@@ -825,6 +825,42 @@ img {
   margin: 0 0 1rem;
 }
 
+.empty-edition {
+  align-items: flex-start;
+  background: #f5f5f2;
+  color: #222;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 100vh;
+  padding: clamp(32px, 8vw, 96px);
+}
+
+.empty-edition h1 {
+  font-family: var(--font-serif);
+  font-size: clamp(3rem, 10vw, 8rem);
+  font-weight: 800;
+  line-height: 0.9;
+  margin: 0;
+}
+
+.empty-edition p {
+  font-size: clamp(1rem, 2vw, 1.25rem);
+  line-height: 1.5;
+  margin: 0;
+  max-width: 680px;
+}
+
+.empty-edition__kicker {
+  border-bottom: 1px solid currentColor;
+  font-size: 0.75rem !important;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  padding-bottom: 5px;
+  text-transform: uppercase;
+}
+
 @media (max-width: 719px) {
   .site-shell {
     width: 100%;
