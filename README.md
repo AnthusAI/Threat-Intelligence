@@ -100,8 +100,9 @@ media is stored as S3 paths on `MediaAsset` records, then resolved into signed
 display URLs at request time.
 
 `buildNewspaperLayout` in `lib/newspaper-layout.ts` builds the active edition
-from normalized content, the current page width, and viewport height. It creates
-article flows, solves the front page, then solves planned continuation pages.
+from normalized content, the edition layout plan, the current page width, and
+viewport height. It creates article flows, solves the front page, then solves
+planned continuation pages.
 
 Each article flow keeps a cursor into prepared Pretext text. When a block lays
 out text, it consumes from the current cursor and returns a new cursor. That
@@ -112,15 +113,20 @@ The front page uses solver-owned story boxes. The solver measures each story's
 label, headline, deck, byline, body slot, and continuation jump area so stories
 in the same row share the same rendered height.
 
-Continuation pages are planned before layout starts. Page labels such as
-`Continued on page 3` come from the edition plan, not from whatever page happens
-to be generated next.
+Continuation pages are planned before layout starts. The plan lives with the
+edition as a versioned `layoutPlan`: local development stores it in
+`content/edition.json`, and Amplify stores it on the `Edition` record. It names
+front-page cut policies, planned continuation pages, section roles, split
+variants, and ordered furniture template preferences. Page labels such as
+`Continued on page 3` come from that plan, not from whatever page happens to be
+generated next.
 
 Adaptive continuation pages try a bounded set of reusable furniture templates.
 The solver can inset aspect-preserving images into one or more columns, place or
 omit optional pull quotes, change text column heights, and then use Pretext to
 fit the remaining copy around the resulting obstacles. The best valid variant is
-chosen deterministically.
+chosen deterministically. The stored plan controls template preference order;
+TypeScript remains the source of truth for what each template means.
 
 `components/newspaper.tsx` renders the solved layout. It does not decide where
 text cuts, how tall pages are, or which image variant wins. It receives placed
@@ -250,8 +256,9 @@ inside the feature file.
   helpers for article text and image assets.
 - `content/articles/` contains Markdown development articles. Frontmatter
   supplies metadata; `#` and `##` headings supply headline and deck.
-- `content/edition.json` defines the local editorial edition metadata and
-  article ordering used by Markdown preview, seeding, and the authoring CLI.
+- `content/edition.json` defines the local editorial edition metadata, article
+  ordering, and versioned layout plan used by Markdown preview, seeding, and
+  the authoring CLI.
 - `lib/content-repository.ts` defines the current fixture/scenario repository
   and the source selector for fixture, Markdown, and GraphQL-backed content.
 - `lib/graphql-content-repository.ts` loads Amplify Data records, resolves

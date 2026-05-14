@@ -49,6 +49,11 @@ Then("the active content source should be {string}", async function (expectedSou
   assert.equal(source, expectedSource);
 });
 
+Then("the active edition should expose layout plan version {int}", async function (expectedVersion) {
+  const version = await requirePage(this).locator(".site-shell").getAttribute("data-layout-plan-version");
+  assert.equal(Number(version), expectedVersion);
+});
+
 Then("the active edition should include article {string}", async function (expectedSlug) {
   const articleSlugs = await requirePage(this).evaluate(() => {
     const layout = window.__PAPYRUS_LAYOUT__;
@@ -63,6 +68,15 @@ Then("the active edition should include article {string}", async function (expec
     articleSlugs.includes(expectedSlug),
     `Expected active edition to include ${expectedSlug}; found ${articleSlugs.join(", ")}`,
   );
+});
+
+Then("the front page should label article {string} as continued on page {int}", async function (articleId, pageNumber) {
+  const continuationPageNumber = await requirePage(this).evaluate((targetArticleId) => {
+    const layout = window.__PAPYRUS_LAYOUT__;
+    return layout?.frontBlocks.find((block) => block.article.slug === targetArticleId)?.pageNumber ?? null;
+  }, articleId);
+
+  assert.equal(continuationPageNumber, pageNumber);
 });
 
 Then("the article page should show headline {string}", async function (expectedHeadline) {

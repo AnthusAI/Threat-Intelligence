@@ -26,6 +26,7 @@ export const markdownContentRepository: ContentRepository = {
       title: editionConfig.title,
       editionDate: editionConfig.displayDate,
       description: editionConfig.description,
+      layoutPlan: editionConfig.layoutPlan,
       articles: loadMarkdownArticles(),
     };
   },

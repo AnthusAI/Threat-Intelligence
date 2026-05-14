@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { normalizeEditionLayoutPlan, type EditionLayoutPlan } from "./layout-plan";
 
 export type LocalEditionConfig = {
   id: string;
@@ -10,6 +11,7 @@ export type LocalEditionConfig = {
   publishDate: string;
   publishedAt: string;
   articleOrder: string[];
+  layoutPlan?: EditionLayoutPlan;
 };
 
 const EDITION_CONFIG_PATH = path.join(process.cwd(), "content", "edition.json");
@@ -36,9 +38,11 @@ export function loadLocalEditionConfig(): LocalEditionConfig {
   if (!fs.existsSync(EDITION_CONFIG_PATH)) return DEFAULT_EDITION_CONFIG;
 
   const parsed = JSON.parse(fs.readFileSync(EDITION_CONFIG_PATH, "utf8")) as Partial<LocalEditionConfig>;
+  const layoutPlan = normalizeEditionLayoutPlan(parsed.layoutPlan, "content/edition.json.layoutPlan");
   return {
     ...DEFAULT_EDITION_CONFIG,
     ...parsed,
+    layoutPlan,
     articleOrder: Array.isArray(parsed.articleOrder) ? parsed.articleOrder : DEFAULT_EDITION_CONFIG.articleOrder,
   };
 }

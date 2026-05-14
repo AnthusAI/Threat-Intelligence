@@ -6,6 +6,15 @@ import {
   type PreparedTextWithSegments,
 } from "@chenglou/pretext";
 import { type Article, type ArticleImageAsset, getArticleImageAssets, getArticleText } from "./articles";
+import {
+  createDefaultEditionLayoutPlan,
+  type EditionLayoutPlan,
+  type MediaPlacementTemplateId,
+  type PullQuoteTemplateId,
+  validateEditionLayoutPlanForArticles,
+} from "./layout-plan";
+
+export type { MediaPlacementTemplateId, PullQuoteTemplateId } from "./layout-plan";
 
 export type TextLine = {
   text: string;
@@ -193,6 +202,9 @@ export type PageRecipe = {
 export type EditionPlan = {
   frontPage: {
     pageNumber: 1;
+    recipeId: string;
+    templateId: "front.teaserGrid";
+    articleIds: string[];
     cutPolicies: FrontCutPolicy[];
   };
   pages: PlannedPage[];
@@ -209,6 +221,8 @@ export type PlannedPage = {
 export type PlannedContinuationSection = {
   articleId: string;
   role: "primary" | "top" | "bottom";
+  mediaTemplateIds?: MediaPlacementTemplateId[];
+  pullQuoteTemplateIds?: PullQuoteTemplateId[];
 };
 
 export type FrontCutPolicy = {
@@ -369,21 +383,7 @@ type ContinuationSectionCandidate = {
   allocatedHeight?: number;
 };
 
-export type MediaPlacementTemplateId =
-  | "rightColumnInset"
-  | "rightTwoColumnInset"
-  | "centerTwoColumnInset"
-  | "leftColumnInset"
-  | "wideTopBand";
-
 export type MediaColumnStartStrategy = "left" | "right" | "center" | "explicit";
-
-export type PullQuoteTemplateId =
-  | "none"
-  | "rightRailMid"
-  | "leftRailMid"
-  | "centerTwoColumnBreak"
-  | "inlineMobileBreak";
 
 type MediaTemplateContext = {
   mode: "single" | "shared";
@@ -416,15 +416,20 @@ type FurnitureRect = {
   height: number;
 };
 
-export function buildNewspaperLayout(articles: Article[], pageWidth: number, viewportHeight: number): NewspaperLayout {
+export function buildNewspaperLayout(
+  articles: Article[],
+  pageWidth: number,
+  viewportHeight: number,
+  layoutPlan?: EditionLayoutPlan,
+): NewspaperLayout {
   const config = getLayoutConfig(pageWidth, viewportHeight);
-  const editionPlan = createEditionPlan(articles);
+  const editionPlan = createEditionPlan(articles, layoutPlan);
   const prepared: PreparedTextCache = new Map();
   const flows = createArticleFlows(articles);
   const recipes: PageRecipe[] = [];
   const pages: PlacedPage[] = [];
   const textRanges: PlacedTextRange[] = [];
-  const frontRecipe = createFrontPageRecipe(articles);
+  const frontRecipe = createFrontPageRecipe(editionPlan);
   recipes.push(frontRecipe);
 
   const frontResult = solveTeaserGridBlock(
@@ -497,53 +502,50 @@ function createArticleFlows(articles: Article[]): Map<string, ArticleFlow> {
   );
 }
 
-function createFrontPageRecipe(articles: Article[]): PageRecipe {
+function createFrontPageRecipe(editionPlan: EditionPlan): PageRecipe {
   return {
-    id: "front-page",
+    id: editionPlan.frontPage.recipeId,
     name: "Front Page Teaser Grid",
     kind: "front",
     blocks: [
       {
         id: "front-teaser-grid",
         kind: "teaserGrid",
-        articleIds: articles.map((article) => article.slug),
+        articleIds: editionPlan.frontPage.articleIds,
       },
     ],
   };
 }
 
-function createEditionPlan(articles: Article[]): EditionPlan {
-  const availableArticleIds = new Set(articles.map((article) => article.slug));
-  const cutPolicies = [
-    { articleId: "harbor-grid", maxLines: 22, continuationPageNumber: 2 },
-    { articleId: "schools-reading-lab", maxLines: 16, continuationPageNumber: 3 },
-    { articleId: "market-hall", maxLines: 14, continuationPageNumber: 3 },
-  ].filter((policy) => availableArticleIds.has(policy.articleId));
-  const pages: PlannedPage[] = [
-    {
-      pageNumber: 2,
-      recipeId: "photo-harbor-grid",
-      kind: "photoContinuation",
-      sections: [{ articleId: "harbor-grid", role: "primary" }],
-    },
-    {
-      pageNumber: 3,
-      recipeId: "shared-schools-reading-market-hall",
-      kind: "dualContinuation",
-      sections: [
-        { articleId: "schools-reading-lab", role: "top" },
-        { articleId: "market-hall", role: "bottom" },
-      ],
-      splitVariants: [0.5, 0.55, 0.45],
-    },
-  ];
-
+function createEditionPlan(articles: Article[], layoutPlan?: EditionLayoutPlan): EditionPlan {
+  const articleIds = articles.map((article) => article.slug);
+  const normalizedLayoutPlan = layoutPlan
+    ? validateEditionLayoutPlanForArticles(layoutPlan, articleIds)
+    : createDefaultEditionLayoutPlan(articleIds);
   return {
     frontPage: {
-      pageNumber: 1,
-      cutPolicies,
+      pageNumber: normalizedLayoutPlan.frontPage.pageNumber,
+      recipeId: normalizedLayoutPlan.frontPage.recipeId,
+      templateId: normalizedLayoutPlan.frontPage.templateId,
+      articleIds: normalizedLayoutPlan.frontPage.articleIds,
+      cutPolicies: normalizedLayoutPlan.frontPage.cutPolicies.map((policy) => ({
+        articleId: policy.articleId,
+        maxLines: policy.maxBodyLines,
+        continuationPageNumber: policy.continuationPageNumber,
+      })),
     },
-    pages: pages.filter((page) => page.sections.every((section) => availableArticleIds.has(section.articleId))),
+    pages: normalizedLayoutPlan.pages.map((page) => ({
+      pageNumber: page.pageNumber,
+      recipeId: page.recipeId,
+      kind: page.kind,
+      sections: page.sections.map((section) => ({
+        articleId: section.articleId,
+        role: section.role,
+        mediaTemplateIds: section.mediaTemplateIds,
+        pullQuoteTemplateIds: section.pullQuoteTemplateIds,
+      })),
+      splitVariants: page.splitVariants,
+    })),
   };
 }
 
@@ -699,8 +701,8 @@ function solvePhotoContinuationPage(
   const plannedSection = plannedPage.sections[0];
   const flow = getRequiredFlow(flows, plannedSection.articleId);
   const asset = getPreferredContinuationImage(flow.article);
-  const variants = getPhotoContinuationVariants(asset, config, { mode: "single", role: plannedSection.role });
-  const pullQuoteVariants = getPullQuoteVariants(flow.article, config, { mode: "single", role: plannedSection.role });
+  const variants = getPhotoContinuationVariants(asset, config, { mode: "single", role: plannedSection.role }, plannedSection);
+  const pullQuoteVariants = getPullQuoteVariants(flow.article, config, { mode: "single", role: plannedSection.role }, plannedSection);
   let bestResult: PlannedContinuationResult | null = null;
   let bestScore = Number.NEGATIVE_INFINITY;
 
@@ -822,8 +824,8 @@ function solveDualContinuationSectionCandidate({
 }): ContinuationSectionCandidate {
   const flow = getRequiredFlow(flows, plannedSection.articleId);
   const asset = getPreferredContinuationImage(flow.article);
-  const variants = getPhotoContinuationVariants(asset, config, { mode: "shared", role: plannedSection.role });
-  const pullQuoteVariants = getPullQuoteVariants(flow.article, config, { mode: "shared", role: plannedSection.role });
+  const variants = getPhotoContinuationVariants(asset, config, { mode: "shared", role: plannedSection.role }, plannedSection);
+  const pullQuoteVariants = getPullQuoteVariants(flow.article, config, { mode: "shared", role: plannedSection.role }, plannedSection);
   let bestCandidate: ContinuationSectionCandidate | null = null;
   let bestScore = Number.NEGATIVE_INFINITY;
 
@@ -1005,6 +1007,7 @@ function getPhotoContinuationVariants(
   asset: ArticleImageAsset | null,
   config: LayoutConfig,
   context: MediaTemplateContext,
+  plannedSection: PlannedContinuationSection,
 ): PhotoContinuationVariant[] {
   const variants: PhotoContinuationVariant[] = [];
   if (asset) {
@@ -1021,7 +1024,7 @@ function getPhotoContinuationVariants(
   }
 
   return [
-    ...variants,
+    ...applyMediaTemplatePreferences(variants, plannedSection.mediaTemplateIds),
     {
       id: "noImage",
       templateId: "noImage",
@@ -1135,16 +1138,40 @@ function getInsetTemplateVariants(config: LayoutConfig, context: MediaTemplateCo
   ];
 }
 
+function applyMediaTemplatePreferences(
+  variants: PhotoContinuationVariant[],
+  preferredTemplateIds: MediaPlacementTemplateId[] | undefined,
+): PhotoContinuationVariant[] {
+  if (!preferredTemplateIds?.length) return variants;
+  const preferenceOrder = new Map(preferredTemplateIds.map((templateId, index) => [templateId, index]));
+
+  return variants
+    .map((variant, originalIndex) => ({
+      variant,
+      originalIndex,
+      preferenceIndex: preferenceOrder.get(variant.templateId as MediaPlacementTemplateId),
+    }))
+    .sort((left, right) => (
+      (left.preferenceIndex ?? Number.MAX_SAFE_INTEGER) - (right.preferenceIndex ?? Number.MAX_SAFE_INTEGER) ||
+      left.originalIndex - right.originalIndex
+    ))
+    .map(({ variant, preferenceIndex }) => ({
+      ...variant,
+      fallbackPenalty: preferenceIndex === undefined ? variant.fallbackPenalty + 900 : preferenceIndex * 90,
+    }));
+}
+
 function getPullQuoteVariants(
   article: Article,
   config: LayoutConfig,
   context: MediaTemplateContext,
+  plannedSection: PlannedContinuationSection,
 ): PullQuotePlacementVariant[] {
   const none = getNoPullQuoteVariant();
   if (!article.pullQuotes?.[0]) return [none];
 
   if (config.columnCount === 1) {
-    return [
+    return applyPullQuoteTemplatePreferences([
       none,
       {
         id: "inlineMobileBreak",
@@ -1154,7 +1181,7 @@ function getPullQuoteVariants(
         anchorRatio: 0.38,
         fallbackPenalty: 80,
       },
-    ];
+    ], plannedSection.pullQuoteTemplateIds);
   }
 
   const leftRail: PullQuotePlacementVariant = {
@@ -1183,20 +1210,50 @@ function getPullQuoteVariants(
   };
 
   if (context.mode === "single") {
-    return [
+    return applyPullQuoteTemplatePreferences([
       none,
       ...(config.columnCount >= 4 ? [centerBreak] : []),
       rightRail,
       leftRail,
-    ];
+    ], plannedSection.pullQuoteTemplateIds);
   }
 
-  return [
+  return applyPullQuoteTemplatePreferences([
     none,
     context.role === "bottom" ? rightRail : leftRail,
     context.role === "bottom" ? leftRail : rightRail,
     ...(config.columnCount >= 4 ? [centerBreak] : []),
-  ];
+  ], plannedSection.pullQuoteTemplateIds);
+}
+
+function applyPullQuoteTemplatePreferences(
+  variants: PullQuotePlacementVariant[],
+  preferredTemplateIds: PullQuoteTemplateId[] | undefined,
+): PullQuotePlacementVariant[] {
+  if (!preferredTemplateIds?.length) return variants;
+  const preferenceOrder = new Map(preferredTemplateIds.map((templateId, index) => [templateId, index]));
+
+  return variants
+    .map((variant, originalIndex) => ({
+      variant,
+      originalIndex,
+      preferenceIndex: preferenceOrder.get(variant.templateId),
+    }))
+    .sort((left, right) => {
+      if (left.variant.templateId === "none") return right.variant.templateId === "none" ? 0 : -1;
+      if (right.variant.templateId === "none") return 1;
+      return (
+        (left.preferenceIndex ?? Number.MAX_SAFE_INTEGER) - (right.preferenceIndex ?? Number.MAX_SAFE_INTEGER) ||
+        left.originalIndex - right.originalIndex
+      );
+    })
+    .map(({ variant, preferenceIndex }) => {
+      if (variant.templateId === "none") return variant;
+      return {
+        ...variant,
+        fallbackPenalty: preferenceIndex === undefined ? variant.fallbackPenalty + 700 : preferenceIndex * 80,
+      };
+    });
 }
 
 function getNoPullQuoteVariant(): PullQuotePlacementVariant {

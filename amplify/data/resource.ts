@@ -129,6 +129,7 @@ const schema = a.schema({
       status: a.string().required(),
       editionDate: a.string().required(),
       description: a.string(),
+      layoutPlan: a.json(),
       metadata: a.json(),
       items: a.hasMany("EditionItem", "editionId"),
     })

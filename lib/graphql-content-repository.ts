@@ -4,6 +4,7 @@ import type { Schema } from "../amplify/data/resource";
 import type { Article, ArticleImage, ArticleImageAsset, ArticleImageLayout } from "./articles";
 import { getAmplifyServerRuntime } from "./amplify-server-runtime";
 import type { ContentRepository, EditionContent } from "./content-types";
+import { normalizeEditionLayoutPlan } from "./layout-plan";
 
 const AUTH_MODE = "apiKey";
 const DEFAULT_EDITION_SLUG = "current";
@@ -30,6 +31,7 @@ type GraphQLEdition = {
   status: string;
   editionDate: string;
   description?: string | null;
+  layoutPlan?: unknown;
 };
 
 type GraphQLEditionItem = {
@@ -106,6 +108,7 @@ export const graphqlContentRepository: ContentRepository = {
       title: edition.title,
       editionDate: edition.editionDate,
       description: edition.description ?? "GraphQL content loaded from Amplify Data.",
+      layoutPlan: normalizeEditionLayoutPlan(edition.layoutPlan, "Edition.layoutPlan"),
       articles: articles.filter((article): article is Article => article !== null),
     };
   },

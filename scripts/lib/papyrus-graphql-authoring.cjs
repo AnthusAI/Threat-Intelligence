@@ -109,6 +109,7 @@ const GETTERS = {
           status
           editionDate
           description
+          layoutPlan
           metadata
         }
       }

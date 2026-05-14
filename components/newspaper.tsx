@@ -73,8 +73,8 @@ export function Newspaper({ content }: { content: EditionContent }) {
   }, []);
 
   const layout = useMemo(
-    () => (metrics === null ? null : buildNewspaperLayout(content.articles, metrics.pageWidth, metrics.viewportHeight)),
-    [metrics, content.articles],
+    () => (metrics === null ? null : buildNewspaperLayout(content.articles, metrics.pageWidth, metrics.viewportHeight, content.layoutPlan)),
+    [metrics, content.articles, content.layoutPlan],
   );
   const totalPages = layout ? layout.pages.length : 0;
   const visiblePage = totalPages > 0 ? Math.min(currentPage, totalPages) : currentPage;
@@ -173,7 +173,13 @@ export function Newspaper({ content }: { content: EditionContent }) {
   };
 
   return (
-    <main className="site-shell" data-content-source={content.source} data-scenario-id={content.scenarioId} ref={shellRef}>
+    <main
+      className="site-shell"
+      data-content-source={content.source}
+      data-scenario-id={content.scenarioId}
+      data-layout-plan-version={content.layoutPlan?.version}
+      ref={shellRef}
+    >
       {!layout ? (
         <section className="paper-page-content paper-page-content--front paper-page-content--loading" aria-label="Loading edition">
           <header className="masthead">

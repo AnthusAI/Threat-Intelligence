@@ -7,7 +7,11 @@ const ARTICLES_DIR = path.join(CONTENT_DIR, "articles");
 const EDITION_PATH = path.join(CONTENT_DIR, "edition.json");
 
 function loadEditionConfig() {
-  return JSON.parse(fs.readFileSync(EDITION_PATH, "utf8"));
+  const config = JSON.parse(fs.readFileSync(EDITION_PATH, "utf8"));
+  return {
+    ...config,
+    layoutPlan: config.layoutPlan || createDefaultLayoutPlan(config.articleOrder || []),
+  };
 }
 
 function loadMarkdownArticles() {
@@ -119,6 +123,59 @@ function orderArticles(articles, articleOrder) {
     const rightRank = rightIndex === -1 ? Number.MAX_SAFE_INTEGER : rightIndex;
     return leftRank - rightRank || left.slug.localeCompare(right.slug);
   });
+}
+
+function createDefaultLayoutPlan(articleIds) {
+  const availableArticleIds = new Set(articleIds);
+  return {
+    version: 1,
+    frontPage: {
+      pageNumber: 1,
+      recipeId: "front-page",
+      templateId: "front.teaserGrid",
+      articleIds,
+      cutPolicies: [
+        { articleId: "harbor-grid", maxBodyLines: 22, continuationPageNumber: 2 },
+        { articleId: "schools-reading-lab", maxBodyLines: 16, continuationPageNumber: 3 },
+        { articleId: "market-hall", maxBodyLines: 14, continuationPageNumber: 3 },
+      ].filter((policy) => availableArticleIds.has(policy.articleId)),
+    },
+    pages: [
+      {
+        pageNumber: 2,
+        recipeId: "photo-harbor-grid",
+        kind: "photoContinuation",
+        sections: [
+          {
+            articleId: "harbor-grid",
+            role: "primary",
+            mediaTemplateIds: ["centerTwoColumnInset", "rightColumnInset", "leftColumnInset", "wideTopBand"],
+            pullQuoteTemplateIds: ["centerTwoColumnBreak", "rightRailMid", "leftRailMid"],
+          },
+        ],
+      },
+      {
+        pageNumber: 3,
+        recipeId: "shared-schools-reading-market-hall",
+        kind: "dualContinuation",
+        sections: [
+          {
+            articleId: "schools-reading-lab",
+            role: "top",
+            mediaTemplateIds: ["rightTwoColumnInset", "rightColumnInset", "leftColumnInset", "centerTwoColumnInset"],
+            pullQuoteTemplateIds: ["leftRailMid", "rightRailMid", "centerTwoColumnBreak"],
+          },
+          {
+            articleId: "market-hall",
+            role: "bottom",
+            mediaTemplateIds: ["leftColumnInset", "rightColumnInset", "centerTwoColumnInset"],
+            pullQuoteTemplateIds: ["rightRailMid", "leftRailMid", "centerTwoColumnBreak"],
+          },
+        ],
+        splitVariants: [0.5, 0.55, 0.45],
+      },
+    ].filter((page) => page.sections.every((section) => availableArticleIds.has(section.articleId))),
+  };
 }
 
 module.exports = {

@@ -288,6 +288,7 @@ async function buildEditionRecordChange(client, editionConfig) {
     status: "published",
     editionDate: editionConfig.publishDate,
     description: editionConfig.description,
+    layoutPlan: toAwsJson(editionConfig.layoutPlan),
     metadata: toAwsJson({ source: "markdown-sync" }),
   });
 }

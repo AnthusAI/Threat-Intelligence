@@ -6,6 +6,10 @@ Feature: Newspaper layout scenarios
     Given I open the "current-edition" layout scenario at 1280 by 900
     Then the active content scenario should be "current-edition"
     And the active content source should be "scenario"
+    And the active edition should expose layout plan version 1
+    And the front page should label article "harbor-grid" as continued on page 2
+    And the front page should label article "schools-reading-lab" as continued on page 3
+    And the front page should label article "market-hall" as continued on page 3
     When I flip to page 3
     Then the active page should be a "dualContinuation" page
     And no measured line should be cropped
@@ -34,9 +38,11 @@ Feature: Newspaper layout scenarios
   Scenario: Development front page uses Markdown content by default
     Given I open the front page at 1280 by 900
     Then the active content source should be "markdown"
+    And the active edition should expose layout plan version 1
     And the active edition should include article "schools-reading-lab"
     When I flip to page 2
     Then the active page should be a "photoContinuation" page
+    And the "harbor-grid" section image should use the "centerTwoColumnInset" template
     And no measured line should be cropped
     And no browser console errors should occur
 

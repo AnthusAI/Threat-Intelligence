@@ -1,4 +1,5 @@
 import type { Article } from "./articles";
+import type { EditionLayoutPlan } from "./layout-plan";
 
 export type ContentSource = "fixture" | "scenario" | "markdown" | "graphql";
 
@@ -8,6 +9,7 @@ export type EditionContent = {
   title: string;
   editionDate: string;
   articles: Article[];
+  layoutPlan?: EditionLayoutPlan;
   scenarioId?: string;
   description?: string;
 };

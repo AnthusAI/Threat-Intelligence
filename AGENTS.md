@@ -185,14 +185,26 @@ runs.
   `content delete all --yes`; do not add `content login` or `content logout`
   unless the auth model changes again.
 
+`lib/layout-plan.ts` owns the edition layout-plan contract:
+
+- `EditionLayoutPlan` is stored with edition content as editorial intent, not
+  solved geometry.
+- `content/edition.json` carries the local development plan; Amplify stores the
+  same shape on `Edition.layoutPlan`.
+- The plan may choose page recipes, front-page cut policies, continuation
+  sections, split variants, and ordered image/pull-quote template preferences.
+- Template IDs are stable public contracts, but executable geometry and scoring
+  stay in TypeScript.
+- A missing plan falls back to the current default plan. A present invalid plan
+  should throw a descriptive publishing error.
+
 `lib/newspaper-layout.ts` owns layout and solver state:
 
 - `ArticleFlow` tracks one article's current Pretext cursor and placed ranges.
 - `PlacedTextRange` records `{ articleId, pageId, blockId, startCursor,
   endCursor, exhausted }`. Treat this as the source of truth for continuation
   correctness.
-- `EditionPlan` defines the fixed publication plan. Today it contains page 1
-  front cuts, page 2 Harbor, and page 3 Reading Labs plus Market Hall.
+- `EditionPlan` is the normalized internal form of `EditionLayoutPlan`.
 - `PlannedPage` chooses the recipe kind: `singleContinuation`,
   `photoContinuation`, or `dualContinuation`.
 - `FrontBlock` is the renderer contract for front-page story geometry.
@@ -229,8 +241,9 @@ page heights, section splits, or image variant scores.
 
 ## Solver Flow
 
-1. `buildNewspaperLayout(articles, pageWidth, viewportHeight)` creates layout
-   config, article flows, and the hardcoded `EditionPlan`.
+1. `buildNewspaperLayout(articles, pageWidth, viewportHeight, layoutPlan)`
+   creates layout config, article flows, and a normalized internal
+   `EditionPlan`.
 2. The front page consumes article text first. Front cut policies constrain
    planned jumps so continuation destinations stay stable.
 3. Each front-page story gets a solver-owned row height, measured chrome, body
@@ -322,9 +335,10 @@ To add cloud content fields:
 
 To add a planned page:
 
-- Update `createEditionPlan`.
-- Add or reuse a `PlannedPage.kind`.
-- Add front cut policies for front-page stories that should jump to that page.
+- Add the page and any front cut policies to `content/edition.json` for local
+  content or `Edition.layoutPlan` for cloud content.
+- Reuse an existing `PlannedPage.kind` unless the page needs new solver
+  behavior.
 - Ensure continuation labels point to planned page numbers.
 
 To add a recipe or solver variant:

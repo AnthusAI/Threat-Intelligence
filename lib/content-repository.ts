@@ -1,6 +1,7 @@
 import { type Article, articles, editionDate } from "./articles";
 import type { ContentRepository, EditionContent } from "./content-types";
 import { graphqlContentRepository } from "./graphql-content-repository";
+import { createDefaultEditionLayoutPlan } from "./layout-plan";
 import { DEFAULT_LAYOUT_SCENARIO_ID, getLayoutScenario } from "./layout-scenarios";
 import { markdownContentRepository } from "./markdown-content-repository";
 
@@ -56,6 +57,7 @@ function getDefaultEditionContent(): EditionContent {
     editionDate,
     scenarioId: DEFAULT_LAYOUT_SCENARIO_ID,
     description: "The default Papyrus fixture edition.",
+    layoutPlan: createDefaultEditionLayoutPlan(articles.map((article) => article.slug)),
     articles: cloneArticles(articles),
   };
 }

@@ -1,5 +1,6 @@
 import { type Article, articles, editionDate } from "./articles";
 import type { EditionContent } from "./content-types";
+import { createDefaultEditionLayoutPlan } from "./layout-plan";
 
 export type LayoutScenario = EditionContent & {
   source: "scenario";
@@ -16,6 +17,7 @@ export const layoutScenarios: LayoutScenario[] = [
     editionDate,
     scenarioId: DEFAULT_LAYOUT_SCENARIO_ID,
     description: "The default Papyrus fixture edition.",
+    layoutPlan: createDefaultEditionLayoutPlan(articles.map((article) => article.slug)),
     articles: cloneArticles(articles),
   },
   {
@@ -26,6 +28,7 @@ export const layoutScenarios: LayoutScenario[] = [
     scenarioId: "shared-blank-column-pressure",
     description:
       "Shorter shared continuation tails with images and pull quotes, used to prove that empty columns are repaired with solved furniture.",
+    layoutPlan: createDefaultEditionLayoutPlan(articles.map((article) => article.slug)),
     articles: createSharedBlankColumnPressureArticles(),
   },
   {
@@ -36,6 +39,7 @@ export const layoutScenarios: LayoutScenario[] = [
     scenarioId: "shared-continuation-no-pull-quotes",
     description:
       "The shared continuation page with editorial pull quotes removed, used to prove pull quotes are optional display furniture.",
+    layoutPlan: createDefaultEditionLayoutPlan(articles.map((article) => article.slug)),
     articles: createNoPullQuoteArticles(),
   },
 ];
