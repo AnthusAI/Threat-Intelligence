@@ -327,7 +327,8 @@ export type LayoutPageSpec = z.infer<typeof LayoutPageSchema>;
 export type EditionLayoutPlan = z.infer<typeof EditionLayoutPlanSchema>;
 
 export function createDefaultEditionLayoutPlan(itemIds: string[]): EditionLayoutPlan {
-  const frontBlocks = itemIds.map((itemId, index) => ({
+  const frontItemIds = getDefaultFrontItemOrder(itemIds);
+  const frontBlocks = frontItemIds.map((itemId, index) => ({
     id: `front-${itemId}`,
     type: "articleFrame" as const,
     presetId: "front.teaser" as const,
@@ -335,6 +336,22 @@ export function createDefaultEditionLayoutPlan(itemIds: string[]): EditionLayout
     flowKey: itemId,
     startCursor: "beginning" as const,
     span: getDefaultFrontSpan(index),
+    media: index === 1
+      ? [
+          {
+            required: true,
+            assetRole: "lead",
+            placement: {
+              anchor: "center",
+              span: { min: 1, preferred: 4, max: 4 },
+              vertical: "top",
+              collapse: "inline",
+              crop: "cropAllowed",
+              wrapsText: false,
+            },
+          },
+        ]
+      : [],
     cutPolicy: getDefaultCutPolicy(itemId),
   }));
 
@@ -628,8 +645,13 @@ function requireKnownItem(itemId: string, itemsBySlug: Map<string, PublicationIt
 }
 
 function getDefaultFrontSpan(index: number): ResponsiveSpanPolicy {
-  const preferred = [2, 1, 1, 2, 1, 1][index] ?? 1;
+  const preferred = [1, 4, 1, 2, 2, 2][index] ?? 1;
   return { min: 1, preferred, max: preferred };
+}
+
+function getDefaultFrontItemOrder(itemIds: string[]): string[] {
+  if (itemIds.length < 3) return itemIds;
+  return [itemIds[1], itemIds[0], itemIds[2], ...itemIds.slice(3)];
 }
 
 function getDefaultCutPolicy(itemId: string): ArticleFrameBlockSpec["cutPolicy"] | undefined {

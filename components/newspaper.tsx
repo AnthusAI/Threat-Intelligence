@@ -303,15 +303,22 @@ function SolvedRegionView({ layout, region }: { layout: NewspaperLayout; region:
 function FrontStoryBlock({ block, index, turnToPage }: { block: SolvedBlock; index: number; turnToPage: (pageNumber: number) => void }) {
   const article = block.article;
   if (!article || !block.front) return null;
+  const preludeImages = block.furniture.filter((furniture): furniture is SolvedImageFurniture => (
+    furniture.kind === "image" && furniture.templateId === "front-prelude"
+  ));
+  const measureFurniture = block.furniture.filter((furniture): furniture is SolvedImageFurniture => (
+    furniture.kind === "image" && furniture.templateId !== "front-prelude"
+  ));
   return (
     <article
-      className={`front-story ${index === 0 ? "front-story--lead" : ""}`}
+      className={`front-story ${block.span >= 4 ? "front-story--lead" : ""} ${preludeImages.length > 0 ? "front-story--feature" : ""}`}
       data-article-id={article.slug}
       data-block-id={block.id}
       data-block-type={block.type}
       data-block-preset-id={block.presetId}
       style={getFrontStoryStyle(block)}
     >
+      {preludeImages.map((furniture) => <LeadPhotoFigure furniture={furniture} key={furniture.id} />)}
       <div className="story-label">{article.section}</div>
       <h2>
         <Link href={`/articles/${article.slug}`}>{article.headline}</Link>
@@ -319,7 +326,7 @@ function FrontStoryBlock({ block, index, turnToPage }: { block: SolvedBlock; ind
       <p className="story-deck">{article.deck}</p>
       <div className="story-byline">{`${article.byline} / ${article.dateline}`}</div>
       <div className="story-measure" style={{ height: block.front.bodySlotHeight + STORY_MEASURE_CHROME }}>
-        {block.furniture.map((furniture) => (furniture.kind === "image" ? <LeadPhotoFigure furniture={furniture} key={furniture.id} /> : null))}
+        {measureFurniture.map((furniture) => <LeadPhotoFigure furniture={furniture} key={furniture.id} />)}
         <MeasuredLines lines={block.columns[0] ?? []} />
       </div>
       <div className="jump-line">
@@ -406,10 +413,11 @@ function SolvedFurnitureView({ furniture }: { furniture: SolvedFurniture }) {
 }
 
 function LeadPhotoFigure({ furniture }: { furniture: SolvedImageFurniture }) {
+  const prelude = furniture.templateId === "front-prelude";
   return (
     <figure
-      className="lead-photo"
-      style={{ left: furniture.x, top: furniture.y, width: furniture.width, height: furniture.height }}
+      className={prelude ? "front-prelude-photo" : "lead-photo"}
+      style={prelude ? { height: furniture.height } : { left: furniture.x, top: furniture.y, width: furniture.width, height: furniture.height }}
     >
       <Image
         src={furniture.src}
@@ -517,6 +525,8 @@ function getFrontStoryStyle(block: SolvedBlock): CSSProperties {
     "--story-row-height": `${front.rowHeight}px`,
     "--story-border-top": `${chrome.borderTopHeight}px`,
     "--story-padding-top": `${chrome.paddingTop}px`,
+    "--story-media-prelude-height": `${chrome.mediaPreludeHeight}px`,
+    "--story-media-prelude-margin-bottom": `${chrome.mediaPreludeMarginBottom}px`,
     "--story-label-line-height": `${chrome.labelLineHeight}px`,
     "--story-headline-font-size": `${chrome.headlineFontSize}px`,
     "--story-headline-line-height": `${chrome.headlineLineHeight}px`,

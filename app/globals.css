@@ -599,7 +599,19 @@ img {
   z-index: 2;
 }
 
-.lead-photo img {
+.front-prelude-photo {
+  background: var(--paper-deep);
+  border: 1px solid rgba(32, 32, 32, 0.45);
+  flex: none;
+  height: var(--story-media-prelude-height, 0);
+  margin: 0 0 var(--story-media-prelude-margin-bottom, 10px);
+  overflow: hidden;
+  position: relative;
+  width: 100%;
+}
+
+.lead-photo img,
+.front-prelude-photo img {
   filter: grayscale(1) contrast(1.05);
   height: 100%;
   object-fit: cover;
@@ -607,6 +619,7 @@ img {
 }
 
 .lead-photo figcaption,
+.front-prelude-photo figcaption,
 .continuation-photo figcaption,
 .article-photo figcaption {
   background: rgba(247, 247, 244, 0.86);

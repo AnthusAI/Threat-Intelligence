@@ -193,6 +193,8 @@ export type PageChromeMetrics = {
 export type StoryChromeMetrics = {
   borderTopHeight: number;
   paddingTop: number;
+  mediaPreludeHeight: number;
+  mediaPreludeMarginBottom: number;
   labelLineHeight: number;
   headlineFontSize: number;
   headlineLineHeight: number;
@@ -269,6 +271,7 @@ type ArticleFrameCandidate = {
 type MediaVariant = {
   id: string;
   placement: ResponsivePlacementSpec | null;
+  assetRole?: string;
   columnStart: number;
   columnSpan: number;
   fallbackPenalty: number;
@@ -408,7 +411,8 @@ function solveFrontArticleFrame(
 
   const span = Math.min(blockSpec.span?.preferred ?? 1, config.columnCount);
   const blockWidth = getSpanWidth(config, span);
-  const chrome = getStoryChromeMetrics(config, item, index, blockWidth);
+  const preludeImage = createFrontPreludeImage(item, blockSpec, blockWidth);
+  const chrome = getStoryChromeMetrics(config, item, index, blockWidth, preludeImage?.height ?? 0);
   const chromeHeight = getStoryChromeHeight(chrome);
   const jumpReserveHeight = getStoryJumpReserveHeight(chrome);
   const rowHeight = getFrontRowHeight(config, index);
@@ -417,7 +421,7 @@ function solveFrontArticleFrame(
     ? getLineLimitHeight(blockSpec.cutPolicy.maxBodyLines, config.lineHeight, config.linePaintHeight)
     : bodySlotHeight;
   const maxHeight = Math.min(bodySlotHeight, lineLimitHeight);
-  const imageWrap = index === 0 ? getLeadImageWrap(item, blockWidth, config.lineHeight) : null;
+  const imageWrap = !preludeImage && index === 0 ? getLeadImageWrap(item, blockWidth, config.lineHeight) : null;
   const startCursor = { ...flow.currentCursor };
   const result = layoutTextLines({
     prepared: getPrepared(prepared, item, config.frontBodyFont),
@@ -463,7 +467,9 @@ function solveFrontArticleFrame(
     span,
     columnCount: 1,
     columns: [result.lines],
-    furniture: imageWrap ? [leadImageToFurniture(item, imageWrap)] : [],
+    furniture: [preludeImage, imageWrap ? leadImageToFurniture(item, imageWrap) : null].filter(
+      (furniture): furniture is SolvedImageFurniture => furniture !== null,
+    ),
     textRange: range,
     hasMore: result.hasMore,
     front: {
@@ -834,6 +840,7 @@ function getMediaVariants(media: LayoutMediaSpec | undefined, config: LayoutConf
   if (!media) return [{ id: "none", placement: null, columnStart: 0, columnSpan: 0, fallbackPenalty: 900 }];
   const variants = resolvePlacementVariants(media.placement, config).map((variant) => ({
     ...variant,
+    assetRole: media.assetRole,
     fallbackPenalty: variant.fallbackPenalty + Math.abs(variant.columnSpan - media.placement.span.preferred) * 900,
   }));
   if (media.required) return variants;
@@ -1259,6 +1266,7 @@ function getStoryChromeMetrics(
   article: ArticlePublicationItem,
   articleIndex: number,
   blockWidth: number,
+  mediaPreludeHeight = 0,
 ): StoryChromeMetrics {
   const lead = articleIndex === 0;
   const headlineFontSize = getHeadlineFontSize(config, lead);
@@ -1274,6 +1282,8 @@ function getStoryChromeMetrics(
   return {
     borderTopHeight: lead ? 6 : 2,
     paddingTop: lead ? 12 : 10,
+    mediaPreludeHeight,
+    mediaPreludeMarginBottom: mediaPreludeHeight > 0 ? 10 : 0,
     labelLineHeight: 14,
     headlineFontSize,
     headlineLineHeight,
@@ -1309,6 +1319,8 @@ function getStoryChromeHeight(chrome: StoryChromeMetrics): number {
   return (
     chrome.borderTopHeight +
     chrome.paddingTop +
+    chrome.mediaPreludeHeight +
+    chrome.mediaPreludeMarginBottom +
     chrome.labelLineHeight +
     chrome.headlineMarginTop +
     chrome.headlineHeight +
@@ -1373,6 +1385,42 @@ function getLeadImageWrap(article: ArticlePublicationItem, width: number, lineHe
     y: 0,
     width: Math.round(width * 0.42),
     height: clamp(Math.round(preferredHeight), minHeight, maxHeight),
+  };
+}
+
+function createFrontPreludeImage(
+  article: ArticlePublicationItem,
+  blockSpec: ArticleFrameBlockSpec,
+  width: number,
+): SolvedImageFurniture | null {
+  const mediaSpec = blockSpec.media[0];
+  if (!mediaSpec) return null;
+  const asset = getPreferredImage(article, mediaSpec.placement, mediaSpec.assetRole);
+  if (!asset) return null;
+  const aspectRatio = getImageAspectRatio(asset);
+  const layout = asset.layout;
+  const minHeight = layout?.minHeight ?? 140;
+  const maxHeight = layout?.maxHeight ?? 320;
+  const naturalHeight = Math.round(width / aspectRatio);
+  const height = clamp(naturalHeight, minHeight, maxHeight);
+  return {
+    kind: "image",
+    id: `${article.slug}-front-prelude-photo`,
+    src: asset.src,
+    alt: asset.alt,
+    credit: asset.credit,
+    templateId: "front-prelude",
+    columnStart: 0,
+    columnSpan: 1,
+    x: 0,
+    y: 0,
+    width,
+    height,
+    aspectRatio,
+    objectFit: mediaSpec.placement.crop === "cropAllowed" || layout?.crop === "cover" ? "cover" : "contain",
+    objectPosition: getObjectPosition(asset),
+    wrapsText: false,
+    preferredHeight: height,
   };
 }
 
@@ -1698,6 +1746,11 @@ function rectsOverlap(
 
 function getImageAspectRatio(asset: Pick<ArticleImageAsset, "layout">): number {
   return asset.layout?.aspectRatio ?? 1.5;
+}
+
+function getObjectPosition(asset: Pick<ArticleImageAsset, "layout">): string {
+  const focalPoint = asset.layout?.focalPoint ?? { x: 0.5, y: 0.5 };
+  return `${Math.round(focalPoint.x * 100)}% ${Math.round(focalPoint.y * 100)}%`;
 }
 
 function formatContinuationJumpLabel(article: ArticlePublicationItem, pageNumber: number): string {

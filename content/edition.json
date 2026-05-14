@@ -32,16 +32,6 @@
             },
             "blocks": [
               {
-                "id": "front-harbor-grid",
-                "type": "articleFrame",
-                "presetId": "front.teaser",
-                "itemId": "harbor-grid",
-                "flowKey": "harbor-grid",
-                "startCursor": "beginning",
-                "span": { "min": 1, "preferred": 2, "max": 2 },
-                "cutPolicy": { "maxBodyLines": 22, "jumpTargetPage": 2 }
-              },
-              {
                 "id": "front-schools-reading-lab",
                 "type": "articleFrame",
                 "presetId": "front.teaser",
@@ -50,6 +40,30 @@
                 "startCursor": "beginning",
                 "span": { "min": 1, "preferred": 1, "max": 1 },
                 "cutPolicy": { "maxBodyLines": 16, "jumpTargetPage": 3 }
+              },
+              {
+                "id": "front-harbor-grid",
+                "type": "articleFrame",
+                "presetId": "front.teaser",
+                "itemId": "harbor-grid",
+                "flowKey": "harbor-grid",
+                "startCursor": "beginning",
+                "span": { "min": 1, "preferred": 4, "max": 4 },
+                "media": [
+                  {
+                    "required": true,
+                    "assetRole": "lead",
+                    "placement": {
+                      "anchor": "center",
+                      "span": { "min": 1, "preferred": 4, "max": 4 },
+                      "vertical": "top",
+                      "collapse": "inline",
+                      "crop": "cropAllowed",
+                      "wrapsText": false
+                    }
+                  }
+                ],
+                "cutPolicy": { "maxBodyLines": 22, "jumpTargetPage": 2 }
               },
               {
                 "id": "front-market-hall",
@@ -77,7 +91,7 @@
                 "itemId": "night-trains",
                 "flowKey": "night-trains",
                 "startCursor": "beginning",
-                "span": { "min": 1, "preferred": 1, "max": 1 }
+                "span": { "min": 1, "preferred": 2, "max": 2 }
               },
               {
                 "id": "front-climate-ledger",
@@ -86,7 +100,7 @@
                 "itemId": "climate-ledger",
                 "flowKey": "climate-ledger",
                 "startCursor": "beginning",
-                "span": { "min": 1, "preferred": 1, "max": 1 }
+                "span": { "min": 1, "preferred": 2, "max": 2 }
               }
             ]
           }
