@@ -208,8 +208,8 @@ async function buildArticleDiff(client, article, editionConfig, index) {
     editionDate: editionConfig.publishDate,
     sortTitle: article.headline,
     pullQuotes: article.pullQuotes ?? [],
-    layout: { source: "markdown" },
-    editorial: {},
+    layout: toAwsJson({ source: "markdown" }),
+    editorial: toAwsJson({}),
   };
   records.push(await buildRecordChange(client, "Item", itemRecord));
 
@@ -258,7 +258,7 @@ async function buildArticleDiff(client, article, editionConfig, index) {
       maxHeight: asset.layout?.maxHeight ?? null,
       crop: asset.layout?.crop ?? null,
       wrapsText: asset.layout?.wrapsText ?? null,
-      metadata: { sourceUrl: asset.src },
+      metadata: toAwsJson({ sourceUrl: asset.src }),
     };
     records.push(await buildRecordChange(client, "MediaAsset", mediaRecord));
   }
@@ -272,7 +272,7 @@ async function buildArticleDiff(client, article, editionConfig, index) {
       sortKey: `${String(articleOrderIndex).padStart(3, "0")}#${article.slug}`,
       pageNumber: 1,
       priority: articleOrderIndex,
-      metadata: {},
+      metadata: toAwsJson({}),
     };
     records.push(await buildRecordChange(client, "EditionItem", editionItemRecord));
   }
@@ -288,7 +288,7 @@ async function buildEditionRecordChange(client, editionConfig) {
     status: "published",
     editionDate: editionConfig.publishDate,
     description: editionConfig.description,
-    metadata: { source: "markdown-sync" },
+    metadata: toAwsJson({ source: "markdown-sync" }),
   });
 }
 
@@ -334,13 +334,17 @@ function normalizeRecord(record) {
 
   const normalized = {};
   for (const key of Object.keys(record).sort()) {
-    if (record[key] === undefined) continue;
+    if (record[key] === undefined || record[key] === null) continue;
     normalized[key] = normalizeRecord(record[key]);
   }
   return normalized;
 }
 
 function stableStringify(value) {
+  return JSON.stringify(value);
+}
+
+function toAwsJson(value) {
   return JSON.stringify(value);
 }
 
