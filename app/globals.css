@@ -430,18 +430,17 @@ img {
 .masthead {
   text-align: center;
   border-bottom: 4px double var(--rule);
-  margin-bottom: 18px;
-  padding-bottom: 12px;
+  margin-bottom: 16px;
+  padding-bottom: 5px;
 }
 
 .masthead__rule {
   height: 6px;
   border-top: 2px solid var(--rule);
   border-bottom: 1px solid var(--rule);
-  margin-bottom: 9px;
+  margin-bottom: 4px;
 }
 
-.masthead__kicker,
 .story-label,
 .continued-title p {
   color: var(--accent);
@@ -455,12 +454,13 @@ img {
 }
 
 .masthead h1 {
+  font-family: var(--font-serif), Georgia, "Times New Roman", serif;
   font-size: var(--masthead-title-font-size, clamp(4rem, 13vw, 8.8rem));
   font-weight: 900;
   letter-spacing: 0;
   line-height: var(--masthead-title-line-height, 0.84);
-  margin: 6px 0 10px;
-  transform: translateY(-0.13em);
+  margin: 0 0 -1px;
+  transform: translateY(-0.08em);
 }
 
 .masthead__meta,
@@ -485,6 +485,24 @@ img {
   line-height: var(--masthead-meta-line-height, normal);
   padding-top: 8px;
   text-transform: uppercase;
+}
+
+.masthead__meta {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  padding-top: 5px;
+}
+
+.masthead__meta > :first-child {
+  justify-self: start;
+}
+
+.masthead__meta > :nth-child(2) {
+  justify-self: center;
+}
+
+.masthead__meta > :last-child {
+  justify-self: end;
 }
 
 .inside-header {
@@ -532,7 +550,7 @@ img {
   letter-spacing: 0;
   line-height: var(--story-headline-line-height, 1);
   margin: var(--story-headline-margin-top, 5px) 0 var(--story-headline-margin-bottom, 8px);
-  overflow: hidden;
+  overflow: visible;
 }
 
 .front-story h2 a {
@@ -694,7 +712,7 @@ img {
   line-height: var(--continued-title-line-height, 0.94);
   margin: 5px 0 0;
   max-width: 980px;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .continued-title h2 a {

@@ -209,11 +209,10 @@ function LoadingPage({ content }: { content: EditionContent }) {
     <section className="paper-page-content paper-page-content--front paper-page-content--loading" aria-label="Loading edition">
       <header className="masthead">
         <div className="masthead__rule" />
-        <p className="masthead__kicker">Anthus AI Solutions</p>
-        <h1>Papyrus</h1>
+        <h1>PAPYRUS</h1>
         <div className="masthead__meta">
           <span>{content.editionDate}</span>
-          <span>Vol. 1, No. 1</span>
+          <span>THE LATEST IN AI/ML</span>
           <span>Measuring type</span>
         </div>
       </header>
@@ -244,11 +243,10 @@ function SolvedPageView({
       {front ? (
         <header className="masthead">
           <div className="masthead__rule" />
-          <p className="masthead__kicker">Anthus AI Solutions</p>
-          <h1 id="edition-title">Papyrus</h1>
+          <h1 id="edition-title">PAPYRUS</h1>
           <div className="masthead__meta">
             <span>{content.editionDate}</span>
-            <span>Vol. 1, No. 1</span>
+            <span>THE LATEST IN AI/ML</span>
             <span>Cybernetic Edition</span>
           </div>
         </header>
