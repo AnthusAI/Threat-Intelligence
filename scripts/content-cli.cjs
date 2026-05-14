@@ -329,14 +329,19 @@ function recordsEqual(left, right) {
   return stableStringify(normalizeRecord(left)) === stableStringify(normalizeRecord(right));
 }
 
-function normalizeRecord(record) {
+const AWS_JSON_FIELDS = new Set(["layout", "editorial", "metadata", "layoutPlan"]);
+
+function normalizeRecord(record, keyName = "") {
   if (Array.isArray(record)) return record.map(normalizeRecord);
+  if (typeof record === "string" && AWS_JSON_FIELDS.has(keyName)) {
+    return normalizeRecord(parseAwsJson(record), keyName);
+  }
   if (!record || typeof record !== "object") return record;
 
   const normalized = {};
   for (const key of Object.keys(record).sort()) {
     if (record[key] === undefined || record[key] === null) continue;
-    normalized[key] = normalizeRecord(record[key]);
+    normalized[key] = normalizeRecord(record[key], key);
   }
   return normalized;
 }
@@ -347,6 +352,14 @@ function stableStringify(value) {
 
 function toAwsJson(value) {
   return JSON.stringify(value);
+}
+
+function parseAwsJson(value) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
 }
 
 function slugify(value) {
