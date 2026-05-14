@@ -1,0 +1,17 @@
+{
+  "id": "edition-current",
+  "slug": "current",
+  "title": "Current Edition",
+  "description": "Development content loaded from Markdown files.",
+  "displayDate": "Wednesday, May 13, 2026",
+  "publishDate": "2026-05-13",
+  "publishedAt": "2026-05-13T12:00:00.000Z",
+  "articleOrder": [
+    "harbor-grid",
+    "schools-reading-lab",
+    "market-hall",
+    "river-court",
+    "night-trains",
+    "climate-ledger"
+  ]
+}

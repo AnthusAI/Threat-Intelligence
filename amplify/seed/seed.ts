@@ -7,44 +7,34 @@ import { uploadData } from "aws-amplify/storage";
 import type { Schema } from "../data/resource";
 import { getArticleImageAssets, type Article, type ArticleImageAsset } from "../../lib/articles";
 import { getAmplifyServerRuntime } from "../../lib/amplify-server-runtime";
+import { loadLocalEditionConfig, orderEditionSlugs } from "../../lib/edition-config";
 import { loadMarkdownArticles } from "../../lib/markdown-content-repository";
 
-const EDITION_ID = "edition-current";
-const EDITION_SLUG = "current";
-const EDITION_DATE = "2026-05-13";
-const PUBLISHED_AT = "2026-05-13T12:00:00.000Z";
 const EDITOR_GROUP = "editor";
-const EDITION_ORDER = [
-  "harbor-grid",
-  "schools-reading-lab",
-  "market-hall",
-  "river-court",
-  "night-trains",
-  "climate-ledger",
-];
 
 const client = generateClient<Schema>({ authMode: "userPool" });
 
 async function main() {
   getAmplifyServerRuntime();
   await signInSeedEditor();
+  const editionConfig = loadLocalEditionConfig();
 
   try {
-    const articles = orderArticles(loadMarkdownArticles());
+    const articles = orderArticles(loadMarkdownArticles(), editionConfig.articleOrder);
     await upsert("Edition", {
-      id: EDITION_ID,
-      slug: EDITION_SLUG,
-      title: "Current Edition",
+      id: editionConfig.id,
+      slug: editionConfig.slug,
+      title: editionConfig.title,
       status: "published",
-      editionDate: EDITION_DATE,
-      description: "Seeded Papyrus cloud edition from content/articles Markdown.",
+      editionDate: editionConfig.publishDate,
+      description: editionConfig.description,
       metadata: {
         source: "markdown-seed",
       },
     });
 
     for (const [index, article] of articles.entries()) {
-      await seedArticle(article, index);
+      await seedArticle(article, index, editionConfig);
     }
 
     console.log(`Seeded ${articles.length} articles into Amplify Data and Storage.`);
@@ -84,7 +74,7 @@ async function signInSeedEditor() {
   }
 }
 
-async function seedArticle(article: Article, index: number) {
+async function seedArticle(article: Article, index: number, editionConfig: ReturnType<typeof loadLocalEditionConfig>) {
   const itemId = `item-${article.slug}`;
   const sectionSlug = slugify(article.section);
   const tagId = `tag-${sectionSlug}`;
@@ -104,8 +94,8 @@ async function seedArticle(article: Article, index: number) {
     body: article.body,
     byline: article.byline,
     dateline: article.dateline,
-    publishedAt: PUBLISHED_AT,
-    editionDate: EDITION_DATE,
+    publishedAt: editionConfig.publishedAt,
+    editionDate: editionConfig.publishDate,
     sortTitle: article.headline,
     pullQuotes: article.pullQuotes ?? [],
     layout: {
@@ -128,12 +118,12 @@ async function seedArticle(article: Article, index: number) {
     itemType: "article",
     itemStatus: "published",
     tagSlug: sectionSlug,
-    publishedAt: PUBLISHED_AT,
+    publishedAt: editionConfig.publishedAt,
   });
 
   await upsert("EditionItem", {
-    id: `edition-current-${article.slug}`,
-    editionId: EDITION_ID,
+    id: `${editionConfig.id}-${article.slug}`,
+    editionId: editionConfig.id,
     itemId,
     placementKey: `front:${index + 1}`,
     sortKey,
@@ -226,16 +216,8 @@ async function upsert(modelName: keyof typeof client.models, record: Record<stri
   assertNoGraphQLErrors(response.errors);
 }
 
-function orderArticles(articles: Article[]): Article[] {
-  return [...articles].sort((left, right) => {
-    const leftIndex = EDITION_ORDER.indexOf(left.slug);
-    const rightIndex = EDITION_ORDER.indexOf(right.slug);
-    return getOrderValue(leftIndex) - getOrderValue(rightIndex) || left.slug.localeCompare(right.slug);
-  });
-}
-
-function getOrderValue(index: number): number {
-  return index === -1 ? Number.MAX_SAFE_INTEGER : index;
+function orderArticles(articles: Article[], articleOrder: string[]): Article[] {
+  return orderEditionSlugs(articles, articleOrder);
 }
 
 function slugify(value: string): string {

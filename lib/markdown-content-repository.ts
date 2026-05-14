@@ -2,8 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import matter from "gray-matter";
 import type { Article, ArticleAsset, ArticleImage } from "./articles";
-import { editionDate } from "./articles";
 import type { ContentRepository, EditionContent } from "./content-types";
+import { loadLocalEditionConfig, orderEditionSlugs } from "./edition-config";
 
 const MARKDOWN_ARTICLES_DIR = path.join(process.cwd(), "content", "articles");
 
@@ -19,12 +19,13 @@ type MarkdownArticleFrontmatter = {
 
 export const markdownContentRepository: ContentRepository = {
   loadEditionContent() {
+    const editionConfig = loadLocalEditionConfig();
     return {
-      id: "markdown-development-edition",
+      id: editionConfig.id,
       source: "markdown",
-      title: "Markdown Development Edition",
-      editionDate,
-      description: "Development content loaded from Markdown files.",
+      title: editionConfig.title,
+      editionDate: editionConfig.displayDate,
+      description: editionConfig.description,
       articles: loadMarkdownArticles(),
     };
   },
@@ -39,7 +40,8 @@ export const markdownContentRepository: ContentRepository = {
 export function loadMarkdownArticles(): Article[] {
   if (!fs.existsSync(MARKDOWN_ARTICLES_DIR)) return [];
 
-  return fs
+  return orderEditionSlugs(
+    fs
     .readdirSync(MARKDOWN_ARTICLES_DIR)
     .filter((filename) => filename.endsWith(".md"))
     .sort()
@@ -47,7 +49,8 @@ export function loadMarkdownArticles(): Article[] {
       const filepath = path.join(MARKDOWN_ARTICLES_DIR, filename);
       const markdown = fs.readFileSync(filepath, "utf8");
       return parseMarkdownArticle(markdown, filename);
-    });
+    }),
+  );
 }
 
 export function parseMarkdownArticle(markdown: string, filename = "article.md"): Article {

@@ -1,4 +1,12 @@
 import { type ClientSchema, a, defineData } from "@aws-amplify/backend";
+import { graphqlJwtAuthorizer } from "../functions/graphql-jwt-authorizer/resource";
+
+const authoringOperations: ("read" | "create" | "update" | "delete")[] = [
+  "read",
+  "create",
+  "update",
+  "delete",
+];
 
 const schema = a.schema({
   Item: a
@@ -31,7 +39,11 @@ const schema = a.schema({
       index("typeStatus").sortKeys(["publishedAt"]).queryField("listItemsByTypeStatusAndPublishedAt"),
       index("sectionStatus").sortKeys(["publishedAt"]).queryField("listItemsBySectionStatusAndPublishedAt"),
     ])
-    .authorization((allow) => [allow.publicApiKey().to(["read"]), allow.group("editor")]),
+    .authorization((allow) => [
+      allow.publicApiKey().to(["read"]),
+      allow.group("editor"),
+      allow.custom().to(authoringOperations),
+    ]),
 
   Tag: a
     .model({
@@ -46,7 +58,11 @@ const schema = a.schema({
       index("slug").queryField("tagBySlug"),
       index("type").sortKeys(["label"]).queryField("listTagsByTypeAndLabel"),
     ])
-    .authorization((allow) => [allow.publicApiKey().to(["read"]), allow.group("editor")]),
+    .authorization((allow) => [
+      allow.publicApiKey().to(["read"]),
+      allow.group("editor"),
+      allow.custom().to(authoringOperations),
+    ]),
 
   ItemTag: a
     .model({
@@ -64,7 +80,11 @@ const schema = a.schema({
       index("itemId").sortKeys(["tagSlug"]).queryField("listItemTagsByItemAndTag"),
       index("tagId").sortKeys(["publishedAt"]).queryField("listItemTagsByTagAndPublishedAt"),
     ])
-    .authorization((allow) => [allow.publicApiKey().to(["read"]), allow.group("editor")]),
+    .authorization((allow) => [
+      allow.publicApiKey().to(["read"]),
+      allow.group("editor"),
+      allow.custom().to(authoringOperations),
+    ]),
 
   MediaAsset: a
     .model({
@@ -95,7 +115,11 @@ const schema = a.schema({
       index("itemId").sortKeys(["sortKey"]).queryField("listMediaAssetsByItemAndSortKey"),
       index("role").sortKeys(["itemId"]).queryField("listMediaAssetsByRoleAndItem"),
     ])
-    .authorization((allow) => [allow.publicApiKey().to(["read"]), allow.group("editor")]),
+    .authorization((allow) => [
+      allow.publicApiKey().to(["read"]),
+      allow.group("editor"),
+      allow.custom().to(authoringOperations),
+    ]),
 
   Edition: a
     .model({
@@ -112,7 +136,11 @@ const schema = a.schema({
       index("slug").queryField("editionBySlug"),
       index("status").sortKeys(["editionDate"]).queryField("listEditionsByStatusAndEditionDate"),
     ])
-    .authorization((allow) => [allow.publicApiKey().to(["read"]), allow.group("editor")]),
+    .authorization((allow) => [
+      allow.publicApiKey().to(["read"]),
+      allow.group("editor"),
+      allow.custom().to(authoringOperations),
+    ]),
 
   EditionItem: a
     .model({
@@ -131,7 +159,11 @@ const schema = a.schema({
       index("editionId").sortKeys(["sortKey"]).queryField("listEditionItemsByEditionAndSortKey"),
       index("itemId").sortKeys(["editionId"]).queryField("listEditionItemsByItemAndEdition"),
     ])
-    .authorization((allow) => [allow.publicApiKey().to(["read"]), allow.group("editor")]),
+    .authorization((allow) => [
+      allow.publicApiKey().to(["read"]),
+      allow.group("editor"),
+      allow.custom().to(authoringOperations),
+    ]),
 });
 
 export type Schema = ClientSchema<typeof schema>;
@@ -140,9 +172,13 @@ export const data = defineData({
   name: "PapyrusCmsApi",
   schema,
   authorizationModes: {
-    defaultAuthorizationMode: "apiKey",
+    defaultAuthorizationMode: "userPool",
     apiKeyAuthorizationMode: {
       expiresInDays: 30,
+    },
+    lambdaAuthorizationMode: {
+      function: graphqlJwtAuthorizer,
+      timeToLiveInSeconds: 300,
     },
   },
 });

@@ -37,6 +37,14 @@ image variants, scoring, continuation labels, and rendering contracts.
 - Do not make the S3 bucket raw-public. Use Amplify Storage access rules and
   signed `getUrl` URLs for reader media unless the architecture is explicitly
   changed.
+- Use an AWS profile for local Amplify/AWS access.
+- `.env` is for Papyrus runtime settings and the seed editor credentials used by
+  `npm run seed:amplify`. `.env*` must stay ignored, and `.env.example` is the
+  committed template.
+- The CLI authoring flow uses `PAPYRUS_GRAPHQL_ENDPOINT` plus
+  `PAPYRUS_GRAPHQL_JWT` from `.env`. That JWT is sent directly to AppSync
+  through the Lambda authorizer lane. Do not add a Papyrus editor login flow or local
+  auth-session cache for CLI publishing.
 
 ## Solver vs. Renderer Boundary
 
@@ -130,6 +138,10 @@ runs.
   `EditionContent`.
 - Routes that use GraphQL content must stay dynamic because signed media URLs
   expire.
+- The read path does not require a hand-managed token in `.env`. It uses
+  `amplify_outputs.json` plus Amplify runtime configuration.
+- The public read path should keep using `authMode: "apiKey"` even though the
+  API default authorization mode is `userPool`.
 
 `amplify/` owns the cloud backend:
 
@@ -143,6 +155,35 @@ runs.
 - `amplify_outputs.json` is generated output and must stay ignored.
 - Do not put BDD fixtures in `content/articles/` to make cloud seeding easier.
   That directory is editorial development content only.
+- Local sandbox, seed, and deploy operations should use the caller's AWS
+  profile, typically via `AWS_PROFILE` and `AWS_REGION`.
+- `amplify/seed/seed.ts` signs into Cognito as the seed editor using
+  `PAPYRUS_SEED_USERNAME`, `PAPYRUS_SEED_PASSWORD`, and
+  `PAPYRUS_SEED_EMAIL`. Those belong in `.env`, not in source control.
+- The data API supports public API-key reads, Cognito user-pool auth, and a
+  separate Lambda JWT authorizer lane. Match the intended `../Plexus/dashboard` shape:
+  public API-key access stays available, Cognito remains available, and utility
+  clients can send a raw bearer JWT accepted by AppSync Lambda-authorizer auth.
+- Lambda-authorizer auth deployment requires an Amplify secret named
+  `PAPYRUS_JWT_SECRET`. The model rules allow public reads, Cognito `editor`
+  group writes, and custom JWT-authorizer writes.
+
+`scripts/` owns the content authoring CLI:
+
+- `scripts/content-cli.cjs` is the entrypoint exposed by `npm run content --`.
+- The CLI is Markdown-first and edition-aware.
+- `content/edition.json` is the local source of truth for edition metadata and
+  article order.
+- `scripts/lib/papyrus-graphql-authoring.cjs` owns JWT-authenticated GraphQL
+  authoring calls.
+- `scripts/lib/papyrus-markdown.cjs` owns Markdown and edition normalization for
+  the CLI.
+- In the current CLI authoring path, media assets must use external URLs. Do
+  not add half-working direct S3 uploads without also introducing an
+  authenticated Storage strategy that matches the chosen credentials model.
+- The CLI should expose `inspect`, `list`, `diff`, `sync`, and explicit
+  `content delete all --yes`; do not add `content login` or `content logout`
+  unless the auth model changes again.
 
 `lib/newspaper-layout.ts` owns layout and solver state:
 

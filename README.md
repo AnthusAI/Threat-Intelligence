@@ -13,6 +13,28 @@ changes how much space is available for copy.
 Pretext is the text-fit oracle. Papyrus owns the edition plan, templates,
 routing, page geometry, scoring, continuation labels, and React rendering.
 
+## Credentials
+
+Use an AWS profile for AWS access. That is the right credential mechanism for
+Amplify sandbox, deployment, and seeding from a local machine.
+
+Papyrus already follows that split:
+
+- AWS credentials come from the normal AWS SDK/CLI chain, usually
+  `AWS_PROFILE` plus your local `~/.aws` config.
+- App-level settings belong in `.env`.
+- The seed script can still use Cognito editor credentials when seeding through
+  Amplify Auth.
+- The content CLI uses a direct bearer token in `PAPYRUS_GRAPHQL_JWT` for
+  authoring requests. It does not log into a Papyrus user pool.
+
+Papyrus has three distinct GraphQL auth lanes:
+
+- the site reads GraphQL content with API-key auth;
+- Cognito user-pool auth remains available for app/editor surfaces;
+- the authoring CLI writes content with a JWT accepted by AppSync through the
+  configured Lambda authorizer.
+
 ## Newspaper layout, not web layout
 
 Normal web layouts usually let text flow in a single article view. Newspapers do
@@ -121,6 +143,13 @@ calls Amplify Storage `getUrl` and injects temporary URLs into normalized
 article image assets. Because signed URLs expire, GraphQL-backed pages render
 dynamically.
 
+The Data API is multi-auth. Public site reads use the API key from Amplify
+outputs. Cognito user-pool auth remains available for future app/editor
+surfaces. CLI authoring uses the separate Lambda authorizer, with
+`PAPYRUS_GRAPHQL_JWT` sent directly to AppSync. Deploying that lane requires an
+Amplify secret named `PAPYRUS_JWT_SECRET`; the authorizer also enforces the
+configured issuer, audience, and scope values.
+
 Cloud content is seeded from `content/articles/*.md`; the Markdown files remain
 development content, not BDD fixtures. The seed uploads article images to
 Storage and creates the related CMS records. It does not create a CMS UI.
@@ -144,8 +173,12 @@ npm run typecheck
 npm run build
 npm run sandbox
 npm run seed:amplify
+npm run content -- content inspect
 npm run test:bdd
 ```
+
+Copy `.env.example` to `.env` when you need local overrides. `.env*` is ignored
+by git, while `.env.example` is intentionally committed as the template.
 
 `npm run test:bdd` runs the Gherkin layout scenarios against a running app. It
 defaults to `http://localhost:3001`; set `PAPYRUS_BASE_URL` to test another
@@ -159,6 +192,36 @@ For Amplify development, run `npm run sandbox` to provision a local cloud
 sandbox. After the sandbox has generated `amplify_outputs.json`, run
 `npm run seed:amplify` to upload Markdown content and media. Then start the app
 with `PAPYRUS_CONTENT_SOURCE=graphql` to read the cloud edition.
+
+For content authoring against a deployed API:
+
+```bash
+npm run content -- content inspect
+npm run content -- content list articles
+npm run content -- content diff edition current
+npm run content -- content sync article harbor-grid
+npm run content -- content sync edition current
+npm run content -- content delete all --yes
+```
+
+The CLI reads local editorial content from `content/articles/` plus
+`content/edition.json`. Set `PAPYRUS_GRAPHQL_ENDPOINT` and
+`PAPYRUS_GRAPHQL_JWT` before running authoring commands. The JWT is sent
+directly as the AppSync `Authorization` bearer token and is validated through
+the configured Lambda authorizer. No Papyrus editor login or local auth-session
+cache is involved.
+
+`content delete all --yes` removes CMS records through the same JWT/Lambda-authorizer
+authoring lane. It does not use API-key reads and should not be replaced with a
+direct DynamoDB cleanup unless that is explicitly requested.
+
+For local cloud work, use an AWS profile, for example:
+
+```bash
+AWS_PROFILE=default AWS_REGION=us-east-1 npm run sandbox
+AWS_PROFILE=default AWS_REGION=us-east-1 npm run seed:amplify
+AWS_PROFILE=default PAPYRUS_CONTENT_SOURCE=graphql npm run dev
+```
 
 ## Layout Scenario Tests
 
@@ -187,6 +250,8 @@ inside the feature file.
   helpers for article text and image assets.
 - `content/articles/` contains Markdown development articles. Frontmatter
   supplies metadata; `#` and `##` headings supply headline and deck.
+- `content/edition.json` defines the local editorial edition metadata and
+  article ordering used by Markdown preview, seeding, and the authoring CLI.
 - `lib/content-repository.ts` defines the current fixture/scenario repository
   and the source selector for fixture, Markdown, and GraphQL-backed content.
 - `lib/graphql-content-repository.ts` loads Amplify Data records, resolves
@@ -194,6 +259,8 @@ inside the feature file.
   objects.
 - `amplify/` defines the Gen2 Auth, Data, Storage, and seed resources for the
   cloud content backend.
+- `scripts/content-cli.cjs` is the JWT-backed content authoring CLI for
+  Markdown-first sync, diff, inspect, and list workflows.
 - `lib/markdown-content-repository.ts` parses Markdown development content with
   `gray-matter` and returns normalized `Article` objects.
 - `lib/content-types.ts` defines `EditionContent` and `ContentRepository`.
