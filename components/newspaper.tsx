@@ -176,22 +176,18 @@ export function Newspaper({ content }: { content: EditionContent }) {
       data-layout-plan-front-template={content.layoutPlan.pages[0]?.presetId}
       ref={shellRef}
     >
+      <FlipbookControls
+        currentPage={layout ? visiblePage : null}
+        totalPages={layout ? totalPages : null}
+        onNext={layout ? () => turnRelative(1) : undefined}
+        onPrevious={layout ? () => turnRelative(-1) : undefined}
+        nextDisabled={!layout || visiblePage >= totalPages}
+        previousDisabled={!layout || visiblePage <= 1}
+      />
       {!layout ? (
         <LoadingPage content={content} />
       ) : (
         <>
-          <nav className="flipbook-controls" aria-label="Edition pages">
-            <button type="button" onClick={() => turnRelative(-1)} disabled={visiblePage <= 1}>
-              ◀ Previous
-            </button>
-            <span>
-              Page {visiblePage} of {totalPages}
-            </span>
-            <button type="button" onClick={() => turnRelative(1)} disabled={visiblePage >= totalPages}>
-              Next ▶
-            </button>
-          </nav>
-
           <div
             className={`flipbook-shell flipbook-shell--turning-${turnDirection}`}
             onTouchCancel={() => {
@@ -222,6 +218,57 @@ export function Newspaper({ content }: { content: EditionContent }) {
   );
 }
 
+function FlipbookControls({
+  currentPage,
+  totalPages,
+  onNext,
+  onPrevious,
+  nextDisabled,
+  previousDisabled,
+}: {
+  currentPage: number | null;
+  totalPages: number | null;
+  onNext?: () => void;
+  onPrevious?: () => void;
+  nextDisabled: boolean;
+  previousDisabled: boolean;
+}) {
+  return (
+    <nav className="flipbook-controls" aria-label="Edition pages">
+      <button type="button" onClick={onPrevious} disabled={previousDisabled}>
+        <span className="flipbook-controls__button-content">
+          <TriangleIcon direction="left" />
+          <span>Previous</span>
+        </span>
+      </button>
+      <span className="flipbook-controls__status">
+        Page {currentPage ?? "--"} of {totalPages ?? "--"}
+      </span>
+      <button type="button" onClick={onNext} disabled={nextDisabled}>
+        <span className="flipbook-controls__button-content">
+          <span>Next</span>
+          <TriangleIcon direction="right" />
+        </span>
+      </button>
+    </nav>
+  );
+}
+
+function TriangleIcon({ direction }: { direction: "left" | "right" }) {
+  const points = direction === "left" ? "10,2 2,7 10,12" : "2,2 10,7 2,12";
+
+  return (
+    <svg
+      aria-hidden="true"
+      className="flipbook-controls__icon"
+      viewBox="0 0 12 14"
+      focusable="false"
+    >
+      <polygon fill="currentColor" points={points} />
+    </svg>
+  );
+}
+
 function LoadingPage({ content }: { content: EditionContent }) {
   return (
     <section className="paper-page-content paper-page-content--front paper-page-content--loading" aria-label="Loading edition">
@@ -230,7 +277,7 @@ function LoadingPage({ content }: { content: EditionContent }) {
         <h1>PAPYRUS</h1>
         <div className="masthead__meta">
           <span>{content.editionDate}</span>
-          <span>THE LATEST IN AI/ML</span>
+          <span>INFORMATION ABOUT INFORMATION SYSTEMS</span>
           <span>Measuring type</span>
         </div>
       </header>
@@ -264,7 +311,7 @@ function SolvedPageView({
           <h1 id="edition-title">PAPYRUS</h1>
           <div className="masthead__meta">
             <span>{content.editionDate}</span>
-            <span>THE LATEST IN AI/ML</span>
+            <span>INFORMATION ABOUT INFORMATION SYSTEMS</span>
             <span>Cybernetic Edition</span>
           </div>
         </header>

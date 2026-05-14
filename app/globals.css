@@ -82,14 +82,14 @@ img {
   align-items: center;
   background: rgb(var(--paper-rgb) / 0.94);
   border-bottom: 0;
-  display: flex;
+  display: grid;
   font-family: Arial, Helvetica, sans-serif;
   font-size: 0.76rem;
   font-weight: 800;
-  gap: 14px;
-  justify-content: center;
+  grid-template-columns: 1fr auto 1fr;
   letter-spacing: 0;
   min-height: 42px;
+  padding: 7px 14px;
   position: sticky;
   text-transform: uppercase;
   top: 0;
@@ -110,6 +110,41 @@ img {
   text-decoration-color: rgb(var(--accent-rgb) / 0.6);
   text-underline-offset: 0.16em;
   text-transform: inherit;
+}
+
+.flipbook-controls button {
+  align-items: center;
+  display: inline-flex;
+  justify-self: center;
+  line-height: 1;
+}
+
+.flipbook-controls button:first-of-type {
+  justify-self: start;
+}
+
+.flipbook-controls button:last-of-type {
+  justify-self: end;
+}
+
+.flipbook-controls__button-content {
+  align-items: center;
+  display: inline-flex;
+  gap: 0.38rem;
+  line-height: 1;
+}
+
+.flipbook-controls__icon {
+  flex: 0 0 auto;
+  height: 0.72rem;
+  width: 0.72rem;
+}
+
+.flipbook-controls__status {
+  align-self: center;
+  justify-self: center;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .flipbook-controls button:disabled {
