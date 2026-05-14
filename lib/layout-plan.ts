@@ -87,6 +87,31 @@ export type ResponsiveCollapsePolicy = (typeof RESPONSIVE_COLLAPSE_POLICIES)[num
 export type ResponsiveCropPolicy = (typeof RESPONSIVE_CROP_POLICIES)[number];
 
 const ItemIdSchema = z.string().min(1);
+const EmValueSchema = z
+  .string()
+  .regex(/^(?:\d+|\d*\.\d+)em$/, "must be an em value like 1em or 2.5em");
+
+const ChromeTextSlotSchema = z
+  .object({
+    lineHeight: EmValueSchema.optional(),
+    paintHeight: EmValueSchema.optional(),
+    marginBefore: EmValueSchema.optional(),
+    marginAfter: EmValueSchema.optional(),
+    minHeight: EmValueSchema.optional(),
+  })
+  .strict();
+
+const ArticleFrameChromeSchema = z
+  .object({
+    label: ChromeTextSlotSchema.optional(),
+    headline: ChromeTextSlotSchema.optional(),
+    deck: ChromeTextSlotSchema.optional(),
+    byline: ChromeTextSlotSchema.optional(),
+    caption: ChromeTextSlotSchema.optional(),
+    pullQuote: ChromeTextSlotSchema.optional(),
+    jumpLine: ChromeTextSlotSchema.optional(),
+  })
+  .strict();
 
 const SpanPolicySchema = z
   .object({
@@ -200,6 +225,7 @@ const ArticleFrameBlockSchema = z
     span: SpanPolicySchema.optional(),
     media: z.array(MediaSpecSchema).default([]),
     pullQuote: PullQuoteSpecSchema.optional(),
+    chrome: ArticleFrameChromeSchema.optional(),
     cutPolicy: CutPolicySchema.optional(),
     requires: ContentRequirementsSchema.optional(),
   })
@@ -311,6 +337,9 @@ const EditionLayoutPlanSchema = z
   .strict();
 
 export type ContentRequirements = z.infer<typeof ContentRequirementsSchema>;
+export type EmValue = z.infer<typeof EmValueSchema>;
+export type ChromeTextSlotSpec = z.infer<typeof ChromeTextSlotSchema>;
+export type ArticleFrameChromeSpec = z.infer<typeof ArticleFrameChromeSchema>;
 export type ResponsiveSpanPolicy = z.infer<typeof SpanPolicySchema>;
 export type ResponsivePlacementSpec = z.infer<typeof PlacementSchema>;
 export type LayoutMediaSpec = z.infer<typeof MediaSpecSchema>;

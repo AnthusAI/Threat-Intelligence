@@ -46,8 +46,8 @@ Feature: Newspaper layout scenarios
     And the active edition should include article "schools-reading-lab"
     When I flip to page 2
     Then the active page should be a "articlePage" page
-    And the "harbor-grid" section should show a responsive image inset
-    And the "harbor-grid" section image should span between 1 and 3 columns
+    And the "agent-procedure-patterns" section should show a responsive image inset
+    And the "agent-procedure-patterns" section image should span between 1 and 3 columns
     And no measured line should be cropped
     And no browser console errors should occur
 
@@ -79,6 +79,20 @@ Feature: Newspaper layout scenarios
     And no solved furniture should overlap within a section
     And no measured line should overlap solved furniture
     And no browser console errors should occur
+
+  Scenario Outline: Article chrome does not overlap under responsive typography
+    Given I open the "<scenario>" layout scenario at 1280 by 900
+    Then no article chrome should overlap
+    And no measured line should be cropped
+    When I flip to page 2
+    Then no article chrome should overlap
+    And no measured line should be cropped
+    And no browser console errors should occur
+
+    Examples:
+      | scenario             |
+      | current-edition      |
+      | front-chrome-compact |
 
   Scenario: Direct article routes resolve content through the repository
     Given I open article "schools-reading-lab" at 1280 by 900

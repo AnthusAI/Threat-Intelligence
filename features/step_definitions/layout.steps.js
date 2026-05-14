@@ -111,6 +111,11 @@ Then("no measured line should overlap solved furniture", async function () {
   assert.deepEqual(report.lineFurnitureOverlaps, []);
 });
 
+Then("no article chrome should overlap", async function () {
+  const report = await getActivePageReport(requirePage(this));
+  assert.deepEqual(report.chromeOverlaps, []);
+});
+
 Then("no continuation column should be dead", async function () {
   const report = await getActivePageReport(requirePage(this));
   assert.deepEqual(report.deadColumns, []);
@@ -239,6 +244,46 @@ async function getActivePageReport(page) {
       }
     }
 
+    const chromeOverlaps = [];
+    for (const story of active.querySelectorAll(".front-story")) {
+      const article = story.getAttribute("data-article-id") ?? "";
+      const pairs = [
+        [story.querySelector("h2"), story.querySelector(".story-deck"), "headline/deck"],
+        [story.querySelector(".story-deck"), story.querySelector(".story-byline"), "deck/byline"],
+        [story.querySelector(".story-byline"), story.querySelector(".story-measure"), "byline/body"],
+        [story.querySelector(".story-measure"), story.querySelector(".jump-line"), "body/jump"],
+      ];
+      for (const [previous, next, label] of pairs) {
+        if (!previous || !next) continue;
+        const previousRect = toRect(previous);
+        const nextRect = toRect(next);
+        if (previousRect.bottom > nextRect.top + 0.75) {
+          chromeOverlaps.push({ article, label, previousRect, nextRect });
+        }
+      }
+    }
+
+    for (const section of active.querySelectorAll(".solved-block--articleFrame")) {
+      const article = section.getAttribute("data-article-id") ?? "";
+      const title = section.querySelector(".continued-title");
+      const body = section.querySelector(".continuation-body");
+      if (!title || !body) continue;
+      const titleRect = toRect(title);
+      const bodyRect = toRect(body);
+      if (titleRect.bottom > bodyRect.top + 0.75) {
+        chromeOverlaps.push({ article, label: "continued-title/body", previousRect: titleRect, nextRect: bodyRect });
+      }
+      const kicker = title.querySelector("p");
+      const headline = title.querySelector("h2");
+      if (kicker && headline) {
+        const kickerRect = toRect(kicker);
+        const headlineRect = toRect(headline);
+        if (kickerRect.bottom > headlineRect.top + 0.75) {
+          chromeOverlaps.push({ article, label: "continued-kicker/headline", previousRect: kickerRect, nextRect: headlineRect });
+        }
+      }
+    }
+
     const clippedLines = [];
     const lineFurnitureOverlaps = [];
     for (const line of active.querySelectorAll(".measured-line")) {
@@ -295,6 +340,7 @@ async function getActivePageReport(page) {
     return {
       kind: active.getAttribute("data-page-kind") ?? (active.classList.contains("paper-page--front") ? "front" : null),
       clippedLines,
+      chromeOverlaps,
       furnitureOverlaps,
       lineFurnitureOverlaps,
       deadColumns,

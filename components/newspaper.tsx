@@ -36,6 +36,7 @@ export function Newspaper({ content }: { content: EditionContent }) {
   const shellRef = useRef<HTMLDivElement | null>(null);
   const swipeStartRef = useRef<{ x: number; y: number; id: number } | null>(null);
   const [metrics, setMetrics] = useState<BookMetrics | null>(null);
+  const [fontRevision, setFontRevision] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [previousPage, setPreviousPage] = useState<number | null>(null);
   const [turnDirection, setTurnDirection] = useState<"next" | "previous">("next");
@@ -75,10 +76,27 @@ export function Newspaper({ content }: { content: EditionContent }) {
     };
   }, []);
 
-  const layout = useMemo(
-    () => (metrics === null ? null : buildNewspaperLayout(content.items, metrics.pageWidth, metrics.viewportHeight, content.layoutPlan)),
-    [metrics, content.items, content.layoutPlan],
-  );
+  useEffect(() => {
+    const fonts = document.fonts;
+    if (!fonts) return;
+    let cancelled = false;
+    const refreshAfterFontLoad = () => {
+      if (!cancelled) setFontRevision((revision) => revision + 1);
+    };
+    fonts.ready.then(refreshAfterFontLoad).catch(() => undefined);
+    fonts.addEventListener("loadingdone", refreshAfterFontLoad);
+    fonts.addEventListener("loadingerror", refreshAfterFontLoad);
+    return () => {
+      cancelled = true;
+      fonts.removeEventListener("loadingdone", refreshAfterFontLoad);
+      fonts.removeEventListener("loadingerror", refreshAfterFontLoad);
+    };
+  }, []);
+
+  const layout = useMemo(() => {
+    void fontRevision;
+    return metrics === null ? null : buildNewspaperLayout(content.items, metrics.pageWidth, metrics.viewportHeight, content.layoutPlan);
+  }, [metrics, content.items, content.layoutPlan, fontRevision]);
   const totalPages = layout ? layout.pages.length : 0;
   const visiblePage = totalPages > 0 ? Math.min(currentPage, totalPages) : currentPage;
   const activePageHeight = layout ? getSolvedPageHeight(layout, visiblePage) : 0;
@@ -525,22 +543,30 @@ function getFrontStoryStyle(block: SolvedBlock): CSSProperties {
     "--story-padding-top": `${chrome.paddingTop}px`,
     "--story-media-prelude-height": `${chrome.mediaPreludeHeight}px`,
     "--story-media-prelude-margin-bottom": `${chrome.mediaPreludeMarginBottom}px`,
+    "--story-label-font-size": `${chrome.labelFontSize}px`,
     "--story-label-line-height": `${chrome.labelLineHeight}px`,
+    "--story-label-height": `${chrome.labelHeight}px`,
+    "--story-label-paint-buffer": `${chrome.labelPaintBuffer}px`,
     "--story-headline-font-size": `${chrome.headlineFontSize}px`,
     "--story-headline-line-height": `${chrome.headlineLineHeight}px`,
     "--story-headline-height": `${chrome.headlineHeight}px`,
+    "--story-headline-paint-buffer": `${chrome.headlinePaintBuffer}px`,
     "--story-headline-margin-top": `${chrome.headlineMarginTop}px`,
     "--story-headline-margin-bottom": `${chrome.headlineMarginBottom}px`,
     "--story-deck-font-size": `${chrome.deckFontSize}px`,
     "--story-deck-line-height": `${chrome.deckLineHeight}px`,
     "--story-deck-height": `${chrome.deckHeight}px`,
+    "--story-deck-paint-buffer": `${chrome.deckPaintBuffer}px`,
     "--story-deck-margin-bottom": `${chrome.deckMarginBottom}px`,
     "--story-byline-font-size": `${chrome.bylineFontSize}px`,
     "--story-byline-line-height": `${chrome.bylineLineHeight}px`,
     "--story-byline-height": `${chrome.bylineHeight}px`,
+    "--story-byline-paint-buffer": `${chrome.bylinePaintBuffer}px`,
     "--story-byline-margin-bottom": `${chrome.bylineMarginBottom}px`,
     "--story-jump-height": `${front.jumpReserveHeight}px`,
+    "--story-jump-font-size": `${chrome.jumpFontSize}px`,
     "--story-jump-line-height": `${chrome.jumpLineHeight}px`,
+    "--story-jump-paint-buffer": `${chrome.jumpPaintBuffer}px`,
     "--story-jump-padding-top": `${chrome.jumpPaddingTop}px`,
     "--story-jump-border-top": `${chrome.jumpBorderTopHeight}px`,
   } as CSSProperties;
@@ -549,10 +575,19 @@ function getFrontStoryStyle(block: SolvedBlock): CSSProperties {
 function getArticleBlockStyle(layout: NewspaperLayout, block: SolvedBlock): CSSProperties {
   const image = block.furniture.find((item): item is SolvedImageFurniture => item.kind === "image");
   const pullQuote = block.furniture.find((item): item is SolvedPullQuoteFurniture => item.kind === "pullQuote");
+  const title = block.titleChrome;
   return {
     width: block.width,
     minHeight: block.height,
-    "--continued-title-heading-height": `${block.titleHeight ?? 0}px`,
+    "--continued-kicker-font-size": `${title?.label.fontSize ?? 11.5}px`,
+    "--continued-kicker-line-height": `${title?.label.lineHeight ?? 14}px`,
+    "--continued-kicker-height": `${title?.label.height ?? 14}px`,
+    "--continued-kicker-paint-buffer": `${title?.label.paintBuffer ?? 0}px`,
+    "--continued-title-font-size": `${title?.heading.fontSize ?? layout.pageChrome.continuedTitleFontSize}px`,
+    "--continued-title-line-height": `${title?.heading.lineHeight ?? layout.pageChrome.continuedTitleLineHeight}px`,
+    "--continued-title-heading-height": `${title?.heading.height ?? block.titleHeight ?? 0}px`,
+    "--continued-title-heading-paint-buffer": `${title?.heading.paintBuffer ?? 0}px`,
+    "--continued-title-heading-margin-top": `${title?.heading.marginBefore ?? 5}px`,
     "--continuation-column-height": `${block.bodyHeight ?? 0}px`,
     "--continuation-pullquote-height": `${pullQuote?.height ?? 0}px`,
     "--continuation-pullquote-x": `${pullQuote?.x ?? 0}px`,

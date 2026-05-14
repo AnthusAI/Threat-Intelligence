@@ -1,6 +1,6 @@
 import { type Article, articles, editionDate } from "./articles";
 import type { EditionContent } from "./content-types";
-import { createDefaultEditionLayoutPlan } from "./layout-plan";
+import { createDefaultEditionLayoutPlan, type EditionLayoutPlan } from "./layout-plan";
 import { articleToPublicationItem, cloneArticle } from "./publication-items";
 
 export type LayoutScenario = EditionContent & {
@@ -42,6 +42,17 @@ export const layoutScenarios: LayoutScenario[] = [
       "The shared continuation page with editorial pull quotes removed, used to prove pull quotes are optional display furniture.",
     layoutPlan: createDefaultEditionLayoutPlan(articles.map((article) => article.slug)),
     items: createNoPullQuoteArticles().map(articleToPublicationItem),
+  },
+  {
+    id: "front-chrome-compact",
+    source: "scenario",
+    title: "Front Chrome Compact Typography",
+    editionDate,
+    scenarioId: "front-chrome-compact",
+    description:
+      "Compact headline and deck line heights prove that em-authored chrome reserves enough paint space to prevent overlap.",
+    layoutPlan: createCompactChromeLayoutPlan(),
+    items: cloneArticles(articles).map(articleToPublicationItem),
   },
 ];
 
@@ -95,4 +106,34 @@ function createNoPullQuoteArticles(): Article[] {
 
 function cloneArticles(source: Article[]): Article[] {
   return source.map(cloneArticle);
+}
+
+function createCompactChromeLayoutPlan(): EditionLayoutPlan {
+  const plan = cloneLayoutPlan(createDefaultEditionLayoutPlan(articles.map((article) => article.slug)));
+  const frontPage = plan.pages.find((page) => page.pageNumber === 1);
+  const frontBlocks = frontPage?.regions.flatMap((region) => region.blocks) ?? [];
+  for (const block of frontBlocks) {
+    if (block.type !== "articleFrame") continue;
+    block.chrome = {
+      headline: {
+        lineHeight: "0.72em",
+        paintHeight: "1.14em",
+        marginAfter: "0.32em",
+      },
+      deck: {
+        lineHeight: "0.9em",
+        paintHeight: "1.12em",
+        minHeight: "2.8em",
+      },
+      byline: {
+        lineHeight: "0.95em",
+        paintHeight: "1.1em",
+      },
+    };
+  }
+  return plan;
+}
+
+function cloneLayoutPlan(plan: EditionLayoutPlan): EditionLayoutPlan {
+  return JSON.parse(JSON.stringify(plan)) as EditionLayoutPlan;
 }

@@ -8,6 +8,8 @@ import {
 import type { ArticleImageAsset } from "./articles";
 import {
   type ArticleFrameBlockSpec,
+  type ArticleFrameChromeSpec,
+  type ChromeTextSlotSpec,
   type EditionLayoutPlan,
   type LayoutBlockSpec,
   type LayoutMediaSpec,
@@ -127,6 +129,7 @@ export type SolvedBlock = {
   textRange?: PlacedTextRange;
   hasMore?: boolean;
   front?: SolvedFrontStoryMetrics;
+  titleChrome?: ContinuationTitleMetrics;
   titleHeight?: number;
   bodyHeight?: number;
 };
@@ -190,35 +193,80 @@ export type PageChromeMetrics = {
   continuedTitleLineHeight: number;
 };
 
+export type ChromeTextBoxMetrics = {
+  fontSize: number;
+  lineHeight: number;
+  paintHeight: number;
+  paintBuffer: number;
+  height: number;
+  lineCount: number;
+  marginBefore: number;
+  marginAfter: number;
+  totalHeight: number;
+};
+
 export type StoryChromeMetrics = {
   borderTopHeight: number;
   paddingTop: number;
   mediaPreludeHeight: number;
   mediaPreludeMarginBottom: number;
+  labelFontSize: number;
   labelLineHeight: number;
+  labelPaintHeight: number;
+  labelPaintBuffer: number;
+  labelHeight: number;
   headlineFontSize: number;
   headlineLineHeight: number;
+  headlinePaintHeight: number;
+  headlinePaintBuffer: number;
   headlineHeight: number;
   headlineLineCount: number;
   headlineMarginTop: number;
   headlineMarginBottom: number;
   deckFontSize: number;
   deckLineHeight: number;
+  deckPaintHeight: number;
+  deckPaintBuffer: number;
   deckHeight: number;
   deckLineCount: number;
   deckMarginBottom: number;
   bylineFontSize: number;
   bylineLineHeight: number;
+  bylinePaintHeight: number;
+  bylinePaintBuffer: number;
   bylineHeight: number;
   bylineLineCount: number;
   bylineMarginBottom: number;
   measureChromeHeight: number;
+  jumpFontSize: number;
   jumpLineHeight: number;
+  jumpPaintHeight: number;
+  jumpPaintBuffer: number;
+  jumpHeight: number;
   jumpPaddingTop: number;
   jumpBorderTopHeight: number;
 };
 
+export type ContinuationTitleMetrics = {
+  label: ChromeTextBoxMetrics;
+  heading: ChromeTextBoxMetrics;
+  chromeHeight: number;
+  totalHeight: number;
+};
+
 type FrontStoryRole = "feature" | "rail" | "standard";
+
+type ChromeTextStyle = {
+  fontSize: number;
+  fontFamily: string;
+  fontWeight?: number | string;
+  fontStyle?: "normal" | "italic";
+  lineHeightEm: number;
+  paintHeightEm: number;
+  marginBeforeEm?: number;
+  marginAfterEm?: number;
+  minHeightEm?: number;
+};
 
 export type TextObstacle = {
   x: number;
@@ -288,6 +336,8 @@ type PullQuoteVariant = {
 };
 
 const EMPTY_CURSOR: LayoutCursor = { segmentIndex: 0, graphemeIndex: 0 };
+const SERIF_TEXT_FONT = 'Georgia, "Times New Roman", serif';
+const SANS_TEXT_FONT = "Arial, Helvetica, sans-serif";
 const STORY_MEASURE_CHROME_HEIGHT = 9;
 const MASTHEAD_RULE_HEIGHT = 6;
 const MASTHEAD_RULE_MARGIN_BOTTOM = 9;
@@ -422,7 +472,7 @@ function solveFrontArticleFrame(
         : span >= 4 || preludeImage !== null
           ? "feature"
           : "standard";
-  const chrome = getStoryChromeMetrics(config, item, storyRole, blockWidth, preludeImage?.height ?? 0);
+  const chrome = getStoryChromeMetrics(config, item, storyRole, blockWidth, preludeImage?.height ?? 0, blockSpec.chrome);
   const chromeHeight = getStoryChromeHeight(chrome);
   const jumpReserveHeight = getStoryJumpReserveHeight(chrome);
   const rowHeight = getFrontRowHeight(config, index);
@@ -597,7 +647,8 @@ function solveArticleFrameBlock(
   const flow = getOrCreateFlow(flows, blockSpec.flowKey ?? blockSpec.itemId, item);
   const startCursor = blockSpec.startCursor === "beginning" ? { ...EMPTY_CURSOR } : { ...flow.currentCursor };
   const blockWidth = getBlockWidth(config, blockSpec.span);
-  const title = getContinuationTitleMetrics(config, item, blockWidth);
+  const label = getArticleFrameLabel(blockSpec, item);
+  const title = getContinuationTitleMetrics(config, item, blockWidth, label, blockSpec.chrome);
   const bodyBudget = Math.max(config.linePaintHeight, allocatedHeight - title.totalHeight);
   const candidates = solveArticleFrameCandidates({
     blockSpec,
@@ -606,6 +657,8 @@ function solveArticleFrameBlock(
     flow,
     startCursor,
     blockWidth,
+    label,
+    title,
     bodyBudget,
     prepared,
     config,
@@ -622,6 +675,8 @@ function solveArticleFrameCandidates({
   flow,
   startCursor,
   blockWidth,
+  label,
+  title,
   bodyBudget,
   prepared,
   config,
@@ -632,6 +687,8 @@ function solveArticleFrameCandidates({
   flow: ArticleFlow;
   startCursor: LayoutCursor;
   blockWidth: number;
+  label: string;
+  title: ContinuationTitleMetrics;
   bodyBudget: number;
   prepared: PreparedTextCache;
   config: LayoutConfig;
@@ -652,7 +709,7 @@ function solveArticleFrameCandidates({
       const textHeights = getTextHeightVariants(Math.max(minimumHeight, bodyBudget), minimumHeight, localConfig);
       for (const textHeight of textHeights) {
         for (const pullQuoteVariant of pullQuoteVariants) {
-          const pullQuote = createPullQuoteFurniture(item, pullQuoteVariant, localConfig, textHeight, image);
+          const pullQuote = createPullQuoteFurniture(item, pullQuoteVariant, localConfig, textHeight, image, blockSpec.chrome);
           if (blockSpec.pullQuote?.required && !pullQuote) continue;
 
           const furniture: SolvedFurniture[] = [];
@@ -678,7 +735,6 @@ function solveArticleFrameCandidates({
           const linesHeight = Math.max(...textResult.columns.map(getLinesHeight), 0);
           const furnitureBottom = getFurnitureBottom(furniture);
           const bodyHeight = Math.max(furnitureBottom, textResult.hasMore ? textHeight : linesHeight, config.linePaintHeight);
-          const title = getContinuationTitleMetrics(config, item, blockWidth);
           const blockHeight = title.totalHeight + bodyHeight;
           const whitespace = getColumnWhitespace(textResult.columns, bodyHeight, furniture);
           const deadColumns = getDeadColumnCount(textResult.columns, bodyHeight, furniture);
@@ -700,7 +756,7 @@ function solveArticleFrameCandidates({
               item,
               article: item,
               pageNumber: pageSpec.pageNumber,
-              label: blockSpec.startCursor === "current" ? formatContinuationSourceLabel(item, 1) : item.section,
+              label,
               title: item.headline,
               deck: item.deck,
               byline: item.byline,
@@ -716,7 +772,8 @@ function solveArticleFrameCandidates({
               furniture,
               textRange: range,
               hasMore: textResult.hasMore,
-              titleHeight: title.headingHeight,
+              titleChrome: title,
+              titleHeight: title.heading.height,
               bodyHeight,
             },
             range,
@@ -944,6 +1001,7 @@ function createPullQuoteFurniture(
   config: LayoutConfig,
   textHeight: number,
   image: SolvedImageFurniture | null,
+  chrome?: ArticleFrameChromeSpec,
 ): SolvedPullQuoteFurniture | null {
   if (!variant.placement || variant.columnSpan === 0) return null;
   const text = article.pullQuotes?.[0];
@@ -951,7 +1009,7 @@ function createPullQuoteFurniture(
   const columnWidth = getSpanWidth(config, 1);
   const width = Math.round(getSpanWidth(config, variant.columnSpan));
   const x = Math.round(variant.columnStart * (columnWidth + config.gap));
-  const metrics = getPullQuoteMetrics(text, width, config);
+  const metrics = getPullQuoteMetrics(text, width, config, chrome?.pullQuote);
   const y = getPullQuoteY({
     x,
     width,
@@ -1133,8 +1191,8 @@ function getLayoutConfig(pageWidth: number, viewportHeight: number): LayoutConfi
     pageChrome,
     lineHeight: narrow ? 18 : 19,
     linePaintHeight: (narrow ? 18 : 19) + 4,
-    frontBodyFont: `${narrow ? 15 : 16}px Georgia, "Times New Roman", serif`,
-    continuationBodyFont: `${narrow ? 16 : 17}px Georgia, "Times New Roman", serif`,
+    frontBodyFont: `${narrow ? 15 : 16}px ${SERIF_TEXT_FONT}`,
+    continuationBodyFont: `${narrow ? 16 : 17}px ${SERIF_TEXT_FONT}`,
     frontRows: getFrontRows(columnCount, gap, frontGridHeight, frontRowMaxHeight),
     continuationHeight,
   };
@@ -1277,43 +1335,91 @@ function getStoryChromeMetrics(
   storyRole: FrontStoryRole,
   blockWidth: number,
   mediaPreludeHeight = 0,
+  overrides?: ArticleFrameChromeSpec,
 ): StoryChromeMetrics {
   const feature = storyRole === "feature";
   const headlineFontSize = getHeadlineFontSize(config, storyRole);
-  const headlineLineHeight = Math.ceil(headlineFontSize * (feature ? 0.96 : 1));
-  const headline = measureWrappedTextBlock(article.headline, `${headlineFontSize}px Georgia, "Times New Roman", serif`, blockWidth, headlineLineHeight);
+  const label = solveChromeTextBox(article.section, blockWidth, {
+    fontSize: 11.5,
+    fontFamily: SANS_TEXT_FONT,
+    fontWeight: 800,
+    lineHeightEm: 1.22,
+    paintHeightEm: 1.22,
+  }, overrides?.label);
+  const headline = solveChromeTextBox(article.headline, blockWidth, {
+    fontSize: headlineFontSize,
+    fontFamily: SERIF_TEXT_FONT,
+    fontWeight: 900,
+    lineHeightEm: feature ? 0.96 : 1,
+    paintHeightEm: feature ? 1.1 : 1.12,
+    marginBeforeEm: 5 / headlineFontSize,
+    marginAfterEm: (feature ? 9 : 8) / headlineFontSize,
+  }, overrides?.headline);
   const deckFontSize = config.columnCount === 1 ? 15 : feature ? 16 : 14;
-  const deckLineHeight = Math.ceil(deckFontSize * 1.25);
-  const deck = measureWrappedTextBlock(article.deck, `italic ${deckFontSize}px Georgia, "Times New Roman", serif`, blockWidth, deckLineHeight);
+  const deck = solveChromeTextBox(article.deck, blockWidth, {
+    fontSize: deckFontSize,
+    fontFamily: SERIF_TEXT_FONT,
+    fontStyle: "italic",
+    lineHeightEm: 1.25,
+    paintHeightEm: 1.25,
+    marginAfterEm: 8 / deckFontSize,
+  }, overrides?.deck);
   const bylineFontSize = 11;
-  const bylineLineHeight = 13;
-  const byline = measureWrappedTextBlock(formatByline(article), `800 ${bylineFontSize}px Arial`, blockWidth, bylineLineHeight);
+  const byline = solveChromeTextBox(formatByline(article), blockWidth, {
+    fontSize: bylineFontSize,
+    fontFamily: SANS_TEXT_FONT,
+    fontWeight: 800,
+    lineHeightEm: 13 / bylineFontSize,
+    paintHeightEm: 13 / bylineFontSize,
+    marginAfterEm: 9 / bylineFontSize,
+  }, overrides?.byline);
+  const jump = solveChromeTextBox("SEE MORE", blockWidth, {
+    fontSize: 12.2,
+    fontFamily: SANS_TEXT_FONT,
+    fontWeight: 800,
+    lineHeightEm: 16 / 12.2,
+    paintHeightEm: 16 / 12.2,
+  }, overrides?.jumpLine);
 
   return {
     borderTopHeight: feature ? 5 : 2,
     paddingTop: feature ? 11 : 10,
     mediaPreludeHeight,
     mediaPreludeMarginBottom: mediaPreludeHeight > 0 ? 10 : 0,
-    labelLineHeight: 14,
-    headlineFontSize,
-    headlineLineHeight,
+    labelFontSize: label.fontSize,
+    labelLineHeight: label.lineHeight,
+    labelPaintHeight: label.paintHeight,
+    labelPaintBuffer: label.paintBuffer,
+    labelHeight: label.height,
+    headlineFontSize: headline.fontSize,
+    headlineLineHeight: headline.lineHeight,
+    headlinePaintHeight: headline.paintHeight,
+    headlinePaintBuffer: headline.paintBuffer,
     headlineHeight: headline.height,
     headlineLineCount: headline.lineCount,
-    headlineMarginTop: 5,
-    headlineMarginBottom: feature ? 9 : 8,
-    deckFontSize,
-    deckLineHeight,
+    headlineMarginTop: headline.marginBefore,
+    headlineMarginBottom: headline.marginAfter,
+    deckFontSize: deck.fontSize,
+    deckLineHeight: deck.lineHeight,
+    deckPaintHeight: deck.paintHeight,
+    deckPaintBuffer: deck.paintBuffer,
     deckHeight: deck.height,
     deckLineCount: deck.lineCount,
-    deckMarginBottom: 8,
-    bylineFontSize,
-    bylineLineHeight,
+    deckMarginBottom: deck.marginAfter,
+    bylineFontSize: byline.fontSize,
+    bylineLineHeight: byline.lineHeight,
+    bylinePaintHeight: byline.paintHeight,
+    bylinePaintBuffer: byline.paintBuffer,
     bylineHeight: byline.height,
     bylineLineCount: byline.lineCount,
-    bylineMarginBottom: 9,
+    bylineMarginBottom: byline.marginAfter,
     measureChromeHeight: STORY_MEASURE_CHROME_HEIGHT,
-    jumpLineHeight: 16,
-    jumpPaddingTop: 8,
+    jumpFontSize: jump.fontSize,
+    jumpLineHeight: jump.lineHeight,
+    jumpPaintHeight: jump.paintHeight,
+    jumpPaintBuffer: jump.paintBuffer,
+    jumpHeight: jump.height,
+    jumpPaddingTop: Math.round(emToPx(8 / 12.2, jump.fontSize)),
     jumpBorderTopHeight: 1,
   };
 }
@@ -1325,13 +1431,64 @@ function getHeadlineFontSize(config: LayoutConfig, storyRole: FrontStoryRole): n
   return clamp(pageWidth * 0.021, 20, 32.8);
 }
 
+function solveChromeTextBox(
+  text: string,
+  maxWidth: number,
+  defaults: ChromeTextStyle,
+  overrides?: ChromeTextSlotSpec,
+): ChromeTextBoxMetrics {
+  const fontSize = defaults.fontSize;
+  const lineHeight = Math.ceil(emToPx(parseEmOverride(overrides?.lineHeight, defaults.lineHeightEm), fontSize));
+  const paintHeight = Math.ceil(emToPx(parseEmOverride(overrides?.paintHeight, defaults.paintHeightEm), fontSize));
+  const marginBefore = Math.round(emToPx(parseEmOverride(overrides?.marginBefore, defaults.marginBeforeEm ?? 0), fontSize));
+  const marginAfter = Math.round(emToPx(parseEmOverride(overrides?.marginAfter, defaults.marginAfterEm ?? 0), fontSize));
+  const minHeight = Math.ceil(emToPx(parseEmOverride(overrides?.minHeight, defaults.minHeightEm ?? 0), fontSize));
+  const measured = measureWrappedTextBlock(text, buildChromeFont(defaults), maxWidth, lineHeight, paintHeight);
+  const height = Math.max(measured.height, minHeight);
+
+  return {
+    fontSize,
+    lineHeight,
+    paintHeight,
+    paintBuffer: Math.max(0, paintHeight - lineHeight),
+    height,
+    lineCount: measured.lineCount,
+    marginBefore,
+    marginAfter,
+    totalHeight: marginBefore + height + marginAfter,
+  };
+}
+
+function buildChromeFont(style: ChromeTextStyle): string {
+  const pieces: string[] = [];
+  if (style.fontStyle && style.fontStyle !== "normal") pieces.push(style.fontStyle);
+  if (style.fontWeight) pieces.push(String(style.fontWeight));
+  pieces.push(`${style.fontSize}px`);
+  pieces.push(style.fontFamily);
+  return pieces.join(" ");
+}
+
+function parseEmOverride(value: ChromeTextSlotSpec[keyof ChromeTextSlotSpec] | undefined, fallback: number): number {
+  if (!value) return fallback;
+  return Number(value.slice(0, -2));
+}
+
+function emToPx(value: number, fontSize: number): number {
+  return value * fontSize;
+}
+
+function getLineStackHeight(lineCount: number, lineHeight: number, paintHeight: number): number {
+  if (lineCount <= 0) return 0;
+  return Math.ceil((lineCount - 1) * lineHeight + paintHeight);
+}
+
 function getStoryChromeHeight(chrome: StoryChromeMetrics): number {
   return (
     chrome.borderTopHeight +
     chrome.paddingTop +
     chrome.mediaPreludeHeight +
     chrome.mediaPreludeMarginBottom +
-    chrome.labelLineHeight +
+    chrome.labelHeight +
     chrome.headlineMarginTop +
     chrome.headlineHeight +
     chrome.headlineMarginBottom +
@@ -1344,23 +1501,44 @@ function getStoryChromeHeight(chrome: StoryChromeMetrics): number {
 }
 
 function getStoryJumpReserveHeight(chrome: StoryChromeMetrics): number {
-  return chrome.jumpBorderTopHeight + chrome.jumpPaddingTop + chrome.jumpLineHeight;
+  return chrome.jumpBorderTopHeight + chrome.jumpPaddingTop + chrome.jumpHeight;
 }
 
 function getContinuationTitleMetrics(
   config: LayoutConfig,
   article: ArticlePublicationItem,
   blockWidth: number,
-): { headingHeight: number; lineCount: number; totalHeight: number } {
-  const heading = measureWrappedTextBlock(
-    article.headline,
-    `${config.pageChrome.continuedTitleFontSize}px Georgia, "Times New Roman", serif`,
-    Math.min(blockWidth, 980),
-    config.pageChrome.continuedTitleLineHeight,
+  labelText: string,
+  overrides?: ArticleFrameChromeSpec,
+): ContinuationTitleMetrics {
+  const label = solveChromeTextBox(labelText, blockWidth, {
+    fontSize: 11.5,
+    fontFamily: SANS_TEXT_FONT,
+    fontWeight: 800,
+    lineHeightEm: CONTINUED_TITLE_KICKER_LINE_HEIGHT / 11.5,
+    paintHeightEm: CONTINUED_TITLE_KICKER_LINE_HEIGHT / 11.5,
+  }, overrides?.label);
+  const heading = solveChromeTextBox(article.headline, Math.min(blockWidth, 980), {
+    fontSize: config.pageChrome.continuedTitleFontSize,
+    fontFamily: SERIF_TEXT_FONT,
+    fontWeight: 900,
+    lineHeightEm: config.pageChrome.continuedTitleLineHeight / config.pageChrome.continuedTitleFontSize,
+    paintHeightEm: Math.max(1.08, config.pageChrome.continuedTitleLineHeight / config.pageChrome.continuedTitleFontSize),
+    marginBeforeEm: CONTINUED_TITLE_HEADING_MARGIN_TOP / config.pageChrome.continuedTitleFontSize,
+  }, overrides?.headline);
+  const chromeHeight = Math.ceil(
+    label.totalHeight +
+      heading.totalHeight +
+      CONTINUED_TITLE_PADDING_BOTTOM +
+      CONTINUED_TITLE_BORDER_BOTTOM +
+      CONTINUED_TITLE_MARGIN_BOTTOM,
   );
-  const headingHeight = Math.max(heading.height, config.pageChrome.continuedTitleLineHeight);
-  const totalHeight = Math.ceil(config.pageChrome.continuedTitleChromeHeight + headingHeight);
-  return { headingHeight, lineCount: heading.lineCount, totalHeight };
+  return {
+    label,
+    heading,
+    chromeHeight,
+    totalHeight: chromeHeight,
+  };
 }
 
 function measureWrappedTextBlock(
@@ -1368,6 +1546,7 @@ function measureWrappedTextBlock(
   font: string,
   maxWidth: number,
   lineHeight: number,
+  paintHeight = lineHeight,
 ): { lineCount: number; height: number } {
   const prepared = prepareWithSegments(text, font);
   let cursor = { ...EMPTY_CURSOR };
@@ -1380,7 +1559,7 @@ function measureWrappedTextBlock(
   }
   return {
     lineCount,
-    height: Math.ceil(lineCount * lineHeight),
+    height: getLineStackHeight(lineCount, lineHeight, paintHeight),
   };
 }
 
@@ -1695,18 +1874,28 @@ function getPullQuoteMetrics(
   text: string,
   width: number,
   config: LayoutConfig,
+  overrides?: ChromeTextSlotSpec,
 ): { height: number; fontSize: number; lineHeight: number } {
   const narrow = config.columnCount === 1;
   const fontSize = narrow ? 20 : 22;
-  const lineHeight = Math.round(fontSize * 1.12);
+  const box = solveChromeTextBox(text, width, {
+    fontSize,
+    fontFamily: SERIF_TEXT_FONT,
+    fontStyle: "italic",
+    lineHeightEm: 1.12,
+    paintHeightEm: 1.18,
+    minHeightEm: (narrow ? 104 : 108) / fontSize,
+    marginBeforeEm: PULL_QUOTE_VERTICAL_PADDING / 2 / fontSize,
+    marginAfterEm: PULL_QUOTE_VERTICAL_PADDING / 2 / fontSize,
+  }, overrides);
   const charsPerLine = Math.max(12, Math.floor(width / (fontSize * 0.52)));
   const lineCount = Math.ceil(text.length / charsPerLine);
   const height = clamp(
-    Math.ceil(lineCount * lineHeight + PULL_QUOTE_VERTICAL_PADDING),
+    Math.max(box.totalHeight, getLineStackHeight(lineCount, box.lineHeight, box.paintHeight) + box.marginBefore + box.marginAfter),
     narrow ? 104 : 108,
     narrow ? 180 : 168,
   );
-  return { height, fontSize, lineHeight };
+  return { height, fontSize, lineHeight: box.lineHeight };
 }
 
 function getPullQuoteY({
@@ -1765,6 +1954,10 @@ function getObjectPosition(asset: Pick<ArticleImageAsset, "layout">): string {
 
 function formatContinuationJumpLabel(article: ArticlePublicationItem, pageNumber: number): string {
   return `SEE ${getShortSlug(article) ?? "MORE"} ON ${formatSectionPage(pageNumber)}`;
+}
+
+function getArticleFrameLabel(blockSpec: ArticleFrameBlockSpec, article: ArticlePublicationItem): string {
+  return blockSpec.startCursor === "current" ? formatContinuationSourceLabel(article, 1) : article.section;
 }
 
 function formatContinuationSourceLabel(article: ArticlePublicationItem, sourcePageNumber: number): string {
