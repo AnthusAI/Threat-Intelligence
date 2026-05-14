@@ -218,6 +218,8 @@ export type StoryChromeMetrics = {
   jumpBorderTopHeight: number;
 };
 
+type FrontStoryRole = "feature" | "rail" | "standard";
+
 export type TextObstacle = {
   x: number;
   y: number;
@@ -412,7 +414,15 @@ function solveFrontArticleFrame(
   const span = Math.min(blockSpec.span?.preferred ?? 1, config.columnCount);
   const blockWidth = getSpanWidth(config, span);
   const preludeImage = createFrontPreludeImage(item, blockSpec, blockWidth);
-  const chrome = getStoryChromeMetrics(config, item, index, blockWidth, preludeImage?.height ?? 0);
+  const storyRole: FrontStoryRole =
+    blockSpec.role === "feature" || blockSpec.role === "primary"
+      ? "feature"
+      : blockSpec.role === "rail"
+        ? "rail"
+        : span >= 4 || preludeImage !== null
+          ? "feature"
+          : "standard";
+  const chrome = getStoryChromeMetrics(config, item, storyRole, blockWidth, preludeImage?.height ?? 0);
   const chromeHeight = getStoryChromeHeight(chrome);
   const jumpReserveHeight = getStoryJumpReserveHeight(chrome);
   const rowHeight = getFrontRowHeight(config, index);
@@ -421,7 +431,7 @@ function solveFrontArticleFrame(
     ? getLineLimitHeight(blockSpec.cutPolicy.maxBodyLines, config.lineHeight, config.linePaintHeight)
     : bodySlotHeight;
   const maxHeight = Math.min(bodySlotHeight, lineLimitHeight);
-  const imageWrap = !preludeImage && index === 0 ? getLeadImageWrap(item, blockWidth, config.lineHeight) : null;
+  const imageWrap = !preludeImage && storyRole === "feature" ? getLeadImageWrap(item, blockWidth, config.lineHeight) : null;
   const startCursor = { ...flow.currentCursor };
   const result = layoutTextLines({
     prepared: getPrepared(prepared, item, config.frontBodyFont),
@@ -1264,15 +1274,15 @@ function getSpanWidth(config: LayoutConfig, span: number): number {
 function getStoryChromeMetrics(
   config: LayoutConfig,
   article: ArticlePublicationItem,
-  articleIndex: number,
+  storyRole: FrontStoryRole,
   blockWidth: number,
   mediaPreludeHeight = 0,
 ): StoryChromeMetrics {
-  const lead = articleIndex === 0;
-  const headlineFontSize = getHeadlineFontSize(config, lead);
-  const headlineLineHeight = Math.ceil(headlineFontSize * (lead ? 0.96 : 1));
+  const feature = storyRole === "feature";
+  const headlineFontSize = getHeadlineFontSize(config, storyRole);
+  const headlineLineHeight = Math.ceil(headlineFontSize * (feature ? 0.96 : 1));
   const headline = measureWrappedTextBlock(article.headline, `${headlineFontSize}px Georgia, "Times New Roman", serif`, blockWidth, headlineLineHeight);
-  const deckFontSize = config.columnCount === 1 ? 15 : lead ? 16 : 14;
+  const deckFontSize = config.columnCount === 1 ? 15 : feature ? 16 : 14;
   const deckLineHeight = Math.ceil(deckFontSize * 1.25);
   const deck = measureWrappedTextBlock(article.deck, `italic ${deckFontSize}px Georgia, "Times New Roman", serif`, blockWidth, deckLineHeight);
   const bylineFontSize = 11;
@@ -1280,8 +1290,8 @@ function getStoryChromeMetrics(
   const byline = measureWrappedTextBlock(formatByline(article), `800 ${bylineFontSize}px Arial`, blockWidth, bylineLineHeight);
 
   return {
-    borderTopHeight: lead ? 6 : 2,
-    paddingTop: lead ? 12 : 10,
+    borderTopHeight: feature ? 5 : 2,
+    paddingTop: feature ? 11 : 10,
     mediaPreludeHeight,
     mediaPreludeMarginBottom: mediaPreludeHeight > 0 ? 10 : 0,
     labelLineHeight: 14,
@@ -1290,7 +1300,7 @@ function getStoryChromeMetrics(
     headlineHeight: headline.height,
     headlineLineCount: headline.lineCount,
     headlineMarginTop: 5,
-    headlineMarginBottom: lead ? 9 : 8,
+    headlineMarginBottom: feature ? 9 : 8,
     deckFontSize,
     deckLineHeight,
     deckHeight: deck.height,
@@ -1308,10 +1318,10 @@ function getStoryChromeMetrics(
   };
 }
 
-function getHeadlineFontSize(config: LayoutConfig, lead: boolean): number {
+function getHeadlineFontSize(config: LayoutConfig, storyRole: FrontStoryRole): number {
   const pageWidth = config.contentWidth + (config.columnCount < 2 ? 36 : 60);
   if (config.columnCount === 1) return clamp(pageWidth * 0.11, 27.2, 48);
-  if (lead) return clamp(pageWidth * 0.034, 24.8, 59.2);
+  if (storyRole === "feature") return clamp(pageWidth * 0.026, 23, 44);
   return clamp(pageWidth * 0.021, 20, 32.8);
 }
 

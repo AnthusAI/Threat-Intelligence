@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 900" role="img" aria-labelledby="title desc">
+  <title id="title">Predictability and agency continuum for AI systems</title>
+  <desc id="desc">A neutral newspaper-style chart mapping scripts, workflow engines, state-machine agents, policy-gated agents, and open-ended agents.</desc>
+  <rect width="1200" height="900" fill="#f4f1ea"/>
+  <rect x="74" y="64" width="1052" height="716" fill="#fbfaf7" stroke="#242424" stroke-width="3"/>
+
+  <g stroke="#d2ccc0" stroke-width="2">
+    <line x1="250" y1="64" x2="250" y2="780"/>
+    <line x1="426" y1="64" x2="426" y2="780"/>
+    <line x1="602" y1="64" x2="602" y2="780"/>
+    <line x1="778" y1="64" x2="778" y2="780"/>
+    <line x1="954" y1="64" x2="954" y2="780"/>
+    <line x1="74" y1="243" x2="1126" y2="243"/>
+    <line x1="74" y1="422" x2="1126" y2="422"/>
+    <line x1="74" y1="601" x2="1126" y2="601"/>
+  </g>
+
+  <g fill="#242424" font-family="Georgia, 'Times New Roman', serif">
+    <text x="600" y="44" text-anchor="middle" font-size="37" font-weight="700">The Agent Design Continuum</text>
+    <text x="600" y="842" text-anchor="middle" font-size="26" font-weight="700">Predictability -&gt; Agency</text>
+    <text x="-422" y="38" transform="rotate(-90)" text-anchor="middle" font-size="26" font-weight="700">Low consequence -&gt; High consequence</text>
+  </g>
+
+  <g fill="#6f6a61" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="700">
+    <text x="92" y="812">DETERMINISTIC</text>
+    <text x="974" y="812">OPEN ENDED</text>
+    <text x="90" y="92">HIGH STAKES</text>
+    <text x="90" y="758">LOW STAKES</text>
+  </g>
+
+  <g font-family="Arial, Helvetica, sans-serif" font-weight="700">
+    <g transform="translate(164 666)">
+      <rect x="-94" y="-42" width="188" height="84" rx="4" fill="#e3dfd6" stroke="#282828" stroke-width="2"/>
+      <text x="0" y="-7" text-anchor="middle" fill="#242424" font-size="24">Scripts</text>
+      <text x="0" y="23" text-anchor="middle" fill="#58534b" font-size="18">RPA</text>
+    </g>
+    <g transform="translate(358 538)">
+      <rect x="-120" y="-48" width="240" height="96" rx="4" fill="#d8ddd8" stroke="#282828" stroke-width="2"/>
+      <text x="0" y="-7" text-anchor="middle" fill="#242424" font-size="23">Workflow</text>
+      <text x="0" y="23" text-anchor="middle" fill="#58534b" font-size="18">engines</text>
+    </g>
+    <g transform="translate(602 390)">
+      <rect x="-146" y="-56" width="292" height="112" rx="4" fill="#d9e2e5" stroke="#282828" stroke-width="2"/>
+      <text x="0" y="-12" text-anchor="middle" fill="#242424" font-size="23">State-machine</text>
+      <text x="0" y="19" text-anchor="middle" fill="#242424" font-size="23">agents</text>
+      <text x="0" y="45" text-anchor="middle" fill="#58534b" font-size="16">bounded improvisation</text>
+    </g>
+    <g transform="translate(790 248)">
+      <rect x="-138" y="-52" width="276" height="104" rx="4" fill="#e8ddcf" stroke="#282828" stroke-width="2"/>
+      <text x="0" y="-8" text-anchor="middle" fill="#242424" font-size="23">Policy-gated</text>
+      <text x="0" y="22" text-anchor="middle" fill="#242424" font-size="23">agents</text>
+    </g>
+    <g transform="translate(970 142)">
+      <rect x="-128" y="-48" width="256" height="96" rx="4" fill="#e6d8d5" stroke="#282828" stroke-width="2"/>
+      <text x="0" y="-7" text-anchor="middle" fill="#242424" font-size="23">Open-ended</text>
+      <text x="0" y="23" text-anchor="middle" fill="#242424" font-size="23">agents</text>
+    </g>
+  </g>
+
+  <path d="M176 646 C328 560, 438 478, 602 390 S830 220, 970 142" fill="none" stroke="#242424" stroke-width="4" stroke-dasharray="12 12"/>
+  <circle cx="602" cy="390" r="9" fill="#242424"/>
+  <text x="602" y="304" text-anchor="middle" fill="#242424" font-family="Georgia, 'Times New Roman', serif" font-size="24" font-weight="700">Useful systems live in the middle</text>
+  <text x="602" y="806" text-anchor="middle" fill="#6f6a61" font-family="Arial, Helvetica, sans-serif" font-size="16">Placeholder chart for Papyrus technical journalism layout experiments</text>
+</svg>

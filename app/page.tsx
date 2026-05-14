@@ -23,7 +23,7 @@ async function loadHomeContent(scenarioId: string | null): Promise<EditionConten
   try {
     return await contentRepository.loadEditionContent({ scenarioId });
   } catch (error) {
-    if (scenarioId || !isGraphQLContentSource()) throw error;
+    if (scenarioId || !isGraphQLContentSource() || !isMissingGraphQLEditionError(error)) throw error;
     return {
       id: "empty-graphql-edition",
       source: "graphql",
@@ -31,9 +31,13 @@ async function loadHomeContent(scenarioId: string | null): Promise<EditionConten
       editionDate: new Date().toISOString().slice(0, 10),
       description: "No published GraphQL edition is available yet.",
       items: [],
-      layoutPlan: createDefaultEditionLayoutPlan([]),
+      layoutPlan: createDefaultEditionLayoutPlan(["empty-edition-placeholder"]),
     };
   }
+}
+
+function isMissingGraphQLEditionError(error: unknown): boolean {
+  return error instanceof Error && error.message.includes("No published GraphQL edition found");
 }
 
 function EmptyGraphQLEdition({ content }: { content: EditionContent }) {

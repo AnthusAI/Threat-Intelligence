@@ -335,6 +335,7 @@ export function createDefaultEditionLayoutPlan(itemIds: string[]): EditionLayout
     itemId,
     flowKey: itemId,
     startCursor: "beginning" as const,
+    role: getDefaultFrontRole(index),
     span: getDefaultFrontSpan(index),
     media: index === 1
       ? [
@@ -647,6 +648,12 @@ function requireKnownItem(itemId: string, itemsBySlug: Map<string, PublicationIt
 function getDefaultFrontSpan(index: number): ResponsiveSpanPolicy {
   const preferred = [1, 4, 1, 2, 2, 2][index] ?? 1;
   return { min: 1, preferred, max: preferred };
+}
+
+function getDefaultFrontRole(index: number): string {
+  if (index === 1) return "feature";
+  if (index === 0 || index === 2) return "rail";
+  return "standard";
 }
 
 function getDefaultFrontItemOrder(itemIds: string[]): string[] {
