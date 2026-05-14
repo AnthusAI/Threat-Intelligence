@@ -196,6 +196,7 @@ async function buildArticleDiff(client, article, editionConfig, index) {
     status: "published",
     typeStatus: "article#published",
     slug: article.slug,
+    shortSlug: article.shortSlug ?? null,
     section: article.section,
     sectionStatus: `${sectionSlug}#published`,
     title: article.headline,

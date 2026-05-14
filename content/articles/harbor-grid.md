@@ -1,5 +1,6 @@
 ---
 slug: harbor-grid
+shortSlug: GRID
 section: Infrastructure
 byline: Mara Ellison
 dateline: PORT KESWICK

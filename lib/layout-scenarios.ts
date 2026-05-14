@@ -1,6 +1,7 @@
 import { type Article, articles, editionDate } from "./articles";
 import type { EditionContent } from "./content-types";
 import { createDefaultEditionLayoutPlan } from "./layout-plan";
+import { articleToPublicationItem, cloneArticle } from "./publication-items";
 
 export type LayoutScenario = EditionContent & {
   source: "scenario";
@@ -18,7 +19,7 @@ export const layoutScenarios: LayoutScenario[] = [
     scenarioId: DEFAULT_LAYOUT_SCENARIO_ID,
     description: "The default Papyrus fixture edition.",
     layoutPlan: createDefaultEditionLayoutPlan(articles.map((article) => article.slug)),
-    articles: cloneArticles(articles),
+    items: cloneArticles(articles).map(articleToPublicationItem),
   },
   {
     id: "shared-blank-column-pressure",
@@ -29,7 +30,7 @@ export const layoutScenarios: LayoutScenario[] = [
     description:
       "Shorter shared continuation tails with images and pull quotes, used to prove that empty columns are repaired with solved furniture.",
     layoutPlan: createDefaultEditionLayoutPlan(articles.map((article) => article.slug)),
-    articles: createSharedBlankColumnPressureArticles(),
+    items: createSharedBlankColumnPressureArticles().map(articleToPublicationItem),
   },
   {
     id: "shared-continuation-no-pull-quotes",
@@ -40,7 +41,7 @@ export const layoutScenarios: LayoutScenario[] = [
     description:
       "The shared continuation page with editorial pull quotes removed, used to prove pull quotes are optional display furniture.",
     layoutPlan: createDefaultEditionLayoutPlan(articles.map((article) => article.slug)),
-    articles: createNoPullQuoteArticles(),
+    items: createNoPullQuoteArticles().map(articleToPublicationItem),
   },
 ];
 
@@ -93,18 +94,5 @@ function createNoPullQuoteArticles(): Article[] {
 }
 
 function cloneArticles(source: Article[]): Article[] {
-  return source.map((article) => ({
-    ...article,
-    image: {
-      ...article.image,
-      layout: article.image.layout ? { ...article.image.layout } : undefined,
-    },
-    assets: article.assets?.map((asset) => ({
-      ...asset,
-      layout: asset.layout ? { ...asset.layout } : undefined,
-      roles: asset.roles ? [...asset.roles] : undefined,
-    })),
-    pullQuotes: article.pullQuotes ? [...article.pullQuotes] : undefined,
-    body: [...article.body],
-  }));
+  return source.map(cloneArticle);
 }

@@ -10,8 +10,9 @@ word on planned inside pages. Continuation pages can combine more than one
 article, and solver-owned editorial furniture such as images and pull quotes
 changes how much space is available for copy.
 
-Pretext is the text-fit oracle. Papyrus owns the edition plan, templates,
-routing, page geometry, scoring, continuation labels, and React rendering.
+Pretext is the text-fit oracle. Papyrus owns the edition layout plan,
+responsive grids, page regions, block geometry, scoring, continuation labels,
+and React rendering.
 
 ## Credentials
 
@@ -48,9 +49,12 @@ something more complex:
   copy;
 - keep the whole layout responsive.
 
-Papyrus treats this as a deterministic layout-solving problem. It uses named
-newspaper recipes rather than a fully open-ended optimizer, then asks Pretext to
-measure exactly which lines fit inside each solved block.
+Papyrus treats this as a deterministic layout-solving problem. It uses a
+validated composable layout language rather than a fully open-ended optimizer:
+an edition has pages, pages have regions, regions have blocks, and blocks can
+own local grids and furniture. The solver turns those editorial instructions
+into concrete geometry, then asks Pretext to measure exactly which lines fit
+inside each solved block.
 
 ## Solver vs. Renderer
 
@@ -79,8 +83,9 @@ measure text around it.
 Development editorial articles live in `content/articles/*.md`. These files use
 YAML frontmatter for metadata and Markdown headings for editorial structure:
 the first `#` heading becomes the headline, the first `##` heading becomes the
-deck, and the remaining paragraph blocks become the article body. This folder is
-for development content only.
+deck, and the remaining paragraph blocks become the article body. Articles may
+also define a `shortSlug` such as `GRID` or `READING` for newspaper-style
+continuation labels. This folder is for development content only.
 
 Fixture articles still live in `lib/articles.ts`. They are the stable base for
 tests and reproducible layout scenarios. Edge-case BDD fixture variants live in
@@ -88,45 +93,50 @@ tests and reproducible layout scenarios. Edge-case BDD fixture variants live in
 
 The app does not read any store directly from UI components. Content flows
 through a `ContentRepository` boundary, which returns normalized
-`EditionContent`: edition metadata plus articles. In development, the default
-front page loads Markdown content. URLs with `?scenario=<id>` always load named
-scenario fixture content. Production/build defaults to fixture content unless
-`PAPYRUS_CONTENT_SOURCE` is set. `PAPYRUS_CONTENT_SOURCE=fixture|markdown|graphql`
-can override the default source.
+`EditionContent`: edition metadata, generic publication items, and a required
+layout plan. In development, the default front page loads Markdown content.
+URLs with `?scenario=<id>` always load named scenario fixture content.
+Production/build defaults to fixture content unless `PAPYRUS_CONTENT_SOURCE` is
+set. `PAPYRUS_CONTENT_SOURCE=fixture|markdown|graphql` can override the default
+source.
 
-The GraphQL repository maps Amplify Data records into the same `Article`,
-`ArticleImageAsset`, and `EditionContent` shape before layout starts. Storage
-media is stored as S3 paths on `MediaAsset` records, then resolved into signed
-display URLs at request time.
+The GraphQL repository maps Amplify Data records into the same
+`PublicationItem`, `ArticleImageAsset`, and `EditionContent` shape before
+layout starts. Storage media is stored as S3 paths on `MediaAsset` records,
+then resolved into signed display URLs at request time.
 
 `buildNewspaperLayout` in `lib/newspaper-layout.ts` builds the active edition
-from normalized content, the edition layout plan, the current page width, and
-viewport height. It creates article flows, solves the front page, then solves
-planned continuation pages.
+from normalized publication items, the edition layout plan, the current page
+width, and viewport height. It creates article flows, solves each page region,
+solves each block, and returns generic solved pages for React to render.
 
 Each article flow keeps a cursor into prepared Pretext text. When a block lays
 out text, it consumes from the current cursor and returns a new cursor. That
 range is recorded as a `PlacedTextRange`, which is the source of truth for
 continuations.
 
-The front page uses solver-owned story boxes. The solver measures each story's
-label, headline, deck, byline, body slot, and continuation jump area so stories
-in the same row share the same rendered height.
+The front page is now just a composable page using the `front.mosaic` preset
+with `articleFrame` blocks. Those blocks still use solver-owned story boxes:
+the solver measures each story's label, headline, deck, byline, body slot, and
+continuation jump area so stories in the same row share the same rendered
+height.
 
 Continuation pages are planned before layout starts. The plan lives with the
-edition as a versioned `layoutPlan`: local development stores it in
-`content/edition.json`, and Amplify stores it on the `Edition` record. It names
-front-page cut policies, planned continuation pages, section roles, split
-variants, and ordered furniture template preferences. Page labels such as
-`Continued on page 3` come from that plan, not from whatever page happens to be
-generated next.
+edition as `layoutPlan`: local development stores it in `content/edition.json`,
+and Amplify stores it on the `Edition` record. It names page presets, regions,
+blocks, local grid preferences, cut policies, jump targets, media placement
+rules, pull-quote options, and content requirements. Page labels such as
+`SEE READING ON A3` come from that plan, not from whatever page happens to be
+generated next. Continuation headings use the article's `shortSlug` when it
+exists, as in `READING FROM A1`; without one they fall back to `FROM A1`.
 
-Adaptive continuation pages try a bounded set of reusable furniture templates.
-The solver can inset aspect-preserving images into one or more columns, place or
-omit optional pull quotes, change text column heights, and then use Pretext to
-fit the remaining copy around the resulting obstacles. The best valid variant is
-chosen deterministically. The stored plan controls template preference order;
-TypeScript remains the source of truth for what each template means.
+Article blocks try a bounded set of responsive local-grid and furniture
+variants. The solver can inset aspect-preserving images into one or more
+columns, place or omit optional pull quotes, change text column heights, and
+then use Pretext to fit the remaining copy around the resulting obstacles. The
+best valid variant is chosen deterministically. The stored plan controls
+placement intent and constraints; TypeScript remains the source of truth for
+how those constraints are solved.
 
 `components/newspaper.tsx` renders the solved layout. It does not decide where
 text cuts, how tall pages are, or which image variant wins. It receives placed
@@ -162,12 +172,12 @@ Storage and creates the related CMS records. It does not create a CMS UI.
 
 ## Current Edition
 
-- Page 1 is a front-page teaser grid with six fixture articles.
-- Page 2 is a photo continuation for `Harbor Microgrids Take Shape Before the
-  Summer Peak`, preferring a centered two-column image inset on desktop.
-- Page 3 is a shared continuation page for `Reading Labs Replace Remediation
-  With Daily Practice` and `Old Market Hall Finds a Second Life as a Food
-  Factory`, using alternating column image insets when space allows.
+- Page 1 is a `front.mosaic` page with six `articleFrame` teaser blocks.
+- Page 2 is a stacked editorial page containing a Harbor `article.mediaInset`
+  block with responsive image placement.
+- Page 3 is a stacked editorial page containing Reading Labs and Market Hall
+  `article.mediaInset` blocks, each solved with its own local grid, image
+  obstacles, and optional pull quote.
 - Direct article routes remain available at `/articles/[slug]`.
 
 ## Commands
@@ -257,13 +267,13 @@ inside the feature file.
 - `content/articles/` contains Markdown development articles. Frontmatter
   supplies metadata; `#` and `##` headings supply headline and deck.
 - `content/edition.json` defines the local editorial edition metadata, article
-  ordering, and versioned layout plan used by Markdown preview, seeding, and
+  ordering, and composable layout plan used by Markdown preview, seeding, and
   the authoring CLI.
 - `lib/content-repository.ts` defines the current fixture/scenario repository
   and the source selector for fixture, Markdown, and GraphQL-backed content.
 - `lib/graphql-content-repository.ts` loads Amplify Data records, resolves
-  Storage paths to signed URLs, and normalizes cloud content into `Article`
-  objects.
+  Storage paths to signed URLs, and normalizes cloud content into
+  `PublicationItem` objects.
 - `amplify/` defines the Gen2 Auth, Data, Storage, and seed resources for the
   cloud content backend.
 - `scripts/content-cli.cjs` is the JWT-backed content authoring CLI for
@@ -271,11 +281,16 @@ inside the feature file.
 - `lib/markdown-content-repository.ts` parses Markdown development content with
   `gray-matter` and returns normalized `Article` objects.
 - `lib/content-types.ts` defines `EditionContent` and `ContentRepository`.
+- `lib/publication-items.ts` defines generic publication items and article
+  adapters used by the solver and direct article routes.
 - `lib/layout-scenarios.ts` contains reproducible layout scenario fixture sets
   used by the app and BDD tests.
-- `lib/newspaper-layout.ts` owns the Pretext layout engine, edition plan,
-  recipes, solver variants, placed text ranges, adaptive images, and solved page
-  heights.
+- `lib/layout-plan.ts` defines and validates the Zod-backed composable layout
+  language: pages, regions, blocks, responsive spans, media placement, pull
+  quote placement, and content requirements.
+- `lib/newspaper-layout.ts` owns the Pretext layout engine, responsive page
+  grids, region/block solving, placed text ranges, adaptive furniture, and
+  solved page heights.
 - `components/newspaper.tsx` renders the solved newspaper, one-page flipper,
   measured text lines, continuation photos, and direct article links.
 - `features/` contains executable Gherkin scenarios and Playwright-backed step

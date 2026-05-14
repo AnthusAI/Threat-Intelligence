@@ -31,7 +31,8 @@
     "gray-matter": "^4.0.3",
     "next": "^15.5.18",
     "react": "^19.2.6",
-    "react-dom": "^19.2.6"
+    "react-dom": "^19.2.6",
+    "zod": "^3.25.17"
   },
   "devDependencies": {
     "@aws-amplify/backend": "^1.22.0",

@@ -4,6 +4,7 @@ import { graphqlContentRepository } from "./graphql-content-repository";
 import { createDefaultEditionLayoutPlan } from "./layout-plan";
 import { DEFAULT_LAYOUT_SCENARIO_ID, getLayoutScenario } from "./layout-scenarios";
 import { markdownContentRepository } from "./markdown-content-repository";
+import { articleToPublicationItem, cloneArticle, publicationItemToArticle } from "./publication-items";
 
 export const fixtureContentRepository: ContentRepository = {
   loadEditionContent({ scenarioId } = {}) {
@@ -11,10 +12,14 @@ export const fixtureContentRepository: ContentRepository = {
     return getDefaultEditionContent();
   },
   getArticle(slug: string) {
-    return getDefaultEditionContent().articles.find((article) => article.slug === slug);
+    const item = getDefaultEditionContent().items.find((candidate) => candidate.slug === slug);
+    return item ? publicationItemToArticle(item) : undefined;
   },
   listArticleSlugs() {
-    return getDefaultEditionContent().articles.map((article) => article.slug);
+    return getDefaultEditionContent().items
+      .map((item) => publicationItemToArticle(item))
+      .filter((article): article is Article => article !== undefined)
+      .map((article) => article.slug);
   },
 };
 
@@ -58,23 +63,10 @@ function getDefaultEditionContent(): EditionContent {
     scenarioId: DEFAULT_LAYOUT_SCENARIO_ID,
     description: "The default Papyrus fixture edition.",
     layoutPlan: createDefaultEditionLayoutPlan(articles.map((article) => article.slug)),
-    articles: cloneArticles(articles),
+    items: cloneArticles(articles).map(articleToPublicationItem),
   };
 }
 
 function cloneArticles(source: Article[]): Article[] {
-  return source.map((article) => ({
-    ...article,
-    image: {
-      ...article.image,
-      layout: article.image.layout ? { ...article.image.layout } : undefined,
-    },
-    assets: article.assets?.map((asset) => ({
-      ...asset,
-      layout: asset.layout ? { ...asset.layout } : undefined,
-      roles: asset.roles ? [...asset.roles] : undefined,
-    })),
-    pullQuotes: article.pullQuotes ? [...article.pullQuotes] : undefined,
-    body: [...article.body],
-  }));
+  return source.map(cloneArticle);
 }

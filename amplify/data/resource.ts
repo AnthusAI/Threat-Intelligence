@@ -16,6 +16,7 @@ const schema = a.schema({
       status: a.string().required(),
       typeStatus: a.string().required(),
       slug: a.string().required(),
+      shortSlug: a.string(),
       section: a.string(),
       sectionStatus: a.string(),
       title: a.string(),

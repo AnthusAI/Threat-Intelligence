@@ -5,6 +5,7 @@ import type { Article, ArticleImage, ArticleImageAsset, ArticleImageLayout } fro
 import { getAmplifyServerRuntime } from "./amplify-server-runtime";
 import type { ContentRepository, EditionContent } from "./content-types";
 import { normalizeEditionLayoutPlan } from "./layout-plan";
+import { articleToPublicationItem } from "./publication-items";
 
 const AUTH_MODE = "apiKey";
 const DEFAULT_EDITION_SLUG = "current";
@@ -46,6 +47,7 @@ type GraphQLItem = {
   type: string;
   status: string;
   slug: string;
+  shortSlug?: string | null;
   section?: string | null;
   title?: string | null;
   headline?: string | null;
@@ -109,7 +111,7 @@ export const graphqlContentRepository: ContentRepository = {
       editionDate: edition.editionDate,
       description: edition.description ?? "GraphQL content loaded from Amplify Data.",
       layoutPlan: normalizeEditionLayoutPlan(edition.layoutPlan, "Edition.layoutPlan"),
-      articles: articles.filter((article): article is Article => article !== null),
+      items: articles.filter((article): article is Article => article !== null).map(articleToPublicationItem),
     };
   },
 
@@ -214,6 +216,7 @@ async function normalizeArticle(item: GraphQLItem, mediaAssets: GraphQLMediaAsse
 
   return {
     slug: item.slug,
+    shortSlug: normalizeShortSlug(item.shortSlug),
     section: item.section ?? "News",
     headline: item.headline ?? item.title ?? item.slug,
     deck: item.deck ?? "",
@@ -310,6 +313,11 @@ function parseImageRoles(role: string | null | undefined): ArticleImageAsset["ro
 
 function compactStrings(values: Array<string | null> | null | undefined): string[] {
   return (values ?? []).filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+}
+
+function normalizeShortSlug(value: string | null | undefined): string | undefined {
+  const shortSlug = value?.trim().toUpperCase();
+  return shortSlug || undefined;
 }
 
 function assertNoGraphQLErrors(errors: unknown[] | null | undefined): void {

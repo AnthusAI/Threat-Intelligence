@@ -1,6 +1,7 @@
 import { Newspaper } from "../components/newspaper";
 import { contentRepository, getScenarioIdParam, isGraphQLContentSource } from "../lib/content-repository";
 import type { EditionContent } from "../lib/content-types";
+import { createDefaultEditionLayoutPlan } from "../lib/layout-plan";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,7 @@ export default async function Home({ searchParams }: HomePageProps) {
   const resolvedSearchParams = await searchParams;
   const scenarioId = getScenarioIdParam(resolvedSearchParams?.scenario);
   const content = await loadHomeContent(scenarioId);
-  if (content.articles.length === 0) return <EmptyGraphQLEdition content={content} />;
+  if (content.items.length === 0) return <EmptyGraphQLEdition content={content} />;
   return <Newspaper content={content} />;
 }
 
@@ -29,7 +30,8 @@ async function loadHomeContent(scenarioId: string | null): Promise<EditionConten
       title: "Papyrus",
       editionDate: new Date().toISOString().slice(0, 10),
       description: "No published GraphQL edition is available yet.",
-      articles: [],
+      items: [],
+      layoutPlan: createDefaultEditionLayoutPlan([]),
     };
   }
 }

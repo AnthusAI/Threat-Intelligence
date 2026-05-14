@@ -8,7 +8,6 @@ import type { Schema } from "../data/resource";
 import { getArticleImageAssets, type Article, type ArticleImageAsset } from "../../lib/articles";
 import { getAmplifyServerRuntime } from "../../lib/amplify-server-runtime";
 import { loadLocalEditionConfig, orderEditionSlugs } from "../../lib/edition-config";
-import { createDefaultEditionLayoutPlan } from "../../lib/layout-plan";
 import { loadMarkdownArticles } from "../../lib/markdown-content-repository";
 
 const EDITOR_GROUP = "editor";
@@ -22,8 +21,6 @@ async function main() {
 
   try {
     const articles = orderArticles(loadMarkdownArticles(), editionConfig.articleOrder);
-    const layoutPlan =
-      editionConfig.layoutPlan ?? createDefaultEditionLayoutPlan(articles.map((article) => article.slug));
     await upsert("Edition", {
       id: editionConfig.id,
       slug: editionConfig.slug,
@@ -31,7 +28,7 @@ async function main() {
       status: "published",
       editionDate: editionConfig.publishDate,
       description: editionConfig.description,
-      layoutPlan,
+      layoutPlan: editionConfig.layoutPlan,
       metadata: {
         source: "markdown-seed",
       },
@@ -90,6 +87,7 @@ async function seedArticle(article: Article, index: number, editionConfig: Retur
     status: "published",
     typeStatus: "article#published",
     slug: article.slug,
+    shortSlug: article.shortSlug,
     section: article.section,
     sectionStatus: `${sectionSlug}#published`,
     title: article.headline,

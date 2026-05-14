@@ -28,6 +28,7 @@ export type ArticleAsset = ArticleImageAsset;
 
 export type Article = {
   slug: string;
+  shortSlug?: string;
   section: string;
   headline: string;
   deck: string;
@@ -44,6 +45,7 @@ export const editionDate = "Wednesday, May 13, 2026";
 export const articles: Article[] = [
   {
     slug: "harbor-grid",
+    shortSlug: "GRID",
     section: "Infrastructure",
     headline: "Harbor Microgrids Take Shape Before the Summer Peak",
     deck:
@@ -78,6 +80,7 @@ export const articles: Article[] = [
   },
   {
     slug: "schools-reading-lab",
+    shortSlug: "READING",
     section: "Education",
     headline: "Reading Labs Replace Remediation With Daily Practice",
     deck:
@@ -111,6 +114,7 @@ export const articles: Article[] = [
   },
   {
     slug: "market-hall",
+    shortSlug: "MARKET",
     section: "Business",
     headline: "Old Market Hall Finds a Second Life as a Food Factory",
     deck:

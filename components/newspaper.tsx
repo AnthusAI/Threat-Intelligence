@@ -8,10 +8,13 @@ import type { EditionContent } from "../lib/content-types";
 import { shouldBypassImageOptimization } from "../lib/image-url";
 import {
   buildNewspaperLayout,
-  type ContinuationPage,
-  type ContinuationSection,
-  type FrontBlock,
   type NewspaperLayout,
+  type SolvedBlock,
+  type SolvedFurniture,
+  type SolvedImageFurniture,
+  type SolvedPage,
+  type SolvedPullQuoteFurniture,
+  type SolvedRegion,
   type TextLine,
 } from "../lib/newspaper-layout";
 
@@ -73,8 +76,8 @@ export function Newspaper({ content }: { content: EditionContent }) {
   }, []);
 
   const layout = useMemo(
-    () => (metrics === null ? null : buildNewspaperLayout(content.articles, metrics.pageWidth, metrics.viewportHeight, content.layoutPlan)),
-    [metrics, content.articles, content.layoutPlan],
+    () => (metrics === null ? null : buildNewspaperLayout(content.items, metrics.pageWidth, metrics.viewportHeight, content.layoutPlan)),
+    [metrics, content.items, content.layoutPlan],
   );
   const totalPages = layout ? layout.pages.length : 0;
   const visiblePage = totalPages > 0 ? Math.min(currentPage, totalPages) : currentPage;
@@ -93,9 +96,7 @@ export function Newspaper({ content }: { content: EditionContent }) {
     papyrusWindow.__PAPYRUS_LAYOUT__ = layout;
     papyrusWindow.__PAPYRUS_SCENARIO__ = content.scenarioId;
     return () => {
-      if (papyrusWindow.__PAPYRUS_LAYOUT__ === layout) {
-        delete papyrusWindow.__PAPYRUS_LAYOUT__;
-      }
+      if (papyrusWindow.__PAPYRUS_LAYOUT__ === layout) delete papyrusWindow.__PAPYRUS_LAYOUT__;
     };
   }, [content.scenarioId, layout]);
 
@@ -110,17 +111,11 @@ export function Newspaper({ content }: { content: EditionContent }) {
     [totalPages, visiblePage],
   );
 
-  const turnRelative = useCallback(
-    (direction: -1 | 1) => {
-      turnToPage(visiblePage + direction);
-    },
-    [turnToPage, visiblePage],
-  );
+  const turnRelative = useCallback((direction: -1 | 1) => turnToPage(visiblePage + direction), [turnToPage, visiblePage]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (isEditableEventTarget(event.target)) return;
-
       if (event.key === "ArrowLeft") {
         event.preventDefault();
         turnRelative(-1);
@@ -129,7 +124,6 @@ export function Newspaper({ content }: { content: EditionContent }) {
         turnRelative(1);
       }
     };
-
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [turnRelative]);
@@ -139,37 +133,21 @@ export function Newspaper({ content }: { content: EditionContent }) {
       swipeStartRef.current = null;
       return;
     }
-
     const touch = event.touches[0];
     if (!touch) return;
-
-    swipeStartRef.current = {
-      x: touch.clientX,
-      y: touch.clientY,
-      id: touch.identifier,
-    };
+    swipeStartRef.current = { x: touch.clientX, y: touch.clientY, id: touch.identifier };
   };
 
   const handleFlipbookTouchEnd = (event: ReactTouchEvent<HTMLDivElement>) => {
     const swipeStart = swipeStartRef.current;
     swipeStartRef.current = null;
     if (!swipeStart) return;
-
-    const changedTouches = Array.from(event.changedTouches);
-    const touch = changedTouches.find((candidate) => candidate.identifier === swipeStart.id) ?? changedTouches[0];
+    const touch = Array.from(event.changedTouches).find((candidate) => candidate.identifier === swipeStart.id) ?? event.changedTouches[0];
     if (!touch) return;
-
     const deltaX = touch.clientX - swipeStart.x;
     const deltaY = touch.clientY - swipeStart.y;
-    const absDeltaX = Math.abs(deltaX);
-    const absDeltaY = Math.abs(deltaY);
-
-    if (absDeltaX < SWIPE_MIN_DISTANCE || absDeltaX <= absDeltaY) return;
+    if (Math.abs(deltaX) < SWIPE_MIN_DISTANCE || Math.abs(deltaX) <= Math.abs(deltaY)) return;
     turnRelative(deltaX < 0 ? 1 : -1);
-  };
-
-  const handleFlipbookTouchCancel = () => {
-    swipeStartRef.current = null;
   };
 
   return (
@@ -177,22 +155,11 @@ export function Newspaper({ content }: { content: EditionContent }) {
       className="site-shell"
       data-content-source={content.source}
       data-scenario-id={content.scenarioId}
-      data-layout-plan-version={content.layoutPlan?.version}
+      data-layout-plan-front-template={content.layoutPlan.pages[0]?.presetId}
       ref={shellRef}
     >
       {!layout ? (
-        <section className="paper-page-content paper-page-content--front paper-page-content--loading" aria-label="Loading edition">
-          <header className="masthead">
-            <div className="masthead__rule" />
-            <p className="masthead__kicker">Anthus AI Solutions</p>
-            <h1>Papyrus</h1>
-            <div className="masthead__meta">
-              <span>{content.editionDate}</span>
-              <span>Vol. 1, No. 1</span>
-              <span>Measuring type</span>
-            </div>
-          </header>
-        </section>
+        <LoadingPage content={content} />
       ) : (
         <>
           <nav className="flipbook-controls" aria-label="Edition pages">
@@ -209,151 +176,24 @@ export function Newspaper({ content }: { content: EditionContent }) {
 
           <div
             className={`flipbook-shell flipbook-shell--turning-${turnDirection}`}
-            onTouchCancel={handleFlipbookTouchCancel}
+            onTouchCancel={() => {
+              swipeStartRef.current = null;
+            }}
             onTouchEnd={handleFlipbookTouchEnd}
             onTouchStart={handleFlipbookTouchStart}
             style={getFlipbookStyle(layout, metrics, shellHeight)}
           >
             <div className="flipbook" key={`${metrics?.bookWidth}-${metrics?.viewportHeight}-${totalPages}`}>
-              <div
-                className={`${getSheetClassName(1, visiblePage, previousPage, turnDirection)} paper-page--front`}
-                data-page-kind="front"
-                id="page-1"
-              >
-                <section
-                  className="paper-page-content paper-page-content--front"
-                  aria-labelledby="edition-title"
-                  style={getPageStyle(layout, 1)}
-                >
-                  <header className="masthead">
-                    <div className="masthead__rule" />
-                    <p className="masthead__kicker">Anthus AI Solutions</p>
-                    <h1 id="edition-title">Papyrus</h1>
-                    <div className="masthead__meta">
-                      <span>{content.editionDate}</span>
-                      <span>Vol. 1, No. 1</span>
-                      <span>Cybernetic Edition</span>
-                    </div>
-                  </header>
-
-                  <div
-                    className="front-grid"
-                    style={
-                      {
-                        "--paper-columns": layout.columnCount,
-                        "--paper-gap": `${layout.gap}px`,
-                      } as CSSProperties
-                    }
-                  >
-                    {layout.frontBlocks.map((block, index) => (
-                      <article
-                        className={`front-story ${index === 0 ? "front-story--lead" : ""}`}
-                        data-article-id={block.article.slug}
-                        data-block-id={block.blockId}
-                        key={block.article.slug}
-                        style={getFrontStoryStyle(block)}
-                      >
-                        <div className="story-label">{block.article.section}</div>
-                        <h2>
-                          <Link href={`/articles/${block.article.slug}`}>{block.article.headline}</Link>
-                        </h2>
-                        <p className="story-deck">{block.article.deck}</p>
-                        <div className="story-byline">{formatStoryByline(block)}</div>
-                        <div className="story-measure" style={{ height: block.bodySlotHeight + STORY_MEASURE_CHROME }}>
-                          {block.imageWrap ? (
-                            <figure
-                              className="lead-photo"
-                              style={{
-                                left: block.imageWrap.x,
-                                top: block.imageWrap.y,
-                                width: block.imageWrap.width,
-                                height: block.imageWrap.height,
-                              }}
-                            >
-                              <Image
-                                src={block.article.image.src}
-                                alt={block.article.image.alt}
-                                fill
-                                sizes="(max-width: 719px) 100vw, 40vw"
-                                priority
-                                unoptimized={shouldBypassImageOptimization(block.article.image.src)}
-                              />
-                              <figcaption>{block.article.image.credit}</figcaption>
-                            </figure>
-                          ) : null}
-                          <MeasuredLines lines={block.lines} />
-                        </div>
-                        <div className="jump-line">
-                          {block.pageNumber ? (
-                            <button type="button" onClick={() => turnToPage(block.pageNumber ?? 1)}>
-                              Continued on page {block.pageNumber}
-                            </button>
-                          ) : (
-                            <Link href={`/articles/${block.article.slug}`}>Read the full article</Link>
-                          )}
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                </section>
-              </div>
-
-              {layout.continuationPages.map((page) => (
+              {layout.pages.map((page) => (
                 <div
-                  className={getSheetClassName(page.pageNumber, visiblePage, previousPage, turnDirection)}
+                  className={`${getSheetClassName(page.pageNumber, visiblePage, previousPage, turnDirection)} ${
+                    page.kind === "front" ? "paper-page--front" : ""
+                  }`}
                   data-page-kind={page.kind}
                   id={`page-${page.pageNumber}`}
                   key={page.id}
                 >
-                  <section
-                    className="paper-page-content paper-page-content--inside"
-                    data-page-kind={page.kind}
-                    data-recipe-id={page.recipeId}
-                    style={getPageStyle(layout, page.pageNumber)}
-                  >
-                    <header className="inside-header">
-                      <span>Page {page.pageNumber}</span>
-                      <span>{formatContinuationSections(page)}</span>
-                      <span>{formatContinuationPageKind(page)}</span>
-                    </header>
-                    <div className={`continuation-sections continuation-sections--${page.kind}`}>
-                      {page.sections.map((section) => (
-                        <article
-                          className={`continuation-section ${section.image ? "continuation-section--has-photo" : ""}`}
-                          data-article-id={section.article.slug}
-                          data-block-id={section.blockId}
-                          key={section.id}
-                          style={getContinuationSectionStyle(layout, section)}
-                        >
-                          <div className="continued-title">
-                            <p>Continued from Page One</p>
-                            <h2>
-                              <Link href={`/articles/${section.article.slug}`}>{section.article.headline}</Link>
-                            </h2>
-                          </div>
-                          <div className="continuation-body">
-                            <div
-                              className="continuation-grid"
-                              style={
-                                {
-                                  "--paper-columns": section.columns.length,
-                                  "--paper-gap": `${layout.gap}px`,
-                                } as CSSProperties
-                              }
-                            >
-                              {section.columns.map((column, columnIndex) => (
-                                <div className="continuation-column" key={columnIndex}>
-                                  <MeasuredLines lines={column} />
-                                </div>
-                              ))}
-                            </div>
-                            {section.image ? <ContinuationPhotoFigure section={section} /> : null}
-                            {section.pullQuote ? <ContinuationPullQuoteAside section={section} /> : null}
-                          </div>
-                        </article>
-                      ))}
-                    </div>
-                  </section>
+                  <SolvedPageView content={content} layout={layout} page={page} turnToPage={turnToPage} />
                 </div>
               ))}
             </div>
@@ -361,6 +201,281 @@ export function Newspaper({ content }: { content: EditionContent }) {
         </>
       )}
     </main>
+  );
+}
+
+function LoadingPage({ content }: { content: EditionContent }) {
+  return (
+    <section className="paper-page-content paper-page-content--front paper-page-content--loading" aria-label="Loading edition">
+      <header className="masthead">
+        <div className="masthead__rule" />
+        <p className="masthead__kicker">Anthus AI Solutions</p>
+        <h1>Papyrus</h1>
+        <div className="masthead__meta">
+          <span>{content.editionDate}</span>
+          <span>Vol. 1, No. 1</span>
+          <span>Measuring type</span>
+        </div>
+      </header>
+    </section>
+  );
+}
+
+function SolvedPageView({
+  content,
+  layout,
+  page,
+  turnToPage,
+}: {
+  content: EditionContent;
+  layout: NewspaperLayout;
+  page: SolvedPage;
+  turnToPage: (pageNumber: number) => void;
+}) {
+  const front = page.kind === "front";
+  return (
+    <section
+      className={`paper-page-content ${front ? "paper-page-content--front" : "paper-page-content--inside"}`}
+      data-page-kind={page.kind}
+      data-page-preset-id={page.presetId}
+      aria-labelledby={front ? "edition-title" : undefined}
+      style={getPageStyle(layout, page.pageNumber)}
+    >
+      {front ? (
+        <header className="masthead">
+          <div className="masthead__rule" />
+          <p className="masthead__kicker">Anthus AI Solutions</p>
+          <h1 id="edition-title">Papyrus</h1>
+          <div className="masthead__meta">
+            <span>{content.editionDate}</span>
+            <span>Vol. 1, No. 1</span>
+            <span>Cybernetic Edition</span>
+          </div>
+        </header>
+      ) : (
+        <header className="inside-header">
+          <span>Page {page.pageNumber}</span>
+          <span>{formatPageSections(page)}</span>
+          <span>{formatPageKind(page)}</span>
+        </header>
+      )}
+
+      {front ? (
+        <div
+          className="front-grid"
+          style={
+            {
+              "--paper-columns": page.columnCount,
+              "--paper-gap": `${layout.gap}px`,
+            } as CSSProperties
+          }
+        >
+          {page.regions.flatMap((region) => region.blocks).map((block, index) => (
+            <FrontStoryBlock block={block} index={index} key={block.id} turnToPage={turnToPage} />
+          ))}
+        </div>
+      ) : (
+        <div className={`solved-regions solved-regions--${page.kind}`}>
+          {page.regions.map((region) => (
+            <SolvedRegionView key={region.id} layout={layout} region={region} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function SolvedRegionView({ layout, region }: { layout: NewspaperLayout; region: SolvedRegion }) {
+  return (
+    <section
+      className={`solved-region solved-region--${region.type} continuation-section`}
+      data-region-id={region.id}
+      data-region-role={region.role}
+      style={{ height: region.height }}
+    >
+      {region.blocks.map((block) => (
+        <SolvedBlockView block={block} key={block.id} layout={layout} />
+      ))}
+    </section>
+  );
+}
+
+function FrontStoryBlock({ block, index, turnToPage }: { block: SolvedBlock; index: number; turnToPage: (pageNumber: number) => void }) {
+  const article = block.article;
+  if (!article || !block.front) return null;
+  return (
+    <article
+      className={`front-story ${index === 0 ? "front-story--lead" : ""}`}
+      data-article-id={article.slug}
+      data-block-id={block.id}
+      data-block-type={block.type}
+      data-block-preset-id={block.presetId}
+      style={getFrontStoryStyle(block)}
+    >
+      <div className="story-label">{article.section}</div>
+      <h2>
+        <Link href={`/articles/${article.slug}`}>{article.headline}</Link>
+      </h2>
+      <p className="story-deck">{article.deck}</p>
+      <div className="story-byline">{`${article.byline} / ${article.dateline}`}</div>
+      <div className="story-measure" style={{ height: block.front.bodySlotHeight + STORY_MEASURE_CHROME }}>
+        {block.furniture.map((furniture) => (furniture.kind === "image" ? <LeadPhotoFigure furniture={furniture} key={furniture.id} /> : null))}
+        <MeasuredLines lines={block.columns[0] ?? []} />
+      </div>
+      <div className="jump-line">
+        {block.jumpTargetPage ? (
+          <button type="button" onClick={() => turnToPage(block.jumpTargetPage ?? 1)}>
+            {block.jumpLabel ?? `SEE MORE ON A${block.jumpTargetPage}`}
+          </button>
+        ) : (
+          <Link href={`/articles/${article.slug}`}>Read the full article</Link>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function SolvedBlockView({ block, layout }: { block: SolvedBlock; layout: NewspaperLayout }) {
+  if (block.type === "articleFrame" && block.article) {
+    return <ArticleFrameBlock block={block} layout={layout} />;
+  }
+  if (block.type === "adBlock") {
+    return <AdBlock block={block} />;
+  }
+  return (
+    <article className={`solved-block solved-block--${block.type}`} data-block-id={block.id} data-block-type={block.type} style={{ height: block.height }}>
+      {block.title ? <h2>{block.title}</h2> : null}
+    </article>
+  );
+}
+
+function ArticleFrameBlock({ block, layout }: { block: SolvedBlock; layout: NewspaperLayout }) {
+  const article = block.article;
+  if (!article) return null;
+  return (
+    <article
+      className={`solved-block solved-block--articleFrame continuation-section ${block.furniture.some((item) => item.kind === "image") ? "continuation-section--has-photo" : ""}`}
+      data-article-id={article.slug}
+      data-block-id={block.id}
+      data-block-type={block.type}
+      data-block-preset-id={block.presetId}
+      style={getArticleBlockStyle(layout, block)}
+    >
+      <div className="continued-title">
+        <p>{block.label ?? article.section}</p>
+        <h2>
+          <Link href={`/articles/${article.slug}`}>{article.headline}</Link>
+        </h2>
+      </div>
+      <div className="continuation-body">
+        <div
+          className="continuation-grid"
+          style={
+            {
+              "--paper-columns": block.columnCount,
+              "--paper-gap": `${layout.gap}px`,
+            } as CSSProperties
+          }
+        >
+          {block.columns.map((column, columnIndex) => (
+            <div className="continuation-column" key={columnIndex}>
+              <MeasuredLines lines={column} />
+            </div>
+          ))}
+        </div>
+        {block.furniture.map((furniture) => (
+          <SolvedFurnitureView furniture={furniture} key={furniture.id} />
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function SolvedFurnitureView({ furniture }: { furniture: SolvedFurniture }) {
+  if (furniture.kind === "image") return <ContinuationPhotoFigure furniture={furniture} />;
+  if (furniture.kind === "pullQuote") return <ContinuationPullQuoteAside furniture={furniture} />;
+  if (furniture.kind === "ad") {
+    return (
+      <figure className="solved-ad" style={{ left: furniture.x, top: furniture.y, width: furniture.width, height: furniture.height }}>
+        {furniture.src ? <Image src={furniture.src} alt={furniture.label} fill sizes="100vw" unoptimized={shouldBypassImageOptimization(furniture.src)} /> : null}
+        <figcaption>{furniture.label}</figcaption>
+      </figure>
+    );
+  }
+  return null;
+}
+
+function LeadPhotoFigure({ furniture }: { furniture: SolvedImageFurniture }) {
+  return (
+    <figure
+      className="lead-photo"
+      style={{ left: furniture.x, top: furniture.y, width: furniture.width, height: furniture.height }}
+    >
+      <Image
+        src={furniture.src}
+        alt={furniture.alt}
+        fill
+        sizes="(max-width: 719px) 100vw, 40vw"
+        priority
+        style={{ objectFit: furniture.objectFit, objectPosition: furniture.objectPosition }}
+        unoptimized={shouldBypassImageOptimization(furniture.src)}
+      />
+      <figcaption>{furniture.credit}</figcaption>
+    </figure>
+  );
+}
+
+function ContinuationPhotoFigure({ furniture }: { furniture: SolvedImageFurniture }) {
+  return (
+    <figure className={`continuation-photo continuation-photo--${furniture.templateId}`} data-furniture-kind="image">
+      <Image
+        src={furniture.src}
+        alt={furniture.alt}
+        fill
+        sizes={furniture.columnSpan > 1 ? "(max-width: 719px) 100vw, 48vw" : "(max-width: 1039px) 50vw, 24vw"}
+        style={{ objectFit: furniture.objectFit, objectPosition: furniture.objectPosition }}
+        unoptimized={shouldBypassImageOptimization(furniture.src)}
+      />
+      <figcaption>{furniture.credit}</figcaption>
+    </figure>
+  );
+}
+
+function ContinuationPullQuoteAside({ furniture }: { furniture: SolvedPullQuoteFurniture }) {
+  return (
+    <aside className={`continuation-pullquote continuation-pullquote--${furniture.templateId}`} data-furniture-kind="pullQuote">
+      {furniture.text}
+    </aside>
+  );
+}
+
+function AdBlock({ block }: { block: SolvedBlock }) {
+  return (
+    <article className="solved-block solved-block--adBlock" data-block-id={block.id} data-block-type={block.type} style={{ height: block.height }}>
+      {block.furniture.map((furniture) => <SolvedFurnitureView furniture={furniture} key={furniture.id} />)}
+    </article>
+  );
+}
+
+function MeasuredLines({ lines }: { lines: TextLine[] }) {
+  const height = lines.length === 0 ? 0 : Math.max(...lines.map((line) => line.y + line.paintHeight));
+  return (
+    <div className="measured-lines" style={{ height }}>
+      {lines.map((line, index) => (
+        <span
+          className="measured-line"
+          key={`${index}-${line.text}`}
+          style={{
+            left: line.x,
+            top: line.y,
+            height: line.paintHeight,
+            width: Math.ceil(line.width) + 4,
+          }}
+        >
+          {line.text}
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -393,11 +508,13 @@ function getSolvedPageHeight(layout: NewspaperLayout, pageNumber: number): numbe
   return layout.pageHeights[pageNumber] ?? layout.pageHeight;
 }
 
-function getFrontStoryStyle(block: FrontBlock): CSSProperties {
-  const chrome = block.chrome;
+function getFrontStoryStyle(block: SolvedBlock): CSSProperties {
+  const front = block.front;
+  if (!front) return {};
+  const chrome = front.chrome;
   return {
     gridColumn: `span ${block.span}`,
-    "--story-row-height": `${block.rowHeight}px`,
+    "--story-row-height": `${front.rowHeight}px`,
     "--story-border-top": `${chrome.borderTopHeight}px`,
     "--story-padding-top": `${chrome.paddingTop}px`,
     "--story-label-line-height": `${chrome.labelLineHeight}px`,
@@ -414,19 +531,21 @@ function getFrontStoryStyle(block: FrontBlock): CSSProperties {
     "--story-byline-line-height": `${chrome.bylineLineHeight}px`,
     "--story-byline-height": `${chrome.bylineHeight}px`,
     "--story-byline-margin-bottom": `${chrome.bylineMarginBottom}px`,
-    "--story-jump-height": `${block.jumpReserveHeight}px`,
+    "--story-jump-height": `${front.jumpReserveHeight}px`,
     "--story-jump-line-height": `${chrome.jumpLineHeight}px`,
     "--story-jump-padding-top": `${chrome.jumpPaddingTop}px`,
     "--story-jump-border-top": `${chrome.jumpBorderTopHeight}px`,
   } as CSSProperties;
 }
 
-function getContinuationSectionStyle(layout: NewspaperLayout, section: ContinuationSection): CSSProperties {
-  const image = section.image;
-  const pullQuote = section.pullQuote;
+function getArticleBlockStyle(layout: NewspaperLayout, block: SolvedBlock): CSSProperties {
+  const image = block.furniture.find((item): item is SolvedImageFurniture => item.kind === "image");
+  const pullQuote = block.furniture.find((item): item is SolvedPullQuoteFurniture => item.kind === "pullQuote");
   return {
-    "--continued-title-heading-height": `${section.titleHeight}px`,
-    "--continuation-column-height": `${section.textHeight}px`,
+    width: block.width,
+    minHeight: block.height,
+    "--continued-title-heading-height": `${block.titleHeight ?? 0}px`,
+    "--continuation-column-height": `${block.bodyHeight ?? 0}px`,
     "--continuation-pullquote-height": `${pullQuote?.height ?? 0}px`,
     "--continuation-pullquote-x": `${pullQuote?.x ?? 0}px`,
     "--continuation-pullquote-y": `${pullQuote?.y ?? 0}px`,
@@ -442,79 +561,21 @@ function getContinuationSectionStyle(layout: NewspaperLayout, section: Continuat
   } as CSSProperties;
 }
 
-function formatContinuationSections(page: ContinuationPage): string {
-  return page.sections.map((section) => section.article.section).join(" / ");
+function formatPageSections(page: SolvedPage): string {
+  const sections = page.regions.flatMap((region) => region.blocks.map((block) => block.section).filter(Boolean));
+  return Array.from(new Set(sections)).join(" / ");
 }
 
-function formatContinuationPageKind(page: ContinuationPage): string {
-  if (page.kind === "dualContinuation") return "Shared jump page";
-  if (page.kind === "photoContinuation") return "Photo continuation";
-  return "Continuation";
-}
-
-function formatStoryByline(block: FrontBlock): string {
-  return `${block.article.byline} / ${block.article.dateline}`;
-}
-
-function ContinuationPhotoFigure({ section }: { section: ContinuationSection }) {
-  const image = section.image;
-  if (!image) return null;
-
-  return (
-    <figure className={`continuation-photo continuation-photo--${image.templateId}`}>
-      <Image
-        src={image.src}
-        alt={image.alt}
-        fill
-        sizes={image.columnSpan > 1 ? "(max-width: 719px) 100vw, 48vw" : "(max-width: 1039px) 50vw, 24vw"}
-        style={{ objectFit: image.objectFit, objectPosition: image.objectPosition }}
-        unoptimized={shouldBypassImageOptimization(image.src)}
-      />
-      <figcaption>{image.credit}</figcaption>
-    </figure>
-  );
-}
-
-function ContinuationPullQuoteAside({ section }: { section: ContinuationSection }) {
-  const pullQuote = section.pullQuote;
-  if (!pullQuote) return null;
-
-  return (
-    <aside className={`continuation-pullquote continuation-pullquote--${pullQuote.templateId}`}>
-      {pullQuote.text}
-    </aside>
-  );
-}
-
-function MeasuredLines({ lines }: { lines: TextLine[] }) {
-  const height = lines.length === 0 ? 0 : Math.max(...lines.map((line) => line.y + line.paintHeight));
-
-  return (
-    <div className="measured-lines" style={{ height }}>
-      {lines.map((line, index) => (
-        <span
-          className="measured-line"
-          key={`${index}-${line.text}`}
-          style={{
-            left: line.x,
-            top: line.y,
-            height: line.paintHeight,
-            width: Math.ceil(line.width) + 4,
-          }}
-        >
-          {line.text}
-        </span>
-      ))}
-    </div>
-  );
+function formatPageKind(page: SolvedPage): string {
+  if (page.kind === "regionStack") return "Stacked page";
+  if (page.kind === "railMain") return "Rail page";
+  return "Article page";
 }
 
 function isEditableEventTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false;
-
   const tagName = target.tagName.toLowerCase();
   if (tagName === "input" || tagName === "textarea" || tagName === "select") return true;
-
   return target.isContentEditable || target.closest("[contenteditable='true']") !== null;
 }
 

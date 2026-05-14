@@ -1,325 +1,659 @@
-export const FRONT_TEASER_GRID_TEMPLATE_ID = "front.teaserGrid" as const;
+import { z } from "zod";
+import {
+  type PublicationItem,
+  getPublicationItemImageAssets,
+  getPublicationItemText,
+} from "./publication-items";
 
-export const MEDIA_PLACEMENT_TEMPLATE_IDS = [
-  "rightColumnInset",
-  "rightTwoColumnInset",
-  "centerTwoColumnInset",
-  "leftColumnInset",
-  "wideTopBand",
+export const PAGE_PRESETS = [
+  "front.mosaic",
+  "page.regionStack",
+  "page.railMain",
+  "page.full",
 ] as const;
 
-export const PULL_QUOTE_TEMPLATE_IDS = [
-  "none",
-  "rightRailMid",
-  "leftRailMid",
-  "centerTwoColumnBreak",
-  "inlineMobileBreak",
+export const REGION_TYPES = [
+  "stack",
+  "split",
+  "railMain",
+  "strip",
+  "fullPage",
 ] as const;
 
-export type FrontPageTemplateId = typeof FRONT_TEASER_GRID_TEMPLATE_ID;
-export type MediaPlacementTemplateId = (typeof MEDIA_PLACEMENT_TEMPLATE_IDS)[number];
-export type PullQuoteTemplateId = (typeof PULL_QUOTE_TEMPLATE_IDS)[number];
-export type PlannedPageKind = "singleContinuation" | "dualContinuation" | "photoContinuation";
-export type PlannedSectionRole = "primary" | "top" | "bottom";
+export const BLOCK_TYPES = [
+  "articleFrame",
+  "itemFrame",
+  "mediaCluster",
+  "itemStack",
+  "promoStrip",
+  "adBlock",
+  "rule",
+  "masthead",
+] as const;
 
-export type EditionLayoutPlan = {
-  version: 1;
-  frontPage: {
-    pageNumber: 1;
-    recipeId: string;
-    templateId: FrontPageTemplateId;
-    articleIds: string[];
-    cutPolicies: Array<{
-      articleId: string;
-      maxBodyLines: number;
-      continuationPageNumber: number;
-    }>;
-  };
-  pages: Array<{
-    pageNumber: number;
-    recipeId: string;
-    kind: PlannedPageKind;
-    sections: Array<{
-      articleId: string;
-      role: PlannedSectionRole;
-      mediaTemplateIds?: MediaPlacementTemplateId[];
-      pullQuoteTemplateIds?: PullQuoteTemplateId[];
-    }>;
-    splitVariants?: number[];
-  }>;
-};
+export const ARTICLE_FRAME_PRESETS = [
+  "front.teaser",
+  "article.standard",
+  "article.mediaInset",
+  "article.mediaPrelude",
+] as const;
 
-const PLANNED_PAGE_KINDS: PlannedPageKind[] = ["singleContinuation", "dualContinuation", "photoContinuation"];
-const PLANNED_SECTION_ROLES: PlannedSectionRole[] = ["primary", "top", "bottom"];
+export const MEDIA_CLUSTER_PRESETS = [
+  "media.triptych",
+  "media.mosaic",
+] as const;
 
-export function createDefaultEditionLayoutPlan(articleIds: string[]): EditionLayoutPlan {
-  const availableArticleIds = new Set(articleIds);
-  const plannedPages: EditionLayoutPlan["pages"] = [
-    {
-      pageNumber: 2,
-      recipeId: "photo-harbor-grid",
-      kind: "photoContinuation",
-      sections: [
-        {
-          articleId: "harbor-grid",
-          role: "primary",
-          mediaTemplateIds: ["centerTwoColumnInset", "rightColumnInset", "leftColumnInset", "wideTopBand"],
-          pullQuoteTemplateIds: ["centerTwoColumnBreak", "rightRailMid", "leftRailMid"],
-        },
-      ],
-    },
-    {
-      pageNumber: 3,
-      recipeId: "shared-schools-reading-market-hall",
-      kind: "dualContinuation",
-      sections: [
-        {
-          articleId: "schools-reading-lab",
-          role: "top",
-          mediaTemplateIds: ["rightTwoColumnInset", "rightColumnInset", "leftColumnInset", "centerTwoColumnInset"],
-          pullQuoteTemplateIds: ["leftRailMid", "rightRailMid", "centerTwoColumnBreak"],
-        },
-        {
-          articleId: "market-hall",
-          role: "bottom",
-          mediaTemplateIds: ["leftColumnInset", "rightColumnInset", "centerTwoColumnInset"],
-          pullQuoteTemplateIds: ["rightRailMid", "leftRailMid", "centerTwoColumnBreak"],
-        },
-      ],
-      splitVariants: [0.5, 0.55, 0.45],
-    },
-  ];
-  const pages = plannedPages.filter((page) => page.sections.every((section) => availableArticleIds.has(section.articleId)));
+export const AD_PRESETS = [
+  "ad.fullPage",
+  "ad.region",
+] as const;
 
-  return {
-    version: 1,
-    frontPage: {
-      pageNumber: 1,
-      recipeId: "front-page",
-      templateId: FRONT_TEASER_GRID_TEMPLATE_ID,
-      articleIds,
-      cutPolicies: [
-        { articleId: "harbor-grid", maxBodyLines: 22, continuationPageNumber: 2 },
-        { articleId: "schools-reading-lab", maxBodyLines: 16, continuationPageNumber: 3 },
-        { articleId: "market-hall", maxBodyLines: 14, continuationPageNumber: 3 },
-      ].filter((policy) => availableArticleIds.has(policy.articleId)),
-    },
-    pages,
-  };
+export const RESPONSIVE_PLACEMENT_ANCHORS = [
+  "left",
+  "right",
+  "center",
+  "outer",
+  "inner",
+  "inline",
+] as const;
+
+export const RESPONSIVE_VERTICAL_PLACEMENTS = [
+  "top",
+  "upperThird",
+  "middle",
+  "lowerThird",
+] as const;
+
+export const RESPONSIVE_COLLAPSE_POLICIES = [
+  "inline",
+  "fullWidth",
+  "omit",
+] as const;
+
+export const RESPONSIVE_CROP_POLICIES = [
+  "preserve",
+  "cropAllowed",
+] as const;
+
+export type PagePresetId = (typeof PAGE_PRESETS)[number];
+export type RegionType = (typeof REGION_TYPES)[number];
+export type BlockType = (typeof BLOCK_TYPES)[number];
+export type ArticleFramePresetId = (typeof ARTICLE_FRAME_PRESETS)[number];
+export type MediaClusterPresetId = (typeof MEDIA_CLUSTER_PRESETS)[number];
+export type AdPresetId = (typeof AD_PRESETS)[number];
+export type ResponsivePlacementAnchor = (typeof RESPONSIVE_PLACEMENT_ANCHORS)[number];
+export type ResponsiveVerticalPlacement = (typeof RESPONSIVE_VERTICAL_PLACEMENTS)[number];
+export type ResponsiveCollapsePolicy = (typeof RESPONSIVE_COLLAPSE_POLICIES)[number];
+export type ResponsiveCropPolicy = (typeof RESPONSIVE_CROP_POLICIES)[number];
+
+const ItemIdSchema = z.string().min(1);
+
+const SpanPolicySchema = z
+  .object({
+    min: z.number().int().positive(),
+    preferred: z.number().int().positive(),
+    max: z.number().int().positive(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.min > value.preferred) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["min"],
+        message: "min must be less than or equal to preferred",
+      });
+    }
+    if (value.preferred > value.max) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["preferred"],
+        message: "preferred must be less than or equal to max",
+      });
+    }
+  });
+
+const ContentRequirementsSchema = z
+  .object({
+    minWords: z.number().int().positive().optional(),
+    maxWords: z.number().int().positive().optional(),
+    minImages: z.number().int().nonnegative().optional(),
+    imageRole: z.string().min(1).optional(),
+    itemType: z.enum(["article", "brief", "correction", "promo", "ad", "sectionHeader"]).optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.minWords !== undefined && value.maxWords !== undefined && value.minWords > value.maxWords) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["minWords"],
+        message: "minWords must be less than or equal to maxWords",
+      });
+    }
+  });
+
+const LocalGridSchema = z
+  .object({
+    columns: SpanPolicySchema.default({ min: 1, preferred: 6, max: 6 }),
+  })
+  .strict();
+
+const PageGridSchema = z
+  .object({
+    columns: SpanPolicySchema.default({ min: 1, preferred: 6, max: 6 }),
+  })
+  .strict();
+
+const RegionSizeSchema = z
+  .object({
+    ratio: z.number().positive().optional(),
+    minHeight: z.number().nonnegative().optional(),
+    preferredHeight: z.number().nonnegative().optional(),
+    maxHeight: z.number().nonnegative().optional(),
+  })
+  .strict();
+
+const PlacementSchema = z
+  .object({
+    anchor: z.enum(RESPONSIVE_PLACEMENT_ANCHORS),
+    span: SpanPolicySchema,
+    vertical: z.enum(RESPONSIVE_VERTICAL_PLACEMENTS).default("upperThird"),
+    collapse: z.enum(RESPONSIVE_COLLAPSE_POLICIES).default("inline"),
+    crop: z.enum(RESPONSIVE_CROP_POLICIES).default("preserve"),
+    wrapsText: z.boolean().default(true),
+  })
+  .strict();
+
+const MediaSpecSchema = z
+  .object({
+    required: z.boolean().default(false),
+    assetRole: z.string().min(1).optional(),
+    placement: PlacementSchema,
+    count: SpanPolicySchema.optional(),
+    pattern: z.enum(MEDIA_CLUSTER_PRESETS).optional(),
+  })
+  .strict();
+
+const PullQuoteSpecSchema = z
+  .object({
+    required: z.boolean().default(false),
+    placements: z.array(PlacementSchema).min(1),
+  })
+  .strict();
+
+const CutPolicySchema = z
+  .object({
+    maxBodyLines: z.number().int().positive().optional(),
+    jumpTargetPage: z.number().int().positive().optional(),
+  })
+  .strict();
+
+const ArticleFrameBlockSchema = z
+  .object({
+    id: z.string().min(1),
+    type: z.literal("articleFrame"),
+    presetId: z.enum(ARTICLE_FRAME_PRESETS),
+    itemId: ItemIdSchema,
+    flowKey: z.string().min(1).optional(),
+    startCursor: z.enum(["beginning", "current"]).default("current"),
+    role: z.string().min(1).optional(),
+    localGrid: LocalGridSchema.optional(),
+    span: SpanPolicySchema.optional(),
+    media: z.array(MediaSpecSchema).default([]),
+    pullQuote: PullQuoteSpecSchema.optional(),
+    cutPolicy: CutPolicySchema.optional(),
+    requires: ContentRequirementsSchema.optional(),
+  })
+  .strict();
+
+const ItemFrameBlockSchema = z
+  .object({
+    id: z.string().min(1),
+    type: z.literal("itemFrame"),
+    itemId: ItemIdSchema,
+    localGrid: LocalGridSchema.optional(),
+    span: SpanPolicySchema.optional(),
+    media: z.array(MediaSpecSchema).default([]),
+    requires: ContentRequirementsSchema.optional(),
+  })
+  .strict();
+
+const MediaClusterBlockSchema = z
+  .object({
+    id: z.string().min(1),
+    type: z.literal("mediaCluster"),
+    itemId: ItemIdSchema,
+    presetId: z.enum(MEDIA_CLUSTER_PRESETS),
+    assetRole: z.string().min(1).optional(),
+    count: SpanPolicySchema.default({ min: 0, preferred: 3, max: 5 }),
+    caption: z.string().optional(),
+    required: z.boolean().default(false),
+  })
+  .strict();
+
+const ItemStackBlockSchema = z
+  .object({
+    id: z.string().min(1),
+    type: z.literal("itemStack"),
+    itemIds: z.array(ItemIdSchema).min(1),
+    title: z.string().optional(),
+  })
+  .strict();
+
+const PromoStripBlockSchema = z
+  .object({
+    id: z.string().min(1),
+    type: z.literal("promoStrip"),
+    itemIds: z.array(ItemIdSchema).min(1),
+  })
+  .strict();
+
+const AdBlockSchema = z
+  .object({
+    id: z.string().min(1),
+    type: z.literal("adBlock"),
+    presetId: z.enum(AD_PRESETS),
+    itemId: ItemIdSchema.optional(),
+    imageUrl: z.string().url().optional(),
+    required: z.boolean().default(false),
+  })
+  .strict();
+
+const RuleBlockSchema = z
+  .object({
+    id: z.string().min(1),
+    type: z.literal("rule"),
+  })
+  .strict();
+
+const MastheadBlockSchema = z
+  .object({
+    id: z.string().min(1),
+    type: z.literal("masthead"),
+  })
+  .strict();
+
+const LayoutBlockSchema = z.discriminatedUnion("type", [
+  ArticleFrameBlockSchema,
+  ItemFrameBlockSchema,
+  MediaClusterBlockSchema,
+  ItemStackBlockSchema,
+  PromoStripBlockSchema,
+  AdBlockSchema,
+  RuleBlockSchema,
+  MastheadBlockSchema,
+]);
+
+const LayoutRegionSchema = z
+  .object({
+    id: z.string().min(1),
+    type: z.enum(REGION_TYPES),
+    role: z.string().min(1).optional(),
+    size: RegionSizeSchema.optional(),
+    localGrid: LocalGridSchema.optional(),
+    blocks: z.array(LayoutBlockSchema).min(1),
+  })
+  .strict();
+
+const LayoutPageSchema = z
+  .object({
+    id: z.string().min(1).optional(),
+    pageNumber: z.number().int().positive(),
+    presetId: z.enum(PAGE_PRESETS),
+    grid: PageGridSchema.optional(),
+    regions: z.array(LayoutRegionSchema).min(1),
+  })
+  .strict();
+
+const EditionLayoutPlanSchema = z
+  .object({
+    pages: z.array(LayoutPageSchema).min(1),
+  })
+  .strict();
+
+export type ContentRequirements = z.infer<typeof ContentRequirementsSchema>;
+export type ResponsiveSpanPolicy = z.infer<typeof SpanPolicySchema>;
+export type ResponsivePlacementSpec = z.infer<typeof PlacementSchema>;
+export type LayoutMediaSpec = z.infer<typeof MediaSpecSchema>;
+export type LayoutPullQuoteSpec = z.infer<typeof PullQuoteSpecSchema>;
+export type ArticleFrameBlockSpec = z.infer<typeof ArticleFrameBlockSchema>;
+export type ItemFrameBlockSpec = z.infer<typeof ItemFrameBlockSchema>;
+export type MediaClusterBlockSpec = z.infer<typeof MediaClusterBlockSchema>;
+export type ItemStackBlockSpec = z.infer<typeof ItemStackBlockSchema>;
+export type PromoStripBlockSpec = z.infer<typeof PromoStripBlockSchema>;
+export type AdBlockSpec = z.infer<typeof AdBlockSchema>;
+export type LayoutBlockSpec = z.infer<typeof LayoutBlockSchema>;
+export type LayoutRegionSpec = z.infer<typeof LayoutRegionSchema>;
+export type LayoutPageSpec = z.infer<typeof LayoutPageSchema>;
+export type EditionLayoutPlan = z.infer<typeof EditionLayoutPlanSchema>;
+
+export function createDefaultEditionLayoutPlan(itemIds: string[]): EditionLayoutPlan {
+  const frontBlocks = itemIds.map((itemId, index) => ({
+    id: `front-${itemId}`,
+    type: "articleFrame" as const,
+    presetId: "front.teaser" as const,
+    itemId,
+    flowKey: itemId,
+    startCursor: "beginning" as const,
+    span: getDefaultFrontSpan(index),
+    cutPolicy: getDefaultCutPolicy(itemId),
+  }));
+
+  const plan: EditionLayoutPlan = normalizeEditionLayoutPlan({
+    pages: [
+      {
+        id: "page-1",
+        pageNumber: 1,
+        presetId: "front.mosaic",
+        grid: { columns: { min: 1, preferred: 6, max: 6 } },
+        regions: [
+          {
+            id: "front-page-news",
+            type: "fullPage",
+            localGrid: { columns: { min: 1, preferred: 6, max: 6 } },
+            blocks: frontBlocks,
+          },
+        ],
+      },
+      {
+        id: "page-2",
+        pageNumber: 2,
+        presetId: "page.regionStack",
+        grid: { columns: { min: 1, preferred: 6, max: 6 } },
+        regions: [
+          {
+            id: "harbor-continuation",
+            type: "fullPage",
+            blocks: [
+              {
+                id: "harbor-grid-page-2",
+                type: "articleFrame",
+                presetId: "article.mediaInset",
+                itemId: "harbor-grid",
+                flowKey: "harbor-grid",
+                startCursor: "current",
+                role: "primary",
+                localGrid: { columns: { min: 2, preferred: 6, max: 6 } },
+                media: [
+                  {
+                    required: true,
+                    assetRole: "continuationInset",
+                    placement: {
+                      anchor: "center",
+                      span: { min: 1, preferred: 2, max: 3 },
+                      vertical: "upperThird",
+                      collapse: "inline",
+                      crop: "preserve",
+                      wrapsText: true,
+                    },
+                  },
+                ],
+                pullQuote: {
+                  required: false,
+                  placements: [
+                    {
+                      anchor: "right",
+                      span: { min: 1, preferred: 1, max: 2 },
+                      vertical: "middle",
+                      collapse: "omit",
+                      crop: "preserve",
+                      wrapsText: true,
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      },
+      {
+        id: "page-3",
+        pageNumber: 3,
+        presetId: "page.regionStack",
+        grid: { columns: { min: 1, preferred: 6, max: 6 } },
+        regions: [
+          {
+            id: "schools-reading-lab-tail",
+            type: "stack",
+            role: "top",
+            size: { ratio: 0.5 },
+            blocks: [
+              {
+                id: "schools-reading-lab-page-3",
+                type: "articleFrame",
+                presetId: "article.mediaInset",
+                itemId: "schools-reading-lab",
+                flowKey: "schools-reading-lab",
+                startCursor: "current",
+                role: "top",
+                localGrid: { columns: { min: 4, preferred: 6, max: 6 } },
+                media: [
+                  {
+                    required: false,
+                    assetRole: "continuationInset",
+                    placement: {
+                      anchor: "right",
+                      span: { min: 1, preferred: 2, max: 2 },
+                      vertical: "upperThird",
+                      collapse: "inline",
+                      crop: "preserve",
+                      wrapsText: true,
+                    },
+                  },
+                ],
+                pullQuote: {
+                  required: false,
+                  placements: [
+                    {
+                      anchor: "left",
+                      span: { min: 1, preferred: 1, max: 2 },
+                      vertical: "middle",
+                      collapse: "omit",
+                      crop: "preserve",
+                      wrapsText: true,
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+          {
+            id: "market-hall-tail",
+            type: "stack",
+            role: "bottom",
+            size: { ratio: 0.5 },
+            blocks: [
+              {
+                id: "market-hall-page-3",
+                type: "articleFrame",
+                presetId: "article.mediaInset",
+                itemId: "market-hall",
+                flowKey: "market-hall",
+                startCursor: "current",
+                role: "bottom",
+                localGrid: { columns: { min: 2, preferred: 6, max: 6 } },
+                media: [
+                  {
+                    required: false,
+                    assetRole: "continuationInset",
+                    placement: {
+                      anchor: "left",
+                      span: { min: 1, preferred: 1, max: 2 },
+                      vertical: "upperThird",
+                      collapse: "inline",
+                      crop: "preserve",
+                      wrapsText: true,
+                    },
+                  },
+                ],
+                pullQuote: {
+                  required: false,
+                  placements: [
+                    {
+                      anchor: "right",
+                      span: { min: 1, preferred: 1, max: 2 },
+                      vertical: "middle",
+                      collapse: "omit",
+                      crop: "preserve",
+                      wrapsText: true,
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  }, "default layoutPlan");
+
+  return plan;
 }
 
-export function normalizeEditionLayoutPlan(
-  value: unknown,
-  label = "Edition.layoutPlan",
-): EditionLayoutPlan | undefined {
+export function normalizeEditionLayoutPlan(value: unknown, label = "Edition.layoutPlan"): EditionLayoutPlan {
   const parsed = parseMaybeJson(value, label);
-  if (parsed === undefined || parsed === null) return undefined;
-  const record = requireRecord(parsed, label);
-
-  if (record.version !== 1) {
-    throw new Error(`${label}.version must be 1`);
+  const result = EditionLayoutPlanSchema.safeParse(parsed);
+  if (!result.success) {
+    throw new Error(formatZodError(label, result.error));
   }
-
-  const frontPageRecord = requireRecord(record.frontPage, `${label}.frontPage`);
-  const pages = requireArray(record.pages, `${label}.pages`).map((page, index) =>
-    normalizePage(page, `${label}.pages[${index}]`),
-  );
-
-  return {
-    version: 1,
-    frontPage: {
-      pageNumber: requireLiteralNumber(frontPageRecord.pageNumber, 1, `${label}.frontPage.pageNumber`),
-      recipeId: requireString(frontPageRecord.recipeId, `${label}.frontPage.recipeId`),
-      templateId: requireLiteralString(
-        frontPageRecord.templateId,
-        FRONT_TEASER_GRID_TEMPLATE_ID,
-        `${label}.frontPage.templateId`,
-      ),
-      articleIds: requireStringArray(frontPageRecord.articleIds, `${label}.frontPage.articleIds`),
-      cutPolicies: requireArray(frontPageRecord.cutPolicies, `${label}.frontPage.cutPolicies`).map((policy, index) =>
-        normalizeCutPolicy(policy, `${label}.frontPage.cutPolicies[${index}]`),
-      ),
-    },
-    pages,
-  };
+  return result.data;
 }
 
-export function validateEditionLayoutPlanForArticles(
+export function validateEditionLayoutPlanForItems(
   layoutPlan: EditionLayoutPlan,
-  articleIds: string[],
+  items: PublicationItem[],
   label = "Edition.layoutPlan",
 ): EditionLayoutPlan {
-  const availableArticleIds = new Set(articleIds);
-  const plannedPageNumbers = new Set(layoutPlan.pages.map((page) => page.pageNumber));
+  const itemsBySlug = new Map(items.map((item) => [item.slug, item]));
+  const pageNumbers = new Set(layoutPlan.pages.map((page) => page.pageNumber));
   const seenPageNumbers = new Set<number>();
-
-  for (const articleId of layoutPlan.frontPage.articleIds) {
-    requireKnownArticle(articleId, availableArticleIds, `${label}.frontPage.articleIds`);
-  }
-  for (const policy of layoutPlan.frontPage.cutPolicies) {
-    requireKnownArticle(policy.articleId, availableArticleIds, `${label}.frontPage.cutPolicies`);
-    if (!plannedPageNumbers.has(policy.continuationPageNumber)) {
-      throw new Error(
-        `${label}.frontPage.cutPolicies for ${policy.articleId} points to missing page ${policy.continuationPageNumber}`,
-      );
-    }
-  }
+  const flowStarts = new Map<string, "beginning" | "current">();
 
   for (const page of layoutPlan.pages) {
-    if (page.pageNumber <= 1) {
-      throw new Error(`${label}.pages pageNumber must be greater than 1`);
-    }
-    if (seenPageNumbers.has(page.pageNumber)) {
-      throw new Error(`${label}.pages contains duplicate pageNumber ${page.pageNumber}`);
-    }
+    if (seenPageNumbers.has(page.pageNumber)) throw new Error(`${label}.pages contains duplicate pageNumber ${page.pageNumber}`);
     seenPageNumbers.add(page.pageNumber);
-    validatePageSections(page, availableArticleIds, label);
+    for (const region of page.regions) {
+      for (const block of region.blocks) {
+        validateBlock(block, itemsBySlug, pageNumbers, flowStarts, `${label}.pages[${page.pageNumber}].regions.${region.id}`);
+      }
+    }
   }
 
   return layoutPlan;
 }
 
-function normalizePage(value: unknown, label: string): EditionLayoutPlan["pages"][number] {
-  const record = requireRecord(value, label);
-  const kind = requireOneOf(record.kind, PLANNED_PAGE_KINDS, `${label}.kind`);
-  const page = {
-    pageNumber: requirePositiveInteger(record.pageNumber, `${label}.pageNumber`),
-    recipeId: requireString(record.recipeId, `${label}.recipeId`),
-    kind,
-    sections: requireArray(record.sections, `${label}.sections`).map((section, index) =>
-      normalizeSection(section, `${label}.sections[${index}]`),
-    ),
-    splitVariants:
-      record.splitVariants === undefined
-        ? undefined
-        : requireArray(record.splitVariants, `${label}.splitVariants`).map((candidate, index) =>
-            requireSplitVariant(candidate, `${label}.splitVariants[${index}]`),
-          ),
-  };
-
-  return page;
-}
-
-function normalizeSection(value: unknown, label: string): EditionLayoutPlan["pages"][number]["sections"][number] {
-  const record = requireRecord(value, label);
-  return {
-    articleId: requireString(record.articleId, `${label}.articleId`),
-    role: requireOneOf(record.role, PLANNED_SECTION_ROLES, `${label}.role`),
-    mediaTemplateIds:
-      record.mediaTemplateIds === undefined
-        ? undefined
-        : requireTemplateArray(
-            record.mediaTemplateIds,
-            MEDIA_PLACEMENT_TEMPLATE_IDS,
-            `${label}.mediaTemplateIds`,
-          ),
-    pullQuoteTemplateIds:
-      record.pullQuoteTemplateIds === undefined
-        ? undefined
-        : requireTemplateArray(
-            record.pullQuoteTemplateIds,
-            PULL_QUOTE_TEMPLATE_IDS,
-            `${label}.pullQuoteTemplateIds`,
-          ),
-  };
-}
-
-function normalizeCutPolicy(value: unknown, label: string): EditionLayoutPlan["frontPage"]["cutPolicies"][number] {
-  const record = requireRecord(value, label);
-  return {
-    articleId: requireString(record.articleId, `${label}.articleId`),
-    maxBodyLines: requirePositiveInteger(record.maxBodyLines, `${label}.maxBodyLines`),
-    continuationPageNumber: requirePositiveInteger(record.continuationPageNumber, `${label}.continuationPageNumber`),
-  };
-}
-
-function validatePageSections(
-  page: EditionLayoutPlan["pages"][number],
-  availableArticleIds: Set<string>,
+function validateBlock(
+  block: LayoutBlockSpec,
+  itemsBySlug: Map<string, PublicationItem>,
+  pageNumbers: Set<number>,
+  flowStarts: Map<string, "beginning" | "current">,
   label: string,
-) {
-  if ((page.kind === "singleContinuation" || page.kind === "photoContinuation") && page.sections.length !== 1) {
-    throw new Error(`${label}.pages page ${page.pageNumber} with kind ${page.kind} must have exactly one section`);
+): void {
+  if (block.type === "rule" || block.type === "masthead") return;
+  if (block.type === "itemStack" || block.type === "promoStrip") {
+    for (const itemId of block.itemIds) requireKnownItem(itemId, itemsBySlug, label);
+    return;
   }
-  if (page.kind === "dualContinuation" && page.sections.length !== 2) {
-    throw new Error(`${label}.pages page ${page.pageNumber} with kind dualContinuation must have exactly two sections`);
+  if (block.type === "adBlock") {
+    if (block.itemId) requireKnownItem(block.itemId, itemsBySlug, label);
+    if (block.required && !block.itemId && !block.imageUrl) throw new Error(`${label}.${block.id} requires an ad item or imageUrl`);
+    return;
   }
 
-  for (const section of page.sections) {
-    requireKnownArticle(section.articleId, availableArticleIds, `${label}.pages[${page.pageNumber}].sections`);
+  const item = requireKnownItem(block.itemId, itemsBySlug, label);
+  if ("requires" in block) validateItemRequirements(item, block.requires, `${label}.${block.id}.requires`);
+
+  if (block.type === "articleFrame") {
+    if (item.type !== "article") throw new Error(`${label}.${block.id} articleFrame requires an article item; ${block.itemId} is ${item.type}`);
+    const flowKey = block.flowKey ?? block.itemId;
+    if (block.startCursor === "beginning") {
+      flowStarts.set(flowKey, "beginning");
+    } else if (!flowStarts.has(flowKey)) {
+      throw new Error(`${label}.${block.id} starts flow ${flowKey} at current before any beginning block`);
+    }
+    if (block.cutPolicy?.jumpTargetPage && !pageNumbers.has(block.cutPolicy.jumpTargetPage)) {
+      throw new Error(`${label}.${block.id} points to missing jumpTargetPage ${block.cutPolicy.jumpTargetPage}`);
+    }
+    for (const media of block.media) validateMediaSpec(item, media, `${label}.${block.id}.media`);
+    if (block.pullQuote?.required && !item.pullQuotes?.[0]) {
+      throw new Error(`${label}.${block.id}.pullQuote requires an editorial pull quote`);
+    }
   }
+
+  if (block.type === "mediaCluster") {
+    const assets = findAssetsByRole(item, block.assetRole);
+    if (block.required && assets.length < block.count.min) {
+      throw new Error(`${label}.${block.id} requires at least ${block.count.min} media assets`);
+    }
+  }
+}
+
+function validateMediaSpec(item: PublicationItem, media: LayoutMediaSpec, label: string): void {
+  const matchingAssets = findAssetsByRole(item, media.assetRole);
+  if (media.required && matchingAssets.length === 0) {
+    throw new Error(`${label} requires an image asset${media.assetRole ? ` with role ${media.assetRole}` : ""}`);
+  }
+}
+
+function validateItemRequirements(item: PublicationItem, requirements: ContentRequirements | undefined, label: string): void {
+  if (!requirements) return;
+  if (requirements.itemType && item.type !== requirements.itemType) {
+    throw new Error(`${label} requires item type ${requirements.itemType}; ${item.slug} is ${item.type}`);
+  }
+  const wordCount = getPublicationItemText(item).split(/\s+/).filter(Boolean).length;
+  const assets = getPublicationItemImageAssets(item);
+  if (requirements.minWords !== undefined && wordCount < requirements.minWords) {
+    throw new Error(`${label} requires at least ${requirements.minWords} words; ${item.slug} has ${wordCount}`);
+  }
+  if (requirements.maxWords !== undefined && wordCount > requirements.maxWords) {
+    throw new Error(`${label} allows at most ${requirements.maxWords} words; ${item.slug} has ${wordCount}`);
+  }
+  if (requirements.minImages !== undefined && assets.length < requirements.minImages) {
+    throw new Error(`${label} requires at least ${requirements.minImages} images; ${item.slug} has ${assets.length}`);
+  }
+  if (requirements.imageRole && findAssetsByRole(item, requirements.imageRole).length === 0) {
+    throw new Error(`${label} requires an image with role ${requirements.imageRole}`);
+  }
+}
+
+function findAssetsByRole(item: PublicationItem, role: string | undefined) {
+  const assets = getPublicationItemImageAssets(item);
+  if (!role) return assets;
+  return assets.filter((asset) => asset.roles?.some((assetRole) => assetRole === role));
+}
+
+function requireKnownItem(itemId: string, itemsBySlug: Map<string, PublicationItem>, label: string): PublicationItem {
+  const item = itemsBySlug.get(itemId);
+  if (!item) throw new Error(`${label} references missing item ${itemId}`);
+  return item;
+}
+
+function getDefaultFrontSpan(index: number): ResponsiveSpanPolicy {
+  const preferred = [2, 1, 1, 2, 1, 1][index] ?? 1;
+  return { min: 1, preferred, max: preferred };
+}
+
+function getDefaultCutPolicy(itemId: string): ArticleFrameBlockSpec["cutPolicy"] | undefined {
+  if (itemId === "harbor-grid") return { maxBodyLines: 22, jumpTargetPage: 2 };
+  if (itemId === "schools-reading-lab") return { maxBodyLines: 16, jumpTargetPage: 3 };
+  if (itemId === "market-hall") return { maxBodyLines: 14, jumpTargetPage: 3 };
+  return undefined;
 }
 
 function parseMaybeJson(value: unknown, label: string): unknown {
-  if (typeof value !== "string") return value;
-  if (!value.trim()) return undefined;
+  if (typeof value !== "string") {
+    if (value === undefined || value === null) throw new Error(`${label} is required`);
+    return value;
+  }
+  if (!value.trim()) throw new Error(`${label} is required`);
   try {
-    return JSON.parse(value) as unknown;
+    return JSON.parse(value);
   } catch (error) {
     throw new Error(`${label} must be valid JSON: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
-function requireRecord(value: unknown, label: string): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`${label} must be an object`);
-  }
-  return value as Record<string, unknown>;
-}
-
-function requireArray(value: unknown, label: string): unknown[] {
-  if (!Array.isArray(value)) throw new Error(`${label} must be an array`);
-  return value;
-}
-
-function requireString(value: unknown, label: string): string {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw new Error(`${label} must be a non-empty string`);
-  }
-  return value;
-}
-
-function requireStringArray(value: unknown, label: string): string[] {
-  return requireArray(value, label).map((item, index) => requireString(item, `${label}[${index}]`));
-}
-
-function requireLiteralNumber<T extends number>(value: unknown, expected: T, label: string): T {
-  if (value !== expected) throw new Error(`${label} must be ${expected}`);
-  return expected;
-}
-
-function requireLiteralString<T extends string>(value: unknown, expected: T, label: string): T {
-  if (value !== expected) throw new Error(`${label} must be ${expected}`);
-  return expected;
-}
-
-function requirePositiveInteger(value: unknown, label: string): number {
-  if (!Number.isInteger(value) || Number(value) <= 0) {
-    throw new Error(`${label} must be a positive integer`);
-  }
-  return Number(value);
-}
-
-function requireSplitVariant(value: unknown, label: string): number {
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0 || value >= 1) {
-    throw new Error(`${label} must be a number between 0 and 1`);
-  }
-  return value;
-}
-
-function requireOneOf<const T extends readonly string[]>(value: unknown, allowed: T, label: string): T[number] {
-  if (typeof value !== "string" || !allowed.includes(value)) {
-    throw new Error(`${label} must be one of ${allowed.join(", ")}`);
-  }
-  return value;
-}
-
-function requireTemplateArray<const T extends readonly string[]>(value: unknown, allowed: T, label: string): T[number][] {
-  return requireArray(value, label).map((item, index) => requireOneOf(item, allowed, `${label}[${index}]`));
-}
-
-function requireKnownArticle(articleId: string, availableArticleIds: Set<string>, label: string) {
-  if (!availableArticleIds.has(articleId)) {
-    throw new Error(`${label} references missing article ${articleId}`);
-  }
+function formatZodError(label: string, error: z.ZodError): string {
+  return `${label} is invalid:\n${error.issues
+    .map((issue) => `- ${[label, ...issue.path].join(".")}: ${issue.message}`)
+    .join("\n")}`;
 }

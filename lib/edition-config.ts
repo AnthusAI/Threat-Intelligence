@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { normalizeEditionLayoutPlan, type EditionLayoutPlan } from "./layout-plan";
+import { createDefaultEditionLayoutPlan, normalizeEditionLayoutPlan, type EditionLayoutPlan } from "./layout-plan";
 
 export type LocalEditionConfig = {
   id: string;
@@ -11,7 +11,7 @@ export type LocalEditionConfig = {
   publishDate: string;
   publishedAt: string;
   articleOrder: string[];
-  layoutPlan?: EditionLayoutPlan;
+  layoutPlan: EditionLayoutPlan;
 };
 
 const EDITION_CONFIG_PATH = path.join(process.cwd(), "content", "edition.json");
@@ -32,6 +32,14 @@ const DEFAULT_EDITION_CONFIG: LocalEditionConfig = {
     "night-trains",
     "climate-ledger",
   ],
+  layoutPlan: createDefaultEditionLayoutPlan([
+    "harbor-grid",
+    "schools-reading-lab",
+    "market-hall",
+    "river-court",
+    "night-trains",
+    "climate-ledger",
+  ]),
 };
 
 export function loadLocalEditionConfig(): LocalEditionConfig {

@@ -15,99 +15,240 @@
     "climate-ledger"
   ],
   "layoutPlan": {
-    "version": 1,
-    "frontPage": {
-      "pageNumber": 1,
-      "recipeId": "front-page",
-      "templateId": "front.teaserGrid",
-      "articleIds": [
-        "harbor-grid",
-        "schools-reading-lab",
-        "market-hall",
-        "river-court",
-        "night-trains",
-        "climate-ledger"
-      ],
-      "cutPolicies": [
-        {
-          "articleId": "harbor-grid",
-          "maxBodyLines": 22,
-          "continuationPageNumber": 2
-        },
-        {
-          "articleId": "schools-reading-lab",
-          "maxBodyLines": 16,
-          "continuationPageNumber": 3
-        },
-        {
-          "articleId": "market-hall",
-          "maxBodyLines": 14,
-          "continuationPageNumber": 3
-        }
-      ]
-    },
     "pages": [
       {
-        "pageNumber": 2,
-        "recipeId": "photo-harbor-grid",
-        "kind": "photoContinuation",
-        "sections": [
+        "id": "page-1",
+        "pageNumber": 1,
+        "presetId": "front.mosaic",
+        "grid": {
+          "columns": { "min": 1, "preferred": 6, "max": 6 }
+        },
+        "regions": [
           {
-            "articleId": "harbor-grid",
-            "role": "primary",
-            "mediaTemplateIds": [
-              "centerTwoColumnInset",
-              "rightColumnInset",
-              "leftColumnInset",
-              "wideTopBand"
-            ],
-            "pullQuoteTemplateIds": [
-              "centerTwoColumnBreak",
-              "rightRailMid",
-              "leftRailMid"
+            "id": "front-page-news",
+            "type": "fullPage",
+            "localGrid": {
+              "columns": { "min": 1, "preferred": 6, "max": 6 }
+            },
+            "blocks": [
+              {
+                "id": "front-harbor-grid",
+                "type": "articleFrame",
+                "presetId": "front.teaser",
+                "itemId": "harbor-grid",
+                "flowKey": "harbor-grid",
+                "startCursor": "beginning",
+                "span": { "min": 1, "preferred": 2, "max": 2 },
+                "cutPolicy": { "maxBodyLines": 22, "jumpTargetPage": 2 }
+              },
+              {
+                "id": "front-schools-reading-lab",
+                "type": "articleFrame",
+                "presetId": "front.teaser",
+                "itemId": "schools-reading-lab",
+                "flowKey": "schools-reading-lab",
+                "startCursor": "beginning",
+                "span": { "min": 1, "preferred": 1, "max": 1 },
+                "cutPolicy": { "maxBodyLines": 16, "jumpTargetPage": 3 }
+              },
+              {
+                "id": "front-market-hall",
+                "type": "articleFrame",
+                "presetId": "front.teaser",
+                "itemId": "market-hall",
+                "flowKey": "market-hall",
+                "startCursor": "beginning",
+                "span": { "min": 1, "preferred": 1, "max": 1 },
+                "cutPolicy": { "maxBodyLines": 14, "jumpTargetPage": 3 }
+              },
+              {
+                "id": "front-river-court",
+                "type": "articleFrame",
+                "presetId": "front.teaser",
+                "itemId": "river-court",
+                "flowKey": "river-court",
+                "startCursor": "beginning",
+                "span": { "min": 1, "preferred": 2, "max": 2 }
+              },
+              {
+                "id": "front-night-trains",
+                "type": "articleFrame",
+                "presetId": "front.teaser",
+                "itemId": "night-trains",
+                "flowKey": "night-trains",
+                "startCursor": "beginning",
+                "span": { "min": 1, "preferred": 1, "max": 1 }
+              },
+              {
+                "id": "front-climate-ledger",
+                "type": "articleFrame",
+                "presetId": "front.teaser",
+                "itemId": "climate-ledger",
+                "flowKey": "climate-ledger",
+                "startCursor": "beginning",
+                "span": { "min": 1, "preferred": 1, "max": 1 }
+              }
             ]
           }
         ]
       },
       {
-        "pageNumber": 3,
-        "recipeId": "shared-schools-reading-market-hall",
-        "kind": "dualContinuation",
-        "sections": [
+        "id": "page-2",
+        "pageNumber": 2,
+        "presetId": "page.regionStack",
+        "grid": {
+          "columns": { "min": 1, "preferred": 6, "max": 6 }
+        },
+        "regions": [
           {
-            "articleId": "schools-reading-lab",
+            "id": "harbor-continuation",
+            "type": "fullPage",
+            "blocks": [
+              {
+                "id": "harbor-grid-page-2",
+                "type": "articleFrame",
+                "presetId": "article.mediaInset",
+                "itemId": "harbor-grid",
+                "flowKey": "harbor-grid",
+                "startCursor": "current",
+                "role": "primary",
+                "localGrid": {
+                  "columns": { "min": 2, "preferred": 6, "max": 6 }
+                },
+                "media": [
+                  {
+                    "required": true,
+                    "assetRole": "continuationInset",
+                    "placement": {
+                      "anchor": "center",
+                      "span": { "min": 1, "preferred": 2, "max": 3 },
+                      "vertical": "upperThird",
+                      "collapse": "inline",
+                      "crop": "preserve",
+                      "wrapsText": true
+                    }
+                  }
+                ],
+                "pullQuote": {
+                  "required": false,
+                  "placements": [
+                    {
+                      "anchor": "right",
+                      "span": { "min": 1, "preferred": 1, "max": 2 },
+                      "vertical": "middle",
+                      "collapse": "omit",
+                      "crop": "preserve",
+                      "wrapsText": true
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "page-3",
+        "pageNumber": 3,
+        "presetId": "page.regionStack",
+        "grid": {
+          "columns": { "min": 1, "preferred": 6, "max": 6 }
+        },
+        "regions": [
+          {
+            "id": "schools-reading-lab-tail",
+            "type": "stack",
             "role": "top",
-            "mediaTemplateIds": [
-              "rightTwoColumnInset",
-              "rightColumnInset",
-              "leftColumnInset",
-              "centerTwoColumnInset"
-            ],
-            "pullQuoteTemplateIds": [
-              "leftRailMid",
-              "rightRailMid",
-              "centerTwoColumnBreak"
+            "size": { "ratio": 0.5 },
+            "blocks": [
+              {
+                "id": "schools-reading-lab-page-3",
+                "type": "articleFrame",
+                "presetId": "article.mediaInset",
+                "itemId": "schools-reading-lab",
+                "flowKey": "schools-reading-lab",
+                "startCursor": "current",
+                "role": "top",
+                "localGrid": {
+                  "columns": { "min": 4, "preferred": 6, "max": 6 }
+                },
+                "media": [
+                  {
+                    "required": false,
+                    "assetRole": "continuationInset",
+                    "placement": {
+                      "anchor": "right",
+                      "span": { "min": 1, "preferred": 2, "max": 2 },
+                      "vertical": "upperThird",
+                      "collapse": "inline",
+                      "crop": "preserve",
+                      "wrapsText": true
+                    }
+                  }
+                ],
+                "pullQuote": {
+                  "required": false,
+                  "placements": [
+                    {
+                      "anchor": "left",
+                      "span": { "min": 1, "preferred": 1, "max": 2 },
+                      "vertical": "middle",
+                      "collapse": "omit",
+                      "crop": "preserve",
+                      "wrapsText": true
+                    }
+                  ]
+                }
+              }
             ]
           },
           {
-            "articleId": "market-hall",
+            "id": "market-hall-tail",
+            "type": "stack",
             "role": "bottom",
-            "mediaTemplateIds": [
-              "leftColumnInset",
-              "rightColumnInset",
-              "centerTwoColumnInset"
-            ],
-            "pullQuoteTemplateIds": [
-              "rightRailMid",
-              "leftRailMid",
-              "centerTwoColumnBreak"
+            "size": { "ratio": 0.5 },
+            "blocks": [
+              {
+                "id": "market-hall-page-3",
+                "type": "articleFrame",
+                "presetId": "article.mediaInset",
+                "itemId": "market-hall",
+                "flowKey": "market-hall",
+                "startCursor": "current",
+                "role": "bottom",
+                "localGrid": {
+                  "columns": { "min": 2, "preferred": 6, "max": 6 }
+                },
+                "media": [
+                  {
+                    "required": false,
+                    "assetRole": "continuationInset",
+                    "placement": {
+                      "anchor": "left",
+                      "span": { "min": 1, "preferred": 1, "max": 2 },
+                      "vertical": "upperThird",
+                      "collapse": "inline",
+                      "crop": "preserve",
+                      "wrapsText": true
+                    }
+                  }
+                ],
+                "pullQuote": {
+                  "required": false,
+                  "placements": [
+                    {
+                      "anchor": "right",
+                      "span": { "min": 1, "preferred": 1, "max": 2 },
+                      "vertical": "middle",
+                      "collapse": "omit",
+                      "crop": "preserve",
+                      "wrapsText": true
+                    }
+                  ]
+                }
+              }
             ]
           }
-        ],
-        "splitVariants": [
-          0.5,
-          0.55,
-          0.45
         ]
       }
     ]

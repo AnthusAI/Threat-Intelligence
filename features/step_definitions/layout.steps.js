@@ -49,19 +49,20 @@ Then("the active content source should be {string}", async function (expectedSou
   assert.equal(source, expectedSource);
 });
 
-Then("the active edition should expose layout plan version {int}", async function (expectedVersion) {
-  const version = await requirePage(this).locator(".site-shell").getAttribute("data-layout-plan-version");
-  assert.equal(Number(version), expectedVersion);
+Then("the active edition should expose a composable layout plan", async function () {
+  const templateId = await requirePage(this).locator(".site-shell").getAttribute("data-layout-plan-front-template");
+  assert.equal(templateId, "front.mosaic");
 });
 
 Then("the active edition should include article {string}", async function (expectedSlug) {
   const articleSlugs = await requirePage(this).evaluate(() => {
     const layout = window.__PAPYRUS_LAYOUT__;
-    const frontSlugs = layout?.frontBlocks.map((block) => block.article.slug) ?? [];
-    const continuationSlugs = layout?.continuationPages.flatMap((page) => (
-      page.sections.map((section) => section.article.slug)
+    const slugs = layout?.pages.flatMap((page) => (
+      page.regions.flatMap((region) => (
+        region.blocks.map((block) => block.article?.slug).filter(Boolean)
+      ))
     )) ?? [];
-    return Array.from(new Set([...frontSlugs, ...continuationSlugs]));
+    return Array.from(new Set(slugs));
   });
 
   assert.ok(
@@ -73,15 +74,19 @@ Then("the active edition should include article {string}", async function (expec
 Then("the front page should label article {string} as continued on page {int}", async function (articleId, pageNumber) {
   const continuationPageNumber = await requirePage(this).evaluate((targetArticleId) => {
     const layout = window.__PAPYRUS_LAYOUT__;
-    return layout?.frontBlocks.find((block) => block.article.slug === targetArticleId)?.pageNumber ?? null;
+    const frontPage = layout?.pages.find((page) => page.pageNumber === 1);
+    return frontPage?.regions
+      .flatMap((region) => region.blocks)
+      .find((block) => block.article?.slug === targetArticleId)?.jumpTargetPage ?? null;
   }, articleId);
 
   assert.equal(continuationPageNumber, pageNumber);
 });
 
 Then("the article page should show headline {string}", async function (expectedHeadline) {
-  await requirePage(this).locator("h1").waitFor({ state: "visible", timeout: 10_000 });
-  const headline = await requirePage(this).locator("h1").innerText();
+  const headlineLocator = requirePage(this).locator(".article-page h1");
+  await headlineLocator.waitFor({ state: "visible", timeout: 10_000 });
+  const headline = await headlineLocator.innerText();
   assert.equal(headline, expectedHeadline);
 });
 
@@ -111,18 +116,48 @@ Then("no continuation column should be dead", async function () {
   assert.deepEqual(report.deadColumns, []);
 });
 
-Then("the {string} section image should use the {string} template", async function (articleId, templateId) {
+Then("the solved layout should use {int} columns", async function (expectedColumnCount) {
+  const columnCount = await requirePage(this).evaluate(() => window.__PAPYRUS_LAYOUT__?.columnCount ?? null);
+  assert.equal(columnCount, expectedColumnCount);
+});
+
+Then("the {string} section should show a responsive image inset", async function (articleId) {
   const solverSection = await getSolvedSection(requirePage(this), articleId);
   assert.ok(solverSection, `Expected solved section for ${articleId}`);
-  assert.equal(solverSection.image?.templateId, templateId);
+  assert.ok(solverSection.image, `Expected ${articleId} to have a solved image`);
+  assert.ok(solverSection.image.columnSpan >= 1, `Expected ${articleId} image to occupy at least one column`);
+  assert.ok(
+    String(solverSection.image.templateId).startsWith("image-"),
+    `Expected responsive image template id; found ${solverSection.image.templateId}`,
+  );
+});
+
+Then("the {string} section image should span {int} columns", async function (articleId, expectedSpan) {
+  const solverSection = await getSolvedSection(requirePage(this), articleId);
+  assert.ok(solverSection, `Expected solved section for ${articleId}`);
+  assert.equal(solverSection.image?.columnSpan, expectedSpan);
+});
+
+Then("the {string} section image should span between {int} and {int} columns", async function (articleId, minSpan, maxSpan) {
+  const solverSection = await getSolvedSection(requirePage(this), articleId);
+  assert.ok(solverSection, `Expected solved section for ${articleId}`);
+  const actualSpan = solverSection.image?.columnSpan;
+  assert.ok(
+    actualSpan >= minSpan && actualSpan <= maxSpan,
+    `Expected ${articleId} image span between ${minSpan} and ${maxSpan}; found ${actualSpan}`,
+  );
 });
 
 Then(
-  "the {string} section should show a pull quote using the {string} template",
-  async function (articleId, templateId) {
+  "the {string} section should show a responsive pull quote",
+  async function (articleId) {
     const solverSection = await getSolvedSection(requirePage(this), articleId);
     assert.ok(solverSection, `Expected solved section for ${articleId}`);
-    assert.equal(solverSection.pullQuote?.templateId, templateId);
+    assert.ok(solverSection.pullQuote, `Expected ${articleId} to have a solved pull quote`);
+    assert.ok(
+      String(solverSection.pullQuote.templateId).startsWith("pullquote-"),
+      `Expected responsive pull quote template id; found ${solverSection.pullQuote.templateId}`,
+    );
   },
 );
 
@@ -153,8 +188,14 @@ async function getSolvedSection(page, articleId) {
     const active = document.querySelector(".paper-page--active");
     const pageNumber = active?.id ? Number(active.id.replace("page-", "")) : 1;
     const layout = window.__PAPYRUS_LAYOUT__;
-    const continuationPage = layout?.continuationPages.find((candidate) => candidate.pageNumber === pageNumber);
-    return continuationPage?.sections.find((section) => section.article.slug === targetArticleId) ?? null;
+    const solvedPage = layout?.pages.find((candidate) => candidate.pageNumber === pageNumber);
+    const block = solvedPage?.regions
+      .flatMap((region) => region.blocks)
+      .find((candidate) => candidate.article?.slug === targetArticleId);
+    if (!block) return null;
+    const image = block.furniture.find((item) => item.kind === "image") ?? null;
+    const pullQuote = block.furniture.find((item) => item.kind === "pullQuote") ?? null;
+    return { ...block, image, pullQuote };
   }, articleId);
 }
 
@@ -183,7 +224,7 @@ async function getActivePageReport(page) {
     const intersectionHeight = (a, b) => Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
 
     const furniture = Array.from(active.querySelectorAll(".continuation-photo, .continuation-pullquote")).map((element) => ({
-      article: element.closest(".continuation-section")?.getAttribute("data-article-id") ?? "",
+      article: element.closest(".solved-block--articleFrame")?.getAttribute("data-article-id") ?? "",
       className: String(element.className),
       rect: toRect(element),
     }));
@@ -213,7 +254,7 @@ async function getActivePageReport(page) {
         });
       }
 
-      const article = line.closest(".continuation-section")?.getAttribute("data-article-id") ?? "";
+      const article = line.closest(".solved-block--articleFrame")?.getAttribute("data-article-id") ?? "";
       for (const item of furniture) {
         if (item.article === article && overlap(lineRect, item.rect)) {
           lineFurnitureOverlaps.push({
@@ -228,7 +269,7 @@ async function getActivePageReport(page) {
     }
 
     const deadColumns = [];
-    for (const section of active.querySelectorAll(".continuation-section")) {
+    for (const section of active.querySelectorAll(".solved-block--articleFrame")) {
       const article = section.getAttribute("data-article-id") ?? "";
       const sectionFurniture = furniture.filter((item) => item.article === article);
       const columns = Array.from(section.querySelectorAll(".continuation-column"));

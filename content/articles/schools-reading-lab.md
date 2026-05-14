@@ -1,5 +1,6 @@
 ---
 slug: schools-reading-lab
+shortSlug: READING
 section: Education
 byline: Jon Bell
 dateline: NORTHLINE

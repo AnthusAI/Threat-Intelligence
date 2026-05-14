@@ -19,6 +19,7 @@ const LIST_ARTICLES_QUERY = `
       items {
         id
         slug
+        shortSlug
         headline
         title
         publishedAt
@@ -56,7 +57,7 @@ const LIST_RECORDS = {
     query: `
       query ListItems($limit: Int, $nextToken: String) {
         listItems(limit: $limit, nextToken: $nextToken) {
-          items { id slug type status headline title }
+          items { id slug shortSlug type status headline title }
           nextToken
         }
       }
@@ -125,6 +126,7 @@ const GETTERS = {
           status
           typeStatus
           slug
+          shortSlug
           section
           sectionStatus
           title

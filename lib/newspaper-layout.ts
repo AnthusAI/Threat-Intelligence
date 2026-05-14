@@ -5,16 +5,27 @@ import {
   type LayoutLine,
   type PreparedTextWithSegments,
 } from "@chenglou/pretext";
-import { type Article, type ArticleImageAsset, getArticleImageAssets, getArticleText } from "./articles";
+import type { ArticleImageAsset } from "./articles";
 import {
-  createDefaultEditionLayoutPlan,
+  type ArticleFrameBlockSpec,
   type EditionLayoutPlan,
-  type MediaPlacementTemplateId,
-  type PullQuoteTemplateId,
-  validateEditionLayoutPlanForArticles,
+  type LayoutBlockSpec,
+  type LayoutMediaSpec,
+  type LayoutPageSpec,
+  type LayoutPullQuoteSpec,
+  type LayoutRegionSpec,
+  type ResponsivePlacementAnchor,
+  type ResponsivePlacementSpec,
+  type ResponsiveSpanPolicy,
+  type ResponsiveVerticalPlacement,
 } from "./layout-plan";
-
-export type { MediaPlacementTemplateId, PullQuoteTemplateId } from "./layout-plan";
+import {
+  type ArticlePublicationItem,
+  type PublicationItem,
+  getArticlePublicationItems,
+  getPublicationItemImageAssets,
+  getPublicationItemText,
+} from "./publication-items";
 
 export type TextLine = {
   text: string;
@@ -25,20 +36,158 @@ export type TextLine = {
   paintHeight: number;
 };
 
-export type FrontBlock = {
-  blockId: string;
-  article: Article;
-  pageNumber: number | null;
+export type SolvedTextLine = TextLine;
+
+export type SolvedFurniture = SolvedImageFurniture | SolvedPullQuoteFurniture | SolvedMediaClusterFurniture | SolvedAdFurniture;
+
+export type SolvedImageFurniture = {
+  kind: "image";
+  id: string;
+  src: string;
+  alt: string;
+  credit: string;
+  templateId: string;
+  columnStart: number;
+  columnSpan: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  aspectRatio: number;
+  objectFit: "contain" | "cover";
+  objectPosition: string;
+  wrapsText: boolean;
+  preferredHeight: number;
+};
+
+export type SolvedPullQuoteFurniture = {
+  kind: "pullQuote";
+  id: string;
+  text: string;
+  templateId: string;
+  columnStart: number;
+  columnSpan: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  fontSize: number;
+  lineHeight: number;
+  wrapsText: boolean;
+};
+
+export type SolvedMediaClusterFurniture = {
+  kind: "mediaCluster";
+  id: string;
+  templateId: string;
+  images: SolvedImageFurniture[];
+  caption: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  wrapsText: false;
+};
+
+export type SolvedAdFurniture = {
+  kind: "ad";
+  id: string;
+  src?: string;
+  label: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  wrapsText: false;
+};
+
+export type SolvedBlock = {
+  id: string;
+  type: LayoutBlockSpec["type"];
+  presetId?: string;
+  item?: PublicationItem;
+  article?: ArticlePublicationItem;
+  pageNumber: number;
+  jumpTargetPage?: number;
+  jumpLabel?: string;
+  label?: string;
+  title?: string;
+  deck?: string;
+  byline?: string;
+  dateline?: string;
+  section?: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
   span: number;
-  slotHeight: number;
+  columnCount: number;
+  columns: TextLine[][];
+  furniture: SolvedFurniture[];
+  textRange?: PlacedTextRange;
+  hasMore?: boolean;
+  front?: SolvedFrontStoryMetrics;
+  titleHeight?: number;
+  bodyHeight?: number;
+};
+
+export type SolvedFrontStoryMetrics = {
   rowHeight: number;
   bodySlotHeight: number;
   chromeHeight: number;
   jumpReserveHeight: number;
   chrome: StoryChromeMetrics;
-  lines: TextLine[];
-  imageWrap: ImageWrap | null;
-  hasMore: boolean;
+};
+
+export type SolvedRegion = {
+  id: string;
+  type: LayoutRegionSpec["type"];
+  role?: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  columnCount: number;
+  blocks: SolvedBlock[];
+};
+
+export type SolvedPage = {
+  id: string;
+  pageNumber: number;
+  presetId: LayoutPageSpec["presetId"];
+  kind: string;
+  height: number;
+  columnCount: number;
+  regions: SolvedRegion[];
+};
+
+export type NewspaperLayout = {
+  columnCount: number;
+  contentWidth: number;
+  gap: number;
+  pageHeight: number;
+  frontPageHeight: number;
+  pageHeights: Record<number, number>;
+  pageChrome: PageChromeMetrics;
+  pages: SolvedPage[];
+  textRanges: PlacedTextRange[];
+};
+
+export type PageChromeMetrics = {
+  pagePaddingTop: number;
+  pagePaddingX: number;
+  pagePaddingBottom: number;
+  mastheadHeight: number;
+  mastheadKickerLineHeight: number;
+  mastheadTitleFontSize: number;
+  mastheadTitleLineHeight: number;
+  mastheadMetaLineHeight: number;
+  mastheadMetaGap: number;
+  insideHeaderHeight: number;
+  continuedTitleHeight: number;
+  continuedTitleChromeHeight: number;
+  continuedTitleFontSize: number;
+  continuedTitleLineHeight: number;
 };
 
 export type StoryChromeMetrics = {
@@ -67,115 +216,12 @@ export type StoryChromeMetrics = {
   jumpBorderTopHeight: number;
 };
 
-export type ContinuationPage = {
-  id: string;
-  recipeId: string;
-  pageNumber: number;
-  kind: PlannedPage["kind"];
-  height: number;
-  sections: ContinuationSection[];
-  hasMore: boolean;
-};
-
-export type ContinuationSection = {
-  id: string;
-  article: Article;
-  blockId: string;
-  textHeight: number;
-  titleHeight: number;
-  titleLineCount: number;
-  columns: TextLine[][];
-  furniture: ContinuationFurniture[];
-  image: ContinuationImage | null;
-  pullQuote: ContinuationPullQuote | null;
-  textRange: PlacedTextRange;
-  hasMore: boolean;
-};
-
-export type ContinuationFurniture = ContinuationImage | ContinuationPullQuote;
-
-export type ContinuationImage = {
-  kind: "image";
-  id: string;
-  src: string;
-  alt: string;
-  credit: string;
-  templateId: MediaPlacementTemplateId;
-  columnStartStrategy: MediaColumnStartStrategy;
-  columnStart: number;
-  columnSpan: number;
-  verticalAnchor: "top";
-  aspectRatio: number;
-  aspectRatioPolicy: "preserve" | "cropAllowed";
-  objectFit: "contain" | "cover";
-  objectPosition: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  layoutHeight: number;
-  wrapsText: boolean;
-  preferredHeight: number;
-};
-
-export type ContinuationPullQuote = {
-  kind: "pullQuote";
-  id: string;
-  text: string;
-  templateId: PullQuoteTemplateId;
-  columnStartStrategy: MediaColumnStartStrategy;
-  columnStart: number;
-  columnSpan: number;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  wrapsText: boolean;
-  fontSize: number;
-  lineHeight: number;
-  fallbackPenalty: number;
-};
-
-export type NewspaperLayout = {
-  columnCount: number;
-  contentWidth: number;
-  gap: number;
-  pageHeight: number;
-  frontPageHeight: number;
-  pageHeights: Record<number, number>;
-  pageChrome: PageChromeMetrics;
-  recipes: PageRecipe[];
-  pages: PlacedPage[];
-  textRanges: PlacedTextRange[];
-  frontBlocks: FrontBlock[];
-  continuationPages: ContinuationPage[];
-};
-
-export type PageChromeMetrics = {
-  pagePaddingTop: number;
-  pagePaddingX: number;
-  pagePaddingBottom: number;
-  mastheadHeight: number;
-  mastheadKickerLineHeight: number;
-  mastheadTitleFontSize: number;
-  mastheadTitleLineHeight: number;
-  mastheadMetaLineHeight: number;
-  mastheadMetaGap: number;
-  insideHeaderHeight: number;
-  continuedTitleHeight: number;
-  continuedTitleChromeHeight: number;
-  continuedTitleFontSize: number;
-  continuedTitleLineHeight: number;
-};
-
-export type ImageWrap = {
+export type TextObstacle = {
   x: number;
   y: number;
   width: number;
   height: number;
 };
-
-export type TextObstacle = ImageWrap;
 
 export type PlacedTextRange = {
   articleId: string;
@@ -187,119 +233,9 @@ export type PlacedTextRange = {
 };
 
 export type ArticleFlow = {
-  article: Article;
+  article: ArticlePublicationItem;
   currentCursor: LayoutCursor;
   placedRanges: PlacedTextRange[];
-};
-
-export type PageRecipe = {
-  id: string;
-  name: string;
-  kind: "front" | "continuation" | "section";
-  blocks: LayoutBlock[];
-};
-
-export type EditionPlan = {
-  frontPage: {
-    pageNumber: 1;
-    recipeId: string;
-    templateId: "front.teaserGrid";
-    articleIds: string[];
-    cutPolicies: FrontCutPolicy[];
-  };
-  pages: PlannedPage[];
-};
-
-export type PlannedPage = {
-  pageNumber: number;
-  recipeId: string;
-  kind: "singleContinuation" | "dualContinuation" | "photoContinuation";
-  sections: PlannedContinuationSection[];
-  splitVariants?: number[];
-};
-
-export type PlannedContinuationSection = {
-  articleId: string;
-  role: "primary" | "top" | "bottom";
-  mediaTemplateIds?: MediaPlacementTemplateId[];
-  pullQuoteTemplateIds?: PullQuoteTemplateId[];
-};
-
-export type FrontCutPolicy = {
-  articleId: string;
-  maxLines: number;
-  continuationPageNumber: number;
-};
-
-export type LayoutBlock =
-  | TeaserGridBlock
-  | ContinuedArticleBlock
-  | ImageWrapArticleBlock
-  | TailStackBlock
-  | PhotoFeatureBlock
-  | PullQuoteBlock;
-
-export type TeaserGridBlock = {
-  id: string;
-  kind: "teaserGrid";
-  articleIds: string[];
-};
-
-export type ContinuedArticleBlock = {
-  id: string;
-  kind: "continuedArticle";
-  articleId: string;
-};
-
-export type ImageWrapArticleBlock = {
-  id: string;
-  kind: "imageWrapArticle";
-  articleId: string;
-  image: ElasticImageSpec;
-};
-
-export type TailStackBlock = {
-  id: string;
-  kind: "tailStack";
-  articleIds: string[];
-};
-
-export type PhotoFeatureBlock = {
-  id: string;
-  kind: "photoFeature";
-  articleId: string;
-  image: ElasticImageSpec;
-};
-
-export type PullQuoteBlock = {
-  id: string;
-  kind: "pullQuote";
-  articleId: string;
-  quote: string;
-};
-
-export type ElasticImageSpec = {
-  minHeight: number;
-  preferredHeight: number;
-  maxHeight: number;
-  crop: "cover" | "contain";
-  wrapsText: boolean;
-};
-
-export type BlockResult = {
-  blockId: string;
-  kind: LayoutBlock["kind"];
-  usedHeight: number;
-  score: number;
-  textRanges: PlacedTextRange[];
-};
-
-export type PlacedPage = {
-  id: string;
-  pageNumber: number;
-  recipeId: string;
-  height: number;
-  blocks: BlockResult[];
 };
 
 type LayoutConfig = {
@@ -321,9 +257,32 @@ type FrontRow = {
   height: number;
 };
 
-const EMPTY_CURSOR: LayoutCursor = { segmentIndex: 0, graphemeIndex: 0 };
+type PreparedTextCache = Map<string, PreparedTextWithSegments>;
 
-const ARTICLE_SPANS = [2, 1, 1, 2, 1, 1];
+type ArticleFrameCandidate = {
+  block: SolvedBlock;
+  range: PlacedTextRange;
+  score: number;
+  whitespace: number;
+};
+
+type MediaVariant = {
+  id: string;
+  placement: ResponsivePlacementSpec | null;
+  columnStart: number;
+  columnSpan: number;
+  fallbackPenalty: number;
+};
+
+type PullQuoteVariant = {
+  id: string;
+  placement: ResponsivePlacementSpec | null;
+  columnStart: number;
+  columnSpan: number;
+  fallbackPenalty: number;
+};
+
+const EMPTY_CURSOR: LayoutCursor = { segmentIndex: 0, graphemeIndex: 0 };
 const STORY_MEASURE_CHROME_HEIGHT = 9;
 const MASTHEAD_RULE_HEIGHT = 6;
 const MASTHEAD_RULE_MARGIN_BOTTOM = 9;
@@ -345,153 +304,725 @@ const CONTINUED_TITLE_MARGIN_BOTTOM = 14;
 const CONTINUATION_SECTION_SEPARATOR_HEIGHT = 38;
 const FURNITURE_COLLISION_GUTTER = 14;
 const PULL_QUOTE_VERTICAL_PADDING = 24;
-const STORY_CHROME_TOKENS = {
-  storyPaddingTop: 10,
-  labelFontSize: 11.52,
-  labelLineHeight: 14,
-  headlineMarginTop: 5,
-  headlineMarginBottom: 8,
-  deckFontSize: 16,
-  deckLineHeight: 20,
-  deckMarginBottom: 8,
-  bylineFontSize: 11.2,
-  bylineLineHeight: 14,
-  bylineMarginBottom: 9,
-  jumpLineHeight: 14,
-  jumpPaddingTop: 8,
-  jumpBorderTopHeight: 1,
-} as const;
-
-type PreparedTextCache = Map<string, PreparedTextWithSegments>;
-
-type InternalBlockResult = BlockResult & {
-  frontBlocks?: FrontBlock[];
-  continuationPage?: ContinuationPage;
-  hasMore?: boolean;
-};
-
-type PlannedContinuationResult = {
-  page: ContinuationPage;
-  blocks: BlockResult[];
-  textRanges: PlacedTextRange[];
-};
-
-type ContinuationSectionCandidate = {
-  section: ContinuationSection;
-  blockResult: BlockResult;
-  whitespace: number;
-  allocatedHeight?: number;
-};
-
-export type MediaColumnStartStrategy = "left" | "right" | "center" | "explicit";
-
-type MediaTemplateContext = {
-  mode: "single" | "shared";
-  role: PlannedContinuationSection["role"];
-};
-
-type PhotoContinuationVariant = {
-  id: string;
-  templateId: MediaPlacementTemplateId | "noImage";
-  columnStartStrategy: MediaColumnStartStrategy;
-  columnSpan: number;
-  aspectRatioPolicy: "preserve" | "cropAllowed";
-  wrapsText: boolean;
-  fallbackPenalty: number;
-};
-
-type PullQuotePlacementVariant = {
-  id: string;
-  templateId: PullQuoteTemplateId;
-  columnStartStrategy: MediaColumnStartStrategy;
-  columnSpan: number;
-  anchorRatio: number;
-  fallbackPenalty: number;
-};
-
-type FurnitureRect = {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-};
 
 export function buildNewspaperLayout(
-  articles: Article[],
+  items: PublicationItem[],
   pageWidth: number,
   viewportHeight: number,
-  layoutPlan?: EditionLayoutPlan,
+  layoutPlan: EditionLayoutPlan,
 ): NewspaperLayout {
   const config = getLayoutConfig(pageWidth, viewportHeight);
-  const editionPlan = createEditionPlan(articles, layoutPlan);
+  const itemsBySlug = new Map(items.map((item) => [item.slug, item]));
+  const flows = createArticleFlows(items);
   const prepared: PreparedTextCache = new Map();
-  const flows = createArticleFlows(articles);
-  const recipes: PageRecipe[] = [];
-  const pages: PlacedPage[] = [];
+  const pages: SolvedPage[] = [];
   const textRanges: PlacedTextRange[] = [];
-  const frontRecipe = createFrontPageRecipe(editionPlan);
-  recipes.push(frontRecipe);
 
-  const frontResult = solveTeaserGridBlock(
-    frontRecipe.blocks[0] as TeaserGridBlock,
-    flows,
-    prepared,
-    config,
-    editionPlan.frontPage.pageNumber,
-    editionPlan.frontPage.cutPolicies,
-  );
-  const frontBlocks = frontResult.frontBlocks ?? [];
-  const frontPageHeight = getFrontPageHeight(config);
-  pages.push({
-    id: "page-1",
-    pageNumber: 1,
-    recipeId: frontRecipe.id,
-    height: frontPageHeight,
-    blocks: [frontResult],
-  });
-  textRanges.push(...frontResult.textRanges);
-
-  const continuationPages: ContinuationPage[] = [];
-  for (const plannedPage of editionPlan.pages) {
-    const recipe = createPlannedContinuationPageRecipe(plannedPage, articles);
-    recipes.push(recipe);
-    const result = solvePlannedContinuationPage(plannedPage, flows, prepared, config);
-    continuationPages.push(result.page);
-    pages.push({
-      id: result.page.id,
-      pageNumber: result.page.pageNumber,
-      recipeId: recipe.id,
-      height: result.page.height,
-      blocks: result.blocks,
-    });
-    textRanges.push(...result.textRanges);
+  for (const pageSpec of layoutPlan.pages) {
+    const page = solvePage(pageSpec, itemsBySlug, flows, prepared, config);
+    pages.push(page);
+    textRanges.push(...collectPageTextRanges(page));
   }
 
   const pageHeights: Record<number, number> = {};
   for (const page of pages) {
     pageHeights[page.pageNumber] = page.height;
   }
-  const maxPageHeight = Math.max(...pages.map((page) => page.height), frontPageHeight);
+  const maxPageHeight = Math.max(...pages.map((page) => page.height), 0);
 
   return {
     columnCount: config.columnCount,
     contentWidth: config.contentWidth,
     gap: config.gap,
     pageHeight: maxPageHeight,
-    frontPageHeight,
+    frontPageHeight: pageHeights[1] ?? maxPageHeight,
     pageHeights,
     pageChrome: config.pageChrome,
-    recipes,
     pages,
     textRanges,
-    frontBlocks,
-    continuationPages,
   };
 }
 
-function createArticleFlows(articles: Article[]): Map<string, ArticleFlow> {
+function solvePage(
+  pageSpec: LayoutPageSpec,
+  itemsBySlug: Map<string, PublicationItem>,
+  flows: Map<string, ArticleFlow>,
+  prepared: PreparedTextCache,
+  config: LayoutConfig,
+): SolvedPage {
+  if (pageSpec.presetId === "front.mosaic") {
+    return solveFrontMosaicPage(pageSpec, itemsBySlug, flows, prepared, config);
+  }
+  return solveStackedEditorialPage(pageSpec, itemsBySlug, flows, prepared, config);
+}
+
+function solveFrontMosaicPage(
+  pageSpec: LayoutPageSpec,
+  itemsBySlug: Map<string, PublicationItem>,
+  flows: Map<string, ArticleFlow>,
+  prepared: PreparedTextCache,
+  config: LayoutConfig,
+): SolvedPage {
+  const regionSpec = pageSpec.regions[0];
+  const blocks = regionSpec.blocks
+    .filter((block): block is ArticleFrameBlockSpec => block.type === "articleFrame")
+    .map((blockSpec, index) => solveFrontArticleFrame(blockSpec, index, itemsBySlug, flows, prepared, config, pageSpec.pageNumber));
+  const gridHeight = getFrontPageGridHeight(config);
+  const pageHeight = getFrontPageHeight(config);
+
+  return {
+    id: pageSpec.id ?? pageIdFor(pageSpec.pageNumber),
+    pageNumber: pageSpec.pageNumber,
+    presetId: pageSpec.presetId,
+    kind: "front",
+    height: pageHeight,
+    columnCount: config.columnCount,
+    regions: [
+      {
+        id: regionSpec.id,
+        type: regionSpec.type,
+        role: regionSpec.role,
+        x: 0,
+        y: config.pageChrome.mastheadHeight,
+        width: config.contentWidth,
+        height: gridHeight,
+        columnCount: config.columnCount,
+        blocks,
+      },
+    ],
+  };
+}
+
+function solveFrontArticleFrame(
+  blockSpec: ArticleFrameBlockSpec,
+  index: number,
+  itemsBySlug: Map<string, PublicationItem>,
+  flows: Map<string, ArticleFlow>,
+  prepared: PreparedTextCache,
+  config: LayoutConfig,
+  pageNumber: number,
+): SolvedBlock {
+  const item = requireArticleItem(blockSpec.itemId, itemsBySlug);
+  const flow = getOrCreateFlow(flows, blockSpec.flowKey ?? blockSpec.itemId, item);
+  if (blockSpec.startCursor === "beginning") flow.currentCursor = { ...EMPTY_CURSOR };
+
+  const span = Math.min(blockSpec.span?.preferred ?? 1, config.columnCount);
+  const blockWidth = getSpanWidth(config, span);
+  const chrome = getStoryChromeMetrics(config, item, index, blockWidth);
+  const chromeHeight = getStoryChromeHeight(chrome);
+  const jumpReserveHeight = getStoryJumpReserveHeight(chrome);
+  const rowHeight = getFrontRowHeight(config, index);
+  const bodySlotHeight = Math.max(config.linePaintHeight, rowHeight - chromeHeight - jumpReserveHeight);
+  const lineLimitHeight = blockSpec.cutPolicy?.maxBodyLines
+    ? getLineLimitHeight(blockSpec.cutPolicy.maxBodyLines, config.lineHeight, config.linePaintHeight)
+    : bodySlotHeight;
+  const maxHeight = Math.min(bodySlotHeight, lineLimitHeight);
+  const imageWrap = index === 0 ? getLeadImageWrap(item, blockWidth, config.lineHeight) : null;
+  const startCursor = { ...flow.currentCursor };
+  const result = layoutTextLines({
+    prepared: getPrepared(prepared, item, config.frontBodyFont),
+    cursor: startCursor,
+    maxHeight,
+    maxWidth: blockWidth,
+    lineHeight: config.lineHeight,
+    linePaintHeight: config.linePaintHeight,
+    obstacles: imageWrap ? [imageWrap] : [],
+  });
+  const range = createTextRange({
+    flow,
+    pageId: pageIdFor(pageNumber),
+    blockId: blockSpec.id,
+    startCursor,
+    endCursor: result.cursor,
+    exhausted: !result.hasMore,
+  });
+  commitTextRange(flow, range);
+
+  return {
+    id: blockSpec.id,
+    type: "articleFrame",
+    presetId: blockSpec.presetId,
+    item,
+    article: item,
+    pageNumber,
+    jumpTargetPage: result.hasMore ? blockSpec.cutPolicy?.jumpTargetPage : undefined,
+    jumpLabel:
+      result.hasMore && blockSpec.cutPolicy?.jumpTargetPage
+        ? formatContinuationJumpLabel(item, blockSpec.cutPolicy.jumpTargetPage)
+        : undefined,
+    label: item.section,
+    title: item.headline,
+    deck: item.deck,
+    byline: item.byline,
+    dateline: item.dateline,
+    section: item.section,
+    x: 0,
+    y: 0,
+    width: blockWidth,
+    height: rowHeight,
+    span,
+    columnCount: 1,
+    columns: [result.lines],
+    furniture: imageWrap ? [leadImageToFurniture(item, imageWrap)] : [],
+    textRange: range,
+    hasMore: result.hasMore,
+    front: {
+      rowHeight,
+      bodySlotHeight,
+      chromeHeight,
+      jumpReserveHeight,
+      chrome,
+    },
+    bodyHeight: bodySlotHeight,
+  };
+}
+
+function solveStackedEditorialPage(
+  pageSpec: LayoutPageSpec,
+  itemsBySlug: Map<string, PublicationItem>,
+  flows: Map<string, ArticleFlow>,
+  prepared: PreparedTextCache,
+  config: LayoutConfig,
+): SolvedPage {
+  const pageStartY = config.pageChrome.insideHeaderHeight;
+  const regions: SolvedRegion[] = [];
+  let currentY = pageStartY;
+  const ratios = pageSpec.regions.map((region) => region.size?.ratio ?? 1 / pageSpec.regions.length);
+  const ratioTotal = ratios.reduce((total, ratio) => total + ratio, 0) || 1;
+
+  for (let index = 0; index < pageSpec.regions.length; index += 1) {
+    const regionSpec = pageSpec.regions[index];
+    const allocatedHeight = Math.max(
+      config.linePaintHeight,
+      Math.floor((config.continuationHeight * ratios[index]) / ratioTotal) -
+        (index > 0 ? CONTINUATION_SECTION_SEPARATOR_HEIGHT : 0),
+    );
+    const region = solveRegion(regionSpec, pageSpec, allocatedHeight, itemsBySlug, flows, prepared, config, currentY);
+    regions.push(region);
+    currentY += region.height + (index < pageSpec.regions.length - 1 ? CONTINUATION_SECTION_SEPARATOR_HEIGHT : 0);
+  }
+
+  const contentBottom = Math.max(...regions.map((region) => region.y + region.height), pageStartY);
+  const height = Math.ceil(
+    config.pageChrome.pagePaddingTop +
+      contentBottom +
+      config.pageChrome.pagePaddingBottom,
+  );
+
+  return {
+    id: pageSpec.id ?? pageIdFor(pageSpec.pageNumber),
+    pageNumber: pageSpec.pageNumber,
+    presetId: pageSpec.presetId,
+    kind: getPageKind(pageSpec),
+    height,
+    columnCount: config.columnCount,
+    regions,
+  };
+}
+
+function solveRegion(
+  regionSpec: LayoutRegionSpec,
+  pageSpec: LayoutPageSpec,
+  allocatedHeight: number,
+  itemsBySlug: Map<string, PublicationItem>,
+  flows: Map<string, ArticleFlow>,
+  prepared: PreparedTextCache,
+  config: LayoutConfig,
+  y: number,
+): SolvedRegion {
+  const blocks: SolvedBlock[] = [];
+  let currentY = 0;
+
+  for (const blockSpec of regionSpec.blocks) {
+    const remainingHeight = Math.max(config.linePaintHeight, allocatedHeight - currentY);
+    const block = solveBlock(blockSpec, pageSpec, remainingHeight, itemsBySlug, flows, prepared, config);
+    blocks.push({ ...block, y: currentY });
+    currentY += block.height;
+  }
+
+  return {
+    id: regionSpec.id,
+    type: regionSpec.type,
+    role: regionSpec.role,
+    x: 0,
+    y,
+    width: config.contentWidth,
+    height: Math.max(currentY, allocatedHeight),
+    columnCount: config.columnCount,
+    blocks,
+  };
+}
+
+function solveBlock(
+  blockSpec: LayoutBlockSpec,
+  pageSpec: LayoutPageSpec,
+  allocatedHeight: number,
+  itemsBySlug: Map<string, PublicationItem>,
+  flows: Map<string, ArticleFlow>,
+  prepared: PreparedTextCache,
+  config: LayoutConfig,
+): SolvedBlock {
+  if (blockSpec.type === "articleFrame") {
+    return solveArticleFrameBlock(blockSpec, pageSpec, allocatedHeight, itemsBySlug, flows, prepared, config);
+  }
+  return solveStaticBlock(blockSpec, pageSpec, allocatedHeight, itemsBySlug, config);
+}
+
+function solveArticleFrameBlock(
+  blockSpec: ArticleFrameBlockSpec,
+  pageSpec: LayoutPageSpec,
+  allocatedHeight: number,
+  itemsBySlug: Map<string, PublicationItem>,
+  flows: Map<string, ArticleFlow>,
+  prepared: PreparedTextCache,
+  config: LayoutConfig,
+): SolvedBlock {
+  const item = requireArticleItem(blockSpec.itemId, itemsBySlug);
+  const flow = getOrCreateFlow(flows, blockSpec.flowKey ?? blockSpec.itemId, item);
+  const startCursor = blockSpec.startCursor === "beginning" ? { ...EMPTY_CURSOR } : { ...flow.currentCursor };
+  const blockWidth = getBlockWidth(config, blockSpec.span);
+  const title = getContinuationTitleMetrics(config, item, blockWidth);
+  const bodyBudget = Math.max(config.linePaintHeight, allocatedHeight - title.totalHeight);
+  const candidates = solveArticleFrameCandidates({
+    blockSpec,
+    pageSpec,
+    item,
+    flow,
+    startCursor,
+    blockWidth,
+    bodyBudget,
+    prepared,
+    config,
+  });
+  const best = chooseBestCandidate(candidates, blockSpec.id);
+  commitTextRange(flow, best.range);
+  return best.block;
+}
+
+function solveArticleFrameCandidates({
+  blockSpec,
+  pageSpec,
+  item,
+  flow,
+  startCursor,
+  blockWidth,
+  bodyBudget,
+  prepared,
+  config,
+}: {
+  blockSpec: ArticleFrameBlockSpec;
+  pageSpec: LayoutPageSpec;
+  item: ArticlePublicationItem;
+  flow: ArticleFlow;
+  startCursor: LayoutCursor;
+  blockWidth: number;
+  bodyBudget: number;
+  prepared: PreparedTextCache;
+  config: LayoutConfig;
+}): ArticleFrameCandidate[] {
+  const localColumnCounts = getLocalColumnCountCandidates(blockSpec.localGrid?.columns, config, blockWidth);
+  const candidates: ArticleFrameCandidate[] = [];
+
+  for (const columnCount of localColumnCounts) {
+    const localConfig = { ...config, columnCount, contentWidth: blockWidth };
+    const mediaVariants = getMediaVariants(blockSpec.media[0], localConfig);
+    const pullQuoteVariants = getPullQuoteVariants(item, blockSpec.pullQuote, localConfig);
+
+    for (const mediaVariant of mediaVariants) {
+      const image = createImageFurniture(item, mediaVariant, localConfig, bodyBudget);
+      if (blockSpec.media[0]?.required && !image) continue;
+
+      const minimumHeight = Math.max(config.linePaintHeight, image ? image.y + image.height : 0);
+      const textHeights = getTextHeightVariants(Math.max(minimumHeight, bodyBudget), minimumHeight, localConfig);
+      for (const textHeight of textHeights) {
+        for (const pullQuoteVariant of pullQuoteVariants) {
+          const pullQuote = createPullQuoteFurniture(item, pullQuoteVariant, localConfig, textHeight, image);
+          if (blockSpec.pullQuote?.required && !pullQuote) continue;
+
+          const furniture: SolvedFurniture[] = [];
+          if (image) furniture.push(image);
+          if (pullQuote) furniture.push(pullQuote);
+          const textResult = layoutTextColumns({
+            item,
+            prepared,
+            cursor: startCursor,
+            columnCount,
+            textHeight,
+            localConfig,
+            furniture,
+          });
+          const range = createTextRange({
+            flow,
+            pageId: pageIdFor(pageSpec.pageNumber),
+            blockId: blockSpec.id,
+            startCursor,
+            endCursor: textResult.cursor,
+            exhausted: !textResult.hasMore,
+          });
+          const linesHeight = Math.max(...textResult.columns.map(getLinesHeight), 0);
+          const furnitureBottom = getFurnitureBottom(furniture);
+          const bodyHeight = Math.max(furnitureBottom, textResult.hasMore ? textHeight : linesHeight, config.linePaintHeight);
+          const title = getContinuationTitleMetrics(config, item, blockWidth);
+          const blockHeight = title.totalHeight + bodyHeight;
+          const whitespace = getColumnWhitespace(textResult.columns, bodyHeight, furniture);
+          const deadColumns = getDeadColumnCount(textResult.columns, bodyHeight, furniture);
+          const score =
+            50_000 -
+            whitespace * 1.1 -
+            deadColumns * 8_000 -
+            (image ? Math.abs(image.height - image.preferredHeight) * 0.35 : 800) -
+            (pullQuote ? 0 : 180) -
+            mediaVariant.fallbackPenalty -
+            pullQuoteVariant.fallbackPenalty -
+            Math.max(0, config.columnCount - columnCount) * 240;
+
+          candidates.push({
+            block: {
+              id: blockSpec.id,
+              type: "articleFrame",
+              presetId: blockSpec.presetId,
+              item,
+              article: item,
+              pageNumber: pageSpec.pageNumber,
+              label: blockSpec.startCursor === "current" ? formatContinuationSourceLabel(item, 1) : item.section,
+              title: item.headline,
+              deck: item.deck,
+              byline: item.byline,
+              dateline: item.dateline,
+              section: item.section,
+              x: 0,
+              y: 0,
+              width: blockWidth,
+              height: blockHeight,
+              span: getBlockSpan(config, blockSpec.span),
+              columnCount,
+              columns: textResult.columns,
+              furniture,
+              textRange: range,
+              hasMore: textResult.hasMore,
+              titleHeight: title.headingHeight,
+              bodyHeight,
+            },
+            range,
+            score,
+            whitespace,
+          });
+        }
+      }
+    }
+  }
+
+  return candidates;
+}
+
+function solveStaticBlock(
+  blockSpec: LayoutBlockSpec,
+  pageSpec: LayoutPageSpec,
+  allocatedHeight: number,
+  itemsBySlug: Map<string, PublicationItem>,
+  config: LayoutConfig,
+): SolvedBlock {
+  const width = config.contentWidth;
+  if (blockSpec.type === "itemStack") {
+    const items = blockSpec.itemIds.map((itemId) => requireKnownItem(itemId, itemsBySlug));
+    return {
+      id: blockSpec.id,
+      type: blockSpec.type,
+      pageNumber: pageSpec.pageNumber,
+      title: blockSpec.title,
+      x: 0,
+      y: 0,
+      width,
+      height: Math.min(allocatedHeight, 220 + items.length * 72),
+      span: config.columnCount,
+      columnCount: 1,
+      columns: [],
+      furniture: [],
+    };
+  }
+  if (blockSpec.type === "adBlock") {
+    return {
+      id: blockSpec.id,
+      type: blockSpec.type,
+      presetId: blockSpec.presetId,
+      item: blockSpec.itemId ? requireKnownItem(blockSpec.itemId, itemsBySlug) : undefined,
+      pageNumber: pageSpec.pageNumber,
+      title: "Advertisement",
+      x: 0,
+      y: 0,
+      width,
+      height: Math.max(260, Math.min(allocatedHeight, 720)),
+      span: config.columnCount,
+      columnCount: config.columnCount,
+      columns: [],
+      furniture: [
+        {
+          kind: "ad",
+          id: `${blockSpec.id}-ad`,
+          src: blockSpec.imageUrl,
+          label: "Advertisement",
+          x: 0,
+          y: 0,
+          width,
+          height: Math.max(260, Math.min(allocatedHeight, 720)),
+          wrapsText: false,
+        },
+      ],
+    };
+  }
+  return {
+    id: blockSpec.id,
+    type: blockSpec.type,
+    pageNumber: pageSpec.pageNumber,
+    x: 0,
+    y: 0,
+    width,
+    height: blockSpec.type === "rule" ? 18 : Math.min(allocatedHeight, 120),
+    span: config.columnCount,
+    columnCount: config.columnCount,
+    columns: [],
+    furniture: [],
+  };
+}
+
+function layoutTextColumns({
+  item,
+  prepared,
+  cursor,
+  columnCount,
+  textHeight,
+  localConfig,
+  furniture,
+}: {
+  item: ArticlePublicationItem;
+  prepared: PreparedTextCache;
+  cursor: LayoutCursor;
+  columnCount: number;
+  textHeight: number;
+  localConfig: LayoutConfig;
+  furniture: SolvedFurniture[];
+}): { columns: TextLine[][]; cursor: LayoutCursor; hasMore: boolean } {
+  const columns: TextLine[][] = [];
+  const preparedText = getPrepared(prepared, item, localConfig.continuationBodyFont);
+  const columnWidth = getSpanWidth(localConfig, 1);
+  let current = { ...cursor };
+  let hasMore = true;
+
+  for (let columnIndex = 0; columnIndex < columnCount; columnIndex += 1) {
+    const result = layoutTextLines({
+      prepared: preparedText,
+      cursor: current,
+      maxHeight: textHeight,
+      maxWidth: columnWidth,
+      lineHeight: localConfig.lineHeight,
+      linePaintHeight: localConfig.linePaintHeight,
+      obstacles: getColumnTextObstacles(furniture, columnIndex),
+    });
+    columns.push(result.lines);
+    current = result.cursor;
+    hasMore = result.hasMore;
+    if (!hasMore) {
+      while (columns.length < columnCount) columns.push([]);
+      break;
+    }
+  }
+
+  return { columns, cursor: current, hasMore };
+}
+
+function getMediaVariants(media: LayoutMediaSpec | undefined, config: LayoutConfig): MediaVariant[] {
+  if (!media) return [{ id: "none", placement: null, columnStart: 0, columnSpan: 0, fallbackPenalty: 900 }];
+  const variants = resolvePlacementVariants(media.placement, config).map((variant) => ({
+    ...variant,
+    fallbackPenalty: variant.fallbackPenalty + Math.abs(variant.columnSpan - media.placement.span.preferred) * 900,
+  }));
+  if (media.required) return variants;
+  return [...variants, { id: "none", placement: null, columnStart: 0, columnSpan: 0, fallbackPenalty: 1_400 }];
+}
+
+function getPullQuoteVariants(
+  article: ArticlePublicationItem,
+  pullQuote: LayoutPullQuoteSpec | undefined,
+  config: LayoutConfig,
+): PullQuoteVariant[] {
+  const none = { id: "none", placement: null, columnStart: 0, columnSpan: 0, fallbackPenalty: 0 };
+  if (!pullQuote || !article.pullQuotes?.[0]) return [none];
+  const variants = pullQuote.placements.flatMap((placement, placementIndex) =>
+    resolvePlacementVariants(placement, config).map((variant) => ({
+      ...variant,
+      fallbackPenalty: variant.fallbackPenalty + placementIndex * 100,
+    })),
+  );
+  return pullQuote.required ? variants : [none, ...variants];
+}
+
+function resolvePlacementVariants(placement: ResponsivePlacementSpec, config: LayoutConfig): Array<{
+  id: string;
+  placement: ResponsivePlacementSpec;
+  columnStart: number;
+  columnSpan: number;
+  fallbackPenalty: number;
+}> {
+  const collapsed = config.columnCount < placement.span.min;
+  if (collapsed && placement.collapse === "omit") return [];
+  const spans = collapsed
+    ? [placement.collapse === "fullWidth" ? config.columnCount : 1]
+    : getSpanCandidates(placement.span, config.columnCount);
+  return spans.map((span, index) => {
+    const anchor = collapsed && placement.collapse === "inline" ? "inline" : placement.anchor;
+    const columnStart = getColumnStart(resolveAnchor(anchor), span, config.columnCount);
+    return {
+      id: `${resolveAnchor(anchor)}-span${span}-${placement.vertical}`,
+      placement,
+      columnStart,
+      columnSpan: span,
+      fallbackPenalty: index * 120 + (collapsed ? 320 : 0),
+    };
+  });
+}
+
+function createImageFurniture(
+  article: ArticlePublicationItem,
+  variant: MediaVariant,
+  config: LayoutConfig,
+  textHeight: number,
+): SolvedImageFurniture | null {
+  if (!variant.placement || variant.columnSpan === 0) return null;
+  const asset = getPreferredImage(article, variant.placement, variant.placement ? undefined : undefined);
+  if (!asset) return null;
+  const columnWidth = getSpanWidth(config, 1);
+  const width = Math.round(getSpanWidth(config, variant.columnSpan));
+  const x = Math.round(variant.columnStart * (columnWidth + config.gap));
+  const aspectRatio = getImageAspectRatio(asset);
+  const preferredHeight = Math.round(width / aspectRatio);
+  const height = variant.placement.crop === "cropAllowed"
+    ? clamp(preferredHeight, asset.layout?.minHeight ?? 140, asset.layout?.maxHeight ?? 420)
+    : preferredHeight;
+  const y = getFurnitureY(variant.placement.vertical, height, textHeight, config);
+  const focalPoint = asset.layout?.focalPoint ?? { x: 0.5, y: 0.5 };
+  return {
+    kind: "image",
+    id: `${article.slug}-${variant.id}-image`,
+    src: asset.src,
+    alt: asset.alt,
+    credit: asset.credit,
+    templateId: `image-${variant.id}`,
+    columnStart: variant.columnStart,
+    columnSpan: variant.columnSpan,
+    x,
+    y,
+    width,
+    height,
+    aspectRatio,
+    objectFit: variant.placement.crop === "cropAllowed" ? "cover" : "contain",
+    objectPosition: `${Math.round(focalPoint.x * 100)}% ${Math.round(focalPoint.y * 100)}%`,
+    wrapsText: variant.placement.wrapsText,
+    preferredHeight,
+  };
+}
+
+function createPullQuoteFurniture(
+  article: ArticlePublicationItem,
+  variant: PullQuoteVariant,
+  config: LayoutConfig,
+  textHeight: number,
+  image: SolvedImageFurniture | null,
+): SolvedPullQuoteFurniture | null {
+  if (!variant.placement || variant.columnSpan === 0) return null;
+  const text = article.pullQuotes?.[0];
+  if (!text) return null;
+  const columnWidth = getSpanWidth(config, 1);
+  const width = Math.round(getSpanWidth(config, variant.columnSpan));
+  const x = Math.round(variant.columnStart * (columnWidth + config.gap));
+  const metrics = getPullQuoteMetrics(text, width, config);
+  const y = getPullQuoteY({
+    x,
+    width,
+    height: metrics.height,
+    textHeight,
+    anchorRatio: getVerticalAnchorRatio(variant.placement.vertical),
+    image,
+    config,
+  });
+  if (y === null) return null;
+  return {
+    kind: "pullQuote",
+    id: `${article.slug}-${variant.id}-pullquote`,
+    text,
+    templateId: `pullquote-${variant.id}`,
+    columnStart: variant.columnStart,
+    columnSpan: variant.columnSpan,
+    x,
+    y,
+    width,
+    height: metrics.height,
+    fontSize: metrics.fontSize,
+    lineHeight: metrics.lineHeight,
+    wrapsText: true,
+  };
+}
+
+function getPreferredImage(
+  article: ArticlePublicationItem,
+  _placement: ResponsivePlacementSpec,
+  assetRole: string | undefined,
+): ArticleImageAsset | null {
+  const assets = getPublicationItemImageAssets(article);
+  if (assetRole) {
+    const roleAsset = assets.find((asset) => asset.roles?.some((role) => role === assetRole));
+    if (roleAsset) return roleAsset;
+  }
+  return (
+    assets.find((asset) => asset.roles?.some((role) => role === "continuationInset")) ??
+    assets.find((asset) => asset.roles?.some((role) => role === "continuation")) ??
+    assets[0] ??
+    null
+  );
+}
+
+function chooseBestCandidate(candidates: ArticleFrameCandidate[], blockId: string): ArticleFrameCandidate {
+  const best = candidates.reduce<ArticleFrameCandidate | null>(
+    (winner, candidate) => (!winner || candidate.score > winner.score ? candidate : winner),
+    null,
+  );
+  if (!best) throw new Error(`No valid articleFrame candidate solved for ${blockId}`);
+  return best;
+}
+
+function getLocalColumnCountCandidates(
+  policy: ResponsiveSpanPolicy | undefined,
+  config: LayoutConfig,
+  blockWidth: number,
+): number[] {
+  const maxByWidth = getResponsiveColumnCount(blockWidth + config.pageChrome.pagePaddingX * 2, blockWidth, config.gap);
+  const min = Math.min(policy?.min ?? 1, maxByWidth, config.columnCount);
+  const max = Math.min(policy?.max ?? config.columnCount, maxByWidth, config.columnCount);
+  const preferred = clamp(policy?.preferred ?? max, min, max);
+  const candidates = [preferred, min, max];
+  return Array.from(new Set(candidates)).sort((left, right) => (
+    Math.abs(left - preferred) - Math.abs(right - preferred) || right - left
+  ));
+}
+
+function getTextHeightVariants(maxHeight: number, minHeight: number, config: LayoutConfig): number[] {
+  if (config.columnCount === 1) return [maxHeight];
+  const candidates = [maxHeight, minHeight].map((height) => clamp(Math.round(height), minHeight, maxHeight));
+  return Array.from(new Set(candidates)).sort((a, b) => b - a);
+}
+
+function getPageKind(pageSpec: LayoutPageSpec): string {
+  if (pageSpec.presetId === "page.regionStack" && pageSpec.regions.length > 1) return "regionStack";
+  if (pageSpec.presetId === "page.railMain") return "railMain";
+  return "articlePage";
+}
+
+function collectPageTextRanges(page: SolvedPage): PlacedTextRange[] {
+  return page.regions.flatMap((region) => region.blocks.flatMap((block) => (block.textRange ? [block.textRange] : [])));
+}
+
+function createArticleFlows(items: PublicationItem[]): Map<string, ArticleFlow> {
   return new Map(
-    articles.map((article) => [
+    getArticlePublicationItems(items).map((article) => [
       article.slug,
       {
         article,
@@ -502,1176 +1033,28 @@ function createArticleFlows(articles: Article[]): Map<string, ArticleFlow> {
   );
 }
 
-function createFrontPageRecipe(editionPlan: EditionPlan): PageRecipe {
-  return {
-    id: editionPlan.frontPage.recipeId,
-    name: "Front Page Teaser Grid",
-    kind: "front",
-    blocks: [
-      {
-        id: "front-teaser-grid",
-        kind: "teaserGrid",
-        articleIds: editionPlan.frontPage.articleIds,
-      },
-    ],
+function getOrCreateFlow(flows: Map<string, ArticleFlow>, flowKey: string, article: ArticlePublicationItem): ArticleFlow {
+  const existing = flows.get(flowKey);
+  if (existing) return existing;
+  const flow = {
+    article,
+    currentCursor: { ...EMPTY_CURSOR },
+    placedRanges: [],
   };
+  flows.set(flowKey, flow);
+  return flow;
 }
 
-function createEditionPlan(articles: Article[], layoutPlan?: EditionLayoutPlan): EditionPlan {
-  const articleIds = articles.map((article) => article.slug);
-  const normalizedLayoutPlan = layoutPlan
-    ? validateEditionLayoutPlanForArticles(layoutPlan, articleIds)
-    : createDefaultEditionLayoutPlan(articleIds);
-  return {
-    frontPage: {
-      pageNumber: normalizedLayoutPlan.frontPage.pageNumber,
-      recipeId: normalizedLayoutPlan.frontPage.recipeId,
-      templateId: normalizedLayoutPlan.frontPage.templateId,
-      articleIds: normalizedLayoutPlan.frontPage.articleIds,
-      cutPolicies: normalizedLayoutPlan.frontPage.cutPolicies.map((policy) => ({
-        articleId: policy.articleId,
-        maxLines: policy.maxBodyLines,
-        continuationPageNumber: policy.continuationPageNumber,
-      })),
-    },
-    pages: normalizedLayoutPlan.pages.map((page) => ({
-      pageNumber: page.pageNumber,
-      recipeId: page.recipeId,
-      kind: page.kind,
-      sections: page.sections.map((section) => ({
-        articleId: section.articleId,
-        role: section.role,
-        mediaTemplateIds: section.mediaTemplateIds,
-        pullQuoteTemplateIds: section.pullQuoteTemplateIds,
-      })),
-      splitVariants: page.splitVariants,
-    })),
-  };
+function requireKnownItem(itemId: string, itemsBySlug: Map<string, PublicationItem>): PublicationItem {
+  const item = itemsBySlug.get(itemId);
+  if (!item) throw new Error(`Layout references missing item ${itemId}`);
+  return item;
 }
 
-function createPlannedContinuationPageRecipe(plannedPage: PlannedPage, articles: Article[]): PageRecipe {
-  const articlesById = new Map(articles.map((article) => [article.slug, article]));
-  const names = plannedPage.sections
-    .map((section) => articlesById.get(section.articleId)?.headline ?? section.articleId)
-    .join(" / ");
-
-  return {
-    id: plannedPage.recipeId,
-    name: `Planned Continuation: ${names}`,
-    kind: "continuation",
-    blocks: plannedPage.sections.map((section) => ({
-        id: `continued-${section.articleId}-page-${plannedPage.pageNumber}`,
-        kind: "continuedArticle",
-        articleId: section.articleId,
-      })),
-  };
-}
-
-function solveTeaserGridBlock(
-  block: TeaserGridBlock,
-  flows: Map<string, ArticleFlow>,
-  prepared: PreparedTextCache,
-  config: LayoutConfig,
-  pageNumber: number,
-  cutPolicies: FrontCutPolicy[],
-): InternalBlockResult {
-  const frontBlocks: FrontBlock[] = [];
-  const textRanges: PlacedTextRange[] = [];
-  const cutPoliciesByArticleId = new Map(cutPolicies.map((policy) => [policy.articleId, policy]));
-  let whitespace = 0;
-
-  for (let articleIndex = 0; articleIndex < block.articleIds.length; articleIndex += 1) {
-    const articleId = block.articleIds[articleIndex];
-    const flow = getRequiredFlow(flows, articleId);
-    const span = Math.min(ARTICLE_SPANS[articleIndex] ?? 1, config.columnCount);
-    const blockWidth = getSpanWidth(config, span);
-    const preparedText = getPrepared(prepared, flow.article, config.frontBodyFont);
-    const imageWrap = articleIndex === 0 ? getLeadImageWrap(flow.article, blockWidth, config.lineHeight) : null;
-    const rowHeight = getFrontRowHeight(config, articleIndex);
-    const chrome = getStoryChromeMetrics(config, flow.article, articleIndex, blockWidth);
-    const chromeHeight = getStoryChromeHeight(chrome);
-    const jumpReserveHeight = getStoryJumpReserveHeight(chrome);
-    const bodySlotHeight = Math.max(0, rowHeight - chromeHeight - jumpReserveHeight);
-    const cutPolicy = cutPoliciesByArticleId.get(flow.article.slug);
-    const maxHeight = cutPolicy
-      ? Math.min(bodySlotHeight, getLineLimitHeight(cutPolicy.maxLines, config.lineHeight, config.linePaintHeight))
-      : bodySlotHeight;
-    const startCursor = { ...flow.currentCursor };
-    const preview = layoutTextLines({
-      prepared: preparedText,
-      cursor: startCursor,
-      maxHeight,
-      maxWidth: blockWidth,
-      lineHeight: config.lineHeight,
-      linePaintHeight: config.linePaintHeight,
-      obstacles: imageWrap ? [imageWrap] : [],
-    });
-    const range = placeTextRange({
-      flow,
-      pageId: pageIdFor(pageNumber),
-      blockId: `${block.id}-${flow.article.slug}`,
-      startCursor,
-      endCursor: preview.cursor,
-      exhausted: !preview.hasMore,
-    });
-    textRanges.push(range);
-    whitespace += getRemainingTextSpace(bodySlotHeight, preview.lines);
-
-    frontBlocks.push({
-      blockId: range.blockId,
-      article: flow.article,
-      pageNumber: preview.hasMore && cutPolicy ? cutPolicy.continuationPageNumber : null,
-      span,
-      slotHeight: bodySlotHeight,
-      rowHeight,
-      bodySlotHeight,
-      chromeHeight,
-      jumpReserveHeight,
-      chrome,
-      lines: preview.lines,
-      imageWrap,
-      hasMore: preview.hasMore,
-    });
-  }
-
-  return {
-    blockId: block.id,
-    kind: block.kind,
-    usedHeight: Math.max(...frontBlocks.map((frontBlock) => frontBlock.rowHeight), 0),
-    score: scoreWhitespace(whitespace),
-    textRanges,
-    frontBlocks,
-  };
-}
-
-function solvePlannedContinuationPage(
-  plannedPage: PlannedPage,
-  flows: Map<string, ArticleFlow>,
-  prepared: PreparedTextCache,
-  config: LayoutConfig,
-): PlannedContinuationResult {
-  const result = (() => {
-    if (plannedPage.kind === "dualContinuation") {
-      return solveDualContinuationPage(plannedPage, flows, prepared, config);
-    }
-    if (plannedPage.kind === "photoContinuation") {
-      return solvePhotoContinuationPage(plannedPage, flows, prepared, config);
-    }
-    return solveSingleContinuationPage(plannedPage, flows, prepared, config);
-  })();
-
-  for (const section of result.page.sections) {
-    commitTextRange(getRequiredFlow(flows, section.article.slug), section.textRange);
-  }
-
-  return result;
-}
-
-function solveSingleContinuationPage(
-  plannedPage: PlannedPage,
-  flows: Map<string, ArticleFlow>,
-  prepared: PreparedTextCache,
-  config: LayoutConfig,
-): PlannedContinuationResult {
-  const plannedSection = plannedPage.sections[0];
-  const candidate = solveContinuationSectionCandidate({
-    plannedPage,
-    plannedSection,
-    flows,
-    prepared,
-    config,
-    textHeight: config.continuationHeight,
-    shrinkToContent: true,
-  });
-  const page = createContinuationPage(plannedPage, [candidate.section], config);
-
-  return {
-    page,
-    blocks: [candidate.blockResult],
-    textRanges: [candidate.section.textRange],
-  };
-}
-
-function solvePhotoContinuationPage(
-  plannedPage: PlannedPage,
-  flows: Map<string, ArticleFlow>,
-  prepared: PreparedTextCache,
-  config: LayoutConfig,
-): PlannedContinuationResult {
-  const plannedSection = plannedPage.sections[0];
-  const flow = getRequiredFlow(flows, plannedSection.articleId);
-  const asset = getPreferredContinuationImage(flow.article);
-  const variants = getPhotoContinuationVariants(asset, config, { mode: "single", role: plannedSection.role }, plannedSection);
-  const pullQuoteVariants = getPullQuoteVariants(flow.article, config, { mode: "single", role: plannedSection.role }, plannedSection);
-  let bestResult: PlannedContinuationResult | null = null;
-  let bestScore = Number.NEGATIVE_INFINITY;
-
-  for (const variant of variants) {
-    const image = asset ? createContinuationImage(asset, variant, config) : null;
-    const maxTextHeight = Math.max(
-      config.linePaintHeight,
-      config.continuationHeight - getContinuationImageLayoutHeight(image),
-    );
-    for (const textHeight of getPhotoContinuationTextHeightVariants(maxTextHeight, image, config)) {
-      for (const pullQuoteVariant of pullQuoteVariants) {
-        const pullQuote = createContinuationPullQuote(flow.article, pullQuoteVariant, config, textHeight, image);
-        if (pullQuoteVariant.templateId !== "none" && !pullQuote) continue;
-
-        const candidate = solveContinuationSectionCandidate({
-          plannedPage,
-          plannedSection,
-          flows,
-          prepared,
-          config,
-          textHeight,
-          shrinkToContent: true,
-          image,
-          pullQuote,
-        });
-        const page = createContinuationPage(plannedPage, [candidate.section], config);
-        const score = scorePhotoContinuationVariant({
-          config,
-          candidate,
-          page,
-          image,
-          variant,
-        });
-
-        if (score > bestScore) {
-          bestResult = {
-            page,
-            blocks: [
-              {
-                ...candidate.blockResult,
-                kind: image ? "photoFeature" : "continuedArticle",
-                score,
-              },
-            ],
-            textRanges: [candidate.section.textRange],
-          };
-          bestScore = score;
-        }
-      }
-    }
-  }
-
-  if (!bestResult) throw new Error(`No photo continuation variant solved for page ${plannedPage.pageNumber}`);
-  return bestResult;
-}
-
-function solveDualContinuationPage(
-  plannedPage: PlannedPage,
-  flows: Map<string, ArticleFlow>,
-  prepared: PreparedTextCache,
-  config: LayoutConfig,
-): PlannedContinuationResult {
-  const splitVariants = plannedPage.splitVariants ?? [0.5];
-  let bestResult: PlannedContinuationResult | null = null;
-  let bestScore = Number.NEGATIVE_INFINITY;
-
-  for (const split of splitVariants) {
-    const firstHeight = Math.floor(config.continuationHeight * split);
-    const secondHeight = config.continuationHeight - firstHeight;
-    const candidates = plannedPage.sections.map((plannedSection, sectionIndex) => (
-      solveDualContinuationSectionCandidate({
-        plannedPage,
-        plannedSection,
-        flows,
-        prepared,
-        config,
-        allocatedHeight: sectionIndex === 0 ? firstHeight : secondHeight,
-      })
-    ));
-    const whitespace = candidates.reduce((total, candidate) => total + candidate.whitespace, 0);
-    const allocationWhitespace = candidates.reduce((total, candidate) => (
-      total + Math.max(0, (candidate.allocatedHeight ?? 0) - candidate.section.textHeight - getContinuationImageLayoutHeight(candidate.section.image))
-    ), 0);
-    const imbalance = candidates.length === 2
-      ? Math.abs(candidates[0].section.textHeight - candidates[1].section.textHeight)
-      : 0;
-    const imageBonus = candidates.reduce((total, candidate) => total + (candidate.section.image ? 650 : 0), 0);
-    const score = 20_000 + imageBonus - whitespace - allocationWhitespace * 1.4 - imbalance * 0.2;
-
-    if (score > bestScore) {
-      const page = createContinuationPage(plannedPage, candidates.map((candidate) => candidate.section), config);
-      bestResult = {
-        page,
-        blocks: candidates.map((candidate) => candidate.blockResult),
-        textRanges: candidates.map((candidate) => candidate.section.textRange),
-      };
-      bestScore = score;
-    }
-  }
-
-  if (!bestResult) throw new Error(`No continuation variant solved for page ${plannedPage.pageNumber}`);
-  return bestResult;
-}
-
-function solveDualContinuationSectionCandidate({
-  plannedPage,
-  plannedSection,
-  flows,
-  prepared,
-  config,
-  allocatedHeight,
-}: {
-  plannedPage: PlannedPage;
-  plannedSection: PlannedContinuationSection;
-  flows: Map<string, ArticleFlow>;
-  prepared: PreparedTextCache;
-  config: LayoutConfig;
-  allocatedHeight: number;
-}): ContinuationSectionCandidate {
-  const flow = getRequiredFlow(flows, plannedSection.articleId);
-  const asset = getPreferredContinuationImage(flow.article);
-  const variants = getPhotoContinuationVariants(asset, config, { mode: "shared", role: plannedSection.role }, plannedSection);
-  const pullQuoteVariants = getPullQuoteVariants(flow.article, config, { mode: "shared", role: plannedSection.role }, plannedSection);
-  let bestCandidate: ContinuationSectionCandidate | null = null;
-  let bestScore = Number.NEGATIVE_INFINITY;
-
-  for (const variant of variants) {
-    const image = asset ? createContinuationImage(asset, variant, config) : null;
-    const maxTextHeight = Math.max(
-      config.linePaintHeight,
-      allocatedHeight - getContinuationImageLayoutHeight(image),
-    );
-
-    for (const textHeight of getPhotoContinuationTextHeightVariants(maxTextHeight, image, config)) {
-      for (const pullQuoteVariant of pullQuoteVariants) {
-        const pullQuote = createContinuationPullQuote(flow.article, pullQuoteVariant, config, textHeight, image);
-        if (pullQuoteVariant.templateId !== "none" && !pullQuote) continue;
-
-        const candidate = solveContinuationSectionCandidate({
-          plannedPage,
-          plannedSection,
-          flows,
-          prepared,
-          config,
-          textHeight,
-          shrinkToContent: true,
-          image,
-          pullQuote,
-        });
-        const score = scoreDualContinuationSectionCandidate({
-          allocatedHeight,
-          candidate,
-          image,
-          variant,
-        });
-
-        if (score > bestScore) {
-          bestCandidate = {
-            ...candidate,
-            allocatedHeight,
-            blockResult: {
-              ...candidate.blockResult,
-              kind: image ? "photoFeature" : "continuedArticle",
-              score,
-            },
-          };
-          bestScore = score;
-        }
-      }
-    }
-  }
-
-  if (!bestCandidate) {
-    throw new Error(`No dual continuation section solved for ${plannedSection.articleId}`);
-  }
-
-  return bestCandidate;
-}
-
-function solveContinuationSectionCandidate({
-  plannedPage,
-  plannedSection,
-  flows,
-  prepared,
-  config,
-  textHeight,
-  shrinkToContent,
-  image = null,
-  pullQuote = null,
-}: {
-  plannedPage: PlannedPage;
-  plannedSection: PlannedContinuationSection;
-  flows: Map<string, ArticleFlow>;
-  prepared: PreparedTextCache;
-  config: LayoutConfig;
-  textHeight: number;
-  shrinkToContent: boolean;
-  image?: ContinuationImage | null;
-  pullQuote?: ContinuationPullQuote | null;
-}): ContinuationSectionCandidate {
-  const flow = getRequiredFlow(flows, plannedSection.articleId);
-  const preparedText = getPrepared(prepared, flow.article, config.continuationBodyFont);
-  const columnWidth = getSpanWidth(config, 1);
-  const furniture = getContinuationFurniture(image, pullQuote);
-  const columns: TextLine[][] = [];
-  const startCursor = { ...flow.currentCursor };
-  let cursor = startCursor;
-  let hasMore = true;
-
-  for (let columnIndex = 0; columnIndex < config.columnCount; columnIndex += 1) {
-    const result = layoutTextLines({
-      prepared: preparedText,
-      cursor,
-      maxHeight: textHeight,
-      maxWidth: columnWidth,
-      lineHeight: config.lineHeight,
-      linePaintHeight: config.linePaintHeight,
-      obstacles: getColumnTextObstacles(furniture, columnIndex),
-    });
-    columns.push(result.lines);
-    cursor = result.cursor;
-    hasMore = result.hasMore;
-    if (!hasMore) {
-      while (columns.length < config.columnCount) {
-        columns.push([]);
-      }
-      break;
-    }
-  }
-
-  const range = createTextRange({
-    flow,
-    pageId: pageIdFor(plannedPage.pageNumber),
-    blockId: continuationBlockId(plannedPage, plannedSection),
-    startCursor,
-    endCursor: cursor,
-    exhausted: !hasMore,
-  });
-  const linesHeight = Math.max(...columns.map(getLinesHeight), 0);
-  const minimumBodyHeight = getContinuationFurnitureBottom(furniture);
-  const resolvedTextHeightWithFurniture = Math.max(
-    minimumBodyHeight,
-    shrinkToContent && !hasMore ? linesHeight : textHeight,
-  );
-  const title = getContinuationTitleMetrics(config, flow.article);
-  const section: ContinuationSection = {
-    id: `${pageIdFor(plannedPage.pageNumber)}-${flow.article.slug}`,
-    article: flow.article,
-    blockId: range.blockId,
-    textHeight: resolvedTextHeightWithFurniture,
-    titleHeight: title.height,
-    titleLineCount: title.lineCount,
-    furniture,
-    image,
-    pullQuote,
-    textRange: range,
-    columns,
-    hasMore,
-  };
-  const whitespace = getSectionColumnWhitespace(section);
-
-  return {
-    section,
-    blockResult: {
-      blockId: range.blockId,
-      kind: "continuedArticle",
-      usedHeight: resolvedTextHeightWithFurniture + getContinuationImageLayoutHeight(image),
-      score: scoreWhitespace(whitespace),
-      textRanges: [range],
-    },
-    whitespace,
-  };
-}
-
-function createContinuationPage(
-  plannedPage: PlannedPage,
-  sections: ContinuationSection[],
-  config: LayoutConfig,
-): ContinuationPage {
-  return {
-    id: pageIdFor(plannedPage.pageNumber),
-    recipeId: plannedPage.recipeId,
-    pageNumber: plannedPage.pageNumber,
-    kind: plannedPage.kind,
-    height: getContinuationPageHeight(config, sections),
-    sections,
-    hasMore: sections.some((section) => section.hasMore),
-  };
-}
-
-function getPreferredContinuationImage(article: Article): ArticleImageAsset | null {
-  const assets = getArticleImageAssets(article);
-  return (
-    assets.find((asset) => asset.roles?.includes("continuationInset")) ??
-    assets.find((asset) => asset.roles?.includes("continuation")) ??
-    assets[0] ??
-    null
-  );
-}
-
-function getPhotoContinuationVariants(
-  asset: ArticleImageAsset | null,
-  config: LayoutConfig,
-  context: MediaTemplateContext,
-  plannedSection: PlannedContinuationSection,
-): PhotoContinuationVariant[] {
-  const variants: PhotoContinuationVariant[] = [];
-  if (asset) {
-    variants.push(...getInsetTemplateVariants(config, context));
-    variants.push({
-      id: "wideTopBand",
-      templateId: "wideTopBand",
-      columnStartStrategy: "left",
-      columnSpan: config.columnCount,
-      aspectRatioPolicy: "cropAllowed",
-      wrapsText: true,
-      fallbackPenalty: 1_200,
-    });
-  }
-
-  return [
-    ...applyMediaTemplatePreferences(variants, plannedSection.mediaTemplateIds),
-    {
-      id: "noImage",
-      templateId: "noImage",
-      columnStartStrategy: "left",
-      columnSpan: 0,
-      aspectRatioPolicy: "preserve",
-      wrapsText: false,
-      fallbackPenalty: 2_400,
-    },
-  ];
-}
-
-function getInsetTemplateVariants(config: LayoutConfig, context: MediaTemplateContext): PhotoContinuationVariant[] {
-  if (config.columnCount === 1) {
-    return [
-      {
-        id: "inlineInset",
-        templateId: "leftColumnInset",
-        columnStartStrategy: "left",
-        columnSpan: 1,
-        aspectRatioPolicy: "preserve",
-        wrapsText: true,
-        fallbackPenalty: 0,
-      },
-    ];
-  }
-
-  if (context.mode === "single") {
-    return [
-      ...(config.columnCount >= 4
-        ? [
-            {
-              id: "centerTwoColumnInset",
-              templateId: "centerTwoColumnInset" as const,
-              columnStartStrategy: "center" as const,
-              columnSpan: 2,
-              aspectRatioPolicy: "preserve" as const,
-              wrapsText: true,
-              fallbackPenalty: 0,
-            },
-          ]
-        : []),
-      {
-        id: "rightColumnInset",
-        templateId: "rightColumnInset",
-        columnStartStrategy: "right",
-        columnSpan: 1,
-        aspectRatioPolicy: "preserve",
-        wrapsText: true,
-        fallbackPenalty: 160,
-      },
-      {
-        id: "leftColumnInset",
-        templateId: "leftColumnInset",
-        columnStartStrategy: "left",
-        columnSpan: 1,
-        aspectRatioPolicy: "preserve",
-        wrapsText: true,
-        fallbackPenalty: 260,
-      },
-    ];
-  }
-
-  const primaryTemplate = context.role === "bottom" ? "leftColumnInset" : "rightColumnInset";
-  const secondaryTemplate = context.role === "bottom" ? "rightColumnInset" : "leftColumnInset";
-  return [
-    ...(context.role === "top" && config.columnCount >= 4
-      ? [
-          {
-            id: "rightTwoColumnInset",
-            templateId: "rightTwoColumnInset" as const,
-            columnStartStrategy: "right" as const,
-            columnSpan: 2,
-            aspectRatioPolicy: "preserve" as const,
-            wrapsText: true,
-            fallbackPenalty: 0,
-          },
-        ]
-      : []),
-    {
-      id: primaryTemplate,
-      templateId: primaryTemplate,
-      columnStartStrategy: context.role === "bottom" ? "left" : "right",
-      columnSpan: 1,
-      aspectRatioPolicy: "preserve",
-      wrapsText: true,
-      fallbackPenalty: context.role === "top" && config.columnCount >= 4 ? 260 : 0,
-    },
-    {
-      id: secondaryTemplate,
-      templateId: secondaryTemplate,
-      columnStartStrategy: context.role === "bottom" ? "right" : "left",
-      columnSpan: 1,
-      aspectRatioPolicy: "preserve",
-      wrapsText: true,
-      fallbackPenalty: 180,
-    },
-    ...(config.columnCount >= 4
-      ? [
-          {
-            id: "centerTwoColumnInset",
-            templateId: "centerTwoColumnInset" as const,
-            columnStartStrategy: "center" as const,
-            columnSpan: 2,
-            aspectRatioPolicy: "preserve" as const,
-            wrapsText: true,
-            fallbackPenalty: 520,
-          },
-        ]
-      : []),
-  ];
-}
-
-function applyMediaTemplatePreferences(
-  variants: PhotoContinuationVariant[],
-  preferredTemplateIds: MediaPlacementTemplateId[] | undefined,
-): PhotoContinuationVariant[] {
-  if (!preferredTemplateIds?.length) return variants;
-  const preferenceOrder = new Map(preferredTemplateIds.map((templateId, index) => [templateId, index]));
-
-  return variants
-    .map((variant, originalIndex) => ({
-      variant,
-      originalIndex,
-      preferenceIndex: preferenceOrder.get(variant.templateId as MediaPlacementTemplateId),
-    }))
-    .sort((left, right) => (
-      (left.preferenceIndex ?? Number.MAX_SAFE_INTEGER) - (right.preferenceIndex ?? Number.MAX_SAFE_INTEGER) ||
-      left.originalIndex - right.originalIndex
-    ))
-    .map(({ variant, preferenceIndex }) => ({
-      ...variant,
-      fallbackPenalty: preferenceIndex === undefined ? variant.fallbackPenalty + 900 : preferenceIndex * 90,
-    }));
-}
-
-function getPullQuoteVariants(
-  article: Article,
-  config: LayoutConfig,
-  context: MediaTemplateContext,
-  plannedSection: PlannedContinuationSection,
-): PullQuotePlacementVariant[] {
-  const none = getNoPullQuoteVariant();
-  if (!article.pullQuotes?.[0]) return [none];
-
-  if (config.columnCount === 1) {
-    return applyPullQuoteTemplatePreferences([
-      none,
-      {
-        id: "inlineMobileBreak",
-        templateId: "inlineMobileBreak",
-        columnStartStrategy: "left",
-        columnSpan: 1,
-        anchorRatio: 0.38,
-        fallbackPenalty: 80,
-      },
-    ], plannedSection.pullQuoteTemplateIds);
-  }
-
-  const leftRail: PullQuotePlacementVariant = {
-    id: "leftRailMid",
-    templateId: "leftRailMid",
-    columnStartStrategy: "left",
-    columnSpan: 1,
-    anchorRatio: 0.48,
-    fallbackPenalty: context.mode === "shared" && context.role === "top" ? 0 : 120,
-  };
-  const rightRail: PullQuotePlacementVariant = {
-    id: "rightRailMid",
-    templateId: "rightRailMid",
-    columnStartStrategy: "right",
-    columnSpan: 1,
-    anchorRatio: 0.48,
-    fallbackPenalty: context.mode === "shared" && context.role === "bottom" ? 0 : 120,
-  };
-  const centerBreak: PullQuotePlacementVariant = {
-    id: "centerTwoColumnBreak",
-    templateId: "centerTwoColumnBreak",
-    columnStartStrategy: "center",
-    columnSpan: 2,
-    anchorRatio: 0.5,
-    fallbackPenalty: context.mode === "single" ? 40 : 220,
-  };
-
-  if (context.mode === "single") {
-    return applyPullQuoteTemplatePreferences([
-      none,
-      ...(config.columnCount >= 4 ? [centerBreak] : []),
-      rightRail,
-      leftRail,
-    ], plannedSection.pullQuoteTemplateIds);
-  }
-
-  return applyPullQuoteTemplatePreferences([
-    none,
-    context.role === "bottom" ? rightRail : leftRail,
-    context.role === "bottom" ? leftRail : rightRail,
-    ...(config.columnCount >= 4 ? [centerBreak] : []),
-  ], plannedSection.pullQuoteTemplateIds);
-}
-
-function applyPullQuoteTemplatePreferences(
-  variants: PullQuotePlacementVariant[],
-  preferredTemplateIds: PullQuoteTemplateId[] | undefined,
-): PullQuotePlacementVariant[] {
-  if (!preferredTemplateIds?.length) return variants;
-  const preferenceOrder = new Map(preferredTemplateIds.map((templateId, index) => [templateId, index]));
-
-  return variants
-    .map((variant, originalIndex) => ({
-      variant,
-      originalIndex,
-      preferenceIndex: preferenceOrder.get(variant.templateId),
-    }))
-    .sort((left, right) => {
-      if (left.variant.templateId === "none") return right.variant.templateId === "none" ? 0 : -1;
-      if (right.variant.templateId === "none") return 1;
-      return (
-        (left.preferenceIndex ?? Number.MAX_SAFE_INTEGER) - (right.preferenceIndex ?? Number.MAX_SAFE_INTEGER) ||
-        left.originalIndex - right.originalIndex
-      );
-    })
-    .map(({ variant, preferenceIndex }) => {
-      if (variant.templateId === "none") return variant;
-      return {
-        ...variant,
-        fallbackPenalty: preferenceIndex === undefined ? variant.fallbackPenalty + 700 : preferenceIndex * 80,
-      };
-    });
-}
-
-function getNoPullQuoteVariant(): PullQuotePlacementVariant {
-  return {
-    id: "none",
-    templateId: "none",
-    columnStartStrategy: "left",
-    columnSpan: 0,
-    anchorRatio: 0,
-    fallbackPenalty: 0,
-  };
-}
-
-function createContinuationImage(
-  asset: ArticleImageAsset,
-  variant: PhotoContinuationVariant,
-  config: LayoutConfig,
-): ContinuationImage | null {
-  if (variant.templateId === "noImage") return null;
-
-  const columnSpan = clamp(variant.columnSpan, 1, config.columnCount);
-  const columnStart = getMediaColumnStart(config, variant.columnStartStrategy, columnSpan);
-  const columnWidth = getSpanWidth(config, 1);
-  const width = getSpanWidth(config, columnSpan);
-  const x = Math.round(columnStart * (columnWidth + config.gap));
-  const aspectRatio = getImageAspectRatio(asset);
-  const preferredHeight = getContinuationPhotoPreferredHeight(asset, width);
-  const height = getContinuationPhotoHeight(asset, width, variant.aspectRatioPolicy);
-  const focalPoint = asset.layout?.focalPoint ?? { x: 0.5, y: 0.5 };
-
-  return {
-    kind: "image",
-    id: `${asset.id}-${variant.id}`,
-    src: asset.src,
-    alt: asset.alt,
-    credit: asset.credit,
-    templateId: variant.templateId,
-    columnStartStrategy: variant.columnStartStrategy,
-    columnStart,
-    columnSpan,
-    verticalAnchor: "top",
-    aspectRatio,
-    aspectRatioPolicy: variant.aspectRatioPolicy,
-    objectFit: variant.aspectRatioPolicy === "cropAllowed" ? "cover" : "contain",
-    objectPosition: `${Math.round(focalPoint.x * 100)}% ${Math.round(focalPoint.y * 100)}%`,
-    x,
-    y: 0,
-    width: Math.round(width),
-    height,
-    layoutHeight: 0,
-    wrapsText: variant.wrapsText,
-    preferredHeight,
-  };
-}
-
-function getMediaColumnStart(
-  config: LayoutConfig,
-  strategy: MediaColumnStartStrategy,
-  columnSpan: number,
-): number {
-  if (strategy === "right") return Math.max(0, config.columnCount - columnSpan);
-  if (strategy === "center") return Math.max(0, Math.floor((config.columnCount - columnSpan) / 2));
-  return 0;
-}
-
-function getImageAspectRatio(asset: ArticleImageAsset): number {
-  return asset.layout?.aspectRatio ?? 1.5;
-}
-
-function getContinuationPhotoPreferredHeight(asset: ArticleImageAsset, width: number): number {
-  return Math.round(width / getImageAspectRatio(asset));
-}
-
-function getContinuationPhotoHeight(
-  asset: ArticleImageAsset,
-  width: number,
-  policy: ContinuationImage["aspectRatioPolicy"],
-): number {
-  const preferredHeight = getContinuationPhotoPreferredHeight(asset, width);
-  const minHeight = asset.layout?.minHeight ?? 140;
-  const maxHeight = asset.layout?.maxHeight ?? 420;
-  return policy === "cropAllowed" ? clamp(preferredHeight, minHeight, maxHeight) : preferredHeight;
-}
-
-function createContinuationPullQuote(
-  article: Article,
-  variant: PullQuotePlacementVariant,
-  config: LayoutConfig,
-  textHeight: number,
-  image: ContinuationImage | null,
-): ContinuationPullQuote | null {
-  const text = article.pullQuotes?.[0];
-  if (variant.templateId === "none" || !text) return null;
-  if (variant.templateId === "centerTwoColumnBreak" && config.columnCount < 4) return null;
-  if (variant.templateId === "inlineMobileBreak" && config.columnCount !== 1) return null;
-
-  const columnSpan = clamp(variant.columnSpan, 1, config.columnCount);
-  const columnStart = getMediaColumnStart(config, variant.columnStartStrategy, columnSpan);
-  const columnWidth = getSpanWidth(config, 1);
-  const width = Math.round(getSpanWidth(config, columnSpan));
-  const x = Math.round(columnStart * (columnWidth + config.gap));
-  const metrics = getPullQuoteMetrics(text, width, config);
-  const y = getPullQuoteY({
-    x,
-    width,
-    height: metrics.height,
-    textHeight,
-    anchorRatio: variant.anchorRatio,
-    image,
-    config,
-  });
-  if (y === null) return null;
-
-  return {
-    kind: "pullQuote",
-    id: `${article.slug}-pullquote-${variant.id}`,
-    text,
-    templateId: variant.templateId,
-    columnStartStrategy: variant.columnStartStrategy,
-    columnStart,
-    columnSpan,
-    x,
-    y,
-    width,
-    height: metrics.height,
-    wrapsText: true,
-    fontSize: metrics.fontSize,
-    lineHeight: metrics.lineHeight,
-    fallbackPenalty: variant.fallbackPenalty,
-  };
-}
-
-function getPullQuoteMetrics(
-  text: string,
-  width: number,
-  config: LayoutConfig,
-): { height: number; fontSize: number; lineHeight: number } {
-  const narrow = config.columnCount === 1;
-  const fontSize = narrow ? 20 : 22;
-  const lineHeight = Math.round(fontSize * 1.12);
-  const charsPerLine = Math.max(12, Math.floor(width / (fontSize * 0.52)));
-  const lineCount = Math.ceil(text.length / charsPerLine);
-  const height = clamp(
-    Math.ceil(lineCount * lineHeight + PULL_QUOTE_VERTICAL_PADDING),
-    narrow ? 104 : 108,
-    narrow ? 180 : 168,
-  );
-
-  return { height, fontSize, lineHeight };
-}
-
-function getPullQuoteY({
-  x,
-  width,
-  height,
-  textHeight,
-  anchorRatio,
-  image,
-  config,
-}: {
-  x: number;
-  width: number;
-  height: number;
-  textHeight: number;
-  anchorRatio: number;
-  image: ContinuationImage | null;
-  config: LayoutConfig;
-}): number | null {
-  const minY = config.lineHeight * 2;
-  const maxY = textHeight - height;
-  if (maxY < minY) return null;
-
-  const preferredY = clamp(Math.round(textHeight * anchorRatio - height / 2), minY, maxY);
-  const preferredRect = { x, y: preferredY, width, height };
-  if (!image || !rectsOverlap(preferredRect, image, FURNITURE_COLLISION_GUTTER)) {
-    return preferredY;
-  }
-
-  const candidateYs = [
-    image.y + image.height + FURNITURE_COLLISION_GUTTER,
-    image.y - height - FURNITURE_COLLISION_GUTTER,
-  ]
-    .filter((candidateY) => candidateY >= minY && candidateY <= maxY)
-    .sort((a, b) => Math.abs(a - preferredY) - Math.abs(b - preferredY));
-
-  for (const candidateY of candidateYs) {
-    if (!rectsOverlap({ x, y: candidateY, width, height }, image, FURNITURE_COLLISION_GUTTER)) {
-      return Math.round(candidateY);
-    }
-  }
-
-  return null;
-}
-
-function getPhotoContinuationTextHeightVariants(
-  maxTextHeight: number,
-  image: ContinuationImage | null,
-  config: LayoutConfig,
-): number[] {
-  const minimumHeight = Math.max(config.linePaintHeight, getContinuationImageBottom(image));
-  const ceilingHeight = Math.max(minimumHeight, maxTextHeight);
-  if (config.columnCount === 1) return [ceilingHeight];
-
-  const candidates = [
-    ceilingHeight,
-    760,
-    620,
-    480,
-    360,
-    280,
-  ].map((height) => clamp(Math.round(height), minimumHeight, ceilingHeight));
-
-  return Array.from(new Set(candidates)).sort((a, b) => b - a);
-}
-
-function scorePhotoContinuationVariant({
-  config,
-  candidate,
-  page,
-  image,
-  variant,
-}: {
-  config: LayoutConfig;
-  candidate: ContinuationSectionCandidate;
-  page: ContinuationPage;
-  image: ContinuationImage | null;
-  variant: PhotoContinuationVariant;
-}): number {
-  const targetPageHeight = getSingleContinuationTargetPageHeight(config, candidate.section);
-  const underfill = Math.max(0, targetPageHeight - page.height);
-  const overshoot = Math.max(0, page.height - targetPageHeight);
-  const columnWhitespace = getSectionColumnWhitespace(candidate.section);
-  const imagePreferencePenalty = image ? Math.abs(image.height - image.preferredHeight) * 0.35 : 0;
-  const imageBonus = image ? 1_500 : 0;
-  const pullQuoteBonus = getPullQuoteScoreBonus(candidate.section, 260);
-  const pullQuotePenalty = getPullQuoteScorePenalty(candidate.section);
-  const templatePenalty = image ? getImageTemplateScorePenalty(image) : 0;
-
-  return (
-    50_000 +
-    imageBonus +
-    pullQuoteBonus -
-    underfill * 0.65 -
-    overshoot * 0.7 -
-    candidate.whitespace * 1.2 -
-    columnWhitespace * 0.85 -
-    imagePreferencePenalty -
-    pullQuotePenalty -
-    templatePenalty -
-    variant.fallbackPenalty
-  );
-}
-
-function scoreDualContinuationSectionCandidate({
-  allocatedHeight,
-  candidate,
-  image,
-  variant,
-}: {
-  allocatedHeight: number;
-  candidate: ContinuationSectionCandidate;
-  image: ContinuationImage | null;
-  variant: PhotoContinuationVariant;
-}): number {
-  const usedHeight = candidate.section.textHeight + getContinuationImageLayoutHeight(image);
-  const underfill = Math.max(0, allocatedHeight - usedHeight);
-  const overshoot = Math.max(0, usedHeight - allocatedHeight);
-  const imagePreferencePenalty = image ? Math.abs(image.height - image.preferredHeight) * 0.3 : 0;
-  const imageBonus = image ? 1_200 : 0;
-  const pullQuoteBonus = getPullQuoteScoreBonus(candidate.section, 220);
-  const pullQuotePenalty = getPullQuoteScorePenalty(candidate.section);
-  const templatePenalty = image ? getImageTemplateScorePenalty(image) : 0;
-
-  return (
-    40_000 +
-    imageBonus +
-    pullQuoteBonus -
-    underfill * 2.2 -
-    overshoot * 1.5 -
-    candidate.whitespace -
-    getSectionColumnWhitespace(candidate.section) -
-    imagePreferencePenalty -
-    pullQuotePenalty -
-    templatePenalty -
-    variant.fallbackPenalty
-  );
-}
-
-function getSectionColumnWhitespace(section: ContinuationSection): number {
-  return getColumnWhitespace(section.columns, section.textHeight, section.furniture);
-}
-
-function getColumnWhitespace(
-  columns: TextLine[][],
-  textHeight: number,
-  furniture: ContinuationFurniture[],
-): number {
-  return columns.reduce(
-    (total, column, columnIndex) => (
-      total +
-      Math.max(
-        0,
-        textHeight -
-          getLinesHeight(column) -
-          getColumnObstacleHeight(furniture, columnIndex, textHeight),
-      )
-    ),
-    0,
-  );
-}
-
-function getImageTemplateScorePenalty(image: ContinuationImage): number {
-  if (image.templateId === "wideTopBand") return 520;
-  if (image.templateId === "centerTwoColumnInset") return 0;
-  if (image.templateId === "rightTwoColumnInset") return 0;
-  return 80;
-}
-
-function getSingleContinuationTargetPageHeight(config: LayoutConfig, section: ContinuationSection): number {
-  return Math.ceil(
-    config.pageChrome.pagePaddingTop +
-    config.pageChrome.insideHeaderHeight +
-    config.pageChrome.continuedTitleChromeHeight +
-    section.titleHeight +
-    config.continuationHeight +
-    config.pageChrome.pagePaddingBottom,
-  );
-}
-
-function getContinuationImageLayoutHeight(image: ContinuationImage | null): number {
-  return image?.layoutHeight ?? 0;
-}
-
-function getContinuationFurnitureBottom(furniture: ContinuationFurniture[]): number {
-  return furniture.reduce((bottom, item) => Math.max(bottom, item.y + item.height), 0);
-}
-
-function getContinuationImageBottom(image: ContinuationImage | null): number {
-  return image ? image.y + image.height : 0;
-}
-
-function getColumnObstacleHeight(
-  furniture: ContinuationFurniture[],
-  columnIndex: number,
-  textHeight: number,
-): number {
-  const intervals = furniture
-    .filter((item) => item.wrapsText && isColumnOccupiedByFurniture(item, columnIndex))
-    .map((item) => ({
-      start: clamp(item.y, 0, textHeight),
-      end: clamp(item.y + item.height, 0, textHeight),
-    }))
-    .filter((interval) => interval.end > interval.start)
-    .sort((a, b) => a.start - b.start);
-
-  const merged: Array<{ start: number; end: number }> = [];
-  for (const interval of intervals) {
-    const previous = merged[merged.length - 1];
-    if (previous && interval.start <= previous.end) {
-      previous.end = Math.max(previous.end, interval.end);
-    } else {
-      merged.push({ ...interval });
-    }
-  }
-
-  return merged.reduce((total, interval) => total + interval.end - interval.start, 0);
-}
-
-function getColumnTextObstacles(furniture: ContinuationFurniture[], columnIndex: number): TextObstacle[] {
-  return furniture
-    .filter((item) => item.wrapsText && isColumnOccupiedByFurniture(item, columnIndex))
-    .map((item) => ({
-      x: 0,
-      y: item.y,
-      width: Number.POSITIVE_INFINITY,
-      height: item.height,
-    }));
-}
-
-function isColumnOccupiedByFurniture(furniture: ContinuationFurniture, columnIndex: number): boolean {
-  return columnIndex >= furniture.columnStart && columnIndex < furniture.columnStart + furniture.columnSpan;
-}
-
-function getContinuationFurniture(
-  image: ContinuationImage | null,
-  pullQuote: ContinuationPullQuote | null,
-): ContinuationFurniture[] {
-  return [image, pullQuote].filter((item): item is ContinuationFurniture => item !== null);
-}
-
-function continuationBlockId(plannedPage: PlannedPage, plannedSection: PlannedContinuationSection): string {
-  return `continued-${plannedSection.articleId}-page-${plannedPage.pageNumber}`;
-}
-
-function getPullQuoteScoreBonus(section: ContinuationSection, baseBonus: number): number {
-  if (!section.pullQuote) return 0;
-  return section.hasMore ? Math.floor(baseBonus * 0.25) : baseBonus;
-}
-
-function getPullQuoteScorePenalty(section: ContinuationSection): number {
-  const pullQuote = section.pullQuote;
-  if (!pullQuote) return 0;
-  const overflowPenalty = section.hasMore ? 1_600 : 0;
-  const templatePenalty = pullQuote.templateId === "centerTwoColumnBreak"
-    ? 90
-    : pullQuote.templateId === "inlineMobileBreak"
-      ? 140
-      : 0;
-  return overflowPenalty + templatePenalty + pullQuote.fallbackPenalty;
-}
-
-function rectsOverlap(a: FurnitureRect, b: FurnitureRect, gutter = 0): boolean {
-  return (
-    a.x < b.x + b.width + gutter &&
-    a.x + a.width + gutter > b.x &&
-    a.y < b.y + b.height + gutter &&
-    a.y + a.height + gutter > b.y
-  );
+function requireArticleItem(itemId: string, itemsBySlug: Map<string, PublicationItem>): ArticlePublicationItem {
+  const item = requireKnownItem(itemId, itemsBySlug);
+  if (item.type !== "article") throw new Error(`Layout articleFrame requires article item ${itemId}`);
+  return item;
 }
 
 function createTextRange({
@@ -1704,70 +1087,17 @@ function commitTextRange(flow: ArticleFlow, range: PlacedTextRange): void {
   flow.placedRanges.push(range);
 }
 
-function placeTextRange({
-  flow,
-  pageId,
-  blockId,
-  startCursor,
-  endCursor,
-  exhausted,
-}: {
-  flow: ArticleFlow;
-  pageId: string;
-  blockId: string;
-  startCursor: LayoutCursor;
-  endCursor: LayoutCursor;
-  exhausted: boolean;
-}): PlacedTextRange {
-  const range = createTextRange({
-    flow,
-    pageId,
-    blockId,
-    startCursor,
-    endCursor,
-    exhausted,
-  });
-  commitTextRange(flow, range);
-  return range;
-}
-
-function getRequiredFlow(flows: Map<string, ArticleFlow>, articleId: string): ArticleFlow {
-  const flow = flows.get(articleId);
-  if (!flow) throw new Error(`Article flow not found: ${articleId}`);
-  return flow;
-}
-
 function pageIdFor(pageNumber: number): string {
   return `page-${pageNumber}`;
 }
 
-function isCursorAtStart(cursor: LayoutCursor): boolean {
-  return cursor.segmentIndex === EMPTY_CURSOR.segmentIndex && cursor.graphemeIndex === EMPTY_CURSOR.graphemeIndex;
-}
-
-function getRemainingTextSpace(slotHeight: number, lines: TextLine[]): number {
-  if (lines.length === 0) return slotHeight;
-  const lastLine = lines[lines.length - 1];
-  return Math.max(0, slotHeight - (lastLine.y + lastLine.paintHeight));
-}
-
-function getLinesHeight(lines: TextLine[]): number {
-  if (lines.length === 0) return 0;
-  const lastLine = lines[lines.length - 1];
-  return lastLine.y + lastLine.paintHeight;
-}
-
-function scoreWhitespace(whitespace: number): number {
-  return Math.max(0, 10_000 - whitespace);
-}
-
 function getLayoutConfig(pageWidth: number, viewportHeight: number): LayoutConfig {
-  const narrow = pageWidth < 720;
-  const medium = pageWidth >= 720 && pageWidth < 1040;
-  const columnCount = narrow ? 1 : medium ? 2 : 4;
+  const narrow = pageWidth < 560;
+  const medium = pageWidth >= 560 && pageWidth < 1040;
   const gap = narrow ? 14 : 18;
   const sideMargin = narrow ? 18 : 30;
   const contentWidth = Math.max(280, pageWidth - sideMargin * 2);
+  const columnCount = getResponsiveColumnCount(pageWidth, contentWidth, gap);
   const pageChrome = getPageChromeMetrics(pageWidth, narrow);
   const targetPageHeight = getTargetPageHeight(pageWidth, viewportHeight);
   const frontGridHeight = getFrontGridHeight(targetPageHeight, narrow, medium);
@@ -1793,6 +1123,16 @@ function getLayoutConfig(pageWidth: number, viewportHeight: number): LayoutConfi
   };
 }
 
+function getResponsiveColumnCount(pageWidth: number, contentWidth: number, gap: number): number {
+  if (pageWidth < 560) return 1;
+  const minimumColumnWidth = 168;
+  for (const columnCount of [6, 5, 4, 3, 2] as const) {
+    const columnWidth = (contentWidth - gap * (columnCount - 1)) / columnCount;
+    if (columnWidth >= minimumColumnWidth) return columnCount;
+  }
+  return 1;
+}
+
 function getTargetPageHeight(pageWidth: number, viewportHeight: number): number {
   if (pageWidth < 720) return Math.max(3000, viewportHeight * 3.25);
   if (pageWidth < 1040) return Math.max(1900, viewportHeight * 2.1);
@@ -1806,16 +1146,10 @@ function getPageChromeMetrics(pageWidth: number, narrow: boolean): PageChromeMet
   const mastheadKickerLineHeight = 14;
   const mastheadTitleFontSize = narrow
     ? clamp(pageWidth * 0.22, 54.4, 89.6)
-    : clamp(pageWidth * 0.13, 64, 140.8);
+    : clamp(pageWidth * 0.12, 72, 145.6);
   const mastheadTitleLineHeight = mastheadTitleFontSize * 0.84;
-  const mastheadMetaLineHeight = 15;
+  const mastheadMetaLineHeight = narrow ? 16 : 18;
   const mastheadMetaGap = narrow ? 5 : 0;
-  const mastheadMetaLines = narrow ? 3 : 1;
-  const mastheadMetaHeight =
-    MASTHEAD_META_BORDER_TOP +
-    MASTHEAD_META_PADDING_TOP +
-    mastheadMetaLines * mastheadMetaLineHeight +
-    Math.max(0, mastheadMetaLines - 1) * mastheadMetaGap;
   const mastheadHeight =
     MASTHEAD_RULE_HEIGHT +
     MASTHEAD_RULE_MARGIN_BOTTOM +
@@ -1823,26 +1157,24 @@ function getPageChromeMetrics(pageWidth: number, narrow: boolean): PageChromeMet
     MASTHEAD_TITLE_MARGIN_TOP +
     mastheadTitleLineHeight +
     MASTHEAD_TITLE_MARGIN_BOTTOM +
-    mastheadMetaHeight +
+    MASTHEAD_META_BORDER_TOP +
+    MASTHEAD_META_PADDING_TOP +
+    mastheadMetaLineHeight +
     MASTHEAD_PADDING_BOTTOM +
     MASTHEAD_BORDER_BOTTOM +
-    MASTHEAD_MARGIN_BOTTOM;
-  const insideHeaderLines = narrow ? 3 : 1;
-  const insideHeaderHeight =
-    insideHeaderLines * mastheadMetaLineHeight +
-    Math.max(0, insideHeaderLines - 1) * mastheadMetaGap +
-    INSIDE_HEADER_PADDING_BOTTOM +
-    INSIDE_HEADER_BORDER_BOTTOM +
-    INSIDE_HEADER_MARGIN_BOTTOM;
-  const continuedTitleFontSize = clamp(pageWidth * 0.04, 28.8, 70.4);
+    MASTHEAD_MARGIN_BOTTOM +
+    (narrow ? mastheadMetaGap * 2 : 0);
+  const insideHeaderHeight = INSIDE_HEADER_PADDING_BOTTOM + INSIDE_HEADER_BORDER_BOTTOM + INSIDE_HEADER_MARGIN_BOTTOM + 18;
+  const continuedTitleFontSize = narrow ? clamp(pageWidth * 0.075, 28, 42) : clamp(pageWidth * 0.035, 32, 56);
   const continuedTitleLineHeight = continuedTitleFontSize * 0.94;
-  const continuedTitleChromeHeight =
+  const continuedTitleHeight = Math.ceil(
     CONTINUED_TITLE_KICKER_LINE_HEIGHT +
-    CONTINUED_TITLE_HEADING_MARGIN_TOP +
-    CONTINUED_TITLE_PADDING_BOTTOM +
-    CONTINUED_TITLE_BORDER_BOTTOM +
-    CONTINUED_TITLE_MARGIN_BOTTOM;
-  const continuedTitleHeight = continuedTitleChromeHeight + continuedTitleLineHeight;
+      CONTINUED_TITLE_HEADING_MARGIN_TOP +
+      continuedTitleLineHeight * 2 +
+      CONTINUED_TITLE_PADDING_BOTTOM +
+      CONTINUED_TITLE_BORDER_BOTTOM +
+      CONTINUED_TITLE_MARGIN_BOTTOM,
+  );
 
   return {
     pagePaddingTop,
@@ -1854,138 +1186,115 @@ function getPageChromeMetrics(pageWidth: number, narrow: boolean): PageChromeMet
     mastheadTitleLineHeight,
     mastheadMetaLineHeight,
     mastheadMetaGap,
-    insideHeaderHeight: Math.ceil(insideHeaderHeight),
-    continuedTitleHeight: Math.ceil(continuedTitleHeight),
-    continuedTitleChromeHeight: Math.ceil(continuedTitleChromeHeight),
+    insideHeaderHeight,
+    continuedTitleHeight,
+    continuedTitleChromeHeight:
+      CONTINUED_TITLE_KICKER_LINE_HEIGHT +
+      CONTINUED_TITLE_HEADING_MARGIN_TOP +
+      CONTINUED_TITLE_PADDING_BOTTOM +
+      CONTINUED_TITLE_BORDER_BOTTOM +
+      CONTINUED_TITLE_MARGIN_BOTTOM,
     continuedTitleFontSize,
     continuedTitleLineHeight,
   };
 }
 
-function getFrontGridHeight(pageHeight: number, narrow: boolean, medium: boolean): number {
-  const mastheadAndPageChrome = narrow ? 430 : medium ? 360 : 370;
-  return Math.max(narrow ? 820 : 980, pageHeight - mastheadAndPageChrome);
+function getFrontGridHeight(targetPageHeight: number, narrow: boolean, medium: boolean): number {
+  const mastheadAllowance = narrow ? 190 : medium ? 230 : 270;
+  const bottomPadding = narrow ? 18 : 30;
+  return Math.max(420, targetPageHeight - mastheadAllowance - bottomPadding);
 }
 
-function getFrontRows(columnCount: number, gap: number, frontGridHeight: number, maxRowHeight: number): FrontRow[] {
-  const rows: FrontRow[] = [];
-  let articleIndex = 0;
-  while (articleIndex < ARTICLE_SPANS.length) {
-    const startIndex = articleIndex;
-    let occupiedColumns = 0;
-    while (articleIndex < ARTICLE_SPANS.length) {
-      const span = Math.min(ARTICLE_SPANS[articleIndex] ?? 1, columnCount);
-      if (occupiedColumns > 0 && occupiedColumns + span > columnCount) break;
-      occupiedColumns += span;
-      articleIndex += 1;
-      if (occupiedColumns >= columnCount) break;
-    }
-    rows.push({ startIndex, endIndex: articleIndex - 1, height: 0 });
+function getFrontRows(columnCount: number, gap: number, gridHeight: number, rowMaxHeight: number): FrontRow[] {
+  if (columnCount === 1) {
+    return Array.from({ length: 6 }, (_, index) => ({
+      startIndex: index,
+      endIndex: index,
+      height: Math.min(rowMaxHeight, Math.max(360, Math.floor((gridHeight - gap * 5) / 6))),
+    }));
   }
-
-  const availableRowsHeight = frontGridHeight - gap * Math.max(0, rows.length - 1);
-  const baseRowHeight = Math.floor(availableRowsHeight / Math.max(1, rows.length));
-  return rows.map((row, rowIndex) => ({
-    ...row,
-    height: Math.min(
-      maxRowHeight,
-      rowIndex === rows.length - 1
-        ? availableRowsHeight - baseRowHeight * (rows.length - 1)
-        : baseRowHeight,
-    ),
-  }));
-}
-
-function getFrontRowHeight(config: LayoutConfig, articleIndex: number): number {
-  const row = config.frontRows.find((candidate) => articleIndex >= candidate.startIndex && articleIndex <= candidate.endIndex);
-  return row?.height ?? 260;
+  const first = Math.min(rowMaxHeight, Math.max(360, Math.floor(gridHeight * 0.52)));
+  const second = Math.min(rowMaxHeight, Math.max(300, Math.floor(gridHeight - first - gap)));
+  return [
+    { startIndex: 0, endIndex: 2, height: first },
+    { startIndex: 3, endIndex: 5, height: second },
+  ];
 }
 
 function getFrontPageHeight(config: LayoutConfig): number {
   return Math.ceil(
     config.pageChrome.pagePaddingTop +
-    config.pageChrome.mastheadHeight +
-    getFrontGridSolvedHeight(config) +
-    config.pageChrome.pagePaddingBottom,
+      config.pageChrome.mastheadHeight +
+      getFrontPageGridHeight(config) +
+      config.pageChrome.pagePaddingBottom,
   );
 }
 
-function getFrontGridSolvedHeight(config: LayoutConfig): number {
-  const rowHeight = config.frontRows.reduce((total, row) => total + row.height, 0);
-  return rowHeight + config.gap * Math.max(0, config.frontRows.length - 1);
+function getFrontPageGridHeight(config: LayoutConfig): number {
+  if (config.frontRows.length === 0) return 0;
+  return config.frontRows.reduce((total, row) => total + row.height, 0) + config.gap * Math.max(0, config.frontRows.length - 1);
 }
 
-function getContinuationPageHeight(config: LayoutConfig, sections: ContinuationSection[]): number {
-  const sectionsHeight = sections.reduce(
-    (total, section, sectionIndex) => (
-      total +
-      (sectionIndex === 0 ? 0 : CONTINUATION_SECTION_SEPARATOR_HEIGHT) +
-      config.pageChrome.continuedTitleChromeHeight +
-      section.titleHeight +
-      getContinuationImageLayoutHeight(section.image) +
-      section.textHeight
-    ),
-    0,
-  );
-
-  return Math.ceil(
-    config.pageChrome.pagePaddingTop +
-    config.pageChrome.insideHeaderHeight +
-    sectionsHeight +
-    config.pageChrome.pagePaddingBottom,
-  );
+function getFrontRowHeight(config: LayoutConfig, articleIndex: number): number {
+  return config.frontRows.find((row) => articleIndex >= row.startIndex && articleIndex <= row.endIndex)?.height ?? 420;
 }
 
-function getContinuationTitleMetrics(config: LayoutConfig, article: Article): { lineCount: number; height: number } {
-  return measureWrappedTextBlock(
-    article.headline,
-    `700 ${config.pageChrome.continuedTitleFontSize}px Georgia, "Times New Roman", serif`,
-    Math.min(config.contentWidth, 980),
-    config.pageChrome.continuedTitleLineHeight,
-  );
+function getBlockSpan(config: LayoutConfig, span: ResponsiveSpanPolicy | undefined): number {
+  if (config.columnCount === 1) return 1;
+  return clamp(span?.preferred ?? config.columnCount, span?.min ?? 1, Math.min(span?.max ?? config.columnCount, config.columnCount));
+}
+
+function getBlockWidth(config: LayoutConfig, span: ResponsiveSpanPolicy | undefined): number {
+  return getSpanWidth(config, getBlockSpan(config, span));
+}
+
+function getSpanWidth(config: LayoutConfig, span: number): number {
+  const safeSpan = clamp(span, 1, config.columnCount);
+  const singleColumn = (config.contentWidth - config.gap * (config.columnCount - 1)) / config.columnCount;
+  return singleColumn * safeSpan + config.gap * (safeSpan - 1);
 }
 
 function getStoryChromeMetrics(
   config: LayoutConfig,
-  article: Article,
+  article: ArticlePublicationItem,
   articleIndex: number,
   blockWidth: number,
 ): StoryChromeMetrics {
   const lead = articleIndex === 0;
   const headlineFontSize = getHeadlineFontSize(config, lead);
-  const headlineLineHeight = headlineFontSize * (lead ? 0.93 : 1);
-  const headlineFont = `700 ${headlineFontSize}px Georgia, "Times New Roman", serif`;
-  const deckFont = `italic ${STORY_CHROME_TOKENS.deckFontSize}px Georgia, "Times New Roman", serif`;
-  const bylineFont =
-    `800 ${STORY_CHROME_TOKENS.bylineFontSize}px Arial, Helvetica, sans-serif`;
-  const headline = measureWrappedTextBlock(article.headline, headlineFont, blockWidth, headlineLineHeight);
-  const deck = measureWrappedTextBlock(article.deck, deckFont, blockWidth, STORY_CHROME_TOKENS.deckLineHeight);
-  const byline = measureWrappedTextBlock(formatByline(article), bylineFont, blockWidth, STORY_CHROME_TOKENS.bylineLineHeight);
+  const headlineLineHeight = Math.ceil(headlineFontSize * (lead ? 0.96 : 1));
+  const headline = measureWrappedTextBlock(article.headline, `${headlineFontSize}px Georgia, "Times New Roman", serif`, blockWidth, headlineLineHeight);
+  const deckFontSize = config.columnCount === 1 ? 15 : lead ? 16 : 14;
+  const deckLineHeight = Math.ceil(deckFontSize * 1.25);
+  const deck = measureWrappedTextBlock(article.deck, `italic ${deckFontSize}px Georgia, "Times New Roman", serif`, blockWidth, deckLineHeight);
+  const bylineFontSize = 11;
+  const bylineLineHeight = 13;
+  const byline = measureWrappedTextBlock(formatByline(article), `800 ${bylineFontSize}px Arial`, blockWidth, bylineLineHeight);
 
   return {
     borderTopHeight: lead ? 6 : 2,
-    paddingTop: STORY_CHROME_TOKENS.storyPaddingTop,
-    labelLineHeight: STORY_CHROME_TOKENS.labelLineHeight,
+    paddingTop: lead ? 12 : 10,
+    labelLineHeight: 14,
     headlineFontSize,
     headlineLineHeight,
     headlineHeight: headline.height,
     headlineLineCount: headline.lineCount,
-    headlineMarginTop: STORY_CHROME_TOKENS.headlineMarginTop,
-    headlineMarginBottom: STORY_CHROME_TOKENS.headlineMarginBottom,
-    deckFontSize: STORY_CHROME_TOKENS.deckFontSize,
-    deckLineHeight: STORY_CHROME_TOKENS.deckLineHeight,
+    headlineMarginTop: 5,
+    headlineMarginBottom: lead ? 9 : 8,
+    deckFontSize,
+    deckLineHeight,
     deckHeight: deck.height,
     deckLineCount: deck.lineCount,
-    deckMarginBottom: STORY_CHROME_TOKENS.deckMarginBottom,
-    bylineFontSize: STORY_CHROME_TOKENS.bylineFontSize,
-    bylineLineHeight: STORY_CHROME_TOKENS.bylineLineHeight,
+    deckMarginBottom: 8,
+    bylineFontSize,
+    bylineLineHeight,
     bylineHeight: byline.height,
     bylineLineCount: byline.lineCount,
-    bylineMarginBottom: STORY_CHROME_TOKENS.bylineMarginBottom,
+    bylineMarginBottom: 9,
     measureChromeHeight: STORY_MEASURE_CHROME_HEIGHT,
-    jumpLineHeight: STORY_CHROME_TOKENS.jumpLineHeight,
-    jumpPaddingTop: STORY_CHROME_TOKENS.jumpPaddingTop,
-    jumpBorderTopHeight: STORY_CHROME_TOKENS.jumpBorderTopHeight,
+    jumpLineHeight: 16,
+    jumpPaddingTop: 8,
+    jumpBorderTopHeight: 1,
   };
 }
 
@@ -2016,6 +1325,22 @@ function getStoryJumpReserveHeight(chrome: StoryChromeMetrics): number {
   return chrome.jumpBorderTopHeight + chrome.jumpPaddingTop + chrome.jumpLineHeight;
 }
 
+function getContinuationTitleMetrics(
+  config: LayoutConfig,
+  article: ArticlePublicationItem,
+  blockWidth: number,
+): { headingHeight: number; lineCount: number; totalHeight: number } {
+  const heading = measureWrappedTextBlock(
+    article.headline,
+    `${config.pageChrome.continuedTitleFontSize}px Georgia, "Times New Roman", serif`,
+    Math.min(blockWidth, 980),
+    config.pageChrome.continuedTitleLineHeight,
+  );
+  const headingHeight = Math.max(heading.height, config.pageChrome.continuedTitleLineHeight);
+  const totalHeight = Math.ceil(config.pageChrome.continuedTitleChromeHeight + headingHeight);
+  return { headingHeight, lineCount: heading.lineCount, totalHeight };
+}
+
 function measureWrappedTextBlock(
   text: string,
   font: string,
@@ -2025,30 +1350,19 @@ function measureWrappedTextBlock(
   const prepared = prepareWithSegments(text, font);
   let cursor = { ...EMPTY_CURSOR };
   let lineCount = 0;
-
   while (lineCount < 20) {
     const line = layoutNextLine(prepared, cursor, maxWidth);
     if (!line) break;
     cursor = line.end;
     lineCount += 1;
   }
-
   return {
     lineCount,
     height: Math.ceil(lineCount * lineHeight),
   };
 }
 
-function formatByline(article: Article): string {
-  return `${article.byline} / ${article.dateline}`.toUpperCase();
-}
-
-function getSpanWidth(config: LayoutConfig, span: number): number {
-  const singleColumn = (config.contentWidth - config.gap * (config.columnCount - 1)) / config.columnCount;
-  return singleColumn * span + config.gap * (span - 1);
-}
-
-function getLeadImageWrap(article: Article, width: number, lineHeight: number): ImageWrap | null {
+function getLeadImageWrap(article: ArticlePublicationItem, width: number, lineHeight: number): TextObstacle | null {
   if (width < 520) return null;
   const layout = article.image.layout;
   const preferredHeight = layout?.preferredHeight ?? lineHeight * 8;
@@ -2062,19 +1376,38 @@ function getLeadImageWrap(article: Article, width: number, lineHeight: number): 
   };
 }
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
+function leadImageToFurniture(article: ArticlePublicationItem, obstacle: TextObstacle): SolvedImageFurniture {
+  const aspectRatio = getImageAspectRatio(article.image);
+  return {
+    kind: "image",
+    id: `${article.slug}-lead-photo`,
+    src: article.image.src,
+    alt: article.image.alt,
+    credit: article.image.credit,
+    templateId: "lead-wrap",
+    columnStart: 0,
+    columnSpan: 1,
+    x: obstacle.x,
+    y: obstacle.y,
+    width: obstacle.width,
+    height: obstacle.height,
+    aspectRatio,
+    objectFit: "cover",
+    objectPosition: "50% 50%",
+    wrapsText: true,
+    preferredHeight: obstacle.height,
+  };
 }
 
 function getPrepared(
-  cache: Map<string, PreparedTextWithSegments>,
-  article: Article,
+  cache: PreparedTextCache,
+  article: ArticlePublicationItem,
   font: string,
 ): PreparedTextWithSegments {
   const key = `${article.slug}:${font}`;
   const cached = cache.get(key);
   if (cached) return cached;
-  const prepared = prepareWithSegments(getArticleText(article), font);
+  const prepared = prepareWithSegments(getPublicationItemText(article), font);
   cache.set(key, prepared);
   return prepared;
 }
@@ -2102,7 +1435,7 @@ function layoutTextLines({
 
   for (let lineIndex = 0; lineIndex < maxLines; lineIndex += 1) {
     const y = lineIndex * lineHeight;
-    const slot = getAvailableSlot(maxWidth, y, lineHeight, obstacles);
+    const slot = getAvailableSlot(maxWidth, y, linePaintHeight, obstacles);
     if (!slot) continue;
     const line = layoutNextLine(prepared, current, slot.width);
     if (!line) return { lines, cursor: current, hasMore: false };
@@ -2110,7 +1443,7 @@ function layoutTextLines({
     current = line.end;
   }
 
-  const nextSlot = getNextAvailableSlot(maxWidth, maxLines, lineHeight, obstacles) ?? { x: 0, width: maxWidth };
+  const nextSlot = getNextAvailableSlot(maxWidth, maxLines, lineHeight, linePaintHeight, obstacles) ?? { x: 0, width: maxWidth };
   return {
     lines,
     cursor: current,
@@ -2132,10 +1465,11 @@ function getNextAvailableSlot(
   maxWidth: number,
   startLineIndex: number,
   lineHeight: number,
+  linePaintHeight: number,
   obstacles: TextObstacle[],
 ): { x: number; width: number } | null {
   for (let offset = 0; offset < 24; offset += 1) {
-    const slot = getAvailableSlot(maxWidth, (startLineIndex + offset) * lineHeight, lineHeight, obstacles);
+    const slot = getAvailableSlot(maxWidth, (startLineIndex + offset) * lineHeight, linePaintHeight, obstacles);
     if (slot) return slot;
   }
   return null;
@@ -2200,4 +1534,195 @@ function toTextLine(line: LayoutLine, x: number, y: number, lineHeight: number, 
     lineHeight,
     paintHeight,
   };
+}
+
+function getColumnTextObstacles(furniture: SolvedFurniture[], columnIndex: number): TextObstacle[] {
+  return furniture
+    .filter((item) => item.wrapsText && columnIndex >= item.columnStart && columnIndex < item.columnStart + item.columnSpan)
+    .map((item) => ({
+      x: 0,
+      y: item.y,
+      width: Number.POSITIVE_INFINITY,
+      height: item.height,
+    }));
+}
+
+function getColumnWhitespace(columns: TextLine[][], textHeight: number, furniture: SolvedFurniture[]): number {
+  return columns.reduce(
+    (total, column, columnIndex) =>
+      total + Math.max(0, textHeight - getLinesHeight(column) - getColumnObstacleHeight(furniture, columnIndex, textHeight)),
+    0,
+  );
+}
+
+function getColumnObstacleHeight(furniture: SolvedFurniture[], columnIndex: number, textHeight: number): number {
+  const intervals = furniture
+    .filter((item) => item.wrapsText && columnIndex >= item.columnStart && columnIndex < item.columnStart + item.columnSpan)
+    .map((item) => ({
+      start: clamp(item.y, 0, textHeight),
+      end: clamp(item.y + item.height, 0, textHeight),
+    }))
+    .filter((interval) => interval.end > interval.start)
+    .sort((a, b) => a.start - b.start);
+
+  const merged: Array<{ start: number; end: number }> = [];
+  for (const interval of intervals) {
+    const previous = merged[merged.length - 1];
+    if (previous && interval.start <= previous.end) previous.end = Math.max(previous.end, interval.end);
+    else merged.push({ ...interval });
+  }
+  return merged.reduce((total, interval) => total + interval.end - interval.start, 0);
+}
+
+function getDeadColumnCount(columns: TextLine[][], textHeight: number, furniture: SolvedFurniture[]): number {
+  return columns.reduce((count, column, columnIndex) => {
+    if (column.length > 0) return count;
+    const obstacleHeight = getColumnObstacleHeight(furniture, columnIndex, textHeight);
+    return obstacleHeight >= Math.min(96, textHeight * 0.18) ? count : count + 1;
+  }, 0);
+}
+
+function getLinesHeight(lines: TextLine[]): number {
+  return lines.length === 0 ? 0 : Math.max(...lines.map((line) => line.y + line.paintHeight));
+}
+
+function getFurnitureBottom(furniture: SolvedFurniture[]): number {
+  return furniture.reduce((bottom, item) => Math.max(bottom, item.y + item.height), 0);
+}
+
+function getSpanCandidates(span: ResponsiveSpanPolicy, columnCount: number): number[] {
+  const min = Math.min(span.min, columnCount);
+  const max = Math.min(span.max, columnCount);
+  const preferred = clamp(span.preferred, min, max);
+  const candidates = [preferred, min, max];
+  return Array.from(new Set(candidates)).sort((left, right) => (
+    Math.abs(left - preferred) - Math.abs(right - preferred) || right - left
+  ));
+}
+
+function resolveAnchor(anchor: ResponsivePlacementAnchor): "left" | "right" | "center" | "inline" {
+  if (anchor === "outer") return "right";
+  if (anchor === "inner") return "left";
+  if (anchor === "inline") return "left";
+  return anchor;
+}
+
+function getColumnStart(anchor: "left" | "right" | "center" | "inline", span: number, columnCount: number): number {
+  if (anchor === "right") return Math.max(0, columnCount - span);
+  if (anchor === "center") return Math.max(0, Math.floor((columnCount - span) / 2));
+  return 0;
+}
+
+function getFurnitureY(
+  verticalAnchor: ResponsiveVerticalPlacement,
+  height: number,
+  textHeight: number,
+  config: LayoutConfig,
+): number {
+  if (verticalAnchor === "top") return 0;
+  const minY = config.lineHeight * 2;
+  const maxY = Math.max(0, textHeight - height);
+  const ratio = getVerticalAnchorRatio(verticalAnchor);
+  return clamp(Math.round(textHeight * ratio - height / 2), Math.min(minY, maxY), maxY);
+}
+
+function getVerticalAnchorRatio(verticalAnchor: ResponsiveVerticalPlacement): number {
+  if (verticalAnchor === "top") return 0.12;
+  if (verticalAnchor === "upperThird") return 0.32;
+  if (verticalAnchor === "lowerThird") return 0.66;
+  return 0.5;
+}
+
+function getPullQuoteMetrics(
+  text: string,
+  width: number,
+  config: LayoutConfig,
+): { height: number; fontSize: number; lineHeight: number } {
+  const narrow = config.columnCount === 1;
+  const fontSize = narrow ? 20 : 22;
+  const lineHeight = Math.round(fontSize * 1.12);
+  const charsPerLine = Math.max(12, Math.floor(width / (fontSize * 0.52)));
+  const lineCount = Math.ceil(text.length / charsPerLine);
+  const height = clamp(
+    Math.ceil(lineCount * lineHeight + PULL_QUOTE_VERTICAL_PADDING),
+    narrow ? 104 : 108,
+    narrow ? 180 : 168,
+  );
+  return { height, fontSize, lineHeight };
+}
+
+function getPullQuoteY({
+  x,
+  width,
+  height,
+  textHeight,
+  anchorRatio,
+  image,
+  config,
+}: {
+  x: number;
+  width: number;
+  height: number;
+  textHeight: number;
+  anchorRatio: number;
+  image: SolvedImageFurniture | null;
+  config: LayoutConfig;
+}): number | null {
+  const minY = config.lineHeight * 2;
+  const maxY = textHeight - height;
+  if (maxY < minY) return null;
+  const preferredY = clamp(Math.round(textHeight * anchorRatio - height / 2), minY, maxY);
+  const preferredRect = { x, y: preferredY, width, height };
+  if (!image || !rectsOverlap(preferredRect, image, FURNITURE_COLLISION_GUTTER)) return preferredY;
+  const candidateYs = [
+    image.y + image.height + FURNITURE_COLLISION_GUTTER,
+    image.y - height - FURNITURE_COLLISION_GUTTER,
+  ]
+    .filter((candidateY) => candidateY >= minY && candidateY <= maxY)
+    .sort((a, b) => Math.abs(a - preferredY) - Math.abs(b - preferredY));
+  return candidateYs.find((candidateY) => !rectsOverlap({ x, y: candidateY, width, height }, image, FURNITURE_COLLISION_GUTTER)) ?? null;
+}
+
+function rectsOverlap(
+  a: { x: number; y: number; width: number; height: number },
+  b: { x: number; y: number; width: number; height: number },
+  gutter = 0,
+): boolean {
+  return (
+    a.x < b.x + b.width + gutter &&
+    a.x + a.width + gutter > b.x &&
+    a.y < b.y + b.height + gutter &&
+    a.y + a.height + gutter > b.y
+  );
+}
+
+function getImageAspectRatio(asset: Pick<ArticleImageAsset, "layout">): number {
+  return asset.layout?.aspectRatio ?? 1.5;
+}
+
+function formatContinuationJumpLabel(article: ArticlePublicationItem, pageNumber: number): string {
+  return `SEE ${getShortSlug(article) ?? "MORE"} ON ${formatSectionPage(pageNumber)}`;
+}
+
+function formatContinuationSourceLabel(article: ArticlePublicationItem, sourcePageNumber: number): string {
+  const shortSlug = getShortSlug(article);
+  const source = `FROM ${formatSectionPage(sourcePageNumber)}`;
+  return shortSlug ? `${shortSlug} ${source}` : source;
+}
+
+function getShortSlug(article: ArticlePublicationItem): string | null {
+  const shortSlug = article.shortSlug?.trim().toUpperCase();
+  return shortSlug || null;
+}
+
+function formatSectionPage(pageNumber: number): string {
+  return `A${pageNumber}`;
+}
+
+function formatByline(article: ArticlePublicationItem): string {
+  return `${article.byline} / ${article.dateline}`.toUpperCase();
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
 }

@@ -1,5 +1,6 @@
 ---
 slug: market-hall
+shortSlug: MARKET
 section: Business
 byline: Ilya Stone
 dateline: EASTBOROUGH

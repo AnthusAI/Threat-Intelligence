@@ -648,6 +648,7 @@ img {
   margin-top: auto;
   overflow: hidden;
   padding-top: var(--story-jump-padding-top, 8px);
+  text-align: right;
   text-transform: uppercase;
 }
 

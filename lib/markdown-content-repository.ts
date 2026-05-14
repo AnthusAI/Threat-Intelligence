@@ -4,11 +4,13 @@ import matter from "gray-matter";
 import type { Article, ArticleAsset, ArticleImage } from "./articles";
 import type { ContentRepository, EditionContent } from "./content-types";
 import { loadLocalEditionConfig, orderEditionSlugs } from "./edition-config";
+import { articleToPublicationItem } from "./publication-items";
 
 const MARKDOWN_ARTICLES_DIR = path.join(process.cwd(), "content", "articles");
 
 type MarkdownArticleFrontmatter = {
   slug?: string;
+  shortSlug?: string;
   section?: string;
   byline?: string;
   dateline?: string;
@@ -27,7 +29,7 @@ export const markdownContentRepository: ContentRepository = {
       editionDate: editionConfig.displayDate,
       description: editionConfig.description,
       layoutPlan: editionConfig.layoutPlan,
-      articles: loadMarkdownArticles(),
+      items: loadMarkdownArticles().map(articleToPublicationItem),
     };
   },
   getArticle(slug: string) {
@@ -63,6 +65,7 @@ export function parseMarkdownArticle(markdown: string, filename = "article.md"):
 
   return {
     slug,
+    shortSlug: normalizeShortSlug(frontmatter.shortSlug),
     section: frontmatter.section ?? "News",
     headline,
     deck,
@@ -73,6 +76,11 @@ export function parseMarkdownArticle(markdown: string, filename = "article.md"):
     pullQuotes: frontmatter.pullQuotes,
     body,
   };
+}
+
+function normalizeShortSlug(value: string | undefined): string | undefined {
+  const shortSlug = value?.trim().toUpperCase();
+  return shortSlug || undefined;
 }
 
 function parseMarkdownArticleBody(markdown: string, filename: string): { headline: string; deck: string; body: string[] } {
