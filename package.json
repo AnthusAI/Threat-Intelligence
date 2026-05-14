@@ -1,0 +1,48 @@
+{
+  "name": "papyrus",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A Pretext-powered responsive newspaper layout lab.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "sandbox": "ampx sandbox",
+    "seed:amplify": "ampx sandbox seed",
+    "test:bdd": "cucumber-js",
+    "test:bdd:headed": "PAPYRUS_HEADLESS=false cucumber-js"
+  },
+  "keywords": [
+    "nextjs",
+    "react",
+    "pretext",
+    "newspaper",
+    "layout"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@aws-amplify/adapter-nextjs": "^1.7.3",
+    "@chenglou/pretext": "^0.0.7",
+    "aws-amplify": "^6.17.0",
+    "gray-matter": "^4.0.3",
+    "next": "^15.5.18",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
+  },
+  "devDependencies": {
+    "@aws-amplify/backend": "^1.22.0",
+    "@aws-amplify/backend-cli": "^1.8.2",
+    "@aws-amplify/seed": "^1.1.2",
+    "@cucumber/cucumber": "^12.8.3",
+    "@types/node": "^25.7.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "eslint": "^9.39.4",
+    "eslint-config-next": "^15.5.18",
+    "playwright": "^1.60.0",
+    "typescript": "^6.0.3"
+  }
+}

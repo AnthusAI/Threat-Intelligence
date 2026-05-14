@@ -1,0 +1,16 @@
+.DS_Store
+.env*
+!.env.example
+.next/
+node_modules/
+out/
+dist/
+coverage/
+.amplify/
+amplify_outputs.json
+amplifyconfiguration.json
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
