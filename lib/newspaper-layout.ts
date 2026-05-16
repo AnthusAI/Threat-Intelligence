@@ -8,9 +8,15 @@ import {
 import type { ArticleImageAsset } from "./articles";
 import {
   type ArticleFrameBlockSpec,
+  type ArticleFrameCompositionSlotSpec,
   type ArticleFrameChromeSpec,
   type ChromeTextSlotSpec,
   type EditionLayoutPlan,
+  type EditorialPriorityId,
+  type FrontResponsiveLayoutOrder,
+  type FrontResponsiveLayoutSpec,
+  type FrontResponsiveSlotSpec,
+  type HeadlineScaleId,
   type LayoutBlockSpec,
   type LayoutMediaSpec,
   type LayoutPageSpec,
@@ -34,6 +40,8 @@ export type TextLine = {
   width: number;
   x: number;
   y: number;
+  fontSize: number;
+  fontFamily: string;
   lineHeight: number;
   paintHeight: number;
 };
@@ -45,8 +53,10 @@ export type SolvedFurniture = SolvedImageFurniture | SolvedPullQuoteFurniture | 
 export type SolvedImageFurniture = {
   kind: "image";
   id: string;
+  assetId: string;
   src: string;
   alt: string;
+  caption: string;
   credit: string;
   templateId: string;
   columnStart: number;
@@ -55,6 +65,10 @@ export type SolvedImageFurniture = {
   y: number;
   width: number;
   height: number;
+  imageHeight: number;
+  captionHeight: number;
+  captionFontSize: number;
+  captionLineHeight: number;
   aspectRatio: number;
   objectFit: "contain" | "cover";
   objectPosition: string;
@@ -103,10 +117,35 @@ export type SolvedAdFurniture = {
   wrapsText: false;
 };
 
+export type SolvedChromeBox = {
+  id: string;
+  slot: "label" | "headline" | "deck" | "byline";
+  text: string;
+  columnStart: number;
+  columnSpan: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  fontSize: number;
+  lineHeight: number;
+  paintBuffer: number;
+  paddingTop?: number;
+  paddingBottom?: number;
+  ruleTopHeight?: number;
+  ruleBottomHeight?: number;
+  fontFamily: "serif" | "sans";
+  fontWeight?: number | string;
+  fontStyle?: "normal" | "italic";
+  textTransform?: "uppercase";
+};
+
 export type SolvedBlock = {
   id: string;
   type: LayoutBlockSpec["type"];
   presetId?: string;
+  headlineScale?: HeadlineScaleId;
+  editorialPriority?: EditorialPriorityId;
   item?: PublicationItem;
   article?: ArticlePublicationItem;
   pageNumber: number;
@@ -125,6 +164,7 @@ export type SolvedBlock = {
   span: number;
   columnCount: number;
   columns: TextLine[][];
+  chromeBoxes?: SolvedChromeBox[];
   furniture: SolvedFurniture[];
   textRange?: PlacedTextRange;
   hasMore?: boolean;
@@ -132,6 +172,7 @@ export type SolvedBlock = {
   titleChrome?: ContinuationTitleMetrics;
   titleHeight?: number;
   bodyHeight?: number;
+  furnitureSufficiency?: FurnitureSufficiencyReport;
 };
 
 export type SolvedFrontStoryMetrics = {
@@ -140,6 +181,22 @@ export type SolvedFrontStoryMetrics = {
   chromeHeight: number;
   jumpReserveHeight: number;
   chrome: StoryChromeMetrics;
+  gridPlacement?: SolvedFrontGridPlacement;
+  composition?: {
+    mode: FrontCompositionFlowMode;
+    bodyTop: number;
+    bodyHeight: number;
+    columnCount: number;
+    copyBandTop: number;
+    copyBandTops: number[];
+  };
+};
+
+export type SolvedFrontGridPlacement = {
+  columnStart: number;
+  columnSpan: number;
+  rowStart: number;
+  rowSpan: number;
 };
 
 export type SolvedRegion = {
@@ -154,6 +211,37 @@ export type SolvedRegion = {
   blocks: SolvedBlock[];
 };
 
+export type SolvedFrontFooterEntry = {
+  section: string;
+  articleSlug: string;
+  articleTitle: string;
+  blockId: string;
+  pageNumber: number;
+};
+
+export type SolvedFrontFooterUtilityEntry =
+  | {
+      id: "archive";
+      label: string;
+      href: string;
+      disabled: false;
+    }
+  | {
+      id: "login";
+      label: string;
+      disabled: true;
+    };
+
+export type SolvedFrontFooter = {
+  rowHeight: number;
+  marginTop: number;
+  height: number;
+  sectionRows: number;
+  sectionColumns: number;
+  entries: SolvedFrontFooterEntry[];
+  utilityEntries: SolvedFrontFooterUtilityEntry[];
+};
+
 export type SolvedPage = {
   id: string;
   pageNumber: number;
@@ -162,18 +250,27 @@ export type SolvedPage = {
   height: number;
   columnCount: number;
   regions: SolvedRegion[];
+  frontFooter?: SolvedFrontFooter;
 };
 
 export type NewspaperLayout = {
   columnCount: number;
   contentWidth: number;
   gap: number;
+  rowGap: number;
+  rhythm: VerticalRhythm;
   pageHeight: number;
   frontPageHeight: number;
   pageHeights: Record<number, number>;
   pageChrome: PageChromeMetrics;
   pages: SolvedPage[];
   textRanges: PlacedTextRange[];
+};
+
+export type VerticalRhythm = {
+  rowHeight: number;
+  paintHeight: number;
+  paintBuffer: number;
 };
 
 export type PageChromeMetrics = {
@@ -184,13 +281,19 @@ export type PageChromeMetrics = {
   mastheadKickerLineHeight: number;
   mastheadTitleFontSize: number;
   mastheadTitleLineHeight: number;
+  mastheadTitleMarginTop: number;
+  mastheadTitleMarginBottom: number;
+  mastheadTitleOpticalShift: number;
   mastheadMetaLineHeight: number;
   mastheadMetaGap: number;
+  mastheadMetaPaddingTop: number;
+  frontGridMarginTop: number;
   insideHeaderHeight: number;
   continuedTitleHeight: number;
   continuedTitleChromeHeight: number;
   continuedTitleFontSize: number;
   continuedTitleLineHeight: number;
+  continuationSectionSeparatorHeight: number;
 };
 
 export type ChromeTextBoxMetrics = {
@@ -198,6 +301,11 @@ export type ChromeTextBoxMetrics = {
   lineHeight: number;
   paintHeight: number;
   paintBuffer: number;
+  contentHeight: number;
+  paddingTop: number;
+  paddingBottom: number;
+  ruleTopHeight: number;
+  ruleBottomHeight: number;
   height: number;
   lineCount: number;
   marginBefore: number;
@@ -227,6 +335,10 @@ export type StoryChromeMetrics = {
   deckLineHeight: number;
   deckPaintHeight: number;
   deckPaintBuffer: number;
+  deckPaddingTop: number;
+  deckPaddingBottom: number;
+  deckRuleTopHeight: number;
+  deckRuleBottomHeight: number;
   deckHeight: number;
   deckLineCount: number;
   deckMarginBottom: number;
@@ -234,6 +346,8 @@ export type StoryChromeMetrics = {
   bylineLineHeight: number;
   bylinePaintHeight: number;
   bylinePaintBuffer: number;
+  bylinePaddingTop: number;
+  bylinePaddingBottom: number;
   bylineHeight: number;
   bylineLineCount: number;
   bylineMarginBottom: number;
@@ -244,6 +358,7 @@ export type StoryChromeMetrics = {
   jumpPaintBuffer: number;
   jumpHeight: number;
   jumpPaddingTop: number;
+  jumpPaddingBottom: number;
   jumpBorderTopHeight: number;
 };
 
@@ -268,6 +383,13 @@ type ChromeTextStyle = {
   minHeightEm?: number;
 };
 
+type ChromeBoxTreatment = {
+  paddingTop: number;
+  paddingBottom: number;
+  ruleTopHeight?: number;
+  ruleBottomHeight?: number;
+};
+
 export type TextObstacle = {
   x: number;
   y: number;
@@ -288,15 +410,20 @@ export type ArticleFlow = {
   article: ArticlePublicationItem;
   currentCursor: LayoutCursor;
   placedRanges: PlacedTextRange[];
+  usedImageAssetIds: Set<string>;
 };
 
 type LayoutConfig = {
   columnCount: number;
   contentWidth: number;
   gap: number;
+  rowGap: number;
+  rhythm: VerticalRhythm;
   pageChrome: PageChromeMetrics;
   lineHeight: number;
   linePaintHeight: number;
+  frontBodyFontSize: number;
+  continuationBodyFontSize: number;
   frontBodyFont: string;
   continuationBodyFont: string;
   frontRows: FrontRow[];
@@ -309,6 +436,16 @@ type FrontRow = {
   height: number;
 };
 
+type FrontArticlePlacement = {
+  block: ArticleFrameBlockSpec;
+  originalIndex: number;
+  solveIndex: number;
+  gridPlacement?: SolvedFrontGridPlacement;
+  rowHeight?: number;
+};
+
+type FrontCompositionFlowMode = "offsetBody" | "integrated" | "titleStackedMedia" | "stackedMedia";
+
 type PreparedTextCache = Map<string, PreparedTextWithSegments>;
 
 type ArticleFrameCandidate = {
@@ -316,12 +453,28 @@ type ArticleFrameCandidate = {
   range: PlacedTextRange;
   score: number;
   whitespace: number;
+  furnitureSufficiency?: FurnitureSufficiencyReport;
+};
+
+export type FurnitureSufficiencyReport = {
+  accepted: boolean;
+  reason?: string;
+  visibleRows: number;
+  furnitureRows: number;
 };
 
 type MediaVariant = {
   id: string;
   placement: ResponsivePlacementSpec | null;
   assetRole?: string;
+  columnStart: number;
+  columnSpan: number;
+  fallbackPenalty: number;
+};
+
+type PlacementVariant = {
+  id: string;
+  placement: ResponsivePlacementSpec;
   columnStart: number;
   columnSpan: number;
   fallbackPenalty: number;
@@ -338,27 +491,86 @@ type PullQuoteVariant = {
 const EMPTY_CURSOR: LayoutCursor = { segmentIndex: 0, graphemeIndex: 0 };
 const SERIF_TEXT_FONT = 'Georgia, "Times New Roman", serif';
 const SANS_TEXT_FONT = "Arial, Helvetica, sans-serif";
-const STORY_MEASURE_CHROME_HEIGHT = 9;
-const MASTHEAD_RULE_HEIGHT = 6;
-const MASTHEAD_RULE_MARGIN_BOTTOM = 9;
-const MASTHEAD_TITLE_MARGIN_TOP = 6;
-const MASTHEAD_TITLE_MARGIN_BOTTOM = 10;
-const MASTHEAD_PADDING_BOTTOM = 12;
-const MASTHEAD_BORDER_BOTTOM = 4;
-const MASTHEAD_MARGIN_BOTTOM = 18;
-const MASTHEAD_META_BORDER_TOP = 1;
-const MASTHEAD_META_PADDING_TOP = 8;
+const IMAGE_CAPTION_FONT_SIZE = 12;
+const IMAGE_CAPTION_HORIZONTAL_PADDING_EM = 0.3;
+const MASTHEAD_TITLE_ROWS = 4;
+const MASTHEAD_HORIZONTAL_ROWS = 6;
+const MASTHEAD_TITLE_GLYPH_HEIGHT_RATIO = 0.736;
+const MASTHEAD_RULE_HEIGHT = 0;
+const MASTHEAD_RULE_MARGIN_BOTTOM = 0;
+const MASTHEAD_TITLE_MARGIN_TOP = 0;
+const MASTHEAD_PADDING_BOTTOM = 0;
+const MASTHEAD_BORDER_BOTTOM = 0;
+const MASTHEAD_MARGIN_BOTTOM = 0;
+const MASTHEAD_META_BORDER_TOP = 0;
+const MASTHEAD_META_PADDING_TOP = 0;
+const MASTHEAD_META_PADDING_BOTTOM = 0;
+const MASTHEAD_META_BORDER_BOTTOM = 0;
 const INSIDE_HEADER_PADDING_BOTTOM = 8;
 const INSIDE_HEADER_BORDER_BOTTOM = 2;
 const INSIDE_HEADER_MARGIN_BOTTOM = 14;
 const CONTINUED_TITLE_KICKER_LINE_HEIGHT = 14;
 const CONTINUED_TITLE_HEADING_MARGIN_TOP = 5;
-const CONTINUED_TITLE_PADDING_BOTTOM = 12;
-const CONTINUED_TITLE_BORDER_BOTTOM = 1;
-const CONTINUED_TITLE_MARGIN_BOTTOM = 14;
-const CONTINUATION_SECTION_SEPARATOR_HEIGHT = 38;
+const CONTINUED_TITLE_PADDING_BOTTOM = 0;
+const CONTINUED_TITLE_BORDER_BOTTOM = 0;
+const CONTINUED_TITLE_MARGIN_BOTTOM = 0;
 const FURNITURE_COLLISION_GUTTER = 14;
 const PULL_QUOTE_VERTICAL_PADDING = 24;
+
+function createVerticalRhythm(narrow: boolean): VerticalRhythm {
+  const rowHeight = narrow ? 18 : 19;
+  const paintHeight = rowHeight + 4;
+  return {
+    rowHeight,
+    paintHeight,
+    paintBuffer: paintHeight - rowHeight,
+  };
+}
+
+function snapUpToRhythm(value: number, rhythm: VerticalRhythm): number {
+  if (value <= 0) return 0;
+  return Math.ceil(value / rhythm.rowHeight) * rhythm.rowHeight;
+}
+
+function snapDownToRhythm(value: number, rhythm: VerticalRhythm): number {
+  if (value <= 0) return 0;
+  return Math.floor(value / rhythm.rowHeight) * rhythm.rowHeight;
+}
+
+function snapToNearestRhythm(value: number, rhythm: VerticalRhythm): number {
+  if (value <= 0) return 0;
+  return Math.round(value / rhythm.rowHeight) * rhythm.rowHeight;
+}
+
+function reserveRhythmRows(value: number, rhythm: VerticalRhythm): number {
+  return snapUpToRhythm(value, rhythm);
+}
+
+function clampRhythmHeight(value: number, minimum: number, maximum: number, rhythm: VerticalRhythm): number {
+  const snappedMinimum = reserveRhythmRows(minimum, rhythm);
+  const snappedMaximum = Math.max(snappedMinimum, snapDownToRhythm(maximum, rhythm));
+  return clamp(reserveRhythmRows(value, rhythm), snappedMinimum, snappedMaximum);
+}
+
+function snapPreferredHeightToRhythm(value: number, rhythm: VerticalRhythm, minimum = rhythm.rowHeight, maximum = Number.POSITIVE_INFINITY): number {
+  const snappedMinimum = reserveRhythmRows(minimum, rhythm);
+  const snappedMaximum = Number.isFinite(maximum) ? Math.max(snappedMinimum, snapDownToRhythm(maximum, rhythm)) : Number.POSITIVE_INFINITY;
+  const down = snapDownToRhythm(value, rhythm);
+  const up = reserveRhythmRows(value, rhythm);
+  const candidates = [down, up].filter((candidate) => candidate >= snappedMinimum && candidate <= snappedMaximum);
+  if (candidates.length === 0) return snappedMinimum;
+  return candidates.sort((left, right) => Math.abs(left - value) - Math.abs(right - value) || left - right)[0];
+}
+
+function snapPreservedImageHeightToRhythm(value: number, rhythm: VerticalRhythm, minimum = rhythm.rowHeight, maximum = Number.POSITIVE_INFINITY): number {
+  const snappedMinimum = reserveRhythmRows(minimum, rhythm);
+  const snappedMaximum = Number.isFinite(maximum) ? Math.max(snappedMinimum, snapDownToRhythm(maximum, rhythm)) : Number.POSITIVE_INFINITY;
+  return clamp(reserveRhythmRows(value, rhythm), snappedMinimum, snappedMaximum);
+}
+
+function getMinimumTextFrameHeight(config: LayoutConfig): number {
+  return reserveRhythmRows(config.linePaintHeight, config.rhythm);
+}
 
 export function buildNewspaperLayout(
   items: PublicationItem[],
@@ -389,6 +601,8 @@ export function buildNewspaperLayout(
     columnCount: config.columnCount,
     contentWidth: config.contentWidth,
     gap: config.gap,
+    rowGap: config.rowGap,
+    rhythm: config.rhythm,
     pageHeight: maxPageHeight,
     frontPageHeight: pageHeights[1] ?? maxPageHeight,
     pageHeights,
@@ -419,11 +633,31 @@ function solveFrontMosaicPage(
   config: LayoutConfig,
 ): SolvedPage {
   const regionSpec = pageSpec.regions[0];
-  const blocks = regionSpec.blocks
-    .filter((block): block is ArticleFrameBlockSpec => block.type === "articleFrame")
-    .map((blockSpec, index) => solveFrontArticleFrame(blockSpec, index, itemsBySlug, flows, prepared, config, pageSpec.pageNumber));
-  const gridHeight = getFrontPageGridHeight(config);
-  const pageHeight = getFrontPageHeight(config);
+  const frontBlockSpecs = regionSpec.blocks.filter((block): block is ArticleFrameBlockSpec => block.type === "articleFrame");
+  const activeResponsiveLayout = getActiveFrontResponsiveLayout(regionSpec, config);
+  const placements = activeResponsiveLayout
+    ? resolveResponsiveFrontArticlePlacements(frontBlockSpecs, activeResponsiveLayout, config)
+    : frontBlockSpecs.map((block, index) => ({ block, originalIndex: index, solveIndex: index }));
+  const responsiveRowHeights = activeResponsiveLayout
+    ? getResponsiveFrontRowHeights(config, placements)
+    : null;
+  const solvedPlacements = responsiveRowHeights
+    ? placements.map((placement) => ({
+        ...placement,
+        rowHeight: getResponsiveFrontPlacementHeight(placement, responsiveRowHeights, config.rowGap),
+      }))
+    : placements;
+  const blocks = solvedPlacements.map((placement) => (
+    solveFrontArticleFrame(placement, itemsBySlug, flows, prepared, config, pageSpec.pageNumber)
+  ));
+  const solvedResponsiveRowHeights = responsiveRowHeights
+    ? getSolvedResponsiveFrontRowHeights(responsiveRowHeights, blocks, config)
+    : null;
+  const gridHeight = solvedResponsiveRowHeights
+    ? getFrontPageGridHeightFromRowHeights(solvedResponsiveRowHeights, config.rowGap)
+    : getFrontPageGridHeight(config);
+  const frontFooter = solveFrontFooter(blocks, config, pageSpec.pageNumber);
+  const pageHeight = getFrontPageHeightForGrid(config, gridHeight, frontFooter);
 
   return {
     id: pageSpec.id ?? pageIdFor(pageSpec.pageNumber),
@@ -432,13 +666,14 @@ function solveFrontMosaicPage(
     kind: "front",
     height: pageHeight,
     columnCount: config.columnCount,
+    frontFooter,
     regions: [
       {
         id: regionSpec.id,
         type: regionSpec.type,
         role: regionSpec.role,
         x: 0,
-        y: config.pageChrome.mastheadHeight,
+        y: config.pageChrome.pagePaddingTop + config.pageChrome.mastheadHeight + config.pageChrome.frontGridMarginTop,
         width: config.contentWidth,
         height: gridHeight,
         columnCount: config.columnCount,
@@ -448,40 +683,248 @@ function solveFrontMosaicPage(
   };
 }
 
+function getActiveFrontResponsiveLayout(regionSpec: LayoutRegionSpec, config: LayoutConfig): FrontResponsiveLayoutSpec | null {
+  return regionSpec.responsiveLayouts?.find((layout) => (
+    config.columnCount >= layout.minColumns && config.columnCount <= layout.maxColumns
+  )) ?? null;
+}
+
+function resolveResponsiveFrontArticlePlacements(
+  blocks: ArticleFrameBlockSpec[],
+  layout: FrontResponsiveLayoutSpec,
+  config: LayoutConfig,
+): FrontArticlePlacement[] {
+  const orderedBlocks = orderFrontArticleBlocks(blocks, layout.order);
+  const placements: FrontArticlePlacement[] = [];
+  const assignedBlockIds = new Set<string>();
+
+  for (const slot of layout.slots) {
+    const block = findFrontSlotBlock(slot, blocks, orderedBlocks);
+    if (!block || assignedBlockIds.has(block.id)) continue;
+    assignedBlockIds.add(block.id);
+    placements.push({
+      block,
+      originalIndex: blocks.indexOf(block),
+      solveIndex: placements.length,
+      gridPlacement: resolveFrontSlotGridPlacement(slot, config),
+    });
+  }
+
+  const overflowBlocks = orderedBlocks.filter((block) => !assignedBlockIds.has(block.id));
+  const overflowPlacements = resolveFrontOverflowPlacements(
+    overflowBlocks,
+    blocks,
+    placements.length,
+    getNextFrontOverflowRow(placements),
+    layout.overflow.columnSpan,
+    layout.overflow.rowSpan,
+    config,
+  );
+
+  return [...placements, ...overflowPlacements]
+    .sort((left, right) => (
+      (left.gridPlacement?.rowStart ?? 0) - (right.gridPlacement?.rowStart ?? 0) ||
+      (left.gridPlacement?.columnStart ?? 0) - (right.gridPlacement?.columnStart ?? 0) ||
+      left.solveIndex - right.solveIndex
+    ))
+    .map((placement, solveIndex) => ({ ...placement, solveIndex }));
+}
+
+function orderFrontArticleBlocks(blocks: ArticleFrameBlockSpec[], order: FrontResponsiveLayoutOrder): ArticleFrameBlockSpec[] {
+  if (order !== "editorialPriority") return blocks;
+  return blocks
+    .map((block, index) => ({ block, index }))
+    .sort((left, right) => (
+      getEditorialPriorityRank(left.block.editorialPriority) - getEditorialPriorityRank(right.block.editorialPriority) ||
+      left.index - right.index
+    ))
+    .map(({ block }) => block);
+}
+
+function findFrontSlotBlock(
+  slot: FrontResponsiveSlotSpec,
+  blocks: ArticleFrameBlockSpec[],
+  orderedBlocks: ArticleFrameBlockSpec[],
+): ArticleFrameBlockSpec | null {
+  if (slot.blockId) return blocks.find((block) => block.id === slot.blockId) ?? null;
+  if (!slot.editorialPriority) return null;
+  const occurrence = slot.priorityOccurrence ?? 1;
+  return orderedBlocks.filter((block) => block.editorialPriority === slot.editorialPriority)[occurrence - 1] ?? null;
+}
+
+function resolveFrontSlotGridPlacement(slot: FrontResponsiveSlotSpec, config: LayoutConfig): SolvedFrontGridPlacement {
+  const columnStart = clamp(slot.columnStart - 1, 0, Math.max(0, config.columnCount - 1));
+  return {
+    columnStart,
+    columnSpan: clamp(slot.columnSpan, 1, Math.max(1, config.columnCount - columnStart)),
+    rowStart: slot.rowStart - 1,
+    rowSpan: slot.rowSpan,
+  };
+}
+
+function resolveFrontOverflowPlacements(
+  overflowBlocks: ArticleFrameBlockSpec[],
+  allBlocks: ArticleFrameBlockSpec[],
+  solveIndexStart: number,
+  rowStart: number,
+  requestedColumnSpan: number | "full",
+  rowSpan: number,
+  config: LayoutConfig,
+): FrontArticlePlacement[] {
+  const columnSpan = requestedColumnSpan === "full"
+    ? config.columnCount
+    : clamp(requestedColumnSpan, 1, config.columnCount);
+  let columnStart = 0;
+  let currentRow = rowStart;
+  return overflowBlocks.map((block, index) => {
+    if (columnStart + columnSpan > config.columnCount) {
+      currentRow += rowSpan;
+      columnStart = 0;
+    }
+    const placement: FrontArticlePlacement = {
+      block,
+      originalIndex: allBlocks.indexOf(block),
+      solveIndex: solveIndexStart + index,
+      gridPlacement: {
+        columnStart,
+        columnSpan,
+        rowStart: currentRow,
+        rowSpan,
+      },
+    };
+    columnStart += columnSpan;
+    return placement;
+  });
+}
+
+function getNextFrontOverflowRow(placements: FrontArticlePlacement[]): number {
+  return placements.reduce((nextRow, placement) => {
+    const gridPlacement = placement.gridPlacement;
+    if (!gridPlacement) return nextRow;
+    return Math.max(nextRow, gridPlacement.rowStart + gridPlacement.rowSpan);
+  }, 0);
+}
+
+function getResponsiveFrontRowHeights(config: LayoutConfig, placements: FrontArticlePlacement[]): number[] {
+  const rowCount = placements.reduce((count, placement) => {
+    const gridPlacement = placement.gridPlacement;
+    if (!gridPlacement) return count;
+    return Math.max(count, gridPlacement.rowStart + gridPlacement.rowSpan);
+  }, 0);
+  const baseHeights = config.frontRows.map((row) => row.height);
+  const fallbackHeight = baseHeights[1] ?? baseHeights[0] ?? reserveRhythmRows(420, config.rhythm);
+  return Array.from({ length: rowCount }, (_, index) => baseHeights[index] ?? fallbackHeight);
+}
+
+function getResponsiveFrontPlacementHeight(placement: FrontArticlePlacement, rowHeights: number[], rowGap: number): number {
+  const gridPlacement = placement.gridPlacement;
+  if (!gridPlacement) return getFrontRowHeightFallback(rowHeights);
+  return getResponsiveFrontGridPlacementHeight(gridPlacement, rowHeights, rowGap);
+}
+
+function getResponsiveFrontGridPlacementHeight(gridPlacement: SolvedFrontGridPlacement, rowHeights: number[], rowGap: number): number {
+  return rowHeights
+    .slice(gridPlacement.rowStart, gridPlacement.rowStart + gridPlacement.rowSpan)
+    .reduce((total, height) => total + height, 0) + rowGap * Math.max(0, gridPlacement.rowSpan - 1);
+}
+
+function getFrontRowHeightFallback(rowHeights: number[]): number {
+  return rowHeights[0] ?? 0;
+}
+
+function solveFrontFooter(blocks: SolvedBlock[], config: LayoutConfig, pageNumber: number): SolvedFrontFooter {
+  const entries: SolvedFrontFooterEntry[] = [];
+  const seenSections = new Set<string>();
+  for (const block of blocks) {
+    const section = block.section ?? block.article?.section;
+    const articleSlug = block.article?.slug;
+    const articleTitle = block.title ?? block.article?.headline;
+    if (!section || !articleSlug || !articleTitle) continue;
+    const sectionKey = section.trim().toLowerCase();
+    if (!sectionKey || seenSections.has(sectionKey)) continue;
+    seenSections.add(sectionKey);
+    entries.push({
+      section,
+      articleSlug,
+      articleTitle,
+      blockId: block.id,
+      pageNumber,
+    });
+  }
+
+  const sectionColumns = entries.length === 0
+    ? 1
+    : Math.min(entries.length, Math.max(1, config.columnCount <= 1 ? 1 : config.columnCount <= 3 ? 2 : 4));
+  const sectionRows = entries.length === 0 ? 0 : Math.ceil(entries.length / sectionColumns);
+  const rowCount = 1 + sectionRows + 1;
+  return {
+    rowHeight: config.rhythm.rowHeight,
+    marginTop: config.rhythm.rowHeight,
+    height: reserveRhythmRows(rowCount * config.rhythm.rowHeight, config.rhythm),
+    sectionRows,
+    sectionColumns,
+    entries,
+    utilityEntries: [
+      { id: "archive", label: "Archive", href: "/archive", disabled: false },
+      { id: "login", label: "Log in", disabled: true },
+    ],
+  };
+}
+
+function getSolvedResponsiveFrontRowHeights(baseRowHeights: number[], blocks: SolvedBlock[], config: LayoutConfig): number[] {
+  const rowHeights = [...baseRowHeights];
+  for (const block of blocks) {
+    const placement = block.front?.gridPlacement;
+    if (!placement) continue;
+    while (rowHeights.length < placement.rowStart + placement.rowSpan) {
+      rowHeights.push(baseRowHeights[baseRowHeights.length - 1] ?? reserveRhythmRows(420, config.rhythm));
+    }
+    const currentHeight = getResponsiveFrontGridPlacementHeight(placement, rowHeights, config.rowGap);
+    if (block.height <= currentHeight) continue;
+    const lastRowIndex = placement.rowStart + placement.rowSpan - 1;
+    rowHeights[lastRowIndex] = reserveRhythmRows(rowHeights[lastRowIndex] + block.height - currentHeight, config.rhythm);
+  }
+  return rowHeights;
+}
+
+function getEditorialPriorityRank(priority: EditorialPriorityId): number {
+  if (priority === "primary") return 0;
+  if (priority === "secondary") return 1;
+  if (priority === "tertiary") return 2;
+  return 3;
+}
+
 function solveFrontArticleFrame(
-  blockSpec: ArticleFrameBlockSpec,
-  index: number,
+  placement: FrontArticlePlacement,
   itemsBySlug: Map<string, PublicationItem>,
   flows: Map<string, ArticleFlow>,
   prepared: PreparedTextCache,
   config: LayoutConfig,
   pageNumber: number,
 ): SolvedBlock {
+  const { block: blockSpec } = placement;
   const item = requireArticleItem(blockSpec.itemId, itemsBySlug);
   const flow = getOrCreateFlow(flows, blockSpec.flowKey ?? blockSpec.itemId, item);
-  if (blockSpec.startCursor === "beginning") flow.currentCursor = { ...EMPTY_CURSOR };
+  if (blockSpec.startCursor === "beginning") resetArticleFlow(flow);
 
-  const span = Math.min(blockSpec.span?.preferred ?? 1, config.columnCount);
+  const span = placement.gridPlacement?.columnSpan ?? Math.min(blockSpec.span?.preferred ?? 1, config.columnCount);
   const blockWidth = getSpanWidth(config, span);
-  const preludeImage = createFrontPreludeImage(item, blockSpec, blockWidth);
-  const storyRole: FrontStoryRole =
-    blockSpec.role === "feature" || blockSpec.role === "primary"
-      ? "feature"
-      : blockSpec.role === "rail"
-        ? "rail"
-        : span >= 4 || preludeImage !== null
-          ? "feature"
-          : "standard";
-  const chrome = getStoryChromeMetrics(config, item, storyRole, blockWidth, preludeImage?.height ?? 0, blockSpec.chrome);
+  if (blockSpec.composition) {
+    return solveComposedFrontArticleFrame(placement, item, flow, prepared, config, pageNumber, span, blockWidth);
+  }
+  const preludeImage = createFrontPreludeImage(item, blockSpec, blockWidth, config, flow.usedImageAssetIds);
+  const storyRole = resolveFrontStoryRole(blockSpec, span, preludeImage !== null);
+  const headlineScale = resolveHeadlineScale(blockSpec, storyRole);
+  const chrome = getStoryChromeMetrics(config, item, storyRole, headlineScale, blockWidth, preludeImage?.height ?? 0, blockSpec.chrome);
   const chromeHeight = getStoryChromeHeight(chrome);
   const jumpReserveHeight = getStoryJumpReserveHeight(chrome);
-  const rowHeight = getFrontRowHeight(config, index);
-  const bodySlotHeight = Math.max(config.linePaintHeight, rowHeight - chromeHeight - jumpReserveHeight);
+  const rowHeight = placement.rowHeight ?? getFrontRowHeight(config, placement.solveIndex);
+  const bodySlotHeight = Math.max(getMinimumTextFrameHeight(config), snapDownToRhythm(rowHeight - chromeHeight - jumpReserveHeight, config.rhythm));
   const lineLimitHeight = blockSpec.cutPolicy?.maxBodyLines
-    ? getLineLimitHeight(blockSpec.cutPolicy.maxBodyLines, config.lineHeight, config.linePaintHeight)
+    ? getLineLimitHeight(blockSpec.cutPolicy.maxBodyLines, config.lineHeight, config.linePaintHeight, config.rhythm)
     : bodySlotHeight;
   const maxHeight = Math.min(bodySlotHeight, lineLimitHeight);
-  const imageWrap = !preludeImage && storyRole === "feature" ? getLeadImageWrap(item, blockWidth, config.lineHeight) : null;
+  const imageWrap = !preludeImage && storyRole === "feature" ? getLeadImageWrap(item, blockWidth, config) : null;
   const startCursor = { ...flow.currentCursor };
   const result = layoutTextLines({
     prepared: getPrepared(prepared, item, config.frontBodyFont),
@@ -490,6 +933,8 @@ function solveFrontArticleFrame(
     maxWidth: blockWidth,
     lineHeight: config.lineHeight,
     linePaintHeight: config.linePaintHeight,
+    fontSize: config.frontBodyFontSize,
+    fontFamily: SERIF_TEXT_FONT,
     obstacles: imageWrap ? [imageWrap] : [],
   });
   const range = createTextRange({
@@ -500,12 +945,18 @@ function solveFrontArticleFrame(
     endCursor: result.cursor,
     exhausted: !result.hasMore,
   });
+  const furniture = [preludeImage, imageWrap ? leadImageToFurniture(item, imageWrap, config) : null].filter(
+    (furniture): furniture is SolvedImageFurniture => furniture !== null,
+  );
   commitTextRange(flow, range);
+  commitUsedImageFurniture(flow, furniture);
 
   return {
     id: blockSpec.id,
     type: "articleFrame",
     presetId: blockSpec.presetId,
+    headlineScale,
+    editorialPriority: blockSpec.editorialPriority,
     item,
     article: item,
     pageNumber,
@@ -527,9 +978,7 @@ function solveFrontArticleFrame(
     span,
     columnCount: 1,
     columns: [result.lines],
-    furniture: [preludeImage, imageWrap ? leadImageToFurniture(item, imageWrap) : null].filter(
-      (furniture): furniture is SolvedImageFurniture => furniture !== null,
-    ),
+    furniture,
     textRange: range,
     hasMore: result.hasMore,
     front: {
@@ -538,9 +987,333 @@ function solveFrontArticleFrame(
       chromeHeight,
       jumpReserveHeight,
       chrome,
+      gridPlacement: placement.gridPlacement,
     },
     bodyHeight: bodySlotHeight,
   };
+}
+
+function solveComposedFrontArticleFrame(
+  placement: FrontArticlePlacement,
+  item: ArticlePublicationItem,
+  flow: ArticleFlow,
+  prepared: PreparedTextCache,
+  config: LayoutConfig,
+  pageNumber: number,
+  span: number,
+  blockWidth: number,
+): SolvedBlock {
+  const { block: blockSpec } = placement;
+  const storyRole = resolveFrontStoryRole(blockSpec, span, false);
+  const headlineScale = resolveHeadlineScale(blockSpec, storyRole);
+  const localColumnCount = getLocalColumnCountCandidates(blockSpec.localGrid?.columns, config, blockWidth)[0] ?? 1;
+  const localConfig = { ...config, columnCount: localColumnCount, contentWidth: blockWidth };
+  const chrome = getStoryChromeMetrics(config, item, storyRole, headlineScale, blockWidth, 0, blockSpec.chrome);
+
+  const rowHeight = placement.rowHeight ?? getFrontRowHeight(config, placement.solveIndex);
+  const jumpReserveHeight = getStoryJumpReserveHeight(chrome);
+  const topMediaVariant = resolveTopMediaCompositionVariant(blockSpec, localConfig);
+  const compositionMode = getFrontCompositionFlowMode(placement, config, localConfig, topMediaVariant);
+  const titleBoxes: SolvedChromeBox[] = [];
+  let titleBottom = reserveRhythmRows(chrome.paddingTop + chrome.borderTopHeight, config.rhythm);
+
+  for (const slot of blockSpec.composition?.title ?? []) {
+    const variant = resolveCompositionChromeSlotVariant(slot, localConfig, compositionMode, topMediaVariant);
+    const box = solveCompositionChromeBox({
+      slot,
+      item,
+      storyRole,
+      headlineScale,
+      localConfig,
+      y: titleBottom,
+      globalYOffset: 0,
+      chromeOverrides: blockSpec.chrome,
+      variant,
+    });
+    if (!box) continue;
+    titleBoxes.push(box.globalBox);
+    titleBottom = Math.max(titleBottom, box.localReserveBottom);
+  }
+
+  const bodyTop = compositionMode === "offsetBody" ? reserveRhythmRows(titleBottom, config.rhythm) : 0;
+  let bodySlotHeight = Math.max(getMinimumTextFrameHeight(config), snapDownToRhythm(rowHeight - bodyTop - jumpReserveHeight, config.rhythm));
+  const lineLimitHeight = blockSpec.cutPolicy?.maxBodyLines
+    ? getLineLimitHeight(blockSpec.cutPolicy.maxBodyLines, config.lineHeight, config.linePaintHeight, config.rhythm)
+    : bodySlotHeight;
+  const leadBoxes: SolvedChromeBox[] = [];
+  const renderLeadBoxes: SolvedChromeBox[] = [];
+  const furniture: SolvedFurniture[] = [];
+  const columnBottoms = Array.from({ length: localColumnCount }, () => 0);
+  if (compositionMode !== "offsetBody") {
+    for (const box of titleBoxes) {
+      updateOccupiedColumnBottoms(columnBottoms, box.columnStart, box.columnSpan, box.y + box.height);
+    }
+  }
+
+  for (const slot of getOrderedCompositionLeadSlots(blockSpec, compositionMode)) {
+    const slotVariant = slot.slot === "media"
+      ? resolveCompositionMediaSlotVariant(slot.placement, localConfig, compositionMode)
+      : resolveCompositionChromeSlotVariant(slot, localConfig, compositionMode, topMediaVariant);
+    if (!slotVariant) continue;
+
+    if (slot.slot === "media") {
+      const mediaSpec = blockSpec.media[slot.mediaIndex ?? 0];
+      const image = createImageFurniture(
+        item,
+        {
+          id: slotVariant.id,
+          placement: slot.placement,
+          assetRole: mediaSpec?.assetRole,
+          columnStart: slotVariant.columnStart,
+          columnSpan: slotVariant.columnSpan,
+          fallbackPenalty: slotVariant.fallbackPenalty,
+        },
+        localConfig,
+        bodySlotHeight,
+        flow.usedImageAssetIds,
+      );
+      if (!image) {
+        if (mediaSpec?.required) throw new Error(`${blockSpec.id} requires media slot ${slot.mediaIndex ?? 0} but no image could be solved`);
+        continue;
+      }
+      const stackTop = getOccupiedColumnBottom(columnBottoms, image.columnStart, image.columnSpan);
+      const y = compositionMode === "stackedMedia"
+        ? reserveRhythmRows(stackTop, config.rhythm)
+        : Math.max(image.y, stackTop);
+      const placedImage = { ...image, y };
+      furniture.push(placedImage);
+      updateOccupiedColumnBottoms(columnBottoms, placedImage.columnStart, placedImage.columnSpan, placedImage.y + placedImage.height);
+      continue;
+    }
+
+    const stackTop = getOccupiedColumnBottom(columnBottoms, slotVariant.columnStart, slotVariant.columnSpan);
+    const box = solveCompositionChromeBox({
+      slot,
+      item,
+      storyRole,
+      headlineScale,
+      localConfig,
+      y: stackTop,
+      globalYOffset: bodyTop,
+      chromeOverrides: blockSpec.chrome,
+      variant: slotVariant,
+    });
+    if (!box) continue;
+    leadBoxes.push(box.localBox);
+    renderLeadBoxes.push(box.globalBox);
+    updateOccupiedColumnBottoms(columnBottoms, box.localBox.columnStart, box.localBox.columnSpan, box.localReserveBottom);
+  }
+
+  const startCursor = { ...flow.currentCursor };
+  const textChromeBoxes = compositionMode === "offsetBody" ? leadBoxes : [...titleBoxes, ...leadBoxes];
+  const furnitureObstacleOffsetY = compositionMode === "offsetBody" ? -bodyTop : 0;
+  const columnCopyBandTops = getColumnCopyBandTops(
+    localColumnCount,
+    textChromeBoxes,
+    furniture,
+    furnitureObstacleOffsetY,
+    config.rhythm.rowHeight,
+    config.rhythm,
+  );
+  const copyBandTop = Math.max(...columnCopyBandTops, 0);
+  if (compositionMode === "stackedMedia" || compositionMode === "titleStackedMedia") {
+    bodySlotHeight = Math.max(bodySlotHeight, reserveRhythmRows(copyBandTop + getMinimumTextFrameHeight(config), config.rhythm));
+  }
+  const maxHeight = Math.min(
+    bodySlotHeight,
+    compositionMode === "stackedMedia" || compositionMode === "titleStackedMedia" ? copyBandTop + lineLimitHeight : lineLimitHeight,
+  );
+  const textResult = layoutTextColumns({
+    item,
+    prepared,
+    cursor: startCursor,
+    columnCount: localColumnCount,
+    textHeight: maxHeight,
+    localConfig,
+    furniture,
+    furnitureObstacleOffsetY,
+    furnitureObstacleMarginBottom: config.rhythm.rowHeight,
+    minimumLineStartYByColumn: columnCopyBandTops,
+    chromeBoxes: textChromeBoxes,
+  });
+  const solvedRowHeight = Math.max(rowHeight, reserveRhythmRows(bodyTop + bodySlotHeight + jumpReserveHeight, config.rhythm));
+  const range = createTextRange({
+    flow,
+    pageId: pageIdFor(pageNumber),
+    blockId: blockSpec.id,
+    startCursor,
+    endCursor: textResult.cursor,
+    exhausted: !textResult.hasMore,
+  });
+  commitTextRange(flow, range);
+  commitUsedImageFurniture(flow, furniture);
+
+  return {
+    id: blockSpec.id,
+    type: "articleFrame",
+    presetId: blockSpec.presetId,
+    headlineScale,
+    editorialPriority: blockSpec.editorialPriority,
+    item,
+    article: item,
+    pageNumber,
+    jumpTargetPage: textResult.hasMore ? blockSpec.cutPolicy?.jumpTargetPage : undefined,
+    jumpLabel:
+      textResult.hasMore && blockSpec.cutPolicy?.jumpTargetPage
+        ? formatContinuationJumpLabel(item, blockSpec.cutPolicy.jumpTargetPage)
+        : undefined,
+    label: item.section,
+    title: item.headline,
+    deck: item.deck,
+    byline: item.byline,
+    dateline: item.dateline,
+    section: item.section,
+    x: 0,
+    y: 0,
+    width: blockWidth,
+    height: solvedRowHeight,
+    span,
+    columnCount: localColumnCount,
+    columns: textResult.columns,
+    chromeBoxes: [...titleBoxes, ...renderLeadBoxes],
+    furniture,
+    textRange: range,
+    hasMore: textResult.hasMore,
+    front: {
+      rowHeight: solvedRowHeight,
+      bodySlotHeight,
+      chromeHeight: bodyTop,
+      jumpReserveHeight,
+      chrome,
+      gridPlacement: placement.gridPlacement,
+      composition: {
+        mode: compositionMode,
+        bodyTop,
+        bodyHeight: bodySlotHeight,
+        columnCount: localColumnCount,
+        copyBandTop,
+        copyBandTops: columnCopyBandTops,
+      },
+    },
+    bodyHeight: bodySlotHeight,
+  };
+}
+
+function getFrontCompositionFlowMode(
+  placement: FrontArticlePlacement,
+  config: LayoutConfig,
+  localConfig: LayoutConfig,
+  topMediaVariant: PlacementVariant | null,
+): FrontCompositionFlowMode {
+  if (topMediaVariant && topMediaVariant.placement.vertical === "top" && !hasCompositionSideBesideMedia(localConfig, topMediaVariant)) {
+    return "stackedMedia";
+  }
+  if (
+    placement.gridPlacement &&
+    placement.gridPlacement.columnSpan === config.columnCount &&
+    localConfig.columnCount > 1 &&
+    topMediaVariant &&
+    topMediaVariant.columnSpan < localConfig.columnCount &&
+    topMediaVariant.placement.vertical === "top"
+  ) {
+    if (localConfig.columnCount <= 3) return "titleStackedMedia";
+    return "integrated";
+  }
+  return "offsetBody";
+}
+
+function resolveTopMediaCompositionVariant(blockSpec: ArticleFrameBlockSpec, localConfig: LayoutConfig): PlacementVariant | null {
+  const slot = blockSpec.composition?.lead.find((candidate) => (
+    candidate.slot === "media" && candidate.placement.vertical === "top"
+  ));
+  return slot ? resolvePreferredPlacementVariant(slot.placement, localConfig) : null;
+}
+
+function resolveCompositionChromeSlotVariant(
+  slot: ArticleFrameCompositionSlotSpec,
+  localConfig: LayoutConfig,
+  compositionMode: FrontCompositionFlowMode,
+  topMediaVariant: PlacementVariant | null,
+): PlacementVariant | null {
+  const variant = resolvePreferredPlacementVariant(slot.placement, localConfig);
+  if (!variant || !isTextCompositionSlot(slot.slot)) return variant;
+  if (compositionMode === "stackedMedia") return getFullWidthPlacementVariant(variant, localConfig, "stacked");
+  if (compositionMode === "titleStackedMedia" && isTitleCompositionSlot(slot.slot)) {
+    return getFullWidthPlacementVariant(variant, localConfig, "title-stacked");
+  }
+  if ((compositionMode !== "integrated" && compositionMode !== "titleStackedMedia") || !topMediaVariant) return variant;
+  if (!columnsOverlap(variant.columnStart, variant.columnSpan, topMediaVariant.columnStart, topMediaVariant.columnSpan)) {
+    return variant;
+  }
+
+  const leftSpan = topMediaVariant.columnStart;
+  const rightStart = topMediaVariant.columnStart + topMediaVariant.columnSpan;
+  const rightSpan = localConfig.columnCount - rightStart;
+  const preferLeft = variant.columnStart <= topMediaVariant.columnStart;
+  const side = preferLeft
+    ? getAvailableCompositionSide(0, leftSpan, rightStart, rightSpan)
+    : getAvailableCompositionSide(rightStart, rightSpan, 0, leftSpan);
+  if (!side) return variant;
+  return {
+    ...variant,
+    id: `${variant.id}-beside-media`,
+    columnStart: side.columnStart,
+    columnSpan: side.columnSpan,
+  };
+}
+
+function resolveCompositionMediaSlotVariant(
+  placement: ResponsivePlacementSpec,
+  localConfig: LayoutConfig,
+  compositionMode: FrontCompositionFlowMode,
+): PlacementVariant | null {
+  const variant = resolvePreferredPlacementVariant(placement, localConfig);
+  if (!variant) return null;
+  return compositionMode === "stackedMedia" ? getFullWidthPlacementVariant(variant, localConfig, "stacked") : variant;
+}
+
+function getFullWidthPlacementVariant(variant: PlacementVariant, localConfig: LayoutConfig, suffix: string): PlacementVariant {
+  return {
+    ...variant,
+    id: `${variant.id}-${suffix}`,
+    columnStart: 0,
+    columnSpan: localConfig.columnCount,
+  };
+}
+
+function getOrderedCompositionLeadSlots(
+  blockSpec: ArticleFrameBlockSpec,
+  compositionMode: FrontCompositionFlowMode,
+): ArticleFrameCompositionSlotSpec[] {
+  const slots = blockSpec.composition?.lead ?? [];
+  if (compositionMode !== "stackedMedia") return slots;
+  return [
+    ...slots.filter((slot) => slot.slot !== "media"),
+    ...slots.filter((slot) => slot.slot === "media"),
+  ];
+}
+
+function hasCompositionSideBesideMedia(localConfig: LayoutConfig, mediaVariant: PlacementVariant): boolean {
+  return mediaVariant.columnStart > 0 || mediaVariant.columnStart + mediaVariant.columnSpan < localConfig.columnCount;
+}
+
+function isTitleCompositionSlot(slot: SolvedChromeBox["slot"]): boolean {
+  return slot === "label" || slot === "headline";
+}
+
+function getAvailableCompositionSide(
+  primaryStart: number,
+  primarySpan: number,
+  fallbackStart: number,
+  fallbackSpan: number,
+): { columnStart: number; columnSpan: number } | null {
+  if (primarySpan > 0) return { columnStart: primaryStart, columnSpan: primarySpan };
+  if (fallbackSpan > 0) return { columnStart: fallbackStart, columnSpan: fallbackSpan };
+  return null;
+}
+
+function columnsOverlap(firstStart: number, firstSpan: number, secondStart: number, secondSpan: number): boolean {
+  return firstStart < secondStart + secondSpan && secondStart < firstStart + firstSpan;
 }
 
 function solveStackedEditorialPage(
@@ -559,20 +1332,24 @@ function solveStackedEditorialPage(
   for (let index = 0; index < pageSpec.regions.length; index += 1) {
     const regionSpec = pageSpec.regions[index];
     const allocatedHeight = Math.max(
-      config.linePaintHeight,
-      Math.floor((config.continuationHeight * ratios[index]) / ratioTotal) -
-        (index > 0 ? CONTINUATION_SECTION_SEPARATOR_HEIGHT : 0),
+      getMinimumTextFrameHeight(config),
+      snapDownToRhythm(
+        Math.floor((config.continuationHeight * ratios[index]) / ratioTotal) -
+          (index > 0 ? config.pageChrome.continuationSectionSeparatorHeight : 0),
+        config.rhythm,
+      ),
     );
     const region = solveRegion(regionSpec, pageSpec, allocatedHeight, itemsBySlug, flows, prepared, config, currentY);
     regions.push(region);
-    currentY += region.height + (index < pageSpec.regions.length - 1 ? CONTINUATION_SECTION_SEPARATOR_HEIGHT : 0);
+    currentY += region.height + (index < pageSpec.regions.length - 1 ? config.pageChrome.continuationSectionSeparatorHeight : 0);
   }
 
   const contentBottom = Math.max(...regions.map((region) => region.y + region.height), pageStartY);
-  const height = Math.ceil(
+  const height = reserveRhythmRows(
     config.pageChrome.pagePaddingTop +
       contentBottom +
       config.pageChrome.pagePaddingBottom,
+    config.rhythm,
   );
 
   return {
@@ -600,7 +1377,7 @@ function solveRegion(
   let currentY = 0;
 
   for (const blockSpec of regionSpec.blocks) {
-    const remainingHeight = Math.max(config.linePaintHeight, allocatedHeight - currentY);
+    const remainingHeight = Math.max(getMinimumTextFrameHeight(config), snapDownToRhythm(allocatedHeight - currentY, config.rhythm));
     const block = solveBlock(blockSpec, pageSpec, remainingHeight, itemsBySlug, flows, prepared, config);
     blocks.push({ ...block, y: currentY });
     currentY += block.height;
@@ -613,7 +1390,12 @@ function solveRegion(
     x: 0,
     y,
     width: config.contentWidth,
-    height: Math.max(currentY, allocatedHeight),
+    height: reserveRhythmRows(
+      regionSpec.size?.shrinkToContent
+        ? Math.max(currentY, getMinimumTextFrameHeight(config))
+        : Math.max(currentY, allocatedHeight),
+      config.rhythm,
+    ),
     columnCount: config.columnCount,
     blocks,
   };
@@ -645,11 +1427,23 @@ function solveArticleFrameBlock(
 ): SolvedBlock {
   const item = requireArticleItem(blockSpec.itemId, itemsBySlug);
   const flow = getOrCreateFlow(flows, blockSpec.flowKey ?? blockSpec.itemId, item);
+  if (blockSpec.startCursor === "beginning") resetArticleFlow(flow);
   const startCursor = blockSpec.startCursor === "beginning" ? { ...EMPTY_CURSOR } : { ...flow.currentCursor };
   const blockWidth = getBlockWidth(config, blockSpec.span);
   const label = getArticleFrameLabel(blockSpec, item);
-  const title = getContinuationTitleMetrics(config, item, blockWidth, label, blockSpec.chrome);
-  const bodyBudget = Math.max(config.linePaintHeight, allocatedHeight - title.totalHeight);
+  const headlineScale = blockSpec.typography?.headlineScale ?? "standard";
+  const title = getContinuationTitleMetrics(
+    config,
+    item,
+    blockWidth,
+    label,
+    headlineScale,
+    Boolean(blockSpec.typography?.headlineScale),
+    blockSpec.chrome,
+  );
+  const offeredHeight = getArticleFrameOfferedHeight(blockSpec, allocatedHeight, config);
+  const bodyBudget = Math.max(getMinimumTextFrameHeight(config), snapDownToRhythm(offeredHeight - title.totalHeight, config.rhythm));
+  const mustExhaust = !blockSpec.cutPolicy?.maxBodyLines && !blockSpec.cutPolicy?.jumpTargetPage;
   const candidates = solveArticleFrameCandidates({
     blockSpec,
     pageSpec,
@@ -658,14 +1452,27 @@ function solveArticleFrameBlock(
     startCursor,
     blockWidth,
     label,
+    headlineScale,
     title,
     bodyBudget,
+    offeredHeight,
+    mustExhaust,
     prepared,
     config,
   });
   const best = chooseBestCandidate(candidates, blockSpec.id);
   commitTextRange(flow, best.range);
+  commitUsedImageFurniture(flow, best.block.furniture);
   return best.block;
+}
+
+function getArticleFrameOfferedHeight(
+  blockSpec: ArticleFrameBlockSpec,
+  allocatedHeight: number,
+  config: LayoutConfig,
+): number {
+  if (!blockSpec.size?.defaultRows) return allocatedHeight;
+  return Math.max(getMinimumTextFrameHeight(config), reserveRhythmRows(blockSpec.size.defaultRows * config.rhythm.rowHeight, config.rhythm));
 }
 
 function solveArticleFrameCandidates({
@@ -676,8 +1483,11 @@ function solveArticleFrameCandidates({
   startCursor,
   blockWidth,
   label,
+  headlineScale,
   title,
   bodyBudget,
+  offeredHeight,
+  mustExhaust,
   prepared,
   config,
 }: {
@@ -688,8 +1498,11 @@ function solveArticleFrameCandidates({
   startCursor: LayoutCursor;
   blockWidth: number;
   label: string;
+  headlineScale: HeadlineScaleId;
   title: ContinuationTitleMetrics;
   bodyBudget: number;
+  offeredHeight: number;
+  mustExhaust: boolean;
   prepared: PreparedTextCache;
   config: LayoutConfig;
 }): ArticleFrameCandidate[] {
@@ -698,15 +1511,27 @@ function solveArticleFrameCandidates({
 
   for (const columnCount of localColumnCounts) {
     const localConfig = { ...config, columnCount, contentWidth: blockWidth };
-    const mediaVariants = getMediaVariants(blockSpec.media[0], localConfig);
+    const mediaSpec = blockSpec.media[0];
+    const hasReusableMedia = mediaSpec
+      ? hasAvailablePreferredImage(item, mediaSpec.placement, mediaSpec.assetRole, flow.usedImageAssetIds)
+      : false;
+    const mediaVariants = getMediaVariants(
+      mediaSpec?.required && !hasReusableMedia ? { ...mediaSpec, required: false } : mediaSpec,
+      localConfig,
+    );
+    const effectiveMediaVariants = mediaSpec?.required && hasReusableMedia
+      ? [...mediaVariants, getNoMediaVariant(12_000)]
+      : mediaVariants;
     const pullQuoteVariants = getPullQuoteVariants(item, blockSpec.pullQuote, localConfig);
 
-    for (const mediaVariant of mediaVariants) {
-      const image = createImageFurniture(item, mediaVariant, localConfig, bodyBudget);
-      if (blockSpec.media[0]?.required && !image) continue;
+    for (const mediaVariant of effectiveMediaVariants) {
+      const image = createImageFurniture(item, mediaVariant, localConfig, bodyBudget, flow.usedImageAssetIds);
+      if (mediaSpec?.required && hasReusableMedia && !image) continue;
 
-      const minimumHeight = Math.max(config.linePaintHeight, image ? image.y + image.height : 0);
-      const textHeights = getTextHeightVariants(Math.max(minimumHeight, bodyBudget), minimumHeight, localConfig);
+      const minimumHeight = reserveRhythmRows(Math.max(config.linePaintHeight, image ? image.y + image.height : 0), config.rhythm);
+      const textHeights = mustExhaust
+        ? getExhaustiveTextHeightVariants(Math.max(minimumHeight, bodyBudget), minimumHeight, localConfig)
+        : getTextHeightVariants(Math.max(minimumHeight, bodyBudget), minimumHeight, localConfig);
       for (const textHeight of textHeights) {
         for (const pullQuoteVariant of pullQuoteVariants) {
           const pullQuote = createPullQuoteFurniture(item, pullQuoteVariant, localConfig, textHeight, image, blockSpec.chrome);
@@ -723,7 +1548,18 @@ function solveArticleFrameCandidates({
             textHeight,
             localConfig,
             furniture,
+            furnitureObstacleMarginBottom: config.rhythm.rowHeight,
           });
+          if (mustExhaust && textResult.hasMore) continue;
+          if (!mustExhaust && textResult.hasMore && textHeight < bodyBudget - 0.75) continue;
+          const furnitureSufficiency = getFurnitureSufficiencyReport({
+            columns: textResult.columns,
+            textHeight,
+            furniture,
+            hasMore: textResult.hasMore,
+            config: localConfig,
+          });
+          if (!furnitureSufficiency.accepted) continue;
           const range = createTextRange({
             flow,
             pageId: pageIdFor(pageSpec.pageNumber),
@@ -734,7 +1570,11 @@ function solveArticleFrameCandidates({
           });
           const linesHeight = Math.max(...textResult.columns.map(getLinesHeight), 0);
           const furnitureBottom = getFurnitureBottom(furniture);
-          const bodyHeight = Math.max(furnitureBottom, textResult.hasMore ? textHeight : linesHeight, config.linePaintHeight);
+          const contentBodyHeight = reserveRhythmRows(Math.max(furnitureBottom, textResult.hasMore ? textHeight : linesHeight, config.linePaintHeight), config.rhythm);
+          const reservedBodyHeight = blockSpec.size?.defaultRows && !blockSpec.size.shrinkToContent
+            ? Math.max(contentBodyHeight, snapDownToRhythm(offeredHeight - title.totalHeight, config.rhythm))
+            : contentBodyHeight;
+          const bodyHeight = reserveRhythmRows(reservedBodyHeight, config.rhythm);
           const blockHeight = title.totalHeight + bodyHeight;
           const whitespace = getColumnWhitespace(textResult.columns, bodyHeight, furniture);
           const deadColumns = getDeadColumnCount(textResult.columns, bodyHeight, furniture);
@@ -742,8 +1582,8 @@ function solveArticleFrameCandidates({
             50_000 -
             whitespace * 1.1 -
             deadColumns * 8_000 -
-            (image ? Math.abs(image.height - image.preferredHeight) * 0.35 : 800) -
-            (pullQuote ? 0 : 180) -
+            (image ? Math.abs(image.height - image.preferredHeight) * 0.35 : 50_000) -
+            (pullQuote ? 0 : 2_800) -
             mediaVariant.fallbackPenalty -
             pullQuoteVariant.fallbackPenalty -
             Math.max(0, config.columnCount - columnCount) * 240;
@@ -753,6 +1593,7 @@ function solveArticleFrameCandidates({
               id: blockSpec.id,
               type: "articleFrame",
               presetId: blockSpec.presetId,
+              headlineScale,
               item,
               article: item,
               pageNumber: pageSpec.pageNumber,
@@ -775,10 +1616,12 @@ function solveArticleFrameCandidates({
               titleChrome: title,
               titleHeight: title.heading.height,
               bodyHeight,
+              furnitureSufficiency,
             },
             range,
             score,
             whitespace,
+            furnitureSufficiency,
           });
         }
       }
@@ -798,6 +1641,7 @@ function solveStaticBlock(
   const width = config.contentWidth;
   if (blockSpec.type === "itemStack") {
     const items = blockSpec.itemIds.map((itemId) => requireKnownItem(itemId, itemsBySlug));
+    const stackHeight = clampRhythmHeight(220 + items.length * 72, getMinimumTextFrameHeight(config), allocatedHeight, config.rhythm);
     return {
       id: blockSpec.id,
       type: blockSpec.type,
@@ -806,7 +1650,7 @@ function solveStaticBlock(
       x: 0,
       y: 0,
       width,
-      height: Math.min(allocatedHeight, 220 + items.length * 72),
+      height: stackHeight,
       span: config.columnCount,
       columnCount: 1,
       columns: [],
@@ -814,6 +1658,7 @@ function solveStaticBlock(
     };
   }
   if (blockSpec.type === "adBlock") {
+    const adHeight = clampRhythmHeight(allocatedHeight, 260, 720, config.rhythm);
     return {
       id: blockSpec.id,
       type: blockSpec.type,
@@ -824,7 +1669,7 @@ function solveStaticBlock(
       x: 0,
       y: 0,
       width,
-      height: Math.max(260, Math.min(allocatedHeight, 720)),
+      height: adHeight,
       span: config.columnCount,
       columnCount: config.columnCount,
       columns: [],
@@ -837,12 +1682,15 @@ function solveStaticBlock(
           x: 0,
           y: 0,
           width,
-          height: Math.max(260, Math.min(allocatedHeight, 720)),
+          height: adHeight,
           wrapsText: false,
         },
       ],
     };
   }
+  const staticHeight = blockSpec.type === "rule"
+    ? config.rhythm.rowHeight
+    : clampRhythmHeight(120, getMinimumTextFrameHeight(config), allocatedHeight, config.rhythm);
   return {
     id: blockSpec.id,
     type: blockSpec.type,
@@ -850,7 +1698,7 @@ function solveStaticBlock(
     x: 0,
     y: 0,
     width,
-    height: blockSpec.type === "rule" ? 18 : Math.min(allocatedHeight, 120),
+    height: staticHeight,
     span: config.columnCount,
     columnCount: config.columnCount,
     columns: [],
@@ -866,6 +1714,10 @@ function layoutTextColumns({
   textHeight,
   localConfig,
   furniture,
+  chromeBoxes = [],
+  furnitureObstacleOffsetY = 0,
+  furnitureObstacleMarginBottom = 0,
+  minimumLineStartYByColumn = [],
 }: {
   item: ArticlePublicationItem;
   prepared: PreparedTextCache;
@@ -874,6 +1726,10 @@ function layoutTextColumns({
   textHeight: number;
   localConfig: LayoutConfig;
   furniture: SolvedFurniture[];
+  chromeBoxes?: SolvedChromeBox[];
+  furnitureObstacleOffsetY?: number;
+  furnitureObstacleMarginBottom?: number;
+  minimumLineStartYByColumn?: number[];
 }): { columns: TextLine[][]; cursor: LayoutCursor; hasMore: boolean } {
   const columns: TextLine[][] = [];
   const preparedText = getPrepared(prepared, item, localConfig.continuationBodyFont);
@@ -889,7 +1745,16 @@ function layoutTextColumns({
       maxWidth: columnWidth,
       lineHeight: localConfig.lineHeight,
       linePaintHeight: localConfig.linePaintHeight,
-      obstacles: getColumnTextObstacles(furniture, columnIndex),
+      fontSize: localConfig.continuationBodyFontSize,
+      fontFamily: SERIF_TEXT_FONT,
+      obstacles: getColumnTextObstacles(
+        furniture,
+        columnIndex,
+        chromeBoxes,
+        furnitureObstacleOffsetY,
+        furnitureObstacleMarginBottom,
+        minimumLineStartYByColumn[columnIndex] ?? 0,
+      ),
     });
     columns.push(result.lines);
     current = result.cursor;
@@ -904,14 +1769,18 @@ function layoutTextColumns({
 }
 
 function getMediaVariants(media: LayoutMediaSpec | undefined, config: LayoutConfig): MediaVariant[] {
-  if (!media) return [{ id: "none", placement: null, columnStart: 0, columnSpan: 0, fallbackPenalty: 900 }];
+  if (!media) return [getNoMediaVariant(900)];
   const variants = resolvePlacementVariants(media.placement, config).map((variant) => ({
     ...variant,
     assetRole: media.assetRole,
     fallbackPenalty: variant.fallbackPenalty + Math.abs(variant.columnSpan - media.placement.span.preferred) * 900,
   }));
   if (media.required) return variants;
-  return [...variants, { id: "none", placement: null, columnStart: 0, columnSpan: 0, fallbackPenalty: 1_400 }];
+  return [...variants, getNoMediaVariant(24_000)];
+}
+
+function getNoMediaVariant(fallbackPenalty: number): MediaVariant {
+  return { id: "none", placement: null, columnStart: 0, columnSpan: 0, fallbackPenalty };
 }
 
 function getPullQuoteVariants(
@@ -930,29 +1799,28 @@ function getPullQuoteVariants(
   return pullQuote.required ? variants : [none, ...variants];
 }
 
-function resolvePlacementVariants(placement: ResponsivePlacementSpec, config: LayoutConfig): Array<{
-  id: string;
-  placement: ResponsivePlacementSpec;
-  columnStart: number;
-  columnSpan: number;
-  fallbackPenalty: number;
-}> {
+function resolvePlacementVariants(placement: ResponsivePlacementSpec, config: LayoutConfig): PlacementVariant[] {
   const collapsed = config.columnCount < placement.span.min;
   if (collapsed && placement.collapse === "omit") return [];
   const spans = collapsed
     ? [placement.collapse === "fullWidth" ? config.columnCount : 1]
     : getSpanCandidates(placement.span, config.columnCount);
-  return spans.map((span, index) => {
-    const anchor = collapsed && placement.collapse === "inline" ? "inline" : placement.anchor;
-    const columnStart = getColumnStart(resolveAnchor(anchor), span, config.columnCount);
-    return {
+  return spans.flatMap((span, index) => {
+    const anchor = collapsed && placement.collapse === "inline" ? "inline" : placement.anchor ?? "left";
+    const columnStart = getColumnStartForPlacement(placement, resolveAnchor(anchor), span, config.columnCount, collapsed);
+    if (columnStart === null) return [];
+    return [{
       id: `${resolveAnchor(anchor)}-span${span}-${placement.vertical}`,
       placement,
       columnStart,
       columnSpan: span,
       fallbackPenalty: index * 120 + (collapsed ? 320 : 0),
-    };
+    }];
   });
+}
+
+function resolvePreferredPlacementVariant(placement: ResponsivePlacementSpec, config: LayoutConfig): PlacementVariant | null {
+  return resolvePlacementVariants(placement, config)[0] ?? null;
 }
 
 function createImageFurniture(
@@ -960,25 +1828,34 @@ function createImageFurniture(
   variant: MediaVariant,
   config: LayoutConfig,
   textHeight: number,
+  usedImageAssetIds: ReadonlySet<string> = new Set(),
 ): SolvedImageFurniture | null {
   if (!variant.placement || variant.columnSpan === 0) return null;
-  const asset = getPreferredImage(article, variant.placement, variant.placement ? undefined : undefined);
+  const asset = getPreferredImage(article, variant.placement, variant.assetRole, usedImageAssetIds);
   if (!asset) return null;
-  const columnWidth = getSpanWidth(config, 1);
-  const width = Math.round(getSpanWidth(config, variant.columnSpan));
-  const x = Math.round(variant.columnStart * (columnWidth + config.gap));
+  const { x, width } = getSpanRect(config, variant.columnStart, variant.columnSpan);
   const aspectRatio = getImageAspectRatio(asset);
   const preferredHeight = Math.round(width / aspectRatio);
-  const height = variant.placement.crop === "cropAllowed"
-    ? clamp(preferredHeight, asset.layout?.minHeight ?? 140, asset.layout?.maxHeight ?? 420)
-    : preferredHeight;
+  const canCropFrame = variant.placement.crop === "cropAllowed";
+  const shouldCropToFill = canCropFrame || asset.layout?.crop === "cover";
+  const minHeight = canCropFrame ? asset.layout?.minHeight ?? 140 : config.rhythm.rowHeight;
+  const maxHeight = canCropFrame ? asset.layout?.maxHeight ?? 420 : Number.POSITIVE_INFINITY;
+  const rawHeight = canCropFrame ? clamp(preferredHeight, minHeight, maxHeight) : preferredHeight;
+  const imageHeight = canCropFrame
+    ? snapPreferredHeightToRhythm(rawHeight, config.rhythm, minHeight, maxHeight)
+    : snapPreservedImageHeightToRhythm(rawHeight, config.rhythm, minHeight, maxHeight);
+  const caption = getImageCaption(asset);
+  const captionHeight = getImageCaptionHeight(caption, width, config.rhythm);
+  const height = imageHeight + captionHeight;
   const y = getFurnitureY(variant.placement.vertical, height, textHeight, config);
   const focalPoint = asset.layout?.focalPoint ?? { x: 0.5, y: 0.5 };
   return {
     kind: "image",
     id: `${article.slug}-${variant.id}-image`,
+    assetId: asset.id,
     src: asset.src,
     alt: asset.alt,
+    caption,
     credit: asset.credit,
     templateId: `image-${variant.id}`,
     columnStart: variant.columnStart,
@@ -987,11 +1864,15 @@ function createImageFurniture(
     y,
     width,
     height,
+    imageHeight,
+    captionHeight,
+    captionFontSize: IMAGE_CAPTION_FONT_SIZE,
+    captionLineHeight: config.rhythm.rowHeight,
     aspectRatio,
-    objectFit: variant.placement.crop === "cropAllowed" ? "cover" : "contain",
+    objectFit: shouldCropToFill ? "cover" : "contain",
     objectPosition: `${Math.round(focalPoint.x * 100)}% ${Math.round(focalPoint.y * 100)}%`,
     wrapsText: variant.placement.wrapsText,
-    preferredHeight,
+    preferredHeight: preferredHeight + captionHeight,
   };
 }
 
@@ -1006,9 +1887,7 @@ function createPullQuoteFurniture(
   if (!variant.placement || variant.columnSpan === 0) return null;
   const text = article.pullQuotes?.[0];
   if (!text) return null;
-  const columnWidth = getSpanWidth(config, 1);
-  const width = Math.round(getSpanWidth(config, variant.columnSpan));
-  const x = Math.round(variant.columnStart * (columnWidth + config.gap));
+  const { x, width } = getSpanRect(config, variant.columnStart, variant.columnSpan);
   const metrics = getPullQuoteMetrics(text, width, config, chrome?.pullQuote);
   const y = getPullQuoteY({
     x,
@@ -1041,8 +1920,9 @@ function getPreferredImage(
   article: ArticlePublicationItem,
   _placement: ResponsivePlacementSpec,
   assetRole: string | undefined,
+  usedImageAssetIds: ReadonlySet<string> = new Set(),
 ): ArticleImageAsset | null {
-  const assets = getPublicationItemImageAssets(article);
+  const assets = getPublicationItemImageAssets(article).filter((asset) => !usedImageAssetIds.has(asset.id));
   if (assetRole) {
     const roleAsset = assets.find((asset) => asset.roles?.some((role) => role === assetRole));
     if (roleAsset) return roleAsset;
@@ -1053,6 +1933,15 @@ function getPreferredImage(
     assets[0] ??
     null
   );
+}
+
+function hasAvailablePreferredImage(
+  article: ArticlePublicationItem,
+  placement: ResponsivePlacementSpec,
+  assetRole: string | undefined,
+  usedImageAssetIds: ReadonlySet<string>,
+): boolean {
+  return getPreferredImage(article, placement, assetRole, usedImageAssetIds) !== null;
 }
 
 function chooseBestCandidate(candidates: ArticleFrameCandidate[], blockId: string): ArticleFrameCandidate {
@@ -1080,9 +1969,21 @@ function getLocalColumnCountCandidates(
 }
 
 function getTextHeightVariants(maxHeight: number, minHeight: number, config: LayoutConfig): number[] {
-  if (config.columnCount === 1) return [maxHeight];
-  const candidates = [maxHeight, minHeight].map((height) => clamp(Math.round(height), minHeight, maxHeight));
-  return Array.from(new Set(candidates)).sort((a, b) => b - a);
+  const snappedMinimum = reserveRhythmRows(minHeight, config.rhythm);
+  const snappedMaximum = Math.max(snappedMinimum, snapDownToRhythm(maxHeight, config.rhythm));
+  if (config.columnCount === 1) return [snappedMaximum];
+  const candidates = [snappedMaximum, snappedMinimum].map((height) => clamp(snapDownToRhythm(height, config.rhythm), snappedMinimum, snappedMaximum));
+  return Array.from(new Set(candidates)).sort((leftHeight, rightHeight) => rightHeight - leftHeight);
+}
+
+function getExhaustiveTextHeightVariants(startHeight: number, minHeight: number, config: LayoutConfig): number[] {
+  const snappedMinimum = reserveRhythmRows(minHeight, config.rhythm);
+  const snappedBudget = Math.max(snappedMinimum, reserveRhythmRows(startHeight, config.rhythm));
+  const step = config.rhythm.rowHeight * 4;
+  const maximum = snappedBudget + config.rhythm.rowHeight * 240;
+  const heights: number[] = [];
+  for (let height = snappedMinimum; height <= maximum; height += step) heights.push(height);
+  return heights;
 }
 
 function getPageKind(pageSpec: LayoutPageSpec): string {
@@ -1103,6 +2004,7 @@ function createArticleFlows(items: PublicationItem[]): Map<string, ArticleFlow> 
         article,
         currentCursor: { ...EMPTY_CURSOR },
         placedRanges: [],
+        usedImageAssetIds: new Set<string>(),
       },
     ]),
   );
@@ -1115,9 +2017,16 @@ function getOrCreateFlow(flows: Map<string, ArticleFlow>, flowKey: string, artic
     article,
     currentCursor: { ...EMPTY_CURSOR },
     placedRanges: [],
+    usedImageAssetIds: new Set<string>(),
   };
   flows.set(flowKey, flow);
   return flow;
+}
+
+function resetArticleFlow(flow: ArticleFlow): void {
+  flow.currentCursor = { ...EMPTY_CURSOR };
+  flow.placedRanges = [];
+  flow.usedImageAssetIds.clear();
 }
 
 function requireKnownItem(itemId: string, itemsBySlug: Map<string, PublicationItem>): PublicationItem {
@@ -1162,6 +2071,18 @@ function commitTextRange(flow: ArticleFlow, range: PlacedTextRange): void {
   flow.placedRanges.push(range);
 }
 
+function commitUsedImageFurniture(flow: ArticleFlow, furniture: SolvedFurniture[]): void {
+  for (const item of furniture) {
+    if (item.kind === "image") {
+      flow.usedImageAssetIds.add(item.assetId);
+      continue;
+    }
+    if (item.kind === "mediaCluster") {
+      for (const image of item.images) flow.usedImageAssetIds.add(image.assetId);
+    }
+  }
+}
+
 function pageIdFor(pageNumber: number): string {
   return `page-${pageNumber}`;
 }
@@ -1169,31 +2090,39 @@ function pageIdFor(pageNumber: number): string {
 function getLayoutConfig(pageWidth: number, viewportHeight: number): LayoutConfig {
   const narrow = pageWidth < 560;
   const medium = pageWidth >= 560 && pageWidth < 1040;
+  const rhythm = createVerticalRhythm(narrow);
   const gap = narrow ? 14 : 18;
+  const rowGap = rhythm.rowHeight;
   const sideMargin = narrow ? 18 : 30;
   const contentWidth = Math.max(280, pageWidth - sideMargin * 2);
   const columnCount = getResponsiveColumnCount(pageWidth, contentWidth, gap);
-  const pageChrome = getPageChromeMetrics(pageWidth, narrow);
-  const targetPageHeight = getTargetPageHeight(pageWidth, viewportHeight);
-  const frontGridHeight = getFrontGridHeight(targetPageHeight, narrow, medium);
-  const frontRowMaxHeight = narrow ? 520 : medium ? 560 : 620;
+  const pageChrome = getPageChromeMetrics(pageWidth, narrow, rhythm);
+  const targetPageHeight = reserveRhythmRows(getTargetPageHeight(pageWidth, viewportHeight), rhythm);
+  const frontGridHeight = snapDownToRhythm(getFrontGridHeight(targetPageHeight, narrow, medium), rhythm);
+  const frontRowMaxHeight = snapDownToRhythm(narrow ? 520 : medium ? 560 : 620, rhythm);
+  const frontBodyFontSize = narrow ? 15 : 16;
+  const continuationBodyFontSize = narrow ? 16 : 17;
   const continuationChrome =
     pageChrome.pagePaddingTop +
     pageChrome.insideHeaderHeight +
     pageChrome.continuedTitleHeight +
     pageChrome.pagePaddingBottom;
-  const continuationHeight = Math.max(760, targetPageHeight - continuationChrome);
+  const continuationHeight = reserveRhythmRows(Math.max(760, targetPageHeight - continuationChrome), rhythm);
 
   return {
     columnCount,
     contentWidth,
     gap,
+    rowGap,
+    rhythm,
     pageChrome,
-    lineHeight: narrow ? 18 : 19,
-    linePaintHeight: (narrow ? 18 : 19) + 4,
-    frontBodyFont: `${narrow ? 15 : 16}px ${SERIF_TEXT_FONT}`,
-    continuationBodyFont: `${narrow ? 16 : 17}px ${SERIF_TEXT_FONT}`,
-    frontRows: getFrontRows(columnCount, gap, frontGridHeight, frontRowMaxHeight),
+    lineHeight: rhythm.rowHeight,
+    linePaintHeight: rhythm.paintHeight,
+    frontBodyFontSize,
+    continuationBodyFontSize,
+    frontBodyFont: `${frontBodyFontSize}px ${SERIF_TEXT_FONT}`,
+    continuationBodyFont: `${continuationBodyFontSize}px ${SERIF_TEXT_FONT}`,
+    frontRows: getFrontRows(columnCount, rowGap, frontGridHeight, frontRowMaxHeight, rhythm),
     continuationHeight,
   };
 }
@@ -1214,31 +2143,37 @@ function getTargetPageHeight(pageWidth: number, viewportHeight: number): number 
   return Math.max(1320, viewportHeight * 1.72);
 }
 
-function getPageChromeMetrics(pageWidth: number, narrow: boolean): PageChromeMetrics {
-  const pagePaddingTop = narrow ? 18 : 26;
+function getPageChromeMetrics(pageWidth: number, narrow: boolean, rhythm: VerticalRhythm): PageChromeMetrics {
+  const pagePaddingTop = rhythm.rowHeight;
   const pagePaddingX = narrow ? 18 : 30;
-  const pagePaddingBottom = narrow ? 18 : 30;
+  const pagePaddingBottom = reserveRhythmRows(narrow ? 18 : 30, rhythm);
   const mastheadKickerLineHeight = 14;
-  const mastheadTitleFontSize = narrow
-    ? clamp(pageWidth * 0.22, 54.4, 89.6)
-    : clamp(pageWidth * 0.12, 72, 145.6);
-  const mastheadTitleLineHeight = mastheadTitleFontSize * 0.84;
-  const mastheadMetaLineHeight = narrow ? 16 : 18;
+  const mastheadTitleLineHeight = rhythm.rowHeight * MASTHEAD_TITLE_ROWS;
+  const mastheadTitleFontSize = mastheadTitleLineHeight / MASTHEAD_TITLE_GLYPH_HEIGHT_RATIO;
+  const mastheadTitleMarginTop = rhythm.rowHeight / 2;
+  const mastheadTitleMarginBottom = rhythm.rowHeight / 2;
+  const mastheadTitleOpticalShift = -3;
+  const mastheadMetaLineHeight = rhythm.rowHeight - MASTHEAD_META_BORDER_TOP - MASTHEAD_META_BORDER_BOTTOM;
   const mastheadMetaGap = narrow ? 5 : 0;
-  const mastheadHeight =
+  const mastheadMetaContentHeight = mastheadMetaLineHeight;
+  const rawMastheadHeight =
     MASTHEAD_RULE_HEIGHT +
     MASTHEAD_RULE_MARGIN_BOTTOM +
-    mastheadKickerLineHeight +
     MASTHEAD_TITLE_MARGIN_TOP +
+    mastheadTitleMarginTop +
     mastheadTitleLineHeight +
-    MASTHEAD_TITLE_MARGIN_BOTTOM +
+    mastheadTitleMarginBottom +
     MASTHEAD_META_BORDER_TOP +
     MASTHEAD_META_PADDING_TOP +
-    mastheadMetaLineHeight +
+    mastheadMetaContentHeight +
+    MASTHEAD_META_PADDING_BOTTOM +
+    MASTHEAD_META_BORDER_BOTTOM +
     MASTHEAD_PADDING_BOTTOM +
     MASTHEAD_BORDER_BOTTOM +
-    MASTHEAD_MARGIN_BOTTOM +
-    (narrow ? mastheadMetaGap * 2 : 0);
+    MASTHEAD_MARGIN_BOTTOM;
+  const mastheadHeight = rhythm.rowHeight * MASTHEAD_HORIZONTAL_ROWS;
+  const mastheadMetaPaddingTop = MASTHEAD_META_PADDING_TOP + Math.max(0, mastheadHeight - rawMastheadHeight);
+  const frontGridMarginTop = rhythm.rowHeight;
   const insideHeaderHeight = INSIDE_HEADER_PADDING_BOTTOM + INSIDE_HEADER_BORDER_BOTTOM + INSIDE_HEADER_MARGIN_BOTTOM + 18;
   const continuedTitleFontSize = narrow ? clamp(pageWidth * 0.075, 28, 42) : clamp(pageWidth * 0.035, 32, 56);
   const continuedTitleLineHeight = continuedTitleFontSize * 0.94;
@@ -1255,22 +2190,30 @@ function getPageChromeMetrics(pageWidth: number, narrow: boolean): PageChromeMet
     pagePaddingTop,
     pagePaddingX,
     pagePaddingBottom,
-    mastheadHeight: Math.ceil(mastheadHeight),
+    mastheadHeight,
     mastheadKickerLineHeight,
     mastheadTitleFontSize,
     mastheadTitleLineHeight,
+    mastheadTitleMarginTop,
+    mastheadTitleMarginBottom,
+    mastheadTitleOpticalShift,
     mastheadMetaLineHeight,
     mastheadMetaGap,
-    insideHeaderHeight,
-    continuedTitleHeight,
-    continuedTitleChromeHeight:
+    mastheadMetaPaddingTop,
+    frontGridMarginTop,
+    insideHeaderHeight: reserveRhythmRows(insideHeaderHeight, rhythm),
+    continuedTitleHeight: reserveRhythmRows(continuedTitleHeight, rhythm),
+    continuedTitleChromeHeight: reserveRhythmRows(
       CONTINUED_TITLE_KICKER_LINE_HEIGHT +
       CONTINUED_TITLE_HEADING_MARGIN_TOP +
       CONTINUED_TITLE_PADDING_BOTTOM +
       CONTINUED_TITLE_BORDER_BOTTOM +
       CONTINUED_TITLE_MARGIN_BOTTOM,
+      rhythm,
+    ),
     continuedTitleFontSize,
     continuedTitleLineHeight,
+    continuationSectionSeparatorHeight: rhythm.rowHeight * 2,
   };
 }
 
@@ -1280,16 +2223,17 @@ function getFrontGridHeight(targetPageHeight: number, narrow: boolean, medium: b
   return Math.max(420, targetPageHeight - mastheadAllowance - bottomPadding);
 }
 
-function getFrontRows(columnCount: number, gap: number, gridHeight: number, rowMaxHeight: number): FrontRow[] {
+function getFrontRows(columnCount: number, rowGap: number, gridHeight: number, rowMaxHeight: number, rhythm: VerticalRhythm): FrontRow[] {
   if (columnCount === 1) {
+    const rowHeight = snapDownToRhythm((gridHeight - rowGap * 5) / 6, rhythm);
     return Array.from({ length: 6 }, (_, index) => ({
       startIndex: index,
       endIndex: index,
-      height: Math.min(rowMaxHeight, Math.max(360, Math.floor((gridHeight - gap * 5) / 6))),
+      height: clampRhythmHeight(rowHeight, 360, rowMaxHeight, rhythm),
     }));
   }
-  const first = Math.min(rowMaxHeight, Math.max(360, Math.floor(gridHeight * 0.52)));
-  const second = Math.min(rowMaxHeight, Math.max(300, Math.floor(gridHeight - first - gap)));
+  const first = clampRhythmHeight(snapDownToRhythm(gridHeight * 0.52, rhythm), 360, rowMaxHeight, rhythm);
+  const second = clampRhythmHeight(gridHeight - first - rowGap, 300, rowMaxHeight, rhythm);
   return [
     { startIndex: 0, endIndex: 2, height: first },
     { startIndex: 3, endIndex: 5, height: second },
@@ -1297,21 +2241,32 @@ function getFrontRows(columnCount: number, gap: number, gridHeight: number, rowM
 }
 
 function getFrontPageHeight(config: LayoutConfig): number {
-  return Math.ceil(
+  return getFrontPageHeightForGrid(config, getFrontPageGridHeight(config));
+}
+
+function getFrontPageHeightForGrid(config: LayoutConfig, gridHeight: number, frontFooter?: SolvedFrontFooter): number {
+  return reserveRhythmRows(
     config.pageChrome.pagePaddingTop +
       config.pageChrome.mastheadHeight +
-      getFrontPageGridHeight(config) +
+      config.pageChrome.frontGridMarginTop +
+      gridHeight +
+      (frontFooter ? frontFooter.marginTop + frontFooter.height : 0) +
       config.pageChrome.pagePaddingBottom,
+    config.rhythm,
   );
 }
 
 function getFrontPageGridHeight(config: LayoutConfig): number {
   if (config.frontRows.length === 0) return 0;
-  return config.frontRows.reduce((total, row) => total + row.height, 0) + config.gap * Math.max(0, config.frontRows.length - 1);
+  return getFrontPageGridHeightFromRowHeights(config.frontRows.map((row) => row.height), config.rowGap);
+}
+
+function getFrontPageGridHeightFromRowHeights(rowHeights: number[], rowGap: number): number {
+  return rowHeights.reduce((total, height) => total + height, 0) + rowGap * Math.max(0, rowHeights.length - 1);
 }
 
 function getFrontRowHeight(config: LayoutConfig, articleIndex: number): number {
-  return config.frontRows.find((row) => articleIndex >= row.startIndex && articleIndex <= row.endIndex)?.height ?? 420;
+  return config.frontRows.find((row) => articleIndex >= row.startIndex && articleIndex <= row.endIndex)?.height ?? reserveRhythmRows(420, config.rhythm);
 }
 
 function getBlockSpan(config: LayoutConfig, span: ResponsiveSpanPolicy | undefined): number {
@@ -1329,63 +2284,283 @@ function getSpanWidth(config: LayoutConfig, span: number): number {
   return singleColumn * safeSpan + config.gap * (safeSpan - 1);
 }
 
+function getSpanRect(config: LayoutConfig, columnStart: number, columnSpan: number): { x: number; width: number } {
+  const safeStart = clamp(columnStart, 0, Math.max(0, config.columnCount - 1));
+  const safeSpan = clamp(columnSpan, 1, config.columnCount - safeStart);
+  const columnWidth = getSpanWidth(config, 1);
+  const rawX = safeStart * (columnWidth + config.gap);
+  const rawRight = rawX + getSpanWidth(config, safeSpan);
+  const x = Math.round(rawX);
+  const right = Math.min(Math.round(rawRight), Math.floor(config.contentWidth));
+  return { x, width: Math.max(1, right - x) };
+}
+
+function solveCompositionChromeBox({
+  slot,
+  item,
+  storyRole,
+  headlineScale,
+  localConfig,
+  y,
+  globalYOffset,
+  chromeOverrides,
+  variant = resolvePreferredPlacementVariant(slot.placement, localConfig),
+}: {
+  slot: ArticleFrameCompositionSlotSpec;
+  item: ArticlePublicationItem;
+  storyRole: FrontStoryRole;
+  headlineScale: HeadlineScaleId;
+  localConfig: LayoutConfig;
+  y: number;
+  globalYOffset: number;
+  chromeOverrides?: ArticleFrameChromeSpec;
+  variant?: PlacementVariant | null;
+}): { localBox: SolvedChromeBox; globalBox: SolvedChromeBox; localReserveBottom: number } | null {
+  if (!variant || !isTextCompositionSlot(slot.slot)) return null;
+  const text = getCompositionSlotText(slot.slot, item);
+  if (!text) return null;
+  const { x, width } = getSpanRect(localConfig, variant.columnStart, variant.columnSpan);
+  const style = getCompositionSlotStyle(slot.slot, localConfig, storyRole, headlineScale, width);
+  const metrics = solveChromeTextBox(text, width, style, localConfig.rhythm, chromeOverrides?.[slot.slot]);
+  const treatedMetrics = applyFrontChromeTreatment(slot.slot, metrics, localConfig, storyRole);
+  const boxY = snapUpToRhythm(y + treatedMetrics.marginBefore, localConfig.rhythm);
+  const localBox: SolvedChromeBox = {
+    id: `${item.slug}-${slot.slot}-${variant.id}`,
+    slot: slot.slot,
+    text,
+    columnStart: variant.columnStart,
+    columnSpan: variant.columnSpan,
+    x,
+    y: boxY,
+    width,
+    height: treatedMetrics.height,
+    fontSize: treatedMetrics.fontSize,
+    lineHeight: treatedMetrics.lineHeight,
+    paintBuffer: treatedMetrics.paintBuffer,
+    paddingTop: treatedMetrics.paddingTop,
+    paddingBottom: treatedMetrics.paddingBottom,
+    ruleTopHeight: treatedMetrics.ruleTopHeight,
+    ruleBottomHeight: treatedMetrics.ruleBottomHeight,
+    fontFamily: style.fontFamily === SANS_TEXT_FONT ? "sans" : "serif",
+    fontWeight: style.fontWeight,
+    fontStyle: style.fontStyle,
+    textTransform: slot.slot === "label" || slot.slot === "byline" ? "uppercase" : undefined,
+  };
+  return {
+    localBox,
+    globalBox: { ...localBox, y: localBox.y + globalYOffset },
+    localReserveBottom: reserveRhythmRows(boxY + treatedMetrics.height + treatedMetrics.marginAfter, localConfig.rhythm),
+  };
+}
+
+function isTextCompositionSlot(slot: ArticleFrameCompositionSlotSpec["slot"]): slot is SolvedChromeBox["slot"] {
+  return slot === "label" || slot === "headline" || slot === "deck" || slot === "byline";
+}
+
+function getCompositionSlotText(slot: SolvedChromeBox["slot"], article: ArticlePublicationItem): string {
+  if (slot === "label") return article.section;
+  if (slot === "headline") return article.headline;
+  if (slot === "deck") return article.deck;
+  return formatByline(article);
+}
+
+function getCompositionSlotStyle(
+  slot: SolvedChromeBox["slot"],
+  config: LayoutConfig,
+  storyRole: FrontStoryRole,
+  headlineScale: HeadlineScaleId,
+  slotWidth: number,
+): ChromeTextStyle {
+  if (slot === "label") {
+    return {
+      fontSize: 11.5,
+      fontFamily: SANS_TEXT_FONT,
+      fontWeight: 800,
+      lineHeightEm: 1.22,
+      paintHeightEm: 1.22,
+    };
+  }
+  if (slot === "headline") {
+    const displayHeadline = isDisplayHeadlineScale(headlineScale);
+    const fontSize = getHeadlineFontSize(config, headlineScale, slotWidth);
+    return {
+      fontSize,
+      fontFamily: SERIF_TEXT_FONT,
+      fontWeight: 900,
+      lineHeightEm: displayHeadline ? 0.96 : 1,
+      paintHeightEm: displayHeadline ? 1.1 : 1.12,
+    };
+  }
+  if (slot === "deck") {
+    const feature = storyRole === "feature";
+    const fontSize = config.columnCount === 1 ? 17 : feature ? 19 : 16;
+    const lineHeight = feature ? Math.round(fontSize * 1.16) : config.rhythm.rowHeight;
+    return {
+      fontSize,
+      fontFamily: SERIF_TEXT_FONT,
+      fontStyle: "italic",
+      lineHeightEm: lineHeight / fontSize,
+      paintHeightEm: lineHeight / fontSize,
+    };
+  }
+  return {
+    fontSize: 12,
+    fontFamily: SANS_TEXT_FONT,
+    fontWeight: 800,
+    lineHeightEm: config.rhythm.rowHeight / 12,
+    paintHeightEm: config.rhythm.rowHeight / 12,
+  };
+}
+
+function getOccupiedColumnBottom(bottoms: number[], columnStart: number, columnSpan: number): number {
+  return Math.max(...bottoms.slice(columnStart, columnStart + columnSpan), 0);
+}
+
+function getColumnCopyBandTops(
+  columnCount: number,
+  chromeBoxes: SolvedChromeBox[],
+  furniture: SolvedFurniture[],
+  furnitureOffsetY: number,
+  furnitureMarginBottom: number,
+  rhythm: VerticalRhythm,
+): number[] {
+  const minimums = Array.from({ length: columnCount }, () => 0);
+
+  for (const box of chromeBoxes) {
+    updateOccupiedColumnBottoms(minimums, box.columnStart, box.columnSpan, box.y + box.height);
+  }
+
+  for (const item of furniture) {
+    if (!item.wrapsText) continue;
+    updateOccupiedColumnBottoms(
+      minimums,
+      item.columnStart,
+      item.columnSpan,
+      item.y + furnitureOffsetY + item.height + furnitureMarginBottom,
+    );
+  }
+
+  return minimums.map((minimum) => reserveRhythmRows(Math.max(0, minimum), rhythm));
+}
+
+function updateOccupiedColumnBottoms(bottoms: number[], columnStart: number, columnSpan: number, bottom: number): void {
+  for (let index = columnStart; index < Math.min(bottoms.length, columnStart + columnSpan); index += 1) {
+    bottoms[index] = Math.max(bottoms[index], bottom);
+  }
+}
+
+function applyFrontChromeTreatment(
+  slot: SolvedChromeBox["slot"],
+  metrics: ChromeTextBoxMetrics,
+  config: LayoutConfig,
+  storyRole: FrontStoryRole,
+): ChromeTextBoxMetrics {
+  if (slot === "deck") {
+    const padding = Math.round(config.rhythm.rowHeight * (storyRole === "feature" ? 0.48 : 0.34));
+    return applyChromeBoxTreatment(metrics, {
+      paddingTop: padding,
+      paddingBottom: padding,
+      ruleTopHeight: 1,
+      ruleBottomHeight: 1,
+    }, config.rhythm);
+  }
+
+  if (slot === "byline") {
+    return applyChromeBoxTreatment(metrics, {
+      paddingTop: config.rhythm.rowHeight,
+      paddingBottom: config.rhythm.rowHeight,
+    }, config.rhythm);
+  }
+
+  return metrics;
+}
+
+function applyChromeBoxTreatment(
+  metrics: ChromeTextBoxMetrics,
+  treatment: ChromeBoxTreatment,
+  rhythm: VerticalRhythm,
+): ChromeTextBoxMetrics {
+  const ruleTopHeight = treatment.ruleTopHeight ?? 0;
+  const ruleBottomHeight = treatment.ruleBottomHeight ?? 0;
+  const rawHeight =
+    ruleTopHeight +
+    treatment.paddingTop +
+    metrics.contentHeight +
+    treatment.paddingBottom +
+    ruleBottomHeight;
+  const height = reserveRhythmRows(rawHeight, rhythm);
+  const paddingBottom = treatment.paddingBottom + Math.max(0, height - rawHeight);
+  const rawTotalHeight = metrics.marginBefore + height + metrics.marginAfter;
+  const totalHeight = reserveRhythmRows(rawTotalHeight, rhythm);
+
+  return {
+    ...metrics,
+    height,
+    paddingTop: treatment.paddingTop,
+    paddingBottom,
+    ruleTopHeight,
+    ruleBottomHeight,
+    totalHeight,
+    marginAfter: metrics.marginAfter + (totalHeight - rawTotalHeight),
+  };
+}
+
 function getStoryChromeMetrics(
   config: LayoutConfig,
   article: ArticlePublicationItem,
   storyRole: FrontStoryRole,
+  headlineScale: HeadlineScaleId,
   blockWidth: number,
   mediaPreludeHeight = 0,
   overrides?: ArticleFrameChromeSpec,
 ): StoryChromeMetrics {
   const feature = storyRole === "feature";
-  const headlineFontSize = getHeadlineFontSize(config, storyRole);
+  const displayHeadline = isDisplayHeadlineScale(headlineScale);
+  const headlineFontSize = getHeadlineFontSize(config, headlineScale, blockWidth);
   const label = solveChromeTextBox(article.section, blockWidth, {
     fontSize: 11.5,
     fontFamily: SANS_TEXT_FONT,
     fontWeight: 800,
     lineHeightEm: 1.22,
     paintHeightEm: 1.22,
-  }, overrides?.label);
+  }, config.rhythm, overrides?.label);
   const headline = solveChromeTextBox(article.headline, blockWidth, {
     fontSize: headlineFontSize,
     fontFamily: SERIF_TEXT_FONT,
     fontWeight: 900,
-    lineHeightEm: feature ? 0.96 : 1,
-    paintHeightEm: feature ? 1.1 : 1.12,
-    marginBeforeEm: 5 / headlineFontSize,
-    marginAfterEm: (feature ? 9 : 8) / headlineFontSize,
-  }, overrides?.headline);
-  const deckFontSize = config.columnCount === 1 ? 15 : feature ? 16 : 14;
-  const deck = solveChromeTextBox(article.deck, blockWidth, {
+    lineHeightEm: displayHeadline ? 0.96 : 1,
+    paintHeightEm: displayHeadline ? 1.1 : 1.12,
+  }, config.rhythm, overrides?.headline);
+  const deckFontSize = config.columnCount === 1 ? 17 : feature ? 19 : 16;
+  const deckLineHeight = feature ? Math.round(deckFontSize * 1.16) : config.rhythm.rowHeight;
+  const deck = applyFrontChromeTreatment("deck", solveChromeTextBox(article.deck, blockWidth, {
     fontSize: deckFontSize,
     fontFamily: SERIF_TEXT_FONT,
     fontStyle: "italic",
-    lineHeightEm: 1.25,
-    paintHeightEm: 1.25,
-    marginAfterEm: 8 / deckFontSize,
-  }, overrides?.deck);
-  const bylineFontSize = 11;
-  const byline = solveChromeTextBox(formatByline(article), blockWidth, {
+    lineHeightEm: deckLineHeight / deckFontSize,
+    paintHeightEm: deckLineHeight / deckFontSize,
+  }, config.rhythm, overrides?.deck), config, storyRole);
+  const bylineFontSize = 12;
+  const byline = applyFrontChromeTreatment("byline", solveChromeTextBox(formatByline(article), blockWidth, {
     fontSize: bylineFontSize,
     fontFamily: SANS_TEXT_FONT,
     fontWeight: 800,
-    lineHeightEm: 13 / bylineFontSize,
-    paintHeightEm: 13 / bylineFontSize,
-    marginAfterEm: 9 / bylineFontSize,
-  }, overrides?.byline);
+    lineHeightEm: config.rhythm.rowHeight / bylineFontSize,
+    paintHeightEm: config.rhythm.rowHeight / bylineFontSize,
+  }, config.rhythm, overrides?.byline), config, storyRole);
   const jump = solveChromeTextBox("SEE MORE", blockWidth, {
     fontSize: 12.2,
     fontFamily: SANS_TEXT_FONT,
     fontWeight: 800,
     lineHeightEm: 16 / 12.2,
     paintHeightEm: 16 / 12.2,
-  }, overrides?.jumpLine);
+  }, config.rhythm, overrides?.jumpLine);
 
   return {
-    borderTopHeight: feature ? 5 : 2,
-    paddingTop: feature ? 11 : 10,
+    borderTopHeight: 0,
+    paddingTop: 0,
     mediaPreludeHeight,
-    mediaPreludeMarginBottom: mediaPreludeHeight > 0 ? 10 : 0,
+    mediaPreludeMarginBottom: mediaPreludeHeight > 0 ? config.rhythm.rowHeight : 0,
     labelFontSize: label.fontSize,
     labelLineHeight: label.lineHeight,
     labelPaintHeight: label.paintHeight,
@@ -1403,6 +2578,10 @@ function getStoryChromeMetrics(
     deckLineHeight: deck.lineHeight,
     deckPaintHeight: deck.paintHeight,
     deckPaintBuffer: deck.paintBuffer,
+    deckPaddingTop: deck.paddingTop,
+    deckPaddingBottom: deck.paddingBottom,
+    deckRuleTopHeight: deck.ruleTopHeight,
+    deckRuleBottomHeight: deck.ruleBottomHeight,
     deckHeight: deck.height,
     deckLineCount: deck.lineCount,
     deckMarginBottom: deck.marginAfter,
@@ -1410,52 +2589,92 @@ function getStoryChromeMetrics(
     bylineLineHeight: byline.lineHeight,
     bylinePaintHeight: byline.paintHeight,
     bylinePaintBuffer: byline.paintBuffer,
+    bylinePaddingTop: byline.paddingTop,
+    bylinePaddingBottom: byline.paddingBottom,
     bylineHeight: byline.height,
     bylineLineCount: byline.lineCount,
     bylineMarginBottom: byline.marginAfter,
-    measureChromeHeight: STORY_MEASURE_CHROME_HEIGHT,
+    measureChromeHeight: 0,
     jumpFontSize: jump.fontSize,
     jumpLineHeight: jump.lineHeight,
     jumpPaintHeight: jump.paintHeight,
     jumpPaintBuffer: jump.paintBuffer,
     jumpHeight: jump.height,
-    jumpPaddingTop: Math.round(emToPx(8 / 12.2, jump.fontSize)),
-    jumpBorderTopHeight: 1,
+    jumpPaddingTop: 0,
+    jumpPaddingBottom: config.rhythm.rowHeight,
+    jumpBorderTopHeight: 0,
   };
 }
 
-function getHeadlineFontSize(config: LayoutConfig, storyRole: FrontStoryRole): number {
-  const pageWidth = config.contentWidth + (config.columnCount < 2 ? 36 : 60);
-  if (config.columnCount === 1) return clamp(pageWidth * 0.11, 27.2, 48);
-  if (storyRole === "feature") return clamp(pageWidth * 0.026, 23, 44);
-  return clamp(pageWidth * 0.021, 20, 32.8);
+function resolveFrontStoryRole(blockSpec: ArticleFrameBlockSpec, span: number, hasFeatureCue: boolean): FrontStoryRole {
+  if (blockSpec.role === "feature" || blockSpec.role === "primary") return "feature";
+  if (blockSpec.role === "rail") return "rail";
+  if (span >= 4 || hasFeatureCue) return "feature";
+  return "standard";
+}
+
+function resolveHeadlineScale(blockSpec: ArticleFrameBlockSpec, storyRole: FrontStoryRole): HeadlineScaleId {
+  if (blockSpec.typography?.headlineScale) return blockSpec.typography.headlineScale;
+  if (storyRole === "feature") return "feature";
+  if (storyRole === "rail") return "rail";
+  return "standard";
+}
+
+function isDisplayHeadlineScale(headlineScale: HeadlineScaleId): boolean {
+  return headlineScale === "banner" || headlineScale === "feature";
+}
+
+function getHeadlineFontSize(config: LayoutConfig, headlineScale: HeadlineScaleId, blockWidth: number): number {
+  const width = Math.max(blockWidth, 1);
+  if (config.columnCount === 1) {
+    if (headlineScale === "banner") return clamp(width * 0.13, 42, 82);
+    if (headlineScale === "feature") return clamp(width * 0.11, 34, 54);
+    if (headlineScale === "standard") return clamp(width * 0.095, 29, 46);
+    if (headlineScale === "rail") return clamp(width * 0.09, 27, 42);
+    return clamp(width * 0.075, 22, 32);
+  }
+
+  if (headlineScale === "banner") return clamp(width * 0.105, 54, 112);
+  if (headlineScale === "feature") return clamp(width * 0.052, 34, 58);
+  if (headlineScale === "standard") return clamp(width * 0.07, 27, 40);
+  if (headlineScale === "rail") return clamp(width * 0.15, 24, 34);
+  return clamp(width * 0.055, 18, 26);
 }
 
 function solveChromeTextBox(
   text: string,
   maxWidth: number,
   defaults: ChromeTextStyle,
+  rhythm: VerticalRhythm,
   overrides?: ChromeTextSlotSpec,
 ): ChromeTextBoxMetrics {
   const fontSize = defaults.fontSize;
   const lineHeight = Math.ceil(emToPx(parseEmOverride(overrides?.lineHeight, defaults.lineHeightEm), fontSize));
   const paintHeight = Math.ceil(emToPx(parseEmOverride(overrides?.paintHeight, defaults.paintHeightEm), fontSize));
   const marginBefore = Math.round(emToPx(parseEmOverride(overrides?.marginBefore, defaults.marginBeforeEm ?? 0), fontSize));
-  const marginAfter = Math.round(emToPx(parseEmOverride(overrides?.marginAfter, defaults.marginAfterEm ?? 0), fontSize));
+  const rawMarginAfter = Math.round(emToPx(parseEmOverride(overrides?.marginAfter, defaults.marginAfterEm ?? 0), fontSize));
   const minHeight = Math.ceil(emToPx(parseEmOverride(overrides?.minHeight, defaults.minHeightEm ?? 0), fontSize));
   const measured = measureWrappedTextBlock(text, buildChromeFont(defaults), maxWidth, lineHeight, paintHeight);
-  const height = Math.max(measured.height, minHeight);
+  const height = reserveRhythmRows(Math.max(measured.height, minHeight), rhythm);
+  const rawTotalHeight = marginBefore + height + rawMarginAfter;
+  const totalHeight = reserveRhythmRows(rawTotalHeight, rhythm);
+  const marginAfter = rawMarginAfter + (totalHeight - rawTotalHeight);
 
   return {
     fontSize,
     lineHeight,
     paintHeight,
     paintBuffer: Math.max(0, paintHeight - lineHeight),
+    contentHeight: measured.height,
+    paddingTop: 0,
+    paddingBottom: 0,
+    ruleTopHeight: 0,
+    ruleBottomHeight: 0,
     height,
     lineCount: measured.lineCount,
     marginBefore,
     marginAfter,
-    totalHeight: marginBefore + height + marginAfter,
+    totalHeight,
   };
 }
 
@@ -1470,6 +2689,10 @@ function buildChromeFont(style: ChromeTextStyle): string {
 
 function parseEmOverride(value: ChromeTextSlotSpec[keyof ChromeTextSlotSpec] | undefined, fallback: number): number {
   if (!value) return fallback;
+  return parseEmValue(value);
+}
+
+function parseEmValue(value: string): number {
   return Number(value.slice(0, -2));
 }
 
@@ -1501,7 +2724,7 @@ function getStoryChromeHeight(chrome: StoryChromeMetrics): number {
 }
 
 function getStoryJumpReserveHeight(chrome: StoryChromeMetrics): number {
-  return chrome.jumpBorderTopHeight + chrome.jumpPaddingTop + chrome.jumpHeight;
+  return chrome.jumpBorderTopHeight + chrome.jumpPaddingTop + chrome.jumpHeight + chrome.jumpPaddingBottom;
 }
 
 function getContinuationTitleMetrics(
@@ -1509,6 +2732,8 @@ function getContinuationTitleMetrics(
   article: ArticlePublicationItem,
   blockWidth: number,
   labelText: string,
+  headlineScale: HeadlineScaleId,
+  explicitHeadlineScale: boolean,
   overrides?: ArticleFrameChromeSpec,
 ): ContinuationTitleMetrics {
   const label = solveChromeTextBox(labelText, blockWidth, {
@@ -1517,21 +2742,29 @@ function getContinuationTitleMetrics(
     fontWeight: 800,
     lineHeightEm: CONTINUED_TITLE_KICKER_LINE_HEIGHT / 11.5,
     paintHeightEm: CONTINUED_TITLE_KICKER_LINE_HEIGHT / 11.5,
-  }, overrides?.label);
-  const heading = solveChromeTextBox(article.headline, Math.min(blockWidth, 980), {
-    fontSize: config.pageChrome.continuedTitleFontSize,
+  }, config.rhythm, overrides?.label);
+  const headingWidth = Math.min(blockWidth, 980);
+  const headingFontSize = explicitHeadlineScale
+    ? getHeadlineFontSize(config, headlineScale, headingWidth)
+    : config.pageChrome.continuedTitleFontSize;
+  const headingLineHeight = explicitHeadlineScale
+    ? headingFontSize * (isDisplayHeadlineScale(headlineScale) ? 0.94 : 1)
+    : config.pageChrome.continuedTitleLineHeight;
+  const heading = solveChromeTextBox(article.headline, headingWidth, {
+    fontSize: headingFontSize,
     fontFamily: SERIF_TEXT_FONT,
     fontWeight: 900,
-    lineHeightEm: config.pageChrome.continuedTitleLineHeight / config.pageChrome.continuedTitleFontSize,
-    paintHeightEm: Math.max(1.08, config.pageChrome.continuedTitleLineHeight / config.pageChrome.continuedTitleFontSize),
-    marginBeforeEm: CONTINUED_TITLE_HEADING_MARGIN_TOP / config.pageChrome.continuedTitleFontSize,
-  }, overrides?.headline);
-  const chromeHeight = Math.ceil(
+    lineHeightEm: headingLineHeight / headingFontSize,
+    paintHeightEm: Math.max(1.08, headingLineHeight / headingFontSize),
+    marginBeforeEm: CONTINUED_TITLE_HEADING_MARGIN_TOP / headingFontSize,
+  }, config.rhythm, overrides?.headline);
+  const chromeHeight = reserveRhythmRows(
     label.totalHeight +
       heading.totalHeight +
       CONTINUED_TITLE_PADDING_BOTTOM +
       CONTINUED_TITLE_BORDER_BOTTOM +
       CONTINUED_TITLE_MARGIN_BOTTOM,
+    config.rhythm,
   );
   return {
     label,
@@ -1563,17 +2796,17 @@ function measureWrappedTextBlock(
   };
 }
 
-function getLeadImageWrap(article: ArticlePublicationItem, width: number, lineHeight: number): TextObstacle | null {
+function getLeadImageWrap(article: ArticlePublicationItem, width: number, config: LayoutConfig): TextObstacle | null {
   if (width < 520) return null;
   const layout = article.image.layout;
-  const preferredHeight = layout?.preferredHeight ?? lineHeight * 8;
-  const minHeight = layout?.minHeight ?? lineHeight * 6;
-  const maxHeight = layout?.maxHeight ?? lineHeight * 12;
+  const preferredHeight = layout?.preferredHeight ?? config.lineHeight * 8;
+  const minHeight = layout?.minHeight ?? config.lineHeight * 6;
+  const maxHeight = layout?.maxHeight ?? config.lineHeight * 12;
   return {
     x: Math.round(width * 0.58),
     y: 0,
     width: Math.round(width * 0.42),
-    height: clamp(Math.round(preferredHeight), minHeight, maxHeight),
+    height: snapPreferredHeightToRhythm(Math.round(preferredHeight), config.rhythm, minHeight, maxHeight),
   };
 }
 
@@ -1581,22 +2814,33 @@ function createFrontPreludeImage(
   article: ArticlePublicationItem,
   blockSpec: ArticleFrameBlockSpec,
   width: number,
+  config: LayoutConfig,
+  usedImageAssetIds: ReadonlySet<string> = new Set(),
 ): SolvedImageFurniture | null {
   const mediaSpec = blockSpec.media[0];
   if (!mediaSpec) return null;
-  const asset = getPreferredImage(article, mediaSpec.placement, mediaSpec.assetRole);
+  const asset = getPreferredImage(article, mediaSpec.placement, mediaSpec.assetRole, usedImageAssetIds);
   if (!asset) return null;
   const aspectRatio = getImageAspectRatio(asset);
   const layout = asset.layout;
-  const minHeight = layout?.minHeight ?? 140;
-  const maxHeight = layout?.maxHeight ?? 320;
+  const canCropFrame = mediaSpec.placement.crop === "cropAllowed";
+  const shouldCropToFill = canCropFrame || layout?.crop === "cover";
+  const minHeight = canCropFrame ? layout?.minHeight ?? 140 : config.rhythm.rowHeight;
+  const maxHeight = canCropFrame ? layout?.maxHeight ?? 320 : Number.POSITIVE_INFINITY;
   const naturalHeight = Math.round(width / aspectRatio);
-  const height = clamp(naturalHeight, minHeight, maxHeight);
+  const imageHeight = canCropFrame
+    ? snapPreferredHeightToRhythm(naturalHeight, config.rhythm, minHeight, maxHeight)
+    : snapPreservedImageHeightToRhythm(naturalHeight, config.rhythm, minHeight, maxHeight);
+  const caption = getImageCaption(asset);
+  const captionHeight = getImageCaptionHeight(caption, width, config.rhythm);
+  const height = imageHeight + captionHeight;
   return {
     kind: "image",
     id: `${article.slug}-front-prelude-photo`,
+    assetId: asset.id,
     src: asset.src,
     alt: asset.alt,
+    caption,
     credit: asset.credit,
     templateId: "front-prelude",
     columnStart: 0,
@@ -1605,21 +2849,31 @@ function createFrontPreludeImage(
     y: 0,
     width,
     height,
+    imageHeight,
+    captionHeight,
+    captionFontSize: IMAGE_CAPTION_FONT_SIZE,
+    captionLineHeight: config.rhythm.rowHeight,
     aspectRatio,
-    objectFit: mediaSpec.placement.crop === "cropAllowed" || layout?.crop === "cover" ? "cover" : "contain",
+    objectFit: shouldCropToFill ? "cover" : "contain",
     objectPosition: getObjectPosition(asset),
     wrapsText: false,
-    preferredHeight: height,
+    preferredHeight: naturalHeight + captionHeight,
   };
 }
 
-function leadImageToFurniture(article: ArticlePublicationItem, obstacle: TextObstacle): SolvedImageFurniture {
+function leadImageToFurniture(article: ArticlePublicationItem, obstacle: TextObstacle, config: LayoutConfig): SolvedImageFurniture {
+  const [asset] = getPublicationItemImageAssets(article);
   const aspectRatio = getImageAspectRatio(article.image);
+  const caption = getImageCaption(article.image);
+  const captionHeight = getImageCaptionHeight(caption, obstacle.width, config.rhythm);
+  const imageHeight = Math.max(config.rhythm.rowHeight, obstacle.height - captionHeight);
   return {
     kind: "image",
     id: `${article.slug}-lead-photo`,
+    assetId: asset?.id ?? `${article.slug}-primary-image`,
     src: article.image.src,
     alt: article.image.alt,
+    caption,
     credit: article.image.credit,
     templateId: "lead-wrap",
     columnStart: 0,
@@ -1628,6 +2882,10 @@ function leadImageToFurniture(article: ArticlePublicationItem, obstacle: TextObs
     y: obstacle.y,
     width: obstacle.width,
     height: obstacle.height,
+    imageHeight,
+    captionHeight,
+    captionFontSize: IMAGE_CAPTION_FONT_SIZE,
+    captionLineHeight: config.rhythm.rowHeight,
     aspectRatio,
     objectFit: "cover",
     objectPosition: "50% 50%",
@@ -1656,6 +2914,8 @@ function layoutTextLines({
   maxWidth,
   lineHeight,
   linePaintHeight,
+  fontSize,
+  fontFamily,
   obstacles,
 }: {
   prepared: PreparedTextWithSegments;
@@ -1664,6 +2924,8 @@ function layoutTextLines({
   maxWidth: number;
   lineHeight: number;
   linePaintHeight: number;
+  fontSize: number;
+  fontFamily: string;
   obstacles: TextObstacle[];
 }): { lines: TextLine[]; cursor: LayoutCursor; hasMore: boolean } {
   const lines: TextLine[] = [];
@@ -1676,7 +2938,7 @@ function layoutTextLines({
     if (!slot) continue;
     const line = layoutNextLine(prepared, current, slot.width);
     if (!line) return { lines, cursor: current, hasMore: false };
-    lines.push(toTextLine(line, slot.x, y, lineHeight, linePaintHeight));
+    lines.push(toTextLine(line, slot.x, y, fontSize, fontFamily, lineHeight, linePaintHeight));
     current = line.end;
   }
 
@@ -1693,9 +2955,9 @@ function getVisibleLineCapacity(maxHeight: number, lineHeight: number, linePaint
   return Math.floor((maxHeight - linePaintHeight) / lineHeight) + 1;
 }
 
-function getLineLimitHeight(maxLines: number, lineHeight: number, linePaintHeight: number): number {
+function getLineLimitHeight(maxLines: number, lineHeight: number, linePaintHeight: number, rhythm: VerticalRhythm): number {
   if (maxLines <= 0) return 0;
-  return (maxLines - 1) * lineHeight + linePaintHeight;
+  return reserveRhythmRows((maxLines - 1) * lineHeight + linePaintHeight, rhythm);
 }
 
 function getNextAvailableSlot(
@@ -1762,26 +3024,65 @@ function getAvailableSlot(
   return slot && slot.width >= 80 ? slot : null;
 }
 
-function toTextLine(line: LayoutLine, x: number, y: number, lineHeight: number, paintHeight: number): TextLine {
+function toTextLine(line: LayoutLine, x: number, y: number, fontSize: number, fontFamily: string, lineHeight: number, paintHeight: number): TextLine {
   return {
     text: line.text,
     width: line.width,
     x,
     y,
+    fontSize,
+    fontFamily,
     lineHeight,
     paintHeight,
   };
 }
 
-function getColumnTextObstacles(furniture: SolvedFurniture[], columnIndex: number): TextObstacle[] {
-  return furniture
+function getColumnTextObstacles(
+  furniture: SolvedFurniture[],
+  columnIndex: number,
+  chromeBoxes: SolvedChromeBox[] = [],
+  furnitureOffsetY = 0,
+  furnitureMarginBottom = 0,
+  minimumLineStartY = 0,
+): TextObstacle[] {
+  const topObstacle: TextObstacle[] = minimumLineStartY > 0
+    ? [{ x: 0, y: 0, width: Number.POSITIVE_INFINITY, height: minimumLineStartY }]
+    : [];
+  const furnitureObstacles = furniture
     .filter((item) => item.wrapsText && columnIndex >= item.columnStart && columnIndex < item.columnStart + item.columnSpan)
     .map((item) => ({
       x: 0,
-      y: item.y,
+      y: item.y + furnitureOffsetY,
       width: Number.POSITIVE_INFINITY,
-      height: item.height,
+      height: item.height + getFurnitureObstacleMarginBottom(item, furnitureMarginBottom),
     }));
+  const imageClearanceObstacles = furniture
+    .filter((item) => (
+      item.kind === "image" &&
+      item.wrapsText &&
+      furnitureMarginBottom > 0 &&
+      columnIndex >= item.columnStart &&
+      columnIndex < item.columnStart + item.columnSpan
+    ))
+    .map((item) => ({
+      x: 0,
+      y: item.y + furnitureOffsetY + item.height,
+      width: Number.POSITIVE_INFINITY,
+      height: furnitureMarginBottom,
+    }));
+  const chromeObstacles = chromeBoxes
+    .filter((box) => columnIndex >= box.columnStart && columnIndex < box.columnStart + box.columnSpan)
+    .map((box) => ({
+      x: 0,
+      y: box.y,
+      width: Number.POSITIVE_INFINITY,
+      height: box.height,
+    }));
+  return [...topObstacle, ...furnitureObstacles, ...imageClearanceObstacles, ...chromeObstacles];
+}
+
+function getFurnitureObstacleMarginBottom(item: SolvedFurniture, marginBottom: number): number {
+  return item.kind === "image" || item.kind === "pullQuote" ? marginBottom : 0;
 }
 
 function getColumnWhitespace(columns: TextLine[][], textHeight: number, furniture: SolvedFurniture[]): number {
@@ -1790,6 +3091,77 @@ function getColumnWhitespace(columns: TextLine[][], textHeight: number, furnitur
       total + Math.max(0, textHeight - getLinesHeight(column) - getColumnObstacleHeight(furniture, columnIndex, textHeight)),
     0,
   );
+}
+
+function getFurnitureSufficiencyReport({
+  columns,
+  textHeight,
+  furniture,
+  hasMore,
+  config,
+}: {
+  columns: TextLine[][];
+  textHeight: number;
+  furniture: SolvedFurniture[];
+  hasMore: boolean;
+  config: LayoutConfig;
+}): FurnitureSufficiencyReport {
+  const visibleRows = columns.reduce((total, column) => total + column.length, 0);
+  const furnitureRows = furniture.reduce(
+    (total, item) => total + getFurnitureRowBurden(item, config.rhythm.rowHeight),
+    0,
+  );
+  const accepted = (reason?: string): FurnitureSufficiencyReport => ({
+    accepted: !reason,
+    reason,
+    visibleRows,
+    furnitureRows,
+  });
+
+  if (furniture.length === 0 || furnitureRows === 0) return accepted();
+  const overlapReason = getFurnitureOverlapReason(furniture);
+  if (overlapReason) return accepted(overlapReason);
+  const minimumReadableRows = columns.length * (furniture.some((item) => item.kind === "pullQuote") ? 6 : 3);
+  if (visibleRows * 4 < furnitureRows) {
+    return accepted("visible-copy-far-below-furniture-burden");
+  }
+  if (visibleRows < furnitureRows && visibleRows < minimumReadableRows) {
+    return accepted("visible-copy-below-furniture-burden");
+  }
+
+  const finalTextColumnIndex = columns.reduce((lastIndex, column, columnIndex) => (
+    column.length > 0 ? columnIndex : lastIndex
+  ), -1);
+  const exhausted = !hasMore;
+  for (let columnIndex = 0; columnIndex < columns.length; columnIndex += 1) {
+    const visibleColumnRows = columns[columnIndex].length;
+    const obstacleRows = Math.ceil(getColumnObstacleHeight(furniture, columnIndex, textHeight) / config.rhythm.rowHeight);
+    const availableRows = Math.floor(textHeight / config.rhythm.rowHeight) - obstacleRows;
+    const hasSubstantialFurniture = obstacleRows >= 6;
+    const isAfterExhaustedText = exhausted && columnIndex > finalTextColumnIndex;
+    if (!hasSubstantialFurniture && !isAfterExhaustedText && availableRows >= 3 && visibleColumnRows < 3) {
+      return accepted("open-column-below-minimum-copy");
+    }
+    if (!hasSubstantialFurniture && visibleColumnRows === 1 && columnIndex < finalTextColumnIndex) {
+      return accepted("non-final-column-single-copy-row");
+    }
+  }
+
+  return accepted();
+}
+
+function getFurnitureRowBurden(item: SolvedFurniture, rowHeight: number): number {
+  if (item.kind !== "image" && item.kind !== "pullQuote") return 0;
+  return Math.ceil(item.height / rowHeight) * item.columnSpan;
+}
+
+function getFurnitureOverlapReason(furniture: SolvedFurniture[]): string | undefined {
+  for (let firstIndex = 0; firstIndex < furniture.length; firstIndex += 1) {
+    for (let secondIndex = firstIndex + 1; secondIndex < furniture.length; secondIndex += 1) {
+      if (rectsOverlap(furniture[firstIndex], furniture[secondIndex])) return "furniture-overlap";
+    }
+  }
+  return undefined;
 }
 
 function getColumnObstacleHeight(furniture: SolvedFurniture[], columnIndex: number, textHeight: number): number {
@@ -1850,6 +3222,21 @@ function getColumnStart(anchor: "left" | "right" | "center" | "inline", span: nu
   return 0;
 }
 
+function getColumnStartForPlacement(
+  placement: ResponsivePlacementSpec,
+  anchor: "left" | "right" | "center" | "inline",
+  span: number,
+  columnCount: number,
+  collapsed: boolean,
+): number | null {
+  if (!placement.columnStart || collapsed) return getColumnStart(anchor, span, columnCount);
+  const requested = placement.columnStart - 1;
+  if (requested + span <= columnCount) return requested;
+  if (placement.collapse === "omit") return null;
+  if (placement.collapse === "fullWidth") return 0;
+  return getColumnStart("inline", Math.min(span, columnCount), columnCount);
+}
+
 function getFurnitureY(
   verticalAnchor: ResponsiveVerticalPlacement,
   height: number,
@@ -1860,7 +3247,10 @@ function getFurnitureY(
   const minY = config.lineHeight * 2;
   const maxY = Math.max(0, textHeight - height);
   const ratio = getVerticalAnchorRatio(verticalAnchor);
-  return clamp(Math.round(textHeight * ratio - height / 2), Math.min(minY, maxY), maxY);
+  const minimumY = Math.min(reserveRhythmRows(minY, config.rhythm), maxY);
+  const maximumY = snapDownToRhythm(maxY, config.rhythm);
+  if (maximumY < minimumY) return maximumY;
+  return clamp(snapToNearestRhythm(textHeight * ratio - height / 2, config.rhythm), minimumY, maximumY);
 }
 
 function getVerticalAnchorRatio(verticalAnchor: ResponsiveVerticalPlacement): number {
@@ -1878,24 +3268,20 @@ function getPullQuoteMetrics(
 ): { height: number; fontSize: number; lineHeight: number } {
   const narrow = config.columnCount === 1;
   const fontSize = narrow ? 20 : 22;
-  const box = solveChromeTextBox(text, width, {
+  const lineHeight = Math.ceil(emToPx(parseEmOverride(overrides?.lineHeight, 1.12), fontSize));
+  const paintHeight = Math.ceil(emToPx(parseEmOverride(overrides?.paintHeight, 1.18), fontSize));
+  const metrics = measureWrappedTextBlock(text, buildChromeFont({
     fontSize,
     fontFamily: SERIF_TEXT_FONT,
     fontStyle: "italic",
-    lineHeightEm: 1.12,
-    paintHeightEm: 1.18,
-    minHeightEm: (narrow ? 104 : 108) / fontSize,
-    marginBeforeEm: PULL_QUOTE_VERTICAL_PADDING / 2 / fontSize,
-    marginAfterEm: PULL_QUOTE_VERTICAL_PADDING / 2 / fontSize,
-  }, overrides);
-  const charsPerLine = Math.max(12, Math.floor(width / (fontSize * 0.52)));
-  const lineCount = Math.ceil(text.length / charsPerLine);
-  const height = clamp(
-    Math.max(box.totalHeight, getLineStackHeight(lineCount, box.lineHeight, box.paintHeight) + box.marginBefore + box.marginAfter),
-    narrow ? 104 : 108,
-    narrow ? 180 : 168,
-  );
-  return { height, fontSize, lineHeight: box.lineHeight };
+    lineHeightEm: lineHeight / fontSize,
+    paintHeightEm: paintHeight / fontSize,
+  }), width, lineHeight, paintHeight);
+  const marginBefore = Math.round(emToPx(parseEmOverride(overrides?.marginBefore, PULL_QUOTE_VERTICAL_PADDING / 2 / fontSize), fontSize));
+  const marginAfter = Math.round(emToPx(parseEmOverride(overrides?.marginAfter, PULL_QUOTE_VERTICAL_PADDING / 2 / fontSize), fontSize));
+  const minHeight = Math.ceil(emToPx(parseEmOverride(overrides?.minHeight, 0), fontSize));
+  const height = reserveRhythmRows(Math.max(metrics.height + marginBefore + marginAfter, minHeight), config.rhythm);
+  return { height, fontSize, lineHeight };
 }
 
 function getPullQuoteY({
@@ -1918,15 +3304,18 @@ function getPullQuoteY({
   const minY = config.lineHeight * 2;
   const maxY = textHeight - height;
   if (maxY < minY) return null;
-  const preferredY = clamp(Math.round(textHeight * anchorRatio - height / 2), minY, maxY);
+  const minimumY = reserveRhythmRows(minY, config.rhythm);
+  const maximumY = snapDownToRhythm(maxY, config.rhythm);
+  if (maximumY < minimumY) return null;
+  const preferredY = clamp(snapToNearestRhythm(textHeight * anchorRatio - height / 2, config.rhythm), minimumY, maximumY);
   const preferredRect = { x, y: preferredY, width, height };
   if (!image || !rectsOverlap(preferredRect, image, FURNITURE_COLLISION_GUTTER)) return preferredY;
   const candidateYs = [
-    image.y + image.height + FURNITURE_COLLISION_GUTTER,
-    image.y - height - FURNITURE_COLLISION_GUTTER,
+    reserveRhythmRows(image.y + image.height + FURNITURE_COLLISION_GUTTER, config.rhythm),
+    snapDownToRhythm(image.y - height - FURNITURE_COLLISION_GUTTER, config.rhythm),
   ]
-    .filter((candidateY) => candidateY >= minY && candidateY <= maxY)
-    .sort((a, b) => Math.abs(a - preferredY) - Math.abs(b - preferredY));
+    .filter((candidateY) => candidateY >= minimumY && candidateY <= maximumY)
+    .sort((leftY, rightY) => Math.abs(leftY - preferredY) - Math.abs(rightY - preferredY));
   return candidateYs.find((candidateY) => !rectsOverlap({ x, y: candidateY, width, height }, image, FURNITURE_COLLISION_GUTTER)) ?? null;
 }
 
@@ -1945,6 +3334,23 @@ function rectsOverlap(
 
 function getImageAspectRatio(asset: Pick<ArticleImageAsset, "layout">): number {
   return asset.layout?.aspectRatio ?? 1.5;
+}
+
+function getImageCaption(asset: Pick<ArticleImageAsset, "caption" | "credit">): string {
+  return (asset.caption ?? asset.credit).trim();
+}
+
+function getImageCaptionHeight(caption: string, width: number, rhythm: VerticalRhythm): number {
+  if (!caption) return 0;
+  const contentWidth = Math.max(1, width - IMAGE_CAPTION_FONT_SIZE * IMAGE_CAPTION_HORIZONTAL_PADDING_EM);
+  const metrics = measureWrappedTextBlock(
+    caption,
+    `italic ${IMAGE_CAPTION_FONT_SIZE}px ${SERIF_TEXT_FONT}`,
+    contentWidth,
+    rhythm.rowHeight,
+    rhythm.rowHeight,
+  );
+  return reserveRhythmRows(Math.max(rhythm.rowHeight, metrics.height), rhythm);
 }
 
 function getObjectPosition(asset: Pick<ArticleImageAsset, "layout">): string {
