@@ -14,6 +14,7 @@ export type ArticleImageLayout = {
 export type ArticleImage = {
   src: string;
   alt: string;
+  caption?: string;
   credit: string;
   layout?: ArticleImageLayout;
 };
