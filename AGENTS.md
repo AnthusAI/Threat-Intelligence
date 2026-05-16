@@ -49,6 +49,9 @@ rendering contracts.
 - Do not make the S3 bucket raw-public. Use Amplify Storage access rules and
   signed `getUrl` URLs for reader media unless the architecture is explicitly
   changed.
+- The production Amplify Storage bucket also owns private `corpora/*` prefixes
+  for Biblicus corpus working data. Treat S3 as the durable corpus source of
+  truth, and local `corpora/` symlinks as working copies only.
 - Use an AWS profile for local Amplify/AWS access.
 - `.env` is for Papyrus runtime settings and the seed editor credentials used by
   `npm run seed:amplify`. `.env*` must stay ignored, and `.env.example` is the
@@ -67,6 +70,9 @@ rendering contracts.
   Papyrus GraphQL. Papyrus stores steering state, artifact references, topic
   copy, proposals, decisions, projections, and stable external `item_id`
   references; Biblicus remains the owner of corpus item metadata.
+- Do not edit `/Users/ryan/Projects/Biblicus` source files. If Biblicus needs a
+  new full-corpus S3 sync or locking feature, relay that request to the Biblicus
+  agent instead of changing the library from Papyrus.
 
 ## Solver vs. Renderer Boundary
 

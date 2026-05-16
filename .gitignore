@@ -3,6 +3,7 @@
 !.env.example
 .next/
 node_modules/
+.npm/
 out/
 dist/
 coverage/

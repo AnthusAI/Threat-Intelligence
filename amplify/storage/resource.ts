@@ -9,5 +9,8 @@ export const storage = defineStorage({
       allow.authenticated.to(["read"]),
       allow.groups(["editor", "admin"]).to(["read", "write", "delete"]),
     ],
+    "corpora/*": [
+      allow.groups(["editor", "admin"]).to(["read"]),
+    ],
   }),
 });

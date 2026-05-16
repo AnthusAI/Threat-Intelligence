@@ -148,7 +148,8 @@ in TypeScript:
 - Data exposes a general CMS model centered on `Item`, plus `Tag`,
   `MediaAsset`, `Edition`, and `EditionItem`.
 - Storage keeps media in a private S3 bucket with guest read through Amplify
-  Storage APIs and editor write/delete on `media/*`.
+  Storage APIs and editor write/delete on `media/*`. The same Amplify bucket
+  also owns private `corpora/*` prefixes for Biblicus corpus working data.
 
 The first cloud media strategy uses signed Storage URLs, not raw public S3
 object URLs. `MediaAsset.storagePath` is stable data. `GraphQLContentRepository`
@@ -179,7 +180,9 @@ Biblicus remains the artifact and worker tool boundary. Workers may run
 Biblicus commands that create reproducible artifacts, but Papyrus code should
 not edit Biblicus corpus sidecars, catalogs, or internals directly. The local
 `corpora/` folder is ignored by git and is only a pilot convenience for
-symlinking the two Biblicus corpora; durable corpus storage should move to S3.
+symlinking the two Biblicus corpora; durable corpus storage lives in the
+production Amplify Storage bucket under `corpora/AI-ML-research/` and
+`corpora/AI-ML-history/`.
 
 Public GraphQL reads expose only curated typed fields needed by the page. Raw
 Biblicus payloads, source notes, full metadata, and import internals live in

@@ -6,6 +6,75 @@ references, decisions, and stable external IDs. It does not mirror Biblicus
 corpus items into GraphQL; evidence remains a Biblicus `item_id` reference until
 Papyrus deliberately turns some information into its own publication content.
 
+## Durable Corpus Storage
+
+The two steering corpora live durably in the production Amplify Storage bucket
+under a private `corpora/` prefix. Local folders are working copies only.
+
+```bash
+export AWS_PROFILE=Ryan
+export AWS_REGION=us-east-1
+export PAPYRUS_CORPORA_BUCKET="amplify-dbsyytcm9drqa-mai-papyrusmediabucket0dab24-4hstaautjdqo"
+```
+
+Current prefixes:
+
+- `s3://$PAPYRUS_CORPORA_BUCKET/corpora/AI-ML-research/`
+- `s3://$PAPYRUS_CORPORA_BUCKET/corpora/AI-ML-history/`
+
+The bucket is managed by Amplify as `papyrusMedia`. The `media/*` prefix is for
+reader media. The `corpora/*` prefix is private and is not raw-public; browser
+access goes through Amplify Storage rules, and worker access uses AWS IAM.
+
+For the pilot, use AWS S3 sync for the full Biblicus corpus artifact trees.
+Biblicus remote-source support is a one-way raw/source mirror into
+`imports/remote/...`; do not use `biblicus source set` or `biblicus source pull`
+as the full-corpus artifact sync unless the Biblicus agent confirms that
+contract has changed.
+
+Initial upload, reviewed before writing:
+
+```bash
+aws s3 sync \
+  /Users/ryan/Projects/Biblicus/corpora/AI-ML-research \
+  s3://$PAPYRUS_CORPORA_BUCKET/corpora/AI-ML-research/ \
+  --dryrun
+
+aws s3 sync \
+  /Users/ryan/Projects/Biblicus/corpora/AI-ML-history \
+  s3://$PAPYRUS_CORPORA_BUCKET/corpora/AI-ML-history/ \
+  --dryrun
+```
+
+After reviewing the dry runs, repeat without `--dryrun`. Do not use `--delete`
+on the first upload.
+
+Worker refresh from S3 into local Biblicus working copies:
+
+```bash
+aws s3 sync \
+  s3://$PAPYRUS_CORPORA_BUCKET/corpora/AI-ML-research/ \
+  /Users/ryan/Projects/Biblicus/corpora/AI-ML-research/
+
+aws s3 sync \
+  s3://$PAPYRUS_CORPORA_BUCKET/corpora/AI-ML-history/ \
+  /Users/ryan/Projects/Biblicus/corpora/AI-ML-history/
+```
+
+After a worker runs Biblicus commands that create artifacts, push the changed
+working copy back to S3. Use a dry run first. Use `--delete` only when this
+worker is intentionally reconciling S3 to its complete local working copy.
+
+```bash
+aws s3 sync \
+  /Users/ryan/Projects/Biblicus/corpora/AI-ML-research \
+  s3://$PAPYRUS_CORPORA_BUCKET/corpora/AI-ML-research/ \
+  --dryrun
+```
+
+Only one writer should update a corpus prefix at a time until there is a
+Biblicus-owned full-corpus locking or sync command.
+
 ## Production Authoring JWT
 
 The content CLI writes through AppSync's Lambda-authorizer lane. It does not use
@@ -203,6 +272,7 @@ npm run content -- curation import-steering \
 ## Local Corpus Symlinks
 
 The `corpora/` folder in Papyrus is local-only and ignored by git. It can point
-at the two Biblicus corpora during the pilot, but Papyrus code must not edit
-sidecars, catalog files, or extracted artifacts directly. Use Biblicus CLI
-commands for all corpus reads and writes.
+at the two Biblicus corpora during the pilot, but the S3 `corpora/` prefixes are
+the durable source of truth. Papyrus code must not edit sidecars, catalog files,
+or extracted artifacts directly. Use Biblicus CLI commands for corpus work, then
+sync the resulting working copy to S3.
