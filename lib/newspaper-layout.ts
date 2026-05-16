@@ -644,22 +644,16 @@ function solveFrontMosaicPage(
   const activeResponsiveLayout = getActiveFrontResponsiveLayout(regionSpec, config);
   const placements = activeResponsiveLayout
     ? resolveResponsiveFrontArticlePlacements(frontBlockSpecs, activeResponsiveLayout, config)
-    : frontBlockSpecs.map((block, index) => ({ block, originalIndex: index, solveIndex: index }));
-  const responsiveRowHeights = activeResponsiveLayout
-    ? getResponsiveFrontRowHeights(config, placements)
-    : null;
-  const solvedPlacements = responsiveRowHeights
-    ? placements.map((placement) => ({
-        ...placement,
-        rowHeight: getResponsiveFrontPlacementHeight(placement, responsiveRowHeights, config.rowGap),
-      }))
-    : placements;
+    : resolveDefaultFrontArticlePlacements(frontBlockSpecs, config);
+  const baseRowHeights = getResponsiveFrontRowHeights(config, placements);
+  const solvedPlacements = placements.map((placement) => ({
+    ...placement,
+    rowHeight: getResponsiveFrontPlacementHeight(placement, baseRowHeights, config.rowGap),
+  }));
   const blocks = solvedPlacements.map((placement) => (
     solveFrontArticleFrame(placement, itemsBySlug, flows, prepared, config, pageSpec.pageNumber)
   ));
-  const rowHeights = responsiveRowHeights
-    ? getSolvedResponsiveFrontRowHeights(responsiveRowHeights, blocks, config)
-    : getSolvedDefaultFrontRowHeights(config.frontRows, blocks, config);
+  const rowHeights = getSolvedResponsiveFrontRowHeights(baseRowHeights, blocks, config);
   const gridHeight = getFrontPageGridHeightFromRowHeights(rowHeights, config.rowGap);
   const frontFooter = solveFrontFooter(blocks, config, pageSpec.pageNumber);
   const regionY = config.pageChrome.pagePaddingTop + config.pageChrome.mastheadHeight + config.pageChrome.frontGridMarginTop;
@@ -735,6 +729,35 @@ function resolveResponsiveFrontArticlePlacements(
       left.solveIndex - right.solveIndex
     ))
     .map((placement, solveIndex) => ({ ...placement, solveIndex }));
+}
+
+function resolveDefaultFrontArticlePlacements(blocks: ArticleFrameBlockSpec[], config: LayoutConfig): FrontArticlePlacement[] {
+  let columnStart = 0;
+  let rowStart = 0;
+  return blocks.map((block, index) => {
+    const columnSpan = getDefaultFrontArticlePlacementSpan(block, config);
+    if (columnStart + columnSpan > config.columnCount) {
+      rowStart += 1;
+      columnStart = 0;
+    }
+    const placement: FrontArticlePlacement = {
+      block,
+      originalIndex: index,
+      solveIndex: index,
+      gridPlacement: {
+        columnStart,
+        columnSpan,
+        rowStart,
+        rowSpan: 1,
+      },
+    };
+    columnStart += columnSpan;
+    return placement;
+  });
+}
+
+function getDefaultFrontArticlePlacementSpan(block: ArticleFrameBlockSpec, config: LayoutConfig): number {
+  return clamp(block.span?.preferred ?? 1, 1, config.columnCount);
 }
 
 function orderFrontArticleBlocks(blocks: ArticleFrameBlockSpec[], order: FrontResponsiveLayoutOrder): ArticleFrameBlockSpec[] {
@@ -878,20 +901,6 @@ function solveFrontFooter(blocks: SolvedBlock[], config: LayoutConfig, pageNumbe
     entries,
     utilityEntries,
   };
-}
-
-function getSolvedDefaultFrontRowHeights(frontRows: FrontRow[], blocks: SolvedBlock[], config: LayoutConfig): number[] {
-  const rowHeights = frontRows.map((row) => row.height);
-  const fallbackHeight = rowHeights[rowHeights.length - 1] ?? reserveRhythmRows(420, config.rhythm);
-  for (const [blockIndex, block] of blocks.entries()) {
-    const rowIndex = frontRows.findIndex((row) => blockIndex >= row.startIndex && blockIndex <= row.endIndex);
-    const resolvedRowIndex = rowIndex >= 0 ? rowIndex : Math.max(0, rowHeights.length - 1);
-    while (rowHeights.length <= resolvedRowIndex) {
-      rowHeights.push(fallbackHeight);
-    }
-    rowHeights[resolvedRowIndex] = Math.max(rowHeights[resolvedRowIndex], reserveRhythmRows(block.height, config.rhythm));
-  }
-  return rowHeights;
 }
 
 function getSolvedResponsiveFrontRowHeights(baseRowHeights: number[], blocks: SolvedBlock[], config: LayoutConfig): number[] {

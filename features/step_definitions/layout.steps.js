@@ -1023,15 +1023,38 @@ Then("the front page footer should fit within the solved page", async function (
     const contentRect = contentElement.getBoundingClientRect();
     const rowHeights = region.rowHeights ?? [];
     const solvedGridHeight = rowHeights.reduce((total, height) => total + height, 0) + layout.rowGap * Math.max(0, rowHeights.length - 1);
+    const unplacedBlockIds = region.blocks
+      .filter((block) => !block.front?.gridPlacement)
+      .map((block) => block.id);
+    const maxPlacedRow = region.blocks.reduce((maxRow, block) => {
+      const placement = block.front?.gridPlacement;
+      return placement ? Math.max(maxRow, placement.rowStart + placement.rowSpan) : maxRow;
+    }, 0);
+    const stories = Array.from(gridElement.querySelectorAll(".front-story")).map((story, index) => {
+      const rect = story.getBoundingClientRect();
+      return {
+        blockId: region.blocks[index]?.id,
+        bottom: rect.bottom,
+        bottomOverflow: rect.bottom - gridRect.bottom,
+      };
+    });
+    const maxStoryBottom = stories.reduce((bottom, story) => Math.max(bottom, story.bottom), gridRect.top);
+    const overflowingStories = stories
+      .filter((story) => story.bottomOverflow > 0.75)
+      .map((story) => ({ blockId: story.blockId, overflow: story.bottomOverflow }));
     return {
       rhythm,
       rowTrackCount: rowHeights.length,
+      maxPlacedRow,
+      unplacedBlockIds,
+      overflowingStories,
       solvedGridHeight,
       solvedRegionHeight: region.height,
       solvedPageHeight: frontPage.height,
       renderedPageHeight: contentRect.height,
       renderedGridHeight: gridRect.height,
       renderedFooterGap: footerRect.top - gridRect.bottom,
+      renderedFooterGapFromLastStory: footerRect.top - maxStoryBottom,
       renderedFooterHeight: footerRect.height,
       footerBottomInset: contentRect.bottom - footerRect.bottom,
       pagePaddingBottom: layout.pageChrome.pagePaddingBottom,
@@ -1041,9 +1064,13 @@ Then("the front page footer should fit within the solved page", async function (
   });
   assert.ok(report, "Expected front footer fit report");
   assert.ok(report.rowTrackCount > 0, "Expected solved front grid row tracks");
+  assert.deepEqual(report.unplacedBlockIds, [], "Expected every front story to have solver-owned grid placement");
+  assert.ok(report.rowTrackCount >= report.maxPlacedRow, `Expected ${report.rowTrackCount} row tracks to cover placed row ${report.maxPlacedRow}`);
+  assert.deepEqual(report.overflowingStories, [], "Expected all front stories to fit within the solved front grid");
   assert.ok(Math.abs(report.solvedGridHeight - report.solvedRegionHeight) <= 0.75, `Expected solved row tracks ${report.solvedGridHeight} to match region height ${report.solvedRegionHeight}`);
   assert.ok(Math.abs(report.renderedGridHeight - report.solvedRegionHeight) <= 0.75, `Expected rendered grid height ${report.renderedGridHeight} to match solved region height ${report.solvedRegionHeight}`);
   assert.ok(Math.abs(report.renderedFooterGap - report.solvedFooterMarginTop) <= 0.75, `Expected footer gap ${report.renderedFooterGap} to match solved margin ${report.solvedFooterMarginTop}`);
+  assert.ok(report.renderedFooterGapFromLastStory + 0.75 >= report.solvedFooterMarginTop, `Expected footer to sit at least ${report.solvedFooterMarginTop}px below the last story; found ${report.renderedFooterGapFromLastStory}`);
   assert.ok(Math.abs(report.renderedFooterHeight - report.solvedFooterHeight) <= 0.75, `Expected footer height ${report.renderedFooterHeight} to match solved footer ${report.solvedFooterHeight}`);
   assert.ok(Math.abs(report.renderedPageHeight - report.solvedPageHeight) <= 0.75, `Expected rendered page height ${report.renderedPageHeight} to match solved page height ${report.solvedPageHeight}`);
   assert.ok(report.footerBottomInset + 0.75 >= report.pagePaddingBottom, `Expected footer to fit above bottom padding ${report.pagePaddingBottom}; found inset ${report.footerBottomInset}`);
