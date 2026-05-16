@@ -6,6 +6,7 @@ const LIST_EDITIONS_QUERY = `
         slug
         title
         editionDate
+        publishedAt
         description
       }
       nextToken
@@ -109,6 +110,7 @@ const GETTERS = {
           title
           status
           editionDate
+          publishedAt
           description
           layoutPlan
           metadata

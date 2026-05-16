@@ -129,6 +129,7 @@ const schema = a.schema({
       title: a.string().required(),
       status: a.string().required(),
       editionDate: a.string().required(),
+      publishedAt: a.datetime(),
       description: a.string(),
       layoutPlan: a.json(),
       metadata: a.json(),
@@ -137,6 +138,7 @@ const schema = a.schema({
     .secondaryIndexes((index) => [
       index("slug").queryField("editionBySlug"),
       index("status").sortKeys(["editionDate"]).queryField("listEditionsByStatusAndEditionDate"),
+      index("status").sortKeys(["publishedAt"]).queryField("listEditionsByStatusAndPublishedAt"),
     ])
     .authorization((allow) => [
       allow.publicApiKey().to(["read"]),
