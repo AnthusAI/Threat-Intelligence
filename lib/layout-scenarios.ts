@@ -54,6 +54,72 @@ export const layoutScenarios: LayoutScenario[] = [
     layoutPlan: createCompactChromeLayoutPlan(),
     items: cloneArticles(articles).map(articleToPublicationItem),
   },
+  {
+    id: "furniture-sufficiency-pressure",
+    source: "scenario",
+    title: "Furniture Sufficiency Pressure",
+    editionDate,
+    scenarioId: "furniture-sufficiency-pressure",
+    description:
+      "Oversized image and pull-quote packages prove that the solver rejects furniture that leaves too little readable copy.",
+    layoutPlan: createFurnitureSufficiencyLayoutPlan(),
+    items: createFurnitureSufficiencyArticles().map(articleToPublicationItem),
+  },
+  {
+    id: "long-image-caption",
+    source: "scenario",
+    title: "Long Image Caption",
+    editionDate,
+    scenarioId: "long-image-caption",
+    description:
+      "A continuation image with a long caption proves image furniture reserves enough rhythm rows for complete caption text.",
+    layoutPlan: createDefaultEditionLayoutPlan(articles.map((article) => article.slug)),
+    items: createLongImageCaptionArticles().map(articleToPublicationItem),
+  },
+  {
+    id: "height-policy-fill-default",
+    source: "scenario",
+    title: "Height Policy Fill Default",
+    editionDate,
+    scenarioId: "height-policy-fill-default",
+    description:
+      "A page-two continuation without shrinkToContent proves stacked regions still preserve their allocated fill height by default.",
+    layoutPlan: createHeightPolicyLayoutPlan({}),
+    items: cloneArticles(articles).map(articleToPublicationItem),
+  },
+  {
+    id: "height-policy-default-rows",
+    source: "scenario",
+    title: "Height Policy Default Rows",
+    editionDate,
+    scenarioId: "height-policy-default-rows",
+    description:
+      "A page-two continuation with block defaultRows proves an article frame can hold an editorial row target.",
+    layoutPlan: createHeightPolicyLayoutPlan({ regionShrinkToContent: true, defaultRows: 64 }),
+    items: cloneArticles(articles).map(articleToPublicationItem),
+  },
+  {
+    id: "height-policy-default-rows-grow",
+    source: "scenario",
+    title: "Height Policy Default Rows Grow",
+    editionDate,
+    scenarioId: "height-policy-default-rows-grow",
+    description:
+      "A short article-frame row target proves exhaustive continuation text can grow beyond defaultRows.",
+    layoutPlan: createHeightPolicyLayoutPlan({ regionShrinkToContent: true, defaultRows: 12 }),
+    items: cloneArticles(articles).map(articleToPublicationItem),
+  },
+  {
+    id: "height-policy-default-rows-shrink",
+    source: "scenario",
+    title: "Height Policy Default Rows Shrink",
+    editionDate,
+    scenarioId: "height-policy-default-rows-shrink",
+    description:
+      "A shrinkable article-frame row target proves defaultRows can be released when content solves shorter.",
+    layoutPlan: createHeightPolicyLayoutPlan({ regionShrinkToContent: true, defaultRows: 64, blockShrinkToContent: true }),
+    items: cloneArticles(articles).map(articleToPublicationItem),
+  },
 ];
 
 export function getLayoutScenario(id: string | null | undefined): LayoutScenario {
@@ -93,7 +159,7 @@ function createSharedBlankColumnPressureArticles(): Article[] {
 
 function createNoPullQuoteArticles(): Article[] {
   return cloneArticles(articles).map((article) => {
-    if (article.slug === "harbor-grid" || article.slug === "schools-reading-lab" || article.slug === "market-hall") {
+    if (article.slug === "agent-procedure-patterns" || article.slug === "schools-reading-lab" || article.slug === "market-hall") {
       return {
         ...article,
         pullQuotes: [],
@@ -102,6 +168,94 @@ function createNoPullQuoteArticles(): Article[] {
 
     return article;
   });
+}
+
+function createFurnitureSufficiencyArticles(): Article[] {
+  return cloneArticles(articles).map((article) => {
+    if (article.slug === "schools-reading-lab") {
+      return {
+        ...article,
+        pullQuotes: [],
+        image: {
+          ...article.image,
+          layout: {
+            ...article.image.layout,
+            minHeight: 120,
+            preferredHeight: 900,
+            maxHeight: 900,
+            aspectRatio: 0.2,
+            crop: "contain",
+            wrapsText: true,
+          },
+        },
+        body: [
+          article.body[0],
+          article.body[1],
+          "This pressure edition leaves only a compact continuation tail, so an oversized photo package must yield to readable copy.",
+        ],
+      };
+    }
+
+    if (article.slug === "market-hall") {
+      return {
+        ...article,
+        pullQuotes: [
+          "The economics depend on sharing, but a display quote that consumes a wide block of columns should not be admitted when it leaves only a few rows of live article copy around it. If the quote keeps expanding across the continuation, the solver should treat that furniture as editorially too expensive for this compact tail.",
+        ],
+        body: [
+          article.body[0],
+          article.body[1],
+          "The hall still opens before dawn, but the continuation in this scenario is deliberately compact so the solver has to prefer readable copy over oversized furniture.",
+        ],
+      };
+    }
+
+    return article;
+  });
+}
+
+function createLongImageCaptionArticles(): Article[] {
+  return cloneArticles(articles).map((article) => {
+    if (article.slug !== "market-hall") return article;
+    return {
+      ...article,
+      image: {
+        ...article.image,
+        caption:
+          "The renovated market hall combines prep kitchens, storefront counters, shared cold storage, and a public retail counter where small producers can test packaging and pricing before committing to wholesale runs.",
+      },
+    };
+  });
+}
+
+function createHeightPolicyLayoutPlan({
+  regionShrinkToContent,
+  defaultRows,
+  blockShrinkToContent = false,
+}: {
+  regionShrinkToContent?: boolean;
+  defaultRows?: number;
+  blockShrinkToContent?: boolean;
+}): EditionLayoutPlan {
+  const plan = cloneLayoutPlan(createDefaultEditionLayoutPlan(articles.map((article) => article.slug)));
+  const region = findPlanRegion(plan, "harbor-continuation");
+  if (region) {
+    if (regionShrinkToContent === undefined) {
+      delete region.size;
+    } else {
+      region.size = { ...(region.size ?? {}), shrinkToContent: regionShrinkToContent };
+    }
+  }
+
+  const block = findPlanBlock(plan, "agent-procedure-patterns-page-2");
+  if (block?.type === "articleFrame" && defaultRows !== undefined) {
+    block.size = {
+      defaultRows,
+      shrinkToContent: blockShrinkToContent,
+    };
+  }
+
+  return plan;
 }
 
 function cloneArticles(source: Article[]): Article[] {
@@ -132,6 +286,55 @@ function createCompactChromeLayoutPlan(): EditionLayoutPlan {
     };
   }
   return plan;
+}
+
+function createFurnitureSufficiencyLayoutPlan(): EditionLayoutPlan {
+  const plan = cloneLayoutPlan(createDefaultEditionLayoutPlan(articles.map((article) => article.slug)));
+  const frontSchoolsBlock = findPlanBlock(plan, "front-schools-reading-lab");
+  if (frontSchoolsBlock?.type === "articleFrame") {
+    frontSchoolsBlock.cutPolicy = { maxBodyLines: 4, jumpTargetPage: 3 };
+  }
+
+  const frontMarketBlock = findPlanBlock(plan, "front-market-hall");
+  if (frontMarketBlock?.type === "articleFrame") {
+    frontMarketBlock.cutPolicy = { maxBodyLines: 4, jumpTargetPage: 3 };
+  }
+
+  const schoolsBlock = findPlanBlock(plan, "schools-reading-lab-page-3");
+  if (schoolsBlock?.type === "articleFrame") {
+    schoolsBlock.localGrid = { columns: { min: 2, preferred: 4, max: 4 } };
+    schoolsBlock.media[0].placement.crop = "cropAllowed";
+    schoolsBlock.media[0].placement.anchor = "center";
+    schoolsBlock.media[0].placement.span = { min: 4, preferred: 4, max: 4 };
+  }
+
+  const marketBlock = findPlanBlock(plan, "market-hall-page-3");
+  if (marketBlock?.type === "articleFrame") {
+    marketBlock.media = [];
+    marketBlock.pullQuote = {
+      required: false,
+      placements: [
+        {
+          anchor: "center",
+          span: { min: 2, preferred: 2, max: 2 },
+          vertical: "middle",
+          collapse: "omit",
+          crop: "preserve",
+          wrapsText: true,
+        },
+      ],
+    };
+  }
+
+  return plan;
+}
+
+function findPlanBlock(plan: EditionLayoutPlan, blockId: string): EditionLayoutPlan["pages"][number]["regions"][number]["blocks"][number] | undefined {
+  return plan.pages.flatMap((page) => page.regions).flatMap((region) => region.blocks).find((block) => block.id === blockId);
+}
+
+function findPlanRegion(plan: EditionLayoutPlan, regionId: string): EditionLayoutPlan["pages"][number]["regions"][number] | undefined {
+  return plan.pages.flatMap((page) => page.regions).find((region) => region.id === regionId);
 }
 
 function cloneLayoutPlan(plan: EditionLayoutPlan): EditionLayoutPlan {
