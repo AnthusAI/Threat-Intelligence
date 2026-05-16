@@ -210,18 +210,27 @@ img {
 }
 
 .edition-progress__button {
+  align-items: center;
   appearance: none;
   background: transparent;
   border: 0;
   color: inherit;
   cursor: pointer;
+  display: inline-flex;
   font: inherit;
+  gap: 0.35rem;
   line-height: inherit;
   padding: 0;
   text-decoration: underline;
   text-decoration-color: rgb(var(--accent-rgb) / 0.6);
   text-underline-offset: 0.16em;
   text-transform: uppercase;
+}
+
+.edition-progress__icon {
+  block-size: 0.62rem;
+  flex: none;
+  inline-size: 0.62rem;
 }
 
 .edition-progress__button:first-of-type {

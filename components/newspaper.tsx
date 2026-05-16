@@ -35,13 +35,6 @@ type ScrollToPageOptions = {
   history?: "push" | "replace" | "none";
 };
 
-type TouchGesture = {
-  startX: number;
-  startY: number;
-  latestX: number;
-  latestY: number;
-};
-
 type PapyrusTestWindow = Window & typeof globalThis & {
   __PAPYRUS_LAYOUT__?: NewspaperLayout;
   __PAPYRUS_SCENARIO__?: string;
@@ -56,8 +49,6 @@ type NewspaperProps = {
 };
 
 const PAGE_LOOKAROUND = 1;
-const SWIPE_INTENT_SLOP = 14;
-const SWIPE_MIN_DISTANCE = 48;
 
 export function Newspaper({ content, editionBasePath, initialPageNumber = 1 }: NewspaperProps) {
   const normalizedInitialPage = Math.max(1, Math.floor(initialPageNumber));
@@ -67,7 +58,6 @@ export function Newspaper({ content, editionBasePath, initialPageNumber = 1 }: N
   const hasInitializedLocationRef = useRef(false);
   const pendingProgrammaticPageRef = useRef<number | null>(null);
   const preservedItemHashPageRef = useRef<number | null>(null);
-  const touchGestureRef = useRef<TouchGesture | null>(null);
   const [metrics, setMetrics] = useState<BookMetrics | null>(null);
   const [fontRevision, setFontRevision] = useState(0);
   const [visiblePage, setVisiblePage] = useState(normalizedInitialPage);
@@ -298,101 +288,12 @@ export function Newspaper({ content, editionBasePath, initialPageNumber = 1 }: N
       if ((event.key === "=" || event.code === "Equal") && event.ctrlKey && !event.metaKey && !event.altKey) {
         event.preventDefault();
         setShowRhythmOverlay((current) => !current);
-        return;
       }
-
-      const advancesPage = event.key === "ArrowRight" || event.key === "ArrowDown";
-      const retreatsPage = event.key === "ArrowLeft" || event.key === "ArrowUp";
-      if (!advancesPage && !retreatsPage) return;
-
-      event.preventDefault();
-      turnRelative(advancesPage ? 1 : -1);
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [turnRelative]);
-
-  useEffect(() => {
-    const node = shellRef.current;
-    if (!node) return;
-
-    const resetGesture = () => {
-      touchGestureRef.current = null;
-    };
-
-    const handleTouchStart = (event: TouchEvent) => {
-      if (event.touches.length !== 1 || isEditableEventTarget(event.target)) {
-        resetGesture();
-        return;
-      }
-
-      const touch = event.touches[0];
-      touchGestureRef.current = {
-        startX: touch.clientX,
-        startY: touch.clientY,
-        latestX: touch.clientX,
-        latestY: touch.clientY,
-      };
-    };
-
-    const handleTouchMove = (event: TouchEvent) => {
-      const gesture = touchGestureRef.current;
-      if (!gesture || event.touches.length !== 1) {
-        resetGesture();
-        return;
-      }
-
-      const touch = event.touches[0];
-      gesture.latestX = touch.clientX;
-      gesture.latestY = touch.clientY;
-
-      const deltaX = gesture.latestX - gesture.startX;
-      const deltaY = gesture.latestY - gesture.startY;
-      const absX = Math.abs(deltaX);
-      const absY = Math.abs(deltaY);
-      const primaryDistance = Math.max(absX, absY);
-      const secondaryDistance = Math.min(absX, absY);
-
-      if (primaryDistance < SWIPE_INTENT_SLOP) return;
-      if (primaryDistance <= secondaryDistance) {
-        resetGesture();
-        return;
-      }
-
-      event.preventDefault();
-    };
-
-    const handleTouchEnd = (event: TouchEvent) => {
-      const gesture = touchGestureRef.current;
-      resetGesture();
-      if (!gesture || event.changedTouches.length !== 1) return;
-
-      const touch = event.changedTouches[0];
-      const deltaX = touch.clientX - gesture.startX;
-      const deltaY = touch.clientY - gesture.startY;
-      const absX = Math.abs(deltaX);
-      const absY = Math.abs(deltaY);
-      const primaryDistance = Math.max(absX, absY);
-      const secondaryDistance = Math.min(absX, absY);
-      if (primaryDistance < SWIPE_MIN_DISTANCE || primaryDistance <= secondaryDistance) return;
-
-      event.preventDefault();
-      const advancesPage = absX >= absY ? deltaX > 0 : deltaY > 0;
-      turnRelative(advancesPage ? 1 : -1);
-    };
-
-    node.addEventListener("touchstart", handleTouchStart, { passive: true });
-    node.addEventListener("touchmove", handleTouchMove, { passive: false });
-    node.addEventListener("touchend", handleTouchEnd, { passive: false });
-    node.addEventListener("touchcancel", resetGesture);
-    return () => {
-      node.removeEventListener("touchstart", handleTouchStart);
-      node.removeEventListener("touchmove", handleTouchMove);
-      node.removeEventListener("touchend", handleTouchEnd);
-      node.removeEventListener("touchcancel", resetGesture);
-    };
-  }, [turnRelative]);
+  }, []);
 
   useEffect(() => {
     const papyrusWindow = window as PapyrusTestWindow;
@@ -545,6 +446,16 @@ export function NewspaperFrontPreview({ content }: { content: EditionContent }) 
   );
 }
 
+function EditionProgressTriangleIcon({ direction }: { direction: "previous" | "next" }) {
+  const path = direction === "previous" ? "M7.5 1 2.5 5 7.5 9Z" : "M2.5 1 7.5 5 2.5 9Z";
+
+  return (
+    <svg aria-hidden="true" className="edition-progress__icon" focusable="false" viewBox="0 0 10 10">
+      <path d={path} fill="currentColor" />
+    </svg>
+  );
+}
+
 function EditionProgress({
   currentPage,
   totalPages,
@@ -561,13 +472,15 @@ function EditionProgress({
   return (
     <nav className="edition-progress" aria-label="Edition progress" ref={progressRef}>
       <button className="edition-progress__button" disabled={!onPrevious} onClick={onPrevious} type="button">
-        <span aria-hidden="true">◀</span> Previous
+        <EditionProgressTriangleIcon direction="previous" />
+        Previous
       </button>
       <span className="edition-progress__status">
         Page {currentPage ?? "--"} of {totalPages ?? "--"}
       </span>
       <button className="edition-progress__button" disabled={!onNext} onClick={onNext} type="button">
-        Next <span aria-hidden="true">▶</span>
+        Next
+        <EditionProgressTriangleIcon direction="next" />
       </button>
     </nav>
   );
