@@ -1,4 +1,5 @@
 import { defineAuth, secret } from "@aws-amplify/backend";
+import { manageUserRole } from "../functions/manage-user-role/resource";
 
 const authRedirectUrls = [
   "http://localhost:3001/",
@@ -21,5 +22,8 @@ export const auth = defineAuth({
       logoutUrls: authRedirectUrls,
     },
   },
-  groups: ["editor"],
+  groups: ["admin", "editor", "curator"],
+  access: (allow) => [
+    allow.resource(manageUserRole).to(["addUserToGroup", "removeUserFromGroup", "listUsers", "listGroupsForUser"]),
+  ],
 });

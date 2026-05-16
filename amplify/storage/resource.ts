@@ -7,7 +7,7 @@ export const storage = defineStorage({
     "media/*": [
       allow.guest.to(["read"]),
       allow.authenticated.to(["read"]),
-      allow.groups(["editor"]).to(["read", "write", "delete"]),
+      allow.groups(["editor", "admin"]).to(["read", "write", "delete"]),
     ],
   }),
 });

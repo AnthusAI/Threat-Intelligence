@@ -1,5 +1,6 @@
 import { type ClientSchema, a, defineData } from "@aws-amplify/backend";
 import { graphqlJwtAuthorizer } from "../functions/graphql-jwt-authorizer/resource";
+import { manageUserRole } from "../functions/manage-user-role/resource";
 
 const authoringOperations: ("read" | "create" | "update" | "delete")[] = [
   "read",
@@ -7,8 +8,73 @@ const authoringOperations: ("read" | "create" | "update" | "delete")[] = [
   "update",
   "delete",
 ];
+const contentWriteGroups = ["editor", "admin"];
+const adminGroup = "admin";
 
 const schema = a.schema({
+  UserProfile: a
+    .model({
+      id: a.id().required(),
+      email: a.email(),
+      displayName: a.string(),
+      avatarUrl: a.url(),
+      preferences: a.json(),
+      createdAt: a.datetime(),
+      updatedAt: a.datetime(),
+    })
+    .authorization((allow) => [
+      allow.owner(),
+      allow.group(adminGroup),
+    ]),
+
+  UserRoleAssignment: a
+    .model({
+      id: a.id().required(),
+      userSub: a.string().required(),
+      email: a.email(),
+      role: a.string().required(),
+      status: a.string().required(),
+      grantedBy: a.string().required(),
+      grantedAt: a.datetime().required(),
+      revokedAt: a.datetime(),
+      notes: a.string(),
+    })
+    .secondaryIndexes((index) => [
+      index("userSub").sortKeys(["role"]).queryField("listUserRoleAssignmentsByUserAndRole"),
+      index("role").sortKeys(["status"]).queryField("listUserRoleAssignmentsByRoleAndStatus"),
+    ])
+    .authorization((allow) => [
+      allow.group(adminGroup),
+    ]),
+
+  UserRoleMutationResult: a.customType({
+    ok: a.boolean().required(),
+    userSub: a.string().required(),
+    username: a.string().required(),
+    role: a.string().required(),
+    activeRoles: a.string().array().required(),
+  }),
+
+  grantUserRole: a
+    .mutation()
+    .arguments({
+      userSub: a.string().required(),
+      role: a.string().required(),
+    })
+    .returns(a.ref("UserRoleMutationResult"))
+    .authorization((allow) => [allow.group(adminGroup)])
+    .handler(a.handler.function(manageUserRole)),
+
+  revokeUserRole: a
+    .mutation()
+    .arguments({
+      userSub: a.string().required(),
+      role: a.string().required(),
+    })
+    .returns(a.ref("UserRoleMutationResult"))
+    .authorization((allow) => [allow.group(adminGroup)])
+    .handler(a.handler.function(manageUserRole)),
+
   Item: a
     .model({
       id: a.id().required(),
@@ -42,7 +108,7 @@ const schema = a.schema({
     ])
     .authorization((allow) => [
       allow.publicApiKey().to(["read"]),
-      allow.group("editor"),
+      allow.groups(contentWriteGroups),
       allow.custom().to(authoringOperations),
     ]),
 
@@ -61,7 +127,7 @@ const schema = a.schema({
     ])
     .authorization((allow) => [
       allow.publicApiKey().to(["read"]),
-      allow.group("editor"),
+      allow.groups(contentWriteGroups),
       allow.custom().to(authoringOperations),
     ]),
 
@@ -83,7 +149,7 @@ const schema = a.schema({
     ])
     .authorization((allow) => [
       allow.publicApiKey().to(["read"]),
-      allow.group("editor"),
+      allow.groups(contentWriteGroups),
       allow.custom().to(authoringOperations),
     ]),
 
@@ -118,7 +184,7 @@ const schema = a.schema({
     ])
     .authorization((allow) => [
       allow.publicApiKey().to(["read"]),
-      allow.group("editor"),
+      allow.groups(contentWriteGroups),
       allow.custom().to(authoringOperations),
     ]),
 
@@ -142,7 +208,7 @@ const schema = a.schema({
     ])
     .authorization((allow) => [
       allow.publicApiKey().to(["read"]),
-      allow.group("editor"),
+      allow.groups(contentWriteGroups),
       allow.custom().to(authoringOperations),
     ]),
 
@@ -165,7 +231,7 @@ const schema = a.schema({
     ])
     .authorization((allow) => [
       allow.publicApiKey().to(["read"]),
-      allow.group("editor"),
+      allow.groups(contentWriteGroups),
       allow.custom().to(authoringOperations),
     ]),
 });
