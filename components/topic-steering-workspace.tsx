@@ -5,7 +5,9 @@ import { generateClient } from "aws-amplify/data";
 import type { Schema } from "../amplify/data/resource";
 import type {
   TopicSteeringArtifact,
+  TopicSteeringCorpus,
   TopicSteeringDashboard,
+  TopicSteeringImportRun,
   TopicSteeringProjection,
   TopicSteeringProposal,
   TopicSteeringTopic,
@@ -27,8 +29,24 @@ export function TopicSteeringWorkspace({ dashboard }: { dashboard: TopicSteering
 
   const topicProposals = proposals.filter((proposal) => proposal.steeringDomain === "topic");
   const graphProposals = proposals.filter((proposal) => proposal.steeringDomain === "graph");
-  const activeTopicSet = dashboard.topicSets[0] ?? null;
-  const latestImport = dashboard.importRuns[0] ?? null;
+  const activeTopicSet = useMemo(() => (
+    dashboard.topicSets.find((topicSet) => topicSet.id === dashboard.canonicalTopicSetId)
+    ?? dashboard.topicSets[0]
+    ?? null
+  ), [dashboard.canonicalTopicSetId, dashboard.topicSets]);
+  const canonicalCorpus = useMemo(() => (
+    dashboard.corpora.find((corpus) => corpus.id === dashboard.canonicalCorpusId)
+    ?? (activeTopicSet ? dashboard.corpora.find((corpus) => corpus.id === activeTopicSet.corpusId) : undefined)
+    ?? null
+  ), [activeTopicSet, dashboard.canonicalCorpusId, dashboard.corpora]);
+  const canonicalTopics = useMemo(() => (
+    activeTopicSet ? topics.filter((topic) => topic.topicSetId === activeTopicSet.id && topic.status !== "deprecated") : []
+  ), [activeTopicSet, topics]);
+  const latestImport = useMemo(() => (
+    activeTopicSet
+      ? dashboard.importRuns.find((importRun) => importRun.corpusId === activeTopicSet.corpusId) ?? dashboard.importRuns[0] ?? null
+      : dashboard.importRuns[0] ?? null
+  ), [activeTopicSet, dashboard.importRuns]);
 
   const topicByUid = useMemo(() => {
     const map = new Map<string, TopicSteeringTopic>();
@@ -134,14 +152,15 @@ export function TopicSteeringWorkspace({ dashboard }: { dashboard: TopicSteering
           <h1>Topic Steering</h1>
         </div>
         <div className="topic-steering-header__meta" aria-label="Steering corpus scope">
-          <span>AI-ML-research</span>
-          <span>AI-ML-history</span>
+          {dashboard.corpora.length ? dashboard.corpora.map((corpus) => (
+            <span key={corpus.id}>{corpus.name}</span>
+          )) : <span>No configured corpora</span>}
         </div>
       </header>
 
       <section className="topic-steering-status-grid" aria-label="Import and projection status">
         <StatusMetric label="Corpora" value={String(dashboard.corpora.length)} detail={dashboard.corpora.map((corpus) => corpus.name).join(" / ")} />
-        <StatusMetric label="Canonical Topics" value={String(topics.filter((topic) => topic.status !== "deprecated").length)} detail={activeTopicSet?.displayName ?? "No accepted topic set"} />
+        <StatusMetric label="Canonical Topics" value={String(canonicalTopics.length)} detail={activeTopicSet ? `${activeTopicSet.displayName}${canonicalCorpus ? ` / ${canonicalCorpus.name}` : ""}` : "No accepted topic set"} />
         <StatusMetric label="Steering Proposals" value={String(proposals.filter((proposal) => proposal.status === "proposed").length)} detail={`${topicProposals.length} topic / ${graphProposals.length} graph`} />
         <StatusMetric label="Projection Rows" value={String(dashboard.projections.length)} detail={latestImport ? `${latestImport.importKind} ${latestImport.status}` : "No projection import"} />
       </section>
@@ -202,17 +221,24 @@ export function TopicSteeringWorkspace({ dashboard }: { dashboard: TopicSteering
         </div>
       </section>
 
+      <CorpusTopicSetSummary
+        corpora={dashboard.corpora}
+        topicSets={dashboard.topicSets}
+        importRuns={dashboard.importRuns}
+        canonicalTopicSetId={activeTopicSet?.id ?? null}
+      />
+
       <section className="topic-steering-section" aria-labelledby="canonical-topic-catalog-title">
-        <SectionHeader title="Canonical Topic Catalog" detail={activeTopicSet ? activeTopicSet.classifierId : "No classifier imported"} />
+        <SectionHeader title="Canonical Topic Catalog" detail={activeTopicSet ? `${activeTopicSet.classifierId}${canonicalCorpus ? ` / ${canonicalCorpus.name}` : ""}` : "No classifier imported"} />
         <div className="topic-steering-topic-grid">
-          {topics.length ? topics.map((topic) => (
+          {canonicalTopics.length ? canonicalTopics.map((topic) => (
             <TopicEditor key={topic.id} topic={topic} disabled={isPending} onSave={saveTopic} />
           )) : <EmptyRow label="No canonical topics imported" />}
         </div>
       </section>
 
       <section className="topic-steering-lower-grid">
-        <EvidenceReferenceBrowser topics={topics} proposals={proposals} projections={dashboard.projections} />
+        <EvidenceReferenceBrowser topics={canonicalTopics} proposals={proposals} projections={dashboard.projections} />
         <RevisionPanel
           topicSet={activeTopicSet}
           artifacts={dashboard.artifacts}
@@ -243,6 +269,69 @@ function SectionHeader({ title, detail }: { title: string; detail: string }) {
       <span>{detail}</span>
     </header>
   );
+}
+
+function CorpusTopicSetSummary({
+  corpora,
+  topicSets,
+  importRuns,
+  canonicalTopicSetId,
+}: {
+  corpora: TopicSteeringCorpus[];
+  topicSets: TopicSteeringTopicSet[];
+  importRuns: TopicSteeringImportRun[];
+  canonicalTopicSetId: string | null;
+}) {
+  return (
+    <section className="topic-steering-section" aria-labelledby="corpus-topic-sets-title">
+      <SectionHeader title="Corpus Topic Sets" detail={`${topicSets.length} configured topic sets`} />
+      <div className="topic-steering-table-wrap">
+        <table className="topic-steering-table">
+          <thead>
+            <tr>
+              <th>Corpus</th>
+              <th>Role</th>
+              <th>Topic Sets</th>
+              <th>Classifiers</th>
+              <th>Topics</th>
+              <th>Latest Import</th>
+            </tr>
+          </thead>
+          <tbody>
+            {corpora.length ? corpora.map((corpus) => {
+              const corpusTopicSets = topicSets.filter((topicSet) => topicSet.corpusId === corpus.id);
+              const latestImport = importRuns.find((importRun) => importRun.corpusId === corpus.id);
+              return (
+                <tr key={corpus.id}>
+                  <td>{corpus.name}</td>
+                  <td>{corpus.role}</td>
+                  <td>{formatTopicSetNames(corpusTopicSets, canonicalTopicSetId)}</td>
+                  <td>{corpusTopicSets.map((topicSet) => topicSet.classifierId).join(" / ") || "none"}</td>
+                  <td>{String(corpusTopicSets.reduce((count, topicSet) => count + (topicSet.topicCount ?? 0), 0))}</td>
+                  <td>{latestImport ? formatDateTime(latestImport.importedAt) : "none"}</td>
+                </tr>
+              );
+            }) : (
+              <tr><td colSpan={6}>No steering corpora imported</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function formatTopicSetNames(topicSets: TopicSteeringTopicSet[], canonicalTopicSetId: string | null): string {
+  if (!topicSets.length) return "No topic sets";
+  return topicSets
+    .map((topicSet) => `${topicSet.displayName}${topicSet.id === canonicalTopicSetId ? " (canonical)" : ""}`)
+    .join(" / ");
+}
+
+function formatDateTime(value: string): string {
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) return value;
+  return new Date(timestamp).toISOString().slice(0, 16).replace("T", " ");
 }
 
 function TopicProposalRow({

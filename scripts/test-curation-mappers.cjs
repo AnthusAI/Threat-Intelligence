@@ -1,22 +1,31 @@
 #!/usr/bin/env node
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const {
   buildAcceptedTopicSetPayload,
   buildProjectionImportRecords,
+  buildSteeringConfigRecords,
   buildSteeringImportRecords,
 } = require("./lib/papyrus-curation.cjs");
+const {
+  loadSteeringConfig,
+  requireCorpusConfig,
+  resolveClassifierForCorpus,
+} = require("./lib/papyrus-steering-config.cjs");
 
 const steeringBundle = {
   generated_at: "2026-05-16T12:00:00.000Z",
   corpus: {
-    name: "AI-ML-research",
+    name: "Knowledge Base Canonical",
     item_count: 2,
     generated_at: "2026-05-16T11:59:00.000Z",
   },
   topic_set: {
-    classifier_id: "ai-ml-topic-classifier",
-    display_name: "AI/ML Topic Set",
+    classifier_id: "canonical-classifier",
+    display_name: "Canonical Topic Set",
     description: "Accepted topics",
     topics: [
       {
@@ -79,10 +88,51 @@ const steeringBundle = {
   warnings: [],
 };
 
+const configPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "papyrus-steering-")), "steering.yml");
+fs.writeFileSync(configPath, `schemaVersion: 1
+publication:
+  name: "Mapper Test Publication"
+canonicalTopicSet:
+  corpusKey: "canonical-corpus"
+  classifierId: "canonical-classifier"
+corpora:
+  - key: "canonical-corpus"
+    name: "Canonical Corpus"
+    path: "corpora/canonical-corpus"
+    s3Prefix: "s3://example/corpora/canonical-corpus/"
+    role: "canonical"
+    localClassifiers:
+      - classifierId: "canonical-classifier"
+        label: "Canonical Topics"
+  - key: "source-corpus"
+    name: "Source Corpus"
+    path: "corpora/source-corpus"
+    s3Prefix: "s3://example/corpora/source-corpus/"
+    role: "source"
+    canonicalProjection:
+      authorityCorpusKey: "canonical-corpus"
+      classifierId: "canonical-classifier"
+    localClassifiers:
+      - classifierId: "source-classifier"
+        label: "Source Topics"
+`, "utf8");
+const steeringConfig = loadSteeringConfig({ configPath });
+const canonicalCorpusConfig = requireCorpusConfig(steeringConfig, "canonical-corpus");
+const sourceCorpusConfig = requireCorpusConfig(steeringConfig, "source-corpus");
+assert.equal(resolveClassifierForCorpus(steeringConfig, canonicalCorpusConfig), "canonical-classifier");
+assert.equal(resolveClassifierForCorpus(steeringConfig, sourceCorpusConfig), "source-classifier");
+const configRecords = buildSteeringConfigRecords(steeringConfig, { importedAt: "2026-05-16T12:15:00.000Z" });
+assert.equal(findRecord(configRecords, "CurationCorpus", (record) => record.id === "curation-corpus-canonical-corpus").role, "canonical");
+assert.equal(findRecord(configRecords, "CurationCorpus", (record) => record.id === "curation-corpus-source-corpus").name, "Source Corpus");
+
 const steeringPlan = buildSteeringImportRecords(steeringBundle, {
-  classifierId: "ai-ml-topic-classifier",
+  classifierId: "canonical-classifier",
+  corpusConfig: canonicalCorpusConfig,
   importedAt: "2026-05-16T12:30:00.000Z",
 });
+const configuredCorpus = findRecord(steeringPlan.records, "CurationCorpus", (record) => record.id === "curation-corpus-canonical-corpus");
+assert.equal(configuredCorpus.name, "Canonical Corpus");
+assert.equal(configuredCorpus.role, "canonical");
 
 const topic = findRecord(steeringPlan.records, "CurationTopic", (record) => record.topicUid === "topic.scaling");
 assert.equal(topic.subtitle, "Compute, data, and capability curves");
@@ -115,8 +165,8 @@ assert.ok(JSON.parse(rawProposal.payload).source_notes);
 
 const acceptedExport = buildAcceptedTopicSetPayload(
   {
-    classifierId: "ai-ml-topic-classifier",
-    displayName: "AI/ML Topic Set",
+    classifierId: "canonical-classifier",
+    displayName: "Canonical Topic Set",
     description: "Accepted topics",
   },
   [
@@ -138,13 +188,13 @@ assert.equal(acceptedExport.topics[0].topic_uid, "topic.scaling");
 assert.deepEqual(acceptedExport.topics[0].seed_item_ids, ["research-001"]);
 
 const projectionPlan = buildProjectionImportRecords({
-  classifier_id: "ai-ml-topic-classifier",
+  classifier_id: "canonical-classifier",
   summary: { source: "projection-test" },
   items: [
     {
-      item_id: "history-001",
-      target_corpus_uri: "s3://papyrus-corpora/AI-ML-history",
-      classifier_corpus_uri: "s3://papyrus-corpora/AI-ML-research",
+      item_id: "source-001",
+      target_corpus_uri: "s3://example/corpora/source-corpus",
+      classifier_corpus_uri: "s3://example/corpora/canonical-corpus",
       topic_uid: "topic.scaling",
       display_name: "Foundation Model Scaling",
       score: 0.82,
@@ -152,12 +202,20 @@ const projectionPlan = buildProjectionImportRecords({
       model_version: "classifier-v1",
     },
   ],
+}, {
+  authorityCorpusConfig: canonicalCorpusConfig,
+  targetCorpusConfig: sourceCorpusConfig,
 });
-const projection = findRecord(projectionPlan.records, "CurationProjection", (record) => record.externalItemId === "history-001");
+const projection = findRecord(projectionPlan.records, "CurationProjection", (record) => record.externalItemId === "source-001");
 assert.equal(projection.topicUid, "topic.scaling");
 assert.equal(projection.reviewRecommended, true);
-const projectionCorpus = findRecord(projectionPlan.records, "CurationCorpus", (record) => record.id === "curation-corpus-ai-ml-history");
-assert.equal(projectionCorpus.role, "projection");
+const projectionCorpus = findRecord(projectionPlan.records, "CurationCorpus", (record) => record.id === "curation-corpus-source-corpus");
+assert.equal(projectionCorpus.role, "source");
+assert.equal(
+  projectionPlan.records.some((record) => JSON.stringify(record.expected).includes("AI-ML-research") || JSON.stringify(record.expected).includes("AI-ML-history")),
+  false,
+  "projection imports should use configured corpus ids without AI/ML name fallbacks",
+);
 
 console.log("curation mapper tests passed");
 

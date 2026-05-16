@@ -45,6 +45,7 @@ export type TopicSteeringTopicSet = {
   latestDraftRevisionId?: string | null;
   generatedAt?: string | null;
   topicCount?: number | null;
+  importRunId?: string | null;
 };
 
 export type TopicSteeringTopic = {
@@ -115,6 +116,8 @@ export type TopicSteeringProjection = {
 
 export type TopicSteeringDashboard = {
   isDemo?: boolean;
+  canonicalCorpusId?: string | null;
+  canonicalTopicSetId?: string | null;
   corpora: TopicSteeringCorpus[];
   importRuns: TopicSteeringImportRun[];
   topicSets: TopicSteeringTopicSet[];
@@ -155,10 +158,17 @@ export async function loadTopicSteeringDashboard(options?: { demo?: boolean }): 
       listModel<TopicSteeringProjection>("CurationProjection"),
     ]);
 
+    const sortedCorpora = corpora.sort((left, right) => left.name.localeCompare(right.name));
+    const sortedImportRuns = importRuns.sort((left, right) => right.importedAt.localeCompare(left.importedAt));
+    const sortedTopicSets = sortTopicSets(topicSets, sortedImportRuns);
+    const canonicalTopicSet = selectCanonicalTopicSet(sortedCorpora, sortedTopicSets);
+
     return {
-      corpora: corpora.sort((left, right) => left.name.localeCompare(right.name)),
-      importRuns: importRuns.sort((left, right) => right.importedAt.localeCompare(left.importedAt)),
-      topicSets: topicSets.sort((left, right) => left.displayName.localeCompare(right.displayName)),
+      canonicalCorpusId: canonicalTopicSet?.corpusId ?? selectCanonicalCorpus(sortedCorpora)?.id ?? null,
+      canonicalTopicSetId: canonicalTopicSet?.id ?? null,
+      corpora: sortedCorpora,
+      importRuns: sortedImportRuns,
+      topicSets: sortedTopicSets,
       topics: sortTopics(topics),
       proposals: sortProposals(proposals),
       artifacts: artifacts.sort((left, right) => (right.createdAt ?? "").localeCompare(left.createdAt ?? "")),
@@ -211,6 +221,43 @@ function assertNoGraphQLErrors(errors?: unknown[] | null) {
   throw new Error(details);
 }
 
+function sortTopicSets(topicSets: TopicSteeringTopicSet[], importRuns: TopicSteeringImportRun[]): TopicSteeringTopicSet[] {
+  const importRunById = new Map(importRuns.map((importRun) => [importRun.id, importRun]));
+  return [...topicSets].sort((left, right) => {
+    const statusDiff = topicSetStatusRank(left.status) - topicSetStatusRank(right.status);
+    if (statusDiff !== 0) return statusDiff;
+    const dateDiff = topicSetSortDate(right, importRunById).localeCompare(topicSetSortDate(left, importRunById));
+    if (dateDiff !== 0) return dateDiff;
+    return left.displayName.localeCompare(right.displayName);
+  });
+}
+
+function topicSetSortDate(topicSet: TopicSteeringTopicSet, importRunById: Map<string, TopicSteeringImportRun>): string {
+  return topicSet.generatedAt ?? (topicSet.importRunId ? importRunById.get(topicSet.importRunId)?.importedAt : null) ?? "";
+}
+
+function selectCanonicalTopicSet(corpora: TopicSteeringCorpus[], topicSets: TopicSteeringTopicSet[]): TopicSteeringTopicSet | null {
+  const canonicalCorpus = selectCanonicalCorpus(corpora);
+  const candidates = topicSets.filter((topicSet) => topicSet.status !== "deprecated");
+  const canonicalCandidates = canonicalCorpus ? candidates.filter((topicSet) => topicSet.corpusId === canonicalCorpus.id) : candidates;
+  return canonicalCandidates[0] ?? candidates[0] ?? null;
+}
+
+function selectCanonicalCorpus(corpora: TopicSteeringCorpus[]): TopicSteeringCorpus | null {
+  return corpora.find((corpus) => corpus.role === "canonical")
+    ?? corpora.find((corpus) => corpus.role === "authority")
+    ?? corpora[0]
+    ?? null;
+}
+
+function topicSetStatusRank(status: string): number {
+  if (status === "accepted") return 0;
+  if (status === "draft") return 1;
+  if (status === "proposed") return 2;
+  if (status === "deprecated") return 8;
+  return 5;
+}
+
 function sortTopics(topics: TopicSteeringTopic[]): TopicSteeringTopic[] {
   return [...topics].sort((left, right) => {
     const rankDiff = (left.rank ?? 999999) - (right.rank ?? 999999);
@@ -235,18 +282,9 @@ function sortProposals(proposals: TopicSteeringProposal[]): TopicSteeringProposa
 
 function createEmptyTopicSteeringDashboard(): TopicSteeringDashboard {
   return {
-    corpora: [
-      {
-        id: "curation-corpus-ai-ml-research",
-        name: "AI-ML-research",
-        role: "authority",
-      },
-      {
-        id: "curation-corpus-ai-ml-history",
-        name: "AI-ML-history",
-        role: "projection",
-      },
-    ],
+    canonicalCorpusId: null,
+    canonicalTopicSetId: null,
+    corpora: [],
     importRuns: [],
     topicSets: [],
     topics: [],
@@ -259,24 +297,27 @@ function createEmptyTopicSteeringDashboard(): TopicSteeringDashboard {
 
 function createDemoTopicSteeringDashboard(): TopicSteeringDashboard {
   const importedAt = "2026-05-16T12:00:00.000Z";
-  const corpusId = "curation-corpus-ai-ml-research";
-  const historyCorpusId = "curation-corpus-ai-ml-history";
-  const topicSetId = "curation-topic-set-ai-ml-research";
+  const corpusId = "curation-corpus-demo-canonical";
+  const sourceCorpusId = "curation-corpus-demo-source";
+  const topicSetId = "curation-topic-set-demo-canonical";
+  const sourceTopicSetId = "curation-topic-set-demo-source";
 
   return {
     isDemo: true,
+    canonicalCorpusId: corpusId,
+    canonicalTopicSetId: topicSetId,
     corpora: [
       {
         id: corpusId,
-        name: "AI-ML-research",
-        role: "authority",
+        name: "Canonical Demo Corpus",
+        role: "canonical",
         itemCount: 3,
         latestImportRunId: "curation-import-demo-steering",
       },
       {
-        id: historyCorpusId,
-        name: "AI-ML-history",
-        role: "projection",
+        id: sourceCorpusId,
+        name: "Source Demo Corpus",
+        role: "source",
         itemCount: 2,
         latestImportRunId: "curation-import-demo-projection",
       },
@@ -286,20 +327,20 @@ function createDemoTopicSteeringDashboard(): TopicSteeringDashboard {
         id: "curation-import-demo-steering",
         corpusId,
         importKind: "steering-export",
-        classifierId: "ai-ml-topic-classifier",
+        classifierId: "demo-canonical-classifier",
         status: "imported",
         importedAt,
         itemCount: 3,
-        topicCount: 2,
+        topicCount: 1,
         proposalCount: 3,
         projectionCount: 0,
         warningCount: 0,
       },
       {
         id: "curation-import-demo-projection",
-        corpusId: historyCorpusId,
+        corpusId: sourceCorpusId,
         importKind: "topic-projection",
-        classifierId: "ai-ml-topic-classifier",
+        classifierId: "demo-canonical-classifier",
         status: "imported",
         importedAt,
         itemCount: 2,
@@ -313,14 +354,28 @@ function createDemoTopicSteeringDashboard(): TopicSteeringDashboard {
       {
         id: topicSetId,
         corpusId,
-        classifierId: "ai-ml-topic-classifier",
-        displayName: "AI/ML Research Topics",
+        classifierId: "demo-canonical-classifier",
+        displayName: "Canonical Demo Topics",
         description: "Accepted topic set imported from Biblicus artifacts.",
         status: "accepted",
         acceptedRevisionId: "revision-demo-accepted",
         latestDraftRevisionId: "revision-demo-draft",
         generatedAt: importedAt,
-        topicCount: 2,
+        topicCount: 1,
+        importRunId: "curation-import-demo-steering",
+      },
+      {
+        id: sourceTopicSetId,
+        corpusId: sourceCorpusId,
+        classifierId: "demo-source-classifier",
+        displayName: "Source Demo Topics",
+        description: "Local topic set discovered inside the source corpus.",
+        status: "accepted",
+        acceptedRevisionId: "revision-demo-source-accepted",
+        latestDraftRevisionId: null,
+        generatedAt: importedAt,
+        topicCount: 1,
+        importRunId: "curation-import-demo-projection",
       },
     ],
     topics: [
@@ -342,8 +397,8 @@ function createDemoTopicSteeringDashboard(): TopicSteeringDashboard {
       },
       {
         id: "topic-symbolic-connectionist-history",
-        topicSetId,
-        corpusId,
+        topicSetId: sourceTopicSetId,
+        corpusId: sourceCorpusId,
         topicUid: "topic.symbolic-connectionist-history",
         displayName: "Symbolic And Connectionist History",
         subtitle: "Shifts between rule systems, neural nets, and hybrid AI programs",
@@ -418,9 +473,9 @@ function createDemoTopicSteeringDashboard(): TopicSteeringDashboard {
     projections: [
       {
         id: "projection-demo-history-001",
-        targetCorpusId: historyCorpusId,
+        targetCorpusId: sourceCorpusId,
         authorityCorpusId: corpusId,
-        classifierId: "ai-ml-topic-classifier",
+        classifierId: "demo-canonical-classifier",
         externalItemId: "history-001",
         topicUid: "topic.symbolic-connectionist-history",
         displayName: "Symbolic And Connectionist History",
@@ -430,9 +485,9 @@ function createDemoTopicSteeringDashboard(): TopicSteeringDashboard {
       },
       {
         id: "projection-demo-history-002",
-        targetCorpusId: historyCorpusId,
+        targetCorpusId: sourceCorpusId,
         authorityCorpusId: corpusId,
-        classifierId: "ai-ml-topic-classifier",
+        classifierId: "demo-canonical-classifier",
         externalItemId: "history-002",
         topicUid: "topic.foundation-model-scaling",
         displayName: "Foundation Model Scaling",

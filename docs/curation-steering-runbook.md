@@ -8,8 +8,10 @@ Papyrus deliberately turns some information into its own publication content.
 
 ## Durable Corpus Storage
 
-The two steering corpora live durably in the production Amplify Storage bucket
-under a private `corpora/` prefix. Local folders are working copies only.
+Publication corpora live durably in the production Amplify Storage bucket under
+a private `corpora/` prefix. Local folders are working copies only. The current
+AI/ML corpora are the pilot data set; future publications can configure one,
+two, or many differently named corpora.
 
 ```bash
 export AWS_PROFILE=Ryan
@@ -21,6 +23,7 @@ Current prefixes:
 
 - `s3://$PAPYRUS_CORPORA_BUCKET/corpora/AI-ML-research/`
 - `s3://$PAPYRUS_CORPORA_BUCKET/corpora/AI-ML-history/`
+- `s3://$PAPYRUS_CORPORA_BUCKET/corpora/papyrus-steering.yml`
 
 The bucket is managed by Amplify as `papyrusMedia`. The `media/*` prefix is for
 reader media. The `corpora/*` prefix is private and is not raw-public; browser
@@ -84,6 +87,36 @@ aws s3 sync \
 
 Only one writer should update a corpus prefix at a time until there is a
 Biblicus-owned full-corpus locking or sync command.
+
+## Steering Config
+
+`corpora/papyrus-steering.yml` is the v1 Papyrus steering config contract. It is
+committed in the Papyrus repo and mirrored to S3 beside the corpus data. The
+config names the publication, identifies the canonical topic-set authority, and
+assigns each corpus a stable key, display name, local path, S3 prefix, role, and
+classifier ids.
+
+Config resolution for the content CLI is:
+
+1. `--config <path>`;
+2. `PAPYRUS_STEERING_CONFIG`;
+3. `corpora/papyrus-steering.yml`.
+
+After changing the config, upload it to S3 and materialize the configured
+`CurationCorpus` records into GraphQL:
+
+```bash
+aws s3 cp \
+  corpora/papyrus-steering.yml \
+  s3://$PAPYRUS_CORPORA_BUCKET/corpora/papyrus-steering.yml
+
+npm run content -- curation import-config \
+  --config corpora/papyrus-steering.yml
+```
+
+Use corpus keys from the config for steering imports and projection imports.
+Avoid display-name fallbacks; display names are editable copy, not stable
+identity.
 
 ## Production Authoring JWT
 
@@ -170,8 +203,8 @@ checkout:
 export BIBLICUS_WORKDIR="/Users/ryan/Projects/Biblicus"
 
 npm run content -- curation import-steering \
-  --corpus corpora/AI-ML-research \
-  --classifier ai-ml-research
+  --config corpora/papyrus-steering.yml \
+  --corpus-key AI-ML-research
 ```
 
 The import is idempotent and intentionally lean. It imports:
@@ -231,6 +264,9 @@ Import projection rows back into Papyrus:
 cd /Users/ryan/Projects/Papyrus
 
 npm run content -- curation import-projection \
+  --config corpora/papyrus-steering.yml \
+  --target-corpus-key AI-ML-history \
+  --authority-corpus-key AI-ML-research \
   --bundle /tmp/ai-ml-history-projection.json \
   --classifier ai-ml-research
 ```
@@ -275,14 +311,15 @@ Re-import steering so `/topics` shows the graph proposal rows:
 cd /Users/ryan/Projects/Papyrus
 
 npm run content -- curation import-steering \
-  --corpus corpora/AI-ML-research \
-  --classifier ai-ml-research
+  --config corpora/papyrus-steering.yml \
+  --corpus-key AI-ML-research
 ```
 
-## Local Corpus Symlinks
+## Local Corpus Working Copies
 
-The `corpora/` folder in Papyrus is local-only and ignored by git. It can point
-at the two Biblicus corpora during the pilot, but the S3 `corpora/` prefixes are
-the durable source of truth. Papyrus code must not edit sidecars, catalog files,
-or extracted artifacts directly. Use Biblicus CLI commands for corpus work, then
-sync the resulting working copy to S3.
+The corpus data under `corpora/*` in Papyrus is local-only and ignored by git.
+Only `corpora/papyrus-steering.yml` is tracked. Local corpus folders can be
+symlinks to Biblicus corpora during the pilot, but the S3 `corpora/` prefixes
+are the durable source of truth. Papyrus code must not edit sidecars, catalog
+files, or extracted artifacts directly. Use Biblicus CLI commands for corpus
+work, then sync the resulting working copy to S3.

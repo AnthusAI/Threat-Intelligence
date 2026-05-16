@@ -7,7 +7,8 @@ node_modules/
 out/
 dist/
 coverage/
-corpora/
+corpora/*
+!corpora/papyrus-steering.yml
 AGENTS.local.md
 .amplify/
 amplify_outputs.json

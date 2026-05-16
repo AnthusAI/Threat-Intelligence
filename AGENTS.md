@@ -52,6 +52,10 @@ rendering contracts.
 - The production Amplify Storage bucket also owns private `corpora/*` prefixes
   for Biblicus corpus working data. Treat S3 as the durable corpus source of
   truth, and local `corpora/` symlinks as working copies only.
+- `corpora/papyrus-steering.yml` is the tracked steering config contract. It
+  defines publication corpus keys, roles, classifier ids, local paths, and S3
+  prefixes. Do not hard-code the AI/ML pilot corpus names in Papyrus logic.
+  Materialize config changes with `npm run content -- curation import-config`.
 - Use an AWS profile for local Amplify/AWS access.
 - `.env` is for Papyrus runtime settings and the seed editor credentials used by
   `npm run seed:amplify`. `.env*` must stay ignored, and `.env.example` is the
@@ -210,8 +214,10 @@ GraphQL (or `?scenario=<id>` fixture overrides for tests/debug only).
   not add half-working direct S3 uploads without also introducing an
   authenticated Storage strategy that matches the chosen credentials model.
 - The CLI should expose `inspect`, `list`, `diff`, `sync`, and explicit
-  `content delete all --yes`; do not add `content login` or `content logout`
-  unless the auth model changes again.
+  `content delete all --yes`; it also owns `curation import-config`,
+  `curation import-steering`, `curation export-topic-set`, and
+  `curation import-projection` for topic and graph steering. Do not add
+  `content login` or `content logout` unless the auth model changes again.
 
 `lib/layout-plan.ts` owns the edition layout-plan contract:
 

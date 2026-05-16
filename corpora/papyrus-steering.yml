@@ -1,0 +1,26 @@
+schemaVersion: 1
+publication:
+  name: "Papyrus AI/ML Newsroom"
+canonicalTopicSet:
+  corpusKey: "AI-ML-research"
+  classifierId: "ai-ml-research"
+corpora:
+  - key: "AI-ML-research"
+    name: "AI-ML-research"
+    path: "corpora/AI-ML-research"
+    s3Prefix: "s3://amplify-dbsyytcm9drqa-mai-papyrusmediabucket0dab24-4hstaautjdqo/corpora/AI-ML-research/"
+    role: "canonical"
+    localClassifiers:
+      - classifierId: "ai-ml-research"
+        label: "AI/ML Research Topics"
+  - key: "AI-ML-history"
+    name: "AI-ML-history"
+    path: "corpora/AI-ML-history"
+    s3Prefix: "s3://amplify-dbsyytcm9drqa-mai-papyrusmediabucket0dab24-4hstaautjdqo/corpora/AI-ML-history/"
+    role: "source"
+    canonicalProjection:
+      authorityCorpusKey: "AI-ML-research"
+      classifierId: "ai-ml-research"
+    localClassifiers:
+      - classifierId: "ai-ml-history"
+        label: "AI/ML History Topics"

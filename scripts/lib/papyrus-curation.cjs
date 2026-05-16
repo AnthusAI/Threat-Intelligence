@@ -44,7 +44,8 @@ function loadSteeringBundleFromBiblicus({ corpus, classifier, topicGovernanceSna
 function buildSteeringImportRecords(bundle, options = {}) {
   const now = options.importedAt ?? new Date().toISOString();
   const corpus = bundle.corpus ?? {};
-  const corpusId = curationCorpusId(corpus);
+  const corpusContext = normalizeCorpusContext(corpus, options.corpusConfig ?? options.corpus);
+  const corpusId = options.corpusId ?? curationCorpusId(corpusContext);
   const classifierId = bundle.topic_set?.classifier_id ?? options.classifierId ?? "unknown-classifier";
   const importRunId = `curation-import-${safeId(corpusId)}-${safeId(classifierId)}-${hashShort([
     bundle.generated_at,
@@ -56,8 +57,8 @@ function buildSteeringImportRecords(bundle, options = {}) {
 
   records.push(record("CurationCorpus", {
     id: corpusId,
-    name: corpus.name ?? "Unknown corpus",
-    role: inferCorpusRole(corpus.name),
+    name: corpusContext.name,
+    role: corpusContext.role,
     itemCount: numberOrNull(corpus.item_count),
     generatedAt: dateOrNull(corpus.generated_at ?? bundle.generated_at),
     latestImportRunId: importRunId,
@@ -108,19 +109,23 @@ function buildProjectionImportRecords(payload, options = {}) {
   const now = options.importedAt ?? new Date().toISOString();
   const items = payload.items ?? payload.predictions ?? [];
   const firstItem = items[0] ?? {};
-  const targetCorpusId = options.targetCorpusId ?? curationCorpusId({
-    name: corpusNameFromUri(firstItem.target_corpus_uri) ?? "AI-ML-history",
-  });
-  const authorityCorpusId = options.authorityCorpusId ?? curationCorpusId({
-    name: corpusNameFromUri(firstItem.classifier_corpus_uri) ?? "AI-ML-research",
-  });
+  const targetCorpus = normalizeCorpusContext({
+    name: corpusNameFromUri(firstItem.target_corpus_uri),
+    corpus_uri: firstItem.target_corpus_uri,
+  }, options.targetCorpusConfig ?? options.targetCorpus);
+  const authorityCorpus = normalizeCorpusContext({
+    name: corpusNameFromUri(firstItem.classifier_corpus_uri),
+    corpus_uri: firstItem.classifier_corpus_uri,
+  }, options.authorityCorpusConfig ?? options.authorityCorpus, { role: "canonical" });
+  const targetCorpusId = options.targetCorpusId ?? curationCorpusId(targetCorpus);
+  const authorityCorpusId = options.authorityCorpusId ?? curationCorpusId(authorityCorpus);
   const classifierId = payload.classifier_id ?? firstItem.classifier_id ?? options.classifierId ?? "unknown-classifier";
   const importRunId = `curation-import-${safeId(targetCorpusId)}-${safeId(classifierId)}-projection-${hashShort(payload.summary ?? items)}`;
   const records = [
     record("CurationCorpus", {
       id: targetCorpusId,
-      name: corpusNameFromUri(firstItem.target_corpus_uri) ?? "AI-ML-history",
-      role: "projection",
+      name: targetCorpus.name,
+      role: targetCorpus.role,
       itemCount: null,
       generatedAt: null,
       latestImportRunId: importRunId,
@@ -167,6 +172,17 @@ function buildProjectionImportRecords(payload, options = {}) {
   }
 
   return { importRunId, records };
+}
+
+function buildSteeringConfigRecords(config, options = {}) {
+  const now = options.importedAt ?? new Date().toISOString();
+  return (config.corpora ?? []).map((corpus) => record("CurationCorpus", {
+    id: curationCorpusId(corpus),
+    name: corpus.name,
+    role: corpus.role,
+    createdAt: now,
+    updatedAt: now,
+  }));
 }
 
 function buildAcceptedTopicSetPayload(topicSet, topics) {
@@ -335,7 +351,7 @@ function record(modelName, expected) {
 }
 
 function curationCorpusId(corpus) {
-  return `curation-corpus-${safeId(corpus.name ?? corpus.corpus_uri ?? "unknown")}`;
+  return `curation-corpus-${safeId(corpus.key ?? corpus.name ?? corpus.corpus_uri ?? "unknown")}`;
 }
 
 function curationTopicSetId(classifierId, corpusId) {
@@ -344,13 +360,6 @@ function curationTopicSetId(classifierId, corpusId) {
 
 function curationTopicId(topicSetId, topicUid) {
   return `topic-${safeId(topicSetId)}-${safeId(topicUid)}`;
-}
-
-function inferCorpusRole(name) {
-  const normalized = String(name ?? "").toLowerCase();
-  if (normalized.includes("history")) return "projection";
-  if (normalized.includes("research")) return "authority";
-  return "supporting";
 }
 
 function inferSteeringDomain(kind) {
@@ -372,6 +381,17 @@ function corpusNameFromUri(uri) {
   } catch {
     return null;
   }
+}
+
+function normalizeCorpusContext(corpus, configuredCorpus, defaults = {}) {
+  const key = configuredCorpus?.key ?? null;
+  const name = configuredCorpus?.name ?? corpus.name ?? key ?? corpusNameFromUri(corpus.corpus_uri) ?? "Unknown corpus";
+  return {
+    key,
+    name,
+    corpus_uri: corpus.corpus_uri ?? configuredCorpus?.s3Prefix ?? configuredCorpus?.path ?? null,
+    role: configuredCorpus?.role ?? corpus.role ?? defaults.role ?? "source",
+  };
 }
 
 function requiredString(value, fieldName) {
@@ -412,8 +432,10 @@ function hashStable(value) {
 
 module.exports = {
   buildAcceptedTopicSetPayload,
+  buildSteeringConfigRecords,
   buildProjectionImportRecords,
   buildSteeringImportRecords,
+  curationCorpusId,
   loadJsonFile,
   loadSteeringBundleFromBiblicus,
   writeJsonFile,

@@ -9,12 +9,21 @@ const {
 } = require("./lib/papyrus-env.cjs");
 const {
   buildAcceptedTopicSetPayload,
+  buildSteeringConfigRecords,
   buildProjectionImportRecords,
   buildSteeringImportRecords,
+  curationCorpusId,
   loadJsonFile,
   loadSteeringBundleFromBiblicus,
   writeJsonFile,
 } = require("./lib/papyrus-curation.cjs");
+const {
+  findCorpusConfigByPath,
+  loadSteeringConfig,
+  requireCorpusConfig,
+  requireSteeringConfig,
+  resolveClassifierForCorpus,
+} = require("./lib/papyrus-steering-config.cjs");
 const { PapyrusGraphQLAuthoringClient } = require("./lib/papyrus-graphql-authoring.cjs");
 const { getArticleImageAssets, getMarkdownArticle, loadEditionConfig, loadMarkdownArticles } = require("./lib/papyrus-markdown.cjs");
 
@@ -52,6 +61,9 @@ async function main() {
       return;
     case "curation:import-steering":
       await importSteering(args.slice(2));
+      return;
+    case "curation:import-config":
+      await importSteeringConfig(args.slice(2));
       return;
     case "curation:export-topic-set":
       await exportTopicSet(args.slice(2));
@@ -151,29 +163,48 @@ async function handleDelete(subject, flags) {
 
 async function importSteering(flags) {
   const options = parseOptions(flags);
+  const steeringConfig = loadSteeringConfig({ configPath: options.config });
+  const resolvedCorpus = resolveSteeringImportCorpus(steeringConfig, options);
   const bundle = options.bundle
     ? loadJsonFile(options.bundle)
     : loadSteeringBundleFromBiblicus({
-        corpus: options.corpus,
-        classifier: options.classifier,
+        corpus: resolvedCorpus.corpusPath,
+        classifier: resolvedCorpus.classifierId,
         topicGovernanceSnapshot: options["topic-governance-snapshot"],
       });
   const { client } = createAuthoringClient();
-  const plan = buildSteeringImportRecords(bundle, { classifierId: options.classifier });
+  const plan = buildSteeringImportRecords(bundle, {
+    classifierId: resolvedCorpus.classifierId,
+    corpusConfig: resolvedCorpus.corpusConfig,
+  });
   const changes = await buildRecordChanges(client, plan.records);
   await applyRecordChanges(client, changes);
   printCurationImportSummary("steering", plan.importRunId, changes);
+}
+
+async function importSteeringConfig(flags) {
+  const options = parseOptions(flags);
+  const steeringConfig = requireSteeringConfig({ configPath: options.config });
+  const { client } = createAuthoringClient();
+  const records = buildSteeringConfigRecords(steeringConfig);
+  const changes = await buildSteeringConfigRecordChanges(client, records);
+  await applyRecordChanges(client, changes);
+  printCurationImportSummary("config", "steering-config", changes);
 }
 
 async function importProjection(flags) {
   const options = parseOptions(flags);
   if (!options.bundle) throw new Error("curation import-projection requires --bundle.");
   const payload = loadJsonFile(options.bundle);
+  const steeringConfig = loadSteeringConfig({ configPath: options.config });
+  const resolvedProjection = resolveProjectionImportCorpora(steeringConfig, options);
   const { client } = createAuthoringClient();
   const plan = buildProjectionImportRecords(payload, {
-    authorityCorpusId: options["authority-corpus-id"],
-    targetCorpusId: options["target-corpus-id"],
-    classifierId: options.classifier,
+    authorityCorpusConfig: resolvedProjection.authorityCorpus,
+    authorityCorpusId: resolvedProjection.authorityCorpusId,
+    targetCorpusConfig: resolvedProjection.targetCorpus,
+    targetCorpusId: resolvedProjection.targetCorpusId,
+    classifierId: resolvedProjection.classifierId,
   });
   const changes = await buildRecordChanges(client, plan.records);
   await applyRecordChanges(client, changes);
@@ -213,6 +244,32 @@ async function buildRecordChanges(client, records) {
   const changes = [];
   for (const record of records) {
     changes.push(await buildRecordChange(client, record.modelName, record.expected));
+  }
+  return changes;
+}
+
+async function buildSteeringConfigRecordChanges(client, records) {
+  const changes = [];
+  for (const record of records) {
+    const current = await client.getRecord(record.modelName, record.expected.id);
+    if (!current) {
+      changes.push({ ...record, current, action: "create" });
+      continue;
+    }
+    const action = current.name === record.expected.name && current.role === record.expected.role ? "noop" : "update";
+    changes.push({
+      modelName: record.modelName,
+      expected: action === "update"
+        ? {
+            id: record.expected.id,
+            name: record.expected.name,
+            role: record.expected.role,
+            updatedAt: record.expected.updatedAt,
+          }
+        : record.expected,
+      current,
+      action,
+    });
   }
   return changes;
 }
@@ -459,8 +516,60 @@ function printUsage() {
   console.log("  npm run content -- content delete all --yes");
   console.log("  npm run content -- curation import-steering --bundle <steering-export.json>");
   console.log("  npm run content -- curation import-steering --corpus <path> --classifier <classifier-id>");
+  console.log("  npm run content -- curation import-steering --config <steering.yml> --corpus-key <key>");
+  console.log("  npm run content -- curation import-config --config <steering.yml>");
   console.log("  npm run content -- curation export-topic-set --topic-set <id> --output <accepted-topic-set.json>");
   console.log("  npm run content -- curation import-projection --bundle <projection.json>");
+  console.log("  npm run content -- curation import-projection --config <steering.yml> --target-corpus-key <key> --authority-corpus-key <key> --bundle <projection.json>");
+}
+
+function resolveSteeringImportCorpus(config, options) {
+  if (options["corpus-key"]) {
+    const requiredConfig = config ?? requireSteeringConfig({ configPath: options.config });
+    const corpusConfig = requireCorpusConfig(requiredConfig, options["corpus-key"], "--corpus-key");
+    return {
+      corpusConfig,
+      corpusPath: options.corpus ?? corpusConfig.path,
+      classifierId: resolveClassifierForCorpus(requiredConfig, corpusConfig, options.classifier),
+    };
+  }
+
+  const corpusConfig = findCorpusConfigByPath(config, options.corpus);
+  return {
+    corpusConfig,
+    corpusPath: options.corpus,
+    classifierId: options.classifier ?? (corpusConfig && config ? resolveClassifierForCorpus(config, corpusConfig, undefined) : undefined),
+  };
+}
+
+function resolveProjectionImportCorpora(config, options) {
+  let targetCorpus = null;
+  let authorityCorpus = null;
+  if (options["target-corpus-key"]) {
+    const requiredConfig = config ?? requireSteeringConfig({ configPath: options.config });
+    targetCorpus = requireCorpusConfig(requiredConfig, options["target-corpus-key"], "--target-corpus-key");
+    const authorityKey = options["authority-corpus-key"] ?? targetCorpus.canonicalProjection?.authorityCorpusKey;
+    if (authorityKey) authorityCorpus = requireCorpusConfig(requiredConfig, authorityKey, "--authority-corpus-key");
+    const classifierId = options.classifier ?? targetCorpus.canonicalProjection?.classifierId ?? requiredConfig.canonicalTopicSet.classifierId;
+    return {
+      targetCorpus,
+      authorityCorpus,
+      targetCorpusId: options["target-corpus-id"] ?? curationCorpusId(targetCorpus),
+      authorityCorpusId: options["authority-corpus-id"] ?? (authorityCorpus ? curationCorpusId(authorityCorpus) : undefined),
+      classifierId,
+    };
+  }
+  if (options["authority-corpus-key"]) {
+    const requiredConfig = config ?? requireSteeringConfig({ configPath: options.config });
+    authorityCorpus = requireCorpusConfig(requiredConfig, options["authority-corpus-key"], "--authority-corpus-key");
+  }
+  return {
+    targetCorpus,
+    authorityCorpus,
+    targetCorpusId: options["target-corpus-id"],
+    authorityCorpusId: options["authority-corpus-id"] ?? (authorityCorpus ? curationCorpusId(authorityCorpus) : undefined),
+    classifierId: options.classifier,
+  };
 }
 
 function parseOptions(flags) {

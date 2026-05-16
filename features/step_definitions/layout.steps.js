@@ -120,8 +120,10 @@ Then("the topic steering workspace should render", async function () {
   await page.locator("[data-topic-steering]").waitFor({ state: "visible", timeout: 10_000 });
   assert.equal(await page.locator("[data-topic-steering]").getAttribute("data-topic-steering-demo"), "true");
   await page.locator("h1", { hasText: "Topic Steering" }).waitFor({ state: "visible", timeout: 10_000 });
-  await page.locator("text=AI-ML-research").first().waitFor({ state: "visible", timeout: 10_000 });
-  await page.locator("text=AI-ML-history").first().waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("text=Canonical Demo Corpus").first().waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("text=Source Demo Corpus").first().waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("text=Corpus Topic Sets").first().waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("text=Source Demo Topics").first().waitFor({ state: "visible", timeout: 10_000 });
 });
 
 Then("topic steering should show topic and graph proposal rows", async function () {

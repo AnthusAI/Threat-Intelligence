@@ -170,19 +170,21 @@ related CMS records. It does not create a CMS UI.
 
 ## Topic Steering
 
-`/topics` is the Papyrus topic steering workspace for the `AI-ML-research` and
-`AI-ML-history` corpora. Papyrus owns the human steering state in GraphQL:
-corpora, import runs, public item summaries, artifacts, accepted topic sets,
-canonical topics, revisions, proposals, append-only decisions, and projection
-rows.
+`/topics` is the Papyrus topic and graph steering workspace. It is driven by
+the configured corpora for the publication, not by hard-coded corpus names.
+Papyrus owns the human steering state in GraphQL: corpora, import runs,
+artifacts, accepted topic sets, canonical topics, revisions, proposals,
+append-only decisions, and projection rows.
 
 Biblicus remains the artifact and worker tool boundary. Workers may run
 Biblicus commands that create reproducible artifacts, but Papyrus code should
 not edit Biblicus corpus sidecars, catalogs, or internals directly. The local
-`corpora/` folder is ignored by git and is only a pilot convenience for
-symlinking the two Biblicus corpora; durable corpus storage lives in the
-production Amplify Storage bucket under `corpora/AI-ML-research/` and
-`corpora/AI-ML-history/`.
+`corpora/` folder is a working-copy convenience; durable corpus storage lives in
+the production Amplify Storage bucket under `corpora/`. The committed
+`corpora/papyrus-steering.yml` file is the v1 steering config contract that
+names the publication corpora, their roles, local classifier ids, and S3
+prefixes. Mirror that YAML to S3 beside the corpus data and materialize it into
+GraphQL with `curation import-config`.
 
 Public GraphQL reads expose only curated typed fields needed by the page. Raw
 Biblicus payloads, source notes, full metadata, and import internals live in
@@ -231,9 +233,11 @@ npm run build
 npm run sandbox
 npm run seed:amplify
 npm run content -- content inspect
+npm run content -- curation import-config --config corpora/papyrus-steering.yml
+npm run content -- curation import-steering --config corpora/papyrus-steering.yml --corpus-key <key>
 npm run content -- curation import-steering --bundle <steering-export.json>
 npm run content -- curation export-topic-set --topic-set <id> --output <accepted-topic-set.json>
-npm run content -- curation import-projection --bundle <projection.json>
+npm run content -- curation import-projection --config corpora/papyrus-steering.yml --target-corpus-key <key> --authority-corpus-key <key> --bundle <projection.json>
 npm run test:bdd
 ```
 
@@ -257,9 +261,10 @@ For content inspection and admin against a deployed API:
 ```bash
 npm run content -- content inspect
 npm run content -- content list articles
-npm run content -- curation import-steering --corpus corpora/AI-ML-research --classifier <classifier-id>
+npm run content -- curation import-config --config corpora/papyrus-steering.yml
+npm run content -- curation import-steering --config corpora/papyrus-steering.yml --corpus-key <key>
 npm run content -- curation export-topic-set --topic-set <id> --output accepted-topic-set.json
-npm run content -- curation import-projection --bundle projection-results.json
+npm run content -- curation import-projection --config corpora/papyrus-steering.yml --target-corpus-key <key> --authority-corpus-key <key> --bundle projection-results.json
 npm run content -- content delete all --yes
 ```
 
