@@ -29,7 +29,7 @@ function loadAmplifyOutputs(): ResourcesConfig {
   const outputsPath = getAmplifyOutputsPath();
   if (!fs.existsSync(outputsPath)) {
     throw new Error(
-      "PAPYRUS_CONTENT_SOURCE=graphql requires amplify_outputs.json. Run `npx ampx sandbox` or deploy the Amplify backend first.",
+      "Papyrus requires amplify_outputs.json for GraphQL content. Run `npx ampx sandbox` or deploy the Amplify backend first.",
     );
   }
 

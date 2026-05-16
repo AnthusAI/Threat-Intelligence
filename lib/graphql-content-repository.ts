@@ -3,16 +3,21 @@ import { getUrl } from "aws-amplify/storage/server";
 import type { Schema } from "../amplify/data/resource";
 import type { Article, ArticleImage, ArticleImageAsset, ArticleImageLayout } from "./articles";
 import { getAmplifyServerRuntime } from "./amplify-server-runtime";
-import type { ContentRepository, EditionContent } from "./content-types";
+import type { ContentRepository, EditionContent, EditionRouteSummary, ListPublishedEditionsOptions, LoadEditionContentOptions } from "./content-types";
 import { normalizeEditionLayoutPlan } from "./layout-plan";
 import { articleToPublicationItem } from "./publication-items";
 
 const AUTH_MODE = "apiKey";
 const DEFAULT_EDITION_SLUG = "current";
+const PUBLISHED_STATUS = "published";
 const STORAGE_URL_EXPIRES_IN_SECONDS = 60 * 60;
 const ARTICLE_TYPE_STATUS = "article#published";
 
 type DataClient = ReturnType<typeof generateClient<Schema>>;
+type EditionPublishedAtIndexQuery = (
+  input: { status: string },
+  options: Record<string, unknown>,
+) => Promise<GraphQLListResponse<GraphQLEdition>>;
 
 type GraphQLListResponse<T> = {
   data?: T[] | null;
@@ -31,6 +36,7 @@ type GraphQLEdition = {
   title: string;
   status: string;
   editionDate: string;
+  publishedAt?: string | null;
   description?: string | null;
   layoutPlan?: unknown;
 };
@@ -93,25 +99,27 @@ const IMAGE_ROLES: NonNullable<ArticleImageAsset["roles"]> = [
 let cachedClient: DataClient | null = null;
 
 export const graphqlContentRepository: ContentRepository = {
-  async loadEditionContent() {
-    const edition = await loadActiveEdition();
-    const editionItems = await listEditionItems(edition.id);
-    const articles = await Promise.all(
-      editionItems.map(async (editionItem) => {
-        const item = await getItemById(editionItem.itemId);
-        if (!item || item.type !== "article" || item.status !== "published") return null;
-        return normalizeArticle(item, await listMediaAssets(item.id));
-      }),
-    );
+  async loadEditionContent(options?: LoadEditionContentOptions) {
+    const edition = options?.editionDate
+      ? await loadPublishedEditionForDate(options.editionDate, options.editionSlug)
+      : await loadActiveEdition();
+    return loadEditionContentFromEdition(edition);
+  },
 
+  async getLatestPublishedEdition() {
+    try {
+      return summarizeEditionRoute(await loadLatestPublishedEdition());
+    } catch (error) {
+      if (isMissingGraphQLEditionError(error)) return null;
+      throw error;
+    }
+  },
+
+  async listPublishedEditions(options?: ListPublishedEditionsOptions) {
+    const result = await listPublishedEditionSummaries(options);
     return {
-      id: edition.id,
-      source: "graphql",
-      title: edition.title,
-      editionDate: edition.editionDate,
-      description: edition.description ?? "GraphQL content loaded from Amplify Data.",
-      layoutPlan: normalizeEditionLayoutPlan(edition.layoutPlan, "Edition.layoutPlan"),
-      items: articles.filter((article): article is Article => article !== null).map(articleToPublicationItem),
+      editions: result.editions.map(summarizeEditionRoute),
+      nextToken: result.nextToken,
     };
   },
 
@@ -119,6 +127,17 @@ export const graphqlContentRepository: ContentRepository = {
     const item = await getItemBySlug(slug);
     if (!item || item.type !== "article" || item.status !== "published") return undefined;
     return normalizeArticle(item, await listMediaAssets(item.id));
+  },
+
+  async getEditionArticle({ editionDate, articleSlug }) {
+    const edition = await loadPublishedEditionForDate(editionDate);
+    const editionItems = await listEditionItems(edition.id);
+    for (const editionItem of editionItems) {
+      const item = await getItemById(editionItem.itemId);
+      if (!item || item.slug !== articleSlug || item.type !== "article" || item.status !== PUBLISHED_STATUS) continue;
+      return normalizeArticle(item, await listMediaAssets(item.id));
+    }
+    return undefined;
   },
 
   async listArticleSlugs() {
@@ -145,14 +164,125 @@ async function loadActiveEdition(): Promise<GraphQLEdition> {
   );
   if (bySlug[0]) return bySlug[0];
 
-  const published = await listAll<GraphQLEdition>((options) =>
-    getClient().models.Edition.listEditionsByStatusAndEditionDate({ status: "published" }, options),
-  );
-  const [latest] = published.sort((left, right) => right.editionDate.localeCompare(left.editionDate));
-  if (!latest) {
-    throw new Error("No published GraphQL edition found. Seed the Amplify sandbox or set PAPYRUS_EDITION_SLUG.");
+  return loadLatestPublishedEdition();
+}
+
+async function loadLatestPublishedEdition(): Promise<GraphQLEdition> {
+  const listByPublishedAt = getEditionPublishedAtIndexQuery();
+  if (listByPublishedAt) {
+    try {
+      const [latestByPublishedAt] = await listFirst<GraphQLEdition>((options) =>
+        listByPublishedAt({ status: PUBLISHED_STATUS }, options),
+      );
+      if (latestByPublishedAt) return latestByPublishedAt;
+    } catch (error) {
+      if (!isMissingPublishedAtIndexError(error)) throw error;
+    }
   }
-  return latest;
+
+  const [latestByEditionDate] = await listFirst<GraphQLEdition>((options) =>
+    getClient().models.Edition.listEditionsByStatusAndEditionDate({ status: PUBLISHED_STATUS }, options),
+  );
+  if (latestByEditionDate) return latestByEditionDate;
+
+  throw new Error("No published GraphQL edition found. Seed the Amplify sandbox or set PAPYRUS_EDITION_SLUG.");
+}
+
+async function listPublishedEditionSummaries({
+  limit = 12,
+  nextToken,
+}: ListPublishedEditionsOptions = {}): Promise<{ editions: GraphQLEdition[]; nextToken?: string | null }> {
+  const safeLimit = clampEditionPageLimit(limit);
+  const listByPublishedAt = getEditionPublishedAtIndexQuery();
+  if (listByPublishedAt) {
+    try {
+      return await listPage<GraphQLEdition>(
+        (options) => listByPublishedAt({ status: PUBLISHED_STATUS }, options),
+        safeLimit,
+        nextToken,
+      );
+    } catch (error) {
+      if (!isMissingPublishedAtIndexError(error)) throw error;
+    }
+  }
+
+  return listPage<GraphQLEdition>(
+    (options) => getClient().models.Edition.listEditionsByStatusAndEditionDate({ status: PUBLISHED_STATUS }, options),
+    safeLimit,
+    nextToken,
+  );
+}
+
+async function loadPublishedEditionForDate(editionDate: string, editionSlug?: string | null): Promise<GraphQLEdition> {
+  const editions = await listPublishedEditionsForDate(editionDate);
+  const selectedEdition = editionSlug ? editions.find((edition) => edition.slug === editionSlug) : editions[0];
+  if (!selectedEdition) {
+    const slugDetail = editionSlug ? ` and slug ${editionSlug}` : "";
+    throw new Error(`No published GraphQL edition found for date ${editionDate}${slugDetail}.`);
+  }
+  return selectedEdition;
+}
+
+async function listPublishedEditionsForDate(editionDate: string): Promise<GraphQLEdition[]> {
+  const editions = await listAll<GraphQLEdition>((options) =>
+    getClient().models.Edition.listEditionsByStatusAndEditionDate(
+      { status: PUBLISHED_STATUS, editionDate: { eq: editionDate } },
+      options,
+    ),
+  );
+  return editions.sort(compareEditionsByFreshness);
+}
+
+async function loadEditionContentFromEdition(edition: GraphQLEdition): Promise<EditionContent> {
+  const editionItems = await listEditionItems(edition.id);
+  const articles = await Promise.all(
+    editionItems.map(async (editionItem) => {
+      const item = await getItemById(editionItem.itemId);
+      if (!item || item.type !== "article" || item.status !== PUBLISHED_STATUS) return null;
+      return normalizeArticle(item, await listMediaAssets(item.id));
+    }),
+  );
+
+  return {
+    id: edition.id,
+    source: "graphql",
+    title: edition.title,
+    editionDate: edition.editionDate,
+    description: edition.description ?? "GraphQL content loaded from Amplify Data.",
+    layoutPlan: normalizeEditionLayoutPlan(edition.layoutPlan, "Edition.layoutPlan"),
+    items: articles.filter((article): article is Article => article !== null).map(articleToPublicationItem),
+  };
+}
+
+function summarizeEditionRoute(edition: GraphQLEdition): EditionRouteSummary {
+  return {
+    id: edition.id,
+    slug: edition.slug,
+    title: edition.title,
+    editionDate: edition.editionDate,
+    publishedAt: edition.publishedAt,
+  };
+}
+
+function compareEditionsByFreshness(left: GraphQLEdition, right: GraphQLEdition): number {
+  const leftPublishedAt = left.publishedAt ?? `${left.editionDate}T00:00:00.000Z`;
+  const rightPublishedAt = right.publishedAt ?? `${right.editionDate}T00:00:00.000Z`;
+  return rightPublishedAt.localeCompare(leftPublishedAt) || right.id.localeCompare(left.id);
+}
+
+function isMissingGraphQLEditionError(error: unknown): boolean {
+  return error instanceof Error && error.message.includes("No published GraphQL edition found");
+}
+
+function getEditionPublishedAtIndexQuery(): EditionPublishedAtIndexQuery | null {
+  const editionModel = getClient().models.Edition as unknown as {
+    listEditionsByStatusAndPublishedAt?: EditionPublishedAtIndexQuery;
+  };
+  return typeof editionModel.listEditionsByStatusAndPublishedAt === "function" ? editionModel.listEditionsByStatusAndPublishedAt : null;
+}
+
+function isMissingPublishedAtIndexError(error: unknown): boolean {
+  return error instanceof Error && error.message.includes("listEditionsByStatusAndPublishedAt");
 }
 
 async function listEditionItems(editionId: string): Promise<GraphQLEditionItem[]> {
@@ -203,6 +333,39 @@ async function listAll<T>(operation: (options: Record<string, unknown>) => Promi
   return items;
 }
 
+async function listFirst<T>(operation: (options: Record<string, unknown>) => Promise<GraphQLListResponse<T>>): Promise<T[]> {
+  const response = await operation({
+    authMode: AUTH_MODE,
+    limit: 1,
+    sortDirection: "DESC",
+  });
+  assertNoGraphQLErrors(response.errors);
+  return (response.data ?? []).filter(Boolean) as T[];
+}
+
+async function listPage<T>(
+  operation: (options: Record<string, unknown>) => Promise<GraphQLListResponse<T>>,
+  limit: number,
+  nextToken?: string | null,
+): Promise<{ editions: T[]; nextToken?: string | null }> {
+  const response = await operation({
+    authMode: AUTH_MODE,
+    limit,
+    nextToken,
+    sortDirection: "DESC",
+  });
+  assertNoGraphQLErrors(response.errors);
+  return {
+    editions: (response.data ?? []).filter(Boolean) as T[],
+    nextToken: response.nextToken,
+  };
+}
+
+function clampEditionPageLimit(limit: number): number {
+  if (!Number.isFinite(limit)) return 12;
+  return Math.max(1, Math.min(12, Math.floor(limit)));
+}
+
 function readGetResponse<T>(response: GraphQLGetResponse<T>): T | null {
   assertNoGraphQLErrors(response.errors);
   return response.data ?? null;
@@ -238,6 +401,7 @@ async function normalizeImageAsset(item: GraphQLItem, asset: GraphQLMediaAsset):
     type: "image",
     src,
     alt: asset.alt ?? `Image for ${item.headline ?? item.slug}`,
+    caption: asset.caption ?? undefined,
     credit: asset.credit ?? asset.caption ?? "Media asset",
     roles: parseImageRoles(asset.role),
     layout: getImageLayout(asset),
@@ -289,6 +453,7 @@ function getFallbackImage(item: GraphQLItem): ArticleImage {
   return {
     src: "https://images.unsplash.com/photo-1495020689067-958852a7765e?auto=format&fit=crop&w=1200&q=80",
     alt: `Editorial image for ${item.headline ?? item.slug}`,
+    caption: "Fallback editorial image.",
     credit: "Fallback image",
     layout: {
       minHeight: 120,
