@@ -1,53 +1,69 @@
 import fs from "node:fs";
 import path from "node:path";
 import { addToUserGroup, createAndSignUpUser, signInUser } from "@aws-amplify/seed";
+import { Amplify } from "aws-amplify";
 import { generateClient } from "aws-amplify/data";
 import { signOut } from "aws-amplify/auth";
 import { uploadData } from "aws-amplify/storage";
 import type { Schema } from "../data/resource";
-import { getArticleImageAssets, type Article, type ArticleImageAsset } from "../../lib/articles";
-import { getAmplifyServerRuntime } from "../../lib/amplify-server-runtime";
-import { loadLocalEditionConfig, orderEditionSlugs } from "../../lib/edition-config";
-import { loadMarkdownArticles } from "../../lib/markdown-content-repository";
+import * as articlesModule from "../../lib/articles";
+import type { Article, ArticleImageAsset } from "../../lib/articles";
+import * as amplifyServerRuntimeModule from "../../lib/amplify-server-runtime";
+
+const articlesRuntime = getRuntimeModule(articlesModule);
+const amplifyServerRuntime = getRuntimeModule(amplifyServerRuntimeModule);
+const { articles, editionDate, getArticleImageAssets } = articlesRuntime as typeof import("../../lib/articles");
+const { getAmplifyServerRuntime } = amplifyServerRuntime as typeof import("../../lib/amplify-server-runtime");
 
 const EDITOR_GROUP = "editor";
 
-const client = generateClient<Schema>({ authMode: "userPool" });
+type DataClient = ReturnType<typeof generateClient<Schema>>;
+
+let cachedClient: DataClient | null = null;
+
+function getRuntimeModule<T extends object>(module: T): T {
+  return "default" in module && typeof module.default === "object" && module.default !== null ? (module.default as T) : module;
+}
+
+function getSeedClient(): DataClient {
+  if (!cachedClient) cachedClient = generateClient<Schema>({ authMode: "userPool" });
+  return cachedClient;
+}
 
 async function main() {
-  getAmplifyServerRuntime();
+  const runtime = getAmplifyServerRuntime();
+  Amplify.configure(runtime.config);
   await signInSeedEditor();
-  const editionConfig = loadLocalEditionConfig();
+  const editionConfig = getSeedEditionConfig();
 
   try {
-    const articles = orderArticles(loadMarkdownArticles(), editionConfig.articleOrder);
+    const orderedArticles = orderArticles(articles, editionConfig.articleOrder);
     await upsert("Edition", {
       id: editionConfig.id,
       slug: editionConfig.slug,
       title: editionConfig.title,
       status: "published",
       editionDate: editionConfig.publishDate,
+      publishedAt: editionConfig.publishedAt,
       description: editionConfig.description,
-      layoutPlan: editionConfig.layoutPlan,
-      metadata: {
-        source: "markdown-seed",
-      },
+      layoutPlan: toAwsJson(editionConfig.layoutPlan),
+      metadata: toAwsJson({ source: "fixture-seed" }),
     });
 
-    for (const [index, article] of articles.entries()) {
+    for (const [index, article] of orderedArticles.entries()) {
       await seedArticle(article, index, editionConfig);
     }
 
-    console.log(`Seeded ${articles.length} articles into Amplify Data and Storage.`);
+    console.log(`Seeded ${orderedArticles.length} articles into Amplify Data and Storage.`);
   } finally {
     await signOut();
   }
 }
 
 async function signInSeedEditor() {
-  const username = process.env.PAPYRUS_SEED_USERNAME ?? "papyrus-seed-editor";
   const password = process.env.PAPYRUS_SEED_PASSWORD ?? "PapyrusSeed1!";
   const email = process.env.PAPYRUS_SEED_EMAIL ?? "papyrus-seed-editor@example.com";
+  const username = process.env.PAPYRUS_SEED_USERNAME ?? email;
 
   try {
     await createAndSignUpUser({
@@ -75,7 +91,9 @@ async function signInSeedEditor() {
   }
 }
 
-async function seedArticle(article: Article, index: number, editionConfig: ReturnType<typeof loadLocalEditionConfig>) {
+type SeedEditionConfig = ReturnType<typeof getSeedEditionConfig>;
+
+async function seedArticle(article: Article, index: number, editionConfig: SeedEditionConfig) {
   const itemId = `item-${article.slug}`;
   const sectionSlug = slugify(article.section);
   const tagId = `tag-${sectionSlug}`;
@@ -100,10 +118,8 @@ async function seedArticle(article: Article, index: number, editionConfig: Retur
     editionDate: editionConfig.publishDate,
     sortTitle: article.headline,
     pullQuotes: article.pullQuotes ?? [],
-    layout: {
-      source: "markdown",
-    },
-    editorial: {},
+    layout: toAwsJson({ source: "fixture" }),
+    editorial: toAwsJson({}),
   });
 
   await upsert("Tag", {
@@ -131,7 +147,7 @@ async function seedArticle(article: Article, index: number, editionConfig: Retur
     sortKey,
     pageNumber: 1,
     priority: index + 1,
-    metadata: {},
+    metadata: toAwsJson({}),
   });
 
   const imageAssets = getArticleImageAssets(article);
@@ -146,7 +162,7 @@ async function seedArticle(article: Article, index: number, editionConfig: Retur
       storagePath: uploaded.storagePath,
       externalUrl: asset.src,
       alt: asset.alt,
-      caption: asset.credit,
+      caption: asset.caption ?? asset.credit,
       credit: asset.credit,
       width: uploaded.width,
       height: uploaded.height,
@@ -158,9 +174,7 @@ async function seedArticle(article: Article, index: number, editionConfig: Retur
       maxHeight: asset.layout?.maxHeight,
       crop: asset.layout?.crop,
       wrapsText: asset.layout?.wrapsText,
-      metadata: {
-        sourceUrl: asset.src,
-      },
+      metadata: toAwsJson({ sourceUrl: asset.src }),
     });
   }
 }
@@ -196,15 +210,18 @@ async function loadImagePayload(src: string): Promise<{ data: Uint8Array; conten
     };
   }
 
-  const filepath = path.isAbsolute(src) ? src : path.join(process.cwd(), src);
+  const filepath =
+    path.isAbsolute(src) && fs.existsSync(src)
+      ? src
+      : path.join(process.cwd(), src.startsWith("/") ? path.join("public", src.slice(1)) : src);
   return {
     data: fs.readFileSync(filepath),
     contentType: getContentTypeFromFilename(filepath),
   };
 }
 
-async function upsert(modelName: keyof typeof client.models, record: Record<string, unknown>) {
-  const model = (client.models as Record<string, unknown>)[String(modelName)] as {
+async function upsert(modelName: keyof DataClient["models"], record: Record<string, unknown>) {
+  const model = (getSeedClient().models as Record<string, unknown>)[String(modelName)] as {
     get(input: { id: string }, options: { authMode: "userPool" }): Promise<{ data?: unknown; errors?: unknown[] }>;
     create(input: Record<string, unknown>, options: { authMode: "userPool" }): Promise<{ errors?: unknown[] }>;
     update(input: Record<string, unknown>, options: { authMode: "userPool" }): Promise<{ errors?: unknown[] }>;
@@ -218,8 +235,14 @@ async function upsert(modelName: keyof typeof client.models, record: Record<stri
   assertNoGraphQLErrors(response.errors);
 }
 
-function orderArticles(articles: Article[], articleOrder: string[]): Article[] {
-  return orderEditionSlugs(articles, articleOrder);
+function orderArticles(source: Article[], articleOrder: string[]): Article[] {
+  return [...source].sort((left, right) => {
+    const leftIndex = articleOrder.indexOf(left.slug);
+    const rightIndex = articleOrder.indexOf(right.slug);
+    const leftRank = leftIndex === -1 ? Number.MAX_SAFE_INTEGER : leftIndex;
+    const rightRank = rightIndex === -1 ? Number.MAX_SAFE_INTEGER : rightIndex;
+    return leftRank - rightRank || left.slug.localeCompare(right.slug);
+  });
 }
 
 function slugify(value: string): string {
@@ -231,6 +254,7 @@ function slugify(value: string): string {
 
 function getImageExtension(contentType: string, src: string): string {
   if (contentType.includes("png")) return "png";
+  if (contentType.includes("svg")) return "svg";
   if (contentType.includes("webp")) return "webp";
   if (contentType.includes("gif")) return "gif";
 
@@ -241,6 +265,7 @@ function getImageExtension(contentType: string, src: string): string {
 function getContentTypeFromFilename(filename: string): string {
   const extension = path.extname(filename).toLowerCase();
   if (extension === ".png") return "image/png";
+  if (extension === ".svg") return "image/svg+xml";
   if (extension === ".webp") return "image/webp";
   if (extension === ".gif") return "image/gif";
   return "image/jpeg";
@@ -254,6 +279,298 @@ function isExpectedExistingUserError(error: unknown): boolean {
 function assertNoGraphQLErrors(errors: unknown[] | null | undefined): void {
   if (!errors?.length) return;
   throw new Error(`Amplify seed GraphQL request failed: ${JSON.stringify(errors)}`);
+}
+
+function toAwsJson(value: unknown): string {
+  return JSON.stringify(value);
+}
+
+function getSeedEditionConfig() {
+  const publishDate = "2026-05-13";
+  return {
+    id: "edition-current",
+    slug: "current",
+    title: "Current Edition",
+    description: "Seeded Papyrus fixture content.",
+    displayDate: editionDate,
+    publishDate,
+    publishedAt: `${publishDate}T12:00:00.000Z`,
+    articleOrder: articles.map((article) => article.slug),
+    layoutPlan: createSeedEditionLayoutPlan(articles.map((article) => article.slug)),
+  };
+}
+
+function createSeedEditionLayoutPlan(itemIds: string[]) {
+  const frontItemIds = itemIds.length < 3 ? itemIds : [itemIds[1], itemIds[0], itemIds[2], ...itemIds.slice(3)];
+  return {
+    pages: [
+      {
+        id: "page-1",
+        pageNumber: 1,
+        presetId: "front.mosaic",
+        grid: { columns: { min: 1, preferred: 6, max: 6 } },
+        regions: [
+          {
+            id: "front-page-news",
+            type: "fullPage",
+            localGrid: { columns: { min: 1, preferred: 6, max: 6 } },
+            responsiveLayouts: getSeedFrontResponsiveLayouts(),
+            blocks: frontItemIds.map((itemId, index) => ({
+              id: `front-${itemId}`,
+              type: "articleFrame",
+              presetId: "front.teaser",
+              itemId,
+              flowKey: itemId,
+              startCursor: "beginning",
+              role: index === 1 ? "feature" : index === 0 || index === 2 ? "rail" : "standard",
+              editorialPriority: index === 1 ? "primary" : index === 0 || index === 2 ? "secondary" : "tertiary",
+              typography: { headlineScale: index === 1 ? "feature" : index === 0 || index === 2 ? "rail" : "standard" },
+              span: { min: 1, preferred: [1, 4, 1, 2, 2, 2][index] ?? 1, max: [1, 4, 1, 2, 2, 2][index] ?? 1 },
+              localGrid: index === 1 ? { columns: { min: 1, preferred: 4, max: 4 } } : undefined,
+              media: index === 1
+                ? [
+                    {
+                      required: true,
+                      assetRole: "lead",
+                      placement: {
+                        anchor: "right",
+                        span: { min: 1, preferred: 2, max: 2 },
+                        vertical: "top",
+                        collapse: "inline",
+                        crop: "preserve",
+                        wrapsText: true,
+                      },
+                    },
+                  ]
+                : [],
+              composition: index === 1
+                ? {
+                    title: [
+                      {
+                        slot: "label",
+                        placement: {
+                          columnStart: 1,
+                          span: { min: 1, preferred: 2, max: 2 },
+                          vertical: "top",
+                          collapse: "inline",
+                          crop: "preserve",
+                          wrapsText: false,
+                        },
+                      },
+                      {
+                        slot: "headline",
+                        placement: {
+                          columnStart: 1,
+                          span: { min: 1, preferred: 2, max: 2 },
+                          vertical: "top",
+                          collapse: "inline",
+                          crop: "preserve",
+                          wrapsText: false,
+                        },
+                      },
+                    ],
+                    lead: [
+                      {
+                        slot: "deck",
+                        placement: {
+                          columnStart: 1,
+                          span: { min: 1, preferred: 2, max: 2 },
+                          vertical: "top",
+                          collapse: "inline",
+                          crop: "preserve",
+                          wrapsText: true,
+                        },
+                      },
+                      {
+                        slot: "byline",
+                        placement: {
+                          columnStart: 1,
+                          span: { min: 1, preferred: 2, max: 2 },
+                          vertical: "top",
+                          collapse: "inline",
+                          crop: "preserve",
+                          wrapsText: true,
+                        },
+                      },
+                      {
+                        slot: "media",
+                        mediaIndex: 0,
+                        placement: {
+                          anchor: "right",
+                          span: { min: 1, preferred: 2, max: 2 },
+                          vertical: "top",
+                          collapse: "inline",
+                          crop: "preserve",
+                          wrapsText: true,
+                        },
+                      },
+                    ],
+                  }
+                : undefined,
+              cutPolicy: getSeedCutPolicy(itemId),
+            })),
+          },
+        ],
+      },
+      {
+        id: "page-2",
+        pageNumber: 2,
+        presetId: "page.regionStack",
+        grid: { columns: { min: 1, preferred: 6, max: 6 } },
+        regions: [
+          {
+            id: "agent-procedure-patterns-continuation",
+            type: "fullPage",
+            size: { shrinkToContent: true },
+            blocks: [
+              createSeedContinuationBlock("agent-procedure-patterns", 2, {
+                required: true,
+                anchor: "center",
+                span: { min: 1, preferred: 2, max: 3 },
+                vertical: "upperThird",
+              }),
+            ],
+          },
+        ],
+      },
+      {
+        id: "page-3",
+        pageNumber: 3,
+        presetId: "page.regionStack",
+        grid: { columns: { min: 1, preferred: 6, max: 6 } },
+        regions: [
+          {
+            id: "schools-reading-lab-tail",
+            type: "stack",
+            role: "top",
+            size: { ratio: 0.5 },
+            blocks: [
+              createSeedContinuationBlock("schools-reading-lab", 3, {
+                required: false,
+                anchor: "right",
+                span: { min: 1, preferred: 2, max: 2 },
+                vertical: "top",
+              }),
+            ],
+          },
+          {
+            id: "market-hall-tail",
+            type: "stack",
+            role: "bottom",
+            size: { ratio: 0.5 },
+            blocks: [
+              createSeedContinuationBlock("market-hall", 3, {
+                required: false,
+                anchor: "center",
+                span: { min: 2, preferred: 2, max: 2 },
+                vertical: "top",
+              }),
+            ],
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function getSeedFrontResponsiveLayouts() {
+  return [
+    {
+      minColumns: 4,
+      maxColumns: 4,
+      order: "editorialPriority",
+      slots: [
+        {
+          editorialPriority: "primary",
+          priorityOccurrence: 1,
+          columnStart: 1,
+          columnSpan: 4,
+          rowStart: 1,
+          rowSpan: 1,
+        },
+        {
+          editorialPriority: "secondary",
+          priorityOccurrence: 1,
+          columnStart: 1,
+          columnSpan: 2,
+          rowStart: 2,
+          rowSpan: 1,
+        },
+        {
+          editorialPriority: "secondary",
+          priorityOccurrence: 2,
+          columnStart: 3,
+          columnSpan: 2,
+          rowStart: 2,
+          rowSpan: 1,
+        },
+      ],
+      overflow: { columnSpan: 2, rowSpan: 1 },
+    },
+    {
+      minColumns: 1,
+      maxColumns: 3,
+      order: "editorialPriority",
+      slots: [],
+      overflow: { columnSpan: "full", rowSpan: 1 },
+    },
+  ];
+}
+
+function createSeedContinuationBlock(
+  itemId: string,
+  pageNumber: number,
+  media: {
+    required: boolean;
+    anchor: string;
+    span: { min: number; preferred: number; max: number };
+    vertical: string;
+  },
+) {
+  return {
+    id: `${itemId}-page-${pageNumber}`,
+    type: "articleFrame",
+    presetId: "article.mediaInset",
+    itemId,
+    flowKey: itemId,
+    startCursor: "current",
+    role: "primary",
+    localGrid: { columns: { min: 2, preferred: 6, max: 6 } },
+    media: [
+      {
+        required: media.required,
+        assetRole: "continuationInset",
+        placement: {
+          anchor: media.anchor,
+          span: media.span,
+          vertical: media.vertical,
+          collapse: "inline",
+          crop: "preserve",
+          wrapsText: true,
+        },
+      },
+    ],
+    pullQuote: {
+      required: false,
+      placements: [
+        {
+          anchor: media.anchor === "left" ? "right" : "left",
+          span: { min: 1, preferred: 1, max: 2 },
+          vertical: "middle",
+          collapse: "omit",
+          crop: "preserve",
+          wrapsText: true,
+        },
+      ],
+    },
+  };
+}
+
+function getSeedCutPolicy(itemId: string) {
+  if (itemId === "agent-procedure-patterns") return { maxBodyLines: 22, jumpTargetPage: 2 };
+  if (itemId === "schools-reading-lab") return { maxBodyLines: 16, jumpTargetPage: 3 };
+  if (itemId === "market-hall") return { maxBodyLines: 14, jumpTargetPage: 3 };
+  return undefined;
 }
 
 await main();
