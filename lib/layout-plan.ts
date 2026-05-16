@@ -75,6 +75,26 @@ export const RESPONSIVE_CROP_POLICIES = [
   "cropAllowed",
 ] as const;
 
+export const HEADLINE_SCALES = [
+  "banner",
+  "feature",
+  "standard",
+  "rail",
+  "brief",
+] as const;
+
+export const EDITORIAL_PRIORITIES = [
+  "primary",
+  "secondary",
+  "tertiary",
+  "supporting",
+] as const;
+
+export const FRONT_RESPONSIVE_LAYOUT_ORDERS = [
+  "plan",
+  "editorialPriority",
+] as const;
+
 export type PagePresetId = (typeof PAGE_PRESETS)[number];
 export type RegionType = (typeof REGION_TYPES)[number];
 export type BlockType = (typeof BLOCK_TYPES)[number];
@@ -85,6 +105,9 @@ export type ResponsivePlacementAnchor = (typeof RESPONSIVE_PLACEMENT_ANCHORS)[nu
 export type ResponsiveVerticalPlacement = (typeof RESPONSIVE_VERTICAL_PLACEMENTS)[number];
 export type ResponsiveCollapsePolicy = (typeof RESPONSIVE_COLLAPSE_POLICIES)[number];
 export type ResponsiveCropPolicy = (typeof RESPONSIVE_CROP_POLICIES)[number];
+export type HeadlineScaleId = (typeof HEADLINE_SCALES)[number];
+export type EditorialPriorityId = (typeof EDITORIAL_PRIORITIES)[number];
+export type FrontResponsiveLayoutOrder = (typeof FRONT_RESPONSIVE_LAYOUT_ORDERS)[number];
 
 const ItemIdSchema = z.string().min(1);
 const EmValueSchema = z
@@ -110,6 +133,12 @@ const ArticleFrameChromeSchema = z
     caption: ChromeTextSlotSchema.optional(),
     pullQuote: ChromeTextSlotSchema.optional(),
     jumpLine: ChromeTextSlotSchema.optional(),
+  })
+  .strict();
+
+const ArticleFrameTypographySchema = z
+  .object({
+    headlineScale: z.enum(HEADLINE_SCALES).optional(),
   })
   .strict();
 
@@ -174,12 +203,68 @@ const RegionSizeSchema = z
     minHeight: z.number().nonnegative().optional(),
     preferredHeight: z.number().nonnegative().optional(),
     maxHeight: z.number().nonnegative().optional(),
+    shrinkToContent: z.boolean().default(false),
   })
   .strict();
 
+const ArticleFrameSizeSchema = z
+  .object({
+    defaultRows: z.number().int().positive().optional(),
+    shrinkToContent: z.boolean().default(false),
+  })
+  .strict();
+
+const FrontResponsiveSlotSchema = z
+  .object({
+    blockId: z.string().min(1).optional(),
+    editorialPriority: z.enum(EDITORIAL_PRIORITIES).optional(),
+    priorityOccurrence: z.number().int().positive().default(1),
+    columnStart: z.number().int().positive(),
+    columnSpan: z.number().int().positive(),
+    rowStart: z.number().int().positive(),
+    rowSpan: z.number().int().positive().default(1),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (!value.blockId && !value.editorialPriority) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["blockId"],
+        message: "slot must match by blockId or editorialPriority",
+      });
+    }
+  });
+
+const FrontResponsiveOverflowSchema = z
+  .object({
+    columnSpan: z.union([z.number().int().positive(), z.literal("full")]).default("full"),
+    rowSpan: z.number().int().positive().default(1),
+  })
+  .strict();
+
+const FrontResponsiveLayoutSchema = z
+  .object({
+    minColumns: z.number().int().positive(),
+    maxColumns: z.number().int().positive(),
+    order: z.enum(FRONT_RESPONSIVE_LAYOUT_ORDERS).default("plan"),
+    slots: z.array(FrontResponsiveSlotSchema).default([]),
+    overflow: FrontResponsiveOverflowSchema.default({}),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.minColumns > value.maxColumns) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["minColumns"],
+        message: "minColumns must be less than or equal to maxColumns",
+      });
+    }
+  });
+
 const PlacementSchema = z
   .object({
-    anchor: z.enum(RESPONSIVE_PLACEMENT_ANCHORS),
+    anchor: z.enum(RESPONSIVE_PLACEMENT_ANCHORS).default("left"),
+    columnStart: z.number().int().positive().optional(),
     span: SpanPolicySchema,
     vertical: z.enum(RESPONSIVE_VERTICAL_PLACEMENTS).default("upperThird"),
     collapse: z.enum(RESPONSIVE_COLLAPSE_POLICIES).default("inline"),
@@ -205,6 +290,21 @@ const PullQuoteSpecSchema = z
   })
   .strict();
 
+const ArticleFrameCompositionSlotSchema = z
+  .object({
+    slot: z.enum(["label", "headline", "deck", "byline", "media", "pullQuote"]),
+    mediaIndex: z.number().int().nonnegative().optional(),
+    placement: PlacementSchema,
+  })
+  .strict();
+
+const ArticleFrameCompositionSchema = z
+  .object({
+    title: z.array(ArticleFrameCompositionSlotSchema).default([]),
+    lead: z.array(ArticleFrameCompositionSlotSchema).default([]),
+  })
+  .strict();
+
 const CutPolicySchema = z
   .object({
     maxBodyLines: z.number().int().positive().optional(),
@@ -221,11 +321,15 @@ const ArticleFrameBlockSchema = z
     flowKey: z.string().min(1).optional(),
     startCursor: z.enum(["beginning", "current"]).default("current"),
     role: z.string().min(1).optional(),
+    editorialPriority: z.enum(EDITORIAL_PRIORITIES).default("tertiary"),
     localGrid: LocalGridSchema.optional(),
     span: SpanPolicySchema.optional(),
     media: z.array(MediaSpecSchema).default([]),
     pullQuote: PullQuoteSpecSchema.optional(),
+    size: ArticleFrameSizeSchema.optional(),
     chrome: ArticleFrameChromeSchema.optional(),
+    typography: ArticleFrameTypographySchema.optional(),
+    composition: ArticleFrameCompositionSchema.optional(),
     cutPolicy: CutPolicySchema.optional(),
     requires: ContentRequirementsSchema.optional(),
   })
@@ -316,6 +420,7 @@ const LayoutRegionSchema = z
     role: z.string().min(1).optional(),
     size: RegionSizeSchema.optional(),
     localGrid: LocalGridSchema.optional(),
+    responsiveLayouts: z.array(FrontResponsiveLayoutSchema).optional(),
     blocks: z.array(LayoutBlockSchema).min(1),
   })
   .strict();
@@ -340,10 +445,16 @@ export type ContentRequirements = z.infer<typeof ContentRequirementsSchema>;
 export type EmValue = z.infer<typeof EmValueSchema>;
 export type ChromeTextSlotSpec = z.infer<typeof ChromeTextSlotSchema>;
 export type ArticleFrameChromeSpec = z.infer<typeof ArticleFrameChromeSchema>;
+export type ArticleFrameTypographySpec = z.infer<typeof ArticleFrameTypographySchema>;
 export type ResponsiveSpanPolicy = z.infer<typeof SpanPolicySchema>;
 export type ResponsivePlacementSpec = z.infer<typeof PlacementSchema>;
 export type LayoutMediaSpec = z.infer<typeof MediaSpecSchema>;
 export type LayoutPullQuoteSpec = z.infer<typeof PullQuoteSpecSchema>;
+export type ArticleFrameSizeSpec = z.infer<typeof ArticleFrameSizeSchema>;
+export type ArticleFrameCompositionSlotSpec = z.infer<typeof ArticleFrameCompositionSlotSchema>;
+export type ArticleFrameCompositionSpec = z.infer<typeof ArticleFrameCompositionSchema>;
+export type FrontResponsiveSlotSpec = z.infer<typeof FrontResponsiveSlotSchema>;
+export type FrontResponsiveLayoutSpec = z.infer<typeof FrontResponsiveLayoutSchema>;
 export type ArticleFrameBlockSpec = z.infer<typeof ArticleFrameBlockSchema>;
 export type ItemFrameBlockSpec = z.infer<typeof ItemFrameBlockSchema>;
 export type MediaClusterBlockSpec = z.infer<typeof MediaClusterBlockSchema>;
@@ -365,23 +476,90 @@ export function createDefaultEditionLayoutPlan(itemIds: string[]): EditionLayout
     flowKey: itemId,
     startCursor: "beginning" as const,
     role: getDefaultFrontRole(index),
+    editorialPriority: getDefaultFrontEditorialPriority(index),
+    typography: { headlineScale: getDefaultFrontHeadlineScale(index) },
     span: getDefaultFrontSpan(index),
+    localGrid: index === 1 ? { columns: { min: 1, preferred: 4, max: 4 } } : undefined,
     media: index === 1
       ? [
           {
             required: true,
             assetRole: "lead",
             placement: {
-              anchor: "center",
-              span: { min: 1, preferred: 4, max: 4 },
+              anchor: "right",
+              span: { min: 1, preferred: 2, max: 2 },
               vertical: "top",
               collapse: "inline",
-              crop: "cropAllowed",
-              wrapsText: false,
+              crop: "preserve",
+              wrapsText: true,
             },
           },
         ]
       : [],
+    composition: index === 1
+      ? {
+          title: [
+            {
+              slot: "label",
+              placement: {
+                columnStart: 1,
+                span: { min: 1, preferred: 2, max: 2 },
+                vertical: "top",
+                collapse: "inline",
+                crop: "preserve",
+                wrapsText: false,
+              },
+            },
+            {
+              slot: "headline",
+              placement: {
+                columnStart: 1,
+                span: { min: 1, preferred: 2, max: 2 },
+                vertical: "top",
+                collapse: "inline",
+                crop: "preserve",
+                wrapsText: false,
+              },
+            },
+          ],
+          lead: [
+            {
+              slot: "deck",
+              placement: {
+                columnStart: 1,
+                span: { min: 1, preferred: 2, max: 2 },
+                vertical: "top",
+                collapse: "inline",
+                crop: "preserve",
+                wrapsText: true,
+              },
+            },
+            {
+              slot: "byline",
+              placement: {
+                columnStart: 1,
+                span: { min: 1, preferred: 2, max: 2 },
+                vertical: "top",
+                collapse: "inline",
+                crop: "preserve",
+                wrapsText: true,
+              },
+            },
+            {
+              slot: "media",
+              mediaIndex: 0,
+              placement: {
+                anchor: "right",
+                span: { min: 1, preferred: 2, max: 2 },
+                vertical: "top",
+                collapse: "inline",
+                crop: "preserve",
+                wrapsText: true,
+              },
+            },
+          ],
+        }
+      : undefined,
     cutPolicy: getDefaultCutPolicy(itemId),
   }));
 
@@ -397,6 +575,7 @@ export function createDefaultEditionLayoutPlan(itemIds: string[]): EditionLayout
             id: "front-page-news",
             type: "fullPage",
             localGrid: { columns: { min: 1, preferred: 6, max: 6 } },
+            responsiveLayouts: getDefaultFrontResponsiveLayouts(),
             blocks: frontBlocks,
           },
         ],
@@ -410,13 +589,14 @@ export function createDefaultEditionLayoutPlan(itemIds: string[]): EditionLayout
           {
             id: "harbor-continuation",
             type: "fullPage",
+            size: { shrinkToContent: true },
             blocks: [
               {
-                id: "harbor-grid-page-2",
+                id: "agent-procedure-patterns-page-2",
                 type: "articleFrame",
                 presetId: "article.mediaInset",
-                itemId: "harbor-grid",
-                flowKey: "harbor-grid",
+                itemId: "agent-procedure-patterns",
+                flowKey: "agent-procedure-patterns",
                 startCursor: "current",
                 role: "primary",
                 localGrid: { columns: { min: 2, preferred: 6, max: 6 } },
@@ -480,7 +660,7 @@ export function createDefaultEditionLayoutPlan(itemIds: string[]): EditionLayout
                     placement: {
                       anchor: "right",
                       span: { min: 1, preferred: 2, max: 2 },
-                      vertical: "upperThird",
+                      vertical: "top",
                       collapse: "inline",
                       crop: "preserve",
                       wrapsText: true,
@@ -523,9 +703,9 @@ export function createDefaultEditionLayoutPlan(itemIds: string[]): EditionLayout
                     required: false,
                     assetRole: "continuationInset",
                     placement: {
-                      anchor: "left",
-                      span: { min: 1, preferred: 1, max: 2 },
-                      vertical: "upperThird",
+                      anchor: "center",
+                      span: { min: 2, preferred: 2, max: 2 },
+                      vertical: "top",
                       collapse: "inline",
                       crop: "preserve",
                       wrapsText: true,
@@ -554,6 +734,50 @@ export function createDefaultEditionLayoutPlan(itemIds: string[]): EditionLayout
   }, "default layoutPlan");
 
   return plan;
+}
+
+function getDefaultFrontResponsiveLayouts(): FrontResponsiveLayoutSpec[] {
+  return [
+    {
+      minColumns: 4,
+      maxColumns: 4,
+      order: "editorialPriority",
+      slots: [
+        {
+          editorialPriority: "primary",
+          priorityOccurrence: 1,
+          columnStart: 1,
+          columnSpan: 4,
+          rowStart: 1,
+          rowSpan: 1,
+        },
+        {
+          editorialPriority: "secondary",
+          priorityOccurrence: 1,
+          columnStart: 1,
+          columnSpan: 2,
+          rowStart: 2,
+          rowSpan: 1,
+        },
+        {
+          editorialPriority: "secondary",
+          priorityOccurrence: 2,
+          columnStart: 3,
+          columnSpan: 2,
+          rowStart: 2,
+          rowSpan: 1,
+        },
+      ],
+      overflow: { columnSpan: 2, rowSpan: 1 },
+    },
+    {
+      minColumns: 1,
+      maxColumns: 3,
+      order: "editorialPriority",
+      slots: [],
+      overflow: { columnSpan: "full", rowSpan: 1 },
+    },
+  ];
 }
 
 export function normalizeEditionLayoutPlan(value: unknown, label = "Edition.layoutPlan"): EditionLayoutPlan {
@@ -621,6 +845,7 @@ function validateBlock(
       throw new Error(`${label}.${block.id} points to missing jumpTargetPage ${block.cutPolicy.jumpTargetPage}`);
     }
     for (const media of block.media) validateMediaSpec(item, media, `${label}.${block.id}.media`);
+    validateArticleFramePlacementGeometry(block, `${label}.${block.id}`);
     if (block.pullQuote?.required && !item.pullQuotes?.[0]) {
       throw new Error(`${label}.${block.id}.pullQuote requires an editorial pull quote`);
     }
@@ -638,6 +863,28 @@ function validateMediaSpec(item: PublicationItem, media: LayoutMediaSpec, label:
   const matchingAssets = findAssetsByRole(item, media.assetRole);
   if (media.required && matchingAssets.length === 0) {
     throw new Error(`${label} requires an image asset${media.assetRole ? ` with role ${media.assetRole}` : ""}`);
+  }
+}
+
+function validateArticleFramePlacementGeometry(block: ArticleFrameBlockSpec, label: string): void {
+  const maxColumns = block.localGrid?.columns.max ?? block.span?.max ?? block.span?.preferred ?? 6;
+  block.media.forEach((media, index) => validatePlacementColumnStart(media.placement, maxColumns, `${label}.media[${index}].placement`));
+  block.pullQuote?.placements.forEach((placement, index) => (
+    validatePlacementColumnStart(placement, maxColumns, `${label}.pullQuote.placements[${index}]`)
+  ));
+  block.composition?.title.forEach((slot, index) => (
+    validatePlacementColumnStart(slot.placement, maxColumns, `${label}.composition.title[${index}].placement`)
+  ));
+  block.composition?.lead.forEach((slot, index) => (
+    validatePlacementColumnStart(slot.placement, maxColumns, `${label}.composition.lead[${index}].placement`)
+  ));
+}
+
+function validatePlacementColumnStart(placement: ResponsivePlacementSpec, maxColumns: number, label: string): void {
+  if (!placement.columnStart) return;
+  const lastColumn = placement.columnStart + placement.span.max - 1;
+  if (lastColumn > maxColumns) {
+    throw new Error(`${label} columnStart ${placement.columnStart} with max span ${placement.span.max} exceeds ${maxColumns} local columns`);
   }
 }
 
@@ -685,13 +932,25 @@ function getDefaultFrontRole(index: number): string {
   return "standard";
 }
 
+function getDefaultFrontHeadlineScale(index: number): HeadlineScaleId {
+  if (index === 1) return "feature";
+  if (index === 0 || index === 2) return "rail";
+  return "standard";
+}
+
+function getDefaultFrontEditorialPriority(index: number): EditorialPriorityId {
+  if (index === 1) return "primary";
+  if (index === 0 || index === 2) return "secondary";
+  return "tertiary";
+}
+
 function getDefaultFrontItemOrder(itemIds: string[]): string[] {
   if (itemIds.length < 3) return itemIds;
   return [itemIds[1], itemIds[0], itemIds[2], ...itemIds.slice(3)];
 }
 
 function getDefaultCutPolicy(itemId: string): ArticleFrameBlockSpec["cutPolicy"] | undefined {
-  if (itemId === "harbor-grid") return { maxBodyLines: 22, jumpTargetPage: 2 };
+  if (itemId === "agent-procedure-patterns") return { maxBodyLines: 22, jumpTargetPage: 2 };
   if (itemId === "schools-reading-lab") return { maxBodyLines: 16, jumpTargetPage: 3 };
   if (itemId === "market-hall") return { maxBodyLines: 14, jumpTargetPage: 3 };
   return undefined;
