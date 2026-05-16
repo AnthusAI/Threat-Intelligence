@@ -346,7 +346,7 @@ function EvidenceReferenceBrowser({
 }) {
   const references = collectEvidenceReferences(topics, proposals, projections).slice(0, 24);
   return (
-    <section className="topic-steering-section" aria-labelledby="evidence-browser-title">
+    <section className="topic-steering-section" aria-labelledby="evidence-references-title">
       <SectionHeader title="Evidence References" detail={`${references.length} external item ids`} />
       <div className="topic-steering-evidence-list">
         {references.map((reference) => (
@@ -407,7 +407,7 @@ function RevisionPanel({
   onPromote: (revisionId: string) => void;
 }) {
   return (
-    <section className="topic-steering-section" aria-labelledby="revision-export-title">
+    <section className="topic-steering-section" aria-labelledby="revision-and-export-title">
       <SectionHeader title="Revision And Export" detail={topicSet?.status ?? "No topic set"} />
       <div className="topic-steering-revision-panel">
         <dl>
