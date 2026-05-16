@@ -128,7 +128,7 @@ Feature: Newspaper layout scenarios
     Then the front page should render a newspaper footer
     And the front page footer should list edition sections
     And the front page solved height should include footer rhythm space
-    And the front page footer should link archive and disable login
+    And the front page footer should link archive and render login
     When I scroll to page 2
     Then the active page should not render a front page footer
     And no browser console errors should occur

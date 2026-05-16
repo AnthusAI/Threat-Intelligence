@@ -967,7 +967,7 @@ Then("the front page solved height should include footer rhythm space", async fu
   assert.equal(report.solvedFooterHeight % report.rhythm, 0);
 });
 
-Then("the front page footer should link archive and disable login", async function () {
+Then("the front page footer should link archive and render login", async function () {
   const page = requirePage(this);
   const report = await page.evaluate(() => (
     Array.from(document.querySelectorAll("#page-1 [data-footer-utility]")).map((entry) => ({
@@ -976,19 +976,13 @@ Then("the front page footer should link archive and disable login", async functi
       role: entry.getAttribute("role"),
       ariaDisabled: entry.getAttribute("aria-disabled"),
       href: entry.getAttribute("href"),
+      tagName: entry.tagName.toLowerCase(),
     }))
   ));
   assert.deepEqual(report, [
-    { id: "archive", text: "Archive", role: null, ariaDisabled: null, href: "/archive" },
-    { id: "login", text: "Log in", role: "link", ariaDisabled: "true", href: null },
+    { id: "archive", text: "Archive", role: null, ariaDisabled: null, href: "/archive", tagName: "a" },
+    { id: "login", text: "LOGIN", role: null, ariaDisabled: null, href: null, tagName: "span" },
   ]);
-
-  const beforeUrl = page.url();
-  const afterDispatchedClicksUrl = await page.evaluate(() => {
-    document.querySelector('#page-1 [data-footer-utility="login"]')?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-    return window.location.href;
-  });
-  assert.equal(afterDispatchedClicksUrl, beforeUrl);
 });
 
 Then("the archive masthead should say {string}", async function (expectedTitle) {

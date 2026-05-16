@@ -493,7 +493,6 @@ function EditionProgress({
         Next
         <EditionProgressTriangleIcon direction="next" />
       </button>
-      <ReaderAuthControl />
     </nav>
   );
 }
@@ -676,8 +675,14 @@ function FrontPageFooter({
         </nav>
       ) : null}
       <div className="front-footer__utilities" aria-label="Publication utilities">
-        {footer.utilityEntries.map((entry) => (
-          entry.disabled || disableLinks ? (
+        {footer.utilityEntries.map((entry) => {
+          if (entry.id === "login" && !disableLinks) {
+            return (
+              <ReaderAuthControl className="front-footer__utility-link" dataFooterUtility={entry.id} key={entry.id} postAuthPath={editionBasePath} />
+            );
+          }
+
+          return entry.disabled || disableLinks ? (
             <span
               aria-disabled="true"
               className="front-footer__utility-link"
@@ -691,8 +696,8 @@ function FrontPageFooter({
             <Link className="front-footer__utility-link" data-footer-utility={entry.id} href={entry.href} key={entry.id}>
               {entry.label}
             </Link>
-          )
-        ))}
+          );
+        })}
       </div>
     </footer>
   );

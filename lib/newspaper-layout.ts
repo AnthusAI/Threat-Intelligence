@@ -866,7 +866,7 @@ function solveFrontFooter(blocks: SolvedBlock[], config: LayoutConfig, pageNumbe
     entries,
     utilityEntries: [
       { id: "archive", label: "Archive", href: "/archive", disabled: false },
-      { id: "login", label: "Log in", disabled: true },
+      { id: "login", label: "LOGIN", disabled: true },
     ],
   };
 }

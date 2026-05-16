@@ -10,22 +10,42 @@ type AuthState =
   | { status: "signedOut"; label: string }
   | { status: "signedIn"; label: string };
 
-export function ReaderAuthControl() {
+type ReaderAuthControlProps = {
+  className?: string;
+  dataFooterUtility?: string;
+  postAuthPath?: string;
+  showIdentity?: boolean;
+};
+
+export function ReaderAuthControl({ className, dataFooterUtility, postAuthPath, showIdentity = false }: ReaderAuthControlProps) {
   const [authState, setAuthState] = useState<AuthState>({ status: "loading", label: "Checking sign-in" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const replaceWithPostAuthPath = useCallback(() => {
+    if (!postAuthPath) return;
+    if (window.location.pathname !== "/" || window.location.search || window.location.hash) return;
+    window.history.replaceState(window.history.state, "", postAuthPath);
+  }, [postAuthPath]);
 
   const refreshAuthState = useCallback(async () => {
     configureAmplifyClient();
     try {
       await getCurrentUser();
-      const attributes = await fetchUserAttributes();
-      setAuthState({ status: "signedIn", label: attributes.email ?? "Signed in" });
+      let label = "Signed in";
+      try {
+        const attributes = await fetchUserAttributes();
+        label = attributes.email ?? label;
+      } catch {
+        // A valid Cognito session is enough for the footer state; email is display-only.
+      }
+      setAuthState({ status: "signedIn", label });
       setError(null);
+      replaceWithPostAuthPath();
     } catch {
       setAuthState({ status: "signedOut", label: "Signed out" });
     }
-  }, []);
+  }, [replaceWithPostAuthPath]);
 
   useEffect(() => {
     let active = true;
@@ -82,9 +102,10 @@ export function ReaderAuthControl() {
   };
 
   const signedIn = authState.status === "signedIn";
+  const actionLabel = signedIn ? "LOGOUT" : "LOGIN";
   return (
-    <div className="reader-auth" aria-live="polite">
-      {signedIn ? <span className="reader-auth__identity">{authState.label}</span> : null}
+    <span className={className ? `reader-auth ${className}` : "reader-auth"} aria-live="polite" data-footer-utility={dataFooterUtility}>
+      {signedIn && showIdentity ? <span className="reader-auth__identity">{authState.label}</span> : null}
       {error ? <span className="reader-auth__error">{error}</span> : null}
       <button
         className="reader-auth__button"
@@ -92,8 +113,8 @@ export function ReaderAuthControl() {
         onClick={signedIn ? signOutCurrentUser : signIn}
         type="button"
       >
-        {signedIn ? "Sign out" : "Sign in"}
+        {actionLabel}
       </button>
-    </div>
+    </span>
   );
 }
