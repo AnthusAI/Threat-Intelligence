@@ -275,30 +275,40 @@ function artifactRecords(artifact, context) {
 function proposalRecords(proposal, context) {
   const externalProposalId = proposal.proposal_id ?? hashShort(proposal);
   const proposalId = `curation-proposal-${safeId(externalProposalId)}`;
-  const steeringDomain = inferSteeringDomain(proposal.kind);
+  const proposalKind = proposal.kind ?? proposal.proposal_kind ?? "unknown";
+  const proposalPayload = proposal.payload && typeof proposal.payload === "object" ? proposal.payload : {};
+  const evidence = proposal.evidence && typeof proposal.evidence === "object" ? proposal.evidence : {};
+  const steeringDomain = proposal.domain ?? inferSteeringDomain(proposalKind);
+  const topicUid = proposal.topic_uid ?? proposalPayload.topic_uid ?? null;
+  const targetTopicUid = proposal.target_topic_uid ?? proposalPayload.target_topic_uid ?? null;
+  const graphEntityId = proposal.graph_entity_id ?? proposalPayload.graph_entity_id ?? proposalPayload.entity_id ?? null;
+  const relationshipType = proposal.relationship_type ?? proposalPayload.relationship_type ?? null;
+  const displayName = proposal.display_name ?? proposalPayload.display_name ?? proposalPayload.name ?? null;
+  const subtitle = proposal.subheading ?? proposal.subtitle ?? proposalPayload.subheading ?? proposalPayload.subtitle ?? null;
+  const description = proposal.description ?? proposalPayload.description ?? null;
   return [
     record("CurationProposal", {
       id: proposalId,
       topicSetId: context.topicSetId,
       corpusId: context.corpusId,
       importRunId: context.importRunId,
-      proposalKind: proposal.kind ?? "unknown",
+      proposalKind,
       steeringDomain,
       status: proposal.status ?? "proposed",
-      title: proposal.display_name ?? proposal.topic_uid ?? proposal.kind ?? "Steering proposal",
+      title: proposal.title ?? displayName ?? topicUid ?? proposalKind ?? "Steering proposal",
       summary: proposal.rationale ?? proposal.description ?? null,
-      topicUid: proposal.topic_uid ?? null,
-      targetTopicUid: proposal.target_topic_uid ?? null,
-      graphEntityId: proposal.graph_entity_id ?? null,
-      relationshipType: proposal.relationship_type ?? null,
-      displayName: proposal.display_name ?? null,
-      subtitle: proposal.subheading ?? proposal.subtitle ?? null,
-      description: proposal.description ?? null,
-      evidenceItemIds: compactArray(proposal.evidence?.item_ids),
+      topicUid,
+      targetTopicUid,
+      graphEntityId,
+      relationshipType,
+      displayName,
+      subtitle,
+      description,
+      evidenceItemIds: compactArray(evidence.item_ids ?? evidence.evidence_item_ids ?? proposal.evidence_item_ids),
       suggestedSeedItemIds: compactArray(proposal.suggested_seed_item_ids),
       suggestedHoldoutItemIds: compactArray(proposal.suggested_holdout_item_ids),
-      sourceSnapshotId: proposal.snapshot_id ?? null,
-      proposedAt: null,
+      sourceSnapshotId: proposal.snapshot_id ?? proposalPayload.graph_snapshot ?? null,
+      proposedAt: dateOrNull(proposal.proposed_at ?? proposal.generated_at) ?? context.now,
       reviewedAt: null,
       reviewedBy: null,
       updatedAt: context.now,

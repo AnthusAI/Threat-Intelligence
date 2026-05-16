@@ -66,10 +66,13 @@ const steeringBundle = {
     },
     {
       proposal_id: "proposal-graph-relationship",
-      kind: "relationship-proposal",
-      topic_uid: "topic.scaling",
-      graph_entity_id: "entity.benchmark-saturation",
-      relationship_type: "influences",
+      proposal_kind: "add-topic-relationship-edge",
+      domain: "graph",
+      payload: {
+        topic_uid: "topic.scaling",
+        graph_entity_id: "entity.benchmark-saturation",
+        relationship_type: "influences",
+      },
       rationale: "Graph steering row.",
     },
   ],
