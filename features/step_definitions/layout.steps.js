@@ -995,22 +995,24 @@ Then("the archive masthead should say {string}", async function (expectedTitle) 
   const report = await requirePage(this).evaluate(() => ({
     title: document.querySelector(".archive-header h1")?.textContent?.trim() ?? "",
     hasFrontPagesText: document.querySelector(".archive-header")?.textContent?.includes("Front Pages") ?? false,
-    hasSubtitleText: document.querySelector(".archive-header")?.textContent?.includes("Previous editions") ?? false,
+    description: document.querySelector("#archive-description")?.textContent?.trim() ?? "",
   }));
   assert.equal(report.title, expectedTitle);
   assert.equal(report.hasFrontPagesText, false);
-  assert.equal(report.hasSubtitleText, false);
+  assert.match(report.description, /previous editions/i);
 });
 
 Then("the archive masthead should use the normal newspaper nameplate height", async function () {
   const report = await requirePage(this).evaluate(() => {
     const header = document.querySelector(".archive-header");
     const title = document.querySelector(".archive-header h1");
-    const meta = document.querySelector(".archive-header__meta");
-    if (!header || !title || !meta) return null;
+    const gridShell = document.querySelector(".archive-grid-shell");
+    const grid = document.querySelector(".archive-grid");
+    if (!header || !title || !gridShell || !grid) return null;
     const headerRect = header.getBoundingClientRect();
     const titleRect = title.getBoundingClientRect();
-    const metaRect = meta.getBoundingClientRect();
+    const gridShellRect = gridShell.getBoundingClientRect();
+    const gridRect = grid.getBoundingClientRect();
     const titleStyle = getComputedStyle(title);
     const rhythm = Number.parseFloat(getComputedStyle(header).getPropertyValue("--paper-rhythm"));
     return {
@@ -1022,9 +1024,8 @@ Then("the archive masthead should use the normal newspaper nameplate height", as
       titleMarginBottom: Number.parseFloat(titleStyle.marginBottom),
       fontSize: Number.parseFloat(titleStyle.fontSize),
       lineHeight: Number.parseFloat(titleStyle.lineHeight),
-      metaTop: metaRect.top - headerRect.top,
-      metaHeight: metaRect.height,
-      metaGap: metaRect.top - headerRect.bottom,
+      gridShellGap: gridShellRect.top - headerRect.bottom,
+      gridTopGap: gridRect.top - gridShellRect.top,
     };
   });
   assert.ok(report, "Expected archive masthead title");
@@ -1038,22 +1039,24 @@ Then("the archive masthead should use the normal newspaper nameplate height", as
   assert.ok(Math.abs(report.titleMarginBottom - expectedHalfRow) <= 0.75, `Expected archive title bottom margin ${report.titleMarginBottom} to be one half-row ${expectedHalfRow}`);
   assert.ok(Math.abs(report.lineHeight - expectedLineHeight) <= 0.75, `Expected archive line height ${report.lineHeight} to match normal masthead ${expectedLineHeight}`);
   assert.ok(Math.abs(report.fontSize - expectedFontSize) <= 0.75, `Expected archive font size ${report.fontSize} to match normal masthead ${expectedFontSize}`);
-  assert.ok(Math.abs(report.metaGap) <= 0.75, `Expected archive metadata strip to start immediately below masthead; gap=${report.metaGap}`);
-  assert.ok(Math.abs(report.metaHeight - report.rhythm) <= 0.75, `Expected archive metadata row height ${report.metaHeight} to be one rhythm row ${report.rhythm}`);
+  assert.ok(Math.abs(report.gridShellGap) <= 0.75, `Expected archive gray substrate to start immediately below masthead; gap=${report.gridShellGap}`);
+  assert.ok(Math.abs(report.gridTopGap - report.rhythm) <= 0.75, `Expected one empty gray row before archive previews; gap=${report.gridTopGap}`);
 });
 
 Then("the archive header should describe previous editions", async function () {
   const report = await requirePage(this).evaluate(() => {
-    const meta = document.querySelector(".archive-header__meta");
-    if (!meta) return null;
+    const description = document.querySelector("#archive-description");
+    if (!description) return null;
     return {
-      subtitle: meta.textContent ?? "",
+      subtitle: description.textContent ?? "",
+      visibleHeight: description.getBoundingClientRect().height,
     };
   });
   assert.ok(report, "Expected archive header report");
   const text = report.subtitle;
   assert.match(text ?? "", /previous editions/i);
   assert.doesNotMatch(text ?? "", /archive/i);
+  assert.ok(report.visibleHeight <= 1, `Expected archive description to be visually hidden; height=${report.visibleHeight}`);
 });
 
 Then("the archive page should expose the shared rhythm overlay", async function () {

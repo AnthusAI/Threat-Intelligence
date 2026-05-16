@@ -10,13 +10,13 @@ export default async function ArchivePage() {
 
   return (
     <ArchiveShell>
-      <header className="masthead archive-header" aria-labelledby="archive-title">
+      <header className="masthead archive-header" aria-describedby="archive-description" aria-labelledby="archive-title">
         <div className="masthead__rule archive-header__rule" />
         <h1 id="archive-title">
           <span>ARCHIVE</span>
         </h1>
+        <p className="archive-description" id="archive-description">Previous editions</p>
       </header>
-      <p className="archive-header__meta">Previous editions</p>
       <ArchiveGrid initialNextCursor={initialBatch.nextCursor ?? null} initialPreviews={initialBatch.previews} />
     </ArchiveShell>
   );

@@ -1177,36 +1177,16 @@ img {
   transform: translateY(var(--masthead-title-optical-shift, -3px));
 }
 
-.archive-header__meta {
-  font-family: Arial, Helvetica, sans-serif;
-  color: var(--muted-strong);
-  align-items: center;
-  background: var(--paper-background);
-  background-size: var(--paper-background-size);
-  block-size: var(--paper-rhythm, 19px);
-  box-sizing: border-box;
-  display: flex;
-  font-size: 0.78rem;
-  font-weight: 700;
-  justify-content: center;
-  letter-spacing: 0.08em;
-  line-height: var(--paper-rhythm, 19px);
-  margin: 0;
-  padding: 0 var(--archive-page-padding);
-  position: relative;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.archive-header__meta::after {
-  border-top: var(--masthead-rule-weight) solid var(--rule);
-  bottom: calc(-1 * var(--masthead-rule-weight));
-  content: "";
-  font-size: 1rem;
-  left: var(--archive-page-padding);
-  pointer-events: none;
+.archive-description {
+  block-size: 1px;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  inline-size: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
   position: absolute;
-  right: var(--archive-page-padding);
+  white-space: nowrap;
 }
 
 .archive-grid-shell {
