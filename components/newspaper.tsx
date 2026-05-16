@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ARCHIVE_PREVIEW_HEIGHT, ARCHIVE_PREVIEW_WIDTH } from "../lib/archive-types";
 import type { EditionContent } from "../lib/content-types";
 import { shouldBypassImageOptimization } from "../lib/image-url";
+import { ReaderAuthControl } from "./reader-auth-control";
 import {
   buildNewspaperLayout,
   type NewspaperLayout,
@@ -471,17 +472,28 @@ function EditionProgress({
 }) {
   return (
     <nav className="edition-progress" aria-label="Edition progress" ref={progressRef}>
-      <button className="edition-progress__button" disabled={!onPrevious} onClick={onPrevious} type="button">
+      <button
+        className="edition-progress__button edition-progress__button--previous"
+        disabled={!onPrevious}
+        onClick={onPrevious}
+        type="button"
+      >
         <EditionProgressTriangleIcon direction="previous" />
         Previous
       </button>
       <span className="edition-progress__status">
         Page {currentPage ?? "--"} of {totalPages ?? "--"}
       </span>
-      <button className="edition-progress__button" disabled={!onNext} onClick={onNext} type="button">
+      <button
+        className="edition-progress__button edition-progress__button--next"
+        disabled={!onNext}
+        onClick={onNext}
+        type="button"
+      >
         Next
         <EditionProgressTriangleIcon direction="next" />
       </button>
+      <ReaderAuthControl />
     </nav>
   );
 }

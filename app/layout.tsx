@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Playfair_Display } from "next/font/google";
+import { AmplifyClientProvider } from "../components/amplify-client-provider";
 import "./globals.css";
 
 const playfairDisplay = Playfair_Display({
@@ -18,7 +19,9 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body className={playfairDisplay.variable}>{children}</body>
+      <body className={playfairDisplay.variable}>
+        <AmplifyClientProvider>{children}</AmplifyClientProvider>
+      </body>
     </html>
   );
 }

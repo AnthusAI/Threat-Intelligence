@@ -187,11 +187,12 @@ img {
   background: rgb(var(--paper-rgb) / 0.72);
   block-size: var(--edition-progress-height);
   border-bottom: 0;
+  column-gap: 0.75rem;
   display: grid;
   font-family: Arial, Helvetica, sans-serif;
   font-size: 0.78rem;
   font-weight: 800;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto;
   letter-spacing: 0.02em;
   line-height: var(--edition-progress-height);
   min-height: var(--edition-progress-height);
@@ -233,15 +234,66 @@ img {
   inline-size: 0.62rem;
 }
 
-.edition-progress__button:first-of-type {
+.edition-progress__button--previous {
   justify-self: start;
 }
 
-.edition-progress__button:last-of-type {
+.edition-progress__button--next {
   justify-self: end;
 }
 
 .edition-progress__button:disabled {
+  color: var(--disabled);
+  cursor: default;
+  text-decoration: none;
+}
+
+.reader-auth {
+  align-items: center;
+  display: inline-flex;
+  gap: 0.45rem;
+  justify-self: end;
+  line-height: inherit;
+  min-width: 0;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.reader-auth__identity,
+.reader-auth__error {
+  display: inline-block;
+  line-height: inherit;
+  max-inline-size: min(22vw, 17rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: top;
+}
+
+.reader-auth__identity {
+  color: var(--muted-strong);
+}
+
+.reader-auth__error {
+  color: var(--ink);
+}
+
+.reader-auth__button {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  line-height: inherit;
+  padding: 0;
+  text-decoration: underline;
+  text-decoration-color: rgb(var(--accent-rgb) / 0.6);
+  text-underline-offset: 0.16em;
+  text-transform: uppercase;
+}
+
+.reader-auth__button:disabled {
   color: var(--disabled);
   cursor: default;
   text-decoration: none;
@@ -1367,6 +1419,17 @@ img {
 @media (max-width: 559px) {
   :root {
     --edition-progress-height: 18px;
+  }
+
+  .edition-progress {
+    column-gap: 0.5rem;
+    font-size: 0.68rem;
+    padding: 0 10px;
+  }
+
+  .reader-auth__identity,
+  .reader-auth__error {
+    display: none;
   }
 
   .masthead__meta {
