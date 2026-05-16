@@ -38,11 +38,15 @@ Initial upload, reviewed before writing:
 aws s3 sync \
   /Users/ryan/Projects/Biblicus/corpora/AI-ML-research \
   s3://$PAPYRUS_CORPORA_BUCKET/corpora/AI-ML-research/ \
+  --exclude ".DS_Store" \
+  --exclude "*/.DS_Store" \
   --dryrun
 
 aws s3 sync \
   /Users/ryan/Projects/Biblicus/corpora/AI-ML-history \
   s3://$PAPYRUS_CORPORA_BUCKET/corpora/AI-ML-history/ \
+  --exclude ".DS_Store" \
+  --exclude "*/.DS_Store" \
   --dryrun
 ```
 
@@ -54,11 +58,15 @@ Worker refresh from S3 into local Biblicus working copies:
 ```bash
 aws s3 sync \
   s3://$PAPYRUS_CORPORA_BUCKET/corpora/AI-ML-research/ \
-  /Users/ryan/Projects/Biblicus/corpora/AI-ML-research/
+  /Users/ryan/Projects/Biblicus/corpora/AI-ML-research/ \
+  --exclude ".DS_Store" \
+  --exclude "*/.DS_Store"
 
 aws s3 sync \
   s3://$PAPYRUS_CORPORA_BUCKET/corpora/AI-ML-history/ \
-  /Users/ryan/Projects/Biblicus/corpora/AI-ML-history/
+  /Users/ryan/Projects/Biblicus/corpora/AI-ML-history/ \
+  --exclude ".DS_Store" \
+  --exclude "*/.DS_Store"
 ```
 
 After a worker runs Biblicus commands that create artifacts, push the changed
@@ -69,6 +77,8 @@ worker is intentionally reconciling S3 to its complete local working copy.
 aws s3 sync \
   /Users/ryan/Projects/Biblicus/corpora/AI-ML-research \
   s3://$PAPYRUS_CORPORA_BUCKET/corpora/AI-ML-research/ \
+  --exclude ".DS_Store" \
+  --exclude "*/.DS_Store" \
   --dryrun
 ```
 
