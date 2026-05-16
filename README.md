@@ -197,21 +197,24 @@ For Amplify development, run `npm run sandbox` to provision a local cloud
 sandbox. After the sandbox has generated `amplify_outputs.json`, run
 `npm run seed:amplify` to upload fixture content and media.
 
-For content authoring against a deployed API:
+For content inspection and admin against a deployed API:
 
 ```bash
 npm run content -- content inspect
 npm run content -- content list articles
-npm run content -- content diff edition current
-npm run content -- content sync article agent-procedure-patterns
-npm run content -- content sync edition current
 npm run content -- content delete all --yes
 ```
 
 Set `PAPYRUS_GRAPHQL_ENDPOINT` and `PAPYRUS_GRAPHQL_JWT` before running
-authoring commands. The JWT is sent directly as the AppSync `Authorization`
-bearer token and is validated through the configured Lambda authorizer. No
-Papyrus editor login or local auth-session cache is involved.
+authoring commands. The JWT is sent in the AppSync `Authorization` header using
+the Papyrus Lambda-authorizer scheme. No Papyrus editor login or local
+auth-session cache is involved.
+
+The CLI still contains legacy `diff` and `sync` commands for source-driven
+publishing, but those commands require a local source adapter. The runtime no
+longer has a committed `content/articles` Markdown store, so do not cite
+`content sync edition current` as the production publishing path unless a
+current source payload exists and has been validated.
 
 `content delete all --yes` removes CMS records through the same JWT/Lambda-authorizer
 authoring lane. It does not use API-key reads and should not be replaced with a
@@ -224,6 +227,37 @@ AWS_PROFILE=default AWS_REGION=us-east-1 npm run sandbox
 AWS_PROFILE=default AWS_REGION=us-east-1 npm run seed:amplify
 AWS_PROFILE=default npm run dev
 ```
+
+## Production Content Operations
+
+Production content lives in Amplify Data. The reader path uses API-key GraphQL
+reads through `ContentRepository`; production writes and repairs should use the
+JWT/Lambda-authorizer authoring lane or an explicit AWS-backed maintenance
+script. Do not repair production by adding a runtime Markdown content source.
+
+The production archive has one important invariant: a published edition must
+have all of these fields set:
+
+- `Edition.status = "published"`
+- `Edition.editionDate`, for canonical date routes such as `/2026/may/13`
+- `Edition.publishedAt`, for archive listing and freshness sort order
+
+If the home page or a date route can load an edition but `/archive` says
+`No published editions are available yet`, check `publishedAt` first. The
+archive API lists editions through the `status + publishedAt` index, so records
+created before that field was populated can be published and still absent from
+the archive. Backfill the edition with a stable timestamp such as
+`2026-05-13T12:00:00.000Z`, then verify the archive endpoint returns at least
+one preview:
+
+```bash
+curl -sS "$PAPYRUS_BASE_URL/api/archive/editions?limit=1"
+```
+
+For local sandbox content, use `npm run seed:amplify`. That seed path uses
+fixture content and Cognito editor credentials, uploads media to Storage, and
+sets `publishedAt` on the seeded edition. Treat it as a sandbox/dev workflow,
+not as an implicit production publish command.
 
 ## Layout Scenario Tests
 

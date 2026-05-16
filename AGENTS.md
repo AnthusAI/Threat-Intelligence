@@ -143,6 +143,9 @@ GraphQL (or `?scenario=<id>` fixture overrides for tests/debug only).
   `EditionContent`.
 - Routes that use GraphQL content must stay dynamic because signed media URLs
   expire.
+- Archive listing depends on published editions having both `editionDate` and
+  non-null `publishedAt`; if `/archive` is empty while a date route works,
+  inspect and backfill `Edition.publishedAt` before changing the renderer.
 - The read path does not require a hand-managed token in `.env`. It uses
   `amplify_outputs.json` plus Amplify runtime configuration.
 - The public read path should keep using `authMode: "apiKey"` even though the
@@ -167,7 +170,8 @@ GraphQL (or `?scenario=<id>` fixture overrides for tests/debug only).
 - The data API supports public API-key reads, Cognito user-pool auth, and a
   separate Lambda JWT authorizer lane. Match the intended `../Plexus/dashboard` shape:
   public API-key access stays available, Cognito remains available, and utility
-  clients can send a raw bearer JWT accepted by AppSync Lambda-authorizer auth.
+  clients can send a direct JWT through the AppSync Lambda-authorizer auth
+  scheme.
 - Lambda-authorizer auth deployment requires an Amplify secret named
   `PAPYRUS_JWT_SECRET`. The model rules allow public reads, Cognito `editor`
   group writes, and custom JWT-authorizer writes.
@@ -178,6 +182,10 @@ GraphQL (or `?scenario=<id>` fixture overrides for tests/debug only).
 - The CLI is GraphQL authoring and inspection.
 - `scripts/lib/papyrus-graphql-authoring.cjs` owns JWT-authenticated GraphQL
   authoring calls.
+- `content inspect`, `content list`, and `content delete all --yes` are the
+  stable deployed-API operations. `content diff` and `content sync` are
+  source-driven publishing commands; do not use them as a production runbook
+  unless the current source adapter and source payload exist.
 - In the current CLI authoring path, media assets must use external URLs. Do
   not add half-working direct S3 uploads without also introducing an
   authenticated Storage strategy that matches the chosen credentials model.
@@ -341,6 +349,9 @@ To add or change article data:
 
 - Update content in GraphQL (`Item`, `MediaAsset`, `Edition`, `EditionItem`)
   through the CLI authoring lane.
+- Published editions must set `status`, `editionDate`, and `publishedAt`.
+  `publishedAt` is required for archive listing and freshness order, even when
+  date routes can still find the edition through `editionDate`.
 - Edit `lib/articles.ts` only for base fixture/test data and scenario work.
 - Add edge-case scenario variants in `lib/layout-scenarios.ts`.
 - Keep body paragraphs long enough for continuation experiments.
@@ -412,6 +423,13 @@ npm run build
 Only run sandbox provisioning when the user expects AWS resources to be created
 or updated. It requires configured AWS credentials and may create cloud
 resources.
+
+For archive or production content changes, also verify the reader endpoint that
+the public page uses:
+
+```bash
+curl -sS "$PAPYRUS_BASE_URL/api/archive/editions?limit=1"
+```
 
 Browser smoke test these viewports:
 
