@@ -45,38 +45,39 @@ export const editionDate = "Wednesday, May 13, 2026";
 
 export const articles: Article[] = [
   {
-    slug: "harbor-grid",
-    shortSlug: "GRID",
-    section: "Infrastructure",
-    headline: "Harbor Microgrids Take Shape Before the Summer Peak",
+    slug: "agent-procedure-patterns",
+    shortSlug: "AGENTS",
+    section: "AI/ML",
+    headline: "The Next Agent Breakthrough Is a Checklist",
     deck:
-      "A patchwork of batteries, rooftop solar, and tide-aware demand plans is becoming the city utility's fastest-moving resilience program.",
-    byline: "Mara Ellison",
-    dateline: "PORT KESWICK",
+      "Developers are learning that reliable agents need less freedom, not more: state machines, scoped tools, policy gates, and step-by-step procedure.",
+    byline: "Papyrus Staff",
+    dateline: "NEWSROOM",
     image: {
-      src: "https://images.unsplash.com/photo-1493246507139-91e8fad9978e?auto=format&fit=crop&w=1200&q=80",
-      alt: "A harbor shoreline at sunrise with utility lights in the distance",
-      credit: "Field photo",
+      src: "/agent-procedure-continuum.svg",
+      alt: "A chart showing a continuum from predictable scripts to open-ended agents",
+      caption: "Bounded agents sit between rigid scripts and open-ended tool use.",
+      credit: "Papyrus chart",
       layout: {
         minHeight: 120,
         preferredHeight: 190,
         maxHeight: 360,
         aspectRatio: 1.5,
-        crop: "cover",
+        crop: "contain",
         wrapsText: true,
       },
     },
     pullQuotes: [
-      "The new microgrid is designed to work in layers.",
-      "Officials plan to repeat the pattern in six other low-lying districts.",
+      "The practical breakthrough is not giving agents a bigger sandbox.",
+      "A tiny tool-calling model can follow agent steps as long as the workflow is enforced outside the prompt.",
     ],
     body: [
-      "The first sign of the new power system is not a turbine or a substation. It is a row of gray cabinets behind the fish market, humming softly while forklifts pass in the alley and gulls circle above the pier. By July, the cabinets will be tied to four rooftop arrays, two refrigerated warehouses, the ferry terminal, and a neighborhood shelter that lost power for thirty-one hours during last year's heat wave.",
-      "Utility planners call the pilot modest. The residents who watched extension cords snake across flooded sidewalks call it overdue. The harbor district sits at the end of two aging feeders, both vulnerable to saltwater intrusion and both carrying more load as restaurants electrify their kitchens and cold-storage operators add compressors.",
-      "The new microgrid is designed to work in layers. On ordinary days it shaves peak demand by charging batteries in the morning and discharging in the late afternoon. During storms it can island from the wider grid and keep essential loads alive. During heat emergencies it can pay participating businesses to pre-cool inventory, dim nonessential lighting, and share capacity with the shelter.",
-      "What makes the program unusual is the amount of software behind the familiar hardware. The controller receives tide forecasts, outage risk scores, wholesale energy prices, and building-level load predictions every fifteen minutes. It then chooses a dispatch plan that favors reliability over arbitrage whenever emergency thresholds are crossed.",
-      "Engineers say the most difficult work has been social rather than electrical. Each participant has a different tolerance for interruption, a different billing arrangement, and a different view of who should get power first when the grid is strained. The city settled on a public priority list after three community meetings and a contentious workshop with harbor employers.",
-      "If the pilot performs through two storm seasons, officials plan to repeat the pattern in six other low-lying districts. That would turn scattered backup systems into a flexible civic resource, one able to absorb rooftop solar, protect clinics and cooling centers, and reduce the need for expensive feeder upgrades.",
+      "Developers are learning that reliable agents need less freedom, not more: state machines, scoped tools, policy gates, and step-by-step procedure. The most interesting argument this week was not about a new frontier model. It was about how much freedom an AI agent should be allowed to have.",
+      "Across demos, comments, and tool launches, builders kept circling the same answer: the practical breakthrough is not giving agents a bigger sandbox, but putting them inside a procedure. That marks a quiet reversal in the agent story. The first wave of agent demos sold autonomy: ask for an outcome and let the model decide what to do. The newer work is more cautious and more useful.",
+      "It treats agency as a dial, not a switch. At one end are scripts, workflow engines, and RPA jobs: predictable, auditable, and brittle when reality changes. At the other end are open-ended agents that can plan, browse, call tools, edit files, and recover from surprises, but may also wander, repeat themselves, or take unsafe actions. The emerging middle ground is bounded agency.",
+      "A model can improvise, but only inside states, allowed tools, review gates, and traceable transitions. The Statewright project drew attention because it says part of this out loud. Its author argues that agentic problem solving becomes more reliable when the problem is made smaller instead of the model larger.",
+      "A planning state can get read-only tools. An implementation state can get edit tools. A testing state can get test commands. The model cannot skip the workflow because the workflow is enforced outside the prompt. That pattern is showing up elsewhere. A tiny tool-calling model can follow agent steps as long as the next action is constrained by a procedure.",
+      "The lesson is not that agents are over. It is that they need architecture. The frontier is shifting from open-ended instruction following to systems that decide where the model is allowed to be creative and where the software should be boring. In practice, the checklist may be the most important agent interface.",
     ],
   },
   {
@@ -91,12 +92,13 @@ export const articles: Article[] = [
     image: {
       src: "https://images.unsplash.com/photo-1509062522246-3755977927d7?auto=format&fit=crop&w=1000&q=80",
       alt: "Students working together at a classroom table",
+      caption: "Students rotate through short reading-practice stations built around live diagnostics.",
       credit: "Classroom notebook",
       layout: {
         minHeight: 120,
         preferredHeight: 220,
         maxHeight: 420,
-        aspectRatio: 1.5,
+        aspectRatio: 4 / 3,
         crop: "cover",
         wrapsText: true,
       },
@@ -125,12 +127,13 @@ export const articles: Article[] = [
     image: {
       src: "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=1000&q=80",
       alt: "A busy restaurant kitchen with stainless steel counters",
+      caption: "The renovated market hall combines prep kitchens, storefront counters, and shared cold storage.",
       credit: "Kitchen file",
       layout: {
         minHeight: 110,
         preferredHeight: 210,
         maxHeight: 380,
-        aspectRatio: 1.5,
+        aspectRatio: 4 / 3,
         crop: "cover",
         wrapsText: false,
       },
@@ -158,6 +161,7 @@ export const articles: Article[] = [
     image: {
       src: "https://images.unsplash.com/photo-1589578527966-fdac0f44566c?auto=format&fit=crop&w=1000&q=80",
       alt: "Sunlight through the columns of a courthouse",
+      caption: "Court administrators are balancing public-record access with case-management automation.",
       credit: "Courthouse file",
       layout: {
         minHeight: 120,
@@ -191,6 +195,7 @@ export const articles: Article[] = [
     image: {
       src: "https://images.unsplash.com/photo-1474487548417-781cb71495f3?auto=format&fit=crop&w=1000&q=80",
       alt: "A passenger train waiting at a platform",
+      caption: "Regional rail planners are testing later departures before committing to permanent schedules.",
       credit: "Rail archive",
       layout: {
         minHeight: 110,
@@ -223,6 +228,7 @@ export const articles: Article[] = [
     image: {
       src: "https://images.unsplash.com/photo-1446776811953-b23d57bd21aa?auto=format&fit=crop&w=1000&q=80",
       alt: "A satellite view of Earth and weather systems",
+      caption: "Small climate ledgers increasingly rely on satellite checks instead of annual surveys.",
       credit: "Remote sensing",
       layout: {
         minHeight: 120,
