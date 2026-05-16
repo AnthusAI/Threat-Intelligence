@@ -6,6 +6,39 @@ references, decisions, and stable external IDs. It does not mirror Biblicus
 corpus items into GraphQL; evidence remains a Biblicus `item_id` reference until
 Papyrus deliberately turns some information into its own publication content.
 
+This runbook is written against the current AI/ML pilot corpora, but the system
+is domain-neutral. A publication about any area of interest should be configured
+by changing corpus keys, S3 prefixes, topic classifiers, steering decisions, and
+agent instructions. Papyrus application code should not know whether a corpus is
+about research papers, sports, markets, crafts, local government, or any other
+beat.
+
+## Publication Configuration Model
+
+The publication is assembled from configuration plus artifacts:
+
+- `corpora/papyrus-steering.yml` names the publication, the canonical topic-set
+  authority, each corpus key, corpus role, local classifier ids, local working
+  copy path, and S3 prefix.
+- Biblicus owns corpus artifacts: source documents, sidecars, extraction
+  snapshots, topic-modeling results, graph snapshots, proposal bundles,
+  classifier manifests, and projection output.
+- Papyrus owns human steering state and publication state: canonical topic copy,
+  proposal review decisions, accepted topic revisions, projection summaries, CMS
+  `Item` records, editions, edition layouts, and reader-facing media.
+- Future research agents should be configured by publication/corpus instruction
+  files rather than hard-coded in Papyrus. Those instructions should tell agents
+  what sources to inspect, what editorial voice and beats matter, how to use
+  accepted topic sets and graph steering, and what artifacts to produce for
+  Papyrus import. The instruction surface does not exist yet; when it does, keep
+  it beside the publication/corpus config and mirror it to S3 with the corpus
+  data.
+
+For a new publication, start by creating or replacing the steering config and
+corpus prefixes. Then import the config, run Biblicus artifact-producing
+commands for those corpora, and import only steering/topic/projection outputs
+into Papyrus. Do not create application branches that special-case a domain.
+
 ## Durable Corpus Storage
 
 Publication corpora live durably in the production Amplify Storage bucket under
@@ -314,6 +347,47 @@ npm run content -- curation import-steering \
   --config corpora/papyrus-steering.yml \
   --corpus-key AI-ML-research
 ```
+
+## Taxonomy And Ontology Steering
+
+Biblicus now uses the unified steering proposal contract for taxonomy and
+ontology work as well as graph work. A steering export can include flattened
+proposal rows and `proposal_bundles` for kinds such as:
+
+- `create-taxonomy-node`;
+- `move-taxonomy-node`;
+- `merge-taxonomy-nodes`;
+- `split-taxonomy-node`;
+- `archive-taxonomy-node`;
+- `add-ontology-relationship`;
+- `add-relationship-type`;
+- `suppress-entity-or-edge`.
+
+Papyrus v1 imports these rows into `CurationProposal` and keeps full details in
+private `CurationRawPayload`. Typed summary fields are best-effort display
+fields: taxonomy proposals can map `topic_uid`, `parent_topic_uid`, display
+copy, and document evidence; ontology proposals can map `assertion_id`,
+`source_ref`, `relationship_uid`, `target_ref`, and evidence IDs. The accepted
+taxonomy and ontology manifests themselves are Biblicus artifacts, not embedded
+top-level fields in the current steering export.
+
+Keep this distinction clear in review UI and automation:
+
+- Flat canonical topic proposal kinds such as `rename-topic` and
+  `topic-display-copy-edit` use the tailored topic controls and can update
+  draft topic revisions when accepted.
+- Taxonomy, ontology, and GraphRAG proposal kinds stay in the generic queue for
+  v1. Accepting, rejecting, or deferring them records a Papyrus decision and
+  updates proposal status; it should not mutate flat topic copy or topic-set
+  revision state.
+- Biblicus proposal labels `recommend`, `do_not_recommend`, and
+  `needs_clarification` are agent recommendation labels. Papyrus human review
+  actions remain `accept`, `reject`, and `defer`.
+
+If editors need first-class accepted hierarchy or relationship editing, add a
+deliberate Papyrus schema/UI pass for accepted taxonomy and ontology summaries.
+Until then, keep public display limited to curated typed topic fields and
+generic proposal rows, with artifact refs pointing back to Biblicus overlays.
 
 ## Local Corpus Working Copies
 

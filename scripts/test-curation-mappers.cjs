@@ -84,6 +84,39 @@ const steeringBundle = {
       },
       rationale: "Graph steering row.",
     },
+    {
+      proposal_id: "proposal-taxonomy-node",
+      proposal_kind: "create-taxonomy-node",
+      domain: "topic",
+      recommendation: "needs_clarification",
+      status: "proposed",
+      evidence: { item_ids: ["research-001"] },
+      rationale: "Scoped discovery found a possible child topic.",
+      payload: {
+        topic_uid: "topic.scaling-memory",
+        parent_topic_uid: "topic.scaling",
+        display_name: "Scaling Memory",
+        description: "Candidate child topic under scaling.",
+        document_ids: ["research-001"],
+        keywords: ["memory"],
+      },
+    },
+    {
+      proposal_id: "proposal-ontology-assertion",
+      proposal_kind: "add-ontology-relationship",
+      domain: "graph",
+      recommendation: "recommend",
+      status: "proposed",
+      evidence: { item_ids: ["research-001"] },
+      rationale: "The evidence supports a typed relationship.",
+      payload: {
+        assertion_id: "assertion-scaling-history",
+        source_ref: "topic:topic.history",
+        relationship_uid: "historical_context_for",
+        target_ref: "topic:topic.scaling-memory",
+        evidence_item_ids: ["research-001"],
+      },
+    },
   ],
   warnings: [],
 };
@@ -158,6 +191,21 @@ assert.equal(topicProposal.source_notes, undefined);
 const graphProposal = findRecord(steeringPlan.records, "CurationProposal", (record) => record.id.includes("proposal-graph-relationship"));
 assert.equal(graphProposal.steeringDomain, "graph");
 assert.equal(graphProposal.relationshipType, "influences");
+
+const taxonomyProposal = findRecord(steeringPlan.records, "CurationProposal", (record) => record.id.includes("proposal-taxonomy-node"));
+assert.equal(taxonomyProposal.proposalKind, "create-taxonomy-node");
+assert.equal(taxonomyProposal.steeringDomain, "topic");
+assert.equal(taxonomyProposal.topicUid, "topic.scaling-memory");
+assert.equal(taxonomyProposal.targetTopicUid, "topic.scaling");
+assert.equal(taxonomyProposal.relationshipType, "subtopic_of");
+assert.equal(taxonomyProposal.displayName, "Scaling Memory");
+
+const ontologyProposal = findRecord(steeringPlan.records, "CurationProposal", (record) => record.id.includes("proposal-ontology-assertion"));
+assert.equal(ontologyProposal.proposalKind, "add-ontology-relationship");
+assert.equal(ontologyProposal.steeringDomain, "graph");
+assert.equal(ontologyProposal.graphEntityId, "assertion-scaling-history");
+assert.equal(ontologyProposal.relationshipType, "historical_context_for");
+assert.equal(ontologyProposal.targetTopicUid, "topic:topic.scaling-memory");
 
 const rawProposal = findRecord(steeringPlan.records, "CurationRawPayload", (record) => record.ownerId === topicProposal.id);
 assert.equal(rawProposal.payloadKind, "biblicus-proposal");

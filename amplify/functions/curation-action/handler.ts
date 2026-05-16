@@ -7,6 +7,17 @@ import type { Schema } from "../../data/resource";
 type ReviewHandler = Schema["reviewCurationProposal"]["functionHandler"];
 type PromoteHandler = Schema["promoteCurationTopicRevision"]["functionHandler"];
 type DataClient = ReturnType<typeof generateClient<Schema>>;
+const TOPIC_MUTATION_PROPOSAL_KINDS = new Set([
+  "new-topic",
+  "rename-topic",
+  "merge-topic",
+  "deprecate-topic",
+  "seed-change",
+  "holdout-change",
+  "topic-display-copy-edit",
+  "topic-copy-edit",
+  "display-copy-edit",
+]);
 
 let clientPromise: Promise<DataClient> | null = null;
 
@@ -53,7 +64,7 @@ async function reviewCurationProposal(event: Parameters<ReviewHandler>[0]) {
 
   let topicId: string | null = null;
   let revisionId: string | null = null;
-  if ((action === "accept" || action === "edit") && proposal.topicSetId && proposal.topicUid) {
+  if ((action === "accept" || action === "edit") && shouldApplyTopicProposal(proposal)) {
     topicId = await upsertAcceptedTopicFromProposal(client, proposal, event.arguments, now);
     revisionId = await upsertDraftRevision(client, proposal, decisionId, now);
   }
@@ -67,6 +78,16 @@ async function reviewCurationProposal(event: Parameters<ReviewHandler>[0]) {
     decisionId,
     status: proposalStatus,
   };
+}
+
+function shouldApplyTopicProposal(proposal: any): boolean {
+  const proposalKind = normalizeOptionalString(proposal.proposalKind);
+  return Boolean(
+    proposal.topicSetId
+      && proposal.topicUid
+      && proposalKind
+      && TOPIC_MUTATION_PROPOSAL_KINDS.has(proposalKind),
+  );
 }
 
 async function promoteCurationTopicRevision(event: Parameters<PromoteHandler>[0]) {

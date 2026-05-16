@@ -296,9 +296,22 @@ function proposalRecords(proposal, context) {
   const evidence = proposal.evidence && typeof proposal.evidence === "object" ? proposal.evidence : {};
   const steeringDomain = proposal.domain ?? inferSteeringDomain(proposalKind);
   const topicUid = proposal.topic_uid ?? proposalPayload.topic_uid ?? null;
-  const targetTopicUid = proposal.target_topic_uid ?? proposalPayload.target_topic_uid ?? null;
-  const graphEntityId = proposal.graph_entity_id ?? proposalPayload.graph_entity_id ?? proposalPayload.entity_id ?? null;
-  const relationshipType = proposal.relationship_type ?? proposalPayload.relationship_type ?? null;
+  const targetTopicUid = proposal.target_topic_uid
+    ?? proposalPayload.target_topic_uid
+    ?? proposalPayload.parent_topic_uid
+    ?? proposalPayload.proposed_parent_topic_uid
+    ?? proposalPayload.target_ref
+    ?? null;
+  const graphEntityId = proposal.graph_entity_id
+    ?? proposalPayload.graph_entity_id
+    ?? proposalPayload.entity_id
+    ?? proposalPayload.assertion_id
+    ?? proposalPayload.source_ref
+    ?? null;
+  const relationshipType = proposal.relationship_type
+    ?? proposalPayload.relationship_type
+    ?? proposalPayload.relationship_uid
+    ?? (proposalPayload.parent_topic_uid ? "subtopic_of" : null);
   const displayName = proposal.display_name ?? proposalPayload.display_name ?? proposalPayload.name ?? null;
   const subtitle = proposal.subheading ?? proposal.subtitle ?? proposalPayload.subheading ?? proposalPayload.subtitle ?? null;
   const description = proposal.description ?? proposalPayload.description ?? null;
@@ -320,7 +333,7 @@ function proposalRecords(proposal, context) {
       displayName,
       subtitle,
       description,
-      evidenceItemIds: compactArray(evidence.item_ids ?? evidence.evidence_item_ids ?? proposal.evidence_item_ids),
+      evidenceItemIds: compactArray(evidence.item_ids ?? evidence.evidence_item_ids ?? proposal.evidence_item_ids ?? proposalPayload.evidence_item_ids ?? proposalPayload.document_ids),
       suggestedSeedItemIds: compactArray(proposal.suggested_seed_item_ids),
       suggestedHoldoutItemIds: compactArray(proposal.suggested_holdout_item_ids),
       sourceSnapshotId: proposal.snapshot_id ?? proposalPayload.graph_snapshot ?? null,

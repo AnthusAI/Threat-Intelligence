@@ -20,6 +20,18 @@ type ActionState = {
   tone: "ok" | "error" | "pending";
 };
 
+const TAILORED_TOPIC_PROPOSAL_KINDS = new Set([
+  "new-topic",
+  "rename-topic",
+  "merge-topic",
+  "deprecate-topic",
+  "seed-change",
+  "holdout-change",
+  "topic-display-copy-edit",
+  "topic-copy-edit",
+  "display-copy-edit",
+]);
+
 export function TopicSteeringWorkspace({ dashboard }: { dashboard: TopicSteeringDashboard }) {
   const dataClient = useMemo(() => generateClient<Schema>(), []);
   const [topics, setTopics] = useState(dashboard.topics);
@@ -27,8 +39,8 @@ export function TopicSteeringWorkspace({ dashboard }: { dashboard: TopicSteering
   const [actionState, setActionState] = useState<ActionState | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  const topicProposals = proposals.filter((proposal) => proposal.steeringDomain === "topic");
-  const graphProposals = proposals.filter((proposal) => proposal.steeringDomain === "graph");
+  const topicProposals = proposals.filter(isTailoredTopicProposal);
+  const genericProposals = proposals.filter((proposal) => !isTailoredTopicProposal(proposal));
   const activeTopicSet = useMemo(() => (
     dashboard.topicSets.find((topicSet) => topicSet.id === dashboard.canonicalTopicSetId)
     ?? dashboard.topicSets[0]
@@ -161,7 +173,7 @@ export function TopicSteeringWorkspace({ dashboard }: { dashboard: TopicSteering
       <section className="topic-steering-status-grid" aria-label="Import and projection status">
         <StatusMetric label="Corpora" value={String(dashboard.corpora.length)} detail={dashboard.corpora.map((corpus) => corpus.name).join(" / ")} />
         <StatusMetric label="Canonical Topics" value={String(canonicalTopics.length)} detail={activeTopicSet ? `${activeTopicSet.displayName}${canonicalCorpus ? ` / ${canonicalCorpus.name}` : ""}` : "No accepted topic set"} />
-        <StatusMetric label="Steering Proposals" value={String(proposals.filter((proposal) => proposal.status === "proposed").length)} detail={`${topicProposals.length} topic / ${graphProposals.length} graph`} />
+        <StatusMetric label="Steering Proposals" value={String(proposals.filter((proposal) => proposal.status === "proposed").length)} detail={`${topicProposals.length} topic / ${genericProposals.length} generic`} />
         <StatusMetric label="Projection Rows" value={String(dashboard.projections.length)} detail={latestImport ? `${latestImport.importKind} ${latestImport.status}` : "No projection import"} />
       </section>
 
@@ -191,35 +203,7 @@ export function TopicSteeringWorkspace({ dashboard }: { dashboard: TopicSteering
         </div>
       </section>
 
-      <section className="topic-steering-section" aria-labelledby="graph-steering-queue-title">
-        <SectionHeader title="Graph Steering Queue" detail={`${graphProposals.length} generic rows`} />
-        <div className="topic-steering-table-wrap">
-          <table className="topic-steering-table">
-            <thead>
-              <tr>
-                <th>Kind</th>
-                <th>Topic</th>
-                <th>Entity</th>
-                <th>Relationship</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {graphProposals.length ? graphProposals.map((proposal) => (
-                <tr key={proposal.id}>
-                  <td>{proposal.proposalKind}</td>
-                  <td>{proposal.topicUid ?? "unmapped"}</td>
-                  <td>{proposal.graphEntityId ?? "new entity"}</td>
-                  <td>{proposal.relationshipType ?? "none"}</td>
-                  <td><StatusPill status={proposal.status} /></td>
-                </tr>
-              )) : (
-                <tr><td colSpan={5}>No graph steering proposals</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <GenericProposalQueue proposals={genericProposals} disabled={isPending} onAction={runProposalAction} />
 
       <CorpusTopicSetSummary
         corpora={dashboard.corpora}
@@ -269,6 +253,66 @@ function SectionHeader({ title, detail }: { title: string; detail: string }) {
       <span>{detail}</span>
     </header>
   );
+}
+
+function GenericProposalQueue({
+  proposals,
+  disabled,
+  onAction,
+}: {
+  proposals: TopicSteeringProposal[];
+  disabled: boolean;
+  onAction: (proposal: TopicSteeringProposal, action: "accept" | "reject" | "defer") => void;
+}) {
+  return (
+    <section className="topic-steering-section" aria-labelledby="taxonomy-ontology-graph-queue-title">
+      <SectionHeader title="Taxonomy, Ontology, And Graph Queue" detail={`${proposals.length} generic rows`} />
+      <div className="topic-steering-table-wrap">
+        <table className="topic-steering-table">
+          <thead>
+            <tr>
+              <th>Domain</th>
+              <th>Kind</th>
+              <th>Subject</th>
+              <th>Relationship</th>
+              <th>Status</th>
+              <th>Review</th>
+            </tr>
+          </thead>
+          <tbody>
+            {proposals.length ? proposals.map((proposal) => (
+              <tr key={proposal.id} data-generic-proposal-kind={proposal.proposalKind}>
+                <td>{proposal.steeringDomain}</td>
+                <td>{proposal.proposalKind}</td>
+                <td>{formatGenericProposalSubject(proposal)}</td>
+                <td>{proposal.relationshipType ?? "none"}</td>
+                <td><StatusPill status={proposal.status} /></td>
+                <td>
+                  <div className="topic-steering-proposal__actions" aria-label={`${proposal.title} review actions`}>
+                    <button type="button" disabled={disabled || proposal.status === "accepted"} onClick={() => onAction(proposal, "accept")}>Accept</button>
+                    <button type="button" disabled={disabled || proposal.status === "deferred"} onClick={() => onAction(proposal, "defer")}>Defer</button>
+                    <button type="button" disabled={disabled || proposal.status === "rejected"} onClick={() => onAction(proposal, "reject")}>Reject</button>
+                  </div>
+                </td>
+              </tr>
+            )) : (
+              <tr><td colSpan={6}>No taxonomy, ontology, or graph steering proposals</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function formatGenericProposalSubject(proposal: TopicSteeringProposal): string {
+  const parts = [
+    proposal.topicUid,
+    proposal.graphEntityId,
+    proposal.targetTopicUid ? `-> ${proposal.targetTopicUid}` : null,
+    proposal.displayName,
+  ].filter(Boolean);
+  return parts.join(" ") || "unmapped";
 }
 
 function CorpusTopicSetSummary({
@@ -545,4 +589,8 @@ function EmptyRow({ label }: { label: string }) {
 function compactArray(value: Array<string | null> | null | undefined): string[] {
   if (!Array.isArray(value)) return [];
   return value.map((entry) => (typeof entry === "string" ? entry.trim() : "")).filter(Boolean);
+}
+
+function isTailoredTopicProposal(proposal: TopicSteeringProposal): boolean {
+  return proposal.steeringDomain === "topic" && TAILORED_TOPIC_PROPOSAL_KINDS.has(proposal.proposalKind);
 }

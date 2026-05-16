@@ -3,6 +3,13 @@
 Papyrus is a Next.js/React layout lab for a newspaper-style news site powered by
 [`@chenglou/pretext`](https://github.com/chenglou/pretext).
 
+Papyrus is meant to be a general-purpose automated newsroom, not an AI/ML-only
+publication. The current AI/ML corpus content is pilot data. A publication about
+soccer, oil markets, cryptocurrency, knitting, sailing, local politics, or any
+other domain should be created by changing the publication configuration,
+corpus set, topic/graph steering state, edition plans, and worker instructions,
+not by changing Papyrus code to know that domain.
+
 The project is exploring a specific publication problem: how to make responsive
 web pages behave more like a printed newspaper. The front page shows carefully
 cut excerpts from multiple stories. Those stories resume from the next exact
@@ -176,6 +183,14 @@ Papyrus owns the human steering state in GraphQL: corpora, import runs,
 artifacts, accepted topic sets, canonical topics, revisions, proposals,
 append-only decisions, and projection rows.
 
+The steering system is publication-neutral. `corpora/papyrus-steering.yml`
+selects the canonical corpus, lists any source/supporting corpora, names local
+classifiers, and points at the S3 corpus prefixes. The AI/ML entries in the
+checked-in config are the current production example, not a schema assumption.
+Future research agents should read their domain-specific instructions from
+configuration beside the corpus/publication data, produce Biblicus artifacts,
+and import only stable steering outputs into Papyrus.
+
 Biblicus remains the artifact and worker tool boundary. Workers may run
 Biblicus commands that create reproducible artifacts, but Papyrus code should
 not edit Biblicus corpus sidecars, catalogs, or internals directly. The local
@@ -197,6 +212,15 @@ Topic proposal review and topic revision promotion are custom mutations because
 they write a decision row and update proposal/revision state together.
 `CurationDecision` is append-only. Current proposal, topic, and revision state
 may update, but decisions should not be overwritten.
+
+Taxonomy and ontology steering stays deliberately generic in v1. Biblicus can
+export proposal kinds such as `create-taxonomy-node` and
+`add-ontology-relationship`; Papyrus imports those into `CurationProposal`,
+keeps the private raw payload, and shows them in the generic steering queue.
+Only flat canonical topic-copy proposals use the tailored topic controls. The
+Biblicus labels `recommend`, `do_not_recommend`, and `needs_clarification` are
+agent recommendation labels, not Papyrus human review actions; Papyrus review
+decisions remain `accept`, `reject`, or `defer`.
 
 ## Current Production Edition
 

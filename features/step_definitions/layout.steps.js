@@ -130,6 +130,8 @@ Then("topic steering should show topic and graph proposal rows", async function 
   const page = requirePage(this);
   await page.locator("[data-proposal-domain='topic']").first().waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("td", { hasText: "relationship-proposal" }).first().waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-generic-proposal-kind='create-taxonomy-node']").first().waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-generic-proposal-kind='add-ontology-relationship']").first().waitFor({ state: "visible", timeout: 10_000 });
 });
 
 Then("the first topic steering name should be {string}", async function (expectedName) {

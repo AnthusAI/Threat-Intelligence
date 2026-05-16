@@ -11,6 +11,13 @@ experiment with a reusable design language for newspaper-style publications:
 front-page teasers, planned continuation pages, shared article tails, adaptive
 solver-owned furniture, and exact word-for-word continuation handoff.
 
+Papyrus is also intended to be a general-purpose automated newsroom. The current
+AI/ML corpus and edition content are pilot configuration, not product-specific
+code. A Papyrus deployment should be able to publish about any area of interest
+by changing corpus configuration, steering state, publication instructions,
+research-agent instructions, and edition plans. Do not bake a subject area,
+corpus name, classifier id, or content category into application logic.
+
 Pretext owns text measurement. Papyrus owns everything around that measurement:
 edition layout plans, responsive page grids, regions, block geometry, cut
 policies, page heights, furniture variants, scoring, continuation labels, and
@@ -56,6 +63,11 @@ rendering contracts.
   defines publication corpus keys, roles, classifier ids, local paths, and S3
   prefixes. Do not hard-code the AI/ML pilot corpus names in Papyrus logic.
   Materialize config changes with `npm run content -- curation import-config`.
+- Future research agents should also be driven by publication/corpus
+  instructions, not by Papyrus source changes. When that instruction surface is
+  added, keep it beside the publication or corpus config and document how agents
+  consume it. Until then, do not add domain-specific research-agent assumptions
+  to `/topics`, the content CLI, GraphQL models, or layout code.
 - Use an AWS profile for local Amplify/AWS access.
 - `.env` is for Papyrus runtime settings and the seed editor credentials used by
   `npm run seed:amplify`. `.env*` must stay ignored, and `.env.example` is the
@@ -74,6 +86,13 @@ rendering contracts.
   Papyrus GraphQL. Papyrus stores steering state, artifact references, topic
   copy, proposals, decisions, projections, and stable external `item_id`
   references; Biblicus remains the owner of corpus item metadata.
+- Taxonomy and ontology steering proposal kinds stay generic in v1. Import
+  proposal summaries and artifact refs, but do not add first-class taxonomy or
+  ontology tables, and do not let accepting `create-taxonomy-node`,
+  `add-ontology-relationship`, or related kinds mutate flat canonical topic
+  revisions unless that first-class editing surface is explicitly designed.
+  Biblicus recommendation labels such as `recommend`, `do_not_recommend`, and
+  `needs_clarification` are agent labels, not Papyrus review actions.
 - Do not edit `/Users/ryan/Projects/Biblicus` source files. If Biblicus needs a
   new full-corpus S3 sync or locking feature, relay that request to the Biblicus
   agent instead of changing the library from Papyrus.
