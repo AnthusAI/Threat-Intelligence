@@ -6,7 +6,6 @@ import type { Schema } from "../amplify/data/resource";
 import type {
   TopicSteeringArtifact,
   TopicSteeringDashboard,
-  TopicSteeringItem,
   TopicSteeringProjection,
   TopicSteeringProposal,
   TopicSteeringTopic,
@@ -30,12 +29,6 @@ export function TopicSteeringWorkspace({ dashboard }: { dashboard: TopicSteering
   const graphProposals = proposals.filter((proposal) => proposal.steeringDomain === "graph");
   const activeTopicSet = dashboard.topicSets[0] ?? null;
   const latestImport = dashboard.importRuns[0] ?? null;
-
-  const evidenceById = useMemo(() => {
-    const map = new Map<string, TopicSteeringItem>();
-    for (const item of dashboard.items) map.set(item.externalItemId, item);
-    return map;
-  }, [dashboard.items]);
 
   const topicByUid = useMemo(() => {
     const map = new Map<string, TopicSteeringTopic>();
@@ -172,7 +165,6 @@ export function TopicSteeringWorkspace({ dashboard }: { dashboard: TopicSteering
               key={proposal.id}
               proposal={proposal}
               topic={proposal.topicUid ? topicByUid.get(proposal.topicUid) : undefined}
-              evidenceById={evidenceById}
               disabled={isPending}
               onAction={runProposalAction}
             />
@@ -220,7 +212,7 @@ export function TopicSteeringWorkspace({ dashboard }: { dashboard: TopicSteering
       </section>
 
       <section className="topic-steering-lower-grid">
-        <EvidenceBrowser items={dashboard.items} />
+        <EvidenceReferenceBrowser topics={topics} proposals={proposals} projections={dashboard.projections} />
         <RevisionPanel
           topicSet={activeTopicSet}
           artifacts={dashboard.artifacts}
@@ -256,19 +248,15 @@ function SectionHeader({ title, detail }: { title: string; detail: string }) {
 function TopicProposalRow({
   proposal,
   topic,
-  evidenceById,
   disabled,
   onAction,
 }: {
   proposal: TopicSteeringProposal;
   topic?: TopicSteeringTopic;
-  evidenceById: Map<string, TopicSteeringItem>;
   disabled: boolean;
   onAction: (proposal: TopicSteeringProposal, action: "accept" | "reject" | "defer") => void;
 }) {
-  const evidence = compactArray(proposal.evidenceItemIds)
-    .map((itemId) => evidenceById.get(itemId) ?? { externalItemId: itemId, title: itemId })
-    .slice(0, 3);
+  const evidence = compactArray(proposal.evidenceItemIds).slice(0, 3);
 
   return (
     <article className="topic-steering-proposal" data-proposal-domain={proposal.steeringDomain}>
@@ -294,8 +282,8 @@ function TopicProposalRow({
           </div>
         </dl>
         <div className="topic-steering-evidence-chips">
-          {evidence.length ? evidence.map((item) => (
-            <span key={item.externalItemId}>{item.title ?? item.externalItemId}</span>
+          {evidence.length ? evidence.map((itemId) => (
+            <span key={itemId}>{itemId}</span>
           )) : <span>No evidence rows</span>}
         </div>
       </div>
@@ -347,22 +335,62 @@ function TopicEditor({
   );
 }
 
-function EvidenceBrowser({ items }: { items: TopicSteeringItem[] }) {
+function EvidenceReferenceBrowser({
+  topics,
+  proposals,
+  projections,
+}: {
+  topics: TopicSteeringTopic[];
+  proposals: TopicSteeringProposal[];
+  projections: TopicSteeringProjection[];
+}) {
+  const references = collectEvidenceReferences(topics, proposals, projections).slice(0, 24);
   return (
     <section className="topic-steering-section" aria-labelledby="evidence-browser-title">
-      <SectionHeader title="Evidence Browser" detail={`${items.length} public item rows`} />
+      <SectionHeader title="Evidence References" detail={`${references.length} external item ids`} />
       <div className="topic-steering-evidence-list">
-        {items.slice(0, 12).map((item) => (
-          <article key={item.id}>
-            <strong>{item.title ?? item.externalItemId}</strong>
-            <span>{item.externalItemId}</span>
-            <small>{[item.mediaType, item.sourceDomain, item.intakeStatus].filter(Boolean).join(" / ")}</small>
+        {references.map((reference) => (
+          <article key={`${reference.itemId}-${reference.source}-${reference.topicUid ?? ""}`}>
+            <strong>{reference.itemId}</strong>
+            <span>{reference.topicUid ?? "corpus evidence"}</span>
+            <small>{reference.source}</small>
           </article>
         ))}
-        {!items.length ? <EmptyRow label="No evidence items imported" /> : null}
+        {!references.length ? <EmptyRow label="No evidence references imported" /> : null}
       </div>
     </section>
   );
+}
+
+function collectEvidenceReferences(
+  topics: TopicSteeringTopic[],
+  proposals: TopicSteeringProposal[],
+  projections: TopicSteeringProjection[],
+) {
+  const references = new Map<string, { itemId: string; source: string; topicUid?: string | null }>();
+  const add = (itemId: string, source: string, topicUid?: string | null) => {
+    const key = `${itemId}:${source}:${topicUid ?? ""}`;
+    if (!references.has(key)) references.set(key, { itemId, source, topicUid });
+  };
+
+  for (const topic of topics) {
+    for (const itemId of compactArray(topic.seedItemIds)) add(itemId, "topic seed", topic.topicUid);
+    for (const itemId of compactArray(topic.holdoutItemIds)) add(itemId, "topic holdout", topic.topicUid);
+  }
+  for (const proposal of proposals) {
+    for (const itemId of compactArray(proposal.evidenceItemIds)) add(itemId, "proposal evidence", proposal.topicUid);
+    for (const itemId of compactArray(proposal.suggestedSeedItemIds)) add(itemId, "suggested seed", proposal.topicUid);
+    for (const itemId of compactArray(proposal.suggestedHoldoutItemIds)) add(itemId, "suggested holdout", proposal.topicUid);
+  }
+  for (const projection of projections) {
+    add(projection.externalItemId, projection.reviewRecommended ? "projection review" : "projection", projection.topicUid);
+  }
+
+  return [...references.values()].sort((left, right) => {
+    const topicDiff = String(left.topicUid ?? "").localeCompare(String(right.topicUid ?? ""));
+    if (topicDiff !== 0) return topicDiff;
+    return left.itemId.localeCompare(right.itemId);
+  });
 }
 
 function RevisionPanel({

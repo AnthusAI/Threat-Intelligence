@@ -186,30 +186,6 @@ const schema = a.schema({
       allow.custom().to(authoringOperations),
     ]),
 
-  CurationItem: a
-    .model({
-      id: a.id().required(),
-      corpusId: a.id().required(),
-      externalItemId: a.string().required(),
-      title: a.string(),
-      mediaType: a.string(),
-      sourceDomain: a.string(),
-      publishedAt: a.string(),
-      intakeStatus: a.string(),
-      tags: a.string().array(),
-      createdAt: a.datetime(),
-      importRunId: a.id(),
-    })
-    .secondaryIndexes((index) => [
-      index("corpusId").sortKeys(["externalItemId"]).queryField("listCurationItemsByCorpusAndExternalId"),
-      index("intakeStatus").sortKeys(["title"]).queryField("listCurationItemsByIntakeStatusAndTitle"),
-    ])
-    .authorization((allow) => [
-      allow.publicApiKey().to(["read"]),
-      allow.groups(curationWriteGroups).to(["read"]),
-      allow.custom().to(authoringOperations),
-    ]),
-
   CurationArtifact: a
     .model({
       id: a.id().required(),

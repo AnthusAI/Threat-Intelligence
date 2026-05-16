@@ -88,10 +88,6 @@ function buildSteeringImportRecords(bundle, options = {}) {
     records.push(...topicSetRecords(bundle.topic_set, { corpusId, importRunId, topicSetId, now, generatedAt: bundle.generated_at }));
   }
 
-  for (const item of bundle.items ?? []) {
-    records.push(...itemRecords(item, { corpusId, importRunId, now }));
-  }
-
   for (const artifact of bundle.artifacts ?? []) {
     records.push(...artifactRecords(artifact, { corpusId, importRunId, now }));
   }
@@ -121,6 +117,16 @@ function buildProjectionImportRecords(payload, options = {}) {
   const classifierId = payload.classifier_id ?? firstItem.classifier_id ?? options.classifierId ?? "unknown-classifier";
   const importRunId = `curation-import-${safeId(targetCorpusId)}-${safeId(classifierId)}-projection-${hashShort(payload.summary ?? items)}`;
   const records = [
+    record("CurationCorpus", {
+      id: targetCorpusId,
+      name: corpusNameFromUri(firstItem.target_corpus_uri) ?? "AI-ML-history",
+      role: "projection",
+      itemCount: null,
+      generatedAt: null,
+      latestImportRunId: importRunId,
+      createdAt: now,
+      updatedAt: now,
+    }),
     record("CurationImportRun", {
       id: importRunId,
       corpusId: targetCorpusId,
@@ -249,26 +255,6 @@ function topicSetRecords(topicSet, context) {
   return records;
 }
 
-function itemRecords(item, context) {
-  const itemId = `curation-item-${safeId(context.corpusId)}-${safeId(item.item_id)}`;
-  return [
-    record("CurationItem", {
-      id: itemId,
-      corpusId: context.corpusId,
-      externalItemId: item.item_id,
-      title: item.title ?? null,
-      mediaType: item.media_type ?? null,
-      sourceDomain: sourceDomain(item.source_uri),
-      publishedAt: item.dates?.published_at ?? null,
-      intakeStatus: item.intake_status ?? null,
-      tags: compactArray(item.tags),
-      createdAt: dateOrNull(item.created_at),
-      importRunId: context.importRunId,
-    }),
-    rawPayloadRecord("item", itemId, "biblicus-item", item, context.importRunId, context.now),
-  ];
-}
-
 function artifactRecords(artifact, context) {
   const artifactId = `curation-artifact-${safeId(context.corpusId)}-${hashShort(`${artifact.kind}:${artifact.artifact_id}`)}`;
   return [
@@ -365,15 +351,6 @@ function inferSteeringDomain(kind) {
 
 function latestSnapshotId(artifacts, kind) {
   return (artifacts ?? []).filter((artifact) => artifact.kind === kind).at(-1)?.snapshot_id ?? null;
-}
-
-function sourceDomain(uri) {
-  if (!uri) return null;
-  try {
-    return new URL(uri).hostname.replace(/^www\./, "");
-  } catch {
-    return null;
-  }
 }
 
 function corpusNameFromUri(uri) {

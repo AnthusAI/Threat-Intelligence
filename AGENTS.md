@@ -61,7 +61,12 @@ rendering contracts.
 - Production authoring uses the deployed production AppSync endpoint, not the
   sandbox. Mint short-lived production JWTs from the Amplify SSM
   `PAPYRUS_JWT_SECRET`; do not write production secrets or freshly minted
-  production JWTs into `.env`.
+  production JWTs into `.env`. Follow `docs/curation-steering-runbook.md` for
+  the exact token minting and topic/graph steering import workflow.
+- Topic and graph steering imports must not mirror Biblicus corpus items into
+  Papyrus GraphQL. Papyrus stores steering state, artifact references, topic
+  copy, proposals, decisions, projections, and stable external `item_id`
+  references; Biblicus remains the owner of corpus item metadata.
 
 ## Solver vs. Renderer Boundary
 

@@ -98,10 +98,10 @@ const LIST_RECORDS = {
     `,
   },
   CurationCorpus: {
-    field: "listCurationCorpora",
+    field: "listCurationCorpuses",
     query: `
       query ListCurationCorpora($limit: Int, $nextToken: String) {
-        listCurationCorpora(limit: $limit, nextToken: $nextToken) {
+        listCurationCorpuses(limit: $limit, nextToken: $nextToken) {
           items { id name role itemCount generatedAt latestImportRunId }
           nextToken
         }
@@ -125,17 +125,6 @@ const LIST_RECORDS = {
       query ListCurationRawPayloads($limit: Int, $nextToken: String) {
         listCurationRawPayloads(limit: $limit, nextToken: $nextToken) {
           items { id ownerType ownerId payloadKind importRunId }
-          nextToken
-        }
-      }
-    `,
-  },
-  CurationItem: {
-    field: "listCurationItems",
-    query: `
-      query ListCurationItems($limit: Int, $nextToken: String) {
-        listCurationItems(limit: $limit, nextToken: $nextToken) {
-          items { id corpusId externalItemId title mediaType sourceDomain publishedAt intakeStatus tags importRunId }
           nextToken
         }
       }
@@ -357,10 +346,6 @@ const GETTERS = {
     field: "getCurationRawPayload",
     query: `query GetCurationRawPayload($id: ID!) { getCurationRawPayload(id: $id) { id ownerType ownerId payloadKind importRunId payload createdAt updatedAt } }`,
   },
-  CurationItem: {
-    field: "getCurationItem",
-    query: `query GetCurationItem($id: ID!) { getCurationItem(id: $id) { id corpusId externalItemId title mediaType sourceDomain publishedAt intakeStatus tags createdAt importRunId } }`,
-  },
   CurationArtifact: {
     field: "getCurationArtifact",
     query: `query GetCurationArtifact($id: ID!) { getCurationArtifact(id: $id) { id corpusId artifactKind artifactId snapshotId displayName createdAt importRunId } }`,
@@ -497,7 +482,6 @@ const MUTATIONS = {
   CurationCorpus: modelMutations("CurationCorpus"),
   CurationImportRun: modelMutations("CurationImportRun"),
   CurationRawPayload: modelMutations("CurationRawPayload"),
-  CurationItem: modelMutations("CurationItem"),
   CurationArtifact: modelMutations("CurationArtifact"),
   CurationTopicSet: modelMutations("CurationTopicSet"),
   CurationTopic: modelMutations("CurationTopic"),

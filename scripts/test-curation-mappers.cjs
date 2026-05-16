@@ -86,10 +86,16 @@ assert.equal(topic.subtitle, "Compute, data, and capability curves");
 assert.equal(topic.topicUid, "topic.scaling");
 assert.equal(topic.displayName, "Scaling Laws");
 
-const publicItem = findRecord(steeringPlan.records, "CurationItem", (record) => record.externalItemId === "research-001");
-assert.equal(publicItem.sourceDomain, "arxiv.org");
-assert.equal(publicItem.source_uri, undefined);
-assert.equal(publicItem.source_notes, undefined);
+assert.equal(
+  steeringPlan.records.some((record) => record.modelName === "CurationItem"),
+  false,
+  "Biblicus corpus items stay external and are not mirrored into Papyrus GraphQL",
+);
+assert.equal(
+  steeringPlan.records.some((record) => record.modelName === "CurationRawPayload" && record.expected.ownerType === "item"),
+  false,
+  "Biblicus item raw payloads stay out of Papyrus GraphQL",
+);
 
 const topicProposal = findRecord(steeringPlan.records, "CurationProposal", (record) => record.id.includes("proposal-rename-scaling"));
 assert.equal(topicProposal.steeringDomain, "topic");
@@ -147,6 +153,8 @@ const projectionPlan = buildProjectionImportRecords({
 const projection = findRecord(projectionPlan.records, "CurationProjection", (record) => record.externalItemId === "history-001");
 assert.equal(projection.topicUid, "topic.scaling");
 assert.equal(projection.reviewRecommended, true);
+const projectionCorpus = findRecord(projectionPlan.records, "CurationCorpus", (record) => record.id === "curation-corpus-ai-ml-history");
+assert.equal(projectionCorpus.role, "projection");
 
 console.log("curation mapper tests passed");
 

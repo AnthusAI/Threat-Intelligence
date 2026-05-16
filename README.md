@@ -301,6 +301,9 @@ export PAPYRUS_GRAPHQL_ENDPOINT=https://64hviw44q5cq5nwjcigmasowlq.appsync-api.u
 Mint a fresh short-lived JWT from the production Amplify SSM secret. Do not
 write the token or secret into `.env`:
 
+The full production authoring and topic/graph steering runbook lives in
+`docs/curation-steering-runbook.md`.
+
 ```bash
 export PAPYRUS_GRAPHQL_JWT="$(node - <<'NODE'
 const { execFileSync } = require("node:child_process");

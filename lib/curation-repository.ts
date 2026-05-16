@@ -90,18 +90,6 @@ export type TopicSteeringProposal = {
   updatedAt?: string | null;
 };
 
-export type TopicSteeringItem = {
-  id: string;
-  corpusId: string;
-  externalItemId: string;
-  title?: string | null;
-  mediaType?: string | null;
-  sourceDomain?: string | null;
-  publishedAt?: string | null;
-  intakeStatus?: string | null;
-  tags?: Array<string | null> | null;
-};
-
 export type TopicSteeringArtifact = {
   id: string;
   corpusId: string;
@@ -132,7 +120,6 @@ export type TopicSteeringDashboard = {
   topicSets: TopicSteeringTopicSet[];
   topics: TopicSteeringTopic[];
   proposals: TopicSteeringProposal[];
-  items: TopicSteeringItem[];
   artifacts: TopicSteeringArtifact[];
   projections: TopicSteeringProjection[];
   loadError?: string | null;
@@ -156,7 +143,6 @@ export async function loadTopicSteeringDashboard(options?: { demo?: boolean }): 
       topicSets,
       topics,
       proposals,
-      items,
       artifacts,
       projections,
     ] = await Promise.all([
@@ -165,7 +151,6 @@ export async function loadTopicSteeringDashboard(options?: { demo?: boolean }): 
       listModel<TopicSteeringTopicSet>("CurationTopicSet"),
       listModel<TopicSteeringTopic>("CurationTopic"),
       listModel<TopicSteeringProposal>("CurationProposal"),
-      listModel<TopicSteeringItem>("CurationItem"),
       listModel<TopicSteeringArtifact>("CurationArtifact"),
       listModel<TopicSteeringProjection>("CurationProjection"),
     ]);
@@ -176,7 +161,6 @@ export async function loadTopicSteeringDashboard(options?: { demo?: boolean }): 
       topicSets: topicSets.sort((left, right) => left.displayName.localeCompare(right.displayName)),
       topics: sortTopics(topics),
       proposals: sortProposals(proposals),
-      items: items.sort((left, right) => left.externalItemId.localeCompare(right.externalItemId)),
       artifacts: artifacts.sort((left, right) => (right.createdAt ?? "").localeCompare(left.createdAt ?? "")),
       projections: projections.sort((left, right) => (right.score ?? 0) - (left.score ?? 0)),
       loadError: null,
@@ -267,7 +251,6 @@ function createEmptyTopicSteeringDashboard(): TopicSteeringDashboard {
     topicSets: [],
     topics: [],
     proposals: [],
-    items: [],
     artifacts: [],
     projections: [],
     loadError: null,
@@ -419,38 +402,6 @@ function createDemoTopicSteeringDashboard(): TopicSteeringDashboard {
         suggestedHoldoutItemIds: ["history-002"],
         evidenceItemIds: ["history-002"],
         proposedAt: importedAt,
-      },
-    ],
-    items: [
-      {
-        id: "curation-item-research-001",
-        corpusId,
-        externalItemId: "research-001",
-        title: "Scaling Laws For Neural Language Models",
-        mediaType: "paper",
-        sourceDomain: "arxiv.org",
-        intakeStatus: "ready",
-        tags: ["scaling", "language-models"],
-      },
-      {
-        id: "curation-item-research-002",
-        corpusId,
-        externalItemId: "research-002",
-        title: "Benchmark Saturation In Foundation Models",
-        mediaType: "paper",
-        sourceDomain: "paperswithcode.com",
-        intakeStatus: "ready",
-        tags: ["benchmarks"],
-      },
-      {
-        id: "curation-item-history-002",
-        corpusId: historyCorpusId,
-        externalItemId: "history-002",
-        title: "Connectionism And The AI Winter",
-        mediaType: "essay",
-        sourceDomain: "example.edu",
-        intakeStatus: "ready",
-        tags: ["history"],
       },
     ],
     artifacts: [

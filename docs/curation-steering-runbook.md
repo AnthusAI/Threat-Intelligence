@@ -1,0 +1,208 @@
+# Topic And Graph Steering Runbook
+
+Papyrus is the human steering system. Biblicus is the artifact producer. Papyrus
+imports accepted topic sets, steering proposals, projection rows, artifact
+references, decisions, and stable external IDs. It does not mirror Biblicus
+corpus items into GraphQL; evidence remains a Biblicus `item_id` reference until
+Papyrus deliberately turns some information into its own publication content.
+
+## Production Authoring JWT
+
+The content CLI writes through AppSync's Lambda-authorizer lane. It does not use
+a browser login or a local Cognito session. The CLI needs two process
+environment values:
+
+```bash
+export PAPYRUS_GRAPHQL_ENDPOINT="https://64hviw44q5cq5nwjcigmasowlq.appsync-api.us-east-1.amazonaws.com/graphql"
+export PAPYRUS_GRAPHQL_JWT="<short-lived production JWT>"
+```
+
+The JWT is an HS256 token signed with the production Amplify
+`PAPYRUS_JWT_SECRET`. The secret lives in SSM Parameter Store for the production
+Amplify branch:
+
+```text
+/amplify/dbsyytcm9drqa/main-branch-cb38ada667/PAPYRUS_JWT_SECRET
+```
+
+Mint the token from the AWS profile that owns Papyrus production, usually
+`Ryan`. Do not print the secret, commit it, or write the token into `.env`.
+
+```bash
+export AWS_PROFILE=Ryan
+export AWS_REGION=us-east-1
+export PAPYRUS_GRAPHQL_JWT="$(node - <<'NODE'
+const { execFileSync } = require("node:child_process");
+const { createHmac } = require("node:crypto");
+
+const parameterName = "/amplify/dbsyytcm9drqa/main-branch-cb38ada667/PAPYRUS_JWT_SECRET";
+const raw = execFileSync("aws", [
+  "ssm",
+  "get-parameter",
+  "--name",
+  parameterName,
+  "--with-decryption",
+  "--output",
+  "json",
+], { encoding: "utf8" });
+
+const secret = JSON.parse(raw).Parameter.Value;
+const now = Math.floor(Date.now() / 1000);
+const header = { alg: "HS256", typ: "JWT" };
+const payload = {
+  iss: "papyrus-cli",
+  sub: "local-production-authoring",
+  aud: "papyrus-authoring",
+  iat: now,
+  nbf: now - 30,
+  exp: now + 6 * 60 * 60,
+  scope: "papyrus:write",
+  groups: ["editor"],
+};
+
+const encode = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
+const unsigned = `${encode(header)}.${encode(payload)}`;
+const signature = createHmac("sha256", secret).update(unsigned).digest("base64url");
+process.stdout.write(`${unsigned}.${signature}`);
+NODE
+)"
+```
+
+The Lambda authorizer verifies:
+
+- signature: HS256 with `PAPYRUS_JWT_SECRET`;
+- issuer: `papyrus-cli`;
+- audience: `papyrus-authoring`;
+- scope: `papyrus:write`;
+- expiration and not-before timestamps.
+
+Check the token before writing:
+
+```bash
+npm run content -- content inspect
+```
+
+## Steering Import
+
+Use the production endpoint and JWT, and point Papyrus at the local Biblicus
+checkout:
+
+```bash
+export BIBLICUS_WORKDIR="/Users/ryan/Projects/Biblicus"
+
+npm run content -- curation import-steering \
+  --corpus corpora/AI-ML-research \
+  --classifier ai-ml-research
+```
+
+The import is idempotent and intentionally lean. It imports:
+
+- `CurationCorpus`;
+- `CurationImportRun`;
+- `CurationTopicSet`;
+- `CurationTopic`;
+- `CurationTopicRevision`;
+- `CurationArtifact`;
+- `CurationProposal`;
+- private `CurationRawPayload` rows for steering objects.
+
+It does not import Biblicus corpus items. Topic seeds, holdouts, proposal
+evidence, and projection rows keep stable external `item_id` strings.
+
+## Export, Train, Project
+
+After a human edits or accepts topic copy in `/topics`, export the accepted topic
+set:
+
+```bash
+npm run content -- curation export-topic-set \
+  --topic-set curation-topic-set-curation-corpus-ai-ml-research-ai-ml-research \
+  --output /tmp/accepted-ai-ml-research-topic-set.json
+```
+
+Render the seed manifest and train/project with Biblicus from the Biblicus
+checkout. These commands write Biblicus corpus artifacts only.
+
+```bash
+cd /Users/ryan/Projects/Biblicus
+
+uv run biblicus steering render-seed-manifest \
+  --input /tmp/accepted-ai-ml-research-topic-set.json \
+  --output corpora/AI-ML-research/metadata/topic-classifiers/ai-ml-research/seed-manifest.json
+
+uv run biblicus topic-classifier train \
+  --corpus corpora/AI-ML-research \
+  --manifest corpora/AI-ML-research/metadata/topic-classifiers/ai-ml-research/seed-manifest.json \
+  --configuration configurations/topic-classifier.yml \
+  --extraction-snapshot pipeline:a64a3abbd70b9ed011be83b678bdb321e0a138a9e33de446033b4b5bee6f175a
+
+uv run biblicus topic-classifier project \
+  --classifier-corpus corpora/AI-ML-research \
+  --target-corpus corpora/AI-ML-history \
+  --classifier ai-ml-research \
+  --extraction-snapshot pipeline:6e29472b5050a806062496b74b290628234ffd26926c2e8d3f205b195e5c9d60 \
+  --all \
+  --record \
+  --format json > /tmp/ai-ml-history-projection.json
+```
+
+Import projection rows back into Papyrus:
+
+```bash
+cd /Users/ryan/Projects/Papyrus
+
+npm run content -- curation import-projection \
+  --bundle /tmp/ai-ml-history-projection.json \
+  --classifier ai-ml-research
+```
+
+## Graph Steering
+
+Graph steering follows the same boundary. Biblicus creates graph snapshots,
+signals, and proposal artifacts. Papyrus imports only the resulting steering
+proposal rows and raw proposal payloads.
+
+```bash
+cd /Users/ryan/Projects/Biblicus
+
+uv run biblicus graph extract \
+  --corpus corpora/AI-ML-research \
+  --extractor simple-entities \
+  --extraction-snapshot pipeline:a64a3abbd70b9ed011be83b678bdb321e0a138a9e33de446033b4b5bee6f175a \
+  --configuration configurations/graph/simple-entities.yml
+
+uv run biblicus steering graph-signals \
+  --corpus corpora/AI-ML-research \
+  --classifier ai-ml-research \
+  --graph-snapshot simple-entities:<snapshot_id> \
+  --format json > /tmp/ai-ml-research-graph-signals.json
+```
+
+A worker or agent then converts the graph signals into a validated
+`SteeringProposalBundle` and records it with Biblicus:
+
+```bash
+uv run biblicus steering proposals validate \
+  --input /tmp/ai-ml-research-graph-proposals.json
+
+uv run biblicus steering proposals record \
+  --corpus corpora/AI-ML-research \
+  --input /tmp/ai-ml-research-graph-proposals.json
+```
+
+Re-import steering so `/topics` shows the graph proposal rows:
+
+```bash
+cd /Users/ryan/Projects/Papyrus
+
+npm run content -- curation import-steering \
+  --corpus corpora/AI-ML-research \
+  --classifier ai-ml-research
+```
+
+## Local Corpus Symlinks
+
+The `corpora/` folder in Papyrus is local-only and ignored by git. It can point
+at the two Biblicus corpora during the pilot, but Papyrus code must not edit
+sidecars, catalog files, or extracted artifacts directly. Use Biblicus CLI
+commands for all corpus reads and writes.
