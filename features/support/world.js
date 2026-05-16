@@ -27,6 +27,7 @@ class PapyrusWorld {
   }
 
   async openPath(path, width, height) {
+    await this.close();
     this.consoleErrors = [];
     this.browser = await chromium.launch({
       headless: process.env.PAPYRUS_HEADLESS !== "false",
