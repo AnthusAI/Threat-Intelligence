@@ -5,19 +5,26 @@ or explaining how a page should be composed with the current layout-plan
 language.
 
 The audience is a coding agent working on publication content. Most layout work
-should be done by editing `content/edition.json` or an edition's cloud
-`layoutPlan`. Only change TypeScript when the existing layout vocabulary cannot
-describe the intended page.
+should be done by editing an edition's cloud `layoutPlan` in GraphQL. Only
+change TypeScript when the existing layout vocabulary cannot describe the
+intended page.
 
 Papyrus layouts are solved layouts, not browser-flow layouts. The edition plan
 stores editorial intent. The TypeScript solver turns that intent into concrete
 page columns, block boxes, media rectangles, pull-quote obstacles, Pretext text
 lines, exact cursors, and page heights. React only renders the solved result.
 
+Use the canonical Papyrus newspaper vocabulary in user-facing notes, status
+updates, and implementation summaries. If a user says "make the headline
+bigger," translate that into a concrete scale such as `feature headline` or
+`banner headline`. If a user says "put the image on the right," describe the
+implementation as a `media inset` placed on the block's `local grid`. Repeating
+these terms keeps content editing conversations precise and makes follow-up
+requests easier for the next agent to implement.
+
 ## Files To Read First
 
-- `content/edition.json`: the local editable edition plan. Start here.
-- `content/articles/*.md`: development article content and metadata.
+- GraphQL `Edition.layoutPlan`: the editable edition plan.
 - `lib/layout-plan.ts`: the Zod contract for valid layout JSON. Use this when
   the JSON shape is unclear.
 - `lib/publication-items.ts`: the normalized item model used by layout blocks.
@@ -26,8 +33,8 @@ Read `lib/newspaper-layout.ts` only when changing how layouts are solved.
 Read `components/newspaper.tsx` only when solved output needs different
 rendering.
 
-Do not put test fixtures in `content/articles/`. Development/editorial content
-belongs there; BDD edge cases belong in `lib/layout-scenarios.ts`.
+Do not put test fixtures in production content records; BDD edge cases belong
+in `lib/layout-scenarios.ts`.
 
 ## CLI Setup And Use
 
@@ -66,11 +73,10 @@ npm run content -- content sync edition current
 
 Use the CLI workflow this way:
 
-1. Edit Markdown articles and `content/edition.json` locally.
-2. Run `npm run content -- content diff edition current`.
-3. Confirm the diff changes only the intended records.
-4. Run `npm run content -- content sync edition current`.
-5. Verify the deployed site or GraphQL-backed local app.
+1. Run `npm run content -- content diff edition current`.
+2. Confirm the diff changes only the intended records.
+3. Run `npm run content -- content sync edition current`.
+4. Verify the deployed site or GraphQL-backed local app.
 
 If the task is only to inspect the live layout, do not sync. Query or diff
 first.
@@ -101,6 +107,7 @@ Edition.layoutPlan
       blocks[]
         local grid
         optional media / pull quote furniture
+        optional article-frame composition slots
         Pretext text flow
 ```
 
@@ -187,10 +194,60 @@ Block types:
 
 Article frame presets:
 
-- `front.teaser`: front-page excerpt with optional planned jump.
+- `front.teaser`: front-page excerpt with optional planned jump and optional
+  slot composition for newspaper-style title/copy/media arrangements.
 - `article.standard`: headline/deck plus text columns, no required furniture.
 - `article.mediaInset`: article text flowing around media/pull-quote obstacles.
 - `article.mediaPrelude`: media cluster before headline/copy.
+
+Headline scales:
+
+- `banner`: largest publication/page display headline.
+- `feature`: dominant story in a region, such as a four-column front feature.
+- `standard`: normal article or continuation headline.
+- `rail`: narrow side-column front-page story.
+- `brief`: small teaser, promo, or compact item headline.
+
+Use these names in conversation, code review, and layout notes. Say `feature
+headline` instead of "big headline," `rail headline` instead of "side headline,"
+and `brief headline` instead of "small headline."
+
+Use `typography.headlineScale` to name the headline treatment explicitly:
+
+```json
+{
+  "type": "articleFrame",
+  "presetId": "front.teaser",
+  "role": "feature",
+  "typography": { "headlineScale": "feature" }
+}
+```
+
+`role` describes the block's editorial job in the layout. `headlineScale`
+describes the headline typography. Keep both when they matter. A center story
+can be a `feature` role with a `feature` headline; side stories can be `rail`
+roles with `rail` headlines; dense strips should use `brief` headlines.
+
+Editorial priorities:
+
+- `primary`: the lead story in a sequential or collapsed layout.
+- `secondary`: important supporting stories, often rails beside the primary.
+- `tertiary`: normal supporting articles.
+- `supporting`: low-priority promos, briefs, or furniture-like content.
+
+Use `editorialPriority` when wide-screen placement and mobile reading order
+need to differ. A center feature can be visually centered on desktop and still
+be the `primary story` that appears first in one-column front-page layouts.
+
+```json
+{
+  "type": "articleFrame",
+  "presetId": "front.teaser",
+  "role": "feature",
+  "editorialPriority": "primary",
+  "typography": { "headlineScale": "feature" }
+}
+```
 
 Media cluster presets:
 
@@ -232,12 +289,12 @@ Media placement is responsive intent, not solved geometry:
   "required": true,
   "assetRole": "lead",
   "placement": {
-    "anchor": "center",
-    "span": { "min": 1, "preferred": 4, "max": 4 },
+    "anchor": "right",
+    "span": { "min": 1, "preferred": 2, "max": 2 },
     "vertical": "top",
     "collapse": "inline",
     "crop": "preserve",
-    "wrapsText": false
+    "wrapsText": true
   }
 }
 ```
@@ -249,6 +306,24 @@ Anchors:
 - `center`: center inside the local grid.
 - `outer` / `inner`: reserved for alternating page-side semantics.
 - `inline`: collapse into the text flow on narrow layouts.
+
+Use `columnStart` when editorial intent needs an exact local-grid target. It is
+1-based because editors talk about “column 1” and “columns 3-4”, not zero-based
+arrays.
+
+```json
+{
+  "columnStart": 3,
+  "span": { "min": 1, "preferred": 2, "max": 2 },
+  "vertical": "top",
+  "collapse": "inline",
+  "crop": "preserve",
+  "wrapsText": true
+}
+```
+
+Only use `columnStart` when the exact columns matter. Use `anchor: "right"` for
+the common “rightmost N columns” case.
 
 Vertical placement:
 
@@ -273,6 +348,11 @@ Use `required: true` only when the page design cannot work without media.
 Optional media should be allowed to disappear if it collides, creates dead
 columns, or makes copy fit worse.
 
+Important front-page rule: if a `front.teaser` needs an image beside copy or a
+deck/byline limited to only some columns, use `articleFrame.composition`. A bare
+`media` array on a front teaser is only for the simple prelude-style image path
+and should not be used for precise editorial column layouts.
+
 ## Pull Quotes
 
 Pull quotes are display furniture. They do not consume the article cursor.
@@ -295,6 +375,125 @@ Pull quotes are display furniture. They do not consume the article cursor.
 
 Prefer optional pull quotes. A clean page without a pull quote is better than a
 crowded page with overlapping furniture.
+
+## Article Frame Slot Composition
+
+Use `articleFrame.composition` when a story needs newspaper-style control over
+which chrome spans which columns. This is the right tool for front features like:
+
+- label/headline spanning the full feature width;
+- deck and byline only over the copy columns;
+- image in the rightmost two of four local columns;
+- body copy flowing around deck, byline, image, or pull quote obstacles;
+- thin or heavy story rules controlled with em tokens.
+
+Example: four-column feature, full-width headline, copy on the left two columns,
+image on the right two columns:
+
+```json
+{
+  "id": "front-agent-procedure-patterns",
+  "type": "articleFrame",
+  "presetId": "front.teaser",
+  "role": "feature",
+  "typography": { "headlineScale": "feature" },
+  "itemId": "agent-procedure-patterns",
+  "flowKey": "agent-procedure-patterns",
+  "startCursor": "beginning",
+  "span": { "min": 1, "preferred": 4, "max": 4 },
+  "localGrid": { "columns": { "min": 1, "preferred": 4, "max": 4 } },
+  "composition": {
+    "ruleBefore": { "width": "0.08em" },
+    "title": [
+      {
+        "slot": "label",
+        "placement": {
+          "columnStart": 1,
+          "span": { "min": 1, "preferred": 4, "max": 4 },
+          "vertical": "top",
+          "collapse": "inline",
+          "crop": "preserve",
+          "wrapsText": false
+        }
+      },
+      {
+        "slot": "headline",
+        "placement": {
+          "columnStart": 1,
+          "span": { "min": 1, "preferred": 4, "max": 4 },
+          "vertical": "top",
+          "collapse": "inline",
+          "crop": "preserve",
+          "wrapsText": false
+        }
+      }
+    ],
+    "lead": [
+      {
+        "slot": "deck",
+        "placement": {
+          "columnStart": 1,
+          "span": { "min": 1, "preferred": 2, "max": 2 },
+          "vertical": "top",
+          "collapse": "inline",
+          "crop": "preserve",
+          "wrapsText": true
+        }
+      },
+      {
+        "slot": "byline",
+        "placement": {
+          "columnStart": 1,
+          "span": { "min": 1, "preferred": 2, "max": 2 },
+          "vertical": "top",
+          "collapse": "inline",
+          "crop": "preserve",
+          "wrapsText": true
+        }
+      },
+      {
+        "slot": "media",
+        "mediaIndex": 0,
+        "placement": {
+          "anchor": "right",
+          "span": { "min": 1, "preferred": 2, "max": 2 },
+          "vertical": "top",
+          "collapse": "inline",
+          "crop": "preserve",
+          "wrapsText": true
+        }
+      }
+    ]
+  },
+  "media": [
+    {
+      "required": true,
+      "assetRole": "lead",
+      "placement": {
+        "anchor": "right",
+        "span": { "min": 1, "preferred": 2, "max": 2 },
+        "vertical": "top",
+        "collapse": "inline",
+        "crop": "preserve",
+        "wrapsText": true
+      }
+    }
+  ]
+}
+```
+
+Slot rules:
+
+- `title` slots reserve vertical chrome above the body field.
+- `lead` slots sit inside the body field and become Pretext obstacles.
+- `deck`, `byline`, `media`, and `pullQuote` in `lead` do not consume article
+  text. They only reserve solved display space.
+- Use `crop: "preserve"` when aspect ratio matters.
+- Use `ruleBefore.width: "0.08em"` for a thin newspaper rule and around
+  `"0.32em"` for a heavy feature rule.
+- On mobile, spans collapse through the normal placement `collapse` policy, so
+  this four-column pattern becomes a one-column stack without needing a second
+  mobile-only layout.
 
 ## Article Flow And Continuations
 
@@ -342,9 +541,11 @@ Rules:
 
 ## Common Patterns
 
-### Front Page: Left Rail, Center Feature, Right Rail
+### Front Page: Left Rail, Composed Center Feature, Right Rail
 
-Use three top-row `articleFrame` blocks whose spans add to six:
+Use three top-row `articleFrame` blocks whose spans add to six. Put explicit
+roles and headline scales on the rails and feature. For media-led center
+features, use `composition`, not a bare full-width front media prelude.
 
 ```json
 [
@@ -352,6 +553,8 @@ Use three top-row `articleFrame` blocks whose spans add to six:
     "id": "front-left-rail",
     "type": "articleFrame",
     "presetId": "front.teaser",
+    "role": "rail",
+    "typography": { "headlineScale": "rail" },
     "itemId": "schools-reading-lab",
     "flowKey": "schools-reading-lab",
     "startCursor": "beginning",
@@ -364,18 +567,84 @@ Use three top-row `articleFrame` blocks whose spans add to six:
     "itemId": "agent-procedure-patterns",
     "flowKey": "agent-procedure-patterns",
     "startCursor": "beginning",
+    "role": "feature",
+    "typography": { "headlineScale": "feature" },
     "span": { "min": 1, "preferred": 4, "max": 4 },
+    "localGrid": { "columns": { "min": 1, "preferred": 4, "max": 4 } },
+    "composition": {
+      "ruleBefore": { "width": "0.08em" },
+      "title": [
+        {
+          "slot": "label",
+          "placement": {
+            "columnStart": 1,
+            "span": { "min": 1, "preferred": 4, "max": 4 },
+            "vertical": "top",
+            "collapse": "inline",
+            "crop": "preserve",
+            "wrapsText": false
+          }
+        },
+        {
+          "slot": "headline",
+          "placement": {
+            "columnStart": 1,
+            "span": { "min": 1, "preferred": 4, "max": 4 },
+            "vertical": "top",
+            "collapse": "inline",
+            "crop": "preserve",
+            "wrapsText": false
+          }
+        }
+      ],
+      "lead": [
+        {
+          "slot": "deck",
+          "placement": {
+            "columnStart": 1,
+            "span": { "min": 1, "preferred": 2, "max": 2 },
+            "vertical": "top",
+            "collapse": "inline",
+            "crop": "preserve",
+            "wrapsText": true
+          }
+        },
+        {
+          "slot": "byline",
+          "placement": {
+            "columnStart": 1,
+            "span": { "min": 1, "preferred": 2, "max": 2 },
+            "vertical": "top",
+            "collapse": "inline",
+            "crop": "preserve",
+            "wrapsText": true
+          }
+        },
+        {
+          "slot": "media",
+          "mediaIndex": 0,
+          "placement": {
+            "anchor": "right",
+            "span": { "min": 1, "preferred": 2, "max": 2 },
+            "vertical": "top",
+            "collapse": "inline",
+            "crop": "preserve",
+            "wrapsText": true
+          }
+        }
+      ]
+    },
     "media": [
       {
         "required": true,
         "assetRole": "lead",
         "placement": {
-          "anchor": "center",
-          "span": { "min": 1, "preferred": 4, "max": 4 },
+          "anchor": "right",
+          "span": { "min": 1, "preferred": 2, "max": 2 },
           "vertical": "top",
           "collapse": "inline",
           "crop": "preserve",
-          "wrapsText": false
+          "wrapsText": true
         }
       }
     ],
@@ -385,6 +654,8 @@ Use three top-row `articleFrame` blocks whose spans add to six:
     "id": "front-right-rail",
     "type": "articleFrame",
     "presetId": "front.teaser",
+    "role": "rail",
+    "typography": { "headlineScale": "rail" },
     "itemId": "market-hall",
     "flowKey": "market-hall",
     "startCursor": "beginning",
@@ -395,17 +666,20 @@ Use three top-row `articleFrame` blocks whose spans add to six:
 
 ### Front-Page Headline Scale
 
-Front-page headline size must be controlled by editorial role, not by accidental
-array position.
+Front-page headline scale must be controlled by canonical editorial tokens, not
+by accidental array position or raw CSS size.
 
-In a rail / feature / rail layout, the two one-column rails should have matching
-headline treatment. The four-column center feature should be the visually larger
-story. A common bug is making the first block in the array a left rail and then
-letting the solver treat index `0` as the lead story. That makes the left rail
-headline larger than the right rail headline even though both are one-column
-side stories.
+In a rail / feature / rail layout, the two one-column rails should use matching
+`rail` headlines. The four-column center feature should use a `feature`
+headline and visually outrank the rails. A common bug is making the first block
+in the array a left rail and then letting the solver treat index `0` as the lead
+story. That makes the left rail headline larger than the right rail headline
+even though both are one-column side stories.
 
-When authoring front-page blocks, set explicit roles:
+When authoring front-page blocks, set explicit `role` and
+`typography.headlineScale`. For media-led center features, combine
+`role: "feature"`, `typography.headlineScale: "feature"`, and the
+`composition` pattern above.
 
 ```json
 [
@@ -414,6 +688,7 @@ When authoring front-page blocks, set explicit roles:
     "type": "articleFrame",
     "presetId": "front.teaser",
     "role": "rail",
+    "typography": { "headlineScale": "rail" },
     "itemId": "schools-reading-lab",
     "flowKey": "schools-reading-lab",
     "startCursor": "beginning",
@@ -424,30 +699,19 @@ When authoring front-page blocks, set explicit roles:
     "type": "articleFrame",
     "presetId": "front.teaser",
     "role": "feature",
+    "typography": { "headlineScale": "feature" },
     "itemId": "agent-procedure-patterns",
     "flowKey": "agent-procedure-patterns",
     "startCursor": "beginning",
     "span": { "min": 1, "preferred": 4, "max": 4 },
-    "media": [
-      {
-        "required": true,
-        "assetRole": "lead",
-        "placement": {
-          "anchor": "center",
-          "span": { "min": 1, "preferred": 4, "max": 4 },
-          "vertical": "top",
-          "collapse": "inline",
-          "crop": "preserve",
-          "wrapsText": false
-        }
-      }
-    ]
+    "localGrid": { "columns": { "min": 1, "preferred": 4, "max": 4 } }
   },
   {
     "id": "front-right-rail",
     "type": "articleFrame",
     "presetId": "front.teaser",
     "role": "rail",
+    "typography": { "headlineScale": "rail" },
     "itemId": "market-hall",
     "flowKey": "market-hall",
     "startCursor": "beginning",
@@ -456,18 +720,21 @@ When authoring front-page blocks, set explicit roles:
 ]
 ```
 
-If `role` is not currently honored by the solver, fix the solver before trying
-to work around this in content. The expected rule is:
+If `typography.headlineScale` is not currently honored by the solver, fix the
+solver before trying to work around this in content. The expected rule is:
 
-- `role: "feature"` or a wide media-led teaser gets feature headline metrics.
-- `role: "rail"` gets rail headline metrics.
-- One-column side stories in the same row get matching headline metrics.
+- `headlineScale: "banner"` gets a `banner headline`.
+- `headlineScale: "feature"` gets a `feature headline`.
+- `headlineScale: "standard"` gets a `standard headline`.
+- `headlineScale: "rail"` gets a `rail headline`.
+- `headlineScale: "brief"` gets a `brief headline`.
+- One-column side stories in the same row should usually use matching `rail`
+  headlines.
 - Do not infer lead typography from `index === 0`.
 
 For the current GraphQL edition, inspect the live `Edition.layoutPlan` before
-changing it. The front page is stored in the cloud, not only in
-`content/edition.json`; use `npm run content -- content diff edition current`
-before syncing.
+changing it. Use `npm run content -- content diff edition current` before
+syncing.
 
 ### Shared Continuation Page
 
@@ -562,8 +829,8 @@ width while still living inside a six-column page system.
 
 ## When To Change TypeScript
 
-Change `content/edition.json` when the existing vocabulary can describe the
-page.
+Change `Edition.layoutPlan` in GraphQL when the existing vocabulary can
+describe the page.
 
 Change `lib/layout-plan.ts` and `lib/newspaper-layout.ts` when you need a new
 reusable layout concept, such as a new page preset, region type, block type,

@@ -80,25 +80,15 @@ measure text around it.
 
 ## How It Works
 
-Development editorial articles live in `content/articles/*.md`. These files use
-YAML frontmatter for metadata and Markdown headings for editorial structure:
-the first `#` heading becomes the headline, the first `##` heading becomes the
-deck, and the remaining paragraph blocks become the article body. Articles may
-also define a `shortSlug` such as `GRID` or `READING` for newspaper-style
-continuation labels. This folder is for development content only.
-
 Fixture articles still live in `lib/articles.ts`. They are the stable base for
 tests and reproducible layout scenarios. Edge-case BDD fixture variants live in
-`lib/layout-scenarios.ts`, not in `content/articles/`.
+`lib/layout-scenarios.ts`.
 
 The app does not read any store directly from UI components. Content flows
 through a `ContentRepository` boundary, which returns normalized
 `EditionContent`: edition metadata, generic publication items, and a required
-layout plan. In development, the default front page loads Markdown content.
-URLs with `?scenario=<id>` always load named scenario fixture content.
-Production/build defaults to fixture content unless `PAPYRUS_CONTENT_SOURCE` is
-set. `PAPYRUS_CONTENT_SOURCE=fixture|markdown|graphql` can override the default
-source.
+layout plan. The default content source is Amplify GraphQL in every environment.
+URLs with `?scenario=<id>` load named fixture scenarios for BDD/debug only.
 
 The GraphQL repository maps Amplify Data records into the same
 `PublicationItem`, `ArticleImageAsset`, and `EditionContent` shape before
@@ -121,9 +111,8 @@ the solver measures each story's label, headline, deck, byline, body slot, and
 continuation jump area so stories in the same row share the same rendered
 height.
 
-Continuation pages are planned before layout starts. The plan lives with the
-edition as `layoutPlan`: local development stores it in `content/edition.json`,
-and Amplify stores it on the `Edition` record. It names page presets, regions,
+Continuation pages are planned before layout starts. The plan lives on the
+Amplify `Edition.layoutPlan` record. It names page presets, regions,
 blocks, local grid preferences, cut policies, jump targets, media placement
 rules, pull-quote options, and content requirements. Page labels such as
 `SEE READING ON A3` come from that plan, not from whatever page happens to be
@@ -166,9 +155,9 @@ surfaces. CLI authoring uses the separate Lambda authorizer, with
 Amplify secret named `PAPYRUS_JWT_SECRET`; the authorizer also enforces the
 configured issuer, audience, and scope values.
 
-Cloud content is seeded from `content/articles/*.md`; the Markdown files remain
-development content, not BDD fixtures. The seed uploads article images to
-Storage and creates the related CMS records. It does not create a CMS UI.
+Cloud content is seeded from fixture content in `lib/articles.ts` and
+`lib/layout-plan.ts`. The seed uploads article images to Storage and creates the
+related CMS records. It does not create a CMS UI.
 
 ## Current Edition
 
@@ -200,14 +189,13 @@ by git, while `.env.example` is intentionally committed as the template.
 defaults to `http://localhost:3001`; set `PAPYRUS_BASE_URL` to test another
 server.
 
-In development, no query string means Markdown content from `content/articles/`.
-Use `/?scenario=current-edition` or another named scenario id when you need the
-reproducible fixture layer.
+In development, no query string means the live GraphQL edition. Use
+`/?scenario=current-edition` or another named scenario id only when you need a
+reproducible fixture layer for testing.
 
 For Amplify development, run `npm run sandbox` to provision a local cloud
 sandbox. After the sandbox has generated `amplify_outputs.json`, run
-`npm run seed:amplify` to upload Markdown content and media. Then start the app
-with `PAPYRUS_CONTENT_SOURCE=graphql` to read the cloud edition.
+`npm run seed:amplify` to upload fixture content and media.
 
 For content authoring against a deployed API:
 
@@ -215,17 +203,15 @@ For content authoring against a deployed API:
 npm run content -- content inspect
 npm run content -- content list articles
 npm run content -- content diff edition current
-npm run content -- content sync article harbor-grid
+npm run content -- content sync article agent-procedure-patterns
 npm run content -- content sync edition current
 npm run content -- content delete all --yes
 ```
 
-The CLI reads local editorial content from `content/articles/` plus
-`content/edition.json`. Set `PAPYRUS_GRAPHQL_ENDPOINT` and
-`PAPYRUS_GRAPHQL_JWT` before running authoring commands. The JWT is sent
-directly as the AppSync `Authorization` bearer token and is validated through
-the configured Lambda authorizer. No Papyrus editor login or local auth-session
-cache is involved.
+Set `PAPYRUS_GRAPHQL_ENDPOINT` and `PAPYRUS_GRAPHQL_JWT` before running
+authoring commands. The JWT is sent directly as the AppSync `Authorization`
+bearer token and is validated through the configured Lambda authorizer. No
+Papyrus editor login or local auth-session cache is involved.
 
 `content delete all --yes` removes CMS records through the same JWT/Lambda-authorizer
 authoring lane. It does not use API-key reads and should not be replaced with a
@@ -236,7 +222,7 @@ For local cloud work, use an AWS profile, for example:
 ```bash
 AWS_PROFILE=default AWS_REGION=us-east-1 npm run sandbox
 AWS_PROFILE=default AWS_REGION=us-east-1 npm run seed:amplify
-AWS_PROFILE=default PAPYRUS_CONTENT_SOURCE=graphql npm run dev
+AWS_PROFILE=default npm run dev
 ```
 
 ## Layout Scenario Tests
@@ -251,9 +237,9 @@ Scenario URLs such as `/?scenario=shared-blank-column-pressure` select named
 fixture content through the same content repository boundary used by the app.
 They are not a renderer-side bypass.
 
-Do not put BDD scenario fixtures in `content/articles/`. That directory is for
-editorial development content. Test scenarios belong in `lib/layout-scenarios.ts`
-so they remain deliberate, reproducible examples.
+Do not put BDD scenario fixtures in production content records. Test scenarios
+belong in `lib/layout-scenarios.ts` so they remain deliberate, reproducible
+examples.
 
 The step definitions use Playwright to inspect both rendered DOM rectangles and
 the solved layout exposed as `window.__PAPYRUS_LAYOUT__`. That lets a scenario
@@ -264,22 +250,15 @@ inside the feature file.
 
 - `lib/articles.ts` contains fixture article data, image asset metadata, and
   helpers for article text and image assets.
-- `content/articles/` contains Markdown development articles. Frontmatter
-  supplies metadata; `#` and `##` headings supply headline and deck.
-- `content/edition.json` defines the local editorial edition metadata, article
-  ordering, and composable layout plan used by Markdown preview, seeding, and
-  the authoring CLI.
-- `lib/content-repository.ts` defines the current fixture/scenario repository
-  and the source selector for fixture, Markdown, and GraphQL-backed content.
+- `lib/content-repository.ts` loads GraphQL content by default and supports
+  `?scenario=<id>` overrides for BDD/debug fixtures.
 - `lib/graphql-content-repository.ts` loads Amplify Data records, resolves
   Storage paths to signed URLs, and normalizes cloud content into
   `PublicationItem` objects.
 - `amplify/` defines the Gen2 Auth, Data, Storage, and seed resources for the
   cloud content backend.
 - `scripts/content-cli.cjs` is the JWT-backed content authoring CLI for
-  Markdown-first sync, diff, inspect, and list workflows.
-- `lib/markdown-content-repository.ts` parses Markdown development content with
-  `gray-matter` and returns normalized `Article` objects.
+  GraphQL inspect/list/diff/sync workflows.
 - `lib/content-types.ts` defines `EditionContent` and `ContentRepository`.
 - `lib/publication-items.ts` defines generic publication items and article
   adapters used by the solver and direct article routes.
@@ -291,7 +270,7 @@ inside the feature file.
 - `lib/newspaper-layout.ts` owns the Pretext layout engine, responsive page
   grids, region/block solving, placed text ranges, adaptive furniture, and
   solved page heights.
-- `components/newspaper.tsx` renders the solved newspaper, one-page flipper,
+- `components/newspaper.tsx` renders the solved newspaper scroll edition,
   measured text lines, continuation photos, and direct article links.
 - `features/` contains executable Gherkin scenarios and Playwright-backed step
   definitions for layout behavior.

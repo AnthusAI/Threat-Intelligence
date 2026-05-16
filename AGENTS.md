@@ -36,6 +36,14 @@ rendering contracts.
   continuation heading, for example `SEE MORE ON A2` and `FROM A1`.
 - Exact cursor handoff matters. Never duplicate or skip article text between
   front-page excerpts and continuation pages.
+- Headline scale is an editorial token, not a CSS tweak or a side effect of
+  block order. Use canonical `typography.headlineScale` names: `banner`,
+  `feature`, `standard`, `rail`, and `brief`.
+- Use Papyrus's canonical newspaper vocabulary when discussing layout changes
+  with users and other agents. Prefer phrases like `feature headline`,
+  `rail headline`, `articleFrame composition`, `local grid`, `media inset`,
+  `planned continuation`, and `solver-owned furniture` over generic wording
+  like "make it bigger" or "move the image around."
 - Keep cloud content behind `ContentRepository`. Amplify, GraphQL, and Storage
   types must not leak into `lib/newspaper-layout.ts`.
 - Do not make the S3 bucket raw-public. Use Amplify Storage access rules and
@@ -93,22 +101,9 @@ runs.
   or adapts the legacy `article.image` into a continuation-capable asset.
 - Keep fixture articles here for reproducible tests and scenario generation.
 
-`content/articles/` owns development editorial content:
-
-- Store development Markdown articles here, one article per `*.md` file.
-- Use YAML frontmatter for metadata: `slug`, optional `shortSlug`, `section`,
-  `byline`, `dateline`, `image`, optional `assets`, and optional `pullQuotes`.
-- The first `#` heading is the article headline. The first `##` heading is the
-  deck. Remaining paragraph blocks become `Article.body`.
-- This directory is not a test fixture store. Do not put BDD edge cases here.
-
-`lib/markdown-content-repository.ts` owns Markdown normalization:
-
-- It parses frontmatter with `gray-matter`.
-- It maps Markdown files into the same `Article` shape used by fixture and
-  future API content.
-- Keep Markdown parsing and default metadata decisions here, not inside the
-  solver or renderer.
+Papyrus no longer uses a local Markdown content store. Do not add back a
+`content/articles/` runtime source. Edition content should come from Amplify
+GraphQL (or `?scenario=<id>` fixture overrides for tests/debug only).
 
 `lib/publication-items.ts` owns the generic publication model:
 
@@ -128,18 +123,11 @@ runs.
   `PublicationItem[]` and a required `EditionLayoutPlan`.
 - `ContentRepository` is the source abstraction for loading edition content,
   resolving one article by slug, and listing article slugs.
-- The current repository selects among Markdown development content, base
-  fixture content, and named scenario content.
+- The current repository uses Amplify GraphQL by default and named scenario
+  content only when `?scenario=<id>` is present.
 - `?scenario=<id>` always selects named scenario content from
   `lib/layout-scenarios.ts`.
-- In `NODE_ENV=development`, no scenario should load Markdown content from
-  `content/articles/`.
-- In production/build, no scenario uses fixture content unless it is the active
-  content source.
-- `PAPYRUS_CONTENT_SOURCE=fixture|markdown|graphql` can override the default
-  source.
-- `PAPYRUS_CONTENT_SOURCE=graphql` loads Amplify Data through
-  `lib/graphql-content-repository.ts`.
+- Amplify Data is loaded through `lib/graphql-content-repository.ts`.
 - UI routes should use the repository boundary, not import fixture arrays
   directly.
 
@@ -167,11 +155,10 @@ runs.
   `MediaAsset`, `Edition`, and `EditionItem`.
 - `amplify/storage/resource.ts` defines private S3-backed media storage with
   guest read and editor write/delete access on `media/*`.
-- `amplify/seed/seed.ts` seeds the sandbox from `content/articles/*.md`, uploads
-  images, and upserts CMS records.
+- `amplify/seed/seed.ts` seeds the sandbox from fixture content, uploads images,
+  and upserts CMS records.
 - `amplify_outputs.json` is generated output and must stay ignored.
-- Do not put BDD fixtures in `content/articles/` to make cloud seeding easier.
-  That directory is editorial development content only.
+- Do not put BDD fixtures in production content records.
 - Local sandbox, seed, and deploy operations should use the caller's AWS
   profile, typically via `AWS_PROFILE` and `AWS_REGION`.
 - `amplify/seed/seed.ts` signs into Cognito as the seed editor using
@@ -188,13 +175,9 @@ runs.
 `scripts/` owns the content authoring CLI:
 
 - `scripts/content-cli.cjs` is the entrypoint exposed by `npm run content --`.
-- The CLI is Markdown-first and edition-aware.
-- `content/edition.json` is the local source of truth for edition metadata and
-  article order.
+- The CLI is GraphQL authoring and inspection.
 - `scripts/lib/papyrus-graphql-authoring.cjs` owns JWT-authenticated GraphQL
   authoring calls.
-- `scripts/lib/papyrus-markdown.cjs` owns Markdown and edition normalization for
-  the CLI.
 - In the current CLI authoring path, media assets must use external URLs. Do
   not add half-working direct S3 uploads without also introducing an
   authenticated Storage strategy that matches the chosen credentials model.
@@ -206,8 +189,7 @@ runs.
 
 - `EditionLayoutPlan` is stored with edition content as editorial intent, not
   solved geometry.
-- `content/edition.json` carries the local development plan; Amplify stores the
-  same shape on `Edition.layoutPlan`.
+- Amplify stores this shape on `Edition.layoutPlan`.
 - The plan is composable: `pages[]` contain `regions[]`, and regions contain
   typed `blocks[]`.
 - Page presets currently include `front.mosaic`, `page.regionStack`,
@@ -220,6 +202,20 @@ runs.
   `article.standard`, `article.mediaInset`, and `article.mediaPrelude`.
 - Media placement uses responsive intent: anchor, span range, vertical
   placement, collapse policy, crop policy, and wrap behavior.
+- `articleFrame.typography.headlineScale` names the headline treatment with
+  canonical newspaper terms: `banner`, `feature`, `standard`, `rail`, or
+  `brief`. Do not infer headline scale from array position or patch it with CSS.
+  When a user asks for a larger or smaller headline, map that request to one of
+  these scale names and state the chosen name back in the implementation notes.
+- `articleFrame.editorialPriority` names sequential importance with canonical
+  terms: `primary`, `secondary`, `tertiary`, or `supporting`. This is separate
+  from visual role and headline scale. In `front.mosaic`, one-column layouts
+  use this priority so the `primary story` appears first even if it is centered
+  or offset in a wide layout.
+- `articleFrame.composition` can place label, headline, deck, byline, media,
+  and pull quote slots on a local grid. Title slots reserve chrome above the
+  body. Lead slots become solver-owned display obstacles inside the body and do
+  not consume article cursors.
 - Runtime validation uses Zod. A missing or invalid required plan is a
   publishing error; do not add a compatibility layer for previous plan shapes.
 - Solved geometry, line positions, selected rectangles, and Pretext cursors must
@@ -252,8 +248,8 @@ page heights, section splits, or image variant scores.
   rectangles, but do not copy those details into scenario prose.
 - Prefer adding a named fixture set in `lib/layout-scenarios.ts` when a bug
   depends on article length, viewport size, images, or pull quotes.
-- Do not store test scenarios or edge-case fixtures in `content/articles/`.
-  That folder is for development/editorial content only.
+- Do not store test scenarios or edge-case fixtures in production edition
+  records.
 - The home page accepts `?scenario=<id>` as a content-source selector. It should
   go through `ContentRepository.loadEditionContent`, not bypass the content
   boundary in the renderer.
@@ -309,6 +305,9 @@ page heights, section splits, or image variant scores.
   previous page heights so pages do not clip mid-flip.
 - Article block title heights, body heights, furniture heights, and region gaps
   must be reflected in solved page height.
+- Composed article-frame chrome boxes must reserve solved paint space before
+  body lines are measured. Decks, bylines, images, and pull quotes placed in the
+  body field are obstacles, not article text.
 - CSS variables passed from React should mirror solver geometry. Avoid duplicate
   independent `clamp(...)` logic for solver-owned measurements.
 
@@ -340,10 +339,10 @@ the solver has run.
 
 To add or change article data:
 
-- Edit `content/articles/*.md` for development editorial content.
-- Edit `lib/articles.ts` only for base fixture/test data.
-- Add edge-case scenario variants in `lib/layout-scenarios.ts`, not in
-  `content/articles/`.
+- Update content in GraphQL (`Item`, `MediaAsset`, `Edition`, `EditionItem`)
+  through the CLI authoring lane.
+- Edit `lib/articles.ts` only for base fixture/test data and scenario work.
+- Add edge-case scenario variants in `lib/layout-scenarios.ts`.
 - Keep body paragraphs long enough for continuation experiments.
 - Add `assets` when an article has more than one usable image.
 - Add pull quotes as editorial fixture data when they are useful for balancing
@@ -358,15 +357,14 @@ To add cloud content fields:
 - Normalize those fields in `lib/graphql-content-repository.ts` before the
   solver sees them.
 - Keep GraphQL schema concerns out of `lib/newspaper-layout.ts`.
-- Update `amplify/seed/seed.ts` if Markdown development content should populate
-  the new field.
+- Update `amplify/seed/seed.ts` if fixture seeding should populate the new
+  field.
 - Prefer secondary indexes for real query access patterns instead of filtering
   large lists in the app.
 
 To add a planned page:
 
-- Add a new entry under `layoutPlan.pages[]` in `content/edition.json` for local
-  content or `Edition.layoutPlan` for cloud content.
+- Add a new entry under `layoutPlan.pages[]` on `Edition.layoutPlan` in GraphQL.
 - Choose an existing page preset (`front.mosaic`, `page.regionStack`,
   `page.railMain`, or `page.full`) unless the page needs a new reusable preset.
 - Add regions and blocks with stable ids. Reference items by slug, not by array
@@ -408,7 +406,7 @@ Amplify checks when cloud content changes:
 ```bash
 npm run sandbox
 npm run seed:amplify
-PAPYRUS_CONTENT_SOURCE=graphql npm run build
+npm run build
 ```
 
 Only run sandbox provisioning when the user expects AWS resources to be created
