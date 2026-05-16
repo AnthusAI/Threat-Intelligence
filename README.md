@@ -78,6 +78,14 @@ continues, whether a pull quote fits, or how tall a page should be. If an object
 changes the available copy area, it belongs in the solver first so Pretext can
 measure text around it.
 
+## Layout System Guide
+
+The durable rules for the current design system are documented in
+`docs/layout-system.md`. Read that guide before changing vertical rhythm,
+masthead chrome, responsive front-page recipes, article-frame composition,
+continuation height policy, furniture sufficiency, captions, the front footer,
+or the archive grid.
+
 ## How It Works
 
 Fixture articles still live in `lib/articles.ts`. They are the stable base for
@@ -159,15 +167,30 @@ Cloud content is seeded from fixture content in `lib/articles.ts` and
 `lib/layout-plan.ts`. The seed uploads article images to Storage and creates the
 related CMS records. It does not create a CMS UI.
 
-## Current Edition
+## Current Production Edition
 
-- Page 1 is a `front.mosaic` page with six `articleFrame` teaser blocks.
-- Page 2 is a stacked editorial page containing a Harbor `article.mediaInset`
-  block with responsive image placement.
-- Page 3 is a stacked editorial page containing Reading Labs and Market Hall
-  `article.mediaInset` blocks, each solved with its own local grid, image
-  obstacles, and optional pull quote.
+The production `edition-current` record is the AI/ML corpus first edition dated
+`2026-05-13`. The live content source of truth is Amplify Data, especially
+`Edition.layoutPlan`, `EditionItem`, `Item`, `Tag`, `ItemTag`, and `MediaAsset`
+records.
+
+- Page 1 is a `front.mosaic` page with six planned `articleFrame` teaser blocks.
+- Pages 2 through 7 are planned continuation pages for the front-page AI/ML
+  corpus stories.
+- Page 8 is a stacked page containing the ASR correction story and ML history
+  story.
+- Production sections mirror Biblicus topic categories, such as
+  `Self-Evolving LLM Agents`,
+  `AI Agent Reliability and Evaluation`,
+  `Autonomous AI Scientific Discovery`,
+  `Multimodal Document Understanding Pretraining`,
+  `LLM Confidence Calibration and Instruction Tuning`,
+  `ASR Error Correction and System Combination`, and
+  `Early Machine Learning in Games and Backpropagation History`.
 - Direct article routes remain available at `/articles/[slug]`.
+
+When production content changes, inspect the live `Edition.layoutPlan` instead
+of trusting this README as the layout source of truth.
 
 ## Commands
 
@@ -216,9 +239,9 @@ longer has a committed `content/articles` Markdown store, so do not cite
 `content sync edition current` as the production publishing path unless a
 current source payload exists and has been validated.
 
-`content delete all --yes` removes CMS records through the same JWT/Lambda-authorizer
-authoring lane. It does not use API-key reads and should not be replaced with a
-direct DynamoDB cleanup unless that is explicitly requested.
+`content delete all --yes` removes CMS records through the same
+JWT/Lambda-authorizer authoring lane. Use it only for an explicitly requested
+reset. Do not use it for production content refreshes.
 
 For local cloud work, use an AWS profile, for example:
 
@@ -234,6 +257,84 @@ Production content lives in Amplify Data. The reader path uses API-key GraphQL
 reads through `ContentRepository`; production writes and repairs should use the
 JWT/Lambda-authorizer authoring lane or an explicit AWS-backed maintenance
 script. Do not repair production by adding a runtime Markdown content source.
+
+Production authoring uses the deployed AppSync API, not the sandbox:
+
+```bash
+export AWS_PROFILE=Ryan
+export AWS_REGION=us-east-1
+export PAPYRUS_GRAPHQL_ENDPOINT=https://64hviw44q5cq5nwjcigmasowlq.appsync-api.us-east-1.amazonaws.com/graphql
+```
+
+Mint a fresh short-lived JWT from the production Amplify SSM secret. Do not
+write the token or secret into `.env`:
+
+```bash
+export PAPYRUS_GRAPHQL_JWT="$(node - <<'NODE'
+const { execFileSync } = require("node:child_process");
+const { createHmac } = require("node:crypto");
+
+const parameterName = "/amplify/dbsyytcm9drqa/main-branch-cb38ada667/PAPYRUS_JWT_SECRET";
+const raw = execFileSync("aws", [
+  "ssm",
+  "get-parameter",
+  "--name",
+  parameterName,
+  "--with-decryption",
+  "--output",
+  "json",
+], { encoding: "utf8" });
+
+const secret = JSON.parse(raw).Parameter.Value;
+const now = Math.floor(Date.now() / 1000);
+const header = { alg: "HS256", typ: "JWT" };
+const payload = {
+  iss: "papyrus-cli",
+  sub: "local-production-authoring",
+  aud: "papyrus-authoring",
+  iat: now,
+  nbf: now - 30,
+  exp: now + 6 * 60 * 60,
+  scope: "papyrus:write",
+  groups: ["editor"],
+};
+const encode = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
+const unsigned = `${encode(header)}.${encode(payload)}`;
+const signature = createHmac("sha256", secret).update(unsigned).digest("base64url");
+process.stdout.write(`${unsigned}.${signature}`);
+NODE
+)"
+```
+
+Then verify the authoring lane before writing:
+
+```bash
+npm run content -- content inspect
+npm run content -- content list articles
+```
+
+For production content refreshes, use targeted GraphQL upserts. The safe pattern
+is:
+
+1. Dump or inspect `edition-current`, its `EditionItem` records, referenced
+   `Item` records, media, and tags.
+2. Generate a planned diff before mutations.
+3. Confirm the diff targets only `edition-current` and the intended
+   `Item`, `Tag`, `ItemTag`, `EditionItem`, and `MediaAsset` records.
+4. Apply only targeted upserts/deletes. Do not run `npm run seed:amplify`, do
+   not run sandbox provisioning, and do not run `content delete all --yes`.
+5. Re-run `content list articles` and smoke-check the deployed site.
+
+When deriving sections from a corpus, set `Item.section`, `Tag.label`, and
+`ItemTag.tagSlug` to the corpus topic taxonomy. Do not leave generic placeholder
+sections if the edition is meant to reflect corpus categories.
+
+If the deployed production code is older than the local layout-plan schema, a
+newer `Edition.layoutPlan` can make production return `500` during layout-plan
+validation. Prefer deploying the current app before publishing advanced
+layout-plan fields. If production must be restored without a deploy, make a
+targeted compatibility repair to `edition-current.layoutPlan`, then re-smoke the
+site and document exactly which fields were removed.
 
 The production archive has one important invariant: a published edition must
 have all of these fields set:
@@ -282,6 +383,9 @@ inside the feature file.
 
 ## Important Files
 
+- `docs/layout-system.md` explains the current layout-system invariants:
+  vertical rhythm, mastheads, responsive front recipes, article composition,
+  continuations, height policy, furniture, captions, footer, and archive.
 - `lib/articles.ts` contains fixture article data, image asset metadata, and
   helpers for article text and image assets.
 - `lib/content-repository.ts` loads GraphQL content by default and supports

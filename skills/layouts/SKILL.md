@@ -25,6 +25,9 @@ requests easier for the next agent to implement.
 ## Files To Read First
 
 - GraphQL `Edition.layoutPlan`: the editable edition plan.
+- `docs/layout-system.md`: the current design-system rules for vertical rhythm,
+  mastheads, responsive recipes, composition, continuations, furniture,
+  captions, footer, and archive behavior.
 - `lib/layout-plan.ts`: the Zod contract for valid layout JSON. Use this when
   the JSON shape is unclear.
 - `lib/publication-items.ts`: the normalized item model used by layout blocks.
@@ -119,6 +122,28 @@ Use this model when authoring:
 - `articleFrame` blocks may consume or resume article text with exact cursors.
 - Media and pull quotes are solver-owned furniture. If they affect copy space,
   they must be in the layout plan before Pretext runs.
+
+## Current Design Invariants
+
+Read `docs/layout-system.md` for the full contract. The critical authoring rules
+are:
+
+- Everything that affects measured copy must be solver-owned before Pretext
+  runs.
+- The shared vertical rhythm is `19px` normally and `18px` on narrow layouts.
+- Front-page nameplates are five rhythm rows; the normal front masthead adds a
+  one-row metadata strip for six rows total.
+- Archive uses a five-row `ARCHIVE` nameplate only; `Previous editions` is not a
+  visible masthead row.
+- Front-page `responsiveLayouts` should be keyed by solver column count, not by
+  device names.
+- `editorialPriority` controls collapsed reading order; it is separate from
+  `role` and `typography.headlineScale`.
+- Captions, pull quotes, and image packages reserve complete rhythm rows and
+  leave one blank rhythm row before following copy.
+- Height policy is explicit: use `region.size.shrinkToContent`,
+  `articleFrame.size.defaultRows`, and `articleFrame.size.shrinkToContent` only
+  when the default fill behavior is wrong.
 
 ## Page Setup Checklist
 
@@ -385,7 +410,7 @@ which chrome spans which columns. This is the right tool for front features like
 - deck and byline only over the copy columns;
 - image in the rightmost two of four local columns;
 - body copy flowing around deck, byline, image, or pull quote obstacles;
-- thin or heavy story rules controlled with em tokens.
+- responsive collapse rules for three-, two-, and one-column layouts.
 
 Example: four-column feature, full-width headline, copy on the left two columns,
 image on the right two columns:
@@ -403,7 +428,6 @@ image on the right two columns:
   "span": { "min": 1, "preferred": 4, "max": 4 },
   "localGrid": { "columns": { "min": 1, "preferred": 4, "max": 4 } },
   "composition": {
-    "ruleBefore": { "width": "0.08em" },
     "title": [
       {
         "slot": "label",
@@ -489,8 +513,6 @@ Slot rules:
 - `deck`, `byline`, `media`, and `pullQuote` in `lead` do not consume article
   text. They only reserve solved display space.
 - Use `crop: "preserve"` when aspect ratio matters.
-- Use `ruleBefore.width: "0.08em"` for a thin newspaper rule and around
-  `"0.32em"` for a heavy feature rule.
 - On mobile, spans collapse through the normal placement `collapse` policy, so
   this four-column pattern becomes a one-column stack without needing a second
   mobile-only layout.
@@ -572,7 +594,6 @@ features, use `composition`, not a bare full-width front media prelude.
     "span": { "min": 1, "preferred": 4, "max": 4 },
     "localGrid": { "columns": { "min": 1, "preferred": 4, "max": 4 } },
     "composition": {
-      "ruleBefore": { "width": "0.08em" },
       "title": [
         {
           "slot": "label",

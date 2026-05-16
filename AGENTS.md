@@ -54,9 +54,14 @@ rendering contracts.
   `npm run seed:amplify`. `.env*` must stay ignored, and `.env.example` is the
   committed template.
 - The CLI authoring flow uses `PAPYRUS_GRAPHQL_ENDPOINT` plus
-  `PAPYRUS_GRAPHQL_JWT` from `.env`. That JWT is sent directly to AppSync
+  `PAPYRUS_GRAPHQL_JWT` from the process environment; local non-production
+  workflows may load those from `.env`. That JWT is sent directly to AppSync
   through the Lambda authorizer lane. Do not add a Papyrus editor login flow or local
   auth-session cache for CLI publishing.
+- Production authoring uses the deployed production AppSync endpoint, not the
+  sandbox. Mint short-lived production JWTs from the Amplify SSM
+  `PAPYRUS_JWT_SECRET`; do not write production secrets or freshly minted
+  production JWTs into `.env`.
 
 ## Solver vs. Renderer Boundary
 
@@ -186,6 +191,10 @@ GraphQL (or `?scenario=<id>` fixture overrides for tests/debug only).
   stable deployed-API operations. `content diff` and `content sync` are
   source-driven publishing commands; do not use them as a production runbook
   unless the current source adapter and source payload exist.
+- Production content refreshes should be targeted GraphQL upserts/deletes after
+  an explicit planned diff. Do not run sandbox seed, sandbox provisioning, or
+  `content delete all --yes` for a production refresh unless the user explicitly
+  asks for that destructive reset.
 - In the current CLI authoring path, media assets must use external URLs. Do
   not add half-working direct S3 uploads without also introducing an
   authenticated Storage strategy that matches the chosen credentials model.
@@ -383,6 +392,11 @@ To add a planned page:
 - Add `articleFrame.cutPolicy.jumpTargetPage` on earlier blocks when a teaser
   should advertise the planned page.
 - Validate required article/image/content constraints before publishing.
+- If the deployed production app is older than the local layout-plan schema,
+  advanced plan fields can make production reject `Edition.layoutPlan`. Prefer
+  deploying current code before publishing newer plan vocabulary; if production
+  must be restored immediately, make a narrow compatibility repair and document
+  the removed fields.
 
 To add a recipe or solver variant:
 
@@ -441,9 +455,10 @@ Browser smoke test these viewports:
 Check all of the following:
 
 - Page 1 renders one active page.
-- Page 2 is the Harbor `article.mediaInset` block on a `page.regionStack` page.
-- Page 3 is a shared `page.regionStack` with Reading Labs and Market Hall
-  `article.mediaInset` blocks.
+- The active page count matches the loaded `Edition.layoutPlan.pages.length`.
+- The production AI/ML corpus edition currently renders as an 8-page issue:
+  Page 1 is the front mosaic, Pages 2 through 7 are planned continuation pages,
+  and Page 8 is a stacked page for the ASR and ML-history stories.
 - Front-page continuation labels route to the planned page numbers.
 - No `.measured-line` is vertically cropped inside `.story-measure` or
   `.continuation-column`.
