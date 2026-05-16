@@ -546,6 +546,7 @@ function SolvedPageView({
 }) {
   const front = page.kind === "front";
   const editionTitleId = front ? rawEditionTitleId ?? "edition-title" : undefined;
+  const frontRegion = front ? page.regions[0] : undefined;
   return (
     <section
       className={`paper-page-content ${front ? "paper-page-content--front" : "paper-page-content--inside"}`}
@@ -582,6 +583,8 @@ function SolvedPageView({
               {
                 "--paper-columns": page.columnCount,
                 "--paper-gap": `${layout.gap}px`,
+                height: frontRegion ? `${frontRegion.height}px` : undefined,
+                gridTemplateRows: frontRegion?.rowHeights?.map((height) => `${height}px`).join(" "),
               } as CSSProperties
             }
           >

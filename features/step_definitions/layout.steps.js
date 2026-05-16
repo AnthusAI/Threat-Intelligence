@@ -21,6 +21,11 @@ Given("I open the archive page at {int} by {int}", async function (width, height
   await requirePage(this).waitForSelector(".archive-grid-shell", { state: "visible", timeout: 15_000 });
 });
 
+Given("I open the topic steering workspace at {int} by {int}", async function (width, height) {
+  await this.openPath("/topics?demo=1", width, height);
+  await requirePage(this).waitForSelector("[data-topic-steering]", { state: "visible", timeout: 15_000 });
+});
+
 Given("I open the edition path {string} at {int} by {int}", async function (routePath, width, height) {
   await this.openPath(routePath, width, height);
 });
@@ -45,6 +50,17 @@ When("I follow the continuation jump for article {string}", async function (arti
   const jump = page.locator(`.front-story[data-article-id="${articleId}"] .jump-line a`).first();
   await jump.waitFor({ state: "visible", timeout: 10_000 });
   await jump.click();
+});
+
+When("I update the first topic steering name to {string}", async function (name) {
+  const page = requirePage(this);
+  const firstNameInput = page.locator(".topic-steering-topic-card label", { hasText: "Name" }).first().locator("input");
+  await firstNameInput.fill(name);
+  await page.locator(".topic-steering-topic-card button", { hasText: "Save Copy" }).first().click();
+  await page.waitForFunction((expectedName) => {
+    const card = document.querySelector(".topic-steering-topic-card");
+    return card?.getAttribute("data-saved-display-name") === expectedName;
+  }, name);
 });
 
 Then("the active page should be a {string} page", async function (expectedKind) {
@@ -97,6 +113,30 @@ Then("the active content scenario should be {string}", async function (expectedS
 Then("the active content source should be {string}", async function (expectedSource) {
   const source = await requirePage(this).locator(".site-shell").getAttribute("data-content-source");
   assert.equal(source, expectedSource);
+});
+
+Then("the topic steering workspace should render", async function () {
+  const page = requirePage(this);
+  await page.locator("[data-topic-steering]").waitFor({ state: "visible", timeout: 10_000 });
+  assert.equal(await page.locator("[data-topic-steering]").getAttribute("data-topic-steering-demo"), "true");
+  await page.locator("h1", { hasText: "Topic Steering" }).waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("text=AI-ML-research").first().waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("text=AI-ML-history").first().waitFor({ state: "visible", timeout: 10_000 });
+});
+
+Then("topic steering should show topic and graph proposal rows", async function () {
+  const page = requirePage(this);
+  await page.locator("[data-proposal-domain='topic']").first().waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("td", { hasText: "relationship-proposal" }).first().waitFor({ state: "visible", timeout: 10_000 });
+});
+
+Then("the first topic steering name should be {string}", async function (expectedName) {
+  const value = await requirePage(this)
+    .locator(".topic-steering-topic-card label", { hasText: "Name" })
+    .first()
+    .locator("input")
+    .inputValue();
+  assert.equal(value, expectedName);
 });
 
 Then("the active edition should expose a composable layout plan", async function () {
@@ -891,7 +931,7 @@ Then("the front page should render a newspaper footer", async function () {
   assert.ok(report, "Expected solved and rendered front footer");
   assert.ok(Math.abs(report.renderedHeight - report.solvedHeight) <= 0.75, `Expected rendered footer height ${report.renderedHeight} to match solved ${report.solvedHeight}`);
   assert.ok(Math.abs(report.renderedMarginTop - report.solvedMarginTop) <= 0.75, `Expected rendered footer margin ${report.renderedMarginTop} to match solved ${report.solvedMarginTop}`);
-  assert.equal(report.utilityCount, 2);
+  assert.equal(report.utilityCount, 3);
   assert.ok(report.solvedHeight >= report.rowHeight * 2, `Expected footer to reserve at least two rhythm rows; found ${report.solvedHeight}`);
 });
 
@@ -967,22 +1007,109 @@ Then("the front page solved height should include footer rhythm space", async fu
   assert.equal(report.solvedFooterHeight % report.rhythm, 0);
 });
 
-Then("the front page footer should link archive and render login", async function () {
+Then("the front page footer should fit within the solved page", async function () {
+  const report = await requirePage(this).evaluate(() => {
+    const layout = window.__PAPYRUS_LAYOUT__;
+    const frontPage = layout?.pages.find((page) => page.pageNumber === 1);
+    const region = frontPage?.regions[0];
+    const footer = frontPage?.frontFooter;
+    const footerElement = document.querySelector("#page-1 .front-footer");
+    const gridElement = document.querySelector("#page-1 .front-grid");
+    const contentElement = document.querySelector("#page-1 .paper-page-content");
+    if (!layout || !frontPage || !region || !footer || !footerElement || !gridElement || !contentElement) return null;
+    const rhythm = layout.rhythm.rowHeight;
+    const gridRect = gridElement.getBoundingClientRect();
+    const footerRect = footerElement.getBoundingClientRect();
+    const contentRect = contentElement.getBoundingClientRect();
+    const rowHeights = region.rowHeights ?? [];
+    const solvedGridHeight = rowHeights.reduce((total, height) => total + height, 0) + layout.rowGap * Math.max(0, rowHeights.length - 1);
+    return {
+      rhythm,
+      rowTrackCount: rowHeights.length,
+      solvedGridHeight,
+      solvedRegionHeight: region.height,
+      solvedPageHeight: frontPage.height,
+      renderedPageHeight: contentRect.height,
+      renderedGridHeight: gridRect.height,
+      renderedFooterGap: footerRect.top - gridRect.bottom,
+      renderedFooterHeight: footerRect.height,
+      footerBottomInset: contentRect.bottom - footerRect.bottom,
+      pagePaddingBottom: layout.pageChrome.pagePaddingBottom,
+      solvedFooterMarginTop: footer.marginTop,
+      solvedFooterHeight: footer.height,
+    };
+  });
+  assert.ok(report, "Expected front footer fit report");
+  assert.ok(report.rowTrackCount > 0, "Expected solved front grid row tracks");
+  assert.ok(Math.abs(report.solvedGridHeight - report.solvedRegionHeight) <= 0.75, `Expected solved row tracks ${report.solvedGridHeight} to match region height ${report.solvedRegionHeight}`);
+  assert.ok(Math.abs(report.renderedGridHeight - report.solvedRegionHeight) <= 0.75, `Expected rendered grid height ${report.renderedGridHeight} to match solved region height ${report.solvedRegionHeight}`);
+  assert.ok(Math.abs(report.renderedFooterGap - report.solvedFooterMarginTop) <= 0.75, `Expected footer gap ${report.renderedFooterGap} to match solved margin ${report.solvedFooterMarginTop}`);
+  assert.ok(Math.abs(report.renderedFooterHeight - report.solvedFooterHeight) <= 0.75, `Expected footer height ${report.renderedFooterHeight} to match solved footer ${report.solvedFooterHeight}`);
+  assert.ok(Math.abs(report.renderedPageHeight - report.solvedPageHeight) <= 0.75, `Expected rendered page height ${report.renderedPageHeight} to match solved page height ${report.solvedPageHeight}`);
+  assert.ok(report.footerBottomInset + 0.75 >= report.pagePaddingBottom, `Expected footer to fit above bottom padding ${report.pagePaddingBottom}; found inset ${report.footerBottomInset}`);
+  assert.equal(report.solvedPageHeight % report.rhythm, 0);
+});
+
+Then("the front page footer should stack utility links in the right column", async function () {
   const page = requirePage(this);
-  const report = await page.evaluate(() => (
-    Array.from(document.querySelectorAll("#page-1 [data-footer-utility]")).map((entry) => ({
+  const report = await page.evaluate(() => {
+    const footer = document.querySelector("#page-1 .front-footer");
+    const sections = footer?.querySelector(".front-footer__sections");
+    const utilities = footer?.querySelector(".front-footer__utilities");
+    if (!footer || !sections || !utilities) return null;
+    const footerRect = footer.getBoundingClientRect();
+    const sectionsRect = sections.getBoundingClientRect();
+    const utilitiesRect = utilities.getBoundingClientRect();
+    const entries = Array.from(footer.querySelectorAll("[data-footer-utility]")).map((entry) => ({
       id: entry.getAttribute("data-footer-utility"),
       text: entry.textContent?.trim(),
       role: entry.getAttribute("role"),
       ariaDisabled: entry.getAttribute("aria-disabled"),
       href: entry.getAttribute("href"),
       tagName: entry.tagName.toLowerCase(),
-    }))
-  ));
-  assert.deepEqual(report, [
+      rect: (() => {
+        const rect = entry.getBoundingClientRect();
+        return {
+          bottom: rect.bottom,
+          height: rect.height,
+          left: rect.left,
+          right: rect.right,
+          top: rect.top,
+        };
+      })(),
+    }));
+    return {
+      footerRight: footerRect.right,
+      sectionsRight: sectionsRect.right,
+      utilities: {
+        bottom: utilitiesRect.bottom,
+        left: utilitiesRect.left,
+        right: utilitiesRect.right,
+        top: utilitiesRect.top,
+      },
+      entries,
+      rhythm: window.__PAPYRUS_LAYOUT__?.rhythm?.rowHeight ?? 19,
+    };
+  });
+  assert.ok(report, "Expected footer utility report");
+  const summary = report.entries.map(({ id, text, role, ariaDisabled, href, tagName }) => ({ id, text, role, ariaDisabled, href, tagName }));
+  assert.deepEqual(summary, [
     { id: "archive", text: "Archive", role: null, ariaDisabled: null, href: "/archive", tagName: "a" },
+    { id: "topics", text: "Topics", role: null, ariaDisabled: null, href: "/topics", tagName: "a" },
     { id: "login", text: "LOGIN", role: null, ariaDisabled: null, href: null, tagName: "span" },
   ]);
+  assert.ok(report.utilities.left >= report.sectionsRight - 0.75, "Expected utility stack to sit to the right of section links");
+  assert.ok(Math.abs(report.utilities.right - report.footerRight) <= 0.75, "Expected utility stack to end at the footer right edge");
+  for (const entry of report.entries) {
+    assert.ok(entry.rect.left >= report.utilities.left - 0.75, `Expected ${entry.id} to stay inside the utility column`);
+    assert.ok(entry.rect.right <= report.utilities.right + 0.75, `Expected ${entry.id} to stay inside the utility column`);
+    assert.ok(Math.abs(entry.rect.height - report.rhythm) <= 0.75, `Expected ${entry.id} to occupy one rhythm row`);
+  }
+  for (let index = 1; index < report.entries.length; index += 1) {
+    const previous = report.entries[index - 1];
+    const current = report.entries[index];
+    assert.ok(current.rect.top >= previous.rect.bottom - 0.75, `Expected ${current.id} to stack below ${previous.id}`);
+  }
 });
 
 Then("the archive masthead should say {string}", async function (expectedTitle) {

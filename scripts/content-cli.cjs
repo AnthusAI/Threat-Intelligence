@@ -7,6 +7,14 @@ const {
   isJwtExpired,
   loadDotEnv,
 } = require("./lib/papyrus-env.cjs");
+const {
+  buildAcceptedTopicSetPayload,
+  buildProjectionImportRecords,
+  buildSteeringImportRecords,
+  loadJsonFile,
+  loadSteeringBundleFromBiblicus,
+  writeJsonFile,
+} = require("./lib/papyrus-curation.cjs");
 const { PapyrusGraphQLAuthoringClient } = require("./lib/papyrus-graphql-authoring.cjs");
 const { getArticleImageAssets, getMarkdownArticle, loadEditionConfig, loadMarkdownArticles } = require("./lib/papyrus-markdown.cjs");
 
@@ -15,7 +23,7 @@ async function main() {
 
   const args = process.argv.slice(2);
   const [group, command, value] = args;
-  if (group !== "content") {
+  if (group !== "content" && group !== "curation") {
     printUsage();
     process.exitCode = 1;
     return;
@@ -41,6 +49,15 @@ async function main() {
       return;
     case "content:delete":
       await handleDelete(value, args.slice(3));
+      return;
+    case "curation:import-steering":
+      await importSteering(args.slice(2));
+      return;
+    case "curation:export-topic-set":
+      await exportTopicSet(args.slice(2));
+      return;
+    case "curation:import-projection":
+      await importProjection(args.slice(2));
       return;
     default:
       printUsage();
@@ -132,6 +149,51 @@ async function handleDelete(subject, flags) {
   printDeleteSummary(result);
 }
 
+async function importSteering(flags) {
+  const options = parseOptions(flags);
+  const bundle = options.bundle
+    ? loadJsonFile(options.bundle)
+    : loadSteeringBundleFromBiblicus({
+        corpus: options.corpus,
+        classifier: options.classifier,
+        topicGovernanceSnapshot: options["topic-governance-snapshot"],
+      });
+  const { client } = createAuthoringClient();
+  const plan = buildSteeringImportRecords(bundle, { classifierId: options.classifier });
+  const changes = await buildRecordChanges(client, plan.records);
+  await applyRecordChanges(client, changes);
+  printCurationImportSummary("steering", plan.importRunId, changes);
+}
+
+async function importProjection(flags) {
+  const options = parseOptions(flags);
+  if (!options.bundle) throw new Error("curation import-projection requires --bundle.");
+  const payload = loadJsonFile(options.bundle);
+  const { client } = createAuthoringClient();
+  const plan = buildProjectionImportRecords(payload, {
+    authorityCorpusId: options["authority-corpus-id"],
+    targetCorpusId: options["target-corpus-id"],
+    classifierId: options.classifier,
+  });
+  const changes = await buildRecordChanges(client, plan.records);
+  await applyRecordChanges(client, changes);
+  printCurationImportSummary("projection", plan.importRunId, changes);
+}
+
+async function exportTopicSet(flags) {
+  const options = parseOptions(flags);
+  const topicSetId = options["topic-set"];
+  if (!topicSetId) throw new Error("curation export-topic-set requires --topic-set.");
+  if (!options.output) throw new Error("curation export-topic-set requires --output.");
+  const { client } = createAuthoringClient();
+  const topicSet = await client.getRecord("CurationTopicSet", topicSetId);
+  if (!topicSet) throw new Error(`CurationTopicSet ${topicSetId} was not found.`);
+  const topics = (await client.listRecords("CurationTopic"))
+    .filter((topic) => topic.topicSetId === topicSetId && topic.status !== "deprecated");
+  writeJsonFile(options.output, buildAcceptedTopicSetPayload(topicSet, topics));
+  console.log(`export\ttopic-set\t${topicSetId}\t${options.output}\t${topics.length} topics`);
+}
+
 async function deleteAllContent(client) {
   const deleteOrder = ["MediaAsset", "ItemTag", "EditionItem", "Item", "Tag", "Edition"];
   const result = [];
@@ -145,6 +207,14 @@ async function deleteAllContent(client) {
   }
 
   return result;
+}
+
+async function buildRecordChanges(client, records) {
+  const changes = [];
+  for (const record of records) {
+    changes.push(await buildRecordChange(client, record.modelName, record.expected));
+  }
+  return changes;
 }
 
 async function syncSingleArticle(client, slug) {
@@ -327,11 +397,19 @@ function printDeleteSummary(result) {
   }
 }
 
+function printCurationImportSummary(kind, importRunId, changes) {
+  console.log(`Import: ${kind}`);
+  console.log(`Run: ${importRunId}`);
+  for (const record of changes) {
+    console.log(`${record.action}\t${record.modelName}\t${record.expected.id}`);
+  }
+}
+
 function recordsEqual(left, right) {
   return stableStringify(normalizeRecord(left)) === stableStringify(normalizeRecord(right));
 }
 
-const AWS_JSON_FIELDS = new Set(["layout", "editorial", "metadata", "layoutPlan"]);
+const AWS_JSON_FIELDS = new Set(["layout", "editorial", "metadata", "layoutPlan", "payload"]);
 
 function normalizeRecord(record, keyName = "") {
   if (Array.isArray(record)) return record.map(normalizeRecord);
@@ -379,6 +457,27 @@ function printUsage() {
   console.log("  npm run content -- content sync article <slug>");
   console.log("  npm run content -- content sync edition <edition-slug>");
   console.log("  npm run content -- content delete all --yes");
+  console.log("  npm run content -- curation import-steering --bundle <steering-export.json>");
+  console.log("  npm run content -- curation import-steering --corpus <path> --classifier <classifier-id>");
+  console.log("  npm run content -- curation export-topic-set --topic-set <id> --output <accepted-topic-set.json>");
+  console.log("  npm run content -- curation import-projection --bundle <projection.json>");
+}
+
+function parseOptions(flags) {
+  const options = {};
+  for (let index = 0; index < flags.length; index += 1) {
+    const token = flags[index];
+    if (!token.startsWith("--")) throw new Error(`Unexpected argument ${token}.`);
+    const key = token.slice(2);
+    const next = flags[index + 1];
+    if (!next || next.startsWith("--")) {
+      options[key] = true;
+      continue;
+    }
+    options[key] = next;
+    index += 1;
+  }
+  return options;
 }
 
 function validateAuthoringClaims(claims) {

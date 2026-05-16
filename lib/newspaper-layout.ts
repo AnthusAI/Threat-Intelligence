@@ -207,6 +207,7 @@ export type SolvedRegion = {
   y: number;
   width: number;
   height: number;
+  rowHeights?: number[];
   columnCount: number;
   blocks: SolvedBlock[];
 };
@@ -222,6 +223,12 @@ export type SolvedFrontFooterEntry = {
 export type SolvedFrontFooterUtilityEntry =
   | {
       id: "archive";
+      label: string;
+      href: string;
+      disabled: false;
+    }
+  | {
+      id: "topics";
       label: string;
       href: string;
       disabled: false;
@@ -650,14 +657,13 @@ function solveFrontMosaicPage(
   const blocks = solvedPlacements.map((placement) => (
     solveFrontArticleFrame(placement, itemsBySlug, flows, prepared, config, pageSpec.pageNumber)
   ));
-  const solvedResponsiveRowHeights = responsiveRowHeights
+  const rowHeights = responsiveRowHeights
     ? getSolvedResponsiveFrontRowHeights(responsiveRowHeights, blocks, config)
-    : null;
-  const gridHeight = solvedResponsiveRowHeights
-    ? getFrontPageGridHeightFromRowHeights(solvedResponsiveRowHeights, config.rowGap)
-    : getFrontPageGridHeight(config);
+    : getSolvedDefaultFrontRowHeights(config.frontRows, blocks, config);
+  const gridHeight = getFrontPageGridHeightFromRowHeights(rowHeights, config.rowGap);
   const frontFooter = solveFrontFooter(blocks, config, pageSpec.pageNumber);
-  const pageHeight = getFrontPageHeightForGrid(config, gridHeight, frontFooter);
+  const regionY = config.pageChrome.pagePaddingTop + config.pageChrome.mastheadHeight + config.pageChrome.frontGridMarginTop;
+  const pageHeight = getFrontPageHeightForRegion(config, regionY, gridHeight, frontFooter);
 
   return {
     id: pageSpec.id ?? pageIdFor(pageSpec.pageNumber),
@@ -673,9 +679,10 @@ function solveFrontMosaicPage(
         type: regionSpec.type,
         role: regionSpec.role,
         x: 0,
-        y: config.pageChrome.pagePaddingTop + config.pageChrome.mastheadHeight + config.pageChrome.frontGridMarginTop,
+        y: regionY,
         width: config.contentWidth,
         height: gridHeight,
+        rowHeights,
         columnCount: config.columnCount,
         blocks,
       },
@@ -856,7 +863,12 @@ function solveFrontFooter(blocks: SolvedBlock[], config: LayoutConfig, pageNumbe
     ? 1
     : Math.min(entries.length, Math.max(1, config.columnCount <= 1 ? 1 : config.columnCount <= 3 ? 2 : 4));
   const sectionRows = entries.length === 0 ? 0 : Math.ceil(entries.length / sectionColumns);
-  const rowCount = 1 + sectionRows + 1;
+  const utilityEntries: SolvedFrontFooterUtilityEntry[] = [
+    { id: "archive", label: "Archive", href: "/archive", disabled: false },
+    { id: "topics", label: "Topics", href: "/topics", disabled: false },
+    { id: "login", label: "LOGIN", disabled: true },
+  ];
+  const rowCount = 1 + Math.max(sectionRows, utilityEntries.length);
   return {
     rowHeight: config.rhythm.rowHeight,
     marginTop: config.rhythm.rowHeight,
@@ -864,11 +876,22 @@ function solveFrontFooter(blocks: SolvedBlock[], config: LayoutConfig, pageNumbe
     sectionRows,
     sectionColumns,
     entries,
-    utilityEntries: [
-      { id: "archive", label: "Archive", href: "/archive", disabled: false },
-      { id: "login", label: "LOGIN", disabled: true },
-    ],
+    utilityEntries,
   };
+}
+
+function getSolvedDefaultFrontRowHeights(frontRows: FrontRow[], blocks: SolvedBlock[], config: LayoutConfig): number[] {
+  const rowHeights = frontRows.map((row) => row.height);
+  const fallbackHeight = rowHeights[rowHeights.length - 1] ?? reserveRhythmRows(420, config.rhythm);
+  for (const [blockIndex, block] of blocks.entries()) {
+    const rowIndex = frontRows.findIndex((row) => blockIndex >= row.startIndex && blockIndex <= row.endIndex);
+    const resolvedRowIndex = rowIndex >= 0 ? rowIndex : Math.max(0, rowHeights.length - 1);
+    while (rowHeights.length <= resolvedRowIndex) {
+      rowHeights.push(fallbackHeight);
+    }
+    rowHeights[resolvedRowIndex] = Math.max(rowHeights[resolvedRowIndex], reserveRhythmRows(block.height, config.rhythm));
+  }
+  return rowHeights;
 }
 
 function getSolvedResponsiveFrontRowHeights(baseRowHeights: number[], blocks: SolvedBlock[], config: LayoutConfig): number[] {
@@ -2241,15 +2264,17 @@ function getFrontRows(columnCount: number, rowGap: number, gridHeight: number, r
 }
 
 function getFrontPageHeight(config: LayoutConfig): number {
-  return getFrontPageHeightForGrid(config, getFrontPageGridHeight(config));
+  return getFrontPageHeightForRegion(
+    config,
+    config.pageChrome.pagePaddingTop + config.pageChrome.mastheadHeight + config.pageChrome.frontGridMarginTop,
+    getFrontPageGridHeight(config),
+  );
 }
 
-function getFrontPageHeightForGrid(config: LayoutConfig, gridHeight: number, frontFooter?: SolvedFrontFooter): number {
+function getFrontPageHeightForRegion(config: LayoutConfig, regionY: number, regionHeight: number, frontFooter?: SolvedFrontFooter): number {
   return reserveRhythmRows(
-    config.pageChrome.pagePaddingTop +
-      config.pageChrome.mastheadHeight +
-      config.pageChrome.frontGridMarginTop +
-      gridHeight +
+    regionY +
+      regionHeight +
       (frontFooter ? frontFooter.marginTop + frontFooter.height : 0) +
       config.pageChrome.pagePaddingBottom,
     config.rhythm,

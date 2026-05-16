@@ -167,6 +167,32 @@ Cloud content is seeded from fixture content in `lib/articles.ts` and
 `lib/layout-plan.ts`. The seed uploads article images to Storage and creates the
 related CMS records. It does not create a CMS UI.
 
+## Topic Steering
+
+`/topics` is the Papyrus topic steering workspace for the `AI-ML-research` and
+`AI-ML-history` corpora. Papyrus owns the human steering state in GraphQL:
+corpora, import runs, public item summaries, artifacts, accepted topic sets,
+canonical topics, revisions, proposals, append-only decisions, and projection
+rows.
+
+Biblicus remains the artifact and worker tool boundary. Workers may run
+Biblicus commands that create reproducible artifacts, but Papyrus code should
+not edit Biblicus corpus sidecars, catalogs, or internals directly. The local
+`corpora/` folder is ignored by git and is only a pilot convenience for
+symlinking the two Biblicus corpora; durable corpus storage should move to S3.
+
+Public GraphQL reads expose only curated typed fields needed by the page. Raw
+Biblicus payloads, source notes, full metadata, and import internals live in
+`CurationRawPayload`, which is private to editor/admin users and the
+JWT-authorized worker lane. Stable IDs such as Biblicus `item_id`, `topic_uid`,
+classifier ids, snapshot/artifact refs, corpus identity, and generated revision
+ids are the API contract; display names are editable copy, not keys.
+
+Topic proposal review and topic revision promotion are custom mutations because
+they write a decision row and update proposal/revision state together.
+`CurationDecision` is append-only. Current proposal, topic, and revision state
+may update, but decisions should not be overwritten.
+
 ## Current Production Edition
 
 The production `edition-current` record is the AI/ML corpus first edition dated
@@ -202,6 +228,9 @@ npm run build
 npm run sandbox
 npm run seed:amplify
 npm run content -- content inspect
+npm run content -- curation import-steering --bundle <steering-export.json>
+npm run content -- curation export-topic-set --topic-set <id> --output <accepted-topic-set.json>
+npm run content -- curation import-projection --bundle <projection.json>
 npm run test:bdd
 ```
 
@@ -225,6 +254,9 @@ For content inspection and admin against a deployed API:
 ```bash
 npm run content -- content inspect
 npm run content -- content list articles
+npm run content -- curation import-steering --corpus corpora/AI-ML-research --classifier <classifier-id>
+npm run content -- curation export-topic-set --topic-set <id> --output accepted-topic-set.json
+npm run content -- curation import-projection --bundle projection-results.json
 npm run content -- content delete all --yes
 ```
 

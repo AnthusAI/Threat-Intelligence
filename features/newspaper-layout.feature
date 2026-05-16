@@ -128,9 +128,30 @@ Feature: Newspaper layout scenarios
     Then the front page should render a newspaper footer
     And the front page footer should list edition sections
     And the front page solved height should include footer rhythm space
-    And the front page footer should link archive and render login
+    And the front page footer should stack utility links in the right column
     When I scroll to page 2
     Then the active page should not render a front page footer
+    And no browser console errors should occur
+
+  Scenario Outline: Front page footer remains visible at responsive widths
+    Given I open the front page at <width> by <height>
+    Then the front page should render a newspaper footer
+    And the front page footer should fit within the solved page
+    And no browser console errors should occur
+
+    Examples:
+      | width | height |
+      | 1280  | 900    |
+      | 900   | 1200   |
+      | 780   | 1200   |
+      | 390   | 900    |
+
+  Scenario: Topic steering workspace renders proposals and topic edits
+    Given I open the topic steering workspace at 1280 by 900
+    Then the topic steering workspace should render
+    And topic steering should show topic and graph proposal rows
+    When I update the first topic steering name to "Foundation Model Scaling Updated"
+    Then the first topic steering name should be "Foundation Model Scaling Updated"
     And no browser console errors should occur
 
   Scenario: Archive renders an infinite front page grid
