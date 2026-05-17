@@ -271,7 +271,11 @@ normalized to Amplify Storage paths like `corpora/...`; out-of-prefix files are
 recorded as external source URIs and should be copied into `corpora/*` only by
 an explicit corpus sync step. Category seeds, holdouts, proposal evidence,
 assignment evidence, and semantic links keep stable external `item_id` strings
-and connect to `Reference` lineages when Papyrus can resolve them.
+and connect to `Reference` lineages when Papyrus can resolve them. Imports also
+create private `Assignment` rows for new or changed reference-curation work and
+link those assignments to their target references through `SemanticRelation`
+rows. Do not create `Item` rows with `type: "assignment"` for knowledge work;
+`Assignment` is the universal pending-work model.
 
 Biblicus import rationale is stored as private append-only `KnowledgeComment`
 records. Comments target exact private object versions and can optionally be

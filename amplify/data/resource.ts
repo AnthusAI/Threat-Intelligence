@@ -1,4 +1,5 @@
 import { type ClientSchema, a, defineData } from "@aws-amplify/backend";
+import { assignmentAction } from "../functions/assignment-action/resource";
 import { categoryAction } from "../functions/category-action/resource";
 import { graphqlJwtAuthorizer } from "../functions/graphql-jwt-authorizer/resource";
 import { manageUserRole } from "../functions/manage-user-role/resource";
@@ -192,6 +193,187 @@ const schema = a.schema({
     .returns(a.ref("SteeringActionResult"))
     .authorization((allow) => [allow.groups(categoryWriteGroups)])
     .handler(a.handler.function(categoryAction)),
+
+  AssignmentActionResult: a.customType({
+    ok: a.boolean().required(),
+    assignmentId: a.id(),
+    eventId: a.id(),
+    status: a.string(),
+    action: a.string().required(),
+  }),
+
+  AssignmentTargetSummary: a.customType({
+    kind: a.string().required(),
+    id: a.id().required(),
+    lineageId: a.id().required(),
+    label: a.string(),
+    detail: a.string(),
+  }),
+
+  AssignmentContext: a.customType({
+    assignment: a.ref("Assignment"),
+    targets: a.ref("AssignmentTargetSummary").array().required(),
+    events: a.ref("AssignmentEvent").array().required(),
+  }),
+
+  listAssignmentsForObject: a
+    .query()
+    .arguments({
+      objectKind: a.string().required(),
+      objectLineageId: a.id().required(),
+      status: a.string(),
+      limit: a.integer(),
+    })
+    .returns(a.ref("AssignmentContext").array().required())
+    .authorization((allow) => [allow.groups(categoryWriteGroups)])
+    .handler(a.handler.function(assignmentAction)),
+
+  listAssignmentQueue: a
+    .query()
+    .arguments({
+      queueKey: a.string().required(),
+      status: a.string(),
+      limit: a.integer(),
+    })
+    .returns(a.ref("AssignmentContext").array().required())
+    .authorization((allow) => [allow.groups(categoryWriteGroups)])
+    .handler(a.handler.function(assignmentAction)),
+
+  getAssignmentContext: a
+    .query()
+    .arguments({
+      assignmentId: a.id().required(),
+    })
+    .returns(a.ref("AssignmentContext"))
+    .authorization((allow) => [allow.groups(categoryWriteGroups)])
+    .handler(a.handler.function(assignmentAction)),
+
+  claimAssignment: a
+    .mutation()
+    .arguments({
+      assignmentId: a.id().required(),
+      assigneeType: a.string(),
+      assigneeId: a.string(),
+      actorSub: a.string(),
+      actorLabel: a.string(),
+      note: a.string(),
+    })
+    .returns(a.ref("AssignmentActionResult"))
+    .authorization((allow) => [allow.groups(categoryWriteGroups)])
+    .handler(a.handler.function(assignmentAction)),
+
+  releaseAssignment: a
+    .mutation()
+    .arguments({
+      assignmentId: a.id().required(),
+      actorSub: a.string(),
+      actorLabel: a.string(),
+      note: a.string(),
+    })
+    .returns(a.ref("AssignmentActionResult"))
+    .authorization((allow) => [allow.groups(categoryWriteGroups)])
+    .handler(a.handler.function(assignmentAction)),
+
+  completeAssignment: a
+    .mutation()
+    .arguments({
+      assignmentId: a.id().required(),
+      actorSub: a.string(),
+      actorLabel: a.string(),
+      note: a.string(),
+    })
+    .returns(a.ref("AssignmentActionResult"))
+    .authorization((allow) => [allow.groups(categoryWriteGroups)])
+    .handler(a.handler.function(assignmentAction)),
+
+  cancelAssignment: a
+    .mutation()
+    .arguments({
+      assignmentId: a.id().required(),
+      actorSub: a.string(),
+      actorLabel: a.string(),
+      note: a.string(),
+    })
+    .returns(a.ref("AssignmentActionResult"))
+    .authorization((allow) => [allow.groups(categoryWriteGroups)])
+    .handler(a.handler.function(assignmentAction)),
+
+  reopenAssignment: a
+    .mutation()
+    .arguments({
+      assignmentId: a.id().required(),
+      actorSub: a.string(),
+      actorLabel: a.string(),
+      note: a.string(),
+    })
+    .returns(a.ref("AssignmentActionResult"))
+    .authorization((allow) => [allow.groups(categoryWriteGroups)])
+    .handler(a.handler.function(assignmentAction)),
+
+  Assignment: a
+    .model({
+      id: a.id().required(),
+      assignmentTypeKey: a.string().required(),
+      queueKey: a.string().required(),
+      queueStatusKey: a.string().required(),
+      status: a.string().required(),
+      priority: a.integer(),
+      title: a.string().required(),
+      brief: a.string(),
+      instructions: a.string(),
+      assigneeType: a.string(),
+      assigneeId: a.string(),
+      assigneeKey: a.string(),
+      claimedAt: a.datetime(),
+      claimExpiresAt: a.datetime(),
+      completedAt: a.datetime(),
+      canceledAt: a.datetime(),
+      corpusId: a.id(),
+      categorySetId: a.id(),
+      classifierId: a.string(),
+      sourceSnapshotId: a.string(),
+      importRunId: a.id(),
+      createdBy: a.string(),
+      createdAt: a.datetime().required(),
+      updatedAt: a.datetime().required(),
+      metadata: a.json(),
+    })
+    .secondaryIndexes((index) => [
+      index("queueStatusKey").sortKeys(["priority", "createdAt"]).queryField("listAssignmentsByQueueStatusAndPriority"),
+      index("assignmentTypeKey").sortKeys(["status", "createdAt"]).queryField("listAssignmentsByTypeStatusAndCreatedAt"),
+      index("status").sortKeys(["updatedAt"]).queryField("listAssignmentsByStatusAndUpdatedAt"),
+      index("assigneeKey").sortKeys(["status", "updatedAt"]).queryField("listAssignmentsByAssigneeStatusAndUpdatedAt"),
+      index("importRunId").sortKeys(["createdAt"]).queryField("listAssignmentsByImportRunAndCreatedAt"),
+    ])
+    .authorization((allow) => [
+      allow.groups(categoryWriteGroups).to(["read"]),
+      allow.custom().to(authoringOperations),
+    ]),
+
+  AssignmentEvent: a
+    .model({
+      id: a.id().required(),
+      assignmentId: a.id().required(),
+      assignmentTypeKey: a.string().required(),
+      queueKey: a.string().required(),
+      eventType: a.string().required(),
+      fromStatus: a.string(),
+      toStatus: a.string(),
+      actorSub: a.string(),
+      actorLabel: a.string(),
+      note: a.string(),
+      createdAt: a.datetime().required(),
+      metadata: a.json(),
+    })
+    .secondaryIndexes((index) => [
+      index("assignmentId").sortKeys(["createdAt"]).queryField("listAssignmentEventsByAssignmentAndCreatedAt"),
+      index("eventType").sortKeys(["createdAt"]).queryField("listAssignmentEventsByTypeAndCreatedAt"),
+      index("queueKey").sortKeys(["createdAt"]).queryField("listAssignmentEventsByQueueAndCreatedAt"),
+    ])
+    .authorization((allow) => [
+      allow.groups(categoryWriteGroups).to(categoryAppendOnlyOperations),
+      allow.custom().to(categoryAppendOnlyOperations),
+    ]),
 
   KnowledgeCorpus: a
     .model({

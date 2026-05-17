@@ -33,6 +33,8 @@ const KNOWLEDGE_CORPUS_FIELDS = "id name role itemCount generatedAt latestImport
 const KNOWLEDGE_IMPORT_RUN_FIELDS = "id corpusId importKind classifierId sourceSnapshotId status generatedAt importedAt itemCount categoryCount proposalCount artifactCount referenceCount relationCount warningCount";
 const KNOWLEDGE_RAW_PAYLOAD_FIELDS = "id ownerType ownerId payloadKind importRunId payload createdAt updatedAt";
 const KNOWLEDGE_ARTIFACT_FIELDS = "id corpusId artifactKind artifactId snapshotId displayName createdAt importRunId";
+const ASSIGNMENT_FIELDS = "id assignmentTypeKey queueKey queueStatusKey status priority title brief instructions assigneeType assigneeId assigneeKey claimedAt claimExpiresAt completedAt canceledAt corpusId categorySetId classifierId sourceSnapshotId importRunId createdBy createdAt updatedAt metadata";
+const ASSIGNMENT_EVENT_FIELDS = "id assignmentId assignmentTypeKey queueKey eventType fromStatus toStatus actorSub actorLabel note createdAt metadata";
 const REFERENCE_FIELDS = `${VERSION_FIELDS} id corpusId externalItemId title authors sourceUri storagePath mediaType byteSize sha256 sourcePublishedAt sourceUpdatedAt retrievedAt importRunId importedAt metadata updatedAt`;
 const REFERENCE_ATTACHMENT_FIELDS = "id referenceId referenceLineageId referenceVersionNumber referenceVersionKey role sortKey storagePath sourceUri filename mediaType byteSize sha256 etag importRunId importedAt metadata";
 const SEMANTIC_NODE_FIELDS = `${VERSION_FIELDS} id nodeKey nodeKind corpusId categorySetId categoryLineageId categoryKey displayName description aliases status importRunId updatedAt`;
@@ -56,6 +58,8 @@ const LIST_RECORDS = {
   KnowledgeImportRun: listDefinition("listKnowledgeImportRuns", KNOWLEDGE_IMPORT_RUN_FIELDS),
   KnowledgeRawPayload: listDefinition("listKnowledgeRawPayloads", "id ownerType ownerId payloadKind importRunId"),
   KnowledgeArtifact: listDefinition("listKnowledgeArtifacts", KNOWLEDGE_ARTIFACT_FIELDS),
+  Assignment: listDefinition("listAssignments", ASSIGNMENT_FIELDS),
+  AssignmentEvent: listDefinition("listAssignmentEvents", ASSIGNMENT_EVENT_FIELDS),
   CategorySet: listDefinition("listCategorySets", CATEGORY_SET_FIELDS),
   Category: listDefinition("listCategories", CATEGORY_FIELDS),
   SteeringProposal: listDefinition("listSteeringProposals", PROPOSAL_FIELDS),
@@ -84,6 +88,8 @@ const GETTERS = {
   KnowledgeImportRun: getDefinition("getKnowledgeImportRun", KNOWLEDGE_IMPORT_RUN_FIELDS),
   KnowledgeRawPayload: getDefinition("getKnowledgeRawPayload", KNOWLEDGE_RAW_PAYLOAD_FIELDS),
   KnowledgeArtifact: getDefinition("getKnowledgeArtifact", KNOWLEDGE_ARTIFACT_FIELDS),
+  Assignment: getDefinition("getAssignment", ASSIGNMENT_FIELDS),
+  AssignmentEvent: getDefinition("getAssignmentEvent", ASSIGNMENT_EVENT_FIELDS),
   CategorySet: getDefinition("getCategorySet", CATEGORY_SET_FIELDS),
   Category: getDefinition("getCategory", CATEGORY_FIELDS),
   SteeringProposal: getDefinition("getSteeringProposal", PROPOSAL_FIELDS),

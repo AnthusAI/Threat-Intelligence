@@ -15,18 +15,14 @@ import type {
   CategorySteeringCategory,
   CategorySteeringCategorySet,
   KnowledgeCommentRecord,
+  AssignmentEventRecord,
+  AssignmentRecord,
   ReferenceAttachmentRecord,
   ReferenceRecord,
   SemanticNodeRecord,
   SemanticRelationRecord,
   UserDirectoryEntry,
 } from "../lib/category-repository";
-import {
-  buildAssignmentDesk,
-  type NewsDeskAssignmentEdition,
-  type NewsDeskAssignmentEditionItem,
-  type NewsDeskAssignmentItem,
-} from "../lib/news-desk-assignments";
 import { configureAmplifyClient } from "./amplify-client-provider";
 
 const USER_POOL_AUTH_MODE = "userPool";
@@ -88,9 +84,8 @@ export async function loadEditorNewsDeskState(): Promise<EditorNewsDeskState> {
       semanticNodes,
       knowledgeComments,
       semanticRelations,
-      editions,
-      editionItems,
-      items,
+      assignments,
+      assignmentEvents,
       userDirectory,
     ] = await Promise.all([
       listUserPoolModel<CategorySteeringCorpus>("KnowledgeCorpus"),
@@ -106,9 +101,8 @@ export async function loadEditorNewsDeskState(): Promise<EditorNewsDeskState> {
       listUserPoolModel<SemanticNodeRecord>("SemanticNode"),
       listUserPoolModel<KnowledgeCommentRecord>("KnowledgeComment"),
       listUserPoolModel<SemanticRelationRecord>("SemanticRelation"),
-      listUserPoolModel<NewsDeskAssignmentEdition>("Edition"),
-      listUserPoolModel<NewsDeskAssignmentEditionItem>("EditionItem"),
-      listUserPoolModel<NewsDeskAssignmentItem>("Item"),
+      listOptionalUserPoolModel<AssignmentRecord>("Assignment"),
+      listOptionalUserPoolModel<AssignmentEventRecord>("AssignmentEvent"),
       auth.isAdmin ? loadUserDirectory() : Promise.resolve([]),
     ]);
 
@@ -122,7 +116,6 @@ export async function loadEditorNewsDeskState(): Promise<EditorNewsDeskState> {
         canonicalCorpusId: canonicalCategorySet?.corpusId ?? selectCanonicalCorpus(sortedCorpora)?.id ?? null,
         canonicalCategorySetId: canonicalCategorySet?.id ?? null,
         canManageUsers: auth.isAdmin,
-        assignmentDesk: buildAssignmentDesk(editions, editionItems, items),
         userDirectory,
         corpora: sortedCorpora,
         importRuns: sortedImportRuns,
@@ -137,6 +130,8 @@ export async function loadEditorNewsDeskState(): Promise<EditorNewsDeskState> {
         semanticNodes: semanticNodes.sort((left, right) => (left.displayName ?? left.nodeKey).localeCompare(right.displayName ?? right.nodeKey)),
         knowledgeComments: knowledgeComments.sort((left, right) => right.createdAt.localeCompare(left.createdAt)),
         semanticRelations: semanticRelations.sort((left, right) => (right.score ?? 0) - (left.score ?? 0)),
+        assignments: assignments.sort((left, right) => assignmentSortKey(left).localeCompare(assignmentSortKey(right))),
+        assignmentEvents: assignmentEvents.sort((left, right) => right.createdAt.localeCompare(left.createdAt)),
         loadError: null,
       },
       error: null,
@@ -247,6 +242,13 @@ async function listUserPoolModel<T>(modelName: string): Promise<T[]> {
     nextToken = response.nextToken;
   } while (nextToken);
   return items;
+}
+
+async function listOptionalUserPoolModel<T>(modelName: string): Promise<T[]> {
+  const client = generateClient<Schema>();
+  const model = (client.models as Record<string, ListableModel<T>>)[modelName];
+  if (!model) return [];
+  return listUserPoolModel<T>(modelName);
 }
 
 async function loadUserDirectory(): Promise<UserDirectoryEntry[]> {
@@ -390,6 +392,10 @@ function sortProposals(proposals: CategorySteeringProposal[]): CategorySteeringP
     if (statusDiff !== 0) return statusDiff;
     return (right.proposedAt ?? right.updatedAt ?? "").localeCompare(left.proposedAt ?? left.updatedAt ?? "");
   });
+}
+
+function assignmentSortKey(assignment: AssignmentRecord): string {
+  return `${String(assignment.priority ?? 999999).padStart(6, "0")}#${assignment.createdAt}#${assignment.id}`;
 }
 
 function sortTaxonomies(categoryTrees: CategorySteeringCategoryTree[]): CategorySteeringCategoryTree[] {

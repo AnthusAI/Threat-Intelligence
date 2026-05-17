@@ -1,4 +1,5 @@
 import type {
+  AssignmentRecord,
   CategorySteeringCategory,
   KnowledgeCommentRecord,
   ReferenceAttachmentRecord,
@@ -6,10 +7,10 @@ import type {
   SemanticNodeRecord,
   SemanticRelationRecord,
 } from "./category-repository";
-import type { NewsDeskAssignmentItem } from "./news-desk-assignments";
 
 export const SEMANTIC_OBJECT_KINDS = [
   "reference",
+  "assignment",
   "item",
   "category",
   "categorySet",
@@ -29,6 +30,10 @@ export type SemanticPredicateId =
   | "mentions"
   | "about"
   | "uses_evidence"
+  | "requests_work_on"
+  | "produces"
+  | "blocked_by"
+  | "derived_from"
   | "related_to"
   | "broader_than"
   | "narrower_than"
@@ -46,7 +51,11 @@ export const SEMANTIC_PREDICATES: SemanticPredicateDefinition[] = [
   { id: "classified_as", label: "classified as", group: "classification", inverseLabel: "classified references/items" },
   { id: "mentions", label: "mentions", group: "ontology", inverseLabel: "mentioned by" },
   { id: "about", label: "about", group: "commentary", inverseLabel: "commentary" },
+  { id: "requests_work_on", label: "requests work on", group: "generic", inverseLabel: "requested work" },
   { id: "uses_evidence", label: "uses evidence", group: "evidence", inverseLabel: "used by" },
+  { id: "produces", label: "produces", group: "generic", inverseLabel: "produced by" },
+  { id: "blocked_by", label: "blocked by", group: "generic", inverseLabel: "blocks" },
+  { id: "derived_from", label: "derived from", group: "generic", inverseLabel: "source for" },
   { id: "related_to", label: "related to", group: "generic", inverseLabel: "related from" },
   { id: "broader_than", label: "broader than", group: "ontology", inverseLabel: "narrower concept" },
   { id: "narrower_than", label: "narrower than", group: "ontology", inverseLabel: "broader concept" },
@@ -59,7 +68,7 @@ export type SemanticObjectRecord =
   | CategorySteeringCategory
   | SemanticNodeRecord
   | KnowledgeCommentRecord
-  | NewsDeskAssignmentItem
+  | AssignmentRecord
   | SemanticRelationRecord;
 
 export type SemanticObjectSummary = {
@@ -94,7 +103,7 @@ export type SemanticGraphSnapshotInput = {
   semanticNodes: SemanticNodeRecord[];
   knowledgeComments: KnowledgeCommentRecord[];
   semanticRelations: SemanticRelationRecord[];
-  items?: NewsDeskAssignmentItem[];
+  assignments?: AssignmentRecord[];
   referenceAttachments?: ReferenceAttachmentRecord[];
 };
 
@@ -125,7 +134,8 @@ export function newsDeskHrefForSemanticObject(kind: string, lineageId: string): 
   if (kind === "reference") return `/news-desk?section=references&reference=${encoded}`;
   if (kind === "category") return `/news-desk?section=topics&category=${encoded}`;
   if (kind === "semanticNode") return `/news-desk?section=concepts&node=${encoded}`;
-  if (kind === "item") return `/news-desk?section=assignments&item=${encoded}`;
+  if (kind === "assignment") return `/news-desk?section=assignments&assignment=${encoded}`;
+  if (kind === "item") return `/news-desk?section=overview&item=${encoded}`;
   if (kind === "knowledgeComment") return `/news-desk?section=references&comment=${encoded}`;
   return `/news-desk?section=overview&object=${encodeURIComponent(kind)}:${encoded}`;
 }
@@ -143,8 +153,7 @@ export class SemanticGraphSnapshot {
   private semanticNodesByLineage = new Map<string, SemanticNodeRecord>();
   private commentsById = new Map<string, KnowledgeCommentRecord>();
   private commentsByLineage = new Map<string, KnowledgeCommentRecord>();
-  private itemsById = new Map<string, NewsDeskAssignmentItem>();
-  private itemsByLineage = new Map<string, NewsDeskAssignmentItem>();
+  private assignmentsById = new Map<string, AssignmentRecord>();
   private relationsBySubjectState = new Map<string, SemanticRelationRecord[]>();
   private relationsByObjectState = new Map<string, SemanticRelationRecord[]>();
 
@@ -164,8 +173,8 @@ export class SemanticGraphSnapshot {
       this.commentsById.set(comment.id, comment);
       this.commentsByLineage.set(comment.subjectLineageId, comment);
     }
-    for (const item of input.items ?? []) {
-      indexVersionedRecord(item, this.itemsById, this.itemsByLineage);
+    for (const assignment of input.assignments ?? []) {
+      this.assignmentsById.set(assignment.id, assignment);
     }
     for (const relation of input.semanticRelations.filter((entry) => entry.relationState === "current")) {
       pushMap(this.relationsBySubjectState, relation.subjectStateKey, relation);
@@ -182,7 +191,7 @@ export class SemanticGraphSnapshot {
     if (kind === "category") return summarizeCategory(this.categoriesByLineage.get(idOrLineageId) ?? this.categoriesById.get(idOrLineageId) ?? null);
     if (kind === "semanticNode") return summarizeSemanticNode(this.semanticNodesByLineage.get(idOrLineageId) ?? this.semanticNodesById.get(idOrLineageId) ?? null);
     if (kind === "knowledgeComment") return summarizeComment(this.commentsByLineage.get(idOrLineageId) ?? this.commentsById.get(idOrLineageId) ?? null);
-    if (kind === "item") return summarizeItem(this.itemsByLineage.get(idOrLineageId) ?? this.itemsById.get(idOrLineageId) ?? null);
+    if (kind === "assignment") return summarizeAssignment(this.assignmentsById.get(idOrLineageId) ?? null);
     return null;
   }
 
@@ -364,17 +373,15 @@ function summarizeComment(record: KnowledgeCommentRecord | null): SemanticObject
   };
 }
 
-function summarizeItem(record: NewsDeskAssignmentItem | null): SemanticObjectSummary | null {
+function summarizeAssignment(record: AssignmentRecord | null): SemanticObjectSummary | null {
   if (!record) return null;
-  const lineageId = record.lineageId ?? record.id;
   return {
-    kind: "item",
+    kind: "assignment",
     id: record.id,
-    lineageId,
-    versionNumber: record.versionNumber,
-    label: record.headline ?? record.title ?? record.slug,
-    subtitle: record.typeStatus,
-    href: newsDeskHrefForSemanticObject("item", lineageId),
+    lineageId: record.id,
+    label: record.title,
+    subtitle: `${record.assignmentTypeKey} / ${record.status}`,
+    href: newsDeskHrefForSemanticObject("assignment", record.id),
     record,
   };
 }

@@ -7,21 +7,9 @@ import { generateClient } from "aws-amplify/data";
 import type { Schema } from "../amplify/data/resource";
 import { loadEditorNewsDeskState, loadEditorCategoryTreeState, type EditorNewsDeskState } from "./news-desk-taxonomy-client";
 import { ReaderAuthControl } from "./reader-auth-control";
-import {
-  applyAssignmentVersionPlan,
-  buildAssignmentManualVersionPlan,
-  getAssignmentAngle,
-  getAssignmentBrief,
-  getAssignmentEvidenceCount,
-  getAssignmentTargetArticleSlots,
-  getCullingReason,
-  isCulledItem,
-  type NewsDeskAssignmentCandidate,
-  type NewsDeskAssignmentDesk,
-  type NewsDeskAssignmentItem,
-  type NewsDeskAssignmentVersionPlan,
-} from "../lib/news-desk-assignments";
 import type {
+  AssignmentEventRecord,
+  AssignmentRecord,
   CategorySteeringArtifact,
   CategorySteeringCorpus,
   CategorySteeringDashboard,
@@ -52,7 +40,7 @@ type ActionState = {
 };
 
 type ReviewAction = "accept" | "reject";
-type AssignmentCullAction = "cull" | "restore";
+type AssignmentAction = "claim" | "release" | "complete" | "cancel" | "reopen";
 type UserRoleAction = "grant" | "revoke";
 export type NewsDeskTab = "overview" | "users" | "topics" | "concepts" | "references" | "assignments";
 
@@ -196,7 +184,8 @@ function NewsDeskDashboard({
   const [categoryNodes, setCategoryTreeNodes] = useState(dashboard.categoryNodes);
   const [categoryTreeLoadError, setCategoryTreeLoadError] = useState<string | null>(null);
   const [proposals, setProposals] = useState(dashboard.proposals);
-  const [assignmentDesk, setAssignmentDesk] = useState(dashboard.assignmentDesk);
+  const [assignments, setAssignments] = useState(dashboard.assignments);
+  const [assignmentEvents, setAssignmentEvents] = useState(dashboard.assignmentEvents);
   const [userDirectory, setUserDirectory] = useState(dashboard.userDirectory);
   const [actionState, setActionState] = useState<ActionState | null>(null);
   const [mergeSelection, setMergeSelection] = useState<MergeSelection | null>(null);
@@ -233,21 +222,18 @@ function NewsDeskDashboard({
   ), [activeCategorySet, dashboard.importRuns]);
   const openProposalCount = proposals.filter((proposal) => proposal.status === "proposed").length;
   const latestImportLabel = latestImport ? formatDateTime(latestImport.importedAt) : "Awaiting import";
-  const assignmentMetrics = useMemo(() => getAssignmentDeskMetrics(assignmentDesk), [assignmentDesk]);
-  const assignmentEditionLabel = assignmentDesk.edition
-    ? `${assignmentDesk.edition.title} / ${assignmentDesk.edition.editionDate}`
-    : "No assignment edition";
-  const mastheadSecondLabel = activeTab === "assignments" ? assignmentEditionLabel : latestImportLabel;
+  const assignmentMetrics = useMemo(() => getAssignmentMetrics(assignments), [assignments]);
+  const mastheadSecondLabel = activeTab === "assignments" ? `${assignmentMetrics.open} open assignments` : latestImportLabel;
   const graph = useMemo(() => createSemanticGraphSnapshot({
     references: dashboard.references,
     categories: categorys,
     semanticNodes: dashboard.semanticNodes,
     knowledgeComments: dashboard.knowledgeComments,
     semanticRelations: dashboard.semanticRelations,
-    items: assignmentDesk.candidates.flatMap((candidate) => [candidate.assignment, candidate.draftItem].filter(Boolean) as NewsDeskAssignmentItem[]),
+    assignments,
     referenceAttachments: dashboard.referenceAttachments,
   }), [
-    assignmentDesk.candidates,
+    assignments,
     categorys,
     dashboard.knowledgeComments,
     dashboard.referenceAttachments,
@@ -263,8 +249,9 @@ function NewsDeskDashboard({
   }, [categorys]);
 
   useEffect(() => {
-    setAssignmentDesk(dashboard.assignmentDesk);
-  }, [dashboard.assignmentDesk]);
+    setAssignments(dashboard.assignments);
+    setAssignmentEvents(dashboard.assignmentEvents);
+  }, [dashboard.assignments, dashboard.assignmentEvents]);
 
   useEffect(() => {
     setUserDirectory(dashboard.userDirectory);
@@ -355,18 +342,13 @@ function NewsDeskDashboard({
     });
   }
 
-  function runAssignmentCullAction(candidate: NewsDeskAssignmentCandidate, action: AssignmentCullAction, reason = "") {
-    const actionLabel = action === "cull" ? "cull" : "restore";
-    setActionState({ id: candidate.assignment.id, message: `${actionLabel} pending`, tone: "pending" });
-    const now = new Date().toISOString();
+  function runAssignmentAction(assignment: AssignmentRecord, action: AssignmentAction, note = "") {
+    setActionState({ id: assignment.id, message: `${action} pending`, tone: "pending" });
     if (dashboard.isDemo) {
-      const plan = buildAssignmentManualVersionPlan(assignmentDesk, candidate, action, {
-        actorLabel: "Papyrus news desk",
-        now,
-        reason,
-      });
-      setAssignmentDesk((current) => applyAssignmentVersionPlan(current, plan));
-      setActionState({ id: candidate.assignment.id, message: `${actionLabel} saved`, tone: "ok" });
+      const now = new Date().toISOString();
+      setAssignments((current) => current.map((entry) => entry.id === assignment.id ? applyAssignmentActionLocally(entry, action, now) : entry));
+      setAssignmentEvents((current) => [demoAssignmentEvent(assignment, action, now, note), ...current]);
+      setActionState({ id: assignment.id, message: `${action} saved`, tone: "ok" });
       return;
     }
 
@@ -374,30 +356,31 @@ function NewsDeskDashboard({
       void (async () => {
         try {
           const actorLabel = await getNewsDeskActorLabel();
-          const plan = buildAssignmentManualVersionPlan(assignmentDesk, candidate, action, { actorLabel, now, reason });
-          await executeAssignmentVersionPlan(plan);
-          setAssignmentDesk((current) => applyAssignmentVersionPlan(current, plan));
-          setActionState({ id: candidate.assignment.id, message: `${actionLabel} saved`, tone: "ok" });
+          await executeAssignmentAction(assignment.id, action, actorLabel, note);
+          await refreshEditorAssignments();
+          setActionState({ id: assignment.id, message: `${action} saved`, tone: "ok" });
         } catch (error) {
           setActionState({
-            id: candidate.assignment.id,
-            message: error instanceof Error ? error.message : `${actionLabel} failed`,
+            id: assignment.id,
+            message: error instanceof Error ? error.message : `${action} failed`,
             tone: "error",
           });
-          await refreshEditorAssignmentDesk();
+          await refreshEditorAssignments();
         }
       })();
     });
   }
 
-  async function refreshEditorAssignmentDesk() {
+  async function refreshEditorAssignments() {
     if (dashboard.isDemo) {
-      setAssignmentDesk(dashboard.assignmentDesk);
+      setAssignments(dashboard.assignments);
+      setAssignmentEvents(dashboard.assignmentEvents);
       return;
     }
     const state = await loadEditorNewsDeskState();
     if (state.status === "ready" && state.dashboard) {
-      setAssignmentDesk(state.dashboard.assignmentDesk);
+      setAssignments(state.dashboard.assignments);
+      setAssignmentEvents(state.dashboard.assignmentEvents);
     }
   }
 
@@ -425,31 +408,17 @@ function NewsDeskDashboard({
     setCategoryTreeLoadError(state.error);
   }
 
-  async function executeAssignmentVersionPlan(plan: NewsDeskAssignmentVersionPlan) {
-    const models = dataClient.models as unknown as Record<string, {
-      create?: (input: Record<string, unknown>, options: { authMode: typeof USER_POOL_AUTH_MODE }) => Promise<unknown>;
-      update?: (input: Record<string, unknown>, options: { authMode: typeof USER_POOL_AUTH_MODE }) => Promise<unknown>;
-    }>;
-    const itemModel = models.Item;
-    const editionModel = models.Edition;
-    const editionItemModel = models.EditionItem;
-    if (!itemModel?.create || !itemModel.update || !editionModel?.create || !editionModel.update || !editionItemModel?.create) {
-      throw new Error("Versioned publishing models are not available in the deployed schema.");
-    }
-
-    await Promise.all(plan.itemChanges.map((change) => itemModel.create!(change.nextItem as Record<string, unknown>, { authMode: USER_POOL_AUTH_MODE })));
-    if (plan.editionChange) {
-      await editionModel.create!(plan.editionChange.nextEdition as Record<string, unknown>, { authMode: USER_POOL_AUTH_MODE });
-      await Promise.all(plan.editionChange.nextEditionItems.map((editionItem) =>
-        editionItemModel.create!(editionItem as Record<string, unknown>, { authMode: USER_POOL_AUTH_MODE }),
-      ));
-    }
-    await Promise.all(plan.itemChanges.map((change) =>
-      itemModel.update!(change.previousItemUpdate, { authMode: USER_POOL_AUTH_MODE }),
-    ));
-    if (plan.editionChange) {
-      await editionModel.update!(plan.editionChange.previousEditionUpdate, { authMode: USER_POOL_AUTH_MODE });
-    }
+  async function executeAssignmentAction(assignmentId: string, action: AssignmentAction, actorLabel: string, note: string) {
+    const mutationName = `${action}Assignment` as keyof typeof dataClient.mutations;
+    const mutation = dataClient.mutations[mutationName] as unknown as ((args: Record<string, unknown>, options: { authMode: typeof USER_POOL_AUTH_MODE }) => Promise<unknown>) | undefined;
+    if (!mutation) throw new Error(`Assignment action ${mutationName} is not available in the deployed schema.`);
+    await mutation({
+      assignmentId,
+      actorLabel,
+      assigneeType: "user",
+      assigneeId: actorLabel,
+      note: note.trim() || undefined,
+    }, { authMode: USER_POOL_AUTH_MODE });
   }
 
   function runUserRoleAction(user: UserDirectoryEntry, role: string, action: UserRoleAction) {
@@ -639,18 +608,13 @@ function NewsDeskDashboard({
             <StatusMetric label="Topics" value={String(canonicalCategorys.length)} detail={`${acceptedSubcategoryCount} accepted subtopics`} />
             <StatusMetric label="Concepts" value={String(dashboard.semanticNodes.length)} detail={`${dashboard.semanticRelations.length} semantic links`} />
             <StatusMetric label="References" value={String(dashboard.references.length)} detail={`${dashboard.referenceAttachments.length} private files`} />
-            <StatusMetric label="Assignments" value={String(assignmentMetrics.total)} detail={`${assignmentMetrics.active} active / ${assignmentMetrics.culled} culled`} />
+            <StatusMetric label="Assignments" value={String(assignmentMetrics.total)} detail={`${assignmentMetrics.open} open / ${assignmentMetrics.claimed} claimed`} />
           </aside>
         </section>
 
         {dashboard.loadError ? (
           <div className="category-steering-alert" role="status">
             {dashboard.loadError}
-          </div>
-        ) : null}
-        {activeTab === "assignments" && assignmentDesk.loadError ? (
-          <div className="category-steering-alert" role="status">
-            {assignmentDesk.loadError}
           </div>
         ) : null}
         {actionState ? (
@@ -723,9 +687,11 @@ function NewsDeskDashboard({
         ) : null}
         {activeTab === "assignments" ? (
           <AssignmentDeskView
-            desk={assignmentDesk}
+            assignments={assignments}
+            assignmentEvents={assignmentEvents}
+            graph={graph}
             disabled={isPending}
-            onAction={runAssignmentCullAction}
+            onAction={runAssignmentAction}
           />
         ) : null}
       </article>
@@ -758,7 +724,7 @@ function OverviewDeskView({
             <DeskLinkCard href="/news-desk?section=concepts" label="Concepts" value={dashboard.semanticNodes.length} detail={`${dashboard.semanticRelations.length} relations`} />
             <DeskLinkCard href="/news-desk?section=topics" label="Topics" value={dashboard.categorys.length} detail={`${dashboard.proposals.filter((proposal) => proposal.status === "proposed").length} open proposals`} />
             <DeskLinkCard href="/news-desk?section=users" label="Users" value={userDirectory.length} detail={dashboard.canManageUsers ? "role desk available" : "admin role required"} />
-            <DeskLinkCard href="/news-desk?section=assignments" label="Assignments" value={assignmentMetrics.total} detail={`${assignmentMetrics.active} active candidates`} />
+            <DeskLinkCard href="/news-desk?section=assignments" label="Assignments" value={assignmentMetrics.total} detail={`${assignmentMetrics.open} open work items`} />
           </div>
         </section>
 
@@ -823,6 +789,17 @@ function UsersDeskView({
               />
             )) : <EmptyRow label={canManageUsers ? "No users returned by the directory" : "Sign in as an admin to load user records"} />}
           </div>
+          {mergeSelection ? (
+            <UserMergePanel
+              disabled={disabled}
+              onCancel={onCancelMerge}
+              onConfirm={onConfirmMerge}
+              onReasonChange={onMergeReasonChange}
+              onTargetChange={onMergeTargetChange}
+              selection={mergeSelection}
+              users={users}
+            />
+          ) : null}
         </section>
       </div>
       <aside className="news-desk-rail-column">
@@ -834,17 +811,6 @@ function UsersDeskView({
             </p>
           </div>
         </section>
-        {mergeSelection ? (
-          <UserMergePanel
-            disabled={disabled}
-            onCancel={onCancelMerge}
-            onConfirm={onConfirmMerge}
-            onReasonChange={onMergeReasonChange}
-            onTargetChange={onMergeTargetChange}
-            selection={mergeSelection}
-            users={users}
-          />
-        ) : null}
       </aside>
     </div>
   );
@@ -1266,55 +1232,59 @@ function DeskLinkCard({ href, label, value, detail }: { href: string; label: str
 }
 
 function AssignmentDeskView({
-  desk,
+  assignments,
+  assignmentEvents,
+  graph,
   disabled,
   onAction,
 }: {
-  desk: NewsDeskAssignmentDesk;
+  assignments: AssignmentRecord[];
+  assignmentEvents: AssignmentEventRecord[];
+  graph: SemanticGraph;
   disabled: boolean;
-  onAction: (candidate: NewsDeskAssignmentCandidate, action: AssignmentCullAction, reason?: string) => void;
+  onAction: (assignment: AssignmentRecord, action: AssignmentAction, note?: string) => void;
 }) {
-  const sections = getAssignmentSections(desk.candidates);
-  const metrics = getAssignmentDeskMetrics(desk);
+  const sections = getAssignmentSections(assignments);
+  const metrics = getAssignmentMetrics(assignments);
 
   return (
     <div className="news-desk-columns news-desk-columns--assignments" data-news-desk-assignments>
       <div className="news-desk-main-column">
         <section className="category-steering-section category-steering-section--lead" aria-labelledby="assignment-candidates-title">
-          <SectionHeader title="Assignment Candidates" detail={`${metrics.active} active / ${metrics.culled} culled`} />
+          <SectionHeader title="Assignment Queue" detail={`${metrics.open} open / ${metrics.claimed} claimed / ${metrics.completed} completed`} />
           <div className="news-desk-assignment-section-list">
             {sections.length ? sections.map((section) => (
-              <AssignmentSection key={section.name} section={section} disabled={disabled} onAction={onAction} />
-            )) : <EmptyRow label="No assignment candidates found for an edition" />}
+              <AssignmentSection key={section.name} graph={graph} section={section} disabled={disabled} onAction={onAction} />
+            )) : <EmptyRow label="No assignments found" />}
           </div>
         </section>
       </div>
 
       <aside className="news-desk-rail-column">
         <section className="category-steering-section" aria-labelledby="assignment-edition-ledger-title">
-          <SectionHeader title="Edition Ledger" detail={desk.edition?.status ?? "No edition"} />
+          <SectionHeader title="Queue Ledger" detail={`${assignments.length} work items`} />
           <div className="news-desk-ledger-list">
             <article className="news-desk-ledger-item">
               <header>
-                <strong>{desk.edition?.title ?? "No assignment edition"}</strong>
-                <span>{desk.edition?.editionDate ?? "undated"}</span>
+                <strong>Universal Assignments</strong>
+                <span>Semantic work queue</span>
               </header>
               <dl>
                 <div>
-                  <dt>Target Slots</dt>
-                  <dd>{metrics.targetSlots}</dd>
+                  <dt>Open</dt>
+                  <dd>{metrics.open}</dd>
                 </div>
                 <div>
-                  <dt>Active</dt>
-                  <dd>{metrics.active}</dd>
+                  <dt>Claimed</dt>
+                  <dd>{metrics.claimed}</dd>
                 </div>
                 <div>
-                  <dt>Drafted</dt>
-                  <dd>{metrics.drafted}</dd>
+                  <dt>Completed</dt>
+                  <dd>{metrics.completed}</dd>
                 </div>
                 <div>
-                  <dt>Culled</dt>
-                  <dd>{metrics.culled}</dd>
+                  <dt>Events</dt>
+                  <dd>{assignmentEvents.length}</dd>
                 </div>
               </dl>
             </article>
@@ -1322,32 +1292,32 @@ function AssignmentDeskView({
         </section>
 
         <section className="category-steering-section" aria-labelledby="assignment-section-ledger-title">
-          <SectionHeader title="Section Ledger" detail={`${sections.length} sections`} />
+          <SectionHeader title="Type Ledger" detail={`${sections.length} queues`} />
           <div className="news-desk-ledger-list">
             {sections.length ? sections.map((section) => {
-              const sectionMetrics = getAssignmentCandidateMetrics(section.candidates);
+              const sectionMetrics = getAssignmentMetrics(section.assignments);
               return (
                 <article className="news-desk-ledger-item" key={section.name}>
                   <header>
                     <strong>{section.name}</strong>
-                    <span>{sectionMetrics.total} candidates</span>
+                    <span>{sectionMetrics.total} assignments</span>
                   </header>
                   <dl>
                     <div>
-                      <dt>Target Slots</dt>
-                      <dd>{sectionMetrics.targetSlots}</dd>
+                      <dt>Open</dt>
+                      <dd>{sectionMetrics.open}</dd>
                     </div>
                     <div>
-                      <dt>Active</dt>
-                      <dd>{sectionMetrics.active}</dd>
+                      <dt>Claimed</dt>
+                      <dd>{sectionMetrics.claimed}</dd>
                     </div>
                     <div>
-                      <dt>Drafted</dt>
-                      <dd>{sectionMetrics.drafted}</dd>
+                      <dt>Completed</dt>
+                      <dd>{sectionMetrics.completed}</dd>
                     </div>
                     <div>
-                      <dt>Culled</dt>
-                      <dd>{sectionMetrics.culled}</dd>
+                      <dt>Canceled</dt>
+                      <dd>{sectionMetrics.canceled}</dd>
                     </div>
                   </dl>
                 </article>
@@ -1361,31 +1331,34 @@ function AssignmentDeskView({
 }
 
 function AssignmentSection({
+  graph,
   section,
   disabled,
   onAction,
 }: {
+  graph: SemanticGraph;
   section: AssignmentSectionGroup;
   disabled: boolean;
-  onAction: (candidate: NewsDeskAssignmentCandidate, action: AssignmentCullAction, reason?: string) => void;
+  onAction: (assignment: AssignmentRecord, action: AssignmentAction, note?: string) => void;
 }) {
-  const metrics = getAssignmentCandidateMetrics(section.candidates);
+  const metrics = getAssignmentMetrics(section.assignments);
 
   return (
-    <section className="news-desk-assignment-section" aria-label={`${section.name} assignment candidates`}>
+    <section className="news-desk-assignment-section" aria-label={`${section.name} assignments`}>
       <header className="news-desk-assignment-section__header">
         <div>
           <p className="story-label">{section.name}</p>
-          <h3>{section.name} Assignment Pool</h3>
+          <h3>{section.name}</h3>
         </div>
-        <span>{metrics.targetSlots} slots / {metrics.active} active / {metrics.drafted} drafted / {metrics.culled} culled</span>
+        <span>{metrics.open} open / {metrics.claimed} claimed / {metrics.completed} completed / {metrics.canceled} canceled</span>
       </header>
       <div className="news-desk-assignment-list">
-        {section.candidates.map((candidate) => (
-          <AssignmentCandidateRow
-            key={getAssignmentCandidateKey(candidate)}
-            candidate={candidate}
+        {section.assignments.map((assignment) => (
+          <AssignmentRow
+            key={assignment.id}
+            assignment={assignment}
             disabled={disabled}
+            graph={graph}
             onAction={onAction}
           />
         ))}
@@ -1394,91 +1367,82 @@ function AssignmentSection({
   );
 }
 
-function AssignmentCandidateRow({
-  candidate,
+function AssignmentRow({
+  assignment,
   disabled,
+  graph,
   onAction,
 }: {
-  candidate: NewsDeskAssignmentCandidate;
+  assignment: AssignmentRecord;
   disabled: boolean;
-  onAction: (candidate: NewsDeskAssignmentCandidate, action: AssignmentCullAction, reason?: string) => void;
+  graph: SemanticGraph;
+  onAction: (assignment: AssignmentRecord, action: AssignmentAction, note?: string) => void;
 }) {
-  const assignment = candidate.assignment;
-  const candidateKey = getAssignmentCandidateKey(candidate);
-  const culled = isCulledItem(assignment);
-  const [reason, setReason] = useState(getCullingReason(assignment));
-  const title = assignment.headline ?? assignment.title ?? assignment.slug;
-  const brief = getAssignmentBrief(assignment) || assignment.deck || "No assignment brief filed.";
-  const angle = getAssignmentAngle(assignment);
-  const evidenceCount = getAssignmentEvidenceCount(assignment);
-  const targetSlots = getAssignmentTargetArticleSlots(assignment);
+  const [note, setNote] = useState("");
+  const targets = graph.outgoing("assignment", assignment.id)
+    .filter((relation) => relation.predicate === "requests_work_on")
+    .map((relation) => graph.resolveRelationObject(relation, "outgoing"))
+    .filter((target): target is SemanticObjectSummary => Boolean(target));
+  const terminal = assignment.status === "completed" || assignment.status === "canceled";
 
   useEffect(() => {
-    setReason(getCullingReason(assignment));
-  }, [assignment]);
+    setNote("");
+  }, [assignment.id, assignment.status]);
 
   return (
     <article
-      className={`news-desk-assignment-row${culled ? " news-desk-assignment-row--culled" : ""}`}
-      data-assignment-candidate={candidateKey}
-      data-assignment-item-id={assignment.id}
+      className={`news-desk-assignment-row${terminal ? " news-desk-assignment-row--terminal" : ""}`}
+      data-assignment-candidate={assignment.id}
+      data-assignment-id={assignment.id}
       data-assignment-status={assignment.status}
     >
       <div className="news-desk-assignment-row__main">
         <header className="news-desk-assignment-row__title">
           <div>
             <StatusPill status={assignment.status} />
-            <h4>{title}</h4>
+            <h4>{assignment.title}</h4>
           </div>
-          <span>{assignment.section ?? "News"}</span>
+          <span>{assignment.assignmentTypeKey}</span>
         </header>
-        <p>{brief}</p>
-        {angle ? (
+        <p>{assignment.brief ?? "No assignment brief filed."}</p>
+        {assignment.instructions ? (
           <p className="news-desk-assignment-row__angle">
-            <span>Angle</span>
-            {angle}
+            <span>Instructions</span>
+            {assignment.instructions}
           </p>
         ) : null}
         <div className="news-desk-assignment-row__meta">
-          <span>{evidenceCount} evidence refs</span>
-          <span>{targetSlots ?? "no"} target slots</span>
-          <span>{formatLinkedDraftState(candidate)}</span>
+          <span>{assignment.queueKey}</span>
+          <span>{assignment.assigneeKey ?? "unassigned"}</span>
+          <span>{targets.length ? targets.map((target) => target.label).join(" / ") : "no linked targets"}</span>
         </div>
       </div>
       <div className="news-desk-assignment-row__actions">
-        {culled ? (
-          <>
-            {reason ? <p className="news-desk-assignment-row__reason">{reason}</p> : null}
-            <button
-              type="button"
-              data-assignment-action="restore"
-              disabled={disabled}
-              onClick={() => onAction(candidate, "restore")}
-            >
-              Restore
-            </button>
-          </>
-        ) : (
-          <>
-            <label>
-              <span>Cull Reason</span>
-              <textarea
-                data-assignment-reason={candidateKey}
-                rows={2}
-                value={reason}
-                onChange={(event) => setReason(event.target.value)}
-              />
-            </label>
-            <button
-              type="button"
-              data-assignment-action="cull"
-              disabled={disabled}
-              onClick={() => onAction(candidate, "cull", reason)}
-            >
-              Cull
-            </button>
-          </>
-        )}
+        <label>
+          <span>Note</span>
+          <textarea
+            data-assignment-reason={assignment.id}
+            rows={2}
+            value={note}
+            onChange={(event) => setNote(event.target.value)}
+          />
+        </label>
+        <div className="news-desk-assignment-row__button-row">
+          {assignment.status === "open" ? (
+            <button type="button" data-assignment-action="claim" disabled={disabled} onClick={() => onAction(assignment, "claim", note)}>Claim</button>
+          ) : null}
+          {assignment.status === "claimed" ? (
+            <button type="button" data-assignment-action="release" disabled={disabled} onClick={() => onAction(assignment, "release", note)}>Release</button>
+          ) : null}
+          {!terminal ? (
+            <>
+              <button type="button" data-assignment-action="complete" disabled={disabled} onClick={() => onAction(assignment, "complete", note)}>Complete</button>
+              <button type="button" data-assignment-action="cancel" disabled={disabled} onClick={() => onAction(assignment, "cancel", note)}>Cancel</button>
+            </>
+          ) : (
+            <button type="button" data-assignment-action="reopen" disabled={disabled} onClick={() => onAction(assignment, "reopen", note)}>Reopen</button>
+          )}
+        </div>
       </div>
     </article>
   );
@@ -1537,92 +1501,95 @@ function selectSemanticNodeSummary(graph: SemanticGraph, nodes: SemanticNodeReco
 
 type AssignmentSectionGroup = {
   name: string;
-  candidates: NewsDeskAssignmentCandidate[];
+  assignments: AssignmentRecord[];
 };
 
 type AssignmentMetrics = {
   total: number;
-  active: number;
-  drafted: number;
-  culled: number;
-  targetSlots: number;
+  open: number;
+  claimed: number;
+  completed: number;
+  canceled: number;
 };
 
-function getAssignmentSections(candidates: NewsDeskAssignmentCandidate[]): AssignmentSectionGroup[] {
-  const sectionByName = new Map<string, NewsDeskAssignmentCandidate[]>();
-  for (const candidate of candidates) {
-    const section = candidate.assignment.section?.trim() || "News";
+function getAssignmentSections(assignments: AssignmentRecord[]): AssignmentSectionGroup[] {
+  const sectionByName = new Map<string, AssignmentRecord[]>();
+  for (const assignment of assignments) {
+    const section = assignment.queueKey?.trim() || assignment.assignmentTypeKey || "Assignments";
     const entries = sectionByName.get(section) ?? [];
-    entries.push(candidate);
+    entries.push(assignment);
     sectionByName.set(section, entries);
   }
   return Array.from(sectionByName.entries())
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([name, entries]) => ({
       name,
-      candidates: entries.sort(compareAssignmentCandidates),
+      assignments: entries.sort(compareAssignments),
     }));
 }
 
-function getAssignmentCandidateKey(candidate: NewsDeskAssignmentCandidate): string {
-  return candidate.assignment.lineageId ?? candidate.assignment.id;
-}
-
-function getAssignmentDeskMetrics(desk: NewsDeskAssignmentDesk): AssignmentMetrics {
-  return getAssignmentCandidateMetrics(desk.candidates);
-}
-
-function getAssignmentCandidateMetrics(candidates: NewsDeskAssignmentCandidate[]): AssignmentMetrics {
-  const targetBySection = new Map<string, number>();
-  let active = 0;
-  let drafted = 0;
-  let culled = 0;
-
-  for (const candidate of candidates) {
-    const assignment = candidate.assignment;
-    const section = assignment.section?.trim() || "News";
-    const targetSlots = getAssignmentTargetArticleSlots(assignment);
-    if (targetSlots !== null) {
-      targetBySection.set(section, Math.max(targetBySection.get(section) ?? 0, targetSlots));
-    }
-    if (isCulledItem(assignment)) {
-      culled += 1;
-    } else {
-      active += 1;
-    }
-    if (assignment.status === "drafted" || assignment.typeStatus.endsWith("#drafted") || candidate.draftItem) {
-      drafted += 1;
-    }
-  }
-
+function getAssignmentMetrics(assignments: AssignmentRecord[]): AssignmentMetrics {
   return {
-    total: candidates.length,
-    active,
-    drafted,
-    culled,
-    targetSlots: Array.from(targetBySection.values()).reduce((sum, value) => sum + value, 0),
+    total: assignments.length,
+    open: assignments.filter((assignment) => assignment.status === "open").length,
+    claimed: assignments.filter((assignment) => assignment.status === "claimed").length,
+    completed: assignments.filter((assignment) => assignment.status === "completed").length,
+    canceled: assignments.filter((assignment) => assignment.status === "canceled").length,
   };
 }
 
-function compareAssignmentCandidates(left: NewsDeskAssignmentCandidate, right: NewsDeskAssignmentCandidate): number {
-  const leftStatus = assignmentStatusRank(left.assignment.status);
-  const rightStatus = assignmentStatusRank(right.assignment.status);
+function compareAssignments(left: AssignmentRecord, right: AssignmentRecord): number {
+  const leftStatus = assignmentStatusRank(left.status);
+  const rightStatus = assignmentStatusRank(right.status);
   if (leftStatus !== rightStatus) return leftStatus - rightStatus;
-  return left.editionItem.sortKey.localeCompare(right.editionItem.sortKey);
+  const priorityDiff = (left.priority ?? 999999) - (right.priority ?? 999999);
+  if (priorityDiff !== 0) return priorityDiff;
+  return left.createdAt.localeCompare(right.createdAt);
 }
 
 function assignmentStatusRank(status: string): number {
-  if (status === "dispatched") return 0;
-  if (status === "researched") return 1;
-  if (status === "drafted") return 2;
-  if (status === "culled") return 8;
+  if (status === "open") return 0;
+  if (status === "claimed") return 1;
+  if (status === "completed") return 6;
+  if (status === "canceled") return 8;
   return 5;
 }
 
-function formatLinkedDraftState(candidate: NewsDeskAssignmentCandidate): string {
-  if (!candidate.draftItem) return "no linked draft";
-  const title = candidate.draftItem.headline ?? candidate.draftItem.title ?? "draft article";
-  return `${title} / ${candidate.draftItem.status}`;
+function applyAssignmentActionLocally(assignment: AssignmentRecord, action: AssignmentAction, now: string): AssignmentRecord {
+  const status = action === "claim"
+    ? "claimed"
+    : action === "release" || action === "reopen"
+      ? "open"
+      : action === "complete"
+        ? "completed"
+        : action === "cancel"
+          ? "canceled"
+          : assignment.status;
+  return {
+    ...assignment,
+    status,
+    queueStatusKey: `${assignment.queueKey}#${status}`,
+    claimedAt: action === "claim" ? now : action === "release" ? null : assignment.claimedAt,
+    completedAt: action === "complete" ? now : action === "reopen" ? null : assignment.completedAt,
+    canceledAt: action === "cancel" ? now : action === "reopen" ? null : assignment.canceledAt,
+    updatedAt: now,
+  };
+}
+
+function demoAssignmentEvent(assignment: AssignmentRecord, action: AssignmentAction, now: string, note: string): AssignmentEventRecord {
+  const next = applyAssignmentActionLocally(assignment, action, now);
+  return {
+    id: `assignment-event-demo-${assignment.id}-${now}`,
+    assignmentId: assignment.id,
+    assignmentTypeKey: assignment.assignmentTypeKey,
+    queueKey: assignment.queueKey,
+    eventType: action,
+    fromStatus: assignment.status,
+    toStatus: next.status,
+    actorLabel: "Papyrus news desk",
+    note: note.trim() || null,
+    createdAt: now,
+  };
 }
 
 function getNewsDeskTabHref(href: string, demo?: boolean): string {

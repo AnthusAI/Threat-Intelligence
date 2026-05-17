@@ -177,13 +177,13 @@ Feature: Newspaper layout scenarios
     And news desk user "Demo Reader" should not be listed
     And no browser console errors should occur
 
-  Scenario: News desk manually culls assignment candidates
+  Scenario: News desk claims and completes reference curation assignments
     Given I open the assignments news desk at 1280 by 900
     Then the assignments desk should render
-    When I cull assignment "assignment-demo-agent-lab" with reason "Too thin"
-    Then assignment "assignment-demo-agent-lab" should be culled
-    When I restore assignment "assignment-demo-agent-lab"
-    Then assignment "assignment-demo-agent-lab" should be active
+    When I claim assignment "assignment-demo-reference-intake-history-001" with note "Taking this one"
+    Then assignment "assignment-demo-reference-intake-history-001" should be claimed
+    When I complete assignment "assignment-demo-reference-intake-history-001" with note "Reviewed"
+    Then assignment "assignment-demo-reference-intake-history-001" should be completed
     And no browser console errors should occur
 
   Scenario: Production news desk requires editor access

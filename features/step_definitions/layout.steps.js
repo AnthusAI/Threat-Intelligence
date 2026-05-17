@@ -92,27 +92,27 @@ When("I update the first news desk category name to {string}", async function (n
   }, name);
 });
 
-When("I cull assignment {string} with reason {string}", async function (assignmentId, reason) {
+When("I claim assignment {string} with note {string}", async function (assignmentId, note) {
   const page = requirePage(this);
   const candidate = page.locator(`[data-assignment-candidate="${assignmentId}"]`);
   await candidate.waitFor({ state: "visible", timeout: 10_000 });
-  await candidate.locator(`[data-assignment-reason="${assignmentId}"]`).fill(reason);
-  await candidate.locator('[data-assignment-action="cull"]').click();
+  await candidate.locator(`[data-assignment-reason="${assignmentId}"]`).fill(note);
+  await candidate.locator('[data-assignment-action="claim"]').click();
   await page.waitForFunction((id) => {
     const row = document.querySelector(`[data-assignment-candidate="${id}"]`);
-    return row?.getAttribute("data-assignment-status") === "culled";
+    return row?.getAttribute("data-assignment-status") === "claimed";
   }, assignmentId);
 });
 
-When("I restore assignment {string}", async function (assignmentId) {
+When("I complete assignment {string} with note {string}", async function (assignmentId, note) {
   const page = requirePage(this);
   const candidate = page.locator(`[data-assignment-candidate="${assignmentId}"]`);
   await candidate.waitFor({ state: "visible", timeout: 10_000 });
-  await candidate.locator('[data-assignment-action="restore"]').click();
+  await candidate.locator(`[data-assignment-reason="${assignmentId}"]`).fill(note);
+  await candidate.locator('[data-assignment-action="complete"]').click();
   await page.waitForFunction((id) => {
     const row = document.querySelector(`[data-assignment-candidate="${id}"]`);
-    const status = row?.getAttribute("data-assignment-status");
-    return status && status !== "culled";
+    return row?.getAttribute("data-assignment-status") === "completed";
   }, assignmentId);
 });
 
@@ -290,9 +290,9 @@ Then("the assignments desk should render", async function () {
   await page.locator("[data-news-desk]").waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("[data-news-desk-tab='assignments'][aria-current='page']").waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("[data-news-desk-assignments]").waitFor({ state: "visible", timeout: 10_000 });
-  await page.locator("text=Assignment Candidates").first().waitFor({ state: "visible", timeout: 10_000 });
-  await page.locator('[data-assignment-candidate="assignment-demo-agent-lab"]').waitFor({ state: "visible", timeout: 10_000 });
-  await page.locator('[data-assignment-candidate="assignment-demo-history-cull"][data-assignment-status="culled"]').waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("text=Assignment Queue").first().waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator('[data-assignment-candidate="assignment-demo-reference-intake-history-001"]').waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator('[data-assignment-candidate="assignment-demo-reference-intake-history-002"][data-assignment-status="claimed"]').waitFor({ state: "visible", timeout: 10_000 });
 });
 
 Then("the news desk should show an editor access gate", async function () {
@@ -338,16 +338,16 @@ Then("the first news desk category name should be {string}", async function (exp
   assert.equal(value, expectedName);
 });
 
-Then("assignment {string} should be culled", async function (assignmentId) {
+Then("assignment {string} should be claimed", async function (assignmentId) {
   const page = requirePage(this);
-  await page.locator(`[data-assignment-candidate="${assignmentId}"][data-assignment-status="culled"]`).waitFor({ state: "visible", timeout: 10_000 });
-  await page.locator(`[data-assignment-candidate="${assignmentId}"] [data-assignment-action="restore"]`).waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator(`[data-assignment-candidate="${assignmentId}"][data-assignment-status="claimed"]`).waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator(`[data-assignment-candidate="${assignmentId}"] [data-assignment-action="complete"]`).waitFor({ state: "visible", timeout: 10_000 });
 });
 
-Then("assignment {string} should be active", async function (assignmentId) {
-  const status = await requirePage(this).locator(`[data-assignment-candidate="${assignmentId}"]`).getAttribute("data-assignment-status");
-  assert.notEqual(status, "culled");
-  assert.ok(status, `Expected assignment ${assignmentId} to expose a workflow status`);
+Then("assignment {string} should be completed", async function (assignmentId) {
+  await requirePage(this)
+    .locator(`[data-assignment-candidate="${assignmentId}"][data-assignment-status="completed"]`)
+    .waitFor({ state: "visible", timeout: 10_000 });
 });
 
 Then("edition page count should not include appended News Desk pages", async function () {

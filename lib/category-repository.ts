@@ -1,12 +1,3 @@
-import {
-  buildAssignmentDesk,
-  createEmptyAssignmentDesk,
-  type NewsDeskAssignmentDesk,
-  type NewsDeskAssignmentEdition,
-  type NewsDeskAssignmentEditionItem,
-  type NewsDeskAssignmentItem,
-} from "./news-desk-assignments";
-
 export type CategorySteeringCorpus = {
   id: string;
   name: string;
@@ -245,6 +236,49 @@ export type KnowledgeCommentRecord = {
   createdAt: string;
 };
 
+export type AssignmentRecord = {
+  id: string;
+  assignmentTypeKey: string;
+  queueKey: string;
+  queueStatusKey: string;
+  status: string;
+  priority?: number | null;
+  title: string;
+  brief?: string | null;
+  instructions?: string | null;
+  assigneeType?: string | null;
+  assigneeId?: string | null;
+  assigneeKey?: string | null;
+  claimedAt?: string | null;
+  claimExpiresAt?: string | null;
+  completedAt?: string | null;
+  canceledAt?: string | null;
+  corpusId?: string | null;
+  categorySetId?: string | null;
+  classifierId?: string | null;
+  sourceSnapshotId?: string | null;
+  importRunId?: string | null;
+  createdBy?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  metadata?: unknown;
+};
+
+export type AssignmentEventRecord = {
+  id: string;
+  assignmentId: string;
+  assignmentTypeKey: string;
+  queueKey: string;
+  eventType: string;
+  fromStatus?: string | null;
+  toStatus?: string | null;
+  actorSub?: string | null;
+  actorLabel?: string | null;
+  note?: string | null;
+  createdAt: string;
+  metadata?: unknown;
+};
+
 export type UserIdentityRecord = {
   id: string;
   userProfileId: string;
@@ -277,7 +311,6 @@ export type CategorySteeringDashboard = {
   canManageUsers?: boolean;
   canonicalCorpusId?: string | null;
   canonicalCategorySetId?: string | null;
-  assignmentDesk: NewsDeskAssignmentDesk;
   userDirectory: UserDirectoryEntry[];
   corpora: CategorySteeringCorpus[];
   importRuns: CategorySteeringImportRun[];
@@ -292,6 +325,8 @@ export type CategorySteeringDashboard = {
   semanticNodes: SemanticNodeRecord[];
   knowledgeComments: KnowledgeCommentRecord[];
   semanticRelations: SemanticRelationRecord[];
+  assignments: AssignmentRecord[];
+  assignmentEvents: AssignmentEventRecord[];
   loadError?: string | null;
 };
 
@@ -366,7 +401,6 @@ function createEmptyCategorySteeringDashboard(): CategorySteeringDashboard {
   return {
     canonicalCorpusId: null,
     canonicalCategorySetId: null,
-    assignmentDesk: createEmptyAssignmentDesk(),
     userDirectory: [],
     corpora: [],
     importRuns: [],
@@ -381,6 +415,8 @@ function createEmptyCategorySteeringDashboard(): CategorySteeringDashboard {
     semanticNodes: [],
     knowledgeComments: [],
     semanticRelations: [],
+    assignments: [],
+    assignmentEvents: [],
     loadError: null,
   };
 }
@@ -395,6 +431,8 @@ function createDemoCategorySteeringDashboard(): CategorySteeringDashboard {
   const referenceHistoryTwoLineageId = "reference-knowledge-corpus-demo-source-history-002";
   const referenceHistoryOneId = `${referenceHistoryOneLineageId}-v1`;
   const referenceHistoryTwoId = `${referenceHistoryTwoLineageId}-v1`;
+  const assignmentHistoryOneId = "assignment-demo-reference-intake-history-001";
+  const assignmentHistoryTwoId = "assignment-demo-reference-intake-history-002";
   const scalingCategoryLineageId = "category-category-set-demo-canonical-category-foundation-model-scaling";
   const historyCategoryLineageId = "category-category-set-demo-source-category-symbolic-connectionist-history";
 
@@ -403,7 +441,6 @@ function createDemoCategorySteeringDashboard(): CategorySteeringDashboard {
     canManageUsers: true,
     canonicalCorpusId: corpusId,
     canonicalCategorySetId: categorySetId,
-    assignmentDesk: createDemoAssignmentDesk(importedAt),
     userDirectory: [
       {
         userProfileId: "user-profile-demo-editor",
@@ -863,7 +900,108 @@ function createDemoCategorySteeringDashboard(): CategorySteeringDashboard {
         createdAt: importedAt,
       },
     ],
+    assignments: [
+      {
+        id: assignmentHistoryOneId,
+        assignmentTypeKey: "curation.reference-intake",
+        queueKey: `curation.reference-intake#${sourceCorpusId}`,
+        queueStatusKey: `curation.reference-intake#${sourceCorpusId}#open`,
+        status: "open",
+        priority: 40,
+        title: "Curate reference: Symbolic And Connectionist History Reader",
+        brief: "Review this knowledge-base reference and add durable curation notes or semantic links.",
+        instructions: "Inspect linked private corpus attachments; write findings as comments, semantic relations, or proposals.",
+        corpusId: sourceCorpusId,
+        categorySetId,
+        classifierId: "demo-canonical-classifier",
+        importRunId: "knowledge-import-demo-projection",
+        createdBy: "biblicus-import",
+        createdAt: importedAt,
+        updatedAt: importedAt,
+        metadata: { referenceLineageId: referenceHistoryOneLineageId, externalItemId: "history-001" },
+      },
+      {
+        id: assignmentHistoryTwoId,
+        assignmentTypeKey: "curation.reference-intake",
+        queueKey: `curation.reference-intake#${sourceCorpusId}`,
+        queueStatusKey: `curation.reference-intake#${sourceCorpusId}#claimed`,
+        status: "claimed",
+        priority: 50,
+        title: "Curate reference: Foundation Model Scaling Retrospective",
+        brief: "Review this reference because it has a review-recommended category projection.",
+        instructions: "Check whether the weak scaling classification deserves a comment, proposal, or relation.",
+        assigneeType: "agent",
+        assigneeId: "archivist-demo",
+        assigneeKey: "agent#archivist-demo",
+        claimedAt: importedAt,
+        corpusId: sourceCorpusId,
+        categorySetId,
+        classifierId: "demo-canonical-classifier",
+        importRunId: "knowledge-import-demo-projection",
+        createdBy: "biblicus-import",
+        createdAt: importedAt,
+        updatedAt: importedAt,
+        metadata: { referenceLineageId: referenceHistoryTwoLineageId, externalItemId: "history-002" },
+      },
+    ],
+    assignmentEvents: [
+      {
+        id: "assignment-event-demo-history-002-claimed",
+        assignmentId: assignmentHistoryTwoId,
+        assignmentTypeKey: "curation.reference-intake",
+        queueKey: `curation.reference-intake#${sourceCorpusId}`,
+        eventType: "claim",
+        fromStatus: "open",
+        toStatus: "claimed",
+        actorLabel: "archivist-demo",
+        createdAt: importedAt,
+      },
+    ],
     semanticRelations: [
+      {
+        id: "semantic-relation-demo-assignment-history-001",
+        relationState: "current",
+        predicate: "requests_work_on",
+        subjectKind: "assignment",
+        subjectId: assignmentHistoryOneId,
+        subjectLineageId: assignmentHistoryOneId,
+        objectKind: "reference",
+        objectId: referenceHistoryOneId,
+        objectLineageId: referenceHistoryOneLineageId,
+        objectVersionNumber: 1,
+        subjectStateKey: `assignment#${assignmentHistoryOneId}#current`,
+        objectStateKey: `reference#${referenceHistoryOneLineageId}#current`,
+        objectSubjectStateKey: `reference#${referenceHistoryOneLineageId}#current#assignment`,
+        predicateObjectStateKey: `requests_work_on#reference#${referenceHistoryOneLineageId}#current`,
+        subjectVersionKey: `assignment#${assignmentHistoryOneId}`,
+        objectVersionKey: `reference#${referenceHistoryOneId}`,
+        rank: 1,
+        reviewRecommended: true,
+        importRunId: "knowledge-import-demo-projection",
+        importedAt,
+      },
+      {
+        id: "semantic-relation-demo-assignment-history-002",
+        relationState: "current",
+        predicate: "requests_work_on",
+        subjectKind: "assignment",
+        subjectId: assignmentHistoryTwoId,
+        subjectLineageId: assignmentHistoryTwoId,
+        objectKind: "reference",
+        objectId: referenceHistoryTwoId,
+        objectLineageId: referenceHistoryTwoLineageId,
+        objectVersionNumber: 1,
+        subjectStateKey: `assignment#${assignmentHistoryTwoId}#current`,
+        objectStateKey: `reference#${referenceHistoryTwoLineageId}#current`,
+        objectSubjectStateKey: `reference#${referenceHistoryTwoLineageId}#current#assignment`,
+        predicateObjectStateKey: `requests_work_on#reference#${referenceHistoryTwoLineageId}#current`,
+        subjectVersionKey: `assignment#${assignmentHistoryTwoId}`,
+        objectVersionKey: `reference#${referenceHistoryTwoId}`,
+        rank: 1,
+        reviewRecommended: true,
+        importRunId: "knowledge-import-demo-projection",
+        importedAt,
+      },
       {
         id: "semantic-relation-demo-history-001",
         relationState: "current",
@@ -939,169 +1077,5 @@ function createDemoCategorySteeringDashboard(): CategorySteeringDashboard {
       },
     ],
     loadError: null,
-  };
-}
-
-function createDemoAssignmentDesk(importedAt: string): NewsDeskAssignmentDesk {
-  const edition: NewsDeskAssignmentEdition = {
-    id: "edition-demo-assignments",
-    slug: "demo-assignments",
-    title: "Demo Assignment Edition",
-    status: "planning",
-    editionDate: "2026-05-16",
-    publishedAt: importedAt,
-    description: "Assignment candidates for the next Papyrus issue.",
-  };
-  const editionItems: NewsDeskAssignmentEditionItem[] = [
-    createDemoAssignmentEditionItem(edition.id, "assignment-demo-agent-lab", "assignment:0001:ai-agents-enter-the-lab"),
-    createDemoAssignmentEditionItem(edition.id, "assignment-demo-benchmark-cull", "assignment:0002:benchmark-saturation-watch"),
-    createDemoAssignmentEditionItem(edition.id, "assignment-demo-history-cull", "assignment:0003:connectionist-history-sidebar"),
-    createDemoAssignmentEditionItem(edition.id, "assignment-demo-infra-restore", "assignment:0004:agent-infra-costs"),
-  ];
-  const items: NewsDeskAssignmentItem[] = [
-    {
-      id: "assignment-demo-agent-lab",
-      type: "assignment",
-      status: "dispatched",
-      typeStatus: "assignment#dispatched",
-      slug: "ai-agents-enter-the-lab",
-      section: "Research",
-      sectionStatus: "research#dispatched",
-      title: "AI Agents Enter the Lab",
-      deck: "A reporting pass on autonomous systems inside scientific workflows.",
-      editorial: {
-        newsroom: {
-          assignment: {
-            brief: "Find concrete examples of agent systems changing lab work without overstating maturity.",
-            angle: "Focus on places where agents make research teams faster, then name the supervision cost.",
-            corpusKey: "AI-ML-research",
-            categoryKey: "category.agent-memory",
-            targetArticleSlots: 2,
-            evidenceItemIds: ["research-001", "research-002", "research-003"],
-          },
-        },
-      },
-    },
-    {
-      id: "assignment-demo-benchmark-cull",
-      type: "assignment",
-      status: "drafted",
-      typeStatus: "assignment#drafted",
-      slug: "benchmark-saturation-watch",
-      section: "Research",
-      sectionStatus: "research#drafted",
-      title: "Benchmark Saturation Watch",
-      deck: "A candidate on evaluation plateaus and leakage in model benchmarks.",
-      editorial: {
-        newsroom: {
-          assignment: {
-            brief: "Turn the benchmark-saturation category into a concise inside-page article.",
-            angle: "Explain why old benchmarks stop working as a newspaper-style accountability story.",
-            corpusKey: "AI-ML-research",
-            categoryKey: "category.benchmark-saturation",
-            targetArticleSlots: 2,
-            evidenceItemIds: ["research-002"],
-          },
-          draft: {
-            articleItemId: "article-demo-benchmark-cull",
-          },
-        },
-      },
-    },
-    {
-      id: "article-demo-benchmark-cull",
-      type: "article",
-      status: "draft",
-      typeStatus: "article#draft",
-      slug: "benchmark-saturation-watch-draft",
-      section: "Research",
-      sectionStatus: "research#draft",
-      title: "Benchmarks Struggle To Keep Up",
-      headline: "Benchmarks Struggle To Keep Up",
-      deck: "Draft copy linked to the benchmark assignment.",
-      body: ["Draft body for the benchmark saturation assignment."],
-      editorial: {
-        newsroom: {
-          assignmentItemId: "assignment-demo-benchmark-cull",
-        },
-      },
-    },
-    {
-      id: "assignment-demo-history-cull",
-      type: "assignment",
-      status: "culled",
-      typeStatus: "assignment#culled",
-      slug: "connectionist-history-sidebar",
-      section: "History",
-      sectionStatus: "history#culled",
-      title: "Connectionist History Sidebar",
-      deck: "A weaker sidebar candidate already removed from the edition pool.",
-      editorial: {
-        newsroom: {
-          assignment: {
-            brief: "Consider a short context piece on the symbolic-to-connectionist swing.",
-            angle: "Make the history useful to readers following current agent systems.",
-            corpusKey: "AI-ML-history",
-            categoryKey: "category.symbolic-connectionist-history",
-            targetArticleSlots: 1,
-            evidenceItemIds: ["history-001"],
-          },
-          culling: {
-            status: "culled",
-            source: "manual-news-desk",
-            culledAt: importedAt,
-            culledBy: "Papyrus news desk",
-            reason: "Too thin for the current edition mix.",
-            previousStatus: "dispatched",
-            previousTypeStatus: "assignment#dispatched",
-            previousSectionStatus: "history#dispatched",
-          },
-        },
-      },
-    },
-    {
-      id: "assignment-demo-infra-restore",
-      type: "assignment",
-      status: "researched",
-      typeStatus: "assignment#researched",
-      slug: "agent-infra-costs",
-      section: "Operations",
-      sectionStatus: "operations#researched",
-      title: "Agent Infrastructure Costs",
-      deck: "A candidate on the operational costs of long-running agent systems.",
-      editorial: {
-        newsroom: {
-          assignment: {
-            brief: "Collect evidence on compute, tool-call, and supervision costs in agent operations.",
-            angle: "Treat the story as an operations ledger rather than a product roundup.",
-            corpusKey: "AI-ML-research",
-            categoryKey: "category.foundation-model-scaling",
-            targetArticleSlots: 1,
-            evidenceItemIds: ["research-001", "history-002"],
-          },
-        },
-      },
-    },
-  ];
-
-  return buildAssignmentDesk([edition], editionItems, items);
-}
-
-function createDemoAssignmentEditionItem(
-  editionId: string,
-  itemId: string,
-  sortKey: string,
-): NewsDeskAssignmentEditionItem {
-  return {
-    id: `edition-item-${itemId}`,
-    editionId,
-    itemId,
-    placementKey: `assignment:${itemId}`,
-    sortKey,
-    metadata: {
-      newsroom: {
-        role: "assignment",
-      },
-    },
   };
 }

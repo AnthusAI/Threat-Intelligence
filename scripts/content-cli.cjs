@@ -37,7 +37,7 @@ async function main() {
 
   const args = process.argv.slice(2);
   const [group, command, value] = args;
-  if (group !== "content" && group !== "categories") {
+  if (group !== "content" && group !== "categories" && group !== "assignments") {
     printUsage();
     process.exitCode = 1;
     return;
@@ -81,6 +81,19 @@ async function main() {
       return;
     case "categories:import-projection":
       await importProjection(args.slice(2));
+      return;
+    case "assignments:list":
+      await listAssignments(args.slice(2));
+      return;
+    case "assignments:for-object":
+      await listAssignmentsForObject(args.slice(2));
+      return;
+    case "assignments:claim":
+    case "assignments:release":
+    case "assignments:complete":
+    case "assignments:cancel":
+    case "assignments:reopen":
+      await mutateAssignment(command, args.slice(2));
       return;
     default:
       printUsage();
@@ -269,6 +282,92 @@ async function exportSteeringFeedback(flags) {
   console.log(`export\tsteering-feedback\t${categorySetId}\t${options.output}\t${payload.accepted_proposals.length} accepted\t${payload.rejected_proposals.length} rejected`);
 }
 
+async function listAssignments(flags) {
+  const options = parseOptions(flags);
+  const { client } = createAuthoringClient();
+  let assignments = await client.listRecords("Assignment");
+  if (options.queue) assignments = assignments.filter((assignment) => assignment.queueKey === options.queue);
+  if (options.status) assignments = assignments.filter((assignment) => assignment.status === options.status);
+  if (options.type) assignments = assignments.filter((assignment) => assignment.assignmentTypeKey === options.type);
+  assignments.sort((left, right) => assignmentSortKey(left).localeCompare(assignmentSortKey(right)));
+  for (const assignment of assignments) {
+    console.log(`${assignment.status}\t${assignment.id}\t${assignment.assignmentTypeKey}\t${assignment.queueKey}\t${assignment.title}`);
+  }
+}
+
+async function listAssignmentsForObject(flags) {
+  const options = parseOptions(flags);
+  const kind = options.kind;
+  const lineage = options.lineage;
+  if (!kind || !lineage) throw new Error("assignments for-object requires --kind and --lineage.");
+  const { client } = createAuthoringClient();
+  const stateKey = `${kind}#${lineage}#current`;
+  const relations = (await client.listRecords("SemanticRelation"))
+    .filter((relation) => relation.relationState === "current")
+    .filter((relation) => relation.objectStateKey === stateKey)
+    .filter((relation) => relation.subjectKind === "assignment")
+    .filter((relation) => relation.predicate === "requests_work_on");
+  const assignmentIds = new Set(relations.map((relation) => relation.subjectId));
+  const assignments = (await client.listRecords("Assignment")).filter((assignment) => assignmentIds.has(assignment.id));
+  assignments.sort((left, right) => assignmentSortKey(left).localeCompare(assignmentSortKey(right)));
+  for (const assignment of assignments) {
+    console.log(`${assignment.status}\t${assignment.id}\t${assignment.assignmentTypeKey}\t${assignment.title}`);
+  }
+}
+
+async function mutateAssignment(action, flags) {
+  const options = parseOptions(flags);
+  const assignmentId = options.assignment;
+  if (!assignmentId) throw new Error(`assignments ${action} requires --assignment.`);
+  const { auth, client } = createAuthoringClient();
+  const current = await client.getRecord("Assignment", assignmentId);
+  if (!current) throw new Error(`Assignment ${assignmentId} was not found.`);
+  const now = new Date().toISOString();
+  const nextStatus = assignmentStatusForAction(action, current.status);
+  const assignee = options.assignee ?? auth.claims.sub ?? "jwt-worker";
+  const update = {
+    id: assignmentId,
+    status: nextStatus,
+    queueStatusKey: `${current.queueKey}#${nextStatus}`,
+    updatedAt: now,
+  };
+  if (action === "claim") {
+    update.assigneeType = options["assignee-type"] ?? "agent";
+    update.assigneeId = assignee;
+    update.assigneeKey = `${update.assigneeType}#${assignee}`;
+    update.claimedAt = now;
+  }
+  if (action === "release") {
+    update.assigneeType = null;
+    update.assigneeId = null;
+    update.assigneeKey = null;
+    update.claimedAt = null;
+    update.claimExpiresAt = null;
+  }
+  if (action === "complete") update.completedAt = now;
+  if (action === "cancel") update.canceledAt = now;
+  if (action === "reopen") {
+    update.completedAt = null;
+    update.canceledAt = null;
+  }
+  await client.upsert("Assignment", update);
+  await client.upsert("AssignmentEvent", {
+    id: `assignment-event-${assignmentId}-${now.replace(/[^0-9TZ]/g, "")}`,
+    assignmentId,
+    assignmentTypeKey: current.assignmentTypeKey,
+    queueKey: current.queueKey,
+    eventType: action,
+    fromStatus: current.status,
+    toStatus: nextStatus,
+    actorSub: auth.claims.sub ?? null,
+    actorLabel: options.assignee ?? auth.claims.email ?? auth.claims.sub ?? "jwt-worker",
+    note: options.note ?? null,
+    createdAt: now,
+    metadata: JSON.stringify({ source: "content-cli" }),
+  });
+  console.log(`assignment\t${action}\t${assignmentId}\t${current.status}->${nextStatus}`);
+}
+
 async function deleteAllContent(client) {
   const deleteOrder = [
     "PublishedMediaAsset",
@@ -287,6 +386,8 @@ async function deleteAllContent(client) {
     "SteeringDecision",
     "SteeringProposal",
     "SemanticRelation",
+    "AssignmentEvent",
+    "Assignment",
     "SemanticNode",
     "KnowledgeComment",
     "ReferenceAttachment",
@@ -813,6 +914,31 @@ function printCategoryImportSummary(kind, importRunId, changes) {
   }
 }
 
+function assignmentSortKey(assignment) {
+  return `${String(assignment.priority ?? 999999).padStart(6, "0")}#${assignment.createdAt ?? ""}#${assignment.id}`;
+}
+
+function assignmentStatusForAction(action, currentStatus) {
+  if (action === "claim") {
+    if (currentStatus === "completed" || currentStatus === "canceled") throw new Error(`Cannot claim ${currentStatus} assignment.`);
+    return "claimed";
+  }
+  if (action === "release") {
+    if (currentStatus === "completed" || currentStatus === "canceled") throw new Error(`Cannot release ${currentStatus} assignment.`);
+    return "open";
+  }
+  if (action === "complete") {
+    if (currentStatus === "canceled") throw new Error("Cannot complete canceled assignment.");
+    return "completed";
+  }
+  if (action === "cancel") {
+    if (currentStatus === "completed") throw new Error("Cannot cancel completed assignment.");
+    return "canceled";
+  }
+  if (action === "reopen") return "open";
+  throw new Error(`Unsupported assignment action ${action}.`);
+}
+
 function recordsEqual(left, right) {
   return stableStringify(normalizeRecord(left)) === stableStringify(normalizeRecord(right));
 }
@@ -894,6 +1020,10 @@ function printUsage() {
   console.log("  npm run content -- categories export-steering-feedback --category-set <id> --output <steering-feedback.json>");
   console.log("  npm run content -- categories import-projection --bundle <projection.json>");
   console.log("  npm run content -- categories import-projection --config <steering.yml> --target-corpus-key <key> --authority-corpus-key <key> --bundle <projection.json>");
+  console.log("  npm run content -- assignments list --queue <queue-key> --status open");
+  console.log("  npm run content -- assignments for-object --kind reference --lineage <reference-lineage-id>");
+  console.log("  npm run content -- assignments claim --assignment <id> --assignee <agent-id>");
+  console.log("  npm run content -- assignments complete --assignment <id> --note <text>");
 }
 
 function resolveSteeringImportCorpus(config, options) {

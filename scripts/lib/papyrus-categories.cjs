@@ -47,6 +47,7 @@ function buildSteeringImportRecords(bundle, options = {}) {
   const corpusContext = normalizeCorpusContext(corpus, options.corpusConfig ?? options.corpus);
   const corpusId = options.corpusId ?? knowledgeCorpusId(corpusContext);
   const classifierId = bundle.topic_set?.classifier_id ?? options.classifierId ?? "unknown-classifier";
+  const sourceSnapshotId = latestSnapshotId(bundle.artifacts, "topic-governance");
   const importRunId = `knowledge-import-${safeId(corpusId)}-${safeId(classifierId)}-${hashShort([
     bundle.generated_at,
     bundle.proposals?.length ?? 0,
@@ -72,7 +73,7 @@ function buildSteeringImportRecords(bundle, options = {}) {
     corpusId,
     importKind: "steering-export",
     classifierId,
-    sourceSnapshotId: latestSnapshotId(bundle.artifacts, "topic-governance"),
+    sourceSnapshotId,
     status: "imported",
     generatedAt: dateOrNull(bundle.generated_at),
     importedAt: now,
@@ -88,7 +89,14 @@ function buildSteeringImportRecords(bundle, options = {}) {
   records.push(...commentConceptNodeRecords({ corpusId, importRunId, now }));
 
   for (const item of bundle.items ?? []) {
-    records.push(...referenceRecords(item, { corpusId, importRunId, now }));
+    records.push(...referenceRecords(item, {
+      corpusId,
+      categorySetId,
+      classifierId,
+      sourceSnapshotId,
+      importRunId,
+      now,
+    }));
   }
 
   if (bundle.topic_set) {
@@ -146,6 +154,7 @@ function buildProjectionImportRecords(payload, options = {}) {
     importRunId,
     now,
   });
+  const categorySetId = categorySetIdFor(classifierId, authorityCorpusId);
   const records = [
     record("KnowledgeCorpus", {
       id: targetCorpusId,
@@ -180,7 +189,14 @@ function buildProjectionImportRecords(payload, options = {}) {
   ];
 
   for (const item of items) {
-    const referenceRecordsForItem = referenceRecords(item, { corpusId: targetCorpusId, importRunId, now });
+    const referenceRecordsForItem = referenceRecords(item, {
+      corpusId: targetCorpusId,
+      categorySetId,
+      classifierId,
+      sourceSnapshotId: item.extraction_snapshot?.snapshot_id ?? firstItem.extraction_snapshot?.snapshot_id ?? null,
+      importRunId,
+      now,
+    });
     const reference = referenceRecordsForItem.find((entry) => entry.modelName === "Reference");
     records.push(...referenceRecordsForItem);
     records.push(rawPayloadRecord("projection", reference.expected.id, "biblicus-projection", sanitizeProjectionPayload(item), importRunId, now));
@@ -244,7 +260,92 @@ function referenceRecords(item, context) {
     reference,
     ...referenceAttachmentRecords(item, reference.expected, context),
     ...referenceCommentRecords(item, reference.expected, context),
+    ...referenceCurationAssignmentRecords(item, reference.expected, context),
   ];
+}
+
+function referenceCurationAssignmentRecords(item, reference, context) {
+  const assignment = referenceCurationAssignmentRecord(item, reference, context);
+  return [
+    assignment,
+    referenceCurationAssignmentRelationRecord(item, reference, assignment.expected, context),
+  ];
+}
+
+function referenceCurationAssignmentRecord(item, reference, context) {
+  const assignmentTypeKey = "curation.reference-intake";
+  const queueKey = `${assignmentTypeKey}#${context.corpusId}`;
+  const assignmentId = `assignment-${safeId(assignmentTypeKey)}-${hashShort([
+    context.corpusId,
+    reference.lineageId,
+    reference.contentHash ?? "",
+  ])}`;
+  const title = reference.title
+    ? `Curate reference: ${reference.title}`
+    : `Curate reference ${reference.externalItemId}`;
+  return record("Assignment", {
+    id: assignmentId,
+    assignmentTypeKey,
+    queueKey,
+    queueStatusKey: `${queueKey}#open`,
+    status: "open",
+    priority: integerOrNull(item.priority) ?? 50,
+    title,
+    brief: "Review this knowledge-base reference and add any useful curation notes, semantic links, category evidence, or follow-up proposals.",
+    instructions: "Inspect the linked Reference metadata and private corpus attachments. Do not copy source contents into Papyrus; write durable findings as KnowledgeComment, SemanticRelation, or SteeringProposal records.",
+    assigneeType: null,
+    assigneeId: null,
+    assigneeKey: null,
+    claimedAt: null,
+    claimExpiresAt: null,
+    completedAt: null,
+    canceledAt: null,
+    corpusId: context.corpusId,
+    categorySetId: context.categorySetId ?? null,
+    classifierId: context.classifierId ?? null,
+    sourceSnapshotId: context.sourceSnapshotId ?? null,
+    importRunId: context.importRunId,
+    createdBy: "biblicus-import",
+    createdAt: context.now,
+    updatedAt: context.now,
+    metadata: JSON.stringify({
+      referenceLineageId: reference.lineageId,
+      referenceId: reference.id,
+      externalItemId: reference.externalItemId,
+      sourceUri: reference.sourceUri,
+      storagePath: reference.storagePath,
+      contentHash: reference.contentHash,
+    }),
+  });
+}
+
+function referenceCurationAssignmentRelationRecord(item, reference, assignment, context) {
+  return semanticRelationRecord({
+    predicate: "requests_work_on",
+    subjectKind: "assignment",
+    subjectId: assignment.id,
+    subjectLineageId: assignment.id,
+    subjectVersionNumber: null,
+    objectKind: "reference",
+    objectId: reference.id,
+    objectLineageId: reference.lineageId,
+    objectVersionNumber: reference.versionNumber,
+    score: null,
+    confidence: null,
+    rank: 1,
+    classifierId: context.classifierId ?? null,
+    modelVersion: null,
+    reviewRecommended: true,
+    sourceSnapshotId: context.sourceSnapshotId ?? null,
+    importRunId: context.importRunId,
+    importedAt: context.now,
+    metadata: {
+      assignmentTypeKey: assignment.assignmentTypeKey,
+      queueKey: assignment.queueKey,
+      externalItemId: reference.externalItemId,
+      title: reference.title ?? item.title ?? null,
+    },
+  });
 }
 
 const COMMENT_CONCEPTS = [

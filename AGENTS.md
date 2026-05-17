@@ -93,20 +93,19 @@ rendering contracts.
   not the whole product concept. Use `/news-desk` and News Desk naming in UI,
   docs, and tests. Future assignment and research queues should become desk tabs
   instead of separate one-off management pages.
-- Newsroom assignment dispatch uses cloud `Item` rows with `type: "assignment"`
-  and workflow statuses such as `dispatched`, `researched`, and `drafted`.
-  Do not model assignments as `type: "article"` plus `status: "assignment"`.
-  Reporter agents consume assignment Items and produce separate draft article
-  Items, preserving the assignment row as the audit/input record.
-- Assignment dispatch should be section-targeted and reviewer-conscious. The
-  default overassignment ratio is `3/2`: dispatch enough surplus assignments to
-  allow culling, but cap each section by its planned article slots instead of
-  flooding the News Desk with every possible candidate.
-- Manual assignment culling lives in the editor-only `Assignments` News Desk
-  tab. Cull by marking the assignment Item and any linked draft article Item
-  `status: "culled"`, preserving previous workflow fields under
-  `editorial.newsroom.culling` on new Item versions so the News Desk can
-  restore without deleting Items or `EditionItem` rows.
+- Assignments are first-class private `Assignment` work records, not cloud
+  `Item` rows with `type: "assignment"`. Do not create assignment Items or
+  encode pending work in article/item status fields.
+- Assignments are generalized newsroom tasks for humans, agents, and
+  procedures. Relate them to `Reference`, `Item`, `Category`, `CategorySet`,
+  `SemanticNode`, `SemanticRelation`, `KnowledgeComment`, `SteeringProposal`,
+  and future models through `SemanticRelation` links such as
+  `requests_work_on`, `uses_evidence`, `produces`, `blocked_by`, and
+  `derived_from`.
+- Assignment lifecycle changes use protected actions or the JWT authoring lane
+  and append `AssignmentEvent` audit rows. The News Desk `Assignments` tab
+  should show claim/release/complete/cancel/reopen workflow actions, not
+  edition-candidate culling.
 - Style the News Desk as a newspaper section or editorial insert, not as an app
   dashboard. Steering is passive and optional: proposals are skimmable notes
   beside the edition, and the system keeps following the accepted category set when
@@ -184,9 +183,10 @@ GraphQL (or `?scenario=<id>` fixture overrides for tests/debug only).
 - `PublicationItem` is the normalized item union consumed by the layout solver.
 - Supported item types are `article`, `brief`, `correction`, `promo`, `ad`,
   and `sectionHeader`.
-- Newsroom `assignment` Items are cloud workflow records, not solver
-  `PublicationItem`s. Keep them out of reader layout until a reporter produces
-  a draft or publishable `article` Item.
+- Assignments are not `PublicationItem`s and should not appear in reader
+  layout. Keep assignment work in the private `Assignment` queue until a
+  reporter or publishing procedure produces a draft or publishable `article`
+  Item.
 - `articleToPublicationItem` adapts legacy/fixture `Article` objects into
   generic items.
 - `publicationItemToArticle` adapts article items back to `Article` for direct
