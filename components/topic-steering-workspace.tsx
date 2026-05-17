@@ -69,6 +69,35 @@ type MergeSelection = {
   notice?: string;
 };
 
+function useNewsroomRhythmOverlay() {
+  const [showRhythmOverlay, setShowRhythmOverlay] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (isEditableEventTarget(event.target)) return;
+
+      if ((event.key === "=" || event.code === "Equal") && event.ctrlKey && !event.metaKey && !event.altKey) {
+        event.preventDefault();
+        setShowRhythmOverlay((current) => !current);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  return showRhythmOverlay;
+}
+
+function isEditableEventTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false;
+
+  const tagName = target.tagName.toLowerCase();
+  if (tagName === "input" || tagName === "textarea" || tagName === "select") return true;
+
+  return target.isContentEditable || target.closest("[contenteditable='true']") !== null;
+}
+
 const TAILORED_TOPIC_PROPOSAL_KINDS = new Set([
   "new-category",
   "rename-category",
@@ -116,6 +145,7 @@ export function NewsDeskWorkspace({
 
 function ProtectedNewsDeskWorkspace({ initialTab, initialSelection }: { initialTab: NewsDeskTab; initialSelection: NewsDeskSelection }) {
   const [state, setState] = useState<EditorNewsDeskState>({ status: "loading", dashboard: null, error: null });
+  const showRhythmOverlay = useNewsroomRhythmOverlay();
 
   useEffect(() => {
     let active = true;
@@ -144,27 +174,31 @@ function ProtectedNewsDeskWorkspace({ initialTab, initialSelection }: { initialT
   if (state.status === "ready" && state.dashboard) return <NewsDeskDashboard dashboard={state.dashboard} initialSelection={initialSelection} initialTab={initialTab} />;
 
   return (
-    <main className="category-steering-shell news-desk-shell" data-news-desk-access={state.status}>
-      <article className="news-desk-page news-desk-page--gate" aria-labelledby="news-desk-access-title">
-        <header className="masthead news-desk-masthead">
-          <div className="masthead__rule" />
-          <h1 id="news-desk-access-title">
-            <span>NEWSROOM</span>
-          </h1>
-          <div className="masthead__meta" aria-label="News desk edition status">
-            <span>Steering Section</span>
-            <span>Restricted Desk</span>
-            <span><ReaderAuthControl className="news-desk-auth-control" showIdentity /></span>
-          </div>
-        </header>
-        <section className="news-desk-access-panel" aria-live="polite">
-          <p className="story-label">Access</p>
-          <h2>{formatAccessTitle(state)}</h2>
-          <p>{formatAccessDetail(state)}</p>
-          {state.status === "error" ? <p className="news-desk-access-panel__error">{state.error}</p> : null}
-          <ReaderAuthControl className="news-desk-access-panel__auth" showIdentity />
-        </section>
-      </article>
+    <main className="site-shell news-desk-shell" data-news-desk-access={state.status} data-rhythm-overlay={showRhythmOverlay ? "true" : "false"}>
+      <section className="scroll-edition news-desk-edition">
+        <div className="paper-page paper-page--front paper-page--active">
+          <article className="paper-page-content paper-page-content--front news-desk-page news-desk-page--gate" aria-labelledby="news-desk-access-title">
+            <header className="masthead news-desk-masthead">
+              <div className="masthead__rule" />
+              <h1 id="news-desk-access-title">
+                <span>NEWSROOM</span>
+              </h1>
+              <div className="masthead__meta" aria-label="News desk edition status">
+                <span>Steering Section</span>
+                <span>Restricted Desk</span>
+                <span><ReaderAuthControl className="news-desk-auth-control" showIdentity /></span>
+              </div>
+            </header>
+            <section className="news-desk-access-panel" aria-live="polite">
+              <p className="story-label">Access</p>
+              <h2>{formatAccessTitle(state)}</h2>
+              <p>{formatAccessDetail(state)}</p>
+              {state.status === "error" ? <p className="news-desk-access-panel__error">{state.error}</p> : null}
+              <ReaderAuthControl className="news-desk-access-panel__auth" showIdentity />
+            </section>
+          </article>
+        </div>
+      </section>
     </main>
   );
 }
@@ -191,6 +225,7 @@ function NewsDeskDashboard({
   const [actionState, setActionState] = useState<ActionState | null>(null);
   const [mergeSelection, setMergeSelection] = useState<MergeSelection | null>(null);
   const [isPending, startTransition] = useTransition();
+  const showRhythmOverlay = useNewsroomRhythmOverlay();
 
   const categoryProposals = proposals.filter(isTailoredCategoryProposal);
   const genericProposals = proposals.filter((proposal) => !isTailoredCategoryProposal(proposal));
@@ -576,8 +611,10 @@ function NewsDeskDashboard({
   }
 
   return (
-    <main className="category-steering-shell news-desk-shell" data-news-desk data-category-steering data-category-steering-demo={dashboard.isDemo ? "true" : "false"}>
-      <article className="news-desk-page" aria-labelledby="news-desk-title">
+    <main className="site-shell news-desk-shell" data-news-desk data-category-steering data-category-steering-demo={dashboard.isDemo ? "true" : "false"} data-rhythm-overlay={showRhythmOverlay ? "true" : "false"}>
+      <section className="scroll-edition news-desk-edition">
+        <div className="paper-page paper-page--front paper-page--active">
+          <article className="paper-page-content paper-page-content--front news-desk-page" aria-labelledby="news-desk-title">
         <header className="masthead news-desk-masthead">
           <div className="masthead__rule" />
           <h1 id="news-desk-title">
@@ -703,7 +740,9 @@ function NewsDeskDashboard({
             onAction={runAssignmentAction}
           />
         ) : null}
-      </article>
+          </article>
+        </div>
+      </section>
     </main>
   );
 }

@@ -1531,24 +1531,28 @@ img {
   text-transform: uppercase;
 }
 
-.category-steering-shell {
+.news-desk-shell {
   --paper-rhythm: var(--edition-progress-height);
   background: var(--substrate);
   color: var(--ink);
   font-family: Georgia, "Times New Roman", serif;
   min-height: 100vh;
-  padding: clamp(12px, 2vw, 30px);
+}
+
+.news-desk-edition {
+  min-height: 100vh;
 }
 
 .news-desk-page {
-  background: var(--paper-page-background);
-  background-size: var(--paper-page-background-size);
-  box-shadow: var(--paper-drop-shadow);
-  margin: 0 auto;
+  --page-padding-bottom: calc(var(--paper-rhythm) * 3);
+  --page-padding-top: calc(var(--paper-rhythm) * 2);
+  --page-padding-x: clamp(24px, 4vw, 64px);
+
+  height: auto;
   max-width: none;
-  min-height: calc(100vh - clamp(12px, 2vw, 30px) * 2);
+  min-height: 100vh;
   min-width: 0;
-  padding: calc(var(--paper-rhythm) * 2) clamp(24px, 4vw, 64px) calc(var(--paper-rhythm) * 3);
+  overflow: visible;
   width: 100%;
 }
 
@@ -2928,8 +2932,7 @@ img {
 
 @media (max-width: 900px) {
   .news-desk-page {
-    padding-left: 18px;
-    padding-right: 18px;
+    --page-padding-x: 18px;
   }
 
   .news-desk-tabs,
@@ -3026,14 +3029,9 @@ img {
 }
 
 @media (max-width: 560px) {
-  .category-steering-shell {
-    padding: 8px;
-  }
-
   .news-desk-page {
-    min-height: calc(100vh - 16px);
-    padding-left: 16px;
-    padding-right: 16px;
+    --page-padding-x: 16px;
+    min-height: 100vh;
   }
 
   .news-desk-appendix h2 {
