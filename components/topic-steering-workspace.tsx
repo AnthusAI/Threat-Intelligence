@@ -149,7 +149,7 @@ function ProtectedNewsDeskWorkspace({ initialTab, initialSelection }: { initialT
         <header className="masthead news-desk-masthead">
           <div className="masthead__rule" />
           <h1 id="news-desk-access-title">
-            <span>NEWS DESK</span>
+            <span>NEWSROOM</span>
           </h1>
           <div className="masthead__meta" aria-label="News desk edition status">
             <span>Steering Section</span>
@@ -581,7 +581,7 @@ function NewsDeskDashboard({
         <header className="masthead news-desk-masthead">
           <div className="masthead__rule" />
           <h1 id="news-desk-title">
-            <span>NEWS DESK</span>
+            <span>NEWSROOM</span>
           </h1>
           <div className="masthead__meta" aria-label="News desk edition status">
             <span>Steering Section</span>
