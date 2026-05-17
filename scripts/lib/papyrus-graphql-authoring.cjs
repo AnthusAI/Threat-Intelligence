@@ -1,527 +1,111 @@
 const LIST_EDITIONS_QUERY = `
-  query ListEditionsByStatusAndEditionDate($status: String!, $limit: Int, $nextToken: String) {
-    listEditionsByStatusAndEditionDate(status: $status, limit: $limit, nextToken: $nextToken) {
-      items {
-        id
-        slug
-        title
-        editionDate
-        publishedAt
-        description
-      }
+  query ListPublishedEditionsByStatusAndEditionDate($status: String!, $limit: Int, $nextToken: String) {
+    listPublishedEditionsByStatusAndEditionDate(status: $status, limit: $limit, nextToken: $nextToken) {
+      items { id slug title editionDate publishedAt description }
       nextToken
     }
   }
 `;
 
 const LIST_ARTICLES_QUERY = `
-  query ListItemsByTypeStatusAndPublishedAt($typeStatus: String!, $limit: Int, $nextToken: String) {
-    listItemsByTypeStatusAndPublishedAt(typeStatus: $typeStatus, limit: $limit, nextToken: $nextToken) {
-      items {
-        id
-        slug
-        shortSlug
-        headline
-        title
-        publishedAt
-      }
+  query ListPublishedItemsByTypeStatusAndPublishedAt($typeStatus: String!, $limit: Int, $nextToken: String) {
+    listPublishedItemsByTypeStatusAndPublishedAt(typeStatus: $typeStatus, limit: $limit, nextToken: $nextToken) {
+      items { id slug shortSlug headline title publishedAt }
       nextToken
     }
   }
 `;
 
+const VERSION_FIELDS = "lineageId versionNumber previousVersionId versionState versionCreatedAt versionCreatedBy changeReason contentHash";
+const ITEM_FIELDS = `${VERSION_FIELDS} id type status typeStatus slug shortSlug section sectionStatus title headline deck body byline dateline publishedAt editionDate sortTitle pullQuotes layout editorial updatedAt`;
+const PUBLISHED_ITEM_FIELDS = "id sourceItemId itemLineageId versionNumber type status typeStatus slug shortSlug section sectionStatus title headline deck body byline dateline publishedAt editionDate sortTitle pullQuotes layout editorial";
+const MEDIA_FIELDS = "id itemId type role sortKey storagePath externalUrl alt caption credit width height aspectRatio focalX focalY minHeight preferredHeight maxHeight crop wrapsText metadata";
+const PUBLISHED_MEDIA_FIELDS = "id sourceMediaAssetId publishedItemId sourceItemId itemLineageId type role sortKey storagePath externalUrl alt caption credit width height aspectRatio focalX focalY minHeight preferredHeight maxHeight crop wrapsText metadata";
+const EDITION_FIELDS = `${VERSION_FIELDS} id slug title status editionDate publishedAt description layoutPlan metadata`;
+const PUBLISHED_EDITION_FIELDS = "id sourceEditionId editionLineageId versionNumber slug title status editionDate publishedAt description layoutPlan metadata";
+const EDITION_ITEM_FIELDS = "id editionId editionLineageId itemId itemLineageId placementKey sortKey pageNumber priority metadata";
+const PUBLISHED_EDITION_ITEM_FIELDS = "id publishedEditionId publishedItemId sourceEditionItemId sourceEditionId sourceItemId editionLineageId itemLineageId placementKey sortKey pageNumber priority metadata";
+const CATEGORY_SET_FIELDS = `${VERSION_FIELDS} id corpusId classifierId displayName description status generatedAt categoryCount importRunId`;
+const CATEGORY_FIELDS = `${VERSION_FIELDS} id categorySetId corpusId categoryKey parentCategoryId parentCategoryKey displayName subtitle description aliases status seedItemIds holdoutItemIds rank depth isPinned importRunId updatedAt`;
+const PROPOSAL_FIELDS = "id categorySetId corpusId importRunId proposalKind steeringDomain status title summary categoryKey targetCategoryKey graphEntityId relationshipType displayName subtitle description evidenceItemIds suggestedSeedItemIds suggestedHoldoutItemIds sourceSnapshotId proposedAt reviewedAt reviewedBy updatedAt";
+const DECISION_FIELDS = "id proposalId categorySetId action actorSub actorLabel note selectedCategoryKey createdAt";
+
 const LIST_RECORDS = {
-  Edition: {
-    field: "listEditions",
-    query: `
-      query ListEditions($limit: Int, $nextToken: String) {
-        listEditions(limit: $limit, nextToken: $nextToken) {
-          items { id slug title }
-          nextToken
-        }
-      }
-    `,
-  },
-  EditionItem: {
-    field: "listEditionItems",
-    query: `
-      query ListEditionItems($limit: Int, $nextToken: String) {
-        listEditionItems(limit: $limit, nextToken: $nextToken) {
-          items { id editionId itemId sortKey }
-          nextToken
-        }
-      }
-    `,
-  },
-  Item: {
-    field: "listItems",
-    query: `
-      query ListItems($limit: Int, $nextToken: String) {
-        listItems(limit: $limit, nextToken: $nextToken) {
-          items { id slug shortSlug type status headline title }
-          nextToken
-        }
-      }
-    `,
-  },
-  ItemTag: {
-    field: "listItemTags",
-    query: `
-      query ListItemTags($limit: Int, $nextToken: String) {
-        listItemTags(limit: $limit, nextToken: $nextToken) {
-          items { id itemId tagId }
-          nextToken
-        }
-      }
-    `,
-  },
-  MediaAsset: {
-    field: "listMediaAssets",
-    query: `
-      query ListMediaAssets($limit: Int, $nextToken: String) {
-        listMediaAssets(limit: $limit, nextToken: $nextToken) {
-          items { id itemId type role }
-          nextToken
-        }
-      }
-    `,
-  },
-  Tag: {
-    field: "listTags",
-    query: `
-      query ListTags($limit: Int, $nextToken: String) {
-        listTags(limit: $limit, nextToken: $nextToken) {
-          items { id slug label type }
-          nextToken
-        }
-      }
-    `,
-  },
-  CurationCorpus: {
-    field: "listCurationCorpuses",
-    query: `
-      query ListCurationCorpora($limit: Int, $nextToken: String) {
-        listCurationCorpuses(limit: $limit, nextToken: $nextToken) {
-          items { id name role itemCount generatedAt latestImportRunId }
-          nextToken
-        }
-      }
-    `,
-  },
-  CurationImportRun: {
-    field: "listCurationImportRuns",
-    query: `
-      query ListCurationImportRuns($limit: Int, $nextToken: String) {
-        listCurationImportRuns(limit: $limit, nextToken: $nextToken) {
-          items { id corpusId importKind classifierId status importedAt itemCount topicCount proposalCount artifactCount projectionCount warningCount }
-          nextToken
-        }
-      }
-    `,
-  },
-  CurationRawPayload: {
-    field: "listCurationRawPayloads",
-    query: `
-      query ListCurationRawPayloads($limit: Int, $nextToken: String) {
-        listCurationRawPayloads(limit: $limit, nextToken: $nextToken) {
-          items { id ownerType ownerId payloadKind importRunId }
-          nextToken
-        }
-      }
-    `,
-  },
-  CurationArtifact: {
-    field: "listCurationArtifacts",
-    query: `
-      query ListCurationArtifacts($limit: Int, $nextToken: String) {
-        listCurationArtifacts(limit: $limit, nextToken: $nextToken) {
-          items { id corpusId artifactKind artifactId snapshotId displayName createdAt importRunId }
-          nextToken
-        }
-      }
-    `,
-  },
-  CurationTopicSet: {
-    field: "listCurationTopicSets",
-    query: `
-      query ListCurationTopicSets($limit: Int, $nextToken: String) {
-        listCurationTopicSets(limit: $limit, nextToken: $nextToken) {
-          items { id corpusId classifierId displayName description status acceptedRevisionId latestDraftRevisionId generatedAt topicCount importRunId }
-          nextToken
-        }
-      }
-    `,
-  },
-  CurationTopic: {
-    field: "listCurationTopics",
-    query: `
-      query ListCurationTopics($limit: Int, $nextToken: String) {
-        listCurationTopics(limit: $limit, nextToken: $nextToken) {
-          items { id topicSetId corpusId topicUid displayName subtitle description aliases status seedItemIds holdoutItemIds rank isPinned importRunId updatedAt }
-          nextToken
-        }
-      }
-    `,
-  },
-  CurationTaxonomy: {
-    field: "listCurationTaxonomies",
-    query: `
-      query ListCurationTaxonomies($limit: Int, $nextToken: String) {
-        listCurationTaxonomies(limit: $limit, nextToken: $nextToken) {
-          items { id corpusId topicSetId taxonomyId displayName description status snapshotId generatedAt nodeCount rootCount importRunId createdAt updatedAt }
-          nextToken
-        }
-      }
-    `,
-  },
-  CurationTaxonomyNode: {
-    field: "listCurationTaxonomyNodes",
-    query: `
-      query ListCurationTaxonomyNodes($limit: Int, $nextToken: String) {
-        listCurationTaxonomyNodes(limit: $limit, nextToken: $nextToken) {
-          items { id taxonomyId corpusId topicSetId topicUid parentTopicUid displayName subtitle description status seedItemIds holdoutItemIds rank depth importRunId updatedAt }
-          nextToken
-        }
-      }
-    `,
-  },
-  CurationTopicRevision: {
-    field: "listCurationTopicRevisions",
-    query: `
-      query ListCurationTopicRevisions($limit: Int, $nextToken: String) {
-        listCurationTopicRevisions(limit: $limit, nextToken: $nextToken) {
-          items { id topicSetId corpusId revisionKind status contentHash sourceImportRunId sourceDecisionId topicCount createdAt acceptedAt acceptedBy }
-          nextToken
-        }
-      }
-    `,
-  },
-  CurationProposal: {
-    field: "listCurationProposals",
-    query: `
-      query ListCurationProposals($limit: Int, $nextToken: String) {
-        listCurationProposals(limit: $limit, nextToken: $nextToken) {
-          items { id topicSetId corpusId importRunId proposalKind steeringDomain status title summary topicUid targetTopicUid graphEntityId relationshipType displayName subtitle description evidenceItemIds suggestedSeedItemIds suggestedHoldoutItemIds sourceSnapshotId proposedAt reviewedAt reviewedBy updatedAt }
-          nextToken
-        }
-      }
-    `,
-  },
-  CurationDecision: {
-    field: "listCurationDecisions",
-    query: `
-      query ListCurationDecisions($limit: Int, $nextToken: String) {
-        listCurationDecisions(limit: $limit, nextToken: $nextToken) {
-          items { id proposalId topicSetId action actorSub actorLabel note selectedTopicUid createdAt }
-          nextToken
-        }
-      }
-    `,
-  },
-  CurationProjection: {
-    field: "listCurationProjections",
-    query: `
-      query ListCurationProjections($limit: Int, $nextToken: String) {
-        listCurationProjections(limit: $limit, nextToken: $nextToken) {
-          items { id targetCorpusId authorityCorpusId classifierId modelVersion externalItemId topicUid displayName score reviewRecommended importedAt importRunId }
-          nextToken
-        }
-      }
-    `,
-  },
+  Edition: listDefinition("listEditions", EDITION_FIELDS),
+  EditionItem: listDefinition("listEditionItems", EDITION_ITEM_FIELDS),
+  Item: listDefinition("listItems", ITEM_FIELDS),
+  ItemTag: listDefinition("listItemTags", "id itemId tagId itemType itemStatus tagSlug publishedAt"),
+  MediaAsset: listDefinition("listMediaAssets", MEDIA_FIELDS),
+  Tag: listDefinition("listTags", "id slug label type description"),
+  PublishedEdition: listDefinition("listPublishedEditions", PUBLISHED_EDITION_FIELDS),
+  PublishedEditionItem: listDefinition("listPublishedEditionItems", PUBLISHED_EDITION_ITEM_FIELDS),
+  PublishedItem: listDefinition("listPublishedItems", PUBLISHED_ITEM_FIELDS),
+  PublishedMediaAsset: listDefinition("listPublishedMediaAssets", PUBLISHED_MEDIA_FIELDS),
+  PublishedCategorySet: listDefinition("listPublishedCategorySets", "id sourceCategorySetId categorySetLineageId versionNumber corpusId classifierId displayName description status generatedAt publishedAt categoryCount metadata"),
+  PublishedCategory: listDefinition("listPublishedCategories", "id sourceCategoryId publishedCategorySetId categoryLineageId categorySetLineageId versionNumber corpusId categoryKey parentCategoryId parentCategoryKey displayName subtitle description aliases status seedItemIds holdoutItemIds rank depth isPinned metadata"),
+  CategoryCorpus: listDefinition("listCategoryCorpuses", "id name role itemCount generatedAt latestImportRunId createdAt updatedAt"),
+  CategoryImportRun: listDefinition("listCategoryImportRuns", "id corpusId importKind classifierId status importedAt itemCount categoryCount proposalCount artifactCount projectionCount warningCount"),
+  CategoryRawPayload: listDefinition("listCategoryRawPayloads", "id ownerType ownerId payloadKind importRunId"),
+  CategoryArtifact: listDefinition("listCategoryArtifacts", "id corpusId artifactKind artifactId snapshotId displayName createdAt importRunId"),
+  CategorySet: listDefinition("listCategorySets", CATEGORY_SET_FIELDS),
+  Category: listDefinition("listCategories", CATEGORY_FIELDS),
+  CategoryProposal: listDefinition("listCategoryProposals", PROPOSAL_FIELDS),
+  CategoryDecision: listDefinition("listCategoryDecisions", DECISION_FIELDS),
+  CategoryProjection: listDefinition("listCategoryProjections", "id targetCorpusId authorityCorpusId classifierId modelVersion externalItemId categoryKey displayName score reviewRecommended importedAt importRunId"),
 };
 
 const GETTERS = {
-  Edition: {
-    field: "getEdition",
-    query: `
-      query GetEdition($id: ID!) {
-        getEdition(id: $id) {
-          id
-          slug
-          title
-          status
-          editionDate
-          publishedAt
-          description
-          layoutPlan
-          metadata
-        }
-      }
-    `,
-  },
-  Item: {
-    field: "getItem",
-    query: `
-      query GetItem($id: ID!) {
-        getItem(id: $id) {
-          id
-          type
-          status
-          typeStatus
-          slug
-          shortSlug
-          section
-          sectionStatus
-          title
-          headline
-          deck
-          body
-          byline
-          dateline
-          publishedAt
-          editionDate
-          sortTitle
-          pullQuotes
-          layout
-          editorial
-        }
-      }
-    `,
-  },
-  Tag: {
-    field: "getTag",
-    query: `
-      query GetTag($id: ID!) {
-        getTag(id: $id) {
-          id
-          slug
-          label
-          type
-          description
-        }
-      }
-    `,
-  },
-  ItemTag: {
-    field: "getItemTag",
-    query: `
-      query GetItemTag($id: ID!) {
-        getItemTag(id: $id) {
-          id
-          itemId
-          tagId
-          itemType
-          itemStatus
-          tagSlug
-          publishedAt
-        }
-      }
-    `,
-  },
-  MediaAsset: {
-    field: "getMediaAsset",
-    query: `
-      query GetMediaAsset($id: ID!) {
-        getMediaAsset(id: $id) {
-          id
-          itemId
-          type
-          role
-          sortKey
-          storagePath
-          externalUrl
-          alt
-          caption
-          credit
-          width
-          height
-          aspectRatio
-          focalX
-          focalY
-          minHeight
-          preferredHeight
-          maxHeight
-          crop
-          wrapsText
-          metadata
-        }
-      }
-    `,
-  },
-  EditionItem: {
-    field: "getEditionItem",
-    query: `
-      query GetEditionItem($id: ID!) {
-        getEditionItem(id: $id) {
-          id
-          editionId
-          itemId
-          placementKey
-          sortKey
-          pageNumber
-          priority
-          metadata
-        }
-      }
-    `,
-  },
-  CurationCorpus: {
-    field: "getCurationCorpus",
-    query: `query GetCurationCorpus($id: ID!) { getCurationCorpus(id: $id) { id name role itemCount generatedAt latestImportRunId createdAt updatedAt } }`,
-  },
-  CurationImportRun: {
-    field: "getCurationImportRun",
-    query: `query GetCurationImportRun($id: ID!) { getCurationImportRun(id: $id) { id corpusId importKind classifierId sourceSnapshotId status generatedAt importedAt itemCount topicCount proposalCount artifactCount projectionCount warningCount } }`,
-  },
-  CurationRawPayload: {
-    field: "getCurationRawPayload",
-    query: `query GetCurationRawPayload($id: ID!) { getCurationRawPayload(id: $id) { id ownerType ownerId payloadKind importRunId payload createdAt updatedAt } }`,
-  },
-  CurationArtifact: {
-    field: "getCurationArtifact",
-    query: `query GetCurationArtifact($id: ID!) { getCurationArtifact(id: $id) { id corpusId artifactKind artifactId snapshotId displayName createdAt importRunId } }`,
-  },
-  CurationTopicSet: {
-    field: "getCurationTopicSet",
-    query: `query GetCurationTopicSet($id: ID!) { getCurationTopicSet(id: $id) { id corpusId classifierId displayName description status acceptedRevisionId latestDraftRevisionId generatedAt topicCount importRunId } }`,
-  },
-  CurationTopic: {
-    field: "getCurationTopic",
-    query: `query GetCurationTopic($id: ID!) { getCurationTopic(id: $id) { id topicSetId corpusId topicUid displayName subtitle description aliases status seedItemIds holdoutItemIds rank isPinned importRunId updatedAt } }`,
-  },
-  CurationTaxonomy: {
-    field: "getCurationTaxonomy",
-    query: `query GetCurationTaxonomy($id: ID!) { getCurationTaxonomy(id: $id) { id corpusId topicSetId taxonomyId displayName description status snapshotId generatedAt nodeCount rootCount importRunId createdAt updatedAt } }`,
-  },
-  CurationTaxonomyNode: {
-    field: "getCurationTaxonomyNode",
-    query: `query GetCurationTaxonomyNode($id: ID!) { getCurationTaxonomyNode(id: $id) { id taxonomyId corpusId topicSetId topicUid parentTopicUid displayName subtitle description status seedItemIds holdoutItemIds rank depth importRunId updatedAt } }`,
-  },
-  CurationTopicRevision: {
-    field: "getCurationTopicRevision",
-    query: `query GetCurationTopicRevision($id: ID!) { getCurationTopicRevision(id: $id) { id topicSetId corpusId revisionKind status contentHash sourceImportRunId sourceDecisionId topicCount createdAt acceptedAt acceptedBy } }`,
-  },
-  CurationProposal: {
-    field: "getCurationProposal",
-    query: `query GetCurationProposal($id: ID!) { getCurationProposal(id: $id) { id topicSetId corpusId importRunId proposalKind steeringDomain status title summary topicUid targetTopicUid graphEntityId relationshipType displayName subtitle description evidenceItemIds suggestedSeedItemIds suggestedHoldoutItemIds sourceSnapshotId proposedAt reviewedAt reviewedBy updatedAt } }`,
-  },
-  CurationDecision: {
-    field: "getCurationDecision",
-    query: `query GetCurationDecision($id: ID!) { getCurationDecision(id: $id) { id proposalId topicSetId action actorSub actorLabel note selectedTopicUid createdAt } }`,
-  },
-  CurationProjection: {
-    field: "getCurationProjection",
-    query: `query GetCurationProjection($id: ID!) { getCurationProjection(id: $id) { id targetCorpusId authorityCorpusId classifierId modelVersion externalItemId topicUid displayName score reviewRecommended importedAt importRunId } }`,
-  },
+  Edition: getDefinition("getEdition", EDITION_FIELDS),
+  EditionItem: getDefinition("getEditionItem", EDITION_ITEM_FIELDS),
+  Item: getDefinition("getItem", ITEM_FIELDS),
+  ItemTag: getDefinition("getItemTag", "id itemId tagId itemType itemStatus tagSlug publishedAt"),
+  MediaAsset: getDefinition("getMediaAsset", MEDIA_FIELDS),
+  Tag: getDefinition("getTag", "id slug label type description"),
+  PublishedEdition: getDefinition("getPublishedEdition", PUBLISHED_EDITION_FIELDS),
+  PublishedEditionItem: getDefinition("getPublishedEditionItem", PUBLISHED_EDITION_ITEM_FIELDS),
+  PublishedItem: getDefinition("getPublishedItem", PUBLISHED_ITEM_FIELDS),
+  PublishedMediaAsset: getDefinition("getPublishedMediaAsset", PUBLISHED_MEDIA_FIELDS),
+  PublishedCategorySet: getDefinition("getPublishedCategorySet", "id sourceCategorySetId categorySetLineageId versionNumber corpusId classifierId displayName description status generatedAt publishedAt categoryCount metadata"),
+  PublishedCategory: getDefinition("getPublishedCategory", "id sourceCategoryId publishedCategorySetId categoryLineageId categorySetLineageId versionNumber corpusId categoryKey parentCategoryId parentCategoryKey displayName subtitle description aliases status seedItemIds holdoutItemIds rank depth isPinned metadata"),
+  CategoryCorpus: getDefinition("getCategoryCorpus", "id name role itemCount generatedAt latestImportRunId createdAt updatedAt"),
+  CategoryImportRun: getDefinition("getCategoryImportRun", "id corpusId importKind classifierId sourceSnapshotId status generatedAt importedAt itemCount categoryCount proposalCount artifactCount projectionCount warningCount"),
+  CategoryRawPayload: getDefinition("getCategoryRawPayload", "id ownerType ownerId payloadKind importRunId payload createdAt updatedAt"),
+  CategoryArtifact: getDefinition("getCategoryArtifact", "id corpusId artifactKind artifactId snapshotId displayName createdAt importRunId"),
+  CategorySet: getDefinition("getCategorySet", CATEGORY_SET_FIELDS),
+  Category: getDefinition("getCategory", CATEGORY_FIELDS),
+  CategoryProposal: getDefinition("getCategoryProposal", PROPOSAL_FIELDS),
+  CategoryDecision: getDefinition("getCategoryDecision", DECISION_FIELDS),
+  CategoryProjection: getDefinition("getCategoryProjection", "id targetCorpusId authorityCorpusId classifierId modelVersion externalItemId categoryKey displayName score reviewRecommended importedAt importRunId"),
 };
 
-const MUTATIONS = {
-  Edition: {
-    create: `
-      mutation CreateEdition($input: CreateEditionInput!) {
-        createEdition(input: $input) { id }
+const MUTATIONS = Object.fromEntries(Object.keys(GETTERS).map((modelName) => [modelName, modelMutations(modelName)]));
+
+function listDefinition(field, fields) {
+  const modelName = field.replace(/^list/, "").replace(/s$/, "");
+  return {
+    field,
+    query: `
+      query ${field[0].toUpperCase()}${field.slice(1)}($limit: Int, $nextToken: String) {
+        ${field}(limit: $limit, nextToken: $nextToken) {
+          items { ${fields} }
+          nextToken
+        }
       }
     `,
-    update: `
-      mutation UpdateEdition($input: UpdateEditionInput!) {
-        updateEdition(input: $input) { id }
+    modelName,
+  };
+}
+
+function getDefinition(field, fields) {
+  return {
+    field,
+    query: `
+      query ${field[0].toUpperCase()}${field.slice(1)}($id: ID!) {
+        ${field}(id: $id) { ${fields} }
       }
     `,
-    delete: `
-      mutation DeleteEdition($input: DeleteEditionInput!) {
-        deleteEdition(input: $input) { id }
-      }
-    `,
-  },
-  Item: {
-    create: `
-      mutation CreateItem($input: CreateItemInput!) {
-        createItem(input: $input) { id }
-      }
-    `,
-    update: `
-      mutation UpdateItem($input: UpdateItemInput!) {
-        updateItem(input: $input) { id }
-      }
-    `,
-    delete: `
-      mutation DeleteItem($input: DeleteItemInput!) {
-        deleteItem(input: $input) { id }
-      }
-    `,
-  },
-  Tag: {
-    create: `
-      mutation CreateTag($input: CreateTagInput!) {
-        createTag(input: $input) { id }
-      }
-    `,
-    update: `
-      mutation UpdateTag($input: UpdateTagInput!) {
-        updateTag(input: $input) { id }
-      }
-    `,
-    delete: `
-      mutation DeleteTag($input: DeleteTagInput!) {
-        deleteTag(input: $input) { id }
-      }
-    `,
-  },
-  ItemTag: {
-    create: `
-      mutation CreateItemTag($input: CreateItemTagInput!) {
-        createItemTag(input: $input) { id }
-      }
-    `,
-    update: `
-      mutation UpdateItemTag($input: UpdateItemTagInput!) {
-        updateItemTag(input: $input) { id }
-      }
-    `,
-    delete: `
-      mutation DeleteItemTag($input: DeleteItemTagInput!) {
-        deleteItemTag(input: $input) { id }
-      }
-    `,
-  },
-  MediaAsset: {
-    create: `
-      mutation CreateMediaAsset($input: CreateMediaAssetInput!) {
-        createMediaAsset(input: $input) { id }
-      }
-    `,
-    update: `
-      mutation UpdateMediaAsset($input: UpdateMediaAssetInput!) {
-        updateMediaAsset(input: $input) { id }
-      }
-    `,
-    delete: `
-      mutation DeleteMediaAsset($input: DeleteMediaAssetInput!) {
-        deleteMediaAsset(input: $input) { id }
-      }
-    `,
-  },
-  EditionItem: {
-    create: `
-      mutation CreateEditionItem($input: CreateEditionItemInput!) {
-        createEditionItem(input: $input) { id }
-      }
-    `,
-    update: `
-      mutation UpdateEditionItem($input: UpdateEditionItemInput!) {
-        updateEditionItem(input: $input) { id }
-      }
-    `,
-    delete: `
-      mutation DeleteEditionItem($input: DeleteEditionItemInput!) {
-        deleteEditionItem(input: $input) { id }
-      }
-    `,
-  },
-  CurationCorpus: modelMutations("CurationCorpus"),
-  CurationImportRun: modelMutations("CurationImportRun"),
-  CurationRawPayload: modelMutations("CurationRawPayload"),
-  CurationArtifact: modelMutations("CurationArtifact"),
-  CurationTopicSet: modelMutations("CurationTopicSet"),
-  CurationTopic: modelMutations("CurationTopic"),
-  CurationTaxonomy: modelMutations("CurationTaxonomy"),
-  CurationTaxonomyNode: modelMutations("CurationTaxonomyNode"),
-  CurationTopicRevision: modelMutations("CurationTopicRevision"),
-  CurationProposal: modelMutations("CurationProposal"),
-  CurationDecision: modelMutations("CurationDecision"),
-  CurationProjection: modelMutations("CurationProjection"),
-};
+  };
+}
 
 function modelMutations(modelName) {
   return {
@@ -563,7 +147,7 @@ class PapyrusGraphQLAuthoringClient {
         limit: 100,
         nextToken,
       });
-      const connection = result.listItemsByTypeStatusAndPublishedAt;
+      const connection = result.listPublishedItemsByTypeStatusAndPublishedAt;
       items.push(...(connection?.items ?? []));
       nextToken = connection?.nextToken ?? null;
     } while (nextToken);
@@ -593,6 +177,7 @@ class PapyrusGraphQLAuthoringClient {
 
   async getRecord(modelName, id) {
     const definition = GETTERS[modelName];
+    if (!definition) throw new Error(`Unsupported model for get: ${modelName}`);
     const result = await this.graphql(definition.query, { id });
     return result[definition.field] ?? null;
   }

@@ -45,17 +45,17 @@ function buildSteeringImportRecords(bundle, options = {}) {
   const now = options.importedAt ?? new Date().toISOString();
   const corpus = bundle.corpus ?? {};
   const corpusContext = normalizeCorpusContext(corpus, options.corpusConfig ?? options.corpus);
-  const corpusId = options.corpusId ?? curationCorpusId(corpusContext);
+  const corpusId = options.corpusId ?? categoryCorpusId(corpusContext);
   const classifierId = bundle.topic_set?.classifier_id ?? options.classifierId ?? "unknown-classifier";
-  const importRunId = `curation-import-${safeId(corpusId)}-${safeId(classifierId)}-${hashShort([
+  const importRunId = `category-import-${safeId(corpusId)}-${safeId(classifierId)}-${hashShort([
     bundle.generated_at,
     bundle.proposals?.length ?? 0,
     bundle.artifacts?.length ?? 0,
   ])}`;
-  const topicSetId = curationTopicSetId(classifierId, corpusId);
+  const categorySetId = categorySetIdFor(classifierId, corpusId);
   const records = [];
 
-  records.push(record("CurationCorpus", {
+  records.push(record("CategoryCorpus", {
     id: corpusId,
     name: corpusContext.name,
     role: corpusContext.role,
@@ -67,7 +67,7 @@ function buildSteeringImportRecords(bundle, options = {}) {
   }));
   records.push(rawPayloadRecord("corpus", corpusId, "biblicus-corpus", corpus, importRunId, now));
 
-  records.push(record("CurationImportRun", {
+  records.push(record("CategoryImportRun", {
     id: importRunId,
     corpusId,
     importKind: "steering-export",
@@ -77,7 +77,7 @@ function buildSteeringImportRecords(bundle, options = {}) {
     generatedAt: dateOrNull(bundle.generated_at),
     importedAt: now,
     itemCount: bundle.items?.length ?? 0,
-    topicCount: bundle.topic_set?.topics?.length ?? 0,
+      categoryCount: bundle.topic_set?.topics?.length ?? 0,
     proposalCount: bundle.proposals?.length ?? 0,
     artifactCount: bundle.artifacts?.length ?? 0,
     projectionCount: 0,
@@ -86,13 +86,13 @@ function buildSteeringImportRecords(bundle, options = {}) {
   records.push(rawPayloadRecord("importRun", importRunId, "warnings", { warnings: bundle.warnings ?? [] }, importRunId, now));
 
   if (bundle.topic_set) {
-    records.push(...topicSetRecords(bundle.topic_set, { corpusId, importRunId, topicSetId, now, generatedAt: bundle.generated_at }));
+    records.push(...categorySetRecords(bundle.topic_set, { corpusId, importRunId, categorySetId, now, generatedAt: bundle.generated_at }));
     records.push(...taxonomyRecords(bundle, {
       corpusId,
       corpusPath: options.corpusPath ?? options.corpusConfig?.path ?? options.corpus?.path ?? null,
       importRunId,
       now,
-      topicSetId,
+      categorySetId,
     }));
   }
 
@@ -101,13 +101,13 @@ function buildSteeringImportRecords(bundle, options = {}) {
   }
 
   for (const proposal of bundle.proposals ?? []) {
-    records.push(...proposalRecords(proposal, { corpusId, importRunId, topicSetId, now }));
+    records.push(...proposalRecords(proposal, { corpusId, importRunId, categorySetId, now }));
   }
 
   return {
     corpusId,
     importRunId,
-    topicSetId,
+    categorySetId,
     records,
   };
 }
@@ -124,12 +124,12 @@ function buildProjectionImportRecords(payload, options = {}) {
     name: corpusNameFromUri(firstItem.classifier_corpus_uri),
     corpus_uri: firstItem.classifier_corpus_uri,
   }, options.authorityCorpusConfig ?? options.authorityCorpus, { role: "canonical" });
-  const targetCorpusId = options.targetCorpusId ?? curationCorpusId(targetCorpus);
-  const authorityCorpusId = options.authorityCorpusId ?? curationCorpusId(authorityCorpus);
+  const targetCorpusId = options.targetCorpusId ?? categoryCorpusId(targetCorpus);
+  const authorityCorpusId = options.authorityCorpusId ?? categoryCorpusId(authorityCorpus);
   const classifierId = payload.classifier_id ?? firstItem.classifier_id ?? options.classifierId ?? "unknown-classifier";
-  const importRunId = `curation-import-${safeId(targetCorpusId)}-${safeId(classifierId)}-projection-${hashShort(payload.summary ?? items)}`;
+  const importRunId = `category-import-${safeId(targetCorpusId)}-${safeId(classifierId)}-projection-${hashShort(payload.summary ?? items)}`;
   const records = [
-    record("CurationCorpus", {
+    record("CategoryCorpus", {
       id: targetCorpusId,
       name: targetCorpus.name,
       role: targetCorpus.role,
@@ -139,7 +139,7 @@ function buildProjectionImportRecords(payload, options = {}) {
       createdAt: now,
       updatedAt: now,
     }),
-    record("CurationImportRun", {
+    record("CategoryImportRun", {
       id: importRunId,
       corpusId: targetCorpusId,
       importKind: "topic-projection",
@@ -149,7 +149,7 @@ function buildProjectionImportRecords(payload, options = {}) {
       generatedAt: null,
       importedAt: now,
       itemCount: 0,
-      topicCount: 0,
+      categoryCount: 0,
       proposalCount: 0,
       artifactCount: 0,
       projectionCount: items.length,
@@ -161,14 +161,14 @@ function buildProjectionImportRecords(payload, options = {}) {
   for (const item of items) {
     const externalItemId = requiredString(item.item_id, "projection item_id");
     const projectionId = `projection-${safeId(targetCorpusId)}-${safeId(classifierId)}-${safeId(externalItemId)}-${hashShort(item.model_version ?? "")}`;
-    records.push(record("CurationProjection", {
+    records.push(record("CategoryProjection", {
       id: projectionId,
       targetCorpusId,
       authorityCorpusId,
       classifierId,
       modelVersion: item.model_version ?? null,
       externalItemId,
-      topicUid: item.topic_uid ?? null,
+      categoryKey: item.category_key ?? item.topic_uid ?? null,
       displayName: item.display_name ?? null,
       score: numberOrNull(item.score),
       reviewRecommended: Boolean(item.review_recommended),
@@ -183,8 +183,8 @@ function buildProjectionImportRecords(payload, options = {}) {
 
 function buildSteeringConfigRecords(config, options = {}) {
   const now = options.importedAt ?? new Date().toISOString();
-  return (config.corpora ?? []).map((corpus) => record("CurationCorpus", {
-    id: curationCorpusId(corpus),
+  return (config.corpora ?? []).map((corpus) => record("CategoryCorpus", {
+    id: categoryCorpusId(corpus),
     name: corpus.name,
     role: corpus.role,
     createdAt: now,
@@ -192,19 +192,19 @@ function buildSteeringConfigRecords(config, options = {}) {
   }));
 }
 
-function buildAcceptedTopicSetPayload(topicSet, topics) {
+function buildAcceptedCategorySetPayload(categorySet, topics) {
   const sortedTopics = [...topics].sort((left, right) => {
     const rankDiff = (left.rank ?? 999999) - (right.rank ?? 999999);
     if (rankDiff !== 0) return rankDiff;
-    return String(left.topicUid).localeCompare(String(right.topicUid));
+    return String(left.categoryKey).localeCompare(String(right.categoryKey));
   });
   return {
     schema_version: 1,
-    classifier_id: requiredString(topicSet.classifierId, "topicSet.classifierId"),
-    display_name: requiredString(topicSet.displayName, "topicSet.displayName"),
-    description: topicSet.description ?? "",
+    classifier_id: requiredString(categorySet.classifierId, "categorySet.classifierId"),
+    display_name: requiredString(categorySet.displayName, "categorySet.displayName"),
+    description: categorySet.description ?? "",
     topics: sortedTopics.map((topic) => ({
-      topic_uid: requiredString(topic.topicUid, "topic.topicUid"),
+      category_key: requiredString(topic.categoryKey, "topic.categoryKey"),
       display_name: requiredString(topic.displayName, "topic.displayName"),
       description: topic.description ?? "",
       seed_item_ids: compactArray(topic.seedItemIds),
@@ -220,7 +220,7 @@ function buildAcceptedTopicSetPayload(topicSet, topics) {
   };
 }
 
-function buildAcceptedTaxonomyPayload(taxonomy, nodes) {
+function buildAcceptedCategoryTreePayload(taxonomy, nodes) {
   const sortedNodes = sortTaxonomyNodes(nodes);
   return {
     schema_version: 1,
@@ -230,34 +230,34 @@ function buildAcceptedTaxonomyPayload(taxonomy, nodes) {
     generated_at: taxonomy.generatedAt ?? taxonomy.updatedAt ?? taxonomy.createdAt ?? new Date().toISOString(),
     ...(taxonomy.snapshotId ? { snapshot_id: taxonomy.snapshotId } : {}),
     nodes: sortedNodes.map((node) => ({
-      topic_uid: requiredString(node.topicUid, "node.topicUid"),
-      parent_topic_uid: node.parentTopicUid ?? null,
+      category_key: requiredString(node.categoryKey, "node.categoryKey"),
+      parent_category_key: node.parentCategoryKey ?? null,
       display_name: requiredString(node.displayName, "node.displayName"),
       description: node.description ?? node.subtitle ?? "",
       status: node.status === "archived" ? "archived" : "accepted",
       seed_item_ids: compactArray(node.seedItemIds),
       holdout_item_ids: compactArray(node.holdoutItemIds),
       source: {
-        papyrus_taxonomy_id: taxonomy.id,
-        papyrus_taxonomy_node_id: node.id,
+        papyrus_category_set_id: taxonomy.id,
+        papyrus_category_id: node.id,
       },
     })),
     source: {
       system: "papyrus",
-      topic_set_id: taxonomy.topicSetId,
+      category_set_id: taxonomy.categorySetId ?? taxonomy.id,
       corpus_id: taxonomy.corpusId,
     },
   };
 }
 
-function buildSteeringFeedbackPayload(topicSet, proposals, decisions, options = {}) {
+function buildSteeringFeedbackPayload(categorySet, proposals, decisions, options = {}) {
   const generatedAt = options.generatedAt ?? new Date().toISOString();
   const inScopeProposals = proposals
-    .filter((proposal) => proposal.topicSetId === topicSet.id)
+    .filter((proposal) => proposal.categorySetId === categorySet.id)
     .sort(compareById);
   const proposalIds = new Set(inScopeProposals.map((proposal) => proposal.id));
   const inScopeDecisions = decisions
-    .filter((decision) => proposalIds.has(decision.proposalId) || decision.topicSetId === topicSet.id)
+    .filter((decision) => proposalIds.has(decision.proposalId) || decision.categorySetId === categorySet.id)
     .sort(compareByCreatedAt);
   const latestDecisionByProposalId = new Map();
   for (const decision of inScopeDecisions) {
@@ -277,21 +277,21 @@ function buildSteeringFeedbackPayload(topicSet, proposals, decisions, options = 
     generated_at: generatedAt,
     source: {
       system: "papyrus",
-      topic_set_id: topicSet.id,
-      corpus_id: topicSet.corpusId ?? null,
-      classifier_id: topicSet.classifierId ?? null,
+      category_set_id: categorySet.id,
+      corpus_id: categorySet.corpusId ?? null,
+      classifier_id: categorySet.classifierId ?? null,
     },
-    topic_set: {
-      topic_set_id: topicSet.id,
-      corpus_id: topicSet.corpusId ?? null,
-      classifier_id: topicSet.classifierId ?? null,
-      display_name: topicSet.displayName ?? null,
-      description: topicSet.description ?? null,
+    category_set: {
+      category_set_id: categorySet.id,
+      corpus_id: categorySet.corpusId ?? null,
+      classifier_id: categorySet.classifierId ?? null,
+      display_name: categorySet.displayName ?? null,
+      description: categorySet.description ?? null,
     },
     decisions: inScopeDecisions.map(decisionFeedbackRecord),
     accepted_proposals: acceptedProposals,
     rejected_proposals: rejectedProposals,
-    suppressions: rejectedProposals.map((proposal) => suppressionFromRejectedProposal(proposal, topicSet)),
+    suppressions: rejectedProposals.map((proposal) => suppressionFromRejectedProposal(proposal, categorySet)),
   };
 }
 
@@ -306,10 +306,10 @@ function reviewedProposalFeedback(proposal, decision) {
     decided_at: decision?.createdAt ?? proposal.reviewedAt ?? proposal.updatedAt ?? null,
     decided_by: decision?.actorLabel ?? proposal.reviewedBy ?? decision?.actorSub ?? null,
     decision_id: decision?.id ?? null,
-    topic_set_id: proposal.topicSetId ?? null,
+    category_set_id: proposal.categorySetId ?? null,
     corpus_id: proposal.corpusId ?? null,
-    topic_uid: proposal.topicUid ?? null,
-    target_topic_uid: proposal.targetTopicUid ?? null,
+    category_key: proposal.categoryKey ?? null,
+    target_category_key: proposal.targetCategoryKey ?? null,
     graph_entity_id: proposal.graphEntityId ?? null,
     relationship_type: proposal.relationshipType ?? null,
     display_name: proposal.displayName ?? proposal.title ?? null,
@@ -334,9 +334,9 @@ function decisionFeedbackRecord(decision) {
   return {
     decision_id: decision.id,
     proposal_id: decision.proposalId,
-    topic_set_id: decision.topicSetId ?? null,
+    category_set_id: decision.categorySetId ?? null,
     action: decision.action,
-    selected_topic_uid: decision.selectedTopicUid ?? null,
+    selected_category_key: decision.selectedCategoryKey ?? null,
     note: decision.note ?? null,
     actor_label: decision.actorLabel ?? null,
     actor_sub: decision.actorSub ?? null,
@@ -344,7 +344,7 @@ function decisionFeedbackRecord(decision) {
   };
 }
 
-function suppressionFromRejectedProposal(proposal, topicSet) {
+function suppressionFromRejectedProposal(proposal, categorySet) {
   return {
     suppression_id: `suppression-${safeId(proposal.proposal_id)}`,
     proposal_id: proposal.proposal_id,
@@ -354,13 +354,13 @@ function suppressionFromRejectedProposal(proposal, topicSet) {
     decided_at: proposal.decided_at,
     decided_by: proposal.decided_by,
     scope: {
-      topic_set_id: topicSet.id,
-      corpus_id: topicSet.corpusId ?? proposal.corpus_id ?? null,
-      classifier_id: topicSet.classifierId ?? null,
-      root_topic_uid: proposal.target_topic_uid ?? null,
+      category_set_id: categorySet.id,
+      corpus_id: categorySet.corpusId ?? proposal.corpus_id ?? null,
+      classifier_id: categorySet.classifierId ?? null,
+      root_category_key: proposal.target_category_key ?? null,
     },
     match: {
-      topic_uid: proposal.topic_uid ?? null,
+      category_key: proposal.category_key ?? null,
       display_name: proposal.display_name ?? null,
       normalized_display_name: normalizeMatchText(proposal.display_name),
       relationship_type: proposal.relationship_type ?? null,
@@ -370,47 +370,36 @@ function suppressionFromRejectedProposal(proposal, topicSet) {
   };
 }
 
-function topicSetRecords(topicSet, context) {
-  const topics = topicSet.topics ?? [];
-  const acceptedRevisionId = `revision-${safeId(context.topicSetId)}-accepted-${hashShort(topicSet)}`;
+function categorySetRecords(categorySet, context) {
+  const topics = categorySet.topics ?? [];
   const records = [
-    record("CurationTopicSet", {
-      id: context.topicSetId,
+    record("CategorySet", versionedRecord({
+      id: context.categorySetId,
+      lineageId: context.categorySetId,
       corpusId: context.corpusId,
-      classifierId: topicSet.classifier_id,
-      displayName: topicSet.display_name,
-      description: topicSet.description ?? null,
+      classifierId: categorySet.classifier_id,
+      displayName: categorySet.display_name,
+      description: categorySet.description ?? null,
       status: "accepted",
-      acceptedRevisionId,
-      latestDraftRevisionId: null,
       generatedAt: dateOrNull(context.generatedAt),
-      topicCount: topics.length,
+      categoryCount: topics.length,
       importRunId: context.importRunId,
-    }),
-    record("CurationTopicRevision", {
-      id: acceptedRevisionId,
-      topicSetId: context.topicSetId,
-      corpusId: context.corpusId,
-      revisionKind: "accepted",
-      status: "accepted",
-      contentHash: hashStable(topicSet),
-      sourceImportRunId: context.importRunId,
-      sourceDecisionId: null,
-      topicCount: topics.length,
-      createdAt: context.now,
-      acceptedAt: context.now,
-      acceptedBy: "biblicus-import",
-    }),
-    rawPayloadRecord("topicSet", context.topicSetId, "biblicus-topic-set", topicSet, context.importRunId, context.now),
+    }, { now: context.now, actor: "biblicus-import", reason: "category-set-import", content: categorySet })),
+    rawPayloadRecord("categorySet", context.categorySetId, "biblicus-category-set", categorySet, context.importRunId, context.now),
   ];
 
   for (const [index, topic] of topics.entries()) {
-    const topicId = curationTopicId(context.topicSetId, topic.topic_uid);
-    records.push(record("CurationTopic", {
-      id: topicId,
-      topicSetId: context.topicSetId,
+    const categoryKey = readCategoryKey(topic);
+    const categoryLineageId = categoryLineageIdFor(context.categorySetId, categoryKey);
+    const categoryId = `${categoryLineageId}-v1`;
+    records.push(record("Category", versionedRecord({
+      id: categoryId,
+      lineageId: categoryLineageId,
+      categorySetId: context.categorySetId,
       corpusId: context.corpusId,
-      topicUid: topic.topic_uid,
+      categoryKey,
+      parentCategoryId: null,
+      parentCategoryKey: null,
       displayName: topic.display_name,
       subtitle: topic.subheading ?? topic.subtitle ?? null,
       description: topic.description ?? null,
@@ -419,19 +408,20 @@ function topicSetRecords(topicSet, context) {
       seedItemIds: compactArray(topic.seed_item_ids),
       holdoutItemIds: compactArray(topic.holdout_item_ids),
       rank: index + 1,
+      depth: 0,
       isPinned: Boolean(topic.ranking_hints?.pinned),
       importRunId: context.importRunId,
       updatedAt: context.now,
-    }));
-    records.push(rawPayloadRecord("topic", topicId, "biblicus-topic", topic, context.importRunId, context.now));
+    }, { now: context.now, actor: "biblicus-import", reason: "category-import", content: topic })));
+    records.push(rawPayloadRecord("category", categoryId, "biblicus-category", topic, context.importRunId, context.now));
   }
   return records;
 }
 
 function artifactRecords(artifact, context) {
-  const artifactId = `curation-artifact-${safeId(context.corpusId)}-${hashShort(`${artifact.kind}:${artifact.artifact_id}`)}`;
+  const artifactId = `category-artifact-${safeId(context.corpusId)}-${hashShort(`${artifact.kind}:${artifact.artifact_id}`)}`;
   return [
-    record("CurationArtifact", {
+    record("CategoryArtifact", {
       id: artifactId,
       corpusId: context.corpusId,
       artifactKind: artifact.kind,
@@ -447,45 +437,27 @@ function artifactRecords(artifact, context) {
 
 function taxonomyRecords(bundle, context) {
   const manifest = loadAcceptedTaxonomyManifest(bundle, context)
-    ?? rootTaxonomyManifestFromTopicSet(bundle.topic_set, context);
+    ?? rootTaxonomyManifestFromCategorySet(bundle.topic_set, context);
   const manifestNodes = Array.isArray(manifest.nodes) ? manifest.nodes : [];
-  const taxonomyId = curationTaxonomyId(context.topicSetId, manifest.taxonomy_id ?? manifest.snapshot_id ?? "accepted-taxonomy");
-  const generatedAt = dateOrNull(manifest.generated_at ?? bundle.generated_at) ?? context.now;
-  const activeNodes = manifestNodes.filter((node) => normalizeTaxonomyNodeStatus(node.status) !== "archived");
-  const rootCount = activeNodes.filter((node) => !node.parent_topic_uid).length;
   const records = [
-    record("CurationTaxonomy", {
-      id: taxonomyId,
-      corpusId: context.corpusId,
-      topicSetId: context.topicSetId,
-      taxonomyId: manifest.taxonomy_id ?? taxonomyId,
-      displayName: manifest.display_name ?? bundle.topic_set.display_name ?? "Accepted Taxonomy",
-      description: manifest.description ?? bundle.topic_set.description ?? null,
-      status: "accepted",
-      snapshotId: manifest.snapshot_id ?? latestSnapshotId(bundle.artifacts, "taxonomy"),
-      generatedAt,
-      nodeCount: manifestNodes.length,
-      rootCount,
-      importRunId: context.importRunId,
-      createdAt: context.now,
-      updatedAt: context.now,
-    }),
-    rawPayloadRecord("taxonomy", taxonomyId, "biblicus-taxonomy", manifest, context.importRunId, context.now),
+    rawPayloadRecord("categoryTree", context.categorySetId, "biblicus-category-tree", manifest, context.importRunId, context.now),
   ];
 
   const nodeRanks = rankTaxonomyNodes(manifestNodes);
   for (const node of manifestNodes) {
-    const topicUid = requiredString(node.topic_uid, "taxonomy node topic_uid");
-    const taxonomyNodeId = curationTaxonomyNodeId(taxonomyId, topicUid);
-    const depth = taxonomyNodeDepth(topicUid, manifestNodes);
-    const rank = nodeRanks.get(topicUid) ?? null;
-    records.push(record("CurationTaxonomyNode", {
-      id: taxonomyNodeId,
-      taxonomyId,
+    const categoryKey = readCategoryKey(node);
+    const categoryLineageId = categoryLineageIdFor(context.categorySetId, categoryKey);
+    const categoryId = `${categoryLineageId}-v1`;
+    const depth = taxonomyNodeDepth(categoryKey, manifestNodes);
+    const rank = nodeRanks.get(categoryKey) ?? null;
+    records.push(record("Category", versionedRecord({
+      id: categoryId,
+      lineageId: categoryLineageId,
       corpusId: context.corpusId,
-      topicSetId: context.topicSetId,
-      topicUid,
-      parentTopicUid: node.parent_topic_uid ?? null,
+      categorySetId: context.categorySetId,
+      categoryKey,
+      parentCategoryId: null,
+      parentCategoryKey: readParentCategoryKey(node),
       displayName: node.display_name,
       subtitle: node.subheading ?? node.subtitle ?? null,
       description: node.description ?? null,
@@ -496,8 +468,8 @@ function taxonomyRecords(bundle, context) {
       depth,
       importRunId: context.importRunId,
       updatedAt: context.now,
-    }));
-    records.push(rawPayloadRecord("taxonomyNode", taxonomyNodeId, "biblicus-taxonomy-node", node, context.importRunId, context.now));
+    }, { now: context.now, actor: "biblicus-import", reason: "category-tree-import", content: node })));
+    records.push(rawPayloadRecord("category", categoryId, "biblicus-category-tree-node", node, context.importRunId, context.now));
   }
   return records;
 }
@@ -547,19 +519,19 @@ function readTaxonomyManifestCandidate(candidatePath) {
   return Array.isArray(taxonomy.nodes) && taxonomy.taxonomy_id ? taxonomy : null;
 }
 
-function rootTaxonomyManifestFromTopicSet(topicSet, context) {
-  const topics = topicSet.topics ?? [];
-  const taxonomyIdentity = `${topicSet.classifier_id}-accepted-taxonomy`;
+function rootTaxonomyManifestFromCategorySet(categorySet, context) {
+  const topics = categorySet.topics ?? [];
+  const taxonomyIdentity = `${categorySet.classifier_id}-accepted-taxonomy`;
   return {
     schema_version: 1,
     taxonomy_id: taxonomyIdentity,
-    display_name: `${topicSet.display_name ?? topicSet.classifier_id} Taxonomy`,
-    description: topicSet.description ?? "Root-only taxonomy derived from the accepted canonical topic set.",
+    display_name: `${categorySet.display_name ?? categorySet.classifier_id} Taxonomy`,
+    description: categorySet.description ?? "Root-only taxonomy derived from the accepted canonical topic set.",
     generated_at: context.now,
-    snapshot_id: `root-only-${hashShort(topicSet)}`,
+    snapshot_id: `root-only-${hashShort(categorySet)}`,
     nodes: topics.map((topic) => ({
-      topic_uid: topic.topic_uid,
-      parent_topic_uid: null,
+      category_key: readCategoryKey(topic),
+      parent_category_key: null,
       display_name: topic.display_name,
       description: topic.description ?? topic.subheading ?? topic.subtitle ?? "Accepted root topic.",
       status: "accepted",
@@ -572,7 +544,7 @@ function rootTaxonomyManifestFromTopicSet(topicSet, context) {
     source: {
       system: "papyrus",
       fallback: "accepted-topic-set",
-      topic_set_id: context.topicSetId,
+      category_set_id: context.categorySetId,
     },
   };
 }
@@ -581,23 +553,23 @@ function rankTaxonomyNodes(nodes) {
   const rankByUid = new Map();
   const childrenByParent = new Map();
   for (const node of nodes) {
-    const parent = node.parent_topic_uid ?? "__root__";
+    const parent = readParentCategoryKey(node) ?? "__root__";
     const children = childrenByParent.get(parent) ?? [];
     children.push(node);
     childrenByParent.set(parent, children);
   }
   for (const children of childrenByParent.values()) {
-    children.sort((left, right) => String(left.display_name ?? left.topic_uid).localeCompare(String(right.display_name ?? right.topic_uid)));
-    children.forEach((node, index) => rankByUid.set(node.topic_uid, index + 1));
+    children.sort((left, right) => String(left.display_name ?? readCategoryKey(left)).localeCompare(String(right.display_name ?? readCategoryKey(right))));
+    children.forEach((node, index) => rankByUid.set(readCategoryKey(node), index + 1));
   }
   return rankByUid;
 }
 
-function taxonomyNodeDepth(topicUid, nodes) {
-  const parentByUid = new Map(nodes.map((node) => [node.topic_uid, node.parent_topic_uid ?? null]));
+function taxonomyNodeDepth(categoryKey, nodes) {
+  const parentByUid = new Map(nodes.map((node) => [readCategoryKey(node), readParentCategoryKey(node)]));
   let depth = 0;
-  let current = parentByUid.get(topicUid) ?? null;
-  const seen = new Set([topicUid]);
+  let current = parentByUid.get(categoryKey) ?? null;
+  const seen = new Set([categoryKey]);
   while (current) {
     if (seen.has(current)) return depth;
     seen.add(current);
@@ -613,15 +585,19 @@ function normalizeTaxonomyNodeStatus(status) {
 
 function proposalRecords(proposal, context) {
   const externalProposalId = proposal.proposal_id ?? hashShort(proposal);
-  const proposalId = `curation-proposal-${safeId(externalProposalId)}`;
-  const proposalKind = proposal.kind ?? proposal.proposal_kind ?? "unknown";
+  const proposalId = `category-proposal-${safeId(externalProposalId)}`;
+  const proposalKind = normalizeProposalKind(proposal.kind ?? proposal.proposal_kind ?? "unknown");
   const proposalPayload = proposal.payload && typeof proposal.payload === "object" ? proposal.payload : {};
   const evidence = proposal.evidence && typeof proposal.evidence === "object" ? proposal.evidence : {};
-  const steeringDomain = proposal.domain ?? inferSteeringDomain(proposalKind);
-  const topicUid = proposal.topic_uid ?? proposalPayload.topic_uid ?? null;
-  const targetTopicUid = proposal.target_topic_uid
+  const steeringDomain = normalizeSteeringDomain(proposal.domain ?? inferSteeringDomain(proposalKind));
+  const categoryKey = proposal.category_key ?? proposal.topic_uid ?? proposalPayload.category_key ?? proposalPayload.topic_uid ?? null;
+  const targetCategoryKey = proposal.target_category_key
+    ?? proposal.target_topic_uid
+    ?? proposalPayload.target_category_key
     ?? proposalPayload.target_topic_uid
+    ?? proposalPayload.parent_category_key
     ?? proposalPayload.parent_topic_uid
+    ?? proposalPayload.proposed_parent_category_key
     ?? proposalPayload.proposed_parent_topic_uid
     ?? proposalPayload.target_ref
     ?? null;
@@ -634,23 +610,23 @@ function proposalRecords(proposal, context) {
   const relationshipType = proposal.relationship_type
     ?? proposalPayload.relationship_type
     ?? proposalPayload.relationship_uid
-    ?? (proposalPayload.parent_topic_uid ? "subtopic_of" : null);
+    ?? (proposalPayload.parent_category_key || proposalPayload.parent_topic_uid ? "subcategory_of" : null);
   const displayName = proposal.display_name ?? proposalPayload.display_name ?? proposalPayload.name ?? null;
   const subtitle = proposal.subheading ?? proposal.subtitle ?? proposalPayload.subheading ?? proposalPayload.subtitle ?? null;
   const description = proposal.description ?? proposalPayload.description ?? null;
   return [
-    record("CurationProposal", {
+    record("CategoryProposal", {
       id: proposalId,
-      topicSetId: context.topicSetId,
+      categorySetId: context.categorySetId,
       corpusId: context.corpusId,
       importRunId: context.importRunId,
       proposalKind,
       steeringDomain,
       status: proposal.status ?? "proposed",
-      title: proposal.title ?? displayName ?? topicUid ?? proposalKind ?? "Steering proposal",
+      title: proposal.title ?? displayName ?? categoryKey ?? proposalKind ?? "Steering proposal",
       summary: proposal.rationale ?? proposal.description ?? null,
-      topicUid,
-      targetTopicUid,
+      categoryKey,
+      targetCategoryKey,
       graphEntityId,
       relationshipType,
       displayName,
@@ -670,7 +646,7 @@ function proposalRecords(proposal, context) {
 }
 
 function rawPayloadRecord(ownerType, ownerId, payloadKind, payload, importRunId, now) {
-  return record("CurationRawPayload", {
+  return record("CategoryRawPayload", {
     id: `raw-${safeId(ownerType)}-${safeId(ownerId)}-${safeId(payloadKind)}`,
     ownerType,
     ownerId,
@@ -686,30 +662,70 @@ function record(modelName, expected) {
   return { modelName, expected };
 }
 
-function curationCorpusId(corpus) {
-  return `curation-corpus-${safeId(corpus.key ?? corpus.name ?? corpus.corpus_uri ?? "unknown")}`;
+function versionedRecord(record, { now, actor, reason, content }) {
+  const withoutHash = {
+    ...record,
+    versionNumber: record.versionNumber ?? 1,
+    previousVersionId: record.previousVersionId ?? null,
+    versionState: record.versionState ?? "current",
+    versionCreatedAt: record.versionCreatedAt ?? now,
+    versionCreatedBy: record.versionCreatedBy ?? actor,
+    changeReason: record.changeReason ?? reason,
+  };
+  return {
+    ...withoutHash,
+    contentHash: record.contentHash ?? hashStable(content ?? withoutHash),
+  };
 }
 
-function curationTopicSetId(classifierId, corpusId) {
-  return `curation-topic-set-${safeId(corpusId)}-${safeId(classifierId)}`;
+function readCategoryKey(value) {
+  return requiredString(value.category_key ?? value.topic_uid ?? value.categoryKey, "category key");
 }
 
-function curationTopicId(topicSetId, topicUid) {
-  return `topic-${safeId(topicSetId)}-${safeId(topicUid)}`;
+function readParentCategoryKey(value) {
+  return value.parent_category_key ?? value.parent_topic_uid ?? value.parentCategoryKey ?? null;
 }
 
-function curationTaxonomyId(topicSetId, taxonomyId) {
-  return `taxonomy-${safeId(topicSetId)}-${safeId(taxonomyId)}`;
+function categoryCorpusId(corpus) {
+  return `category-corpus-${safeId(corpus.key ?? corpus.name ?? corpus.corpus_uri ?? "unknown")}`;
 }
 
-function curationTaxonomyNodeId(taxonomyId, topicUid) {
-  return `taxonomy-node-${safeId(taxonomyId)}-${safeId(topicUid)}`;
+function categorySetIdFor(classifierId, corpusId) {
+  return `category-set-${safeId(corpusId)}-${safeId(classifierId)}`;
+}
+
+function categoryLineageIdFor(categorySetId, categoryKey) {
+  return `category-${safeId(categorySetId)}-${safeId(categoryKey)}`;
+}
+
+function normalizeProposalKind(kind) {
+  const normalized = String(kind ?? "unknown");
+  const replacements = new Map([
+    ["new-topic", "new-category"],
+    ["rename-topic", "rename-category"],
+    ["merge-topic", "merge-category"],
+    ["deprecate-topic", "deprecate-category"],
+    ["create-taxonomy-node", "create-category"],
+    ["move-taxonomy-node", "move-category"],
+    ["archive-taxonomy-node", "archive-category"],
+    ["merge-taxonomy-nodes", "merge-categories"],
+    ["split-taxonomy-node", "split-category"],
+    ["add-topic-relationship-edge", "relationship-proposal"],
+  ]);
+  return replacements.get(normalized) ?? normalized
+    .replaceAll("topic", "category")
+    .replaceAll("taxonomy-node", "category")
+    .replaceAll("taxonomy", "category-tree");
+}
+
+function normalizeSteeringDomain(domain) {
+  return domain === "topic" ? "category" : String(domain ?? "category");
 }
 
 function inferSteeringDomain(kind) {
   if (GRAPH_PROPOSAL_KINDS.has(kind)) return "graph";
   if (String(kind ?? "").includes("graph") || String(kind ?? "").includes("entity") || String(kind ?? "").includes("relationship")) return "graph";
-  return "topic";
+  return "category";
 }
 
 function latestSnapshotId(artifacts, kind) {
@@ -726,7 +742,7 @@ function sortTaxonomyNodes(nodes) {
     if (depthDiff !== 0) return depthDiff;
     const rankDiff = (left.rank ?? 999999) - (right.rank ?? 999999);
     if (rankDiff !== 0) return rankDiff;
-    return String(left.topicUid).localeCompare(String(right.topicUid));
+    return String(left.categoryKey).localeCompare(String(right.categoryKey));
   });
 }
 
@@ -779,7 +795,7 @@ function compareByCreatedAt(left, right) {
 }
 
 function compareFeedback(left, right) {
-  const rootDiff = String(left.target_topic_uid ?? "").localeCompare(String(right.target_topic_uid ?? ""));
+  const rootDiff = String(left.target_category_key ?? "").localeCompare(String(right.target_category_key ?? ""));
   if (rootDiff !== 0) return rootDiff;
   const kindDiff = String(left.proposal_kind ?? "").localeCompare(String(right.proposal_kind ?? ""));
   if (kindDiff !== 0) return kindDiff;
@@ -825,13 +841,13 @@ function mergeReviewedProposalState(expected, current) {
 }
 
 module.exports = {
-  buildAcceptedTaxonomyPayload,
-  buildAcceptedTopicSetPayload,
+  buildAcceptedCategoryTreePayload,
+  buildAcceptedCategorySetPayload,
   buildSteeringFeedbackPayload,
   buildSteeringConfigRecords,
   buildProjectionImportRecords,
   buildSteeringImportRecords,
-  curationCorpusId,
+  categoryCorpusId,
   loadJsonFile,
   loadSteeringBundleFromBiblicus,
   mergeReviewedProposalState,

@@ -157,6 +157,15 @@ Feature: Newspaper layout scenarios
     Then the first news desk topic name should be "Foundation Model Scaling Updated"
     And no browser console errors should occur
 
+  Scenario: News desk manually culls assignment candidates
+    Given I open the assignments news desk at 1280 by 900
+    Then the assignments desk should render
+    When I cull assignment "assignment-demo-agent-lab" with reason "Too thin"
+    Then assignment "assignment-demo-agent-lab" should be culled
+    When I restore assignment "assignment-demo-agent-lab"
+    Then assignment "assignment-demo-agent-lab" should be active
+    And no browser console errors should occur
+
   Scenario: Production news desk requires editor access
     Given I open the edition path "/news-desk" at 1280 by 900
     Then the news desk should show an editor access gate

@@ -62,7 +62,7 @@ rendering contracts.
 - `corpora/papyrus-steering.yml` is the tracked steering config contract. It
   defines publication corpus keys, roles, classifier ids, local paths, and S3
   prefixes. Do not hard-code the AI/ML pilot corpus names in Papyrus logic.
-  Materialize config changes with `npm run content -- curation import-config`.
+  Materialize config changes with `npm run content -- categories import-config`.
 - Future research agents should also be driven by publication/corpus
   instructions, not by Papyrus source changes. When that instruction surface is
   added, keep it beside the publication or corpus config and document how agents
@@ -80,33 +80,45 @@ rendering contracts.
 - Production authoring uses the deployed production AppSync endpoint, not the
   sandbox. Mint short-lived production JWTs from the Amplify SSM
   `PAPYRUS_JWT_SECRET`; do not write production secrets or freshly minted
-  production JWTs into `.env`. Follow `docs/curation-steering-runbook.md` for
-  the exact token minting and topic/graph steering import workflow.
-- Topic and graph steering imports must not mirror Biblicus corpus items into
-  Papyrus GraphQL. Papyrus stores steering state, artifact references, topic
+  production JWTs into `.env`. Follow `docs/category-steering-runbook.md` for
+  the exact token minting and category/graph steering import workflow.
+- Category and graph steering imports must not mirror Biblicus corpus items into
+  Papyrus GraphQL. Papyrus stores steering state, artifact references, category
   copy, proposals, decisions, projections, and stable external `item_id`
   references; Biblicus remains the owner of corpus item metadata.
 - The News Desk is the newsroom operations surface. `Topics` is one desk tab,
   not the whole product concept. Use `/news-desk` and News Desk naming in UI,
   docs, and tests. Future assignment and research queues should become desk tabs
   instead of separate one-off management pages.
+- Newsroom assignment dispatch uses cloud `Item` rows with `type: "assignment"`
+  and workflow statuses such as `dispatched`, `researched`, and `drafted`.
+  Do not model assignments as `type: "article"` plus `status: "assignment"`.
+  Reporter agents consume assignment Items and produce separate draft article
+  Items, preserving the assignment row as the audit/input record.
+- Assignment dispatch should be section-targeted and reviewer-conscious. The
+  default overassignment ratio is `3/2`: dispatch enough surplus assignments to
+  allow culling, but cap each section by its planned article slots instead of
+  flooding the News Desk with every possible candidate.
+- Manual assignment culling lives in the editor-only `Assignments` News Desk
+  tab. Cull by marking the assignment Item and any linked draft article Item
+  `status: "culled"`, preserving previous workflow fields under
+  `editorial.newsroom.culling` on new Item versions so the News Desk can
+  restore without deleting Items or `EditionItem` rows.
 - Style the News Desk as a newspaper section or editorial insert, not as an app
   dashboard. Steering is passive and optional: proposals are skimmable notes
-  beside the edition, and the system keeps following the accepted topic set when
+  beside the edition, and the system keeps following the accepted category set when
   humans provide no new steering.
-- Accepted taxonomy has a small first-class typed surface for editor-only News
-  Desk views and appendix pages: `CurationTaxonomy` and
-  `CurationTaxonomyNode`. Import accepted taxonomy artifacts into those tables,
-  keep full manifests in private `CurationRawPayload`, and append passive News
-  Desk topic-register pages to editions only for signed-in editor/admin
-  readers. Ontology proposal kinds remain generic in v1. Do not let accepting
-  taxonomy or ontology proposals mutate flat canonical topic-copy rows or topic
-  revisions unless that first-class editing surface is explicitly designed.
+- Accepted categories have a small first-class typed surface for editor-only
+  News Desk views and appendix pages: versioned `CategorySet` and strict-tree
+  `Category` rows. Import accepted taxonomy artifacts into those tables, keep
+  full manifests in private `CategoryRawPayload`, and append passive News Desk
+  category-register pages to editions only for signed-in editor/admin readers.
+  Ontology proposal kinds remain generic in v1.
   Biblicus recommendation labels such as `recommend`, `do_not_recommend`, and
   `needs_clarification` are agent labels, not Papyrus review actions.
 - Rejected steering proposals are not cosmetic. Export Papyrus review memory
-  with `npm run content -- curation export-steering-feedback --topic-set <id> --output <feedback.json>`
-  before new taxonomy, ontology, or graph proposal cycles. Accepted taxonomy
+  with `npm run content -- categories export-steering-feedback --category-set <id> --output <feedback.json>`
+  before new taxonomy, ontology, or graph proposal cycles. Accepted category-tree
   exports say what is accepted; steering-feedback exports say what editors
   accepted or rejected and include suppressions. Pass that file to
   `biblicus taxonomy discover` and `biblicus steering graph-signals` with
@@ -168,6 +180,9 @@ GraphQL (or `?scenario=<id>` fixture overrides for tests/debug only).
 - `PublicationItem` is the normalized item union consumed by the layout solver.
 - Supported item types are `article`, `brief`, `correction`, `promo`, `ad`,
   and `sectionHeader`.
+- Newsroom `assignment` Items are cloud workflow records, not solver
+  `PublicationItem`s. Keep them out of reader layout until a reporter produces
+  a draft or publishable `article` Item.
 - `articleToPublicationItem` adapts legacy/fixture `Article` objects into
   generic items.
 - `publicationItemToArticle` adapts article items back to `Article` for direct
@@ -252,9 +267,9 @@ GraphQL (or `?scenario=<id>` fixture overrides for tests/debug only).
   not add half-working direct S3 uploads without also introducing an
   authenticated Storage strategy that matches the chosen credentials model.
 - The CLI should expose `inspect`, `list`, `diff`, `sync`, and explicit
-  `content delete all --yes`; it also owns `curation import-config`,
-  `curation import-steering`, `curation export-topic-set`, and
-  `curation import-projection` for topic and graph steering. Do not add
+  `content delete all --yes`; it also owns `categories import-config`,
+  `categories import-steering`, `categories export-category-set`, and
+  `categories import-projection` for category and graph steering. Do not add
   `content login` or `content logout` unless the auth model changes again.
 
 `lib/layout-plan.ts` owns the edition layout-plan contract:

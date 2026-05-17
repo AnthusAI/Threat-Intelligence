@@ -1,7 +1,7 @@
 -- Papyrus automated newsroom reporter procedure.
 --
--- Dry-run only: this procedure returns an Item update plan that advances an
--- assignment to draft but does not write to GraphQL.
+-- Dry-run only: this procedure returns an assignment update plus draft article
+-- create plan but does not write to GraphQL.
 
 local done = require("tactus.tools.done")
 
@@ -17,15 +17,16 @@ newsroom_reporter = Agent {
 You are the Papyrus newsroom reporter agent.
 
 Goal:
-- Turn one assignment Item into a draft article update plan.
+- Turn one assignment Item into a draft article record plan.
 - If assignment_json is absent, read the assignment with papyrus_get_item.
 - Research the assignment with Biblicus query/context tools.
-- Use build_draft_update_plan to produce the dry-run Item update.
+- Use build_draft_update_plan to produce the dry-run assignment update and draft article create plan.
 
 Rules:
 - This is dry-run only. Never claim records were written.
-- Preserve Item.type as "article".
-- Move lifecycle through Item.status from "assignment" to "draft".
+- Assignment input records must use Item.type = "assignment".
+- Preserve the assignment Item as the audit/input row and mark it drafted in the plan.
+- Create a separate draft article Item with Item.type = "article" and Item.status = "draft".
 - Return structured draft data and the dry-run update plan.
 ]],
     tools = {"plugin", done},
@@ -84,8 +85,8 @@ Feature: Newsroom reporter procedure
     And the input corpus_key is "AI-ML-research"
     And the agent "newsroom_reporter" calls tool "papyrus_get_item" with args {"item_id": "assignment-abc123"}
     And the agent "newsroom_reporter" calls tool "biblicus_query" with args {"corpus_key": "AI-ML-research", "query": "AI Agents Enter the Lab", "max_total_items": 5}
-    And the agent "newsroom_reporter" calls tool "build_draft_update_plan" with args {"assignment_item_json": "{\"id\":\"assignment-abc123\",\"type\":\"article\",\"status\":\"assignment\",\"typeStatus\":\"article#assignment\",\"slug\":\"ai-agents-enter-the-lab\",\"section\":\"Research\",\"title\":\"AI Agents Enter the Lab\",\"editorial\":{\"newsroom\":{\"assignment\":{\"brief\":\"Explain research agents.\"}}}}", "draft_json": "{\"headline\":\"AI Agents Enter the Lab\",\"deck\":\"Research teams are handing more lab work to autonomous systems.\",\"body\":[\"Agentic systems are moving from demos into research workflows.\",\"The strongest evidence comes from scientific discovery and evaluation corpora.\"],\"byline\":\"Papyrus Staff\",\"evidence_item_ids\":[\"research-001\"]}"}
-    And the agent "newsroom_reporter" returns data {"assignment_item_id":"assignment-abc123","dry_run":True,"draft_status":"draft","draft_record_plan":{"dryRun":True,"lifecycle":"draft","records":[{"modelName":"Item","action":"update","input":{"id":"assignment-abc123","type":"article","status":"draft","typeStatus":"article#draft"}}]},"summary":"Created one dry-run draft update plan."}
+    And the agent "newsroom_reporter" calls tool "build_draft_update_plan" with args {"assignment_item_json": "{\"id\":\"assignment-abc123\",\"type\":\"assignment\",\"status\":\"dispatched\",\"typeStatus\":\"assignment#dispatched\",\"slug\":\"ai-agents-enter-the-lab\",\"section\":\"Research\",\"title\":\"AI Agents Enter the Lab\",\"editorial\":{\"newsroom\":{\"assignment\":{\"brief\":\"Explain research agents.\"}}}}", "draft_json": "{\"headline\":\"AI Agents Enter the Lab\",\"deck\":\"Research teams are handing more lab work to autonomous systems.\",\"body\":[\"Agentic systems are moving from demos into research workflows.\",\"The strongest evidence comes from scientific discovery and evaluation corpora.\"],\"byline\":\"Papyrus Staff\",\"evidence_item_ids\":[\"research-001\"]}"}
+    And the agent "newsroom_reporter" returns data {"assignment_item_id":"assignment-abc123","dry_run":True,"draft_status":"draft","draft_record_plan":{"dryRun":True,"lifecycle":"draft","records":[{"modelName":"Item","action":"update","input":{"id":"assignment-abc123","type":"assignment","status":"drafted","typeStatus":"assignment#drafted"}},{"modelName":"Item","action":"create","input":{"type":"article","status":"draft","typeStatus":"article#draft"}}]},"summary":"Created one dry-run draft article plan."}
     When the procedure runs
     Then the procedure should complete successfully
     And the output dry_run should be true

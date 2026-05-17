@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit",
     "sandbox": "ampx sandbox",
     "seed:amplify": "ampx sandbox seed",
-    "test:curation": "node scripts/test-curation-mappers.cjs",
+    "test:assignments": "node scripts/test-news-desk-assignments.cjs",
+    "test:categories": "node scripts/test-category-mappers.cjs",
     "test:bdd": "cucumber-js",
     "test:bdd:headed": "PAPYRUS_HEADLESS=false cucumber-js"
   },

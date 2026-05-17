@@ -7,7 +7,7 @@ Papyrus is meant to be a general-purpose automated newsroom, not an AI/ML-only
 publication. The current AI/ML corpus content is pilot data. A publication about
 soccer, oil markets, cryptocurrency, knitting, sailing, local politics, or any
 other domain should be created by changing the publication configuration,
-corpus set, topic/graph steering state, edition plans, and worker instructions,
+corpus set, category/graph steering state, edition plans, and worker instructions,
 not by changing Papyrus code to know that domain.
 
 The project is exploring a specific publication problem: how to make responsive
@@ -177,17 +177,30 @@ related CMS records. It does not create a CMS UI.
 
 ## News Desk
 
-`/news-desk` is the Papyrus newsroom operations workspace. The current active
-desk tab is `Topics`, which handles topic, taxonomy, ontology, and graph
-steering. The page is driven by the configured corpora for the publication, not
-by hard-coded corpus names. Papyrus owns the human steering state in
-GraphQL: corpora, import runs, artifacts, accepted topic sets, canonical
-topics, accepted taxonomy summaries, revisions, proposals, append-only
-decisions, and projection rows.
+`/news-desk` is the Papyrus newsroom operations workspace. The default desk tab
+is `Categories`; `?tab=assignments` opens the assignment culling desk. The page
+is driven by the configured corpora for the publication, not by hard-coded
+corpus names. Papyrus owns the human steering state in GraphQL: corpora, import
+runs, artifacts, accepted category sets, strict-tree categories, proposals,
+append-only decisions, and projection rows.
+
+Assignment dispatch is the next newsroom lane. The Tactus editor procedure in
+`procedures/newsroom/editor.tac` plans assignment rows as `Item` records with
+`type: "assignment"` and `status: "dispatched"`, then returns one downstream
+reporter procedure input per assignment. Assignments are workflow records, not
+reader-facing article items. The default dispatch ratio is `3/2`: for each
+section target, the editor can send a small surplus of assignments so weaker
+drafts can be culled without flooding reviewers. Reporter output creates a
+separate draft article item and preserves the assignment item as the audit row.
+The editor-only `Assignments` desk tab at `/news-desk?tab=assignments` selects
+the latest edition with assignment rows, groups candidates by section, and lets
+editors manually cull or restore assignment candidates. Manual culling marks the
+assignment Item and any linked draft article Item as `culled`, with the previous
+workflow status preserved in `editorial.newsroom.culling` for restore.
 
 The News Desk should feel like another section of the newspaper, not a separate
 administrative app. Steering proposals are optional editorial notes: the
-publication keeps following the accepted topic set unless a human chooses to
+publication keeps following the accepted category set unless a human chooses to
 accept, reject, or rewrite a proposal while reading. Ignoring a proposal is also
 valid steering: no decision is recorded, and the accepted course continues.
 
@@ -207,46 +220,51 @@ the production Amplify Storage bucket under `corpora/`. The committed
 `corpora/papyrus-steering.yml` file is the v1 steering config contract that
 names the publication corpora, their roles, local classifier ids, and S3
 prefixes. Mirror that YAML to S3 beside the corpus data and materialize it into
-GraphQL with `curation import-config`.
+GraphQL with `categories import-config`.
 
-Public GraphQL reads expose only curated typed fields needed by the page. Raw
-Biblicus payloads, source notes, full metadata, and import internals live in
-`CurationRawPayload`, which is private to editor/admin users and the
-JWT-authorized worker lane. Stable IDs such as Biblicus `item_id`, `topic_uid`,
-classifier ids, snapshot/artifact refs, corpus identity, and generated revision
-ids are the API contract; display names are editable copy, not keys.
+Private canonical publishing records are versioned in place: `Item`, `Edition`,
+`CategorySet`, and `Category` carry lineage, version number, previous version,
+version state, author/time metadata, change reason, and content hash. There are
+no separate version tables. `EditionItem` rows belong to an exact edition
+version and point to exact item versions.
 
-Topic proposal review and topic revision promotion are custom mutations because
-they write a decision row and update proposal/revision state together.
-`CurationDecision` is append-only. Current proposal, topic, and revision state
-may update, but decisions should not be overwritten.
+Public readers use only published projections: `PublishedEdition`,
+`PublishedEditionItem`, `PublishedItem`, `PublishedMediaAsset`,
+`PublishedCategorySet`, and `PublishedCategory`. Private canonical tables are
+editor/admin and JWT-authoring only; API-key reads are limited to the projection
+tables. Publishing materializes approved current versions into projections, so
+the reader path stays a direct AppSync read without a Lambda call.
 
-Accepted taxonomy has a small typed editor-only surface in v1.
-`CurationTaxonomy` and `CurationTaxonomyNode` store the current accepted topic
-tree, while full Biblicus taxonomy manifests stay private in
-`CurationRawPayload`. Signed-in editor/admin readers see passive News Desk
-appendix pages after each edition: a canonical topic register followed by one
-page per accepted root topic. Public readers get the normal newspaper edition
-with no appended taxonomy pages. Taxonomy and ontology proposals still arrive
-through `CurationProposal`; only `create-taxonomy-node`,
-`move-taxonomy-node`, and `archive-taxonomy-node` update typed taxonomy rows
-through protected review. Flat canonical topic-copy rows and revisions remain
-separate. The Biblicus labels `recommend`, `do_not_recommend`, and
+Raw Biblicus payloads, source notes, full metadata, and import internals live in
+`CategoryRawPayload`, which is private to editor/admin users and the
+JWT-authorized worker lane. Stable IDs such as Biblicus `item_id`,
+`category_key`, classifier ids, snapshot/artifact refs, corpus identity, and
+category lineage ids are the API contract; display names are editable copy, not
+keys.
+
+Category proposal review writes an append-only `CategoryDecision` and creates
+new `Category` versions when accepted edits change category copy or tree state.
+Accepted category trees are modeled as strict parent/child `Category` rows under
+a versioned `CategorySet`; full Biblicus taxonomy manifests stay private in
+`CategoryRawPayload`. Signed-in editor/admin readers see passive News Desk
+appendix pages after each edition. Public readers get the normal newspaper
+edition with no appended category pages. The Biblicus labels `recommend`,
+`do_not_recommend`, and
 `needs_clarification` are agent recommendation labels, not Papyrus human review
 actions; the News Desk exposes `accept` and `reject` as explicit human decisions.
 Editors can ignore a proposal by leaving it alone.
 
-Rejected proposals must influence future curation. Before a new taxonomy,
+Rejected proposals must influence future category steering. Before a new taxonomy,
 ontology, or graph proposal cycle, export the Papyrus review memory:
 
 ```bash
-npm run content -- curation export-steering-feedback \
-  --topic-set <topic-set-id> \
+npm run content -- categories export-steering-feedback \
+  --category-set <category-set-id> \
   --output /tmp/papyrus-steering-feedback.json
 ```
 
 That JSON contains append-only decisions, reviewed proposals, and normalized
-`suppressions` scoped by topic set, corpus, classifier, and root topic. Workers
+`suppressions` scoped by category set, corpus, classifier, and root topic. Workers
 must pass it to `biblicus taxonomy discover` and
 `biblicus steering graph-signals` with `--steering-feedback` so rejected child
 topics, labels, relationships, or weak patterns are not proposed again.
@@ -288,11 +306,11 @@ npm run build
 npm run sandbox
 npm run seed:amplify
 npm run content -- content inspect
-npm run content -- curation import-config --config corpora/papyrus-steering.yml
-npm run content -- curation import-steering --config corpora/papyrus-steering.yml --corpus-key <key>
-npm run content -- curation import-steering --bundle <steering-export.json>
-npm run content -- curation export-topic-set --topic-set <id> --output <accepted-topic-set.json>
-npm run content -- curation import-projection --config corpora/papyrus-steering.yml --target-corpus-key <key> --authority-corpus-key <key> --bundle <projection.json>
+npm run content -- categories import-config --config corpora/papyrus-steering.yml
+npm run content -- categories import-steering --config corpora/papyrus-steering.yml --corpus-key <key>
+npm run content -- categories import-steering --bundle <steering-export.json>
+npm run content -- categories export-category-set --category-set <id> --output <accepted-category-set.json>
+npm run content -- categories import-projection --config corpora/papyrus-steering.yml --target-corpus-key <key> --authority-corpus-key <key> --bundle <projection.json>
 npm run test:bdd
 ```
 
@@ -316,10 +334,10 @@ For content inspection and admin against a deployed API:
 ```bash
 npm run content -- content inspect
 npm run content -- content list articles
-npm run content -- curation import-config --config corpora/papyrus-steering.yml
-npm run content -- curation import-steering --config corpora/papyrus-steering.yml --corpus-key <key>
-npm run content -- curation export-topic-set --topic-set <id> --output accepted-topic-set.json
-npm run content -- curation import-projection --config corpora/papyrus-steering.yml --target-corpus-key <key> --authority-corpus-key <key> --bundle projection-results.json
+npm run content -- categories import-config --config corpora/papyrus-steering.yml
+npm run content -- categories import-steering --config corpora/papyrus-steering.yml --corpus-key <key>
+npm run content -- categories export-category-set --category-set <id> --output accepted-category-set.json
+npm run content -- categories import-projection --config corpora/papyrus-steering.yml --target-corpus-key <key> --authority-corpus-key <key> --bundle projection-results.json
 npm run content -- content delete all --yes
 ```
 
@@ -364,8 +382,8 @@ export PAPYRUS_GRAPHQL_ENDPOINT=https://64hviw44q5cq5nwjcigmasowlq.appsync-api.u
 Mint a fresh short-lived JWT from the production Amplify SSM secret. Do not
 write the token or secret into `.env`:
 
-The full production authoring and topic/graph steering runbook lives in
-`docs/curation-steering-runbook.md`.
+The full production authoring and category/graph steering runbook lives in
+`docs/category-steering-runbook.md`.
 
 ```bash
 export PAPYRUS_GRAPHQL_JWT="$(node - <<'NODE'

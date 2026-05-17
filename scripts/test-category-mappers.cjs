@@ -5,14 +5,14 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const {
-  buildAcceptedTopicSetPayload,
-  buildAcceptedTaxonomyPayload,
+  buildAcceptedCategorySetPayload,
+  buildAcceptedCategoryTreePayload,
   buildProjectionImportRecords,
   buildSteeringConfigRecords,
   buildSteeringFeedbackPayload,
   buildSteeringImportRecords,
   mergeReviewedProposalState,
-} = require("./lib/papyrus-curation.cjs");
+} = require("./lib/papyrus-categories.cjs");
 const {
   loadSteeringConfig,
   requireCorpusConfig,
@@ -32,7 +32,7 @@ const steeringBundle = {
     description: "Accepted topics",
     topics: [
       {
-        topic_uid: "topic.scaling",
+        category_key: "topic.scaling",
         display_name: "Scaling Laws",
         subheading: "Compute, data, and capability curves",
         description: "Model scaling research.",
@@ -68,7 +68,7 @@ const steeringBundle = {
     {
       proposal_id: "proposal-rename-scaling",
       kind: "rename-topic",
-      topic_uid: "topic.scaling",
+      category_key: "topic.scaling",
       display_name: "Foundation Model Scaling",
       subheading: "Compute, data, and benchmark saturation",
       rationale: "The evidence uses this newer name.",
@@ -81,7 +81,7 @@ const steeringBundle = {
       proposal_kind: "add-topic-relationship-edge",
       domain: "graph",
       payload: {
-        topic_uid: "topic.scaling",
+        category_key: "topic.scaling",
         graph_entity_id: "entity.benchmark-saturation",
         relationship_type: "influences",
       },
@@ -89,15 +89,15 @@ const steeringBundle = {
     },
     {
       proposal_id: "proposal-taxonomy-node",
-      proposal_kind: "create-taxonomy-node",
+      proposal_kind: "create-category",
       domain: "topic",
       recommendation: "needs_clarification",
       status: "proposed",
       evidence: { item_ids: ["research-001"] },
       rationale: "Scoped discovery found a possible child topic.",
       payload: {
-        topic_uid: "topic.scaling-memory",
-        parent_topic_uid: "topic.scaling",
+        category_key: "topic.scaling-memory",
+        parent_category_key: "topic.scaling",
         display_name: "Scaling Memory",
         description: "Candidate child topic under scaling.",
         document_ids: ["research-001"],
@@ -158,58 +158,59 @@ const sourceCorpusConfig = requireCorpusConfig(steeringConfig, "source-corpus");
 assert.equal(resolveClassifierForCorpus(steeringConfig, canonicalCorpusConfig), "canonical-classifier");
 assert.equal(resolveClassifierForCorpus(steeringConfig, sourceCorpusConfig), "source-classifier");
 const configRecords = buildSteeringConfigRecords(steeringConfig, { importedAt: "2026-05-16T12:15:00.000Z" });
-assert.equal(findRecord(configRecords, "CurationCorpus", (record) => record.id === "curation-corpus-canonical-corpus").role, "canonical");
-assert.equal(findRecord(configRecords, "CurationCorpus", (record) => record.id === "curation-corpus-source-corpus").name, "Source Corpus");
+assert.equal(findRecord(configRecords, "CategoryCorpus", (record) => record.id === "category-corpus-canonical-corpus").role, "canonical");
+assert.equal(findRecord(configRecords, "CategoryCorpus", (record) => record.id === "category-corpus-source-corpus").name, "Source Corpus");
 
 const steeringPlan = buildSteeringImportRecords(steeringBundle, {
   classifierId: "canonical-classifier",
   corpusConfig: canonicalCorpusConfig,
   importedAt: "2026-05-16T12:30:00.000Z",
 });
-const configuredCorpus = findRecord(steeringPlan.records, "CurationCorpus", (record) => record.id === "curation-corpus-canonical-corpus");
+const configuredCorpus = findRecord(steeringPlan.records, "CategoryCorpus", (record) => record.id === "category-corpus-canonical-corpus");
 assert.equal(configuredCorpus.name, "Canonical Corpus");
 assert.equal(configuredCorpus.role, "canonical");
 
-const topic = findRecord(steeringPlan.records, "CurationTopic", (record) => record.topicUid === "topic.scaling");
+const topic = findRecord(steeringPlan.records, "Category", (record) => record.categoryKey === "topic.scaling");
 assert.equal(topic.subtitle, "Compute, data, and capability curves");
-assert.equal(topic.topicUid, "topic.scaling");
+assert.equal(topic.categoryKey, "topic.scaling");
 assert.equal(topic.displayName, "Scaling Laws");
 
-const fallbackTaxonomy = findRecord(steeringPlan.records, "CurationTaxonomy", (record) => record.topicSetId === steeringPlan.topicSetId);
+const fallbackTaxonomy = findRecord(steeringPlan.records, "CategorySet", (record) => record.id === steeringPlan.categorySetId);
 assert.equal(fallbackTaxonomy.status, "accepted");
-const fallbackTaxonomyNode = findRecord(steeringPlan.records, "CurationTaxonomyNode", (record) => record.topicUid === "topic.scaling");
-assert.equal(fallbackTaxonomyNode.parentTopicUid, null);
+const fallbackTaxonomyNode = findRecord(steeringPlan.records, "Category", (record) => record.categoryKey === "topic.scaling");
+assert.equal(fallbackTaxonomyNode.parentCategoryKey, null);
 assert.equal(fallbackTaxonomyNode.displayName, "Scaling Laws");
 
 assert.equal(
-  steeringPlan.records.some((record) => record.modelName === "CurationItem"),
+  steeringPlan.records.some((record) => record.modelName === "CategoryCorpusItem"),
   false,
   "Biblicus corpus items stay external and are not mirrored into Papyrus GraphQL",
 );
 assert.equal(
-  steeringPlan.records.some((record) => record.modelName === "CurationRawPayload" && record.expected.ownerType === "item"),
+  steeringPlan.records.some((record) => record.modelName === "CategoryRawPayload" && record.expected.ownerType === "item"),
   false,
   "Biblicus item raw payloads stay out of Papyrus GraphQL",
 );
 
-const topicProposal = findRecord(steeringPlan.records, "CurationProposal", (record) => record.id.includes("proposal-rename-scaling"));
-assert.equal(topicProposal.steeringDomain, "topic");
-assert.equal(topicProposal.subtitle, "Compute, data, and benchmark saturation");
-assert.equal(topicProposal.source_notes, undefined);
+const renameProposal = findRecord(steeringPlan.records, "CategoryProposal", (record) => record.id.includes("proposal-rename-scaling"));
+assert.equal(renameProposal.proposalKind, "rename-category");
+assert.equal(renameProposal.steeringDomain, "category");
+assert.equal(renameProposal.subtitle, "Compute, data, and benchmark saturation");
+assert.equal(renameProposal.source_notes, undefined);
 
-const graphProposal = findRecord(steeringPlan.records, "CurationProposal", (record) => record.id.includes("proposal-graph-relationship"));
+const graphProposal = findRecord(steeringPlan.records, "CategoryProposal", (record) => record.id.includes("proposal-graph-relationship"));
 assert.equal(graphProposal.steeringDomain, "graph");
 assert.equal(graphProposal.relationshipType, "influences");
 
-const taxonomyProposal = findRecord(steeringPlan.records, "CurationProposal", (record) => record.id.includes("proposal-taxonomy-node"));
-assert.equal(taxonomyProposal.proposalKind, "create-taxonomy-node");
-assert.equal(taxonomyProposal.steeringDomain, "topic");
-assert.equal(taxonomyProposal.topicUid, "topic.scaling-memory");
-assert.equal(taxonomyProposal.targetTopicUid, "topic.scaling");
-assert.equal(taxonomyProposal.relationshipType, "subtopic_of");
-assert.equal(taxonomyProposal.displayName, "Scaling Memory");
-const preservedRejectedProposal = mergeReviewedProposalState(taxonomyProposal, {
-  ...taxonomyProposal,
+const categoryProposal = findRecord(steeringPlan.records, "CategoryProposal", (record) => record.id.includes("proposal-taxonomy-node"));
+assert.equal(categoryProposal.proposalKind, "create-category");
+assert.equal(categoryProposal.steeringDomain, "category");
+assert.equal(categoryProposal.categoryKey, "topic.scaling-memory");
+assert.equal(categoryProposal.targetCategoryKey, "topic.scaling");
+assert.equal(categoryProposal.relationshipType, "subcategory_of");
+assert.equal(categoryProposal.displayName, "Scaling Memory");
+const preservedRejectedProposal = mergeReviewedProposalState(categoryProposal, {
+  ...categoryProposal,
   status: "rejected",
   reviewedAt: "2026-05-16T13:00:00.000Z",
   reviewedBy: "editor@example.com",
@@ -217,22 +218,22 @@ const preservedRejectedProposal = mergeReviewedProposalState(taxonomyProposal, {
 assert.equal(preservedRejectedProposal.status, "rejected");
 assert.equal(preservedRejectedProposal.reviewedAt, "2026-05-16T13:00:00.000Z");
 assert.equal(preservedRejectedProposal.reviewedBy, "editor@example.com");
-const openProposalReimport = mergeReviewedProposalState(taxonomyProposal, {
-  ...taxonomyProposal,
+const openProposalReimport = mergeReviewedProposalState(categoryProposal, {
+  ...categoryProposal,
   status: "proposed",
   reviewedAt: null,
   reviewedBy: null,
 });
 assert.equal(openProposalReimport.status, "proposed");
 
-const ontologyProposal = findRecord(steeringPlan.records, "CurationProposal", (record) => record.id.includes("proposal-ontology-assertion"));
+const ontologyProposal = findRecord(steeringPlan.records, "CategoryProposal", (record) => record.id.includes("proposal-ontology-assertion"));
 assert.equal(ontologyProposal.proposalKind, "add-ontology-relationship");
 assert.equal(ontologyProposal.steeringDomain, "graph");
 assert.equal(ontologyProposal.graphEntityId, "assertion-scaling-history");
 assert.equal(ontologyProposal.relationshipType, "historical_context_for");
-assert.equal(ontologyProposal.targetTopicUid, "topic:topic.scaling-memory");
+assert.equal(ontologyProposal.targetCategoryKey, "topic:topic.scaling-memory");
 
-const rawProposal = findRecord(steeringPlan.records, "CurationRawPayload", (record) => record.ownerId === topicProposal.id);
+const rawProposal = findRecord(steeringPlan.records, "CategoryRawPayload", (record) => record.ownerId === renameProposal.id);
 assert.equal(rawProposal.payloadKind, "biblicus-proposal");
 assert.ok(JSON.parse(rawProposal.payload).source_notes);
 
@@ -260,8 +261,8 @@ fs.writeFileSync(path.join(taxonomyDir, "taxonomy.json"), JSON.stringify({
   snapshot_id: "taxonomy-snapshot",
   nodes: [
     {
-      topic_uid: "topic.scaling",
-      parent_topic_uid: null,
+      category_key: "topic.scaling",
+      parent_category_key: null,
       display_name: "Scaling Laws",
       description: "Root topic.",
       status: "accepted",
@@ -269,8 +270,8 @@ fs.writeFileSync(path.join(taxonomyDir, "taxonomy.json"), JSON.stringify({
       holdout_item_ids: ["research-002"],
     },
     {
-      topic_uid: "topic.memory",
-      parent_topic_uid: "topic.scaling",
+      category_key: "topic.memory",
+      parent_category_key: "topic.scaling",
       display_name: "Memory Systems",
       description: "Child topic.",
       status: "accepted",
@@ -298,13 +299,13 @@ const taxonomyPlan = buildSteeringImportRecords({
   corpusPath: taxonomyCorpusPath,
   importedAt: "2026-05-16T12:31:00.000Z",
 });
-const importedTaxonomy = findRecord(taxonomyPlan.records, "CurationTaxonomy", (record) => record.taxonomyId === "canonical-taxonomy");
-assert.equal(importedTaxonomy.snapshotId, "taxonomy-snapshot");
-const importedChildNode = findRecord(taxonomyPlan.records, "CurationTaxonomyNode", (record) => record.topicUid === "topic.memory");
-assert.equal(importedChildNode.parentTopicUid, "topic.scaling");
+const importedTaxonomyPayload = findRecord(taxonomyPlan.records, "CategoryRawPayload", (record) => record.ownerType === "categoryTree");
+assert.equal(JSON.parse(importedTaxonomyPayload.payload).snapshot_id, "taxonomy-snapshot");
+const importedChildNode = findRecord(taxonomyPlan.records, "Category", (record) => record.categoryKey === "topic.memory");
+assert.equal(importedChildNode.parentCategoryKey, "topic.scaling");
 assert.equal(importedChildNode.depth, 1);
 
-const acceptedExport = buildAcceptedTopicSetPayload(
+const acceptedExport = buildAcceptedCategorySetPayload(
   {
     classifierId: "canonical-classifier",
     displayName: "Canonical Topic Set",
@@ -312,7 +313,7 @@ const acceptedExport = buildAcceptedTopicSetPayload(
   },
   [
     {
-      topicUid: "topic.scaling",
+      categoryKey: "topic.scaling",
       displayName: "Foundation Model Scaling",
       subtitle: "Subtitle written in Papyrus",
       description: "Accepted description",
@@ -325,15 +326,15 @@ const acceptedExport = buildAcceptedTopicSetPayload(
   ],
 );
 assert.equal(acceptedExport.topics[0].subheading, "Subtitle written in Papyrus");
-assert.equal(acceptedExport.topics[0].topic_uid, "topic.scaling");
+assert.equal(acceptedExport.topics[0].category_key, "topic.scaling");
 assert.deepEqual(acceptedExport.topics[0].seed_item_ids, ["research-001"]);
 
-const acceptedTaxonomyExport = buildAcceptedTaxonomyPayload(
+const acceptedTaxonomyExport = buildAcceptedCategoryTreePayload(
   {
     id: "taxonomy-test",
     taxonomyId: "canonical-taxonomy",
-    corpusId: "curation-corpus-canonical-corpus",
-    topicSetId: "curation-topic-set-test",
+    corpusId: "category-corpus-canonical-corpus",
+    categorySetId: "category-set-test",
     displayName: "Canonical Taxonomy",
     description: "Accepted hierarchy",
     generatedAt: "2026-05-16T12:31:00.000Z",
@@ -342,8 +343,8 @@ const acceptedTaxonomyExport = buildAcceptedTaxonomyPayload(
     {
       id: "taxonomy-node-root",
       taxonomyId: "taxonomy-test",
-      topicUid: "topic.scaling",
-      parentTopicUid: null,
+      categoryKey: "topic.scaling",
+      parentCategoryKey: null,
       displayName: "Scaling Laws",
       description: "Root topic.",
       status: "accepted",
@@ -355,8 +356,8 @@ const acceptedTaxonomyExport = buildAcceptedTaxonomyPayload(
     {
       id: "taxonomy-node-child",
       taxonomyId: "taxonomy-test",
-      topicUid: "topic.memory",
-      parentTopicUid: "topic.scaling",
+      categoryKey: "topic.memory",
+      parentCategoryKey: "topic.scaling",
       displayName: "Memory Systems",
       description: "Child topic.",
       status: "accepted",
@@ -368,12 +369,12 @@ const acceptedTaxonomyExport = buildAcceptedTaxonomyPayload(
   ],
 );
 assert.equal(acceptedTaxonomyExport.taxonomy_id, "canonical-taxonomy");
-assert.equal(acceptedTaxonomyExport.nodes[1].parent_topic_uid, "topic.scaling");
+assert.equal(acceptedTaxonomyExport.nodes[1].parent_category_key, "topic.scaling");
 assert.deepEqual(acceptedTaxonomyExport.nodes[0].seed_item_ids, ["research-001"]);
 
 const steeringFeedbackExport = buildSteeringFeedbackPayload(
   {
-    id: steeringPlan.topicSetId,
+    id: steeringPlan.categorySetId,
     corpusId: steeringPlan.corpusId,
     classifierId: "canonical-classifier",
     displayName: "Canonical Topic Set",
@@ -381,7 +382,7 @@ const steeringFeedbackExport = buildSteeringFeedbackPayload(
   },
   [
     {
-      ...taxonomyProposal,
+      ...categoryProposal,
       status: "rejected",
       reviewedAt: "2026-05-16T13:00:00.000Z",
       reviewedBy: "editor@example.com",
@@ -396,24 +397,24 @@ const steeringFeedbackExport = buildSteeringFeedbackPayload(
   [
     {
       id: "decision-reject-taxonomy-node",
-      proposalId: taxonomyProposal.id,
-      topicSetId: steeringPlan.topicSetId,
+      proposalId: categoryProposal.id,
+      categorySetId: steeringPlan.categorySetId,
       action: "reject",
       actorLabel: "editor@example.com",
       actorSub: "editor-sub",
       note: "Too broad.",
-      selectedTopicUid: taxonomyProposal.topicUid,
+      selectedCategoryKey: categoryProposal.categoryKey,
       createdAt: "2026-05-16T13:00:00.000Z",
     },
     {
       id: "decision-accept-ontology",
       proposalId: ontologyProposal.id,
-      topicSetId: steeringPlan.topicSetId,
+      categorySetId: steeringPlan.categorySetId,
       action: "accept",
       actorLabel: "editor@example.com",
       actorSub: "editor-sub",
       note: null,
-      selectedTopicUid: ontologyProposal.topicUid,
+      selectedCategoryKey: ontologyProposal.categoryKey,
       createdAt: "2026-05-16T13:05:00.000Z",
     },
   ],
@@ -422,9 +423,9 @@ const steeringFeedbackExport = buildSteeringFeedbackPayload(
 assert.equal(steeringFeedbackExport.export_kind, "papyrus-steering-feedback");
 assert.equal(steeringFeedbackExport.rejected_proposals.length, 1);
 assert.equal(steeringFeedbackExport.accepted_proposals.length, 1);
-assert.equal(steeringFeedbackExport.suppressions[0].proposal_id, taxonomyProposal.id);
-assert.equal(steeringFeedbackExport.suppressions[0].scope.root_topic_uid, "topic.scaling");
-assert.equal(steeringFeedbackExport.suppressions[0].match.topic_uid, "topic.scaling-memory");
+assert.equal(steeringFeedbackExport.suppressions[0].proposal_id, categoryProposal.id);
+assert.equal(steeringFeedbackExport.suppressions[0].scope.root_category_key, "topic.scaling");
+assert.equal(steeringFeedbackExport.suppressions[0].match.category_key, "topic.scaling-memory");
 assert.equal(steeringFeedbackExport.suppressions[0].match.normalized_display_name, "scaling memory");
 assert.equal(steeringFeedbackExport.decisions.length, 2);
 
@@ -436,7 +437,7 @@ const projectionPlan = buildProjectionImportRecords({
       item_id: "source-001",
       target_corpus_uri: "s3://example/corpora/source-corpus",
       classifier_corpus_uri: "s3://example/corpora/canonical-corpus",
-      topic_uid: "topic.scaling",
+      category_key: "topic.scaling",
       display_name: "Foundation Model Scaling",
       score: 0.82,
       review_recommended: true,
@@ -447,10 +448,10 @@ const projectionPlan = buildProjectionImportRecords({
   authorityCorpusConfig: canonicalCorpusConfig,
   targetCorpusConfig: sourceCorpusConfig,
 });
-const projection = findRecord(projectionPlan.records, "CurationProjection", (record) => record.externalItemId === "source-001");
-assert.equal(projection.topicUid, "topic.scaling");
+const projection = findRecord(projectionPlan.records, "CategoryProjection", (record) => record.externalItemId === "source-001");
+assert.equal(projection.categoryKey, "topic.scaling");
 assert.equal(projection.reviewRecommended, true);
-const projectionCorpus = findRecord(projectionPlan.records, "CurationCorpus", (record) => record.id === "curation-corpus-source-corpus");
+const projectionCorpus = findRecord(projectionPlan.records, "CategoryCorpus", (record) => record.id === "category-corpus-source-corpus");
 assert.equal(projectionCorpus.role, "source");
 assert.equal(
   projectionPlan.records.some((record) => JSON.stringify(record.expected).includes("AI-ML-research") || JSON.stringify(record.expected).includes("AI-ML-history")),
@@ -458,7 +459,7 @@ assert.equal(
   "projection imports should use configured corpus ids without AI/ML name fallbacks",
 );
 
-console.log("curation mapper tests passed");
+console.log("category mapper tests passed");
 
 function findRecord(records, modelName, predicate) {
   const record = records.find((entry) => entry.modelName === modelName && predicate(entry.expected));

@@ -32,6 +32,9 @@ type GraphQLGetResponse<T> = {
 
 type GraphQLEdition = {
   id: string;
+  sourceEditionId?: string | null;
+  editionLineageId?: string | null;
+  versionNumber?: number | null;
   slug: string;
   title: string;
   status: string;
@@ -43,13 +46,16 @@ type GraphQLEdition = {
 
 type GraphQLEditionItem = {
   id: string;
-  editionId: string;
-  itemId: string;
+  publishedEditionId: string;
+  publishedItemId: string;
   sortKey: string;
 };
 
 type GraphQLItem = {
   id: string;
+  sourceItemId?: string | null;
+  itemLineageId?: string | null;
+  versionNumber?: number | null;
   type: string;
   status: string;
   slug: string;
@@ -67,7 +73,9 @@ type GraphQLItem = {
 
 type GraphQLMediaAsset = {
   id: string;
-  itemId: string;
+  publishedItemId: string;
+  sourceItemId?: string | null;
+  itemLineageId?: string | null;
   type: string;
   role: string;
   sortKey: string;
@@ -133,7 +141,7 @@ export const graphqlContentRepository: ContentRepository = {
     const edition = await loadPublishedEditionForDate(editionDate);
     const editionItems = await listEditionItems(edition.id);
     for (const editionItem of editionItems) {
-      const item = await getItemById(editionItem.itemId);
+      const item = await getItemById(editionItem.publishedItemId);
       if (!item || item.slug !== articleSlug || item.type !== "article" || item.status !== PUBLISHED_STATUS) continue;
       return normalizeArticle(item, await listMediaAssets(item.id));
     }
@@ -160,7 +168,7 @@ function getClient(): DataClient {
 async function loadActiveEdition(): Promise<GraphQLEdition> {
   const configuredSlug = process.env.PAPYRUS_EDITION_SLUG ?? DEFAULT_EDITION_SLUG;
   const bySlug = await listAll<GraphQLEdition>((options) =>
-    getClient().models.Edition.editionBySlug({ slug: configuredSlug }, options),
+    getPublishedEditionModel().publishedEditionBySlug({ slug: configuredSlug }, options),
   );
   if (bySlug[0]) return bySlug[0];
 
@@ -181,7 +189,7 @@ async function loadLatestPublishedEdition(): Promise<GraphQLEdition> {
   }
 
   const [latestByEditionDate] = await listFirst<GraphQLEdition>((options) =>
-    getClient().models.Edition.listEditionsByStatusAndEditionDate({ status: PUBLISHED_STATUS }, options),
+    getPublishedEditionModel().listPublishedEditionsByStatusAndEditionDate({ status: PUBLISHED_STATUS }, options),
   );
   if (latestByEditionDate) return latestByEditionDate;
 
@@ -207,7 +215,7 @@ async function listPublishedEditionSummaries({
   }
 
   return listPage<GraphQLEdition>(
-    (options) => getClient().models.Edition.listEditionsByStatusAndEditionDate({ status: PUBLISHED_STATUS }, options),
+    (options) => getPublishedEditionModel().listPublishedEditionsByStatusAndEditionDate({ status: PUBLISHED_STATUS }, options),
     safeLimit,
     nextToken,
   );
@@ -225,7 +233,7 @@ async function loadPublishedEditionForDate(editionDate: string, editionSlug?: st
 
 async function listPublishedEditionsForDate(editionDate: string): Promise<GraphQLEdition[]> {
   const editions = await listAll<GraphQLEdition>((options) =>
-    getClient().models.Edition.listEditionsByStatusAndEditionDate(
+    getPublishedEditionModel().listPublishedEditionsByStatusAndEditionDate(
       { status: PUBLISHED_STATUS, editionDate: { eq: editionDate } },
       options,
     ),
@@ -237,7 +245,7 @@ async function loadEditionContentFromEdition(edition: GraphQLEdition): Promise<E
   const editionItems = await listEditionItems(edition.id);
   const articles = await Promise.all(
     editionItems.map(async (editionItem) => {
-      const item = await getItemById(editionItem.itemId);
+      const item = await getItemById(editionItem.publishedItemId);
       if (!item || item.type !== "article" || item.status !== PUBLISHED_STATUS) return null;
       return normalizeArticle(item, await listMediaAssets(item.id));
     }),
@@ -275,42 +283,72 @@ function isMissingGraphQLEditionError(error: unknown): boolean {
 }
 
 function getEditionPublishedAtIndexQuery(): EditionPublishedAtIndexQuery | null {
-  const editionModel = getClient().models.Edition as unknown as {
-    listEditionsByStatusAndPublishedAt?: EditionPublishedAtIndexQuery;
+  const editionModel = getPublishedEditionModel() as unknown as {
+    listPublishedEditionsByStatusAndPublishedAt?: EditionPublishedAtIndexQuery;
   };
-  return typeof editionModel.listEditionsByStatusAndPublishedAt === "function" ? editionModel.listEditionsByStatusAndPublishedAt : null;
+  return typeof editionModel.listPublishedEditionsByStatusAndPublishedAt === "function"
+    ? editionModel.listPublishedEditionsByStatusAndPublishedAt
+    : null;
+}
+
+function getPublishedEditionModel() {
+  const model = getClient().models.PublishedEdition;
+  if (!model) throw missingProjectionModelError("PublishedEdition");
+  return model;
+}
+
+function getPublishedEditionItemModel() {
+  const model = getClient().models.PublishedEditionItem;
+  if (!model) throw missingProjectionModelError("PublishedEditionItem");
+  return model;
+}
+
+function getPublishedItemModel() {
+  const model = getClient().models.PublishedItem;
+  if (!model) throw missingProjectionModelError("PublishedItem");
+  return model;
+}
+
+function getPublishedMediaAssetModel() {
+  const model = getClient().models.PublishedMediaAsset;
+  if (!model) throw missingProjectionModelError("PublishedMediaAsset");
+  return model;
+}
+
+function missingProjectionModelError(modelName: string): Error {
+  return new Error(`No published GraphQL edition found. Projection model ${modelName} is not available in this Amplify output.`);
 }
 
 function isMissingPublishedAtIndexError(error: unknown): boolean {
-  return error instanceof Error && error.message.includes("listEditionsByStatusAndPublishedAt");
+  return error instanceof Error && error.message.includes("listPublishedEditionsByStatusAndPublishedAt");
 }
 
 async function listEditionItems(editionId: string): Promise<GraphQLEditionItem[]> {
   const items = await listAll<GraphQLEditionItem>((options) =>
-    getClient().models.EditionItem.listEditionItemsByEditionAndSortKey({ editionId }, options),
+    getPublishedEditionItemModel().listPublishedEditionItemsByEditionAndSortKey({ publishedEditionId: editionId }, options),
   );
   return items.sort((left, right) => left.sortKey.localeCompare(right.sortKey));
 }
 
 async function listItemsByTypeStatus(typeStatus: string): Promise<GraphQLItem[]> {
   return listAll<GraphQLItem>((options) =>
-    getClient().models.Item.listItemsByTypeStatusAndPublishedAt({ typeStatus }, options),
+    getPublishedItemModel().listPublishedItemsByTypeStatusAndPublishedAt({ typeStatus }, options),
   );
 }
 
 async function getItemById(id: string): Promise<GraphQLItem | null> {
-  const response = await getClient().models.Item.get({ id }, { authMode: AUTH_MODE });
+  const response = await getPublishedItemModel().get({ id }, { authMode: AUTH_MODE });
   return readGetResponse<GraphQLItem>(response);
 }
 
 async function getItemBySlug(slug: string): Promise<GraphQLItem | null> {
-  const items = await listAll<GraphQLItem>((options) => getClient().models.Item.itemBySlug({ slug }, options));
+  const items = await listAll<GraphQLItem>((options) => getPublishedItemModel().publishedItemBySlug({ slug }, options));
   return items[0] ?? null;
 }
 
 async function listMediaAssets(itemId: string): Promise<GraphQLMediaAsset[]> {
   const mediaAssets = await listAll<GraphQLMediaAsset>((options) =>
-    getClient().models.MediaAsset.listMediaAssetsByItemAndSortKey({ itemId }, options),
+    getPublishedMediaAssetModel().listPublishedMediaAssetsByItemAndSortKey({ publishedItemId: itemId }, options),
   );
   return mediaAssets.sort((left, right) => left.sortKey.localeCompare(right.sortKey));
 }

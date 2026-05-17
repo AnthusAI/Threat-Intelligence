@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+const crypto = require("node:crypto");
+
 const {
   decodeJwtClaims,
   getGraphQLEndpoint,
@@ -8,18 +10,18 @@ const {
   loadDotEnv,
 } = require("./lib/papyrus-env.cjs");
 const {
-  buildAcceptedTopicSetPayload,
-  buildAcceptedTaxonomyPayload,
+  buildAcceptedCategorySetPayload,
+  buildAcceptedCategoryTreePayload,
   buildSteeringFeedbackPayload,
   buildSteeringConfigRecords,
   buildProjectionImportRecords,
   buildSteeringImportRecords,
-  curationCorpusId,
+  categoryCorpusId,
   loadJsonFile,
   loadSteeringBundleFromBiblicus,
   mergeReviewedProposalState,
   writeJsonFile,
-} = require("./lib/papyrus-curation.cjs");
+} = require("./lib/papyrus-categories.cjs");
 const {
   findCorpusConfigByPath,
   loadSteeringConfig,
@@ -35,7 +37,7 @@ async function main() {
 
   const args = process.argv.slice(2);
   const [group, command, value] = args;
-  if (group !== "content" && group !== "curation") {
+  if (group !== "content" && group !== "categories") {
     printUsage();
     process.exitCode = 1;
     return;
@@ -62,22 +64,22 @@ async function main() {
     case "content:delete":
       await handleDelete(value, args.slice(3));
       return;
-    case "curation:import-steering":
+    case "categories:import-steering":
       await importSteering(args.slice(2));
       return;
-    case "curation:import-config":
+    case "categories:import-config":
       await importSteeringConfig(args.slice(2));
       return;
-    case "curation:export-topic-set":
-      await exportTopicSet(args.slice(2));
+    case "categories:export-category-set":
+      await exportCategorySet(args.slice(2));
       return;
-    case "curation:export-taxonomy":
-      await exportTaxonomy(args.slice(2));
+    case "categories:export-category-tree":
+      await exportCategoryTree(args.slice(2));
       return;
-    case "curation:export-steering-feedback":
+    case "categories:export-steering-feedback":
       await exportSteeringFeedback(args.slice(2));
       return;
-    case "curation:import-projection":
+    case "categories:import-projection":
       await importProjection(args.slice(2));
       return;
     default:
@@ -189,7 +191,7 @@ async function importSteering(flags) {
   });
   const changes = await buildRecordChanges(client, plan.records);
   await applyRecordChanges(client, changes);
-  printCurationImportSummary("steering", plan.importRunId, changes);
+  printCategoryImportSummary("steering", plan.importRunId, changes);
 }
 
 async function importSteeringConfig(flags) {
@@ -199,12 +201,12 @@ async function importSteeringConfig(flags) {
   const records = buildSteeringConfigRecords(steeringConfig);
   const changes = await buildSteeringConfigRecordChanges(client, records);
   await applyRecordChanges(client, changes);
-  printCurationImportSummary("config", "steering-config", changes);
+  printCategoryImportSummary("config", "steering-config", changes);
 }
 
 async function importProjection(flags) {
   const options = parseOptions(flags);
-  if (!options.bundle) throw new Error("curation import-projection requires --bundle.");
+  if (!options.bundle) throw new Error("categories import-projection requires --bundle.");
   const payload = loadJsonFile(options.bundle);
   const steeringConfig = loadSteeringConfig({ configPath: options.config });
   const resolvedProjection = resolveProjectionImportCorpora(steeringConfig, options);
@@ -218,57 +220,79 @@ async function importProjection(flags) {
   });
   const changes = await buildRecordChanges(client, plan.records);
   await applyRecordChanges(client, changes);
-  printCurationImportSummary("projection", plan.importRunId, changes);
+  printCategoryImportSummary("projection", plan.importRunId, changes);
 }
 
-async function exportTopicSet(flags) {
+async function exportCategorySet(flags) {
   const options = parseOptions(flags);
-  const topicSetId = options["topic-set"];
-  if (!topicSetId) throw new Error("curation export-topic-set requires --topic-set.");
-  if (!options.output) throw new Error("curation export-topic-set requires --output.");
+  const categorySetId = options["category-set"];
+  if (!categorySetId) throw new Error("categories export-category-set requires --category-set.");
+  if (!options.output) throw new Error("categories export-category-set requires --output.");
   const { client } = createAuthoringClient();
-  const topicSet = await client.getRecord("CurationTopicSet", topicSetId);
-  if (!topicSet) throw new Error(`CurationTopicSet ${topicSetId} was not found.`);
-  const topics = (await client.listRecords("CurationTopic"))
-    .filter((topic) => topic.topicSetId === topicSetId && topic.status !== "deprecated");
-  writeJsonFile(options.output, buildAcceptedTopicSetPayload(topicSet, topics));
-  console.log(`export\ttopic-set\t${topicSetId}\t${options.output}\t${topics.length} topics`);
+  const categorySet = await client.getRecord("CategorySet", categorySetId);
+  if (!categorySet) throw new Error(`CategorySet ${categorySetId} was not found.`);
+  const categories = (await client.listRecords("Category"))
+    .filter((category) => category.categorySetId === categorySetId && category.status !== "archived");
+  writeJsonFile(options.output, buildAcceptedCategorySetPayload(categorySet, categories));
+  console.log(`export\tcategory-set\t${categorySetId}\t${options.output}\t${categories.length} categories`);
 }
 
-async function exportTaxonomy(flags) {
+async function exportCategoryTree(flags) {
   const options = parseOptions(flags);
-  const taxonomyId = options.taxonomy;
-  if (!taxonomyId) throw new Error("curation export-taxonomy requires --taxonomy.");
-  if (!options.output) throw new Error("curation export-taxonomy requires --output.");
+  const categorySetId = options["category-set"];
+  if (!categorySetId) throw new Error("categories export-category-tree requires --category-set.");
+  if (!options.output) throw new Error("categories export-category-tree requires --output.");
   const { client } = createAuthoringClient();
-  const taxonomy = await client.getRecord("CurationTaxonomy", taxonomyId);
-  if (!taxonomy) throw new Error(`CurationTaxonomy ${taxonomyId} was not found.`);
-  const nodes = (await client.listRecords("CurationTaxonomyNode"))
-    .filter((node) => node.taxonomyId === taxonomyId && node.status !== "deprecated");
-  writeJsonFile(options.output, buildAcceptedTaxonomyPayload(taxonomy, nodes));
-  console.log(`export\ttaxonomy\t${taxonomyId}\t${options.output}\t${nodes.length} nodes`);
+  const categorySet = await client.getRecord("CategorySet", categorySetId);
+  if (!categorySet) throw new Error(`CategorySet ${categorySetId} was not found.`);
+  const nodes = (await client.listRecords("Category"))
+    .filter((node) => node.categorySetId === categorySetId && node.status !== "archived");
+  writeJsonFile(options.output, buildAcceptedCategoryTreePayload(categorySet, nodes));
+  console.log(`export\tcategory-tree\t${categorySetId}\t${options.output}\t${nodes.length} categories`);
 }
 
 async function exportSteeringFeedback(flags) {
   const options = parseOptions(flags);
-  const topicSetId = options["topic-set"];
-  if (!topicSetId) throw new Error("curation export-steering-feedback requires --topic-set.");
-  if (!options.output) throw new Error("curation export-steering-feedback requires --output.");
+  const categorySetId = options["category-set"];
+  if (!categorySetId) throw new Error("categories export-steering-feedback requires --category-set.");
+  if (!options.output) throw new Error("categories export-steering-feedback requires --output.");
   const { client } = createAuthoringClient();
-  const topicSet = await client.getRecord("CurationTopicSet", topicSetId);
-  if (!topicSet) throw new Error(`CurationTopicSet ${topicSetId} was not found.`);
-  const proposals = (await client.listRecords("CurationProposal"))
-    .filter((proposal) => proposal.topicSetId === topicSetId);
+  const categorySet = await client.getRecord("CategorySet", categorySetId);
+  if (!categorySet) throw new Error(`CategorySet ${categorySetId} was not found.`);
+  const proposals = (await client.listRecords("CategoryProposal"))
+    .filter((proposal) => proposal.categorySetId === categorySetId);
   const proposalIds = new Set(proposals.map((proposal) => proposal.id));
-  const decisions = (await client.listRecords("CurationDecision"))
-    .filter((decision) => decision.topicSetId === topicSetId || proposalIds.has(decision.proposalId));
-  const payload = buildSteeringFeedbackPayload(topicSet, proposals, decisions);
+  const decisions = (await client.listRecords("CategoryDecision"))
+    .filter((decision) => decision.categorySetId === categorySetId || proposalIds.has(decision.proposalId));
+  const payload = buildSteeringFeedbackPayload(categorySet, proposals, decisions);
   writeJsonFile(options.output, payload);
-  console.log(`export\tsteering-feedback\t${topicSetId}\t${options.output}\t${payload.accepted_proposals.length} accepted\t${payload.rejected_proposals.length} rejected`);
+  console.log(`export\tsteering-feedback\t${categorySetId}\t${options.output}\t${payload.accepted_proposals.length} accepted\t${payload.rejected_proposals.length} rejected`);
 }
 
 async function deleteAllContent(client) {
-  const deleteOrder = ["MediaAsset", "ItemTag", "EditionItem", "Item", "Tag", "Edition"];
+  const deleteOrder = [
+    "PublishedMediaAsset",
+    "PublishedEditionItem",
+    "PublishedItem",
+    "PublishedEdition",
+    "PublishedCategory",
+    "PublishedCategorySet",
+    "MediaAsset",
+    "ItemTag",
+    "EditionItem",
+    "Item",
+    "Tag",
+    "Edition",
+    "CategoryRawPayload",
+    "CategoryDecision",
+    "CategoryProposal",
+    "CategoryProjection",
+    "Category",
+    "CategorySet",
+    "CategoryArtifact",
+    "CategoryImportRun",
+    "CategoryCorpus",
+  ];
   const result = [];
 
   for (const modelName of deleteOrder) {
@@ -342,7 +366,7 @@ async function diffEdition(client, editionSlug) {
 
   const articles = loadMarkdownArticles();
   const records = [];
-  records.push(await buildEditionRecordChange(client, editionConfig));
+  records.push(...await buildEditionRecordChanges(client, editionConfig));
 
   for (const [index, article] of articles.entries()) {
     const articleChanges = await buildArticleDiff(client, article, editionConfig, index);
@@ -354,13 +378,16 @@ async function diffEdition(client, editionSlug) {
 
 async function buildArticleDiff(client, article, editionConfig, index) {
   const records = [];
-  const itemId = `item-${article.slug}`;
+  const itemLineageId = `item-${article.slug}`;
+  const itemId = `${itemLineageId}-v1`;
+  const publishedItemId = `published-${itemLineageId}`;
   const sectionSlug = slugify(article.section);
   const tagId = `tag-${sectionSlug}`;
   const articleOrderIndex = index + 1;
 
-  const itemRecord = {
+  const itemRecord = withVersionFields({
     id: itemId,
+    lineageId: itemLineageId,
     type: "article",
     status: "published",
     typeStatus: "article#published",
@@ -380,8 +407,34 @@ async function buildArticleDiff(client, article, editionConfig, index) {
     pullQuotes: article.pullQuotes ?? [],
     layout: toAwsJson({ source: "markdown" }),
     editorial: toAwsJson({}),
-  };
+    updatedAt: editionConfig.publishedAt,
+  }, { now: editionConfig.publishedAt, actor: "papyrus-content-cli", reason: "markdown-sync" });
   records.push(await buildRecordChange(client, "Item", itemRecord));
+  records.push(await buildRecordChange(client, "PublishedItem", {
+    id: publishedItemId,
+    sourceItemId: itemId,
+    itemLineageId,
+    versionNumber: itemRecord.versionNumber,
+    type: itemRecord.type,
+    status: itemRecord.status,
+    typeStatus: itemRecord.typeStatus,
+    slug: itemRecord.slug,
+    shortSlug: itemRecord.shortSlug,
+    section: itemRecord.section,
+    sectionStatus: itemRecord.sectionStatus,
+    title: itemRecord.title,
+    headline: itemRecord.headline,
+    deck: itemRecord.deck,
+    body: itemRecord.body,
+    byline: itemRecord.byline,
+    dateline: itemRecord.dateline,
+    publishedAt: itemRecord.publishedAt,
+    editionDate: itemRecord.editionDate,
+    sortTitle: itemRecord.sortTitle,
+    pullQuotes: itemRecord.pullQuotes,
+    layout: itemRecord.layout,
+    editorial: itemRecord.editorial,
+  }));
 
   const tagRecord = {
     id: tagId,
@@ -392,8 +445,8 @@ async function buildArticleDiff(client, article, editionConfig, index) {
   records.push(await buildRecordChange(client, "Tag", tagRecord));
 
   const itemTagRecord = {
-    id: `item-tag-${article.slug}-${sectionSlug}`,
-    itemId,
+      id: `item-tag-${article.slug}-${sectionSlug}-v1`,
+      itemId,
     tagId,
     itemType: "article",
     itemStatus: "published",
@@ -408,7 +461,7 @@ async function buildArticleDiff(client, article, editionConfig, index) {
     }
 
     const mediaRecord = {
-      id: `media-${article.slug}-${assetIndex}`,
+      id: `media-${article.slug}-${assetIndex}-v1`,
       itemId,
       type: "image",
       role: (asset.roles ?? ["lead", "continuation", "continuationInset"]).join(","),
@@ -431,13 +484,43 @@ async function buildArticleDiff(client, article, editionConfig, index) {
       metadata: toAwsJson({ sourceUrl: asset.src }),
     };
     records.push(await buildRecordChange(client, "MediaAsset", mediaRecord));
+    records.push(await buildRecordChange(client, "PublishedMediaAsset", {
+      id: `published-media-${article.slug}-${assetIndex}`,
+      sourceMediaAssetId: mediaRecord.id,
+      publishedItemId,
+      sourceItemId: itemId,
+      itemLineageId,
+      type: mediaRecord.type,
+      role: mediaRecord.role,
+      sortKey: mediaRecord.sortKey,
+      storagePath: mediaRecord.storagePath,
+      externalUrl: mediaRecord.externalUrl,
+      alt: mediaRecord.alt,
+      caption: mediaRecord.caption,
+      credit: mediaRecord.credit,
+      width: mediaRecord.width,
+      height: mediaRecord.height,
+      aspectRatio: mediaRecord.aspectRatio,
+      focalX: mediaRecord.focalX,
+      focalY: mediaRecord.focalY,
+      minHeight: mediaRecord.minHeight,
+      preferredHeight: mediaRecord.preferredHeight,
+      maxHeight: mediaRecord.maxHeight,
+      crop: mediaRecord.crop,
+      wrapsText: mediaRecord.wrapsText,
+      metadata: mediaRecord.metadata,
+    }));
   }
 
   if (editionConfig.articleOrder.includes(article.slug)) {
+    const editionLineageId = editionConfig.id;
+    const editionId = `${editionLineageId}-v1`;
     const editionItemRecord = {
-      id: `${editionConfig.id}-${article.slug}`,
-      editionId: editionConfig.id,
+      id: `${editionId}-${article.slug}`,
+      editionId,
+      editionLineageId,
       itemId,
+      itemLineageId,
       placementKey: `front:${articleOrderIndex}`,
       sortKey: `${String(articleOrderIndex).padStart(3, "0")}#${article.slug}`,
       pageNumber: 1,
@@ -445,14 +528,32 @@ async function buildArticleDiff(client, article, editionConfig, index) {
       metadata: toAwsJson({}),
     };
     records.push(await buildRecordChange(client, "EditionItem", editionItemRecord));
+    records.push(await buildRecordChange(client, "PublishedEditionItem", {
+      id: `published-${editionItemRecord.id}`,
+      publishedEditionId: `published-${editionLineageId}`,
+      publishedItemId,
+      sourceEditionItemId: editionItemRecord.id,
+      sourceEditionId: editionId,
+      sourceItemId: itemId,
+      editionLineageId,
+      itemLineageId,
+      placementKey: editionItemRecord.placementKey,
+      sortKey: editionItemRecord.sortKey,
+      pageNumber: editionItemRecord.pageNumber,
+      priority: editionItemRecord.priority,
+      metadata: editionItemRecord.metadata,
+    }));
   }
 
   return { articleSlug: article.slug, records };
 }
 
-async function buildEditionRecordChange(client, editionConfig) {
-  return buildRecordChange(client, "Edition", {
-    id: editionConfig.id,
+async function buildEditionRecordChanges(client, editionConfig) {
+  const editionLineageId = editionConfig.id;
+  const editionId = `${editionLineageId}-v1`;
+  const editionRecord = withVersionFields({
+    id: editionId,
+    lineageId: editionLineageId,
     slug: editionConfig.slug,
     title: editionConfig.title,
     status: "published",
@@ -461,12 +562,29 @@ async function buildEditionRecordChange(client, editionConfig) {
     description: editionConfig.description,
     layoutPlan: toAwsJson(editionConfig.layoutPlan),
     metadata: toAwsJson({ source: "markdown-sync" }),
-  });
+  }, { now: editionConfig.publishedAt || `${editionConfig.publishDate}T12:00:00.000Z`, actor: "papyrus-content-cli", reason: "markdown-sync" });
+  return [
+    await buildRecordChange(client, "Edition", editionRecord),
+    await buildRecordChange(client, "PublishedEdition", {
+      id: `published-${editionLineageId}`,
+      sourceEditionId: editionId,
+      editionLineageId,
+      versionNumber: editionRecord.versionNumber,
+      slug: editionRecord.slug,
+      title: editionRecord.title,
+      status: editionRecord.status,
+      editionDate: editionRecord.editionDate,
+      publishedAt: editionRecord.publishedAt,
+      description: editionRecord.description,
+      layoutPlan: editionRecord.layoutPlan,
+      metadata: editionRecord.metadata,
+    }),
+  ];
 }
 
 async function buildRecordChange(client, modelName, expected) {
   const current = await client.getRecord(modelName, expected.id);
-  const nextExpected = modelName === "CurationProposal" ? mergeReviewedProposalState(expected, current) : expected;
+  const nextExpected = modelName === "CategoryProposal" ? mergeReviewedProposalState(expected, current) : expected;
   const action = !current ? "create" : recordsEqual(current, nextExpected) ? "noop" : "update";
   return { modelName, expected: nextExpected, current, action };
 }
@@ -497,7 +615,7 @@ function printDeleteSummary(result) {
   }
 }
 
-function printCurationImportSummary(kind, importRunId, changes) {
+function printCategoryImportSummary(kind, importRunId, changes) {
   console.log(`Import: ${kind}`);
   console.log(`Run: ${importRunId}`);
   for (const record of changes) {
@@ -530,6 +648,22 @@ function stableStringify(value) {
   return JSON.stringify(value);
 }
 
+function withVersionFields(record, { now, actor, reason }) {
+  const versioned = {
+    ...record,
+    versionNumber: record.versionNumber ?? 1,
+    previousVersionId: record.previousVersionId ?? null,
+    versionState: record.versionState ?? "current",
+    versionCreatedAt: record.versionCreatedAt ?? now,
+    versionCreatedBy: record.versionCreatedBy ?? actor,
+    changeReason: record.changeReason ?? reason,
+  };
+  return {
+    ...versioned,
+    contentHash: record.contentHash ?? crypto.createHash("sha256").update(stableStringify(normalizeRecord(versioned))).digest("hex"),
+  };
+}
+
 function toAwsJson(value) {
   return JSON.stringify(value);
 }
@@ -557,15 +691,15 @@ function printUsage() {
   console.log("  npm run content -- content sync article <slug>");
   console.log("  npm run content -- content sync edition <edition-slug>");
   console.log("  npm run content -- content delete all --yes");
-  console.log("  npm run content -- curation import-steering --bundle <steering-export.json>");
-  console.log("  npm run content -- curation import-steering --corpus <path> --classifier <classifier-id>");
-  console.log("  npm run content -- curation import-steering --config <steering.yml> --corpus-key <key>");
-  console.log("  npm run content -- curation import-config --config <steering.yml>");
-  console.log("  npm run content -- curation export-topic-set --topic-set <id> --output <accepted-topic-set.json>");
-  console.log("  npm run content -- curation export-taxonomy --taxonomy <id> --output <accepted-taxonomy.json>");
-  console.log("  npm run content -- curation export-steering-feedback --topic-set <id> --output <steering-feedback.json>");
-  console.log("  npm run content -- curation import-projection --bundle <projection.json>");
-  console.log("  npm run content -- curation import-projection --config <steering.yml> --target-corpus-key <key> --authority-corpus-key <key> --bundle <projection.json>");
+  console.log("  npm run content -- categories import-steering --bundle <steering-export.json>");
+  console.log("  npm run content -- categories import-steering --corpus <path> --classifier <classifier-id>");
+  console.log("  npm run content -- categories import-steering --config <steering.yml> --corpus-key <key>");
+  console.log("  npm run content -- categories import-config --config <steering.yml>");
+  console.log("  npm run content -- categories export-category-set --category-set <id> --output <accepted-category-set.json>");
+  console.log("  npm run content -- categories export-category-tree --category-set <id> --output <accepted-category-tree.json>");
+  console.log("  npm run content -- categories export-steering-feedback --category-set <id> --output <steering-feedback.json>");
+  console.log("  npm run content -- categories import-projection --bundle <projection.json>");
+  console.log("  npm run content -- categories import-projection --config <steering.yml> --target-corpus-key <key> --authority-corpus-key <key> --bundle <projection.json>");
 }
 
 function resolveSteeringImportCorpus(config, options) {
@@ -595,12 +729,12 @@ function resolveProjectionImportCorpora(config, options) {
     targetCorpus = requireCorpusConfig(requiredConfig, options["target-corpus-key"], "--target-corpus-key");
     const authorityKey = options["authority-corpus-key"] ?? targetCorpus.canonicalProjection?.authorityCorpusKey;
     if (authorityKey) authorityCorpus = requireCorpusConfig(requiredConfig, authorityKey, "--authority-corpus-key");
-    const classifierId = options.classifier ?? targetCorpus.canonicalProjection?.classifierId ?? requiredConfig.canonicalTopicSet.classifierId;
+    const classifierId = options.classifier ?? targetCorpus.canonicalProjection?.classifierId ?? requiredConfig.canonicalCategorySet.classifierId;
     return {
       targetCorpus,
       authorityCorpus,
-      targetCorpusId: options["target-corpus-id"] ?? curationCorpusId(targetCorpus),
-      authorityCorpusId: options["authority-corpus-id"] ?? (authorityCorpus ? curationCorpusId(authorityCorpus) : undefined),
+      targetCorpusId: options["target-corpus-id"] ?? categoryCorpusId(targetCorpus),
+      authorityCorpusId: options["authority-corpus-id"] ?? (authorityCorpus ? categoryCorpusId(authorityCorpus) : undefined),
       classifierId,
     };
   }
@@ -612,7 +746,7 @@ function resolveProjectionImportCorpora(config, options) {
     targetCorpus,
     authorityCorpus,
     targetCorpusId: options["target-corpus-id"],
-    authorityCorpusId: options["authority-corpus-id"] ?? (authorityCorpus ? curationCorpusId(authorityCorpus) : undefined),
+    authorityCorpusId: options["authority-corpus-id"] ?? (authorityCorpus ? categoryCorpusId(authorityCorpus) : undefined),
     classifierId: options.classifier,
   };
 }

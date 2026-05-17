@@ -12,7 +12,7 @@ SPEC.loader.exec_module(papyrus_newsroom)
 
 
 class NewsroomToolTests(unittest.TestCase):
-    def test_assignment_plan_uses_status_lifecycle(self):
+    def test_assignment_plan_uses_assignment_type(self):
         plan = papyrus_newsroom.build_assignment_record_plan(
             edition_id="edition-1",
             corpus_key="AI-ML-research",
@@ -22,7 +22,7 @@ class NewsroomToolTests(unittest.TestCase):
                     "title": "AI Agents Enter the Lab",
                     "brief": "Explain how agentic systems are changing research workflows.",
                     "angle": "Focus on practical scientific workflow changes.",
-                    "topic_uid": "automated-scientific-discovery",
+                    "category_key": "automated-scientific-discovery",
                     "evidence_item_ids": ["research-001"],
                     "recent_article_notes": ["Avoid yesterday's benchmark roundup."],
                 }
@@ -31,27 +31,72 @@ class NewsroomToolTests(unittest.TestCase):
 
         item = plan["item"]
         self.assertTrue(plan["dryRun"])
-        self.assertEqual(item["type"], "article")
-        self.assertEqual(item["status"], "assignment")
-        self.assertEqual(item["typeStatus"], "article#assignment")
+        self.assertEqual(plan["lifecycle"], "assignment-dispatch")
+        self.assertEqual(item["type"], "assignment")
+        self.assertEqual(item["status"], "dispatched")
+        self.assertEqual(item["typeStatus"], "assignment#dispatched")
+        self.assertEqual(item["lineageId"], item["id"])
+        self.assertEqual(item["versionNumber"], 1)
+        self.assertEqual(item["versionState"], "current")
+        self.assertRegex(item["contentHash"], r"^sha256:[a-f0-9]{64}$")
         self.assertEqual(item["body"], [])
         self.assertIsNone(item["publishedAt"])
         self.assertEqual(plan["editionItem"]["editionId"], "edition-1")
+        self.assertEqual(plan["editionItem"]["editionLineageId"], "edition-1")
+        self.assertEqual(plan["editionItem"]["itemLineageId"], item["lineageId"])
         self.assertEqual(plan["editionItem"]["placementKey"], "assignment:ai-agents-enter-the-lab")
         assignment = item["editorial"]["newsroom"]["assignment"]
         self.assertEqual(assignment["corpusKey"], "AI-ML-research")
-        self.assertEqual(assignment["topicUid"], "automated-scientific-discovery")
+        self.assertEqual(assignment["categoryKey"], "automated-scientific-discovery")
         self.assertEqual(assignment["evidenceItemIds"], ["research-001"])
+        self.assertEqual(assignment["downstreamReporter"]["procedure"], "procedures/newsroom/reporter.tac")
 
-    def test_draft_plan_advances_same_item_to_draft(self):
+    def test_dispatch_plan_caps_assignments_by_section_ratio(self):
+        plan = papyrus_newsroom.build_assignment_dispatch_plan(
+            edition_id="edition-1",
+            corpus_key="AI-ML-research",
+            generated_at="2026-05-16T12:00:00Z",
+            assignment_ratio=1.5,
+            section_targets_json=json.dumps(
+                [
+                    {"section": "Research", "target_articles": 2},
+                    {"section": "Markets", "target_articles": 1},
+                ]
+            ),
+            assignments_json=json.dumps(
+                [
+                    {"section": "Research", "title": "Research 1"},
+                    {"section": "Research", "title": "Research 2"},
+                    {"section": "Research", "title": "Research 3"},
+                    {"section": "Markets", "title": "Markets 1"},
+                    {"section": "Markets", "title": "Markets 2"},
+                    {"section": "Markets", "title": "Markets 3"},
+                ]
+            ),
+        )
+
+        self.assertTrue(plan["dryRun"])
+        self.assertEqual(plan["lifecycle"], "assignment-dispatch")
+        self.assertEqual(plan["reviewerLoad"]["targetArticleCount"], 3)
+        self.assertEqual(plan["reviewerLoad"]["dispatchedAssignmentCount"], 5)
+        self.assertEqual(plan["reviewerLoad"]["suppressedCandidateCount"], 1)
+        self.assertEqual(len(plan["recordPlans"]), 5)
+        self.assertEqual(len(plan["reporterDispatches"]), 5)
+        self.assertEqual(plan["sectionTargets"][0]["dispatchCount"], 3)
+        self.assertEqual(plan["sectionTargets"][1]["dispatchCount"], 2)
+        self.assertEqual(plan["recordPlans"][0]["item"]["type"], "assignment")
+        self.assertEqual(plan["reporterDispatches"][0]["procedure"], "procedures/newsroom/reporter.tac")
+        self.assertIn('"type": "assignment"', plan["reporterDispatches"][0]["input"]["assignment_json"])
+
+    def test_draft_plan_creates_article_from_assignment_item(self):
         plan = papyrus_newsroom.build_draft_update_plan(
             generated_at="2026-05-16T12:30:00Z",
             assignment_item_json=json.dumps(
                 {
                     "id": "assignment-1",
-                    "type": "article",
-                    "status": "assignment",
-                    "typeStatus": "article#assignment",
+                    "type": "assignment",
+                    "status": "dispatched",
+                    "typeStatus": "assignment#dispatched",
                     "slug": "ai-agents-enter-the-lab",
                     "section": "Research",
                     "title": "AI Agents Enter the Lab",
@@ -78,26 +123,37 @@ class NewsroomToolTests(unittest.TestCase):
             ),
         )
 
-        item = plan["item"]
+        assignment = plan["assignmentItem"]
+        item = plan["draftItem"]
         self.assertTrue(plan["dryRun"])
-        self.assertEqual(item["id"], "assignment-1")
+        self.assertEqual(assignment["id"], "assignment-1-v2")
+        self.assertEqual(assignment["previousVersionId"], "assignment-1")
+        self.assertEqual(assignment["type"], "assignment")
+        self.assertEqual(assignment["status"], "drafted")
+        self.assertEqual(assignment["typeStatus"], "assignment#drafted")
+        self.assertEqual(item["id"], "item-ai-agents-enter-the-lab")
         self.assertEqual(item["type"], "article")
         self.assertEqual(item["status"], "draft")
         self.assertEqual(item["typeStatus"], "article#draft")
         self.assertEqual(item["sectionStatus"], "research#draft")
         self.assertIsNone(item["publishedAt"])
         self.assertIn("assignment", item["editorial"]["newsroom"])
+        self.assertEqual(item["editorial"]["newsroom"]["assignmentItemId"], "assignment-1-v2")
         self.assertEqual(item["editorial"]["newsroom"]["draft"]["evidenceItemIds"], ["research-001"])
+        self.assertEqual(plan["records"][0]["action"], "create")
+        self.assertEqual(plan["records"][1]["action"], "update")
+        self.assertEqual(plan["records"][1]["input"]["versionState"], "superseded")
+        self.assertEqual(plan["records"][2]["action"], "create")
 
-    def test_research_plan_preserves_assignment_lifecycle(self):
+    def test_research_plan_preserves_assignment_type(self):
         plan = papyrus_newsroom.build_research_update_plan(
             generated_at="2026-05-16T12:15:00Z",
             assignment_item_json=json.dumps(
                 {
                     "id": "assignment-1",
-                    "type": "article",
-                    "status": "assignment",
-                    "typeStatus": "article#assignment",
+                    "type": "assignment",
+                    "status": "dispatched",
+                    "typeStatus": "assignment#dispatched",
                     "slug": "ai-agents-enter-the-lab",
                     "section": "Research",
                     "title": "AI Agents Enter the Lab",
@@ -114,7 +170,7 @@ class NewsroomToolTests(unittest.TestCase):
                 {
                     "summary": "Evidence supports a practical research-workflow angle.",
                     "corpus_key": "AI-ML-research",
-                    "topic_uid": "automated-scientific-discovery",
+                    "category_key": "automated-scientific-discovery",
                     "evidence_item_ids": ["research-001", "research-002"],
                     "queries": ["agentic research workflows"],
                     "source_snapshots": [{"itemId": "research-001", "title": "Lab agents"}],
@@ -129,10 +185,11 @@ class NewsroomToolTests(unittest.TestCase):
         item = plan["item"]
         self.assertTrue(plan["dryRun"])
         self.assertEqual(plan["lifecycle"], "assignment-research")
-        self.assertEqual(item["id"], "assignment-1")
-        self.assertEqual(item["type"], "article")
-        self.assertEqual(item["status"], "assignment")
-        self.assertEqual(item["typeStatus"], "article#assignment")
+        self.assertEqual(item["id"], "assignment-1-v2")
+        self.assertEqual(item["previousVersionId"], "assignment-1")
+        self.assertEqual(item["type"], "assignment")
+        self.assertEqual(item["status"], "researched")
+        self.assertEqual(item["typeStatus"], "assignment#researched")
         self.assertIsNone(item["publishedAt"])
         self.assertIn("assignment", item["editorial"]["newsroom"])
         research = item["editorial"]["newsroom"]["research"]
@@ -140,6 +197,8 @@ class NewsroomToolTests(unittest.TestCase):
         self.assertEqual(research["corpusKey"], "AI-ML-research")
         self.assertEqual(research["evidenceItemIds"], ["research-001", "research-002"])
         self.assertEqual(research["procedure"]["role"], "researcher")
+        self.assertEqual(plan["records"][0]["action"], "create")
+        self.assertEqual(plan["records"][1]["input"]["versionState"], "superseded")
 
     def test_lambda_auth_header_matches_authoring_lane(self):
         token = papyrus_newsroom._lambda_auth_token("Bearer abc.def.ghi")

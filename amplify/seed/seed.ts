@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { addToUserGroup, createAndSignUpUser, signInUser } from "@aws-amplify/seed";
 import { Amplify } from "aws-amplify";
 import { generateClient } from "aws-amplify/data";
@@ -38,8 +39,28 @@ async function main() {
 
   try {
     const orderedArticles = orderArticles(articles, editionConfig.articleOrder);
-    await upsert("Edition", {
+    const editionRecord = withVersionFields({
       id: editionConfig.id,
+      slug: editionConfig.slug,
+      title: editionConfig.title,
+      status: "published",
+      editionDate: editionConfig.publishDate,
+      publishedAt: editionConfig.publishedAt,
+      description: editionConfig.description,
+      layoutPlan: toAwsJson(editionConfig.layoutPlan),
+      metadata: toAwsJson({ source: "fixture-seed" }),
+    }, {
+      lineageId: editionConfig.id,
+      versionCreatedAt: editionConfig.publishedAt,
+      versionCreatedBy: "amplify-seed",
+      changeReason: "fixture seed",
+    });
+    await upsert("Edition", editionRecord);
+    await upsert("PublishedEdition", {
+      id: publishedEditionId(editionConfig.id),
+      sourceEditionId: editionRecord.id,
+      editionLineageId: editionRecord.lineageId,
+      versionNumber: editionRecord.versionNumber,
       slug: editionConfig.slug,
       title: editionConfig.title,
       status: "published",
@@ -99,8 +120,39 @@ async function seedArticle(article: Article, index: number, editionConfig: SeedE
   const tagId = `tag-${sectionSlug}`;
   const sortKey = `${String(index + 1).padStart(3, "0")}#${article.slug}`;
 
-  await upsert("Item", {
+  const itemRecord = withVersionFields({
     id: itemId,
+    type: "article",
+    status: "published",
+    typeStatus: "article#published",
+    slug: article.slug,
+    shortSlug: article.shortSlug,
+    section: article.section,
+    sectionStatus: `${sectionSlug}#published`,
+    title: article.headline,
+    headline: article.headline,
+    deck: article.deck,
+    body: article.body,
+    byline: article.byline,
+    dateline: article.dateline,
+    publishedAt: editionConfig.publishedAt,
+    editionDate: editionConfig.publishDate,
+    sortTitle: article.headline,
+    pullQuotes: article.pullQuotes ?? [],
+    layout: toAwsJson({ source: "fixture" }),
+    editorial: toAwsJson({}),
+  }, {
+    lineageId: itemId,
+    versionCreatedAt: editionConfig.publishedAt,
+    versionCreatedBy: "amplify-seed",
+    changeReason: "fixture seed",
+  });
+  await upsert("Item", itemRecord);
+  await upsert("PublishedItem", {
+    id: publishedItemId(itemId),
+    sourceItemId: itemRecord.id,
+    itemLineageId: itemRecord.lineageId,
+    versionNumber: itemRecord.versionNumber,
     type: "article",
     status: "published",
     typeStatus: "article#published",
@@ -142,7 +194,24 @@ async function seedArticle(article: Article, index: number, editionConfig: SeedE
   await upsert("EditionItem", {
     id: `${editionConfig.id}-${article.slug}`,
     editionId: editionConfig.id,
+    editionLineageId: editionConfig.id,
     itemId,
+    itemLineageId: itemId,
+    placementKey: `front:${index + 1}`,
+    sortKey,
+    pageNumber: 1,
+    priority: index + 1,
+    metadata: toAwsJson({}),
+  });
+  await upsert("PublishedEditionItem", {
+    id: `${publishedEditionId(editionConfig.id)}-${article.slug}`,
+    publishedEditionId: publishedEditionId(editionConfig.id),
+    publishedItemId: publishedItemId(itemId),
+    sourceEditionItemId: `${editionConfig.id}-${article.slug}`,
+    sourceEditionId: editionConfig.id,
+    sourceItemId: itemId,
+    editionLineageId: editionConfig.id,
+    itemLineageId: itemId,
     placementKey: `front:${index + 1}`,
     sortKey,
     pageNumber: 1,
@@ -153,12 +222,40 @@ async function seedArticle(article: Article, index: number, editionConfig: SeedE
   const imageAssets = getArticleImageAssets(article);
   for (const [assetIndex, asset] of imageAssets.entries()) {
     const uploaded = await uploadSeedImage(article, asset, assetIndex);
+    const mediaId = `media-${article.slug}-${assetIndex}`;
+    const mediaSortKey = `${String(assetIndex + 1).padStart(3, "0")}#${asset.id}`;
     await upsert("MediaAsset", {
-      id: `media-${article.slug}-${assetIndex}`,
+      id: mediaId,
       itemId,
       type: "image",
       role: (asset.roles ?? ["lead", "continuation", "continuationInset"]).join(","),
-      sortKey: `${String(assetIndex + 1).padStart(3, "0")}#${asset.id}`,
+      sortKey: mediaSortKey,
+      storagePath: uploaded.storagePath,
+      externalUrl: asset.src,
+      alt: asset.alt,
+      caption: asset.caption ?? asset.credit,
+      credit: asset.credit,
+      width: uploaded.width,
+      height: uploaded.height,
+      aspectRatio: asset.layout?.aspectRatio,
+      focalX: asset.layout?.focalPoint?.x,
+      focalY: asset.layout?.focalPoint?.y,
+      minHeight: asset.layout?.minHeight,
+      preferredHeight: asset.layout?.preferredHeight,
+      maxHeight: asset.layout?.maxHeight,
+      crop: asset.layout?.crop,
+      wrapsText: asset.layout?.wrapsText,
+      metadata: toAwsJson({ sourceUrl: asset.src }),
+    });
+    await upsert("PublishedMediaAsset", {
+      id: `published-${mediaId}`,
+      sourceMediaAssetId: mediaId,
+      publishedItemId: publishedItemId(itemId),
+      sourceItemId: itemId,
+      itemLineageId: itemId,
+      type: "image",
+      role: (asset.roles ?? ["lead", "continuation", "continuationInset"]).join(","),
+      sortKey: mediaSortKey,
       storagePath: uploaded.storagePath,
       externalUrl: asset.src,
       alt: asset.alt,
@@ -283,6 +380,61 @@ function assertNoGraphQLErrors(errors: unknown[] | null | undefined): void {
 
 function toAwsJson(value: unknown): string {
   return JSON.stringify(value);
+}
+
+function withVersionFields<T extends Record<string, unknown>>(
+  record: T,
+  options: {
+    lineageId: string;
+    versionCreatedAt: string;
+    versionCreatedBy: string;
+    changeReason: string;
+  },
+): T & {
+  lineageId: string;
+  versionNumber: number;
+  previousVersionId: null;
+  versionState: string;
+  versionCreatedAt: string;
+  versionCreatedBy: string;
+  changeReason: string;
+  contentHash: string;
+} {
+  const versioned = {
+    ...record,
+    lineageId: options.lineageId,
+    versionNumber: 1,
+    previousVersionId: null,
+    versionState: "current",
+    versionCreatedAt: options.versionCreatedAt,
+    versionCreatedBy: options.versionCreatedBy,
+    changeReason: options.changeReason,
+  };
+  return {
+    ...versioned,
+    contentHash: contentHashFor(versioned),
+  };
+}
+
+function contentHashFor(value: unknown): string {
+  return `sha256:${createHash("sha256").update(stableStringify(value)).digest("hex")}`;
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, entry]) => entry !== undefined)
+    .sort(([left], [right]) => left.localeCompare(right));
+  return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${stableStringify(entry)}`).join(",")}}`;
+}
+
+function publishedEditionId(editionId: string): string {
+  return `published-${editionId}`;
+}
+
+function publishedItemId(itemId: string): string {
+  return `published-${itemId}`;
 }
 
 function getSeedEditionConfig() {

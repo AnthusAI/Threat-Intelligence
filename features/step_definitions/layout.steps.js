@@ -26,6 +26,11 @@ Given("I open the news desk at {int} by {int}", async function (width, height) {
   await requirePage(this).waitForSelector("[data-news-desk]", { state: "visible", timeout: 15_000 });
 });
 
+Given("I open the assignments news desk at {int} by {int}", async function (width, height) {
+  await this.openPath("/news-desk?demo=1&tab=assignments", width, height);
+  await requirePage(this).waitForSelector("[data-news-desk-assignments]", { state: "visible", timeout: 15_000 });
+});
+
 Given("I am a test editor reader", async function () {
   this.testEditorReader = true;
 });
@@ -65,6 +70,30 @@ When("I update the first news desk topic name to {string}", async function (name
     const card = document.querySelector(".topic-steering-topic-card");
     return card?.getAttribute("data-saved-display-name") === expectedName;
   }, name);
+});
+
+When("I cull assignment {string} with reason {string}", async function (assignmentId, reason) {
+  const page = requirePage(this);
+  const candidate = page.locator(`[data-assignment-candidate="${assignmentId}"]`);
+  await candidate.waitFor({ state: "visible", timeout: 10_000 });
+  await candidate.locator(`[data-assignment-reason="${assignmentId}"]`).fill(reason);
+  await candidate.locator('[data-assignment-action="cull"]').click();
+  await page.waitForFunction((id) => {
+    const row = document.querySelector(`[data-assignment-candidate="${id}"]`);
+    return row?.getAttribute("data-assignment-status") === "culled";
+  }, assignmentId);
+});
+
+When("I restore assignment {string}", async function (assignmentId) {
+  const page = requirePage(this);
+  const candidate = page.locator(`[data-assignment-candidate="${assignmentId}"]`);
+  await candidate.waitFor({ state: "visible", timeout: 10_000 });
+  await candidate.locator('[data-assignment-action="restore"]').click();
+  await page.waitForFunction((id) => {
+    const row = document.querySelector(`[data-assignment-candidate="${id}"]`);
+    const status = row?.getAttribute("data-assignment-status");
+    return status && status !== "culled";
+  }, assignmentId);
 });
 
 When("I scroll to the canonical topic register", async function () {
@@ -155,11 +184,21 @@ Then("the news desk should render", async function () {
   await page.locator("[data-news-desk]").waitFor({ state: "visible", timeout: 10_000 });
   assert.equal(await page.locator("[data-news-desk]").getAttribute("data-topic-steering-demo"), "true");
   await page.locator("h1", { hasText: "News Desk" }).waitFor({ state: "visible", timeout: 10_000 });
-  await page.locator("[data-news-desk-tab='topics'][aria-current='page']").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-tab='categories'][aria-current='page']").waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("text=Canonical Demo Corpus").first().waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("text=Source Demo Corpus").first().waitFor({ state: "visible", timeout: 10_000 });
-  await page.locator("text=Corpus Topic Sets").first().waitFor({ state: "visible", timeout: 10_000 });
-  await page.locator("text=Source Demo Topics").first().waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("text=Corpus Category Sets").first().waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("text=Source Demo Categories").first().waitFor({ state: "visible", timeout: 10_000 });
+});
+
+Then("the assignments desk should render", async function () {
+  const page = requirePage(this);
+  await page.locator("[data-news-desk]").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-tab='assignments'][aria-current='page']").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-assignments]").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("text=Assignment Candidates").first().waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator('[data-assignment-candidate="assignment-demo-agent-lab"]').waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator('[data-assignment-candidate="assignment-demo-history-cull"][data-assignment-status="culled"]').waitFor({ state: "visible", timeout: 10_000 });
 });
 
 Then("the news desk should show an editor access gate", async function () {
@@ -170,29 +209,29 @@ Then("the news desk should show an editor access gate", async function () {
 
 Then("the news desk should show topic and graph proposal rows", async function () {
   const page = requirePage(this);
-  await page.locator("[data-proposal-domain='topic']").first().waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-proposal-domain='category']").first().waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("td", { hasText: "relationship-proposal" }).first().waitFor({ state: "visible", timeout: 10_000 });
-  await page.locator("[data-generic-proposal-kind='create-taxonomy-node']").first().waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-generic-proposal-kind='create-category']").first().waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("[data-generic-proposal-kind='add-ontology-relationship']").first().waitFor({ state: "visible", timeout: 10_000 });
 });
 
 Then("the news desk should show accepted subtopics under canonical topics", async function () {
   const page = requirePage(this);
-  await page.locator("[data-news-desk-taxonomy-root='topic.foundation-model-scaling']").waitFor({ state: "visible", timeout: 10_000 });
-  await page.locator("[data-news-desk-subtopic='topic.agent-memory']", { hasText: "Agent Memory" }).waitFor({ state: "visible", timeout: 10_000 });
-  await page.locator("[data-news-desk-subtopic='topic.benchmark-saturation']", { hasText: "Benchmark Saturation" }).waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-category-tree-root='category.foundation-model-scaling']").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-subcategory='category.agent-memory']", { hasText: "Agent Memory" }).waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-subcategory='category.benchmark-saturation']", { hasText: "Benchmark Saturation" }).waitFor({ state: "visible", timeout: 10_000 });
 });
 
 Then("the news desk should show proposed subtopics under canonical topics", async function () {
   const page = requirePage(this);
-  await page.locator("[data-news-desk-taxonomy-root='topic.foundation-model-scaling']").waitFor({ state: "visible", timeout: 10_000 });
-  await page.locator("[data-news-desk-proposed-subtopic='topic.agent-memory']", { hasText: "Agent Memory" }).waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-category-tree-root='category.foundation-model-scaling']").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-proposed-subtopic='category.agent-memory']", { hasText: "Agent Memory" }).waitFor({ state: "visible", timeout: 10_000 });
 });
 
 Then("the news desk should offer accept and reject actions without defer", async function () {
   const page = requirePage(this);
-  await page.locator("[data-news-desk-proposed-subtopic='topic.agent-memory'] [data-review-action='accept']").waitFor({ state: "visible", timeout: 10_000 });
-  await page.locator("[data-news-desk-proposed-subtopic='topic.agent-memory'] [data-review-action='reject']").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-proposed-subtopic='category.agent-memory'] [data-review-action='accept']").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-proposed-subtopic='category.agent-memory'] [data-review-action='reject']").waitFor({ state: "visible", timeout: 10_000 });
   assert.equal(await page.locator("[data-review-action='defer']").count(), 0);
 });
 
@@ -203,6 +242,18 @@ Then("the first news desk topic name should be {string}", async function (expect
     .locator("input")
     .inputValue();
   assert.equal(value, expectedName);
+});
+
+Then("assignment {string} should be culled", async function (assignmentId) {
+  const page = requirePage(this);
+  await page.locator(`[data-assignment-candidate="${assignmentId}"][data-assignment-status="culled"]`).waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator(`[data-assignment-candidate="${assignmentId}"] [data-assignment-action="restore"]`).waitFor({ state: "visible", timeout: 10_000 });
+});
+
+Then("assignment {string} should be active", async function (assignmentId) {
+  const status = await requirePage(this).locator(`[data-assignment-candidate="${assignmentId}"]`).getAttribute("data-assignment-status");
+  assert.notEqual(status, "culled");
+  assert.ok(status, `Expected assignment ${assignmentId} to expose a workflow status`);
 });
 
 Then("edition page count should not include appended News Desk pages", async function () {
@@ -250,7 +301,7 @@ Then("the front page footer should not link to the news desk", async function ()
 
 Then("the final edition pages should include the canonical topic register", async function () {
   const page = requirePage(this);
-  await page.locator("[data-news-desk-appendix-page='register'] h2", { hasText: "Canonical Topic Register" }).waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-appendix-page='register'] h2", { hasText: "Canonical Category Register" }).waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("[data-news-desk-topic-register]", { hasText: "Foundation Model Scaling" }).waitFor({ state: "visible", timeout: 10_000 });
 });
 

@@ -1,7 +1,7 @@
-# Topic And Graph Steering Runbook
+# Category And Graph Steering Runbook
 
 Papyrus is the human steering system. Biblicus is the artifact producer. Papyrus
-imports accepted topic sets, steering proposals, projection rows, artifact
+imports accepted category sets, steering proposals, projection rows, artifact
 references, decisions, and stable external IDs. It does not mirror Biblicus
 corpus items into GraphQL; evidence remains a Biblicus `item_id` reference until
 Papyrus deliberately turns some information into its own publication content.
@@ -29,7 +29,7 @@ The publication is assembled from configuration plus artifacts:
 - Future research agents should be configured by publication/corpus instruction
   files rather than hard-coded in Papyrus. Those instructions should tell agents
   what sources to inspect, what editorial voice and beats matter, how to use
-  accepted topic sets and graph steering, and what artifacts to produce for
+  accepted category sets and graph steering, and what artifacts to produce for
   Papyrus import. The instruction surface does not exist yet; when it does, keep
   it beside the publication/corpus config and mirror it to S3 with the corpus
   data.
@@ -136,14 +136,14 @@ Config resolution for the content CLI is:
 3. `corpora/papyrus-steering.yml`.
 
 After changing the config, upload it to S3 and materialize the configured
-`CurationCorpus` records into GraphQL:
+`CategoryCorpus` records into GraphQL:
 
 ```bash
 aws s3 cp \
   corpora/papyrus-steering.yml \
   s3://$PAPYRUS_CORPORA_BUCKET/corpora/papyrus-steering.yml
 
-npm run content -- curation import-config \
+npm run content -- categories import-config \
   --config corpora/papyrus-steering.yml
 ```
 
@@ -235,49 +235,48 @@ checkout:
 ```bash
 export BIBLICUS_WORKDIR="/Users/ryan/Projects/Biblicus"
 
-npm run content -- curation import-steering \
+npm run content -- categories import-steering \
   --config corpora/papyrus-steering.yml \
   --corpus-key AI-ML-research
 ```
 
-The import is idempotent and intentionally lean. It imports:
+The import is idempotent and intentionally lean. It imports private canonical
+category records plus raw payloads:
 
-- `CurationCorpus`;
-- `CurationImportRun`;
-- `CurationTopicSet`;
-- `CurationTopic`;
-- `CurationTopicRevision`;
-- `CurationTaxonomy`;
-- `CurationTaxonomyNode`;
-- `CurationArtifact`;
-- `CurationProposal`;
-- private `CurationRawPayload` rows for steering objects.
+- `CategoryCorpus`;
+- `CategoryImportRun`;
+- `CategorySet`;
+- `Category`;
+- `CategoryArtifact`;
+- `CategoryProposal`;
+- private `CategoryRawPayload` rows for steering objects.
 
-It does not import Biblicus corpus items. Topic seeds, holdouts, proposal
+It does not import Biblicus corpus items. Category seeds, holdouts, proposal
 evidence, and projection rows keep stable external `item_id` strings.
 If a Biblicus taxonomy artifact exists, `import-steering` resolves
 `analysis/taxonomy/<snapshot>/taxonomy.json` from the artifact reference and
-imports accepted taxonomy nodes. If no accepted taxonomy artifact exists yet,
-Papyrus creates a root-only taxonomy from the accepted topic set so signed-in
-editor/admin readers can still append a canonical topic register.
+imports accepted category nodes under the versioned `CategorySet`. If no
+accepted taxonomy artifact exists yet, Papyrus creates a root-only category tree
+from the accepted category set so signed-in editor/admin readers can still
+append a canonical category register.
 
 ## Export, Train, Project
 
-After a human edits or accepts topic copy from the `Topics` tab in the News Desk
-at `/news-desk`, export the accepted topic set:
+After a human edits or accepts category copy from the `Categories` tab in the
+News Desk at `/news-desk`, export the accepted category set:
 
 ```bash
-npm run content -- curation export-topic-set \
-  --topic-set curation-topic-set-curation-corpus-ai-ml-research-ai-ml-research \
-  --output /tmp/accepted-ai-ml-research-topic-set.json
+npm run content -- categories export-category-set \
+  --category-set category-set-category-corpus-ai-ml-research-ai-ml-research \
+  --output /tmp/accepted-ai-ml-research-category-set.json
 ```
 
 When accepted taxonomy nodes have been reviewed, export the taxonomy manifest
 for Biblicus:
 
 ```bash
-npm run content -- curation export-taxonomy \
-  --taxonomy taxonomy-curation-topic-set-curation-corpus-ai-ml-research-ai-ml-research-ai-ml-research-accepted-taxonomy \
+npm run content -- categories export-category-tree \
+  --category-set category-set-category-corpus-ai-ml-research-ai-ml-research \
   --output /tmp/accepted-ai-ml-research-taxonomy.json
 ```
 
@@ -288,14 +287,14 @@ Export Papyrus human steering feedback as a separate machine-readable feedback
 file before the next taxonomy or graph proposal cycle:
 
 ```bash
-npm run content -- curation export-steering-feedback \
-  --topic-set curation-topic-set-curation-corpus-ai-ml-research-ai-ml-research \
+npm run content -- categories export-steering-feedback \
+  --category-set category-set-category-corpus-ai-ml-research-ai-ml-research \
   --output /tmp/ai-ml-research-steering-feedback.json
 ```
 
 This export is the bridge that makes editor rejections matter to future worker
 cycles. It contains append-only Papyrus decisions, accepted proposals, rejected
-proposals, and a normalized `suppressions` list scoped by topic set, corpus,
+proposals, and a normalized `suppressions` list scoped by category set, corpus,
 classifier, and root topic. Pass it to Biblicus with `--steering-feedback` so
 rejected child topics, labels, relationship assertions, and weak patterns are
 not proposed again under the same root. The accepted taxonomy JSON remains the
@@ -332,7 +331,7 @@ checkout. These commands write Biblicus corpus artifacts only.
 cd /Users/ryan/Projects/Biblicus
 
 uv run biblicus steering render-seed-manifest \
-  --input /tmp/accepted-ai-ml-research-topic-set.json \
+  --input /tmp/accepted-ai-ml-research-category-set.json \
   --output corpora/AI-ML-research/metadata/topic-classifiers/ai-ml-research/seed-manifest.json
 
 uv run biblicus topic-classifier train \
@@ -356,7 +355,7 @@ Import projection rows back into Papyrus:
 ```bash
 cd /Users/ryan/Projects/Papyrus
 
-npm run content -- curation import-projection \
+npm run content -- categories import-projection \
   --config corpora/papyrus-steering.yml \
   --target-corpus-key AI-ML-history \
   --authority-corpus-key AI-ML-research \
@@ -404,7 +403,7 @@ Re-import steering so the News Desk shows the graph proposal rows:
 ```bash
 cd /Users/ryan/Projects/Papyrus
 
-npm run content -- curation import-steering \
+npm run content -- categories import-steering \
   --config corpora/papyrus-steering.yml \
   --corpus-key AI-ML-research
 ```
@@ -424,8 +423,8 @@ proposal rows and `proposal_bundles` for kinds such as:
 - `add-relationship-type`;
 - `suppress-entity-or-edge`.
 
-Papyrus v1 imports these rows into `CurationProposal` and keeps full details in
-private `CurationRawPayload`. Typed summary fields are best-effort display
+Papyrus imports these rows into `CategoryProposal` and keeps full details in
+private `CategoryRawPayload`. Typed summary fields are best-effort display
 fields: taxonomy proposals can map `topic_uid`, `parent_topic_uid`, display
 copy, and document evidence; ontology proposals can map `assertion_id`,
 `source_ref`, `relationship_uid`, `target_ref`, and evidence IDs. The accepted
@@ -434,14 +433,13 @@ top-level fields in the current steering export.
 
 Keep this distinction clear in review UI and automation:
 
-- Flat canonical topic proposal kinds such as `rename-topic` and
-  `topic-display-copy-edit` use the tailored topic controls and can update
-  draft topic revisions when accepted.
-- Taxonomy, ontology, and GraphRAG proposal kinds stay in the generic queue for
-  v1. Accepting or rejecting them records a Papyrus decision and
-  updates proposal status; it should not mutate flat topic copy or topic-set
-  revision state. Ignoring a row is intentional no-op steering: no decision is
-  recorded, and the accepted course continues.
+- Category proposal kinds such as `rename-category`, `create-category`, and
+  `move-category` create new `Category` versions when accepted. There is no
+  separate revision table.
+- Ontology and GraphRAG proposal kinds stay in the generic queue for v1.
+  Accepting or rejecting them records a Papyrus decision and updates proposal
+  status. Ignoring a row is intentional no-op steering: no decision is recorded,
+  and the accepted course continues.
 - Biblicus proposal labels `recommend`, `do_not_recommend`, and
   `needs_clarification` are agent recommendation labels. Papyrus human review
   actions are `accept` and `reject`; ignoring a proposal is represented by
@@ -450,10 +448,10 @@ Keep this distinction clear in review UI and automation:
 When steering is re-imported from Biblicus, Papyrus preserves reviewed proposal
 state for existing accepted or rejected rows. This keeps repeated artifact
 imports from reopening proposals that editors already handled. Accepted
-taxonomy nodes are exported through `curation export-taxonomy`; rejected rows
+category nodes are exported through `categories export-category-tree`; rejected rows
 remain as Papyrus decision/proposal state and should be consulted by proposal
 generation workers before they create the next bundle. Use
-`curation export-steering-feedback` to make that review state available outside
+`categories export-steering-feedback` to make that review state available outside
 Papyrus.
 
 Biblicus supports that feedback file directly on `biblicus taxonomy discover`
@@ -461,11 +459,10 @@ and `biblicus steering graph-signals` via
 `--steering-feedback <papyrus-feedback.json>`. Use that option for every
 post-review proposal generation cycle.
 
-Accepted taxonomy summaries now have a small first-class editor surface in
-Papyrus: `/news-desk` shows accepted subtopics beside the canonical topic
-register, and signed-in editor/admin readers can see passive taxonomy appendix
-pages after the edition. Public display stays limited to curated typed topic
-fields and generic proposal summaries that are already authorized for public
+Accepted category summaries now have a small first-class editor surface in
+Papyrus: `/news-desk` shows accepted subcategories beside the canonical category
+register, and signed-in editor/admin readers can see passive category appendix
+pages after the edition. Public display stays limited to published projection
 read. Accepted ontology relationships remain artifact-backed and generic until
 editors need first-class relationship editing or public relationship display.
 

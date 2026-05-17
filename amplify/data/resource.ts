@@ -1,5 +1,5 @@
 import { type ClientSchema, a, defineData } from "@aws-amplify/backend";
-import { curationAction } from "../functions/curation-action/resource";
+import { categoryAction } from "../functions/category-action/resource";
 import { graphqlJwtAuthorizer } from "../functions/graphql-jwt-authorizer/resource";
 import { manageUserRole } from "../functions/manage-user-role/resource";
 
@@ -11,8 +11,8 @@ const authoringOperations: ("read" | "create" | "update" | "delete")[] = [
 ];
 const contentWriteGroups = ["editor", "admin"];
 const adminGroup = "admin";
-const curationWriteGroups = ["editor", "admin"];
-const curationAppendOnlyOperations: ("read" | "create")[] = ["read", "create"];
+const categoryWriteGroups = ["editor", "admin"];
+const categoryAppendOnlyOperations: ("read" | "create")[] = ["read", "create"];
 
 const schema = a.schema({
   UserProfile: a
@@ -78,19 +78,17 @@ const schema = a.schema({
     .authorization((allow) => [allow.group(adminGroup)])
     .handler(a.handler.function(manageUserRole)),
 
-  CurationActionResult: a.customType({
+  CategoryActionResult: a.customType({
     ok: a.boolean().required(),
     action: a.string().required(),
     proposalId: a.id(),
-    revisionId: a.id(),
-    topicId: a.id(),
-    taxonomyId: a.id(),
-    taxonomyNodeId: a.id(),
+    categorySetId: a.id(),
+    categoryId: a.id(),
     decisionId: a.id(),
     status: a.string(),
   }),
 
-  reviewCurationProposal: a
+  reviewCategoryProposal: a
     .mutation()
     .arguments({
       proposalId: a.id().required(),
@@ -105,23 +103,11 @@ const schema = a.schema({
       seedItemIds: a.string().array(),
       holdoutItemIds: a.string().array(),
     })
-    .returns(a.ref("CurationActionResult"))
-    .authorization((allow) => [allow.groups(curationWriteGroups)])
-    .handler(a.handler.function(curationAction)),
+    .returns(a.ref("CategoryActionResult"))
+    .authorization((allow) => [allow.groups(categoryWriteGroups)])
+    .handler(a.handler.function(categoryAction)),
 
-  promoteCurationTopicRevision: a
-    .mutation()
-    .arguments({
-      revisionId: a.id().required(),
-      actorSub: a.string(),
-      actorLabel: a.string(),
-      note: a.string(),
-    })
-    .returns(a.ref("CurationActionResult"))
-    .authorization((allow) => [allow.groups(curationWriteGroups)])
-    .handler(a.handler.function(curationAction)),
-
-  CurationCorpus: a
+  CategoryCorpus: a
     .model({
       id: a.id().required(),
       name: a.string().required(),
@@ -133,14 +119,14 @@ const schema = a.schema({
       updatedAt: a.datetime(),
     })
     .secondaryIndexes((index) => [
-      index("role").sortKeys(["name"]).queryField("listCurationCorporaByRoleAndName"),
+      index("role").sortKeys(["name"]).queryField("listCategoryCorporaByRoleAndName"),
     ])
     .authorization((allow) => [
-      allow.groups(curationWriteGroups).to(["read"]),
+      allow.groups(categoryWriteGroups).to(["read"]),
       allow.custom().to(authoringOperations),
     ]),
 
-  CurationImportRun: a
+  CategoryImportRun: a
     .model({
       id: a.id().required(),
       corpusId: a.id().required(),
@@ -151,22 +137,22 @@ const schema = a.schema({
       generatedAt: a.datetime(),
       importedAt: a.datetime().required(),
       itemCount: a.integer(),
-      topicCount: a.integer(),
+      categoryCount: a.integer(),
       proposalCount: a.integer(),
       artifactCount: a.integer(),
       projectionCount: a.integer(),
       warningCount: a.integer(),
     })
     .secondaryIndexes((index) => [
-      index("corpusId").sortKeys(["importedAt"]).queryField("listCurationImportRunsByCorpusAndImportedAt"),
-      index("importKind").sortKeys(["importedAt"]).queryField("listCurationImportRunsByKindAndImportedAt"),
+      index("corpusId").sortKeys(["importedAt"]).queryField("listCategoryImportRunsByCorpusAndImportedAt"),
+      index("importKind").sortKeys(["importedAt"]).queryField("listCategoryImportRunsByKindAndImportedAt"),
     ])
     .authorization((allow) => [
-      allow.groups(curationWriteGroups).to(["read"]),
+      allow.groups(categoryWriteGroups).to(["read"]),
       allow.custom().to(authoringOperations),
     ]),
 
-  CurationRawPayload: a
+  CategoryRawPayload: a
     .model({
       id: a.id().required(),
       ownerType: a.string().required(),
@@ -178,15 +164,15 @@ const schema = a.schema({
       updatedAt: a.datetime(),
     })
     .secondaryIndexes((index) => [
-      index("ownerId").sortKeys(["payloadKind"]).queryField("listCurationRawPayloadsByOwnerAndKind"),
-      index("importRunId").sortKeys(["ownerType"]).queryField("listCurationRawPayloadsByImportRunAndOwner"),
+      index("ownerId").sortKeys(["payloadKind"]).queryField("listCategoryRawPayloadsByOwnerAndKind"),
+      index("importRunId").sortKeys(["ownerType"]).queryField("listCategoryRawPayloadsByImportRunAndOwner"),
     ])
     .authorization((allow) => [
-      allow.groups(curationWriteGroups),
+      allow.groups(categoryWriteGroups),
       allow.custom().to(authoringOperations),
     ]),
 
-  CurationArtifact: a
+  CategoryArtifact: a
     .model({
       id: a.id().required(),
       corpusId: a.id().required(),
@@ -198,44 +184,61 @@ const schema = a.schema({
       importRunId: a.id(),
     })
     .secondaryIndexes((index) => [
-      index("corpusId").sortKeys(["artifactKind"]).queryField("listCurationArtifactsByCorpusAndKind"),
-      index("artifactKind").sortKeys(["createdAt"]).queryField("listCurationArtifactsByKindAndCreatedAt"),
+      index("corpusId").sortKeys(["artifactKind"]).queryField("listCategoryArtifactsByCorpusAndKind"),
+      index("artifactKind").sortKeys(["createdAt"]).queryField("listCategoryArtifactsByKindAndCreatedAt"),
     ])
     .authorization((allow) => [
-      allow.groups(curationWriteGroups).to(["read"]),
+      allow.groups(categoryWriteGroups).to(["read"]),
       allow.custom().to(authoringOperations),
     ]),
 
-  CurationTopicSet: a
+  CategorySet: a
     .model({
       id: a.id().required(),
+      lineageId: a.id().required(),
+      versionNumber: a.integer().required(),
+      previousVersionId: a.id(),
+      versionState: a.string().required(),
+      versionCreatedAt: a.datetime().required(),
+      versionCreatedBy: a.string(),
+      changeReason: a.string(),
+      contentHash: a.string(),
       corpusId: a.id().required(),
       classifierId: a.string().required(),
       displayName: a.string().required(),
       description: a.string(),
       status: a.string().required(),
-      acceptedRevisionId: a.id(),
-      latestDraftRevisionId: a.id(),
       generatedAt: a.datetime(),
-      topicCount: a.integer(),
+      categoryCount: a.integer(),
       importRunId: a.id(),
     })
     .secondaryIndexes((index) => [
-      index("corpusId").sortKeys(["classifierId"]).queryField("listCurationTopicSetsByCorpusAndClassifier"),
-      index("status").sortKeys(["displayName"]).queryField("listCurationTopicSetsByStatusAndName"),
+      index("lineageId").sortKeys(["versionNumber"]).queryField("listCategorySetsByLineageAndVersion"),
+      index("corpusId").sortKeys(["classifierId"]).queryField("listCategorySetsByCorpusAndClassifier"),
+      index("status").sortKeys(["displayName"]).queryField("listCategorySetsByStatusAndName"),
+      index("versionState").sortKeys(["generatedAt"]).queryField("listCategorySetsByVersionStateAndGeneratedAt"),
     ])
     .authorization((allow) => [
-      allow.publicApiKey().to(["read"]),
-      allow.groups(curationWriteGroups),
+      allow.groups(categoryWriteGroups),
       allow.custom().to(authoringOperations),
     ]),
 
-  CurationTopic: a
+  Category: a
     .model({
       id: a.id().required(),
-      topicSetId: a.id().required(),
+      lineageId: a.id().required(),
+      versionNumber: a.integer().required(),
+      previousVersionId: a.id(),
+      versionState: a.string().required(),
+      versionCreatedAt: a.datetime().required(),
+      versionCreatedBy: a.string(),
+      changeReason: a.string(),
+      contentHash: a.string(),
+      categorySetId: a.id().required(),
       corpusId: a.id().required(),
-      topicUid: a.string().required(),
+      categoryKey: a.string().required(),
+      parentCategoryId: a.id(),
+      parentCategoryKey: a.string(),
       displayName: a.string().required(),
       subtitle: a.string(),
       description: a.string(),
@@ -244,106 +247,28 @@ const schema = a.schema({
       seedItemIds: a.string().array(),
       holdoutItemIds: a.string().array(),
       rank: a.integer(),
+      depth: a.integer(),
       isPinned: a.boolean(),
       importRunId: a.id(),
       updatedAt: a.datetime(),
     })
     .secondaryIndexes((index) => [
-      index("topicSetId").sortKeys(["topicUid"]).queryField("listCurationTopicsByTopicSetAndTopicUid"),
-      index("corpusId").sortKeys(["displayName"]).queryField("listCurationTopicsByCorpusAndName"),
-      index("status").sortKeys(["displayName"]).queryField("listCurationTopicsByStatusAndName"),
+      index("lineageId").sortKeys(["versionNumber"]).queryField("listCategoriesByLineageAndVersion"),
+      index("categorySetId").sortKeys(["categoryKey"]).queryField("listCategoriesBySetAndKey"),
+      index("parentCategoryId").sortKeys(["rank"]).queryField("listCategoriesByParentAndRank"),
+      index("parentCategoryKey").sortKeys(["rank"]).queryField("listCategoriesByParentKeyAndRank"),
+      index("corpusId").sortKeys(["displayName"]).queryField("listCategoriesByCorpusAndName"),
+      index("status").sortKeys(["displayName"]).queryField("listCategoriesByStatusAndName"),
     ])
     .authorization((allow) => [
-      allow.publicApiKey().to(["read"]),
-      allow.groups(curationWriteGroups),
+      allow.groups(categoryWriteGroups),
       allow.custom().to(authoringOperations),
     ]),
 
-  CurationTaxonomy: a
+  CategoryProposal: a
     .model({
       id: a.id().required(),
-      corpusId: a.id().required(),
-      topicSetId: a.id().required(),
-      taxonomyId: a.string().required(),
-      displayName: a.string().required(),
-      description: a.string(),
-      status: a.string().required(),
-      snapshotId: a.string(),
-      generatedAt: a.datetime(),
-      nodeCount: a.integer(),
-      rootCount: a.integer(),
-      importRunId: a.id(),
-      createdAt: a.datetime(),
-      updatedAt: a.datetime(),
-    })
-    .secondaryIndexes((index) => [
-      index("topicSetId").sortKeys(["status"]).queryField("listCurationTaxonomiesByTopicSetAndStatus"),
-      index("corpusId").sortKeys(["taxonomyId"]).queryField("listCurationTaxonomiesByCorpusAndTaxonomy"),
-      index("status").sortKeys(["generatedAt"]).queryField("listCurationTaxonomiesByStatusAndGeneratedAt"),
-    ])
-    .authorization((allow) => [
-      allow.groups(curationWriteGroups).to(["read"]),
-      allow.custom().to(authoringOperations),
-    ]),
-
-  CurationTaxonomyNode: a
-    .model({
-      id: a.id().required(),
-      taxonomyId: a.id().required(),
-      corpusId: a.id().required(),
-      topicSetId: a.id().required(),
-      topicUid: a.string().required(),
-      parentTopicUid: a.string(),
-      displayName: a.string().required(),
-      subtitle: a.string(),
-      description: a.string(),
-      status: a.string().required(),
-      seedItemIds: a.string().array(),
-      holdoutItemIds: a.string().array(),
-      rank: a.integer(),
-      depth: a.integer(),
-      importRunId: a.id(),
-      updatedAt: a.datetime(),
-    })
-    .secondaryIndexes((index) => [
-      index("taxonomyId").sortKeys(["topicUid"]).queryField("listCurationTaxonomyNodesByTaxonomyAndTopicUid"),
-      index("parentTopicUid").sortKeys(["rank"]).queryField("listCurationTaxonomyNodesByParentAndRank"),
-      index("topicUid").sortKeys(["taxonomyId"]).queryField("listCurationTaxonomyNodesByTopicUidAndTaxonomy"),
-    ])
-    .authorization((allow) => [
-      allow.groups(curationWriteGroups).to(["read"]),
-      allow.custom().to(authoringOperations),
-    ]),
-
-  CurationTopicRevision: a
-    .model({
-      id: a.id().required(),
-      topicSetId: a.id().required(),
-      corpusId: a.id().required(),
-      revisionKind: a.string().required(),
-      status: a.string().required(),
-      contentHash: a.string(),
-      sourceImportRunId: a.id(),
-      sourceDecisionId: a.id(),
-      topicCount: a.integer(),
-      createdAt: a.datetime().required(),
-      acceptedAt: a.datetime(),
-      acceptedBy: a.string(),
-    })
-    .secondaryIndexes((index) => [
-      index("topicSetId").sortKeys(["createdAt"]).queryField("listCurationTopicRevisionsByTopicSetAndCreatedAt"),
-      index("status").sortKeys(["createdAt"]).queryField("listCurationTopicRevisionsByStatusAndCreatedAt"),
-    ])
-    .authorization((allow) => [
-      allow.publicApiKey().to(["read"]),
-      allow.groups(curationWriteGroups).to(["read"]),
-      allow.custom().to(authoringOperations),
-    ]),
-
-  CurationProposal: a
-    .model({
-      id: a.id().required(),
-      topicSetId: a.id(),
+      categorySetId: a.id(),
       corpusId: a.id().required(),
       importRunId: a.id(),
       proposalKind: a.string().required(),
@@ -351,8 +276,8 @@ const schema = a.schema({
       status: a.string().required(),
       title: a.string().required(),
       summary: a.string(),
-      topicUid: a.string(),
-      targetTopicUid: a.string(),
+      categoryKey: a.string(),
+      targetCategoryKey: a.string(),
       graphEntityId: a.string(),
       relationshipType: a.string(),
       displayName: a.string(),
@@ -368,39 +293,38 @@ const schema = a.schema({
       updatedAt: a.datetime(),
     })
     .secondaryIndexes((index) => [
-      index("status").sortKeys(["proposedAt"]).queryField("listCurationProposalsByStatusAndProposedAt"),
-      index("topicSetId").sortKeys(["status"]).queryField("listCurationProposalsByTopicSetAndStatus"),
-      index("corpusId").sortKeys(["proposalKind"]).queryField("listCurationProposalsByCorpusAndKind"),
-      index("steeringDomain").sortKeys(["status"]).queryField("listCurationProposalsByDomainAndStatus"),
+      index("status").sortKeys(["proposedAt"]).queryField("listCategoryProposalsByStatusAndProposedAt"),
+      index("categorySetId").sortKeys(["status"]).queryField("listCategoryProposalsBySetAndStatus"),
+      index("corpusId").sortKeys(["proposalKind"]).queryField("listCategoryProposalsByCorpusAndKind"),
+      index("steeringDomain").sortKeys(["status"]).queryField("listCategoryProposalsByDomainAndStatus"),
     ])
     .authorization((allow) => [
-      allow.publicApiKey().to(["read"]),
-      allow.groups(curationWriteGroups).to(["read"]),
+      allow.groups(categoryWriteGroups).to(["read"]),
       allow.custom().to(authoringOperations),
     ]),
 
-  CurationDecision: a
+  CategoryDecision: a
     .model({
       id: a.id().required(),
       proposalId: a.id().required(),
-      topicSetId: a.id(),
+      categorySetId: a.id(),
       action: a.string().required(),
       actorSub: a.string(),
       actorLabel: a.string(),
       note: a.string(),
-      selectedTopicUid: a.string(),
+      selectedCategoryKey: a.string(),
       createdAt: a.datetime().required(),
     })
     .secondaryIndexes((index) => [
-      index("proposalId").sortKeys(["createdAt"]).queryField("listCurationDecisionsByProposalAndCreatedAt"),
-      index("topicSetId").sortKeys(["createdAt"]).queryField("listCurationDecisionsByTopicSetAndCreatedAt"),
+      index("proposalId").sortKeys(["createdAt"]).queryField("listCategoryDecisionsByProposalAndCreatedAt"),
+      index("categorySetId").sortKeys(["createdAt"]).queryField("listCategoryDecisionsBySetAndCreatedAt"),
     ])
     .authorization((allow) => [
-      allow.groups(curationWriteGroups).to(curationAppendOnlyOperations),
-      allow.custom().to(curationAppendOnlyOperations),
+      allow.groups(categoryWriteGroups).to(categoryAppendOnlyOperations),
+      allow.custom().to(categoryAppendOnlyOperations),
     ]),
 
-  CurationProjection: a
+  CategoryProjection: a
     .model({
       id: a.id().required(),
       targetCorpusId: a.id().required(),
@@ -408,7 +332,7 @@ const schema = a.schema({
       classifierId: a.string().required(),
       modelVersion: a.string(),
       externalItemId: a.string().required(),
-      topicUid: a.string(),
+      categoryKey: a.string(),
       displayName: a.string(),
       score: a.float(),
       reviewRecommended: a.boolean(),
@@ -416,19 +340,26 @@ const schema = a.schema({
       importRunId: a.id(),
     })
     .secondaryIndexes((index) => [
-      index("targetCorpusId").sortKeys(["externalItemId"]).queryField("listCurationProjectionsByTargetCorpusAndItem"),
-      index("classifierId").sortKeys(["importedAt"]).queryField("listCurationProjectionsByClassifierAndImportedAt"),
-      index("topicUid").sortKeys(["score"]).queryField("listCurationProjectionsByTopicAndScore"),
+      index("targetCorpusId").sortKeys(["externalItemId"]).queryField("listCategoryProjectionsByTargetCorpusAndItem"),
+      index("classifierId").sortKeys(["importedAt"]).queryField("listCategoryProjectionsByClassifierAndImportedAt"),
+      index("categoryKey").sortKeys(["score"]).queryField("listCategoryProjectionsByCategoryAndScore"),
     ])
     .authorization((allow) => [
-      allow.publicApiKey().to(["read"]),
-      allow.groups(curationWriteGroups).to(["read"]),
+      allow.groups(categoryWriteGroups).to(["read"]),
       allow.custom().to(authoringOperations),
     ]),
 
   Item: a
     .model({
       id: a.id().required(),
+      lineageId: a.id().required(),
+      versionNumber: a.integer().required(),
+      previousVersionId: a.id(),
+      versionState: a.string().required(),
+      versionCreatedAt: a.datetime().required(),
+      versionCreatedBy: a.string(),
+      changeReason: a.string(),
+      contentHash: a.string(),
       type: a.string().required(),
       status: a.string().required(),
       typeStatus: a.string().required(),
@@ -448,17 +379,19 @@ const schema = a.schema({
       pullQuotes: a.string().array(),
       layout: a.json(),
       editorial: a.json(),
+      updatedAt: a.datetime(),
       tags: a.hasMany("ItemTag", "itemId"),
       mediaAssets: a.hasMany("MediaAsset", "itemId"),
       editionItems: a.hasMany("EditionItem", "itemId"),
     })
     .secondaryIndexes((index) => [
+      index("lineageId").sortKeys(["versionNumber"]).queryField("listItemsByLineageAndVersion"),
       index("slug").queryField("itemBySlug"),
       index("typeStatus").sortKeys(["publishedAt"]).queryField("listItemsByTypeStatusAndPublishedAt"),
       index("sectionStatus").sortKeys(["publishedAt"]).queryField("listItemsBySectionStatusAndPublishedAt"),
+      index("versionState").sortKeys(["updatedAt"]).queryField("listItemsByVersionStateAndUpdatedAt"),
     ])
     .authorization((allow) => [
-      allow.publicApiKey().to(["read"]),
       allow.groups(contentWriteGroups),
       allow.custom().to(authoringOperations),
     ]),
@@ -477,7 +410,6 @@ const schema = a.schema({
       index("type").sortKeys(["label"]).queryField("listTagsByTypeAndLabel"),
     ])
     .authorization((allow) => [
-      allow.publicApiKey().to(["read"]),
       allow.groups(contentWriteGroups),
       allow.custom().to(authoringOperations),
     ]),
@@ -499,7 +431,6 @@ const schema = a.schema({
       index("tagId").sortKeys(["publishedAt"]).queryField("listItemTagsByTagAndPublishedAt"),
     ])
     .authorization((allow) => [
-      allow.publicApiKey().to(["read"]),
       allow.groups(contentWriteGroups),
       allow.custom().to(authoringOperations),
     ]),
@@ -534,7 +465,6 @@ const schema = a.schema({
       index("role").sortKeys(["itemId"]).queryField("listMediaAssetsByRoleAndItem"),
     ])
     .authorization((allow) => [
-      allow.publicApiKey().to(["read"]),
       allow.groups(contentWriteGroups),
       allow.custom().to(authoringOperations),
     ]),
@@ -542,6 +472,14 @@ const schema = a.schema({
   Edition: a
     .model({
       id: a.id().required(),
+      lineageId: a.id().required(),
+      versionNumber: a.integer().required(),
+      previousVersionId: a.id(),
+      versionState: a.string().required(),
+      versionCreatedAt: a.datetime().required(),
+      versionCreatedBy: a.string(),
+      changeReason: a.string(),
+      contentHash: a.string(),
       slug: a.string().required(),
       title: a.string().required(),
       status: a.string().required(),
@@ -553,12 +491,13 @@ const schema = a.schema({
       items: a.hasMany("EditionItem", "editionId"),
     })
     .secondaryIndexes((index) => [
+      index("lineageId").sortKeys(["versionNumber"]).queryField("listEditionsByLineageAndVersion"),
       index("slug").queryField("editionBySlug"),
       index("status").sortKeys(["editionDate"]).queryField("listEditionsByStatusAndEditionDate"),
       index("status").sortKeys(["publishedAt"]).queryField("listEditionsByStatusAndPublishedAt"),
+      index("versionState").sortKeys(["publishedAt"]).queryField("listEditionsByVersionStateAndPublishedAt"),
     ])
     .authorization((allow) => [
-      allow.publicApiKey().to(["read"]),
       allow.groups(contentWriteGroups),
       allow.custom().to(authoringOperations),
     ]),
@@ -567,7 +506,9 @@ const schema = a.schema({
     .model({
       id: a.id().required(),
       editionId: a.id().required(),
+      editionLineageId: a.id(),
       itemId: a.id().required(),
+      itemLineageId: a.id(),
       placementKey: a.string().required(),
       sortKey: a.string().required(),
       pageNumber: a.integer(),
@@ -581,12 +522,202 @@ const schema = a.schema({
       index("itemId").sortKeys(["editionId"]).queryField("listEditionItemsByItemAndEdition"),
     ])
     .authorization((allow) => [
+      allow.groups(contentWriteGroups),
+      allow.custom().to(authoringOperations),
+    ]),
+
+  PublishedItem: a
+    .model({
+      id: a.id().required(),
+      sourceItemId: a.id().required(),
+      itemLineageId: a.id().required(),
+      versionNumber: a.integer().required(),
+      type: a.string().required(),
+      status: a.string().required(),
+      typeStatus: a.string().required(),
+      slug: a.string().required(),
+      shortSlug: a.string(),
+      section: a.string(),
+      sectionStatus: a.string(),
+      title: a.string(),
+      headline: a.string(),
+      deck: a.string(),
+      body: a.string().array(),
+      byline: a.string(),
+      dateline: a.string(),
+      publishedAt: a.datetime(),
+      editionDate: a.string(),
+      sortTitle: a.string(),
+      pullQuotes: a.string().array(),
+      layout: a.json(),
+      editorial: a.json(),
+    })
+    .secondaryIndexes((index) => [
+      index("slug").queryField("publishedItemBySlug"),
+      index("typeStatus").sortKeys(["publishedAt"]).queryField("listPublishedItemsByTypeStatusAndPublishedAt"),
+      index("sectionStatus").sortKeys(["publishedAt"]).queryField("listPublishedItemsBySectionStatusAndPublishedAt"),
+      index("itemLineageId").sortKeys(["versionNumber"]).queryField("listPublishedItemsByLineageAndVersion"),
+    ])
+    .authorization((allow) => [
+      allow.publicApiKey().to(["read"]),
+      allow.groups(contentWriteGroups),
+      allow.custom().to(authoringOperations),
+    ]),
+
+  PublishedMediaAsset: a
+    .model({
+      id: a.id().required(),
+      sourceMediaAssetId: a.id().required(),
+      publishedItemId: a.id().required(),
+      sourceItemId: a.id().required(),
+      itemLineageId: a.id().required(),
+      type: a.string().required(),
+      role: a.string().required(),
+      sortKey: a.string().required(),
+      storagePath: a.string(),
+      externalUrl: a.string(),
+      alt: a.string().required(),
+      caption: a.string(),
+      credit: a.string(),
+      width: a.integer(),
+      height: a.integer(),
+      aspectRatio: a.float(),
+      focalX: a.float(),
+      focalY: a.float(),
+      minHeight: a.integer(),
+      preferredHeight: a.integer(),
+      maxHeight: a.integer(),
+      crop: a.string(),
+      wrapsText: a.boolean(),
+      metadata: a.json(),
+    })
+    .secondaryIndexes((index) => [
+      index("publishedItemId").sortKeys(["sortKey"]).queryField("listPublishedMediaAssetsByItemAndSortKey"),
+      index("role").sortKeys(["publishedItemId"]).queryField("listPublishedMediaAssetsByRoleAndItem"),
+    ])
+    .authorization((allow) => [
+      allow.publicApiKey().to(["read"]),
+      allow.groups(contentWriteGroups),
+      allow.custom().to(authoringOperations),
+    ]),
+
+  PublishedEdition: a
+    .model({
+      id: a.id().required(),
+      sourceEditionId: a.id().required(),
+      editionLineageId: a.id().required(),
+      versionNumber: a.integer().required(),
+      slug: a.string().required(),
+      title: a.string().required(),
+      status: a.string().required(),
+      editionDate: a.string().required(),
+      publishedAt: a.datetime(),
+      description: a.string(),
+      layoutPlan: a.json(),
+      metadata: a.json(),
+    })
+    .secondaryIndexes((index) => [
+      index("slug").queryField("publishedEditionBySlug"),
+      index("status").sortKeys(["editionDate"]).queryField("listPublishedEditionsByStatusAndEditionDate"),
+      index("status").sortKeys(["publishedAt"]).queryField("listPublishedEditionsByStatusAndPublishedAt"),
+      index("editionLineageId").sortKeys(["versionNumber"]).queryField("listPublishedEditionsByLineageAndVersion"),
+    ])
+    .authorization((allow) => [
+      allow.publicApiKey().to(["read"]),
+      allow.groups(contentWriteGroups),
+      allow.custom().to(authoringOperations),
+    ]),
+
+  PublishedEditionItem: a
+    .model({
+      id: a.id().required(),
+      publishedEditionId: a.id().required(),
+      publishedItemId: a.id().required(),
+      sourceEditionItemId: a.id().required(),
+      sourceEditionId: a.id().required(),
+      sourceItemId: a.id().required(),
+      editionLineageId: a.id().required(),
+      itemLineageId: a.id().required(),
+      placementKey: a.string().required(),
+      sortKey: a.string().required(),
+      pageNumber: a.integer(),
+      priority: a.integer(),
+      metadata: a.json(),
+    })
+    .secondaryIndexes((index) => [
+      index("publishedEditionId").sortKeys(["sortKey"]).queryField("listPublishedEditionItemsByEditionAndSortKey"),
+      index("publishedItemId").sortKeys(["publishedEditionId"]).queryField("listPublishedEditionItemsByItemAndEdition"),
+    ])
+    .authorization((allow) => [
+      allow.publicApiKey().to(["read"]),
+      allow.groups(contentWriteGroups),
+      allow.custom().to(authoringOperations),
+    ]),
+
+  PublishedCategorySet: a
+    .model({
+      id: a.id().required(),
+      sourceCategorySetId: a.id().required(),
+      categorySetLineageId: a.id().required(),
+      versionNumber: a.integer().required(),
+      corpusId: a.id().required(),
+      classifierId: a.string().required(),
+      displayName: a.string().required(),
+      description: a.string(),
+      status: a.string().required(),
+      generatedAt: a.datetime(),
+      publishedAt: a.datetime(),
+      categoryCount: a.integer(),
+      metadata: a.json(),
+    })
+    .secondaryIndexes((index) => [
+      index("status").sortKeys(["displayName"]).queryField("listPublishedCategorySetsByStatusAndName"),
+      index("classifierId").sortKeys(["displayName"]).queryField("listPublishedCategorySetsByClassifierAndName"),
+      index("categorySetLineageId").sortKeys(["versionNumber"]).queryField("listPublishedCategorySetsByLineageAndVersion"),
+    ])
+    .authorization((allow) => [
+      allow.publicApiKey().to(["read"]),
+      allow.groups(contentWriteGroups),
+      allow.custom().to(authoringOperations),
+    ]),
+
+  PublishedCategory: a
+    .model({
+      id: a.id().required(),
+      sourceCategoryId: a.id().required(),
+      publishedCategorySetId: a.id().required(),
+      categoryLineageId: a.id().required(),
+      categorySetLineageId: a.id().required(),
+      versionNumber: a.integer().required(),
+      corpusId: a.id().required(),
+      categoryKey: a.string().required(),
+      parentCategoryId: a.id(),
+      parentCategoryKey: a.string(),
+      displayName: a.string().required(),
+      subtitle: a.string(),
+      description: a.string(),
+      aliases: a.string().array(),
+      status: a.string().required(),
+      seedItemIds: a.string().array(),
+      holdoutItemIds: a.string().array(),
+      rank: a.integer(),
+      depth: a.integer(),
+      isPinned: a.boolean(),
+      metadata: a.json(),
+    })
+    .secondaryIndexes((index) => [
+      index("publishedCategorySetId").sortKeys(["categoryKey"]).queryField("listPublishedCategoriesBySetAndKey"),
+      index("parentCategoryId").sortKeys(["rank"]).queryField("listPublishedCategoriesByParentAndRank"),
+      index("parentCategoryKey").sortKeys(["rank"]).queryField("listPublishedCategoriesByParentKeyAndRank"),
+      index("categoryKey").sortKeys(["publishedCategorySetId"]).queryField("listPublishedCategoriesByKeyAndSet"),
+    ])
+    .authorization((allow) => [
       allow.publicApiKey().to(["read"]),
       allow.groups(contentWriteGroups),
       allow.custom().to(authoringOperations),
     ]),
 }).authorization((allow) => [
-  allow.resource(curationAction),
+  allow.resource(categoryAction),
 ]);
 
 export type Schema = ClientSchema<typeof schema>;

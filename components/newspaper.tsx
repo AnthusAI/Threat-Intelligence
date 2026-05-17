@@ -8,9 +8,9 @@ import Link from "next/link";
 import type { CSSProperties, MouseEvent as ReactMouseEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ARCHIVE_PREVIEW_HEIGHT, ARCHIVE_PREVIEW_WIDTH } from "../lib/archive-types";
-import type { EditionContent, NewsDeskAppendix, NewsDeskTaxonomyNode } from "../lib/content-types";
+import type { EditionContent, NewsDeskAppendix, NewsDeskCategoryTreeNode } from "../lib/content-types";
 import { shouldBypassImageOptimization } from "../lib/image-url";
-import { loadEditorAccessState, loadEditorTaxonomyState } from "./news-desk-taxonomy-client";
+import { loadEditorAccessState, loadEditorCategoryTreeState } from "./news-desk-taxonomy-client";
 import { ReaderAuthControl } from "./reader-auth-control";
 import {
   buildNewspaperLayout,
@@ -57,11 +57,11 @@ const PAGE_LOOKAROUND = 1;
 type NewsDeskAppendixPage = {
   id: string;
   pageNumber: number;
-  mode: "register" | "topic";
+  mode: "register" | "category";
   appendix: NewsDeskAppendix;
-  roots: NewsDeskTaxonomyNode[];
-  root?: NewsDeskTaxonomyNode;
-  subtopics: NewsDeskTaxonomyNode[];
+  roots: NewsDeskCategoryTreeNode[];
+  root?: NewsDeskCategoryTreeNode;
+  subcategories: NewsDeskCategoryTreeNode[];
 };
 
 export function Newspaper({ content, editionBasePath, initialPageNumber = 1 }: NewspaperProps) {
@@ -135,7 +135,7 @@ export function Newspaper({ content, editionBasePath, initialPageNumber = 1 }: N
     let active = true;
     setEditorAppendixReady(false);
     const refreshAppendix = async () => {
-      const state = await loadEditorTaxonomyState({
+      const state = await loadEditorCategoryTreeState({
         scenarioAppendix: content.newsDeskAppendix,
         allowScenarioEditorOverride: content.source === "scenario",
       });
@@ -789,26 +789,26 @@ function TopicRegisterPage({
   return (
     <>
       <p className="news-desk-appendix__lede">
-        {page.appendix.description ?? "The accepted canonical topic tree currently steering corpus analysis and newsroom coverage."}
+        {page.appendix.description ?? "The accepted canonical category tree currently steering corpus analysis and newsroom coverage."}
       </p>
-      <div className="news-desk-appendix__ledger" data-news-desk-topic-register>
+      <div className="news-desk-appendix__ledger" data-news-desk-category-register>
         {page.roots.map((root, index) => {
           const rootPageNumber = page.pageNumber + index + 1;
-          const subtopicCount = page.appendix.nodes.filter((node) => node.parentTopicUid === root.topicUid && node.status === "accepted").length;
+          const subcategoryCount = page.appendix.nodes.filter((node) => node.parentCategoryKey === root.categoryKey && node.status === "accepted").length;
           const href = getPageHref(rootPageNumber, editionBasePath);
           return (
-            <article className="news-desk-appendix__topic-summary" key={root.id}>
+            <article className="news-desk-appendix__category-summary" key={root.id}>
               <header>
                 <h3>
                   <a href={href} onClick={(event) => handleAppendixPageClick(event, rootPageNumber, scrollToPage)}>
                     {root.displayName}
                   </a>
                 </h3>
-                <span>{subtopicCount} subtopics</span>
+                <span>{subcategoryCount} subcategories</span>
               </header>
               {root.subtitle ? <p className="news-desk-appendix__subtitle">{root.subtitle}</p> : null}
-              <p>{root.description ?? "Accepted root topic."}</p>
-              <TopicEvidenceLine node={root} />
+              <p>{root.description ?? "Accepted root category."}</p>
+              <CategoryEvidenceLine node={root} />
             </article>
           );
         })}
@@ -827,33 +827,33 @@ function RootTopicPage({ page }: { page: NewsDeskAppendixPage }) {
   return (
     <>
       {root.subtitle ? <p className="news-desk-appendix__subtitle news-desk-appendix__subtitle--root">{root.subtitle}</p> : null}
-      <p className="news-desk-appendix__lede">{root.description ?? "Accepted root topic."}</p>
+      <p className="news-desk-appendix__lede">{root.description ?? "Accepted root category."}</p>
       <div className="news-desk-appendix__evidence-band" aria-label="Topic evidence counts">
-        <TopicEvidenceMetric label="Seed references" value={compactTextArray(root.seedItemIds).length} />
-        <TopicEvidenceMetric label="Holdout references" value={compactTextArray(root.holdoutItemIds).length} />
-        <TopicEvidenceMetric label="Accepted subtopics" value={page.subtopics.length} />
+        <CategoryEvidenceMetric label="Seed references" value={compactTextArray(root.seedItemIds).length} />
+        <CategoryEvidenceMetric label="Holdout references" value={compactTextArray(root.holdoutItemIds).length} />
+        <CategoryEvidenceMetric label="Accepted subcategories" value={page.subcategories.length} />
       </div>
-      <section className="news-desk-appendix__subtopics" aria-label={`${root.displayName} accepted subtopics`}>
+      <section className="news-desk-appendix__subcategories" aria-label={`${root.displayName} accepted subcategories`}>
         <header>
-          <h3>Accepted Subtopics</h3>
+          <h3>Accepted Subcategories</h3>
           <Link href="/news-desk">Review related notes in News Desk</Link>
         </header>
-        {page.subtopics.length ? page.subtopics.map((subtopic) => (
-          <article className="news-desk-appendix__subtopic" data-news-desk-subtopic={subtopic.topicUid} key={subtopic.id}>
-            <h4>{subtopic.displayName}</h4>
-            {subtopic.subtitle ? <p className="news-desk-appendix__subtitle">{subtopic.subtitle}</p> : null}
-            <p>{subtopic.description ?? "Accepted subtopic."}</p>
-            <TopicEvidenceLine node={subtopic} />
+        {page.subcategories.length ? page.subcategories.map((subcategory) => (
+          <article className="news-desk-appendix__subcategory" data-news-desk-subcategory={subcategory.categoryKey} key={subcategory.id}>
+            <h4>{subcategory.displayName}</h4>
+            {subcategory.subtitle ? <p className="news-desk-appendix__subtitle">{subcategory.subtitle}</p> : null}
+            <p>{subcategory.description ?? "Accepted subcategory."}</p>
+            <CategoryEvidenceLine node={subcategory} />
           </article>
         )) : (
-          <p className="news-desk-appendix__empty">No accepted subtopics have been filed for this topic yet.</p>
+          <p className="news-desk-appendix__empty">No accepted subcategories have been filed for this category yet.</p>
         )}
       </section>
     </>
   );
 }
 
-function TopicEvidenceMetric({ label, value }: { label: string; value: number }) {
+function CategoryEvidenceMetric({ label, value }: { label: string; value: number }) {
   return (
     <div>
       <strong>{value}</strong>
@@ -862,12 +862,12 @@ function TopicEvidenceMetric({ label, value }: { label: string; value: number })
   );
 }
 
-function TopicEvidenceLine({ node }: { node: NewsDeskTaxonomyNode }) {
+function CategoryEvidenceLine({ node }: { node: NewsDeskCategoryTreeNode }) {
   const seedCount = compactTextArray(node.seedItemIds).length;
   const holdoutCount = compactTextArray(node.holdoutItemIds).length;
   return (
     <small className="news-desk-appendix__evidence-line">
-      {seedCount} seed refs / {holdoutCount} holdout refs / {node.topicUid}
+      {seedCount} seed refs / {holdoutCount} holdout refs / {node.categoryKey}
     </small>
   );
 }
@@ -1514,34 +1514,34 @@ function formatPageKind(page: SolvedPage): string {
 function buildNewsDeskAppendixPages(appendix: NewsDeskAppendix | null | undefined, basePageCount: number): NewsDeskAppendixPage[] {
   if (!appendix?.nodes?.length || basePageCount <= 0) return [];
   const acceptedNodes = appendix.nodes.filter((node) => node.status === "accepted");
-  const roots = sortAppendixNodes(acceptedNodes.filter((node) => !node.parentTopicUid));
+  const roots = sortAppendixNodes(acceptedNodes.filter((node) => !node.parentCategoryKey));
   if (!roots.length) return [];
 
   const pages: NewsDeskAppendixPage[] = [
     {
-      id: `${appendix.taxonomyId}-register`,
+      id: `${appendix.categorySetId}-register`,
       pageNumber: basePageCount + 1,
       mode: "register",
       appendix,
       roots,
-      subtopics: [],
+      subcategories: [],
     },
   ];
   roots.forEach((root, index) => {
     pages.push({
-      id: `${appendix.taxonomyId}-${root.topicUid}`,
+      id: `${appendix.categorySetId}-${root.categoryKey}`,
       pageNumber: basePageCount + index + 2,
-      mode: "topic",
+      mode: "category",
       appendix,
       roots,
       root,
-      subtopics: sortAppendixNodes(acceptedNodes.filter((node) => node.parentTopicUid === root.topicUid)),
+      subcategories: sortAppendixNodes(acceptedNodes.filter((node) => node.parentCategoryKey === root.categoryKey)),
     });
   });
   return pages;
 }
 
-function sortAppendixNodes(nodes: NewsDeskTaxonomyNode[]): NewsDeskTaxonomyNode[] {
+function sortAppendixNodes(nodes: NewsDeskCategoryTreeNode[]): NewsDeskCategoryTreeNode[] {
   return [...nodes].sort((left, right) => {
     const rankDiff = (left.rank ?? 999999) - (right.rank ?? 999999);
     if (rankDiff !== 0) return rankDiff;

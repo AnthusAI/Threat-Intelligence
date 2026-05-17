@@ -1907,7 +1907,9 @@ img {
 
 .topic-steering-proposal-list,
 .topic-steering-topic-grid,
-.news-desk-ledger-list {
+.news-desk-ledger-list,
+.news-desk-assignment-section-list,
+.news-desk-assignment-list {
   display: grid;
   gap: 0;
 }
@@ -2015,7 +2017,8 @@ img {
 
 .topic-steering-proposal__actions button,
 .topic-steering-topic-card button,
-.topic-steering-revision-panel button {
+.topic-steering-revision-panel button,
+.news-desk-assignment-row__actions button {
   border: 1px solid var(--rule);
   cursor: pointer;
   font-family: Arial, Helvetica, sans-serif;
@@ -2029,23 +2032,175 @@ img {
 
 .topic-steering-proposal__actions button[data-review-action="accept"],
 .topic-steering-topic-card button,
-.topic-steering-revision-panel button {
+.topic-steering-revision-panel button,
+.news-desk-assignment-row__actions button[data-assignment-action="restore"] {
   background: var(--ink);
   color: rgb(var(--paper-rgb));
 }
 
-.topic-steering-proposal__actions button[data-review-action="reject"] {
+.topic-steering-proposal__actions button[data-review-action="reject"],
+.news-desk-assignment-row__actions button[data-assignment-action="cull"] {
   background: transparent;
   color: var(--ink);
 }
 
 .topic-steering-proposal__actions button:disabled,
 .topic-steering-topic-card button:disabled,
-.topic-steering-revision-panel button:disabled {
+.topic-steering-revision-panel button:disabled,
+.news-desk-assignment-row__actions button:disabled {
   background: transparent;
   border-color: rgb(var(--rule-rgb) / 0.22);
   color: var(--disabled);
   cursor: default;
+}
+
+.news-desk-assignment-section {
+  border-top: 1px solid rgb(var(--rule-rgb) / 0.52);
+  display: grid;
+  gap: 0;
+  padding: calc(var(--paper-rhythm) * 0.85) 0 0;
+}
+
+.news-desk-assignment-section:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.news-desk-assignment-section__header {
+  align-items: flex-end;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.news-desk-assignment-section__header h3 {
+  color: rgb(var(--ink-solid-rgb) / var(--ink-display-alpha));
+  font-family: var(--font-serif), Georgia, "Times New Roman", serif;
+  font-size: 1.45rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  line-height: 1;
+  margin: 0;
+}
+
+.news-desk-assignment-section__header > span,
+.news-desk-assignment-row__title > span,
+.news-desk-assignment-row__meta,
+.news-desk-assignment-row__actions label span {
+  color: var(--muted);
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1.28;
+  text-transform: uppercase;
+}
+
+.news-desk-assignment-row {
+  border-top: 1px solid rgb(var(--rule-rgb) / 0.36);
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) minmax(190px, 0.34fr);
+  padding: 14px 0;
+}
+
+.news-desk-assignment-row:first-child {
+  border-top: 0;
+}
+
+.news-desk-assignment-row--culled {
+  color: var(--muted-strong);
+}
+
+.news-desk-assignment-row__title {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.news-desk-assignment-row__title > div {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.news-desk-assignment-row__title h4 {
+  color: rgb(var(--ink-solid-rgb) / var(--ink-display-alpha));
+  font-family: var(--font-serif), Georgia, "Times New Roman", serif;
+  font-size: 1.34rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  line-height: 1;
+  margin: 0;
+}
+
+.news-desk-assignment-row__main > p {
+  color: var(--muted-strong);
+  line-height: 1.4;
+  margin: 8px 0 0;
+}
+
+.news-desk-assignment-row__angle {
+  border-left: 2px solid rgb(var(--rule-rgb) / 0.48);
+  padding-left: 10px;
+}
+
+.news-desk-assignment-row__angle span {
+  color: var(--muted);
+  display: block;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  margin-bottom: 3px;
+  text-transform: uppercase;
+}
+
+.news-desk-assignment-row__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.news-desk-assignment-row__meta span {
+  border: 1px solid rgb(var(--rule-rgb) / 0.32);
+  padding: 4px 6px;
+}
+
+.news-desk-assignment-row__actions {
+  align-content: start;
+  display: grid;
+  gap: 8px;
+}
+
+.news-desk-assignment-row__actions label {
+  display: grid;
+  gap: 4px;
+}
+
+.news-desk-assignment-row__actions textarea {
+  background: rgb(var(--paper-rgb) / 0.42);
+  border: 1px solid rgb(var(--rule-rgb) / 0.32);
+  color: var(--ink);
+  font: inherit;
+  line-height: 1.32;
+  min-width: 0;
+  padding: 7px;
+  resize: vertical;
+}
+
+.news-desk-assignment-row__reason {
+  border-left: 2px solid rgb(155 75 54 / 0.5);
+  color: var(--muted-strong);
+  font-size: 0.86rem;
+  line-height: 1.34;
+  margin: 0;
+  padding-left: 8px;
 }
 
 .topic-steering-table-wrap {
@@ -2292,18 +2447,23 @@ img {
 }
 
 .topic-steering-pill--rejected,
+.topic-steering-pill--culled,
 .topic-steering-pill--deprecated {
   background: rgb(155 75 54 / 0.14);
   border-color: rgb(155 75 54 / 0.74);
 }
 
 .topic-steering-pill--deferred,
-.topic-steering-pill--draft {
+.topic-steering-pill--draft,
+.topic-steering-pill--drafted,
+.topic-steering-pill--researched {
   background: rgb(155 123 38 / 0.14);
   border-color: rgb(155 123 38 / 0.74);
 }
 
-.topic-steering-pill--proposed {
+.topic-steering-pill--proposed,
+.topic-steering-pill--dispatched,
+.topic-steering-pill--restored {
   background: rgb(var(--ink-solid-rgb) / 0.08);
 }
 
@@ -2379,6 +2539,8 @@ img {
   }
 
   .topic-steering-section__header,
+  .news-desk-assignment-section__header,
+  .news-desk-assignment-row__title,
   .topic-steering-taxonomy-root header,
   .topic-steering-topic-card header,
   .topic-steering-topic-card footer,
@@ -2391,8 +2553,16 @@ img {
     grid-template-columns: 1fr;
   }
 
+  .news-desk-assignment-row {
+    grid-template-columns: 1fr;
+  }
+
   .topic-steering-proposal__actions {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .news-desk-assignment-row__actions {
+    grid-template-columns: 1fr;
   }
 
   .topic-steering-proposal dl,

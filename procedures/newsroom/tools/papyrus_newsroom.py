@@ -30,12 +30,28 @@ PAPYRUS_ROOT = Path(__file__).resolve().parents[3]
 BIBLICUS_ROOT = PAPYRUS_ROOT.parent / "Biblicus"
 STEERING_CONFIG_PATH = PAPYRUS_ROOT / "corpora" / "papyrus-steering.yml"
 NEWSROOM_VERSION = "newsroom-v1"
+ASSIGNMENT_TYPE = "assignment"
+ASSIGNMENT_DISPATCH_STATUS = "dispatched"
+ASSIGNMENT_RESEARCH_STATUS = "researched"
+ASSIGNMENT_DRAFT_STATUS = "drafted"
+ARTICLE_TYPE = "article"
+ARTICLE_DRAFT_STATUS = "draft"
+DEFAULT_ASSIGNMENT_RATIO = 1.5
+REPORTER_PROCEDURE = "procedures/newsroom/reporter.tac"
 
 
 GET_EDITION_QUERY = """
 query GetEdition($id: ID!) {
   getEdition(id: $id) {
     id
+    lineageId
+    versionNumber
+    previousVersionId
+    versionState
+    versionCreatedAt
+    versionCreatedBy
+    changeReason
+    contentHash
     slug
     title
     status
@@ -58,7 +74,9 @@ query ListEditionItemsByEdition($editionId: ID!, $limit: Int, $nextToken: String
     items {
       id
       editionId
+      editionLineageId
       itemId
+      itemLineageId
       placementKey
       sortKey
       pageNumber
@@ -74,6 +92,14 @@ GET_ITEM_QUERY = """
 query GetItem($id: ID!) {
   getItem(id: $id) {
     id
+    lineageId
+    versionNumber
+    previousVersionId
+    versionState
+    versionCreatedAt
+    versionCreatedBy
+    changeReason
+    contentHash
     type
     status
     typeStatus
@@ -98,12 +124,12 @@ query GetItem($id: ID!) {
 """
 
 LIST_ARTICLES_QUERY = """
-query ListItemsByTypeStatusAndPublishedAt(
+query ListPublishedItemsByTypeStatusAndPublishedAt(
   $typeStatus: String!
   $limit: Int
   $nextToken: String
 ) {
-  listItemsByTypeStatusAndPublishedAt(
+  listPublishedItemsByTypeStatusAndPublishedAt(
     typeStatus: $typeStatus
     limit: $limit
     nextToken: $nextToken
@@ -111,6 +137,9 @@ query ListItemsByTypeStatusAndPublishedAt(
   ) {
     items {
       id
+      sourceItemId
+      itemLineageId
+      versionNumber
       slug
       title
       headline
@@ -185,7 +214,7 @@ def papyrus_list_recent_published_articles(recent_days: int = 30, limit: int = 2
                 "nextToken": next_token,
             },
         )
-        connection = data.get("listItemsByTypeStatusAndPublishedAt") or {}
+        connection = data.get("listPublishedItemsByTypeStatusAndPublishedAt") or {}
         for item in connection.get("items") or []:
             decoded = _decode_record_json(item)
             published_at = _parse_datetime(decoded.get("publishedAt"))
@@ -309,7 +338,7 @@ def build_assignment_record_plan(
     section = str(payload.get("section") or "News")
     priority = int(payload.get("priority") or placement_index or 1)
     resolved_corpus_key = corpus_key or str(payload.get("corpus_key") or payload.get("corpusKey") or "")
-    topic_uid = payload.get("topic_uid") or payload.get("topicUid")
+    category_key = payload.get("category_key") or payload.get("categoryKey") or payload.get("topic_uid") or payload.get("topicUid")
     evidence_item_ids = _string_list(
         payload.get("evidence_item_ids") or payload.get("evidenceItemIds")
     )
@@ -317,13 +346,27 @@ def build_assignment_record_plan(
     edition_item_id = str(
         payload.get("edition_item_id") or f"edition-assignment-{_hash_short([edition_id, assignment_id])}"
     )
+    target_article_slots = _optional_int(
+        payload.get("target_article_slots")
+        or payload.get("targetArticleSlots")
+        or payload.get("target_articles")
+        or payload.get("targetArticles")
+    )
+    assignment_ratio = _optional_float(
+        payload.get("assignment_ratio")
+        or payload.get("assignmentRatio")
+        or payload.get("overassignment_ratio")
+        or payload.get("overassignmentRatio")
+    )
 
     assignment_state = {
         "brief": str(payload.get("brief") or payload.get("deck") or ""),
         "angle": str(payload.get("angle") or ""),
         "corpusKey": resolved_corpus_key or None,
-        "topicUid": topic_uid,
+        "categoryKey": category_key,
         "evidenceItemIds": evidence_item_ids,
+        "targetArticleSlots": target_article_slots,
+        "overassignmentRatio": assignment_ratio,
         "sourceSnapshots": _normalize_jsonish(payload.get("source_snapshots") or payload.get("sourceSnapshots") or []),
         "recentArticleAvoidance": _normalize_jsonish(
             payload.get("recent_article_avoidance")
@@ -338,17 +381,21 @@ def build_assignment_record_plan(
             "version": NEWSROOM_VERSION,
             "generatedAt": now,
         },
+        "downstreamReporter": {
+            "procedure": REPORTER_PROCEDURE,
+            "inputItemId": assignment_id,
+        },
     }
 
-    item = {
+    item = _with_initial_version({
         "id": assignment_id,
-        "type": "article",
-        "status": "assignment",
-        "typeStatus": "article#assignment",
+        "type": ASSIGNMENT_TYPE,
+        "status": ASSIGNMENT_DISPATCH_STATUS,
+        "typeStatus": f"{ASSIGNMENT_TYPE}#{ASSIGNMENT_DISPATCH_STATUS}",
         "slug": slug,
         "shortSlug": payload.get("shortSlug") or payload.get("short_slug"),
         "section": section,
-        "sectionStatus": f"{_slugify(section)}#assignment",
+        "sectionStatus": f"{_slugify(section)}#{ASSIGNMENT_DISPATCH_STATUS}",
         "title": title,
         "headline": title,
         "deck": str(payload.get("brief") or payload.get("deck") or ""),
@@ -361,7 +408,7 @@ def build_assignment_record_plan(
         "pullQuotes": [],
         "layout": {"source": "newsroom-assignment"},
         "editorial": {"newsroom": {"assignment": assignment_state}},
-    }
+    }, now=now, actor="newsroom-editor", reason="assignment dispatch")
     item = {
         key: value
         for key, value in item.items()
@@ -371,7 +418,9 @@ def build_assignment_record_plan(
     edition_item = {
         "id": edition_item_id,
         "editionId": edition_id,
+        "editionLineageId": payload.get("editionLineageId") or payload.get("edition_lineage_id") or edition_id,
         "itemId": assignment_id,
+        "itemLineageId": item["lineageId"],
         "placementKey": f"assignment:{slug}",
         "sortKey": f"assignment:{priority:04d}:{slug}",
         "pageNumber": payload.get("pageNumber") or payload.get("page_number"),
@@ -379,9 +428,12 @@ def build_assignment_record_plan(
         "metadata": {
             "newsroom": {
                 "role": "assignment",
-                "status": "assignment",
+                "status": ASSIGNMENT_DISPATCH_STATUS,
                 "createdByProcedure": "procedures/newsroom/editor.tac",
                 "generatedAt": now,
+                "targetArticleSlots": target_article_slots,
+                "overassignmentRatio": assignment_ratio,
+                "downstreamProcedure": REPORTER_PROCEDURE,
             }
         },
     }
@@ -389,7 +441,7 @@ def build_assignment_record_plan(
 
     return {
         "dryRun": True,
-        "lifecycle": "assignment",
+        "lifecycle": "assignment-dispatch",
         "item": item,
         "editionItem": edition_item,
         "records": [
@@ -397,6 +449,127 @@ def build_assignment_record_plan(
             {"modelName": "EditionItem", "action": "create", "input": edition_item},
         ],
         "warnings": [],
+    }
+
+
+def build_assignment_dispatch_plan(
+    edition_id: str,
+    section_targets_json: str = "",
+    section_targets: Any = None,
+    assignments_json: str = "",
+    assignments: Any = None,
+    corpus_key: str = "",
+    assignment_ratio: float | str = DEFAULT_ASSIGNMENT_RATIO,
+    generated_at: str = "",
+) -> dict[str, Any]:
+    """
+    Build a dry-run section-capped assignment dispatch plan.
+
+    The editor may produce more candidate assignments than the final edition
+    needs, but this helper limits reviewer load to the requested per-section
+    target multiplied by the overassignment ratio.
+    """
+    now = generated_at or _now_iso()
+    edition_id = _required(edition_id, "edition_id")
+    ratio = _positive_float(assignment_ratio, "assignment_ratio")
+    normalized_targets = _normalize_section_targets(section_targets, section_targets_json, ratio)
+    candidate_assignments = _coerce_payload_list(assignments, assignments_json, "assignments")
+    candidates_by_section: dict[str, list[dict[str, Any]]] = {}
+    for candidate in candidate_assignments:
+        section_key = _slugify(candidate.get("section") or "News")
+        candidates_by_section.setdefault(section_key, []).append(candidate)
+
+    record_plans: list[dict[str, Any]] = []
+    reporter_dispatches: list[dict[str, Any]] = []
+    assignment_summaries: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    total_target_articles = 0
+    total_suppressed = 0
+    placement_index = 1
+
+    for target in normalized_targets:
+        section_key = target["sectionKey"]
+        candidates = candidates_by_section.get(section_key, [])
+        target_articles = target["targetArticles"]
+        dispatch_count = target["dispatchCount"]
+        total_target_articles += target_articles
+        if len(candidates) < dispatch_count:
+            warnings.append(
+                f"section {target['section']} supplied {len(candidates)} assignment candidate(s) for {dispatch_count} dispatch slot(s)"
+            )
+        selected = candidates[:dispatch_count]
+        suppressed = max(len(candidates) - len(selected), 0)
+        total_suppressed += suppressed
+        target["selectedAssignments"] = len(selected)
+        target["suppressedCandidates"] = suppressed
+
+        for section_index, candidate in enumerate(selected, start=1):
+            candidate_payload = dict(candidate)
+            candidate_payload.setdefault("section", target["section"])
+            candidate_payload["targetArticleSlots"] = target_articles
+            candidate_payload["overassignmentRatio"] = ratio
+            candidate_payload["sectionAssignmentIndex"] = section_index
+            plan = build_assignment_record_plan(
+                edition_id=edition_id,
+                assignment=candidate_payload,
+                corpus_key=corpus_key,
+                placement_index=placement_index,
+                generated_at=now,
+            )
+            item = plan["item"]
+            record_plans.append(plan)
+            assignment_summaries.append(
+                {
+                    "id": item["id"],
+                    "slug": item["slug"],
+                    "title": item["title"],
+                    "section": item.get("section"),
+                    "status": item["status"],
+                    "type": item["type"],
+                    "targetArticleSlots": target_articles,
+                }
+            )
+            reporter_dispatches.append(
+                {
+                    "dryRun": True,
+                    "procedure": REPORTER_PROCEDURE,
+                    "assignmentItemId": item["id"],
+                    "section": item.get("section"),
+                    "input": {
+                        "assignment_item_id": item["id"],
+                        "assignment_json": json.dumps(item, sort_keys=True),
+                        "corpus_key": corpus_key or _assignment_corpus_key(item),
+                    },
+                }
+            )
+            placement_index += 1
+
+    return {
+        "dryRun": True,
+        "lifecycle": "assignment-dispatch",
+        "editionId": edition_id,
+        "corpusKey": corpus_key,
+        "assignmentRatio": ratio,
+        "sectionTargets": [
+            {
+                "section": target["section"],
+                "targetArticles": target["targetArticles"],
+                "dispatchCount": target["dispatchCount"],
+                "selectedAssignments": target["selectedAssignments"],
+                "suppressedCandidates": target["suppressedCandidates"],
+            }
+            for target in normalized_targets
+        ],
+        "assignments": assignment_summaries,
+        "recordPlans": record_plans,
+        "reporterDispatches": reporter_dispatches,
+        "reviewerLoad": {
+            "targetArticleCount": total_target_articles,
+            "dispatchedAssignmentCount": len(record_plans),
+            "suppressedCandidateCount": total_suppressed,
+            "assignmentRatio": ratio,
+        },
+        "warnings": warnings,
     }
 
 
@@ -414,14 +587,19 @@ def build_research_update_plan(
     research_payload = _coerce_payload(research, research_json, "research")
     now = generated_at or _now_iso()
 
-    if item.get("type") != "article":
-        raise ValueError("assignment item must have type 'article'")
-    if item.get("status") != "assignment":
-        raise ValueError("research can only be attached to assignment Items in v1")
+    if item.get("type") != ASSIGNMENT_TYPE:
+        raise ValueError("assignment item must have type 'assignment'")
+    if item.get("status") not in {ASSIGNMENT_DISPATCH_STATUS, ASSIGNMENT_RESEARCH_STATUS}:
+        raise ValueError("research can only be attached to dispatched assignment Items in v1")
 
     summary = _required(research_payload.get("summary"), "research.summary")
     corpus_key = research_payload.get("corpus_key") or research_payload.get("corpusKey")
-    topic_uid = research_payload.get("topic_uid") or research_payload.get("topicUid")
+    category_key = (
+        research_payload.get("category_key")
+        or research_payload.get("categoryKey")
+        or research_payload.get("topic_uid")
+        or research_payload.get("topicUid")
+    )
     evidence_item_ids = _string_list(
         research_payload.get("evidence_item_ids") or research_payload.get("evidenceItemIds")
     )
@@ -434,7 +612,7 @@ def build_research_update_plan(
         "status": "researched",
         "summary": summary,
         "corpusKey": corpus_key,
-        "topicUid": topic_uid,
+        "categoryKey": category_key,
         "evidenceItemIds": evidence_item_ids,
         "queries": _normalize_jsonish(research_payload.get("queries") or []),
         "sourceSnapshots": _normalize_jsonish(
@@ -462,14 +640,18 @@ def build_research_update_plan(
         },
     }
 
-    updated_item = dict(item)
-    updated_item.update(
+    updated_item = _next_version(
+        item,
         {
-            "status": "assignment",
-            "typeStatus": "article#assignment",
+            "status": ASSIGNMENT_RESEARCH_STATUS,
+            "typeStatus": f"{ASSIGNMENT_TYPE}#{ASSIGNMENT_RESEARCH_STATUS}",
+            "sectionStatus": f"{_slugify(item.get('section') or 'news')}#{ASSIGNMENT_RESEARCH_STATUS}",
             "publishedAt": None,
             "editorial": editorial,
-        }
+        },
+        now=now,
+        actor="newsroom-researcher",
+        reason="assignment research",
     )
 
     warnings = []
@@ -481,7 +663,8 @@ def build_research_update_plan(
         "lifecycle": "assignment-research",
         "item": updated_item,
         "records": [
-            {"modelName": "Item", "action": "update", "input": updated_item},
+            {"modelName": "Item", "action": "create", "input": updated_item},
+            {"modelName": "Item", "action": "update", "input": _supersede_update(item, now)},
         ],
         "warnings": warnings,
     }
@@ -495,16 +678,16 @@ def build_draft_update_plan(
     generated_at: str = "",
 ) -> dict[str, Any]:
     """
-    Build a dry-run update plan that advances one assignment Item to draft.
+    Build a dry-run plan that marks an assignment drafted and creates an article draft.
     """
     item = _decode_record_json(_coerce_payload(assignment_item, assignment_item_json, "assignment_item"))
     draft_payload = _coerce_payload(draft, draft_json, "draft")
     now = generated_at or _now_iso()
 
-    if item.get("type") != "article":
-        raise ValueError("assignment item must have type 'article'")
-    if item.get("status") not in {"assignment", "draft"}:
-        raise ValueError("assignment item status must be 'assignment' or 'draft'")
+    if item.get("type") != ASSIGNMENT_TYPE:
+        raise ValueError("assignment item must have type 'assignment'")
+    if item.get("status") not in {ASSIGNMENT_DISPATCH_STATUS, ASSIGNMENT_RESEARCH_STATUS, ASSIGNMENT_DRAFT_STATUS}:
+        raise ValueError("assignment item status must be 'dispatched', 'researched', or 'drafted'")
 
     headline = _required(draft_payload.get("headline") or draft_payload.get("title"), "draft.headline")
     body = _string_list(draft_payload.get("body"))
@@ -529,33 +712,137 @@ def build_draft_update_plan(
         },
     }
 
-    updated_item = dict(item)
-    updated_item.update(
+    slug = _slugify(draft_payload.get("slug") or item.get("slug") or headline)
+    section = str(draft_payload.get("section") or item.get("section") or "News")
+    draft_item_id = str(draft_payload.get("id") or f"item-{slug}")
+    newsroom["draft"]["articleItemId"] = draft_item_id
+    assignment_update = _next_version(
+        item,
         {
-            "status": "draft",
-            "typeStatus": "article#draft",
-            "sectionStatus": f"{_slugify(updated_item.get('section') or 'news')}#draft",
-            "title": draft_payload.get("title") or headline,
-            "headline": headline,
-            "deck": str(draft_payload.get("deck") or updated_item.get("deck") or ""),
-            "body": body,
-            "byline": str(draft_payload.get("byline") or updated_item.get("byline") or "Papyrus Staff"),
-            "dateline": str(draft_payload.get("dateline") or updated_item.get("dateline") or "NEWSROOM"),
+            "status": ASSIGNMENT_DRAFT_STATUS,
+            "typeStatus": f"{ASSIGNMENT_TYPE}#{ASSIGNMENT_DRAFT_STATUS}",
+            "sectionStatus": f"{_slugify(section)}#{ASSIGNMENT_DRAFT_STATUS}",
             "publishedAt": None,
-            "sortTitle": _sort_title(draft_payload.get("title") or headline),
             "editorial": editorial,
-        }
+        },
+        now=now,
+        actor="newsroom-reporter",
+        reason="assignment drafted",
     )
+
+    draft_item = _with_initial_version({
+        "id": draft_item_id,
+        "type": ARTICLE_TYPE,
+        "status": ARTICLE_DRAFT_STATUS,
+        "typeStatus": f"{ARTICLE_TYPE}#{ARTICLE_DRAFT_STATUS}",
+        "slug": slug,
+        "shortSlug": draft_payload.get("shortSlug") or draft_payload.get("short_slug") or item.get("shortSlug"),
+        "section": section,
+        "sectionStatus": f"{_slugify(section)}#{ARTICLE_DRAFT_STATUS}",
+        "title": draft_payload.get("title") or headline,
+        "headline": headline,
+        "deck": str(draft_payload.get("deck") or item.get("deck") or ""),
+        "body": body,
+        "byline": str(draft_payload.get("byline") or item.get("byline") or "Papyrus Staff"),
+        "dateline": str(draft_payload.get("dateline") or item.get("dateline") or "NEWSROOM"),
+        "publishedAt": None,
+        "editionDate": draft_payload.get("editionDate") or draft_payload.get("edition_date") or item.get("editionDate"),
+        "sortTitle": _sort_title(draft_payload.get("title") or headline),
+        "pullQuotes": _string_list(draft_payload.get("pullQuotes") or draft_payload.get("pull_quotes")),
+        "layout": {"source": "newsroom-reporter"},
+        "editorial": {
+            "newsroom": {
+                "assignmentItemId": assignment_update.get("id"),
+                "assignment": newsroom.get("assignment", {}),
+                "research": newsroom.get("research"),
+                "draft": newsroom["draft"],
+            }
+        },
+    }, now=now, actor="newsroom-reporter", reason="assignment draft")
+    draft_item = {
+        key: value
+        for key, value in draft_item.items()
+        if value is not None or key in {"publishedAt"}
+    }
 
     return {
         "dryRun": True,
         "lifecycle": "draft",
-        "item": updated_item,
+        "assignmentItem": assignment_update,
+        "item": draft_item,
+        "draftItem": draft_item,
         "records": [
-            {"modelName": "Item", "action": "update", "input": updated_item},
+            {"modelName": "Item", "action": "create", "input": assignment_update},
+            {"modelName": "Item", "action": "update", "input": _supersede_update(item, now)},
+            {"modelName": "Item", "action": "create", "input": draft_item},
         ],
         "warnings": [],
     }
+
+
+def _with_initial_version(
+    record: dict[str, Any],
+    *,
+    now: str,
+    actor: str,
+    reason: str,
+) -> dict[str, Any]:
+    versioned = dict(record)
+    lineage_id = str(versioned.get("lineageId") or versioned["id"])
+    versioned.update(
+        {
+            "lineageId": lineage_id,
+            "versionNumber": int(versioned.get("versionNumber") or 1),
+            "previousVersionId": versioned.get("previousVersionId"),
+            "versionState": versioned.get("versionState") or "current",
+            "versionCreatedAt": versioned.get("versionCreatedAt") or now,
+            "versionCreatedBy": versioned.get("versionCreatedBy") or actor,
+            "changeReason": versioned.get("changeReason") or reason,
+        }
+    )
+    versioned["contentHash"] = _content_hash(versioned)
+    return versioned
+
+
+def _next_version(
+    current: dict[str, Any],
+    updates: dict[str, Any],
+    *,
+    now: str,
+    actor: str,
+    reason: str,
+) -> dict[str, Any]:
+    lineage_id = str(current.get("lineageId") or current["id"])
+    version_number = int(current.get("versionNumber") or 1) + 1
+    versioned = dict(current)
+    versioned.update(updates)
+    versioned.update(
+        {
+            "id": f"{lineage_id}-v{version_number}",
+            "lineageId": lineage_id,
+            "versionNumber": version_number,
+            "previousVersionId": current["id"],
+            "versionState": "current",
+            "versionCreatedAt": now,
+            "versionCreatedBy": actor,
+            "changeReason": reason,
+        }
+    )
+    versioned["contentHash"] = _content_hash(versioned)
+    return versioned
+
+
+def _supersede_update(current: dict[str, Any], now: str) -> dict[str, Any]:
+    return {
+        "id": current["id"],
+        "versionState": "superseded",
+        "updatedAt": now,
+    }
+
+
+def _content_hash(record: dict[str, Any]) -> str:
+    payload = {key: value for key, value in record.items() if key != "contentHash"}
+    return "sha256:" + hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
 def _graphql(query: str, variables: dict[str, Any]) -> dict[str, Any]:
@@ -661,6 +948,73 @@ def _coerce_payload(
     return payload
 
 
+def _coerce_payload_list(value: Any, json_value: str, label: str) -> list[dict[str, Any]]:
+    if value is not None:
+        payload = value
+    else:
+        if not json_value:
+            raise ValueError(f"{label}_json is required")
+        payload = json.loads(json_value)
+    if isinstance(payload, dict) and isinstance(payload.get(label), list):
+        payload = payload[label]
+    if not isinstance(payload, list):
+        raise ValueError(f"{label}_json must decode to an array")
+    result: list[dict[str, Any]] = []
+    for index, item in enumerate(payload, start=1):
+        if not isinstance(item, dict):
+            raise ValueError(f"{label}[{index}] must be an object")
+        result.append(item)
+    return result
+
+
+def _normalize_section_targets(value: Any, json_value: str, assignment_ratio: float) -> list[dict[str, Any]]:
+    if value is not None:
+        payload = value
+    else:
+        if not json_value:
+            raise ValueError("section_targets_json is required")
+        payload = json.loads(json_value)
+    if isinstance(payload, dict) and isinstance(payload.get("sections"), list):
+        payload = payload["sections"]
+    elif isinstance(payload, dict):
+        payload = [
+            {"section": section, "targetArticles": target}
+            for section, target in payload.items()
+        ]
+    if not isinstance(payload, list):
+        raise ValueError("section_targets_json must decode to an object or array")
+
+    targets: list[dict[str, Any]] = []
+    for index, item in enumerate(payload, start=1):
+        if not isinstance(item, dict):
+            raise ValueError(f"section_targets[{index}] must be an object")
+        section = _required(item.get("section") or item.get("name"), f"section_targets[{index}].section")
+        target_articles = _positive_int(
+            item.get("target_articles")
+            or item.get("targetArticles")
+            or item.get("target")
+            or item.get("slots"),
+            f"section_targets[{index}].targetArticles",
+        )
+        dispatch_count = _optional_int(item.get("dispatch_count") or item.get("dispatchCount"))
+        if dispatch_count is None:
+            dispatch_count = _ceil(target_articles * assignment_ratio)
+        dispatch_count = max(dispatch_count, target_articles)
+        targets.append(
+            {
+                "section": section,
+                "sectionKey": _slugify(section),
+                "targetArticles": target_articles,
+                "dispatchCount": dispatch_count,
+                "selectedAssignments": 0,
+                "suppressedCandidates": 0,
+            }
+        )
+    if not targets:
+        raise ValueError("section_targets_json must include at least one section")
+    return targets
+
+
 def _decode_record_json(record: dict[str, Any]) -> dict[str, Any]:
     decoded = dict(record)
     for field in ("layout", "editorial", "metadata", "layoutPlan", "payload"):
@@ -692,6 +1046,50 @@ def _string_list(value: Any) -> list[str]:
     if isinstance(value, tuple):
         return [str(item) for item in value if item is not None and str(item) != ""]
     return [str(value)]
+
+
+def _assignment_corpus_key(item: dict[str, Any]) -> str:
+    editorial = _normalize_jsonish(item.get("editorial") or {})
+    if not isinstance(editorial, dict):
+        return ""
+    newsroom = editorial.get("newsroom")
+    if not isinstance(newsroom, dict):
+        return ""
+    assignment = newsroom.get("assignment")
+    if not isinstance(assignment, dict):
+        return ""
+    return str(assignment.get("corpusKey") or "")
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    return int(value)
+
+
+def _positive_int(value: Any, label: str) -> int:
+    result = _optional_int(value)
+    if result is None or result <= 0:
+        raise ValueError(f"{label} must be a positive integer")
+    return result
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    return float(value)
+
+
+def _positive_float(value: Any, label: str) -> float:
+    result = _optional_float(value)
+    if result is None or result <= 0:
+        raise ValueError(f"{label} must be a positive number")
+    return result
+
+
+def _ceil(value: float) -> int:
+    whole = int(value)
+    return whole if value == whole else whole + 1
 
 
 def _slugify(value: Any) -> str:

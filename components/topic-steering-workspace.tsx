@@ -1,23 +1,38 @@
 "use client";
 
 import { Hub } from "aws-amplify/utils";
+import { fetchAuthSession } from "aws-amplify/auth";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { generateClient } from "aws-amplify/data";
 import type { Schema } from "../amplify/data/resource";
-import { loadEditorNewsDeskState, loadEditorTaxonomyState, type EditorNewsDeskState } from "./news-desk-taxonomy-client";
+import { loadEditorNewsDeskState, loadEditorCategoryTreeState, type EditorNewsDeskState } from "./news-desk-taxonomy-client";
 import { ReaderAuthControl } from "./reader-auth-control";
+import {
+  applyAssignmentVersionPlan,
+  buildAssignmentManualVersionPlan,
+  getAssignmentAngle,
+  getAssignmentBrief,
+  getAssignmentEvidenceCount,
+  getAssignmentTargetArticleSlots,
+  getCullingReason,
+  isCulledItem,
+  type NewsDeskAssignmentCandidate,
+  type NewsDeskAssignmentDesk,
+  type NewsDeskAssignmentItem,
+  type NewsDeskAssignmentVersionPlan,
+} from "../lib/news-desk-assignments";
 import type {
-  TopicSteeringArtifact,
-  TopicSteeringCorpus,
-  TopicSteeringDashboard,
-  TopicSteeringImportRun,
-  TopicSteeringProjection,
-  TopicSteeringProposal,
-  TopicSteeringTaxonomy,
-  TopicSteeringTaxonomyNode,
-  TopicSteeringTopic,
-  TopicSteeringTopicSet,
-} from "../lib/curation-repository";
+  CategorySteeringArtifact,
+  CategorySteeringCorpus,
+  CategorySteeringDashboard,
+  CategorySteeringImportRun,
+  CategorySteeringProjection,
+  CategorySteeringProposal,
+  CategorySteeringCategoryTree,
+  CategorySteeringCategoryTreeNode,
+  CategorySteeringCategory,
+  CategorySteeringCategorySet,
+} from "../lib/category-repository";
 
 type ActionState = {
   id: string;
@@ -26,8 +41,10 @@ type ActionState = {
 };
 
 type ReviewAction = "accept" | "reject";
+type AssignmentCullAction = "cull" | "restore";
+export type NewsDeskTab = "categories" | "assignments";
 
-type CurationReviewResponse = {
+type CategoryReviewResponse = {
   data?: {
     ok?: boolean | null;
     status?: string | null;
@@ -38,40 +55,46 @@ type CurationReviewResponse = {
 };
 
 const TAILORED_TOPIC_PROPOSAL_KINDS = new Set([
-  "new-topic",
-  "rename-topic",
-  "merge-topic",
-  "deprecate-topic",
+  "new-category",
+  "rename-category",
+  "merge-category",
+  "deprecate-category",
   "seed-change",
   "holdout-change",
-  "topic-display-copy-edit",
-  "topic-copy-edit",
+  "category-display-copy-edit",
+  "category-copy-edit",
   "display-copy-edit",
 ]);
 
 const NEWS_DESK_TABS = [
-  { id: "topics", label: "Topics", detail: "Open desk", href: "/news-desk", active: true },
-  { id: "assignments", label: "Assignments", detail: "Coming desk", active: false },
-  { id: "research", label: "Research Queue", detail: "Coming desk", active: false },
-  { id: "reporting", label: "Reporter Queue", detail: "Coming desk", active: false },
+  { id: "categories", label: "Categories", detail: "Open desk", href: "/news-desk", disabled: false },
+  { id: "assignments", label: "Assignments", detail: "Cull desk", href: "/news-desk?tab=assignments", disabled: false },
+  { id: "research", label: "Research Queue", detail: "Coming desk", href: "/news-desk?tab=research", disabled: true },
+  { id: "reporting", label: "Reporter Queue", detail: "Coming desk", href: "/news-desk?tab=reporting", disabled: true },
 ];
 
 const TAXONOMY_PROPOSAL_KINDS = new Set([
-  "create-taxonomy-node",
-  "move-taxonomy-node",
-  "archive-taxonomy-node",
-  "merge-taxonomy-nodes",
-  "split-taxonomy-node",
+  "create-category",
+  "move-category",
+  "archive-category",
+  "merge-categories",
+  "split-category",
 ]);
 
 const USER_POOL_AUTH_MODE = "userPool";
 
-export function NewsDeskWorkspace({ dashboard }: { dashboard: TopicSteeringDashboard | null }) {
-  if (!dashboard) return <ProtectedNewsDeskWorkspace />;
-  return <NewsDeskDashboard dashboard={dashboard} />;
+export function NewsDeskWorkspace({
+  dashboard,
+  initialTab = "categories",
+}: {
+  dashboard: CategorySteeringDashboard | null;
+  initialTab?: NewsDeskTab;
+}) {
+  if (!dashboard) return <ProtectedNewsDeskWorkspace initialTab={initialTab} />;
+  return <NewsDeskDashboard dashboard={dashboard} initialTab={initialTab} />;
 }
 
-function ProtectedNewsDeskWorkspace() {
+function ProtectedNewsDeskWorkspace({ initialTab }: { initialTab: NewsDeskTab }) {
   const [state, setState] = useState<EditorNewsDeskState>({ status: "loading", dashboard: null, error: null });
 
   useEffect(() => {
@@ -98,10 +121,10 @@ function ProtectedNewsDeskWorkspace() {
     };
   }, []);
 
-  if (state.status === "ready" && state.dashboard) return <NewsDeskDashboard dashboard={state.dashboard} />;
+  if (state.status === "ready" && state.dashboard) return <NewsDeskDashboard dashboard={state.dashboard} initialTab={initialTab} />;
 
   return (
-    <main className="topic-steering-shell news-desk-shell" data-news-desk-access={state.status}>
+    <main className="category-steering-shell news-desk-shell" data-news-desk-access={state.status}>
       <article className="news-desk-page news-desk-page--gate" aria-labelledby="news-desk-access-title">
         <header className="masthead news-desk-masthead">
           <div className="masthead__rule" />
@@ -126,72 +149,89 @@ function ProtectedNewsDeskWorkspace() {
   );
 }
 
-function NewsDeskDashboard({ dashboard }: { dashboard: TopicSteeringDashboard }) {
+function NewsDeskDashboard({
+  dashboard,
+  initialTab,
+}: {
+  dashboard: CategorySteeringDashboard;
+  initialTab: NewsDeskTab;
+}) {
   const dataClient = useMemo(() => generateClient<Schema>(), []);
-  const [topics, setTopics] = useState(dashboard.topics);
-  const [taxonomies, setTaxonomies] = useState(dashboard.taxonomies);
-  const [taxonomyNodes, setTaxonomyNodes] = useState(dashboard.taxonomyNodes);
-  const [taxonomyLoadError, setTaxonomyLoadError] = useState<string | null>(null);
+  const activeTab = initialTab;
+  const [categorys, setCategorys] = useState(dashboard.categorys);
+  const [categoryTrees, setTaxonomies] = useState(dashboard.categoryTrees);
+  const [categoryNodes, setCategoryTreeNodes] = useState(dashboard.categoryNodes);
+  const [categoryTreeLoadError, setCategoryTreeLoadError] = useState<string | null>(null);
   const [proposals, setProposals] = useState(dashboard.proposals);
+  const [assignmentDesk, setAssignmentDesk] = useState(dashboard.assignmentDesk);
   const [actionState, setActionState] = useState<ActionState | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  const topicProposals = proposals.filter(isTailoredTopicProposal);
-  const genericProposals = proposals.filter((proposal) => !isTailoredTopicProposal(proposal));
-  const activeTopicSet = useMemo(() => (
-    dashboard.topicSets.find((topicSet) => topicSet.id === dashboard.canonicalTopicSetId)
-    ?? dashboard.topicSets[0]
+  const categoryProposals = proposals.filter(isTailoredCategoryProposal);
+  const genericProposals = proposals.filter((proposal) => !isTailoredCategoryProposal(proposal));
+  const activeCategorySet = useMemo(() => (
+    dashboard.categorySets.find((categorySet) => categorySet.id === dashboard.canonicalCategorySetId)
+    ?? dashboard.categorySets[0]
     ?? null
-  ), [dashboard.canonicalTopicSetId, dashboard.topicSets]);
+  ), [dashboard.canonicalCategorySetId, dashboard.categorySets]);
   const canonicalCorpus = useMemo(() => (
     dashboard.corpora.find((corpus) => corpus.id === dashboard.canonicalCorpusId)
-    ?? (activeTopicSet ? dashboard.corpora.find((corpus) => corpus.id === activeTopicSet.corpusId) : undefined)
+    ?? (activeCategorySet ? dashboard.corpora.find((corpus) => corpus.id === activeCategorySet.corpusId) : undefined)
     ?? null
-  ), [activeTopicSet, dashboard.canonicalCorpusId, dashboard.corpora]);
-  const canonicalTopics = useMemo(() => (
-    activeTopicSet ? topics.filter((topic) => topic.topicSetId === activeTopicSet.id && topic.status !== "deprecated") : []
-  ), [activeTopicSet, topics]);
-  const activeTaxonomy = useMemo(
-    () => selectActiveTaxonomy(taxonomies, activeTopicSet?.id ?? null, canonicalCorpus?.id ?? null),
-    [activeTopicSet?.id, canonicalCorpus?.id, taxonomies],
+  ), [activeCategorySet, dashboard.canonicalCorpusId, dashboard.corpora]);
+  const canonicalCategorys = useMemo(() => (
+    activeCategorySet ? categorys.filter((category) => category.categorySetId === activeCategorySet.id && category.status !== "deprecated") : []
+  ), [activeCategorySet, categorys]);
+  const activeCategoryTree = useMemo(
+    () => selectActiveCategoryTree(categoryTrees, activeCategorySet?.id ?? null, canonicalCorpus?.id ?? null),
+    [activeCategorySet?.id, canonicalCorpus?.id, categoryTrees],
   );
-  const activeTaxonomyNodes = useMemo(() => (
-    activeTaxonomy ? taxonomyNodes.filter((node) => node.taxonomyId === activeTaxonomy.id && node.status !== "deprecated") : []
-  ), [activeTaxonomy, taxonomyNodes]);
-  const acceptedRootTopicCount = activeTaxonomyNodes.filter((node) => !node.parentTopicUid && node.status === "accepted").length;
-  const acceptedSubtopicCount = activeTaxonomyNodes.filter((node) => node.parentTopicUid && node.status === "accepted").length;
+  const activeCategoryTreeNodes = useMemo(() => (
+    activeCategoryTree ? categoryNodes.filter((node) => node.categorySetId === activeCategoryTree.id && node.status !== "deprecated") : []
+  ), [activeCategoryTree, categoryNodes]);
+  const acceptedRootCategoryCount = activeCategoryTreeNodes.filter((node) => !node.parentCategoryKey && node.status === "accepted").length;
+  const acceptedSubcategoryCount = activeCategoryTreeNodes.filter((node) => node.parentCategoryKey && node.status === "accepted").length;
   const latestImport = useMemo(() => (
-    activeTopicSet
-      ? dashboard.importRuns.find((importRun) => importRun.corpusId === activeTopicSet.corpusId) ?? dashboard.importRuns[0] ?? null
+    activeCategorySet
+      ? dashboard.importRuns.find((importRun) => importRun.corpusId === activeCategorySet.corpusId) ?? dashboard.importRuns[0] ?? null
       : dashboard.importRuns[0] ?? null
-  ), [activeTopicSet, dashboard.importRuns]);
+  ), [activeCategorySet, dashboard.importRuns]);
   const openProposalCount = proposals.filter((proposal) => proposal.status === "proposed").length;
   const latestImportLabel = latestImport ? formatDateTime(latestImport.importedAt) : "Awaiting import";
+  const assignmentMetrics = useMemo(() => getAssignmentDeskMetrics(assignmentDesk), [assignmentDesk]);
+  const assignmentEditionLabel = assignmentDesk.edition
+    ? `${assignmentDesk.edition.title} / ${assignmentDesk.edition.editionDate}`
+    : "No assignment edition";
+  const mastheadSecondLabel = activeTab === "assignments" ? assignmentEditionLabel : latestImportLabel;
 
-  const topicByUid = useMemo(() => {
-    const map = new Map<string, TopicSteeringTopic>();
-    for (const topic of topics) map.set(topic.topicUid, topic);
+  const categoryByUid = useMemo(() => {
+    const map = new Map<string, CategorySteeringCategory>();
+    for (const category of categorys) map.set(category.categoryKey, category);
     return map;
-  }, [topics]);
+  }, [categorys]);
+
+  useEffect(() => {
+    setAssignmentDesk(dashboard.assignmentDesk);
+  }, [dashboard.assignmentDesk]);
 
   useEffect(() => {
     if (dashboard.isDemo) {
-      setTaxonomies(dashboard.taxonomies);
-      setTaxonomyNodes(dashboard.taxonomyNodes);
-      setTaxonomyLoadError(null);
+      setTaxonomies(dashboard.categoryTrees);
+      setCategoryTreeNodes(dashboard.categoryNodes);
+      setCategoryTreeLoadError(null);
       return;
     }
 
     let active = true;
-    const refreshTaxonomy = async () => {
-      const state = await loadEditorTaxonomyState();
+    const refreshCategoryTree = async () => {
+      const state = await loadEditorCategoryTreeState();
       if (!active) return;
-      setTaxonomies(state.taxonomies);
-      setTaxonomyNodes(state.taxonomyNodes);
-      setTaxonomyLoadError(state.error);
+      setTaxonomies(state.categoryTrees);
+      setCategoryTreeNodes(state.categoryNodes);
+      setCategoryTreeLoadError(state.error);
     };
 
-    void refreshTaxonomy();
+    void refreshCategoryTree();
     const unsubscribe = Hub.listen("auth", ({ payload }) => {
       if (
         payload.event === "signedIn" ||
@@ -199,16 +239,16 @@ function NewsDeskDashboard({ dashboard }: { dashboard: TopicSteeringDashboard })
         payload.event === "signInWithRedirect" ||
         payload.event === "signInWithRedirect_failure"
       ) {
-        void refreshTaxonomy();
+        void refreshCategoryTree();
       }
     });
     return () => {
       active = false;
       unsubscribe();
     };
-  }, [dashboard.isDemo, dashboard.taxonomies, dashboard.taxonomyNodes]);
+  }, [dashboard.isDemo, dashboard.categoryTrees, dashboard.categoryNodes]);
 
-  function runProposalAction(proposal: TopicSteeringProposal, action: ReviewAction) {
+  function runProposalAction(proposal: CategorySteeringProposal, action: ReviewAction) {
     setActionState({ id: proposal.id, message: `${action} pending`, tone: "pending" });
     if (dashboard.isDemo) {
       setProposals((current) =>
@@ -224,7 +264,7 @@ function NewsDeskDashboard({ dashboard }: { dashboard: TopicSteeringDashboard })
     startTransition(() => {
       void (async () => {
         try {
-          const response = await dataClient.mutations.reviewCurationProposal(
+          const response = await dataClient.mutations.reviewCategoryProposal(
             {
               proposalId: proposal.id,
               action,
@@ -249,7 +289,7 @@ function NewsDeskDashboard({ dashboard }: { dashboard: TopicSteeringDashboard })
             ),
           );
           if (action === "accept" && TAXONOMY_PROPOSAL_KINDS.has(proposal.proposalKind)) {
-            await refreshEditorTaxonomyState();
+            await refreshEditorCategoryTreeState();
           }
           setActionState({ id: proposal.id, message: `${action} saved`, tone: "ok" });
         } catch (error) {
@@ -259,70 +299,131 @@ function NewsDeskDashboard({ dashboard }: { dashboard: TopicSteeringDashboard })
     });
   }
 
-  async function refreshEditorTaxonomyState() {
+  function runAssignmentCullAction(candidate: NewsDeskAssignmentCandidate, action: AssignmentCullAction, reason = "") {
+    const actionLabel = action === "cull" ? "cull" : "restore";
+    setActionState({ id: candidate.assignment.id, message: `${actionLabel} pending`, tone: "pending" });
+    const now = new Date().toISOString();
     if (dashboard.isDemo) {
-      setTaxonomies(dashboard.taxonomies);
-      setTaxonomyNodes(dashboard.taxonomyNodes);
-      setTaxonomyLoadError(null);
+      const plan = buildAssignmentManualVersionPlan(assignmentDesk, candidate, action, {
+        actorLabel: "Papyrus news desk",
+        now,
+        reason,
+      });
+      setAssignmentDesk((current) => applyAssignmentVersionPlan(current, plan));
+      setActionState({ id: candidate.assignment.id, message: `${actionLabel} saved`, tone: "ok" });
       return;
     }
-    const state = await loadEditorTaxonomyState();
-    setTaxonomies(state.taxonomies);
-    setTaxonomyNodes(state.taxonomyNodes);
-    setTaxonomyLoadError(state.error);
-  }
 
-  function saveTopic(topic: TopicSteeringTopic, update: Pick<TopicSteeringTopic, "displayName" | "subtitle" | "description">) {
-    setActionState({ id: topic.id, message: "topic save pending", tone: "pending" });
-    if (dashboard.isDemo) {
-      const updatedAt = new Date().toISOString();
-      setTopics((current) => current.map((entry) => (entry.id === topic.id ? { ...entry, ...update, updatedAt } : entry)));
-      setActionState({ id: topic.id, message: "topic copy saved", tone: "ok" });
-      return;
-    }
     startTransition(() => {
       void (async () => {
         try {
-          const updatedAt = new Date().toISOString();
-          await dataClient.models.CurationTopic.update({
-            id: topic.id,
-            displayName: update.displayName,
-            subtitle: update.subtitle,
-            description: update.description,
-            updatedAt,
-          });
-          setTopics((current) => current.map((entry) => (entry.id === topic.id ? { ...entry, ...update, updatedAt } : entry)));
-          setActionState({ id: topic.id, message: "topic copy saved", tone: "ok" });
+          const actorLabel = await getNewsDeskActorLabel();
+          const plan = buildAssignmentManualVersionPlan(assignmentDesk, candidate, action, { actorLabel, now, reason });
+          await executeAssignmentVersionPlan(plan);
+          setAssignmentDesk((current) => applyAssignmentVersionPlan(current, plan));
+          setActionState({ id: candidate.assignment.id, message: `${actionLabel} saved`, tone: "ok" });
         } catch (error) {
-          setActionState({ id: topic.id, message: error instanceof Error ? error.message : "topic save failed", tone: "error" });
+          setActionState({
+            id: candidate.assignment.id,
+            message: error instanceof Error ? error.message : `${actionLabel} failed`,
+            tone: "error",
+          });
+          await refreshEditorAssignmentDesk();
         }
       })();
     });
   }
 
-  function promoteRevision(revisionId: string) {
-    setActionState({ id: revisionId, message: "promotion pending", tone: "pending" });
+  async function refreshEditorAssignmentDesk() {
     if (dashboard.isDemo) {
-      setActionState({ id: revisionId, message: "revision promoted", tone: "ok" });
+      setAssignmentDesk(dashboard.assignmentDesk);
+      return;
+    }
+    const state = await loadEditorNewsDeskState();
+    if (state.status === "ready" && state.dashboard) {
+      setAssignmentDesk(state.dashboard.assignmentDesk);
+    }
+  }
+
+  async function refreshEditorCategoryTreeState() {
+    if (dashboard.isDemo) {
+      setTaxonomies(dashboard.categoryTrees);
+      setCategoryTreeNodes(dashboard.categoryNodes);
+      setCategoryTreeLoadError(null);
+      return;
+    }
+    const state = await loadEditorCategoryTreeState();
+    setTaxonomies(state.categoryTrees);
+    setCategoryTreeNodes(state.categoryNodes);
+    setCategoryTreeLoadError(state.error);
+  }
+
+  async function executeAssignmentVersionPlan(plan: NewsDeskAssignmentVersionPlan) {
+    const models = dataClient.models as unknown as Record<string, {
+      create?: (input: Record<string, unknown>, options: { authMode: typeof USER_POOL_AUTH_MODE }) => Promise<unknown>;
+      update?: (input: Record<string, unknown>, options: { authMode: typeof USER_POOL_AUTH_MODE }) => Promise<unknown>;
+    }>;
+    const itemModel = models.Item;
+    const editionModel = models.Edition;
+    const editionItemModel = models.EditionItem;
+    if (!itemModel?.create || !itemModel.update || !editionModel?.create || !editionModel.update || !editionItemModel?.create) {
+      throw new Error("Versioned publishing models are not available in the deployed schema.");
+    }
+
+    await Promise.all(plan.itemChanges.map((change) => itemModel.create!(change.nextItem as Record<string, unknown>, { authMode: USER_POOL_AUTH_MODE })));
+    if (plan.editionChange) {
+      await editionModel.create!(plan.editionChange.nextEdition as Record<string, unknown>, { authMode: USER_POOL_AUTH_MODE });
+      await Promise.all(plan.editionChange.nextEditionItems.map((editionItem) =>
+        editionItemModel.create!(editionItem as Record<string, unknown>, { authMode: USER_POOL_AUTH_MODE }),
+      ));
+    }
+    await Promise.all(plan.itemChanges.map((change) =>
+      itemModel.update!(change.previousItemUpdate, { authMode: USER_POOL_AUTH_MODE }),
+    ));
+    if (plan.editionChange) {
+      await editionModel.update!(plan.editionChange.previousEditionUpdate, { authMode: USER_POOL_AUTH_MODE });
+    }
+  }
+
+  function saveCategory(category: CategorySteeringCategory, update: Pick<CategorySteeringCategory, "displayName" | "subtitle" | "description">) {
+    setActionState({ id: category.id, message: "category save pending", tone: "pending" });
+    const updatedAt = new Date().toISOString();
+    if (dashboard.isDemo) {
+      const nextCategory = buildCategoryCopyVersion(category, update, {
+        actorLabel: "Papyrus news desk",
+        now: updatedAt,
+      });
+      setCategorys((current) => current.map((entry) => (entry.id === category.id ? nextCategory : entry)));
+      setCategoryTreeNodes((current) => current.map((entry) => (entry.id === category.id ? nextCategory : entry)));
+      setActionState({ id: category.id, message: "category copy saved", tone: "ok" });
       return;
     }
     startTransition(() => {
       void (async () => {
         try {
-          await dataClient.mutations.promoteCurationTopicRevision({
-            revisionId,
-            actorLabel: "Papyrus news desk",
+          const actorLabel = await getNewsDeskActorLabel();
+          const nextCategory = buildCategoryCopyVersion(category, update, {
+            actorLabel,
+            now: updatedAt,
           });
-          setActionState({ id: revisionId, message: "revision promoted", tone: "ok" });
+          await dataClient.models.Category.create(nextCategory as never, { authMode: USER_POOL_AUTH_MODE });
+          await dataClient.models.Category.update({
+            id: category.id,
+            versionState: "superseded",
+            updatedAt,
+          }, { authMode: USER_POOL_AUTH_MODE });
+          setCategorys((current) => current.map((entry) => (entry.id === category.id ? nextCategory : entry)));
+          setCategoryTreeNodes((current) => current.map((entry) => (entry.id === category.id ? nextCategory : entry)));
+          setActionState({ id: category.id, message: "category copy saved", tone: "ok" });
         } catch (error) {
-          setActionState({ id: revisionId, message: error instanceof Error ? error.message : "promotion failed", tone: "error" });
+          setActionState({ id: category.id, message: error instanceof Error ? error.message : "category save failed", tone: "error" });
         }
       })();
     });
   }
 
   return (
-    <main className="topic-steering-shell news-desk-shell" data-news-desk data-topic-steering data-topic-steering-demo={dashboard.isDemo ? "true" : "false"}>
+    <main className="category-steering-shell news-desk-shell" data-news-desk data-category-steering data-category-steering-demo={dashboard.isDemo ? "true" : "false"}>
       <article className="news-desk-page" aria-labelledby="news-desk-title">
         <header className="masthead news-desk-masthead">
           <div className="masthead__rule" />
@@ -331,19 +432,19 @@ function NewsDeskDashboard({ dashboard }: { dashboard: TopicSteeringDashboard })
           </h1>
           <div className="masthead__meta" aria-label="News desk edition status">
             <span>Steering Section</span>
-            <span>{latestImportLabel}</span>
+            <span>{mastheadSecondLabel}</span>
             <span>{dashboard.isDemo ? "Demo Desk" : <ReaderAuthControl className="news-desk-auth-control" showIdentity />}</span>
           </div>
         </header>
 
         <nav className="news-desk-tabs" aria-label="News desk sections">
-          {NEWS_DESK_TABS.map((tab) => tab.active ? (
+          {NEWS_DESK_TABS.map((tab) => !tab.disabled ? (
             <a
               key={tab.id}
-              aria-current="page"
-              className="news-desk-tab news-desk-tab--active"
+              aria-current={tab.id === activeTab ? "page" : undefined}
+              className={`news-desk-tab${tab.id === activeTab ? " news-desk-tab--active" : ""}`}
               data-news-desk-tab={tab.id}
-              href={tab.href}
+              href={getNewsDeskTabHref(tab.href, dashboard.isDemo)}
             >
               <span>{tab.label}</span>
               <small>{tab.detail}</small>
@@ -362,101 +463,460 @@ function NewsDeskDashboard({ dashboard }: { dashboard: TopicSteeringDashboard })
         </nav>
 
         <section className="news-desk-lede-grid" aria-label="News desk overview">
-          <article className="news-desk-lede">
-            <p className="story-label">Topics Desk</p>
-            <h2>Steering Notes Run Beside The Edition</h2>
-            <p>
-              Proposal rows are copy-desk notes from workers and agents. Skim them like an inside page: accept a correction, reject it, or leave the present course undisturbed.
-            </p>
-          </article>
-          <aside className="news-desk-index" aria-label="News desk status index">
-            <StatusMetric label="Accepted Topics" value={String(canonicalTopics.length)} detail={activeTopicSet ? activeTopicSet.displayName : "No accepted topic set"} />
-            <StatusMetric label="Accepted Subtopics" value={String(acceptedSubtopicCount)} detail={`${acceptedRootTopicCount} root topics`} />
-            <StatusMetric label="Filed Notes" value={String(openProposalCount)} detail={`${topicProposals.length} topic / ${genericProposals.length} generic`} />
-            <StatusMetric label="Projection Notices" value={String(dashboard.projections.length)} detail={latestImport ? `${latestImport.importKind} ${latestImport.status}` : "No projection import"} />
-          </aside>
+          {activeTab === "assignments" ? (
+            <>
+              <article className="news-desk-lede">
+                <p className="story-label">Assignments Desk</p>
+                <h2>Candidate Stories Are Culled Before The Edition Closes</h2>
+                <p>
+                  Assignment rows are the surplus reporting slate for the next issue. Cull weak candidates, restore a mistaken cut, or leave the desk to follow the active assignment pool.
+                </p>
+              </article>
+              <aside className="news-desk-index" aria-label="Assignments desk status index">
+                <StatusMetric label="Target Slots" value={String(assignmentMetrics.targetSlots)} detail={assignmentDesk.edition?.title ?? "No edition selected"} />
+                <StatusMetric label="Active Assignments" value={String(assignmentMetrics.active)} detail={`${assignmentMetrics.total} total candidates`} />
+                <StatusMetric label="Drafted" value={String(assignmentMetrics.drafted)} detail="linked article drafts" />
+                <StatusMetric label="Culled" value={String(assignmentMetrics.culled)} detail="manual newsroom cuts" />
+              </aside>
+            </>
+          ) : (
+            <>
+              <article className="news-desk-lede">
+                <p className="story-label">Categorys Desk</p>
+                <h2>Steering Notes Run Beside The Edition</h2>
+                <p>
+                  Proposal rows are copy-desk notes from workers and agents. Skim them like an inside page: accept a correction, reject it, or leave the present course undisturbed.
+                </p>
+              </article>
+              <aside className="news-desk-index" aria-label="News desk status index">
+                <StatusMetric label="Accepted Categorys" value={String(canonicalCategorys.length)} detail={activeCategorySet ? activeCategorySet.displayName : "No accepted category set"} />
+                <StatusMetric label="Accepted Subcategorys" value={String(acceptedSubcategoryCount)} detail={`${acceptedRootCategoryCount} root categorys`} />
+                <StatusMetric label="Filed Notes" value={String(openProposalCount)} detail={`${categoryProposals.length} category / ${genericProposals.length} generic`} />
+                <StatusMetric label="Projection Notices" value={String(dashboard.projections.length)} detail={latestImport ? `${latestImport.importKind} ${latestImport.status}` : "No projection import"} />
+              </aside>
+            </>
+          )}
         </section>
 
         {dashboard.loadError ? (
-          <div className="topic-steering-alert" role="status">
+          <div className="category-steering-alert" role="status">
             {dashboard.loadError}
           </div>
         ) : null}
+        {activeTab === "assignments" && assignmentDesk.loadError ? (
+          <div className="category-steering-alert" role="status">
+            {assignmentDesk.loadError}
+          </div>
+        ) : null}
         {actionState ? (
-          <div className={`topic-steering-action topic-steering-action--${actionState.tone}`} role="status" aria-live="polite">
+          <div className={`category-steering-action category-steering-action--${actionState.tone}`} role="status" aria-live="polite">
             {actionState.message}
           </div>
         ) : null}
 
-        <div className="news-desk-columns">
+        {activeTab === "assignments" ? (
+          <AssignmentDeskView
+            desk={assignmentDesk}
+            disabled={isPending}
+            onAction={runAssignmentCullAction}
+          />
+        ) : (
+          <div className="news-desk-columns">
           <div className="news-desk-main-column">
-            <AcceptedTaxonomySection
-              activeTaxonomy={activeTaxonomy}
-              canonicalTopics={canonicalTopics}
+            <AcceptedCategoryTreeSection
+              activeCategoryTree={activeCategoryTree}
+              canonicalCategorys={canonicalCategorys}
               disabled={isPending}
               onAction={runProposalAction}
               proposals={proposals}
-              taxonomyLoadError={taxonomyLoadError}
-              taxonomyNodes={activeTaxonomyNodes}
+              categoryTreeLoadError={categoryTreeLoadError}
+              categoryNodes={activeCategoryTreeNodes}
             />
 
-            <section className="topic-steering-section topic-steering-section--lead" aria-labelledby="topic-proposals-title">
-              <SectionHeader title="Topic Proposals" detail={`${topicProposals.length} tailored notes`} />
-              <div className="topic-steering-proposal-list">
-                {topicProposals.length ? topicProposals.map((proposal) => (
-                  <TopicProposalRow
+            <section className="category-steering-section category-steering-section--lead" aria-labelledby="category-proposals-title">
+              <SectionHeader title="Category Proposals" detail={`${categoryProposals.length} tailored notes`} />
+              <div className="category-steering-proposal-list">
+                {categoryProposals.length ? categoryProposals.map((proposal) => (
+                  <CategoryProposalRow
                     key={proposal.id}
                     proposal={proposal}
-                    topic={proposal.topicUid ? topicByUid.get(proposal.topicUid) : undefined}
+                    category={proposal.categoryKey ? categoryByUid.get(proposal.categoryKey) : undefined}
                     disabled={isPending}
                     onAction={runProposalAction}
                   />
-                )) : <EmptyRow label="No topic proposals" />}
+                )) : <EmptyRow label="No category proposals" />}
               </div>
             </section>
 
             <GenericProposalQueue proposals={genericProposals} disabled={isPending} onAction={runProposalAction} />
 
-            <section className="topic-steering-section" aria-labelledby="accepted-topic-register-title">
-              <SectionHeader title="Accepted Topic Register" detail={activeTopicSet ? activeTopicSet.classifierId : "No classifier imported"} />
-              <div className="topic-steering-topic-grid">
-                {canonicalTopics.length ? canonicalTopics.map((topic) => (
-                  <TopicEditor key={topic.id} topic={topic} disabled={isPending} onSave={saveTopic} />
-                )) : <EmptyRow label="No canonical topics imported" />}
+            <section className="category-steering-section" aria-labelledby="accepted-category-register-title">
+              <SectionHeader title="Accepted Category Register" detail={activeCategorySet ? activeCategorySet.classifierId : "No classifier imported"} />
+              <div className="category-steering-category-grid">
+                {canonicalCategorys.length ? canonicalCategorys.map((category) => (
+                  <CategoryEditor key={category.id} category={category} disabled={isPending} onSave={saveCategory} />
+                )) : <EmptyRow label="No canonical categorys imported" />}
               </div>
             </section>
           </div>
 
           <aside className="news-desk-rail-column">
-            <CorpusTopicSetSummary
+            <CorpusCategorySetSummary
               corpora={dashboard.corpora}
-              topicSets={dashboard.topicSets}
+              categorySets={dashboard.categorySets}
               importRuns={dashboard.importRuns}
-              canonicalTopicSetId={activeTopicSet?.id ?? null}
+              canonicalCategorySetId={activeCategorySet?.id ?? null}
             />
 
-            <RevisionPanel
-              topicSet={activeTopicSet}
+            <CategorySetPanel
+              categorySet={activeCategorySet}
               artifacts={dashboard.artifacts}
               projections={dashboard.projections}
-              disabled={isPending}
-              onPromote={promoteRevision}
             />
           </aside>
-        </div>
+          </div>
+        )}
       </article>
     </main>
   );
 }
 
+function AssignmentDeskView({
+  desk,
+  disabled,
+  onAction,
+}: {
+  desk: NewsDeskAssignmentDesk;
+  disabled: boolean;
+  onAction: (candidate: NewsDeskAssignmentCandidate, action: AssignmentCullAction, reason?: string) => void;
+}) {
+  const sections = getAssignmentSections(desk.candidates);
+  const metrics = getAssignmentDeskMetrics(desk);
+
+  return (
+    <div className="news-desk-columns news-desk-columns--assignments" data-news-desk-assignments>
+      <div className="news-desk-main-column">
+        <section className="category-steering-section category-steering-section--lead" aria-labelledby="assignment-candidates-title">
+          <SectionHeader title="Assignment Candidates" detail={`${metrics.active} active / ${metrics.culled} culled`} />
+          <div className="news-desk-assignment-section-list">
+            {sections.length ? sections.map((section) => (
+              <AssignmentSection key={section.name} section={section} disabled={disabled} onAction={onAction} />
+            )) : <EmptyRow label="No assignment candidates found for an edition" />}
+          </div>
+        </section>
+      </div>
+
+      <aside className="news-desk-rail-column">
+        <section className="category-steering-section" aria-labelledby="assignment-edition-ledger-title">
+          <SectionHeader title="Edition Ledger" detail={desk.edition?.status ?? "No edition"} />
+          <div className="news-desk-ledger-list">
+            <article className="news-desk-ledger-item">
+              <header>
+                <strong>{desk.edition?.title ?? "No assignment edition"}</strong>
+                <span>{desk.edition?.editionDate ?? "undated"}</span>
+              </header>
+              <dl>
+                <div>
+                  <dt>Target Slots</dt>
+                  <dd>{metrics.targetSlots}</dd>
+                </div>
+                <div>
+                  <dt>Active</dt>
+                  <dd>{metrics.active}</dd>
+                </div>
+                <div>
+                  <dt>Drafted</dt>
+                  <dd>{metrics.drafted}</dd>
+                </div>
+                <div>
+                  <dt>Culled</dt>
+                  <dd>{metrics.culled}</dd>
+                </div>
+              </dl>
+            </article>
+          </div>
+        </section>
+
+        <section className="category-steering-section" aria-labelledby="assignment-section-ledger-title">
+          <SectionHeader title="Section Ledger" detail={`${sections.length} sections`} />
+          <div className="news-desk-ledger-list">
+            {sections.length ? sections.map((section) => {
+              const sectionMetrics = getAssignmentCandidateMetrics(section.candidates);
+              return (
+                <article className="news-desk-ledger-item" key={section.name}>
+                  <header>
+                    <strong>{section.name}</strong>
+                    <span>{sectionMetrics.total} candidates</span>
+                  </header>
+                  <dl>
+                    <div>
+                      <dt>Target Slots</dt>
+                      <dd>{sectionMetrics.targetSlots}</dd>
+                    </div>
+                    <div>
+                      <dt>Active</dt>
+                      <dd>{sectionMetrics.active}</dd>
+                    </div>
+                    <div>
+                      <dt>Drafted</dt>
+                      <dd>{sectionMetrics.drafted}</dd>
+                    </div>
+                    <div>
+                      <dt>Culled</dt>
+                      <dd>{sectionMetrics.culled}</dd>
+                    </div>
+                  </dl>
+                </article>
+              );
+            }) : <EmptyRow label="No section assignment ledger" />}
+          </div>
+        </section>
+      </aside>
+    </div>
+  );
+}
+
+function AssignmentSection({
+  section,
+  disabled,
+  onAction,
+}: {
+  section: AssignmentSectionGroup;
+  disabled: boolean;
+  onAction: (candidate: NewsDeskAssignmentCandidate, action: AssignmentCullAction, reason?: string) => void;
+}) {
+  const metrics = getAssignmentCandidateMetrics(section.candidates);
+
+  return (
+    <section className="news-desk-assignment-section" aria-label={`${section.name} assignment candidates`}>
+      <header className="news-desk-assignment-section__header">
+        <div>
+          <p className="story-label">{section.name}</p>
+          <h3>{section.name} Assignment Pool</h3>
+        </div>
+        <span>{metrics.targetSlots} slots / {metrics.active} active / {metrics.drafted} drafted / {metrics.culled} culled</span>
+      </header>
+      <div className="news-desk-assignment-list">
+        {section.candidates.map((candidate) => (
+          <AssignmentCandidateRow
+            key={candidate.assignment.id}
+            candidate={candidate}
+            disabled={disabled}
+            onAction={onAction}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function AssignmentCandidateRow({
+  candidate,
+  disabled,
+  onAction,
+}: {
+  candidate: NewsDeskAssignmentCandidate;
+  disabled: boolean;
+  onAction: (candidate: NewsDeskAssignmentCandidate, action: AssignmentCullAction, reason?: string) => void;
+}) {
+  const assignment = candidate.assignment;
+  const culled = isCulledItem(assignment);
+  const [reason, setReason] = useState(getCullingReason(assignment));
+  const title = assignment.headline ?? assignment.title ?? assignment.slug;
+  const brief = getAssignmentBrief(assignment) || assignment.deck || "No assignment brief filed.";
+  const angle = getAssignmentAngle(assignment);
+  const evidenceCount = getAssignmentEvidenceCount(assignment);
+  const targetSlots = getAssignmentTargetArticleSlots(assignment);
+
+  useEffect(() => {
+    setReason(getCullingReason(assignment));
+  }, [assignment]);
+
+  return (
+    <article
+      className={`news-desk-assignment-row${culled ? " news-desk-assignment-row--culled" : ""}`}
+      data-assignment-candidate={assignment.id}
+      data-assignment-status={assignment.status}
+    >
+      <div className="news-desk-assignment-row__main">
+        <header className="news-desk-assignment-row__title">
+          <div>
+            <StatusPill status={assignment.status} />
+            <h4>{title}</h4>
+          </div>
+          <span>{assignment.section ?? "News"}</span>
+        </header>
+        <p>{brief}</p>
+        {angle ? (
+          <p className="news-desk-assignment-row__angle">
+            <span>Angle</span>
+            {angle}
+          </p>
+        ) : null}
+        <div className="news-desk-assignment-row__meta">
+          <span>{evidenceCount} evidence refs</span>
+          <span>{targetSlots ?? "no"} target slots</span>
+          <span>{formatLinkedDraftState(candidate)}</span>
+        </div>
+      </div>
+      <div className="news-desk-assignment-row__actions">
+        {culled ? (
+          <>
+            {reason ? <p className="news-desk-assignment-row__reason">{reason}</p> : null}
+            <button
+              type="button"
+              data-assignment-action="restore"
+              disabled={disabled}
+              onClick={() => onAction(candidate, "restore")}
+            >
+              Restore
+            </button>
+          </>
+        ) : (
+          <>
+            <label>
+              <span>Cull Reason</span>
+              <textarea
+                data-assignment-reason={assignment.id}
+                rows={2}
+                value={reason}
+                onChange={(event) => setReason(event.target.value)}
+              />
+            </label>
+            <button
+              type="button"
+              data-assignment-action="cull"
+              disabled={disabled}
+              onClick={() => onAction(candidate, "cull", reason)}
+            >
+              Cull
+            </button>
+          </>
+        )}
+      </div>
+    </article>
+  );
+}
+
 function StatusMetric({ label, value, detail }: { label: string; value: string; detail: string }) {
   return (
-    <div className="topic-steering-metric">
+    <div className="category-steering-metric">
       <span>{label}</span>
       <strong>{value}</strong>
       <small>{detail}</small>
     </div>
   );
+}
+
+type AssignmentSectionGroup = {
+  name: string;
+  candidates: NewsDeskAssignmentCandidate[];
+};
+
+type AssignmentMetrics = {
+  total: number;
+  active: number;
+  drafted: number;
+  culled: number;
+  targetSlots: number;
+};
+
+function getAssignmentSections(candidates: NewsDeskAssignmentCandidate[]): AssignmentSectionGroup[] {
+  const sectionByName = new Map<string, NewsDeskAssignmentCandidate[]>();
+  for (const candidate of candidates) {
+    const section = candidate.assignment.section?.trim() || "News";
+    const entries = sectionByName.get(section) ?? [];
+    entries.push(candidate);
+    sectionByName.set(section, entries);
+  }
+  return Array.from(sectionByName.entries())
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([name, entries]) => ({
+      name,
+      candidates: entries.sort(compareAssignmentCandidates),
+    }));
+}
+
+function getAssignmentDeskMetrics(desk: NewsDeskAssignmentDesk): AssignmentMetrics {
+  return getAssignmentCandidateMetrics(desk.candidates);
+}
+
+function getAssignmentCandidateMetrics(candidates: NewsDeskAssignmentCandidate[]): AssignmentMetrics {
+  const targetBySection = new Map<string, number>();
+  let active = 0;
+  let drafted = 0;
+  let culled = 0;
+
+  for (const candidate of candidates) {
+    const assignment = candidate.assignment;
+    const section = assignment.section?.trim() || "News";
+    const targetSlots = getAssignmentTargetArticleSlots(assignment);
+    if (targetSlots !== null) {
+      targetBySection.set(section, Math.max(targetBySection.get(section) ?? 0, targetSlots));
+    }
+    if (isCulledItem(assignment)) {
+      culled += 1;
+    } else {
+      active += 1;
+    }
+    if (assignment.status === "drafted" || assignment.typeStatus.endsWith("#drafted") || candidate.draftItem) {
+      drafted += 1;
+    }
+  }
+
+  return {
+    total: candidates.length,
+    active,
+    drafted,
+    culled,
+    targetSlots: Array.from(targetBySection.values()).reduce((sum, value) => sum + value, 0),
+  };
+}
+
+function compareAssignmentCandidates(left: NewsDeskAssignmentCandidate, right: NewsDeskAssignmentCandidate): number {
+  const leftStatus = assignmentStatusRank(left.assignment.status);
+  const rightStatus = assignmentStatusRank(right.assignment.status);
+  if (leftStatus !== rightStatus) return leftStatus - rightStatus;
+  return left.editionItem.sortKey.localeCompare(right.editionItem.sortKey);
+}
+
+function assignmentStatusRank(status: string): number {
+  if (status === "dispatched") return 0;
+  if (status === "researched") return 1;
+  if (status === "drafted") return 2;
+  if (status === "culled") return 8;
+  return 5;
+}
+
+function formatLinkedDraftState(candidate: NewsDeskAssignmentCandidate): string {
+  if (!candidate.draftItem) return "no linked draft";
+  const title = candidate.draftItem.headline ?? candidate.draftItem.title ?? "draft article";
+  return `${title} / ${candidate.draftItem.status}`;
+}
+
+function getNewsDeskTabHref(href: string, demo?: boolean): string {
+  if (!demo) return href;
+  const separator = href.includes("?") ? "&" : "?";
+  return `${href}${separator}demo=1`;
+}
+
+async function getNewsDeskActorLabel(): Promise<string> {
+  try {
+    const session = await fetchAuthSession();
+    const payload = session.tokens?.idToken?.payload ?? session.tokens?.accessToken.payload ?? {};
+    const claim = readTextClaim(payload.email)
+      ?? readTextClaim(payload.name)
+      ?? readTextClaim(payload["cognito:username"])
+      ?? readTextClaim(payload.username)
+      ?? readTextClaim(payload.sub);
+    return claim ?? "Papyrus news desk";
+  } catch {
+    return "Papyrus news desk";
+  }
+}
+
+function readTextClaim(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 function formatAccessTitle(state: EditorNewsDeskState): string {
@@ -470,13 +930,13 @@ function formatAccessDetail(state: EditorNewsDeskState): string {
   if (state.status === "loading") return "Papyrus is checking the current browser session before loading steering state.";
   if (state.status === "forbidden") return "This account is signed in, but the Cognito session does not include the editor or admin group.";
   if (state.status === "error") return "Papyrus could not verify this editor session or load the private News Desk data.";
-  return "Sign in with an editor or admin account to inspect topic, taxonomy, ontology, and graph steering.";
+  return "Sign in with an editor or admin account to inspect category, categoryTree, ontology, and graph steering.";
 }
 
 function SectionHeader({ title, detail }: { title: string; detail: string }) {
   const id = title.toLowerCase().replace(/[^a-z0-9]+/g, "-");
   return (
-    <header className="topic-steering-section__header">
+    <header className="category-steering-section__header">
       <h2 id={`${id}-title`}>{title}</h2>
       <span>{detail}</span>
     </header>
@@ -488,15 +948,15 @@ function GenericProposalQueue({
   disabled,
   onAction,
 }: {
-  proposals: TopicSteeringProposal[];
+  proposals: CategorySteeringProposal[];
   disabled: boolean;
-  onAction: (proposal: TopicSteeringProposal, action: ReviewAction) => void;
+  onAction: (proposal: CategorySteeringProposal, action: ReviewAction) => void;
 }) {
   return (
-    <section className="topic-steering-section" aria-labelledby="ontology-and-graph-proposals-title">
+    <section className="category-steering-section" aria-labelledby="ontology-and-graph-proposals-title">
       <SectionHeader title="Ontology And Graph Wire" detail={`${proposals.length} generic notes`} />
-      <div className="topic-steering-table-wrap">
-        <table className="topic-steering-table">
+      <div className="category-steering-table-wrap">
+        <table className="category-steering-table">
           <thead>
             <tr>
               <th>Domain</th>
@@ -516,14 +976,14 @@ function GenericProposalQueue({
                 <td>{proposal.relationshipType ?? "none"}</td>
                 <td><StatusPill status={proposal.status} /></td>
                 <td>
-                  <div className="topic-steering-proposal__actions" aria-label={`${proposal.title} review actions`}>
+                  <div className="category-steering-proposal__actions" aria-label={`${proposal.title} review actions`}>
                     <button type="button" data-review-action="accept" disabled={disabled || proposal.status === "accepted"} onClick={() => onAction(proposal, "accept")}>Accept</button>
                     <button type="button" data-review-action="reject" disabled={disabled || proposal.status === "rejected"} onClick={() => onAction(proposal, "reject")}>Reject</button>
                   </div>
                 </td>
               </tr>
             )) : (
-              <tr><td colSpan={6}>No taxonomy, ontology, or graph proposals</td></tr>
+              <tr><td colSpan={6}>No categoryTree, ontology, or graph proposals</td></tr>
             )}
           </tbody>
         </table>
@@ -532,104 +992,104 @@ function GenericProposalQueue({
   );
 }
 
-function AcceptedTaxonomySection({
-  activeTaxonomy,
-  canonicalTopics,
+function AcceptedCategoryTreeSection({
+  activeCategoryTree,
+  canonicalCategorys,
   disabled,
   onAction,
   proposals,
-  taxonomyLoadError,
-  taxonomyNodes,
+  categoryTreeLoadError,
+  categoryNodes,
 }: {
-  activeTaxonomy: TopicSteeringTaxonomy | null;
-  canonicalTopics: TopicSteeringTopic[];
+  activeCategoryTree: CategorySteeringCategoryTree | null;
+  canonicalCategorys: CategorySteeringCategory[];
   disabled: boolean;
-  onAction: (proposal: TopicSteeringProposal, action: ReviewAction) => void;
-  proposals: TopicSteeringProposal[];
-  taxonomyLoadError: string | null;
-  taxonomyNodes: TopicSteeringTaxonomyNode[];
+  onAction: (proposal: CategorySteeringProposal, action: ReviewAction) => void;
+  proposals: CategorySteeringProposal[];
+  categoryTreeLoadError: string | null;
+  categoryNodes: CategorySteeringCategoryTreeNode[];
 }) {
-  const roots = canonicalTopics.map((topic) => {
-    const node = taxonomyNodes.find((candidate) => candidate.topicUid === topic.topicUid && !candidate.parentTopicUid);
-    const subtopics = taxonomyNodes.filter((candidate) => candidate.parentTopicUid === topic.topicUid && candidate.status === "accepted");
+  const roots = canonicalCategorys.map((category) => {
+    const node = categoryNodes.find((candidate) => candidate.categoryKey === category.categoryKey && !candidate.parentCategoryKey);
+    const subcategorys = categoryNodes.filter((candidate) => candidate.parentCategoryKey === category.categoryKey && candidate.status === "accepted");
     return {
-      topic,
+      category,
       node,
-      subtopics,
-      proposedSubtopics: getProposedSubtopicProposals(topic.topicUid, proposals),
+      subcategorys,
+      proposedSubcategorys: getProposedSubcategoryProposals(category.categoryKey, proposals),
     };
   });
-  const subtopicCount = roots.reduce((count, root) => count + root.subtopics.length, 0);
-  const proposedSubtopicCount = roots.reduce((count, root) => count + root.proposedSubtopics.length, 0);
-  const detail = activeTaxonomy
-    ? `${subtopicCount} accepted / ${proposedSubtopicCount} proposed subtopics`
-    : taxonomyLoadError
-      ? "Taxonomy unavailable"
+  const subcategoryCount = roots.reduce((count, root) => count + root.subcategorys.length, 0);
+  const proposedSubcategoryCount = roots.reduce((count, root) => count + root.proposedSubcategorys.length, 0);
+  const detail = activeCategoryTree
+    ? `${subcategoryCount} accepted / ${proposedSubcategoryCount} proposed subcategorys`
+    : categoryTreeLoadError
+      ? "CategoryTree unavailable"
       : "Editor sign-in required";
 
   return (
-    <section className="topic-steering-section topic-steering-section--taxonomy" aria-labelledby="accepted-taxonomy-title">
-      <SectionHeader title="Accepted Subtopic Register" detail={detail} />
-      {taxonomyLoadError ? (
-        <div className="topic-steering-alert" role="status">
-          {taxonomyLoadError}
+    <section className="category-steering-section category-steering-section--categoryTree" aria-labelledby="accepted-categoryTree-title">
+      <SectionHeader title="Accepted Subcategory Register" detail={detail} />
+      {categoryTreeLoadError ? (
+        <div className="category-steering-alert" role="status">
+          {categoryTreeLoadError}
         </div>
       ) : null}
-      {!activeTaxonomy ? (
-        <EmptyRow label="Accepted subtopics are visible to signed-in editors" />
+      {!activeCategoryTree ? (
+        <EmptyRow label="Accepted subcategorys are visible to signed-in editors" />
       ) : (
-        <div className="topic-steering-taxonomy-list" data-news-desk-taxonomy>
-          {roots.length ? roots.map(({ node, proposedSubtopics, subtopics, topic }) => {
-            const root = node ?? topicToTaxonomyNode(topic);
-            const relatedProposalCount = countRelatedTaxonomyProposals(root.topicUid, subtopics, proposals);
+        <div className="category-steering-categoryTree-list" data-news-desk-category-tree>
+          {roots.length ? roots.map(({ node, proposedSubcategorys, subcategorys, category }) => {
+            const root = node ?? categoryToCategoryTreeNode(category);
+            const relatedProposalCount = countRelatedCategoryTreeProposals(root.categoryKey, subcategorys, proposals);
             return (
-              <article className="topic-steering-taxonomy-root" data-news-desk-taxonomy-root={root.topicUid} key={root.topicUid}>
+              <article className="category-steering-categoryTree-root" data-news-desk-category-tree-root={root.categoryKey} key={root.categoryKey}>
                 <header>
                   <div>
-                    <p className="story-label">Root Topic</p>
+                    <p className="story-label">Root Category</p>
                     <h3>{root.displayName}</h3>
                   </div>
-                  <span>{subtopics.length} accepted / {proposedSubtopics.length} proposed / {relatedProposalCount} related notes</span>
+                  <span>{subcategorys.length} accepted / {proposedSubcategorys.length} proposed / {relatedProposalCount} related notes</span>
                 </header>
-                {root.subtitle ? <p className="topic-steering-taxonomy-subtitle">{root.subtitle}</p> : null}
-                <p>{root.description ?? "Accepted root topic."}</p>
-                <div className="topic-steering-taxonomy-evidence">
+                {root.subtitle ? <p className="category-steering-categoryTree-subtitle">{root.subtitle}</p> : null}
+                <p>{root.description ?? "Accepted root category."}</p>
+                <div className="category-steering-categoryTree-evidence">
                   <span>{compactArray(root.seedItemIds).length} seed refs</span>
                   <span>{compactArray(root.holdoutItemIds).length} holdout refs</span>
-                  <span>{root.topicUid}</span>
+                  <span>{root.categoryKey}</span>
                 </div>
-                <div className="topic-steering-subtopic-list">
-                  <p className="topic-steering-subtopic-list__label">Accepted Subtopics</p>
-                  {subtopics.length ? subtopics.map((subtopic) => (
-                    <article className="topic-steering-subtopic" data-news-desk-subtopic={subtopic.topicUid} key={subtopic.id}>
-                      <h4>{subtopic.displayName}</h4>
-                      {subtopic.subtitle ? <p className="topic-steering-taxonomy-subtitle">{subtopic.subtitle}</p> : null}
-                      <p>{subtopic.description ?? "Accepted subtopic."}</p>
-                      <div className="topic-steering-taxonomy-evidence">
-                        <span>{compactArray(subtopic.seedItemIds).length} seed refs</span>
-                        <span>{compactArray(subtopic.holdoutItemIds).length} holdout refs</span>
-                        <span>{countRelatedTaxonomyProposals(subtopic.topicUid, [], proposals)} related notes</span>
+                <div className="category-steering-subcategory-list">
+                  <p className="category-steering-subcategory-list__label">Accepted Subcategorys</p>
+                  {subcategorys.length ? subcategorys.map((subcategory) => (
+                    <article className="category-steering-subcategory" data-news-desk-subcategory={subcategory.categoryKey} key={subcategory.id}>
+                      <h4>{subcategory.displayName}</h4>
+                      {subcategory.subtitle ? <p className="category-steering-categoryTree-subtitle">{subcategory.subtitle}</p> : null}
+                      <p>{subcategory.description ?? "Accepted subcategory."}</p>
+                      <div className="category-steering-categoryTree-evidence">
+                        <span>{compactArray(subcategory.seedItemIds).length} seed refs</span>
+                        <span>{compactArray(subcategory.holdoutItemIds).length} holdout refs</span>
+                        <span>{countRelatedCategoryTreeProposals(subcategory.categoryKey, [], proposals)} related notes</span>
                       </div>
                     </article>
                   )) : (
-                    <EmptyRow label="No accepted subtopics under this root" />
+                    <EmptyRow label="No accepted subcategorys under this root" />
                   )}
                 </div>
-                {proposedSubtopics.length ? (
-                  <div className="topic-steering-subtopic-list topic-steering-subtopic-list--proposed">
-                    <p className="topic-steering-subtopic-list__label">Proposed Subtopics</p>
-                    {proposedSubtopics.map((proposal) => (
-                      <article className="topic-steering-subtopic topic-steering-subtopic--proposed" data-news-desk-proposed-subtopic={proposal.topicUid ?? proposal.id} key={proposal.id}>
+                {proposedSubcategorys.length ? (
+                  <div className="category-steering-subcategory-list category-steering-subcategory-list--proposed">
+                    <p className="category-steering-subcategory-list__label">Proposed Subcategorys</p>
+                    {proposedSubcategorys.map((proposal) => (
+                      <article className="category-steering-subcategory category-steering-subcategory--proposed" data-news-desk-proposed-subcategory={proposal.categoryKey ?? proposal.id} key={proposal.id}>
                         <h4>{proposal.displayName ?? proposal.title}</h4>
-                        {proposal.subtitle ? <p className="topic-steering-taxonomy-subtitle">{proposal.subtitle}</p> : null}
-                        <p>{proposal.description ?? proposal.summary ?? "Candidate subtopic from steering proposals."}</p>
-                        <div className="topic-steering-taxonomy-evidence">
+                        {proposal.subtitle ? <p className="category-steering-categoryTree-subtitle">{proposal.subtitle}</p> : null}
+                        <p>{proposal.description ?? proposal.summary ?? "Candidate subcategory from steering proposals."}</p>
+                        <div className="category-steering-categoryTree-evidence">
                           <span>{proposal.proposalKind}</span>
                           <span>{proposal.status}</span>
                           <span>{compactArray(proposal.evidenceItemIds).length} evidence refs</span>
-                          <span>{proposal.topicUid ?? "new topic"}</span>
+                          <span>{proposal.categoryKey ?? "new category"}</span>
                         </div>
-                        <div className="topic-steering-proposal__actions topic-steering-subtopic__actions" aria-label={`${proposal.title} review actions`}>
+                        <div className="category-steering-proposal__actions category-steering-subcategory__actions" aria-label={`${proposal.title} review actions`}>
                           <button type="button" data-review-action="accept" disabled={disabled || proposal.status === "accepted"} onClick={() => onAction(proposal, "accept")}>Accept</button>
                           <button type="button" data-review-action="reject" disabled={disabled || proposal.status === "rejected"} onClick={() => onAction(proposal, "reject")}>Reject</button>
                         </div>
@@ -639,24 +1099,24 @@ function AcceptedTaxonomySection({
                 ) : null}
               </article>
             );
-          }) : <EmptyRow label="No canonical roots available for taxonomy display" />}
+          }) : <EmptyRow label="No canonical roots available for categoryTree display" />}
         </div>
       )}
     </section>
   );
 }
 
-function formatGenericProposalSubject(proposal: TopicSteeringProposal): string {
+function formatGenericProposalSubject(proposal: CategorySteeringProposal): string {
   const parts = [
-    proposal.topicUid,
+    proposal.categoryKey,
     proposal.graphEntityId,
-    proposal.targetTopicUid ? `-> ${proposal.targetTopicUid}` : null,
+    proposal.targetCategoryKey ? `-> ${proposal.targetCategoryKey}` : null,
     proposal.displayName,
   ].filter(Boolean);
   return parts.join(" ") || "unmapped";
 }
 
-function assertReviewMutationSucceeded(response: CurationReviewResponse, proposalId: string): NonNullable<CurationReviewResponse["data"]> {
+function assertReviewMutationSucceeded(response: CategoryReviewResponse, proposalId: string): NonNullable<CategoryReviewResponse["data"]> {
   if (response.errors?.length) {
     throw new Error(response.errors.map(formatGraphQLError).join("; "));
   }
@@ -677,59 +1137,121 @@ function formatGraphQLError(error: { message?: string | null } | string | null):
   return error?.message ?? "GraphQL mutation failed.";
 }
 
-function selectActiveTaxonomy(
-  taxonomies: TopicSteeringTaxonomy[],
-  topicSetId: string | null,
+function selectActiveCategoryTree(
+  categoryTrees: CategorySteeringCategoryTree[],
+  categorySetId: string | null,
   corpusId: string | null,
-): TopicSteeringTaxonomy | null {
-  const candidates = taxonomies.filter((taxonomy) => taxonomy.status !== "deprecated");
-  const matchingTopicSet = topicSetId ? candidates.filter((taxonomy) => taxonomy.topicSetId === topicSetId) : candidates;
-  const matchingCorpus = corpusId ? candidates.filter((taxonomy) => taxonomy.corpusId === corpusId) : candidates;
-  return matchingTopicSet[0] ?? matchingCorpus[0] ?? candidates[0] ?? null;
+): CategorySteeringCategoryTree | null {
+  const candidates = categoryTrees.filter((categoryTree) => categoryTree.status !== "deprecated");
+  const matchingCategorySet = categorySetId ? candidates.filter((categoryTree) => categoryTree.id === categorySetId) : candidates;
+  const matchingCorpus = corpusId ? candidates.filter((categoryTree) => categoryTree.corpusId === corpusId) : candidates;
+  return matchingCategorySet[0] ?? matchingCorpus[0] ?? candidates[0] ?? null;
 }
 
-function topicToTaxonomyNode(topic: TopicSteeringTopic): TopicSteeringTaxonomyNode {
+function categoryToCategoryTreeNode(category: CategorySteeringCategory): CategorySteeringCategoryTreeNode {
   return {
-    id: topic.id,
-    taxonomyId: topic.topicSetId,
-    corpusId: topic.corpusId,
-    topicSetId: topic.topicSetId,
-    topicUid: topic.topicUid,
-    parentTopicUid: null,
-    displayName: topic.displayName,
-    subtitle: topic.subtitle,
-    description: topic.description,
-    status: topic.status,
-    seedItemIds: topic.seedItemIds,
-    holdoutItemIds: topic.holdoutItemIds,
-    rank: topic.rank,
+    id: category.id,
+    categorySetId: category.categorySetId,
+    corpusId: category.corpusId,
+    categoryKey: category.categoryKey,
+    parentCategoryKey: null,
+    displayName: category.displayName,
+    subtitle: category.subtitle,
+    description: category.description,
+    status: category.status,
+    seedItemIds: category.seedItemIds,
+    holdoutItemIds: category.holdoutItemIds,
+    rank: category.rank,
     depth: 0,
     importRunId: null,
-    updatedAt: topic.updatedAt,
+    updatedAt: category.updatedAt,
   };
 }
 
-function countRelatedTaxonomyProposals(
-  topicUid: string,
-  subtopics: TopicSteeringTaxonomyNode[],
-  proposals: TopicSteeringProposal[],
+function buildCategoryCopyVersion(
+  category: CategorySteeringCategory,
+  update: Pick<CategorySteeringCategory, "displayName" | "subtitle" | "description">,
+  { actorLabel, now }: { actorLabel: string; now: string },
+): CategorySteeringCategory {
+  const lineageId = category.lineageId ?? category.id;
+  const versionNumber = nextVersionNumber(category.versionNumber);
+  const nextCategory: CategorySteeringCategory = {
+    ...category,
+    ...update,
+    id: `${lineageId}-v${versionNumber}`,
+    lineageId,
+    versionNumber,
+    previousVersionId: category.id,
+    versionState: "current",
+    versionCreatedAt: now,
+    versionCreatedBy: actorLabel,
+    changeReason: "manual category copy edit",
+    updatedAt: now,
+  };
+  nextCategory.contentHash = contentHashFor(nextCategory);
+  return nextCategory;
+}
+
+function nextVersionNumber(versionNumber: number | null | undefined): number {
+  return typeof versionNumber === "number" && Number.isFinite(versionNumber)
+    ? Math.max(1, Math.trunc(versionNumber)) + 1
+    : 2;
+}
+
+function contentHashFor(value: unknown): string {
+  return `fnv1a32:${stableHash(stripHash(value))}`;
+}
+
+function stripHash(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const copy: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (key === "contentHash") continue;
+    copy[key] = entry;
+  }
+  return copy;
+}
+
+function stableHash(value: unknown): string {
+  const text = stableStringify(value);
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, entry]) => entry !== undefined)
+    .sort(([left], [right]) => left.localeCompare(right));
+  return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${stableStringify(entry)}`).join(",")}}`;
+}
+
+function countRelatedCategoryTreeProposals(
+  categoryKey: string,
+  subcategorys: CategorySteeringCategoryTreeNode[],
+  proposals: CategorySteeringProposal[],
 ): number {
-  const topicUids = new Set([topicUid, ...subtopics.map((subtopic) => subtopic.topicUid)]);
+  const categoryKeys = new Set([categoryKey, ...subcategorys.map((subcategory) => subcategory.categoryKey)]);
   return proposals.filter((proposal) => {
     if (!TAXONOMY_PROPOSAL_KINDS.has(proposal.proposalKind)) return false;
     return Boolean(
-      (proposal.topicUid && topicUids.has(proposal.topicUid)) ||
-      (proposal.targetTopicUid && topicUids.has(proposal.targetTopicUid)),
+      (proposal.categoryKey && categoryKeys.has(proposal.categoryKey)) ||
+      (proposal.targetCategoryKey && categoryKeys.has(proposal.targetCategoryKey)),
     );
   }).length;
 }
 
-function getProposedSubtopicProposals(rootTopicUid: string, proposals: TopicSteeringProposal[]): TopicSteeringProposal[] {
+function getProposedSubcategoryProposals(rootCategoryUid: string, proposals: CategorySteeringProposal[]): CategorySteeringProposal[] {
   return proposals
     .filter((proposal) => (
-      proposal.proposalKind === "create-taxonomy-node"
+      proposal.proposalKind === "create-category"
       && proposal.status === "proposed"
-      && proposal.targetTopicUid === rootTopicUid
+      && proposal.targetCategoryKey === rootCategoryUid
     ))
     .sort((left, right) => {
       const leftName = left.displayName ?? left.title;
@@ -738,23 +1260,23 @@ function getProposedSubtopicProposals(rootTopicUid: string, proposals: TopicStee
     });
 }
 
-function CorpusTopicSetSummary({
+function CorpusCategorySetSummary({
   corpora,
-  topicSets,
+  categorySets,
   importRuns,
-  canonicalTopicSetId,
+  canonicalCategorySetId,
 }: {
-  corpora: TopicSteeringCorpus[];
-  topicSets: TopicSteeringTopicSet[];
-  importRuns: TopicSteeringImportRun[];
-  canonicalTopicSetId: string | null;
+  corpora: CategorySteeringCorpus[];
+  categorySets: CategorySteeringCategorySet[];
+  importRuns: CategorySteeringImportRun[];
+  canonicalCategorySetId: string | null;
 }) {
   return (
-    <section className="topic-steering-section" aria-labelledby="corpus-topic-sets-title">
-      <SectionHeader title="Corpus Topic Sets" detail={`${corpora.length} configured corpora / ${topicSets.length} registers`} />
+    <section className="category-steering-section" aria-labelledby="corpus-category-sets-title">
+      <SectionHeader title="Corpus Category Sets" detail={`${corpora.length} configured corpora / ${categorySets.length} registers`} />
       <div className="news-desk-ledger-list">
         {corpora.length ? corpora.map((corpus) => {
-          const corpusTopicSets = topicSets.filter((topicSet) => topicSet.corpusId === corpus.id);
+          const corpusCategorySets = categorySets.filter((categorySet) => categorySet.corpusId === corpus.id);
           const latestImport = importRuns.find((importRun) => importRun.corpusId === corpus.id);
           return (
             <article className="news-desk-ledger-item" key={corpus.id}>
@@ -764,16 +1286,16 @@ function CorpusTopicSetSummary({
               </header>
               <dl>
                 <div>
-                  <dt>Topic Sets</dt>
-                  <dd>{formatTopicSetNames(corpusTopicSets, canonicalTopicSetId)}</dd>
+                  <dt>Category Sets</dt>
+                  <dd>{formatCategorySetNames(corpusCategorySets, canonicalCategorySetId)}</dd>
                 </div>
                 <div>
                   <dt>Classifiers</dt>
-                  <dd>{corpusTopicSets.map((topicSet) => topicSet.classifierId).join(" / ") || "none"}</dd>
+                  <dd>{corpusCategorySets.map((categorySet) => categorySet.classifierId).join(" / ") || "none"}</dd>
                 </div>
                 <div>
-                  <dt>Topics</dt>
-                  <dd>{String(corpusTopicSets.reduce((count, topicSet) => count + (topicSet.topicCount ?? 0), 0))}</dd>
+                  <dt>Categorys</dt>
+                  <dd>{String(corpusCategorySets.reduce((count, categorySet) => count + (categorySet.categoryCount ?? 0), 0))}</dd>
                 </div>
                 <div>
                   <dt>Latest Import</dt>
@@ -788,10 +1310,10 @@ function CorpusTopicSetSummary({
   );
 }
 
-function formatTopicSetNames(topicSets: TopicSteeringTopicSet[], canonicalTopicSetId: string | null): string {
-  if (!topicSets.length) return "No topic sets";
-  return topicSets
-    .map((topicSet) => `${topicSet.displayName}${topicSet.id === canonicalTopicSetId ? " (canonical)" : ""}`)
+function formatCategorySetNames(categorySets: CategorySteeringCategorySet[], canonicalCategorySetId: string | null): string {
+  if (!categorySets.length) return "No category sets";
+  return categorySets
+    .map((categorySet) => `${categorySet.displayName}${categorySet.id === canonicalCategorySetId ? " (canonical)" : ""}`)
     .join(" / ");
 }
 
@@ -801,23 +1323,23 @@ function formatDateTime(value: string): string {
   return new Date(timestamp).toISOString().slice(0, 16).replace("T", " ");
 }
 
-function TopicProposalRow({
+function CategoryProposalRow({
   proposal,
-  topic,
+  category,
   disabled,
   onAction,
 }: {
-  proposal: TopicSteeringProposal;
-  topic?: TopicSteeringTopic;
+  proposal: CategorySteeringProposal;
+  category?: CategorySteeringCategory;
   disabled: boolean;
-  onAction: (proposal: TopicSteeringProposal, action: ReviewAction) => void;
+  onAction: (proposal: CategorySteeringProposal, action: ReviewAction) => void;
 }) {
   const evidence = compactArray(proposal.evidenceItemIds).slice(0, 3);
 
   return (
-    <article className="topic-steering-proposal" data-proposal-domain={proposal.steeringDomain}>
-      <div className="topic-steering-proposal__main">
-        <div className="topic-steering-proposal__title">
+    <article className="category-steering-proposal" data-proposal-domain={proposal.steeringDomain}>
+      <div className="category-steering-proposal__main">
+        <div className="category-steering-proposal__title">
           <StatusPill status={proposal.status} />
           <strong>{proposal.title}</strong>
           <span>{proposal.proposalKind}</span>
@@ -825,25 +1347,25 @@ function TopicProposalRow({
         <p>{proposal.summary ?? "No summary provided."}</p>
         <dl>
           <div>
-            <dt>Topic UID</dt>
-            <dd>{proposal.topicUid ?? topic?.topicUid ?? "new topic"}</dd>
+            <dt>Category UID</dt>
+            <dd>{proposal.categoryKey ?? category?.categoryKey ?? "new category"}</dd>
           </div>
           <div>
             <dt>Display</dt>
-            <dd>{proposal.displayName ?? topic?.displayName ?? "pending"}</dd>
+            <dd>{proposal.displayName ?? category?.displayName ?? "pending"}</dd>
           </div>
           <div>
             <dt>Subtitle</dt>
-            <dd>{proposal.subtitle ?? topic?.subtitle ?? "none"}</dd>
+            <dd>{proposal.subtitle ?? category?.subtitle ?? "none"}</dd>
           </div>
         </dl>
-        <div className="topic-steering-evidence-chips">
+        <div className="category-steering-evidence-chips">
           {evidence.length ? evidence.map((itemId) => (
             <span key={itemId}>{itemId}</span>
           )) : <span>No evidence rows</span>}
         </div>
       </div>
-      <div className="topic-steering-proposal__actions" aria-label={`${proposal.title} review actions`}>
+      <div className="category-steering-proposal__actions" aria-label={`${proposal.title} review actions`}>
         <button type="button" data-review-action="accept" disabled={disabled || proposal.status === "accepted"} onClick={() => onAction(proposal, "accept")}>Accept</button>
         <button type="button" data-review-action="reject" disabled={disabled || proposal.status === "rejected"} onClick={() => onAction(proposal, "reject")}>Reject</button>
       </div>
@@ -851,24 +1373,24 @@ function TopicProposalRow({
   );
 }
 
-function TopicEditor({
-  topic,
+function CategoryEditor({
+  category,
   disabled,
   onSave,
 }: {
-  topic: TopicSteeringTopic;
+  category: CategorySteeringCategory;
   disabled: boolean;
-  onSave: (topic: TopicSteeringTopic, update: Pick<TopicSteeringTopic, "displayName" | "subtitle" | "description">) => void;
+  onSave: (category: CategorySteeringCategory, update: Pick<CategorySteeringCategory, "displayName" | "subtitle" | "description">) => void;
 }) {
-  const [displayName, setDisplayName] = useState(topic.displayName);
-  const [subtitle, setSubtitle] = useState(topic.subtitle ?? "");
-  const [description, setDescription] = useState(topic.description ?? "");
+  const [displayName, setDisplayName] = useState(category.displayName);
+  const [subtitle, setSubtitle] = useState(category.subtitle ?? "");
+  const [description, setDescription] = useState(category.description ?? "");
 
   return (
-    <article className="topic-steering-topic-card" data-topic-uid={topic.topicUid} data-saved-display-name={topic.displayName}>
+    <article className="category-steering-category-card" data-category-uid={category.categoryKey} data-saved-display-name={category.displayName}>
       <header>
-        <span>{topic.topicUid}</span>
-        <StatusPill status={topic.status} />
+        <span>{category.categoryKey}</span>
+        <StatusPill status={category.status} />
       </header>
       <label>
         <span>Name</span>
@@ -883,38 +1405,34 @@ function TopicEditor({
         <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={3} />
       </label>
       <footer>
-        <span>{compactArray(topic.seedItemIds).length} seeds / {compactArray(topic.holdoutItemIds).length} holdouts</span>
-        <button type="button" data-news-desk-command="save-copy" disabled={disabled || !displayName.trim()} onClick={() => onSave(topic, { displayName, subtitle, description })}>Save Copy</button>
+        <span>{compactArray(category.seedItemIds).length} seeds / {compactArray(category.holdoutItemIds).length} holdouts</span>
+        <button type="button" data-news-desk-command="save-copy" disabled={disabled || !displayName.trim()} onClick={() => onSave(category, { displayName, subtitle, description })}>Save Copy</button>
       </footer>
     </article>
   );
 }
 
-function RevisionPanel({
-  topicSet,
+function CategorySetPanel({
+  categorySet,
   artifacts,
   projections,
-  disabled,
-  onPromote,
 }: {
-  topicSet: TopicSteeringTopicSet | null;
-  artifacts: TopicSteeringArtifact[];
-  projections: TopicSteeringProjection[];
-  disabled: boolean;
-  onPromote: (revisionId: string) => void;
+  categorySet: CategorySteeringCategorySet | null;
+  artifacts: CategorySteeringArtifact[];
+  projections: CategorySteeringProjection[];
 }) {
   return (
-    <section className="topic-steering-section" aria-labelledby="pressroom-export-title">
-      <SectionHeader title="Pressroom Export" detail={topicSet?.status ?? "No topic set"} />
-      <div className="topic-steering-revision-panel">
+    <section className="category-steering-section" aria-labelledby="pressroom-export-title">
+      <SectionHeader title="Pressroom Export" detail={categorySet?.status ?? "No category set"} />
+      <div className="category-steering-revision-panel">
         <dl>
           <div>
-            <dt>Accepted Revision</dt>
-            <dd>{topicSet?.acceptedRevisionId ?? "none"}</dd>
+            <dt>Current Version</dt>
+            <dd>{categorySet?.versionNumber ?? "none"}</dd>
           </div>
           <div>
-            <dt>Draft Revision</dt>
-            <dd>{topicSet?.latestDraftRevisionId ?? "none"}</dd>
+            <dt>Version State</dt>
+            <dd>{categorySet?.versionState ?? "unknown"}</dd>
           </div>
           <div>
             <dt>Artifacts</dt>
@@ -925,15 +1443,7 @@ function RevisionPanel({
             <dd>{projections.filter((projection) => projection.reviewRecommended).length}</dd>
           </div>
         </dl>
-        <button
-          type="button"
-          data-news-desk-command="promote-draft"
-          disabled={disabled || !topicSet?.latestDraftRevisionId}
-          onClick={() => topicSet?.latestDraftRevisionId ? onPromote(topicSet.latestDraftRevisionId) : undefined}
-        >
-          Promote Draft
-        </button>
-        <div className="topic-steering-artifacts">
+        <div className="category-steering-artifacts">
           {artifacts.slice(0, 4).map((artifact) => (
             <span key={artifact.id}>{artifact.displayName ?? artifact.artifactId}</span>
           ))}
@@ -944,11 +1454,11 @@ function RevisionPanel({
 }
 
 function StatusPill({ status }: { status: string }) {
-  return <span className={`topic-steering-pill topic-steering-pill--${status}`}>{status}</span>;
+  return <span className={`category-steering-pill category-steering-pill--${status}`}>{status}</span>;
 }
 
 function EmptyRow({ label }: { label: string }) {
-  return <div className="topic-steering-empty">{label}</div>;
+  return <div className="category-steering-empty">{label}</div>;
 }
 
 function compactArray(value: Array<string | null> | null | undefined): string[] {
@@ -956,6 +1466,6 @@ function compactArray(value: Array<string | null> | null | undefined): string[] 
   return value.map((entry) => (typeof entry === "string" ? entry.trim() : "")).filter(Boolean);
 }
 
-function isTailoredTopicProposal(proposal: TopicSteeringProposal): boolean {
-  return proposal.steeringDomain === "topic" && TAILORED_TOPIC_PROPOSAL_KINDS.has(proposal.proposalKind);
+function isTailoredCategoryProposal(proposal: CategorySteeringProposal): boolean {
+  return proposal.steeringDomain === "category" && TAILORED_TOPIC_PROPOSAL_KINDS.has(proposal.proposalKind);
 }

@@ -260,20 +260,19 @@ function createHeightPolicyLayoutPlan({
 }
 
 function createDemoNewsDeskAppendix(): NewsDeskAppendix {
-  const taxonomyId = "taxonomy-demo-canonical";
+  const categorySetId = "category-set-demo-canonical";
   return {
-    taxonomyId,
-    corpusId: "curation-corpus-demo-canonical",
-    topicSetId: "curation-topic-set-demo-canonical",
-    displayName: "Canonical Topic Register",
-    description: "Accepted topic taxonomy for the fixture edition.",
+    categorySetId,
+    corpusId: "category-corpus-demo-canonical",
+    displayName: "Canonical Category Register",
+    description: "Accepted category tree for the fixture edition.",
     generatedAt: `${editionDate}T12:00:00.000Z`,
     nodes: [
       {
-        id: "taxonomy-node-foundation-model-scaling",
-        taxonomyId,
-        topicUid: "topic.foundation-model-scaling",
-        parentTopicUid: null,
+        id: "category-node-foundation-model-scaling",
+        categorySetId,
+        categoryKey: "category.foundation-model-scaling",
+        parentCategoryKey: null,
         displayName: "Foundation Model Scaling",
         subtitle: "Capability curves, benchmark saturation, and training-compute effects",
         description: "Research on model size, data mixtures, compute budgets, and emergent benchmark behavior.",
@@ -284,10 +283,10 @@ function createDemoNewsDeskAppendix(): NewsDeskAppendix {
         depth: 0,
       },
       {
-        id: "taxonomy-node-agent-memory",
-        taxonomyId,
-        topicUid: "topic.agent-memory",
-        parentTopicUid: "topic.foundation-model-scaling",
+        id: "category-node-agent-memory",
+        categorySetId,
+        categoryKey: "category.agent-memory",
+        parentCategoryKey: "category.foundation-model-scaling",
         displayName: "Agent Memory",
         subtitle: "Retrieval, persistence, and working context for autonomous systems",
         description: "Subtopic covering memory stores, retrieval policies, and long-horizon agent state.",
@@ -298,10 +297,10 @@ function createDemoNewsDeskAppendix(): NewsDeskAppendix {
         depth: 1,
       },
       {
-        id: "taxonomy-node-benchmark-saturation",
-        taxonomyId,
-        topicUid: "topic.benchmark-saturation",
-        parentTopicUid: "topic.foundation-model-scaling",
+        id: "category-node-benchmark-saturation",
+        categorySetId,
+        categoryKey: "category.benchmark-saturation",
+        parentCategoryKey: "category.foundation-model-scaling",
         displayName: "Benchmark Saturation",
         subtitle: "When evaluation sets stop separating model capability",
         description: "Subtopic covering benchmark exhaustion, contamination, and evaluation drift.",
@@ -312,10 +311,10 @@ function createDemoNewsDeskAppendix(): NewsDeskAppendix {
         depth: 1,
       },
       {
-        id: "taxonomy-node-symbolic-connectionist-history",
-        taxonomyId,
-        topicUid: "topic.symbolic-connectionist-history",
-        parentTopicUid: null,
+        id: "category-node-symbolic-connectionist-history",
+        categorySetId,
+        categoryKey: "category.symbolic-connectionist-history",
+        parentCategoryKey: null,
         displayName: "Symbolic And Connectionist History",
         subtitle: "Shifts between rules, neural nets, and hybrid AI programs",
         description: "Historical coverage of symbolic AI, neural network winters, and later hybrid systems.",

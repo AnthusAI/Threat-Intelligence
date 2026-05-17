@@ -4,11 +4,11 @@ import type { PublicationItem } from "./publication-items";
 
 export type ContentSource = "scenario" | "graphql";
 
-export type NewsDeskTaxonomyNode = {
+export type NewsDeskCategoryTreeNode = {
   id: string;
-  taxonomyId: string;
-  topicUid: string;
-  parentTopicUid?: string | null;
+  categorySetId: string;
+  categoryKey: string;
+  parentCategoryKey?: string | null;
   displayName: string;
   subtitle?: string | null;
   description?: string | null;
@@ -20,13 +20,12 @@ export type NewsDeskTaxonomyNode = {
 };
 
 export type NewsDeskAppendix = {
-  taxonomyId: string;
+  categorySetId: string;
   corpusId: string;
-  topicSetId: string;
   displayName: string;
   description?: string | null;
   generatedAt?: string | null;
-  nodes: NewsDeskTaxonomyNode[];
+  nodes: NewsDeskCategoryTreeNode[];
 };
 
 export type EditionContent = {

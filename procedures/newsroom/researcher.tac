@@ -24,8 +24,8 @@ Goal:
 
 Rules:
 - This is dry-run only. Never claim records were written.
-- Preserve Item.type as "article".
-- Preserve Item.status as "assignment" and Item.typeStatus as "article#assignment".
+- Assignment input records must use Item.type = "assignment".
+- Keep the assignment Item as the input row and advance Item.status to "researched".
 - Store research handoff details in editorial.newsroom.research.
 - Return structured research data and the dry-run update plan.
 ]],
@@ -76,7 +76,7 @@ Required tool flow:
 3. Use biblicus_query plus biblicus_topic_context or biblicus_topic_trends to gather evidence.
 4. Call build_research_update_plan with the assignment item and research packet.
 
-Use at most %d evidence items. Return dry_run=true, item_status="assignment",
+Use at most %d evidence items. Return dry_run=true, item_status="researched",
 research_packet, research_record_plan, and a concise summary.
 ]], assignment_source, input.corpus_key, input.research_questions, input.max_evidence_items)
 
@@ -98,11 +98,11 @@ Feature: Newsroom researcher procedure
     And the agent "newsroom_researcher" calls tool "papyrus_get_item" with args {"item_id": "assignment-abc123"}
     And the agent "newsroom_researcher" calls tool "biblicus_steering_artifacts" with args {"corpus_key": "AI-ML-research"}
     And the agent "newsroom_researcher" calls tool "biblicus_query" with args {"corpus_key": "AI-ML-research", "query": "AI Agents Enter the Lab concrete lab workflow examples", "max_total_items": 2}
-    And the agent "newsroom_researcher" calls tool "build_research_update_plan" with args {"assignment_item_json": "{\"id\":\"assignment-abc123\",\"type\":\"article\",\"status\":\"assignment\",\"typeStatus\":\"article#assignment\",\"slug\":\"ai-agents-enter-the-lab\",\"section\":\"Research\",\"title\":\"AI Agents Enter the Lab\",\"editorial\":{\"newsroom\":{\"assignment\":{\"brief\":\"Explain research agents.\"}}}}", "research_json": "{\"summary\":\"Evidence supports a practical research-workflow angle.\",\"corpus_key\":\"AI-ML-research\",\"topic_uid\":\"automated-scientific-discovery\",\"evidence_item_ids\":[\"research-001\"],\"queries\":[\"AI Agents Enter the Lab concrete lab workflow examples\"],\"source_snapshots\":[{\"itemId\":\"research-001\",\"title\":\"Lab agents\"}],\"research_notes\":[\"Tie the story to concrete workflow changes.\"],\"open_questions\":[\"Which examples are strongest for the edition?\"],\"coverage_gaps\":[\"Need one skeptical source.\"],\"recommended_angle\":\"Focus on lab workflow delegation.\"}"}
-    And the agent "newsroom_researcher" returns data {"assignment_item_id":"assignment-abc123","corpus_key":"AI-ML-research","dry_run":True,"item_status":"assignment","research_packet":{"summary":"Evidence supports a practical research-workflow angle.","evidence_item_ids":["research-001"]},"research_record_plan":{"dryRun":True,"lifecycle":"assignment-research","records":[{"modelName":"Item","action":"update","input":{"id":"assignment-abc123","type":"article","status":"assignment","typeStatus":"article#assignment"}}]},"summary":"Created one dry-run research update plan."}
+    And the agent "newsroom_researcher" calls tool "build_research_update_plan" with args {"assignment_item_json": "{\"id\":\"assignment-abc123\",\"type\":\"assignment\",\"status\":\"dispatched\",\"typeStatus\":\"assignment#dispatched\",\"slug\":\"ai-agents-enter-the-lab\",\"section\":\"Research\",\"title\":\"AI Agents Enter the Lab\",\"editorial\":{\"newsroom\":{\"assignment\":{\"brief\":\"Explain research agents.\"}}}}", "research_json": "{\"summary\":\"Evidence supports a practical research-workflow angle.\",\"corpus_key\":\"AI-ML-research\",\"category_key\":\"automated-scientific-discovery\",\"evidence_item_ids\":[\"research-001\"],\"queries\":[\"AI Agents Enter the Lab concrete lab workflow examples\"],\"source_snapshots\":[{\"itemId\":\"research-001\",\"title\":\"Lab agents\"}],\"research_notes\":[\"Tie the story to concrete workflow changes.\"],\"open_questions\":[\"Which examples are strongest for the edition?\"],\"coverage_gaps\":[\"Need one skeptical source.\"],\"recommended_angle\":\"Focus on lab workflow delegation.\"}"}
+    And the agent "newsroom_researcher" returns data {"assignment_item_id":"assignment-abc123","corpus_key":"AI-ML-research","dry_run":True,"item_status":"researched","research_packet":{"summary":"Evidence supports a practical research-workflow angle.","evidence_item_ids":["research-001"]},"research_record_plan":{"dryRun":True,"lifecycle":"assignment-research","records":[{"modelName":"Item","action":"update","input":{"id":"assignment-abc123","type":"assignment","status":"researched","typeStatus":"assignment#researched"}}]},"summary":"Created one dry-run research update plan."}
     When the procedure runs
     Then the procedure should complete successfully
     And the output dry_run should be true
-    And the output item_status should be assignment
+    And the output item_status should be researched
     And the output research_record_plan should exist
 ]])

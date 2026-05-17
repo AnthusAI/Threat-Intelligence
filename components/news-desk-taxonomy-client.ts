@@ -3,19 +3,25 @@
 import { fetchAuthSession } from "aws-amplify/auth";
 import { generateClient } from "aws-amplify/data";
 import type { Schema } from "../amplify/data/resource";
-import type { NewsDeskAppendix, NewsDeskTaxonomyNode } from "../lib/content-types";
+import type { NewsDeskAppendix, NewsDeskCategoryTreeNode } from "../lib/content-types";
 import type {
-  TopicSteeringArtifact,
-  TopicSteeringCorpus,
-  TopicSteeringDashboard,
-  TopicSteeringImportRun,
-  TopicSteeringProjection,
-  TopicSteeringProposal,
-  TopicSteeringTaxonomy,
-  TopicSteeringTaxonomyNode,
-  TopicSteeringTopic,
-  TopicSteeringTopicSet,
-} from "../lib/curation-repository";
+  CategorySteeringArtifact,
+  CategorySteeringCorpus,
+  CategorySteeringDashboard,
+  CategorySteeringImportRun,
+  CategorySteeringProjection,
+  CategorySteeringProposal,
+  CategorySteeringCategoryTree,
+  CategorySteeringCategoryTreeNode,
+  CategorySteeringCategory,
+  CategorySteeringCategorySet,
+} from "../lib/category-repository";
+import {
+  buildAssignmentDesk,
+  type NewsDeskAssignmentEdition,
+  type NewsDeskAssignmentEditionItem,
+  type NewsDeskAssignmentItem,
+} from "../lib/news-desk-assignments";
 import { configureAmplifyClient } from "./amplify-client-provider";
 
 const USER_POOL_AUTH_MODE = "userPool";
@@ -31,11 +37,11 @@ type ListableModel<T> = {
   list: (options: Record<string, unknown>) => Promise<GraphQLListResponse<T>>;
 };
 
-export type EditorTaxonomyState = {
+export type EditorCategoryTreeState = {
   isEditor: boolean;
   appendix: NewsDeskAppendix | null;
-  taxonomies: TopicSteeringTaxonomy[];
-  taxonomyNodes: TopicSteeringTaxonomyNode[];
+  categoryTrees: CategorySteeringCategoryTree[];
+  categoryNodes: CategorySteeringCategoryTreeNode[];
   error: string | null;
 };
 
@@ -43,7 +49,7 @@ export type EditorNewsDeskState =
   | { status: "loading"; dashboard: null; error: null }
   | { status: "signedOut"; dashboard: null; error: null }
   | { status: "forbidden"; dashboard: null; error: null }
-  | { status: "ready"; dashboard: TopicSteeringDashboard; error: null }
+  | { status: "ready"; dashboard: CategorySteeringDashboard; error: null }
   | { status: "error"; dashboard: null; error: string };
 
 export async function loadEditorAccessState(): Promise<{ isEditor: boolean; status: EditorAuthState["status"]; error: string | null }> {
@@ -66,40 +72,47 @@ export async function loadEditorNewsDeskState(): Promise<EditorNewsDeskState> {
     const [
       corpora,
       importRuns,
-      topicSets,
-      topics,
-      taxonomies,
-      taxonomyNodes,
+      categorySets,
+      categorys,
+      categoryTrees,
+      categoryNodes,
       proposals,
       artifacts,
       projections,
+      editions,
+      editionItems,
+      items,
     ] = await Promise.all([
-      listUserPoolModel<TopicSteeringCorpus>("CurationCorpus"),
-      listUserPoolModel<TopicSteeringImportRun>("CurationImportRun"),
-      listUserPoolModel<TopicSteeringTopicSet>("CurationTopicSet"),
-      listUserPoolModel<TopicSteeringTopic>("CurationTopic"),
-      listUserPoolModel<TopicSteeringTaxonomy>("CurationTaxonomy"),
-      listUserPoolModel<TopicSteeringTaxonomyNode>("CurationTaxonomyNode"),
-      listUserPoolModel<TopicSteeringProposal>("CurationProposal"),
-      listUserPoolModel<TopicSteeringArtifact>("CurationArtifact"),
-      listUserPoolModel<TopicSteeringProjection>("CurationProjection"),
+      listUserPoolModel<CategorySteeringCorpus>("CategoryCorpus"),
+      listUserPoolModel<CategorySteeringImportRun>("CategoryImportRun"),
+      listUserPoolModel<CategorySteeringCategorySet>("CategorySet"),
+      listUserPoolModel<CategorySteeringCategory>("Category"),
+      listUserPoolModel<CategorySteeringCategoryTree>("CategorySet"),
+      listUserPoolModel<CategorySteeringCategoryTreeNode>("Category"),
+      listUserPoolModel<CategorySteeringProposal>("CategoryProposal"),
+      listUserPoolModel<CategorySteeringArtifact>("CategoryArtifact"),
+      listUserPoolModel<CategorySteeringProjection>("CategoryProjection"),
+      listUserPoolModel<NewsDeskAssignmentEdition>("Edition"),
+      listUserPoolModel<NewsDeskAssignmentEditionItem>("EditionItem"),
+      listUserPoolModel<NewsDeskAssignmentItem>("Item"),
     ]);
 
     const sortedCorpora = corpora.sort((left, right) => left.name.localeCompare(right.name));
     const sortedImportRuns = importRuns.sort((left, right) => right.importedAt.localeCompare(left.importedAt));
-    const sortedTopicSets = sortTopicSets(topicSets, sortedImportRuns);
-    const canonicalTopicSet = selectCanonicalTopicSet(sortedCorpora, sortedTopicSets);
+    const sortedCategorySets = sortCategorySets(categorySets, sortedImportRuns);
+    const canonicalCategorySet = selectCanonicalCategorySet(sortedCorpora, sortedCategorySets);
     return {
       status: "ready",
       dashboard: {
-        canonicalCorpusId: canonicalTopicSet?.corpusId ?? selectCanonicalCorpus(sortedCorpora)?.id ?? null,
-        canonicalTopicSetId: canonicalTopicSet?.id ?? null,
+        canonicalCorpusId: canonicalCategorySet?.corpusId ?? selectCanonicalCorpus(sortedCorpora)?.id ?? null,
+        canonicalCategorySetId: canonicalCategorySet?.id ?? null,
+        assignmentDesk: buildAssignmentDesk(editions, editionItems, items),
         corpora: sortedCorpora,
         importRuns: sortedImportRuns,
-        topicSets: sortedTopicSets,
-        topics: sortTopics(topics),
-        taxonomies: sortTaxonomies(taxonomies),
-        taxonomyNodes: sortTaxonomyNodes(taxonomyNodes),
+        categorySets: sortedCategorySets,
+        categorys: sortCategorys(categorys),
+        categoryTrees: sortTaxonomies(categoryTrees),
+        categoryNodes: sortCategoryTreeNodes(categoryNodes),
         proposals: sortProposals(proposals),
         artifacts: artifacts.sort((left, right) => (right.createdAt ?? "").localeCompare(left.createdAt ?? "")),
         projections: projections.sort((left, right) => (right.score ?? 0) - (left.score ?? 0)),
@@ -116,10 +129,10 @@ export async function loadEditorNewsDeskState(): Promise<EditorNewsDeskState> {
   }
 }
 
-export async function loadEditorTaxonomyState(options?: {
+export async function loadEditorCategoryTreeState(options?: {
   scenarioAppendix?: NewsDeskAppendix | null;
   allowScenarioEditorOverride?: boolean;
-}): Promise<EditorTaxonomyState> {
+}): Promise<EditorCategoryTreeState> {
   configureAmplifyClient();
 
   if (options?.allowScenarioEditorOverride && hasTestEditorOverride()) {
@@ -127,42 +140,42 @@ export async function loadEditorTaxonomyState(options?: {
     return {
       isEditor: true,
       appendix,
-      taxonomies: appendix ? [taxonomyFromAppendix(appendix)] : [],
-      taxonomyNodes: appendix ? appendix.nodes.map(taxonomyNodeFromAppendixNode) : [],
+      categoryTrees: appendix ? [categoryTreeFromAppendix(appendix)] : [],
+      categoryNodes: appendix ? appendix.nodes.map(categoryTreeNodeFromAppendixNode) : [],
       error: null,
     };
   }
 
   const auth = await getEditorAuthState();
   if (!auth.isEditor) {
-    return { isEditor: false, appendix: null, taxonomies: [], taxonomyNodes: [], error: auth.error };
+    return { isEditor: false, appendix: null, categoryTrees: [], categoryNodes: [], error: auth.error };
   }
 
   try {
-    const [taxonomies, taxonomyNodes] = await Promise.all([
-      listUserPoolModel<TopicSteeringTaxonomy>("CurationTaxonomy"),
-      listUserPoolModel<TopicSteeringTaxonomyNode>("CurationTaxonomyNode"),
+    const [categoryTrees, categoryNodes] = await Promise.all([
+      listUserPoolModel<CategorySteeringCategoryTree>("CategorySet"),
+      listUserPoolModel<CategorySteeringCategoryTreeNode>("Category"),
     ]);
-    const sortedTaxonomies = sortTaxonomies(taxonomies);
-    const sortedNodes = sortTaxonomyNodes(taxonomyNodes);
-    const selectedTaxonomy = selectCurrentAcceptedTaxonomy(sortedTaxonomies);
+    const sortedTaxonomies = sortTaxonomies(categoryTrees);
+    const sortedNodes = sortCategoryTreeNodes(categoryNodes);
+    const selectedCategoryTree = selectCurrentAcceptedCategoryTree(sortedTaxonomies);
     return {
       isEditor: true,
-      appendix: selectedTaxonomy ? appendixFromTaxonomy(selectedTaxonomy, sortedNodes) : null,
-      taxonomies: sortedTaxonomies,
-      taxonomyNodes: sortedNodes,
+      appendix: selectedCategoryTree ? appendixFromCategoryTree(selectedCategoryTree, sortedNodes) : null,
+      categoryTrees: sortedTaxonomies,
+      categoryNodes: sortedNodes,
       error: null,
     };
   } catch (error) {
     if (isUnauthenticatedError(error)) {
-      return { isEditor: false, appendix: null, taxonomies: [], taxonomyNodes: [], error: null };
+      return { isEditor: false, appendix: null, categoryTrees: [], categoryNodes: [], error: null };
     }
     return {
       isEditor: false,
       appendix: null,
-      taxonomies: [],
-      taxonomyNodes: [],
-      error: error instanceof Error ? error.message : "Could not load editor taxonomy state.",
+      categoryTrees: [],
+      categoryNodes: [],
+      error: error instanceof Error ? error.message : "Could not load editor categoryTree state.",
     };
   }
 }
@@ -228,21 +241,20 @@ function readGroups(value: unknown): string[] {
   return [];
 }
 
-function appendixFromTaxonomy(taxonomy: TopicSteeringTaxonomy, nodes: TopicSteeringTaxonomyNode[]): NewsDeskAppendix {
+function appendixFromCategoryTree(categoryTree: CategorySteeringCategoryTree, nodes: CategorySteeringCategoryTreeNode[]): NewsDeskAppendix {
   return {
-    taxonomyId: taxonomy.id,
-    corpusId: taxonomy.corpusId,
-    topicSetId: taxonomy.topicSetId,
-    displayName: taxonomy.displayName,
-    description: taxonomy.description,
-    generatedAt: taxonomy.generatedAt,
+    categorySetId: categoryTree.id,
+    corpusId: categoryTree.corpusId,
+    displayName: categoryTree.displayName,
+    description: categoryTree.description,
+    generatedAt: categoryTree.generatedAt,
     nodes: nodes
-      .filter((node) => node.taxonomyId === taxonomy.id)
+      .filter((node) => node.categorySetId === categoryTree.id)
       .map((node) => ({
         id: node.id,
-        taxonomyId: node.taxonomyId,
-        topicUid: node.topicUid,
-        parentTopicUid: node.parentTopicUid,
+        categorySetId: node.categorySetId,
+        categoryKey: node.categoryKey,
+        parentCategoryKey: node.parentCategoryKey,
         displayName: node.displayName,
         subtitle: node.subtitle,
         description: node.description,
@@ -255,13 +267,12 @@ function appendixFromTaxonomy(taxonomy: TopicSteeringTaxonomy, nodes: TopicSteer
   };
 }
 
-function taxonomyFromAppendix(appendix: NewsDeskAppendix): TopicSteeringTaxonomy {
-  const roots = appendix.nodes.filter((node) => node.status === "accepted" && !node.parentTopicUid);
+function categoryTreeFromAppendix(appendix: NewsDeskAppendix): CategorySteeringCategoryTree {
+  const roots = appendix.nodes.filter((node) => node.status === "accepted" && !node.parentCategoryKey);
   return {
-    id: appendix.taxonomyId,
+    id: appendix.categorySetId,
     corpusId: appendix.corpusId,
-    topicSetId: appendix.topicSetId,
-    taxonomyId: appendix.taxonomyId,
+    classifierId: "scenario",
     displayName: appendix.displayName,
     description: appendix.description,
     status: "accepted",
@@ -271,14 +282,13 @@ function taxonomyFromAppendix(appendix: NewsDeskAppendix): TopicSteeringTaxonomy
   };
 }
 
-function taxonomyNodeFromAppendixNode(node: NewsDeskTaxonomyNode): TopicSteeringTaxonomyNode {
+function categoryTreeNodeFromAppendixNode(node: NewsDeskCategoryTreeNode): CategorySteeringCategoryTreeNode {
   return {
     id: node.id,
-    taxonomyId: node.taxonomyId,
+    categorySetId: node.categorySetId,
     corpusId: "",
-    topicSetId: "",
-    topicUid: node.topicUid,
-    parentTopicUid: node.parentTopicUid,
+    categoryKey: node.categoryKey,
+    parentCategoryKey: node.parentCategoryKey,
     displayName: node.displayName,
     subtitle: node.subtitle,
     description: node.description,
@@ -290,40 +300,40 @@ function taxonomyNodeFromAppendixNode(node: NewsDeskTaxonomyNode): TopicSteering
   };
 }
 
-function selectCurrentAcceptedTaxonomy(taxonomies: TopicSteeringTaxonomy[]): TopicSteeringTaxonomy | null {
-  return taxonomies.find((taxonomy) => taxonomy.status === "accepted") ?? taxonomies[0] ?? null;
+function selectCurrentAcceptedCategoryTree(categoryTrees: CategorySteeringCategoryTree[]): CategorySteeringCategoryTree | null {
+  return categoryTrees.find((categoryTree) => categoryTree.status === "accepted") ?? categoryTrees[0] ?? null;
 }
 
-function selectCanonicalTopicSet(corpora: TopicSteeringCorpus[], topicSets: TopicSteeringTopicSet[]): TopicSteeringTopicSet | null {
+function selectCanonicalCategorySet(corpora: CategorySteeringCorpus[], categorySets: CategorySteeringCategorySet[]): CategorySteeringCategorySet | null {
   const canonicalCorpus = selectCanonicalCorpus(corpora);
-  const candidates = topicSets.filter((topicSet) => topicSet.status !== "deprecated");
-  const canonicalCandidates = canonicalCorpus ? candidates.filter((topicSet) => topicSet.corpusId === canonicalCorpus.id) : candidates;
+  const candidates = categorySets.filter((categorySet) => categorySet.status !== "deprecated");
+  const canonicalCandidates = canonicalCorpus ? candidates.filter((categorySet) => categorySet.corpusId === canonicalCorpus.id) : candidates;
   return canonicalCandidates[0] ?? candidates[0] ?? null;
 }
 
-function selectCanonicalCorpus(corpora: TopicSteeringCorpus[]): TopicSteeringCorpus | null {
+function selectCanonicalCorpus(corpora: CategorySteeringCorpus[]): CategorySteeringCorpus | null {
   return corpora.find((corpus) => corpus.role === "canonical")
     ?? corpora.find((corpus) => corpus.role === "authority")
     ?? corpora[0]
     ?? null;
 }
 
-function sortTopicSets(topicSets: TopicSteeringTopicSet[], importRuns: TopicSteeringImportRun[]): TopicSteeringTopicSet[] {
+function sortCategorySets(categorySets: CategorySteeringCategorySet[], importRuns: CategorySteeringImportRun[]): CategorySteeringCategorySet[] {
   const importRunById = new Map(importRuns.map((importRun) => [importRun.id, importRun]));
-  return [...topicSets].sort((left, right) => {
-    const statusDiff = topicSetStatusRank(left.status) - topicSetStatusRank(right.status);
+  return [...categorySets].sort((left, right) => {
+    const statusDiff = categorySetStatusRank(left.status) - categorySetStatusRank(right.status);
     if (statusDiff !== 0) return statusDiff;
-    const dateDiff = topicSetSortDate(right, importRunById).localeCompare(topicSetSortDate(left, importRunById));
+    const dateDiff = categorySetSortDate(right, importRunById).localeCompare(categorySetSortDate(left, importRunById));
     if (dateDiff !== 0) return dateDiff;
     return left.displayName.localeCompare(right.displayName);
   });
 }
 
-function topicSetSortDate(topicSet: TopicSteeringTopicSet, importRunById: Map<string, TopicSteeringImportRun>): string {
-  return topicSet.generatedAt ?? (topicSet.importRunId ? importRunById.get(topicSet.importRunId)?.importedAt : null) ?? "";
+function categorySetSortDate(categorySet: CategorySteeringCategorySet, importRunById: Map<string, CategorySteeringImportRun>): string {
+  return categorySet.generatedAt ?? (categorySet.importRunId ? importRunById.get(categorySet.importRunId)?.importedAt : null) ?? "";
 }
 
-function topicSetStatusRank(status: string): number {
+function categorySetStatusRank(status: string): number {
   if (status === "accepted") return 0;
   if (status === "draft") return 1;
   if (status === "proposed") return 2;
@@ -331,15 +341,15 @@ function topicSetStatusRank(status: string): number {
   return 5;
 }
 
-function sortTopics(topics: TopicSteeringTopic[]): TopicSteeringTopic[] {
-  return [...topics].sort((left, right) => {
+function sortCategorys(categorys: CategorySteeringCategory[]): CategorySteeringCategory[] {
+  return [...categorys].sort((left, right) => {
     const rankDiff = (left.rank ?? 999999) - (right.rank ?? 999999);
     if (rankDiff !== 0) return rankDiff;
-    return left.topicUid.localeCompare(right.topicUid);
+    return left.categoryKey.localeCompare(right.categoryKey);
   });
 }
 
-function sortProposals(proposals: TopicSteeringProposal[]): TopicSteeringProposal[] {
+function sortProposals(proposals: CategorySteeringProposal[]): CategorySteeringProposal[] {
   const statusWeight = new Map([
     ["proposed", 0],
     ["deferred", 1],
@@ -353,27 +363,27 @@ function sortProposals(proposals: TopicSteeringProposal[]): TopicSteeringProposa
   });
 }
 
-function sortTaxonomies(taxonomies: TopicSteeringTaxonomy[]): TopicSteeringTaxonomy[] {
-  return [...taxonomies].sort((left, right) => {
-    const statusDiff = taxonomyStatusRank(left.status) - taxonomyStatusRank(right.status);
+function sortTaxonomies(categoryTrees: CategorySteeringCategoryTree[]): CategorySteeringCategoryTree[] {
+  return [...categoryTrees].sort((left, right) => {
+    const statusDiff = categoryTreeStatusRank(left.status) - categoryTreeStatusRank(right.status);
     if (statusDiff !== 0) return statusDiff;
-    const dateDiff = taxonomyDate(right).localeCompare(taxonomyDate(left));
+    const dateDiff = categoryTreeDate(right).localeCompare(categoryTreeDate(left));
     if (dateDiff !== 0) return dateDiff;
     return left.displayName.localeCompare(right.displayName);
   });
 }
 
-function sortTaxonomyNodes(nodes: TopicSteeringTaxonomyNode[]): TopicSteeringTaxonomyNode[] {
+function sortCategoryTreeNodes(nodes: CategorySteeringCategoryTreeNode[]): CategorySteeringCategoryTreeNode[] {
   return [...nodes].sort((left, right) => {
     const depthDiff = (left.depth ?? 0) - (right.depth ?? 0);
     if (depthDiff !== 0) return depthDiff;
     const rankDiff = (left.rank ?? 999999) - (right.rank ?? 999999);
     if (rankDiff !== 0) return rankDiff;
-    return left.topicUid.localeCompare(right.topicUid);
+    return left.categoryKey.localeCompare(right.categoryKey);
   });
 }
 
-function taxonomyStatusRank(status: string): number {
+function categoryTreeStatusRank(status: string): number {
   if (status === "accepted") return 0;
   if (status === "draft") return 1;
   if (status === "proposed") return 2;
@@ -381,8 +391,8 @@ function taxonomyStatusRank(status: string): number {
   return 5;
 }
 
-function taxonomyDate(taxonomy: TopicSteeringTaxonomy): string {
-  return taxonomy.generatedAt ?? taxonomy.updatedAt ?? taxonomy.createdAt ?? "";
+function categoryTreeDate(categoryTree: CategorySteeringCategoryTree): string {
+  return categoryTree.generatedAt ?? categoryTree.updatedAt ?? categoryTree.createdAt ?? "";
 }
 
 function assertNoGraphQLErrors(errors?: unknown[] | null) {
