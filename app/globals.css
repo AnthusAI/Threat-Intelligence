@@ -1907,7 +1907,6 @@ img {
 
 .topic-steering-proposal-list,
 .topic-steering-topic-grid,
-.topic-steering-evidence-list,
 .news-desk-ledger-list {
   display: grid;
   gap: 0;
@@ -2274,7 +2273,6 @@ img {
   resize: vertical;
 }
 
-.topic-steering-evidence-list article,
 .topic-steering-revision-panel,
 .news-desk-ledger-item {
   border-top: 1px solid rgb(var(--rule-rgb) / 0.36);
@@ -2283,21 +2281,9 @@ img {
   padding: 9px 0;
 }
 
-.topic-steering-evidence-list article:first-child,
 .news-desk-ledger-item:first-child {
   border-top: 0;
   padding-top: 0;
-}
-
-.topic-steering-evidence-list article strong {
-  color: rgb(var(--ink-solid-rgb) / var(--ink-display-alpha));
-  overflow-wrap: anywhere;
-}
-
-.topic-steering-evidence-list article span,
-.topic-steering-evidence-list article small {
-  color: var(--muted);
-  line-height: 1.35;
 }
 
 .topic-steering-pill--accepted {

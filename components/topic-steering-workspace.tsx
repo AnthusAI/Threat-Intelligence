@@ -435,7 +435,6 @@ function NewsDeskDashboard({ dashboard }: { dashboard: TopicSteeringDashboard })
               canonicalTopicSetId={activeTopicSet?.id ?? null}
             />
 
-            <EvidenceReferenceBrowser topics={canonicalTopics} proposals={proposals} projections={dashboard.projections} />
             <RevisionPanel
               topicSet={activeTopicSet}
               artifacts={dashboard.artifacts}
@@ -889,64 +888,6 @@ function TopicEditor({
       </footer>
     </article>
   );
-}
-
-function EvidenceReferenceBrowser({
-  topics,
-  proposals,
-  projections,
-}: {
-  topics: TopicSteeringTopic[];
-  proposals: TopicSteeringProposal[];
-  projections: TopicSteeringProjection[];
-}) {
-  const references = collectEvidenceReferences(topics, proposals, projections).slice(0, 24);
-  return (
-    <section className="topic-steering-section" aria-labelledby="source-clippings-title">
-      <SectionHeader title="Source Clippings" detail={`${references.length} external item ids`} />
-      <div className="topic-steering-evidence-list">
-        {references.map((reference) => (
-          <article key={`${reference.itemId}-${reference.source}-${reference.topicUid ?? ""}`}>
-            <strong>{reference.itemId}</strong>
-            <span>{reference.topicUid ?? "corpus evidence"}</span>
-            <small>{reference.source}</small>
-          </article>
-        ))}
-        {!references.length ? <EmptyRow label="No evidence references imported" /> : null}
-      </div>
-    </section>
-  );
-}
-
-function collectEvidenceReferences(
-  topics: TopicSteeringTopic[],
-  proposals: TopicSteeringProposal[],
-  projections: TopicSteeringProjection[],
-) {
-  const references = new Map<string, { itemId: string; source: string; topicUid?: string | null }>();
-  const add = (itemId: string, source: string, topicUid?: string | null) => {
-    const key = `${itemId}:${source}:${topicUid ?? ""}`;
-    if (!references.has(key)) references.set(key, { itemId, source, topicUid });
-  };
-
-  for (const topic of topics) {
-    for (const itemId of compactArray(topic.seedItemIds)) add(itemId, "topic seed", topic.topicUid);
-    for (const itemId of compactArray(topic.holdoutItemIds)) add(itemId, "topic holdout", topic.topicUid);
-  }
-  for (const proposal of proposals) {
-    for (const itemId of compactArray(proposal.evidenceItemIds)) add(itemId, "proposal evidence", proposal.topicUid);
-    for (const itemId of compactArray(proposal.suggestedSeedItemIds)) add(itemId, "suggested seed", proposal.topicUid);
-    for (const itemId of compactArray(proposal.suggestedHoldoutItemIds)) add(itemId, "suggested holdout", proposal.topicUid);
-  }
-  for (const projection of projections) {
-    add(projection.externalItemId, projection.reviewRecommended ? "projection review" : "projection", projection.topicUid);
-  }
-
-  return [...references.values()].sort((left, right) => {
-    const topicDiff = String(left.topicUid ?? "").localeCompare(String(right.topicUid ?? ""));
-    if (topicDiff !== 0) return topicDiff;
-    return left.itemId.localeCompare(right.itemId);
-  });
 }
 
 function RevisionPanel({
