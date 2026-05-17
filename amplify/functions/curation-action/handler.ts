@@ -18,6 +18,11 @@ const TOPIC_MUTATION_PROPOSAL_KINDS = new Set([
   "topic-copy-edit",
   "display-copy-edit",
 ]);
+const TAXONOMY_MUTATION_PROPOSAL_KINDS = new Set([
+  "create-taxonomy-node",
+  "move-taxonomy-node",
+  "archive-taxonomy-node",
+]);
 
 let clientPromise: Promise<DataClient> | null = null;
 
@@ -63,10 +68,16 @@ async function reviewCurationProposal(event: Parameters<ReviewHandler>[0]) {
   });
 
   let topicId: string | null = null;
+  let taxonomyId: string | null = null;
+  let taxonomyNodeId: string | null = null;
   let revisionId: string | null = null;
   if ((action === "accept" || action === "edit") && shouldApplyTopicProposal(proposal)) {
     topicId = await upsertAcceptedTopicFromProposal(client, proposal, event.arguments, now);
     revisionId = await upsertDraftRevision(client, proposal, decisionId, now);
+  } else if ((action === "accept" || action === "edit") && shouldApplyTaxonomyProposal(proposal)) {
+    const taxonomyResult = await applyTaxonomyProposal(client, proposal, event.arguments, now);
+    taxonomyId = taxonomyResult.taxonomyId;
+    taxonomyNodeId = taxonomyResult.taxonomyNodeId;
   }
 
   return {
@@ -74,6 +85,8 @@ async function reviewCurationProposal(event: Parameters<ReviewHandler>[0]) {
     action,
     proposalId,
     topicId,
+    taxonomyId,
+    taxonomyNodeId,
     revisionId,
     decisionId,
     status: proposalStatus,
@@ -88,6 +101,184 @@ function shouldApplyTopicProposal(proposal: any): boolean {
       && proposalKind
       && TOPIC_MUTATION_PROPOSAL_KINDS.has(proposalKind),
   );
+}
+
+function shouldApplyTaxonomyProposal(proposal: any): boolean {
+  const proposalKind = normalizeOptionalString(proposal.proposalKind);
+  return Boolean(
+    proposal.topicSetId
+      && proposal.corpusId
+      && proposalKind
+      && TAXONOMY_MUTATION_PROPOSAL_KINDS.has(proposalKind),
+  );
+}
+
+async function applyTaxonomyProposal(
+  client: DataClient,
+  proposal: any,
+  args: Parameters<ReviewHandler>[0]["arguments"],
+  now: string,
+): Promise<{ taxonomyId: string; taxonomyNodeId: string | null }> {
+  const proposalKind = normalizeRequiredString(proposal.proposalKind, "proposal.proposalKind");
+  const topicSetId = normalizeRequiredString(proposal.topicSetId, "proposal.topicSetId");
+  const taxonomy = await getOrCreateAcceptedTaxonomy(client, proposal, now);
+  const taxonomyId = normalizeRequiredString(taxonomy.id, "taxonomy.id");
+
+  if (proposalKind === "create-taxonomy-node") {
+    const topicUid = normalizeRequiredString(proposal.topicUid, "proposal.topicUid");
+    const taxonomyNodeId = await upsertTaxonomyNode(client, taxonomyId, proposal, args, now, {
+      topicUid,
+      parentTopicUid: normalizeOptionalString(proposal.targetTopicUid),
+      status: "accepted",
+    });
+    await updateTaxonomyCounts(client, taxonomyId, now);
+    return { taxonomyId, taxonomyNodeId };
+  }
+
+  if (proposalKind === "move-taxonomy-node") {
+    const topicUid = normalizeRequiredString(proposal.topicUid, "proposal.topicUid");
+    const current = await findTaxonomyNodeByTopicUid(client, taxonomyId, topicUid);
+    if (!current) throw new Error(`CurationTaxonomyNode ${topicUid} was not found in taxonomy ${taxonomyId}.`);
+    const parentTopicUid = normalizeOptionalString(proposal.targetTopicUid);
+    await client.models.CurationTaxonomyNode.update({
+      id: current.id,
+      parentTopicUid,
+      depth: await taxonomyNodeDepthAfterMove(client, taxonomyId, parentTopicUid),
+      updatedAt: now,
+    });
+    await updateTaxonomyCounts(client, taxonomyId, now);
+    return { taxonomyId, taxonomyNodeId: current.id };
+  }
+
+  if (proposalKind === "archive-taxonomy-node") {
+    const topicUid = normalizeRequiredString(proposal.topicUid, "proposal.topicUid");
+    const current = await findTaxonomyNodeByTopicUid(client, taxonomyId, topicUid);
+    if (!current) throw new Error(`CurationTaxonomyNode ${topicUid} was not found in taxonomy ${taxonomyId}.`);
+    await client.models.CurationTaxonomyNode.update({
+      id: current.id,
+      status: "archived",
+      updatedAt: now,
+    });
+    await updateTaxonomyCounts(client, taxonomyId, now);
+    return { taxonomyId, taxonomyNodeId: current.id };
+  }
+
+  return { taxonomyId, taxonomyNodeId: null };
+}
+
+async function getOrCreateAcceptedTaxonomy(client: DataClient, proposal: any, now: string): Promise<any> {
+  const topicSetId = normalizeRequiredString(proposal.topicSetId, "proposal.topicSetId");
+  const existing = await listTaxonomiesForTopicSet(client, topicSetId);
+  const accepted = existing
+    .filter((taxonomy) => taxonomy.status === "accepted")
+    .sort((left, right) => String(right.generatedAt ?? right.updatedAt ?? "").localeCompare(String(left.generatedAt ?? left.updatedAt ?? "")))[0];
+  if (accepted) return accepted;
+
+  const topicSet = await getRequiredRecord(client.models.CurationTopicSet, topicSetId, "CurationTopicSet");
+  const taxonomyId = `taxonomy-${safeId(topicSetId)}-accepted`;
+  const input = {
+    id: taxonomyId,
+    corpusId: proposal.corpusId,
+    topicSetId,
+    taxonomyId: `${topicSetId}-accepted-taxonomy`,
+    displayName: `${topicSet.displayName ?? "Accepted Topics"} Taxonomy`,
+    description: topicSet.description ?? null,
+    status: "accepted",
+    snapshotId: null,
+    generatedAt: now,
+    nodeCount: 0,
+    rootCount: 0,
+    importRunId: proposal.importRunId ?? null,
+    createdAt: now,
+    updatedAt: now,
+  };
+  await client.models.CurationTaxonomy.create(input);
+  return input;
+}
+
+async function upsertTaxonomyNode(
+  client: DataClient,
+  taxonomyId: string,
+  proposal: any,
+  args: Parameters<ReviewHandler>[0]["arguments"],
+  now: string,
+  options: { topicUid: string; parentTopicUid: string | null; status: "accepted" | "archived" },
+): Promise<string> {
+  const current = await findTaxonomyNodeByTopicUid(client, taxonomyId, options.topicUid);
+  const taxonomyNodeId = current?.id ?? `taxonomy-node-${safeId(taxonomyId)}-${safeId(options.topicUid)}`;
+  const input = {
+    id: taxonomyNodeId,
+    taxonomyId,
+    corpusId: proposal.corpusId,
+    topicSetId: proposal.topicSetId,
+    topicUid: options.topicUid,
+    parentTopicUid: options.parentTopicUid,
+    displayName: normalizeOptionalString(args.displayName) ?? proposal.displayName ?? proposal.title,
+    subtitle: normalizeOptionalString(args.subtitle) ?? proposal.subtitle ?? null,
+    description: normalizeOptionalString(args.description) ?? proposal.description ?? proposal.summary ?? null,
+    status: options.status,
+    seedItemIds: normalizeStringArray(args.seedItemIds) ?? compactStringArray(proposal.suggestedSeedItemIds),
+    holdoutItemIds: normalizeStringArray(args.holdoutItemIds) ?? compactStringArray(proposal.suggestedHoldoutItemIds),
+    rank: current?.rank ?? null,
+    depth: await taxonomyNodeDepthAfterMove(client, taxonomyId, options.parentTopicUid),
+    importRunId: proposal.importRunId ?? null,
+    updatedAt: now,
+  };
+
+  if (current) await client.models.CurationTaxonomyNode.update(input);
+  else await client.models.CurationTaxonomyNode.create(input);
+  return taxonomyNodeId;
+}
+
+async function taxonomyNodeDepthAfterMove(client: DataClient, taxonomyId: string, parentTopicUid: string | null): Promise<number> {
+  if (!parentTopicUid) return 0;
+  const parent = await findTaxonomyNodeByTopicUid(client, taxonomyId, parentTopicUid);
+  return (typeof parent?.depth === "number" ? parent.depth : 0) + 1;
+}
+
+async function listTaxonomiesForTopicSet(client: DataClient, topicSetId: string): Promise<any[]> {
+  let nextToken: string | null | undefined;
+  const records: any[] = [];
+  do {
+    const page = await client.models.CurationTaxonomy.list({
+      filter: { topicSetId: { eq: topicSetId } },
+      limit: 100,
+      nextToken,
+    });
+    records.push(...(page.data ?? []));
+    nextToken = page.nextToken;
+  } while (nextToken);
+  return records;
+}
+
+async function listTaxonomyNodes(client: DataClient, taxonomyId: string): Promise<any[]> {
+  let nextToken: string | null | undefined;
+  const records: any[] = [];
+  do {
+    const page = await client.models.CurationTaxonomyNode.listCurationTaxonomyNodesByTaxonomyAndTopicUid(
+      { taxonomyId },
+      { limit: 100, nextToken },
+    );
+    records.push(...(page.data ?? []));
+    nextToken = page.nextToken;
+  } while (nextToken);
+  return records;
+}
+
+async function findTaxonomyNodeByTopicUid(client: DataClient, taxonomyId: string, topicUid: string): Promise<any | null> {
+  const nodes = await listTaxonomyNodes(client, taxonomyId);
+  return nodes.find((node) => node.topicUid === topicUid) ?? null;
+}
+
+async function updateTaxonomyCounts(client: DataClient, taxonomyId: string, now: string) {
+  const nodes = await listTaxonomyNodes(client, taxonomyId);
+  const active = nodes.filter((node) => node.status !== "archived");
+  await client.models.CurationTaxonomy.update({
+    id: taxonomyId,
+    nodeCount: nodes.length,
+    rootCount: active.filter((node) => !node.parentTopicUid).length,
+    updatedAt: now,
+  });
 }
 
 async function promoteCurationTopicRevision(event: Parameters<PromoteHandler>[0]) {

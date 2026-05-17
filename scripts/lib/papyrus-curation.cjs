@@ -87,6 +87,13 @@ function buildSteeringImportRecords(bundle, options = {}) {
 
   if (bundle.topic_set) {
     records.push(...topicSetRecords(bundle.topic_set, { corpusId, importRunId, topicSetId, now, generatedAt: bundle.generated_at }));
+    records.push(...taxonomyRecords(bundle, {
+      corpusId,
+      corpusPath: options.corpusPath ?? options.corpusConfig?.path ?? options.corpus?.path ?? null,
+      importRunId,
+      now,
+      topicSetId,
+    }));
   }
 
   for (const artifact of bundle.artifacts ?? []) {
@@ -213,6 +220,36 @@ function buildAcceptedTopicSetPayload(topicSet, topics) {
   };
 }
 
+function buildAcceptedTaxonomyPayload(taxonomy, nodes) {
+  const sortedNodes = sortTaxonomyNodes(nodes);
+  return {
+    schema_version: 1,
+    taxonomy_id: requiredString(taxonomy.taxonomyId ?? taxonomy.id, "taxonomy.taxonomyId"),
+    display_name: requiredString(taxonomy.displayName, "taxonomy.displayName"),
+    description: taxonomy.description ?? "",
+    generated_at: taxonomy.generatedAt ?? taxonomy.updatedAt ?? taxonomy.createdAt ?? new Date().toISOString(),
+    ...(taxonomy.snapshotId ? { snapshot_id: taxonomy.snapshotId } : {}),
+    nodes: sortedNodes.map((node) => ({
+      topic_uid: requiredString(node.topicUid, "node.topicUid"),
+      parent_topic_uid: node.parentTopicUid ?? null,
+      display_name: requiredString(node.displayName, "node.displayName"),
+      description: node.description ?? node.subtitle ?? "",
+      status: node.status === "archived" ? "archived" : "accepted",
+      seed_item_ids: compactArray(node.seedItemIds),
+      holdout_item_ids: compactArray(node.holdoutItemIds),
+      source: {
+        papyrus_taxonomy_id: taxonomy.id,
+        papyrus_taxonomy_node_id: node.id,
+      },
+    })),
+    source: {
+      system: "papyrus",
+      topic_set_id: taxonomy.topicSetId,
+      corpus_id: taxonomy.corpusId,
+    },
+  };
+}
+
 function topicSetRecords(topicSet, context) {
   const topics = topicSet.topics ?? [];
   const acceptedRevisionId = `revision-${safeId(context.topicSetId)}-accepted-${hashShort(topicSet)}`;
@@ -286,6 +323,172 @@ function artifactRecords(artifact, context) {
     }),
     rawPayloadRecord("artifact", artifactId, "biblicus-artifact", artifact, context.importRunId, context.now),
   ];
+}
+
+function taxonomyRecords(bundle, context) {
+  const manifest = loadAcceptedTaxonomyManifest(bundle, context)
+    ?? rootTaxonomyManifestFromTopicSet(bundle.topic_set, context);
+  const manifestNodes = Array.isArray(manifest.nodes) ? manifest.nodes : [];
+  const taxonomyId = curationTaxonomyId(context.topicSetId, manifest.taxonomy_id ?? manifest.snapshot_id ?? "accepted-taxonomy");
+  const generatedAt = dateOrNull(manifest.generated_at ?? bundle.generated_at) ?? context.now;
+  const activeNodes = manifestNodes.filter((node) => normalizeTaxonomyNodeStatus(node.status) !== "archived");
+  const rootCount = activeNodes.filter((node) => !node.parent_topic_uid).length;
+  const records = [
+    record("CurationTaxonomy", {
+      id: taxonomyId,
+      corpusId: context.corpusId,
+      topicSetId: context.topicSetId,
+      taxonomyId: manifest.taxonomy_id ?? taxonomyId,
+      displayName: manifest.display_name ?? bundle.topic_set.display_name ?? "Accepted Taxonomy",
+      description: manifest.description ?? bundle.topic_set.description ?? null,
+      status: "accepted",
+      snapshotId: manifest.snapshot_id ?? latestSnapshotId(bundle.artifacts, "taxonomy"),
+      generatedAt,
+      nodeCount: manifestNodes.length,
+      rootCount,
+      importRunId: context.importRunId,
+      createdAt: context.now,
+      updatedAt: context.now,
+    }),
+    rawPayloadRecord("taxonomy", taxonomyId, "biblicus-taxonomy", manifest, context.importRunId, context.now),
+  ];
+
+  const nodeRanks = rankTaxonomyNodes(manifestNodes);
+  for (const node of manifestNodes) {
+    const topicUid = requiredString(node.topic_uid, "taxonomy node topic_uid");
+    const taxonomyNodeId = curationTaxonomyNodeId(taxonomyId, topicUid);
+    const depth = taxonomyNodeDepth(topicUid, manifestNodes);
+    const rank = nodeRanks.get(topicUid) ?? null;
+    records.push(record("CurationTaxonomyNode", {
+      id: taxonomyNodeId,
+      taxonomyId,
+      corpusId: context.corpusId,
+      topicSetId: context.topicSetId,
+      topicUid,
+      parentTopicUid: node.parent_topic_uid ?? null,
+      displayName: node.display_name,
+      subtitle: node.subheading ?? node.subtitle ?? null,
+      description: node.description ?? null,
+      status: normalizeTaxonomyNodeStatus(node.status),
+      seedItemIds: compactArray(node.seed_item_ids),
+      holdoutItemIds: compactArray(node.holdout_item_ids),
+      rank,
+      depth,
+      importRunId: context.importRunId,
+      updatedAt: context.now,
+    }));
+    records.push(rawPayloadRecord("taxonomyNode", taxonomyNodeId, "biblicus-taxonomy-node", node, context.importRunId, context.now));
+  }
+  return records;
+}
+
+function loadAcceptedTaxonomyManifest(bundle, context) {
+  const artifact = latestArtifact(bundle.artifacts, "taxonomy");
+  if (!artifact || !context.corpusPath) return null;
+  for (const candidate of taxonomyArtifactCandidates(artifact, context.corpusPath)) {
+    const manifest = readTaxonomyManifestCandidate(candidate);
+    if (manifest) return manifest;
+  }
+  return null;
+}
+
+function taxonomyArtifactCandidates(artifact, corpusPath) {
+  const paths = compactArray([
+    artifact.path,
+    artifact.artifact_paths?.taxonomy,
+    artifact.artifact_paths?.manifest,
+    artifact.metadata?.artifact_paths?.taxonomy,
+    artifact.metadata?.artifact_paths?.manifest,
+  ]);
+  if (artifact.snapshot_id) {
+    paths.push(path.join("analysis", "taxonomy", artifact.snapshot_id, "taxonomy.json"));
+    paths.push(path.join("analysis", "taxonomy", artifact.snapshot_id, "manifest.json"));
+  }
+  const candidates = [];
+  for (const artifactPath of paths) {
+    if (artifactPath.startsWith("s3://")) continue;
+    const resolved = path.isAbsolute(artifactPath) ? artifactPath : path.join(corpusPath, artifactPath);
+    candidates.push(resolved);
+    if (path.basename(resolved) === "manifest.json") candidates.push(path.join(path.dirname(resolved), "taxonomy.json"));
+  }
+  return Array.from(new Set(candidates));
+}
+
+function readTaxonomyManifestCandidate(candidatePath) {
+  if (!fs.existsSync(candidatePath) || !fs.statSync(candidatePath).isFile()) return null;
+  const payload = loadJsonFile(candidatePath);
+  if (Array.isArray(payload.nodes) && payload.taxonomy_id) return payload;
+  const artifactPaths = payload.artifact_paths && typeof payload.artifact_paths === "object" ? payload.artifact_paths : {};
+  const taxonomyPath = artifactPaths.taxonomy;
+  if (typeof taxonomyPath !== "string" || taxonomyPath.startsWith("s3://")) return null;
+  const resolved = path.isAbsolute(taxonomyPath) ? taxonomyPath : path.join(path.dirname(candidatePath), taxonomyPath);
+  if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) return null;
+  const taxonomy = loadJsonFile(resolved);
+  return Array.isArray(taxonomy.nodes) && taxonomy.taxonomy_id ? taxonomy : null;
+}
+
+function rootTaxonomyManifestFromTopicSet(topicSet, context) {
+  const topics = topicSet.topics ?? [];
+  const taxonomyIdentity = `${topicSet.classifier_id}-accepted-taxonomy`;
+  return {
+    schema_version: 1,
+    taxonomy_id: taxonomyIdentity,
+    display_name: `${topicSet.display_name ?? topicSet.classifier_id} Taxonomy`,
+    description: topicSet.description ?? "Root-only taxonomy derived from the accepted canonical topic set.",
+    generated_at: context.now,
+    snapshot_id: `root-only-${hashShort(topicSet)}`,
+    nodes: topics.map((topic) => ({
+      topic_uid: topic.topic_uid,
+      parent_topic_uid: null,
+      display_name: topic.display_name,
+      description: topic.description ?? topic.subheading ?? topic.subtitle ?? "Accepted root topic.",
+      status: "accepted",
+      seed_item_ids: compactArray(topic.seed_item_ids),
+      holdout_item_ids: compactArray(topic.holdout_item_ids),
+      source: {
+        papyrus_fallback: "accepted-topic-set",
+      },
+    })),
+    source: {
+      system: "papyrus",
+      fallback: "accepted-topic-set",
+      topic_set_id: context.topicSetId,
+    },
+  };
+}
+
+function rankTaxonomyNodes(nodes) {
+  const rankByUid = new Map();
+  const childrenByParent = new Map();
+  for (const node of nodes) {
+    const parent = node.parent_topic_uid ?? "__root__";
+    const children = childrenByParent.get(parent) ?? [];
+    children.push(node);
+    childrenByParent.set(parent, children);
+  }
+  for (const children of childrenByParent.values()) {
+    children.sort((left, right) => String(left.display_name ?? left.topic_uid).localeCompare(String(right.display_name ?? right.topic_uid)));
+    children.forEach((node, index) => rankByUid.set(node.topic_uid, index + 1));
+  }
+  return rankByUid;
+}
+
+function taxonomyNodeDepth(topicUid, nodes) {
+  const parentByUid = new Map(nodes.map((node) => [node.topic_uid, node.parent_topic_uid ?? null]));
+  let depth = 0;
+  let current = parentByUid.get(topicUid) ?? null;
+  const seen = new Set([topicUid]);
+  while (current) {
+    if (seen.has(current)) return depth;
+    seen.add(current);
+    depth += 1;
+    current = parentByUid.get(current) ?? null;
+  }
+  return depth;
+}
+
+function normalizeTaxonomyNodeStatus(status) {
+  return status === "archived" ? "archived" : "accepted";
 }
 
 function proposalRecords(proposal, context) {
@@ -375,6 +578,14 @@ function curationTopicId(topicSetId, topicUid) {
   return `topic-${safeId(topicSetId)}-${safeId(topicUid)}`;
 }
 
+function curationTaxonomyId(topicSetId, taxonomyId) {
+  return `taxonomy-${safeId(topicSetId)}-${safeId(taxonomyId)}`;
+}
+
+function curationTaxonomyNodeId(taxonomyId, topicUid) {
+  return `taxonomy-node-${safeId(taxonomyId)}-${safeId(topicUid)}`;
+}
+
 function inferSteeringDomain(kind) {
   if (GRAPH_PROPOSAL_KINDS.has(kind)) return "graph";
   if (String(kind ?? "").includes("graph") || String(kind ?? "").includes("entity") || String(kind ?? "").includes("relationship")) return "graph";
@@ -383,6 +594,20 @@ function inferSteeringDomain(kind) {
 
 function latestSnapshotId(artifacts, kind) {
   return (artifacts ?? []).filter((artifact) => artifact.kind === kind).at(-1)?.snapshot_id ?? null;
+}
+
+function latestArtifact(artifacts, kind) {
+  return (artifacts ?? []).filter((artifact) => artifact.kind === kind).at(-1) ?? null;
+}
+
+function sortTaxonomyNodes(nodes) {
+  return [...nodes].sort((left, right) => {
+    const depthDiff = (left.depth ?? 0) - (right.depth ?? 0);
+    if (depthDiff !== 0) return depthDiff;
+    const rankDiff = (left.rank ?? 999999) - (right.rank ?? 999999);
+    if (rankDiff !== 0) return rankDiff;
+    return String(left.topicUid).localeCompare(String(right.topicUid));
+  });
 }
 
 function corpusNameFromUri(uri) {
@@ -444,6 +669,7 @@ function hashStable(value) {
 }
 
 module.exports = {
+  buildAcceptedTaxonomyPayload,
   buildAcceptedTopicSetPayload,
   buildSteeringConfigRecords,
   buildProjectionImportRecords,

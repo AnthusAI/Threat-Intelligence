@@ -175,13 +175,20 @@ Cloud content is seeded from fixture content in `lib/articles.ts` and
 `lib/layout-plan.ts`. The seed uploads article images to Storage and creates the
 related CMS records. It does not create a CMS UI.
 
-## Topic Steering
+## News Desk
 
-`/topics` is the Papyrus topic and graph steering workspace. It is driven by
-the configured corpora for the publication, not by hard-coded corpus names.
-Papyrus owns the human steering state in GraphQL: corpora, import runs,
-artifacts, accepted topic sets, canonical topics, revisions, proposals,
-append-only decisions, and projection rows.
+`/news-desk` is the Papyrus newsroom operations workspace. The current active
+desk tab is `Topics`, which handles topic, taxonomy, ontology, and graph
+steering. The page is driven by the configured corpora for the publication, not
+by hard-coded corpus names. Papyrus owns the human steering state in
+GraphQL: corpora, import runs, artifacts, accepted topic sets, canonical
+topics, accepted taxonomy summaries, revisions, proposals, append-only
+decisions, and projection rows.
+
+The News Desk should feel like another section of the newspaper, not a separate
+administrative app. Steering proposals are optional editorial notes: the
+publication keeps following the accepted topic set unless a human chooses to
+accept, reject, defer, or rewrite a proposal while reading.
 
 The steering system is publication-neutral. `corpora/papyrus-steering.yml`
 selects the canonical corpus, lists any source/supporting corpora, names local
@@ -213,14 +220,19 @@ they write a decision row and update proposal/revision state together.
 `CurationDecision` is append-only. Current proposal, topic, and revision state
 may update, but decisions should not be overwritten.
 
-Taxonomy and ontology steering stays deliberately generic in v1. Biblicus can
-export proposal kinds such as `create-taxonomy-node` and
-`add-ontology-relationship`; Papyrus imports those into `CurationProposal`,
-keeps the private raw payload, and shows them in the generic steering queue.
-Only flat canonical topic-copy proposals use the tailored topic controls. The
-Biblicus labels `recommend`, `do_not_recommend`, and `needs_clarification` are
-agent recommendation labels, not Papyrus human review actions; Papyrus review
-decisions remain `accept`, `reject`, or `defer`.
+Accepted taxonomy has a small typed editor-only surface in v1.
+`CurationTaxonomy` and `CurationTaxonomyNode` store the current accepted topic
+tree, while full Biblicus taxonomy manifests stay private in
+`CurationRawPayload`. Signed-in editor/admin readers see passive News Desk
+appendix pages after each edition: a canonical topic register followed by one
+page per accepted root topic. Public readers get the normal newspaper edition
+with no appended taxonomy pages. Taxonomy and ontology proposals still arrive
+through `CurationProposal`; only `create-taxonomy-node`,
+`move-taxonomy-node`, and `archive-taxonomy-node` update typed taxonomy rows
+through protected review. Flat canonical topic-copy rows and revisions remain
+separate. The Biblicus labels `recommend`, `do_not_recommend`, and
+`needs_clarification` are agent recommendation labels, not Papyrus human review
+actions; Papyrus review decisions remain `accept`, `reject`, or `defer`.
 
 ## Current Production Edition
 

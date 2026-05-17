@@ -4,6 +4,31 @@ import type { PublicationItem } from "./publication-items";
 
 export type ContentSource = "scenario" | "graphql";
 
+export type NewsDeskTaxonomyNode = {
+  id: string;
+  taxonomyId: string;
+  topicUid: string;
+  parentTopicUid?: string | null;
+  displayName: string;
+  subtitle?: string | null;
+  description?: string | null;
+  status: string;
+  seedItemIds?: Array<string | null> | null;
+  holdoutItemIds?: Array<string | null> | null;
+  rank?: number | null;
+  depth?: number | null;
+};
+
+export type NewsDeskAppendix = {
+  taxonomyId: string;
+  corpusId: string;
+  topicSetId: string;
+  displayName: string;
+  description?: string | null;
+  generatedAt?: string | null;
+  nodes: NewsDeskTaxonomyNode[];
+};
+
 export type EditionContent = {
   id: string;
   source: ContentSource;
@@ -11,6 +36,7 @@ export type EditionContent = {
   editionDate: string;
   items: PublicationItem[];
   layoutPlan: EditionLayoutPlan;
+  newsDeskAppendix?: NewsDeskAppendix | null;
   scenarioId?: string;
   description?: string;
 };

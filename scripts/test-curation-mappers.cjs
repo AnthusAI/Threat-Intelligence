@@ -6,6 +6,7 @@ const os = require("node:os");
 const path = require("node:path");
 const {
   buildAcceptedTopicSetPayload,
+  buildAcceptedTaxonomyPayload,
   buildProjectionImportRecords,
   buildSteeringConfigRecords,
   buildSteeringImportRecords,
@@ -172,6 +173,12 @@ assert.equal(topic.subtitle, "Compute, data, and capability curves");
 assert.equal(topic.topicUid, "topic.scaling");
 assert.equal(topic.displayName, "Scaling Laws");
 
+const fallbackTaxonomy = findRecord(steeringPlan.records, "CurationTaxonomy", (record) => record.topicSetId === steeringPlan.topicSetId);
+assert.equal(fallbackTaxonomy.status, "accepted");
+const fallbackTaxonomyNode = findRecord(steeringPlan.records, "CurationTaxonomyNode", (record) => record.topicUid === "topic.scaling");
+assert.equal(fallbackTaxonomyNode.parentTopicUid, null);
+assert.equal(fallbackTaxonomyNode.displayName, "Scaling Laws");
+
 assert.equal(
   steeringPlan.records.some((record) => record.modelName === "CurationItem"),
   false,
@@ -211,6 +218,74 @@ const rawProposal = findRecord(steeringPlan.records, "CurationRawPayload", (reco
 assert.equal(rawProposal.payloadKind, "biblicus-proposal");
 assert.ok(JSON.parse(rawProposal.payload).source_notes);
 
+const taxonomyCorpusPath = fs.mkdtempSync(path.join(os.tmpdir(), "papyrus-taxonomy-corpus-"));
+const taxonomyDir = path.join(taxonomyCorpusPath, "analysis", "taxonomy", "taxonomy-snapshot");
+fs.mkdirSync(taxonomyDir, { recursive: true });
+fs.writeFileSync(path.join(taxonomyDir, "manifest.json"), JSON.stringify({
+  schema_version: 1,
+  analysis_id: "taxonomy",
+  taxonomy_id: "canonical-taxonomy",
+  snapshot_id: "taxonomy-snapshot",
+  generated_at: "2026-05-16T12:31:00.000Z",
+  node_count: 2,
+  root_count: 1,
+  artifact_paths: {
+    taxonomy: path.join(taxonomyDir, "taxonomy.json"),
+  },
+}, null, 2), "utf8");
+fs.writeFileSync(path.join(taxonomyDir, "taxonomy.json"), JSON.stringify({
+  schema_version: 1,
+  taxonomy_id: "canonical-taxonomy",
+  display_name: "Canonical Taxonomy",
+  description: "Accepted hierarchy",
+  generated_at: "2026-05-16T12:31:00.000Z",
+  snapshot_id: "taxonomy-snapshot",
+  nodes: [
+    {
+      topic_uid: "topic.scaling",
+      parent_topic_uid: null,
+      display_name: "Scaling Laws",
+      description: "Root topic.",
+      status: "accepted",
+      seed_item_ids: ["research-001"],
+      holdout_item_ids: ["research-002"],
+    },
+    {
+      topic_uid: "topic.memory",
+      parent_topic_uid: "topic.scaling",
+      display_name: "Memory Systems",
+      description: "Child topic.",
+      status: "accepted",
+      seed_item_ids: ["research-001"],
+      holdout_item_ids: [],
+    },
+  ],
+}, null, 2), "utf8");
+const taxonomyPlan = buildSteeringImportRecords({
+  ...steeringBundle,
+  artifacts: [
+    ...steeringBundle.artifacts,
+    {
+      kind: "taxonomy",
+      artifact_id: "taxonomy:taxonomy-snapshot",
+      path: "analysis/taxonomy/taxonomy-snapshot/manifest.json",
+      snapshot_id: "taxonomy-snapshot",
+      created_at: "2026-05-16T12:31:00.000Z",
+      metadata: { analysis_id: "taxonomy" },
+    },
+  ],
+}, {
+  classifierId: "canonical-classifier",
+  corpusConfig: canonicalCorpusConfig,
+  corpusPath: taxonomyCorpusPath,
+  importedAt: "2026-05-16T12:31:00.000Z",
+});
+const importedTaxonomy = findRecord(taxonomyPlan.records, "CurationTaxonomy", (record) => record.taxonomyId === "canonical-taxonomy");
+assert.equal(importedTaxonomy.snapshotId, "taxonomy-snapshot");
+const importedChildNode = findRecord(taxonomyPlan.records, "CurationTaxonomyNode", (record) => record.topicUid === "topic.memory");
+assert.equal(importedChildNode.parentTopicUid, "topic.scaling");
+assert.equal(importedChildNode.depth, 1);
+
 const acceptedExport = buildAcceptedTopicSetPayload(
   {
     classifierId: "canonical-classifier",
@@ -234,6 +309,49 @@ const acceptedExport = buildAcceptedTopicSetPayload(
 assert.equal(acceptedExport.topics[0].subheading, "Subtitle written in Papyrus");
 assert.equal(acceptedExport.topics[0].topic_uid, "topic.scaling");
 assert.deepEqual(acceptedExport.topics[0].seed_item_ids, ["research-001"]);
+
+const acceptedTaxonomyExport = buildAcceptedTaxonomyPayload(
+  {
+    id: "taxonomy-test",
+    taxonomyId: "canonical-taxonomy",
+    corpusId: "curation-corpus-canonical-corpus",
+    topicSetId: "curation-topic-set-test",
+    displayName: "Canonical Taxonomy",
+    description: "Accepted hierarchy",
+    generatedAt: "2026-05-16T12:31:00.000Z",
+  },
+  [
+    {
+      id: "taxonomy-node-root",
+      taxonomyId: "taxonomy-test",
+      topicUid: "topic.scaling",
+      parentTopicUid: null,
+      displayName: "Scaling Laws",
+      description: "Root topic.",
+      status: "accepted",
+      seedItemIds: ["research-001"],
+      holdoutItemIds: [],
+      rank: 1,
+      depth: 0,
+    },
+    {
+      id: "taxonomy-node-child",
+      taxonomyId: "taxonomy-test",
+      topicUid: "topic.memory",
+      parentTopicUid: "topic.scaling",
+      displayName: "Memory Systems",
+      description: "Child topic.",
+      status: "accepted",
+      seedItemIds: [],
+      holdoutItemIds: [],
+      rank: 1,
+      depth: 1,
+    },
+  ],
+);
+assert.equal(acceptedTaxonomyExport.taxonomy_id, "canonical-taxonomy");
+assert.equal(acceptedTaxonomyExport.nodes[1].parent_topic_uid, "topic.scaling");
+assert.deepEqual(acceptedTaxonomyExport.nodes[0].seed_item_ids, ["research-001"]);
 
 const projectionPlan = buildProjectionImportRecords({
   classifier_id: "canonical-classifier",

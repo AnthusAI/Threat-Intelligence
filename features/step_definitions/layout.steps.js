@@ -21,9 +21,13 @@ Given("I open the archive page at {int} by {int}", async function (width, height
   await requirePage(this).waitForSelector(".archive-grid-shell", { state: "visible", timeout: 15_000 });
 });
 
-Given("I open the topic steering workspace at {int} by {int}", async function (width, height) {
-  await this.openPath("/topics?demo=1", width, height);
-  await requirePage(this).waitForSelector("[data-topic-steering]", { state: "visible", timeout: 15_000 });
+Given("I open the news desk at {int} by {int}", async function (width, height) {
+  await this.openPath("/news-desk?demo=1", width, height);
+  await requirePage(this).waitForSelector("[data-news-desk]", { state: "visible", timeout: 15_000 });
+});
+
+Given("I am a test editor reader", async function () {
+  this.testEditorReader = true;
 });
 
 Given("I open the edition path {string} at {int} by {int}", async function (routePath, width, height) {
@@ -52,7 +56,7 @@ When("I follow the continuation jump for article {string}", async function (arti
   await jump.click();
 });
 
-When("I update the first topic steering name to {string}", async function (name) {
+When("I update the first news desk topic name to {string}", async function (name) {
   const page = requirePage(this);
   const firstNameInput = page.locator(".topic-steering-topic-card label", { hasText: "Name" }).first().locator("input");
   await firstNameInput.fill(name);
@@ -61,6 +65,37 @@ When("I update the first topic steering name to {string}", async function (name)
     const card = document.querySelector(".topic-steering-topic-card");
     return card?.getAttribute("data-saved-display-name") === expectedName;
   }, name);
+});
+
+When("I scroll to the canonical topic register", async function () {
+  const page = requirePage(this);
+  await page.waitForFunction(() => document.querySelector(".site-shell")?.getAttribute("data-news-desk-appendix-ready") === "true");
+  await page.waitForFunction(() => {
+    const solvedPages = window.__PAPYRUS_LAYOUT__?.pages.length ?? 0;
+    const totalPages = window.__PAPYRUS_TOTAL_PAGES__ ?? 0;
+    return solvedPages > 0 && totalPages > solvedPages;
+  });
+  const targetPage = await page.evaluate(() => (window.__PAPYRUS_LAYOUT__?.pages.length ?? 0) + 1);
+  await page.evaluate((target) => {
+    window.__PAPYRUS_SCROLL_TO_PAGE__?.(target, { immediate: true });
+  }, targetPage);
+  await page.locator("[data-news-desk-appendix-page='register']").waitFor({ state: "visible", timeout: 10_000 });
+});
+
+When("I scroll to the appendix page for root topic {string}", async function (topicName) {
+  const page = requirePage(this);
+  const pageNumber = await page.evaluate((name) => {
+    const register = document.querySelector("[data-news-desk-appendix-page='register']");
+    const links = Array.from(register?.querySelectorAll(".news-desk-appendix__topic-summary h3 a") ?? []);
+    const index = links.findIndex((link) => link.textContent?.trim() === name);
+    const basePageCount = window.__PAPYRUS_LAYOUT__?.pages.length ?? 0;
+    return index >= 0 ? basePageCount + index + 2 : null;
+  }, topicName);
+  assert.ok(pageNumber, `Expected appendix page link for ${topicName}`);
+  await page.evaluate((target) => {
+    window.__PAPYRUS_SCROLL_TO_PAGE__?.(target, { immediate: true });
+  }, pageNumber);
+  await page.locator("[data-news-desk-appendix-page='topic']", { hasText: topicName }).waitFor({ state: "visible", timeout: 10_000 });
 });
 
 Then("the active page should be a {string} page", async function (expectedKind) {
@@ -115,18 +150,25 @@ Then("the active content source should be {string}", async function (expectedSou
   assert.equal(source, expectedSource);
 });
 
-Then("the topic steering workspace should render", async function () {
+Then("the news desk should render", async function () {
   const page = requirePage(this);
-  await page.locator("[data-topic-steering]").waitFor({ state: "visible", timeout: 10_000 });
-  assert.equal(await page.locator("[data-topic-steering]").getAttribute("data-topic-steering-demo"), "true");
-  await page.locator("h1", { hasText: "Topic Steering" }).waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk]").waitFor({ state: "visible", timeout: 10_000 });
+  assert.equal(await page.locator("[data-news-desk]").getAttribute("data-topic-steering-demo"), "true");
+  await page.locator("h1", { hasText: "News Desk" }).waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-tab='topics'][aria-current='page']").waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("text=Canonical Demo Corpus").first().waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("text=Source Demo Corpus").first().waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("text=Corpus Topic Sets").first().waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("text=Source Demo Topics").first().waitFor({ state: "visible", timeout: 10_000 });
 });
 
-Then("topic steering should show topic and graph proposal rows", async function () {
+Then("the news desk should show an editor access gate", async function () {
+  const page = requirePage(this);
+  await page.locator("[data-news-desk-access]").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("text=Editor Sign-In Required").first().waitFor({ state: "visible", timeout: 10_000 });
+});
+
+Then("the news desk should show topic and graph proposal rows", async function () {
   const page = requirePage(this);
   await page.locator("[data-proposal-domain='topic']").first().waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("td", { hasText: "relationship-proposal" }).first().waitFor({ state: "visible", timeout: 10_000 });
@@ -134,13 +176,111 @@ Then("topic steering should show topic and graph proposal rows", async function 
   await page.locator("[data-generic-proposal-kind='add-ontology-relationship']").first().waitFor({ state: "visible", timeout: 10_000 });
 });
 
-Then("the first topic steering name should be {string}", async function (expectedName) {
+Then("the news desk should show accepted subtopics under canonical topics", async function () {
+  const page = requirePage(this);
+  await page.locator("[data-news-desk-taxonomy-root='topic.foundation-model-scaling']").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-subtopic='topic.agent-memory']", { hasText: "Agent Memory" }).waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-subtopic='topic.benchmark-saturation']", { hasText: "Benchmark Saturation" }).waitFor({ state: "visible", timeout: 10_000 });
+});
+
+Then("the first news desk topic name should be {string}", async function (expectedName) {
   const value = await requirePage(this)
     .locator(".topic-steering-topic-card label", { hasText: "Name" })
     .first()
     .locator("input")
     .inputValue();
   assert.equal(value, expectedName);
+});
+
+Then("edition page count should not include appended News Desk pages", async function () {
+  const page = requirePage(this);
+  await page.waitForFunction(() => document.querySelector(".site-shell")?.getAttribute("data-news-desk-appendix-ready") === "true");
+  const report = await page.evaluate(() => ({
+    solvedPages: window.__PAPYRUS_LAYOUT__?.pages.length ?? 0,
+    totalPages: window.__PAPYRUS_TOTAL_PAGES__ ?? 0,
+  }));
+  assert.ok(report.solvedPages > 0, "Expected solved edition pages");
+  assert.equal(report.totalPages, report.solvedPages);
+});
+
+Then("edition page count should include appended News Desk pages", async function () {
+  const page = requirePage(this);
+  await page.waitForFunction(() => document.querySelector(".site-shell")?.getAttribute("data-news-desk-appendix-ready") === "true");
+  await page.waitForFunction(() => {
+    const solvedPages = window.__PAPYRUS_LAYOUT__?.pages.length ?? 0;
+    const totalPages = window.__PAPYRUS_TOTAL_PAGES__ ?? 0;
+    return solvedPages > 0 && totalPages > solvedPages;
+  });
+  const report = await page.evaluate(() => ({
+    solvedPages: window.__PAPYRUS_LAYOUT__?.pages.length ?? 0,
+    totalPages: window.__PAPYRUS_TOTAL_PAGES__ ?? 0,
+  }));
+  assert.ok(report.solvedPages > 0, "Expected solved edition pages");
+  assert.ok(
+    report.totalPages > report.solvedPages,
+    `Expected appended News Desk pages; solved=${report.solvedPages}, total=${report.totalPages}`,
+  );
+});
+
+Then("no News Desk appendix pages should render", async function () {
+  const page = requirePage(this);
+  const appendixCount = await page.locator("[data-news-desk-appendix-page]").count();
+  assert.equal(appendixCount, 0);
+});
+
+Then("the front page footer should not link to the news desk", async function () {
+  const page = requirePage(this);
+  await page.waitForFunction(() => window.__PAPYRUS_LAYOUT__ && document.querySelector(".front-footer"));
+  const newsDeskLinks = await page.locator('.front-footer [data-footer-utility="newsDesk"]').count();
+  assert.equal(newsDeskLinks, 0);
+});
+
+Then("the final edition pages should include the canonical topic register", async function () {
+  const page = requirePage(this);
+  await page.locator("[data-news-desk-appendix-page='register'] h2", { hasText: "Canonical Topic Register" }).waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-topic-register]", { hasText: "Foundation Model Scaling" }).waitFor({ state: "visible", timeout: 10_000 });
+});
+
+Then("the root topic appendix page should show subtopic {string}", async function (subtopicName) {
+  const page = requirePage(this);
+  await page.locator("[data-news-desk-appendix-page='topic'] .news-desk-appendix__subtopic", { hasText: subtopicName }).waitFor({ state: "visible", timeout: 10_000 });
+});
+
+Then("the appendix page should use newspaper page styling", async function () {
+  const report = await requirePage(this).evaluate(() => {
+    const active = document.querySelector(".paper-page--active .paper-page-content--news-desk-appendix");
+    if (!active) return null;
+    const style = getComputedStyle(active);
+    return {
+      backgroundImage: style.backgroundImage,
+      boxShadow: style.boxShadow,
+      fontFamily: style.fontFamily,
+    };
+  });
+  assert.ok(report, "Expected active News Desk appendix page");
+  assert.notEqual(report.backgroundImage, "none", "Expected paper background on appendix page");
+  assert.notEqual(report.boxShadow, "none", "Expected paper shadow on appendix page");
+  assert.match(report.fontFamily, /Georgia|Times/i);
+});
+
+Then("the News Desk appendix should not overflow horizontally", async function () {
+  const report = await requirePage(this).evaluate(() => {
+    const active = document.querySelector(".paper-page--active .paper-page-content--news-desk-appendix");
+    return {
+      documentScrollWidth: document.documentElement.scrollWidth,
+      documentClientWidth: document.documentElement.clientWidth,
+      activeScrollWidth: active?.scrollWidth ?? 0,
+      activeClientWidth: active?.clientWidth ?? 0,
+    };
+  });
+  assert.ok(
+    report.documentScrollWidth <= report.documentClientWidth + 2,
+    `Expected document not to overflow horizontally; scrollWidth=${report.documentScrollWidth}, clientWidth=${report.documentClientWidth}`,
+  );
+  assert.ok(
+    report.activeScrollWidth <= report.activeClientWidth + 2,
+    `Expected appendix not to overflow horizontally; scrollWidth=${report.activeScrollWidth}, clientWidth=${report.activeClientWidth}`,
+  );
 });
 
 Then("the active edition should expose a composable layout plan", async function () {
@@ -1126,7 +1266,7 @@ Then("the front page footer should stack utility links in the right column", asy
   const summary = report.entries.map(({ id, text, role, ariaDisabled, href, tagName }) => ({ id, text, role, ariaDisabled, href, tagName }));
   assert.deepEqual(summary, [
     { id: "archive", text: "Archive", role: null, ariaDisabled: null, href: "/archive", tagName: "a" },
-    { id: "topics", text: "Topics", role: null, ariaDisabled: null, href: "/topics", tagName: "a" },
+    { id: "newsDesk", text: "News Desk", role: null, ariaDisabled: null, href: "/news-desk", tagName: "a" },
     { id: "login", text: "LOGIN", role: null, ariaDisabled: null, href: null, tagName: "span" },
   ]);
   assert.ok(report.utilities.left >= report.sectionsRight - 0.75, "Expected utility stack to sit to the right of section links");

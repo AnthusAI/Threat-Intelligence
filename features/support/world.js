@@ -10,6 +10,7 @@ class PapyrusWorld {
     this.page = null;
     this.consoleErrors = [];
     this.currentScenarioId = null;
+    this.testEditorReader = false;
   }
 
   async openScenario(scenarioId, width, height) {
@@ -35,6 +36,11 @@ class PapyrusWorld {
     this.page = await this.browser.newPage({
       viewport: { width, height },
     });
+    if (this.testEditorReader) {
+      await this.page.addInitScript(() => {
+        window.localStorage.setItem("papyrus:test-editor", "true");
+      });
+    }
     this.page.on("console", (message) => {
       if (message.type() === "error") {
         this.consoleErrors.push(message.text());

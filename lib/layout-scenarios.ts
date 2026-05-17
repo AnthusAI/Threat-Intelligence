@@ -1,5 +1,5 @@
 import { type Article, articles, editionDate } from "./articles";
-import type { EditionContent } from "./content-types";
+import type { EditionContent, NewsDeskAppendix } from "./content-types";
 import { createDefaultEditionLayoutPlan, type EditionLayoutPlan } from "./layout-plan";
 import { articleToPublicationItem, cloneArticle } from "./publication-items";
 
@@ -20,6 +20,7 @@ export const layoutScenarios: LayoutScenario[] = [
     description: "The default Papyrus fixture edition.",
     layoutPlan: createDefaultEditionLayoutPlan(articles.map((article) => article.slug)),
     items: cloneArticles(articles).map(articleToPublicationItem),
+    newsDeskAppendix: createDemoNewsDeskAppendix(),
   },
   {
     id: "shared-blank-column-pressure",
@@ -256,6 +257,76 @@ function createHeightPolicyLayoutPlan({
   }
 
   return plan;
+}
+
+function createDemoNewsDeskAppendix(): NewsDeskAppendix {
+  const taxonomyId = "taxonomy-demo-canonical";
+  return {
+    taxonomyId,
+    corpusId: "curation-corpus-demo-canonical",
+    topicSetId: "curation-topic-set-demo-canonical",
+    displayName: "Canonical Topic Register",
+    description: "Accepted topic taxonomy for the fixture edition.",
+    generatedAt: `${editionDate}T12:00:00.000Z`,
+    nodes: [
+      {
+        id: "taxonomy-node-foundation-model-scaling",
+        taxonomyId,
+        topicUid: "topic.foundation-model-scaling",
+        parentTopicUid: null,
+        displayName: "Foundation Model Scaling",
+        subtitle: "Capability curves, benchmark saturation, and training-compute effects",
+        description: "Research on model size, data mixtures, compute budgets, and emergent benchmark behavior.",
+        status: "accepted",
+        seedItemIds: ["research-001", "research-002"],
+        holdoutItemIds: ["research-003"],
+        rank: 1,
+        depth: 0,
+      },
+      {
+        id: "taxonomy-node-agent-memory",
+        taxonomyId,
+        topicUid: "topic.agent-memory",
+        parentTopicUid: "topic.foundation-model-scaling",
+        displayName: "Agent Memory",
+        subtitle: "Retrieval, persistence, and working context for autonomous systems",
+        description: "Subtopic covering memory stores, retrieval policies, and long-horizon agent state.",
+        status: "accepted",
+        seedItemIds: ["research-001"],
+        holdoutItemIds: [],
+        rank: 1,
+        depth: 1,
+      },
+      {
+        id: "taxonomy-node-benchmark-saturation",
+        taxonomyId,
+        topicUid: "topic.benchmark-saturation",
+        parentTopicUid: "topic.foundation-model-scaling",
+        displayName: "Benchmark Saturation",
+        subtitle: "When evaluation sets stop separating model capability",
+        description: "Subtopic covering benchmark exhaustion, contamination, and evaluation drift.",
+        status: "accepted",
+        seedItemIds: ["research-002"],
+        holdoutItemIds: [],
+        rank: 2,
+        depth: 1,
+      },
+      {
+        id: "taxonomy-node-symbolic-connectionist-history",
+        taxonomyId,
+        topicUid: "topic.symbolic-connectionist-history",
+        parentTopicUid: null,
+        displayName: "Symbolic And Connectionist History",
+        subtitle: "Shifts between rules, neural nets, and hybrid AI programs",
+        description: "Historical coverage of symbolic AI, neural network winters, and later hybrid systems.",
+        status: "accepted",
+        seedItemIds: ["history-001"],
+        holdoutItemIds: ["history-002"],
+        rank: 2,
+        depth: 0,
+      },
+    ],
+  };
 }
 
 function cloneArticles(source: Article[]): Article[] {

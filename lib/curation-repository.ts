@@ -65,6 +65,42 @@ export type TopicSteeringTopic = {
   updatedAt?: string | null;
 };
 
+export type TopicSteeringTaxonomy = {
+  id: string;
+  corpusId: string;
+  topicSetId: string;
+  taxonomyId: string;
+  displayName: string;
+  description?: string | null;
+  status: string;
+  snapshotId?: string | null;
+  generatedAt?: string | null;
+  nodeCount?: number | null;
+  rootCount?: number | null;
+  importRunId?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+};
+
+export type TopicSteeringTaxonomyNode = {
+  id: string;
+  taxonomyId: string;
+  corpusId: string;
+  topicSetId: string;
+  topicUid: string;
+  parentTopicUid?: string | null;
+  displayName: string;
+  subtitle?: string | null;
+  description?: string | null;
+  status: string;
+  seedItemIds?: Array<string | null> | null;
+  holdoutItemIds?: Array<string | null> | null;
+  rank?: number | null;
+  depth?: number | null;
+  importRunId?: string | null;
+  updatedAt?: string | null;
+};
+
 export type TopicSteeringProposal = {
   id: string;
   topicSetId?: string | null;
@@ -122,6 +158,8 @@ export type TopicSteeringDashboard = {
   importRuns: TopicSteeringImportRun[];
   topicSets: TopicSteeringTopicSet[];
   topics: TopicSteeringTopic[];
+  taxonomies: TopicSteeringTaxonomy[];
+  taxonomyNodes: TopicSteeringTaxonomyNode[];
   proposals: TopicSteeringProposal[];
   artifacts: TopicSteeringArtifact[];
   projections: TopicSteeringProjection[];
@@ -170,6 +208,8 @@ export async function loadTopicSteeringDashboard(options?: { demo?: boolean }): 
       importRuns: sortedImportRuns,
       topicSets: sortedTopicSets,
       topics: sortTopics(topics),
+      taxonomies: [],
+      taxonomyNodes: [],
       proposals: sortProposals(proposals),
       artifacts: artifacts.sort((left, right) => (right.createdAt ?? "").localeCompare(left.createdAt ?? "")),
       projections: projections.sort((left, right) => (right.score ?? 0) - (left.score ?? 0)),
@@ -178,7 +218,7 @@ export async function loadTopicSteeringDashboard(options?: { demo?: boolean }): 
   } catch (error) {
     return {
       ...createEmptyTopicSteeringDashboard(),
-      loadError: error instanceof Error ? error.message : "Could not load topic steering data.",
+      loadError: error instanceof Error ? error.message : "Could not load News Desk data.",
     };
   }
 }
@@ -288,6 +328,8 @@ function createEmptyTopicSteeringDashboard(): TopicSteeringDashboard {
     importRuns: [],
     topicSets: [],
     topics: [],
+    taxonomies: [],
+    taxonomyNodes: [],
     proposals: [],
     artifacts: [],
     projections: [],
@@ -409,6 +451,80 @@ function createDemoTopicSteeringDashboard(): TopicSteeringDashboard {
         holdoutItemIds: ["history-002"],
         rank: 2,
         isPinned: false,
+        updatedAt: importedAt,
+      },
+    ],
+    taxonomies: [
+      {
+        id: "curation-taxonomy-demo-canonical",
+        corpusId,
+        topicSetId,
+        taxonomyId: "demo-canonical-taxonomy",
+        displayName: "Canonical Demo Taxonomy",
+        description: "Accepted topic tree imported from Biblicus taxonomy artifacts.",
+        status: "accepted",
+        snapshotId: "snapshot-demo-taxonomy",
+        generatedAt: importedAt,
+        nodeCount: 3,
+        rootCount: 1,
+        importRunId: "curation-import-demo-steering",
+        createdAt: importedAt,
+        updatedAt: importedAt,
+      },
+    ],
+    taxonomyNodes: [
+      {
+        id: "curation-taxonomy-node-demo-foundation-model-scaling",
+        taxonomyId: "curation-taxonomy-demo-canonical",
+        corpusId,
+        topicSetId,
+        topicUid: "topic.foundation-model-scaling",
+        parentTopicUid: null,
+        displayName: "Foundation Model Scaling",
+        subtitle: "Capability curves, benchmark saturation, and training-compute effects",
+        description: "Accepted root topic for model size, data mixtures, compute budgets, and emergent benchmark behavior.",
+        status: "accepted",
+        seedItemIds: ["research-001", "research-002"],
+        holdoutItemIds: ["research-003"],
+        rank: 1,
+        depth: 0,
+        importRunId: "curation-import-demo-steering",
+        updatedAt: importedAt,
+      },
+      {
+        id: "curation-taxonomy-node-demo-agent-memory",
+        taxonomyId: "curation-taxonomy-demo-canonical",
+        corpusId,
+        topicSetId,
+        topicUid: "topic.agent-memory",
+        parentTopicUid: "topic.foundation-model-scaling",
+        displayName: "Agent Memory",
+        subtitle: "Retrieval, persistence, and episodic context for agent systems",
+        description: "Accepted subtopic covering long-running memory, retrieval augmentation, and context persistence in agent workflows.",
+        status: "accepted",
+        seedItemIds: ["research-001"],
+        holdoutItemIds: [],
+        rank: 1,
+        depth: 1,
+        importRunId: "curation-import-demo-steering",
+        updatedAt: importedAt,
+      },
+      {
+        id: "curation-taxonomy-node-demo-benchmark-saturation",
+        taxonomyId: "curation-taxonomy-demo-canonical",
+        corpusId,
+        topicSetId,
+        topicUid: "topic.benchmark-saturation",
+        parentTopicUid: "topic.foundation-model-scaling",
+        displayName: "Benchmark Saturation",
+        subtitle: "Evaluation plateaus, leakage, and capability measurement stress",
+        description: "Accepted subtopic covering benchmark exhaustion and the need for new evaluation signals.",
+        status: "accepted",
+        seedItemIds: ["research-002"],
+        holdoutItemIds: ["research-003"],
+        rank: 2,
+        depth: 1,
+        importRunId: "curation-import-demo-steering",
         updatedAt: importedAt,
       },
     ],

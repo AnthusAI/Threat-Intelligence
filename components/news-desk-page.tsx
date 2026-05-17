@@ -1,0 +1,26 @@
+import { NewsDeskWorkspace } from "./topic-steering-workspace";
+import { loadTopicSteeringDashboard } from "../lib/curation-repository";
+
+export type NewsDeskPageProps = {
+  searchParams?: Promise<{
+    demo?: string | string[];
+  }>;
+};
+
+export async function NewsDeskPage({ searchParams }: NewsDeskPageProps) {
+  const resolvedSearchParams = await searchParams;
+  const demo = hasParam(getSearchParam(resolvedSearchParams, "demo"));
+  const dashboard = demo ? await loadTopicSteeringDashboard({ demo: true }) : null;
+  return <NewsDeskWorkspace dashboard={dashboard} />;
+}
+
+function getSearchParam(searchParams: unknown, key: string): string | string[] | null | undefined {
+  if (searchParams instanceof URLSearchParams) return searchParams.get(key);
+  if (!searchParams || typeof searchParams !== "object") return undefined;
+  return (searchParams as Record<string, string | string[] | undefined>)[key];
+}
+
+function hasParam(value: string | string[] | null | undefined): boolean {
+  if (Array.isArray(value)) return value.some(Boolean);
+  return Boolean(value);
+}

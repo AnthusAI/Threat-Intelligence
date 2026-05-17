@@ -163,6 +163,28 @@ const LIST_RECORDS = {
       }
     `,
   },
+  CurationTaxonomy: {
+    field: "listCurationTaxonomies",
+    query: `
+      query ListCurationTaxonomies($limit: Int, $nextToken: String) {
+        listCurationTaxonomies(limit: $limit, nextToken: $nextToken) {
+          items { id corpusId topicSetId taxonomyId displayName description status snapshotId generatedAt nodeCount rootCount importRunId createdAt updatedAt }
+          nextToken
+        }
+      }
+    `,
+  },
+  CurationTaxonomyNode: {
+    field: "listCurationTaxonomyNodes",
+    query: `
+      query ListCurationTaxonomyNodes($limit: Int, $nextToken: String) {
+        listCurationTaxonomyNodes(limit: $limit, nextToken: $nextToken) {
+          items { id taxonomyId corpusId topicSetId topicUid parentTopicUid displayName subtitle description status seedItemIds holdoutItemIds rank depth importRunId updatedAt }
+          nextToken
+        }
+      }
+    `,
+  },
   CurationTopicRevision: {
     field: "listCurationTopicRevisions",
     query: `
@@ -358,6 +380,14 @@ const GETTERS = {
     field: "getCurationTopic",
     query: `query GetCurationTopic($id: ID!) { getCurationTopic(id: $id) { id topicSetId corpusId topicUid displayName subtitle description aliases status seedItemIds holdoutItemIds rank isPinned importRunId updatedAt } }`,
   },
+  CurationTaxonomy: {
+    field: "getCurationTaxonomy",
+    query: `query GetCurationTaxonomy($id: ID!) { getCurationTaxonomy(id: $id) { id corpusId topicSetId taxonomyId displayName description status snapshotId generatedAt nodeCount rootCount importRunId createdAt updatedAt } }`,
+  },
+  CurationTaxonomyNode: {
+    field: "getCurationTaxonomyNode",
+    query: `query GetCurationTaxonomyNode($id: ID!) { getCurationTaxonomyNode(id: $id) { id taxonomyId corpusId topicSetId topicUid parentTopicUid displayName subtitle description status seedItemIds holdoutItemIds rank depth importRunId updatedAt } }`,
+  },
   CurationTopicRevision: {
     field: "getCurationTopicRevision",
     query: `query GetCurationTopicRevision($id: ID!) { getCurationTopicRevision(id: $id) { id topicSetId corpusId revisionKind status contentHash sourceImportRunId sourceDecisionId topicCount createdAt acceptedAt acceptedBy } }`,
@@ -485,6 +515,8 @@ const MUTATIONS = {
   CurationArtifact: modelMutations("CurationArtifact"),
   CurationTopicSet: modelMutations("CurationTopicSet"),
   CurationTopic: modelMutations("CurationTopic"),
+  CurationTaxonomy: modelMutations("CurationTaxonomy"),
+  CurationTaxonomyNode: modelMutations("CurationTaxonomyNode"),
   CurationTopicRevision: modelMutations("CurationTopicRevision"),
   CurationProposal: modelMutations("CurationProposal"),
   CurationDecision: modelMutations("CurationDecision"),

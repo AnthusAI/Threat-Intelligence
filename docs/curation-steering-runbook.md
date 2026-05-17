@@ -247,23 +247,42 @@ The import is idempotent and intentionally lean. It imports:
 - `CurationTopicSet`;
 - `CurationTopic`;
 - `CurationTopicRevision`;
+- `CurationTaxonomy`;
+- `CurationTaxonomyNode`;
 - `CurationArtifact`;
 - `CurationProposal`;
 - private `CurationRawPayload` rows for steering objects.
 
 It does not import Biblicus corpus items. Topic seeds, holdouts, proposal
 evidence, and projection rows keep stable external `item_id` strings.
+If a Biblicus taxonomy artifact exists, `import-steering` resolves
+`analysis/taxonomy/<snapshot>/taxonomy.json` from the artifact reference and
+imports accepted taxonomy nodes. If no accepted taxonomy artifact exists yet,
+Papyrus creates a root-only taxonomy from the accepted topic set so signed-in
+editor/admin readers can still append a canonical topic register.
 
 ## Export, Train, Project
 
-After a human edits or accepts topic copy in `/topics`, export the accepted topic
-set:
+After a human edits or accepts topic copy from the `Topics` tab in the News Desk
+at `/news-desk`, export the accepted topic set:
 
 ```bash
 npm run content -- curation export-topic-set \
   --topic-set curation-topic-set-curation-corpus-ai-ml-research-ai-ml-research \
   --output /tmp/accepted-ai-ml-research-topic-set.json
 ```
+
+When accepted taxonomy nodes have been reviewed, export the taxonomy manifest
+for Biblicus:
+
+```bash
+npm run content -- curation export-taxonomy \
+  --taxonomy taxonomy-curation-topic-set-curation-corpus-ai-ml-research-ai-ml-research-ai-ml-research-accepted-taxonomy \
+  --output /tmp/accepted-ai-ml-research-taxonomy.json
+```
+
+The taxonomy export uses the Biblicus accepted taxonomy JSON shape, including
+`parent_topic_uid`, `seed_item_ids`, and `holdout_item_ids`.
 
 Render the seed manifest and train/project with Biblicus from the Biblicus
 checkout. These commands write Biblicus corpus artifacts only.
@@ -338,7 +357,7 @@ uv run biblicus steering proposals record \
   --input /tmp/ai-ml-research-graph-proposals.json
 ```
 
-Re-import steering so `/topics` shows the graph proposal rows:
+Re-import steering so the News Desk shows the graph proposal rows:
 
 ```bash
 cd /Users/ryan/Projects/Papyrus
@@ -384,10 +403,13 @@ Keep this distinction clear in review UI and automation:
   `needs_clarification` are agent recommendation labels. Papyrus human review
   actions remain `accept`, `reject`, and `defer`.
 
-If editors need first-class accepted hierarchy or relationship editing, add a
-deliberate Papyrus schema/UI pass for accepted taxonomy and ontology summaries.
-Until then, keep public display limited to curated typed topic fields and
-generic proposal rows, with artifact refs pointing back to Biblicus overlays.
+Accepted taxonomy summaries now have a small first-class editor surface in
+Papyrus: `/news-desk` shows accepted subtopics beside the canonical topic
+register, and signed-in editor/admin readers can see passive taxonomy appendix
+pages after the edition. Public display stays limited to curated typed topic
+fields and generic proposal summaries that are already authorized for public
+read. Accepted ontology relationships remain artifact-backed and generic until
+editors need first-class relationship editing or public relationship display.
 
 ## Local Corpus Working Copies
 

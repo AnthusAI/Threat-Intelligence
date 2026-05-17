@@ -9,6 +9,7 @@ const {
 } = require("./lib/papyrus-env.cjs");
 const {
   buildAcceptedTopicSetPayload,
+  buildAcceptedTaxonomyPayload,
   buildSteeringConfigRecords,
   buildProjectionImportRecords,
   buildSteeringImportRecords,
@@ -67,6 +68,9 @@ async function main() {
       return;
     case "curation:export-topic-set":
       await exportTopicSet(args.slice(2));
+      return;
+    case "curation:export-taxonomy":
+      await exportTaxonomy(args.slice(2));
       return;
     case "curation:import-projection":
       await importProjection(args.slice(2));
@@ -176,6 +180,7 @@ async function importSteering(flags) {
   const plan = buildSteeringImportRecords(bundle, {
     classifierId: resolvedCorpus.classifierId,
     corpusConfig: resolvedCorpus.corpusConfig,
+    corpusPath: resolvedCorpus.corpusPath,
   });
   const changes = await buildRecordChanges(client, plan.records);
   await applyRecordChanges(client, changes);
@@ -223,6 +228,20 @@ async function exportTopicSet(flags) {
     .filter((topic) => topic.topicSetId === topicSetId && topic.status !== "deprecated");
   writeJsonFile(options.output, buildAcceptedTopicSetPayload(topicSet, topics));
   console.log(`export\ttopic-set\t${topicSetId}\t${options.output}\t${topics.length} topics`);
+}
+
+async function exportTaxonomy(flags) {
+  const options = parseOptions(flags);
+  const taxonomyId = options.taxonomy;
+  if (!taxonomyId) throw new Error("curation export-taxonomy requires --taxonomy.");
+  if (!options.output) throw new Error("curation export-taxonomy requires --output.");
+  const { client } = createAuthoringClient();
+  const taxonomy = await client.getRecord("CurationTaxonomy", taxonomyId);
+  if (!taxonomy) throw new Error(`CurationTaxonomy ${taxonomyId} was not found.`);
+  const nodes = (await client.listRecords("CurationTaxonomyNode"))
+    .filter((node) => node.taxonomyId === taxonomyId && node.status !== "deprecated");
+  writeJsonFile(options.output, buildAcceptedTaxonomyPayload(taxonomy, nodes));
+  console.log(`export\ttaxonomy\t${taxonomyId}\t${options.output}\t${nodes.length} nodes`);
 }
 
 async function deleteAllContent(client) {
@@ -519,6 +538,7 @@ function printUsage() {
   console.log("  npm run content -- curation import-steering --config <steering.yml> --corpus-key <key>");
   console.log("  npm run content -- curation import-config --config <steering.yml>");
   console.log("  npm run content -- curation export-topic-set --topic-set <id> --output <accepted-topic-set.json>");
+  console.log("  npm run content -- curation export-taxonomy --taxonomy <id> --output <accepted-taxonomy.json>");
   console.log("  npm run content -- curation import-projection --bundle <projection.json>");
   console.log("  npm run content -- curation import-projection --config <steering.yml> --target-corpus-key <key> --authority-corpus-key <key> --bundle <projection.json>");
 }

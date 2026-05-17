@@ -67,7 +67,7 @@ rendering contracts.
   instructions, not by Papyrus source changes. When that instruction surface is
   added, keep it beside the publication or corpus config and document how agents
   consume it. Until then, do not add domain-specific research-agent assumptions
-  to `/topics`, the content CLI, GraphQL models, or layout code.
+  to `/news-desk`, the content CLI, GraphQL models, or layout code.
 - Use an AWS profile for local Amplify/AWS access.
 - `.env` is for Papyrus runtime settings and the seed editor credentials used by
   `npm run seed:amplify`. `.env*` must stay ignored, and `.env.example` is the
@@ -86,10 +86,21 @@ rendering contracts.
   Papyrus GraphQL. Papyrus stores steering state, artifact references, topic
   copy, proposals, decisions, projections, and stable external `item_id`
   references; Biblicus remains the owner of corpus item metadata.
-- Taxonomy and ontology steering proposal kinds stay generic in v1. Import
-  proposal summaries and artifact refs, but do not add first-class taxonomy or
-  ontology tables, and do not let accepting `create-taxonomy-node`,
-  `add-ontology-relationship`, or related kinds mutate flat canonical topic
+- The News Desk is the newsroom operations surface. `Topics` is one desk tab,
+  not the whole product concept. Use `/news-desk` and News Desk naming in UI,
+  docs, and tests. Future assignment and research queues should become desk tabs
+  instead of separate one-off management pages.
+- Style the News Desk as a newspaper section or editorial insert, not as an app
+  dashboard. Steering is passive and optional: proposals are skimmable notes
+  beside the edition, and the system keeps following the accepted topic set when
+  humans provide no new steering.
+- Accepted taxonomy has a small first-class typed surface for editor-only News
+  Desk views and appendix pages: `CurationTaxonomy` and
+  `CurationTaxonomyNode`. Import accepted taxonomy artifacts into those tables,
+  keep full manifests in private `CurationRawPayload`, and append passive News
+  Desk topic-register pages to editions only for signed-in editor/admin
+  readers. Ontology proposal kinds remain generic in v1. Do not let accepting
+  taxonomy or ontology proposals mutate flat canonical topic-copy rows or topic
   revisions unless that first-class editing surface is explicitly designed.
   Biblicus recommendation labels such as `recommend`, `do_not_recommend`, and
   `needs_clarification` are agent labels, not Papyrus review actions.

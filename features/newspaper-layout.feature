@@ -146,12 +146,43 @@ Feature: Newspaper layout scenarios
       | 780   | 1200   |
       | 390   | 900    |
 
-  Scenario: Topic steering workspace renders proposals and topic edits
-    Given I open the topic steering workspace at 1280 by 900
-    Then the topic steering workspace should render
-    And topic steering should show topic and graph proposal rows
-    When I update the first topic steering name to "Foundation Model Scaling Updated"
-    Then the first topic steering name should be "Foundation Model Scaling Updated"
+  Scenario: News desk renders topic steering proposals and topic edits
+    Given I open the news desk at 1280 by 900
+    Then the news desk should render
+    And the news desk should show topic and graph proposal rows
+    And the news desk should show accepted subtopics under canonical topics
+    When I update the first news desk topic name to "Foundation Model Scaling Updated"
+    Then the first news desk topic name should be "Foundation Model Scaling Updated"
+    And no browser console errors should occur
+
+  Scenario: Production news desk requires editor access
+    Given I open the edition path "/news-desk" at 1280 by 900
+    Then the news desk should show an editor access gate
+    And no browser console errors should occur
+
+  Scenario: Unauthenticated readers do not see News Desk appendix pages
+    Given I open the "current-edition" layout scenario at 1280 by 900
+    Then edition page count should not include appended News Desk pages
+    And the front page footer should not link to the news desk
+    And no News Desk appendix pages should render
+    And no browser console errors should occur
+
+  Scenario: Editor readers see News Desk appendix pages after the edition
+    Given I am a test editor reader
+    And I open the "current-edition" layout scenario at 1280 by 900
+    Then edition page count should include appended News Desk pages
+    When I scroll to the canonical topic register
+    Then the final edition pages should include the canonical topic register
+    And the appendix page should use newspaper page styling
+    When I scroll to the appendix page for root topic "Foundation Model Scaling"
+    Then the root topic appendix page should show subtopic "Agent Memory"
+    And no browser console errors should occur
+
+  Scenario: News Desk appendix pages fit on mobile
+    Given I am a test editor reader
+    And I open the "current-edition" layout scenario at 390 by 900
+    When I scroll to the canonical topic register
+    Then the News Desk appendix should not overflow horizontally
     And no browser console errors should occur
 
   Scenario: Archive renders an infinite front page grid

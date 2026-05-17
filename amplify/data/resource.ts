@@ -84,6 +84,8 @@ const schema = a.schema({
     proposalId: a.id(),
     revisionId: a.id(),
     topicId: a.id(),
+    taxonomyId: a.id(),
+    taxonomyNodeId: a.id(),
     decisionId: a.id(),
     status: a.string(),
   }),
@@ -134,7 +136,6 @@ const schema = a.schema({
       index("role").sortKeys(["name"]).queryField("listCurationCorporaByRoleAndName"),
     ])
     .authorization((allow) => [
-      allow.publicApiKey().to(["read"]),
       allow.groups(curationWriteGroups).to(["read"]),
       allow.custom().to(authoringOperations),
     ]),
@@ -161,7 +162,6 @@ const schema = a.schema({
       index("importKind").sortKeys(["importedAt"]).queryField("listCurationImportRunsByKindAndImportedAt"),
     ])
     .authorization((allow) => [
-      allow.publicApiKey().to(["read"]),
       allow.groups(curationWriteGroups).to(["read"]),
       allow.custom().to(authoringOperations),
     ]),
@@ -202,7 +202,6 @@ const schema = a.schema({
       index("artifactKind").sortKeys(["createdAt"]).queryField("listCurationArtifactsByKindAndCreatedAt"),
     ])
     .authorization((allow) => [
-      allow.publicApiKey().to(["read"]),
       allow.groups(curationWriteGroups).to(["read"]),
       allow.custom().to(authoringOperations),
     ]),
@@ -257,6 +256,63 @@ const schema = a.schema({
     .authorization((allow) => [
       allow.publicApiKey().to(["read"]),
       allow.groups(curationWriteGroups),
+      allow.custom().to(authoringOperations),
+    ]),
+
+  CurationTaxonomy: a
+    .model({
+      id: a.id().required(),
+      corpusId: a.id().required(),
+      topicSetId: a.id().required(),
+      taxonomyId: a.string().required(),
+      displayName: a.string().required(),
+      description: a.string(),
+      status: a.string().required(),
+      snapshotId: a.string(),
+      generatedAt: a.datetime(),
+      nodeCount: a.integer(),
+      rootCount: a.integer(),
+      importRunId: a.id(),
+      createdAt: a.datetime(),
+      updatedAt: a.datetime(),
+    })
+    .secondaryIndexes((index) => [
+      index("topicSetId").sortKeys(["status"]).queryField("listCurationTaxonomiesByTopicSetAndStatus"),
+      index("corpusId").sortKeys(["taxonomyId"]).queryField("listCurationTaxonomiesByCorpusAndTaxonomy"),
+      index("status").sortKeys(["generatedAt"]).queryField("listCurationTaxonomiesByStatusAndGeneratedAt"),
+    ])
+    .authorization((allow) => [
+      allow.groups(curationWriteGroups).to(["read"]),
+      allow.custom().to(authoringOperations),
+    ]),
+
+  CurationTaxonomyNode: a
+    .model({
+      id: a.id().required(),
+      taxonomyId: a.id().required(),
+      corpusId: a.id().required(),
+      topicSetId: a.id().required(),
+      topicUid: a.string().required(),
+      parentTopicUid: a.string(),
+      displayName: a.string().required(),
+      subtitle: a.string(),
+      description: a.string(),
+      status: a.string().required(),
+      seedItemIds: a.string().array(),
+      holdoutItemIds: a.string().array(),
+      rank: a.integer(),
+      depth: a.integer(),
+      importRunId: a.id(),
+      updatedAt: a.datetime(),
+    })
+    .secondaryIndexes((index) => [
+      index("taxonomyId").sortKeys(["topicUid"]).queryField("listCurationTaxonomyNodesByTaxonomyAndTopicUid"),
+      index("parentTopicUid").sortKeys(["rank"]).queryField("listCurationTaxonomyNodesByParentAndRank"),
+      index("topicUid").sortKeys(["taxonomyId"]).queryField("listCurationTaxonomyNodesByTopicUidAndTaxonomy"),
+    ])
+    .authorization((allow) => [
+      allow.publicApiKey().to(["read"]),
+      allow.groups(curationWriteGroups).to(["read"]),
       allow.custom().to(authoringOperations),
     ]),
 

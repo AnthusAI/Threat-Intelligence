@@ -2,13 +2,15 @@
 
 import { gsap } from "gsap";
 import { ScrollToPlugin } from "gsap/ScrollToPlugin";
+import { Hub } from "aws-amplify/utils";
 import Image from "next/image";
 import Link from "next/link";
 import type { CSSProperties, MouseEvent as ReactMouseEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ARCHIVE_PREVIEW_HEIGHT, ARCHIVE_PREVIEW_WIDTH } from "../lib/archive-types";
-import type { EditionContent } from "../lib/content-types";
+import type { EditionContent, NewsDeskAppendix, NewsDeskTaxonomyNode } from "../lib/content-types";
 import { shouldBypassImageOptimization } from "../lib/image-url";
+import { loadEditorAccessState, loadEditorTaxonomyState } from "./news-desk-taxonomy-client";
 import { ReaderAuthControl } from "./reader-auth-control";
 import {
   buildNewspaperLayout,
@@ -38,6 +40,7 @@ type ScrollToPageOptions = {
 
 type PapyrusTestWindow = Window & typeof globalThis & {
   __PAPYRUS_LAYOUT__?: NewspaperLayout;
+  __PAPYRUS_TOTAL_PAGES__?: number;
   __PAPYRUS_SCENARIO__?: string;
   __PAPYRUS_VISIBLE_PAGE__?: number;
   __PAPYRUS_SCROLL_TO_PAGE__?: (pageNumber: number, options?: ScrollToPageOptions) => void;
@@ -50,6 +53,16 @@ type NewspaperProps = {
 };
 
 const PAGE_LOOKAROUND = 1;
+
+type NewsDeskAppendixPage = {
+  id: string;
+  pageNumber: number;
+  mode: "register" | "topic";
+  appendix: NewsDeskAppendix;
+  roots: NewsDeskTaxonomyNode[];
+  root?: NewsDeskTaxonomyNode;
+  subtopics: NewsDeskTaxonomyNode[];
+};
 
 export function Newspaper({ content, editionBasePath, initialPageNumber = 1 }: NewspaperProps) {
   const normalizedInitialPage = Math.max(1, Math.floor(initialPageNumber));
@@ -64,6 +77,9 @@ export function Newspaper({ content, editionBasePath, initialPageNumber = 1 }: N
   const [visiblePage, setVisiblePage] = useState(normalizedInitialPage);
   const [priorityPages, setPriorityPages] = useState<Set<number>>(new Set([normalizedInitialPage]));
   const [showRhythmOverlay, setShowRhythmOverlay] = useState(false);
+  const [editorAppendix, setEditorAppendix] = useState<NewsDeskAppendix | null>(null);
+  const [editorAppendixReady, setEditorAppendixReady] = useState(false);
+  const [showNewsDeskFooterLink, setShowNewsDeskFooterLink] = useState(false);
 
   useEffect(() => {
     const node = shellRef.current;
@@ -115,18 +131,73 @@ export function Newspaper({ content, editionBasePath, initialPageNumber = 1 }: N
     return metrics === null ? null : buildNewspaperLayout(content.items, metrics.pageWidth, metrics.viewportHeight, content.layoutPlan);
   }, [metrics, content.items, content.layoutPlan, fontRevision]);
 
-  const totalPages = layout?.pages.length ?? 0;
+  useEffect(() => {
+    let active = true;
+    setEditorAppendixReady(false);
+    const refreshAppendix = async () => {
+      const state = await loadEditorTaxonomyState({
+        scenarioAppendix: content.newsDeskAppendix,
+        allowScenarioEditorOverride: content.source === "scenario",
+      });
+      if (!active) return;
+      setEditorAppendix(state.isEditor ? state.appendix : null);
+      setEditorAppendixReady(true);
+    };
+
+    void refreshAppendix();
+    const unsubscribe = Hub.listen("auth", ({ payload }) => {
+      if (
+        payload.event === "signedIn" ||
+        payload.event === "signedOut" ||
+        payload.event === "signInWithRedirect" ||
+        payload.event === "signInWithRedirect_failure"
+      ) {
+        void refreshAppendix();
+      }
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [content.newsDeskAppendix, content.source]);
+
+  useEffect(() => {
+    let active = true;
+    const refreshAccess = async () => {
+      const state = await loadEditorAccessState();
+      if (active) setShowNewsDeskFooterLink(state.isEditor);
+    };
+
+    void refreshAccess();
+    const unsubscribe = Hub.listen("auth", ({ payload }) => {
+      if (
+        payload.event === "signedIn" ||
+        payload.event === "signedOut" ||
+        payload.event === "signInWithRedirect" ||
+        payload.event === "signInWithRedirect_failure"
+      ) {
+        void refreshAccess();
+      }
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
+
+  const appendixPages = useMemo(() => buildNewsDeskAppendixPages(editorAppendix, layout?.pages.length ?? 0), [editorAppendix, layout?.pages.length]);
+  const totalPages = (layout?.pages.length ?? 0) + appendixPages.length;
 
   useEffect(() => {
     if (!layout) return;
-    setVisiblePage((current) => clampPageNumber(current, layout.pages.length));
+    setVisiblePage((current) => clampPageNumber(current, totalPages));
     setPriorityPages((current) => {
       const next = new Set<number>();
-      next.add(clampPageNumber(visiblePage, layout.pages.length));
-      for (const page of current) next.add(clampPageNumber(page, layout.pages.length));
+      next.add(clampPageNumber(visiblePage, totalPages));
+      for (const page of current) next.add(clampPageNumber(page, totalPages));
       return next;
     });
-  }, [layout, visiblePage]);
+  }, [layout, totalPages, visiblePage]);
 
   const materializedPages = useMemo(() => {
     if (!layout) return new Set<number>();
@@ -163,7 +234,7 @@ export function Newspaper({ content, editionBasePath, initialPageNumber = 1 }: N
   const scrollToPage = useCallback(
     (rawPageNumber: number, options?: ScrollToPageOptions) => {
       if (!layout) return;
-      const pageNumber = clampPageNumber(rawPageNumber, layout.pages.length);
+      const pageNumber = clampPageNumber(rawPageNumber, totalPages);
       pendingProgrammaticPageRef.current = pageNumber;
       preservedItemHashPageRef.current = null;
       writePageLocation(pageNumber, options?.history ?? "push", editionBasePath);
@@ -179,7 +250,7 @@ export function Newspaper({ content, editionBasePath, initialPageNumber = 1 }: N
         scrollToTarget(target, options);
       });
     },
-    [editionBasePath, layout, scrollToTarget],
+    [editionBasePath, layout, scrollToTarget, totalPages],
   );
 
   const scrollToItemAnchor = useCallback(
@@ -226,7 +297,7 @@ export function Newspaper({ content, editionBasePath, initialPageNumber = 1 }: N
     [layout, scrollToPage, totalPages, visiblePage],
   );
 
-  useVisiblePageObserver(layout, setVisiblePage, pageRefs);
+  useVisiblePageObserver(layout, totalPages, setVisiblePage, pageRefs);
 
   useEffect(() => {
     if (!layout) return;
@@ -300,6 +371,7 @@ export function Newspaper({ content, editionBasePath, initialPageNumber = 1 }: N
     const papyrusWindow = window as PapyrusTestWindow;
     if (!layout) {
       delete papyrusWindow.__PAPYRUS_LAYOUT__;
+      delete papyrusWindow.__PAPYRUS_TOTAL_PAGES__;
       delete papyrusWindow.__PAPYRUS_VISIBLE_PAGE__;
       delete papyrusWindow.__PAPYRUS_SCROLL_TO_PAGE__;
       papyrusWindow.__PAPYRUS_SCENARIO__ = content.scenarioId;
@@ -307,15 +379,17 @@ export function Newspaper({ content, editionBasePath, initialPageNumber = 1 }: N
     }
 
     papyrusWindow.__PAPYRUS_LAYOUT__ = layout;
+    papyrusWindow.__PAPYRUS_TOTAL_PAGES__ = totalPages;
     papyrusWindow.__PAPYRUS_SCENARIO__ = content.scenarioId;
     papyrusWindow.__PAPYRUS_VISIBLE_PAGE__ = visiblePage;
     papyrusWindow.__PAPYRUS_SCROLL_TO_PAGE__ = scrollToPage;
     return () => {
       if (papyrusWindow.__PAPYRUS_LAYOUT__ === layout) delete papyrusWindow.__PAPYRUS_LAYOUT__;
+      if (papyrusWindow.__PAPYRUS_TOTAL_PAGES__ === totalPages) delete papyrusWindow.__PAPYRUS_TOTAL_PAGES__;
       if (papyrusWindow.__PAPYRUS_VISIBLE_PAGE__ === visiblePage) delete papyrusWindow.__PAPYRUS_VISIBLE_PAGE__;
       if (papyrusWindow.__PAPYRUS_SCROLL_TO_PAGE__ === scrollToPage) delete papyrusWindow.__PAPYRUS_SCROLL_TO_PAGE__;
     };
-  }, [content.scenarioId, layout, scrollToPage, visiblePage]);
+  }, [content.scenarioId, layout, scrollToPage, totalPages, visiblePage]);
 
   return (
     <main
@@ -323,6 +397,8 @@ export function Newspaper({ content, editionBasePath, initialPageNumber = 1 }: N
       data-content-source={content.source}
       data-current-page={layout ? visiblePage : undefined}
       data-layout-plan-front-template={content.layoutPlan.pages[0]?.presetId}
+      data-news-desk-appendix-enabled={appendixPages.length > 0 ? "true" : "false"}
+      data-news-desk-appendix-ready={editorAppendixReady ? "true" : "false"}
       data-rhythm-overlay={showRhythmOverlay ? "true" : "false"}
       data-scenario-id={content.scenarioId}
       ref={shellRef}
@@ -372,9 +448,41 @@ export function Newspaper({ content, editionBasePath, initialPageNumber = 1 }: N
                     page={page}
                     scrollToItemAnchor={scrollToItemAnchor}
                     scrollToPage={scrollToPage}
+                    showNewsDeskFooterLink={showNewsDeskFooterLink}
                   />
                 ) : (
                   <PagePlaceholder page={page} />
+                )}
+              </div>
+            );
+          })}
+          {appendixPages.map((page) => {
+            const pageHeight = layout.pageHeight;
+            const materialized = materializedPages.has(page.pageNumber);
+            return (
+              <div
+                className={`paper-page paper-page--news-desk-appendix ${
+                  page.pageNumber === visiblePage ? "paper-page--active" : ""
+                } ${materialized ? "paper-page--materialized" : "paper-page--placeholder"}`}
+                data-materialized={materialized ? "true" : "false"}
+                data-page-kind="newsDeskAppendix"
+                id={getPageAnchorId(page.pageNumber)}
+                key={page.id}
+                ref={(node) => {
+                  if (node) pageRefs.current.set(page.pageNumber, node);
+                  else pageRefs.current.delete(page.pageNumber);
+                }}
+                style={{ minHeight: pageHeight }}
+              >
+                {materialized ? (
+                  <NewsDeskAppendixPageView
+                    editionBasePath={editionBasePath}
+                    layout={layout}
+                    page={page}
+                    scrollToPage={scrollToPage}
+                  />
+                ) : (
+                  <AppendixPagePlaceholder pageNumber={page.pageNumber} />
                 )}
               </div>
             );
@@ -440,6 +548,7 @@ export function NewspaperFrontPreview({ content }: { content: EditionContent }) 
             page={page}
             scrollToItemAnchor={scrollToItemAnchor}
             scrollToPage={scrollToPage}
+            showNewsDeskFooterLink={false}
           />
         </div>
       ) : null}
@@ -505,6 +614,14 @@ function PagePlaceholder({ page }: { page: SolvedPage }) {
   );
 }
 
+function AppendixPagePlaceholder({ pageNumber }: { pageNumber: number }) {
+  return (
+    <section className="paper-page-content paper-page-content--placeholder" data-page-kind="newsDeskAppendix">
+      <div className="page-placeholder-label">Loading News Desk Page {pageNumber}</div>
+    </section>
+  );
+}
+
 function LoadingPage({ content }: { content: EditionContent }) {
   return (
     <section className="paper-page-content paper-page-content--front paper-page-content--loading" aria-label="Loading edition">
@@ -533,6 +650,7 @@ function SolvedPageView({
   page,
   scrollToItemAnchor,
   scrollToPage,
+  showNewsDeskFooterLink,
 }: {
   articleAnchorBlockIds: Set<string>;
   content: EditionContent;
@@ -543,6 +661,7 @@ function SolvedPageView({
   page: SolvedPage;
   scrollToItemAnchor: (articleSlug: string, options?: ScrollToPageOptions) => boolean;
   scrollToPage: (pageNumber: number, options?: ScrollToPageOptions) => void;
+  showNewsDeskFooterLink?: boolean;
 }) {
   const front = page.kind === "front";
   const editionTitleId = front ? rawEditionTitleId ?? "edition-title" : undefined;
@@ -606,6 +725,7 @@ function SolvedPageView({
               editionBasePath={editionBasePath}
               footer={page.frontFooter}
               scrollToItemAnchor={scrollToItemAnchor}
+              showNewsDeskFooterLink={showNewsDeskFooterLink}
             />
           ) : null}
         </>
@@ -620,16 +740,159 @@ function SolvedPageView({
   );
 }
 
+function NewsDeskAppendixPageView({
+  editionBasePath,
+  layout,
+  page,
+  scrollToPage,
+}: {
+  editionBasePath?: string;
+  layout: NewspaperLayout;
+  page: NewsDeskAppendixPage;
+  scrollToPage: (pageNumber: number, options?: ScrollToPageOptions) => void;
+}) {
+  const title = page.mode === "register" ? "Canonical Topic Register" : page.root?.displayName ?? "Topic Page";
+  return (
+    <section
+      className="paper-page-content paper-page-content--inside paper-page-content--news-desk-appendix"
+      data-news-desk-appendix-page={page.mode}
+      data-page-kind="newsDeskAppendix"
+      style={getPageStyle(layout, page.pageNumber)}
+    >
+      <header className="inside-header">
+        <span>Page {page.pageNumber}</span>
+        <span>News Desk</span>
+        <span>{page.mode === "register" ? "Topic Register" : "Topic Page"}</span>
+      </header>
+      <article className="news-desk-appendix" aria-labelledby={`news-desk-appendix-title-${page.pageNumber}`}>
+        <p className="story-label">News Desk Appendix</p>
+        <h2 id={`news-desk-appendix-title-${page.pageNumber}`}>{title}</h2>
+        {page.mode === "register" ? (
+          <TopicRegisterPage editionBasePath={editionBasePath} page={page} scrollToPage={scrollToPage} />
+        ) : (
+          <RootTopicPage page={page} />
+        )}
+      </article>
+    </section>
+  );
+}
+
+function TopicRegisterPage({
+  editionBasePath,
+  page,
+  scrollToPage,
+}: {
+  editionBasePath?: string;
+  page: NewsDeskAppendixPage;
+  scrollToPage: (pageNumber: number, options?: ScrollToPageOptions) => void;
+}) {
+  return (
+    <>
+      <p className="news-desk-appendix__lede">
+        {page.appendix.description ?? "The accepted canonical topic tree currently steering corpus analysis and newsroom coverage."}
+      </p>
+      <div className="news-desk-appendix__ledger" data-news-desk-topic-register>
+        {page.roots.map((root, index) => {
+          const rootPageNumber = page.pageNumber + index + 1;
+          const subtopicCount = page.appendix.nodes.filter((node) => node.parentTopicUid === root.topicUid && node.status === "accepted").length;
+          const href = getPageHref(rootPageNumber, editionBasePath);
+          return (
+            <article className="news-desk-appendix__topic-summary" key={root.id}>
+              <header>
+                <h3>
+                  <a href={href} onClick={(event) => handleAppendixPageClick(event, rootPageNumber, scrollToPage)}>
+                    {root.displayName}
+                  </a>
+                </h3>
+                <span>{subtopicCount} subtopics</span>
+              </header>
+              {root.subtitle ? <p className="news-desk-appendix__subtitle">{root.subtitle}</p> : null}
+              <p>{root.description ?? "Accepted root topic."}</p>
+              <TopicEvidenceLine node={root} />
+            </article>
+          );
+        })}
+      </div>
+      <footer className="news-desk-appendix__footer">
+        <span>{page.appendix.displayName}</span>
+        {page.appendix.generatedAt ? <span>Accepted state {formatShortDate(page.appendix.generatedAt)}</span> : null}
+      </footer>
+    </>
+  );
+}
+
+function RootTopicPage({ page }: { page: NewsDeskAppendixPage }) {
+  const root = page.root;
+  if (!root) return null;
+  return (
+    <>
+      {root.subtitle ? <p className="news-desk-appendix__subtitle news-desk-appendix__subtitle--root">{root.subtitle}</p> : null}
+      <p className="news-desk-appendix__lede">{root.description ?? "Accepted root topic."}</p>
+      <div className="news-desk-appendix__evidence-band" aria-label="Topic evidence counts">
+        <TopicEvidenceMetric label="Seed references" value={compactTextArray(root.seedItemIds).length} />
+        <TopicEvidenceMetric label="Holdout references" value={compactTextArray(root.holdoutItemIds).length} />
+        <TopicEvidenceMetric label="Accepted subtopics" value={page.subtopics.length} />
+      </div>
+      <section className="news-desk-appendix__subtopics" aria-label={`${root.displayName} accepted subtopics`}>
+        <header>
+          <h3>Accepted Subtopics</h3>
+          <Link href="/news-desk">Review related notes in News Desk</Link>
+        </header>
+        {page.subtopics.length ? page.subtopics.map((subtopic) => (
+          <article className="news-desk-appendix__subtopic" data-news-desk-subtopic={subtopic.topicUid} key={subtopic.id}>
+            <h4>{subtopic.displayName}</h4>
+            {subtopic.subtitle ? <p className="news-desk-appendix__subtitle">{subtopic.subtitle}</p> : null}
+            <p>{subtopic.description ?? "Accepted subtopic."}</p>
+            <TopicEvidenceLine node={subtopic} />
+          </article>
+        )) : (
+          <p className="news-desk-appendix__empty">No accepted subtopics have been filed for this topic yet.</p>
+        )}
+      </section>
+    </>
+  );
+}
+
+function TopicEvidenceMetric({ label, value }: { label: string; value: number }) {
+  return (
+    <div>
+      <strong>{value}</strong>
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function TopicEvidenceLine({ node }: { node: NewsDeskTaxonomyNode }) {
+  const seedCount = compactTextArray(node.seedItemIds).length;
+  const holdoutCount = compactTextArray(node.holdoutItemIds).length;
+  return (
+    <small className="news-desk-appendix__evidence-line">
+      {seedCount} seed refs / {holdoutCount} holdout refs / {node.topicUid}
+    </small>
+  );
+}
+
+function handleAppendixPageClick(
+  event: ReactMouseEvent<HTMLAnchorElement>,
+  pageNumber: number,
+  scrollToPage: (pageNumber: number, options?: ScrollToPageOptions) => void,
+) {
+  event.preventDefault();
+  scrollToPage(pageNumber);
+}
+
 function FrontPageFooter({
   disableLinks = false,
   editionBasePath,
   footer,
   scrollToItemAnchor,
+  showNewsDeskFooterLink = false,
 }: {
   disableLinks?: boolean;
   editionBasePath?: string;
   footer: SolvedFrontFooter;
   scrollToItemAnchor: (articleSlug: string, options?: ScrollToPageOptions) => boolean;
+  showNewsDeskFooterLink?: boolean;
 }) {
   return (
     <footer
@@ -679,6 +942,8 @@ function FrontPageFooter({
       ) : null}
       <div className="front-footer__utilities" aria-label="Publication utilities">
         {footer.utilityEntries.map((entry) => {
+          if (entry.id === "newsDesk" && (!showNewsDeskFooterLink || disableLinks)) return null;
+
           if (entry.id === "login" && !disableLinks) {
             return (
               <ReaderAuthControl className="front-footer__utility-link" dataFooterUtility={entry.id} key={entry.id} postAuthPath={editionBasePath} />
@@ -1246,6 +1511,44 @@ function formatPageKind(page: SolvedPage): string {
   return "Article page";
 }
 
+function buildNewsDeskAppendixPages(appendix: NewsDeskAppendix | null | undefined, basePageCount: number): NewsDeskAppendixPage[] {
+  if (!appendix?.nodes?.length || basePageCount <= 0) return [];
+  const acceptedNodes = appendix.nodes.filter((node) => node.status === "accepted");
+  const roots = sortAppendixNodes(acceptedNodes.filter((node) => !node.parentTopicUid));
+  if (!roots.length) return [];
+
+  const pages: NewsDeskAppendixPage[] = [
+    {
+      id: `${appendix.taxonomyId}-register`,
+      pageNumber: basePageCount + 1,
+      mode: "register",
+      appendix,
+      roots,
+      subtopics: [],
+    },
+  ];
+  roots.forEach((root, index) => {
+    pages.push({
+      id: `${appendix.taxonomyId}-${root.topicUid}`,
+      pageNumber: basePageCount + index + 2,
+      mode: "topic",
+      appendix,
+      roots,
+      root,
+      subtopics: sortAppendixNodes(acceptedNodes.filter((node) => node.parentTopicUid === root.topicUid)),
+    });
+  });
+  return pages;
+}
+
+function sortAppendixNodes(nodes: NewsDeskTaxonomyNode[]): NewsDeskTaxonomyNode[] {
+  return [...nodes].sort((left, right) => {
+    const rankDiff = (left.rank ?? 999999) - (right.rank ?? 999999);
+    if (rankDiff !== 0) return rankDiff;
+    return left.displayName.localeCompare(right.displayName);
+  });
+}
+
 function computeMaterializedPages(visiblePage: number, priorityPages: Set<number>, totalPages: number): Set<number> {
   const pages = new Set<number>();
   for (const pageNumber of priorityPages) addMaterializedWindow(pages, pageNumber, totalPages);
@@ -1281,6 +1584,7 @@ function addMaterializedWindow(pages: Set<number>, center: number, totalPages: n
 
 function useVisiblePageObserver(
   layout: NewspaperLayout | null,
+  totalPages: number,
   setVisiblePage: React.Dispatch<React.SetStateAction<number>>,
   pageRefs: React.MutableRefObject<Map<number, HTMLElement>>,
 ) {
@@ -1296,11 +1600,11 @@ function useVisiblePageObserver(
         }
         let bestPage = 1;
         let bestRatio = -1;
-        for (const page of layout.pages) {
-          const ratio = ratios.get(page.pageNumber) ?? 0;
+        for (let pageNumber = 1; pageNumber <= totalPages; pageNumber += 1) {
+          const ratio = ratios.get(pageNumber) ?? 0;
           if (ratio > bestRatio) {
             bestRatio = ratio;
-            bestPage = page.pageNumber;
+            bestPage = pageNumber;
           }
         }
         setVisiblePage(bestPage);
@@ -1311,14 +1615,14 @@ function useVisiblePageObserver(
       },
     );
 
-    for (const page of layout.pages) {
-      const node = pageRefs.current.get(page.pageNumber);
+    for (let pageNumber = 1; pageNumber <= totalPages; pageNumber += 1) {
+      const node = pageRefs.current.get(pageNumber);
       if (!node) continue;
-      node.dataset.pageNumber = String(page.pageNumber);
+      node.dataset.pageNumber = String(pageNumber);
       observer.observe(node);
     }
     return () => observer.disconnect();
-  }, [layout, pageRefs, setVisiblePage]);
+  }, [layout, pageRefs, setVisiblePage, totalPages]);
 }
 
 function getPageAnchorId(pageNumber: number): string {
@@ -1384,6 +1688,16 @@ function getItemAnchorHref(articleSlug: string, pageNumber: number, editionBaseP
   const anchor = `#${encodeURIComponent(articleSlug)}`;
   if (!editionBasePath) return anchor;
   return `${getPageHref(pageNumber, editionBasePath)}${anchor}`;
+}
+
+function compactTextArray(values: Array<string | null> | null | undefined): string[] {
+  return (values ?? []).filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+}
+
+function formatShortDate(value: string): string {
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) return value;
+  return new Date(timestamp).toISOString().slice(0, 10);
 }
 
 function normalizePath(pathname: string): string {
