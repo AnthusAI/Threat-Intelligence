@@ -27,11 +27,23 @@ const TAXONOMY_MUTATION_PROPOSAL_KINDS = new Set([
 let clientPromise: Promise<DataClient> | null = null;
 
 export const handler: ReviewHandler | PromoteHandler = async (event: any) => {
-  const operation = event.info.fieldName;
+  const operation = resolveCurationOperation(event);
   if (operation === "reviewCurationProposal") return reviewCurationProposal(event);
   if (operation === "promoteCurationTopicRevision") return promoteCurationTopicRevision(event);
   throw new Error(`Unsupported curation action ${operation}.`);
 };
+
+function resolveCurationOperation(event: any): string {
+  const fieldName = normalizeOptionalString(event?.info?.fieldName)
+    ?? normalizeOptionalString(event?.fieldName)
+    ?? normalizeOptionalString(event?.request?.fieldName);
+  if (fieldName) return fieldName;
+
+  const args = event?.arguments ?? {};
+  if (normalizeOptionalString(args.proposalId)) return "reviewCurationProposal";
+  if (normalizeOptionalString(args.revisionId)) return "promoteCurationTopicRevision";
+  throw new Error("Unsupported curation action: missing AppSync field name and known arguments.");
+}
 
 async function reviewCurationProposal(event: Parameters<ReviewHandler>[0]) {
   const client = await getDataClient();
