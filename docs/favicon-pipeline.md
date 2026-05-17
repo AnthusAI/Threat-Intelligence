@@ -22,8 +22,8 @@ This script will:
 - Resolve light/dark colors in a headless Playwright browser context.
 - Apply configured `final.strokeWidth` and `final.padding`.
 - Write production assets:
-  - `public/icon-light.svg`
-  - `public/icon-dark.svg`
+  - `public/icon-light.png`
+  - `public/icon-dark.png`
   - `public/icon.png`
 - Write local tuning previews:
   - `scripts/favicon/previews/icon-preview-light.png`
@@ -33,12 +33,13 @@ Preview PNGs are gitignored and should be regenerated locally as needed.
 
 ## Runtime Behavior
 
-Papyrus metadata uses a light SVG favicon by default, with PNG fallback. At
-runtime, `app/layout.tsx` applies `window.matchMedia("(prefers-color-scheme:
-dark)")` to switch between `icon-light.svg` and `icon-dark.svg`.
+Papyrus metadata uses a light PNG favicon by default. At runtime,
+`app/layout.tsx` applies `window.matchMedia("(prefers-color-scheme: dark)")`
+to switch between `icon-light.png` and `icon-dark.png`.
 
-This keeps light mode as the deterministic fallback if a browser does not honor
-`media` selection for `rel="icon"`.
+This keeps light mode as the deterministic fallback and avoids SVG favicon
+selection quirks in Safari. The layout also appends a version query string to
+favicon URLs to force cache refresh when favicon behavior changes.
 
 ## Tune
 

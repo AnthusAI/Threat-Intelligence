@@ -245,8 +245,8 @@ async function main() {
       title: "Papyrus",
     });
 
-    await fs.writeFile(path.join(publicDir, "icon-light.svg"), lightSvg, "utf8");
-    await fs.writeFile(path.join(publicDir, "icon-dark.svg"), darkSvg, "utf8");
+    await renderSvgToPng(browser, lightSvg, path.join(publicDir, "icon-light.png"), config.outputSize);
+    await renderSvgToPng(browser, darkSvg, path.join(publicDir, "icon-dark.png"), config.outputSize);
     await renderSvgToPng(browser, lightSvg, path.join(publicDir, "icon.png"), config.outputSize);
 
     const previewDir = path.join(projectRoot, config.preview.outputDir);
@@ -303,8 +303,8 @@ async function main() {
     });
 
     console.log("Generated favicon assets:");
-    console.log(" - public/icon-light.svg");
-    console.log(" - public/icon-dark.svg");
+    console.log(" - public/icon-light.png");
+    console.log(" - public/icon-dark.png");
     console.log(" - public/icon.png");
     console.log(` - ${path.relative(projectRoot, path.join(previewDir, "icon-preview-light.png"))}`);
     console.log(` - ${path.relative(projectRoot, path.join(previewDir, "icon-preview-dark.png"))}`);
