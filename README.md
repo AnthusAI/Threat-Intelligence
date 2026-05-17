@@ -1,47 +1,62 @@
 # Papyrus
 
-Papyrus is a Next.js/React layout lab for a newspaper-style news site powered by
-[`@chenglou/pretext`](https://github.com/chenglou/pretext).
+You are focused on a topic. For us, it is AI/ML information systems. For you,
+it might be golf club technology, underwater basket weaving, oil markets, local
+politics, or any other beat worth watching closely.
 
-Papyrus is meant to be a general-purpose automated newsroom, not an AI/ML-only
-publication. The current AI/ML corpus content is pilot data. A publication about
-soccer, oil markets, cryptocurrency, knitting, sailing, local politics, or any
-other domain should be created by changing the publication configuration,
-corpus set, category/graph steering state, edition plans, and worker instructions,
-not by changing Papyrus code to know that domain.
+Papyrus turns that focus into a fully automated newsroom. While you sleep,
+research agents monitor the beat, update a publication-specific knowledge base,
+find leads, and surface surprising developments. Editor agents turn those
+signals into assignments. Reporter agents draft publishable stories. The next
+morning, you can open your publication and see what your newsroom found and
+created overnight.
 
-The project is exploring a specific publication problem: how to make responsive
-web pages behave more like a printed newspaper. The front page shows carefully
-cut excerpts from multiple stories. Those stories resume from the next exact
-word on planned inside pages. Continuation pages can combine more than one
-article, and solver-owned editorial furniture such as images and pull quotes
-changes how much space is available for copy.
+You steer it like an executive editor, as much or as little as you want. Choose
+the canonical categories that become sections, set editorial focus and policy,
+vote promising items up, push weak ones down, comment on developing drafts, and
+cull or restore assignments before publication. Every action becomes steering
+memory for the next research, assignment, drafting, and publication cycle.
 
+You can also step back. When you stop steering, the system keeps operating from
+the momentum you already gave it: accepted categories, current policy, open
+assignments, prior votes, and rejected proposal memory. It keeps researching,
+assigning, drafting, and preparing editions around your interests until you
+step back in.
+
+The beat is configuration, not code. The current AI/ML corpus is pilot content,
+not an application assumption. A Papyrus publication changes subject by
+changing publication configuration, corpus set, category/graph steering state,
+edition plans, and worker instructions.
+
+The output is a real newspaper-style reader experience: a Next.js/React site
+powered by [`@chenglou/pretext`](https://github.com/chenglou/pretext), with
+planned front page teasers, exact continuation handoff, shared continuation
+pages, and solver-owned editorial furniture such as images and pull quotes.
 Pretext is the text-fit oracle. Papyrus owns the edition layout plan,
 responsive grids, page regions, block geometry, scoring, continuation labels,
 and React rendering.
 
-## Credentials
+## Automated Newsroom
 
-Use an AWS profile for AWS access. That is the right credential mechanism for
-Amplify sandbox, deployment, and seeding from a local machine.
+Papyrus treats editorial control as an ongoing loop rather than a one-time
+content import. A publication starts with configuration: the corpus or corpora
+that define the beat, the accepted category tree that names the sections, the
+editorial policies that guide coverage, the edition plan that gives the issue
+shape, and worker instructions that tell agents how to research, assign, draft,
+review, and publish.
 
-Papyrus already follows that split:
+The human role is executive editorial steering. Editors can accept or reject
+category and graph proposals, tune section focus, review generated assignments,
+vote on candidate items, write comments for in-progress work, and decide which
+drafts survive into an edition. Those decisions become durable steering memory,
+so later research, taxonomy, graph, assignment, and publication cycles inherit
+both positive and negative feedback.
 
-- AWS credentials come from the normal AWS SDK/CLI chain, usually
-  `AWS_PROFILE` plus your local `~/.aws` config.
-- App-level settings belong in `.env`.
-- The seed script can still use Cognito editor credentials when seeding through
-  Amplify Auth.
-- The content CLI uses a direct bearer token in `PAPYRUS_GRAPHQL_JWT` for
-  authoring requests. It does not log into a Papyrus user pool.
-
-Papyrus has three distinct GraphQL auth lanes:
-
-- the site reads GraphQL content with API-key auth;
-- Cognito user-pool auth remains available for app/editor surfaces;
-- the authoring CLI writes content with a JWT accepted by AppSync through the
-  configured Lambda authorizer.
+The agent role is newsroom execution. Research agents maintain the knowledge
+base and produce reproducible artifacts. Editor agents dispatch section-targeted
+assignments with enough surplus for culling. Reporter agents produce draft
+article items from assignment records. Publishing materializes approved current
+versions into public reader projections.
 
 ## Newspaper layout, not web layout
 
@@ -175,14 +190,37 @@ Cloud content is seeded from fixture content in `lib/articles.ts` and
 `lib/layout-plan.ts`. The seed uploads article images to Storage and creates the
 related CMS records. It does not create a CMS UI.
 
+## Credentials
+
+Use an AWS profile for AWS access. That is the right credential mechanism for
+Amplify sandbox, deployment, and seeding from a local machine.
+
+Papyrus already follows that split:
+
+- AWS credentials come from the normal AWS SDK/CLI chain, usually
+  `AWS_PROFILE` plus your local `~/.aws` config.
+- App-level settings belong in `.env`.
+- The seed script can still use Cognito editor credentials when seeding through
+  Amplify Auth.
+- The content CLI uses a direct bearer token in `PAPYRUS_GRAPHQL_JWT` for
+  authoring requests. It does not log into a Papyrus user pool.
+
+Papyrus has three distinct GraphQL auth lanes:
+
+- the site reads GraphQL content with API-key auth;
+- Cognito user-pool auth remains available for app/editor surfaces;
+- the authoring CLI writes content with a JWT accepted by AppSync through the
+  configured Lambda authorizer.
+
 ## News Desk
 
 `/news-desk` is the Papyrus newsroom operations workspace. The default desk tab
 is `Categories`; `?tab=assignments` opens the assignment culling desk. The page
 is driven by the configured corpora for the publication, not by hard-coded
-corpus names. Papyrus owns the human steering state in GraphQL: corpora, import
-runs, artifacts, accepted category sets, strict-tree categories, proposals,
-append-only decisions, and projection rows.
+corpus names. Papyrus owns the human steering state in GraphQL: knowledge
+corpora, import runs, artifacts, accepted category sets, strict-tree categories,
+private `Reference` metadata, private `SemanticRelation` links, proposals, and
+append-only decisions.
 
 Assignment dispatch is the next newsroom lane. The Tactus editor procedure in
 `procedures/newsroom/editor.tac` plans assignment rows as `Item` records with
@@ -222,11 +260,12 @@ names the publication corpora, their roles, local classifier ids, and S3
 prefixes. Mirror that YAML to S3 beside the corpus data and materialize it into
 GraphQL with `categories import-config`.
 
-Private canonical publishing records are versioned in place: `Item`, `Edition`,
-`CategorySet`, and `Category` carry lineage, version number, previous version,
-version state, author/time metadata, change reason, and content hash. There are
-no separate version tables. `EditionItem` rows belong to an exact edition
-version and point to exact item versions.
+Private canonical publishing and knowledge records are versioned in place:
+`Item`, `Edition`, `CategorySet`, `Category`, `Reference`, and `SemanticNode`
+carry lineage, version number, previous version, version state, author/time
+metadata, change reason, and content hash. There are no separate version
+tables. `EditionItem` rows belong to an exact edition version and point to exact
+item versions; `SemanticRelation` rows point to exact subject/object versions.
 
 Public readers use only published projections: `PublishedEdition`,
 `PublishedEditionItem`, `PublishedItem`, `PublishedMediaAsset`,
@@ -235,18 +274,20 @@ editor/admin and JWT-authoring only; API-key reads are limited to the projection
 tables. Publishing materializes approved current versions into projections, so
 the reader path stays a direct AppSync read without a Lambda call.
 
-Raw Biblicus payloads, source notes, full metadata, and import internals live in
-`CategoryRawPayload`, which is private to editor/admin users and the
-JWT-authorized worker lane. Stable IDs such as Biblicus `item_id`,
+Raw Biblicus steering payloads and import internals live in `KnowledgeRawPayload`,
+which is private to editor/admin users and the JWT-authorized worker lane.
+Actual corpus contents do not belong in GraphQL. `Reference` records store only
+strict metadata such as Biblicus `item_id`, title, authors, source URI, S3/corpus
+path, media type, checksum, dates, and sanitized provenance. Stable IDs such as
 `category_key`, classifier ids, snapshot/artifact refs, corpus identity, and
 category lineage ids are the API contract; display names are editable copy, not
 keys.
 
-Category proposal review writes an append-only `CategoryDecision` and creates
+Category proposal review writes an append-only `SteeringDecision` and creates
 new `Category` versions when accepted edits change category copy or tree state.
 Accepted category trees are modeled as strict parent/child `Category` rows under
 a versioned `CategorySet`; full Biblicus taxonomy manifests stay private in
-`CategoryRawPayload`. Signed-in editor/admin readers see passive News Desk
+`KnowledgeRawPayload`. Signed-in editor/admin readers see passive News Desk
 appendix pages after each edition. Public readers get the normal newspaper
 edition with no appended category pages. The Biblicus labels `recommend`,
 `do_not_recommend`, and
