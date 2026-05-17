@@ -4,8 +4,8 @@ You are focused on a topic. For us, it is AI/ML information systems. For you,
 it might be golf club technology, underwater basket weaving, oil markets, local
 politics, or any other beat worth watching closely.
 
-Papyrus turns that focus into a fully automated newsroom. While you sleep,
-research agents monitor the beat, update a publication-specific knowledge base,
+Papyrus turns that focus into a fully automated newsroom. Research agents
+monitor the beat while you sleep, update a publication-specific knowledge base,
 find leads, and surface surprising developments. Editor agents turn those
 signals into assignments. Reporter agents draft publishable stories. The next
 morning, you can open your publication and see what your newsroom found and
