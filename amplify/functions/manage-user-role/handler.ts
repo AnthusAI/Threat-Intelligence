@@ -19,6 +19,14 @@ const REVOKED_ROLE_STATUS = "revoked";
 type GrantHandler = Schema["grantUserRole"]["functionHandler"];
 type RevokeHandler = Schema["revokeUserRole"]["functionHandler"];
 type DirectoryHandler = Schema["listUserDirectory"]["functionHandler"];
+type RoleFunctionEvent = (
+  | Parameters<GrantHandler>[0]
+  | Parameters<RevokeHandler>[0]
+  | Parameters<DirectoryHandler>[0]
+) & {
+  fieldName?: string | null;
+  info?: { fieldName?: string | null } | null;
+};
 type DataClient = ReturnType<typeof generateClient<Schema>>;
 type DataClientErrors = Array<{ message?: string | null } | string | null> | null | undefined;
 type DataClientResult<T = unknown> = {
@@ -71,14 +79,20 @@ type CognitoDirectoryUser = {
 const cognito = new CognitoIdentityProviderClient();
 let clientPromise: Promise<DataClient> | null = null;
 
-export const handler = async (event: Parameters<GrantHandler>[0] | Parameters<RevokeHandler>[0] | Parameters<DirectoryHandler>[0]) => {
-  const operation = event.info.fieldName;
+export const handler = async (event: RoleFunctionEvent) => {
+  const operation = getOperationName(event);
   if (operation === "listUserDirectory") return listUserDirectory();
   if (operation === "grantUserRole" || operation === "revokeUserRole") {
     return updateUserRole(event as Parameters<GrantHandler>[0] | Parameters<RevokeHandler>[0], operation);
   }
   throw new Error(`Unsupported role operation ${operation}.`);
 };
+
+function getOperationName(event: RoleFunctionEvent): string {
+  const operation = normalizeOptionalString(event.info?.fieldName) ?? normalizeOptionalString(event.fieldName);
+  if (!operation) throw new Error("Role operation event did not include a field name.");
+  return operation;
+}
 
 async function listUserDirectory() {
   const client = await getDataClient();
