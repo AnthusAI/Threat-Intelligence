@@ -236,6 +236,22 @@ separate. The Biblicus labels `recommend`, `do_not_recommend`, and
 actions; the News Desk exposes `accept` and `reject` as explicit human decisions.
 Editors can ignore a proposal by leaving it alone.
 
+Rejected proposals must influence future curation. Before a new taxonomy,
+ontology, or graph proposal cycle, export the Papyrus review memory:
+
+```bash
+npm run content -- curation export-steering-feedback \
+  --topic-set <topic-set-id> \
+  --output /tmp/papyrus-steering-feedback.json
+```
+
+That JSON contains append-only decisions, reviewed proposals, and normalized
+`suppressions` scoped by topic set, corpus, classifier, and root topic. Workers
+must pass it into proposal generation or use it to filter candidate bundles so
+rejected child topics, labels, relationships, or weak patterns are not proposed
+again. Accepted taxonomy exports define the current tree; steering-feedback
+exports carry the positive and negative review memory.
+
 ## Current Production Edition
 
 The production `edition-current` record is the AI/ML corpus first edition dated

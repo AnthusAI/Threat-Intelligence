@@ -9,6 +9,7 @@ const {
   buildAcceptedTaxonomyPayload,
   buildProjectionImportRecords,
   buildSteeringConfigRecords,
+  buildSteeringFeedbackPayload,
   buildSteeringImportRecords,
   mergeReviewedProposalState,
 } = require("./lib/papyrus-curation.cjs");
@@ -369,6 +370,63 @@ const acceptedTaxonomyExport = buildAcceptedTaxonomyPayload(
 assert.equal(acceptedTaxonomyExport.taxonomy_id, "canonical-taxonomy");
 assert.equal(acceptedTaxonomyExport.nodes[1].parent_topic_uid, "topic.scaling");
 assert.deepEqual(acceptedTaxonomyExport.nodes[0].seed_item_ids, ["research-001"]);
+
+const steeringFeedbackExport = buildSteeringFeedbackPayload(
+  {
+    id: steeringPlan.topicSetId,
+    corpusId: steeringPlan.corpusId,
+    classifierId: "canonical-classifier",
+    displayName: "Canonical Topic Set",
+    description: "Accepted topics",
+  },
+  [
+    {
+      ...taxonomyProposal,
+      status: "rejected",
+      reviewedAt: "2026-05-16T13:00:00.000Z",
+      reviewedBy: "editor@example.com",
+    },
+    {
+      ...ontologyProposal,
+      status: "accepted",
+      reviewedAt: "2026-05-16T13:05:00.000Z",
+      reviewedBy: "editor@example.com",
+    },
+  ],
+  [
+    {
+      id: "decision-reject-taxonomy-node",
+      proposalId: taxonomyProposal.id,
+      topicSetId: steeringPlan.topicSetId,
+      action: "reject",
+      actorLabel: "editor@example.com",
+      actorSub: "editor-sub",
+      note: "Too broad.",
+      selectedTopicUid: taxonomyProposal.topicUid,
+      createdAt: "2026-05-16T13:00:00.000Z",
+    },
+    {
+      id: "decision-accept-ontology",
+      proposalId: ontologyProposal.id,
+      topicSetId: steeringPlan.topicSetId,
+      action: "accept",
+      actorLabel: "editor@example.com",
+      actorSub: "editor-sub",
+      note: null,
+      selectedTopicUid: ontologyProposal.topicUid,
+      createdAt: "2026-05-16T13:05:00.000Z",
+    },
+  ],
+  { generatedAt: "2026-05-16T13:10:00.000Z" },
+);
+assert.equal(steeringFeedbackExport.export_kind, "papyrus-steering-feedback");
+assert.equal(steeringFeedbackExport.rejected_proposals.length, 1);
+assert.equal(steeringFeedbackExport.accepted_proposals.length, 1);
+assert.equal(steeringFeedbackExport.suppressions[0].proposal_id, taxonomyProposal.id);
+assert.equal(steeringFeedbackExport.suppressions[0].scope.root_topic_uid, "topic.scaling");
+assert.equal(steeringFeedbackExport.suppressions[0].match.topic_uid, "topic.scaling-memory");
+assert.equal(steeringFeedbackExport.suppressions[0].match.normalized_display_name, "scaling memory");
+assert.equal(steeringFeedbackExport.decisions.length, 2);
 
 const projectionPlan = buildProjectionImportRecords({
   classifier_id: "canonical-classifier",

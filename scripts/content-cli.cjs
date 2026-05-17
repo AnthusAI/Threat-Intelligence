@@ -10,6 +10,7 @@ const {
 const {
   buildAcceptedTopicSetPayload,
   buildAcceptedTaxonomyPayload,
+  buildSteeringFeedbackPayload,
   buildSteeringConfigRecords,
   buildProjectionImportRecords,
   buildSteeringImportRecords,
@@ -72,6 +73,9 @@ async function main() {
       return;
     case "curation:export-taxonomy":
       await exportTaxonomy(args.slice(2));
+      return;
+    case "curation:export-steering-feedback":
+      await exportSteeringFeedback(args.slice(2));
       return;
     case "curation:import-projection":
       await importProjection(args.slice(2));
@@ -243,6 +247,24 @@ async function exportTaxonomy(flags) {
     .filter((node) => node.taxonomyId === taxonomyId && node.status !== "deprecated");
   writeJsonFile(options.output, buildAcceptedTaxonomyPayload(taxonomy, nodes));
   console.log(`export\ttaxonomy\t${taxonomyId}\t${options.output}\t${nodes.length} nodes`);
+}
+
+async function exportSteeringFeedback(flags) {
+  const options = parseOptions(flags);
+  const topicSetId = options["topic-set"];
+  if (!topicSetId) throw new Error("curation export-steering-feedback requires --topic-set.");
+  if (!options.output) throw new Error("curation export-steering-feedback requires --output.");
+  const { client } = createAuthoringClient();
+  const topicSet = await client.getRecord("CurationTopicSet", topicSetId);
+  if (!topicSet) throw new Error(`CurationTopicSet ${topicSetId} was not found.`);
+  const proposals = (await client.listRecords("CurationProposal"))
+    .filter((proposal) => proposal.topicSetId === topicSetId);
+  const proposalIds = new Set(proposals.map((proposal) => proposal.id));
+  const decisions = (await client.listRecords("CurationDecision"))
+    .filter((decision) => decision.topicSetId === topicSetId || proposalIds.has(decision.proposalId));
+  const payload = buildSteeringFeedbackPayload(topicSet, proposals, decisions);
+  writeJsonFile(options.output, payload);
+  console.log(`export\tsteering-feedback\t${topicSetId}\t${options.output}\t${payload.accepted_proposals.length} accepted\t${payload.rejected_proposals.length} rejected`);
 }
 
 async function deleteAllContent(client) {
@@ -541,6 +563,7 @@ function printUsage() {
   console.log("  npm run content -- curation import-config --config <steering.yml>");
   console.log("  npm run content -- curation export-topic-set --topic-set <id> --output <accepted-topic-set.json>");
   console.log("  npm run content -- curation export-taxonomy --taxonomy <id> --output <accepted-taxonomy.json>");
+  console.log("  npm run content -- curation export-steering-feedback --topic-set <id> --output <steering-feedback.json>");
   console.log("  npm run content -- curation import-projection --bundle <projection.json>");
   console.log("  npm run content -- curation import-projection --config <steering.yml> --target-corpus-key <key> --authority-corpus-key <key> --bundle <projection.json>");
 }

@@ -284,6 +284,24 @@ npm run content -- curation export-taxonomy \
 The taxonomy export uses the Biblicus accepted taxonomy JSON shape, including
 `parent_topic_uid`, `seed_item_ids`, and `holdout_item_ids`.
 
+Export Papyrus human steering feedback as a separate machine-readable feedback
+file before the next taxonomy or graph proposal cycle:
+
+```bash
+npm run content -- curation export-steering-feedback \
+  --topic-set curation-topic-set-curation-corpus-ai-ml-research-ai-ml-research \
+  --output /tmp/ai-ml-research-steering-feedback.json
+```
+
+This export is the bridge that makes editor rejections matter to future worker
+cycles. It contains append-only Papyrus decisions, accepted proposals, rejected
+proposals, and a normalized `suppressions` list scoped by topic set, corpus,
+classifier, and root topic. Workers should provide it to Biblicus-side proposal
+generation so rejected child topics, labels, relationship assertions, and weak
+patterns are not proposed again under the same root. The accepted taxonomy JSON
+remains the source for what **is** accepted; the steering feedback JSON is the
+negative/positive review memory for what was accepted or rejected during review.
+
 Render the seed manifest and train/project with Biblicus from the Biblicus
 checkout. These commands write Biblicus corpus artifacts only.
 
@@ -410,7 +428,17 @@ state for existing accepted or rejected rows. This keeps repeated artifact
 imports from reopening proposals that editors already handled. Accepted
 taxonomy nodes are exported through `curation export-taxonomy`; rejected rows
 remain as Papyrus decision/proposal state and should be consulted by proposal
-generation workers before they create the next bundle.
+generation workers before they create the next bundle. Use
+`curation export-steering-feedback` to make that review state available outside
+Papyrus.
+
+Current Biblicus gap to keep explicit: `biblicus taxonomy discover` does not yet
+accept a Papyrus steering feedback/suppression input. Until Biblicus adds that
+command option, a worker/agent must read the feedback JSON and suppress matching
+proposal candidates before validating and recording a new
+`SteeringProposalBundle`. The preferred Biblicus-side feature is a
+`--steering-feedback <papyrus-feedback.json>` or equivalent option for taxonomy
+discovery and graph/ontology proposal generation.
 
 Accepted taxonomy summaries now have a small first-class editor surface in
 Papyrus: `/news-desk` shows accepted subtopics beside the canonical topic

@@ -250,6 +250,126 @@ function buildAcceptedTaxonomyPayload(taxonomy, nodes) {
   };
 }
 
+function buildSteeringFeedbackPayload(topicSet, proposals, decisions, options = {}) {
+  const generatedAt = options.generatedAt ?? new Date().toISOString();
+  const inScopeProposals = proposals
+    .filter((proposal) => proposal.topicSetId === topicSet.id)
+    .sort(compareById);
+  const proposalIds = new Set(inScopeProposals.map((proposal) => proposal.id));
+  const inScopeDecisions = decisions
+    .filter((decision) => proposalIds.has(decision.proposalId) || decision.topicSetId === topicSet.id)
+    .sort(compareByCreatedAt);
+  const latestDecisionByProposalId = new Map();
+  for (const decision of inScopeDecisions) {
+    if (!decision.proposalId) continue;
+    latestDecisionByProposalId.set(decision.proposalId, decision);
+  }
+  const reviewedProposals = inScopeProposals
+    .filter((proposal) => proposal.status === "accepted" || proposal.status === "rejected")
+    .map((proposal) => reviewedProposalFeedback(proposal, latestDecisionByProposalId.get(proposal.id)))
+    .sort(compareFeedback);
+  const acceptedProposals = reviewedProposals.filter((proposal) => proposal.human_action === "accept" || proposal.status === "accepted");
+  const rejectedProposals = reviewedProposals.filter((proposal) => proposal.human_action === "reject" || proposal.status === "rejected");
+
+  return {
+    schema_version: 1,
+    export_kind: "papyrus-steering-feedback",
+    generated_at: generatedAt,
+    source: {
+      system: "papyrus",
+      topic_set_id: topicSet.id,
+      corpus_id: topicSet.corpusId ?? null,
+      classifier_id: topicSet.classifierId ?? null,
+    },
+    topic_set: {
+      topic_set_id: topicSet.id,
+      corpus_id: topicSet.corpusId ?? null,
+      classifier_id: topicSet.classifierId ?? null,
+      display_name: topicSet.displayName ?? null,
+      description: topicSet.description ?? null,
+    },
+    decisions: inScopeDecisions.map(decisionFeedbackRecord),
+    accepted_proposals: acceptedProposals,
+    rejected_proposals: rejectedProposals,
+    suppressions: rejectedProposals.map((proposal) => suppressionFromRejectedProposal(proposal, topicSet)),
+  };
+}
+
+function reviewedProposalFeedback(proposal, decision) {
+  const humanAction = decisionAction(decision, proposal);
+  return {
+    proposal_id: proposal.id,
+    proposal_kind: proposal.proposalKind ?? "unknown",
+    steering_domain: proposal.steeringDomain ?? null,
+    status: proposal.status,
+    human_action: humanAction,
+    decided_at: decision?.createdAt ?? proposal.reviewedAt ?? proposal.updatedAt ?? null,
+    decided_by: decision?.actorLabel ?? proposal.reviewedBy ?? decision?.actorSub ?? null,
+    decision_id: decision?.id ?? null,
+    topic_set_id: proposal.topicSetId ?? null,
+    corpus_id: proposal.corpusId ?? null,
+    topic_uid: proposal.topicUid ?? null,
+    target_topic_uid: proposal.targetTopicUid ?? null,
+    graph_entity_id: proposal.graphEntityId ?? null,
+    relationship_type: proposal.relationshipType ?? null,
+    display_name: proposal.displayName ?? proposal.title ?? null,
+    subtitle: proposal.subtitle ?? null,
+    description: proposal.description ?? null,
+    summary: proposal.summary ?? null,
+    evidence_item_ids: compactArray(proposal.evidenceItemIds),
+    suggested_seed_item_ids: compactArray(proposal.suggestedSeedItemIds),
+    suggested_holdout_item_ids: compactArray(proposal.suggestedHoldoutItemIds),
+    source_snapshot_id: proposal.sourceSnapshotId ?? null,
+  };
+}
+
+function decisionAction(decision, proposal) {
+  if (decision?.action === "accept" || decision?.action === "reject" || decision?.action === "edit") return decision.action;
+  if (proposal.status === "accepted") return "accept";
+  if (proposal.status === "rejected") return "reject";
+  return decision?.action ?? null;
+}
+
+function decisionFeedbackRecord(decision) {
+  return {
+    decision_id: decision.id,
+    proposal_id: decision.proposalId,
+    topic_set_id: decision.topicSetId ?? null,
+    action: decision.action,
+    selected_topic_uid: decision.selectedTopicUid ?? null,
+    note: decision.note ?? null,
+    actor_label: decision.actorLabel ?? null,
+    actor_sub: decision.actorSub ?? null,
+    created_at: decision.createdAt ?? null,
+  };
+}
+
+function suppressionFromRejectedProposal(proposal, topicSet) {
+  return {
+    suppression_id: `suppression-${safeId(proposal.proposal_id)}`,
+    proposal_id: proposal.proposal_id,
+    proposal_kind: proposal.proposal_kind,
+    steering_domain: proposal.steering_domain,
+    reason: proposal.summary ?? proposal.description ?? null,
+    decided_at: proposal.decided_at,
+    decided_by: proposal.decided_by,
+    scope: {
+      topic_set_id: topicSet.id,
+      corpus_id: topicSet.corpusId ?? proposal.corpus_id ?? null,
+      classifier_id: topicSet.classifierId ?? null,
+      root_topic_uid: proposal.target_topic_uid ?? null,
+    },
+    match: {
+      topic_uid: proposal.topic_uid ?? null,
+      display_name: proposal.display_name ?? null,
+      normalized_display_name: normalizeMatchText(proposal.display_name),
+      relationship_type: proposal.relationship_type ?? null,
+      graph_entity_id: proposal.graph_entity_id ?? null,
+    },
+    evidence_item_ids: compactArray(proposal.evidence_item_ids),
+  };
+}
+
 function topicSetRecords(topicSet, context) {
   const topics = topicSet.topics ?? [];
   const acceptedRevisionId = `revision-${safeId(context.topicSetId)}-accepted-${hashShort(topicSet)}`;
@@ -648,8 +768,32 @@ function numberOrNull(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function compareById(left, right) {
+  return String(left.id ?? "").localeCompare(String(right.id ?? ""));
+}
+
+function compareByCreatedAt(left, right) {
+  const timeDiff = String(left.createdAt ?? "").localeCompare(String(right.createdAt ?? ""));
+  if (timeDiff !== 0) return timeDiff;
+  return compareById(left, right);
+}
+
+function compareFeedback(left, right) {
+  const rootDiff = String(left.target_topic_uid ?? "").localeCompare(String(right.target_topic_uid ?? ""));
+  if (rootDiff !== 0) return rootDiff;
+  const kindDiff = String(left.proposal_kind ?? "").localeCompare(String(right.proposal_kind ?? ""));
+  if (kindDiff !== 0) return kindDiff;
+  return String(left.proposal_id ?? "").localeCompare(String(right.proposal_id ?? ""));
+}
+
 function dateOrNull(value) {
   return typeof value === "string" && value.trim() ? value : null;
+}
+
+function normalizeMatchText(value) {
+  return typeof value === "string" && value.trim()
+    ? value.trim().toLowerCase().replace(/\s+/g, " ")
+    : null;
 }
 
 function safeId(value) {
@@ -683,6 +827,7 @@ function mergeReviewedProposalState(expected, current) {
 module.exports = {
   buildAcceptedTaxonomyPayload,
   buildAcceptedTopicSetPayload,
+  buildSteeringFeedbackPayload,
   buildSteeringConfigRecords,
   buildProjectionImportRecords,
   buildSteeringImportRecords,
