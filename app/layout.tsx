@@ -12,7 +12,11 @@ export const metadata: Metadata = {
   title: "Papyrus",
   description: "A Pretext-powered responsive newspaper layout lab.",
   icons: {
-    icon: "/icon.svg",
+    icon: [
+      { url: "/icon-light.svg", media: "(prefers-color-scheme: light)", type: "image/svg+xml" },
+      { url: "/icon-dark.svg", media: "(prefers-color-scheme: dark)", type: "image/svg+xml" },
+      { url: "/icon.png", type: "image/png" },
+    ],
   },
 };
 

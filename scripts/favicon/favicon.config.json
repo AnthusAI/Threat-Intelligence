@@ -1,0 +1,15 @@
+{
+  "iconName": "newspaper",
+  "outputSize": 256,
+  "final": {
+    "strokeWidth": 1.6,
+    "padding": 0
+  },
+  "preview": {
+    "strokeWidths": [1.6, 2.45, 3.3],
+    "paddings": [0, 1.35, 3],
+    "cellSize": 172,
+    "gap": 18,
+    "outputDir": "scripts/favicon/previews"
+  }
+}
