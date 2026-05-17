@@ -31,6 +31,15 @@ This script will:
 
 Preview PNGs are gitignored and should be regenerated locally as needed.
 
+## Runtime Behavior
+
+Papyrus metadata uses a light SVG favicon by default, with PNG fallback. At
+runtime, `app/layout.tsx` applies `window.matchMedia("(prefers-color-scheme:
+dark)")` to switch between `icon-light.svg` and `icon-dark.svg`.
+
+This keeps light mode as the deterministic fallback if a browser does not honor
+`media` selection for `rel="icon"`.
+
 ## Tune
 
 Edit `scripts/favicon/favicon.config.json`:
