@@ -156,7 +156,8 @@ const schema = a.schema({
   mergeUserProfiles: a
     .mutation()
     .arguments({
-      targetUserProfileId: a.id().required(),
+      targetUserProfileId: a.id(),
+      targetUserSub: a.string(),
       sourceUserProfileId: a.id(),
       sourceUserSub: a.string(),
       reason: a.string(),

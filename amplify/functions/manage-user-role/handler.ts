@@ -250,15 +250,16 @@ async function mergeUserProfiles(event: Parameters<MergeHandler>[0]) {
   const userPoolId = getUserPoolId();
   const now = new Date().toISOString();
   const actor = getIdentityLabel(event) ?? "Papyrus admin";
-  const targetProfileId = normalizeRequiredString(event.arguments.targetUserProfileId, "targetUserProfileId");
+  const requestedTargetProfileId = normalizeOptionalString(event.arguments.targetUserProfileId);
+  const requestedTargetSub = normalizeOptionalString((event.arguments as { targetUserSub?: string | null }).targetUserSub);
   const requestedSourceProfileId = normalizeOptionalString(event.arguments.sourceUserProfileId);
   const requestedSourceSub = normalizeOptionalString(event.arguments.sourceUserSub);
   const reason = normalizeOptionalString(event.arguments.reason);
+  if (!requestedTargetProfileId && !requestedTargetSub) {
+    throw new Error("targetUserProfileId or targetUserSub is required.");
+  }
   if (!requestedSourceProfileId && !requestedSourceSub) {
     throw new Error("sourceUserProfileId or sourceUserSub is required.");
-  }
-  if (requestedSourceProfileId && requestedSourceProfileId === targetProfileId) {
-    throw new Error("Source and target profiles must be different.");
   }
 
   const [profiles, identities, assignments] = await Promise.all([
@@ -267,7 +268,16 @@ async function mergeUserProfiles(event: Parameters<MergeHandler>[0]) {
     listDataRecords<UserRoleAssignmentRecord>(client.models.UserRoleAssignment),
   ]);
   const profilesById = new Map(profiles.map((profile) => [profile.id, profile]));
-  const targetProfile = profilesById.get(targetProfileId);
+  const targetProfileId = await ensureMergeTargetProfile(client, {
+    userPoolId,
+    now,
+    requestedTargetProfileId,
+    requestedTargetSub,
+    profilesById,
+    identities,
+  });
+  const targetProfile = profilesById.get(targetProfileId)
+    ?? (await getDataRecord<UserProfileRecord>(client.models.UserProfile, targetProfileId, "Target UserProfile"));
   if (!targetProfile) throw new Error(`Target profile ${targetProfileId} was not found.`);
   if ((targetProfile.status ?? ACTIVE_IDENTITY_STATUS) === "merged") {
     throw new Error(`Target profile ${targetProfileId} is already merged.`);
@@ -377,6 +387,65 @@ async function mergeUserProfiles(event: Parameters<MergeHandler>[0]) {
   const targetEntry = snapshot.entries.find((entry) => entry.userProfileId === targetProfileId);
   if (!targetEntry) throw new Error(`Merged target profile ${targetProfileId} was not returned by the directory.`);
   return targetEntry;
+}
+
+async function ensureMergeTargetProfile(
+  client: DataClient,
+  input: {
+    userPoolId: string;
+    now: string;
+    requestedTargetProfileId: string | null;
+    requestedTargetSub: string | null;
+    profilesById: Map<string, UserProfileRecord>;
+    identities: UserIdentityRecord[];
+  },
+): Promise<string> {
+  if (input.requestedTargetProfileId) {
+    if (!input.profilesById.has(input.requestedTargetProfileId)) {
+      throw new Error(`Target profile ${input.requestedTargetProfileId} was not found.`);
+    }
+    return input.requestedTargetProfileId;
+  }
+
+  const targetSub = input.requestedTargetSub;
+  if (!targetSub) throw new Error("targetUserProfileId or targetUserSub is required.");
+  const existingIdentity = input.identities.find((identity) => identity.cognitoSub === targetSub);
+  if (existingIdentity) {
+    if (!input.profilesById.has(existingIdentity.userProfileId)) {
+      throw new Error(`Target profile ${existingIdentity.userProfileId} was not found.`);
+    }
+    return existingIdentity.userProfileId;
+  }
+
+  const cognitoUser = await findCognitoUserBySub(input.userPoolId, targetSub);
+  const profileId = `user-profile-${safeId(targetSub)}`;
+  if (!input.profilesById.has(profileId)) {
+    await requireDataResult(
+      client.models.UserProfile.create({
+        id: profileId,
+        email: cognitoUser.email ?? null,
+        displayName: cognitoUser.displayName ?? cognitoUser.email ?? cognitoUser.username,
+        status: ACTIVE_IDENTITY_STATUS,
+        createdAt: input.now,
+        updatedAt: input.now,
+      }),
+      "create target UserProfile",
+    );
+  }
+  await requireDataResult(
+    client.models.UserIdentity.create({
+      id: `user-identity-${safeId(targetSub)}-${randomUUID().slice(0, 8)}`,
+      userProfileId: profileId,
+      cognitoSub: targetSub,
+      provider: cognitoUser.provider ?? null,
+      email: cognitoUser.email ?? null,
+      status: ACTIVE_IDENTITY_STATUS,
+      linkedAt: input.now,
+      lastSeenAt: input.now,
+    }),
+    "create target UserIdentity",
+  );
+  return profileId;
 }
 
 async function resolveRoleTarget(
@@ -581,6 +650,16 @@ async function listDataRecords<T>(model: { list(input?: Record<string, unknown>)
     nextToken = page.nextToken;
   } while (nextToken);
   return records;
+}
+
+async function getDataRecord<T>(
+  model: { get(input: { id: string }): Promise<DataClientResult<T>> },
+  id: string,
+  operation: string,
+): Promise<T | null> {
+  const response = await model.get({ id });
+  assertNoDataErrors(response.errors, operation);
+  return response.data ?? null;
 }
 
 async function requireDataResult<T>(promise: Promise<DataClientResult<T>>, operation: string): Promise<T> {

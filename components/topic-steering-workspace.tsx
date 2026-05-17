@@ -64,8 +64,9 @@ type CategoryReviewResponse = {
 
 type MergeSelection = {
   source: UserDirectoryEntry;
-  targetUserProfileId: string;
+  targetUserKey: string;
   reason: string;
+  notice?: string;
 };
 
 const TAILORED_TOPIC_PROPOSAL_KINDS = new Set([
@@ -468,18 +469,18 @@ function NewsDeskDashboard({
   }
 
   function openUserMerge(source: UserDirectoryEntry) {
-    const target = userDirectory.find((entry) => (
-      entry.userProfileId && (entry.userProfileId !== source.userProfileId || !source.userProfileId)
-    ));
+    const sourceKey = getUserDirectoryEntryKey(source);
+    const otherUsers = userDirectory.filter((entry) => getUserDirectoryEntryKey(entry) !== sourceKey);
+    const target = otherUsers[0] ?? null;
     setMergeSelection({
       source,
-      targetUserProfileId: target?.userProfileId ?? "",
+      targetUserKey: target ? getUserDirectoryEntryKey(target) : "",
       reason: "",
     });
   }
 
-  function updateUserMergeTarget(targetUserProfileId: string) {
-    setMergeSelection((current) => current ? { ...current, targetUserProfileId } : current);
+  function updateUserMergeTarget(targetUserKey: string) {
+    setMergeSelection((current) => current ? { ...current, targetUserKey } : current);
   }
 
   function updateUserMergeReason(reason: string) {
@@ -488,19 +489,20 @@ function NewsDeskDashboard({
 
   function runUserMergeAction() {
     if (!mergeSelection) return;
-    const { source, targetUserProfileId, reason } = mergeSelection;
+    const { source, targetUserKey, reason } = mergeSelection;
+    const target = userDirectory.find((entry) => getUserDirectoryEntryKey(entry) === targetUserKey) ?? null;
     const sourceId = source.userProfileId ?? source.userSub ?? "unknown-user";
     setActionState({ id: sourceId, message: "merge pending", tone: "pending" });
-    if (!targetUserProfileId) {
-      setActionState({ id: sourceId, message: "choose a target profile", tone: "error" });
+    if (!target) {
+      setActionState({ id: sourceId, message: "choose a target user", tone: "error" });
       return;
     }
-    if (source.userProfileId && source.userProfileId === targetUserProfileId) {
-      setActionState({ id: sourceId, message: "source and target profiles must be different", tone: "error" });
+    if (getUserDirectoryEntryKey(source) === getUserDirectoryEntryKey(target)) {
+      setActionState({ id: sourceId, message: "source and target users must be different", tone: "error" });
       return;
     }
     if (dashboard.isDemo) {
-      setUserDirectory((current) => mergeDemoUsers(current, source, targetUserProfileId));
+      setUserDirectory((current) => mergeDemoUsers(current, source, target));
       setMergeSelection(null);
       setActionState({ id: sourceId, message: "merge saved", tone: "ok" });
       return;
@@ -512,8 +514,12 @@ function NewsDeskDashboard({
     startTransition(() => {
       void (async () => {
         try {
-          const response = await dataClient.mutations.mergeUserProfiles({
-            targetUserProfileId,
+          const response = await (dataClient.mutations.mergeUserProfiles as unknown as (
+            args: Record<string, unknown>,
+            options: { authMode: typeof USER_POOL_AUTH_MODE },
+          ) => Promise<{ errors?: Array<{ message?: string | null } | string | null> | null }>)({
+            targetUserProfileId: target.userProfileId ?? undefined,
+            targetUserSub: target.userSub ?? undefined,
             sourceUserProfileId: source.userProfileId ?? undefined,
             sourceUserSub: source.userSub ?? undefined,
             reason: reason.trim() || undefined,
@@ -889,35 +895,40 @@ function UserMergePanel({
   onCancel: () => void;
   onConfirm: () => void;
   onReasonChange: (reason: string) => void;
-  onTargetChange: (targetUserProfileId: string) => void;
+  onTargetChange: (targetUserKey: string) => void;
 }) {
   const source = selection.source;
-  const targetOptions = users.filter((user) => (
-    user.userProfileId && (user.userProfileId !== source.userProfileId || !source.userProfileId)
-  ));
-  const target = targetOptions.find((user) => user.userProfileId === selection.targetUserProfileId) ?? null;
+  const sourceKey = getUserDirectoryEntryKey(source);
+  const targetOptions = users.filter((user) => getUserDirectoryEntryKey(user) !== sourceKey);
+  const target = targetOptions.find((user) => getUserDirectoryEntryKey(user) === selection.targetUserKey) ?? null;
   return (
     <section className="category-steering-section news-desk-merge-panel" aria-labelledby="user-merge-title" data-news-desk-user-merge-panel="true">
       <SectionHeader title="Merge Users" detail="Identity repair" />
       <div className="category-steering-revision-panel">
+        {selection.notice ? <p>{selection.notice}</p> : null}
         <label>
           <span>Source</span>
           <strong>{formatUserLabel(source)}</strong>
         </label>
         <label>
-          <span>Target profile</span>
+          <span>Target user</span>
           <select
             data-news-desk-merge-target
             disabled={disabled}
-            value={selection.targetUserProfileId}
+            value={selection.targetUserKey}
             onChange={(event) => onTargetChange(event.target.value)}
           >
-            <option value="">Choose target profile</option>
+            <option value="">Choose target user</option>
             {targetOptions.map((user) => (
-              <option key={user.userProfileId} value={user.userProfileId ?? ""}>{formatUserLabel(user)}</option>
+              <option key={getUserDirectoryEntryKey(user)} value={getUserDirectoryEntryKey(user)}>
+                {formatUserLabel(user)}{user.userProfileId ? "" : " (create profile)"}
+              </option>
             ))}
           </select>
         </label>
+        {!targetOptions.length ? (
+          <p>No other user is available as a merge target.</p>
+        ) : null}
         <label>
           <span>Reason</span>
           <textarea
@@ -935,7 +946,7 @@ function UserMergePanel({
         {target ? <UserMergeIdentityBlock title="Target identities" user={target} /> : null}
       </div>
       <div className="news-desk-user-row__actions">
-        <button type="button" data-news-desk-merge-confirm disabled={disabled || !selection.targetUserProfileId} onClick={onConfirm}>Confirm Merge</button>
+        <button type="button" data-news-desk-merge-confirm disabled={disabled || !selection.targetUserKey} onClick={onConfirm}>Confirm Merge</button>
         <button type="button" disabled={disabled} onClick={onCancel}>Cancel</button>
       </div>
     </section>
@@ -2191,16 +2202,22 @@ function formatUserLabel(user: UserDirectoryEntry): string {
   return user.displayName ?? user.email ?? user.username ?? user.userSub ?? user.userProfileId ?? "Unknown user";
 }
 
-function mergeDemoUsers(users: UserDirectoryEntry[], source: UserDirectoryEntry, targetUserProfileId: string): UserDirectoryEntry[] {
-  const sourceKey = source.userProfileId ?? source.userSub;
+function getUserDirectoryEntryKey(user: UserDirectoryEntry): string {
+  return user.userProfileId ?? user.userSub ?? user.email ?? user.username ?? formatUserLabel(user);
+}
+
+function mergeDemoUsers(users: UserDirectoryEntry[], source: UserDirectoryEntry, target: UserDirectoryEntry): UserDirectoryEntry[] {
+  const sourceKey = getUserDirectoryEntryKey(source);
+  const targetKey = getUserDirectoryEntryKey(target);
+  const targetProfileId = target.userProfileId ?? `user-profile-demo-${targetKey.replace(/[^a-z0-9-]/gi, "-").toLowerCase()}`;
   return users.reduce<UserDirectoryEntry[]>((entries, entry) => {
-    if (entry.userProfileId === targetUserProfileId) {
+    if (getUserDirectoryEntryKey(entry) === targetKey) {
       const mergedIdentity = source.identities.length
-        ? source.identities.map((identity) => ({ ...identity, userProfileId: targetUserProfileId }))
+        ? source.identities.map((identity) => ({ ...identity, userProfileId: targetProfileId }))
         : source.userSub
           ? [{
               id: `user-identity-demo-merged-${source.userSub}`,
-              userProfileId: targetUserProfileId,
+              userProfileId: targetProfileId,
               cognitoSub: source.userSub,
               provider: source.provider ?? "cognito",
               email: source.email ?? null,
@@ -2211,12 +2228,13 @@ function mergeDemoUsers(users: UserDirectoryEntry[], source: UserDirectoryEntry,
           : [];
       entries.push({
         ...entry,
+        userProfileId: targetProfileId,
         activeRoles: Array.from(new Set([...compactArray(entry.activeRoles), ...compactArray(source.activeRoles)])).sort(),
         identities: uniqueIdentities([...entry.identities, ...mergedIdentity]),
       });
       return entries;
     }
-    if ((entry.userProfileId ?? entry.userSub) === sourceKey) return entries;
+    if (getUserDirectoryEntryKey(entry) === sourceKey) return entries;
     entries.push(entry);
     return entries;
   }, []);
