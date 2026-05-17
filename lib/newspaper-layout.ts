@@ -888,7 +888,7 @@ function solveFrontFooter(blocks: SolvedBlock[], config: LayoutConfig, pageNumbe
   const sectionRows = entries.length === 0 ? 0 : Math.ceil(entries.length / sectionColumns);
   const utilityEntries: SolvedFrontFooterUtilityEntry[] = [
     { id: "archive", label: "Archive", href: "/archive", disabled: false },
-    { id: "newsDesk", label: "News Desk", href: "/news-desk", disabled: false },
+    { id: "newsDesk", label: "News Room", href: "/newsroom", disabled: false },
     { id: "login", label: "LOGIN", disabled: true },
   ];
   const rowCount = 1 + Math.max(sectionRows, utilityEntries.length);

@@ -140,7 +140,7 @@ export async function loadEditorNewsDeskState(): Promise<EditorNewsDeskState> {
     return {
       status: "error",
       dashboard: null,
-      error: error instanceof Error ? error.message : "Could not load News Desk data.",
+      error: error instanceof Error ? error.message : "Could not load Newsroom data.",
     };
   }
 }

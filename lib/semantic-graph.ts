@@ -131,13 +131,13 @@ export function predicateLabel(predicate: string, direction: "outgoing" | "incom
 
 export function newsDeskHrefForSemanticObject(kind: string, lineageId: string): string {
   const encoded = encodeURIComponent(lineageId);
-  if (kind === "reference") return `/news-desk/references?reference=${encoded}`;
-  if (kind === "category") return `/news-desk/topics?category=${encoded}`;
-  if (kind === "semanticNode") return `/news-desk/concepts?node=${encoded}`;
-  if (kind === "assignment") return `/news-desk/assignments?assignment=${encoded}`;
-  if (kind === "item") return `/news-desk?item=${encoded}`;
-  if (kind === "knowledgeComment") return `/news-desk/references?comment=${encoded}`;
-  return `/news-desk?object=${encodeURIComponent(kind)}:${encoded}`;
+  if (kind === "reference") return `/newsroom/references?reference=${encoded}`;
+  if (kind === "category") return `/newsroom/topics?category=${encoded}`;
+  if (kind === "semanticNode") return `/newsroom/concepts?node=${encoded}`;
+  if (kind === "assignment") return `/newsroom/assignments?assignment=${encoded}`;
+  if (kind === "item") return `/newsroom?item=${encoded}`;
+  if (kind === "knowledgeComment") return `/newsroom/references?comment=${encoded}`;
+  return `/newsroom?object=${encodeURIComponent(kind)}:${encoded}`;
 }
 
 export function createSemanticGraphSnapshot(input: SemanticGraphSnapshotInput) {

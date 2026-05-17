@@ -67,7 +67,7 @@ rendering contracts.
   instructions, not by Papyrus source changes. When that instruction surface is
   added, keep it beside the publication or corpus config and document how agents
   consume it. Until then, do not add domain-specific research-agent assumptions
-  to `/news-desk`, the content CLI, GraphQL models, or layout code.
+  to `/newsroom`, the content CLI, GraphQL models, or layout code.
 - Use an AWS profile for local Amplify/AWS access.
 - `.env` is for Papyrus runtime settings and the seed editor credentials used by
   `npm run seed:amplify`. `.env*` must stay ignored, and `.env.example` is the
@@ -89,8 +89,8 @@ rendering contracts.
   `KnowledgeComment` commentary, `SemanticNode` rows, `SemanticRelation` links,
   and stable external `item_id` references; Biblicus and S3 remain the owners of
   corpus content.
-- The News Desk is the newsroom operations surface. `Topics` is one desk tab,
-  not the whole product concept. Use `/news-desk` and News Desk naming in UI,
+- The Newsroom is the newsroom operations surface. `Topics` is one desk tab,
+  not the whole product concept. Use `/newsroom` and Newsroom naming in UI,
   docs, and tests. Future assignment and research queues should become desk tabs
   instead of separate one-off management pages.
 - Assignments are first-class private `Assignment` work records, not cloud
@@ -103,20 +103,20 @@ rendering contracts.
   `requests_work_on`, `uses_evidence`, `produces`, `blocked_by`, and
   `derived_from`.
 - Assignment lifecycle changes use protected actions or the JWT authoring lane
-  and append `AssignmentEvent` audit rows. The News Desk `Assignments` tab
+  and append `AssignmentEvent` audit rows. The Newsroom `Assignments` tab
   should show claim/release/complete/cancel/reopen workflow actions, not
   edition-candidate culling.
-- Style the News Desk as a newspaper section or editorial insert, not as an app
+- Style the Newsroom as a newspaper section or editorial insert, not as an app
   dashboard. Steering is passive and optional: proposals are skimmable notes
   beside the edition, and the system keeps following the accepted category set when
   humans provide no new steering.
 - Accepted categories have a small first-class typed surface for editor-only
-  News Desk views and appendix pages: versioned `CategorySet` and strict-tree
+  Newsroom views and appendix pages: versioned `CategorySet` and strict-tree
   `Category` rows. Import accepted taxonomy artifacts into those tables, keep
-  full manifests in private `KnowledgeRawPayload`, and append passive News Desk
+  full manifests in private `KnowledgeRawPayload`, and append passive Newsroom
   category-register pages to editions only for signed-in editor/admin readers.
   Accepted graph and ontology artifacts may materialize private `SemanticNode`
-  and `SemanticRelation` rows for direct News Desk and procedure queries.
+  and `SemanticRelation` rows for direct Newsroom and procedure queries.
   Biblicus recommendation labels such as `recommend`, `do_not_recommend`, and
   `needs_clarification` are agent labels, not Papyrus review actions.
 - Rejected steering proposals are not cosmetic. Export Papyrus review memory

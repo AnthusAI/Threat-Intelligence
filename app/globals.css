@@ -1541,12 +1541,13 @@ img {
 
 .news-desk-edition {
   min-height: 100vh;
+  padding-top: var(--edition-progress-height);
 }
 
 .news-desk-page {
-  --page-padding-bottom: calc(var(--paper-rhythm) * 3);
-  --page-padding-top: calc(var(--paper-rhythm) * 2);
-  --page-padding-x: clamp(24px, 4vw, 64px);
+  --page-padding-bottom: calc(var(--paper-rhythm) * 2);
+  --page-padding-top: var(--paper-rhythm);
+  --page-padding-x: 30px;
 
   height: auto;
   max-width: none;
@@ -1626,7 +1627,7 @@ img {
 .news-desk-masthead {
   --masthead-bonus-rule-offset: 0.1875em;
   --masthead-bonus-rule-weight: 0.0625em;
-  --masthead-height: calc(var(--paper-rhythm) * 5);
+  --masthead-height: calc(var(--paper-rhythm) * 6);
   --masthead-rule-weight: 0.125em;
   --masthead-title-font-size: calc(var(--masthead-title-line-height) * 1.3586956522);
   --masthead-title-line-height: calc(var(--paper-rhythm) * 4);
@@ -1634,22 +1635,7 @@ img {
   --masthead-title-margin-top: calc(var(--paper-rhythm) / 2);
   --masthead-title-optical-shift: -3px;
   --masthead-meta-line-height: var(--paper-rhythm);
-  --masthead-meta-padding-top: 5px;
-
-  margin-bottom: calc(var(--paper-rhythm) * 1.55);
-}
-
-.news-desk-masthead h1 {
-  font-size: var(--masthead-title-font-size);
-  line-height: var(--masthead-title-line-height);
-  margin: var(--masthead-title-margin-top) 0 var(--masthead-title-margin-bottom);
-  white-space: nowrap;
-}
-
-.news-desk-masthead .masthead__meta {
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.02em;
+  --masthead-meta-padding-top: 0px;
 }
 
 .news-desk-auth-control {
@@ -2955,10 +2941,6 @@ img {
     padding-bottom: calc(var(--paper-rhythm) * 0.75);
   }
 
-  .news-desk-masthead h1 {
-    font-size: min(var(--masthead-title-font-size), 14vw);
-  }
-
   .news-desk-appendix h2 {
     font-size: 3.2rem;
   }
@@ -3090,10 +3072,6 @@ img {
 
   .masthead h1 {
     font-size: var(--masthead-title-font-size, clamp(3.4rem, 22vw, 5.6rem));
-  }
-
-  .news-desk-masthead h1 {
-    font-size: min(var(--masthead-title-font-size), 13.5vw);
   }
 
   .inside-header {

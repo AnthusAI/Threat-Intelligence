@@ -617,7 +617,7 @@ function PagePlaceholder({ page }: { page: SolvedPage }) {
 function AppendixPagePlaceholder({ pageNumber }: { pageNumber: number }) {
   return (
     <section className="paper-page-content paper-page-content--placeholder" data-page-kind="newsDeskAppendix">
-      <div className="page-placeholder-label">Loading News Desk Page {pageNumber}</div>
+      <div className="page-placeholder-label">Loading Newsroom Page {pageNumber}</div>
     </section>
   );
 }
@@ -761,11 +761,11 @@ function NewsDeskAppendixPageView({
     >
       <header className="inside-header">
         <span>Page {page.pageNumber}</span>
-        <span>News Desk</span>
+        <span>Newsroom</span>
         <span>{page.mode === "register" ? "Category Register" : "Category Page"}</span>
       </header>
       <article className="news-desk-appendix" aria-labelledby={`news-desk-appendix-title-${page.pageNumber}`}>
-        <p className="story-label">News Desk Appendix</p>
+        <p className="story-label">Newsroom Appendix</p>
         <h2 id={`news-desk-appendix-title-${page.pageNumber}`}>{title}</h2>
         {page.mode === "register" ? (
           <TopicRegisterPage editionBasePath={editionBasePath} page={page} scrollToPage={scrollToPage} />
@@ -837,7 +837,7 @@ function RootTopicPage({ page }: { page: NewsDeskAppendixPage }) {
       <section className="news-desk-appendix__subcategories" aria-label={`${root.displayName} accepted subcategories`}>
         <header>
           <h3>Accepted Subcategories</h3>
-          <Link href="/news-desk">Review related notes in News Desk</Link>
+          <Link href="/newsroom">Review related notes in Newsroom</Link>
         </header>
         {page.subcategories.length ? page.subcategories.map((subcategory) => (
           <article className="news-desk-appendix__subcategory" data-news-desk-subcategory={subcategory.categoryKey} key={subcategory.id}>

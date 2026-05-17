@@ -21,33 +21,33 @@ Given("I open the archive page at {int} by {int}", async function (width, height
   await requirePage(this).waitForSelector(".archive-grid-shell", { state: "visible", timeout: 15_000 });
 });
 
-Given("I open the news desk at {int} by {int}", async function (width, height) {
-  await this.openPath("/news-desk?demo=1", width, height);
+Given("I open the newsroom at {int} by {int}", async function (width, height) {
+  await this.openPath("/newsroom?demo=1", width, height);
   await requirePage(this).waitForSelector("[data-news-desk]", { state: "visible", timeout: 15_000 });
 });
 
-Given("I open the topics news desk at {int} by {int}", async function (width, height) {
-  await this.openPath("/news-desk?demo=1&section=topics", width, height);
+Given("I open the topics newsroom at {int} by {int}", async function (width, height) {
+  await this.openPath("/newsroom/topics?demo=1", width, height);
   await requirePage(this).waitForSelector("[data-news-desk-section='topics']", { state: "visible", timeout: 15_000 });
 });
 
-Given("I open the references news desk at {int} by {int}", async function (width, height) {
-  await this.openPath("/news-desk?demo=1&section=references", width, height);
+Given("I open the references newsroom at {int} by {int}", async function (width, height) {
+  await this.openPath("/newsroom/references?demo=1", width, height);
   await requirePage(this).waitForSelector("[data-news-desk-section='references']", { state: "visible", timeout: 15_000 });
 });
 
-Given("I open the concepts news desk at {int} by {int}", async function (width, height) {
-  await this.openPath("/news-desk?demo=1&section=concepts", width, height);
+Given("I open the concepts newsroom at {int} by {int}", async function (width, height) {
+  await this.openPath("/newsroom/concepts?demo=1", width, height);
   await requirePage(this).waitForSelector("[data-news-desk-section='concepts']", { state: "visible", timeout: 15_000 });
 });
 
-Given("I open the users news desk at {int} by {int}", async function (width, height) {
-  await this.openPath("/news-desk?demo=1&section=users", width, height);
+Given("I open the users newsroom at {int} by {int}", async function (width, height) {
+  await this.openPath("/newsroom/users?demo=1", width, height);
   await requirePage(this).waitForSelector("[data-news-desk-section='users']", { state: "visible", timeout: 15_000 });
 });
 
-Given("I open the assignments news desk at {int} by {int}", async function (width, height) {
-  await this.openPath("/news-desk?demo=1&section=assignments", width, height);
+Given("I open the assignments newsroom at {int} by {int}", async function (width, height) {
+  await this.openPath("/newsroom/assignments?demo=1", width, height);
   await requirePage(this).waitForSelector("[data-news-desk-assignments]", { state: "visible", timeout: 15_000 });
 });
 
@@ -81,7 +81,7 @@ When("I follow the continuation jump for article {string}", async function (arti
   await jump.click();
 });
 
-When("I update the first news desk category name to {string}", async function (name) {
+When("I update the first newsroom category name to {string}", async function (name) {
   const page = requirePage(this);
   const firstNameInput = page.locator(".category-steering-category-card label", { hasText: "Name" }).first().locator("input");
   await firstNameInput.fill(name);
@@ -116,7 +116,7 @@ When("I complete assignment {string} with note {string}", async function (assign
   }, assignmentId);
 });
 
-When("I merge news desk user {string} into {string}", async function (sourceLabel, targetLabel) {
+When("I merge newsroom user {string} into {string}", async function (sourceLabel, targetLabel) {
   const page = requirePage(this);
   const sourceRow = page.locator(".news-desk-user-row", { hasText: sourceLabel }).first();
   await sourceRow.waitFor({ state: "visible", timeout: 10_000 });
@@ -212,11 +212,11 @@ Then("the active content source should be {string}", async function (expectedSou
   assert.equal(source, expectedSource);
 });
 
-Then("the news desk should render", async function () {
+Then("the newsroom should render", async function () {
   const page = requirePage(this);
   await page.locator("[data-news-desk]").waitFor({ state: "visible", timeout: 10_000 });
   assert.equal(await page.locator("[data-news-desk]").getAttribute("data-category-steering-demo"), "true");
-  await page.locator("h1", { hasText: "News Desk" }).waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("h1", { hasText: "NEWSROOM" }).waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("[data-news-desk-tab='overview'][aria-current='page']").waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("[data-news-desk-tab='users']").waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("[data-news-desk-tab='topics']").waitFor({ state: "visible", timeout: 10_000 });
@@ -224,7 +224,7 @@ Then("the news desk should render", async function () {
   await page.locator("[data-news-desk-tab='references']").waitFor({ state: "visible", timeout: 10_000 });
 });
 
-Then("the news desk should show the knowledge overview", async function () {
+Then("the newsroom should show the knowledge overview", async function () {
   const page = requirePage(this);
   await page.locator("[data-news-desk-section='overview']").waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("text=Knowledge Wire").first().waitFor({ state: "visible", timeout: 10_000 });
@@ -266,7 +266,7 @@ Then("the users desk should show merge controls", async function () {
   await page.locator(".news-desk-user-row button", { hasText: "Merge" }).first().waitFor({ state: "visible", timeout: 10_000 });
 });
 
-Then("news desk user {string} should include identity {string}", async function (userLabel, identityLabel) {
+Then("newsroom user {string} should include identity {string}", async function (userLabel, identityLabel) {
   const page = requirePage(this);
   await page.waitForFunction(
     ({ userLabel, identityLabel }) => {
@@ -278,7 +278,7 @@ Then("news desk user {string} should include identity {string}", async function 
   );
 });
 
-Then("news desk user {string} should not be listed", async function (userLabel) {
+Then("newsroom user {string} should not be listed", async function (userLabel) {
   const page = requirePage(this);
   await page.waitForFunction((label) => (
     !Array.from(document.querySelectorAll(".news-desk-user-row")).some((entry) => entry.textContent?.includes(label))
@@ -295,13 +295,13 @@ Then("the assignments desk should render", async function () {
   await page.locator('[data-assignment-candidate="assignment-demo-reference-intake-history-002"][data-assignment-status="claimed"]').waitFor({ state: "visible", timeout: 10_000 });
 });
 
-Then("the news desk should show an editor access gate", async function () {
+Then("the newsroom should show an editor access gate", async function () {
   const page = requirePage(this);
   await page.locator("[data-news-desk-access]").waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("text=Editor Sign-In Required").first().waitFor({ state: "visible", timeout: 10_000 });
 });
 
-Then("the news desk should show category and graph proposal rows", async function () {
+Then("the newsroom should show category and graph proposal rows", async function () {
   const page = requirePage(this);
   await page.locator("[data-proposal-domain='category']").first().waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("td", { hasText: "relationship-proposal" }).first().waitFor({ state: "visible", timeout: 10_000 });
@@ -309,27 +309,27 @@ Then("the news desk should show category and graph proposal rows", async functio
   await page.locator("[data-generic-proposal-kind='add-ontology-relationship']").first().waitFor({ state: "visible", timeout: 10_000 });
 });
 
-Then("the news desk should show accepted subcategories under canonical categories", async function () {
+Then("the newsroom should show accepted subcategories under canonical categories", async function () {
   const page = requirePage(this);
   await page.locator("[data-news-desk-category-tree-root='category.foundation-model-scaling']").waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("[data-news-desk-subcategory='category.agent-memory']", { hasText: "Agent Memory" }).waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("[data-news-desk-subcategory='category.benchmark-saturation']", { hasText: "Benchmark Saturation" }).waitFor({ state: "visible", timeout: 10_000 });
 });
 
-Then("the news desk should show proposed subcategories under canonical categories", async function () {
+Then("the newsroom should show proposed subcategories under canonical categories", async function () {
   const page = requirePage(this);
   await page.locator("[data-news-desk-category-tree-root='category.foundation-model-scaling']").waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("[data-news-desk-proposed-subcategory='category.agent-memory']", { hasText: "Agent Memory" }).waitFor({ state: "visible", timeout: 10_000 });
 });
 
-Then("the news desk should offer accept and reject actions without defer", async function () {
+Then("the newsroom should offer accept and reject actions without defer", async function () {
   const page = requirePage(this);
   await page.locator("[data-news-desk-proposed-subcategory='category.agent-memory'] [data-review-action='accept']").waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("[data-news-desk-proposed-subcategory='category.agent-memory'] [data-review-action='reject']").waitFor({ state: "visible", timeout: 10_000 });
   assert.equal(await page.locator("[data-review-action='defer']").count(), 0);
 });
 
-Then("the first news desk category name should be {string}", async function (expectedName) {
+Then("the first newsroom category name should be {string}", async function (expectedName) {
   const value = await requirePage(this)
     .locator(".category-steering-category-card label", { hasText: "Name" })
     .first()
@@ -350,7 +350,7 @@ Then("assignment {string} should be completed", async function (assignmentId) {
     .waitFor({ state: "visible", timeout: 10_000 });
 });
 
-Then("edition page count should not include appended News Desk pages", async function () {
+Then("edition page count should not include appended Newsroom pages", async function () {
   const page = requirePage(this);
   await page.waitForFunction(() => document.querySelector(".site-shell")?.getAttribute("data-news-desk-appendix-ready") === "true");
   const report = await page.evaluate(() => ({
@@ -361,7 +361,7 @@ Then("edition page count should not include appended News Desk pages", async fun
   assert.equal(report.totalPages, report.solvedPages);
 });
 
-Then("edition page count should include appended News Desk pages", async function () {
+Then("edition page count should include appended Newsroom pages", async function () {
   const page = requirePage(this);
   await page.waitForFunction(() => document.querySelector(".site-shell")?.getAttribute("data-news-desk-appendix-ready") === "true");
   await page.waitForFunction(() => {
@@ -376,17 +376,17 @@ Then("edition page count should include appended News Desk pages", async functio
   assert.ok(report.solvedPages > 0, "Expected solved edition pages");
   assert.ok(
     report.totalPages > report.solvedPages,
-    `Expected appended News Desk pages; solved=${report.solvedPages}, total=${report.totalPages}`,
+    `Expected appended Newsroom pages; solved=${report.solvedPages}, total=${report.totalPages}`,
   );
 });
 
-Then("no News Desk appendix pages should render", async function () {
+Then("no Newsroom appendix pages should render", async function () {
   const page = requirePage(this);
   const appendixCount = await page.locator("[data-news-desk-appendix-page]").count();
   assert.equal(appendixCount, 0);
 });
 
-Then("the front page footer should not link to the news desk", async function () {
+Then("the front page footer should not link to the newsroom", async function () {
   const page = requirePage(this);
   await page.waitForFunction(() => window.__PAPYRUS_LAYOUT__ && document.querySelector(".front-footer"));
   const newsDeskLinks = await page.locator('.front-footer [data-footer-utility="newsDesk"]').count();
@@ -415,13 +415,13 @@ Then("the appendix page should use newspaper page styling", async function () {
       fontFamily: style.fontFamily,
     };
   });
-  assert.ok(report, "Expected active News Desk appendix page");
+  assert.ok(report, "Expected active Newsroom appendix page");
   assert.notEqual(report.backgroundImage, "none", "Expected paper background on appendix page");
   assert.notEqual(report.boxShadow, "none", "Expected paper shadow on appendix page");
   assert.match(report.fontFamily, /Georgia|Times/i);
 });
 
-Then("the News Desk appendix should not overflow horizontally", async function () {
+Then("the Newsroom appendix should not overflow horizontally", async function () {
   const report = await requirePage(this).evaluate(() => {
     const active = document.querySelector(".paper-page--active .paper-page-content--news-desk-appendix");
     return {

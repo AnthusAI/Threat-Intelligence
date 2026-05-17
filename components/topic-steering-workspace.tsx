@@ -111,12 +111,12 @@ const TAILORED_TOPIC_PROPOSAL_KINDS = new Set([
 ]);
 
 const NEWS_DESK_TABS: Array<{ id: NewsDeskTab; label: string; detail: string; href: string }> = [
-  { id: "overview", label: "Overview", detail: "Desk index", href: "/news-desk" },
-  { id: "users", label: "Users", detail: "Roles", href: "/news-desk/users" },
-  { id: "topics", label: "Topics", detail: "Taxonomy", href: "/news-desk/topics" },
-  { id: "concepts", label: "Concepts", detail: "Ontology", href: "/news-desk/concepts" },
-  { id: "references", label: "References", detail: "Corpus", href: "/news-desk/references" },
-  { id: "assignments", label: "Assignments", detail: "Placeholder", href: "/news-desk/assignments" },
+  { id: "overview", label: "Overview", detail: "Desk index", href: "/newsroom" },
+  { id: "users", label: "Users", detail: "Roles", href: "/newsroom/users" },
+  { id: "topics", label: "Topics", detail: "Taxonomy", href: "/newsroom/topics" },
+  { id: "concepts", label: "Concepts", detail: "Ontology", href: "/newsroom/concepts" },
+  { id: "references", label: "References", detail: "Corpus", href: "/newsroom/references" },
+  { id: "assignments", label: "Assignments", detail: "Placeholder", href: "/newsroom/assignments" },
 ];
 
 const TAXONOMY_PROPOSAL_KINDS = new Set([
@@ -183,7 +183,7 @@ function ProtectedNewsDeskWorkspace({ initialTab, initialSelection }: { initialT
               <h1 id="news-desk-access-title">
                 <span>NEWSROOM</span>
               </h1>
-              <div className="masthead__meta" aria-label="News desk edition status">
+              <div className="masthead__meta" aria-label="Newsroom edition status">
                 <span>Steering Section</span>
                 <span>Restricted Desk</span>
                 <span><ReaderAuthControl className="news-desk-auth-control" showIdentity /></span>
@@ -348,7 +348,7 @@ function NewsDeskDashboard({
             {
               proposalId: proposal.id,
               action,
-              actorLabel: "Papyrus news desk",
+              actorLabel: "Papyrus newsroom",
               displayName: proposal.displayName ?? undefined,
               shortTitle: proposal.shortTitle ?? undefined,
               subtitle: proposal.subtitle ?? undefined,
@@ -578,7 +578,7 @@ function NewsDeskDashboard({
     const updatedAt = new Date().toISOString();
     if (dashboard.isDemo) {
       const nextCategory = buildCategoryCopyVersion(category, update, {
-        actorLabel: "Papyrus news desk",
+        actorLabel: "Papyrus newsroom",
         now: updatedAt,
       });
       setCategorys((current) => current.map((entry) => (entry.id === category.id ? nextCategory : entry)));
@@ -620,14 +620,14 @@ function NewsDeskDashboard({
           <h1 id="news-desk-title">
             <span>NEWSROOM</span>
           </h1>
-          <div className="masthead__meta" aria-label="News desk edition status">
+          <div className="masthead__meta" aria-label="Newsroom edition status">
             <span>Steering Section</span>
             <span>{mastheadSecondLabel}</span>
             <span>{dashboard.isDemo ? "Demo Desk" : <ReaderAuthControl className="news-desk-auth-control" showIdentity />}</span>
           </div>
         </header>
 
-        <nav className="news-desk-tabs" aria-label="News desk sections">
+        <nav className="news-desk-tabs" aria-label="Newsroom sections">
           {NEWS_DESK_TABS.map((tab) => (
             <a
               key={tab.id}
@@ -642,13 +642,13 @@ function NewsDeskDashboard({
           ))}
         </nav>
 
-        <section className="news-desk-lede-grid" aria-label="News desk overview">
+        <section className="news-desk-lede-grid" aria-label="Newsroom overview">
           <article className="news-desk-lede">
             <p className="story-label">{formatDeskSectionLabel(activeTab)}</p>
             <h2>{formatDeskSectionHeadline(activeTab)}</h2>
             <p>{formatDeskSectionLede(activeTab)}</p>
           </article>
-          <aside className="news-desk-index" aria-label="News desk status index">
+          <aside className="news-desk-index" aria-label="Newsroom status index">
             <StatusMetric label="Users" value={String(userDirectory.length)} detail={dashboard.canManageUsers ? "admin directory" : "admin-only directory"} />
             <StatusMetric label="Topics" value={String(canonicalCategorys.length)} detail={`${acceptedSubcategoryCount} accepted subtopics`} />
             <StatusMetric label="Concepts" value={String(dashboard.semanticNodes.length)} detail={`${dashboard.semanticRelations.length} semantic links`} />
@@ -768,11 +768,11 @@ function OverviewDeskView({
         <section className="category-steering-section category-steering-section--lead" aria-labelledby="knowledge-wire-title">
           <SectionHeader title="Knowledge Wire" detail={latestImport ? `${latestImport.importKind} / ${latestImport.status}` : "No import run"} />
           <div className="news-desk-ledger-list news-desk-ledger-list--compact">
-            <DeskLinkCard href="/news-desk/references" label="References" value={dashboard.references.length} detail={`${dashboard.referenceAttachments.length} attachments / ${dashboard.knowledgeComments.length} comments`} />
-            <DeskLinkCard href="/news-desk/concepts" label="Concepts" value={dashboard.semanticNodes.length} detail={`${dashboard.semanticRelations.length} relations`} />
-            <DeskLinkCard href="/news-desk/topics" label="Topics" value={dashboard.categorys.length} detail={`${dashboard.proposals.filter((proposal) => proposal.status === "proposed").length} open proposals`} />
-            <DeskLinkCard href="/news-desk/users" label="Users" value={userDirectory.length} detail={dashboard.canManageUsers ? "role desk available" : "admin role required"} />
-            <DeskLinkCard href="/news-desk/assignments" label="Assignments" value={assignmentMetrics.total} detail={`${assignmentMetrics.open} open work items`} />
+            <DeskLinkCard href="/newsroom/references" label="References" value={dashboard.references.length} detail={`${dashboard.referenceAttachments.length} attachments / ${dashboard.knowledgeComments.length} comments`} />
+            <DeskLinkCard href="/newsroom/concepts" label="Concepts" value={dashboard.semanticNodes.length} detail={`${dashboard.semanticRelations.length} relations`} />
+            <DeskLinkCard href="/newsroom/topics" label="Topics" value={dashboard.categorys.length} detail={`${dashboard.proposals.filter((proposal) => proposal.status === "proposed").length} open proposals`} />
+            <DeskLinkCard href="/newsroom/users" label="Users" value={userDirectory.length} detail={dashboard.canManageUsers ? "role desk available" : "admin role required"} />
+            <DeskLinkCard href="/newsroom/assignments" label="Assignments" value={assignmentMetrics.total} detail={`${assignmentMetrics.open} open work items`} />
           </div>
         </section>
 
@@ -1635,7 +1635,7 @@ function demoAssignmentEvent(assignment: AssignmentRecord, action: AssignmentAct
     eventType: action,
     fromStatus: assignment.status,
     toStatus: next.status,
-    actorLabel: "Papyrus news desk",
+    actorLabel: "Papyrus newsroom",
     note: note.trim() || null,
     createdAt: now,
   };
@@ -1656,9 +1656,9 @@ async function getNewsDeskActorLabel(): Promise<string> {
       ?? readTextClaim(payload["cognito:username"])
       ?? readTextClaim(payload.username)
       ?? readTextClaim(payload.sub);
-    return claim ?? "Papyrus news desk";
+    return claim ?? "Papyrus newsroom";
   } catch {
-    return "Papyrus news desk";
+    return "Papyrus newsroom";
   }
 }
 
@@ -1669,14 +1669,14 @@ function readTextClaim(value: unknown): string | null {
 function formatAccessTitle(state: EditorNewsDeskState): string {
   if (state.status === "loading") return "Checking Desk Credentials";
   if (state.status === "forbidden") return "Editor Role Required";
-  if (state.status === "error") return "News Desk Unavailable";
+  if (state.status === "error") return "Newsroom Unavailable";
   return "Editor Sign-In Required";
 }
 
 function formatAccessDetail(state: EditorNewsDeskState): string {
   if (state.status === "loading") return "Papyrus is checking the current browser session before loading steering state.";
   if (state.status === "forbidden") return "This account is signed in, but the Cognito session does not include the editor or admin group.";
-  if (state.status === "error") return "Papyrus could not verify this editor session or load the private News Desk data.";
+  if (state.status === "error") return "Papyrus could not verify this editor session or load the private Newsroom data.";
   return "Sign in with an editor or admin account to inspect category, category tree, ontology, and graph steering.";
 }
 

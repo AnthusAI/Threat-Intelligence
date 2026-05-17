@@ -291,7 +291,7 @@ append a canonical category register.
 ## Export, Train, Project
 
 After a human edits or accepts category copy from the `Categories` tab in the
-News Desk at `/news-desk`, export the accepted category set:
+Newsroom at `/newsroom`, export the accepted category set:
 
 ```bash
 npm run content -- categories export-category-set \
@@ -401,7 +401,7 @@ npm run content -- categories import-projection \
 Graph steering follows the same boundary. Biblicus creates graph snapshots,
 signals, and proposal artifacts. Papyrus imports the resulting steering proposal
 rows and raw proposal payloads. Accepted graph or ontology artifacts can also
-materialize private `SemanticNode` and `SemanticRelation` rows so News Desk and
+materialize private `SemanticNode` and `SemanticRelation` rows so Newsroom and
 procedure code can query ontological relationships directly.
 
 ```bash
@@ -433,7 +433,7 @@ uv run biblicus steering proposals record \
   --input /tmp/ai-ml-research-graph-proposals.json
 ```
 
-Re-import steering so the News Desk shows the graph proposal rows:
+Re-import steering so the Newsroom shows the graph proposal rows:
 
 ```bash
 cd /Users/ryan/Projects/Papyrus
@@ -495,7 +495,7 @@ and `biblicus steering graph-signals` via
 post-review proposal generation cycle.
 
 Accepted category summaries now have a small first-class editor surface in
-Papyrus: `/news-desk` shows accepted subcategories beside the canonical category
+Papyrus: `/newsroom` shows accepted subcategories beside the canonical category
 register, and signed-in editor/admin readers can see passive category appendix
 pages after the edition. Public display stays limited to published category
 projections and published issue content. `Reference`, `ReferenceAttachment`,

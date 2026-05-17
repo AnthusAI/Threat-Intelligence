@@ -146,39 +146,39 @@ Feature: Newspaper layout scenarios
       | 780   | 1200   |
       | 390   | 900    |
 
-  Scenario: News desk opens knowledge overview
-    Given I open the news desk at 1280 by 900
-    Then the news desk should render
-    And the news desk should show the knowledge overview
+  Scenario: Newsroom opens knowledge overview
+    Given I open the newsroom at 1280 by 900
+    Then the newsroom should render
+    And the newsroom should show the knowledge overview
 
-  Scenario: News desk renders category steering proposals and category edits
-    Given I open the topics news desk at 1280 by 900
+  Scenario: Newsroom renders category steering proposals and category edits
+    Given I open the topics newsroom at 1280 by 900
     Then the topics desk should render
-    And the news desk should show category and graph proposal rows
-    And the news desk should show accepted subcategories under canonical categories
-    And the news desk should show proposed subcategories under canonical categories
-    And the news desk should offer accept and reject actions without defer
-    When I update the first news desk category name to "Foundation Model Scaling Updated"
-    Then the first news desk category name should be "Foundation Model Scaling Updated"
+    And the newsroom should show category and graph proposal rows
+    And the newsroom should show accepted subcategories under canonical categories
+    And the newsroom should show proposed subcategories under canonical categories
+    And the newsroom should offer accept and reject actions without defer
+    When I update the first newsroom category name to "Foundation Model Scaling Updated"
+    Then the first newsroom category name should be "Foundation Model Scaling Updated"
     And no browser console errors should occur
 
-  Scenario: News desk browses references and semantic concepts
-    Given I open the references news desk at 1280 by 900
+  Scenario: Newsroom browses references and semantic concepts
+    Given I open the references newsroom at 1280 by 900
     Then the references desk should show reference metadata and semantic neighbors
-    Given I open the concepts news desk at 1280 by 900
+    Given I open the concepts newsroom at 1280 by 900
     Then the concepts desk should show semantic nodes and linked objects
     And no browser console errors should occur
 
-  Scenario: News desk merges duplicate user identities
-    Given I open the users news desk at 1280 by 900
+  Scenario: Newsroom merges duplicate user identities
+    Given I open the users newsroom at 1280 by 900
     Then the users desk should show merge controls
-    When I merge news desk user "Demo Reader" into "Demo Editor"
-    Then news desk user "Demo Editor" should include identity "reader@example.com"
-    And news desk user "Demo Reader" should not be listed
+    When I merge newsroom user "Demo Reader" into "Demo Editor"
+    Then newsroom user "Demo Editor" should include identity "reader@example.com"
+    And newsroom user "Demo Reader" should not be listed
     And no browser console errors should occur
 
-  Scenario: News desk claims and completes reference curation assignments
-    Given I open the assignments news desk at 1280 by 900
+  Scenario: Newsroom claims and completes reference curation assignments
+    Given I open the assignments newsroom at 1280 by 900
     Then the assignments desk should render
     When I claim assignment "assignment-demo-reference-intake-history-001" with note "Taking this one"
     Then assignment "assignment-demo-reference-intake-history-001" should be claimed
@@ -186,22 +186,22 @@ Feature: Newspaper layout scenarios
     Then assignment "assignment-demo-reference-intake-history-001" should be completed
     And no browser console errors should occur
 
-  Scenario: Production news desk requires editor access
-    Given I open the edition path "/news-desk" at 1280 by 900
-    Then the news desk should show an editor access gate
+  Scenario: Production newsroom requires editor access
+    Given I open the edition path "/newsroom" at 1280 by 900
+    Then the newsroom should show an editor access gate
     And no browser console errors should occur
 
-  Scenario: Unauthenticated readers do not see News Desk appendix pages
+  Scenario: Unauthenticated readers do not see Newsroom appendix pages
     Given I open the "current-edition" layout scenario at 1280 by 900
-    Then edition page count should not include appended News Desk pages
-    And the front page footer should not link to the news desk
-    And no News Desk appendix pages should render
+    Then edition page count should not include appended Newsroom pages
+    And the front page footer should not link to the newsroom
+    And no Newsroom appendix pages should render
     And no browser console errors should occur
 
-  Scenario: Editor readers see News Desk appendix pages after the edition
+  Scenario: Editor readers see Newsroom appendix pages after the edition
     Given I am a test editor reader
     And I open the "current-edition" layout scenario at 1280 by 900
-    Then edition page count should include appended News Desk pages
+    Then edition page count should include appended Newsroom pages
     When I scroll to the canonical category register
     Then the final edition pages should include the canonical category register
     And the appendix page should use newspaper page styling
@@ -209,11 +209,11 @@ Feature: Newspaper layout scenarios
     Then the root category appendix page should show subcategory "Agent Memory"
     And no browser console errors should occur
 
-  Scenario: News Desk appendix pages fit on mobile
+  Scenario: Newsroom appendix pages fit on mobile
     Given I am a test editor reader
     And I open the "current-edition" layout scenario at 390 by 900
     When I scroll to the canonical category register
-    Then the News Desk appendix should not overflow horizontally
+    Then the Newsroom appendix should not overflow horizontally
     And no browser console errors should occur
 
   Scenario: Archive renders an infinite front page grid

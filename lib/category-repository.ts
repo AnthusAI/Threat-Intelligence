@@ -336,7 +336,7 @@ export async function loadCategorySteeringDashboard(options?: { demo?: boolean }
   if (options?.demo) return createDemoCategorySteeringDashboard();
   return {
     ...createEmptyCategorySteeringDashboard(),
-    loadError: "News Desk canonical records require an editor user-pool session.",
+    loadError: "Newsroom canonical records require an editor user-pool session.",
   };
 }
 
