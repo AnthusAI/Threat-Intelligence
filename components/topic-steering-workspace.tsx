@@ -158,6 +158,8 @@ function NewsDeskDashboard({ dashboard }: { dashboard: TopicSteeringDashboard })
   const activeTaxonomyNodes = useMemo(() => (
     activeTaxonomy ? taxonomyNodes.filter((node) => node.taxonomyId === activeTaxonomy.id && node.status !== "deprecated") : []
   ), [activeTaxonomy, taxonomyNodes]);
+  const acceptedRootTopicCount = activeTaxonomyNodes.filter((node) => !node.parentTopicUid && node.status === "accepted").length;
+  const acceptedSubtopicCount = activeTaxonomyNodes.filter((node) => node.parentTopicUid && node.status === "accepted").length;
   const latestImport = useMemo(() => (
     activeTopicSet
       ? dashboard.importRuns.find((importRun) => importRun.corpusId === activeTopicSet.corpusId) ?? dashboard.importRuns[0] ?? null
@@ -367,9 +369,9 @@ function NewsDeskDashboard({ dashboard }: { dashboard: TopicSteeringDashboard })
               Proposal rows are copy-desk notes from workers and agents. Skim them like an inside page: accept a correction, reject it, or leave the present course undisturbed.
             </p>
           </article>
-          <aside className="news-desk-index" aria-label="Import and projection index">
-            <StatusMetric label="Corpus Bureaus" value={String(dashboard.corpora.length)} detail={dashboard.corpora.map((corpus) => corpus.name).join(" / ")} />
-            <StatusMetric label="Accepted Topics" value={String(canonicalTopics.length)} detail={activeTopicSet ? `${activeTopicSet.displayName}${canonicalCorpus ? ` / ${canonicalCorpus.name}` : ""}` : "No accepted topic set"} />
+          <aside className="news-desk-index" aria-label="News desk status index">
+            <StatusMetric label="Accepted Topics" value={String(canonicalTopics.length)} detail={activeTopicSet ? activeTopicSet.displayName : "No accepted topic set"} />
+            <StatusMetric label="Accepted Subtopics" value={String(acceptedSubtopicCount)} detail={`${acceptedRootTopicCount} root topics`} />
             <StatusMetric label="Filed Notes" value={String(openProposalCount)} detail={`${topicProposals.length} topic / ${genericProposals.length} generic`} />
             <StatusMetric label="Projection Notices" value={String(dashboard.projections.length)} detail={latestImport ? `${latestImport.importKind} ${latestImport.status}` : "No projection import"} />
           </aside>
@@ -416,7 +418,7 @@ function NewsDeskDashboard({ dashboard }: { dashboard: TopicSteeringDashboard })
             <GenericProposalQueue proposals={genericProposals} disabled={isPending} onAction={runProposalAction} />
 
             <section className="topic-steering-section" aria-labelledby="accepted-topic-register-title">
-              <SectionHeader title="Accepted Topic Register" detail={activeTopicSet ? `${activeTopicSet.classifierId}${canonicalCorpus ? ` / ${canonicalCorpus.name}` : ""}` : "No classifier imported"} />
+              <SectionHeader title="Accepted Topic Register" detail={activeTopicSet ? activeTopicSet.classifierId : "No classifier imported"} />
               <div className="topic-steering-topic-grid">
                 {canonicalTopics.length ? canonicalTopics.map((topic) => (
                   <TopicEditor key={topic.id} topic={topic} disabled={isPending} onSave={saveTopic} />
@@ -750,7 +752,7 @@ function CorpusTopicSetSummary({
 }) {
   return (
     <section className="topic-steering-section" aria-labelledby="corpus-topic-sets-title">
-      <SectionHeader title="Corpus Topic Sets" detail={`${topicSets.length} configured registers`} />
+      <SectionHeader title="Corpus Topic Sets" detail={`${corpora.length} configured corpora / ${topicSets.length} registers`} />
       <div className="news-desk-ledger-list">
         {corpora.length ? corpora.map((corpus) => {
           const corpusTopicSets = topicSets.filter((topicSet) => topicSet.corpusId === corpus.id);
