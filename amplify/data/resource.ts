@@ -311,7 +311,6 @@ const schema = a.schema({
       index("topicUid").sortKeys(["taxonomyId"]).queryField("listCurationTaxonomyNodesByTopicUidAndTaxonomy"),
     ])
     .authorization((allow) => [
-      allow.publicApiKey().to(["read"]),
       allow.groups(curationWriteGroups).to(["read"]),
       allow.custom().to(authoringOperations),
     ]),
