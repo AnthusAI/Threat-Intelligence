@@ -227,7 +227,7 @@ function NewsDeskDashboard({
   const mastheadSecondLabel = activeTab === "assignments" ? `${assignmentMetrics.open} open assignments` : latestImportLabel;
   const graph = useMemo(() => createSemanticGraphSnapshot({
     references: dashboard.references,
-    categories: categorys,
+    categories: mergeCategoryRecords(categorys, activeCategoryTreeNodes),
     semanticNodes: dashboard.semanticNodes,
     knowledgeComments: dashboard.knowledgeComments,
     semanticRelations: dashboard.semanticRelations,
@@ -235,6 +235,7 @@ function NewsDeskDashboard({
     referenceAttachments: dashboard.referenceAttachments,
   }), [
     assignments,
+    activeCategoryTreeNodes,
     categorys,
     dashboard.knowledgeComments,
     dashboard.referenceAttachments,
@@ -667,6 +668,7 @@ function NewsDeskDashboard({
             corpora={dashboard.corpora}
             disabled={isPending}
             genericProposals={genericProposals}
+            graph={graph}
             importRuns={dashboard.importRuns}
             initialCategoryLineageId={initialSelection.category}
             knowledgeComments={dashboard.knowledgeComments}
@@ -981,7 +983,9 @@ function TopicsDeskView({
   corpora,
   disabled,
   genericProposals,
+  graph,
   importRuns,
+  initialCategoryLineageId,
   knowledgeComments,
   onCategorySave,
   onProposalAction,
@@ -1002,6 +1006,7 @@ function TopicsDeskView({
   corpora: CategorySteeringCorpus[];
   disabled: boolean;
   genericProposals: CategorySteeringProposal[];
+  graph: SemanticGraph;
   importRuns: CategorySteeringImportRun[];
   initialCategoryLineageId?: string | null;
   knowledgeComments: KnowledgeCommentRecord[];
@@ -1019,14 +1024,16 @@ function TopicsDeskView({
           activeCategoryTree={activeCategoryTree}
           canonicalCategorys={canonicalCategorys}
           disabled={disabled}
+          graph={graph}
+          initialCategoryLineageId={initialCategoryLineageId}
           onAction={onProposalAction}
           proposals={proposals}
           categoryTreeLoadError={categoryTreeLoadError}
           categoryNodes={categoryNodes}
         />
 
-        <section className="category-steering-section category-steering-section--lead" aria-labelledby="category-proposals-title">
-          <SectionHeader title="Category Proposals" detail={`${categoryProposals.length} tailored notes`} />
+        <section className="category-steering-section" aria-labelledby="category-proposals-title">
+          <SectionHeader title="All Category Proposal Notes" detail={`${categoryProposals.length} tailored notes`} />
           <div className="category-steering-proposal-list">
             {categoryProposals.length ? categoryProposals.map((proposal) => (
               <CategoryProposalRow
@@ -1041,15 +1048,6 @@ function TopicsDeskView({
         </section>
 
         <GenericProposalQueue proposals={genericProposals} disabled={disabled} onAction={onProposalAction} />
-
-        <section className="category-steering-section" aria-labelledby="accepted-category-register-title">
-          <SectionHeader title="Accepted Category Register" detail={activeCategorySet ? activeCategorySet.classifierId : "No classifier imported"} />
-          <div className="category-steering-category-grid">
-            {canonicalCategorys.length ? canonicalCategorys.map((category) => (
-              <CategoryEditor key={category.id} category={category} disabled={disabled} onSave={onCategorySave} />
-            )) : <EmptyRow label="No canonical categories imported" />}
-          </div>
-        </section>
       </div>
 
       <aside className="news-desk-rail-column">
@@ -1706,6 +1704,8 @@ function AcceptedCategoryTreeSection({
   activeCategoryTree,
   canonicalCategorys,
   disabled,
+  graph,
+  initialCategoryLineageId,
   onAction,
   proposals,
   categoryTreeLoadError,
@@ -1714,6 +1714,8 @@ function AcceptedCategoryTreeSection({
   activeCategoryTree: CategorySteeringCategoryTree | null;
   canonicalCategorys: CategorySteeringCategory[];
   disabled: boolean;
+  graph: SemanticGraph;
+  initialCategoryLineageId?: string | null;
   onAction: (proposal: CategorySteeringProposal, action: ReviewAction) => void;
   proposals: CategorySteeringProposal[];
   categoryTreeLoadError: string | null;
@@ -1731,15 +1733,42 @@ function AcceptedCategoryTreeSection({
   });
   const subcategoryCount = roots.reduce((count, root) => count + root.subcategorys.length, 0);
   const proposedSubcategoryCount = roots.reduce((count, root) => count + root.proposedSubcategorys.length, 0);
+  const initialRootKey = selectInitialRootKey(roots, initialCategoryLineageId);
+  const [selectedRootKey, setSelectedRootKey] = useState<string | null>(initialRootKey);
+  const selectedRoot = roots.find((root) => root.category.categoryKey === selectedRootKey) ?? roots[0] ?? null;
+  const [focusedCategoryKey, setFocusedCategoryKey] = useState<string | null>(selectedRoot?.category.categoryKey ?? null);
+  const focusedNode = selectedRoot
+    ? [categoryToCategoryTreeNode(selectedRoot.category), ...(selectedRoot.node ? [selectedRoot.node] : []), ...selectedRoot.subcategorys]
+      .find((node) => node.categoryKey === focusedCategoryKey)
+      ?? categoryToCategoryTreeNode(selectedRoot.category)
+    : null;
   const detail = activeCategoryTree
-    ? `${subcategoryCount} accepted / ${proposedSubcategoryCount} proposed subcategories`
+    ? `${roots.length} canonical / ${subcategoryCount} accepted subcategories / ${proposedSubcategoryCount} proposed`
     : categoryTreeLoadError
       ? "CategoryTree unavailable"
       : "Editor sign-in required";
 
+  useEffect(() => {
+    if (!roots.length) {
+      setSelectedRootKey(null);
+      setFocusedCategoryKey(null);
+      return;
+    }
+    const nextRootKey = selectedRoot?.category.categoryKey ?? initialRootKey ?? roots[0].category.categoryKey;
+    if (selectedRootKey !== nextRootKey) setSelectedRootKey(nextRootKey);
+  }, [initialRootKey, roots, selectedRoot, selectedRootKey]);
+
+  useEffect(() => {
+    if (!selectedRoot) return;
+    const validKeys = new Set([selectedRoot.category.categoryKey, ...selectedRoot.subcategorys.map((subcategory) => subcategory.categoryKey)]);
+    if (!focusedCategoryKey || !validKeys.has(focusedCategoryKey)) {
+      setFocusedCategoryKey(selectedRoot.category.categoryKey);
+    }
+  }, [focusedCategoryKey, selectedRoot]);
+
   return (
     <section className="category-steering-section category-steering-section--categoryTree" aria-labelledby="accepted-categoryTree-title">
-      <SectionHeader title="Accepted Subcategory Register" detail={detail} />
+      <SectionHeader title="Canonical Topics" detail={detail} />
       {categoryTreeLoadError ? (
         <div className="category-steering-alert" role="status">
           {categoryTreeLoadError}
@@ -1748,74 +1777,228 @@ function AcceptedCategoryTreeSection({
       {!activeCategoryTree ? (
         <EmptyRow label="Accepted subcategories are visible to signed-in editors" />
       ) : (
-        <div className="category-steering-categoryTree-list" data-news-desk-category-tree>
-          {roots.length ? roots.map(({ node, proposedSubcategorys, subcategorys, category }) => {
-            const root = node ?? categoryToCategoryTreeNode(category);
-            const relatedProposalCount = countRelatedCategoryTreeProposals(root.categoryKey, subcategorys, proposals);
-            return (
-              <article className="category-steering-categoryTree-root" data-news-desk-category-tree-root={root.categoryKey} key={root.categoryKey}>
-                <header>
-                  <div>
-                    <p className="story-label">Root Category</p>
-                    <h3>{root.displayName}</h3>
-                    <span>{root.shortTitle ?? deriveShortTitle(root.displayName)}</span>
-                  </div>
-                  <span>{subcategorys.length} accepted / {proposedSubcategorys.length} proposed / {relatedProposalCount} related notes</span>
-                </header>
-                {root.subtitle ? <p className="category-steering-categoryTree-subtitle">{root.subtitle}</p> : null}
-                <p>{root.description ?? "Accepted root category."}</p>
-                <div className="category-steering-categoryTree-evidence">
-                  <span>{compactArray(root.seedItemIds).length} seed refs</span>
-                  <span>{compactArray(root.holdoutItemIds).length} holdout refs</span>
-                  <span>{root.categoryKey}</span>
-                </div>
-                <div className="category-steering-subcategory-list">
-                  <p className="category-steering-subcategory-list__label">Accepted Subcategories</p>
-                  {subcategorys.length ? subcategorys.map((subcategory) => (
-                    <article className="category-steering-subcategory" data-news-desk-subcategory={subcategory.categoryKey} key={subcategory.id}>
-                      <h4>{subcategory.displayName}</h4>
-                      <span>{subcategory.shortTitle ?? deriveShortTitle(subcategory.displayName)}</span>
-                      {subcategory.subtitle ? <p className="category-steering-categoryTree-subtitle">{subcategory.subtitle}</p> : null}
-                      <p>{subcategory.description ?? "Accepted subcategory."}</p>
-                      <div className="category-steering-categoryTree-evidence">
-                        <span>{compactArray(subcategory.seedItemIds).length} seed refs</span>
-                        <span>{compactArray(subcategory.holdoutItemIds).length} holdout refs</span>
-                        <span>{countRelatedCategoryTreeProposals(subcategory.categoryKey, [], proposals)} related notes</span>
-                      </div>
-                    </article>
-                  )) : (
-                    <EmptyRow label="No accepted subcategories under this root" />
-                  )}
-                </div>
-                {proposedSubcategorys.length ? (
-                  <div className="category-steering-subcategory-list category-steering-subcategory-list--proposed">
-                    <p className="category-steering-subcategory-list__label">Proposed Subcategories</p>
-                    {proposedSubcategorys.map((proposal) => (
-                      <article className="category-steering-subcategory category-steering-subcategory--proposed" data-news-desk-proposed-subcategory={proposal.categoryKey ?? proposal.id} key={proposal.id}>
-                        <h4>{proposal.displayName ?? proposal.title}</h4>
-                        <span>{proposal.shortTitle ?? deriveShortTitle(proposal.displayName ?? proposal.title)}</span>
-                        {proposal.subtitle ? <p className="category-steering-categoryTree-subtitle">{proposal.subtitle}</p> : null}
-                        <p>{proposal.description ?? proposal.summary ?? "Candidate subcategory from steering proposals."}</p>
-                        <div className="category-steering-categoryTree-evidence">
-                          <span>{proposal.proposalKind}</span>
-                          <span>{proposal.status}</span>
-                          <span>{compactArray(proposal.evidenceItemIds).length} evidence refs</span>
-                          <span>{proposal.categoryKey ?? "new category"}</span>
-                        </div>
-                        <div className="category-steering-proposal__actions category-steering-subcategory__actions" aria-label={`${proposal.title} review actions`}>
-                          <button type="button" data-review-action="accept" disabled={disabled || proposal.status === "accepted"} onClick={() => onAction(proposal, "accept")}>Accept</button>
-                          <button type="button" data-review-action="reject" disabled={disabled || proposal.status === "rejected"} onClick={() => onAction(proposal, "reject")}>Reject</button>
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                ) : null}
-              </article>
-            );
-          }) : <EmptyRow label="No canonical roots available for category-tree display" />}
+        <div className="news-desk-topic-browser" data-news-desk-category-tree>
+          <div className="news-desk-topic-browser__roots" aria-label="Canonical topic list">
+            {roots.length ? roots.map((root) => {
+              const rootNode = root.node ?? categoryToCategoryTreeNode(root.category);
+              const relatedProposalCount = countRelatedCategoryTreeProposals(rootNode.categoryKey, root.subcategorys, proposals);
+              const isSelected = selectedRoot?.category.categoryKey === root.category.categoryKey;
+              return (
+                <button
+                  aria-pressed={isSelected}
+                  className="news-desk-topic-root-button"
+                  data-selected={isSelected || undefined}
+                  key={root.category.categoryKey}
+                  onClick={() => {
+                    setSelectedRootKey(root.category.categoryKey);
+                    setFocusedCategoryKey(root.category.categoryKey);
+                  }}
+                  type="button"
+                >
+                  <span>{rootNode.shortTitle ?? deriveShortTitle(rootNode.displayName)}</span>
+                  <strong>{rootNode.displayName}</strong>
+                  <small>{root.subcategorys.length} accepted / {root.proposedSubcategorys.length} proposed / {relatedProposalCount} notes</small>
+                </button>
+              );
+            }) : <EmptyRow label="No canonical roots available for category-tree display" />}
+          </div>
+          {selectedRoot ? (
+            <CanonicalTopicDetail
+              disabled={disabled}
+              focusedCategoryKey={focusedCategoryKey}
+              focusedNode={focusedNode}
+              graph={graph}
+              onAction={onAction}
+              onFocusCategory={setFocusedCategoryKey}
+              proposals={proposals}
+              root={selectedRoot}
+            />
+          ) : null}
         </div>
       )}
     </section>
+  );
+}
+
+type CanonicalTopicRoot = {
+  category: CategorySteeringCategory;
+  node?: CategorySteeringCategoryTreeNode;
+  subcategorys: CategorySteeringCategoryTreeNode[];
+  proposedSubcategorys: CategorySteeringProposal[];
+};
+
+function CanonicalTopicDetail({
+  disabled,
+  focusedCategoryKey,
+  focusedNode,
+  graph,
+  onAction,
+  onFocusCategory,
+  proposals,
+  root,
+}: {
+  disabled: boolean;
+  focusedCategoryKey: string | null;
+  focusedNode: CategorySteeringCategoryTreeNode | null;
+  graph: SemanticGraph;
+  onAction: (proposal: CategorySteeringProposal, action: ReviewAction) => void;
+  onFocusCategory: (categoryKey: string) => void;
+  proposals: CategorySteeringProposal[];
+  root: CanonicalTopicRoot;
+}) {
+  const rootNode = root.node ?? categoryToCategoryTreeNode(root.category);
+  const relatedProposalCount = countRelatedCategoryTreeProposals(rootNode.categoryKey, root.subcategorys, proposals);
+
+  return (
+    <article className="news-desk-topic-detail" data-news-desk-category-tree-root={rootNode.categoryKey}>
+      <header className="news-desk-topic-detail__header">
+        <div>
+          <p className="story-label">Canonical Topic</p>
+          <h3>{rootNode.displayName}</h3>
+          <span>{rootNode.shortTitle ?? deriveShortTitle(rootNode.displayName)}</span>
+        </div>
+        <dl>
+          <div>
+            <dt>Accepted Subtopics</dt>
+            <dd>{root.subcategorys.length}</dd>
+          </div>
+          <div>
+            <dt>Proposed</dt>
+            <dd>{root.proposedSubcategorys.length}</dd>
+          </div>
+          <div>
+            <dt>Notes</dt>
+            <dd>{relatedProposalCount}</dd>
+          </div>
+        </dl>
+      </header>
+      {rootNode.subtitle ? <p className="category-steering-categoryTree-subtitle">{rootNode.subtitle}</p> : null}
+      <p>{rootNode.description ?? "Accepted root category."}</p>
+      <div className="category-steering-categoryTree-evidence">
+        <span>{compactArray(rootNode.seedItemIds).length} seed refs</span>
+        <span>{compactArray(rootNode.holdoutItemIds).length} holdout refs</span>
+        <span>{rootNode.categoryKey}</span>
+      </div>
+
+      <div className="news-desk-topic-detail__body">
+        <div className="news-desk-topic-detail__subtopics">
+          <p className="category-steering-subcategory-list__label">Accepted Subtopics</p>
+          <div className="news-desk-topic-subtopic-buttons">
+            <TopicFocusButton
+              active={focusedCategoryKey === rootNode.categoryKey}
+              count={graph.referencesForCategory(categoryLineageId(rootNode)).length}
+              label={rootNode.shortTitle ?? deriveShortTitle(rootNode.displayName)}
+              title={rootNode.displayName}
+              onClick={() => onFocusCategory(rootNode.categoryKey)}
+            />
+            {root.subcategorys.length ? root.subcategorys.map((subcategory) => (
+              <TopicFocusButton
+                active={focusedCategoryKey === subcategory.categoryKey}
+                count={graph.referencesForCategory(categoryLineageId(subcategory)).length}
+                key={subcategory.id}
+                label={subcategory.shortTitle ?? deriveShortTitle(subcategory.displayName)}
+                title={subcategory.displayName}
+                onClick={() => onFocusCategory(subcategory.categoryKey)}
+              />
+            )) : null}
+          </div>
+          {!root.subcategorys.length ? <EmptyRow label="No accepted subtopics under this root" /> : null}
+
+          {root.proposedSubcategorys.length ? (
+            <div className="category-steering-subcategory-list category-steering-subcategory-list--proposed">
+              <p className="category-steering-subcategory-list__label">Proposed Subtopics</p>
+              {root.proposedSubcategorys.map((proposal) => (
+                <article className="category-steering-subcategory category-steering-subcategory--proposed" data-news-desk-proposed-subcategory={proposal.categoryKey ?? proposal.id} key={proposal.id}>
+                  <h4>{proposal.displayName ?? proposal.title}</h4>
+                  <span>{proposal.shortTitle ?? deriveShortTitle(proposal.displayName ?? proposal.title)}</span>
+                  {proposal.subtitle ? <p className="category-steering-categoryTree-subtitle">{proposal.subtitle}</p> : null}
+                  <p>{proposal.description ?? proposal.summary ?? "Candidate subtopic from steering proposals."}</p>
+                  <div className="category-steering-categoryTree-evidence">
+                    <span>{proposal.proposalKind}</span>
+                    <span>{proposal.status}</span>
+                    <span>{compactArray(proposal.evidenceItemIds).length} evidence refs</span>
+                    <span>{proposal.categoryKey ?? "new category"}</span>
+                  </div>
+                  <div className="category-steering-proposal__actions category-steering-subcategory__actions" aria-label={`${proposal.title} review actions`}>
+                    <button type="button" data-review-action="accept" disabled={disabled || proposal.status === "accepted"} onClick={() => onAction(proposal, "accept")}>Accept</button>
+                    <button type="button" data-review-action="reject" disabled={disabled || proposal.status === "rejected"} onClick={() => onAction(proposal, "reject")}>Reject</button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : null}
+        </div>
+
+        <TopicSemanticContext graph={graph} node={focusedNode ?? rootNode} />
+      </div>
+    </article>
+  );
+}
+
+function TopicFocusButton({
+  active,
+  count,
+  label,
+  onClick,
+  title,
+}: {
+  active: boolean;
+  count: number;
+  label: string;
+  onClick: () => void;
+  title: string;
+}) {
+  return (
+    <button className="news-desk-topic-focus-button" data-selected={active || undefined} onClick={onClick} type="button">
+      <strong>{label}</strong>
+      <span>{title}</span>
+      <small>{count} refs</small>
+    </button>
+  );
+}
+
+function TopicSemanticContext({ graph, node }: { graph: SemanticGraph; node: CategorySteeringCategoryTreeNode }) {
+  const lineageId = categoryLineageId(node);
+  const references = graph.referencesForCategory(lineageId).slice(0, 8);
+  const concepts = uniqueSemanticSummaries(
+    graph.neighbors("category", lineageId)
+      .flatMap((group) => group.objects)
+      .filter((object) => object.kind === "semanticNode"),
+  ).slice(0, 8);
+  const neighborGroups = graph.neighbors("category", lineageId);
+
+  return (
+    <aside className="news-desk-topic-context" data-news-desk-topic-context={node.categoryKey}>
+      <p className="story-label">Selected Topic</p>
+      <h4>{node.displayName}</h4>
+      {node.subtitle ? <p className="category-steering-categoryTree-subtitle">{node.subtitle}</p> : null}
+      <p>{node.description ?? "No description imported for this topic."}</p>
+      <div className="news-desk-topic-context__block">
+        <header>
+          <strong>Associated Concepts</strong>
+          <span>{concepts.length}</span>
+        </header>
+        {concepts.length ? concepts.map((concept) => (
+          <a href={concept.href} key={concept.lineageId}>
+            <span>{concept.subtitle ?? "concept"}</span>
+            <strong>{concept.label}</strong>
+          </a>
+        )) : <EmptyRow label="No graph concepts attached yet" />}
+      </div>
+      <div className="news-desk-topic-context__block">
+        <header>
+          <strong>Associated References</strong>
+          <span>{references.length}</span>
+        </header>
+        {references.length ? references.map((reference) => (
+          <a href={reference.href} key={reference.lineageId}>
+            <span>{reference.subtitle ?? "reference"}</span>
+            <strong>{reference.label}</strong>
+          </a>
+        )) : <EmptyRow label="No classified references attached yet" />}
+      </div>
+      <NeighborGroups groups={neighborGroups} />
+    </aside>
   );
 }
 
@@ -1885,6 +2068,45 @@ function categoryToCategoryTreeNode(category: CategorySteeringCategory): Categor
     importRunId: null,
     updatedAt: category.updatedAt,
   };
+}
+
+function mergeCategoryRecords(
+  categorys: CategorySteeringCategory[],
+  categoryNodes: CategorySteeringCategoryTreeNode[],
+): CategorySteeringCategory[] {
+  const records = new Map<string, CategorySteeringCategory>();
+  for (const category of [...categorys, ...categoryNodes]) {
+    records.set(category.id, category);
+  }
+  return Array.from(records.values());
+}
+
+function categoryLineageId(category: CategorySteeringCategory | CategorySteeringCategoryTreeNode): string {
+  return category.lineageId ?? category.id;
+}
+
+function uniqueSemanticSummaries(objects: SemanticObjectSummary[]): SemanticObjectSummary[] {
+  const map = new Map<string, SemanticObjectSummary>();
+  for (const object of objects) map.set(`${object.kind}#${object.lineageId}`, object);
+  return Array.from(map.values()).sort((left, right) => left.label.localeCompare(right.label));
+}
+
+function selectInitialRootKey(roots: CanonicalTopicRoot[], initialCategoryLineageId?: string | null): string | null {
+  if (!roots.length) return null;
+  if (!initialCategoryLineageId) return roots[0].category.categoryKey;
+  for (const root of roots) {
+    if (matchesCategorySelection(root.category, initialCategoryLineageId) || (root.node && matchesCategorySelection(root.node, initialCategoryLineageId))) {
+      return root.category.categoryKey;
+    }
+    if (root.subcategorys.some((subcategory) => matchesCategorySelection(subcategory, initialCategoryLineageId))) {
+      return root.category.categoryKey;
+    }
+  }
+  return roots[0].category.categoryKey;
+}
+
+function matchesCategorySelection(category: CategorySteeringCategory | CategorySteeringCategoryTreeNode, selection: string): boolean {
+  return category.id === selection || category.lineageId === selection || category.categoryKey === selection;
 }
 
 function buildCategoryCopyVersion(
