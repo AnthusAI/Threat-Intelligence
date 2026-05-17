@@ -57,6 +57,7 @@ export type CategorySteeringCategory = {
   parentCategoryId?: string | null;
   parentCategoryKey?: string | null;
   displayName: string;
+  shortTitle?: string | null;
   subtitle?: string | null;
   description?: string | null;
   aliases?: Array<string | null> | null;
@@ -88,6 +89,7 @@ export type SteeringProposal = {
   graphEntityId?: string | null;
   relationshipType?: string | null;
   displayName?: string | null;
+  shortTitle?: string | null;
   subtitle?: string | null;
   description?: string | null;
   evidenceItemIds?: Array<string | null> | null;

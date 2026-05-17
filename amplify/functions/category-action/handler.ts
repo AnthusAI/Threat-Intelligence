@@ -140,6 +140,7 @@ async function createCategoryVersionFromProposal(
     parentCategoryId: null,
     parentCategoryKey: nextParentCategoryKey,
     displayName: normalizeOptionalString(args.displayName) ?? proposal.displayName ?? current?.displayName ?? proposal.title,
+    shortTitle: normalizeOptionalString(args.shortTitle) ?? proposal.shortTitle ?? current?.shortTitle ?? deriveShortTitle(proposal.displayName ?? current?.displayName ?? proposal.title),
     subtitle: normalizeOptionalString(args.subtitle) ?? proposal.subtitle ?? current?.subtitle ?? null,
     description: normalizeOptionalString(args.description) ?? proposal.description ?? proposal.summary ?? current?.description ?? null,
     aliases: normalizeStringArray(args.aliases) ?? current?.aliases ?? [],
@@ -274,6 +275,16 @@ function compactStringArray(value: unknown): string[] {
   return value
     .map((entry) => typeof entry === "string" ? entry.trim() : "")
     .filter(Boolean);
+}
+
+function deriveShortTitle(value: unknown): string {
+  const words = String(value ?? "")
+    .replace(/[_/|]+/g, " ")
+    .replace(/[^\p{L}\p{N}\s&+-]/gu, "")
+    .split(/\s+/)
+    .map((word) => word.trim())
+    .filter(Boolean);
+  return words.length ? words.slice(0, 3).join(" ") : "Topic";
 }
 
 function getIdentitySub(event: Parameters<ReviewHandler>[0]): string | null {

@@ -83,11 +83,11 @@ const TAILORED_TOPIC_PROPOSAL_KINDS = new Set([
 
 const NEWS_DESK_TABS: Array<{ id: NewsDeskTab; label: string; detail: string; href: string }> = [
   { id: "overview", label: "Overview", detail: "Desk index", href: "/news-desk" },
-  { id: "users", label: "Users", detail: "Roles", href: "/news-desk?section=users" },
-  { id: "topics", label: "Topics", detail: "Taxonomy", href: "/news-desk?section=topics" },
-  { id: "concepts", label: "Concepts", detail: "Ontology", href: "/news-desk?section=concepts" },
-  { id: "references", label: "References", detail: "Corpus", href: "/news-desk?section=references" },
-  { id: "assignments", label: "Assignments", detail: "Placeholder", href: "/news-desk?section=assignments" },
+  { id: "users", label: "Users", detail: "Roles", href: "/news-desk/users" },
+  { id: "topics", label: "Topics", detail: "Taxonomy", href: "/news-desk/topics" },
+  { id: "concepts", label: "Concepts", detail: "Ontology", href: "/news-desk/concepts" },
+  { id: "references", label: "References", detail: "Corpus", href: "/news-desk/references" },
+  { id: "assignments", label: "Assignments", detail: "Placeholder", href: "/news-desk/assignments" },
 ];
 
 const TAXONOMY_PROPOSAL_KINDS = new Set([
@@ -314,6 +314,7 @@ function NewsDeskDashboard({
               action,
               actorLabel: "Papyrus news desk",
               displayName: proposal.displayName ?? undefined,
+              shortTitle: proposal.shortTitle ?? undefined,
               subtitle: proposal.subtitle ?? undefined,
               description: proposal.description ?? undefined,
               seedItemIds: compactArray(proposal.suggestedSeedItemIds),
@@ -536,7 +537,7 @@ function NewsDeskDashboard({
     });
   }
 
-  function saveCategory(category: CategorySteeringCategory, update: Pick<CategorySteeringCategory, "displayName" | "subtitle" | "description">) {
+  function saveCategory(category: CategorySteeringCategory, update: Pick<CategorySteeringCategory, "displayName" | "shortTitle" | "subtitle" | "description">) {
     setActionState({ id: category.id, message: "category save pending", tone: "pending" });
     const updatedAt = new Date().toISOString();
     if (dashboard.isDemo) {
@@ -726,11 +727,11 @@ function OverviewDeskView({
         <section className="category-steering-section category-steering-section--lead" aria-labelledby="knowledge-wire-title">
           <SectionHeader title="Knowledge Wire" detail={latestImport ? `${latestImport.importKind} / ${latestImport.status}` : "No import run"} />
           <div className="news-desk-ledger-list news-desk-ledger-list--compact">
-            <DeskLinkCard href="/news-desk?section=references" label="References" value={dashboard.references.length} detail={`${dashboard.referenceAttachments.length} attachments / ${dashboard.knowledgeComments.length} comments`} />
-            <DeskLinkCard href="/news-desk?section=concepts" label="Concepts" value={dashboard.semanticNodes.length} detail={`${dashboard.semanticRelations.length} relations`} />
-            <DeskLinkCard href="/news-desk?section=topics" label="Topics" value={dashboard.categorys.length} detail={`${dashboard.proposals.filter((proposal) => proposal.status === "proposed").length} open proposals`} />
-            <DeskLinkCard href="/news-desk?section=users" label="Users" value={userDirectory.length} detail={dashboard.canManageUsers ? "role desk available" : "admin role required"} />
-            <DeskLinkCard href="/news-desk?section=assignments" label="Assignments" value={assignmentMetrics.total} detail={`${assignmentMetrics.open} open work items`} />
+            <DeskLinkCard href="/news-desk/references" label="References" value={dashboard.references.length} detail={`${dashboard.referenceAttachments.length} attachments / ${dashboard.knowledgeComments.length} comments`} />
+            <DeskLinkCard href="/news-desk/concepts" label="Concepts" value={dashboard.semanticNodes.length} detail={`${dashboard.semanticRelations.length} relations`} />
+            <DeskLinkCard href="/news-desk/topics" label="Topics" value={dashboard.categorys.length} detail={`${dashboard.proposals.filter((proposal) => proposal.status === "proposed").length} open proposals`} />
+            <DeskLinkCard href="/news-desk/users" label="Users" value={userDirectory.length} detail={dashboard.canManageUsers ? "role desk available" : "admin role required"} />
+            <DeskLinkCard href="/news-desk/assignments" label="Assignments" value={assignmentMetrics.total} detail={`${assignmentMetrics.open} open work items`} />
           </div>
         </section>
 
@@ -1004,7 +1005,7 @@ function TopicsDeskView({
   importRuns: CategorySteeringImportRun[];
   initialCategoryLineageId?: string | null;
   knowledgeComments: KnowledgeCommentRecord[];
-  onCategorySave: (category: CategorySteeringCategory, update: Pick<CategorySteeringCategory, "displayName" | "subtitle" | "description">) => void;
+  onCategorySave: (category: CategorySteeringCategory, update: Pick<CategorySteeringCategory, "displayName" | "shortTitle" | "subtitle" | "description">) => void;
   onProposalAction: (proposal: CategorySteeringProposal, action: ReviewAction) => void;
   proposals: CategorySteeringProposal[];
   referenceAttachments: ReferenceAttachmentRecord[];
@@ -1757,6 +1758,7 @@ function AcceptedCategoryTreeSection({
                   <div>
                     <p className="story-label">Root Category</p>
                     <h3>{root.displayName}</h3>
+                    <span>{root.shortTitle ?? deriveShortTitle(root.displayName)}</span>
                   </div>
                   <span>{subcategorys.length} accepted / {proposedSubcategorys.length} proposed / {relatedProposalCount} related notes</span>
                 </header>
@@ -1772,6 +1774,7 @@ function AcceptedCategoryTreeSection({
                   {subcategorys.length ? subcategorys.map((subcategory) => (
                     <article className="category-steering-subcategory" data-news-desk-subcategory={subcategory.categoryKey} key={subcategory.id}>
                       <h4>{subcategory.displayName}</h4>
+                      <span>{subcategory.shortTitle ?? deriveShortTitle(subcategory.displayName)}</span>
                       {subcategory.subtitle ? <p className="category-steering-categoryTree-subtitle">{subcategory.subtitle}</p> : null}
                       <p>{subcategory.description ?? "Accepted subcategory."}</p>
                       <div className="category-steering-categoryTree-evidence">
@@ -1790,6 +1793,7 @@ function AcceptedCategoryTreeSection({
                     {proposedSubcategorys.map((proposal) => (
                       <article className="category-steering-subcategory category-steering-subcategory--proposed" data-news-desk-proposed-subcategory={proposal.categoryKey ?? proposal.id} key={proposal.id}>
                         <h4>{proposal.displayName ?? proposal.title}</h4>
+                        <span>{proposal.shortTitle ?? deriveShortTitle(proposal.displayName ?? proposal.title)}</span>
                         {proposal.subtitle ? <p className="category-steering-categoryTree-subtitle">{proposal.subtitle}</p> : null}
                         <p>{proposal.description ?? proposal.summary ?? "Candidate subcategory from steering proposals."}</p>
                         <div className="category-steering-categoryTree-evidence">
@@ -1870,6 +1874,7 @@ function categoryToCategoryTreeNode(category: CategorySteeringCategory): Categor
     categoryKey: category.categoryKey,
     parentCategoryKey: null,
     displayName: category.displayName,
+    shortTitle: category.shortTitle,
     subtitle: category.subtitle,
     description: category.description,
     status: category.status,
@@ -1884,7 +1889,7 @@ function categoryToCategoryTreeNode(category: CategorySteeringCategory): Categor
 
 function buildCategoryCopyVersion(
   category: CategorySteeringCategory,
-  update: Pick<CategorySteeringCategory, "displayName" | "subtitle" | "description">,
+  update: Pick<CategorySteeringCategory, "displayName" | "shortTitle" | "subtitle" | "description">,
   { actorLabel, now }: { actorLabel: string; now: string },
 ): CategorySteeringCategory {
   const lineageId = category.lineageId ?? category.id;
@@ -2037,6 +2042,16 @@ function formatDateTime(value: string): string {
   return new Date(timestamp).toISOString().slice(0, 16).replace("T", " ");
 }
 
+function deriveShortTitle(value: string | null | undefined): string {
+  const words = String(value ?? "")
+    .replace(/[_/|]+/g, " ")
+    .replace(/[^\p{L}\p{N}\s&+-]/gu, "")
+    .split(/\s+/)
+    .map((word) => word.trim())
+    .filter(Boolean);
+  return words.length ? words.slice(0, 3).join(" ") : "Topic";
+}
+
 function CategoryProposalRow({
   proposal,
   category,
@@ -2069,6 +2084,10 @@ function CategoryProposalRow({
             <dd>{proposal.displayName ?? category?.displayName ?? "pending"}</dd>
           </div>
           <div>
+            <dt>Short Title</dt>
+            <dd>{proposal.shortTitle ?? category?.shortTitle ?? "auto"}</dd>
+          </div>
+          <div>
             <dt>Subtitle</dt>
             <dd>{proposal.subtitle ?? category?.subtitle ?? "none"}</dd>
           </div>
@@ -2094,9 +2113,10 @@ function CategoryEditor({
 }: {
   category: CategorySteeringCategory;
   disabled: boolean;
-  onSave: (category: CategorySteeringCategory, update: Pick<CategorySteeringCategory, "displayName" | "subtitle" | "description">) => void;
+  onSave: (category: CategorySteeringCategory, update: Pick<CategorySteeringCategory, "displayName" | "shortTitle" | "subtitle" | "description">) => void;
 }) {
   const [displayName, setDisplayName] = useState(category.displayName);
+  const [shortTitle, setShortTitle] = useState(category.shortTitle ?? deriveShortTitle(category.displayName));
   const [subtitle, setSubtitle] = useState(category.subtitle ?? "");
   const [description, setDescription] = useState(category.description ?? "");
 
@@ -2111,6 +2131,15 @@ function CategoryEditor({
         <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
       </label>
       <label>
+        <span>Short Title</span>
+        <input
+          aria-describedby={`${category.id}-short-title-help`}
+          value={shortTitle}
+          onChange={(event) => setShortTitle(event.target.value)}
+        />
+        <small id={`${category.id}-short-title-help`}>Used for URL slugs and eyebrow headers; it does not need to be unique.</small>
+      </label>
+      <label>
         <span>Subtitle</span>
         <input value={subtitle} onChange={(event) => setSubtitle(event.target.value)} />
       </label>
@@ -2120,7 +2149,7 @@ function CategoryEditor({
       </label>
       <footer>
         <span>{compactArray(category.seedItemIds).length} seeds / {compactArray(category.holdoutItemIds).length} holdouts</span>
-        <button type="button" data-news-desk-command="save-copy" disabled={disabled || !displayName.trim()} onClick={() => onSave(category, { displayName, subtitle, description })}>Save Copy</button>
+        <button type="button" data-news-desk-command="save-copy" disabled={disabled || !displayName.trim() || !shortTitle.trim()} onClick={() => onSave(category, { displayName, shortTitle, subtitle, description })}>Save Copy</button>
       </footer>
     </article>
   );

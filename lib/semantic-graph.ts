@@ -131,13 +131,13 @@ export function predicateLabel(predicate: string, direction: "outgoing" | "incom
 
 export function newsDeskHrefForSemanticObject(kind: string, lineageId: string): string {
   const encoded = encodeURIComponent(lineageId);
-  if (kind === "reference") return `/news-desk?section=references&reference=${encoded}`;
-  if (kind === "category") return `/news-desk?section=topics&category=${encoded}`;
-  if (kind === "semanticNode") return `/news-desk?section=concepts&node=${encoded}`;
-  if (kind === "assignment") return `/news-desk?section=assignments&assignment=${encoded}`;
-  if (kind === "item") return `/news-desk?section=overview&item=${encoded}`;
-  if (kind === "knowledgeComment") return `/news-desk?section=references&comment=${encoded}`;
-  return `/news-desk?section=overview&object=${encodeURIComponent(kind)}:${encoded}`;
+  if (kind === "reference") return `/news-desk/references?reference=${encoded}`;
+  if (kind === "category") return `/news-desk/topics?category=${encoded}`;
+  if (kind === "semanticNode") return `/news-desk/concepts?node=${encoded}`;
+  if (kind === "assignment") return `/news-desk/assignments?assignment=${encoded}`;
+  if (kind === "item") return `/news-desk?item=${encoded}`;
+  if (kind === "knowledgeComment") return `/news-desk/references?comment=${encoded}`;
+  return `/news-desk?object=${encodeURIComponent(kind)}:${encoded}`;
 }
 
 export function createSemanticGraphSnapshot(input: SemanticGraphSnapshotInput) {

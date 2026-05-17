@@ -742,6 +742,7 @@ function buildAcceptedCategorySetPayload(categorySet, topics) {
     topics: sortedTopics.map((topic) => ({
       category_key: requiredString(topic.categoryKey, "topic.categoryKey"),
       display_name: requiredString(topic.displayName, "topic.displayName"),
+      short_title: normalizeShortTitle(topic.shortTitle, topic.displayName),
       description: topic.description ?? "",
       seed_item_ids: compactArray(topic.seedItemIds),
       holdout_item_ids: compactArray(topic.holdoutItemIds),
@@ -769,6 +770,7 @@ function buildAcceptedCategoryTreePayload(taxonomy, nodes) {
       category_key: requiredString(node.categoryKey, "node.categoryKey"),
       parent_category_key: node.parentCategoryKey ?? null,
       display_name: requiredString(node.displayName, "node.displayName"),
+      short_title: normalizeShortTitle(node.shortTitle, node.displayName),
       description: node.description ?? node.subtitle ?? "",
       status: node.status === "archived" ? "archived" : "accepted",
       seed_item_ids: compactArray(node.seedItemIds),
@@ -849,6 +851,7 @@ function reviewedProposalFeedback(proposal, decision) {
     graph_entity_id: proposal.graphEntityId ?? null,
     relationship_type: proposal.relationshipType ?? null,
     display_name: proposal.displayName ?? proposal.title ?? null,
+    short_title: proposal.shortTitle ?? null,
     subtitle: proposal.subtitle ?? null,
     description: proposal.description ?? null,
     summary: proposal.summary ?? null,
@@ -937,6 +940,7 @@ function categorySetRecords(categorySet, context) {
       parentCategoryId: null,
       parentCategoryKey: null,
       displayName: topic.display_name,
+      shortTitle: readShortTitle(topic),
       subtitle: topic.subheading ?? topic.subtitle ?? null,
       description: topic.description ?? null,
       aliases: compactArray(topic.aliases),
@@ -995,6 +999,7 @@ function taxonomyRecords(bundle, context) {
       parentCategoryId: null,
       parentCategoryKey: readParentCategoryKey(node),
       displayName: node.display_name,
+      shortTitle: readShortTitle(node),
       subtitle: node.subheading ?? node.subtitle ?? null,
       description: node.description ?? null,
       status: normalizeTaxonomyNodeStatus(node.status),
@@ -1069,6 +1074,7 @@ function rootTaxonomyManifestFromCategorySet(categorySet, context) {
       category_key: readCategoryKey(topic),
       parent_category_key: null,
       display_name: topic.display_name,
+      short_title: readShortTitle(topic),
       description: topic.description ?? topic.subheading ?? topic.subtitle ?? "Accepted root topic.",
       status: "accepted",
       seed_item_ids: compactArray(topic.seed_item_ids),
@@ -1148,6 +1154,10 @@ function proposalRecords(proposal, context) {
     ?? proposalPayload.relationship_uid
     ?? (proposalPayload.parent_category_key || proposalPayload.parent_topic_uid ? "subcategory_of" : null);
   const displayName = proposal.display_name ?? proposalPayload.display_name ?? proposalPayload.name ?? null;
+  const shortTitle = normalizeShortTitle(
+    proposal.short_title ?? proposal.shortTitle ?? proposalPayload.short_title ?? proposalPayload.shortTitle,
+    displayName ?? proposal.title ?? categoryKey,
+  );
   const subtitle = proposal.subheading ?? proposal.subtitle ?? proposalPayload.subheading ?? proposalPayload.subtitle ?? null;
   const description = proposal.description ?? proposalPayload.description ?? null;
   return [
@@ -1166,6 +1176,7 @@ function proposalRecords(proposal, context) {
       graphEntityId,
       relationshipType,
       displayName,
+      shortTitle,
       subtitle,
       description,
       evidenceItemIds: compactArray(evidence.item_ids ?? evidence.evidence_item_ids ?? proposal.evidence_item_ids ?? proposalPayload.evidence_item_ids ?? proposalPayload.document_ids),
@@ -1216,6 +1227,27 @@ function versionedRecord(record, { now, actor, reason, content }) {
 
 function readCategoryKey(value) {
   return requiredString(value.category_key ?? value.topic_uid ?? value.categoryKey, "category key");
+}
+
+function readShortTitle(value) {
+  return normalizeShortTitle(value.short_title ?? value.shortTitle, value.display_name ?? value.displayName ?? value.name ?? readCategoryKey(value));
+}
+
+function normalizeShortTitle(value, fallback) {
+  const explicit = typeof value === "string" ? value.trim() : "";
+  if (explicit) return explicit;
+  return deriveShortTitle(fallback);
+}
+
+function deriveShortTitle(value) {
+  const words = String(value ?? "")
+    .replace(/[_/|]+/g, " ")
+    .replace(/[^\p{L}\p{N}\s&+-]/gu, "")
+    .split(/\s+/)
+    .map((word) => word.trim())
+    .filter(Boolean);
+  if (!words.length) return "Topic";
+  return words.slice(0, 3).join(" ");
 }
 
 function readParentCategoryKey(value) {
@@ -1274,7 +1306,7 @@ function semanticRelationRecord(input) {
     predicateObjectStateKey,
     subjectVersionKey,
     objectVersionKey,
-    score: numberOrNull(input.score),
+    score: numberOrUndefined(input.score),
     confidence: numberOrNull(input.confidence),
     rank: integerOrNull(input.rank),
     classifierId: input.classifierId ?? null,
@@ -1439,6 +1471,10 @@ function stringOrNull(value) {
 
 function numberOrNull(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function numberOrUndefined(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function integerOrNull(value) {

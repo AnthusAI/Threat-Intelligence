@@ -751,7 +751,7 @@ function NewsDeskAppendixPageView({
   page: NewsDeskAppendixPage;
   scrollToPage: (pageNumber: number, options?: ScrollToPageOptions) => void;
 }) {
-  const title = page.mode === "register" ? "Canonical Category Register" : page.root?.displayName ?? "Category Page";
+  const title = page.mode === "register" ? "Canonical Category Register" : page.root?.shortTitle ?? page.root?.displayName ?? "Category Page";
   return (
     <section
       className="paper-page-content paper-page-content--inside paper-page-content--news-desk-appendix"
@@ -801,11 +801,12 @@ function TopicRegisterPage({
               <header>
                 <h3>
                   <a href={href} onClick={(event) => handleAppendixPageClick(event, rootPageNumber, scrollToPage)}>
-                    {root.displayName}
+                    {root.shortTitle ?? root.displayName}
                   </a>
                 </h3>
                 <span>{subcategoryCount} subcategories</span>
               </header>
+              {root.shortTitle ? <p className="news-desk-appendix__subtitle">{root.displayName}</p> : null}
               {root.subtitle ? <p className="news-desk-appendix__subtitle">{root.subtitle}</p> : null}
               <p>{root.description ?? "Accepted root category."}</p>
               <CategoryEvidenceLine node={root} />
@@ -840,7 +841,8 @@ function RootTopicPage({ page }: { page: NewsDeskAppendixPage }) {
         </header>
         {page.subcategories.length ? page.subcategories.map((subcategory) => (
           <article className="news-desk-appendix__subcategory" data-news-desk-subcategory={subcategory.categoryKey} key={subcategory.id}>
-            <h4>{subcategory.displayName}</h4>
+            <h4>{subcategory.shortTitle ?? subcategory.displayName}</h4>
+            {subcategory.shortTitle ? <p className="news-desk-appendix__subtitle">{subcategory.displayName}</p> : null}
             {subcategory.subtitle ? <p className="news-desk-appendix__subtitle">{subcategory.subtitle}</p> : null}
             <p>{subcategory.description ?? "Accepted subcategory."}</p>
             <CategoryEvidenceLine node={subcategory} />

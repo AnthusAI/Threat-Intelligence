@@ -26,8 +26,8 @@ const PUBLISHED_EDITION_FIELDS = "id sourceEditionId editionLineageId versionNum
 const EDITION_ITEM_FIELDS = "id editionId editionLineageId itemId itemLineageId placementKey sortKey pageNumber priority metadata";
 const PUBLISHED_EDITION_ITEM_FIELDS = "id publishedEditionId publishedItemId sourceEditionItemId sourceEditionId sourceItemId editionLineageId itemLineageId placementKey sortKey pageNumber priority metadata";
 const CATEGORY_SET_FIELDS = `${VERSION_FIELDS} id corpusId classifierId displayName description status generatedAt categoryCount importRunId`;
-const CATEGORY_FIELDS = `${VERSION_FIELDS} id categorySetId corpusId categoryKey parentCategoryId parentCategoryKey displayName subtitle description aliases status seedItemIds holdoutItemIds rank depth isPinned importRunId updatedAt`;
-const PROPOSAL_FIELDS = "id categorySetId corpusId importRunId proposalKind steeringDomain status title summary categoryKey targetCategoryKey graphEntityId relationshipType displayName subtitle description evidenceItemIds suggestedSeedItemIds suggestedHoldoutItemIds sourceSnapshotId proposedAt reviewedAt reviewedBy updatedAt";
+const CATEGORY_FIELDS = `${VERSION_FIELDS} id categorySetId corpusId categoryKey parentCategoryId parentCategoryKey displayName shortTitle subtitle description aliases status seedItemIds holdoutItemIds rank depth isPinned importRunId updatedAt`;
+const PROPOSAL_FIELDS = "id categorySetId corpusId importRunId proposalKind steeringDomain status title summary categoryKey targetCategoryKey graphEntityId relationshipType displayName shortTitle subtitle description evidenceItemIds suggestedSeedItemIds suggestedHoldoutItemIds sourceSnapshotId proposedAt reviewedAt reviewedBy updatedAt";
 const DECISION_FIELDS = "id proposalId categorySetId action actorSub actorLabel note selectedCategoryKey createdAt";
 const KNOWLEDGE_CORPUS_FIELDS = "id name role itemCount generatedAt latestImportRunId createdAt updatedAt";
 const KNOWLEDGE_IMPORT_RUN_FIELDS = "id corpusId importKind classifierId sourceSnapshotId status generatedAt importedAt itemCount categoryCount proposalCount artifactCount referenceCount relationCount warningCount";
@@ -53,7 +53,7 @@ const LIST_RECORDS = {
   PublishedItem: listDefinition("listPublishedItems", PUBLISHED_ITEM_FIELDS),
   PublishedMediaAsset: listDefinition("listPublishedMediaAssets", PUBLISHED_MEDIA_FIELDS),
   PublishedCategorySet: listDefinition("listPublishedCategorySets", "id sourceCategorySetId categorySetLineageId versionNumber corpusId classifierId displayName description status generatedAt publishedAt categoryCount metadata"),
-  PublishedCategory: listDefinition("listPublishedCategories", "id sourceCategoryId publishedCategorySetId categoryLineageId categorySetLineageId versionNumber corpusId categoryKey parentCategoryId parentCategoryKey displayName subtitle description aliases status seedItemIds holdoutItemIds rank depth isPinned metadata"),
+  PublishedCategory: listDefinition("listPublishedCategories", "id sourceCategoryId publishedCategorySetId categoryLineageId categorySetLineageId versionNumber corpusId categoryKey parentCategoryId parentCategoryKey displayName shortTitle subtitle description aliases status seedItemIds holdoutItemIds rank depth isPinned metadata"),
   KnowledgeCorpus: listDefinition("listKnowledgeCorpuses", KNOWLEDGE_CORPUS_FIELDS),
   KnowledgeImportRun: listDefinition("listKnowledgeImportRuns", KNOWLEDGE_IMPORT_RUN_FIELDS),
   KnowledgeRawPayload: listDefinition("listKnowledgeRawPayloads", "id ownerType ownerId payloadKind importRunId"),
@@ -83,7 +83,7 @@ const GETTERS = {
   PublishedItem: getDefinition("getPublishedItem", PUBLISHED_ITEM_FIELDS),
   PublishedMediaAsset: getDefinition("getPublishedMediaAsset", PUBLISHED_MEDIA_FIELDS),
   PublishedCategorySet: getDefinition("getPublishedCategorySet", "id sourceCategorySetId categorySetLineageId versionNumber corpusId classifierId displayName description status generatedAt publishedAt categoryCount metadata"),
-  PublishedCategory: getDefinition("getPublishedCategory", "id sourceCategoryId publishedCategorySetId categoryLineageId categorySetLineageId versionNumber corpusId categoryKey parentCategoryId parentCategoryKey displayName subtitle description aliases status seedItemIds holdoutItemIds rank depth isPinned metadata"),
+  PublishedCategory: getDefinition("getPublishedCategory", "id sourceCategoryId publishedCategorySetId categoryLineageId categorySetLineageId versionNumber corpusId categoryKey parentCategoryId parentCategoryKey displayName shortTitle subtitle description aliases status seedItemIds holdoutItemIds rank depth isPinned metadata"),
   KnowledgeCorpus: getDefinition("getKnowledgeCorpus", KNOWLEDGE_CORPUS_FIELDS),
   KnowledgeImportRun: getDefinition("getKnowledgeImportRun", KNOWLEDGE_IMPORT_RUN_FIELDS),
   KnowledgeRawPayload: getDefinition("getKnowledgeRawPayload", KNOWLEDGE_RAW_PAYLOAD_FIELDS),

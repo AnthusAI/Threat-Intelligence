@@ -10,6 +10,7 @@ export type NewsDeskCategoryTreeNode = {
   categoryKey: string;
   parentCategoryKey?: string | null;
   displayName: string;
+  shortTitle?: string | null;
   subtitle?: string | null;
   description?: string | null;
   status: string;

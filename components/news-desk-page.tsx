@@ -2,6 +2,7 @@ import { NewsDeskWorkspace, type NewsDeskTab } from "./topic-steering-workspace"
 import { loadCategorySteeringDashboard } from "../lib/category-repository";
 
 export type NewsDeskPageProps = {
+  section?: string | string[] | null;
   searchParams?: Promise<{
     demo?: string | string[];
     section?: string | string[];
@@ -14,10 +15,10 @@ export type NewsDeskPageProps = {
   }>;
 };
 
-export async function NewsDeskPage({ searchParams }: NewsDeskPageProps) {
+export async function NewsDeskPage({ section: routeSection, searchParams }: NewsDeskPageProps) {
   const resolvedSearchParams = await searchParams;
   const demo = hasParam(getSearchParam(resolvedSearchParams, "demo"));
-  const initialTab = parseNewsDeskTab(getSearchParam(resolvedSearchParams, "section"), getSearchParam(resolvedSearchParams, "tab"));
+  const initialTab = parseNewsDeskTab(routeSection ?? getSearchParam(resolvedSearchParams, "section"), getSearchParam(resolvedSearchParams, "tab"));
   const initialSelection = {
     reference: getFirstSearchParam(resolvedSearchParams, "reference"),
     category: getFirstSearchParam(resolvedSearchParams, "category"),
