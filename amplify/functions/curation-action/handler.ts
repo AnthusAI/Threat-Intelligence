@@ -58,26 +58,32 @@ async function reviewCurationProposal(event: Parameters<ReviewHandler>[0]) {
     : normalizeOptionalString(proposal.topicUid);
   const decisionId = `decision-${proposalId}-${now.replace(/[^0-9TZ]/g, "")}-${randomUUID().slice(0, 8)}`;
 
-  await client.models.CurationDecision.create({
-    id: decisionId,
-    proposalId,
-    topicSetId: proposal.topicSetId ?? null,
-    action,
-    actorSub,
-    actorLabel,
-    note: normalizeOptionalString(event.arguments.note),
-    selectedTopicUid: topicUid,
-    createdAt: now,
-  });
+  await requireDataResult(
+    client.models.CurationDecision.create({
+      id: decisionId,
+      proposalId,
+      topicSetId: proposal.topicSetId ?? null,
+      action,
+      actorSub,
+      actorLabel,
+      note: normalizeOptionalString(event.arguments.note),
+      selectedTopicUid: topicUid,
+      createdAt: now,
+    }),
+    "create CurationDecision",
+  );
 
   const proposalStatus = action === "reject" ? "rejected" : action === "defer" ? "deferred" : "accepted";
-  await client.models.CurationProposal.update({
-    id: proposalId,
-    status: proposalStatus,
-    reviewedAt: now,
-    reviewedBy: actorLabel ?? actorSub,
-    updatedAt: now,
-  });
+  await requireDataResult(
+    client.models.CurationProposal.update({
+      id: proposalId,
+      status: proposalStatus,
+      reviewedAt: now,
+      reviewedBy: actorLabel ?? actorSub,
+      updatedAt: now,
+    }),
+    "update CurationProposal",
+  );
 
   let topicId: string | null = null;
   let taxonomyId: string | null = null;
@@ -152,12 +158,15 @@ async function applyTaxonomyProposal(
     const current = await findTaxonomyNodeByTopicUid(client, taxonomyId, topicUid);
     if (!current) throw new Error(`CurationTaxonomyNode ${topicUid} was not found in taxonomy ${taxonomyId}.`);
     const parentTopicUid = normalizeOptionalString(proposal.targetTopicUid);
-    await client.models.CurationTaxonomyNode.update({
-      id: current.id,
-      parentTopicUid,
-      depth: await taxonomyNodeDepthAfterMove(client, taxonomyId, parentTopicUid),
-      updatedAt: now,
-    });
+    await requireDataResult(
+      client.models.CurationTaxonomyNode.update({
+        id: current.id,
+        parentTopicUid,
+        depth: await taxonomyNodeDepthAfterMove(client, taxonomyId, parentTopicUid),
+        updatedAt: now,
+      }),
+      "move CurationTaxonomyNode",
+    );
     await updateTaxonomyCounts(client, taxonomyId, now);
     return { taxonomyId, taxonomyNodeId: current.id };
   }
@@ -166,11 +175,14 @@ async function applyTaxonomyProposal(
     const topicUid = normalizeRequiredString(proposal.topicUid, "proposal.topicUid");
     const current = await findTaxonomyNodeByTopicUid(client, taxonomyId, topicUid);
     if (!current) throw new Error(`CurationTaxonomyNode ${topicUid} was not found in taxonomy ${taxonomyId}.`);
-    await client.models.CurationTaxonomyNode.update({
-      id: current.id,
-      status: "archived",
-      updatedAt: now,
-    });
+    await requireDataResult(
+      client.models.CurationTaxonomyNode.update({
+        id: current.id,
+        status: "archived",
+        updatedAt: now,
+      }),
+      "archive CurationTaxonomyNode",
+    );
     await updateTaxonomyCounts(client, taxonomyId, now);
     return { taxonomyId, taxonomyNodeId: current.id };
   }
@@ -204,7 +216,7 @@ async function getOrCreateAcceptedTaxonomy(client: DataClient, proposal: any, no
     createdAt: now,
     updatedAt: now,
   };
-  await client.models.CurationTaxonomy.create(input);
+  await requireDataResult(client.models.CurationTaxonomy.create(input), "create CurationTaxonomy");
   return input;
 }
 
@@ -237,8 +249,8 @@ async function upsertTaxonomyNode(
     updatedAt: now,
   };
 
-  if (current) await client.models.CurationTaxonomyNode.update(input);
-  else await client.models.CurationTaxonomyNode.create(input);
+  if (current) await requireDataResult(client.models.CurationTaxonomyNode.update(input), "update CurationTaxonomyNode");
+  else await requireDataResult(client.models.CurationTaxonomyNode.create(input), "create CurationTaxonomyNode");
   return taxonomyNodeId;
 }
 
@@ -257,6 +269,7 @@ async function listTaxonomiesForTopicSet(client: DataClient, topicSetId: string)
       limit: 100,
       nextToken,
     });
+    assertNoDataErrors(page.errors, "list CurationTaxonomy");
     records.push(...(page.data ?? []));
     nextToken = page.nextToken;
   } while (nextToken);
@@ -271,6 +284,7 @@ async function listTaxonomyNodes(client: DataClient, taxonomyId: string): Promis
       { taxonomyId },
       { limit: 100, nextToken },
     );
+    assertNoDataErrors(page.errors, "list CurationTaxonomyNode");
     records.push(...(page.data ?? []));
     nextToken = page.nextToken;
   } while (nextToken);
@@ -285,12 +299,15 @@ async function findTaxonomyNodeByTopicUid(client: DataClient, taxonomyId: string
 async function updateTaxonomyCounts(client: DataClient, taxonomyId: string, now: string) {
   const nodes = await listTaxonomyNodes(client, taxonomyId);
   const active = nodes.filter((node) => node.status !== "archived");
-  await client.models.CurationTaxonomy.update({
-    id: taxonomyId,
-    nodeCount: nodes.length,
-    rootCount: active.filter((node) => !node.parentTopicUid).length,
-    updatedAt: now,
-  });
+  await requireDataResult(
+    client.models.CurationTaxonomy.update({
+      id: taxonomyId,
+      nodeCount: nodes.length,
+      rootCount: active.filter((node) => !node.parentTopicUid).length,
+      updatedAt: now,
+    }),
+    "update CurationTaxonomy counts",
+  );
 }
 
 async function promoteCurationTopicRevision(event: Parameters<PromoteHandler>[0]) {
@@ -302,31 +319,40 @@ async function promoteCurationTopicRevision(event: Parameters<PromoteHandler>[0]
   const actorLabel = normalizeOptionalString(event.arguments.actorLabel) ?? getIdentityLabel(event);
   const decisionId = `decision-revision-${revisionId}-${now.replace(/[^0-9TZ]/g, "")}-${randomUUID().slice(0, 8)}`;
 
-  await client.models.CurationDecision.create({
-    id: decisionId,
-    proposalId: `revision:${revisionId}`,
-    topicSetId: revision.topicSetId,
-    action: "promote-revision",
-    actorSub,
-    actorLabel,
-    note: normalizeOptionalString(event.arguments.note),
-    selectedTopicUid: null,
-    createdAt: now,
-  });
+  await requireDataResult(
+    client.models.CurationDecision.create({
+      id: decisionId,
+      proposalId: `revision:${revisionId}`,
+      topicSetId: revision.topicSetId,
+      action: "promote-revision",
+      actorSub,
+      actorLabel,
+      note: normalizeOptionalString(event.arguments.note),
+      selectedTopicUid: null,
+      createdAt: now,
+    }),
+    "create revision CurationDecision",
+  );
 
-  await client.models.CurationTopicRevision.update({
-    id: revisionId,
-    status: "accepted",
-    acceptedAt: now,
-    acceptedBy: actorLabel ?? actorSub,
-  });
+  await requireDataResult(
+    client.models.CurationTopicRevision.update({
+      id: revisionId,
+      status: "accepted",
+      acceptedAt: now,
+      acceptedBy: actorLabel ?? actorSub,
+    }),
+    "promote CurationTopicRevision",
+  );
 
-  await client.models.CurationTopicSet.update({
-    id: revision.topicSetId,
-    status: "accepted",
-    acceptedRevisionId: revisionId,
-    latestDraftRevisionId: null,
-  });
+  await requireDataResult(
+    client.models.CurationTopicSet.update({
+      id: revision.topicSetId,
+      status: "accepted",
+      acceptedRevisionId: revisionId,
+      latestDraftRevisionId: null,
+    }),
+    "update promoted CurationTopicSet",
+  );
 
   return {
     ok: true,
@@ -347,6 +373,7 @@ async function upsertAcceptedTopicFromProposal(
   const topicUid = normalizeRequiredString(proposal.topicUid, "proposal.topicUid");
   const topicId = `topic-${safeId(topicSetId)}-${safeId(topicUid)}`;
   const current = await client.models.CurationTopic.get({ id: topicId });
+  assertNoDataErrors(current.errors, "get CurationTopic");
   const input = {
     id: topicId,
     topicSetId,
@@ -365,8 +392,8 @@ async function upsertAcceptedTopicFromProposal(
     updatedAt: now,
   };
 
-  if (current.data) await client.models.CurationTopic.update(input);
-  else await client.models.CurationTopic.create(input);
+  if (current.data) await requireDataResult(client.models.CurationTopic.update(input), "update CurationTopic");
+  else await requireDataResult(client.models.CurationTopic.create(input), "create CurationTopic");
   return topicId;
 }
 
@@ -381,6 +408,7 @@ async function upsertDraftRevision(
   const topicCount = await countTopicsForTopicSet(client, topicSetId);
   const contentHash = hashStable({ topicSetId, topicCount, sourceDecisionId: decisionId, updatedAt: now });
   const current = await client.models.CurationTopicRevision.get({ id: revisionId });
+  assertNoDataErrors(current.errors, "get CurationTopicRevision");
   const input = {
     id: revisionId,
     topicSetId,
@@ -395,13 +423,16 @@ async function upsertDraftRevision(
     acceptedAt: null,
     acceptedBy: null,
   };
-  if (current.data) await client.models.CurationTopicRevision.update(input);
-  else await client.models.CurationTopicRevision.create(input);
-  await client.models.CurationTopicSet.update({
-    id: topicSetId,
-    latestDraftRevisionId: revisionId,
-    topicCount,
-  });
+  if (current.data) await requireDataResult(client.models.CurationTopicRevision.update(input), "update CurationTopicRevision");
+  else await requireDataResult(client.models.CurationTopicRevision.create(input), "create CurationTopicRevision");
+  await requireDataResult(
+    client.models.CurationTopicSet.update({
+      id: topicSetId,
+      latestDraftRevisionId: revisionId,
+      topicCount,
+    }),
+    "update draft CurationTopicSet",
+  );
   return revisionId;
 }
 
@@ -413,6 +444,7 @@ async function countTopicsForTopicSet(client: DataClient, topicSetId: string): P
       { topicSetId },
       { limit: 100, nextToken },
     );
+    assertNoDataErrors(page.errors, "list CurationTopic");
     count += page.data?.length ?? 0;
     nextToken = page.nextToken;
   } while (nextToken);
@@ -431,13 +463,37 @@ async function getDataClient(): Promise<DataClient> {
 }
 
 async function getRequiredRecord(
-  model: { get(input: { id: string }): Promise<{ data?: unknown | null }> },
+  model: { get(input: { id: string }): Promise<{ data?: unknown | null; errors?: DataClientErrors }> },
   id: string,
   modelName: string,
 ): Promise<any> {
   const response = await model.get({ id });
+  assertNoDataErrors(response.errors, `get ${modelName}`);
   if (!response.data) throw new Error(`${modelName} ${id} was not found.`);
   return response.data;
+}
+
+type DataClientErrors = Array<{ message?: string | null } | string | null> | null | undefined;
+type DataClientResult<T = unknown> = {
+  data?: T | null;
+  errors?: DataClientErrors;
+};
+
+async function requireDataResult<T>(promise: Promise<DataClientResult<T>>, operation: string): Promise<T> {
+  const response = await promise;
+  assertNoDataErrors(response.errors, operation);
+  if (!response.data) throw new Error(`${operation} returned no data.`);
+  return response.data;
+}
+
+function assertNoDataErrors(errors: DataClientErrors, operation: string): void {
+  if (!errors?.length) return;
+  throw new Error(`${operation} failed: ${errors.map(formatDataError).join("; ")}`);
+}
+
+function formatDataError(error: { message?: string | null } | string | null): string {
+  if (typeof error === "string") return error;
+  return error?.message ?? "GraphQL data operation failed.";
 }
 
 function normalizeReviewAction(value: unknown): "accept" | "reject" | "defer" | "edit" {

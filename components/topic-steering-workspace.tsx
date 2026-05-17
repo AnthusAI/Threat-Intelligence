@@ -331,9 +331,6 @@ function NewsDeskDashboard({ dashboard }: { dashboard: TopicSteeringDashboard })
           </div>
           <p className="topic-steering-kicker">Papyrus Newsroom</p>
           <h1 id="news-desk-title">News Desk</h1>
-          <p className="news-desk-standfirst">
-            Optional steering notes for the publication. The accepted topic set keeps carrying the edition unless an editor files a new decision.
-          </p>
           <div className="topic-steering-header__meta" aria-label="News desk corpus bureaus">
             {dashboard.corpora.length ? dashboard.corpora.map((corpus) => (
               <span key={corpus.id}>{corpus.name}</span>
