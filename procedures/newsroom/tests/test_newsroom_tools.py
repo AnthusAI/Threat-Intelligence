@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import pathlib
+import sys
 import unittest
 from unittest import mock
 
@@ -9,6 +10,12 @@ MODULE_PATH = pathlib.Path(__file__).resolve().parents[1] / "tools" / "papyrus_n
 SPEC = importlib.util.spec_from_file_location("papyrus_newsroom", MODULE_PATH)
 papyrus_newsroom = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(papyrus_newsroom)
+
+SEMANTIC_MODULE_PATH = pathlib.Path(__file__).resolve().parents[1] / "tools" / "papyrus_semantic.py"
+SEMANTIC_SPEC = importlib.util.spec_from_file_location("papyrus_semantic", SEMANTIC_MODULE_PATH)
+papyrus_semantic = importlib.util.module_from_spec(SEMANTIC_SPEC)
+sys.modules[SEMANTIC_SPEC.name] = papyrus_semantic
+SEMANTIC_SPEC.loader.exec_module(papyrus_semantic)
 
 
 class NewsroomToolTests(unittest.TestCase):
@@ -225,6 +232,58 @@ class NewsroomToolTests(unittest.TestCase):
         self.assertEqual(command[1:4], ["-m", "biblicus", "steering"])
         self.assertIn("/Users/ryan/Projects/Biblicus/.venv/bin/python", command[0])
         self.assertIn("/Users/ryan/Projects/Biblicus/corpora/AI-ML-research", command)
+
+    def test_semantic_key_builders_match_relation_indexes(self):
+        self.assertEqual(
+            papyrus_semantic.semantic_state_key("reference", "reference-1"),
+            "reference#reference-1#current",
+        )
+        self.assertEqual(
+            papyrus_semantic.semantic_object_subject_state_key("category", "category-1", "reference"),
+            "category#category-1#current#reference",
+        )
+        self.assertEqual(
+            papyrus_semantic.semantic_predicate_object_state_key("classified_as", "category", "category-1"),
+            "classified_as#category#category-1#current",
+        )
+
+    def test_semantic_neighbors_and_walk_use_graph_indexes(self):
+        calls = []
+
+        def fake_graphql(query, variables):
+            calls.append(variables)
+            if "listSemanticRelationsBySubjectState" in query:
+                return {
+                    "listSemanticRelationsBySubjectState": {
+                        "items": [
+                            {
+                                "id": "rel-1",
+                                "relationState": "current",
+                                "predicate": "classified_as",
+                                "subjectKind": "reference",
+                                "subjectId": "ref-v1",
+                                "subjectLineageId": "ref",
+                                "objectKind": "category",
+                                "objectId": "cat-v1",
+                                "objectLineageId": "cat",
+                                "subjectStateKey": "reference#ref#current",
+                                "objectStateKey": "category#cat#current",
+                                "predicateObjectStateKey": "classified_as#category#cat#current",
+                            }
+                        ],
+                        "nextToken": None,
+                    }
+                }
+            if "listSemanticRelationsByObjectState" in query:
+                return {"listSemanticRelationsByObjectState": {"items": [], "nextToken": None}}
+            raise AssertionError(f"Unexpected query {query}")
+
+        client = papyrus_semantic.PapyrusSemanticClient(fake_graphql)
+        neighbors = client.neighbors("reference", "ref")
+        self.assertEqual(neighbors["neighborRefs"], [{"kind": "category", "lineageId": "cat", "id": "cat-v1"}])
+        walked = client.walk("reference", "ref", depth=1)
+        self.assertIn({"kind": "category", "lineageId": "cat"}, walked["nodes"])
+        self.assertEqual(calls[0]["subjectStateKey"], "reference#ref#current")
 
 
 if __name__ == "__main__":

@@ -14,9 +14,12 @@ import type {
   CategorySteeringCategoryTreeNode,
   CategorySteeringCategory,
   CategorySteeringCategorySet,
+  KnowledgeCommentRecord,
+  ReferenceAttachmentRecord,
   ReferenceRecord,
   SemanticNodeRecord,
   SemanticRelationRecord,
+  UserDirectoryEntry,
 } from "../lib/category-repository";
 import {
   buildAssignmentDesk,
@@ -62,7 +65,7 @@ export async function loadEditorAccessState(): Promise<{ isEditor: boolean; stat
 type EditorAuthState =
   | { status: "signedOut"; isEditor: false; error: null }
   | { status: "forbidden"; isEditor: false; error: null }
-  | { status: "ready"; isEditor: true; error: null }
+  | { status: "ready"; isEditor: true; isAdmin: boolean; error: null }
   | { status: "error"; isEditor: false; error: string };
 
 export async function loadEditorNewsDeskState(): Promise<EditorNewsDeskState> {
@@ -81,11 +84,14 @@ export async function loadEditorNewsDeskState(): Promise<EditorNewsDeskState> {
       proposals,
       artifacts,
       references,
+      referenceAttachments,
       semanticNodes,
+      knowledgeComments,
       semanticRelations,
       editions,
       editionItems,
       items,
+      userDirectory,
     ] = await Promise.all([
       listUserPoolModel<CategorySteeringCorpus>("KnowledgeCorpus"),
       listUserPoolModel<CategorySteeringImportRun>("KnowledgeImportRun"),
@@ -96,11 +102,14 @@ export async function loadEditorNewsDeskState(): Promise<EditorNewsDeskState> {
       listUserPoolModel<CategorySteeringProposal>("SteeringProposal"),
       listUserPoolModel<CategorySteeringArtifact>("KnowledgeArtifact"),
       listUserPoolModel<ReferenceRecord>("Reference"),
+      listUserPoolModel<ReferenceAttachmentRecord>("ReferenceAttachment"),
       listUserPoolModel<SemanticNodeRecord>("SemanticNode"),
+      listUserPoolModel<KnowledgeCommentRecord>("KnowledgeComment"),
       listUserPoolModel<SemanticRelationRecord>("SemanticRelation"),
       listUserPoolModel<NewsDeskAssignmentEdition>("Edition"),
       listUserPoolModel<NewsDeskAssignmentEditionItem>("EditionItem"),
       listUserPoolModel<NewsDeskAssignmentItem>("Item"),
+      auth.isAdmin ? loadUserDirectory() : Promise.resolve([]),
     ]);
 
     const sortedCorpora = corpora.sort((left, right) => left.name.localeCompare(right.name));
@@ -112,7 +121,9 @@ export async function loadEditorNewsDeskState(): Promise<EditorNewsDeskState> {
       dashboard: {
         canonicalCorpusId: canonicalCategorySet?.corpusId ?? selectCanonicalCorpus(sortedCorpora)?.id ?? null,
         canonicalCategorySetId: canonicalCategorySet?.id ?? null,
+        canManageUsers: auth.isAdmin,
         assignmentDesk: buildAssignmentDesk(editions, editionItems, items),
+        userDirectory,
         corpora: sortedCorpora,
         importRuns: sortedImportRuns,
         categorySets: sortedCategorySets,
@@ -122,7 +133,9 @@ export async function loadEditorNewsDeskState(): Promise<EditorNewsDeskState> {
         proposals: sortProposals(proposals),
         artifacts: artifacts.sort((left, right) => (right.createdAt ?? "").localeCompare(left.createdAt ?? "")),
         references: references.sort((left, right) => (right.importedAt ?? "").localeCompare(left.importedAt ?? "")),
+        referenceAttachments: referenceAttachments.sort((left, right) => left.sortKey.localeCompare(right.sortKey)),
         semanticNodes: semanticNodes.sort((left, right) => (left.displayName ?? left.nodeKey).localeCompare(right.displayName ?? right.nodeKey)),
+        knowledgeComments: knowledgeComments.sort((left, right) => right.createdAt.localeCompare(left.createdAt)),
         semanticRelations: semanticRelations.sort((left, right) => (right.score ?? 0) - (left.score ?? 0)),
         loadError: null,
       },
@@ -193,8 +206,9 @@ async function getEditorAuthState(): Promise<EditorAuthState> {
   try {
     const session = await fetchAuthSession();
     if (!session.tokens?.accessToken) return { status: "signedOut", isEditor: false, error: null };
-    if (!hasEditorGroup(session)) return { status: "forbidden", isEditor: false, error: null };
-    return { status: "ready", isEditor: true, error: null };
+    const groups = getSessionGroups(session);
+    if (!groups.includes("editor") && !groups.includes("admin")) return { status: "forbidden", isEditor: false, error: null };
+    return { status: "ready", isEditor: true, isAdmin: groups.includes("admin"), error: null };
   } catch (error) {
     if (isUnauthenticatedError(error)) return { status: "signedOut", isEditor: false, error: null };
     return {
@@ -235,12 +249,19 @@ async function listUserPoolModel<T>(modelName: string): Promise<T[]> {
   return items;
 }
 
-function hasEditorGroup(session: Awaited<ReturnType<typeof fetchAuthSession>>): boolean {
-  const groups = [
+async function loadUserDirectory(): Promise<UserDirectoryEntry[]> {
+  const client = generateClient<Schema>();
+  const response = await client.queries.listUserDirectory({ authMode: USER_POOL_AUTH_MODE });
+  assertNoGraphQLErrors(response.errors);
+  return ((response.data?.entries ?? []).filter(Boolean) as UserDirectoryEntry[])
+    .sort((left, right) => (left.displayName ?? left.email ?? left.userSub ?? "").localeCompare(right.displayName ?? right.email ?? right.userSub ?? ""));
+}
+
+function getSessionGroups(session: Awaited<ReturnType<typeof fetchAuthSession>>): string[] {
+  return [
     ...readGroups(session.tokens?.accessToken.payload["cognito:groups"]),
     ...readGroups(session.tokens?.idToken?.payload["cognito:groups"]),
   ];
-  return groups.includes("editor") || groups.includes("admin");
 }
 
 function readGroups(value: unknown): string[] {

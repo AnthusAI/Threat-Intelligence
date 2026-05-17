@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -38,6 +39,7 @@ ARTICLE_TYPE = "article"
 ARTICLE_DRAFT_STATUS = "draft"
 DEFAULT_ASSIGNMENT_RATIO = 1.5
 REPORTER_PROCEDURE = "procedures/newsroom/reporter.tac"
+SEMANTIC_MODULE_PATH = Path(__file__).resolve().parent / "papyrus_semantic.py"
 
 
 GET_EDITION_QUERY = """
@@ -230,6 +232,108 @@ def papyrus_list_recent_published_articles(recent_days: int = 30, limit: int = 2
         "cutoff": cutoff.isoformat().replace("+00:00", "Z"),
         "items": items,
     }
+
+
+def papyrus_get_reference(reference_id: str) -> dict[str, Any]:
+    """
+    Read one private Reference metadata record through the authoring endpoint.
+    """
+    return _semantic_client().get_reference(reference_id)
+
+
+def papyrus_find_reference(corpus_id: str, external_item_id: str) -> dict[str, Any]:
+    """
+    Find Reference metadata by corpus id plus external item id.
+    """
+    return _semantic_client().find_reference(corpus_id, external_item_id)
+
+
+def papyrus_list_reference_attachments(
+    reference_lineage_id: str | None = None,
+    reference_version_key: str | None = None,
+) -> dict[str, Any]:
+    """
+    List private attachment metadata for one Reference lineage or exact version.
+    """
+    return _semantic_client().list_reference_attachments(
+        reference_lineage_id=reference_lineage_id,
+        reference_version_key=reference_version_key,
+    )
+
+
+def papyrus_list_reference_comments(reference_lineage_id: str) -> dict[str, Any]:
+    """
+    List private comments attached to one Reference lineage.
+    """
+    return _semantic_client().list_reference_comments(reference_lineage_id)
+
+
+def papyrus_get_semantic_object(kind: str, object_id: str) -> dict[str, Any]:
+    """
+    Read a graph-addressable private object by kind and exact version id.
+    """
+    return _semantic_client().get_semantic_object(kind, object_id)
+
+
+def papyrus_semantic_outgoing(subject_kind: str, subject_lineage_id: str) -> dict[str, Any]:
+    """
+    List current SemanticRelation rows leaving one subject lineage.
+    """
+    return _semantic_client().list_outgoing(subject_kind, subject_lineage_id)
+
+
+def papyrus_semantic_incoming(object_kind: str, object_lineage_id: str) -> dict[str, Any]:
+    """
+    List current SemanticRelation rows pointing at one object lineage.
+    """
+    return _semantic_client().list_incoming(object_kind, object_lineage_id)
+
+
+def papyrus_semantic_neighbors(kind: str, lineage_id: str, direction: str = "both") -> dict[str, Any]:
+    """
+    List one-hop semantic neighbors around a Reference, Item, Category, or SemanticNode.
+    """
+    return _semantic_client().neighbors(kind, lineage_id, direction=direction)
+
+
+def papyrus_references_for_category(category_lineage_id: str) -> dict[str, Any]:
+    """
+    List Reference relations classified under a category lineage.
+    """
+    return _semantic_client().references_for_category(category_lineage_id)
+
+
+def papyrus_references_for_semantic_node(node_lineage_id: str, predicate: str | None = None) -> dict[str, Any]:
+    """
+    List Reference relations attached to a semantic node, optionally predicate-scoped.
+    """
+    return _semantic_client().references_for_semantic_node(node_lineage_id, predicate=predicate)
+
+
+def papyrus_items_using_reference(reference_lineage_id: str) -> dict[str, Any]:
+    """
+    List Item relations that point at a Reference as evidence or context.
+    """
+    return _semantic_client().items_using_reference(reference_lineage_id)
+
+
+def papyrus_semantic_walk(
+    start_kind: str,
+    start_lineage_id: str,
+    depth: int = 2,
+    predicates: list[str] | None = None,
+    kinds: list[str] | None = None,
+) -> dict[str, Any]:
+    """
+    Walk the private semantic graph from one lineage with bounded depth.
+    """
+    return _semantic_client().walk(
+        start_kind=start_kind,
+        start_lineage_id=start_lineage_id,
+        depth=depth,
+        predicates=predicates,
+        kinds=kinds,
+    )
 
 
 def biblicus_steering_artifacts(corpus_key: str, config_path: str = "") -> dict[str, Any]:
@@ -1304,6 +1408,21 @@ def _parse_datetime(value: Any) -> _dt.datetime | None:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=_dt.timezone.utc)
     return parsed.astimezone(_dt.timezone.utc)
+
+
+def _semantic_client():
+    module = _load_semantic_module()
+    return module.PapyrusSemanticClient(_graphql, decode_record=_decode_record_json)
+
+
+def _load_semantic_module():
+    spec = importlib.util.spec_from_file_location("papyrus_semantic", SEMANTIC_MODULE_PATH)
+    if not spec or not spec.loader:
+        raise RuntimeError(f"Could not load Papyrus semantic helpers from {SEMANTIC_MODULE_PATH}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 if __name__ == "__main__":

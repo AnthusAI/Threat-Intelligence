@@ -30,10 +30,31 @@ const schema = a.schema({
       allow.group(adminGroup),
     ]),
 
+  UserIdentity: a
+    .model({
+      id: a.id().required(),
+      userProfileId: a.id().required(),
+      cognitoSub: a.string().required(),
+      provider: a.string(),
+      email: a.email(),
+      status: a.string().required(),
+      linkedAt: a.datetime().required(),
+      lastSeenAt: a.datetime(),
+    })
+    .secondaryIndexes((index) => [
+      index("userProfileId").sortKeys(["linkedAt"]).queryField("listUserIdentitiesByProfileAndLinkedAt"),
+      index("cognitoSub").queryField("userIdentityByCognitoSub"),
+      index("email").sortKeys(["status"]).queryField("listUserIdentitiesByEmailAndStatus"),
+    ])
+    .authorization((allow) => [
+      allow.group(adminGroup),
+    ]),
+
   UserRoleAssignment: a
     .model({
       id: a.id().required(),
-      userSub: a.string().required(),
+      userProfileId: a.id().required(),
+      userSub: a.string(),
       email: a.email(),
       role: a.string().required(),
       status: a.string().required(),
@@ -43,6 +64,7 @@ const schema = a.schema({
       notes: a.string(),
     })
     .secondaryIndexes((index) => [
+      index("userProfileId").sortKeys(["role"]).queryField("listUserRoleAssignmentsByProfileAndRole"),
       index("userSub").sortKeys(["role"]).queryField("listUserRoleAssignmentsByUserAndRole"),
       index("role").sortKeys(["status"]).queryField("listUserRoleAssignmentsByRoleAndStatus"),
     ])
@@ -52,16 +74,59 @@ const schema = a.schema({
 
   UserRoleMutationResult: a.customType({
     ok: a.boolean().required(),
-    userSub: a.string().required(),
-    username: a.string().required(),
+    userProfileId: a.id(),
+    userSub: a.string(),
+    username: a.string(),
     role: a.string().required(),
+    userSubs: a.string().array(),
+    usernames: a.string().array(),
     activeRoles: a.string().array().required(),
   }),
+
+  UserDirectoryIdentity: a.customType({
+    id: a.id().required(),
+    userProfileId: a.id().required(),
+    cognitoSub: a.string().required(),
+    provider: a.string(),
+    email: a.email(),
+    status: a.string().required(),
+    linkedAt: a.datetime().required(),
+    lastSeenAt: a.datetime(),
+  }),
+
+  UserDirectoryEntry: a.customType({
+    userProfileId: a.id(),
+    userSub: a.string(),
+    username: a.string(),
+    email: a.email(),
+    displayName: a.string(),
+    provider: a.string(),
+    enabled: a.boolean(),
+    cognitoStatus: a.string(),
+    identityStatus: a.string(),
+    activeRoles: a.string().array().required(),
+    identities: a.ref("UserDirectoryIdentity").array().required(),
+  }),
+
+  UserDirectoryResult: a.customType({
+    entries: a.ref("UserDirectoryEntry").array().required(),
+    profileCount: a.integer().required(),
+    identityCount: a.integer().required(),
+    cognitoUserCount: a.integer().required(),
+  }),
+
+  listUserDirectory: a
+    .query()
+    .returns(a.ref("UserDirectoryResult"))
+    .authorization((allow) => [allow.group(adminGroup)])
+    .handler(a.handler.function(manageUserRole)),
 
   grantUserRole: a
     .mutation()
     .arguments({
-      userSub: a.string().required(),
+      userProfileId: a.id(),
+      userSub: a.string(),
+      cognitoSubs: a.string().array(),
       role: a.string().required(),
     })
     .returns(a.ref("UserRoleMutationResult"))
@@ -71,7 +136,9 @@ const schema = a.schema({
   revokeUserRole: a
     .mutation()
     .arguments({
-      userSub: a.string().required(),
+      userProfileId: a.id(),
+      userSub: a.string(),
+      cognitoSubs: a.string().array(),
       role: a.string().required(),
     })
     .returns(a.ref("UserRoleMutationResult"))
@@ -364,6 +431,37 @@ const schema = a.schema({
       allow.custom().to(authoringOperations),
     ]),
 
+  ReferenceAttachment: a
+    .model({
+      id: a.id().required(),
+      referenceId: a.id().required(),
+      referenceLineageId: a.id().required(),
+      referenceVersionNumber: a.integer(),
+      referenceVersionKey: a.string().required(),
+      role: a.string().required(),
+      sortKey: a.string().required(),
+      storagePath: a.string(),
+      sourceUri: a.string(),
+      filename: a.string(),
+      mediaType: a.string(),
+      byteSize: a.integer(),
+      sha256: a.string(),
+      etag: a.string(),
+      importRunId: a.id(),
+      importedAt: a.datetime(),
+      metadata: a.json(),
+    })
+    .secondaryIndexes((index) => [
+      index("referenceVersionKey").sortKeys(["sortKey"]).queryField("listReferenceAttachmentsByReferenceVersionAndSortKey"),
+      index("referenceLineageId").sortKeys(["sortKey"]).queryField("listReferenceAttachmentsByReferenceLineageAndSortKey"),
+      index("storagePath").queryField("referenceAttachmentByStoragePath"),
+      index("importRunId").sortKeys(["sortKey"]).queryField("listReferenceAttachmentsByImportRunAndSortKey"),
+    ])
+    .authorization((allow) => [
+      allow.groups(categoryWriteGroups).to(["read"]),
+      allow.custom().to(authoringOperations),
+    ]),
+
   SemanticNode: a
     .model({
       id: a.id().required(),
@@ -397,6 +495,39 @@ const schema = a.schema({
     .authorization((allow) => [
       allow.groups(categoryWriteGroups).to(["read"]),
       allow.custom().to(authoringOperations),
+    ]),
+
+  KnowledgeComment: a
+    .model({
+      id: a.id().required(),
+      subjectKind: a.string().required(),
+      subjectId: a.id().required(),
+      subjectLineageId: a.id().required(),
+      subjectVersionNumber: a.integer(),
+      subjectVersionKey: a.string().required(),
+      subjectStateKey: a.string().required(),
+      commentKind: a.string().required(),
+      body: a.string().required(),
+      status: a.string().required(),
+      source: a.string(),
+      importRunId: a.id(),
+      authorSub: a.string(),
+      authorUserProfileId: a.id(),
+      authorLabel: a.string(),
+      metadata: a.json(),
+      createdAt: a.datetime().required(),
+    })
+    .secondaryIndexes((index) => [
+      index("subjectStateKey").sortKeys(["createdAt"]).queryField("listKnowledgeCommentsBySubjectStateAndCreatedAt"),
+      index("subjectVersionKey").sortKeys(["createdAt"]).queryField("listKnowledgeCommentsBySubjectVersionAndCreatedAt"),
+      index("commentKind").sortKeys(["createdAt"]).queryField("listKnowledgeCommentsByKindAndCreatedAt"),
+      index("authorSub").sortKeys(["createdAt"]).queryField("listKnowledgeCommentsByAuthorSubAndCreatedAt"),
+      index("authorUserProfileId").sortKeys(["createdAt"]).queryField("listKnowledgeCommentsByAuthorProfileAndCreatedAt"),
+      index("importRunId").sortKeys(["createdAt"]).queryField("listKnowledgeCommentsByImportRunAndCreatedAt"),
+    ])
+    .authorization((allow) => [
+      allow.groups(categoryWriteGroups).to(categoryAppendOnlyOperations),
+      allow.custom().to(categoryAppendOnlyOperations),
     ]),
 
   SemanticRelation: a
@@ -811,6 +942,7 @@ const schema = a.schema({
     ]),
 }).authorization((allow) => [
   allow.resource(categoryAction),
+  allow.resource(manageUserRole),
 ]);
 
 export type Schema = ClientSchema<typeof schema>;

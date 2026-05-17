@@ -49,6 +49,7 @@ const steeringBundle = {
       title: "Scaling Laws For Neural Language Models",
       media_type: "paper",
       source_uri: "https://arxiv.org/abs/2001.08361",
+      storage_path: "s3://example/corpora/canonical-corpus/research-001.md",
       dates: { published_at: "2020-01-01" },
       intake_status: "ready",
       tags: ["scaling"],
@@ -184,8 +185,12 @@ assert.equal(fallbackTaxonomyNode.displayName, "Scaling Laws");
 const reference = findRecord(steeringPlan.records, "Reference", (record) => record.externalItemId === "research-001");
 assert.equal(reference.title, "Scaling Laws For Neural Language Models");
 assert.equal(reference.sourceUri, "https://arxiv.org/abs/2001.08361");
+assert.equal(reference.storagePath, "corpora/canonical-corpus/research-001.md");
 assert.equal(JSON.parse(reference.metadata).source_notes, undefined);
 assert.equal(JSON.parse(reference.metadata).abstract, undefined);
+const steeringAttachment = findRecord(steeringPlan.records, "ReferenceAttachment", (record) => record.referenceId === reference.id);
+assert.equal(steeringAttachment.role, "source");
+assert.equal(steeringAttachment.storagePath, "corpora/canonical-corpus/research-001.md");
 assert.equal(
   steeringPlan.records.some((record) => record.modelName === "KnowledgeRawPayload" && record.expected.ownerType === "item"),
   false,
@@ -442,6 +447,25 @@ const projectionPlan = buildProjectionImportRecords({
       score: 0.82,
       review_recommended: true,
       model_version: "classifier-v1",
+      storage_path: "s3://example/corpora/source-corpus/source-001.md",
+      import_rationale: "Projected into the source corpus because the classifier found a strong scaling match.",
+      attachments: [
+        {
+          role: "transcript",
+          path: "s3://example/corpora/source-corpus/source-001.transcript.txt",
+          media_type: "text/plain",
+          sha256: "transcript-sha",
+        },
+        {
+          role: "deepgram",
+          path: "s3://example/corpora/source-corpus/source-001.deepgram.json",
+          media_type: "application/json",
+        },
+        {
+          role: "external",
+          path: "s3://outside-bucket/not-corpora/source-001.pdf",
+        },
+      ],
     },
   ],
 }, {
@@ -450,12 +474,32 @@ const projectionPlan = buildProjectionImportRecords({
 });
 const projectedReference = findRecord(projectionPlan.records, "Reference", (record) => record.externalItemId === "source-001");
 assert.equal(projectedReference.title, null);
+assert.equal(projectedReference.storagePath, "corpora/source-corpus/source-001.md");
 assert.equal(JSON.parse(projectedReference.metadata).abstract, undefined);
 const projectionRelation = findRecord(projectionPlan.records, "SemanticRelation", (record) => record.subjectId === projectedReference.id);
 assert.equal(projectionRelation.predicate, "classified_as");
 assert.equal(projectionRelation.objectKind, "category");
 assert.equal(projectionRelation.score, 0.82);
 assert.equal(projectionRelation.reviewRecommended, true);
+const projectedAttachments = projectionPlan.records
+  .filter((record) => record.modelName === "ReferenceAttachment" && record.expected.referenceId === projectedReference.id)
+  .map((record) => record.expected);
+assert.equal(projectedAttachments.length, 4);
+assert.equal(projectedAttachments[0].storagePath, "corpora/source-corpus/source-001.md");
+assert.equal(projectedAttachments[1].role, "transcript");
+assert.equal(projectedAttachments[1].storagePath, "corpora/source-corpus/source-001.transcript.txt");
+assert.equal(projectedAttachments[2].role, "deepgram");
+assert.equal(projectedAttachments[2].storagePath, "corpora/source-corpus/source-001.deepgram.json");
+assert.equal(projectedAttachments[3].storagePath, null);
+assert.equal(projectedAttachments[3].sourceUri, "s3://outside-bucket/not-corpora/source-001.pdf");
+assert.equal(JSON.parse(projectedAttachments[3].metadata).body, undefined);
+const importRationaleComment = findRecord(projectionPlan.records, "KnowledgeComment", (record) => record.subjectId === projectedReference.id);
+assert.equal(importRationaleComment.commentKind, "import_rationale");
+assert.equal(importRationaleComment.body, "Projected into the source corpus because the classifier found a strong scaling match.");
+assert.equal(JSON.parse(importRationaleComment.metadata).body, undefined);
+const rationaleRelation = findRecord(projectionPlan.records, "SemanticRelation", (record) => record.subjectKind === "knowledgeComment" && record.subjectId === importRationaleComment.id);
+assert.equal(rationaleRelation.predicate, "about");
+assert.equal(rationaleRelation.objectKind, "semanticNode");
 const projectionCorpus = findRecord(projectionPlan.records, "KnowledgeCorpus", (record) => record.id === "knowledge-corpus-source-corpus");
 assert.equal(projectionCorpus.role, "source");
 assert.equal(
@@ -463,6 +507,19 @@ assert.equal(
   false,
   "projection imports should use configured corpus ids without AI/ML name fallbacks",
 );
+
+const schemaSource = fs.readFileSync(path.join(__dirname, "..", "amplify", "data", "resource.ts"), "utf8");
+assert.match(schemaSource, /ReferenceAttachment:\s*a\s*\n\s*\.model/);
+assert.match(schemaSource, /KnowledgeComment:\s*a\s*\n\s*\.model/);
+assert.match(schemaSource, /UserIdentity:\s*a\s*\n\s*\.model/);
+assert.match(schemaSource, /listUserDirectory:\s*a\s*\n\s*\.query/);
+assert.match(schemaSource, /listUserIdentitiesByProfileAndLinkedAt/);
+assert.match(schemaSource, /listUserRoleAssignmentsByProfileAndRole/);
+assert.match(schemaSource, /listReferenceAttachmentsByReferenceVersionAndSortKey/);
+assert.match(schemaSource, /listKnowledgeCommentsByAuthorSubAndCreatedAt/);
+assert.match(schemaSource, /allow\.groups\(categoryWriteGroups\)\.to\(categoryAppendOnlyOperations\)/);
+assert.doesNotMatch(schemaSource.match(/UserIdentity:[\s\S]*?UserRoleAssignment:/)?.[0] ?? "", /publicApiKey/);
+assert.doesNotMatch(schemaSource.match(/Reference:[\s\S]*?Item:/)?.[0] ?? "", /publicApiKey/);
 
 console.log("category mapper tests passed");
 

@@ -288,6 +288,8 @@ async function deleteAllContent(client) {
     "SteeringProposal",
     "SemanticRelation",
     "SemanticNode",
+    "KnowledgeComment",
+    "ReferenceAttachment",
     "Reference",
     "Category",
     "CategorySet",
@@ -384,11 +386,18 @@ async function prepareVersionedKnowledgeRecords(client, records) {
     });
   }
 
-  const mappedRecords = preparedRecords.map((record) => (
-    record.modelName === "SemanticRelation"
-      ? { ...record, expected: remapSemanticRelationReferences(record.expected, referenceIdMap) }
-      : record
-  ));
+  const mappedRecords = preparedRecords.map((record) => {
+    if (record.modelName === "SemanticRelation") {
+      return { ...record, expected: remapSemanticRelationReferences(record.expected, referenceIdMap) };
+    }
+    if (record.modelName === "ReferenceAttachment") {
+      return { ...record, expected: remapReferenceAttachment(record.expected, referenceIdMap) };
+    }
+    if (record.modelName === "KnowledgeComment") {
+      return { ...record, expected: remapKnowledgeComment(record.expected, referenceIdMap) };
+    }
+    return record;
+  });
 
   if (changedReferenceLineages.size) {
     const existingRelations = await client.listRecords("SemanticRelation");
@@ -444,6 +453,55 @@ function remapSemanticRelationReferences(relation, referenceIdMap) {
     };
   }
   return next;
+}
+
+function remapReferenceAttachment(attachment, referenceIdMap) {
+  const reference = referenceIdMap.get(attachment.referenceId);
+  if (!reference) return attachment;
+  const referenceVersionKey = `reference#${reference.id}`;
+  const next = {
+    ...attachment,
+    referenceId: reference.id,
+    referenceLineageId: reference.lineageId,
+    referenceVersionNumber: reference.versionNumber,
+    referenceVersionKey,
+  };
+  return {
+    ...next,
+    id: `reference-attachment-${hashShort([
+      referenceVersionKey,
+      next.role,
+      next.sortKey,
+      next.storagePath ?? "",
+      next.sourceUri ?? "",
+    ])}`,
+  };
+}
+
+function remapKnowledgeComment(comment, referenceIdMap) {
+  if (comment.subjectKind !== "reference") return comment;
+  const reference = referenceIdMap.get(comment.subjectId);
+  if (!reference) return comment;
+  const subjectVersionKey = `reference#${reference.id}`;
+  const subjectStateKey = `reference#${reference.lineageId}#current`;
+  const next = {
+    ...comment,
+    subjectId: reference.id,
+    subjectLineageId: reference.lineageId,
+    subjectVersionNumber: reference.versionNumber,
+    subjectVersionKey,
+    subjectStateKey,
+  };
+  return {
+    ...next,
+    id: `knowledge-comment-${hashShort([
+      subjectVersionKey,
+      next.commentKind,
+      next.body,
+      next.createdAt,
+      next.source ?? "",
+    ])}`,
+  };
 }
 
 async function buildSteeringConfigRecordChanges(client, records) {

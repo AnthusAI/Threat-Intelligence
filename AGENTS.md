@@ -85,8 +85,10 @@ rendering contracts.
 - Category and graph steering imports must not mirror Biblicus corpus contents
   into Papyrus GraphQL. Papyrus stores steering state, artifact references,
   category copy, proposals, decisions, strict private `Reference` metadata,
-  `SemanticNode` rows, `SemanticRelation` links, and stable external `item_id`
-  references; Biblicus and S3 remain the owners of corpus content.
+  private `ReferenceAttachment` file-path metadata, append-only
+  `KnowledgeComment` commentary, `SemanticNode` rows, `SemanticRelation` links,
+  and stable external `item_id` references; Biblicus and S3 remain the owners of
+  corpus content.
 - The News Desk is the newsroom operations surface. `Topics` is one desk tab,
   not the whole product concept. Use `/news-desk` and News Desk naming in UI,
   docs, and tests. Future assignment and research queues should become desk tabs

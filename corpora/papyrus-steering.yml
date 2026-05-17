@@ -24,3 +24,14 @@ corpora:
     localClassifiers:
       - classifierId: "ai-ml-history"
         label: "AI/ML History Topics"
+  - key: "AI-ML-journalism"
+    name: "AI-ML-journalism"
+    path: "corpora/AI-ML-journalism"
+    s3Prefix: "s3://amplify-dbsyytcm9drqa-mai-papyrusmediabucket0dab24-4hstaautjdqo/corpora/AI-ML-journalism/"
+    role: "source"
+    canonicalProjection:
+      authorityCorpusKey: "AI-ML-research"
+      classifierId: "ai-ml-research"
+    localClassifiers:
+      - classifierId: "ai-ml-journalism"
+        label: "AI/ML Journalism Topics"

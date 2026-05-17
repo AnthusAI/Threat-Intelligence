@@ -146,15 +146,27 @@ Feature: Newspaper layout scenarios
       | 780   | 1200   |
       | 390   | 900    |
 
-  Scenario: News desk renders category steering proposals and category edits
+  Scenario: News desk opens knowledge overview
     Given I open the news desk at 1280 by 900
     Then the news desk should render
+    And the news desk should show the knowledge overview
+
+  Scenario: News desk renders category steering proposals and category edits
+    Given I open the topics news desk at 1280 by 900
+    Then the topics desk should render
     And the news desk should show category and graph proposal rows
     And the news desk should show accepted subcategories under canonical categories
     And the news desk should show proposed subcategories under canonical categories
     And the news desk should offer accept and reject actions without defer
     When I update the first news desk category name to "Foundation Model Scaling Updated"
     Then the first news desk category name should be "Foundation Model Scaling Updated"
+    And no browser console errors should occur
+
+  Scenario: News desk browses references and semantic concepts
+    Given I open the references news desk at 1280 by 900
+    Then the references desk should show reference metadata and semantic neighbors
+    Given I open the concepts news desk at 1280 by 900
+    Then the concepts desk should show semantic nodes and linked objects
     And no browser console errors should occur
 
   Scenario: News desk manually culls assignment candidates

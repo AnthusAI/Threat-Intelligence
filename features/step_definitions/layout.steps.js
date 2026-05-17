@@ -26,8 +26,23 @@ Given("I open the news desk at {int} by {int}", async function (width, height) {
   await requirePage(this).waitForSelector("[data-news-desk]", { state: "visible", timeout: 15_000 });
 });
 
+Given("I open the topics news desk at {int} by {int}", async function (width, height) {
+  await this.openPath("/news-desk?demo=1&section=topics", width, height);
+  await requirePage(this).waitForSelector("[data-news-desk-section='topics']", { state: "visible", timeout: 15_000 });
+});
+
+Given("I open the references news desk at {int} by {int}", async function (width, height) {
+  await this.openPath("/news-desk?demo=1&section=references", width, height);
+  await requirePage(this).waitForSelector("[data-news-desk-section='references']", { state: "visible", timeout: 15_000 });
+});
+
+Given("I open the concepts news desk at {int} by {int}", async function (width, height) {
+  await this.openPath("/news-desk?demo=1&section=concepts", width, height);
+  await requirePage(this).waitForSelector("[data-news-desk-section='concepts']", { state: "visible", timeout: 15_000 });
+});
+
 Given("I open the assignments news desk at {int} by {int}", async function (width, height) {
-  await this.openPath("/news-desk?demo=1&tab=assignments", width, height);
+  await this.openPath("/news-desk?demo=1&section=assignments", width, height);
   await requirePage(this).waitForSelector("[data-news-desk-assignments]", { state: "visible", timeout: 15_000 });
 });
 
@@ -184,11 +199,45 @@ Then("the news desk should render", async function () {
   await page.locator("[data-news-desk]").waitFor({ state: "visible", timeout: 10_000 });
   assert.equal(await page.locator("[data-news-desk]").getAttribute("data-category-steering-demo"), "true");
   await page.locator("h1", { hasText: "News Desk" }).waitFor({ state: "visible", timeout: 10_000 });
-  await page.locator("[data-news-desk-tab='categories'][aria-current='page']").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-tab='overview'][aria-current='page']").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-tab='users']").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-tab='topics']").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-tab='concepts']").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-tab='references']").waitFor({ state: "visible", timeout: 10_000 });
+});
+
+Then("the news desk should show the knowledge overview", async function () {
+  const page = requirePage(this);
+  await page.locator("[data-news-desk-section='overview']").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("text=Knowledge Wire").first().waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("text=Reference Ledger").first().waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("text=Canonical Demo Corpus").first().waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("text=Source Demo Corpus").first().waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("text=Corpus Category Sets").first().waitFor({ state: "visible", timeout: 10_000 });
+});
+
+Then("the topics desk should render", async function () {
+  const page = requirePage(this);
+  await page.locator("[data-news-desk]").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-tab='topics'][aria-current='page']").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-section='topics']").waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("text=Source Demo Categories").first().waitFor({ state: "visible", timeout: 10_000 });
+});
+
+Then("the references desk should show reference metadata and semantic neighbors", async function () {
+  const page = requirePage(this);
+  await page.locator("[data-news-desk-reference-ledger]").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-reference-lineage='reference-knowledge-corpus-demo-source-history-001']").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-semantic-detail]").first().waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("text=Attachments").first().waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-neighbors]", { hasText: "classified as" }).first().waitFor({ state: "visible", timeout: 10_000 });
+});
+
+Then("the concepts desk should show semantic nodes and linked objects", async function () {
+  const page = requirePage(this);
+  await page.locator("[data-semantic-node='semantic-node-graph-entity-benchmark-saturation']").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-semantic-detail]").first().waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-neighbors]").first().waitFor({ state: "visible", timeout: 10_000 });
 });
 
 Then("the assignments desk should render", async function () {

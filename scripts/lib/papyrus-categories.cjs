@@ -85,9 +85,10 @@ function buildSteeringImportRecords(bundle, options = {}) {
     warningCount: bundle.warnings?.length ?? 0,
   }));
   records.push(rawPayloadRecord("importRun", importRunId, "warnings", { warnings: bundle.warnings ?? [] }, importRunId, now));
+  records.push(...commentConceptNodeRecords({ corpusId, importRunId, now }));
 
   for (const item of bundle.items ?? []) {
-    records.push(referenceRecord(item, { corpusId, importRunId, now }));
+    records.push(...referenceRecords(item, { corpusId, importRunId, now }));
   }
 
   if (bundle.topic_set) {
@@ -108,6 +109,10 @@ function buildSteeringImportRecords(bundle, options = {}) {
   for (const proposal of bundle.proposals ?? []) {
     records.push(...proposalRecords(proposal, { corpusId, importRunId, categorySetId, now }));
     records.push(...semanticRecordsFromProposal(proposal, { corpusId, importRunId, categorySetId, now }));
+  }
+  const importRun = records.find((entry) => entry.modelName === "KnowledgeImportRun");
+  if (importRun) {
+    importRun.expected.relationCount = records.filter((entry) => entry.modelName === "SemanticRelation").length;
   }
 
   return {
@@ -170,13 +175,19 @@ function buildProjectionImportRecords(payload, options = {}) {
       warningCount: 0,
     }),
     rawPayloadRecord("importRun", importRunId, "projection-summary", payload.summary ?? {}, importRunId, now),
+    ...commentConceptNodeRecords({ corpusId: targetCorpusId, importRunId, now }),
     ...relationRecords,
   ];
 
   for (const item of items) {
-    const reference = referenceRecord(item, { corpusId: targetCorpusId, importRunId, now });
-    records.push(reference);
+    const referenceRecordsForItem = referenceRecords(item, { corpusId: targetCorpusId, importRunId, now });
+    const reference = referenceRecordsForItem.find((entry) => entry.modelName === "Reference");
+    records.push(...referenceRecordsForItem);
     records.push(rawPayloadRecord("projection", reference.expected.id, "biblicus-projection", sanitizeProjectionPayload(item), importRunId, now));
+  }
+  const importRun = records.find((entry) => entry.modelName === "KnowledgeImportRun");
+  if (importRun) {
+    importRun.expected.relationCount = records.filter((entry) => entry.modelName === "SemanticRelation").length;
   }
 
   return { importRunId, records };
@@ -197,6 +208,8 @@ function referenceRecord(item, context) {
   const externalItemId = requiredString(item.item_id ?? item.id ?? item.externalItemId, "reference item_id");
   const lineageId = referenceLineageIdFor(context.corpusId, externalItemId);
   const metadata = sanitizeReferenceMetadata(item.metadata ?? item);
+  const pathValue = item.storage_path ?? item.storagePath ?? item.relpath ?? item.path;
+  const normalizedPath = normalizeStoragePath(pathValue);
   const reference = {
     id: `${lineageId}-v1`,
     lineageId,
@@ -204,8 +217,8 @@ function referenceRecord(item, context) {
     externalItemId,
     title: stringOrNull(item.title ?? metadata.title),
     authors: stringArrayFrom(item.authors ?? metadata.authors),
-    sourceUri: stringOrNull(item.source_uri ?? item.sourceUri ?? metadata.source_uri ?? metadata.sourceUri),
-    storagePath: stringOrNull(item.storage_path ?? item.storagePath ?? item.relpath ?? item.path),
+    sourceUri: stringOrNull(item.source_uri ?? item.sourceUri ?? metadata.source_uri ?? metadata.sourceUri) ?? normalizedPath.sourceUri,
+    storagePath: normalizedPath.storagePath,
     mediaType: stringOrNull(item.media_type ?? item.mediaType),
     byteSize: integerOrNull(item.bytes ?? item.byte_size ?? item.byteSize),
     sha256: stringOrNull(item.sha256 ?? item.checksum),
@@ -223,6 +236,286 @@ function referenceRecord(item, context) {
     reason: "reference-import",
     content: sanitizeReferenceContent(reference),
   }));
+}
+
+function referenceRecords(item, context) {
+  const reference = referenceRecord(item, context);
+  return [
+    reference,
+    ...referenceAttachmentRecords(item, reference.expected, context),
+    ...referenceCommentRecords(item, reference.expected, context),
+  ];
+}
+
+const COMMENT_CONCEPTS = [
+  {
+    nodeKey: "comment.general",
+    displayName: "General Comment",
+    description: "A general note about a private knowledge or content object.",
+  },
+  {
+    nodeKey: "comment.import_rationale",
+    displayName: "Import Rationale",
+    description: "A note explaining why a reference or content item was imported.",
+  },
+  {
+    nodeKey: "comment.ai_slop_assessment",
+    displayName: "AI Slop Assessment",
+    description: "A note assessing whether a reference or content item is low-quality generated material.",
+  },
+];
+
+function commentConceptNodeRecords(context) {
+  return COMMENT_CONCEPTS.map((concept) => {
+    const lineageId = semanticNodeLineageIdFor(concept.nodeKey);
+    return record("SemanticNode", versionedRecord({
+      id: `${lineageId}-v1`,
+      lineageId,
+      nodeKey: concept.nodeKey,
+      nodeKind: "commentConcept",
+      corpusId: context.corpusId,
+      categorySetId: null,
+      categoryLineageId: null,
+      categoryKey: null,
+      displayName: concept.displayName,
+      description: concept.description,
+      aliases: [],
+      status: "accepted",
+      importRunId: context.importRunId,
+      updatedAt: context.now,
+    }, {
+      now: context.now,
+      actor: "biblicus-import",
+      reason: "comment-concept-seed",
+      content: concept,
+    }));
+  });
+}
+
+function referenceAttachmentRecords(item, reference, context) {
+  const attachments = referenceAttachmentInputs(item, reference);
+  return attachments.map((attachment, index) => {
+    const role = safeAttachmentRole(attachment.role ?? (index === 0 ? "source" : "attachment"));
+    const sortKey = `${String(index + 1).padStart(3, "0")}-${role}`;
+    const referenceVersionKey = semanticVersionKey("reference", reference.id);
+    const metadata = sanitizeReferenceMetadata({
+      ...(attachment.metadata ?? {}),
+      ...(attachment.warning ? { warning: attachment.warning } : {}),
+    });
+    return record("ReferenceAttachment", {
+      id: `reference-attachment-${hashShort([
+        referenceVersionKey,
+        role,
+        sortKey,
+        attachment.storagePath ?? "",
+        attachment.sourceUri ?? "",
+      ])}`,
+      referenceId: reference.id,
+      referenceLineageId: reference.lineageId,
+      referenceVersionNumber: reference.versionNumber,
+      referenceVersionKey,
+      role,
+      sortKey,
+      storagePath: attachment.storagePath,
+      sourceUri: attachment.sourceUri,
+      filename: attachment.filename,
+      mediaType: attachment.mediaType,
+      byteSize: attachment.byteSize,
+      sha256: attachment.sha256,
+      etag: attachment.etag,
+      importRunId: context.importRunId,
+      importedAt: context.now,
+      metadata: JSON.stringify(metadata),
+    });
+  });
+}
+
+function referenceAttachmentInputs(item, reference) {
+  const inputs = [];
+  const addAttachment = (candidate, fallbackRole) => {
+    const normalized = normalizeAttachmentInput(candidate, fallbackRole);
+    if (!normalized) return;
+    const key = `${normalized.storagePath ?? ""}\n${normalized.sourceUri ?? ""}\n${normalized.role ?? ""}`;
+    if (inputs.some((entry) => `${entry.storagePath ?? ""}\n${entry.sourceUri ?? ""}\n${entry.role ?? ""}` === key)) return;
+    inputs.push(normalized);
+  };
+
+  addAttachment({
+    role: "source",
+    storagePath: reference.storagePath,
+    sourceUri: reference.sourceUri,
+    mediaType: reference.mediaType,
+    byteSize: reference.byteSize,
+    sha256: reference.sha256,
+  }, "source");
+
+  for (const field of ["attachments", "files", "source_files", "sourceFiles"]) {
+    const value = item[field];
+    if (!Array.isArray(value)) continue;
+    for (const entry of value) addAttachment(entry, "attachment");
+  }
+
+  addAttachment(item.source_file ?? item.sourceFile, "source");
+  addAttachment(item.transcript_file ?? item.transcriptFile ?? item.transcript_path ?? item.transcriptPath, "transcript");
+  addAttachment(item.deepgram_file ?? item.deepgramFile ?? item.deepgram_json_path ?? item.deepgramJsonPath ?? item.deepgram_path ?? item.deepgramPath, "deepgram");
+  addAttachment(item.raw_file ?? item.rawFile ?? item.raw_path ?? item.rawPath, "raw");
+
+  return inputs;
+}
+
+function normalizeAttachmentInput(candidate, fallbackRole) {
+  if (!candidate) return null;
+  const entry = typeof candidate === "string" ? { path: candidate } : candidate;
+  if (!entry || typeof entry !== "object") return null;
+  const pathValue = stringOrNull(
+    entry.storage_path
+    ?? entry.storagePath
+    ?? entry.path
+    ?? entry.s3_path
+    ?? entry.s3Path
+    ?? entry.uri
+    ?? entry.url
+    ?? entry.source_uri
+    ?? entry.sourceUri,
+  );
+  const normalizedPath = normalizeStoragePath(pathValue);
+  const storagePath = normalizedPath.storagePath;
+  const sourceUri = stringOrNull(entry.source_uri ?? entry.sourceUri ?? entry.uri ?? entry.url)
+    ?? normalizedPath.sourceUri
+    ?? (storagePath ? null : pathValue);
+  if (!storagePath && !sourceUri) return null;
+  return {
+    role: entry.role ?? entry.kind ?? entry.type ?? fallbackRole,
+    storagePath,
+    sourceUri,
+    filename: stringOrNull(entry.filename ?? entry.name) ?? filenameFromPath(storagePath ?? sourceUri),
+    mediaType: stringOrNull(entry.media_type ?? entry.mediaType ?? entry.contentType),
+    byteSize: integerOrNull(entry.bytes ?? entry.byte_size ?? entry.byteSize ?? entry.size),
+    sha256: stringOrNull(entry.sha256 ?? entry.checksum),
+    etag: stringOrNull(entry.etag ?? entry.eTag),
+    metadata: entry.metadata ?? entry,
+    warning: normalizedPath.warning,
+  };
+}
+
+function normalizeStoragePath(value) {
+  const raw = stringOrNull(value);
+  if (!raw) return { storagePath: null, sourceUri: null, warning: null };
+  if (raw.startsWith("corpora/")) return { storagePath: raw, sourceUri: null, warning: null };
+  if (raw.startsWith("/")) {
+    const marker = "/corpora/";
+    const markerIndex = raw.indexOf(marker);
+    if (markerIndex >= 0) return { storagePath: raw.slice(markerIndex + 1), sourceUri: raw, warning: null };
+    return { storagePath: null, sourceUri: raw, warning: "external-local-path" };
+  }
+  if (!raw.startsWith("s3://")) return { storagePath: raw.includes("/") ? raw : null, sourceUri: raw.includes("/") ? null : raw, warning: null };
+  try {
+    const parsed = new URL(raw);
+    const storagePath = parsed.pathname.replace(/^\/+/, "");
+    if (storagePath.startsWith("corpora/")) return { storagePath, sourceUri: raw, warning: null };
+    return { storagePath: null, sourceUri: raw, warning: "external-s3-path" };
+  } catch {
+    return { storagePath: null, sourceUri: raw, warning: "unparseable-path" };
+  }
+}
+
+function filenameFromPath(value) {
+  const normalized = stringOrNull(value);
+  if (!normalized) return null;
+  return normalized.split(/[/?#]/).filter(Boolean).at(-1) ?? null;
+}
+
+function safeAttachmentRole(value) {
+  return safeId(value || "attachment");
+}
+
+function referenceCommentRecords(item, reference, context) {
+  const rationale = importRationaleFrom(item);
+  if (!rationale) return [];
+  const comment = knowledgeCommentRecord({
+    subjectKind: "reference",
+    subjectId: reference.id,
+    subjectLineageId: reference.lineageId,
+    subjectVersionNumber: reference.versionNumber,
+    commentKind: "import_rationale",
+    body: rationale,
+    source: "biblicus-import",
+    importRunId: context.importRunId,
+    createdAt: context.now,
+    metadata: {
+      externalItemId: reference.externalItemId,
+      corpusId: reference.corpusId,
+    },
+  });
+  const conceptLineageId = semanticNodeLineageIdFor("comment.import_rationale");
+  return [
+    comment,
+    semanticRelationRecord({
+      predicate: "about",
+      subjectKind: "knowledgeComment",
+      subjectId: comment.expected.id,
+      subjectLineageId: comment.expected.id,
+      subjectVersionNumber: 1,
+      objectKind: "semanticNode",
+      objectId: `${conceptLineageId}-v1`,
+      objectLineageId: conceptLineageId,
+      objectVersionNumber: 1,
+      score: null,
+      confidence: null,
+      rank: 1,
+      classifierId: null,
+      modelVersion: null,
+      reviewRecommended: false,
+      sourceSnapshotId: null,
+      importRunId: context.importRunId,
+      importedAt: context.now,
+      metadata: {
+        commentKind: "import_rationale",
+      },
+    }),
+  ];
+}
+
+function knowledgeCommentRecord(input) {
+  const subjectVersionKey = semanticVersionKey(input.subjectKind, input.subjectId);
+  const subjectStateKey = semanticStateKey(input.subjectKind, input.subjectLineageId);
+  const metadata = sanitizeReferenceMetadata(input.metadata ?? {});
+  return record("KnowledgeComment", {
+    id: `knowledge-comment-${hashShort([
+      subjectVersionKey,
+      input.commentKind ?? "comment",
+      input.body,
+      input.createdAt,
+      input.source ?? "",
+    ])}`,
+    subjectKind: input.subjectKind,
+    subjectId: input.subjectId,
+    subjectLineageId: input.subjectLineageId,
+    subjectVersionNumber: input.subjectVersionNumber,
+    subjectVersionKey,
+    subjectStateKey,
+    commentKind: input.commentKind ?? "comment",
+    body: input.body,
+    status: input.status ?? "active",
+    source: input.source ?? null,
+    importRunId: input.importRunId ?? null,
+    authorSub: input.authorSub ?? null,
+    authorUserProfileId: input.authorUserProfileId ?? null,
+    authorLabel: input.authorLabel ?? null,
+    metadata: JSON.stringify(metadata),
+    createdAt: input.createdAt,
+  });
+}
+
+function importRationaleFrom(item) {
+  return stringOrNull(
+    item.import_rationale
+    ?? item.importRationale
+    ?? item.metadata?.import_rationale
+    ?? item.metadata?.importRationale
+    ?? item.provenance?.import_rationale
+    ?? item.provenance?.importRationale,
+  );
 }
 
 function projectionRelationRecords(items, context) {

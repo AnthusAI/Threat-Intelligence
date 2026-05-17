@@ -253,7 +253,9 @@ category records, reference metadata, semantic links, and raw payloads:
 - `KnowledgeArtifact`;
 - `SteeringProposal`;
 - `Reference`;
+- `ReferenceAttachment`;
 - `SemanticNode`;
+- `KnowledgeComment`;
 - `SemanticRelation`;
 - private `KnowledgeRawPayload` rows for steering objects.
 
@@ -261,9 +263,20 @@ It does not import Biblicus corpus contents. `Reference` rows store strict
 metadata only: stable external `item_id`, title, authors, source URI, corpus/S3
 path, media type, checksums, dates, and sanitized provenance. Abstracts,
 excerpts, extracted text, bodies, transcripts, and source notes do not belong in
-the GraphQL record. Category seeds, holdouts, proposal evidence, assignment
-evidence, and semantic links keep stable external `item_id` strings and connect
-to `Reference` lineages when Papyrus can resolve them.
+the GraphQL record. Source files and auxiliary files such as transcripts or
+Deepgram JSON remain in the existing private Amplify Storage bucket under
+`corpora/*`; Papyrus stores one `ReferenceAttachment` row per file with the
+Storage path and metadata only. Existing `s3://<bucket>/corpora/...` paths are
+normalized to Amplify Storage paths like `corpora/...`; out-of-prefix files are
+recorded as external source URIs and should be copied into `corpora/*` only by
+an explicit corpus sync step. Category seeds, holdouts, proposal evidence,
+assignment evidence, and semantic links keep stable external `item_id` strings
+and connect to `Reference` lineages when Papyrus can resolve them.
+
+Biblicus import rationale is stored as private append-only `KnowledgeComment`
+records. Comments target exact private object versions and can optionally be
+typed by ontology links through `SemanticRelation`; for example, an import
+rationale comment links to the seeded `comment.import_rationale` semantic node.
 If a Biblicus taxonomy artifact exists, `import-steering` resolves
 `analysis/taxonomy/<snapshot>/taxonomy.json` from the artifact reference and
 imports accepted category nodes under the versioned `CategorySet`. If no
@@ -362,9 +375,11 @@ uv run biblicus topic-classifier project \
 ```
 
 Import projection output back into Papyrus. This creates or versions one
-private `Reference` per projected Biblicus item and writes current
-`SemanticRelation` rows from that exact reference version to the matching
-category version:
+private `Reference` per projected Biblicus item, records private
+`ReferenceAttachment` rows for source/transcript/analysis files, stores optional
+import rationale as `KnowledgeComment`, and writes current `SemanticRelation`
+rows from the exact reference/comment versions to matching category or ontology
+versions:
 
 ```bash
 cd /Users/ryan/Projects/Papyrus
@@ -479,9 +494,10 @@ Accepted category summaries now have a small first-class editor surface in
 Papyrus: `/news-desk` shows accepted subcategories beside the canonical category
 register, and signed-in editor/admin readers can see passive category appendix
 pages after the edition. Public display stays limited to published category
-projections and published issue content. `Reference`, `SemanticNode`,
-`SemanticRelation`, and `Knowledge*` tables are private and have no API-key read
-path; readers never receive a published citation/reference projection.
+projections and published issue content. `Reference`, `ReferenceAttachment`,
+`SemanticNode`, `KnowledgeComment`, `SemanticRelation`, and `Knowledge*` tables
+are private and have no API-key read path; readers never receive a published
+citation/reference/comment projection.
 
 ## Local Corpus Working Copies
 

@@ -36,6 +36,47 @@ Pretext is the text-fit oracle. Papyrus owns the edition layout plan,
 responsive grids, page regions, block geometry, scoring, continuation labels,
 and React rendering.
 
+## Steering Taxonomy and Ontology
+
+Papyrus is designed for steering taxonomy and ontology with as much or as
+little human input as you want to provide. The News Desk is the control surface
+for that work.
+
+Steering taxonomy is how the publication decides "what the sections are" and
+what counts as coverage. Papyrus stores an accepted, versioned category tree
+as `CategorySet` + strict parent/child `Category` rows. When an editor accepts
+or edits proposals, Papyrus versions the affected categories and records an
+append-only `SteeringDecision`. When an editor rejects a proposal, that
+negative decision is also stored and can be exported as steering-feedback
+suppressions so future proposal cycles avoid re-suggesting the same weak topics.
+
+Steering ontology goes deeper than a category tree. Papyrus stores a durable
+semantic model of the publication's information space, not just loose
+associations: `Reference` records for strict external identifiers and
+provenance, `SemanticNode` records for typed entities/concepts, and
+`SemanticRelation` records for explicit, versioned subject/object relationships.
+This allows the system to evolve meaning over time: not only "these two items
+are related", but *how* they are related, with structure that editors can
+review, correct, and build on.
+
+That structured ontology is what makes Papyrus a newsroom system rather than
+"RAG with a UI". Vector search (or GraphRAG backed mostly by embedding
+similarity) can retrieve nearby text, but it does not preserve the deeper model
+needed for newsroom workflows: canonical topic lineage, rejected-proposal memory,
+entity identity over time, typed relationships, and editorially reviewed
+interpretations.
+
+Papyrus uses that extra structure to build richer agent context packs. Research,
+editor, and reporter agents can pull context that is tailored to the task and
+the beat: the accepted category tree (what we cover), steering decisions (what
+we believe and what we rejected), the relevant references (what sources and
+artifacts the knowledge is grounded in), and the semantic neighborhood around a
+topic or item (which entities, claims, and relationships matter, and how to
+navigate to adjacent concepts). Agents can also ask for "more like this" in a
+semantic sense, not only a vector-nearest-neighbors sense, and traverse the
+graph to request missing context intentionally instead of hoping a similarity
+query happens to include it.
+
 ## Automated Newsroom
 
 Papyrus treats editorial control as an ongoing loop rather than a one-time

@@ -31,9 +31,19 @@ import type {
   CategorySteeringCategoryTreeNode,
   CategorySteeringCategory,
   CategorySteeringCategorySet,
+  KnowledgeCommentRecord,
+  ReferenceAttachmentRecord,
   ReferenceRecord,
+  SemanticNodeRecord,
   SemanticRelationRecord,
+  UserDirectoryEntry,
 } from "../lib/category-repository";
+import {
+  createSemanticGraphSnapshot,
+  newsDeskHrefForSemanticObject,
+  type SemanticNeighborGroup,
+  type SemanticObjectSummary,
+} from "../lib/semantic-graph";
 
 type ActionState = {
   id: string;
@@ -43,7 +53,16 @@ type ActionState = {
 
 type ReviewAction = "accept" | "reject";
 type AssignmentCullAction = "cull" | "restore";
-export type NewsDeskTab = "categories" | "assignments";
+type UserRoleAction = "grant" | "revoke";
+export type NewsDeskTab = "overview" | "users" | "topics" | "concepts" | "references" | "assignments";
+
+export type NewsDeskSelection = {
+  reference?: string | null;
+  category?: string | null;
+  node?: string | null;
+  user?: string | null;
+  item?: string | null;
+};
 
 type CategoryReviewResponse = {
   data?: {
@@ -67,11 +86,13 @@ const TAILORED_TOPIC_PROPOSAL_KINDS = new Set([
   "display-copy-edit",
 ]);
 
-const NEWS_DESK_TABS = [
-  { id: "categories", label: "Categories", detail: "Open desk", href: "/news-desk", disabled: false },
-  { id: "assignments", label: "Assignments", detail: "Cull desk", href: "/news-desk?tab=assignments", disabled: false },
-  { id: "research", label: "Research Queue", detail: "Coming desk", href: "/news-desk?tab=research", disabled: true },
-  { id: "reporting", label: "Reporter Queue", detail: "Coming desk", href: "/news-desk?tab=reporting", disabled: true },
+const NEWS_DESK_TABS: Array<{ id: NewsDeskTab; label: string; detail: string; href: string }> = [
+  { id: "overview", label: "Overview", detail: "Desk index", href: "/news-desk" },
+  { id: "users", label: "Users", detail: "Roles", href: "/news-desk?section=users" },
+  { id: "topics", label: "Topics", detail: "Taxonomy", href: "/news-desk?section=topics" },
+  { id: "concepts", label: "Concepts", detail: "Ontology", href: "/news-desk?section=concepts" },
+  { id: "references", label: "References", detail: "Corpus", href: "/news-desk?section=references" },
+  { id: "assignments", label: "Assignments", detail: "Placeholder", href: "/news-desk?section=assignments" },
 ];
 
 const TAXONOMY_PROPOSAL_KINDS = new Set([
@@ -83,19 +104,22 @@ const TAXONOMY_PROPOSAL_KINDS = new Set([
 ]);
 
 const USER_POOL_AUTH_MODE = "userPool";
+type SemanticGraph = ReturnType<typeof createSemanticGraphSnapshot>;
 
 export function NewsDeskWorkspace({
   dashboard,
-  initialTab = "categories",
+  initialTab = "overview",
+  initialSelection = {},
 }: {
   dashboard: CategorySteeringDashboard | null;
   initialTab?: NewsDeskTab;
+  initialSelection?: NewsDeskSelection;
 }) {
-  if (!dashboard) return <ProtectedNewsDeskWorkspace initialTab={initialTab} />;
-  return <NewsDeskDashboard dashboard={dashboard} initialTab={initialTab} />;
+  if (!dashboard) return <ProtectedNewsDeskWorkspace initialSelection={initialSelection} initialTab={initialTab} />;
+  return <NewsDeskDashboard dashboard={dashboard} initialSelection={initialSelection} initialTab={initialTab} />;
 }
 
-function ProtectedNewsDeskWorkspace({ initialTab }: { initialTab: NewsDeskTab }) {
+function ProtectedNewsDeskWorkspace({ initialTab, initialSelection }: { initialTab: NewsDeskTab; initialSelection: NewsDeskSelection }) {
   const [state, setState] = useState<EditorNewsDeskState>({ status: "loading", dashboard: null, error: null });
 
   useEffect(() => {
@@ -122,7 +146,7 @@ function ProtectedNewsDeskWorkspace({ initialTab }: { initialTab: NewsDeskTab })
     };
   }, []);
 
-  if (state.status === "ready" && state.dashboard) return <NewsDeskDashboard dashboard={state.dashboard} initialTab={initialTab} />;
+  if (state.status === "ready" && state.dashboard) return <NewsDeskDashboard dashboard={state.dashboard} initialSelection={initialSelection} initialTab={initialTab} />;
 
   return (
     <main className="category-steering-shell news-desk-shell" data-news-desk-access={state.status}>
@@ -153,9 +177,11 @@ function ProtectedNewsDeskWorkspace({ initialTab }: { initialTab: NewsDeskTab })
 function NewsDeskDashboard({
   dashboard,
   initialTab,
+  initialSelection,
 }: {
   dashboard: CategorySteeringDashboard;
   initialTab: NewsDeskTab;
+  initialSelection: NewsDeskSelection;
 }) {
   const dataClient = useMemo(() => generateClient<Schema>(), []);
   const activeTab = initialTab;
@@ -165,6 +191,7 @@ function NewsDeskDashboard({
   const [categoryTreeLoadError, setCategoryTreeLoadError] = useState<string | null>(null);
   const [proposals, setProposals] = useState(dashboard.proposals);
   const [assignmentDesk, setAssignmentDesk] = useState(dashboard.assignmentDesk);
+  const [userDirectory, setUserDirectory] = useState(dashboard.userDirectory);
   const [actionState, setActionState] = useState<ActionState | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -204,6 +231,23 @@ function NewsDeskDashboard({
     ? `${assignmentDesk.edition.title} / ${assignmentDesk.edition.editionDate}`
     : "No assignment edition";
   const mastheadSecondLabel = activeTab === "assignments" ? assignmentEditionLabel : latestImportLabel;
+  const graph = useMemo(() => createSemanticGraphSnapshot({
+    references: dashboard.references,
+    categories: categorys,
+    semanticNodes: dashboard.semanticNodes,
+    knowledgeComments: dashboard.knowledgeComments,
+    semanticRelations: dashboard.semanticRelations,
+    items: assignmentDesk.candidates.flatMap((candidate) => [candidate.assignment, candidate.draftItem].filter(Boolean) as NewsDeskAssignmentItem[]),
+    referenceAttachments: dashboard.referenceAttachments,
+  }), [
+    assignmentDesk.candidates,
+    categorys,
+    dashboard.knowledgeComments,
+    dashboard.referenceAttachments,
+    dashboard.references,
+    dashboard.semanticNodes,
+    dashboard.semanticRelations,
+  ]);
 
   const categoryByUid = useMemo(() => {
     const map = new Map<string, CategorySteeringCategory>();
@@ -214,6 +258,10 @@ function NewsDeskDashboard({
   useEffect(() => {
     setAssignmentDesk(dashboard.assignmentDesk);
   }, [dashboard.assignmentDesk]);
+
+  useEffect(() => {
+    setUserDirectory(dashboard.userDirectory);
+  }, [dashboard.userDirectory]);
 
   useEffect(() => {
     if (dashboard.isDemo) {
@@ -386,6 +434,52 @@ function NewsDeskDashboard({
     }
   }
 
+  function runUserRoleAction(user: UserDirectoryEntry, role: string, action: UserRoleAction) {
+    const userId = user.userProfileId ?? user.userSub ?? "unknown-user";
+    const label = action === "grant" ? "grant" : "revoke";
+    setActionState({ id: userId, message: `${label} ${role} pending`, tone: "pending" });
+    if (dashboard.isDemo) {
+      setUserDirectory((current) => current.map((entry) => {
+        if ((entry.userProfileId ?? entry.userSub) !== (user.userProfileId ?? user.userSub)) return entry;
+        const roles = new Set(compactArray(entry.activeRoles));
+        if (action === "grant") roles.add(role);
+        if (action === "revoke") roles.delete(role);
+        return { ...entry, activeRoles: Array.from(roles).sort() };
+      }));
+      setActionState({ id: userId, message: `${label} ${role} saved`, tone: "ok" });
+      return;
+    }
+    if (!dashboard.canManageUsers) {
+      setActionState({ id: userId, message: "admin role required", tone: "error" });
+      return;
+    }
+    startTransition(() => {
+      void (async () => {
+        try {
+          const input = {
+            userProfileId: user.userProfileId ?? undefined,
+            userSub: user.userSub ?? undefined,
+            cognitoSubs: compactArray(user.identities?.map((identity) => identity.cognitoSub) ?? []),
+            role,
+          };
+          const response = action === "grant"
+            ? await dataClient.mutations.grantUserRole(input, { authMode: USER_POOL_AUTH_MODE })
+            : await dataClient.mutations.revokeUserRole(input, { authMode: USER_POOL_AUTH_MODE });
+          assertNoGraphQLErrors(response.errors);
+          const activeRoles = compactArray(response.data?.activeRoles ?? []);
+          setUserDirectory((current) => current.map((entry) => (
+            (entry.userProfileId ?? entry.userSub) === (user.userProfileId ?? user.userSub)
+              ? { ...entry, activeRoles }
+              : entry
+          )));
+          setActionState({ id: userId, message: `${label} ${role} saved`, tone: "ok" });
+        } catch (error) {
+          setActionState({ id: userId, message: error instanceof Error ? error.message : `${label} ${role} failed`, tone: "error" });
+        }
+      })();
+    });
+  }
+
   function saveCategory(category: CategorySteeringCategory, update: Pick<CategorySteeringCategory, "displayName" | "subtitle" | "description">) {
     setActionState({ id: category.id, message: "category save pending", tone: "pending" });
     const updatedAt = new Date().toISOString();
@@ -439,7 +533,7 @@ function NewsDeskDashboard({
         </header>
 
         <nav className="news-desk-tabs" aria-label="News desk sections">
-          {NEWS_DESK_TABS.map((tab) => !tab.disabled ? (
+          {NEWS_DESK_TABS.map((tab) => (
             <a
               key={tab.id}
               aria-current={tab.id === activeTab ? "page" : undefined}
@@ -450,53 +544,22 @@ function NewsDeskDashboard({
               <span>{tab.label}</span>
               <small>{tab.detail}</small>
             </a>
-          ) : (
-            <span
-              key={tab.id}
-              aria-disabled="true"
-              className="news-desk-tab news-desk-tab--disabled"
-              data-news-desk-tab={tab.id}
-            >
-              <span>{tab.label}</span>
-              <small>{tab.detail}</small>
-            </span>
           ))}
         </nav>
 
         <section className="news-desk-lede-grid" aria-label="News desk overview">
-          {activeTab === "assignments" ? (
-            <>
-              <article className="news-desk-lede">
-                <p className="story-label">Assignments Desk</p>
-                <h2>Candidate Stories Are Culled Before The Edition Closes</h2>
-                <p>
-                  Assignment rows are the surplus reporting slate for the next issue. Cull weak candidates, restore a mistaken cut, or leave the desk to follow the active assignment pool.
-                </p>
-              </article>
-              <aside className="news-desk-index" aria-label="Assignments desk status index">
-                <StatusMetric label="Target Slots" value={String(assignmentMetrics.targetSlots)} detail={assignmentDesk.edition?.title ?? "No edition selected"} />
-                <StatusMetric label="Active Assignments" value={String(assignmentMetrics.active)} detail={`${assignmentMetrics.total} total candidates`} />
-                <StatusMetric label="Drafted" value={String(assignmentMetrics.drafted)} detail="linked article drafts" />
-                <StatusMetric label="Culled" value={String(assignmentMetrics.culled)} detail="manual newsroom cuts" />
-              </aside>
-            </>
-          ) : (
-            <>
-              <article className="news-desk-lede">
-                <p className="story-label">Categories Desk</p>
-                <h2>Steering Notes Run Beside The Edition</h2>
-                <p>
-                  Proposal rows are copy-desk notes from workers and agents. Skim them like an inside page: accept a correction, reject it, or leave the present course undisturbed.
-                </p>
-              </article>
-              <aside className="news-desk-index" aria-label="News desk status index">
-                <StatusMetric label="Accepted Categories" value={String(canonicalCategorys.length)} detail={activeCategorySet ? activeCategorySet.displayName : "No accepted category set"} />
-                <StatusMetric label="Accepted Subcategories" value={String(acceptedSubcategoryCount)} detail={`${acceptedRootCategoryCount} root categories`} />
-                <StatusMetric label="Filed Notes" value={String(openProposalCount)} detail={`${categoryProposals.length} category / ${genericProposals.length} generic`} />
-                <StatusMetric label="Reference Links" value={String(dashboard.semanticRelations.length)} detail={latestImport ? `${latestImport.importKind} ${latestImport.status}` : "No knowledge import"} />
-              </aside>
-            </>
-          )}
+          <article className="news-desk-lede">
+            <p className="story-label">{formatDeskSectionLabel(activeTab)}</p>
+            <h2>{formatDeskSectionHeadline(activeTab)}</h2>
+            <p>{formatDeskSectionLede(activeTab)}</p>
+          </article>
+          <aside className="news-desk-index" aria-label="News desk status index">
+            <StatusMetric label="Users" value={String(userDirectory.length)} detail={dashboard.canManageUsers ? "admin directory" : "admin-only directory"} />
+            <StatusMetric label="Topics" value={String(canonicalCategorys.length)} detail={`${acceptedSubcategoryCount} accepted subtopics`} />
+            <StatusMetric label="Concepts" value={String(dashboard.semanticNodes.length)} detail={`${dashboard.semanticRelations.length} semantic links`} />
+            <StatusMetric label="References" value={String(dashboard.references.length)} detail={`${dashboard.referenceAttachments.length} private files`} />
+            <StatusMetric label="Assignments" value={String(assignmentMetrics.total)} detail={`${assignmentMetrics.active} active / ${assignmentMetrics.culled} culled`} />
+          </aside>
         </section>
 
         {dashboard.loadError ? (
@@ -515,71 +578,478 @@ function NewsDeskDashboard({
           </div>
         ) : null}
 
+        {activeTab === "overview" ? (
+          <OverviewDeskView
+            assignmentMetrics={assignmentMetrics}
+            dashboard={dashboard}
+            graph={graph}
+            latestImport={latestImport}
+            userDirectory={userDirectory}
+          />
+        ) : null}
+        {activeTab === "users" ? (
+          <UsersDeskView
+            canManageUsers={Boolean(dashboard.canManageUsers)}
+            disabled={isPending}
+            users={userDirectory}
+            onRoleAction={runUserRoleAction}
+          />
+        ) : null}
+        {activeTab === "topics" ? (
+          <TopicsDeskView
+            activeCategorySet={activeCategorySet}
+            activeCategoryTree={activeCategoryTree}
+            artifacts={dashboard.artifacts}
+            canonicalCategorys={canonicalCategorys}
+            categoryByUid={categoryByUid}
+            categoryProposals={categoryProposals}
+            categoryTreeLoadError={categoryTreeLoadError}
+            categoryNodes={activeCategoryTreeNodes}
+            categorySets={dashboard.categorySets}
+            corpora={dashboard.corpora}
+            disabled={isPending}
+            genericProposals={genericProposals}
+            importRuns={dashboard.importRuns}
+            initialCategoryLineageId={initialSelection.category}
+            knowledgeComments={dashboard.knowledgeComments}
+            onCategorySave={saveCategory}
+            onProposalAction={runProposalAction}
+            proposals={proposals}
+            referenceAttachments={dashboard.referenceAttachments}
+            references={dashboard.references}
+            semanticRelations={dashboard.semanticRelations}
+          />
+        ) : null}
+        {activeTab === "concepts" ? (
+          <ConceptsDeskView
+            graph={graph}
+            initialNodeLineageId={initialSelection.node}
+            semanticNodes={dashboard.semanticNodes}
+          />
+        ) : null}
+        {activeTab === "references" ? (
+          <ReferencesDeskView
+            graph={graph}
+            initialReferenceLineageId={initialSelection.reference}
+            references={dashboard.references}
+          />
+        ) : null}
         {activeTab === "assignments" ? (
           <AssignmentDeskView
             desk={assignmentDesk}
             disabled={isPending}
             onAction={runAssignmentCullAction}
           />
-        ) : (
-          <div className="news-desk-columns">
-          <div className="news-desk-main-column">
-            <AcceptedCategoryTreeSection
-              activeCategoryTree={activeCategoryTree}
-              canonicalCategorys={canonicalCategorys}
-              disabled={isPending}
-              onAction={runProposalAction}
-              proposals={proposals}
-              categoryTreeLoadError={categoryTreeLoadError}
-              categoryNodes={activeCategoryTreeNodes}
-            />
-
-            <section className="category-steering-section category-steering-section--lead" aria-labelledby="category-proposals-title">
-              <SectionHeader title="Category Proposals" detail={`${categoryProposals.length} tailored notes`} />
-              <div className="category-steering-proposal-list">
-                {categoryProposals.length ? categoryProposals.map((proposal) => (
-                  <CategoryProposalRow
-                    key={proposal.id}
-                    proposal={proposal}
-                    category={proposal.categoryKey ? categoryByUid.get(proposal.categoryKey) : undefined}
-                    disabled={isPending}
-                    onAction={runProposalAction}
-                  />
-                )) : <EmptyRow label="No category proposals" />}
-              </div>
-            </section>
-
-            <GenericProposalQueue proposals={genericProposals} disabled={isPending} onAction={runProposalAction} />
-
-            <section className="category-steering-section" aria-labelledby="accepted-category-register-title">
-              <SectionHeader title="Accepted Category Register" detail={activeCategorySet ? activeCategorySet.classifierId : "No classifier imported"} />
-              <div className="category-steering-category-grid">
-                {canonicalCategorys.length ? canonicalCategorys.map((category) => (
-                  <CategoryEditor key={category.id} category={category} disabled={isPending} onSave={saveCategory} />
-                )) : <EmptyRow label="No canonical categories imported" />}
-              </div>
-            </section>
-          </div>
-
-          <aside className="news-desk-rail-column">
-            <CorpusCategorySetSummary
-              corpora={dashboard.corpora}
-              categorySets={dashboard.categorySets}
-              importRuns={dashboard.importRuns}
-              canonicalCategorySetId={activeCategorySet?.id ?? null}
-            />
-
-            <CategorySetPanel
-              categorySet={activeCategorySet}
-              artifacts={dashboard.artifacts}
-              references={dashboard.references}
-              semanticRelations={dashboard.semanticRelations}
-            />
-          </aside>
-          </div>
-        )}
+        ) : null}
       </article>
     </main>
+  );
+}
+
+function OverviewDeskView({
+  assignmentMetrics,
+  dashboard,
+  graph,
+  latestImport,
+  userDirectory,
+}: {
+  assignmentMetrics: AssignmentMetrics;
+  dashboard: CategorySteeringDashboard;
+  graph: SemanticGraph;
+  latestImport: CategorySteeringImportRun | null;
+  userDirectory: UserDirectoryEntry[];
+}) {
+  const selectedReference = dashboard.references[0] ?? null;
+  const selectedSummary = selectedReference ? graph.resolve("reference", selectedReference.lineageId ?? selectedReference.id) : null;
+  return (
+    <div className="news-desk-columns" data-news-desk-section="overview">
+      <div className="news-desk-main-column">
+        <section className="category-steering-section category-steering-section--lead" aria-labelledby="knowledge-wire-title">
+          <SectionHeader title="Knowledge Wire" detail={latestImport ? `${latestImport.importKind} / ${latestImport.status}` : "No import run"} />
+          <div className="news-desk-ledger-list news-desk-ledger-list--compact">
+            <DeskLinkCard href="/news-desk?section=references" label="References" value={dashboard.references.length} detail={`${dashboard.referenceAttachments.length} attachments / ${dashboard.knowledgeComments.length} comments`} />
+            <DeskLinkCard href="/news-desk?section=concepts" label="Concepts" value={dashboard.semanticNodes.length} detail={`${dashboard.semanticRelations.length} relations`} />
+            <DeskLinkCard href="/news-desk?section=topics" label="Topics" value={dashboard.categorys.length} detail={`${dashboard.proposals.filter((proposal) => proposal.status === "proposed").length} open proposals`} />
+            <DeskLinkCard href="/news-desk?section=users" label="Users" value={userDirectory.length} detail={dashboard.canManageUsers ? "role desk available" : "admin role required"} />
+            <DeskLinkCard href="/news-desk?section=assignments" label="Assignments" value={assignmentMetrics.total} detail={`${assignmentMetrics.active} active candidates`} />
+          </div>
+        </section>
+
+        <section className="category-steering-section" aria-labelledby="reference-ledger-title">
+          <SectionHeader title="Reference Ledger" detail={`${dashboard.references.length} private metadata rows`} />
+          <ReferenceLedger references={dashboard.references.slice(0, 8)} selectedLineageId={selectedReference?.lineageId ?? null} />
+        </section>
+      </div>
+
+      <aside className="news-desk-rail-column">
+        <CorpusCategorySetSummary
+          corpora={dashboard.corpora}
+          categorySets={dashboard.categorySets}
+          importRuns={dashboard.importRuns}
+          canonicalCategorySetId={dashboard.canonicalCategorySetId ?? null}
+        />
+        <SemanticDetailPanel graph={graph} selected={selectedSummary} />
+      </aside>
+    </div>
+  );
+}
+
+function UsersDeskView({
+  canManageUsers,
+  disabled,
+  users,
+  onRoleAction,
+}: {
+  canManageUsers: boolean;
+  disabled: boolean;
+  users: UserDirectoryEntry[];
+  onRoleAction: (user: UserDirectoryEntry, role: string, action: UserRoleAction) => void;
+}) {
+  return (
+    <div className="news-desk-columns" data-news-desk-section="users">
+      <div className="news-desk-main-column">
+        <section className="category-steering-section category-steering-section--lead" aria-labelledby="user-directory-title">
+          <SectionHeader title="User Directory" detail={canManageUsers ? `${users.length} mapped users` : "Admin role required"} />
+          {!canManageUsers ? <div className="category-steering-alert">Only admins can list Cognito users or change editor/admin roles.</div> : null}
+          <div className="news-desk-user-list">
+            {users.length ? users.map((user) => (
+              <UserDirectoryRow key={user.userProfileId ?? user.userSub ?? user.email ?? "unknown"} canManageUsers={canManageUsers} disabled={disabled} user={user} onRoleAction={onRoleAction} />
+            )) : <EmptyRow label={canManageUsers ? "No users returned by the directory" : "Sign in as an admin to load user records"} />}
+          </div>
+        </section>
+      </div>
+      <aside className="news-desk-rail-column">
+        <section className="category-steering-section" aria-labelledby="identity-policy-title">
+          <SectionHeader title="Identity Policy" detail="Profile first" />
+          <div className="category-steering-revision-panel">
+            <p>
+              A Papyrus user is a stable profile. One profile can carry multiple Cognito identities, so separate Google accounts can still resolve to the same editor.
+            </p>
+          </div>
+        </section>
+      </aside>
+    </div>
+  );
+}
+
+function UserDirectoryRow({
+  canManageUsers,
+  disabled,
+  user,
+  onRoleAction,
+}: {
+  canManageUsers: boolean;
+  disabled: boolean;
+  user: UserDirectoryEntry;
+  onRoleAction: (user: UserDirectoryEntry, role: string, action: UserRoleAction) => void;
+}) {
+  const activeRoles = new Set(compactArray(user.activeRoles));
+  const label = user.displayName ?? user.email ?? user.username ?? user.userSub ?? "Unknown user";
+  return (
+    <article className="news-desk-user-row" data-news-desk-user={user.userProfileId ?? user.userSub ?? label}>
+      <div>
+        <header>
+          <strong>{label}</strong>
+          <span>{compactArray(user.activeRoles).join(" / ") || "reader"}</span>
+        </header>
+        <p>{user.email ?? "No email"} / {user.provider ?? "provider unknown"} / {user.cognitoStatus ?? "no Cognito status"}</p>
+        <div className="news-desk-chip-row">
+          {user.identities.length ? user.identities.map((identity) => (
+            <span key={identity.id}>{identity.email ?? identity.cognitoSub} ({identity.status})</span>
+          )) : <span>No linked identity row</span>}
+        </div>
+      </div>
+      <div className="news-desk-user-row__actions">
+        {["editor", "admin"].map((role) => {
+          const active = activeRoles.has(role);
+          return (
+            <button
+              key={role}
+              type="button"
+              disabled={disabled || !canManageUsers}
+              onClick={() => onRoleAction(user, role, active ? "revoke" : "grant")}
+            >
+              {active ? `Revoke ${role}` : `Make ${role}`}
+            </button>
+          );
+        })}
+      </div>
+    </article>
+  );
+}
+
+function TopicsDeskView({
+  activeCategorySet,
+  activeCategoryTree,
+  artifacts,
+  canonicalCategorys,
+  categoryByUid,
+  categoryProposals,
+  categoryTreeLoadError,
+  categoryNodes,
+  categorySets,
+  corpora,
+  disabled,
+  genericProposals,
+  importRuns,
+  knowledgeComments,
+  onCategorySave,
+  onProposalAction,
+  proposals,
+  referenceAttachments,
+  references,
+  semanticRelations,
+}: {
+  activeCategorySet: CategorySteeringCategorySet | null;
+  activeCategoryTree: CategorySteeringCategoryTree | null;
+  artifacts: CategorySteeringArtifact[];
+  canonicalCategorys: CategorySteeringCategory[];
+  categoryByUid: Map<string, CategorySteeringCategory>;
+  categoryProposals: CategorySteeringProposal[];
+  categoryTreeLoadError: string | null;
+  categoryNodes: CategorySteeringCategoryTreeNode[];
+  categorySets: CategorySteeringCategorySet[];
+  corpora: CategorySteeringCorpus[];
+  disabled: boolean;
+  genericProposals: CategorySteeringProposal[];
+  importRuns: CategorySteeringImportRun[];
+  initialCategoryLineageId?: string | null;
+  knowledgeComments: KnowledgeCommentRecord[];
+  onCategorySave: (category: CategorySteeringCategory, update: Pick<CategorySteeringCategory, "displayName" | "subtitle" | "description">) => void;
+  onProposalAction: (proposal: CategorySteeringProposal, action: ReviewAction) => void;
+  proposals: CategorySteeringProposal[];
+  referenceAttachments: ReferenceAttachmentRecord[];
+  references: ReferenceRecord[];
+  semanticRelations: SemanticRelationRecord[];
+}) {
+  return (
+    <div className="news-desk-columns" data-news-desk-section="topics">
+      <div className="news-desk-main-column">
+        <AcceptedCategoryTreeSection
+          activeCategoryTree={activeCategoryTree}
+          canonicalCategorys={canonicalCategorys}
+          disabled={disabled}
+          onAction={onProposalAction}
+          proposals={proposals}
+          categoryTreeLoadError={categoryTreeLoadError}
+          categoryNodes={categoryNodes}
+        />
+
+        <section className="category-steering-section category-steering-section--lead" aria-labelledby="category-proposals-title">
+          <SectionHeader title="Category Proposals" detail={`${categoryProposals.length} tailored notes`} />
+          <div className="category-steering-proposal-list">
+            {categoryProposals.length ? categoryProposals.map((proposal) => (
+              <CategoryProposalRow
+                key={proposal.id}
+                proposal={proposal}
+                category={proposal.categoryKey ? categoryByUid.get(proposal.categoryKey) : undefined}
+                disabled={disabled}
+                onAction={onProposalAction}
+              />
+            )) : <EmptyRow label="No category proposals" />}
+          </div>
+        </section>
+
+        <GenericProposalQueue proposals={genericProposals} disabled={disabled} onAction={onProposalAction} />
+
+        <section className="category-steering-section" aria-labelledby="accepted-category-register-title">
+          <SectionHeader title="Accepted Category Register" detail={activeCategorySet ? activeCategorySet.classifierId : "No classifier imported"} />
+          <div className="category-steering-category-grid">
+            {canonicalCategorys.length ? canonicalCategorys.map((category) => (
+              <CategoryEditor key={category.id} category={category} disabled={disabled} onSave={onCategorySave} />
+            )) : <EmptyRow label="No canonical categories imported" />}
+          </div>
+        </section>
+      </div>
+
+      <aside className="news-desk-rail-column">
+        <CorpusCategorySetSummary
+          corpora={corpora}
+          categorySets={categorySets}
+          importRuns={importRuns}
+          canonicalCategorySetId={activeCategorySet?.id ?? null}
+        />
+
+        <CategorySetPanel
+          categorySet={activeCategorySet}
+          artifacts={artifacts}
+          references={references}
+          referenceAttachments={referenceAttachments}
+          knowledgeComments={knowledgeComments}
+          semanticRelations={semanticRelations}
+        />
+      </aside>
+    </div>
+  );
+}
+
+function ConceptsDeskView({
+  graph,
+  initialNodeLineageId,
+  semanticNodes,
+}: {
+  graph: SemanticGraph;
+  initialNodeLineageId?: string | null;
+  semanticNodes: SemanticNodeRecord[];
+}) {
+  const selected = selectSemanticNodeSummary(graph, semanticNodes, initialNodeLineageId);
+  return (
+    <div className="news-desk-columns" data-news-desk-section="concepts">
+      <div className="news-desk-main-column">
+        <section className="category-steering-section category-steering-section--lead" aria-labelledby="semantic-concepts-title">
+          <SectionHeader title="Semantic Concepts" detail={`${semanticNodes.length} graph nodes`} />
+          <div className="news-desk-object-list">
+            {semanticNodes.length ? semanticNodes.map((node) => {
+              const lineageId = node.lineageId ?? node.id;
+              return (
+                <a
+                  className={`news-desk-object-row${selected?.lineageId === lineageId ? " news-desk-object-row--active" : ""}`}
+                  data-semantic-node={lineageId}
+                  href={newsDeskHrefForSemanticObject("semanticNode", lineageId)}
+                  key={node.id}
+                >
+                  <strong>{node.displayName ?? node.nodeKey}</strong>
+                  <span>{node.nodeKind} / {node.status}</span>
+                </a>
+              );
+            }) : <EmptyRow label="No semantic nodes imported" />}
+          </div>
+        </section>
+      </div>
+      <aside className="news-desk-rail-column">
+        <SemanticDetailPanel graph={graph} selected={selected} />
+      </aside>
+    </div>
+  );
+}
+
+function ReferencesDeskView({
+  graph,
+  initialReferenceLineageId,
+  references,
+}: {
+  graph: SemanticGraph;
+  initialReferenceLineageId?: string | null;
+  references: ReferenceRecord[];
+}) {
+  const selected = selectReferenceSummary(graph, references, initialReferenceLineageId);
+  return (
+    <div className="news-desk-columns" data-news-desk-section="references">
+      <div className="news-desk-main-column">
+        <section className="category-steering-section category-steering-section--lead" aria-labelledby="reference-ledger-title">
+          <SectionHeader title="Reference Ledger" detail={`${references.length} private corpus items`} />
+          <ReferenceLedger references={references} selectedLineageId={selected?.lineageId ?? null} />
+        </section>
+      </div>
+      <aside className="news-desk-rail-column">
+        <SemanticDetailPanel graph={graph} selected={selected} />
+      </aside>
+    </div>
+  );
+}
+
+function ReferenceLedger({ references, selectedLineageId }: { references: ReferenceRecord[]; selectedLineageId?: string | null }) {
+  return (
+    <div className="news-desk-object-list" data-news-desk-reference-ledger>
+      {references.length ? references.map((reference) => {
+        const lineageId = reference.lineageId ?? reference.id;
+        return (
+          <a
+            className={`news-desk-object-row${selectedLineageId === lineageId ? " news-desk-object-row--active" : ""}`}
+            data-reference-lineage={lineageId}
+            href={newsDeskHrefForSemanticObject("reference", lineageId)}
+            key={reference.id}
+          >
+            <strong>{reference.title ?? reference.externalItemId}</strong>
+            <span>{reference.mediaType ?? "metadata"} / {reference.storagePath ?? reference.sourceUri ?? "no file path"}</span>
+          </a>
+        );
+      }) : <EmptyRow label="No private references imported" />}
+    </div>
+  );
+}
+
+function SemanticDetailPanel({ graph, selected }: { graph: SemanticGraph; selected: SemanticObjectSummary | null }) {
+  if (!selected) {
+    return (
+      <section className="category-steering-section" aria-labelledby="semantic-detail-title">
+        <SectionHeader title="Semantic Detail" detail="No object selected" />
+        <EmptyRow label="Select a reference, topic, concept, item, or comment" />
+      </section>
+    );
+  }
+
+  const comments = graph.commentsFor(selected.kind, selected.lineageId);
+  const attachments = selected.kind === "reference" ? graph.attachmentsForReference(selected.lineageId) : [];
+  const neighborGroups = graph.neighbors(selected.kind, selected.lineageId);
+
+  return (
+    <section className="category-steering-section" aria-labelledby="semantic-detail-title" data-news-desk-semantic-detail={selected.lineageId}>
+      <SectionHeader title="Semantic Detail" detail={`${selected.kind} / v${selected.versionNumber ?? "?"}`} />
+      <article className="news-desk-semantic-detail">
+        <header>
+          <strong>{selected.label}</strong>
+          <span>{selected.subtitle ?? selected.lineageId}</span>
+        </header>
+        {attachments.length ? (
+          <div className="news-desk-detail-block">
+            <p className="story-label">Attachments</p>
+            {attachments.map((attachment) => (
+              <div className="news-desk-detail-line" key={attachment.id}>
+                <span>{attachment.role}</span>
+                <strong>{attachment.storagePath ?? attachment.sourceUri ?? attachment.filename ?? "unmapped file"}</strong>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        {comments.length ? (
+          <div className="news-desk-detail-block">
+            <p className="story-label">Comments</p>
+            {comments.slice(0, 4).map((comment) => (
+              <div className="news-desk-detail-line" key={comment.id}>
+                <span>{comment.commentKind}</span>
+                <strong>{comment.body}</strong>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        <NeighborGroups groups={neighborGroups} />
+      </article>
+    </section>
+  );
+}
+
+function NeighborGroups({ groups }: { groups: SemanticNeighborGroup[] }) {
+  return (
+    <div className="news-desk-detail-block" data-news-desk-neighbors>
+      <p className="story-label">Semantic Neighbors</p>
+      {groups.length ? groups.map((group) => (
+        <div className="news-desk-neighbor-group" key={`${group.direction}-${group.predicate}`}>
+          <header>
+            <strong>{group.label}</strong>
+            <span>{group.direction} / {group.relations.length}</span>
+          </header>
+          {group.objects.map((object) => (
+            <a href={object.href} key={`${group.direction}-${group.predicate}-${object.kind}-${object.lineageId}`}>
+              <span>{object.kind}</span>
+              <strong>{object.label}</strong>
+            </a>
+          ))}
+        </div>
+      )) : <EmptyRow label="No current semantic relations for this object" />}
+    </div>
+  );
+}
+
+function DeskLinkCard({ href, label, value, detail }: { href: string; label: string; value: number; detail: string }) {
+  return (
+    <a className="news-desk-ledger-item news-desk-ledger-item--link" href={href}>
+      <header>
+        <strong>{label}</strong>
+        <span>{value}</span>
+      </header>
+      <p>{detail}</p>
+    </a>
   );
 }
 
@@ -810,6 +1280,47 @@ function StatusMetric({ label, value, detail }: { label: string; value: string; 
       <small>{detail}</small>
     </div>
   );
+}
+
+function formatDeskSectionLabel(section: NewsDeskTab): string {
+  if (section === "users") return "Users Desk";
+  if (section === "topics") return "Topics Desk";
+  if (section === "concepts") return "Concepts Desk";
+  if (section === "references") return "References Desk";
+  if (section === "assignments") return "Assignments Desk";
+  return "Knowledge Desk";
+}
+
+function formatDeskSectionHeadline(section: NewsDeskTab): string {
+  if (section === "users") return "Profiles Carry The Human, Identities Carry The Login";
+  if (section === "topics") return "Taxonomy Steering Stays Beside The Corpus";
+  if (section === "concepts") return "Semantic Concepts Connect The Knowledge Graph";
+  if (section === "references") return "Reference Metadata Leads To Private Corpus Files";
+  if (section === "assignments") return "Assignment Operations Stay Ready For The Reporting Queue";
+  return "The Desk Opens On The Whole Knowledge Wire";
+}
+
+function formatDeskSectionLede(section: NewsDeskTab): string {
+  if (section === "users") return "Admins can map more than one Cognito identity to one Papyrus profile and mirror newsroom roles across those identities.";
+  if (section === "topics") return "Editors can inspect accepted topics, subtopics, open steering proposals, and the taxonomy artifacts imported from Biblicus.";
+  if (section === "concepts") return "Graph concepts are private semantic nodes. Use them to surf from ontology terms to references, topics, comments, and Papyrus items.";
+  if (section === "references") return "References store strict metadata and attachment paths only. Source contents stay in S3 and corpus storage.";
+  if (section === "assignments") return "This section keeps the assignment desk visible while taxonomy and ontology monitoring take priority.";
+  return "Use the left sections to move between users, topics, semantic concepts, references, and downstream newsroom work.";
+}
+
+function selectReferenceSummary(graph: SemanticGraph, references: ReferenceRecord[], lineageId?: string | null): SemanticObjectSummary | null {
+  const selected = lineageId ? graph.resolve("reference", lineageId) : null;
+  if (selected) return selected;
+  const first = references[0];
+  return first ? graph.resolve("reference", first.lineageId ?? first.id) : null;
+}
+
+function selectSemanticNodeSummary(graph: SemanticGraph, nodes: SemanticNodeRecord[], lineageId?: string | null): SemanticObjectSummary | null {
+  const selected = lineageId ? graph.resolve("semanticNode", lineageId) : null;
+  if (selected) return selected;
+  const first = nodes[0];
+  return first ? graph.resolve("semanticNode", first.lineageId ?? first.id) : null;
 }
 
 type AssignmentSectionGroup = {
@@ -1140,6 +1651,11 @@ function assertReviewMutationSucceeded(response: CategoryReviewResponse, proposa
   return response.data;
 }
 
+function assertNoGraphQLErrors(errors?: unknown[] | null) {
+  if (!errors?.length) return;
+  throw new Error(errors.map((error) => formatGraphQLError(error as { message?: string | null } | string | null)).join("; "));
+}
+
 function formatGraphQLError(error: { message?: string | null } | string | null): string {
   if (typeof error === "string") return error;
   return error?.message ?? "GraphQL mutation failed.";
@@ -1424,11 +1940,15 @@ function CategorySetPanel({
   categorySet,
   artifacts,
   references,
+  referenceAttachments,
+  knowledgeComments,
   semanticRelations,
 }: {
   categorySet: CategorySteeringCategorySet | null;
   artifacts: CategorySteeringArtifact[];
   references: ReferenceRecord[];
+  referenceAttachments: { id: string }[];
+  knowledgeComments: { id: string; commentKind: string }[];
   semanticRelations: SemanticRelationRecord[];
 }) {
   return (
@@ -1451,6 +1971,14 @@ function CategorySetPanel({
           <div>
             <dt>References</dt>
             <dd>{references.length}</dd>
+          </div>
+          <div>
+            <dt>Attachments</dt>
+            <dd>{referenceAttachments.length}</dd>
+          </div>
+          <div>
+            <dt>Import Notes</dt>
+            <dd>{knowledgeComments.filter((comment) => comment.commentKind === "import_rationale").length}</dd>
           </div>
           <div>
             <dt>Review Links</dt>

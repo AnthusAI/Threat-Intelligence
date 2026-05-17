@@ -34,7 +34,9 @@ const KNOWLEDGE_IMPORT_RUN_FIELDS = "id corpusId importKind classifierId sourceS
 const KNOWLEDGE_RAW_PAYLOAD_FIELDS = "id ownerType ownerId payloadKind importRunId payload createdAt updatedAt";
 const KNOWLEDGE_ARTIFACT_FIELDS = "id corpusId artifactKind artifactId snapshotId displayName createdAt importRunId";
 const REFERENCE_FIELDS = `${VERSION_FIELDS} id corpusId externalItemId title authors sourceUri storagePath mediaType byteSize sha256 sourcePublishedAt sourceUpdatedAt retrievedAt importRunId importedAt metadata updatedAt`;
+const REFERENCE_ATTACHMENT_FIELDS = "id referenceId referenceLineageId referenceVersionNumber referenceVersionKey role sortKey storagePath sourceUri filename mediaType byteSize sha256 etag importRunId importedAt metadata";
 const SEMANTIC_NODE_FIELDS = `${VERSION_FIELDS} id nodeKey nodeKind corpusId categorySetId categoryLineageId categoryKey displayName description aliases status importRunId updatedAt`;
+const KNOWLEDGE_COMMENT_FIELDS = "id subjectKind subjectId subjectLineageId subjectVersionNumber subjectVersionKey subjectStateKey commentKind body status source importRunId authorSub authorUserProfileId authorLabel metadata createdAt";
 const SEMANTIC_RELATION_FIELDS = "id relationState predicate subjectKind subjectId subjectLineageId subjectVersionNumber objectKind objectId objectLineageId objectVersionNumber subjectStateKey objectStateKey objectSubjectStateKey predicateObjectStateKey subjectVersionKey objectVersionKey score confidence rank classifierId modelVersion reviewRecommended sourceSnapshotId importRunId importedAt metadata";
 
 const LIST_RECORDS = {
@@ -59,7 +61,9 @@ const LIST_RECORDS = {
   SteeringProposal: listDefinition("listSteeringProposals", PROPOSAL_FIELDS),
   SteeringDecision: listDefinition("listSteeringDecisions", DECISION_FIELDS),
   Reference: listDefinition("listReferences", REFERENCE_FIELDS),
+  ReferenceAttachment: listDefinition("listReferenceAttachments", REFERENCE_ATTACHMENT_FIELDS),
   SemanticNode: listDefinition("listSemanticNodes", SEMANTIC_NODE_FIELDS),
+  KnowledgeComment: listDefinition("listKnowledgeComments", KNOWLEDGE_COMMENT_FIELDS),
   SemanticRelation: listDefinition("listSemanticRelations", SEMANTIC_RELATION_FIELDS),
 };
 
@@ -85,7 +89,9 @@ const GETTERS = {
   SteeringProposal: getDefinition("getSteeringProposal", PROPOSAL_FIELDS),
   SteeringDecision: getDefinition("getSteeringDecision", DECISION_FIELDS),
   Reference: getDefinition("getReference", REFERENCE_FIELDS),
+  ReferenceAttachment: getDefinition("getReferenceAttachment", REFERENCE_ATTACHMENT_FIELDS),
   SemanticNode: getDefinition("getSemanticNode", SEMANTIC_NODE_FIELDS),
+  KnowledgeComment: getDefinition("getKnowledgeComment", KNOWLEDGE_COMMENT_FIELDS),
   SemanticRelation: getDefinition("getSemanticRelation", SEMANTIC_RELATION_FIELDS),
 };
 

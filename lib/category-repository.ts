@@ -151,6 +151,26 @@ export type ReferenceRecord = {
   updatedAt?: string | null;
 };
 
+export type ReferenceAttachmentRecord = {
+  id: string;
+  referenceId: string;
+  referenceLineageId: string;
+  referenceVersionNumber?: number | null;
+  referenceVersionKey: string;
+  role: string;
+  sortKey: string;
+  storagePath?: string | null;
+  sourceUri?: string | null;
+  filename?: string | null;
+  mediaType?: string | null;
+  byteSize?: number | null;
+  sha256?: string | null;
+  etag?: string | null;
+  importRunId?: string | null;
+  importedAt?: string | null;
+  metadata?: unknown;
+};
+
 export type SemanticNodeRecord = {
   id: string;
   lineageId?: string | null;
@@ -205,11 +225,58 @@ export type SemanticRelationRecord = {
   metadata?: unknown;
 };
 
+export type KnowledgeCommentRecord = {
+  id: string;
+  subjectKind: string;
+  subjectId: string;
+  subjectLineageId: string;
+  subjectVersionNumber?: number | null;
+  subjectVersionKey: string;
+  subjectStateKey: string;
+  commentKind: string;
+  body: string;
+  status: string;
+  source?: string | null;
+  importRunId?: string | null;
+  authorSub?: string | null;
+  authorUserProfileId?: string | null;
+  authorLabel?: string | null;
+  metadata?: unknown;
+  createdAt: string;
+};
+
+export type UserIdentityRecord = {
+  id: string;
+  userProfileId: string;
+  cognitoSub: string;
+  provider?: string | null;
+  email?: string | null;
+  status: string;
+  linkedAt: string;
+  lastSeenAt?: string | null;
+};
+
+export type UserDirectoryEntry = {
+  userProfileId?: string | null;
+  userSub?: string | null;
+  username?: string | null;
+  email?: string | null;
+  displayName?: string | null;
+  provider?: string | null;
+  enabled?: boolean | null;
+  cognitoStatus?: string | null;
+  identityStatus?: string | null;
+  activeRoles: Array<string | null>;
+  identities: UserIdentityRecord[];
+};
+
 export type CategorySteeringDashboard = {
   isDemo?: boolean;
+  canManageUsers?: boolean;
   canonicalCorpusId?: string | null;
   canonicalCategorySetId?: string | null;
   assignmentDesk: NewsDeskAssignmentDesk;
+  userDirectory: UserDirectoryEntry[];
   corpora: CategorySteeringCorpus[];
   importRuns: CategorySteeringImportRun[];
   categorySets: CategorySteeringCategorySet[];
@@ -219,7 +286,9 @@ export type CategorySteeringDashboard = {
   proposals: CategorySteeringProposal[];
   artifacts: CategorySteeringArtifact[];
   references: ReferenceRecord[];
+  referenceAttachments: ReferenceAttachmentRecord[];
   semanticNodes: SemanticNodeRecord[];
+  knowledgeComments: KnowledgeCommentRecord[];
   semanticRelations: SemanticRelationRecord[];
   loadError?: string | null;
 };
@@ -296,6 +365,7 @@ function createEmptyCategorySteeringDashboard(): CategorySteeringDashboard {
     canonicalCorpusId: null,
     canonicalCategorySetId: null,
     assignmentDesk: createEmptyAssignmentDesk(),
+    userDirectory: [],
     corpora: [],
     importRuns: [],
     categorySets: [],
@@ -305,7 +375,9 @@ function createEmptyCategorySteeringDashboard(): CategorySteeringDashboard {
     proposals: [],
     artifacts: [],
     references: [],
+    referenceAttachments: [],
     semanticNodes: [],
+    knowledgeComments: [],
     semanticRelations: [],
     loadError: null,
   };
@@ -326,9 +398,70 @@ function createDemoCategorySteeringDashboard(): CategorySteeringDashboard {
 
   return {
     isDemo: true,
+    canManageUsers: true,
     canonicalCorpusId: corpusId,
     canonicalCategorySetId: categorySetId,
     assignmentDesk: createDemoAssignmentDesk(importedAt),
+    userDirectory: [
+      {
+        userProfileId: "user-profile-demo-editor",
+        userSub: "demo-editor-sub",
+        username: "demo-editor",
+        email: "editor@example.com",
+        displayName: "Demo Editor",
+        provider: "google",
+        enabled: true,
+        cognitoStatus: "CONFIRMED",
+        identityStatus: "active",
+        activeRoles: ["editor"],
+        identities: [
+          {
+            id: "user-identity-demo-editor-google",
+            userProfileId: "user-profile-demo-editor",
+            cognitoSub: "demo-editor-sub",
+            provider: "google",
+            email: "editor@example.com",
+            status: "active",
+            linkedAt: importedAt,
+            lastSeenAt: importedAt,
+          },
+          {
+            id: "user-identity-demo-editor-alt",
+            userProfileId: "user-profile-demo-editor",
+            cognitoSub: "demo-editor-alt-sub",
+            provider: "google",
+            email: "editor.alt@example.com",
+            status: "active",
+            linkedAt: importedAt,
+            lastSeenAt: importedAt,
+          },
+        ],
+      },
+      {
+        userProfileId: "user-profile-demo-reader",
+        userSub: "demo-reader-sub",
+        username: "demo-reader",
+        email: "reader@example.com",
+        displayName: "Demo Reader",
+        provider: "google",
+        enabled: true,
+        cognitoStatus: "CONFIRMED",
+        identityStatus: "active",
+        activeRoles: [],
+        identities: [
+          {
+            id: "user-identity-demo-reader-google",
+            userProfileId: "user-profile-demo-reader",
+            cognitoSub: "demo-reader-sub",
+            provider: "google",
+            email: "reader@example.com",
+            status: "active",
+            linkedAt: importedAt,
+            lastSeenAt: importedAt,
+          },
+        ],
+      },
+    ],
     corpora: [
       {
         id: corpusId,
@@ -635,6 +768,54 @@ function createDemoCategorySteeringDashboard(): CategorySteeringDashboard {
         importedAt,
       },
     ],
+    referenceAttachments: [
+      {
+        id: "reference-attachment-demo-history-001-source",
+        referenceId: referenceHistoryOneId,
+        referenceLineageId: referenceHistoryOneLineageId,
+        referenceVersionNumber: 1,
+        referenceVersionKey: `reference#${referenceHistoryOneId}`,
+        role: "source",
+        sortKey: "001-source",
+        storagePath: "corpora/history/history-001.md",
+        sourceUri: "s3://papyrus-demo/corpora/history/history-001.md",
+        filename: "history-001.md",
+        mediaType: "text/markdown",
+        sha256: "demo-history-001",
+        importRunId: "knowledge-import-demo-projection",
+        importedAt,
+      },
+      {
+        id: "reference-attachment-demo-history-002-source",
+        referenceId: referenceHistoryTwoId,
+        referenceLineageId: referenceHistoryTwoLineageId,
+        referenceVersionNumber: 1,
+        referenceVersionKey: `reference#${referenceHistoryTwoId}`,
+        role: "source",
+        sortKey: "001-source",
+        storagePath: "corpora/history/history-002.md",
+        sourceUri: "s3://papyrus-demo/corpora/history/history-002.md",
+        filename: "history-002.md",
+        mediaType: "text/markdown",
+        sha256: "demo-history-002",
+        importRunId: "knowledge-import-demo-projection",
+        importedAt,
+      },
+      {
+        id: "reference-attachment-demo-history-002-deepgram",
+        referenceId: referenceHistoryTwoId,
+        referenceLineageId: referenceHistoryTwoLineageId,
+        referenceVersionNumber: 1,
+        referenceVersionKey: `reference#${referenceHistoryTwoId}`,
+        role: "deepgram",
+        sortKey: "002-deepgram",
+        storagePath: "corpora/history/history-002.deepgram.json",
+        filename: "history-002.deepgram.json",
+        mediaType: "application/json",
+        importRunId: "knowledge-import-demo-projection",
+        importedAt,
+      },
+    ],
     semanticNodes: [
       {
         id: "semantic-node-graph-entity-benchmark-saturation-v1",
@@ -648,6 +829,36 @@ function createDemoCategorySteeringDashboard(): CategorySteeringDashboard {
         status: "accepted",
         importRunId: "knowledge-import-demo-steering",
         updatedAt: importedAt,
+      },
+      {
+        id: "semantic-node-comment-import-rationale-v1",
+        lineageId: "semantic-node-comment-import-rationale",
+        versionNumber: 1,
+        versionState: "current",
+        nodeKey: "comment.import_rationale",
+        nodeKind: "commentConcept",
+        corpusId: sourceCorpusId,
+        displayName: "Import Rationale",
+        status: "accepted",
+        importRunId: "knowledge-import-demo-projection",
+        updatedAt: importedAt,
+      },
+    ],
+    knowledgeComments: [
+      {
+        id: "knowledge-comment-demo-history-002-rationale",
+        subjectKind: "reference",
+        subjectId: referenceHistoryTwoId,
+        subjectLineageId: referenceHistoryTwoLineageId,
+        subjectVersionNumber: 1,
+        subjectVersionKey: `reference#${referenceHistoryTwoId}`,
+        subjectStateKey: `reference#${referenceHistoryTwoLineageId}#current`,
+        commentKind: "import_rationale",
+        body: "Imported as a useful holdout against modern scaling coverage.",
+        status: "active",
+        source: "biblicus-import",
+        importRunId: "knowledge-import-demo-projection",
+        createdAt: importedAt,
       },
     ],
     semanticRelations: [
@@ -698,6 +909,29 @@ function createDemoCategorySteeringDashboard(): CategorySteeringDashboard {
         rank: 1,
         classifierId: "demo-canonical-classifier",
         reviewRecommended: true,
+        importRunId: "knowledge-import-demo-projection",
+        importedAt,
+      },
+      {
+        id: "semantic-relation-demo-comment-import-rationale",
+        relationState: "current",
+        predicate: "about",
+        subjectKind: "knowledgeComment",
+        subjectId: "knowledge-comment-demo-history-002-rationale",
+        subjectLineageId: "knowledge-comment-demo-history-002-rationale",
+        subjectVersionNumber: 1,
+        objectKind: "semanticNode",
+        objectId: "semantic-node-comment-import-rationale-v1",
+        objectLineageId: "semantic-node-comment-import-rationale",
+        objectVersionNumber: 1,
+        subjectStateKey: "knowledgeComment#knowledge-comment-demo-history-002-rationale#current",
+        objectStateKey: "semanticNode#semantic-node-comment-import-rationale#current",
+        objectSubjectStateKey: "semanticNode#semantic-node-comment-import-rationale#current#knowledgeComment",
+        predicateObjectStateKey: "about#semanticNode#semantic-node-comment-import-rationale#current",
+        subjectVersionKey: "knowledgeComment#knowledge-comment-demo-history-002-rationale",
+        objectVersionKey: "semanticNode#semantic-node-comment-import-rationale-v1",
+        rank: 1,
+        reviewRecommended: false,
         importRunId: "knowledge-import-demo-projection",
         importedAt,
       },
