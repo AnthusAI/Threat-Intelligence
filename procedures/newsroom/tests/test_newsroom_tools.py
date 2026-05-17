@@ -50,6 +50,10 @@ class NewsroomToolTests(unittest.TestCase):
         self.assertEqual(assignment["categoryKey"], "automated-scientific-discovery")
         self.assertEqual(assignment["evidenceItemIds"], ["research-001"])
         self.assertEqual(assignment["downstreamReporter"]["procedure"], "procedures/newsroom/reporter.tac")
+        evidence_relation = next(record for record in plan["records"] if record["modelName"] == "SemanticRelation")
+        self.assertEqual(evidence_relation["input"]["predicate"], "uses_evidence")
+        self.assertEqual(evidence_relation["input"]["subjectId"], item["id"])
+        self.assertEqual(evidence_relation["input"]["objectId"], "reference-knowledge-corpus-ai-ml-research-research-001-v1")
 
     def test_dispatch_plan_caps_assignments_by_section_ratio(self):
         plan = papyrus_newsroom.build_assignment_dispatch_plan(
@@ -104,6 +108,7 @@ class NewsroomToolTests(unittest.TestCase):
                         "newsroom": {
                             "assignment": {
                                 "brief": "Explain research agents.",
+                                "corpusKey": "AI-ML-research",
                             }
                         }
                     },
@@ -144,6 +149,9 @@ class NewsroomToolTests(unittest.TestCase):
         self.assertEqual(plan["records"][1]["action"], "update")
         self.assertEqual(plan["records"][1]["input"]["versionState"], "superseded")
         self.assertEqual(plan["records"][2]["action"], "create")
+        relation_records = [record for record in plan["records"] if record["modelName"] == "SemanticRelation"]
+        self.assertEqual(len(relation_records), 2)
+        self.assertEqual({record["input"]["subjectId"] for record in relation_records}, {"assignment-1-v2", "item-ai-agents-enter-the-lab"})
 
     def test_research_plan_preserves_assignment_type(self):
         plan = papyrus_newsroom.build_research_update_plan(
@@ -199,6 +207,9 @@ class NewsroomToolTests(unittest.TestCase):
         self.assertEqual(research["procedure"]["role"], "researcher")
         self.assertEqual(plan["records"][0]["action"], "create")
         self.assertEqual(plan["records"][1]["input"]["versionState"], "superseded")
+        relation_records = [record for record in plan["records"] if record["modelName"] == "SemanticRelation"]
+        self.assertEqual(len(relation_records), 2)
+        self.assertEqual(relation_records[0]["input"]["objectId"], "reference-knowledge-corpus-ai-ml-research-research-001-v1")
 
     def test_lambda_auth_header_matches_authoring_lane(self):
         token = papyrus_newsroom._lambda_auth_token("Bearer abc.def.ghi")

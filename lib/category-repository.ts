@@ -26,7 +26,8 @@ export type CategorySteeringImportRun = {
   itemCount?: number | null;
   categoryCount?: number | null;
   proposalCount?: number | null;
-  projectionCount?: number | null;
+  referenceCount?: number | null;
+  relationCount?: number | null;
   warningCount?: number | null;
 };
 
@@ -82,7 +83,7 @@ export type CategorySteeringCategoryTree = CategorySteeringCategorySet;
 
 export type CategorySteeringCategoryTreeNode = CategorySteeringCategory;
 
-export type CategorySteeringProposal = {
+export type SteeringProposal = {
   id: string;
   categorySetId?: string | null;
   corpusId: string;
@@ -108,7 +109,9 @@ export type CategorySteeringProposal = {
   updatedAt?: string | null;
 };
 
-export type CategorySteeringArtifact = {
+export type CategorySteeringProposal = SteeringProposal;
+
+export type KnowledgeArtifact = {
   id: string;
   corpusId: string;
   artifactKind: string;
@@ -118,17 +121,88 @@ export type CategorySteeringArtifact = {
   createdAt?: string | null;
 };
 
-export type CategorySteeringProjection = {
+export type CategorySteeringArtifact = KnowledgeArtifact;
+
+export type ReferenceRecord = {
   id: string;
-  targetCorpusId: string;
-  authorityCorpusId?: string | null;
-  classifierId: string;
+  lineageId?: string | null;
+  versionNumber?: number | null;
+  previousVersionId?: string | null;
+  versionState?: string | null;
+  versionCreatedAt?: string | null;
+  versionCreatedBy?: string | null;
+  changeReason?: string | null;
+  contentHash?: string | null;
+  corpusId: string;
   externalItemId: string;
+  title?: string | null;
+  authors?: Array<string | null> | null;
+  sourceUri?: string | null;
+  storagePath?: string | null;
+  mediaType?: string | null;
+  byteSize?: number | null;
+  sha256?: string | null;
+  sourcePublishedAt?: string | null;
+  sourceUpdatedAt?: string | null;
+  retrievedAt?: string | null;
+  importRunId?: string | null;
+  importedAt?: string | null;
+  metadata?: unknown;
+  updatedAt?: string | null;
+};
+
+export type SemanticNodeRecord = {
+  id: string;
+  lineageId?: string | null;
+  versionNumber?: number | null;
+  previousVersionId?: string | null;
+  versionState?: string | null;
+  versionCreatedAt?: string | null;
+  versionCreatedBy?: string | null;
+  changeReason?: string | null;
+  contentHash?: string | null;
+  nodeKey: string;
+  nodeKind: string;
+  corpusId?: string | null;
+  categorySetId?: string | null;
+  categoryLineageId?: string | null;
   categoryKey?: string | null;
   displayName?: string | null;
+  description?: string | null;
+  aliases?: Array<string | null> | null;
+  status: string;
+  importRunId?: string | null;
+  updatedAt?: string | null;
+};
+
+export type SemanticRelationRecord = {
+  id: string;
+  relationState: string;
+  predicate: string;
+  subjectKind: string;
+  subjectId: string;
+  subjectLineageId: string;
+  subjectVersionNumber?: number | null;
+  objectKind: string;
+  objectId: string;
+  objectLineageId: string;
+  objectVersionNumber?: number | null;
+  subjectStateKey: string;
+  objectStateKey: string;
+  objectSubjectStateKey: string;
+  predicateObjectStateKey: string;
+  subjectVersionKey: string;
+  objectVersionKey: string;
   score?: number | null;
+  confidence?: number | null;
+  rank?: number | null;
+  classifierId?: string | null;
+  modelVersion?: string | null;
   reviewRecommended?: boolean | null;
-  importedAt: string;
+  sourceSnapshotId?: string | null;
+  importRunId?: string | null;
+  importedAt?: string | null;
+  metadata?: unknown;
 };
 
 export type CategorySteeringDashboard = {
@@ -144,7 +218,9 @@ export type CategorySteeringDashboard = {
   categoryNodes: CategorySteeringCategoryTreeNode[];
   proposals: CategorySteeringProposal[];
   artifacts: CategorySteeringArtifact[];
-  projections: CategorySteeringProjection[];
+  references: ReferenceRecord[];
+  semanticNodes: SemanticNodeRecord[];
+  semanticRelations: SemanticRelationRecord[];
   loadError?: string | null;
 };
 
@@ -228,17 +304,25 @@ function createEmptyCategorySteeringDashboard(): CategorySteeringDashboard {
     categoryNodes: [],
     proposals: [],
     artifacts: [],
-    projections: [],
+    references: [],
+    semanticNodes: [],
+    semanticRelations: [],
     loadError: null,
   };
 }
 
 function createDemoCategorySteeringDashboard(): CategorySteeringDashboard {
   const importedAt = "2026-05-16T12:00:00.000Z";
-  const corpusId = "category-corpus-demo-canonical";
-  const sourceCorpusId = "category-corpus-demo-source";
+  const corpusId = "knowledge-corpus-demo-canonical";
+  const sourceCorpusId = "knowledge-corpus-demo-source";
   const categorySetId = "category-set-demo-canonical";
   const sourceCategorySetId = "category-set-demo-source";
+  const referenceHistoryOneLineageId = "reference-knowledge-corpus-demo-source-history-001";
+  const referenceHistoryTwoLineageId = "reference-knowledge-corpus-demo-source-history-002";
+  const referenceHistoryOneId = `${referenceHistoryOneLineageId}-v1`;
+  const referenceHistoryTwoId = `${referenceHistoryTwoLineageId}-v1`;
+  const scalingCategoryLineageId = "category-category-set-demo-canonical-category-foundation-model-scaling";
+  const historyCategoryLineageId = "category-category-set-demo-source-category-symbolic-connectionist-history";
 
   return {
     isDemo: true,
@@ -251,19 +335,19 @@ function createDemoCategorySteeringDashboard(): CategorySteeringDashboard {
         name: "Canonical Demo Corpus",
         role: "canonical",
         itemCount: 3,
-        latestImportRunId: "category-import-demo-steering",
+        latestImportRunId: "knowledge-import-demo-steering",
       },
       {
         id: sourceCorpusId,
         name: "Source Demo Corpus",
         role: "source",
         itemCount: 2,
-        latestImportRunId: "category-import-demo-projection",
+        latestImportRunId: "knowledge-import-demo-projection",
       },
     ],
     importRuns: [
       {
-        id: "category-import-demo-steering",
+        id: "knowledge-import-demo-steering",
         corpusId,
         importKind: "steering-export",
         classifierId: "demo-canonical-classifier",
@@ -272,20 +356,22 @@ function createDemoCategorySteeringDashboard(): CategorySteeringDashboard {
         itemCount: 3,
         categoryCount: 1,
         proposalCount: 5,
-        projectionCount: 0,
+        referenceCount: 3,
+        relationCount: 0,
         warningCount: 0,
       },
       {
-        id: "category-import-demo-projection",
+        id: "knowledge-import-demo-projection",
         corpusId: sourceCorpusId,
-        importKind: "category-projection",
+        importKind: "topic-projection",
         classifierId: "demo-canonical-classifier",
         status: "imported",
         importedAt,
         itemCount: 2,
         categoryCount: 0,
         proposalCount: 0,
-        projectionCount: 2,
+        referenceCount: 2,
+        relationCount: 2,
         warningCount: 0,
       },
     ],
@@ -302,7 +388,7 @@ function createDemoCategorySteeringDashboard(): CategorySteeringDashboard {
         status: "accepted",
         generatedAt: importedAt,
         categoryCount: 1,
-        importRunId: "category-import-demo-steering",
+        importRunId: "knowledge-import-demo-steering",
       },
       {
         id: sourceCategorySetId,
@@ -316,7 +402,7 @@ function createDemoCategorySteeringDashboard(): CategorySteeringDashboard {
         status: "accepted",
         generatedAt: importedAt,
         categoryCount: 1,
-        importRunId: "category-import-demo-projection",
+        importRunId: "knowledge-import-demo-projection",
       },
     ],
     categorys: [
@@ -368,7 +454,7 @@ function createDemoCategorySteeringDashboard(): CategorySteeringDashboard {
         categoryCount: 3,
         nodeCount: 3,
         rootCount: 1,
-        importRunId: "category-import-demo-steering",
+        importRunId: "knowledge-import-demo-steering",
         createdAt: importedAt,
         updatedAt: importedAt,
       },
@@ -388,7 +474,7 @@ function createDemoCategorySteeringDashboard(): CategorySteeringDashboard {
         holdoutItemIds: ["research-003"],
         rank: 1,
         depth: 0,
-        importRunId: "category-import-demo-steering",
+        importRunId: "knowledge-import-demo-steering",
         updatedAt: importedAt,
       },
       {
@@ -405,7 +491,7 @@ function createDemoCategorySteeringDashboard(): CategorySteeringDashboard {
         holdoutItemIds: [],
         rank: 1,
         depth: 1,
-        importRunId: "category-import-demo-steering",
+        importRunId: "knowledge-import-demo-steering",
         updatedAt: importedAt,
       },
       {
@@ -422,7 +508,7 @@ function createDemoCategorySteeringDashboard(): CategorySteeringDashboard {
         holdoutItemIds: ["research-003"],
         rank: 2,
         depth: 1,
-        importRunId: "category-import-demo-steering",
+        importRunId: "knowledge-import-demo-steering",
         updatedAt: importedAt,
       },
     ],
@@ -508,7 +594,7 @@ function createDemoCategorySteeringDashboard(): CategorySteeringDashboard {
     ],
     artifacts: [
       {
-        id: "category-artifact-demo-category-set",
+        id: "knowledge-artifact-demo-category-set",
         corpusId,
         artifactKind: "accepted-category-set",
         artifactId: "s3://papyrus-demo/accepted-category-set.json",
@@ -517,29 +603,102 @@ function createDemoCategorySteeringDashboard(): CategorySteeringDashboard {
         createdAt: importedAt,
       },
     ],
-    projections: [
+    references: [
       {
-        id: "projection-demo-history-001",
-        targetCorpusId: sourceCorpusId,
-        authorityCorpusId: corpusId,
-        classifierId: "demo-canonical-classifier",
+        id: referenceHistoryOneId,
+        lineageId: referenceHistoryOneLineageId,
+        versionNumber: 1,
+        versionState: "current",
+        corpusId: sourceCorpusId,
         externalItemId: "history-001",
-        categoryKey: "category.symbolic-connectionist-history",
-        displayName: "Symbolic And Connectionist History",
-        score: 0.91,
-        reviewRecommended: false,
+        title: "Symbolic And Connectionist History Reader",
+        sourceUri: "s3://papyrus-demo/corpora/history/history-001.md",
+        storagePath: "corpora/history/history-001.md",
+        mediaType: "text/markdown",
+        sha256: "demo-history-001",
+        importRunId: "knowledge-import-demo-projection",
         importedAt,
       },
       {
-        id: "projection-demo-history-002",
-        targetCorpusId: sourceCorpusId,
-        authorityCorpusId: corpusId,
-        classifierId: "demo-canonical-classifier",
+        id: referenceHistoryTwoId,
+        lineageId: referenceHistoryTwoLineageId,
+        versionNumber: 1,
+        versionState: "current",
+        corpusId: sourceCorpusId,
         externalItemId: "history-002",
-        categoryKey: "category.foundation-model-scaling",
-        displayName: "Foundation Model Scaling",
+        title: "Foundation Model Scaling Retrospective",
+        sourceUri: "s3://papyrus-demo/corpora/history/history-002.md",
+        storagePath: "corpora/history/history-002.md",
+        mediaType: "text/markdown",
+        sha256: "demo-history-002",
+        importRunId: "knowledge-import-demo-projection",
+        importedAt,
+      },
+    ],
+    semanticNodes: [
+      {
+        id: "semantic-node-graph-entity-benchmark-saturation-v1",
+        lineageId: "semantic-node-graph-entity-benchmark-saturation",
+        versionNumber: 1,
+        versionState: "current",
+        nodeKey: "graph-entity-benchmark-saturation",
+        nodeKind: "entity",
+        corpusId,
+        displayName: "Benchmark Saturation",
+        status: "accepted",
+        importRunId: "knowledge-import-demo-steering",
+        updatedAt: importedAt,
+      },
+    ],
+    semanticRelations: [
+      {
+        id: "semantic-relation-demo-history-001",
+        relationState: "current",
+        predicate: "classified_as",
+        subjectKind: "reference",
+        subjectId: referenceHistoryOneId,
+        subjectLineageId: referenceHistoryOneLineageId,
+        subjectVersionNumber: 1,
+        objectKind: "category",
+        objectId: `${historyCategoryLineageId}-v1`,
+        objectLineageId: historyCategoryLineageId,
+        objectVersionNumber: 1,
+        subjectStateKey: `reference#${referenceHistoryOneLineageId}#current`,
+        objectStateKey: `category#${historyCategoryLineageId}#current`,
+        objectSubjectStateKey: `category#${historyCategoryLineageId}#current#reference`,
+        predicateObjectStateKey: `classified_as#category#${historyCategoryLineageId}#current`,
+        subjectVersionKey: `reference#${referenceHistoryOneId}`,
+        objectVersionKey: `category#${historyCategoryLineageId}-v1`,
+        score: 0.91,
+        rank: 1,
+        classifierId: "demo-canonical-classifier",
+        reviewRecommended: false,
+        importRunId: "knowledge-import-demo-projection",
+        importedAt,
+      },
+      {
+        id: "semantic-relation-demo-history-002",
+        relationState: "current",
+        predicate: "classified_as",
+        subjectKind: "reference",
+        subjectId: referenceHistoryTwoId,
+        subjectLineageId: referenceHistoryTwoLineageId,
+        subjectVersionNumber: 1,
+        objectKind: "category",
+        objectId: `${scalingCategoryLineageId}-v1`,
+        objectLineageId: scalingCategoryLineageId,
+        objectVersionNumber: 1,
+        subjectStateKey: `reference#${referenceHistoryTwoLineageId}#current`,
+        objectStateKey: `category#${scalingCategoryLineageId}#current`,
+        objectSubjectStateKey: `category#${scalingCategoryLineageId}#current#reference`,
+        predicateObjectStateKey: `classified_as#category#${scalingCategoryLineageId}#current`,
+        subjectVersionKey: `reference#${referenceHistoryTwoId}`,
+        objectVersionKey: `category#${scalingCategoryLineageId}-v1`,
         score: 0.58,
+        rank: 1,
+        classifierId: "demo-canonical-classifier",
         reviewRecommended: true,
+        importRunId: "knowledge-import-demo-projection",
         importedAt,
       },
     ],

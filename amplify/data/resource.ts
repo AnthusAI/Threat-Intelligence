@@ -78,7 +78,7 @@ const schema = a.schema({
     .authorization((allow) => [allow.group(adminGroup)])
     .handler(a.handler.function(manageUserRole)),
 
-  CategoryActionResult: a.customType({
+  SteeringActionResult: a.customType({
     ok: a.boolean().required(),
     action: a.string().required(),
     proposalId: a.id(),
@@ -88,7 +88,7 @@ const schema = a.schema({
     status: a.string(),
   }),
 
-  reviewCategoryProposal: a
+  reviewSteeringProposal: a
     .mutation()
     .arguments({
       proposalId: a.id().required(),
@@ -103,11 +103,11 @@ const schema = a.schema({
       seedItemIds: a.string().array(),
       holdoutItemIds: a.string().array(),
     })
-    .returns(a.ref("CategoryActionResult"))
+    .returns(a.ref("SteeringActionResult"))
     .authorization((allow) => [allow.groups(categoryWriteGroups)])
     .handler(a.handler.function(categoryAction)),
 
-  CategoryCorpus: a
+  KnowledgeCorpus: a
     .model({
       id: a.id().required(),
       name: a.string().required(),
@@ -119,14 +119,14 @@ const schema = a.schema({
       updatedAt: a.datetime(),
     })
     .secondaryIndexes((index) => [
-      index("role").sortKeys(["name"]).queryField("listCategoryCorporaByRoleAndName"),
+      index("role").sortKeys(["name"]).queryField("listKnowledgeCorporaByRoleAndName"),
     ])
     .authorization((allow) => [
       allow.groups(categoryWriteGroups).to(["read"]),
       allow.custom().to(authoringOperations),
     ]),
 
-  CategoryImportRun: a
+  KnowledgeImportRun: a
     .model({
       id: a.id().required(),
       corpusId: a.id().required(),
@@ -140,19 +140,20 @@ const schema = a.schema({
       categoryCount: a.integer(),
       proposalCount: a.integer(),
       artifactCount: a.integer(),
-      projectionCount: a.integer(),
+      referenceCount: a.integer(),
+      relationCount: a.integer(),
       warningCount: a.integer(),
     })
     .secondaryIndexes((index) => [
-      index("corpusId").sortKeys(["importedAt"]).queryField("listCategoryImportRunsByCorpusAndImportedAt"),
-      index("importKind").sortKeys(["importedAt"]).queryField("listCategoryImportRunsByKindAndImportedAt"),
+      index("corpusId").sortKeys(["importedAt"]).queryField("listKnowledgeImportRunsByCorpusAndImportedAt"),
+      index("importKind").sortKeys(["importedAt"]).queryField("listKnowledgeImportRunsByKindAndImportedAt"),
     ])
     .authorization((allow) => [
       allow.groups(categoryWriteGroups).to(["read"]),
       allow.custom().to(authoringOperations),
     ]),
 
-  CategoryRawPayload: a
+  KnowledgeRawPayload: a
     .model({
       id: a.id().required(),
       ownerType: a.string().required(),
@@ -164,15 +165,15 @@ const schema = a.schema({
       updatedAt: a.datetime(),
     })
     .secondaryIndexes((index) => [
-      index("ownerId").sortKeys(["payloadKind"]).queryField("listCategoryRawPayloadsByOwnerAndKind"),
-      index("importRunId").sortKeys(["ownerType"]).queryField("listCategoryRawPayloadsByImportRunAndOwner"),
+      index("ownerId").sortKeys(["payloadKind"]).queryField("listKnowledgeRawPayloadsByOwnerAndKind"),
+      index("importRunId").sortKeys(["ownerType"]).queryField("listKnowledgeRawPayloadsByImportRunAndOwner"),
     ])
     .authorization((allow) => [
       allow.groups(categoryWriteGroups),
       allow.custom().to(authoringOperations),
     ]),
 
-  CategoryArtifact: a
+  KnowledgeArtifact: a
     .model({
       id: a.id().required(),
       corpusId: a.id().required(),
@@ -184,8 +185,8 @@ const schema = a.schema({
       importRunId: a.id(),
     })
     .secondaryIndexes((index) => [
-      index("corpusId").sortKeys(["artifactKind"]).queryField("listCategoryArtifactsByCorpusAndKind"),
-      index("artifactKind").sortKeys(["createdAt"]).queryField("listCategoryArtifactsByKindAndCreatedAt"),
+      index("corpusId").sortKeys(["artifactKind"]).queryField("listKnowledgeArtifactsByCorpusAndKind"),
+      index("artifactKind").sortKeys(["createdAt"]).queryField("listKnowledgeArtifactsByKindAndCreatedAt"),
     ])
     .authorization((allow) => [
       allow.groups(categoryWriteGroups).to(["read"]),
@@ -265,7 +266,7 @@ const schema = a.schema({
       allow.custom().to(authoringOperations),
     ]),
 
-  CategoryProposal: a
+  SteeringProposal: a
     .model({
       id: a.id().required(),
       categorySetId: a.id(),
@@ -293,17 +294,17 @@ const schema = a.schema({
       updatedAt: a.datetime(),
     })
     .secondaryIndexes((index) => [
-      index("status").sortKeys(["proposedAt"]).queryField("listCategoryProposalsByStatusAndProposedAt"),
-      index("categorySetId").sortKeys(["status"]).queryField("listCategoryProposalsBySetAndStatus"),
-      index("corpusId").sortKeys(["proposalKind"]).queryField("listCategoryProposalsByCorpusAndKind"),
-      index("steeringDomain").sortKeys(["status"]).queryField("listCategoryProposalsByDomainAndStatus"),
+      index("status").sortKeys(["proposedAt"]).queryField("listSteeringProposalsByStatusAndProposedAt"),
+      index("categorySetId").sortKeys(["status"]).queryField("listSteeringProposalsBySetAndStatus"),
+      index("corpusId").sortKeys(["proposalKind"]).queryField("listSteeringProposalsByCorpusAndKind"),
+      index("steeringDomain").sortKeys(["status"]).queryField("listSteeringProposalsByDomainAndStatus"),
     ])
     .authorization((allow) => [
       allow.groups(categoryWriteGroups).to(["read"]),
       allow.custom().to(authoringOperations),
     ]),
 
-  CategoryDecision: a
+  SteeringDecision: a
     .model({
       id: a.id().required(),
       proposalId: a.id().required(),
@@ -316,33 +317,125 @@ const schema = a.schema({
       createdAt: a.datetime().required(),
     })
     .secondaryIndexes((index) => [
-      index("proposalId").sortKeys(["createdAt"]).queryField("listCategoryDecisionsByProposalAndCreatedAt"),
-      index("categorySetId").sortKeys(["createdAt"]).queryField("listCategoryDecisionsBySetAndCreatedAt"),
+      index("proposalId").sortKeys(["createdAt"]).queryField("listSteeringDecisionsByProposalAndCreatedAt"),
+      index("categorySetId").sortKeys(["createdAt"]).queryField("listSteeringDecisionsBySetAndCreatedAt"),
     ])
     .authorization((allow) => [
       allow.groups(categoryWriteGroups).to(categoryAppendOnlyOperations),
       allow.custom().to(categoryAppendOnlyOperations),
     ]),
 
-  CategoryProjection: a
+  Reference: a
     .model({
       id: a.id().required(),
-      targetCorpusId: a.id().required(),
-      authorityCorpusId: a.id(),
-      classifierId: a.string().required(),
-      modelVersion: a.string(),
+      lineageId: a.id().required(),
+      versionNumber: a.integer().required(),
+      previousVersionId: a.id(),
+      versionState: a.string().required(),
+      versionCreatedAt: a.datetime().required(),
+      versionCreatedBy: a.string(),
+      changeReason: a.string(),
+      contentHash: a.string(),
+      corpusId: a.id().required(),
       externalItemId: a.string().required(),
-      categoryKey: a.string(),
-      displayName: a.string(),
-      score: a.float(),
-      reviewRecommended: a.boolean(),
-      importedAt: a.datetime().required(),
+      title: a.string(),
+      authors: a.string().array(),
+      sourceUri: a.string(),
+      storagePath: a.string(),
+      mediaType: a.string(),
+      byteSize: a.integer(),
+      sha256: a.string(),
+      sourcePublishedAt: a.string(),
+      sourceUpdatedAt: a.string(),
+      retrievedAt: a.string(),
       importRunId: a.id(),
+      importedAt: a.datetime(),
+      metadata: a.json(),
+      updatedAt: a.datetime(),
     })
     .secondaryIndexes((index) => [
-      index("targetCorpusId").sortKeys(["externalItemId"]).queryField("listCategoryProjectionsByTargetCorpusAndItem"),
-      index("classifierId").sortKeys(["importedAt"]).queryField("listCategoryProjectionsByClassifierAndImportedAt"),
-      index("categoryKey").sortKeys(["score"]).queryField("listCategoryProjectionsByCategoryAndScore"),
+      index("lineageId").sortKeys(["versionNumber"]).queryField("listReferencesByLineageAndVersion"),
+      index("corpusId").sortKeys(["externalItemId"]).queryField("listReferencesByCorpusAndExternalItem"),
+      index("versionState").sortKeys(["updatedAt"]).queryField("listReferencesByVersionStateAndUpdatedAt"),
+      index("importRunId").sortKeys(["externalItemId"]).queryField("listReferencesByImportRunAndExternalItem"),
+    ])
+    .authorization((allow) => [
+      allow.groups(categoryWriteGroups).to(["read"]),
+      allow.custom().to(authoringOperations),
+    ]),
+
+  SemanticNode: a
+    .model({
+      id: a.id().required(),
+      lineageId: a.id().required(),
+      versionNumber: a.integer().required(),
+      previousVersionId: a.id(),
+      versionState: a.string().required(),
+      versionCreatedAt: a.datetime().required(),
+      versionCreatedBy: a.string(),
+      changeReason: a.string(),
+      contentHash: a.string(),
+      nodeKey: a.string().required(),
+      nodeKind: a.string().required(),
+      corpusId: a.id(),
+      categorySetId: a.id(),
+      categoryLineageId: a.id(),
+      categoryKey: a.string(),
+      displayName: a.string(),
+      description: a.string(),
+      aliases: a.string().array(),
+      status: a.string().required(),
+      importRunId: a.id(),
+      updatedAt: a.datetime(),
+    })
+    .secondaryIndexes((index) => [
+      index("lineageId").sortKeys(["versionNumber"]).queryField("listSemanticNodesByLineageAndVersion"),
+      index("nodeKey").sortKeys(["versionNumber"]).queryField("listSemanticNodesByNodeKeyAndVersion"),
+      index("corpusId").sortKeys(["nodeKey"]).queryField("listSemanticNodesByCorpusAndNodeKey"),
+      index("versionState").sortKeys(["updatedAt"]).queryField("listSemanticNodesByVersionStateAndUpdatedAt"),
+    ])
+    .authorization((allow) => [
+      allow.groups(categoryWriteGroups).to(["read"]),
+      allow.custom().to(authoringOperations),
+    ]),
+
+  SemanticRelation: a
+    .model({
+      id: a.id().required(),
+      relationState: a.string().required(),
+      predicate: a.string().required(),
+      subjectKind: a.string().required(),
+      subjectId: a.id().required(),
+      subjectLineageId: a.id().required(),
+      subjectVersionNumber: a.integer(),
+      objectKind: a.string().required(),
+      objectId: a.id().required(),
+      objectLineageId: a.id().required(),
+      objectVersionNumber: a.integer(),
+      subjectStateKey: a.string().required(),
+      objectStateKey: a.string().required(),
+      objectSubjectStateKey: a.string().required(),
+      predicateObjectStateKey: a.string().required(),
+      subjectVersionKey: a.string().required(),
+      objectVersionKey: a.string().required(),
+      score: a.float(),
+      confidence: a.float(),
+      rank: a.integer(),
+      classifierId: a.string(),
+      modelVersion: a.string(),
+      reviewRecommended: a.boolean(),
+      sourceSnapshotId: a.string(),
+      importRunId: a.id(),
+      importedAt: a.datetime(),
+      metadata: a.json(),
+    })
+    .secondaryIndexes((index) => [
+      index("subjectStateKey").sortKeys(["predicateObjectStateKey"]).queryField("listSemanticRelationsBySubjectState"),
+      index("objectStateKey").sortKeys(["predicate"]).queryField("listSemanticRelationsByObjectState"),
+      index("objectSubjectStateKey").sortKeys(["score"]).queryField("listSemanticRelationsByObjectSubjectStateAndScore"),
+      index("predicateObjectStateKey").sortKeys(["score"]).queryField("listSemanticRelationsByPredicateObjectStateAndScore"),
+      index("subjectVersionKey").sortKeys(["predicateObjectStateKey"]).queryField("listSemanticRelationsBySubjectVersion"),
+      index("importRunId").sortKeys(["importedAt"]).queryField("listSemanticRelationsByImportRunAndImportedAt"),
     ])
     .authorization((allow) => [
       allow.groups(categoryWriteGroups).to(["read"]),

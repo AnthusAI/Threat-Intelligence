@@ -45,9 +45,9 @@ function buildSteeringImportRecords(bundle, options = {}) {
   const now = options.importedAt ?? new Date().toISOString();
   const corpus = bundle.corpus ?? {};
   const corpusContext = normalizeCorpusContext(corpus, options.corpusConfig ?? options.corpus);
-  const corpusId = options.corpusId ?? categoryCorpusId(corpusContext);
+  const corpusId = options.corpusId ?? knowledgeCorpusId(corpusContext);
   const classifierId = bundle.topic_set?.classifier_id ?? options.classifierId ?? "unknown-classifier";
-  const importRunId = `category-import-${safeId(corpusId)}-${safeId(classifierId)}-${hashShort([
+  const importRunId = `knowledge-import-${safeId(corpusId)}-${safeId(classifierId)}-${hashShort([
     bundle.generated_at,
     bundle.proposals?.length ?? 0,
     bundle.artifacts?.length ?? 0,
@@ -55,7 +55,7 @@ function buildSteeringImportRecords(bundle, options = {}) {
   const categorySetId = categorySetIdFor(classifierId, corpusId);
   const records = [];
 
-  records.push(record("CategoryCorpus", {
+  records.push(record("KnowledgeCorpus", {
     id: corpusId,
     name: corpusContext.name,
     role: corpusContext.role,
@@ -67,7 +67,7 @@ function buildSteeringImportRecords(bundle, options = {}) {
   }));
   records.push(rawPayloadRecord("corpus", corpusId, "biblicus-corpus", corpus, importRunId, now));
 
-  records.push(record("CategoryImportRun", {
+  records.push(record("KnowledgeImportRun", {
     id: importRunId,
     corpusId,
     importKind: "steering-export",
@@ -80,10 +80,15 @@ function buildSteeringImportRecords(bundle, options = {}) {
       categoryCount: bundle.topic_set?.topics?.length ?? 0,
     proposalCount: bundle.proposals?.length ?? 0,
     artifactCount: bundle.artifacts?.length ?? 0,
-    projectionCount: 0,
+    referenceCount: (bundle.items ?? []).length,
+    relationCount: 0,
     warningCount: bundle.warnings?.length ?? 0,
   }));
   records.push(rawPayloadRecord("importRun", importRunId, "warnings", { warnings: bundle.warnings ?? [] }, importRunId, now));
+
+  for (const item of bundle.items ?? []) {
+    records.push(referenceRecord(item, { corpusId, importRunId, now }));
+  }
 
   if (bundle.topic_set) {
     records.push(...categorySetRecords(bundle.topic_set, { corpusId, importRunId, categorySetId, now, generatedAt: bundle.generated_at }));
@@ -102,6 +107,7 @@ function buildSteeringImportRecords(bundle, options = {}) {
 
   for (const proposal of bundle.proposals ?? []) {
     records.push(...proposalRecords(proposal, { corpusId, importRunId, categorySetId, now }));
+    records.push(...semanticRecordsFromProposal(proposal, { corpusId, importRunId, categorySetId, now }));
   }
 
   return {
@@ -124,12 +130,19 @@ function buildProjectionImportRecords(payload, options = {}) {
     name: corpusNameFromUri(firstItem.classifier_corpus_uri),
     corpus_uri: firstItem.classifier_corpus_uri,
   }, options.authorityCorpusConfig ?? options.authorityCorpus, { role: "canonical" });
-  const targetCorpusId = options.targetCorpusId ?? categoryCorpusId(targetCorpus);
-  const authorityCorpusId = options.authorityCorpusId ?? categoryCorpusId(authorityCorpus);
+  const targetCorpusId = options.targetCorpusId ?? knowledgeCorpusId(targetCorpus);
+  const authorityCorpusId = options.authorityCorpusId ?? knowledgeCorpusId(authorityCorpus);
   const classifierId = payload.classifier_id ?? firstItem.classifier_id ?? options.classifierId ?? "unknown-classifier";
-  const importRunId = `category-import-${safeId(targetCorpusId)}-${safeId(classifierId)}-projection-${hashShort(payload.summary ?? items)}`;
+  const importRunId = `knowledge-import-${safeId(targetCorpusId)}-${safeId(classifierId)}-projection-${hashShort(payload.summary ?? items)}`;
+  const relationRecords = projectionRelationRecords(items, {
+    targetCorpusId,
+    authorityCorpusId,
+    classifierId,
+    importRunId,
+    now,
+  });
   const records = [
-    record("CategoryCorpus", {
+    record("KnowledgeCorpus", {
       id: targetCorpusId,
       name: targetCorpus.name,
       role: targetCorpus.role,
@@ -139,7 +152,7 @@ function buildProjectionImportRecords(payload, options = {}) {
       createdAt: now,
       updatedAt: now,
     }),
-    record("CategoryImportRun", {
+    record("KnowledgeImportRun", {
       id: importRunId,
       corpusId: targetCorpusId,
       importKind: "topic-projection",
@@ -152,30 +165,18 @@ function buildProjectionImportRecords(payload, options = {}) {
       categoryCount: 0,
       proposalCount: 0,
       artifactCount: 0,
-      projectionCount: items.length,
+      referenceCount: items.length,
+      relationCount: relationRecords.length,
       warningCount: 0,
     }),
     rawPayloadRecord("importRun", importRunId, "projection-summary", payload.summary ?? {}, importRunId, now),
+    ...relationRecords,
   ];
 
   for (const item of items) {
-    const externalItemId = requiredString(item.item_id, "projection item_id");
-    const projectionId = `projection-${safeId(targetCorpusId)}-${safeId(classifierId)}-${safeId(externalItemId)}-${hashShort(item.model_version ?? "")}`;
-    records.push(record("CategoryProjection", {
-      id: projectionId,
-      targetCorpusId,
-      authorityCorpusId,
-      classifierId,
-      modelVersion: item.model_version ?? null,
-      externalItemId,
-      categoryKey: item.category_key ?? item.topic_uid ?? null,
-      displayName: item.display_name ?? null,
-      score: numberOrNull(item.score),
-      reviewRecommended: Boolean(item.review_recommended),
-      importedAt: now,
-      importRunId,
-    }));
-    records.push(rawPayloadRecord("projection", projectionId, "biblicus-projection", item, importRunId, now));
+    const reference = referenceRecord(item, { corpusId: targetCorpusId, importRunId, now });
+    records.push(reference);
+    records.push(rawPayloadRecord("projection", reference.expected.id, "biblicus-projection", sanitizeProjectionPayload(item), importRunId, now));
   }
 
   return { importRunId, records };
@@ -183,13 +184,154 @@ function buildProjectionImportRecords(payload, options = {}) {
 
 function buildSteeringConfigRecords(config, options = {}) {
   const now = options.importedAt ?? new Date().toISOString();
-  return (config.corpora ?? []).map((corpus) => record("CategoryCorpus", {
-    id: categoryCorpusId(corpus),
+  return (config.corpora ?? []).map((corpus) => record("KnowledgeCorpus", {
+    id: knowledgeCorpusId(corpus),
     name: corpus.name,
     role: corpus.role,
     createdAt: now,
     updatedAt: now,
   }));
+}
+
+function referenceRecord(item, context) {
+  const externalItemId = requiredString(item.item_id ?? item.id ?? item.externalItemId, "reference item_id");
+  const lineageId = referenceLineageIdFor(context.corpusId, externalItemId);
+  const metadata = sanitizeReferenceMetadata(item.metadata ?? item);
+  const reference = {
+    id: `${lineageId}-v1`,
+    lineageId,
+    corpusId: context.corpusId,
+    externalItemId,
+    title: stringOrNull(item.title ?? metadata.title),
+    authors: stringArrayFrom(item.authors ?? metadata.authors),
+    sourceUri: stringOrNull(item.source_uri ?? item.sourceUri ?? metadata.source_uri ?? metadata.sourceUri),
+    storagePath: stringOrNull(item.storage_path ?? item.storagePath ?? item.relpath ?? item.path),
+    mediaType: stringOrNull(item.media_type ?? item.mediaType),
+    byteSize: integerOrNull(item.bytes ?? item.byte_size ?? item.byteSize),
+    sha256: stringOrNull(item.sha256 ?? item.checksum),
+    sourcePublishedAt: stringOrNull(item.dates?.published_at ?? item.dates?.publishedAt ?? item.published_at ?? item.publishedAt),
+    sourceUpdatedAt: stringOrNull(item.dates?.updated_at ?? item.dates?.updatedAt ?? item.updated_at ?? item.updatedAt),
+    retrievedAt: stringOrNull(item.dates?.retrieved_at ?? item.dates?.retrievedAt ?? item.retrieved_at ?? item.retrievedAt),
+    importRunId: context.importRunId,
+    importedAt: context.now,
+    metadata: JSON.stringify(metadata),
+    updatedAt: context.now,
+  };
+  return record("Reference", versionedRecord(reference, {
+    now: context.now,
+    actor: "biblicus-import",
+    reason: "reference-import",
+    content: sanitizeReferenceContent(reference),
+  }));
+}
+
+function projectionRelationRecords(items, context) {
+  const records = [];
+  const categorySetId = categorySetIdFor(context.classifierId, context.authorityCorpusId);
+  for (const item of items) {
+    const externalItemId = requiredString(item.item_id, "projection item_id");
+    const referenceLineageId = referenceLineageIdFor(context.targetCorpusId, externalItemId);
+    const referenceId = `${referenceLineageId}-v1`;
+    const candidates = projectionCandidates(item);
+    for (const candidate of candidates) {
+      const categoryKey = candidate.categoryKey;
+      if (!categoryKey) continue;
+      const categoryLineageId = categoryLineageIdFor(categorySetId, categoryKey);
+      const categoryId = `${categoryLineageId}-v1`;
+      records.push(semanticRelationRecord({
+        predicate: "classified_as",
+        subjectKind: "reference",
+        subjectId: referenceId,
+        subjectLineageId: referenceLineageId,
+        subjectVersionNumber: 1,
+        objectKind: "category",
+        objectId: categoryId,
+        objectLineageId: categoryLineageId,
+        objectVersionNumber: 1,
+        score: numberOrNull(candidate.score),
+        confidence: numberOrNull(candidate.confidence),
+        rank: integerOrNull(candidate.rank),
+        classifierId: context.classifierId,
+        modelVersion: item.model_version ?? null,
+        reviewRecommended: Boolean(item.review_recommended ?? candidate.reviewRecommended),
+        sourceSnapshotId: item.extraction_snapshot?.snapshot_id ?? null,
+        importRunId: context.importRunId,
+        importedAt: context.now,
+        metadata: {
+          categoryKey,
+          displayName: candidate.displayName,
+          bertopicTopicId: integerOrNull(candidate.bertopicTopicId),
+          authorityCorpusId: context.authorityCorpusId,
+        },
+      }));
+    }
+  }
+  return records;
+}
+
+function semanticRecordsFromProposal(proposal, context) {
+  const status = proposal.status ?? "proposed";
+  if (status !== "accepted") return [];
+  const proposalPayload = proposal.payload && typeof proposal.payload === "object" ? proposal.payload : {};
+  const nodeKey = proposal.graph_entity_id
+    ?? proposalPayload.graph_entity_id
+    ?? proposalPayload.entity_id
+    ?? proposalPayload.assertion_id
+    ?? proposalPayload.source_ref
+    ?? null;
+  if (!nodeKey) return [];
+
+  const records = [];
+  const nodeLineageId = semanticNodeLineageIdFor(nodeKey);
+  const nodeId = `${nodeLineageId}-v1`;
+  records.push(record("SemanticNode", versionedRecord({
+    id: nodeId,
+    lineageId: nodeLineageId,
+    nodeKey,
+    nodeKind: inferSemanticNodeKind(nodeKey, proposal.proposal_kind ?? proposal.kind),
+    corpusId: context.corpusId,
+    categorySetId: context.categorySetId,
+    categoryLineageId: null,
+    categoryKey: proposalPayload.topic_uid ?? proposalPayload.category_key ?? null,
+    displayName: proposalPayload.display_name ?? proposal.display_name ?? proposal.title ?? nodeKey,
+    description: proposalPayload.description ?? proposal.description ?? proposal.rationale ?? null,
+    aliases: stringArrayFrom(proposalPayload.aliases),
+    status: "accepted",
+    importRunId: context.importRunId,
+    updatedAt: context.now,
+  }, { now: context.now, actor: "biblicus-import", reason: "semantic-node-import", content: proposalPayload })));
+
+  const targetRef = proposalPayload.target_ref ?? proposal.target_category_key ?? proposalPayload.target_topic_uid ?? null;
+  const relationshipType = proposal.relationship_type ?? proposalPayload.relationship_type ?? proposalPayload.relationship_uid ?? null;
+  if (targetRef && relationshipType) {
+    const target = semanticObjectRef(targetRef, context);
+    records.push(semanticRelationRecord({
+      predicate: relationshipType,
+      subjectKind: "semanticNode",
+      subjectId: nodeId,
+      subjectLineageId: nodeLineageId,
+      subjectVersionNumber: 1,
+      objectKind: target.kind,
+      objectId: target.id,
+      objectLineageId: target.lineageId,
+      objectVersionNumber: target.versionNumber,
+      score: numberOrNull(proposal.score),
+      confidence: numberOrNull(proposal.confidence),
+      rank: null,
+      classifierId: null,
+      modelVersion: null,
+      reviewRecommended: proposal.recommendation === "recommend",
+      sourceSnapshotId: proposal.snapshot_id ?? proposalPayload.graph_snapshot ?? null,
+      importRunId: context.importRunId,
+      importedAt: context.now,
+      metadata: {
+        proposalId: proposal.proposal_id ?? null,
+        sourceRef: nodeKey,
+        targetRef,
+      },
+    }));
+  }
+  return records;
 }
 
 function buildAcceptedCategorySetPayload(categorySet, topics) {
@@ -421,7 +563,7 @@ function categorySetRecords(categorySet, context) {
 function artifactRecords(artifact, context) {
   const artifactId = `category-artifact-${safeId(context.corpusId)}-${hashShort(`${artifact.kind}:${artifact.artifact_id}`)}`;
   return [
-    record("CategoryArtifact", {
+    record("KnowledgeArtifact", {
       id: artifactId,
       corpusId: context.corpusId,
       artifactKind: artifact.kind,
@@ -585,7 +727,7 @@ function normalizeTaxonomyNodeStatus(status) {
 
 function proposalRecords(proposal, context) {
   const externalProposalId = proposal.proposal_id ?? hashShort(proposal);
-  const proposalId = `category-proposal-${safeId(externalProposalId)}`;
+  const proposalId = `steering-proposal-${safeId(externalProposalId)}`;
   const proposalKind = normalizeProposalKind(proposal.kind ?? proposal.proposal_kind ?? "unknown");
   const proposalPayload = proposal.payload && typeof proposal.payload === "object" ? proposal.payload : {};
   const evidence = proposal.evidence && typeof proposal.evidence === "object" ? proposal.evidence : {};
@@ -615,7 +757,7 @@ function proposalRecords(proposal, context) {
   const subtitle = proposal.subheading ?? proposal.subtitle ?? proposalPayload.subheading ?? proposalPayload.subtitle ?? null;
   const description = proposal.description ?? proposalPayload.description ?? null;
   return [
-    record("CategoryProposal", {
+    record("SteeringProposal", {
       id: proposalId,
       categorySetId: context.categorySetId,
       corpusId: context.corpusId,
@@ -646,7 +788,7 @@ function proposalRecords(proposal, context) {
 }
 
 function rawPayloadRecord(ownerType, ownerId, payloadKind, payload, importRunId, now) {
-  return record("CategoryRawPayload", {
+  return record("KnowledgeRawPayload", {
     id: `raw-${safeId(ownerType)}-${safeId(ownerId)}-${safeId(payloadKind)}`,
     ownerType,
     ownerId,
@@ -686,8 +828,16 @@ function readParentCategoryKey(value) {
   return value.parent_category_key ?? value.parent_topic_uid ?? value.parentCategoryKey ?? null;
 }
 
-function categoryCorpusId(corpus) {
-  return `category-corpus-${safeId(corpus.key ?? corpus.name ?? corpus.corpus_uri ?? "unknown")}`;
+function referenceLineageIdFor(corpusId, externalItemId) {
+  return `reference-${safeId(corpusId)}-${safeId(externalItemId)}`;
+}
+
+function semanticNodeLineageIdFor(nodeKey) {
+  return `semantic-node-${safeId(nodeKey)}`;
+}
+
+function knowledgeCorpusId(corpus) {
+  return `knowledge-corpus-${safeId(corpus.key ?? corpus.name ?? corpus.corpus_uri ?? "unknown")}`;
 }
 
 function categorySetIdFor(classifierId, corpusId) {
@@ -696,6 +846,110 @@ function categorySetIdFor(classifierId, corpusId) {
 
 function categoryLineageIdFor(categorySetId, categoryKey) {
   return `category-${safeId(categorySetId)}-${safeId(categoryKey)}`;
+}
+
+function semanticRelationRecord(input) {
+  const subjectStateKey = semanticStateKey(input.subjectKind, input.subjectLineageId);
+  const objectStateKey = semanticStateKey(input.objectKind, input.objectLineageId);
+  const objectSubjectStateKey = `${objectStateKey}#${input.subjectKind}`;
+  const predicateObjectStateKey = `${input.predicate}#${objectStateKey}`;
+  const subjectVersionKey = semanticVersionKey(input.subjectKind, input.subjectId);
+  const objectVersionKey = semanticVersionKey(input.objectKind, input.objectId);
+  return record("SemanticRelation", {
+    id: `semantic-relation-${hashShort([
+      subjectVersionKey,
+      input.predicate,
+      objectVersionKey,
+      input.rank ?? "",
+      input.classifierId ?? "",
+      input.modelVersion ?? "",
+    ])}`,
+    relationState: "current",
+    predicate: input.predicate,
+    subjectKind: input.subjectKind,
+    subjectId: input.subjectId,
+    subjectLineageId: input.subjectLineageId,
+    subjectVersionNumber: input.subjectVersionNumber,
+    objectKind: input.objectKind,
+    objectId: input.objectId,
+    objectLineageId: input.objectLineageId,
+    objectVersionNumber: input.objectVersionNumber,
+    subjectStateKey,
+    objectStateKey,
+    objectSubjectStateKey,
+    predicateObjectStateKey,
+    subjectVersionKey,
+    objectVersionKey,
+    score: numberOrNull(input.score),
+    confidence: numberOrNull(input.confidence),
+    rank: integerOrNull(input.rank),
+    classifierId: input.classifierId ?? null,
+    modelVersion: input.modelVersion ?? null,
+    reviewRecommended: Boolean(input.reviewRecommended),
+    sourceSnapshotId: input.sourceSnapshotId ?? null,
+    importRunId: input.importRunId,
+    importedAt: input.importedAt,
+    metadata: JSON.stringify(input.metadata ?? {}),
+  });
+}
+
+function semanticStateKey(kind, lineageId) {
+  return `${kind}#${lineageId}#current`;
+}
+
+function semanticVersionKey(kind, versionId) {
+  return `${kind}#${versionId}`;
+}
+
+function projectionCandidates(item) {
+  const candidates = [];
+  if (Array.isArray(item.topic_candidates)) {
+    for (const candidate of item.topic_candidates) {
+      candidates.push({
+        rank: candidate.rank,
+        categoryKey: candidate.category_key ?? candidate.topic_uid ?? null,
+        displayName: candidate.display_name ?? null,
+        score: candidate.score,
+        confidence: candidate.confidence,
+        bertopicTopicId: candidate.bertopic_topic_id,
+        reviewRecommended: candidate.review_recommended,
+      });
+    }
+  }
+  const topLevelCategoryKey = item.category_key ?? item.topic_uid ?? null;
+  if (topLevelCategoryKey && !candidates.some((candidate) => candidate.categoryKey === topLevelCategoryKey)) {
+    candidates.unshift({
+      rank: item.rank ?? 1,
+      categoryKey: topLevelCategoryKey,
+      displayName: item.display_name ?? null,
+      score: item.score,
+      confidence: item.confidence,
+      bertopicTopicId: item.bertopic_topic_id,
+      reviewRecommended: item.review_recommended,
+    });
+  }
+  return candidates;
+}
+
+function semanticObjectRef(ref, context) {
+  if (String(ref).startsWith("topic:")) {
+    const categoryKey = String(ref).replace(/^topic:/, "");
+    const categorySetId = context.categorySetId ?? categorySetIdFor("unknown-classifier", context.corpusId);
+    const categoryLineageId = categoryLineageIdFor(categorySetId, categoryKey);
+    return {
+      kind: "category",
+      id: `${categoryLineageId}-v1`,
+      lineageId: categoryLineageId,
+      versionNumber: 1,
+    };
+  }
+  const nodeLineageId = semanticNodeLineageIdFor(ref);
+  return {
+    kind: "semanticNode",
+    id: `${nodeLineageId}-v1`,
+    lineageId: nodeLineageId,
+    versionNumber: 1,
+  };
 }
 
 function normalizeProposalKind(kind) {
@@ -780,8 +1034,107 @@ function compactArray(value) {
   return value.map((entry) => (typeof entry === "string" ? entry.trim() : "")).filter(Boolean);
 }
 
+function stringArrayFrom(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((entry) => (typeof entry === "string" ? entry.trim() : "")).filter(Boolean);
+}
+
+function stringOrNull(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
 function numberOrNull(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function integerOrNull(value) {
+  return typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : null;
+}
+
+const STRICT_REFERENCE_METADATA_DENY_KEYS = new Set([
+  "abstract",
+  "body",
+  "content",
+  "excerpt",
+  "extracted_text",
+  "extractedText",
+  "full_text",
+  "fullText",
+  "markdown",
+  "raw_text",
+  "rawText",
+  "source_notes",
+  "summary",
+  "text",
+  "transcript",
+]);
+
+function sanitizeReferenceMetadata(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const sanitized = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (STRICT_REFERENCE_METADATA_DENY_KEYS.has(key)) continue;
+    if (entry === undefined) continue;
+    if (Array.isArray(entry)) {
+      sanitized[key] = entry
+        .map((item) => sanitizeReferenceMetadataValue(item))
+        .filter((item) => item !== undefined);
+      continue;
+    }
+    const normalized = sanitizeReferenceMetadataValue(entry);
+    if (normalized !== undefined) sanitized[key] = normalized;
+  }
+  return sanitized;
+}
+
+function sanitizeReferenceMetadataValue(value) {
+  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => sanitizeReferenceMetadataValue(entry))
+      .filter((entry) => entry !== undefined);
+  }
+  if (value && typeof value === "object") return sanitizeReferenceMetadata(value);
+  return undefined;
+}
+
+function sanitizeReferenceContent(reference) {
+  return {
+    corpusId: reference.corpusId,
+    externalItemId: reference.externalItemId,
+    title: reference.title,
+    authors: reference.authors,
+    sourceUri: reference.sourceUri,
+    storagePath: reference.storagePath,
+    mediaType: reference.mediaType,
+    byteSize: reference.byteSize,
+    sha256: reference.sha256,
+    sourcePublishedAt: reference.sourcePublishedAt,
+    sourceUpdatedAt: reference.sourceUpdatedAt,
+    retrievedAt: reference.retrievedAt,
+    metadata: reference.metadata,
+  };
+}
+
+function sanitizeProjectionPayload(item) {
+  return {
+    ...sanitizeReferenceMetadata(item),
+    item_id: item.item_id,
+    title: item.title ?? null,
+    source_uri: item.source_uri ?? null,
+    classifier_id: item.classifier_id ?? null,
+    model_version: item.model_version ?? null,
+    classifier_corpus_uri: item.classifier_corpus_uri ?? null,
+    target_corpus_uri: item.target_corpus_uri ?? null,
+    extraction_snapshot: item.extraction_snapshot ?? null,
+    topic_candidates: Array.isArray(item.topic_candidates) ? item.topic_candidates.map((candidate) => sanitizeReferenceMetadata(candidate)) : [],
+  };
+}
+
+function inferSemanticNodeKind(nodeKey, proposalKind) {
+  if (String(nodeKey).startsWith("topic:")) return "topic";
+  if (String(proposalKind ?? "").includes("assertion")) return "assertion";
+  return "entity";
 }
 
 function compareById(left, right) {
@@ -847,7 +1200,7 @@ module.exports = {
   buildSteeringConfigRecords,
   buildProjectionImportRecords,
   buildSteeringImportRecords,
-  categoryCorpusId,
+  knowledgeCorpusId,
   loadJsonFile,
   loadSteeringBundleFromBiblicus,
   mergeReviewedProposalState,

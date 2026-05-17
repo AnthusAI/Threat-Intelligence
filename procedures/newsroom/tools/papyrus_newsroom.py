@@ -439,15 +439,26 @@ def build_assignment_record_plan(
     }
     edition_item = {key: value for key, value in edition_item.items() if value is not None}
 
+    records = [
+        {"modelName": "Item", "action": "create", "input": item},
+        {"modelName": "EditionItem", "action": "create", "input": edition_item},
+    ]
+    records.extend(
+        _evidence_relation_records(
+            item=item,
+            evidence_item_ids=evidence_item_ids,
+            corpus_key=resolved_corpus_key,
+            now=now,
+            lifecycle="assignment-dispatch",
+        )
+    )
+
     return {
         "dryRun": True,
         "lifecycle": "assignment-dispatch",
         "item": item,
         "editionItem": edition_item,
-        "records": [
-            {"modelName": "Item", "action": "create", "input": item},
-            {"modelName": "EditionItem", "action": "create", "input": edition_item},
-        ],
+        "records": records,
         "warnings": [],
     }
 
@@ -658,14 +669,25 @@ def build_research_update_plan(
     if not evidence_item_ids:
         warnings.append("research.evidenceItemIds is empty")
 
+    records = [
+        {"modelName": "Item", "action": "create", "input": updated_item},
+        {"modelName": "Item", "action": "update", "input": _supersede_update(item, now)},
+    ]
+    records.extend(
+        _evidence_relation_records(
+            item=updated_item,
+            evidence_item_ids=evidence_item_ids,
+            corpus_key=str(corpus_key or _assignment_corpus_key(item) or ""),
+            now=now,
+            lifecycle="assignment-research",
+        )
+    )
+
     return {
         "dryRun": True,
         "lifecycle": "assignment-research",
         "item": updated_item,
-        "records": [
-            {"modelName": "Item", "action": "create", "input": updated_item},
-            {"modelName": "Item", "action": "update", "input": _supersede_update(item, now)},
-        ],
+        "records": records,
         "warnings": warnings,
     }
 
@@ -765,19 +787,176 @@ def build_draft_update_plan(
         if value is not None or key in {"publishedAt"}
     }
 
+    draft_evidence_item_ids = _string_list(
+        draft_payload.get("evidence_item_ids") or draft_payload.get("evidenceItemIds")
+    )
+    records = [
+        {"modelName": "Item", "action": "create", "input": assignment_update},
+        {"modelName": "Item", "action": "update", "input": _supersede_update(item, now)},
+        {"modelName": "Item", "action": "create", "input": draft_item},
+    ]
+    relation_corpus_key = str(draft_payload.get("corpus_key") or draft_payload.get("corpusKey") or _assignment_corpus_key(item) or "")
+    records.extend(
+        _evidence_relation_records(
+            item=assignment_update,
+            evidence_item_ids=draft_evidence_item_ids,
+            corpus_key=relation_corpus_key,
+            now=now,
+            lifecycle="assignment-draft",
+        )
+    )
+    records.extend(
+        _evidence_relation_records(
+            item=draft_item,
+            evidence_item_ids=draft_evidence_item_ids,
+            corpus_key=relation_corpus_key,
+            now=now,
+            lifecycle="draft",
+        )
+    )
+
     return {
         "dryRun": True,
         "lifecycle": "draft",
         "assignmentItem": assignment_update,
         "item": draft_item,
         "draftItem": draft_item,
-        "records": [
-            {"modelName": "Item", "action": "create", "input": assignment_update},
-            {"modelName": "Item", "action": "update", "input": _supersede_update(item, now)},
-            {"modelName": "Item", "action": "create", "input": draft_item},
-        ],
+        "records": records,
         "warnings": [],
     }
+
+
+def _evidence_relation_records(
+    *,
+    item: dict[str, Any],
+    evidence_item_ids: list[str],
+    corpus_key: str,
+    now: str,
+    lifecycle: str,
+) -> list[dict[str, Any]]:
+    if not evidence_item_ids or not corpus_key:
+        return []
+
+    subject_kind = "item"
+    subject_id = str(item["id"])
+    subject_lineage_id = str(item.get("lineageId") or subject_id)
+    subject_version_number = _optional_int(item.get("versionNumber"))
+    records: list[dict[str, Any]] = []
+    for rank, evidence_item_id in enumerate(evidence_item_ids, start=1):
+        reference_lineage_id = _reference_lineage_id(corpus_key, evidence_item_id)
+        reference_id = f"{reference_lineage_id}-v1"
+        relation = _semantic_relation(
+            predicate="uses_evidence",
+            subject_kind=subject_kind,
+            subject_id=subject_id,
+            subject_lineage_id=subject_lineage_id,
+            subject_version_number=subject_version_number,
+            object_kind="reference",
+            object_id=reference_id,
+            object_lineage_id=reference_lineage_id,
+            object_version_number=1,
+            rank=rank,
+            score=None,
+            confidence=None,
+            classifier_id=None,
+            model_version=None,
+            review_recommended=False,
+            source_snapshot_id=None,
+            import_run_id=None,
+            imported_at=now,
+            metadata={
+                "lifecycle": lifecycle,
+                "corpusKey": corpus_key,
+                "externalItemId": evidence_item_id,
+            },
+        )
+        records.append({"modelName": "SemanticRelation", "action": "create", "input": relation})
+    return records
+
+
+def _semantic_relation(
+    *,
+    predicate: str,
+    subject_kind: str,
+    subject_id: str,
+    subject_lineage_id: str,
+    subject_version_number: int | None,
+    object_kind: str,
+    object_id: str,
+    object_lineage_id: str,
+    object_version_number: int | None,
+    rank: int | None,
+    score: float | None,
+    confidence: float | None,
+    classifier_id: str | None,
+    model_version: str | None,
+    review_recommended: bool,
+    source_snapshot_id: str | None,
+    import_run_id: str | None,
+    imported_at: str,
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
+    subject_state_key = _semantic_state_key(subject_kind, subject_lineage_id)
+    object_state_key = _semantic_state_key(object_kind, object_lineage_id)
+    predicate_object_state_key = f"{predicate}#{object_state_key}"
+    subject_version_key = _semantic_version_key(subject_kind, subject_id)
+    object_version_key = _semantic_version_key(object_kind, object_id)
+    relation_id = "semantic-relation-" + _hash_short(
+        [
+            subject_version_key,
+            predicate,
+            object_version_key,
+            rank,
+            classifier_id,
+            model_version,
+        ]
+    )
+    relation: dict[str, Any] = {
+        "id": relation_id,
+        "relationState": "current",
+        "predicate": predicate,
+        "subjectKind": subject_kind,
+        "subjectId": subject_id,
+        "subjectLineageId": subject_lineage_id,
+        "subjectVersionNumber": subject_version_number,
+        "objectKind": object_kind,
+        "objectId": object_id,
+        "objectLineageId": object_lineage_id,
+        "objectVersionNumber": object_version_number,
+        "subjectStateKey": subject_state_key,
+        "objectStateKey": object_state_key,
+        "objectSubjectStateKey": f"{object_state_key}#{subject_kind}",
+        "predicateObjectStateKey": predicate_object_state_key,
+        "subjectVersionKey": subject_version_key,
+        "objectVersionKey": object_version_key,
+        "score": score,
+        "confidence": confidence,
+        "rank": rank,
+        "classifierId": classifier_id,
+        "modelVersion": model_version,
+        "reviewRecommended": review_recommended,
+        "sourceSnapshotId": source_snapshot_id,
+        "importRunId": import_run_id,
+        "importedAt": imported_at,
+        "metadata": metadata,
+    }
+    return {key: value for key, value in relation.items() if value is not None}
+
+
+def _reference_lineage_id(corpus_key: str, external_item_id: str) -> str:
+    return f"reference-{_knowledge_corpus_id(corpus_key)}-{_slugify(external_item_id)}"
+
+
+def _knowledge_corpus_id(corpus_key: str) -> str:
+    return f"knowledge-corpus-{_slugify(corpus_key)}"
+
+
+def _semantic_state_key(kind: str, lineage_id: str) -> str:
+    return f"{kind}#{lineage_id}#current"
+
+
+def _semantic_version_key(kind: str, version_id: str) -> str:
+    return f"{kind}#{version_id}"
 
 
 def _with_initial_version(

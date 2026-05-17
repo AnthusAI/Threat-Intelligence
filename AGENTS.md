@@ -82,10 +82,11 @@ rendering contracts.
   `PAPYRUS_JWT_SECRET`; do not write production secrets or freshly minted
   production JWTs into `.env`. Follow `docs/category-steering-runbook.md` for
   the exact token minting and category/graph steering import workflow.
-- Category and graph steering imports must not mirror Biblicus corpus items into
-  Papyrus GraphQL. Papyrus stores steering state, artifact references, category
-  copy, proposals, decisions, projections, and stable external `item_id`
-  references; Biblicus remains the owner of corpus item metadata.
+- Category and graph steering imports must not mirror Biblicus corpus contents
+  into Papyrus GraphQL. Papyrus stores steering state, artifact references,
+  category copy, proposals, decisions, strict private `Reference` metadata,
+  `SemanticNode` rows, `SemanticRelation` links, and stable external `item_id`
+  references; Biblicus and S3 remain the owners of corpus content.
 - The News Desk is the newsroom operations surface. `Topics` is one desk tab,
   not the whole product concept. Use `/news-desk` and News Desk naming in UI,
   docs, and tests. Future assignment and research queues should become desk tabs
@@ -111,9 +112,10 @@ rendering contracts.
 - Accepted categories have a small first-class typed surface for editor-only
   News Desk views and appendix pages: versioned `CategorySet` and strict-tree
   `Category` rows. Import accepted taxonomy artifacts into those tables, keep
-  full manifests in private `CategoryRawPayload`, and append passive News Desk
+  full manifests in private `KnowledgeRawPayload`, and append passive News Desk
   category-register pages to editions only for signed-in editor/admin readers.
-  Ontology proposal kinds remain generic in v1.
+  Accepted graph and ontology artifacts may materialize private `SemanticNode`
+  and `SemanticRelation` rows for direct News Desk and procedure queries.
   Biblicus recommendation labels such as `recommend`, `do_not_recommend`, and
   `needs_clarification` are agent labels, not Papyrus review actions.
 - Rejected steering proposals are not cosmetic. Export Papyrus review memory
@@ -269,8 +271,9 @@ GraphQL (or `?scenario=<id>` fixture overrides for tests/debug only).
 - The CLI should expose `inspect`, `list`, `diff`, `sync`, and explicit
   `content delete all --yes`; it also owns `categories import-config`,
   `categories import-steering`, `categories export-category-set`, and
-  `categories import-projection` for category and graph steering. Do not add
-  `content login` or `content logout` unless the auth model changes again.
+  `categories import-projection` for category, reference, and graph steering.
+  Do not add `content login` or `content logout` unless the auth model changes
+  again.
 
 `lib/layout-plan.ts` owns the edition layout-plan contract:
 

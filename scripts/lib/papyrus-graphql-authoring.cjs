@@ -29,6 +29,13 @@ const CATEGORY_SET_FIELDS = `${VERSION_FIELDS} id corpusId classifierId displayN
 const CATEGORY_FIELDS = `${VERSION_FIELDS} id categorySetId corpusId categoryKey parentCategoryId parentCategoryKey displayName subtitle description aliases status seedItemIds holdoutItemIds rank depth isPinned importRunId updatedAt`;
 const PROPOSAL_FIELDS = "id categorySetId corpusId importRunId proposalKind steeringDomain status title summary categoryKey targetCategoryKey graphEntityId relationshipType displayName subtitle description evidenceItemIds suggestedSeedItemIds suggestedHoldoutItemIds sourceSnapshotId proposedAt reviewedAt reviewedBy updatedAt";
 const DECISION_FIELDS = "id proposalId categorySetId action actorSub actorLabel note selectedCategoryKey createdAt";
+const KNOWLEDGE_CORPUS_FIELDS = "id name role itemCount generatedAt latestImportRunId createdAt updatedAt";
+const KNOWLEDGE_IMPORT_RUN_FIELDS = "id corpusId importKind classifierId sourceSnapshotId status generatedAt importedAt itemCount categoryCount proposalCount artifactCount referenceCount relationCount warningCount";
+const KNOWLEDGE_RAW_PAYLOAD_FIELDS = "id ownerType ownerId payloadKind importRunId payload createdAt updatedAt";
+const KNOWLEDGE_ARTIFACT_FIELDS = "id corpusId artifactKind artifactId snapshotId displayName createdAt importRunId";
+const REFERENCE_FIELDS = `${VERSION_FIELDS} id corpusId externalItemId title authors sourceUri storagePath mediaType byteSize sha256 sourcePublishedAt sourceUpdatedAt retrievedAt importRunId importedAt metadata updatedAt`;
+const SEMANTIC_NODE_FIELDS = `${VERSION_FIELDS} id nodeKey nodeKind corpusId categorySetId categoryLineageId categoryKey displayName description aliases status importRunId updatedAt`;
+const SEMANTIC_RELATION_FIELDS = "id relationState predicate subjectKind subjectId subjectLineageId subjectVersionNumber objectKind objectId objectLineageId objectVersionNumber subjectStateKey objectStateKey objectSubjectStateKey predicateObjectStateKey subjectVersionKey objectVersionKey score confidence rank classifierId modelVersion reviewRecommended sourceSnapshotId importRunId importedAt metadata";
 
 const LIST_RECORDS = {
   Edition: listDefinition("listEditions", EDITION_FIELDS),
@@ -43,15 +50,17 @@ const LIST_RECORDS = {
   PublishedMediaAsset: listDefinition("listPublishedMediaAssets", PUBLISHED_MEDIA_FIELDS),
   PublishedCategorySet: listDefinition("listPublishedCategorySets", "id sourceCategorySetId categorySetLineageId versionNumber corpusId classifierId displayName description status generatedAt publishedAt categoryCount metadata"),
   PublishedCategory: listDefinition("listPublishedCategories", "id sourceCategoryId publishedCategorySetId categoryLineageId categorySetLineageId versionNumber corpusId categoryKey parentCategoryId parentCategoryKey displayName subtitle description aliases status seedItemIds holdoutItemIds rank depth isPinned metadata"),
-  CategoryCorpus: listDefinition("listCategoryCorpuses", "id name role itemCount generatedAt latestImportRunId createdAt updatedAt"),
-  CategoryImportRun: listDefinition("listCategoryImportRuns", "id corpusId importKind classifierId status importedAt itemCount categoryCount proposalCount artifactCount projectionCount warningCount"),
-  CategoryRawPayload: listDefinition("listCategoryRawPayloads", "id ownerType ownerId payloadKind importRunId"),
-  CategoryArtifact: listDefinition("listCategoryArtifacts", "id corpusId artifactKind artifactId snapshotId displayName createdAt importRunId"),
+  KnowledgeCorpus: listDefinition("listKnowledgeCorpuses", KNOWLEDGE_CORPUS_FIELDS),
+  KnowledgeImportRun: listDefinition("listKnowledgeImportRuns", KNOWLEDGE_IMPORT_RUN_FIELDS),
+  KnowledgeRawPayload: listDefinition("listKnowledgeRawPayloads", "id ownerType ownerId payloadKind importRunId"),
+  KnowledgeArtifact: listDefinition("listKnowledgeArtifacts", KNOWLEDGE_ARTIFACT_FIELDS),
   CategorySet: listDefinition("listCategorySets", CATEGORY_SET_FIELDS),
   Category: listDefinition("listCategories", CATEGORY_FIELDS),
-  CategoryProposal: listDefinition("listCategoryProposals", PROPOSAL_FIELDS),
-  CategoryDecision: listDefinition("listCategoryDecisions", DECISION_FIELDS),
-  CategoryProjection: listDefinition("listCategoryProjections", "id targetCorpusId authorityCorpusId classifierId modelVersion externalItemId categoryKey displayName score reviewRecommended importedAt importRunId"),
+  SteeringProposal: listDefinition("listSteeringProposals", PROPOSAL_FIELDS),
+  SteeringDecision: listDefinition("listSteeringDecisions", DECISION_FIELDS),
+  Reference: listDefinition("listReferences", REFERENCE_FIELDS),
+  SemanticNode: listDefinition("listSemanticNodes", SEMANTIC_NODE_FIELDS),
+  SemanticRelation: listDefinition("listSemanticRelations", SEMANTIC_RELATION_FIELDS),
 };
 
 const GETTERS = {
@@ -67,15 +76,17 @@ const GETTERS = {
   PublishedMediaAsset: getDefinition("getPublishedMediaAsset", PUBLISHED_MEDIA_FIELDS),
   PublishedCategorySet: getDefinition("getPublishedCategorySet", "id sourceCategorySetId categorySetLineageId versionNumber corpusId classifierId displayName description status generatedAt publishedAt categoryCount metadata"),
   PublishedCategory: getDefinition("getPublishedCategory", "id sourceCategoryId publishedCategorySetId categoryLineageId categorySetLineageId versionNumber corpusId categoryKey parentCategoryId parentCategoryKey displayName subtitle description aliases status seedItemIds holdoutItemIds rank depth isPinned metadata"),
-  CategoryCorpus: getDefinition("getCategoryCorpus", "id name role itemCount generatedAt latestImportRunId createdAt updatedAt"),
-  CategoryImportRun: getDefinition("getCategoryImportRun", "id corpusId importKind classifierId sourceSnapshotId status generatedAt importedAt itemCount categoryCount proposalCount artifactCount projectionCount warningCount"),
-  CategoryRawPayload: getDefinition("getCategoryRawPayload", "id ownerType ownerId payloadKind importRunId payload createdAt updatedAt"),
-  CategoryArtifact: getDefinition("getCategoryArtifact", "id corpusId artifactKind artifactId snapshotId displayName createdAt importRunId"),
+  KnowledgeCorpus: getDefinition("getKnowledgeCorpus", KNOWLEDGE_CORPUS_FIELDS),
+  KnowledgeImportRun: getDefinition("getKnowledgeImportRun", KNOWLEDGE_IMPORT_RUN_FIELDS),
+  KnowledgeRawPayload: getDefinition("getKnowledgeRawPayload", KNOWLEDGE_RAW_PAYLOAD_FIELDS),
+  KnowledgeArtifact: getDefinition("getKnowledgeArtifact", KNOWLEDGE_ARTIFACT_FIELDS),
   CategorySet: getDefinition("getCategorySet", CATEGORY_SET_FIELDS),
   Category: getDefinition("getCategory", CATEGORY_FIELDS),
-  CategoryProposal: getDefinition("getCategoryProposal", PROPOSAL_FIELDS),
-  CategoryDecision: getDefinition("getCategoryDecision", DECISION_FIELDS),
-  CategoryProjection: getDefinition("getCategoryProjection", "id targetCorpusId authorityCorpusId classifierId modelVersion externalItemId categoryKey displayName score reviewRecommended importedAt importRunId"),
+  SteeringProposal: getDefinition("getSteeringProposal", PROPOSAL_FIELDS),
+  SteeringDecision: getDefinition("getSteeringDecision", DECISION_FIELDS),
+  Reference: getDefinition("getReference", REFERENCE_FIELDS),
+  SemanticNode: getDefinition("getSemanticNode", SEMANTIC_NODE_FIELDS),
+  SemanticRelation: getDefinition("getSemanticRelation", SEMANTIC_RELATION_FIELDS),
 };
 
 const MUTATIONS = Object.fromEntries(Object.keys(GETTERS).map((modelName) => [modelName, modelMutations(modelName)]));

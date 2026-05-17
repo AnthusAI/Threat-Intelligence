@@ -4,7 +4,7 @@ import { Amplify } from "aws-amplify";
 import { generateClient } from "aws-amplify/data";
 import type { Schema } from "../../data/resource";
 
-type ReviewHandler = Schema["reviewCategoryProposal"]["functionHandler"];
+type ReviewHandler = Schema["reviewSteeringProposal"]["functionHandler"];
 type DataClient = ReturnType<typeof generateClient<Schema>>;
 type DataClientErrors = Array<{ message?: string | null } | string | null> | null | undefined;
 type DataClientResult<T = unknown> = {
@@ -31,17 +31,17 @@ let clientPromise: Promise<DataClient> | null = null;
 
 export const handler: ReviewHandler = async (event) => {
   const fieldName = normalizeOptionalString(event.info?.fieldName);
-  if (fieldName && fieldName !== "reviewCategoryProposal") {
-    throw new Error(`Unsupported category action ${fieldName}.`);
+  if (fieldName && fieldName !== "reviewSteeringProposal") {
+    throw new Error(`Unsupported steering action ${fieldName}.`);
   }
-  return reviewCategoryProposal(event);
+  return reviewSteeringProposal(event);
 };
 
-async function reviewCategoryProposal(event: Parameters<ReviewHandler>[0]) {
+async function reviewSteeringProposal(event: Parameters<ReviewHandler>[0]) {
   const client = await getDataClient();
   const proposalId = normalizeRequiredString(event.arguments.proposalId, "proposalId");
   const action = normalizeReviewAction(event.arguments.action);
-  const proposal = await getRequiredRecord(client.models.CategoryProposal, proposalId, "CategoryProposal");
+  const proposal = await getRequiredRecord(client.models.SteeringProposal, proposalId, "SteeringProposal");
   const now = new Date().toISOString();
   const actorSub = normalizeOptionalString(event.arguments.actorSub) ?? getIdentitySub(event);
   const actorLabel = normalizeOptionalString(event.arguments.actorLabel) ?? getIdentityLabel(event);
@@ -49,7 +49,7 @@ async function reviewCategoryProposal(event: Parameters<ReviewHandler>[0]) {
   const decisionId = `decision-${proposalId}-${now.replace(/[^0-9TZ]/g, "")}-${randomUUID().slice(0, 8)}`;
 
   await requireDataResult(
-    client.models.CategoryDecision.create({
+    client.models.SteeringDecision.create({
       id: decisionId,
       proposalId,
       categorySetId: proposal.categorySetId ?? null,
@@ -60,23 +60,23 @@ async function reviewCategoryProposal(event: Parameters<ReviewHandler>[0]) {
       selectedCategoryKey,
       createdAt: now,
     }),
-    "create CategoryDecision",
+    "create SteeringDecision",
   );
 
   const proposalStatus = action === "reject" ? "rejected" : action === "defer" ? "deferred" : "accepted";
   await requireDataResult(
-    client.models.CategoryProposal.update({
+    client.models.SteeringProposal.update({
       id: proposalId,
       status: proposalStatus,
       reviewedAt: now,
       reviewedBy: actorLabel ?? actorSub,
       updatedAt: now,
     }),
-    "update CategoryProposal",
+    "update SteeringProposal",
   );
 
   let categoryId: string | null = null;
-  if ((action === "accept" || action === "edit") && shouldApplyCategoryProposal(proposal)) {
+  if ((action === "accept" || action === "edit") && shouldApplySteeringProposalToCategory(proposal)) {
     categoryId = await createCategoryVersionFromProposal(client, proposal, event.arguments, {
       actorLabel: actorLabel ?? actorSub ?? "Papyrus news desk",
       now,
@@ -96,7 +96,7 @@ async function reviewCategoryProposal(event: Parameters<ReviewHandler>[0]) {
   };
 }
 
-function shouldApplyCategoryProposal(proposal: any): boolean {
+function shouldApplySteeringProposalToCategory(proposal: any): boolean {
   const proposalKind = normalizeOptionalString(proposal.proposalKind);
   return Boolean(
     proposal.categorySetId

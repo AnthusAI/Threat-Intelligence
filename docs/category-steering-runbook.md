@@ -1,10 +1,11 @@
 # Category And Graph Steering Runbook
 
 Papyrus is the human steering system. Biblicus is the artifact producer. Papyrus
-imports accepted category sets, steering proposals, projection rows, artifact
-references, decisions, and stable external IDs. It does not mirror Biblicus
-corpus items into GraphQL; evidence remains a Biblicus `item_id` reference until
-Papyrus deliberately turns some information into its own publication content.
+imports accepted category sets, steering proposals, private reference metadata,
+semantic relation rows, artifact references, decisions, and stable external IDs.
+It does not import corpus contents into GraphQL. Source text, PDFs, transcripts,
+and extraction output stay in private S3/corpus storage; Papyrus `Reference`
+records store strict metadata and associations only.
 
 This runbook is written against the current AI/ML pilot corpora, but the system
 is domain-neutral. A publication about any area of interest should be configured
@@ -24,8 +25,9 @@ The publication is assembled from configuration plus artifacts:
   snapshots, topic-modeling results, graph snapshots, proposal bundles,
   classifier manifests, and projection output.
 - Papyrus owns human steering state and publication state: canonical topic copy,
-  proposal review decisions, accepted topic revisions, projection summaries, CMS
-  `Item` records, editions, edition layouts, and reader-facing media.
+  proposal review decisions, accepted topic revisions, private `Reference`
+  metadata, private `SemanticRelation` links, CMS `Item` records, editions,
+  edition layouts, and reader-facing media.
 - Future research agents should be configured by publication/corpus instruction
   files rather than hard-coded in Papyrus. Those instructions should tell agents
   what sources to inspect, what editorial voice and beats matter, how to use
@@ -36,8 +38,9 @@ The publication is assembled from configuration plus artifacts:
 
 For a new publication, start by creating or replacing the steering config and
 corpus prefixes. Then import the config, run Biblicus artifact-producing
-commands for those corpora, and import only steering/topic/projection outputs
-into Papyrus. Do not create application branches that special-case a domain.
+commands for those corpora, and import only steering/topic/reference-link
+outputs into Papyrus. Do not create application branches that special-case a
+domain.
 
 ## Durable Corpus Storage
 
@@ -136,7 +139,7 @@ Config resolution for the content CLI is:
 3. `corpora/papyrus-steering.yml`.
 
 After changing the config, upload it to S3 and materialize the configured
-`CategoryCorpus` records into GraphQL:
+`KnowledgeCorpus` records into GraphQL:
 
 ```bash
 aws s3 cp \
@@ -241,18 +244,26 @@ npm run content -- categories import-steering \
 ```
 
 The import is idempotent and intentionally lean. It imports private canonical
-category records plus raw payloads:
+category records, reference metadata, semantic links, and raw payloads:
 
-- `CategoryCorpus`;
-- `CategoryImportRun`;
+- `KnowledgeCorpus`;
+- `KnowledgeImportRun`;
 - `CategorySet`;
 - `Category`;
-- `CategoryArtifact`;
-- `CategoryProposal`;
-- private `CategoryRawPayload` rows for steering objects.
+- `KnowledgeArtifact`;
+- `SteeringProposal`;
+- `Reference`;
+- `SemanticNode`;
+- `SemanticRelation`;
+- private `KnowledgeRawPayload` rows for steering objects.
 
-It does not import Biblicus corpus items. Category seeds, holdouts, proposal
-evidence, and projection rows keep stable external `item_id` strings.
+It does not import Biblicus corpus contents. `Reference` rows store strict
+metadata only: stable external `item_id`, title, authors, source URI, corpus/S3
+path, media type, checksums, dates, and sanitized provenance. Abstracts,
+excerpts, extracted text, bodies, transcripts, and source notes do not belong in
+the GraphQL record. Category seeds, holdouts, proposal evidence, assignment
+evidence, and semantic links keep stable external `item_id` strings and connect
+to `Reference` lineages when Papyrus can resolve them.
 If a Biblicus taxonomy artifact exists, `import-steering` resolves
 `analysis/taxonomy/<snapshot>/taxonomy.json` from the artifact reference and
 imports accepted category nodes under the versioned `CategorySet`. If no
@@ -350,7 +361,10 @@ uv run biblicus topic-classifier project \
   --format json > /tmp/ai-ml-history-projection.json
 ```
 
-Import projection rows back into Papyrus:
+Import projection output back into Papyrus. This creates or versions one
+private `Reference` per projected Biblicus item and writes current
+`SemanticRelation` rows from that exact reference version to the matching
+category version:
 
 ```bash
 cd /Users/ryan/Projects/Papyrus
@@ -366,8 +380,10 @@ npm run content -- categories import-projection \
 ## Graph Steering
 
 Graph steering follows the same boundary. Biblicus creates graph snapshots,
-signals, and proposal artifacts. Papyrus imports only the resulting steering
-proposal rows and raw proposal payloads.
+signals, and proposal artifacts. Papyrus imports the resulting steering proposal
+rows and raw proposal payloads. Accepted graph or ontology artifacts can also
+materialize private `SemanticNode` and `SemanticRelation` rows so News Desk and
+procedure code can query ontological relationships directly.
 
 ```bash
 cd /Users/ryan/Projects/Biblicus
@@ -423,8 +439,8 @@ proposal rows and `proposal_bundles` for kinds such as:
 - `add-relationship-type`;
 - `suppress-entity-or-edge`.
 
-Papyrus imports these rows into `CategoryProposal` and keeps full details in
-private `CategoryRawPayload`. Typed summary fields are best-effort display
+Papyrus imports these rows into `SteeringProposal` and keeps full details in
+private `KnowledgeRawPayload`. Typed summary fields are best-effort display
 fields: taxonomy proposals can map `topic_uid`, `parent_topic_uid`, display
 copy, and document evidence; ontology proposals can map `assertion_id`,
 `source_ref`, `relationship_uid`, `target_ref`, and evidence IDs. The accepted
@@ -462,9 +478,10 @@ post-review proposal generation cycle.
 Accepted category summaries now have a small first-class editor surface in
 Papyrus: `/news-desk` shows accepted subcategories beside the canonical category
 register, and signed-in editor/admin readers can see passive category appendix
-pages after the edition. Public display stays limited to published projection
-read. Accepted ontology relationships remain artifact-backed and generic until
-editors need first-class relationship editing or public relationship display.
+pages after the edition. Public display stays limited to published category
+projections and published issue content. `Reference`, `SemanticNode`,
+`SemanticRelation`, and `Knowledge*` tables are private and have no API-key read
+path; readers never receive a published citation/reference projection.
 
 ## Local Corpus Working Copies
 

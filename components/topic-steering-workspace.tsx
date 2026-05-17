@@ -26,12 +26,13 @@ import type {
   CategorySteeringCorpus,
   CategorySteeringDashboard,
   CategorySteeringImportRun,
-  CategorySteeringProjection,
   CategorySteeringProposal,
   CategorySteeringCategoryTree,
   CategorySteeringCategoryTreeNode,
   CategorySteeringCategory,
   CategorySteeringCategorySet,
+  ReferenceRecord,
+  SemanticRelationRecord,
 } from "../lib/category-repository";
 
 type ActionState = {
@@ -264,7 +265,7 @@ function NewsDeskDashboard({
     startTransition(() => {
       void (async () => {
         try {
-          const response = await dataClient.mutations.reviewCategoryProposal(
+          const response = await dataClient.mutations.reviewSteeringProposal(
             {
               proposalId: proposal.id,
               action,
@@ -492,7 +493,7 @@ function NewsDeskDashboard({
                 <StatusMetric label="Accepted Categories" value={String(canonicalCategorys.length)} detail={activeCategorySet ? activeCategorySet.displayName : "No accepted category set"} />
                 <StatusMetric label="Accepted Subcategories" value={String(acceptedSubcategoryCount)} detail={`${acceptedRootCategoryCount} root categories`} />
                 <StatusMetric label="Filed Notes" value={String(openProposalCount)} detail={`${categoryProposals.length} category / ${genericProposals.length} generic`} />
-                <StatusMetric label="Projection Notices" value={String(dashboard.projections.length)} detail={latestImport ? `${latestImport.importKind} ${latestImport.status}` : "No projection import"} />
+                <StatusMetric label="Reference Links" value={String(dashboard.semanticRelations.length)} detail={latestImport ? `${latestImport.importKind} ${latestImport.status}` : "No knowledge import"} />
               </aside>
             </>
           )}
@@ -571,7 +572,8 @@ function NewsDeskDashboard({
             <CategorySetPanel
               categorySet={activeCategorySet}
               artifacts={dashboard.artifacts}
-              projections={dashboard.projections}
+              references={dashboard.references}
+              semanticRelations={dashboard.semanticRelations}
             />
           </aside>
           </div>
@@ -1421,11 +1423,13 @@ function CategoryEditor({
 function CategorySetPanel({
   categorySet,
   artifacts,
-  projections,
+  references,
+  semanticRelations,
 }: {
   categorySet: CategorySteeringCategorySet | null;
   artifacts: CategorySteeringArtifact[];
-  projections: CategorySteeringProjection[];
+  references: ReferenceRecord[];
+  semanticRelations: SemanticRelationRecord[];
 }) {
   return (
     <section className="category-steering-section" aria-labelledby="pressroom-export-title">
@@ -1445,8 +1449,12 @@ function CategorySetPanel({
             <dd>{artifacts.length}</dd>
           </div>
           <div>
-            <dt>Review Projections</dt>
-            <dd>{projections.filter((projection) => projection.reviewRecommended).length}</dd>
+            <dt>References</dt>
+            <dd>{references.length}</dd>
+          </div>
+          <div>
+            <dt>Review Links</dt>
+            <dd>{semanticRelations.filter((relation) => relation.reviewRecommended).length}</dd>
           </div>
         </dl>
         <div className="category-steering-artifacts">

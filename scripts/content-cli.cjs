@@ -16,7 +16,7 @@ const {
   buildSteeringConfigRecords,
   buildProjectionImportRecords,
   buildSteeringImportRecords,
-  categoryCorpusId,
+  knowledgeCorpusId,
   loadJsonFile,
   loadSteeringBundleFromBiblicus,
   mergeReviewedProposalState,
@@ -259,10 +259,10 @@ async function exportSteeringFeedback(flags) {
   const { client } = createAuthoringClient();
   const categorySet = await client.getRecord("CategorySet", categorySetId);
   if (!categorySet) throw new Error(`CategorySet ${categorySetId} was not found.`);
-  const proposals = (await client.listRecords("CategoryProposal"))
+  const proposals = (await client.listRecords("SteeringProposal"))
     .filter((proposal) => proposal.categorySetId === categorySetId);
   const proposalIds = new Set(proposals.map((proposal) => proposal.id));
-  const decisions = (await client.listRecords("CategoryDecision"))
+  const decisions = (await client.listRecords("SteeringDecision"))
     .filter((decision) => decision.categorySetId === categorySetId || proposalIds.has(decision.proposalId));
   const payload = buildSteeringFeedbackPayload(categorySet, proposals, decisions);
   writeJsonFile(options.output, payload);
@@ -283,15 +283,17 @@ async function deleteAllContent(client) {
     "Item",
     "Tag",
     "Edition",
-    "CategoryRawPayload",
-    "CategoryDecision",
-    "CategoryProposal",
-    "CategoryProjection",
+    "KnowledgeRawPayload",
+    "SteeringDecision",
+    "SteeringProposal",
+    "SemanticRelation",
+    "SemanticNode",
+    "Reference",
     "Category",
     "CategorySet",
-    "CategoryArtifact",
-    "CategoryImportRun",
-    "CategoryCorpus",
+    "KnowledgeArtifact",
+    "KnowledgeImportRun",
+    "KnowledgeCorpus",
   ];
   const result = [];
 
@@ -307,11 +309,141 @@ async function deleteAllContent(client) {
 }
 
 async function buildRecordChanges(client, records) {
+  const prepared = await prepareVersionedKnowledgeRecords(client, records);
   const changes = [];
-  for (const record of records) {
+  for (const record of prepared.records) {
     changes.push(await buildRecordChange(client, record.modelName, record.expected));
   }
+  changes.push(...prepared.postChanges);
   return changes;
+}
+
+async function prepareVersionedKnowledgeRecords(client, records) {
+  const referenceRecords = records.filter((record) => record.modelName === "Reference");
+  if (!referenceRecords.length) return { records, postChanges: [] };
+
+  const existingReferences = await client.listRecords("Reference");
+  const currentReferenceByLineage = new Map();
+  for (const reference of existingReferences) {
+    const lineageId = reference.lineageId;
+    if (!lineageId) continue;
+    const current = currentReferenceByLineage.get(lineageId);
+    if (
+      reference.versionState === "current" &&
+      (!current || Number(reference.versionNumber ?? 0) > Number(current.versionNumber ?? 0))
+    ) {
+      currentReferenceByLineage.set(lineageId, reference);
+    }
+  }
+
+  const referenceIdMap = new Map();
+  const changedReferenceLineages = new Set();
+  const postChanges = [];
+  const preparedRecords = [];
+
+  for (const record of records) {
+    if (record.modelName !== "Reference") {
+      preparedRecords.push(record);
+      continue;
+    }
+
+    const expected = record.expected;
+    const current = currentReferenceByLineage.get(expected.lineageId);
+    if (!current) {
+      referenceIdMap.set(expected.id, expected);
+      preparedRecords.push(record);
+      continue;
+    }
+
+    if (current.contentHash && current.contentHash === expected.contentHash) {
+      referenceIdMap.set(expected.id, current);
+      continue;
+    }
+
+    const versionNumber = Number(current.versionNumber ?? 1) + 1;
+    const next = {
+      ...expected,
+      id: `${expected.lineageId}-v${versionNumber}`,
+      versionNumber,
+      previousVersionId: current.id,
+      versionState: "current",
+    };
+    next.contentHash = expected.contentHash;
+    referenceIdMap.set(expected.id, next);
+    changedReferenceLineages.add(expected.lineageId);
+    preparedRecords.push({ ...record, expected: next });
+    postChanges.push({
+      modelName: "Reference",
+      expected: {
+        id: current.id,
+        versionState: "superseded",
+        updatedAt: expected.updatedAt ?? expected.importedAt ?? new Date().toISOString(),
+      },
+      current,
+      action: "update",
+    });
+  }
+
+  const mappedRecords = preparedRecords.map((record) => (
+    record.modelName === "SemanticRelation"
+      ? { ...record, expected: remapSemanticRelationReferences(record.expected, referenceIdMap) }
+      : record
+  ));
+
+  if (changedReferenceLineages.size) {
+    const existingRelations = await client.listRecords("SemanticRelation");
+    for (const relation of existingRelations) {
+      if (
+        relation.relationState === "current" &&
+        changedReferenceLineages.has(relation.subjectLineageId)
+      ) {
+        postChanges.push({
+          modelName: "SemanticRelation",
+          expected: { id: relation.id, relationState: "superseded" },
+          current: relation,
+          action: "update",
+        });
+      }
+    }
+  }
+
+  return { records: mappedRecords, postChanges };
+}
+
+function remapSemanticRelationReferences(relation, referenceIdMap) {
+  let next = relation;
+  const subject = referenceIdMap.get(relation.subjectId);
+  if (subject) {
+    next = {
+      ...next,
+      subjectId: subject.id,
+      subjectVersionNumber: subject.versionNumber,
+      subjectVersionKey: `${relation.subjectKind}#${subject.id}`,
+    };
+  }
+  const object = referenceIdMap.get(relation.objectId);
+  if (object) {
+    next = {
+      ...next,
+      objectId: object.id,
+      objectVersionNumber: object.versionNumber,
+      objectVersionKey: `${relation.objectKind}#${object.id}`,
+    };
+  }
+  if (next !== relation) {
+    next = {
+      ...next,
+      id: `semantic-relation-${hashShort([
+        next.subjectVersionKey,
+        next.predicate,
+        next.objectVersionKey,
+        next.rank ?? "",
+        next.classifierId ?? "",
+        next.modelVersion ?? "",
+      ])}`,
+    };
+  }
+  return next;
 }
 
 async function buildSteeringConfigRecordChanges(client, records) {
@@ -584,7 +716,7 @@ async function buildEditionRecordChanges(client, editionConfig) {
 
 async function buildRecordChange(client, modelName, expected) {
   const current = await client.getRecord(modelName, expected.id);
-  const nextExpected = modelName === "CategoryProposal" ? mergeReviewedProposalState(expected, current) : expected;
+  const nextExpected = modelName === "SteeringProposal" ? mergeReviewedProposalState(expected, current) : expected;
   const action = !current ? "create" : recordsEqual(current, nextExpected) ? "noop" : "update";
   return { modelName, expected: nextExpected, current, action };
 }
@@ -646,6 +778,10 @@ function normalizeRecord(record, keyName = "") {
 
 function stableStringify(value) {
   return JSON.stringify(value);
+}
+
+function hashShort(value) {
+  return crypto.createHash("sha256").update(typeof value === "string" ? value : JSON.stringify(value)).digest("hex").slice(0, 16);
 }
 
 function withVersionFields(record, { now, actor, reason }) {
@@ -733,8 +869,8 @@ function resolveProjectionImportCorpora(config, options) {
     return {
       targetCorpus,
       authorityCorpus,
-      targetCorpusId: options["target-corpus-id"] ?? categoryCorpusId(targetCorpus),
-      authorityCorpusId: options["authority-corpus-id"] ?? (authorityCorpus ? categoryCorpusId(authorityCorpus) : undefined),
+      targetCorpusId: options["target-corpus-id"] ?? knowledgeCorpusId(targetCorpus),
+      authorityCorpusId: options["authority-corpus-id"] ?? (authorityCorpus ? knowledgeCorpusId(authorityCorpus) : undefined),
       classifierId,
     };
   }
@@ -746,7 +882,7 @@ function resolveProjectionImportCorpora(config, options) {
     targetCorpus,
     authorityCorpus,
     targetCorpusId: options["target-corpus-id"],
-    authorityCorpusId: options["authority-corpus-id"] ?? (authorityCorpus ? categoryCorpusId(authorityCorpus) : undefined),
+    authorityCorpusId: options["authority-corpus-id"] ?? (authorityCorpus ? knowledgeCorpusId(authorityCorpus) : undefined),
     classifierId: options.classifier,
   };
 }
