@@ -25,6 +25,18 @@ type ActionState = {
   tone: "ok" | "error" | "pending";
 };
 
+type ReviewAction = "accept" | "reject";
+
+type CurationReviewResponse = {
+  data?: {
+    ok?: boolean | null;
+    status?: string | null;
+    proposalId?: string | null;
+    decisionId?: string | null;
+  } | null;
+  errors?: Array<{ message?: string | null } | string | null> | null;
+};
+
 const TAILORED_TOPIC_PROPOSAL_KINDS = new Set([
   "new-topic",
   "rename-topic",
@@ -51,6 +63,8 @@ const TAXONOMY_PROPOSAL_KINDS = new Set([
   "merge-taxonomy-nodes",
   "split-taxonomy-node",
 ]);
+
+const USER_POOL_AUTH_MODE = "userPool";
 
 export function NewsDeskWorkspace({ dashboard }: { dashboard: TopicSteeringDashboard | null }) {
   if (!dashboard) return <ProtectedNewsDeskWorkspace />;
@@ -193,13 +207,13 @@ function NewsDeskDashboard({ dashboard }: { dashboard: TopicSteeringDashboard })
     };
   }, [dashboard.isDemo, dashboard.taxonomies, dashboard.taxonomyNodes]);
 
-  function runProposalAction(proposal: TopicSteeringProposal, action: "accept" | "reject" | "defer") {
+  function runProposalAction(proposal: TopicSteeringProposal, action: ReviewAction) {
     setActionState({ id: proposal.id, message: `${action} pending`, tone: "pending" });
     if (dashboard.isDemo) {
       setProposals((current) =>
         current.map((entry) =>
           entry.id === proposal.id
-            ? { ...entry, status: action === "accept" ? "accepted" : action === "reject" ? "rejected" : "deferred", reviewedAt: new Date().toISOString() }
+            ? { ...entry, status: action === "accept" ? "accepted" : "rejected", reviewedAt: new Date().toISOString() }
             : entry,
         ),
       );
@@ -209,29 +223,52 @@ function NewsDeskDashboard({ dashboard }: { dashboard: TopicSteeringDashboard })
     startTransition(() => {
       void (async () => {
         try {
-          await dataClient.mutations.reviewCurationProposal({
-            proposalId: proposal.id,
-            action,
-            actorLabel: "Papyrus news desk",
-            displayName: proposal.displayName ?? undefined,
-            subtitle: proposal.subtitle ?? undefined,
-            description: proposal.description ?? undefined,
-            seedItemIds: compactArray(proposal.suggestedSeedItemIds),
-            holdoutItemIds: compactArray(proposal.suggestedHoldoutItemIds),
-          });
+          const response = await dataClient.mutations.reviewCurationProposal(
+            {
+              proposalId: proposal.id,
+              action,
+              actorLabel: "Papyrus news desk",
+              displayName: proposal.displayName ?? undefined,
+              subtitle: proposal.subtitle ?? undefined,
+              description: proposal.description ?? undefined,
+              seedItemIds: compactArray(proposal.suggestedSeedItemIds),
+              holdoutItemIds: compactArray(proposal.suggestedHoldoutItemIds),
+            },
+            { authMode: USER_POOL_AUTH_MODE },
+          );
+          const review = assertReviewMutationSucceeded(response, proposal.id);
+          const nextStatus = review.status === "accepted" || review.status === "rejected"
+            ? review.status
+            : action === "accept" ? "accepted" : "rejected";
           setProposals((current) =>
             current.map((entry) =>
               entry.id === proposal.id
-                ? { ...entry, status: action === "accept" ? "accepted" : action === "reject" ? "rejected" : "deferred", reviewedAt: new Date().toISOString() }
+                ? { ...entry, status: nextStatus, reviewedAt: new Date().toISOString() }
                 : entry,
             ),
           );
+          if (action === "accept" && TAXONOMY_PROPOSAL_KINDS.has(proposal.proposalKind)) {
+            await refreshEditorTaxonomyState();
+          }
           setActionState({ id: proposal.id, message: `${action} saved`, tone: "ok" });
         } catch (error) {
           setActionState({ id: proposal.id, message: error instanceof Error ? error.message : `${action} failed`, tone: "error" });
         }
       })();
     });
+  }
+
+  async function refreshEditorTaxonomyState() {
+    if (dashboard.isDemo) {
+      setTaxonomies(dashboard.taxonomies);
+      setTaxonomyNodes(dashboard.taxonomyNodes);
+      setTaxonomyLoadError(null);
+      return;
+    }
+    const state = await loadEditorTaxonomyState();
+    setTaxonomies(state.taxonomies);
+    setTaxonomyNodes(state.taxonomyNodes);
+    setTaxonomyLoadError(state.error);
   }
 
   function saveTopic(topic: TopicSteeringTopic, update: Pick<TopicSteeringTopic, "displayName" | "subtitle" | "description">) {
@@ -334,7 +371,7 @@ function NewsDeskDashboard({ dashboard }: { dashboard: TopicSteeringDashboard })
             <p className="story-label">Topics Desk</p>
             <h2>Steering Notes Run Beside The Edition</h2>
             <p>
-              Proposal rows are copy-desk notes from workers and agents. Skim them like an inside page: accept a correction, file it for later, or leave the present course undisturbed.
+              Proposal rows are copy-desk notes from workers and agents. Skim them like an inside page: accept a correction, reject it, or leave the present course undisturbed.
             </p>
           </article>
           <aside className="news-desk-index" aria-label="Import and projection index">
@@ -361,6 +398,8 @@ function NewsDeskDashboard({ dashboard }: { dashboard: TopicSteeringDashboard })
             <AcceptedTaxonomySection
               activeTaxonomy={activeTaxonomy}
               canonicalTopics={canonicalTopics}
+              disabled={isPending}
+              onAction={runProposalAction}
               proposals={proposals}
               taxonomyLoadError={taxonomyLoadError}
               taxonomyNodes={activeTaxonomyNodes}
@@ -457,7 +496,7 @@ function GenericProposalQueue({
 }: {
   proposals: TopicSteeringProposal[];
   disabled: boolean;
-  onAction: (proposal: TopicSteeringProposal, action: "accept" | "reject" | "defer") => void;
+  onAction: (proposal: TopicSteeringProposal, action: ReviewAction) => void;
 }) {
   return (
     <section className="topic-steering-section" aria-labelledby="ontology-and-graph-proposals-title">
@@ -485,7 +524,6 @@ function GenericProposalQueue({
                 <td>
                   <div className="topic-steering-proposal__actions" aria-label={`${proposal.title} review actions`}>
                     <button type="button" data-review-action="accept" disabled={disabled || proposal.status === "accepted"} onClick={() => onAction(proposal, "accept")}>Accept</button>
-                    <button type="button" data-review-action="defer" disabled={disabled || proposal.status === "deferred"} onClick={() => onAction(proposal, "defer")}>Defer</button>
                     <button type="button" data-review-action="reject" disabled={disabled || proposal.status === "rejected"} onClick={() => onAction(proposal, "reject")}>Reject</button>
                   </div>
                 </td>
@@ -503,27 +541,34 @@ function GenericProposalQueue({
 function AcceptedTaxonomySection({
   activeTaxonomy,
   canonicalTopics,
+  disabled,
+  onAction,
   proposals,
   taxonomyLoadError,
   taxonomyNodes,
 }: {
   activeTaxonomy: TopicSteeringTaxonomy | null;
   canonicalTopics: TopicSteeringTopic[];
+  disabled: boolean;
+  onAction: (proposal: TopicSteeringProposal, action: ReviewAction) => void;
   proposals: TopicSteeringProposal[];
   taxonomyLoadError: string | null;
   taxonomyNodes: TopicSteeringTaxonomyNode[];
 }) {
   const roots = canonicalTopics.map((topic) => {
     const node = taxonomyNodes.find((candidate) => candidate.topicUid === topic.topicUid && !candidate.parentTopicUid);
+    const subtopics = taxonomyNodes.filter((candidate) => candidate.parentTopicUid === topic.topicUid && candidate.status === "accepted");
     return {
       topic,
       node,
-      subtopics: taxonomyNodes.filter((candidate) => candidate.parentTopicUid === topic.topicUid && candidate.status === "accepted"),
+      subtopics,
+      proposedSubtopics: getProposedSubtopicProposals(topic.topicUid, proposals),
     };
   });
   const subtopicCount = roots.reduce((count, root) => count + root.subtopics.length, 0);
+  const proposedSubtopicCount = roots.reduce((count, root) => count + root.proposedSubtopics.length, 0);
   const detail = activeTaxonomy
-    ? `${subtopicCount} accepted subtopics`
+    ? `${subtopicCount} accepted / ${proposedSubtopicCount} proposed subtopics`
     : taxonomyLoadError
       ? "Taxonomy unavailable"
       : "Editor sign-in required";
@@ -540,7 +585,7 @@ function AcceptedTaxonomySection({
         <EmptyRow label="Accepted subtopics are visible to signed-in editors" />
       ) : (
         <div className="topic-steering-taxonomy-list" data-news-desk-taxonomy>
-          {roots.length ? roots.map(({ node, subtopics, topic }) => {
+          {roots.length ? roots.map(({ node, proposedSubtopics, subtopics, topic }) => {
             const root = node ?? topicToTaxonomyNode(topic);
             const relatedProposalCount = countRelatedTaxonomyProposals(root.topicUid, subtopics, proposals);
             return (
@@ -550,7 +595,7 @@ function AcceptedTaxonomySection({
                     <p className="story-label">Root Topic</p>
                     <h3>{root.displayName}</h3>
                   </div>
-                  <span>{subtopics.length} subtopics / {relatedProposalCount} related notes</span>
+                  <span>{subtopics.length} accepted / {proposedSubtopics.length} proposed / {relatedProposalCount} related notes</span>
                 </header>
                 {root.subtitle ? <p className="topic-steering-taxonomy-subtitle">{root.subtitle}</p> : null}
                 <p>{root.description ?? "Accepted root topic."}</p>
@@ -560,6 +605,7 @@ function AcceptedTaxonomySection({
                   <span>{root.topicUid}</span>
                 </div>
                 <div className="topic-steering-subtopic-list">
+                  <p className="topic-steering-subtopic-list__label">Accepted Subtopics</p>
                   {subtopics.length ? subtopics.map((subtopic) => (
                     <article className="topic-steering-subtopic" data-news-desk-subtopic={subtopic.topicUid} key={subtopic.id}>
                       <h4>{subtopic.displayName}</h4>
@@ -575,6 +621,28 @@ function AcceptedTaxonomySection({
                     <EmptyRow label="No accepted subtopics under this root" />
                   )}
                 </div>
+                {proposedSubtopics.length ? (
+                  <div className="topic-steering-subtopic-list topic-steering-subtopic-list--proposed">
+                    <p className="topic-steering-subtopic-list__label">Proposed Subtopics</p>
+                    {proposedSubtopics.map((proposal) => (
+                      <article className="topic-steering-subtopic topic-steering-subtopic--proposed" data-news-desk-proposed-subtopic={proposal.topicUid ?? proposal.id} key={proposal.id}>
+                        <h4>{proposal.displayName ?? proposal.title}</h4>
+                        {proposal.subtitle ? <p className="topic-steering-taxonomy-subtitle">{proposal.subtitle}</p> : null}
+                        <p>{proposal.description ?? proposal.summary ?? "Candidate subtopic from steering proposals."}</p>
+                        <div className="topic-steering-taxonomy-evidence">
+                          <span>{proposal.proposalKind}</span>
+                          <span>{proposal.status}</span>
+                          <span>{compactArray(proposal.evidenceItemIds).length} evidence refs</span>
+                          <span>{proposal.topicUid ?? "new topic"}</span>
+                        </div>
+                        <div className="topic-steering-proposal__actions topic-steering-subtopic__actions" aria-label={`${proposal.title} review actions`}>
+                          <button type="button" data-review-action="accept" disabled={disabled || proposal.status === "accepted"} onClick={() => onAction(proposal, "accept")}>Accept</button>
+                          <button type="button" data-review-action="reject" disabled={disabled || proposal.status === "rejected"} onClick={() => onAction(proposal, "reject")}>Reject</button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                ) : null}
               </article>
             );
           }) : <EmptyRow label="No canonical roots available for taxonomy display" />}
@@ -592,6 +660,27 @@ function formatGenericProposalSubject(proposal: TopicSteeringProposal): string {
     proposal.displayName,
   ].filter(Boolean);
   return parts.join(" ") || "unmapped";
+}
+
+function assertReviewMutationSucceeded(response: CurationReviewResponse, proposalId: string): NonNullable<CurationReviewResponse["data"]> {
+  if (response.errors?.length) {
+    throw new Error(response.errors.map(formatGraphQLError).join("; "));
+  }
+  if (!response.data?.ok) {
+    throw new Error(`Review was not saved for ${proposalId}.`);
+  }
+  if (response.data.proposalId && response.data.proposalId !== proposalId) {
+    throw new Error(`Review response did not match proposal ${proposalId}.`);
+  }
+  if (!response.data.decisionId) {
+    throw new Error(`Review saved no decision audit row for ${proposalId}.`);
+  }
+  return response.data;
+}
+
+function formatGraphQLError(error: { message?: string | null } | string | null): string {
+  if (typeof error === "string") return error;
+  return error?.message ?? "GraphQL mutation failed.";
 }
 
 function selectActiveTaxonomy(
@@ -639,6 +728,20 @@ function countRelatedTaxonomyProposals(
       (proposal.targetTopicUid && topicUids.has(proposal.targetTopicUid)),
     );
   }).length;
+}
+
+function getProposedSubtopicProposals(rootTopicUid: string, proposals: TopicSteeringProposal[]): TopicSteeringProposal[] {
+  return proposals
+    .filter((proposal) => (
+      proposal.proposalKind === "create-taxonomy-node"
+      && proposal.status === "proposed"
+      && proposal.targetTopicUid === rootTopicUid
+    ))
+    .sort((left, right) => {
+      const leftName = left.displayName ?? left.title;
+      const rightName = right.displayName ?? right.title;
+      return leftName.localeCompare(rightName);
+    });
 }
 
 function CorpusTopicSetSummary({
@@ -713,7 +816,7 @@ function TopicProposalRow({
   proposal: TopicSteeringProposal;
   topic?: TopicSteeringTopic;
   disabled: boolean;
-  onAction: (proposal: TopicSteeringProposal, action: "accept" | "reject" | "defer") => void;
+  onAction: (proposal: TopicSteeringProposal, action: ReviewAction) => void;
 }) {
   const evidence = compactArray(proposal.evidenceItemIds).slice(0, 3);
 
@@ -748,7 +851,6 @@ function TopicProposalRow({
       </div>
       <div className="topic-steering-proposal__actions" aria-label={`${proposal.title} review actions`}>
         <button type="button" data-review-action="accept" disabled={disabled || proposal.status === "accepted"} onClick={() => onAction(proposal, "accept")}>Accept</button>
-        <button type="button" data-review-action="defer" disabled={disabled || proposal.status === "deferred"} onClick={() => onAction(proposal, "defer")}>Defer</button>
         <button type="button" data-review-action="reject" disabled={disabled || proposal.status === "rejected"} onClick={() => onAction(proposal, "reject")}>Reject</button>
       </div>
     </article>

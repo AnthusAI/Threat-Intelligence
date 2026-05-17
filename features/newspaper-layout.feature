@@ -151,6 +151,8 @@ Feature: Newspaper layout scenarios
     Then the news desk should render
     And the news desk should show topic and graph proposal rows
     And the news desk should show accepted subtopics under canonical topics
+    And the news desk should show proposed subtopics under canonical topics
+    And the news desk should offer accept and reject actions without defer
     When I update the first news desk topic name to "Foundation Model Scaling Updated"
     Then the first news desk topic name should be "Foundation Model Scaling Updated"
     And no browser console errors should occur

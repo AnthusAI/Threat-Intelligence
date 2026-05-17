@@ -188,7 +188,8 @@ decisions, and projection rows.
 The News Desk should feel like another section of the newspaper, not a separate
 administrative app. Steering proposals are optional editorial notes: the
 publication keeps following the accepted topic set unless a human chooses to
-accept, reject, defer, or rewrite a proposal while reading.
+accept, reject, or rewrite a proposal while reading. Ignoring a proposal is also
+valid steering: no decision is recorded, and the accepted course continues.
 
 The steering system is publication-neutral. `corpora/papyrus-steering.yml`
 selects the canonical corpus, lists any source/supporting corpora, names local
@@ -232,7 +233,8 @@ through `CurationProposal`; only `create-taxonomy-node`,
 through protected review. Flat canonical topic-copy rows and revisions remain
 separate. The Biblicus labels `recommend`, `do_not_recommend`, and
 `needs_clarification` are agent recommendation labels, not Papyrus human review
-actions; Papyrus review decisions remain `accept`, `reject`, or `defer`.
+actions; the News Desk exposes `accept` and `reject` as explicit human decisions.
+Editors can ignore a proposal by leaving it alone.
 
 ## Current Production Edition
 

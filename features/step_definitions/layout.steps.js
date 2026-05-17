@@ -183,6 +183,19 @@ Then("the news desk should show accepted subtopics under canonical topics", asyn
   await page.locator("[data-news-desk-subtopic='topic.benchmark-saturation']", { hasText: "Benchmark Saturation" }).waitFor({ state: "visible", timeout: 10_000 });
 });
 
+Then("the news desk should show proposed subtopics under canonical topics", async function () {
+  const page = requirePage(this);
+  await page.locator("[data-news-desk-taxonomy-root='topic.foundation-model-scaling']").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-proposed-subtopic='topic.agent-memory']", { hasText: "Agent Memory" }).waitFor({ state: "visible", timeout: 10_000 });
+});
+
+Then("the news desk should offer accept and reject actions without defer", async function () {
+  const page = requirePage(this);
+  await page.locator("[data-news-desk-proposed-subtopic='topic.agent-memory'] [data-review-action='accept']").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-proposed-subtopic='topic.agent-memory'] [data-review-action='reject']").waitFor({ state: "visible", timeout: 10_000 });
+  assert.equal(await page.locator("[data-review-action='defer']").count(), 0);
+});
+
 Then("the first news desk topic name should be {string}", async function (expectedName) {
   const value = await requirePage(this)
     .locator(".topic-steering-topic-card label", { hasText: "Name" })
