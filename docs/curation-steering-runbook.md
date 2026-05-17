@@ -296,11 +296,34 @@ npm run content -- curation export-steering-feedback \
 This export is the bridge that makes editor rejections matter to future worker
 cycles. It contains append-only Papyrus decisions, accepted proposals, rejected
 proposals, and a normalized `suppressions` list scoped by topic set, corpus,
-classifier, and root topic. Workers should provide it to Biblicus-side proposal
-generation so rejected child topics, labels, relationship assertions, and weak
-patterns are not proposed again under the same root. The accepted taxonomy JSON
-remains the source for what **is** accepted; the steering feedback JSON is the
+classifier, and root topic. Pass it to Biblicus with `--steering-feedback` so
+rejected child topics, labels, relationship assertions, and weak patterns are
+not proposed again under the same root. The accepted taxonomy JSON remains the
+source for what **is** accepted; the steering feedback JSON is the
 negative/positive review memory for what was accepted or rejected during review.
+
+Record the accepted taxonomy in Biblicus, then run taxonomy discovery with the
+Papyrus feedback suppressions:
+
+```bash
+cd /Users/ryan/Projects/Biblicus
+
+uv run biblicus taxonomy record \
+  --corpus corpora/AI-ML-research \
+  --input /tmp/accepted-ai-ml-research-taxonomy.json
+
+uv run biblicus taxonomy discover \
+  --corpus corpora/AI-ML-research \
+  --classifier ai-ml-research \
+  --extraction-snapshot pipeline:a64a3abbd70b9ed011be83b678bdb321e0a138a9e33de446033b4b5bee6f175a \
+  --steering-feedback /tmp/ai-ml-research-steering-feedback.json \
+  --format json > /tmp/ai-ml-research-taxonomy-proposals.json
+```
+
+`biblicus taxonomy discover` validates the Papyrus feedback export and
+suppresses rejected child-topic patterns that match the same classifier and root
+topic. Suppressed candidates should show up as warnings, not as new proposal
+records.
 
 Render the seed manifest and train/project with Biblicus from the Biblicus
 checkout. These commands write Biblicus corpus artifacts only.
@@ -360,6 +383,7 @@ uv run biblicus steering graph-signals \
   --corpus corpora/AI-ML-research \
   --classifier ai-ml-research \
   --graph-snapshot simple-entities:<snapshot_id> \
+  --steering-feedback /tmp/ai-ml-research-steering-feedback.json \
   --format json > /tmp/ai-ml-research-graph-signals.json
 ```
 
@@ -432,13 +456,10 @@ generation workers before they create the next bundle. Use
 `curation export-steering-feedback` to make that review state available outside
 Papyrus.
 
-Current Biblicus gap to keep explicit: `biblicus taxonomy discover` does not yet
-accept a Papyrus steering feedback/suppression input. Until Biblicus adds that
-command option, a worker/agent must read the feedback JSON and suppress matching
-proposal candidates before validating and recording a new
-`SteeringProposalBundle`. The preferred Biblicus-side feature is a
-`--steering-feedback <papyrus-feedback.json>` or equivalent option for taxonomy
-discovery and graph/ontology proposal generation.
+Biblicus supports that feedback file directly on `biblicus taxonomy discover`
+and `biblicus steering graph-signals` via
+`--steering-feedback <papyrus-feedback.json>`. Use that option for every
+post-review proposal generation cycle.
 
 Accepted taxonomy summaries now have a small first-class editor surface in
 Papyrus: `/news-desk` shows accepted subtopics beside the canonical topic

@@ -108,9 +108,10 @@ rendering contracts.
   with `npm run content -- curation export-steering-feedback --topic-set <id> --output <feedback.json>`
   before new taxonomy, ontology, or graph proposal cycles. Accepted taxonomy
   exports say what is accepted; steering-feedback exports say what editors
-  accepted or rejected and include suppressions that workers/Biblicus must use
-  to avoid re-proposing rejected child topics, labels, relationships, or weak
-  patterns.
+  accepted or rejected and include suppressions. Pass that file to
+  `biblicus taxonomy discover` and `biblicus steering graph-signals` with
+  `--steering-feedback` so Biblicus avoids re-proposing rejected child topics,
+  labels, relationships, or weak patterns.
 - Do not edit `/Users/ryan/Projects/Biblicus` source files. If Biblicus needs a
   new full-corpus S3 sync or locking feature, relay that request to the Biblicus
   agent instead of changing the library from Papyrus.

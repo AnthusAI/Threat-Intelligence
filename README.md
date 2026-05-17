@@ -247,10 +247,11 @@ npm run content -- curation export-steering-feedback \
 
 That JSON contains append-only decisions, reviewed proposals, and normalized
 `suppressions` scoped by topic set, corpus, classifier, and root topic. Workers
-must pass it into proposal generation or use it to filter candidate bundles so
-rejected child topics, labels, relationships, or weak patterns are not proposed
-again. Accepted taxonomy exports define the current tree; steering-feedback
-exports carry the positive and negative review memory.
+must pass it to `biblicus taxonomy discover` and
+`biblicus steering graph-signals` with `--steering-feedback` so rejected child
+topics, labels, relationships, or weak patterns are not proposed again.
+Accepted taxonomy exports define the current tree; steering-feedback exports
+carry the positive and negative review memory.
 
 ## Current Production Edition
 
