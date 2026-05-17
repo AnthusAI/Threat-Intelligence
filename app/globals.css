@@ -2338,6 +2338,39 @@ img {
   padding: 4px 6px;
 }
 
+.news-desk-merge-panel {
+  margin-top: 14px;
+}
+
+.news-desk-merge-panel select,
+.news-desk-merge-panel textarea {
+  background: rgb(var(--paper-rgb) / 0.72);
+  border: 1px solid rgb(var(--rule-rgb) / 0.42);
+  color: var(--ink);
+  font: 700 0.74rem/1.35 Arial, Helvetica, sans-serif;
+  letter-spacing: 0;
+  padding: 8px;
+  width: 100%;
+}
+
+.news-desk-merge-panel label {
+  display: grid;
+  gap: 5px;
+}
+
+.news-desk-merge-panel label span {
+  color: var(--muted);
+  font: 800 0.66rem/1.25 Arial, Helvetica, sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.news-desk-merge-preview {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0;
+}
+
 .news-desk-semantic-detail {
   display: grid;
   gap: 14px;

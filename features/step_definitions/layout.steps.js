@@ -41,6 +41,11 @@ Given("I open the concepts news desk at {int} by {int}", async function (width, 
   await requirePage(this).waitForSelector("[data-news-desk-section='concepts']", { state: "visible", timeout: 15_000 });
 });
 
+Given("I open the users news desk at {int} by {int}", async function (width, height) {
+  await this.openPath("/news-desk?demo=1&section=users", width, height);
+  await requirePage(this).waitForSelector("[data-news-desk-section='users']", { state: "visible", timeout: 15_000 });
+});
+
 Given("I open the assignments news desk at {int} by {int}", async function (width, height) {
   await this.openPath("/news-desk?demo=1&section=assignments", width, height);
   await requirePage(this).waitForSelector("[data-news-desk-assignments]", { state: "visible", timeout: 15_000 });
@@ -109,6 +114,19 @@ When("I restore assignment {string}", async function (assignmentId) {
     const status = row?.getAttribute("data-assignment-status");
     return status && status !== "culled";
   }, assignmentId);
+});
+
+When("I merge news desk user {string} into {string}", async function (sourceLabel, targetLabel) {
+  const page = requirePage(this);
+  const sourceRow = page.locator(".news-desk-user-row", { hasText: sourceLabel }).first();
+  await sourceRow.waitFor({ state: "visible", timeout: 10_000 });
+  await sourceRow.locator("button", { hasText: "Merge" }).click();
+  await page.locator("[data-news-desk-user-merge-panel]").waitFor({ state: "visible", timeout: 10_000 });
+  const targetValue = await page.locator(".news-desk-user-row", { hasText: targetLabel }).first().getAttribute("data-news-desk-user");
+  assert.ok(targetValue, `Expected target user row for ${targetLabel}`);
+  await page.locator("[data-news-desk-merge-target]").selectOption(targetValue);
+  await page.locator("[data-news-desk-merge-reason]").fill("Same human account");
+  await page.locator("[data-news-desk-merge-confirm]").click();
 });
 
 When("I scroll to the canonical category register", async function () {
@@ -238,6 +256,33 @@ Then("the concepts desk should show semantic nodes and linked objects", async fu
   await page.locator("[data-semantic-node='semantic-node-graph-entity-benchmark-saturation']").waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("[data-news-desk-semantic-detail]").first().waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("[data-news-desk-neighbors]").first().waitFor({ state: "visible", timeout: 10_000 });
+});
+
+Then("the users desk should show merge controls", async function () {
+  const page = requirePage(this);
+  await page.locator("[data-news-desk-section='users']").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator(".news-desk-user-row", { hasText: "Demo Editor" }).waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator(".news-desk-user-row", { hasText: "Demo Reader" }).waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator(".news-desk-user-row button", { hasText: "Merge" }).first().waitFor({ state: "visible", timeout: 10_000 });
+});
+
+Then("news desk user {string} should include identity {string}", async function (userLabel, identityLabel) {
+  const page = requirePage(this);
+  await page.waitForFunction(
+    ({ userLabel, identityLabel }) => {
+      const rows = Array.from(document.querySelectorAll(".news-desk-user-row"));
+      const row = rows.find((entry) => entry.textContent?.includes(userLabel));
+      return Boolean(row?.textContent?.includes(identityLabel));
+    },
+    { userLabel, identityLabel },
+  );
+});
+
+Then("news desk user {string} should not be listed", async function (userLabel) {
+  const page = requirePage(this);
+  await page.waitForFunction((label) => (
+    !Array.from(document.querySelectorAll(".news-desk-user-row")).some((entry) => entry.textContent?.includes(label))
+  ), userLabel);
 });
 
 Then("the assignments desk should render", async function () {

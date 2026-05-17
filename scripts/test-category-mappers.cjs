@@ -513,6 +513,8 @@ assert.match(schemaSource, /ReferenceAttachment:\s*a\s*\n\s*\.model/);
 assert.match(schemaSource, /KnowledgeComment:\s*a\s*\n\s*\.model/);
 assert.match(schemaSource, /UserIdentity:\s*a\s*\n\s*\.model/);
 assert.match(schemaSource, /listUserDirectory:\s*a\s*\n\s*\.query/);
+assert.match(schemaSource, /mergeUserProfiles:\s*a\s*\n\s*\.mutation/);
+assert.match(schemaSource.match(/UserProfile:[\s\S]*?UserIdentity:/)?.[0] ?? "", /mergedIntoProfileId/);
 assert.match(schemaSource, /listUserIdentitiesByProfileAndLinkedAt/);
 assert.match(schemaSource, /listUserRoleAssignmentsByProfileAndRole/);
 assert.match(schemaSource, /listReferenceAttachmentsByReferenceVersionAndSortKey/);
@@ -520,6 +522,11 @@ assert.match(schemaSource, /listKnowledgeCommentsByAuthorSubAndCreatedAt/);
 assert.match(schemaSource, /allow\.groups\(categoryWriteGroups\)\.to\(categoryAppendOnlyOperations\)/);
 assert.doesNotMatch(schemaSource.match(/UserIdentity:[\s\S]*?UserRoleAssignment:/)?.[0] ?? "", /publicApiKey/);
 assert.doesNotMatch(schemaSource.match(/Reference:[\s\S]*?Item:/)?.[0] ?? "", /publicApiKey/);
+
+const roleHandlerSource = fs.readFileSync(path.join(__dirname, "..", "amplify", "functions", "manage-user-role", "handler.ts"), "utf8");
+assert.match(roleHandlerSource, /operation === "mergeUserProfiles"/);
+assert.match(roleHandlerSource, /archive source UserProfile/);
+assert.match(roleHandlerSource, /mirrorRolesToCognitoUsers/);
 
 console.log("category mapper tests passed");
 

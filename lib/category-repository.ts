@@ -265,6 +265,8 @@ export type UserDirectoryEntry = {
   provider?: string | null;
   enabled?: boolean | null;
   cognitoStatus?: string | null;
+  profileStatus?: string | null;
+  mergedIntoProfileId?: string | null;
   identityStatus?: string | null;
   activeRoles: Array<string | null>;
   identities: UserIdentityRecord[];

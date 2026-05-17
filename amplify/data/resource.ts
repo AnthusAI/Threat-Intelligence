@@ -22,6 +22,11 @@ const schema = a.schema({
       displayName: a.string(),
       avatarUrl: a.url(),
       preferences: a.json(),
+      status: a.string(),
+      mergedIntoProfileId: a.id(),
+      mergedAt: a.datetime(),
+      mergedBy: a.string(),
+      mergeReason: a.string(),
       createdAt: a.datetime(),
       updatedAt: a.datetime(),
     })
@@ -103,6 +108,8 @@ const schema = a.schema({
     provider: a.string(),
     enabled: a.boolean(),
     cognitoStatus: a.string(),
+    profileStatus: a.string(),
+    mergedIntoProfileId: a.id(),
     identityStatus: a.string(),
     activeRoles: a.string().array().required(),
     identities: a.ref("UserDirectoryIdentity").array().required(),
@@ -142,6 +149,18 @@ const schema = a.schema({
       role: a.string().required(),
     })
     .returns(a.ref("UserRoleMutationResult"))
+    .authorization((allow) => [allow.group(adminGroup)])
+    .handler(a.handler.function(manageUserRole)),
+
+  mergeUserProfiles: a
+    .mutation()
+    .arguments({
+      targetUserProfileId: a.id().required(),
+      sourceUserProfileId: a.id(),
+      sourceUserSub: a.string(),
+      reason: a.string(),
+    })
+    .returns(a.ref("UserDirectoryEntry"))
     .authorization((allow) => [allow.group(adminGroup)])
     .handler(a.handler.function(manageUserRole)),
 

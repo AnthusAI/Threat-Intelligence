@@ -169,6 +169,14 @@ Feature: Newspaper layout scenarios
     Then the concepts desk should show semantic nodes and linked objects
     And no browser console errors should occur
 
+  Scenario: News desk merges duplicate user identities
+    Given I open the users news desk at 1280 by 900
+    Then the users desk should show merge controls
+    When I merge news desk user "Demo Reader" into "Demo Editor"
+    Then news desk user "Demo Editor" should include identity "reader@example.com"
+    And news desk user "Demo Reader" should not be listed
+    And no browser console errors should occur
+
   Scenario: News desk manually culls assignment candidates
     Given I open the assignments news desk at 1280 by 900
     Then the assignments desk should render

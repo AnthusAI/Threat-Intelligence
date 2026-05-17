@@ -74,6 +74,12 @@ type CategoryReviewResponse = {
   errors?: Array<{ message?: string | null } | string | null> | null;
 };
 
+type MergeSelection = {
+  source: UserDirectoryEntry;
+  targetUserProfileId: string;
+  reason: string;
+};
+
 const TAILORED_TOPIC_PROPOSAL_KINDS = new Set([
   "new-category",
   "rename-category",
@@ -193,6 +199,7 @@ function NewsDeskDashboard({
   const [assignmentDesk, setAssignmentDesk] = useState(dashboard.assignmentDesk);
   const [userDirectory, setUserDirectory] = useState(dashboard.userDirectory);
   const [actionState, setActionState] = useState<ActionState | null>(null);
+  const [mergeSelection, setMergeSelection] = useState<MergeSelection | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const categoryProposals = proposals.filter(isTailoredCategoryProposal);
@@ -394,6 +401,17 @@ function NewsDeskDashboard({
     }
   }
 
+  async function refreshEditorUserDirectory() {
+    if (dashboard.isDemo) {
+      setUserDirectory(dashboard.userDirectory);
+      return;
+    }
+    const state = await loadEditorNewsDeskState();
+    if (state.status === "ready" && state.dashboard) {
+      setUserDirectory(state.dashboard.userDirectory);
+    }
+  }
+
   async function refreshEditorCategoryTreeState() {
     if (dashboard.isDemo) {
       setTaxonomies(dashboard.categoryTrees);
@@ -475,6 +493,69 @@ function NewsDeskDashboard({
           setActionState({ id: userId, message: `${label} ${role} saved`, tone: "ok" });
         } catch (error) {
           setActionState({ id: userId, message: error instanceof Error ? error.message : `${label} ${role} failed`, tone: "error" });
+        }
+      })();
+    });
+  }
+
+  function openUserMerge(source: UserDirectoryEntry) {
+    const target = userDirectory.find((entry) => (
+      entry.userProfileId && (entry.userProfileId !== source.userProfileId || !source.userProfileId)
+    ));
+    setMergeSelection({
+      source,
+      targetUserProfileId: target?.userProfileId ?? "",
+      reason: "",
+    });
+  }
+
+  function updateUserMergeTarget(targetUserProfileId: string) {
+    setMergeSelection((current) => current ? { ...current, targetUserProfileId } : current);
+  }
+
+  function updateUserMergeReason(reason: string) {
+    setMergeSelection((current) => current ? { ...current, reason } : current);
+  }
+
+  function runUserMergeAction() {
+    if (!mergeSelection) return;
+    const { source, targetUserProfileId, reason } = mergeSelection;
+    const sourceId = source.userProfileId ?? source.userSub ?? "unknown-user";
+    setActionState({ id: sourceId, message: "merge pending", tone: "pending" });
+    if (!targetUserProfileId) {
+      setActionState({ id: sourceId, message: "choose a target profile", tone: "error" });
+      return;
+    }
+    if (source.userProfileId && source.userProfileId === targetUserProfileId) {
+      setActionState({ id: sourceId, message: "source and target profiles must be different", tone: "error" });
+      return;
+    }
+    if (dashboard.isDemo) {
+      setUserDirectory((current) => mergeDemoUsers(current, source, targetUserProfileId));
+      setMergeSelection(null);
+      setActionState({ id: sourceId, message: "merge saved", tone: "ok" });
+      return;
+    }
+    if (!dashboard.canManageUsers) {
+      setActionState({ id: sourceId, message: "admin role required", tone: "error" });
+      return;
+    }
+    startTransition(() => {
+      void (async () => {
+        try {
+          const response = await dataClient.mutations.mergeUserProfiles({
+            targetUserProfileId,
+            sourceUserProfileId: source.userProfileId ?? undefined,
+            sourceUserSub: source.userSub ?? undefined,
+            reason: reason.trim() || undefined,
+          }, { authMode: USER_POOL_AUTH_MODE });
+          assertNoGraphQLErrors(response.errors);
+          await refreshEditorUserDirectory();
+          setMergeSelection(null);
+          setActionState({ id: sourceId, message: "merge saved", tone: "ok" });
+        } catch (error) {
+          setActionState({ id: sourceId, message: error instanceof Error ? error.message : "merge failed", tone: "error" });
+          await refreshEditorUserDirectory();
         }
       })();
     });
@@ -591,6 +672,12 @@ function NewsDeskDashboard({
           <UsersDeskView
             canManageUsers={Boolean(dashboard.canManageUsers)}
             disabled={isPending}
+            mergeSelection={mergeSelection}
+            onCancelMerge={() => setMergeSelection(null)}
+            onConfirmMerge={runUserMergeAction}
+            onMergeReasonChange={updateUserMergeReason}
+            onMergeRequest={openUserMerge}
+            onMergeTargetChange={updateUserMergeTarget}
             users={userDirectory}
             onRoleAction={runUserRoleAction}
           />
@@ -697,11 +784,23 @@ function OverviewDeskView({
 function UsersDeskView({
   canManageUsers,
   disabled,
+  mergeSelection,
+  onCancelMerge,
+  onConfirmMerge,
+  onMergeReasonChange,
+  onMergeRequest,
+  onMergeTargetChange,
   users,
   onRoleAction,
 }: {
   canManageUsers: boolean;
   disabled: boolean;
+  mergeSelection: MergeSelection | null;
+  onCancelMerge: () => void;
+  onConfirmMerge: () => void;
+  onMergeReasonChange: (reason: string) => void;
+  onMergeRequest: (user: UserDirectoryEntry) => void;
+  onMergeTargetChange: (targetUserProfileId: string) => void;
   users: UserDirectoryEntry[];
   onRoleAction: (user: UserDirectoryEntry, role: string, action: UserRoleAction) => void;
 }) {
@@ -713,7 +812,15 @@ function UsersDeskView({
           {!canManageUsers ? <div className="category-steering-alert">Only admins can list Cognito users or change editor/admin roles.</div> : null}
           <div className="news-desk-user-list">
             {users.length ? users.map((user) => (
-              <UserDirectoryRow key={user.userProfileId ?? user.userSub ?? user.email ?? "unknown"} canManageUsers={canManageUsers} disabled={disabled} user={user} onRoleAction={onRoleAction} />
+              <UserDirectoryRow
+                key={user.userProfileId ?? user.userSub ?? user.email ?? "unknown"}
+                canManageUsers={canManageUsers}
+                canMerge={users.length > 1}
+                disabled={disabled}
+                onMergeRequest={onMergeRequest}
+                onRoleAction={onRoleAction}
+                user={user}
+              />
             )) : <EmptyRow label={canManageUsers ? "No users returned by the directory" : "Sign in as an admin to load user records"} />}
           </div>
         </section>
@@ -727,6 +834,17 @@ function UsersDeskView({
             </p>
           </div>
         </section>
+        {mergeSelection ? (
+          <UserMergePanel
+            disabled={disabled}
+            onCancel={onCancelMerge}
+            onConfirm={onConfirmMerge}
+            onReasonChange={onMergeReasonChange}
+            onTargetChange={onMergeTargetChange}
+            selection={mergeSelection}
+            users={users}
+          />
+        ) : null}
       </aside>
     </div>
   );
@@ -734,17 +852,22 @@ function UsersDeskView({
 
 function UserDirectoryRow({
   canManageUsers,
+  canMerge,
   disabled,
+  onMergeRequest,
   user,
   onRoleAction,
 }: {
   canManageUsers: boolean;
+  canMerge: boolean;
   disabled: boolean;
+  onMergeRequest: (user: UserDirectoryEntry) => void;
   user: UserDirectoryEntry;
   onRoleAction: (user: UserDirectoryEntry, role: string, action: UserRoleAction) => void;
 }) {
   const activeRoles = new Set(compactArray(user.activeRoles));
   const label = user.displayName ?? user.email ?? user.username ?? user.userSub ?? "Unknown user";
+  const identityCount = user.identities.length;
   return (
     <article className="news-desk-user-row" data-news-desk-user={user.userProfileId ?? user.userSub ?? label}>
       <div>
@@ -752,7 +875,7 @@ function UserDirectoryRow({
           <strong>{label}</strong>
           <span>{compactArray(user.activeRoles).join(" / ") || "reader"}</span>
         </header>
-        <p>{user.email ?? "No email"} / {user.provider ?? "provider unknown"} / {user.cognitoStatus ?? "no Cognito status"}</p>
+        <p>{user.email ?? "No email"} / {user.provider ?? "provider unknown"} / {user.cognitoStatus ?? "no Cognito status"} / {identityCount} {identityCount === 1 ? "identity" : "identities"}</p>
         <div className="news-desk-chip-row">
           {user.identities.length ? user.identities.map((identity) => (
             <span key={identity.id}>{identity.email ?? identity.cognitoSub} ({identity.status})</span>
@@ -773,8 +896,97 @@ function UserDirectoryRow({
             </button>
           );
         })}
+        <button
+          type="button"
+          disabled={disabled || !canManageUsers || !canMerge}
+          onClick={() => onMergeRequest(user)}
+        >
+          Merge
+        </button>
       </div>
     </article>
+  );
+}
+
+function UserMergePanel({
+  disabled,
+  selection,
+  users,
+  onCancel,
+  onConfirm,
+  onReasonChange,
+  onTargetChange,
+}: {
+  disabled: boolean;
+  selection: MergeSelection;
+  users: UserDirectoryEntry[];
+  onCancel: () => void;
+  onConfirm: () => void;
+  onReasonChange: (reason: string) => void;
+  onTargetChange: (targetUserProfileId: string) => void;
+}) {
+  const source = selection.source;
+  const targetOptions = users.filter((user) => (
+    user.userProfileId && (user.userProfileId !== source.userProfileId || !source.userProfileId)
+  ));
+  const target = targetOptions.find((user) => user.userProfileId === selection.targetUserProfileId) ?? null;
+  return (
+    <section className="category-steering-section news-desk-merge-panel" aria-labelledby="user-merge-title" data-news-desk-user-merge-panel="true">
+      <SectionHeader title="Merge Users" detail="Identity repair" />
+      <div className="category-steering-revision-panel">
+        <label>
+          <span>Source</span>
+          <strong>{formatUserLabel(source)}</strong>
+        </label>
+        <label>
+          <span>Target profile</span>
+          <select
+            data-news-desk-merge-target
+            disabled={disabled}
+            value={selection.targetUserProfileId}
+            onChange={(event) => onTargetChange(event.target.value)}
+          >
+            <option value="">Choose target profile</option>
+            {targetOptions.map((user) => (
+              <option key={user.userProfileId} value={user.userProfileId ?? ""}>{formatUserLabel(user)}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Reason</span>
+          <textarea
+            data-news-desk-merge-reason
+            disabled={disabled}
+            placeholder="Same human account"
+            rows={3}
+            value={selection.reason}
+            onChange={(event) => onReasonChange(event.target.value)}
+          />
+        </label>
+      </div>
+      <div className="news-desk-merge-preview">
+        <UserMergeIdentityBlock title="Source identities" user={source} />
+        {target ? <UserMergeIdentityBlock title="Target identities" user={target} /> : null}
+      </div>
+      <div className="news-desk-user-row__actions">
+        <button type="button" data-news-desk-merge-confirm disabled={disabled || !selection.targetUserProfileId} onClick={onConfirm}>Confirm Merge</button>
+        <button type="button" disabled={disabled} onClick={onCancel}>Cancel</button>
+      </div>
+    </section>
+  );
+}
+
+function UserMergeIdentityBlock({ title, user }: { title: string; user: UserDirectoryEntry }) {
+  const fallback = user.userSub ?? user.email ?? "No linked identity row";
+  return (
+    <div>
+      <p className="story-label">{title}</p>
+      <div className="news-desk-chip-row">
+        {user.identities.length ? user.identities.map((identity) => (
+          <span key={identity.id}>{identity.email ?? identity.cognitoSub} ({identity.status})</span>
+        )) : <span>{fallback}</span>}
+      </div>
+    </div>
   );
 }
 
@@ -2006,6 +2218,53 @@ function EmptyRow({ label }: { label: string }) {
 function compactArray(value: Array<string | null> | null | undefined): string[] {
   if (!Array.isArray(value)) return [];
   return value.map((entry) => (typeof entry === "string" ? entry.trim() : "")).filter(Boolean);
+}
+
+function formatUserLabel(user: UserDirectoryEntry): string {
+  return user.displayName ?? user.email ?? user.username ?? user.userSub ?? user.userProfileId ?? "Unknown user";
+}
+
+function mergeDemoUsers(users: UserDirectoryEntry[], source: UserDirectoryEntry, targetUserProfileId: string): UserDirectoryEntry[] {
+  const sourceKey = source.userProfileId ?? source.userSub;
+  return users.reduce<UserDirectoryEntry[]>((entries, entry) => {
+    if (entry.userProfileId === targetUserProfileId) {
+      const mergedIdentity = source.identities.length
+        ? source.identities.map((identity) => ({ ...identity, userProfileId: targetUserProfileId }))
+        : source.userSub
+          ? [{
+              id: `user-identity-demo-merged-${source.userSub}`,
+              userProfileId: targetUserProfileId,
+              cognitoSub: source.userSub,
+              provider: source.provider ?? "cognito",
+              email: source.email ?? null,
+              status: "active",
+              linkedAt: new Date().toISOString(),
+              lastSeenAt: new Date().toISOString(),
+            }]
+          : [];
+      entries.push({
+        ...entry,
+        activeRoles: Array.from(new Set([...compactArray(entry.activeRoles), ...compactArray(source.activeRoles)])).sort(),
+        identities: uniqueIdentities([...entry.identities, ...mergedIdentity]),
+      });
+      return entries;
+    }
+    if ((entry.userProfileId ?? entry.userSub) === sourceKey) return entries;
+    entries.push(entry);
+    return entries;
+  }, []);
+}
+
+function uniqueIdentities(identities: UserDirectoryEntry["identities"]): UserDirectoryEntry["identities"] {
+  const seen = new Set<string>();
+  const unique = [];
+  for (const identity of identities) {
+    const key = identity.cognitoSub || identity.id;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(identity);
+  }
+  return unique;
 }
 
 function isTailoredCategoryProposal(proposal: CategorySteeringProposal): boolean {

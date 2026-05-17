@@ -19,10 +19,12 @@ const REVOKED_ROLE_STATUS = "revoked";
 type GrantHandler = Schema["grantUserRole"]["functionHandler"];
 type RevokeHandler = Schema["revokeUserRole"]["functionHandler"];
 type DirectoryHandler = Schema["listUserDirectory"]["functionHandler"];
+type MergeHandler = Schema["mergeUserProfiles"]["functionHandler"];
 type RoleFunctionEvent = (
   | Parameters<GrantHandler>[0]
   | Parameters<RevokeHandler>[0]
   | Parameters<DirectoryHandler>[0]
+  | Parameters<MergeHandler>[0]
 ) & {
   fieldName?: string | null;
   info?: { fieldName?: string | null } | null;
@@ -39,6 +41,11 @@ type UserProfileRecord = {
   id: string;
   email?: string | null;
   displayName?: string | null;
+  status?: string | null;
+  mergedIntoProfileId?: string | null;
+  mergedAt?: string | null;
+  mergedBy?: string | null;
+  mergeReason?: string | null;
 };
 
 type UserIdentityRecord = {
@@ -82,6 +89,7 @@ let clientPromise: Promise<DataClient> | null = null;
 export const handler = async (event: RoleFunctionEvent) => {
   const operation = getOperationName(event);
   if (operation === "listUserDirectory") return listUserDirectory();
+  if (operation === "mergeUserProfiles") return mergeUserProfiles(event as Parameters<MergeHandler>[0]);
   if (operation === "grantUserRole" || operation === "revokeUserRole") {
     return updateUserRole(event as Parameters<GrantHandler>[0] | Parameters<RevokeHandler>[0], operation);
   }
@@ -95,6 +103,16 @@ function getOperationName(event: RoleFunctionEvent): string {
 }
 
 async function listUserDirectory() {
+  const { entries, profiles, identities, cognitoUsers } = await loadUserDirectorySnapshot();
+  return {
+    entries,
+    profileCount: profiles.length,
+    identityCount: identities.length,
+    cognitoUserCount: cognitoUsers.length,
+  };
+}
+
+async function loadUserDirectorySnapshot() {
   const client = await getDataClient();
   const userPoolId = getUserPoolId();
   const [profiles, identities, assignments, cognitoUsers] = await Promise.all([
@@ -105,16 +123,44 @@ async function listUserDirectory() {
   ]);
 
   const profilesById = new Map(profiles.map((profile) => [profile.id, profile]));
+  const activeProfiles = profiles.filter((profile) => (profile.status ?? ACTIVE_IDENTITY_STATUS) !== "merged");
   const identitiesBySub = new Map(identities.map((identity) => [identity.cognitoSub, identity]));
   const identitiesByProfile = groupBy(identities, (identity) => identity.userProfileId);
   const assignmentsByProfile = groupBy(assignments, (assignment) => assignment.userProfileId);
+  const cognitoUsersBySub = new Map(cognitoUsers.map((user) => [user.userSub, user]));
   const entries = [];
-  const seenProfiles = new Set<string>();
+  const seenCognitoSubs = new Set<string>();
+
+  for (const profile of activeProfiles) {
+    const profileIdentities = identitiesByProfile.get(profile.id) ?? [];
+    const roleAssignments = assignmentsByProfile.get(profile.id) ?? [];
+    const profileCognitoUsers = compactStrings(profileIdentities.map((identity) => identity.cognitoSub))
+      .map((sub) => cognitoUsersBySub.get(sub))
+      .filter(isDefined);
+    for (const user of profileCognitoUsers) seenCognitoSubs.add(user.userSub);
+    const primaryCognito = profileCognitoUsers[0] ?? null;
+    const primaryIdentity = profileIdentities[0] ?? null;
+    entries.push({
+      userProfileId: profile.id,
+      userSub: primaryCognito?.userSub ?? primaryIdentity?.cognitoSub ?? null,
+      username: primaryCognito?.username ?? null,
+      email: profile.email ?? primaryIdentity?.email ?? primaryCognito?.email ?? null,
+      displayName: profile.displayName ?? profile.email ?? primaryCognito?.displayName ?? primaryCognito?.email ?? profile.id,
+      provider: primaryIdentity?.provider ?? primaryCognito?.provider ?? null,
+      enabled: profileCognitoUsers.some((user) => user.enabled === true) || null,
+      cognitoStatus: compactStrings(profileCognitoUsers.map((user) => user.cognitoStatus)).join(" / ") || null,
+      profileStatus: profile.status ?? ACTIVE_IDENTITY_STATUS,
+      mergedIntoProfileId: profile.mergedIntoProfileId ?? null,
+      identityStatus: primaryIdentity?.status ?? null,
+      activeRoles: mergeRoles(activeAssignmentRoles(roleAssignments), ...profileCognitoUsers.map((user) => user.activeRoles)),
+      identities: profileIdentities.map(identitySnapshot),
+    });
+  }
 
   for (const cognitoUser of cognitoUsers) {
+    if (seenCognitoSubs.has(cognitoUser.userSub)) continue;
     const identity = identitiesBySub.get(cognitoUser.userSub);
     const profile = identity ? profilesById.get(identity.userProfileId) : null;
-    if (profile?.id) seenProfiles.add(profile.id);
     const profileIdentities = profile?.id ? identitiesByProfile.get(profile.id) ?? [] : identity ? [identity] : [];
     const roleAssignments = profile?.id ? assignmentsByProfile.get(profile.id) ?? [] : [];
     entries.push({
@@ -126,38 +172,16 @@ async function listUserDirectory() {
       provider: identity?.provider ?? cognitoUser.provider ?? null,
       enabled: cognitoUser.enabled ?? null,
       cognitoStatus: cognitoUser.cognitoStatus ?? null,
+      profileStatus: profile?.status ?? null,
+      mergedIntoProfileId: profile?.mergedIntoProfileId ?? null,
       identityStatus: identity?.status ?? null,
       activeRoles: mergeRoles(cognitoUser.activeRoles, activeAssignmentRoles(roleAssignments)),
       identities: profileIdentities.map(identitySnapshot),
     });
   }
 
-  for (const profile of profiles) {
-    if (seenProfiles.has(profile.id)) continue;
-    const profileIdentities = identitiesByProfile.get(profile.id) ?? [];
-    const roleAssignments = assignmentsByProfile.get(profile.id) ?? [];
-    entries.push({
-      userProfileId: profile.id,
-      userSub: profileIdentities[0]?.cognitoSub ?? null,
-      username: null,
-      email: profile.email ?? profileIdentities[0]?.email ?? null,
-      displayName: profile.displayName ?? profile.email ?? profile.id,
-      provider: profileIdentities[0]?.provider ?? null,
-      enabled: null,
-      cognitoStatus: null,
-      identityStatus: profileIdentities[0]?.status ?? null,
-      activeRoles: activeAssignmentRoles(roleAssignments),
-      identities: profileIdentities.map(identitySnapshot),
-    });
-  }
-
   entries.sort((left, right) => String(left.displayName ?? left.email ?? left.userSub ?? "").localeCompare(String(right.displayName ?? right.email ?? right.userSub ?? "")));
-  return {
-    entries,
-    profileCount: profiles.length,
-    identityCount: identities.length,
-    cognitoUserCount: cognitoUsers.length,
-  };
+  return { entries, profiles, identities, assignments, cognitoUsers };
 }
 
 async function updateUserRole(
@@ -219,6 +243,140 @@ async function updateUserRole(
     usernames: cognitoTargets.map((user) => user.username),
     activeRoles,
   };
+}
+
+async function mergeUserProfiles(event: Parameters<MergeHandler>[0]) {
+  const client = await getDataClient();
+  const userPoolId = getUserPoolId();
+  const now = new Date().toISOString();
+  const actor = getIdentityLabel(event) ?? "Papyrus admin";
+  const targetProfileId = normalizeRequiredString(event.arguments.targetUserProfileId, "targetUserProfileId");
+  const requestedSourceProfileId = normalizeOptionalString(event.arguments.sourceUserProfileId);
+  const requestedSourceSub = normalizeOptionalString(event.arguments.sourceUserSub);
+  const reason = normalizeOptionalString(event.arguments.reason);
+  if (!requestedSourceProfileId && !requestedSourceSub) {
+    throw new Error("sourceUserProfileId or sourceUserSub is required.");
+  }
+  if (requestedSourceProfileId && requestedSourceProfileId === targetProfileId) {
+    throw new Error("Source and target profiles must be different.");
+  }
+
+  const [profiles, identities, assignments] = await Promise.all([
+    listDataRecords<UserProfileRecord>(client.models.UserProfile),
+    listDataRecords<UserIdentityRecord>(client.models.UserIdentity),
+    listDataRecords<UserRoleAssignmentRecord>(client.models.UserRoleAssignment),
+  ]);
+  const profilesById = new Map(profiles.map((profile) => [profile.id, profile]));
+  const targetProfile = profilesById.get(targetProfileId);
+  if (!targetProfile) throw new Error(`Target profile ${targetProfileId} was not found.`);
+  if ((targetProfile.status ?? ACTIVE_IDENTITY_STATUS) === "merged") {
+    throw new Error(`Target profile ${targetProfileId} is already merged.`);
+  }
+
+  const existingSourceIdentity = requestedSourceSub ? identities.find((identity) => identity.cognitoSub === requestedSourceSub) : undefined;
+  const sourceProfileId = requestedSourceProfileId ?? existingSourceIdentity?.userProfileId ?? null;
+  if (sourceProfileId && sourceProfileId === targetProfileId) {
+    throw new Error("Source and target profiles must be different.");
+  }
+  const sourceProfile = sourceProfileId ? profilesById.get(sourceProfileId) : null;
+  if (sourceProfileId && !sourceProfile) throw new Error(`Source profile ${sourceProfileId} was not found.`);
+
+  const sourceIdentities = sourceProfileId
+    ? identities.filter((identity) => identity.userProfileId === sourceProfileId)
+    : [];
+  const identitiesToMove = uniqueBy(
+    [...sourceIdentities, ...(existingSourceIdentity ? [existingSourceIdentity] : [])],
+    (identity) => identity.id,
+  );
+
+  if (!identitiesToMove.length && requestedSourceSub) {
+    const cognitoUser = await findCognitoUserBySub(userPoolId, requestedSourceSub);
+    await requireDataResult(
+      client.models.UserIdentity.create({
+        id: `user-identity-${safeId(requestedSourceSub)}-${randomUUID().slice(0, 8)}`,
+        userProfileId: targetProfileId,
+        cognitoSub: requestedSourceSub,
+        provider: cognitoUser.provider ?? null,
+        email: cognitoUser.email ?? null,
+        status: ACTIVE_IDENTITY_STATUS,
+        linkedAt: now,
+        lastSeenAt: now,
+      }),
+      "create merged UserIdentity",
+    );
+  } else {
+    await Promise.all(identitiesToMove.map((identity) =>
+      requireDataResult(
+        client.models.UserIdentity.update({
+          id: identity.id,
+          userProfileId: targetProfileId,
+          status: identity.status || ACTIVE_IDENTITY_STATUS,
+          lastSeenAt: now,
+        }),
+        "move UserIdentity",
+      ),
+    ));
+  }
+
+  const targetAssignments = assignments.filter((assignment) => assignment.userProfileId === targetProfileId);
+  const sourceAssignments = sourceProfileId ? assignments.filter((assignment) => assignment.userProfileId === sourceProfileId) : [];
+  const sourceActiveRoles = activeAssignmentRoles(sourceAssignments);
+  const targetActiveRoles = activeAssignmentRoles(targetAssignments);
+  const movedCognitoSubs = compactStrings([
+    ...identitiesToMove.map((identity) => identity.cognitoSub),
+    requestedSourceSub,
+    ...identities.filter((identity) => identity.userProfileId === targetProfileId).map((identity) => identity.cognitoSub),
+  ]);
+  const movedCognitoUsers = await Promise.all(movedCognitoSubs.map((sub) => findCognitoUserBySub(userPoolId, sub)));
+  const targetRoleUnion = mergeRoles(sourceActiveRoles, targetActiveRoles, ...movedCognitoUsers.map((user) => user.activeRoles));
+  const primaryTargetSub = movedCognitoSubs[0] ?? null;
+  const primaryTargetEmail = movedCognitoUsers[0]?.email ?? null;
+
+  await Promise.all(targetRoleUnion.map((role) =>
+    upsertRoleAssignment(client, {
+      operation: "grantUserRole",
+      userProfileId: targetProfileId,
+      userSub: primaryTargetSub,
+      email: primaryTargetEmail,
+      role,
+      actor,
+      now,
+    }),
+  ));
+
+  await Promise.all(sourceAssignments.filter((assignment) => assignment.status === ACTIVE_ROLE_STATUS).map((assignment) =>
+    requireDataResult(
+      client.models.UserRoleAssignment.update({
+        id: assignment.id,
+        status: REVOKED_ROLE_STATUS,
+        revokedAt: now,
+        notes: `Merged into ${targetProfileId}${assignment.notes ? `; ${assignment.notes}` : ""}`,
+      }),
+      "archive source UserRoleAssignment",
+    ),
+  ));
+
+  if (sourceProfile) {
+    await requireDataResult(
+      client.models.UserProfile.update({
+        id: sourceProfile.id,
+        status: "merged",
+        mergedIntoProfileId: targetProfileId,
+        mergedAt: now,
+        mergedBy: actor,
+        mergeReason: reason,
+        updatedAt: now,
+      }),
+      "archive source UserProfile",
+    );
+  }
+
+  await mirrorRolesToCognitoUsers(userPoolId, movedCognitoUsers, targetRoleUnion);
+
+  const snapshot = await loadUserDirectorySnapshot();
+  const targetEntry = snapshot.entries.find((entry) => entry.userProfileId === targetProfileId);
+  if (!targetEntry) throw new Error(`Merged target profile ${targetProfileId} was not returned by the directory.`);
+  return targetEntry;
 }
 
 async function resolveRoleTarget(
@@ -463,6 +621,20 @@ function mergeRoles(...roleSets: string[][]): string[] {
   return uniqueStrings(roleSets.flat().filter((role) => MANAGED_ROLES.has(role)));
 }
 
+async function mirrorRolesToCognitoUsers(userPoolId: string, users: CognitoDirectoryUser[], roles: string[]): Promise<void> {
+  await Promise.all(users.flatMap((user) =>
+    roles.filter((role) => !user.activeRoles.includes(role)).map((role) =>
+      cognito.send(
+        new AdminAddUserToGroupCommand({
+          UserPoolId: userPoolId,
+          Username: user.username,
+          GroupName: role,
+        }),
+      ),
+    ),
+  ));
+}
+
 function readCognitoAttribute(
   attributes: Array<{ Name?: string | null; Value?: string | null }> | undefined,
   name: string,
@@ -490,7 +662,7 @@ function normalizeOptionalString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
-function getIdentityLabel(event: Parameters<GrantHandler>[0] | Parameters<RevokeHandler>[0]): string | null {
+function getIdentityLabel(event: Parameters<GrantHandler>[0] | Parameters<RevokeHandler>[0] | Parameters<MergeHandler>[0]): string | null {
   const claims = event.identity && "claims" in event.identity ? event.identity.claims : null;
   return normalizeOptionalString(claims?.email)
     ?? normalizeOptionalString(claims?.name)
@@ -523,10 +695,26 @@ function uniqueStrings(values: string[]): string[] {
   return Array.from(new Set(values)).sort();
 }
 
+function uniqueBy<T>(values: T[], keyFor: (value: T) => string): T[] {
+  const seen = new Set<string>();
+  const unique: T[] = [];
+  for (const value of values) {
+    const key = keyFor(value);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(value);
+  }
+  return unique;
+}
+
 function safeId(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "unknown";
 }
 
 function isString(value: string | null | undefined): value is string {
   return typeof value === "string" && value.length > 0;
+}
+
+function isDefined<T>(value: T | null | undefined): value is T {
+  return value !== null && value !== undefined;
 }
