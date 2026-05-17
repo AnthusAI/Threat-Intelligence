@@ -751,7 +751,7 @@ function NewsDeskAppendixPageView({
   page: NewsDeskAppendixPage;
   scrollToPage: (pageNumber: number, options?: ScrollToPageOptions) => void;
 }) {
-  const title = page.mode === "register" ? "Canonical Topic Register" : page.root?.displayName ?? "Topic Page";
+  const title = page.mode === "register" ? "Canonical Category Register" : page.root?.displayName ?? "Category Page";
   return (
     <section
       className="paper-page-content paper-page-content--inside paper-page-content--news-desk-appendix"
@@ -762,7 +762,7 @@ function NewsDeskAppendixPageView({
       <header className="inside-header">
         <span>Page {page.pageNumber}</span>
         <span>News Desk</span>
-        <span>{page.mode === "register" ? "Topic Register" : "Topic Page"}</span>
+        <span>{page.mode === "register" ? "Category Register" : "Category Page"}</span>
       </header>
       <article className="news-desk-appendix" aria-labelledby={`news-desk-appendix-title-${page.pageNumber}`}>
         <p className="story-label">News Desk Appendix</p>
@@ -828,7 +828,7 @@ function RootTopicPage({ page }: { page: NewsDeskAppendixPage }) {
     <>
       {root.subtitle ? <p className="news-desk-appendix__subtitle news-desk-appendix__subtitle--root">{root.subtitle}</p> : null}
       <p className="news-desk-appendix__lede">{root.description ?? "Accepted root category."}</p>
-      <div className="news-desk-appendix__evidence-band" aria-label="Topic evidence counts">
+      <div className="news-desk-appendix__evidence-band" aria-label="Category evidence counts">
         <CategoryEvidenceMetric label="Seed references" value={compactTextArray(root.seedItemIds).length} />
         <CategoryEvidenceMetric label="Holdout references" value={compactTextArray(root.holdoutItemIds).length} />
         <CategoryEvidenceMetric label="Accepted subcategories" value={page.subcategories.length} />

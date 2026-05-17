@@ -1117,8 +1117,8 @@ img {
   columns: 2 320px;
 }
 
-.news-desk-appendix__topic-summary,
-.news-desk-appendix__subtopic {
+.news-desk-appendix__category-summary,
+.news-desk-appendix__subcategory {
   break-inside: avoid;
   border-top: 1px solid rgb(var(--rule-rgb) / 0.38);
   display: grid;
@@ -1126,14 +1126,14 @@ img {
   padding: 12px 0;
 }
 
-.news-desk-appendix__topic-summary:first-child,
-.news-desk-appendix__subtopic:first-of-type {
+.news-desk-appendix__category-summary:first-child,
+.news-desk-appendix__subcategory:first-of-type {
   border-top: 0;
   padding-top: 0;
 }
 
-.news-desk-appendix__topic-summary header,
-.news-desk-appendix__subtopics header {
+.news-desk-appendix__category-summary header,
+.news-desk-appendix__subcategories header {
   align-items: baseline;
   display: flex;
   gap: 12px;
@@ -1141,8 +1141,8 @@ img {
   min-width: 0;
 }
 
-.news-desk-appendix__topic-summary header span,
-.news-desk-appendix__subtopics header a,
+.news-desk-appendix__category-summary header span,
+.news-desk-appendix__subcategories header a,
 .news-desk-appendix__evidence-line,
 .news-desk-appendix__footer,
 .news-desk-appendix__empty {
@@ -1155,8 +1155,8 @@ img {
   text-transform: uppercase;
 }
 
-.news-desk-appendix__topic-summary a,
-.news-desk-appendix__subtopics header a {
+.news-desk-appendix__category-summary a,
+.news-desk-appendix__subcategories header a {
   text-decoration-thickness: 1px;
 }
 
@@ -1206,7 +1206,7 @@ img {
   text-transform: uppercase;
 }
 
-.news-desk-appendix__subtopics {
+.news-desk-appendix__subcategories {
   border-top: 2px solid var(--rule);
   display: grid;
   gap: 0;
@@ -2016,7 +2016,7 @@ img {
 }
 
 .topic-steering-proposal__actions button,
-.topic-steering-topic-card button,
+.category-steering-category-card button,
 .topic-steering-revision-panel button,
 .news-desk-assignment-row__actions button {
   border: 1px solid var(--rule);
@@ -2031,7 +2031,7 @@ img {
 }
 
 .topic-steering-proposal__actions button[data-review-action="accept"],
-.topic-steering-topic-card button,
+.category-steering-category-card button,
 .topic-steering-revision-panel button,
 .news-desk-assignment-row__actions button[data-assignment-action="restore"] {
   background: var(--ink);
@@ -2045,7 +2045,7 @@ img {
 }
 
 .topic-steering-proposal__actions button:disabled,
-.topic-steering-topic-card button:disabled,
+.category-steering-category-card button:disabled,
 .topic-steering-revision-panel button:disabled,
 .news-desk-assignment-row__actions button:disabled {
   background: transparent;
@@ -2239,32 +2239,32 @@ img {
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 }
 
-.topic-steering-taxonomy-list {
+.category-steering-categoryTree-list {
   display: grid;
   gap: calc(var(--paper-rhythm) * 1.25);
 }
 
-.topic-steering-taxonomy-root {
+.category-steering-categoryTree-root {
   border-top: 1px solid rgb(var(--rule-rgb) / 0.42);
   display: grid;
   gap: 10px;
   padding-top: 12px;
 }
 
-.topic-steering-taxonomy-root:first-child {
+.category-steering-categoryTree-root:first-child {
   border-top: 0;
   padding-top: 0;
 }
 
-.topic-steering-taxonomy-root header {
+.category-steering-categoryTree-root header {
   align-items: flex-start;
   display: flex;
   gap: 14px;
   justify-content: space-between;
 }
 
-.topic-steering-taxonomy-root h3,
-.topic-steering-subtopic h4 {
+.category-steering-categoryTree-root h3,
+.category-steering-subcategory h4 {
   color: rgb(var(--ink-solid-rgb) / var(--ink-display-alpha));
   font-family: var(--font-serif), Georgia, "Times New Roman", serif;
   font-weight: 900;
@@ -2272,25 +2272,25 @@ img {
   margin: 0;
 }
 
-.topic-steering-taxonomy-root h3 {
+.category-steering-categoryTree-root h3 {
   font-size: 1.72rem;
   line-height: 0.98;
 }
 
-.topic-steering-subtopic h4 {
+.category-steering-subcategory h4 {
   font-size: 1.18rem;
   line-height: 1;
 }
 
-.topic-steering-taxonomy-root > p,
-.topic-steering-subtopic p {
+.category-steering-categoryTree-root > p,
+.category-steering-subcategory p {
   color: var(--muted-strong);
   line-height: 1.42;
   margin: 0;
 }
 
-.topic-steering-taxonomy-root header > span,
-.topic-steering-taxonomy-evidence span {
+.category-steering-categoryTree-root header > span,
+.category-steering-categoryTree-evidence span {
   color: var(--muted);
   font-family: Arial, Helvetica, sans-serif;
   font-size: 0.68rem;
@@ -2300,24 +2300,24 @@ img {
   text-transform: uppercase;
 }
 
-.topic-steering-taxonomy-subtitle {
+.category-steering-categoryTree-subtitle {
   color: var(--muted);
   font-style: italic;
   margin: 0;
 }
 
-.topic-steering-taxonomy-evidence {
+.category-steering-categoryTree-evidence {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-.topic-steering-taxonomy-evidence span {
+.category-steering-categoryTree-evidence span {
   border: 1px solid rgb(var(--rule-rgb) / 0.28);
   padding: 4px 6px;
 }
 
-.topic-steering-subtopic-list {
+.category-steering-subcategory-list {
   border-left: 1px solid rgb(var(--rule-rgb) / 0.34);
   display: grid;
   gap: 10px;
@@ -2325,12 +2325,12 @@ img {
   padding-left: 14px;
 }
 
-.topic-steering-subtopic-list--proposed {
+.category-steering-subcategory-list--proposed {
   border-left-color: rgb(var(--accent-rgb) / 0.38);
   margin-top: 2px;
 }
 
-.topic-steering-subtopic-list__label {
+.category-steering-subcategory-list__label {
   color: var(--muted);
   font-family: Arial, Helvetica, sans-serif;
   font-size: 0.68rem;
@@ -2341,39 +2341,39 @@ img {
   text-transform: uppercase;
 }
 
-.topic-steering-subtopic {
+.category-steering-subcategory {
   border-top: 1px solid rgb(var(--rule-rgb) / 0.28);
   display: grid;
   gap: 6px;
   padding-top: 9px;
 }
 
-.topic-steering-subtopic:first-child {
+.category-steering-subcategory:first-child {
   border-top: 0;
   padding-top: 0;
 }
 
-.topic-steering-subtopic--proposed {
+.category-steering-subcategory--proposed {
   background: rgb(var(--accent-rgb) / 0.045);
   border-top-color: rgb(var(--accent-rgb) / 0.24);
   padding: 9px 10px 10px;
 }
 
-.topic-steering-subtopic__actions {
+.category-steering-subcategory__actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.topic-steering-topic-card {
+.category-steering-category-card {
   border-top: 1px solid rgb(var(--rule-rgb) / 0.4);
   display: grid;
   gap: 9px;
   padding-top: 10px;
 }
 
-.topic-steering-topic-card header,
-.topic-steering-topic-card footer,
+.category-steering-category-card header,
+.category-steering-category-card footer,
 .news-desk-ledger-item header {
   align-items: center;
   display: flex;
@@ -2381,8 +2381,8 @@ img {
   justify-content: space-between;
 }
 
-.topic-steering-topic-card header > span,
-.topic-steering-topic-card footer > span,
+.category-steering-category-card header > span,
+.category-steering-category-card footer > span,
 .news-desk-ledger-item header span {
   color: var(--muted);
   font-family: Arial, Helvetica, sans-serif;
@@ -2399,12 +2399,12 @@ img {
   line-height: 1;
 }
 
-.topic-steering-topic-card label {
+.category-steering-category-card label {
   display: grid;
   gap: 4px;
 }
 
-.topic-steering-topic-card label span {
+.category-steering-category-card label span {
   color: var(--muted);
   font-family: Arial, Helvetica, sans-serif;
   font-size: 0.66rem;
@@ -2413,8 +2413,8 @@ img {
   text-transform: uppercase;
 }
 
-.topic-steering-topic-card input,
-.topic-steering-topic-card textarea {
+.category-steering-category-card input,
+.category-steering-category-card textarea {
   background: rgb(var(--paper-rgb) / 0.42);
   border: 1px solid rgb(var(--rule-rgb) / 0.32);
   color: var(--ink);
@@ -2424,7 +2424,7 @@ img {
   padding: 7px;
 }
 
-.topic-steering-topic-card textarea {
+.category-steering-category-card textarea {
   resize: vertical;
 }
 
@@ -2514,8 +2514,8 @@ img {
     font-size: 3.2rem;
   }
 
-  .news-desk-appendix__topic-summary header,
-  .news-desk-appendix__subtopics header,
+  .news-desk-appendix__category-summary header,
+  .news-desk-appendix__subcategories header,
   .news-desk-appendix__footer {
     align-items: flex-start;
     flex-direction: column;
@@ -2541,9 +2541,9 @@ img {
   .topic-steering-section__header,
   .news-desk-assignment-section__header,
   .news-desk-assignment-row__title,
-  .topic-steering-taxonomy-root header,
-  .topic-steering-topic-card header,
-  .topic-steering-topic-card footer,
+  .category-steering-categoryTree-root header,
+  .category-steering-category-card header,
+  .category-steering-category-card footer,
   .news-desk-ledger-item header {
     align-items: flex-start;
     flex-direction: column;

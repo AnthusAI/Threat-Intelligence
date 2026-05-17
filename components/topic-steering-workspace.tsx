@@ -482,15 +482,15 @@ function NewsDeskDashboard({
           ) : (
             <>
               <article className="news-desk-lede">
-                <p className="story-label">Categorys Desk</p>
+                <p className="story-label">Categories Desk</p>
                 <h2>Steering Notes Run Beside The Edition</h2>
                 <p>
                   Proposal rows are copy-desk notes from workers and agents. Skim them like an inside page: accept a correction, reject it, or leave the present course undisturbed.
                 </p>
               </article>
               <aside className="news-desk-index" aria-label="News desk status index">
-                <StatusMetric label="Accepted Categorys" value={String(canonicalCategorys.length)} detail={activeCategorySet ? activeCategorySet.displayName : "No accepted category set"} />
-                <StatusMetric label="Accepted Subcategorys" value={String(acceptedSubcategoryCount)} detail={`${acceptedRootCategoryCount} root categorys`} />
+                <StatusMetric label="Accepted Categories" value={String(canonicalCategorys.length)} detail={activeCategorySet ? activeCategorySet.displayName : "No accepted category set"} />
+                <StatusMetric label="Accepted Subcategories" value={String(acceptedSubcategoryCount)} detail={`${acceptedRootCategoryCount} root categories`} />
                 <StatusMetric label="Filed Notes" value={String(openProposalCount)} detail={`${categoryProposals.length} category / ${genericProposals.length} generic`} />
                 <StatusMetric label="Projection Notices" value={String(dashboard.projections.length)} detail={latestImport ? `${latestImport.importKind} ${latestImport.status}` : "No projection import"} />
               </aside>
@@ -555,7 +555,7 @@ function NewsDeskDashboard({
               <div className="category-steering-category-grid">
                 {canonicalCategorys.length ? canonicalCategorys.map((category) => (
                   <CategoryEditor key={category.id} category={category} disabled={isPending} onSave={saveCategory} />
-                )) : <EmptyRow label="No canonical categorys imported" />}
+                )) : <EmptyRow label="No canonical categories imported" />}
               </div>
             </section>
           </div>
@@ -699,7 +699,7 @@ function AssignmentSection({
       <div className="news-desk-assignment-list">
         {section.candidates.map((candidate) => (
           <AssignmentCandidateRow
-            key={candidate.assignment.id}
+            key={getAssignmentCandidateKey(candidate)}
             candidate={candidate}
             disabled={disabled}
             onAction={onAction}
@@ -720,6 +720,7 @@ function AssignmentCandidateRow({
   onAction: (candidate: NewsDeskAssignmentCandidate, action: AssignmentCullAction, reason?: string) => void;
 }) {
   const assignment = candidate.assignment;
+  const candidateKey = getAssignmentCandidateKey(candidate);
   const culled = isCulledItem(assignment);
   const [reason, setReason] = useState(getCullingReason(assignment));
   const title = assignment.headline ?? assignment.title ?? assignment.slug;
@@ -735,7 +736,8 @@ function AssignmentCandidateRow({
   return (
     <article
       className={`news-desk-assignment-row${culled ? " news-desk-assignment-row--culled" : ""}`}
-      data-assignment-candidate={assignment.id}
+      data-assignment-candidate={candidateKey}
+      data-assignment-item-id={assignment.id}
       data-assignment-status={assignment.status}
     >
       <div className="news-desk-assignment-row__main">
@@ -777,7 +779,7 @@ function AssignmentCandidateRow({
             <label>
               <span>Cull Reason</span>
               <textarea
-                data-assignment-reason={assignment.id}
+                data-assignment-reason={candidateKey}
                 rows={2}
                 value={reason}
                 onChange={(event) => setReason(event.target.value)}
@@ -835,6 +837,10 @@ function getAssignmentSections(candidates: NewsDeskAssignmentCandidate[]): Assig
       name,
       candidates: entries.sort(compareAssignmentCandidates),
     }));
+}
+
+function getAssignmentCandidateKey(candidate: NewsDeskAssignmentCandidate): string {
+  return candidate.assignment.lineageId ?? candidate.assignment.id;
 }
 
 function getAssignmentDeskMetrics(desk: NewsDeskAssignmentDesk): AssignmentMetrics {
@@ -930,7 +936,7 @@ function formatAccessDetail(state: EditorNewsDeskState): string {
   if (state.status === "loading") return "Papyrus is checking the current browser session before loading steering state.";
   if (state.status === "forbidden") return "This account is signed in, but the Cognito session does not include the editor or admin group.";
   if (state.status === "error") return "Papyrus could not verify this editor session or load the private News Desk data.";
-  return "Sign in with an editor or admin account to inspect category, categoryTree, ontology, and graph steering.";
+  return "Sign in with an editor or admin account to inspect category, category tree, ontology, and graph steering.";
 }
 
 function SectionHeader({ title, detail }: { title: string; detail: string }) {
@@ -983,7 +989,7 @@ function GenericProposalQueue({
                 </td>
               </tr>
             )) : (
-              <tr><td colSpan={6}>No categoryTree, ontology, or graph proposals</td></tr>
+              <tr><td colSpan={6}>No category tree, ontology, or graph proposals</td></tr>
             )}
           </tbody>
         </table>
@@ -1022,7 +1028,7 @@ function AcceptedCategoryTreeSection({
   const subcategoryCount = roots.reduce((count, root) => count + root.subcategorys.length, 0);
   const proposedSubcategoryCount = roots.reduce((count, root) => count + root.proposedSubcategorys.length, 0);
   const detail = activeCategoryTree
-    ? `${subcategoryCount} accepted / ${proposedSubcategoryCount} proposed subcategorys`
+    ? `${subcategoryCount} accepted / ${proposedSubcategoryCount} proposed subcategories`
     : categoryTreeLoadError
       ? "CategoryTree unavailable"
       : "Editor sign-in required";
@@ -1036,7 +1042,7 @@ function AcceptedCategoryTreeSection({
         </div>
       ) : null}
       {!activeCategoryTree ? (
-        <EmptyRow label="Accepted subcategorys are visible to signed-in editors" />
+        <EmptyRow label="Accepted subcategories are visible to signed-in editors" />
       ) : (
         <div className="category-steering-categoryTree-list" data-news-desk-category-tree>
           {roots.length ? roots.map(({ node, proposedSubcategorys, subcategorys, category }) => {
@@ -1059,7 +1065,7 @@ function AcceptedCategoryTreeSection({
                   <span>{root.categoryKey}</span>
                 </div>
                 <div className="category-steering-subcategory-list">
-                  <p className="category-steering-subcategory-list__label">Accepted Subcategorys</p>
+                  <p className="category-steering-subcategory-list__label">Accepted Subcategories</p>
                   {subcategorys.length ? subcategorys.map((subcategory) => (
                     <article className="category-steering-subcategory" data-news-desk-subcategory={subcategory.categoryKey} key={subcategory.id}>
                       <h4>{subcategory.displayName}</h4>
@@ -1072,12 +1078,12 @@ function AcceptedCategoryTreeSection({
                       </div>
                     </article>
                   )) : (
-                    <EmptyRow label="No accepted subcategorys under this root" />
+                    <EmptyRow label="No accepted subcategories under this root" />
                   )}
                 </div>
                 {proposedSubcategorys.length ? (
                   <div className="category-steering-subcategory-list category-steering-subcategory-list--proposed">
-                    <p className="category-steering-subcategory-list__label">Proposed Subcategorys</p>
+                    <p className="category-steering-subcategory-list__label">Proposed Subcategories</p>
                     {proposedSubcategorys.map((proposal) => (
                       <article className="category-steering-subcategory category-steering-subcategory--proposed" data-news-desk-proposed-subcategory={proposal.categoryKey ?? proposal.id} key={proposal.id}>
                         <h4>{proposal.displayName ?? proposal.title}</h4>
@@ -1099,7 +1105,7 @@ function AcceptedCategoryTreeSection({
                 ) : null}
               </article>
             );
-          }) : <EmptyRow label="No canonical roots available for categoryTree display" />}
+          }) : <EmptyRow label="No canonical roots available for category-tree display" />}
         </div>
       )}
     </section>
@@ -1294,7 +1300,7 @@ function CorpusCategorySetSummary({
                   <dd>{corpusCategorySets.map((categorySet) => categorySet.classifierId).join(" / ") || "none"}</dd>
                 </div>
                 <div>
-                  <dt>Categorys</dt>
+                  <dt>Categories</dt>
                   <dd>{String(corpusCategorySets.reduce((count, categorySet) => count + (categorySet.categoryCount ?? 0), 0))}</dd>
                 </div>
                 <div>

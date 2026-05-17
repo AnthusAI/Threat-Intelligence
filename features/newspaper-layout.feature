@@ -146,15 +146,15 @@ Feature: Newspaper layout scenarios
       | 780   | 1200   |
       | 390   | 900    |
 
-  Scenario: News desk renders topic steering proposals and topic edits
+  Scenario: News desk renders category steering proposals and category edits
     Given I open the news desk at 1280 by 900
     Then the news desk should render
-    And the news desk should show topic and graph proposal rows
-    And the news desk should show accepted subtopics under canonical topics
-    And the news desk should show proposed subtopics under canonical topics
+    And the news desk should show category and graph proposal rows
+    And the news desk should show accepted subcategories under canonical categories
+    And the news desk should show proposed subcategories under canonical categories
     And the news desk should offer accept and reject actions without defer
-    When I update the first news desk topic name to "Foundation Model Scaling Updated"
-    Then the first news desk topic name should be "Foundation Model Scaling Updated"
+    When I update the first news desk category name to "Foundation Model Scaling Updated"
+    Then the first news desk category name should be "Foundation Model Scaling Updated"
     And no browser console errors should occur
 
   Scenario: News desk manually culls assignment candidates
@@ -182,17 +182,17 @@ Feature: Newspaper layout scenarios
     Given I am a test editor reader
     And I open the "current-edition" layout scenario at 1280 by 900
     Then edition page count should include appended News Desk pages
-    When I scroll to the canonical topic register
-    Then the final edition pages should include the canonical topic register
+    When I scroll to the canonical category register
+    Then the final edition pages should include the canonical category register
     And the appendix page should use newspaper page styling
-    When I scroll to the appendix page for root topic "Foundation Model Scaling"
-    Then the root topic appendix page should show subtopic "Agent Memory"
+    When I scroll to the appendix page for root category "Foundation Model Scaling"
+    Then the root category appendix page should show subcategory "Agent Memory"
     And no browser console errors should occur
 
   Scenario: News Desk appendix pages fit on mobile
     Given I am a test editor reader
     And I open the "current-edition" layout scenario at 390 by 900
-    When I scroll to the canonical topic register
+    When I scroll to the canonical category register
     Then the News Desk appendix should not overflow horizontally
     And no browser console errors should occur
 
@@ -248,7 +248,7 @@ Feature: Newspaper layout scenarios
 
   Scenario: Date-scoped article routes and edition anchors resolve
     Given I open the edition path "/2026/may/13/agent-procedure-patterns" at 1280 by 900
-    Then the article page should show headline "The Next Agent Breakthrough Is a Checklist"
+    Then the article page should show headline "Self-Evolving Agents Learn to Rewrite Their Own Playbooks"
     And the article back link should target "/2026/may/13#agent-procedure-patterns"
     Given I open the edition path "/2026/may/13#agent-procedure-patterns" at 1280 by 900
     Then the browser hash should be "#agent-procedure-patterns"
@@ -377,6 +377,6 @@ Feature: Newspaper layout scenarios
 
   Scenario: Direct article routes resolve content through the repository
     Given I open article "schools-reading-lab" at 1280 by 900
-    Then the article page should show headline "Reading Labs Replace Remediation With Daily Practice"
-    And the article page should show deck "Teachers are testing short, frequent literacy blocks that use live diagnostics without turning classrooms into test prep centers."
+    Then the article page should show headline "Agent Reliability Papers Turn Demos Into Stress Tests"
+    And the article page should show deck "Benchmarks are starting to treat agents as production systems that must survive tools, memory, multi-turn work, and boring failure modes."
     And no browser console errors should occur

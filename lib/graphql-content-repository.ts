@@ -316,7 +316,9 @@ function getPublishedMediaAssetModel() {
 }
 
 function missingProjectionModelError(modelName: string): Error {
-  return new Error(`No published GraphQL edition found. Projection model ${modelName} is not available in this Amplify output.`);
+  return new Error(
+    `Amplify output is missing projection model ${modelName}. Refresh amplify_outputs.json from the latest deployed backend or regenerate it from the current sandbox schema.`,
+  );
 }
 
 function isMissingPublishedAtIndexError(error: unknown): boolean {
