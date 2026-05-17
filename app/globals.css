@@ -1619,32 +1619,32 @@ img {
   text-transform: uppercase;
 }
 
-.topic-steering-header.news-desk-masthead {
-  border-bottom: 0;
-  display: block;
-  padding-bottom: calc(var(--paper-rhythm) * 0.5);
-  text-align: center;
+.news-desk-masthead {
+  --masthead-bonus-rule-offset: 0.1875em;
+  --masthead-bonus-rule-weight: 0.0625em;
+  --masthead-rule-weight: 0.125em;
+  --masthead-title-font-size: calc(var(--masthead-title-line-height) * 1.22);
+  --masthead-title-line-height: calc(var(--paper-rhythm) * 4);
+  --masthead-title-margin-bottom: calc(var(--paper-rhythm) / 2);
+  --masthead-title-margin-top: calc(var(--paper-rhythm) / 2);
+  --masthead-title-optical-shift: -3px;
+  --masthead-meta-line-height: var(--paper-rhythm);
+  --masthead-meta-padding-top: 5px;
+
+  margin-bottom: calc(var(--paper-rhythm) * 1.55);
 }
 
-.news-desk-edition-strip {
-  border-bottom: 1px solid rgb(var(--rule-rgb) / 0.52);
-  border-top: 2px solid var(--rule);
-  display: grid;
-  font-family: Arial, Helvetica, sans-serif;
+.news-desk-masthead h1 {
+  font-size: var(--masthead-title-font-size);
+  line-height: var(--masthead-title-line-height);
+  margin: var(--masthead-title-margin-top) 0 var(--masthead-title-margin-bottom);
+  white-space: nowrap;
+}
+
+.news-desk-masthead .masthead__meta {
   font-size: 0.72rem;
   font-weight: 800;
-  grid-template-columns: 1fr auto 1fr;
-  line-height: var(--paper-rhythm);
-  min-height: var(--paper-rhythm);
-  text-transform: uppercase;
-}
-
-.news-desk-edition-strip span:first-child {
-  text-align: left;
-}
-
-.news-desk-edition-strip span:last-child {
-  text-align: right;
+  letter-spacing: 0.02em;
 }
 
 .news-desk-auth-control {
@@ -1681,52 +1681,6 @@ img {
   color: rgb(155 75 54);
 }
 
-.topic-steering-header h1 {
-  border-bottom: 2px solid var(--rule);
-  color: rgb(var(--ink-solid-rgb) / var(--ink-display-alpha));
-  font-family: var(--font-serif), Georgia, "Times New Roman", serif;
-  font-size: 6.7rem;
-  font-weight: 900;
-  letter-spacing: 0;
-  line-height: 0.84;
-  margin: 4px 0 0;
-  padding-bottom: calc(var(--paper-rhythm) * 0.4);
-}
-
-.topic-steering-kicker {
-  color: var(--accent);
-  font-family: Arial, Helvetica, sans-serif;
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  line-height: var(--paper-rhythm);
-  margin: calc(var(--paper-rhythm) * 0.5) 0 0;
-  text-transform: uppercase;
-}
-
-.news-desk-standfirst {
-  border-bottom: 1px solid rgb(var(--rule-rgb) / 0.52);
-  border-top: 1px solid rgb(var(--rule-rgb) / 0.52);
-  color: var(--muted-strong);
-  font-size: 1.1rem;
-  font-style: italic;
-  line-height: 1.35;
-  margin: 0 auto;
-  max-width: 860px;
-  padding: calc(var(--paper-rhythm) * 0.5) 0;
-}
-
-.topic-steering-header__meta {
-  border-bottom: 1px solid rgb(var(--rule-rgb) / 0.52);
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  justify-content: center;
-  margin-top: 0;
-  padding: calc(var(--paper-rhythm) * 0.5) 0;
-}
-
-.topic-steering-header__meta span,
 .topic-steering-pill {
   border: 1px solid rgb(var(--rule-rgb) / 0.72);
   color: var(--ink);
@@ -2396,16 +2350,9 @@ img {
     padding-right: 18px;
   }
 
-  .news-desk-edition-strip,
   .news-desk-tabs,
   .news-desk-index {
     grid-template-columns: 1fr;
-  }
-
-  .news-desk-edition-strip span,
-  .news-desk-edition-strip span:first-child,
-  .news-desk-edition-strip span:last-child {
-    text-align: center;
   }
 
   .news-desk-tab,
@@ -2413,8 +2360,8 @@ img {
     border-right: 0;
   }
 
-  .topic-steering-header h1 {
-    font-size: 4rem;
+  .news-desk-masthead h1 {
+    font-size: min(var(--masthead-title-font-size), 14vw);
   }
 
   .news-desk-appendix h2 {
@@ -2478,10 +2425,6 @@ img {
     min-height: 100vh;
   }
 
-  .topic-steering-header h1 {
-    font-size: 3.15rem;
-  }
-
   .news-desk-appendix h2 {
     font-size: 2.55rem;
   }
@@ -2538,6 +2481,10 @@ img {
 
   .masthead h1 {
     font-size: var(--masthead-title-font-size, clamp(3.4rem, 22vw, 5.6rem));
+  }
+
+  .news-desk-masthead h1 {
+    font-size: min(var(--masthead-title-font-size), 13.5vw);
   }
 
   .inside-header {

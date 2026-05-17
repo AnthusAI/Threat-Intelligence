@@ -103,17 +103,16 @@ function ProtectedNewsDeskWorkspace() {
   return (
     <main className="topic-steering-shell news-desk-shell" data-news-desk-access={state.status}>
       <article className="news-desk-page news-desk-page--gate" aria-labelledby="news-desk-access-title">
-        <header className="topic-steering-header news-desk-masthead">
-          <div className="news-desk-edition-strip" aria-label="News desk edition status">
+        <header className="masthead news-desk-masthead">
+          <div className="masthead__rule" />
+          <h1 id="news-desk-access-title">
+            <span>NEWS DESK</span>
+          </h1>
+          <div className="masthead__meta" aria-label="News desk edition status">
             <span>Steering Section</span>
             <span>Restricted Desk</span>
             <span><ReaderAuthControl className="news-desk-auth-control" showIdentity /></span>
           </div>
-          <p className="topic-steering-kicker">Papyrus Newsroom</p>
-          <h1 id="news-desk-access-title">News Desk</h1>
-          <p className="news-desk-standfirst">
-            The News Desk is available to signed-in editor and admin users.
-          </p>
         </header>
         <section className="news-desk-access-panel" aria-live="polite">
           <p className="story-label">Access</p>
@@ -323,18 +322,15 @@ function NewsDeskDashboard({ dashboard }: { dashboard: TopicSteeringDashboard })
   return (
     <main className="topic-steering-shell news-desk-shell" data-news-desk data-topic-steering data-topic-steering-demo={dashboard.isDemo ? "true" : "false"}>
       <article className="news-desk-page" aria-labelledby="news-desk-title">
-        <header className="topic-steering-header news-desk-masthead">
-          <div className="news-desk-edition-strip" aria-label="News desk edition status">
+        <header className="masthead news-desk-masthead">
+          <div className="masthead__rule" />
+          <h1 id="news-desk-title">
+            <span>NEWS DESK</span>
+          </h1>
+          <div className="masthead__meta" aria-label="News desk edition status">
             <span>Steering Section</span>
             <span>{latestImportLabel}</span>
             <span>{dashboard.isDemo ? "Demo Desk" : <ReaderAuthControl className="news-desk-auth-control" showIdentity />}</span>
-          </div>
-          <p className="topic-steering-kicker">Papyrus Newsroom</p>
-          <h1 id="news-desk-title">News Desk</h1>
-          <div className="topic-steering-header__meta" aria-label="News desk corpus bureaus">
-            {dashboard.corpora.length ? dashboard.corpora.map((corpus) => (
-              <span key={corpus.id}>{corpus.name}</span>
-            )) : <span>No configured corpora</span>}
           </div>
         </header>
 
