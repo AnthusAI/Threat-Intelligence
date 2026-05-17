@@ -10,6 +10,7 @@ const {
   buildProjectionImportRecords,
   buildSteeringConfigRecords,
   buildSteeringImportRecords,
+  mergeReviewedProposalState,
 } = require("./lib/papyrus-curation.cjs");
 const {
   loadSteeringConfig,
@@ -206,6 +207,22 @@ assert.equal(taxonomyProposal.topicUid, "topic.scaling-memory");
 assert.equal(taxonomyProposal.targetTopicUid, "topic.scaling");
 assert.equal(taxonomyProposal.relationshipType, "subtopic_of");
 assert.equal(taxonomyProposal.displayName, "Scaling Memory");
+const preservedRejectedProposal = mergeReviewedProposalState(taxonomyProposal, {
+  ...taxonomyProposal,
+  status: "rejected",
+  reviewedAt: "2026-05-16T13:00:00.000Z",
+  reviewedBy: "editor@example.com",
+});
+assert.equal(preservedRejectedProposal.status, "rejected");
+assert.equal(preservedRejectedProposal.reviewedAt, "2026-05-16T13:00:00.000Z");
+assert.equal(preservedRejectedProposal.reviewedBy, "editor@example.com");
+const openProposalReimport = mergeReviewedProposalState(taxonomyProposal, {
+  ...taxonomyProposal,
+  status: "proposed",
+  reviewedAt: null,
+  reviewedBy: null,
+});
+assert.equal(openProposalReimport.status, "proposed");
 
 const ontologyProposal = findRecord(steeringPlan.records, "CurationProposal", (record) => record.id.includes("proposal-ontology-assertion"));
 assert.equal(ontologyProposal.proposalKind, "add-ontology-relationship");

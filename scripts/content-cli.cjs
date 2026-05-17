@@ -16,6 +16,7 @@ const {
   curationCorpusId,
   loadJsonFile,
   loadSteeringBundleFromBiblicus,
+  mergeReviewedProposalState,
   writeJsonFile,
 } = require("./lib/papyrus-curation.cjs");
 const {
@@ -443,8 +444,9 @@ async function buildEditionRecordChange(client, editionConfig) {
 
 async function buildRecordChange(client, modelName, expected) {
   const current = await client.getRecord(modelName, expected.id);
-  const action = !current ? "create" : recordsEqual(current, expected) ? "noop" : "update";
-  return { modelName, expected, current, action };
+  const nextExpected = modelName === "CurationProposal" ? mergeReviewedProposalState(expected, current) : expected;
+  const action = !current ? "create" : recordsEqual(current, nextExpected) ? "noop" : "update";
+  return { modelName, expected: nextExpected, current, action };
 }
 
 async function applyRecordChanges(client, records) {

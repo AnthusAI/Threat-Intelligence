@@ -668,6 +668,18 @@ function hashStable(value) {
   return crypto.createHash("sha256").update(typeof value === "string" ? value : JSON.stringify(value)).digest("hex");
 }
 
+const REVIEWED_PROPOSAL_STATUSES = new Set(["accepted", "rejected", "deferred"]);
+
+function mergeReviewedProposalState(expected, current) {
+  if (!current || !REVIEWED_PROPOSAL_STATUSES.has(current.status)) return expected;
+  return {
+    ...expected,
+    status: current.status,
+    reviewedAt: current.reviewedAt ?? null,
+    reviewedBy: current.reviewedBy ?? null,
+  };
+}
+
 module.exports = {
   buildAcceptedTaxonomyPayload,
   buildAcceptedTopicSetPayload,
@@ -677,5 +689,6 @@ module.exports = {
   curationCorpusId,
   loadJsonFile,
   loadSteeringBundleFromBiblicus,
+  mergeReviewedProposalState,
   writeJsonFile,
 };

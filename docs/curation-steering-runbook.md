@@ -396,12 +396,21 @@ Keep this distinction clear in review UI and automation:
   `topic-display-copy-edit` use the tailored topic controls and can update
   draft topic revisions when accepted.
 - Taxonomy, ontology, and GraphRAG proposal kinds stay in the generic queue for
-  v1. Accepting, rejecting, or deferring them records a Papyrus decision and
+  v1. Accepting or rejecting them records a Papyrus decision and
   updates proposal status; it should not mutate flat topic copy or topic-set
-  revision state.
+  revision state. Ignoring a row is intentional no-op steering: no decision is
+  recorded, and the accepted course continues.
 - Biblicus proposal labels `recommend`, `do_not_recommend`, and
   `needs_clarification` are agent recommendation labels. Papyrus human review
-  actions remain `accept`, `reject`, and `defer`.
+  actions are `accept` and `reject`; ignoring a proposal is represented by
+  leaving it unreviewed.
+
+When steering is re-imported from Biblicus, Papyrus preserves reviewed proposal
+state for existing accepted or rejected rows. This keeps repeated artifact
+imports from reopening proposals that editors already handled. Accepted
+taxonomy nodes are exported through `curation export-taxonomy`; rejected rows
+remain as Papyrus decision/proposal state and should be consulted by proposal
+generation workers before they create the next bundle.
 
 Accepted taxonomy summaries now have a small first-class editor surface in
 Papyrus: `/news-desk` shows accepted subtopics beside the canonical topic
