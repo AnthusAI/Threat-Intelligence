@@ -356,7 +356,13 @@ def _run_async(coro: Any) -> Any:
 
 
 def execute_tactus(tactus: str) -> dict[str, Any]:
-    """Execute a short Papyrus Tactus snippet and return a structured envelope."""
+    """Execute a short Papyrus Tactus snippet and return a structured envelope.
+
+    This is the single Papyrus newsroom agent tool. The snippet receives a
+    global ``papyrus`` host module plus helper aliases such as ``api_list``,
+    ``docs_list``, ``assignment_context``, ``assignment_agent_context``,
+    ``biblicus_query``, ``plan_research_update``, and ``plan_draft_update``.
+    """
 
     started = time.monotonic()
     trace_id = str(uuid.uuid4())
