@@ -580,6 +580,66 @@ const schema = a.schema({
       allow.custom().to(authoringOperations),
     ]),
 
+  CategoryKeyword: a
+    .model({
+      id: a.id().required(),
+      categorySetId: a.id().required(),
+      corpusId: a.id().required(),
+      categoryKey: a.string().required(),
+      categoryLineageId: a.id(),
+      categoryId: a.id(),
+      keyword: a.string().required(),
+      normalizedKeyword: a.string().required(),
+      weight: a.float(),
+      rank: a.integer(),
+      source: a.string().required(),
+      sourceTopicId: a.string(),
+      importRunId: a.id(),
+      metadata: a.json(),
+      createdAt: a.datetime().required(),
+      updatedAt: a.datetime(),
+    })
+    .secondaryIndexes((index) => [
+      index("categorySetId").sortKeys(["categoryKey", "rank"]).queryField("listCategoryKeywordsBySetKeyAndRank"),
+      index("categoryKey").sortKeys(["rank"]).queryField("listCategoryKeywordsByCategoryKeyAndRank"),
+      index("normalizedKeyword").sortKeys(["categorySetId"]).queryField("listCategoryKeywordsByNormalizedKeywordAndSet"),
+      index("importRunId").sortKeys(["rank"]).queryField("listCategoryKeywordsByImportRunAndRank"),
+    ])
+    .authorization((allow) => [
+      allow.groups(categoryWriteGroups),
+      allow.custom().to(authoringOperations),
+    ]),
+
+  LexicalSteeringRule: a
+    .model({
+      id: a.id().required(),
+      ruleKind: a.string().required(),
+      term: a.string().required(),
+      normalizedTerm: a.string().required(),
+      scope: a.string().required(),
+      status: a.string().required(),
+      corpusId: a.id(),
+      classifierId: a.string(),
+      categorySetId: a.id(),
+      categoryKey: a.string(),
+      note: a.string(),
+      source: a.string(),
+      createdBy: a.string(),
+      createdAt: a.datetime().required(),
+      updatedAt: a.datetime(),
+      metadata: a.json(),
+    })
+    .secondaryIndexes((index) => [
+      index("status").sortKeys(["normalizedTerm"]).queryField("listLexicalSteeringRulesByStatusAndTerm"),
+      index("scope").sortKeys(["normalizedTerm"]).queryField("listLexicalSteeringRulesByScopeAndTerm"),
+      index("categorySetId").sortKeys(["normalizedTerm"]).queryField("listLexicalSteeringRulesBySetAndTerm"),
+      index("corpusId").sortKeys(["normalizedTerm"]).queryField("listLexicalSteeringRulesByCorpusAndTerm"),
+    ])
+    .authorization((allow) => [
+      allow.groups(categoryWriteGroups),
+      allow.custom().to(authoringOperations),
+    ]),
+
   SteeringProposal: a
     .model({
       id: a.id().required(),

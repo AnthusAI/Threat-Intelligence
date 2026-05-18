@@ -28,6 +28,7 @@ export type SemanticObjectKind = typeof SEMANTIC_OBJECT_KINDS[number];
 export type SemanticPredicateId =
   | "classified_as"
   | "mentions"
+  | "has_editorial_form"
   | "about"
   | "uses_evidence"
   | "requests_work_on"
@@ -50,6 +51,7 @@ export type SemanticPredicateDefinition = {
 export const SEMANTIC_PREDICATES: SemanticPredicateDefinition[] = [
   { id: "classified_as", label: "classified as", group: "classification", inverseLabel: "classified references/items" },
   { id: "mentions", label: "mentions", group: "ontology", inverseLabel: "mentioned by" },
+  { id: "has_editorial_form", label: "has editorial form", group: "classification", inverseLabel: "items by editorial form" },
   { id: "about", label: "about", group: "commentary", inverseLabel: "commentary" },
   { id: "requests_work_on", label: "requests work on", group: "generic", inverseLabel: "requested work" },
   { id: "uses_evidence", label: "uses evidence", group: "evidence", inverseLabel: "used by" },

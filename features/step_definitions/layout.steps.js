@@ -81,6 +81,23 @@ When("I follow the continuation jump for article {string}", async function (arti
   await jump.click();
 });
 
+When("I follow the newsroom tab for {string}", async function (label) {
+  const page = requirePage(this);
+  const tab = page.locator("[data-news-desk-tab]", { hasText: label }).first();
+  await tab.waitFor({ state: "visible", timeout: 10_000 });
+  await tab.click();
+  const sectionId = getNewsroomSectionId(label);
+  await waitForNewsroomSection(page, sectionId);
+});
+
+When("I follow the newsroom overview link for {string}", async function (label) {
+  const page = requirePage(this);
+  const link = page.locator(".news-desk-ledger-item", { hasText: label }).first();
+  await link.waitFor({ state: "visible", timeout: 10_000 });
+  await link.click();
+  await waitForNewsroomSection(page, getNewsroomSectionId(label));
+});
+
 When("I update the first newsroom category name to {string}", async function (name) {
   const page = requirePage(this);
   const firstNameInput = page.locator(".category-steering-category-card label", { hasText: "Name" }).first().locator("input");
@@ -224,6 +241,11 @@ Then("the newsroom should render", async function () {
   await page.locator("[data-news-desk-tab='references']").waitFor({ state: "visible", timeout: 10_000 });
 });
 
+Then("the active newsroom section should be {string}", async function (sectionId) {
+  const page = requirePage(this);
+  await waitForNewsroomSection(page, sectionId);
+});
+
 Then("the newsroom should show the knowledge overview", async function () {
   const page = requirePage(this);
   await page.locator("[data-news-desk-section='overview']").waitFor({ state: "visible", timeout: 10_000 });
@@ -299,6 +321,11 @@ Then("the newsroom should show an editor access gate", async function () {
   const page = requirePage(this);
   await page.locator("[data-news-desk-access]").waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("text=Editor Sign-In Required").first().waitFor({ state: "visible", timeout: 10_000 });
+});
+
+Then("the newsroom should not show an editor access gate", async function () {
+  const page = requirePage(this);
+  assert.equal(await page.locator("[data-news-desk-access]").count(), 0);
 });
 
 Then("the newsroom should show category and graph proposal rows", async function () {
@@ -2192,6 +2219,26 @@ function registerTypeScriptRequire() {
     });
     module._compile(output.outputText, filename);
   };
+}
+
+async function waitForNewsroomSection(page, sectionId) {
+  await page.locator(`[data-news-desk-tab='${sectionId}'][aria-current='page']`).waitFor({ state: "visible", timeout: 10_000 });
+  const sectionSelector = sectionId === "assignments"
+    ? "[data-news-desk-assignments]"
+    : `[data-news-desk-section='${sectionId}']`;
+  await page.locator(sectionSelector).waitFor({ state: "visible", timeout: 10_000 });
+}
+
+function getNewsroomSectionId(label) {
+  const normalized = String(label).trim().toLowerCase();
+  if (normalized === "overview") return "overview";
+  if (normalized === "users") return "users";
+  if (normalized === "topics") return "topics";
+  if (normalized === "concepts") return "concepts";
+  if (normalized === "references") return "references";
+  if (normalized === "assignments") return "assignments";
+  if (normalized === "doctrine") return "doctrine";
+  throw new Error(`Unknown newsroom section label: ${label}`);
 }
 
 function createHeadlineScalePlan(headlineScale) {

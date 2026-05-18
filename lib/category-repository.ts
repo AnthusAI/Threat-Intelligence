@@ -75,6 +75,44 @@ export type CategorySteeringCategoryTree = CategorySteeringCategorySet;
 
 export type CategorySteeringCategoryTreeNode = CategorySteeringCategory;
 
+export type CategoryKeywordRecord = {
+  id: string;
+  categorySetId: string;
+  corpusId: string;
+  categoryKey: string;
+  categoryLineageId?: string | null;
+  categoryId?: string | null;
+  keyword: string;
+  normalizedKeyword: string;
+  weight?: number | null;
+  rank?: number | null;
+  source: string;
+  sourceTopicId?: string | null;
+  importRunId?: string | null;
+  metadata?: unknown;
+  createdAt: string;
+  updatedAt?: string | null;
+};
+
+export type LexicalSteeringRuleRecord = {
+  id: string;
+  ruleKind: string;
+  term: string;
+  normalizedTerm: string;
+  scope: string;
+  status: string;
+  corpusId?: string | null;
+  classifierId?: string | null;
+  categorySetId?: string | null;
+  categoryKey?: string | null;
+  note?: string | null;
+  source?: string | null;
+  createdBy?: string | null;
+  createdAt: string;
+  updatedAt?: string | null;
+  metadata?: unknown;
+};
+
 export type SteeringProposal = {
   id: string;
   categorySetId?: string | null;
@@ -308,6 +346,24 @@ export type UserDirectoryEntry = {
   identities: UserIdentityRecord[];
 };
 
+export type DoctrineRecord = {
+  id: string;
+  lineageId?: string | null;
+  versionNumber?: number | null;
+  versionState?: string | null;
+  versionCreatedAt?: string | null;
+  versionCreatedBy?: string | null;
+  type: string;
+  status: string;
+  typeStatus: string;
+  slug: string;
+  title?: string | null;
+  headline?: string | null;
+  body?: Array<string | null> | null;
+  editorial?: string | Record<string, unknown> | null;
+  updatedAt?: string | null;
+};
+
 export type CategorySteeringDashboard = {
   isDemo?: boolean;
   canManageUsers?: boolean;
@@ -320,6 +376,8 @@ export type CategorySteeringDashboard = {
   categorys: CategorySteeringCategory[];
   categoryTrees: CategorySteeringCategoryTree[];
   categoryNodes: CategorySteeringCategoryTreeNode[];
+  categoryKeywords: CategoryKeywordRecord[];
+  lexicalSteeringRules: LexicalSteeringRuleRecord[];
   proposals: CategorySteeringProposal[];
   artifacts: CategorySteeringArtifact[];
   references: ReferenceRecord[];
@@ -329,6 +387,7 @@ export type CategorySteeringDashboard = {
   semanticRelations: SemanticRelationRecord[];
   assignments: AssignmentRecord[];
   assignmentEvents: AssignmentEventRecord[];
+  doctrineRecords: DoctrineRecord[];
   loadError?: string | null;
 };
 
@@ -410,6 +469,8 @@ function createEmptyCategorySteeringDashboard(): CategorySteeringDashboard {
     categorys: [],
     categoryTrees: [],
     categoryNodes: [],
+    categoryKeywords: [],
+    lexicalSteeringRules: [],
     proposals: [],
     artifacts: [],
     references: [],
@@ -419,6 +480,7 @@ function createEmptyCategorySteeringDashboard(): CategorySteeringDashboard {
     semanticRelations: [],
     assignments: [],
     assignmentEvents: [],
+    doctrineRecords: [],
     loadError: null,
   };
 }
@@ -683,6 +745,87 @@ function createDemoCategorySteeringDashboard(): CategorySteeringDashboard {
         rank: 2,
         depth: 1,
         importRunId: "knowledge-import-demo-steering",
+        updatedAt: importedAt,
+      },
+    ],
+    categoryKeywords: [
+      {
+        id: "category-keyword-demo-scaling-001",
+        categorySetId,
+        corpusId,
+        categoryKey: "category.foundation-model-scaling",
+        categoryLineageId: scalingCategoryLineageId,
+        categoryId: "category-demo-foundation-model-scaling",
+        keyword: "scaling laws",
+        normalizedKeyword: "scaling laws",
+        weight: 0.92,
+        rank: 1,
+        source: "accepted-category-tree",
+        sourceTopicId: "category.foundation-model-scaling",
+        importRunId: "knowledge-import-demo-steering",
+        createdAt: importedAt,
+        updatedAt: importedAt,
+      },
+      {
+        id: "category-keyword-demo-scaling-002",
+        categorySetId,
+        corpusId,
+        categoryKey: "category.foundation-model-scaling",
+        categoryLineageId: scalingCategoryLineageId,
+        categoryId: "category-demo-foundation-model-scaling",
+        keyword: "et",
+        normalizedKeyword: "et",
+        weight: 0.41,
+        rank: 2,
+        source: "accepted-category-tree",
+        sourceTopicId: "category.foundation-model-scaling",
+        importRunId: "knowledge-import-demo-steering",
+        createdAt: importedAt,
+        updatedAt: importedAt,
+      },
+      {
+        id: "category-keyword-demo-memory-001",
+        categorySetId,
+        corpusId,
+        categoryKey: "category.agent-memory",
+        categoryLineageId: "category-category-set-demo-canonical-category-agent-memory",
+        categoryId: "category-demo-agent-memory",
+        keyword: "agent memory",
+        normalizedKeyword: "agent memory",
+        weight: 0.87,
+        rank: 1,
+        source: "steering-proposal",
+        sourceTopicId: "category-proposal-demo-create-category",
+        importRunId: "knowledge-import-demo-steering",
+        createdAt: importedAt,
+        updatedAt: importedAt,
+      },
+    ],
+    lexicalSteeringRules: [
+      {
+        id: "lexical-rule-demo-et",
+        ruleKind: "ignored_keyword",
+        term: "et",
+        normalizedTerm: "et",
+        scope: "publication",
+        status: "active",
+        note: "Citation/header noise from et al.",
+        source: "papyrus-lexical-steering.yml",
+        createdBy: "papyrus-config",
+        createdAt: importedAt,
+        updatedAt: importedAt,
+      },
+      {
+        id: "lexical-rule-demo-al",
+        ruleKind: "ignored_keyword",
+        term: "al",
+        normalizedTerm: "al",
+        scope: "publication",
+        status: "active",
+        note: "Citation/header noise from et al.",
+        source: "papyrus-lexical-steering.yml",
+        createdBy: "papyrus-config",
+        createdAt: importedAt,
         updatedAt: importedAt,
       },
     ],
@@ -957,6 +1100,45 @@ function createDemoCategorySteeringDashboard(): CategorySteeringDashboard {
         toStatus: "claimed",
         actorLabel: "archivist-demo",
         createdAt: importedAt,
+      },
+    ],
+    doctrineRecords: [
+      {
+        id: "item-editorial-doctrine-mission-v1",
+        lineageId: "item-editorial-doctrine-mission",
+        versionNumber: 1,
+        versionState: "current",
+        versionCreatedAt: importedAt,
+        versionCreatedBy: "demo-editor",
+        type: "doctrine",
+        status: "private",
+        typeStatus: "doctrine#private",
+        slug: "editorial-doctrine-mission",
+        title: "Editorial Mission",
+        body: [
+          "Papyrus exists to help editors define a publication with a clear civic and intellectual purpose.",
+          "The newsroom should make its coverage priorities legible to its staff before those priorities ever become layout or publishing decisions.",
+        ],
+        editorial: { kind: "mission" },
+        updatedAt: importedAt,
+      },
+      {
+        id: "item-editorial-doctrine-policy-v1",
+        lineageId: "item-editorial-doctrine-policy",
+        versionNumber: 1,
+        versionState: "current",
+        versionCreatedAt: importedAt,
+        versionCreatedBy: "demo-editor",
+        type: "doctrine",
+        status: "private",
+        typeStatus: "doctrine#private",
+        slug: "editorial-doctrine-policy",
+        title: "Editorial Policy",
+        body: [
+          "Editorial policy stays private to the newsroom and records the standards that govern sourcing, review, and publication decisions.",
+        ],
+        editorial: { kind: "policy" },
+        updatedAt: importedAt,
       },
     ],
     semanticRelations: [

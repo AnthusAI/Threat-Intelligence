@@ -2,11 +2,19 @@
 
 import { Hub } from "aws-amplify/utils";
 import { fetchAuthSession } from "aws-amplify/auth";
+import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { generateClient } from "aws-amplify/data";
 import type { Schema } from "../amplify/data/resource";
-import { loadEditorNewsDeskState, loadEditorCategoryTreeState, type EditorNewsDeskState } from "./news-desk-taxonomy-client";
+import {
+  loadEditorAssignmentsData,
+  loadEditorCategoryTreeState,
+  loadEditorDoctrineRecordsData,
+  loadEditorUserDirectoryData,
+} from "./news-desk-taxonomy-client";
+import { useOptionalNewsDeskClient } from "./news-desk-client-provider";
 import { ReaderAuthControl } from "./reader-auth-control";
+import type { ReaderAuthSnapshot } from "./reader-auth-state";
 import type {
   AssignmentEventRecord,
   AssignmentRecord,
@@ -19,7 +27,10 @@ import type {
   CategorySteeringCategoryTreeNode,
   CategorySteeringCategory,
   CategorySteeringCategorySet,
+  CategoryKeywordRecord,
+  DoctrineRecord,
   KnowledgeCommentRecord,
+  LexicalSteeringRuleRecord,
   ReferenceAttachmentRecord,
   ReferenceRecord,
   SemanticNodeRecord,
@@ -27,11 +38,23 @@ import type {
   UserDirectoryEntry,
 } from "../lib/category-repository";
 import {
+  type DoctrineKind,
+  DOCTRINE_DEFINITION_BY_KIND,
+  DOCTRINE_DEFINITIONS,
+  DOCTRINE_ITEM_STATUS,
+  DOCTRINE_ITEM_TYPE,
+  DOCTRINE_ITEM_TYPE_STATUS,
+  doctrineBodyToText,
+  doctrineEditorialValue,
+  doctrineTextToBody,
+} from "../lib/doctrine";
+import {
   createSemanticGraphSnapshot,
   newsDeskHrefForSemanticObject,
   type SemanticNeighborGroup,
   type SemanticObjectSummary,
 } from "../lib/semantic-graph";
+import type { NewsDeskShellState } from "../lib/news-desk-session";
 
 type ActionState = {
   id: string;
@@ -42,7 +65,20 @@ type ActionState = {
 type ReviewAction = "accept" | "reject";
 type AssignmentAction = "claim" | "release" | "complete" | "cancel" | "reopen";
 type UserRoleAction = "grant" | "revoke";
-export type NewsDeskTab = "overview" | "users" | "topics" | "concepts" | "references" | "assignments";
+export type NewsDeskTab = "overview" | "users" | "topics" | "concepts" | "references" | "assignments" | "doctrine";
+type LexicalRuleScope = "publication" | "corpus" | "classifier" | "category";
+type LexicalRuleDraft = {
+  term: string;
+  scope: LexicalRuleScope;
+  corpusId?: string | null;
+  classifierId?: string | null;
+  categorySetId?: string | null;
+  categoryKey?: string | null;
+  note?: string | null;
+};
+
+const REFERENCE_PAGE_SIZE = 25;
+const TOPIC_REFERENCE_PAGE_SIZE = 12;
 
 export type NewsDeskSelection = {
   reference?: string | null;
@@ -68,6 +104,8 @@ type MergeSelection = {
   reason: string;
   notice?: string;
 };
+
+type DoctrineEditorState = Record<DoctrineKind, string>;
 
 function useNewsroomRhythmOverlay() {
   const [showRhythmOverlay, setShowRhythmOverlay] = useState(false);
@@ -117,6 +155,7 @@ const NEWS_DESK_TABS: Array<{ id: NewsDeskTab; label: string; detail: string; hr
   { id: "concepts", label: "Concepts", detail: "Ontology", href: "/newsroom/concepts" },
   { id: "references", label: "References", detail: "Corpus", href: "/newsroom/references" },
   { id: "assignments", label: "Assignments", detail: "Placeholder", href: "/newsroom/assignments" },
+  { id: "doctrine", label: "Doctrine", detail: "Mission & Policies", href: "/newsroom/doctrine" },
 ];
 
 const TAXONOMY_PROPOSAL_KINDS = new Set([
@@ -139,93 +178,79 @@ export function NewsDeskWorkspace({
   initialTab?: NewsDeskTab;
   initialSelection?: NewsDeskSelection;
 }) {
-  if (!dashboard) return <ProtectedNewsDeskWorkspace initialSelection={initialSelection} initialTab={initialTab} />;
-  return <NewsDeskDashboard dashboard={dashboard} initialSelection={initialSelection} initialTab={initialTab} />;
-}
+  const session = useOptionalNewsDeskClient();
 
-function ProtectedNewsDeskWorkspace({ initialTab, initialSelection }: { initialTab: NewsDeskTab; initialSelection: NewsDeskSelection }) {
-  const [state, setState] = useState<EditorNewsDeskState>({ status: "loading", dashboard: null, error: null });
-  const showRhythmOverlay = useNewsroomRhythmOverlay();
+  if (dashboard) {
+    return (
+      <NewsDeskDashboard
+        dashboard={dashboard}
+        initialSelection={initialSelection}
+        initialTab={initialTab}
+        authState={{ status: "signedIn", label: "Demo Desk" }}
+        isRefreshing={false}
+        shellError={null}
+      />
+    );
+  }
 
-  useEffect(() => {
-    let active = true;
-    const refresh = async () => {
-      const nextState = await loadEditorNewsDeskState();
-      if (active) setState(nextState);
-    };
-    void refresh();
-    const unsubscribe = Hub.listen("auth", ({ payload }) => {
-      if (
-        payload.event === "signedIn" ||
-        payload.event === "signedOut" ||
-        payload.event === "signInWithRedirect" ||
-        payload.event === "signInWithRedirect_failure"
-      ) {
-        setState({ status: "loading", dashboard: null, error: null });
-        void refresh();
-      }
-    });
-    return () => {
-      active = false;
-      unsubscribe();
-    };
-  }, []);
+  if (session?.shell.dashboard) {
+    return (
+      <NewsDeskDashboard
+        dashboard={session.shell.dashboard}
+        initialSelection={initialSelection}
+        initialTab={initialTab}
+        authState={session.shell.auth}
+        isRefreshing={session.shell.phase === "refreshing"}
+        shellError={session.shell.error}
+        onRefreshAssignments={session.refreshAssignments}
+        onRefreshDoctrineRecords={session.refreshDoctrineRecords}
+        onRefreshUserDirectory={session.refreshUserDirectory}
+      />
+    );
+  }
 
-  if (state.status === "ready" && state.dashboard) return <NewsDeskDashboard dashboard={state.dashboard} initialSelection={initialSelection} initialTab={initialTab} />;
-
-  return (
-    <main className="site-shell news-desk-shell" data-news-desk-access={state.status} data-rhythm-overlay={showRhythmOverlay ? "true" : "false"}>
-      <section className="scroll-edition news-desk-edition">
-        <div className="paper-page paper-page--front paper-page--active">
-          <article className="paper-page-content paper-page-content--front news-desk-page news-desk-page--gate" aria-labelledby="news-desk-access-title">
-            <header className="masthead news-desk-masthead">
-              <div className="masthead__rule" />
-              <h1 id="news-desk-access-title">
-                <span>NEWSROOM</span>
-              </h1>
-              <div className="masthead__meta" aria-label="Newsroom edition status">
-                <span>Steering Section</span>
-                <span>Restricted Desk</span>
-                <span><ReaderAuthControl className="news-desk-auth-control" showIdentity /></span>
-              </div>
-            </header>
-            <section className="news-desk-access-panel" aria-live="polite">
-              <p className="story-label">Access</p>
-              <h2>{formatAccessTitle(state)}</h2>
-              <p>{formatAccessDetail(state)}</p>
-              {state.status === "error" ? <p className="news-desk-access-panel__error">{state.error}</p> : null}
-              <ReaderAuthControl className="news-desk-access-panel__auth" showIdentity />
-            </section>
-          </article>
-        </div>
-      </section>
-    </main>
-  );
+  return <NewsDeskAccessGate shell={session?.shell ?? null} />;
 }
 
 function NewsDeskDashboard({
   dashboard,
   initialTab,
   initialSelection,
+  authState,
+  isRefreshing,
+  shellError,
+  onRefreshAssignments,
+  onRefreshDoctrineRecords,
+  onRefreshUserDirectory,
 }: {
   dashboard: CategorySteeringDashboard;
   initialTab: NewsDeskTab;
   initialSelection: NewsDeskSelection;
+  authState: ReaderAuthSnapshot;
+  isRefreshing: boolean;
+  shellError: string | null;
+  onRefreshAssignments?: () => Promise<void>;
+  onRefreshDoctrineRecords?: () => Promise<void>;
+  onRefreshUserDirectory?: () => Promise<void>;
 }) {
   const dataClient = useMemo(() => generateClient<Schema>(), []);
   const activeTab = initialTab;
   const [categorys, setCategorys] = useState(dashboard.categorys);
   const [categoryTrees, setTaxonomies] = useState(dashboard.categoryTrees);
   const [categoryNodes, setCategoryTreeNodes] = useState(dashboard.categoryNodes);
+  const [categoryKeywords, setCategoryKeywords] = useState(dashboard.categoryKeywords);
+  const [lexicalSteeringRules, setLexicalSteeringRules] = useState(dashboard.lexicalSteeringRules);
   const [categoryTreeLoadError, setCategoryTreeLoadError] = useState<string | null>(null);
   const [proposals, setProposals] = useState(dashboard.proposals);
   const [assignments, setAssignments] = useState(dashboard.assignments);
   const [assignmentEvents, setAssignmentEvents] = useState(dashboard.assignmentEvents);
+  const [doctrineRecords, setDoctrineRecords] = useState(dashboard.doctrineRecords);
   const [userDirectory, setUserDirectory] = useState(dashboard.userDirectory);
   const [actionState, setActionState] = useState<ActionState | null>(null);
   const [mergeSelection, setMergeSelection] = useState<MergeSelection | null>(null);
   const [isPending, startTransition] = useTransition();
   const showRhythmOverlay = useNewsroomRhythmOverlay();
+  const [doctrineDrafts, setDoctrineDrafts] = useState<DoctrineEditorState>(() => buildDoctrineEditorState(dashboard.doctrineRecords));
 
   const categoryProposals = proposals.filter(isTailoredCategoryProposal);
   const genericProposals = proposals.filter((proposal) => !isTailoredCategoryProposal(proposal));
@@ -286,13 +311,40 @@ function NewsDeskDashboard({
   }, [categorys]);
 
   useEffect(() => {
+    setCategorys(dashboard.categorys);
+  }, [dashboard.categorys]);
+
+  useEffect(() => {
+    setCategoryKeywords(dashboard.categoryKeywords);
+  }, [dashboard.categoryKeywords]);
+
+  useEffect(() => {
+    setLexicalSteeringRules(dashboard.lexicalSteeringRules);
+  }, [dashboard.lexicalSteeringRules]);
+
+  useEffect(() => {
+    setProposals(dashboard.proposals);
+  }, [dashboard.proposals]);
+
+  useEffect(() => {
     setAssignments(dashboard.assignments);
     setAssignmentEvents(dashboard.assignmentEvents);
   }, [dashboard.assignments, dashboard.assignmentEvents]);
 
   useEffect(() => {
+    setDoctrineRecords(dashboard.doctrineRecords);
+    setDoctrineDrafts(buildDoctrineEditorState(dashboard.doctrineRecords));
+  }, [dashboard.doctrineRecords]);
+
+  useEffect(() => {
     setUserDirectory(dashboard.userDirectory);
   }, [dashboard.userDirectory]);
+
+  useEffect(() => {
+    setTaxonomies(dashboard.categoryTrees);
+    setCategoryTreeNodes(dashboard.categoryNodes);
+    setCategoryTreeLoadError(null);
+  }, [dashboard.categoryNodes, dashboard.categoryTrees]);
 
   useEffect(() => {
     if (dashboard.isDemo) {
@@ -380,6 +432,58 @@ function NewsDeskDashboard({
     });
   }
 
+  function createLexicalSteeringRule(draft: LexicalRuleDraft) {
+    const normalizedTerm = normalizeKeywordTerm(draft.term);
+    if (!normalizedTerm) {
+      setActionState({ id: "lexical-rule-empty", message: "keyword term is required", tone: "error" });
+      return;
+    }
+    const now = new Date().toISOString();
+    const rule: LexicalSteeringRuleRecord = {
+      id: `lexical-rule-ignored-keyword-${hashUiKey([
+        draft.scope,
+        draft.corpusId ?? "",
+        draft.classifierId ?? "",
+        draft.categorySetId ?? "",
+        draft.categoryKey ?? "",
+        normalizedTerm,
+      ])}`,
+      ruleKind: "ignored_keyword",
+      term: draft.term.trim(),
+      normalizedTerm,
+      scope: draft.scope,
+      status: "active",
+      corpusId: draft.corpusId ?? null,
+      classifierId: draft.classifierId ?? null,
+      categorySetId: draft.categorySetId ?? null,
+      categoryKey: draft.categoryKey ?? null,
+      note: draft.note ?? null,
+      source: "newsroom",
+      createdBy: authState.label,
+      createdAt: now,
+      updatedAt: now,
+      metadata: { createdFrom: "newsroom/topics" },
+    };
+    setActionState({ id: rule.id, message: "ignore rule pending", tone: "pending" });
+    if (dashboard.isDemo) {
+      setLexicalSteeringRules((current) => upsertLocalLexicalRule(current, rule));
+      setActionState({ id: rule.id, message: `ignoring "${rule.term}"`, tone: "ok" });
+      return;
+    }
+    startTransition(() => {
+      void (async () => {
+        try {
+          const response = await dataClient.models.LexicalSteeringRule.create(rule as never, { authMode: USER_POOL_AUTH_MODE });
+          assertNoGraphQLErrors(response.errors);
+          setLexicalSteeringRules((current) => upsertLocalLexicalRule(current, rule));
+          setActionState({ id: rule.id, message: `ignoring "${rule.term}"`, tone: "ok" });
+        } catch (error) {
+          setActionState({ id: rule.id, message: error instanceof Error ? error.message : "ignore rule failed", tone: "error" });
+        }
+      })();
+    });
+  }
+
   function runAssignmentAction(assignment: AssignmentRecord, action: AssignmentAction, note = "") {
     setActionState({ id: assignment.id, message: `${action} pending`, tone: "pending" });
     if (dashboard.isDemo) {
@@ -415,11 +519,13 @@ function NewsDeskDashboard({
       setAssignmentEvents(dashboard.assignmentEvents);
       return;
     }
-    const state = await loadEditorNewsDeskState();
-    if (state.status === "ready" && state.dashboard) {
-      setAssignments(state.dashboard.assignments);
-      setAssignmentEvents(state.dashboard.assignmentEvents);
+    if (onRefreshAssignments) {
+      await onRefreshAssignments();
+      return;
     }
+    const state = await loadEditorAssignmentsData();
+    setAssignments(state.assignments);
+    setAssignmentEvents(state.assignmentEvents);
   }
 
   async function refreshEditorUserDirectory() {
@@ -427,10 +533,26 @@ function NewsDeskDashboard({
       setUserDirectory(dashboard.userDirectory);
       return;
     }
-    const state = await loadEditorNewsDeskState();
-    if (state.status === "ready" && state.dashboard) {
-      setUserDirectory(state.dashboard.userDirectory);
+    if (onRefreshUserDirectory) {
+      await onRefreshUserDirectory();
+      return;
     }
+    setUserDirectory(await loadEditorUserDirectoryData());
+  }
+
+  async function refreshEditorDoctrineRecords() {
+    if (dashboard.isDemo) {
+      setDoctrineRecords(dashboard.doctrineRecords);
+      setDoctrineDrafts(buildDoctrineEditorState(dashboard.doctrineRecords));
+      return;
+    }
+    if (onRefreshDoctrineRecords) {
+      await onRefreshDoctrineRecords();
+      return;
+    }
+    const nextRecords = await loadEditorDoctrineRecordsData();
+    setDoctrineRecords(nextRecords);
+    setDoctrineDrafts(buildDoctrineEditorState(nextRecords));
   }
 
   async function refreshEditorCategoryTreeState() {
@@ -444,6 +566,57 @@ function NewsDeskDashboard({
     setTaxonomies(state.categoryTrees);
     setCategoryTreeNodes(state.categoryNodes);
     setCategoryTreeLoadError(state.error);
+  }
+
+  function updateDoctrineDraft(kind: DoctrineKind, text: string) {
+    setDoctrineDrafts((current) => ({ ...current, [kind]: text }));
+  }
+
+  function saveDoctrine(kind: DoctrineKind) {
+    const definition = requireDoctrineDefinition(kind);
+    const currentRecord = doctrineRecords.find((record) => record.slug === definition.slug) ?? null;
+    const recordKey = definition.slug;
+    setActionState({ id: recordKey, message: "doctrine save pending", tone: "pending" });
+
+    const nextBody = doctrineTextToBody(doctrineDrafts[kind]);
+    const now = new Date().toISOString();
+
+    if (dashboard.isDemo) {
+      const nextRecord = buildDoctrineRecord(kind, nextBody, currentRecord, now, "Papyrus newsroom");
+      setDoctrineRecords((current) => replaceDoctrineRecord(current, nextRecord));
+      setActionState({ id: recordKey, message: "doctrine saved", tone: "ok" });
+      return;
+    }
+
+    startTransition(() => {
+      void (async () => {
+        try {
+          const actorLabel = await getNewsDeskActorLabel();
+          const nextRecord = buildDoctrineRecord(kind, nextBody, currentRecord, now, actorLabel);
+          if (currentRecord) {
+            const response = await dataClient.models.Item.update({
+              id: currentRecord.id,
+              title: nextRecord.title,
+              headline: nextRecord.headline,
+              body: nextRecord.body,
+              editorial: nextRecord.editorial,
+              updatedAt: nextRecord.updatedAt,
+            }, { authMode: USER_POOL_AUTH_MODE });
+            assertNoGraphQLErrors(response.errors);
+            if (!response.data?.id) throw new Error("Doctrine update returned no saved record.");
+          } else {
+            const response = await dataClient.models.Item.create(nextRecord as never, { authMode: USER_POOL_AUTH_MODE });
+            assertNoGraphQLErrors(response.errors);
+            if (!response.data?.id) throw new Error("Doctrine create returned no saved record.");
+          }
+          await refreshEditorDoctrineRecords();
+          setActionState({ id: recordKey, message: "doctrine saved", tone: "ok" });
+        } catch (error) {
+          setActionState({ id: recordKey, message: error instanceof Error ? error.message : "doctrine save failed", tone: "error" });
+          await refreshEditorDoctrineRecords();
+        }
+      })();
+    });
   }
 
   async function executeAssignmentAction(assignmentId: string, action: AssignmentAction, actorLabel: string, note: string) {
@@ -611,7 +784,14 @@ function NewsDeskDashboard({
   }
 
   return (
-    <main className="site-shell news-desk-shell" data-news-desk data-category-steering data-category-steering-demo={dashboard.isDemo ? "true" : "false"} data-rhythm-overlay={showRhythmOverlay ? "true" : "false"}>
+    <main
+      className="site-shell news-desk-shell"
+      data-news-desk
+      data-category-steering
+      data-category-steering-demo={dashboard.isDemo ? "true" : "false"}
+      data-news-desk-refreshing={isRefreshing ? "true" : "false"}
+      data-rhythm-overlay={showRhythmOverlay ? "true" : "false"}
+    >
       <section className="scroll-edition news-desk-edition">
         <div className="paper-page paper-page--front paper-page--active">
           <article className="paper-page-content paper-page-content--front news-desk-page" aria-labelledby="news-desk-title">
@@ -623,13 +803,13 @@ function NewsDeskDashboard({
           <div className="masthead__meta" aria-label="Newsroom edition status">
             <span>Steering Section</span>
             <span>{mastheadSecondLabel}</span>
-            <span>{dashboard.isDemo ? "Demo Desk" : <ReaderAuthControl className="news-desk-auth-control" showIdentity />}</span>
+            <span>{dashboard.isDemo ? "Demo Desk" : <ReaderAuthControl className="news-desk-auth-control" showIdentity authState={authState} />}</span>
           </div>
         </header>
 
         <nav className="news-desk-tabs" aria-label="Newsroom sections">
           {NEWS_DESK_TABS.map((tab) => (
-            <a
+            <Link
               key={tab.id}
               aria-current={tab.id === activeTab ? "page" : undefined}
               className={`news-desk-tab${tab.id === activeTab ? " news-desk-tab--active" : ""}`}
@@ -638,7 +818,7 @@ function NewsDeskDashboard({
             >
               <span>{tab.label}</span>
               <small>{tab.detail}</small>
-            </a>
+            </Link>
           ))}
         </nav>
 
@@ -654,12 +834,23 @@ function NewsDeskDashboard({
             <StatusMetric label="Concepts" value={String(dashboard.semanticNodes.length)} detail={`${dashboard.semanticRelations.length} semantic links`} />
             <StatusMetric label="References" value={String(dashboard.references.length)} detail={`${dashboard.referenceAttachments.length} private files`} />
             <StatusMetric label="Assignments" value={String(assignmentMetrics.total)} detail={`${assignmentMetrics.open} open / ${assignmentMetrics.claimed} claimed`} />
+            <StatusMetric label="Doctrine" value={String(doctrineRecords.length)} detail="mission and policy slots" />
           </aside>
         </section>
 
         {dashboard.loadError ? (
           <div className="category-steering-alert" role="status">
             {dashboard.loadError}
+          </div>
+        ) : null}
+        {isRefreshing ? (
+          <div className="category-steering-alert" role="status">
+            Refreshing newsroom data...
+          </div>
+        ) : null}
+        {!isRefreshing && shellError ? (
+          <div className="category-steering-alert" role="status">
+            {shellError}
           </div>
         ) : null}
         {actionState ? (
@@ -672,6 +863,7 @@ function NewsDeskDashboard({
           <OverviewDeskView
             assignmentMetrics={assignmentMetrics}
             dashboard={dashboard}
+            doctrineCount={doctrineRecords.length}
             graph={graph}
             latestImport={latestImport}
             userDirectory={userDirectory}
@@ -698,6 +890,7 @@ function NewsDeskDashboard({
             artifacts={dashboard.artifacts}
             canonicalCategorys={canonicalCategorys}
             categoryByUid={categoryByUid}
+            categoryKeywords={categoryKeywords}
             categoryProposals={categoryProposals}
             categoryTreeLoadError={categoryTreeLoadError}
             categoryNodes={activeCategoryTreeNodes}
@@ -709,7 +902,9 @@ function NewsDeskDashboard({
             importRuns={dashboard.importRuns}
             initialCategoryLineageId={initialSelection.category}
             knowledgeComments={dashboard.knowledgeComments}
+            lexicalSteeringRules={lexicalSteeringRules}
             onCategorySave={saveCategory}
+            onLexicalRuleCreate={createLexicalSteeringRule}
             onProposalAction={runProposalAction}
             proposals={proposals}
             referenceAttachments={dashboard.referenceAttachments}
@@ -740,6 +935,16 @@ function NewsDeskDashboard({
             onAction={runAssignmentAction}
           />
         ) : null}
+        {activeTab === "doctrine" ? (
+          <DoctrineDeskView
+            doctrineDrafts={doctrineDrafts}
+            doctrineRecords={doctrineRecords}
+            disabled={isPending}
+            onChange={updateDoctrineDraft}
+            onSave={saveDoctrine}
+            actionState={actionState}
+          />
+        ) : null}
           </article>
         </div>
       </section>
@@ -750,12 +955,14 @@ function NewsDeskDashboard({
 function OverviewDeskView({
   assignmentMetrics,
   dashboard,
+  doctrineCount,
   graph,
   latestImport,
   userDirectory,
 }: {
   assignmentMetrics: AssignmentMetrics;
   dashboard: CategorySteeringDashboard;
+  doctrineCount: number;
   graph: SemanticGraph;
   latestImport: CategorySteeringImportRun | null;
   userDirectory: UserDirectoryEntry[];
@@ -773,6 +980,7 @@ function OverviewDeskView({
             <DeskLinkCard href="/newsroom/topics" label="Topics" value={dashboard.categorys.length} detail={`${dashboard.proposals.filter((proposal) => proposal.status === "proposed").length} open proposals`} />
             <DeskLinkCard href="/newsroom/users" label="Users" value={userDirectory.length} detail={dashboard.canManageUsers ? "role desk available" : "admin role required"} />
             <DeskLinkCard href="/newsroom/assignments" label="Assignments" value={assignmentMetrics.total} detail={`${assignmentMetrics.open} open work items`} />
+            <DeskLinkCard href="/newsroom/doctrine" label="Doctrine" value={doctrineCount} detail="mission and policy" />
           </div>
         </section>
 
@@ -792,6 +1000,128 @@ function OverviewDeskView({
         <SemanticDetailPanel graph={graph} selected={selectedSummary} />
       </aside>
     </div>
+  );
+}
+
+function DoctrineDeskView({
+  doctrineDrafts,
+  doctrineRecords,
+  disabled,
+  onChange,
+  onSave,
+  actionState,
+}: {
+  doctrineDrafts: DoctrineEditorState;
+  doctrineRecords: DoctrineRecord[];
+  disabled: boolean;
+  onChange: (kind: DoctrineKind, text: string) => void;
+  onSave: (kind: DoctrineKind) => void;
+  actionState: ActionState | null;
+}) {
+  return (
+    <div className="news-desk-columns" data-news-desk-section="doctrine">
+      <div className="news-desk-main-column">
+        <section className="category-steering-section category-steering-section--lead" aria-labelledby="newsroom-doctrine-title">
+          <SectionHeader title="Editorial Doctrine" detail="Private newsroom doctrine records" />
+          <div className="news-desk-doctrine-list">
+            {DOCTRINE_DEFINITIONS.map((definition) => {
+              const record = doctrineRecords.find((entry) => entry.slug === definition.slug) ?? null;
+              const statusId = definition.slug;
+              const statusMessage = actionState?.id === statusId ? actionState : null;
+              return (
+                <DoctrineEditorCard
+                  key={definition.kind}
+                  body={doctrineDrafts[definition.kind]}
+                  definition={definition}
+                  disabled={disabled}
+                  record={record}
+                  statusMessage={statusMessage}
+                  onChange={onChange}
+                  onSave={onSave}
+                />
+              );
+            })}
+          </div>
+        </section>
+      </div>
+
+      <aside className="news-desk-rail-column">
+        <section className="category-steering-section" aria-labelledby="doctrine-notes-title">
+          <SectionHeader title="Doctrine Notes" detail="Singleton editor records" />
+          <div className="news-desk-ledger-list">
+            <article className="news-desk-ledger-item">
+              <header>
+                <strong>Editorial Mission</strong>
+                <span>Fixed slot</span>
+              </header>
+              <p>Use this slot for the publication&apos;s purpose, audience, and coverage focus.</p>
+            </article>
+            <article className="news-desk-ledger-item">
+              <header>
+                <strong>Editorial Policy</strong>
+                <span>Fixed slot</span>
+              </header>
+              <p>Use this slot for sourcing, standards, review rules, corrections, and similar newsroom doctrine.</p>
+            </article>
+          </div>
+        </section>
+      </aside>
+    </div>
+  );
+}
+
+function DoctrineEditorCard({
+  body,
+  definition,
+  disabled,
+  record,
+  statusMessage,
+  onChange,
+  onSave,
+}: {
+  body: string;
+  definition: { kind: DoctrineKind; label: string; slug: string };
+  disabled: boolean;
+  record: DoctrineRecord | null;
+  statusMessage: ActionState | null;
+  onChange: (kind: DoctrineKind, text: string) => void;
+  onSave: (kind: DoctrineKind) => void;
+}) {
+  const paragraphCount = doctrineTextToBody(body).length;
+  return (
+    <article className="news-desk-doctrine-card" data-news-desk-doctrine={definition.kind}>
+      <header className="news-desk-doctrine-card__header">
+        <div>
+          <p className="story-label">Doctrine</p>
+          <h3>{definition.label}</h3>
+        </div>
+        <span>{record ? "Saved record" : "Empty slot"}</span>
+      </header>
+      <label className="news-desk-doctrine-card__field">
+        <span>{definition.label}</span>
+        <textarea
+          data-news-desk-doctrine-input={definition.kind}
+          disabled={disabled}
+          onChange={(event) => onChange(definition.kind, event.target.value)}
+          placeholder={`Enter the ${definition.label.toLowerCase()}.`}
+          value={body}
+        />
+      </label>
+      <div className="news-desk-doctrine-card__footer">
+        <span>{paragraphCount} paragraph{paragraphCount === 1 ? "" : "s"}</span>
+        <div className="news-desk-doctrine-card__actions">
+          {statusMessage ? <span data-tone={statusMessage.tone}>{statusMessage.message}</span> : null}
+          <button
+            type="button"
+            data-news-desk-doctrine-save={definition.kind}
+            disabled={disabled}
+            onClick={() => onSave(definition.kind)}
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    </article>
   );
 }
 
@@ -1015,6 +1345,7 @@ function TopicsDeskView({
   artifacts,
   canonicalCategorys,
   categoryByUid,
+  categoryKeywords,
   categoryProposals,
   categoryTreeLoadError,
   categoryNodes,
@@ -1026,7 +1357,9 @@ function TopicsDeskView({
   importRuns,
   initialCategoryLineageId,
   knowledgeComments,
+  lexicalSteeringRules,
   onCategorySave,
+  onLexicalRuleCreate,
   onProposalAction,
   proposals,
   referenceAttachments,
@@ -1038,6 +1371,7 @@ function TopicsDeskView({
   artifacts: CategorySteeringArtifact[];
   canonicalCategorys: CategorySteeringCategory[];
   categoryByUid: Map<string, CategorySteeringCategory>;
+  categoryKeywords: CategoryKeywordRecord[];
   categoryProposals: CategorySteeringProposal[];
   categoryTreeLoadError: string | null;
   categoryNodes: CategorySteeringCategoryTreeNode[];
@@ -1049,7 +1383,9 @@ function TopicsDeskView({
   importRuns: CategorySteeringImportRun[];
   initialCategoryLineageId?: string | null;
   knowledgeComments: KnowledgeCommentRecord[];
+  lexicalSteeringRules: LexicalSteeringRuleRecord[];
   onCategorySave: (category: CategorySteeringCategory, update: Pick<CategorySteeringCategory, "displayName" | "shortTitle" | "subtitle" | "description">) => void;
+  onLexicalRuleCreate: (draft: LexicalRuleDraft) => void;
   onProposalAction: (proposal: CategorySteeringProposal, action: ReviewAction) => void;
   proposals: CategorySteeringProposal[];
   referenceAttachments: ReferenceAttachmentRecord[];
@@ -1062,11 +1398,16 @@ function TopicsDeskView({
         <AcceptedCategoryTreeSection
           activeCategoryTree={activeCategoryTree}
           canonicalCategorys={canonicalCategorys}
+          categoryByUid={categoryByUid}
+          categoryKeywords={categoryKeywords}
           disabled={disabled}
           graph={graph}
           initialCategoryLineageId={initialCategoryLineageId}
           onAction={onProposalAction}
+          onCategorySave={onCategorySave}
+          onLexicalRuleCreate={onLexicalRuleCreate}
           proposals={proposals}
+          lexicalSteeringRules={lexicalSteeringRules}
           categoryTreeLoadError={categoryTreeLoadError}
           categoryNodes={categoryNodes}
         />
@@ -1176,23 +1517,47 @@ function ReferencesDeskView({
 }
 
 function ReferenceLedger({ references, selectedLineageId }: { references: ReferenceRecord[]; selectedLineageId?: string | null }) {
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(0);
+  const normalizedQuery = query.trim().toLowerCase();
+  const sortedReferences = useMemo(() => sortReferencesByRecency(references), [references]);
+  const filteredReferences = useMemo(() => (
+    normalizedQuery
+      ? sortedReferences.filter((reference) => referenceMatchesQuery(reference, normalizedQuery))
+      : sortedReferences
+  ), [normalizedQuery, sortedReferences]);
+  const pageCount = Math.max(1, Math.ceil(filteredReferences.length / REFERENCE_PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount - 1);
+  const visibleReferences = filteredReferences.slice(currentPage * REFERENCE_PAGE_SIZE, (currentPage + 1) * REFERENCE_PAGE_SIZE);
+
+  useEffect(() => {
+    setPage(0);
+  }, [normalizedQuery, references]);
+
   return (
-    <div className="news-desk-object-list" data-news-desk-reference-ledger>
-      {references.length ? references.map((reference) => {
-        const lineageId = reference.lineageId ?? reference.id;
-        return (
-          <a
-            className={`news-desk-object-row${selectedLineageId === lineageId ? " news-desk-object-row--active" : ""}`}
-            data-reference-lineage={lineageId}
-            href={newsDeskHrefForSemanticObject("reference", lineageId)}
-            key={reference.id}
-          >
-            <strong>{reference.title ?? reference.externalItemId}</strong>
-            <span>{reference.mediaType ?? "metadata"} / {reference.storagePath ?? reference.sourceUri ?? "no file path"}</span>
-          </a>
-        );
-      }) : <EmptyRow label="No private references imported" />}
-    </div>
+    <>
+      <ReferenceListControls
+        label={`${filteredReferences.length} of ${references.length} references`}
+        onNext={() => setPage((value) => Math.min(value + 1, pageCount - 1))}
+        onPrevious={() => setPage((value) => Math.max(value - 1, 0))}
+        onQueryChange={setQuery}
+        page={currentPage}
+        pageCount={pageCount}
+        query={query}
+      />
+      <div className="news-desk-object-list" data-news-desk-reference-ledger>
+        {visibleReferences.length ? visibleReferences.map((reference) => {
+          const lineageId = reference.lineageId ?? reference.id;
+          return (
+            <ReferenceRow
+              active={selectedLineageId === lineageId}
+              key={reference.id}
+              reference={reference}
+            />
+          );
+        }) : <EmptyRow label={references.length ? "No references match this search" : "No private references imported"} />}
+      </div>
+    </>
   );
 }
 
@@ -1270,13 +1635,13 @@ function NeighborGroups({ groups }: { groups: SemanticNeighborGroup[] }) {
 
 function DeskLinkCard({ href, label, value, detail }: { href: string; label: string; value: number; detail: string }) {
   return (
-    <a className="news-desk-ledger-item news-desk-ledger-item--link" href={href}>
+    <Link className="news-desk-ledger-item news-desk-ledger-item--link" href={href}>
       <header>
         <strong>{label}</strong>
         <span>{value}</span>
       </header>
       <p>{detail}</p>
-    </a>
+    </Link>
   );
 }
 
@@ -1513,6 +1878,7 @@ function formatDeskSectionLabel(section: NewsDeskTab): string {
   if (section === "concepts") return "Concepts Desk";
   if (section === "references") return "References Desk";
   if (section === "assignments") return "Assignments Desk";
+  if (section === "doctrine") return "Doctrine Desk";
   return "Knowledge Desk";
 }
 
@@ -1522,6 +1888,7 @@ function formatDeskSectionHeadline(section: NewsDeskTab): string {
   if (section === "concepts") return "Semantic Concepts Connect The Knowledge Graph";
   if (section === "references") return "Reference Metadata Leads To Private Corpus Files";
   if (section === "assignments") return "Assignment Operations Stay Ready For The Reporting Queue";
+  if (section === "doctrine") return "Editorial Doctrine Should Stay Explicit Inside The Newsroom";
   return "The Desk Opens On The Whole Knowledge Wire";
 }
 
@@ -1531,7 +1898,8 @@ function formatDeskSectionLede(section: NewsDeskTab): string {
   if (section === "concepts") return "Graph concepts are private semantic nodes. Use them to surf from ontology terms to references, topics, comments, and Papyrus items.";
   if (section === "references") return "References store strict metadata and attachment paths only. Source contents stay in S3 and corpus storage.";
   if (section === "assignments") return "This section keeps the assignment desk visible while taxonomy and ontology monitoring take priority.";
-  return "Use the left sections to move between users, topics, semantic concepts, references, and downstream newsroom work.";
+  if (section === "doctrine") return "Editors can keep the publication's mission and policy in two fixed private doctrine slots without pushing them into reader-facing content.";
+  return "Use the left sections to move between users, topics, semantic concepts, references, doctrine, and downstream newsroom work.";
 }
 
 function selectReferenceSummary(graph: SemanticGraph, references: ReferenceRecord[], lineageId?: string | null): SemanticObjectSummary | null {
@@ -1666,17 +2034,52 @@ function readTextClaim(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-function formatAccessTitle(state: EditorNewsDeskState): string {
-  if (state.status === "loading") return "Checking Desk Credentials";
-  if (state.status === "forbidden") return "Editor Role Required";
-  if (state.status === "error") return "Newsroom Unavailable";
+function NewsDeskAccessGate({ shell }: { shell: NewsDeskShellState | null }) {
+  const showRhythmOverlay = useNewsroomRhythmOverlay();
+  const authState = shell?.auth ?? { status: "loading", label: "Checking sign-in" };
+
+  return (
+    <main className="site-shell news-desk-shell" data-news-desk-access={shell?.phase ?? "checkingAccess"} data-rhythm-overlay={showRhythmOverlay ? "true" : "false"}>
+      <section className="scroll-edition news-desk-edition">
+        <div className="paper-page paper-page--front paper-page--active">
+          <article className="paper-page-content paper-page-content--front news-desk-page news-desk-page--gate" aria-labelledby="news-desk-access-title">
+            <header className="masthead news-desk-masthead">
+              <div className="masthead__rule" />
+              <h1 id="news-desk-access-title">
+                <span>NEWSROOM</span>
+              </h1>
+              <div className="masthead__meta" aria-label="Newsroom edition status">
+                <span>Steering Section</span>
+                <span>Restricted Desk</span>
+                <span><ReaderAuthControl className="news-desk-auth-control" showIdentity authState={authState} /></span>
+              </div>
+            </header>
+            <section className="news-desk-access-panel" aria-live="polite">
+              <p className="story-label">Access</p>
+              <h2>{formatAccessTitle(shell)}</h2>
+              <p>{formatAccessDetail(shell)}</p>
+              {shell?.error ? <p className="news-desk-access-panel__error">{shell.error}</p> : null}
+              <p className="news-desk-access-panel__auth">Use the masthead sign-in control to enter the desk.</p>
+            </section>
+          </article>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function formatAccessTitle(state: NewsDeskShellState | null): string {
+  if (!state || state.phase === "checkingAccess" || state.phase === "loadingDesk") return "Checking Desk Credentials";
+  if (state.phase === "forbidden") return "Editor Role Required";
+  if (state.phase === "error") return "Newsroom Unavailable";
   return "Editor Sign-In Required";
 }
 
-function formatAccessDetail(state: EditorNewsDeskState): string {
-  if (state.status === "loading") return "Papyrus is checking the current browser session before loading steering state.";
-  if (state.status === "forbidden") return "This account is signed in, but the Cognito session does not include the editor or admin group.";
-  if (state.status === "error") return "Papyrus could not verify this editor session or load the private Newsroom data.";
+function formatAccessDetail(state: NewsDeskShellState | null): string {
+  if (!state || state.phase === "checkingAccess") return "Papyrus is checking the current browser session before loading steering state.";
+  if (state.phase === "loadingDesk") return "Papyrus verified the browser session and is loading private Newsroom records.";
+  if (state.phase === "forbidden") return "This account is signed in, but the Cognito session does not include the editor or admin group.";
+  if (state.phase === "error") return "Papyrus could not verify this editor session or load the private Newsroom data.";
   return "Sign in with an editor or admin account to inspect category, category tree, ontology, and graph steering.";
 }
 
@@ -1742,21 +2145,31 @@ function GenericProposalQueue({
 function AcceptedCategoryTreeSection({
   activeCategoryTree,
   canonicalCategorys,
+  categoryByUid,
+  categoryKeywords,
   disabled,
   graph,
   initialCategoryLineageId,
   onAction,
+  onCategorySave,
+  onLexicalRuleCreate,
   proposals,
+  lexicalSteeringRules,
   categoryTreeLoadError,
   categoryNodes,
 }: {
   activeCategoryTree: CategorySteeringCategoryTree | null;
   canonicalCategorys: CategorySteeringCategory[];
+  categoryByUid: Map<string, CategorySteeringCategory>;
+  categoryKeywords: CategoryKeywordRecord[];
   disabled: boolean;
   graph: SemanticGraph;
   initialCategoryLineageId?: string | null;
   onAction: (proposal: CategorySteeringProposal, action: ReviewAction) => void;
+  onCategorySave: (category: CategorySteeringCategory, update: Pick<CategorySteeringCategory, "displayName" | "shortTitle" | "subtitle" | "description">) => void;
+  onLexicalRuleCreate: (draft: LexicalRuleDraft) => void;
   proposals: CategorySteeringProposal[];
+  lexicalSteeringRules: LexicalSteeringRuleRecord[];
   categoryTreeLoadError: string | null;
   categoryNodes: CategorySteeringCategoryTreeNode[];
 }) {
@@ -1786,6 +2199,10 @@ function AcceptedCategoryTreeSection({
     : categoryTreeLoadError
       ? "CategoryTree unavailable"
       : "Editor sign-in required";
+  const editableCategory = focusedCategoryKey
+    ? categoryByUid.get(focusedCategoryKey)
+      ?? (selectedRoot?.category.categoryKey === focusedCategoryKey ? selectedRoot.category : undefined)
+    : selectedRoot?.category;
 
   useEffect(() => {
     if (!roots.length) {
@@ -1821,6 +2238,8 @@ function AcceptedCategoryTreeSection({
             {roots.length ? roots.map((root) => {
               const rootNode = root.node ?? categoryToCategoryTreeNode(root.category);
               const relatedProposalCount = countRelatedCategoryTreeProposals(rootNode.categoryKey, root.subcategorys, proposals);
+              const rootReferenceCount = graph.referencesForCategory(categoryLineageId(rootNode)).length;
+              const previewKeywords = keywordsForCategory(categoryKeywords, rootNode.categoryKey).slice(0, 4);
               const isSelected = selectedRoot?.category.categoryKey === root.category.categoryKey;
               return (
                 <button
@@ -1836,22 +2255,33 @@ function AcceptedCategoryTreeSection({
                 >
                   <span>{rootNode.shortTitle ?? deriveShortTitle(rootNode.displayName)}</span>
                   <strong>{rootNode.displayName}</strong>
-                  <small>{root.subcategorys.length} accepted / {root.proposedSubcategorys.length} proposed / {relatedProposalCount} notes</small>
+                  <small>{rootReferenceCount} refs / {root.subcategorys.length} accepted / {root.proposedSubcategorys.length} proposed / {relatedProposalCount} notes</small>
+                  {previewKeywords.length ? (
+                    <em>{previewKeywords.map((keyword) => keyword.keyword).join(" / ")}</em>
+                  ) : null}
                 </button>
               );
             }) : <EmptyRow label="No canonical roots available for category-tree display" />}
           </div>
           {selectedRoot ? (
-            <CanonicalTopicDetail
-              disabled={disabled}
-              focusedCategoryKey={focusedCategoryKey}
-              focusedNode={focusedNode}
-              graph={graph}
-              onAction={onAction}
-              onFocusCategory={setFocusedCategoryKey}
-              proposals={proposals}
-              root={selectedRoot}
-            />
+            <>
+              <CanonicalTopicDetail
+                disabled={disabled}
+                focusedCategoryKey={focusedCategoryKey}
+                focusedNode={focusedNode}
+                graph={graph}
+                categoryKeywords={categoryKeywords}
+                lexicalSteeringRules={lexicalSteeringRules}
+                onAction={onAction}
+                onFocusCategory={setFocusedCategoryKey}
+                onLexicalRuleCreate={onLexicalRuleCreate}
+                proposals={proposals}
+                root={selectedRoot}
+              />
+              {editableCategory ? (
+                <CategoryEditor category={editableCategory} disabled={disabled} onSave={onCategorySave} />
+              ) : null}
+            </>
           ) : null}
         </div>
       )}
@@ -1867,26 +2297,33 @@ type CanonicalTopicRoot = {
 };
 
 function CanonicalTopicDetail({
+  categoryKeywords,
   disabled,
   focusedCategoryKey,
   focusedNode,
   graph,
+  lexicalSteeringRules,
   onAction,
   onFocusCategory,
+  onLexicalRuleCreate,
   proposals,
   root,
 }: {
+  categoryKeywords: CategoryKeywordRecord[];
   disabled: boolean;
   focusedCategoryKey: string | null;
   focusedNode: CategorySteeringCategoryTreeNode | null;
   graph: SemanticGraph;
+  lexicalSteeringRules: LexicalSteeringRuleRecord[];
   onAction: (proposal: CategorySteeringProposal, action: ReviewAction) => void;
   onFocusCategory: (categoryKey: string) => void;
+  onLexicalRuleCreate: (draft: LexicalRuleDraft) => void;
   proposals: CategorySteeringProposal[];
   root: CanonicalTopicRoot;
 }) {
   const rootNode = root.node ?? categoryToCategoryTreeNode(root.category);
   const relatedProposalCount = countRelatedCategoryTreeProposals(rootNode.categoryKey, root.subcategorys, proposals);
+  const rootReferenceCount = graph.referencesForCategory(categoryLineageId(rootNode)).length;
 
   return (
     <article className="news-desk-topic-detail" data-news-desk-category-tree-root={rootNode.categoryKey}>
@@ -1897,6 +2334,10 @@ function CanonicalTopicDetail({
           <span>{rootNode.shortTitle ?? deriveShortTitle(rootNode.displayName)}</span>
         </div>
         <dl>
+          <div>
+            <dt>References</dt>
+            <dd>{rootReferenceCount}</dd>
+          </div>
           <div>
             <dt>Accepted Subtopics</dt>
             <dd>{root.subcategorys.length}</dd>
@@ -1926,6 +2367,7 @@ function CanonicalTopicDetail({
             <TopicFocusButton
               active={focusedCategoryKey === rootNode.categoryKey}
               count={graph.referencesForCategory(categoryLineageId(rootNode)).length}
+              dataCategoryKey={rootNode.categoryKey}
               label={rootNode.shortTitle ?? deriveShortTitle(rootNode.displayName)}
               title={rootNode.displayName}
               onClick={() => onFocusCategory(rootNode.categoryKey)}
@@ -1934,6 +2376,7 @@ function CanonicalTopicDetail({
               <TopicFocusButton
                 active={focusedCategoryKey === subcategory.categoryKey}
                 count={graph.referencesForCategory(categoryLineageId(subcategory)).length}
+                dataCategoryKey={subcategory.categoryKey}
                 key={subcategory.id}
                 label={subcategory.shortTitle ?? deriveShortTitle(subcategory.displayName)}
                 title={subcategory.displayName}
@@ -1968,7 +2411,14 @@ function CanonicalTopicDetail({
           ) : null}
         </div>
 
-        <TopicSemanticContext graph={graph} node={focusedNode ?? rootNode} />
+        <TopicSemanticContext
+          categoryKeywords={categoryKeywords}
+          disabled={disabled}
+          graph={graph}
+          lexicalSteeringRules={lexicalSteeringRules}
+          node={focusedNode ?? rootNode}
+          onLexicalRuleCreate={onLexicalRuleCreate}
+        />
       </div>
     </article>
   );
@@ -1977,18 +2427,26 @@ function CanonicalTopicDetail({
 function TopicFocusButton({
   active,
   count,
+  dataCategoryKey,
   label,
   onClick,
   title,
 }: {
   active: boolean;
   count: number;
+  dataCategoryKey?: string;
   label: string;
   onClick: () => void;
   title: string;
 }) {
   return (
-    <button className="news-desk-topic-focus-button" data-selected={active || undefined} onClick={onClick} type="button">
+    <button
+      className="news-desk-topic-focus-button"
+      data-news-desk-subcategory={dataCategoryKey}
+      data-selected={active || undefined}
+      onClick={onClick}
+      type="button"
+    >
       <strong>{label}</strong>
       <span>{title}</span>
       <small>{count} refs</small>
@@ -1996,9 +2454,27 @@ function TopicFocusButton({
   );
 }
 
-function TopicSemanticContext({ graph, node }: { graph: SemanticGraph; node: CategorySteeringCategoryTreeNode }) {
+function TopicSemanticContext({
+  categoryKeywords,
+  disabled,
+  graph,
+  lexicalSteeringRules,
+  node,
+  onLexicalRuleCreate,
+}: {
+  categoryKeywords: CategoryKeywordRecord[];
+  disabled: boolean;
+  graph: SemanticGraph;
+  lexicalSteeringRules: LexicalSteeringRuleRecord[];
+  node: CategorySteeringCategoryTreeNode;
+  onLexicalRuleCreate: (draft: LexicalRuleDraft) => void;
+}) {
   const lineageId = categoryLineageId(node);
-  const references = graph.referencesForCategory(lineageId).slice(0, 8);
+  const [referencePage, setReferencePage] = useState(0);
+  const references = useMemo(() => sortReferenceSummariesByRecency(graph.referencesForCategory(lineageId)), [graph, lineageId]);
+  const pageCount = Math.max(1, Math.ceil(references.length / TOPIC_REFERENCE_PAGE_SIZE));
+  const currentPage = Math.min(referencePage, pageCount - 1);
+  const visibleReferences = references.slice(currentPage * TOPIC_REFERENCE_PAGE_SIZE, (currentPage + 1) * TOPIC_REFERENCE_PAGE_SIZE);
   const concepts = uniqueSemanticSummaries(
     graph.neighbors("category", lineageId)
       .flatMap((group) => group.objects)
@@ -2006,12 +2482,40 @@ function TopicSemanticContext({ graph, node }: { graph: SemanticGraph; node: Cat
   ).slice(0, 8);
   const neighborGroups = graph.neighbors("category", lineageId);
 
+  useEffect(() => {
+    setReferencePage(0);
+  }, [lineageId]);
+
   return (
     <aside className="news-desk-topic-context" data-news-desk-topic-context={node.categoryKey}>
       <p className="story-label">Selected Topic</p>
       <h4>{node.displayName}</h4>
       {node.subtitle ? <p className="category-steering-categoryTree-subtitle">{node.subtitle}</p> : null}
       <p>{node.description ?? "No description imported for this topic."}</p>
+      <div className="news-desk-topic-context__stats" aria-label="Selected topic reference counts">
+        <div>
+          <span>References</span>
+          <strong>{references.length}</strong>
+        </div>
+        <div>
+          <span>Seed</span>
+          <strong>{compactArray(node.seedItemIds).length}</strong>
+        </div>
+        <div>
+          <span>Holdout</span>
+          <strong>{compactArray(node.holdoutItemIds).length}</strong>
+        </div>
+      </div>
+      <TopicKeywordsPanel
+        categorySetId={node.categorySetId}
+        categoryKey={node.categoryKey}
+        classifierId={null}
+        corpusId={node.corpusId}
+        disabled={disabled}
+        keywords={keywordsForCategory(categoryKeywords, node.categoryKey)}
+        rules={lexicalSteeringRules}
+        onLexicalRuleCreate={onLexicalRuleCreate}
+      />
       <div className="news-desk-topic-context__block">
         <header>
           <strong>Associated Concepts</strong>
@@ -2026,18 +2530,226 @@ function TopicSemanticContext({ graph, node }: { graph: SemanticGraph; node: Cat
       </div>
       <div className="news-desk-topic-context__block">
         <header>
-          <strong>Associated References</strong>
+          <strong>Latest References</strong>
           <span>{references.length}</span>
         </header>
-        {references.length ? references.map((reference) => (
-          <a href={reference.href} key={reference.lineageId}>
-            <span>{reference.subtitle ?? "reference"}</span>
+        {visibleReferences.length ? visibleReferences.map((reference) => (
+          <a className="news-desk-reference-link" href={reference.href} key={reference.lineageId}>
+            <span>{formatReferenceSummaryDate(reference)} / {reference.subtitle ?? "reference"}</span>
             <strong>{reference.label}</strong>
           </a>
         )) : <EmptyRow label="No classified references attached yet" />}
+        {references.length > TOPIC_REFERENCE_PAGE_SIZE ? (
+          <ReferencePager
+            onNext={() => setReferencePage((value) => Math.min(value + 1, pageCount - 1))}
+            onPrevious={() => setReferencePage((value) => Math.max(value - 1, 0))}
+            page={currentPage}
+            pageCount={pageCount}
+          />
+        ) : null}
       </div>
       <NeighborGroups groups={neighborGroups} />
     </aside>
+  );
+}
+
+function TopicKeywordsPanel({
+  categoryKey,
+  categorySetId,
+  classifierId,
+  corpusId,
+  disabled,
+  keywords,
+  rules,
+  onLexicalRuleCreate,
+}: {
+  categoryKey: string;
+  categorySetId: string;
+  classifierId?: string | null;
+  corpusId: string;
+  disabled: boolean;
+  keywords: CategoryKeywordRecord[];
+  rules: LexicalSteeringRuleRecord[];
+  onLexicalRuleCreate: (draft: LexicalRuleDraft) => void;
+}) {
+  const [showAll, setShowAll] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const [manualTerm, setManualTerm] = useState("");
+  const activeIgnoredTerms = useMemo(() => ignoredTermSet(rules, { categorySetId, corpusId, classifierId, categoryKey }, false), [categoryKey, categorySetId, classifierId, corpusId, rules]);
+  const archivedIgnoredTerms = useMemo(() => ignoredTermSet(rules, { categorySetId, corpusId, classifierId, categoryKey }, true), [categoryKey, categorySetId, classifierId, corpusId, rules]);
+  const activeRules = rules.filter((rule) => rule.ruleKind === "ignored_keyword" && rule.status === "active");
+  const archivedRules = rules.filter((rule) => rule.ruleKind === "ignored_keyword" && rule.status !== "active");
+  const visibleKeywords = showAll ? keywords : keywords.slice(0, 14);
+
+  function createRule(term: string, scope: LexicalRuleScope = "publication", note?: string) {
+    const normalized = normalizeKeywordTerm(term);
+    if (!normalized) return;
+    onLexicalRuleCreate({
+      term,
+      scope,
+      corpusId: scope === "corpus" || scope === "classifier" || scope === "category" ? corpusId : null,
+      classifierId: scope === "classifier" || scope === "category" ? classifierId : null,
+      categorySetId: scope === "category" ? categorySetId : null,
+      categoryKey: scope === "category" ? categoryKey : null,
+      note,
+    });
+  }
+
+  return (
+    <div className="news-desk-topic-context__block news-desk-topic-keywords" data-news-desk-topic-keywords={categoryKey}>
+      <header>
+        <strong>Topic Keywords</strong>
+        <span>{keywords.length}</span>
+      </header>
+      <div className="news-desk-keyword-controls">
+        <label>
+          <span>Ignore term</span>
+          <input
+            type="text"
+            value={manualTerm}
+            onChange={(event) => setManualTerm(event.target.value)}
+            placeholder="et, al, boilerplate"
+          />
+        </label>
+        <button
+          type="button"
+          disabled={disabled || !normalizeKeywordTerm(manualTerm)}
+          onClick={() => {
+            createRule(manualTerm, "publication", "Manual lexical steering from Newsroom.");
+            setManualTerm("");
+          }}
+        >
+          Ignore
+        </button>
+      </div>
+      {visibleKeywords.length ? (
+        <div className="news-desk-keyword-list">
+          {visibleKeywords.map((keyword) => {
+            const isIgnored = activeIgnoredTerms.has(keyword.normalizedKeyword);
+            const wasIgnored = archivedIgnoredTerms.has(keyword.normalizedKeyword);
+            return (
+              <div
+                className="news-desk-keyword-row"
+                data-ignored={isIgnored || undefined}
+                data-archived-ignored={wasIgnored || undefined}
+                key={keyword.id}
+              >
+                <span>{keyword.rank ?? "-"}</span>
+                <strong>{keyword.keyword}</strong>
+                <small>{keyword.weight != null ? keyword.weight.toFixed(3) : keyword.source}</small>
+                <button
+                  type="button"
+                  disabled={disabled || isIgnored}
+                  onClick={() => createRule(keyword.keyword, "publication", `Ignored from topic ${categoryKey}.`)}
+                >
+                  {isIgnored ? "Ignored" : "Ignore"}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      ) : <EmptyRow label="No keyword evidence imported for this topic yet" />}
+      {keywords.length > visibleKeywords.length ? (
+        <button className="news-desk-keyword-more" type="button" onClick={() => setShowAll(true)}>
+          Show all {keywords.length} keywords
+        </button>
+      ) : showAll && keywords.length > 14 ? (
+        <button className="news-desk-keyword-more" type="button" onClick={() => setShowAll(false)}>
+          Show fewer keywords
+        </button>
+      ) : null}
+      <details className="news-desk-ignored-terms" open={activeRules.length > 0}>
+        <summary>{activeRules.length} active ignored terms</summary>
+        <div>
+          {activeRules.slice(0, 24).map((rule) => (
+            <span key={rule.id}>{rule.term} <small>{rule.scope}</small></span>
+          ))}
+          {!activeRules.length ? <span>No active lexical rules</span> : null}
+        </div>
+      </details>
+      {archivedRules.length ? (
+        <label className="news-desk-keyword-toggle">
+          <input type="checkbox" checked={showArchived} onChange={(event) => setShowArchived(event.target.checked)} />
+          <span>Show archived ignored terms</span>
+        </label>
+      ) : null}
+      {showArchived ? (
+        <div className="news-desk-ignored-terms__archive">
+          {archivedRules.map((rule) => <span key={rule.id}>{rule.term} <small>{rule.scope}</small></span>)}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ReferenceListControls({
+  label,
+  onNext,
+  onPrevious,
+  onQueryChange,
+  page,
+  pageCount,
+  query,
+}: {
+  label: string;
+  onNext: () => void;
+  onPrevious: () => void;
+  onQueryChange: (query: string) => void;
+  page: number;
+  pageCount: number;
+  query: string;
+}) {
+  return (
+    <div className="news-desk-reference-controls">
+      <label>
+        <span>Search references</span>
+        <input
+          type="search"
+          value={query}
+          onChange={(event) => onQueryChange(event.target.value)}
+          placeholder="Title, source path, author, item id"
+        />
+      </label>
+      <div>
+        <span>{label}</span>
+        <ReferencePager onNext={onNext} onPrevious={onPrevious} page={page} pageCount={pageCount} />
+      </div>
+    </div>
+  );
+}
+
+function ReferencePager({
+  onNext,
+  onPrevious,
+  page,
+  pageCount,
+}: {
+  onNext: () => void;
+  onPrevious: () => void;
+  page: number;
+  pageCount: number;
+}) {
+  return (
+    <div className="news-desk-reference-pager">
+      <button type="button" disabled={page <= 0} onClick={onPrevious}>Previous</button>
+      <span>Page {page + 1} / {pageCount}</span>
+      <button type="button" disabled={page >= pageCount - 1} onClick={onNext}>Next</button>
+    </div>
+  );
+}
+
+function ReferenceRow({ active, reference }: { active?: boolean; reference: ReferenceRecord }) {
+  const lineageId = reference.lineageId ?? reference.id;
+  const date = formatReferenceDate(reference);
+  return (
+    <a
+      className={`news-desk-object-row${active ? " news-desk-object-row--active" : ""}`}
+      data-reference-lineage={lineageId}
+      href={newsDeskHrefForSemanticObject("reference", lineageId)}
+    >
+      <strong>{reference.title ?? reference.externalItemId}</strong>
+      <span>{date} / {reference.mediaType ?? "metadata"} / {reference.storagePath ?? reference.sourceUri ?? "no file path"}</span>
+    </a>
   );
 }
 
@@ -2124,10 +2836,140 @@ function categoryLineageId(category: CategorySteeringCategory | CategorySteering
   return category.lineageId ?? category.id;
 }
 
+function keywordsForCategory(keywords: CategoryKeywordRecord[], categoryKey: string): CategoryKeywordRecord[] {
+  return keywords
+    .filter((keyword) => keyword.categoryKey === categoryKey)
+    .sort((left, right) => {
+      const rankDiff = (left.rank ?? 999999) - (right.rank ?? 999999);
+      if (rankDiff !== 0) return rankDiff;
+      const weightDiff = (right.weight ?? -Infinity) - (left.weight ?? -Infinity);
+      if (Number.isFinite(weightDiff) && weightDiff !== 0) return weightDiff;
+      return left.normalizedKeyword.localeCompare(right.normalizedKeyword);
+    });
+}
+
+function ignoredTermSet(
+  rules: LexicalSteeringRuleRecord[],
+  context: { categorySetId: string; corpusId: string; classifierId?: string | null; categoryKey: string },
+  archived: boolean,
+): Set<string> {
+  return new Set(
+    rules
+      .filter((rule) => rule.ruleKind === "ignored_keyword")
+      .filter((rule) => archived ? rule.status !== "active" : rule.status === "active")
+      .filter((rule) => lexicalRuleApplies(rule, context))
+      .map((rule) => rule.normalizedTerm),
+  );
+}
+
+function lexicalRuleApplies(
+  rule: LexicalSteeringRuleRecord,
+  context: { categorySetId: string; corpusId: string; classifierId?: string | null; categoryKey: string },
+): boolean {
+  if (rule.scope === "publication") return true;
+  if (rule.scope === "corpus") return !rule.corpusId || rule.corpusId === context.corpusId;
+  if (rule.scope === "classifier") {
+    return (!rule.corpusId || rule.corpusId === context.corpusId)
+      && (!rule.classifierId || rule.classifierId === context.classifierId);
+  }
+  if (rule.scope === "category") {
+    return (!rule.categorySetId || rule.categorySetId === context.categorySetId)
+      && (!rule.categoryKey || rule.categoryKey === context.categoryKey);
+  }
+  return false;
+}
+
+function normalizeKeywordTerm(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^\p{L}\p{N}\s-]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function upsertLocalLexicalRule(rules: LexicalSteeringRuleRecord[], rule: LexicalSteeringRuleRecord): LexicalSteeringRuleRecord[] {
+  const withoutExisting = rules.filter((entry) => entry.id !== rule.id);
+  return [rule, ...withoutExisting].sort((left, right) => `${left.scope}#${left.normalizedTerm}`.localeCompare(`${right.scope}#${right.normalizedTerm}`));
+}
+
+function hashUiKey(values: unknown[]): string {
+  const text = values.map((value) => String(value ?? "")).join("|");
+  let hash = 5381;
+  for (let index = 0; index < text.length; index += 1) {
+    hash = ((hash << 5) + hash) ^ text.charCodeAt(index);
+  }
+  return Math.abs(hash >>> 0).toString(16);
+}
+
 function uniqueSemanticSummaries(objects: SemanticObjectSummary[]): SemanticObjectSummary[] {
   const map = new Map<string, SemanticObjectSummary>();
   for (const object of objects) map.set(`${object.kind}#${object.lineageId}`, object);
   return Array.from(map.values()).sort((left, right) => left.label.localeCompare(right.label));
+}
+
+function sortReferencesByRecency(references: ReferenceRecord[]): ReferenceRecord[] {
+  return [...references].sort(compareReferencesByRecency);
+}
+
+function sortReferenceSummariesByRecency(references: SemanticObjectSummary[]): SemanticObjectSummary[] {
+  return [...references].sort((left, right) => {
+    const dateDiff = referenceSummarySortDate(right).localeCompare(referenceSummarySortDate(left));
+    if (dateDiff !== 0) return dateDiff;
+    return left.label.localeCompare(right.label);
+  });
+}
+
+function compareReferencesByRecency(left: ReferenceRecord, right: ReferenceRecord): number {
+  const dateDiff = referenceSortDate(right).localeCompare(referenceSortDate(left));
+  if (dateDiff !== 0) return dateDiff;
+  return (left.title ?? left.externalItemId).localeCompare(right.title ?? right.externalItemId);
+}
+
+function referenceSortDate(reference: ReferenceRecord): string {
+  return reference.sourcePublishedAt
+    ?? reference.sourceUpdatedAt
+    ?? reference.retrievedAt
+    ?? reference.importedAt
+    ?? reference.updatedAt
+    ?? "";
+}
+
+function referenceSummarySortDate(reference: SemanticObjectSummary): string {
+  return reference.kind === "reference" && reference.record
+    ? referenceSortDate(reference.record as ReferenceRecord)
+    : "";
+}
+
+function formatReferenceDate(reference: ReferenceRecord): string {
+  const value = referenceSortDate(reference);
+  return value ? formatShortDate(value) : "undated";
+}
+
+function formatReferenceSummaryDate(reference: SemanticObjectSummary): string {
+  const value = referenceSummarySortDate(reference);
+  return value ? formatShortDate(value) : "undated";
+}
+
+function formatShortDate(value: string): string {
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) return value;
+  return new Date(timestamp).toISOString().slice(0, 10);
+}
+
+function referenceMatchesQuery(reference: ReferenceRecord, normalizedQuery: string): boolean {
+  const authors = compactArray(reference.authors).join(" ");
+  return [
+    reference.title,
+    reference.externalItemId,
+    reference.sourceUri,
+    reference.storagePath,
+    reference.mediaType,
+    authors,
+  ]
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .some((value) => value.toLowerCase().includes(normalizedQuery));
 }
 
 function selectInitialRootKey(roots: CanonicalTopicRoot[], initialCategoryLineageId?: string | null): string | null {
@@ -2481,6 +3323,57 @@ function StatusPill({ status }: { status: string }) {
 
 function EmptyRow({ label }: { label: string }) {
   return <div className="category-steering-empty">{label}</div>;
+}
+
+function buildDoctrineEditorState(records: DoctrineRecord[]): DoctrineEditorState {
+  return {
+    mission: doctrineBodyToText(findDoctrineRecord(records, "mission")?.body),
+    policy: doctrineBodyToText(findDoctrineRecord(records, "policy")?.body),
+  };
+}
+
+function findDoctrineRecord(records: DoctrineRecord[], kind: DoctrineKind): DoctrineRecord | null {
+  const definition = requireDoctrineDefinition(kind);
+  return records.find((record) => record.slug === definition.slug) ?? null;
+}
+
+function requireDoctrineDefinition(kind: DoctrineKind) {
+  const definition = DOCTRINE_DEFINITION_BY_KIND.get(kind);
+  if (!definition) throw new Error(`Unknown doctrine kind ${kind}`);
+  return definition;
+}
+
+function buildDoctrineRecord(
+  kind: DoctrineKind,
+  body: string[],
+  currentRecord: DoctrineRecord | null,
+  now: string,
+  actorLabel: string,
+): DoctrineRecord {
+  const definition = requireDoctrineDefinition(kind);
+  return {
+    id: currentRecord?.id ?? definition.id,
+    lineageId: currentRecord?.lineageId ?? definition.lineageId,
+    versionNumber: currentRecord?.versionNumber ?? 1,
+    versionState: currentRecord?.versionState ?? "current",
+    versionCreatedAt: currentRecord?.versionCreatedAt ?? now,
+    versionCreatedBy: currentRecord?.versionCreatedBy ?? actorLabel,
+    type: DOCTRINE_ITEM_TYPE,
+    status: currentRecord?.status ?? DOCTRINE_ITEM_STATUS,
+    typeStatus: currentRecord?.typeStatus ?? DOCTRINE_ITEM_TYPE_STATUS,
+    slug: definition.slug,
+    title: definition.label,
+    headline: definition.label,
+    body,
+    editorial: doctrineEditorialValue(kind),
+    updatedAt: now,
+  };
+}
+
+function replaceDoctrineRecord(records: DoctrineRecord[], nextRecord: DoctrineRecord): DoctrineRecord[] {
+  const next = records.filter((record) => record.slug !== nextRecord.slug);
+  next.push(nextRecord);
+  return next.sort((left, right) => left.slug.localeCompare(right.slug));
 }
 
 function compactArray(value: Array<string | null> | null | undefined): string[] {

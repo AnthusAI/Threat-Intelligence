@@ -151,6 +151,22 @@ Feature: Newspaper layout scenarios
     Then the newsroom should render
     And the newsroom should show the knowledge overview
 
+  Scenario: Demo newsroom navigation keeps the desk visible
+    Given I open the newsroom at 1280 by 900
+    When I follow the newsroom overview link for "References"
+    Then the active newsroom section should be "references"
+    And the newsroom should not show an editor access gate
+    When I follow the newsroom tab for "Concepts"
+    Then the active newsroom section should be "concepts"
+    And the newsroom should not show an editor access gate
+    When I follow the newsroom tab for "Assignments"
+    Then the active newsroom section should be "assignments"
+    And the newsroom should not show an editor access gate
+    When I follow the newsroom tab for "Doctrine"
+    Then the active newsroom section should be "doctrine"
+    And the newsroom should not show an editor access gate
+    And no browser console errors should occur
+
   Scenario: Newsroom renders category steering proposals and category edits
     Given I open the topics newsroom at 1280 by 900
     Then the topics desk should render

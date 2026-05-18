@@ -7,12 +7,19 @@ const path = require("node:path");
 const {
   buildAcceptedCategorySetPayload,
   buildAcceptedCategoryTreePayload,
+  buildLexicalSteeringConfigRecords,
+  buildLexicalSteeringPayload,
   buildProjectionImportRecords,
   buildSteeringConfigRecords,
   buildSteeringFeedbackPayload,
   buildSteeringImportRecords,
+  loadLexicalSteeringConfig,
+  loadSemanticConceptSeeds,
   mergeReviewedProposalState,
 } = require("./lib/papyrus-categories.cjs");
+const {
+  buildCurationCyclePlan,
+} = require("./lib/papyrus-curation-cycle.cjs");
 const {
   loadSteeringConfig,
   requireCorpusConfig,
@@ -37,6 +44,10 @@ const steeringBundle = {
         subheading: "Compute, data, and capability curves",
         description: "Model scaling research.",
         aliases: ["foundation scaling"],
+        keywords: [
+          { keyword: "scaling laws", weight: 0.91 },
+          { keyword: "et", weight: 0.12 },
+        ],
         seed_item_ids: ["research-001"],
         holdout_item_ids: ["research-002"],
         ranking_hints: { pinned: true },
@@ -154,6 +165,19 @@ corpora:
         label: "Source Topics"
 `, "utf8");
 const steeringConfig = loadSteeringConfig({ configPath });
+const semanticConceptSeeds = loadSemanticConceptSeeds();
+assert.equal(semanticConceptSeeds.filter((concept) => concept.nodeKind === "editorialForm").length, 3);
+assert.equal(semanticConceptSeeds.find((concept) => concept.nodeKey === "editorial.form.reporting")?.scope, "global");
+assert.equal(semanticConceptSeeds.find((concept) => concept.nodeKey === "comment.import_rationale")?.scope, "corpus");
+const lexicalConfig = loadLexicalSteeringConfig();
+assert.equal(lexicalConfig.keywordDisplay.preview_count, 6);
+assert.equal(lexicalConfig.ignoredTerms.find((rule) => rule.term === "et")?.normalizedTerm, "et");
+assert.equal(lexicalConfig.ignoredTerms.find((rule) => rule.term === "al")?.scope, "publication");
+const lexicalConfigRecords = buildLexicalSteeringConfigRecords(lexicalConfig, { importedAt: "2026-05-16T12:16:00.000Z" });
+const etRule = findRecord(lexicalConfigRecords, "LexicalSteeringRule", (record) => record.normalizedTerm === "et");
+assert.equal(etRule.ruleKind, "ignored_keyword");
+assert.equal(etRule.status, "active");
+assert.equal(etRule.scope, "publication");
 const canonicalCorpusConfig = requireCorpusConfig(steeringConfig, "canonical-corpus");
 const sourceCorpusConfig = requireCorpusConfig(steeringConfig, "source-corpus");
 assert.equal(resolveClassifierForCorpus(steeringConfig, canonicalCorpusConfig), "canonical-classifier");
@@ -161,6 +185,18 @@ assert.equal(resolveClassifierForCorpus(steeringConfig, sourceCorpusConfig), "so
 const configRecords = buildSteeringConfigRecords(steeringConfig, { importedAt: "2026-05-16T12:15:00.000Z" });
 assert.equal(findRecord(configRecords, "KnowledgeCorpus", (record) => record.id === "knowledge-corpus-canonical-corpus").role, "canonical");
 assert.equal(findRecord(configRecords, "KnowledgeCorpus", (record) => record.id === "knowledge-corpus-source-corpus").name, "Source Corpus");
+const cyclePlan = buildCurationCyclePlan(steeringConfig, {
+  runId: "test-run",
+  outputDir: "/tmp/papyrus-cycle-test",
+  biblicusWorkdir: "/tmp/biblicus",
+});
+assert.equal(cyclePlan.canonical.corpus.key, "canonical-corpus");
+assert.equal(cyclePlan.canonical.classifierId, "canonical-classifier");
+assert.equal(cyclePlan.sourceProjections.length, 1);
+assert.equal(cyclePlan.sourceProjections[0].targetCorpus.key, "source-corpus");
+assert.equal(cyclePlan.sourceProjections[0].classifierId, "canonical-classifier");
+assert.equal(cyclePlan.canonical.seedManifestPath, "/tmp/biblicus/corpora/canonical-corpus/metadata/topic-classifiers/canonical-classifier/seed-manifest.json");
+assert.equal(cyclePlan.canonical.lexicalSteeringPath, "/tmp/papyrus-cycle-test/canonical-corpus-lexical-steering.json");
 
 const steeringPlan = buildSteeringImportRecords(steeringBundle, {
   classifierId: "canonical-classifier",
@@ -175,6 +211,10 @@ const topic = findRecord(steeringPlan.records, "Category", (record) => record.ca
 assert.equal(topic.subtitle, "Compute, data, and capability curves");
 assert.equal(topic.categoryKey, "topic.scaling");
 assert.equal(topic.displayName, "Scaling Laws");
+const scalingKeyword = findRecord(steeringPlan.records, "CategoryKeyword", (record) => record.categoryKey === "topic.scaling" && record.normalizedKeyword === "scaling laws");
+assert.equal(scalingKeyword.keyword, "scaling laws");
+assert.equal(scalingKeyword.weight, 0.91);
+assert.equal(scalingKeyword.source, "accepted-category-set");
 
 const fallbackTaxonomy = findRecord(steeringPlan.records, "CategorySet", (record) => record.id === steeringPlan.categorySetId);
 assert.equal(fallbackTaxonomy.status, "accepted");
@@ -191,6 +231,17 @@ assert.equal(JSON.parse(reference.metadata).abstract, undefined);
 const steeringAttachment = findRecord(steeringPlan.records, "ReferenceAttachment", (record) => record.referenceId === reference.id);
 assert.equal(steeringAttachment.role, "source");
 assert.equal(steeringAttachment.storagePath, "corpora/canonical-corpus/research-001.md");
+const reportingConcept = findRecord(steeringPlan.records, "SemanticNode", (record) => record.nodeKey === "editorial.form.reporting");
+assert.equal(reportingConcept.id, "semantic-node-editorial-form-reporting-v1");
+assert.equal(reportingConcept.lineageId, "semantic-node-editorial-form-reporting");
+assert.equal(reportingConcept.nodeKind, "editorialForm");
+assert.equal(reportingConcept.displayName, "Reporting");
+assert.equal(reportingConcept.corpusId, null);
+assert.equal(reportingConcept.categorySetId, null);
+assert.equal(reportingConcept.categoryLineageId, null);
+assert.equal(reportingConcept.categoryKey, null);
+assert.deepEqual(reportingConcept.aliases, ["reported story", "news report"]);
+assert.equal(steeringPlan.records.filter((record) => record.modelName === "SemanticNode" && record.expected.nodeKind === "editorialForm").length, 3);
 assert.equal(
   steeringPlan.records.some((record) => record.modelName === "KnowledgeRawPayload" && record.expected.ownerType === "item"),
   false,
@@ -214,6 +265,8 @@ assert.equal(categoryProposal.categoryKey, "topic.scaling-memory");
 assert.equal(categoryProposal.targetCategoryKey, "topic.scaling");
 assert.equal(categoryProposal.relationshipType, "subcategory_of");
 assert.equal(categoryProposal.displayName, "Scaling Memory");
+const proposalKeyword = findRecord(steeringPlan.records, "CategoryKeyword", (record) => record.categoryKey === "topic.scaling-memory" && record.normalizedKeyword === "memory");
+assert.equal(proposalKeyword.source, "steering-proposal");
 const preservedRejectedProposal = mergeReviewedProposalState(categoryProposal, {
   ...categoryProposal,
   status: "rejected",
@@ -280,6 +333,9 @@ fs.writeFileSync(path.join(taxonomyDir, "taxonomy.json"), JSON.stringify({
       display_name: "Memory Systems",
       description: "Child topic.",
       status: "accepted",
+      keywords: [
+        { keyword: "memory systems", weight: 0.84 },
+      ],
       seed_item_ids: ["research-001"],
       holdout_item_ids: [],
     },
@@ -309,6 +365,8 @@ assert.equal(JSON.parse(importedTaxonomyPayload.payload).snapshot_id, "taxonomy-
 const importedChildNode = findRecord(taxonomyPlan.records, "Category", (record) => record.categoryKey === "topic.memory");
 assert.equal(importedChildNode.parentCategoryKey, "topic.scaling");
 assert.equal(importedChildNode.depth, 1);
+const taxonomyKeyword = findRecord(taxonomyPlan.records, "CategoryKeyword", (record) => record.categoryKey === "topic.memory" && record.normalizedKeyword === "memory systems");
+assert.equal(taxonomyKeyword.source, "accepted-category-tree");
 
 const acceptedExport = buildAcceptedCategorySetPayload(
   {
@@ -331,7 +389,8 @@ const acceptedExport = buildAcceptedCategorySetPayload(
   ],
 );
 assert.equal(acceptedExport.topics[0].subheading, "Subtitle written in Papyrus");
-assert.equal(acceptedExport.topics[0].category_key, "topic.scaling");
+assert.equal(acceptedExport.topics[0].topic_uid, "topic.scaling");
+assert.equal(Object.hasOwn(acceptedExport.topics[0], "short_title"), false);
 assert.deepEqual(acceptedExport.topics[0].seed_item_ids, ["research-001"]);
 
 const acceptedTaxonomyExport = buildAcceptedCategoryTreePayload(
@@ -374,7 +433,9 @@ const acceptedTaxonomyExport = buildAcceptedCategoryTreePayload(
   ],
 );
 assert.equal(acceptedTaxonomyExport.taxonomy_id, "canonical-taxonomy");
-assert.equal(acceptedTaxonomyExport.nodes[1].parent_category_key, "topic.scaling");
+assert.equal(acceptedTaxonomyExport.nodes[0].topic_uid, "topic.scaling");
+assert.equal(acceptedTaxonomyExport.nodes[1].parent_topic_uid, "topic.scaling");
+assert.equal(Object.hasOwn(acceptedTaxonomyExport.nodes[0], "short_title"), false);
 assert.deepEqual(acceptedTaxonomyExport.nodes[0].seed_item_ids, ["research-001"]);
 
 const steeringFeedbackExport = buildSteeringFeedbackPayload(
@@ -429,10 +490,30 @@ assert.equal(steeringFeedbackExport.export_kind, "papyrus-steering-feedback");
 assert.equal(steeringFeedbackExport.rejected_proposals.length, 1);
 assert.equal(steeringFeedbackExport.accepted_proposals.length, 1);
 assert.equal(steeringFeedbackExport.suppressions[0].proposal_id, categoryProposal.id);
-assert.equal(steeringFeedbackExport.suppressions[0].scope.root_category_key, "topic.scaling");
-assert.equal(steeringFeedbackExport.suppressions[0].match.category_key, "topic.scaling-memory");
+assert.equal(steeringFeedbackExport.topic_set.topic_set_id, steeringPlan.categorySetId);
+assert.equal(steeringFeedbackExport.suppressions[0].scope.root_topic_uid, "topic.scaling");
+assert.equal(steeringFeedbackExport.suppressions[0].match.topic_uid, "topic.scaling-memory");
 assert.equal(steeringFeedbackExport.suppressions[0].match.normalized_display_name, "scaling memory");
 assert.equal(steeringFeedbackExport.decisions.length, 2);
+const lexicalExport = buildLexicalSteeringPayload([
+  etRule,
+  {
+    id: "lexical-rule-archived",
+    ruleKind: "ignored_keyword",
+    term: "draft",
+    normalizedTerm: "draft",
+    scope: "publication",
+    status: "archived",
+    createdAt: "2026-05-16T12:16:00.000Z",
+  },
+], {
+  config: lexicalConfig,
+  generatedAt: "2026-05-16T13:11:00.000Z",
+});
+assert.equal(lexicalExport.export_kind, "papyrus-lexical-steering");
+assert.equal(lexicalExport.ignored_terms.length, 1);
+assert.equal(lexicalExport.ignored_terms[0].normalized_term, "et");
+assert.equal(lexicalExport.keyword_display.expanded_limit, 120);
 
 const projectionPlan = buildProjectionImportRecords({
   classifier_id: "canonical-classifier",
@@ -471,14 +552,18 @@ const projectionPlan = buildProjectionImportRecords({
 }, {
   authorityCorpusConfig: canonicalCorpusConfig,
   targetCorpusConfig: sourceCorpusConfig,
+  categorySetId: steeringPlan.categorySetId,
 });
 const projectedReference = findRecord(projectionPlan.records, "Reference", (record) => record.externalItemId === "source-001");
+assert.equal(projectionPlan.categorySetId, steeringPlan.categorySetId);
 assert.equal(projectedReference.title, null);
 assert.equal(projectedReference.storagePath, "corpora/source-corpus/source-001.md");
 assert.equal(JSON.parse(projectedReference.metadata).abstract, undefined);
 const projectionRelation = findRecord(projectionPlan.records, "SemanticRelation", (record) => record.subjectId === projectedReference.id);
 assert.equal(projectionRelation.predicate, "classified_as");
 assert.equal(projectionRelation.objectKind, "category");
+assert.equal(projectionRelation.objectLineageId, fallbackTaxonomyNode.lineageId);
+assert.equal(JSON.parse(projectionRelation.metadata).categorySetId, steeringPlan.categorySetId);
 assert.equal(projectionRelation.score, 0.82);
 assert.equal(projectionRelation.reviewRecommended, true);
 const projectedAttachments = projectionPlan.records
@@ -509,6 +594,11 @@ assert.equal(assignmentRelation.objectKind, "reference");
 assert.equal(assignmentRelation.objectLineageId, projectedReference.lineageId);
 const projectionCorpus = findRecord(projectionPlan.records, "KnowledgeCorpus", (record) => record.id === "knowledge-corpus-source-corpus");
 assert.equal(projectionCorpus.role, "source");
+const projectedEditorialConcept = findRecord(projectionPlan.records, "SemanticNode", (record) => record.nodeKey === "editorial.form.analysis");
+assert.equal(projectedEditorialConcept.id, "semantic-node-editorial-form-analysis-v1");
+assert.equal(projectedEditorialConcept.nodeKind, "editorialForm");
+assert.equal(projectedEditorialConcept.corpusId, null);
+assert.equal(projectionPlan.records.filter((record) => record.modelName === "SemanticNode" && record.expected.nodeKind === "editorialForm").length, 3);
 assert.equal(
   projectionPlan.records.some((record) => JSON.stringify(record.expected).includes("AI-ML-research") || JSON.stringify(record.expected).includes("AI-ML-history")),
   false,
@@ -520,6 +610,8 @@ assert.match(schemaSource, /ReferenceAttachment:\s*a\s*\n\s*\.model/);
 assert.match(schemaSource, /KnowledgeComment:\s*a\s*\n\s*\.model/);
 assert.match(schemaSource, /Assignment:\s*a\s*\n\s*\.model/);
 assert.match(schemaSource, /AssignmentEvent:\s*a\s*\n\s*\.model/);
+assert.match(schemaSource, /CategoryKeyword:\s*a\s*\n\s*\.model/);
+assert.match(schemaSource, /LexicalSteeringRule:\s*a\s*\n\s*\.model/);
 assert.match(schemaSource, /listAssignmentsForObject:\s*a\s*\n\s*\.query/);
 assert.match(schemaSource, /listAssignmentQueue:\s*a\s*\n\s*\.query/);
 assert.match(schemaSource, /UserIdentity:\s*a\s*\n\s*\.model/);
@@ -533,7 +625,11 @@ assert.match(schemaSource, /listKnowledgeCommentsByAuthorSubAndCreatedAt/);
 assert.match(schemaSource, /listAssignmentsByQueueStatusAndPriority/);
 assert.match(schemaSource, /allow\.groups\(categoryWriteGroups\)\.to\(categoryAppendOnlyOperations\)/);
 assert.doesNotMatch(schemaSource.match(/UserIdentity:[\s\S]*?UserRoleAssignment:/)?.[0] ?? "", /publicApiKey/);
+assert.doesNotMatch(schemaSource.match(/CategoryKeyword:[\s\S]*?SteeringProposal:/)?.[0] ?? "", /publicApiKey/);
 assert.doesNotMatch(schemaSource.match(/Reference:[\s\S]*?Item:/)?.[0] ?? "", /publicApiKey/);
+const semanticGraphSource = fs.readFileSync(path.join(__dirname, "..", "lib", "semantic-graph.ts"), "utf8");
+assert.match(semanticGraphSource, /has_editorial_form/);
+assert.match(semanticGraphSource, /items by editorial form/);
 
 const roleHandlerSource = fs.readFileSync(path.join(__dirname, "..", "amplify", "functions", "manage-user-role", "handler.ts"), "utf8");
 assert.match(roleHandlerSource, /operation === "mergeUserProfiles"/);

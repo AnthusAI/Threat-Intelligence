@@ -1,6 +1,5 @@
 "use client";
 
-import { fetchAuthSession } from "aws-amplify/auth";
 import { generateClient } from "aws-amplify/data";
 import type { Schema } from "../amplify/data/resource";
 import type { NewsDeskAppendix, NewsDeskCategoryTreeNode } from "../lib/content-types";
@@ -14,16 +13,21 @@ import type {
   CategorySteeringCategoryTreeNode,
   CategorySteeringCategory,
   CategorySteeringCategorySet,
+  CategoryKeywordRecord,
   KnowledgeCommentRecord,
+  LexicalSteeringRuleRecord,
   AssignmentEventRecord,
   AssignmentRecord,
+  DoctrineRecord,
   ReferenceAttachmentRecord,
   ReferenceRecord,
   SemanticNodeRecord,
   SemanticRelationRecord,
   UserDirectoryEntry,
 } from "../lib/category-repository";
+import { DOCTRINE_DEFINITIONS } from "../lib/doctrine";
 import { configureAmplifyClient } from "./amplify-client-provider";
+import { isUnauthenticatedError, loadReaderSessionSnapshot, type ReaderAuthSnapshot } from "./reader-auth-state";
 
 const USER_POOL_AUTH_MODE = "userPool";
 const TEST_EDITOR_STORAGE_KEY = "papyrus:test-editor";
@@ -36,6 +40,10 @@ type GraphQLListResponse<T> = {
 
 type ListableModel<T> = {
   list: (options: Record<string, unknown>) => Promise<GraphQLListResponse<T>>;
+};
+
+type SlugQueryableModel<T> = {
+  itemBySlug?: (args: { slug: string }, options: Record<string, unknown>) => Promise<GraphQLListResponse<T>>;
 };
 
 export type EditorCategoryTreeState = {
@@ -53,89 +61,24 @@ export type EditorNewsDeskState =
   | { status: "ready"; dashboard: CategorySteeringDashboard; error: null }
   | { status: "error"; dashboard: null; error: string };
 
-export async function loadEditorAccessState(): Promise<{ isEditor: boolean; status: EditorAuthState["status"]; error: string | null }> {
-  const auth = await getEditorAuthState();
+export async function loadEditorAccessState(): Promise<{ isEditor: boolean; status: EditorAccessState["status"]; error: string | null }> {
+  const auth = await loadEditorResolvedAccessState();
   return { isEditor: auth.isEditor, status: auth.status, error: auth.error };
 }
 
-type EditorAuthState =
-  | { status: "signedOut"; isEditor: false; error: null }
-  | { status: "forbidden"; isEditor: false; error: null }
-  | { status: "ready"; isEditor: true; isAdmin: boolean; error: null }
-  | { status: "error"; isEditor: false; error: string };
+export type EditorAccessState =
+  | { status: "signedOut"; isEditor: false; isAdmin: false; auth: ReaderAuthSnapshot; error: null }
+  | { status: "forbidden"; isEditor: false; isAdmin: false; auth: ReaderAuthSnapshot; error: null }
+  | { status: "ready"; isEditor: true; isAdmin: boolean; auth: ReaderAuthSnapshot; error: null }
+  | { status: "error"; isEditor: false; isAdmin: false; auth: ReaderAuthSnapshot; error: string };
 
 export async function loadEditorNewsDeskState(): Promise<EditorNewsDeskState> {
-  const auth = await getEditorAuthState();
+  const auth = await loadEditorResolvedAccessState();
   if (auth.status === "signedOut" || auth.status === "forbidden") return { status: auth.status, dashboard: null, error: null };
   if (auth.status === "error") return { status: "error", dashboard: null, error: auth.error };
 
   try {
-    const [
-      corpora,
-      importRuns,
-      categorySets,
-      categorys,
-      categoryTrees,
-      categoryNodes,
-      proposals,
-      artifacts,
-      references,
-      referenceAttachments,
-      semanticNodes,
-      knowledgeComments,
-      semanticRelations,
-      assignments,
-      assignmentEvents,
-      userDirectory,
-    ] = await Promise.all([
-      listUserPoolModel<CategorySteeringCorpus>("KnowledgeCorpus"),
-      listUserPoolModel<CategorySteeringImportRun>("KnowledgeImportRun"),
-      listUserPoolModel<CategorySteeringCategorySet>("CategorySet"),
-      listUserPoolModel<CategorySteeringCategory>("Category"),
-      listUserPoolModel<CategorySteeringCategoryTree>("CategorySet"),
-      listUserPoolModel<CategorySteeringCategoryTreeNode>("Category"),
-      listUserPoolModel<CategorySteeringProposal>("SteeringProposal"),
-      listUserPoolModel<CategorySteeringArtifact>("KnowledgeArtifact"),
-      listUserPoolModel<ReferenceRecord>("Reference"),
-      listUserPoolModel<ReferenceAttachmentRecord>("ReferenceAttachment"),
-      listUserPoolModel<SemanticNodeRecord>("SemanticNode"),
-      listUserPoolModel<KnowledgeCommentRecord>("KnowledgeComment"),
-      listUserPoolModel<SemanticRelationRecord>("SemanticRelation"),
-      listOptionalUserPoolModel<AssignmentRecord>("Assignment"),
-      listOptionalUserPoolModel<AssignmentEventRecord>("AssignmentEvent"),
-      auth.isAdmin ? loadUserDirectory() : Promise.resolve([]),
-    ]);
-
-    const sortedCorpora = corpora.sort((left, right) => left.name.localeCompare(right.name));
-    const sortedImportRuns = importRuns.sort((left, right) => right.importedAt.localeCompare(left.importedAt));
-    const sortedCategorySets = sortCategorySets(categorySets, sortedImportRuns);
-    const canonicalCategorySet = selectCanonicalCategorySet(sortedCorpora, sortedCategorySets);
-    return {
-      status: "ready",
-      dashboard: {
-        canonicalCorpusId: canonicalCategorySet?.corpusId ?? selectCanonicalCorpus(sortedCorpora)?.id ?? null,
-        canonicalCategorySetId: canonicalCategorySet?.id ?? null,
-        canManageUsers: auth.isAdmin,
-        userDirectory,
-        corpora: sortedCorpora,
-        importRuns: sortedImportRuns,
-        categorySets: sortedCategorySets,
-        categorys: sortCategorys(categorys),
-        categoryTrees: sortTaxonomies(categoryTrees),
-        categoryNodes: sortCategoryTreeNodes(categoryNodes),
-        proposals: sortProposals(proposals),
-        artifacts: artifacts.sort((left, right) => (right.createdAt ?? "").localeCompare(left.createdAt ?? "")),
-        references: references.sort((left, right) => (right.importedAt ?? "").localeCompare(left.importedAt ?? "")),
-        referenceAttachments: referenceAttachments.sort((left, right) => left.sortKey.localeCompare(right.sortKey)),
-        semanticNodes: semanticNodes.sort((left, right) => (left.displayName ?? left.nodeKey).localeCompare(right.displayName ?? right.nodeKey)),
-        knowledgeComments: knowledgeComments.sort((left, right) => right.createdAt.localeCompare(left.createdAt)),
-        semanticRelations: semanticRelations.sort((left, right) => (right.score ?? 0) - (left.score ?? 0)),
-        assignments: assignments.sort((left, right) => assignmentSortKey(left).localeCompare(assignmentSortKey(right))),
-        assignmentEvents: assignmentEvents.sort((left, right) => right.createdAt.localeCompare(left.createdAt)),
-        loadError: null,
-      },
-      error: null,
-    };
+    return { status: "ready", dashboard: await loadEditorNewsDeskDashboard({ isAdmin: auth.isAdmin }), error: null };
   } catch (error) {
     return {
       status: "error",
@@ -162,7 +105,7 @@ export async function loadEditorCategoryTreeState(options?: {
     };
   }
 
-  const auth = await getEditorAuthState();
+  const auth = await loadEditorResolvedAccessState();
   if (!auth.isEditor) {
     return { isEditor: false, appendix: null, categoryTrees: [], categoryNodes: [], error: auth.error };
   }
@@ -196,27 +139,121 @@ export async function loadEditorCategoryTreeState(options?: {
   }
 }
 
-async function getEditorAuthState(): Promise<EditorAuthState> {
-  configureAmplifyClient();
+export async function loadEditorResolvedAccessState(): Promise<EditorAccessState> {
   try {
-    const session = await fetchAuthSession();
-    if (!session.tokens?.accessToken) return { status: "signedOut", isEditor: false, error: null };
-    const groups = getSessionGroups(session);
-    if (!groups.includes("editor") && !groups.includes("admin")) return { status: "forbidden", isEditor: false, error: null };
-    return { status: "ready", isEditor: true, isAdmin: groups.includes("admin"), error: null };
+    const snapshot = await loadReaderSessionSnapshot();
+    if (!snapshot.hasSession || snapshot.auth.status === "signedOut") {
+      return { status: "signedOut", isEditor: false, isAdmin: false, auth: snapshot.auth, error: null };
+    }
+    const groups = snapshot.groups;
+    if (!groups.includes("editor") && !groups.includes("admin")) {
+      return { status: "forbidden", isEditor: false, isAdmin: false, auth: snapshot.auth, error: null };
+    }
+    return { status: "ready", isEditor: true, isAdmin: groups.includes("admin"), auth: snapshot.auth, error: null };
   } catch (error) {
-    if (isUnauthenticatedError(error)) return { status: "signedOut", isEditor: false, error: null };
     return {
       status: "error",
       isEditor: false,
+      isAdmin: false,
+      auth: { status: "signedOut", label: "Signed out" },
       error: error instanceof Error ? error.message : "Could not verify editor session.",
     };
   }
 }
 
-function isUnauthenticatedError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return /unauth|not authenticated|no current user|not signed in/i.test(message);
+export async function loadEditorNewsDeskDashboard({ isAdmin }: { isAdmin: boolean }): Promise<CategorySteeringDashboard> {
+  const [
+    corpora,
+    importRuns,
+    categorySets,
+    categorys,
+    categoryTrees,
+    categoryNodes,
+    categoryKeywords,
+    lexicalSteeringRules,
+    proposals,
+    artifacts,
+    references,
+    referenceAttachments,
+    semanticNodes,
+    knowledgeComments,
+    semanticRelations,
+    assignmentState,
+    doctrineRecords,
+    userDirectory,
+  ] = await Promise.all([
+    listUserPoolModel<CategorySteeringCorpus>("KnowledgeCorpus"),
+    listUserPoolModel<CategorySteeringImportRun>("KnowledgeImportRun"),
+    listUserPoolModel<CategorySteeringCategorySet>("CategorySet"),
+    listUserPoolModel<CategorySteeringCategory>("Category"),
+    listUserPoolModel<CategorySteeringCategoryTree>("CategorySet"),
+    listUserPoolModel<CategorySteeringCategoryTreeNode>("Category"),
+    listUserPoolModel<CategoryKeywordRecord>("CategoryKeyword"),
+    listUserPoolModel<LexicalSteeringRuleRecord>("LexicalSteeringRule"),
+    listUserPoolModel<CategorySteeringProposal>("SteeringProposal"),
+    listUserPoolModel<CategorySteeringArtifact>("KnowledgeArtifact"),
+    listUserPoolModel<ReferenceRecord>("Reference"),
+    listUserPoolModel<ReferenceAttachmentRecord>("ReferenceAttachment"),
+    listUserPoolModel<SemanticNodeRecord>("SemanticNode"),
+    listUserPoolModel<KnowledgeCommentRecord>("KnowledgeComment"),
+    listUserPoolModel<SemanticRelationRecord>("SemanticRelation"),
+    loadEditorAssignmentsData(),
+    loadDoctrineRecords(),
+    isAdmin ? loadUserDirectory() : Promise.resolve([]),
+  ]);
+
+  const sortedCorpora = corpora.sort((left, right) => left.name.localeCompare(right.name));
+  const sortedImportRuns = importRuns.sort((left, right) => right.importedAt.localeCompare(left.importedAt));
+  const sortedCategorySets = sortCategorySets(categorySets, sortedImportRuns);
+  const canonicalCategorySet = selectCanonicalCategorySet(sortedCorpora, sortedCategorySets);
+
+  return {
+    canonicalCorpusId: canonicalCategorySet?.corpusId ?? selectCanonicalCorpus(sortedCorpora)?.id ?? null,
+    canonicalCategorySetId: canonicalCategorySet?.id ?? null,
+    canManageUsers: isAdmin,
+    userDirectory,
+    corpora: sortedCorpora,
+    importRuns: sortedImportRuns,
+    categorySets: sortedCategorySets,
+    categorys: sortCategorys(categorys),
+    categoryTrees: sortTaxonomies(categoryTrees),
+    categoryNodes: sortCategoryTreeNodes(categoryNodes),
+    categoryKeywords: categoryKeywords.sort((left, right) => keywordSortKey(left).localeCompare(keywordSortKey(right))),
+    lexicalSteeringRules: lexicalSteeringRules.sort((left, right) => lexicalRuleSortKey(left).localeCompare(lexicalRuleSortKey(right))),
+    proposals: sortProposals(proposals),
+    artifacts: artifacts.sort((left, right) => (right.createdAt ?? "").localeCompare(left.createdAt ?? "")),
+    references: references.sort((left, right) => (right.importedAt ?? "").localeCompare(left.importedAt ?? "")),
+    referenceAttachments: referenceAttachments.sort((left, right) => left.sortKey.localeCompare(right.sortKey)),
+    semanticNodes: semanticNodes.sort((left, right) => (left.displayName ?? left.nodeKey).localeCompare(right.displayName ?? right.nodeKey)),
+    knowledgeComments: knowledgeComments.sort((left, right) => right.createdAt.localeCompare(left.createdAt)),
+    semanticRelations: semanticRelations.sort((left, right) => (right.score ?? 0) - (left.score ?? 0)),
+    assignments: assignmentState.assignments,
+    assignmentEvents: assignmentState.assignmentEvents,
+    doctrineRecords,
+    loadError: null,
+  };
+}
+
+export async function loadEditorAssignmentsData(): Promise<{
+  assignments: AssignmentRecord[];
+  assignmentEvents: AssignmentEventRecord[];
+}> {
+  const [assignments, assignmentEvents] = await Promise.all([
+    listOptionalUserPoolModel<AssignmentRecord>("Assignment"),
+    listOptionalUserPoolModel<AssignmentEventRecord>("AssignmentEvent"),
+  ]);
+  return {
+    assignments: assignments.sort((left, right) => assignmentSortKey(left).localeCompare(assignmentSortKey(right))),
+    assignmentEvents: assignmentEvents.sort((left, right) => right.createdAt.localeCompare(left.createdAt)),
+  };
+}
+
+export async function loadEditorDoctrineRecordsData(): Promise<DoctrineRecord[]> {
+  return loadDoctrineRecords();
+}
+
+export async function loadEditorUserDirectoryData(): Promise<UserDirectoryEntry[]> {
+  return loadUserDirectory();
 }
 
 export function hasTestEditorOverride(): boolean {
@@ -251,25 +288,46 @@ async function listOptionalUserPoolModel<T>(modelName: string): Promise<T[]> {
   return listUserPoolModel<T>(modelName);
 }
 
+async function loadDoctrineRecords(): Promise<DoctrineRecord[]> {
+  const records = await Promise.all(
+    DOCTRINE_DEFINITIONS.map((definition) => getDoctrineRecordBySlug(definition.slug)),
+  );
+  return records.filter((record): record is DoctrineRecord => record !== null);
+}
+
+async function getDoctrineRecordBySlug(slug: string): Promise<DoctrineRecord | null> {
+  const client = generateClient<Schema>();
+  const model = client.models.Item as unknown as SlugQueryableModel<DoctrineRecord>;
+  if (typeof model.itemBySlug !== "function") {
+    throw new Error("GraphQL Item.itemBySlug is not available in the deployed schema.");
+  }
+
+  const records: DoctrineRecord[] = [];
+  let nextToken: string | null | undefined;
+  do {
+    const response = await model.itemBySlug(
+      { slug },
+      {
+        authMode: USER_POOL_AUTH_MODE,
+        limit: 100,
+        nextToken,
+      },
+    );
+    assertNoGraphQLErrors(response.errors);
+    records.push(...((response.data ?? []).filter(Boolean) as DoctrineRecord[]));
+    nextToken = response.nextToken;
+  } while (nextToken);
+
+  const doctrine = records.find((record) => record.type === "doctrine") ?? records[0] ?? null;
+  return doctrine;
+}
+
 async function loadUserDirectory(): Promise<UserDirectoryEntry[]> {
   const client = generateClient<Schema>();
   const response = await client.queries.listUserDirectory({ authMode: USER_POOL_AUTH_MODE });
   assertNoGraphQLErrors(response.errors);
   return ((response.data?.entries ?? []).filter(Boolean) as UserDirectoryEntry[])
     .sort((left, right) => (left.displayName ?? left.email ?? left.userSub ?? "").localeCompare(right.displayName ?? right.email ?? right.userSub ?? ""));
-}
-
-function getSessionGroups(session: Awaited<ReturnType<typeof fetchAuthSession>>): string[] {
-  return [
-    ...readGroups(session.tokens?.accessToken.payload["cognito:groups"]),
-    ...readGroups(session.tokens?.idToken?.payload["cognito:groups"]),
-  ];
-}
-
-function readGroups(value: unknown): string[] {
-  if (Array.isArray(value)) return value.map(String);
-  if (typeof value === "string") return value.split(/[,\s]+/).map((entry) => entry.trim()).filter(Boolean);
-  return [];
 }
 
 function appendixFromCategoryTree(categoryTree: CategorySteeringCategoryTree, nodes: CategorySteeringCategoryTreeNode[]): NewsDeskAppendix {
@@ -394,6 +452,14 @@ function sortProposals(proposals: CategorySteeringProposal[]): CategorySteeringP
     if (statusDiff !== 0) return statusDiff;
     return (right.proposedAt ?? right.updatedAt ?? "").localeCompare(left.proposedAt ?? left.updatedAt ?? "");
   });
+}
+
+function keywordSortKey(keyword: CategoryKeywordRecord): string {
+  return `${keyword.categorySetId}#${keyword.categoryKey}#${String(keyword.rank ?? 999999).padStart(6, "0")}#${keyword.normalizedKeyword}`;
+}
+
+function lexicalRuleSortKey(rule: LexicalSteeringRuleRecord): string {
+  return `${rule.status === "active" ? "0" : "1"}#${rule.scope}#${rule.normalizedTerm}#${rule.id}`;
 }
 
 function assignmentSortKey(assignment: AssignmentRecord): string {

@@ -11,6 +11,9 @@ __pycache__/
 *.py[cod]
 corpora/*
 !corpora/papyrus-steering.yml
+!corpora/papyrus-semantic-concepts.yml
+!corpora/papyrus-lexical-steering.yml
+.papyrus-runs/
 AGENTS.local.md
 .amplify/
 amplify_outputs.json

@@ -27,6 +27,8 @@ const EDITION_ITEM_FIELDS = "id editionId editionLineageId itemId itemLineageId 
 const PUBLISHED_EDITION_ITEM_FIELDS = "id publishedEditionId publishedItemId sourceEditionItemId sourceEditionId sourceItemId editionLineageId itemLineageId placementKey sortKey pageNumber priority metadata";
 const CATEGORY_SET_FIELDS = `${VERSION_FIELDS} id corpusId classifierId displayName description status generatedAt categoryCount importRunId`;
 const CATEGORY_FIELDS = `${VERSION_FIELDS} id categorySetId corpusId categoryKey parentCategoryId parentCategoryKey displayName shortTitle subtitle description aliases status seedItemIds holdoutItemIds rank depth isPinned importRunId updatedAt`;
+const CATEGORY_KEYWORD_FIELDS = "id categorySetId corpusId categoryKey categoryLineageId categoryId keyword normalizedKeyword weight rank source sourceTopicId importRunId metadata createdAt updatedAt";
+const LEXICAL_STEERING_RULE_FIELDS = "id ruleKind term normalizedTerm scope status corpusId classifierId categorySetId categoryKey note source createdBy createdAt updatedAt metadata";
 const PROPOSAL_FIELDS = "id categorySetId corpusId importRunId proposalKind steeringDomain status title summary categoryKey targetCategoryKey graphEntityId relationshipType displayName shortTitle subtitle description evidenceItemIds suggestedSeedItemIds suggestedHoldoutItemIds sourceSnapshotId proposedAt reviewedAt reviewedBy updatedAt";
 const DECISION_FIELDS = "id proposalId categorySetId action actorSub actorLabel note selectedCategoryKey createdAt";
 const KNOWLEDGE_CORPUS_FIELDS = "id name role itemCount generatedAt latestImportRunId createdAt updatedAt";
@@ -62,6 +64,8 @@ const LIST_RECORDS = {
   AssignmentEvent: listDefinition("listAssignmentEvents", ASSIGNMENT_EVENT_FIELDS),
   CategorySet: listDefinition("listCategorySets", CATEGORY_SET_FIELDS),
   Category: listDefinition("listCategories", CATEGORY_FIELDS),
+  CategoryKeyword: listDefinition("listCategoryKeywords", CATEGORY_KEYWORD_FIELDS),
+  LexicalSteeringRule: listDefinition("listLexicalSteeringRules", LEXICAL_STEERING_RULE_FIELDS),
   SteeringProposal: listDefinition("listSteeringProposals", PROPOSAL_FIELDS),
   SteeringDecision: listDefinition("listSteeringDecisions", DECISION_FIELDS),
   Reference: listDefinition("listReferences", REFERENCE_FIELDS),
@@ -92,6 +96,8 @@ const GETTERS = {
   AssignmentEvent: getDefinition("getAssignmentEvent", ASSIGNMENT_EVENT_FIELDS),
   CategorySet: getDefinition("getCategorySet", CATEGORY_SET_FIELDS),
   Category: getDefinition("getCategory", CATEGORY_FIELDS),
+  CategoryKeyword: getDefinition("getCategoryKeyword", CATEGORY_KEYWORD_FIELDS),
+  LexicalSteeringRule: getDefinition("getLexicalSteeringRule", LEXICAL_STEERING_RULE_FIELDS),
   SteeringProposal: getDefinition("getSteeringProposal", PROPOSAL_FIELDS),
   SteeringDecision: getDefinition("getSteeringDecision", DECISION_FIELDS),
   Reference: getDefinition("getReference", REFERENCE_FIELDS),

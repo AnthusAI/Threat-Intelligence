@@ -6,27 +6,58 @@ politics, or any other beat worth watching closely.
 
 Papyrus turns that focus into a fully automated newsroom. Research agents
 monitor the beat while you sleep, update a publication-specific knowledge base,
-find leads, and surface surprising developments. Editor agents turn those
-signals into assignments. Reporter agents draft publishable stories. The next
-morning, you can open your publication and see what your newsroom found and
-created overnight.
+and surface surprising developments. Editor agents turn those signals into
+assignments. Reporter agents draft publishable stories. The next morning, you
+can open your publication and see what your newsroom found and created
+overnight.
 
-You steer it like an executive editor, as much or as little as you want. Choose
-the canonical categories that become sections, set editorial focus and policy,
-vote promising items up, push weak ones down, comment on developing drafts, and
-cull or restore assignments before publication. Every action becomes steering
-memory for the next research, assignment, drafting, and publication cycle.
-
-You can also step back. When you stop steering, the system keeps operating from
-the momentum you already gave it: accepted categories, current policy, open
-assignments, prior votes, and rejected proposal memory. It keeps researching,
-assigning, drafting, and preparing editions around your interests until you
-step back in.
+You steer it like an executive editor, as much or as little as you want:
+choosing the canonical categories that become sections, setting editorial
+policy, voting items up or down, commenting on drafts, and culling assignments
+before publication. When you step back, Papyrus keeps operating from the
+momentum you already gave it: accepted categories, current policy, open
+assignments, prior votes, and rejected proposal memory.
 
 The beat is configuration, not code. The current AI/ML corpus is pilot content,
 not an application assumption. A Papyrus publication changes subject by
 changing publication configuration, corpus set, category/graph steering state,
 edition plans, and worker instructions.
+
+## A Taxonomy-Aware, Ontology-Aware CMS
+
+Papyrus is a CMS, but it manages the newsroom around the articles, not just the
+articles themselves: references, knowledge artifacts, canonical topics,
+ontology, assignments, drafts, published items, editions, and editorial
+decisions.
+
+The taxonomy layer decides what the publication covers and how those topics
+map to newspaper sections. Papyrus stores an accepted, versioned category tree
+as `CategorySet` + strict parent/child `Category` rows. Editors can accept,
+reject, rename, move, split, merge, or ignore proposed topic changes; accepted
+changes shape the publication, and rejected proposals become steering memory
+for future cycles.
+
+The ontology layer stores meaning, not just association. `Reference` records
+hold strict external identifiers and provenance. `SemanticNode` records model
+typed entities and concepts. `SemanticRelation` records preserve explicit,
+versioned subject/object relationships. Together they let Papyrus track what a
+thing is, what it refers to, how it relates to other things, and why it matters
+to the publication.
+
+Papyrus cultivates that model with human review plus aggregate, unsupervised,
+and semi-supervised proposal cycles. Automated analysis can find patterns in
+the knowledge base, propose topics, suggest ontology relationships, cluster
+references, or identify weak sections. Editors can guide heavily, lightly, or
+not at all for a while; the CMS keeps the accepted model stable and carries
+rejected ideas forward as constraints.
+
+That makes agent context richer than vector search alone. Instead of retrieving
+only nearby text, research, editor, and reporter agents can receive context
+packs with accepted taxonomy, steering decisions, citations and references,
+related publication items, semantic neighbors, open assignments, and the
+relationship paths that explain why something matters. The same model can power
+reader-facing structure: coherent sections, source-grounded context,
+related-article links, and navigation around emerging ideas.
 
 The output is a real newspaper-style reader experience: a Next.js/React site
 powered by [`@chenglou/pretext`](https://github.com/chenglou/pretext), with
@@ -35,69 +66,6 @@ pages, and solver-owned editorial furniture such as images and pull quotes.
 Pretext is the text-fit oracle. Papyrus owns the edition layout plan,
 responsive grids, page regions, block geometry, scoring, continuation labels,
 and React rendering.
-
-## Steering Taxonomy and Ontology
-
-Papyrus is designed for steering taxonomy and ontology with as much or as
-little human input as you want to provide. The News Desk is the control surface
-for that work.
-
-Steering taxonomy is how the publication decides "what the sections are" and
-what counts as coverage. Papyrus stores an accepted, versioned category tree
-as `CategorySet` + strict parent/child `Category` rows. When an editor accepts
-or edits proposals, Papyrus versions the affected categories and records an
-append-only `SteeringDecision`. When an editor rejects a proposal, that
-negative decision is also stored and can be exported as steering-feedback
-suppressions so future proposal cycles avoid re-suggesting the same weak topics.
-
-Steering ontology goes deeper than a category tree. Papyrus stores a durable
-semantic model of the publication's information space, not just loose
-associations: `Reference` records for strict external identifiers and
-provenance, `SemanticNode` records for typed entities/concepts, and
-`SemanticRelation` records for explicit, versioned subject/object relationships.
-This allows the system to evolve meaning over time: not only "these two items
-are related", but *how* they are related, with structure that editors can
-review, correct, and build on.
-
-That structured ontology is what makes Papyrus a newsroom system rather than
-"RAG with a UI". Vector search (or GraphRAG backed mostly by embedding
-similarity) can retrieve nearby text, but it does not preserve the deeper model
-needed for newsroom workflows: canonical topic lineage, rejected-proposal memory,
-entity identity over time, typed relationships, and editorially reviewed
-interpretations.
-
-Papyrus uses that extra structure to build richer agent context packs. Research,
-editor, and reporter agents can pull context that is tailored to the task and
-the beat: the accepted category tree (what we cover), steering decisions (what
-we believe and what we rejected), the relevant references (what sources and
-artifacts the knowledge is grounded in), and the semantic neighborhood around a
-topic or item (which entities, claims, and relationships matter, and how to
-navigate to adjacent concepts). Agents can also ask for "more like this" in a
-semantic sense, not only a vector-nearest-neighbors sense, and traverse the
-graph to request missing context intentionally instead of hoping a similarity
-query happens to include it.
-
-## Automated Newsroom
-
-Papyrus treats editorial control as an ongoing loop rather than a one-time
-content import. A publication starts with configuration: the corpus or corpora
-that define the beat, the accepted category tree that names the sections, the
-editorial policies that guide coverage, the edition plan that gives the issue
-shape, and worker instructions that tell agents how to research, assign, draft,
-review, and publish.
-
-The human role is executive editorial steering. Editors can accept or reject
-category and graph proposals, tune section focus, review generated assignments,
-vote on candidate items, write comments for in-progress work, and decide which
-drafts survive into an edition. Those decisions become durable steering memory,
-so later research, taxonomy, graph, assignment, and publication cycles inherit
-both positive and negative feedback.
-
-The agent role is newsroom execution. Research agents maintain the knowledge
-base and produce reproducible artifacts. Editor agents dispatch section-targeted
-assignments with enough surplus for culling. Reporter agents produce draft
-article items from assignment records. Publishing materializes approved current
-versions into public reader projections.
 
 ## Newspaper layout, not web layout
 
@@ -322,7 +290,10 @@ strict metadata such as Biblicus `item_id`, title, authors, source URI, S3/corpu
 path, media type, checksum, dates, and sanitized provenance. Stable IDs such as
 `category_key`, classifier ids, snapshot/artifact refs, corpus identity, and
 category lineage ids are the API contract; display names are editable copy, not
-keys.
+keys. New knowledge-base source materials should follow
+[skills/reference-intake/SKILL.md](skills/reference-intake/SKILL.md): register
+references and attachment metadata in Papyrus, keep corpus contents in S3 and
+Biblicus artifacts, and do not model references as publication `Item` rows.
 
 Category proposal review writes an append-only `SteeringDecision` and creates
 new `Category` versions when accepted edits change category copy or tree state.
@@ -352,6 +323,23 @@ must pass it to `biblicus taxonomy discover` and
 topics, labels, relationships, or weak patterns are not proposed again.
 Accepted taxonomy exports define the current tree; steering-feedback exports
 carry the positive and negative review memory.
+
+Keyword evidence and ignored-term steering are also first-class private
+Newsroom data. `CategoryKeyword` rows show the weighted terms that define each
+category or subcategory, while `LexicalSteeringRule` rows capture ignored terms
+such as citation/header noise. Defaults live in
+`corpora/papyrus-lexical-steering.yml` and are materialized by
+`categories import-config`. Export active lexical steering before a new analysis
+cycle with:
+
+```bash
+npm run content -- categories export-lexical-steering \
+  --output /tmp/papyrus-lexical-steering.json
+```
+
+Papyrus exports this contract now; Biblicus support for consuming it during
+taxonomy discovery or classifier train/project must be confirmed by the Biblicus
+agent before workers rely on it.
 
 ## Current Production Edition
 
@@ -464,8 +452,8 @@ export PAPYRUS_GRAPHQL_ENDPOINT=https://64hviw44q5cq5nwjcigmasowlq.appsync-api.u
 Mint a fresh short-lived JWT from the production Amplify SSM secret. Do not
 write the token or secret into `.env`:
 
-The full production authoring and category/graph steering runbook lives in
-`docs/category-steering-runbook.md`.
+The full production authoring and category/graph steering guide lives in the
+agent skill at [skills/category-steering/SKILL.md](skills/category-steering/SKILL.md).
 
 ```bash
 export PAPYRUS_GRAPHQL_JWT="$(node - <<'NODE'

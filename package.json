@@ -10,6 +10,7 @@
     "favicon:generate": "node scripts/favicon/generate-favicon.mjs",
     "content": "node scripts/content-cli.cjs",
     "lint": "eslint .",
+    "test:newsroom": "node scripts/test-newsroom-session.cjs",
     "typecheck": "tsc --noEmit",
     "sandbox": "ampx sandbox",
     "seed:amplify": "ampx sandbox seed",

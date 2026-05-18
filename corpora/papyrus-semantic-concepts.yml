@@ -1,0 +1,46 @@
+schemaVersion: 1
+concepts:
+  - key: comment.general
+    kind: commentConcept
+    scope: corpus
+    name: General Comment
+    description: A general note about a private knowledge or content object.
+
+  - key: comment.import_rationale
+    kind: commentConcept
+    scope: corpus
+    name: Import Rationale
+    description: A note explaining why a reference or content item was imported.
+
+  - key: comment.ai_slop_assessment
+    kind: commentConcept
+    scope: corpus
+    name: AI Slop Assessment
+    description: A note assessing whether a reference or content item is low-quality generated material.
+
+  - key: editorial.form.reporting
+    kind: editorialForm
+    scope: global
+    name: Reporting
+    description: A publication item whose primary purpose is reported factual coverage.
+    aliases:
+      - reported story
+      - news report
+
+  - key: editorial.form.opinion
+    kind: editorialForm
+    scope: global
+    name: Opinion
+    description: A publication item whose primary purpose is interpretation, argument, or editorial judgment.
+    aliases:
+      - editorial
+      - commentary
+
+  - key: editorial.form.analysis
+    kind: editorialForm
+    scope: global
+    name: Analysis
+    description: A publication item whose primary purpose is explanatory analysis or contextual synthesis.
+    aliases:
+      - explainer
+      - context

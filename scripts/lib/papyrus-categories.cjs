@@ -2,8 +2,11 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
+const YAML = require("yaml");
 
 const DEFAULT_BIBLICUS_WORKDIR = "/Users/ryan/Projects/Biblicus";
+const DEFAULT_SEMANTIC_CONCEPTS_PATH = path.join(__dirname, "..", "..", "corpora", "papyrus-semantic-concepts.yml");
+const DEFAULT_LEXICAL_STEERING_PATH = path.join(__dirname, "..", "..", "corpora", "papyrus-lexical-steering.yml");
 const GRAPH_PROPOSAL_KINDS = new Set([
   "topic-becomes-graph-entity",
   "topic-maps-to-existing-graph-entity",
@@ -21,6 +24,40 @@ function loadJsonFile(filepath) {
 function writeJsonFile(filepath, payload) {
   fs.mkdirSync(path.dirname(filepath), { recursive: true });
   fs.writeFileSync(filepath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+}
+
+let semanticConceptSeedCache = null;
+let lexicalSteeringConfigCache = null;
+
+function loadSemanticConceptSeeds(filepath = DEFAULT_SEMANTIC_CONCEPTS_PATH) {
+  if (semanticConceptSeedCache && semanticConceptSeedCache.filepath === filepath) return semanticConceptSeedCache.concepts;
+  const parsed = YAML.parse(fs.readFileSync(filepath, "utf8"));
+  if (!parsed || parsed.schemaVersion !== 1 || !Array.isArray(parsed.concepts)) {
+    throw new Error(`Invalid semantic concept seed file: ${filepath}`);
+  }
+  const concepts = parsed.concepts.map((concept, index) => normalizeSemanticConceptSeed(concept, index, filepath));
+  semanticConceptSeedCache = { filepath, concepts };
+  return concepts;
+}
+
+function loadLexicalSteeringConfig(filepath = DEFAULT_LEXICAL_STEERING_PATH) {
+  if (lexicalSteeringConfigCache && lexicalSteeringConfigCache.filepath === filepath) return lexicalSteeringConfigCache.config;
+  const parsed = YAML.parse(fs.readFileSync(filepath, "utf8"));
+  if (!parsed || parsed.schemaVersion !== 1) {
+    throw new Error(`Invalid lexical steering config file: ${filepath}`);
+  }
+  const keywordDisplay = normalizeKeywordDisplay(parsed.keywordDisplay ?? {}, filepath);
+  const ignoredTerms = Array.isArray(parsed.ignoredTerms)
+    ? parsed.ignoredTerms.map((rule, index) => normalizeLexicalRuleSeed(rule, index, filepath))
+    : [];
+  const config = {
+    schemaVersion: 1,
+    keywordDisplay,
+    ignoredTerms,
+    configPath: filepath,
+  };
+  lexicalSteeringConfigCache = { filepath, config };
+  return config;
 }
 
 function loadSteeringBundleFromBiblicus({ corpus, classifier, topicGovernanceSnapshot }) {
@@ -86,7 +123,7 @@ function buildSteeringImportRecords(bundle, options = {}) {
     warningCount: bundle.warnings?.length ?? 0,
   }));
   records.push(rawPayloadRecord("importRun", importRunId, "warnings", { warnings: bundle.warnings ?? [] }, importRunId, now));
-  records.push(...commentConceptNodeRecords({ corpusId, importRunId, now }));
+  records.push(...seededSemanticConceptNodeRecords({ corpusId, importRunId, now }));
 
   for (const item of bundle.items ?? []) {
     records.push(...referenceRecords(item, {
@@ -146,15 +183,16 @@ function buildProjectionImportRecords(payload, options = {}) {
   const targetCorpusId = options.targetCorpusId ?? knowledgeCorpusId(targetCorpus);
   const authorityCorpusId = options.authorityCorpusId ?? knowledgeCorpusId(authorityCorpus);
   const classifierId = payload.classifier_id ?? firstItem.classifier_id ?? options.classifierId ?? "unknown-classifier";
+  const categorySetId = options.categorySetId ?? categorySetIdFor(classifierId, authorityCorpusId);
   const importRunId = `knowledge-import-${safeId(targetCorpusId)}-${safeId(classifierId)}-projection-${hashShort(payload.summary ?? items)}`;
   const relationRecords = projectionRelationRecords(items, {
     targetCorpusId,
     authorityCorpusId,
+    categorySetId,
     classifierId,
     importRunId,
     now,
   });
-  const categorySetId = categorySetIdFor(classifierId, authorityCorpusId);
   const records = [
     record("KnowledgeCorpus", {
       id: targetCorpusId,
@@ -184,7 +222,7 @@ function buildProjectionImportRecords(payload, options = {}) {
       warningCount: 0,
     }),
     rawPayloadRecord("importRun", importRunId, "projection-summary", payload.summary ?? {}, importRunId, now),
-    ...commentConceptNodeRecords({ corpusId: targetCorpusId, importRunId, now }),
+    ...seededSemanticConceptNodeRecords({ corpusId: targetCorpusId, importRunId, now }),
     ...relationRecords,
   ];
 
@@ -206,7 +244,7 @@ function buildProjectionImportRecords(payload, options = {}) {
     importRun.expected.relationCount = records.filter((entry) => entry.modelName === "SemanticRelation").length;
   }
 
-  return { importRunId, records };
+  return { importRunId, categorySetId, records };
 }
 
 function buildSteeringConfigRecords(config, options = {}) {
@@ -218,6 +256,54 @@ function buildSteeringConfigRecords(config, options = {}) {
     createdAt: now,
     updatedAt: now,
   }));
+}
+
+function buildLexicalSteeringConfigRecords(config, options = {}) {
+  const now = options.importedAt ?? new Date().toISOString();
+  return (config.ignoredTerms ?? []).map((rule) => lexicalSteeringRuleRecord({
+    ...rule,
+    source: rule.source ?? "papyrus-lexical-steering.yml",
+    createdBy: rule.createdBy ?? "papyrus-config",
+    createdAt: now,
+    updatedAt: now,
+    metadata: {
+      configPath: config.configPath ?? null,
+      keywordDisplay: config.keywordDisplay ?? null,
+    },
+  }));
+}
+
+function buildLexicalSteeringPayload(rules, options = {}) {
+  const config = options.config ?? null;
+  const generatedAt = options.generatedAt ?? new Date().toISOString();
+  const activeRules = (rules ?? [])
+    .filter((rule) => (rule.ruleKind ?? rule.rule_kind) === "ignored_keyword")
+    .filter((rule) => (rule.status ?? "active") === "active")
+    .map((rule) => ({
+      rule_id: rule.id,
+      rule_kind: "ignored_keyword",
+      term: rule.term,
+      normalized_term: rule.normalizedTerm ?? normalizeLexicalTerm(rule.term),
+      scope: rule.scope ?? "publication",
+      corpus_id: rule.corpusId ?? null,
+      classifier_id: rule.classifierId ?? null,
+      category_set_id: rule.categorySetId ?? null,
+      category_key: rule.categoryKey ?? null,
+      note: rule.note ?? null,
+      source: rule.source ?? null,
+      created_by: rule.createdBy ?? null,
+      created_at: rule.createdAt ?? null,
+      updated_at: rule.updatedAt ?? null,
+    }))
+    .sort(compareLexicalRules);
+
+  return {
+    schema_version: 1,
+    export_kind: "papyrus-lexical-steering",
+    generated_at: generatedAt,
+    keyword_display: normalizeKeywordDisplay(config?.keywordDisplay ?? {}, config?.configPath ?? "inline"),
+    ignored_terms: activeRules,
+  };
 }
 
 function referenceRecord(item, context) {
@@ -348,48 +434,113 @@ function referenceCurationAssignmentRelationRecord(item, reference, assignment, 
   });
 }
 
-const COMMENT_CONCEPTS = [
-  {
-    nodeKey: "comment.general",
-    displayName: "General Comment",
-    description: "A general note about a private knowledge or content object.",
-  },
-  {
-    nodeKey: "comment.import_rationale",
-    displayName: "Import Rationale",
-    description: "A note explaining why a reference or content item was imported.",
-  },
-  {
-    nodeKey: "comment.ai_slop_assessment",
-    displayName: "AI Slop Assessment",
-    description: "A note assessing whether a reference or content item is low-quality generated material.",
-  },
-];
-
-function commentConceptNodeRecords(context) {
-  return COMMENT_CONCEPTS.map((concept) => {
+function seededSemanticConceptNodeRecords(context) {
+  return loadSemanticConceptSeeds().map((concept) => {
     const lineageId = semanticNodeLineageIdFor(concept.nodeKey);
+    const isGlobal = concept.scope === "global";
     return record("SemanticNode", versionedRecord({
       id: `${lineageId}-v1`,
       lineageId,
       nodeKey: concept.nodeKey,
-      nodeKind: "commentConcept",
-      corpusId: context.corpusId,
+      nodeKind: concept.nodeKind,
+      corpusId: isGlobal ? null : context.corpusId,
       categorySetId: null,
       categoryLineageId: null,
       categoryKey: null,
       displayName: concept.displayName,
       description: concept.description,
-      aliases: [],
+      aliases: stringArrayFrom(concept.aliases),
       status: "accepted",
       importRunId: context.importRunId,
       updatedAt: context.now,
     }, {
       now: context.now,
       actor: "biblicus-import",
-      reason: "comment-concept-seed",
+      reason: `${concept.nodeKind}-seed`,
       content: concept,
     }));
+  });
+}
+
+function normalizeSemanticConceptSeed(concept, index, filepath) {
+  const label = `${filepath} concepts[${index}]`;
+  const nodeKey = requiredString(concept.key ?? concept.nodeKey, `${label}.key`);
+  const nodeKind = requiredString(concept.kind ?? concept.nodeKind, `${label}.kind`);
+  const displayName = requiredString(concept.name ?? concept.displayName, `${label}.name`);
+  const scope = concept.scope ?? "global";
+  if (!["global", "corpus"].includes(scope)) {
+    throw new Error(`${label}.scope must be global or corpus.`);
+  }
+  return {
+    nodeKey,
+    nodeKind,
+    scope,
+    displayName,
+    description: concept.description ?? null,
+    aliases: stringArrayFrom(concept.aliases),
+  };
+}
+
+function normalizeKeywordDisplay(value, filepath) {
+  return {
+    preview_count: integerOrNull(value.previewCount ?? value.preview_count) ?? 6,
+    default_limit: integerOrNull(value.defaultLimit ?? value.default_limit) ?? 30,
+    expanded_limit: integerOrNull(value.expandedLimit ?? value.expanded_limit) ?? 120,
+    source: filepath,
+  };
+}
+
+function normalizeLexicalRuleSeed(rule, index, filepath) {
+  const label = `${filepath} ignoredTerms[${index}]`;
+  const term = requiredString(rule.term, `${label}.term`);
+  const scope = rule.scope ?? "publication";
+  if (!["publication", "corpus", "classifier", "category"].includes(scope)) {
+    throw new Error(`${label}.scope must be publication, corpus, classifier, or category.`);
+  }
+  return {
+    ruleKind: "ignored_keyword",
+    term,
+    normalizedTerm: normalizeLexicalTerm(term),
+    scope,
+    status: rule.status ?? "active",
+    corpusId: rule.corpusId ?? null,
+    classifierId: rule.classifierId ?? null,
+    categorySetId: rule.categorySetId ?? null,
+    categoryKey: rule.categoryKey ?? null,
+    note: rule.note ?? null,
+    source: rule.source ?? null,
+    createdBy: rule.createdBy ?? null,
+  };
+}
+
+function lexicalSteeringRuleRecord(rule) {
+  const normalizedTerm = rule.normalizedTerm ?? normalizeLexicalTerm(rule.term);
+  const scope = rule.scope ?? "publication";
+  const scopeParts = [
+    scope,
+    rule.corpusId ?? "",
+    rule.classifierId ?? "",
+    rule.categorySetId ?? "",
+    rule.categoryKey ?? "",
+  ];
+  const id = rule.id ?? `lexical-rule-${safeId(rule.ruleKind ?? "ignored-keyword")}-${hashShort([...scopeParts, normalizedTerm])}`;
+  return record("LexicalSteeringRule", {
+    id,
+    ruleKind: rule.ruleKind ?? "ignored_keyword",
+    term: requiredString(rule.term, "lexical rule term"),
+    normalizedTerm,
+    scope,
+    status: rule.status ?? "active",
+    corpusId: rule.corpusId ?? null,
+    classifierId: rule.classifierId ?? null,
+    categorySetId: rule.categorySetId ?? null,
+    categoryKey: rule.categoryKey ?? null,
+    note: rule.note ?? null,
+    source: rule.source ?? null,
+    createdBy: rule.createdBy ?? null,
+    createdAt: rule.createdAt,
+    updatedAt: rule.updatedAt ?? rule.createdAt,
+    metadata: JSON.stringify(rule.metadata ?? {}),
   });
 }
 
@@ -621,7 +772,7 @@ function importRationaleFrom(item) {
 
 function projectionRelationRecords(items, context) {
   const records = [];
-  const categorySetId = categorySetIdFor(context.classifierId, context.authorityCorpusId);
+  const categorySetId = context.categorySetId ?? categorySetIdFor(context.classifierId, context.authorityCorpusId);
   for (const item of items) {
     const externalItemId = requiredString(item.item_id, "projection item_id");
     const referenceLineageId = referenceLineageIdFor(context.targetCorpusId, externalItemId);
@@ -656,6 +807,7 @@ function projectionRelationRecords(items, context) {
           displayName: candidate.displayName,
           bertopicTopicId: integerOrNull(candidate.bertopicTopicId),
           authorityCorpusId: context.authorityCorpusId,
+          categorySetId,
         },
       }));
     }
@@ -740,9 +892,8 @@ function buildAcceptedCategorySetPayload(categorySet, topics) {
     display_name: requiredString(categorySet.displayName, "categorySet.displayName"),
     description: categorySet.description ?? "",
     topics: sortedTopics.map((topic) => ({
-      category_key: requiredString(topic.categoryKey, "topic.categoryKey"),
+      topic_uid: requiredString(topic.categoryKey, "topic.categoryKey"),
       display_name: requiredString(topic.displayName, "topic.displayName"),
-      short_title: normalizeShortTitle(topic.shortTitle, topic.displayName),
       description: topic.description ?? "",
       seed_item_ids: compactArray(topic.seedItemIds),
       holdout_item_ids: compactArray(topic.holdoutItemIds),
@@ -767,10 +918,9 @@ function buildAcceptedCategoryTreePayload(taxonomy, nodes) {
     generated_at: taxonomy.generatedAt ?? taxonomy.updatedAt ?? taxonomy.createdAt ?? new Date().toISOString(),
     ...(taxonomy.snapshotId ? { snapshot_id: taxonomy.snapshotId } : {}),
     nodes: sortedNodes.map((node) => ({
-      category_key: requiredString(node.categoryKey, "node.categoryKey"),
-      parent_category_key: node.parentCategoryKey ?? null,
+      topic_uid: requiredString(node.categoryKey, "node.categoryKey"),
+      parent_topic_uid: node.parentCategoryKey ?? null,
       display_name: requiredString(node.displayName, "node.displayName"),
-      short_title: normalizeShortTitle(node.shortTitle, node.displayName),
       description: node.description ?? node.subtitle ?? "",
       status: node.status === "archived" ? "archived" : "accepted",
       seed_item_ids: compactArray(node.seedItemIds),
@@ -815,12 +965,12 @@ function buildSteeringFeedbackPayload(categorySet, proposals, decisions, options
     generated_at: generatedAt,
     source: {
       system: "papyrus",
-      category_set_id: categorySet.id,
+      topic_set_id: categorySet.id,
       corpus_id: categorySet.corpusId ?? null,
       classifier_id: categorySet.classifierId ?? null,
     },
-    category_set: {
-      category_set_id: categorySet.id,
+    topic_set: {
+      topic_set_id: categorySet.id,
       corpus_id: categorySet.corpusId ?? null,
       classifier_id: categorySet.classifierId ?? null,
       display_name: categorySet.displayName ?? null,
@@ -844,10 +994,10 @@ function reviewedProposalFeedback(proposal, decision) {
     decided_at: decision?.createdAt ?? proposal.reviewedAt ?? proposal.updatedAt ?? null,
     decided_by: decision?.actorLabel ?? proposal.reviewedBy ?? decision?.actorSub ?? null,
     decision_id: decision?.id ?? null,
-    category_set_id: proposal.categorySetId ?? null,
+    topic_set_id: proposal.categorySetId ?? null,
     corpus_id: proposal.corpusId ?? null,
-    category_key: proposal.categoryKey ?? null,
-    target_category_key: proposal.targetCategoryKey ?? null,
+    topic_uid: proposal.categoryKey ?? null,
+    target_topic_uid: proposal.targetCategoryKey ?? null,
     graph_entity_id: proposal.graphEntityId ?? null,
     relationship_type: proposal.relationshipType ?? null,
     display_name: proposal.displayName ?? proposal.title ?? null,
@@ -873,9 +1023,9 @@ function decisionFeedbackRecord(decision) {
   return {
     decision_id: decision.id,
     proposal_id: decision.proposalId,
-    category_set_id: decision.categorySetId ?? null,
+    topic_set_id: decision.categorySetId ?? null,
     action: decision.action,
-    selected_category_key: decision.selectedCategoryKey ?? null,
+    selected_topic_uid: decision.selectedCategoryKey ?? null,
     note: decision.note ?? null,
     actor_label: decision.actorLabel ?? null,
     actor_sub: decision.actorSub ?? null,
@@ -893,13 +1043,13 @@ function suppressionFromRejectedProposal(proposal, categorySet) {
     decided_at: proposal.decided_at,
     decided_by: proposal.decided_by,
     scope: {
-      category_set_id: categorySet.id,
+      topic_set_id: categorySet.id,
       corpus_id: categorySet.corpusId ?? proposal.corpus_id ?? null,
       classifier_id: categorySet.classifierId ?? null,
-      root_category_key: proposal.target_category_key ?? null,
+      root_topic_uid: proposal.target_topic_uid ?? null,
     },
     match: {
-      category_key: proposal.category_key ?? null,
+      topic_uid: proposal.topic_uid ?? null,
       display_name: proposal.display_name ?? null,
       normalized_display_name: normalizeMatchText(proposal.display_name),
       relationship_type: proposal.relationship_type ?? null,
@@ -954,6 +1104,14 @@ function categorySetRecords(categorySet, context) {
       updatedAt: context.now,
     }, { now: context.now, actor: "biblicus-import", reason: "category-import", content: topic })));
     records.push(rawPayloadRecord("category", categoryId, "biblicus-category", topic, context.importRunId, context.now));
+    records.push(...categoryKeywordRecordsFromSource(topic, {
+      ...context,
+      categoryKey,
+      categoryLineageId,
+      categoryId,
+      source: "accepted-category-set",
+      sourceTopicId: topic.topic_id ?? topic.bertopic_topic_id ?? topic.topic_uid ?? topic.category_key ?? null,
+    }));
   }
   return records;
 }
@@ -1011,6 +1169,14 @@ function taxonomyRecords(bundle, context) {
       updatedAt: context.now,
     }, { now: context.now, actor: "biblicus-import", reason: "category-tree-import", content: node })));
     records.push(rawPayloadRecord("category", categoryId, "biblicus-category-tree-node", node, context.importRunId, context.now));
+    records.push(...categoryKeywordRecordsFromSource(node, {
+      ...context,
+      categoryKey,
+      categoryLineageId,
+      categoryId,
+      source: "accepted-category-tree",
+      sourceTopicId: node.topic_id ?? node.bertopic_topic_id ?? node.topic_uid ?? node.category_key ?? null,
+    }));
   }
   return records;
 }
@@ -1160,7 +1326,7 @@ function proposalRecords(proposal, context) {
   );
   const subtitle = proposal.subheading ?? proposal.subtitle ?? proposalPayload.subheading ?? proposalPayload.subtitle ?? null;
   const description = proposal.description ?? proposalPayload.description ?? null;
-  return [
+  const records = [
     record("SteeringProposal", {
       id: proposalId,
       categorySetId: context.categorySetId,
@@ -1190,6 +1356,90 @@ function proposalRecords(proposal, context) {
     }),
     rawPayloadRecord("proposal", proposalId, "biblicus-proposal", proposal, context.importRunId, context.now),
   ];
+  const keywordCategoryKey = categoryKey ?? targetCategoryKey;
+  if (keywordCategoryKey) {
+    const categoryLineageId = categoryLineageIdFor(context.categorySetId, keywordCategoryKey);
+    records.push(...categoryKeywordRecordsFromSource({
+      ...proposal,
+      ...proposalPayload,
+      keywords: proposalPayload.keywords ?? proposal.keywords,
+    }, {
+      ...context,
+      categoryKey: keywordCategoryKey,
+      categoryLineageId,
+      categoryId: `${categoryLineageId}-v1`,
+      source: "steering-proposal",
+      sourceTopicId: proposalId,
+    }));
+  }
+  return records;
+}
+
+function categoryKeywordRecordsFromSource(sourceValue, context) {
+  const entries = keywordEntriesFrom(sourceValue);
+  return entries.map((entry, index) => {
+    const keyword = requiredString(entry.keyword, "category keyword");
+    const normalizedKeyword = normalizeLexicalTerm(keyword);
+    const rank = integerOrNull(entry.rank) ?? index + 1;
+    return record("CategoryKeyword", {
+      id: `category-keyword-${safeId(context.categorySetId)}-${safeId(context.categoryKey)}-${safeId(context.source)}-${String(rank).padStart(4, "0")}-${hashShort([normalizedKeyword, context.sourceTopicId ?? ""])}`,
+      categorySetId: context.categorySetId,
+      corpusId: context.corpusId,
+      categoryKey: context.categoryKey,
+      categoryLineageId: context.categoryLineageId ?? categoryLineageIdFor(context.categorySetId, context.categoryKey),
+      categoryId: context.categoryId ?? `${context.categoryLineageId ?? categoryLineageIdFor(context.categorySetId, context.categoryKey)}-v1`,
+      keyword,
+      normalizedKeyword,
+      weight: numberOrNull(entry.weight),
+      rank,
+      source: context.source,
+      sourceTopicId: entry.sourceTopicId ?? stringOrNull(context.sourceTopicId),
+      importRunId: context.importRunId,
+      metadata: JSON.stringify({
+        original: entry.original ?? null,
+        source: context.source,
+      }),
+      createdAt: context.now,
+      updatedAt: context.now,
+    });
+  });
+}
+
+function keywordEntriesFrom(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const raw =
+    source.keywords
+    ?? source.keyword_weights
+    ?? source.keywordWeights
+    ?? source.top_words
+    ?? source.topWords
+    ?? source.terms
+    ?? [];
+  if (!Array.isArray(raw)) return [];
+  const entries = [];
+  raw.forEach((entry, index) => {
+    if (typeof entry === "string") {
+      const keyword = stringOrNull(entry);
+      if (keyword) entries.push({ keyword, rank: index + 1, original: entry });
+      return;
+    }
+    if (Array.isArray(entry)) {
+      const keyword = stringOrNull(entry[0]);
+      if (keyword) entries.push({ keyword, weight: numberOrNull(entry[1]), rank: index + 1, original: entry });
+      return;
+    }
+    if (!entry || typeof entry !== "object") return;
+    const keyword = stringOrNull(entry.keyword ?? entry.term ?? entry.label ?? entry.value ?? entry.word);
+    if (!keyword) return;
+    entries.push({
+      keyword,
+      weight: numberOrNull(entry.weight ?? entry.score ?? entry.probability),
+      rank: integerOrNull(entry.rank) ?? index + 1,
+      sourceTopicId: stringOrNull(entry.sourceTopicId ?? entry.topic_id ?? entry.bertopic_topic_id),
+      original: entry,
+    });
+  });
+  return entries;
 }
 
 function rawPayloadRecord(ownerType, ownerId, payloadKind, payload, importRunId, now) {
@@ -1595,6 +1845,42 @@ function normalizeMatchText(value) {
     : null;
 }
 
+function normalizeLexicalTerm(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^\p{L}\p{N}\s-]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function compareLexicalRules(left, right) {
+  const scopeDiff = String(left.scope ?? "").localeCompare(String(right.scope ?? ""));
+  if (scopeDiff !== 0) return scopeDiff;
+  const termDiff = String(left.normalized_term ?? left.normalizedTerm ?? "").localeCompare(String(right.normalized_term ?? right.normalizedTerm ?? ""));
+  if (termDiff !== 0) return termDiff;
+  return String(left.rule_id ?? left.id ?? "").localeCompare(String(right.rule_id ?? right.id ?? ""));
+}
+
+function normalizeLexicalTerm(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^\p{L}\p{N}\s-]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function compareLexicalRules(left, right) {
+  const scopeDiff = String(left.scope ?? "").localeCompare(String(right.scope ?? ""));
+  if (scopeDiff !== 0) return scopeDiff;
+  const termDiff = String(left.normalized_term ?? left.normalizedTerm ?? "").localeCompare(String(right.normalized_term ?? right.normalizedTerm ?? ""));
+  if (termDiff !== 0) return termDiff;
+  return String(left.rule_id ?? left.id ?? "").localeCompare(String(right.rule_id ?? right.id ?? ""));
+}
+
 function safeId(value) {
   return String(value ?? "")
     .toLowerCase()
@@ -1626,13 +1912,19 @@ function mergeReviewedProposalState(expected, current) {
 module.exports = {
   buildAcceptedCategoryTreePayload,
   buildAcceptedCategorySetPayload,
+  buildLexicalSteeringConfigRecords,
+  buildLexicalSteeringPayload,
   buildSteeringFeedbackPayload,
   buildSteeringConfigRecords,
   buildProjectionImportRecords,
   buildSteeringImportRecords,
+  categorySetIdFor,
   knowledgeCorpusId,
   loadJsonFile,
+  loadLexicalSteeringConfig,
+  loadSemanticConceptSeeds,
   loadSteeringBundleFromBiblicus,
   mergeReviewedProposalState,
+  normalizeLexicalTerm,
   writeJsonFile,
 };

@@ -51,6 +51,6 @@ function parseNewsDeskTab(sectionValue: string | string[] | null | undefined, le
   const section = Array.isArray(sectionValue) ? sectionValue[0] : sectionValue;
   const legacyTab = Array.isArray(legacyTabValue) ? legacyTabValue[0] : legacyTabValue;
   const value = section ?? (legacyTab === "categories" ? "topics" : legacyTab);
-  if (value === "users" || value === "topics" || value === "concepts" || value === "references" || value === "assignments") return value;
+  if (value === "users" || value === "topics" || value === "concepts" || value === "references" || value === "assignments" || value === "doctrine") return value;
   return "overview";
 }

@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 
 const crypto = require("node:crypto");
+const fs = require("node:fs");
+const path = require("node:path");
+const { spawnSync } = require("node:child_process");
 
 const {
   decodeJwtClaims,
@@ -12,16 +15,22 @@ const {
 const {
   buildAcceptedCategorySetPayload,
   buildAcceptedCategoryTreePayload,
+  buildLexicalSteeringConfigRecords,
+  buildLexicalSteeringPayload,
   buildSteeringFeedbackPayload,
   buildSteeringConfigRecords,
   buildProjectionImportRecords,
   buildSteeringImportRecords,
   knowledgeCorpusId,
   loadJsonFile,
+  loadLexicalSteeringConfig,
   loadSteeringBundleFromBiblicus,
   mergeReviewedProposalState,
   writeJsonFile,
 } = require("./lib/papyrus-categories.cjs");
+const {
+  buildCurationCyclePlan,
+} = require("./lib/papyrus-curation-cycle.cjs");
 const {
   findCorpusConfigByPath,
   loadSteeringConfig,
@@ -79,8 +88,14 @@ async function main() {
     case "categories:export-steering-feedback":
       await exportSteeringFeedback(args.slice(2));
       return;
+    case "categories:export-lexical-steering":
+      await exportLexicalSteering(args.slice(2));
+      return;
     case "categories:import-projection":
       await importProjection(args.slice(2));
+      return;
+    case "categories:run-curation-cycle":
+      await runCurationCycle(args.slice(2));
       return;
     case "assignments:list":
       await listAssignments(args.slice(2));
@@ -214,7 +229,11 @@ async function importSteeringConfig(flags) {
   const records = buildSteeringConfigRecords(steeringConfig);
   const changes = await buildSteeringConfigRecordChanges(client, records);
   await applyRecordChanges(client, changes);
+  const lexicalConfig = loadLexicalSteeringConfig(options["lexical-config"]);
+  const lexicalChanges = await buildRecordChanges(client, buildLexicalSteeringConfigRecords(lexicalConfig));
+  await applyRecordChanges(client, lexicalChanges);
   printCategoryImportSummary("config", "steering-config", changes);
+  printCategoryImportSummary("lexical-config", "papyrus-lexical-steering", lexicalChanges);
 }
 
 async function importProjection(flags) {
@@ -224,16 +243,185 @@ async function importProjection(flags) {
   const steeringConfig = loadSteeringConfig({ configPath: options.config });
   const resolvedProjection = resolveProjectionImportCorpora(steeringConfig, options);
   const { client } = createAuthoringClient();
+  const categorySet = await resolveAcceptedCategorySet(client, {
+    categorySetId: options["category-set"],
+    corpusId: resolvedProjection.authorityCorpusId,
+    classifierId: resolvedProjection.classifierId,
+  });
   const plan = buildProjectionImportRecords(payload, {
     authorityCorpusConfig: resolvedProjection.authorityCorpus,
     authorityCorpusId: resolvedProjection.authorityCorpusId,
     targetCorpusConfig: resolvedProjection.targetCorpus,
     targetCorpusId: resolvedProjection.targetCorpusId,
     classifierId: resolvedProjection.classifierId,
+    categorySetId: categorySet?.id,
   });
   const changes = await buildRecordChanges(client, plan.records);
   await applyRecordChanges(client, changes);
   printCategoryImportSummary("projection", plan.importRunId, changes);
+}
+
+async function runCurationCycle(flags) {
+  const options = parseOptions(flags);
+  const steeringConfig = requireSteeringConfig({ configPath: options.config });
+  const plan = buildCurationCyclePlan(steeringConfig, {
+    outputDir: options["output-dir"],
+    biblicusWorkdir: options["biblicus-workdir"],
+  });
+  fs.mkdirSync(plan.runDir, { recursive: true });
+  const { client } = createAuthoringClient();
+
+  console.log(`Curation cycle: ${plan.runId}`);
+  console.log(`Run directory: ${plan.runDir}`);
+  validateCycleCorpusPaths(plan);
+
+  const configChanges = await buildSteeringConfigRecordChanges(client, buildSteeringConfigRecords(steeringConfig));
+  await applyRecordChanges(client, configChanges);
+  printCategoryImportSummary("config", "steering-config", configChanges);
+  const lexicalConfig = loadLexicalSteeringConfig(options["lexical-config"]);
+  const lexicalConfigChanges = await buildRecordChanges(client, buildLexicalSteeringConfigRecords(lexicalConfig));
+  await applyRecordChanges(client, lexicalConfigChanges);
+  printCategoryImportSummary("lexical-config", "papyrus-lexical-steering", lexicalConfigChanges);
+
+  const canonicalBundle = loadSteeringBundleFromBiblicus({
+    corpus: plan.canonical.corpus.path,
+    classifier: plan.canonical.classifierId,
+  });
+  writeJsonFile(plan.canonical.steeringPath, canonicalBundle);
+  const steeringImportPlan = buildSteeringImportRecords(canonicalBundle, {
+    classifierId: plan.canonical.classifierId,
+    corpusConfig: plan.canonical.corpus,
+    corpusPath: resolveBiblicusCorpusPath(plan, plan.canonical.corpus),
+  });
+  const steeringChanges = await buildRecordChanges(client, steeringImportPlan.records);
+  await applyRecordChanges(client, steeringChanges);
+  printCategoryImportSummary("steering", steeringImportPlan.importRunId, steeringChanges);
+
+  const categorySet = await resolveAcceptedCategorySet(client, {
+    categorySetId: steeringImportPlan.categorySetId,
+    corpusId: plan.canonical.corpusId,
+    classifierId: plan.canonical.classifierId,
+  });
+  if (!categorySet) throw new Error(`No accepted category set found for ${plan.canonical.corpusId}/${plan.canonical.classifierId}.`);
+  const categories = (await client.listRecords("Category"))
+    .filter((category) => category.categorySetId === categorySet.id && category.status !== "archived");
+  writeJsonFile(plan.canonical.categorySetPath, buildAcceptedCategorySetPayload(categorySet, categories));
+  writeJsonFile(plan.canonical.categoryTreePath, buildAcceptedCategoryTreePayload(categorySet, categories));
+
+  const proposals = (await client.listRecords("SteeringProposal"))
+    .filter((proposal) => proposal.categorySetId === categorySet.id);
+  const proposalIds = new Set(proposals.map((proposal) => proposal.id));
+  const decisions = (await client.listRecords("SteeringDecision"))
+    .filter((decision) => decision.categorySetId === categorySet.id || proposalIds.has(decision.proposalId));
+  writeJsonFile(plan.canonical.steeringFeedbackPath, buildSteeringFeedbackPayload(categorySet, proposals, decisions));
+  const lexicalRules = await client.listRecords("LexicalSteeringRule");
+  writeJsonFile(plan.canonical.lexicalSteeringPath, buildLexicalSteeringPayload(lexicalRules, { config: lexicalConfig }));
+
+  const canonicalExtractionSnapshot = latestPipelineSnapshot(canonicalBundle);
+  if (!canonicalExtractionSnapshot) throw new Error(`No pipeline extraction snapshot found for ${plan.canonical.corpus.key}.`);
+  runBiblicus(plan, ["taxonomy", "record", "--corpus", plan.canonical.corpus.path, "--input", plan.canonical.categoryTreePath], "taxonomy-record");
+  runBiblicusJson(plan, [
+    "taxonomy",
+    "discover",
+    "--corpus",
+    plan.canonical.corpus.path,
+    "--classifier",
+    plan.canonical.classifierId,
+    "--extraction-snapshot",
+    canonicalExtractionSnapshot,
+    "--steering-feedback",
+    plan.canonical.steeringFeedbackPath,
+    "--format",
+    "json",
+  ], "taxonomy-discover", plan.canonical.taxonomyDiscoveryPath);
+  recordProposalBundleIfPresent(plan, plan.canonical.taxonomyDiscoveryPath, plan.canonical.corpus.path, "taxonomy-discover");
+
+  runBiblicus(plan, [
+    "steering",
+    "render-seed-manifest",
+    "--input",
+    plan.canonical.categorySetPath,
+    "--output",
+    plan.canonical.seedManifestPath,
+  ], "render-seed-manifest");
+  runBiblicus(plan, [
+    "topic-classifier",
+    "train",
+    "--corpus",
+    plan.canonical.corpus.path,
+    "--manifest",
+    plan.canonical.seedManifestPath,
+    "--configuration",
+    "configurations/topic-classifier.yml",
+    "--extraction-snapshot",
+    canonicalExtractionSnapshot,
+  ], "topic-classifier-train");
+
+  for (const projection of plan.sourceProjections) {
+    const targetBundle = loadSteeringBundleFromBiblicus({
+      corpus: projection.targetCorpus.path,
+      classifier: projection.targetCorpus.localClassifiers[0]?.classifierId ?? projection.classifierId,
+    });
+    writeJsonFile(projection.targetSteeringPath, targetBundle);
+    const targetExtractionSnapshot = latestPipelineSnapshot(targetBundle);
+    if (!targetExtractionSnapshot) throw new Error(`No pipeline extraction snapshot found for ${projection.targetCorpus.key}.`);
+    runBiblicusJson(plan, [
+      "topic-classifier",
+      "project",
+      "--classifier-corpus",
+      plan.canonical.corpus.path,
+      "--target-corpus",
+      projection.targetCorpus.path,
+      "--classifier",
+      projection.classifierId,
+      "--extraction-snapshot",
+      targetExtractionSnapshot,
+      "--all",
+      "--record",
+      "--format",
+      "json",
+    ], `project-${projection.targetCorpus.key}`, projection.projectionPath);
+    const projectionPayload = loadJsonFile(projection.projectionPath);
+    const projectionCategorySet = await resolveAcceptedCategorySet(client, {
+      categorySetId: categorySet.id,
+      corpusId: projection.authorityCorpusId,
+      classifierId: projection.classifierId,
+    });
+    const projectionImportPlan = buildProjectionImportRecords(projectionPayload, {
+      authorityCorpusConfig: projection.authorityCorpus,
+      authorityCorpusId: projection.authorityCorpusId,
+      targetCorpusConfig: projection.targetCorpus,
+      targetCorpusId: projection.targetCorpusId,
+      classifierId: projection.classifierId,
+      categorySetId: projectionCategorySet?.id,
+    });
+    const projectionChanges = await buildRecordChanges(client, projectionImportPlan.records);
+    await applyRecordChanges(client, projectionChanges);
+    printCategoryImportSummary(`projection:${projection.targetCorpus.key}`, projectionImportPlan.importRunId, projectionChanges);
+  }
+
+  const refreshedBundle = loadSteeringBundleFromBiblicus({
+    corpus: plan.canonical.corpus.path,
+    classifier: plan.canonical.classifierId,
+  });
+  const refreshedPlan = buildSteeringImportRecords(refreshedBundle, {
+    classifierId: plan.canonical.classifierId,
+    corpusConfig: plan.canonical.corpus,
+    corpusPath: resolveBiblicusCorpusPath(plan, plan.canonical.corpus),
+  });
+  const refreshedChanges = await buildRecordChanges(client, refreshedPlan.records);
+  await applyRecordChanges(client, refreshedChanges);
+  printCategoryImportSummary("steering:refreshed", refreshedPlan.importRunId, refreshedChanges);
+
+  const verification = await verifyCurationCycle(client, {
+    plan,
+    categorySetId: categorySet.id,
+  });
+  writeJsonFile(plan.verificationPath, verification);
+  printCurationVerification(verification);
+  if (verification.failures.length) {
+    throw new Error(`Curation cycle verification failed: ${verification.failures.join("; ")}`);
+  }
 }
 
 async function exportCategorySet(flags) {
@@ -280,6 +468,17 @@ async function exportSteeringFeedback(flags) {
   const payload = buildSteeringFeedbackPayload(categorySet, proposals, decisions);
   writeJsonFile(options.output, payload);
   console.log(`export\tsteering-feedback\t${categorySetId}\t${options.output}\t${payload.accepted_proposals.length} accepted\t${payload.rejected_proposals.length} rejected`);
+}
+
+async function exportLexicalSteering(flags) {
+  const options = parseOptions(flags);
+  if (!options.output) throw new Error("categories export-lexical-steering requires --output.");
+  const { client } = createAuthoringClient();
+  const lexicalConfig = loadLexicalSteeringConfig(options["lexical-config"]);
+  const rules = await client.listRecords("LexicalSteeringRule");
+  const payload = buildLexicalSteeringPayload(rules, { config: lexicalConfig });
+  writeJsonFile(options.output, payload);
+  console.log(`export\tlexical-steering\t${options.output}\t${payload.ignored_terms.length} active ignored terms`);
 }
 
 async function listAssignments(flags) {
@@ -392,6 +591,8 @@ async function deleteAllContent(client) {
     "KnowledgeComment",
     "ReferenceAttachment",
     "Reference",
+    "CategoryKeyword",
+    "LexicalSteeringRule",
     "Category",
     "CategorySet",
     "KnowledgeArtifact",
@@ -412,13 +613,32 @@ async function deleteAllContent(client) {
 }
 
 async function buildRecordChanges(client, records) {
+  console.error(`prepare\trecords\t${records.length}`);
   const prepared = await prepareVersionedKnowledgeRecords(client, records);
+  console.error(`prepare\tplanned\t${prepared.records.length}\tpostChanges\t${prepared.postChanges.length}`);
   const changes = [];
+  const existingByModel = await listExistingRecordsByModel(client, prepared.records);
   for (const record of prepared.records) {
-    changes.push(await buildRecordChange(client, record.modelName, record.expected));
+    changes.push(buildRecordChangeFromCurrent(
+      record.modelName,
+      record.expected,
+      existingByModel.get(record.modelName)?.get(record.expected.id) ?? null,
+    ));
   }
   changes.push(...prepared.postChanges);
   return changes;
+}
+
+async function listExistingRecordsByModel(client, records) {
+  const modelNames = Array.from(new Set(records.map((record) => record.modelName)));
+  const existingByModel = new Map();
+  for (const modelName of modelNames) {
+    console.error(`prefetch\t${modelName}`);
+    const existing = await client.listRecords(modelName);
+    console.error(`prefetch\t${modelName}\t${existing.length}`);
+    existingByModel.set(modelName, new Map(existing.map((record) => [record.id, record])));
+  }
+  return existingByModel;
 }
 
 async function prepareVersionedKnowledgeRecords(client, records) {
@@ -875,15 +1095,29 @@ async function buildEditionRecordChanges(client, editionConfig) {
 
 async function buildRecordChange(client, modelName, expected) {
   const current = await client.getRecord(modelName, expected.id);
+  return buildRecordChangeFromCurrent(modelName, expected, current);
+}
+
+function buildRecordChangeFromCurrent(modelName, expected, current) {
+  if (modelName === "Assignment" && current) {
+    return { modelName, expected: current, current, action: "noop" };
+  }
   const nextExpected = modelName === "SteeringProposal" ? mergeReviewedProposalState(expected, current) : expected;
-  const action = !current ? "create" : recordsEqual(current, nextExpected) ? "noop" : "update";
+  const action = !current ? "create" : recordsEqualForModel(modelName, current, nextExpected) ? "noop" : "update";
   return { modelName, expected: nextExpected, current, action };
 }
 
 async function applyRecordChanges(client, records) {
+  const actionable = records.filter((record) => record.action !== "noop");
+  console.error(`apply\tchanges\t${actionable.length}`);
+  let applied = 0;
   for (const record of records) {
     if (record.action === "noop") continue;
     await client.upsert(record.modelName, record.expected);
+    applied += 1;
+    if (applied === actionable.length || applied % 100 === 0) {
+      console.error(`apply\tprogress\t${applied}/${actionable.length}`);
+    }
   }
 }
 
@@ -909,8 +1143,158 @@ function printDeleteSummary(result) {
 function printCategoryImportSummary(kind, importRunId, changes) {
   console.log(`Import: ${kind}`);
   console.log(`Run: ${importRunId}`);
-  for (const record of changes) {
+  const counts = changes.reduce((memo, record) => {
+    memo[record.action] = (memo[record.action] ?? 0) + 1;
+    return memo;
+  }, {});
+  console.log(`Summary: create=${counts.create ?? 0} update=${counts.update ?? 0} noop=${counts.noop ?? 0}`);
+  for (const record of changes.filter((entry) => entry.action !== "noop")) {
     console.log(`${record.action}\t${record.modelName}\t${record.expected.id}`);
+  }
+}
+
+async function resolveAcceptedCategorySet(client, options) {
+  if (options.categorySetId) {
+    const categorySet = await client.getRecord("CategorySet", options.categorySetId);
+    if (!categorySet) throw new Error(`CategorySet ${options.categorySetId} was not found.`);
+    return categorySet;
+  }
+  const candidates = (await client.listRecords("CategorySet"))
+    .filter((categorySet) => !options.corpusId || categorySet.corpusId === options.corpusId)
+    .filter((categorySet) => !options.classifierId || categorySet.classifierId === options.classifierId)
+    .filter((categorySet) => categorySet.status === "accepted");
+  candidates.sort((left, right) => String(right.generatedAt ?? right.versionCreatedAt ?? "").localeCompare(String(left.generatedAt ?? left.versionCreatedAt ?? "")));
+  return candidates[0] ?? null;
+}
+
+function validateCycleCorpusPaths(plan) {
+  const corpora = [plan.canonical.corpus, ...plan.sourceProjections.map((projection) => projection.targetCorpus)];
+  for (const corpus of corpora) {
+    if (!corpus.path) throw new Error(`Corpus ${corpus.key} does not define a local path in steering config.`);
+    const resolved = resolveBiblicusCorpusPath(plan, corpus);
+    if (!fs.existsSync(resolved)) {
+      throw new Error(`Corpus path for ${corpus.key} was not found: ${resolved}`);
+    }
+  }
+}
+
+function resolveBiblicusCorpusPath(plan, corpus) {
+  if (path.isAbsolute(corpus.path)) return corpus.path;
+  return path.join(plan.biblicusWorkdir, corpus.path);
+}
+
+function latestPipelineSnapshot(bundle) {
+  const artifacts = (bundle.artifacts ?? [])
+    .filter((artifact) => artifact.kind === "extraction")
+    .filter((artifact) => String(artifact.artifact_id ?? "").startsWith("pipeline:"))
+    .filter((artifact) => artifact.snapshot_id);
+  artifacts.sort((left, right) => String(right.created_at ?? "").localeCompare(String(left.created_at ?? "")));
+  return artifacts[0] ? `pipeline:${artifacts[0].snapshot_id}` : null;
+}
+
+function runBiblicus(plan, args, label) {
+  const logPrefix = path.join(plan.runDir, `${label.replace(/[^A-Za-z0-9_.-]/g, "-")}`);
+  console.log(`Biblicus: ${label}`);
+  const result = spawnSync("uv", ["run", "--extra", "topic-modeling", "biblicus", ...args], {
+    cwd: plan.biblicusWorkdir,
+    encoding: "utf8",
+    maxBuffer: 1024 * 1024 * 256,
+  });
+  fs.writeFileSync(`${logPrefix}.stdout.log`, result.stdout ?? "", "utf8");
+  fs.writeFileSync(`${logPrefix}.stderr.log`, result.stderr ?? "", "utf8");
+  if (result.status !== 0) {
+    throw new Error(`Biblicus ${label} failed. See ${logPrefix}.stderr.log`);
+  }
+  return result.stdout ?? "";
+}
+
+function runBiblicusJson(plan, args, label, outputPath) {
+  const stdout = runBiblicus(plan, args, label);
+  writeJsonFile(outputPath, JSON.parse(stdout));
+  return outputPath;
+}
+
+function recordProposalBundleIfPresent(plan, bundlePath, corpusPath, label) {
+  const bundle = normalizeSteeringProposalBundle(loadJsonFile(bundlePath));
+  writeJsonFile(bundlePath, bundle);
+  const proposalCount = Array.isArray(bundle.proposals) ? bundle.proposals.length : 0;
+  if (!proposalCount) return;
+  runBiblicus(plan, ["steering", "proposals", "validate", "--input", bundlePath], `${label}-validate`);
+  runBiblicus(plan, ["steering", "proposals", "record", "--corpus", corpusPath, "--input", bundlePath], `${label}-record`);
+}
+
+function normalizeSteeringProposalBundle(payload) {
+  return {
+    schema_version: payload.schema_version ?? 1,
+    analysis_id: "steering-proposals",
+    snapshot_id: null,
+    generated_at: payload.generated_at ?? new Date().toISOString(),
+    source_artifact_refs: Array.from(new Set([
+      payload.taxonomy_snapshot_id ? `taxonomy:${payload.taxonomy_snapshot_id}` : null,
+      payload.extraction_snapshot ?? null,
+      payload.snapshot_id ? `${payload.analysis_id ?? "analysis"}:${payload.snapshot_id}` : null,
+    ].filter(Boolean))),
+    signals: Array.isArray(payload.signals) ? payload.signals : [],
+    proposals: Array.isArray(payload.proposals) ? payload.proposals : [],
+    warnings: Array.isArray(payload.warnings) ? payload.warnings : [],
+  };
+}
+
+async function verifyCurationCycle(client, context) {
+  const [corpora, categorySets, categories, references, relations, proposals, nodes] = await Promise.all([
+    client.listRecords("KnowledgeCorpus"),
+    client.listRecords("CategorySet"),
+    client.listRecords("Category"),
+    client.listRecords("Reference"),
+    client.listRecords("SemanticRelation"),
+    client.listRecords("SteeringProposal"),
+    client.listRecords("SemanticNode"),
+  ]);
+  const currentReferences = references.filter((reference) => reference.versionState === "current");
+  const classifiedRelations = relations.filter((relation) => relation.relationState === "current" && relation.predicate === "classified_as");
+  const categoryLineages = new Set(categories.filter((category) => category.versionState === "current").map((category) => category.lineageId));
+  const referenceLineages = new Set(currentReferences.map((reference) => reference.lineageId));
+  const unresolvedCategoryRelations = classifiedRelations.filter((relation) => !categoryLineages.has(relation.objectLineageId)).length;
+  const unresolvedReferenceRelations = classifiedRelations.filter((relation) => !referenceLineages.has(relation.subjectLineageId)).length;
+  const activeCategorySet = categorySets.find((categorySet) => categorySet.id === context.categorySetId) ?? null;
+  const failures = [];
+  if (!activeCategorySet) failures.push(`accepted category set ${context.categorySetId} is missing`);
+  if (!currentReferences.length) failures.push("no current references found");
+  if (!classifiedRelations.length) failures.push("no classified_as relations found");
+  if (unresolvedCategoryRelations) failures.push(`${unresolvedCategoryRelations} classified_as relations point at missing categories`);
+  if (unresolvedReferenceRelations) failures.push(`${unresolvedReferenceRelations} classified_as relations point at missing references`);
+  return {
+    generatedAt: new Date().toISOString(),
+    runId: context.plan.runId,
+    categorySetId: context.categorySetId,
+    counts: {
+      corpora: corpora.length,
+      categorySets: categorySets.length,
+      currentCategories: categories.filter((category) => category.versionState === "current").length,
+      currentReferences: currentReferences.length,
+      classifiedAsRelations: classifiedRelations.length,
+      steeringProposals: proposals.length,
+      semanticNodes: nodes.length,
+    },
+    unresolved: {
+      categoryRelations: unresolvedCategoryRelations,
+      referenceRelations: unresolvedReferenceRelations,
+    },
+    failures,
+  };
+}
+
+function printCurationVerification(verification) {
+  console.log("Curation verification:");
+  for (const [key, value] of Object.entries(verification.counts)) {
+    console.log(`${key}\t${value}`);
+  }
+  console.log(`unresolved.categoryRelations\t${verification.unresolved.categoryRelations}`);
+  console.log(`unresolved.referenceRelations\t${verification.unresolved.referenceRelations}`);
+  if (verification.failures.length) {
+    for (const failure of verification.failures) console.log(`failure\t${failure}`);
+  } else {
+    console.log("verification\tok");
   }
 }
 
@@ -940,22 +1324,57 @@ function assignmentStatusForAction(action, currentStatus) {
 }
 
 function recordsEqual(left, right) {
-  return stableStringify(normalizeRecord(left)) === stableStringify(normalizeRecord(right));
+  return recordsEqualForModel(null, left, right);
+}
+
+function recordsEqualForModel(modelName, left, right) {
+  const ignoredFields = ignoredRecordFields(modelName);
+  return stableStringify(normalizeRecord(left, "", ignoredFields)) === stableStringify(normalizeRecord(right, "", ignoredFields));
 }
 
 const AWS_JSON_FIELDS = new Set(["layout", "editorial", "metadata", "layoutPlan", "payload"]);
+const KNOWLEDGE_MODELS = new Set([
+  "Assignment",
+  "AssignmentEvent",
+  "Category",
+  "CategorySet",
+  "KnowledgeArtifact",
+  "KnowledgeComment",
+  "KnowledgeCorpus",
+  "KnowledgeImportRun",
+  "KnowledgeRawPayload",
+  "Reference",
+  "ReferenceAttachment",
+  "SemanticNode",
+  "SemanticRelation",
+  "SteeringDecision",
+  "SteeringProposal",
+]);
+const KNOWLEDGE_VOLATILE_FIELDS = new Set([
+  "createdAt",
+  "updatedAt",
+  "importedAt",
+  "importRunId",
+  "latestImportRunId",
+  "sourceSnapshotId",
+]);
 
-function normalizeRecord(record, keyName = "") {
-  if (Array.isArray(record)) return record.map(normalizeRecord);
+function ignoredRecordFields(modelName) {
+  return KNOWLEDGE_MODELS.has(modelName) ? KNOWLEDGE_VOLATILE_FIELDS : null;
+}
+
+function normalizeRecord(record, keyName = "", ignoredFields = null) {
+  if (Array.isArray(record)) return record.map((entry) => normalizeRecord(entry, keyName, ignoredFields));
   if (typeof record === "string" && AWS_JSON_FIELDS.has(keyName)) {
-    return normalizeRecord(parseAwsJson(record), keyName);
+    return normalizeRecord(parseAwsJson(record), keyName, ignoredFields);
   }
   if (!record || typeof record !== "object") return record;
 
   const normalized = {};
   for (const key of Object.keys(record).sort()) {
+    if (ignoredFields?.has(key)) continue;
     if (record[key] === undefined || record[key] === null) continue;
-    normalized[key] = normalizeRecord(record[key], key);
+    normalized[key] = normalizeRecord(record[key], key, ignoredFields);
   }
   return normalized;
 }
@@ -1018,8 +1437,10 @@ function printUsage() {
   console.log("  npm run content -- categories export-category-set --category-set <id> --output <accepted-category-set.json>");
   console.log("  npm run content -- categories export-category-tree --category-set <id> --output <accepted-category-tree.json>");
   console.log("  npm run content -- categories export-steering-feedback --category-set <id> --output <steering-feedback.json>");
+  console.log("  npm run content -- categories export-lexical-steering --output <lexical-steering.json>");
   console.log("  npm run content -- categories import-projection --bundle <projection.json>");
   console.log("  npm run content -- categories import-projection --config <steering.yml> --target-corpus-key <key> --authority-corpus-key <key> --bundle <projection.json>");
+  console.log("  npm run content -- categories run-curation-cycle --config <steering.yml>");
   console.log("  npm run content -- assignments list --queue <queue-key> --status open");
   console.log("  npm run content -- assignments for-object --kind reference --lineage <reference-lineage-id>");
   console.log("  npm run content -- assignments claim --assignment <id> --assignee <agent-id>");
@@ -1053,7 +1474,7 @@ function resolveProjectionImportCorpora(config, options) {
     targetCorpus = requireCorpusConfig(requiredConfig, options["target-corpus-key"], "--target-corpus-key");
     const authorityKey = options["authority-corpus-key"] ?? targetCorpus.canonicalProjection?.authorityCorpusKey;
     if (authorityKey) authorityCorpus = requireCorpusConfig(requiredConfig, authorityKey, "--authority-corpus-key");
-    const classifierId = options.classifier ?? targetCorpus.canonicalProjection?.classifierId ?? requiredConfig.canonicalCategorySet.classifierId;
+    const classifierId = options.classifier ?? targetCorpus.canonicalProjection?.classifierId ?? requiredConfig.canonicalTopicSet.classifierId;
     return {
       targetCorpus,
       authorityCorpus,

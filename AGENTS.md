@@ -80,7 +80,7 @@ rendering contracts.
 - Production authoring uses the deployed production AppSync endpoint, not the
   sandbox. Mint short-lived production JWTs from the Amplify SSM
   `PAPYRUS_JWT_SECRET`; do not write production secrets or freshly minted
-  production JWTs into `.env`. Follow `docs/category-steering-runbook.md` for
+  production JWTs into `.env`. Follow `skills/category-steering/SKILL.md` for
   the exact token minting and category/graph steering import workflow.
 - Category and graph steering imports must not mirror Biblicus corpus contents
   into Papyrus GraphQL. Papyrus stores steering state, artifact references,
@@ -88,7 +88,8 @@ rendering contracts.
   private `ReferenceAttachment` file-path metadata, append-only
   `KnowledgeComment` commentary, `SemanticNode` rows, `SemanticRelation` links,
   and stable external `item_id` references; Biblicus and S3 remain the owners of
-  corpus content.
+  corpus content. Follow `skills/reference-intake/SKILL.md` for ingesting or
+  registering new knowledge-base source materials correctly.
 - The Newsroom is the newsroom operations surface. `Topics` is one desk tab,
   not the whole product concept. Use `/newsroom` and Newsroom naming in UI,
   docs, and tests. Future assignment and research queues should become desk tabs
@@ -127,6 +128,13 @@ rendering contracts.
   `biblicus taxonomy discover` and `biblicus steering graph-signals` with
   `--steering-feedback` so Biblicus avoids re-proposing rejected child topics,
   labels, relationships, or weak patterns.
+- Lexical steering is private editorial steering. `CategoryKeyword` rows expose
+  keyword evidence for categories in the Newsroom, and `LexicalSteeringRule`
+  rows capture ignored terms such as citation/header noise. Seed defaults live
+  in `corpora/papyrus-lexical-steering.yml`; export active rules with
+  `npm run content -- categories export-lexical-steering --output <lexical-steering.json>`.
+  Do not assume Biblicus consumes that export until the Biblicus agent confirms
+  the command contract.
 - Do not edit `/Users/ryan/Projects/Biblicus` source files. If Biblicus needs a
   new full-corpus S3 sync or locking feature, relay that request to the Biblicus
   agent instead of changing the library from Papyrus.

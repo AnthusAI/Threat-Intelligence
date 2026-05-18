@@ -1,26 +1,30 @@
 "use client";
 
-import { fetchUserAttributes, getCurrentUser, signInWithRedirect, signOut } from "aws-amplify/auth";
+import { signInWithRedirect, signOut } from "aws-amplify/auth";
 import { Hub } from "aws-amplify/utils";
 import { useCallback, useEffect, useState } from "react";
 import { configureAmplifyClient } from "./amplify-client-provider";
-
-type AuthState =
-  | { status: "loading"; label: string }
-  | { status: "signedOut"; label: string }
-  | { status: "signedIn"; label: string };
+import { loadReaderSessionSnapshot, type ReaderAuthSnapshot } from "./reader-auth-state";
 
 type ReaderAuthControlProps = {
   className?: string;
   dataFooterUtility?: string;
   postAuthPath?: string;
   showIdentity?: boolean;
+  authState?: ReaderAuthSnapshot;
 };
 
-export function ReaderAuthControl({ className, dataFooterUtility, postAuthPath, showIdentity = false }: ReaderAuthControlProps) {
-  const [authState, setAuthState] = useState<AuthState>({ status: "loading", label: "Checking sign-in" });
+export function ReaderAuthControl({
+  className,
+  dataFooterUtility,
+  postAuthPath,
+  showIdentity = false,
+  authState: externalAuthState,
+}: ReaderAuthControlProps) {
+  const [authState, setAuthState] = useState<ReaderAuthSnapshot>(externalAuthState ?? { status: "loading", label: "Checking sign-in" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isExternallyManaged = Boolean(externalAuthState);
 
   const replaceWithPostAuthPath = useCallback(() => {
     if (!postAuthPath) return;
@@ -29,25 +33,19 @@ export function ReaderAuthControl({ className, dataFooterUtility, postAuthPath, 
   }, [postAuthPath]);
 
   const refreshAuthState = useCallback(async () => {
-    configureAmplifyClient();
-    try {
-      await getCurrentUser();
-      let label = "Signed in";
-      try {
-        const attributes = await fetchUserAttributes();
-        label = attributes.email ?? label;
-      } catch {
-        // A valid Cognito session is enough for the footer state; email is display-only.
-      }
-      setAuthState({ status: "signedIn", label });
-      setError(null);
-      replaceWithPostAuthPath();
-    } catch {
-      setAuthState({ status: "signedOut", label: "Signed out" });
-    }
+    const snapshot = await loadReaderSessionSnapshot();
+    setAuthState(snapshot.auth);
+    setError(null);
+    if (snapshot.auth.status === "signedIn") replaceWithPostAuthPath();
   }, [replaceWithPostAuthPath]);
 
   useEffect(() => {
+    if (externalAuthState) {
+      setAuthState(externalAuthState);
+      setBusy(false);
+      return;
+    }
+
     let active = true;
 
     const refreshIfActive = async () => {
@@ -73,7 +71,7 @@ export function ReaderAuthControl({ className, dataFooterUtility, postAuthPath, 
       active = false;
       unsubscribe();
     };
-  }, [refreshAuthState]);
+  }, [externalAuthState, refreshAuthState]);
 
   const signIn = async () => {
     configureAmplifyClient();
@@ -100,6 +98,11 @@ export function ReaderAuthControl({ className, dataFooterUtility, postAuthPath, 
       setBusy(false);
     }
   };
+
+  useEffect(() => {
+    if (!externalAuthState) return;
+    setAuthState(externalAuthState);
+  }, [externalAuthState]);
 
   const signedIn = authState.status === "signedIn";
   const actionLabel = signedIn ? "LOGOUT" : "LOGIN";

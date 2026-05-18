@@ -22,6 +22,7 @@ const NEWS_DESK_ROUTE_SECTIONS = new Set<NewsDeskTab>([
   "concepts",
   "references",
   "assignments",
+  "doctrine",
 ]);
 
 export default async function NewsDeskSectionPage({ params, searchParams }: NewsDeskSectionPageProps) {
