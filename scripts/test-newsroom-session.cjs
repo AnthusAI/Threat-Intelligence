@@ -15,6 +15,12 @@ const {
   resolveDashboardReady,
   resolveSignedOut,
 } = require("../lib/news-desk-session.ts");
+const {
+  buildCategoryDrilldownContext,
+  referencesForCategoryContext,
+  semanticNodesForCategoryContext,
+  topicHref,
+} = require("../lib/newsroom-category-drilldown.ts");
 
 const initial = createInitialNewsDeskShellState();
 assert.equal(initial.phase, "checkingAccess");
@@ -55,6 +61,42 @@ assert.equal(patched.lastRefreshedAt, "2026-05-17T21:05:00.000Z");
 const invalidated = resolveSignedOut(ready, { status: "signedOut", label: "Signed out" });
 assert.equal(invalidated.phase, "signedOut");
 assert.equal(invalidated.dashboard, null);
+
+const drilldownCategories = [
+  { id: "flat-root", lineageId: "flat-root-lineage", categoryKey: "topic.root", displayName: "Root", categorySetId: "set", corpusId: "corpus", status: "accepted", parentCategoryKey: null },
+  { id: "tree-root", lineageId: "tree-root-lineage", categoryKey: "topic.root", displayName: "Root", categorySetId: "set", corpusId: "corpus", status: "accepted", parentCategoryKey: null },
+  { id: "tree-child", lineageId: "tree-child-lineage", categoryKey: "topic.child", displayName: "Child", categorySetId: "set", corpusId: "corpus", status: "accepted", parentCategoryKey: "topic.root" },
+];
+const rootReference = { kind: "reference", id: "reference-root", lineageId: "reference-root", label: "Root Reference", href: "/newsroom/references?reference=reference-root" };
+const childReference = { kind: "reference", id: "reference-child", lineageId: "reference-child", label: "Child Reference", href: "/newsroom/references?reference=reference-child" };
+const rootConcept = { kind: "semanticNode", id: "concept-root", lineageId: "concept-root", label: "Root Concept", href: "/newsroom/concepts?node=concept-root" };
+const childConcept = { kind: "semanticNode", id: "concept-child", lineageId: "concept-child", label: "Child Concept", href: "/newsroom/concepts?node=concept-child" };
+const drilldownGraph = {
+  referencesForCategory(lineageId) {
+    if (lineageId === "flat-root-lineage") return [rootReference];
+    if (lineageId === "tree-root-lineage") return [rootReference];
+    if (lineageId === "tree-child-lineage") return [childReference];
+    return [];
+  },
+  neighbors(kind, lineageId) {
+    assert.equal(kind, "category");
+    if (lineageId === "flat-root-lineage") return [{ predicate: "mentions", label: "mentioned by", direction: "incoming", relations: [{ id: "relation-root" }], objects: [rootConcept] }];
+    if (lineageId === "tree-child-lineage") return [{ predicate: "mentions", label: "mentioned by", direction: "incoming", relations: [{ id: "relation-child" }], objects: [childConcept] }];
+    return [];
+  },
+};
+
+const rootDrilldown = buildCategoryDrilldownContext(drilldownCategories, "topic.root");
+assert.equal(rootDrilldown.includeDescendants, true);
+assert.deepEqual(referencesForCategoryContext(drilldownGraph, rootDrilldown).map((reference) => reference.lineageId).sort(), ["reference-child", "reference-root"]);
+assert.deepEqual(semanticNodesForCategoryContext(drilldownGraph, rootDrilldown).map((node) => node.lineageId).sort(), ["concept-child", "concept-root"]);
+
+const childDrilldown = buildCategoryDrilldownContext(drilldownCategories, "topic.child");
+assert.equal(childDrilldown.includeDescendants, false);
+assert.deepEqual(referencesForCategoryContext(drilldownGraph, childDrilldown).map((reference) => reference.lineageId), ["reference-child"]);
+assert.deepEqual(semanticNodesForCategoryContext(drilldownGraph, childDrilldown).map((node) => node.lineageId), ["concept-child"]);
+assert.equal(topicHref("topic.root"), "/newsroom/topics/topic.root");
+assert.equal(topicHref("topic.root", "topic.child"), "/newsroom/topics/topic.root/topic.child");
 
 console.log("newsroom session tests passed");
 
