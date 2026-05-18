@@ -25,7 +25,7 @@ import type {
   SemanticRelationRecord,
   UserDirectoryEntry,
 } from "../lib/category-repository";
-import { DOCTRINE_DEFINITIONS } from "../lib/doctrine";
+import { DOCTRINE_DEFINITIONS, getDeskDoctrineDefinitions } from "../lib/doctrine";
 import { configureAmplifyClient } from "./amplify-client-provider";
 import { isUnauthenticatedError, loadReaderSessionSnapshot, type ReaderAuthSnapshot } from "./reader-auth-state";
 
@@ -179,7 +179,6 @@ export async function loadEditorNewsDeskDashboard({ isAdmin }: { isAdmin: boolea
     knowledgeComments,
     semanticRelations,
     assignmentState,
-    doctrineRecords,
     userDirectory,
   ] = await Promise.all([
     listUserPoolModel<CategorySteeringCorpus>("KnowledgeCorpus"),
@@ -188,8 +187,8 @@ export async function loadEditorNewsDeskDashboard({ isAdmin }: { isAdmin: boolea
     listUserPoolModel<CategorySteeringCategory>("Category"),
     listUserPoolModel<CategorySteeringCategoryTree>("CategorySet"),
     listUserPoolModel<CategorySteeringCategoryTreeNode>("Category"),
-    listUserPoolModel<CategoryKeywordRecord>("CategoryKeyword"),
-    listUserPoolModel<LexicalSteeringRuleRecord>("LexicalSteeringRule"),
+    listOptionalUserPoolModel<CategoryKeywordRecord>("CategoryKeyword"),
+    listOptionalUserPoolModel<LexicalSteeringRuleRecord>("LexicalSteeringRule"),
     listUserPoolModel<CategorySteeringProposal>("SteeringProposal"),
     listUserPoolModel<CategorySteeringArtifact>("KnowledgeArtifact"),
     listUserPoolModel<ReferenceRecord>("Reference"),
@@ -198,7 +197,6 @@ export async function loadEditorNewsDeskDashboard({ isAdmin }: { isAdmin: boolea
     listUserPoolModel<KnowledgeCommentRecord>("KnowledgeComment"),
     listUserPoolModel<SemanticRelationRecord>("SemanticRelation"),
     loadEditorAssignmentsData(),
-    loadDoctrineRecords(),
     isAdmin ? loadUserDirectory() : Promise.resolve([]),
   ]);
 
@@ -206,6 +204,14 @@ export async function loadEditorNewsDeskDashboard({ isAdmin }: { isAdmin: boolea
   const sortedImportRuns = importRuns.sort((left, right) => right.importedAt.localeCompare(left.importedAt));
   const sortedCategorySets = sortCategorySets(categorySets, sortedImportRuns);
   const canonicalCategorySet = selectCanonicalCategorySet(sortedCorpora, sortedCategorySets);
+  const sortedCategorys = sortCategorys(categorys);
+  const sortedCategoryNodes = sortCategoryTreeNodes(categoryNodes);
+  const rootDeskCategories = selectRootDeskCategoriesForDoctrine({
+    categorys: sortedCategorys,
+    categoryNodes: sortedCategoryNodes,
+    categorySetId: canonicalCategorySet?.id ?? null,
+  });
+  const doctrineRecords = await loadDoctrineRecords(rootDeskCategories);
 
   return {
     canonicalCorpusId: canonicalCategorySet?.corpusId ?? selectCanonicalCorpus(sortedCorpora)?.id ?? null,
@@ -215,9 +221,9 @@ export async function loadEditorNewsDeskDashboard({ isAdmin }: { isAdmin: boolea
     corpora: sortedCorpora,
     importRuns: sortedImportRuns,
     categorySets: sortedCategorySets,
-    categorys: sortCategorys(categorys),
+    categorys: sortedCategorys,
     categoryTrees: sortTaxonomies(categoryTrees),
-    categoryNodes: sortCategoryTreeNodes(categoryNodes),
+    categoryNodes: sortedCategoryNodes,
     categoryKeywords: categoryKeywords.sort((left, right) => keywordSortKey(left).localeCompare(keywordSortKey(right))),
     lexicalSteeringRules: lexicalSteeringRules.sort((left, right) => lexicalRuleSortKey(left).localeCompare(lexicalRuleSortKey(right))),
     proposals: sortProposals(proposals),
@@ -248,8 +254,19 @@ export async function loadEditorAssignmentsData(): Promise<{
   };
 }
 
-export async function loadEditorDoctrineRecordsData(): Promise<DoctrineRecord[]> {
-  return loadDoctrineRecords();
+export async function loadEditorDoctrineRecordsData(options?: {
+  dashboard?: Pick<CategorySteeringDashboard, "categorys" | "categoryNodes" | "canonicalCategorySetId"> | null;
+  rootCategories?: CategorySteeringCategory[];
+}): Promise<DoctrineRecord[]> {
+  const rootCategories = options?.rootCategories
+    ?? (options?.dashboard
+      ? selectRootDeskCategoriesForDoctrine({
+        categorys: options.dashboard.categorys,
+        categoryNodes: options.dashboard.categoryNodes,
+        categorySetId: options.dashboard.canonicalCategorySetId ?? null,
+      })
+      : []);
+  return loadDoctrineRecords(rootCategories);
 }
 
 export async function loadEditorUserDirectoryData(): Promise<UserDirectoryEntry[]> {
@@ -288,9 +305,47 @@ async function listOptionalUserPoolModel<T>(modelName: string): Promise<T[]> {
   return listUserPoolModel<T>(modelName);
 }
 
-async function loadDoctrineRecords(): Promise<DoctrineRecord[]> {
+export function selectRootDeskCategoriesForDoctrine({
+  categorys,
+  categoryNodes,
+  categorySetId,
+}: {
+  categorys: CategorySteeringCategory[];
+  categoryNodes: CategorySteeringCategoryTreeNode[];
+  categorySetId: string | null;
+}): CategorySteeringCategory[] {
+  const categorySetFilter = (category: { categorySetId: string }) => !categorySetId || category.categorySetId === categorySetId;
+  const currentCategorys = categorys.filter((category) => (
+    categorySetFilter(category)
+    && category.status !== "deprecated"
+    && category.versionState !== "superseded"
+  ));
+  const categoryByKey = new Map(currentCategorys.map((category) => [category.categoryKey, category]));
+  const rootNodes = categoryNodes
+    .filter((node) => (
+      categorySetFilter(node)
+      && node.status === "accepted"
+      && node.versionState !== "superseded"
+      && !node.parentCategoryKey
+    ))
+    .sort((left, right) => categorySortKey(left).localeCompare(categorySortKey(right)));
+
+  if (rootNodes.length) {
+    return rootNodes.map((node) => mergeRootNodeWithCategory(node, categoryByKey.get(node.categoryKey)));
+  }
+
+  return currentCategorys
+    .filter((category) => category.status === "accepted" && category.versionState !== "superseded" && !category.parentCategoryKey)
+    .sort((left, right) => categorySortKey(left).localeCompare(categorySortKey(right)));
+}
+
+async function loadDoctrineRecords(rootCategories: CategorySteeringCategory[] = []): Promise<DoctrineRecord[]> {
+  const definitions = uniqueDoctrineDefinitions([
+    ...DOCTRINE_DEFINITIONS,
+    ...rootCategories.flatMap((category) => getDeskDoctrineDefinitions(category)),
+  ]);
   const records = await Promise.all(
-    DOCTRINE_DEFINITIONS.map((definition) => getDoctrineRecordBySlug(definition.slug)),
+    definitions.map((definition) => getDoctrineRecordBySlug(definition.slug)),
   );
   return records.filter((record): record is DoctrineRecord => record !== null);
 }
@@ -320,6 +375,53 @@ async function getDoctrineRecordBySlug(slug: string): Promise<DoctrineRecord | n
 
   const doctrine = records.find((record) => record.type === "doctrine") ?? records[0] ?? null;
   return doctrine;
+}
+
+function uniqueDoctrineDefinitions(definitions: typeof DOCTRINE_DEFINITIONS): typeof DOCTRINE_DEFINITIONS {
+  const bySlug = new Map<string, (typeof DOCTRINE_DEFINITIONS)[number]>();
+  for (const definition of definitions) bySlug.set(definition.slug, definition);
+  return Array.from(bySlug.values());
+}
+
+function mergeRootNodeWithCategory(
+  node: CategorySteeringCategoryTreeNode,
+  category?: CategorySteeringCategory,
+): CategorySteeringCategory {
+  return {
+    ...node,
+    ...category,
+    id: category?.id ?? node.id,
+    lineageId: category?.lineageId ?? node.lineageId ?? category?.id ?? node.id,
+    versionNumber: category?.versionNumber ?? node.versionNumber,
+    previousVersionId: category?.previousVersionId ?? node.previousVersionId,
+    versionState: category?.versionState ?? node.versionState,
+    versionCreatedAt: category?.versionCreatedAt ?? node.versionCreatedAt,
+    versionCreatedBy: category?.versionCreatedBy ?? node.versionCreatedBy,
+    changeReason: category?.changeReason ?? node.changeReason,
+    contentHash: category?.contentHash ?? node.contentHash,
+    categorySetId: category?.categorySetId ?? node.categorySetId,
+    corpusId: category?.corpusId ?? node.corpusId,
+    categoryKey: node.categoryKey,
+    parentCategoryId: null,
+    parentCategoryKey: null,
+    displayName: category?.displayName ?? node.displayName,
+    shortTitle: category?.shortTitle ?? node.shortTitle,
+    subtitle: category?.subtitle ?? node.subtitle,
+    description: category?.description ?? node.description,
+    aliases: category?.aliases ?? node.aliases,
+    status: category?.status ?? node.status,
+    seedItemIds: category?.seedItemIds ?? node.seedItemIds,
+    holdoutItemIds: category?.holdoutItemIds ?? node.holdoutItemIds,
+    rank: category?.rank ?? node.rank,
+    depth: 0,
+    isPinned: category?.isPinned ?? node.isPinned,
+    importRunId: category?.importRunId ?? node.importRunId,
+    updatedAt: category?.updatedAt ?? node.updatedAt,
+  };
+}
+
+function categorySortKey(category: Pick<CategorySteeringCategory, "rank" | "categoryKey">): string {
+  return `${String(category.rank ?? 999999).padStart(6, "0")}#${category.categoryKey}`;
 }
 
 async function loadUserDirectory(): Promise<UserDirectoryEntry[]> {

@@ -100,7 +100,7 @@ export function NewsDeskClientProvider({ children }: Readonly<{ children: React.
 
   const refreshDoctrineRecords = useCallback(async () => {
     try {
-      const doctrineRecords = await loadEditorDoctrineRecordsData();
+      const doctrineRecords = await loadEditorDoctrineRecordsData({ dashboard: shellRef.current.dashboard });
       setShell((current) => patchDashboard(
         current,
         (dashboard) => ({

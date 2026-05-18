@@ -18,6 +18,7 @@ type NewsDeskSectionPageProps = {
 
 const NEWS_DESK_ROUTE_SECTIONS = new Set<NewsDeskTab>([
   "users",
+  "desks",
   "topics",
   "concepts",
   "references",

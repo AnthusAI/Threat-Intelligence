@@ -11,6 +11,7 @@ import {
   loadEditorCategoryTreeState,
   loadEditorDoctrineRecordsData,
   loadEditorUserDirectoryData,
+  selectRootDeskCategoriesForDoctrine,
 } from "./news-desk-taxonomy-client";
 import { useOptionalNewsDeskClient } from "./news-desk-client-provider";
 import { ReaderAuthControl } from "./reader-auth-control";
@@ -44,6 +45,8 @@ import {
   DOCTRINE_ITEM_STATUS,
   DOCTRINE_ITEM_TYPE,
   DOCTRINE_ITEM_TYPE_STATUS,
+  buildDeskDoctrineDefinition,
+  deskDoctrineEditorialValue,
   doctrineBodyToText,
   doctrineEditorialValue,
   doctrineTextToBody,
@@ -54,6 +57,17 @@ import {
   type SemanticNeighborGroup,
   type SemanticObjectSummary,
 } from "../lib/semantic-graph";
+import {
+  buildCategoryDrilldownContext,
+  buildTopicDrilldownContext,
+  categoryDrilldownHref,
+  categoryLineageId,
+  referencesForCategoryContext,
+  semanticNodesForCategoryContext,
+  topicHref,
+  uniqueNeighborGroupsForCategoryContext,
+  type CategoryDrilldownContext,
+} from "../lib/newsroom-category-drilldown";
 import type { NewsDeskShellState } from "../lib/news-desk-session";
 
 type ActionState = {
@@ -65,7 +79,7 @@ type ActionState = {
 type ReviewAction = "accept" | "reject";
 type AssignmentAction = "claim" | "release" | "complete" | "cancel" | "reopen";
 type UserRoleAction = "grant" | "revoke";
-export type NewsDeskTab = "overview" | "users" | "topics" | "concepts" | "references" | "assignments" | "doctrine";
+export type NewsDeskTab = "overview" | "users" | "desks" | "topics" | "concepts" | "references" | "assignments" | "doctrine";
 type LexicalRuleScope = "publication" | "corpus" | "classifier" | "category";
 type LexicalRuleDraft = {
   term: string;
@@ -151,6 +165,7 @@ const TAILORED_TOPIC_PROPOSAL_KINDS = new Set([
 const NEWS_DESK_TABS: Array<{ id: NewsDeskTab; label: string; detail: string; href: string }> = [
   { id: "overview", label: "Overview", detail: "Desk index", href: "/newsroom" },
   { id: "users", label: "Users", detail: "Roles", href: "/newsroom/users" },
+  { id: "desks", label: "Desks", detail: "Sections & Doctrine", href: "/newsroom/desks" },
   { id: "topics", label: "Topics", detail: "Taxonomy", href: "/newsroom/topics" },
   { id: "concepts", label: "Concepts", detail: "Ontology", href: "/newsroom/concepts" },
   { id: "references", label: "References", detail: "Corpus", href: "/newsroom/references" },
@@ -274,6 +289,11 @@ function NewsDeskDashboard({
   const activeCategoryTreeNodes = useMemo(() => (
     activeCategoryTree ? categoryNodes.filter((node) => node.categorySetId === activeCategoryTree.id && node.status !== "deprecated") : []
   ), [activeCategoryTree, categoryNodes]);
+  const rootDeskCategories = useMemo(() => selectRootDeskCategoriesForDoctrine({
+    categorys,
+    categoryNodes: activeCategoryTreeNodes,
+    categorySetId: activeCategorySet?.id ?? null,
+  }), [activeCategorySet?.id, activeCategoryTreeNodes, categorys]);
   const acceptedRootCategoryCount = activeCategoryTreeNodes.filter((node) => !node.parentCategoryKey && node.status === "accepted").length;
   const acceptedSubcategoryCount = activeCategoryTreeNodes.filter((node) => node.parentCategoryKey && node.status === "accepted").length;
   const latestImport = useMemo(() => (
@@ -473,6 +493,9 @@ function NewsDeskDashboard({
     startTransition(() => {
       void (async () => {
         try {
+          if (!("LexicalSteeringRule" in dataClient.models)) {
+            throw new Error("GraphQL model LexicalSteeringRule is not available in the deployed schema.");
+          }
           const response = await dataClient.models.LexicalSteeringRule.create(rule as never, { authMode: USER_POOL_AUTH_MODE });
           assertNoGraphQLErrors(response.errors);
           setLexicalSteeringRules((current) => upsertLocalLexicalRule(current, rule));
@@ -550,7 +573,7 @@ function NewsDeskDashboard({
       await onRefreshDoctrineRecords();
       return;
     }
-    const nextRecords = await loadEditorDoctrineRecordsData();
+    const nextRecords = await loadEditorDoctrineRecordsData({ rootCategories: rootDeskCategories });
     setDoctrineRecords(nextRecords);
     setDoctrineDrafts(buildDoctrineEditorState(nextRecords));
   }
@@ -613,6 +636,53 @@ function NewsDeskDashboard({
           setActionState({ id: recordKey, message: "doctrine saved", tone: "ok" });
         } catch (error) {
           setActionState({ id: recordKey, message: error instanceof Error ? error.message : "doctrine save failed", tone: "error" });
+          await refreshEditorDoctrineRecords();
+        }
+      })();
+    });
+  }
+
+  function saveDeskDoctrine(category: CategorySteeringCategory, kind: DoctrineKind, text: string) {
+    const definition = buildDeskDoctrineDefinition(category, kind);
+    const currentRecord = doctrineRecords.find((record) => record.slug === definition.slug) ?? null;
+    const recordKey = definition.slug;
+    setActionState({ id: recordKey, message: "desk doctrine save pending", tone: "pending" });
+
+    const nextBody = doctrineTextToBody(text);
+    const now = new Date().toISOString();
+
+    if (dashboard.isDemo) {
+      const nextRecord = buildDeskDoctrineRecord(category, kind, nextBody, currentRecord, now, "Papyrus newsroom");
+      setDoctrineRecords((current) => replaceDoctrineRecord(current, nextRecord));
+      setActionState({ id: recordKey, message: "desk doctrine saved", tone: "ok" });
+      return;
+    }
+
+    startTransition(() => {
+      void (async () => {
+        try {
+          const actorLabel = await getNewsDeskActorLabel();
+          const nextRecord = buildDeskDoctrineRecord(category, kind, nextBody, currentRecord, now, actorLabel);
+          if (currentRecord) {
+            const response = await dataClient.models.Item.update({
+              id: currentRecord.id,
+              title: nextRecord.title,
+              headline: nextRecord.headline,
+              body: nextRecord.body,
+              editorial: nextRecord.editorial,
+              updatedAt: nextRecord.updatedAt,
+            }, { authMode: USER_POOL_AUTH_MODE });
+            assertNoGraphQLErrors(response.errors);
+            if (!response.data?.id) throw new Error("Desk doctrine update returned no saved record.");
+          } else {
+            const response = await dataClient.models.Item.create(nextRecord as never, { authMode: USER_POOL_AUTH_MODE });
+            assertNoGraphQLErrors(response.errors);
+            if (!response.data?.id) throw new Error("Desk doctrine create returned no saved record.");
+          }
+          await refreshEditorDoctrineRecords();
+          setActionState({ id: recordKey, message: "desk doctrine saved", tone: "ok" });
+        } catch (error) {
+          setActionState({ id: recordKey, message: error instanceof Error ? error.message : "desk doctrine save failed", tone: "error" });
           await refreshEditorDoctrineRecords();
         }
       })();
@@ -830,6 +900,7 @@ function NewsDeskDashboard({
           </article>
           <aside className="news-desk-index" aria-label="Newsroom status index">
             <StatusMetric label="Users" value={String(userDirectory.length)} detail={dashboard.canManageUsers ? "admin directory" : "admin-only directory"} />
+            <StatusMetric label="Desks" value={String(rootDeskCategories.length)} detail="root topic desks" />
             <StatusMetric label="Topics" value={String(canonicalCategorys.length)} detail={`${acceptedSubcategoryCount} accepted subtopics`} />
             <StatusMetric label="Concepts" value={String(dashboard.semanticNodes.length)} detail={`${dashboard.semanticRelations.length} semantic links`} />
             <StatusMetric label="References" value={String(dashboard.references.length)} detail={`${dashboard.referenceAttachments.length} private files`} />
@@ -883,6 +954,22 @@ function NewsDeskDashboard({
             onRoleAction={runUserRoleAction}
           />
         ) : null}
+        {activeTab === "desks" ? (
+          <DesksDeskView
+            assignments={assignments}
+            categoryByUid={categoryByUid}
+            categoryNodes={activeCategoryTreeNodes}
+            disabled={isPending}
+            doctrineRecords={doctrineRecords}
+            graph={graph}
+            initialCategoryLineageId={initialSelection.category}
+            isDemo={Boolean(dashboard.isDemo)}
+            onCategorySave={saveCategory}
+            onDeskDoctrineSave={saveDeskDoctrine}
+            rootCategories={rootDeskCategories}
+            statusMessage={actionState}
+          />
+        ) : null}
         {activeTab === "topics" ? (
           <TopicsDeskView
             activeCategorySet={activeCategorySet}
@@ -914,14 +1001,18 @@ function NewsDeskDashboard({
         ) : null}
         {activeTab === "concepts" ? (
           <ConceptsDeskView
+            categories={mergeCategoryRecords(categorys, activeCategoryTreeNodes)}
             graph={graph}
+            initialCategoryLineageId={initialSelection.category}
             initialNodeLineageId={initialSelection.node}
             semanticNodes={dashboard.semanticNodes}
           />
         ) : null}
         {activeTab === "references" ? (
           <ReferencesDeskView
+            categories={mergeCategoryRecords(categorys, activeCategoryTreeNodes)}
             graph={graph}
+            initialCategoryLineageId={initialSelection.category}
             initialReferenceLineageId={initialSelection.reference}
             references={dashboard.references}
           />
@@ -977,6 +1068,7 @@ function OverviewDeskView({
           <div className="news-desk-ledger-list news-desk-ledger-list--compact">
             <DeskLinkCard href="/newsroom/references" label="References" value={dashboard.references.length} detail={`${dashboard.referenceAttachments.length} attachments / ${dashboard.knowledgeComments.length} comments`} />
             <DeskLinkCard href="/newsroom/concepts" label="Concepts" value={dashboard.semanticNodes.length} detail={`${dashboard.semanticRelations.length} relations`} />
+            <DeskLinkCard href="/newsroom/desks" label="Desks" value={dashboard.categorys.filter((category) => category.status === "accepted" && !category.parentCategoryKey).length} detail="sections and doctrine" />
             <DeskLinkCard href="/newsroom/topics" label="Topics" value={dashboard.categorys.length} detail={`${dashboard.proposals.filter((proposal) => proposal.status === "proposed").length} open proposals`} />
             <DeskLinkCard href="/newsroom/users" label="Users" value={userDirectory.length} detail={dashboard.canManageUsers ? "role desk available" : "admin role required"} />
             <DeskLinkCard href="/newsroom/assignments" label="Assignments" value={assignmentMetrics.total} detail={`${assignmentMetrics.open} open work items`} />
@@ -1339,6 +1431,273 @@ function UserMergeIdentityBlock({ title, user }: { title: string; user: UserDire
   );
 }
 
+function DesksDeskView({
+  assignments,
+  categoryByUid,
+  categoryNodes,
+  disabled,
+  doctrineRecords,
+  graph,
+  initialCategoryLineageId,
+  isDemo,
+  onCategorySave,
+  onDeskDoctrineSave,
+  rootCategories,
+  statusMessage,
+}: {
+  assignments: AssignmentRecord[];
+  categoryByUid: Map<string, CategorySteeringCategory>;
+  categoryNodes: CategorySteeringCategoryTreeNode[];
+  disabled: boolean;
+  doctrineRecords: DoctrineRecord[];
+  graph: SemanticGraph;
+  initialCategoryLineageId?: string | null;
+  isDemo: boolean;
+  onCategorySave: (category: CategorySteeringCategory, update: Pick<CategorySteeringCategory, "displayName" | "shortTitle" | "subtitle" | "description">) => void;
+  onDeskDoctrineSave: (category: CategorySteeringCategory, kind: DoctrineKind, text: string) => void;
+  rootCategories: CategorySteeringCategory[];
+  statusMessage: ActionState | null;
+}) {
+  const roots = buildCanonicalTopicRoots(rootCategories, categoryNodes, []);
+  const initialRootKey = selectInitialRootKey(roots, initialCategoryLineageId);
+  const [selectedRootKey, setSelectedRootKey] = useState<string | null>(initialRootKey);
+  const selectedRoot = roots.find((root) => root.category.categoryKey === selectedRootKey) ?? roots[0] ?? null;
+
+  useEffect(() => {
+    if (!roots.length) {
+      setSelectedRootKey(null);
+      return;
+    }
+    const nextRootKey = selectedRoot?.category.categoryKey ?? initialRootKey ?? roots[0].category.categoryKey;
+    if (selectedRootKey !== nextRootKey) setSelectedRootKey(nextRootKey);
+  }, [initialRootKey, roots, selectedRoot, selectedRootKey]);
+
+  return (
+    <div className="news-desk-columns" data-news-desk-section="desks">
+      <div className="news-desk-main-column">
+        <section className="category-steering-section category-steering-section--lead" aria-labelledby="newsroom-desks-title">
+          <SectionHeader title="News Desks" detail={`${roots.length} root topic desks`} />
+          <div className="news-desk-desk-list">
+            {roots.length ? roots.map((root) => {
+              const rootNode = root.node ?? categoryToCategoryTreeNode(root.category);
+              const rootContext = buildTopicDrilldownContext(root, rootNode, categoryByUid);
+              const referenceCount = referencesForCategoryContext(graph, rootContext).length;
+              const assignmentCount = countAssignmentsForDesk(assignments, graph, rootNode, root.subcategorys);
+              const doctrineStatus = deskDoctrineStatus(root.category, doctrineRecords);
+              const selected = selectedRoot?.category.categoryKey === root.category.categoryKey;
+              return (
+                <Link
+                  className="news-desk-desk-card"
+                  data-news-desk-card={root.category.categoryKey}
+                  data-selected={selected || undefined}
+                  href={getNewsDeskTabHref(`/newsroom/desks/${encodeURIComponent(root.category.categoryKey)}`, isDemo)}
+                  key={root.category.categoryKey}
+                  onClick={() => setSelectedRootKey(root.category.categoryKey)}
+                >
+                  <span>{rootNode.shortTitle ?? deriveShortTitle(rootNode.displayName)}</span>
+                  <strong>{rootNode.displayName}</strong>
+                  <p>{rootNode.description ?? "No desk description yet."}</p>
+                  <small>{referenceCount} refs / {assignmentCount} assignments / {root.subcategorys.length} subtopics / {doctrineStatus.savedCount} of 2 doctrine slots</small>
+                </Link>
+              );
+            }) : <EmptyRow label="No root topic desks are available in the canonical category set" />}
+          </div>
+        </section>
+
+        {selectedRoot ? (
+          <DeskDetailPanel
+            assignments={assignments}
+            categoryByUid={categoryByUid}
+            disabled={disabled}
+            doctrineRecords={doctrineRecords}
+            graph={graph}
+            onCategorySave={onCategorySave}
+            onDeskDoctrineSave={onDeskDoctrineSave}
+            root={selectedRoot}
+            statusMessage={statusMessage}
+          />
+        ) : null}
+      </div>
+
+      <aside className="news-desk-rail-column">
+        <section className="category-steering-section" aria-labelledby="desk-index-notes-title">
+          <SectionHeader title="Desk Rules" detail="Root topics only" />
+          <div className="news-desk-ledger-list">
+            <article className="news-desk-ledger-item">
+              <header>
+                <strong>Desk Identity</strong>
+                <span>Category</span>
+              </header>
+              <p>Official name, short title, subtitle, and description stay on the accepted root Category record.</p>
+            </article>
+            <article className="news-desk-ledger-item">
+              <header>
+                <strong>Desk Doctrine</strong>
+                <span>Private Item</span>
+              </header>
+              <p>Mission and policies are private doctrine Items tied to the root category lineage.</p>
+            </article>
+            <article className="news-desk-ledger-item">
+              <header>
+                <strong>Subtopics</strong>
+                <span>Inherited</span>
+              </header>
+              <p>Child topics inherit the root desk doctrine in v1.</p>
+            </article>
+          </div>
+        </section>
+      </aside>
+    </div>
+  );
+}
+
+function DeskDetailPanel({
+  assignments,
+  categoryByUid,
+  disabled,
+  doctrineRecords,
+  graph,
+  onCategorySave,
+  onDeskDoctrineSave,
+  root,
+  statusMessage,
+}: {
+  assignments: AssignmentRecord[];
+  categoryByUid: Map<string, CategorySteeringCategory>;
+  disabled: boolean;
+  doctrineRecords: DoctrineRecord[];
+  graph: SemanticGraph;
+  onCategorySave: (category: CategorySteeringCategory, update: Pick<CategorySteeringCategory, "displayName" | "shortTitle" | "subtitle" | "description">) => void;
+  onDeskDoctrineSave: (category: CategorySteeringCategory, kind: DoctrineKind, text: string) => void;
+  root: CanonicalTopicRoot;
+  statusMessage: ActionState | null;
+}) {
+  const rootNode = root.node ?? categoryToCategoryTreeNode(root.category);
+  const rootContext = buildTopicDrilldownContext(root, rootNode, categoryByUid);
+  const referenceCount = referencesForCategoryContext(graph, rootContext).length;
+  const assignmentCount = countAssignmentsForDesk(assignments, graph, rootNode, root.subcategorys);
+  const doctrineStatus = deskDoctrineStatus(root.category, doctrineRecords);
+
+  return (
+    <section className="category-steering-section news-desk-desk-detail" aria-labelledby="selected-desk-title">
+      <header className="news-desk-topic-detail__header">
+        <div>
+          <p className="story-label">News Desk</p>
+          <h3 id="selected-desk-title">{rootNode.displayName}</h3>
+          <span>{rootNode.shortTitle ?? deriveShortTitle(rootNode.displayName)}</span>
+        </div>
+        <dl>
+          <div>
+            <dt>References</dt>
+            <dd>{referenceCount}</dd>
+          </div>
+          <div>
+            <dt>Assignments</dt>
+            <dd>{assignmentCount}</dd>
+          </div>
+          <div>
+            <dt>Subtopics</dt>
+            <dd>{root.subcategorys.length}</dd>
+          </div>
+          <div>
+            <dt>Doctrine</dt>
+            <dd>{doctrineStatus.savedCount}/2</dd>
+          </div>
+        </dl>
+      </header>
+
+      <div className="news-desk-desk-detail__grid">
+        <CategoryEditor category={root.category} disabled={disabled} onSave={onCategorySave} />
+        <div className="news-desk-doctrine-list">
+          {(["mission", "policy"] as DoctrineKind[]).map((kind) => {
+            const definition = buildDeskDoctrineDefinition(root.category, kind);
+            const record = doctrineRecords.find((entry) => entry.slug === definition.slug) ?? null;
+            return (
+              <DeskDoctrineEditorCard
+                key={definition.slug}
+                category={root.category}
+                definition={definition}
+                disabled={disabled}
+                record={record}
+                statusMessage={statusMessage?.id === definition.slug ? statusMessage : null}
+                onSave={onDeskDoctrineSave}
+              />
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="news-desk-desk-subtopics" aria-label={`${rootNode.displayName} inherited subtopics`}>
+        <p className="category-steering-subcategory-list__label">Inherited Subtopics</p>
+        <div className="news-desk-chip-row">
+          {root.subcategorys.length ? root.subcategorys.map((subcategory) => (
+            <span key={subcategory.id}>{subcategory.shortTitle ?? deriveShortTitle(subcategory.displayName)}</span>
+          )) : <span>No accepted child topics</span>}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function DeskDoctrineEditorCard({
+  category,
+  definition,
+  disabled,
+  record,
+  statusMessage,
+  onSave,
+}: {
+  category: CategorySteeringCategory;
+  definition: { kind: DoctrineKind; label: string; slug: string };
+  disabled: boolean;
+  record: DoctrineRecord | null;
+  statusMessage: ActionState | null;
+  onSave: (category: CategorySteeringCategory, kind: DoctrineKind, text: string) => void;
+}) {
+  const [body, setBody] = useState(() => doctrineBodyToText(record?.body));
+  const paragraphCount = doctrineTextToBody(body).length;
+
+  useEffect(() => {
+    setBody(doctrineBodyToText(record?.body));
+  }, [definition.slug, record?.id, record?.updatedAt, record?.body]);
+
+  return (
+    <article className="news-desk-doctrine-card" data-news-desk-doctrine={definition.slug}>
+      <header className="news-desk-doctrine-card__header">
+        <div>
+          <p className="story-label">Desk Doctrine</p>
+          <h3>{definition.label}</h3>
+        </div>
+        <span>{record ? "Saved record" : "Empty slot"}</span>
+      </header>
+      <label className="news-desk-doctrine-card__field">
+        <span>{definition.label}</span>
+        <textarea
+          data-news-desk-doctrine-input={definition.slug}
+          disabled={disabled}
+          onChange={(event) => setBody(event.target.value)}
+          placeholder={`Enter the ${category.displayName} ${definition.label.toLowerCase()}.`}
+          value={body}
+        />
+      </label>
+      <div className="news-desk-doctrine-card__footer">
+        <span>{paragraphCount} paragraph{paragraphCount === 1 ? "" : "s"}</span>
+        <div className="news-desk-doctrine-card__actions">
+          {statusMessage ? <span data-tone={statusMessage.tone}>{statusMessage.message}</span> : null}
+          <button
+            type="button"
+            data-news-desk-doctrine-save={definition.slug}
+            disabled={disabled}
+            onClick={() => onSave(category, definition.kind, body)}
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    </article>
+  );
+}
+
 function TopicsDeskView({
   activeCategorySet,
   activeCategoryTree,
@@ -1452,22 +1811,41 @@ function TopicsDeskView({
 }
 
 function ConceptsDeskView({
+  categories,
   graph,
+  initialCategoryLineageId,
   initialNodeLineageId,
   semanticNodes,
 }: {
+  categories: CategorySteeringCategory[];
   graph: SemanticGraph;
+  initialCategoryLineageId?: string | null;
   initialNodeLineageId?: string | null;
   semanticNodes: SemanticNodeRecord[];
 }) {
-  const selected = selectSemanticNodeSummary(graph, semanticNodes, initialNodeLineageId);
+  const categoryContext = useMemo(() => buildCategoryDrilldownContext(categories, initialCategoryLineageId), [categories, initialCategoryLineageId]);
+  const categoryFilter = categoryContext.primary ? graph.resolve("category", categoryLineageId(categoryContext.primary)) : null;
+  const categoryConceptLineages = useMemo(() => (
+    categoryContext.primary
+      ? new Set(semanticNodesForCategoryContext(graph, categoryContext).map((node) => node.lineageId))
+      : null
+  ), [categoryContext, graph]);
+  const visibleNodes = useMemo(() => (
+    categoryConceptLineages
+      ? semanticNodes.filter((node) => categoryConceptLineages.has(node.lineageId ?? node.id))
+      : semanticNodes
+  ), [categoryConceptLineages, semanticNodes]);
+  const selected = selectSemanticNodeSummary(graph, visibleNodes, initialNodeLineageId) ?? categoryFilter;
+  const detail = categoryFilter
+    ? `${visibleNodes.length} graph nodes associated with ${categoryFilter.label}`
+    : `${visibleNodes.length} graph nodes`;
   return (
     <div className="news-desk-columns" data-news-desk-section="concepts">
       <div className="news-desk-main-column">
         <section className="category-steering-section category-steering-section--lead" aria-labelledby="semantic-concepts-title">
-          <SectionHeader title="Semantic Concepts" detail={`${semanticNodes.length} graph nodes`} />
+          <SectionHeader title="Semantic Concepts" detail={detail} />
           <div className="news-desk-object-list">
-            {semanticNodes.length ? semanticNodes.map((node) => {
+            {visibleNodes.length ? visibleNodes.map((node) => {
               const lineageId = node.lineageId ?? node.id;
               return (
                 <a
@@ -1492,21 +1870,41 @@ function ConceptsDeskView({
 }
 
 function ReferencesDeskView({
+  categories,
   graph,
+  initialCategoryLineageId,
   initialReferenceLineageId,
   references,
 }: {
+  categories: CategorySteeringCategory[];
   graph: SemanticGraph;
+  initialCategoryLineageId?: string | null;
   initialReferenceLineageId?: string | null;
   references: ReferenceRecord[];
 }) {
-  const selected = selectReferenceSummary(graph, references, initialReferenceLineageId);
+  const categoryContext = useMemo(() => buildCategoryDrilldownContext(categories, initialCategoryLineageId), [categories, initialCategoryLineageId]);
+  const categoryFilter = categoryContext.primary ? graph.resolve("category", categoryLineageId(categoryContext.primary)) : null;
+  const categoryReferenceLineages = useMemo(() => (
+    categoryContext.primary
+      ? new Set(referencesForCategoryContext(graph, categoryContext).map((reference) => reference.lineageId))
+      : null
+  ), [categoryContext, graph]);
+  const visibleReferences = useMemo(() => (
+    categoryReferenceLineages
+      ? references.filter((reference) => categoryReferenceLineages.has(reference.lineageId ?? reference.id))
+      : references
+  ), [categoryReferenceLineages, references]);
+  const selected = selectReferenceSummary(graph, visibleReferences, initialReferenceLineageId) ?? categoryFilter;
+  const selectedReferenceLineageId = selected?.kind === "reference" ? selected.lineageId : null;
+  const detail = categoryFilter
+    ? `${visibleReferences.length} references classified as ${categoryFilter.label}`
+    : `${visibleReferences.length} private corpus items`;
   return (
     <div className="news-desk-columns" data-news-desk-section="references">
       <div className="news-desk-main-column">
         <section className="category-steering-section category-steering-section--lead" aria-labelledby="reference-ledger-title">
-          <SectionHeader title="Reference Ledger" detail={`${references.length} private corpus items`} />
-          <ReferenceLedger references={references} selectedLineageId={selected?.lineageId ?? null} />
+          <SectionHeader title="Reference Ledger" detail={detail} />
+          <ReferenceLedger references={visibleReferences} selectedLineageId={selectedReferenceLineageId} />
         </section>
       </div>
       <aside className="news-desk-rail-column">
@@ -1874,6 +2272,7 @@ function StatusMetric({ label, value, detail }: { label: string; value: string; 
 
 function formatDeskSectionLabel(section: NewsDeskTab): string {
   if (section === "users") return "Users Desk";
+  if (section === "desks") return "Desks Desk";
   if (section === "topics") return "Topics Desk";
   if (section === "concepts") return "Concepts Desk";
   if (section === "references") return "References Desk";
@@ -1884,6 +2283,7 @@ function formatDeskSectionLabel(section: NewsDeskTab): string {
 
 function formatDeskSectionHeadline(section: NewsDeskTab): string {
   if (section === "users") return "Profiles Carry The Human, Identities Carry The Login";
+  if (section === "desks") return "News Desks Carry Section Identity And Doctrine";
   if (section === "topics") return "Taxonomy Steering Stays Beside The Corpus";
   if (section === "concepts") return "Semantic Concepts Connect The Knowledge Graph";
   if (section === "references") return "Reference Metadata Leads To Private Corpus Files";
@@ -1894,6 +2294,7 @@ function formatDeskSectionHeadline(section: NewsDeskTab): string {
 
 function formatDeskSectionLede(section: NewsDeskTab): string {
   if (section === "users") return "Admins can map more than one Cognito identity to one Papyrus profile and mirror newsroom roles across those identities.";
+  if (section === "desks") return "Each accepted root topic becomes a newsroom desk with category identity fields and two private doctrine slots for mission and policies.";
   if (section === "topics") return "Editors can inspect accepted topics, subtopics, open steering proposals, and the taxonomy artifacts imported from Biblicus.";
   if (section === "concepts") return "Graph concepts are private semantic nodes. Use them to surf from ontology terms to references, topics, comments, and Papyrus items.";
   if (section === "references") return "References store strict metadata and attachment paths only. Source contents stay in S3 and corpus storage.";
@@ -2173,22 +2574,14 @@ function AcceptedCategoryTreeSection({
   categoryTreeLoadError: string | null;
   categoryNodes: CategorySteeringCategoryTreeNode[];
 }) {
-  const roots = canonicalCategorys.map((category) => {
-    const node = categoryNodes.find((candidate) => candidate.categoryKey === category.categoryKey && !candidate.parentCategoryKey);
-    const subcategorys = categoryNodes.filter((candidate) => candidate.parentCategoryKey === category.categoryKey && candidate.status === "accepted");
-    return {
-      category,
-      node,
-      subcategorys,
-      proposedSubcategorys: getProposedSubcategoryProposals(category.categoryKey, proposals),
-    };
-  });
+  const roots = buildCanonicalTopicRoots(canonicalCategorys, categoryNodes, proposals);
   const subcategoryCount = roots.reduce((count, root) => count + root.subcategorys.length, 0);
   const proposedSubcategoryCount = roots.reduce((count, root) => count + root.proposedSubcategorys.length, 0);
   const initialRootKey = selectInitialRootKey(roots, initialCategoryLineageId);
   const [selectedRootKey, setSelectedRootKey] = useState<string | null>(initialRootKey);
   const selectedRoot = roots.find((root) => root.category.categoryKey === selectedRootKey) ?? roots[0] ?? null;
-  const [focusedCategoryKey, setFocusedCategoryKey] = useState<string | null>(selectedRoot?.category.categoryKey ?? null);
+  const initialFocusKey = selectInitialFocusKey(selectedRoot, initialCategoryLineageId);
+  const [focusedCategoryKey, setFocusedCategoryKey] = useState<string | null>(initialFocusKey);
   const focusedNode = selectedRoot
     ? [categoryToCategoryTreeNode(selectedRoot.category), ...(selectedRoot.node ? [selectedRoot.node] : []), ...selectedRoot.subcategorys]
       .find((node) => node.categoryKey === focusedCategoryKey)
@@ -2238,34 +2631,36 @@ function AcceptedCategoryTreeSection({
             {roots.length ? roots.map((root) => {
               const rootNode = root.node ?? categoryToCategoryTreeNode(root.category);
               const relatedProposalCount = countRelatedCategoryTreeProposals(rootNode.categoryKey, root.subcategorys, proposals);
-              const rootReferenceCount = graph.referencesForCategory(categoryLineageId(rootNode)).length;
+              const rootContext = buildTopicDrilldownContext(root, rootNode, categoryByUid);
+              const rootReferenceCount = referencesForCategoryContext(graph, rootContext).length;
               const previewKeywords = keywordsForCategory(categoryKeywords, rootNode.categoryKey).slice(0, 4);
               const isSelected = selectedRoot?.category.categoryKey === root.category.categoryKey;
               return (
-                <button
+                <Link
                   aria-pressed={isSelected}
                   className="news-desk-topic-root-button"
                   data-selected={isSelected || undefined}
+                  href={topicHref(rootNode.categoryKey)}
                   key={root.category.categoryKey}
-                  onClick={() => {
-                    setSelectedRootKey(root.category.categoryKey);
-                    setFocusedCategoryKey(root.category.categoryKey);
-                  }}
-                  type="button"
-                >
+	                  onClick={() => {
+	                    setSelectedRootKey(root.category.categoryKey);
+	                    setFocusedCategoryKey(root.category.categoryKey);
+	                  }}
+	                >
                   <span>{rootNode.shortTitle ?? deriveShortTitle(rootNode.displayName)}</span>
                   <strong>{rootNode.displayName}</strong>
                   <small>{rootReferenceCount} refs / {root.subcategorys.length} accepted / {root.proposedSubcategorys.length} proposed / {relatedProposalCount} notes</small>
-                  {previewKeywords.length ? (
-                    <em>{previewKeywords.map((keyword) => keyword.keyword).join(" / ")}</em>
-                  ) : null}
-                </button>
+	                  {previewKeywords.length ? (
+	                    <em>{previewKeywords.map((keyword) => keyword.keyword).join(" / ")}</em>
+	                  ) : null}
+	                </Link>
               );
             }) : <EmptyRow label="No canonical roots available for category-tree display" />}
           </div>
           {selectedRoot ? (
             <>
               <CanonicalTopicDetail
+                categoryByUid={categoryByUid}
                 disabled={disabled}
                 focusedCategoryKey={focusedCategoryKey}
                 focusedNode={focusedNode}
@@ -2296,7 +2691,36 @@ type CanonicalTopicRoot = {
   proposedSubcategorys: CategorySteeringProposal[];
 };
 
+function buildCanonicalTopicRoots(
+  canonicalCategorys: CategorySteeringCategory[],
+  categoryNodes: CategorySteeringCategoryTreeNode[],
+  proposals: CategorySteeringProposal[],
+): CanonicalTopicRoot[] {
+  return canonicalCategorys
+    .filter((category) => category.status === "accepted" && !category.parentCategoryKey && category.versionState !== "superseded")
+    .map((category) => {
+      const node = categoryNodes.find((candidate) => (
+        candidate.categoryKey === category.categoryKey
+        && !candidate.parentCategoryKey
+        && candidate.status === "accepted"
+        && candidate.versionState !== "superseded"
+      ));
+      const subcategorys = categoryNodes.filter((candidate) => (
+        candidate.parentCategoryKey === category.categoryKey
+        && candidate.status === "accepted"
+        && candidate.versionState !== "superseded"
+      ));
+      return {
+        category,
+        node,
+        subcategorys,
+        proposedSubcategorys: getProposedSubcategoryProposals(category.categoryKey, proposals),
+      };
+    });
+}
+
 function CanonicalTopicDetail({
+  categoryByUid,
   categoryKeywords,
   disabled,
   focusedCategoryKey,
@@ -2309,6 +2733,7 @@ function CanonicalTopicDetail({
   proposals,
   root,
 }: {
+  categoryByUid: Map<string, CategorySteeringCategory>;
   categoryKeywords: CategoryKeywordRecord[];
   disabled: boolean;
   focusedCategoryKey: string | null;
@@ -2323,7 +2748,8 @@ function CanonicalTopicDetail({
 }) {
   const rootNode = root.node ?? categoryToCategoryTreeNode(root.category);
   const relatedProposalCount = countRelatedCategoryTreeProposals(rootNode.categoryKey, root.subcategorys, proposals);
-  const rootReferenceCount = graph.referencesForCategory(categoryLineageId(rootNode)).length;
+  const rootContext = buildTopicDrilldownContext(root, rootNode, categoryByUid);
+  const rootReferenceCount = referencesForCategoryContext(graph, rootContext).length;
 
   return (
     <article className="news-desk-topic-detail" data-news-desk-category-tree-root={rootNode.categoryKey}>
@@ -2364,24 +2790,40 @@ function CanonicalTopicDetail({
         <div className="news-desk-topic-detail__subtopics">
           <p className="category-steering-subcategory-list__label">Accepted Subtopics</p>
           <div className="news-desk-topic-subtopic-buttons">
-            <TopicFocusButton
-              active={focusedCategoryKey === rootNode.categoryKey}
-              count={graph.referencesForCategory(categoryLineageId(rootNode)).length}
+            {(() => {
+              const rootLineageId = categoryLineageId(rootNode);
+              return (
+              <TopicFocusButton
+                active={focusedCategoryKey === rootNode.categoryKey}
+              conceptCount={semanticNodesForCategoryContext(graph, buildTopicDrilldownContext(root, rootNode, categoryByUid)).length}
+              count={referencesForCategoryContext(graph, buildTopicDrilldownContext(root, rootNode, categoryByUid)).length}
               dataCategoryKey={rootNode.categoryKey}
               label={rootNode.shortTitle ?? deriveShortTitle(rootNode.displayName)}
+              lineageId={rootLineageId}
+              rootCategoryKey={rootNode.categoryKey}
               title={rootNode.displayName}
               onClick={() => onFocusCategory(rootNode.categoryKey)}
             />
+              );
+            })()}
             {root.subcategorys.length ? root.subcategorys.map((subcategory) => (
-              <TopicFocusButton
-                active={focusedCategoryKey === subcategory.categoryKey}
-                count={graph.referencesForCategory(categoryLineageId(subcategory)).length}
-                dataCategoryKey={subcategory.categoryKey}
-                key={subcategory.id}
-                label={subcategory.shortTitle ?? deriveShortTitle(subcategory.displayName)}
-                title={subcategory.displayName}
-                onClick={() => onFocusCategory(subcategory.categoryKey)}
-              />
+              (() => {
+                const subcategoryLineageId = categoryLineageId(subcategory);
+                return (
+                  <TopicFocusButton
+                    active={focusedCategoryKey === subcategory.categoryKey}
+                    conceptCount={semanticNodesForCategoryContext(graph, buildTopicDrilldownContext(root, subcategory, categoryByUid)).length}
+                    count={referencesForCategoryContext(graph, buildTopicDrilldownContext(root, subcategory, categoryByUid)).length}
+                    dataCategoryKey={subcategory.categoryKey}
+                    key={subcategory.id}
+                    label={subcategory.shortTitle ?? deriveShortTitle(subcategory.displayName)}
+                    lineageId={subcategoryLineageId}
+                    rootCategoryKey={rootNode.categoryKey}
+                    title={subcategory.displayName}
+                    onClick={() => onFocusCategory(subcategory.categoryKey)}
+                  />
+                );
+              })()
             )) : null}
           </div>
           {!root.subcategorys.length ? <EmptyRow label="No accepted subtopics under this root" /> : null}
@@ -2411,7 +2853,8 @@ function CanonicalTopicDetail({
           ) : null}
         </div>
 
-        <TopicSemanticContext
+          <TopicSemanticContext
+          categoryContext={focusedNode ? buildTopicDrilldownContext(root, focusedNode, categoryByUid) : rootContext}
           categoryKeywords={categoryKeywords}
           disabled={disabled}
           graph={graph}
@@ -2426,35 +2869,49 @@ function CanonicalTopicDetail({
 
 function TopicFocusButton({
   active,
+  conceptCount,
   count,
   dataCategoryKey,
   label,
+  lineageId,
   onClick,
+  rootCategoryKey,
   title,
 }: {
   active: boolean;
+  conceptCount: number;
   count: number;
   dataCategoryKey?: string;
   label: string;
+  lineageId: string;
   onClick: () => void;
+  rootCategoryKey: string;
   title: string;
 }) {
   return (
-    <button
-      className="news-desk-topic-focus-button"
-      data-news-desk-subcategory={dataCategoryKey}
-      data-selected={active || undefined}
-      onClick={onClick}
-      type="button"
-    >
-      <strong>{label}</strong>
-      <span>{title}</span>
-      <small>{count} refs</small>
-    </button>
+    <div className="news-desk-topic-focus-row" data-selected={active || undefined}>
+      <Link
+        className="news-desk-topic-focus-button"
+        data-news-desk-subcategory={dataCategoryKey}
+        data-selected={active || undefined}
+        href={topicHref(rootCategoryKey, dataCategoryKey)}
+        onClick={onClick}
+      >
+        <strong>{label}</strong>
+        <span>{title}</span>
+        <small>{count} refs / {conceptCount} concepts</small>
+      </Link>
+      <div className="news-desk-topic-focus-row__actions" aria-label={`${title} drill-down links`}>
+        <Link href={topicHref(rootCategoryKey, dataCategoryKey)}>Topic page</Link>
+        <Link href={categoryDrilldownHref("references", dataCategoryKey ?? lineageId)}>References</Link>
+        <Link href={categoryDrilldownHref("concepts", dataCategoryKey ?? lineageId)}>Concepts</Link>
+      </div>
+    </div>
   );
 }
 
 function TopicSemanticContext({
+  categoryContext,
   categoryKeywords,
   disabled,
   graph,
@@ -2462,6 +2919,7 @@ function TopicSemanticContext({
   node,
   onLexicalRuleCreate,
 }: {
+  categoryContext: CategoryDrilldownContext;
   categoryKeywords: CategoryKeywordRecord[];
   disabled: boolean;
   graph: SemanticGraph;
@@ -2471,16 +2929,14 @@ function TopicSemanticContext({
 }) {
   const lineageId = categoryLineageId(node);
   const [referencePage, setReferencePage] = useState(0);
-  const references = useMemo(() => sortReferenceSummariesByRecency(graph.referencesForCategory(lineageId)), [graph, lineageId]);
+  const references = useMemo(() => sortReferenceSummariesByRecency(referencesForCategoryContext(graph, categoryContext)), [categoryContext, graph]);
   const pageCount = Math.max(1, Math.ceil(references.length / TOPIC_REFERENCE_PAGE_SIZE));
   const currentPage = Math.min(referencePage, pageCount - 1);
   const visibleReferences = references.slice(currentPage * TOPIC_REFERENCE_PAGE_SIZE, (currentPage + 1) * TOPIC_REFERENCE_PAGE_SIZE);
   const concepts = uniqueSemanticSummaries(
-    graph.neighbors("category", lineageId)
-      .flatMap((group) => group.objects)
-      .filter((object) => object.kind === "semanticNode"),
+    semanticNodesForCategoryContext(graph, categoryContext),
   ).slice(0, 8);
-  const neighborGroups = graph.neighbors("category", lineageId);
+  const neighborGroups = uniqueNeighborGroupsForCategoryContext(graph, categoryContext);
 
   useEffect(() => {
     setReferencePage(0);
@@ -2494,7 +2950,7 @@ function TopicSemanticContext({
       <p>{node.description ?? "No description imported for this topic."}</p>
       <div className="news-desk-topic-context__stats" aria-label="Selected topic reference counts">
         <div>
-          <span>References</span>
+          <span>{categoryContext.includeDescendants ? "References including subtopics" : "References"}</span>
           <strong>{references.length}</strong>
         </div>
         <div>
@@ -2506,6 +2962,16 @@ function TopicSemanticContext({
           <strong>{compactArray(node.holdoutItemIds).length}</strong>
         </div>
       </div>
+      <TopicReferencePanel
+        currentPage={currentPage}
+        includeDescendants={categoryContext.includeDescendants}
+        node={node}
+        pageCount={pageCount}
+        references={references}
+        visibleReferences={visibleReferences}
+        onNext={() => setReferencePage((value) => Math.min(value + 1, pageCount - 1))}
+        onPrevious={() => setReferencePage((value) => Math.max(value - 1, 0))}
+      />
       <TopicKeywordsPanel
         categorySetId={node.categorySetId}
         categoryKey={node.categoryKey}
@@ -2522,34 +2988,75 @@ function TopicSemanticContext({
           <span>{concepts.length}</span>
         </header>
         {concepts.length ? concepts.map((concept) => (
-          <a href={concept.href} key={concept.lineageId}>
+          <Link href={concept.href} key={concept.lineageId}>
             <span>{concept.subtitle ?? "concept"}</span>
             <strong>{concept.label}</strong>
-          </a>
+          </Link>
         )) : <EmptyRow label="No graph concepts attached yet" />}
-      </div>
-      <div className="news-desk-topic-context__block">
-        <header>
-          <strong>Latest References</strong>
-          <span>{references.length}</span>
-        </header>
-        {visibleReferences.length ? visibleReferences.map((reference) => (
-          <a className="news-desk-reference-link" href={reference.href} key={reference.lineageId}>
-            <span>{formatReferenceSummaryDate(reference)} / {reference.subtitle ?? "reference"}</span>
-            <strong>{reference.label}</strong>
-          </a>
-        )) : <EmptyRow label="No classified references attached yet" />}
-        {references.length > TOPIC_REFERENCE_PAGE_SIZE ? (
-          <ReferencePager
-            onNext={() => setReferencePage((value) => Math.min(value + 1, pageCount - 1))}
-            onPrevious={() => setReferencePage((value) => Math.max(value - 1, 0))}
-            page={currentPage}
-            pageCount={pageCount}
-          />
-        ) : null}
+        <Link className="news-desk-topic-reference-ledger-link" href={categoryDrilldownHref("concepts", node.categoryKey)}>
+          View graph concepts
+        </Link>
       </div>
       <NeighborGroups groups={neighborGroups} />
     </aside>
+  );
+}
+
+function TopicReferencePanel({
+  currentPage,
+  includeDescendants,
+  node,
+  onNext,
+  onPrevious,
+  pageCount,
+  references,
+  visibleReferences,
+}: {
+  currentPage: number;
+  includeDescendants: boolean;
+  node: CategorySteeringCategoryTreeNode;
+  onNext: () => void;
+  onPrevious: () => void;
+  pageCount: number;
+  references: SemanticObjectSummary[];
+  visibleReferences: SemanticObjectSummary[];
+}) {
+  return (
+    <section className="news-desk-topic-reference-panel" data-news-desk-topic-references={node.categoryKey}>
+      <header>
+        <div>
+          <p className="story-label">Reference Ledger</p>
+          <h5>References In This Topic</h5>
+        </div>
+        <span>{references.length}</span>
+      </header>
+      {includeDescendants ? <p className="news-desk-topic-reference-panel__note">Including accepted subtopics.</p> : null}
+      {visibleReferences.length ? (
+        <div className="news-desk-topic-reference-list">
+          {visibleReferences.map((reference) => (
+            <Link className="news-desk-topic-reference-link" href={reference.href} key={reference.lineageId}>
+              <span>{formatReferenceSummaryDate(reference)} / {reference.subtitle ?? "reference"}</span>
+              <strong>{reference.label}</strong>
+            </Link>
+          ))}
+        </div>
+      ) : (
+        <EmptyRow label="No classified references are attached to this topic yet. Run the curation cycle after importing projections." />
+      )}
+      {references.length > TOPIC_REFERENCE_PAGE_SIZE ? (
+        <ReferencePager
+          onNext={onNext}
+          onPrevious={onPrevious}
+          page={currentPage}
+          pageCount={pageCount}
+        />
+      ) : null}
+      {references.length ? (
+        <Link className="news-desk-topic-reference-ledger-link" href={categoryDrilldownHref("references", node.categoryKey)}>
+          View all references
+        </Link>
+      ) : null}
+    </section>
   );
 }
 
@@ -2803,20 +3310,31 @@ function selectActiveCategoryTree(
 function categoryToCategoryTreeNode(category: CategorySteeringCategory): CategorySteeringCategoryTreeNode {
   return {
     id: category.id,
+    lineageId: category.lineageId ?? category.id,
+    versionNumber: category.versionNumber,
+    previousVersionId: category.previousVersionId,
+    versionState: category.versionState,
+    versionCreatedAt: category.versionCreatedAt,
+    versionCreatedBy: category.versionCreatedBy,
+    changeReason: category.changeReason,
+    contentHash: category.contentHash,
     categorySetId: category.categorySetId,
     corpusId: category.corpusId,
     categoryKey: category.categoryKey,
+    parentCategoryId: category.parentCategoryId,
     parentCategoryKey: null,
     displayName: category.displayName,
     shortTitle: category.shortTitle,
     subtitle: category.subtitle,
     description: category.description,
+    aliases: category.aliases,
     status: category.status,
     seedItemIds: category.seedItemIds,
     holdoutItemIds: category.holdoutItemIds,
     rank: category.rank,
     depth: 0,
-    importRunId: null,
+    isPinned: category.isPinned,
+    importRunId: category.importRunId,
     updatedAt: category.updatedAt,
   };
 }
@@ -2830,10 +3348,6 @@ function mergeCategoryRecords(
     records.set(category.id, category);
   }
   return Array.from(records.values());
-}
-
-function categoryLineageId(category: CategorySteeringCategory | CategorySteeringCategoryTreeNode): string {
-  return category.lineageId ?? category.id;
 }
 
 function keywordsForCategory(keywords: CategoryKeywordRecord[], categoryKey: string): CategoryKeywordRecord[] {
@@ -2986,6 +3500,16 @@ function selectInitialRootKey(roots: CanonicalTopicRoot[], initialCategoryLineag
   return roots[0].category.categoryKey;
 }
 
+function selectInitialFocusKey(root: CanonicalTopicRoot | null, initialCategoryLineageId?: string | null): string | null {
+  if (!root) return null;
+  if (!initialCategoryLineageId) return root.category.categoryKey;
+  if (matchesCategorySelection(root.category, initialCategoryLineageId) || (root.node && matchesCategorySelection(root.node, initialCategoryLineageId))) {
+    return root.category.categoryKey;
+  }
+  const subcategory = root.subcategorys.find((candidate) => matchesCategorySelection(candidate, initialCategoryLineageId));
+  return subcategory?.categoryKey ?? root.category.categoryKey;
+}
+
 function matchesCategorySelection(category: CategorySteeringCategory | CategorySteeringCategoryTreeNode, selection: string): boolean {
   return category.id === selection || category.lineageId === selection || category.categoryKey === selection;
 }
@@ -3051,6 +3575,71 @@ function stableStringify(value: unknown): string {
     .filter(([, entry]) => entry !== undefined)
     .sort(([left], [right]) => left.localeCompare(right));
   return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${stableStringify(entry)}`).join(",")}}`;
+}
+
+function deskDoctrineStatus(category: CategorySteeringCategory, records: DoctrineRecord[]): { savedCount: number } {
+  const savedCount = (["mission", "policy"] as DoctrineKind[]).filter((kind) => {
+    const definition = buildDeskDoctrineDefinition(category, kind);
+    const record = records.find((entry) => entry.slug === definition.slug);
+    return doctrineTextToBody(doctrineBodyToText(record?.body)).length > 0;
+  }).length;
+  return { savedCount };
+}
+
+function countAssignmentsForDesk(
+  assignments: AssignmentRecord[],
+  graph: SemanticGraph,
+  rootNode: CategorySteeringCategoryTreeNode,
+  subcategorys: CategorySteeringCategoryTreeNode[],
+): number {
+  const categoryKeys = new Set([rootNode.categoryKey, ...subcategorys.map((subcategory) => subcategory.categoryKey)]);
+  const categoryLineages = new Set([rootNode, ...subcategorys].map((category) => categoryLineageId(category)));
+  return assignments.filter((assignment) => {
+    const metadataCategoryKey = assignmentMetadataCategoryKey(assignment);
+    if (metadataCategoryKey && categoryKeys.has(metadataCategoryKey)) return true;
+    return graph.outgoing("assignment", assignment.id).some((relation) => (
+      relation.objectKind === "category"
+      && categoryLineages.has(relation.objectLineageId)
+    ));
+  }).length;
+}
+
+function assignmentMetadataCategoryKey(assignment: AssignmentRecord): string | null {
+  const metadata = parseMetadataObject(assignment.metadata);
+  return normalizeMetadataString(metadata?.categoryKey)
+    ?? normalizeMetadataString(metadata?.category_key)
+    ?? normalizeMetadataString(metadata?.rootCategoryKey)
+    ?? normalizeMetadataString(metadata?.root_category_key)
+    ?? normalizeMetadataString(metadata?.topicUid)
+    ?? normalizeMetadataString(metadata?.topic_uid)
+    ?? nestedMetadataCategoryKey(metadata?.newsroom)
+    ?? nestedMetadataCategoryKey(metadata?.assignment);
+}
+
+function nestedMetadataCategoryKey(value: unknown): string | null {
+  const metadata = parseMetadataObject(value);
+  return normalizeMetadataString(metadata?.categoryKey)
+    ?? normalizeMetadataString(metadata?.category_key)
+    ?? normalizeMetadataString(metadata?.rootCategoryKey)
+    ?? normalizeMetadataString(metadata?.root_category_key)
+    ?? normalizeMetadataString(metadata?.topicUid)
+    ?? normalizeMetadataString(metadata?.topic_uid);
+}
+
+function parseMetadataObject(value: unknown): Record<string, unknown> | null {
+  if (!value) return null;
+  if (typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+  if (typeof value !== "string") return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeMetadataString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 function countRelatedCategoryTreeProposals(
@@ -3223,6 +3812,13 @@ function CategoryEditor({
   const [subtitle, setSubtitle] = useState(category.subtitle ?? "");
   const [description, setDescription] = useState(category.description ?? "");
 
+  useEffect(() => {
+    setDisplayName(category.displayName);
+    setShortTitle(category.shortTitle ?? deriveShortTitle(category.displayName));
+    setSubtitle(category.subtitle ?? "");
+    setDescription(category.description ?? "");
+  }, [category.description, category.displayName, category.id, category.shortTitle, category.subtitle]);
+
   return (
     <article className="category-steering-category-card" data-category-uid={category.categoryKey} data-saved-display-name={category.displayName}>
       <header>
@@ -3308,9 +3904,14 @@ function CategorySetPanel({
           </div>
         </dl>
         <div className="category-steering-artifacts">
-          {artifacts.slice(0, 4).map((artifact) => (
-            <span key={artifact.id}>{artifact.displayName ?? artifact.artifactId}</span>
-          ))}
+          {artifacts.slice(0, 4).map((artifact) => {
+            const label = artifact.displayName ?? artifact.artifactId;
+            return (
+              <span key={artifact.id} aria-label={label} title={label}>
+                {formatArtifactChipLabel(label)}
+              </span>
+            );
+          })}
         </div>
       </div>
     </section>
@@ -3370,6 +3971,35 @@ function buildDoctrineRecord(
   };
 }
 
+function buildDeskDoctrineRecord(
+  category: CategorySteeringCategory,
+  kind: DoctrineKind,
+  body: string[],
+  currentRecord: DoctrineRecord | null,
+  now: string,
+  actorLabel: string,
+): DoctrineRecord {
+  const definition = buildDeskDoctrineDefinition(category, kind);
+  const title = `${category.displayName} ${definition.label}`;
+  return {
+    id: currentRecord?.id ?? definition.id,
+    lineageId: currentRecord?.lineageId ?? definition.lineageId,
+    versionNumber: currentRecord?.versionNumber ?? 1,
+    versionState: currentRecord?.versionState ?? "current",
+    versionCreatedAt: currentRecord?.versionCreatedAt ?? now,
+    versionCreatedBy: currentRecord?.versionCreatedBy ?? actorLabel,
+    type: DOCTRINE_ITEM_TYPE,
+    status: currentRecord?.status ?? DOCTRINE_ITEM_STATUS,
+    typeStatus: currentRecord?.typeStatus ?? DOCTRINE_ITEM_TYPE_STATUS,
+    slug: definition.slug,
+    title,
+    headline: title,
+    body,
+    editorial: deskDoctrineEditorialValue(category, kind),
+    updatedAt: now,
+  };
+}
+
 function replaceDoctrineRecord(records: DoctrineRecord[], nextRecord: DoctrineRecord): DoctrineRecord[] {
   const next = records.filter((record) => record.slug !== nextRecord.slug);
   next.push(nextRecord);
@@ -3379,6 +4009,20 @@ function replaceDoctrineRecord(records: DoctrineRecord[], nextRecord: DoctrineRe
 function compactArray(value: Array<string | null> | null | undefined): string[] {
   if (!Array.isArray(value)) return [];
   return value.map((entry) => (typeof entry === "string" ? entry.trim() : "")).filter(Boolean);
+}
+
+function formatArtifactChipLabel(value: string | null | undefined): string {
+  const label = value?.trim() ?? "";
+  if (!label) return "Untitled artifact";
+  if (label.length <= 44) return label;
+
+  const kindHashMatch = label.match(/^([^:\s]+:)([a-f0-9]{24,})$/i);
+  if (kindHashMatch) {
+    const [, prefix, hash] = kindHashMatch;
+    return `${prefix}${hash.slice(0, 8)}…${hash.slice(-8)}`;
+  }
+
+  return `${label.slice(0, 24)}…${label.slice(-12)}`;
 }
 
 function formatUserLabel(user: UserDirectoryEntry): string {
