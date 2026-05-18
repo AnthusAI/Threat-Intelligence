@@ -689,7 +689,7 @@ const reportingMetadata = JSON.parse(reportingAssignment.metadata);
 assert.equal(reportingMetadata.referenceLineageIds[0], projectedReference.lineageId);
 assert.equal(reportingMetadata.deskCategoryKey, fallbackTaxonomyNode.categoryKey);
 assert.equal(reportingMetadata.focusCategoryKey, focusCategoryAlpha.categoryKey);
-assert.equal(reportingMetadata.focusCategoryTitle, "Agents");
+assert.equal(reportingMetadata.focusCategoryTitle, "Scaling Agents");
 assert.equal(reportingMetadata.contextProfile, "reporting");
 assert.equal(reportingMetadata.contextTokenBudget, 4000);
 assert.deepEqual(reportingMetadata.contextSources, ["doctrine", "focus-category", "desk-memory", "fresh-evidence"]);

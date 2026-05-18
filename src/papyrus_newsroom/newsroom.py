@@ -523,7 +523,7 @@ def papyrus_build_assignment_agent_context(
             "deskCategoryLineageId": desk_category.get("lineageId") if desk_category else metadata.get("deskCategoryLineageId"),
             "focusCategoryKey": focus_category.get("categoryKey") if focus_category else metadata.get("focusCategoryKey"),
             "focusCategoryLineageId": focus_category.get("lineageId") if focus_category else metadata.get("focusCategoryLineageId"),
-            "focusCategoryTitle": (focus_category.get("shortTitle") or focus_category.get("displayName")) if focus_category else metadata.get("focusCategoryTitle"),
+            "focusCategoryTitle": (focus_category.get("displayName") or focus_category.get("shortTitle")) if focus_category else metadata.get("focusCategoryTitle"),
             "contextProfile": profile_key,
             "contextTokenBudget": token_budget,
             "contextSources": metadata.get("contextSources") or ["doctrine", "focus-category", "desk-memory", "fresh-evidence"],

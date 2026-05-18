@@ -149,8 +149,8 @@ function buildAssignmentContextMetadata({
   signalNodes,
   targetSystemType,
 }) {
-  const focusTitle = focusCategory.shortTitle ?? focusCategory.displayName ?? focusCategory.categoryKey;
-  const deskTitle = deskCategory.shortTitle ?? deskCategory.displayName ?? deskCategory.categoryKey;
+  const focusTitle = focusCategory.displayName ?? focusCategory.shortTitle ?? focusCategory.categoryKey;
+  const deskTitle = deskCategory.displayName ?? deskCategory.shortTitle ?? deskCategory.categoryKey;
   return {
     deskCategoryKey: deskCategory.categoryKey,
     deskCategoryLineageId: deskCategory.lineageId,
@@ -164,7 +164,7 @@ function buildAssignmentContextMetadata({
     laneKey: lane.laneKey,
     laneLabel: lane.label,
     laneNodeKey: lane.nodeKey,
-    sectionKey: safeId(deskCategory.shortTitle ?? deskCategory.displayName ?? deskCategory.categoryKey),
+    sectionKey: safeId(deskCategory.displayName ?? deskCategory.shortTitle ?? deskCategory.categoryKey),
     publicationSlots,
     dispatchCount,
     overassignmentRatio,

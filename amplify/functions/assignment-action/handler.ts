@@ -29,7 +29,7 @@ const PUBLICATION_DOCTRINE_DEFINITIONS = [
 let clientPromise: Promise<DataClient> | null = null;
 
 export const handler = async (event: any): Promise<any> => {
-  const fieldName = normalizeRequiredString(event.info?.fieldName, "fieldName");
+  const fieldName = normalizeRequiredString(event.info?.fieldName ?? event.fieldName, "fieldName");
   if (fieldName === "getAssignmentContext") return getAssignmentContext(event as Parameters<Schema["getAssignmentContext"]["functionHandler"]>[0]);
   if (fieldName === "listAssignmentQueue") return listAssignmentQueue(event as Parameters<Schema["listAssignmentQueue"]["functionHandler"]>[0]);
   if (fieldName === "listAssignmentsForObject") return listAssignmentsForObject(event as Parameters<Schema["listAssignmentsForObject"]["functionHandler"]>[0]);
