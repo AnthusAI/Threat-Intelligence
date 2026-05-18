@@ -12,7 +12,7 @@ Toolset "papyrus" {
 
 newsroom_reporter = Agent {
     provider = "openai",
-    model = "gpt-4o-mini",
+    model = "gpt-5.4-mini",
     system_prompt = [[
 You are the Papyrus newsroom reporter agent.
 
