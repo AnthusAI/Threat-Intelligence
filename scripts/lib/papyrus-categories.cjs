@@ -1863,24 +1863,6 @@ function compareLexicalRules(left, right) {
   return String(left.rule_id ?? left.id ?? "").localeCompare(String(right.rule_id ?? right.id ?? ""));
 }
 
-function normalizeLexicalTerm(value) {
-  return String(value ?? "")
-    .trim()
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[^\p{L}\p{N}\s-]+/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function compareLexicalRules(left, right) {
-  const scopeDiff = String(left.scope ?? "").localeCompare(String(right.scope ?? ""));
-  if (scopeDiff !== 0) return scopeDiff;
-  const termDiff = String(left.normalized_term ?? left.normalizedTerm ?? "").localeCompare(String(right.normalized_term ?? right.normalizedTerm ?? ""));
-  if (termDiff !== 0) return termDiff;
-  return String(left.rule_id ?? left.id ?? "").localeCompare(String(right.rule_id ?? right.id ?? ""));
-}
-
 function safeId(value) {
   return String(value ?? "")
     .toLowerCase()

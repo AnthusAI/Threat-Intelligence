@@ -41,6 +41,8 @@ const {
 const { PapyrusGraphQLAuthoringClient } = require("./lib/papyrus-graphql-authoring.cjs");
 const { getArticleImageAssets, getMarkdownArticle, loadEditionConfig, loadMarkdownArticles } = require("./lib/papyrus-markdown.cjs");
 
+const OPTIONAL_SCHEMA_MODELS = new Set(["CategoryKeyword", "LexicalSteeringRule"]);
+
 async function main() {
   loadDotEnv();
 
@@ -217,7 +219,7 @@ async function importSteering(flags) {
     corpusConfig: resolvedCorpus.corpusConfig,
     corpusPath: resolvedCorpus.corpusPath,
   });
-  const changes = await buildRecordChanges(client, plan.records);
+  const changes = await buildRecordChangesToleratingOptionalModels(client, plan.records);
   await applyRecordChanges(client, changes);
   printCategoryImportSummary("steering", plan.importRunId, changes);
 }
@@ -229,11 +231,8 @@ async function importSteeringConfig(flags) {
   const records = buildSteeringConfigRecords(steeringConfig);
   const changes = await buildSteeringConfigRecordChanges(client, records);
   await applyRecordChanges(client, changes);
-  const lexicalConfig = loadLexicalSteeringConfig(options["lexical-config"]);
-  const lexicalChanges = await buildRecordChanges(client, buildLexicalSteeringConfigRecords(lexicalConfig));
-  await applyRecordChanges(client, lexicalChanges);
   printCategoryImportSummary("config", "steering-config", changes);
-  printCategoryImportSummary("lexical-config", "papyrus-lexical-steering", lexicalChanges);
+  await applyLexicalSteeringConfigIfAvailable(client, options);
 }
 
 async function importProjection(flags) {
@@ -256,7 +255,7 @@ async function importProjection(flags) {
     classifierId: resolvedProjection.classifierId,
     categorySetId: categorySet?.id,
   });
-  const changes = await buildRecordChanges(client, plan.records);
+  const changes = await buildRecordChangesToleratingOptionalModels(client, plan.records);
   await applyRecordChanges(client, changes);
   printCategoryImportSummary("projection", plan.importRunId, changes);
 }
@@ -278,10 +277,7 @@ async function runCurationCycle(flags) {
   const configChanges = await buildSteeringConfigRecordChanges(client, buildSteeringConfigRecords(steeringConfig));
   await applyRecordChanges(client, configChanges);
   printCategoryImportSummary("config", "steering-config", configChanges);
-  const lexicalConfig = loadLexicalSteeringConfig(options["lexical-config"]);
-  const lexicalConfigChanges = await buildRecordChanges(client, buildLexicalSteeringConfigRecords(lexicalConfig));
-  await applyRecordChanges(client, lexicalConfigChanges);
-  printCategoryImportSummary("lexical-config", "papyrus-lexical-steering", lexicalConfigChanges);
+  const lexicalConfig = await applyLexicalSteeringConfigIfAvailable(client, options);
 
   const canonicalBundle = loadSteeringBundleFromBiblicus({
     corpus: plan.canonical.corpus.path,
@@ -293,7 +289,7 @@ async function runCurationCycle(flags) {
     corpusConfig: plan.canonical.corpus,
     corpusPath: resolveBiblicusCorpusPath(plan, plan.canonical.corpus),
   });
-  const steeringChanges = await buildRecordChanges(client, steeringImportPlan.records);
+  const steeringChanges = await buildRecordChangesToleratingOptionalModels(client, steeringImportPlan.records);
   await applyRecordChanges(client, steeringChanges);
   printCategoryImportSummary("steering", steeringImportPlan.importRunId, steeringChanges);
 
@@ -314,8 +310,7 @@ async function runCurationCycle(flags) {
   const decisions = (await client.listRecords("SteeringDecision"))
     .filter((decision) => decision.categorySetId === categorySet.id || proposalIds.has(decision.proposalId));
   writeJsonFile(plan.canonical.steeringFeedbackPath, buildSteeringFeedbackPayload(categorySet, proposals, decisions));
-  const lexicalRules = await client.listRecords("LexicalSteeringRule");
-  writeJsonFile(plan.canonical.lexicalSteeringPath, buildLexicalSteeringPayload(lexicalRules, { config: lexicalConfig }));
+  await writeLexicalSteeringExportIfAvailable(client, plan.canonical.lexicalSteeringPath, lexicalConfig);
 
   const canonicalExtractionSnapshot = latestPipelineSnapshot(canonicalBundle);
   if (!canonicalExtractionSnapshot) throw new Error(`No pipeline extraction snapshot found for ${plan.canonical.corpus.key}.`);
@@ -395,7 +390,7 @@ async function runCurationCycle(flags) {
       classifierId: projection.classifierId,
       categorySetId: projectionCategorySet?.id,
     });
-    const projectionChanges = await buildRecordChanges(client, projectionImportPlan.records);
+    const projectionChanges = await buildRecordChangesToleratingOptionalModels(client, projectionImportPlan.records);
     await applyRecordChanges(client, projectionChanges);
     printCategoryImportSummary(`projection:${projection.targetCorpus.key}`, projectionImportPlan.importRunId, projectionChanges);
   }
@@ -409,7 +404,7 @@ async function runCurationCycle(flags) {
     corpusConfig: plan.canonical.corpus,
     corpusPath: resolveBiblicusCorpusPath(plan, plan.canonical.corpus),
   });
-  const refreshedChanges = await buildRecordChanges(client, refreshedPlan.records);
+  const refreshedChanges = await buildRecordChangesToleratingOptionalModels(client, refreshedPlan.records);
   await applyRecordChanges(client, refreshedChanges);
   printCategoryImportSummary("steering:refreshed", refreshedPlan.importRunId, refreshedChanges);
 
@@ -479,6 +474,31 @@ async function exportLexicalSteering(flags) {
   const payload = buildLexicalSteeringPayload(rules, { config: lexicalConfig });
   writeJsonFile(options.output, payload);
   console.log(`export\tlexical-steering\t${options.output}\t${payload.ignored_terms.length} active ignored terms`);
+}
+
+async function applyLexicalSteeringConfigIfAvailable(client, options = {}) {
+  const lexicalConfig = loadLexicalSteeringConfig(options["lexical-config"]);
+  try {
+    const lexicalChanges = await buildRecordChangesToleratingOptionalModels(client, buildLexicalSteeringConfigRecords(lexicalConfig));
+    await applyRecordChanges(client, lexicalChanges);
+    printCategoryImportSummary("lexical-config", "papyrus-lexical-steering", lexicalChanges);
+  } catch (error) {
+    if (!isMissingGraphQLModelError(error, "LexicalSteeringRule")) throw error;
+    console.warn("skip\tlexical-config\tLexicalSteeringRule model is not deployed in AppSync yet.");
+  }
+  return lexicalConfig;
+}
+
+async function writeLexicalSteeringExportIfAvailable(client, outputPath, lexicalConfig) {
+  try {
+    const lexicalRules = await client.listRecords("LexicalSteeringRule");
+    writeJsonFile(outputPath, buildLexicalSteeringPayload(lexicalRules, { config: lexicalConfig }));
+    console.log(`export\tlexical-steering\t${outputPath}\t${lexicalRules.length} rules`);
+  } catch (error) {
+    if (!isMissingGraphQLModelError(error, "LexicalSteeringRule")) throw error;
+    writeJsonFile(outputPath, buildLexicalSteeringPayload([], { config: lexicalConfig }));
+    console.warn("skip\tlexical-export\tLexicalSteeringRule model is not deployed in AppSync yet; wrote empty lexical export.");
+  }
 }
 
 async function listAssignments(flags) {
@@ -627,6 +647,23 @@ async function buildRecordChanges(client, records) {
   }
   changes.push(...prepared.postChanges);
   return changes;
+}
+
+async function buildRecordChangesToleratingOptionalModels(client, records) {
+  let pendingRecords = records;
+  const skippedModels = new Set();
+  for (;;) {
+    try {
+      return await buildRecordChanges(client, pendingRecords);
+    } catch (error) {
+      const missingModel = Array.from(OPTIONAL_SCHEMA_MODELS)
+        .find((modelName) => !skippedModels.has(modelName) && isMissingGraphQLModelError(error, modelName));
+      if (!missingModel) throw error;
+      skippedModels.add(missingModel);
+      pendingRecords = pendingRecords.filter((record) => record.modelName !== missingModel);
+      console.warn(`skip\t${missingModel}\tmodel is not deployed in AppSync yet; skipped optional records.`);
+    }
+  }
 }
 
 async function listExistingRecordsByModel(client, records) {
@@ -1105,6 +1142,14 @@ function buildRecordChangeFromCurrent(modelName, expected, current) {
   const nextExpected = modelName === "SteeringProposal" ? mergeReviewedProposalState(expected, current) : expected;
   const action = !current ? "create" : recordsEqualForModel(modelName, current, nextExpected) ? "noop" : "update";
   return { modelName, expected: nextExpected, current, action };
+}
+
+function isMissingGraphQLModelError(error, modelName) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  const listField = `list${modelName}s`;
+  const getField = `get${modelName}`;
+  return message.includes("FieldUndefined")
+    && (message.includes(listField) || message.includes(getField) || message.includes(modelName));
 }
 
 async function applyRecordChanges(client, records) {
