@@ -32,6 +32,20 @@ const {
   buildCurationCyclePlan,
 } = require("./lib/papyrus-curation-cycle.cjs");
 const {
+  DEFAULT_RELATION_TYPES_PATH,
+  buildSemanticRelationBackfillRecords,
+  buildSemanticRelationTypeRecords,
+  loadSemanticRelationTypeSeeds,
+  semanticRelationTypeFieldsForPredicate,
+} = require("./lib/papyrus-relation-types.cjs");
+const {
+  applyEditionPlanningPlan,
+  buildEditionPlanningPlan,
+  loadEditionPlanningState,
+  verifyEditionPlanningPlan,
+  writeEditionPlanningReport,
+} = require("./lib/papyrus-edition-planning.cjs");
+const {
   findCorpusConfigByPath,
   loadSteeringConfig,
   requireCorpusConfig,
@@ -48,7 +62,7 @@ async function main() {
 
   const args = process.argv.slice(2);
   const [group, command, value] = args;
-  if (group !== "content" && group !== "categories" && group !== "assignments") {
+  if (group !== "content" && group !== "categories" && group !== "assignments" && group !== "editions" && group !== "relations" && group !== "references" && group !== "messages") {
     printUsage();
     process.exitCode = 1;
     return;
@@ -99,11 +113,29 @@ async function main() {
     case "categories:run-curation-cycle":
       await runCurationCycle(args.slice(2));
       return;
+    case "relations:import-types":
+      await importRelationTypes(args.slice(2));
+      return;
+    case "relations:backfill":
+      await backfillRelationTypes(args.slice(2));
+      return;
+    case "messages:export-legacy-comments":
+      await exportLegacyKnowledgeComments(args.slice(2));
+      return;
+    case "messages:import-legacy-comments":
+      await importLegacyKnowledgeComments(args.slice(2));
+      return;
+    case "references:review-curation":
+      await reviewReferenceCuration(args.slice(2));
+      return;
     case "assignments:list":
       await listAssignments(args.slice(2));
       return;
     case "assignments:for-object":
       await listAssignmentsForObject(args.slice(2));
+      return;
+    case "assignments:build-context":
+      await buildAssignmentContext(args.slice(2));
       return;
     case "assignments:claim":
     case "assignments:release":
@@ -111,6 +143,12 @@ async function main() {
     case "assignments:cancel":
     case "assignments:reopen":
       await mutateAssignment(command, args.slice(2));
+      return;
+    case "editions:plan":
+      await planEdition(args.slice(2));
+      return;
+    case "editions:dispatch-research":
+      await dispatchEditionResearch(args.slice(2));
       return;
     default:
       printUsage();
@@ -233,6 +271,119 @@ async function importSteeringConfig(flags) {
   await applyRecordChanges(client, changes);
   printCategoryImportSummary("config", "steering-config", changes);
   await applyLexicalSteeringConfigIfAvailable(client, options);
+}
+
+async function importRelationTypes(flags) {
+  const options = parseOptions(flags);
+  const configPath = options.config || DEFAULT_RELATION_TYPES_PATH;
+  const relationTypes = loadSemanticRelationTypeSeeds(configPath);
+  const { client } = createAuthoringClient();
+  const records = buildSemanticRelationTypeRecords(relationTypes);
+  const changes = await buildRecordChanges(client, records);
+  await applyRecordChanges(client, changes);
+  printCategoryImportSummary("relation-types", path.basename(configPath), changes);
+}
+
+async function backfillRelationTypes(flags) {
+  const options = parseOptions(flags);
+  const configPath = options.config || DEFAULT_RELATION_TYPES_PATH;
+  const relationTypes = loadSemanticRelationTypeSeeds(configPath);
+  const { client } = createAuthoringClient();
+  const relations = await client.listRecords("SemanticRelation");
+  const changes = buildSemanticRelationBackfillRecords(relations, relationTypes);
+  const runDir = path.join(".papyrus-runs", `relation-type-backfill-${timestampForPath()}`);
+  const reportPath = path.join(runDir, "backfill-report.json");
+  const report = {
+    generatedAt: new Date().toISOString(),
+    configPath,
+    reportPath,
+    apply: Boolean(options.apply),
+    relationCount: relations.length,
+    changeCount: changes.filter((change) => change.action !== "noop").length,
+    unknownTypeCount: changes.filter((change) => change.unknownType).length,
+    unknownTypes: Array.from(new Set(changes.filter((change) => change.unknownType).map((change) => change.expected.relationTypeKey))).sort(),
+    changes: changes
+      .filter((change) => change.action !== "noop")
+      .map((change) => ({
+        id: change.expected.id,
+        action: change.action,
+        relationTypeKey: change.expected.relationTypeKey,
+        relationDomain: change.expected.relationDomain,
+      })),
+  };
+  writeJsonFile(reportPath, report);
+  if (options.apply) {
+    await applyRecordChanges(client, changes);
+  }
+  printRelationBackfillSummary(report);
+}
+
+async function exportLegacyKnowledgeComments(flags) {
+  const options = parseOptions(flags);
+  if (!options.output) throw new Error("messages export-legacy-comments requires --output.");
+  const { client } = createAuthoringClient();
+  const comments = [];
+  let nextToken = null;
+  const query = `
+    query ListLegacyKnowledgeComments($limit: Int, $nextToken: String) {
+      listKnowledgeComments(limit: $limit, nextToken: $nextToken) {
+        items {
+          id subjectKind subjectId subjectLineageId subjectVersionNumber subjectVersionKey subjectStateKey
+          commentKind body status source importRunId authorSub authorUserProfileId authorLabel metadata createdAt
+        }
+        nextToken
+      }
+    }
+  `;
+  do {
+    const result = await client.graphql(query, { limit: 100, nextToken });
+    const page = result.listKnowledgeComments;
+    comments.push(...(page?.items ?? []).filter(Boolean));
+    nextToken = page?.nextToken ?? null;
+  } while (nextToken);
+
+  writeJsonFile(options.output, {
+    schemaVersion: 1,
+    exportKind: "legacy-knowledge-comments",
+    generatedAt: new Date().toISOString(),
+    comments,
+  });
+  console.log(`messages\texport-legacy-comments\t${comments.length}\t${options.output}`);
+}
+
+async function importLegacyKnowledgeComments(flags) {
+  const options = parseOptions(flags);
+  if (!options.input) throw new Error("messages import-legacy-comments requires --input.");
+  const payload = loadJsonFile(options.input);
+  const comments = Array.isArray(payload.comments) ? payload.comments : Array.isArray(payload.items) ? payload.items : [];
+  const records = comments.flatMap(legacyKnowledgeCommentRecords);
+  const { client } = createAuthoringClient();
+  const changes = await buildRecordChanges(client, records);
+  await applyRecordChanges(client, changes);
+  printCategoryImportSummary("legacy-messages", path.basename(options.input), changes);
+}
+
+async function reviewReferenceCuration(flags) {
+  const options = parseOptions(flags);
+  const referenceId = options.reference ?? options["reference-id"];
+  if (!referenceId) throw new Error("references review-curation requires --reference <id>.");
+  if (!options.action) throw new Error("references review-curation requires --action accept|reject|reopen|archive.");
+  const { client } = createAuthoringClient();
+  const mutation = `
+    mutation ReviewReferenceCuration($referenceId: ID!, $action: String!, $note: String, $actorLabel: String) {
+      reviewReferenceCuration(referenceId: $referenceId, action: $action, note: $note, actorLabel: $actorLabel) {
+        ok action referenceId status messageId relationId
+      }
+    }
+  `;
+  const result = await client.graphql(mutation, {
+    referenceId,
+    action: options.action,
+    note: options.note ?? null,
+    actorLabel: options.actor ?? "Papyrus content CLI",
+  });
+  const review = result.reviewReferenceCuration;
+  console.log(`references\treview-curation\t${review.referenceId}\t${review.action}\t${review.status}\t${review.messageId ?? ""}`);
 }
 
 async function importProjection(flags) {
@@ -525,13 +676,41 @@ async function listAssignmentsForObject(flags) {
     .filter((relation) => relation.relationState === "current")
     .filter((relation) => relation.objectStateKey === stateKey)
     .filter((relation) => relation.subjectKind === "assignment")
-    .filter((relation) => relation.predicate === "requests_work_on");
+    .filter((relation) => (relation.relationTypeKey ?? relation.predicate) === "requests_work_on");
   const assignmentIds = new Set(relations.map((relation) => relation.subjectId));
   const assignments = (await client.listRecords("Assignment")).filter((assignment) => assignmentIds.has(assignment.id));
   assignments.sort((left, right) => assignmentSortKey(left).localeCompare(assignmentSortKey(right)));
   for (const assignment of assignments) {
     console.log(`${assignment.status}\t${assignment.id}\t${assignment.assignmentTypeKey}\t${assignment.title}`);
   }
+}
+
+async function buildAssignmentContext(flags) {
+  const options = parseOptions(flags);
+  const assignmentId = options.assignment;
+  if (!assignmentId) throw new Error("assignments build-context requires --assignment.");
+  const outputPath = options.output || path.join(
+    process.cwd(),
+    ".papyrus-runs",
+    timestampForPath(),
+    `assignment-context-${assignmentId}.json`,
+  );
+  const result = runPapyrusNewsroomTool([
+    "build-assignment-agent-context",
+    "--assignment-id", assignmentId,
+    "--context-profile", String(options["context-profile"] || ""),
+    "--max-tokens", String(options["max-tokens"] || 0),
+    "--recent-days", String(options["recent-days"] || 30),
+  ], "assignment-context");
+  const payload = JSON.parse(result);
+  writeJsonFile(outputPath, payload);
+  const context = payload.assignment_agent_context || {};
+  console.log(`assignment-context\tassignment\t${assignmentId}`);
+  console.log(`assignment-context\tprofile\t${context.contextProfile || "unknown"}\tbudget=${context.contextTokenBudget || 0}`);
+  console.log(`assignment-context\tdesk\t${context.deskCategoryKey || "unknown"}\tfocus=${context.focusCategoryKey || "unknown"}`);
+  console.log(`assignment-context\tblocks\tincluded=${(context.includedBlocks || []).length}\tdropped=${(context.droppedBlocks || []).length}`);
+  console.log(`assignment-context\ttokens\t${context.totalTokens || 0}`);
+  console.log(`assignment-context\toutput\t${outputPath}`);
 }
 
 async function mutateAssignment(action, flags) {
@@ -546,10 +725,14 @@ async function mutateAssignment(action, flags) {
   const assignee = options.assignee ?? auth.claims.sub ?? "jwt-worker";
   const update = {
     id: assignmentId,
+    assignmentTypeKey: current.assignmentTypeKey,
+    queueKey: current.queueKey,
     status: nextStatus,
     queueStatusKey: `${current.queueKey}#${nextStatus}`,
+    createdAt: current.createdAt,
     updatedAt: now,
   };
+  if (current.priority !== undefined && current.priority !== null) update.priority = current.priority;
   if (action === "claim") {
     update.assigneeType = options["assignee-type"] ?? "agent";
     update.assigneeId = assignee;
@@ -587,6 +770,73 @@ async function mutateAssignment(action, flags) {
   console.log(`assignment\t${action}\t${assignmentId}\t${current.status}->${nextStatus}`);
 }
 
+async function planEdition(flags) {
+  const options = parseOptions(flags);
+  const { plan, report } = await buildEditionPlanningCommandPlan(options);
+  printEditionPlanningSummary(plan, report, "dry-run");
+}
+
+async function dispatchEditionResearch(flags) {
+  const options = parseOptions(flags);
+  const dryRunOnly = !options.apply;
+  const { client, plan, report } = await buildEditionPlanningCommandPlan(options);
+  if (dryRunOnly) {
+    printEditionPlanningSummary(plan, report, "dry-run");
+    console.log("edition-planning\tapply\tskipped\tpass --apply to write Edition, Assignment, and SemanticRelation records");
+    return;
+  }
+
+  const applyResult = await applyEditionPlanningPlan(client, plan);
+  const refreshedState = await loadEditionPlanningState(client);
+  const verification = verifyEditionPlanningPlan(refreshedState, plan);
+  const applyReport = writeEditionPlanningReport(plan, {
+    mode: "apply",
+    plan,
+    applyResult,
+    verification,
+  }, {
+    outputDir: report.outputDir,
+    filename: "dispatch-report.json",
+  });
+  writeEditionPlanningReport(plan, verification, {
+    outputDir: report.outputDir,
+    filename: "verification.json",
+  });
+  printEditionPlanningSummary(plan, applyReport, "apply");
+  console.log(`edition-planning\tapplied\t${applyResult.applied}`);
+  console.log(`edition-planning\tverification\t${verification.ok ? "ok" : "failed"}`);
+  if (verification.failures.length) {
+    for (const failure of verification.failures) console.log(`failure\t${failure}`);
+    throw new Error("Edition planning verification failed.");
+  }
+}
+
+async function buildEditionPlanningCommandPlan(options) {
+  const editionDate = options.date;
+  if (!editionDate) throw new Error("editions plan/dispatch-research requires --date YYYY-MM-DD.");
+  const { client } = createAuthoringClient();
+  const state = await loadEditionPlanningState(client);
+  const plan = buildEditionPlanningPlan(state, {
+    editionDate,
+    editionSlug: options.slug,
+    topDeskCount: options["top-desks"],
+    publicationSlots: options.slots,
+    overassignmentRatio: options.ratio,
+    maxAssignments: options["max-assignments"],
+    focusCategories: parseCommaList(options["focus-categories"] ?? options["track-lenses"]),
+    contextProfile: options["context-profile"],
+    targetSystemType: options["target-system-type"],
+  });
+  const report = writeEditionPlanningReport(plan, {
+    mode: "dry-run",
+    plan,
+  }, {
+    outputDir: options.output,
+    filename: "dry-run-plan.json",
+  });
+  return { client, plan, report };
+}
+
 async function deleteAllContent(client) {
   const deleteOrder = [
     "PublishedMediaAsset",
@@ -605,10 +855,11 @@ async function deleteAllContent(client) {
     "SteeringDecision",
     "SteeringProposal",
     "SemanticRelation",
+    "SemanticRelationType",
     "AssignmentEvent",
     "Assignment",
     "SemanticNode",
-    "KnowledgeComment",
+    "Message",
     "ReferenceAttachment",
     "Reference",
     "CategoryKeyword",
@@ -717,6 +968,15 @@ async function prepareVersionedKnowledgeRecords(client, records) {
 
     if (current.contentHash && current.contentHash === expected.contentHash) {
       referenceIdMap.set(expected.id, current);
+      const curationPatch = referenceCurationBackfillPatch(current, expected);
+      if (curationPatch) {
+        postChanges.push({
+          modelName: "Reference",
+          expected: curationPatch,
+          current,
+          action: "update",
+        });
+      }
       continue;
     }
 
@@ -750,9 +1010,6 @@ async function prepareVersionedKnowledgeRecords(client, records) {
     }
     if (record.modelName === "ReferenceAttachment") {
       return { ...record, expected: remapReferenceAttachment(record.expected, referenceIdMap) };
-    }
-    if (record.modelName === "KnowledgeComment") {
-      return { ...record, expected: remapKnowledgeComment(record.expected, referenceIdMap) };
     }
     return record;
   });
@@ -836,30 +1093,104 @@ function remapReferenceAttachment(attachment, referenceIdMap) {
   };
 }
 
-function remapKnowledgeComment(comment, referenceIdMap) {
-  if (comment.subjectKind !== "reference") return comment;
-  const reference = referenceIdMap.get(comment.subjectId);
-  if (!reference) return comment;
-  const subjectVersionKey = `reference#${reference.id}`;
-  const subjectStateKey = `reference#${reference.lineageId}#current`;
-  const next = {
-    ...comment,
-    subjectId: reference.id,
-    subjectLineageId: reference.lineageId,
-    subjectVersionNumber: reference.versionNumber,
-    subjectVersionKey,
-    subjectStateKey,
+function referenceCurationBackfillPatch(current, expected) {
+  const status = current.curationStatus ?? expected.curationStatus ?? "accepted";
+  const corpusId = current.corpusId ?? expected.corpusId;
+  const patch = {
+    id: current.id,
+    curationStatus: status,
+    curationStatusKey: current.curationStatusKey ?? (corpusId ? `${corpusId}#${status}` : null),
+    curationStatusUpdatedAt: current.curationStatusUpdatedAt ?? expected.curationStatusUpdatedAt ?? expected.updatedAt ?? new Date().toISOString(),
+    curationStatusUpdatedBy: current.curationStatusUpdatedBy ?? expected.curationStatusUpdatedBy ?? "biblicus-import",
+    curationStatusReason: current.curationStatusReason ?? expected.curationStatusReason ?? null,
+    updatedAt: expected.updatedAt ?? current.updatedAt ?? new Date().toISOString(),
   };
-  return {
-    ...next,
-    id: `knowledge-comment-${hashShort([
-      subjectVersionKey,
-      next.commentKind,
-      next.body,
-      next.createdAt,
-      next.source ?? "",
-    ])}`,
+  if (
+    current.curationStatus === patch.curationStatus &&
+    current.curationStatusKey === patch.curationStatusKey &&
+    current.curationStatusUpdatedAt === patch.curationStatusUpdatedAt &&
+    current.curationStatusUpdatedBy === patch.curationStatusUpdatedBy &&
+    current.curationStatusReason === patch.curationStatusReason
+  ) {
+    return null;
+  }
+  return patch;
+}
+
+function legacyKnowledgeCommentRecords(comment) {
+  if (!comment || typeof comment !== "object") return [];
+  const createdAt = comment.createdAt ?? new Date().toISOString();
+  const messageKind = comment.commentKind ?? "comment";
+  const messageId = `message-legacy-${hashShort([comment.id, messageKind, createdAt])}`;
+  const body = comment.body ?? "";
+  const message = {
+    id: messageId,
+    messageKind,
+    messageDomain: "commentary",
+    status: comment.status ?? "active",
+    body,
+    summary: body.length > 140 ? `${body.slice(0, 137)}...` : body,
+    source: comment.source ?? "legacy-knowledge-comment",
+    importRunId: comment.importRunId ?? null,
+    authorSub: comment.authorSub ?? null,
+    authorUserProfileId: comment.authorUserProfileId ?? null,
+    authorLabel: comment.authorLabel ?? null,
+    createdAt,
+    updatedAt: createdAt,
+    metadata: JSON.stringify({
+      legacyModel: "KnowledgeComment",
+      legacyId: comment.id,
+      ...(parseAwsJson(comment.metadata) && typeof parseAwsJson(comment.metadata) === "object" ? parseAwsJson(comment.metadata) : {}),
+    }),
   };
+  const targetKind = comment.subjectKind;
+  const targetId = comment.subjectId;
+  const targetLineageId = comment.subjectLineageId;
+  if (!targetKind || !targetId || !targetLineageId) return [{ modelName: "Message", expected: message }];
+  const relationType = semanticRelationTypeFieldsForPredicate("comment");
+  const subjectVersionKey = semanticVersionKey("message", messageId);
+  const objectVersionKey = semanticVersionKey(targetKind, targetId);
+  const objectStateKey = semanticStateKey(targetKind, targetLineageId);
+  return [
+    { modelName: "Message", expected: message },
+    {
+      modelName: "SemanticRelation",
+      expected: {
+        id: `semantic-relation-${hashShort([subjectVersionKey, "comment", objectVersionKey, comment.id])}`,
+        relationState: "current",
+        predicate: "comment",
+        ...relationType,
+        subjectKind: "message",
+        subjectId: messageId,
+        subjectLineageId: messageId,
+        subjectVersionNumber: 1,
+        objectKind: targetKind,
+        objectId: targetId,
+        objectLineageId: targetLineageId,
+        objectVersionNumber: comment.subjectVersionNumber ?? null,
+        subjectStateKey: semanticStateKey("message", messageId),
+        objectStateKey,
+        objectSubjectStateKey: `${objectStateKey}#message`,
+        predicateObjectStateKey: `comment#${objectStateKey}`,
+        subjectVersionKey,
+        objectVersionKey,
+        score: null,
+        confidence: null,
+        rank: 1,
+        classifierId: null,
+        modelVersion: null,
+        reviewRecommended: false,
+        sourceSnapshotId: null,
+        importRunId: comment.importRunId ?? null,
+        importedAt: createdAt,
+        metadata: JSON.stringify({
+          legacyModel: "KnowledgeComment",
+          legacyId: comment.id,
+          messageKind,
+        }),
+      },
+    },
+  ];
 }
 
 async function buildSteeringConfigRecordChanges(client, records) {
@@ -1198,6 +1529,17 @@ function printCategoryImportSummary(kind, importRunId, changes) {
   }
 }
 
+function printRelationBackfillSummary(report) {
+  console.log("Relation type backfill:");
+  console.log(`config\t${report.configPath}`);
+  console.log(`relations\t${report.relationCount}`);
+  console.log(`changes\t${report.changeCount}`);
+  console.log(`unknownTypes\t${report.unknownTypeCount}`);
+  console.log(`apply\t${report.apply ? "yes" : "no"}`);
+  for (const type of report.unknownTypes) console.log(`unknown\t${type}`);
+  console.log(`report\t${report.reportPath}`);
+}
+
 async function resolveAcceptedCategorySet(client, options) {
   if (options.categorySetId) {
     const categorySet = await client.getRecord("CategorySet", options.categorySetId);
@@ -1296,7 +1638,7 @@ async function verifyCurationCycle(client, context) {
     client.listRecords("SemanticNode"),
   ]);
   const currentReferences = references.filter((reference) => reference.versionState === "current");
-  const classifiedRelations = relations.filter((relation) => relation.relationState === "current" && relation.predicate === "classified_as");
+  const classifiedRelations = relations.filter((relation) => relation.relationState === "current" && (relation.relationTypeKey ?? relation.predicate) === "classified_as");
   const categoryLineages = new Set(categories.filter((category) => category.versionState === "current").map((category) => category.lineageId));
   const referenceLineages = new Set(currentReferences.map((reference) => reference.lineageId));
   const unresolvedCategoryRelations = classifiedRelations.filter((relation) => !categoryLineages.has(relation.objectLineageId)).length;
@@ -1384,14 +1726,15 @@ const KNOWLEDGE_MODELS = new Set([
   "Category",
   "CategorySet",
   "KnowledgeArtifact",
-  "KnowledgeComment",
   "KnowledgeCorpus",
   "KnowledgeImportRun",
   "KnowledgeRawPayload",
+  "Message",
   "Reference",
   "ReferenceAttachment",
   "SemanticNode",
   "SemanticRelation",
+  "SemanticRelationType",
   "SteeringDecision",
   "SteeringProposal",
 ]);
@@ -1430,6 +1773,14 @@ function stableStringify(value) {
 
 function hashShort(value) {
   return crypto.createHash("sha256").update(typeof value === "string" ? value : JSON.stringify(value)).digest("hex").slice(0, 16);
+}
+
+function semanticStateKey(kind, lineageId) {
+  return `${kind}#${lineageId}#current`;
+}
+
+function semanticVersionKey(kind, id) {
+  return `${kind}#${id}`;
 }
 
 function withVersionFields(record, { now, actor, reason }) {
@@ -1486,10 +1837,48 @@ function printUsage() {
   console.log("  npm run content -- categories import-projection --bundle <projection.json>");
   console.log("  npm run content -- categories import-projection --config <steering.yml> --target-corpus-key <key> --authority-corpus-key <key> --bundle <projection.json>");
   console.log("  npm run content -- categories run-curation-cycle --config <steering.yml>");
+  console.log("  npm run content -- relations import-types --config corpora/papyrus-semantic-relation-types.yml");
+  console.log("  npm run content -- relations backfill --config corpora/papyrus-semantic-relation-types.yml --apply");
+  console.log("  npm run content -- messages export-legacy-comments --output .papyrus-runs/<timestamp>/legacy-knowledge-comments.json");
+  console.log("  npm run content -- messages import-legacy-comments --input .papyrus-runs/<timestamp>/legacy-knowledge-comments.json");
+  console.log("  npm run content -- references review-curation --reference <id> --action accept|reject|reopen|archive --note <text>");
   console.log("  npm run content -- assignments list --queue <queue-key> --status open");
   console.log("  npm run content -- assignments for-object --kind reference --lineage <reference-lineage-id>");
+  console.log("  npm run content -- assignments build-context --assignment <id> --context-profile reporting");
   console.log("  npm run content -- assignments claim --assignment <id> --assignee <agent-id>");
   console.log("  npm run content -- assignments complete --assignment <id> --note <text>");
+  console.log("  npm run content -- editions plan --date YYYY-MM-DD --dry-run");
+  console.log("  npm run content -- editions plan --date YYYY-MM-DD --focus-categories automated-publication-systems,agentic-workflows --context-profile analysis --dry-run");
+  console.log("  npm run content -- editions dispatch-research --date YYYY-MM-DD --apply");
+  console.log("  npm run content -- editions dispatch-research --date YYYY-MM-DD --focus-categories agentic-workflows,evaluation-qa --context-profile reporting --apply");
+}
+
+function printEditionPlanningSummary(plan, report, mode) {
+  console.log(`edition-planning\tmode\t${mode}`);
+  console.log(`edition-planning\tedition\t${plan.edition.id}\t${plan.edition.slug}\t${plan.edition.status}`);
+  console.log(`edition-planning\tcategory-set\t${plan.categorySet.id}\t${plan.categorySet.displayName}`);
+  console.log(`edition-planning\tdesks\t${plan.desks.length}`);
+  console.log(`edition-planning\tassignments\t${plan.assignments.length}`);
+  console.log(`edition-planning\tcontext-backed\t${plan.summary.contextBackedAssignmentCount}`);
+  console.log(`edition-planning\trecords\tcreate=${plan.summary.createCount}\tupdate=${plan.summary.updateCount}\tnoop=${plan.summary.noopCount}`);
+  console.log(`edition-planning\treport\t${report.filepath}`);
+  for (const coverage of plan.focusCoverage || []) {
+    console.log(`focus-coverage\t${coverage.deskCategoryKey}\t${coverage.laneKey}\t${coverage.focusCategoryKey}\t${coverage.count}`);
+  }
+  for (const desk of plan.desks) {
+    console.log(`desk\t${desk.categoryKey}\t${desk.opportunityScore}\trefs=${desk.referenceCount}\tsignals=${desk.signalCount}`);
+  }
+}
+
+function runPapyrusNewsroomTool(args, label) {
+  const result = spawnSync("poetry", ["run", "papyrus-newsroom", ...args], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  });
+  if (result.status !== 0) {
+    throw new Error(`Papyrus newsroom ${label} failed: ${result.stderr || result.stdout || "unknown error"}`);
+  }
+  return result.stdout;
 }
 
 function resolveSteeringImportCorpus(config, options) {
@@ -1556,6 +1945,18 @@ function parseOptions(flags) {
     index += 1;
   }
   return options;
+}
+
+function parseCommaList(value) {
+  if (!value) return undefined;
+  return String(value)
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function timestampForPath(value = new Date().toISOString()) {
+  return String(value).replace(/[^0-9A-Za-z]+/g, "-").replace(/^-|-$/g, "");
 }
 
 function validateAuthoringClaims(claims) {

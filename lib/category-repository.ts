@@ -178,6 +178,11 @@ export type ReferenceRecord = {
   retrievedAt?: string | null;
   importRunId?: string | null;
   importedAt?: string | null;
+  curationStatus?: string | null;
+  curationStatusKey?: string | null;
+  curationStatusUpdatedAt?: string | null;
+  curationStatusUpdatedBy?: string | null;
+  curationStatusReason?: string | null;
   metadata?: unknown;
   updatedAt?: string | null;
 };
@@ -230,6 +235,9 @@ export type SemanticRelationRecord = {
   id: string;
   relationState: string;
   predicate: string;
+  relationTypeId?: string | null;
+  relationTypeKey?: string | null;
+  relationDomain?: string | null;
   subjectKind: string;
   subjectId: string;
   subjectLineageId: string;
@@ -256,24 +264,21 @@ export type SemanticRelationRecord = {
   metadata?: unknown;
 };
 
-export type KnowledgeCommentRecord = {
+export type MessageRecord = {
   id: string;
-  subjectKind: string;
-  subjectId: string;
-  subjectLineageId: string;
-  subjectVersionNumber?: number | null;
-  subjectVersionKey: string;
-  subjectStateKey: string;
-  commentKind: string;
-  body: string;
+  messageKind: string;
+  messageDomain: string;
   status: string;
+  body: string;
+  summary?: string | null;
   source?: string | null;
   importRunId?: string | null;
   authorSub?: string | null;
   authorUserProfileId?: string | null;
   authorLabel?: string | null;
-  metadata?: unknown;
   createdAt: string;
+  updatedAt: string;
+  metadata?: unknown;
 };
 
 export type AssignmentRecord = {
@@ -383,7 +388,7 @@ export type CategorySteeringDashboard = {
   references: ReferenceRecord[];
   referenceAttachments: ReferenceAttachmentRecord[];
   semanticNodes: SemanticNodeRecord[];
-  knowledgeComments: KnowledgeCommentRecord[];
+  messages: MessageRecord[];
   semanticRelations: SemanticRelationRecord[];
   assignments: AssignmentRecord[];
   assignmentEvents: AssignmentEventRecord[];
@@ -476,7 +481,7 @@ function createEmptyCategorySteeringDashboard(): CategorySteeringDashboard {
     references: [],
     referenceAttachments: [],
     semanticNodes: [],
-    knowledgeComments: [],
+    messages: [],
     semanticRelations: [],
     assignments: [],
     assignmentEvents: [],
@@ -935,6 +940,10 @@ function createDemoCategorySteeringDashboard(): CategorySteeringDashboard {
         sha256: "demo-history-001",
         importRunId: "knowledge-import-demo-projection",
         importedAt,
+        curationStatus: "accepted",
+        curationStatusKey: `${sourceCorpusId}#accepted`,
+        curationStatusUpdatedAt: importedAt,
+        curationStatusUpdatedBy: "demo-import",
       },
       {
         id: referenceHistoryTwoId,
@@ -950,6 +959,10 @@ function createDemoCategorySteeringDashboard(): CategorySteeringDashboard {
         sha256: "demo-history-002",
         importRunId: "knowledge-import-demo-projection",
         importedAt,
+        curationStatus: "pending",
+        curationStatusKey: `${sourceCorpusId}#pending`,
+        curationStatusUpdatedAt: importedAt,
+        curationStatusUpdatedBy: "demo-import",
       },
     ],
     referenceAttachments: [
@@ -1028,21 +1041,18 @@ function createDemoCategorySteeringDashboard(): CategorySteeringDashboard {
         updatedAt: importedAt,
       },
     ],
-    knowledgeComments: [
+    messages: [
       {
-        id: "knowledge-comment-demo-history-002-rationale",
-        subjectKind: "reference",
-        subjectId: referenceHistoryTwoId,
-        subjectLineageId: referenceHistoryTwoLineageId,
-        subjectVersionNumber: 1,
-        subjectVersionKey: `reference#${referenceHistoryTwoId}`,
-        subjectStateKey: `reference#${referenceHistoryTwoLineageId}#current`,
-        commentKind: "import_rationale",
-        body: "Imported as a useful holdout against modern scaling coverage.",
+        id: "message-demo-history-002-rationale",
+        messageKind: "import_rationale",
+        messageDomain: "commentary",
         status: "active",
+        body: "Imported as a useful holdout against modern scaling coverage.",
+        summary: "Holdout import rationale",
         source: "biblicus-import",
         importRunId: "knowledge-import-demo-projection",
         createdAt: importedAt,
+        updatedAt: importedAt,
       },
     ],
     assignments: [
@@ -1055,7 +1065,7 @@ function createDemoCategorySteeringDashboard(): CategorySteeringDashboard {
         priority: 40,
         title: "Curate reference: Symbolic And Connectionist History Reader",
         brief: "Review this knowledge-base reference and add durable curation notes or semantic links.",
-        instructions: "Inspect linked private corpus attachments; write findings as comments, semantic relations, or proposals.",
+        instructions: "Inspect linked private corpus attachments; write findings as messages, semantic relations, or proposals.",
         corpusId: sourceCorpusId,
         categorySetId,
         classifierId: "demo-canonical-classifier",
@@ -1074,7 +1084,7 @@ function createDemoCategorySteeringDashboard(): CategorySteeringDashboard {
         priority: 50,
         title: "Curate reference: Foundation Model Scaling Retrospective",
         brief: "Review this reference because it has a review-recommended category projection.",
-        instructions: "Check whether the weak scaling classification deserves a comment, proposal, or relation.",
+        instructions: "Check whether the weak scaling classification deserves a message, proposal, or relation.",
         assigneeType: "agent",
         assigneeId: "archivist-demo",
         assigneeKey: "agent#archivist-demo",
@@ -1237,23 +1247,26 @@ function createDemoCategorySteeringDashboard(): CategorySteeringDashboard {
         importedAt,
       },
       {
-        id: "semantic-relation-demo-comment-import-rationale",
+        id: "semantic-relation-demo-message-history-002-rationale",
         relationState: "current",
-        predicate: "about",
-        subjectKind: "knowledgeComment",
-        subjectId: "knowledge-comment-demo-history-002-rationale",
-        subjectLineageId: "knowledge-comment-demo-history-002-rationale",
+        predicate: "comment",
+        relationTypeId: "semantic-relation-type-comment",
+        relationTypeKey: "comment",
+        relationDomain: "commentary",
+        subjectKind: "message",
+        subjectId: "message-demo-history-002-rationale",
+        subjectLineageId: "message-demo-history-002-rationale",
         subjectVersionNumber: 1,
-        objectKind: "semanticNode",
-        objectId: "semantic-node-comment-import-rationale-v1",
-        objectLineageId: "semantic-node-comment-import-rationale",
+        objectKind: "reference",
+        objectId: referenceHistoryTwoId,
+        objectLineageId: referenceHistoryTwoLineageId,
         objectVersionNumber: 1,
-        subjectStateKey: "knowledgeComment#knowledge-comment-demo-history-002-rationale#current",
-        objectStateKey: "semanticNode#semantic-node-comment-import-rationale#current",
-        objectSubjectStateKey: "semanticNode#semantic-node-comment-import-rationale#current#knowledgeComment",
-        predicateObjectStateKey: "about#semanticNode#semantic-node-comment-import-rationale#current",
-        subjectVersionKey: "knowledgeComment#knowledge-comment-demo-history-002-rationale",
-        objectVersionKey: "semanticNode#semantic-node-comment-import-rationale-v1",
+        subjectStateKey: "message#message-demo-history-002-rationale#current",
+        objectStateKey: `reference#${referenceHistoryTwoLineageId}#current`,
+        objectSubjectStateKey: `reference#${referenceHistoryTwoLineageId}#current#message`,
+        predicateObjectStateKey: `comment#reference#${referenceHistoryTwoLineageId}#current`,
+        subjectVersionKey: "message#message-demo-history-002-rationale",
+        objectVersionKey: `reference#${referenceHistoryTwoId}`,
         rank: 1,
         reviewRecommended: false,
         importRunId: "knowledge-import-demo-projection",

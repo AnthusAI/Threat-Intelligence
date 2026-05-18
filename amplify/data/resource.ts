@@ -196,6 +196,31 @@ const schema = a.schema({
     .authorization((allow) => [allow.groups(categoryWriteGroups)])
     .handler(a.handler.function(categoryAction)),
 
+  ReferenceCurationActionResult: a.customType({
+    ok: a.boolean().required(),
+    action: a.string().required(),
+    referenceId: a.id().required(),
+    status: a.string().required(),
+    messageId: a.id(),
+    relationId: a.id(),
+  }),
+
+  reviewReferenceCuration: a
+    .mutation()
+    .arguments({
+      referenceId: a.id().required(),
+      action: a.string().required(),
+      actorSub: a.string(),
+      actorLabel: a.string(),
+      note: a.string(),
+    })
+    .returns(a.ref("ReferenceCurationActionResult"))
+    .authorization((allow) => [
+      allow.groups(categoryWriteGroups),
+      allow.custom(),
+    ])
+    .handler(a.handler.function(categoryAction)),
+
   AssignmentActionResult: a.customType({
     ok: a.boolean().required(),
     assignmentId: a.id(),
@@ -255,8 +280,19 @@ const schema = a.schema({
     metadata: a.json(),
   }),
 
+  AssignmentDoctrineSummary: a.customType({
+    scope: a.string().required(),
+    kind: a.string().required(),
+    label: a.string().required(),
+    slug: a.string().required(),
+    body: a.string().array().required(),
+    categoryKey: a.string(),
+    categoryLineageId: a.id(),
+  }),
+
   AssignmentContext: a.customType({
     assignment: a.ref("AssignmentSummary"),
+    doctrine: a.ref("AssignmentDoctrineSummary").array().required(),
     targets: a.ref("AssignmentTargetSummary").array().required(),
     events: a.ref("AssignmentEventSummary").array().required(),
   }),
@@ -270,7 +306,7 @@ const schema = a.schema({
       limit: a.integer(),
     })
     .returns(a.ref("AssignmentContext").array().required())
-    .authorization((allow) => [allow.groups(categoryWriteGroups)])
+    .authorization((allow) => [allow.groups(categoryWriteGroups), allow.custom()])
     .handler(a.handler.function(assignmentAction)),
 
   listAssignmentQueue: a
@@ -281,7 +317,7 @@ const schema = a.schema({
       limit: a.integer(),
     })
     .returns(a.ref("AssignmentContext").array().required())
-    .authorization((allow) => [allow.groups(categoryWriteGroups)])
+    .authorization((allow) => [allow.groups(categoryWriteGroups), allow.custom()])
     .handler(a.handler.function(assignmentAction)),
 
   getAssignmentContext: a
@@ -290,7 +326,7 @@ const schema = a.schema({
       assignmentId: a.id().required(),
     })
     .returns(a.ref("AssignmentContext"))
-    .authorization((allow) => [allow.groups(categoryWriteGroups)])
+    .authorization((allow) => [allow.groups(categoryWriteGroups), allow.custom()])
     .handler(a.handler.function(assignmentAction)),
 
   claimAssignment: a
@@ -304,7 +340,7 @@ const schema = a.schema({
       note: a.string(),
     })
     .returns(a.ref("AssignmentActionResult"))
-    .authorization((allow) => [allow.groups(categoryWriteGroups)])
+    .authorization((allow) => [allow.groups(categoryWriteGroups), allow.custom()])
     .handler(a.handler.function(assignmentAction)),
 
   releaseAssignment: a
@@ -316,7 +352,7 @@ const schema = a.schema({
       note: a.string(),
     })
     .returns(a.ref("AssignmentActionResult"))
-    .authorization((allow) => [allow.groups(categoryWriteGroups)])
+    .authorization((allow) => [allow.groups(categoryWriteGroups), allow.custom()])
     .handler(a.handler.function(assignmentAction)),
 
   completeAssignment: a
@@ -328,7 +364,7 @@ const schema = a.schema({
       note: a.string(),
     })
     .returns(a.ref("AssignmentActionResult"))
-    .authorization((allow) => [allow.groups(categoryWriteGroups)])
+    .authorization((allow) => [allow.groups(categoryWriteGroups), allow.custom()])
     .handler(a.handler.function(assignmentAction)),
 
   cancelAssignment: a
@@ -340,7 +376,7 @@ const schema = a.schema({
       note: a.string(),
     })
     .returns(a.ref("AssignmentActionResult"))
-    .authorization((allow) => [allow.groups(categoryWriteGroups)])
+    .authorization((allow) => [allow.groups(categoryWriteGroups), allow.custom()])
     .handler(a.handler.function(assignmentAction)),
 
   reopenAssignment: a
@@ -352,7 +388,7 @@ const schema = a.schema({
       note: a.string(),
     })
     .returns(a.ref("AssignmentActionResult"))
-    .authorization((allow) => [allow.groups(categoryWriteGroups)])
+    .authorization((allow) => [allow.groups(categoryWriteGroups), allow.custom()])
     .handler(a.handler.function(assignmentAction)),
 
   Assignment: a
@@ -725,6 +761,11 @@ const schema = a.schema({
       retrievedAt: a.string(),
       importRunId: a.id(),
       importedAt: a.datetime(),
+      curationStatus: a.string(),
+      curationStatusKey: a.string(),
+      curationStatusUpdatedAt: a.datetime(),
+      curationStatusUpdatedBy: a.string(),
+      curationStatusReason: a.string(),
       metadata: a.json(),
       updatedAt: a.datetime(),
     })
@@ -733,6 +774,8 @@ const schema = a.schema({
       index("corpusId").sortKeys(["externalItemId"]).queryField("listReferencesByCorpusAndExternalItem"),
       index("versionState").sortKeys(["updatedAt"]).queryField("listReferencesByVersionStateAndUpdatedAt"),
       index("importRunId").sortKeys(["externalItemId"]).queryField("listReferencesByImportRunAndExternalItem"),
+      index("curationStatus").sortKeys(["curationStatusUpdatedAt"]).queryField("listReferencesByCurationStatusAndUpdatedAt"),
+      index("curationStatusKey").sortKeys(["curationStatusUpdatedAt"]).queryField("listReferencesByCurationStatusKeyAndUpdatedAt"),
     ])
     .authorization((allow) => [
       allow.groups(categoryWriteGroups).to(["read"]),
@@ -805,37 +848,63 @@ const schema = a.schema({
       allow.custom().to(authoringOperations),
     ]),
 
-  KnowledgeComment: a
+  Message: a
     .model({
       id: a.id().required(),
-      subjectKind: a.string().required(),
-      subjectId: a.id().required(),
-      subjectLineageId: a.id().required(),
-      subjectVersionNumber: a.integer(),
-      subjectVersionKey: a.string().required(),
-      subjectStateKey: a.string().required(),
-      commentKind: a.string().required(),
-      body: a.string().required(),
+      messageKind: a.string().required(),
+      messageDomain: a.string().required(),
       status: a.string().required(),
+      body: a.string().required(),
+      summary: a.string(),
       source: a.string(),
       importRunId: a.id(),
       authorSub: a.string(),
       authorUserProfileId: a.id(),
       authorLabel: a.string(),
-      metadata: a.json(),
       createdAt: a.datetime().required(),
+      updatedAt: a.datetime().required(),
+      metadata: a.json(),
     })
     .secondaryIndexes((index) => [
-      index("subjectStateKey").sortKeys(["createdAt"]).queryField("listKnowledgeCommentsBySubjectStateAndCreatedAt"),
-      index("subjectVersionKey").sortKeys(["createdAt"]).queryField("listKnowledgeCommentsBySubjectVersionAndCreatedAt"),
-      index("commentKind").sortKeys(["createdAt"]).queryField("listKnowledgeCommentsByKindAndCreatedAt"),
-      index("authorSub").sortKeys(["createdAt"]).queryField("listKnowledgeCommentsByAuthorSubAndCreatedAt"),
-      index("authorUserProfileId").sortKeys(["createdAt"]).queryField("listKnowledgeCommentsByAuthorProfileAndCreatedAt"),
-      index("importRunId").sortKeys(["createdAt"]).queryField("listKnowledgeCommentsByImportRunAndCreatedAt"),
+      index("status").sortKeys(["createdAt"]).queryField("listMessagesByStatusAndCreatedAt"),
+      index("messageKind").sortKeys(["createdAt"]).queryField("listMessagesByKindAndCreatedAt"),
+      index("messageDomain").sortKeys(["createdAt"]).queryField("listMessagesByDomainAndCreatedAt"),
+      index("authorSub").sortKeys(["createdAt"]).queryField("listMessagesByAuthorSubAndCreatedAt"),
+      index("authorUserProfileId").sortKeys(["createdAt"]).queryField("listMessagesByAuthorProfileAndCreatedAt"),
+      index("importRunId").sortKeys(["createdAt"]).queryField("listMessagesByImportRunAndCreatedAt"),
     ])
     .authorization((allow) => [
       allow.groups(categoryWriteGroups).to(categoryAppendOnlyOperations),
       allow.custom().to(categoryAppendOnlyOperations),
+    ]),
+
+  SemanticRelationType: a
+    .model({
+      id: a.id().required(),
+      key: a.string().required(),
+      label: a.string().required(),
+      inverseLabel: a.string(),
+      description: a.string(),
+      domain: a.string().required(),
+      status: a.string().required(),
+      allowedSubjectKinds: a.string().array(),
+      allowedObjectKinds: a.string().array(),
+      isDirectional: a.boolean(),
+      isSymmetric: a.boolean(),
+      isTransitive: a.boolean(),
+      contextPackTags: a.string().array(),
+      createdAt: a.datetime().required(),
+      updatedAt: a.datetime().required(),
+      metadata: a.json(),
+    })
+    .secondaryIndexes((index) => [
+      index("key").queryField("semanticRelationTypeByKey"),
+      index("domain").sortKeys(["label"]).queryField("listSemanticRelationTypesByDomainAndLabel"),
+      index("status").sortKeys(["label"]).queryField("listSemanticRelationTypesByStatusAndLabel"),
+    ])
+    .authorization((allow) => [
+      allow.groups(categoryWriteGroups),
+      allow.custom().to(authoringOperations),
     ]),
 
   SemanticRelation: a
@@ -843,6 +912,9 @@ const schema = a.schema({
       id: a.id().required(),
       relationState: a.string().required(),
       predicate: a.string().required(),
+      relationTypeId: a.id(),
+      relationTypeKey: a.string(),
+      relationDomain: a.string(),
       subjectKind: a.string().required(),
       subjectId: a.id().required(),
       subjectLineageId: a.id().required(),
@@ -875,6 +947,8 @@ const schema = a.schema({
       index("predicateObjectStateKey").sortKeys(["score"]).queryField("listSemanticRelationsByPredicateObjectStateAndScore"),
       index("subjectVersionKey").sortKeys(["predicateObjectStateKey"]).queryField("listSemanticRelationsBySubjectVersion"),
       index("importRunId").sortKeys(["importedAt"]).queryField("listSemanticRelationsByImportRunAndImportedAt"),
+      index("relationTypeKey").sortKeys(["importedAt"]).queryField("listSemanticRelationsByTypeAndImportedAt"),
+      index("relationDomain").sortKeys(["importedAt"]).queryField("listSemanticRelationsByDomainAndImportedAt"),
     ])
     .authorization((allow) => [
       allow.groups(categoryWriteGroups).to(["read"]),

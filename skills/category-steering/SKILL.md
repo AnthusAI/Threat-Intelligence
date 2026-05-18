@@ -129,7 +129,7 @@ use `aws s3 sync --delete` unless this worker is intentionally reconciling S3 to
 its complete local working copy.
 
 Papyrus imports steering state, artifact refs, strict private `Reference`
-metadata, `ReferenceAttachment` paths, `KnowledgeComment` rows,
+metadata, `ReferenceAttachment` paths, `Message` rows,
 `SemanticNode` rows, `SemanticRelation` links, proposals, decisions, and stable
 external `item_id` references. It does not mirror source text, PDFs,
 transcripts, extraction output, or Biblicus corpus internals into GraphQL.

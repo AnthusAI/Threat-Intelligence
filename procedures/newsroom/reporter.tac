@@ -5,9 +5,9 @@
 
 local done = require("tactus.tools.done")
 
-Toolset "plugin" {
+Toolset "papyrus" {
     type = "plugin",
-    paths = {"./procedures/newsroom/tools"}
+    paths = {"./procedures/newsroom/tactus_tools"}
 }
 
 newsroom_reporter = Agent {
@@ -18,18 +18,20 @@ You are the Papyrus newsroom reporter agent.
 
 Goal:
 - Turn one assignment Item into a draft article record plan.
-- If assignment_json is absent, read the assignment with papyrus_get_item.
-- Research the assignment with Biblicus query/context tools.
-- Use build_draft_update_plan to produce the dry-run assignment update and draft article create plan.
+- If assignment_json is absent, read either a live Assignment context or a legacy assignment Item.
+- When live Assignment context is available, build and use the budgeted Papyrus agent context pack.
+- Use execute_tactus as your only tool for Papyrus, Biblicus, context, and dry-run plan work.
+- Inside execute_tactus, compose Papyrus APIs with short Tactus snippets.
 
 Rules:
 - This is dry-run only. Never claim records were written.
-- Assignment input records must use Item.type = "assignment".
+- Assignment input records must normalize to Item.type = "assignment".
 - Preserve the assignment Item as the audit/input row and mark it drafted in the plan.
 - Create a separate draft article Item with Item.type = "article" and Item.status = "draft".
+- When live context is available, read and apply its doctrine section, focus-category section, desk-memory section, and fresh-evidence section before drafting.
 - Return structured draft data and the dry-run update plan.
 ]],
-    tools = {"plugin", done},
+    tools = {"papyrus", done},
     output = {
         assignment_item_id = field.string{required = true},
         dry_run = field.boolean{required = true},
@@ -44,6 +46,7 @@ Procedure {
         assignment_item_id = field.string{default = "", description = "Papyrus Item.id for the assignment"},
         assignment_json = field.string{default = "", description = "Inline assignment Item JSON for deterministic tests or offline runs"},
         corpus_key = field.string{default = "AI-ML-research", description = "Papyrus steering corpus key"},
+        context_profile = field.string{default = "", description = "Optional live context profile override"},
         max_evidence_items = field.integer{default = 5, description = "Maximum Biblicus evidence items to use"}
     },
     output = {
@@ -63,9 +66,11 @@ Procedure {
 Create a draft update plan for %s using corpus %s.
 
 Required tool flow:
-1. If assignment_json is empty, call papyrus_get_item(assignment_item_id).
-2. Use biblicus_query or biblicus_topic_context to gather evidence.
-3. Call build_draft_update_plan with the assignment item and draft payload.
+1. Call execute_tactus with one short Tactus snippet.
+2. In that snippet, use assignment_context, assignment_agent_context, and assignment_context_to_item for live Assignment queue work when possible.
+3. Fall back to item_get only when live Assignment context is unavailable.
+4. Use biblicus_query or biblicus_topic_context for evidence.
+5. Use plan_draft_update to build the dry-run assignment update and article draft plan.
 
 Return dry_run=true, draft_status="draft", draft_record_plan, and a concise summary.
 ]], assignment_source, input.corpus_key)
@@ -83,10 +88,21 @@ Feature: Newsroom reporter procedure
     Given the procedure has started
     And the input assignment_item_id is "assignment-abc123"
     And the input corpus_key is "AI-ML-research"
-    And the agent "newsroom_reporter" calls tool "papyrus_get_item" with args {"item_id": "assignment-abc123"}
-    And the agent "newsroom_reporter" calls tool "biblicus_query" with args {"corpus_key": "AI-ML-research", "query": "AI Agents Enter the Lab", "max_total_items": 5}
-    And the agent "newsroom_reporter" calls tool "build_draft_update_plan" with args {"assignment_item_json": "{\"id\":\"assignment-abc123\",\"type\":\"assignment\",\"status\":\"dispatched\",\"typeStatus\":\"assignment#dispatched\",\"slug\":\"ai-agents-enter-the-lab\",\"section\":\"Research\",\"title\":\"AI Agents Enter the Lab\",\"editorial\":{\"newsroom\":{\"assignment\":{\"brief\":\"Explain research agents.\"}}}}", "draft_json": "{\"headline\":\"AI Agents Enter the Lab\",\"deck\":\"Research teams are handing more lab work to autonomous systems.\",\"body\":[\"Agentic systems are moving from demos into research workflows.\",\"The strongest evidence comes from scientific discovery and evaluation corpora.\"],\"byline\":\"Papyrus Staff\",\"evidence_item_ids\":[\"research-001\"]}"}
+    And the agent "newsroom_reporter" calls tool "execute_tactus" with args {"tactus": "local item = item_get{ id = \"assignment-abc123\" }; local evidence = biblicus_query{ corpus_key = \"AI-ML-research\", query = \"AI Agents Enter the Lab\", max_total_items = 5 }; return { item = item, evidence = evidence }"}
     And the agent "newsroom_reporter" returns data {"assignment_item_id":"assignment-abc123","dry_run":True,"draft_status":"draft","draft_record_plan":{"dryRun":True,"lifecycle":"draft","records":[{"modelName":"Item","action":"update","input":{"id":"assignment-abc123","type":"assignment","status":"drafted","typeStatus":"assignment#drafted"}},{"modelName":"Item","action":"create","input":{"type":"article","status":"draft","typeStatus":"article#draft"}}]},"summary":"Created one dry-run draft article plan."}
+    When the procedure runs
+    Then the procedure should complete successfully
+    And the output dry_run should be true
+    And the output draft_status should be draft
+    And the output draft_record_plan should exist
+
+  Scenario: Reporter accepts a live Assignment context
+    Given the procedure has started
+    And the input assignment_item_id is "assignment-live-123"
+    And the input corpus_key is "AI-ML-research"
+    And the input context_profile is "reporting"
+    And the agent "newsroom_reporter" calls tool "execute_tactus" with args {"tactus": "local context = assignment_context{ id = \"assignment-live-123\" }; local pack = assignment_agent_context{ id = \"assignment-live-123\", context_profile = \"reporting\" }; local item = assignment_context_to_item{ assignment_context = context.assignment_context }; return { context = context, pack = pack, item = item }"}
+    And the agent "newsroom_reporter" returns data {"assignment_item_id":"assignment-live-123","dry_run":True,"draft_status":"draft","draft_record_plan":{"dryRun":True,"lifecycle":"draft"},"summary":"Created one dry-run draft article plan from a live assignment context."}
     When the procedure runs
     Then the procedure should complete successfully
     And the output dry_run should be true

@@ -5,9 +5,9 @@
 
 local done = require("tactus.tools.done")
 
-Toolset "plugin" {
+Toolset "papyrus" {
     type = "plugin",
-    paths = {"./procedures/newsroom/tools"}
+    paths = {"./procedures/newsroom/tactus_tools"}
 }
 
 newsroom_researcher = Agent {
@@ -18,18 +18,30 @@ You are the Papyrus newsroom researcher agent.
 
 Goal:
 - Build an evidence-backed research packet for one assignment Item.
-- If assignment_json is absent, read the assignment with papyrus_get_item.
-- Use Biblicus steering, topic, trend, and query tools to gather relevant evidence.
-- Use build_research_update_plan to produce the dry-run Item update.
+- If assignment_json is absent, read either a live Assignment context or a legacy assignment Item.
+- When live Assignment context is available, build and use the budgeted Papyrus agent context pack.
+- Use execute_tactus as your only tool for Papyrus, Biblicus, context, and dry-run plan work.
+- Inside execute_tactus, compose Papyrus APIs with short Tactus snippets.
 
 Rules:
 - This is dry-run only. Never claim records were written.
-- Assignment input records must use Item.type = "assignment".
+- Assignment input records must normalize to Item.type = "assignment" before the dry-run update is built.
 - Keep the assignment Item as the input row and advance Item.status to "researched".
 - Store research handoff details in editorial.newsroom.research.
+- When live context is available, read and apply its doctrine section, focus-category section, desk-memory section, and fresh-evidence section.
+- Apply doctrine in this order when context is available: publication mission
+  and policies, root desk mission and policies, assignment brief, focus-category
+  metadata, desk memory, then fresh evidence instructions.
+- Treat publication doctrine as the global editorial constitution and desk
+  doctrine as the local beat standard. If doctrine and assignment instructions
+  conflict, surface the conflict in openQuestions or coverageGaps.
+- Do not quote private doctrine, curation notes, or unpublished assignment
+  material into reader-facing prose. Use doctrine to guide judgment, source
+  selection, coverage gaps, and recommendedAngle.
+- Return doctrine_context, comparison_findings, and rubric_assessments when the research packet needs to explain why evidence did or did not meet the live doctrine standard.
 - Return structured research data and the dry-run update plan.
 ]],
-    tools = {"plugin", done},
+    tools = {"papyrus", done},
     output = {
         assignment_item_id = field.string{required = true},
         corpus_key = field.string{required = true},
@@ -46,6 +58,7 @@ Procedure {
         assignment_item_id = field.string{default = "", description = "Papyrus Item.id for the assignment"},
         assignment_json = field.string{default = "", description = "Inline assignment Item JSON for deterministic tests or offline runs"},
         corpus_key = field.string{default = "AI-ML-research", description = "Papyrus steering corpus key"},
+        context_profile = field.string{default = "", description = "Optional live context profile override"},
         research_questions = field.string{default = "", description = "Optional editor/reporter research questions"},
         max_evidence_items = field.integer{default = 8, description = "Maximum Biblicus evidence items to use"}
     },
@@ -71,10 +84,11 @@ Research questions:
 %s
 
 Required tool flow:
-1. If assignment_json is empty, call papyrus_get_item(assignment_item_id).
-2. Call biblicus_steering_artifacts(corpus_key).
-3. Use biblicus_query plus biblicus_topic_context or biblicus_topic_trends to gather evidence.
-4. Call build_research_update_plan with the assignment item and research packet.
+1. Call execute_tactus with one short Tactus snippet.
+2. In that snippet, use assignment_context, assignment_agent_context, and assignment_context_to_item for live Assignment queue work when possible.
+3. Fall back to item_get only when live Assignment context is unavailable.
+4. Use biblicus_steering_artifacts, biblicus_query, biblicus_topic_context, or biblicus_topic_trends for evidence.
+5. Use plan_research_update to build the dry-run research update plan.
 
 Use at most %d evidence items. Return dry_run=true, item_status="researched",
 research_packet, research_record_plan, and a concise summary.
@@ -93,13 +107,24 @@ Feature: Newsroom researcher procedure
     Given the procedure has started
     And the input assignment_item_id is "assignment-abc123"
     And the input corpus_key is "AI-ML-research"
+    And the input context_profile is "analysis"
     And the input max_evidence_items is 2
     And the input research_questions is "What concrete lab workflow examples support this?"
-    And the agent "newsroom_researcher" calls tool "papyrus_get_item" with args {"item_id": "assignment-abc123"}
-    And the agent "newsroom_researcher" calls tool "biblicus_steering_artifacts" with args {"corpus_key": "AI-ML-research"}
-    And the agent "newsroom_researcher" calls tool "biblicus_query" with args {"corpus_key": "AI-ML-research", "query": "AI Agents Enter the Lab concrete lab workflow examples", "max_total_items": 2}
-    And the agent "newsroom_researcher" calls tool "build_research_update_plan" with args {"assignment_item_json": "{\"id\":\"assignment-abc123\",\"type\":\"assignment\",\"status\":\"dispatched\",\"typeStatus\":\"assignment#dispatched\",\"slug\":\"ai-agents-enter-the-lab\",\"section\":\"Research\",\"title\":\"AI Agents Enter the Lab\",\"editorial\":{\"newsroom\":{\"assignment\":{\"brief\":\"Explain research agents.\"}}}}", "research_json": "{\"summary\":\"Evidence supports a practical research-workflow angle.\",\"corpus_key\":\"AI-ML-research\",\"category_key\":\"automated-scientific-discovery\",\"evidence_item_ids\":[\"research-001\"],\"queries\":[\"AI Agents Enter the Lab concrete lab workflow examples\"],\"source_snapshots\":[{\"itemId\":\"research-001\",\"title\":\"Lab agents\"}],\"research_notes\":[\"Tie the story to concrete workflow changes.\"],\"open_questions\":[\"Which examples are strongest for the edition?\"],\"coverage_gaps\":[\"Need one skeptical source.\"],\"recommended_angle\":\"Focus on lab workflow delegation.\"}"}
+    And the agent "newsroom_researcher" calls tool "execute_tactus" with args {"tactus": "local item = item_get{ id = \"assignment-abc123\" }; local steering = biblicus_steering_artifacts{ corpus_key = \"AI-ML-research\" }; return { item = item, steering = steering }"}
     And the agent "newsroom_researcher" returns data {"assignment_item_id":"assignment-abc123","corpus_key":"AI-ML-research","dry_run":True,"item_status":"researched","research_packet":{"summary":"Evidence supports a practical research-workflow angle.","evidence_item_ids":["research-001"]},"research_record_plan":{"dryRun":True,"lifecycle":"assignment-research","records":[{"modelName":"Item","action":"update","input":{"id":"assignment-abc123","type":"assignment","status":"researched","typeStatus":"assignment#researched"}}]},"summary":"Created one dry-run research update plan."}
+    When the procedure runs
+    Then the procedure should complete successfully
+    And the output dry_run should be true
+    And the output item_status should be researched
+    And the output research_record_plan should exist
+
+  Scenario: Researcher accepts a live Assignment context
+    Given the procedure has started
+    And the input assignment_item_id is "assignment-live-123"
+    And the input corpus_key is "AI-ML-research"
+    And the input context_profile is "reporting"
+    And the agent "newsroom_researcher" calls tool "execute_tactus" with args {"tactus": "local context = assignment_context{ id = \"assignment-live-123\" }; local pack = assignment_agent_context{ id = \"assignment-live-123\", context_profile = \"reporting\" }; local item = assignment_context_to_item{ assignment_context = context.assignment_context }; return { context = context, pack = pack, item = item }"}
+    And the agent "newsroom_researcher" returns data {"assignment_item_id":"assignment-live-123","corpus_key":"AI-ML-research","dry_run":True,"item_status":"researched","research_packet":{"summary":"Live assignment context normalized correctly."},"research_record_plan":{"dryRun":True,"lifecycle":"assignment-research"},"summary":"Created one dry-run research update plan from a live assignment context."}
     When the procedure runs
     Then the procedure should complete successfully
     And the output dry_run should be true

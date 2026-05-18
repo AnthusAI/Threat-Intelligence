@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const YAML = require("yaml");
+const { semanticRelationTypeFieldsForPredicate } = require("./papyrus-relation-types.cjs");
 
 const DEFAULT_BIBLICUS_WORKDIR = "/Users/ryan/Projects/Biblicus";
 const DEFAULT_SEMANTIC_CONCEPTS_PATH = path.join(__dirname, "..", "..", "corpora", "papyrus-semantic-concepts.yml");
@@ -312,6 +313,19 @@ function referenceRecord(item, context) {
   const metadata = sanitizeReferenceMetadata(item.metadata ?? item);
   const pathValue = item.storage_path ?? item.storagePath ?? item.relpath ?? item.path;
   const normalizedPath = normalizeStoragePath(pathValue);
+  const curationStatus = normalizeReferenceCurationStatus(
+    item.curation_status
+    ?? item.curationStatus
+    ?? item.intake_status
+    ?? item.intakeStatus
+    ?? item.status
+    ?? metadata.curation_status
+    ?? metadata.curationStatus
+    ?? metadata.intake_status
+    ?? metadata.intakeStatus
+    ?? metadata.status,
+    "accepted",
+  );
   const reference = {
     id: `${lineageId}-v1`,
     lineageId,
@@ -329,6 +343,11 @@ function referenceRecord(item, context) {
     retrievedAt: stringOrNull(item.dates?.retrieved_at ?? item.dates?.retrievedAt ?? item.retrieved_at ?? item.retrievedAt),
     importRunId: context.importRunId,
     importedAt: context.now,
+    curationStatus,
+    curationStatusKey: `${context.corpusId}#${curationStatus}`,
+    curationStatusUpdatedAt: context.now,
+    curationStatusUpdatedBy: "biblicus-import",
+    curationStatusReason: curationStatus === "accepted" ? "trusted import" : null,
     metadata: JSON.stringify(metadata),
     updatedAt: context.now,
   };
@@ -345,7 +364,7 @@ function referenceRecords(item, context) {
   return [
     reference,
     ...referenceAttachmentRecords(item, reference.expected, context),
-    ...referenceCommentRecords(item, reference.expected, context),
+    ...referenceMessageRecords(item, reference.expected, context),
     ...referenceCurationAssignmentRecords(item, reference.expected, context),
   ];
 }
@@ -378,7 +397,7 @@ function referenceCurationAssignmentRecord(item, reference, context) {
     priority: integerOrNull(item.priority) ?? 50,
     title,
     brief: "Review this knowledge-base reference and add any useful curation notes, semantic links, category evidence, or follow-up proposals.",
-    instructions: "Inspect the linked Reference metadata and private corpus attachments. Do not copy source contents into Papyrus; write durable findings as KnowledgeComment, SemanticRelation, or SteeringProposal records.",
+    instructions: "Inspect the linked Reference metadata and private corpus attachments. Do not copy source contents into Papyrus; write durable findings as Message, SemanticRelation, or SteeringProposal records.",
     assigneeType: null,
     assigneeId: null,
     assigneeKey: null,
@@ -681,16 +700,14 @@ function safeAttachmentRole(value) {
   return safeId(value || "attachment");
 }
 
-function referenceCommentRecords(item, reference, context) {
+function referenceMessageRecords(item, reference, context) {
   const rationale = importRationaleFrom(item);
   if (!rationale) return [];
-  const comment = knowledgeCommentRecord({
-    subjectKind: "reference",
-    subjectId: reference.id,
-    subjectLineageId: reference.lineageId,
-    subjectVersionNumber: reference.versionNumber,
-    commentKind: "import_rationale",
+  const message = messageRecord({
+    messageKind: "import_rationale",
+    messageDomain: "commentary",
     body: rationale,
+    summary: reference.title ?? reference.externalItemId ?? "Import rationale",
     source: "biblicus-import",
     importRunId: context.importRunId,
     createdAt: context.now,
@@ -699,19 +716,18 @@ function referenceCommentRecords(item, reference, context) {
       corpusId: reference.corpusId,
     },
   });
-  const conceptLineageId = semanticNodeLineageIdFor("comment.import_rationale");
   return [
-    comment,
+    message,
     semanticRelationRecord({
-      predicate: "about",
-      subjectKind: "knowledgeComment",
-      subjectId: comment.expected.id,
-      subjectLineageId: comment.expected.id,
+      predicate: "comment",
+      subjectKind: "message",
+      subjectId: message.expected.id,
+      subjectLineageId: message.expected.id,
       subjectVersionNumber: 1,
-      objectKind: "semanticNode",
-      objectId: `${conceptLineageId}-v1`,
-      objectLineageId: conceptLineageId,
-      objectVersionNumber: 1,
+      objectKind: "reference",
+      objectId: reference.id,
+      objectLineageId: reference.lineageId,
+      objectVersionNumber: reference.versionNumber,
       score: null,
       confidence: null,
       rank: 1,
@@ -722,40 +738,37 @@ function referenceCommentRecords(item, reference, context) {
       importRunId: context.importRunId,
       importedAt: context.now,
       metadata: {
-        commentKind: "import_rationale",
+        messageKind: "import_rationale",
+        externalItemId: reference.externalItemId,
+        corpusId: reference.corpusId,
       },
     }),
   ];
 }
 
-function knowledgeCommentRecord(input) {
-  const subjectVersionKey = semanticVersionKey(input.subjectKind, input.subjectId);
-  const subjectStateKey = semanticStateKey(input.subjectKind, input.subjectLineageId);
+function messageRecord(input) {
   const metadata = sanitizeReferenceMetadata(input.metadata ?? {});
-  return record("KnowledgeComment", {
-    id: `knowledge-comment-${hashShort([
-      subjectVersionKey,
-      input.commentKind ?? "comment",
+  return record("Message", {
+    id: `message-${hashShort([
+      input.messageKind ?? "comment",
       input.body,
       input.createdAt,
       input.source ?? "",
+      metadata,
     ])}`,
-    subjectKind: input.subjectKind,
-    subjectId: input.subjectId,
-    subjectLineageId: input.subjectLineageId,
-    subjectVersionNumber: input.subjectVersionNumber,
-    subjectVersionKey,
-    subjectStateKey,
-    commentKind: input.commentKind ?? "comment",
-    body: input.body,
+    messageKind: input.messageKind ?? "comment",
+    messageDomain: input.messageDomain ?? "commentary",
     status: input.status ?? "active",
+    body: input.body,
+    summary: input.summary ?? null,
     source: input.source ?? null,
     importRunId: input.importRunId ?? null,
     authorSub: input.authorSub ?? null,
     authorUserProfileId: input.authorUserProfileId ?? null,
     authorLabel: input.authorLabel ?? null,
-    metadata: JSON.stringify(metadata),
     createdAt: input.createdAt,
+    updatedAt: input.updatedAt ?? input.createdAt,
+    metadata: JSON.stringify(metadata),
   });
 }
 
@@ -1542,6 +1555,7 @@ function semanticRelationRecord(input) {
     ])}`,
     relationState: "current",
     predicate: input.predicate,
+    ...semanticRelationTypeFieldsForPredicate(input.predicate),
     subjectKind: input.subjectKind,
     subjectId: input.subjectId,
     subjectLineageId: input.subjectLineageId,
@@ -1837,6 +1851,18 @@ function compareFeedback(left, right) {
 
 function dateOrNull(value) {
   return typeof value === "string" && value.trim() ? value : null;
+}
+
+function normalizeReferenceCurationStatus(value, fallback = "pending") {
+  const normalized = String(value ?? fallback)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_|_$/g, "");
+  if (normalized === "accepted" || normalized === "accept" || normalized === "ready" || normalized === "trusted") return "accepted";
+  if (normalized === "rejected" || normalized === "reject" || normalized === "discarded") return "rejected";
+  if (normalized === "archived" || normalized === "archive") return "archived";
+  return "pending";
 }
 
 function normalizeMatchText(value) {

@@ -1,7 +1,7 @@
 import type {
   AssignmentRecord,
   CategorySteeringCategory,
-  KnowledgeCommentRecord,
+  MessageRecord,
   ReferenceAttachmentRecord,
   ReferenceRecord,
   SemanticNodeRecord,
@@ -16,7 +16,7 @@ export const SEMANTIC_OBJECT_KINDS = [
   "categorySet",
   "semanticNode",
   "semanticRelation",
-  "knowledgeComment",
+  "message",
   "steeringProposal",
   "steeringDecision",
   "knowledgeArtifact",
@@ -30,8 +30,12 @@ export type SemanticPredicateId =
   | "mentions"
   | "has_editorial_form"
   | "about"
+  | "comment"
   | "uses_evidence"
+  | "uses_signal"
   | "requests_work_on"
+  | "planned_for_edition"
+  | "targets_lane"
   | "produces"
   | "blocked_by"
   | "derived_from"
@@ -44,20 +48,25 @@ export type SemanticPredicateId =
 export type SemanticPredicateDefinition = {
   id: SemanticPredicateId | string;
   label: string;
-  group: "classification" | "evidence" | "ontology" | "commentary" | "generic";
+  group: "knowledge" | "editorial" | "workflow" | "evidence" | "ontology" | "commentary" | "publication" | "generic" | "classification";
   inverseLabel: string;
+  contextPackTags?: string[];
 };
 
 export const SEMANTIC_PREDICATES: SemanticPredicateDefinition[] = [
-  { id: "classified_as", label: "classified as", group: "classification", inverseLabel: "classified references/items" },
+  { id: "classified_as", label: "classified as", group: "knowledge", inverseLabel: "classified references/items", contextPackTags: ["reference_graph", "research", "category_context"] },
   { id: "mentions", label: "mentions", group: "ontology", inverseLabel: "mentioned by" },
-  { id: "has_editorial_form", label: "has editorial form", group: "classification", inverseLabel: "items by editorial form" },
+  { id: "has_editorial_form", label: "has editorial form", group: "editorial", inverseLabel: "items by editorial form", contextPackTags: ["editing", "publication", "assignment_context"] },
   { id: "about", label: "about", group: "commentary", inverseLabel: "commentary" },
-  { id: "requests_work_on", label: "requests work on", group: "generic", inverseLabel: "requested work" },
-  { id: "uses_evidence", label: "uses evidence", group: "evidence", inverseLabel: "used by" },
-  { id: "produces", label: "produces", group: "generic", inverseLabel: "produced by" },
-  { id: "blocked_by", label: "blocked by", group: "generic", inverseLabel: "blocks" },
-  { id: "derived_from", label: "derived from", group: "generic", inverseLabel: "source for" },
+  { id: "comment", label: "comments on", group: "commentary", inverseLabel: "commented on by", contextPackTags: ["reference_curation", "editing", "research", "assignment_context"] },
+  { id: "requests_work_on", label: "requests work on", group: "workflow", inverseLabel: "requested work", contextPackTags: ["assignment_context", "editing"] },
+  { id: "uses_evidence", label: "uses evidence", group: "evidence", inverseLabel: "used as evidence by", contextPackTags: ["assignment_context", "research", "reference_graph"] },
+  { id: "uses_signal", label: "uses signal", group: "evidence", inverseLabel: "signal for", contextPackTags: ["assignment_context", "research", "reference_graph"] },
+  { id: "planned_for_edition", label: "planned for edition", group: "publication", inverseLabel: "planned assignments", contextPackTags: ["assignment_context", "editing", "publication"] },
+  { id: "targets_lane", label: "targets lane", group: "editorial", inverseLabel: "lane targets", contextPackTags: ["assignment_context", "editing", "publication"] },
+  { id: "produces", label: "produces", group: "workflow", inverseLabel: "produced by" },
+  { id: "blocked_by", label: "blocked by", group: "workflow", inverseLabel: "blocks" },
+  { id: "derived_from", label: "derived from", group: "evidence", inverseLabel: "source for" },
   { id: "related_to", label: "related to", group: "generic", inverseLabel: "related from" },
   { id: "broader_than", label: "broader than", group: "ontology", inverseLabel: "narrower concept" },
   { id: "narrower_than", label: "narrower than", group: "ontology", inverseLabel: "broader concept" },
@@ -69,7 +78,7 @@ export type SemanticObjectRecord =
   | ReferenceRecord
   | CategorySteeringCategory
   | SemanticNodeRecord
-  | KnowledgeCommentRecord
+  | MessageRecord
   | AssignmentRecord
   | SemanticRelationRecord;
 
@@ -103,7 +112,7 @@ export type SemanticGraphSnapshotInput = {
   references: ReferenceRecord[];
   categories: CategorySteeringCategory[];
   semanticNodes: SemanticNodeRecord[];
-  knowledgeComments: KnowledgeCommentRecord[];
+  messages: MessageRecord[];
   semanticRelations: SemanticRelationRecord[];
   assignments?: AssignmentRecord[];
   referenceAttachments?: ReferenceAttachmentRecord[];
@@ -125,6 +134,15 @@ export function semanticPredicateObjectStateKey(predicate: string, objectKind: s
   return `${predicate}#${objectKind}#${objectLineageId}#${state}`;
 }
 
+export function relationTypeKey(relation: Pick<SemanticRelationRecord, "predicate" | "relationTypeKey">): string {
+  return relation.relationTypeKey ?? relation.predicate;
+}
+
+export function relationDomain(relation: Pick<SemanticRelationRecord, "predicate" | "relationTypeKey" | "relationDomain">): string {
+  if (relation.relationDomain) return relation.relationDomain;
+  return SEMANTIC_PREDICATES.find((entry) => entry.id === relationTypeKey(relation))?.group ?? "generic";
+}
+
 export function predicateLabel(predicate: string, direction: "outgoing" | "incoming" = "outgoing"): string {
   const definition = SEMANTIC_PREDICATES.find((entry) => entry.id === predicate);
   if (!definition) return predicate.replaceAll("_", " ");
@@ -138,7 +156,7 @@ export function newsDeskHrefForSemanticObject(kind: string, lineageId: string): 
   if (kind === "semanticNode") return `/newsroom/concepts?node=${encoded}`;
   if (kind === "assignment") return `/newsroom/assignments?assignment=${encoded}`;
   if (kind === "item") return `/newsroom?item=${encoded}`;
-  if (kind === "knowledgeComment") return `/newsroom/references?comment=${encoded}`;
+  if (kind === "message") return `/newsroom/messages?message=${encoded}`;
   return `/newsroom?object=${encodeURIComponent(kind)}:${encoded}`;
 }
 
@@ -153,8 +171,7 @@ export class SemanticGraphSnapshot {
   private categoriesByLineage = new Map<string, CategorySteeringCategory>();
   private semanticNodesById = new Map<string, SemanticNodeRecord>();
   private semanticNodesByLineage = new Map<string, SemanticNodeRecord>();
-  private commentsById = new Map<string, KnowledgeCommentRecord>();
-  private commentsByLineage = new Map<string, KnowledgeCommentRecord>();
+  private messagesById = new Map<string, MessageRecord>();
   private assignmentsById = new Map<string, AssignmentRecord>();
   private relationsBySubjectState = new Map<string, SemanticRelationRecord[]>();
   private relationsByObjectState = new Map<string, SemanticRelationRecord[]>();
@@ -171,9 +188,8 @@ export class SemanticGraphSnapshot {
     for (const node of input.semanticNodes) {
       indexVersionedRecord(node, this.semanticNodesById, this.semanticNodesByLineage);
     }
-    for (const comment of input.knowledgeComments) {
-      this.commentsById.set(comment.id, comment);
-      this.commentsByLineage.set(comment.subjectLineageId, comment);
+    for (const message of input.messages) {
+      this.messagesById.set(message.id, message);
     }
     for (const assignment of input.assignments ?? []) {
       this.assignmentsById.set(assignment.id, assignment);
@@ -192,7 +208,7 @@ export class SemanticGraphSnapshot {
     if (kind === "reference") return summarizeReference(this.referencesByLineage.get(idOrLineageId) ?? this.referencesById.get(idOrLineageId) ?? null);
     if (kind === "category") return summarizeCategory(this.categoriesByLineage.get(idOrLineageId) ?? this.categoriesById.get(idOrLineageId) ?? null);
     if (kind === "semanticNode") return summarizeSemanticNode(this.semanticNodesByLineage.get(idOrLineageId) ?? this.semanticNodesById.get(idOrLineageId) ?? null);
-    if (kind === "knowledgeComment") return summarizeComment(this.commentsByLineage.get(idOrLineageId) ?? this.commentsById.get(idOrLineageId) ?? null);
+    if (kind === "message") return summarizeMessage(this.messagesById.get(idOrLineageId) ?? null);
     if (kind === "assignment") return summarizeAssignment(this.assignmentsById.get(idOrLineageId) ?? null);
     return null;
   }
@@ -229,13 +245,17 @@ export class SemanticGraphSnapshot {
   subjectsForObject(objectKind: string, objectLineageId: string, subjectKind: string, predicate?: string): SemanticObjectSummary[] {
     const relations = this.incoming(objectKind, objectLineageId)
       .filter((relation) => relation.subjectKind === subjectKind)
-      .filter((relation) => !predicate || relation.predicate === predicate);
+      .filter((relation) => !predicate || relationTypeKey(relation) === predicate || relation.predicate === predicate);
     return uniqueSemanticObjects(relations.map((relation) => this.resolve(relation.subjectKind, relation.subjectLineageId) ?? fallbackRelationObject(relation, "subject")));
   }
 
-  commentsFor(kind: string, lineageId: string): KnowledgeCommentRecord[] {
-    const stateKey = semanticStateKey(kind, lineageId);
-    return this.input.knowledgeComments.filter((comment) => comment.subjectStateKey === stateKey || comment.subjectLineageId === lineageId);
+  messagesFor(kind: string, lineageId: string): MessageRecord[] {
+    return this.incoming(kind, lineageId)
+      .filter((relation) => relation.subjectKind === "message")
+      .filter((relation) => relationTypeKey(relation) === "comment" || relation.predicate === "comment")
+      .map((relation) => this.messagesById.get(relation.subjectId))
+      .filter((message): message is MessageRecord => Boolean(message))
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
   attachmentsForReference(referenceLineageId: string): ReferenceAttachmentRecord[] {
@@ -290,7 +310,7 @@ function groupRelations(
   objectFor: (relation: SemanticRelationRecord) => SemanticObjectSummary | null,
 ): SemanticNeighborGroup[] {
   const groups = new Map<string, SemanticRelationRecord[]>();
-  for (const relation of relations) pushMap(groups, relation.predicate, relation);
+  for (const relation of relations) pushMap(groups, relationTypeKey(relation), relation);
   return Array.from(groups.entries()).map(([predicate, entries]) => ({
     predicate,
     label: predicateLabel(predicate, direction),
@@ -360,17 +380,17 @@ function summarizeSemanticNode(record: SemanticNodeRecord | null): SemanticObjec
   };
 }
 
-function summarizeComment(record: KnowledgeCommentRecord | null): SemanticObjectSummary | null {
+function summarizeMessage(record: MessageRecord | null): SemanticObjectSummary | null {
   if (!record) return null;
   const lineageId = record.id;
   return {
-    kind: "knowledgeComment",
+    kind: "message",
     id: record.id,
     lineageId,
-    versionNumber: record.subjectVersionNumber,
-    label: record.commentKind,
+    versionNumber: 1,
+    label: record.summary ?? record.messageKind,
     subtitle: record.body,
-    href: newsDeskHrefForSemanticObject("knowledgeComment", lineageId),
+    href: newsDeskHrefForSemanticObject("message", lineageId),
     record,
   };
 }

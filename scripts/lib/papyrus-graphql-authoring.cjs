@@ -37,11 +37,12 @@ const KNOWLEDGE_RAW_PAYLOAD_FIELDS = "id ownerType ownerId payloadKind importRun
 const KNOWLEDGE_ARTIFACT_FIELDS = "id corpusId artifactKind artifactId snapshotId displayName createdAt importRunId";
 const ASSIGNMENT_FIELDS = "id assignmentTypeKey queueKey queueStatusKey status priority title brief instructions assigneeType assigneeId assigneeKey claimedAt claimExpiresAt completedAt canceledAt corpusId categorySetId classifierId sourceSnapshotId importRunId createdBy createdAt updatedAt metadata";
 const ASSIGNMENT_EVENT_FIELDS = "id assignmentId assignmentTypeKey queueKey eventType fromStatus toStatus actorSub actorLabel note createdAt metadata";
-const REFERENCE_FIELDS = `${VERSION_FIELDS} id corpusId externalItemId title authors sourceUri storagePath mediaType byteSize sha256 sourcePublishedAt sourceUpdatedAt retrievedAt importRunId importedAt metadata updatedAt`;
+const REFERENCE_FIELDS = `${VERSION_FIELDS} id corpusId externalItemId title authors sourceUri storagePath mediaType byteSize sha256 sourcePublishedAt sourceUpdatedAt retrievedAt importRunId importedAt curationStatus curationStatusKey curationStatusUpdatedAt curationStatusUpdatedBy curationStatusReason metadata updatedAt`;
 const REFERENCE_ATTACHMENT_FIELDS = "id referenceId referenceLineageId referenceVersionNumber referenceVersionKey role sortKey storagePath sourceUri filename mediaType byteSize sha256 etag importRunId importedAt metadata";
 const SEMANTIC_NODE_FIELDS = `${VERSION_FIELDS} id nodeKey nodeKind corpusId categorySetId categoryLineageId categoryKey displayName description aliases status importRunId updatedAt`;
-const KNOWLEDGE_COMMENT_FIELDS = "id subjectKind subjectId subjectLineageId subjectVersionNumber subjectVersionKey subjectStateKey commentKind body status source importRunId authorSub authorUserProfileId authorLabel metadata createdAt";
-const SEMANTIC_RELATION_FIELDS = "id relationState predicate subjectKind subjectId subjectLineageId subjectVersionNumber objectKind objectId objectLineageId objectVersionNumber subjectStateKey objectStateKey objectSubjectStateKey predicateObjectStateKey subjectVersionKey objectVersionKey score confidence rank classifierId modelVersion reviewRecommended sourceSnapshotId importRunId importedAt metadata";
+const MESSAGE_FIELDS = "id messageKind messageDomain status body summary source importRunId authorSub authorUserProfileId authorLabel createdAt updatedAt metadata";
+const SEMANTIC_RELATION_TYPE_FIELDS = "id key label inverseLabel description domain status allowedSubjectKinds allowedObjectKinds isDirectional isSymmetric isTransitive contextPackTags createdAt updatedAt metadata";
+const SEMANTIC_RELATION_FIELDS = "id relationState predicate relationTypeId relationTypeKey relationDomain subjectKind subjectId subjectLineageId subjectVersionNumber objectKind objectId objectLineageId objectVersionNumber subjectStateKey objectStateKey objectSubjectStateKey predicateObjectStateKey subjectVersionKey objectVersionKey score confidence rank classifierId modelVersion reviewRecommended sourceSnapshotId importRunId importedAt metadata";
 
 const LIST_RECORDS = {
   Edition: listDefinition("listEditions", EDITION_FIELDS),
@@ -71,7 +72,8 @@ const LIST_RECORDS = {
   Reference: listDefinition("listReferences", REFERENCE_FIELDS),
   ReferenceAttachment: listDefinition("listReferenceAttachments", REFERENCE_ATTACHMENT_FIELDS),
   SemanticNode: listDefinition("listSemanticNodes", SEMANTIC_NODE_FIELDS),
-  KnowledgeComment: listDefinition("listKnowledgeComments", KNOWLEDGE_COMMENT_FIELDS),
+  Message: listDefinition("listMessages", MESSAGE_FIELDS),
+  SemanticRelationType: listDefinition("listSemanticRelationTypes", SEMANTIC_RELATION_TYPE_FIELDS),
   SemanticRelation: listDefinition("listSemanticRelations", SEMANTIC_RELATION_FIELDS),
 };
 
@@ -103,7 +105,8 @@ const GETTERS = {
   Reference: getDefinition("getReference", REFERENCE_FIELDS),
   ReferenceAttachment: getDefinition("getReferenceAttachment", REFERENCE_ATTACHMENT_FIELDS),
   SemanticNode: getDefinition("getSemanticNode", SEMANTIC_NODE_FIELDS),
-  KnowledgeComment: getDefinition("getKnowledgeComment", KNOWLEDGE_COMMENT_FIELDS),
+  Message: getDefinition("getMessage", MESSAGE_FIELDS),
+  SemanticRelationType: getDefinition("getSemanticRelationType", SEMANTIC_RELATION_TYPE_FIELDS),
   SemanticRelation: getDefinition("getSemanticRelation", SEMANTIC_RELATION_FIELDS),
 };
 

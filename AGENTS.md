@@ -63,11 +63,13 @@ rendering contracts.
   defines publication corpus keys, roles, classifier ids, local paths, and S3
   prefixes. Do not hard-code the AI/ML pilot corpus names in Papyrus logic.
   Materialize config changes with `npm run content -- categories import-config`.
-- Future research agents should also be driven by publication/corpus
-  instructions, not by Papyrus source changes. When that instruction surface is
-  added, keep it beside the publication or corpus config and document how agents
-  consume it. Until then, do not add domain-specific research-agent assumptions
-  to `/newsroom`, the content CLI, GraphQL models, or layout code.
+- Research agents should be driven by editable publication doctrine, root-desk
+  doctrine, publication/corpus config, accepted category state, and assignment
+  context, not by hard-coded subject assumptions. Follow
+  `skills/researcher-doctrine/SKILL.md` when designing or running researcher
+  behavior. Keep domain-specific guidance in doctrine/config data and do not add
+  domain assumptions to `/newsroom`, the content CLI, GraphQL models, or layout
+  code.
 - Use an AWS profile for local Amplify/AWS access.
 - `.env` is for Papyrus runtime settings and the seed editor credentials used by
   `npm run seed:amplify`. `.env*` must stay ignored, and `.env.example` is the
@@ -85,8 +87,8 @@ rendering contracts.
 - Category and graph steering imports must not mirror Biblicus corpus contents
   into Papyrus GraphQL. Papyrus stores steering state, artifact references,
   category copy, proposals, decisions, strict private `Reference` metadata,
-  private `ReferenceAttachment` file-path metadata, append-only
-  `KnowledgeComment` commentary, `SemanticNode` rows, `SemanticRelation` links,
+  private `ReferenceAttachment` file-path metadata, private append-only
+  `Message` commentary, `SemanticNode` rows, `SemanticRelation` links,
   and stable external `item_id` references; Biblicus and S3 remain the owners of
   corpus content. Follow `skills/reference-intake/SKILL.md` for ingesting or
   registering new knowledge-base source materials correctly.
@@ -94,19 +96,39 @@ rendering contracts.
   not the whole product concept. Use `/newsroom` and Newsroom naming in UI,
   docs, and tests. Future assignment and research queues should become desk tabs
   instead of separate one-off management pages.
+- `/newsroom/doctrine` manages publication-wide mission and policies.
+  `/newsroom/desks` manages root-topic desk identity and each desk's mission and
+  policies. Desk doctrine is private `Item` data tied to `Category.lineageId`;
+  child topics inherit root desk doctrine in v1.
 - Assignments are first-class private `Assignment` work records, not cloud
   `Item` rows with `type: "assignment"`. Do not create assignment Items or
   encode pending work in article/item status fields.
 - Assignments are generalized newsroom tasks for humans, agents, and
   procedures. Relate them to `Reference`, `Item`, `Category`, `CategorySet`,
-  `SemanticNode`, `SemanticRelation`, `KnowledgeComment`, `SteeringProposal`,
+  `SemanticNode`, `SemanticRelation`, `Message`, `SteeringProposal`,
   and future models through `SemanticRelation` links such as
   `requests_work_on`, `uses_evidence`, `produces`, `blocked_by`, and
   `derived_from`.
+- Official semantic relationship metadata lives in `SemanticRelationType`
+  records seeded from `corpora/papyrus-semantic-relation-types.yml`.
+  `SemanticRelation.predicate` remains required for v1 compatibility and
+  indexes, but new relation writes must also set `relationTypeId`,
+  `relationTypeKey`, and `relationDomain` by resolving the seeded type. Use
+  `npm run content -- relations import-types --config corpora/papyrus-semantic-relation-types.yml`
+  after schema deploy, then `npm run content -- relations backfill --config corpora/papyrus-semantic-relation-types.yml --apply`
+  to denormalize existing relation rows.
 - Assignment lifecycle changes use protected actions or the JWT authoring lane
   and append `AssignmentEvent` audit rows. The Newsroom `Assignments` tab
   should show claim/release/complete/cancel/reopen workflow actions, not
   edition-candidate culling.
+- For dated edition setup, section slot planning, and surplus research
+  assignment dispatch, follow `skills/edition-planning/SKILL.md`. The default
+  overassignment ratio is `3/2`, but assignments remain private `Assignment`
+  records. Create or update the dated private `Edition` record first, then
+  dispatch by root desk category plus publication lane (`reporting`, `analysis`,
+  and `briefs` by default) and link assignments to that edition, lane, and
+  evidence with `SemanticRelation` rows until selected outputs become
+  reader-facing `Item` and `EditionItem` records.
 - Style the Newsroom as a newspaper section or editorial insert, not as an app
   dashboard. Steering is passive and optional: proposals are skimmable notes
   beside the edition, and the system keeps following the accepted category set when
@@ -441,6 +463,10 @@ To add or change article data:
 
 - Update content in GraphQL (`Item`, `MediaAsset`, `Edition`, `EditionItem`)
   through the CLI authoring lane.
+- Use `skills/edition-planning/SKILL.md` when creating a dated edition that
+  needs new research assignments. Edition-candidate assignments are private
+  `Assignment` records linked to the private `Edition` through
+  `SemanticRelation`, and must not be published directly into `EditionItem` rows.
 - Published editions must set `status`, `editionDate`, and `publishedAt`.
   `publishedAt` is required for archive listing and freshness order, even when
   date routes can still find the edition through `editionDate`.

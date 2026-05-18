@@ -1,4 +1,4 @@
-"""Compatibility shim for the packaged Papyrus semantic helpers."""
+"""Single Papyrus newsroom tool exposed to Tactus agents."""
 
 from __future__ import annotations
 
@@ -11,4 +11,4 @@ SRC_ROOT = PAPYRUS_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from papyrus_newsroom.semantic import *  # noqa: F401,F403,E402
+from papyrus_newsroom.tactus_runtime import execute_tactus  # noqa: E402,F401

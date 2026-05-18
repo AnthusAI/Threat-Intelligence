@@ -5,6 +5,8 @@ import { generateClient } from "aws-amplify/data";
 import type { Schema } from "../../data/resource";
 
 type ReviewHandler = Schema["reviewSteeringProposal"]["functionHandler"];
+type ReferenceCurationHandler = Schema["reviewReferenceCuration"]["functionHandler"];
+type CategoryActionEvent = Parameters<ReviewHandler>[0] | Parameters<ReferenceCurationHandler>[0];
 type DataClient = ReturnType<typeof generateClient<Schema>>;
 type DataClientErrors = Array<{ message?: string | null } | string | null> | null | undefined;
 type DataClientResult<T = unknown> = {
@@ -29,12 +31,13 @@ const CATEGORY_PROPOSAL_KINDS = new Set([
 
 let clientPromise: Promise<DataClient> | null = null;
 
-export const handler: ReviewHandler = async (event) => {
+export const handler = async (event: CategoryActionEvent) => {
   const fieldName = normalizeOptionalString(event.info?.fieldName);
+  if (fieldName === "reviewReferenceCuration") return reviewReferenceCuration(event as Parameters<ReferenceCurationHandler>[0]);
   if (fieldName && fieldName !== "reviewSteeringProposal") {
     throw new Error(`Unsupported steering action ${fieldName}.`);
   }
-  return reviewSteeringProposal(event);
+  return reviewSteeringProposal(event as Parameters<ReviewHandler>[0]);
 };
 
 async function reviewSteeringProposal(event: Parameters<ReviewHandler>[0]) {
@@ -93,6 +96,116 @@ async function reviewSteeringProposal(event: Parameters<ReviewHandler>[0]) {
     categoryId,
     decisionId,
     status: proposalStatus,
+  };
+}
+
+async function reviewReferenceCuration(event: Parameters<ReferenceCurationHandler>[0]) {
+  const client = await getDataClient();
+  const referenceId = normalizeRequiredString(event.arguments.referenceId, "referenceId");
+  const action = normalizeReferenceCurationAction(event.arguments.action);
+  const nextStatus = referenceCurationStatusForAction(action);
+  const reference = await getRequiredRecord(client.models.Reference, referenceId, "Reference");
+  const now = new Date().toISOString();
+  const actorSub = normalizeOptionalString(event.arguments.actorSub) ?? getIdentitySub(event);
+  const actorLabel = normalizeOptionalString(event.arguments.actorLabel) ?? getIdentityLabel(event);
+  const actor = actorLabel ?? actorSub ?? "Papyrus newsroom";
+  const note = normalizeOptionalString(event.arguments.note);
+  const referenceLineageId = normalizeOptionalString(reference.lineageId) ?? referenceId;
+  const referenceVersionNumber = typeof reference.versionNumber === "number" ? reference.versionNumber : null;
+  const referenceTitle = normalizeOptionalString(reference.title) ?? normalizeOptionalString(reference.externalItemId) ?? referenceId;
+  const messageId = `message-reference-curation-${safeId(referenceLineageId)}-${safeId(action)}-${now.replace(/[^0-9TZ]/g, "")}-${randomUUID().slice(0, 8)}`;
+  const relationId = `semantic-relation-${hashStable([
+    `message#${messageId}`,
+    "comment",
+    `reference#${referenceId}`,
+    action,
+  ]).slice(0, 16)}`;
+
+  await requireDataResult(
+    client.models.Reference.update({
+      id: referenceId,
+      curationStatus: nextStatus,
+      curationStatusKey: `${normalizeRequiredString(reference.corpusId, "reference.corpusId")}#${nextStatus}`,
+      curationStatusUpdatedAt: now,
+      curationStatusUpdatedBy: actor,
+      curationStatusReason: note,
+      updatedAt: now,
+    }),
+    "update Reference curation status",
+  );
+
+  await requireDataResult(
+    client.models.Message.create({
+      id: messageId,
+      messageKind: "reference_curation",
+      messageDomain: "commentary",
+      status: "active",
+      body: note ?? `${actor} marked this reference ${nextStatus}.`,
+      summary: `${referenceTitle}: ${nextStatus}`,
+      source: "newsroom",
+      importRunId: null,
+      authorSub: actorSub,
+      authorUserProfileId: null,
+      authorLabel: actor,
+      createdAt: now,
+      updatedAt: now,
+      metadata: {
+        action,
+        curationStatus: nextStatus,
+        referenceId,
+        referenceLineageId,
+      },
+    }),
+    "create Message",
+  );
+
+  await requireDataResult(
+    client.models.SemanticRelation.create({
+      id: relationId,
+      relationState: "current",
+      predicate: "comment",
+      relationTypeId: "semantic-relation-type-comment",
+      relationTypeKey: "comment",
+      relationDomain: "commentary",
+      subjectKind: "message",
+      subjectId: messageId,
+      subjectLineageId: messageId,
+      subjectVersionNumber: 1,
+      objectKind: "reference",
+      objectId: referenceId,
+      objectLineageId: referenceLineageId,
+      objectVersionNumber: referenceVersionNumber,
+      subjectStateKey: semanticStateKey("message", messageId),
+      objectStateKey: semanticStateKey("reference", referenceLineageId),
+      objectSubjectStateKey: `${semanticStateKey("reference", referenceLineageId)}#message`,
+      predicateObjectStateKey: `comment#${semanticStateKey("reference", referenceLineageId)}`,
+      subjectVersionKey: semanticVersionKey("message", messageId),
+      objectVersionKey: semanticVersionKey("reference", referenceId),
+      score: null,
+      confidence: null,
+      rank: 1,
+      classifierId: null,
+      modelVersion: null,
+      reviewRecommended: false,
+      sourceSnapshotId: null,
+      importRunId: null,
+      importedAt: now,
+      metadata: {
+        action,
+        curationStatus: nextStatus,
+        messageKind: "reference_curation",
+      },
+    }),
+    "create Message SemanticRelation",
+  );
+
+  return {
+    ok: true,
+    action,
+    referenceId,
+    status: nextStatus,
+    messageId,
+    relationId,
   };
 }
 
@@ -252,6 +365,19 @@ function normalizeReviewAction(value: unknown): "accept" | "reject" | "defer" | 
   throw new Error(`Unsupported proposal action ${action}.`);
 }
 
+function normalizeReferenceCurationAction(value: unknown): "accept" | "reject" | "reopen" | "archive" {
+  const action = normalizeRequiredString(value, "action").toLowerCase();
+  if (action === "accept" || action === "reject" || action === "reopen" || action === "archive") return action;
+  throw new Error(`Unsupported reference curation action ${action}.`);
+}
+
+function referenceCurationStatusForAction(action: "accept" | "reject" | "reopen" | "archive"): "accepted" | "rejected" | "pending" | "archived" {
+  if (action === "accept") return "accepted";
+  if (action === "reject") return "rejected";
+  if (action === "archive") return "archived";
+  return "pending";
+}
+
 function normalizeRequiredString(value: unknown, fieldName: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new Error(`${fieldName} is required.`);
@@ -287,17 +413,25 @@ function deriveShortTitle(value: unknown): string {
   return words.length ? words.slice(0, 3).join(" ") : "Topic";
 }
 
-function getIdentitySub(event: Parameters<ReviewHandler>[0]): string | null {
+function getIdentitySub(event: CategoryActionEvent): string | null {
   const identity = event.identity as { sub?: unknown; username?: unknown } | null | undefined;
   return normalizeOptionalString(identity?.sub) ?? normalizeOptionalString(identity?.username);
 }
 
-function getIdentityLabel(event: Parameters<ReviewHandler>[0]): string | null {
+function getIdentityLabel(event: CategoryActionEvent): string | null {
   const identity = event.identity as { claims?: Record<string, unknown>; username?: unknown } | null | undefined;
   const claims = identity?.claims ?? {};
   return normalizeOptionalString(claims.email)
     ?? normalizeOptionalString(claims.name)
     ?? normalizeOptionalString(identity?.username);
+}
+
+function semanticStateKey(kind: string, lineageId: string): string {
+  return `${kind}#${lineageId}#current`;
+}
+
+function semanticVersionKey(kind: string, id: string): string {
+  return `${kind}#${id}`;
 }
 
 function hashStable(value: unknown): string {

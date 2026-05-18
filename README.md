@@ -40,7 +40,11 @@ for future cycles.
 The ontology layer stores meaning, not just association. `Reference` records
 hold strict external identifiers and provenance. `SemanticNode` records model
 typed entities and concepts. `SemanticRelation` records preserve explicit,
-versioned subject/object relationships. Together they let Papyrus track what a
+versioned subject/object relationships, while seeded `SemanticRelationType`
+records define official relationship keys, domains, inverse labels, and
+context-pack tags. `SemanticRelation.predicate` remains a compatibility field;
+new relation writers also denormalize `relationTypeId`, `relationTypeKey`, and
+`relationDomain`. Together they let Papyrus track what a
 thing is, what it refers to, how it relates to other things, and why it matters
 to the publication.
 
@@ -221,31 +225,36 @@ Papyrus has three distinct GraphQL auth lanes:
 - the authoring CLI writes content with a JWT accepted by AppSync through the
   configured Lambda authorizer.
 
-## News Desk
+## Newsroom
 
-`/news-desk` is the Papyrus newsroom operations workspace. The default desk tab
-is `Categories`; `?tab=assignments` opens the assignment culling desk. The page
-is driven by the configured corpora for the publication, not by hard-coded
-corpus names. Papyrus owns the human steering state in GraphQL: knowledge
-corpora, import runs, artifacts, accepted category sets, strict-tree categories,
-private `Reference` metadata, private `SemanticRelation` links, proposals, and
+`/newsroom` is the Papyrus newsroom operations workspace. `Topics` is the
+taxonomy steering tab. `Desks` is the operational root-topic desk surface.
+`Doctrine` is the publication-wide mission and policies surface. The page is
+driven by the configured corpora for the publication, not by hard-coded corpus
+names. Papyrus owns the human steering state in GraphQL: knowledge corpora,
+import runs, artifacts, accepted category sets, strict-tree categories, private
+`Reference` metadata, private `SemanticRelation` links, proposals, and
 append-only decisions.
 
-Assignment dispatch is the next newsroom lane. The Tactus editor procedure in
-`procedures/newsroom/editor.tac` plans assignment rows as `Item` records with
-`type: "assignment"` and `status: "dispatched"`, then returns one downstream
-reporter procedure input per assignment. Assignments are workflow records, not
-reader-facing article items. The default dispatch ratio is `3/2`: for each
-section target, the editor can send a small surplus of assignments so weaker
-drafts can be culled without flooding reviewers. Reporter output creates a
-separate draft article item and preserves the assignment item as the audit row.
-The editor-only `Assignments` desk tab at `/news-desk?tab=assignments` selects
-the latest edition with assignment rows, groups candidates by section, and lets
-editors manually cull or restore assignment candidates. Manual culling marks the
-assignment Item and any linked draft article Item as `culled`, with the previous
-workflow status preserved in `editorial.newsroom.culling` for restore.
+Edition planning and assignment dispatch use first-class private `Assignment`
+records, not `Item` rows with assignment types. Follow
+[skills/edition-planning/SKILL.md](skills/edition-planning/SKILL.md) when
+creating a dated edition, planning section slots, or dispatching surplus
+research assignments. The dated private `Edition` record is created or updated
+first; each assignment is then linked to that edition, its root-desk category,
+its publication lane, and its evidence with `SemanticRelation` rows. The default
+lanes are `reporting`, `analysis`, and `briefs`; `opinion` is opt-in through
+publication or desk policy. The default dispatch ratio is `3/2`: for each
+desk/lane target, dispatch a small surplus of research assignments so editors
+can select the strongest outputs without publishing every result. Assignments
+remain private workflow records with append-only `AssignmentEvent` audit rows
+and `SemanticRelation` links to categories, references, graph entities,
+comments, and eventual drafts. Only selected outputs become reader-facing
+article `Item` records and `EditionItem` placements. The editor-only
+`Assignments` desk tab at `/newsroom/assignments` is the review surface for
+these private queues.
 
-The News Desk should feel like another section of the newspaper, not a separate
+The Newsroom should feel like another section of the newspaper, not a separate
 administrative app. Steering proposals are optional editorial notes: the
 publication keeps following the accepted category set unless a human chooses to
 accept, reject, or rewrite a proposal while reading. Ignoring a proposal is also
@@ -258,6 +267,13 @@ checked-in config are the current production example, not a schema assumption.
 Future research agents should read their domain-specific instructions from
 configuration beside the corpus/publication data, produce Biblicus artifacts,
 and import only stable steering outputs into Papyrus.
+
+Researcher behavior should follow
+[skills/researcher-doctrine/SKILL.md](skills/researcher-doctrine/SKILL.md):
+publication doctrine is the global editorial constitution, root-desk doctrine
+is the local beat standard, and the assignment brief is the immediate task.
+Doctrine stays private and editable in Papyrus data; the skill defines how
+agents apply it while gathering evidence and preparing research packets.
 
 Biblicus remains the artifact and worker tool boundary. Workers may run
 Biblicus commands that create reproducible artifacts, but Papyrus code should
@@ -294,17 +310,21 @@ keys. New knowledge-base source materials should follow
 [skills/reference-intake/SKILL.md](skills/reference-intake/SKILL.md): register
 references and attachment metadata in Papyrus, keep corpus contents in S3 and
 Biblicus artifacts, and do not model references as publication `Item` rows.
+Research packets and assignment evidence should also follow
+[skills/researcher-doctrine/SKILL.md](skills/researcher-doctrine/SKILL.md) so
+agents apply publication doctrine, inherited root-desk doctrine, assignment
+briefs, graph context, and recent desk activity in the correct order.
 
 Category proposal review writes an append-only `SteeringDecision` and creates
 new `Category` versions when accepted edits change category copy or tree state.
 Accepted category trees are modeled as strict parent/child `Category` rows under
 a versioned `CategorySet`; full Biblicus taxonomy manifests stay private in
-`KnowledgeRawPayload`. Signed-in editor/admin readers see passive News Desk
+`KnowledgeRawPayload`. Signed-in editor/admin readers see passive Newsroom
 appendix pages after each edition. Public readers get the normal newspaper
 edition with no appended category pages. The Biblicus labels `recommend`,
 `do_not_recommend`, and
 `needs_clarification` are agent recommendation labels, not Papyrus human review
-actions; the News Desk exposes `accept` and `reject` as explicit human decisions.
+actions; the Newsroom exposes `accept` and `reject` as explicit human decisions.
 Editors can ignore a proposal by leaving it alone.
 
 Rejected proposals must influence future category steering. Before a new taxonomy,
@@ -373,6 +393,10 @@ npm run dev
 npm run lint
 npm run typecheck
 npm run build
+poetry install
+poetry run papyrus-newsroom --help
+poetry run papyrus-newsroom execute-tactus 'return api_list{}'
+poetry run python procedures/newsroom/tests/test_newsroom_tools.py
 npm run sandbox
 npm run seed:amplify
 npm run content -- content inspect
@@ -381,8 +405,33 @@ npm run content -- categories import-steering --config corpora/papyrus-steering.
 npm run content -- categories import-steering --bundle <steering-export.json>
 npm run content -- categories export-category-set --category-set <id> --output <accepted-category-set.json>
 npm run content -- categories import-projection --config corpora/papyrus-steering.yml --target-corpus-key <key> --authority-corpus-key <key> --bundle <projection.json>
+npm run content -- relations import-types --config corpora/papyrus-semantic-relation-types.yml
+npm run content -- relations backfill --config corpora/papyrus-semantic-relation-types.yml --apply
 npm run test:bdd
 ```
+
+## Python Newsroom Package
+
+Papyrus now packages its Python newsroom tooling as the Poetry-managed
+`papyrus-newsroom` module.
+
+Use Poetry as the canonical Python entrypoint:
+
+```bash
+poetry install
+poetry run papyrus-newsroom --help
+poetry run papyrus-newsroom build-assignment-agent-context --assignment-id <assignment-id>
+poetry run papyrus-newsroom execute-tactus 'return api_list{}'
+poetry run python procedures/newsroom/tests/test_newsroom_tools.py
+```
+
+Newsroom agents use the single-tool Tactus pattern from Plexus. Their Tactus
+procedures load only `execute_tactus` from `procedures/newsroom/tactus_tools/`;
+inside that tool, snippets use the packaged `papyrus` host module for GraphQL
+reads, desk context assembly, Biblicus evidence, docs/API discovery, and dry-run
+record-plan builders. The older compatibility shims under
+`procedures/newsroom/tools/` still exist for path-based tooling, but the
+canonical implementation now lives in `src/papyrus_newsroom/`.
 
 Copy `.env.example` to `.env` when you need local overrides. `.env*` is ignored
 by git, while `.env.example` is intentionally committed as the template.

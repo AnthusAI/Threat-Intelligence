@@ -156,6 +156,9 @@ Feature: Newspaper layout scenarios
     When I follow the newsroom overview link for "References"
     Then the active newsroom section should be "references"
     And the newsroom should not show an editor access gate
+    When I follow the newsroom tab for "Desks"
+    Then the active newsroom section should be "desks"
+    And the newsroom should not show an editor access gate
     When I follow the newsroom tab for "Concepts"
     Then the active newsroom section should be "concepts"
     And the newsroom should not show an editor access gate
@@ -176,6 +179,11 @@ Feature: Newspaper layout scenarios
     And the newsroom should offer accept and reject actions without defer
     When I update the first newsroom category name to "Foundation Model Scaling Updated"
     Then the first newsroom category name should be "Foundation Model Scaling Updated"
+    And no browser console errors should occur
+
+  Scenario: Newsroom renders desks as root-topic operational sections
+    Given I open the desks newsroom at 1280 by 900
+    Then the desks desk should render
     And no browser console errors should occur
 
   Scenario: Newsroom browses references and semantic concepts

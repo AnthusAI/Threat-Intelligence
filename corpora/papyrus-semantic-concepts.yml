@@ -44,3 +44,12 @@ concepts:
     aliases:
       - explainer
       - context
+
+  - key: editorial.form.briefs
+    kind: editorialForm
+    scope: global
+    name: Briefs
+    description: A publication item lane for concise reported updates, short evidence notes, and compact newsroom briefs.
+    aliases:
+      - brief
+      - short item

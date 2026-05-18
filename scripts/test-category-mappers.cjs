@@ -21,6 +21,18 @@ const {
   buildCurationCyclePlan,
 } = require("./lib/papyrus-curation-cycle.cjs");
 const {
+  DEFAULT_LANES,
+  buildEditionPlanningPlan,
+  verifyEditionPlanningPlan,
+} = require("./lib/papyrus-edition-planning.cjs");
+const {
+  buildSemanticRelationBackfillRecords,
+  buildSemanticRelationTypeRecords,
+  loadSemanticRelationTypeSeeds,
+  semanticRelationTypeFieldsForPredicate,
+  semanticRelationTypeIdFor,
+} = require("./lib/papyrus-relation-types.cjs");
+const {
   loadSteeringConfig,
   requireCorpusConfig,
   resolveClassifierForCorpus,
@@ -166,9 +178,11 @@ corpora:
 `, "utf8");
 const steeringConfig = loadSteeringConfig({ configPath });
 const semanticConceptSeeds = loadSemanticConceptSeeds();
-assert.equal(semanticConceptSeeds.filter((concept) => concept.nodeKind === "editorialForm").length, 3);
+assert.equal(semanticConceptSeeds.filter((concept) => concept.nodeKind === "editorialForm").length, 4);
 assert.equal(semanticConceptSeeds.find((concept) => concept.nodeKey === "editorial.form.reporting")?.scope, "global");
 assert.equal(semanticConceptSeeds.find((concept) => concept.nodeKey === "comment.import_rationale")?.scope, "corpus");
+assert.equal(semanticConceptSeeds.find((concept) => concept.nodeKey === "editorial.form.briefs")?.displayName, "Briefs");
+assert.deepEqual(DEFAULT_LANES.map((lane) => lane.laneKey), ["reporting", "analysis", "briefs"]);
 const lexicalConfig = loadLexicalSteeringConfig();
 assert.equal(lexicalConfig.keywordDisplay.preview_count, 6);
 assert.equal(lexicalConfig.ignoredTerms.find((rule) => rule.term === "et")?.normalizedTerm, "et");
@@ -241,7 +255,9 @@ assert.equal(reportingConcept.categorySetId, null);
 assert.equal(reportingConcept.categoryLineageId, null);
 assert.equal(reportingConcept.categoryKey, null);
 assert.deepEqual(reportingConcept.aliases, ["reported story", "news report"]);
-assert.equal(steeringPlan.records.filter((record) => record.modelName === "SemanticNode" && record.expected.nodeKind === "editorialForm").length, 3);
+const briefsConcept = findRecord(steeringPlan.records, "SemanticNode", (record) => record.nodeKey === "editorial.form.briefs");
+assert.equal(briefsConcept.displayName, "Briefs");
+assert.equal(steeringPlan.records.filter((record) => record.modelName === "SemanticNode" && record.expected.nodeKind === "editorialForm").length, 4);
 assert.equal(
   steeringPlan.records.some((record) => record.modelName === "KnowledgeRawPayload" && record.expected.ownerType === "item"),
   false,
@@ -558,9 +574,14 @@ const projectedReference = findRecord(projectionPlan.records, "Reference", (reco
 assert.equal(projectionPlan.categorySetId, steeringPlan.categorySetId);
 assert.equal(projectedReference.title, null);
 assert.equal(projectedReference.storagePath, "corpora/source-corpus/source-001.md");
+assert.equal(projectedReference.curationStatus, "accepted");
+assert.equal(projectedReference.curationStatusKey, "knowledge-corpus-source-corpus#accepted");
 assert.equal(JSON.parse(projectedReference.metadata).abstract, undefined);
 const projectionRelation = findRecord(projectionPlan.records, "SemanticRelation", (record) => record.subjectId === projectedReference.id);
 assert.equal(projectionRelation.predicate, "classified_as");
+assert.equal(projectionRelation.relationTypeId, semanticRelationTypeIdFor("classified_as"));
+assert.equal(projectionRelation.relationTypeKey, "classified_as");
+assert.equal(projectionRelation.relationDomain, "knowledge");
 assert.equal(projectionRelation.objectKind, "category");
 assert.equal(projectionRelation.objectLineageId, fallbackTaxonomyNode.lineageId);
 assert.equal(JSON.parse(projectionRelation.metadata).categorySetId, steeringPlan.categorySetId);
@@ -578,18 +599,23 @@ assert.equal(projectedAttachments[2].storagePath, "corpora/source-corpus/source-
 assert.equal(projectedAttachments[3].storagePath, null);
 assert.equal(projectedAttachments[3].sourceUri, "s3://outside-bucket/not-corpora/source-001.pdf");
 assert.equal(JSON.parse(projectedAttachments[3].metadata).body, undefined);
-const importRationaleComment = findRecord(projectionPlan.records, "KnowledgeComment", (record) => record.subjectId === projectedReference.id);
-assert.equal(importRationaleComment.commentKind, "import_rationale");
-assert.equal(importRationaleComment.body, "Projected into the source corpus because the classifier found a strong scaling match.");
-assert.equal(JSON.parse(importRationaleComment.metadata).body, undefined);
-const rationaleRelation = findRecord(projectionPlan.records, "SemanticRelation", (record) => record.subjectKind === "knowledgeComment" && record.subjectId === importRationaleComment.id);
-assert.equal(rationaleRelation.predicate, "about");
-assert.equal(rationaleRelation.objectKind, "semanticNode");
+const importRationaleMessage = findRecord(projectionPlan.records, "Message", (record) => record.messageKind === "import_rationale");
+assert.equal(importRationaleMessage.messageDomain, "commentary");
+assert.equal(importRationaleMessage.body, "Projected into the source corpus because the classifier found a strong scaling match.");
+assert.equal(JSON.parse(importRationaleMessage.metadata).body, undefined);
+const rationaleRelation = findRecord(projectionPlan.records, "SemanticRelation", (record) => record.subjectKind === "message" && record.subjectId === importRationaleMessage.id);
+assert.equal(rationaleRelation.predicate, "comment");
+assert.equal(rationaleRelation.relationTypeKey, "comment");
+assert.equal(rationaleRelation.relationDomain, "commentary");
+assert.equal(rationaleRelation.objectKind, "reference");
+assert.equal(rationaleRelation.objectLineageId, projectedReference.lineageId);
 const referenceAssignment = findRecord(projectionPlan.records, "Assignment", (record) => record.metadata.includes(projectedReference.lineageId));
 assert.equal(referenceAssignment.assignmentTypeKey, "curation.reference-intake");
 assert.equal(referenceAssignment.status, "open");
 const assignmentRelation = findRecord(projectionPlan.records, "SemanticRelation", (record) => record.subjectKind === "assignment" && record.subjectId === referenceAssignment.id);
 assert.equal(assignmentRelation.predicate, "requests_work_on");
+assert.equal(assignmentRelation.relationTypeKey, "requests_work_on");
+assert.equal(assignmentRelation.relationDomain, "workflow");
 assert.equal(assignmentRelation.objectKind, "reference");
 assert.equal(assignmentRelation.objectLineageId, projectedReference.lineageId);
 const projectionCorpus = findRecord(projectionPlan.records, "KnowledgeCorpus", (record) => record.id === "knowledge-corpus-source-corpus");
@@ -598,20 +624,225 @@ const projectedEditorialConcept = findRecord(projectionPlan.records, "SemanticNo
 assert.equal(projectedEditorialConcept.id, "semantic-node-editorial-form-analysis-v1");
 assert.equal(projectedEditorialConcept.nodeKind, "editorialForm");
 assert.equal(projectedEditorialConcept.corpusId, null);
-assert.equal(projectionPlan.records.filter((record) => record.modelName === "SemanticNode" && record.expected.nodeKind === "editorialForm").length, 3);
+assert.equal(projectionPlan.records.filter((record) => record.modelName === "SemanticNode" && record.expected.nodeKind === "editorialForm").length, 4);
 assert.equal(
   projectionPlan.records.some((record) => JSON.stringify(record.expected).includes("AI-ML-research") || JSON.stringify(record.expected).includes("AI-ML-history")),
   false,
   "projection imports should use configured corpus ids without AI/ML name fallbacks",
 );
 
+const focusCategoryAlpha = {
+  ...fallbackTaxonomyNode,
+  id: "category-topic-scaling-agents-v1",
+  lineageId: "category-topic-scaling-agents",
+  categoryKey: "topic.scaling-agents",
+  parentCategoryKey: fallbackTaxonomyNode.categoryKey,
+  depth: 1,
+  displayName: "Scaling Agents",
+  shortTitle: "Agents",
+  rank: 1,
+  isPinned: true,
+};
+const focusCategoryBeta = {
+  ...fallbackTaxonomyNode,
+  id: "category-topic-scaling-evals-v1",
+  lineageId: "category-topic-scaling-evals",
+  categoryKey: "topic.scaling-evals",
+  parentCategoryKey: fallbackTaxonomyNode.categoryKey,
+  depth: 1,
+  displayName: "Scaling Evaluations",
+  shortTitle: "Evaluations",
+  rank: 2,
+  isPinned: false,
+};
+
+const editionPlanningState = {
+  editions: [],
+  publishedEditions: [],
+  editionItems: [],
+  categorySets: [fallbackTaxonomy],
+  categories: [fallbackTaxonomyNode, focusCategoryAlpha, focusCategoryBeta],
+  references: [projectedReference],
+  semanticRelations: [projectionRelation],
+  semanticNodes: projectionPlan.records.filter((record) => record.modelName === "SemanticNode").map((record) => record.expected),
+  assignments: [],
+  assignmentEvents: [],
+};
+const editionPlan = buildEditionPlanningPlan(editionPlanningState, {
+  editionDate: "2026-05-19",
+  now: "2026-05-18T12:00:00.000Z",
+  topDeskCount: 1,
+  publicationSlots: 1,
+});
+assert.equal(editionPlan.edition.slug, "edition-2026-05-19");
+assert.equal(editionPlan.edition.status, "planning");
+assert.equal(editionPlan.records.some((record) => record.modelName === "PublishedEdition"), false);
+assert.equal(editionPlan.records.some((record) => record.modelName === "EditionItem"), false);
+assert.equal(editionPlan.assignments.length, 6);
+assert.equal(new Set(editionPlan.assignments.map((assignment) => assignment.id)).size, 6);
+assert.equal(new Set(editionPlan.assignments.map((assignment) => JSON.parse(assignment.metadata).laneKey)).size, 3);
+const reportingAssignment = editionPlan.assignments.find((assignment) => JSON.parse(assignment.metadata).laneKey === "reporting");
+assert.ok(reportingAssignment);
+assert.equal(reportingAssignment.assignmentTypeKey, "research.edition-candidate");
+assert.equal(reportingAssignment.queueKey, `edition:edition-2026-05-19:desk:${fallbackTaxonomyNode.categoryKey.replace(/[^a-z0-9]+/g, "-")}:lane:reporting`);
+const reportingMetadata = JSON.parse(reportingAssignment.metadata);
+assert.equal(reportingMetadata.referenceLineageIds[0], projectedReference.lineageId);
+assert.equal(reportingMetadata.deskCategoryKey, fallbackTaxonomyNode.categoryKey);
+assert.equal(reportingMetadata.focusCategoryKey, focusCategoryAlpha.categoryKey);
+assert.equal(reportingMetadata.focusCategoryTitle, "Agents");
+assert.equal(reportingMetadata.contextProfile, "reporting");
+assert.equal(reportingMetadata.contextTokenBudget, 4000);
+assert.deepEqual(reportingMetadata.contextSources, ["doctrine", "focus-category", "desk-memory", "fresh-evidence"]);
+assert.equal(reportingMetadata.researchTrackKey, "live-desk-context");
+assert.equal(reportingMetadata.researchLens, focusCategoryAlpha.categoryKey);
+const editionRelation = findRecord(editionPlan.records, "SemanticRelation", (record) => record.subjectId === reportingAssignment.id && record.predicate === "planned_for_edition");
+assert.equal(editionRelation.relationTypeKey, "planned_for_edition");
+assert.equal(editionRelation.relationDomain, "publication");
+assert.equal(editionRelation.objectKind, "edition");
+assert.equal(editionRelation.objectLineageId, editionPlan.edition.lineageId);
+const laneRelation = findRecord(editionPlan.records, "SemanticRelation", (record) => record.subjectId === reportingAssignment.id && record.predicate === "targets_lane");
+assert.equal(laneRelation.relationTypeKey, "targets_lane");
+assert.equal(laneRelation.relationDomain, "editorial");
+assert.equal(laneRelation.objectKind, "semanticNode");
+assert.equal(JSON.parse(laneRelation.metadata).laneNodeKey, "editorial.form.reporting");
+const deskRelation = findRecord(editionPlan.records, "SemanticRelation", (record) => record.subjectId === reportingAssignment.id && record.predicate === "requests_work_on");
+assert.equal(deskRelation.relationTypeKey, "requests_work_on");
+assert.equal(deskRelation.objectKind, "category");
+assert.equal(deskRelation.objectLineageId, reportingMetadata.focusCategoryLineageId);
+const evidenceRelation = findRecord(editionPlan.records, "SemanticRelation", (record) => record.subjectId === reportingAssignment.id && record.predicate === "uses_evidence");
+assert.equal(evidenceRelation.relationTypeKey, "uses_evidence");
+assert.equal(evidenceRelation.relationDomain, "evidence");
+assert.equal(evidenceRelation.objectLineageId, projectedReference.lineageId);
+assert.deepEqual(
+  editionPlan.assignments.map((assignment) => JSON.parse(assignment.metadata).focusCategoryKey),
+  [
+    "topic.scaling-agents",
+    "topic.scaling-evals",
+    "topic.scaling-agents",
+    "topic.scaling-evals",
+    "topic.scaling-agents",
+    "topic.scaling-evals",
+  ],
+);
+assert.deepEqual(
+  editionPlan.focusCoverage.map((entry) => entry.focusCategoryKey),
+  ["topic.scaling-agents", "topic.scaling-evals", "topic.scaling-agents", "topic.scaling-evals", "topic.scaling-agents", "topic.scaling-evals"],
+);
+
+const relationTypeSeeds = loadSemanticRelationTypeSeeds();
+assert.ok(relationTypeSeeds.some((type) => type.key === "classified_as" && type.domain === "knowledge"));
+assert.ok(relationTypeSeeds.some((type) => type.key === "comment" && type.domain === "commentary" && type.allowedSubjectKinds.includes("message")));
+assert.ok(relationTypeSeeds.some((type) => type.key === "planned_for_edition" && type.domain === "publication"));
+assert.ok(relationTypeSeeds.some((type) => type.key === "targets_lane" && type.contextPackTags.includes("assignment_context")));
+const relationTypeRecords = buildSemanticRelationTypeRecords(relationTypeSeeds, { now: "2026-05-18T12:00:00.000Z" });
+const usesEvidenceType = findRecord(relationTypeRecords, "SemanticRelationType", (record) => record.key === "uses_evidence");
+assert.equal(usesEvidenceType.id, semanticRelationTypeIdFor("uses_evidence"));
+assert.equal(usesEvidenceType.domain, "evidence");
+assert.ok(usesEvidenceType.contextPackTags.includes("reference_graph"));
+assert.deepEqual(semanticRelationTypeFieldsForPredicate("CLASSIFIED AS"), {
+  relationTypeId: semanticRelationTypeIdFor("classified_as"),
+  relationTypeKey: "classified_as",
+  relationDomain: "knowledge",
+});
+const backfillRecords = buildSemanticRelationBackfillRecords([
+  { id: "relation-a", predicate: "classified_as" },
+  { id: "relation-b", predicate: "mystery_predicate" },
+], relationTypeSeeds);
+assert.equal(backfillRecords[0].expected.relationTypeKey, "classified_as");
+assert.equal(backfillRecords[0].expected.relationDomain, "knowledge");
+assert.equal(backfillRecords[0].action, "update");
+assert.equal(backfillRecords[1].expected.relationTypeKey, "mystery_predicate");
+assert.equal(backfillRecords[1].expected.relationDomain, "generic");
+assert.equal(backfillRecords[1].unknownType, true);
+const persistedEditionPlanState = {
+  ...editionPlanningState,
+  editions: [editionPlan.edition],
+  semanticNodes: editionPlan.records.filter((record) => record.modelName === "SemanticNode").map((record) => record.expected),
+  assignments: editionPlan.records.filter((record) => record.modelName === "Assignment").map((record) => record.expected),
+  assignmentEvents: editionPlan.records.filter((record) => record.modelName === "AssignmentEvent").map((record) => record.expected),
+  semanticRelations: editionPlan.records.filter((record) => record.modelName === "SemanticRelation").map((record) => record.expected),
+};
+const editionVerification = verifyEditionPlanningPlan(persistedEditionPlanState, editionPlan);
+assert.equal(editionVerification.ok, true);
+const editionPlanRerun = buildEditionPlanningPlan(persistedEditionPlanState, {
+  editionDate: "2026-05-19",
+  now: "2026-05-18T12:00:00.000Z",
+  topDeskCount: 1,
+  publicationSlots: 1,
+});
+assert.equal(editionPlanRerun.records.filter((record) => record.modelName === "Assignment" && record.action === "create").length, 0);
+const cappedEditionPlan = buildEditionPlanningPlan(editionPlanningState, {
+  editionDate: "2026-05-19",
+  now: "2026-05-18T12:00:00.000Z",
+  topDeskCount: 1,
+  publicationSlots: 1,
+  maxAssignments: 2,
+});
+assert.equal(cappedEditionPlan.assignments.length, 2);
+const focusedEditionPlan = buildEditionPlanningPlan(editionPlanningState, {
+  editionDate: "2026-05-20",
+  now: "2026-05-18T12:00:00.000Z",
+  topDeskCount: 1,
+  publicationSlots: 1,
+  contextProfile: "analysis",
+  targetSystemType: "research newsroom",
+});
+assert.equal(focusedEditionPlan.summary.contextBackedAssignmentCount, focusedEditionPlan.assignments.length);
+assert.equal(focusedEditionPlan.focusCoverage.length, 6);
+assert.deepEqual(
+  focusedEditionPlan.assignments.map((assignment) => JSON.parse(assignment.metadata).focusCategoryKey),
+  ["topic.scaling-agents", "topic.scaling-evals", "topic.scaling-agents", "topic.scaling-evals", "topic.scaling-agents", "topic.scaling-evals"],
+);
+assert.equal(JSON.parse(focusedEditionPlan.assignments[0].metadata).contextProfile, "analysis");
+assert.equal(JSON.parse(focusedEditionPlan.assignments[0].metadata).contextTokenBudget, 6000);
+assert.equal(JSON.parse(focusedEditionPlan.assignments[0].metadata).targetSystemType, "research newsroom");
+const focusedEditionPlanRerun = buildEditionPlanningPlan(editionPlanningState, {
+  editionDate: "2026-05-20",
+  now: "2026-05-18T12:00:00.000Z",
+  topDeskCount: 1,
+  publicationSlots: 1,
+  contextProfile: "analysis",
+  targetSystemType: "research newsroom",
+});
+assert.deepEqual(
+  focusedEditionPlanRerun.assignments.map((assignment) => JSON.parse(assignment.metadata).focusCategoryKey),
+  focusedEditionPlan.assignments.map((assignment) => JSON.parse(assignment.metadata).focusCategoryKey),
+);
+const focusedSubsetPlan = buildEditionPlanningPlan(editionPlanningState, {
+  editionDate: "2026-05-21",
+  now: "2026-05-18T12:00:00.000Z",
+  topDeskCount: 1,
+  publicationSlots: 1,
+  focusCategories: ["topic.scaling-evals"],
+});
+assert.deepEqual(
+  focusedSubsetPlan.assignments.map((assignment) => JSON.parse(assignment.metadata).focusCategoryKey),
+  ["topic.scaling-evals", "topic.scaling-evals", "topic.scaling-evals", "topic.scaling-evals", "topic.scaling-evals", "topic.scaling-evals"],
+);
+assert.throws(
+  () => buildEditionPlanningPlan(editionPlanningState, {
+    editionDate: "2026-05-22",
+    now: "2026-05-18T12:00:00.000Z",
+    topDeskCount: 1,
+    publicationSlots: 1,
+    focusCategories: ["topic.not-real"],
+  }),
+  /Unknown focus category/,
+);
+
 const schemaSource = fs.readFileSync(path.join(__dirname, "..", "amplify", "data", "resource.ts"), "utf8");
 assert.match(schemaSource, /ReferenceAttachment:\s*a\s*\n\s*\.model/);
-assert.match(schemaSource, /KnowledgeComment:\s*a\s*\n\s*\.model/);
+assert.match(schemaSource, /Message:\s*a\s*\n\s*\.model/);
+assert.doesNotMatch(schemaSource, /KnowledgeComment:\s*a\s*\n\s*\.model/);
 assert.match(schemaSource, /Assignment:\s*a\s*\n\s*\.model/);
 assert.match(schemaSource, /AssignmentEvent:\s*a\s*\n\s*\.model/);
 assert.match(schemaSource, /CategoryKeyword:\s*a\s*\n\s*\.model/);
 assert.match(schemaSource, /LexicalSteeringRule:\s*a\s*\n\s*\.model/);
+assert.match(schemaSource, /SemanticRelationType:\s*a\s*\n\s*\.model/);
+assert.match(schemaSource.match(/SemanticRelation:\s*a[\s\S]*?Item:/)?.[0] ?? "", /relationTypeId/);
+assert.match(schemaSource.match(/SemanticRelation:\s*a[\s\S]*?Item:/)?.[0] ?? "", /relationTypeKey/);
+assert.match(schemaSource.match(/SemanticRelation:\s*a[\s\S]*?Item:/)?.[0] ?? "", /relationDomain/);
+assert.match(schemaSource, /listSemanticRelationsByTypeAndImportedAt/);
 assert.match(schemaSource, /listAssignmentsForObject:\s*a\s*\n\s*\.query/);
 assert.match(schemaSource, /listAssignmentQueue:\s*a\s*\n\s*\.query/);
 assert.match(schemaSource, /UserIdentity:\s*a\s*\n\s*\.model/);
@@ -621,7 +852,10 @@ assert.match(schemaSource.match(/UserProfile:[\s\S]*?UserIdentity:/)?.[0] ?? "",
 assert.match(schemaSource, /listUserIdentitiesByProfileAndLinkedAt/);
 assert.match(schemaSource, /listUserRoleAssignmentsByProfileAndRole/);
 assert.match(schemaSource, /listReferenceAttachmentsByReferenceVersionAndSortKey/);
-assert.match(schemaSource, /listKnowledgeCommentsByAuthorSubAndCreatedAt/);
+assert.match(schemaSource, /listMessagesByAuthorSubAndCreatedAt/);
+assert.match(schemaSource, /curationStatusKey/);
+assert.match(schemaSource, /listReferencesByCurationStatusKeyAndUpdatedAt/);
+assert.doesNotMatch(schemaSource.match(/Reference:[\s\S]*?ReferenceAttachment:/)?.[0] ?? "", /a\.boolean\(\)[\s\S]*curation/);
 assert.match(schemaSource, /listAssignmentsByQueueStatusAndPriority/);
 assert.match(schemaSource, /allow\.groups\(categoryWriteGroups\)\.to\(categoryAppendOnlyOperations\)/);
 assert.doesNotMatch(schemaSource.match(/UserIdentity:[\s\S]*?UserRoleAssignment:/)?.[0] ?? "", /publicApiKey/);
@@ -630,6 +864,9 @@ assert.doesNotMatch(schemaSource.match(/Reference:[\s\S]*?Item:/)?.[0] ?? "", /p
 const semanticGraphSource = fs.readFileSync(path.join(__dirname, "..", "lib", "semantic-graph.ts"), "utf8");
 assert.match(semanticGraphSource, /has_editorial_form/);
 assert.match(semanticGraphSource, /items by editorial form/);
+assert.match(semanticGraphSource, /planned_for_edition/);
+assert.match(semanticGraphSource, /targets_lane/);
+assert.match(semanticGraphSource, /uses_signal/);
 
 const roleHandlerSource = fs.readFileSync(path.join(__dirname, "..", "amplify", "functions", "manage-user-role", "handler.ts"), "utf8");
 assert.match(roleHandlerSource, /operation === "mergeUserProfiles"/);

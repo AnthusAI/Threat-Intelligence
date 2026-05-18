@@ -11,6 +11,7 @@ export type NewsDeskPageProps = {
     reference?: string | string[];
     category?: string | string[];
     node?: string | string[];
+    message?: string | string[];
     user?: string | string[];
     item?: string | string[];
   }>;
@@ -25,6 +26,7 @@ export async function NewsDeskPage({ section: routeSection, selectionPath, searc
     reference: getFirstSearchParam(resolvedSearchParams, "reference"),
     category: routeSelection.category ?? getFirstSearchParam(resolvedSearchParams, "category"),
     node: getFirstSearchParam(resolvedSearchParams, "node"),
+    message: routeSelection.message ?? getFirstSearchParam(resolvedSearchParams, "message"),
     user: getFirstSearchParam(resolvedSearchParams, "user"),
     item: getFirstSearchParam(resolvedSearchParams, "item"),
   };
@@ -32,12 +34,13 @@ export async function NewsDeskPage({ section: routeSection, selectionPath, searc
   return <NewsDeskWorkspace dashboard={dashboard} initialSelection={initialSelection} initialTab={initialTab} />;
 }
 
-function parseRouteSelection(tab: NewsDeskTab, selectionPath: string[] | null | undefined): { category?: string | null } {
+function parseRouteSelection(tab: NewsDeskTab, selectionPath: string[] | null | undefined): { category?: string | null; message?: string | null } {
   const segments = (selectionPath ?? []).map((segment) => decodeURIComponent(segment)).filter(Boolean);
   if (!segments.length) return {};
   if (tab === "desks") return { category: segments[0] ?? null };
   if (tab === "topics") return { category: segments[1] ?? segments[0] ?? null };
   if (tab === "references" || tab === "concepts") return { category: segments[0] ?? null };
+  if (tab === "messages") return { message: segments[0] ?? null };
   return {};
 }
 
@@ -62,6 +65,6 @@ function parseNewsDeskTab(sectionValue: string | string[] | null | undefined, le
   const section = Array.isArray(sectionValue) ? sectionValue[0] : sectionValue;
   const legacyTab = Array.isArray(legacyTabValue) ? legacyTabValue[0] : legacyTabValue;
   const value = section ?? (legacyTab === "categories" ? "topics" : legacyTab);
-  if (value === "users" || value === "desks" || value === "topics" || value === "concepts" || value === "references" || value === "assignments" || value === "doctrine") return value;
+  if (value === "users" || value === "desks" || value === "topics" || value === "concepts" || value === "references" || value === "messages" || value === "assignments" || value === "doctrine") return value;
   return "overview";
 }

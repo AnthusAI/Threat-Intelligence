@@ -30,7 +30,7 @@ import type {
   CategorySteeringCategorySet,
   CategoryKeywordRecord,
   DoctrineRecord,
-  KnowledgeCommentRecord,
+  MessageRecord,
   LexicalSteeringRuleRecord,
   ReferenceAttachmentRecord,
   ReferenceRecord,
@@ -77,9 +77,10 @@ type ActionState = {
 };
 
 type ReviewAction = "accept" | "reject";
+type ReferenceCurationAction = "accept" | "reject" | "reopen" | "archive";
 type AssignmentAction = "claim" | "release" | "complete" | "cancel" | "reopen";
 type UserRoleAction = "grant" | "revoke";
-export type NewsDeskTab = "overview" | "users" | "desks" | "topics" | "concepts" | "references" | "assignments" | "doctrine";
+export type NewsDeskTab = "overview" | "users" | "desks" | "topics" | "concepts" | "references" | "messages" | "assignments" | "doctrine";
 type LexicalRuleScope = "publication" | "corpus" | "classifier" | "category";
 type LexicalRuleDraft = {
   term: string;
@@ -98,6 +99,7 @@ export type NewsDeskSelection = {
   reference?: string | null;
   category?: string | null;
   node?: string | null;
+  message?: string | null;
   user?: string | null;
   item?: string | null;
 };
@@ -108,6 +110,18 @@ type CategoryReviewResponse = {
     status?: string | null;
     proposalId?: string | null;
     decisionId?: string | null;
+  } | null;
+  errors?: Array<{ message?: string | null } | string | null> | null;
+};
+
+type ReferenceReviewResponse = {
+  data?: {
+    ok?: boolean | null;
+    action?: string | null;
+    referenceId?: string | null;
+    status?: string | null;
+    messageId?: string | null;
+    relationId?: string | null;
   } | null;
   errors?: Array<{ message?: string | null } | string | null> | null;
 };
@@ -169,6 +183,7 @@ const NEWS_DESK_TABS: Array<{ id: NewsDeskTab; label: string; detail: string; hr
   { id: "topics", label: "Topics", detail: "Taxonomy", href: "/newsroom/topics" },
   { id: "concepts", label: "Concepts", detail: "Ontology", href: "/newsroom/concepts" },
   { id: "references", label: "References", detail: "Corpus", href: "/newsroom/references" },
+  { id: "messages", label: "Messages", detail: "Commentary", href: "/newsroom/messages" },
   { id: "assignments", label: "Assignments", detail: "Placeholder", href: "/newsroom/assignments" },
   { id: "doctrine", label: "Doctrine", detail: "Mission & Policies", href: "/newsroom/doctrine" },
 ];
@@ -257,6 +272,9 @@ function NewsDeskDashboard({
   const [lexicalSteeringRules, setLexicalSteeringRules] = useState(dashboard.lexicalSteeringRules);
   const [categoryTreeLoadError, setCategoryTreeLoadError] = useState<string | null>(null);
   const [proposals, setProposals] = useState(dashboard.proposals);
+  const [references, setReferences] = useState(dashboard.references);
+  const [messages, setMessages] = useState(dashboard.messages);
+  const [semanticRelations, setSemanticRelations] = useState(dashboard.semanticRelations);
   const [assignments, setAssignments] = useState(dashboard.assignments);
   const [assignmentEvents, setAssignmentEvents] = useState(dashboard.assignmentEvents);
   const [doctrineRecords, setDoctrineRecords] = useState(dashboard.doctrineRecords);
@@ -306,22 +324,22 @@ function NewsDeskDashboard({
   const assignmentMetrics = useMemo(() => getAssignmentMetrics(assignments), [assignments]);
   const mastheadSecondLabel = activeTab === "assignments" ? `${assignmentMetrics.open} open assignments` : latestImportLabel;
   const graph = useMemo(() => createSemanticGraphSnapshot({
-    references: dashboard.references,
+    references,
     categories: mergeCategoryRecords(categorys, activeCategoryTreeNodes),
     semanticNodes: dashboard.semanticNodes,
-    knowledgeComments: dashboard.knowledgeComments,
-    semanticRelations: dashboard.semanticRelations,
+    messages,
+    semanticRelations,
     assignments,
     referenceAttachments: dashboard.referenceAttachments,
   }), [
     assignments,
     activeCategoryTreeNodes,
     categorys,
-    dashboard.knowledgeComments,
     dashboard.referenceAttachments,
-    dashboard.references,
     dashboard.semanticNodes,
-    dashboard.semanticRelations,
+    messages,
+    references,
+    semanticRelations,
   ]);
 
   const categoryByUid = useMemo(() => {
@@ -345,6 +363,18 @@ function NewsDeskDashboard({
   useEffect(() => {
     setProposals(dashboard.proposals);
   }, [dashboard.proposals]);
+
+  useEffect(() => {
+    setReferences(dashboard.references);
+  }, [dashboard.references]);
+
+  useEffect(() => {
+    setMessages(dashboard.messages);
+  }, [dashboard.messages]);
+
+  useEffect(() => {
+    setSemanticRelations(dashboard.semanticRelations);
+  }, [dashboard.semanticRelations]);
 
   useEffect(() => {
     setAssignments(dashboard.assignments);
@@ -447,6 +477,98 @@ function NewsDeskDashboard({
           setActionState({ id: proposal.id, message: `${action} saved`, tone: "ok" });
         } catch (error) {
           setActionState({ id: proposal.id, message: error instanceof Error ? error.message : `${action} failed`, tone: "error" });
+        }
+      })();
+    });
+  }
+
+  function runReferenceCurationAction(reference: ReferenceRecord, action: ReferenceCurationAction, note?: string) {
+    const nextStatus = referenceCurationStatusForAction(action);
+    setActionState({ id: reference.id, message: `${action} pending`, tone: "pending" });
+    if (dashboard.isDemo) {
+      const now = new Date().toISOString();
+      const messageId = `message-demo-${reference.id}-${action}-${now.replace(/[^0-9]/g, "")}`;
+      const relationId = `semantic-relation-demo-${messageId}`;
+      setReferences((current) => current.map((entry) => entry.id === reference.id
+        ? {
+            ...entry,
+            curationStatus: nextStatus,
+            curationStatusKey: `${entry.corpusId}#${nextStatus}`,
+            curationStatusUpdatedAt: now,
+            curationStatusUpdatedBy: authState.label,
+            curationStatusReason: note ?? null,
+            updatedAt: now,
+          }
+        : entry));
+      setMessages((current) => [{
+        id: messageId,
+        messageKind: "reference_curation",
+        messageDomain: "commentary",
+        status: "active",
+        body: note?.trim() || `${authState.label} marked this reference ${nextStatus}.`,
+        summary: `${reference.title ?? reference.externalItemId}: ${nextStatus}`,
+        source: "newsroom",
+        authorLabel: authState.label,
+        createdAt: now,
+        updatedAt: now,
+      }, ...current]);
+      setSemanticRelations((current) => [{
+        id: relationId,
+        relationState: "current",
+        predicate: "comment",
+        relationTypeId: "semantic-relation-type-comment",
+        relationTypeKey: "comment",
+        relationDomain: "commentary",
+        subjectKind: "message",
+        subjectId: messageId,
+        subjectLineageId: messageId,
+        subjectVersionNumber: 1,
+        objectKind: "reference",
+        objectId: reference.id,
+        objectLineageId: reference.lineageId ?? reference.id,
+        objectVersionNumber: reference.versionNumber ?? null,
+        subjectStateKey: `message#${messageId}#current`,
+        objectStateKey: `reference#${reference.lineageId ?? reference.id}#current`,
+        objectSubjectStateKey: `reference#${reference.lineageId ?? reference.id}#current#message`,
+        predicateObjectStateKey: `comment#reference#${reference.lineageId ?? reference.id}#current`,
+        subjectVersionKey: `message#${messageId}`,
+        objectVersionKey: `reference#${reference.id}`,
+        rank: 1,
+        reviewRecommended: false,
+        importedAt: now,
+      }, ...current]);
+      setActionState({ id: reference.id, message: `${action} saved`, tone: "ok" });
+      return;
+    }
+    startTransition(() => {
+      void (async () => {
+        try {
+          const response = await dataClient.mutations.reviewReferenceCuration(
+            {
+              referenceId: reference.id,
+              action,
+              actorLabel: authState.label,
+              note: note?.trim() || undefined,
+            },
+            { authMode: USER_POOL_AUTH_MODE },
+          );
+          const review = assertReferenceReviewMutationSucceeded(response, reference.id);
+          const status = review.status ?? nextStatus;
+          const now = new Date().toISOString();
+          setReferences((current) => current.map((entry) => entry.id === reference.id
+            ? {
+                ...entry,
+                curationStatus: status,
+                curationStatusKey: `${entry.corpusId}#${status}`,
+                curationStatusUpdatedAt: now,
+                curationStatusUpdatedBy: authState.label,
+                curationStatusReason: note?.trim() || null,
+                updatedAt: now,
+              }
+            : entry));
+          setActionState({ id: reference.id, message: `${action} saved`, tone: "ok" });
+        } catch (error) {
+          setActionState({ id: reference.id, message: error instanceof Error ? error.message : `${action} failed`, tone: "error" });
         }
       })();
     });
@@ -988,15 +1110,15 @@ function NewsDeskDashboard({
             graph={graph}
             importRuns={dashboard.importRuns}
             initialCategoryLineageId={initialSelection.category}
-            knowledgeComments={dashboard.knowledgeComments}
+            messages={messages}
             lexicalSteeringRules={lexicalSteeringRules}
             onCategorySave={saveCategory}
             onLexicalRuleCreate={createLexicalSteeringRule}
             onProposalAction={runProposalAction}
             proposals={proposals}
             referenceAttachments={dashboard.referenceAttachments}
-            references={dashboard.references}
-            semanticRelations={dashboard.semanticRelations}
+            references={references}
+            semanticRelations={semanticRelations}
           />
         ) : null}
         {activeTab === "concepts" ? (
@@ -1014,7 +1136,16 @@ function NewsDeskDashboard({
             graph={graph}
             initialCategoryLineageId={initialSelection.category}
             initialReferenceLineageId={initialSelection.reference}
-            references={dashboard.references}
+            references={references}
+            disabled={isPending}
+            onReview={runReferenceCurationAction}
+          />
+        ) : null}
+        {activeTab === "messages" ? (
+          <MessagesDeskView
+            graph={graph}
+            initialMessageId={initialSelection.message}
+            messages={messages}
           />
         ) : null}
         {activeTab === "assignments" ? (
@@ -1066,7 +1197,8 @@ function OverviewDeskView({
         <section className="category-steering-section category-steering-section--lead" aria-labelledby="knowledge-wire-title">
           <SectionHeader title="Knowledge Wire" detail={latestImport ? `${latestImport.importKind} / ${latestImport.status}` : "No import run"} />
           <div className="news-desk-ledger-list news-desk-ledger-list--compact">
-            <DeskLinkCard href="/newsroom/references" label="References" value={dashboard.references.length} detail={`${dashboard.referenceAttachments.length} attachments / ${dashboard.knowledgeComments.length} comments`} />
+            <DeskLinkCard href="/newsroom/references" label="References" value={dashboard.references.length} detail={`${dashboard.referenceAttachments.length} attachments`} />
+            <DeskLinkCard href="/newsroom/messages" label="Messages" value={dashboard.messages.length} detail="private commentary" />
             <DeskLinkCard href="/newsroom/concepts" label="Concepts" value={dashboard.semanticNodes.length} detail={`${dashboard.semanticRelations.length} relations`} />
             <DeskLinkCard href="/newsroom/desks" label="Desks" value={dashboard.categorys.filter((category) => category.status === "accepted" && !category.parentCategoryKey).length} detail="sections and doctrine" />
             <DeskLinkCard href="/newsroom/topics" label="Topics" value={dashboard.categorys.length} detail={`${dashboard.proposals.filter((proposal) => proposal.status === "proposed").length} open proposals`} />
@@ -1715,7 +1847,7 @@ function TopicsDeskView({
   graph,
   importRuns,
   initialCategoryLineageId,
-  knowledgeComments,
+  messages,
   lexicalSteeringRules,
   onCategorySave,
   onLexicalRuleCreate,
@@ -1741,7 +1873,7 @@ function TopicsDeskView({
   graph: SemanticGraph;
   importRuns: CategorySteeringImportRun[];
   initialCategoryLineageId?: string | null;
-  knowledgeComments: KnowledgeCommentRecord[];
+  messages: MessageRecord[];
   lexicalSteeringRules: LexicalSteeringRuleRecord[];
   onCategorySave: (category: CategorySteeringCategory, update: Pick<CategorySteeringCategory, "displayName" | "shortTitle" | "subtitle" | "description">) => void;
   onLexicalRuleCreate: (draft: LexicalRuleDraft) => void;
@@ -1802,7 +1934,7 @@ function TopicsDeskView({
           artifacts={artifacts}
           references={references}
           referenceAttachments={referenceAttachments}
-          knowledgeComments={knowledgeComments}
+          messages={messages}
           semanticRelations={semanticRelations}
         />
       </aside>
@@ -1871,15 +2003,19 @@ function ConceptsDeskView({
 
 function ReferencesDeskView({
   categories,
+  disabled,
   graph,
   initialCategoryLineageId,
   initialReferenceLineageId,
+  onReview,
   references,
 }: {
   categories: CategorySteeringCategory[];
+  disabled: boolean;
   graph: SemanticGraph;
   initialCategoryLineageId?: string | null;
   initialReferenceLineageId?: string | null;
+  onReview: (reference: ReferenceRecord, action: ReferenceCurationAction, note?: string) => void;
   references: ReferenceRecord[];
 }) {
   const categoryContext = useMemo(() => buildCategoryDrilldownContext(categories, initialCategoryLineageId), [categories, initialCategoryLineageId]);
@@ -1908,6 +2044,71 @@ function ReferencesDeskView({
         </section>
       </div>
       <aside className="news-desk-rail-column">
+        <SemanticDetailPanel disabled={disabled} graph={graph} onReferenceReview={onReview} selected={selected} />
+      </aside>
+    </div>
+  );
+}
+
+function MessagesDeskView({
+  graph,
+  initialMessageId,
+  messages,
+}: {
+  graph: SemanticGraph;
+  initialMessageId?: string | null;
+  messages: MessageRecord[];
+}) {
+  const [kindFilter, setKindFilter] = useState("");
+  const [domainFilter, setDomainFilter] = useState("");
+  const messageKinds = useMemo(() => uniqueStrings(messages.map((message) => message.messageKind)), [messages]);
+  const messageDomains = useMemo(() => uniqueStrings(messages.map((message) => message.messageDomain)), [messages]);
+  const visibleMessages = useMemo(() => messages
+    .filter((message) => !kindFilter || message.messageKind === kindFilter)
+    .filter((message) => !domainFilter || message.messageDomain === domainFilter)
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt)), [domainFilter, kindFilter, messages]);
+  const selected = initialMessageId
+    ? graph.resolve("message", initialMessageId)
+    : visibleMessages[0]
+      ? graph.resolve("message", visibleMessages[0].id)
+      : null;
+  return (
+    <div className="news-desk-columns" data-news-desk-section="messages">
+      <div className="news-desk-main-column">
+        <section className="category-steering-section category-steering-section--lead" aria-labelledby="messages-title">
+          <SectionHeader title="Message Wire" detail={`${visibleMessages.length} private messages`} />
+          <div className="news-desk-reference-controls">
+            <label>
+              <span>Kind</span>
+              <select value={kindFilter} onChange={(event) => setKindFilter(event.target.value)}>
+                <option value="">All kinds</option>
+                {messageKinds.map((kind) => <option key={kind} value={kind}>{kind}</option>)}
+              </select>
+            </label>
+            <label>
+              <span>Domain</span>
+              <select value={domainFilter} onChange={(event) => setDomainFilter(event.target.value)}>
+                <option value="">All domains</option>
+                {messageDomains.map((domain) => <option key={domain} value={domain}>{domain}</option>)}
+              </select>
+            </label>
+          </div>
+          <div className="news-desk-object-list">
+            {visibleMessages.length ? visibleMessages.slice(0, 100).map((message) => (
+              <a
+                className={`news-desk-object-row${selected?.id === message.id ? " news-desk-object-row--active" : ""}`}
+                data-message-id={message.id}
+                href={newsDeskHrefForSemanticObject("message", message.id)}
+                key={message.id}
+              >
+                <strong>{message.summary ?? message.body}</strong>
+                <span>{message.messageKind} / {message.messageDomain} / {formatDateTime(message.createdAt)}</span>
+              </a>
+            )) : <EmptyRow label="No private messages recorded" />}
+          </div>
+        </section>
+      </div>
+      <aside className="news-desk-rail-column">
         <SemanticDetailPanel graph={graph} selected={selected} />
       </aside>
     </div>
@@ -1916,21 +2117,22 @@ function ReferencesDeskView({
 
 function ReferenceLedger({ references, selectedLineageId }: { references: ReferenceRecord[]; selectedLineageId?: string | null }) {
   const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
   const [page, setPage] = useState(0);
   const normalizedQuery = query.trim().toLowerCase();
   const sortedReferences = useMemo(() => sortReferencesByRecency(references), [references]);
   const filteredReferences = useMemo(() => (
-    normalizedQuery
-      ? sortedReferences.filter((reference) => referenceMatchesQuery(reference, normalizedQuery))
-      : sortedReferences
-  ), [normalizedQuery, sortedReferences]);
+    sortedReferences
+      .filter((reference) => !statusFilter || (reference.curationStatus ?? "pending") === statusFilter)
+      .filter((reference) => !normalizedQuery || referenceMatchesQuery(reference, normalizedQuery))
+  ), [normalizedQuery, sortedReferences, statusFilter]);
   const pageCount = Math.max(1, Math.ceil(filteredReferences.length / REFERENCE_PAGE_SIZE));
   const currentPage = Math.min(page, pageCount - 1);
   const visibleReferences = filteredReferences.slice(currentPage * REFERENCE_PAGE_SIZE, (currentPage + 1) * REFERENCE_PAGE_SIZE);
 
   useEffect(() => {
     setPage(0);
-  }, [normalizedQuery, references]);
+  }, [normalizedQuery, references, statusFilter]);
 
   return (
     <>
@@ -1939,9 +2141,11 @@ function ReferenceLedger({ references, selectedLineageId }: { references: Refere
         onNext={() => setPage((value) => Math.min(value + 1, pageCount - 1))}
         onPrevious={() => setPage((value) => Math.max(value - 1, 0))}
         onQueryChange={setQuery}
+        onStatusChange={setStatusFilter}
         page={currentPage}
         pageCount={pageCount}
         query={query}
+        status={statusFilter}
       />
       <div className="news-desk-object-list" data-news-desk-reference-ledger>
         {visibleReferences.length ? visibleReferences.map((reference) => {
@@ -1959,19 +2163,30 @@ function ReferenceLedger({ references, selectedLineageId }: { references: Refere
   );
 }
 
-function SemanticDetailPanel({ graph, selected }: { graph: SemanticGraph; selected: SemanticObjectSummary | null }) {
+function SemanticDetailPanel({
+  disabled = false,
+  graph,
+  onReferenceReview,
+  selected,
+}: {
+  disabled?: boolean;
+  graph: SemanticGraph;
+  onReferenceReview?: (reference: ReferenceRecord, action: ReferenceCurationAction, note?: string) => void;
+  selected: SemanticObjectSummary | null;
+}) {
   if (!selected) {
     return (
       <section className="category-steering-section" aria-labelledby="semantic-detail-title">
         <SectionHeader title="Semantic Detail" detail="No object selected" />
-        <EmptyRow label="Select a reference, topic, concept, item, or comment" />
+        <EmptyRow label="Select a reference, topic, concept, item, or message" />
       </section>
     );
   }
 
-  const comments = graph.commentsFor(selected.kind, selected.lineageId);
+  const messages = graph.messagesFor(selected.kind, selected.lineageId);
   const attachments = selected.kind === "reference" ? graph.attachmentsForReference(selected.lineageId) : [];
   const neighborGroups = graph.neighbors(selected.kind, selected.lineageId);
+  const selectedReference = selected.kind === "reference" ? selected.record as ReferenceRecord : null;
 
   return (
     <section className="category-steering-section" aria-labelledby="semantic-detail-title" data-news-desk-semantic-detail={selected.lineageId}>
@@ -1992,13 +2207,16 @@ function SemanticDetailPanel({ graph, selected }: { graph: SemanticGraph; select
             ))}
           </div>
         ) : null}
-        {comments.length ? (
+        {selectedReference && onReferenceReview ? (
+          <ReferenceCurationPanel disabled={disabled} reference={selectedReference} onReview={onReferenceReview} />
+        ) : null}
+        {messages.length ? (
           <div className="news-desk-detail-block">
-            <p className="story-label">Comments</p>
-            {comments.slice(0, 4).map((comment) => (
-              <div className="news-desk-detail-line" key={comment.id}>
-                <span>{comment.commentKind}</span>
-                <strong>{comment.body}</strong>
+            <p className="story-label">Messages</p>
+            {messages.slice(0, 4).map((message) => (
+              <div className="news-desk-detail-line" key={message.id}>
+                <span>{message.messageKind}</span>
+                <strong>{message.body}</strong>
               </div>
             ))}
           </div>
@@ -2006,6 +2224,53 @@ function SemanticDetailPanel({ graph, selected }: { graph: SemanticGraph; select
         <NeighborGroups groups={neighborGroups} />
       </article>
     </section>
+  );
+}
+
+function ReferenceCurationPanel({
+  disabled,
+  onReview,
+  reference,
+}: {
+  disabled: boolean;
+  onReview: (reference: ReferenceRecord, action: ReferenceCurationAction, note?: string) => void;
+  reference: ReferenceRecord;
+}) {
+  const [note, setNote] = useState("");
+  const status = reference.curationStatus ?? "pending";
+  const submit = (action: ReferenceCurationAction) => {
+    onReview(reference, action, note);
+    setNote("");
+  };
+  return (
+    <div className="news-desk-detail-block" data-reference-curation-status={status}>
+      <p className="story-label">Reference Curation</p>
+      <div className="news-desk-detail-line">
+        <span>Status</span>
+        <strong>{status}</strong>
+      </div>
+      {reference.curationStatusReason ? (
+        <div className="news-desk-detail-line">
+          <span>Reason</span>
+          <strong>{reference.curationStatusReason}</strong>
+        </div>
+      ) : null}
+      <label className="news-desk-reference-curation-note">
+        <span>Message</span>
+        <textarea
+          rows={3}
+          value={note}
+          onChange={(event) => setNote(event.target.value)}
+          placeholder="Optional curation note"
+        />
+      </label>
+      <div className="news-desk-assignment-row__button-row">
+        <button type="button" disabled={disabled || status === "accepted"} onClick={() => submit("accept")}>Accept</button>
+        <button type="button" disabled={disabled || status === "rejected"} onClick={() => submit("reject")}>Reject</button>
+        <button type="button" disabled={disabled || status === "pending"} onClick={() => submit("reopen")}>Reopen</button>
+        <button type="button" disabled={disabled || status === "archived"} onClick={() => submit("archive")}>Archive</button>
+      </div>
+    </div>
   );
 }
 
@@ -2195,6 +2460,7 @@ function AssignmentRow({
     .filter((relation) => relation.predicate === "requests_work_on")
     .map((relation) => graph.resolveRelationObject(relation, "outgoing"))
     .filter((target): target is SemanticObjectSummary => Boolean(target));
+  const context = assignmentContextMetadata(assignment);
   const terminal = assignment.status === "completed" || assignment.status === "canceled";
 
   useEffect(() => {
@@ -2217,6 +2483,32 @@ function AssignmentRow({
           <span>{assignment.assignmentTypeKey}</span>
         </header>
         <p>{assignment.brief ?? "No assignment brief filed."}</p>
+        {context ? (
+          <>
+            <p className="news-desk-assignment-row__angle">
+              <span>{context.deskTitle ?? context.deskKey ?? "Desk"}</span>
+              {`${context.focusTitle ?? context.focusKey ?? "focus"} / ${context.targetSystemType ?? context.contextProfile ?? "context"}`}
+            </p>
+            {context.contextProfile || context.contextTokenBudget ? (
+              <p className="news-desk-assignment-row__angle">
+                <span>Context</span>
+                {[context.contextProfile, context.contextTokenBudget ? `${context.contextTokenBudget} tokens` : null].filter(Boolean).join(" / ")}
+              </p>
+            ) : null}
+            {context.expectedEvidenceClasses.length ? (
+              <p className="news-desk-assignment-row__angle">
+                <span>Evidence</span>
+                {context.expectedEvidenceClasses.slice(0, 2).join(" / ")}
+              </p>
+            ) : null}
+            {context.comparisonQuestions.length ? (
+              <p className="news-desk-assignment-row__angle">
+                <span>Compare</span>
+                {context.comparisonQuestions.slice(0, 2).join(" / ")}
+              </p>
+            ) : null}
+          </>
+        ) : null}
         {assignment.instructions ? (
           <p className="news-desk-assignment-row__angle">
             <span>Instructions</span>
@@ -2276,6 +2568,7 @@ function formatDeskSectionLabel(section: NewsDeskTab): string {
   if (section === "topics") return "Topics Desk";
   if (section === "concepts") return "Concepts Desk";
   if (section === "references") return "References Desk";
+  if (section === "messages") return "Messages Desk";
   if (section === "assignments") return "Assignments Desk";
   if (section === "doctrine") return "Doctrine Desk";
   return "Knowledge Desk";
@@ -2287,6 +2580,7 @@ function formatDeskSectionHeadline(section: NewsDeskTab): string {
   if (section === "topics") return "Taxonomy Steering Stays Beside The Corpus";
   if (section === "concepts") return "Semantic Concepts Connect The Knowledge Graph";
   if (section === "references") return "Reference Metadata Leads To Private Corpus Files";
+  if (section === "messages") return "Messages Preserve Editorial Commentary";
   if (section === "assignments") return "Assignment Operations Stay Ready For The Reporting Queue";
   if (section === "doctrine") return "Editorial Doctrine Should Stay Explicit Inside The Newsroom";
   return "The Desk Opens On The Whole Knowledge Wire";
@@ -2296,8 +2590,9 @@ function formatDeskSectionLede(section: NewsDeskTab): string {
   if (section === "users") return "Admins can map more than one Cognito identity to one Papyrus profile and mirror newsroom roles across those identities.";
   if (section === "desks") return "Each accepted root topic becomes a newsroom desk with category identity fields and two private doctrine slots for mission and policies.";
   if (section === "topics") return "Editors can inspect accepted topics, subtopics, open steering proposals, and the taxonomy artifacts imported from Biblicus.";
-  if (section === "concepts") return "Graph concepts are private semantic nodes. Use them to surf from ontology terms to references, topics, comments, and Papyrus items.";
+  if (section === "concepts") return "Graph concepts are private semantic nodes. Use them to surf from ontology terms to references, topics, messages, and Papyrus items.";
   if (section === "references") return "References store strict metadata and attachment paths only. Source contents stay in S3 and corpus storage.";
+  if (section === "messages") return "Messages are private editorial commentary linked to references, topics, assignments, and other newsroom objects through typed relations.";
   if (section === "assignments") return "This section keeps the assignment desk visible while taxonomy and ontology monitoring take priority.";
   if (section === "doctrine") return "Editors can keep the publication's mission and policy in two fixed private doctrine slots without pushing them into reader-facing content.";
   return "Use the left sections to move between users, topics, semantic concepts, references, doctrine, and downstream newsroom work.";
@@ -3194,17 +3489,21 @@ function ReferenceListControls({
   onNext,
   onPrevious,
   onQueryChange,
+  onStatusChange,
   page,
   pageCount,
   query,
+  status,
 }: {
   label: string;
   onNext: () => void;
   onPrevious: () => void;
   onQueryChange: (query: string) => void;
+  onStatusChange: (status: string) => void;
   page: number;
   pageCount: number;
   query: string;
+  status: string;
 }) {
   return (
     <div className="news-desk-reference-controls">
@@ -3216,6 +3515,16 @@ function ReferenceListControls({
           onChange={(event) => onQueryChange(event.target.value)}
           placeholder="Title, source path, author, item id"
         />
+      </label>
+      <label>
+        <span>Curation status</span>
+        <select value={status} onChange={(event) => onStatusChange(event.target.value)}>
+          <option value="">All statuses</option>
+          <option value="pending">Pending</option>
+          <option value="accepted">Accepted</option>
+          <option value="rejected">Rejected</option>
+          <option value="archived">Archived</option>
+        </select>
       </label>
       <div>
         <span>{label}</span>
@@ -3255,7 +3564,7 @@ function ReferenceRow({ active, reference }: { active?: boolean; reference: Refe
       href={newsDeskHrefForSemanticObject("reference", lineageId)}
     >
       <strong>{reference.title ?? reference.externalItemId}</strong>
-      <span>{date} / {reference.mediaType ?? "metadata"} / {reference.storagePath ?? reference.sourceUri ?? "no file path"}</span>
+      <span>{reference.curationStatus ?? "pending"} / {date} / {reference.mediaType ?? "metadata"} / {reference.storagePath ?? reference.sourceUri ?? "no file path"}</span>
     </a>
   );
 }
@@ -3284,6 +3593,29 @@ function assertReviewMutationSucceeded(response: CategoryReviewResponse, proposa
     throw new Error(`Review saved no decision audit row for ${proposalId}.`);
   }
   return response.data;
+}
+
+function assertReferenceReviewMutationSucceeded(response: ReferenceReviewResponse, referenceId: string): NonNullable<ReferenceReviewResponse["data"]> {
+  if (response.errors?.length) {
+    throw new Error(response.errors.map(formatGraphQLError).join("; "));
+  }
+  if (!response.data?.ok) {
+    throw new Error(`Reference curation review was not saved for ${referenceId}.`);
+  }
+  if (response.data.referenceId && response.data.referenceId !== referenceId) {
+    throw new Error(`Reference review response did not match ${referenceId}.`);
+  }
+  if (!response.data.messageId || !response.data.relationId) {
+    throw new Error(`Reference review saved without commentary audit rows for ${referenceId}.`);
+  }
+  return response.data;
+}
+
+function referenceCurationStatusForAction(action: ReferenceCurationAction): "accepted" | "rejected" | "pending" | "archived" {
+  if (action === "accept") return "accepted";
+  if (action === "reject") return "rejected";
+  if (action === "archive") return "archived";
+  return "pending";
 }
 
 function assertNoGraphQLErrors(errors?: unknown[] | null) {
@@ -3606,7 +3938,9 @@ function countAssignmentsForDesk(
 
 function assignmentMetadataCategoryKey(assignment: AssignmentRecord): string | null {
   const metadata = parseMetadataObject(assignment.metadata);
-  return normalizeMetadataString(metadata?.categoryKey)
+  return normalizeMetadataString(metadata?.focusCategoryKey)
+    ?? normalizeMetadataString(metadata?.deskCategoryKey)
+    ?? normalizeMetadataString(metadata?.categoryKey)
     ?? normalizeMetadataString(metadata?.category_key)
     ?? normalizeMetadataString(metadata?.rootCategoryKey)
     ?? normalizeMetadataString(metadata?.root_category_key)
@@ -3618,7 +3952,9 @@ function assignmentMetadataCategoryKey(assignment: AssignmentRecord): string | n
 
 function nestedMetadataCategoryKey(value: unknown): string | null {
   const metadata = parseMetadataObject(value);
-  return normalizeMetadataString(metadata?.categoryKey)
+  return normalizeMetadataString(metadata?.focusCategoryKey)
+    ?? normalizeMetadataString(metadata?.deskCategoryKey)
+    ?? normalizeMetadataString(metadata?.categoryKey)
     ?? normalizeMetadataString(metadata?.category_key)
     ?? normalizeMetadataString(metadata?.rootCategoryKey)
     ?? normalizeMetadataString(metadata?.root_category_key)
@@ -3640,6 +3976,55 @@ function parseMetadataObject(value: unknown): Record<string, unknown> | null {
 
 function normalizeMetadataString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function normalizeMetadataStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => normalizeMetadataString(entry))
+    .filter((entry): entry is string => Boolean(entry));
+}
+
+function assignmentContextMetadata(assignment: AssignmentRecord): {
+  deskKey: string | null;
+  deskTitle: string | null;
+  focusKey: string | null;
+  focusTitle: string | null;
+  contextProfile: string | null;
+  contextTokenBudget: number | null;
+  contextSources: string[];
+  targetSystemType: string | null;
+  expectedEvidenceClasses: string[];
+  comparisonQuestions: string[];
+} | null {
+  const metadata = parseMetadataObject(assignment.metadata);
+  if (!metadata) return null;
+  const deskKey = normalizeMetadataString(metadata.deskCategoryKey)
+    ?? normalizeMetadataString(metadata.rootCategoryKey);
+  const focusKey = normalizeMetadataString(metadata.focusCategoryKey)
+    ?? normalizeMetadataString(metadata.researchLens);
+  if (!deskKey && !focusKey) return null;
+  const contextTokenBudgetValue = typeof metadata.contextTokenBudget === "number"
+    ? metadata.contextTokenBudget
+    : typeof metadata.contextTokenBudget === "string" && metadata.contextTokenBudget.trim()
+      ? Number(metadata.contextTokenBudget)
+      : null;
+  return {
+    deskKey,
+    deskTitle: normalizeMetadataString(metadata.deskCategoryTitle)
+      ?? normalizeMetadataString(metadata.rootCategoryTitle)
+      ?? deskKey,
+    focusKey,
+    focusTitle: normalizeMetadataString(metadata.focusCategoryTitle)
+      ?? normalizeMetadataString(metadata.researchLensTitle)
+      ?? focusKey,
+    contextProfile: normalizeMetadataString(metadata.contextProfile),
+    contextTokenBudget: Number.isFinite(contextTokenBudgetValue) ? Number(contextTokenBudgetValue) : null,
+    contextSources: normalizeMetadataStringList(metadata.contextSources),
+    targetSystemType: normalizeMetadataString(metadata.targetSystemType),
+    expectedEvidenceClasses: normalizeMetadataStringList(metadata.expectedEvidenceClasses),
+    comparisonQuestions: normalizeMetadataStringList(metadata.comparisonQuestions),
+  };
 }
 
 function countRelatedCategoryTreeProposals(
@@ -3859,14 +4244,14 @@ function CategorySetPanel({
   artifacts,
   references,
   referenceAttachments,
-  knowledgeComments,
+  messages,
   semanticRelations,
 }: {
   categorySet: CategorySteeringCategorySet | null;
   artifacts: CategorySteeringArtifact[];
   references: ReferenceRecord[];
   referenceAttachments: { id: string }[];
-  knowledgeComments: { id: string; commentKind: string }[];
+  messages: { id: string; messageKind: string }[];
   semanticRelations: SemanticRelationRecord[];
 }) {
   return (
@@ -3895,8 +4280,8 @@ function CategorySetPanel({
             <dd>{referenceAttachments.length}</dd>
           </div>
           <div>
-            <dt>Import Notes</dt>
-            <dd>{knowledgeComments.filter((comment) => comment.commentKind === "import_rationale").length}</dd>
+            <dt>Import Messages</dt>
+            <dd>{messages.filter((message) => message.messageKind === "import_rationale").length}</dd>
           </div>
           <div>
             <dt>Review Links</dt>
@@ -4009,6 +4394,10 @@ function replaceDoctrineRecord(records: DoctrineRecord[], nextRecord: DoctrineRe
 function compactArray(value: Array<string | null> | null | undefined): string[] {
   if (!Array.isArray(value)) return [];
   return value.map((entry) => (typeof entry === "string" ? entry.trim() : "")).filter(Boolean);
+}
+
+function uniqueStrings(values: Array<string | null | undefined>): string[] {
+  return Array.from(new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value)))).sort();
 }
 
 function formatArtifactChipLabel(value: string | null | undefined): string {

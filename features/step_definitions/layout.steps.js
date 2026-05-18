@@ -31,6 +31,11 @@ Given("I open the topics newsroom at {int} by {int}", async function (width, hei
   await requirePage(this).waitForSelector("[data-news-desk-section='topics']", { state: "visible", timeout: 15_000 });
 });
 
+Given("I open the desks newsroom at {int} by {int}", async function (width, height) {
+  await this.openPath("/newsroom/desks?demo=1", width, height);
+  await requirePage(this).waitForSelector("[data-news-desk-section='desks']", { state: "visible", timeout: 15_000 });
+});
+
 Given("I open the references newsroom at {int} by {int}", async function (width, height) {
   await this.openPath("/newsroom/references?demo=1", width, height);
   await requirePage(this).waitForSelector("[data-news-desk-section='references']", { state: "visible", timeout: 15_000 });
@@ -236,6 +241,7 @@ Then("the newsroom should render", async function () {
   await page.locator("h1", { hasText: "NEWSROOM" }).waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("[data-news-desk-tab='overview'][aria-current='page']").waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("[data-news-desk-tab='users']").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-tab='desks']").waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("[data-news-desk-tab='topics']").waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("[data-news-desk-tab='concepts']").waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("[data-news-desk-tab='references']").waitFor({ state: "visible", timeout: 10_000 });
@@ -262,6 +268,16 @@ Then("the topics desk should render", async function () {
   await page.locator("[data-news-desk-tab='topics'][aria-current='page']").waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("[data-news-desk-section='topics']").waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("text=Source Demo Categories").first().waitFor({ state: "visible", timeout: 10_000 });
+});
+
+Then("the desks desk should render", async function () {
+  const page = requirePage(this);
+  await page.locator("[data-news-desk]").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-tab='desks'][aria-current='page']").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-section='desks']").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-card='category.foundation-model-scaling']").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("textarea[data-news-desk-doctrine-input$='mission']").first().waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("text=Inherited Subtopics").first().waitFor({ state: "visible", timeout: 10_000 });
 });
 
 Then("the references desk should show reference metadata and semantic neighbors", async function () {
@@ -2233,6 +2249,7 @@ function getNewsroomSectionId(label) {
   const normalized = String(label).trim().toLowerCase();
   if (normalized === "overview") return "overview";
   if (normalized === "users") return "users";
+  if (normalized === "desks") return "desks";
   if (normalized === "topics") return "topics";
   if (normalized === "concepts") return "concepts";
   if (normalized === "references") return "references";

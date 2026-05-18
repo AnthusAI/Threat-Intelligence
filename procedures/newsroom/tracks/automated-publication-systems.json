@@ -1,0 +1,163 @@
+{
+  "key": "automated-publication-systems",
+  "title": "Fully-Automated Publication Systems",
+  "summary": "A standing Papyrus research track for end-to-end publication systems that automate research, editorial planning, drafting, publication, QA, review, and human override.",
+  "doctrine": {
+    "mission": [
+      "Study publication systems as operational systems, not just model demos.",
+      "Prioritize durable workflows, editorial judgment, evidence handling, and failure containment over novelty alone."
+    ],
+    "policies": [
+      "Track research automation, editorial planning, drafting, publishing, QA, review, and human override as one connected workflow.",
+      "Prefer primary materials, product documentation, system papers, source code, original evaluations, and operator testimony over derivative commentary.",
+      "Treat autonomy claims as unproven until the evidence shows what the system can do without human rescue.",
+      "Avoid promotional framing. Surface missing evidence, hidden human labor, brittle handoffs, and unverifiable benchmark claims.",
+      "Compare systems on provenance, repeatability, editorial control, and operational durability, not only speed or output fluency."
+    ],
+    "coverageDefinition": [
+      "Research automation",
+      "Editorial planning and assignment generation",
+      "Drafting and revision",
+      "Publication and release operations",
+      "Evaluation and QA",
+      "Review and approval",
+      "Human override and failure recovery"
+    ]
+  },
+  "requiredAssignmentFields": [
+    "researchLens",
+    "targetSystemType",
+    "expectedEvidenceClasses",
+    "comparisonQuestions"
+  ],
+  "assignmentTemplates": [
+    {
+      "lens": "system-architecture",
+      "title": "System Architecture",
+      "summary": "Map the components, boundaries, orchestration layers, and external dependencies that make the publication system work.",
+      "expectedEvidenceClasses": [
+        "system diagrams or architecture docs",
+        "source code or configuration",
+        "deployment or runtime documentation",
+        "operator explanations"
+      ],
+      "comparisonQuestions": [
+        "Which components are deterministic infrastructure versus model-driven agents?",
+        "Where are the hard boundaries between retrieval, planning, generation, validation, and publishing?",
+        "Which external systems or human operators are required for the workflow to complete?"
+      ]
+    },
+    {
+      "lens": "agent-workflow",
+      "title": "Agent Workflow",
+      "summary": "Explain how research, planning, drafting, and publication work moves through the system from trigger to output.",
+      "expectedEvidenceClasses": [
+        "runbooks or workflow descriptions",
+        "execution traces or logs",
+        "assignment or queue artifacts",
+        "operator examples"
+      ],
+      "comparisonQuestions": [
+        "What is the end-to-end handoff sequence from signal detection to published output?",
+        "Which steps are automated, supervised, or manually recovered?",
+        "Where does the system branch, retry, pause, or escalate to a human?"
+      ]
+    },
+    {
+      "lens": "evidence-provenance",
+      "title": "Evidence and Provenance",
+      "summary": "Inspect how the system gathers evidence, preserves provenance, and prevents citation drift or fabricated support.",
+      "expectedEvidenceClasses": [
+        "source registries or reference catalogs",
+        "citation or attachment metadata",
+        "retrieval and ranking logic",
+        "published examples with source trails"
+      ],
+      "comparisonQuestions": [
+        "What are the durable identifiers and provenance records for evidence?",
+        "Can an editor audit the evidence trail from draft claim back to source?",
+        "What prevents stale, weak, or fabricated evidence from entering the publication path?"
+      ]
+    },
+    {
+      "lens": "evaluation-qa",
+      "title": "Evaluation and QA",
+      "summary": "Examine how the system measures quality, catches regressions, and decides whether output is safe to publish.",
+      "expectedEvidenceClasses": [
+        "evaluation specs or scorecards",
+        "QA checks or guardrail definitions",
+        "benchmark or review results",
+        "examples of blocked or corrected outputs"
+      ],
+      "comparisonQuestions": [
+        "What explicit quality gates exist before publication?",
+        "Which evaluations are automated and which still depend on human review?",
+        "How does the system measure regressions, false positives, and hidden failure modes?"
+      ]
+    },
+    {
+      "lens": "editorial-control",
+      "title": "Editorial Control",
+      "summary": "Clarify how editors steer topic coverage, doctrine, approvals, and override authority without collapsing the automation loop.",
+      "expectedEvidenceClasses": [
+        "editor policy or doctrine docs",
+        "approval or review UI flows",
+        "assignment or queue controls",
+        "examples of human overrides"
+      ],
+      "comparisonQuestions": [
+        "What can editors configure before a run versus after output is produced?",
+        "How are approvals, vetoes, and steering decisions represented in system state?",
+        "Can the system continue autonomously from prior editor decisions without silently drifting away from policy?"
+      ]
+    },
+    {
+      "lens": "failure-modes",
+      "title": "Failure Modes",
+      "summary": "Document where the system breaks, stalls, hallucinates, repeats itself, or hides human intervention.",
+      "expectedEvidenceClasses": [
+        "incident reports or postmortems",
+        "error traces or fallback paths",
+        "examples of incorrect or low-quality outputs",
+        "operator accounts of recovery work"
+      ],
+      "comparisonQuestions": [
+        "What are the common failure modes and how visible are they to operators?",
+        "Which failures degrade gracefully versus silently corrupt output quality?",
+        "How much hidden human work is required to keep the system appearing autonomous?"
+      ]
+    }
+  ],
+  "evidenceRubric": [
+    {
+      "key": "autonomy-scope",
+      "title": "Autonomy Scope",
+      "question": "What parts of the publication workflow can the system complete without human rescue?"
+    },
+    {
+      "key": "editorial-control",
+      "title": "Editorial Control",
+      "question": "How clearly can editors steer, approve, reject, or override the system?"
+    },
+    {
+      "key": "provenance-auditability",
+      "title": "Provenance and Auditability",
+      "question": "Can the evidence chain be audited from published claim back to durable source records?"
+    },
+    {
+      "key": "evaluation-discipline",
+      "title": "Evaluation Discipline",
+      "question": "What explicit QA, scorecards, or evaluation practices block weak output before publication?"
+    },
+    {
+      "key": "operational-durability",
+      "title": "Operational Durability",
+      "question": "How well does the system handle routine operations, retries, drift, and long-running publication cycles?"
+    },
+    {
+      "key": "failure-recovery",
+      "title": "Failure Recovery",
+      "question": "How visible are failures, and how much hidden human labor is required to recover from them?"
+    }
+  ]
+}

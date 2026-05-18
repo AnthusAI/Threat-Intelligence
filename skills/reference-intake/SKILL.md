@@ -45,10 +45,10 @@ verification have succeeded.
   S3 prefixes, roles, and classifier ids.
 - `skills/category-steering/SKILL.md`: production JWT setup, curation-cycle
   commands, S3 corpus rules, and Biblicus escalation rules.
-- `scripts/lib/papyrus-categories.cjs`: current reference, attachment, comment,
+- `scripts/lib/papyrus-categories.cjs`: current reference, attachment, message,
   assignment, and semantic-relation import mappers.
 - `amplify/data/resource.ts`: `Reference`, `ReferenceAttachment`,
-  `KnowledgeComment`, `Assignment`, and `SemanticRelation` schema/auth rules.
+  `Message`, `Assignment`, and `SemanticRelation` schema/auth rules.
 - `lib/category-repository.ts`: private Newsroom data shape for references and
   assignments.
 
@@ -69,9 +69,10 @@ GraphQL stores strict private metadata and relationships only:
   normalized S3/corpus path, media type, checksums, dates, sanitized metadata.
 - `ReferenceAttachment`: private file-path metadata for source PDFs, text,
   transcripts, extraction JSON, and auxiliary corpus files.
-- `KnowledgeComment`: append-only commentary such as import rationale.
+- `Message`: append-only private commentary such as import rationale and
+  reference-curation notes.
 - `Assignment`: private work item such as `curation.reference-intake`.
-- `SemanticRelation`: links from assignments/comments/references to exact
+- `SemanticRelation`: typed links from assignments/messages/references to exact
   target lineages such as `Reference`, `Category`, or `SemanticNode`.
 
 Do not store source text, PDFs, transcripts, abstracts, raw extraction payloads,
@@ -136,7 +137,7 @@ curation import/projection outputs:
    ```
 
 5. The mapper creates or updates private `Reference` rows, private
-   `ReferenceAttachment` rows, optional import-rationale `KnowledgeComment`
+   `ReferenceAttachment` rows, optional import-rationale `Message`
    rows, `curation.reference-intake` `Assignment` rows, and `SemanticRelation`
    links.
 6. The Newsroom reads the private models for signed-in editor/admin users.

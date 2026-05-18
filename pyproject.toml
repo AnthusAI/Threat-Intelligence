@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "papyrus-newsroom"
+version = "0.1.0"
+description = "Papyrus newsroom Python tools and CLI."
+authors = []
+readme = "README.md"
+packages = [{ include = "papyrus_newsroom", from = "src" }]
+
+[tool.poetry.dependencies]
+python = ">=3.12,<3.14"
+PyYAML = "^6.0.2"
+tactus = "^0.48.1"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.4.2"
+
+[tool.poetry.scripts]
+papyrus-newsroom = "papyrus_newsroom.cli:main"
+
+[build-system]
+requires = ["poetry-core>=1.9.0"]
+build-backend = "poetry.core.masonry.api"
