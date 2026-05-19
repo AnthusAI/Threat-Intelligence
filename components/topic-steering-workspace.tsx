@@ -534,11 +534,11 @@ function NewsDeskDashboard({
   const tabCounts = useMemo<Record<NewsDeskTab, number>>(() => ({
     overview: 0,
     desks: acceptedRootCategoryCount || summaryCount(dashboard, "categories"),
-    messages: messages.length || summaryCount(dashboard, "messages"),
-    assignments: assignments.length || summaryCount(dashboard, "assignments"),
-    references: references.length || summaryCount(dashboard, "references"),
-    topics: canonicalCategorys.length || summaryCount(dashboard, "categories"),
-    concepts: semanticNodes.length || summaryCount(dashboard, "semanticNodes"),
+    messages: summaryCount(dashboard, "messages") || messages.length,
+    assignments: summaryCount(dashboard, "assignments") || assignments.length,
+    references: summaryCount(dashboard, "references") || references.length,
+    topics: summaryCount(dashboard, "categories") || canonicalCategorys.length,
+    concepts: summaryCount(dashboard, "semanticNodes") || semanticNodes.length,
     administration: userDirectory.length + doctrineRecords.length + newsroomSections.length,
   }), [
     acceptedRootCategoryCount,
@@ -2031,11 +2031,11 @@ function OverviewDeskView({
     };
   }, [dashboard.assignments, dashboard.isDemo, dashboard.messages, dashboard.references]);
 
-  const messageCount = dashboard.messages.length || summaryCount(dashboard, "messages");
-  const assignmentCount = assignmentMetrics.total || summaryCount(dashboard, "assignments");
-  const openAssignmentCount = assignmentMetrics.open || dashboard.summary?.assignmentStatusCounts.open || 0;
-  const referenceCount = dashboard.references.length || summaryCount(dashboard, "references");
-  const referenceAttachmentCount = dashboard.referenceAttachments.length || summaryCount(dashboard, "referenceAttachments");
+  const messageCount = summaryCount(dashboard, "messages") || dashboard.messages.length;
+  const assignmentCount = summaryCount(dashboard, "assignments") || assignmentMetrics.total;
+  const openAssignmentCount = dashboard.summary?.assignmentStatusCounts.open || assignmentMetrics.open || 0;
+  const referenceCount = summaryCount(dashboard, "references") || dashboard.references.length;
+  const referenceAttachmentCount = summaryCount(dashboard, "referenceAttachments") || dashboard.referenceAttachments.length;
   const isDemo = Boolean(dashboard.isDemo);
   return (
     <div className="news-desk-overview-feeds" data-news-desk-section="overview">
