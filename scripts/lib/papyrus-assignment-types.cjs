@@ -1,0 +1,48 @@
+const ASSIGNMENT_TYPE_POLICIES = {
+  "analysis.reindex": {
+    assignmentTypeKey: "analysis.reindex",
+    handlerKey: "analysis.reindex",
+    claimPolicy: "exclusive",
+    defaultClaimTtlSeconds: 6 * 60 * 60,
+    workProductPolicy: "assignment-events-and-messages",
+    description: "Runs explicit Biblicus re-index command plans for generated analysis outputs.",
+  },
+  "curation.reference-intake": {
+    assignmentTypeKey: "curation.reference-intake",
+    handlerKey: "curation.reference-intake",
+    claimPolicy: "exclusive",
+    defaultClaimTtlSeconds: 60 * 60,
+    workProductPolicy: "reference-curation-decision",
+    description: "Reviews pending reference prospects and records accept/reject/archive decisions.",
+  },
+  "research.edition-candidate": {
+    assignmentTypeKey: "research.edition-candidate",
+    handlerKey: "newsroom.research",
+    claimPolicy: "optional",
+    defaultClaimTtlSeconds: 2 * 60 * 60,
+    workProductPolicy: "research-packet-message",
+    description: "Produces assignment-linked research packets for edition planning.",
+  },
+};
+
+const DEFAULT_ASSIGNMENT_TYPE_POLICY = {
+  assignmentTypeKey: "unknown",
+  handlerKey: "manual",
+  claimPolicy: "optional",
+  defaultClaimTtlSeconds: null,
+  workProductPolicy: "assignment-events-and-messages",
+  description: "Generic assignment work without a specialized handler policy.",
+};
+
+function getAssignmentTypePolicy(assignmentTypeKey) {
+  const key = typeof assignmentTypeKey === "string" ? assignmentTypeKey.trim() : "";
+  const policy = ASSIGNMENT_TYPE_POLICIES[key];
+  if (policy) return { ...policy };
+  return { ...DEFAULT_ASSIGNMENT_TYPE_POLICY, assignmentTypeKey: key || "unknown" };
+}
+
+module.exports = {
+  ASSIGNMENT_TYPE_POLICIES,
+  DEFAULT_ASSIGNMENT_TYPE_POLICY,
+  getAssignmentTypePolicy,
+};
