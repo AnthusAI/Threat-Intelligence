@@ -80,9 +80,8 @@ const {
   buildReferenceSourceStatusRows,
   isExtractableMediaType,
   referenceSourceReadiness,
+  selectExtractedTextAttachment,
   sourceStoragePathForReference,
-  stableExtractedTextLocalPath,
-  stableExtractedTextStoragePath,
   textStoragePathForReference,
 } = require("./lib/papyrus-reference-source-readiness.cjs");
 const {
@@ -962,8 +961,8 @@ async function referenceSourceStatus(flags) {
     memo[state] = (memo[state] ?? 0) + 1;
     return memo;
   }, {});
-  const limit = options.limit ? normalizeCliPositiveInteger(options.limit, "--limit") : 50;
-  const selected = limit ? rows.slice(0, limit) : rows;
+  const limit = options.limit === undefined ? 50 : normalizeCliNonNegativeInteger(options.limit, "--limit");
+  const selected = limit === 0 ? [] : rows.slice(0, limit);
   console.log(`references\tsource-status\tcorpus\t${corpusId}`);
   console.log(`references\tsource-status\tstatus\t${status}`);
   for (const state of Object.values(SOURCE_READINESS_STATES)) {
@@ -1258,10 +1257,10 @@ async function attachExtractedTextReferences(flags) {
   console.log(`references\tattach-extracted-text\tsnapshots\t${extractionIndex.snapshotIds.length}`);
   console.log(`references\tattach-extracted-text\teligible\t${allPlans.length}`);
   if (maxCount) console.log(`references\tattach-extracted-text\tmax-count\t${maxCount}`);
-  console.log(`references\tattach-extracted-text\tmaterializations\t${plans.length}`);
+  console.log(`references\tattach-extracted-text\tsnapshot_attachments\t${plans.length}`);
   console.log(`references\tattach-extracted-text\tplanned\t${records.length}`);
   const changed = changes.filter((entry) => entry.action !== "noop");
-  const printLimit = normalizeCliPositiveInteger(options.limit, "--limit") ?? 25;
+  const printLimit = options.limit === undefined ? 25 : normalizeCliNonNegativeInteger(options.limit, "--limit");
   console.log(`references\tattach-extracted-text\tchanges\t${changed.length}`);
   for (const change of changed.slice(0, printLimit)) {
     console.log(`${change.action}\t${change.modelName}\t${change.expected.id}`);
@@ -1270,21 +1269,7 @@ async function attachExtractedTextReferences(flags) {
     console.log(`references\tattach-extracted-text\tomitted\t${changed.length - printLimit}\tpass --limit ${changed.length} to print every planned change`);
   }
   if (!options.apply) {
-    console.log("references\tattach-extracted-text\tapply\tskipped\tpass --apply to materialize text.txt files and write ReferenceAttachment records");
-    return;
-  }
-  const materialized = materializeExtractedTextArtifacts(plans);
-  const s3SyncResult = maybeSyncExtractedTextArtifactsToS3({
-    corpusConfig,
-    corpusPath: path.resolve(corpusConfig.path),
-    runDir: path.join(process.cwd(), ".papyrus-runs", `reference-text-attach-${timestampForPath(new Date().toISOString())}-${hashShort(corpusId)}`),
-    options,
-    artifacts: materialized,
-  });
-  if (s3SyncResult.requiresApply) {
-    console.log(`references\tattach-extracted-text\tmaterialized\t${materialized.length}`);
-    console.log(`references\tattach-extracted-text\ts3-sync\tdry-run\t${s3SyncResult.dryRunLogPath}`);
-    console.log("references\tattach-extracted-text\tapply\tblocked\tpass --sync-s3-apply to sync text artifacts before writing GraphQL attachment records");
+    console.log("references\tattach-extracted-text\tapply\tskipped\tpass --apply to write snapshot-backed ReferenceAttachment records");
     return;
   }
   await applyRecordChanges(client, changes);
@@ -1292,9 +1277,7 @@ async function attachExtractedTextReferences(flags) {
     actorLabel,
     reason: `references attach-extracted-text ${corpusId}`,
   });
-  console.log(`references\tattach-extracted-text\tmaterialized\t${materialized.length}`);
-  if (s3SyncResult.skipped) console.log(`references\tattach-extracted-text\ts3-sync\tskipped\t${s3SyncResult.reason}`);
-  else console.log(`references\tattach-extracted-text\ts3-sync\tapplied\t${s3SyncResult.stdoutLogPath}`);
+  console.log(`references\tattach-extracted-text\tattached\t${changes.filter((entry) => entry.action === "create").length}`);
 }
 
 async function exportReferenceAnalysisManifest(flags) {
@@ -2993,22 +2976,6 @@ async function executeReferenceTextExtractionAssignmentInternal({ client, assign
     });
     const records = plans.map((plan) => plan.record).filter(Boolean);
     const changes = await buildRecordChanges(client, records);
-    const materialized = materializeExtractedTextArtifacts(plans);
-    const s3SyncResult = maybeSyncExtractedTextArtifactsToS3({
-      corpusConfig,
-      corpusPath,
-      runDir,
-      options,
-      artifacts: materialized,
-    });
-    if (s3SyncResult.requiresApply) {
-      throw createReferenceAccessionError("S3 text artifact sync dry-run completed; pass --sync-s3-apply before writing GraphQL attachment records.", {
-        runId,
-        manifestPath,
-        kind: "s3_text_sync_requires_apply",
-        stdoutLogPaths: [s3SyncResult.dryRunLogPath],
-      });
-    }
     await applyRecordChanges(client, changes);
     await updateNewsroomSummaryAfterExtractedTextAttachments(client, changes, {
       actorLabel,
@@ -3027,11 +2994,9 @@ async function executeReferenceTextExtractionAssignmentInternal({ client, assign
       corpusPath,
       extraction: extractionResult,
       extractionSnapshots: extractionIndex.snapshotIds,
-      textArtifacts: materialized,
-      s3Sync: s3SyncResult,
       plannedTextAttachments: records.length,
       importSummary,
-      textStoragePolicy: "ReferenceAttachment.role=extracted_text points at corpora/<corpus>/imports/<item-id>/text.txt; raw text is not stored in GraphQL.",
+      textStoragePolicy: "ReferenceAttachment.role=extracted_text points at corpora/<corpus>/extracted/pipeline/<snapshot-id>/text/<item-id>.txt; raw text is not stored in GraphQL.",
     };
     writeJsonFile(manifestPath, manifest);
     await appendAssignmentPhaseEvent({
@@ -3048,7 +3013,6 @@ async function executeReferenceTextExtractionAssignmentInternal({ client, assign
         importRuns: importSummary.importRuns,
         importedRecords: importSummary.importedRecords,
         extractionSnapshotIds: extractionIndex.snapshotIds,
-        materializedTextArtifacts: materialized.length,
       },
     });
     return {
@@ -5554,7 +5518,7 @@ function buildReferenceAnalysisManifest({ corpusConfig, corpusId, references, at
   const missingText = acceptedReferences.filter((reference) => !textStoragePathForReference(reference, attachments));
   if (missingText.length) {
     const examples = missingText.slice(0, 5).map((reference) => `${reference.id}:${reference.externalItemId ?? "no-item-id"}`).join(", ");
-    throw new Error(`Cannot export analysis manifest: ${missingText.length} accepted current references in ${corpusId} lack stable extracted text at imports/<item-id>/text.txt. Run references source-status, references extract-text-now, or references attach-extracted-text first. Examples: ${examples}`);
+    throw new Error(`Cannot export analysis manifest: ${missingText.length} accepted current references in ${corpusId} lack snapshot-backed extracted_text attachments. Run references source-status, references extract-text-now, or references attach-extracted-text first. Examples: ${examples}`);
   }
   return {
     schema_version: 1,
@@ -5760,7 +5724,8 @@ function referenceTextExtractionAssignmentRecord({ corpusConfig, corpusId, actor
       force: parseBooleanOption(options.force, false, "--force"),
       "max-workers": normalizeCliPositiveInteger(options["max-workers"], "--max-workers"),
     }),
-    instructions: "Run Biblicus text extraction against accessioned corpus source files, then register text.txt artifacts as extracted_text ReferenceAttachment rows. Do not copy extracted text into GraphQL.",
+    instructions: "Run Biblicus text extraction against accessioned corpus source files, then register snapshot-backed extracted_text ReferenceAttachment rows. Do not copy extracted text into GraphQL.",
+    assignmentTypePolicy: policy,
   };
   return {
     id: `assignment-reference-text-extraction-${hashShort([corpusId, runId])}`,
@@ -5773,19 +5738,22 @@ function referenceTextExtractionAssignmentRecord({ corpusConfig, corpusId, actor
     brief: `Run Biblicus extraction for ${corpusConfig.key} and register extracted text attachments.`,
     instructions: metadata.instructions,
     metadata: JSON.stringify(metadata),
+    assigneeType: null,
+    assigneeId: null,
     assigneeKey: null,
-    claimToken: null,
     claimedAt: null,
     claimExpiresAt: null,
-    createdAt: now,
-    updatedAt: now,
     completedAt: null,
     canceledAt: null,
-    dueAt: null,
-    source: "papyrus-content-cli",
-    sourceDetail: `references extract-text-now ${corpusConfig.key}`,
+    corpusId,
+    categorySetId: null,
+    classifierId: null,
+    sourceSnapshotId: null,
     importRunId: null,
-    handlerKey: policy.handlerKey,
+    createdBy: actorLabel ?? "papyrus-content-cli",
+    createdAt: now,
+    updatedAt: now,
+    newsroomFeedKey: "assignments",
   };
 }
 
@@ -5905,7 +5873,7 @@ function localSemanticRelationRecord(input) {
     predicateObjectStateKey: `${input.predicate}#${objectStateKey}`,
     subjectVersionKey,
     objectVersionKey,
-    score: input.score ?? null,
+    score: input.score ?? input.confidence ?? 1,
     confidence: input.confidence ?? null,
     rank: input.rank ?? null,
     classifierId: input.classifierId ?? null,
@@ -6294,21 +6262,21 @@ function buildExtractedTextAttachmentRecords({ corpusConfig, corpusId, reference
 
 function buildExtractedTextAttachmentPlans({ corpusConfig, corpusId, references, attachments, extractionIndex }) {
   const now = new Date().toISOString();
-  const existingKeys = new Set(attachments.map((attachment) => [
-    attachment.referenceLineageId,
-    attachment.role,
-    attachment.storagePath,
-  ].join("\n")));
   const plans = [];
-  for (const reference of references
+  const seenLineages = new Set();
+  const currentReferences = references
     .filter((entry) => entry.corpusId === corpusId)
     .filter((entry) => entry.versionState === "current")
-    .filter((entry) => entry.externalItemId && extractionIndex.textByItemId?.has(entry.externalItemId))) {
+    .filter((entry) => entry.externalItemId && extractionIndex.textByItemId?.has(entry.externalItemId))
+    .sort(compareReferenceVersionsByFreshness);
+  for (const reference of currentReferences) {
+    if (seenLineages.has(reference.lineageId)) continue;
+    seenLineages.add(reference.lineageId);
     const extracted = extractionIndex.textByItemId.get(reference.externalItemId);
-    const targetLocalPath = stableExtractedTextLocalPath(corpusConfig.path, reference.externalItemId);
-    const storagePath = stableExtractedTextStoragePath(corpusConfig.path, reference.externalItemId);
-    if (!targetLocalPath || !storagePath) continue;
-    const key = [reference.lineageId, "extracted_text", storagePath].join("\n");
+    const storagePath = extracted.storagePath;
+    if (!storagePath) continue;
+    const existingTextAttachment = selectExtractedTextAttachment(reference, attachments);
+    const key = [reference.lineageId, "extracted_text"].join("\n");
     let byteSize = null;
     let sha256 = null;
     try {
@@ -6319,8 +6287,8 @@ function buildExtractedTextAttachmentPlans({ corpusConfig, corpusId, references,
       // The row is skipped if the file disappears between scan and plan.
       continue;
     }
-    const record = existingKeys.has(key) ? null : { modelName: "ReferenceAttachment", expected: {
-        id: `reference-attachment-${hashShort([`reference#${reference.id}`, "extracted_text", storagePath])}`,
+    const record = { modelName: "ReferenceAttachment", expected: {
+        id: existingTextAttachment?.id ?? `reference-attachment-${hashShort(key)}`,
         referenceId: reference.id,
         referenceLineageId: reference.lineageId,
         referenceVersionNumber: reference.versionNumber,
@@ -6329,7 +6297,7 @@ function buildExtractedTextAttachmentPlans({ corpusConfig, corpusId, references,
         sortKey: "900-extracted-text",
         storagePath,
         sourceUri: null,
-        filename: "text.txt",
+        filename: path.basename(extracted.localPath),
         mediaType: "text/plain",
         byteSize,
         sha256,
@@ -6338,16 +6306,27 @@ function buildExtractedTextAttachmentPlans({ corpusConfig, corpusId, references,
         importedAt: now,
         metadata: JSON.stringify({
           source: "biblicus-extraction-snapshot",
-          extractorId: "pipeline",
+          extractorId: extracted.extractorId ?? "pipeline",
+          snapshotId: extracted.snapshotId,
           extractionSnapshotId: extracted.snapshotId,
+          finalTextRelpath: extracted.finalTextRelpath ?? null,
+          finalMetadataRelpath: extracted.finalMetadataRelpath ?? null,
+          configurationId: extracted.configurationId ?? null,
+          configurationName: extracted.configurationName ?? null,
+          finalProducerExtractorId: extracted.finalProducerExtractorId ?? null,
+          finalStageExtractorId: extracted.finalStageExtractorId ?? null,
+          finalStageIndex: extracted.finalStageIndex ?? null,
+          finalSourceStageIndex: extracted.finalSourceStageIndex ?? null,
+          textCharacters: extracted.textCharacters ?? null,
+          extractionStatus: extracted.status ?? null,
+          errorType: extracted.errorType ?? null,
+          errorMessage: extracted.errorMessage ?? null,
           snapshotLocalPath: extracted.localPath,
-          materializedLocalPath: targetLocalPath,
         }),
       } };
     plans.push({
       reference,
       extracted,
-      targetLocalPath,
       storagePath,
       byteSize,
       sha256,
@@ -6357,106 +6336,10 @@ function buildExtractedTextAttachmentPlans({ corpusConfig, corpusId, references,
   return plans;
 }
 
-function materializeExtractedTextArtifacts(plans) {
-  const results = [];
-  for (const plan of plans) {
-    fs.mkdirSync(path.dirname(plan.targetLocalPath), { recursive: true });
-    let action = "copied";
-    if (fs.existsSync(plan.targetLocalPath)) {
-      const existingBytes = fs.readFileSync(plan.targetLocalPath);
-      const existingSha256 = crypto.createHash("sha256").update(existingBytes).digest("hex");
-      if (existingSha256 === plan.sha256) {
-        action = "unchanged";
-      }
-    }
-    if (action === "copied") {
-      fs.copyFileSync(plan.extracted.localPath, plan.targetLocalPath);
-    }
-    results.push({
-      itemId: plan.reference.externalItemId,
-      snapshotId: plan.extracted.snapshotId,
-      sourceLocalPath: plan.extracted.localPath,
-      targetLocalPath: plan.targetLocalPath,
-      storagePath: plan.storagePath,
-      byteSize: plan.byteSize,
-      sha256: plan.sha256,
-      action,
-    });
-  }
-  return results;
-}
-
-function maybeSyncExtractedTextArtifactsToS3({ corpusConfig, corpusPath, runDir, options, artifacts = [] }) {
-  if (!options["sync-s3"] && !options["sync-s3-apply"]) {
-    return {
-      skipped: true,
-      reason: "pass --sync-s3 for dry-run and --sync-s3-apply for actual sync",
-      artifactCount: artifacts.length,
-    };
-  }
-  if (!artifacts.length) {
-    return {
-      skipped: true,
-      reason: "no materialized text artifacts to sync",
-      artifactCount: 0,
-    };
-  }
-  if (!corpusConfig.s3Prefix) throw new Error(`Corpus ${corpusConfig.key} does not define s3Prefix.`);
-  fs.mkdirSync(runDir, { recursive: true });
-  const dryRunLogPath = path.join(runDir, "s3-text-sync-dryrun.stdout.log");
-  const stdoutLogPath = path.join(runDir, "s3-text-sync.stdout.log");
-  const stderrLogPath = path.join(runDir, "s3-text-sync.stderr.log");
-  const dryRunLines = [];
-  const stdoutLines = [];
-  const stderrLines = [];
-  for (const artifact of artifacts) {
-    const relpath = path.relative(path.resolve(corpusPath), artifact.targetLocalPath).split(path.sep).join("/");
-    const targetUri = `${String(corpusConfig.s3Prefix).replace(/\/+$/g, "")}/${relpath}`;
-    const dryRun = spawnSync("aws", ["s3", "cp", artifact.targetLocalPath, targetUri, "--dryrun"], { encoding: "utf8" });
-    dryRunLines.push(`$ aws s3 cp ${artifact.targetLocalPath} ${targetUri} --dryrun`);
-    dryRunLines.push(dryRun.stdout ?? "");
-    if (dryRun.stderr) dryRunLines.push(dryRun.stderr);
-    if (dryRun.error || dryRun.status !== 0) {
-      fs.writeFileSync(dryRunLogPath, dryRunLines.join("\n"), "utf8");
-      throw createReferenceAccessionError(`S3 text artifact sync dry-run failed. See ${dryRunLogPath}.`, {
-        kind: "s3_text_sync_dryrun_failed",
-      });
-    }
-    if (!options["sync-s3-apply"]) continue;
-    const result = spawnSync("aws", ["s3", "cp", artifact.targetLocalPath, targetUri], { encoding: "utf8" });
-    stdoutLines.push(`$ aws s3 cp ${artifact.targetLocalPath} ${targetUri}`);
-    stdoutLines.push(result.stdout ?? "");
-    if (result.stderr) stderrLines.push(result.stderr);
-    if (result.error || result.status !== 0) {
-      fs.writeFileSync(dryRunLogPath, dryRunLines.join("\n"), "utf8");
-      fs.writeFileSync(stdoutLogPath, stdoutLines.join("\n"), "utf8");
-      fs.writeFileSync(stderrLogPath, stderrLines.join("\n"), "utf8");
-      throw createReferenceAccessionError(`S3 text artifact sync failed. See ${stderrLogPath}.`, {
-        kind: "s3_text_sync_failed",
-        stdoutLogPaths: [stdoutLogPath],
-        stderrLogPaths: [stderrLogPath],
-      });
-    }
-  }
-  fs.writeFileSync(dryRunLogPath, dryRunLines.join("\n"), "utf8");
-  if (!options["sync-s3-apply"]) {
-    return {
-      skipped: true,
-      requiresApply: true,
-      dryRunLogPath,
-      reason: "dry-run completed; pass --sync-s3-apply to sync extracted text artifacts",
-      artifactCount: artifacts.length,
-    };
-  }
-  fs.writeFileSync(stdoutLogPath, stdoutLines.join("\n"), "utf8");
-  fs.writeFileSync(stderrLogPath, stderrLines.join("\n"), "utf8");
-  return {
-    skipped: false,
-    dryRunLogPath,
-    stdoutLogPath,
-    stderrLogPath,
-    artifactCount: artifacts.length,
-  };
+function compareReferenceVersionsByFreshness(left, right) {
+  return (Number(right.versionNumber) || 0) - (Number(left.versionNumber) || 0)
+    || String(right.updatedAt ?? right.createdAt ?? "").localeCompare(String(left.updatedAt ?? left.createdAt ?? ""))
+    || String(right.id ?? "").localeCompare(String(left.id ?? ""));
 }
 
 function normalizeExtractionStages(value) {
@@ -7557,6 +7440,13 @@ function normalizeCliPositiveInteger(value, label) {
   if (value === null || value === undefined || value === "") return null;
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) throw new Error(`${label} must be a positive integer.`);
+  return parsed;
+}
+
+function normalizeCliNonNegativeInteger(value, label) {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) throw new Error(`${label} must be zero or a positive integer.`);
   return parsed;
 }
 

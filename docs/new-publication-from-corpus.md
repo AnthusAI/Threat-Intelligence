@@ -99,11 +99,9 @@ reviewable prospect, not an extraction-ready source. Before text extraction,
 create a `reference.corpus-accession` assignment to materialize the source into
 the configured Biblicus corpus. Text availability is then represented by a
 `ReferenceAttachment` with `role = "extracted_text"` pointing at the corpus
-artifact `corpora/<corpus>/imports/<item-id>/text.txt`. Biblicus extraction
-snapshots remain immutable provenance under
-`extracted/pipeline/<snapshot-id>/text/<item-id>.txt`, but Papyrus does not
-consider a reference text-ready until the stable `text.txt` artifact is
-materialized and attached.
+artifact `corpora/<corpus>/extracted/pipeline/<snapshot-id>/text/<item-id>.txt`.
+Papyrus records the selected Biblicus snapshot path and metadata; it does not
+duplicate extracted text into a second canonical location.
 
 ## Bootstrap Procedure
 
@@ -170,10 +168,10 @@ materialized and attached.
    sources, run Biblicus extraction through `reference.text-extraction`, and
    register extracted text attachments. Accession and extraction are separate:
    the first creates or updates corpus source files, and the second creates
-   `text.txt` artifacts that GraphQL references by path. In `source-status`,
-   `snapshot_extracted` means Biblicus text exists but the stable artifact is
-   not attached yet; `text_ready` means `imports/<item-id>/text.txt` is the
-   active attached text artifact.
+   Biblicus extraction snapshots that GraphQL references by path. In
+   `source-status`, `snapshot_extracted` means Biblicus text exists but no
+   `extracted_text` attachment records the selected snapshot yet; `text_ready`
+   means a snapshot-backed attachment exists.
 
    ```bash
    npm run content -- references source-status \

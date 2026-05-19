@@ -212,10 +212,10 @@ function applyCurrentReferenceContribution(delta, reference, weight) {
   delta.countDelta += Number(weight) || 0;
   const status = stringOrDefault(reference.curationStatus, "pending");
   const corpus = stringOrDefault(reference.corpusId, "unknown");
-  increment(delta.statusDeltas, status, weight);
-  increment(delta.corpusDeltas, corpus, weight);
+  incrementSigned(delta.statusDeltas, status, weight);
+  incrementSigned(delta.corpusDeltas, corpus, weight);
   if (!delta.statusByCorpusDeltas[corpus]) delta.statusByCorpusDeltas[corpus] = {};
-  increment(delta.statusByCorpusDeltas[corpus], status, weight);
+  incrementSigned(delta.statusByCorpusDeltas[corpus], status, weight);
   if (!Object.keys(delta.statusByCorpusDeltas[corpus]).length) delete delta.statusByCorpusDeltas[corpus];
 }
 
@@ -338,6 +338,12 @@ function applyNumberDeltas(target, deltas) {
 
 function increment(target, key, delta) {
   applyNumberDeltas(target, { [key]: delta });
+}
+
+function incrementSigned(target, key, delta) {
+  const value = (target[key] ?? 0) + Number(delta);
+  if (!Number.isFinite(value) || value === 0) delete target[key];
+  else target[key] = value;
 }
 
 function incrementNested(target, outerKey, innerKey, delta) {

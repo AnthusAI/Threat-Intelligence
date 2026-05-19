@@ -69,7 +69,6 @@ const {
   buildExtractionIndex,
   buildReferenceSourceStatusRows,
   referenceSourceReadiness,
-  stableExtractedTextStoragePath,
 } = require("./lib/papyrus-reference-source-readiness.cjs");
 
 const steeringBundle = {
@@ -270,15 +269,9 @@ const fallbackTaxonomyNode = findRecord(steeringPlan.records, "Category", (recor
 assert.equal(fallbackTaxonomyNode.parentCategoryKey, null);
 assert.equal(fallbackTaxonomyNode.displayName, "Scaling Laws");
 
-const reference = findRecord(steeringPlan.records, "Reference", (record) => record.externalItemId === "research-001");
-assert.equal(reference.title, "Scaling Laws For Neural Language Models");
-assert.equal(reference.sourceUri, "https://arxiv.org/abs/2001.08361");
-assert.equal(reference.storagePath, "corpora/canonical-corpus/research-001.md");
-assert.equal(JSON.parse(reference.metadata).source_notes, undefined);
-assert.equal(JSON.parse(reference.metadata).abstract, undefined);
-const steeringAttachment = findRecord(steeringPlan.records, "ReferenceAttachment", (record) => record.referenceId === reference.id);
-assert.equal(steeringAttachment.role, "source");
-assert.equal(steeringAttachment.storagePath, "corpora/canonical-corpus/research-001.md");
+assert.equal(steeringPlan.records.some((record) => record.modelName === "Reference"), false);
+assert.equal(steeringPlan.records.some((record) => record.modelName === "ReferenceAttachment"), false);
+assert.equal(steeringPlan.records.some((record) => record.modelName === "Assignment"), false);
 const reportingConcept = findRecord(steeringPlan.records, "SemanticNode", (record) => record.nodeKey === "editorial.form.reporting");
 assert.equal(reportingConcept.id, "semantic-node-editorial-form-reporting-v1");
 assert.equal(reportingConcept.lineageId, "semantic-node-editorial-form-reporting");
@@ -604,14 +597,25 @@ const projectionPlan = buildProjectionImportRecords({
   targetCorpusConfig: sourceCorpusConfig,
   categorySetId: steeringPlan.categorySetId,
 });
-const projectedReference = findRecord(projectionPlan.records, "Reference", (record) => record.externalItemId === "source-001");
 assert.equal(projectionPlan.categorySetId, steeringPlan.categorySetId);
-assert.equal(projectedReference.title, null);
-assert.equal(projectedReference.storagePath, "corpora/source-corpus/source-001.md");
-assert.equal(projectedReference.curationStatus, "accepted");
-assert.equal(projectedReference.curationStatusKey, "knowledge-corpus-source-corpus#accepted");
-assert.equal(JSON.parse(projectedReference.metadata).abstract, undefined);
-const projectionRelation = findRecord(projectionPlan.records, "SemanticRelation", (record) => record.subjectId === projectedReference.id);
+assert.equal(projectionPlan.records.some((record) => record.modelName === "Reference"), false);
+assert.equal(projectionPlan.records.some((record) => record.modelName === "ReferenceAttachment"), false);
+assert.equal(projectionPlan.records.some((record) => record.modelName === "Message"), false);
+assert.equal(projectionPlan.records.some((record) => record.modelName === "Assignment"), false);
+const projectionRelation = findRecord(projectionPlan.records, "SemanticRelation", (record) => record.subjectKind === "reference" && record.subjectLineageId.endsWith("source-001"));
+const projectedReference = {
+  id: projectionRelation.subjectId,
+  lineageId: projectionRelation.subjectLineageId,
+  versionNumber: projectionRelation.subjectVersionNumber,
+  versionState: "current",
+  corpusId: "knowledge-corpus-source-corpus",
+  externalItemId: "source-001",
+  title: null,
+  storagePath: "corpora/source-corpus/source-001.md",
+  curationStatus: "accepted",
+  curationStatusKey: "knowledge-corpus-source-corpus#accepted",
+  metadata: JSON.stringify({}),
+};
 assert.equal(projectionRelation.predicate, "classified_as");
 assert.equal(projectionRelation.relationTypeId, semanticRelationTypeIdFor("classified_as"));
 assert.equal(projectionRelation.relationTypeKey, "classified_as");
@@ -621,37 +625,6 @@ assert.equal(projectionRelation.objectLineageId, fallbackTaxonomyNode.lineageId)
 assert.equal(JSON.parse(projectionRelation.metadata).categorySetId, steeringPlan.categorySetId);
 assert.equal(projectionRelation.score, 0.82);
 assert.equal(projectionRelation.reviewRecommended, true);
-const projectedAttachments = projectionPlan.records
-  .filter((record) => record.modelName === "ReferenceAttachment" && record.expected.referenceId === projectedReference.id)
-  .map((record) => record.expected);
-assert.equal(projectedAttachments.length, 4);
-assert.equal(projectedAttachments[0].storagePath, "corpora/source-corpus/source-001.md");
-assert.equal(projectedAttachments[1].role, "transcript");
-assert.equal(projectedAttachments[1].storagePath, "corpora/source-corpus/source-001.transcript.txt");
-assert.equal(projectedAttachments[2].role, "deepgram");
-assert.equal(projectedAttachments[2].storagePath, "corpora/source-corpus/source-001.deepgram.json");
-assert.equal(projectedAttachments[3].storagePath, null);
-assert.equal(projectedAttachments[3].sourceUri, "s3://outside-bucket/not-corpora/source-001.pdf");
-assert.equal(JSON.parse(projectedAttachments[3].metadata).body, undefined);
-const ingestionRationaleMessage = findRecord(projectionPlan.records, "Message", (record) => record.messageKind === "ingestion_rationale");
-assert.equal(ingestionRationaleMessage.messageDomain, "commentary");
-assert.equal(ingestionRationaleMessage.body, "Projected into the source corpus because the classifier found a strong scaling match.");
-assert.equal(JSON.parse(ingestionRationaleMessage.metadata).body, undefined);
-const rationaleRelation = findRecord(projectionPlan.records, "SemanticRelation", (record) => record.subjectKind === "message" && record.subjectId === ingestionRationaleMessage.id);
-assert.equal(rationaleRelation.predicate, "ingestion_rationale");
-assert.equal(rationaleRelation.relationTypeKey, "ingestion_rationale");
-assert.equal(rationaleRelation.relationDomain, "commentary");
-assert.equal(rationaleRelation.objectKind, "reference");
-assert.equal(rationaleRelation.objectLineageId, projectedReference.lineageId);
-const referenceAssignment = findRecord(projectionPlan.records, "Assignment", (record) => record.metadata.includes(projectedReference.lineageId));
-assert.equal(referenceAssignment.assignmentTypeKey, "curation.reference-intake");
-assert.equal(referenceAssignment.status, "open");
-const assignmentRelation = findRecord(projectionPlan.records, "SemanticRelation", (record) => record.subjectKind === "assignment" && record.subjectId === referenceAssignment.id);
-assert.equal(assignmentRelation.predicate, "requests_work_on");
-assert.equal(assignmentRelation.relationTypeKey, "requests_work_on");
-assert.equal(assignmentRelation.relationDomain, "workflow");
-assert.equal(assignmentRelation.objectKind, "reference");
-assert.equal(assignmentRelation.objectLineageId, projectedReference.lineageId);
 const projectionCorpus = findRecord(projectionPlan.records, "KnowledgeCorpus", (record) => record.id === "knowledge-corpus-source-corpus");
 assert.equal(projectionCorpus.role, "source");
 const projectedEditorialConcept = findRecord(projectionPlan.records, "SemanticNode", (record) => record.nodeKey === "editorial.form.analysis");
@@ -776,25 +749,12 @@ const snapshotOnlyReadiness = referenceSourceReadiness(pendingCatalogReference, 
     referenceLineageId: pendingCatalogReference.lineageId,
     role: "extracted_text",
     storagePath: "corpora/source-corpus/extracted/pipeline/snapshot/text/catalog-001.txt",
-    filename: "text.txt",
+    filename: "catalog-001.txt",
     mediaType: "text/plain",
   },
 ]);
-assert.equal(snapshotOnlyReadiness.state, SOURCE_READINESS_STATES.EXTRACTABLE);
-assert.equal(snapshotOnlyReadiness.textState, SOURCE_TEXT_STATES.MISSING_TEXT);
-const stableTextStoragePath = stableExtractedTextStoragePath("corpora/source-corpus", pendingCatalogReference.externalItemId);
-const stableTextReadiness = referenceSourceReadiness(pendingCatalogReference, [
-  ...pendingCatalogAttachments.map((entry) => entry.expected),
-  {
-    referenceLineageId: pendingCatalogReference.lineageId,
-    role: "extracted_text",
-    storagePath: stableTextStoragePath,
-    filename: "text.txt",
-    mediaType: "text/plain",
-  },
-]);
-assert.equal(stableTextReadiness.state, SOURCE_READINESS_STATES.EXTRACTED);
-assert.equal(stableTextReadiness.textState, SOURCE_TEXT_STATES.TEXT_READY);
+assert.equal(snapshotOnlyReadiness.state, SOURCE_READINESS_STATES.EXTRACTED);
+assert.equal(snapshotOnlyReadiness.textState, SOURCE_TEXT_STATES.TEXT_READY);
 const extractionTempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "papyrus-extraction-index-"));
 const extractionTextDir = path.join(extractionTempRoot, "extracted", "pipeline", "snapshot-001", "text");
 fs.mkdirSync(extractionTextDir, { recursive: true });
@@ -807,6 +767,31 @@ const snapshotReadiness = referenceSourceReadiness(
 );
 assert.equal(snapshotReadiness.state, SOURCE_READINESS_STATES.EXTRACTABLE);
 assert.equal(snapshotReadiness.textState, SOURCE_TEXT_STATES.SNAPSHOT_EXTRACTED);
+const snapshotTextStoragePath = snapshotIndex.textByItemId.get(pendingCatalogReference.externalItemId).storagePath;
+const snapshotTextReadiness = referenceSourceReadiness(pendingCatalogReference, [
+  ...pendingCatalogAttachments.map((entry) => entry.expected),
+  {
+    referenceLineageId: pendingCatalogReference.lineageId,
+    role: "extracted_text",
+    storagePath: snapshotTextStoragePath,
+    filename: `${pendingCatalogReference.externalItemId}.txt`,
+    mediaType: "text/plain",
+  },
+], snapshotIndex);
+assert.equal(snapshotTextReadiness.state, SOURCE_READINESS_STATES.EXTRACTED);
+assert.equal(snapshotTextReadiness.textState, SOURCE_TEXT_STATES.TEXT_READY);
+const legacyImportsTextReadiness = referenceSourceReadiness(pendingCatalogReference, [
+  ...pendingCatalogAttachments.map((entry) => entry.expected),
+  {
+    referenceLineageId: pendingCatalogReference.lineageId,
+    role: "extracted_text",
+    storagePath: `corpora/source-corpus/imports/${pendingCatalogReference.externalItemId}/text.txt`,
+    filename: "text.txt",
+    mediaType: "text/plain",
+  },
+], snapshotIndex);
+assert.equal(legacyImportsTextReadiness.state, SOURCE_READINESS_STATES.EXTRACTABLE);
+assert.equal(legacyImportsTextReadiness.textState, SOURCE_TEXT_STATES.SNAPSHOT_EXTRACTED);
 const sourceRows = buildReferenceSourceStatusRows({
   corpusId: "knowledge-corpus-source-corpus",
   curationStatus: "pending",

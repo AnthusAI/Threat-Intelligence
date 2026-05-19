@@ -51,37 +51,38 @@ function sourceMediaTypeForReference(reference, attachments = []) {
 }
 
 function textStoragePathForReference(reference, attachments = []) {
-  const expectedPath = stableExtractedTextStoragePathForReference(reference);
-  const textAttachment = attachments
-    .filter((attachment) => attachment.referenceLineageId === reference?.lineageId)
-    .find((attachment) => (
-      attachment.role === "extracted_text"
-      && attachment.filename === "text.txt"
-      && hasCorpusStoragePath(attachment.storagePath)
-      && (!expectedPath || attachment.storagePath.endsWith(expectedPath))
-    ));
+  const textAttachment = selectExtractedTextAttachment(reference, attachments);
   return textAttachment?.storagePath ?? null;
 }
 
-function stableExtractedTextRelativePath(itemId) {
-  if (!itemId) return null;
-  return path.posix.join("imports", encodeURIComponent(String(itemId)), "text.txt");
+function extractedTextAttachmentsForReference(reference, attachments = []) {
+  return attachments
+    .filter((attachment) => attachment.referenceLineageId === reference?.lineageId)
+    .filter((attachment) => (
+      attachment.role === "extracted_text"
+      && hasCorpusStoragePath(attachment.storagePath)
+      && isBiblicusExtractionSnapshotTextPath(attachment.storagePath, reference?.externalItemId)
+    ));
 }
 
-function stableExtractedTextStoragePath(corpusPath, itemId) {
-  const relativePath = stableExtractedTextRelativePath(itemId);
-  if (!corpusPath || !relativePath) return null;
-  return `${String(corpusPath).replace(/\/+$/g, "")}/${relativePath}`;
+function selectExtractedTextAttachment(reference, attachments = []) {
+  return extractedTextAttachmentsForReference(reference, attachments)
+    .sort(compareReferenceAttachmentsByFreshness)
+    .at(0) ?? null;
 }
 
-function stableExtractedTextLocalPath(corpusPath, itemId) {
-  const relativePath = stableExtractedTextRelativePath(itemId);
-  if (!corpusPath || !relativePath) return null;
-  return path.join(path.resolve(corpusPath), ...relativePath.split("/"));
+function compareReferenceAttachmentsByFreshness(left, right) {
+  return String(right.importedAt ?? "").localeCompare(String(left.importedAt ?? ""))
+    || String(right.id ?? "").localeCompare(String(left.id ?? ""));
 }
 
-function stableExtractedTextStoragePathForReference(reference) {
-  return stableExtractedTextRelativePath(reference?.externalItemId);
+function isBiblicusExtractionSnapshotTextPath(storagePath, itemId = null) {
+  if (!hasCorpusStoragePath(storagePath)) return false;
+  const normalized = String(storagePath).split(path.sep).join("/");
+  const expectedSuffix = itemId ? `/${String(itemId)}.txt` : ".txt";
+  return normalized.includes("/extracted/pipeline/")
+    && normalized.includes("/text/")
+    && normalized.endsWith(expectedSuffix);
 }
 
 function hasCorpusStoragePath(value) {
@@ -99,27 +100,121 @@ function isExtractableMediaType(mediaType) {
 function buildExtractionIndex(corpusPath) {
   const itemIds = new Set();
   const textByItemId = new Map();
+  const textByStoragePath = new Map();
   const root = corpusPath ? path.resolve(corpusPath) : null;
-  if (!root) return { itemIds, textByItemId, snapshotIds: [] };
+  if (!root) return { itemIds, textByItemId, textByStoragePath, snapshotIds: [] };
   const extractedRoot = path.join(root, "extracted", "pipeline");
-  if (!fs.existsSync(extractedRoot)) return { itemIds, textByItemId, snapshotIds: [] };
-  const snapshotIds = fs.readdirSync(extractedRoot)
+  if (!fs.existsSync(extractedRoot)) return { itemIds, textByItemId, textByStoragePath, snapshotIds: [] };
+  const snapshots = fs.readdirSync(extractedRoot)
     .filter((entry) => fs.statSync(path.join(extractedRoot, entry)).isDirectory())
-    .sort();
-  for (const snapshotId of snapshotIds) {
-    const textDir = path.join(extractedRoot, snapshotId, "text");
-    if (!fs.existsSync(textDir)) continue;
+    .map((snapshotId) => extractionSnapshotEntry({ root, extractedRoot, snapshotId }))
+    .filter(Boolean)
+    .sort(compareExtractionSnapshotEntries);
+  for (const snapshot of snapshots) {
+    for (const item of snapshot.items) {
+      if (!item.itemId || !item.localPath || !item.storagePath) continue;
+      itemIds.add(item.itemId);
+      textByItemId.set(item.itemId, item);
+      textByStoragePath.set(item.storagePath, item);
+    }
+  }
+  return { itemIds, textByItemId, textByStoragePath, snapshotIds: snapshots.map((entry) => entry.snapshotId) };
+}
+
+function extractionSnapshotEntry({ root, extractedRoot, snapshotId }) {
+  const snapshotDir = path.join(extractedRoot, snapshotId);
+  const manifestPath = path.join(snapshotDir, "manifest.json");
+  const manifest = readJsonIfExists(manifestPath);
+  const configuration = manifest?.configuration ?? {};
+  const extractorId = configuration.extractor_id ?? "pipeline";
+  const createdAt = manifest?.created_at ?? null;
+  const items = [];
+  if (Array.isArray(manifest?.items)) {
+    for (const item of manifest.items) {
+      if (item?.status !== "extracted" || !item.final_text_relpath) continue;
+      const localPath = path.join(snapshotDir, ...String(item.final_text_relpath).split("/"));
+      if (!fs.existsSync(localPath)) continue;
+      const storagePath = corpusStoragePath(root, localPath);
+      if (!storagePath) continue;
+      const finalStage = Array.isArray(item.stage_results)
+        ? item.stage_results.find((stage) => stage.stage_index === item.final_stage_index)
+        : null;
+      items.push({
+        itemId: item.item_id,
+        snapshotId,
+        extractorId,
+        localPath,
+        storagePath,
+        manifestPath,
+        finalTextRelpath: item.final_text_relpath,
+        finalMetadataRelpath: item.final_metadata_relpath ?? null,
+        configurationId: configuration.configuration_id ?? null,
+        configurationName: configuration.name ?? null,
+        finalProducerExtractorId: item.final_producer_extractor_id ?? null,
+        finalStageExtractorId: item.final_stage_extractor_id ?? null,
+        finalStageIndex: item.final_stage_index ?? null,
+        finalSourceStageIndex: item.final_source_stage_index ?? null,
+        textCharacters: finalStage?.text_characters ?? null,
+        status: item.status,
+        errorType: item.error_type ?? null,
+        errorMessage: item.error_message ?? null,
+        createdAt,
+      });
+    }
+  } else {
+    const textDir = path.join(snapshotDir, "text");
+    if (!fs.existsSync(textDir)) return null;
     for (const filename of fs.readdirSync(textDir)) {
       if (!filename.endsWith(".txt")) continue;
-      const itemId = filename.slice(0, -4);
-      itemIds.add(itemId);
-      textByItemId.set(itemId, {
+      const localPath = path.join(textDir, filename);
+      const storagePath = corpusStoragePath(root, localPath);
+      if (!storagePath) continue;
+      items.push({
+        itemId: filename.slice(0, -4),
         snapshotId,
-        localPath: path.join(textDir, filename),
+        extractorId,
+        localPath,
+        storagePath,
+        manifestPath: fs.existsSync(manifestPath) ? manifestPath : null,
+        finalTextRelpath: `text/${filename}`,
+        finalMetadataRelpath: null,
+        configurationId: configuration.configuration_id ?? null,
+        configurationName: configuration.name ?? null,
+        finalProducerExtractorId: null,
+        finalStageExtractorId: null,
+        finalStageIndex: null,
+        finalSourceStageIndex: null,
+        textCharacters: null,
+        status: "extracted",
+        errorType: null,
+        errorMessage: null,
+        createdAt,
       });
     }
   }
-  return { itemIds, textByItemId, snapshotIds };
+  return { snapshotId, createdAt, items };
+}
+
+function compareExtractionSnapshotEntries(left, right) {
+  return String(left.createdAt ?? "").localeCompare(String(right.createdAt ?? ""))
+    || String(left.snapshotId).localeCompare(String(right.snapshotId));
+}
+
+function readJsonIfExists(filePath) {
+  if (!fs.existsSync(filePath)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function corpusStoragePath(root, localPath) {
+  const relativePath = path.relative(path.resolve(root), localPath).split(path.sep).join("/");
+  if (!relativePath || relativePath.startsWith("..")) return null;
+  return `${path.basename(path.resolve(root))}/${relativePath}`.startsWith("corpora/")
+    ? `${path.basename(path.resolve(root))}/${relativePath}`
+    : `corpora/${path.basename(path.resolve(root))}/${relativePath}`;
 }
 
 function referenceHasExtractedText(reference, extractionIndex) {
@@ -133,9 +228,13 @@ function referenceSourceReadiness(reference, attachments = [], extractionIndex =
   const mediaType = sourceMediaTypeForReference(reference, attachments);
   const hasSourceUri = Boolean(reference?.sourceUri);
   const hasExtractionSnapshot = referenceHasExtractedText(reference, extractionIndex);
-  const extracted = Boolean(textStoragePath);
+  const textAttachmentExists = Boolean(textStoragePath);
+  const textAttachmentPresentInIndex = !textStoragePath
+    || !extractionIndex?.textByStoragePath
+    || extractionIndex.textByStoragePath.has(textStoragePath);
+  const extracted = textAttachmentExists && textAttachmentPresentInIndex;
   const extractable = isExtractableMediaType(mediaType);
-  const textState = textStoragePath
+  const textState = extracted
     ? SOURCE_TEXT_STATES.TEXT_READY
     : hasExtractionSnapshot
       ? SOURCE_TEXT_STATES.SNAPSHOT_EXTRACTED
@@ -146,7 +245,7 @@ function referenceSourceReadiness(reference, attachments = [], extractionIndex =
   if (extracted) {
     return {
       state: SOURCE_READINESS_STATES.EXTRACTED,
-      reason: "stable_text_attachment_found",
+      reason: "extracted_text_snapshot_attachment_found",
       storagePath,
       textStoragePath,
       mediaType,
@@ -159,7 +258,7 @@ function referenceSourceReadiness(reference, attachments = [], extractionIndex =
   if (storagePath && extractable) {
     return {
       state: SOURCE_READINESS_STATES.EXTRACTABLE,
-      reason: hasExtractionSnapshot ? "snapshot_extracted_missing_stable_text" : "corpus_source_available",
+      reason: hasExtractionSnapshot ? "snapshot_extracted_missing_attachment" : "corpus_source_available",
       storagePath,
       textStoragePath,
       mediaType,
@@ -243,12 +342,11 @@ module.exports = {
   buildReferenceSourceStatusRows,
   hasCorpusStoragePath,
   isExtractableMediaType,
+  isBiblicusExtractionSnapshotTextPath,
+  selectExtractedTextAttachment,
   referenceHasExtractedText,
   referenceSourceReadiness,
   sourceMediaTypeForReference,
   sourceStoragePathForReference,
-  stableExtractedTextLocalPath,
-  stableExtractedTextRelativePath,
-  stableExtractedTextStoragePath,
   textStoragePathForReference,
 };
