@@ -2,7 +2,7 @@ import { Newspaper } from "../components/newspaper";
 import { contentRepository, getScenarioIdParam } from "../lib/content-repository";
 import type { EditionContent } from "../lib/content-types";
 import { getEditionDatePath } from "../lib/edition-routes";
-import { createDefaultEditionLayoutPlan } from "../lib/layout-plan";
+import { normalizeEditionLayoutPlan } from "../lib/layout-plan";
 import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
@@ -22,17 +22,17 @@ export default async function Home({ searchParams }: HomePageProps) {
   if (!scenarioId) {
     if (hasOAuthRedirectParams(resolvedSearchParams)) {
       const content = await loadLatestGraphQLEdition();
-      if (!content || content.items.length === 0) return <EmptyGraphQLEdition content={createEmptyGraphQLEdition()} />;
+      if (!content || content.items.length === 0) return <Newspaper content={createEmptyGraphQLEdition()} />;
       return <Newspaper content={content} editionBasePath={getEditionDatePath(content.editionDate)} />;
     }
 
     const latestEdition = await contentRepository.getLatestPublishedEdition();
     if (latestEdition) redirect(getEditionDatePath(latestEdition.editionDate));
-    return <EmptyGraphQLEdition content={createEmptyGraphQLEdition()} />;
+    return <Newspaper content={createEmptyGraphQLEdition()} />;
   }
 
   const content = await loadHomeContent(scenarioId);
-  if (content.items.length === 0) return <EmptyGraphQLEdition content={content} />;
+  if (content.items.length === 0) return <Newspaper content={createEmptyGraphQLEdition()} />;
   return <Newspaper content={content} />;
 }
 
@@ -47,27 +47,80 @@ async function loadHomeContent(scenarioId: string | null): Promise<EditionConten
     return await contentRepository.loadEditionContent({ scenarioId });
   } catch (error) {
     if (scenarioId || !isMissingGraphQLEditionError(error)) throw error;
-    return {
-      id: "empty-graphql-edition",
-      source: "graphql",
-      title: "Papyrus",
-      editionDate: new Date().toISOString().slice(0, 10),
-      description: "No published GraphQL edition is available yet.",
-      items: [],
-      layoutPlan: createDefaultEditionLayoutPlan(["empty-edition-placeholder"]),
-    };
+    return createEmptyGraphQLEdition();
   }
 }
 
 function createEmptyGraphQLEdition(): EditionContent {
+  const placeholderSlug = "empty-edition-placeholder";
   return {
     id: "empty-graphql-edition",
     source: "graphql",
     title: "Papyrus",
     editionDate: new Date().toISOString().slice(0, 10),
     description: "No published GraphQL edition is available yet.",
-    items: [],
-    layoutPlan: createDefaultEditionLayoutPlan(["empty-edition-placeholder"]),
+    items: [
+      {
+        type: "article",
+        slug: placeholderSlug,
+        shortSlug: "EMPTY",
+        section: "Newsroom",
+        headline: "No Published Edition Yet",
+        deck: "No published GraphQL edition is available yet.",
+        byline: "Papyrus",
+        dateline: "SANDBOX",
+        image: {
+          src: "/papyrus-plant-placeholder.png",
+          alt: "A black papyrus plant silhouette",
+          credit: "",
+          layout: {
+            minHeight: 120,
+            preferredHeight: 180,
+            maxHeight: 260,
+            aspectRatio: 1.5,
+            crop: "contain",
+            wrapsText: true,
+          },
+        },
+        body: [
+          "This sandbox does not have any published edition records yet. Papyrus is showing the production newspaper shell with placeholder source material so operators can verify the publication shape before content is loaded.",
+          "Open the Newsroom to inspect the empty operational skeleton, confirm that counts start at zero, and watch records appear as the GraphQL database is seeded or imported.",
+        ],
+      },
+    ],
+    layoutPlan: normalizeEditionLayoutPlan({
+      pages: [
+        {
+          id: "page-1",
+          pageNumber: 1,
+          presetId: "front.mosaic",
+          grid: { columns: { min: 1, preferred: 6, max: 6 } },
+          regions: [
+            {
+              id: "empty-front-page",
+              type: "fullPage",
+              localGrid: { columns: { min: 1, preferred: 6, max: 6 } },
+              blocks: [
+                {
+                  id: "empty-edition-placeholder-front",
+                  type: "articleFrame",
+                  presetId: "front.teaser",
+                  itemId: placeholderSlug,
+                  flowKey: placeholderSlug,
+                  startCursor: "beginning",
+                  role: "primary",
+                  editorialPriority: "primary",
+                  typography: { headlineScale: "feature" },
+                  span: { min: 1, preferred: 6, max: 6 },
+                  localGrid: { columns: { min: 1, preferred: 6, max: 6 } },
+                  media: [],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    }, "EmptyGraphQLEdition.layoutPlan"),
   };
 }
 
@@ -82,14 +135,4 @@ function hasOAuthRedirectParams(searchParams: Awaited<HomePageProps["searchParam
 function hasParam(value: string | string[] | null | undefined): boolean {
   if (Array.isArray(value)) return value.some(Boolean);
   return Boolean(value);
-}
-
-function EmptyGraphQLEdition({ content }: { content: EditionContent }) {
-  return (
-    <main className="empty-edition">
-      <p className="empty-edition__kicker">{content.source}</p>
-      <h1>{content.title}</h1>
-      <p>{content.description ?? "No published articles are available yet."}</p>
-    </main>
-  );
 }

@@ -2900,7 +2900,17 @@ function leadImageToFurniture(article: ArticlePublicationItem, obstacle: TextObs
   const aspectRatio = getImageAspectRatio(article.image);
   const caption = getImageCaption(article.image);
   const captionHeight = getImageCaptionHeight(caption, obstacle.width, config.rhythm);
-  const imageHeight = Math.max(config.rhythm.rowHeight, obstacle.height - captionHeight);
+  const preserveImageAspect = article.image.layout?.crop === "contain";
+  const naturalHeight = Math.round(obstacle.width / aspectRatio);
+  const imageHeight = preserveImageAspect
+    ? snapPreservedImageHeightToRhythm(
+      naturalHeight,
+      config.rhythm,
+      article.image.layout?.minHeight ?? config.rhythm.rowHeight,
+      article.image.layout?.maxHeight ?? Number.POSITIVE_INFINITY,
+    )
+    : Math.max(config.rhythm.rowHeight, obstacle.height - captionHeight);
+  const height = imageHeight + captionHeight;
   return {
     kind: "image",
     id: `${article.slug}-lead-photo`,
@@ -2915,16 +2925,16 @@ function leadImageToFurniture(article: ArticlePublicationItem, obstacle: TextObs
     x: obstacle.x,
     y: obstacle.y,
     width: obstacle.width,
-    height: obstacle.height,
+    height,
     imageHeight,
     captionHeight,
     captionFontSize: IMAGE_CAPTION_FONT_SIZE,
     captionLineHeight: config.rhythm.rowHeight,
     aspectRatio,
-    objectFit: "cover",
+    objectFit: preserveImageAspect ? "contain" : "cover",
     objectPosition: "50% 50%",
     wrapsText: true,
-    preferredHeight: obstacle.height,
+    preferredHeight: height,
   };
 }
 

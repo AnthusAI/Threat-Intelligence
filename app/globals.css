@@ -183,7 +183,8 @@ img {
 
 .edition-progress {
   align-items: center;
-  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(7px) saturate(0.96);
+  backdrop-filter: blur(7px) saturate(0.96);
   background: rgb(var(--paper-rgb) / 0.72);
   block-size: var(--edition-progress-height);
   border-bottom: 0;
@@ -207,6 +208,10 @@ img {
   justify-self: center;
   line-height: inherit;
   white-space: nowrap;
+}
+
+.edition-progress--newsroom {
+  grid-template-columns: 1fr;
 }
 
 .edition-progress__button {
@@ -865,6 +870,22 @@ img {
   height: 100%;
   object-fit: cover;
   width: 100%;
+}
+
+.photo-frame img[src*="papyrus-plant-placeholder"],
+.lead-photo img[src*="papyrus-plant-placeholder"],
+.front-prelude-photo img[src*="papyrus-plant-placeholder"] {
+  filter: none;
+  opacity: var(--ink-display-alpha);
+}
+
+@media (prefers-color-scheme: dark) {
+  .photo-frame img[src*="papyrus-plant-placeholder"],
+  .lead-photo img[src*="papyrus-plant-placeholder"],
+  .front-prelude-photo img[src*="papyrus-plant-placeholder"],
+  .news-desk-access-panel__mark img {
+    filter: invert(1);
+  }
 }
 
 .lead-photo figcaption,
@@ -1549,7 +1570,6 @@ img {
 .news-desk-edition {
   min-height: 100vh;
   overflow-x: hidden;
-  padding-top: var(--edition-progress-height);
   width: 100%;
 }
 

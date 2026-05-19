@@ -10,7 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ARCHIVE_PREVIEW_HEIGHT, ARCHIVE_PREVIEW_WIDTH } from "../lib/archive-types";
 import type { EditionContent, NewsDeskAppendix, NewsDeskCategoryTreeNode } from "../lib/content-types";
 import { shouldBypassImageOptimization } from "../lib/image-url";
-import { loadEditorAccessState, loadEditorCategoryTreeState } from "./news-desk-taxonomy-client";
+import { loadEditorCategoryTreeState } from "./news-desk-taxonomy-client";
 import { ReaderAuthControl } from "./reader-auth-control";
 import {
   buildNewspaperLayout,
@@ -79,7 +79,6 @@ export function Newspaper({ content, editionBasePath, initialPageNumber = 1 }: N
   const [showRhythmOverlay, setShowRhythmOverlay] = useState(false);
   const [editorAppendix, setEditorAppendix] = useState<NewsDeskAppendix | null>(null);
   const [editorAppendixReady, setEditorAppendixReady] = useState(false);
-  const [showNewsDeskFooterLink, setShowNewsDeskFooterLink] = useState(false);
 
   useEffect(() => {
     const node = shellRef.current;
@@ -160,30 +159,6 @@ export function Newspaper({ content, editionBasePath, initialPageNumber = 1 }: N
       unsubscribe();
     };
   }, [content.newsDeskAppendix, content.source]);
-
-  useEffect(() => {
-    let active = true;
-    const refreshAccess = async () => {
-      const state = await loadEditorAccessState();
-      if (active) setShowNewsDeskFooterLink(state.isEditor);
-    };
-
-    void refreshAccess();
-    const unsubscribe = Hub.listen("auth", ({ payload }) => {
-      if (
-        payload.event === "signedIn" ||
-        payload.event === "signedOut" ||
-        payload.event === "signInWithRedirect" ||
-        payload.event === "signInWithRedirect_failure"
-      ) {
-        void refreshAccess();
-      }
-    });
-    return () => {
-      active = false;
-      unsubscribe();
-    };
-  }, []);
 
   const appendixPages = useMemo(() => buildNewsDeskAppendixPages(editorAppendix, layout?.pages.length ?? 0), [editorAppendix, layout?.pages.length]);
   const totalPages = (layout?.pages.length ?? 0) + appendixPages.length;
@@ -448,7 +423,6 @@ export function Newspaper({ content, editionBasePath, initialPageNumber = 1 }: N
                     page={page}
                     scrollToItemAnchor={scrollToItemAnchor}
                     scrollToPage={scrollToPage}
-                    showNewsDeskFooterLink={showNewsDeskFooterLink}
                   />
                 ) : (
                   <PagePlaceholder page={page} />
@@ -548,7 +522,6 @@ export function NewspaperFrontPreview({ content }: { content: EditionContent }) 
             page={page}
             scrollToItemAnchor={scrollToItemAnchor}
             scrollToPage={scrollToPage}
-            showNewsDeskFooterLink={false}
           />
         </div>
       ) : null}
@@ -650,7 +623,6 @@ function SolvedPageView({
   page,
   scrollToItemAnchor,
   scrollToPage,
-  showNewsDeskFooterLink,
 }: {
   articleAnchorBlockIds: Set<string>;
   content: EditionContent;
@@ -661,7 +633,6 @@ function SolvedPageView({
   page: SolvedPage;
   scrollToItemAnchor: (articleSlug: string, options?: ScrollToPageOptions) => boolean;
   scrollToPage: (pageNumber: number, options?: ScrollToPageOptions) => void;
-  showNewsDeskFooterLink?: boolean;
 }) {
   const front = page.kind === "front";
   const editionTitleId = front ? rawEditionTitleId ?? "edition-title" : undefined;
@@ -725,7 +696,6 @@ function SolvedPageView({
               editionBasePath={editionBasePath}
               footer={page.frontFooter}
               scrollToItemAnchor={scrollToItemAnchor}
-              showNewsDeskFooterLink={showNewsDeskFooterLink}
             />
           ) : null}
         </>
@@ -888,13 +858,11 @@ function FrontPageFooter({
   editionBasePath,
   footer,
   scrollToItemAnchor,
-  showNewsDeskFooterLink = false,
 }: {
   disableLinks?: boolean;
   editionBasePath?: string;
   footer: SolvedFrontFooter;
   scrollToItemAnchor: (articleSlug: string, options?: ScrollToPageOptions) => boolean;
-  showNewsDeskFooterLink?: boolean;
 }) {
   return (
     <footer
@@ -944,7 +912,7 @@ function FrontPageFooter({
       ) : null}
       <div className="front-footer__utilities" aria-label="Publication utilities">
         {footer.utilityEntries.map((entry) => {
-          if (entry.id === "newsDesk" && (!showNewsDeskFooterLink || disableLinks)) return null;
+          if (entry.id === "newsDesk" && disableLinks) return null;
 
           if (entry.id === "login" && !disableLinks) {
             return (
