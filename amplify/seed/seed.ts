@@ -6,6 +6,7 @@ import { Amplify } from "aws-amplify";
 import { generateClient } from "aws-amplify/data";
 import { signOut } from "aws-amplify/auth";
 import { uploadData } from "aws-amplify/storage";
+import YAML from "yaml";
 import type { Schema } from "../data/resource";
 import * as articlesModule from "../../lib/articles";
 import type { Article, ArticleImageAsset } from "../../lib/articles";
@@ -17,8 +18,25 @@ const { articles, editionDate, getArticleImageAssets } = articlesRuntime as type
 const { getAmplifyServerRuntime } = amplifyServerRuntime as typeof import("../../lib/amplify-server-runtime");
 
 const EDITOR_GROUP = "editor";
+const NEWSROOM_SECTIONS_CONFIG_PATH = path.join(process.cwd(), "corpora", "papyrus-newsroom-sections.yml");
+const NEWSROOM_SECTION_TYPES = new Set(["canonical", "rotating"]);
 
 type DataClient = ReturnType<typeof generateClient<Schema>>;
+type NewsroomSectionSeed = {
+  id: string;
+  title: string;
+  type: "canonical" | "rotating";
+  editorialMission: string;
+  editorialPolicy: string;
+  enabled: boolean;
+  sortOrder: number;
+  shortDescription: string | null;
+  defaultArticleTypes: string[];
+  defaultPageBudget: number | null;
+  assignmentGuidance: string | null;
+  killCriteria: string | null;
+  visualGuidance: string | null;
+};
 
 let cachedClient: DataClient | null = null;
 
@@ -70,6 +88,7 @@ async function main() {
       layoutPlan: toAwsJson(editionConfig.layoutPlan),
       metadata: toAwsJson({ source: "fixture-seed" }),
     });
+    await seedNewsroomSections(editionConfig.publishedAt);
 
     for (const [index, article] of orderedArticles.entries()) {
       await seedArticle(article, index, editionConfig);
@@ -274,6 +293,94 @@ async function seedArticle(article: Article, index: number, editionConfig: SeedE
       metadata: toAwsJson({ sourceUrl: asset.src }),
     });
   }
+}
+
+async function seedNewsroomSections(importedAt: string) {
+  const sections = loadNewsroomSectionSeeds();
+  for (const section of sections) {
+    await upsert("NewsroomSection", {
+      id: section.id,
+      title: section.title,
+      type: section.type,
+      editorialMission: section.editorialMission,
+      editorialPolicy: section.editorialPolicy,
+      enabled: section.enabled,
+      enabledStatus: section.enabled ? "enabled" : "disabled",
+      sortOrder: section.sortOrder,
+      shortDescription: section.shortDescription,
+      defaultArticleTypes: section.defaultArticleTypes,
+      defaultPageBudget: section.defaultPageBudget,
+      assignmentGuidance: section.assignmentGuidance,
+      killCriteria: section.killCriteria,
+      visualGuidance: section.visualGuidance,
+      createdAt: importedAt,
+      updatedAt: importedAt,
+    });
+  }
+}
+
+function loadNewsroomSectionSeeds(configPath = NEWSROOM_SECTIONS_CONFIG_PATH): NewsroomSectionSeed[] {
+  const parsed = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
+    schemaVersion?: number;
+    sections?: Array<Record<string, unknown>>;
+  };
+  if (!parsed || parsed.schemaVersion !== 1 || !Array.isArray(parsed.sections)) {
+    throw new Error(`Invalid newsroom section seed file: ${configPath}`);
+  }
+  return parsed.sections.map((entry, index) => normalizeNewsroomSectionSeed(entry, index, configPath));
+}
+
+function normalizeNewsroomSectionSeed(entry: Record<string, unknown>, index: number, configPath: string): NewsroomSectionSeed {
+  const id = String(entry.id ?? "").trim();
+  if (!id) throw new Error(`Newsroom section at index ${index} in ${configPath} is missing id.`);
+  const title = requiredText(entry.title, `title for section ${id}`);
+  const typeValue = String(entry.type ?? "").trim().toLowerCase();
+  if (!NEWSROOM_SECTION_TYPES.has(typeValue)) {
+    throw new Error(`Newsroom section ${id} in ${configPath} has unsupported type '${String(entry.type ?? "")}'.`);
+  }
+  return {
+    id,
+    title,
+    type: typeValue as NewsroomSectionSeed["type"],
+    editorialMission: requiredText(entry.editorialMission, `editorialMission for section ${id}`),
+    editorialPolicy: requiredText(entry.editorialPolicy, `editorialPolicy for section ${id}`),
+    enabled: typeof entry.enabled === "boolean" ? entry.enabled : true,
+    sortOrder: positiveInteger(entry.sortOrder, index + 1),
+    shortDescription: optionalText(entry.shortDescription),
+    defaultArticleTypes: normalizeStringList(entry.defaultArticleTypes),
+    defaultPageBudget: optionalInteger(entry.defaultPageBudget),
+    assignmentGuidance: optionalText(entry.assignmentGuidance),
+    killCriteria: optionalText(entry.killCriteria),
+    visualGuidance: optionalText(entry.visualGuidance),
+  };
+}
+
+function requiredText(value: unknown, label: string): string {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) throw new Error(`Missing ${label} in ${path.basename(NEWSROOM_SECTIONS_CONFIG_PATH)}.`);
+  return normalized;
+}
+
+function optionalText(value: unknown): string | null {
+  const normalized = String(value ?? "").trim();
+  return normalized ? normalized : null;
+}
+
+function normalizeStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => optionalText(entry))
+    .filter((entry): entry is string => Boolean(entry));
+}
+
+function optionalInteger(value: unknown): number | null {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) ? parsed : null;
+}
+
+function positiveInteger(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 async function uploadSeedImage(article: Article, asset: ArticleImageAsset, index: number) {

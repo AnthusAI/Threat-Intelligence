@@ -12,7 +12,8 @@ can open your publication and see what your newsroom found and created
 overnight.
 
 You steer it like an executive editor, as much or as little as you want:
-choosing the canonical categories that become sections, setting editorial
+choosing the canonical categories for topic coverage and configuring editorial
+sections for the issue, setting editorial
 policy, voting items up or down, commenting on drafts, and culling assignments
 before publication. When you step back, Papyrus keeps operating from the
 momentum you already gave it: accepted categories, current policy, open
@@ -37,8 +38,9 @@ articles themselves: references, knowledge artifacts, canonical topics,
 ontology, assignments, drafts, published items, editions, and editorial
 decisions.
 
-The taxonomy layer decides what the publication covers and how those topics
-map to newspaper sections. Papyrus stores an accepted, versioned category tree
+The taxonomy layer decides what the publication covers. Newspaper sections are
+a separate editorial configuration that defines the role a piece serves in the
+issue (for example News vs History vs Methods). Papyrus stores an accepted, versioned category tree
 as `CategorySet` + strict parent/child `Category` rows. Editors can accept,
 reject, rename, move, split, merge, or ignore proposed topic changes; accepted
 changes shape the publication, and rejected proposals become steering memory
@@ -398,7 +400,8 @@ records.
   corpus stories.
 - Page 8 is a stacked page containing the ASR correction story and ML history
   story.
-- Production sections mirror Biblicus topic categories, such as
+- The current production edition uses section labels that align with its
+  accepted topic taxonomy, such as
   `Self-Evolving LLM Agents`,
   `AI Agent Reliability and Evaluation`,
   `Autonomous AI Scientific Discovery`,
@@ -426,6 +429,7 @@ npm run sandbox
 npm run seed:amplify
 npm run content -- content inspect
 npm run content -- categories import-config --config corpora/papyrus-steering.yml
+npm run content -- newsroom import-sections --config corpora/papyrus-newsroom-sections.yml
 npm run content -- categories import-steering --config corpora/papyrus-steering.yml --corpus-key <key>
 npm run content -- categories import-steering --bundle <steering-export.json>
 npm run content -- categories export-category-set --category-set <id> --output <accepted-category-set.json>
@@ -487,6 +491,7 @@ For content inspection and admin against a deployed API:
 npm run content -- content inspect
 npm run content -- content list articles
 npm run content -- categories import-config --config corpora/papyrus-steering.yml
+npm run content -- newsroom import-sections --config corpora/papyrus-newsroom-sections.yml
 npm run content -- categories import-steering --config corpora/papyrus-steering.yml --corpus-key <key>
 npm run content -- assignments research-packets --assignment <assignment-id>
 npm run content -- references register-catalog --config corpora/papyrus-steering.yml --corpus-key <key> --catalog <metadata/catalog.json> --status pending --ingestion-rationale "<summary, research focus, editorial mission fit>" --apply
@@ -584,9 +589,9 @@ is:
    not run sandbox provisioning, and do not run `content delete all --yes`.
 5. Re-run `content list articles` and smoke-check the deployed site.
 
-When deriving sections from a corpus, set `Item.section`, `Tag.label`, and
-`ItemTag.tagSlug` to the corpus topic taxonomy. Do not leave generic placeholder
-sections if the edition is meant to reflect corpus categories.
+Sections are editor-configured newsroom objects, not inferred taxonomy labels.
+When publishing an edition, set `Item.section`, `Tag.label`, and
+`ItemTag.tagSlug` to the configured editorial sections chosen for that issue.
 
 If the deployed production code is older than the local layout-plan schema, a
 newer `Edition.layoutPlan` can make production return `500` during layout-plan

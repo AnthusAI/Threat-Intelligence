@@ -36,6 +36,7 @@ async function loadEditionPlanningState(client) {
     semanticNodes,
     assignments,
     assignmentEvents,
+    newsroomSections,
   ] = await Promise.all([
     client.listRecords("Edition"),
     client.listRecords("PublishedEdition"),
@@ -47,6 +48,7 @@ async function loadEditionPlanningState(client) {
     client.listRecords("SemanticNode"),
     client.listRecords("Assignment"),
     client.listRecords("AssignmentEvent"),
+    listOptionalRecords(client, "NewsroomSection"),
   ]);
   return {
     editions,
@@ -59,7 +61,18 @@ async function loadEditionPlanningState(client) {
     semanticNodes,
     assignments,
     assignmentEvents,
+    newsroomSections,
   };
+}
+
+async function listOptionalRecords(client, modelName) {
+  try {
+    return await client.listRecords(modelName);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error ?? "");
+    if (message.includes("not available in deployed schema") || message.includes("Unknown model")) return [];
+    throw error;
+  }
 }
 
 function buildEditionPlanningPlan(state, options = {}) {
@@ -74,6 +87,7 @@ function buildEditionPlanningPlan(state, options = {}) {
   const explicitContextProfile = options.contextProfile ? requiredString(options.contextProfile, "contextProfile") : null;
   const targetSystemType = options.targetSystemType ? requiredString(options.targetSystemType, "targetSystemType") : null;
   const laneDefinitions = resolveLaneDefinitions(options.lanes ?? DEFAULT_LANES, options.semanticConcepts);
+  const enabledSections = selectEnabledNewsroomSections(state.newsroomSections ?? []);
   const existing = buildExistingRecordMaps(state);
   const categorySet = selectAcceptedCategorySet(state.categorySets ?? []);
   const categories = (state.categories ?? []).filter((category) => (
@@ -111,9 +125,11 @@ function buildEditionPlanningPlan(state, options = {}) {
     ? scoredGroups.filter((group) => existingRootKeys.includes(group.root.categoryKey)).sort((left, right) => existingRootKeys.indexOf(left.root.categoryKey) - existingRootKeys.indexOf(right.root.categoryKey))
     : focusSelectedGroups.length
       ? focusSelectedGroups
-    : scoredGroups.slice(0, topDeskCount);
+      : scoredGroups.slice(0, topDeskCount);
+  const sectionTargets = resolveSectionTargets(options.sectionTargets, enabledSections, selectedGroups);
   attachEditionPlanningMetadata(edition, {
     selectedGroups,
+    sectionTargets,
     laneDefinitions,
     generatedAt: now,
     publicationSlots,
@@ -148,6 +164,7 @@ function buildEditionPlanningPlan(state, options = {}) {
           group,
           focusCategory,
           lane,
+          sectionTarget: sectionTargets.get(group.root.categoryKey),
           now,
           publicationSlots,
           overassignmentRatio,
@@ -180,6 +197,7 @@ function buildEditionPlanningPlan(state, options = {}) {
       label: lane.label,
     })),
     focusCoverage: summarizeFocusCoverage(assignments),
+    sections: Array.from(new Set(assignments.map((assignment) => parseJsonObject(assignment.metadata).sectionId).filter(Boolean))),
     desks: selectedGroups.map((group) => summarizeDeskGroup(group)),
     assignments,
     records,
@@ -250,6 +268,9 @@ function verifyEditionPlanningPlan(state, plan) {
       failures.push(`Assignment ${assignment.id} has evidence metadata but no uses_evidence relation.`);
     }
     for (const key of [
+      "sectionId",
+      "sectionTitle",
+      "sectionType",
       "deskCategoryKey",
       "deskCategoryLineageId",
       "focusCategoryKey",
@@ -338,7 +359,7 @@ function buildEditionRecord({ existingEdition, editionDate, editionSlug, now }) 
   };
 }
 
-function attachEditionPlanningMetadata(edition, { selectedGroups, laneDefinitions, generatedAt, publicationSlots, overassignmentRatio, maxAssignments, contextProfile, focusCategories }) {
+function attachEditionPlanningMetadata(edition, { selectedGroups, sectionTargets, laneDefinitions, generatedAt, publicationSlots, overassignmentRatio, maxAssignments, contextProfile, focusCategories }) {
   const current = parseJsonObject(edition.metadata);
   const metadata = {
     ...current,
@@ -346,6 +367,9 @@ function attachEditionPlanningMetadata(edition, { selectedGroups, laneDefinition
     generatedAt: current.generatedAt ?? generatedAt,
     selectedRootCategoryKeys: selectedGroups.map((group) => group.root.categoryKey),
     selectedRootCategoryLineageIds: selectedGroups.map((group) => group.root.lineageId),
+    selectedSectionIds: selectedGroups
+      .map((group) => sectionTargets.get(group.root.categoryKey)?.id ?? null)
+      .filter(Boolean),
     laneKeys: laneDefinitions.map((lane) => lane.laneKey),
     laneNodeKeys: laneDefinitions.map((lane) => lane.nodeKey),
     publicationSlots,
@@ -376,6 +400,49 @@ function resolveLaneDefinitions(lanes, semanticConcepts = loadSemanticConceptSee
       concept,
     };
   });
+}
+
+function selectEnabledNewsroomSections(sections) {
+  return (sections ?? [])
+    .filter((section) => section && section.enabled)
+    .sort((left, right) => Number(left.sortOrder ?? 999999) - Number(right.sortOrder ?? 999999));
+}
+
+function parseSectionTargetEntry(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  const [deskCategoryKey, sectionId] = text.split(":").map((entry) => String(entry ?? "").trim());
+  if (!deskCategoryKey || !sectionId) {
+    throw new Error(`Invalid section target '${text}'. Use deskCategoryKey:sectionId.`);
+  }
+  return { deskCategoryKey, sectionId };
+}
+
+function resolveSectionTargets(sectionTargets, enabledSections, selectedGroups) {
+  if (!enabledSections.length) {
+    throw new Error("No enabled NewsroomSection records found. Configure sections in /newsroom/administration/sections.");
+  }
+  const sectionById = new Map(enabledSections.map((section) => [section.id, section]));
+  const targetMap = new Map();
+  for (const entry of sectionTargets ?? []) {
+    const parsed = parseSectionTargetEntry(entry);
+    if (!parsed) continue;
+    const section = sectionById.get(parsed.sectionId);
+    if (!section) {
+      throw new Error(`Unknown or disabled section '${parsed.sectionId}' in --section-targets.`);
+    }
+    targetMap.set(parsed.deskCategoryKey, {
+      id: section.id,
+      title: section.title,
+      type: section.type,
+    });
+  }
+  for (const group of selectedGroups) {
+    if (!targetMap.get(group.root.categoryKey)) {
+      throw new Error(`Missing section target for desk '${group.root.categoryKey}'. Pass --section-targets deskCategoryKey:sectionId entries.`);
+    }
+  }
+  return targetMap;
 }
 
 function semanticNodeForLane(lane, now) {
@@ -477,7 +544,7 @@ function scoreDeskGroup(group, state, now) {
   };
 }
 
-function buildAssignmentBundle({ categorySet, edition, group, focusCategory, lane, now, publicationSlots, overassignmentRatio, dispatchCount, candidateRank, priority, existing, contextProfile, targetSystemType }) {
+function buildAssignmentBundle({ categorySet, edition, group, focusCategory, lane, sectionTarget, now, publicationSlots, overassignmentRatio, dispatchCount, candidateRank, priority, existing, contextProfile, targetSystemType }) {
   const queueKey = `edition:${edition.slug}:desk:${safeId(group.root.categoryKey)}:lane:${lane.laneKey}`;
   const assignmentId = `assignment-${safeId(EDITION_ASSIGNMENT_TYPE)}-${hashShort([
     edition.id,
@@ -500,6 +567,7 @@ function buildAssignmentBundle({ categorySet, edition, group, focusCategory, lan
     ...buildAssignmentContextMetadata({
       deskCategory: group.root,
       focusCategory,
+      sectionTarget,
       lane,
       contextProfile: resolvedContextProfile,
       publicationSlots,

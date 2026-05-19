@@ -151,6 +151,7 @@ function createDashboard() {
     assignments: [{ id: "assignment-1", queueKey: "queue-1", status: "open" }],
     assignmentEvents: [{ id: "assignment-event-1", createdAt: "2026-05-17T20:55:00.000Z" }],
     doctrineRecords: [{ id: "doctrine-1", slug: "editorial-doctrine-mission" }],
+    newsroomSections: [],
     loadError: null,
   };
 }

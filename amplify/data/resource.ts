@@ -607,6 +607,35 @@ const schema = a.schema({
       allow.custom().to(categoryAppendOnlyOperations),
     ]),
 
+  NewsroomSection: a
+    .model({
+      id: a.id().required(),
+      title: a.string().required(),
+      type: a.string().required(),
+      editorialMission: a.string().required(),
+      editorialPolicy: a.string().required(),
+      enabled: a.boolean().required(),
+      enabledStatus: a.string().required(),
+      sortOrder: a.integer().required(),
+      shortDescription: a.string(),
+      defaultArticleTypes: a.string().array(),
+      defaultPageBudget: a.integer(),
+      assignmentGuidance: a.string(),
+      killCriteria: a.string(),
+      visualGuidance: a.string(),
+      createdAt: a.datetime(),
+      updatedAt: a.datetime(),
+    })
+    .secondaryIndexes((index) => [
+      index("sortOrder").sortKeys(["id"]).queryField("listNewsroomSectionsBySortOrder"),
+      index("type").sortKeys(["sortOrder"]).queryField("listNewsroomSectionsByTypeAndSortOrder"),
+      index("enabledStatus").sortKeys(["sortOrder"]).queryField("listNewsroomSectionsByEnabledStatusAndSortOrder"),
+    ])
+    .authorization((allow) => [
+      allow.groups(categoryWriteGroups),
+      allow.custom().to(authoringOperations),
+    ]),
+
   KnowledgeCorpus: a
     .model({
       id: a.id().required(),

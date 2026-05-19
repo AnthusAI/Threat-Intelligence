@@ -46,6 +46,7 @@ const CATEGORY_SET_FIELDS = `${VERSION_FIELDS} id corpusId classifierId displayN
 const CATEGORY_FIELDS = `${VERSION_FIELDS} id categorySetId corpusId categoryKey parentCategoryId parentCategoryKey displayName shortTitle subtitle description aliases status seedItemIds holdoutItemIds rank depth isPinned importRunId updatedAt`;
 const CATEGORY_KEYWORD_FIELDS = "id categorySetId corpusId categoryKey categoryLineageId categoryId keyword normalizedKeyword weight rank source sourceTopicId importRunId metadata createdAt updatedAt";
 const LEXICAL_STEERING_RULE_FIELDS = "id ruleKind term normalizedTerm scope status corpusId classifierId categorySetId categoryKey note source createdBy createdAt updatedAt metadata";
+const NEWSROOM_SECTION_FIELDS = "id title type editorialMission editorialPolicy enabled enabledStatus sortOrder shortDescription defaultArticleTypes defaultPageBudget assignmentGuidance killCriteria visualGuidance createdAt updatedAt";
 const PROPOSAL_FIELDS = "id categorySetId corpusId importRunId proposalKind steeringDomain status title summary categoryKey targetCategoryKey graphEntityId relationshipType displayName shortTitle subtitle description evidenceItemIds suggestedSeedItemIds suggestedHoldoutItemIds sourceSnapshotId proposedAt reviewedAt reviewedBy updatedAt";
 const DECISION_FIELDS = "id proposalId categorySetId action actorSub actorLabel note selectedCategoryKey createdAt";
 const KNOWLEDGE_CORPUS_FIELDS = "id name role itemCount generatedAt latestImportRunId createdAt updatedAt";
@@ -84,6 +85,7 @@ const LIST_RECORDS = {
   Category: listDefinition("listCategories", CATEGORY_FIELDS),
   CategoryKeyword: listDefinition("listCategoryKeywords", CATEGORY_KEYWORD_FIELDS),
   LexicalSteeringRule: listDefinition("listLexicalSteeringRules", LEXICAL_STEERING_RULE_FIELDS),
+  NewsroomSection: listDefinition("listNewsroomSections", NEWSROOM_SECTION_FIELDS),
   SteeringProposal: listDefinition("listSteeringProposals", PROPOSAL_FIELDS),
   SteeringDecision: listDefinition("listSteeringDecisions", DECISION_FIELDS),
   Reference: listDefinition("listReferences", REFERENCE_FIELDS),
@@ -117,6 +119,7 @@ const GETTERS = {
   Category: getDefinition("getCategory", CATEGORY_FIELDS),
   CategoryKeyword: getDefinition("getCategoryKeyword", CATEGORY_KEYWORD_FIELDS),
   LexicalSteeringRule: getDefinition("getLexicalSteeringRule", LEXICAL_STEERING_RULE_FIELDS),
+  NewsroomSection: getDefinition("getNewsroomSection", NEWSROOM_SECTION_FIELDS),
   SteeringProposal: getDefinition("getSteeringProposal", PROPOSAL_FIELDS),
   SteeringDecision: getDefinition("getSteeringDecision", DECISION_FIELDS),
   Reference: getDefinition("getReference", REFERENCE_FIELDS),

@@ -3,6 +3,7 @@
 import { generateClient } from "aws-amplify/data";
 import type { Schema } from "../amplify/data/resource";
 import type { NewsDeskAppendix, NewsDeskCategoryTreeNode } from "../lib/content-types";
+import { createEmptyCategorySteeringDashboard } from "../lib/category-dashboard";
 import type {
   CategorySteeringArtifact,
   CategorySteeringCorpus,
@@ -15,22 +16,98 @@ import type {
   CategorySteeringCategorySet,
   CategoryKeywordRecord,
   MessageRecord,
+  NewsroomSummaryRecord,
   LexicalSteeringRuleRecord,
   AssignmentEventRecord,
   AssignmentRecord,
   DoctrineRecord,
+  NewsroomSectionRecord,
   ReferenceAttachmentRecord,
   ReferenceRecord,
   SemanticNodeRecord,
   SemanticRelationRecord,
   UserDirectoryEntry,
 } from "../lib/category-repository";
-import { DOCTRINE_DEFINITIONS, getDeskDoctrineDefinitions } from "../lib/doctrine";
+import { DOCTRINE_DEFINITIONS, getCategoryDoctrineDefinitions, type DoctrineCategory } from "../lib/doctrine";
 import { configureAmplifyClient } from "./amplify-client-provider";
 import { isUnauthenticatedError, loadReaderSessionSnapshot, type ReaderAuthSnapshot } from "./reader-auth-state";
 
 const USER_POOL_AUTH_MODE = "userPool";
+const USER_POOL_LIST_LIMIT = 500;
+const USER_POOL_PAGE_LIMIT = 50;
 const TEST_EDITOR_STORAGE_KEY = "papyrus:test-editor";
+const NEWSROOM_PAGE_LIMIT = 50;
+
+const NEWSROOM_MESSAGE_FEED_QUERY = `
+  query ListMessagesByNewsroomFeedAndCreatedAt($newsroomFeedKey: String!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String, $filter: ModelMessageFilterInput) {
+    listMessagesByNewsroomFeedAndCreatedAt(newsroomFeedKey: $newsroomFeedKey, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken, filter: $filter) {
+      items { id messageKind messageDomain status body summary source importRunId authorSub authorUserProfileId authorLabel createdAt updatedAt newsroomFeedKey metadata }
+      nextToken
+    }
+  }
+`;
+
+const NEWSROOM_ASSIGNMENT_FEED_QUERY = `
+  query ListAssignmentsByNewsroomFeedAndCreatedAt($newsroomFeedKey: String!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String, $filter: ModelAssignmentFilterInput) {
+    listAssignmentsByNewsroomFeedAndCreatedAt(newsroomFeedKey: $newsroomFeedKey, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken, filter: $filter) {
+      items { id assignmentTypeKey queueKey queueStatusKey status priority title brief instructions assigneeType assigneeId assigneeKey claimedAt claimExpiresAt completedAt canceledAt corpusId categorySetId classifierId sourceSnapshotId importRunId createdBy createdAt updatedAt newsroomFeedKey metadata }
+      nextToken
+    }
+  }
+`;
+
+const NEWSROOM_REFERENCE_FEED_QUERY = `
+  query ListReferencesByNewsroomFeedAndCreatedAt($newsroomFeedKey: String!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String, $filter: ModelReferenceFilterInput) {
+    listReferencesByNewsroomFeedAndCreatedAt(newsroomFeedKey: $newsroomFeedKey, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken, filter: $filter) {
+      items { id lineageId versionNumber previousVersionId versionState versionCreatedAt versionCreatedBy changeReason contentHash corpusId externalItemId title authors sourceUri storagePath mediaType byteSize sha256 sourcePublishedAt sourceUpdatedAt retrievedAt importRunId importedAt createdAt curationStatus curationStatusKey curationStatusUpdatedAt curationStatusUpdatedBy curationStatusReason newsroomFeedKey metadata updatedAt }
+      nextToken
+    }
+  }
+`;
+
+const NEWSROOM_SEMANTIC_NODE_FEED_QUERY = `
+  query ListSemanticNodesByNewsroomFeedAndCreatedAt($newsroomFeedKey: String!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String, $filter: ModelSemanticNodeFilterInput) {
+    listSemanticNodesByNewsroomFeedAndCreatedAt(newsroomFeedKey: $newsroomFeedKey, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken, filter: $filter) {
+      items { id lineageId versionNumber previousVersionId versionState versionCreatedAt versionCreatedBy changeReason contentHash nodeKey nodeKind corpusId categorySetId categoryLineageId categoryKey displayName description aliases status importRunId createdAt newsroomFeedKey updatedAt }
+      nextToken
+    }
+  }
+`;
+
+const NEWSROOM_SEMANTIC_RELATION_FEED_QUERY = `
+  query ListSemanticRelationsByNewsroomFeedAndCreatedAt($newsroomFeedKey: String!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String, $filter: ModelSemanticRelationFilterInput) {
+    listSemanticRelationsByNewsroomFeedAndCreatedAt(newsroomFeedKey: $newsroomFeedKey, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken, filter: $filter) {
+      items { id relationState predicate relationTypeId relationTypeKey relationDomain subjectKind subjectId subjectLineageId subjectVersionNumber objectKind objectId objectLineageId objectVersionNumber subjectStateKey objectStateKey objectSubjectStateKey predicateObjectStateKey subjectVersionKey objectVersionKey score confidence rank classifierId modelVersion reviewRecommended sourceSnapshotId importRunId importedAt createdAt updatedAt newsroomFeedKey metadata }
+      nextToken
+    }
+  }
+`;
+
+const NEWSROOM_SECTION_LIST_QUERY = `
+  query ListNewsroomSections($limit: Int, $nextToken: String) {
+    listNewsroomSections(limit: $limit, nextToken: $nextToken) {
+      items {
+        id
+        title
+        type
+        editorialMission
+        editorialPolicy
+        enabled
+        enabledStatus
+        sortOrder
+        shortDescription
+        defaultArticleTypes
+        defaultPageBudget
+        assignmentGuidance
+        killCriteria
+        visualGuidance
+        createdAt
+        updatedAt
+      }
+      nextToken
+    }
+  }
+`;
 
 type GraphQLListResponse<T> = {
   data?: T[] | null;
@@ -42,8 +119,55 @@ type ListableModel<T> = {
   list: (options: Record<string, unknown>) => Promise<GraphQLListResponse<T>>;
 };
 
+export type NewsroomRecordPage<T> = {
+  items: T[];
+  nextToken?: string | null;
+  hasMore: boolean;
+};
+
+type GraphQLConnectionResponse<T> = {
+  data?: Record<string, { items?: Array<T | null> | null; nextToken?: string | null } | null> | null;
+  errors?: unknown[] | null;
+};
+
+type NewsroomPageOptions = {
+  limit?: number;
+  nextToken?: string | null;
+};
+
+type NewsroomMessagePageOptions = NewsroomPageOptions & {
+  kind?: string;
+  domain?: string;
+  status?: string;
+};
+
+type NewsroomAssignmentPageOptions = NewsroomPageOptions & {
+  type?: string;
+  status?: string;
+};
+
+type NewsroomReferencePageOptions = NewsroomPageOptions & {
+  status?: string;
+  corpusId?: string;
+};
+
+type NewsroomSemanticNodePageOptions = NewsroomPageOptions & {
+  nodeKind?: string;
+  status?: string;
+};
+
+type NewsroomSemanticRelationPageOptions = NewsroomPageOptions & {
+  relationTypeKey?: string;
+  relationDomain?: string;
+};
+
 type SlugQueryableModel<T> = {
   itemBySlug?: (args: { slug: string }, options: Record<string, unknown>) => Promise<GraphQLListResponse<T>>;
+};
+
+type NewsroomSummaryResponse = {
+  data?: unknown;
+  errors?: unknown[] | null;
 };
 
 export type EditorCategoryTreeState = {
@@ -162,13 +286,24 @@ export async function loadEditorResolvedAccessState(): Promise<EditorAccessState
 }
 
 export async function loadEditorNewsDeskDashboard({ isAdmin }: { isAdmin: boolean }): Promise<CategorySteeringDashboard> {
+  const [summary, userDirectory] = await Promise.all([
+    loadNewsroomSummary(),
+    isAdmin ? loadUserDirectory() : Promise.resolve([]),
+  ]);
+
+  return {
+    ...createSummaryCategorySteeringDashboard(summary),
+    canManageUsers: isAdmin,
+    userDirectory,
+  };
+}
+
+export async function loadEditorFullNewsDeskDashboard({ isAdmin }: { isAdmin: boolean }): Promise<CategorySteeringDashboard> {
   const [
     corpora,
     importRuns,
     categorySets,
     categorys,
-    categoryTrees,
-    categoryNodes,
     categoryKeywords,
     lexicalSteeringRules,
     proposals,
@@ -179,14 +314,13 @@ export async function loadEditorNewsDeskDashboard({ isAdmin }: { isAdmin: boolea
     messages,
     semanticRelations,
     assignmentState,
+    newsroomSections,
     userDirectory,
   ] = await Promise.all([
     listUserPoolModel<CategorySteeringCorpus>("KnowledgeCorpus"),
     listUserPoolModel<CategorySteeringImportRun>("KnowledgeImportRun"),
     listUserPoolModel<CategorySteeringCategorySet>("CategorySet"),
     listUserPoolModel<CategorySteeringCategory>("Category"),
-    listUserPoolModel<CategorySteeringCategoryTree>("CategorySet"),
-    listUserPoolModel<CategorySteeringCategoryTreeNode>("Category"),
     listOptionalUserPoolModel<CategoryKeywordRecord>("CategoryKeyword"),
     listOptionalUserPoolModel<LexicalSteeringRuleRecord>("LexicalSteeringRule"),
     listUserPoolModel<CategorySteeringProposal>("SteeringProposal"),
@@ -197,6 +331,7 @@ export async function loadEditorNewsDeskDashboard({ isAdmin }: { isAdmin: boolea
     listUserPoolModel<MessageRecord>("Message"),
     listUserPoolModel<SemanticRelationRecord>("SemanticRelation"),
     loadEditorAssignmentsData(),
+    listOptionalUserPoolModel<NewsroomSectionRecord>("NewsroomSection"),
     isAdmin ? loadUserDirectory() : Promise.resolve([]),
   ]);
 
@@ -205,13 +340,14 @@ export async function loadEditorNewsDeskDashboard({ isAdmin }: { isAdmin: boolea
   const sortedCategorySets = sortCategorySets(categorySets, sortedImportRuns);
   const canonicalCategorySet = selectCanonicalCategorySet(sortedCorpora, sortedCategorySets);
   const sortedCategorys = sortCategorys(categorys);
-  const sortedCategoryNodes = sortCategoryTreeNodes(categoryNodes);
-  const rootDeskCategories = selectRootDeskCategoriesForDoctrine({
+  const sortedCategoryNodes = sortCategoryTreeNodes(categorys);
+  const acceptedDoctrineCategories = selectAcceptedCategoriesForDoctrine({
     categorys: sortedCategorys,
     categoryNodes: sortedCategoryNodes,
     categorySetId: canonicalCategorySet?.id ?? null,
   });
-  const doctrineRecords = await loadDoctrineRecords(rootDeskCategories);
+  const doctrineRecords = await loadDoctrineRecords(acceptedDoctrineCategories);
+  const sortedNewsroomSections = sortNewsroomSections(newsroomSections);
 
   return {
     canonicalCorpusId: canonicalCategorySet?.corpusId ?? selectCanonicalCorpus(sortedCorpora)?.id ?? null,
@@ -222,7 +358,7 @@ export async function loadEditorNewsDeskDashboard({ isAdmin }: { isAdmin: boolea
     importRuns: sortedImportRuns,
     categorySets: sortedCategorySets,
     categorys: sortedCategorys,
-    categoryTrees: sortTaxonomies(categoryTrees),
+    categoryTrees: sortTaxonomies(categorySets),
     categoryNodes: sortedCategoryNodes,
     categoryKeywords: categoryKeywords.sort((left, right) => keywordSortKey(left).localeCompare(keywordSortKey(right))),
     lexicalSteeringRules: lexicalSteeringRules.sort((left, right) => lexicalRuleSortKey(left).localeCompare(lexicalRuleSortKey(right))),
@@ -236,37 +372,133 @@ export async function loadEditorNewsDeskDashboard({ isAdmin }: { isAdmin: boolea
     assignments: assignmentState.assignments,
     assignmentEvents: assignmentState.assignmentEvents,
     doctrineRecords,
+    newsroomSections: sortedNewsroomSections,
     loadError: null,
   };
+}
+
+export async function loadEditorMessagesData(): Promise<MessageRecord[]> {
+  const page = await loadNewsroomMessagePage();
+  return page.items;
+}
+
+export async function loadNewsroomMessagePage(options: NewsroomMessagePageOptions = {}): Promise<NewsroomRecordPage<MessageRecord>> {
+  return loadNewsroomFeedPage<MessageRecord>({
+    query: NEWSROOM_MESSAGE_FEED_QUERY,
+    field: "listMessagesByNewsroomFeedAndCreatedAt",
+    newsroomFeedKey: "messages",
+    limit: options.limit,
+    nextToken: options.nextToken,
+    matches: equalityMatcher({
+      messageKind: options.kind,
+      messageDomain: options.domain,
+      status: options.status,
+    }),
+  });
+}
+
+export async function loadEditorReferencesData(): Promise<{
+  references: ReferenceRecord[];
+  referenceAttachments: ReferenceAttachmentRecord[];
+}> {
+  const [referencePage, referenceAttachments] = await Promise.all([
+    loadNewsroomReferencePage(),
+    listUserPoolModelPage<ReferenceAttachmentRecord>("ReferenceAttachment", USER_POOL_PAGE_LIMIT),
+  ]);
+  return {
+    references: referencePage.items,
+    referenceAttachments: referenceAttachments.sort((left, right) => left.sortKey.localeCompare(right.sortKey)),
+  };
+}
+
+export async function loadNewsroomReferencePage(options: NewsroomReferencePageOptions = {}): Promise<NewsroomRecordPage<ReferenceRecord>> {
+  return loadNewsroomFeedPage<ReferenceRecord>({
+    query: NEWSROOM_REFERENCE_FEED_QUERY,
+    field: "listReferencesByNewsroomFeedAndCreatedAt",
+    newsroomFeedKey: "references",
+    limit: options.limit,
+    nextToken: options.nextToken,
+    matches: equalityMatcher({
+      curationStatus: options.status,
+      corpusId: options.corpusId,
+    }),
+  });
+}
+
+export async function loadEditorSemanticRelationsData(): Promise<SemanticRelationRecord[]> {
+  const page = await loadNewsroomSemanticRelationPage();
+  return page.items;
+}
+
+export async function loadNewsroomSemanticRelationPage(options: NewsroomSemanticRelationPageOptions = {}): Promise<NewsroomRecordPage<SemanticRelationRecord>> {
+  return loadNewsroomFeedPage<SemanticRelationRecord>({
+    query: NEWSROOM_SEMANTIC_RELATION_FEED_QUERY,
+    field: "listSemanticRelationsByNewsroomFeedAndCreatedAt",
+    newsroomFeedKey: "semanticRelations",
+    limit: options.limit,
+    nextToken: options.nextToken,
+    matches: equalityMatcher({
+      relationTypeKey: options.relationTypeKey,
+      relationDomain: options.relationDomain,
+    }),
+  });
 }
 
 export async function loadEditorAssignmentsData(): Promise<{
   assignments: AssignmentRecord[];
   assignmentEvents: AssignmentEventRecord[];
 }> {
-  const [assignments, assignmentEvents] = await Promise.all([
-    listOptionalUserPoolModel<AssignmentRecord>("Assignment"),
-    listOptionalUserPoolModel<AssignmentEventRecord>("AssignmentEvent"),
+  const [assignmentPage, assignmentEvents] = await Promise.all([
+    loadNewsroomAssignmentPage(),
+    listOptionalUserPoolModelPage<AssignmentEventRecord>("AssignmentEvent", USER_POOL_PAGE_LIMIT),
   ]);
   return {
-    assignments: assignments.sort((left, right) => assignmentSortKey(left).localeCompare(assignmentSortKey(right))),
+    assignments: assignmentPage.items,
     assignmentEvents: assignmentEvents.sort((left, right) => right.createdAt.localeCompare(left.createdAt)),
   };
 }
 
+export async function loadNewsroomAssignmentPage(options: NewsroomAssignmentPageOptions = {}): Promise<NewsroomRecordPage<AssignmentRecord>> {
+  return loadNewsroomFeedPage<AssignmentRecord>({
+    query: NEWSROOM_ASSIGNMENT_FEED_QUERY,
+    field: "listAssignmentsByNewsroomFeedAndCreatedAt",
+    newsroomFeedKey: "assignments",
+    limit: options.limit,
+    nextToken: options.nextToken,
+    matches: equalityMatcher({
+      assignmentTypeKey: options.type,
+      status: options.status,
+    }),
+  });
+}
+
+export async function loadNewsroomSemanticNodePage(options: NewsroomSemanticNodePageOptions = {}): Promise<NewsroomRecordPage<SemanticNodeRecord>> {
+  return loadNewsroomFeedPage<SemanticNodeRecord>({
+    query: NEWSROOM_SEMANTIC_NODE_FEED_QUERY,
+    field: "listSemanticNodesByNewsroomFeedAndCreatedAt",
+    newsroomFeedKey: "semanticNodes",
+    limit: options.limit,
+    nextToken: options.nextToken,
+    matches: equalityMatcher({
+      nodeKind: options.nodeKind,
+      status: options.status,
+    }),
+  });
+}
+
 export async function loadEditorDoctrineRecordsData(options?: {
   dashboard?: Pick<CategorySteeringDashboard, "categorys" | "categoryNodes" | "canonicalCategorySetId"> | null;
-  rootCategories?: CategorySteeringCategory[];
+  doctrineCategories?: DoctrineCategory[];
 }): Promise<DoctrineRecord[]> {
-  const rootCategories = options?.rootCategories
+  const doctrineCategories = options?.doctrineCategories
     ?? (options?.dashboard
-      ? selectRootDeskCategoriesForDoctrine({
+      ? selectAcceptedCategoriesForDoctrine({
         categorys: options.dashboard.categorys,
         categoryNodes: options.dashboard.categoryNodes,
         categorySetId: options.dashboard.canonicalCategorySetId ?? null,
       })
       : []);
-  return loadDoctrineRecords(rootCategories);
+  return loadDoctrineRecords(doctrineCategories);
 }
 
 export async function loadEditorUserDirectoryData(): Promise<UserDirectoryEntry[]> {
@@ -276,6 +508,126 @@ export async function loadEditorUserDirectoryData(): Promise<UserDirectoryEntry[
 export function hasTestEditorOverride(): boolean {
   if (typeof window === "undefined") return false;
   return window.localStorage.getItem(TEST_EDITOR_STORAGE_KEY) === "true";
+}
+
+async function loadNewsroomSummary(): Promise<NewsroomSummaryRecord> {
+  const client = generateClient<Schema>();
+  const response = await (client.queries.getNewsroomSummary as unknown as (
+    args: Record<string, never>,
+    options: { authMode: typeof USER_POOL_AUTH_MODE },
+  ) => Promise<NewsroomSummaryResponse>)({}, { authMode: USER_POOL_AUTH_MODE });
+  assertNoGraphQLErrors(response.errors);
+  return normalizeNewsroomSummary(response.data);
+}
+
+function createSummaryCategorySteeringDashboard(summary: NewsroomSummaryRecord): CategorySteeringDashboard {
+  const latestImportRun = summary.latestImportRun;
+  return {
+    ...createEmptyCategorySteeringDashboard(),
+    isPublicSkeleton: false,
+    summary,
+    importRuns: latestImportRun ? [latestImportRun] : [],
+    loadError: null,
+  };
+}
+
+function normalizeNewsroomSummary(value: unknown): NewsroomSummaryRecord {
+  const record = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  return {
+    generatedAt: typeof record.generatedAt === "string" ? record.generatedAt : new Date().toISOString(),
+    staleAt: typeof record.staleAt === "string" ? record.staleAt : null,
+    source: typeof record.source === "string" ? record.source : null,
+    latestImportRun: normalizeLatestImportRun(record.latestImportRun),
+    counts: numberRecord(record.counts),
+    facets: normalizeSummaryFacets(record.facets, record),
+    assignmentStatusCounts: numberRecord(record.assignmentStatusCounts),
+    assignmentTypeCounts: numberRecord(record.assignmentTypeCounts),
+    referenceStatusCounts: numberRecord(record.referenceStatusCounts),
+    messageKindCounts: numberRecord(record.messageKindCounts),
+    messageDomainCounts: numberRecord(record.messageDomainCounts),
+  };
+}
+
+function normalizeSummaryFacets(value: unknown, legacy: Record<string, unknown>) {
+  const parsed = parseJsonish(value);
+  const record = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  return {
+    assignments: {
+      byStatus: { ...numberRecord(legacy.assignmentStatusCounts), ...sectionCounts(record.assignments, "byStatus") },
+      byType: { ...numberRecord(legacy.assignmentTypeCounts), ...sectionCounts(record.assignments, "byType") },
+      statusByType: nestedCounts(record.assignments, "statusByType"),
+    },
+    messages: {
+      byKind: { ...numberRecord(legacy.messageKindCounts), ...sectionCounts(record.messages, "byKind") },
+      byDomain: { ...numberRecord(legacy.messageDomainCounts), ...sectionCounts(record.messages, "byDomain") },
+      byStatus: sectionCounts(record.messages, "byStatus"),
+      domainByKind: nestedCounts(record.messages, "domainByKind"),
+    },
+    references: {
+      byCurationStatus: { ...numberRecord(legacy.referenceStatusCounts), ...sectionCounts(record.references, "byCurationStatus") },
+      byCorpus: sectionCounts(record.references, "byCorpus"),
+      statusByCorpus: nestedCounts(record.references, "statusByCorpus"),
+    },
+    semanticNodes: {
+      byNodeKind: sectionCounts(record.semanticNodes, "byNodeKind"),
+      byStatus: sectionCounts(record.semanticNodes, "byStatus"),
+      byCorpus: sectionCounts(record.semanticNodes, "byCorpus"),
+      byCategorySet: sectionCounts(record.semanticNodes, "byCategorySet"),
+    },
+    semanticRelations: {
+      byRelationTypeKey: sectionCounts(record.semanticRelations, "byRelationTypeKey"),
+      byRelationDomain: sectionCounts(record.semanticRelations, "byRelationDomain"),
+      bySubjectKind: sectionCounts(record.semanticRelations, "bySubjectKind"),
+      byObjectKind: sectionCounts(record.semanticRelations, "byObjectKind"),
+    },
+    imports: {
+      byCorpus: sectionCounts(record.imports, "byCorpus"),
+    },
+  };
+}
+
+function sectionCounts(section: unknown, key: string): Record<string, number> {
+  const record = parseJsonish(section);
+  return record && typeof record === "object" && !Array.isArray(record)
+    ? numberRecord((record as Record<string, unknown>)[key])
+    : {};
+}
+
+function nestedCounts(section: unknown, key: string): Record<string, Record<string, number>> {
+  const record = parseJsonish(section);
+  const value = record && typeof record === "object" && !Array.isArray(record) ? (record as Record<string, unknown>)[key] : null;
+  const parsed = parseJsonish(value);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+  const result: Record<string, Record<string, number>> = {};
+  for (const [outerKey, inner] of Object.entries(parsed as Record<string, unknown>)) {
+    result[outerKey] = numberRecord(inner);
+  }
+  return result;
+}
+
+function normalizeLatestImportRun(value: unknown): CategorySteeringImportRun | null {
+  const parsed = parseJsonish(value);
+  return parsed && typeof parsed === "object" && typeof (parsed as { id?: unknown }).id === "string"
+    ? parsed as CategorySteeringImportRun
+    : null;
+}
+
+function numberRecord(value: unknown): Record<string, number> {
+  const parsed = parseJsonish(value);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+  const entries = Object.entries(parsed as Record<string, unknown>)
+    .map(([key, entry]) => [key, Number(entry)] as const)
+    .filter(([, entry]) => Number.isFinite(entry));
+  return Object.fromEntries(entries);
+}
+
+function parseJsonish(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
 }
 
 async function listUserPoolModel<T>(modelName: string): Promise<T[]> {
@@ -288,7 +640,7 @@ async function listUserPoolModel<T>(modelName: string): Promise<T[]> {
   do {
     const response = await model.list({
       authMode: USER_POOL_AUTH_MODE,
-      limit: 100,
+      limit: USER_POOL_LIST_LIMIT,
       nextToken,
     });
     assertNoGraphQLErrors(response.errors);
@@ -301,8 +653,112 @@ async function listUserPoolModel<T>(modelName: string): Promise<T[]> {
 async function listOptionalUserPoolModel<T>(modelName: string): Promise<T[]> {
   const client = generateClient<Schema>();
   const model = (client.models as Record<string, ListableModel<T>>)[modelName];
-  if (!model) return [];
+  if (!model) {
+    if (modelName === "NewsroomSection") {
+      return (await listNewsroomSectionsViaGraphql(client)) as T[];
+    }
+    return [];
+  }
   return listUserPoolModel<T>(modelName);
+}
+
+async function listUserPoolModelPage<T>(modelName: string, limit: number): Promise<T[]> {
+  const client = generateClient<Schema>();
+  const model = (client.models as Record<string, ListableModel<T>>)[modelName];
+  if (!model) throw new Error(`GraphQL model ${modelName} is not available in the deployed schema.`);
+  const response = await model.list({
+    authMode: USER_POOL_AUTH_MODE,
+    limit,
+  });
+  assertNoGraphQLErrors(response.errors);
+  return (response.data ?? []).filter(Boolean) as T[];
+}
+
+async function listOptionalUserPoolModelPage<T>(modelName: string, limit: number): Promise<T[]> {
+  const client = generateClient<Schema>();
+  const model = (client.models as Record<string, ListableModel<T>>)[modelName];
+  if (!model) return [];
+  return listUserPoolModelPage<T>(modelName, limit);
+}
+
+async function loadNewsroomFeedPage<T>({
+  query,
+  field,
+  newsroomFeedKey,
+  matches,
+  limit = NEWSROOM_PAGE_LIMIT,
+  nextToken,
+}: {
+  query: string;
+  field: string;
+  newsroomFeedKey: string;
+  matches?: ((item: T) => boolean) | null;
+  limit?: number;
+  nextToken?: string | null;
+}): Promise<NewsroomRecordPage<T>> {
+  const client = generateClient<Schema>() as unknown as {
+    graphql: (options: Record<string, unknown>) => Promise<GraphQLConnectionResponse<T>>;
+  };
+  const items: T[] = [];
+  let cursor = nextToken ?? null;
+  let pageCount = 0;
+  let connectionNextToken: string | null = null;
+
+  do {
+    pageCount += 1;
+    const response = await client.graphql({
+      query,
+      variables: {
+        newsroomFeedKey,
+        sortDirection: "DESC",
+        limit,
+        nextToken: cursor,
+        filter: null,
+      },
+      authMode: USER_POOL_AUTH_MODE,
+    });
+    assertNoGraphQLErrors(response.errors);
+    const connection = response.data?.[field];
+    connectionNextToken = connection?.nextToken ?? null;
+    const pageItems = ((connection?.items ?? []).filter(Boolean) as T[])
+      .filter((item) => matches ? matches(item) : true);
+    items.push(...pageItems);
+    cursor = connectionNextToken;
+  } while (items.length < limit && cursor && pageCount < 10);
+
+  return {
+    items: items.slice(0, limit),
+    nextToken: connectionNextToken,
+    hasMore: Boolean(connectionNextToken),
+  };
+}
+
+async function listNewsroomSectionsViaGraphql(client: ReturnType<typeof generateClient<Schema>>): Promise<NewsroomSectionRecord[]> {
+  const graphClient = client as unknown as {
+    graphql: (options: Record<string, unknown>) => Promise<GraphQLConnectionResponse<NewsroomSectionRecord>>;
+  };
+  const rows: NewsroomSectionRecord[] = [];
+  let nextToken: string | null | undefined = null;
+  do {
+    const response = await graphClient.graphql({
+      query: NEWSROOM_SECTION_LIST_QUERY,
+      variables: { limit: USER_POOL_LIST_LIMIT, nextToken },
+      authMode: USER_POOL_AUTH_MODE,
+    });
+    assertNoGraphQLErrors(response.errors);
+    const connection = response.data?.listNewsroomSections;
+    rows.push(...((connection?.items ?? []).filter(Boolean) as NewsroomSectionRecord[]));
+    nextToken = connection?.nextToken ?? null;
+  } while (nextToken);
+  return rows;
+}
+
+function equalityMatcher<T extends Record<string, unknown>>(values: Record<string, string | null | undefined>): ((item: T) => boolean) | null {
+  const entries = Object.entries(values)
+    .map(([key, value]) => [key, typeof value === "string" ? value.trim() : ""] as const)
+    .filter((entry): entry is readonly [string, string] => Boolean(entry[1]));
+  if (!entries.length) return null;
+  return (item: T) => entries.every(([key, value]) => item[key] === value);
 }
 
 export function selectRootDeskCategoriesForDoctrine({
@@ -339,10 +795,36 @@ export function selectRootDeskCategoriesForDoctrine({
     .sort((left, right) => categorySortKey(left).localeCompare(categorySortKey(right)));
 }
 
-async function loadDoctrineRecords(rootCategories: CategorySteeringCategory[] = []): Promise<DoctrineRecord[]> {
+export function selectAcceptedCategoriesForDoctrine({
+  categorys,
+  categoryNodes,
+  categorySetId,
+}: {
+  categorys: CategorySteeringCategory[];
+  categoryNodes: CategorySteeringCategoryTreeNode[];
+  categorySetId: string | null;
+}): DoctrineCategory[] {
+  const categorySetFilter = (category: { categorySetId: string }) => !categorySetId || category.categorySetId === categorySetId;
+  const currentCategorys = categorys.filter((category) => (
+    categorySetFilter(category)
+    && category.status !== "deprecated"
+    && category.versionState !== "superseded"
+  ));
+  const categoryByKey = new Map(currentCategorys.map((category) => [category.categoryKey, category]));
+  return categoryNodes
+    .filter((node) => (
+      categorySetFilter(node)
+      && node.status === "accepted"
+      && node.versionState !== "superseded"
+    ))
+    .sort((left, right) => categorySortKey(left).localeCompare(categorySortKey(right)))
+    .map((node) => mergeRootNodeWithCategory(node, categoryByKey.get(node.categoryKey)));
+}
+
+async function loadDoctrineRecords(doctrineCategories: DoctrineCategory[] = []): Promise<DoctrineRecord[]> {
   const definitions = uniqueDoctrineDefinitions([
     ...DOCTRINE_DEFINITIONS,
-    ...rootCategories.flatMap((category) => getDeskDoctrineDefinitions(category)),
+    ...doctrineCategories.flatMap((category) => getCategoryDoctrineDefinitions(category)),
   ]);
   const records = await Promise.all(
     definitions.map((definition) => getDoctrineRecordBySlug(definition.slug)),
@@ -494,14 +976,18 @@ function categoryTreeNodeFromAppendixNode(node: NewsDeskCategoryTreeNode): Categ
 }
 
 function selectCurrentAcceptedCategoryTree(categoryTrees: CategorySteeringCategoryTree[]): CategorySteeringCategoryTree | null {
-  return categoryTrees.find((categoryTree) => categoryTree.status === "accepted") ?? categoryTrees[0] ?? null;
+  return categoryTrees.find(isCurrentAcceptedCategorySet) ?? null;
 }
 
 function selectCanonicalCategorySet(corpora: CategorySteeringCorpus[], categorySets: CategorySteeringCategorySet[]): CategorySteeringCategorySet | null {
   const canonicalCorpus = selectCanonicalCorpus(corpora);
-  const candidates = categorySets.filter((categorySet) => categorySet.status !== "deprecated");
+  const candidates = categorySets.filter(isCurrentAcceptedCategorySet);
   const canonicalCandidates = canonicalCorpus ? candidates.filter((categorySet) => categorySet.corpusId === canonicalCorpus.id) : candidates;
   return canonicalCandidates[0] ?? candidates[0] ?? null;
+}
+
+function isCurrentAcceptedCategorySet(categorySet: CategorySteeringCategorySet | CategorySteeringCategoryTree): boolean {
+  return categorySet.versionState === "current" && categorySet.status === "accepted";
 }
 
 function selectCanonicalCorpus(corpora: CategorySteeringCorpus[]): CategorySteeringCorpus | null {
@@ -540,6 +1026,22 @@ function sortCategorys(categorys: CategorySteeringCategory[]): CategorySteeringC
     if (rankDiff !== 0) return rankDiff;
     return left.categoryKey.localeCompare(right.categoryKey);
   });
+}
+
+function normalizeNewsroomSectionType(value: string | null | undefined): "canonical" | "rotating" {
+  return value === "rotating" ? "rotating" : "canonical";
+}
+
+function sortNewsroomSections(sections: NewsroomSectionRecord[]): NewsroomSectionRecord[] {
+  return [...sections]
+    .map((section) => ({ ...section, type: normalizeNewsroomSectionType(section.type) }))
+    .sort((left, right) => {
+      const typeDiff = (left.type === "canonical" ? 0 : 1) - (right.type === "canonical" ? 0 : 1);
+      if (typeDiff !== 0) return typeDiff;
+      const sortDiff = (left.sortOrder ?? 999999) - (right.sortOrder ?? 999999);
+      if (sortDiff !== 0) return sortDiff;
+      return left.title.localeCompare(right.title);
+    });
 }
 
 function sortProposals(proposals: CategorySteeringProposal[]): CategorySteeringProposal[] {

@@ -31,11 +31,6 @@ Given("I open the topics newsroom at {int} by {int}", async function (width, hei
   await requirePage(this).waitForSelector("[data-news-desk-section='topics']", { state: "visible", timeout: 15_000 });
 });
 
-Given("I open the desks newsroom at {int} by {int}", async function (width, height) {
-  await this.openPath("/newsroom/desks?demo=1", width, height);
-  await requirePage(this).waitForSelector("[data-news-desk-section='desks']", { state: "visible", timeout: 15_000 });
-});
-
 Given("I open the references newsroom at {int} by {int}", async function (width, height) {
   await this.openPath("/newsroom/references?demo=1", width, height);
   await requirePage(this).waitForSelector("[data-news-desk-section='references']", { state: "visible", timeout: 15_000 });
@@ -46,9 +41,10 @@ Given("I open the concepts newsroom at {int} by {int}", async function (width, h
   await requirePage(this).waitForSelector("[data-news-desk-section='concepts']", { state: "visible", timeout: 15_000 });
 });
 
-Given("I open the users newsroom at {int} by {int}", async function (width, height) {
-  await this.openPath("/newsroom/users?demo=1", width, height);
-  await requirePage(this).waitForSelector("[data-news-desk-section='users']", { state: "visible", timeout: 15_000 });
+Given("I open the administration newsroom at {int} by {int}", async function (width, height) {
+  await this.openPath("/newsroom/administration?demo=1&panel=users", width, height);
+  await requirePage(this).waitForSelector("[data-news-desk-section='administration']", { state: "visible", timeout: 15_000 });
+  await requirePage(this).waitForSelector("[data-news-desk-admin-panel='users']", { state: "visible", timeout: 15_000 });
 });
 
 Given("I open the assignments newsroom at {int} by {int}", async function (width, height) {
@@ -239,12 +235,11 @@ Then("the newsroom should render", async function () {
   await page.locator("[data-news-desk]").waitFor({ state: "visible", timeout: 10_000 });
   assert.equal(await page.locator("[data-news-desk]").getAttribute("data-category-steering-demo"), "true");
   await page.locator("h1", { hasText: "NEWSROOM" }).waitFor({ state: "visible", timeout: 10_000 });
-  await page.locator("[data-news-desk-tab='overview'][aria-current='page']").waitFor({ state: "visible", timeout: 10_000 });
-  await page.locator("[data-news-desk-tab='users']").waitFor({ state: "visible", timeout: 10_000 });
-  await page.locator("[data-news-desk-tab='desks']").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-section='overview']").waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("[data-news-desk-tab='topics']").waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("[data-news-desk-tab='concepts']").waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("[data-news-desk-tab='references']").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-tab='administration']").waitFor({ state: "visible", timeout: 10_000 });
 });
 
 Then("the active newsroom section should be {string}", async function (sectionId) {
@@ -270,16 +265,6 @@ Then("the topics desk should render", async function () {
   await page.locator("text=Source Demo Categories").first().waitFor({ state: "visible", timeout: 10_000 });
 });
 
-Then("the desks desk should render", async function () {
-  const page = requirePage(this);
-  await page.locator("[data-news-desk]").waitFor({ state: "visible", timeout: 10_000 });
-  await page.locator("[data-news-desk-tab='desks'][aria-current='page']").waitFor({ state: "visible", timeout: 10_000 });
-  await page.locator("[data-news-desk-section='desks']").waitFor({ state: "visible", timeout: 10_000 });
-  await page.locator("[data-news-desk-card='category.foundation-model-scaling']").waitFor({ state: "visible", timeout: 10_000 });
-  await page.locator("textarea[data-news-desk-doctrine-input$='mission']").first().waitFor({ state: "visible", timeout: 10_000 });
-  await page.locator("text=Inherited Subtopics").first().waitFor({ state: "visible", timeout: 10_000 });
-});
-
 Then("the references desk should show reference metadata and semantic neighbors", async function () {
   const page = requirePage(this);
   await page.locator("[data-news-desk-reference-ledger]").waitFor({ state: "visible", timeout: 10_000 });
@@ -298,10 +283,63 @@ Then("the concepts desk should show semantic nodes and linked objects", async fu
 
 Then("the users desk should show merge controls", async function () {
   const page = requirePage(this);
-  await page.locator("[data-news-desk-section='users']").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-section='administration']").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-admin-nav='users'][data-active='true']").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-admin-panel='users']").waitFor({ state: "visible", timeout: 10_000 });
   await page.locator(".news-desk-user-row", { hasText: "Demo Editor" }).waitFor({ state: "visible", timeout: 10_000 });
   await page.locator(".news-desk-user-row", { hasText: "Demo Reader" }).waitFor({ state: "visible", timeout: 10_000 });
   await page.locator(".news-desk-user-row button", { hasText: "Merge" }).first().waitFor({ state: "visible", timeout: 10_000 });
+});
+
+Then("the administration policies panel should render doctrine controls", async function () {
+  const page = requirePage(this);
+  await page.locator("[data-news-desk-section='administration']").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-admin-nav='policies']").click();
+  await page.locator("[data-news-desk-admin-nav='policies'][data-active='true']").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-admin-panel='policies']").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("textarea[data-news-desk-doctrine-input='mission']").first().waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-policy-categories]").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-policy-editor]").waitFor({ state: "visible", timeout: 10_000 });
+});
+
+Then("the administration sections panel should render section controls", async function () {
+  const page = requirePage(this);
+  await page.locator("[data-news-desk-section='administration']").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-admin-nav='sections']").click();
+  await page.locator("[data-news-desk-admin-nav='sections'][data-active='true']").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-admin-panel='sections']").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-admin-section='news']").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-section-editor]").waitFor({ state: "visible", timeout: 10_000 });
+});
+
+When("I update newsroom section {string} title to {string} and save", async function (sectionId, title) {
+  const page = requirePage(this);
+  await page.locator("[data-news-desk-admin-nav='sections']").click();
+  await page.locator(`[data-news-desk-admin-section='${sectionId}']`).click();
+  await page.locator("[data-news-desk-section-input='title']").first().fill(title);
+  await page.locator(`[data-news-desk-section-save='${sectionId}']`).click();
+});
+
+Then("newsroom section {string} should have title {string}", async function (sectionId, title) {
+  const page = requirePage(this);
+  await page.locator(`[data-news-desk-admin-section='${sectionId}']`).waitFor({ state: "visible", timeout: 10_000 });
+  const text = await page.locator(`[data-news-desk-admin-section='${sectionId}'] span`).first().innerText();
+  assert.equal(text.trim(), title);
+});
+
+When("I move newsroom section {string} down one slot", async function (sectionId) {
+  const page = requirePage(this);
+  await page.locator("[data-news-desk-admin-nav='sections']").click();
+  await page.locator(`[data-news-desk-admin-section='${sectionId}']`).click();
+  await page.locator("[data-news-desk-section-move='down']").click();
+});
+
+Then("newsroom section {string} should appear after {string}", async function (sectionId, previousSectionId) {
+  const page = requirePage(this);
+  const ids = await page.locator("[data-news-desk-admin-section]").evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-news-desk-admin-section")));
+  const currentIndex = ids.indexOf(sectionId);
+  const previousIndex = ids.indexOf(previousSectionId);
+  assert.ok(currentIndex > previousIndex, `Expected ${sectionId} index ${currentIndex} to be after ${previousSectionId} index ${previousIndex}`);
 });
 
 Then("newsroom user {string} should include identity {string}", async function (userLabel, identityLabel) {
@@ -2248,13 +2286,15 @@ async function waitForNewsroomSection(page, sectionId) {
 function getNewsroomSectionId(label) {
   const normalized = String(label).trim().toLowerCase();
   if (normalized === "overview") return "overview";
-  if (normalized === "users") return "users";
-  if (normalized === "desks") return "desks";
+  if (normalized === "users") return "administration";
+  if (normalized === "administration") return "administration";
+  if (normalized === "desks") return "topics";
   if (normalized === "topics") return "topics";
   if (normalized === "concepts") return "concepts";
   if (normalized === "references") return "references";
   if (normalized === "assignments") return "assignments";
-  if (normalized === "doctrine") return "doctrine";
+  if (normalized === "sections") return "administration";
+  if (normalized === "doctrine") return "administration";
   throw new Error(`Unknown newsroom section label: ${label}`);
 }
 

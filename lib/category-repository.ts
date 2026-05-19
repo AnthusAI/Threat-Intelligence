@@ -1,3 +1,10 @@
+import fs from "node:fs";
+import path from "node:path";
+import YAML from "yaml";
+import { createEmptyCategorySteeringDashboard } from "./category-dashboard";
+
+export { createEmptyCategorySteeringDashboard };
+
 export type CategorySteeringCorpus = {
   id: string;
   name: string;
@@ -113,6 +120,34 @@ export type LexicalSteeringRuleRecord = {
   metadata?: unknown;
 };
 
+export type NewsroomSectionType = "canonical" | "rotating";
+
+export type NewsroomSectionRecord = {
+  id: string;
+  title: string;
+  type: NewsroomSectionType;
+  editorialMission: string;
+  editorialPolicy: string;
+  enabled: boolean;
+  enabledStatus?: string | null;
+  sortOrder: number;
+  shortDescription?: string | null;
+  defaultArticleTypes?: Array<string | null> | null;
+  defaultPageBudget?: number | null;
+  assignmentGuidance?: string | null;
+  killCriteria?: string | null;
+  visualGuidance?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+};
+
+const NEWSROOM_SECTIONS_CONFIG_PATH = path.join(process.cwd(), "corpora", "papyrus-newsroom-sections.yml");
+const NEWSROOM_SECTION_TYPES = new Set<NewsroomSectionType>(["canonical", "rotating"]);
+let newsroomSectionSeedRowsCache: Array<Omit<NewsroomSectionRecord, "sortOrder" | "enabled" | "enabledStatus" | "createdAt" | "updatedAt"> & {
+  enabled: boolean;
+  sortOrder: number;
+}> | null = null;
+
 export type SteeringProposal = {
   id: string;
   categorySetId?: string | null;
@@ -178,11 +213,13 @@ export type ReferenceRecord = {
   retrievedAt?: string | null;
   importRunId?: string | null;
   importedAt?: string | null;
+  createdAt?: string | null;
   curationStatus?: string | null;
   curationStatusKey?: string | null;
   curationStatusUpdatedAt?: string | null;
   curationStatusUpdatedBy?: string | null;
   curationStatusReason?: string | null;
+  newsroomFeedKey?: string | null;
   metadata?: unknown;
   updatedAt?: string | null;
 };
@@ -228,6 +265,8 @@ export type SemanticNodeRecord = {
   aliases?: Array<string | null> | null;
   status: string;
   importRunId?: string | null;
+  createdAt?: string | null;
+  newsroomFeedKey?: string | null;
   updatedAt?: string | null;
 };
 
@@ -261,6 +300,9 @@ export type SemanticRelationRecord = {
   sourceSnapshotId?: string | null;
   importRunId?: string | null;
   importedAt?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  newsroomFeedKey?: string | null;
   metadata?: unknown;
 };
 
@@ -278,6 +320,7 @@ export type MessageRecord = {
   authorLabel?: string | null;
   createdAt: string;
   updatedAt: string;
+  newsroomFeedKey?: string | null;
   metadata?: unknown;
 };
 
@@ -306,6 +349,7 @@ export type AssignmentRecord = {
   createdBy?: string | null;
   createdAt: string;
   updatedAt: string;
+  newsroomFeedKey?: string | null;
   metadata?: unknown;
 };
 
@@ -369,8 +413,76 @@ export type DoctrineRecord = {
   updatedAt?: string | null;
 };
 
+export type AnalysisProfileSummary = {
+  key: string;
+  title: string;
+  description: string;
+  scope: string;
+  defaultMode: string;
+  corpusKey?: string | null;
+  classifierId?: string | null;
+  configurationName?: string | null;
+  biblicus: {
+    extractor?: string | null;
+    configurations: string[];
+  };
+  defaults: Record<string, unknown>;
+  allowedOverrides: string[];
+  expectedOutputs: string[];
+};
+
+export type NewsroomSummaryRecord = {
+  generatedAt: string;
+  staleAt?: string | null;
+  source?: string | null;
+  latestImportRun?: CategorySteeringImportRun | null;
+  counts: Record<string, number>;
+  facets?: NewsroomSummaryFacets | null;
+  assignmentStatusCounts: Record<string, number>;
+  assignmentTypeCounts: Record<string, number>;
+  referenceStatusCounts: Record<string, number>;
+  messageKindCounts: Record<string, number>;
+  messageDomainCounts: Record<string, number>;
+};
+
+export type NewsroomSummaryFacets = {
+  assignments?: {
+    byStatus?: Record<string, number>;
+    byType?: Record<string, number>;
+    statusByType?: Record<string, Record<string, number>>;
+  };
+  messages?: {
+    byKind?: Record<string, number>;
+    byDomain?: Record<string, number>;
+    byStatus?: Record<string, number>;
+    domainByKind?: Record<string, Record<string, number>>;
+  };
+  references?: {
+    byCurationStatus?: Record<string, number>;
+    byCorpus?: Record<string, number>;
+    statusByCorpus?: Record<string, Record<string, number>>;
+  };
+  semanticNodes?: {
+    byNodeKind?: Record<string, number>;
+    byStatus?: Record<string, number>;
+    byCorpus?: Record<string, number>;
+    byCategorySet?: Record<string, number>;
+  };
+  semanticRelations?: {
+    byRelationTypeKey?: Record<string, number>;
+    byRelationDomain?: Record<string, number>;
+    bySubjectKind?: Record<string, number>;
+    byObjectKind?: Record<string, number>;
+  };
+  imports?: {
+    byCorpus?: Record<string, number>;
+  };
+};
+
 export type CategorySteeringDashboard = {
   isDemo?: boolean;
+  isPublicSkeleton?: boolean;
+  summary?: NewsroomSummaryRecord | null;
   canManageUsers?: boolean;
   canonicalCorpusId?: string | null;
   canonicalCategorySetId?: string | null;
@@ -393,15 +505,92 @@ export type CategorySteeringDashboard = {
   assignments: AssignmentRecord[];
   assignmentEvents: AssignmentEventRecord[];
   doctrineRecords: DoctrineRecord[];
+  newsroomSections: NewsroomSectionRecord[];
   loadError?: string | null;
 };
 
+const DEFAULT_ANALYSIS_PROFILES_PATH = path.join(process.cwd(), "corpora", "papyrus-analysis-profiles.yml");
+const DEFAULT_STEERING_CONFIG_PATH = path.join(process.cwd(), "corpora", "papyrus-steering.yml");
+
+export async function loadAnalysisProfileSummaries(filepath = DEFAULT_ANALYSIS_PROFILES_PATH): Promise<AnalysisProfileSummary[]> {
+  try {
+    const parsed = YAML.parse(fs.readFileSync(filepath, "utf8")) as {
+      schemaVersion?: number;
+      profiles?: Array<Record<string, unknown>>;
+    } | null;
+    if (!parsed || parsed.schemaVersion !== 1 || !Array.isArray(parsed.profiles)) return [];
+    return parsed.profiles.map((entry) => ({
+      key: stringValue(entry.key),
+      title: stringValue(entry.title) || stringValue(entry.key),
+      description: stringValue(entry.description),
+      scope: stringValue(entry.scope),
+      defaultMode: stringValue(entry.defaultMode),
+      corpusKey: stringValue(entry.corpusKey) || null,
+      classifierId: stringValue(entry.classifierId) || null,
+      configurationName: stringValue(entry.configurationName) || null,
+      biblicus: {
+        extractor: stringValue(objectValue(entry.biblicus).extractor) || null,
+        configurations: stringArray(objectValue(entry.biblicus).configurations),
+      },
+      defaults: objectValue(entry.defaults),
+      allowedOverrides: stringArray(entry.allowedOverrides),
+      expectedOutputs: stringArray(entry.expectedOutputs),
+    })).filter((profile) => profile.key && profile.scope && profile.defaultMode);
+  } catch {
+    return [];
+  }
+}
+
+export async function loadConfiguredCorpusSummaries(filepath = DEFAULT_STEERING_CONFIG_PATH): Promise<CategorySteeringCorpus[]> {
+  try {
+    const parsed = YAML.parse(fs.readFileSync(filepath, "utf8")) as {
+      corpora?: Array<Record<string, unknown>>;
+    } | null;
+    if (!parsed || !Array.isArray(parsed.corpora)) return [];
+    return parsed.corpora.map((entry) => {
+      const key = stringValue(entry.key) || stringValue(entry.name);
+      const name = stringValue(entry.name) || key;
+      return {
+        id: knowledgeCorpusIdFromKey(key),
+        name,
+        role: stringValue(entry.role) || "source",
+      };
+    }).filter((corpus) => corpus.id && corpus.name);
+  } catch {
+    return [];
+  }
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function nullableStringValue(value: unknown): string | null {
+  const normalized = stringValue(value);
+  return normalized || null;
+}
+
+function integerValue(value: unknown): number | null {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) ? parsed : null;
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(stringValue).filter(Boolean) : [];
+}
+
+function knowledgeCorpusIdFromKey(corpusKey: string): string {
+  const safeKey = String(corpusKey || "unknown").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "unknown";
+  return `knowledge-corpus-${safeKey}`;
+}
+
 export async function loadCategorySteeringDashboard(options?: { demo?: boolean }): Promise<CategorySteeringDashboard> {
   if (options?.demo) return createDemoCategorySteeringDashboard();
-  return {
-    ...createEmptyCategorySteeringDashboard(),
-    loadError: "Newsroom canonical records require an editor user-pool session.",
-  };
+  return createEmptyCategorySteeringDashboard();
 }
 
 function sortCategorySets(categorySets: CategorySteeringCategorySet[], importRuns: CategorySteeringImportRun[]): CategorySteeringCategorySet[] {
@@ -463,30 +652,57 @@ function sortProposals(proposals: CategorySteeringProposal[]): CategorySteeringP
   });
 }
 
-function createEmptyCategorySteeringDashboard(): CategorySteeringDashboard {
+function defaultNewsroomSections(importedAt: string): NewsroomSectionRecord[] {
+  return loadNewsroomSectionSeedRows().map((row, index) => ({
+    ...row,
+    enabledStatus: "enabled",
+    sortOrder: Number.isInteger(row.sortOrder) && row.sortOrder > 0 ? row.sortOrder : index + 1,
+    createdAt: importedAt,
+    updatedAt: importedAt,
+  }));
+}
+
+function loadNewsroomSectionSeedRows() {
+  if (newsroomSectionSeedRowsCache) return newsroomSectionSeedRowsCache;
+  const parsed = YAML.parse(fs.readFileSync(NEWSROOM_SECTIONS_CONFIG_PATH, "utf8")) as {
+    schemaVersion?: number;
+    sections?: Array<Record<string, unknown>>;
+  };
+  if (!parsed || parsed.schemaVersion !== 1 || !Array.isArray(parsed.sections)) {
+    throw new Error(`Invalid newsroom section seed file: ${NEWSROOM_SECTIONS_CONFIG_PATH}`);
+  }
+  newsroomSectionSeedRowsCache = parsed.sections.map((entry, index) => normalizeNewsroomSectionSeedRow(entry, index));
+  return newsroomSectionSeedRowsCache;
+}
+
+function normalizeNewsroomSectionSeedRow(entry: Record<string, unknown>, index: number): Omit<NewsroomSectionRecord, "enabledStatus" | "createdAt" | "updatedAt"> {
+  const id = stringValue(entry.id);
+  if (!id) throw new Error(`Newsroom section at index ${index} is missing id in ${NEWSROOM_SECTIONS_CONFIG_PATH}`);
+  const title = stringValue(entry.title);
+  if (!title) throw new Error(`Newsroom section '${id}' is missing title in ${NEWSROOM_SECTIONS_CONFIG_PATH}`);
+  const typeRaw = stringValue(entry.type).toLowerCase() as NewsroomSectionType;
+  if (!NEWSROOM_SECTION_TYPES.has(typeRaw)) {
+    throw new Error(`Newsroom section '${id}' has unsupported type '${stringValue(entry.type)}' in ${NEWSROOM_SECTIONS_CONFIG_PATH}`);
+  }
+  const editorialMission = stringValue(entry.editorialMission);
+  const editorialPolicy = stringValue(entry.editorialPolicy);
+  if (!editorialMission || !editorialPolicy) {
+    throw new Error(`Newsroom section '${id}' requires editorialMission and editorialPolicy in ${NEWSROOM_SECTIONS_CONFIG_PATH}`);
+  }
   return {
-    canonicalCorpusId: null,
-    canonicalCategorySetId: null,
-    userDirectory: [],
-    corpora: [],
-    importRuns: [],
-    categorySets: [],
-    categorys: [],
-    categoryTrees: [],
-    categoryNodes: [],
-    categoryKeywords: [],
-    lexicalSteeringRules: [],
-    proposals: [],
-    artifacts: [],
-    references: [],
-    referenceAttachments: [],
-    semanticNodes: [],
-    messages: [],
-    semanticRelations: [],
-    assignments: [],
-    assignmentEvents: [],
-    doctrineRecords: [],
-    loadError: null,
+    id,
+    title,
+    type: typeRaw,
+    editorialMission,
+    editorialPolicy,
+    enabled: typeof entry.enabled === "boolean" ? entry.enabled : true,
+    sortOrder: integerValue(entry.sortOrder) ?? index + 1,
+    shortDescription: nullableStringValue(entry.shortDescription),
+    defaultArticleTypes: stringArray(entry.defaultArticleTypes),
+    defaultPageBudget: integerValue(entry.defaultPageBudget),
+    assignmentGuidance: nullableStringValue(entry.assignmentGuidance),
+    killCriteria: nullableStringValue(entry.killCriteria),
+    visualGuidance: nullableStringValue(entry.visualGuidance),
   };
 }
 
@@ -507,6 +723,7 @@ function createDemoCategorySteeringDashboard(): CategorySteeringDashboard {
 
   return {
     isDemo: true,
+    summary: null,
     canManageUsers: true,
     canonicalCorpusId: corpusId,
     canonicalCategorySetId: categorySetId,
@@ -1028,14 +1245,14 @@ function createDemoCategorySteeringDashboard(): CategorySteeringDashboard {
         updatedAt: importedAt,
       },
       {
-        id: "semantic-node-comment-import-rationale-v1",
-        lineageId: "semantic-node-comment-import-rationale",
+        id: "semantic-node-comment-ingestion-rationale-v1",
+        lineageId: "semantic-node-comment-ingestion-rationale",
         versionNumber: 1,
         versionState: "current",
-        nodeKey: "comment.import_rationale",
+        nodeKey: "comment.ingestion_rationale",
         nodeKind: "commentConcept",
         corpusId: sourceCorpusId,
-        displayName: "Import Rationale",
+        displayName: "Ingestion Rationale",
         status: "accepted",
         importRunId: "knowledge-import-demo-projection",
         updatedAt: importedAt,
@@ -1044,11 +1261,11 @@ function createDemoCategorySteeringDashboard(): CategorySteeringDashboard {
     messages: [
       {
         id: "message-demo-history-002-rationale",
-        messageKind: "import_rationale",
+        messageKind: "ingestion_rationale",
         messageDomain: "commentary",
         status: "active",
         body: "Imported as a useful holdout against modern scaling coverage.",
-        summary: "Holdout import rationale",
+        summary: "Holdout ingestion rationale",
         source: "biblicus-import",
         importRunId: "knowledge-import-demo-projection",
         createdAt: importedAt,
@@ -1112,6 +1329,7 @@ function createDemoCategorySteeringDashboard(): CategorySteeringDashboard {
         createdAt: importedAt,
       },
     ],
+    newsroomSections: defaultNewsroomSections(importedAt),
     doctrineRecords: [
       {
         id: "item-editorial-doctrine-mission-v1",

@@ -156,17 +156,14 @@ Feature: Newspaper layout scenarios
     When I follow the newsroom overview link for "References"
     Then the active newsroom section should be "references"
     And the newsroom should not show an editor access gate
-    When I follow the newsroom tab for "Desks"
-    Then the active newsroom section should be "desks"
-    And the newsroom should not show an editor access gate
     When I follow the newsroom tab for "Concepts"
     Then the active newsroom section should be "concepts"
     And the newsroom should not show an editor access gate
     When I follow the newsroom tab for "Assignments"
     Then the active newsroom section should be "assignments"
     And the newsroom should not show an editor access gate
-    When I follow the newsroom tab for "Doctrine"
-    Then the active newsroom section should be "doctrine"
+    When I follow the newsroom tab for "Administration"
+    Then the active newsroom section should be "administration"
     And the newsroom should not show an editor access gate
     And no browser console errors should occur
 
@@ -181,11 +178,6 @@ Feature: Newspaper layout scenarios
     Then the first newsroom category name should be "Foundation Model Scaling Updated"
     And no browser console errors should occur
 
-  Scenario: Newsroom renders desks as root-topic operational sections
-    Given I open the desks newsroom at 1280 by 900
-    Then the desks desk should render
-    And no browser console errors should occur
-
   Scenario: Newsroom browses references and semantic concepts
     Given I open the references newsroom at 1280 by 900
     Then the references desk should show reference metadata and semantic neighbors
@@ -194,8 +186,14 @@ Feature: Newspaper layout scenarios
     And no browser console errors should occur
 
   Scenario: Newsroom merges duplicate user identities
-    Given I open the users newsroom at 1280 by 900
+    Given I open the administration newsroom at 1280 by 900
     Then the users desk should show merge controls
+    And the administration policies panel should render doctrine controls
+    And the administration sections panel should render section controls
+    When I update newsroom section "news" title to "Daily News" and save
+    Then newsroom section "news" should have title "Daily News"
+    When I move newsroom section "news" down one slot
+    Then newsroom section "news" should appear after "business"
     When I merge newsroom user "Demo Reader" into "Demo Editor"
     Then newsroom user "Demo Editor" should include identity "reader@example.com"
     And newsroom user "Demo Reader" should not be listed
@@ -213,6 +211,13 @@ Feature: Newspaper layout scenarios
   Scenario: Production newsroom requires editor access
     Given I open the edition path "/newsroom" at 1280 by 900
     Then the newsroom should show an editor access gate
+    And no browser console errors should occur
+
+  Scenario: Administration sections panel route variants resolve
+    Given I open the edition path "/newsroom/administration/sections?demo=1" at 1280 by 900
+    Then the administration sections panel should render section controls
+    Given I open the edition path "/newsroom/administration?demo=1&panel=sections" at 1280 by 900
+    Then the administration sections panel should render section controls
     And no browser console errors should occur
 
   Scenario: Unauthenticated readers do not see Newsroom appendix pages

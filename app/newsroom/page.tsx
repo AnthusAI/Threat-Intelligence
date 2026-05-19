@@ -7,9 +7,12 @@ type NewsDeskRootPageProps = {
     demo?: string | string[];
     section?: string | string[];
     tab?: string | string[];
+    panel?: string | string[];
     reference?: string | string[];
     category?: string | string[];
     node?: string | string[];
+    assignment?: string | string[];
+    message?: string | string[];
     user?: string | string[];
     item?: string | string[];
   }>;
