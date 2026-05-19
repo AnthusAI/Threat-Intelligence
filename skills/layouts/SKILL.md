@@ -60,6 +60,12 @@ from the AppSync API in AWS. The JWT is a direct authoring token accepted by the
 AppSync Lambda authorizer. It is not a Cognito login session. If the JWT is
 missing or expired, the CLI cannot inspect or sync cloud content.
 
+Refresh JWTs with:
+
+```bash
+npm run auth:refresh-jwt -- --write-env .env
+```
+
 Basic CLI checks:
 
 ```bash
