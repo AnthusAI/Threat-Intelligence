@@ -3,7 +3,7 @@ const path = require("node:path");
 const YAML = require("yaml");
 
 const DEFAULT_NEWSROOM_SECTIONS_PATH = path.join(__dirname, "..", "..", "corpora", "papyrus-newsroom-sections.yml");
-const SECTION_TYPES = new Set(["canonical", "rotating"]);
+const SECTION_TYPES = new Set(["canonical", "floating", "rotating"]);
 
 let newsroomSectionSeedCache = null;
 
@@ -46,7 +46,8 @@ function normalizeNewsroomSectionSeed(entry, index, filepath) {
   const id = String(entry.id ?? "").trim();
   if (!id) throw new Error(`Newsroom section at index ${index} in ${filepath} is missing id.`);
   const title = requiredText(entry.title, `title for section ${id} in ${filepath}`);
-  const type = String(entry.type ?? "").trim().toLowerCase();
+  const rawType = String(entry.type ?? "").trim().toLowerCase();
+  const type = rawType === "rotating" ? "floating" : rawType;
   if (!SECTION_TYPES.has(type)) {
     throw new Error(`Newsroom section ${id} in ${filepath} has unsupported type '${entry.type}'.`);
   }

@@ -160,6 +160,13 @@ query GetAssignment($id: ID!) {
     corpusId
     categorySetId
     classifierId
+    sectionId
+    sectionKey
+    sectionType
+    sectionStatusKey
+    sectionQueueStatusKey
+    primaryFocusCategoryKey
+    topicScopeCategoryKeys
     sourceSnapshotId
     importRunId
     createdBy
@@ -193,6 +200,13 @@ query GetAssignmentContext($assignmentId: ID!) {
       corpusId
       categorySetId
       classifierId
+      sectionId
+      sectionKey
+      sectionType
+      sectionStatusKey
+      sectionQueueStatusKey
+      primaryFocusCategoryKey
+      topicScopeCategoryKeys
       sourceSnapshotId
       importRunId
       createdBy
@@ -257,6 +271,13 @@ query ListAssignments($limit: Int, $nextToken: String) {
       corpusId
       categorySetId
       classifierId
+      sectionId
+      sectionKey
+      sectionType
+      sectionStatusKey
+      sectionQueueStatusKey
+      primaryFocusCategoryKey
+      topicScopeCategoryKeys
       sourceSnapshotId
       importRunId
       createdBy
@@ -515,6 +536,12 @@ def papyrus_build_assignment_agent_context(
     context = papyrus_get_assignment_context(assignment_id)["assignment_context"]
     assignment = _decode_record_json(context.get("assignment") or {})
     metadata = _normalize_assignment_metadata(assignment.get("metadata") or {})
+    section_key = (
+        assignment.get("sectionKey")
+        or metadata.get("sectionKey")
+        or assignment.get("sectionId")
+        or metadata.get("sectionId")
+    )
     lane_key = _assignment_lane_key(assignment, metadata)
     profile_key = _normalize_context_profile(context_profile or metadata.get("contextProfile"), lane_key)
     token_budget = _context_token_budget(profile_key, max_tokens or metadata.get("contextTokenBudget"))
@@ -554,7 +581,7 @@ def papyrus_build_assignment_agent_context(
         [category_key for category_key in [desk_category.get("categoryKey") if desk_category else None, focus_category.get("categoryKey") if focus_category else None] if category_key],
     )
     recent_assignments = _list_assignments()
-    desk_assignments = _assignments_for_desk(recent_assignments, metadata, desk_category, focus_category)
+    desk_assignments = _assignments_for_desk(recent_assignments, metadata, desk_category, focus_category, section_key=section_key)
     assignment_events = _assignment_events_for_assignments([entry.get("id") for entry in desk_assignments][:8])
     recent_published_items = _recent_published_items(recent_days)
     desk_published_items = _published_items_for_desk(recent_published_items, desk_category, focus_category)
@@ -592,6 +619,12 @@ def papyrus_build_assignment_agent_context(
     return {
         "assignment_agent_context": {
             "assignmentId": assignment.get("id"),
+            "sectionKey": section_key,
+            "sectionId": assignment.get("sectionId") or metadata.get("sectionId") or section_key,
+            "sectionTitle": metadata.get("sectionTitle") or section_key,
+            "sectionType": assignment.get("sectionType") or metadata.get("sectionType"),
+            "topicScopeCategoryKeys": _string_list(assignment.get("topicScopeCategoryKeys") or metadata.get("topicScopeCategoryKeys") or []),
+            "primaryFocusCategoryKey": assignment.get("primaryFocusCategoryKey") or metadata.get("primaryFocusCategoryKey") or explicit_focus_key,
             "deskCategoryKey": desk_category.get("categoryKey") if desk_category else metadata.get("deskCategoryKey"),
             "deskCategoryLineageId": desk_category.get("lineageId") if desk_category else metadata.get("deskCategoryLineageId"),
             "focusCategoryKey": (
@@ -2238,12 +2271,24 @@ def _assignments_for_desk(
     metadata: dict[str, Any],
     desk_category: dict[str, Any] | None,
     focus_category: dict[str, Any] | None,
+    section_key: Any = None,
 ) -> list[dict[str, Any]]:
     desk_key = (desk_category or {}).get("categoryKey") or metadata.get("deskCategoryKey") or metadata.get("rootCategoryKey")
     focus_key = (focus_category or {}).get("categoryKey") or metadata.get("focusCategoryKey") or metadata.get("researchLens")
+    normalized_section_key = str(section_key or "").strip()
     result = []
     for assignment in assignments:
         assignment_metadata = _normalize_assignment_metadata(assignment.get("metadata") or {})
+        assignment_section_key = str(
+            assignment.get("sectionKey")
+            or assignment_metadata.get("sectionKey")
+            or assignment.get("sectionId")
+            or assignment_metadata.get("sectionId")
+            or ""
+        ).strip()
+        if normalized_section_key and assignment_section_key == normalized_section_key:
+            result.append(assignment)
+            continue
         assignment_desk_key = assignment_metadata.get("deskCategoryKey") or assignment_metadata.get("rootCategoryKey")
         assignment_focus_key = assignment_metadata.get("focusCategoryKey") or assignment_metadata.get("researchLens")
         if desk_key and assignment_desk_key == desk_key:
@@ -2384,6 +2429,25 @@ def _build_assignment_context_blocks(
                 _format_doctrine_block("Desk Doctrine", desk_doctrine),
                 required=True,
                 metadata={"scope": "desk", "deskCategoryKey": (desk_category or {}).get("categoryKey")},
+            )
+        )
+    section_key = assignment.get("sectionKey") or metadata.get("sectionKey") or assignment.get("sectionId") or metadata.get("sectionId")
+    if section_key:
+        blocks.append(
+            _context_block(
+                "doctrine-section",
+                "doctrine",
+                "\n".join([
+                    f"Section: {metadata.get('sectionTitle') or section_key}",
+                    f"section_key: {section_key}",
+                    f"section_type: {assignment.get('sectionType') or metadata.get('sectionType') or 'unknown'}",
+                    f"mission: {metadata.get('sectionMission') or metadata.get('editorialMission') or ''}",
+                    f"policy: {metadata.get('sectionPolicies') or metadata.get('editorialPolicy') or metadata.get('sectionPolicy') or ''}",
+                    f"guidance: {metadata.get('assignmentGuidance') or ''}",
+                    f"kill_criteria: {metadata.get('killCriteria') or ''}",
+                ]),
+                required=True,
+                metadata={"scope": "section", "sectionKey": section_key},
             )
         )
     blocks.append(

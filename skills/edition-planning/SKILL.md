@@ -49,9 +49,10 @@ reference/category/graph state, not guess from stale local files.
   default overassignment ratio is `3/2`, so dispatch
   `ceil(publicationSlots * 1.5)` assignments per desk/lane target unless an
   editor specifies another ratio.
-- Dispatch by Newsroom desk plus publication lane, not by individual reference.
-  References are evidence for the assignment. They are not the primary planning
-  unit.
+- Dispatch by configurable Newsroom section plus publication lane. Sections are
+  the operational desks; topics/categories are optional knowledge scope for
+  retrieval and focus. References are evidence for the assignment. They are not
+  the primary planning unit.
 - Default active lanes are `reporting`, `analysis`, and `briefs`. `Opinion` can
   exist as a semantic concept, but it is opt-in through publication or desk
   policy and should not be dispatched by default.
@@ -72,8 +73,9 @@ reference/category/graph state, not guess from stale local files.
    current editor/admin or JWT authoring lane. The edition record is the
    ontological anchor for the assignment batch, even before any reader-facing
    `EditionItem` placements exist.
-3. Define desk/lane targets:
-   - root canonical category as the Newsroom desk;
+3. Define section/lane targets:
+   - configurable `NewsroomSection` as the operational desk;
+   - optional root/focus categories as knowledge scope;
    - lane key, usually `reporting`, `analysis`, or `briefs`;
    - intended publication slot count for the desk/lane;
    - desired evidence or source freshness;
@@ -99,9 +101,10 @@ reference/category/graph state, not guess from stale local files.
 7. Create or plan private `Assignment` rows. If the current CLI cannot create
    the exact assignment rows, stop with a clear handoff instead of creating
    surrogate `Item` rows.
-8. Link each assignment to the `Edition` record, its desk category, lane concept,
-   and its evidence with `SemanticRelation` rows. Metadata helps filtering, but
-   the semantic links are what make the edition-assignment graph navigable.
+8. Link each assignment to the `Edition` record, its Newsroom section, optional
+   topic scope, lane concept, and evidence with `SemanticRelation` rows. The
+   section index fields support hot queue queries; semantic links make the
+   edition-assignment graph navigable.
 9. Researchers consume the assignments using `skills/researcher-doctrine/SKILL.md`
    and return private research packets.
 10. Editors select the strongest outputs. Only selected drafts become

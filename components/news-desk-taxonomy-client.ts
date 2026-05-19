@@ -1028,8 +1028,8 @@ function sortCategorys(categorys: CategorySteeringCategory[]): CategorySteeringC
   });
 }
 
-function normalizeNewsroomSectionType(value: string | null | undefined): "canonical" | "rotating" {
-  return value === "rotating" ? "rotating" : "canonical";
+function normalizeNewsroomSectionType(value: string | null | undefined): "canonical" | "floating" {
+  return value === "floating" || value === "rotating" ? "floating" : "canonical";
 }
 
 function sortNewsroomSections(sections: NewsroomSectionRecord[]): NewsroomSectionRecord[] {

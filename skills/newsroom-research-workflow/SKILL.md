@@ -24,6 +24,9 @@ to it.
 - `Assignment.assigneeKey` is the flexible claim/lease identity. It only needs
   to be meaningful within the competing worker pool; it can represent a human,
   procedure run, worker process, or coding-agent session.
+- `Assignment.sectionKey` names the configurable Newsroom section that owns the
+  work. Treat sections as desks. Use `topicScopeCategoryKeys` and
+  `primaryFocusCategoryKey` only as knowledge/retrieval scope.
 - Fresh web search results are reference prospects, not evidence. They belong
   in `sourceSnapshots` and `proposedReferences` until intake registers them as
   `Reference` records.
@@ -66,6 +69,8 @@ For analysis assignments, two canonical execution modes are supported:
 Queue worker mode is also supported through
 `assignments process-queue --type analysis.reindex ...` with deterministic
 ordering and bounded batch size.
+Use `--section <section-key>` when the worker should process only one section's
+queue.
 
 When worker operations mutate `Assignment`, `AssignmentEvent`, `Message`,
 `Reference`, `SemanticRelation`, `SemanticNode`, or category/import records,

@@ -2145,9 +2145,10 @@ async function listAssignments(flags) {
   if (options.queue) assignments = assignments.filter((assignment) => assignment.queueKey === options.queue);
   if (options.status) assignments = assignments.filter((assignment) => assignment.status === options.status);
   if (options.type) assignments = assignments.filter((assignment) => assignment.assignmentTypeKey === options.type);
+  if (options.section) assignments = assignments.filter((assignment) => assignmentSectionKey(assignment) === options.section);
   assignments.sort((left, right) => assignmentSortKey(left).localeCompare(assignmentSortKey(right)));
   for (const assignment of assignments) {
-    console.log(`${assignment.status}\t${assignment.id}\t${assignment.assignmentTypeKey}\t${assignment.queueKey}\t${assignment.title}`);
+    console.log(`${assignment.status}\t${assignment.id}\t${assignment.assignmentTypeKey}\t${assignment.queueKey}\tsection=${assignmentSectionKey(assignment) ?? ""}\t${assignment.title}`);
   }
 }
 
@@ -2363,13 +2364,15 @@ async function createAnalysisReindexAssignment(flags) {
   const options = parseOptions(flags);
   const plan = buildAnalysisReindexPlanFromOptions(options, flags);
   const { client } = createAuthoringClient();
-  const [assignments, assignmentEvents, semanticRelations, categorySets] = await Promise.all([
+  const [assignments, assignmentEvents, semanticRelations, categorySets, newsroomSections] = await Promise.all([
     client.listRecords("Assignment"),
     client.listRecords("AssignmentEvent"),
     client.listRecords("SemanticRelation"),
     client.listRecords("CategorySet"),
+    client.listRecords("NewsroomSection"),
   ]);
   const categorySet = selectAnalysisCategorySet(categorySets, plan, options["category-set"]);
+  const sectionTarget = resolveNewsroomSectionTarget(newsroomSections, options.section);
   const existing = mapExistingRecords({
     Assignment: assignments,
     AssignmentEvent: assignmentEvents,
@@ -2377,6 +2380,7 @@ async function createAnalysisReindexAssignment(flags) {
   });
   const assignmentPlan = buildAnalysisReindexAssignmentRecords(plan, {
     categorySet,
+    sectionTarget,
     existing,
     actorLabel: options.actor || "papyrus-content-cli",
   });
@@ -2406,13 +2410,15 @@ async function runAnalysisReindexNow(flags) {
   const flagsWithRunId = injectRunIdOverride(flags, runNowOptions["run-id"]);
   const plan = buildAnalysisReindexPlanFromOptions(runNowOptions, flagsWithRunId);
   const { auth, client } = createAuthoringClient();
-  const [assignments, assignmentEvents, semanticRelations, categorySets] = await Promise.all([
+  const [assignments, assignmentEvents, semanticRelations, categorySets, newsroomSections] = await Promise.all([
     client.listRecords("Assignment"),
     client.listRecords("AssignmentEvent"),
     client.listRecords("SemanticRelation"),
     client.listRecords("CategorySet"),
+    client.listRecords("NewsroomSection"),
   ]);
   const categorySet = selectAnalysisCategorySet(categorySets, plan, runNowOptions["category-set"]);
+  const sectionTarget = resolveNewsroomSectionTarget(newsroomSections, runNowOptions.section);
   const existing = mapExistingRecords({
     Assignment: assignments,
     AssignmentEvent: assignmentEvents,
@@ -2420,6 +2426,7 @@ async function runAnalysisReindexNow(flags) {
   });
   const assignmentPlan = buildAnalysisReindexAssignmentRecords(plan, {
     categorySet,
+    sectionTarget,
     existing,
     actorLabel: runNowOptions.actor || "papyrus-content-cli",
   });
@@ -3056,6 +3063,7 @@ async function processAssignmentQueue(flags) {
   const assignmentTypeKey = normalizeCliString(options.type);
   if (!assignmentTypeKey) throw new Error("assignments process-queue requires --type <assignment-type-key>.");
   const queueKey = normalizeCliString(options.queue);
+  const sectionKey = normalizeCliString(options.section);
   const targetStatus = normalizeCliString(options.status) ?? "open";
   const stopOnError = parseBooleanOption(options["stop-on-error"], true, "--stop-on-error");
   const dryRun = parseBooleanOption(options["dry-run"], false, "--dry-run");
@@ -3070,6 +3078,7 @@ async function processAssignmentQueue(flags) {
   const candidates = (await client.listRecords("Assignment"))
     .filter((assignment) => assignment.assignmentTypeKey === assignmentTypeKey)
     .filter((assignment) => !queueKey || assignment.queueKey === queueKey)
+    .filter((assignment) => !sectionKey || assignmentSectionKey(assignment) === sectionKey)
     .filter((assignment) => assignment.status === targetStatus)
     .sort(compareAssignmentQueueOrder);
 
@@ -3077,6 +3086,7 @@ async function processAssignmentQueue(flags) {
   if (dryRun) {
     console.log(`assignment-process-queue\tdry-run\ttrue`);
     console.log(`assignment-process-queue\ttype\t${assignmentTypeKey}`);
+    console.log(`assignment-process-queue\tsection\t${sectionKey ?? ""}`);
     console.log(`assignment-process-queue\tstatus\t${targetStatus}`);
     console.log(`assignment-process-queue\tcandidates\t${candidates.length}`);
     console.log(`assignment-process-queue\tselected\t${selected.length}`);
@@ -3175,6 +3185,7 @@ async function processAssignmentQueue(flags) {
   }
 
   console.log(`assignment-process-queue\ttype\t${assignmentTypeKey}`);
+  console.log(`assignment-process-queue\tsection\t${sectionKey ?? ""}`);
   console.log(`assignment-process-queue\tstatus\t${targetStatus}`);
   console.log(`assignment-process-queue\tattempted\t${summary.attempted}`);
   console.log(`assignment-process-queue\tclaimed\t${summary.claimed}`);
@@ -3369,6 +3380,28 @@ function buildAnalysisReindexPlanFromOptions(options, flags) {
     categorySetId: options["category-set"],
     categoryKey: options["category-key"],
   });
+}
+
+function resolveNewsroomSectionTarget(newsroomSections, sectionKey) {
+  const normalized = normalizeCliString(sectionKey);
+  if (!normalized) return null;
+  const section = newsroomSections.find((entry) => (
+    entry.id === normalized
+    || entry.sectionKey === normalized
+    || safeId(entry.title) === normalized
+  ));
+  if (!section) throw new Error(`Unknown NewsroomSection '${normalized}'.`);
+  if (section.enabled === false || section.enabledStatus === "disabled") throw new Error(`NewsroomSection '${normalized}' is disabled.`);
+  return {
+    id: section.id,
+    title: section.title,
+    type: section.type === "rotating" ? "floating" : section.type,
+    editorialMission: section.editorialMission ?? null,
+    editorialPolicy: section.editorialPolicy ?? null,
+    assignmentGuidance: section.assignmentGuidance ?? null,
+    killCriteria: section.killCriteria ?? null,
+    visualGuidance: section.visualGuidance ?? null,
+  };
 }
 
 function selectAnalysisCategorySet(categorySets, plan, explicitCategorySetId) {
@@ -5292,6 +5325,7 @@ async function updateNewsroomSummaryAfterReferenceRegistration(client, changes, 
   }
   const latestImportRun = createdByModel.get("KnowledgeImportRun")?.[0] ?? plan.records.find((record) => record.modelName === "KnowledgeImportRun")?.expected ?? null;
   const createdAssignments = createdByModel.get("Assignment") ?? [];
+  const createdAssignmentFacets = assignmentsWithSummarySection(createdAssignments);
   const createdMessages = createdByModel.get("Message") ?? [];
   const createdSemanticRelations = createdByModel.get("SemanticRelation") ?? [];
   const createdImportRuns = createdByModel.get("KnowledgeImportRun") ?? [];
@@ -5318,6 +5352,9 @@ async function updateNewsroomSummaryAfterReferenceRegistration(client, changes, 
         byStatus: countDelta(createdAssignments, "status", "unknown"),
         byType: countDelta(createdAssignments, "assignmentTypeKey", "unknown"),
         statusByType: nestedCountDelta(createdAssignments, "assignmentTypeKey", "status", "unknown", "unknown"),
+        bySection: countDelta(createdAssignmentFacets, "summarySectionKey", "unsectioned"),
+        statusBySection: nestedCountDelta(createdAssignmentFacets, "summarySectionKey", "status", "unsectioned", "unknown"),
+        typeBySection: nestedCountDelta(createdAssignmentFacets, "summarySectionKey", "assignmentTypeKey", "unsectioned", "unknown"),
       },
       messages: {
         byKind: countDelta(createdMessages, "messageKind", "unknown"),
@@ -5355,6 +5392,7 @@ async function updateNewsroomSummaryAfterAssignmentCreates(client, changes, { ac
     createdByModel.get(record.modelName).push(record.expected);
   }
   const createdAssignments = createdByModel.get("Assignment") ?? [];
+  const createdAssignmentFacets = assignmentsWithSummarySection(createdAssignments);
   const createdEvents = createdByModel.get("AssignmentEvent") ?? [];
   const createdRelations = createdByModel.get("SemanticRelation") ?? [];
   if (!createdAssignments.length && !createdEvents.length && !createdRelations.length) return;
@@ -5371,6 +5409,9 @@ async function updateNewsroomSummaryAfterAssignmentCreates(client, changes, { ac
       assignments: {
         byType: countDelta(createdAssignments, "assignmentTypeKey", "unknown"),
         statusByType: nestedCountDelta(createdAssignments, "assignmentTypeKey", "status", "unknown", "unknown"),
+        bySection: countDelta(createdAssignmentFacets, "summarySectionKey", "unsectioned"),
+        statusBySection: nestedCountDelta(createdAssignmentFacets, "summarySectionKey", "status", "unsectioned", "unknown"),
+        typeBySection: nestedCountDelta(createdAssignmentFacets, "summarySectionKey", "assignmentTypeKey", "unsectioned", "unknown"),
       },
       semanticRelations: {
         byRelationTypeKey: countDelta(createdRelations, "relationTypeKey", "unknown"),
@@ -5503,6 +5544,13 @@ function nestedCountDelta(items, outerKey, innerKey, outerDefaultValue, innerDef
     counts[outer][inner] = (counts[outer][inner] ?? 0) + 1;
   }
   return counts;
+}
+
+function assignmentsWithSummarySection(assignments) {
+  return assignments.map((assignment) => ({
+    ...assignment,
+    summarySectionKey: assignmentSectionKey(assignment) ?? "unsectioned",
+  }));
 }
 
 function buildReferenceAnalysisManifest({ corpusConfig, corpusId, references, attachments }) {
@@ -7140,12 +7188,20 @@ async function applyAssignmentAction({
   if (!current) throw new Error(`Assignment ${assignmentId} was not found.`);
   const now = new Date().toISOString();
   const nextStatus = assignmentStatusForAction(action, current.status);
+  const currentMetadata = parseJsonish(current.metadata);
   const update = {
     id: assignmentId,
     assignmentTypeKey: current.assignmentTypeKey,
     queueKey: current.queueKey,
     status: nextStatus,
     queueStatusKey: `${current.queueKey}#${nextStatus}`,
+    sectionId: current.sectionId ?? currentMetadata.sectionId ?? assignmentSectionKey(current) ?? null,
+    sectionKey: assignmentSectionKey(current),
+    sectionType: current.sectionType ?? currentMetadata.sectionType ?? null,
+    sectionStatusKey: assignmentSectionStatusKey(current, nextStatus),
+    sectionQueueStatusKey: assignmentSectionQueueStatusKey(current, nextStatus),
+    primaryFocusCategoryKey: current.primaryFocusCategoryKey ?? currentMetadata.primaryFocusCategoryKey ?? currentMetadata.focusCategoryKey ?? null,
+    topicScopeCategoryKeys: Array.isArray(current.topicScopeCategoryKeys) ? current.topicScopeCategoryKeys : Array.isArray(currentMetadata.topicScopeCategoryKeys) ? currentMetadata.topicScopeCategoryKeys : [],
     createdAt: current.createdAt,
     updatedAt: now,
     newsroomFeedKey: current.newsroomFeedKey ?? "assignments",
@@ -7201,6 +7257,7 @@ async function applyAssignmentAction({
   const statusDeltas = current.status === nextStatus
     ? {}
     : { [current.status]: -1, [nextStatus]: 1 };
+  const sectionKey = assignmentSectionKey(current) ?? "unsectioned";
   await client.updateNewsroomSummary({
     source: "incremental",
     countDeltas: {
@@ -7213,6 +7270,14 @@ async function applyAssignmentAction({
           ? {}
           : {
               [current.assignmentTypeKey]: {
+                [current.status]: -1,
+                [nextStatus]: 1,
+              },
+            },
+        statusBySection: current.status === nextStatus
+          ? {}
+          : {
+              [sectionKey]: {
                 [current.status]: -1,
                 [nextStatus]: 1,
               },
@@ -7355,6 +7420,28 @@ function uniqueStrings(values) {
 
 function assignmentSortKey(assignment) {
   return `${String(assignment.priority ?? 999999).padStart(6, "0")}#${assignment.createdAt ?? ""}#${assignment.id}`;
+}
+
+function assignmentSectionKey(assignment) {
+  const metadata = parseJsonish(assignment?.metadata);
+  return normalizeCliString(assignment?.sectionKey)
+    ?? normalizeCliString(metadata.sectionKey)
+    ?? normalizeCliString(assignment?.sectionId)
+    ?? normalizeCliString(metadata.sectionId)
+    ?? null;
+}
+
+function assignmentSectionStatusKey(assignment, status = assignment?.status) {
+  const sectionKey = assignmentSectionKey(assignment);
+  const normalizedStatus = normalizeCliString(status) ?? "open";
+  return sectionKey ? `${sectionKey}#${normalizedStatus}` : null;
+}
+
+function assignmentSectionQueueStatusKey(assignment, status = assignment?.status) {
+  const sectionKey = assignmentSectionKey(assignment);
+  const queueKey = normalizeCliString(assignment?.queueKey);
+  const normalizedStatus = normalizeCliString(status) ?? "open";
+  return sectionKey && queueKey ? `${sectionKey}#${queueKey}#${normalizedStatus}` : null;
 }
 
 function compareAssignmentQueueOrder(left, right) {
@@ -7622,8 +7709,8 @@ function printUsage() {
   console.log("  npm run content -- assignments build-context --assignment <id> --context-profile reporting");
   console.log("  npm run content -- assignments research-packets --assignment <id>");
   console.log("  npm run content -- assignments events --assignment <id>");
-  console.log("  npm run content -- assignments process-queue --type analysis.reindex --status open --max-count 10 --dry-run");
-  console.log("  npm run content -- assignments process-queue --type analysis.reindex --status open --max-count 10 --max-runtime-seconds 3600 --stop-on-error false");
+  console.log("  npm run content -- assignments process-queue --type analysis.reindex --section technology --status open --max-count 10 --dry-run");
+  console.log("  npm run content -- assignments process-queue --type analysis.reindex --section technology --status open --max-count 10 --max-runtime-seconds 3600 --stop-on-error false");
   console.log("  npm run content -- assignments claim --assignment <id> --assignee-key <worker-run-id> --claim-ttl-seconds 3600");
   console.log("  npm run content -- assignments complete --assignment <id> --note <text>");
   console.log("  npm run content -- analysis profiles --profiles corpora/papyrus-analysis-profiles.yml");
@@ -7631,7 +7718,7 @@ function printUsage() {
   console.log("  npm run content -- analysis reindex-plan --profile canonical-topic-classifier --corpus-key AI-ML-research --override bertopic_analysis.parameters.nr_topics=12");
   console.log("  npm run content -- analysis preview-reindex --profile canonical-topic-classifier --corpus-key AI-ML-research --override bertopic_analysis.parameters.nr_topics=12");
   console.log("  npm run content -- analysis create-reindex-assignment --profile canonical-topic-classifier --corpus-key AI-ML-research --apply");
-  console.log("  npm run content -- analysis run-now --profile canonical-topic-classifier --corpus-key AI-ML-research --max-runtime-seconds 3600 --override bertopic_analysis.parameters.nr_topics=12");
+  console.log("  npm run content -- analysis run-now --profile canonical-topic-classifier --corpus-key AI-ML-research --section science --max-runtime-seconds 3600 --override bertopic_analysis.parameters.nr_topics=12");
   console.log("  npm run content -- analysis execute-assignment --assignment <analysis-assignment-id> --max-runtime-seconds 3600");
   console.log("  npm run content -- newsroom recount-summary --apply");
   console.log("  npm run content -- newsroom backfill-feed-fields --apply");

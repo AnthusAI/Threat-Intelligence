@@ -1158,7 +1158,14 @@ function normalizeSummaryPayload(value: unknown, now: string): {
   messageKindCounts: Record<string, number>;
   messageDomainCounts: Record<string, number>;
   facets: {
-    assignments: { byStatus: Record<string, number>; byType: Record<string, number>; statusByType: Record<string, Record<string, number>> };
+    assignments: {
+      byStatus: Record<string, number>;
+      byType: Record<string, number>;
+      bySection: Record<string, number>;
+      statusByType: Record<string, Record<string, number>>;
+      statusBySection: Record<string, Record<string, number>>;
+      typeBySection: Record<string, Record<string, number>>;
+    };
     messages: { byKind: Record<string, number>; byDomain: Record<string, number>; byStatus: Record<string, number>; domainByKind: Record<string, Record<string, number>> };
     references: { byCurationStatus: Record<string, number>; byCorpus: Record<string, number>; statusByCorpus: Record<string, Record<string, number>> };
     semanticNodes: { byNodeKind: Record<string, number>; byStatus: Record<string, number>; byCorpus: Record<string, number>; byCategorySet: Record<string, number> };
@@ -1194,7 +1201,10 @@ function normalizeFacets(payload: Record<string, unknown>): ReturnType<typeof cr
   const imports = parseJsonObject(parsed.imports);
   facets.assignments.byStatus = { ...numberRecord(payload.assignmentStatusCounts), ...numberRecord(assignments.byStatus) };
   facets.assignments.byType = { ...numberRecord(payload.assignmentTypeCounts), ...numberRecord(assignments.byType) };
+  facets.assignments.bySection = numberRecord(assignments.bySection);
   facets.assignments.statusByType = nestedNumberRecord(assignments.statusByType);
+  facets.assignments.statusBySection = nestedNumberRecord(assignments.statusBySection);
+  facets.assignments.typeBySection = nestedNumberRecord(assignments.typeBySection);
   facets.messages.byKind = { ...numberRecord(payload.messageKindCounts), ...numberRecord(messages.byKind) };
   facets.messages.byDomain = { ...numberRecord(payload.messageDomainCounts), ...numberRecord(messages.byDomain) };
   facets.messages.byStatus = numberRecord(messages.byStatus);
@@ -1216,7 +1226,7 @@ function normalizeFacets(payload: Record<string, unknown>): ReturnType<typeof cr
 
 function createEmptyFacets() {
   return {
-    assignments: { byStatus: {}, byType: {}, statusByType: {} },
+    assignments: { byStatus: {}, byType: {}, bySection: {}, statusByType: {}, statusBySection: {}, typeBySection: {} },
     messages: { byKind: {}, byDomain: {}, byStatus: {}, domainByKind: {} },
     references: { byCurationStatus: {}, byCorpus: {}, statusByCorpus: {} },
     semanticNodes: { byNodeKind: {}, byStatus: {}, byCorpus: {}, byCategorySet: {} },

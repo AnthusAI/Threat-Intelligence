@@ -74,6 +74,7 @@ async function mutateAssignment(event: Parameters<Schema["claimAssignment"]["fun
   );
   await updateNewsroomSummaryForAssignmentAction(client, {
     assignmentTypeKey: normalizeOptionalString(assignment.assignmentTypeKey),
+    sectionKey: assignmentSectionKey(assignment),
     previousStatus: normalizeOptionalString(assignment.status),
     nextStatus: normalizeOptionalString(next.status) ?? normalizeOptionalString(assignment.status),
     now,
@@ -91,7 +92,7 @@ async function mutateAssignment(event: Parameters<Schema["claimAssignment"]["fun
 
 async function updateNewsroomSummaryForAssignmentAction(
   client: DataClient,
-  input: { assignmentTypeKey: string | null; previousStatus: string | null; nextStatus: string | null; now: string },
+  input: { assignmentTypeKey: string | null; sectionKey: string | null; previousStatus: string | null; nextStatus: string | null; now: string },
 ): Promise<void> {
   const response = await client.models.KnowledgeRawPayload.get({ id: NEWSROOM_SUMMARY_PAYLOAD_ID });
   assertNoDataErrors(response.errors, "get Newsroom summary snapshot");
@@ -110,6 +111,10 @@ async function updateNewsroomSummaryForAssignmentAction(
       increment(payload.facets.assignments.statusByType[input.assignmentTypeKey], input.previousStatus, -1);
       increment(payload.facets.assignments.statusByType[input.assignmentTypeKey], input.nextStatus, 1);
     }
+    const sectionKey = input.sectionKey || "unsectioned";
+    if (!payload.facets.assignments.statusBySection[sectionKey]) payload.facets.assignments.statusBySection[sectionKey] = {};
+    increment(payload.facets.assignments.statusBySection[sectionKey], input.previousStatus, -1);
+    increment(payload.facets.assignments.statusBySection[sectionKey], input.nextStatus, 1);
   }
   await upsertNewsroomSummaryPayload(client, payload, response.data, input.now);
 }
@@ -409,6 +414,8 @@ function nextAssignmentUpdate(assignment: any, action: string, args: Record<stri
     return {
       status: "claimed",
       queueStatusKey: `${assignment.queueKey}#claimed`,
+      sectionStatusKey: sectionStatusKey(assignment, "claimed"),
+      sectionQueueStatusKey: sectionQueueStatusKey(assignment, "claimed"),
       assigneeType: claimIdentity.assigneeType,
       assigneeId: claimIdentity.assigneeId,
       assigneeKey: claimIdentity.assigneeKey,
@@ -422,6 +429,8 @@ function nextAssignmentUpdate(assignment: any, action: string, args: Record<stri
     return {
       status: "open",
       queueStatusKey: `${assignment.queueKey}#open`,
+      sectionStatusKey: sectionStatusKey(assignment, "open"),
+      sectionQueueStatusKey: sectionQueueStatusKey(assignment, "open"),
       assigneeType: null,
       assigneeId: null,
       assigneeKey: null,
@@ -435,6 +444,8 @@ function nextAssignmentUpdate(assignment: any, action: string, args: Record<stri
     return {
       status: "completed",
       queueStatusKey: `${assignment.queueKey}#completed`,
+      sectionStatusKey: sectionStatusKey(assignment, "completed"),
+      sectionQueueStatusKey: sectionQueueStatusKey(assignment, "completed"),
       completedAt: now,
       updatedAt: now,
     };
@@ -444,6 +455,8 @@ function nextAssignmentUpdate(assignment: any, action: string, args: Record<stri
     return {
       status: "canceled",
       queueStatusKey: `${assignment.queueKey}#canceled`,
+      sectionStatusKey: sectionStatusKey(assignment, "canceled"),
+      sectionQueueStatusKey: sectionQueueStatusKey(assignment, "canceled"),
       canceledAt: now,
       updatedAt: now,
     };
@@ -452,12 +465,33 @@ function nextAssignmentUpdate(assignment: any, action: string, args: Record<stri
     return {
       status: "open",
       queueStatusKey: `${assignment.queueKey}#open`,
+      sectionStatusKey: sectionStatusKey(assignment, "open"),
+      sectionQueueStatusKey: sectionQueueStatusKey(assignment, "open"),
       completedAt: null,
       canceledAt: null,
       updatedAt: now,
     };
   }
   throw new Error(`Unsupported assignment action ${action}.`);
+}
+
+function assignmentSectionKey(assignment: any): string | null {
+  const metadata = parseJsonObject(assignment?.metadata) ?? {};
+  return normalizeOptionalString(assignment?.sectionKey)
+    ?? normalizeOptionalString(metadata.sectionKey)
+    ?? normalizeOptionalString(assignment?.sectionId)
+    ?? normalizeOptionalString(metadata.sectionId);
+}
+
+function sectionStatusKey(assignment: any, status: string): string | null {
+  const sectionKey = assignmentSectionKey(assignment);
+  return sectionKey ? `${sectionKey}#${status}` : null;
+}
+
+function sectionQueueStatusKey(assignment: any, status: string): string | null {
+  const sectionKey = assignmentSectionKey(assignment);
+  const queueKey = normalizeOptionalString(assignment?.queueKey);
+  return sectionKey && queueKey ? `${sectionKey}#${queueKey}#${status}` : null;
 }
 
 function resolveClaimIdentity(args: Record<string, unknown>): { assigneeType: string | null; assigneeId: string | null; assigneeKey: string } {
@@ -596,7 +630,14 @@ function normalizeSummaryPayload(value: unknown, now: string): {
   messageKindCounts: Record<string, number>;
   messageDomainCounts: Record<string, number>;
   facets: {
-    assignments: { byStatus: Record<string, number>; byType: Record<string, number>; statusByType: Record<string, Record<string, number>> };
+    assignments: {
+      byStatus: Record<string, number>;
+      byType: Record<string, number>;
+      bySection: Record<string, number>;
+      statusByType: Record<string, Record<string, number>>;
+      statusBySection: Record<string, Record<string, number>>;
+      typeBySection: Record<string, Record<string, number>>;
+    };
     messages: { byKind: Record<string, number>; byDomain: Record<string, number>; byStatus: Record<string, number>; domainByKind: Record<string, Record<string, number>> };
     references: { byCurationStatus: Record<string, number>; byCorpus: Record<string, number>; statusByCorpus: Record<string, Record<string, number>> };
     semanticNodes: { byNodeKind: Record<string, number>; byStatus: Record<string, number>; byCorpus: Record<string, number>; byCategorySet: Record<string, number> };
@@ -632,7 +673,10 @@ function normalizeFacets(payload: Record<string, unknown>): ReturnType<typeof cr
   const imports = parseJsonObject(parsed.imports) ?? {};
   facets.assignments.byStatus = { ...numberRecord(payload.assignmentStatusCounts), ...numberRecord(assignments.byStatus) };
   facets.assignments.byType = { ...numberRecord(payload.assignmentTypeCounts), ...numberRecord(assignments.byType) };
+  facets.assignments.bySection = numberRecord(assignments.bySection);
   facets.assignments.statusByType = nestedNumberRecord(assignments.statusByType);
+  facets.assignments.statusBySection = nestedNumberRecord(assignments.statusBySection);
+  facets.assignments.typeBySection = nestedNumberRecord(assignments.typeBySection);
   facets.messages.byKind = { ...numberRecord(payload.messageKindCounts), ...numberRecord(messages.byKind) };
   facets.messages.byDomain = { ...numberRecord(payload.messageDomainCounts), ...numberRecord(messages.byDomain) };
   facets.messages.byStatus = numberRecord(messages.byStatus);
@@ -654,7 +698,7 @@ function normalizeFacets(payload: Record<string, unknown>): ReturnType<typeof cr
 
 function createEmptyFacets() {
   return {
-    assignments: { byStatus: {}, byType: {}, statusByType: {} },
+    assignments: { byStatus: {}, byType: {}, bySection: {}, statusByType: {}, statusBySection: {}, typeBySection: {} },
     messages: { byKind: {}, byDomain: {}, byStatus: {}, domainByKind: {} },
     references: { byCurationStatus: {}, byCorpus: {}, statusByCorpus: {} },
     semanticNodes: { byNodeKind: {}, byStatus: {}, byCorpus: {}, byCategorySet: {} },

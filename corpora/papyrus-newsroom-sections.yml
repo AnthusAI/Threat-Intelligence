@@ -58,7 +58,7 @@ sections:
 
   - id: world
     title: World
-    type: rotating
+    type: floating
     editorialMission: Cover AI/ML as it relates to governments, geopolitics, international competition, war, regulation, and national strategy.
     editorialPolicy: Commission pieces about state use of AI, military AI, international AI policy, export controls, surveillance, information warfare, and AI competition between countries.
     enabled: true
@@ -66,7 +66,7 @@ sections:
 
   - id: arts
     title: Arts
-    type: rotating
+    type: floating
     editorialMission: Cover AI's relationship to creativity, culture, media, design, games, music, film, and publishing.
     editorialPolicy: Favor visually interesting and culturally relevant pieces. This section can help make the newspaper more skimmable and image-rich while still staying connected to AI/ML.
     enabled: true
@@ -74,7 +74,7 @@ sections:
 
   - id: sports
     title: Sports
-    type: rotating
+    type: floating
     editorialMission: Cover AI/ML in sports, athletics, broadcasting, performance analytics, officiating, visualization, and fan experience.
     editorialPolicy: Commission concise, visual pieces about computer vision, predictive analytics, real-time visualization, training systems, broadcast enhancement, and sports data platforms.
     enabled: true
@@ -82,7 +82,7 @@ sections:
 
   - id: education
     title: Education
-    type: rotating
+    type: floating
     editorialMission: Cover AI in schools, universities, training, tutoring, research workflows, and learning systems.
     editorialPolicy: Include AI tutors, academic integrity, curriculum changes, education platforms, student workflows, and the use of AI in research and teaching.
     enabled: true
@@ -90,7 +90,7 @@ sections:
 
   - id: health
     title: Health
-    type: rotating
+    type: floating
     editorialMission: Cover AI/ML in medicine, healthcare operations, diagnostics, clinical workflows, drug discovery, and patient-facing systems.
     editorialPolicy: Apply stricter editorial standards because health claims are higher-risk. Require careful sourcing and avoid overstating clinical significance.
     enabled: true
@@ -98,7 +98,7 @@ sections:
 
   - id: security
     title: Security
-    type: rotating
+    type: floating
     editorialMission: Cover AI/ML in cybersecurity, misuse, defensive automation, model security, red-teaming, and adversarial systems.
     editorialPolicy: Focus on practical security implications, defensive use cases, attack surfaces, monitoring, and trustworthy deployment.
     enabled: true
@@ -106,7 +106,7 @@ sections:
 
   - id: law-policy
     title: Law & Policy
-    type: rotating
+    type: floating
     editorialMission: Cover legal, regulatory, governance, copyright, liability, and compliance issues around AI/ML.
     editorialPolicy: Commission pieces that explain policy developments, legal disputes, regulatory frameworks, and operational compliance implications.
     enabled: true
@@ -114,7 +114,7 @@ sections:
 
   - id: labor
     title: Labor
-    type: rotating
+    type: floating
     editorialMission: Cover how AI changes work, management, professions, hiring, automation, augmentation, and human-machine collaboration.
     editorialPolicy: Focus on practical workplace changes rather than generic automation speculation. Suitable for pieces on call centers, knowledge work, management, training, and productivity systems.
     enabled: true

@@ -154,9 +154,13 @@ function buildNewsroomSummaryFacets({
   for (const assignment of assignments) {
     const status = stringOrDefault(assignment?.status, "unknown");
     const type = stringOrDefault(assignment?.assignmentTypeKey, "unknown");
+    const section = assignmentSectionKey(assignment);
     increment(facets.assignments.byStatus, status, 1);
     increment(facets.assignments.byType, type, 1);
     incrementNested(facets.assignments.statusByType, type, status, 1);
+    increment(facets.assignments.bySection, section, 1);
+    incrementNested(facets.assignments.statusBySection, section, status, 1);
+    incrementNested(facets.assignments.typeBySection, section, type, 1);
   }
   for (const message of messages) {
     const kind = stringOrDefault(message?.messageKind, "unknown");
@@ -241,9 +245,18 @@ function isCurrentRelationState(value) {
   return stringOrDefault(value, "current") === "current";
 }
 
+function assignmentSectionKey(assignment) {
+  const metadata = parseJsonish(assignment?.metadata);
+  return stringOrDefault(assignment?.sectionKey, null)
+    ?? stringOrDefault(metadata.sectionKey, null)
+    ?? stringOrDefault(assignment?.sectionId, null)
+    ?? stringOrDefault(metadata.sectionId, null)
+    ?? "unsectioned";
+}
+
 function createEmptyNewsroomSummaryFacets() {
   return {
-    assignments: { byStatus: {}, byType: {}, statusByType: {} },
+    assignments: { byStatus: {}, byType: {}, bySection: {}, statusByType: {}, statusBySection: {}, typeBySection: {} },
     messages: { byKind: {}, byDomain: {}, byStatus: {}, domainByKind: {} },
     references: { byCurationStatus: {}, byCorpus: {}, statusByCorpus: {} },
     semanticNodes: { byNodeKind: {}, byStatus: {}, byCorpus: {}, byCategorySet: {} },
@@ -255,7 +268,7 @@ function createEmptyNewsroomSummaryFacets() {
 function normalizeNewsroomSummaryFacets(value, legacy = {}) {
   const facets = createEmptyNewsroomSummaryFacets();
   const parsed = parseJsonish(value);
-  mergeFacetSection(facets.assignments, parsed.assignments, ["statusByType"]);
+  mergeFacetSection(facets.assignments, parsed.assignments, ["statusByType", "statusBySection", "typeBySection"]);
   mergeFacetSection(facets.messages, parsed.messages, ["domainByKind"]);
   mergeFacetSection(facets.references, parsed.references, ["statusByCorpus"]);
   mergeFacetSection(facets.semanticNodes, parsed.semanticNodes);

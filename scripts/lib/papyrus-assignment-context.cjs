@@ -69,6 +69,34 @@ function safeId(value) {
     || "context";
 }
 
+function normalizeSectionType(value) {
+  const normalized = normalizeString(value)?.toLowerCase() ?? null;
+  if (normalized === "rotating") return "floating";
+  return normalized;
+}
+
+function assignmentSectionKey(sectionTarget, fallback) {
+  return normalizeString(sectionTarget?.id)
+    ?? normalizeString(sectionTarget?.sectionKey)
+    ?? normalizeString(fallback)
+    ?? null;
+}
+
+function assignmentSectionFields({ sectionTarget = null, status = "open", queueKey = null, primaryFocusCategoryKey = null, topicScopeCategoryKeys = [] } = {}) {
+  const sectionKey = assignmentSectionKey(sectionTarget);
+  const normalizedStatus = normalizeString(status) ?? "open";
+  const normalizedQueueKey = normalizeString(queueKey);
+  return {
+    sectionId: normalizeString(sectionTarget?.id) ?? sectionKey,
+    sectionKey,
+    sectionType: normalizeSectionType(sectionTarget?.type),
+    sectionStatusKey: sectionKey ? `${sectionKey}#${normalizedStatus}` : null,
+    sectionQueueStatusKey: sectionKey && normalizedQueueKey ? `${sectionKey}#${normalizedQueueKey}#${normalizedStatus}` : null,
+    primaryFocusCategoryKey: normalizeString(primaryFocusCategoryKey),
+    topicScopeCategoryKeys: normalizeStringList(topicScopeCategoryKeys),
+  };
+}
+
 function descendantsForRoot(root, categories) {
   const byParentKey = new Map();
   for (const category of categories) {
@@ -167,8 +195,13 @@ function buildAssignmentContextMetadata({
     laneNodeKey: lane.nodeKey,
     sectionId: sectionTarget?.id ?? null,
     sectionTitle: sectionTarget?.title ?? null,
-    sectionType: sectionTarget?.type ?? null,
+    sectionType: normalizeSectionType(sectionTarget?.type),
     sectionKey: sectionTarget?.id ? safeId(sectionTarget.id) : safeId(deskCategory.displayName ?? deskCategory.shortTitle ?? deskCategory.categoryKey),
+    sectionMission: sectionTarget?.editorialMission ?? null,
+    sectionPolicies: sectionTarget?.editorialPolicy ? [sectionTarget.editorialPolicy] : [],
+    assignmentGuidance: sectionTarget?.assignmentGuidance ?? null,
+    killCriteria: sectionTarget?.killCriteria ?? null,
+    visualGuidance: sectionTarget?.visualGuidance ?? null,
     publicationSlots,
     dispatchCount,
     overassignmentRatio,
@@ -232,7 +265,9 @@ function assignmentDeskCategoryKey(assignment) {
 
 function assignmentFocusCategoryKey(assignment) {
   const metadata = parseMetadataObject(assignment.metadata);
-  return normalizeString(metadata.focusCategoryKey)
+  return normalizeString(assignment.primaryFocusCategoryKey)
+    ?? normalizeString(metadata.primaryFocusCategoryKey)
+    ?? normalizeString(metadata.focusCategoryKey)
     ?? normalizeString(metadata.researchLens)
     ?? normalizeString(metadata.categoryKey)
     ?? null;
@@ -246,6 +281,7 @@ function positiveInteger(value, fallback) {
 module.exports = {
   CONTEXT_PROFILE_DEFINITIONS,
   DEFAULT_CONTEXT_SOURCES,
+  assignmentSectionFields,
   assignmentDeskCategoryKey,
   assignmentFocusCategoryKey,
   buildAssignmentContextMetadata,

@@ -15,6 +15,9 @@ const {
 const {
   getAssignmentTypePolicy,
 } = require("./papyrus-assignment-types.cjs");
+const {
+  assignmentSectionFields,
+} = require("./papyrus-assignment-context.cjs");
 
 const DEFAULT_ANALYSIS_PROFILES_PATH = path.join(__dirname, "..", "..", "corpora", "papyrus-analysis-profiles.yml");
 const DEFAULT_BIBLICUS_WORKDIR = "/Users/ryan/Projects/Biblicus";
@@ -293,7 +296,7 @@ function buildAnalysisReindexPlan({
   };
 }
 
-function buildAnalysisReindexAssignmentRecords(plan, { categorySet = null, existing = {}, now = plan.generatedAt, actorLabel = "papyrus-content-cli" } = {}) {
+function buildAnalysisReindexAssignmentRecords(plan, { categorySet = null, sectionTarget = null, existing = {}, now = plan.generatedAt, actorLabel = "papyrus-content-cli" } = {}) {
   const assignmentTypeKey = "analysis.reindex";
   const assignmentTypePolicy = getAssignmentTypePolicy(assignmentTypeKey);
   const assignmentId = `assignment-analysis-reindex-${safeId(plan.corpus.key)}-${safeId(plan.profile.key)}-${hashShort([
@@ -314,6 +317,17 @@ function buildAnalysisReindexAssignmentRecords(plan, { categorySet = null, exist
     classifierId: plan.classifierId,
     categorySetId: plan.categorySetId,
     categoryKey: plan.categoryKey,
+    sectionId: sectionTarget?.id ?? null,
+    sectionKey: sectionTarget?.id ?? null,
+    sectionTitle: sectionTarget?.title ?? null,
+    sectionType: sectionTarget?.type === "rotating" ? "floating" : sectionTarget?.type ?? null,
+    sectionMission: sectionTarget?.editorialMission ?? null,
+    sectionPolicies: sectionTarget?.editorialPolicy ? [sectionTarget.editorialPolicy] : [],
+    assignmentGuidance: sectionTarget?.assignmentGuidance ?? null,
+    killCriteria: sectionTarget?.killCriteria ?? null,
+    visualGuidance: sectionTarget?.visualGuidance ?? null,
+    primaryFocusCategoryKey: plan.categoryKey ?? null,
+    topicScopeCategoryKeys: [plan.categoryKey].filter(Boolean),
     parameterOverrides: plan.parameterOverrides,
     effectiveParameters: plan.effectiveParameters,
     commandPlan: plan.commandPlan,
@@ -346,6 +360,13 @@ function buildAnalysisReindexAssignmentRecords(plan, { categorySet = null, exist
     corpusId: plan.corpus.id,
     categorySetId: plan.categorySetId,
     classifierId: plan.classifierId,
+    ...assignmentSectionFields({
+      sectionTarget,
+      status: "open",
+      queueKey,
+      primaryFocusCategoryKey: plan.categoryKey,
+      topicScopeCategoryKeys: [plan.categoryKey].filter(Boolean),
+    }),
     sourceSnapshotId: cleanString(plan.effectiveParameters.extractionSnapshot) || null,
     importRunId: null,
     createdBy: actorLabel,
@@ -395,6 +416,28 @@ function buildAnalysisReindexAssignmentRecords(plan, { categorySet = null, exist
         analysisProfileKey: plan.profile.key,
         reindexMode: plan.mode,
         corpusKey: plan.corpus.key,
+      },
+    }).expected, existing));
+  }
+  if (sectionTarget) {
+    records.push(withAction("SemanticRelation", semanticRelationRecord({
+      predicate: "targets_section",
+      subjectKind: "assignment",
+      subjectId: assignment.id,
+      subjectLineageId: assignment.id,
+      subjectVersionNumber: null,
+      objectKind: "newsroomSection",
+      objectId: sectionTarget.id,
+      objectLineageId: sectionTarget.id,
+      objectVersionNumber: null,
+      rank: 1,
+      importedAt: now,
+      metadata: {
+        analysisProfileKey: plan.profile.key,
+        reindexMode: plan.mode,
+        corpusKey: plan.corpus.key,
+        sectionKey: sectionTarget.id,
+        sectionTitle: sectionTarget.title,
       },
     }).expected, existing));
   }

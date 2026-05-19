@@ -164,7 +164,7 @@ function normalizeSummaryPayload(value: unknown, now: string) {
 
 function createEmptyFacets() {
   return {
-    assignments: { byStatus: {}, byType: {}, statusByType: {} },
+    assignments: { byStatus: {}, byType: {}, bySection: {}, statusByType: {}, statusBySection: {}, typeBySection: {} },
     messages: { byKind: {}, byDomain: {}, byStatus: {}, domainByKind: {} },
     references: { byCurationStatus: {}, byCorpus: {}, statusByCorpus: {} },
     semanticNodes: { byNodeKind: {}, byStatus: {}, byCorpus: {}, byCategorySet: {} },
@@ -176,7 +176,7 @@ function createEmptyFacets() {
 function normalizeFacets(value: unknown, legacy: Record<string, unknown>) {
   const facets = createEmptyFacets();
   const parsed = parseJsonObject(value);
-  mergeFacetSection(facets.assignments, parsed.assignments, ["statusByType"]);
+  mergeFacetSection(facets.assignments, parsed.assignments, ["statusByType", "statusBySection", "typeBySection"]);
   mergeFacetSection(facets.messages, parsed.messages, ["domainByKind"]);
   mergeFacetSection(facets.references, parsed.references, ["statusByCorpus"]);
   mergeFacetSection(facets.semanticNodes, parsed.semanticNodes);

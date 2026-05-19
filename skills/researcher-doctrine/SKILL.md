@@ -18,11 +18,14 @@ is not a replacement for evidence.
 
 ## Core Model
 
-Doctrine has two scopes:
+Doctrine has two primary scopes:
 
 - **Publication doctrine** applies to all newsroom work.
-- **Desk doctrine** applies to one Newsroom desk, derived from a top-level
-  accepted canonical topic in the current category set.
+- **Section doctrine** applies to the configurable Newsroom section that owns
+  the assignment.
+
+Topic/category doctrine or metadata may still guide retrieval, but topics are
+knowledge scope, not the operational desk identity.
 
 Each scope has two slots:
 
@@ -39,13 +42,13 @@ should use that doctrine, not what the doctrine must say.
 Load and apply context in this order:
 
 1. Publication mission and publication policies.
-2. Root desk mission and root desk policies.
+2. Section mission, section policies, assignment guidance, and kill criteria.
 3. Assignment brief and editor questions.
 4. Relevant category, semantic graph, reference, and corpus evidence context.
-5. Recent desk activity and prior related coverage.
+5. Recent section activity, topic activity, and prior related coverage.
 
-Publication doctrine is the global editorial constitution. Desk doctrine is the
-local beat standard. The assignment brief is the immediate task.
+Publication doctrine is the global editorial constitution. Section doctrine is
+the local desk standard. The assignment brief is the immediate task.
 
 If these conflict, surface the conflict in the research packet instead of
 silently resolving it. Do not let a narrow assignment shortcut override
@@ -68,16 +71,15 @@ Use doctrine to decide what matters, not to invent facts.
   launches unless the evidence makes them materially relevant.
 - Preserve enough source trail for editors and reporters to audit the packet.
 
-## Desk Inheritance
+## Section And Topic Scope
 
-Only top-level accepted canonical topics are Newsroom desks in v1. Child topics
-inherit doctrine from their root desk.
+Newsroom desks now revolve around configurable sections. An assignment may also
+carry `topicScopeCategoryKeys` and a `primaryFocusCategoryKey`; use those for
+retrieval, evidence filtering, and topic framing without treating them as the
+desk itself.
 
-When an assignment is tied to a child category, resolve the root category first
-and apply the root desk mission and policies. Do not invent child-level doctrine.
-
-If the applicable desk doctrine is missing, continue with publication doctrine
-and report that the desk doctrine slots are empty.
+If the applicable section doctrine is missing, continue with publication
+doctrine and report that the section doctrine slots are empty.
 
 ## Privacy Boundary
 

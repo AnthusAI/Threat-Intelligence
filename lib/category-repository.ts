@@ -120,7 +120,7 @@ export type LexicalSteeringRuleRecord = {
   metadata?: unknown;
 };
 
-export type NewsroomSectionType = "canonical" | "rotating";
+export type NewsroomSectionType = "canonical" | "floating" | "rotating";
 
 export type NewsroomSectionRecord = {
   id: string;
@@ -142,7 +142,7 @@ export type NewsroomSectionRecord = {
 };
 
 const NEWSROOM_SECTIONS_CONFIG_PATH = path.join(process.cwd(), "corpora", "papyrus-newsroom-sections.yml");
-const NEWSROOM_SECTION_TYPES = new Set<NewsroomSectionType>(["canonical", "rotating"]);
+const NEWSROOM_SECTION_TYPES = new Set<NewsroomSectionType>(["canonical", "floating", "rotating"]);
 let newsroomSectionSeedRowsCache: Array<Omit<NewsroomSectionRecord, "sortOrder" | "enabled" | "enabledStatus" | "createdAt" | "updatedAt"> & {
   enabled: boolean;
   sortOrder: number;
@@ -344,6 +344,13 @@ export type AssignmentRecord = {
   corpusId?: string | null;
   categorySetId?: string | null;
   classifierId?: string | null;
+  sectionId?: string | null;
+  sectionKey?: string | null;
+  sectionType?: string | null;
+  sectionStatusKey?: string | null;
+  sectionQueueStatusKey?: string | null;
+  primaryFocusCategoryKey?: string | null;
+  topicScopeCategoryKeys?: Array<string | null> | null;
   sourceSnapshotId?: string | null;
   importRunId?: string | null;
   createdBy?: string | null;
@@ -449,7 +456,10 @@ export type NewsroomSummaryFacets = {
   assignments?: {
     byStatus?: Record<string, number>;
     byType?: Record<string, number>;
+    bySection?: Record<string, number>;
     statusByType?: Record<string, Record<string, number>>;
+    statusBySection?: Record<string, Record<string, number>>;
+    typeBySection?: Record<string, Record<string, number>>;
   };
   messages?: {
     byKind?: Record<string, number>;
@@ -680,10 +690,11 @@ function normalizeNewsroomSectionSeedRow(entry: Record<string, unknown>, index: 
   if (!id) throw new Error(`Newsroom section at index ${index} is missing id in ${NEWSROOM_SECTIONS_CONFIG_PATH}`);
   const title = stringValue(entry.title);
   if (!title) throw new Error(`Newsroom section '${id}' is missing title in ${NEWSROOM_SECTIONS_CONFIG_PATH}`);
-  const typeRaw = stringValue(entry.type).toLowerCase() as NewsroomSectionType;
-  if (!NEWSROOM_SECTION_TYPES.has(typeRaw)) {
+  const rawType = stringValue(entry.type).toLowerCase() as NewsroomSectionType;
+  if (!NEWSROOM_SECTION_TYPES.has(rawType)) {
     throw new Error(`Newsroom section '${id}' has unsupported type '${stringValue(entry.type)}' in ${NEWSROOM_SECTIONS_CONFIG_PATH}`);
   }
+  const type = rawType === "rotating" ? "floating" : rawType;
   const editorialMission = stringValue(entry.editorialMission);
   const editorialPolicy = stringValue(entry.editorialPolicy);
   if (!editorialMission || !editorialPolicy) {
@@ -692,7 +703,7 @@ function normalizeNewsroomSectionSeedRow(entry: Record<string, unknown>, index: 
   return {
     id,
     title,
-    type: typeRaw,
+    type,
     editorialMission,
     editorialPolicy,
     enabled: typeof entry.enabled === "boolean" ? entry.enabled : true,

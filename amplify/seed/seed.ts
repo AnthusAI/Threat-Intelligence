@@ -19,13 +19,13 @@ const { getAmplifyServerRuntime } = amplifyServerRuntime as typeof import("../..
 
 const EDITOR_GROUP = "editor";
 const NEWSROOM_SECTIONS_CONFIG_PATH = path.join(process.cwd(), "corpora", "papyrus-newsroom-sections.yml");
-const NEWSROOM_SECTION_TYPES = new Set(["canonical", "rotating"]);
+const NEWSROOM_SECTION_TYPES = new Set(["canonical", "floating", "rotating"]);
 
 type DataClient = ReturnType<typeof generateClient<Schema>>;
 type NewsroomSectionSeed = {
   id: string;
   title: string;
-  type: "canonical" | "rotating";
+  type: "canonical" | "floating" | "rotating";
   editorialMission: string;
   editorialPolicy: string;
   enabled: boolean;
@@ -334,10 +334,11 @@ function normalizeNewsroomSectionSeed(entry: Record<string, unknown>, index: num
   const id = String(entry.id ?? "").trim();
   if (!id) throw new Error(`Newsroom section at index ${index} in ${configPath} is missing id.`);
   const title = requiredText(entry.title, `title for section ${id}`);
-  const typeValue = String(entry.type ?? "").trim().toLowerCase();
-  if (!NEWSROOM_SECTION_TYPES.has(typeValue)) {
+  const rawTypeValue = String(entry.type ?? "").trim().toLowerCase();
+  if (!NEWSROOM_SECTION_TYPES.has(rawTypeValue)) {
     throw new Error(`Newsroom section ${id} in ${configPath} has unsupported type '${String(entry.type ?? "")}'.`);
   }
+  const typeValue = rawTypeValue === "rotating" ? "floating" : rawTypeValue;
   return {
     id,
     title,

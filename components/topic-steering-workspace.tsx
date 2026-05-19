@@ -2256,7 +2256,7 @@ function AdministrationDeskView({
                 onClick={() => onPanelChange("sections")}
               >
                 <strong>Sections</strong>
-                <span>Canonical and rotating newspaper sections</span>
+                <span>Canonical and floating newspaper sections</span>
               </Link>
             </nav>
             <div className="news-desk-settings-panel">
@@ -2679,7 +2679,7 @@ function AdministrationSectionsPanel({
 }) {
   const sortedSections = useMemo(() => sortNewsroomSections(sections), [sections]);
   const canonicalSections = sortedSections.filter((section) => section.type === "canonical");
-  const rotatingSections = sortedSections.filter((section) => section.type === "rotating");
+  const floatingSections = sortedSections.filter((section) => section.type === "floating" || section.type === "rotating");
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(sortedSections[0]?.id ?? null);
   const [newSection, setNewSection] = useState<NewsroomSectionRecord>(() => createEmptyNewsroomSectionDraft(sortedSections.length + 1));
   const selectedSection = sortedSections.find((section) => section.id === selectedSectionId) ?? sortedSections[0] ?? null;
@@ -2750,8 +2750,8 @@ function AdministrationSectionsPanel({
                   <small>{section.type} / {section.enabled ? "enabled" : "disabled"}</small>
                 </button>
               ))}
-              <p className="story-label">Rotating</p>
-              {rotatingSections.map((section) => (
+              <p className="story-label">Floating</p>
+              {floatingSections.map((section) => (
                 <button
                   key={section.id}
                   type="button"
@@ -2851,11 +2851,11 @@ function NewsroomSectionEditorBody({
         <select
           data-news-desk-section-input="type"
           disabled={disabled}
-          onChange={(event) => onChange({ ...draft, type: event.target.value === "rotating" ? "rotating" : "canonical" })}
+          onChange={(event) => onChange({ ...draft, type: event.target.value === "floating" ? "floating" : "canonical" })}
           value={draft.type}
         >
           <option value="canonical">canonical</option>
-          <option value="rotating">rotating</option>
+          <option value="floating">floating</option>
         </select>
       </label>
       <label className="news-desk-doctrine-card__field">
@@ -6273,7 +6273,7 @@ function normalizeSectionDraft(draft: NewsroomSectionRecord, forUpdate: boolean)
     ...draft,
     id: forUpdate ? draft.id : id,
     title,
-    type: draft.type === "rotating" ? "rotating" : "canonical",
+    type: draft.type === "floating" || draft.type === "rotating" ? "floating" : "canonical",
     editorialMission,
     editorialPolicy,
     enabled: Boolean(draft.enabled),

@@ -6,6 +6,7 @@ const { loadSemanticConceptSeeds } = require("./papyrus-categories.cjs");
 const { semanticRelationTypeFieldsForPredicate } = require("./papyrus-relation-types.cjs");
 const { isEvidenceEligibleReference } = require("./papyrus-reference-policy.cjs");
 const {
+  assignmentSectionFields,
   buildAssignmentContextMetadata,
   parseMetadataObject,
   resolveContextProfile,
@@ -260,8 +261,11 @@ function verifyEditionPlanningPlan(state, plan) {
   }
   for (const assignment of plan.assignments) {
     const predicates = relationPredicatesByAssignment.get(assignment.id) ?? new Set();
-    for (const predicate of ["planned_for_edition", "requests_work_on", "targets_lane"]) {
+    for (const predicate of ["planned_for_edition", "requests_work_on", "targets_lane", "targets_section", "targets_topic"]) {
       if (!predicates.has(predicate)) failures.push(`Assignment ${assignment.id} is missing ${predicate}.`);
+    }
+    if (!assignment.sectionKey || !assignment.sectionStatusKey || !assignment.sectionQueueStatusKey) {
+      failures.push(`Assignment ${assignment.id} is missing section index fields.`);
     }
     const metadata = parseJsonObject(assignment.metadata);
     if ((metadata.referenceLineageIds ?? []).length && !predicates.has("uses_evidence")) {
@@ -434,7 +438,12 @@ function resolveSectionTargets(sectionTargets, enabledSections, selectedGroups) 
     targetMap.set(parsed.deskCategoryKey, {
       id: section.id,
       title: section.title,
-      type: section.type,
+      type: section.type === "rotating" ? "floating" : section.type,
+      editorialMission: section.editorialMission ?? null,
+      editorialPolicy: section.editorialPolicy ?? null,
+      assignmentGuidance: section.assignmentGuidance ?? null,
+      killCriteria: section.killCriteria ?? null,
+      visualGuidance: section.visualGuidance ?? null,
     });
   }
   for (const group of selectedGroups) {
@@ -556,6 +565,7 @@ function buildAssignmentBundle({ categorySet, edition, group, focusCategory, lan
   const signalNodes = group.signalNodes.slice(0, 3);
   const candidateAngle = candidateAngleForLane(lane, group.root, candidateRank);
   const resolvedContextProfile = resolveContextProfile(contextProfile, lane.laneKey);
+  const topicScopeCategoryKeys = unique([group.root.categoryKey, ...group.categories.map((category) => category.categoryKey)]);
   const metadata = {
     editionDate: edition.editionDate,
     editionSlug: edition.slug,
@@ -581,7 +591,16 @@ function buildAssignmentBundle({ categorySet, edition, group, focusCategory, lan
       signalNodes,
       targetSystemType,
     }),
+    primaryFocusCategoryKey: focusCategory.categoryKey,
+    topicScopeCategoryKeys,
   };
+  const sectionFields = assignmentSectionFields({
+    sectionTarget,
+    status: "open",
+    queueKey,
+    primaryFocusCategoryKey: focusCategory.categoryKey,
+    topicScopeCategoryKeys,
+  });
   const assignment = {
     id: assignmentId,
     assignmentTypeKey: EDITION_ASSIGNMENT_TYPE,
@@ -602,6 +621,7 @@ function buildAssignmentBundle({ categorySet, edition, group, focusCategory, lan
     corpusId: group.root.corpusId,
     categorySetId: categorySet.id,
     classifierId: categorySet.classifierId,
+    ...sectionFields,
     sourceSnapshotId: null,
     importRunId: null,
     createdBy: "papyrus-content-cli",
@@ -626,6 +646,8 @@ function buildAssignmentBundle({ categorySet, edition, group, focusCategory, lan
       editionId: edition.id,
       editionSlug: edition.slug,
       laneKey: lane.laneKey,
+      sectionKey: metadata.sectionKey,
+      sectionId: metadata.sectionId,
       deskCategoryKey: metadata.deskCategoryKey,
       focusCategoryKey: metadata.focusCategoryKey,
       candidateRank,
@@ -663,6 +685,35 @@ function buildAssignmentBundle({ categorySet, edition, group, focusCategory, lan
       classifierId: categorySet.classifierId,
       importedAt: now,
       metadata: { categoryKey: focusCategory.categoryKey, deskCategoryKey: group.root.categoryKey, laneKey: lane.laneKey },
+    }),
+    semanticRelationRecord({
+      predicate: "targets_section",
+      subjectKind: "assignment",
+      subjectId: assignment.id,
+      subjectLineageId: assignment.id,
+      subjectVersionNumber: null,
+      objectKind: "newsroomSection",
+      objectId: sectionTarget.id,
+      objectLineageId: sectionTarget.id,
+      objectVersionNumber: null,
+      rank: 1,
+      importedAt: now,
+      metadata: { sectionKey: sectionTarget.id, sectionTitle: sectionTarget.title, sectionType: assignment.sectionType },
+    }),
+    semanticRelationRecord({
+      predicate: "targets_topic",
+      subjectKind: "assignment",
+      subjectId: assignment.id,
+      subjectLineageId: assignment.id,
+      subjectVersionNumber: null,
+      objectKind: "category",
+      objectId: focusCategory.id,
+      objectLineageId: focusCategory.lineageId,
+      objectVersionNumber: focusCategory.versionNumber,
+      rank: 1,
+      classifierId: categorySet.classifierId,
+      importedAt: now,
+      metadata: { categoryKey: focusCategory.categoryKey, sectionKey: assignment.sectionKey, topicScopeCategoryKeys },
     }),
     semanticRelationRecord({
       predicate: "targets_lane",
@@ -866,6 +917,10 @@ function uniqueDomains(references) {
       return null;
     }
   }).filter(Boolean), (domain) => domain);
+}
+
+function unique(values) {
+  return Array.from(new Set(values.filter(Boolean)));
 }
 
 function countActiveAssignmentsForRoot(assignments, rootCategoryKey) {
