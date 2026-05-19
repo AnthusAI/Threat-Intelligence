@@ -5,6 +5,7 @@ import { assignmentAction } from "./functions/assignment-action/resource";
 import { categoryAction } from "./functions/category-action/resource";
 import { graphqlJwtAuthorizer } from "./functions/graphql-jwt-authorizer/resource";
 import { manageUserRole } from "./functions/manage-user-role/resource";
+import { newsroomSummary } from "./functions/newsroom-summary/resource";
 import { storage } from "./storage/resource";
 
 defineBackend({
@@ -14,5 +15,6 @@ defineBackend({
   data,
   graphqlJwtAuthorizer,
   manageUserRole,
+  newsroomSummary,
   storage,
 });

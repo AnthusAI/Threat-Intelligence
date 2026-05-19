@@ -6,11 +6,11 @@ concepts:
     name: General Comment
     description: A general note about a private knowledge or content object.
 
-  - key: comment.import_rationale
+  - key: comment.ingestion_rationale
     kind: commentConcept
     scope: corpus
-    name: Import Rationale
-    description: A note explaining why a reference or content item was imported.
+    name: Ingestion Rationale
+    description: A note explaining why a reference or content item was ingested.
 
   - key: comment.ai_slop_assessment
     kind: commentConcept

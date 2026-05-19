@@ -22,6 +22,8 @@ type DataClientResult<T = unknown> = {
 };
 
 const FINAL_STATUSES = new Set(["completed", "canceled"]);
+const NEWSROOM_SUMMARY_PAYLOAD_ID = "knowledge-raw-payload-newsroom-summary-current";
+const SUMMARY_STALE_AFTER_MS = 15 * 60 * 1000;
 const PUBLICATION_DOCTRINE_DEFINITIONS = [
   { scope: "publication", kind: "mission", label: "Editorial Mission", slug: "editorial-doctrine-mission" },
   { scope: "publication", kind: "policy", label: "Editorial Policy", slug: "editorial-doctrine-policy" },
@@ -47,6 +49,12 @@ async function mutateAssignment(event: Parameters<Schema["claimAssignment"]["fun
   const next = nextAssignmentUpdate(assignment, action, event.arguments, now);
   await requireDataResult(client.models.Assignment.update({ id: assignmentId, ...next }), `update Assignment ${assignmentId}`);
   const eventId = `assignment-event-${assignmentId}-${now.replace(/[^0-9TZ]/g, "")}-${randomUUID().slice(0, 8)}`;
+  const eventMetadata: Record<string, unknown> = { fieldName };
+  if (action === "claim") {
+    eventMetadata.assigneeKey = next.assigneeKey ?? null;
+    eventMetadata.claimExpiresAt = next.claimExpiresAt ?? null;
+    eventMetadata.previousAssigneeKey = normalizeOptionalString(assignment.assigneeKey);
+  }
   await requireDataResult(
     client.models.AssignmentEvent.create({
       id: eventId,
@@ -60,17 +68,50 @@ async function mutateAssignment(event: Parameters<Schema["claimAssignment"]["fun
       actorLabel,
       note: normalizeOptionalString(event.arguments.note),
       createdAt: now,
-      metadata: JSON.stringify({ fieldName }),
+      metadata: JSON.stringify(eventMetadata),
     }),
     `create AssignmentEvent ${eventId}`,
   );
+  await updateNewsroomSummaryForAssignmentAction(client, {
+    assignmentTypeKey: normalizeOptionalString(assignment.assignmentTypeKey),
+    previousStatus: normalizeOptionalString(assignment.status),
+    nextStatus: normalizeOptionalString(next.status) ?? normalizeOptionalString(assignment.status),
+    now,
+  });
   return {
     ok: true,
     assignmentId,
     eventId,
     status: next.status ?? assignment.status,
     action,
+    assigneeKey: normalizeOptionalString(next.assigneeKey),
+    claimExpiresAt: normalizeOptionalString(next.claimExpiresAt),
   };
+}
+
+async function updateNewsroomSummaryForAssignmentAction(
+  client: DataClient,
+  input: { assignmentTypeKey: string | null; previousStatus: string | null; nextStatus: string | null; now: string },
+): Promise<void> {
+  const response = await client.models.KnowledgeRawPayload.get({ id: NEWSROOM_SUMMARY_PAYLOAD_ID });
+  assertNoDataErrors(response.errors, "get Newsroom summary snapshot");
+  const payload = normalizeSummaryPayload(response.data?.payload, input.now);
+  payload.generatedAt = input.now;
+  payload.staleAt = new Date(Date.parse(input.now) + SUMMARY_STALE_AFTER_MS).toISOString();
+  payload.source = "incremental";
+  payload.counts.assignmentEvents = Math.max(0, (payload.counts.assignmentEvents ?? 0) + 1);
+  if (input.previousStatus && input.nextStatus && input.previousStatus !== input.nextStatus) {
+    increment(payload.assignmentStatusCounts, input.previousStatus, -1);
+    increment(payload.assignmentStatusCounts, input.nextStatus, 1);
+    increment(payload.facets.assignments.byStatus, input.previousStatus, -1);
+    increment(payload.facets.assignments.byStatus, input.nextStatus, 1);
+    if (input.assignmentTypeKey) {
+      if (!payload.facets.assignments.statusByType[input.assignmentTypeKey]) payload.facets.assignments.statusByType[input.assignmentTypeKey] = {};
+      increment(payload.facets.assignments.statusByType[input.assignmentTypeKey], input.previousStatus, -1);
+      increment(payload.facets.assignments.statusByType[input.assignmentTypeKey], input.nextStatus, 1);
+    }
+  }
+  await upsertNewsroomSummaryPayload(client, payload, response.data, input.now);
 }
 
 async function getAssignmentContext(event: Parameters<Schema["getAssignmentContext"]["functionHandler"]>[0]) {
@@ -358,15 +399,21 @@ async function listAssignmentEventPages(client: DataClient, assignmentId: string
 function nextAssignmentUpdate(assignment: any, action: string, args: Record<string, unknown>, now: string): Record<string, unknown> {
   if (action === "claim") {
     if (FINAL_STATUSES.has(assignment.status)) throw new Error(`Cannot claim ${assignment.status} assignment ${assignment.id}.`);
-    const assigneeType = normalizeOptionalString(args.assigneeType) ?? "user";
-    const assigneeId = normalizeOptionalString(args.assigneeId) ?? normalizeOptionalString(args.actorSub) ?? "unknown";
+    const claimIdentity = resolveClaimIdentity(args);
+    if (activeClaimHeldByDifferentAssignee(assignment, claimIdentity.assigneeKey, now)) {
+      throw new Error(`Assignment ${assignment.id} is already claimed by ${assignment.assigneeKey}.`);
+    }
+    const sameAssignee = normalizeOptionalString(assignment.assigneeKey) === claimIdentity.assigneeKey;
+    const requestedClaimExpiresAt = resolveClaimExpiresAt(args, now);
+    const claimExpiresAt = requestedClaimExpiresAt ?? (sameAssignee ? normalizeOptionalString(assignment.claimExpiresAt) : null);
     return {
       status: "claimed",
       queueStatusKey: `${assignment.queueKey}#claimed`,
-      assigneeType,
-      assigneeId,
-      assigneeKey: `${assigneeType}#${assigneeId}`,
-      claimedAt: now,
+      assigneeType: claimIdentity.assigneeType,
+      assigneeId: claimIdentity.assigneeId,
+      assigneeKey: claimIdentity.assigneeKey,
+      claimedAt: sameAssignee && normalizeOptionalString(assignment.claimedAt) ? assignment.claimedAt : now,
+      claimExpiresAt,
       updatedAt: now,
     };
   }
@@ -411,6 +458,54 @@ function nextAssignmentUpdate(assignment: any, action: string, args: Record<stri
     };
   }
   throw new Error(`Unsupported assignment action ${action}.`);
+}
+
+function resolveClaimIdentity(args: Record<string, unknown>): { assigneeType: string | null; assigneeId: string | null; assigneeKey: string } {
+  const explicitAssigneeKey = normalizeOptionalString(args.assigneeKey);
+  if (explicitAssigneeKey) {
+    return {
+      assigneeType: normalizeOptionalString(args.assigneeType),
+      assigneeId: normalizeOptionalString(args.assigneeId),
+      assigneeKey: explicitAssigneeKey,
+    };
+  }
+  const assigneeType = normalizeOptionalString(args.assigneeType) ?? "user";
+  const assigneeId = normalizeOptionalString(args.assigneeId) ?? normalizeOptionalString(args.actorSub) ?? "unknown";
+  return {
+    assigneeType,
+    assigneeId,
+    assigneeKey: `${assigneeType}#${assigneeId}`,
+  };
+}
+
+function activeClaimHeldByDifferentAssignee(assignment: any, requestedAssigneeKey: string, now: string): boolean {
+  if (assignment.status !== "claimed") return false;
+  const currentAssigneeKey = normalizeOptionalString(assignment.assigneeKey);
+  if (!currentAssigneeKey || currentAssigneeKey === requestedAssigneeKey) return false;
+  const claimExpiresAt = normalizeOptionalString(assignment.claimExpiresAt);
+  if (!claimExpiresAt) return true;
+  const expirationTime = Date.parse(claimExpiresAt);
+  if (!Number.isFinite(expirationTime)) return true;
+  return expirationTime > Date.parse(now);
+}
+
+function resolveClaimExpiresAt(args: Record<string, unknown>, now: string): string | null {
+  const explicitExpiration = normalizeOptionalString(args.claimExpiresAt);
+  if (explicitExpiration) {
+    const expirationTime = Date.parse(explicitExpiration);
+    if (!Number.isFinite(expirationTime)) throw new Error(`Invalid claimExpiresAt value ${explicitExpiration}.`);
+    return new Date(expirationTime).toISOString();
+  }
+  const ttlSeconds = normalizeOptionalPositiveInteger(args.claimTtlSeconds);
+  if (!ttlSeconds) return null;
+  return new Date(Date.parse(now) + ttlSeconds * 1000).toISOString();
+}
+
+function normalizeOptionalPositiveInteger(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) throw new Error(`Expected a positive integer, got ${String(value)}.`);
+  return parsed;
 }
 
 function assignmentActionFromField(fieldName: string): string {
@@ -487,6 +582,129 @@ function parseJsonObject(value: unknown): Record<string, unknown> | null {
   } catch {
     return null;
   }
+}
+
+function normalizeSummaryPayload(value: unknown, now: string): {
+  generatedAt: string;
+  staleAt: string;
+  source: string;
+  latestImportRun: Record<string, unknown> | null;
+  counts: Record<string, number>;
+  assignmentStatusCounts: Record<string, number>;
+  assignmentTypeCounts: Record<string, number>;
+  referenceStatusCounts: Record<string, number>;
+  messageKindCounts: Record<string, number>;
+  messageDomainCounts: Record<string, number>;
+  facets: {
+    assignments: { byStatus: Record<string, number>; byType: Record<string, number>; statusByType: Record<string, Record<string, number>> };
+    messages: { byKind: Record<string, number>; byDomain: Record<string, number>; byStatus: Record<string, number>; domainByKind: Record<string, Record<string, number>> };
+    references: { byCurationStatus: Record<string, number>; byCorpus: Record<string, number>; statusByCorpus: Record<string, Record<string, number>> };
+    semanticNodes: { byNodeKind: Record<string, number>; byStatus: Record<string, number>; byCorpus: Record<string, number>; byCategorySet: Record<string, number> };
+    semanticRelations: { byRelationTypeKey: Record<string, number>; byRelationDomain: Record<string, number>; bySubjectKind: Record<string, number>; byObjectKind: Record<string, number> };
+    imports: { byCorpus: Record<string, number> };
+  };
+} {
+  const parsed = parseJsonObject(value) ?? {};
+  const facets = normalizeFacets(parsed);
+  return {
+    generatedAt: normalizeOptionalString(parsed.generatedAt) ?? now,
+    staleAt: normalizeOptionalString(parsed.staleAt) ?? now,
+    source: normalizeOptionalString(parsed.source) ?? "missing",
+    latestImportRun: parseJsonObject(parsed.latestImportRun),
+    counts: numberRecord(parsed.counts),
+    assignmentStatusCounts: numberRecord(parsed.assignmentStatusCounts),
+    assignmentTypeCounts: numberRecord(parsed.assignmentTypeCounts),
+    referenceStatusCounts: numberRecord(parsed.referenceStatusCounts),
+    messageKindCounts: numberRecord(parsed.messageKindCounts),
+    messageDomainCounts: numberRecord(parsed.messageDomainCounts),
+    facets,
+  };
+}
+
+function normalizeFacets(payload: Record<string, unknown>): ReturnType<typeof createEmptyFacets> {
+  const facets = createEmptyFacets();
+  const parsed = parseJsonObject(payload.facets) ?? {};
+  const assignments = parseJsonObject(parsed.assignments) ?? {};
+  const messages = parseJsonObject(parsed.messages) ?? {};
+  const references = parseJsonObject(parsed.references) ?? {};
+  const semanticNodes = parseJsonObject(parsed.semanticNodes) ?? {};
+  const semanticRelations = parseJsonObject(parsed.semanticRelations) ?? {};
+  const imports = parseJsonObject(parsed.imports) ?? {};
+  facets.assignments.byStatus = { ...numberRecord(payload.assignmentStatusCounts), ...numberRecord(assignments.byStatus) };
+  facets.assignments.byType = { ...numberRecord(payload.assignmentTypeCounts), ...numberRecord(assignments.byType) };
+  facets.assignments.statusByType = nestedNumberRecord(assignments.statusByType);
+  facets.messages.byKind = { ...numberRecord(payload.messageKindCounts), ...numberRecord(messages.byKind) };
+  facets.messages.byDomain = { ...numberRecord(payload.messageDomainCounts), ...numberRecord(messages.byDomain) };
+  facets.messages.byStatus = numberRecord(messages.byStatus);
+  facets.messages.domainByKind = nestedNumberRecord(messages.domainByKind);
+  facets.references.byCurationStatus = { ...numberRecord(payload.referenceStatusCounts), ...numberRecord(references.byCurationStatus) };
+  facets.references.byCorpus = numberRecord(references.byCorpus);
+  facets.references.statusByCorpus = nestedNumberRecord(references.statusByCorpus);
+  facets.semanticNodes.byNodeKind = numberRecord(semanticNodes.byNodeKind);
+  facets.semanticNodes.byStatus = numberRecord(semanticNodes.byStatus);
+  facets.semanticNodes.byCorpus = numberRecord(semanticNodes.byCorpus);
+  facets.semanticNodes.byCategorySet = numberRecord(semanticNodes.byCategorySet);
+  facets.semanticRelations.byRelationTypeKey = numberRecord(semanticRelations.byRelationTypeKey);
+  facets.semanticRelations.byRelationDomain = numberRecord(semanticRelations.byRelationDomain);
+  facets.semanticRelations.bySubjectKind = numberRecord(semanticRelations.bySubjectKind);
+  facets.semanticRelations.byObjectKind = numberRecord(semanticRelations.byObjectKind);
+  facets.imports.byCorpus = numberRecord(imports.byCorpus);
+  return facets;
+}
+
+function createEmptyFacets() {
+  return {
+    assignments: { byStatus: {}, byType: {}, statusByType: {} },
+    messages: { byKind: {}, byDomain: {}, byStatus: {}, domainByKind: {} },
+    references: { byCurationStatus: {}, byCorpus: {}, statusByCorpus: {} },
+    semanticNodes: { byNodeKind: {}, byStatus: {}, byCorpus: {}, byCategorySet: {} },
+    semanticRelations: { byRelationTypeKey: {}, byRelationDomain: {}, bySubjectKind: {}, byObjectKind: {} },
+    imports: { byCorpus: {} },
+  };
+}
+
+function nestedNumberRecord(value: unknown): Record<string, Record<string, number>> {
+  const parsed = parseJsonObject(value) ?? {};
+  const result: Record<string, Record<string, number>> = {};
+  for (const [key, entry] of Object.entries(parsed)) result[key] = numberRecord(entry);
+  return result;
+}
+
+async function upsertNewsroomSummaryPayload(
+  client: DataClient,
+  payload: Record<string, unknown>,
+  current: any,
+  now: string,
+): Promise<void> {
+  const input = {
+    id: NEWSROOM_SUMMARY_PAYLOAD_ID,
+    ownerType: "newsroom",
+    ownerId: "newsroom",
+    payloadKind: "summary-snapshot",
+    importRunId: normalizeOptionalString(parseJsonObject(payload.latestImportRun)?.id),
+    payload: JSON.stringify(payload),
+    createdAt: current?.createdAt ?? now,
+    updatedAt: now,
+  };
+  if (current) {
+    await requireDataResult(client.models.KnowledgeRawPayload.update(input), "update Newsroom summary snapshot");
+    return;
+  }
+  await requireDataResult(client.models.KnowledgeRawPayload.create(input), "create Newsroom summary snapshot");
+}
+
+function numberRecord(value: unknown): Record<string, number> {
+  const parsed = parseJsonObject(value) ?? {};
+  const result: Record<string, number> = {};
+  for (const [key, entry] of Object.entries(parsed)) {
+    const numeric = Number(entry);
+    if (Number.isFinite(numeric)) result[key] = numeric;
+  }
+  return result;
+}
+
+function increment(target: Record<string, number>, key: string, delta: number): void {
+  target[key] = Math.max(0, (target[key] ?? 0) + delta);
 }
 
 function normalizeRequiredString(value: unknown, fieldName: string): string {

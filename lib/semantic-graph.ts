@@ -7,6 +7,7 @@ import type {
   SemanticNodeRecord,
   SemanticRelationRecord,
 } from "./category-repository";
+import { isEvidenceEligibleReference } from "./reference-policy";
 
 export const SEMANTIC_OBJECT_KINDS = [
   "reference",
@@ -31,6 +32,7 @@ export type SemanticPredicateId =
   | "has_editorial_form"
   | "about"
   | "comment"
+  | "ingestion_rationale"
   | "uses_evidence"
   | "uses_signal"
   | "requests_work_on"
@@ -59,6 +61,7 @@ export const SEMANTIC_PREDICATES: SemanticPredicateDefinition[] = [
   { id: "has_editorial_form", label: "has editorial form", group: "editorial", inverseLabel: "items by editorial form", contextPackTags: ["editing", "publication", "assignment_context"] },
   { id: "about", label: "about", group: "commentary", inverseLabel: "commentary" },
   { id: "comment", label: "comments on", group: "commentary", inverseLabel: "commented on by", contextPackTags: ["reference_curation", "editing", "research", "assignment_context"] },
+  { id: "ingestion_rationale", label: "ingestion rationale for", group: "commentary", inverseLabel: "ingestion rationale", contextPackTags: ["reference_curation", "editing", "research", "assignment_context"] },
   { id: "requests_work_on", label: "requests work on", group: "workflow", inverseLabel: "requested work", contextPackTags: ["assignment_context", "editing"] },
   { id: "uses_evidence", label: "uses evidence", group: "evidence", inverseLabel: "used as evidence by", contextPackTags: ["assignment_context", "research", "reference_graph"] },
   { id: "uses_signal", label: "uses signal", group: "evidence", inverseLabel: "signal for", contextPackTags: ["assignment_context", "research", "reference_graph"] },
@@ -235,11 +238,13 @@ export class SemanticGraphSnapshot {
   }
 
   referencesForCategory(categoryLineageId: string): SemanticObjectSummary[] {
-    return this.subjectsForObject("category", categoryLineageId, "reference", "classified_as");
+    return this.subjectsForObject("category", categoryLineageId, "reference", "classified_as")
+      .filter(isEvidenceEligibleReferenceSummary);
   }
 
   referencesForSemanticNode(nodeLineageId: string, predicate?: string): SemanticObjectSummary[] {
-    return this.subjectsForObject("semanticNode", nodeLineageId, "reference", predicate);
+    return this.subjectsForObject("semanticNode", nodeLineageId, "reference", predicate)
+      .filter(isEvidenceEligibleReferenceSummary);
   }
 
   subjectsForObject(objectKind: string, objectLineageId: string, subjectKind: string, predicate?: string): SemanticObjectSummary[] {
@@ -252,7 +257,7 @@ export class SemanticGraphSnapshot {
   messagesFor(kind: string, lineageId: string): MessageRecord[] {
     return this.incoming(kind, lineageId)
       .filter((relation) => relation.subjectKind === "message")
-      .filter((relation) => relationTypeKey(relation) === "comment" || relation.predicate === "comment")
+      .filter((relation) => ["comment", "ingestion_rationale"].includes(relationTypeKey(relation)) || ["comment", "ingestion_rationale"].includes(relation.predicate))
       .map((relation) => this.messagesById.get(relation.subjectId))
       .filter((message): message is MessageRecord => Boolean(message))
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
@@ -333,6 +338,10 @@ function uniqueSemanticObjects(objects: Array<SemanticObjectSummary | null>): Se
     map.set(`${object.kind}#${object.lineageId}`, object);
   }
   return Array.from(map.values()).sort((left, right) => left.label.localeCompare(right.label));
+}
+
+function isEvidenceEligibleReferenceSummary(summary: SemanticObjectSummary): boolean {
+  return summary.kind === "reference" && isEvidenceEligibleReference(summary.record as ReferenceRecord | undefined);
 }
 
 function summarizeReference(record: ReferenceRecord | null): SemanticObjectSummary | null {

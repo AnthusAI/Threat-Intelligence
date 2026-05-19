@@ -6,7 +6,23 @@ import type { Schema } from "../../data/resource";
 
 type ReviewHandler = Schema["reviewSteeringProposal"]["functionHandler"];
 type ReferenceCurationHandler = Schema["reviewReferenceCuration"]["functionHandler"];
-type CategoryActionEvent = Parameters<ReviewHandler>[0] | Parameters<ReferenceCurationHandler>[0];
+type CreateCategorySetDraftHandler = Schema["createCategorySetDraft"]["functionHandler"];
+type PromoteCategorySetDraftHandler = Schema["promoteCategorySetDraft"]["functionHandler"];
+type DiscardCategorySetDraftHandler = Schema["discardCategorySetDraft"]["functionHandler"];
+type CreateDraftCategoryHandler = Schema["createDraftCategory"]["functionHandler"];
+type UpdateDraftCategoryHandler = Schema["updateDraftCategory"]["functionHandler"];
+type ArchiveDraftCategoryHandler = Schema["archiveDraftCategory"]["functionHandler"];
+type ReviewReferenceTopicLabelHandler = Schema["reviewReferenceTopicLabel"]["functionHandler"];
+type CategoryActionEvent =
+  | Parameters<ReviewHandler>[0]
+  | Parameters<ReferenceCurationHandler>[0]
+  | Parameters<CreateCategorySetDraftHandler>[0]
+  | Parameters<PromoteCategorySetDraftHandler>[0]
+  | Parameters<DiscardCategorySetDraftHandler>[0]
+  | Parameters<CreateDraftCategoryHandler>[0]
+  | Parameters<UpdateDraftCategoryHandler>[0]
+  | Parameters<ArchiveDraftCategoryHandler>[0]
+  | Parameters<ReviewReferenceTopicLabelHandler>[0];
 type DataClient = ReturnType<typeof generateClient<Schema>>;
 type DataClientErrors = Array<{ message?: string | null } | string | null> | null | undefined;
 type DataClientResult<T = unknown> = {
@@ -28,15 +44,37 @@ const CATEGORY_PROPOSAL_KINDS = new Set([
   "move-category",
   "archive-category",
 ]);
+const NEWSROOM_SUMMARY_PAYLOAD_ID = "knowledge-raw-payload-newsroom-summary-current";
+const SUMMARY_STALE_AFTER_MS = 15 * 60 * 1000;
 
 let clientPromise: Promise<DataClient> | null = null;
 
 export const handler = async (event: CategoryActionEvent) => {
-  const fieldName = normalizeOptionalString(event.info?.fieldName);
-  if (fieldName === "reviewReferenceCuration") return reviewReferenceCuration(event as Parameters<ReferenceCurationHandler>[0]);
+  const fieldName = normalizeOptionalString(event.info?.fieldName) ?? normalizeOptionalString((event as { fieldName?: string | null }).fieldName);
+  if (fieldName === "reviewReferenceCuration") {
+    return reviewReferenceCuration(event as Parameters<ReferenceCurationHandler>[0]);
+  }
+  if (fieldName === "createCategorySetDraft") return createCategorySetDraft(event as Parameters<CreateCategorySetDraftHandler>[0]);
+  if (fieldName === "promoteCategorySetDraft") return promoteCategorySetDraft(event as Parameters<PromoteCategorySetDraftHandler>[0]);
+  if (fieldName === "discardCategorySetDraft") return discardCategorySetDraft(event as Parameters<DiscardCategorySetDraftHandler>[0]);
+  if (fieldName === "createDraftCategory") return createDraftCategory(event as Parameters<CreateDraftCategoryHandler>[0]);
+  if (fieldName === "updateDraftCategory") return updateDraftCategory(event as Parameters<UpdateDraftCategoryHandler>[0]);
+  if (fieldName === "archiveDraftCategory") return archiveDraftCategory(event as Parameters<ArchiveDraftCategoryHandler>[0]);
+  if (fieldName === "reviewReferenceTopicLabel") return reviewReferenceTopicLabel(event as Parameters<ReviewReferenceTopicLabelHandler>[0]);
   if (fieldName && fieldName !== "reviewSteeringProposal") {
     throw new Error(`Unsupported steering action ${fieldName}.`);
   }
+  if ("sourceCategorySetId" in event.arguments) return createCategorySetDraft(event as Parameters<CreateCategorySetDraftHandler>[0]);
+  if ("categorySetId" in event.arguments && !("proposalId" in event.arguments)) {
+    if ("displayName" in event.arguments) return createDraftCategory(event as Parameters<CreateDraftCategoryHandler>[0]);
+    return promoteCategorySetDraft(event as Parameters<PromoteCategorySetDraftHandler>[0]);
+  }
+  if ("categoryId" in event.arguments && "referenceId" in event.arguments) return reviewReferenceTopicLabel(event as Parameters<ReviewReferenceTopicLabelHandler>[0]);
+  if ("categoryId" in event.arguments) {
+    if ("displayName" in event.arguments || "parentCategoryKey" in event.arguments) return updateDraftCategory(event as Parameters<UpdateDraftCategoryHandler>[0]);
+    return archiveDraftCategory(event as Parameters<ArchiveDraftCategoryHandler>[0]);
+  }
+  if ("referenceId" in event.arguments) return reviewReferenceCuration(event as Parameters<ReferenceCurationHandler>[0]);
   return reviewSteeringProposal(event as Parameters<ReviewHandler>[0]);
 };
 
@@ -104,6 +142,7 @@ async function reviewReferenceCuration(event: Parameters<ReferenceCurationHandle
   const referenceId = normalizeRequiredString(event.arguments.referenceId, "referenceId");
   const action = normalizeReferenceCurationAction(event.arguments.action);
   const nextStatus = referenceCurationStatusForAction(action);
+  const reasonCode = normalizeReferenceRejectionReasonCode(event.arguments.reasonCode, action === "reject");
   const reference = await getRequiredRecord(client.models.Reference, referenceId, "Reference");
   const now = new Date().toISOString();
   const actorSub = normalizeOptionalString(event.arguments.actorSub) ?? getIdentitySub(event);
@@ -129,6 +168,7 @@ async function reviewReferenceCuration(event: Parameters<ReferenceCurationHandle
       curationStatusUpdatedAt: now,
       curationStatusUpdatedBy: actor,
       curationStatusReason: note,
+      newsroomFeedKey: reference.newsroomFeedKey ?? "references",
       updatedAt: now,
     }),
     "update Reference curation status",
@@ -149,12 +189,15 @@ async function reviewReferenceCuration(event: Parameters<ReferenceCurationHandle
       authorLabel: actor,
       createdAt: now,
       updatedAt: now,
-      metadata: {
+      newsroomFeedKey: "messages",
+      metadata: JSON.stringify({
         action,
         curationStatus: nextStatus,
+        reasonCode,
+        curationReasonCode: reasonCode,
         referenceId,
         referenceLineageId,
-      },
+      }),
     }),
     "create Message",
   );
@@ -181,7 +224,7 @@ async function reviewReferenceCuration(event: Parameters<ReferenceCurationHandle
       predicateObjectStateKey: `comment#${semanticStateKey("reference", referenceLineageId)}`,
       subjectVersionKey: semanticVersionKey("message", messageId),
       objectVersionKey: semanticVersionKey("reference", referenceId),
-      score: null,
+      score: 1,
       confidence: null,
       rank: 1,
       classifierId: null,
@@ -190,22 +233,407 @@ async function reviewReferenceCuration(event: Parameters<ReferenceCurationHandle
       sourceSnapshotId: null,
       importRunId: null,
       importedAt: now,
-      metadata: {
+      createdAt: now,
+      updatedAt: now,
+      newsroomFeedKey: "semanticRelations",
+      metadata: JSON.stringify({
         action,
         curationStatus: nextStatus,
+        reasonCode,
         messageKind: "reference_curation",
-      },
+      }),
     }),
     "create Message SemanticRelation",
   );
+
+  await updateNewsroomSummaryForReferenceCuration(client, {
+    corpusId: normalizeOptionalString(reference.corpusId),
+    previousStatus: normalizeOptionalString(reference.curationStatus) ?? "pending",
+    nextStatus,
+    now,
+  });
 
   return {
     ok: true,
     action,
     referenceId,
     status: nextStatus,
+    reasonCode,
     messageId,
     relationId,
+  };
+}
+
+async function createCategorySetDraft(event: Parameters<CreateCategorySetDraftHandler>[0]) {
+  const client = await getDataClient();
+  const sourceCategorySetId = normalizeRequiredString(event.arguments.sourceCategorySetId, "sourceCategorySetId");
+  const source = await getRequiredRecord(client.models.CategorySet, sourceCategorySetId, "CategorySet");
+  if (source.versionState !== "current" || source.status !== "accepted") {
+    throw new Error(`CategorySet ${sourceCategorySetId} is ${source.versionState}/${source.status}; create drafts from the accepted current set.`);
+  }
+  const sourceCategories = (await listCategoriesForSet(client, sourceCategorySetId))
+    .filter((category) => category.versionState !== "superseded" && category.status !== "archived" && category.status !== "deprecated")
+    .sort(compareCategoryRank);
+  const now = new Date().toISOString();
+  const actor = normalizeOptionalString(event.arguments.actorLabel) ?? getIdentityLabel(event) ?? getIdentitySub(event) ?? "Papyrus newsroom";
+  const lineageId = normalizeOptionalString(source.lineageId) ?? source.id;
+  const versionNumber = Number(source.versionNumber ?? 0) + 1;
+  const draftId = `category-set-${safeId(lineageId)}-draft-${now.replace(/[^0-9TZ]/g, "")}-${randomUUID().slice(0, 8)}`;
+  const displayName = normalizeOptionalString(event.arguments.displayName) ?? `${source.displayName} Draft`;
+  const draftCategoryIdBySourceId = new Map<string, string>();
+  for (const category of sourceCategories) {
+    draftCategoryIdBySourceId.set(
+      normalizeRequiredString(category.id, "category.id"),
+      `category-${safeId(draftId)}-${safeId(category.categoryKey)}-${randomUUID().slice(0, 8)}`,
+    );
+  }
+  const draftSet = {
+    id: draftId,
+    lineageId,
+    versionNumber,
+    previousVersionId: source.id,
+    versionState: "draft",
+    versionCreatedAt: now,
+    versionCreatedBy: actor,
+    changeReason: normalizeOptionalString(event.arguments.note) ?? `draft from ${source.id}`,
+    contentHash: "",
+    corpusId: source.corpusId,
+    classifierId: source.classifierId,
+    displayName,
+    description: source.description ?? null,
+    status: "draft",
+    generatedAt: now,
+    categoryCount: sourceCategories.length,
+    importRunId: source.importRunId ?? null,
+  };
+  await requireDataResult(
+    client.models.CategorySet.create({ ...draftSet, contentHash: hashStable({ ...draftSet, contentHash: undefined }) }),
+    "create CategorySet draft",
+  );
+  for (const category of sourceCategories) {
+    const categoryId = normalizeRequiredString(category.id, "category.id");
+    const parentCategoryId = normalizeOptionalString(category.parentCategoryId);
+    const draftCategory = {
+      id: draftCategoryIdBySourceId.get(categoryId) ?? `category-${safeId(draftId)}-${safeId(category.categoryKey)}-${randomUUID().slice(0, 8)}`,
+      lineageId: normalizeOptionalString(category.lineageId) ?? `category-${safeId(draftId)}-${safeId(category.categoryKey)}`,
+      previousVersionId: categoryId,
+      versionNumber: Number(category.versionNumber ?? 0) + 1,
+      versionState: "draft",
+      versionCreatedAt: now,
+      versionCreatedBy: actor,
+      changeReason: `draft from ${category.id}`,
+      categorySetId: draftId,
+      corpusId: category.corpusId,
+      categoryKey: category.categoryKey,
+      parentCategoryId: parentCategoryId ? draftCategoryIdBySourceId.get(parentCategoryId) ?? null : null,
+      parentCategoryKey: category.parentCategoryKey ?? null,
+      displayName: category.displayName,
+      shortTitle: category.shortTitle ?? null,
+      subtitle: category.subtitle ?? null,
+      description: category.description ?? null,
+      aliases: compactStringArray(category.aliases) ?? [],
+      status: category.status,
+      seedItemIds: compactStringArray(category.seedItemIds) ?? [],
+      holdoutItemIds: compactStringArray(category.holdoutItemIds) ?? [],
+      rank: category.rank ?? null,
+      depth: category.depth ?? null,
+      isPinned: Boolean(category.isPinned),
+      importRunId: category.importRunId ?? null,
+      contentHash: "",
+      updatedAt: now,
+    };
+    await requireDataResult(
+      client.models.Category.create({
+        ...draftCategory,
+        contentHash: hashStable({ ...draftCategory, contentHash: undefined }),
+      }),
+      "create draft Category",
+    );
+  }
+  return {
+    ok: true,
+    action: "create_draft",
+    categorySetId: draftId,
+    sourceCategorySetId,
+    categoryCount: sourceCategories.length,
+    status: "draft",
+  };
+}
+
+async function promoteCategorySetDraft(event: Parameters<PromoteCategorySetDraftHandler>[0]) {
+  const client = await getDataClient();
+  const categorySetId = normalizeRequiredString(event.arguments.categorySetId, "categorySetId");
+  const draft = await getRequiredRecord(client.models.CategorySet, categorySetId, "CategorySet");
+  if (draft.versionState !== "draft") throw new Error(`CategorySet ${categorySetId} is ${draft.versionState}; only drafts can be promoted.`);
+  const now = new Date().toISOString();
+  const actor = normalizeOptionalString(event.arguments.actorLabel) ?? getIdentityLabel(event) ?? getIdentitySub(event) ?? "Papyrus newsroom";
+  const currentSets = await listCategorySetsByLineage(client, normalizeRequiredString(draft.lineageId, "draft.lineageId"));
+  for (const categorySet of currentSets.filter((entry) => entry.id !== draft.id && entry.versionState === "current")) {
+    await requireDataResult(
+      client.models.CategorySet.update({
+        id: categorySet.id,
+        versionState: "superseded",
+        status: "superseded",
+        changeReason: `superseded by ${draft.id}`,
+      }),
+      "supersede CategorySet",
+    );
+  }
+  const categories = await listCategoriesForSet(client, categorySetId);
+  const activeCount = categories.filter((category) => category.status !== "archived" && category.status !== "deprecated").length;
+  await requireDataResult(
+    client.models.CategorySet.update({
+      id: draft.id,
+      versionState: "current",
+      status: "accepted",
+      versionCreatedBy: actor,
+      changeReason: normalizeOptionalString(event.arguments.note) ?? "draft promoted",
+      generatedAt: now,
+      categoryCount: activeCount,
+    }),
+    "promote CategorySet",
+  );
+  for (const category of categories) {
+    await requireDataResult(
+      client.models.Category.update({
+        id: category.id,
+        versionState: "current",
+        updatedAt: now,
+      }),
+      "promote Category",
+    );
+  }
+  return {
+    ok: true,
+    action: "promote_draft",
+    categorySetId,
+    sourceCategorySetId: draft.previousVersionId ?? null,
+    categoryCount: activeCount,
+    status: "accepted",
+  };
+}
+
+async function discardCategorySetDraft(event: Parameters<DiscardCategorySetDraftHandler>[0]) {
+  const client = await getDataClient();
+  const categorySetId = normalizeRequiredString(event.arguments.categorySetId, "categorySetId");
+  normalizeRequiredString(event.arguments.note, "note");
+  const draft = await requireDraftCategorySet(client, categorySetId);
+  const categories = await listCategoriesForSet(client, categorySetId);
+  const semanticRelations = await listSemanticRelationsForDraftCategories(client, categories);
+  const categoryKeywords = await listCategoryKeywordsForSet(client, categorySetId);
+  const lexicalSteeringRules = await listLexicalSteeringRulesForSet(client, categorySetId);
+
+  for (const relation of semanticRelations) {
+    await requireDataResult((client.models.SemanticRelation as any).delete({ id: relation.id }), "delete draft SemanticRelation");
+  }
+  for (const keyword of categoryKeywords) {
+    await requireDataResult((client.models.CategoryKeyword as any).delete({ id: keyword.id }), "delete draft CategoryKeyword");
+  }
+  for (const rule of lexicalSteeringRules) {
+    await requireDataResult((client.models.LexicalSteeringRule as any).delete({ id: rule.id }), "delete draft LexicalSteeringRule");
+  }
+  for (const category of categories) {
+    await requireDataResult(client.models.Category.delete({ id: category.id }), "delete draft Category");
+  }
+  await requireDataResult(client.models.CategorySet.delete({ id: draft.id }), "delete draft CategorySet");
+
+  return {
+    ok: true,
+    action: "discard_draft",
+    categorySetId,
+    sourceCategorySetId: draft.previousVersionId ?? null,
+    categoryCount: categories.length,
+    status: "deleted",
+  };
+}
+
+async function createDraftCategory(event: Parameters<CreateDraftCategoryHandler>[0]) {
+  const client = await getDataClient();
+  const categorySetId = normalizeRequiredString(event.arguments.categorySetId, "categorySetId");
+  const categorySet = await requireDraftCategorySet(client, categorySetId);
+  const now = new Date().toISOString();
+  const actor = normalizeOptionalString(event.arguments.actorLabel) ?? getIdentityLabel(event) ?? getIdentitySub(event) ?? "Papyrus newsroom";
+  const displayName = normalizeRequiredString(event.arguments.displayName, "displayName");
+  const categoryKey = await uniqueCategoryKey(client, categorySetId, deriveCategoryKey(displayName));
+  const parentCategoryKey = normalizeOptionalString(event.arguments.parentCategoryKey);
+  const depth = await categoryDepthForParent(client, categorySetId, parentCategoryKey);
+  const lineageId = `category-${safeId(categorySetId)}-${safeId(categoryKey)}`;
+  const category = {
+    id: `${lineageId}-v1`,
+    lineageId,
+    versionNumber: 1,
+    previousVersionId: null,
+    versionState: "draft",
+    versionCreatedAt: now,
+    versionCreatedBy: actor,
+    changeReason: normalizeOptionalString(event.arguments.note) ?? "manual draft topic",
+    contentHash: "",
+    categorySetId,
+    corpusId: categorySet.corpusId,
+    categoryKey,
+    parentCategoryId: null,
+    parentCategoryKey,
+    displayName,
+    shortTitle: normalizeOptionalString(event.arguments.shortTitle) ?? deriveShortTitle(displayName),
+    subtitle: normalizeOptionalString(event.arguments.subtitle),
+    description: normalizeOptionalString(event.arguments.description),
+    aliases: [],
+    status: "accepted",
+    seedItemIds: [],
+    holdoutItemIds: [],
+    rank: null,
+    depth,
+    isPinned: false,
+    importRunId: categorySet.importRunId ?? null,
+    updatedAt: now,
+  };
+  await requireDataResult(
+    client.models.Category.create({ ...category, contentHash: hashStable({ ...category, contentHash: undefined }) }),
+    "create draft Category",
+  );
+  await refreshCategorySetCount(client, categorySetId);
+  return {
+    ok: true,
+    action: "create_draft_category",
+    proposalId: null,
+    categorySetId,
+    categoryId: category.id,
+    decisionId: null,
+    status: "draft",
+  };
+}
+
+async function updateDraftCategory(event: Parameters<UpdateDraftCategoryHandler>[0]) {
+  const client = await getDataClient();
+  const categoryId = normalizeRequiredString(event.arguments.categoryId, "categoryId");
+  const category = await getRequiredRecord(client.models.Category, categoryId, "Category");
+  await requireDraftCategorySet(client, normalizeRequiredString(category.categorySetId, "category.categorySetId"));
+  if (category.versionState !== "draft") throw new Error(`Category ${categoryId} is ${category.versionState}; only draft categories can be edited.`);
+  const now = new Date().toISOString();
+  const displayName = normalizeOptionalString(event.arguments.displayName) ?? category.displayName;
+  const parentCategoryKey = normalizeOptionalString(event.arguments.parentCategoryKey);
+  const parentChanged = parentCategoryKey !== normalizeOptionalString(category.parentCategoryKey);
+  const nextParentCategoryKey = parentChanged ? parentCategoryKey : category.parentCategoryKey ?? null;
+  const next = {
+    ...category,
+    displayName,
+    shortTitle: normalizeOptionalString(event.arguments.shortTitle) ?? category.shortTitle ?? deriveShortTitle(displayName),
+    subtitle: normalizeOptionalString(event.arguments.subtitle),
+    description: normalizeOptionalString(event.arguments.description),
+    parentCategoryKey: nextParentCategoryKey,
+    depth: await categoryDepthForParent(client, category.categorySetId, nextParentCategoryKey),
+    changeReason: normalizeOptionalString(event.arguments.note) ?? "manual draft topic edit",
+    updatedAt: now,
+  };
+  await requireDataResult(
+    client.models.Category.update({
+      id: categoryId,
+      displayName: next.displayName,
+      shortTitle: next.shortTitle,
+      subtitle: next.subtitle,
+      description: next.description,
+      parentCategoryKey: next.parentCategoryKey,
+      depth: next.depth,
+      changeReason: next.changeReason,
+      contentHash: hashStable({ ...next, contentHash: undefined }),
+      updatedAt: now,
+    }),
+    "update draft Category",
+  );
+  return {
+    ok: true,
+    action: "update_draft_category",
+    proposalId: null,
+    categorySetId: category.categorySetId,
+    categoryId,
+    decisionId: null,
+    status: "draft",
+  };
+}
+
+async function archiveDraftCategory(event: Parameters<ArchiveDraftCategoryHandler>[0]) {
+  const client = await getDataClient();
+  const categoryId = normalizeRequiredString(event.arguments.categoryId, "categoryId");
+  const category = await getRequiredRecord(client.models.Category, categoryId, "Category");
+  await requireDraftCategorySet(client, normalizeRequiredString(category.categorySetId, "category.categorySetId"));
+  if (category.versionState !== "draft") throw new Error(`Category ${categoryId} is ${category.versionState}; only draft categories can be archived.`);
+  const now = new Date().toISOString();
+  await requireDataResult(
+    client.models.Category.update({
+      id: categoryId,
+      status: "deprecated",
+      changeReason: normalizeOptionalString(event.arguments.note) ?? "manual draft topic archive",
+      updatedAt: now,
+    }),
+    "archive draft Category",
+  );
+  await refreshCategorySetCount(client, category.categorySetId);
+  return {
+    ok: true,
+    action: "archive_draft_category",
+    proposalId: null,
+    categorySetId: category.categorySetId,
+    categoryId,
+    decisionId: null,
+    status: "deprecated",
+  };
+}
+
+async function reviewReferenceTopicLabel(event: Parameters<ReviewReferenceTopicLabelHandler>[0]) {
+  const client = await getDataClient();
+  const action = normalizeTopicLabelAction(event.arguments.action);
+  const referenceId = normalizeRequiredString(event.arguments.referenceId, "referenceId");
+  const categoryId = normalizeRequiredString(event.arguments.categoryId, "categoryId");
+  const sourceRelationId = normalizeOptionalString(event.arguments.sourceRelationId);
+  const now = new Date().toISOString();
+  const actor = normalizeOptionalString(event.arguments.actorLabel) ?? getIdentityLabel(event) ?? getIdentitySub(event) ?? "Papyrus newsroom";
+  const note = normalizeOptionalString(event.arguments.note);
+  const reference = await getRequiredRecord(client.models.Reference, referenceId, "Reference");
+  const category = await getRequiredRecord(client.models.Category, categoryId, "Category");
+  if (action === "reject_prediction") {
+    if (!sourceRelationId) throw new Error("sourceRelationId is required to reject a prediction.");
+    const source = await getRequiredSemanticRelation(client, sourceRelationId, "classified_as");
+    await requireDataResult((client.models.SemanticRelation as any).delete({ id: source.id }), "delete classified_as prediction");
+    await updateNewsroomSummaryForSemanticRelationDelta(client, source, -1, now);
+    return { ok: true, action, referenceId, categoryId, relationId: null, sourceRelationId, status: "deleted_prediction" };
+  }
+  if (action === "unlabel") {
+    if (!sourceRelationId) throw new Error("sourceRelationId is required to remove an authoritative label.");
+    const source = await getRequiredSemanticRelation(client, sourceRelationId, "authoritative_label");
+    await requireDataResult((client.models.SemanticRelation as any).delete({ id: source.id }), "delete authoritative_label");
+    await updateNewsroomSummaryForSemanticRelationDelta(client, source, -1, now);
+    return { ok: true, action, referenceId, categoryId, relationId: null, sourceRelationId, status: "deleted_authoritative_label" };
+  }
+  if (!isAcceptedCurrentReference(reference)) {
+    throw new Error(`Reference ${referenceId} is ${reference.versionState}/${reference.curationStatus}; authoritative labels require a current accepted Reference.`);
+  }
+  let sourcePrediction: any | null = null;
+  if (action === "accept_prediction") {
+    if (!sourceRelationId) throw new Error("sourceRelationId is required to accept a prediction.");
+    sourcePrediction = await getRequiredSemanticRelation(client, sourceRelationId, "classified_as");
+  }
+  const relation = buildAuthoritativeLabelRelation({
+    reference,
+    category,
+    now,
+    actor,
+    note,
+    sourceMode: action === "accept_prediction" ? "accepted_prediction" : "manual",
+    sourceRelationId: sourcePrediction?.id ?? null,
+  });
+  const existing = await findCurrentSemanticRelationByState(client, "authoritative_label", relation.subjectStateKey, relation.objectStateKey);
+  if (!existing) {
+    await requireDataResult(client.models.SemanticRelation.create(relation), "create authoritative_label");
+    await updateNewsroomSummaryForSemanticRelationDelta(client, relation, 1, now);
+  }
+  return {
+    ok: true,
+    action,
+    referenceId,
+    categoryId,
+    relationId: existing?.id ?? relation.id,
+    sourceRelationId: sourcePrediction?.id ?? sourceRelationId ?? null,
+    status: existing ? "idempotent" : "created_authoritative_label",
   };
 }
 
@@ -305,19 +733,292 @@ async function listCategoriesForSet(client: DataClient, categorySetId: string): 
   return records;
 }
 
+async function listCategoryKeywordsForSet(client: DataClient, categorySetId: string): Promise<any[]> {
+  const model = client.models.CategoryKeyword as any;
+  let nextToken: string | null | undefined;
+  const records: any[] = [];
+  do {
+    const page = await model.listCategoryKeywordsBySetKeyAndRank(
+      { categorySetId },
+      { limit: 100, nextToken },
+    );
+    assertNoDataErrors(page.errors, "list CategoryKeyword");
+    records.push(...(page.data ?? []));
+    nextToken = page.nextToken;
+  } while (nextToken);
+  return records;
+}
+
+async function listLexicalSteeringRulesForSet(client: DataClient, categorySetId: string): Promise<any[]> {
+  const model = client.models.LexicalSteeringRule as any;
+  let nextToken: string | null | undefined;
+  const records: any[] = [];
+  do {
+    const page = await model.listLexicalSteeringRulesBySetAndTerm(
+      { categorySetId },
+      { limit: 100, nextToken },
+    );
+    assertNoDataErrors(page.errors, "list LexicalSteeringRule");
+    records.push(...(page.data ?? []));
+    nextToken = page.nextToken;
+  } while (nextToken);
+  return records;
+}
+
+async function listSemanticRelationsForDraftCategories(client: DataClient, categories: any[]): Promise<any[]> {
+  const model = client.models.SemanticRelation as any;
+  const categoryIds = new Set(categories.map((category) => normalizeOptionalString(category.id)).filter(Boolean));
+  const relationById = new Map<string, any>();
+  for (const category of categories) {
+    const lineageId = normalizeOptionalString(category.lineageId);
+    if (!lineageId) continue;
+    let nextToken: string | null | undefined;
+    do {
+      const page = await model.listSemanticRelationsByObjectState(
+        { objectStateKey: semanticStateKey("category", lineageId) },
+        { limit: 100, nextToken },
+      );
+      assertNoDataErrors(page.errors, "list SemanticRelation");
+      for (const relation of page.data ?? []) {
+        if (relation?.objectKind === "category" && categoryIds.has(normalizeOptionalString(relation.objectId))) {
+          relationById.set(relation.id, relation);
+        }
+      }
+      nextToken = page.nextToken;
+    } while (nextToken);
+  }
+  return Array.from(relationById.values());
+}
+
+async function listCategorySetsByLineage(client: DataClient, lineageId: string): Promise<any[]> {
+  const model = client.models.CategorySet as any;
+  let nextToken: string | null | undefined;
+  const records: any[] = [];
+  do {
+    const page = await model.listCategorySetsByLineageAndVersion(
+      { lineageId },
+      { limit: 100, nextToken },
+    );
+    assertNoDataErrors(page.errors, "list CategorySet");
+    records.push(...(page.data ?? []));
+    nextToken = page.nextToken;
+  } while (nextToken);
+  return records;
+}
+
+async function requireDraftCategorySet(client: DataClient, categorySetId: string): Promise<any> {
+  const categorySet = await getRequiredRecord(client.models.CategorySet, categorySetId, "CategorySet");
+  if (categorySet.versionState !== "draft" || categorySet.status !== "draft") {
+    throw new Error(`CategorySet ${categorySetId} is ${categorySet.versionState}/${categorySet.status}; this operation requires a draft CategorySet.`);
+  }
+  return categorySet;
+}
+
 async function categoryDepthForParent(client: DataClient, categorySetId: string, parentCategoryKey: string | null): Promise<number> {
   if (!parentCategoryKey) return 0;
   const parent = await findCurrentCategory(client, categorySetId, parentCategoryKey);
   return (typeof parent?.depth === "number" ? parent.depth : 0) + 1;
 }
 
+function compareCategoryRank(left: any, right: any): number {
+  const depthDiff = Number(left.depth ?? 0) - Number(right.depth ?? 0);
+  if (depthDiff !== 0) return depthDiff;
+  const rankDiff = Number(left.rank ?? 999999) - Number(right.rank ?? 999999);
+  if (rankDiff !== 0) return rankDiff;
+  return String(left.categoryKey ?? left.id).localeCompare(String(right.categoryKey ?? right.id));
+}
+
+function deriveCategoryKey(value: unknown): string {
+  return safeId(value).replace(/-/g, "_") || "topic";
+}
+
+async function uniqueCategoryKey(client: DataClient, categorySetId: string, baseKey: string): Promise<string> {
+  const existing = new Set((await listCategoriesForSet(client, categorySetId)).map((category) => normalizeOptionalString(category.categoryKey)).filter(Boolean));
+  let candidate = baseKey || "topic";
+  let suffix = 2;
+  while (existing.has(candidate)) {
+    candidate = `${baseKey || "topic"}_${suffix}`;
+    suffix += 1;
+  }
+  return candidate;
+}
+
 async function refreshCategorySetCount(client: DataClient, categorySetId: string): Promise<void> {
   const categories = await listCategoriesForSet(client, categorySetId);
-  const categoryCount = categories.filter((category) => category.versionState === "current" && category.status !== "archived").length;
+  const categoryCount = categories.filter((category) => (
+    category.versionState !== "superseded"
+    && category.status !== "archived"
+    && category.status !== "deprecated"
+  )).length;
   await requireDataResult(
     client.models.CategorySet.update({ id: categorySetId, categoryCount }),
     "update CategorySet count",
   );
+}
+
+type TopicLabelAction = "manual_label" | "accept_prediction" | "reject_prediction" | "unlabel";
+
+function normalizeTopicLabelAction(value: unknown): TopicLabelAction {
+  const action = normalizeRequiredString(value, "action").toLowerCase();
+  if (action === "manual_label" || action === "accept_prediction" || action === "reject_prediction" || action === "unlabel") {
+    return action;
+  }
+  throw new Error(`Unsupported topic label action ${action}.`);
+}
+
+function isAcceptedCurrentReference(reference: any): boolean {
+  return reference.versionState === "current" && reference.curationStatus === "accepted";
+}
+
+async function getRequiredSemanticRelation(client: DataClient, relationId: string, relationTypeKey: string): Promise<any> {
+  const relation = await getRequiredRecord(client.models.SemanticRelation, relationId, "SemanticRelation");
+  const key = normalizeOptionalString(relation.relationTypeKey) ?? normalizeOptionalString(relation.predicate);
+  if (key !== relationTypeKey) {
+    throw new Error(`SemanticRelation ${relationId} is ${key ?? "unknown"}, not ${relationTypeKey}.`);
+  }
+  if (relation.relationState && relation.relationState !== "current") {
+    throw new Error(`SemanticRelation ${relationId} is ${relation.relationState}; only current relations can be reviewed.`);
+  }
+  return relation;
+}
+
+async function findCurrentSemanticRelationByState(
+  client: DataClient,
+  relationTypeKey: string,
+  subjectStateKey: string,
+  objectStateKey: string,
+): Promise<any | null> {
+  const model = client.models.SemanticRelation as any;
+  let nextToken: string | null | undefined;
+  do {
+    const page = await model.listSemanticRelationsBySubjectState(
+      { subjectStateKey },
+      { limit: 100, nextToken },
+    );
+    assertNoDataErrors(page.errors, "list SemanticRelation by subject");
+    const match = (page.data ?? []).find((relation: any) => (
+      relation.relationState === "current"
+      && relation.objectStateKey === objectStateKey
+      && ((relation.relationTypeKey ?? relation.predicate) === relationTypeKey)
+    ));
+    if (match) return match;
+    nextToken = page.nextToken;
+  } while (nextToken);
+  return null;
+}
+
+function semanticRelationTypeFieldsForPredicate(predicate: string): {
+  relationTypeId: string;
+  relationTypeKey: string;
+  relationDomain: string;
+} {
+  if (predicate === "authoritative_label") {
+    return {
+      relationTypeId: "semantic-relation-type-authoritative-label",
+      relationTypeKey: "authoritative_label",
+      relationDomain: "taxonomy",
+    };
+  }
+  if (predicate === "classified_as") {
+    return {
+      relationTypeId: "semantic-relation-type-classified-as",
+      relationTypeKey: "classified_as",
+      relationDomain: "taxonomy",
+    };
+  }
+  return {
+    relationTypeId: `semantic-relation-type-${safeId(predicate)}`,
+    relationTypeKey: predicate,
+    relationDomain: "semantic",
+  };
+}
+
+function buildAuthoritativeLabelRelation({
+  actor,
+  category,
+  note,
+  now,
+  reference,
+  sourceMode,
+  sourceRelationId,
+}: {
+  actor: string;
+  category: any;
+  note: string | null;
+  now: string;
+  reference: any;
+  sourceMode: "manual" | "accepted_prediction";
+  sourceRelationId: string | null;
+}): any {
+  const subjectLineageId = normalizeOptionalString(reference.lineageId) ?? normalizeRequiredString(reference.id, "reference.id");
+  const objectLineageId = normalizeOptionalString(category.lineageId) ?? normalizeRequiredString(category.id, "category.id");
+  const subjectStateKey = semanticStateKey("reference", subjectLineageId);
+  const objectStateKey = semanticStateKey("category", objectLineageId);
+  const subjectVersionKey = semanticVersionKey("reference", normalizeRequiredString(reference.id, "reference.id"));
+  const objectVersionKey = semanticVersionKey("category", normalizeRequiredString(category.id, "category.id"));
+  return {
+    id: `semantic-relation-${hashStable([subjectStateKey, "authoritative_label", objectStateKey]).slice(0, 24)}`,
+    relationState: "current",
+    predicate: "authoritative_label",
+    ...semanticRelationTypeFieldsForPredicate("authoritative_label"),
+    subjectKind: "reference",
+    subjectId: reference.id,
+    subjectLineageId,
+    subjectVersionNumber: typeof reference.versionNumber === "number" ? reference.versionNumber : null,
+    objectKind: "category",
+    objectId: category.id,
+    objectLineageId,
+    objectVersionNumber: typeof category.versionNumber === "number" ? category.versionNumber : null,
+    subjectStateKey,
+    objectStateKey,
+    objectSubjectStateKey: `${objectStateKey}#reference`,
+    predicateObjectStateKey: `authoritative_label#${objectStateKey}`,
+    subjectVersionKey,
+    objectVersionKey,
+    score: 1,
+    confidence: null,
+    rank: 1,
+    classifierId: normalizeOptionalString(category.classifierId),
+    modelVersion: null,
+    reviewRecommended: false,
+    sourceSnapshotId: null,
+    importRunId: null,
+    importedAt: now,
+    createdAt: now,
+    updatedAt: now,
+    newsroomFeedKey: "semanticRelations",
+    metadata: JSON.stringify({
+      kind: sourceMode === "accepted_prediction"
+        ? "classification.authoritative_label.accepted_from_prediction"
+        : "classification.authoritative_label.manual",
+      actor,
+      note,
+      sourceMode,
+      sourcePredictionId: sourceRelationId,
+      categorySetId: normalizeOptionalString(category.categorySetId),
+      categoryKey: normalizeOptionalString(category.categoryKey),
+    }),
+  };
+}
+
+async function updateNewsroomSummaryForSemanticRelationDelta(
+  client: DataClient,
+  relation: any,
+  amount: number,
+  now: string,
+): Promise<void> {
+  const response = await client.models.KnowledgeRawPayload.get({ id: NEWSROOM_SUMMARY_PAYLOAD_ID });
+  assertNoDataErrors(response.errors, "get Newsroom summary snapshot");
+  const payload = normalizeSummaryPayload(response.data?.payload, now);
+  payload.generatedAt = now;
+  payload.staleAt = new Date(Date.parse(now) + SUMMARY_STALE_AFTER_MS).toISOString();
+  payload.source = "incremental";
+  payload.counts.semanticRelations = Math.max(0, (payload.counts.semanticRelations ?? 0) + amount);
+  increment(payload.facets.semanticRelations.byRelationTypeKey, normalizeOptionalString(relation.relationTypeKey) ?? normalizeOptionalString(relation.predicate) ?? "unknown", amount);
+  increment(payload.facets.semanticRelations.byRelationDomain, normalizeOptionalString(relation.relationDomain) ?? "unknown", amount);
+  increment(payload.facets.semanticRelations.bySubjectKind, normalizeOptionalString(relation.subjectKind) ?? "unknown", amount);
+  increment(payload.facets.semanticRelations.byObjectKind, normalizeOptionalString(relation.objectKind) ?? "unknown", amount);
+  await upsertNewsroomSummaryPayload(client, payload, response.data, now);
 }
 
 async function getDataClient(): Promise<DataClient> {
@@ -376,6 +1077,207 @@ function referenceCurationStatusForAction(action: "accept" | "reject" | "reopen"
   if (action === "reject") return "rejected";
   if (action === "archive") return "archived";
   return "pending";
+}
+
+const REFERENCE_REJECTION_REASON_CODES = new Set([
+  "out_of_scope",
+  "policy_exclusion",
+  "duplicate",
+  "low_quality",
+  "unavailable",
+  "provenance",
+  "other",
+]);
+
+function normalizeReferenceRejectionReasonCode(value: unknown, required: boolean): string | null {
+  const normalized = normalizePolicyToken(value);
+  if (!normalized) {
+    if (required) throw new Error("reasonCode is required when rejecting a reference.");
+    return null;
+  }
+  if (!REFERENCE_REJECTION_REASON_CODES.has(normalized)) {
+    throw new Error(`Unsupported reference rejection reason code ${normalized}.`);
+  }
+  return normalized;
+}
+
+function normalizePolicyToken(value: unknown): string {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_|_$/g, "");
+}
+
+async function updateNewsroomSummaryForReferenceCuration(
+  client: DataClient,
+  input: { corpusId: string | null; previousStatus: string; nextStatus: string; now: string },
+): Promise<void> {
+  const response = await client.models.KnowledgeRawPayload.get({ id: NEWSROOM_SUMMARY_PAYLOAD_ID });
+  assertNoDataErrors(response.errors, "get Newsroom summary snapshot");
+  const payload = normalizeSummaryPayload(response.data?.payload, input.now);
+  payload.generatedAt = input.now;
+  payload.staleAt = new Date(Date.parse(input.now) + SUMMARY_STALE_AFTER_MS).toISOString();
+  payload.source = "incremental";
+  payload.counts.messages = Math.max(0, (payload.counts.messages ?? 0) + 1);
+  payload.counts.semanticRelations = Math.max(0, (payload.counts.semanticRelations ?? 0) + 1);
+  if (input.previousStatus !== input.nextStatus) {
+    increment(payload.referenceStatusCounts, input.previousStatus, -1);
+    increment(payload.referenceStatusCounts, input.nextStatus, 1);
+    increment(payload.facets.references.byCurationStatus, input.previousStatus, -1);
+    increment(payload.facets.references.byCurationStatus, input.nextStatus, 1);
+    if (input.corpusId) {
+      if (!payload.facets.references.statusByCorpus[input.corpusId]) payload.facets.references.statusByCorpus[input.corpusId] = {};
+      increment(payload.facets.references.statusByCorpus[input.corpusId], input.previousStatus, -1);
+      increment(payload.facets.references.statusByCorpus[input.corpusId], input.nextStatus, 1);
+    }
+  }
+  increment(payload.messageKindCounts, "reference_curation", 1);
+  increment(payload.messageDomainCounts, "commentary", 1);
+  increment(payload.facets.messages.byKind, "reference_curation", 1);
+  increment(payload.facets.messages.byDomain, "commentary", 1);
+  increment(payload.facets.messages.byStatus, "active", 1);
+  if (!payload.facets.messages.domainByKind.reference_curation) payload.facets.messages.domainByKind.reference_curation = {};
+  increment(payload.facets.messages.domainByKind.reference_curation, "commentary", 1);
+  increment(payload.facets.semanticRelations.byRelationTypeKey, "comment", 1);
+  increment(payload.facets.semanticRelations.byRelationDomain, "workflow", 1);
+  increment(payload.facets.semanticRelations.bySubjectKind, "message", 1);
+  increment(payload.facets.semanticRelations.byObjectKind, "reference", 1);
+  await upsertNewsroomSummaryPayload(client, payload, response.data, input.now);
+}
+
+function normalizeSummaryPayload(value: unknown, now: string): {
+  generatedAt: string;
+  staleAt: string;
+  source: string;
+  latestImportRun: Record<string, unknown> | null;
+  counts: Record<string, number>;
+  assignmentStatusCounts: Record<string, number>;
+  assignmentTypeCounts: Record<string, number>;
+  referenceStatusCounts: Record<string, number>;
+  messageKindCounts: Record<string, number>;
+  messageDomainCounts: Record<string, number>;
+  facets: {
+    assignments: { byStatus: Record<string, number>; byType: Record<string, number>; statusByType: Record<string, Record<string, number>> };
+    messages: { byKind: Record<string, number>; byDomain: Record<string, number>; byStatus: Record<string, number>; domainByKind: Record<string, Record<string, number>> };
+    references: { byCurationStatus: Record<string, number>; byCorpus: Record<string, number>; statusByCorpus: Record<string, Record<string, number>> };
+    semanticNodes: { byNodeKind: Record<string, number>; byStatus: Record<string, number>; byCorpus: Record<string, number>; byCategorySet: Record<string, number> };
+    semanticRelations: { byRelationTypeKey: Record<string, number>; byRelationDomain: Record<string, number>; bySubjectKind: Record<string, number>; byObjectKind: Record<string, number> };
+    imports: { byCorpus: Record<string, number> };
+  };
+} {
+  const parsed = parseJsonObject(value);
+  const facets = normalizeFacets(parsed);
+  return {
+    generatedAt: normalizeOptionalString(parsed.generatedAt) ?? now,
+    staleAt: normalizeOptionalString(parsed.staleAt) ?? now,
+    source: normalizeOptionalString(parsed.source) ?? "missing",
+    latestImportRun: parseJsonObject(parsed.latestImportRun),
+    counts: numberRecord(parsed.counts),
+    assignmentStatusCounts: numberRecord(parsed.assignmentStatusCounts),
+    assignmentTypeCounts: numberRecord(parsed.assignmentTypeCounts),
+    referenceStatusCounts: numberRecord(parsed.referenceStatusCounts),
+    messageKindCounts: numberRecord(parsed.messageKindCounts),
+    messageDomainCounts: numberRecord(parsed.messageDomainCounts),
+    facets,
+  };
+}
+
+function normalizeFacets(payload: Record<string, unknown>): ReturnType<typeof createEmptyFacets> {
+  const facets = createEmptyFacets();
+  const parsed = parseJsonObject(payload.facets);
+  const assignments = parseJsonObject(parsed.assignments);
+  const messages = parseJsonObject(parsed.messages);
+  const references = parseJsonObject(parsed.references);
+  const semanticNodes = parseJsonObject(parsed.semanticNodes);
+  const semanticRelations = parseJsonObject(parsed.semanticRelations);
+  const imports = parseJsonObject(parsed.imports);
+  facets.assignments.byStatus = { ...numberRecord(payload.assignmentStatusCounts), ...numberRecord(assignments.byStatus) };
+  facets.assignments.byType = { ...numberRecord(payload.assignmentTypeCounts), ...numberRecord(assignments.byType) };
+  facets.assignments.statusByType = nestedNumberRecord(assignments.statusByType);
+  facets.messages.byKind = { ...numberRecord(payload.messageKindCounts), ...numberRecord(messages.byKind) };
+  facets.messages.byDomain = { ...numberRecord(payload.messageDomainCounts), ...numberRecord(messages.byDomain) };
+  facets.messages.byStatus = numberRecord(messages.byStatus);
+  facets.messages.domainByKind = nestedNumberRecord(messages.domainByKind);
+  facets.references.byCurationStatus = { ...numberRecord(payload.referenceStatusCounts), ...numberRecord(references.byCurationStatus) };
+  facets.references.byCorpus = numberRecord(references.byCorpus);
+  facets.references.statusByCorpus = nestedNumberRecord(references.statusByCorpus);
+  facets.semanticNodes.byNodeKind = numberRecord(semanticNodes.byNodeKind);
+  facets.semanticNodes.byStatus = numberRecord(semanticNodes.byStatus);
+  facets.semanticNodes.byCorpus = numberRecord(semanticNodes.byCorpus);
+  facets.semanticNodes.byCategorySet = numberRecord(semanticNodes.byCategorySet);
+  facets.semanticRelations.byRelationTypeKey = numberRecord(semanticRelations.byRelationTypeKey);
+  facets.semanticRelations.byRelationDomain = numberRecord(semanticRelations.byRelationDomain);
+  facets.semanticRelations.bySubjectKind = numberRecord(semanticRelations.bySubjectKind);
+  facets.semanticRelations.byObjectKind = numberRecord(semanticRelations.byObjectKind);
+  facets.imports.byCorpus = numberRecord(imports.byCorpus);
+  return facets;
+}
+
+function createEmptyFacets() {
+  return {
+    assignments: { byStatus: {}, byType: {}, statusByType: {} },
+    messages: { byKind: {}, byDomain: {}, byStatus: {}, domainByKind: {} },
+    references: { byCurationStatus: {}, byCorpus: {}, statusByCorpus: {} },
+    semanticNodes: { byNodeKind: {}, byStatus: {}, byCorpus: {}, byCategorySet: {} },
+    semanticRelations: { byRelationTypeKey: {}, byRelationDomain: {}, bySubjectKind: {}, byObjectKind: {} },
+    imports: { byCorpus: {} },
+  };
+}
+
+function nestedNumberRecord(value: unknown): Record<string, Record<string, number>> {
+  const parsed = parseJsonObject(value);
+  const result: Record<string, Record<string, number>> = {};
+  for (const [key, entry] of Object.entries(parsed)) result[key] = numberRecord(entry);
+  return result;
+}
+
+async function upsertNewsroomSummaryPayload(
+  client: DataClient,
+  payload: Record<string, unknown>,
+  current: any,
+  now: string,
+): Promise<void> {
+  const input = {
+    id: NEWSROOM_SUMMARY_PAYLOAD_ID,
+    ownerType: "newsroom",
+    ownerId: "newsroom",
+    payloadKind: "summary-snapshot",
+    importRunId: normalizeOptionalString(parseJsonObject(payload.latestImportRun).id),
+    payload: JSON.stringify(payload),
+    createdAt: current?.createdAt ?? now,
+    updatedAt: now,
+  };
+  if (current) {
+    await requireDataResult(client.models.KnowledgeRawPayload.update(input), "update Newsroom summary snapshot");
+    return;
+  }
+  await requireDataResult(client.models.KnowledgeRawPayload.create(input), "create Newsroom summary snapshot");
+}
+
+function parseJsonObject(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+  if (typeof value !== "string") return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+function numberRecord(value: unknown): Record<string, number> {
+  const parsed = parseJsonObject(value);
+  const result: Record<string, number> = {};
+  for (const [key, entry] of Object.entries(parsed)) {
+    const numeric = Number(entry);
+    if (Number.isFinite(numeric)) result[key] = numeric;
+  }
+  return result;
+}
+
+function increment(target: Record<string, number>, key: string, delta: number): void {
+  target[key] = Math.max(0, (target[key] ?? 0) + delta);
 }
 
 function normalizeRequiredString(value: unknown, fieldName: string): string {

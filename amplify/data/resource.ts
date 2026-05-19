@@ -3,6 +3,7 @@ import { assignmentAction } from "../functions/assignment-action/resource";
 import { categoryAction } from "../functions/category-action/resource";
 import { graphqlJwtAuthorizer } from "../functions/graphql-jwt-authorizer/resource";
 import { manageUserRole } from "../functions/manage-user-role/resource";
+import { newsroomSummary } from "../functions/newsroom-summary/resource";
 
 const authoringOperations: ("read" | "create" | "update" | "delete")[] = [
   "read",
@@ -201,8 +202,28 @@ const schema = a.schema({
     action: a.string().required(),
     referenceId: a.id().required(),
     status: a.string().required(),
+    reasonCode: a.string(),
     messageId: a.id(),
     relationId: a.id(),
+  }),
+
+  CategorySetDraftActionResult: a.customType({
+    ok: a.boolean().required(),
+    action: a.string().required(),
+    categorySetId: a.id().required(),
+    sourceCategorySetId: a.id(),
+    categoryCount: a.integer(),
+    status: a.string(),
+  }),
+
+  TopicLabelActionResult: a.customType({
+    ok: a.boolean().required(),
+    action: a.string().required(),
+    referenceId: a.id(),
+    categoryId: a.id(),
+    relationId: a.id(),
+    sourceRelationId: a.id(),
+    status: a.string(),
   }),
 
   reviewReferenceCuration: a
@@ -213,6 +234,7 @@ const schema = a.schema({
       actorSub: a.string(),
       actorLabel: a.string(),
       note: a.string(),
+      reasonCode: a.string(),
     })
     .returns(a.ref("ReferenceCurationActionResult"))
     .authorization((allow) => [
@@ -221,12 +243,136 @@ const schema = a.schema({
     ])
     .handler(a.handler.function(categoryAction)),
 
+  createCategorySetDraft: a
+    .mutation()
+    .arguments({
+      sourceCategorySetId: a.id().required(),
+      displayName: a.string(),
+      actorLabel: a.string(),
+      note: a.string(),
+    })
+    .returns(a.ref("CategorySetDraftActionResult"))
+    .authorization((allow) => [allow.groups(categoryWriteGroups)])
+    .handler(a.handler.function(categoryAction)),
+
+  promoteCategorySetDraft: a
+    .mutation()
+    .arguments({
+      categorySetId: a.id().required(),
+      actorLabel: a.string(),
+      note: a.string(),
+    })
+    .returns(a.ref("CategorySetDraftActionResult"))
+    .authorization((allow) => [allow.groups(categoryWriteGroups)])
+    .handler(a.handler.function(categoryAction)),
+
+  discardCategorySetDraft: a
+    .mutation()
+    .arguments({
+      categorySetId: a.id().required(),
+      actorLabel: a.string(),
+      note: a.string(),
+    })
+    .returns(a.ref("CategorySetDraftActionResult"))
+    .authorization((allow) => [allow.groups(categoryWriteGroups)])
+    .handler(a.handler.function(categoryAction)),
+
+  createDraftCategory: a
+    .mutation()
+    .arguments({
+      categorySetId: a.id().required(),
+      parentCategoryKey: a.string(),
+      displayName: a.string().required(),
+      shortTitle: a.string(),
+      subtitle: a.string(),
+      description: a.string(),
+      actorLabel: a.string(),
+      note: a.string(),
+    })
+    .returns(a.ref("SteeringActionResult"))
+    .authorization((allow) => [allow.groups(categoryWriteGroups)])
+    .handler(a.handler.function(categoryAction)),
+
+  updateDraftCategory: a
+    .mutation()
+    .arguments({
+      categoryId: a.id().required(),
+      displayName: a.string(),
+      shortTitle: a.string(),
+      subtitle: a.string(),
+      description: a.string(),
+      parentCategoryKey: a.string(),
+      actorLabel: a.string(),
+      note: a.string(),
+    })
+    .returns(a.ref("SteeringActionResult"))
+    .authorization((allow) => [allow.groups(categoryWriteGroups)])
+    .handler(a.handler.function(categoryAction)),
+
+  archiveDraftCategory: a
+    .mutation()
+    .arguments({
+      categoryId: a.id().required(),
+      actorLabel: a.string(),
+      note: a.string(),
+    })
+    .returns(a.ref("SteeringActionResult"))
+    .authorization((allow) => [allow.groups(categoryWriteGroups)])
+    .handler(a.handler.function(categoryAction)),
+
+  reviewReferenceTopicLabel: a
+    .mutation()
+    .arguments({
+      referenceId: a.id().required(),
+      categoryId: a.id().required(),
+      action: a.string().required(),
+      sourceRelationId: a.id(),
+      actorLabel: a.string(),
+      note: a.string(),
+    })
+    .returns(a.ref("TopicLabelActionResult"))
+    .authorization((allow) => [allow.groups(categoryWriteGroups)])
+    .handler(a.handler.function(categoryAction)),
+
+  NewsroomSummary: a.customType({
+    generatedAt: a.datetime().required(),
+    staleAt: a.datetime(),
+    source: a.string(),
+    latestImportRun: a.json(),
+    counts: a.json().required(),
+    facets: a.json(),
+    assignmentStatusCounts: a.json().required(),
+    assignmentTypeCounts: a.json().required(),
+    referenceStatusCounts: a.json().required(),
+    messageKindCounts: a.json().required(),
+    messageDomainCounts: a.json().required(),
+  }),
+
+  getNewsroomSummary: a
+    .query()
+    .returns(a.ref("NewsroomSummary"))
+    .authorization((allow) => [allow.groups(categoryWriteGroups), allow.custom()])
+    .handler(a.handler.function(newsroomSummary)),
+
+  updateNewsroomSummary: a
+    .mutation()
+    .arguments({
+      delta: a.json().required(),
+      actorLabel: a.string(),
+      reason: a.string(),
+    })
+    .returns(a.ref("NewsroomSummary"))
+    .authorization((allow) => [allow.groups(categoryWriteGroups), allow.custom()])
+    .handler(a.handler.function(newsroomSummary)),
+
   AssignmentActionResult: a.customType({
     ok: a.boolean().required(),
     assignmentId: a.id(),
     eventId: a.id(),
     status: a.string(),
     action: a.string().required(),
+    assigneeKey: a.string(),
+    claimExpiresAt: a.datetime(),
   }),
 
   AssignmentTargetSummary: a.customType({
@@ -333,8 +479,11 @@ const schema = a.schema({
     .mutation()
     .arguments({
       assignmentId: a.id().required(),
+      assigneeKey: a.string(),
       assigneeType: a.string(),
       assigneeId: a.string(),
+      claimExpiresAt: a.datetime(),
+      claimTtlSeconds: a.integer(),
       actorSub: a.string(),
       actorLabel: a.string(),
       note: a.string(),
@@ -417,9 +566,11 @@ const schema = a.schema({
       createdBy: a.string(),
       createdAt: a.datetime().required(),
       updatedAt: a.datetime().required(),
+      newsroomFeedKey: a.string(),
       metadata: a.json(),
     })
     .secondaryIndexes((index) => [
+      index("newsroomFeedKey").sortKeys(["createdAt"]).queryField("listAssignmentsByNewsroomFeedAndCreatedAt"),
       index("queueStatusKey").sortKeys(["priority", "createdAt"]).queryField("listAssignmentsByQueueStatusAndPriority"),
       index("assignmentTypeKey").sortKeys(["status", "createdAt"]).queryField("listAssignmentsByTypeStatusAndCreatedAt"),
       index("status").sortKeys(["updatedAt"]).queryField("listAssignmentsByStatusAndUpdatedAt"),
@@ -427,7 +578,7 @@ const schema = a.schema({
       index("importRunId").sortKeys(["createdAt"]).queryField("listAssignmentsByImportRunAndCreatedAt"),
     ])
     .authorization((allow) => [
-      allow.groups(categoryWriteGroups).to(["read"]),
+      allow.groups(categoryWriteGroups).to(categoryAppendOnlyOperations),
       allow.custom().to(authoringOperations),
     ]),
 
@@ -761,15 +912,18 @@ const schema = a.schema({
       retrievedAt: a.string(),
       importRunId: a.id(),
       importedAt: a.datetime(),
+      createdAt: a.datetime(),
       curationStatus: a.string(),
       curationStatusKey: a.string(),
       curationStatusUpdatedAt: a.datetime(),
       curationStatusUpdatedBy: a.string(),
       curationStatusReason: a.string(),
+      newsroomFeedKey: a.string(),
       metadata: a.json(),
       updatedAt: a.datetime(),
     })
     .secondaryIndexes((index) => [
+      index("newsroomFeedKey").sortKeys(["createdAt"]).queryField("listReferencesByNewsroomFeedAndCreatedAt"),
       index("lineageId").sortKeys(["versionNumber"]).queryField("listReferencesByLineageAndVersion"),
       index("corpusId").sortKeys(["externalItemId"]).queryField("listReferencesByCorpusAndExternalItem"),
       index("versionState").sortKeys(["updatedAt"]).queryField("listReferencesByVersionStateAndUpdatedAt"),
@@ -835,9 +989,12 @@ const schema = a.schema({
       aliases: a.string().array(),
       status: a.string().required(),
       importRunId: a.id(),
+      createdAt: a.datetime(),
+      newsroomFeedKey: a.string(),
       updatedAt: a.datetime(),
     })
     .secondaryIndexes((index) => [
+      index("newsroomFeedKey").sortKeys(["createdAt"]).queryField("listSemanticNodesByNewsroomFeedAndCreatedAt"),
       index("lineageId").sortKeys(["versionNumber"]).queryField("listSemanticNodesByLineageAndVersion"),
       index("nodeKey").sortKeys(["versionNumber"]).queryField("listSemanticNodesByNodeKeyAndVersion"),
       index("corpusId").sortKeys(["nodeKey"]).queryField("listSemanticNodesByCorpusAndNodeKey"),
@@ -863,9 +1020,11 @@ const schema = a.schema({
       authorLabel: a.string(),
       createdAt: a.datetime().required(),
       updatedAt: a.datetime().required(),
+      newsroomFeedKey: a.string(),
       metadata: a.json(),
     })
     .secondaryIndexes((index) => [
+      index("newsroomFeedKey").sortKeys(["createdAt"]).queryField("listMessagesByNewsroomFeedAndCreatedAt"),
       index("status").sortKeys(["createdAt"]).queryField("listMessagesByStatusAndCreatedAt"),
       index("messageKind").sortKeys(["createdAt"]).queryField("listMessagesByKindAndCreatedAt"),
       index("messageDomain").sortKeys(["createdAt"]).queryField("listMessagesByDomainAndCreatedAt"),
@@ -938,9 +1097,13 @@ const schema = a.schema({
       sourceSnapshotId: a.string(),
       importRunId: a.id(),
       importedAt: a.datetime(),
+      createdAt: a.datetime(),
+      updatedAt: a.datetime(),
+      newsroomFeedKey: a.string(),
       metadata: a.json(),
     })
     .secondaryIndexes((index) => [
+      index("newsroomFeedKey").sortKeys(["createdAt"]).queryField("listSemanticRelationsByNewsroomFeedAndCreatedAt"),
       index("subjectStateKey").sortKeys(["predicateObjectStateKey"]).queryField("listSemanticRelationsBySubjectState"),
       index("objectStateKey").sortKeys(["predicate"]).queryField("listSemanticRelationsByObjectState"),
       index("objectSubjectStateKey").sortKeys(["score"]).queryField("listSemanticRelationsByObjectSubjectStateAndScore"),
@@ -951,7 +1114,7 @@ const schema = a.schema({
       index("relationDomain").sortKeys(["importedAt"]).queryField("listSemanticRelationsByDomainAndImportedAt"),
     ])
     .authorization((allow) => [
-      allow.groups(categoryWriteGroups).to(["read"]),
+      allow.groups(categoryWriteGroups).to(categoryAppendOnlyOperations),
       allow.custom().to(authoringOperations),
     ]),
 
@@ -1326,6 +1489,7 @@ const schema = a.schema({
 }).authorization((allow) => [
   allow.resource(categoryAction),
   allow.resource(manageUserRole),
+  allow.resource(newsroomSummary),
 ]);
 
 export type Schema = ClientSchema<typeof schema>;

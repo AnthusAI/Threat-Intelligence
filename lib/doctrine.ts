@@ -3,7 +3,7 @@ export const DOCTRINE_ITEM_STATUS = "private";
 export const DOCTRINE_ITEM_TYPE_STATUS = "doctrine#private";
 
 export type DoctrineKind = "mission" | "policy";
-export type DoctrineScope = "publication" | "desk";
+export type DoctrineScope = "publication" | "category";
 
 export type DoctrineDefinition = {
   kind: DoctrineKind;
@@ -13,10 +13,13 @@ export type DoctrineDefinition = {
   lineageId: string;
 };
 
-export type DeskDoctrineCategory = {
+export type DoctrineCategory = {
   categorySetId: string;
   categoryKey: string;
   displayName: string;
+  shortTitle?: string | null;
+  rank?: number | null;
+  depth?: number | null;
   lineageId?: string | null;
   id?: string | null;
 };
@@ -42,11 +45,11 @@ export const DOCTRINE_DEFINITION_BY_KIND = new Map(
   DOCTRINE_DEFINITIONS.map((definition) => [definition.kind, definition]),
 );
 
-export function buildDeskDoctrineDefinition(category: DeskDoctrineCategory, kind: DoctrineKind): DoctrineDefinition {
+export function buildCategoryDoctrineDefinition(category: DoctrineCategory, kind: DoctrineKind): DoctrineDefinition {
   const safeCategoryKey = safeDoctrineKey(category.categoryKey);
   const categoryLineageId = category.lineageId ?? category.id ?? category.categoryKey;
   const safeCategoryLineageId = safeDoctrineKey(categoryLineageId);
-  const label = kind === "mission" ? "Desk Mission" : "Desk Policies";
+  const label = kind === "mission" ? "Category Mission" : "Category Policies";
   return {
     kind,
     label,
@@ -56,22 +59,34 @@ export function buildDeskDoctrineDefinition(category: DeskDoctrineCategory, kind
   };
 }
 
-export function getDeskDoctrineDefinitions(category: DeskDoctrineCategory): DoctrineDefinition[] {
+export function getCategoryDoctrineDefinitions(category: DoctrineCategory): DoctrineDefinition[] {
   return [
-    buildDeskDoctrineDefinition(category, "mission"),
-    buildDeskDoctrineDefinition(category, "policy"),
+    buildCategoryDoctrineDefinition(category, "mission"),
+    buildCategoryDoctrineDefinition(category, "policy"),
   ];
 }
 
-export function deskDoctrineEditorialValue(category: DeskDoctrineCategory, kind: DoctrineKind): string {
+export function categoryDoctrineEditorialValue(category: DoctrineCategory, kind: DoctrineKind): string {
   return JSON.stringify({
-    scope: "desk",
+    scope: "category",
     kind,
     categorySetId: category.categorySetId,
     categoryLineageId: category.lineageId ?? category.id ?? category.categoryKey,
     categoryKey: category.categoryKey,
-    deskLevel: "root-topic",
+    categoryDepth: category.depth ?? null,
   });
+}
+
+export function buildDeskDoctrineDefinition(category: DoctrineCategory, kind: DoctrineKind): DoctrineDefinition {
+  return buildCategoryDoctrineDefinition(category, kind);
+}
+
+export function getDeskDoctrineDefinitions(category: DoctrineCategory): DoctrineDefinition[] {
+  return getCategoryDoctrineDefinitions(category);
+}
+
+export function deskDoctrineEditorialValue(category: DoctrineCategory, kind: DoctrineKind): string {
+  return categoryDoctrineEditorialValue(category, kind);
 }
 
 export function isDeskDoctrineSlug(slug: string | null | undefined): boolean {

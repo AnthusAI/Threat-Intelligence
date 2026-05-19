@@ -16,6 +16,23 @@ const LIST_ARTICLES_QUERY = `
   }
 `;
 
+const UPDATE_NEWSROOM_SUMMARY_MUTATION = `
+  mutation UpdateNewsroomSummary($delta: AWSJSON!, $actorLabel: String, $reason: String) {
+    updateNewsroomSummary(delta: $delta, actorLabel: $actorLabel, reason: $reason) {
+      generatedAt
+      staleAt
+      source
+      counts
+      facets
+      assignmentStatusCounts
+      assignmentTypeCounts
+      referenceStatusCounts
+      messageKindCounts
+      messageDomainCounts
+    }
+  }
+`;
+
 const VERSION_FIELDS = "lineageId versionNumber previousVersionId versionState versionCreatedAt versionCreatedBy changeReason contentHash";
 const ITEM_FIELDS = `${VERSION_FIELDS} id type status typeStatus slug shortSlug section sectionStatus title headline deck body byline dateline publishedAt editionDate sortTitle pullQuotes layout editorial updatedAt`;
 const PUBLISHED_ITEM_FIELDS = "id sourceItemId itemLineageId versionNumber type status typeStatus slug shortSlug section sectionStatus title headline deck body byline dateline publishedAt editionDate sortTitle pullQuotes layout editorial";
@@ -37,12 +54,12 @@ const KNOWLEDGE_RAW_PAYLOAD_FIELDS = "id ownerType ownerId payloadKind importRun
 const KNOWLEDGE_ARTIFACT_FIELDS = "id corpusId artifactKind artifactId snapshotId displayName createdAt importRunId";
 const ASSIGNMENT_FIELDS = "id assignmentTypeKey queueKey queueStatusKey status priority title brief instructions assigneeType assigneeId assigneeKey claimedAt claimExpiresAt completedAt canceledAt corpusId categorySetId classifierId sourceSnapshotId importRunId createdBy createdAt updatedAt metadata";
 const ASSIGNMENT_EVENT_FIELDS = "id assignmentId assignmentTypeKey queueKey eventType fromStatus toStatus actorSub actorLabel note createdAt metadata";
-const REFERENCE_FIELDS = `${VERSION_FIELDS} id corpusId externalItemId title authors sourceUri storagePath mediaType byteSize sha256 sourcePublishedAt sourceUpdatedAt retrievedAt importRunId importedAt curationStatus curationStatusKey curationStatusUpdatedAt curationStatusUpdatedBy curationStatusReason metadata updatedAt`;
+const REFERENCE_FIELDS = `${VERSION_FIELDS} id corpusId externalItemId title authors sourceUri storagePath mediaType byteSize sha256 sourcePublishedAt sourceUpdatedAt retrievedAt importRunId importedAt createdAt curationStatus curationStatusKey curationStatusUpdatedAt curationStatusUpdatedBy curationStatusReason metadata updatedAt`;
 const REFERENCE_ATTACHMENT_FIELDS = "id referenceId referenceLineageId referenceVersionNumber referenceVersionKey role sortKey storagePath sourceUri filename mediaType byteSize sha256 etag importRunId importedAt metadata";
-const SEMANTIC_NODE_FIELDS = `${VERSION_FIELDS} id nodeKey nodeKind corpusId categorySetId categoryLineageId categoryKey displayName description aliases status importRunId updatedAt`;
+const SEMANTIC_NODE_FIELDS = `${VERSION_FIELDS} id nodeKey nodeKind corpusId categorySetId categoryLineageId categoryKey displayName description aliases status importRunId createdAt updatedAt`;
 const MESSAGE_FIELDS = "id messageKind messageDomain status body summary source importRunId authorSub authorUserProfileId authorLabel createdAt updatedAt metadata";
 const SEMANTIC_RELATION_TYPE_FIELDS = "id key label inverseLabel description domain status allowedSubjectKinds allowedObjectKinds isDirectional isSymmetric isTransitive contextPackTags createdAt updatedAt metadata";
-const SEMANTIC_RELATION_FIELDS = "id relationState predicate relationTypeId relationTypeKey relationDomain subjectKind subjectId subjectLineageId subjectVersionNumber objectKind objectId objectLineageId objectVersionNumber subjectStateKey objectStateKey objectSubjectStateKey predicateObjectStateKey subjectVersionKey objectVersionKey score confidence rank classifierId modelVersion reviewRecommended sourceSnapshotId importRunId importedAt metadata";
+const SEMANTIC_RELATION_FIELDS = "id relationState predicate relationTypeId relationTypeKey relationDomain subjectKind subjectId subjectLineageId subjectVersionNumber objectKind objectId objectLineageId objectVersionNumber subjectStateKey objectStateKey objectSubjectStateKey predicateObjectStateKey subjectVersionKey objectVersionKey score confidence rank classifierId modelVersion reviewRecommended sourceSnapshotId importRunId importedAt createdAt updatedAt metadata";
 
 const LIST_RECORDS = {
   Edition: listDefinition("listEditions", EDITION_FIELDS),
@@ -214,10 +231,20 @@ class PapyrusGraphQLAuthoringClient {
     return result[definition.field] ?? null;
   }
 
+  async updateNewsroomSummary(delta, options = {}) {
+    const result = await this.graphql(UPDATE_NEWSROOM_SUMMARY_MUTATION, {
+      delta: JSON.stringify(delta),
+      actorLabel: options.actorLabel ?? null,
+      reason: options.reason ?? null,
+    });
+    return result.updateNewsroomSummary;
+  }
+
   async upsert(modelName, input) {
-    const current = await this.getRecord(modelName, input.id);
+    const preparedInput = { ...input };
+    const current = await this.getRecord(modelName, preparedInput.id);
     const mutation = current ? MUTATIONS[modelName].update : MUTATIONS[modelName].create;
-    await this.graphql(mutation, { input });
+    await this.graphql(mutation, { input: preparedInput });
     return current ? "updated" : "created";
   }
 
