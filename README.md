@@ -23,6 +23,13 @@ not an application assumption. A Papyrus publication changes subject by
 changing publication configuration, corpus set, category/graph steering state,
 edition plans, and worker instructions.
 
+To start a new publication from a pile of files, follow
+[`docs/new-publication-from-corpus.md`](docs/new-publication-from-corpus.md).
+That workflow defines the corpus accession shape, reference-prospect intake,
+accepted-only analysis manifests, authoritative labels, topic granularity
+profiles, and `analysis.reindex` assignment path used to bootstrap a knowledge
+base from scratch.
+
 ## A Taxonomy-Aware, Ontology-Aware CMS
 
 Papyrus is a CMS, but it manages the newsroom around the articles, not just the
@@ -254,6 +261,13 @@ article `Item` records and `EditionItem` placements. The editor-only
 `Assignments` desk tab at `/newsroom/assignments` is the review surface for
 these private queues.
 
+Assignment claiming is an execution lease, not universal identity ownership.
+`Assignment.assigneeKey` is the flexible coordination string for the current
+worker cycle; it may name a human, a procedure run, a worker process, or a
+coding-agent session. Assignment types decide whether claiming is required.
+`analysis.reindex` work requires an exclusive claim, ideally with a TTL, before
+any Biblicus command plan is executed.
+
 The Newsroom should feel like another section of the newspaper, not a separate
 administrative app. Steering proposals are optional editorial notes: the
 publication keeps following the accepted category set unless a human chooses to
@@ -274,6 +288,12 @@ publication doctrine is the global editorial constitution, root-desk doctrine
 is the local beat standard, and the assignment brief is the immediate task.
 Doctrine stays private and editable in Papyrus data; the skill defines how
 agents apply it while gathering evidence and preparing research packets.
+Coding agents that need to run the same assignment workflow outside a Tactus
+procedure should use
+[skills/newsroom-research-workflow/SKILL.md](skills/newsroom-research-workflow/SKILL.md).
+Live assignment research packets are private `Message` work products linked to
+the `Assignment`, and proposed web sources remain reference prospects until
+intake registers them.
 
 Biblicus remains the artifact and worker tool boundary. Workers may run
 Biblicus commands that create reproducible artifacts, but Papyrus code should
@@ -310,6 +330,11 @@ keys. New knowledge-base source materials should follow
 [skills/reference-intake/SKILL.md](skills/reference-intake/SKILL.md): register
 references and attachment metadata in Papyrus, keep corpus contents in S3 and
 Biblicus artifacts, and do not model references as publication `Item` rows.
+`Reference.curationStatus` separates visibility from evidence eligibility:
+pending prospects and rejected scope memory stay visible for curation, comments,
+votes, and training exports, but only current accepted references may feed
+evidence sets, topic modeling, graph analysis, desk memory, context packs, or
+edition planning.
 Research packets and assignment evidence should also follow
 [skills/researcher-doctrine/SKILL.md](skills/researcher-doctrine/SKILL.md) so
 agents apply publication doctrine, inherited root-desk doctrine, assignment
@@ -433,6 +458,14 @@ record-plan builders. The older compatibility shims under
 `procedures/newsroom/tools/` still exist for path-based tooling, but the
 canonical implementation now lives in `src/papyrus_newsroom/`.
 
+Fresh external web research is a Tactus standard-library capability, not a
+Papyrus adapter. Researcher and reporter snippets should use
+`local web = require("tactus.web")` and then call `web.search{...}` or
+`web.synthesize{...}` with `provider = "openai"` when the assignment context
+requests current web evidence. Web results stay in the private research packet
+or draft reasoning path; Papyrus does not write GraphQL records directly from
+web search.
+
 Copy `.env.example` to `.env` when you need local overrides. `.env*` is ignored
 by git, while `.env.example` is intentionally committed as the template.
 
@@ -455,10 +488,22 @@ npm run content -- content inspect
 npm run content -- content list articles
 npm run content -- categories import-config --config corpora/papyrus-steering.yml
 npm run content -- categories import-steering --config corpora/papyrus-steering.yml --corpus-key <key>
+npm run content -- assignments research-packets --assignment <assignment-id>
+npm run content -- references register-catalog --config corpora/papyrus-steering.yml --corpus-key <key> --catalog <metadata/catalog.json> --status pending --ingestion-rationale "<summary, research focus, editorial mission fit>" --apply
+npm run content -- references export-analysis-manifest --config corpora/papyrus-steering.yml --corpus-key <key> --output accepted-reference-manifest.json
+npm run content -- references export-scope-training --config corpora/papyrus-steering.yml --corpus-key <key> --output reference-scope-training.json
 npm run content -- categories export-category-set --category-set <id> --output accepted-category-set.json
 npm run content -- categories import-projection --config corpora/papyrus-steering.yml --target-corpus-key <key> --authority-corpus-key <key> --bundle projection-results.json
 npm run content -- content delete all --yes
 ```
+
+`references register-catalog` is the canonical bridge from corpus accession
+files into Papyrus workflow state. With `--apply`, it creates a
+`KnowledgeImportRun`, sanitized `KnowledgeRawPayload`, `Reference` and
+`ReferenceAttachment` records, ingestion-rationale `Message` rows, workflow
+`SemanticRelation` links, and one open `curation.reference-intake` `Assignment`
+per pending reference. The filesystem catalog is not the queue after
+registration; pending references and assignments are.
 
 Set `PAPYRUS_GRAPHQL_ENDPOINT` and `PAPYRUS_GRAPHQL_JWT` before running
 authoring commands. The JWT is sent in the AppSync `Authorization` header using
@@ -498,47 +543,26 @@ export AWS_REGION=us-east-1
 export PAPYRUS_GRAPHQL_ENDPOINT=https://64hviw44q5cq5nwjcigmasowlq.appsync-api.us-east-1.amazonaws.com/graphql
 ```
 
-Mint a fresh short-lived JWT from the production Amplify SSM secret. Do not
-write the token or secret into `.env`:
+Mint a fresh short-lived JWT from the production Amplify SSM secret:
 
 The full production authoring and category/graph steering guide lives in the
 agent skill at [skills/category-steering/SKILL.md](skills/category-steering/SKILL.md).
 
 ```bash
-export PAPYRUS_GRAPHQL_JWT="$(node - <<'NODE'
-const { execFileSync } = require("node:child_process");
-const { createHmac } = require("node:crypto");
+export PAPYRUS_GRAPHQL_JWT="$(npm run -s auth:refresh-jwt)"
+```
 
-const parameterName = "/amplify/dbsyytcm9drqa/main-branch-cb38ada667/PAPYRUS_JWT_SECRET";
-const raw = execFileSync("aws", [
-  "ssm",
-  "get-parameter",
-  "--name",
-  parameterName,
-  "--with-decryption",
-  "--output",
-  "json",
-], { encoding: "utf8" });
+Or write it directly into local `.env` for this workspace:
 
-const secret = JSON.parse(raw).Parameter.Value;
-const now = Math.floor(Date.now() / 1000);
-const header = { alg: "HS256", typ: "JWT" };
-const payload = {
-  iss: "papyrus-cli",
-  sub: "local-production-authoring",
-  aud: "papyrus-authoring",
-  iat: now,
-  nbf: now - 30,
-  exp: now + 6 * 60 * 60,
-  scope: "papyrus:write",
-  groups: ["editor"],
-};
-const encode = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
-const unsigned = `${encode(header)}.${encode(payload)}`;
-const signature = createHmac("sha256", secret).update(unsigned).digest("base64url");
-process.stdout.write(`${unsigned}.${signature}`);
-NODE
-)"
+```bash
+npm run auth:refresh-jwt -- --write-env .env
+```
+
+If your shell already exported an old `PAPYRUS_GRAPHQL_JWT`, refresh the active
+shell value directly:
+
+```bash
+eval "$(npm run -s auth:refresh-jwt -- --format shell)"
 ```
 
 Then verify the authoring lane before writing:

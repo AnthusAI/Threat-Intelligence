@@ -9,6 +9,10 @@ Use this skill when acting as a Papyrus researcher, designing a researcher
 procedure, reviewing a research packet, or deciding how a research assignment
 should apply editorial doctrine.
 
+For coding-agent execution details, CLI inspection commands, Message-backed
+research packets, and reference-intake follow-up, also use
+[`skills/newsroom-research-workflow/SKILL.md`](/Users/ryan/Projects/Papyrus/skills/newsroom-research-workflow/SKILL.md).
+
 Doctrine is private operating guidance. It is not reader-facing content and it
 is not a replacement for evidence.
 
@@ -89,7 +93,23 @@ copy.
 
 ## Research Packet Shape
 
-When returning a research packet, include:
+For live `Assignment` records, a research packet is a private work-product
+`Message`, not a file and not a new top-level GraphQL model:
+
+- `Message.messageKind = "research_packet"`.
+- `Message.messageDomain = "assignment_work"`.
+- `Message.metadata.kind = "research.packet.created"`.
+- `Message.metadata.assignmentId` names the live `Assignment`.
+- `Message.metadata.research` contains the structured packet.
+- A current `SemanticRelation` with `relationTypeKey = "comment"` links the
+  `Message` to the `Assignment`.
+
+The legacy assignment-`Item` path may still store the packet under
+`Item.editorial.newsroom.research`, but do not extend that path for live
+assignment work.
+
+When returning a research packet, include these fields inside the structured
+packet:
 
 - `summary`: concise evidence-backed finding.
 - `doctrine_context`: which publication and desk doctrine slots were available,
@@ -98,6 +118,8 @@ When returning a research packet, include:
 - `evidence_item_ids`: stable external or Papyrus reference ids.
 - `queries`: the searches or corpus queries used.
 - `source_snapshots`: short auditable source summaries.
+- `proposed_references`: candidate source materials for intake, including an
+  `ingestion_rationale`.
 - `research_notes`: reasoning that helps editors and reporters.
 - `open_questions`: unresolved questions.
 - `coverage_gaps`: missing sources, weak evidence, or absent viewpoints.
@@ -115,6 +137,16 @@ for the current desk-context contract.
 If a packet could become reader-facing later, keep private doctrine and private
 curation details in structured private fields, not prose that might be copied
 directly into an article.
+
+Fresh web results are not accepted references. Keep them in `source_snapshots`
+and `proposed_references`; do not put web `evidence_candidate_id` values in
+`evidence_item_ids`.
+
+Coding agents can inspect live assignment packets with:
+
+```bash
+npm run content -- assignments research-packets --assignment <assignment-id>
+```
 
 ## Implementation Notes
 

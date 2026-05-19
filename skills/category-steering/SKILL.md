@@ -26,6 +26,9 @@ from configuration and steering state, not application logic.
   including global editorial forms and corpus-scoped comment concepts.
 - `corpora/papyrus-lexical-steering.yml`: default lexical steering such as
   ignored keyword noise and keyword display limits.
+- `corpora/papyrus-analysis-profiles.yml`: YAML-backed Biblicus analysis and
+  re-index profiles for topic modeling, classifier retraining, projection, and
+  entity-graph work.
 - `scripts/content-cli.cjs`: CLI command registration.
 - `scripts/lib/papyrus-steering-config.cjs`: steering config parsing and corpus
   resolution.
@@ -53,45 +56,22 @@ export PAPYRUS_GRAPHQL_ENDPOINT="https://64hviw44q5cq5nwjcigmasowlq.appsync-api.
 ```
 
 Mint a short-lived production JWT from the Amplify SSM parameter
-`/amplify/dbsyytcm9drqa/main-branch-cb38ada667/PAPYRUS_JWT_SECRET`. Do not
-print the secret, commit it, or write production JWTs into `.env`.
+`/amplify/dbsyytcm9drqa/main-branch-cb38ada667/PAPYRUS_JWT_SECRET`.
 
 ```bash
-export PAPYRUS_GRAPHQL_JWT="$(node - <<'NODE'
-const { execFileSync } = require("node:child_process");
-const { createHmac } = require("node:crypto");
+export PAPYRUS_GRAPHQL_JWT="$(npm run -s auth:refresh-jwt)"
+```
 
-const parameterName = "/amplify/dbsyytcm9drqa/main-branch-cb38ada667/PAPYRUS_JWT_SECRET";
-const raw = execFileSync("aws", [
-  "ssm",
-  "get-parameter",
-  "--name",
-  parameterName,
-  "--with-decryption",
-  "--output",
-  "json",
-], { encoding: "utf8" });
+Optional local persistence for this workspace:
 
-const secret = JSON.parse(raw).Parameter.Value;
-const now = Math.floor(Date.now() / 1000);
-const header = { alg: "HS256", typ: "JWT" };
-const payload = {
-  iss: "papyrus-cli",
-  sub: "local-production-authoring",
-  aud: "papyrus-authoring",
-  iat: now,
-  nbf: now - 30,
-  exp: now + 6 * 60 * 60,
-  scope: "papyrus:write",
-  groups: ["editor"],
-};
+```bash
+npm run auth:refresh-jwt -- --write-env .env
+```
 
-const encode = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
-const unsigned = `${encode(header)}.${encode(payload)}`;
-const signature = createHmac("sha256", secret).update(unsigned).digest("base64url");
-process.stdout.write(`${unsigned}.${signature}`);
-NODE
-)"
+If your shell still has an older exported token, refresh the active shell too:
+
+```bash
+eval "$(npm run -s auth:refresh-jwt -- --format shell)"
 ```
 
 Smoke-check the authoring lane before mutating data:
@@ -154,6 +134,160 @@ Papyrus can export this lexical steering today. Biblicus must explicitly accept
 that contract before agents assume taxonomy discovery or topic classifier
 training can consume it directly. Until then, relay that request to the Biblicus
 agent instead of editing Biblicus source.
+
+## Analysis Profiles And Re-Index Assignments
+
+Papyrus records analysis/re-index intent as private `Assignment` work. It does
+not execute Biblicus or clear generated GraphQL records when an assignment is
+created.
+
+Validate and inspect the YAML-backed profiles:
+
+```bash
+npm run content -- analysis validate-profiles \
+  --profiles corpora/papyrus-analysis-profiles.yml
+
+npm run content -- analysis profiles \
+  --profiles corpora/papyrus-analysis-profiles.yml
+```
+
+Preview the exact Biblicus command plan before creating work:
+
+```bash
+npm run content -- analysis reindex-plan \
+  --profile canonical-topic-classifier \
+  --corpus-key AI-ML-research \
+  --override bertopic_analysis.parameters.nr_topics=14
+```
+
+Create live work only after the preview is acceptable:
+
+```bash
+npm run content -- analysis create-reindex-assignment \
+  --profile canonical-topic-classifier \
+  --corpus-key AI-ML-research \
+  --apply
+```
+
+Execute claimed analysis work from assignment metadata (worker/operator path):
+
+```bash
+npm run content -- analysis execute-assignment \
+  --assignment <analysis-assignment-id>
+```
+
+Run immediate assignment-backed execution in one step:
+
+```bash
+npm run content -- analysis run-now \
+  --profile canonical-topic-classifier \
+  --corpus-key AI-ML-research \
+  --override bertopic_analysis.parameters.nr_topics=14
+```
+
+Process queued assignments in deterministic batches (priority desc, createdAt asc):
+
+```bash
+npm run content -- assignments process-queue \
+  --type analysis.reindex \
+  --status open \
+  --max-count 10 \
+  --stop-on-error false
+```
+
+The assignment metadata must preserve the profile key, scope, re-index mode,
+safe parameter overrides, command plan, expected outputs, and dry-run
+destructive preview. Assignment creation writes only `Assignment`,
+`AssignmentEvent`, and workflow `SemanticRelation` rows.
+
+Re-index execution requires an exclusive assignment claim. Treat
+`Assignment.assigneeKey` as the flexible lease identity for the current worker
+cycle. It may be a user profile, a procedure run, an OS process, or any other
+string that is unique within the competing worker pool. `assigneeType` and
+`assigneeId` are optional detail fields; `assigneeKey` is the coordination key.
+Use a TTL for worker claims so crashed agents do not hold work forever:
+
+```bash
+npm run content -- assignments claim \
+  --assignment <assignment-id> \
+  --assignee-key "procedure-run:<run-id>" \
+  --claim-ttl-seconds 21600
+```
+
+An unexpired claim by a different `assigneeKey` blocks another worker from
+claiming the assignment. The same `assigneeKey` may claim again to refresh the
+lease, and expired claims may be taken over. Do not run the Biblicus command
+plan for `analysis.reindex` work before the assignment is claimed.
+
+## Manual Topic Sculpting
+
+Use draft category sets when humans or agents need to shape the canonical topic
+set before classifier retraining. Do not hard-delete accepted historical
+categories. Draft edits write new `CategorySet` / `Category` rows, and
+promotion supersedes the previous current version.
+
+Create and edit a draft:
+
+```bash
+npm run content -- categories draft-create \
+  --from-category-set <current-category-set-id> \
+  --title "Topic sculpting draft" \
+  --apply
+
+npm run content -- categories draft-add-topic \
+  --category-set <draft-category-set-id> \
+  --display-name "Agent Tooling" \
+  --short-title "Tools" \
+  --subtitle "Tool use" \
+  --apply
+
+npm run content -- categories draft-update-topic \
+  --category <category-id-or-key> \
+  --display-name "Clearer topic name" \
+  --apply
+
+npm run content -- categories draft-archive-topic \
+  --category <category-id-or-key> \
+  --apply
+```
+
+Manual reference labels are immediate authoritative labels. They are allowed
+only for current accepted `Reference` rows:
+
+```bash
+npm run content -- references label \
+  --reference <reference-id-or-external-item-id> \
+  --category <category-key-or-lineage-id> \
+  --category-set <draft-or-current-category-set-id> \
+  --note "Why this reference is a good seed example." \
+  --apply
+
+npm run content -- references labels --reference <reference-id-or-item-id>
+```
+
+Export the strict Biblicus seed manifest from authoritative labels, then pass it
+to classifier retraining as the `seedManifestPath` override:
+
+```bash
+npm run content -- categories export-classifier-seed-manifest \
+  --config corpora/papyrus-steering.yml \
+  --category-set <draft-or-current-category-set-id> \
+  --corpus-key <corpus-key> \
+  --output .papyrus-runs/<run-id>/seed-manifest.json
+
+npm run content -- analysis preview-reindex \
+  --profile canonical-topic-classifier \
+  --corpus-key <corpus-key> \
+  --override seedManifestPath=.papyrus-runs/<run-id>/seed-manifest.json
+```
+
+Promote only when the draft is ready to become the accepted publication basis:
+
+```bash
+npm run content -- categories draft-promote \
+  --category-set <draft-category-set-id> \
+  --apply
+```
 
 ## Regular Curation Cycle
 
