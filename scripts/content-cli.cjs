@@ -245,6 +245,9 @@ async function main() {
     case "assignments:research-packets":
       await listAssignmentResearchPackets(args.slice(2));
       return;
+    case "assignments:events":
+      await listAssignmentEvents(args.slice(2));
+      return;
     case "assignments:process-queue":
       await processAssignmentQueue(args.slice(2));
       return;
@@ -2229,6 +2232,30 @@ async function listAssignmentResearchPackets(flags) {
     }
   }
   if (!packets.length) console.log(`assignment-research-packets\t${assignmentId}\t0`);
+}
+
+async function listAssignmentEvents(flags) {
+  const options = parseOptions(flags);
+  const assignmentId = options.assignment;
+  if (!assignmentId) throw new Error("assignments events requires --assignment.");
+  const { client } = createAuthoringClient();
+  const events = (await client.listRecords("AssignmentEvent"))
+    .filter((event) => event.assignmentId === assignmentId)
+    .sort((left, right) => String(left.createdAt).localeCompare(String(right.createdAt)));
+  for (const event of events) {
+    const metadata = parseAwsJson(event.metadata || "{}");
+    const runId = metadata && typeof metadata === "object" ? metadata.runId ?? "" : "";
+    const commandLabel = metadata && typeof metadata === "object" ? metadata.commandLabel ?? "" : "";
+    console.log([
+      event.createdAt,
+      event.eventType,
+      `${event.fromStatus ?? ""}->${event.toStatus ?? ""}`,
+      runId,
+      commandLabel,
+      event.note ?? "",
+    ].join("\t"));
+  }
+  console.log(`assignments\tevents\t${assignmentId}\t${events.length}`);
 }
 
 async function mutateAssignment(action, flags) {
@@ -7505,6 +7532,7 @@ function printUsage() {
   console.log("  npm run content -- assignments for-object --kind reference --lineage <reference-lineage-id>");
   console.log("  npm run content -- assignments build-context --assignment <id> --context-profile reporting");
   console.log("  npm run content -- assignments research-packets --assignment <id>");
+  console.log("  npm run content -- assignments events --assignment <id>");
   console.log("  npm run content -- assignments process-queue --type analysis.reindex --status open --max-count 10 --dry-run");
   console.log("  npm run content -- assignments process-queue --type analysis.reindex --status open --max-count 10 --max-runtime-seconds 3600 --stop-on-error false");
   console.log("  npm run content -- assignments claim --assignment <id> --assignee-key <worker-run-id> --claim-ttl-seconds 3600");

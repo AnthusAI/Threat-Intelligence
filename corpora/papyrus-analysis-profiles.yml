@@ -141,7 +141,13 @@ profiles:
       - graph.configurationName
       - graph.model
       - graph.min_entity_length
+      - graph.max_entity_length
+      - graph.entity_labels
       - graph.include_item_node
+      - graph.include_relation_edges
+      - graph.max_relation_entities_per_sentence
+      - graph.min_relation_weight
+      - graph.max_items
       - extractionSnapshot
     expectedOutputs:
       - graph-snapshot

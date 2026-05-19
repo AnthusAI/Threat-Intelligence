@@ -72,7 +72,13 @@ const SAFE_OVERRIDE_KEYS = new Set([
   "graph.configurationName",
   "graph.model",
   "graph.min_entity_length",
+  "graph.max_entity_length",
+  "graph.entity_labels",
   "graph.include_item_node",
+  "graph.include_relation_edges",
+  "graph.max_relation_entities_per_sentence",
+  "graph.min_relation_weight",
+  "graph.max_items",
 ]);
 
 function loadAnalysisProfiles(filepath = DEFAULT_ANALYSIS_PROFILES_PATH) {
@@ -568,13 +574,22 @@ function graphOverrideArgs(effective, profile) {
   const graphKeyMap = new Map([
     ["graph.model", "model"],
     ["graph.min_entity_length", "min_entity_length"],
+    ["graph.max_entity_length", "max_entity_length"],
+    ["graph.entity_labels", "entity_labels"],
     ["graph.include_item_node", "include_item_node"],
+    ["graph.include_relation_edges", "include_relation_edges"],
+    ["graph.max_relation_entities_per_sentence", "max_relation_entities_per_sentence"],
+    ["graph.min_relation_weight", "min_relation_weight"],
   ]);
-  return Object.entries(effective)
+  const args = Object.entries(effective)
     .filter(([key]) => profile.allowedOverrides.includes(key))
     .filter(([key]) => graphKeyMap.has(key))
     .map(([key, value]) => ["--override", `${graphKeyMap.get(key)}=${formatOverrideValue(value)}`])
     .flat();
+  if (profile.allowedOverrides.includes("graph.max_items") && effective["graph.max_items"] !== undefined) {
+    args.push("--max-items", String(effective["graph.max_items"]));
+  }
+  return args;
 }
 
 function command(label, cwd, args, metadata = {}) {
