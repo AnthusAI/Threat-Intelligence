@@ -47,8 +47,8 @@ reference/category/graph state, not guess from stale local files.
   records, then selected into an `Edition` through `EditionItem`.
 - Dispatch more assignments than publication slots, then cull/select. The
   default overassignment ratio is `3/2`, so dispatch
-  `ceil(publicationSlots * 1.5)` assignments per section unless an editor
-  specifies another ratio.
+  `ceil(publicationSlots * 1.5)` assignments per desk/lane target unless an
+  editor specifies another ratio.
 - Dispatch by Newsroom desk plus publication lane, not by individual reference.
   References are evidence for the assignment. They are not the primary planning
   unit.
