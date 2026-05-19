@@ -4894,12 +4894,10 @@ name = "tactus"
 version = "0.48.1"
 description = "Tactus: Lua-based DSL for agentic workflows"
 optional = false
-python-versions = "<3.14,>=3.10"
+python-versions = ">=3.10,<3.14"
 groups = ["main"]
-files = [
-    {file = "tactus-0.48.1-py3-none-any.whl", hash = "sha256:8d6a723bc71c83ce502b6dd901c0d6d463f24b024d34fc7c5cbc961739fbf712"},
-    {file = "tactus-0.48.1.tar.gz", hash = "sha256:dade081ec866aef2bc4f1c0f619a70cd3800bc468e58f3d28a1d70bb3325c882"},
-]
+files = []
+develop = true
 
 [package.dependencies]
 aiohttp = ">=3.13.4"
@@ -4944,6 +4942,10 @@ hf = ["datasets (>=2.18)", "torch (>=2.2)", "transformers (>=4.38)"]
 ml = ["datasets (>=2.18)", "joblib (>=1.3)", "scikit-learn (>=1.3)"]
 notifications = ["aiosmtplib (>=3.0)", "discord.py (>=2.0)", "slack-sdk (>=3.0)"]
 slack = ["slack-sdk (>=3.0)"]
+
+[package.source]
+type = "directory"
+url = "../Tactus"
 
 [[package]]
 name = "tenacity"
@@ -5857,4 +5859,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "bd5c39f428b0d8f5adbd72ffdf375a135e5f58c815ea2fd9ab88e3f5071e3c43"
+content-hash = "bb6572bb4b8d1e403ec2ef8c1ac9aa6213c5ad4943941bc6a36a55e2b771613f"

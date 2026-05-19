@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "PyYAML >=6.0.2,<7.0.0",
-    "tactus >=0.48.1,<0.49.0",
+    "tactus @ file:///Users/ryan/Projects/Tactus",
 ]
 
 [project.scripts]
@@ -18,6 +18,9 @@ packages = [{ include = "papyrus_newsroom", from = "src" }]
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.4.2"
 
+
+[tool.poetry.dependencies]
+tactus = {develop = true}
 [build-system]
 requires = ["poetry-core>=1.9.0"]
 build-backend = "poetry.core.masonry.api"
