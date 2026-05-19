@@ -34,6 +34,7 @@ class NewsroomToolTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertIn("papyrus.assignment", result["value"]["api"])
         self.assertIn("context", result["value"]["api"]["papyrus.assignment"])
+        self.assertIn("assignment_research_packet", result["value"]["api"]["papyrus.plan"])
         self.assertEqual(
             result["api_calls"],
             ["papyrus.api.list", "papyrus.docs.list"],
@@ -174,18 +175,37 @@ return plan_research_update{ assignment_item = assignment, research = research }
         class FakeSemanticClient:
             def references_for_category(self, category_lineage_id):
                 if category_lineage_id == "category-topic-scaling-agents":
-                    return {"relations": [{"subjectId": "reference-1-v1", "subjectLineageId": "reference-1"}]}
+                    return {
+                        "relations": [
+                            {"subjectId": "reference-1-v1", "subjectLineageId": "reference-1"},
+                            {"subjectId": "reference-2-v1", "subjectLineageId": "reference-2"},
+                        ]
+                    }
                 return {"relations": []}
 
             def get_reference(self, reference_id):
-                self_ref = {
+                if reference_id == "reference-2-v1":
+                    return {
+                        "reference": {
+                            "id": reference_id,
+                            "lineageId": "reference-2",
+                            "versionState": "current",
+                            "curationStatus": "rejected",
+                            "title": "Rejected Scope Memo",
+                            "sourceUri": "https://example.com/rejected",
+                            "sourcePublishedAt": "2026-05-13T12:00:00Z",
+                        }
+                    }
+                accepted_ref = {
                     "id": reference_id,
                     "lineageId": "reference-1",
+                    "versionState": "current",
+                    "curationStatus": "accepted",
                     "title": "Scaling Agent Memo",
                     "sourceUri": "https://example.com/scaling-agent-memo",
                     "sourcePublishedAt": "2026-05-13T12:00:00Z",
                 }
-                return {"reference": self_ref}
+                return {"reference": accepted_ref}
 
             def list_reference_messages(self, reference_lineage_id):
                 if reference_lineage_id != "reference-1":
@@ -233,6 +253,8 @@ return plan_research_update{ assignment_item = assignment, research = research }
         self.assertIn("Desk Doctrine", context["text"])
         self.assertIn("Desk: Scaling", "\n".join(block["text"] for block in context["blocks"]))
         self.assertIn("Focus: Scaling Agents", "\n".join(block["text"] for block in context["blocks"]))
+        self.assertIn("Scaling Agent Memo", "\n".join(block["text"] for block in context["blocks"]))
+        self.assertNotIn("Rejected Scope Memo", "\n".join(block["text"] for block in context["blocks"]))
         self.assertNotIn("Foreign Desk", context["text"])
 
     def test_assignment_plan_uses_assignment_type(self):
@@ -445,6 +467,13 @@ return plan_research_update{ assignment_item = assignment, research = research }
                     },
                     "queries": ["agentic research workflows"],
                     "source_snapshots": [{"itemId": "research-001", "title": "Lab agents"}],
+                    "proposed_references": [
+                        {
+                            "title": "Candidate source",
+                            "url": "https://example.com/candidate",
+                            "ingestion_rationale": "Candidate source relates to the research focus and publication mission.",
+                        }
+                    ],
                     "research_notes": ["Tie the story to concrete workflow changes."],
                     "comparison_findings": ["Release still requires a human approval gate."],
                     "rubric_assessments": [
@@ -476,6 +505,7 @@ return plan_research_update{ assignment_item = assignment, research = research }
         self.assertEqual(research["researchLens"], "agent-workflow")
         self.assertEqual(research["targetSystemType"], "research newsroom")
         self.assertEqual(research["doctrineContext"]["desk"]["fallback"], "publication")
+        self.assertEqual(research["proposedReferences"][0]["url"], "https://example.com/candidate")
         self.assertEqual(research["comparisonFindings"], ["Release still requires a human approval gate."])
         self.assertEqual(research["rubricAssessments"][0]["key"], "autonomy-scope")
         self.assertEqual(research["procedure"]["role"], "researcher")
@@ -484,6 +514,94 @@ return plan_research_update{ assignment_item = assignment, research = research }
         relation_records = [record for record in plan["records"] if record["modelName"] == "SemanticRelation"]
         self.assertEqual(len(relation_records), 2)
         self.assertEqual(relation_records[0]["input"]["objectId"], "reference-knowledge-corpus-ai-ml-research-research-001-v1")
+        self.assertEqual(relation_records[0]["input"]["relationTypeKey"], "uses_evidence")
+
+    def test_live_assignment_research_packet_plan_creates_message_and_comment_relation(self):
+        plan = papyrus_newsroom.build_assignment_research_packet_plan(
+            generated_at="2026-05-18T15:30:00Z",
+            assignment={
+                "id": "assignment-live-123",
+                "assignmentTypeKey": "research.edition-candidate",
+                "queueKey": "edition:edition-2026-05-18:desk:automation:lane:reporting",
+                "queueStatusKey": "edition:edition-2026-05-18:desk:automation:lane:reporting#open",
+                "status": "open",
+                "title": "Research automated publication systems",
+                "brief": "Find current source material.",
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "metadata": {
+                    "deskCategoryKey": "automation",
+                    "focusCategoryKey": "automated-publication-systems",
+                    "contextProfile": "reporting",
+                    "contextTokenBudget": 4000,
+                },
+            },
+            research={
+                "summary": "Found one current source prospect.",
+                "corpus_key": "AI-ML-research",
+                "queries": ["automated publication systems newsroom"],
+                "source_snapshots": [
+                    {
+                        "url": "https://example.com/source",
+                        "source_domain": "example.com",
+                        "evidence_candidate_id": "evidence-candidate-1",
+                    }
+                ],
+                "proposed_references": [
+                    {
+                        "title": "Candidate source",
+                        "url": "https://example.com/source",
+                        "ingestion_rationale": "Candidate source relates to the focus and publication mission.",
+                    }
+                ],
+                "evidence_item_ids": [],
+                "recommended_angle": "Review as intake candidate.",
+            },
+        )
+
+        self.assertTrue(plan["dryRun"])
+        self.assertEqual(plan["lifecycle"], "assignment-research-packet")
+        self.assertEqual([record["modelName"] for record in plan["records"]], ["Message", "SemanticRelation"])
+        message = plan["records"][0]["input"]
+        self.assertEqual(message["messageKind"], "research_packet")
+        self.assertEqual(message["messageDomain"], "assignment_work")
+        self.assertEqual(message["metadata"]["kind"], "research.packet.created")
+        self.assertEqual(message["metadata"]["assignmentId"], "assignment-live-123")
+        self.assertEqual(message["metadata"]["research"]["sourceSnapshots"][0]["source_domain"], "example.com")
+        self.assertEqual(message["metadata"]["research"]["proposedReferences"][0]["ingestion_rationale"], "Candidate source relates to the focus and publication mission.")
+        relation = plan["records"][1]["input"]
+        self.assertEqual(relation["predicate"], "comment")
+        self.assertEqual(relation["relationTypeKey"], "comment")
+        self.assertEqual(relation["relationDomain"], "commentary")
+        self.assertEqual(relation["subjectKind"], "message")
+        self.assertEqual(relation["objectKind"], "assignment")
+        self.assertEqual(relation["objectId"], "assignment-live-123")
+
+    def test_execute_tactus_can_plan_live_assignment_research_packet(self):
+        result = tactus_runtime.execute_tactus(
+            """
+local assignment = {
+  id = "assignment-live-123",
+  assignmentTypeKey = "research.edition-candidate",
+  queueKey = "edition:edition-2026-05-18:desk:automation:lane:reporting",
+  status = "open",
+  title = "Research automated publication systems",
+}
+local research = {
+  summary = "Found one source prospect.",
+  corpus_key = "AI-ML-research",
+  source_snapshots = { { url = "https://example.com/source", source_domain = "example.com" } },
+  proposed_references = { { title = "Candidate source", url = "https://example.com/source", ingestion_rationale = "Review for intake." } },
+  evidence_item_ids = {},
+}
+return plan_assignment_research_packet{ assignment = assignment, research = research }
+"""
+        )
+
+        self.assertTrue(result["ok"], result.get("error"))
+        self.assertEqual(result["value"]["lifecycle"], "assignment-research-packet")
+        self.assertEqual(result["value"]["records"][0]["modelName"], "Message")
+        self.assertEqual(result["value"]["records"][1]["input"]["relationTypeKey"], "comment")
+        self.assertEqual(result["api_calls"], ["papyrus.plan.assignment_research_packet"])
 
     def test_track_research_warns_when_doctrine_context_and_rubric_are_missing(self):
         plan = papyrus_newsroom.build_research_update_plan(

@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from .semantic import PapyrusSemanticClient
+from .reference_policy import is_evidence_eligible_reference
 
 try:
     import yaml
@@ -40,6 +41,18 @@ ARTICLE_TYPE = "article"
 ARTICLE_DRAFT_STATUS = "draft"
 DEFAULT_ASSIGNMENT_RATIO = 1.5
 REPORTER_PROCEDURE = "procedures/newsroom/reporter.tac"
+RELATION_TYPE_FIELDS = {
+    "comment": {
+        "relationTypeId": "semantic-relation-type-comment",
+        "relationTypeKey": "comment",
+        "relationDomain": "commentary",
+    },
+    "uses_evidence": {
+        "relationTypeId": "semantic-relation-type-uses-evidence",
+        "relationTypeKey": "uses_evidence",
+        "relationDomain": "evidence",
+    },
+}
 
 
 GET_EDITION_QUERY = """
@@ -337,6 +350,30 @@ query ListCategoryKeywords($limit: Int, $nextToken: String) {
 }
 """
 
+LIST_SEMANTIC_NODES_QUERY = """
+query ListSemanticNodes($limit: Int, $nextToken: String) {
+  listSemanticNodes(limit: $limit, nextToken: $nextToken) {
+    items {
+      id
+      lineageId
+      versionNumber
+      versionState
+      nodeKey
+      nodeKind
+      categorySetId
+      categoryLineageId
+      categoryKey
+      displayName
+      description
+      aliases
+      status
+      updatedAt
+    }
+    nextToken
+  }
+}
+"""
+
 LIST_MESSAGES_QUERY = """
 query ListMessages($limit: Int, $nextToken: String) {
   listMessages(limit: $limit, nextToken: $nextToken) {
@@ -451,11 +488,19 @@ def papyrus_get_assignment_context(assignment_id: str) -> dict[str, Any]:
     """
     Read live Assignment context, including doctrine, targets, and events.
     """
-    data = _graphql(GET_ASSIGNMENT_CONTEXT_QUERY, {"assignmentId": _required(assignment_id, "assignment_id")})
-    context = data.get("getAssignmentContext")
-    if not context:
-        raise ValueError(f"Assignment context not found: {assignment_id}")
-    return {"assignment_context": _decode_record_json(context)}
+    assignment_id = _required(assignment_id, "assignment_id")
+    try:
+        data = _graphql(GET_ASSIGNMENT_CONTEXT_QUERY, {"assignmentId": assignment_id})
+        context = data.get("getAssignmentContext")
+        if not context:
+            raise ValueError(f"Assignment context not found: {assignment_id}")
+        return {"assignment_context": _decode_record_json(context)}
+    except RuntimeError as error:
+        message = str(error)
+        if "data environment variables are malformed" not in message:
+            raise
+        # Fallback path when the assignment-action Lambda resolver is misconfigured.
+        return {"assignment_context": _fallback_assignment_context(assignment_id)}
 
 
 def papyrus_build_assignment_agent_context(
@@ -479,11 +524,31 @@ def papyrus_build_assignment_agent_context(
         metadata.get("deskCategoryLineageId") or metadata.get("rootCategoryLineageId"),
         metadata.get("deskCategoryKey") or metadata.get("rootCategoryKey"),
     )
+    explicit_focus_key = (
+        metadata.get("focusCategoryKey")
+        or metadata.get("categoryKey")
+        or metadata.get("researchLens")
+    )
     focus_category = _resolve_assignment_category(
         categories,
         metadata.get("focusCategoryLineageId") or metadata.get("categoryLineageId"),
-        metadata.get("focusCategoryKey") or metadata.get("categoryKey") or metadata.get("researchLens"),
+        explicit_focus_key,
     ) or desk_category
+    semantic_query_terms = _context_semantic_terms(assignment, metadata, desk_category, focus_category)
+    semantic_node_matches = _search_semantic_nodes(
+        semantic_query_terms,
+        category_set_id=assignment.get("categorySetId"),
+        limit=8,
+    )
+    focus_resolution = "category"
+    if focus_category and semantic_node_matches:
+        focus_resolution = "category+semantic-node"
+    elif not focus_category and semantic_node_matches:
+        focus_resolution = "semantic-node"
+    elif not focus_category and explicit_focus_key:
+        focus_resolution = "temporary-focus-key"
+    elif not focus_category:
+        focus_resolution = "none"
     keywords = _list_category_keywords(
         assignment.get("categorySetId"),
         [category_key for category_key in [desk_category.get("categoryKey") if desk_category else None, focus_category.get("categoryKey") if focus_category else None] if category_key],
@@ -496,12 +561,20 @@ def papyrus_build_assignment_agent_context(
     semantic = _semantic_client()
     reference_summaries = _desk_reference_summaries(semantic, desk_category, focus_category)
     comment_summaries = _desk_comment_summaries(semantic, reference_summaries)
+    coverage_gaps: list[str] = []
+    if focus_resolution == "none":
+        coverage_gaps.append("No accepted focus category or semantic node match was found.")
+    elif focus_resolution == "temporary-focus-key":
+        coverage_gaps.append("Focus category key is metadata-only and not present in the accepted category set.")
+    if not reference_summaries:
+        coverage_gaps.append("No accepted desk-memory references matched this assignment context.")
     context_blocks = _build_assignment_context_blocks(
         assignment=assignment,
         metadata=metadata,
         doctrine=_normalize_jsonish(context.get("doctrine") or []),
         desk_category=desk_category,
         focus_category=focus_category,
+        semantic_nodes=semantic_node_matches,
         category_keywords=keywords,
         desk_assignments=desk_assignments,
         assignment_events=assignment_events,
@@ -521,12 +594,35 @@ def papyrus_build_assignment_agent_context(
             "assignmentId": assignment.get("id"),
             "deskCategoryKey": desk_category.get("categoryKey") if desk_category else metadata.get("deskCategoryKey"),
             "deskCategoryLineageId": desk_category.get("lineageId") if desk_category else metadata.get("deskCategoryLineageId"),
-            "focusCategoryKey": focus_category.get("categoryKey") if focus_category else metadata.get("focusCategoryKey"),
-            "focusCategoryLineageId": focus_category.get("lineageId") if focus_category else metadata.get("focusCategoryLineageId"),
-            "focusCategoryTitle": (focus_category.get("displayName") or focus_category.get("shortTitle")) if focus_category else metadata.get("focusCategoryTitle"),
+            "focusCategoryKey": (
+                focus_category.get("categoryKey")
+                if focus_category
+                else explicit_focus_key
+            ),
+            "focusCategoryLineageId": (
+                focus_category.get("lineageId")
+                if focus_category
+                else metadata.get("focusCategoryLineageId")
+            ),
+            "focusCategoryTitle": (
+                (focus_category.get("displayName") or focus_category.get("shortTitle"))
+                if focus_category
+                else metadata.get("focusCategoryTitle") or explicit_focus_key
+            ),
             "contextProfile": profile_key,
             "contextTokenBudget": token_budget,
             "contextSources": metadata.get("contextSources") or ["doctrine", "focus-category", "desk-memory", "fresh-evidence"],
+            "focusResolution": focus_resolution,
+            "semanticNodeMatches": semantic_node_matches,
+            "semanticQueryTerms": semantic_query_terms,
+            "coverageGaps": coverage_gaps,
+            "contextCoverage": {
+                "deskFocusCategory": bool(desk_category or focus_category),
+                "semanticNodeEntity": bool(semantic_node_matches),
+                "acceptedEvidenceMemory": bool(reference_summaries),
+                "doctrineFallbackOnly": not bool(desk_category or focus_category or semantic_node_matches or reference_summaries),
+                "focusResolution": focus_resolution,
+            },
             "blocks": context_blocks,
             "includedBlocks": compaction.get("included_blocks") or [],
             "droppedBlocks": compaction.get("dropped_blocks") or [],
@@ -724,6 +820,17 @@ def papyrus_semantic_walk(
         predicates=predicates,
         kinds=kinds,
     )
+
+
+def papyrus_search_semantic_nodes(query: str, limit: int = 10, category_set_id: str = "") -> dict[str, Any]:
+    """
+    Search current semantic nodes by term match against key, title, description, and aliases.
+    """
+    query_terms = _match_terms_from_text(query)
+    if not query_terms:
+        return {"query": query, "terms": [], "nodes": []}
+    nodes = _search_semantic_nodes(query_terms, category_set_id=category_set_id, limit=limit)
+    return {"query": query, "terms": query_terms, "nodes": nodes}
 
 
 def biblicus_steering_artifacts(corpus_key: str, config_path: str = "") -> dict[str, Any]:
@@ -1110,6 +1217,12 @@ def build_research_update_plan(
     evidence_item_ids = _string_list(
         research_payload.get("evidence_item_ids") or research_payload.get("evidenceItemIds")
     )
+    source_snapshots = _jsonish_list(
+        research_payload.get("source_snapshots") or research_payload.get("sourceSnapshots") or []
+    )
+    proposed_references = _jsonish_list(
+        research_payload.get("proposed_references") or research_payload.get("proposedReferences") or []
+    )
 
     editorial = _normalize_jsonish(item.get("editorial") or {})
     if not isinstance(editorial, dict):
@@ -1121,10 +1234,10 @@ def build_research_update_plan(
     doctrine_context = _normalize_jsonish(
         research_payload.get("doctrine_context") or research_payload.get("doctrineContext") or {}
     )
-    comparison_findings = _normalize_jsonish(
+    comparison_findings = _jsonish_list(
         research_payload.get("comparison_findings") or research_payload.get("comparisonFindings") or []
     )
-    rubric_assessments = _normalize_jsonish(
+    rubric_assessments = _jsonish_list(
         research_payload.get("rubric_assessments") or research_payload.get("rubricAssessments") or []
     )
     newsroom["research"] = {
@@ -1140,25 +1253,24 @@ def build_research_update_plan(
         "focusCategoryTitle": assignment_state.get("focusCategoryTitle"),
         "contextProfile": assignment_state.get("contextProfile"),
         "contextTokenBudget": assignment_state.get("contextTokenBudget"),
-        "contextSources": _normalize_jsonish(assignment_state.get("contextSources") or []),
+        "contextSources": _jsonish_list(assignment_state.get("contextSources") or []),
         "researchTrackKey": assignment_state.get("researchTrackKey"),
         "researchLens": assignment_state.get("researchLens"),
         "targetSystemType": assignment_state.get("targetSystemType"),
         "comparisonQuestions": _normalize_jsonish(assignment_state.get("comparisonQuestions") or []),
         "doctrineContext": doctrine_context,
-        "queries": _normalize_jsonish(research_payload.get("queries") or []),
-        "sourceSnapshots": _normalize_jsonish(
-            research_payload.get("source_snapshots") or research_payload.get("sourceSnapshots") or []
-        ),
-        "researchNotes": _normalize_jsonish(
+        "queries": _jsonish_list(research_payload.get("queries") or []),
+        "sourceSnapshots": source_snapshots,
+        "proposedReferences": proposed_references,
+        "researchNotes": _jsonish_list(
             research_payload.get("research_notes") or research_payload.get("researchNotes") or []
         ),
         "comparisonFindings": comparison_findings,
         "rubricAssessments": rubric_assessments,
-        "openQuestions": _normalize_jsonish(
+        "openQuestions": _jsonish_list(
             research_payload.get("open_questions") or research_payload.get("openQuestions") or []
         ),
-        "coverageGaps": _normalize_jsonish(
+        "coverageGaps": _jsonish_list(
             research_payload.get("coverage_gaps") or research_payload.get("coverageGaps") or []
         ),
         "recommendedAngle": str(
@@ -1189,7 +1301,7 @@ def build_research_update_plan(
     )
 
     warnings = []
-    if not evidence_item_ids:
+    if not evidence_item_ids and not source_snapshots and not proposed_references:
         warnings.append("research.evidenceItemIds is empty")
     if assignment_state.get("researchTrackKey") and not doctrine_context:
         warnings.append("research.doctrineContext is empty")
@@ -1215,6 +1327,94 @@ def build_research_update_plan(
         "lifecycle": "assignment-research",
         "item": updated_item,
         "records": records,
+        "warnings": warnings,
+    }
+
+
+def build_assignment_research_packet_plan(
+    assignment_json: str = "",
+    assignment: dict[str, Any] | None = None,
+    research_json: str = "",
+    research: dict[str, Any] | None = None,
+    generated_at: str = "",
+) -> dict[str, Any]:
+    """
+    Build a dry-run Message work-product plan for a live Assignment.
+    """
+    assignment_payload = _decode_record_json(_coerce_payload(assignment, assignment_json, "assignment"))
+    research_payload = _coerce_payload(research, research_json, "research")
+    now = generated_at or _now_iso()
+
+    assignment_id = _required(assignment_payload.get("id"), "assignment.id")
+    if not assignment_payload.get("assignmentTypeKey"):
+        raise ValueError("live assignment research packets require assignment.assignmentTypeKey")
+    if not assignment_payload.get("queueKey"):
+        raise ValueError("live assignment research packets require assignment.queueKey")
+
+    summary = _required(research_payload.get("summary"), "research.summary")
+    research_packet = _research_packet_metadata(research_payload, assignment_payload, now)
+    message_id = f"message-research-packet-{_hash_short([assignment_id, summary, now])}"
+    message = {
+        "id": message_id,
+        "messageKind": "research_packet",
+        "messageDomain": "assignment_work",
+        "status": "active",
+        "body": summary,
+        "summary": summary,
+        "source": "procedures/newsroom/researcher.tac",
+        "importRunId": assignment_payload.get("importRunId"),
+        "authorLabel": "newsroom-researcher",
+        "createdAt": now,
+        "updatedAt": now,
+        "metadata": {
+            "kind": "research.packet.created",
+            "assignmentId": assignment_id,
+            "assignmentTypeKey": assignment_payload.get("assignmentTypeKey"),
+            "queueKey": assignment_payload.get("queueKey"),
+            "research": research_packet,
+        },
+    }
+    relation = _semantic_relation(
+        predicate="comment",
+        subject_kind="message",
+        subject_id=message_id,
+        subject_lineage_id=message_id,
+        subject_version_number=None,
+        object_kind="assignment",
+        object_id=assignment_id,
+        object_lineage_id=assignment_id,
+        object_version_number=None,
+        rank=1,
+        score=None,
+        confidence=None,
+        classifier_id=assignment_payload.get("classifierId"),
+        model_version=None,
+        review_recommended=False,
+        source_snapshot_id=assignment_payload.get("sourceSnapshotId"),
+        import_run_id=assignment_payload.get("importRunId"),
+        imported_at=now,
+        metadata={
+            "lifecycle": "assignment-research-packet",
+            "messageKind": "research_packet",
+            "metadataKind": "research.packet.created",
+            "assignmentTypeKey": assignment_payload.get("assignmentTypeKey"),
+            "queueKey": assignment_payload.get("queueKey"),
+        },
+    )
+
+    warnings = []
+    if not research_packet["evidenceItemIds"] and not research_packet["sourceSnapshots"] and not research_packet["proposedReferences"]:
+        warnings.append("research packet has no accepted evidence ids, source snapshots, or proposed references")
+
+    return {
+        "dryRun": True,
+        "lifecycle": "assignment-research-packet",
+        "assignmentId": assignment_id,
+        "message": message,
+        "records": [
+            {"modelName": "Message", "action": "create", "input": message},
+            {"modelName": "SemanticRelation", "action": "create", "input": relation},
+        ],
         "warnings": warnings,
     }
 
@@ -1401,6 +1601,71 @@ def _evidence_relation_records(
     return records
 
 
+def _research_packet_metadata(research_payload: dict[str, Any], assignment: dict[str, Any], now: str) -> dict[str, Any]:
+    evidence_item_ids = _string_list(
+        research_payload.get("evidence_item_ids") or research_payload.get("evidenceItemIds")
+    )
+    metadata = _normalize_jsonish(assignment.get("metadata") or {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+    return {
+        "status": "researched",
+        "summary": str(research_payload.get("summary") or ""),
+        "corpusKey": research_payload.get("corpus_key") or research_payload.get("corpusKey") or assignment.get("corpusId"),
+        "categoryKey": (
+            research_payload.get("category_key")
+            or research_payload.get("categoryKey")
+            or metadata.get("focusCategoryKey")
+            or metadata.get("deskCategoryKey")
+        ),
+        "evidenceItemIds": evidence_item_ids,
+        "deskCategoryKey": metadata.get("deskCategoryKey"),
+        "deskCategoryLineageId": metadata.get("deskCategoryLineageId"),
+        "focusCategoryKey": metadata.get("focusCategoryKey"),
+        "focusCategoryLineageId": metadata.get("focusCategoryLineageId"),
+        "focusCategoryTitle": metadata.get("focusCategoryTitle"),
+        "contextProfile": metadata.get("contextProfile"),
+        "contextTokenBudget": metadata.get("contextTokenBudget"),
+        "contextSources": _jsonish_list(metadata.get("contextSources") or []),
+        "doctrineContext": _normalize_jsonish(
+            research_payload.get("doctrine_context") or research_payload.get("doctrineContext") or {}
+        ),
+        "queries": _jsonish_list(research_payload.get("queries") or []),
+        "sourceSnapshots": _jsonish_list(
+            research_payload.get("source_snapshots") or research_payload.get("sourceSnapshots") or []
+        ),
+        "proposedReferences": _jsonish_list(
+            research_payload.get("proposed_references") or research_payload.get("proposedReferences") or []
+        ),
+        "researchNotes": _jsonish_list(
+            research_payload.get("research_notes") or research_payload.get("researchNotes") or []
+        ),
+        "comparisonFindings": _jsonish_list(
+            research_payload.get("comparison_findings") or research_payload.get("comparisonFindings") or []
+        ),
+        "rubricAssessments": _jsonish_list(
+            research_payload.get("rubric_assessments") or research_payload.get("rubricAssessments") or []
+        ),
+        "openQuestions": _jsonish_list(
+            research_payload.get("open_questions") or research_payload.get("openQuestions") or []
+        ),
+        "coverageGaps": _jsonish_list(
+            research_payload.get("coverage_gaps") or research_payload.get("coverageGaps") or []
+        ),
+        "recommendedAngle": str(
+            research_payload.get("recommended_angle")
+            or research_payload.get("recommendedAngle")
+            or ""
+        ),
+        "procedure": {
+            "role": "researcher",
+            "name": "procedures/newsroom/researcher.tac",
+            "version": NEWSROOM_VERSION,
+            "generatedAt": now,
+        },
+    }
+
+
 def _semantic_relation(
     *,
     predicate: str,
@@ -1423,6 +1688,9 @@ def _semantic_relation(
     imported_at: str,
     metadata: dict[str, Any],
 ) -> dict[str, Any]:
+    relation_type_fields = RELATION_TYPE_FIELDS.get(predicate)
+    if relation_type_fields is None:
+        raise ValueError(f"unsupported semantic relation predicate: {predicate}")
     subject_state_key = _semantic_state_key(subject_kind, subject_lineage_id)
     object_state_key = _semantic_state_key(object_kind, object_lineage_id)
     predicate_object_state_key = f"{predicate}#{object_state_key}"
@@ -1442,6 +1710,7 @@ def _semantic_relation(
         "id": relation_id,
         "relationState": "current",
         "predicate": predicate,
+        **relation_type_fields,
         "subjectKind": subject_kind,
         "subjectId": subject_id,
         "subjectLineageId": subject_lineage_id,
@@ -1743,6 +2012,23 @@ def _list_category_keywords(category_set_id: Any, category_keys: list[str]) -> l
     ]
 
 
+def _list_semantic_nodes(category_set_id: Any) -> list[dict[str, Any]]:
+    try:
+        items = _list_connection(LIST_SEMANTIC_NODES_QUERY, {}, "listSemanticNodes")
+    except (RuntimeError, ValueError):
+        return []
+    accepted: list[dict[str, Any]] = []
+    for item in items:
+        if item.get("versionState") != "current":
+            continue
+        if item.get("status") in {"rejected", "archived"}:
+            continue
+        if category_set_id and item.get("categorySetId") and item.get("categorySetId") != category_set_id:
+            continue
+        accepted.append(item)
+    return accepted
+
+
 def _list_messages() -> list[dict[str, Any]]:
     return _list_connection(LIST_MESSAGES_QUERY, {}, "listMessages")
 
@@ -1781,9 +2067,128 @@ query ListAssignmentEventsByAssignment($assignmentId: ID!, $limit: Int, $nextTok
     return sorted(events, key=lambda item: item.get("createdAt") or "", reverse=True)
 
 
+def _fallback_assignment_context(assignment_id: str) -> dict[str, Any]:
+    assignment = papyrus_get_assignment(assignment_id).get("assignment") or {}
+    relations = _list_connection(
+        """
+query ListSemanticRelationsBySubjectState($subjectStateKey: String!, $limit: Int, $nextToken: String) {
+  listSemanticRelationsBySubjectState(subjectStateKey: $subjectStateKey, limit: $limit, nextToken: $nextToken) {
+    items {
+      id
+      relationState
+      predicate
+      relationTypeKey
+      subjectKind
+      subjectId
+      subjectLineageId
+      objectKind
+      objectId
+      objectLineageId
+      metadata
+    }
+    nextToken
+  }
+}
+""",
+        {"subjectStateKey": _semantic_state_key("assignment", assignment_id)},
+        "listSemanticRelationsBySubjectState",
+    )
+    targets = [
+        {
+            "kind": relation.get("objectKind"),
+            "id": relation.get("objectId"),
+            "lineageId": relation.get("objectLineageId"),
+            "label": relation.get("objectLineageId") or relation.get("objectId"),
+            "detail": relation.get("relationTypeKey") or relation.get("predicate"),
+        }
+        for relation in relations
+        if relation.get("relationState") == "current"
+    ]
+    events = _assignment_events_for_assignments([assignment_id])
+    return {
+        "assignment": assignment,
+        "doctrine": [],
+        "targets": targets,
+        "events": events,
+    }
+
+
 def _normalize_assignment_metadata(value: Any) -> dict[str, Any]:
     metadata = _normalize_jsonish(value or {})
     return metadata if isinstance(metadata, dict) else {}
+
+
+def _match_terms_from_text(value: Any) -> list[str]:
+    text = str(value or "").lower()
+    if not text:
+        return []
+    seen: set[str] = set()
+    terms: list[str] = []
+    for term in re.findall(r"[a-z0-9][a-z0-9\\-]{2,}", text):
+        if term in seen:
+            continue
+        seen.add(term)
+        terms.append(term)
+    return terms
+
+
+def _context_semantic_terms(
+    assignment: dict[str, Any],
+    metadata: dict[str, Any],
+    desk_category: dict[str, Any] | None,
+    focus_category: dict[str, Any] | None,
+) -> list[str]:
+    candidates = [
+        assignment.get("title"),
+        assignment.get("brief"),
+        assignment.get("instructions"),
+        metadata.get("focusCategoryKey"),
+        metadata.get("focusCategoryTitle"),
+        metadata.get("researchLens"),
+        metadata.get("researchLensTitle"),
+        metadata.get("targetSystemType"),
+        (desk_category or {}).get("displayName"),
+        (desk_category or {}).get("categoryKey"),
+        (focus_category or {}).get("displayName"),
+        (focus_category or {}).get("categoryKey"),
+    ]
+    seen: set[str] = set()
+    terms: list[str] = []
+    for candidate in candidates:
+        for term in _match_terms_from_text(candidate):
+            if term in seen:
+                continue
+            seen.add(term)
+            terms.append(term)
+    return terms
+
+
+def _search_semantic_nodes(
+    query_terms: list[str],
+    *,
+    category_set_id: Any,
+    limit: int = 8,
+) -> list[dict[str, Any]]:
+    if not query_terms:
+        return []
+    nodes = _list_semantic_nodes(category_set_id)
+    scored: list[tuple[int, dict[str, Any]]] = []
+    for node in nodes:
+        search_text = " ".join(
+            [
+                str(node.get("nodeKey") or ""),
+                str(node.get("displayName") or ""),
+                str(node.get("description") or ""),
+                " ".join(_string_list(node.get("aliases") or [])),
+                str(node.get("categoryKey") or ""),
+            ]
+        ).lower()
+        score = sum(1 for term in query_terms if term in search_text)
+        if score <= 0:
+            continue
+        scored.append((score, node))
+    scored.sort(key=lambda entry: (-entry[0], str(entry[1].get("nodeKey") or ""), str(entry[1].get("id") or "")))
+    return [entry[1] for entry in scored[: max(int(limit), 0)]]
 
 
 def _assignment_lane_key(assignment: dict[str, Any], metadata: dict[str, Any]) -> str:
@@ -1912,6 +2317,8 @@ def _desk_reference_summaries(
                 reference = semantic.get_reference(subject_id)["reference"]
             except ValueError:
                 continue
+            if not is_evidence_eligible_reference(reference):
+                continue
             seen.add(subject_lineage_id)
             references.append(reference)
     references.sort(
@@ -1947,6 +2354,7 @@ def _build_assignment_context_blocks(
     doctrine: list[dict[str, Any]],
     desk_category: dict[str, Any] | None,
     focus_category: dict[str, Any] | None,
+    semantic_nodes: list[dict[str, Any]],
     category_keywords: list[dict[str, Any]],
     desk_assignments: list[dict[str, Any]],
     assignment_events: list[dict[str, Any]],
@@ -2024,6 +2432,19 @@ def _build_assignment_context_blocks(
                 "taxonomy",
                 "Keyword hints:\n" + "\n".join(keyword_lines),
                 metadata={"keywordCount": len(category_keywords)},
+            )
+        )
+    if semantic_nodes:
+        semantic_lines = [
+            f"- {(node.get('displayName') or node.get('nodeKey') or node.get('id'))} [{node.get('nodeKind') or 'node'}]"
+            for node in semantic_nodes[:8]
+        ]
+        blocks.append(
+            _context_block(
+                "taxonomy-semantic-nodes",
+                "taxonomy",
+                "Semantic node/entity matches:\n" + "\n".join(semantic_lines),
+                metadata={"semanticNodeCount": len(semantic_nodes)},
             )
         )
     linked_reference_ids = _string_list(metadata.get("referenceLineageIds") or [])
@@ -2384,6 +2805,25 @@ def _normalize_jsonish(value: Any) -> Any:
     return value
 
 
+def _jsonish_list(value: Any) -> list[Any]:
+    normalized = _normalize_jsonish(value)
+    if normalized is None:
+        return []
+    if isinstance(normalized, list):
+        return normalized
+    if isinstance(normalized, tuple):
+        return list(normalized)
+    if isinstance(normalized, dict):
+        if not normalized:
+            return []
+        if all(isinstance(key, int) for key in normalized):
+            keys = sorted(normalized)
+            if keys == list(range(1, len(keys) + 1)):
+                return [normalized[key] for key in keys]
+        return [normalized]
+    return [normalized]
+
+
 def _required(value: Any, label: str) -> str:
     if value is None or str(value).strip() == "":
         raise ValueError(f"{label} is required")
@@ -2397,6 +2837,11 @@ def _string_list(value: Any) -> list[str]:
         return [str(item) for item in value if item is not None and str(item) != ""]
     if isinstance(value, tuple):
         return [str(item) for item in value if item is not None and str(item) != ""]
+    if isinstance(value, dict):
+        if not value:
+            return []
+        if all(isinstance(key, int) for key in value):
+            return [str(value[key]) for key in sorted(value) if value[key] is not None and str(value[key]) != ""]
     return [str(value)]
 
 

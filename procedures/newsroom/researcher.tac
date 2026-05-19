@@ -3,8 +3,6 @@
 -- Dry-run only: this procedure returns an Item update plan that attaches
 -- research to an assignment but does not write to GraphQL.
 
-local done = require("tactus.tools.done")
-
 Toolset "papyrus" {
     type = "plugin",
     paths = {"./procedures/newsroom/tactus_tools"}
@@ -20,8 +18,12 @@ Goal:
 - Build an evidence-backed research packet for one assignment Item.
 - If assignment_json is absent, read either a live Assignment context or a legacy assignment Item.
 - When live Assignment context is available, build and use the budgeted Papyrus agent context pack.
-- Use execute_tactus as your only tool for Papyrus, Biblicus, context, and dry-run plan work.
+- Use execute_tactus as your only tool for Papyrus, Biblicus, Tactus stdlib web research, context, and dry-run plan work.
 - Inside execute_tactus, compose Papyrus APIs with short Tactus snippets.
+- When fresh external evidence is needed, require tactus.web inside the snippet:
+  local web = require("tactus.web"). Use provider="openai" for both web.search
+  and web.synthesize through the OpenAI web_search API. Keep provider selection
+  explicit and do not write GraphQL records from web results.
 
 Rules:
 - This is dry-run only. Never claim records were written.
@@ -38,10 +40,21 @@ Rules:
 - Do not quote private doctrine, curation notes, or unpublished assignment
   material into reader-facing prose. Use doctrine to guide judgment, source
   selection, coverage gaps, and recommendedAngle.
+- Use only current accepted references as publishable evidence or desk-memory
+  context. Pending references are reference prospects. Rejected references are
+  scope memory only unless the task is explicitly curation or classifier
+  training.
+- When proposing a new reference for ingestion, include an ingestion rationale:
+  a brief summary of what the source material is about, how it relates to the
+  current research focus, and how it fits the publication mission.
 - Return doctrine_context, comparison_findings, and rubric_assessments when the research packet needs to explain why evidence did or did not meet the live doctrine standard.
 - Return structured research data and the dry-run update plan.
+- The final response must be the structured output object matching the declared
+  output schema. Return a structured object, not a JSON string. Do not rewrite,
+  reformat, summarize, or augment the execute_tactus.value object. Do not
+  return Markdown, bullets, or explanatory prose as the final answer.
 ]],
-    tools = {"papyrus", done},
+    tools = {"papyrus"},
     output = {
         assignment_item_id = field.string{required = true},
         corpus_key = field.string{required = true},
@@ -72,9 +85,91 @@ Procedure {
         summary = field.string{required = true}
     },
     function(input)
+        local json = require("tactus.io.json")
+
+        local function json_string(value)
+            local text = tostring(value or "")
+            text = string.gsub(text, "\\", "\\\\")
+            text = string.gsub(text, '"', '\\"')
+            text = string.gsub(text, "\n", "\\n")
+            text = string.gsub(text, "\r", "\\r")
+            return '"' .. text .. '"'
+        end
+
+        local function assignment_json_for_tool(value)
+            if type(value) == "string" then
+                return value
+            end
+            if type(value) ~= "table" then
+                return ""
+            end
+            if value.assignmentTypeKey or value.assignment_type_key then
+                local id = value.id or "assignment-inline"
+                local assignment_type_key = value.assignmentTypeKey or value.assignment_type_key
+                local queue_key = value.queueKey or value.queue_key or assignment_type_key
+                local queue_status_key = value.queueStatusKey or value.queue_status_key or (queue_key .. "#" .. tostring(value.status or "open"))
+                local status = value.status or "open"
+                local title = value.title or id
+                local brief = value.brief or value.summary or ""
+                local metadata = value.metadata or {}
+                local metadata_parts = {}
+                if type(metadata) == "table" then
+                    local metadata_fields = {
+                        "deskCategoryKey",
+                        "deskCategoryLineageId",
+                        "deskCategoryTitle",
+                        "focusCategoryKey",
+                        "focusCategoryLineageId",
+                        "focusCategoryTitle",
+                        "contextProfile",
+                        "contextTokenBudget",
+                        "targetSystemType",
+                    }
+                    for _, key in ipairs(metadata_fields) do
+                        if metadata[key] ~= nil then
+                            table.insert(metadata_parts, json_string(key) .. ":" .. json_string(metadata[key]))
+                        end
+                    end
+                end
+                return table.concat({
+                    "{",
+                    '"id":', json_string(id), ",",
+                    '"assignmentTypeKey":', json_string(assignment_type_key), ",",
+                    '"queueKey":', json_string(queue_key), ",",
+                    '"queueStatusKey":', json_string(queue_status_key), ",",
+                    '"status":', json_string(status), ",",
+                    '"title":', json_string(title), ",",
+                    '"brief":', json_string(brief), ",",
+                    '"metadata":{', table.concat(metadata_parts, ","), "}",
+                    "}",
+                })
+            end
+            local id = value.id or "assignment-inline"
+            local status = value.status or "dispatched"
+            local type_status = value.typeStatus or value.type_status or "assignment#dispatched"
+            local section = value.section or "Research"
+            local title = value.title or value.headline or id
+            local summary = value.summary or ""
+            return table.concat({
+                "{",
+                '"id":', json_string(id), ",",
+                '"type":"assignment",',
+                '"status":', json_string(status), ",",
+                '"typeStatus":', json_string(type_status), ",",
+                '"section":', json_string(section), ",",
+                '"title":', json_string(title), ",",
+                '"summary":', json_string(summary), ",",
+                '"editorial":{"newsroom":{"assignment":{"brief":', json_string(summary), "}}}",
+                "}",
+            })
+        end
+
+        local assignment_json = assignment_json_for_tool(input.assignment_json)
         local assignment_source = input.assignment_item_id
-        if input.assignment_json ~= "" then
+        local inline_assignment_id = ""
+        if assignment_json ~= "" then
             assignment_source = "inline assignment_json"
+            inline_assignment_id = string.match(assignment_json, '"id"%s*:%s*"([^"]+)"') or ""
         end
 
         local message = string.format([[
@@ -83,19 +178,76 @@ Create a research packet and dry-run update plan for %s using corpus %s.
 Research questions:
 %s
 
+Inline assignment JSON, when present:
+%s
+
+Inline assignment id to preserve, when present:
+%s
+
 Required tool flow:
-1. Call execute_tactus with one short Tactus snippet.
-2. In that snippet, use assignment_context, assignment_agent_context, and assignment_context_to_item for live Assignment queue work when possible.
-3. Fall back to item_get only when live Assignment context is unavailable.
-4. Use biblicus_steering_artifacts, biblicus_query, biblicus_topic_context, or biblicus_topic_trends for evidence.
-5. Use plan_research_update to build the dry-run research update plan.
+1. Call execute_tactus exactly once with harness="research", corpus_key set to
+   %s, and max_evidence_items set to %d.
+2. The harness already loads tactus.web, the assignment item, the corpus key,
+   and the dry-run plan builder. Do not require any modules and do not choose a
+   web provider.
+3. If inline assignment JSON is present, pass assignment_item_json. If not,
+   pass assignment_id set to %s so the harness can read the live Assignment.
+4. Your tactus argument should be only a small body snippet that uses:
+   - assignment: the preloaded assignment table.
+   - corpus_key: the preloaded corpus key.
+   - max_evidence_items: the evidence limit.
+   - web_search(query): OpenAI-backed web search with the standard model and budget.
+   - finish_research(research): validates and returns the dry-run output object.
+   - finish_research_from_search(search, options): builds the standard research
+     packet from one web_search result, including source_snapshots and
+     proposed_references with ingestion_rationale.
+5. Web search results are not accepted References yet. Put them in
+   source_snapshots and proposed_references. Do not put web
+   evidence_candidate_id values in evidence_item_ids.
+6. Live Assignment runs must produce a research packet Message plan, not an
+   assignment Item update plan. The harness handles that routing.
+
+Use this body snippet shape:
+local search = web_search("specific current query for this assignment")
+return finish_research_from_search(search, {
+    recommended_angle = "Non-promotional editorial angle.",
+})
+
+Do not copy example placeholder strings. Use a specific query and specific
+recommended_angle that reflect the research question.
 
 Use at most %d evidence items. Return dry_run=true, item_status="researched",
 research_packet, research_record_plan, and a concise summary.
-]], assignment_source, input.corpus_key, input.research_questions, input.max_evidence_items)
+Your final response must be exactly the structured object returned by execute_tactus.value.
+Do not convert it to JSON text. Do not add an ok field. Do not rewrite nested
+metadata, ingestion rationales, or record plans.
+]], assignment_source, input.corpus_key, input.research_questions, assignment_json, inline_assignment_id, input.corpus_key, input.max_evidence_items, assignment_source, input.max_evidence_items)
 
         local result = newsroom_researcher({message = message})
-        return result.output
+        local output = result.output
+        if type(output) == "string" and output ~= "" then
+            local ok, decoded = pcall(json.decode, output)
+            if not ok then
+                error("newsroom_researcher returned text instead of the structured execute_tactus.value object")
+            end
+            output = decoded
+        end
+        if type(output) == "table" then
+            local payload = output
+            if type(output.value) == "table" then
+                payload = output.value
+            end
+            return {
+                assignment_item_id = payload.assignment_item_id or payload.assignmentItemId or input.assignment_item_id or inline_assignment_id or "assignment-unknown",
+                corpus_key = payload.corpus_key or payload.corpusKey or input.corpus_key or "AI-ML-research",
+                dry_run = payload.dry_run,
+                item_status = payload.item_status or payload.itemStatus or "researched",
+                research_packet = payload.research_packet or payload.researchPacket or {},
+                research_record_plan = payload.research_record_plan or payload.researchRecordPlan or {},
+                summary = payload.summary or "Created dry-run research packet.",
+            }
+        end
+        return output
     end
 }
 

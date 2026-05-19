@@ -71,9 +71,10 @@ def _response_envelope(
     api_calls: list[str],
     error: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    normalized_value = _normalize_known_empty_arrays(_jsonable(value))
     return {
         "ok": ok,
-        "value": _jsonable(value),
+        "value": normalized_value,
         "error": error,
         "cost": {
             "usd": 0.0,
@@ -84,6 +85,39 @@ def _response_envelope(
         "partial": False,
         "api_calls": list(api_calls),
     }
+
+
+_ARRAY_SHAPED_KEYS = {
+    "contextSources",
+    "coverageGaps",
+    "evidenceItemIds",
+    "openQuestions",
+    "proposedReferences",
+    "queries",
+    "researchNotes",
+    "rubricAssessments",
+    "sourceSnapshots",
+    "comparisonFindings",
+    "context_sources",
+    "coverage_gaps",
+    "evidence_item_ids",
+    "open_questions",
+    "proposed_references",
+    "research_notes",
+    "rubric_assessments",
+    "source_snapshots",
+    "comparison_findings",
+}
+
+
+def _normalize_known_empty_arrays(value: Any, key: str | None = None) -> Any:
+    if key in _ARRAY_SHAPED_KEYS and value == {}:
+        return []
+    if isinstance(value, dict):
+        return {entry_key: _normalize_known_empty_arrays(entry_value, entry_key) for entry_key, entry_value in value.items()}
+    if isinstance(value, list):
+        return [_normalize_known_empty_arrays(item, key) for item in value]
+    return value
 
 
 class _Namespace:
@@ -138,6 +172,11 @@ API_METHODS: dict[tuple[str, str], Callable[[dict[str, Any]], Any]] = {
         kind=args.get("kind"),
         object_id=args.get("id") or args.get("object_id"),
     ),
+    ("semantic", "search_nodes"): lambda args: newsroom.papyrus_search_semantic_nodes(
+        query=args.get("query") or args.get("q") or "",
+        limit=args.get("limit", 10),
+        category_set_id=args.get("category_set_id") or args.get("categorySetId") or "",
+    ),
     ("biblicus", "steering_artifacts"): lambda args: newsroom.biblicus_steering_artifacts(
         corpus_key=args.get("corpus_key") or args.get("corpusKey"),
         config_path=args.get("config_path") or args.get("configPath") or "",
@@ -148,6 +187,7 @@ API_METHODS: dict[tuple[str, str], Callable[[dict[str, Any]], Any]] = {
     ("plan", "assignment_record"): lambda args: newsroom.build_assignment_record_plan(**args),
     ("plan", "assignment_dispatch"): lambda args: newsroom.build_assignment_dispatch_plan(**args),
     ("plan", "research_update"): lambda args: newsroom.build_research_update_plan(**args),
+    ("plan", "assignment_research_packet"): lambda args: newsroom.build_assignment_research_packet_plan(**args),
     ("plan", "draft_update"): lambda args: newsroom.build_draft_update_plan(**args),
 }
 
@@ -190,7 +230,8 @@ DOCS: dict[str, dict[str, Any]] = {
         "tags": ["plans", "dry-run"],
         "content": (
             "Use papyrus.plan.assignment_dispatch, papyrus.plan.research_update, "
-            "and papyrus.plan.draft_update to build inspectable dry-run mutation plans. "
+            "papyrus.plan.assignment_research_packet, and papyrus.plan.draft_update "
+            "to build inspectable dry-run mutation plans. "
             "These helpers do not write GraphQL records."
         ),
     },
@@ -204,7 +245,39 @@ DOCS: dict[str, dict[str, Any]] = {
         "content": (
             "Use biblicus_steering_artifacts, biblicus_query, biblicus_topic_context, "
             "and biblicus_topic_trends for evidence gathering. Keep returned evidence "
-            "ids in research packets and draft plans."
+            "ids in research packets and draft plans. Papyrus context and planning "
+            "helpers treat only current accepted references as evidence-eligible."
+        ),
+    },
+    "newsroom.reference-intake": {
+        "id": "newsroom.reference-intake",
+        "title": "Reference Intake",
+        "summary": "Use consistent reference-intake vocabulary and ingestion rationales.",
+        "namespace": "newsroom",
+        "status": "stable",
+        "tags": ["references", "curation", "scope-memory"],
+        "content": (
+            "New source material becomes a reference prospect until accepted. "
+            "When proposing ingestion, include an ingestion rationale with a brief "
+            "summary, the link to the current research focus, and the fit with the "
+            "publication mission. Rejected references are scope memory, not "
+            "publishable evidence."
+        ),
+    },
+    "newsroom.web-research": {
+        "id": "newsroom.web-research",
+        "title": "Web Research",
+        "summary": "Use the Tactus stdlib web module for fresh external evidence.",
+        "namespace": "newsroom",
+        "status": "stable",
+        "tags": ["web", "evidence", "tactus"],
+        "content": (
+            "Fresh web research belongs to the Tactus standard library, not "
+            "Papyrus. Inside execute_tactus snippets, call local web = "
+            "require(\"tactus.web\"), then use web.search{ provider = "
+            "\"openai\", ... } or web.synthesize{ provider = \"openai\", ... } "
+            "through the OpenAI web_search API. Keep provider selection explicit "
+            "and do not write GraphQL records from web search."
         ),
     },
 }
@@ -223,8 +296,10 @@ HELPER_BINDINGS: tuple[tuple[str, str, str], ...] = (
     ("biblicus_topic_context", "biblicus", "topic_context"),
     ("biblicus_topic_trends", "biblicus", "topic_trends"),
     ("biblicus_query", "biblicus", "query"),
+    ("semantic_search_nodes", "semantic", "search_nodes"),
     ("plan_assignment_dispatch", "plan", "assignment_dispatch"),
     ("plan_research_update", "plan", "research_update"),
+    ("plan_assignment_research_packet", "plan", "assignment_research_packet"),
     ("plan_draft_update", "plan", "draft_update"),
     ("docs_list", "docs", "list"),
     ("docs_get", "docs", "get"),
@@ -353,6 +428,240 @@ def _run_async(coro: Any) -> Any:
     if error:
         raise error["error"]
     return result.get("value")
+
+
+def _lua_string(value: str) -> str:
+    return json.dumps(str(value))
+
+
+def _research_harness(
+    *,
+    body: str,
+    assignment_id: str,
+    assignment_item_json: str,
+    corpus_key: str,
+    max_evidence_items: int,
+) -> str:
+    assignment_json = assignment_item_json or "{}"
+    evidence_limit = max(int(max_evidence_items or 1), 1)
+    assignment_loader = (
+        f'local assignment = assignment_get{{ id = {_lua_string(assignment_id)} }}.assignment\nlocal assignment_is_live = true'
+        if assignment_id and not assignment_item_json
+        else f'local assignment = json.decode({_lua_string(assignment_json)})\nlocal assignment_is_live = assignment.assignmentTypeKey ~= nil and assignment.type == nil'
+    )
+    return f"""
+local json = require("tactus.io.json")
+local web = require("tactus.web")
+
+{assignment_loader}
+local corpus_key = {_lua_string(corpus_key or "")}
+local max_evidence_items = {evidence_limit}
+
+local function trim_results(results)
+    local trimmed = {{}}
+    if not results then return trimmed end
+    local index = 1
+    while results[index] and index <= max_evidence_items do
+        trimmed[index] = results[index]
+        index = index + 1
+    end
+    return trimmed
+end
+
+local function web_search(query)
+    local result = web.search{{
+        provider = "openai",
+        query = query,
+        model = "gpt-5.4-mini",
+        return_token_budget = "default",
+        max_results = max_evidence_items,
+    }}
+    result.results = trim_results(result.results)
+    return result
+end
+
+local function compact_record_plan(plan)
+    local records = {{}}
+    local index = 1
+    while plan.records and plan.records[index] do
+        local record = plan.records[index]
+        local input = record.input or {{}}
+        records[index] = {{
+            modelName = record.modelName,
+            action = record.action,
+            input = {{
+                id = input.id,
+                messageKind = input.messageKind,
+                messageDomain = input.messageDomain,
+                relationTypeKey = input.relationTypeKey,
+                relationDomain = input.relationDomain,
+                subjectKind = input.subjectKind,
+                subjectId = input.subjectId,
+                objectKind = input.objectKind,
+                objectId = input.objectId,
+            }},
+        }}
+        index = index + 1
+    end
+    return {{
+        dryRun = plan.dryRun,
+        lifecycle = plan.lifecycle,
+        assignmentId = plan.assignmentId,
+        item = plan.item and {{ id = plan.item.id, type = plan.item.type, status = plan.item.status }},
+        message = plan.message and {{
+            id = plan.message.id,
+            messageKind = plan.message.messageKind,
+            messageDomain = plan.message.messageDomain,
+            status = plan.message.status,
+            summary = plan.message.summary,
+        }},
+        records = records,
+        warnings = plan.warnings or {{}},
+    }}
+end
+
+local function finish_research(research)
+    research.corpus_key = research.corpus_key or corpus_key
+    research.evidence_item_ids = research.evidence_item_ids or {{}}
+    local plan = nil
+    if assignment_is_live then
+        plan = plan_assignment_research_packet{{
+            assignment = assignment,
+            research = research,
+        }}
+    else
+        plan = plan_research_update{{
+            assignment_item = assignment,
+            research = research,
+        }}
+    end
+    return {{
+        assignment_item_id = assignment.id,
+        corpus_key = corpus_key,
+        dry_run = true,
+        item_status = "researched",
+        research_packet = research,
+        research_record_plan = compact_record_plan(plan),
+        summary = research.summary or "Created dry-run research packet.",
+    }}
+end
+
+local function source_title(source)
+    if not source then return "Candidate source" end
+    return source.title or source.url or source.source_domain or "Candidate source"
+end
+
+local function default_ingestion_rationale(source, query, answer)
+    local title = source_title(source)
+    local focus = assignment.summary or assignment.title or "the current research focus"
+    focus = tostring(focus)
+    focus = string.gsub(focus, "%s+", " ")
+    focus = string.gsub(focus, "[%.%s]+$", "")
+    return table.concat({{
+        title,
+        " was returned by OpenAI web search for ",
+        query or "the research query",
+        ". The source should be reviewed as a reference prospect because it may provide current context for ",
+        focus,
+        ". Its fit with the publication mission should be judged during reference intake before it is treated as accepted evidence.",
+    }})
+end
+
+local function proposed_references_from_search(search)
+    local proposals = {{}}
+    local results = search.results or {{}}
+    local answer = ""
+    if search.metadata and search.metadata.answer then
+        answer = search.metadata.answer
+    end
+    local index = 1
+    while results[index] do
+        local source = results[index]
+        proposals[index] = {{
+            title = source_title(source),
+            url = source.url,
+            source_domain = source.source_domain,
+            evidence_candidate_id = source.evidence_candidate_id,
+            ingestion_rationale = default_ingestion_rationale(source, search.query, answer),
+        }}
+        index = index + 1
+    end
+    return proposals
+end
+
+local function result_count(results)
+    local count = 0
+    if not results then return count end
+    while results[count + 1] do
+        count = count + 1
+    end
+    return count
+end
+
+local function search_summary(search)
+    local first = search.results and search.results[1]
+    if first then
+        return table.concat({{
+            "Found ",
+            tostring(result_count(search.results)),
+            " current reference prospect(s) for ",
+            search.query or "the research query",
+            "; first source: ",
+            first.source_domain or first.url or "web search",
+            ". Treat these as reference prospects until reference intake review.",
+        }})
+    end
+    return "No current web reference prospect was returned for " .. (search.query or "the research query") .. "."
+end
+
+local function finish_research_from_search(search, options)
+    options = options or {{}}
+    return finish_research{{
+        summary = options.summary or search_summary(search),
+        queries = {{ search.query }},
+        source_snapshots = search.results or {{}},
+        proposed_references = options.proposed_references or proposed_references_from_search(search),
+        evidence_item_ids = {{}},
+        recommended_angle = options.recommended_angle or "Assess the source as a reference prospect before using it as evidence.",
+        open_questions = options.open_questions or {{}},
+        coverage_gaps = options.coverage_gaps or {{}},
+        comparison_findings = options.comparison_findings or {{}},
+        rubric_assessments = options.rubric_assessments or {{}},
+    }}
+end
+
+{body}
+"""
+
+
+def execute_tactus_harnessed(
+    tactus: str,
+    *,
+    harness: str = "raw",
+    assignment_id: str = "",
+    assignment_item_json: str = "",
+    corpus_key: str = "",
+    max_evidence_items: int = 8,
+) -> dict[str, Any]:
+    if harness == "raw":
+        return execute_tactus(tactus)
+    if harness == "research":
+        snippet = _research_harness(
+            body=tactus,
+            assignment_id=assignment_id,
+            assignment_item_json=assignment_item_json,
+            corpus_key=corpus_key,
+            max_evidence_items=max_evidence_items,
+        )
+        return execute_tactus(snippet)
+    return _response_envelope(
+        ok=False,
+        value=None,
+        trace_id=str(uuid.uuid4()),
+        started_at=time.monotonic(),
+        api_calls=[],
+        error=_structured_error("invalid_request", f"unknown harness: {harness}"),
+    )
 
 
 def execute_tactus(tactus: str) -> dict[str, Any]:

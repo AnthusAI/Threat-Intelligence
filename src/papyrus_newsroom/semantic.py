@@ -32,6 +32,7 @@ SEMANTIC_PREDICATES: dict[str, dict[str, str]] = {
     "mentions": {"label": "mentions", "group": "ontology", "inverse_label": "mentioned by"},
     "about": {"label": "about", "group": "commentary", "inverse_label": "commentary"},
     "comment": {"label": "comments on", "group": "commentary", "inverse_label": "commented on by"},
+    "ingestion_rationale": {"label": "ingestion rationale for", "group": "commentary", "inverse_label": "ingestion rationale"},
     "uses_evidence": {"label": "uses evidence", "group": "evidence", "inverse_label": "used by"},
     "related_to": {"label": "related to", "group": "generic", "inverse_label": "related from"},
     "broader_than": {"label": "broader than", "group": "ontology", "inverse_label": "narrower concept"},

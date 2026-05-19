@@ -20,8 +20,11 @@ Goal:
 - Turn one assignment Item into a draft article record plan.
 - If assignment_json is absent, read either a live Assignment context or a legacy assignment Item.
 - When live Assignment context is available, build and use the budgeted Papyrus agent context pack.
-- Use execute_tactus as your only tool for Papyrus, Biblicus, context, and dry-run plan work.
+- Use execute_tactus as your only tool for Papyrus, Biblicus, Tactus stdlib web research, context, and dry-run plan work.
 - Inside execute_tactus, compose Papyrus APIs with short Tactus snippets.
+- If drafting needs fresh source verification, require tactus.web inside the
+  snippet and use provider="openai" with web.search or web.synthesize. Treat web
+  results as evidence inputs only; do not write GraphQL records from web search.
 
 Rules:
 - This is dry-run only. Never claim records were written.
@@ -29,6 +32,9 @@ Rules:
 - Preserve the assignment Item as the audit/input row and mark it drafted in the plan.
 - Create a separate draft article Item with Item.type = "article" and Item.status = "draft".
 - When live context is available, read and apply its doctrine section, focus-category section, desk-memory section, and fresh-evidence section before drafting.
+- Treat only current accepted references as publishable evidence. Pending
+  prospects and rejected scope memory are private curation/training context, not
+  source support for reader-facing claims.
 - Return structured draft data and the dry-run update plan.
 ]],
     tools = {"papyrus", done},
@@ -68,9 +74,10 @@ Create a draft update plan for %s using corpus %s.
 Required tool flow:
 1. Call execute_tactus with one short Tactus snippet.
 2. In that snippet, use assignment_context, assignment_agent_context, and assignment_context_to_item for live Assignment queue work when possible.
-3. Fall back to item_get only when live Assignment context is unavailable.
+3. Use item_get only when live Assignment context is unavailable.
 4. Use biblicus_query or biblicus_topic_context for evidence.
-5. Use plan_draft_update to build the dry-run assignment update and article draft plan.
+5. When fresh source verification is needed, use local web = require("tactus.web") and call web.search or web.synthesize inside execute_tactus.
+6. Use plan_draft_update to build the dry-run assignment update and article draft plan.
 
 Return dry_run=true, draft_status="draft", draft_record_plan, and a concise summary.
 ]], assignment_source, input.corpus_key)
