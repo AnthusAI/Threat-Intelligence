@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const assert = require("node:assert/strict");
+const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -9,7 +10,9 @@ const {
   buildAcceptedCategoryTreePayload,
   buildLexicalSteeringConfigRecords,
   buildLexicalSteeringPayload,
+  buildPreparedReferenceCatalog,
   buildProjectionImportRecords,
+  buildReferenceCatalogRegistrationRecords,
   buildSteeringConfigRecords,
   buildSteeringFeedbackPayload,
   buildSteeringImportRecords,
@@ -20,6 +23,13 @@ const {
 const {
   buildCurationCyclePlan,
 } = require("./lib/papyrus-curation-cycle.cjs");
+const {
+  buildAnalysisReindexAssignmentRecords,
+  buildAnalysisReindexPlan,
+  loadAnalysisProfiles,
+  mapExistingRecords,
+  parseAnalysisOverrides,
+} = require("./lib/papyrus-analysis-profiles.cjs");
 const {
   DEFAULT_LANES,
   buildEditionPlanningPlan,
@@ -37,6 +47,22 @@ const {
   requireCorpusConfig,
   resolveClassifierForCorpus,
 } = require("./lib/papyrus-steering-config.cjs");
+const {
+  isEvidenceEligibleReference,
+  normalizeReferenceCurationStatus,
+  scopeTrainingLabelForReference,
+} = require("./lib/papyrus-reference-policy.cjs");
+const {
+  getAssignmentTypePolicy,
+} = require("./lib/papyrus-assignment-types.cjs");
+const {
+  NEWSROOM_SUMMARY_PAYLOAD_ID,
+  applySummaryDeltas,
+  buildNewsroomSummaryPayload,
+  buildNewsroomSummaryPayloadRecord,
+  computeCurrentReferenceDeltaFromChanges,
+  normalizeNewsroomSummaryPayload,
+} = require("./lib/papyrus-newsroom-summary.cjs");
 
 const steeringBundle = {
   generated_at: "2026-05-16T12:00:00.000Z",
@@ -180,7 +206,7 @@ const steeringConfig = loadSteeringConfig({ configPath });
 const semanticConceptSeeds = loadSemanticConceptSeeds();
 assert.equal(semanticConceptSeeds.filter((concept) => concept.nodeKind === "editorialForm").length, 4);
 assert.equal(semanticConceptSeeds.find((concept) => concept.nodeKey === "editorial.form.reporting")?.scope, "global");
-assert.equal(semanticConceptSeeds.find((concept) => concept.nodeKey === "comment.import_rationale")?.scope, "corpus");
+assert.equal(semanticConceptSeeds.find((concept) => concept.nodeKey === "comment.ingestion_rationale")?.scope, "corpus");
 assert.equal(semanticConceptSeeds.find((concept) => concept.nodeKey === "editorial.form.briefs")?.displayName, "Briefs");
 assert.deepEqual(DEFAULT_LANES.map((lane) => lane.laneKey), ["reporting", "analysis", "briefs"]);
 const lexicalConfig = loadLexicalSteeringConfig();
@@ -545,7 +571,7 @@ const projectionPlan = buildProjectionImportRecords({
       review_recommended: true,
       model_version: "classifier-v1",
       storage_path: "s3://example/corpora/source-corpus/source-001.md",
-      import_rationale: "Projected into the source corpus because the classifier found a strong scaling match.",
+      ingestion_rationale: "Projected into the source corpus because the classifier found a strong scaling match.",
       attachments: [
         {
           role: "transcript",
@@ -599,13 +625,13 @@ assert.equal(projectedAttachments[2].storagePath, "corpora/source-corpus/source-
 assert.equal(projectedAttachments[3].storagePath, null);
 assert.equal(projectedAttachments[3].sourceUri, "s3://outside-bucket/not-corpora/source-001.pdf");
 assert.equal(JSON.parse(projectedAttachments[3].metadata).body, undefined);
-const importRationaleMessage = findRecord(projectionPlan.records, "Message", (record) => record.messageKind === "import_rationale");
-assert.equal(importRationaleMessage.messageDomain, "commentary");
-assert.equal(importRationaleMessage.body, "Projected into the source corpus because the classifier found a strong scaling match.");
-assert.equal(JSON.parse(importRationaleMessage.metadata).body, undefined);
-const rationaleRelation = findRecord(projectionPlan.records, "SemanticRelation", (record) => record.subjectKind === "message" && record.subjectId === importRationaleMessage.id);
-assert.equal(rationaleRelation.predicate, "comment");
-assert.equal(rationaleRelation.relationTypeKey, "comment");
+const ingestionRationaleMessage = findRecord(projectionPlan.records, "Message", (record) => record.messageKind === "ingestion_rationale");
+assert.equal(ingestionRationaleMessage.messageDomain, "commentary");
+assert.equal(ingestionRationaleMessage.body, "Projected into the source corpus because the classifier found a strong scaling match.");
+assert.equal(JSON.parse(ingestionRationaleMessage.metadata).body, undefined);
+const rationaleRelation = findRecord(projectionPlan.records, "SemanticRelation", (record) => record.subjectKind === "message" && record.subjectId === ingestionRationaleMessage.id);
+assert.equal(rationaleRelation.predicate, "ingestion_rationale");
+assert.equal(rationaleRelation.relationTypeKey, "ingestion_rationale");
 assert.equal(rationaleRelation.relationDomain, "commentary");
 assert.equal(rationaleRelation.objectKind, "reference");
 assert.equal(rationaleRelation.objectLineageId, projectedReference.lineageId);
@@ -630,6 +656,235 @@ assert.equal(
   false,
   "projection imports should use configured corpus ids without AI/ML name fallbacks",
 );
+
+assert.equal(normalizeReferenceCurationStatus("trusted"), "accepted");
+assert.equal(isEvidenceEligibleReference(projectedReference), true);
+assert.equal(isEvidenceEligibleReference({ ...projectedReference, curationStatus: "pending" }), false);
+assert.equal(isEvidenceEligibleReference({ ...projectedReference, versionState: "superseded" }), false);
+assert.equal(scopeTrainingLabelForReference(projectedReference), "positive");
+assert.equal(
+  scopeTrainingLabelForReference({ ...projectedReference, curationStatus: "rejected", metadata: JSON.stringify({ reasonCode: "out_of_scope" }) }),
+  "negative",
+);
+assert.equal(
+  scopeTrainingLabelForReference({ ...projectedReference, curationStatus: "rejected", metadata: JSON.stringify({ reasonCode: "duplicate" }) }),
+  null,
+);
+
+const preparedCatalog = buildPreparedReferenceCatalog({
+  schema_version: 2,
+  generated_at: "2026-05-18T12:00:00.000Z",
+  items: {
+    "catalog-needs-rationale": {
+      id: "catalog-needs-rationale",
+      relpath: "imports/catalog-needs-rationale.pdf",
+      media_type: "application/pdf",
+      title: "Prepared Reference Prospect",
+      source_uri: "https://example.com/prepared",
+      metadata: {
+        abstract: "This abstract should inform the derived rationale but remain out of sanitized GraphQL metadata.",
+        title: "Prepared Reference Prospect",
+      },
+    },
+  },
+}, {
+  corpusKey: "source-corpus",
+  publicationName: "Test Publication",
+  preparedAt: "2026-05-18T12:00:00.000Z",
+});
+const preparedCatalogItem = preparedCatalog.items["catalog-needs-rationale"];
+assert.match(preparedCatalogItem.ingestion_rationale, /Prepared Reference Prospect/);
+assert.match(preparedCatalogItem.ingestion_rationale, /source-corpus/);
+assert.match(preparedCatalogItem.ingestion_rationale, /This abstract should inform/);
+
+const pendingCatalogPlan = buildReferenceCatalogRegistrationRecords({
+  schema_version: 2,
+  generated_at: "2026-05-18T12:00:00.000Z",
+  items: {
+    "catalog-001": {
+      id: "catalog-001",
+      relpath: "imports/catalog-001.pdf",
+      sha256: "catalog-sha",
+      bytes: 1234,
+      media_type: "application/pdf",
+      title: "Reference Prospect",
+      source_uri: "https://example.com/catalog-001",
+      metadata: {
+        body: "This source body must not be copied into GraphQL raw payload snapshots.",
+        source_uri: "https://example.com/catalog-001",
+      },
+      ingestion_rationale: "Summarizes a candidate source for the current focus and explains why it fits the publication mission.",
+    },
+  },
+}, {
+  corpusConfig: sourceCorpusConfig,
+  corpusId: "knowledge-corpus-source-corpus",
+  status: "pending",
+  importedAt: "2026-05-18T12:00:00.000Z",
+});
+assert.ok(pendingCatalogPlan.importRunId);
+const pendingCatalogImportRun = findRecord(pendingCatalogPlan.records, "KnowledgeImportRun", (record) => record.id === pendingCatalogPlan.importRunId);
+assert.equal(pendingCatalogImportRun.importKind, "reference-catalog-registration");
+assert.equal(pendingCatalogImportRun.referenceCount, 1);
+const pendingCatalogRawPayload = findRecord(pendingCatalogPlan.records, "KnowledgeRawPayload", (record) => record.ownerId === pendingCatalogPlan.importRunId && record.payloadKind === "reference-intake-catalog");
+const pendingCatalogSnapshot = JSON.parse(pendingCatalogRawPayload.payload);
+assert.equal(pendingCatalogSnapshot.item_count, 1);
+assert.equal(pendingCatalogSnapshot.snapshot_policy, "bounded-summary");
+assert.equal(pendingCatalogSnapshot.items[0].id, "catalog-001");
+assert.equal(pendingCatalogSnapshot.items[0].metadata, undefined);
+assert.deepEqual(pendingCatalogSnapshot.items[0].metadata_keys, ["source_uri"]);
+const pendingCatalogReference = findRecord(pendingCatalogPlan.records, "Reference", (record) => record.externalItemId === "catalog-001");
+assert.equal(pendingCatalogReference.curationStatus, "pending");
+assert.equal(pendingCatalogReference.importRunId, pendingCatalogPlan.importRunId);
+assert.equal(pendingCatalogReference.storagePath, "corpora/source-corpus/imports/catalog-001.pdf");
+const pendingCatalogAttachments = pendingCatalogPlan.records.filter((record) => record.modelName === "ReferenceAttachment" && record.expected.referenceId === pendingCatalogReference.id);
+assert.ok(pendingCatalogAttachments.length >= 1);
+assert.equal(pendingCatalogAttachments[0].expected.importRunId, pendingCatalogPlan.importRunId);
+const pendingCatalogAssignments = pendingCatalogPlan.records.filter((record) => record.modelName === "Assignment");
+assert.equal(pendingCatalogAssignments.length, 1);
+assert.equal(pendingCatalogAssignments[0].expected.assignmentTypeKey, "curation.reference-intake");
+assert.equal(pendingCatalogAssignments[0].expected.queueKey, "curation.reference-intake#knowledge-corpus-source-corpus");
+assert.equal(pendingCatalogAssignments[0].expected.importRunId, pendingCatalogPlan.importRunId);
+const pendingCatalogRationale = findRecord(pendingCatalogPlan.records, "Message", (record) => record.messageKind === "ingestion_rationale");
+assert.equal(pendingCatalogRationale.importRunId, pendingCatalogPlan.importRunId);
+assert.equal(pendingCatalogPlan.records.some((record) => record.modelName === "SemanticRelation" && record.expected.predicate === "ingestion_rationale" && record.expected.importRunId === pendingCatalogPlan.importRunId), true);
+assert.equal(pendingCatalogPlan.records.some((record) => record.modelName === "SemanticRelation" && record.expected.predicate === "requests_work_on" && record.expected.importRunId === pendingCatalogPlan.importRunId), true);
+assert.equal(pendingCatalogPlan.records.some((record) => record.modelName === "Item"), false);
+assert.equal(pendingCatalogPlan.records.some((record) => record.modelName === "EditionItem"), false);
+assert.equal(pendingCatalogPlan.records.some((record) => record.modelName === "SemanticRelation" && ["classified_as", "uses_evidence"].includes(record.expected.predicate)), false);
+assert.throws(
+  () => buildReferenceCatalogRegistrationRecords({ items: [{ id: "catalog-no-rationale" }] }, {
+    corpusConfig: sourceCorpusConfig,
+    corpusId: "knowledge-corpus-source-corpus",
+    status: "pending",
+    importedAt: "2026-05-18T12:00:00.000Z",
+  }),
+  /requires ingestion_rationale/,
+);
+
+const rejectedCatalogPlan = buildReferenceCatalogRegistrationRecords({
+  schema_version: 2,
+  generated_at: "2026-05-18T12:00:00.000Z",
+  items: [
+    {
+      id: "catalog-002",
+      relpath: "imports/catalog-002.pdf",
+      media_type: "application/pdf",
+      title: "Rejected Prospect",
+      source_uri: "https://example.com/catalog-002",
+    },
+  ],
+}, {
+  corpusConfig: sourceCorpusConfig,
+  corpusId: "knowledge-corpus-source-corpus",
+  status: "rejected",
+  reasonCode: "out_of_scope",
+  note: "Outside the editorial mission.",
+  importedAt: "2026-05-18T12:00:00.000Z",
+});
+const rejectedCatalogReference = findRecord(rejectedCatalogPlan.records, "Reference", (record) => record.externalItemId === "catalog-002");
+assert.equal(rejectedCatalogReference.curationStatus, "rejected");
+assert.equal(rejectedCatalogReference.importRunId, rejectedCatalogPlan.importRunId);
+assert.equal(JSON.parse(rejectedCatalogReference.metadata).curation_reason_code, "out_of_scope");
+assert.equal(rejectedCatalogPlan.records.some((record) => record.modelName === "Assignment"), false);
+const rejectionMessage = findRecord(rejectedCatalogPlan.records, "Message", (record) => record.messageKind === "reference_curation");
+assert.equal(JSON.parse(rejectionMessage.metadata).reasonCode, "out_of_scope");
+assert.equal(rejectionMessage.importRunId, rejectedCatalogPlan.importRunId);
+assert.equal(rejectedCatalogPlan.records.some((record) => record.modelName === "SemanticRelation" && record.expected.predicate === "comment" && record.expected.importRunId === rejectedCatalogPlan.importRunId), true);
+assert.throws(
+  () => buildReferenceCatalogRegistrationRecords({ items: [{ id: "catalog-003" }] }, {
+    corpusConfig: sourceCorpusConfig,
+    corpusId: "knowledge-corpus-source-corpus",
+    status: "rejected",
+    importedAt: "2026-05-18T12:00:00.000Z",
+  }),
+  /reason-code is required/,
+);
+
+const analysisProfilesConfig = loadAnalysisProfiles();
+const classifierAnalysisProfile = analysisProfilesConfig.profiles.find((profile) => profile.key === "canonical-topic-classifier");
+assert.ok(classifierAnalysisProfile);
+assert.ok(classifierAnalysisProfile.allowedOverrides.includes("bertopic_analysis.parameters.nr_topics"));
+assert.ok(classifierAnalysisProfile.allowedOverrides.includes("seedManifestPath"));
+assert.throws(
+  () => parseAnalysisOverrides(["unsafe.parameter=1"], classifierAnalysisProfile),
+  /not allowed/,
+);
+const testAnalysisProfile = {
+  ...classifierAnalysisProfile,
+  corpusKey: "canonical-corpus",
+  classifierId: "canonical-classifier",
+  defaults: {
+    ...classifierAnalysisProfile.defaults,
+    extractionSnapshot: "snapshot-canonical-text",
+    seedManifestPath: "corpora/canonical-corpus/metadata/topic-classifiers/canonical-classifier/seed-manifest.json",
+  },
+};
+const testAnalysisProfilesConfig = {
+  ...analysisProfilesConfig,
+  profiles: [testAnalysisProfile],
+};
+const analysisOverrides = parseAnalysisOverrides(["bertopic_analysis.parameters.nr_topics=14"], testAnalysisProfile);
+const analysisPlan = buildAnalysisReindexPlan({
+  profilesConfig: testAnalysisProfilesConfig,
+  steeringConfig,
+  profileKey: "canonical-topic-classifier",
+  corpusKey: "canonical-corpus",
+  overrides: analysisOverrides,
+  now: "2026-05-18T12:00:00.000Z",
+  biblicusWorkdir: "/tmp/biblicus",
+});
+assert.equal(analysisPlan.profile.scope, "topic-classifier-train");
+assert.equal(analysisPlan.mode, "classifier-retrain");
+assert.equal(analysisPlan.corpus.id, "knowledge-corpus-canonical-corpus");
+assert.equal(analysisPlan.classifierId, "canonical-classifier");
+assert.equal(analysisPlan.destructivePlan.mutatesGraphqlNow, false);
+assert.equal(analysisPlan.destructivePlan.executesBiblicusNow, false);
+assert.equal(analysisPlan.commandPlan.length, 1);
+assert.deepEqual(
+  analysisPlan.commandPlan[0].args.filter((entry) => entry === "--override").length,
+  1,
+);
+assert.ok(analysisPlan.commandPlan[0].args.includes("bertopic_analysis.parameters.nr_topics=14"));
+const analysisPlanRerun = buildAnalysisReindexPlan({
+  profilesConfig: testAnalysisProfilesConfig,
+  steeringConfig,
+  profileKey: "canonical-topic-classifier",
+  corpusKey: "canonical-corpus",
+  overrides: analysisOverrides,
+  now: "2026-05-18T12:00:00.000Z",
+  biblicusWorkdir: "/tmp/biblicus",
+});
+assert.deepEqual(analysisPlanRerun.commandPlan, analysisPlan.commandPlan);
+const analysisAssignmentPlan = buildAnalysisReindexAssignmentRecords(analysisPlan, {
+  categorySet: fallbackTaxonomy,
+  existing: mapExistingRecords({}),
+  now: "2026-05-18T12:00:00.000Z",
+  actorLabel: "test-operator",
+});
+assert.equal(getAssignmentTypePolicy("analysis.reindex").claimPolicy, "exclusive");
+assert.equal(getAssignmentTypePolicy("research.edition-candidate").claimPolicy, "optional");
+const analysisAssignment = findRecord(analysisAssignmentPlan.records, "Assignment", (record) => record.assignmentTypeKey === "analysis.reindex");
+assert.equal(analysisAssignment.status, "open");
+assert.equal(analysisAssignment.queueKey, "analysis:reindex:canonical-corpus:topic-classifier-train");
+const analysisAssignmentMetadata = JSON.parse(analysisAssignment.metadata);
+assert.equal(analysisAssignmentMetadata.analysisProfileKey, "canonical-topic-classifier");
+assert.equal(analysisAssignmentMetadata.reindexMode, "classifier-retrain");
+assert.equal(analysisAssignmentMetadata.parameterOverrides["bertopic_analysis.parameters.nr_topics"], 14);
+assert.equal(analysisAssignmentMetadata.destructivePlan.mutatesGraphqlNow, false);
+assert.equal(analysisAssignmentMetadata.commandPlan[0].label, "topic-classifier-train");
+assert.equal(analysisAssignmentMetadata.assignmentTypePolicy.claimPolicy, "exclusive");
+assert.equal(analysisAssignmentMetadata.assignmentTypePolicy.defaultClaimTtlSeconds, 21600);
+const analysisAssignmentEvent = findRecord(analysisAssignmentPlan.records, "AssignmentEvent", (record) => record.assignmentId === analysisAssignment.id);
+assert.equal(analysisAssignmentEvent.eventType, "created");
+const analysisAssignmentRelation = findRecord(analysisAssignmentPlan.records, "SemanticRelation", (record) => record.subjectId === analysisAssignment.id);
+assert.equal(analysisAssignmentRelation.predicate, "requests_work_on");
+assert.equal(analysisAssignmentRelation.relationTypeKey, "requests_work_on");
+assert.equal(analysisAssignmentRelation.objectKind, "categorySet");
+assert.equal(analysisAssignmentPlan.records.some((record) => record.modelName === "Item"), false);
+assert.equal(analysisAssignmentPlan.records.some((record) => record.modelName === "EditionItem"), false);
+assert.equal(analysisAssignmentPlan.records.some((record) => record.modelName === "Reference"), false);
+assert.equal(analysisAssignmentPlan.records.some((record) => record.modelName === "SemanticRelation" && ["classified_as", "uses_evidence"].includes(record.expected.predicate)), false);
 
 const focusCategoryAlpha = {
   ...fallbackTaxonomyNode,
@@ -662,8 +917,16 @@ const editionPlanningState = {
   editionItems: [],
   categorySets: [fallbackTaxonomy],
   categories: [fallbackTaxonomyNode, focusCategoryAlpha, focusCategoryBeta],
-  references: [projectedReference],
-  semanticRelations: [projectionRelation],
+  references: [
+    projectedReference,
+    { ...projectedReference, id: "source-002-v1", lineageId: "source-002", externalItemId: "source-002", curationStatus: "pending", curationStatusKey: "knowledge-corpus-source-corpus#pending" },
+    { ...projectedReference, id: "source-003-v1", lineageId: "source-003", externalItemId: "source-003", curationStatus: "rejected", curationStatusKey: "knowledge-corpus-source-corpus#rejected" },
+  ],
+  semanticRelations: [
+    projectionRelation,
+    { ...projectionRelation, id: "projection-pending", subjectId: "source-002-v1", subjectLineageId: "source-002", subjectVersionKey: "reference#source-002-v1" },
+    { ...projectionRelation, id: "projection-rejected", subjectId: "source-003-v1", subjectLineageId: "source-003", subjectVersionKey: "reference#source-003-v1" },
+  ],
   semanticNodes: projectionPlan.records.filter((record) => record.modelName === "SemanticNode").map((record) => record.expected),
   assignments: [],
   assignmentEvents: [],
@@ -687,6 +950,7 @@ assert.equal(reportingAssignment.assignmentTypeKey, "research.edition-candidate"
 assert.equal(reportingAssignment.queueKey, `edition:edition-2026-05-19:desk:${fallbackTaxonomyNode.categoryKey.replace(/[^a-z0-9]+/g, "-")}:lane:reporting`);
 const reportingMetadata = JSON.parse(reportingAssignment.metadata);
 assert.equal(reportingMetadata.referenceLineageIds[0], projectedReference.lineageId);
+assert.deepEqual(reportingMetadata.referenceLineageIds, [projectedReference.lineageId]);
 assert.equal(reportingMetadata.deskCategoryKey, fallbackTaxonomyNode.categoryKey);
 assert.equal(reportingMetadata.focusCategoryKey, focusCategoryAlpha.categoryKey);
 assert.equal(reportingMetadata.focusCategoryTitle, "Scaling Agents");
@@ -731,7 +995,9 @@ assert.deepEqual(
 
 const relationTypeSeeds = loadSemanticRelationTypeSeeds();
 assert.ok(relationTypeSeeds.some((type) => type.key === "classified_as" && type.domain === "knowledge"));
+assert.ok(relationTypeSeeds.some((type) => type.key === "authoritative_label" && type.domain === "classification"));
 assert.ok(relationTypeSeeds.some((type) => type.key === "comment" && type.domain === "commentary" && type.allowedSubjectKinds.includes("message")));
+assert.ok(relationTypeSeeds.some((type) => type.key === "ingestion_rationale" && type.domain === "commentary" && type.allowedObjectKinds.includes("reference")));
 assert.ok(relationTypeSeeds.some((type) => type.key === "planned_for_edition" && type.domain === "publication"));
 assert.ok(relationTypeSeeds.some((type) => type.key === "targets_lane" && type.contextPackTags.includes("assignment_context")));
 const relationTypeRecords = buildSemanticRelationTypeRecords(relationTypeSeeds, { now: "2026-05-18T12:00:00.000Z" });
@@ -743,6 +1009,11 @@ assert.deepEqual(semanticRelationTypeFieldsForPredicate("CLASSIFIED AS"), {
   relationTypeId: semanticRelationTypeIdFor("classified_as"),
   relationTypeKey: "classified_as",
   relationDomain: "knowledge",
+});
+assert.deepEqual(semanticRelationTypeFieldsForPredicate("authoritative_label"), {
+  relationTypeId: semanticRelationTypeIdFor("authoritative_label"),
+  relationTypeKey: "authoritative_label",
+  relationDomain: "classification",
 });
 const backfillRecords = buildSemanticRelationBackfillRecords([
   { id: "relation-a", predicate: "classified_as" },
@@ -836,6 +1107,10 @@ assert.match(schemaSource, /Message:\s*a\s*\n\s*\.model/);
 assert.doesNotMatch(schemaSource, /KnowledgeComment:\s*a\s*\n\s*\.model/);
 assert.match(schemaSource, /Assignment:\s*a\s*\n\s*\.model/);
 assert.match(schemaSource, /AssignmentEvent:\s*a\s*\n\s*\.model/);
+const claimAssignmentSource = schemaSource.match(/claimAssignment:[\s\S]*?releaseAssignment:/)?.[0] ?? "";
+assert.match(claimAssignmentSource, /assigneeKey:\s*a\.string\(\)/);
+assert.match(claimAssignmentSource, /claimExpiresAt:\s*a\.datetime\(\)/);
+assert.match(claimAssignmentSource, /claimTtlSeconds:\s*a\.integer\(\)/);
 assert.match(schemaSource, /CategoryKeyword:\s*a\s*\n\s*\.model/);
 assert.match(schemaSource, /LexicalSteeringRule:\s*a\s*\n\s*\.model/);
 assert.match(schemaSource, /SemanticRelationType:\s*a\s*\n\s*\.model/);
@@ -854,9 +1129,19 @@ assert.match(schemaSource, /listUserRoleAssignmentsByProfileAndRole/);
 assert.match(schemaSource, /listReferenceAttachmentsByReferenceVersionAndSortKey/);
 assert.match(schemaSource, /listMessagesByAuthorSubAndCreatedAt/);
 assert.match(schemaSource, /curationStatusKey/);
+assert.match(schemaSource, /reasonCode:\s*a\.string\(\)/);
 assert.match(schemaSource, /listReferencesByCurationStatusKeyAndUpdatedAt/);
 assert.doesNotMatch(schemaSource.match(/Reference:[\s\S]*?ReferenceAttachment:/)?.[0] ?? "", /a\.boolean\(\)[\s\S]*curation/);
 assert.match(schemaSource, /listAssignmentsByQueueStatusAndPriority/);
+assert.match(schemaSource, /listAssignmentsByNewsroomFeedAndCreatedAt/);
+assert.match(schemaSource, /listMessagesByNewsroomFeedAndCreatedAt/);
+assert.match(schemaSource, /listReferencesByNewsroomFeedAndCreatedAt/);
+assert.match(schemaSource, /listSemanticNodesByNewsroomFeedAndCreatedAt/);
+assert.match(schemaSource, /listSemanticRelationsByNewsroomFeedAndCreatedAt/);
+assert.match(schemaSource, /NewsroomSummary:\s*a\.customType/);
+assert.match(schemaSource, /facets:\s*a\.json\(\)/);
+assert.match(schemaSource, /getNewsroomSummary:\s*a\s*\n\s*\.query/);
+assert.match(schemaSource, /updateNewsroomSummary:\s*a\s*\n\s*\.mutation/);
 assert.match(schemaSource, /allow\.groups\(categoryWriteGroups\)\.to\(categoryAppendOnlyOperations\)/);
 assert.doesNotMatch(schemaSource.match(/UserIdentity:[\s\S]*?UserRoleAssignment:/)?.[0] ?? "", /publicApiKey/);
 assert.doesNotMatch(schemaSource.match(/CategoryKeyword:[\s\S]*?SteeringProposal:/)?.[0] ?? "", /publicApiKey/);
@@ -864,6 +1149,7 @@ assert.doesNotMatch(schemaSource.match(/Reference:[\s\S]*?Item:/)?.[0] ?? "", /p
 const semanticGraphSource = fs.readFileSync(path.join(__dirname, "..", "lib", "semantic-graph.ts"), "utf8");
 assert.match(semanticGraphSource, /has_editorial_form/);
 assert.match(semanticGraphSource, /items by editorial form/);
+assert.match(semanticGraphSource, /ingestion_rationale/);
 assert.match(semanticGraphSource, /planned_for_edition/);
 assert.match(semanticGraphSource, /targets_lane/);
 assert.match(semanticGraphSource, /uses_signal/);
@@ -872,6 +1158,155 @@ const roleHandlerSource = fs.readFileSync(path.join(__dirname, "..", "amplify", 
 assert.match(roleHandlerSource, /operation === "mergeUserProfiles"/);
 assert.match(roleHandlerSource, /archive source UserProfile/);
 assert.match(roleHandlerSource, /mirrorRolesToCognitoUsers/);
+
+const summaryHandlerSource = fs.readFileSync(path.join(__dirname, "..", "amplify", "functions", "newsroom-summary", "handler.ts"), "utf8");
+assert.match(summaryHandlerSource, /KnowledgeRawPayload\.get/);
+assert.match(summaryHandlerSource, /updateNewsroomSummary/);
+assert.match(summaryHandlerSource, /applySummaryDelta/);
+assert.match(summaryHandlerSource, /applyFacetDeltas/);
+assert.doesNotMatch(summaryHandlerSource, /listAll\(/);
+assert.doesNotMatch(summaryHandlerSource, /client\.models\.Reference\.list/);
+assert.doesNotMatch(summaryHandlerSource, /client\.models\.Message\.list/);
+assert.doesNotMatch(summaryHandlerSource, /client\.models\.Assignment\.list/);
+
+const authoringSource = fs.readFileSync(path.join(__dirname, "lib", "papyrus-graphql-authoring.cjs"), "utf8");
+assert.match(authoringSource, /mutation UpdateNewsroomSummary/);
+assert.match(authoringSource, /updateNewsroomSummary\(delta/);
+
+const summaryPayload = buildNewsroomSummaryPayload({
+  categorySets: [
+    { id: "set-1-v2", lineageId: "set-1", versionNumber: 2, versionState: "current" },
+    { id: "set-1-v1", lineageId: "set-1", versionNumber: 1, versionState: "superseded" },
+  ],
+  categories: [
+    { id: "cat-1-v2", lineageId: "cat-1", versionNumber: 2, versionState: "current" },
+    { id: "cat-1-v1", lineageId: "cat-1", versionNumber: 1, versionState: "superseded" },
+  ],
+  references: [
+    { id: "reference-1-v2", lineageId: "reference-1", versionNumber: 2, versionState: "current", curationStatus: "accepted", corpusId: "corpus-1" },
+    { id: "reference-1-v1", lineageId: "reference-1", versionNumber: 1, versionState: "superseded", curationStatus: "pending", corpusId: "corpus-1" },
+    { id: "reference-2-v1", lineageId: "reference-2", versionNumber: 1, versionState: "current", curationStatus: "rejected", corpusId: "corpus-2" },
+  ],
+  semanticNodes: [
+    { id: "node-1-v2", lineageId: "node-1", versionNumber: 2, versionState: "current", nodeKind: "concept", status: "accepted" },
+    { id: "node-1-v1", lineageId: "node-1", versionNumber: 1, versionState: "superseded", nodeKind: "concept", status: "accepted" },
+  ],
+  messages: [
+    { messageKind: "ingestion_rationale", messageDomain: "reference_intake" },
+    { messageKind: "reference_curation", messageDomain: "commentary" },
+  ],
+  assignments: [
+    { status: "open", assignmentTypeKey: "curation.reference-intake" },
+    { status: "claimed", assignmentTypeKey: "analysis.reindex" },
+  ],
+  semanticRelations: [{ relationState: "current" }, { relationState: "superseded" }],
+  importRuns: [{ id: "older", importedAt: "2026-05-18T10:00:00.000Z" }, { id: "newer", importedAt: "2026-05-18T11:00:00.000Z" }],
+  now: "2026-05-18T12:00:00.000Z",
+});
+assert.equal(summaryPayload.counts.categorySets, 1);
+assert.equal(summaryPayload.counts.categories, 1);
+assert.equal(summaryPayload.counts.references, 2);
+assert.equal(summaryPayload.counts.semanticNodes, 1);
+assert.equal(summaryPayload.counts.semanticRelations, 1);
+assert.equal(summaryPayload.referenceStatusCounts.accepted, 1);
+assert.equal(summaryPayload.referenceStatusCounts.pending ?? 0, 0);
+assert.equal(summaryPayload.referenceStatusCounts.rejected, 1);
+assert.equal(summaryPayload.assignmentStatusCounts.open, 1);
+assert.equal(summaryPayload.facets.assignments.statusByType["curation.reference-intake"].open, 1);
+assert.equal(summaryPayload.facets.messages.domainByKind.ingestion_rationale.reference_intake, 1);
+assert.equal(summaryPayload.latestImportRun.id, "newer");
+const summaryRecord = buildNewsroomSummaryPayloadRecord(summaryPayload, "2026-05-18T12:00:00.000Z");
+assert.equal(summaryRecord.id, NEWSROOM_SUMMARY_PAYLOAD_ID);
+assert.equal(summaryRecord.ownerType, "newsroom");
+assert.equal(summaryRecord.payloadKind, "summary-snapshot");
+const deltaPayload = applySummaryDeltas(summaryRecord.payload, {
+  now: "2026-05-18T12:01:00.000Z",
+  countDeltas: { messages: 1 },
+  messageKindDeltas: { reference_curation: 1 },
+  referenceStatusDeltas: { pending: -1, accepted: 1 },
+  facetDeltas: {
+    assignments: {
+      byStatus: { open: -1, claimed: 1 },
+      statusByType: { "curation.reference-intake": { open: -1, claimed: 1 } },
+    },
+  },
+});
+assert.equal(deltaPayload.counts.messages, 3);
+assert.equal(deltaPayload.messageKindCounts.reference_curation, 2);
+assert.equal(deltaPayload.referenceStatusCounts.pending ?? 0, 0);
+assert.equal(deltaPayload.referenceStatusCounts.accepted, 2);
+assert.equal(deltaPayload.facets.assignments.byStatus.claimed, 2);
+assert.equal(deltaPayload.facets.assignments.statusByType["curation.reference-intake"].claimed, 1);
+assert.equal(normalizeNewsroomSummaryPayload(JSON.stringify(deltaPayload)).source, "incremental");
+const referenceNetZeroDelta = computeCurrentReferenceDeltaFromChanges([
+  {
+    modelName: "Reference",
+    action: "create",
+    expected: {
+      id: "reference-1-v2",
+      lineageId: "reference-1",
+      versionState: "current",
+      curationStatus: "accepted",
+      corpusId: "knowledge-corpus-ai-ml-journalism",
+    },
+    current: null,
+  },
+  {
+    modelName: "Reference",
+    action: "update",
+    expected: { id: "reference-1-v1", versionState: "superseded" },
+    current: {
+      id: "reference-1-v1",
+      lineageId: "reference-1",
+      versionState: "current",
+      curationStatus: "accepted",
+      corpusId: "knowledge-corpus-ai-ml-journalism",
+    },
+  },
+]);
+assert.equal(referenceNetZeroDelta.countDelta, 0);
+assert.equal(referenceNetZeroDelta.statusDeltas.accepted ?? 0, 0);
+assert.equal(referenceNetZeroDelta.corpusDeltas["knowledge-corpus-ai-ml-journalism"] ?? 0, 0);
+const referenceStatusTransitionDelta = computeCurrentReferenceDeltaFromChanges([
+  {
+    modelName: "Reference",
+    action: "update",
+    expected: {
+      id: "reference-2-v1",
+      lineageId: "reference-2",
+      versionState: "current",
+      curationStatus: "accepted",
+      corpusId: "knowledge-corpus-ai-ml-research",
+    },
+    current: {
+      id: "reference-2-v1",
+      lineageId: "reference-2",
+      versionState: "current",
+      curationStatus: "pending",
+      corpusId: "knowledge-corpus-ai-ml-research",
+    },
+  },
+]);
+assert.equal(referenceStatusTransitionDelta.countDelta, 0);
+assert.equal(referenceStatusTransitionDelta.statusDeltas.pending ?? 0, -1);
+assert.equal(referenceStatusTransitionDelta.statusDeltas.accepted ?? 0, 1);
+assert.equal(referenceStatusTransitionDelta.statusByCorpusDeltas["knowledge-corpus-ai-ml-research"].pending ?? 0, -1);
+assert.equal(referenceStatusTransitionDelta.statusByCorpusDeltas["knowledge-corpus-ai-ml-research"].accepted ?? 0, 1);
+
+const sandboxJwtResult = spawnSync(process.execPath, ["scripts/refresh-jwt.cjs", "--no-discover-ssm-param"], {
+  cwd: path.join(__dirname, ".."),
+  encoding: "utf8",
+  env: {
+    ...process.env,
+    PAPYRUS_SANDBOX_JWT_SECRET: "unit-test-sandbox-secret",
+    PAPYRUS_JWT_SECRET: "",
+    PAPYRUS_JWT_SECRET_SSM_PARAM: "",
+  },
+});
+assert.equal(sandboxJwtResult.status, 0, sandboxJwtResult.stderr || sandboxJwtResult.stdout);
+const sandboxJwtPayload = JSON.parse(Buffer.from(sandboxJwtResult.stdout.trim().split(".")[1], "base64url").toString("utf8"));
+assert.equal(sandboxJwtPayload.iss, "papyrus-cli");
+assert.equal(sandboxJwtPayload.scope, "papyrus:write");
 
 console.log("category mapper tests passed");
 
