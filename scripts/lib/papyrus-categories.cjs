@@ -4,6 +4,12 @@ const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const YAML = require("yaml");
 const { semanticRelationTypeFieldsForPredicate } = require("./papyrus-relation-types.cjs");
+const {
+  isEvidenceEligibleReference,
+  normalizeReferenceCurationStatus,
+  normalizeReferenceRejectionReasonCode,
+  scopeTrainingLabelForReference,
+} = require("./papyrus-reference-policy.cjs");
 
 const DEFAULT_BIBLICUS_WORKDIR = "/Users/ryan/Projects/Biblicus";
 const DEFAULT_SEMANTIC_CONCEPTS_PATH = path.join(__dirname, "..", "..", "corpora", "papyrus-semantic-concepts.yml");
@@ -119,23 +125,12 @@ function buildSteeringImportRecords(bundle, options = {}) {
       categoryCount: bundle.topic_set?.topics?.length ?? 0,
     proposalCount: bundle.proposals?.length ?? 0,
     artifactCount: bundle.artifacts?.length ?? 0,
-    referenceCount: (bundle.items ?? []).length,
+    referenceCount: 0,
     relationCount: 0,
     warningCount: bundle.warnings?.length ?? 0,
   }));
   records.push(rawPayloadRecord("importRun", importRunId, "warnings", { warnings: bundle.warnings ?? [] }, importRunId, now));
   records.push(...seededSemanticConceptNodeRecords({ corpusId, importRunId, now }));
-
-  for (const item of bundle.items ?? []) {
-    records.push(...referenceRecords(item, {
-      corpusId,
-      categorySetId,
-      classifierId,
-      sourceSnapshotId,
-      importRunId,
-      now,
-    }));
-  }
 
   if (bundle.topic_set) {
     records.push(...categorySetRecords(bundle.topic_set, { corpusId, importRunId, categorySetId, now, generatedAt: bundle.generated_at }));
@@ -228,17 +223,9 @@ function buildProjectionImportRecords(payload, options = {}) {
   ];
 
   for (const item of items) {
-    const referenceRecordsForItem = referenceRecords(item, {
-      corpusId: targetCorpusId,
-      categorySetId,
-      classifierId,
-      sourceSnapshotId: item.extraction_snapshot?.snapshot_id ?? firstItem.extraction_snapshot?.snapshot_id ?? null,
-      importRunId,
-      now,
-    });
-    const reference = referenceRecordsForItem.find((entry) => entry.modelName === "Reference");
-    records.push(...referenceRecordsForItem);
-    records.push(rawPayloadRecord("projection", reference.expected.id, "biblicus-projection", sanitizeProjectionPayload(item), importRunId, now));
+    const externalItemId = requiredString(item.item_id, "projection item_id");
+    const referenceLineageId = referenceLineageIdFor(targetCorpusId, externalItemId);
+    records.push(rawPayloadRecord("projection", referenceLineageId, "biblicus-projection", sanitizeProjectionPayload(item), importRunId, now));
   }
   const importRun = records.find((entry) => entry.modelName === "KnowledgeImportRun");
   if (importRun) {
@@ -246,6 +233,305 @@ function buildProjectionImportRecords(payload, options = {}) {
   }
 
   return { importRunId, categorySetId, records };
+}
+
+function buildReferenceCatalogRegistrationRecords(catalog, options = {}) {
+  const now = options.importedAt ?? new Date().toISOString();
+  const corpusContext = normalizeCorpusContext(catalog.corpus ?? {}, options.corpusConfig ?? options.corpus);
+  const corpusId = options.corpusId ?? knowledgeCorpusId(corpusContext);
+  const classifierId = options.classifierId ?? null;
+  const categorySetId = options.categorySetId ?? null;
+  const status = normalizeReferenceCurationStatus(options.status ?? catalog.status, "pending");
+  const reasonCode = normalizeReferenceRejectionReasonCode(options.reasonCode ?? options.reason_code, { required: status === "rejected" });
+  const sourceSnapshotId = catalog.latest_snapshot_id ?? catalog.latestSnapshotId ?? null;
+  const batchId = `reference-intake-${safeId(corpusId)}-${hashShort([
+    catalog.generated_at ?? catalog.generatedAt ?? now,
+    sourceSnapshotId ?? "",
+    catalogItems(catalog).map((item) => item.id ?? item.item_id ?? item.externalItemId ?? "").sort(),
+    status,
+    reasonCode ?? "",
+  ])}`;
+  const items = catalogItems(catalog).map((item) => normalizeCatalogReferenceItem(item, {
+    corpusConfig: options.corpusConfig ?? options.corpus ?? {},
+    status,
+    reasonCode,
+    note: options.note,
+    ingestionRationale: options.ingestionRationale ?? options.ingestion_rationale,
+    batchId,
+    now,
+  }));
+  const importRunId = `knowledge-import-${safeId(corpusId)}-reference-catalog-${hashShort([batchId, status, reasonCode ?? ""])}`;
+  const records = [
+    record("KnowledgeCorpus", {
+      id: corpusId,
+      name: corpusContext.name,
+      role: corpusContext.role,
+      itemCount: items.length,
+      generatedAt: dateOrNull(catalog.generated_at ?? catalog.generatedAt),
+      latestImportRunId: importRunId,
+      createdAt: now,
+      updatedAt: now,
+    }),
+    record("KnowledgeImportRun", {
+      id: importRunId,
+      corpusId,
+      importKind: "reference-catalog-registration",
+      classifierId,
+      sourceSnapshotId,
+      status: "imported",
+      generatedAt: dateOrNull(catalog.generated_at ?? catalog.generatedAt),
+      importedAt: now,
+      itemCount: items.length,
+      categoryCount: 0,
+      proposalCount: 0,
+      artifactCount: 0,
+      referenceCount: items.length,
+      relationCount: 0,
+      warningCount: 0,
+    }),
+    rawPayloadRecord("importRun", importRunId, "reference-intake-catalog", sanitizedReferenceCatalogSnapshot(catalog, {
+      batchId,
+      corpusId,
+      status,
+      reasonCode,
+      itemCount: items.length,
+      sourceSnapshotId,
+    }), importRunId, now),
+  ];
+  for (const item of items) {
+    const referenceRecordsForItem = referenceRecords(item, {
+      corpusId,
+      categorySetId,
+      classifierId,
+      sourceSnapshotId,
+      importRunId,
+      now,
+      createCurationAssignment: status === "pending" || Boolean(options.createCurationAssignment),
+    });
+    const reference = referenceRecordsForItem.find((entry) => entry.modelName === "Reference")?.expected;
+    records.push(...referenceRecordsForItem);
+    if (status === "rejected" && reference) {
+      records.push(...referenceCurationMessageRecords({
+        reference,
+        action: "reject",
+        status,
+        reasonCode,
+        note: item.curation_note ?? item.curationNote ?? item.ingestion_rationale ?? item.ingestionRationale ?? item.import_rationale ?? item.importRationale,
+        actor: options.actor ?? "papyrus-register-catalog",
+        source: "papyrus-register-catalog",
+        importRunId,
+        now,
+      }));
+    }
+  }
+  const importRun = records.find((entry) => entry.modelName === "KnowledgeImportRun");
+  if (importRun) {
+    importRun.expected.relationCount = records.filter((entry) => entry.modelName === "SemanticRelation").length;
+  }
+  return {
+    batchId,
+    importRunId,
+    corpusId,
+    status,
+    reasonCode,
+    itemCount: items.length,
+    records,
+  };
+}
+
+function buildPreparedReferenceCatalog(catalog, options = {}) {
+  const corpusKey = options.corpusKey ?? options.corpusConfig?.key ?? catalog.corpus?.key ?? null;
+  const publicationName = options.publicationName ?? options.steeringConfig?.publication?.name ?? "the publication";
+  const itemsValue = catalog.items ?? catalog.references ?? catalog.records ?? [];
+  const prepareItem = (item) => prepareReferenceCatalogItem(item, { corpusKey, publicationName });
+  const output = {
+    ...catalog,
+    prepared_at: options.preparedAt ?? new Date().toISOString(),
+    preparation: {
+      tool: "papyrus references prepare-catalog",
+      corpus_key: corpusKey,
+      rationale_policy: "derived-from-title-abstract-source-when-missing",
+    },
+  };
+  if (Array.isArray(itemsValue)) {
+    output.items = itemsValue.map(prepareItem);
+  } else if (itemsValue && typeof itemsValue === "object") {
+    output.items = Object.fromEntries(Object.entries(itemsValue).map(([key, item]) => [key, prepareItem(item)]));
+  } else {
+    output.items = [];
+  }
+  delete output.references;
+  delete output.records;
+  return output;
+}
+
+function prepareReferenceCatalogItem(item, context) {
+  if (!item || typeof item !== "object") return item;
+  if (ingestionRationaleFrom(item)) return item;
+  const metadata = item.metadata && typeof item.metadata === "object" ? item.metadata : {};
+  const title = stringOrNull(item.title ?? metadata.title) ?? stringOrNull(item.id ?? item.item_id ?? item.externalItemId) ?? "Untitled source material";
+  const abstract = stringOrNull(item.abstract ?? metadata.abstract ?? item.summary ?? metadata.summary);
+  const sourceUri = stringOrNull(item.source_uri ?? item.sourceUri ?? metadata.source_uri ?? metadata.sourceUri ?? item.url ?? item.uri);
+  const mediaType = stringOrNull(item.media_type ?? item.mediaType ?? metadata.media_type ?? metadata.mediaType);
+  const sourceClause = sourceUri ? ` Source: ${sourceUri}.` : "";
+  const typeClause = mediaType ? ` Media type: ${mediaType}.` : "";
+  const focusClause = context.corpusKey ? ` It is being staged for the ${context.corpusKey} corpus.` : "";
+  const summaryClause = abstract
+    ? ` Summary: ${abstract}`
+    : " Summary is not yet available in the catalog; review the source material during curation.";
+  return {
+    ...item,
+    ingestion_rationale: `${title} is a reference prospect for ${context.publicationName}.${focusClause}${typeClause}${sourceClause}${summaryClause}`,
+  };
+}
+
+function sanitizedReferenceCatalogSnapshot(catalog, context) {
+  const items = catalogItems(catalog);
+  const maxSnapshotItems = 50;
+  const snapshotItems = items.slice(0, maxSnapshotItems).map(compactReferenceCatalogSnapshotItem);
+  const order = Array.isArray(catalog.order) ? catalog.order.map((value) => compactString(value, 160)).filter(Boolean) : [];
+  return {
+    schema_version: 1,
+    snapshot_kind: "papyrus-reference-intake-catalog",
+    snapshot_policy: "bounded-summary",
+    batch_id: context.batchId,
+    corpus_id: context.corpusId,
+    status: context.status,
+    reason_code: context.reasonCode ?? null,
+    source_snapshot_id: context.sourceSnapshotId ?? null,
+    generated_at: catalog.generated_at ?? catalog.generatedAt ?? null,
+    latest_run_id: catalog.latest_run_id ?? catalog.latestRunId ?? null,
+    latest_snapshot_id: catalog.latest_snapshot_id ?? catalog.latestSnapshotId ?? null,
+    item_count: context.itemCount,
+    sampled_item_count: snapshotItems.length,
+    omitted_item_count: Math.max(0, items.length - snapshotItems.length),
+    order_sample: order.slice(0, maxSnapshotItems),
+    omitted_order_count: Math.max(0, order.length - maxSnapshotItems),
+    items: snapshotItems,
+  };
+}
+
+function compactReferenceCatalogSnapshotItem(item) {
+  const metadata = sanitizeReferenceMetadata(item.metadata ?? {});
+  return {
+    id: compactString(item.id ?? item.item_id ?? item.externalItemId, 160),
+    item_id: compactString(item.item_id ?? item.externalItemId ?? item.id, 160),
+    relpath: compactString(item.relpath ?? item.relative_path ?? item.relativePath, 512),
+    storage_path: compactString(item.storage_path ?? item.storagePath, 512),
+    source_uri: compactString(item.source_uri ?? item.sourceUri ?? metadata.source_uri ?? metadata.sourceUri ?? item.url ?? item.uri, 512),
+    media_type: compactString(item.media_type ?? item.mediaType ?? metadata.media_type ?? metadata.mediaType, 160),
+    title: compactString(item.title ?? metadata.title, 240),
+    sha256: compactString(item.sha256 ?? item.checksum, 160),
+    bytes: item.bytes ?? item.byte_size ?? item.byteSize ?? null,
+    dates: sanitizeReferenceMetadata(item.dates ?? {}),
+    tags: stringArrayFrom(item.tags ?? metadata.tags).slice(0, 12).map((tag) => compactString(tag, 80)).filter(Boolean),
+    metadata_keys: Object.keys(metadata).sort().slice(0, 50),
+    has_ingestion_rationale: Boolean(ingestionRationaleFrom(item)),
+  };
+}
+
+function compactString(value, maxLength) {
+  if (value === null || value === undefined) return null;
+  const text = String(value);
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, Math.max(0, maxLength - 3))}...`;
+}
+
+function catalogItems(catalog) {
+  const items = catalog.items ?? catalog.references ?? catalog.records ?? [];
+  if (Array.isArray(items)) return items;
+  if (items && typeof items === "object") return Object.values(items);
+  return [];
+}
+
+function normalizeCatalogReferenceItem(item, { corpusConfig, status, reasonCode, note, ingestionRationale, batchId, now }) {
+  if (!item || typeof item !== "object") throw new Error("Catalog item must be an object.");
+  const metadata = sanitizeReferenceMetadata(item.metadata ?? {});
+  const relpath = stringOrNull(item.relpath ?? item.relative_path ?? item.relativePath);
+  const configuredCorpusPath = stringOrNull(corpusConfig.path) ?? (corpusConfig.key ? `corpora/${corpusConfig.key}` : null);
+  const storagePath = stringOrNull(item.storage_path ?? item.storagePath)
+    ?? (relpath && configuredCorpusPath ? `${configuredCorpusPath.replace(/\/+$/g, "")}/${relpath.replace(/^\/+/g, "")}` : null)
+    ?? relpath;
+  const itemIngestionRationale = stringOrNull(ingestionRationale) ?? ingestionRationaleFrom(item);
+  const curationNote = stringOrNull(note)
+    ?? stringOrNull(item.curation_note ?? item.curationNote)
+    ?? stringOrNull(item.rejection_note ?? item.rejectionNote)
+    ?? itemIngestionRationale;
+  if (status === "pending" && !itemIngestionRationale) {
+    throw new Error(`Pending reference ${item.id ?? item.item_id ?? "unknown"} requires ingestion_rationale or --ingestion-rationale.`);
+  }
+  if (status === "rejected" && !curationNote) {
+    throw new Error(`Rejected reference ${item.id ?? item.item_id ?? "unknown"} requires --note or catalog rationale.`);
+  }
+  return {
+    ...item,
+    item_id: item.item_id ?? item.externalItemId ?? item.id,
+    storage_path: storagePath,
+    source_uri: item.source_uri ?? item.sourceUri ?? metadata.source_uri ?? metadata.sourceUri ?? item.url ?? item.uri,
+    media_type: item.media_type ?? item.mediaType ?? metadata.media_type ?? metadata.mediaType,
+    curation_status: status,
+    curation_note: curationNote,
+    ingestion_rationale: itemIngestionRationale,
+    metadata: {
+      ...metadata,
+      reference_intake_batch_id: batchId,
+      reference_intake_status: status,
+      curation_status: status,
+      curation_reason_code: reasonCode,
+      registered_at: now,
+    },
+  };
+}
+
+function referenceCurationMessageRecords({ reference, action, status, reasonCode, note, actor, source, importRunId, now }) {
+  const body = note || `${actor} marked this reference ${status}.`;
+  const message = messageRecord({
+    messageKind: "reference_curation",
+    messageDomain: "commentary",
+    body,
+    summary: `${reference.title ?? reference.externalItemId ?? reference.id}: ${status}`,
+    source,
+    importRunId,
+    authorLabel: actor,
+    createdAt: now,
+    metadata: {
+      action,
+      curationStatus: status,
+      reasonCode,
+      curationReasonCode: reasonCode,
+      referenceId: reference.id,
+      referenceLineageId: reference.lineageId,
+    },
+  });
+  return [
+    message,
+    semanticRelationRecord({
+      predicate: "comment",
+      subjectKind: "message",
+      subjectId: message.expected.id,
+      subjectLineageId: message.expected.id,
+      subjectVersionNumber: 1,
+      objectKind: "reference",
+      objectId: reference.id,
+      objectLineageId: reference.lineageId,
+      objectVersionNumber: reference.versionNumber,
+      score: null,
+      confidence: null,
+      rank: 1,
+      classifierId: null,
+      modelVersion: null,
+      reviewRecommended: false,
+      sourceSnapshotId: null,
+      importRunId,
+      importedAt: now,
+      metadata: {
+        action,
+        curationStatus: status,
+        reasonCode,
+        messageKind: "reference_curation",
+      },
+    }),
+  ];
 }
 
 function buildSteeringConfigRecords(config, options = {}) {
@@ -314,7 +600,8 @@ function referenceRecord(item, context) {
   const pathValue = item.storage_path ?? item.storagePath ?? item.relpath ?? item.path;
   const normalizedPath = normalizeStoragePath(pathValue);
   const curationStatus = normalizeReferenceCurationStatus(
-    item.curation_status
+    context.curationStatus
+    ?? item.curation_status
     ?? item.curationStatus
     ?? item.intake_status
     ?? item.intakeStatus
@@ -343,11 +630,15 @@ function referenceRecord(item, context) {
     retrievedAt: stringOrNull(item.dates?.retrieved_at ?? item.dates?.retrievedAt ?? item.retrieved_at ?? item.retrievedAt),
     importRunId: context.importRunId,
     importedAt: context.now,
+    createdAt: context.now,
     curationStatus,
     curationStatusKey: `${context.corpusId}#${curationStatus}`,
     curationStatusUpdatedAt: context.now,
     curationStatusUpdatedBy: "biblicus-import",
-    curationStatusReason: curationStatus === "accepted" ? "trusted import" : null,
+    curationStatusReason: curationStatus === "accepted"
+      ? "trusted import"
+      : stringOrNull(item.curation_note ?? item.curationNote ?? item.rejection_note ?? item.rejectionNote ?? item.ingestion_rationale ?? item.ingestionRationale ?? item.import_rationale ?? item.importRationale),
+    newsroomFeedKey: "references",
     metadata: JSON.stringify(metadata),
     updatedAt: context.now,
   };
@@ -361,11 +652,14 @@ function referenceRecord(item, context) {
 
 function referenceRecords(item, context) {
   const reference = referenceRecord(item, context);
+  const shouldCreateAssignment = typeof context.createCurationAssignment === "boolean"
+    ? context.createCurationAssignment
+    : true;
   return [
     reference,
     ...referenceAttachmentRecords(item, reference.expected, context),
     ...referenceMessageRecords(item, reference.expected, context),
-    ...referenceCurationAssignmentRecords(item, reference.expected, context),
+    ...(shouldCreateAssignment ? referenceCurationAssignmentRecords(item, reference.expected, context) : []),
   ];
 }
 
@@ -383,7 +677,6 @@ function referenceCurationAssignmentRecord(item, reference, context) {
   const assignmentId = `assignment-${safeId(assignmentTypeKey)}-${hashShort([
     context.corpusId,
     reference.lineageId,
-    reference.contentHash ?? "",
   ])}`;
   const title = reference.title
     ? `Curate reference: ${reference.title}`
@@ -413,6 +706,7 @@ function referenceCurationAssignmentRecord(item, reference, context) {
     createdBy: "biblicus-import",
     createdAt: context.now,
     updatedAt: context.now,
+    newsroomFeedKey: "assignments",
     metadata: JSON.stringify({
       referenceLineageId: reference.lineageId,
       referenceId: reference.id,
@@ -471,6 +765,8 @@ function seededSemanticConceptNodeRecords(context) {
       aliases: stringArrayFrom(concept.aliases),
       status: "accepted",
       importRunId: context.importRunId,
+      createdAt: context.now,
+      newsroomFeedKey: "semanticNodes",
       updatedAt: context.now,
     }, {
       now: context.now,
@@ -673,6 +969,9 @@ function normalizeStoragePath(value) {
   const raw = stringOrNull(value);
   if (!raw) return { storagePath: null, sourceUri: null, warning: null };
   if (raw.startsWith("corpora/")) return { storagePath: raw, sourceUri: null, warning: null };
+  if (raw.startsWith("http://") || raw.startsWith("https://")) {
+    return { storagePath: null, sourceUri: raw, warning: null };
+  }
   if (raw.startsWith("/")) {
     const marker = "/corpora/";
     const markerIndex = raw.indexOf(marker);
@@ -701,13 +1000,13 @@ function safeAttachmentRole(value) {
 }
 
 function referenceMessageRecords(item, reference, context) {
-  const rationale = importRationaleFrom(item);
+  const rationale = ingestionRationaleFrom(item);
   if (!rationale) return [];
   const message = messageRecord({
-    messageKind: "import_rationale",
+    messageKind: "ingestion_rationale",
     messageDomain: "commentary",
     body: rationale,
-    summary: reference.title ?? reference.externalItemId ?? "Import rationale",
+    summary: reference.title ?? reference.externalItemId ?? "Ingestion rationale",
     source: "biblicus-import",
     importRunId: context.importRunId,
     createdAt: context.now,
@@ -719,7 +1018,7 @@ function referenceMessageRecords(item, reference, context) {
   return [
     message,
     semanticRelationRecord({
-      predicate: "comment",
+      predicate: "ingestion_rationale",
       subjectKind: "message",
       subjectId: message.expected.id,
       subjectLineageId: message.expected.id,
@@ -738,7 +1037,7 @@ function referenceMessageRecords(item, reference, context) {
       importRunId: context.importRunId,
       importedAt: context.now,
       metadata: {
-        messageKind: "import_rationale",
+        messageKind: "ingestion_rationale",
         externalItemId: reference.externalItemId,
         corpusId: reference.corpusId,
       },
@@ -752,7 +1051,6 @@ function messageRecord(input) {
     id: `message-${hashShort([
       input.messageKind ?? "comment",
       input.body,
-      input.createdAt,
       input.source ?? "",
       metadata,
     ])}`,
@@ -768,16 +1066,23 @@ function messageRecord(input) {
     authorLabel: input.authorLabel ?? null,
     createdAt: input.createdAt,
     updatedAt: input.updatedAt ?? input.createdAt,
+    newsroomFeedKey: "messages",
     metadata: JSON.stringify(metadata),
   });
 }
 
-function importRationaleFrom(item) {
+function ingestionRationaleFrom(item) {
   return stringOrNull(
-    item.import_rationale
+    item.ingestion_rationale
+    ?? item.ingestionRationale
+    ?? item.import_rationale
     ?? item.importRationale
+    ?? item.metadata?.ingestion_rationale
+    ?? item.metadata?.ingestionRationale
     ?? item.metadata?.import_rationale
     ?? item.metadata?.importRationale
+    ?? item.provenance?.ingestion_rationale
+    ?? item.provenance?.ingestionRationale
     ?? item.provenance?.import_rationale
     ?? item.provenance?.importRationale,
   );
@@ -857,6 +1162,8 @@ function semanticRecordsFromProposal(proposal, context) {
     aliases: stringArrayFrom(proposalPayload.aliases),
     status: "accepted",
     importRunId: context.importRunId,
+    createdAt: context.now,
+    newsroomFeedKey: "semanticNodes",
     updatedAt: context.now,
   }, { now: context.now, actor: "biblicus-import", reason: "semantic-node-import", content: proposalPayload })));
 
@@ -1014,7 +1321,6 @@ function reviewedProposalFeedback(proposal, decision) {
     graph_entity_id: proposal.graphEntityId ?? null,
     relationship_type: proposal.relationshipType ?? null,
     display_name: proposal.displayName ?? proposal.title ?? null,
-    short_title: proposal.shortTitle ?? null,
     subtitle: proposal.subtitle ?? null,
     description: proposal.description ?? null,
     summary: proposal.summary ?? null,
@@ -1498,7 +1804,7 @@ function readShortTitle(value) {
 
 function normalizeShortTitle(value, fallback) {
   const explicit = typeof value === "string" ? value.trim() : "";
-  if (explicit) return explicit;
+  if (explicit) return normalizeShortTitleWords(explicit);
   return deriveShortTitle(fallback);
 }
 
@@ -1510,7 +1816,16 @@ function deriveShortTitle(value) {
     .map((word) => word.trim())
     .filter(Boolean);
   if (!words.length) return "Topic";
-  return words.slice(0, 3).join(" ");
+  return normalizeShortTitleWords(words.join(" "));
+}
+
+function normalizeShortTitleWords(value) {
+  const words = String(value ?? "")
+    .split(/\s+/)
+    .map((word) => word.trim())
+    .filter(Boolean);
+  if (!words.length) return "Topic";
+  return words.slice(0, 2).join(" ");
 }
 
 function readParentCategoryKey(value) {
@@ -1579,6 +1894,9 @@ function semanticRelationRecord(input) {
     sourceSnapshotId: input.sourceSnapshotId ?? null,
     importRunId: input.importRunId,
     importedAt: input.importedAt,
+    createdAt: input.createdAt ?? input.importedAt,
+    updatedAt: input.updatedAt ?? input.importedAt,
+    newsroomFeedKey: "semanticRelations",
     metadata: JSON.stringify(input.metadata ?? {}),
   });
 }
@@ -1853,18 +2171,6 @@ function dateOrNull(value) {
   return typeof value === "string" && value.trim() ? value : null;
 }
 
-function normalizeReferenceCurationStatus(value, fallback = "pending") {
-  const normalized = String(value ?? fallback)
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_|_$/g, "");
-  if (normalized === "accepted" || normalized === "accept" || normalized === "ready" || normalized === "trusted") return "accepted";
-  if (normalized === "rejected" || normalized === "reject" || normalized === "discarded") return "rejected";
-  if (normalized === "archived" || normalized === "archive") return "archived";
-  return "pending";
-}
-
 function normalizeMatchText(value) {
   return typeof value === "string" && value.trim()
     ? value.trim().toLowerCase().replace(/\s+/g, " ")
@@ -1922,6 +2228,8 @@ module.exports = {
   buildAcceptedCategorySetPayload,
   buildLexicalSteeringConfigRecords,
   buildLexicalSteeringPayload,
+  buildPreparedReferenceCatalog,
+  buildReferenceCatalogRegistrationRecords,
   buildSteeringFeedbackPayload,
   buildSteeringConfigRecords,
   buildProjectionImportRecords,
@@ -1933,6 +2241,10 @@ module.exports = {
   loadSemanticConceptSeeds,
   loadSteeringBundleFromBiblicus,
   mergeReviewedProposalState,
+  normalizeReferenceCurationStatus,
+  normalizeReferenceRejectionReasonCode,
+  isEvidenceEligibleReference,
   normalizeLexicalTerm,
+  scopeTrainingLabelForReference,
   writeJsonFile,
 };

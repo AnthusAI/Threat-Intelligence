@@ -21,6 +21,9 @@ const {
   semanticNodesForCategoryContext,
   topicHref,
 } = require("../lib/newsroom-category-drilldown.ts");
+const {
+  createSemanticGraphSnapshot,
+} = require("../lib/semantic-graph.ts");
 
 const initial = createInitialNewsDeskShellState();
 assert.equal(initial.phase, "checkingAccess");
@@ -97,6 +100,32 @@ assert.deepEqual(referencesForCategoryContext(drilldownGraph, childDrilldown).ma
 assert.deepEqual(semanticNodesForCategoryContext(drilldownGraph, childDrilldown).map((node) => node.lineageId), ["concept-child"]);
 assert.equal(topicHref("topic.root"), "/newsroom/topics/topic.root");
 assert.equal(topicHref("topic.root", "topic.child"), "/newsroom/topics/topic.root/topic.child");
+
+const mixedReferenceGraph = createSemanticGraphSnapshot({
+  references: [
+    { id: "accepted-ref-v1", lineageId: "accepted-ref", versionState: "current", versionNumber: 1, corpusId: "corpus", externalItemId: "accepted", title: "Accepted", curationStatus: "accepted" },
+    { id: "pending-ref-v1", lineageId: "pending-ref", versionState: "current", versionNumber: 1, corpusId: "corpus", externalItemId: "pending", title: "Pending", curationStatus: "pending" },
+    { id: "rejected-ref-v1", lineageId: "rejected-ref", versionState: "current", versionNumber: 1, corpusId: "corpus", externalItemId: "rejected", title: "Rejected", curationStatus: "rejected" },
+  ],
+  categories: [{ id: "category-v1", lineageId: "category", versionState: "current", versionNumber: 1, categoryKey: "topic.root", displayName: "Root", categorySetId: "set", corpusId: "corpus", status: "accepted" }],
+  semanticNodes: [],
+  messages: [],
+  semanticRelations: ["accepted-ref", "pending-ref", "rejected-ref"].map((lineageId) => ({
+    id: `relation-${lineageId}`,
+    relationState: "current",
+    predicate: "classified_as",
+    relationTypeKey: "classified_as",
+    subjectKind: "reference",
+    subjectId: `${lineageId}-v1`,
+    subjectLineageId: lineageId,
+    objectKind: "category",
+    objectId: "category-v1",
+    objectLineageId: "category",
+    subjectStateKey: `reference#${lineageId}#current`,
+    objectStateKey: "category#category#current",
+  })),
+});
+assert.deepEqual(mixedReferenceGraph.referencesForCategory("category").map((reference) => reference.lineageId), ["accepted-ref"]);
 
 console.log("newsroom session tests passed");
 

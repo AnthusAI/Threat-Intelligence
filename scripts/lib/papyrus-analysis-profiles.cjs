@@ -216,12 +216,23 @@ function buildAnalysisReindexPlan({
   const corpus = requireCorpusConfig(steeringConfig, selectedCorpusKey, "--corpus-key");
   const corpusId = knowledgeCorpusId(corpus);
   const classifierId = cleanString(overrides.classifierId) || profile.classifierId || resolveClassifierId(steeringConfig, corpus);
-  const effective = {
+  const rawEffective = {
     ...profile.defaults,
     ...overrides,
   };
-  const resolvedRunId = runId || `analysis-reindex-${safeId(profile.key)}-${safeId(selectedCorpusKey)}-${hashShort([selectedMode, effective])}`;
+  const resolvedRunId = runId || `analysis-reindex-${safeId(profile.key)}-${safeId(selectedCorpusKey)}-${hashShort([selectedMode, rawEffective])}`;
   const resolvedBiblicusWorkdir = path.resolve(biblicusWorkdir || process.env.BIBLICUS_WORKDIR || DEFAULT_BIBLICUS_WORKDIR);
+  const effective = resolveParameterPlaceholders(rawEffective, {
+    runId: resolvedRunId,
+    profileKey: profile.key,
+    corpusKey: selectedCorpusKey,
+    corpusId,
+    classifierId,
+    biblicusWorkdir: resolvedBiblicusWorkdir,
+  });
+  if (cleanString(effective.steeringFeedbackPath) && !path.isAbsolute(effective.steeringFeedbackPath)) {
+    effective.steeringFeedbackPath = path.resolve(process.cwd(), effective.steeringFeedbackPath);
+  }
   const commandPlan = buildCommandPlan({
     profile,
     mode: selectedMode,
@@ -515,6 +526,23 @@ function buildPlanWarnings({ profile, effective }) {
     warnings.push("No steering feedback path is configured; Biblicus may re-emit previously rejected topic proposals.");
   }
   return warnings;
+}
+
+function resolveParameterPlaceholders(value, context) {
+  if (typeof value === "string") {
+    return value
+      .replaceAll("<run-id>", context.runId)
+      .replaceAll("<profile-key>", context.profileKey)
+      .replaceAll("<corpus-key>", context.corpusKey)
+      .replaceAll("<corpus-id>", context.corpusId)
+      .replaceAll("<classifier-id>", context.classifierId)
+      .replaceAll("<biblicus-workdir>", context.biblicusWorkdir);
+  }
+  if (Array.isArray(value)) return value.map((entry) => resolveParameterPlaceholders(entry, context));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, resolveParameterPlaceholders(entry, context)]));
+  }
+  return value;
 }
 
 function validateOverrideObject(overrides, profile) {

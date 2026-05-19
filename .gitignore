@@ -11,6 +11,7 @@ __pycache__/
 *.py[cod]
 corpora/*
 !corpora/papyrus-steering.yml
+!corpora/papyrus-analysis-profiles.yml
 !corpora/papyrus-semantic-concepts.yml
 !corpora/papyrus-lexical-steering.yml
 .papyrus-runs/

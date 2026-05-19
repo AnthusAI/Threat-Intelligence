@@ -141,6 +141,9 @@ async function main() {
     case "categories:export-classifier-seed-manifest":
       await exportClassifierSeedManifest(args.slice(2));
       return;
+    case "categories:review-proposal":
+      await reviewSteeringProposalFromCli(args.slice(2));
+      return;
     case "categories:export-category-tree":
       await exportCategoryTree(args.slice(2));
       return;
@@ -1588,6 +1591,128 @@ async function exportClassifierSeedManifest(flags) {
   }
 }
 
+async function reviewSteeringProposalFromCli(flags) {
+  const options = parseOptions(flags);
+  const proposalId = options.proposal ?? options["proposal-id"];
+  const action = String(options.action ?? "").toLowerCase();
+  if (!proposalId) throw new Error("categories review-proposal requires --proposal <steering-proposal-id>.");
+  if (action !== "accept" && action !== "reject") throw new Error("categories review-proposal requires --action accept|reject.");
+  const actor = options.actor ?? "Papyrus content CLI";
+  const now = new Date().toISOString();
+  const { client } = createAuthoringClient();
+  const [proposal, categorySets, categories] = await Promise.all([
+    client.getRecord("SteeringProposal", proposalId),
+    client.listRecords("CategorySet"),
+    client.listRecords("Category"),
+  ]);
+  if (!proposal) throw new Error(`SteeringProposal ${proposalId} was not found.`);
+  if (proposal.status === "accepted" || proposal.status === "rejected") {
+    console.log(`categories\treview-proposal\t${proposal.id}\t${proposal.status}\tidempotent`);
+    return;
+  }
+
+  const decision = {
+    id: `decision-${proposal.id}-${timestampForPath(now)}-${crypto.randomUUID().slice(0, 8)}`,
+    proposalId: proposal.id,
+    categorySetId: options["target-category-set"] ?? proposal.categorySetId ?? null,
+    action,
+    actorSub: null,
+    actorLabel: actor,
+    note: options.note ?? null,
+    selectedCategoryKey: proposal.categoryKey ?? null,
+    createdAt: now,
+  };
+  const updatedProposal = {
+    ...proposal,
+    status: action === "accept" ? "accepted" : "rejected",
+    reviewedAt: now,
+    reviewedBy: actor,
+    updatedAt: now,
+  };
+  const records = [
+    { modelName: "SteeringDecision", expected: decision },
+    { modelName: "SteeringProposal", expected: updatedProposal },
+  ];
+
+  let category = null;
+  let categorySetUpdate = null;
+  if (action === "accept") {
+    const targetCategorySetId = options["target-category-set"] ?? proposal.categorySetId;
+    if (!targetCategorySetId) throw new Error(`SteeringProposal ${proposal.id} has no categorySetId; pass --target-category-set.`);
+    const categorySet = categorySets.find((entry) => entry.id === targetCategorySetId);
+    if (!categorySet) throw new Error(`CategorySet ${targetCategorySetId} was not found.`);
+    const categoryKey = proposal.categoryKey ?? deriveCategoryKeyFromText(proposal.displayName ?? proposal.title ?? proposal.id);
+    const targetCategories = categories.filter((entry) => entry.categorySetId === categorySet.id);
+    const existing = targetCategories.find((entry) => entry.categoryKey === categoryKey && entry.versionState === "current");
+    if (existing) throw new Error(`Category ${categoryKey} already exists in ${categorySet.id}; refusing duplicate proposal accept.`);
+    const parentCategoryKey = proposal.targetCategoryKey ?? null;
+    const parent = parentCategoryKey
+      ? targetCategories.find((entry) => entry.categoryKey === parentCategoryKey && entry.versionState === "current") ?? null
+      : null;
+    const lineageId = `category-${slugify(categorySet.id)}-${slugify(categoryKey)}`;
+    category = withVersionFields({
+      id: `${lineageId}-v1`,
+      lineageId,
+      versionNumber: 1,
+      previousVersionId: null,
+      versionState: "current",
+      categorySetId: categorySet.id,
+      corpusId: proposal.corpusId ?? categorySet.corpusId ?? null,
+      categoryKey,
+      parentCategoryId: parent?.id ?? null,
+      parentCategoryKey,
+      displayName: options["display-name"] ?? proposal.displayName ?? proposal.title ?? categoryKey,
+      shortTitle: options["short-title"] ?? proposal.shortTitle ?? deriveShortTitleFromText(proposal.displayName ?? proposal.title ?? categoryKey),
+      subtitle: options.subtitle ?? proposal.subtitle ?? null,
+      description: options.description ?? proposal.description ?? proposal.summary ?? "",
+      aliases: [],
+      status: "accepted",
+      seedItemIds: normalizeStringList(proposal.suggestedSeedItemIds),
+      holdoutItemIds: normalizeStringList(proposal.suggestedHoldoutItemIds),
+      rank: targetCategories.filter((entry) => (entry.parentCategoryKey ?? null) === parentCategoryKey).length + 1,
+      depth: parent ? (Number(parent.depth) || 0) + 1 : parentCategoryKey ? 1 : 0,
+      isPinned: false,
+      importRunId: proposal.importRunId ?? null,
+      updatedAt: now,
+    }, {
+      now,
+      actor,
+      reason: `proposal:${proposal.id}`,
+    });
+    const nextCount = targetCategories
+      .filter((entry) => entry.versionState === "current" && entry.status !== "archived" && entry.status !== "deprecated")
+      .length + 1;
+    categorySetUpdate = {
+      ...categorySet,
+      categoryCount: nextCount,
+      changeReason: `proposal:${proposal.id}`,
+      contentHash: hashShort({ ...categorySet, categoryCount: nextCount, updatedAt: now }),
+    };
+    records.push({ modelName: "Category", expected: category });
+    records.push({ modelName: "CategorySet", expected: categorySetUpdate });
+  }
+
+  console.log(`categories\treview-proposal\tmode\t${options.apply ? "apply" : "dry-run"}`);
+  console.log(`categories\treview-proposal\tproposal\t${proposal.id}\t${action}\t${proposal.categoryKey ?? ""}\t${proposal.targetCategoryKey ?? ""}`);
+  if (category) console.log(`categories\treview-proposal\tcategory\t${category.id}\t${category.categoryKey}\t${category.parentCategoryKey ?? ""}\tdepth=${category.depth}`);
+  if (!options.apply) {
+    console.log("categories\treview-proposal\tapply\tskipped\tpass --apply to write the proposal decision");
+    return;
+  }
+  for (const record of records) await client.upsert(record.modelName, record.expected);
+  const countDeltas = {
+    openProposals: proposal.status === "proposed" ? -1 : 0,
+    ...(category ? { categories: 1 } : {}),
+  };
+  await updateNewsroomSummaryDelta(client, { countDeltas }, `categories review-proposal ${proposal.id} ${action}`);
+  console.log(`categories\treview-proposal\t${proposal.id}\t${action}\t${category?.id ?? ""}`);
+  if (category) {
+    console.log(`categories\treview-proposal\tnext\tnpm run content -- categories export-category-set --category-set ${category.categorySetId} --output .papyrus-runs/${timestampForPath(now)}-${category.categorySetId}.json`);
+  } else {
+    console.log("categories\treview-proposal\tnext\tnpm run content -- newsroom recount-summary");
+  }
+}
+
 async function applyLexicalSteeringConfigIfAvailable(client, options = {}) {
   const lexicalConfig = loadLexicalSteeringConfig(options["lexical-config"]);
   try {
@@ -2943,7 +3068,14 @@ async function importAnalysisAssignmentOutputs({
         corpusConfig,
         corpusPath: corpusConfig.path,
       });
-      const changes = await buildRecordChangesToleratingOptionalModels(client, steeringPlan.records);
+      const steeringRecords = command.label === "taxonomy-discover"
+        ? await scopedTopicDiscoveryImportRecords(client, steeringPlan.records, {
+          metadata,
+          corpusId: knowledgeCorpusId(corpusConfig),
+          classifierId,
+        })
+        : steeringPlan.records;
+      const changes = await buildRecordChangesToleratingOptionalModels(client, steeringRecords);
       await applyRecordChanges(client, changes);
       await updateNewsroomSummaryAfterAnalysisImport(client, changes, {
         actorLabel: "papyrus-content-cli",
@@ -3935,12 +4067,14 @@ async function updateNewsroomSummaryAfterAnalysisImport(client, changes, { actor
   const createdCategorySets = createdByModel.get("CategorySet") ?? [];
   const createdCategories = createdByModel.get("Category") ?? [];
   const createdProposals = createdByModel.get("SteeringProposal") ?? [];
+  const createdArtifacts = createdByModel.get("KnowledgeArtifact") ?? [];
   const createdNodes = createdByModel.get("SemanticNode") ?? [];
   const createdRelations = createdByModel.get("SemanticRelation") ?? [];
   if (!createdImportRuns.length
     && !createdCategorySets.length
     && !createdCategories.length
     && !createdProposals.length
+    && !createdArtifacts.length
     && !createdNodes.length
     && !createdRelations.length) {
     return;
@@ -3954,6 +4088,7 @@ async function updateNewsroomSummaryAfterAnalysisImport(client, changes, { actor
       categories: createdCategories.length,
       proposals: createdProposals.length,
       openProposals: createdProposals.filter((proposal) => proposal.status === "proposed").length,
+      artifacts: createdArtifacts.length,
       semanticNodes: createdNodes.length,
       semanticRelations: createdRelations.length,
     },
@@ -3978,7 +4113,7 @@ async function updateNewsroomSummaryAfterAnalysisImport(client, changes, { actor
     actorLabel,
     reason,
   });
-  console.log(`newsroom\tsummary-snapshot\tincremental\tanalysis-import\truns=${createdImportRuns.length}\tnodes=${createdNodes.length}\trelations=${createdRelations.length}`);
+  console.log(`newsroom\tsummary-snapshot\tincremental\tanalysis-import\truns=${createdImportRuns.length}\tartifacts=${createdArtifacts.length}\tproposals=${createdProposals.length}\tnodes=${createdNodes.length}\trelations=${createdRelations.length}`);
 }
 
 function countDelta(items, key, defaultValue) {
@@ -4173,6 +4308,19 @@ function normalizeStringList(value) {
     return value.split(",").map((entry) => entry.trim()).filter(Boolean);
   }
   return [];
+}
+
+function deriveCategoryKeyFromText(value) {
+  return slugify(String(value ?? "topic")).replace(/-/g, "_") || `topic_${hashShort(value).slice(0, 8)}`;
+}
+
+function deriveShortTitleFromText(value) {
+  return String(value ?? "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .join(" ") || null;
 }
 
 function numberOrNull(value) {
@@ -4396,7 +4544,8 @@ async function resolveAcceptedCategorySet(client, options) {
   const candidates = (await client.listRecords("CategorySet"))
     .filter((categorySet) => !options.corpusId || categorySet.corpusId === options.corpusId)
     .filter((categorySet) => !options.classifierId || categorySet.classifierId === options.classifierId)
-    .filter((categorySet) => categorySet.status === "accepted");
+    .filter((categorySet) => categorySet.status === "accepted")
+    .filter((categorySet) => !categorySet.versionState || categorySet.versionState === "current");
   candidates.sort((left, right) => String(right.generatedAt ?? right.versionCreatedAt ?? "").localeCompare(String(left.generatedAt ?? left.versionCreatedAt ?? "")));
   return candidates[0] ?? null;
 }
@@ -4514,6 +4663,60 @@ function normalizeSteeringProposalBundle(payload) {
     proposals: Array.isArray(payload.proposals) ? payload.proposals : [],
     warnings: Array.isArray(payload.warnings) ? payload.warnings : [],
   };
+}
+
+async function scopedTopicDiscoveryImportRecords(client, records, { metadata, corpusId, classifierId }) {
+  const categorySet = await resolveAcceptedCategorySet(client, {
+    categorySetId: metadata.categorySetId || null,
+    corpusId,
+    classifierId,
+  });
+  if (!categorySet) return records;
+  const categorySetId = categorySet.id;
+  const remapped = [];
+  for (const record of records) {
+    if (record.modelName === "CategorySet" || record.modelName === "Category" || record.modelName === "SemanticNode") continue;
+    const expected = record.expected ?? {};
+    if (record.modelName === "KnowledgeRawPayload") {
+      const ownerType = expected.ownerType ?? "";
+      const payloadKind = expected.payloadKind ?? "";
+      if (ownerType === "categorySet"
+        || ownerType === "category"
+        || ownerType === "categoryTree"
+        || payloadKind === "biblicus-category-set"
+        || payloadKind === "biblicus-category"
+        || payloadKind === "biblicus-category-tree") {
+        continue;
+      }
+    }
+    if (record.modelName === "SteeringProposal") {
+      remapped.push({
+        ...record,
+        expected: {
+          ...expected,
+          categorySetId,
+        },
+      });
+      continue;
+    }
+    if (record.modelName === "CategoryKeyword") {
+      const categoryKey = expected.categoryKey ?? "";
+      const categoryLineageId = `category-${slugify(categorySetId)}-${slugify(categoryKey)}`;
+      remapped.push({
+        ...record,
+        expected: {
+          ...expected,
+          id: `category-keyword-${slugify(categorySetId)}-${slugify(categoryKey)}-${slugify(expected.source ?? "source")}-${String(expected.rank ?? 999999).padStart(4, "0")}-${hashShort([expected.normalizedKeyword ?? expected.keyword ?? "", expected.sourceTopicId ?? ""])}`,
+          categorySetId,
+          categoryLineageId,
+          categoryId: `${categoryLineageId}-v1`,
+        },
+      });
+      continue;
+    }
+    remapped.push(record);
+  }
+  return remapped;
 }
 
 async function verifyCurationCycle(client, context) {
@@ -5023,6 +5226,7 @@ function printUsage() {
   console.log("  npm run content -- categories draft-archive-topic --category <id|lineage|key> --apply");
   console.log("  npm run content -- categories draft-promote --category-set <draft-id> --apply");
   console.log("  npm run content -- categories export-classifier-seed-manifest --category-set <id> --corpus-key <key> --output <seed-manifest.json>");
+  console.log("  npm run content -- categories review-proposal --proposal <steering-proposal-id> --action accept|reject --target-category-set <id> --apply");
   console.log("  npm run content -- categories export-category-tree --category-set <id> --output <accepted-category-tree.json>");
   console.log("  npm run content -- categories export-steering-feedback --category-set <id> --output <steering-feedback.json>");
   console.log("  npm run content -- categories export-lexical-steering --output <lexical-steering.json>");

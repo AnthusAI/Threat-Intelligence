@@ -4,6 +4,7 @@ const path = require("node:path");
 
 const { loadSemanticConceptSeeds } = require("./papyrus-categories.cjs");
 const { semanticRelationTypeFieldsForPredicate } = require("./papyrus-relation-types.cjs");
+const { isEvidenceEligibleReference } = require("./papyrus-reference-policy.cjs");
 const {
   buildAssignmentContextMetadata,
   parseMetadataObject,
@@ -399,6 +400,8 @@ function semanticNodeForLane(lane, now) {
     aliases: lane.concept.aliases ?? [],
     status: "accepted",
     importRunId: null,
+    createdAt: now,
+    newsroomFeedKey: "semanticNodes",
     updatedAt: now,
   };
   return {
@@ -423,7 +426,9 @@ function buildDeskGroup(root, categories, state) {
     .filter((relation) => relation.subjectKind === "reference")
     .filter((relation) => relation.objectKind === "category")
     .filter((relation) => categoryLineageIds.has(relation.objectLineageId));
-  const referenceByLineage = new Map((state.references ?? []).map((reference) => [reference.lineageId, reference]));
+  const referenceByLineage = new Map((state.references ?? [])
+    .filter(isEvidenceEligibleReference)
+    .map((reference) => [reference.lineageId, reference]));
   const evidenceReferences = uniqueBy(
     classifiedRelations.map((relation) => referenceByLineage.get(relation.subjectLineageId)).filter(Boolean),
     (reference) => reference.lineageId,
@@ -534,6 +539,7 @@ function buildAssignmentBundle({ categorySet, edition, group, focusCategory, lan
     createdBy: "papyrus-content-cli",
     createdAt: now,
     updatedAt: now,
+    newsroomFeedKey: "assignments",
     metadata: JSON.stringify(metadata),
   };
   const assignmentEvent = {
@@ -676,6 +682,9 @@ function semanticRelationRecord(input) {
     objectVersionKey,
     reviewRecommended: Boolean(input.reviewRecommended),
     importedAt: input.importedAt,
+    createdAt: input.createdAt ?? input.importedAt,
+    updatedAt: input.updatedAt ?? input.importedAt,
+    newsroomFeedKey: "semanticRelations",
     metadata: JSON.stringify(input.metadata ?? {}),
   };
   setOptional(expected, "subjectVersionNumber", input.subjectVersionNumber);
