@@ -14,6 +14,7 @@
     "typecheck": "tsc --noEmit",
     "sandbox": "ampx sandbox",
     "seed:amplify": "ampx sandbox seed",
+    "auth:refresh-jwt": "node scripts/refresh-jwt.cjs",
     "test:assignments": "node scripts/test-category-mappers.cjs",
     "test:categories": "node scripts/test-category-mappers.cjs",
     "test:bdd": "cucumber-js",
