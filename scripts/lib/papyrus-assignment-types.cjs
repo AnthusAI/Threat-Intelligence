@@ -31,6 +31,22 @@ const ASSIGNMENT_TYPE_POLICIES = {
     workProductPolicy: "reference-extracted-text-attachment",
     description: "Runs Biblicus extraction for accessioned source materials and registers extracted text artifacts.",
   },
+  "reference.doi-backfill": {
+    assignmentTypeKey: "reference.doi-backfill",
+    handlerKey: "reference.doi-backfill",
+    claimPolicy: "exclusive",
+    defaultClaimTtlSeconds: 2 * 60 * 60,
+    workProductPolicy: "reference-identifier-enrichment",
+    description: "Backfills DOI semantic identifiers for current references and persists DOI provenance.",
+  },
+  "reference.identifier-backfill": {
+    assignmentTypeKey: "reference.identifier-backfill",
+    handlerKey: "reference.identifier-backfill",
+    claimPolicy: "exclusive",
+    defaultClaimTtlSeconds: 4 * 60 * 60,
+    workProductPolicy: "reference-identifier-enrichment",
+    description: "Backfills semantic identifiers for current references and persists identifier provenance.",
+  },
   "research.edition-candidate": {
     assignmentTypeKey: "research.edition-candidate",
     handlerKey: "newsroom.research",

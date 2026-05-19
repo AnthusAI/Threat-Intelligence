@@ -22,6 +22,50 @@ relationTypes:
     isSymmetric: false
     isTransitive: false
     contextPackTags: [reference_graph, research, category_context]
+  - key: digital_object_identifier_is
+    label: digital object identifier is
+    inverseLabel: identifies reference
+    description: Links a reference to its DOI identifier semantic node.
+    domain: ontology
+    allowedSubjectKinds: [reference]
+    allowedObjectKinds: [semanticNode]
+    isDirectional: true
+    isSymmetric: false
+    isTransitive: false
+    contextPackTags: [reference_graph, research]
+  - key: arxiv_identifier_is
+    label: arXiv identifier is
+    inverseLabel: identifies reference
+    description: Links a reference to its arXiv identifier semantic node.
+    domain: ontology
+    allowedSubjectKinds: [reference]
+    allowedObjectKinds: [semanticNode]
+    isDirectional: true
+    isSymmetric: false
+    isTransitive: false
+    contextPackTags: [reference_graph, research]
+  - key: isbn_identifier_is
+    label: ISBN identifier is
+    inverseLabel: identifies reference
+    description: Links a reference to its ISBN identifier semantic node.
+    domain: ontology
+    allowedSubjectKinds: [reference]
+    allowedObjectKinds: [semanticNode]
+    isDirectional: true
+    isSymmetric: false
+    isTransitive: false
+    contextPackTags: [reference_graph, research]
+  - key: publisher_item_identifier_is
+    label: publisher item identifier is
+    inverseLabel: identifies reference
+    description: Links a reference to a normalized publisher item identifier semantic node when DOI, arXiv, or ISBN identifiers are unavailable.
+    domain: ontology
+    allowedSubjectKinds: [reference]
+    allowedObjectKinds: [semanticNode]
+    isDirectional: true
+    isSymmetric: false
+    isTransitive: false
+    contextPackTags: [reference_graph, research]
   - key: mentions
     label: mentions
     inverseLabel: mentioned by
