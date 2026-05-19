@@ -90,6 +90,12 @@ or private source notes directly in GraphQL. Those stay in private S3
 `corpora/*` prefixes or Biblicus corpus working copies. GraphQL may store a
 path, checksum, media type, and sanitized provenance.
 
+Text availability is tracked as attachment metadata, not DynamoDB content. When
+Biblicus has produced text, register a `ReferenceAttachment` with
+`role = "extracted_text"` that points at the corpus text artifact, such as an
+`extracted/pipeline/<snapshot>/text/<item-id>.txt` file. Do not copy that text
+into `Reference.metadata`, `Message.body`, or a raw payload.
+
 ## Stable IDs
 
 Use stable identifiers everywhere:
@@ -133,6 +139,18 @@ only a reference prospect. Register it through `references register-catalog` or
 the repeatable Biblicus corpus path before any curation or evidence use. Do not
 copy web-search `evidence_candidate_id` values into `evidenceItemIds`; those are
 audit identifiers, not accepted reference ids.
+
+URL-only prospects are reviewable but not extraction-ready. If
+`Reference.sourceUri` is set and `Reference.storagePath` is empty, the source
+material still needs a `reference.corpus-accession` assignment before Biblicus
+can extract text. For arXiv abstract URLs, the accession step should resolve the
+PDF URL and store the PDF in the corpus accession.
+
+Accession and extraction are separate workflow concepts. `reference.corpus-accession`
+materializes the source file. `reference.text-extraction` runs Biblicus
+extraction for accessioned sources and registers `text.txt` artifacts as
+`ReferenceAttachment` rows. Neither workflow stores raw source bytes or
+extracted text in DynamoDB.
 
 ## Current Intake Path
 
@@ -285,6 +303,31 @@ the prospect visible as a pending or rejected `Reference`.
 Export accepted-only manifests before analysis runs:
 
 ```bash
+npm run content -- references source-status \
+  --config corpora/papyrus-steering.yml \
+  --corpus-key <corpus-key> \
+  --status all
+
+npm run content -- references create-accession-assignments \
+  --config corpora/papyrus-steering.yml \
+  --corpus-key <corpus-key> \
+  --status pending \
+  --apply
+
+npm run content -- references accession-now \
+  --reference <reference-id> \
+  --assignee-key <worker-run-id>
+
+npm run content -- references extract-text-now \
+  --config corpora/papyrus-steering.yml \
+  --corpus-key <corpus-key> \
+  --assignee-key <worker-run-id>
+
+npm run content -- references attach-extracted-text \
+  --config corpora/papyrus-steering.yml \
+  --corpus-key <corpus-key> \
+  --apply
+
 npm run content -- references export-analysis-manifest \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \

@@ -51,8 +51,14 @@ const {
   buildSemanticRelationBackfillRecords,
   buildSemanticRelationTypeRecords,
   loadSemanticRelationTypeSeeds,
+  normalizeRelationTypeKey,
   semanticRelationTypeFieldsForPredicate,
 } = require("./lib/papyrus-relation-types.cjs");
+const {
+  DEFAULT_NEWSROOM_SECTIONS_PATH,
+  buildNewsroomSectionRecords,
+  loadNewsroomSectionSeeds,
+} = require("./lib/papyrus-newsroom-sections.cjs");
 const {
   applyEditionPlanningPlan,
   buildEditionPlanningPlan,
@@ -67,6 +73,17 @@ const {
   computeCurrentReferenceDeltaFromChanges,
   normalizeNewsroomSummaryPayload,
 } = require("./lib/papyrus-newsroom-summary.cjs");
+const {
+  SOURCE_READINESS_STATES,
+  buildExtractionIndex,
+  buildReferenceSourceStatusRows,
+  isExtractableMediaType,
+  referenceSourceReadiness,
+  sourceStoragePathForReference,
+} = require("./lib/papyrus-reference-source-readiness.cjs");
+const {
+  getAssignmentTypePolicy,
+} = require("./lib/papyrus-assignment-types.cjs");
 const {
   findCorpusConfigByPath,
   loadSteeringConfig,
@@ -195,6 +212,21 @@ async function main() {
     case "references:prepare-catalog":
       await prepareReferenceCatalog(args.slice(2));
       return;
+    case "references:source-status":
+      await referenceSourceStatus(args.slice(2));
+      return;
+    case "references:create-accession-assignments":
+      await createReferenceAccessionAssignments(args.slice(2));
+      return;
+    case "references:accession-now":
+      await accessionReferenceNow(args.slice(2));
+      return;
+    case "references:extract-text-now":
+      await extractReferenceTextNow(args.slice(2));
+      return;
+    case "references:attach-extracted-text":
+      await attachExtractedTextReferences(args.slice(2));
+      return;
     case "references:export-analysis-manifest":
       await exportReferenceAnalysisManifest(args.slice(2));
       return;
@@ -240,6 +272,9 @@ async function main() {
       return;
     case "newsroom:backfill-feed-fields":
       await backfillNewsroomFeedFields(args.slice(2));
+      return;
+    case "newsroom:import-sections":
+      await importNewsroomSections(args.slice(2));
       return;
     case "assignments:claim":
     case "assignments:release":
@@ -456,6 +491,17 @@ async function backfillRelationTypes(flags) {
     await applyRecordChanges(client, changes);
   }
   printRelationBackfillSummary(report);
+}
+
+async function importNewsroomSections(flags) {
+  const options = parseOptions(flags);
+  const configPath = options.config || DEFAULT_NEWSROOM_SECTIONS_PATH;
+  const sections = loadNewsroomSectionSeeds(configPath);
+  const { client } = createAuthoringClient();
+  const records = buildNewsroomSectionRecords(sections);
+  const changes = await buildRecordChanges(client, records);
+  await applyRecordChanges(client, changes);
+  printCategoryImportSummary("newsroom-sections", path.basename(configPath), changes);
 }
 
 async function exportLegacyKnowledgeComments(flags) {
@@ -878,6 +924,338 @@ async function prepareReferenceCatalog(flags) {
   const items = catalogItemsForSummary(prepared);
   const rationaleCount = items.filter((item) => item.ingestion_rationale || item.ingestionRationale || item.metadata?.ingestion_rationale || item.metadata?.ingestionRationale).length;
   console.log(`references\tprepare-catalog\t${options["corpus-key"]}\t${options.output}\t${items.length} items\t${rationaleCount} rationales`);
+}
+
+async function referenceSourceStatus(flags) {
+  const options = parseOptions(flags);
+  if (!options["corpus-key"]) throw new Error("references source-status requires --corpus-key <key>.");
+  const steeringConfig = loadSteeringConfig({ configPath: options.config });
+  const corpusConfig = requireCorpusConfig(steeringConfig, options["corpus-key"], "--corpus-key");
+  const corpusId = knowledgeCorpusId(corpusConfig);
+  const status = normalizeSourceStatusFilter(options.status);
+  const { client } = createAuthoringClient();
+  const [references, attachments] = await Promise.all([
+    client.listRecords("Reference"),
+    client.listRecords("ReferenceAttachment"),
+  ]);
+  const extractionIndex = buildExtractionIndex(corpusConfig.path);
+  const rows = buildReferenceSourceStatusRows({
+    references,
+    attachments,
+    corpusId,
+    curationStatus: status,
+    extractionIndex,
+  });
+  const counts = rows.reduce((memo, row) => {
+    memo[row.state] = (memo[row.state] ?? 0) + 1;
+    return memo;
+  }, {});
+  const limit = options.limit ? normalizeCliPositiveInteger(options.limit, "--limit") : 50;
+  const selected = limit ? rows.slice(0, limit) : rows;
+  console.log(`references\tsource-status\tcorpus\t${corpusId}`);
+  console.log(`references\tsource-status\tstatus\t${status}`);
+  for (const state of Object.values(SOURCE_READINESS_STATES)) {
+    console.log(`references\tsource-status\t${state}\t${counts[state] ?? 0}`);
+  }
+  console.log(`references\tsource-status\textraction-snapshots\t${extractionIndex.snapshotIds.length}`);
+  console.log(`references\tsource-status\trows\t${rows.length}`);
+  for (const row of selected) {
+    const reference = row.reference;
+    console.log([
+      "reference-source",
+      row.state,
+      reference.curationStatus ?? "-",
+      reference.id,
+      reference.externalItemId ?? "-",
+      row.readiness.storagePath ?? "-",
+      row.readiness.textStoragePath ?? "-",
+      reference.sourceUri ?? "-",
+      nextReferenceSourceCommand(row),
+      reference.title ?? "-",
+    ].join("\t"));
+  }
+  if (rows.length > selected.length) {
+    console.log(`references\tsource-status\tomitted\t${rows.length - selected.length}\tpass --limit ${rows.length} to print every row`);
+  }
+}
+
+async function createReferenceAccessionAssignments(flags) {
+  const options = parseOptions(flags);
+  if (!options["corpus-key"]) throw new Error("references create-accession-assignments requires --corpus-key <key>.");
+  const steeringConfig = loadSteeringConfig({ configPath: options.config });
+  const corpusConfig = requireCorpusConfig(steeringConfig, options["corpus-key"], "--corpus-key");
+  const corpusId = knowledgeCorpusId(corpusConfig);
+  const status = normalizeSourceStatusFilter(options.status ?? "pending");
+  if (status === "all") throw new Error("references create-accession-assignments requires --status pending|accepted|rejected|archived, not all.");
+  const now = new Date().toISOString();
+  const actorLabel = options.actor || "Papyrus content CLI";
+  const { client } = createAuthoringClient();
+  const [references, attachments, assignments] = await Promise.all([
+    client.listRecords("Reference"),
+    client.listRecords("ReferenceAttachment"),
+    client.listRecords("Assignment"),
+  ]);
+  const rows = buildReferenceSourceStatusRows({
+    references,
+    attachments,
+    corpusId,
+    curationStatus: status,
+    extractionIndex: null,
+  }).filter((row) => row.state === SOURCE_READINESS_STATES.URL_ONLY);
+  const records = buildReferenceAccessionAssignmentRecords(rows, {
+    corpusConfig,
+    corpusId,
+    assignments,
+    actorLabel,
+    now,
+  });
+  const changes = await buildRecordChanges(client, records);
+  printReferenceAccessionAssignmentSummary(rows, changes, { apply: Boolean(options.apply) });
+  if (!options.apply) {
+    console.log("references\tcreate-accession-assignments\tapply\tskipped\tpass --apply to write Assignment records");
+    return;
+  }
+  await applyRecordChanges(client, changes);
+  await updateNewsroomSummaryAfterAssignmentCreates(client, changes, {
+    actorLabel,
+    reason: `references create-accession-assignments ${corpusId}`,
+  });
+}
+
+async function accessionReferenceNow(flags) {
+  const options = parseOptions(flags);
+  const referenceSelector = options.reference;
+  if (!referenceSelector) throw new Error("references accession-now requires --reference <reference-id>.");
+  const { auth, client } = createAuthoringClient();
+  const references = await client.listRecords("Reference");
+  const reference = findReferenceForSourceAccession(references, referenceSelector);
+  if (!reference) throw new Error(`Reference ${referenceSelector} was not found.`);
+  const steeringConfig = loadSteeringConfig({ configPath: options.config });
+  const corpusConfig = requireCorpusConfigByIdOrKey(steeringConfig, reference.corpusId, options["corpus-key"]);
+  const corpusId = knowledgeCorpusId(corpusConfig);
+  const [attachments, assignments] = await Promise.all([
+    client.listRecords("ReferenceAttachment"),
+    client.listRecords("Assignment"),
+  ]);
+  const readiness = referenceSourceReadiness(reference, attachments, null);
+  if (readiness.state !== SOURCE_READINESS_STATES.URL_ONLY) {
+    throw new Error(`Reference ${reference.id} is ${readiness.state}, not url_only; accession is only needed for URL-only source material.`);
+  }
+  const rows = [{ reference, readiness, state: readiness.state, reason: readiness.reason }];
+  const now = new Date().toISOString();
+  const actorLabel = options["assignee-key"] ?? options.assignee ?? options.actor ?? "Papyrus content CLI";
+  const records = buildReferenceAccessionAssignmentRecords(rows, {
+    corpusConfig,
+    corpusId,
+    assignments,
+    actorLabel,
+    now,
+  });
+  const changes = await buildRecordChanges(client, records);
+  if (changes.some((change) => change.action !== "noop")) {
+    await applyRecordChanges(client, changes);
+    await updateNewsroomSummaryAfterAssignmentCreates(client, changes, {
+      actorLabel,
+      reason: `references accession-now create ${reference.id}`,
+    });
+  }
+  const assignmentId = referenceAccessionAssignmentId(reference, corpusId);
+  await applyAssignmentAction({
+    client,
+    authClaims: auth.claims,
+    action: "claim",
+    assignmentId,
+    options,
+    actorLabel,
+  });
+  try {
+    const executionResult = await executeAssignmentByType({
+      client,
+      assignmentId,
+      options,
+    });
+    await applyAssignmentAction({
+      client,
+      authClaims: auth.claims,
+      action: "complete",
+      assignmentId,
+      options,
+      actorLabel,
+    });
+    console.log(`reference-accession-now\tassignment\t${assignmentId}`);
+    console.log(`reference-accession-now\trun\t${executionResult.runId}`);
+    console.log(`reference-accession-now\tmanifest\t${executionResult.manifestPath}`);
+    console.log(`reference-accession-now\tstorage-path\t${executionResult.storagePath ?? "-"}`);
+  } catch (error) {
+    const assignment = await client.getRecord("Assignment", assignmentId);
+    const failure = normalizeError(error);
+    const artifacts = analysisFailureArtifactsFromError(error);
+    await appendAssignmentFailedEvent({
+      client,
+      assignmentId,
+      assignmentTypeKey: assignment?.assignmentTypeKey ?? "reference.corpus-accession",
+      queueKey: assignment?.queueKey ?? null,
+      fromStatus: assignment?.status ?? "claimed",
+      toStatus: assignment?.status ?? "claimed",
+      actorLabel,
+      note: failure.message,
+      metadata: {
+        kind: "assignment.execution.failed",
+        runId: artifacts.runId ?? options["run-id"] ?? null,
+        manifestPath: artifacts.manifestPath ?? null,
+        stdoutLogPaths: artifacts.stdoutLogPaths,
+        stderrLogPaths: artifacts.stderrLogPaths,
+        importRuns: [],
+        importedRecords: 0,
+        error: failure,
+      },
+    });
+    throw error;
+  }
+}
+
+async function extractReferenceTextNow(flags) {
+  const options = parseOptions(flags);
+  if (!options["corpus-key"]) throw new Error("references extract-text-now requires --corpus-key <key>.");
+  const steeringConfig = loadSteeringConfig({ configPath: options.config });
+  const corpusConfig = requireCorpusConfig(steeringConfig, options["corpus-key"], "--corpus-key");
+  const corpusId = knowledgeCorpusId(corpusConfig);
+  const { auth, client } = createAuthoringClient();
+  const now = new Date().toISOString();
+  const actorLabel = options["assignee-key"] ?? options.assignee ?? options.actor ?? "Papyrus content CLI";
+  const runId = options["run-id"] || `reference-text-extraction-${timestampForPath(now)}-${hashShort([corpusId, options.stage, options.configuration, options.force])}`;
+  const assignment = referenceTextExtractionAssignmentRecord({
+    corpusConfig,
+    corpusId,
+    actorLabel,
+    now,
+    options,
+    runId,
+  });
+  const records = [
+    { modelName: "Assignment", expected: assignment },
+    { modelName: "AssignmentEvent", expected: assignmentCreatedEventRecord(assignment, actorLabel, now) },
+    { modelName: "SemanticRelation", expected: localSemanticRelationRecord({
+      predicate: "requests_work_on",
+      subjectKind: "assignment",
+      subjectId: assignment.id,
+      subjectLineageId: assignment.id,
+      subjectVersionNumber: null,
+      objectKind: "knowledge_corpus",
+      objectId: corpusId,
+      objectLineageId: corpusId,
+      objectVersionNumber: null,
+      rank: 1,
+      importRunId: null,
+      importedAt: now,
+      metadata: {
+        kind: "reference.text-extraction.requests_work_on",
+        corpusKey: corpusConfig.key,
+      },
+    }) },
+  ];
+  const changes = await buildRecordChanges(client, records);
+  await applyRecordChanges(client, changes);
+  await updateNewsroomSummaryAfterAssignmentCreates(client, changes, {
+    actorLabel,
+    reason: `references extract-text-now create ${corpusId}`,
+  });
+  await applyAssignmentAction({
+    client,
+    authClaims: auth.claims,
+    action: "claim",
+    assignmentId: assignment.id,
+    options,
+    actorLabel,
+  });
+  try {
+    const executionResult = await executeAssignmentByType({
+      client,
+      assignmentId: assignment.id,
+      options,
+    });
+    await applyAssignmentAction({
+      client,
+      authClaims: auth.claims,
+      action: "complete",
+      assignmentId: assignment.id,
+      options,
+      actorLabel,
+    });
+    console.log(`reference-text-extraction-now\tassignment\t${assignment.id}`);
+    console.log(`reference-text-extraction-now\trun\t${executionResult.runId}`);
+    console.log(`reference-text-extraction-now\tmanifest\t${executionResult.manifestPath}`);
+    console.log(`reference-text-extraction-now\tattachments\t${executionResult.importSummary?.importedRecords ?? 0}`);
+  } catch (error) {
+    const currentAssignment = await client.getRecord("Assignment", assignment.id);
+    const failure = normalizeError(error);
+    const artifacts = analysisFailureArtifactsFromError(error);
+    await appendAssignmentFailedEvent({
+      client,
+      assignmentId: assignment.id,
+      assignmentTypeKey: assignment.assignmentTypeKey,
+      queueKey: assignment.queueKey,
+      fromStatus: currentAssignment?.status ?? "claimed",
+      toStatus: currentAssignment?.status ?? "claimed",
+      actorLabel,
+      note: failure.message,
+      metadata: {
+        kind: "assignment.execution.failed",
+        runId: artifacts.runId ?? runId,
+        manifestPath: artifacts.manifestPath ?? null,
+        stdoutLogPaths: artifacts.stdoutLogPaths,
+        stderrLogPaths: artifacts.stderrLogPaths,
+        importRuns: [],
+        importedRecords: 0,
+        error: failure,
+      },
+    });
+    throw error;
+  }
+}
+
+async function attachExtractedTextReferences(flags) {
+  const options = parseOptions(flags);
+  if (!options["corpus-key"]) throw new Error("references attach-extracted-text requires --corpus-key <key>.");
+  const steeringConfig = loadSteeringConfig({ configPath: options.config });
+  const corpusConfig = requireCorpusConfig(steeringConfig, options["corpus-key"], "--corpus-key");
+  const corpusId = knowledgeCorpusId(corpusConfig);
+  const actorLabel = options.actor || "Papyrus content CLI";
+  const { client } = createAuthoringClient();
+  const [references, attachments] = await Promise.all([
+    client.listRecords("Reference"),
+    client.listRecords("ReferenceAttachment"),
+  ]);
+  const extractionIndex = buildExtractionIndex(corpusConfig.path);
+  const records = buildExtractedTextAttachmentRecords({
+    corpusConfig,
+    corpusId,
+    references,
+    attachments,
+    extractionIndex,
+  });
+  const changes = await buildRecordChanges(client, records);
+  console.log(`references\tattach-extracted-text\tcorpus\t${corpusId}`);
+  console.log(`references\tattach-extracted-text\tsnapshots\t${extractionIndex.snapshotIds.length}`);
+  console.log(`references\tattach-extracted-text\tplanned\t${records.length}`);
+  const changed = changes.filter((entry) => entry.action !== "noop");
+  const printLimit = normalizeCliPositiveInteger(options.limit, "--limit") ?? 25;
+  console.log(`references\tattach-extracted-text\tchanges\t${changed.length}`);
+  for (const change of changed.slice(0, printLimit)) {
+    console.log(`${change.action}\t${change.modelName}\t${change.expected.id}`);
+  }
+  if (changed.length > printLimit) {
+    console.log(`references\tattach-extracted-text\tomitted\t${changed.length - printLimit}\tpass --limit ${changed.length} to print every planned change`);
+  }
+  if (!options.apply) {
+    console.log("references\tattach-extracted-text\tapply\tskipped\tpass --apply to write ReferenceAttachment records");
+    return;
+  }
+  await applyRecordChanges(client, changes);
+  await updateNewsroomSummaryAfterExtractedTextAttachments(client, changes, {
+    actorLabel,
+    reason: `references attach-extracted-text ${corpusId}`,
+  });
 }
 
 async function exportReferenceAnalysisManifest(flags) {
@@ -2106,6 +2484,20 @@ async function executeAssignmentByType({ client, assignmentId, options = {} }) {
       options,
     });
   }
+  if (assignment.assignmentTypeKey === "reference.corpus-accession") {
+    return executeReferenceAccessionAssignmentInternal({
+      client,
+      assignment,
+      options,
+    });
+  }
+  if (assignment.assignmentTypeKey === "reference.text-extraction") {
+    return executeReferenceTextExtractionAssignmentInternal({
+      client,
+      assignment,
+      options,
+    });
+  }
   throw new Error(`No executor is registered for assignment type ${assignment.assignmentTypeKey}.`);
 }
 
@@ -2276,6 +2668,7 @@ async function executeAnalysisReindexAssignmentInternal({ client, assignment, op
       commandResults: failedCommandResults,
       importRuns: importSummary.importRuns ?? [],
       importedRecords: importSummary.importedRecords ?? 0,
+      graphExportPath: artifacts.graphExportPath ?? null,
       stdoutLogPaths,
       stderrLogPaths,
       nextSuggestedCommand: `npm run content -- assignments list --type ${assignment.assignmentTypeKey} --limit 20`,
@@ -2287,6 +2680,324 @@ async function executeAnalysisReindexAssignmentInternal({ client, assignment, op
       stdoutLogPaths,
       stderrLogPaths,
       commandResult: artifacts.commandResult ?? null,
+      graphExportPath: artifacts.graphExportPath ?? null,
+    });
+    throw error;
+  }
+}
+
+async function executeReferenceAccessionAssignmentInternal({ client, assignment, options = {} }) {
+  if (assignment.assignmentTypeKey !== "reference.corpus-accession") {
+    throw new Error(`Assignment ${assignment.id} is ${assignment.assignmentTypeKey}; expected reference.corpus-accession.`);
+  }
+  if (assignment.status !== "claimed") {
+    throw new Error(`Assignment ${assignment.id} must be claimed before execution (current=${assignment.status}).`);
+  }
+  const metadata = parseJsonish(assignment.metadata);
+  if (metadata.kind !== "reference.corpus-accession.requested") {
+    throw new Error(`Assignment ${assignment.id} metadata is not reference.corpus-accession.requested.`);
+  }
+  const actorLabel = options.actor || options["assignee-key"] || "papyrus-content-cli";
+  const runId = options["run-id"] || `reference-accession-${hashShort([assignment.id, new Date().toISOString()])}`;
+  const runDir = path.join(process.cwd(), ".papyrus-runs", runId);
+  const manifestPath = path.join(runDir, "execution-manifest.json");
+  fs.mkdirSync(runDir, { recursive: true });
+
+  const reference = await client.getRecord("Reference", metadata.referenceId);
+  if (!reference) {
+    throw createReferenceAccessionError(`Reference ${metadata.referenceId} was not found.`, {
+      runId,
+      manifestPath,
+      kind: "missing_reference",
+    });
+  }
+  if (!reference.sourceUri) {
+    throw createReferenceAccessionError(`Reference ${reference.id} has no sourceUri to accession.`, {
+      runId,
+      manifestPath,
+      kind: "missing_source_material",
+    });
+  }
+  const steeringConfig = loadSteeringConfig({ configPath: options.config || metadata.steeringConfigPath || undefined });
+  const corpusConfig = requireCorpusConfig(steeringConfig, metadata.corpusKey, "assignment.metadata.corpusKey");
+  const corpusId = knowledgeCorpusId(corpusConfig);
+  const corpusPath = path.resolve(corpusConfig.path);
+  const biblicusWorkdir = resolveBiblicusWorkdir(options);
+
+  await appendAssignmentPhaseEvent({
+    client,
+    assignment,
+    eventType: "executing",
+    actorLabel,
+    note: `Accessioning source material for ${reference.externalItemId}.`,
+    metadata: {
+      kind: "reference.corpus-accession.executing",
+      runId,
+      manifestPath,
+      referenceId: reference.id,
+      sourceUri: reference.sourceUri,
+      corpusPath,
+    },
+  });
+
+  try {
+    const sourceMaterial = await downloadReferenceSourceMaterial(reference, {
+      biblicusItemId: metadata.biblicusItemId,
+      runDir,
+    });
+    if (!isExtractableMediaType(sourceMaterial.mediaType)) {
+      throw createReferenceAccessionError(`Unsupported media type for extraction: ${sourceMaterial.mediaType}.`, {
+        runId,
+        manifestPath,
+        kind: "unsupported_media_type",
+      });
+    }
+    const accession = writeReferenceSourceAccession({
+      reference,
+      sourceMaterial,
+      corpusConfig,
+      corpusPath,
+      biblicusItemId: metadata.biblicusItemId,
+      actorLabel,
+    });
+    const reindexResult = runBiblicusReindexForAccession({
+      corpusPath,
+      biblicusWorkdir,
+      runDir,
+    });
+    const s3SyncResult = maybeSyncAccessionToS3({
+      corpusConfig,
+      corpusPath,
+      runDir,
+      options,
+    });
+    const importRunId = `knowledge-import-${safeId(corpusId)}-reference-accession-${hashShort([reference.lineageId, accession.sha256])}`;
+    const records = buildReferenceAccessionGraphqlRecords({
+      reference,
+      corpusConfig,
+      corpusId,
+      importRunId,
+      accession,
+      sourceMaterial,
+      metadata,
+      actorLabel,
+    });
+    const changes = await buildRecordChanges(client, records);
+    const augmentedChanges = augmentReferenceAccessionChangesForReplacement(changes, {
+      reference,
+      accession,
+      metadata,
+    });
+    await applyRecordChanges(client, augmentedChanges);
+    await updateNewsroomSummaryAfterReferenceAccession(client, augmentedChanges, {
+      actorLabel,
+      reason: `references accession ${assignment.id}`,
+    });
+    const importSummary = {
+      importedRecords: augmentedChanges.filter((change) => change.action !== "noop").length,
+      importRuns: [importRunId],
+    };
+    const manifest = {
+      runId,
+      assignmentId: assignment.id,
+      assignmentTypeKey: assignment.assignmentTypeKey,
+      status: "executed",
+      referenceId: reference.id,
+      sourceUri: reference.sourceUri,
+      storagePath: accession.storagePath,
+      localPath: accession.localPath,
+      sidecarPath: accession.sidecarPath,
+      mediaType: accession.mediaType,
+      sha256: accession.sha256,
+      biblicusItemId: accession.biblicusItemId,
+      reindex: reindexResult,
+      s3Sync: s3SyncResult,
+      importSummary,
+    };
+    writeJsonFile(manifestPath, manifest);
+    await appendAssignmentPhaseEvent({
+      client,
+      assignment,
+      eventType: "executed",
+      actorLabel,
+      note: `Accessioned source material to ${accession.storagePath}.`,
+      metadata: {
+        kind: "reference.corpus-accession.executed",
+        runId,
+        manifestPath,
+        referenceId: reference.id,
+        storagePath: accession.storagePath,
+        sidecarPath: accession.sidecarPath,
+        importRuns: importSummary.importRuns,
+        importedRecords: importSummary.importedRecords,
+      },
+    });
+    return {
+      assignmentId: assignment.id,
+      runId,
+      runDir,
+      manifestPath,
+      storagePath: accession.storagePath,
+      importSummary,
+      commandResults: [reindexResult].filter(Boolean),
+    };
+  } catch (error) {
+    const failure = normalizeError(error);
+    const artifacts = analysisFailureArtifactsFromError(error);
+    const failureManifest = {
+      runId,
+      assignmentId: assignment.id,
+      assignmentTypeKey: assignment.assignmentTypeKey,
+      failedAt: new Date().toISOString(),
+      status: "failed",
+      referenceId: reference.id,
+      sourceUri: reference.sourceUri,
+      error: failure,
+      stdoutLogPaths: artifacts.stdoutLogPaths,
+      stderrLogPaths: artifacts.stderrLogPaths,
+      nextSuggestedCommand: `npm run content -- references source-status --corpus-key ${metadata.corpusKey} --status all`,
+    };
+    writeJsonFile(manifestPath, failureManifest);
+    attachAnalysisFailureArtifacts(error, {
+      runId,
+      manifestPath,
+      kind: failure.kind ?? "reference_accession_failed",
+      stdoutLogPaths: artifacts.stdoutLogPaths,
+      stderrLogPaths: artifacts.stderrLogPaths,
+    });
+    throw error;
+  }
+}
+
+async function executeReferenceTextExtractionAssignmentInternal({ client, assignment, options = {} }) {
+  if (assignment.assignmentTypeKey !== "reference.text-extraction") {
+    throw new Error(`Assignment ${assignment.id} is ${assignment.assignmentTypeKey}; expected reference.text-extraction.`);
+  }
+  if (assignment.status !== "claimed") {
+    throw new Error(`Assignment ${assignment.id} must be claimed before execution (current=${assignment.status}).`);
+  }
+  const metadata = parseJsonish(assignment.metadata);
+  if (metadata.kind !== "reference.text-extraction.requested") {
+    throw new Error(`Assignment ${assignment.id} metadata is not reference.text-extraction.requested.`);
+  }
+  const actorLabel = options.actor || options["assignee-key"] || "papyrus-content-cli";
+  const runId = options["run-id"] || metadata.runId || `reference-text-extraction-${hashShort([assignment.id, Date.now()])}`;
+  const runDir = path.join(".papyrus-runs", runId);
+  const manifestPath = path.join(runDir, "execution-manifest.json");
+  fs.mkdirSync(runDir, { recursive: true });
+  const steeringConfig = loadSteeringConfig({ configPath: options.config || metadata.steeringConfigPath || undefined });
+  const corpusConfig = requireCorpusConfig(steeringConfig, metadata.corpusKey, "assignment.metadata.corpusKey");
+  const corpusId = knowledgeCorpusId(corpusConfig);
+  const corpusPath = path.resolve(corpusConfig.path);
+  const biblicusWorkdir = resolveBiblicusWorkdir(options);
+
+  await appendAssignmentPhaseEvent({
+    client,
+    assignment,
+    eventType: "executing",
+    actorLabel,
+    note: `Running Biblicus text extraction for ${corpusConfig.key}.`,
+    metadata: {
+      kind: "reference.text-extraction.executing",
+      runId,
+      manifestPath,
+      corpusId,
+      corpusPath,
+    },
+  });
+
+  try {
+    const extractionResult = runBiblicusTextExtractionForCorpus({
+      corpusPath,
+      biblicusWorkdir,
+      runDir,
+      options: {
+        ...metadata.options,
+        ...options,
+      },
+    });
+    const [references, attachments] = await Promise.all([
+      client.listRecords("Reference"),
+      client.listRecords("ReferenceAttachment"),
+    ]);
+    const extractionIndex = buildExtractionIndex(corpusConfig.path);
+    const records = buildExtractedTextAttachmentRecords({
+      corpusConfig,
+      corpusId,
+      references,
+      attachments,
+      extractionIndex,
+    });
+    const changes = await buildRecordChanges(client, records);
+    await applyRecordChanges(client, changes);
+    await updateNewsroomSummaryAfterExtractedTextAttachments(client, changes, {
+      actorLabel,
+      reason: `references text extraction ${assignment.id}`,
+    });
+    const importSummary = {
+      importedRecords: changes.filter((change) => change.action !== "noop").length,
+      importRuns: [],
+    };
+    const manifest = {
+      runId,
+      assignmentId: assignment.id,
+      assignmentTypeKey: assignment.assignmentTypeKey,
+      status: "executed",
+      corpusId,
+      corpusPath,
+      extraction: extractionResult,
+      extractionSnapshots: extractionIndex.snapshotIds,
+      plannedTextAttachments: records.length,
+      importSummary,
+      textStoragePolicy: "ReferenceAttachment.role=extracted_text points at corpus text artifacts; raw text is not stored in GraphQL.",
+    };
+    writeJsonFile(manifestPath, manifest);
+    await appendAssignmentPhaseEvent({
+      client,
+      assignment,
+      eventType: "executed",
+      actorLabel,
+      note: `Registered ${importSummary.importedRecords} extracted text attachment records.`,
+      metadata: {
+        kind: "reference.text-extraction.executed",
+        runId,
+        manifestPath,
+        corpusId,
+        importRuns: importSummary.importRuns,
+        importedRecords: importSummary.importedRecords,
+        extractionSnapshotIds: extractionIndex.snapshotIds,
+      },
+    });
+    return {
+      assignmentId: assignment.id,
+      runId,
+      runDir,
+      manifestPath,
+      importSummary,
+      commandResults: [extractionResult],
+    };
+  } catch (error) {
+    const failure = normalizeError(error);
+    const artifacts = analysisFailureArtifactsFromError(error);
+    const failureManifest = {
+      runId,
+      assignmentId: assignment.id,
+      assignmentTypeKey: assignment.assignmentTypeKey,
+      failedAt: new Date().toISOString(),
+      status: "failed",
+      corpusId,
+      error: failure,
+      stdoutLogPaths: artifacts.stdoutLogPaths,
+      stderrLogPaths: artifacts.stderrLogPaths,
+      nextSuggestedCommand: `npm run content -- references source-status --corpus-key ${metadata.corpusKey} --status accepted`,
+    };
+    writeJsonFile(manifestPath, failureManifest);
+    attachAnalysisFailureArtifacts(error, {
+      runId,
+      manifestPath,
+      kind: failure.kind ?? "reference_text_extraction_failed",
+      stdoutLogPaths: artifacts.stdoutLogPaths,
+      stderrLogPaths: artifacts.stderrLogPaths,
     });
     throw error;
   }
@@ -3008,6 +3719,7 @@ async function importAnalysisAssignmentOutputs({
 }) {
   const importRuns = [];
   let importedRecords = 0;
+  const graphExports = [];
 
   for (const command of commandResults) {
     const payload = command.outputJson;
@@ -3047,6 +3759,22 @@ async function importAnalysisAssignmentOutputs({
       printCategoryImportSummary(`projection:${metadata.corpusKey}`, plan.importRunId, changes);
       importRuns.push(plan.importRunId);
       importedRecords += changes.filter((record) => record.action !== "noop").length;
+      continue;
+    }
+
+    if (command.label === "graph-extract") {
+      const graphImport = await importGraphCommandOutput({
+        client,
+        assignment,
+        metadata,
+        corpusConfig,
+        classifierId,
+        command,
+        runDir,
+      });
+      importRuns.push(graphImport.importRunId);
+      importedRecords += graphImport.importedRecords;
+      graphExports.push(graphImport);
       continue;
     }
 
@@ -3091,7 +3819,559 @@ async function importAnalysisAssignmentOutputs({
     assignmentId: assignment.id,
     importedRecords,
     importRuns,
+    graphExports,
   };
+}
+
+async function importGraphCommandOutput({
+  client,
+  assignment,
+  metadata,
+  corpusConfig,
+  classifierId,
+  command,
+  runDir,
+}) {
+  const graphExport = runGraphExportForCommand({
+    command,
+    metadata,
+    corpusConfig,
+    runDir,
+  });
+  const corpusId = knowledgeCorpusId(corpusConfig);
+  const now = new Date().toISOString();
+  const referenceByExternalItemId = await hydrateGraphReferenceMap(client, corpusId);
+  const plan = buildGraphExportImportRecords(graphExport.payload, {
+    corpusId,
+    classifierId,
+    importedAt: now,
+    referenceByExternalItemId,
+  });
+  if (plan.mentionEdgeCount > 0 && plan.mentionRelationCount === 0) {
+    throw createAnalysisCommandError(`Graph import could not resolve any accepted References for ${plan.mentionEdgeCount} reference-to-entity edge(s).`, {
+      kind: "graph_import_unresolved_references",
+      graphExportPath: graphExport.outputPath,
+      stdoutLogPaths: [],
+      stderrLogPaths: [],
+    });
+  }
+  const supersessionChanges = await buildGeneratedGraphSupersessionChanges(client, {
+    corpusId,
+    extractorId: plan.extractorId,
+    importRunId: plan.importRunId,
+    now,
+  });
+  const importChanges = await buildRecordChangesToleratingOptionalModels(client, plan.records);
+  const changes = [...supersessionChanges, ...importChanges];
+  await applyRecordChanges(client, changes);
+  await updateNewsroomSummaryAfterAnalysisImport(client, changes, {
+    actorLabel: "papyrus-content-cli",
+    reason: `analysis import graph ${plan.importRunId}`,
+  });
+  printCategoryImportSummary("graph", plan.importRunId, changes);
+  return {
+    assignmentId: assignment.id,
+    importRunId: plan.importRunId,
+    importedRecords: changes.filter((record) => record.action !== "noop").length,
+    graphExportPath: graphExport.outputPath,
+    snapshot: plan.snapshotRef,
+    nodes: plan.semanticNodeCount,
+    relations: plan.semanticRelationCount,
+    skippedItemNodes: plan.skippedItemNodes,
+    unresolvedReferences: plan.unresolvedReferences,
+    mentionRelations: plan.mentionRelationCount,
+    supersededRecords: supersessionChanges.filter((record) => record.action !== "noop").length,
+  };
+}
+
+function runGraphExportForCommand({ command, metadata, corpusConfig, runDir }) {
+  const snapshotRef = graphSnapshotRefFromCommand(command);
+  const outputPath = path.join(runDir, `${command.label}-export.json`);
+  const logPrefix = path.join(runDir, `${command.label}-export`);
+  const cwd = normalizeCliString(command.cwd)
+    || normalizeCliString(metadata.biblicusWorkdir)
+    || process.env.BIBLICUS_WORKDIR
+    || DEFAULT_BIBLICUS_WORKDIR;
+  const rawArgs = [
+    "run",
+    "--extra",
+    "topic-modeling",
+    "biblicus",
+    "graph",
+    "export",
+    "--corpus",
+    corpusConfig.path,
+    "--snapshot",
+    snapshotRef,
+    "--output",
+    outputPath,
+  ];
+  const args = ensureUvBiblicusExtras(rawArgs, ["topic-modeling", "openai", "neo4j", "ner"]);
+  const result = spawnSync("uv", args, {
+    cwd,
+    encoding: "utf8",
+    maxBuffer: 1024 * 1024 * 256,
+  });
+  const stdoutLogPath = `${logPrefix}.stdout.log`;
+  const stderrLogPath = `${logPrefix}.stderr.log`;
+  fs.writeFileSync(stdoutLogPath, result.stdout ?? "", "utf8");
+  fs.writeFileSync(stderrLogPath, result.stderr ?? "", "utf8");
+  if (result.status !== 0) {
+    throw createAnalysisCommandError(`Analysis command ${command.label} graph export failed. See ${stderrLogPath}`, {
+      kind: "graph_export_failed",
+      commandResult: {
+        label: `${command.label}-export`,
+        executable: "uv",
+        args,
+        cwd,
+        outputPath,
+        stdoutLogPath,
+        stderrLogPath,
+        exitStatus: result.status,
+        signal: result.signal ?? null,
+        timedOut: false,
+      },
+      stdoutLogPaths: [stdoutLogPath],
+      stderrLogPaths: [stderrLogPath],
+    });
+  }
+  return {
+    outputPath,
+    payload: loadJsonFile(outputPath),
+  };
+}
+
+function graphSnapshotRefFromCommand(command) {
+  const payload = command.outputJson ?? {};
+  const snapshotId = normalizeCliString(payload.snapshot_id);
+  const extractorId = normalizeCliString(payload.configuration?.extractor_id)
+    || graphCommandArgValue(command.args, "--extractor");
+  if (!snapshotId || !extractorId) {
+    throw createAnalysisCommandError(`Analysis command ${command.label} did not return a graph snapshot id and extractor id.`, {
+      kind: "graph_snapshot_missing",
+      commandResult: command,
+      stdoutLogPaths: [command.stdoutLogPath],
+      stderrLogPaths: [command.stderrLogPath],
+    });
+  }
+  return `${extractorId}:${snapshotId}`;
+}
+
+function graphCommandArgValue(args, key) {
+  const normalized = Array.isArray(args) ? args.map(String) : [];
+  const index = normalized.findIndex((entry) => entry === key);
+  return index >= 0 && normalized[index + 1] ? normalizeCliString(normalized[index + 1]) : null;
+}
+
+function buildGraphExportImportRecords(payload, { corpusId, classifierId, importedAt, referenceByExternalItemId }) {
+  const snapshot = payload.snapshot ?? {};
+  const manifest = payload.manifest ?? {};
+  const extractorId = normalizeCliString(snapshot.extractor_id ?? manifest.configuration?.extractor_id) ?? "graph";
+  const snapshotId = normalizeCliString(snapshot.snapshot_id ?? manifest.snapshot_id);
+  if (!snapshotId) throw new Error("Graph export is missing snapshot.snapshot_id.");
+  const snapshotRef = `${extractorId}:${snapshotId}`;
+  const graphId = normalizeCliString(manifest.graph_id) ?? normalizeCliString(payload.graph_id) ?? snapshotRef;
+  const extractionSnapshot = normalizeCliString(manifest.extraction_snapshot);
+  const importRunId = `knowledge-import-${safeId(corpusId)}-graph-${safeId(extractorId)}-${hashShort(snapshotRef)}`;
+  const nodes = Array.isArray(payload.nodes) ? payload.nodes : [];
+  const edges = Array.isArray(payload.edges) ? payload.edges : [];
+  const records = [];
+  const materializedNodeByGraphNodeId = new Map();
+  let skippedItemNodes = 0;
+
+  for (const node of nodes) {
+    const nodeId = normalizeCliString(node.node_id);
+    if (!nodeId) continue;
+    if (isGraphItemNode(node)) {
+      skippedItemNodes += 1;
+      continue;
+    }
+    if (materializedNodeByGraphNodeId.has(nodeId)) continue;
+    const lineageId = `semantic-node-graph-${safeId(corpusId)}-${safeId(extractorId)}-${safeId(snapshotId)}-${hashShort(nodeId)}`;
+    const semanticNode = withVersionFields({
+      id: `${lineageId}-v1`,
+      lineageId,
+      nodeKey: `${extractorId}:${snapshotId}:${nodeId}`,
+      nodeKind: normalizeGraphNodeKind(node.node_type),
+      corpusId,
+      categorySetId: null,
+      categoryLineageId: null,
+      categoryKey: null,
+      displayName: normalizeCliString(node.label) ?? nodeId,
+      description: graphNodeDescription(node),
+      aliases: graphNodeAliases(node),
+      status: "generated",
+      importRunId,
+      createdAt: importedAt,
+      newsroomFeedKey: "semanticNodes",
+      updatedAt: importedAt,
+    }, {
+      now: importedAt,
+      actor: "biblicus-graph-export",
+      reason: `graph-import:${snapshotRef}`,
+    });
+    materializedNodeByGraphNodeId.set(nodeId, semanticNode);
+    records.push({ modelName: "SemanticNode", expected: semanticNode });
+  }
+
+  const relationRecords = buildGraphExportRelationRecords({
+    edges,
+    nodes,
+    materializedNodeByGraphNodeId,
+    corpusId,
+    classifierId,
+    importRunId,
+    importedAt,
+    snapshotRef,
+    graphId,
+    extractorId,
+    extractionSnapshot,
+    referenceByExternalItemId,
+  });
+
+  records.push(recordKnowledgeImportRun({
+    importRunId,
+    corpusId,
+    classifierId,
+    sourceSnapshotId: snapshotId,
+    importedAt,
+    itemCount: Number(payload.stats?.items_processed ?? payload.stats?.items_total ?? 0) || 0,
+    artifactCount: 1,
+    relationCount: relationRecords.records.length,
+  }));
+  records.push({
+    modelName: "KnowledgeArtifact",
+    expected: {
+      id: `knowledge-artifact-${safeId(corpusId)}-${safeId(extractorId)}-${safeId(snapshotId)}`,
+      corpusId,
+      artifactKind: "graph-snapshot",
+      artifactId: snapshotRef,
+      snapshotId,
+      displayName: `Graph snapshot ${snapshotRef}`,
+      createdAt: importedAt,
+      importRunId,
+    },
+  });
+  records.push({
+    modelName: "KnowledgeRawPayload",
+    expected: {
+      id: `raw-import-run-${safeId(importRunId)}-graph-export-summary`,
+      ownerType: "importRun",
+      ownerId: importRunId,
+      payloadKind: "graph-export-summary",
+      importRunId,
+      payload: JSON.stringify({
+        snapshot: snapshotRef,
+        graphId,
+        extractorId,
+        extractionSnapshot,
+        stats: payload.stats ?? {},
+        nodeCount: nodes.length,
+        edgeCount: edges.length,
+        semanticNodeCount: materializedNodeByGraphNodeId.size,
+        semanticRelationCount: relationRecords.records.length,
+        skippedItemNodes,
+        unresolvedReferences: relationRecords.unresolvedReferences,
+      }),
+      createdAt: importedAt,
+      updatedAt: importedAt,
+    },
+  });
+  records.push(...relationRecords.records);
+
+  return {
+    importRunId,
+    extractorId,
+    snapshotId,
+    snapshotRef,
+    records,
+    semanticNodeCount: materializedNodeByGraphNodeId.size,
+    semanticRelationCount: relationRecords.records.length,
+    skippedItemNodes,
+    unresolvedReferences: relationRecords.unresolvedReferences,
+    mentionEdgeCount: relationRecords.mentionEdgeCount,
+    mentionRelationCount: relationRecords.mentionRelationCount,
+  };
+}
+
+function buildGraphExportRelationRecords({
+  edges,
+  nodes,
+  materializedNodeByGraphNodeId,
+  corpusId,
+  classifierId,
+  importRunId,
+  importedAt,
+  snapshotRef,
+  graphId,
+  extractorId,
+  extractionSnapshot,
+  referenceByExternalItemId,
+}) {
+  const graphNodeById = new Map(nodes.map((node) => [normalizeCliString(node.node_id), node]).filter(([key]) => key));
+  const referencesByExternalId = referenceByExternalItemId instanceof Map ? referenceByExternalItemId : new Map();
+  const relationTypes = new Set(loadSemanticRelationTypeSeeds().map((type) => type.key));
+  const records = [];
+  const seen = new Set();
+  let unresolvedReferences = 0;
+  let mentionEdgeCount = 0;
+  let mentionRelationCount = 0;
+
+  for (const edge of edges) {
+    const src = normalizeCliString(edge.src);
+    const dst = normalizeCliString(edge.dst);
+    const edgeId = normalizeCliString(edge.edge_id) ?? hashShort(edge);
+    if (!src || !dst) continue;
+    const srcNode = graphNodeById.get(src) ?? {};
+    const dstNode = graphNodeById.get(dst) ?? {};
+    const srcSemantic = materializedNodeByGraphNodeId.get(src);
+    const dstSemantic = materializedNodeByGraphNodeId.get(dst);
+    const sourceItemId = normalizeCliString(edge.item_id) ?? graphItemIdFromNode(srcNode) ?? graphItemIdFromNode(dstNode);
+    const metadata = graphRelationMetadata({
+      edge,
+      snapshotRef,
+      graphId,
+      extractorId,
+      extractionSnapshot,
+      sourceItemId,
+    });
+
+    if (isGraphItemNode(srcNode) || isGraphItemNode(dstNode)) {
+      mentionEdgeCount += 1;
+      const entityNode = srcSemantic ?? dstSemantic;
+      if (!entityNode) continue;
+      const reference = sourceItemId ? referencesByExternalId.get(sourceItemId) : null;
+      if (!reference) {
+        unresolvedReferences += 1;
+        continue;
+      }
+      const relation = graphSemanticRelationRecord({
+        idParts: [snapshotRef, sourceItemId, edgeId, "mentions"],
+        predicate: "mentions",
+        subjectKind: "reference",
+        subjectId: reference.id,
+        subjectLineageId: reference.lineageId ?? reference.id,
+        subjectVersionNumber: reference.versionNumber ?? null,
+        objectKind: "semanticNode",
+        objectId: entityNode.id,
+        objectLineageId: entityNode.lineageId,
+        objectVersionNumber: entityNode.versionNumber ?? 1,
+        score: numberOrNull(edge.weight),
+        rank: 1,
+        classifierId,
+        sourceSnapshotId: snapshotRef,
+        importRunId,
+        importedAt,
+        metadata,
+      });
+      const key = relation.id;
+      if (!seen.has(key)) {
+        records.push({ modelName: "SemanticRelation", expected: relation });
+        seen.add(key);
+        mentionRelationCount += 1;
+      }
+      continue;
+    }
+
+    if (!srcSemantic || !dstSemantic) continue;
+    const normalizedEdgeType = normalizeRelationTypeKey(edge.edge_type);
+    const predicate = relationTypes.has(normalizedEdgeType) ? normalizedEdgeType : "related_to";
+    const relation = graphSemanticRelationRecord({
+      idParts: [snapshotRef, sourceItemId, edgeId, predicate],
+      predicate,
+      subjectKind: "semanticNode",
+      subjectId: srcSemantic.id,
+      subjectLineageId: srcSemantic.lineageId,
+      subjectVersionNumber: srcSemantic.versionNumber ?? 1,
+      objectKind: "semanticNode",
+      objectId: dstSemantic.id,
+      objectLineageId: dstSemantic.lineageId,
+      objectVersionNumber: dstSemantic.versionNumber ?? 1,
+      score: numberOrNull(edge.weight),
+      rank: 1,
+      classifierId,
+      sourceSnapshotId: snapshotRef,
+      importRunId,
+      importedAt,
+      metadata,
+    });
+    const key = relation.id;
+    if (!seen.has(key)) {
+      records.push({ modelName: "SemanticRelation", expected: relation });
+      seen.add(key);
+    }
+  }
+  return { records, unresolvedReferences, mentionEdgeCount, mentionRelationCount };
+}
+
+async function buildGeneratedGraphSupersessionChanges(client, { corpusId, extractorId, importRunId, now }) {
+  const prefix = `knowledge-import-${safeId(corpusId)}-graph-${safeId(extractorId)}-`;
+  const [nodes, relations] = await Promise.all([
+    client.listRecords("SemanticNode"),
+    client.listRecords("SemanticRelation"),
+  ]);
+  const changes = [];
+  for (const node of nodes) {
+    if (node.importRunId === importRunId || !String(node.importRunId ?? "").startsWith(prefix)) continue;
+    if (node.versionState !== "current") continue;
+    const expected = {
+      ...node,
+      versionState: "superseded",
+      status: "superseded",
+      changeReason: `superseded-by-graph-import:${importRunId}`,
+      updatedAt: now,
+    };
+    expected.contentHash = hashShort(normalizeRecord(expected));
+    changes.push(buildRecordChangeFromCurrent("SemanticNode", expected, node));
+  }
+  for (const relation of relations) {
+    if (relation.importRunId === importRunId || !String(relation.importRunId ?? "").startsWith(prefix)) continue;
+    if (relation.relationState !== "current") continue;
+    const expected = {
+      ...relation,
+      relationState: "superseded",
+      updatedAt: now,
+    };
+    changes.push(buildRecordChangeFromCurrent("SemanticRelation", expected, relation));
+  }
+  return changes;
+}
+
+async function hydrateGraphReferenceMap(client, corpusId) {
+  const references = await client.listRecords("Reference");
+  return new Map(references
+    .filter((reference) => reference.corpusId === corpusId)
+    .filter(isCurrentAcceptedReference)
+    .map((reference) => [reference.externalItemId, reference])
+    .filter(([key]) => key));
+}
+
+function recordKnowledgeImportRun({
+  importRunId,
+  corpusId,
+  classifierId,
+  sourceSnapshotId,
+  importedAt,
+  itemCount,
+  artifactCount,
+  relationCount,
+}) {
+  return {
+    modelName: "KnowledgeImportRun",
+    expected: {
+      id: importRunId,
+      corpusId,
+      importKind: "graph-export",
+      classifierId,
+      sourceSnapshotId,
+      status: "imported",
+      generatedAt: importedAt,
+      importedAt,
+      itemCount,
+      categoryCount: 0,
+      proposalCount: 0,
+      artifactCount,
+      referenceCount: 0,
+      relationCount,
+      warningCount: 0,
+    },
+  };
+}
+
+function graphSemanticRelationRecord(input) {
+  const subjectStateKey = semanticStateKey(input.subjectKind, input.subjectLineageId);
+  const objectStateKey = semanticStateKey(input.objectKind, input.objectLineageId);
+  const subjectVersionKey = semanticVersionKey(input.subjectKind, input.subjectId);
+  const objectVersionKey = semanticVersionKey(input.objectKind, input.objectId);
+  return {
+    id: `semantic-relation-${hashShort(input.idParts)}`,
+    relationState: "current",
+    predicate: input.predicate,
+    ...semanticRelationTypeFieldsForPredicate(input.predicate),
+    subjectKind: input.subjectKind,
+    subjectId: input.subjectId,
+    subjectLineageId: input.subjectLineageId,
+    subjectVersionNumber: input.subjectVersionNumber,
+    objectKind: input.objectKind,
+    objectId: input.objectId,
+    objectLineageId: input.objectLineageId,
+    objectVersionNumber: input.objectVersionNumber,
+    subjectStateKey,
+    objectStateKey,
+    objectSubjectStateKey: `${objectStateKey}#${input.subjectKind}`,
+    predicateObjectStateKey: `${input.predicate}#${objectStateKey}`,
+    subjectVersionKey,
+    objectVersionKey,
+    score: input.score,
+    confidence: null,
+    rank: input.rank ?? 1,
+    classifierId: input.classifierId ?? null,
+    modelVersion: null,
+    reviewRecommended: false,
+    sourceSnapshotId: input.sourceSnapshotId,
+    importRunId: input.importRunId,
+    importedAt: input.importedAt,
+    createdAt: input.importedAt,
+    updatedAt: input.importedAt,
+    newsroomFeedKey: "semanticRelations",
+    metadata: JSON.stringify(input.metadata ?? {}),
+  };
+}
+
+function graphRelationMetadata({ edge, snapshotRef, graphId, extractorId, extractionSnapshot, sourceItemId }) {
+  return {
+    kind: "graph.imported_relation",
+    graphSnapshot: snapshotRef,
+    graphId,
+    extractorId,
+    extractionSnapshot,
+    sourceItemId,
+    edgeId: edge.edge_id ?? null,
+    edgeType: edge.edge_type ?? null,
+    properties: edge.properties && typeof edge.properties === "object" ? edge.properties : {},
+  };
+}
+
+function isGraphItemNode(node) {
+  const nodeType = normalizeCliString(node?.node_type);
+  const nodeId = normalizeCliString(node?.node_id);
+  return nodeType === "item"
+    || nodeType === "reference"
+    || nodeId?.startsWith("item:")
+    || nodeId?.startsWith("reference:");
+}
+
+function graphItemIdFromNode(node) {
+  const properties = node?.properties && typeof node.properties === "object" ? node.properties : {};
+  return normalizeCliString(properties.item_id)
+    || normalizeCliString(properties.reference_id)
+    || stripGraphNodePrefix(node?.node_id, "item:")
+    || stripGraphNodePrefix(node?.node_id, "reference:");
+}
+
+function stripGraphNodePrefix(value, prefix) {
+  const normalized = normalizeCliString(value);
+  return normalized?.startsWith(prefix) ? normalized.slice(prefix.length) : null;
+}
+
+function normalizeGraphNodeKind(value) {
+  const normalized = normalizeRelationTypeKey(value);
+  if (!normalized) return "entity";
+  if (normalized === "item" || normalized === "reference") return "entity";
+  return normalized;
+}
+
+function graphNodeDescription(node) {
+  const entityType = normalizeCliString(node.properties?.entity_type ?? node.properties?.kind);
+  const nodeType = normalizeCliString(node.node_type);
+  return [nodeType, entityType].filter(Boolean).join(": ") || null;
+}
+
+function graphNodeAliases(node) {
+  const aliases = new Set();
+  const canonical = normalizeCliString(node.properties?.canonical);
+  if (canonical && canonical !== node.label) aliases.add(canonical);
+  return Array.from(aliases);
 }
 
 async function buildEditionPlanningCommandPlan(options) {
@@ -3107,6 +4387,7 @@ async function buildEditionPlanningCommandPlan(options) {
     overassignmentRatio: options.ratio,
     maxAssignments: options["max-assignments"],
     focusCategories: parseCommaList(options["focus-categories"] ?? options["track-lenses"]),
+    sectionTargets: parseCommaList(options["section-targets"]),
     contextProfile: options["context-profile"],
     targetSystemType: options["target-system-type"],
   });
@@ -3141,6 +4422,7 @@ async function deleteAllContent(client) {
     "SemanticRelationType",
     "AssignmentEvent",
     "Assignment",
+    "NewsroomSection",
     "SemanticNode",
     "Message",
     "ReferenceAttachment",
@@ -4068,15 +5350,15 @@ async function updateNewsroomSummaryAfterAnalysisImport(client, changes, { actor
   const createdCategories = createdByModel.get("Category") ?? [];
   const createdProposals = createdByModel.get("SteeringProposal") ?? [];
   const createdArtifacts = createdByModel.get("KnowledgeArtifact") ?? [];
-  const createdNodes = createdByModel.get("SemanticNode") ?? [];
-  const createdRelations = createdByModel.get("SemanticRelation") ?? [];
+  const semanticNodeDelta = currentSemanticNodeDeltaFromChanges(changes);
+  const semanticRelationDelta = currentSemanticRelationDeltaFromChanges(changes);
   if (!createdImportRuns.length
     && !createdCategorySets.length
     && !createdCategories.length
     && !createdProposals.length
     && !createdArtifacts.length
-    && !createdNodes.length
-    && !createdRelations.length) {
+    && !semanticNodeDelta.count
+    && !semanticRelationDelta.count) {
     return;
   }
   await client.updateNewsroomSummary({
@@ -4089,31 +5371,71 @@ async function updateNewsroomSummaryAfterAnalysisImport(client, changes, { actor
       proposals: createdProposals.length,
       openProposals: createdProposals.filter((proposal) => proposal.status === "proposed").length,
       artifacts: createdArtifacts.length,
-      semanticNodes: createdNodes.length,
-      semanticRelations: createdRelations.length,
+      semanticNodes: semanticNodeDelta.count,
+      semanticRelations: semanticRelationDelta.count,
     },
     facetDeltas: {
       imports: {
         byCorpus: countDelta(createdImportRuns, "corpusId", "unknown"),
       },
-      semanticNodes: {
-        byNodeKind: countDelta(createdNodes, "nodeKind", "unknown"),
-        byStatus: countDelta(createdNodes, "status", "unknown"),
-        byCorpus: countDelta(createdNodes, "corpusId", "unknown"),
-        byCategorySet: countDelta(createdNodes, "categorySetId", "unknown"),
-      },
-      semanticRelations: {
-        byRelationTypeKey: countDelta(createdRelations, "relationTypeKey", "unknown"),
-        byRelationDomain: countDelta(createdRelations, "relationDomain", "unknown"),
-        bySubjectKind: countDelta(createdRelations, "subjectKind", "unknown"),
-        byObjectKind: countDelta(createdRelations, "objectKind", "unknown"),
-      },
+      semanticNodes: semanticNodeDelta.facets,
+      semanticRelations: semanticRelationDelta.facets,
     },
   }, {
     actorLabel,
     reason,
   });
-  console.log(`newsroom\tsummary-snapshot\tincremental\tanalysis-import\truns=${createdImportRuns.length}\tartifacts=${createdArtifacts.length}\tproposals=${createdProposals.length}\tnodes=${createdNodes.length}\trelations=${createdRelations.length}`);
+  console.log(`newsroom\tsummary-snapshot\tincremental\tanalysis-import\truns=${createdImportRuns.length}\tartifacts=${createdArtifacts.length}\tproposals=${createdProposals.length}\tnodes=${semanticNodeDelta.count}\trelations=${semanticRelationDelta.count}`);
+}
+
+function currentSemanticNodeDeltaFromChanges(changes = []) {
+  const delta = {
+    count: 0,
+    facets: { byNodeKind: {}, byStatus: {}, byCorpus: {}, byCategorySet: {} },
+  };
+  for (const change of changes.filter((entry) => entry.modelName === "SemanticNode" && entry.action !== "noop")) {
+    applySemanticNodeContribution(delta, change.current, -1);
+    applySemanticNodeContribution(delta, change.expected, 1);
+  }
+  return delta;
+}
+
+function applySemanticNodeContribution(delta, node, amount) {
+  if (!node || node.versionState !== "current") return;
+  delta.count += amount;
+  incrementObject(delta.facets.byNodeKind, stringFacetValue(node.nodeKind, "unknown"), amount);
+  incrementObject(delta.facets.byStatus, stringFacetValue(node.status, "unknown"), amount);
+  incrementObject(delta.facets.byCorpus, stringFacetValue(node.corpusId, "unknown"), amount);
+  incrementObject(delta.facets.byCategorySet, stringFacetValue(node.categorySetId, "unknown"), amount);
+}
+
+function currentSemanticRelationDeltaFromChanges(changes = []) {
+  const delta = {
+    count: 0,
+    facets: { byRelationTypeKey: {}, byRelationDomain: {}, bySubjectKind: {}, byObjectKind: {} },
+  };
+  for (const change of changes.filter((entry) => entry.modelName === "SemanticRelation" && entry.action !== "noop")) {
+    applySemanticRelationContribution(delta, change.current, -1);
+    applySemanticRelationContribution(delta, change.expected, 1);
+  }
+  return delta;
+}
+
+function applySemanticRelationContribution(delta, relation, amount) {
+  if (!relation || relation.relationState !== "current") return;
+  delta.count += amount;
+  incrementObject(delta.facets.byRelationTypeKey, stringFacetValue(relation.relationTypeKey ?? relation.predicate, "unknown"), amount);
+  incrementObject(delta.facets.byRelationDomain, stringFacetValue(relation.relationDomain, "unknown"), amount);
+  incrementObject(delta.facets.bySubjectKind, stringFacetValue(relation.subjectKind, "unknown"), amount);
+  incrementObject(delta.facets.byObjectKind, stringFacetValue(relation.objectKind, "unknown"), amount);
+}
+
+function incrementObject(target, key, amount) {
+  target[key] = (target[key] ?? 0) + amount;
+}
+
+function stringFacetValue(value, fallback) {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
 
 function countDelta(items, key, defaultValue) {
@@ -4141,6 +5463,11 @@ function buildReferenceAnalysisManifest({ corpusConfig, corpusId, references, at
     .filter((reference) => reference.corpusId === corpusId)
     .filter(isCurrentAcceptedReference)
     .sort(compareReferencesForExport);
+  const missingSource = acceptedReferences.filter((reference) => !sourceStoragePathForReference(reference, attachments));
+  if (missingSource.length) {
+    const examples = missingSource.slice(0, 5).map((reference) => `${reference.id}:${reference.sourceUri ?? "no-source-uri"}`).join(", ");
+    throw new Error(`Cannot export analysis manifest: ${missingSource.length} accepted current references in ${corpusId} lack corpus source material. Run references source-status and accession URL-only references first. Examples: ${examples}`);
+  }
   return {
     schema_version: 1,
     export_kind: "papyrus-reference-analysis-manifest",
@@ -4225,6 +5552,919 @@ function referenceManifestItem(reference, attachments) {
       sha256: attachment.sha256 ?? null,
     })),
   };
+}
+
+function normalizeSourceStatusFilter(value) {
+  const normalized = String(value ?? "all").trim().toLowerCase();
+  if (["pending", "accepted", "rejected", "archived", "all"].includes(normalized)) return normalized;
+  throw new Error("--status must be pending, accepted, rejected, archived, or all.");
+}
+
+function nextReferenceSourceCommand(row) {
+  if (row.state === SOURCE_READINESS_STATES.URL_ONLY) {
+    return `npm run content -- references accession-now --reference ${row.reference.id}`;
+  }
+  if (row.state === SOURCE_READINESS_STATES.EXTRACTABLE) {
+    return "run Biblicus extraction for this corpus";
+  }
+  if (row.state === SOURCE_READINESS_STATES.BLOCKED) {
+    return "add sourceUri or corpus storagePath before extraction";
+  }
+  return "-";
+}
+
+function printReferenceAccessionAssignmentSummary(rows, changes, { apply }) {
+  const modelCounts = changes.reduce((memo, record) => {
+    memo[record.modelName] = (memo[record.modelName] ?? 0) + 1;
+    return memo;
+  }, {});
+  const actionCounts = changes.reduce((memo, record) => {
+    memo[record.action] = (memo[record.action] ?? 0) + 1;
+    return memo;
+  }, {});
+  console.log(`references\tcreate-accession-assignments\tcandidates\t${rows.length}`);
+  console.log(`references\tcreate-accession-assignments\tmodels\t${Object.entries(modelCounts).sort(([left], [right]) => left.localeCompare(right)).map(([model, count]) => `${model}=${count}`).join(" ")}`);
+  console.log(`references\tcreate-accession-assignments\tsummary\tcreate=${actionCounts.create ?? 0}\tupdate=${actionCounts.update ?? 0}\tnoop=${actionCounts.noop ?? 0}`);
+  console.log(`references\tcreate-accession-assignments\tapply\t${apply ? "yes" : "no"}`);
+  const changed = changes.filter((entry) => entry.action !== "noop");
+  const printLimit = 25;
+  for (const change of changed.slice(0, printLimit)) {
+    console.log(`${change.action}\t${change.modelName}\t${change.expected.id}`);
+  }
+  if (changed.length > printLimit) {
+    console.log(`references\tcreate-accession-assignments\tomitted\t${changed.length - printLimit}\tshowing first ${printLimit} planned changes`);
+  }
+}
+
+function findReferenceForSourceAccession(references, selector) {
+  const selected = String(selector ?? "");
+  return references.find((reference) => reference.id === selected)
+    ?? references.find((reference) => reference.lineageId === selected && reference.versionState === "current")
+    ?? references.find((reference) => reference.externalItemId === selected && reference.versionState === "current")
+    ?? null;
+}
+
+function requireCorpusConfigByIdOrKey(steeringConfig, corpusId, corpusKey) {
+  if (corpusKey) return requireCorpusConfig(steeringConfig, corpusKey, "--corpus-key");
+  const match = (steeringConfig.corpora ?? []).find((corpus) => knowledgeCorpusId(corpus) === corpusId);
+  if (!match) throw new Error(`Could not resolve corpus config for ${corpusId}; pass --corpus-key.`);
+  return match;
+}
+
+function buildReferenceAccessionAssignmentRecords(rows, { corpusConfig, corpusId, assignments = [], actorLabel, now }) {
+  const records = [];
+  for (const row of rows) {
+    const reference = row.reference;
+    if (row.state !== SOURCE_READINESS_STATES.URL_ONLY) continue;
+    if (activeReferenceAccessionAssignment(assignments, reference, corpusId)) continue;
+    const assignment = referenceAccessionAssignmentRecord(reference, row.readiness, {
+      corpusConfig,
+      corpusId,
+      actorLabel,
+      now,
+    });
+    records.push(
+      { modelName: "Assignment", expected: assignment },
+      { modelName: "AssignmentEvent", expected: assignmentCreatedEventRecord(assignment, actorLabel, now) },
+      { modelName: "SemanticRelation", expected: localSemanticRelationRecord({
+        predicate: "requests_work_on",
+        subjectKind: "assignment",
+        subjectId: assignment.id,
+        subjectLineageId: assignment.id,
+        subjectVersionNumber: null,
+        objectKind: "reference",
+        objectId: reference.id,
+        objectLineageId: reference.lineageId,
+        objectVersionNumber: reference.versionNumber,
+        rank: 1,
+        importRunId: null,
+        importedAt: now,
+        metadata: {
+          kind: "reference.corpus-accession.requests_work_on",
+          sourceReadinessBefore: row.readiness.state,
+        },
+      }) },
+    );
+  }
+  return records;
+}
+
+function referenceTextExtractionAssignmentRecord({ corpusConfig, corpusId, actorLabel, now, options, runId }) {
+  const assignmentTypeKey = "reference.text-extraction";
+  const queueKey = `${assignmentTypeKey}#${corpusId}`;
+  const policy = getAssignmentTypePolicy(assignmentTypeKey);
+  const stages = normalizeExtractionStages(options.stage);
+  const metadata = {
+    kind: "reference.text-extraction.requested",
+    runId,
+    corpusKey: corpusConfig.key,
+    corpusId,
+    corpusPath: corpusConfig.path,
+    expectedStoragePrefix: corpusConfig.s3Prefix ?? null,
+    extractionPipeline: options.configuration ? null : stages,
+    extractionConfigurationPath: options.configuration ?? null,
+    options: pruneUndefined({
+      configuration: options.configuration,
+      stage: stages,
+      force: parseBooleanOption(options.force, false, "--force"),
+      "max-workers": normalizeCliPositiveInteger(options["max-workers"], "--max-workers"),
+    }),
+    instructions: "Run Biblicus text extraction against accessioned corpus source files, then register text.txt artifacts as extracted_text ReferenceAttachment rows. Do not copy extracted text into GraphQL.",
+  };
+  return {
+    id: `assignment-reference-text-extraction-${hashShort([corpusId, runId])}`,
+    assignmentTypeKey,
+    queueKey,
+    queueStatusKey: `${queueKey}#open`,
+    status: "open",
+    priority: 0,
+    title: `Extract reference text for ${corpusConfig.key}`,
+    brief: `Run Biblicus extraction for ${corpusConfig.key} and register extracted text attachments.`,
+    instructions: metadata.instructions,
+    metadata: JSON.stringify(metadata),
+    assigneeKey: null,
+    claimToken: null,
+    claimedAt: null,
+    claimExpiresAt: null,
+    createdAt: now,
+    updatedAt: now,
+    completedAt: null,
+    canceledAt: null,
+    dueAt: null,
+    source: "papyrus-content-cli",
+    sourceDetail: `references extract-text-now ${corpusConfig.key}`,
+    importRunId: null,
+    handlerKey: policy.handlerKey,
+  };
+}
+
+function activeReferenceAccessionAssignment(assignments, reference, corpusId) {
+  const expectedId = referenceAccessionAssignmentId(reference, corpusId);
+  return assignments.some((assignment) => (
+    assignment.id === expectedId
+  ));
+}
+
+function referenceAccessionAssignmentId(reference, corpusId) {
+  return `assignment-reference-corpus-accession-${hashShort([corpusId, reference.lineageId])}`;
+}
+
+function referenceAccessionAssignmentRecord(reference, readiness, { corpusConfig, corpusId, actorLabel, now }) {
+  const assignmentTypeKey = "reference.corpus-accession";
+  const queueKey = `${assignmentTypeKey}#${corpusId}`;
+  const policy = getAssignmentTypePolicy(assignmentTypeKey);
+  const biblicusItemId = isUuidString(reference.externalItemId)
+    ? reference.externalItemId
+    : deterministicUuid(`papyrus-reference-accession:${reference.lineageId}`);
+  const accessionMode = isUuidString(reference.externalItemId)
+    ? "update-current-lineage"
+    : "create-uuid-replacement";
+  return {
+    id: referenceAccessionAssignmentId(reference, corpusId),
+    assignmentTypeKey,
+    queueKey,
+    queueStatusKey: `${queueKey}#open`,
+    status: "open",
+    priority: 60,
+    title: reference.title ? `Accession source: ${reference.title}` : `Accession source ${reference.externalItemId}`,
+    brief: "Materialize this URL-only reference prospect into the configured Biblicus corpus so extraction and analysis can use durable source material.",
+    instructions: "Download the source URI into the corpus accession, write a Biblicus sidecar, run Biblicus reindex, update Reference source metadata, and do not copy source text into GraphQL.",
+    assigneeType: null,
+    assigneeId: null,
+    assigneeKey: null,
+    claimedAt: null,
+    claimExpiresAt: null,
+    completedAt: null,
+    canceledAt: null,
+    corpusId,
+    categorySetId: null,
+    classifierId: null,
+    sourceSnapshotId: null,
+    importRunId: null,
+    createdBy: actorLabel ?? "papyrus-content-cli",
+    createdAt: now,
+    updatedAt: now,
+    newsroomFeedKey: "assignments",
+    metadata: JSON.stringify({
+      kind: "reference.corpus-accession.requested",
+      referenceId: reference.id,
+      referenceLineageId: reference.lineageId,
+      sourceUri: reference.sourceUri,
+      corpusKey: corpusConfig.key,
+      corpusId,
+      corpusPath: corpusConfig.path,
+      expectedStoragePrefix: `${String(corpusConfig.path ?? "").replace(/\/+$/g, "")}/imports/`,
+      s3Prefix: corpusConfig.s3Prefix ?? null,
+      accessionMode,
+      biblicusItemId,
+      sourceReadinessBefore: readiness.state,
+      assignmentTypePolicy: policy,
+    }),
+  };
+}
+
+function assignmentCreatedEventRecord(assignment, actorLabel, now) {
+  return {
+    id: `assignment-event-${assignment.id}-created`,
+    assignmentId: assignment.id,
+    assignmentTypeKey: assignment.assignmentTypeKey,
+    queueKey: assignment.queueKey,
+    eventType: "created",
+    fromStatus: null,
+    toStatus: assignment.status,
+    actorSub: null,
+    actorLabel: actorLabel ?? "papyrus-content-cli",
+    note: assignment.brief ?? null,
+    createdAt: now,
+    metadata: JSON.stringify({
+      kind: `${assignment.assignmentTypeKey}.created`,
+      source: "content-cli",
+    }),
+  };
+}
+
+function localSemanticRelationRecord(input) {
+  const subjectStateKey = semanticStateKey(input.subjectKind, input.subjectLineageId);
+  const objectStateKey = semanticStateKey(input.objectKind, input.objectLineageId);
+  const subjectVersionKey = `${input.subjectKind}#${input.subjectId}`;
+  const objectVersionKey = `${input.objectKind}#${input.objectId}`;
+  return {
+    id: `semantic-relation-${hashShort([
+      subjectVersionKey,
+      input.predicate,
+      objectVersionKey,
+      input.rank ?? "",
+      input.classifierId ?? "",
+      input.modelVersion ?? "",
+    ])}`,
+    relationState: "current",
+    predicate: input.predicate,
+    ...semanticRelationTypeFieldsForPredicate(input.predicate),
+    subjectKind: input.subjectKind,
+    subjectId: input.subjectId,
+    subjectLineageId: input.subjectLineageId,
+    subjectVersionNumber: input.subjectVersionNumber ?? null,
+    objectKind: input.objectKind,
+    objectId: input.objectId,
+    objectLineageId: input.objectLineageId,
+    objectVersionNumber: input.objectVersionNumber ?? null,
+    subjectStateKey,
+    objectStateKey,
+    objectSubjectStateKey: `${objectStateKey}#${input.subjectKind}`,
+    predicateObjectStateKey: `${input.predicate}#${objectStateKey}`,
+    subjectVersionKey,
+    objectVersionKey,
+    score: input.score ?? null,
+    confidence: input.confidence ?? null,
+    rank: input.rank ?? null,
+    classifierId: input.classifierId ?? null,
+    modelVersion: input.modelVersion ?? null,
+    reviewRecommended: Boolean(input.reviewRecommended),
+    sourceSnapshotId: input.sourceSnapshotId ?? null,
+    importRunId: input.importRunId ?? null,
+    importedAt: input.importedAt ?? null,
+    createdAt: input.createdAt ?? input.importedAt ?? new Date().toISOString(),
+    updatedAt: input.updatedAt ?? input.importedAt ?? new Date().toISOString(),
+    newsroomFeedKey: "semanticRelations",
+    metadata: JSON.stringify(input.metadata ?? {}),
+  };
+}
+
+async function downloadReferenceSourceMaterial(reference, { biblicusItemId, runDir }) {
+  const downloadUri = sourceDownloadUriForReference(reference);
+  const response = await fetch(downloadUri, {
+    headers: {
+      "user-agent": "papyrus-reference-accession/1",
+    },
+  });
+  if (!response.ok) {
+    throw createReferenceAccessionError(`Failed to download ${downloadUri}: ${response.status} ${response.statusText}.`, {
+      kind: "download_failed",
+    });
+  }
+  const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim() || mediaTypeFromUrl(downloadUri) || "application/octet-stream";
+  const buffer = Buffer.from(await response.arrayBuffer());
+  if (!buffer.length) {
+    throw createReferenceAccessionError(`Downloaded source for ${reference.id} was empty.`, {
+      kind: "download_empty",
+    });
+  }
+  const filename = referenceAccessionFilename({
+    itemId: biblicusItemId,
+    sourceUri: downloadUri,
+    title: reference.title,
+    mediaType: contentType,
+  });
+  const downloadPath = path.join(runDir, filename);
+  fs.writeFileSync(downloadPath, buffer);
+  return {
+    buffer,
+    downloadPath,
+    filename,
+    downloadUri,
+    mediaType: contentType,
+    byteSize: buffer.length,
+    sha256: crypto.createHash("sha256").update(buffer).digest("hex"),
+  };
+}
+
+function writeReferenceSourceAccession({ reference, sourceMaterial, corpusConfig, corpusPath, biblicusItemId, actorLabel }) {
+  const importsDir = path.join(corpusPath, "imports");
+  fs.mkdirSync(importsDir, { recursive: true });
+  const localPath = path.join(importsDir, sourceMaterial.filename);
+  fs.copyFileSync(sourceMaterial.downloadPath, localPath);
+  const relpath = path.relative(corpusPath, localPath).split(path.sep).join("/");
+  const storagePath = `${String(corpusConfig.path).replace(/\/+$/g, "")}/${relpath}`;
+  const sidecarPath = `${localPath}.biblicus.yml`;
+  const sidecar = {
+    title: reference.title ?? undefined,
+    authors: Array.isArray(reference.authors) ? reference.authors : undefined,
+    media_type: sourceMaterial.mediaType,
+    biblicus: {
+      id: biblicusItemId,
+      source: reference.sourceUri,
+    },
+    dates: {
+      published_at: reference.sourcePublishedAt ?? undefined,
+      updated_at: reference.sourceUpdatedAt ?? undefined,
+      retrieved_at: reference.retrievedAt ?? new Date().toISOString(),
+    },
+    papyrus: {
+      reference_id: reference.id,
+      reference_lineage_id: reference.lineageId,
+      download_uri: sourceMaterial.downloadUri,
+      accessioned_by: actorLabel ?? "papyrus-content-cli",
+      accessioned_at: new Date().toISOString(),
+    },
+  };
+  fs.writeFileSync(sidecarPath, YAML.stringify(pruneUndefined(sidecar)), "utf8");
+  return {
+    biblicusItemId,
+    localPath,
+    sidecarPath,
+    relpath,
+    storagePath,
+    sourceUri: reference.sourceUri,
+    mediaType: sourceMaterial.mediaType,
+    byteSize: sourceMaterial.byteSize,
+    sha256: sourceMaterial.sha256,
+  };
+}
+
+function runBiblicusReindexForAccession({ corpusPath, biblicusWorkdir, runDir }) {
+  const stdoutLogPath = path.join(runDir, "biblicus-reindex.stdout.log");
+  const stderrLogPath = path.join(runDir, "biblicus-reindex.stderr.log");
+  const result = spawnSync("uv", ["run", "biblicus", "reindex", "--corpus", corpusPath], {
+    cwd: biblicusWorkdir,
+    encoding: "utf8",
+  });
+  fs.writeFileSync(stdoutLogPath, result.stdout ?? "", "utf8");
+  fs.writeFileSync(stderrLogPath, result.stderr ?? "", "utf8");
+  if (result.error || result.status !== 0) {
+    throw createReferenceAccessionError(`Biblicus reindex failed for ${corpusPath}. See ${stderrLogPath}.`, {
+      kind: "biblicus_reindex_failed",
+      commandResult: {
+        label: "biblicus-reindex",
+        stdoutLogPath,
+        stderrLogPath,
+        exitStatus: result.status,
+        signal: result.signal ?? null,
+      },
+      stdoutLogPaths: [stdoutLogPath],
+      stderrLogPaths: [stderrLogPath],
+    });
+  }
+  return {
+    label: "biblicus-reindex",
+    stdoutLogPath,
+    stderrLogPath,
+    exitStatus: result.status,
+    signal: result.signal ?? null,
+  };
+}
+
+function maybeSyncAccessionToS3({ corpusConfig, corpusPath, runDir, options }) {
+  if (!options["sync-s3"] && !options["sync-s3-apply"]) {
+    return {
+      skipped: true,
+      reason: "pass --sync-s3 for dry-run and --sync-s3-apply for actual sync",
+    };
+  }
+  if (!corpusConfig.s3Prefix) throw new Error(`Corpus ${corpusConfig.key} does not define s3Prefix.`);
+  const dryRunLogPath = path.join(runDir, "s3-sync-dryrun.stdout.log");
+  const dryRun = spawnSync("aws", [
+    "s3", "sync",
+    corpusPath,
+    corpusConfig.s3Prefix,
+    "--exclude", ".DS_Store",
+    "--exclude", "*/.DS_Store",
+    "--dryrun",
+  ], { encoding: "utf8" });
+  fs.writeFileSync(dryRunLogPath, dryRun.stdout ?? "", "utf8");
+  if (dryRun.error || dryRun.status !== 0) {
+    throw createReferenceAccessionError(`S3 sync dry-run failed. See ${dryRunLogPath}.`, {
+      kind: "s3_sync_dryrun_failed",
+    });
+  }
+  if (!options["sync-s3-apply"]) {
+    return {
+      skipped: true,
+      dryRunLogPath,
+      reason: "dry-run completed; pass --sync-s3-apply to sync source accession material",
+    };
+  }
+  const stdoutLogPath = path.join(runDir, "s3-sync.stdout.log");
+  const stderrLogPath = path.join(runDir, "s3-sync.stderr.log");
+  const result = spawnSync("aws", [
+    "s3", "sync",
+    corpusPath,
+    corpusConfig.s3Prefix,
+    "--exclude", ".DS_Store",
+    "--exclude", "*/.DS_Store",
+  ], { encoding: "utf8" });
+  fs.writeFileSync(stdoutLogPath, result.stdout ?? "", "utf8");
+  fs.writeFileSync(stderrLogPath, result.stderr ?? "", "utf8");
+  if (result.error || result.status !== 0) {
+    throw createReferenceAccessionError(`S3 sync failed. See ${stderrLogPath}.`, {
+      kind: "s3_sync_failed",
+      stdoutLogPaths: [stdoutLogPath],
+      stderrLogPaths: [stderrLogPath],
+    });
+  }
+  return {
+    skipped: false,
+    dryRunLogPath,
+    stdoutLogPath,
+    stderrLogPath,
+  };
+}
+
+function buildReferenceAccessionGraphqlRecords({ reference, corpusConfig, corpusId, importRunId, accession, sourceMaterial, metadata, actorLabel }) {
+  const now = new Date().toISOString();
+  const replacementMode = metadata.accessionMode === "create-uuid-replacement";
+  const nextReference = replacementMode
+    ? newReferenceForAccessionReplacement(reference, corpusId, importRunId, accession, actorLabel, now)
+    : nextReferenceVersionForAccession(reference, importRunId, accession, actorLabel, now);
+  const records = [
+    { modelName: "KnowledgeImportRun", expected: {
+      id: importRunId,
+      corpusId,
+      importKind: "reference-corpus-accession",
+      classifierId: null,
+      sourceSnapshotId: null,
+      status: "imported",
+      generatedAt: now,
+      importedAt: now,
+      itemCount: 1,
+      categoryCount: 0,
+      proposalCount: 0,
+      artifactCount: 0,
+      referenceCount: 1,
+      relationCount: replacementMode ? 1 : 0,
+      warningCount: 0,
+    } },
+    { modelName: "KnowledgeRawPayload", expected: {
+      id: `knowledge-raw-payload-${safeId(importRunId)}-reference-accession`,
+      ownerType: "importRun",
+      ownerId: importRunId,
+      payloadKind: "reference-corpus-accession",
+      importRunId,
+      payload: JSON.stringify({
+        snapshot_kind: "papyrus-reference-corpus-accession",
+        reference_id: reference.id,
+        reference_lineage_id: reference.lineageId,
+        source_uri: reference.sourceUri,
+        storage_path: accession.storagePath,
+        media_type: accession.mediaType,
+        byte_size: accession.byteSize,
+        sha256: accession.sha256,
+        biblicus_item_id: accession.biblicusItemId,
+      }),
+      createdAt: now,
+      updatedAt: now,
+    } },
+    { modelName: "Reference", expected: nextReference },
+    { modelName: "ReferenceAttachment", expected: referenceAttachmentForAccession(nextReference, accession, importRunId, now) },
+  ];
+  if (replacementMode) {
+    records.push({ modelName: "SemanticRelation", expected: localSemanticRelationRecord({
+      predicate: "derived_from",
+      subjectKind: "reference",
+      subjectId: nextReference.id,
+      subjectLineageId: nextReference.lineageId,
+      subjectVersionNumber: nextReference.versionNumber,
+      objectKind: "reference",
+      objectId: reference.id,
+      objectLineageId: reference.lineageId,
+      objectVersionNumber: reference.versionNumber,
+      rank: 1,
+      importRunId,
+      importedAt: now,
+      metadata: {
+        kind: "reference.corpus-accession.replacement",
+        replacedExternalItemId: reference.externalItemId,
+      },
+    }) });
+  }
+  return records;
+}
+
+function nextReferenceVersionForAccession(reference, importRunId, accession, actorLabel, now) {
+  const metadata = {
+    ...parseJsonish(reference.metadata),
+    source_readiness: "accessioned",
+    accessioned_at: now,
+    accessioned_by: actorLabel,
+    accession_import_run_id: importRunId,
+  };
+  return {
+    ...reference,
+    id: `${reference.lineageId}-v1`,
+    importRunId,
+    importedAt: now,
+    storagePath: accession.storagePath,
+    mediaType: accession.mediaType,
+    byteSize: accession.byteSize,
+    sha256: accession.sha256,
+    retrievedAt: reference.retrievedAt ?? now,
+    metadata: JSON.stringify(metadata),
+    updatedAt: now,
+    contentHash: hashShort({
+      referenceId: reference.id,
+      storagePath: accession.storagePath,
+      mediaType: accession.mediaType,
+      byteSize: accession.byteSize,
+      sha256: accession.sha256,
+      curationStatus: reference.curationStatus,
+    }),
+    versionCreatedAt: now,
+    versionCreatedBy: actorLabel,
+    changeReason: "reference-corpus-accession",
+  };
+}
+
+function newReferenceForAccessionReplacement(reference, corpusId, importRunId, accession, actorLabel, now) {
+  const lineageId = `reference-${safeId(corpusId)}-${safeId(accession.biblicusItemId)}`;
+  const metadata = {
+    ...parseJsonish(reference.metadata),
+    source_readiness: "accessioned",
+    accessioned_at: now,
+    accessioned_by: actorLabel,
+    accession_import_run_id: importRunId,
+    replaced_reference_id: reference.id,
+    replaced_reference_lineage_id: reference.lineageId,
+    replaced_external_item_id: reference.externalItemId,
+  };
+  const next = {
+    ...reference,
+    id: `${lineageId}-v1`,
+    lineageId,
+    versionNumber: 1,
+    previousVersionId: null,
+    versionState: "current",
+    versionCreatedAt: now,
+    versionCreatedBy: actorLabel,
+    changeReason: "reference-corpus-accession-replacement",
+    externalItemId: accession.biblicusItemId,
+    corpusId,
+    importRunId,
+    importedAt: now,
+    storagePath: accession.storagePath,
+    mediaType: accession.mediaType,
+    byteSize: accession.byteSize,
+    sha256: accession.sha256,
+    retrievedAt: reference.retrievedAt ?? now,
+    curationStatus: reference.curationStatus ?? "pending",
+    curationStatusKey: `${corpusId}#${reference.curationStatus ?? "pending"}`,
+    metadata: JSON.stringify(metadata),
+    updatedAt: now,
+  };
+  next.contentHash = hashShort({
+    referenceId: next.id,
+    storagePath: next.storagePath,
+    mediaType: next.mediaType,
+    byteSize: next.byteSize,
+    sha256: next.sha256,
+    curationStatus: next.curationStatus,
+  });
+  return next;
+}
+
+function referenceAttachmentForAccession(reference, accession, importRunId, now) {
+  const referenceVersionKey = `reference#${reference.id}`;
+  return {
+    id: `reference-attachment-${hashShort([referenceVersionKey, "source", "001-source", accession.storagePath])}`,
+    referenceId: reference.id,
+    referenceLineageId: reference.lineageId,
+    referenceVersionNumber: reference.versionNumber,
+    referenceVersionKey,
+    role: "source",
+    sortKey: "001-source",
+    storagePath: accession.storagePath,
+    sourceUri: accession.sourceUri,
+    filename: path.basename(accession.localPath),
+    mediaType: accession.mediaType,
+    byteSize: accession.byteSize,
+    sha256: accession.sha256,
+    etag: null,
+    importRunId,
+    importedAt: now,
+    metadata: JSON.stringify({
+      source: "reference.corpus-accession",
+      localPath: accession.localPath,
+      sidecarPath: accession.sidecarPath,
+      biblicusItemId: accession.biblicusItemId,
+    }),
+  };
+}
+
+function buildExtractedTextAttachmentRecords({ corpusConfig, corpusId, references, attachments, extractionIndex }) {
+  const now = new Date().toISOString();
+  const existingKeys = new Set(attachments.map((attachment) => [
+    attachment.referenceLineageId,
+    attachment.role,
+    attachment.storagePath,
+  ].join("\n")));
+  const records = [];
+  for (const reference of references
+    .filter((entry) => entry.corpusId === corpusId)
+    .filter((entry) => entry.versionState === "current")
+    .filter((entry) => entry.externalItemId && extractionIndex.textByItemId?.has(entry.externalItemId))) {
+    const extracted = extractionIndex.textByItemId.get(reference.externalItemId);
+    const relativePath = path.relative(path.resolve(corpusConfig.path), extracted.localPath).split(path.sep).join("/");
+    const storagePath = `${String(corpusConfig.path).replace(/\/+$/g, "")}/${relativePath}`;
+    const key = [reference.lineageId, "extracted_text", storagePath].join("\n");
+    if (existingKeys.has(key)) continue;
+    let byteSize = null;
+    let sha256 = null;
+    try {
+      const bytes = fs.readFileSync(extracted.localPath);
+      byteSize = bytes.length;
+      sha256 = crypto.createHash("sha256").update(bytes).digest("hex");
+    } catch {
+      // The row is skipped if the file disappears between scan and plan.
+      continue;
+    }
+    records.push({ modelName: "ReferenceAttachment", expected: {
+      id: `reference-attachment-${hashShort([`reference#${reference.id}`, "extracted_text", storagePath])}`,
+      referenceId: reference.id,
+      referenceLineageId: reference.lineageId,
+      referenceVersionNumber: reference.versionNumber,
+      referenceVersionKey: `reference#${reference.id}`,
+      role: "extracted_text",
+      sortKey: "900-extracted-text",
+      storagePath,
+      sourceUri: null,
+      filename: "text.txt",
+      mediaType: "text/plain",
+      byteSize,
+      sha256,
+      etag: null,
+      importRunId: null,
+      importedAt: now,
+      metadata: JSON.stringify({
+        source: "biblicus-extraction-snapshot",
+        extractorId: "pipeline",
+        extractionSnapshotId: extracted.snapshotId,
+        localPath: extracted.localPath,
+      }),
+    } });
+  }
+  return records;
+}
+
+function normalizeExtractionStages(value) {
+  if (Array.isArray(value) && value.length) return value.map(String).filter(Boolean);
+  if (typeof value === "string" && value.trim()) {
+    return value.split(",").map((entry) => entry.trim()).filter(Boolean);
+  }
+  return ["pass-through-text", "pdf-text", "metadata-text"];
+}
+
+function runBiblicusTextExtractionForCorpus({ corpusPath, biblicusWorkdir, runDir, options = {} }) {
+  const stdoutLogPath = path.join(runDir, "biblicus-extract.stdout.log");
+  const stderrLogPath = path.join(runDir, "biblicus-extract.stderr.log");
+  const args = ["run", "--extra", "topic-modeling", "biblicus", "extract", "build", "--corpus", corpusPath];
+  if (options.configuration) {
+    args.push("--configuration", String(options.configuration));
+  } else {
+    for (const stage of normalizeExtractionStages(options.stage)) {
+      args.push("--stage", stage);
+    }
+  }
+  if (parseBooleanOption(options.force, false, "--force")) args.push("--force");
+  const maxWorkers = normalizeCliPositiveInteger(options["max-workers"], "--max-workers");
+  if (maxWorkers) args.push("--max-workers", String(maxWorkers));
+  const uvArgs = ensureUvBiblicusExtras(args, ["topic-modeling"]);
+  const result = spawnSync("uv", uvArgs, {
+    cwd: biblicusWorkdir,
+    encoding: "utf8",
+    maxBuffer: 1024 * 1024 * 256,
+  });
+  fs.writeFileSync(stdoutLogPath, result.stdout ?? "", "utf8");
+  fs.writeFileSync(stderrLogPath, result.stderr ?? "", "utf8");
+  if (result.status !== 0) {
+    throw createReferenceAccessionError(`Biblicus text extraction failed for ${corpusPath}. See ${stderrLogPath}.`, {
+      runId: path.basename(runDir),
+      manifestPath: path.join(runDir, "execution-manifest.json"),
+      kind: "biblicus_text_extraction_failed",
+      commandResult: {
+        label: "biblicus-extract-build",
+        executable: "uv",
+        args: uvArgs,
+        cwd: biblicusWorkdir,
+        stdoutLogPath,
+        stderrLogPath,
+        exitStatus: result.status,
+        signal: result.signal ?? null,
+        timedOut: false,
+      },
+      stdoutLogPaths: [stdoutLogPath],
+      stderrLogPaths: [stderrLogPath],
+    });
+  }
+  return {
+    label: "biblicus-extract-build",
+    executable: "uv",
+    args: uvArgs,
+    cwd: biblicusWorkdir,
+    stdoutLogPath,
+    stderrLogPath,
+    exitStatus: result.status,
+    signal: result.signal ?? null,
+    timedOut: false,
+  };
+}
+
+function augmentReferenceAccessionChangesForReplacement(changes, { reference, accession, metadata }) {
+  if (metadata.accessionMode !== "create-uuid-replacement") return changes;
+  const now = new Date().toISOString();
+  return [
+    ...changes,
+    {
+      modelName: "Reference",
+      current: reference,
+      expected: {
+        id: reference.id,
+        curationStatus: "archived",
+        curationStatusKey: `${reference.corpusId}#archived`,
+        curationStatusUpdatedAt: now,
+        curationStatusUpdatedBy: "papyrus-content-cli",
+        curationStatusReason: `Replaced by corpus accession reference ${accession.biblicusItemId}.`,
+        updatedAt: now,
+      },
+      action: "update",
+    },
+  ];
+}
+
+async function updateNewsroomSummaryAfterReferenceAccession(client, changes, { actorLabel = "Papyrus content CLI", reason = "reference accession" } = {}) {
+  const createdByModel = new Map();
+  for (const record of changes.filter((entry) => entry.action === "create")) {
+    if (!createdByModel.has(record.modelName)) createdByModel.set(record.modelName, []);
+    createdByModel.get(record.modelName).push(record.expected);
+  }
+  const createdRelations = createdByModel.get("SemanticRelation") ?? [];
+  const referenceDelta = computeCurrentReferenceDeltaFromChanges(changes);
+  await client.updateNewsroomSummary({
+    source: "incremental",
+    latestImportRun: createdByModel.get("KnowledgeImportRun")?.[0] ?? null,
+    countDeltas: {
+      importRuns: createdByModel.get("KnowledgeImportRun")?.length ?? 0,
+      referenceAttachments: createdByModel.get("ReferenceAttachment")?.length ?? 0,
+      references: referenceDelta.countDelta,
+      semanticRelations: createdRelations.length,
+    },
+    referenceStatusDeltas: referenceDelta.statusDeltas,
+    facetDeltas: {
+      references: {
+        byCurationStatus: referenceDelta.statusDeltas,
+        byCorpus: referenceDelta.corpusDeltas,
+        statusByCorpus: referenceDelta.statusByCorpusDeltas,
+      },
+      semanticRelations: {
+        byRelationTypeKey: countDelta(createdRelations, "relationTypeKey", "unknown"),
+        byRelationDomain: countDelta(createdRelations, "relationDomain", "unknown"),
+        bySubjectKind: countDelta(createdRelations, "subjectKind", "unknown"),
+        byObjectKind: countDelta(createdRelations, "objectKind", "unknown"),
+      },
+      imports: {
+        byCorpus: countDelta(createdByModel.get("KnowledgeImportRun") ?? [], "corpusId", "unknown"),
+      },
+    },
+  }, {
+    actorLabel,
+    reason,
+  });
+  console.log(`newsroom\tsummary-snapshot\tincremental\treference-accession\treferences=${referenceDelta.countDelta}\tattachments=${createdByModel.get("ReferenceAttachment")?.length ?? 0}`);
+}
+
+async function updateNewsroomSummaryAfterExtractedTextAttachments(client, changes, { actorLabel = "Papyrus content CLI", reason = "extracted text attachments" } = {}) {
+  const createdAttachments = changes
+    .filter((entry) => entry.modelName === "ReferenceAttachment" && entry.action === "create")
+    .map((entry) => entry.expected);
+  if (!createdAttachments.length) return;
+  await client.updateNewsroomSummary({
+    source: "incremental",
+    countDeltas: {
+      referenceAttachments: createdAttachments.length,
+    },
+  }, {
+    actorLabel,
+    reason,
+  });
+  console.log(`newsroom\tsummary-snapshot\tincremental\textracted-text-attachments=${createdAttachments.length}`);
+}
+
+function createReferenceAccessionError(message, artifacts = {}) {
+  const error = new Error(message);
+  attachAnalysisFailureArtifacts(error, artifacts);
+  return error;
+}
+
+function resolveBiblicusWorkdir(options = {}) {
+  const configured = normalizeCliString(options["biblicus-workdir"]) ?? normalizeCliString(process.env.BIBLICUS_WORKDIR);
+  return path.resolve(configured ?? path.join(process.cwd(), "..", "Biblicus"));
+}
+
+function referenceAccessionFilename({ itemId, sourceUri, title, mediaType }) {
+  const parsed = safeUrl(sourceUri);
+  const uriPart = encodeURIComponent(sourceUri).slice(0, 100);
+  const titlePart = safeId(title || parsed?.pathname?.split("/").filter(Boolean).pop() || "source").slice(0, 80);
+  const ext = extensionForMediaType(mediaType, parsed?.pathname);
+  return `${itemId}--${uriPart}--${titlePart}${ext}`;
+}
+
+function sourceDownloadUriForReference(reference) {
+  const sourceUri = String(reference.sourceUri ?? "");
+  const parsed = safeUrl(sourceUri);
+  if (!parsed) return sourceUri;
+  if ((parsed.hostname === "arxiv.org" || parsed.hostname === "www.arxiv.org") && parsed.pathname.startsWith("/abs/")) {
+    const arxivId = parsed.pathname.replace(/^\/abs\//, "").replace(/\/+$/g, "");
+    if (arxivId) return `https://arxiv.org/pdf/${arxivId}.pdf`;
+  }
+  return sourceUri;
+}
+
+function extensionForMediaType(mediaType, pathname = "") {
+  const suffix = pathname ? path.extname(pathname).toLowerCase() : "";
+  if (suffix && suffix.length <= 8) return suffix;
+  const normalized = String(mediaType ?? "").toLowerCase();
+  if (normalized === "application/pdf") return ".pdf";
+  if (normalized === "text/html") return ".html";
+  if (normalized === "text/markdown") return ".md";
+  if (normalized.startsWith("text/")) return ".txt";
+  if (normalized === "audio/mpeg" || normalized === "audio/mp3") return ".mp3";
+  if (normalized === "audio/ogg") return ".ogg";
+  if (normalized === "audio/wav" || normalized === "audio/x-wav") return ".wav";
+  if (normalized === "video/mp4") return ".mp4";
+  return "";
+}
+
+function mediaTypeFromUrl(sourceUri) {
+  const parsed = safeUrl(sourceUri);
+  const suffix = parsed ? path.extname(parsed.pathname).toLowerCase() : "";
+  if (suffix === ".pdf") return "application/pdf";
+  if (suffix === ".html" || suffix === ".htm") return "text/html";
+  if (suffix === ".md" || suffix === ".markdown") return "text/markdown";
+  if (suffix === ".txt") return "text/plain";
+  if (suffix === ".mp3") return "audio/mpeg";
+  if (suffix === ".wav") return "audio/x-wav";
+  if (suffix === ".ogg") return "audio/ogg";
+  return null;
+}
+
+function safeUrl(value) {
+  try {
+    return new URL(value);
+  } catch {
+    return null;
+  }
+}
+
+function deterministicUuid(value) {
+  const bytes = crypto.createHash("sha256").update(String(value)).digest();
+  bytes[6] = (bytes[6] & 0x0f) | 0x50;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.subarray(0, 16).toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
+
+function isUuidString(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value ?? ""));
+}
+
+function pruneUndefined(value) {
+  if (Array.isArray(value)) return value.map(pruneUndefined).filter((entry) => entry !== undefined);
+  if (value && typeof value === "object") {
+    const next = {};
+    for (const [key, entry] of Object.entries(value)) {
+      const pruned = pruneUndefined(entry);
+      if (pruned !== undefined) next[key] = pruned;
+    }
+    return next;
+  }
+  return value === undefined || value === null ? undefined : value;
 }
 
 function filterProjectionPayloadForAcceptedReferences(payload, references, targetCorpusId) {
@@ -5163,6 +7403,14 @@ function hashShort(value) {
   return crypto.createHash("sha256").update(typeof value === "string" ? value : JSON.stringify(value)).digest("hex").slice(0, 16);
 }
 
+function safeId(value) {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 140) || hashShort(value);
+}
+
 function semanticStateKey(kind, lineageId) {
   return `${kind}#${lineageId}#current`;
 }
@@ -5240,6 +7488,11 @@ function printUsage() {
   console.log("  npm run content -- references prepare-catalog --config <steering.yml> --corpus-key <key> --catalog <catalog.json> --output <prepared.json>");
   console.log("  npm run content -- references register-catalog --config <steering.yml> --corpus-key <key> --catalog <catalog.json> --status pending --ingestion-rationale <text> --apply");
   console.log("  npm run content -- references register-catalog --config <steering.yml> --corpus-key <key> --catalog <catalog.json> --status rejected --reason-code out_of_scope --note <text> --apply");
+  console.log("  npm run content -- references source-status --config <steering.yml> --corpus-key <key> --status all");
+  console.log("  npm run content -- references create-accession-assignments --config <steering.yml> --corpus-key <key> --status pending --apply");
+  console.log("  npm run content -- references accession-now --reference <reference-id> --assignee-key <worker-run-id>");
+  console.log("  npm run content -- references extract-text-now --config <steering.yml> --corpus-key <key> --assignee-key <worker-run-id> --stage pass-through-text,pdf-text,metadata-text");
+  console.log("  npm run content -- references attach-extracted-text --config <steering.yml> --corpus-key <key> --apply");
   console.log("  npm run content -- references export-analysis-manifest --config <steering.yml> --corpus-key <key> --output <accepted-manifest.json>");
   console.log("  npm run content -- references export-scope-training --config <steering.yml> --corpus-key <key> --output <scope-training.json>");
   console.log("  npm run content -- references review-curation --reference <id> --action accept|reject|reopen|archive --reason-code out_of_scope --note <text>");
@@ -5265,10 +7518,11 @@ function printUsage() {
   console.log("  npm run content -- analysis execute-assignment --assignment <analysis-assignment-id> --max-runtime-seconds 3600");
   console.log("  npm run content -- newsroom recount-summary --apply");
   console.log("  npm run content -- newsroom backfill-feed-fields --apply");
-  console.log("  npm run content -- editions plan --date YYYY-MM-DD --dry-run");
-  console.log("  npm run content -- editions plan --date YYYY-MM-DD --focus-categories automated-publication-systems,agentic-workflows --context-profile analysis --dry-run");
-  console.log("  npm run content -- editions dispatch-research --date YYYY-MM-DD --apply");
-  console.log("  npm run content -- editions dispatch-research --date YYYY-MM-DD --focus-categories agentic-workflows,evaluation-qa --context-profile reporting --apply");
+  console.log("  npm run content -- newsroom import-sections --config corpora/papyrus-newsroom-sections.yml");
+  console.log("  npm run content -- editions plan --date YYYY-MM-DD --section-targets desk.key:news,other.desk:history --dry-run");
+  console.log("  npm run content -- editions plan --date YYYY-MM-DD --focus-categories automated-publication-systems,agentic-workflows --section-targets automated-publication-systems:methods,agentic-workflows:technology --context-profile analysis --dry-run");
+  console.log("  npm run content -- editions dispatch-research --date YYYY-MM-DD --section-targets desk.key:news --apply");
+  console.log("  npm run content -- editions dispatch-research --date YYYY-MM-DD --focus-categories agentic-workflows,evaluation-qa --section-targets agentic-workflows:technology,evaluation-qa:methods --context-profile reporting --apply");
 }
 
 function printEditionPlanningSummary(plan, report, mode) {
@@ -5276,6 +7530,7 @@ function printEditionPlanningSummary(plan, report, mode) {
   console.log(`edition-planning\tedition\t${plan.edition.id}\t${plan.edition.slug}\t${plan.edition.status}`);
   console.log(`edition-planning\tcategory-set\t${plan.categorySet.id}\t${plan.categorySet.displayName}`);
   console.log(`edition-planning\tdesks\t${plan.desks.length}`);
+  console.log(`edition-planning\tsections\t${(plan.sections ?? []).join(",") || "none"}`);
   console.log(`edition-planning\tassignments\t${plan.assignments.length}`);
   console.log(`edition-planning\tcontext-backed\t${plan.summary.contextBackedAssignmentCount}`);
   console.log(`edition-planning\trecords\tcreate=${plan.summary.createCount}\tupdate=${plan.summary.updateCount}\tnoop=${plan.summary.noopCount}`);
@@ -5439,6 +7694,7 @@ function analysisFailureArtifactsFromError(error) {
       stdoutLogPaths,
       stderrLogPaths,
       commandResult: attached.commandResult ?? null,
+      graphExportPath: attached.graphExportPath ?? null,
     };
   }
   const message = error instanceof Error ? error.message : String(error ?? "");
@@ -5450,6 +7706,7 @@ function analysisFailureArtifactsFromError(error) {
       stdoutLogPaths: [],
       stderrLogPaths: [],
       commandResult: null,
+      graphExportPath: null,
     };
   }
   const stderrLogPath = match[1];
@@ -5461,6 +7718,7 @@ function analysisFailureArtifactsFromError(error) {
     stdoutLogPaths: [stderrLogPath.replace(/\.stderr\.log$/i, ".stdout.log")],
     stderrLogPaths: [stderrLogPath],
     commandResult: null,
+    graphExportPath: null,
   };
 }
 

@@ -63,6 +63,11 @@ const {
   computeCurrentReferenceDeltaFromChanges,
   normalizeNewsroomSummaryPayload,
 } = require("./lib/papyrus-newsroom-summary.cjs");
+const {
+  SOURCE_READINESS_STATES,
+  buildReferenceSourceStatusRows,
+  referenceSourceReadiness,
+} = require("./lib/papyrus-reference-source-readiness.cjs");
 
 const steeringBundle = {
   generated_at: "2026-05-16T12:00:00.000Z",
@@ -752,6 +757,32 @@ assert.equal(pendingCatalogPlan.records.some((record) => record.modelName === "S
 assert.equal(pendingCatalogPlan.records.some((record) => record.modelName === "Item"), false);
 assert.equal(pendingCatalogPlan.records.some((record) => record.modelName === "EditionItem"), false);
 assert.equal(pendingCatalogPlan.records.some((record) => record.modelName === "SemanticRelation" && ["classified_as", "uses_evidence"].includes(record.expected.predicate)), false);
+const urlOnlyReference = {
+  ...pendingCatalogReference,
+  id: "reference-url-only-v1",
+  lineageId: "reference-url-only",
+  externalItemId: "url-only",
+  sourceUri: "https://example.com/url-only.pdf",
+  storagePath: null,
+};
+assert.equal(referenceSourceReadiness(urlOnlyReference, []).state, SOURCE_READINESS_STATES.URL_ONLY);
+assert.equal(referenceSourceReadiness(pendingCatalogReference, pendingCatalogAttachments.map((entry) => entry.expected)).state, SOURCE_READINESS_STATES.EXTRACTABLE);
+assert.equal(referenceSourceReadiness(pendingCatalogReference, [
+  ...pendingCatalogAttachments.map((entry) => entry.expected),
+  {
+    referenceLineageId: pendingCatalogReference.lineageId,
+    role: "extracted_text",
+    storagePath: "corpora/source-corpus/extracted/pipeline/snapshot/text/catalog-001.txt",
+    mediaType: "text/plain",
+  },
+]).state, SOURCE_READINESS_STATES.EXTRACTED);
+const sourceRows = buildReferenceSourceStatusRows({
+  corpusId: "knowledge-corpus-source-corpus",
+  curationStatus: "pending",
+  references: [pendingCatalogReference, urlOnlyReference],
+  attachments: pendingCatalogAttachments.map((entry) => entry.expected),
+});
+assert.deepEqual(sourceRows.map((row) => row.state).sort(), [SOURCE_READINESS_STATES.EXTRACTABLE, SOURCE_READINESS_STATES.URL_ONLY].sort());
 assert.throws(
   () => buildReferenceCatalogRegistrationRecords({ items: [{ id: "catalog-no-rationale" }] }, {
     corpusConfig: sourceCorpusConfig,
@@ -864,6 +895,8 @@ const analysisAssignmentPlan = buildAnalysisReindexAssignmentRecords(analysisPla
 });
 assert.equal(getAssignmentTypePolicy("analysis.reindex").claimPolicy, "exclusive");
 assert.equal(getAssignmentTypePolicy("research.edition-candidate").claimPolicy, "optional");
+assert.equal(getAssignmentTypePolicy("reference.corpus-accession").claimPolicy, "exclusive");
+assert.equal(getAssignmentTypePolicy("reference.text-extraction").claimPolicy, "exclusive");
 const analysisAssignment = findRecord(analysisAssignmentPlan.records, "Assignment", (record) => record.assignmentTypeKey === "analysis.reindex");
 assert.equal(analysisAssignment.status, "open");
 assert.equal(analysisAssignment.queueKey, "analysis:reindex:canonical-corpus:topic-classifier-train");
@@ -930,13 +963,26 @@ const editionPlanningState = {
   semanticNodes: projectionPlan.records.filter((record) => record.modelName === "SemanticNode").map((record) => record.expected),
   assignments: [],
   assignmentEvents: [],
+  newsroomSections: [
+    {
+      id: "technology",
+      title: "Technology",
+      type: "canonical",
+      editorialMission: "Cover tools and systems.",
+      editorialPolicy: "Prioritize practical capabilities.",
+      enabled: true,
+      sortOrder: 1,
+    },
+  ],
 };
 const editionPlan = buildEditionPlanningPlan(editionPlanningState, {
   editionDate: "2026-05-19",
   now: "2026-05-18T12:00:00.000Z",
   topDeskCount: 1,
   publicationSlots: 1,
+  sectionTargets: [`${fallbackTaxonomyNode.categoryKey}:technology`],
 });
+const sectionTargets = [`${fallbackTaxonomyNode.categoryKey}:technology`];
 assert.equal(editionPlan.edition.slug, "edition-2026-05-19");
 assert.equal(editionPlan.edition.status, "planning");
 assert.equal(editionPlan.records.some((record) => record.modelName === "PublishedEdition"), false);
@@ -957,6 +1003,9 @@ assert.equal(reportingMetadata.focusCategoryTitle, "Scaling Agents");
 assert.equal(reportingMetadata.contextProfile, "reporting");
 assert.equal(reportingMetadata.contextTokenBudget, 4000);
 assert.deepEqual(reportingMetadata.contextSources, ["doctrine", "focus-category", "desk-memory", "fresh-evidence"]);
+assert.equal(reportingMetadata.sectionId, "technology");
+assert.equal(reportingMetadata.sectionTitle, "Technology");
+assert.equal(reportingMetadata.sectionType, "canonical");
 assert.equal(reportingMetadata.researchTrackKey, "live-desk-context");
 assert.equal(reportingMetadata.researchLens, focusCategoryAlpha.categoryKey);
 const editionRelation = findRecord(editionPlan.records, "SemanticRelation", (record) => record.subjectId === reportingAssignment.id && record.predicate === "planned_for_edition");
@@ -1040,6 +1089,7 @@ const editionPlanRerun = buildEditionPlanningPlan(persistedEditionPlanState, {
   now: "2026-05-18T12:00:00.000Z",
   topDeskCount: 1,
   publicationSlots: 1,
+  sectionTargets,
 });
 assert.equal(editionPlanRerun.records.filter((record) => record.modelName === "Assignment" && record.action === "create").length, 0);
 const cappedEditionPlan = buildEditionPlanningPlan(editionPlanningState, {
@@ -1048,6 +1098,7 @@ const cappedEditionPlan = buildEditionPlanningPlan(editionPlanningState, {
   topDeskCount: 1,
   publicationSlots: 1,
   maxAssignments: 2,
+  sectionTargets,
 });
 assert.equal(cappedEditionPlan.assignments.length, 2);
 const focusedEditionPlan = buildEditionPlanningPlan(editionPlanningState, {
@@ -1055,6 +1106,7 @@ const focusedEditionPlan = buildEditionPlanningPlan(editionPlanningState, {
   now: "2026-05-18T12:00:00.000Z",
   topDeskCount: 1,
   publicationSlots: 1,
+  sectionTargets,
   contextProfile: "analysis",
   targetSystemType: "research newsroom",
 });
@@ -1072,6 +1124,7 @@ const focusedEditionPlanRerun = buildEditionPlanningPlan(editionPlanningState, {
   now: "2026-05-18T12:00:00.000Z",
   topDeskCount: 1,
   publicationSlots: 1,
+  sectionTargets,
   contextProfile: "analysis",
   targetSystemType: "research newsroom",
 });
@@ -1085,6 +1138,7 @@ const focusedSubsetPlan = buildEditionPlanningPlan(editionPlanningState, {
   topDeskCount: 1,
   publicationSlots: 1,
   focusCategories: ["topic.scaling-evals"],
+  sectionTargets,
 });
 assert.deepEqual(
   focusedSubsetPlan.assignments.map((assignment) => JSON.parse(assignment.metadata).focusCategoryKey),
@@ -1097,6 +1151,7 @@ assert.throws(
     topDeskCount: 1,
     publicationSlots: 1,
     focusCategories: ["topic.not-real"],
+    sectionTargets,
   }),
   /Unknown focus category/,
 );
@@ -1107,6 +1162,7 @@ assert.match(schemaSource, /Message:\s*a\s*\n\s*\.model/);
 assert.doesNotMatch(schemaSource, /KnowledgeComment:\s*a\s*\n\s*\.model/);
 assert.match(schemaSource, /Assignment:\s*a\s*\n\s*\.model/);
 assert.match(schemaSource, /AssignmentEvent:\s*a\s*\n\s*\.model/);
+assert.match(schemaSource, /NewsroomSection:\s*a\s*\n\s*\.model/);
 const claimAssignmentSource = schemaSource.match(/claimAssignment:[\s\S]*?releaseAssignment:/)?.[0] ?? "";
 assert.match(claimAssignmentSource, /assigneeKey:\s*a\.string\(\)/);
 assert.match(claimAssignmentSource, /claimExpiresAt:\s*a\.datetime\(\)/);

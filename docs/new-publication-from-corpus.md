@@ -93,6 +93,14 @@ sanitized `KnowledgeRawPayload`, `Reference`, `ReferenceAttachment`,
 Papyrus may store provenance and workflow metadata; it must not copy source
 text, PDF contents, transcripts, or extraction payloads into GraphQL.
 
+URL-only registration is allowed for curation visibility, but it is not a
+corpus accession. A `Reference` with `sourceUri` and no `storagePath` is a
+reviewable prospect, not an extraction-ready source. Before text extraction,
+create a `reference.corpus-accession` assignment to materialize the source into
+the configured Biblicus corpus. Text availability is then represented by a
+`ReferenceAttachment` with `role = "extracted_text"` pointing at the corpus
+`text.txt` artifact or Biblicus extraction snapshot text file.
+
 ## Bootstrap Procedure
 
 1. Define the publication and corpus set in a steering config. Use
@@ -124,6 +132,7 @@ text, PDF contents, transcripts, or extraction payloads into GraphQL.
      --output .papyrus-runs/<run-id>/sandbox-steering.yml
 
    npm run content -- categories import-config --config <steering.yml>
+   npm run content -- newsroom import-sections --config corpora/papyrus-newsroom-sections.yml
    npm run content -- relations import-types --config corpora/papyrus-semantic-relation-types.yml
    ```
 
@@ -152,7 +161,41 @@ text, PDF contents, transcripts, or extraction payloads into GraphQL.
    feed topic modeling, graph analysis, desk memory, context packs, assignment
    evidence, or edition planning.
 
-7. Export the accepted-only analysis manifest for Biblicus.
+7. Ensure accepted references have source material and text artifacts. Use
+   `source-status` to find URL-only or unextracted references, accession the
+   sources, run Biblicus extraction through `reference.text-extraction`, and
+   register extracted text attachments. Accession and extraction are separate:
+   the first creates or updates corpus source files, and the second creates
+   `text.txt` artifacts that GraphQL references by path.
+
+   ```bash
+   npm run content -- references source-status \
+     --config <steering.yml> \
+     --corpus-key <corpus-key> \
+     --status all
+
+   npm run content -- references create-accession-assignments \
+     --config <steering.yml> \
+     --corpus-key <corpus-key> \
+     --status pending \
+     --apply
+
+   npm run content -- references accession-now \
+     --reference <reference-id> \
+     --assignee-key <worker-run-id>
+
+   npm run content -- references extract-text-now \
+     --config <steering.yml> \
+     --corpus-key <corpus-key> \
+     --assignee-key <worker-run-id>
+
+   npm run content -- references attach-extracted-text \
+     --config <steering.yml> \
+     --corpus-key <corpus-key> \
+     --apply
+   ```
+
+8. Export the accepted-only analysis manifest for Biblicus.
 
    ```bash
    npm run content -- references export-analysis-manifest \
@@ -161,15 +204,15 @@ text, PDF contents, transcripts, or extraction payloads into GraphQL.
      --output .papyrus-runs/<run-id>/accepted-reference-manifest.json
    ```
 
-8. Run Biblicus extraction and topic-modeling from that accepted-only manifest.
+9. Run Biblicus extraction and topic-modeling from that accepted-only manifest.
    Papyrus records the intent as `analysis.reindex` assignments; Biblicus owns
    execution and artifacts.
 
-9. Import accepted taxonomy, projection, and graph artifacts back into Papyrus
+10. Import accepted taxonomy, projection, and graph artifacts back into Papyrus
    through the category steering and projection commands.
 
-10. Repeat with adjusted analysis profiles until the top-level category set is
-    useful enough to operate as desks and publication sections.
+11. Repeat with adjusted analysis profiles until the top-level category set is
+   useful enough to operate as desks and to inform section planning.
 
 ## Controlling Topic Granularity
 

@@ -15,6 +15,22 @@ const ASSIGNMENT_TYPE_POLICIES = {
     workProductPolicy: "reference-curation-decision",
     description: "Reviews pending reference prospects and records accept/reject/archive decisions.",
   },
+  "reference.corpus-accession": {
+    assignmentTypeKey: "reference.corpus-accession",
+    handlerKey: "reference.corpus-accession",
+    claimPolicy: "exclusive",
+    defaultClaimTtlSeconds: 60 * 60,
+    workProductPolicy: "reference-attachment-and-corpus-file",
+    description: "Materializes URL-only reference prospects into durable Biblicus corpus source files.",
+  },
+  "reference.text-extraction": {
+    assignmentTypeKey: "reference.text-extraction",
+    handlerKey: "reference.text-extraction",
+    claimPolicy: "exclusive",
+    defaultClaimTtlSeconds: 2 * 60 * 60,
+    workProductPolicy: "reference-extracted-text-attachment",
+    description: "Runs Biblicus extraction for accessioned source materials and registers extracted text artifacts.",
+  },
   "research.edition-candidate": {
     assignmentTypeKey: "research.edition-candidate",
     handlerKey: "newsroom.research",
