@@ -65,8 +65,11 @@ const {
 } = require("./lib/papyrus-newsroom-summary.cjs");
 const {
   SOURCE_READINESS_STATES,
+  SOURCE_TEXT_STATES,
+  buildExtractionIndex,
   buildReferenceSourceStatusRows,
   referenceSourceReadiness,
+  stableExtractedTextStoragePath,
 } = require("./lib/papyrus-reference-source-readiness.cjs");
 
 const steeringBundle = {
@@ -767,15 +770,43 @@ const urlOnlyReference = {
 };
 assert.equal(referenceSourceReadiness(urlOnlyReference, []).state, SOURCE_READINESS_STATES.URL_ONLY);
 assert.equal(referenceSourceReadiness(pendingCatalogReference, pendingCatalogAttachments.map((entry) => entry.expected)).state, SOURCE_READINESS_STATES.EXTRACTABLE);
-assert.equal(referenceSourceReadiness(pendingCatalogReference, [
+const snapshotOnlyReadiness = referenceSourceReadiness(pendingCatalogReference, [
   ...pendingCatalogAttachments.map((entry) => entry.expected),
   {
     referenceLineageId: pendingCatalogReference.lineageId,
     role: "extracted_text",
     storagePath: "corpora/source-corpus/extracted/pipeline/snapshot/text/catalog-001.txt",
+    filename: "text.txt",
     mediaType: "text/plain",
   },
-]).state, SOURCE_READINESS_STATES.EXTRACTED);
+]);
+assert.equal(snapshotOnlyReadiness.state, SOURCE_READINESS_STATES.EXTRACTABLE);
+assert.equal(snapshotOnlyReadiness.textState, SOURCE_TEXT_STATES.MISSING_TEXT);
+const stableTextStoragePath = stableExtractedTextStoragePath("corpora/source-corpus", pendingCatalogReference.externalItemId);
+const stableTextReadiness = referenceSourceReadiness(pendingCatalogReference, [
+  ...pendingCatalogAttachments.map((entry) => entry.expected),
+  {
+    referenceLineageId: pendingCatalogReference.lineageId,
+    role: "extracted_text",
+    storagePath: stableTextStoragePath,
+    filename: "text.txt",
+    mediaType: "text/plain",
+  },
+]);
+assert.equal(stableTextReadiness.state, SOURCE_READINESS_STATES.EXTRACTED);
+assert.equal(stableTextReadiness.textState, SOURCE_TEXT_STATES.TEXT_READY);
+const extractionTempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "papyrus-extraction-index-"));
+const extractionTextDir = path.join(extractionTempRoot, "extracted", "pipeline", "snapshot-001", "text");
+fs.mkdirSync(extractionTextDir, { recursive: true });
+fs.writeFileSync(path.join(extractionTextDir, `${pendingCatalogReference.externalItemId}.txt`), "Extracted text snapshot.", "utf8");
+const snapshotIndex = buildExtractionIndex(extractionTempRoot);
+const snapshotReadiness = referenceSourceReadiness(
+  pendingCatalogReference,
+  pendingCatalogAttachments.map((entry) => entry.expected),
+  snapshotIndex,
+);
+assert.equal(snapshotReadiness.state, SOURCE_READINESS_STATES.EXTRACTABLE);
+assert.equal(snapshotReadiness.textState, SOURCE_TEXT_STATES.SNAPSHOT_EXTRACTED);
 const sourceRows = buildReferenceSourceStatusRows({
   corpusId: "knowledge-corpus-source-corpus",
   curationStatus: "pending",

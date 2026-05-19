@@ -92,9 +92,16 @@ path, checksum, media type, and sanitized provenance.
 
 Text availability is tracked as attachment metadata, not DynamoDB content. When
 Biblicus has produced text, register a `ReferenceAttachment` with
-`role = "extracted_text"` that points at the corpus text artifact, such as an
-`extracted/pipeline/<snapshot>/text/<item-id>.txt` file. Do not copy that text
-into `Reference.metadata`, `Message.body`, or a raw payload.
+`role = "extracted_text"` that points at the stable corpus text artifact:
+`corpora/<corpus>/imports/<item-id>/text.txt`. Biblicus snapshot text under
+`extracted/pipeline/<snapshot>/text/<item-id>.txt` is provenance only; run
+`references attach-extracted-text --apply` to materialize the stable artifact
+and register the attachment. Do not copy that text into `Reference.metadata`,
+`Message.body`, or a raw payload.
+
+Use `references source-status` to distinguish `snapshot_extracted` from
+`text_ready`. A snapshot-only reference still needs `attach-extracted-text`
+before it is eligible for analysis manifests.
 
 ## Stable IDs
 
@@ -326,6 +333,7 @@ npm run content -- references extract-text-now \
 npm run content -- references attach-extracted-text \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
+  --max-count 10 \
   --apply
 
 npm run content -- references export-analysis-manifest \

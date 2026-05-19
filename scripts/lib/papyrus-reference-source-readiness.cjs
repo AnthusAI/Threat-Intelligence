@@ -9,6 +9,13 @@ const SOURCE_READINESS_STATES = Object.freeze({
   BLOCKED: "blocked",
 });
 
+const SOURCE_TEXT_STATES = Object.freeze({
+  TEXT_READY: "text_ready",
+  SNAPSHOT_EXTRACTED: "snapshot_extracted",
+  MISSING_TEXT: "missing_text",
+  NOT_APPLICABLE: "not_applicable",
+});
+
 const EXTRACTABLE_MEDIA_TYPES = new Set([
   "application/pdf",
   "text/html",
@@ -44,10 +51,37 @@ function sourceMediaTypeForReference(reference, attachments = []) {
 }
 
 function textStoragePathForReference(reference, attachments = []) {
+  const expectedPath = stableExtractedTextStoragePathForReference(reference);
   const textAttachment = attachments
     .filter((attachment) => attachment.referenceLineageId === reference?.lineageId)
-    .find((attachment) => ["extracted_text", "text", "transcript"].includes(attachment.role) && hasCorpusStoragePath(attachment.storagePath));
+    .find((attachment) => (
+      attachment.role === "extracted_text"
+      && attachment.filename === "text.txt"
+      && hasCorpusStoragePath(attachment.storagePath)
+      && (!expectedPath || attachment.storagePath.endsWith(expectedPath))
+    ));
   return textAttachment?.storagePath ?? null;
+}
+
+function stableExtractedTextRelativePath(itemId) {
+  if (!itemId) return null;
+  return path.posix.join("imports", encodeURIComponent(String(itemId)), "text.txt");
+}
+
+function stableExtractedTextStoragePath(corpusPath, itemId) {
+  const relativePath = stableExtractedTextRelativePath(itemId);
+  if (!corpusPath || !relativePath) return null;
+  return `${String(corpusPath).replace(/\/+$/g, "")}/${relativePath}`;
+}
+
+function stableExtractedTextLocalPath(corpusPath, itemId) {
+  const relativePath = stableExtractedTextRelativePath(itemId);
+  if (!corpusPath || !relativePath) return null;
+  return path.join(path.resolve(corpusPath), ...relativePath.split("/"));
+}
+
+function stableExtractedTextStoragePathForReference(reference) {
+  return stableExtractedTextRelativePath(reference?.externalItemId);
 }
 
 function hasCorpusStoragePath(value) {
@@ -98,29 +132,41 @@ function referenceSourceReadiness(reference, attachments = [], extractionIndex =
   const textStoragePath = textStoragePathForReference(reference, attachments);
   const mediaType = sourceMediaTypeForReference(reference, attachments);
   const hasSourceUri = Boolean(reference?.sourceUri);
-  const extracted = Boolean(textStoragePath) || referenceHasExtractedText(reference, extractionIndex);
+  const hasExtractionSnapshot = referenceHasExtractedText(reference, extractionIndex);
+  const extracted = Boolean(textStoragePath);
   const extractable = isExtractableMediaType(mediaType);
+  const textState = textStoragePath
+    ? SOURCE_TEXT_STATES.TEXT_READY
+    : hasExtractionSnapshot
+      ? SOURCE_TEXT_STATES.SNAPSHOT_EXTRACTED
+      : storagePath && extractable
+        ? SOURCE_TEXT_STATES.MISSING_TEXT
+        : SOURCE_TEXT_STATES.NOT_APPLICABLE;
 
   if (extracted) {
     return {
       state: SOURCE_READINESS_STATES.EXTRACTED,
-      reason: textStoragePath ? "extracted_text_attachment_found" : "extraction_snapshot_found",
+      reason: "stable_text_attachment_found",
       storagePath,
       textStoragePath,
       mediaType,
       extracted: true,
       extractable,
+      hasExtractionSnapshot,
+      textState,
     };
   }
   if (storagePath && extractable) {
     return {
       state: SOURCE_READINESS_STATES.EXTRACTABLE,
-      reason: "corpus_source_available",
+      reason: hasExtractionSnapshot ? "snapshot_extracted_missing_stable_text" : "corpus_source_available",
       storagePath,
       textStoragePath,
       mediaType,
       extracted: false,
       extractable: true,
+      hasExtractionSnapshot,
+      textState,
     };
   }
   if (storagePath) {
@@ -132,6 +178,8 @@ function referenceSourceReadiness(reference, attachments = [], extractionIndex =
       mediaType,
       extracted: false,
       extractable: false,
+      hasExtractionSnapshot,
+      textState,
     };
   }
   if (hasSourceUri) {
@@ -143,6 +191,8 @@ function referenceSourceReadiness(reference, attachments = [], extractionIndex =
       mediaType,
       extracted: false,
       extractable: false,
+      hasExtractionSnapshot,
+      textState,
     };
   }
   return {
@@ -153,6 +203,8 @@ function referenceSourceReadiness(reference, attachments = [], extractionIndex =
     mediaType,
     extracted: false,
     extractable: false,
+    hasExtractionSnapshot,
+    textState,
   };
 }
 
@@ -186,6 +238,7 @@ function buildReferenceSourceStatusRows({
 module.exports = {
   EXTRACTABLE_MEDIA_TYPES,
   SOURCE_READINESS_STATES,
+  SOURCE_TEXT_STATES,
   buildExtractionIndex,
   buildReferenceSourceStatusRows,
   hasCorpusStoragePath,
@@ -194,5 +247,8 @@ module.exports = {
   referenceSourceReadiness,
   sourceMediaTypeForReference,
   sourceStoragePathForReference,
+  stableExtractedTextLocalPath,
+  stableExtractedTextRelativePath,
+  stableExtractedTextStoragePath,
   textStoragePathForReference,
 };
