@@ -40,11 +40,19 @@ The private agent context pack is assembled on demand from:
 - root-desk mission and policies
 - desk and focus-topic metadata
 - recent desk memory from published items, assignments, assignment events,
-  linked references, and knowledge comments
+  linked accepted references, and knowledge comments
 - fresh-evidence request parameters for the current lane/profile
 
 Papyrus assembles the source material. Biblicus compacts it into a
 token-budget-limited context pack.
+
+Only current accepted references enter evidence sets, graph/context analysis,
+desk memory, or edition planning. Pending reference prospects and rejected
+scope memory remain visible for curation and training workflows, but they are
+not publishable evidence. When a researcher proposes ingesting new source
+material, the handoff should include an ingestion rationale: what the reference
+is about, how it relates to the current focus, and how it fits the publication
+mission.
 
 ## Research Packet
 
@@ -58,6 +66,19 @@ and add the context-aware structure inside the same private packet:
 - `recommended_angle`
 - `comparison_findings`
 - `rubric_assessments`
+
+For live `Assignment` work, the packet is stored as a private `Message` with
+`messageKind = "research_packet"` and `messageDomain = "assignment_work"`,
+linked back to the `Assignment` by a `comment` `SemanticRelation`. Coding agents
+should inspect those packets with:
+
+```bash
+npm run content -- assignments research-packets --assignment <assignment-id>
+```
+
+Use [skills/newsroom-research-workflow/SKILL.md](/Users/ryan/Projects/Papyrus/skills/newsroom-research-workflow/SKILL.md)
+for the coding-agent workflow that turns packet `proposedReferences` into
+reference-intake catalog registrations.
 
 `doctrine_context` should record whether publication and desk doctrine were
 available, and whether the packet fell back to publication doctrine because the
@@ -81,7 +102,13 @@ The live-first newsroom flow is:
 3. Researchers can build a budgeted live context pack for the same assignment,
    normalize the live assignment context into the dry-run procedure contract,
    and return a structured packet with doctrine-backed findings.
-4. Reporters may use the same normalized live assignment path later, but draft
+4. When an assignment requires current external evidence, researchers and
+   reporters should import the Tactus stdlib web module inside `execute_tactus`:
+   `local web = require("tactus.web")` and call `web.search` or
+   `web.synthesize` with `provider = "openai"`. Papyrus does not own OpenAI,
+   future Perplexity, or future Gemini adapters; it only consumes the normalized
+   Tactus web results in dry-run packet and draft workflows.
+5. Reporters may use the same normalized live assignment path later, but draft
    mutation remains dry-run-only in this milestone.
 
 This formalizes the beat without changing the public reader surface or claiming

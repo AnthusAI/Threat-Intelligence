@@ -9,6 +9,10 @@ Use this skill when new source materials need to become visible in Papyrus as
 knowledge-base references, or when debugging why newly ingested corpus materials
 are not visible in the Newsroom.
 
+If the source material came from a research agent packet, first use
+[`skills/newsroom-research-workflow/SKILL.md`](/Users/ryan/Projects/Papyrus/skills/newsroom-research-workflow/SKILL.md)
+to inspect the assignment packet and extract `proposedReferences`.
+
 Papyrus owns newsroom visibility, reference metadata, assignments, comments,
 semantic links, and editorial steering state. Biblicus owns corpus ingestion,
 source files, extraction artifacts, classifier artifacts, graph artifacts, and
@@ -63,13 +67,19 @@ promos, ads, and reader-facing edition content. Assignments are private
 `Assignment` records. Do not create `Item` rows with `type: "assignment"` and
 do not use `Item` rows for corpus references.
 
-GraphQL stores strict private metadata and relationships only:
+GraphQL is the operational source of truth after registration. Files, folders,
+and catalogs are adapters into this workflow; they are not the queue. GraphQL
+stores strict private metadata and relationships only:
 
+- `KnowledgeImportRun`: the registration batch or generated-artifact import
+  that operators can inspect.
+- `KnowledgeRawPayload`: sanitized catalog/import summaries for monitoring,
+  never source bodies or extraction content.
 - `Reference`: stable Biblicus `item_id`, title, authors, source URI,
   normalized S3/corpus path, media type, checksums, dates, sanitized metadata.
 - `ReferenceAttachment`: private file-path metadata for source PDFs, text,
   transcripts, extraction JSON, and auxiliary corpus files.
-- `Message`: append-only private commentary such as import rationale and
+- `Message`: append-only private commentary such as ingestion rationale and
   reference-curation notes.
 - `Assignment`: private work item such as `curation.reference-intake`.
 - `SemanticRelation`: typed links from assignments/messages/references to exact
@@ -95,11 +105,49 @@ Use stable identifiers everywhere:
 Display names, titles, and source labels are editable copy. Do not key records
 or URLs from them.
 
+## Reference Status Policy
+
+Papyrus uses `Reference.curationStatus` as the editor decision field:
+
+- `pending`: a reference prospect that is visible for curation.
+- `accepted`: an accepted reference that is eligible for evidence sets, topic
+  modeling manifests, graph analysis, desk memory, context packs, and edition
+  planning.
+- `rejected`: a rejected reference retained as scope memory. Only
+  `out_of_scope` and `policy_exclusion` rejections become negative examples in
+  the scope training set.
+- `archived`: retained but inactive.
+
+Do not use pending, rejected, or archived references as publishable evidence or
+agent context. They may appear in the Reference Ledger, curation assignments,
+comments, votes, and scope-training exports.
+
+Every pending reference prospect registered through `references register-catalog`
+needs an ingestion rationale. Provide it in the catalog as
+`ingestion_rationale` or through `--ingestion-rationale`. The rationale should
+briefly summarize the source material, explain how it relates to the current
+research focus, and explain why it fits the publication mission.
+
+When a research packet supplies `proposedReferences`, each proposal is still
+only a reference prospect. Register it through `references register-catalog` or
+the repeatable Biblicus corpus path before any curation or evidence use. Do not
+copy web-search `evidence_candidate_id` values into `evidenceItemIds`; those are
+audit identifiers, not accepted reference ids.
+
 ## Current Intake Path
 
-The current production path does not have a dedicated `references` CLI yet.
-Reference visibility is created through Biblicus corpus work, S3 sync, and
-curation import/projection outputs:
+Reference visibility is created either through direct catalog registration or
+through Biblicus corpus work, S3 sync, and curation import/projection outputs:
+
+```bash
+npm run content -- references register-catalog \
+  --config corpora/papyrus-steering.yml \
+  --corpus-key <corpus-key> \
+  --catalog <catalog.json> \
+  --status pending \
+  --ingestion-rationale "<summary, research focus, editorial mission fit>" \
+  --apply
+```
 
 1. Put each source material in the correct configured Biblicus corpus. For the
    current pilot, journalism/publishing/automated-news papers belong in
@@ -137,7 +185,7 @@ curation import/projection outputs:
    ```
 
 5. The mapper creates or updates private `Reference` rows, private
-   `ReferenceAttachment` rows, optional import-rationale `Message`
+   `ReferenceAttachment` rows, optional ingestion-rationale `Message`
    rows, `curation.reference-intake` `Assignment` rows, and `SemanticRelation`
    links.
 6. The Newsroom reads the private models for signed-in editor/admin users.
@@ -161,7 +209,7 @@ After import, verify from the editor/private side:
 - `/newsroom/references` shows the new references or updated reference counts.
 - `/newsroom/assignments` shows `curation.reference-intake` assignments for
   references that need human or agent review.
-- a selected reference has attachment metadata, import rationale if available,
+- a selected reference has attachment metadata, ingestion rationale if available,
   and semantic links to categories or other graph objects when expected.
 - the curation-cycle `verification.json` has nonzero current references and no
   unresolved reference relations when projections were expected.
@@ -179,26 +227,80 @@ When reporting completion, include: corpus key, Biblicus `item_id`s, whether S3
 sync completed, curation-cycle run directory, verification result, and any
 references that failed to surface.
 
-## Future Direct Intake CLI
+## Direct Reference Registration CLI
 
-The desired direct Papyrus intake command does not exist yet. Do not pretend it
-does.
-
-When implemented, it should live under:
+Papyrus has a direct registration command for making Biblicus catalog/accession
+metadata visible in GraphQL without turning the material into evidence:
 
 ```bash
-npm run content -- references ...
+npm run content -- references prepare-catalog \
+  --config corpora/papyrus-steering.yml \
+  --corpus-key <corpus-key> \
+  --catalog <metadata/catalog.json> \
+  --output .papyrus-runs/<run-id>/<corpus-key>-prepared-catalog.json
+
+npm run content -- references register-catalog \
+  --config corpora/papyrus-steering.yml \
+  --corpus-key <corpus-key> \
+  --catalog .papyrus-runs/<run-id>/<corpus-key>-prepared-catalog.json \
+  --status pending \
+  --apply
 ```
 
-The future command family should register candidate source materials in Papyrus,
-create or update strict `Reference` metadata, link `ReferenceAttachment` file
-paths, create `curation.reference-intake` assignments, and hand off a stable
-manifest to Biblicus for actual corpus ingestion and artifact production.
+Use `prepare-catalog` for sandbox bootstrap rehearsals or legacy catalogs that
+lack item-level `ingestion_rationale`. It writes a run-local prepared catalog
+and must not rewrite source corpus metadata unless the user explicitly asks.
+
+Rejected registrations require structured scope memory:
+
+```bash
+npm run content -- references register-catalog \
+  --config corpora/papyrus-steering.yml \
+  --corpus-key <corpus-key> \
+  --catalog <metadata/catalog.json> \
+  --status rejected \
+  --reason-code out_of_scope \
+  --note "Outside the publication mission." \
+  --apply
+```
+
+`register-catalog` is dry-run by default. With `--apply`, it writes a
+`KnowledgeImportRun`, sanitized `KnowledgeRawPayload`, `Reference`,
+`ReferenceAttachment`, curation `Message`, `curation.reference-intake`
+`Assignment`, and audit/workflow `SemanticRelation` rows. Pending references get
+one open curation assignment each. Rejected registrations create curation
+commentary but no open review assignment unless explicitly requested. It must
+not create `Item`, `EditionItem`, `classified_as`, or `uses_evidence` records.
+
+To start from a live assignment research packet:
+
+```bash
+npm run content -- assignments research-packets --assignment <assignment-id>
+```
+
+Use the listed `proposedReferences` to build the catalog metadata, preserving
+each proposal's ingestion rationale. The catalog registration step is what makes
+the prospect visible as a pending or rejected `Reference`.
+
+Export accepted-only manifests before analysis runs:
+
+```bash
+npm run content -- references export-analysis-manifest \
+  --config corpora/papyrus-steering.yml \
+  --corpus-key <corpus-key> \
+  --output /tmp/accepted-reference-manifest.json
+
+npm run content -- references export-scope-training \
+  --config corpora/papyrus-steering.yml \
+  --corpus-key <corpus-key> \
+  --output /tmp/reference-scope-training.json
+```
 
 Biblicus should remain responsible for source ingestion, extraction, corpus
 sidecars, classifier artifacts, graph artifacts, and reproducible analysis
-commands. Papyrus should remain responsible for the GraphQL visibility layer,
-editor review workflow, assignments, comments, and semantic links.
+commands. Papyrus should remain responsible for GraphQL visibility, editor
+review workflow, assignments, comments, semantic links, accepted-only analysis
+manifests, and scope-training exports.
 
 If the direct CLI needs a Biblicus feature, ask the Biblicus agent for a stable
 contract such as Papyrus intake id to Biblicus `item_id` mapping, artifact path

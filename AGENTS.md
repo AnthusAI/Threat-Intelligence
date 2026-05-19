@@ -70,6 +70,12 @@ rendering contracts.
   behavior. Keep domain-specific guidance in doctrine/config data and do not add
   domain assumptions to `/newsroom`, the content CLI, GraphQL models, or layout
   code.
+- Coding agents that operate the research workflow should follow
+  `skills/newsroom-research-workflow/SKILL.md`. Live Assignment research packets
+  are private `Message` work products linked to `Assignment` by a `comment`
+  `SemanticRelation`; they are not files, folders, or new top-level models.
+  Inspect them with
+  `npm run content -- assignments research-packets --assignment <id>`.
 - Use an AWS profile for local Amplify/AWS access.
 - `.env` is for Papyrus runtime settings and the seed editor credentials used by
   `npm run seed:amplify`. `.env*` must stay ignored, and `.env.example` is the
@@ -92,6 +98,20 @@ rendering contracts.
   and stable external `item_id` references; Biblicus and S3 remain the owners of
   corpus content. Follow `skills/reference-intake/SKILL.md` for ingesting or
   registering new knowledge-base source materials correctly.
+- Research packet `proposedReferences` are source-material prospects for
+  reference intake, not accepted evidence. Register them through
+  `references register-catalog` or the repeatable Biblicus corpus path before
+  curation or evidence use. Only current accepted `Reference` rows may be used
+  for evidence sets, topic modeling, graph analysis, desk memory, context
+  packs, assignment evidence, or edition planning.
+- When bootstrapping a new publication from a file pile, follow
+  `skills/publication-bootstrap/SKILL.md` and
+  `docs/new-publication-from-corpus.md`. Convert loose files into a corpus
+  accession with stable item ids, sidecars, and `metadata/catalog.json`; then
+  register reference prospects, curate accepted references, export
+  accepted-only Biblicus manifests, and create `analysis.reindex` assignments
+  instead of hard-coding topic lists or running mixed-status corpora through
+  analysis.
 - The Newsroom is the newsroom operations surface. `Topics` is one desk tab,
   not the whole product concept. Use `/newsroom` and Newsroom naming in UI,
   docs, and tests. Future assignment and research queues should become desk tabs
