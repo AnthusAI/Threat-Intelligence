@@ -45,7 +45,7 @@ SEMANTIC_PREDICATES: dict[str, dict[str, str]] = {
 REFERENCE_FIELDS = """
 id lineageId versionNumber previousVersionId versionState versionCreatedAt versionCreatedBy changeReason contentHash
 corpusId externalItemId title authors sourceUri storagePath mediaType byteSize sha256 sourcePublishedAt sourceUpdatedAt
-    retrievedAt importRunId importedAt curationStatus curationStatusKey curationStatusUpdatedAt curationStatusUpdatedBy curationStatusReason metadata updatedAt
+    retrievedAt importRunId importedAt curationStatus curationStatusKey curationStatusUpdatedAt curationStatusUpdatedBy curationStatusReason updatedAt
 """
 
 ATTACHMENT_FIELDS = """
@@ -54,7 +54,7 @@ mediaType byteSize sha256 etag importRunId importedAt metadata
 """
 
 MESSAGE_FIELDS = """
-id messageKind messageDomain status body summary source importRunId authorSub authorUserProfileId authorLabel createdAt updatedAt metadata
+id messageKind messageDomain status summary source importRunId authorSub authorUserProfileId authorLabel createdAt updatedAt
 """
 
 RELATION_FIELDS = """

@@ -168,6 +168,26 @@ API_METHODS: dict[tuple[str, str], Callable[[dict[str, Any]], Any]] = {
     ("track", "list"): lambda args: newsroom.papyrus_list_research_tracks(),
     ("track", "get"): lambda args: newsroom.papyrus_get_research_track(args.get("key") or args.get("track_key")),
     ("reference", "get"): lambda args: newsroom.papyrus_get_reference(args.get("id") or args.get("reference_id")),
+    ("reference", "doi_backfill_plan"): lambda args: newsroom.papyrus_doi_backfill_plan(
+        corpus_key=args.get("corpus_key") or args.get("corpusKey") or "AI-ML-research",
+        max_count=args.get("max_count") or args.get("maxCount") or 0,
+        use_llm=bool(args.get("use_llm") or args.get("useLlm") or False),
+        llm_model=args.get("llm_model") or args.get("llmModel") or "",
+        llm_reasoning_effort=args.get("llm_reasoning_effort") or args.get("llmReasoningEffort") or "",
+        config_path=args.get("config_path") or args.get("configPath") or "",
+    ),
+    ("reference", "doi_backfill_run"): lambda args: newsroom.papyrus_doi_backfill_run(
+        corpus_key=args.get("corpus_key") or args.get("corpusKey") or "AI-ML-research",
+        max_count=args.get("max_count") or args.get("maxCount") or 0,
+        use_llm=bool(args.get("use_llm") or args.get("useLlm") or False),
+        llm_model=args.get("llm_model") or args.get("llmModel") or "",
+        llm_reasoning_effort=args.get("llm_reasoning_effort") or args.get("llmReasoningEffort") or "",
+        config_path=args.get("config_path") or args.get("configPath") or "",
+    ),
+    ("reference", "doi_backfill_manifest"): lambda args: newsroom.papyrus_doi_backfill_manifest(
+        run_id=args.get("run_id") or args.get("runId") or "",
+        manifest_path=args.get("manifest_path") or args.get("manifestPath") or "",
+    ),
     ("semantic", "object"): lambda args: newsroom.papyrus_get_semantic_object(
         kind=args.get("kind"),
         object_id=args.get("id") or args.get("object_id"),
@@ -264,6 +284,21 @@ DOCS: dict[str, dict[str, Any]] = {
             "publishable evidence."
         ),
     },
+    "newsroom.doi-backfill": {
+        "id": "newsroom.doi-backfill",
+        "title": "DOI Backfill",
+        "summary": "Assignment-first DOI resolution and identifier linking workflow.",
+        "namespace": "newsroom",
+        "status": "stable",
+        "tags": ["references", "doi", "identifiers"],
+        "content": (
+            "Use reference_doi_backfill_plan for canonical commands, then run "
+            "reference_doi_backfill_run for immediate mode or process queue claims "
+            "for assignment mode. The workflow resolves DOI deterministically first, "
+            "uses LLM adjudication only when configured, writes "
+            "digital_object_identifier_is relations, and persists DOI metadata."
+        ),
+    },
     "newsroom.web-research": {
         "id": "newsroom.web-research",
         "title": "Web Research",
@@ -291,6 +326,9 @@ HELPER_BINDINGS: tuple[tuple[str, str, str], ...] = (
     ("assignment_context", "assignment", "context"),
     ("assignment_agent_context", "assignment", "agent_context"),
     ("assignment_context_to_item", "assignment", "context_to_item"),
+    ("reference_doi_backfill_plan", "reference", "doi_backfill_plan"),
+    ("reference_doi_backfill_run", "reference", "doi_backfill_run"),
+    ("reference_doi_backfill_manifest", "reference", "doi_backfill_manifest"),
     ("recent_published_articles", "article", "recent_published"),
     ("biblicus_steering_artifacts", "biblicus", "steering_artifacts"),
     ("biblicus_topic_context", "biblicus", "topic_context"),

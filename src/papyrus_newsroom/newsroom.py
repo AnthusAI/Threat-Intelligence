@@ -148,8 +148,7 @@ query GetAssignment($id: ID!) {
     status
     priority
     title
-    brief
-    instructions
+    summary
     assigneeType
     assigneeId
     assigneeKey
@@ -172,7 +171,6 @@ query GetAssignment($id: ID!) {
     createdBy
     createdAt
     updatedAt
-    metadata
   }
 }
 """
@@ -188,8 +186,7 @@ query GetAssignmentContext($assignmentId: ID!) {
       status
       priority
       title
-      brief
-      instructions
+      summary
       assigneeType
       assigneeId
       assigneeKey
@@ -212,7 +209,6 @@ query GetAssignmentContext($assignmentId: ID!) {
       createdBy
       createdAt
       updatedAt
-      metadata
     }
     doctrine {
       scope
@@ -242,7 +238,6 @@ query GetAssignmentContext($assignmentId: ID!) {
       actorLabel
       note
       createdAt
-      metadata
     }
   }
 }
@@ -259,8 +254,7 @@ query ListAssignments($limit: Int, $nextToken: String) {
       status
       priority
       title
-      brief
-      instructions
+      summary
       assigneeType
       assigneeId
       assigneeKey
@@ -283,7 +277,6 @@ query ListAssignments($limit: Int, $nextToken: String) {
       createdBy
       createdAt
       updatedAt
-      metadata
     }
     nextToken
   }
@@ -403,7 +396,6 @@ query ListMessages($limit: Int, $nextToken: String) {
       messageKind
       messageDomain
       status
-      body
       summary
       source
       importRunId
@@ -412,7 +404,6 @@ query ListMessages($limit: Int, $nextToken: String) {
       authorLabel
       createdAt
       updatedAt
-      metadata
     }
     nextToken
   }
@@ -502,7 +493,9 @@ def papyrus_get_assignment(assignment_id: str) -> dict[str, Any]:
     assignment = data.get("getAssignment")
     if not assignment:
         raise ValueError(f"Assignment not found: {assignment_id}")
-    return {"assignment": _decode_record_json(assignment)}
+    decoded = _decode_record_json(assignment)
+    _hydrate_assignment_payloads(decoded)
+    return {"assignment": decoded}
 
 
 def papyrus_get_assignment_context(assignment_id: str) -> dict[str, Any]:
@@ -515,7 +508,13 @@ def papyrus_get_assignment_context(assignment_id: str) -> dict[str, Any]:
         context = data.get("getAssignmentContext")
         if not context:
             raise ValueError(f"Assignment context not found: {assignment_id}")
-        return {"assignment_context": _decode_record_json(context)}
+        decoded = _decode_record_json(context)
+        if isinstance(decoded.get("assignment"), dict):
+            _hydrate_assignment_payloads(decoded["assignment"])
+        for event in decoded.get("events") or []:
+            if isinstance(event, dict):
+                _hydrate_assignment_event_metadata(event)
+        return {"assignment_context": decoded}
     except RuntimeError as error:
         message = str(error)
         if "data environment variables are malformed" not in message:
@@ -785,6 +784,151 @@ def papyrus_list_reference_messages(reference_lineage_id: str) -> dict[str, Any]
     List private messages attached to one Reference lineage.
     """
     return _semantic_client().list_reference_messages(reference_lineage_id)
+
+
+def papyrus_doi_backfill_plan(
+    corpus_key: str = "AI-ML-research",
+    max_count: int = 0,
+    use_llm: bool = False,
+    llm_model: str = "",
+    llm_reasoning_effort: str = "",
+    config_path: str = "",
+) -> dict[str, Any]:
+    """
+    Build canonical CLI commands for assignment-first DOI backfill orchestration.
+    """
+    key = _required(corpus_key, "corpus_key")
+    commands = {
+        "create_assignment": [
+            "npm",
+            "run",
+            "content",
+            "--",
+            "references",
+            "create-doi-backfill-assignment",
+            "--corpus-key",
+            key,
+            "--apply",
+        ],
+        "run_now": [
+            "npm",
+            "run",
+            "content",
+            "--",
+            "references",
+            "doi-backfill-now",
+            "--corpus-key",
+            key,
+            "--use-llm",
+            "true" if use_llm else "false",
+        ],
+        "process_queue": [
+            "npm",
+            "run",
+            "content",
+            "--",
+            "assignments",
+            "process-queue",
+            "--type",
+            "reference.doi-backfill",
+            "--status",
+            "open",
+            "--max-count",
+            "10",
+        ],
+    }
+    if max_count and int(max_count) > 0:
+        commands["run_now"].extend(["--max-count", str(int(max_count))])
+    if llm_model:
+        commands["run_now"].extend(["--llm-model", llm_model.strip()])
+    if llm_reasoning_effort:
+        commands["run_now"].extend(["--llm-reasoning-effort", llm_reasoning_effort.strip()])
+    if config_path:
+        commands["create_assignment"].extend(["--config", config_path])
+        commands["run_now"].extend(["--config", config_path])
+    return {
+        "doi_backfill_plan": {
+            "corpusKey": key,
+            "mode": "assignment-first",
+            "resolverMode": "deterministic-first",
+            "useLlm": bool(use_llm),
+            "commands": {label: " ".join(command) for label, command in commands.items()},
+        }
+    }
+
+
+def papyrus_doi_backfill_run(
+    corpus_key: str = "AI-ML-research",
+    max_count: int = 0,
+    use_llm: bool = False,
+    llm_model: str = "",
+    llm_reasoning_effort: str = "",
+    config_path: str = "",
+) -> dict[str, Any]:
+    """
+    Execute DOI backfill through the canonical content CLI and return manifest summary.
+    """
+    command = [
+        "npm",
+        "run",
+        "content",
+        "--",
+        "references",
+        "doi-backfill-now",
+        "--corpus-key",
+        _required(corpus_key, "corpus_key"),
+        "--use-llm",
+        "true" if use_llm else "false",
+    ]
+    if max_count and int(max_count) > 0:
+        command.extend(["--max-count", str(int(max_count))])
+    if llm_model:
+        command.extend(["--llm-model", llm_model.strip()])
+    if llm_reasoning_effort:
+        command.extend(["--llm-reasoning-effort", llm_reasoning_effort.strip()])
+    if config_path:
+        command.extend(["--config", config_path])
+    result = subprocess.run(
+        command,
+        cwd=PAPYRUS_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    manifest_path = _extract_tsv_value(result.stdout, "references-doi-backfill-now", "manifest")
+    run_id = _extract_tsv_value(result.stdout, "references-doi-backfill-now", "run")
+    manifest = _read_json_file(Path(manifest_path)) if manifest_path else {}
+    return {
+        "doi_backfill_run": {
+            "ok": result.returncode == 0,
+            "exitCode": result.returncode,
+            "command": command,
+            "runId": run_id or manifest.get("runId"),
+            "manifestPath": manifest_path,
+            "summary": manifest.get("summary") or {},
+            "unresolved": manifest.get("unresolved") or [],
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "nextCommands": {
+                "inspectAssignmentQueue": "npm run content -- assignments list --type reference.doi-backfill --status open",
+                "inspectManifest": f"cat {manifest_path}" if manifest_path else None,
+            },
+        }
+    }
+
+
+def papyrus_doi_backfill_manifest(run_id: str = "", manifest_path: str = "") -> dict[str, Any]:
+    """
+    Load one DOI backfill execution manifest by run id or absolute manifest path.
+    """
+    resolved_path = Path(manifest_path).expanduser() if manifest_path else PAPYRUS_ROOT / ".papyrus-runs" / _required(run_id, "run_id") / "execution-manifest.json"
+    payload = _read_json_file(resolved_path)
+    if not payload:
+        raise ValueError(f"DOI backfill manifest not found: {resolved_path}")
+    return {
+        "doi_backfill_manifest": payload,
+        "manifest_path": str(resolved_path),
+    }
 
 
 def papyrus_get_semantic_object(kind: str, object_id: str) -> dict[str, Any]:
@@ -1392,21 +1536,41 @@ def build_assignment_research_packet_plan(
         "messageKind": "research_packet",
         "messageDomain": "assignment_work",
         "status": "active",
-        "body": summary,
         "summary": summary,
         "source": "procedures/newsroom/researcher.tac",
         "importRunId": assignment_payload.get("importRunId"),
         "authorLabel": "newsroom-researcher",
         "createdAt": now,
         "updatedAt": now,
-        "metadata": {
+    }
+    body_attachment = _model_attachment(
+        owner_kind="message",
+        owner_id=message_id,
+        role="message_body",
+        sort_key="message",
+        filename="message.txt",
+        media_type="text/plain",
+        content=summary,
+        import_run_id=assignment_payload.get("importRunId"),
+        now=now,
+    )
+    metadata_attachment = _model_attachment(
+        owner_kind="message",
+        owner_id=message_id,
+        role="metadata",
+        sort_key="metadata",
+        filename="metadata.json",
+        media_type="application/json",
+        content={
             "kind": "research.packet.created",
             "assignmentId": assignment_id,
             "assignmentTypeKey": assignment_payload.get("assignmentTypeKey"),
             "queueKey": assignment_payload.get("queueKey"),
             "research": research_packet,
         },
-    }
+        import_run_id=assignment_payload.get("importRunId"),
+        now=now,
+    )
     relation = _semantic_relation(
         predicate="comment",
         subject_kind="message",
@@ -1446,6 +1610,8 @@ def build_assignment_research_packet_plan(
         "message": message,
         "records": [
             {"modelName": "Message", "action": "create", "input": message},
+            {"modelName": "ModelAttachment", "action": "create", "input": body_attachment["record"], "body": body_attachment["body"]},
+            {"modelName": "ModelAttachment", "action": "create", "input": metadata_attachment["record"], "body": metadata_attachment["body"]},
             {"modelName": "SemanticRelation", "action": "create", "input": relation},
         ],
         "warnings": warnings,
@@ -1772,6 +1938,45 @@ def _semantic_relation(
     return {key: value for key, value in relation.items() if value is not None}
 
 
+def _model_attachment(
+    *,
+    owner_kind: str,
+    owner_id: str,
+    role: str,
+    sort_key: str,
+    filename: str,
+    media_type: str,
+    content: Any,
+    import_run_id: str | None,
+    now: str,
+) -> dict[str, Any]:
+    body = content if isinstance(content, str) else json.dumps(content or {}, indent=2, sort_keys=True) + "\n"
+    body_bytes = body.encode("utf-8")
+    return {
+        "record": {
+            "id": f"model-attachment-{_safe_id(owner_kind)}-{_safe_id(owner_id)}-{_safe_id(role)}-{_safe_id(sort_key)}",
+            "ownerKind": owner_kind,
+            "ownerId": owner_id,
+            "ownerLineageId": owner_id,
+            "ownerVersionNumber": None,
+            "ownerVersionKey": None,
+            "role": role,
+            "sortKey": sort_key,
+            "storagePath": f"newsroom/payloads/{_safe_id(owner_kind)}/{_safe_id(owner_id)}/{_safe_id(role)}/{filename}",
+            "filename": filename,
+            "mediaType": media_type,
+            "byteSize": len(body_bytes),
+            "sha256": hashlib.sha256(body_bytes).hexdigest(),
+            "etag": None,
+            "importRunId": import_run_id,
+            "createdAt": now,
+            "updatedAt": now,
+            "status": "active",
+        },
+        "body": body,
+    }
+
+
 def _reference_lineage_id(corpus_key: str, external_item_id: str) -> str:
     return f"reference-{_knowledge_corpus_id(corpus_key)}-{_slugify(external_item_id)}"
 
@@ -1881,6 +2086,87 @@ def _graphql(query: str, variables: dict[str, Any]) -> dict[str, Any]:
     if payload.get("errors"):
         raise RuntimeError("; ".join(error.get("message", str(error)) for error in payload["errors"]))
     return payload.get("data") or {}
+
+
+def _hydrate_assignment_payloads(assignment: dict[str, Any]) -> None:
+    metadata = _read_json_model_payload("assignment", assignment.get("id"), "metadata", "metadata")
+    if metadata is not None:
+        assignment["metadata"] = metadata
+    brief = _read_text_model_payload("assignment", assignment.get("id"), "assignment_brief", "brief")
+    if brief is not None:
+        assignment["brief"] = brief
+    instructions = _read_text_model_payload("assignment", assignment.get("id"), "assignment_instructions", "instructions")
+    if instructions is not None:
+        assignment["instructions"] = instructions
+
+
+def _hydrate_assignment_event_metadata(event: dict[str, Any]) -> None:
+    metadata = _read_json_model_payload("assignmentEvent", event.get("id"), "metadata", "metadata")
+    if metadata is not None:
+        event["metadata"] = metadata
+
+
+def _read_json_model_payload(owner_kind: str, owner_id: Any, role: str, sort_key: str) -> dict[str, Any] | None:
+    body = _read_text_model_payload(owner_kind, owner_id, role, sort_key)
+    if body is None:
+        return None
+    parsed = _normalize_jsonish(body)
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _read_text_model_payload(owner_kind: str, owner_id: Any, role: str, sort_key: str) -> str | None:
+    if not owner_id:
+        return None
+    attachment_id = f"model-attachment-{_safe_id(owner_kind)}-{_safe_id(str(owner_id))}-{_safe_id(role)}-{_safe_id(sort_key)}"
+    data = _graphql(
+        """
+query GetModelAttachment($id: ID!) {
+  getModelAttachment(id: $id) {
+    id
+    storagePath
+    mediaType
+    status
+  }
+}
+""",
+        {"id": attachment_id},
+    )
+    attachment = data.get("getModelAttachment")
+    if not attachment or attachment.get("status") == "deleted":
+        return None
+    return _download_model_attachment_body(attachment)
+
+
+def _download_model_attachment_body(attachment: dict[str, Any]) -> str | None:
+    storage_path = str(attachment.get("storagePath") or "").strip()
+    if not storage_path:
+        return None
+    bucket = _storage_bucket_name()
+    if not bucket:
+        return None
+    result = subprocess.run(
+        ["aws", "s3", "cp", f"s3://{bucket}/{storage_path}", "-"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout
+
+
+def _storage_bucket_name() -> str | None:
+    outputs_path = PAPYRUS_ROOT / "amplify_outputs.json"
+    if not outputs_path.exists():
+        return None
+    try:
+        outputs = json.loads(outputs_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    storage = outputs.get("storage") if isinstance(outputs, dict) else None
+    if not isinstance(storage, dict):
+        return None
+    return str(storage.get("bucket_name") or storage.get("bucketName") or "").strip() or None
 
 
 def _lambda_auth_token(token: str) -> str:
@@ -2022,7 +2308,8 @@ def _recent_published_items(recent_days: int) -> list[dict[str, Any]]:
 
 
 def _list_categories(category_set_id: Any) -> list[dict[str, Any]]:
-    category_set_id = _required(category_set_id, "assignment.categorySetId")
+    if not category_set_id:
+        return []
     items = _list_connection(LIST_CATEGORIES_QUERY, {}, "listCategories")
     return [
         item for item in items
@@ -2084,19 +2371,21 @@ query ListAssignmentEventsByAssignment($assignmentId: ID!, $limit: Int, $nextTok
       fromStatus
       toStatus
       actorSub
-      actorLabel
-      note
-      createdAt
-      metadata
-    }
-    nextToken
-  }
-}
+	      actorLabel
+	      note
+	      createdAt
+	    }
+	    nextToken
+	  }
+	}
 """,
             {"assignmentId": assignment_id, "limit": 100, "nextToken": None},
         )
         connection = data.get("listAssignmentEventsByAssignmentAndCreatedAt") or {}
-        events.extend(_decode_record_json(item) for item in connection.get("items") or [])
+        for item in connection.get("items") or []:
+            event = _decode_record_json(item)
+            _hydrate_assignment_event_metadata(event)
+            events.append(event)
     return sorted(events, key=lambda item: item.get("createdAt") or "", reverse=True)
 
 
@@ -2278,23 +2567,20 @@ def _assignments_for_desk(
     normalized_section_key = str(section_key or "").strip()
     result = []
     for assignment in assignments:
-        assignment_metadata = _normalize_assignment_metadata(assignment.get("metadata") or {})
         assignment_section_key = str(
             assignment.get("sectionKey")
-            or assignment_metadata.get("sectionKey")
             or assignment.get("sectionId")
-            or assignment_metadata.get("sectionId")
             or ""
         ).strip()
         if normalized_section_key and assignment_section_key == normalized_section_key:
             result.append(assignment)
             continue
-        assignment_desk_key = assignment_metadata.get("deskCategoryKey") or assignment_metadata.get("rootCategoryKey")
-        assignment_focus_key = assignment_metadata.get("focusCategoryKey") or assignment_metadata.get("researchLens")
-        if desk_key and assignment_desk_key == desk_key:
+        topic_scope = assignment.get("topicScopeCategoryKeys") if isinstance(assignment.get("topicScopeCategoryKeys"), list) else []
+        assignment_focus_key = assignment.get("primaryFocusCategoryKey")
+        if desk_key and (assignment_focus_key == desk_key or desk_key in topic_scope):
             result.append(assignment)
             continue
-        if focus_key and assignment_focus_key == focus_key:
+        if focus_key and (assignment_focus_key == focus_key or focus_key in topic_scope):
             result.append(assignment)
     return sorted(result, key=lambda entry: (entry.get("updatedAt") or "", entry.get("id") or ""), reverse=True)
 
@@ -2528,7 +2814,6 @@ def _build_assignment_context_blocks(
             )
         )
     for assignment_entry in desk_assignments[:6]:
-        assignment_metadata = _normalize_assignment_metadata(assignment_entry.get("metadata") or {})
         blocks.append(
             _context_block(
                 f"desk-assignment-{assignment_entry.get('id')}",
@@ -2536,9 +2821,9 @@ def _build_assignment_context_blocks(
                 "\n".join([
                     f"Assignment: {assignment_entry.get('title') or assignment_entry.get('id')}",
                     f"status: {assignment_entry.get('status')}",
-                    f"desk: {assignment_metadata.get('deskCategoryKey') or assignment_metadata.get('rootCategoryKey') or 'unknown'}",
-                    f"focus: {assignment_metadata.get('focusCategoryKey') or assignment_metadata.get('researchLens') or 'unknown'}",
-                    f"brief: {assignment_entry.get('brief') or ''}",
+                    f"section: {assignment_entry.get('sectionKey') or assignment_entry.get('sectionId') or 'unsectioned'}",
+                    f"focus: {assignment_entry.get('primaryFocusCategoryKey') or ', '.join(assignment_entry.get('topicScopeCategoryKeys') or []) or 'unknown'}",
+                    f"summary: {assignment_entry.get('summary') or assignment_entry.get('brief') or ''}",
                 ]),
                 metadata={"sourceKind": "assignment", "assignmentId": assignment_entry.get("id")},
             )
@@ -2667,9 +2952,9 @@ def _format_inclusion_risk_block(
     if publication_doctrine:
         doctrine_summary.append("Apply publication mission and policies as the primary inclusion standard.")
     if desk_doctrine:
-        doctrine_summary.append("Apply root-desk doctrine as the local beat standard before narrowing the angle.")
+        doctrine_summary.append("Apply section doctrine as the local beat standard before narrowing the angle.")
     else:
-        doctrine_summary.append("No desk doctrine is available; fall back to publication doctrine.")
+        doctrine_summary.append("No section doctrine is available; continue with publication doctrine and report the gap.")
     return "\n".join([
         f"Inclusion and risk profile: {profile_key}",
         f"assignment: {assignment.get('title') or assignment.get('id')}",
@@ -3022,6 +3307,26 @@ def _procedure_assignment_item_from_live_assignment(
     }
 
 
+def _extract_tsv_value(output: str, section: str, field: str) -> str:
+    for line in (output or "").splitlines():
+        parts = line.strip().split("\t")
+        if len(parts) < 3:
+            continue
+        if parts[0] == section and parts[1] == field:
+            return parts[2].strip()
+    return ""
+
+
+def _read_json_file(filepath: Path) -> dict[str, Any]:
+    try:
+        if not filepath.exists():
+            return {}
+        payload = json.loads(filepath.read_text(encoding="utf-8"))
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return {}
+
+
 def _optional_int(value: Any) -> int | None:
     if value is None or value == "":
         return None
@@ -3056,6 +3361,10 @@ def _ceil(value: float) -> int:
 def _slugify(value: Any) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", str(value).lower()).strip("-")
     return slug or "assignment"
+
+
+def _safe_id(value: Any) -> str:
+    return _slugify(value)[:80] or "payload"
 
 
 def _sort_title(title: str) -> str:

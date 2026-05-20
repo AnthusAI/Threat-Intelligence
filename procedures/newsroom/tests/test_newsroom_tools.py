@@ -35,6 +35,7 @@ class NewsroomToolTests(unittest.TestCase):
         self.assertIn("papyrus.assignment", result["value"]["api"])
         self.assertIn("context", result["value"]["api"]["papyrus.assignment"])
         self.assertIn("assignment_research_packet", result["value"]["api"]["papyrus.plan"])
+        self.assertIn("doi_backfill_plan", result["value"]["api"]["papyrus.reference"])
         self.assertEqual(
             result["api_calls"],
             ["papyrus.api.list", "papyrus.docs.list"],
@@ -324,6 +325,17 @@ return plan_research_update{ assignment_item = assignment, research = research }
                 ),
             )
 
+    def test_doi_backfill_plan_is_assignment_first(self):
+        payload = papyrus_newsroom.papyrus_doi_backfill_plan(
+            corpus_key="AI-ML-research",
+            max_count=25,
+            use_llm=False,
+        )["doi_backfill_plan"]
+        self.assertEqual(payload["mode"], "assignment-first")
+        self.assertIn("create-doi-backfill-assignment", payload["commands"]["create_assignment"])
+        self.assertIn("doi-backfill-now", payload["commands"]["run_now"])
+        self.assertIn("reference.doi-backfill", payload["commands"]["process_queue"])
+
     def test_dispatch_plan_caps_assignments_by_section_ratio(self):
         plan = papyrus_newsroom.build_assignment_dispatch_plan(
             edition_id="edition-1",
@@ -560,15 +572,18 @@ return plan_research_update{ assignment_item = assignment, research = research }
 
         self.assertTrue(plan["dryRun"])
         self.assertEqual(plan["lifecycle"], "assignment-research-packet")
-        self.assertEqual([record["modelName"] for record in plan["records"]], ["Message", "SemanticRelation"])
+        self.assertEqual([record["modelName"] for record in plan["records"]], ["Message", "ModelAttachment", "ModelAttachment", "SemanticRelation"])
         message = plan["records"][0]["input"]
         self.assertEqual(message["messageKind"], "research_packet")
         self.assertEqual(message["messageDomain"], "assignment_work")
-        self.assertEqual(message["metadata"]["kind"], "research.packet.created")
-        self.assertEqual(message["metadata"]["assignmentId"], "assignment-live-123")
-        self.assertEqual(message["metadata"]["research"]["sourceSnapshots"][0]["source_domain"], "example.com")
-        self.assertEqual(message["metadata"]["research"]["proposedReferences"][0]["ingestion_rationale"], "Candidate source relates to the focus and publication mission.")
-        relation = plan["records"][1]["input"]
+        metadata_attachment = plan["records"][2]
+        self.assertEqual(metadata_attachment["input"]["role"], "metadata")
+        metadata = json.loads(metadata_attachment["body"])
+        self.assertEqual(metadata["kind"], "research.packet.created")
+        self.assertEqual(metadata["assignmentId"], "assignment-live-123")
+        self.assertEqual(metadata["research"]["sourceSnapshots"][0]["source_domain"], "example.com")
+        self.assertEqual(metadata["research"]["proposedReferences"][0]["ingestion_rationale"], "Candidate source relates to the focus and publication mission.")
+        relation = plan["records"][3]["input"]
         self.assertEqual(relation["predicate"], "comment")
         self.assertEqual(relation["relationTypeKey"], "comment")
         self.assertEqual(relation["relationDomain"], "commentary")
@@ -600,7 +615,7 @@ return plan_assignment_research_packet{ assignment = assignment, research = rese
         self.assertTrue(result["ok"], result.get("error"))
         self.assertEqual(result["value"]["lifecycle"], "assignment-research-packet")
         self.assertEqual(result["value"]["records"][0]["modelName"], "Message")
-        self.assertEqual(result["value"]["records"][1]["input"]["relationTypeKey"], "comment")
+        self.assertEqual(result["value"]["records"][3]["input"]["relationTypeKey"], "comment")
         self.assertEqual(result["api_calls"], ["papyrus.plan.assignment_research_packet"])
 
     def test_track_research_warns_when_doctrine_context_and_rubric_are_missing(self):

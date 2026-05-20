@@ -96,6 +96,17 @@ Procedure {
             return '"' .. text .. '"'
         end
 
+        local function json_value(value)
+            if type(value) == "table" then
+                local parts = {}
+                for _, entry in ipairs(value) do
+                    table.insert(parts, json_string(entry))
+                end
+                return "[" .. table.concat(parts, ",") .. "]"
+            end
+            return json_string(value)
+        end
+
         local function assignment_json_for_tool(value)
             if type(value) == "string" then
                 return value
@@ -111,10 +122,25 @@ Procedure {
                 local status = value.status or "open"
                 local title = value.title or id
                 local brief = value.brief or value.summary or ""
+                local section_id = value.sectionId or value.section_id
+                local section_key = value.sectionKey or value.section_key
+                local section_type = value.sectionType or value.section_type
+                local primary_focus = value.primaryFocusCategoryKey or value.primary_focus_category_key
                 local metadata = value.metadata or {}
                 local metadata_parts = {}
                 if type(metadata) == "table" then
                     local metadata_fields = {
+                        "sectionId",
+                        "sectionKey",
+                        "sectionTitle",
+                        "sectionType",
+                        "sectionMission",
+                        "sectionPolicies",
+                        "assignmentGuidance",
+                        "killCriteria",
+                        "visualGuidance",
+                        "primaryFocusCategoryKey",
+                        "topicScopeCategoryKeys",
                         "deskCategoryKey",
                         "deskCategoryLineageId",
                         "deskCategoryTitle",
@@ -127,7 +153,7 @@ Procedure {
                     }
                     for _, key in ipairs(metadata_fields) do
                         if metadata[key] ~= nil then
-                            table.insert(metadata_parts, json_string(key) .. ":" .. json_string(metadata[key]))
+                            table.insert(metadata_parts, json_string(key) .. ":" .. json_value(metadata[key]))
                         end
                     end
                 end
@@ -138,6 +164,10 @@ Procedure {
                     '"queueKey":', json_string(queue_key), ",",
                     '"queueStatusKey":', json_string(queue_status_key), ",",
                     '"status":', json_string(status), ",",
+                    '"sectionId":', json_string(section_id), ",",
+                    '"sectionKey":', json_string(section_key), ",",
+                    '"sectionType":', json_string(section_type), ",",
+                    '"primaryFocusCategoryKey":', json_string(primary_focus), ",",
                     '"title":', json_string(title), ",",
                     '"brief":', json_string(brief), ",",
                     '"metadata":{', table.concat(metadata_parts, ","), "}",

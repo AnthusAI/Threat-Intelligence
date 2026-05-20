@@ -114,9 +114,9 @@ When returning a research packet, include these fields inside the structured
 packet:
 
 - `summary`: concise evidence-backed finding.
-- `doctrine_context`: which publication and desk doctrine slots were available,
+- `doctrine_context`: which publication and section doctrine slots were available,
   without dumping full private text unless the receiving surface is private.
-- `category_key` or root desk category key when available.
+- `section_key`, plus topic-scope category keys when available.
 - `evidence_item_ids`: stable external or Papyrus reference ids.
 - `queries`: the searches or corpus queries used.
 - `source_snapshots`: short auditable source summaries.
@@ -132,9 +132,9 @@ comparisons and inclusion/risk work in private structured fields rather than
 flattening them into reader-facing prose. For the current automated-publication
 workflow, include `comparison_findings` and `rubric_assessments` alongside the
 normal packet fields, but derive them from live doctrine plus the current
-desk/focus context rather than a hard-coded rubric file. See
+section/topic-scope context rather than a hard-coded rubric file. See
 [`docs/automated-publication-research-workflow.md`](/Users/ryan/Projects/Papyrus/docs/automated-publication-research-workflow.md)
-for the current desk-context contract.
+for the current section-context contract.
 
 If a packet could become reader-facing later, keep private doctrine and private
 curation details in structured private fields, not prose that might be copied
@@ -156,11 +156,12 @@ Papyrus stores doctrine as private `Item` rows with `type = "doctrine"`:
 
 - publication slugs: `editorial-doctrine-mission` and
   `editorial-doctrine-policy`;
-- desk slugs: `desk-doctrine-${safeCategoryKey}-mission` and
+- legacy desk slugs: `desk-doctrine-${safeCategoryKey}-mission` and
   `desk-doctrine-${safeCategoryKey}-policy`;
 - body paragraphs live in `Item.body`;
-- desk doctrine is tied to `Category.lineageId`, not the current category
-  version id.
+- new section-backed workflows should prefer section doctrine from the
+  assignment context. Legacy category-tied desk doctrine may still be present
+  during migration.
 
 Research agents should consume doctrine through authenticated Newsroom or
 assignment-context paths. Do not load doctrine through public reader
