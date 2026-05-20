@@ -164,6 +164,34 @@ Feature: Newspaper layout scenarios
     Then the newsroom should render
     And the newsroom should show the knowledge overview
 
+  Scenario Outline: Newsroom overview newspaper sections stay readable
+    Given I open the newsroom at <width> by <height>
+    Then the newsroom overview should show newspaper sections
+    And newsroom overview section cards should not overlap or clip
+    And no browser console errors should occur
+
+    Examples:
+      | width | height |
+      | 1280  | 900    |
+      | 390   | 900    |
+
+  Scenario: Newsroom overview shows configured section rail
+    Given I open the newsroom at 1280 by 900
+    Then the newsroom section rail should show canonical sections in rank order
+    And the newsroom rotating expander should be collapsed by default
+    When I open the newsroom rotating expander
+    Then the newsroom rotating expander should be expanded
+    And the newsroom section rail should show rotating section choices
+    And the newsroom section rail should occupy one wide column
+    Given I open the edition path "/newsroom/messages?demo=1" at 1280 by 900
+    Then the newsroom section rail should not render
+
+  Scenario: Deep newsroom section pages omit operational tabs
+    Given I open the edition path "/newsroom/sections/news?demo=1" at 1280 by 900
+    Then the deep newsroom section page should show "News"
+    And the deep newsroom section page should omit operational tabs
+    And no browser console errors should occur
+
   Scenario: Demo newsroom navigation keeps the desk visible
     Given I open the newsroom at 1280 by 900
     When I follow the newsroom overview link for "References"
@@ -198,6 +226,42 @@ Feature: Newspaper layout scenarios
     Then the concepts desk should show semantic nodes and linked objects
     And no browser console errors should occur
 
+  Scenario Outline: Newsroom operational desks use newspaper card grids
+    Given I open the "<section>" newsroom section at <width> by <height>
+    Then the newsroom card grid should render for "<section>"
+    And newsroom cards should not overlap or clip
+    When I open the first newsroom card detail
+    Then the newsroom card grid should scale to the split width
+    And no browser console errors should occur
+
+    Examples:
+      | section     | width | height |
+      | messages    | 1280  | 900    |
+      | references  | 1280  | 900    |
+      | assignments | 1280  | 900    |
+
+  Scenario: Newsroom assignment cards animate selected span changes
+    Given I open the "assignments" newsroom section at 1280 by 900
+    Then the newsroom card grid should render for "assignments"
+    When I open the first newsroom card detail
+    Then the newsroom card grid should scale to the split width
+    When I select a different newsroom card
+    Then the newsroom card resize should animate and settle
+    And newsroom cards should not overlap or clip
+    And no browser console errors should occur
+
+  Scenario Outline: Newsroom card grids stay readable on compact screens
+    Given I open the "<section>" newsroom section at 390 by 900
+    Then the newsroom card grid should render for "<section>"
+    And newsroom cards should not overlap or clip
+    And no browser console errors should occur
+
+    Examples:
+      | section     |
+      | messages    |
+      | references  |
+      | assignments |
+
   Scenario: Newsroom merges duplicate user identities
     Given I open the administration newsroom at 1280 by 900
     Then the users desk should show merge controls
@@ -219,6 +283,14 @@ Feature: Newspaper layout scenarios
     Then assignment "assignment-demo-reference-intake-history-001" should be claimed
     When I complete assignment "assignment-demo-reference-intake-history-001" with note "Reviewed"
     Then assignment "assignment-demo-reference-intake-history-001" should be completed
+    And no browser console errors should occur
+
+  Scenario: Newsroom shows reporting context packets without publishing candidate Items
+    Given I open the assignments newsroom at 1280 by 900
+    Then the assignments desk should render
+    When I open assignment "assignment-demo-reporting-news-001"
+    Then assignment "assignment-demo-reporting-news-001" should show a private reporting packet
+    And assignment "assignment-demo-reporting-news-001" should not appear as an edition item
     And no browser console errors should occur
 
   Scenario: Production newsroom requires editor access
@@ -316,6 +388,34 @@ Feature: Newspaper layout scenarios
     Then the browser hash should be "#agent-procedure-patterns"
     And article "agent-procedure-patterns" should have exactly one edition anchor
     And no browser console errors should occur
+
+  Scenario: Reader settings change the edition renderer without changing content URLs
+    Given I open the settings page at 1280 by 900
+    Then reader format "Newspaper" should be selected
+    When I choose reader format "Blog"
+    Then reader format "Blog" should be selected
+    And settings should be saved in this browser
+    When I reload the current page
+    Then reader format "Blog" should be selected
+    When I open the "current-edition" layout scenario in the same browser
+    Then the active presentation should be "blog"
+    And the reader presentation switcher should not render
+    And the browser path should be "/"
+    And presentation section "ai-ml" should render
+    And presentation item "agent-procedure-patterns" should render with measured lines
+    When I open the settings page in the same browser
+    And I choose reader format "Magazine"
+    And I open the "current-edition" layout scenario in the same browser
+    Then the active presentation should be "magazine"
+    And the reader presentation switcher should not render
+    And the browser path should be "/"
+    And presentation section "ai-ml" should render
+    And presentation item "agent-procedure-patterns" should render with measured lines
+    And no browser console errors should occur
+
+  Scenario: Section routes and item routes stay separate content links
+    Then edition section route "/2026/may/13/section/ai-ml" should target section "ai-ml"
+    And edition item route "/2026/may/13/agent-procedure-patterns" should target item "agent-procedure-patterns"
 
   Scenario: Layout validation accepts only canonical headline scales
     Then layout plan validation should accept headline scale "feature"

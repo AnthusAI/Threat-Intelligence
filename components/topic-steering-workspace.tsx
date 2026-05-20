@@ -3,9 +3,11 @@
 import { Hub } from "aws-amplify/utils";
 import { fetchAuthSession } from "aws-amplify/auth";
 import { gsap } from "gsap";
+import { Flip } from "gsap/Flip";
 import Link from "next/link";
-import type { ReactNode } from "react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import type { ReactNode, RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
 import { generateClient } from "aws-amplify/data";
 import type { Schema } from "../amplify/data/resource";
 import {
@@ -93,6 +95,8 @@ import {
 } from "../lib/newsroom-category-drilldown";
 import type { NewsDeskShellState } from "../lib/news-desk-session";
 
+gsap.registerPlugin(Flip);
+
 type ActionState = {
   id: string;
   message: string;
@@ -106,7 +110,7 @@ type TopicLabelAction = "manual_label" | "accept_prediction" | "reject_predictio
 type AssignmentAction = "claim" | "release" | "complete" | "cancel" | "reopen";
 type UserRoleAction = "grant" | "revoke";
 type AdministrationPanel = "users" | "policies" | "sections";
-export type NewsDeskTab = "overview" | "desks" | "topics" | "concepts" | "references" | "messages" | "assignments" | "administration";
+export type NewsDeskTab = "overview" | "desks" | "topics" | "concepts" | "references" | "messages" | "assignments" | "administration" | "search";
 type LexicalRuleScope = "publication" | "corpus" | "classifier" | "category";
 type AnalysisReindexMode = "online-update" | "classifier-retrain" | "scoped-topic-rebuild" | "entity-graph-rebuild" | "generated-analysis-rebuild";
 type AnalysisReindexDraft = {
@@ -150,6 +154,7 @@ type NewsroomCardRecord = {
   ariaLabel?: string;
   body?: ReactNode;
   dataAttributes?: Record<string, boolean | number | string | undefined>;
+  href?: string;
   kicker: ReactNode;
   meta: ReactNode[];
   span?: NewsroomCardSpan;
@@ -177,6 +182,13 @@ type KnowledgeQueryTarget = {
   subtitle?: string | null;
 };
 
+type NewsroomSearchRequest = {
+  anchor?: KnowledgeQueryAnchor | null;
+  from?: string | null;
+  maxTokens: number;
+  semanticQuery: string;
+};
+
 type KnowledgeQueryControl = {
   action: NewsroomDetailAction;
   clear: () => void;
@@ -186,13 +198,9 @@ type KnowledgeQueryControl = {
   result: KnowledgeQueryResponse | null;
 };
 
-type NewsroomSearchControl = {
-  clear: () => void;
+type NewsroomRouteSearchControl = {
   dialog: ReactNode;
-  error: string | null;
-  loading: boolean;
   open: () => void;
-  result: KnowledgeQueryResponse | null;
 };
 
 type NewsroomPagedRows<T> = {
@@ -233,6 +241,12 @@ export type NewsDeskSelection = {
   user?: string | null;
   item?: string | null;
   panel?: string | null;
+  searchQuery?: string | null;
+  searchAnchorKind?: string | null;
+  searchAnchorId?: string | null;
+  searchAnchorLineageId?: string | null;
+  searchMaxTokens?: string | null;
+  searchFrom?: string | null;
 };
 
 type CategoryReviewResponse = {
@@ -394,12 +408,14 @@ export function NewsDeskWorkspace({
   dashboard,
   initialTab = "overview",
   initialSelection = {},
+  sectionPageId = null,
 }: {
   analysisProfiles?: AnalysisProfileSummary[];
   configuredCorpora?: CategorySteeringCorpus[];
   dashboard: CategorySteeringDashboard | null;
   initialTab?: NewsDeskTab;
   initialSelection?: NewsDeskSelection;
+  sectionPageId?: string | null;
 }) {
   const session = useOptionalNewsDeskClient();
 
@@ -412,6 +428,7 @@ export function NewsDeskWorkspace({
         dashboard={dashboard}
         initialSelection={initialSelection}
         initialTab={initialTab}
+        sectionPageId={sectionPageId}
         authState={{ status: "signedIn", label: "Demo Desk" }}
         isRefreshing={false}
         shellError={null}
@@ -428,6 +445,7 @@ export function NewsDeskWorkspace({
         dashboard={session.shell.dashboard}
         initialSelection={initialSelection}
         initialTab={initialTab}
+        sectionPageId={sectionPageId}
         authState={session.shell.auth}
         isRefreshing={session.shell.phase === "refreshing"}
         shellError={session.shell.error}
@@ -451,6 +469,7 @@ export function NewsDeskWorkspace({
         dashboard={dashboard}
         initialSelection={initialSelection}
         initialTab={initialTab}
+        sectionPageId={sectionPageId}
         authState={session?.shell.auth ?? { status: "signedOut", label: "Signed out" }}
         isRefreshing={session?.shell.phase === "checkingAccess" || session?.shell.phase === "loadingDesk" || session?.shell.phase === "refreshing"}
         shellError={session?.shell.error ?? null}
@@ -468,6 +487,7 @@ function NewsDeskDashboard({
   dashboard,
   initialTab,
   initialSelection,
+  sectionPageId,
   authState,
   isRefreshing,
   shellError,
@@ -481,6 +501,7 @@ function NewsDeskDashboard({
   dashboard: CategorySteeringDashboard;
   initialTab: NewsDeskTab;
   initialSelection: NewsDeskSelection;
+  sectionPageId?: string | null;
   authState: ReaderAuthSnapshot;
   isRefreshing: boolean;
   shellError: string | null;
@@ -490,6 +511,7 @@ function NewsDeskDashboard({
 }) {
   const dataClient = useMemo(() => generateClient<Schema>(), []);
   const activeTab = initialTab;
+  const isSectionPage = Boolean(sectionPageId);
   const [corpora, setCorpora] = useState(dashboard.corpora);
   const [importRuns, setImportRuns] = useState(dashboard.importRuns);
   const [categorySets, setCategorySets] = useState(dashboard.categorySets);
@@ -517,7 +539,6 @@ function NewsDeskDashboard({
   const [mergeSelection, setMergeSelection] = useState<MergeSelection | null>(null);
   const [isPending, startTransition] = useTransition();
   const controlsDisabled = isPending || !canEdit;
-  const overviewSearch = useNewsroomSemanticSearchContext({ disabled: controlsDisabled || Boolean(dashboard.isDemo) });
   const showRhythmOverlay = useNewsroomRhythmOverlay();
   const initialAdministrationPanel = normalizeAdministrationPanel(initialSelection.panel);
   const [administrationPanel, setAdministrationPanel] = useState<AdministrationPanel>(initialAdministrationPanel);
@@ -581,6 +602,10 @@ function NewsDeskDashboard({
   const assignmentMetrics = useMemo(() => getAssignmentMetrics(assignments, dashboard.summary), [assignments, dashboard.summary]);
   const summaryFreshnessLabel = dashboard.summary ? `Summary ${formatDateTime(dashboard.summary.generatedAt)}${dashboard.summary.source ? ` / ${dashboard.summary.source}` : ""}` : latestImportLabel;
   const mastheadSecondLabel = activeTab === "assignments" ? `${assignmentMetrics.open || dashboard.summary?.assignmentStatusCounts.open || 0} open assignments` : summaryFreshnessLabel;
+  const activeNewsroomSection = sectionPageId
+    ? newsroomSections.find((section) => section.id === sectionPageId && section.enabled !== false && section.enabledStatus !== "disabled") ?? null
+    : null;
+  const mastheadTitle = activeNewsroomSection?.title ?? (isSectionPage ? "SECTION" : "NEWSROOM");
   const tabCounts = useMemo<Record<NewsDeskTab, number>>(() => ({
     overview: 0,
     desks: acceptedRootCategoryCount || summaryCount(dashboard, "categories"),
@@ -590,6 +615,7 @@ function NewsDeskDashboard({
     topics: summaryCount(dashboard, "categories") || canonicalCategorys.length,
     concepts: summaryCount(dashboard, "semanticNodes") || semanticNodes.length,
     administration: userDirectory.length + doctrineRecords.length + newsroomSections.length,
+    search: 0,
   }), [
     acceptedRootCategoryCount,
     assignments.length,
@@ -626,6 +652,18 @@ function NewsDeskDashboard({
     for (const category of categorys) map.set(category.categoryKey, category);
     return map;
   }, [categorys]);
+  const initialSearchRequest = useMemo(() => parseNewsroomSearchRequest(initialSelection), [initialSelection]);
+  const topBarSearchControl = useNewsroomRouteSearch({
+    activeTab,
+    assignments,
+    categorys,
+    dashboard,
+    disabled: Boolean(dashboard.isDemo),
+    initialRequest: initialSearchRequest,
+    messages,
+    references,
+    semanticNodes,
+  });
 
   useEffect(() => {
     setCorpora(dashboard.corpora);
@@ -798,7 +836,7 @@ function NewsDeskDashboard({
         });
     }
 
-    if (activeTab === "administration" && !loadedSections.sections) {
+    if ((activeTab === "administration" || activeTab === "overview" || isSectionPage) && !loadedSections.sections) {
       setLoadedSections((current) => ({ ...current, sections: true }));
       void refreshNewsroomSections()
         .catch((error) => {
@@ -868,6 +906,7 @@ function NewsDeskDashboard({
     loadedSections.references,
     loadedSections.sections,
     loadedSections.semanticRelations,
+    isSectionPage,
   ]);
 
   function runProposalAction(proposal: CategorySteeringProposal, action: ReviewAction) {
@@ -1815,10 +1854,12 @@ function NewsDeskDashboard({
       data-rhythm-overlay={showRhythmOverlay ? "true" : "false"}
     >
       <NewsroomProgressBackLink
-        searchAction={activeTab === "overview" ? {
-          disabled: controlsDisabled || Boolean(dashboard.isDemo),
-          onPress: overviewSearch.open,
-        } : null}
+        searchAction={{
+          disabled: Boolean(dashboard.isDemo),
+          onPress: activeTab === "search"
+            ? focusNewsroomSearchForm
+            : topBarSearchControl.open,
+        }}
       />
       <section className="scroll-edition news-desk-edition">
         <div className="paper-page paper-page--front paper-page--active">
@@ -1826,32 +1867,32 @@ function NewsDeskDashboard({
 	        <header className="masthead news-desk-masthead">
 	          <div className="masthead__rule" />
 	          <h1 id="news-desk-title">
-	            <Link href={getNewsDeskTabHref("/newsroom", dashboard.isDemo)}>NEWSROOM</Link>
+	            {isSectionPage ? mastheadTitle : <Link href={getNewsDeskTabHref("/newsroom", dashboard.isDemo)}>NEWSROOM</Link>}
 	          </h1>
 		          <div className="masthead__meta" aria-label="Newsroom edition status">
-	            <span>Steering Section</span>
+	            <span>{isSectionPage ? "Section" : "Steering Section"}</span>
 	            <span>{mastheadSecondLabel}</span>
 	            <span>{dashboard.isDemo ? "Demo Desk" : <ReaderAuthControl className="news-desk-auth-control" showIdentity authState={authState} />}</span>
 	          </div>
 	        </header>
 
-        <nav className="news-desk-tabs" aria-label="Newsroom sections">
-          {NEWS_DESK_TABS.map((tab) => (
-            <NewsDeskTabLink
-              key={tab.id}
-              active={tab.id === activeTab}
-              count={tabCounts[tab.id]}
-              countSlot={tab.id !== "administration"}
-              countVisible={tab.id !== "administration"}
-              demo={dashboard.isDemo}
-              tab={tab}
-            />
-          ))}
-        </nav>
+        {!isSectionPage ? (
+          <nav className="news-desk-tabs" aria-label="Newsroom sections">
+            {NEWS_DESK_TABS.map((tab) => (
+              <NewsDeskTabLink
+                key={tab.id}
+                active={tab.id === activeTab}
+                count={tabCounts[tab.id]}
+                countSlot={tab.id !== "administration"}
+                countVisible={tab.id !== "administration"}
+                demo={dashboard.isDemo}
+                tab={tab}
+              />
+            ))}
+          </nav>
+        ) : null}
 
-	        {activeTab === "overview" ? <NewsroomOverviewSearch search={overviewSearch} /> : null}
-
-        {activeTab !== "overview" && activeTab !== "assignments" && activeTab !== "messages" && activeTab !== "references" && activeTab !== "topics" && activeTab !== "concepts" ? (
+        {activeTab !== "overview" && activeTab !== "assignments" && activeTab !== "messages" && activeTab !== "references" && activeTab !== "topics" && activeTab !== "concepts" && activeTab !== "search" ? (
           <section className="news-desk-lede-grid" aria-label="Newsroom overview">
             <article className="news-desk-lede">
               <h2>{formatDeskSectionHeadline(activeTab)}</h2>
@@ -1881,13 +1922,33 @@ function NewsDeskDashboard({
           </div>
         ) : null}
 
-        {activeTab === "overview" ? (
+        {isSectionPage ? (
+          <DeepNewsroomSectionView
+            demo={Boolean(dashboard.isDemo)}
+            section={activeNewsroomSection}
+            sectionId={sectionPageId ?? ""}
+            sectionsLoaded={loadedSections.sections}
+          />
+        ) : null}
+        {!isSectionPage && activeTab === "overview" ? (
           <OverviewDeskView
             assignmentMetrics={assignmentMetrics}
             dashboard={dashboard}
+            newsroomSections={newsroomSections}
           />
         ) : null}
-        {activeTab === "desks" ? (
+        {!isSectionPage && activeTab === "search" ? (
+          <SearchDeskView
+            assignments={assignments}
+            categories={mergeCategoryRecords(categorys, activeCategoryTreeNodes)}
+            initialRequest={initialSearchRequest}
+            isDemo={Boolean(dashboard.isDemo)}
+            messages={messages}
+            references={references}
+            semanticNodes={semanticNodes}
+          />
+        ) : null}
+        {!isSectionPage && activeTab === "desks" ? (
           <DesksDeskView
             assignments={assignments}
             categoryByUid={categoryByUid}
@@ -1903,7 +1964,7 @@ function NewsDeskDashboard({
             statusMessage={actionState}
           />
         ) : null}
-        {activeTab === "topics" ? (
+        {!isSectionPage && activeTab === "topics" ? (
           <TopicsDeskView
             activeCategoryTree={activeCategoryTree}
             activeCategorySet={activeCategorySet}
@@ -1936,7 +1997,7 @@ function NewsDeskDashboard({
             proposals={proposals}
           />
         ) : null}
-        {activeTab === "concepts" ? (
+        {!isSectionPage && activeTab === "concepts" ? (
           <ConceptsDeskView
             categories={mergeCategoryRecords(categorys, activeCategoryTreeNodes)}
             graph={graph}
@@ -1946,7 +2007,7 @@ function NewsDeskDashboard({
             summary={dashboard.summary}
           />
         ) : null}
-        {activeTab === "references" ? (
+        {!isSectionPage && activeTab === "references" ? (
           <ReferencesDeskView
             categories={mergeCategoryRecords(categorys, activeCategoryTreeNodes)}
             categorySets={categorySets}
@@ -1962,7 +2023,7 @@ function NewsDeskDashboard({
             onReviewTopicLabel={runReferenceTopicLabelAction}
           />
         ) : null}
-        {activeTab === "messages" ? (
+        {!isSectionPage && activeTab === "messages" ? (
           <MessagesDeskView
             graph={graph}
             initialMessageId={initialSelection.message}
@@ -1971,7 +2032,7 @@ function NewsDeskDashboard({
             summary={dashboard.summary}
           />
         ) : null}
-        {activeTab === "assignments" ? (
+        {!isSectionPage && activeTab === "assignments" ? (
           <AssignmentDeskView
             actionState={actionState}
             analysisProfiles={analysisProfiles}
@@ -1987,7 +2048,7 @@ function NewsDeskDashboard({
             onCreateAnalysisReindexAssignment={createAnalysisReindexAssignment}
           />
         ) : null}
-        {activeTab === "administration" ? (
+        {!isSectionPage && activeTab === "administration" ? (
           <AdministrationDeskView
             actionState={actionState}
             administrationPanel={administrationPanel}
@@ -2014,6 +2075,7 @@ function NewsDeskDashboard({
             users={userDirectory}
           />
         ) : null}
+        {topBarSearchControl.dialog}
           </article>
         </div>
       </section>
@@ -2024,9 +2086,11 @@ function NewsDeskDashboard({
 function OverviewDeskView({
   assignmentMetrics,
   dashboard,
+  newsroomSections,
 }: {
   assignmentMetrics: AssignmentMetrics;
   dashboard: CategorySteeringDashboard;
+  newsroomSections: NewsroomSectionRecord[];
 }) {
   const [recentState, setRecentState] = useState<{
     assignments: AssignmentRecord[];
@@ -2094,140 +2158,391 @@ function OverviewDeskView({
   const referenceCount = summaryCount(dashboard, "references") || dashboard.references.length;
   const referenceAttachmentCount = summaryCount(dashboard, "referenceAttachments") || dashboard.referenceAttachments.length;
   const isDemo = Boolean(dashboard.isDemo);
+  const messageCards = recentState.messages.slice(0, 4).map((message, index) => withNewsroomOverviewCardLayout(
+    messageToNewsroomCard(message, index, null),
+    index,
+    getNewsDeskTabHref(`/newsroom/messages/${encodeURIComponent(message.id)}`, isDemo),
+  ));
+  const assignmentCards = recentState.assignments.slice(0, 4).map((assignment, index) => withNewsroomOverviewCardLayout(
+    assignmentToNewsroomCard(assignment, index, null),
+    index,
+    getNewsDeskTabHref(`/newsroom/assignments/${encodeURIComponent(assignment.id)}`, isDemo),
+  ));
+  const referenceCards = recentState.references.slice(0, 4).map((reference, index) => withNewsroomOverviewCardLayout(
+    referenceToNewsroomCard(reference, index, null),
+    index,
+    getNewsDeskTabHref(`/newsroom/references/${encodeURIComponent(reference.lineageId ?? reference.id)}`, isDemo),
+  ));
   return (
-    <div className="news-desk-overview-feeds" data-news-desk-section="overview">
-      <NewsroomRecentPanel
-        detail={`${messageCount} private commentary rows`}
-        emptyLabel="No recent messages."
-        error={recentState.error}
-        isLoading={recentState.isLoading}
-        moreHref={getNewsDeskTabHref("/newsroom/messages", isDemo)}
-        rowHref={(message) => getNewsDeskTabHref(`/newsroom/messages/${encodeURIComponent(message.id)}`, isDemo)}
-        rowRenderer={renderRecentMessageRow}
-        rows={recentState.messages}
-        title="Recent Messages"
-      />
-      <NewsroomRecentPanel
-        detail={`${assignmentCount} assignments / ${openAssignmentCount} open`}
-        emptyLabel="No recent assignments."
-        error={recentState.error}
-        isLoading={recentState.isLoading}
-        moreHref={getNewsDeskTabHref("/newsroom/assignments", isDemo)}
-        rowHref={(assignment) => getNewsDeskTabHref(`/newsroom/assignments/${encodeURIComponent(assignment.id)}`, isDemo)}
-        rowRenderer={renderRecentAssignmentRow}
-        rows={recentState.assignments}
-        title="Recent Assignments"
-      />
-      <NewsroomRecentPanel
-        detail={`${referenceCount} references / ${referenceAttachmentCount} attachments`}
-        emptyLabel="No recent references."
-        error={recentState.error}
-        isLoading={recentState.isLoading}
-        moreHref={getNewsDeskTabHref("/newsroom/references", isDemo)}
-        rowHref={(reference) => getNewsDeskTabHref(`/newsroom/references/${encodeURIComponent(reference.lineageId ?? reference.id)}`, isDemo)}
-        rowRenderer={renderRecentReferenceRow}
-        rows={recentState.references}
-        title="Recent References"
-      />
+    <div className="news-desk-overview" data-news-desk-section="overview">
+      <div className="news-desk-overview-feeds" data-newsroom-overview-feeds>
+        <NewsroomOverviewSection
+          cards={messageCards}
+          detail={`${messageCount} private commentary rows`}
+          emptyLabel="No recent messages."
+          error={recentState.error}
+          isLoading={recentState.isLoading}
+          moreHref={getNewsDeskTabHref("/newsroom/messages", isDemo)}
+          sectionKey="messages"
+          title="Messages"
+        />
+        <NewsroomOverviewSection
+          cards={assignmentCards}
+          detail={`${assignmentCount} assignments / ${openAssignmentCount} open`}
+          emptyLabel="No recent assignments."
+          error={recentState.error}
+          isLoading={recentState.isLoading}
+          moreHref={getNewsDeskTabHref("/newsroom/assignments", isDemo)}
+          sectionKey="assignments"
+          title="Assignments"
+        />
+        <NewsroomOverviewSection
+          cards={referenceCards}
+          detail={`${referenceCount} references / ${referenceAttachmentCount} attachments`}
+          emptyLabel="No recent references."
+          error={recentState.error}
+          isLoading={recentState.isLoading}
+          moreHref={getNewsDeskTabHref("/newsroom/references", isDemo)}
+          sectionKey="references"
+          title="References"
+        />
+      </div>
+      <NewsroomSectionRail demo={isDemo} sections={newsroomSections} />
     </div>
   );
 }
 
-function NewsroomRecentPanel<T extends { id: string }>({
+function NewsroomSectionRail({ demo, sections }: { demo: boolean; sections: NewsroomSectionRecord[] }) {
+  const enabledSections = useMemo(() => sortNewsroomSections(sections).filter(isEnabledNewsroomSection), [sections]);
+  const canonicalSections = enabledSections.filter((section) => normalizeNewsroomSectionType(section.type) === "canonical");
+  const rotatingSections = enabledSections.filter((section) => normalizeNewsroomSectionType(section.type) === "floating");
+  const [isRotatingExpanded, setIsRotatingExpanded] = useState<boolean>(() => false);
+  const [shouldRenderRotatingPanel, setShouldRenderRotatingPanel] = useState(false);
+  const rotatingPanelRef = useRef<HTMLDivElement | null>(null);
+  const rotatingInnerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!rotatingSections.length) {
+      if (isRotatingExpanded) setIsRotatingExpanded(false);
+      if (shouldRenderRotatingPanel) setShouldRenderRotatingPanel(false);
+    }
+  }, [isRotatingExpanded, rotatingSections.length, shouldRenderRotatingPanel]);
+
+  useEffect(() => {
+    if (isRotatingExpanded) setShouldRenderRotatingPanel(true);
+  }, [isRotatingExpanded]);
+
+  useLayoutEffect(() => {
+    const panel = rotatingPanelRef.current;
+    const inner = rotatingInnerRef.current;
+    if (!panel || !inner) return;
+
+    gsap.killTweensOf([panel, inner]);
+
+    if (!shouldRenderRotatingPanel) {
+      panel.hidden = true;
+      panel.style.height = "";
+      panel.style.opacity = "";
+      panel.style.overflow = "";
+      panel.style.visibility = "";
+      inner.style.opacity = "";
+      inner.style.transform = "";
+      return;
+    }
+
+    panel.hidden = false;
+    const targetHeight = Math.max(inner.scrollHeight, 1);
+
+    if (isRotatingExpanded) {
+      gsap.set(panel, { autoAlpha: 0, display: "block", height: 0, overflow: "hidden" });
+      gsap.set(inner, { autoAlpha: 0, y: -10 });
+      gsap.to(panel, {
+        autoAlpha: 1,
+        duration: 0.3,
+        ease: "power3.out",
+        height: targetHeight,
+        onComplete: () => {
+          panel.style.height = "auto";
+          panel.style.overflow = "visible";
+        },
+      });
+      gsap.to(inner, {
+        autoAlpha: 1,
+        duration: 0.28,
+        ease: "power3.out",
+        y: 0,
+      });
+      return;
+    }
+
+    gsap.set(panel, {
+      autoAlpha: 1,
+      display: "block",
+      height: panel.offsetHeight || targetHeight,
+      overflow: "hidden",
+    });
+    gsap.to(inner, {
+      autoAlpha: 0,
+      duration: 0.18,
+      ease: "power2.inOut",
+      y: -8,
+    });
+    gsap.to(panel, {
+      autoAlpha: 0,
+      duration: 0.22,
+      ease: "power2.inOut",
+      height: 0,
+      onComplete: () => {
+        panel.hidden = true;
+        panel.style.height = "";
+        panel.style.opacity = "";
+        panel.style.overflow = "";
+        panel.style.visibility = "";
+        inner.style.opacity = "";
+        inner.style.transform = "";
+        setShouldRenderRotatingPanel(false);
+      },
+    });
+  }, [isRotatingExpanded, shouldRenderRotatingPanel, rotatingSections.length]);
+
+  function chooseRotatingSection() {
+    setIsRotatingExpanded(false);
+  }
+
+  return (
+    <aside className="newsroom-section-rail" data-newsroom-section-rail aria-labelledby="newsroom-section-rail-title">
+      <header className="newsroom-section-rail__header">
+        <p className="story-label">Sections</p>
+        <h2 id="newsroom-section-rail-title">Section Desk</h2>
+      </header>
+      {canonicalSections.length ? (
+        <div className="newsroom-section-rail__canonical-list" data-newsroom-section-rail-canonical-list>
+          {canonicalSections.map((section) => (
+            <Link
+              className="newsroom-section-rail__link"
+              data-newsroom-section-link={section.id}
+              data-newsroom-section-type="canonical"
+              href={buildNewsroomSectionHref(section.id, demo)}
+              key={section.id}
+            >
+              <strong>{section.title}</strong>
+              <span>{formatNewsroomSectionTypeLabel(section.type)}</span>
+            </Link>
+          ))}
+        </div>
+      ) : (
+        <EmptyRow label="No canonical sections configured." />
+      )}
+      {rotatingSections.length ? (
+        <div className="newsroom-section-rail__rotating" data-newsroom-section-rail-rotating>
+          <button
+            type="button"
+            className="newsroom-section-rail__rotating-toggle"
+            data-newsroom-rotating-expander-toggle
+            aria-expanded={isRotatingExpanded ? "true" : "false"}
+            aria-controls="newsroom-rotating-expander-panel"
+            onClick={() => setIsRotatingExpanded((current) => !current)}
+          >
+            <span className="newsroom-section-rail__rotating-toggle-label">Rotating</span>
+            <RotatingSectionTriangleIcon expanded={isRotatingExpanded} />
+          </button>
+          <div
+            className="newsroom-section-rail__rotating-panel"
+            data-newsroom-rotating-expander-panel
+            id="newsroom-rotating-expander-panel"
+            ref={rotatingPanelRef}
+            aria-hidden={isRotatingExpanded ? "false" : "true"}
+            hidden={!shouldRenderRotatingPanel}
+          >
+            <div
+              className="newsroom-section-rail__rotating-panel-inner newsroom-section-rail__canonical-list"
+              ref={rotatingInnerRef}
+            >
+              {rotatingSections.map((section) => (
+                <Link
+                  className="newsroom-section-rail__link"
+                  data-newsroom-section-link={section.id}
+                  data-newsroom-section-type="rotating"
+                  data-newsroom-rotating-option={section.id}
+                  href={buildNewsroomSectionHref(section.id, demo)}
+                  key={section.id}
+                  onClick={() => chooseRotatingSection()}
+                >
+                  <strong>{section.title}</strong>
+                  <span>{formatNewsroomSectionTypeLabel(section.type)}</span>
+                </Link>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </aside>
+  );
+}
+
+function RotatingSectionTriangleIcon({ expanded }: { expanded: boolean }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={`newsroom-section-rail__rotating-icon${expanded ? " newsroom-section-rail__rotating-icon--expanded" : ""}`}
+      focusable="false"
+      viewBox="0 0 10 10"
+    >
+      <path d="M7.5 1 2.5 5 7.5 9Z" fill="currentColor" />
+    </svg>
+  );
+}
+
+function DeepNewsroomSectionView({
+  demo,
+  section,
+  sectionId,
+  sectionsLoaded,
+}: {
+  demo: boolean;
+  section: NewsroomSectionRecord | null;
+  sectionId: string;
+  sectionsLoaded: boolean;
+}) {
+  if (!section) {
+    return (
+      <section className="newsroom-deep-section" data-newsroom-deep-section-missing={sectionId}>
+        <p className="story-label">Section</p>
+        <h2>{sectionsLoaded ? "Section not found" : "Loading section"}</h2>
+        <p>{sectionsLoaded ? "This section is not configured or is disabled." : "Loading the configured newsroom section."}</p>
+      </section>
+    );
+  }
+
+  const guidanceRows = [
+    ["Assignment Guidance", section.assignmentGuidance],
+    ["Kill Criteria", section.killCriteria],
+    ["Visual Guidance", section.visualGuidance],
+  ].filter((row): row is [string, string] => typeof row[1] === "string" && row[1].trim().length > 0);
+
+  return (
+    <section
+      className="newsroom-deep-section"
+      data-newsroom-deep-section={section.id}
+      data-newsroom-section-type={formatNewsroomSectionTypeLabel(section.type).toLowerCase()}
+    >
+      <header className="newsroom-deep-section__header">
+        <p className="story-label" data-newsroom-deep-section-eyebrow>Section</p>
+        <h2 data-newsroom-deep-section-title>{section.title}</h2>
+        <Link href={getNewsDeskTabHref("/newsroom", demo)}>Back to Newsroom</Link>
+      </header>
+      <div className="newsroom-deep-section__body">
+        <article className="newsroom-deep-section__field newsroom-deep-section__field--lead">
+          <p className="story-label">Mission</p>
+          <p>{section.editorialMission}</p>
+        </article>
+        <article className="newsroom-deep-section__field newsroom-deep-section__field--lead">
+          <p className="story-label">Policy</p>
+          <p>{section.editorialPolicy}</p>
+        </article>
+        {guidanceRows.map(([label, value]) => (
+          <article className="newsroom-deep-section__field" key={label}>
+            <p className="story-label">{label}</p>
+            <p>{value}</p>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function NewsroomOverviewSection({
+  cards,
   detail,
   emptyLabel,
   error,
   isLoading,
   moreHref,
-  rowHref,
-  rowRenderer,
-  rows,
+  sectionKey,
   title,
 }: {
+  cards: NewsroomCardRecord[];
   detail: string;
   emptyLabel: string;
   error: string | null;
   isLoading: boolean;
   moreHref: string;
-  rowHref: (row: T) => string;
-  rowRenderer: (row: T) => ReactNode;
-  rows: T[];
+  sectionKey: "messages" | "assignments" | "references";
   title: string;
 }) {
-  const bodyRef = useRef<HTMLDivElement | null>(null);
-  const [visibleRowCount, setVisibleRowCount] = useState(4);
-  const headingId = `newsroom-recent-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
-
-  useEffect(() => {
-    const body = bodyRef.current;
-    if (!body) return;
-
-    const updateVisibleRows = () => {
-      const style = window.getComputedStyle(body);
-      const rowHeight = Number.parseFloat(style.getPropertyValue("--newsroom-recent-row-height")) || 76;
-      setVisibleRowCount(Math.max(1, Math.floor(body.clientHeight / rowHeight)));
-    };
-
-    updateVisibleRows();
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(updateVisibleRows);
-    observer.observe(body);
-    return () => observer.disconnect();
-  }, []);
-
-  const visibleRows = rows.slice(0, visibleRowCount);
+  const headingId = `newsroom-overview-${sectionKey}`;
   return (
-    <section className="newsroom-recent-panel" aria-labelledby={headingId}>
-      <header className="newsroom-recent-panel__header">
-        <h2 id={headingId}>{title}</h2>
-        <span>{detail}</span>
+    <section
+      className="newsroom-overview-section"
+      data-newsroom-overview-section={sectionKey}
+      aria-labelledby={headingId}
+    >
+      <header className="newsroom-overview-section__header">
+        <div>
+          <p className="story-label">Newsroom</p>
+          <h2 id={headingId}>{title}</h2>
+          <span>{detail}</span>
+        </div>
+        <Link data-newsroom-overview-more={sectionKey} href={moreHref}>More</Link>
       </header>
-      <div className="newsroom-recent-panel__body" ref={bodyRef}>
-        {error ? (
-          <div className="newsroom-recent-panel__state" role="status">{error}</div>
-        ) : isLoading && !visibleRows.length ? (
-          <div className="newsroom-recent-panel__state" role="status">Loading recent records...</div>
-        ) : visibleRows.length ? visibleRows.map((row) => (
-          <Link className="newsroom-recent-panel__row" href={rowHref(row)} key={row.id}>
-            {rowRenderer(row)}
-          </Link>
-        )) : (
-          <div className="newsroom-recent-panel__state">{emptyLabel}</div>
-        )}
-      </div>
-      <footer className="newsroom-recent-panel__footer">
-        <Link href={moreHref}>More</Link>
-      </footer>
+      {error ? (
+        <div className="newsroom-overview-section__state" role="status">{error}</div>
+      ) : isLoading && !cards.length ? (
+        <div className="newsroom-overview-section__state" role="status">Loading recent records...</div>
+      ) : cards.length ? (
+        <div className="newsroom-overview-section__card-grid" data-newsroom-overview-card-grid>
+          {cards.map((card) => {
+            const span = card.span ?? "1x1";
+            return (
+              <Link
+                aria-label={card.ariaLabel}
+                className={`newsroom-card newsroom-card--span-${span}`}
+                data-newsroom-card
+                data-newsroom-card-id={card.id}
+                data-newsroom-card-span={span}
+                data-newsroom-overview-section-card
+                href={card.href ?? moreHref}
+                key={card.id}
+                {...card.dataAttributes}
+              >
+                <NewsroomCardContents card={card} />
+              </Link>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="newsroom-overview-section__state">{emptyLabel}</div>
+      )}
     </section>
   );
 }
 
-function renderRecentMessageRow(message: MessageRecord): ReactNode {
-  return (
-    <>
-      <strong>{message.summary || message.messageKind}</strong>
-      <span>{message.messageKind} / {message.messageDomain}</span>
-      <time>{formatDateTime(message.createdAt)}</time>
-    </>
-  );
+function withNewsroomOverviewCardLayout(card: NewsroomCardRecord, index: number, href: string): NewsroomCardRecord {
+  return {
+    ...card,
+    href,
+    span: newsroomOverviewCardSpan(index),
+  };
 }
 
-function renderRecentAssignmentRow(assignment: AssignmentRecord): ReactNode {
-  return (
-    <>
-      <strong>{assignment.title}</strong>
-      <span>{assignment.assignmentTypeKey} / {assignment.status}</span>
-      <time>{formatDateTime(assignment.updatedAt ?? assignment.createdAt)}</time>
-    </>
-  );
+function newsroomOverviewCardSpan(index: number): NewsroomCardSpan {
+  if (index === 0) return "2x2";
+  if (index === 3) return "2x1";
+  return "1x1";
 }
 
-function renderRecentReferenceRow(reference: ReferenceRecord): ReactNode {
+function NewsroomCardContents({ card }: { card: NewsroomCardRecord }) {
   return (
     <>
-      <strong>{reference.title || reference.externalItemId}</strong>
-      <span>{reference.curationStatus ?? "pending"} / {reference.corpusId}</span>
-      <time>{formatDateTime(reference.createdAt ?? reference.importedAt ?? reference.versionCreatedAt ?? "")}</time>
+      <span className="newsroom-card__kicker">{card.kicker}</span>
+      <strong className="newsroom-card__title">{card.title}</strong>
+      {card.body ? <span className="newsroom-card__body">{card.body}</span> : null}
+      <span className="newsroom-card__meta">
+        {card.meta.map((entry, index) => (
+          <span key={`${card.id}-meta-${index}`}>{entry}</span>
+        ))}
+      </span>
+      {card.stamp ? <span className="newsroom-card__stamp">{card.stamp}</span> : null}
     </>
   );
 }
@@ -5176,22 +5491,34 @@ function NewsroomCardGrid({
   onLoadMore?: () => void;
 }) {
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const { captureLayout, gridRef } = useNewsroomCardGridFlip({
+    cards,
+    filterValue,
+    metricValue,
+    selectedId,
+  });
   useEffect(() => {
     if (!onLoadMore || !hasMore || isLoadingMore) return;
     const sentinel = sentinelRef.current;
     if (!sentinel) return;
     const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) onLoadMore();
+      if (entries.some((entry) => entry.isIntersecting)) {
+        captureLayout();
+        onLoadMore();
+      }
     }, { rootMargin: "240px" });
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [hasMore, isLoadingMore, onLoadMore]);
+  }, [captureLayout, hasMore, isLoadingMore, onLoadMore]);
   return (
     <div className="newsroom-card-grid-shell" data-newsroom-card-grid-shell>
       <div className="news-desk-data-grid-filter newsroom-card-grid-filter" data-news-desk-data-grid-filter>
         <label>
           <span>{filterLabel}</span>
-          <select value={filterValue} onChange={(event) => onFilterChange(event.target.value)}>
+          <select value={filterValue} onChange={(event) => {
+            captureLayout();
+            onFilterChange(event.target.value);
+          }}>
             {filterOptions.map((option) => (
               <option key={option.key || "all"} value={option.key}>
                 {option.count === undefined ? option.label : `${option.label} (${option.count})`}
@@ -5205,14 +5532,17 @@ function NewsroomCardGrid({
               type="button"
               key={metric.key || "all"}
               data-active={metricValue === metric.key || undefined}
-              onClick={() => onMetricChange(metric.key)}
+              onClick={() => {
+                captureLayout();
+                onMetricChange(metric.key);
+              }}
             >
               {metric.count} {metric.label}
             </button>
           ))}
         </div>
       </div>
-      <div className="newsroom-card-grid" data-newsroom-card-grid>
+      <div className="newsroom-card-grid" data-newsroom-card-grid ref={gridRef}>
         {cards.length ? cards.map((card) => {
           const span = card.span ?? "1x1";
           return (
@@ -5225,18 +5555,13 @@ function NewsroomCardGrid({
               data-newsroom-card-id={card.id}
               data-newsroom-card-span={span}
               key={card.id}
-              onClick={() => onSelect(card.id)}
+              onClick={() => {
+                captureLayout();
+                onSelect(card.id);
+              }}
               {...card.dataAttributes}
             >
-              <span className="newsroom-card__kicker">{card.kicker}</span>
-              <strong className="newsroom-card__title">{card.title}</strong>
-              {card.body ? <span className="newsroom-card__body">{card.body}</span> : null}
-              <span className="newsroom-card__meta">
-                {card.meta.map((entry, index) => (
-                  <span key={`${card.id}-meta-${index}`}>{entry}</span>
-                ))}
-              </span>
-              {card.stamp ? <span className="newsroom-card__stamp">{card.stamp}</span> : null}
+              <NewsroomCardContents card={card} />
             </button>
           );
         }) : (
@@ -5252,6 +5577,78 @@ function NewsroomCardGrid({
       ) : null}
     </div>
   );
+}
+
+function useNewsroomCardGridFlip({
+  cards,
+  filterValue,
+  metricValue,
+  selectedId,
+}: {
+  cards: NewsroomCardRecord[];
+  filterValue: string;
+  metricValue: string;
+  selectedId?: string | null;
+}) {
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  const pendingStateRef = useRef<ReturnType<typeof Flip.getState> | null>(null);
+  const hasMountedRef = useRef(false);
+  const prefersReducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
+  const layoutSignature = useMemo(() => (
+    [
+      selectedId ?? "",
+      filterValue,
+      metricValue,
+      cards.length,
+      ...cards.map((card) => `${card.id}:${card.span ?? "1x1"}`),
+    ].join("|")
+  ), [cards, filterValue, metricValue, selectedId]);
+
+  const captureLayout = useCallback(() => {
+    if (prefersReducedMotion) return;
+    const grid = gridRef.current;
+    if (!grid) return;
+    const targets = Array.from(grid.querySelectorAll<HTMLElement>("[data-newsroom-card]"));
+    if (!targets.length) return;
+    gsap.killTweensOf(targets);
+    pendingStateRef.current = Flip.getState(targets);
+  }, [prefersReducedMotion]);
+
+  useLayoutEffect(() => {
+    const grid = gridRef.current;
+    if (!grid) return;
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true;
+      return;
+    }
+    const state = pendingStateRef.current;
+    pendingStateRef.current = null;
+    if (prefersReducedMotion || !state) {
+      grid.removeAttribute("data-newsroom-card-grid-animating");
+      return;
+    }
+    const targets = Array.from(grid.querySelectorAll<HTMLElement>("[data-newsroom-card]"));
+    if (!targets.length) {
+      grid.removeAttribute("data-newsroom-card-grid-animating");
+      return;
+    }
+    gsap.killTweensOf(targets);
+    grid.setAttribute("data-newsroom-card-grid-animating", "true");
+    Flip.from(state, {
+      absolute: true,
+      duration: 0.42,
+      ease: "power3.out",
+      nested: true,
+      onComplete: () => {
+        grid.removeAttribute("data-newsroom-card-grid-animating");
+      },
+      onInterrupt: () => {
+        grid.removeAttribute("data-newsroom-card-grid-animating");
+      },
+    });
+  }, [layoutSignature, prefersReducedMotion]);
+
+  return { captureLayout, gridRef };
 }
 
 function SemanticDetailPanel({
@@ -5452,102 +5849,160 @@ function useNewsroomKnowledgeContext(target: KnowledgeQueryTarget | null) {
   };
 }
 
-function useNewsroomSemanticSearchContext({ disabled }: { disabled: boolean }): NewsroomSearchControl {
+function useNewsroomRouteSearch({
+  activeTab,
+  assignments,
+  categorys,
+  dashboard,
+  disabled,
+  initialRequest,
+  messages,
+  references,
+  semanticNodes,
+}: {
+  activeTab: NewsDeskTab;
+  assignments: AssignmentRecord[];
+  categorys: CategorySteeringCategory[];
+  dashboard: CategorySteeringDashboard;
+  disabled: boolean;
+  initialRequest: NewsroomSearchRequest | null;
+  messages: MessageRecord[];
+  references: ReferenceRecord[];
+  semanticNodes: SemanticNodeRecord[];
+}): NewsroomRouteSearchControl {
+  const router = useRouter();
+  const session = useOptionalNewsDeskClient();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [semanticText, setSemanticText] = useState("");
   const [maxTokens, setMaxTokens] = useState("1600");
-  const [state, setState] = useState<{ error: string | null; loading: boolean; result: KnowledgeQueryResponse | null }>({
-    error: null,
-    loading: false,
-    result: null,
-  });
+  const [target, setTarget] = useState<KnowledgeQueryTarget | null>(null);
+  const modalRef = useRef<HTMLDivElement | null>(null);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
 
-  const run = async () => {
+  useEffect(() => {
+    if (activeTab !== "search") return;
+    setTarget(resolveKnowledgeQueryTarget(initialRequest?.anchor ?? null, { assignments, categorys, messages, references, semanticNodes }));
+    setSemanticText(initialRequest?.semanticQuery ?? "");
+    setMaxTokens(String(initialRequest?.maxTokens ?? 1600));
+    setDialogOpen(false);
+  }, [activeTab, assignments, categorys, initialRequest, messages, references, semanticNodes]);
+
+  const navigate = () => {
     if (disabled) return;
-    const query = semanticText.trim();
-    if (!query) {
-      setState({ error: "Enter a semantic query before searching.", loading: false, result: null });
+    const tokenBudget = Math.max(400, Math.min(20_000, Number.parseInt(maxTokens, 10) || 1600));
+    const request: NewsroomSearchRequest = {
+      anchor: target?.anchor ?? null,
+      from: currentNewsroomOriginHref(initialRequest?.from ?? null),
+      maxTokens: tokenBudget,
+      semanticQuery: semanticText.trim(),
+    };
+    const href = buildNewsroomSearchHref(request, dashboard.isDemo);
+    const requestKey = serializeNewsroomSearchRequest(request);
+    const routeToSearch = () => {
+      session?.beginSearchTransition({
+        href,
+        kind: "modal-to-serp",
+        requestKey,
+        submittedAt: Date.now(),
+      });
+      router.push(href);
+      setDialogOpen(false);
+    };
+
+    if (!modalRef.current || !dialogRef.current) {
+      routeToSearch();
       return;
     }
-    const tokenBudget = Math.max(400, Math.min(20_000, Number.parseInt(maxTokens, 10) || 1600));
-    const request = buildNewsroomSemanticOnlyQueryInput(query, tokenBudget);
-    setState((current) => ({ ...current, error: null, loading: true }));
-    try {
-      const result = await runNewsroomKnowledgeQuery(request);
-      const text = result.context?.text?.trim();
-      if (!text) throw new Error("knowledgeQuery returned no markdown context.");
-      setState({ error: null, loading: false, result });
-      setDialogOpen(false);
-    } catch (error) {
-      setState({ error: error instanceof Error ? error.message : "Knowledge query failed.", loading: false, result: null });
-    }
+
+    gsap.killTweensOf([modalRef.current, dialogRef.current]);
+    gsap.timeline({ onComplete: routeToSearch })
+      .to(modalRef.current, {
+        autoAlpha: 0,
+        duration: 0.18,
+        ease: "power2.out",
+      }, 0)
+      .to(dialogRef.current, {
+        duration: 0.18,
+        ease: "power2.out",
+        scale: 0.98,
+        y: -20,
+      }, 0);
   };
 
   return {
-    clear: () => setState({ error: null, loading: false, result: null }),
     dialog: (
       <NewsroomSearchDialog
-        disabled={disabled || state.loading}
+        disabled={disabled}
+        dialogRef={dialogRef}
         maxTokens={maxTokens}
+        modalRef={modalRef}
         semanticText={semanticText}
+        target={target}
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
         onMaxTokensChange={setMaxTokens}
-        onRun={run}
+        onRun={navigate}
         onSemanticTextChange={setSemanticText}
       />
     ),
-    error: state.error,
-    loading: state.loading,
-    open: () => setDialogOpen(true),
-    result: state.result,
+    open: () => {
+      const defaultAnchor = resolveCurrentRouteAnchor(activeTab);
+      setTarget(resolveKnowledgeQueryTarget(defaultAnchor, { assignments, categorys, messages, references, semanticNodes }));
+      setSemanticText("");
+      setMaxTokens("1600");
+      setDialogOpen(true);
+    },
   };
 }
 
-function buildNewsroomSemanticOnlyQueryInput(semanticQuery: string, maxTokens: number): Record<string, unknown> {
+function parseNewsroomSearchRequest(selection: NewsDeskSelection): NewsroomSearchRequest | null {
+  const anchorKind = normalizeKnowledgeQueryAnchorKind(selection.searchAnchorKind);
+  const anchorId = selection.searchAnchorId?.trim() || null;
+  const anchorLineageId = selection.searchAnchorLineageId?.trim() || null;
+  const semanticQuery = selection.searchQuery?.trim() ?? "";
+  const maxTokens = clampKnowledgeQueryTokenBudget(selection.searchMaxTokens);
+  const from = normalizeNewsroomFromHref(selection.searchFrom ?? null);
+  const anchor = anchorKind && anchorId ? {
+    kind: anchorKind,
+    id: anchorId,
+    lineageId: anchorLineageId,
+  } satisfies KnowledgeQueryAnchor : null;
+  if (!anchor && !semanticQuery) return null;
   return {
+    anchor,
+    from,
+    maxTokens,
     semanticQuery,
-    scope: {
-      depth: 1,
-      topK: 24,
-      relatedRecordLimit: 10,
-    },
-    profile: "editor",
-    ranking: {
-      profile: "balanced",
-      diversity: "broad",
-    },
-    output: {
-      format: "markdown",
-      maxTokens,
-    },
   };
 }
 
-function buildNewsroomKnowledgeQueryInput(target: KnowledgeQueryTarget, semanticText: string, maxTokens: number): Record<string, unknown> {
-  const anchor: Record<string, unknown> = {
-    kind: target.anchor.kind,
-    id: target.anchor.id,
-  };
-  if (target.anchor.lineageId) anchor.lineageId = target.anchor.lineageId;
-  return {
-    anchors: [anchor],
+function buildNewsroomKnowledgeQueryInput(target: KnowledgeQueryTarget | null, semanticText: string, maxTokens: number): Record<string, unknown> {
+  const request: Record<string, unknown> = {
     semanticQuery: semanticText.trim(),
     scope: {
       depth: 1,
-      topK: 18,
-      relatedRecordLimit: 8,
+      topK: target ? 18 : 24,
+      relatedRecordLimit: target ? 8 : 10,
     },
     profile: "editor",
     ranking: {
       profile: "balanced",
-      diversity: "balanced",
+      diversity: target ? "balanced" : "broad",
     },
     output: {
       format: "markdown",
       maxTokens,
     },
   };
+  if (target) {
+    const anchor: Record<string, unknown> = {
+      kind: target.anchor.kind,
+      id: target.anchor.id,
+    };
+    if (target.anchor.lineageId) anchor.lineageId = target.anchor.lineageId;
+    request.anchors = [anchor];
+  }
+  return request;
 }
 
 function knowledgeQueryTargetKey(target: KnowledgeQueryTarget): string {
@@ -5556,22 +6011,28 @@ function knowledgeQueryTargetKey(target: KnowledgeQueryTarget): string {
 
 function NewsroomSearchDialog({
   disabled,
+  dialogRef,
   maxTokens,
+  modalRef,
   onClose,
   onMaxTokensChange,
   onRun,
   onSemanticTextChange,
   open,
   semanticText,
+  target,
 }: {
   disabled: boolean;
+  dialogRef?: RefObject<HTMLDivElement | null>;
   maxTokens: string;
+  modalRef?: RefObject<HTMLDivElement | null>;
   onClose: () => void;
   onMaxTokensChange: (value: string) => void;
   onRun: () => void;
   onSemanticTextChange: (value: string) => void;
   open: boolean;
   semanticText: string;
+  target?: KnowledgeQueryTarget | null;
 }) {
   useEffect(() => {
     if (!open) return;
@@ -5588,11 +6049,18 @@ function NewsroomSearchDialog({
     <div
       className="news-desk-modal"
       data-news-desk-knowledge-query-modal
+      ref={modalRef}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget && !disabled) onClose();
       }}
     >
-      <div className="news-desk-modal__dialog news-desk-modal__dialog--knowledge-query" role="dialog" aria-modal="true" aria-labelledby="newsroom-search-title">
+      <div
+        className="news-desk-modal__dialog news-desk-modal__dialog--knowledge-query"
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="newsroom-search-title"
+      >
         <header className="news-desk-modal__header">
           <div>
             <p className="story-label">Search</p>
@@ -5602,6 +6070,15 @@ function NewsroomSearchDialog({
           <button type="button" disabled={disabled} onClick={onClose}>Close</button>
         </header>
         <div className="news-desk-knowledge-query-form">
+          {target ? (
+            <label>
+              <span>Context Target</span>
+              <div className="news-desk-knowledge-query-target">
+                <strong>{target.title}</strong>
+                <small>{target.anchor.kind} / {target.anchor.lineageId ?? target.anchor.id}</small>
+              </div>
+            </label>
+          ) : null}
           <label>
             <span>Semantic Query</span>
             <textarea
@@ -5730,29 +6207,12 @@ function KnowledgeQueryStatus({ error, loading }: { error: string | null; loadin
   );
 }
 
-function NewsroomOverviewSearch({ search }: { search: NewsroomSearchControl }) {
-  const hasInlineOutput = search.loading || Boolean(search.error) || Boolean(search.result);
-  return (
-    <>
-      {hasInlineOutput ? (
-        <section className="news-desk-overview-search" aria-label="Knowledge search">
-          <KnowledgeQueryStatus error={search.error} loading={search.loading} />
-          {search.result ? (
-            <div className="news-desk-overview-search__result">
-              <KnowledgeQueryResultBlock result={search.result} onClear={search.clear} />
-            </div>
-          ) : null}
-        </section>
-      ) : null}
-      {search.dialog}
-    </>
-  );
-}
-
 function KnowledgeQueryResultBlock({
+  clearLabel = "Show Record",
   onClear,
   result,
 }: {
+  clearLabel?: string;
   onClear: () => void;
   result: KnowledgeQueryResponse;
 }) {
@@ -5763,7 +6223,7 @@ function KnowledgeQueryResultBlock({
     <div className="news-desk-knowledge-query-result" data-news-desk-knowledge-query-result>
       <header>
         <p className="story-label">Knowledge Context</p>
-        <button type="button" onClick={onClear}>Show Record</button>
+        <button type="button" onClick={onClear}>{clearLabel}</button>
       </header>
       <MarkdownContext text={markdown} />
       <footer>
@@ -5779,6 +6239,261 @@ function KnowledgeQueryResultBlock({
         </details>
       ) : null}
     </div>
+  );
+}
+
+function SearchDeskView({
+  assignments,
+  categories,
+  initialRequest,
+  isDemo,
+  messages,
+  references,
+  semanticNodes,
+}: {
+  assignments: AssignmentRecord[];
+  categories: CategorySteeringCategory[];
+  initialRequest: NewsroomSearchRequest | null;
+  isDemo?: boolean;
+  messages: MessageRecord[];
+  references: ReferenceRecord[];
+  semanticNodes: SemanticNodeRecord[];
+}) {
+  const router = useRouter();
+  const session = useOptionalNewsDeskClient();
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const panelRef = useRef<HTMLElement | null>(null);
+  const resultRef = useRef<HTMLDivElement | null>(null);
+  const statusRef = useRef<HTMLDivElement | null>(null);
+  const previousLoadingRef = useRef(false);
+  const [semanticText, setSemanticText] = useState(initialRequest?.semanticQuery ?? "");
+  const [maxTokens, setMaxTokens] = useState(String(initialRequest?.maxTokens ?? 1600));
+  const [runNonce, setRunNonce] = useState(0);
+  const [state, setState] = useState<{
+    error: string | null;
+    loading: boolean;
+    requestKey: string | null;
+    result: KnowledgeQueryResponse | null;
+  }>({
+    error: null,
+    loading: false,
+    requestKey: null,
+    result: null,
+  });
+  const target = useMemo(
+    () => resolveKnowledgeQueryTarget(initialRequest?.anchor ?? null, { assignments, categorys: categories, messages, references, semanticNodes }),
+    [assignments, categories, initialRequest?.anchor, messages, references, semanticNodes],
+  );
+  const requestKey = useMemo(() => serializeNewsroomSearchRequest(initialRequest), [initialRequest]);
+  const hasRequest = Boolean(initialRequest && (initialRequest.anchor || initialRequest.semanticQuery.trim()));
+  const statusVisible = state.loading || Boolean(state.error);
+
+  useEffect(() => {
+    setSemanticText(initialRequest?.semanticQuery ?? "");
+    setMaxTokens(String(initialRequest?.maxTokens ?? 1600));
+    setRunNonce(0);
+    if (!hasRequest) {
+      setState({ error: null, loading: false, requestKey: null, result: null });
+    }
+  }, [hasRequest, initialRequest?.maxTokens, initialRequest?.semanticQuery, requestKey]);
+
+  useEffect(() => {
+    if (!hasRequest || !initialRequest || isDemo) return;
+    let active = true;
+    setState((current) => ({ ...current, error: null, loading: true, requestKey }));
+    const request = buildNewsroomKnowledgeQueryInput(target, initialRequest.semanticQuery, initialRequest.maxTokens);
+    void runNewsroomKnowledgeQuery(request)
+      .then((result) => {
+        if (!active) return;
+        const text = result.context?.text?.trim();
+        if (!text) throw new Error("knowledgeQuery returned no markdown context.");
+        setState({ error: null, loading: false, requestKey, result });
+      })
+      .catch((error) => {
+        if (!active) return;
+        setState((current) => ({
+          ...current,
+          error: error instanceof Error ? error.message : "Knowledge query failed.",
+          loading: false,
+          requestKey,
+        }));
+      });
+    return () => {
+      active = false;
+    };
+  }, [hasRequest, initialRequest, isDemo, requestKey, runNonce, target]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const focusSearch = () => inputRef.current?.focus();
+    window.addEventListener("papyrus:newsroom-search-focus", focusSearch as EventListener);
+    return () => window.removeEventListener("papyrus:newsroom-search-focus", focusSearch as EventListener);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!panelRef.current) return;
+    const transition = session?.searchTransition;
+    if (!transition || transition.kind !== "modal-to-serp" || transition.requestKey !== requestKey || !statusVisible) return;
+
+    gsap.killTweensOf([panelRef.current, statusRef.current]);
+    gsap.set(panelRef.current, { autoAlpha: 0, y: 18 });
+    if (statusRef.current) gsap.set(statusRef.current, { autoAlpha: 0, y: 14 });
+
+    const timeline = gsap.timeline({
+      onComplete: () => {
+        session?.clearSearchTransition();
+      },
+    });
+    timeline.to(panelRef.current, {
+      autoAlpha: 1,
+      duration: 0.24,
+      ease: "power3.out",
+      y: 0,
+    }, 0);
+    if (statusRef.current) {
+      timeline.to(statusRef.current, {
+        autoAlpha: 1,
+        duration: 0.24,
+        ease: "power3.out",
+        y: 0,
+      }, 0.06);
+    }
+  }, [requestKey, session, statusVisible]);
+
+  useLayoutEffect(() => {
+    const hadLoading = previousLoadingRef.current;
+    previousLoadingRef.current = state.loading;
+
+    if (!statusRef.current) return;
+    gsap.killTweensOf([resultRef.current, statusRef.current]);
+
+    if (state.loading) {
+      if (resultRef.current && state.result) {
+        gsap.to(resultRef.current, {
+          autoAlpha: 0.3,
+          duration: 0.18,
+          ease: "power2.out",
+          y: 8,
+        });
+      }
+      gsap.fromTo(
+        statusRef.current,
+        { autoAlpha: 0, y: 12 },
+        { autoAlpha: 1, duration: 0.24, ease: "power3.out", y: 0 },
+      );
+      return;
+    }
+
+    if (hadLoading && resultRef.current && state.result) {
+      const timeline = gsap.timeline();
+      timeline.to(statusRef.current, {
+        autoAlpha: 0,
+        duration: 0.18,
+        ease: "power2.inOut",
+        y: -8,
+      }, 0);
+      timeline.to(resultRef.current, {
+        autoAlpha: 1,
+        duration: 0.24,
+        ease: "power3.out",
+        y: 0,
+      }, 0.04);
+    }
+  }, [state.loading, state.result]);
+
+  const run = () => {
+    const nextRequest: NewsroomSearchRequest = {
+      anchor: target?.anchor ?? initialRequest?.anchor ?? null,
+      from: initialRequest?.from ?? null,
+      maxTokens: clampKnowledgeQueryTokenBudget(maxTokens),
+      semanticQuery: semanticText.trim(),
+    };
+    const href = buildNewsroomSearchHref(nextRequest, isDemo);
+    if (typeof window !== "undefined" && `${window.location.pathname}${window.location.search}` === href) {
+      setRunNonce((value) => value + 1);
+      return;
+    }
+    router.replace(href);
+  };
+
+  const clear = () => {
+    router.replace(buildNewsroomSearchHref({ anchor: null, from: initialRequest?.from ?? null, maxTokens: 1600, semanticQuery: "" }, isDemo));
+  };
+
+  return (
+    <section className="news-desk-search-view" aria-labelledby="newsroom-search-view-title" ref={panelRef}>
+      <section className="news-desk-lede news-desk-search-view__lede">
+        <div>
+          <h2 id="newsroom-search-view-title">Search</h2>
+          <p>semantic + ontology</p>
+        </div>
+        {initialRequest?.from ? (
+          <Link className="news-desk-search-view__backlink" href={initialRequest.from}>Back to origin</Link>
+        ) : null}
+      </section>
+      <section className="category-steering-section category-steering-section--lead news-desk-search-view__panel">
+        <form
+          className="news-desk-knowledge-query-form news-desk-knowledge-query-form--serp"
+          data-newsroom-search-form
+          onSubmit={(event) => {
+            event.preventDefault();
+            run();
+          }}
+        >
+          {target ? (
+            <label>
+              <span>Context Target</span>
+              <div className="news-desk-knowledge-query-target">
+                <strong>{target.title}</strong>
+                <small>{target.anchor.kind} / {target.anchor.lineageId ?? target.anchor.id}</small>
+              </div>
+            </label>
+          ) : null}
+          <label>
+            <span>Semantic Query</span>
+            <textarea
+              id="newsroom-search-query"
+              ref={inputRef}
+              rows={5}
+              value={semanticText}
+              onChange={(event) => setSemanticText(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>Token Budget</span>
+            <input
+              inputMode="numeric"
+              min="400"
+              max="20000"
+              step="100"
+              type="number"
+              value={maxTokens}
+              onChange={(event) => setMaxTokens(event.target.value)}
+            />
+          </label>
+          <footer className="news-desk-search-view__actions">
+            <button type="submit" className="news-desk-assignment-create-button">Run Search</button>
+          </footer>
+        </form>
+        <div className="news-desk-search-view__status" ref={statusRef}>
+          {statusVisible ? <KnowledgeQueryStatus error={state.error} loading={state.loading} /> : null}
+        </div>
+        {!hasRequest ? (
+          <div className="news-desk-search-view__blank">
+            <p className="story-label">Search</p>
+            <h3>Enter a semantic query, or launch search from a record detail page for anchored context.</h3>
+          </div>
+        ) : (
+          <>
+            {state.result ? (
+              <div ref={resultRef}>
+                <KnowledgeQueryResultBlock clearLabel="Clear Search" onClear={clear} result={state.result} />
+              </div>
+            ) : null}
+          </>
+        )}
+      </section>
+    </section>
   );
 }
 
@@ -6732,7 +7447,7 @@ function AssignmentRow({
               <div className="news-desk-assignment-row__packets">
                 {researchPackets.slice(0, 2).map((packet) => (
                   <p className="news-desk-assignment-row__angle" key={packet.id}>
-                    <span>Research packet</span>
+                    <span>{packet.label}</span>
                     {`${packet.summary}${packet.proposedReferenceCount ? ` / ${packet.proposedReferenceCount} proposed refs` : ""}${packet.queryCount ? ` / ${packet.queryCount} queries` : ""}${packet.sourceDomains.length ? ` / ${packet.sourceDomains.slice(0, 2).join(", ")}` : ""}`}
                   </p>
                 ))}
@@ -7218,12 +7933,28 @@ function normalizeAdministrationPanel(value: string | null | undefined): Adminis
 
 function sortNewsroomSections(sections: NewsroomSectionRecord[]): NewsroomSectionRecord[] {
   return [...sections].sort((left, right) => {
-    const typeDiff = (left.type === "canonical" ? 0 : 1) - (right.type === "canonical" ? 0 : 1);
+    const typeDiff = (normalizeNewsroomSectionType(left.type) === "canonical" ? 0 : 1) - (normalizeNewsroomSectionType(right.type) === "canonical" ? 0 : 1);
     if (typeDiff !== 0) return typeDiff;
     const orderDiff = (left.sortOrder ?? 999999) - (right.sortOrder ?? 999999);
     if (orderDiff !== 0) return orderDiff;
     return left.title.localeCompare(right.title);
   });
+}
+
+function normalizeNewsroomSectionType(value: string | null | undefined): "canonical" | "floating" {
+  return value === "floating" || value === "rotating" ? "floating" : "canonical";
+}
+
+function isEnabledNewsroomSection(section: NewsroomSectionRecord): boolean {
+  return section.enabled !== false && section.enabledStatus !== "disabled";
+}
+
+function formatNewsroomSectionTypeLabel(value: string | null | undefined): "Canonical" | "Rotating" {
+  return normalizeNewsroomSectionType(value) === "canonical" ? "Canonical" : "Rotating";
+}
+
+function buildNewsroomSectionHref(sectionId: string, demo?: boolean): string {
+  return getNewsDeskTabHref(`/newsroom/sections/${encodeURIComponent(sectionId)}`, demo);
 }
 
 function replaceNewsroomSection(sections: NewsroomSectionRecord[], section: NewsroomSectionRecord): NewsroomSectionRecord[] {
@@ -7362,6 +8093,7 @@ function compareDoctrineCategories(left: DoctrineCategory, right: DoctrineCatego
 }
 
 function formatDeskSectionHeadline(section: NewsDeskTab): string {
+  if (section === "search") return "Search";
   if (section === "topics") return "Topics";
   if (section === "concepts") return "Concepts";
   if (section === "references") return "References";
@@ -7372,6 +8104,7 @@ function formatDeskSectionHeadline(section: NewsDeskTab): string {
 }
 
 function formatDeskSectionLede(section: NewsDeskTab): string {
+  if (section === "search") return "Search the newsroom knowledge base with semantic and ontology context.";
   if (section === "topics") return "Review and shape the subject areas the newsroom covers.";
   if (section === "concepts") return "Browse people, organizations, places, and ideas found in the source material.";
   if (section === "references") return "Review source materials before they become usable evidence.";
@@ -7705,6 +8438,173 @@ function demoAssignmentEvent(assignment: AssignmentRecord, action: AssignmentAct
     actorLabel: "Papyrus newsroom",
     note: note.trim() || null,
     createdAt: now,
+  };
+}
+
+function clampKnowledgeQueryTokenBudget(value: string | number | null | undefined): number {
+  if (typeof value === "number") return Math.max(400, Math.min(20_000, Math.trunc(value) || 1600));
+  return Math.max(400, Math.min(20_000, Number.parseInt(value ?? "", 10) || 1600));
+}
+
+function normalizeKnowledgeQueryAnchorKind(value: string | null | undefined): KnowledgeQueryAnchor["kind"] | null {
+  if (
+    value === "assignment"
+    || value === "category"
+    || value === "categorySet"
+    || value === "item"
+    || value === "message"
+    || value === "reference"
+    || value === "semanticNode"
+  ) return value;
+  return null;
+}
+
+function normalizeNewsroomFromHref(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("/newsroom")) return null;
+  return trimmed;
+}
+
+function currentNewsroomOriginHref(fallback: string | null): string | null {
+  if (typeof window === "undefined") return fallback;
+  const current = `${window.location.pathname}${window.location.search}`;
+  return current.startsWith("/newsroom/search") ? fallback : normalizeNewsroomFromHref(current);
+}
+
+function serializeNewsroomSearchRequest(request: NewsroomSearchRequest | null): string {
+  if (!request) return "";
+  return JSON.stringify({
+    anchor: request.anchor ? {
+      id: request.anchor.id,
+      kind: request.anchor.kind,
+      lineageId: request.anchor.lineageId ?? null,
+    } : null,
+    from: request.from ?? null,
+    maxTokens: request.maxTokens,
+    semanticQuery: request.semanticQuery,
+  });
+}
+
+function buildNewsroomSearchHref(request: NewsroomSearchRequest, demo?: boolean): string {
+  const params = new URLSearchParams();
+  const query = request.semanticQuery.trim();
+  const hasPayload = Boolean(query || request.anchor);
+  if (query) params.set("q", query);
+  if (request.anchor) {
+    params.set("anchorKind", request.anchor.kind);
+    params.set("anchorId", request.anchor.id);
+    if (request.anchor.lineageId) params.set("anchorLineageId", request.anchor.lineageId);
+  }
+  if (hasPayload || clampKnowledgeQueryTokenBudget(request.maxTokens) !== 1600) {
+    params.set("maxTokens", String(clampKnowledgeQueryTokenBudget(request.maxTokens)));
+  }
+  if (request.from) params.set("from", request.from);
+  if (demo) params.set("demo", "1");
+  const queryString = params.toString();
+  return queryString ? `/newsroom/search?${queryString}` : "/newsroom/search";
+}
+
+function focusNewsroomSearchForm() {
+  if (typeof window === "undefined") return;
+  const input = document.getElementById("newsroom-search-query");
+  if (input instanceof HTMLElement) {
+    input.focus();
+    input.scrollIntoView({ behavior: "smooth", block: "center" });
+    return;
+  }
+  window.dispatchEvent(new CustomEvent("papyrus:newsroom-search-focus"));
+}
+
+function resolveCurrentRouteAnchor(activeTab: NewsDeskTab): KnowledgeQueryAnchor | null {
+  if (typeof window === "undefined") return null;
+  const url = new URL(window.location.href);
+  const segments = url.pathname.split("/").filter(Boolean);
+  const detailId = segments[2] ? decodeURIComponent(segments[2]) : null;
+  if (activeTab === "references" && detailId) return { kind: "reference", id: detailId, lineageId: detailId };
+  if (activeTab === "messages" && detailId) return { kind: "message", id: detailId };
+  if (activeTab === "assignments" && detailId) return { kind: "assignment", id: detailId };
+  if (activeTab === "topics") {
+    const category = url.searchParams.get("category")?.trim();
+    if (category) return { kind: "category", id: category, lineageId: category };
+  }
+  if (activeTab === "concepts") {
+    const node = url.searchParams.get("node")?.trim();
+    if (node) return { kind: "semanticNode", id: node, lineageId: node };
+    const category = url.searchParams.get("category")?.trim();
+    if (category) return { kind: "category", id: category, lineageId: category };
+  }
+  return null;
+}
+
+function resolveKnowledgeQueryTarget(
+  anchor: KnowledgeQueryAnchor | null | undefined,
+  input: {
+    assignments: AssignmentRecord[];
+    categorys: CategorySteeringCategory[];
+    messages: MessageRecord[];
+    references: ReferenceRecord[];
+    semanticNodes: SemanticNodeRecord[];
+  },
+): KnowledgeQueryTarget | null {
+  if (!anchor) return null;
+  const anchorId = anchor.lineageId ?? anchor.id;
+  if (anchor.kind === "reference") {
+    const reference = input.references.find((entry) => (entry.lineageId ?? entry.id) === anchorId || entry.id === anchor.id);
+    return {
+      anchor: {
+        kind: "reference",
+        id: reference?.id ?? anchor.id,
+        lineageId: reference?.lineageId ?? anchor.lineageId ?? anchor.id,
+      },
+      title: reference?.title ?? reference?.externalItemId ?? anchorId,
+      subtitle: reference?.corpusId ?? null,
+    };
+  }
+  if (anchor.kind === "message") {
+    const message = input.messages.find((entry) => entry.id === anchor.id);
+    return {
+      anchor: { kind: "message", id: message?.id ?? anchor.id },
+      title: message?.summary ?? "Stored message payload",
+      subtitle: message?.messageKind ?? null,
+    };
+  }
+  if (anchor.kind === "assignment") {
+    const assignment = input.assignments.find((entry) => entry.id === anchor.id);
+    return {
+      anchor: { kind: "assignment", id: assignment?.id ?? anchor.id },
+      title: assignment?.title ?? anchor.id,
+      subtitle: assignment?.assignmentTypeKey ?? null,
+    };
+  }
+  if (anchor.kind === "category") {
+    const category = input.categorys.find((entry) => categoryLineageId(entry) === anchorId || entry.categoryKey === anchor.id || entry.id === anchor.id);
+    return {
+      anchor: {
+        kind: "category",
+        id: category?.id ?? category?.categoryKey ?? anchor.id,
+        lineageId: category ? categoryLineageId(category) : (anchor.lineageId ?? anchor.id),
+      },
+      title: category?.displayName ?? anchorId,
+      subtitle: category?.categoryKey ?? null,
+    };
+  }
+  if (anchor.kind === "semanticNode") {
+    const node = input.semanticNodes.find((entry) => (entry.lineageId ?? entry.id) === anchorId || entry.id === anchor.id || entry.nodeKey === anchor.id);
+    return {
+      anchor: {
+        kind: "semanticNode",
+        id: node?.id ?? anchor.id,
+        lineageId: node?.lineageId ?? anchor.lineageId ?? anchor.id,
+      },
+      title: node?.displayName ?? node?.nodeKey ?? anchorId,
+      subtitle: node?.nodeKind ?? null,
+    };
+  }
+  return {
+    anchor,
+    title: anchorId,
+    subtitle: null,
   };
 }
 
@@ -9289,6 +10189,7 @@ function assignmentAnalysisReindexMetadata(assignment: AssignmentRecord): Assign
 
 type AssignmentResearchPacketSummary = {
   id: string;
+  label: string;
   summary: string;
   createdAt: string;
   queryCount: number;
@@ -9304,10 +10205,11 @@ function researchPacketsForAssignment(
   const linked = graph.messagesFor("assignment", assignment.id);
   const candidates = linked.length ? linked : messages;
   return candidates
-    .filter((message) => message.messageKind === "research_packet")
+    .filter((message) => message.messageKind === "research_packet" || message.messageKind === "reporting_context_packet")
     .map((message) => {
       return {
         id: message.id,
+        label: message.messageKind === "reporting_context_packet" ? "Reporting packet" : "Research packet",
         summary: message.summary ?? "Stored research packet",
         createdAt: message.createdAt,
         queryCount: 0,
