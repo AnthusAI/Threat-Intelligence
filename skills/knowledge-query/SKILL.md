@@ -34,6 +34,10 @@ The input is one JSON object:
     "relatedRecordLimit": 8
   },
   "profile": "editor",
+  "ranking": {
+    "profile": "balanced",
+    "diversity": "balanced"
+  },
   "output": {
     "format": "both",
     "maxTokens": 1200,
@@ -66,6 +70,10 @@ Papyrus URIs:
 papyrus://<kind>/<lineageId-or-id>
 ```
 
+CLI and Tactus anchors may use either explicit `{kind,id}` tables or those
+stable URIs directly, for example `--anchor papyrus://reference/<lineage-id>` or
+`knowledge_query{ uri = "papyrus://reference/<lineage-id>" }`.
+
 When anchors are references, they are target records. Multiple reference
 anchors render under `## Target Records`; each record keeps its metadata and
 excerpts together.
@@ -87,6 +95,11 @@ generic related concepts. Non-anchor semantic matches may become `See Also`
 records when they are strong matches, graph neighbors, or share corpus/category
 context with the anchors.
 
+If vector search returns a summary `Message` instead of the summarized
+`Reference`, normalize the hit back to the target Reference through the current
+`reference_summary_<N>_tokens` relation. Treat the summary as Reference summary
+evidence, not as an orphan `Message` object and not as a chunk excerpt.
+
 ## Scope Options
 
 `scope.depth`: graph expansion depth, clamped to `0..3`.
@@ -95,6 +108,23 @@ context with the anchors.
 
 `scope.semanticSeedLimit`: when there are no anchors, maximum semantic matches
 to promote as graph-expansion seeds. Default `5`, maximum `20`.
+
+`scope.semanticSeedExpansionLimit`: when there are no anchors, maximum semantic
+seeds to actually expand through graph neighbors. Default `1`. Keep this low
+for search-like context packs; graph expansion is one of the most expensive
+parts of live queries.
+
+`scope.semanticSeedGraphTopK`: relation cap for each semantic seed graph
+expansion. Default `6`. This is intentionally separate from vector `topK`;
+do not use a broad vector search limit as the graph expansion limit.
+
+`scope.resolveSemanticSeeds`: defaults to `false`. Set `true` only when seed
+metadata is insufficient and the seed itself must be resolved before graph
+expansion.
+
+`scope.resolveSemanticSeedExpansionObjects`: defaults to `false`. Set `true`
+only when graph neighbor object details are needed; otherwise relation stubs
+and vector metadata are enough for search context.
 
 `scope.relatedRecordLimit`: maximum related records to keep for `See Also`.
 Default `8`, maximum `30`.
@@ -125,6 +155,47 @@ Valid profiles are:
 Profiles tune default graph depth, semantic `topK`, and context emphasis. They
 do not override the default knowledge-only relation policy.
 
+## Ranking And Diversity
+
+`ranking.profile` controls score weights. Valid values are:
+
+- `balanced`: default; relevance dominates, quality can meaningfully break
+  ties, and graph context contributes a small signal.
+- `relevance_first`: favors semantic/lexical relevance more strongly.
+- `quality_forward`: gives accepted quality ratings more influence among
+  otherwise relevant records.
+
+Reference quality comes from one current outgoing relation:
+
+```text
+Reference --quality_rating_is--> SemanticNode
+```
+
+The ranking code reads `relationTypeKey = "quality_rating_is"` or fallback
+`predicate = "quality_rating_is"`, requires `relationState = "current"` when
+present, and uses `SemanticRelation.score` as the `1..5` quality rating.
+Missing quality is unknown, not zero, and uses a neutral ranking fallback.
+
+`ranking.diversity` controls source spread and token allocation. It is separate
+from `ranking.profile`.
+
+- `focused`: fewer sources, deeper treatment of the top-ranked records. Use for
+  source-specific chat or close reading.
+- `balanced`: default; gives explicit anchors and top records useful depth
+  while preserving moderate source spread.
+- `broad`: smaller slices from more unique sources. Use for exploratory
+  "what does the corpus know?" queries.
+
+Diversity affects semantic match selection, `See Also` selection, source
+budgets, and passage caps. It must not change curation status, relation policy,
+or scoring semantics. Explicit anchors remain visible in every diversity mode.
+
+When summaries exist, `knowledgeQuery` prefers one selected Reference summary
+for a source before semantic or extracted-text chunks. The engine chooses the
+largest current summary that fits that source's token budget, using relation
+types such as `reference_summary_100_tokens`,
+`reference_summary_200_tokens`, and `reference_summary_500_tokens`.
+
 ## Output Options
 
 `output.format`:
@@ -148,6 +219,12 @@ maximum `20`.
 
 `output.includeExtracts`: defaults to `true`. Set `false` only when metadata
 and graph structure are enough.
+
+`output.extractMode`: `auto`, `always`, or `never`. Default `auto`.
+Semantic-only vector-backed queries skip S3 extracted-text fallback in `auto`
+mode because vector chunks are already evidence passages. Anchored queries
+still use extracted text in `auto` mode. Use `always` for source-specific close
+reading or full-source attempts.
 
 `output.includeProvenanceAppendix`: defaults to `false`. Set `true` to render
 operational/curation facts at the end instead of mixing them into the knowledge
@@ -228,7 +305,10 @@ The response envelope includes:
 - `warnings`: non-fatal issues such as missing extracted text or unavailable
   providers.
 - `provenance`: graph and semantic provider names.
-- `debug`: counts, timings, tokenizer metadata, and semantic query source.
+- `debug`: counts, timings, tokenizer metadata, semantic query source,
+  ranking profile, diversity profile, unique source count, source budget count,
+  vector diversification mode, stage timing breakdowns, and provider-level
+  graph call counts when available.
 
 Check `structured.request.semanticQuerySource`:
 
@@ -296,18 +376,36 @@ logic is ready to validate through AppSync.
 
 ## Vector Indexing
 
-When S3 Vectors is configured, accepted reference extracted-text passages can be
-indexed with:
+S3 Vectors is a derived semantic index. GraphQL `Reference` rows and extracted
+text attachments remain the source of truth; the vector index must be rebuilt or
+synced after a vector bucket/index replacement.
+
+Audit coverage before writing vectors:
 
 ```bash
-PYTHONPATH=src python -m papyrus_newsroom knowledge-vector-index \
+AWS_PROFILE=<profile> AWS_REGION=<region> PYTHONPATH=src \
+  python -m papyrus_newsroom knowledge-vector-index --action audit
+```
+
+Sync missing vectors with a dry run first:
+
+```bash
+AWS_PROFILE=<profile> AWS_REGION=<region> PYTHONPATH=src \
+  python -m papyrus_newsroom knowledge-vector-index --action sync \
   --corpus-id <corpus-id> \
   --max-references 25 \
   --dry-run
 ```
 
-Remove `--dry-run` only after reviewing the candidate count and configured
-vector index.
+Remove `--dry-run` only after reviewing the configured vector index, accepted
+reference count, existing vector count, prepared vector count, and write count.
+`sync` skips deterministic keys that already exist unless `--force` is passed.
+By default it writes both `reference_summary` source-level vectors and
+`reference_passage` extracted-text chunk vectors. Use `--no-source-vectors` or
+`--no-passage-vectors` only for a targeted repair.
+
+Use `--action rebuild` only for a derived-index rebuild where deleting existing
+vectors in the configured S3 Vectors index is intentional.
 
 ## Verification
 

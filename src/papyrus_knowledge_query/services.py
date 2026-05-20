@@ -3,12 +3,15 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import re
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from .tokens import TokenCounter
+from .uris import normalize_anchor_uri
 
 
 SUPPORTED_ANCHOR_KINDS = {
@@ -95,6 +98,37 @@ getSteeringProposal(id: $id) {
   graphEntityId relationshipType displayName description sourceSnapshotId proposedAt reviewedAt updatedAt
 }
 """,
+}
+
+LINEAGE_OBJECT_FIELD_MAP = {
+    "category": (
+        "listCategoriesByLineageAndVersion",
+        """
+  id lineageId versionNumber versionState categorySetId corpusId categoryKey parentCategoryId parentCategoryKey displayName
+  subtitle description aliases status seedItemIds holdoutItemIds rank depth isPinned importRunId updatedAt
+""",
+    ),
+    "categorySet": (
+        "listCategorySetsByLineageAndVersion",
+        """
+  id lineageId versionNumber versionState corpusId classifierId displayName description status generatedAt categoryCount importRunId
+""",
+    ),
+    "item": (
+        "listItemsByLineageAndVersion",
+        """
+  id lineageId versionNumber versionState type status typeStatus slug shortSlug section sectionStatus title headline deck byline
+  dateline publishedAt editionDate sortTitle body editorial updatedAt
+""",
+    ),
+    "reference": ("listReferencesByLineageAndVersion", REFERENCE_FIELDS),
+    "semanticNode": (
+        "listSemanticNodesByLineageAndVersion",
+        """
+  id lineageId versionNumber versionState contentHash nodeKey nodeKind corpusId categorySetId categoryLineageId categoryKey
+  displayName description aliases status importRunId createdAt updatedAt
+""",
+    ),
 }
 
 
@@ -234,19 +268,37 @@ class S3VectorsProvider:
         if not query.strip():
             return []
         vector = self._embed(query)
+        query_limit = _semantic_query_limit(scope, limit)
+        diversity = str(scope.get("rankingDiversity") or scope.get("diversity") or "balanced")
+        if diversity == "broad":
+            source_matches = self._query_vectors(vector, scope, query_limit, vector_kind="reference_summary")
+            passage_matches = self._query_vectors(vector, scope, min(query_limit, max(limit, 40)), vector_kind="reference_passage")
+            matches = source_matches + passage_matches
+            if not matches:
+                matches = self._query_vectors(vector, scope, query_limit)
+        else:
+            matches = self._query_vectors(vector, scope, query_limit)
+        return diversify_vector_matches(matches, limit, max_per_source=_semantic_max_matches_per_source(scope))
+
+    def _query_vectors(
+        self,
+        vector: list[float],
+        scope: dict[str, Any],
+        query_limit: int,
+        vector_kind: str | None = None,
+    ) -> list[dict[str, Any]]:
         try:
             import boto3  # type: ignore
         except ImportError as exc:  # pragma: no cover - deployment guard
             raise RuntimeError("boto3 is required for S3VectorsProvider") from exc
         client = boto3.client("s3vectors", region_name=self.region_name)
-        query_limit = max(limit, min(100, limit * 5))
         response = client.query_vectors(
             indexArn=self.vector_index_arn,
             queryVector={"float32": vector},
             topK=query_limit,
             returnDistance=True,
             returnMetadata=True,
-            filter=self._metadata_filter(scope),
+            filter=self._metadata_filter(scope, vector_kind=vector_kind),
         )
         matches = []
         for index, vector_match in enumerate(response.get("vectors") or response.get("matches") or []):
@@ -264,7 +316,7 @@ class S3VectorsProvider:
                     "metadata": metadata,
                 }
             )
-        return diversify_vector_matches(matches, limit)
+        return matches
 
     def _embed(self, text: str) -> list[float]:
         api_key = os.environ.get("OPENAI_API_KEY")
@@ -281,12 +333,14 @@ class S3VectorsProvider:
             payload = json.loads(response.read().decode("utf-8"))
         return payload["data"][0]["embedding"]
 
-    def _metadata_filter(self, scope: dict[str, Any]) -> dict[str, Any] | None:
+    def _metadata_filter(self, scope: dict[str, Any], vector_kind: str | None = None) -> dict[str, Any] | None:
         clauses: list[dict[str, Any]] = []
         for key in ("corpusId", "categorySetId", "classifierId", "curationStatus"):
             value = scope.get(key)
             if isinstance(value, str) and value:
                 clauses.append({key: {"$eq": value}})
+        if vector_kind:
+            clauses.append({"vectorKind": {"$eq": vector_kind}})
         object_kinds = scope.get("objectKinds")
         if isinstance(object_kinds, list) and object_kinds:
             clauses.append({"kind": {"$in": [str(kind) for kind in object_kinds]}})
@@ -305,18 +359,22 @@ class GraphQLKnowledgeGraphProvider:
     authorization_header: str = ""
     page_limit: int = 100
     name: str = "appsync-graphql"
+    profile_stats: dict[str, Any] = field(default_factory=lambda: {"graphqlCalls": 0, "graphqlMs": 0.0, "operations": {}})
 
     def resolve_anchor(self, anchor: dict[str, Any]) -> dict[str, Any] | None:
-        kind = str(anchor.get("kind") or "").strip()
-        object_id = str(anchor.get("id") or anchor.get("objectId") or "").strip()
+        normalized = normalize_anchor(anchor)
+        kind = str(normalized.get("kind") or "").strip()
+        object_id = str(normalized.get("id") or normalized.get("objectId") or normalized.get("lineageId") or "").strip()
         if not kind or not object_id or kind not in OBJECT_FIELD_MAP:
-            return normalize_anchor(anchor)
+            return normalized
         query = f"query GetKnowledgeObject($id: ID!) {{ {OBJECT_FIELD_MAP[kind]} }}"
         data = self.graphql(query, {"id": object_id})
         field_name = next((key for key in data if key.startswith("get")), "")
         record = data.get(field_name) if field_name else None
+        if not record and kind in LINEAGE_OBJECT_FIELD_MAP:
+            record = self._resolve_current_by_lineage(kind, object_id)
         if not record:
-            return normalize_anchor(anchor)
+            return normalized
         return {"kind": kind, **record}
 
     def expand_anchor(self, anchor: dict[str, Any], scope: dict[str, Any]) -> dict[str, Any]:
@@ -328,6 +386,7 @@ class GraphQLKnowledgeGraphProvider:
         top_k = max(1, min(int(scope.get("topK") or 12), 100))
         relation_types = {str(value) for value in scope.get("relationTypes") or [] if value}
         object_kinds = {str(value) for value in scope.get("objectKinds") or [] if value}
+        resolve_expansion_objects = bool(scope.get("resolveExpansionObjects", True))
         seen_nodes = {(kind, lineage_id)}
         frontier = [(kind, lineage_id, 0)]
         relations: dict[str, dict[str, Any]] = {}
@@ -365,7 +424,10 @@ class GraphQLKnowledgeGraphProvider:
                     frontier.append((node_key[0], node_key[1], level + 1))
                 if node_key not in objects:
                     stub = {"kind": other.get("kind"), "id": other.get("id"), "lineageId": other.get("lineageId")}
-                    objects[node_key] = resolved_objects.setdefault(node_key, self.resolve_anchor(stub) or stub)
+                    if resolve_expansion_objects:
+                        objects[node_key] = resolved_objects.setdefault(node_key, self.resolve_anchor(stub) or stub)
+                    else:
+                        objects[node_key] = stub
                 if len(relations) >= top_k:
                     break
         return {
@@ -413,6 +475,19 @@ class GraphQLKnowledgeGraphProvider:
         incoming = self._list_connection(LIST_RELATIONS_BY_OBJECT_QUERY, {"objectStateKey": state_key}, "listSemanticRelationsByObjectState")
         return dedupe_records(outgoing + incoming)
 
+    def _resolve_current_by_lineage(self, kind: str, lineage_id: str) -> dict[str, Any] | None:
+        field_name, fields = LINEAGE_OBJECT_FIELD_MAP[kind]
+        query = f"""
+query ResolveKnowledgeObjectByLineage($lineageId: ID!, $limit: Int, $nextToken: String) {{
+  {field_name}(lineageId: $lineageId, limit: $limit, nextToken: $nextToken) {{
+    items {{ {fields} }}
+    nextToken
+  }}
+}}
+"""
+        records = self._list_connection(query, {"lineageId": lineage_id}, field_name)
+        return select_current_version(records)
+
     def _list_connection(self, query: str, variables: dict[str, Any], field_name: str) -> list[dict[str, Any]]:
         records: list[dict[str, Any]] = []
         next_token = None
@@ -426,6 +501,8 @@ class GraphQLKnowledgeGraphProvider:
         return records
 
     def graphql(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
+        started = time.perf_counter()
+        operation_name = _graphql_operation_name(query)
         body = json.dumps({"query": query, "variables": variables}).encode("utf-8")
         request = urllib.request.Request(
             self.endpoint,
@@ -446,7 +523,36 @@ class GraphQLKnowledgeGraphProvider:
         if errors:
             messages = "; ".join(str(error.get("message") or error) for error in errors)
             raise RuntimeError(f"GraphQL request failed: {messages}")
+        self._record_graphql_call(operation_name, started)
         return payload.get("data") or {}
+
+    def profile_snapshot(self) -> dict[str, Any]:
+        operations = self.profile_stats.get("operations") if isinstance(self.profile_stats, dict) else {}
+        return {
+            "graphqlCalls": int(self.profile_stats.get("graphqlCalls") or 0),
+            "graphqlMs": round(float(self.profile_stats.get("graphqlMs") or 0.0), 2),
+            "operations": {
+                key: {"calls": int(value.get("calls") or 0), "ms": round(float(value.get("ms") or 0.0), 2)}
+                for key, value in sorted((operations or {}).items())
+                if isinstance(value, dict)
+            },
+        }
+
+    def _record_graphql_call(self, operation_name: str, started: float) -> None:
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        self.profile_stats["graphqlCalls"] = int(self.profile_stats.get("graphqlCalls") or 0) + 1
+        self.profile_stats["graphqlMs"] = float(self.profile_stats.get("graphqlMs") or 0.0) + elapsed_ms
+        operations = self.profile_stats.setdefault("operations", {})
+        operation = operations.setdefault(operation_name, {"calls": 0, "ms": 0.0})
+        operation["calls"] = int(operation.get("calls") or 0) + 1
+        operation["ms"] = float(operation.get("ms") or 0.0) + elapsed_ms
+
+
+def _graphql_operation_name(query: str) -> str:
+    match = re.search(r"\b(?:query|mutation)\s+([A-Za-z0-9_]+)", query or "")
+    if match:
+        return match.group(1)
+    return "anonymous"
 
 
 def build_environment_services(event: dict[str, Any] | None = None) -> KnowledgeQueryServices:
@@ -457,13 +563,21 @@ def build_environment_services(event: dict[str, Any] | None = None) -> Knowledge
 
 
 def normalize_anchor(anchor: dict[str, Any]) -> dict[str, Any]:
-    kind = str(anchor.get("kind") or anchor.get("objectKind") or "").strip()
-    normalized = dict(anchor)
+    normalized = normalize_anchor_uri(anchor)
+    kind = str(normalized.get("kind") or normalized.get("objectKind") or "").strip()
     if kind:
         normalized["kind"] = kind
-    if "lineageId" not in normalized and anchor.get("objectLineageId"):
-        normalized["lineageId"] = anchor.get("objectLineageId")
+    if "lineageId" not in normalized and normalized.get("objectLineageId"):
+        normalized["lineageId"] = normalized.get("objectLineageId")
     return normalized
+
+
+def select_current_version(records: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not records:
+        return None
+    current = [record for record in records if record.get("versionState") == "current"]
+    candidates = current or records
+    return sorted(candidates, key=lambda record: int(record.get("versionNumber") or 0), reverse=True)[0]
 
 
 def semantic_state_key(kind: str, lineage_id: str, state: str = "current") -> str:
@@ -486,7 +600,7 @@ def dedupe_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return list(deduped.values())
 
 
-def diversify_vector_matches(matches: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+def diversify_vector_matches(matches: list[dict[str, Any]], limit: int, max_per_source: int | None = None) -> list[dict[str, Any]]:
     """Prefer source diversity while preserving provider order within each source."""
 
     if limit <= 0:
@@ -501,13 +615,18 @@ def diversify_vector_matches(matches: list[dict[str, Any]], limit: int) -> list[
         buckets[key].append(match)
 
     diversified: list[dict[str, Any]] = []
+    emitted_by_source: dict[str, int] = {}
     while bucket_order and len(diversified) < limit:
         next_order: list[str] = []
         for key in bucket_order:
             bucket = buckets.get(key) or []
             if not bucket:
                 continue
+            if max_per_source is not None and emitted_by_source.get(key, 0) >= max_per_source:
+                bucket.clear()
+                continue
             diversified.append(bucket.pop(0))
+            emitted_by_source[key] = emitted_by_source.get(key, 0) + 1
             if bucket:
                 next_order.append(key)
             if len(diversified) >= limit:
@@ -518,6 +637,37 @@ def diversify_vector_matches(matches: list[dict[str, Any]], limit: int) -> list[
         {**match, "rank": index + 1}
         for index, match in enumerate(diversified)
     ]
+
+
+def _semantic_query_limit(scope: dict[str, Any], limit: int) -> int:
+    raw = scope.get("semanticSearchOverfetch")
+    if raw is not None:
+        try:
+            return max(limit, min(int(raw), 100))
+        except (TypeError, ValueError):
+            pass
+    diversity = str(scope.get("rankingDiversity") or scope.get("diversity") or "balanced")
+    if diversity == "broad":
+        return max(limit, min(100, limit * 12))
+    if diversity == "focused":
+        return max(limit, min(100, limit * 4))
+    return max(limit, min(100, limit * 6))
+
+
+def _semantic_max_matches_per_source(scope: dict[str, Any]) -> int | None:
+    raw = scope.get("semanticMaxMatchesPerSource")
+    if raw is not None:
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return None
+        return value if value > 0 else None
+    diversity = str(scope.get("rankingDiversity") or scope.get("diversity") or "balanced")
+    if diversity == "broad":
+        return 2
+    if diversity == "balanced":
+        return 4
+    return None
 
 
 def _vector_match_diversity_key(match: dict[str, Any]) -> str:

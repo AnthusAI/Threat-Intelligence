@@ -1,6 +1,7 @@
 import contextlib
 import io
 import json
+import os
 import pathlib
 import sys
 import tempfile
@@ -14,9 +15,15 @@ if str(SRC_ROOT) not in sys.path:
 
 from papyrus_knowledge_query.engine import ContextBlock, _render_markdown_context, run_knowledge_query
 from papyrus_knowledge_query.lambda_handler import handler as lambda_handler
-from papyrus_knowledge_query.ranking import quality_score_from_rating, quality_signal_from_relations
+from papyrus_knowledge_query.ranking import (
+    allocate_token_budgets,
+    quality_score_from_rating,
+    quality_signal_from_relations,
+    select_records_by_diversity,
+)
 from papyrus_knowledge_query.services import KnowledgeQueryServices, diversify_vector_matches, relation_allowed_for_scope
 from papyrus_knowledge_query.tokens import TokenCounter
+from papyrus_knowledge_query.vector_index import VectorIndexOptions, index_reference_passages
 
 
 class FakeSemanticProvider:
@@ -84,6 +91,120 @@ class FakeVectorSemanticProvider:
         ][:limit]
 
 
+class RepeatedChunkSemanticProvider:
+    name = "repeated-chunk-semantic"
+
+    def search(self, query, scope, limit):
+        matches = []
+        for index in range(4):
+            matches.append(
+                {
+                    "rank": index + 1,
+                    "distance": 0.1 + (index * 0.01),
+                    "kind": "reference",
+                    "id": "reference-a-v1",
+                    "lineageId": "reference-a",
+                    "title": "Evaluation Source A",
+                    "metadata": {
+                        "kind": "reference",
+                        "id": "reference-a-v1",
+                        "lineageId": "reference-a",
+                        "referenceId": "reference-a-v1",
+                        "referenceLineageId": "reference-a",
+                        "title": "Evaluation Source A",
+                        "text": (
+                            f"Evaluation source A chunk {index} describes model evaluation, reliability measurement, "
+                            "benchmark design, and production quality checks for agent systems."
+                        ),
+                        "storagePath": "corpora/test/extracted/source-a.txt",
+                        "chunkIndex": index,
+                        "startChar": index * 200,
+                        "endChar": (index + 1) * 200,
+                    },
+                }
+            )
+        matches.append(
+            {
+                "rank": 5,
+                "distance": 0.2,
+                "kind": "reference",
+                "id": "reference-b-v1",
+                "lineageId": "reference-b",
+                "title": "Evaluation Source B",
+                "metadata": {
+                    "kind": "reference",
+                    "id": "reference-b-v1",
+                    "lineageId": "reference-b",
+                    "referenceId": "reference-b-v1",
+                    "referenceLineageId": "reference-b",
+                    "title": "Evaluation Source B",
+                    "text": (
+                        "Evaluation source B describes evaluation protocols, reliability review, benchmark selection, "
+                        "and measurement practices for machine learning systems."
+                    ),
+                    "storagePath": "corpora/test/extracted/source-b.txt",
+                    "chunkIndex": 0,
+                    "startChar": 0,
+                    "endChar": 200,
+                },
+            }
+        )
+        return matches[:limit]
+
+
+class SummaryMessageSemanticProvider:
+    name = "summary-message-semantic"
+
+    def search(self, query, scope, limit):
+        return [
+            {
+                "rank": 1,
+                "distance": 0.08,
+                "kind": "message",
+                "id": "message-summary-semantic",
+                "lineageId": "message-summary-semantic",
+                "messageKind": "reference_summary",
+                "messageDomain": "summarization",
+                "summary": "Semantic-hit summary: model evaluation requires reliability checks and human review.",
+                "metadata": {
+                    "kind": "message",
+                    "id": "message-summary-semantic",
+                    "lineageId": "message-summary-semantic",
+                    "messageKind": "reference_summary",
+                    "messageDomain": "summarization",
+                    "relationTypeKey": "reference_summary_100_tokens",
+                    "referenceId": "reference-1-v1",
+                    "referenceLineageId": "reference-1",
+                    "text": "Semantic-hit summary: model evaluation requires reliability checks and human review.",
+                },
+            },
+            {
+                "rank": 2,
+                "distance": 0.12,
+                "kind": "reference",
+                "id": "reference-1-v1",
+                "lineageId": "reference-1",
+                "title": "Scaling Memo",
+                "metadata": {
+                    "kind": "reference",
+                    "id": "reference-1-v1",
+                    "lineageId": "reference-1",
+                    "referenceId": "reference-1-v1",
+                    "referenceLineageId": "reference-1",
+                    "title": "Scaling Memo",
+                    "text": (
+                        "Production agent systems need reliable evaluation before deployment. "
+                        "Teams measure reliability with task success, human review, and regression checks."
+                    ),
+                    "storagePath": "corpora/test/extracted/pipeline/snapshot/text/reference-1.txt",
+                    "chunkIndex": 0,
+                    "startChar": 0,
+                    "endChar": 160,
+                },
+            },
+        ][:limit]
+
+
 class RecordingVectorSemanticProvider(FakeVectorSemanticProvider):
     def __init__(self):
         self.queries = []
@@ -147,6 +268,7 @@ class FakeGraphProvider:
                     "The source emphasizes task success, regression checks, observability, and human review as practical controls. "
                     "It connects measurement choices to production risk, repeatability, and the need to understand failures before agents are trusted."
                 ),
+                "message-summary-semantic": "Semantic-hit summary: model evaluation requires reliability checks and human review.",
             }
             message_id = anchor["id"]
             return {
@@ -257,6 +379,24 @@ class FakeGraphProvider:
         ]
 
     def list_outgoing_relations(self, obj):
+        if obj.get("kind") == "message" and obj.get("lineageId") == "message-summary-semantic":
+            return [
+                {
+                    "id": "summary-reference-1-semantic",
+                    "relationState": "current",
+                    "predicate": "reference_summary_100_tokens",
+                    "relationTypeKey": "reference_summary_100_tokens",
+                    "relationDomain": "summarization",
+                    "subjectKind": "message",
+                    "subjectId": "message-summary-semantic",
+                    "subjectLineageId": "message-summary-semantic",
+                    "objectKind": "reference",
+                    "objectId": "reference-1-v1",
+                    "objectLineageId": "reference-1",
+                    "metadata": {"maxTokens": 100, "actualTokenEstimate": 20},
+                    "importedAt": "2026-05-19T12:30:00Z",
+                }
+            ]
         if obj.get("kind") != "reference":
             return []
         lineage_id = obj.get("lineageId") or obj.get("id")
@@ -329,6 +469,91 @@ class FakeGraphProvider:
         return relations
 
 
+class FakeVectorIndexGraphProvider:
+    name = "fake-vector-index-graph"
+
+    def __init__(self):
+        self.references = [
+            {
+                "id": "reference-1-v1",
+                "lineageId": "reference-1",
+                "versionState": "current",
+                "curationStatus": "accepted",
+                "corpusId": "test-corpus",
+                "title": "Evaluation Source One",
+                "authors": ["Ada Reporter"],
+                "sourceUri": "https://example.com/one",
+            },
+            {
+                "id": "reference-2-v1",
+                "lineageId": "reference-2",
+                "versionState": "current",
+                "curationStatus": "accepted",
+                "corpusId": "test-corpus",
+                "title": "Evaluation Source Two",
+                "authors": ["Grace Editor"],
+                "sourceUri": "https://example.com/two",
+            },
+            {
+                "id": "reference-draft-v1",
+                "lineageId": "reference-draft",
+                "versionState": "current",
+                "curationStatus": "proposed",
+                "corpusId": "test-corpus",
+                "title": "Draft Source",
+            },
+        ]
+
+    def graphql(self, query, variables):
+        return {"listReferences": {"items": self.references, "nextToken": None}}
+
+    def list_reference_attachments(self, reference):
+        return [
+            {
+                "role": "extracted_text",
+                "storagePath": f"corpora/test/{reference['lineageId']}.txt",
+            }
+        ]
+
+
+class FakeVectorIndexTextProvider:
+    def read_text(self, storage_path):
+        return (
+            (
+                f"{storage_path} describes model evaluation, production monitoring, reliability checks, "
+                "human review, regression testing, benchmark design, and operational measurement. "
+                "The document discusses how teams decide whether AI systems are ready for deployment.\n"
+            )
+        ) * 8
+
+    def list_incoming_relations(self, obj):
+        if obj.get("kind") != "reference":
+            return []
+        lineage_id = obj.get("lineageId") or obj.get("id")
+        if lineage_id != "reference-1":
+            return []
+        relations = []
+        for tokens in (100, 200, 500):
+            relations.append(
+                {
+                    "id": f"summary-reference-1-{tokens}",
+                    "relationState": "current",
+                    "predicate": f"reference_summary_{tokens}_tokens",
+                    "relationTypeKey": f"reference_summary_{tokens}_tokens",
+                    "relationDomain": "summarization",
+                    "subjectKind": "message",
+                    "subjectId": f"message-summary-{tokens}",
+                    "subjectLineageId": f"message-summary-{tokens}",
+                    "objectKind": "reference",
+                    "objectId": "reference-1-v1",
+                    "objectLineageId": "reference-1",
+                    "metadata": {"maxTokens": tokens, "actualTokenEstimate": tokens},
+                    "importedAt": "2026-05-19T12:00:00Z",
+                }
+            )
+        return relations
+
+
 class FakeCorpusTextProvider:
     name = "fake-corpus-text"
 
@@ -366,6 +591,20 @@ class KnowledgeQueryTests(unittest.TestCase):
 
         self.assertEqual([match["lineageId"] for match in diversified], ["ref-a", "ref-b", "ref-c", "ref-a"])
         self.assertEqual([match["rank"] for match in diversified], [1, 2, 3, 4])
+
+    def test_vector_match_diversification_can_cap_repeated_sources(self):
+        matches = [
+            {"id": "ref-a-v1", "lineageId": "ref-a", "providerRank": 1, "metadata": {"referenceLineageId": "ref-a"}},
+            {"id": "ref-a-v1", "lineageId": "ref-a", "providerRank": 2, "metadata": {"referenceLineageId": "ref-a"}},
+            {"id": "ref-b-v1", "lineageId": "ref-b", "providerRank": 3, "metadata": {"referenceLineageId": "ref-b"}},
+            {"id": "ref-b-v1", "lineageId": "ref-b", "providerRank": 4, "metadata": {"referenceLineageId": "ref-b"}},
+            {"id": "ref-c-v1", "lineageId": "ref-c", "providerRank": 5, "metadata": {"referenceLineageId": "ref-c"}},
+        ]
+
+        diversified = diversify_vector_matches(matches, 10, max_per_source=1)
+
+        self.assertEqual([match["lineageId"] for match in diversified], ["ref-a", "ref-b", "ref-c"])
+        self.assertEqual([match["rank"] for match in diversified], [1, 2, 3])
 
     def test_quality_signal_reads_current_relation_score(self):
         signal, warning = quality_signal_from_relations([
@@ -478,6 +717,59 @@ class KnowledgeQueryTests(unittest.TestCase):
         self.assertEqual(result["context"]["tokenizer"]["encoding"], "o200k_base")
         self.assertEqual(result["debug"]["tokenizerProvider"], "tiktoken")
         self.assertEqual(result["debug"]["tokenizerEncoding"], "o200k_base")
+        self.assertEqual(result["structured"]["request"]["ranking"]["diversity"], "balanced")
+        self.assertEqual(result["debug"]["diversityProfile"], "balanced")
+        self.assertEqual(result["debug"]["vectorDiversification"], "source_round_robin")
+        self.assertTrue(any(stage["name"] == "semantic_search" for stage in result["debug"]["stageTimings"]))
+        self.assertIn("semanticUniqueSourceCount", result["debug"])
+
+    def test_uri_anchor_resolves_like_explicit_anchor(self):
+        explicit = run_knowledge_query(
+            {
+                "anchors": [{"kind": "category", "id": "category-scaling", "lineageId": "category-scaling"}],
+                "output": {"format": "structured", "maxTokens": 120},
+            },
+            fake_services(),
+        )
+        by_uri = run_knowledge_query(
+            {
+                "anchors": [{"uri": "papyrus://category/category-scaling"}],
+                "output": {"format": "structured", "maxTokens": 120},
+            },
+            fake_services(),
+        )
+
+        self.assertEqual(by_uri["structured"]["anchors"][0]["kind"], explicit["structured"]["anchors"][0]["kind"])
+        self.assertEqual(by_uri["structured"]["anchors"][0]["lineageId"], explicit["structured"]["anchors"][0]["lineageId"])
+        self.assertEqual(by_uri["structured"]["anchors"][0]["objectUri"], "papyrus://category/category-scaling")
+
+    def test_unknown_diversity_warns_and_falls_back_to_balanced(self):
+        result = run_knowledge_query(
+            {
+                "anchors": [{"kind": "category", "id": "category-scaling-v1", "lineageId": "category-scaling"}],
+                "ranking": {"diversity": "wide"},
+                "output": {"format": "structured"},
+            },
+            fake_services(),
+        )
+
+        self.assertEqual(result["structured"]["request"]["ranking"]["diversity"], "balanced")
+        self.assertTrue(any("Unknown ranking.diversity" in warning for warning in result["warnings"]))
+
+    def test_broad_diversity_warns_when_semantic_source_spread_is_not_satisfied(self):
+        result = run_knowledge_query(
+            {
+                "semanticQuery": "evaluation",
+                "ranking": {"diversity": "broad"},
+                "scope": {"topK": 5, "relatedRecordLimit": 8, "semanticSeedLimit": 0},
+                "output": {"format": "structured"},
+            },
+            KnowledgeQueryServices(graph=None, semantic=FakeVectorSemanticProvider(), corpus_text=None),
+        )
+
+        self.assertEqual(result["debug"]["semanticUniqueSourceCount"], 2)
+        self.assertEqual(result["debug"]["semanticSourceTarget"], 5)
+        self.assertTrue(any("Broad diversity requested" in warning for warning in result["warnings"]))
 
     def test_output_tokenizer_model_override_is_reported(self):
         result = run_knowledge_query(
@@ -715,7 +1007,7 @@ class KnowledgeQueryTests(unittest.TestCase):
         result = run_knowledge_query(
             {
                 "semanticQuery": "production reliability evaluation for agents",
-                "output": {"format": "markdown", "maxTokens": 500},
+                "output": {"format": "markdown", "maxTokens": 500, "extractMode": "always"},
             },
             services,
         )
@@ -799,6 +1091,32 @@ class KnowledgeQueryTests(unittest.TestCase):
         self.assertIn("Production agent systems need reliable evaluation", text)
         self.assertLess(text.index("Long summary"), text.index("Production agent systems need reliable evaluation"))
 
+    def test_semantic_summary_message_hit_maps_to_reference_summary(self):
+        services = KnowledgeQueryServices(
+            graph=FakeGraphProvider(),
+            semantic=SummaryMessageSemanticProvider(),
+            corpus_text=LongFakeCorpusTextProvider(),
+        )
+        result = run_knowledge_query(
+            {
+                "semanticQuery": "model evaluation",
+                "output": {"format": "both", "maxTokens": 420, "maxPassageTokens": 120},
+            },
+            services,
+        )
+
+        self.assertEqual(result["structured"]["semanticMatches"][0]["kind"], "reference")
+        self.assertEqual(result["structured"]["semanticMatches"][0]["semanticHitKind"], "reference_summary")
+        self.assertEqual(result["structured"]["semanticMatches"][0]["summaryMessageId"], "message-summary-semantic")
+        selected = [
+            passage for passage in result["structured"]["evidencePassages"]
+            if passage.get("selectionReason") == "reference_summary"
+        ]
+        self.assertGreaterEqual(len(selected), 1)
+        self.assertNotEqual(result["structured"]["evidencePassages"][0]["selectionReason"], "semantic_vector")
+        self.assertEqual(result["structured"]["evidencePassages"][0]["selectionReason"], "reference_summary")
+        self.assertNotIn("papyrus://message/message-summary-semantic", result["context"]["text"])
+
     def test_semantic_only_query_promotes_matches_to_related_records_and_graph_seed(self):
         services = KnowledgeQueryServices(
             graph=FakeGraphProvider(),
@@ -818,6 +1136,12 @@ class KnowledgeQueryTests(unittest.TestCase):
         self.assertIn("papyrus://reference/reference-1", related_uris)
         self.assertIn("papyrus://item/item-agent-eval", related_uris)
         self.assertTrue(any(obj.get("semanticSeedRank") == 1 for obj in result["structured"]["expandedObjects"]))
+        self.assertEqual(result["structured"]["request"]["scope"]["semanticSeedGraphTopK"], 6)
+        self.assertEqual(result["structured"]["request"]["scope"]["semanticSeedExpansionLimit"], 1)
+        seed_stage = next(stage for stage in result["debug"]["stageTimings"] if stage["name"] == "expand_semantic_seeds")
+        self.assertEqual(seed_stage["semanticSeedExpansionLimit"], 1)
+        self.assertEqual(seed_stage["semanticSeedRelationLimit"], 4)
+        self.assertFalse(seed_stage["semanticSeedResolveEnabled"])
         self.assertIn("## See Also", result["context"]["text"])
         self.assertIn("A newsroom article about measuring agent reliability", result["context"]["text"])
 
@@ -926,6 +1250,81 @@ class KnowledgeQueryTests(unittest.TestCase):
         self.assertGreaterEqual(related[0]["ranking"]["tokenBudget"], related[1]["ranking"]["tokenBudget"])
         self.assertLessEqual(result["context"]["totalTokens"], 500)
 
+    def test_diversity_profile_changes_source_token_budgets(self):
+        records = [
+            {"lineageId": "reference-a", "ranking": {"finalScore": 0.95}},
+            {"lineageId": "reference-b", "ranking": {"finalScore": 0.55}},
+            {"lineageId": "reference-c", "ranking": {"finalScore": 0.35}},
+        ]
+
+        focused = allocate_token_budgets(records, 360, min_tokens=60, max_tokens=320, diversity="focused")
+        broad = allocate_token_budgets(records, 360, min_tokens=90, max_tokens=180, diversity="broad")
+
+        self.assertGreater(focused["reference-a"], broad["reference-a"])
+        self.assertLess(max(broad.values()) - min(broad.values()), max(focused.values()) - min(focused.values()))
+
+    def test_broad_diversity_selects_unique_sources_before_repeats(self):
+        records = [
+            {"id": "a-1", "lineageId": "reference-a", "ranking": {"finalScore": 0.99, "relevanceScore": 0.99, "qualityScore": 0.5}},
+            {"id": "a-2", "lineageId": "reference-a", "ranking": {"finalScore": 0.98, "relevanceScore": 0.98, "qualityScore": 0.5}},
+            {"id": "b-1", "lineageId": "reference-b", "ranking": {"finalScore": 0.82, "relevanceScore": 0.82, "qualityScore": 0.5}},
+        ]
+
+        focused = select_records_by_diversity(records, 2, "focused")
+        broad = select_records_by_diversity(records, 2, "broad")
+
+        self.assertEqual([record["id"] for record in focused], ["a-1", "a-2"])
+        self.assertEqual([record["id"] for record in broad], ["a-1", "b-1"])
+
+    def test_see_also_diversity_changes_summary_budget(self):
+        services = KnowledgeQueryServices(graph=FakeGraphProvider(), semantic=QualityTieSemanticProvider())
+        base_payload = {
+            "anchors": [{"kind": "category", "id": "category-scaling-v1", "lineageId": "category-scaling"}],
+            "semanticQuery": "production reliability evaluation for agents",
+            "scope": {"topK": 2, "relatedRecordLimit": 2},
+            "output": {"format": "markdown", "maxTokens": 500, "seeAlsoMaxTokens": 180},
+        }
+        focused = run_knowledge_query({**base_payload, "ranking": {"diversity": "focused"}}, services)
+        broad = run_knowledge_query({**base_payload, "ranking": {"diversity": "broad"}}, services)
+
+        focused_budget = focused["structured"]["relatedRecords"][0]["ranking"]["tokenBudget"]
+        broad_budget = broad["structured"]["relatedRecords"][0]["ranking"]["tokenBudget"]
+        self.assertGreater(focused_budget, broad_budget)
+        self.assertEqual(focused["structured"]["relatedRecords"][0]["ranking"]["diversity"], "focused")
+        self.assertEqual(broad["structured"]["relatedRecords"][0]["ranking"]["diversity"], "broad")
+
+    def test_broad_diversity_caps_repeated_semantic_passages_per_source(self):
+        services = KnowledgeQueryServices(graph=None, semantic=RepeatedChunkSemanticProvider(), corpus_text=None)
+        focused = run_knowledge_query(
+            {
+                "semanticQuery": "model evaluation",
+                "ranking": {"diversity": "focused"},
+                "scope": {"topK": 5},
+                "output": {"format": "both", "maxTokens": 800, "maxPassages": 5, "maxPassageTokens": 120},
+            },
+            services,
+        )
+        broad = run_knowledge_query(
+            {
+                "semanticQuery": "model evaluation",
+                "ranking": {"diversity": "broad"},
+                "scope": {"topK": 5},
+                "output": {"format": "both", "maxTokens": 800, "maxPassages": 5, "maxPassageTokens": 120},
+            },
+            services,
+        )
+
+        focused_a = [
+            passage for passage in focused["structured"]["evidencePassages"]
+            if passage.get("referenceLineageId") == "reference-a"
+        ]
+        broad_a = [
+            passage for passage in broad["structured"]["evidencePassages"]
+            if passage.get("referenceLineageId") == "reference-a"
+        ]
+        self.assertGreater(len(focused_a), len(broad_a))
+        self.assertEqual(len(broad_a), 1)
+
     def test_core_renders_appsync_awsjson_metadata_strings(self):
         services = KnowledgeQueryServices(graph=FakeGraphProvider(), semantic=FakeSemanticProvider())
         original_expand = services.graph.expand_anchor
@@ -978,13 +1377,94 @@ class KnowledgeQueryTests(unittest.TestCase):
             stdout = io.StringIO()
             with mock.patch("papyrus_knowledge_query.cli.build_environment_services", return_value=fake_services()), \
                  contextlib.redirect_stdout(stdout):
-                exit_code = newsroom_cli.main(["knowledge-query", "--input", handle.name])
+                exit_code = newsroom_cli.main(["knowledge-query", "--input", handle.name, "--execution", "local"])
 
         self.assertEqual(exit_code, 0)
         result = json.loads(stdout.getvalue())
         direct = run_knowledge_query(payload, fake_services())
         self.assertEqual(result["structured"], direct["structured"])
         self.assertEqual(result["context"]["text"], direct["context"]["text"])
+
+    def test_vector_index_audit_reports_missing_references(self):
+        services = KnowledgeQueryServices(graph=FakeVectorIndexGraphProvider(), corpus_text=FakeVectorIndexTextProvider())
+        existing = [
+            {
+                "key": "reference-summary-existing",
+                "metadata": {
+                    "kind": "reference",
+                    "referenceLineageId": "reference-1",
+                    "vectorKind": "reference_summary",
+                },
+            }
+        ]
+        with mock.patch.dict(os.environ, {"PAPYRUS_S3_VECTOR_INDEX_ARN": "arn:test:index"}), \
+             mock.patch("papyrus_knowledge_query.vector_index._list_index_vectors", return_value=existing):
+            result = index_reference_passages(services, VectorIndexOptions(action="audit"))
+
+        self.assertEqual(result["acceptedReferences"], 2)
+        self.assertEqual(result["existingVectors"], 1)
+        self.assertEqual(result["existingIndexedReferences"], 1)
+        self.assertEqual(result["missingIndexedReferences"], 1)
+        self.assertEqual(result["missingIndexedReferenceSample"], ["reference-2"])
+
+    def test_vector_index_sync_writes_source_and_passage_vectors_once(self):
+        services = KnowledgeQueryServices(graph=FakeVectorIndexGraphProvider(), corpus_text=FakeVectorIndexTextProvider())
+        written_batches = []
+
+        def fake_embed(texts):
+            return [[0.1, 0.2, 0.3] for _ in texts]
+
+        def fake_put(index_arn, vectors):
+            written_batches.append(vectors)
+
+        with mock.patch.dict(os.environ, {"PAPYRUS_S3_VECTOR_INDEX_ARN": "arn:test:index"}), \
+             mock.patch("papyrus_knowledge_query.vector_index._list_index_vectors", return_value=[]), \
+             mock.patch("papyrus_knowledge_query.vector_index._embed", side_effect=fake_embed), \
+             mock.patch("papyrus_knowledge_query.vector_index._put_vectors", side_effect=fake_put):
+            result = index_reference_passages(
+                services,
+                VectorIndexOptions(
+                    action="sync",
+                    max_chunks_per_reference=2,
+                    batch_size=3,
+                    progress_every=0,
+                ),
+            )
+
+        written = [vector for batch in written_batches for vector in batch]
+        self.assertEqual(result["acceptedReferences"], 2)
+        self.assertEqual(result["sourceVectorsPrepared"], 2)
+        self.assertEqual(result["passageVectorsPrepared"], 4)
+        self.assertEqual(result["vectorsWritten"], 6)
+        self.assertEqual({vector["metadata"]["vectorKind"] for vector in written}, {"reference_summary", "reference_passage"})
+        self.assertTrue(all(vector["metadata"]["referenceLineageId"] in {"reference-1", "reference-2"} for vector in written))
+
+    def test_vector_index_sync_skips_existing_keys(self):
+        services = KnowledgeQueryServices(graph=FakeVectorIndexGraphProvider(), corpus_text=FakeVectorIndexTextProvider())
+        written_batches = []
+        with mock.patch.dict(os.environ, {"PAPYRUS_S3_VECTOR_INDEX_ARN": "arn:test:index"}), \
+             mock.patch("papyrus_knowledge_query.vector_index._list_index_vectors", return_value=[]), \
+             mock.patch("papyrus_knowledge_query.vector_index._embed", return_value=[[0.1, 0.2, 0.3]] * 6), \
+             mock.patch("papyrus_knowledge_query.vector_index._put_vectors", side_effect=lambda index_arn, vectors: written_batches.append(vectors)):
+            first = index_reference_passages(
+                services,
+                VectorIndexOptions(action="sync", max_chunks_per_reference=2, progress_every=0),
+            )
+        existing = [{"key": vector["key"], "metadata": vector["metadata"]} for batch in written_batches for vector in batch]
+        with mock.patch.dict(os.environ, {"PAPYRUS_S3_VECTOR_INDEX_ARN": "arn:test:index"}), \
+             mock.patch("papyrus_knowledge_query.vector_index._list_index_vectors", return_value=existing), \
+             mock.patch("papyrus_knowledge_query.vector_index._embed") as embed_mock, \
+             mock.patch("papyrus_knowledge_query.vector_index._put_vectors") as put_mock:
+            second = index_reference_passages(
+                services,
+                VectorIndexOptions(action="sync", max_chunks_per_reference=2, progress_every=0),
+            )
+
+        self.assertEqual(first["vectorsWritten"], 6)
+        self.assertEqual(second["vectorsSkippedExisting"], 6)
+        self.assertEqual(second["vectorsWritten"], 0)
+        embed_mock.assert_not_called()
+        put_mock.assert_not_called()
 
 
 if __name__ == "__main__":
