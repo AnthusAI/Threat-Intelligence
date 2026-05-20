@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import re
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -179,10 +180,19 @@ class KnowledgeGraphProvider(Protocol):
     def list_reference_attachments(self, reference: dict[str, Any]) -> list[dict[str, Any]]:
         ...
 
+    def list_reference_attachments_batch(self, references: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+        ...
+
     def list_outgoing_relations(self, obj: dict[str, Any]) -> list[dict[str, Any]]:
         ...
 
     def list_incoming_relations(self, obj: dict[str, Any]) -> list[dict[str, Any]]:
+        ...
+
+    def list_outgoing_relations_batch(self, objects: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+        ...
+
+    def list_incoming_relations_batch(self, objects: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
         ...
 
 
@@ -236,18 +246,28 @@ class S3CorpusTextProvider:
     region_name: str | None = None
     max_bytes: int = 2_000_000
     name: str = "s3-corpus-text"
+    _client: Any = field(default=None, init=False, repr=False)
+    _client_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
 
     def read_text(self, storage_path: str) -> str | None:
         if not storage_path:
             return None
-        try:
-            import boto3  # type: ignore
-        except ImportError as exc:  # pragma: no cover - deployment guard
-            raise RuntimeError("boto3 is required for S3CorpusTextProvider") from exc
-        client = boto3.client("s3", region_name=self.region_name)
+        client = self._s3_client()
         response = client.get_object(Bucket=self.bucket_name, Key=storage_path)
         body = response["Body"].read(self.max_bytes + 1)
         return body[: self.max_bytes].decode("utf-8", errors="replace")
+
+    def _s3_client(self) -> Any:
+        if self._client is not None:
+            return self._client
+        with self._client_lock:
+            if self._client is None:
+                try:
+                    import boto3  # type: ignore
+                except ImportError as exc:  # pragma: no cover - deployment guard
+                    raise RuntimeError("boto3 is required for S3CorpusTextProvider") from exc
+                self._client = boto3.client("s3", region_name=self.region_name)
+        return self._client
 
 
 @dataclass
@@ -360,6 +380,7 @@ class GraphQLKnowledgeGraphProvider:
     page_limit: int = 100
     name: str = "appsync-graphql"
     profile_stats: dict[str, Any] = field(default_factory=lambda: {"graphqlCalls": 0, "graphqlMs": 0.0, "operations": {}})
+    profile_lock: threading.Lock = field(default_factory=threading.Lock)
 
     def resolve_anchor(self, anchor: dict[str, Any]) -> dict[str, Any] | None:
         normalized = normalize_anchor(anchor)
@@ -447,6 +468,44 @@ class GraphQLKnowledgeGraphProvider:
             "listReferenceAttachmentsByReferenceLineageAndSortKey",
         )
 
+    def list_reference_attachments_batch(self, references: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+        key_specs: list[str] = []
+        seen: set[str] = set()
+        for reference in references:
+            lineage_id = str(reference.get("lineageId") or reference.get("referenceLineageId") or reference.get("id") or "").strip()
+            if not lineage_id or lineage_id in seen:
+                continue
+            seen.add(lineage_id)
+            key_specs.append(lineage_id)
+        if not key_specs:
+            return {}
+        results: dict[str, list[dict[str, Any]]] = {}
+        for batch in _batched_values(key_specs, 20):
+            variables: dict[str, Any] = {"limit": self.page_limit}
+            variable_defs = ["$limit: Int"]
+            fields = []
+            alias_to_lineage: dict[str, str] = {}
+            for index, lineage_id in enumerate(batch):
+                var_name = f"k{index}"
+                alias = f"a{index}"
+                variables[var_name] = lineage_id
+                variable_defs.append(f"${var_name}: ID!")
+                fields.append(
+                    f"""
+  {alias}: listReferenceAttachmentsByReferenceLineageAndSortKey(referenceLineageId: ${var_name}, limit: $limit) {{
+    items {{ {REFERENCE_ATTACHMENT_FIELDS} }}
+    nextToken
+  }}
+"""
+                )
+                alias_to_lineage[alias] = lineage_id
+            query = f"query BatchReferenceAttachmentsByLineage({', '.join(variable_defs)}) {{\n{''.join(fields)}\n}}"
+            payload = self.graphql(query, variables)
+            for alias, lineage_id in alias_to_lineage.items():
+                connection = payload.get(alias) or {}
+                results[lineage_id] = [item for item in connection.get("items") or [] if item]
+        return results
+
     def list_outgoing_relations(self, obj: dict[str, Any]) -> list[dict[str, Any]]:
         kind = str(obj.get("kind") or obj.get("subjectKind") or "").strip()
         lineage_id = str(obj.get("lineageId") or obj.get("subjectLineageId") or obj.get("id") or "").strip()
@@ -458,6 +517,9 @@ class GraphQLKnowledgeGraphProvider:
             "listSemanticRelationsBySubjectState",
         )
 
+    def list_outgoing_relations_batch(self, objects: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+        return self._list_relations_batch(objects, "subject")
+
     def list_incoming_relations(self, obj: dict[str, Any]) -> list[dict[str, Any]]:
         kind = str(obj.get("kind") or obj.get("objectKind") or "").strip()
         lineage_id = str(obj.get("lineageId") or obj.get("objectLineageId") or obj.get("id") or "").strip()
@@ -468,6 +530,55 @@ class GraphQLKnowledgeGraphProvider:
             {"objectStateKey": semantic_state_key(kind, lineage_id)},
             "listSemanticRelationsByObjectState",
         )
+
+    def list_incoming_relations_batch(self, objects: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+        return self._list_relations_batch(objects, "object")
+
+    def _list_relations_batch(self, objects: list[dict[str, Any]], direction: str) -> dict[str, list[dict[str, Any]]]:
+        key_specs: list[tuple[str, str, str]] = []
+        seen: set[str] = set()
+        for obj in objects:
+            if direction == "subject":
+                kind = str(obj.get("kind") or obj.get("subjectKind") or "").strip()
+                lineage_id = str(obj.get("lineageId") or obj.get("subjectLineageId") or obj.get("id") or "").strip()
+            else:
+                kind = str(obj.get("kind") or obj.get("objectKind") or "").strip()
+                lineage_id = str(obj.get("lineageId") or obj.get("objectLineageId") or obj.get("id") or "").strip()
+            if not kind or not lineage_id or lineage_id in seen:
+                continue
+            seen.add(lineage_id)
+            key_specs.append((lineage_id, semantic_state_key(kind, lineage_id), kind))
+        if not key_specs:
+            return {}
+        field_name = "listSemanticRelationsBySubjectState" if direction == "subject" else "listSemanticRelationsByObjectState"
+        variable_name = "subjectStateKey" if direction == "subject" else "objectStateKey"
+        operation_name = "BatchRelationsBySubject" if direction == "subject" else "BatchRelationsByObject"
+        results: dict[str, list[dict[str, Any]]] = {}
+        for batch in _batched_tuples(key_specs, 20):
+            variables: dict[str, Any] = {"limit": self.page_limit}
+            variable_defs = ["$limit: Int"]
+            fields = []
+            alias_to_lineage: dict[str, str] = {}
+            for index, (lineage_id, state_key, _kind) in enumerate(batch):
+                var_name = f"k{index}"
+                alias = f"r{index}"
+                variables[var_name] = state_key
+                variable_defs.append(f"${var_name}: String!")
+                fields.append(
+                    f"""
+  {alias}: {field_name}({variable_name}: ${var_name}, limit: $limit) {{
+    items {{ {RELATION_FIELDS} }}
+    nextToken
+  }}
+"""
+                )
+                alias_to_lineage[alias] = lineage_id
+            query = f"query {operation_name}({', '.join(variable_defs)}) {{\n{''.join(fields)}\n}}"
+            payload = self.graphql(query, variables)
+            for alias, lineage_id in alias_to_lineage.items():
+                connection = payload.get(alias) or {}
+                results[lineage_id] = [item for item in connection.get("items") or [] if item]
+        return results
 
     def _neighbors(self, kind: str, lineage_id: str) -> list[dict[str, Any]]:
         state_key = semantic_state_key(kind, lineage_id)
@@ -540,12 +651,13 @@ query ResolveKnowledgeObjectByLineage($lineageId: ID!, $limit: Int, $nextToken: 
 
     def _record_graphql_call(self, operation_name: str, started: float) -> None:
         elapsed_ms = (time.perf_counter() - started) * 1000
-        self.profile_stats["graphqlCalls"] = int(self.profile_stats.get("graphqlCalls") or 0) + 1
-        self.profile_stats["graphqlMs"] = float(self.profile_stats.get("graphqlMs") or 0.0) + elapsed_ms
-        operations = self.profile_stats.setdefault("operations", {})
-        operation = operations.setdefault(operation_name, {"calls": 0, "ms": 0.0})
-        operation["calls"] = int(operation.get("calls") or 0) + 1
-        operation["ms"] = float(operation.get("ms") or 0.0) + elapsed_ms
+        with self.profile_lock:
+            self.profile_stats["graphqlCalls"] = int(self.profile_stats.get("graphqlCalls") or 0) + 1
+            self.profile_stats["graphqlMs"] = float(self.profile_stats.get("graphqlMs") or 0.0) + elapsed_ms
+            operations = self.profile_stats.setdefault("operations", {})
+            operation = operations.setdefault(operation_name, {"calls": 0, "ms": 0.0})
+            operation["calls"] = int(operation.get("calls") or 0) + 1
+            operation["ms"] = float(operation.get("ms") or 0.0) + elapsed_ms
 
 
 def _graphql_operation_name(query: str) -> str:
@@ -553,6 +665,14 @@ def _graphql_operation_name(query: str) -> str:
     if match:
         return match.group(1)
     return "anonymous"
+
+
+def _batched_tuples(items: list[tuple[str, str, str]], batch_size: int) -> list[list[tuple[str, str, str]]]:
+    return [items[index : index + batch_size] for index in range(0, len(items), batch_size)]
+
+
+def _batched_values(items: list[str], batch_size: int) -> list[list[str]]:
+    return [items[index : index + batch_size] for index in range(0, len(items), batch_size)]
 
 
 def build_environment_services(event: dict[str, Any] | None = None) -> KnowledgeQueryServices:

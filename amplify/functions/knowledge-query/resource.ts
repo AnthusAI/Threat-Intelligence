@@ -31,7 +31,7 @@ export const knowledgeQuery = defineFunction(
       functionName: "papyrus-knowledge-query",
       runtime: Runtime.PYTHON_3_12,
       handler: "handler.handler",
-      timeout: Duration.seconds(30),
+      timeout: Duration.seconds(300),
       memorySize: 512,
       environment: {
         PAPYRUS_STORAGE_BUCKET_NAME: storageBucketName(),

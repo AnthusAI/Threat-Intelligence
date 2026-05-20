@@ -52,14 +52,19 @@ def add_knowledge_vector_index_parser(subparsers: argparse._SubParsersAction[arg
     parser.add_argument("--no-passage-vectors", action="store_true", help="Do not write extracted-text passage vectors")
     parser.add_argument("--force", action="store_true", help="Re-embed and upsert vectors even when deterministic keys already exist")
     parser.add_argument("--progress-every", type=int, default=25)
+    parser.add_argument("--workers", type=int, default=8, help="Parallel workers for GraphQL attachment lookup and S3 text reads")
     parser.add_argument("--dry-run", action="store_true")
 
 
 def run_knowledge_query_cli(args: argparse.Namespace) -> dict[str, Any]:
     payload = _load_input(args.input) if args.input else _input_from_args(args)
     if _should_run_remote(args):
-        return _run_remote_knowledge_query(payload)
-    return run_knowledge_query(payload, build_environment_services())
+        result = _run_remote_knowledge_query(payload)
+        _annotate_cli_execution(result, "remote")
+        return result
+    result = run_knowledge_query(payload, build_environment_services())
+    _annotate_cli_execution(result, "local")
+    return result
 
 
 def run_knowledge_vector_index_cli(args: argparse.Namespace) -> dict[str, Any]:
@@ -77,6 +82,7 @@ def run_knowledge_vector_index_cli(args: argparse.Namespace) -> dict[str, Any]:
         force=bool(args.force),
         dry_run=bool(args.dry_run),
         progress_every=max(0, int(args.progress_every or 0)),
+        worker_count=max(1, int(args.workers or 1)),
     )
     return index_reference_passages(build_environment_services(), options)
 
@@ -125,7 +131,7 @@ def _run_remote_knowledge_query(payload: dict[str, Any]) -> dict[str, Any]:
         },
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=120) as response:  # nosec B310 - configured AppSync endpoint
+    with urllib.request.urlopen(request, timeout=330) as response:  # nosec B310 - configured AppSync endpoint
         response_payload = json.loads(response.read().decode("utf-8"))
     if response_payload.get("errors"):
         raise RuntimeError(json.dumps(response_payload["errors"]))
@@ -137,6 +143,17 @@ def _run_remote_knowledge_query(payload: dict[str, Any]) -> dict[str, Any]:
     if isinstance(result, dict):
         return result
     raise RuntimeError("knowledgeQuery remote response did not contain a JSON object")
+
+
+def _annotate_cli_execution(result: dict[str, Any], execution: str) -> None:
+    if not isinstance(result, dict):
+        return
+    debug = result.setdefault("debug", {})
+    if isinstance(debug, dict):
+        debug["cliExecution"] = execution
+    provenance = result.setdefault("provenance", {})
+    if isinstance(provenance, dict):
+        provenance["cliExecution"] = execution
 
 
 def _input_from_args(args: argparse.Namespace) -> dict[str, Any]:

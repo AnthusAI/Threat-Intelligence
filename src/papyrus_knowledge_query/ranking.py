@@ -8,11 +8,42 @@ from typing import Any
 QUALITY_RELATION_KEYS = {"quality_rating_is"}
 QUALITY_NODE_RE = re.compile(r"quality\.rating\.(\d)_star$")
 VALID_RANKING_PROFILES = {"balanced", "relevance_first", "quality_forward"}
+VALID_DIVERSITY_PROFILES = {"focused", "balanced", "broad"}
 
 PROFILE_WEIGHTS = {
     "balanced": {"relevance": 0.70, "quality": 0.25, "graphContext": 0.05},
     "relevance_first": {"relevance": 0.85, "quality": 0.10, "graphContext": 0.05},
     "quality_forward": {"relevance": 0.55, "quality": 0.40, "graphContext": 0.05},
+}
+
+DIVERSITY_PROFILES = {
+    "focused": {
+        "description": "Prioritize depth from the top-ranked sources.",
+        "sourceFloorRatio": 0.30,
+        "maxSourceMultiplier": 8.0,
+        "passageRepeatCap": 4,
+        "seeAlsoMinTokens": 45,
+        "seeAlsoMaxTokens": 180,
+        "uniqueFirst": False,
+    },
+    "balanced": {
+        "description": "Balance top-source depth with source spread.",
+        "sourceFloorRatio": 0.50,
+        "maxSourceMultiplier": 3.0,
+        "passageRepeatCap": 3,
+        "seeAlsoMinTokens": 40,
+        "seeAlsoMaxTokens": 120,
+        "uniqueFirst": True,
+    },
+    "broad": {
+        "description": "Favor smaller slices from more unique sources.",
+        "sourceFloorRatio": 0.72,
+        "maxSourceMultiplier": 1.6,
+        "passageRepeatCap": 1,
+        "seeAlsoMinTokens": 30,
+        "seeAlsoMaxTokens": 80,
+        "uniqueFirst": True,
+    },
 }
 
 
@@ -22,6 +53,10 @@ def normalize_ranking_config(input: dict[str, Any], warnings: list[str]) -> dict
     if profile not in VALID_RANKING_PROFILES:
         warnings.append(f"Unknown ranking.profile '{profile}', using balanced")
         profile = "balanced"
+    diversity = str(raw.get("diversity") or "balanced").strip()
+    if diversity not in VALID_DIVERSITY_PROFILES:
+        warnings.append(f"Unknown ranking.diversity '{diversity}', using balanced")
+        diversity = "balanced"
     weights = dict(PROFILE_WEIGHTS[profile])
     raw_weights = raw.get("weights") if isinstance(raw.get("weights"), dict) else {}
     for key in ("relevance", "quality", "graphContext"):
@@ -44,6 +79,8 @@ def normalize_ranking_config(input: dict[str, Any], warnings: list[str]) -> dict
         missing_quality = 0.5
     return {
         "profile": profile,
+        "diversity": diversity,
+        "diversityConfig": dict(DIVERSITY_PROFILES[diversity]),
         "weights": weights,
         "missingQuality": clamp01(missing_quality),
         "relevanceGate": 0.18,
@@ -215,6 +252,7 @@ def score_record(
     )
     return {
         "profile": ranking_config.get("profile", "balanced"),
+        "diversity": ranking_config.get("diversity", "balanced"),
         "relevanceScore": round(clamp01(relevance), 4),
         "qualityScore": round(clamp01(quality["qualityScore"]), 4),
         "qualityRating": quality.get("qualityRating"),
@@ -249,6 +287,7 @@ def allocate_token_budgets(
     *,
     min_tokens: int,
     max_tokens: int,
+    diversity: str = "balanced",
 ) -> dict[str, int]:
     if not records or total_budget <= 0:
         return {}
@@ -256,25 +295,73 @@ def allocate_token_budgets(
     key_values = [(key, value) for key, value in key_values if key]
     if not key_values:
         return {}
-    if total_budget <= min_tokens * len(key_values):
-        floor = max(1, total_budget // len(key_values))
+    diversity_config = DIVERSITY_PROFILES.get(diversity, DIVERSITY_PROFILES["balanced"])
+    source_count = len(key_values)
+    floor_tokens = _diversity_floor_tokens(
+        total_budget,
+        source_count,
+        min_tokens,
+        max_tokens,
+        float(diversity_config["sourceFloorRatio"]),
+    )
+    max_tokens = _diversity_max_tokens(floor_tokens, max_tokens, float(diversity_config["maxSourceMultiplier"]))
+    if total_budget <= floor_tokens * source_count:
+        floor = max(1, total_budget // source_count)
         return {key: floor for key, _ in key_values}
-    budgets = {key: min_tokens for key, _ in key_values}
-    remaining = total_budget - (min_tokens * len(key_values))
+    budgets = {key: floor_tokens for key, _ in key_values}
+    remaining = total_budget - (floor_tokens * source_count)
     denominator = sum(value for _, value in key_values)
     for key, value in key_values:
         budgets[key] += int(round(remaining * (value / denominator)))
-        budgets[key] = min(max_tokens, max(min_tokens, budgets[key]))
+        budgets[key] = min(max_tokens, max(floor_tokens, budgets[key]))
     overflow = sum(budgets.values()) - total_budget
     if overflow > 0:
         for key, _ in sorted(key_values, key=lambda item: item[1]):
-            reducible = max(0, budgets[key] - min_tokens)
+            reducible = max(0, budgets[key] - floor_tokens)
             reduction = min(reducible, overflow)
             budgets[key] -= reduction
             overflow -= reduction
             if overflow <= 0:
                 break
     return budgets
+
+
+def select_records_by_diversity(records: list[dict[str, Any]], limit: int, diversity: str = "balanced") -> list[dict[str, Any]]:
+    if limit <= 0:
+        return []
+    ordered = sorted(records, key=ranking_sort_key)
+    if diversity == "focused":
+        return ordered[:limit]
+    selected: list[dict[str, Any]] = []
+    selected_indexes: set[int] = set()
+    seen_sources: set[str] = set()
+    for index, record in enumerate(ordered):
+        source = diversity_source_key(record)
+        if source in seen_sources:
+            continue
+        selected.append(record)
+        selected_indexes.add(index)
+        seen_sources.add(source)
+        if len(selected) >= limit:
+            return selected
+    for index, record in enumerate(ordered):
+        if index in selected_indexes:
+            continue
+        selected.append(record)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
+def diversity_source_key(record: dict[str, Any]) -> str:
+    metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+    ranking = record.get("ranking") if isinstance(record.get("ranking"), dict) else {}
+    for container in (record, metadata, ranking):
+        for key in ("referenceLineageId", "lineageId", "referenceId", "id", "parentReferenceLineageId"):
+            value = container.get(key)
+            if value not in {None, ""}:
+                return str(value)
+    return record_key(record) or str(id(record))
 
 
 def record_key(record: dict[str, Any]) -> str:
@@ -321,3 +408,24 @@ def _record_text_parts(record: dict[str, Any]) -> list[str]:
             if isinstance(value, str) and value.strip():
                 parts.append(value.strip())
     return parts
+
+
+def _diversity_floor_tokens(
+    total_budget: int,
+    source_count: int,
+    min_tokens: int,
+    max_tokens: int,
+    floor_ratio: float,
+) -> int:
+    if source_count <= 0:
+        return 0
+    per_source_equal_share = max(1, total_budget // source_count)
+    desired_floor = int(round(per_source_equal_share * clamp01(floor_ratio)))
+    return max(1, min(max_tokens, min(min_tokens, desired_floor)))
+
+
+def _diversity_max_tokens(floor_tokens: int, requested_max_tokens: int, multiplier: float) -> int:
+    if floor_tokens <= 0:
+        return requested_max_tokens
+    profile_max = int(round(max(floor_tokens, min(requested_max_tokens, floor_tokens * 2)) * max(1.0, multiplier)))
+    return max(floor_tokens, min(requested_max_tokens, profile_max))

@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import quote
 from dataclasses import dataclass
 from typing import Any
@@ -11,11 +12,13 @@ from .services import KnowledgeQueryServices, NoopSemanticSearchProvider, normal
 from .ranking import (
     QUALITY_RELATION_KEYS,
     allocate_token_budgets,
+    DIVERSITY_PROFILES,
     normalize_ranking_config,
     quality_signal_from_relations,
     ranking_sort_key,
     record_key,
     score_record,
+    select_records_by_diversity,
 )
 
 
@@ -83,6 +86,17 @@ class ContextBlock:
 
 def run_knowledge_query(input: dict[str, Any], services: KnowledgeQueryServices | None = None) -> dict[str, Any]:
     started = time.perf_counter()
+    stage_started = started
+    stage_timings: list[dict[str, Any]] = []
+
+    def mark_stage(name: str, **metadata: Any) -> None:
+        nonlocal stage_started
+        now = time.perf_counter()
+        entry: dict[str, Any] = {"name": name, "ms": round((now - stage_started) * 1000, 2)}
+        entry.update({key: value for key, value in metadata.items() if value is not None})
+        stage_timings.append(entry)
+        stage_started = now
+
     services = services or KnowledgeQueryServices()
     request, warnings = _normalize_request(input)
     services.token_counter = services.token_counter.with_model(request["tokenizerModel"])
@@ -99,8 +113,9 @@ def run_knowledge_query(input: dict[str, Any], services: KnowledgeQueryServices 
             "scope": request["scope"],
             "profile": request["profile"],
             "ranking": request["ranking"],
-            "relationPolicy": request["relationPolicy"],
-            "includeExtracts": request["includeExtracts"],
+        "relationPolicy": request["relationPolicy"],
+        "includeExtracts": request["includeExtracts"],
+        "extractMode": request["extractMode"],
         },
         "anchors": [],
         "semanticMatches": [],
@@ -125,6 +140,7 @@ def run_knowledge_query(input: dict[str, Any], services: KnowledgeQueryServices 
         "semanticProvider": getattr(semantic_provider, "name", "none"),
         "corpusTextProvider": getattr(services.corpus_text, "name", "none"),
     }
+    mark_stage("normalize_request")
 
     for index, anchor in enumerate(request["anchors"]):
         resolved = normalize_anchor(anchor)
@@ -146,6 +162,7 @@ def run_knowledge_query(input: dict[str, Any], services: KnowledgeQueryServices 
                 structured["relations"].extend(expansion.get("relations") or [])
                 structured["operationalRelations"].extend(expansion.get("excludedRelations") or [])
                 warnings.extend(str(item) for item in expansion.get("warnings") or [])
+    mark_stage("resolve_and_expand_anchors", anchorCount=len(structured["anchors"]))
 
     if not request["semanticQuery"] and structured["anchors"]:
         derived_query = _derive_semantic_query_from_anchors(structured["anchors"], services)
@@ -154,45 +171,68 @@ def run_knowledge_query(input: dict[str, Any], services: KnowledgeQueryServices 
             request["semanticQuerySource"] = "anchor_derived"
             structured["request"]["semanticQuery"] = derived_query
             structured["request"]["semanticQuerySource"] = "anchor_derived"
+    mark_stage("derive_semantic_query")
 
     if request["semanticQuery"]:
         try:
+            semantic_scope = {
+                **request["scope"],
+                "rankingDiversity": request["ranking"].get("diversity", "balanced"),
+            }
             structured["semanticMatches"] = semantic_provider.search(
                 request["semanticQuery"],
-                request["scope"],
+                semantic_scope,
                 int(request["scope"]["topK"]),
             )
         except Exception as exc:
             warnings.append(f"Semantic search failed: {exc}")
+    mark_stage("semantic_search", semanticMatchCount=len(structured["semanticMatches"]))
 
     _normalize_semantic_matches(structured, request, services)
+    _warn_if_source_spread_was_not_satisfied(structured, request, warnings)
+    mark_stage("normalize_semantic_matches", semanticPassageCount=len(structured["semanticPassages"]))
+    semantic_seed_profile: dict[str, Any] = {}
     if request["semanticQuery"] and not request["anchors"] and graph_provider:
-        _expand_semantic_seed_matches(structured, request, graph_provider, warnings)
+        semantic_seed_profile = _expand_semantic_seed_matches(structured, request, graph_provider, warnings)
+    mark_stage("expand_semantic_seeds", **semantic_seed_profile)
 
     structured["expandedObjects"] = _dedupe_by_ref(structured["expandedObjects"])
     structured["relations"] = _dedupe_by_id(structured["relations"])
     structured["operationalRelations"] = _dedupe_by_id(structured["operationalRelations"])
     _assign_object_uris(structured)
+    mark_stage("dedupe_and_uri_assignment")
     _collect_quality_ratings(structured, request, services, warnings)
     _rank_structured_records(structured, request)
     structured["referenceTokenBudgets"] = _reference_excerpt_token_budgets(structured, request)
-    _collect_reference_summaries(structured, services, warnings)
+    mark_stage("quality_ranking_and_budgets", sourceBudgetCount=len(structured["referenceTokenBudgets"]))
+    _collect_reference_summaries(structured, request, services, warnings)
     _seed_evidence_from_reference_summaries(structured, request, services)
-    _seed_evidence_from_semantic_passages(structured)
+    mark_stage("collect_and_seed_summaries", summaryCount=len(structured["referenceSummaries"]))
+    _seed_evidence_from_semantic_passages(structured, request, services)
+    mark_stage("seed_semantic_passages", evidencePassageCount=len(structured["evidencePassages"]))
     _collect_reference_evidence(structured, request, services, warnings)
     structured["evidencePassages"] = _dedupe_passages(structured["evidencePassages"])
+    mark_stage(
+        "collect_extracted_evidence",
+        evidencePassageCount=len(structured["evidencePassages"]),
+        evidenceSourceCount=structured.get("_evidenceReferenceCount"),
+        evidenceSourceTotal=structured.get("_evidenceReferenceTotal"),
+    )
     _rank_structured_records(structured, request)
     structured["relatedRecords"] = _build_related_records(structured, request, services)
+    mark_stage("rank_and_build_related_records", relatedRecordCount=len(structured["relatedRecords"]))
     blocks = _build_context_blocks(structured, request, services)
     structured["contextBlocks"] = [
         block.as_dict(services.token_counter.count(block.text))
         for block in blocks
         if block.section != "full_source_text"
     ]
+    mark_stage("build_context_blocks", contextBlockCount=len(blocks))
 
     context = None
     if request["outputFormat"] in {"markdown", "both"}:
         context = _render_markdown_context(blocks, request["maxTokens"], services, request["seeAlsoMaxTokens"])
+    mark_stage("render_context", totalTokens=(context or {}).get("totalTokens") if isinstance(context, dict) else None)
 
     elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
     public_structured = _public_structured(structured)
@@ -218,12 +258,21 @@ def run_knowledge_query(input: dict[str, Any], services: KnowledgeQueryServices 
             "semanticQuery": request["semanticQuery"],
             "semanticQuerySource": request["semanticQuerySource"],
             "rankingProfile": request["ranking"]["profile"],
+            "diversityProfile": request["ranking"]["diversity"],
+            "uniqueSourceCount": _unique_source_count(public_structured),
+            "semanticUniqueSourceCount": _unique_semantic_match_source_count(public_structured),
+            "semanticSourceTarget": _semantic_source_target(request),
+            "sourceBudgetCount": len(public_structured.get("referenceTokenBudgets") or {}),
+            "vectorDiversification": "source_round_robin" if request["semanticQuery"] else "not_applied",
             "relationPolicy": request["relationPolicy"],
             "sourceTextMode": source_text_mode,
+            "extractMode": request["extractMode"],
             "rankingWarningCount": len(public_structured.get("rankingWarnings") or []),
             "tokenizerProvider": tokenizer_metadata.get("provider"),
             "tokenizerEncoding": tokenizer_metadata.get("encoding"),
             "tokenizerModel": tokenizer_metadata.get("model"),
+            "stageTimings": stage_timings,
+            "graphProfile": _graph_profile(graph_provider),
         },
     }
 
@@ -243,12 +292,22 @@ def _normalize_request(input: dict[str, Any]) -> tuple[dict[str, Any], list[str]
     scope["topK"] = int(scope.get("topK") if scope.get("topK") is not None else defaults["topK"])
     scope["depth"] = max(0, min(scope["depth"], 3))
     scope["topK"] = max(1, min(scope["topK"], 100))
-    for key, default, upper in (("semanticSeedLimit", 5, 20), ("relatedRecordLimit", 8, 30)):
+    for key, default, upper in (
+        ("semanticSeedLimit", 5, 20),
+        ("semanticSeedExpansionLimit", 0, 20),
+        ("relatedRecordLimit", 8, 30),
+        ("semanticSeedGraphTopK", 6, 30),
+    ):
         try:
             scope[key] = max(0, min(int(scope.get(key, default)), upper))
         except (TypeError, ValueError):
             warnings.append(f"scope.{key} must be an integer; using {default}")
             scope[key] = default
+    for key in ("resolveSemanticSeeds", "resolveSemanticSeedExpansionObjects"):
+        value = scope.get(key, False)
+        if isinstance(value, str):
+            value = value.lower() in {"1", "true", "yes"}
+        scope[key] = bool(value)
     anchors = input.get("anchors") or []
     if isinstance(anchors, dict):
         anchors = [anchors]
@@ -296,6 +355,10 @@ def _normalize_request(input: dict[str, Any]) -> tuple[dict[str, Any], list[str]
     include_extracts = output.get("includeExtracts", True)
     if isinstance(include_extracts, str):
         include_extracts = include_extracts.lower() not in {"0", "false", "no"}
+    extract_mode = str(output.get("extractMode") or input.get("extractMode") or "auto").strip()
+    if extract_mode not in {"auto", "always", "never"}:
+        warnings.append(f"Unknown output.extractMode '{extract_mode}', using auto")
+        extract_mode = "auto"
     include_provenance_appendix = bool(output.get("includeProvenanceAppendix"))
     ranking_config = normalize_ranking_config(input, warnings)
     return {
@@ -308,6 +371,7 @@ def _normalize_request(input: dict[str, Any]) -> tuple[dict[str, Any], list[str]
         "maxTokens": max_tokens,
         "seeAlsoMaxTokens": see_also_max_tokens,
         "includeExtracts": bool(include_extracts),
+        "extractMode": extract_mode,
         "maxPassages": max_passages,
         "maxPassageTokens": max_passage_tokens,
         "includeProvenanceAppendix": include_provenance_appendix,
@@ -974,6 +1038,84 @@ def _public_structured(structured: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in structured.items() if not key.startswith("_")}
 
 
+def _graph_profile(graph_provider: Any) -> dict[str, Any]:
+    if graph_provider and hasattr(graph_provider, "profile_snapshot"):
+        try:
+            profile = graph_provider.profile_snapshot()
+        except Exception:  # pragma: no cover - debug-only best effort
+            return {}
+        return profile if isinstance(profile, dict) else {}
+    return {}
+
+
+def _unique_source_count(structured: dict[str, Any]) -> int:
+    keys: set[str] = set()
+    for collection in ("anchors", "expandedObjects", "semanticMatches", "relatedRecords"):
+        for obj in structured.get(collection) or []:
+            if obj.get("kind") != "reference":
+                continue
+            key = str(obj.get("lineageId") or obj.get("id") or obj.get("objectUri") or "")
+            if key:
+                keys.add(key)
+    for passage in [*(structured.get("semanticPassages") or []), *(structured.get("evidencePassages") or [])]:
+        key = str(passage.get("referenceLineageId") or passage.get("referenceId") or passage.get("objectUri") or "")
+        if key:
+            keys.add(key)
+    return len(keys)
+
+
+def _warn_if_source_spread_was_not_satisfied(
+    structured: dict[str, Any],
+    request: dict[str, Any],
+    warnings: list[str],
+) -> None:
+    if request["ranking"].get("diversity") != "broad" or not request.get("semanticQuery"):
+        return
+    unique_matches = _unique_semantic_match_source_count(structured)
+    target = _semantic_source_target(request)
+    structured.setdefault("retrievalDiagnostics", {})["semanticSourceSpread"] = {
+        "target": target,
+        "actual": unique_matches,
+        "semanticMatchCount": len(structured.get("semanticMatches") or []),
+    }
+    if unique_matches < target:
+        warnings.append(
+            f"Broad diversity requested about {target} semantic sources, but semantic search returned {unique_matches}; context cannot include more unique sources than retrieval provides"
+        )
+
+
+def _semantic_source_target(request: dict[str, Any]) -> int:
+    scope = request.get("scope") if isinstance(request.get("scope"), dict) else {}
+    explicit = scope.get("semanticSourceTarget")
+    if explicit is not None:
+        try:
+            return max(1, int(explicit))
+        except (TypeError, ValueError):
+            pass
+    related_limit = int(scope.get("relatedRecordLimit") or 8)
+    top_k = int(scope.get("topK") or related_limit)
+    return max(4, min(related_limit, top_k, 12))
+
+
+def _unique_semantic_match_source_count(structured: dict[str, Any]) -> int:
+    keys: set[str] = set()
+    for match in structured.get("semanticMatches") or []:
+        metadata = match.get("metadata") if isinstance(match.get("metadata"), dict) else {}
+        key = (
+            match.get("referenceLineageId")
+            or metadata.get("referenceLineageId")
+            or match.get("lineageId")
+            or metadata.get("lineageId")
+            or match.get("referenceId")
+            or metadata.get("referenceId")
+            or match.get("id")
+            or metadata.get("id")
+        )
+        if key:
+            keys.add(str(key))
+    return len(keys)
+
+
 def _normalize_semantic_matches(
     structured: dict[str, Any],
     request: dict[str, Any],
@@ -992,9 +1134,17 @@ def _normalize_semantic_matches(
             ("lineageId", "lineageId"),
             ("title", "title"),
             ("summary", "summary"),
+            ("curationStatus", "curationStatus"),
+            ("curationStatusKey", "curationStatusKey"),
+            ("referenceId", "referenceId"),
+            ("referenceLineageId", "referenceLineageId"),
         ):
             if normalized.get(key) in {None, ""} and metadata.get(metadata_key) not in {None, ""}:
                 normalized[key] = metadata.get(metadata_key)
+        summary_reference = _summary_reference_match_from_semantic_match(normalized, services)
+        if summary_reference:
+            normalized = summary_reference["reference"]
+            structured["referenceSummaries"].append(summary_reference["summary"])
         _assign_object_uri(normalized)
         normalized_matches.append(normalized)
         passage = _semantic_passage_from_match(normalized, request, services)
@@ -1009,7 +1159,11 @@ def _semantic_passage_from_match(
     request: dict[str, Any],
     services: KnowledgeQueryServices,
 ) -> dict[str, Any] | None:
+    if match.get("semanticHitKind") == "reference_summary":
+        return None
     metadata = match.get("metadata") if isinstance(match.get("metadata"), dict) else {}
+    if metadata.get("semanticHitKind") == "reference_summary":
+        return None
     text = metadata.get("text") or match.get("text") or metadata.get("summary") or match.get("summary")
     storage_path = metadata.get("storagePath") or match.get("storagePath")
     has_chunk_coordinates = any(
@@ -1063,6 +1217,174 @@ def _semantic_passage_from_match(
     }
 
 
+def _summary_reference_match_from_semantic_match(
+    match: dict[str, Any],
+    services: KnowledgeQueryServices,
+) -> dict[str, dict[str, Any]] | None:
+    if not _is_reference_summary_semantic_match(match):
+        return None
+    metadata = match.get("metadata") if isinstance(match.get("metadata"), dict) else {}
+    graph = services.graph
+    message = _resolve_summary_message(match, graph)
+    relation = _summary_relation_for_message(match, graph, allow_graph=not _metadata_has_summary_relation(metadata))
+    reference_stub = _summary_reference_stub(match, relation)
+    if not reference_stub:
+        return None
+    reference = _resolve_summary_reference(reference_stub, graph)
+    reference.update(
+        {
+            "rank": match.get("rank"),
+            "providerRank": match.get("providerRank"),
+            "score": match.get("score"),
+            "distance": match.get("distance"),
+            "semanticHitKind": "reference_summary",
+            "summaryMessageId": message.get("id") or match.get("id"),
+            "summaryRelationId": relation.get("id"),
+            "metadata": {
+                **metadata,
+                "semanticHitKind": "reference_summary",
+                "summaryMessageId": message.get("id") or match.get("id"),
+                "summaryRelationId": relation.get("id"),
+            },
+        }
+    )
+    _assign_object_uri(reference)
+    summary_text = str(
+        message.get("summary")
+        or metadata.get("text")
+        or metadata.get("summary")
+        or match.get("text")
+        or match.get("summary")
+        or ""
+    ).strip()
+    if not summary_text:
+        return None
+    relation_key = str(relation.get("relationTypeKey") or relation.get("predicate") or metadata.get("relationTypeKey") or metadata.get("predicate") or "")
+    max_tokens = _summary_tokens_from_relation_type(relation_key) or _int_or_none(metadata.get("maxTokens")) or services.token_counter.count(summary_text)
+    reference_lineage_id = str(reference.get("lineageId") or reference.get("id") or reference_stub.get("lineageId") or reference_stub.get("id") or "")
+    if not reference_lineage_id:
+        return None
+    summary = {
+        "id": relation.get("id") or f"{reference_lineage_id}:semantic-summary:{message.get('id') or match.get('id') or match.get('rank')}",
+        "referenceId": reference.get("id") or reference_stub.get("id"),
+        "referenceLineageId": reference_lineage_id,
+        "referenceTitle": object_title(reference),
+        "objectUri": object_uri(reference),
+        "messageId": message.get("id") or match.get("id"),
+        "messageLineageId": message.get("lineageId") or metadata.get("lineageId") or match.get("lineageId"),
+        "relationId": relation.get("id"),
+        "relationTypeKey": relation_key or f"reference_summary_{max_tokens}_tokens",
+        "maxTokens": max_tokens,
+        "actualTokens": services.token_counter.count(summary_text),
+        "createdAt": message.get("createdAt") or relation.get("importedAt"),
+        "model": metadata.get("model"),
+        "tokenizer": metadata.get("tokenizer"),
+        "summary": summary_text,
+        "text": summary_text,
+        "tokens": services.token_counter.count(summary_text),
+        "selectionSource": "semantic_summary_hit",
+        "semanticScore": match.get("score"),
+        "distance": match.get("distance"),
+    }
+    return {"reference": reference, "summary": summary}
+
+
+def _is_reference_summary_semantic_match(match: dict[str, Any]) -> bool:
+    metadata = match.get("metadata") if isinstance(match.get("metadata"), dict) else {}
+    kind = str(match.get("kind") or metadata.get("kind") or metadata.get("objectKind") or "")
+    if kind != "message":
+        return False
+    message_kind = str(match.get("messageKind") or metadata.get("messageKind") or "")
+    message_domain = str(match.get("messageDomain") or metadata.get("messageDomain") or "")
+    relation_key = str(metadata.get("relationTypeKey") or metadata.get("predicate") or match.get("relationTypeKey") or match.get("predicate") or "")
+    return (
+        message_kind == "reference_summary"
+        or message_domain == "summarization"
+        or bool(_summary_tokens_from_relation_type(relation_key))
+        or bool(metadata.get("referenceLineageId") or metadata.get("referenceId"))
+    )
+
+
+def _resolve_summary_message(match: dict[str, Any], graph: Any) -> dict[str, Any]:
+    metadata = match.get("metadata") if isinstance(match.get("metadata"), dict) else {}
+    message = dict(match)
+    has_summary_text = bool(message.get("summary") or message.get("text") or metadata.get("summary") or metadata.get("text"))
+    has_message_contract = bool(message.get("messageKind") or metadata.get("messageKind") or message.get("messageDomain") or metadata.get("messageDomain"))
+    if not (has_summary_text and has_message_contract) and graph and hasattr(graph, "resolve_anchor"):
+        try:
+            resolved = graph.resolve_anchor({"kind": "message", "id": match.get("id"), "lineageId": match.get("lineageId")})
+        except Exception:  # pragma: no cover - best-effort semantic hit normalization
+            resolved = None
+        if isinstance(resolved, dict):
+            message.update(resolved)
+    for key in ("messageKind", "messageDomain", "status", "summary", "createdAt"):
+        if message.get(key) in {None, ""} and metadata.get(key) not in {None, ""}:
+            message[key] = metadata.get(key)
+    return message
+
+
+def _summary_relation_for_message(match: dict[str, Any], graph: Any, allow_graph: bool = True) -> dict[str, Any]:
+    metadata = match.get("metadata") if isinstance(match.get("metadata"), dict) else {}
+    relation: dict[str, Any] = {}
+    if allow_graph and graph and hasattr(graph, "list_outgoing_relations"):
+        try:
+            outgoing = graph.list_outgoing_relations({"kind": "message", "id": match.get("id"), "lineageId": match.get("lineageId")})
+        except Exception:  # pragma: no cover - best-effort semantic hit normalization
+            outgoing = []
+        relation = next(
+            (
+                candidate for candidate in outgoing
+                if candidate.get("objectKind") == "reference"
+                and _summary_tokens_from_relation_type(str(candidate.get("relationTypeKey") or candidate.get("predicate") or ""))
+            ),
+            {},
+        )
+    if relation:
+        return relation
+    relation_key = str(metadata.get("relationTypeKey") or metadata.get("predicate") or "")
+    return {
+        "id": metadata.get("relationId"),
+        "relationTypeKey": relation_key,
+        "predicate": relation_key,
+        "subjectKind": "message",
+        "subjectId": match.get("id"),
+        "subjectLineageId": match.get("lineageId"),
+        "objectKind": "reference",
+        "objectId": metadata.get("referenceId"),
+        "objectLineageId": metadata.get("referenceLineageId"),
+    }
+
+
+def _metadata_has_summary_relation(metadata: dict[str, Any]) -> bool:
+    relation_key = str(metadata.get("relationTypeKey") or metadata.get("predicate") or "")
+    return bool(
+        (metadata.get("referenceLineageId") or metadata.get("referenceId"))
+        and (_summary_tokens_from_relation_type(relation_key) or metadata.get("maxTokens"))
+    )
+
+
+def _summary_reference_stub(match: dict[str, Any], relation: dict[str, Any]) -> dict[str, Any]:
+    metadata = match.get("metadata") if isinstance(match.get("metadata"), dict) else {}
+    reference_id = relation.get("objectId") or metadata.get("referenceId")
+    reference_lineage_id = relation.get("objectLineageId") or metadata.get("referenceLineageId")
+    if not reference_id and not reference_lineage_id:
+        return {}
+    return {"kind": "reference", "id": reference_id or reference_lineage_id, "lineageId": reference_lineage_id or reference_id}
+
+
+def _resolve_summary_reference(reference_stub: dict[str, Any], graph: Any) -> dict[str, Any]:
+    reference = dict(reference_stub)
+    if graph and hasattr(graph, "resolve_anchor"):
+        try:
+            resolved = graph.resolve_anchor(reference_stub)
+        except Exception:  # pragma: no cover - best-effort semantic hit normalization
+            resolved = None
+        if isinstance(resolved, dict):
+            reference.update(resolved)
+    reference["kind"] = "reference"
+    return reference
+
+
 def _semantic_match_score(match: dict[str, Any]) -> float:
     score = match.get("score")
     if isinstance(score, (int, float)):
@@ -1078,12 +1400,20 @@ def _expand_semantic_seed_matches(
     request: dict[str, Any],
     graph_provider: Any,
     warnings: list[str],
-) -> None:
+) -> dict[str, Any]:
     seed_limit = int(request["scope"].get("semanticSeedLimit") or 0)
     if seed_limit <= 0:
-        return
+        return {"semanticSeedsExpanded": 0, "semanticSeedRelationLimit": 0}
+    expansion_scope = dict(request["scope"])
+    seed_graph_top_k = int(request["scope"].get("semanticSeedGraphTopK") or 6)
+    expansion_scope["topK"] = max(1, min(seed_graph_top_k, int(request["scope"].get("topK") or seed_graph_top_k)))
+    expansion_scope["depth"] = max(0, min(int(expansion_scope.get("depth") or 1), 1))
+    expansion_scope["resolveExpansionObjects"] = bool(request["scope"].get("resolveSemanticSeedExpansionObjects", False))
+    resolve_seeds = bool(request["scope"].get("resolveSemanticSeeds"))
     seen: set[tuple[str, str]] = set()
     seeds = []
+    raw_expansion_limit = request["scope"].get("semanticSeedExpansionLimit")
+    expansion_limit = max(0, min(seed_limit, int(raw_expansion_limit if raw_expansion_limit is not None else seed_limit)))
     for match in structured.get("semanticMatches") or []:
         key = _object_key(match)
         if not key or key in seen or not match.get("kind"):
@@ -1092,24 +1422,36 @@ def _expand_semantic_seed_matches(
         seeds.append(match)
         if len(seeds) >= seed_limit:
             break
-    for seed in seeds:
-        try:
-            resolved = graph_provider.resolve_anchor(seed) or normalize_anchor(seed)
-        except Exception as exc:  # pragma: no cover - defensive runtime note
-            warnings.append(f"Could not resolve semantic seed {anchor_ref(seed)}: {exc}")
-            resolved = normalize_anchor(seed)
+    expanded_count = 0
+    relation_count_before = len(structured.get("relations") or [])
+    for seed in seeds[:expansion_limit]:
+        resolved = normalize_anchor(seed)
+        if resolve_seeds:
+            try:
+                resolved = graph_provider.resolve_anchor(seed) or resolved
+            except Exception as exc:  # pragma: no cover - defensive runtime note
+                warnings.append(f"Could not resolve semantic seed {anchor_ref(seed)}: {exc}")
         resolved["semanticSeedRank"] = seed.get("rank")
         _assign_object_uri(resolved)
         structured["expandedObjects"].append(resolved)
         try:
-            expansion = graph_provider.expand_anchor(resolved, request["scope"])
+            expansion = graph_provider.expand_anchor(resolved, expansion_scope)
         except Exception as exc:  # pragma: no cover - defensive runtime note
             warnings.append(f"Could not expand semantic seed {anchor_ref(resolved)}: {exc}")
             continue
+        expanded_count += 1
         structured["expandedObjects"].extend(expansion.get("objects") or [])
         structured["relations"].extend(expansion.get("relations") or [])
         structured["operationalRelations"].extend(expansion.get("excludedRelations") or [])
         warnings.extend(str(item) for item in expansion.get("warnings") or [])
+    return {
+        "semanticSeedsExpanded": expanded_count,
+        "semanticSeedLimit": seed_limit,
+        "semanticSeedExpansionLimit": expansion_limit,
+        "semanticSeedRelationLimit": expansion_scope["topK"],
+        "semanticSeedResolveEnabled": resolve_seeds,
+        "semanticSeedRelationsAdded": max(0, len(structured.get("relations") or []) - relation_count_before),
+    }
 
 
 def _assign_object_uris(structured: dict[str, Any]) -> None:
@@ -1130,16 +1472,34 @@ def _assign_object_uri(obj: dict[str, Any]) -> None:
         obj["objectUri"] = uri
 
 
-def _seed_evidence_from_semantic_passages(structured: dict[str, Any]) -> None:
+def _seed_evidence_from_semantic_passages(
+    structured: dict[str, Any],
+    request: dict[str, Any],
+    services: KnowledgeQueryServices,
+) -> None:
     if not structured.get("semanticPassages"):
         return
+    diversity = str(request["ranking"].get("diversity") or "balanced")
+    diversity_config = DIVERSITY_PROFILES.get(diversity, DIVERSITY_PROFILES["balanced"])
+    passage_repeat_cap = max(1, int(diversity_config.get("passageRepeatCap") or 3))
     summary_keys = {
         str(passage.get("referenceLineageId") or passage.get("referenceId") or "")
         for passage in structured.get("evidencePassages") or []
         if passage.get("selectionReason") == "reference_summary"
     }
-    for passage in structured["semanticPassages"]:
+    selected_counts: dict[str, int] = {}
+    selected_tokens: dict[str, int] = {}
+    ordered_passages = sorted(
+        structured["semanticPassages"],
+        key=lambda passage: (
+            -float((passage.get("ranking") or {}).get("finalScore", 0.0)) if isinstance(passage.get("ranking"), dict) else -float(passage.get("score") or 0.0),
+            int(passage.get("rank") or 999999),
+        ),
+    )
+    for passage in ordered_passages:
         reference_key = str(passage.get("referenceLineageId") or passage.get("referenceId") or "")
+        if selected_counts.get(reference_key, 0) >= passage_repeat_cap:
+            continue
         if reference_key in summary_keys:
             summary = next(
                 item for item in structured.get("evidencePassages") or []
@@ -1150,12 +1510,26 @@ def _seed_evidence_from_semantic_passages(structured: dict[str, Any]) -> None:
             reference_budget = int((structured.get("referenceTokenBudgets") or {}).get(reference_key) or 0)
             if reference_budget <= summary_budget + 80:
                 continue
+            selected_tokens[reference_key] = summary_budget
+        reference_budget = int((structured.get("referenceTokenBudgets") or {}).get(reference_key) or request["maxPassageTokens"])
+        passage_tokens = int(passage.get("tokens") or 0)
+        if selected_tokens.get(reference_key, 0) + passage_tokens > reference_budget:
+            remaining_budget = reference_budget - selected_tokens.get(reference_key, 0)
+            if remaining_budget < 40:
+                continue
+            passage = dict(passage)
+            passage["text"] = services.token_counter.truncate(str(passage.get("text") or ""), remaining_budget)
+            passage["tokens"] = services.token_counter.count(str(passage.get("text") or ""))
+            passage["truncated"] = True
         structured["evidencePassages"].append(passage)
+        selected_counts[reference_key] = selected_counts.get(reference_key, 0) + 1
+        selected_tokens[reference_key] = selected_tokens.get(reference_key, 0) + int(passage.get("tokens") or 0)
     structured["evidencePassages"] = _dedupe_passages(structured["evidencePassages"])
 
 
 def _collect_reference_summaries(
     structured: dict[str, Any],
+    request: dict[str, Any],
     services: KnowledgeQueryServices,
     warnings: list[str],
 ) -> None:
@@ -1163,20 +1537,48 @@ def _collect_reference_summaries(
     if not graph or not hasattr(graph, "list_incoming_relations"):
         return
     summaries: list[dict[str, Any]] = []
-    for reference in _reference_objects(structured):
+    references = _reference_objects(structured)
+
+    def load_summaries(reference: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
+        local_summaries: list[dict[str, Any]] = []
+        local_warnings: list[str] = []
         lineage_id = str(reference.get("lineageId") or reference.get("id") or "")
         if not lineage_id:
-            continue
+            return local_summaries, local_warnings
         try:
             incoming = graph.list_incoming_relations(reference)  # type: ignore[attr-defined]
         except Exception as exc:  # pragma: no cover - defensive runtime note
-            warnings.append(f"Could not load reference summaries for {object_title(reference) or anchor_ref(reference)}: {exc}")
-            continue
+            local_warnings.append(f"Could not load reference summaries for {object_title(reference) or anchor_ref(reference)}: {exc}")
+            return local_summaries, local_warnings
         for relation in incoming:
             summary = _reference_summary_from_relation(reference, relation, graph, services)
             if summary:
-                summaries.append(summary)
-    structured["referenceSummaries"] = _dedupe_reference_summaries(summaries)
+                local_summaries.append(summary)
+        return local_summaries, local_warnings
+
+    if hasattr(graph, "list_incoming_relations_batch"):
+        incoming_by_reference = graph.list_incoming_relations_batch(references)  # type: ignore[attr-defined]
+        results = []
+        for reference in references:
+            lineage_id = str(reference.get("lineageId") or reference.get("id") or "")
+            local_summaries = []
+            for relation in incoming_by_reference.get(lineage_id, []):
+                summary = _reference_summary_from_relation(reference, relation, graph, services)
+                if summary:
+                    local_summaries.append(summary)
+            results.append((local_summaries, []))
+    else:
+        worker_count = _graph_fetch_worker_count(request, len(references))
+        if worker_count <= 1:
+            results = [load_summaries(reference) for reference in references]
+        else:
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                futures = [executor.submit(load_summaries, reference) for reference in references]
+                results = [future.result() for future in as_completed(futures)]
+    for local_summaries, local_warnings in results:
+        summaries.extend(local_summaries)
+        warnings.extend(local_warnings)
+    structured["referenceSummaries"] = _dedupe_reference_summaries([*(structured.get("referenceSummaries") or []), *summaries])
 
 
 def _reference_summary_from_relation(
@@ -1323,6 +1725,16 @@ def _summary_tokens_from_relation_type(value: str | None) -> int | None:
     return int(match.group(1)) if match else None
 
 
+def _graph_fetch_worker_count(request: dict[str, Any], item_count: int) -> int:
+    scope = request.get("scope") if isinstance(request.get("scope"), dict) else {}
+    raw = scope.get("graphFetchWorkers")
+    try:
+        workers = int(raw) if raw is not None else 8
+    except (TypeError, ValueError):
+        workers = 8
+    return max(1, min(workers, max(1, item_count), 16))
+
+
 def _collect_quality_ratings(
     structured: dict[str, Any],
     request: dict[str, Any],
@@ -1345,16 +1757,39 @@ def _collect_quality_ratings(
         if lineage_id:
             relations_by_reference.setdefault(lineage_id, []).append(relation)
     if graph and hasattr(graph, "list_outgoing_relations"):
-        for reference in references:
+        def load_outgoing(reference: dict[str, Any]) -> tuple[str, list[dict[str, Any]], str | None]:
             lineage_id = str(reference.get("lineageId") or reference.get("id") or "")
             if not lineage_id:
-                continue
+                return "", [], None
             try:
                 outgoing = graph.list_outgoing_relations(reference)  # type: ignore[attr-defined]
             except Exception as exc:  # pragma: no cover - defensive runtime note
-                warnings.append(f"Could not load quality relations for {object_title(reference) or anchor_ref(reference)}: {exc}")
-                outgoing = []
-            relations_by_reference.setdefault(lineage_id, []).extend(relation for relation in outgoing if isinstance(relation, dict))
+                return lineage_id, [], f"Could not load quality relations for {object_title(reference) or anchor_ref(reference)}: {exc}"
+            return lineage_id, [relation for relation in outgoing if isinstance(relation, dict)], None
+
+        if hasattr(graph, "list_outgoing_relations_batch"):
+            outgoing_by_reference = graph.list_outgoing_relations_batch(references)  # type: ignore[attr-defined]
+            outgoing_results = [
+                (
+                    str(reference.get("lineageId") or reference.get("id") or ""),
+                    outgoing_by_reference.get(str(reference.get("lineageId") or reference.get("id") or ""), []),
+                    None,
+                )
+                for reference in references
+            ]
+        else:
+            worker_count = _graph_fetch_worker_count(request, len(references))
+            if worker_count <= 1:
+                outgoing_results = [load_outgoing(reference) for reference in references]
+            else:
+                with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                    futures = [executor.submit(load_outgoing, reference) for reference in references]
+                    outgoing_results = [future.result() for future in as_completed(futures)]
+        for lineage_id, outgoing, warning in outgoing_results:
+            if warning:
+                warnings.append(warning)
+            if lineage_id:
+                relations_by_reference.setdefault(lineage_id, []).extend(outgoing)
     selected_relations: list[dict[str, Any]] = []
     for reference in references:
         lineage_id = str(reference.get("lineageId") or reference.get("id") or "")
@@ -1467,6 +1902,7 @@ def _assign_passage_ranking(passage: dict[str, Any], structured: dict[str, Any],
     )
     passage["ranking"] = {
         "profile": request["ranking"].get("profile", "balanced"),
+        "diversity": request["ranking"].get("diversity", "balanced"),
         "relevanceScore": round(max(0.0, min(1.0, passage_relevance)), 4),
         "qualityScore": round(max(0.0, min(1.0, quality_score)), 4),
         "qualityRating": parent_ranking.get("qualityRating"),
@@ -1496,11 +1932,14 @@ def _reference_excerpt_token_budgets(structured: dict[str, Any], request: dict[s
         total_budget = max(max_passage_tokens, min(max_passages * max_passage_tokens, int(int(request["maxTokens"]) * 0.55)))
     else:
         total_budget = max_passages * max_passage_tokens
+    diversity = str(request["ranking"].get("diversity") or "balanced")
+    min_tokens, max_tokens = _source_budget_bounds(diversity, max_passage_tokens)
     budgets = allocate_token_budgets(
         references,
         total_budget,
-        min_tokens=min(80, max_passage_tokens),
-        max_tokens=min(1000, max(160, max_passage_tokens * 3)),
+        min_tokens=min_tokens,
+        max_tokens=max_tokens,
+        diversity=diversity,
     )
     for reference in references:
         key = record_key(reference)
@@ -1508,8 +1947,18 @@ def _reference_excerpt_token_budgets(structured: dict[str, Any], request: dict[s
             continue
         ranking = reference.get("ranking") if isinstance(reference.get("ranking"), dict) else {}
         ranking["tokenBudget"] = budgets[key]
+        ranking["diversity"] = diversity
+        ranking["sourceBudgetRole"] = "evidence_source"
         reference["ranking"] = ranking
     return budgets
+
+
+def _source_budget_bounds(diversity: str, max_passage_tokens: int) -> tuple[int, int]:
+    if diversity == "focused":
+        return min(60, max_passage_tokens), min(1400, max(240, max_passage_tokens * 5))
+    if diversity == "broad":
+        return min(90, max_passage_tokens), min(420, max(120, max_passage_tokens * 2))
+    return min(80, max_passage_tokens), min(1000, max(160, max_passage_tokens * 3))
 
 
 def _build_related_records(
@@ -1545,7 +1994,7 @@ def _build_related_records(
             continue
         records.append(_related_record(obj, rank, "graph context expansion", "graph_expansion", structured, services))
         rank += 1
-    records = _dedupe_related_records(records)[:limit]
+    records = select_records_by_diversity(_dedupe_related_records(records), limit, str(request["ranking"].get("diversity") or "balanced"))
     _allocate_related_record_budgets(records, request, services)
     return records
 
@@ -1714,11 +2163,14 @@ def _related_record_priority(record: dict[str, Any]) -> float:
 def _allocate_related_record_budgets(records: list[dict[str, Any]], request: dict[str, Any], services: KnowledgeQueryServices) -> None:
     if not records:
         return
+    diversity = str(request["ranking"].get("diversity") or "balanced")
+    diversity_config = DIVERSITY_PROFILES.get(diversity, DIVERSITY_PROFILES["balanced"])
     budgets = allocate_token_budgets(
         records,
         int(request.get("seeAlsoMaxTokens") or 300),
-        min_tokens=40,
-        max_tokens=120,
+        min_tokens=int(diversity_config["seeAlsoMinTokens"]),
+        max_tokens=int(diversity_config["seeAlsoMaxTokens"]),
+        diversity=diversity,
     )
     for record in records:
         key = record_key(record)
@@ -1727,6 +2179,8 @@ def _allocate_related_record_budgets(records: list[dict[str, Any]], request: dic
             continue
         ranking = record.get("ranking") if isinstance(record.get("ranking"), dict) else {}
         ranking["tokenBudget"] = budget
+        ranking["diversity"] = diversity
+        ranking["sourceBudgetRole"] = "see_also"
         record["ranking"] = ranking
         # Keep room for the title, object URI, and reason lines rendered by See Also.
         summary_budget = max(16, budget - 35)
@@ -1753,24 +2207,55 @@ def _collect_reference_evidence(
     services: KnowledgeQueryServices,
     warnings: list[str],
 ) -> None:
-    if not request["includeExtracts"]:
+    if not _should_collect_extracted_evidence(structured, request):
         return
-    references = _reference_objects(structured)
+    all_references = _reference_objects(structured)
+    references = _evidence_reference_objects(structured, request)
+    structured["_evidenceReferenceTotal"] = len(all_references)
+    structured["_evidenceReferenceCount"] = len(references)
     if not references:
         return
     attachments_by_lineage: dict[str, list[dict[str, Any]]] = {}
     graph = services.graph
-    if graph and hasattr(graph, "list_reference_attachments"):
-        for reference in references:
+    if graph and hasattr(graph, "list_reference_attachments_batch"):
+        try:
+            attachments_by_lineage = graph.list_reference_attachments_batch(references)  # type: ignore[attr-defined]
+        except Exception as exc:  # pragma: no cover - defensive runtime note
+            warnings.append(f"Could not batch load reference attachments: {exc}")
+            attachments_by_lineage = {}
+        for attachments in attachments_by_lineage.values():
+            structured["referenceAttachments"].extend(attachments)
+    elif graph and hasattr(graph, "list_reference_attachments"):
+        def load_attachments(reference: dict[str, Any]) -> tuple[str, list[dict[str, Any]], str | None]:
+            lineage_id = str(reference.get("lineageId") or reference.get("id") or "")
             try:
                 attachments = graph.list_reference_attachments(reference)  # type: ignore[attr-defined]
             except Exception as exc:  # pragma: no cover - defensive runtime note
-                warnings.append(f"Could not load attachments for {object_title(reference) or anchor_ref(reference)}: {exc}")
-                attachments = []
-            lineage_id = str(reference.get("lineageId") or reference.get("id") or "")
+                return lineage_id, [], f"Could not load attachments for {object_title(reference) or anchor_ref(reference)}: {exc}"
+            return lineage_id, attachments, None
+
+        worker_count = _graph_fetch_worker_count(request, len(references))
+        if worker_count <= 1:
+            attachment_results = [load_attachments(reference) for reference in references]
+        else:
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                futures = [executor.submit(load_attachments, reference) for reference in references]
+                attachment_results = [future.result() for future in as_completed(futures)]
+        for lineage_id, attachments, warning in attachment_results:
+            if warning:
+                warnings.append(warning)
             attachments_by_lineage[lineage_id] = attachments
             structured["referenceAttachments"].extend(attachments)
     structured["referenceAttachments"] = _dedupe_by_id(structured["referenceAttachments"])
+    source_texts_by_lineage = _read_reference_source_texts(
+        references,
+        attachments_by_lineage,
+        request,
+        services,
+        warnings,
+    )
+    for source_texts in source_texts_by_lineage.values():
+        structured.setdefault("_sourceTexts", []).extend(source_texts)
 
     remaining = max(0, int(request["maxPassages"]) - len(structured.get("evidencePassages") or []))
     ordered_references = sorted(references, key=ranking_sort_key)
@@ -1802,27 +2287,13 @@ def _collect_reference_evidence(
         if not services.corpus_text:
             warnings.append(f"No corpus text provider configured for {object_title(reference) or anchor_ref(reference)}")
             continue
-        for attachment in text_attachments:
-            storage_path = str(attachment.get("storagePath") or "")
-            try:
-                text = services.corpus_text.read_text(storage_path)
-            except Exception as exc:  # pragma: no cover - defensive runtime note
-                warnings.append(f"Could not read extracted text for {object_title(reference) or anchor_ref(reference)}: {exc}")
-                continue
-            if not text:
-                warnings.append(f"Extracted text was empty for {object_title(reference) or anchor_ref(reference)}")
-                continue
-            structured.setdefault("_sourceTexts", []).append(
-                {
-                    "referenceId": reference.get("id"),
-                    "referenceLineageId": reference.get("lineageId"),
-                    "referenceTitle": object_title(reference),
-                    "objectUri": object_uri(reference),
-                    "storagePath": storage_path,
-                    "text": text.strip(),
-                    "tokens": services.token_counter.count(text),
-                }
-            )
+        source_texts = source_texts_by_lineage.get(lineage_id) or []
+        if not source_texts:
+            warnings.append(f"Extracted text was empty or unreadable for {object_title(reference) or anchor_ref(reference)}")
+            continue
+        for source_text in source_texts:
+            text = str(source_text.get("text") or "")
+            storage_path = str(source_text.get("storagePath") or "")
             if remaining <= 0:
                 continue
             reference_budget = int((structured.get("referenceTokenBudgets") or {}).get(lineage_id) or request["maxPassageTokens"])
@@ -1832,6 +2303,9 @@ def _collect_reference_evidence(
                 if reference_budget < 80:
                     continue
             max_for_reference = max(1, min(remaining, (reference_budget + int(request["maxPassageTokens"]) - 1) // int(request["maxPassageTokens"])))
+            diversity = str(request["ranking"].get("diversity") or "balanced")
+            passage_repeat_cap = int((DIVERSITY_PROFILES.get(diversity, DIVERSITY_PROFILES["balanced"])).get("passageRepeatCap") or 3)
+            max_for_reference = min(max_for_reference, passage_repeat_cap)
             if _reference_needs_evidence(structured, reference):
                 max_for_reference = max(1, max_for_reference)
             max_passage_tokens = max(40, min(500, reference_budget // max_for_reference))
@@ -1855,6 +2329,105 @@ def _collect_reference_evidence(
                         ranking = obj.get("ranking") if isinstance(obj.get("ranking"), dict) else {}
                         ranking["remainingPassageTokenBudget"] = max(0, int((structured.get("referenceTokenBudgets") or {}).get(reference_key) or request["maxPassageTokens"]) - used)
                         obj["ranking"] = ranking
+
+
+def _read_reference_source_texts(
+    references: list[dict[str, Any]],
+    attachments_by_lineage: dict[str, list[dict[str, Any]]],
+    request: dict[str, Any],
+    services: KnowledgeQueryServices,
+    warnings: list[str],
+) -> dict[str, list[dict[str, Any]]]:
+    if not references or not services.corpus_text:
+        return {}
+    tasks: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    for reference in references:
+        lineage_id = str(reference.get("lineageId") or reference.get("id") or "")
+        for attachment in attachments_by_lineage.get(lineage_id, []):
+            if attachment.get("role") == "extracted_text" and attachment.get("storagePath"):
+                tasks.append((reference, attachment))
+    if not tasks:
+        return {}
+
+    def read_one(reference: dict[str, Any], attachment: dict[str, Any]) -> tuple[str, dict[str, Any] | None, str | None]:
+        lineage_id = str(reference.get("lineageId") or reference.get("id") or "")
+        storage_path = str(attachment.get("storagePath") or "")
+        try:
+            text = services.corpus_text.read_text(storage_path) if services.corpus_text else None
+        except Exception as exc:  # pragma: no cover - defensive runtime note
+            return lineage_id, None, f"Could not read extracted text for {object_title(reference) or anchor_ref(reference)}: {exc}"
+        if not text:
+            return lineage_id, None, None
+        return lineage_id, {
+            "referenceId": reference.get("id"),
+            "referenceLineageId": reference.get("lineageId"),
+            "referenceTitle": object_title(reference),
+            "objectUri": object_uri(reference),
+            "storagePath": storage_path,
+            "text": text.strip(),
+            "tokens": services.token_counter.count(text),
+        }, None
+
+    worker_count = _graph_fetch_worker_count(request, len(tasks))
+    if worker_count <= 1:
+        results = [read_one(reference, attachment) for reference, attachment in tasks]
+    else:
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            futures = [executor.submit(read_one, reference, attachment) for reference, attachment in tasks]
+            results = [future.result() for future in as_completed(futures)]
+    source_texts_by_lineage: dict[str, list[dict[str, Any]]] = {}
+    for lineage_id, source_text, warning in results:
+        if warning:
+            warnings.append(warning)
+        if source_text and lineage_id:
+            source_texts_by_lineage.setdefault(lineage_id, []).append(source_text)
+    return source_texts_by_lineage
+
+
+def _evidence_reference_objects(structured: dict[str, Any], request: dict[str, Any]) -> list[dict[str, Any]]:
+    references = _reference_objects(structured)
+    if not references:
+        return []
+    anchor_keys = {
+        str(anchor.get("lineageId") or anchor.get("id") or "")
+        for anchor in structured.get("anchors") or []
+        if anchor.get("kind") == "reference" and str(anchor.get("lineageId") or anchor.get("id") or "")
+    }
+    selected: dict[str, dict[str, Any]] = {}
+    for reference in references:
+        key = str(reference.get("lineageId") or reference.get("id") or "")
+        if key and key in anchor_keys:
+            selected[key] = reference
+    scope = request.get("scope") if isinstance(request.get("scope"), dict) else {}
+    raw_limit = scope.get("evidenceSourceLimit")
+    try:
+        source_limit = int(raw_limit) if raw_limit is not None else int(request.get("maxPassages") or 5)
+    except (TypeError, ValueError):
+        source_limit = int(request.get("maxPassages") or 5)
+    source_limit = max(len(selected), max(1, min(source_limit, 30)))
+    for reference in sorted(references, key=ranking_sort_key):
+        key = str(reference.get("lineageId") or reference.get("id") or "")
+        if not key or key in selected:
+            continue
+        selected[key] = reference
+        if len(selected) >= source_limit:
+            break
+    return list(selected.values())
+
+
+def _should_collect_extracted_evidence(structured: dict[str, Any], request: dict[str, Any]) -> bool:
+    if not request["includeExtracts"]:
+        return False
+    extract_mode = str(request.get("extractMode") or "auto")
+    if extract_mode == "never":
+        return False
+    if extract_mode == "always":
+        return True
+    if structured.get("anchors"):
+        return True
+    if not structured.get("semanticPassages"):
+        return True
+    return False
 
 
 def _selected_summary_passage(structured: dict[str, Any], reference_key: str) -> dict[str, Any] | None:

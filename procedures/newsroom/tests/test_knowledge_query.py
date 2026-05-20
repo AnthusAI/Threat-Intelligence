@@ -1126,7 +1126,7 @@ class KnowledgeQueryTests(unittest.TestCase):
         result = run_knowledge_query(
             {
                 "semanticQuery": "production reliability evaluation for agents",
-                "scope": {"depth": 1, "topK": 4, "semanticSeedLimit": 1},
+                "scope": {"depth": 1, "topK": 4, "semanticSeedLimit": 1, "semanticSeedExpansionLimit": 1},
                 "output": {"format": "markdown", "maxTokens": 500},
             },
             services,
@@ -1384,6 +1384,67 @@ class KnowledgeQueryTests(unittest.TestCase):
         direct = run_knowledge_query(payload, fake_services())
         self.assertEqual(result["structured"], direct["structured"])
         self.assertEqual(result["context"]["text"], direct["context"]["text"])
+
+    def test_newsroom_cli_remote_executes_appsync_knowledge_query(self):
+        from papyrus_newsroom import cli as newsroom_cli
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return json.dumps(
+                    {
+                        "data": {
+                            "knowledgeQuery": json.dumps(
+                                {
+                                    "structured": {},
+                                    "context": {"text": "remote context"},
+                                    "warnings": [],
+                                    "provenance": {},
+                                    "debug": {},
+                                }
+                            )
+                        }
+                    }
+                ).encode("utf-8")
+
+        stdout = io.StringIO()
+        captured = {}
+
+        def fake_urlopen(request, timeout):
+            captured["body"] = json.loads(request.data.decode("utf-8"))
+            captured["authorization"] = request.headers.get("Authorization")
+            return FakeResponse()
+
+        with mock.patch.dict(
+            os.environ,
+            {
+                "PAPYRUS_GRAPHQL_ENDPOINT": "https://example.appsync-api.us-east-1.amazonaws.com/graphql",
+                "PAPYRUS_GRAPHQL_JWT": "test-jwt",
+                "PAPYRUS_GRAPHQL_AUTH_PREFIX": "PapyrusJwt",
+            },
+            clear=False,
+        ), mock.patch("papyrus_knowledge_query.cli.urllib.request.urlopen", side_effect=fake_urlopen), \
+             contextlib.redirect_stdout(stdout):
+            exit_code = newsroom_cli.main(["knowledge-query", "--query", "LLM", "--format", "both", "--max-tokens", "1200"])
+
+        self.assertEqual(exit_code, 0)
+        result = json.loads(stdout.getvalue())
+        self.assertEqual(result["context"]["text"], "remote context")
+        self.assertEqual(result["debug"]["cliExecution"], "remote")
+        self.assertEqual(captured["authorization"], "PapyrusJwt test-jwt")
+        self.assertEqual(captured["body"]["variables"]["input"], '{"anchors":[],"semanticQuery":"LLM","scope":{},"profile":"researcher","output":{"format":"both","maxTokens":1200}}')
+
+    def test_newsroom_cli_remote_requires_graphql_auth(self):
+        from papyrus_newsroom import cli as newsroom_cli
+
+        with mock.patch.dict(os.environ, {"PAPYRUS_GRAPHQL_ENDPOINT": "", "PAPYRUS_GRAPHQL_JWT": ""}, clear=False):
+            with self.assertRaises(RuntimeError):
+                newsroom_cli.main(["knowledge-query", "--query", "LLM"])
 
     def test_vector_index_audit_reports_missing_references(self):
         services = KnowledgeQueryServices(graph=FakeVectorIndexGraphProvider(), corpus_text=FakeVectorIndexTextProvider())

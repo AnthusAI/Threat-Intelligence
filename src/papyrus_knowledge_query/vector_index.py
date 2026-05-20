@@ -4,7 +4,9 @@ import hashlib
 import json
 import os
 import sys
+import time
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any
 
@@ -40,6 +42,7 @@ class VectorIndexOptions:
     force: bool = False
     dry_run: bool = False
     progress_every: int = 25
+    worker_count: int = 8
 
 
 def index_reference_passages(services: KnowledgeQueryServices, options: VectorIndexOptions) -> dict[str, Any]:
@@ -69,6 +72,7 @@ def index_reference_passages(services: KnowledgeQueryServices, options: VectorIn
     existing_reference_keys = _indexed_reference_keys(existing_vectors)
     stats = {
         "action": options.action,
+        "startedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "totalReferences": len(all_references),
         "acceptedReferences": len(accepted_references),
         "referencesScanned": len(references),
@@ -90,6 +94,7 @@ def index_reference_passages(services: KnowledgeQueryServices, options: VectorIn
         "failures": [],
         "warnings": [],
     }
+    started = time.perf_counter()
     if options.action == "audit":
         selected_keys = _reference_key_set(references)
         missing = sorted(selected_keys - existing_reference_keys)
@@ -104,54 +109,21 @@ def index_reference_passages(services: KnowledgeQueryServices, options: VectorIn
         stats["vectorsDeleted"] = len(existing_vectors)
 
     pending_vectors: list[dict[str, Any]] = []
-    for index, reference in enumerate(references, start=1):
-        if options.progress_every and index % options.progress_every == 0:
-            _progress(
-                f"vector-index {index}/{len(references)} refs; prepared={stats['vectorsPrepared']} "
-                f"to_write={stats['vectorsToWrite']} written={stats['vectorsWritten']}"
-            )
-        try:
-            attachments = services.graph.list_reference_attachments(reference)
-        except Exception as exc:  # pragma: no cover - defensive runtime reporting
-            stats["failures"].append({"referenceId": reference.get("id"), "stage": "attachments", "error": str(exc)})
-            continue
-        extracted = next(
-            (attachment for attachment in attachments if attachment.get("role") == "extracted_text" and attachment.get("storagePath")),
-            None,
-        )
-        if not extracted:
-            stats["warnings"].append(f"missing extracted text attachment for {reference.get('id')}")
-            continue
-        try:
-            text = services.corpus_text.read_text(str(extracted["storagePath"]))
-        except Exception as exc:  # pragma: no cover - defensive runtime reporting
-            stats["failures"].append({"referenceId": reference.get("id"), "stage": "read_text", "error": str(exc)})
-            continue
-        if not text:
-            stats["warnings"].append(f"empty extracted text for {reference.get('id')}")
-            continue
-        stats["referencesWithExtractedText"] += 1
-        candidates = _prepare_reference_vectors(text, reference, str(extracted["storagePath"]), options)
-        if candidates:
-            stats["referencesPrepared"] += 1
-        for candidate in candidates:
-            stats["vectorsPrepared"] += 1
-            if candidate["metadata"].get("vectorKind") == "reference_summary":
-                stats["sourceVectorsPrepared"] += 1
-            elif candidate["metadata"].get("vectorKind") == "reference_passage":
-                stats["passageVectorsPrepared"] += 1
-            if not options.force and candidate["key"] in existing_keys:
-                stats["vectorsSkippedExisting"] += 1
-                continue
-            stats["vectorsToWrite"] += 1
-            if options.dry_run:
-                continue
-            pending_vectors.append(candidate)
-            if len(pending_vectors) >= options.batch_size:
-                stats["vectorsWritten"] += _embed_and_put_vectors(vector_index_arn, pending_vectors)
-                stats["embeddingRequests"] += 1
-                stats["embeddingInputCharacters"] += sum(len(vector["text"]) for vector in pending_vectors)
-                pending_vectors = []
+    completed = 0
+    worker_count = max(1, int(options.worker_count or 1))
+    if worker_count == 1 or len(references) <= 1:
+        prepared_results = (_prepare_reference_for_indexing(services, reference, options) for reference in references)
+        for result in prepared_results:
+            completed += 1
+            pending_vectors = _consume_prepared_reference(result, stats, existing_keys, pending_vectors, vector_index_arn, options)
+            _maybe_report_progress(completed, len(references), stats, options)
+    else:
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            futures = [executor.submit(_prepare_reference_for_indexing, services, reference, options) for reference in references]
+            for future in as_completed(futures):
+                completed += 1
+                pending_vectors = _consume_prepared_reference(future.result(), stats, existing_keys, pending_vectors, vector_index_arn, options)
+                _maybe_report_progress(completed, len(references), stats, options)
 
     if pending_vectors and not options.dry_run:
         stats["vectorsWritten"] += _embed_and_put_vectors(vector_index_arn, pending_vectors)
@@ -159,7 +131,92 @@ def index_reference_passages(services: KnowledgeQueryServices, options: VectorIn
         stats["embeddingInputCharacters"] += sum(len(vector["text"]) for vector in pending_vectors)
     selected_keys = _reference_key_set(references)
     stats["missingIndexedReferencesBeforeRun"] = len(selected_keys - existing_reference_keys)
+    stats["elapsedSeconds"] = round(time.perf_counter() - started, 3)
+    stats["completedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     return stats
+
+
+def _prepare_reference_for_indexing(
+    services: KnowledgeQueryServices,
+    reference: dict[str, Any],
+    options: VectorIndexOptions,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "referenceId": reference.get("id"),
+        "referenceLineageId": reference.get("lineageId"),
+        "hasExtractedText": False,
+        "candidates": [],
+        "warnings": [],
+        "failures": [],
+    }
+    try:
+        attachments = services.graph.list_reference_attachments(reference)  # type: ignore[union-attr]
+    except Exception as exc:  # pragma: no cover - defensive runtime reporting
+        result["failures"].append({"referenceId": reference.get("id"), "stage": "attachments", "error": str(exc)})
+        return result
+    extracted = next(
+        (attachment for attachment in attachments if attachment.get("role") == "extracted_text" and attachment.get("storagePath")),
+        None,
+    )
+    if not extracted:
+        result["warnings"].append(f"missing extracted text attachment for {reference.get('id')}")
+        return result
+    result["hasExtractedText"] = True
+    try:
+        text = services.corpus_text.read_text(str(extracted["storagePath"]))  # type: ignore[union-attr]
+    except Exception as exc:  # pragma: no cover - defensive runtime reporting
+        result["failures"].append({"referenceId": reference.get("id"), "stage": "read_text", "error": str(exc)})
+        return result
+    if not text:
+        result["warnings"].append(f"empty extracted text for {reference.get('id')}")
+        return result
+    result["candidates"] = _prepare_reference_vectors(text, reference, str(extracted["storagePath"]), options)
+    return result
+
+
+def _consume_prepared_reference(
+    result: dict[str, Any],
+    stats: dict[str, Any],
+    existing_keys: set[str],
+    pending_vectors: list[dict[str, Any]],
+    vector_index_arn: str,
+    options: VectorIndexOptions,
+) -> list[dict[str, Any]]:
+    stats["warnings"].extend(result.get("warnings") or [])
+    stats["failures"].extend(result.get("failures") or [])
+    if result.get("hasExtractedText"):
+        stats["referencesWithExtractedText"] += 1
+    candidates = [candidate for candidate in result.get("candidates") or [] if isinstance(candidate, dict)]
+    if candidates:
+        stats["referencesPrepared"] += 1
+    for candidate in candidates:
+        stats["vectorsPrepared"] += 1
+        if candidate["metadata"].get("vectorKind") == "reference_summary":
+            stats["sourceVectorsPrepared"] += 1
+        elif candidate["metadata"].get("vectorKind") == "reference_passage":
+            stats["passageVectorsPrepared"] += 1
+        if not options.force and candidate["key"] in existing_keys:
+            stats["vectorsSkippedExisting"] += 1
+            continue
+        stats["vectorsToWrite"] += 1
+        if options.dry_run:
+            continue
+        pending_vectors.append(candidate)
+        if len(pending_vectors) >= options.batch_size:
+            stats["vectorsWritten"] += _embed_and_put_vectors(vector_index_arn, pending_vectors)
+            stats["embeddingRequests"] += 1
+            stats["embeddingInputCharacters"] += sum(len(vector["text"]) for vector in pending_vectors)
+            pending_vectors = []
+    return pending_vectors
+
+
+def _maybe_report_progress(completed: int, total: int, stats: dict[str, Any], options: VectorIndexOptions) -> None:
+    if not options.progress_every or completed % options.progress_every != 0:
+        return
+    _progress(
+        f"vector-index {completed}/{total} refs; prepared={stats['vectorsPrepared']} "
+        f"skipped={stats['vectorsSkippedExisting']} to_write={stats['vectorsToWrite']} written={stats['vectorsWritten']}"
+    )
 
 
 def _prepare_reference_vectors(
