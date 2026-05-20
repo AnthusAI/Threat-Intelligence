@@ -3,6 +3,7 @@
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
+const zlib = require("node:zlib");
 const { spawn, spawnSync } = require("node:child_process");
 const YAML = require("yaml");
 
@@ -74,6 +75,19 @@ const {
   normalizeNewsroomSummaryPayload,
 } = require("./lib/papyrus-newsroom-summary.cjs");
 const {
+  attachmentRecord,
+  buildBinaryModelPayloadAttachment,
+  buildJsonModelPayloadAttachment,
+  buildTextModelPayloadAttachment,
+  deleteAttachmentStoragePaths,
+  downloadAttachmentBody,
+  downloadAttachmentBuffer,
+  listAttachmentStoragePaths,
+  modelAttachmentId,
+  stripPrivatePayloadFields,
+  uploadAttachmentBody,
+} = require("./lib/papyrus-model-attachments.cjs");
+const {
   SOURCE_READINESS_STATES,
   SOURCE_TEXT_STATES,
   buildExtractionIndex,
@@ -84,6 +98,19 @@ const {
   sourceStoragePathForReference,
   textStoragePathForReference,
 } = require("./lib/papyrus-reference-source-readiness.cjs");
+const {
+  DEFAULT_QUERY_TERMS,
+  runCitationLedDiscovery,
+} = require("./lib/papyrus-reference-discovery.cjs");
+const {
+  IDENTIFIER_TYPE_CONFIG,
+  normalizeIdentifier,
+  normalizeIdentifierTypes,
+  identifiersFromObject,
+  parseCatalogItems,
+  resolveIdentifierForReference,
+  sidecarIdentifier,
+} = require("./lib/papyrus-identifier-backfill.cjs");
 const {
   getAssignmentTypePolicy,
 } = require("./lib/papyrus-assignment-types.cjs");
@@ -97,14 +124,21 @@ const {
 const { PapyrusGraphQLAuthoringClient } = require("./lib/papyrus-graphql-authoring.cjs");
 const { getArticleImageAssets, getMarkdownArticle, loadEditionConfig, loadMarkdownArticles } = require("./lib/papyrus-markdown.cjs");
 
-const OPTIONAL_SCHEMA_MODELS = new Set(["CategoryKeyword", "LexicalSteeringRule"]);
+const OPTIONAL_SCHEMA_MODELS = new Set(["CategoryKeyword", "LexicalSteeringRule", "ModelAttachment"]);
+const MODEL_ATTACHMENT_OWNER_MODELS = {
+  assignment: "Assignment",
+  assignmentEvent: "AssignmentEvent",
+  knowledgeRawPayload: "KnowledgeRawPayload",
+  message: "Message",
+  reference: "Reference",
+};
 
 async function main() {
   loadDotEnv();
 
   const args = process.argv.slice(2);
   const [group, command, value] = args;
-  if (group !== "content" && group !== "categories" && group !== "assignments" && group !== "editions" && group !== "relations" && group !== "references" && group !== "messages" && group !== "analysis" && group !== "newsroom") {
+  if (group !== "content" && group !== "categories" && group !== "assignments" && group !== "editions" && group !== "relations" && group !== "references" && group !== "messages" && group !== "analysis" && group !== "newsroom" && group !== "corpora") {
     printUsage();
     process.exitCode = 1;
     return;
@@ -122,6 +156,9 @@ async function main() {
       }
       await listArticles();
       return;
+    case "content:schema-check":
+      await checkGraphqlSchema(args.slice(2));
+      return;
     case "content:sync":
       await handleSync(value, process.argv[5]);
       return;
@@ -130,6 +167,18 @@ async function main() {
       return;
     case "content:delete":
       await handleDelete(value, args.slice(3));
+      return;
+    case "corpora:status":
+      await corpusStatus(args.slice(2));
+      return;
+    case "corpora:sync-from-cloud":
+      await syncCorpusFromCloud(args.slice(2));
+      return;
+    case "corpora:sync-to-cloud":
+      await syncCorpusToCloud(args.slice(2));
+      return;
+    case "corpora:worker-bootstrap":
+      await corpusWorkerBootstrap(args.slice(2));
       return;
     case "categories:import-steering":
       await importSteering(args.slice(2));
@@ -212,6 +261,15 @@ async function main() {
     case "references:register-catalog":
       await registerReferenceCatalog(args.slice(2));
       return;
+    case "references:register-catalog-split":
+      await registerReferenceCatalogSplit(args.slice(2));
+      return;
+    case "references:make-catalog":
+      await makeReferenceCatalogFromText(args.slice(2));
+      return;
+    case "references:discover-citation-led":
+      await discoverCitationLedReferences(args.slice(2));
+      return;
     case "references:prepare-catalog":
       await prepareReferenceCatalog(args.slice(2));
       return;
@@ -230,6 +288,24 @@ async function main() {
     case "references:attach-extracted-text":
       await attachExtractedTextReferences(args.slice(2));
       return;
+    case "references:create-doi-backfill-assignment":
+      await createReferenceDoiBackfillAssignment(args.slice(2));
+      return;
+    case "references:doi-backfill-now":
+      await runReferenceDoiBackfillNow(args.slice(2));
+      return;
+    case "references:execute-doi-backfill":
+      await executeReferenceDoiBackfillAssignment(args.slice(2));
+      return;
+    case "references:create-identifier-backfill-assignment":
+      await createReferenceIdentifierBackfillAssignment(args.slice(2));
+      return;
+    case "references:identifier-backfill-now":
+      await runReferenceIdentifierBackfillNow(args.slice(2));
+      return;
+    case "references:execute-identifier-backfill":
+      await executeReferenceIdentifierBackfillAssignment(args.slice(2));
+      return;
     case "references:export-analysis-manifest":
       await exportReferenceAnalysisManifest(args.slice(2));
       return;
@@ -238,6 +314,9 @@ async function main() {
       return;
     case "assignments:list":
       await listAssignments(args.slice(2));
+      return;
+    case "assignments:backfill-section-indexes":
+      await backfillAssignmentSectionIndexes(args.slice(2));
       return;
     case "assignments:for-object":
       await listAssignmentsForObject(args.slice(2));
@@ -273,11 +352,23 @@ async function main() {
     case "analysis:execute-assignment":
       await executeAnalysisReindexAssignment(args.slice(2));
       return;
+    case "analysis:graph-artifacts":
+      await listGraphArtifacts(args.slice(2));
+      return;
+    case "analysis:import-graph-artifact":
+      await importGraphArtifact(args.slice(2));
+      return;
     case "newsroom:recount-summary":
       await recountNewsroomSummary(args.slice(2));
       return;
+    case "newsroom:prune-attachments":
+      await pruneModelAttachments(args.slice(2));
+      return;
     case "newsroom:backfill-feed-fields":
       await backfillNewsroomFeedFields(args.slice(2));
+      return;
+    case "newsroom:backfill-operational-indexes":
+      await backfillOperationalIndexes(args.slice(2));
       return;
     case "newsroom:import-sections":
       await importNewsroomSections(args.slice(2));
@@ -353,6 +444,38 @@ async function inspect() {
   console.log("GraphQL reachability: ok");
 }
 
+async function checkGraphqlSchema(flags) {
+  const options = parseOptions(flags);
+  const typeName = normalizeCliString(options.type) ?? "Assignment";
+  const requiredFields = parseCommaList(options.fields) ?? parseCommaList(options.field) ?? [];
+  const { client } = createAuthoringClient();
+  const fields = await graphqlTypeFieldNames(client, typeName);
+  const missing = requiredFields.filter((field) => !fields.includes(field));
+  console.log(`schema-check\ttype\t${typeName}`);
+  console.log(`schema-check\tfields\t${fields.length}`);
+  if (requiredFields.length) console.log(`schema-check\trequired\t${requiredFields.join(",")}`);
+  if (missing.length) {
+    console.log(`schema-check\tmissing\t${missing.join(",")}`);
+    process.exitCode = 1;
+    return;
+  }
+  console.log("schema-check\tok\ttrue");
+}
+
+async function graphqlTypeFieldNames(client, typeName) {
+  const result = await client.graphql(`
+    query PapyrusSchemaCheck($type: String!) {
+      __type(name: $type) {
+        name
+        fields { name }
+      }
+    }
+  `, { type: typeName });
+  const type = result.__type;
+  if (!type) throw new Error(`GraphQL type '${typeName}' was not found.`);
+  return (type.fields ?? []).map((field) => field.name).sort();
+}
+
 async function listArticles() {
   const { client } = createAuthoringClient();
   const articles = await client.listPublishedArticles();
@@ -396,9 +519,90 @@ async function handleDelete(subject, flags) {
     return;
   }
 
+  const options = parseOptions(flags.filter((flag) => flag !== "--yes"));
   const { client } = createAuthoringClient();
-  const result = await deleteAllContent(client);
-  printDeleteSummary(result);
+  const result = await deleteAllContent(client, {
+    deleteAttachments: Boolean(options["delete-attachments"] ?? options["purge-attachments"]),
+    bucket: normalizeCliString(options.bucket),
+  });
+  if (options.json) {
+    printCompactJson(deleteAllJsonResult(result));
+  } else {
+    printDeleteSummary(result);
+  }
+}
+
+async function corpusStatus(flags) {
+  const options = parseOptions(flags);
+  const steeringConfig = loadSteeringConfig({ configPath: options.config });
+  const corpora = selectedCorpusConfigs(steeringConfig, options["corpus-key"]);
+  const { endpoint, client } = createAuthoringClient();
+  const graphState = await loadCorpusGraphState(client);
+  const statuses = corpora.map((corpus) => buildCorpusStatus(corpus, {
+    graphState,
+    endpoint,
+    force: Boolean(options.force),
+  }));
+  const payload = {
+    ok: statuses.every((status) => status.readiness.readyForWorker),
+    command: "corpora status",
+    endpoint,
+    expectedBucket: storageBucketFromAmplifyOutputsLocal(),
+    configPath: steeringConfig.configPath,
+    corpora: statuses,
+  };
+  if (options.json) {
+    printCompactJson(payload);
+  } else {
+    printCorpusStatus(payload);
+  }
+}
+
+async function corpusWorkerBootstrap(flags) {
+  const options = parseOptions(flags);
+  const steeringConfig = loadSteeringConfig({ configPath: options.config });
+  const corpora = selectedCorpusConfigs(steeringConfig, options["corpus-key"]);
+  const { endpoint, client } = createAuthoringClient();
+  const graphState = await loadCorpusGraphState(client);
+  const statuses = corpora.map((corpus) => buildCorpusStatus(corpus, {
+    graphState,
+    endpoint,
+    force: Boolean(options.force),
+  }));
+  const payload = {
+    ok: statuses.every((status) => status.target.ok && status.local.exists),
+    command: "corpora worker-bootstrap",
+    endpoint,
+    expectedBucket: storageBucketFromAmplifyOutputsLocal(),
+    configPath: steeringConfig.configPath,
+    corpora: statuses.map((status) => ({
+      ...status,
+      next: nextCorpusBootstrapCommand(status),
+    })),
+  };
+  if (options.json) {
+    printCompactJson(payload);
+  } else {
+    printCorpusWorkerBootstrap(payload);
+  }
+}
+
+async function syncCorpusFromCloud(flags) {
+  const options = parseOptions(flags);
+  if (!options["corpus-key"]) throw new Error("corpora sync-from-cloud requires --corpus-key <key>.");
+  const steeringConfig = loadSteeringConfig({ configPath: options.config });
+  const corpus = requireCorpusConfig(steeringConfig, options["corpus-key"], "--corpus-key");
+  const plan = buildCorpusSyncPlan(corpus, { direction: "from-cloud", options });
+  runOrPrintCorpusSyncPlan(plan, options);
+}
+
+async function syncCorpusToCloud(flags) {
+  const options = parseOptions(flags);
+  if (!options["corpus-key"]) throw new Error("corpora sync-to-cloud requires --corpus-key <key>.");
+  const steeringConfig = loadSteeringConfig({ configPath: options.config });
+  const corpus = requireCorpusConfig(steeringConfig, options["corpus-key"], "--corpus-key");
+  const plan = buildCorpusSyncPlan(corpus, { direction: "to-cloud", options });
+  runOrPrintCorpusSyncPlan(plan, options);
 }
 
 async function importSteering(flags) {
@@ -890,7 +1094,9 @@ async function registerReferenceCatalog(flags) {
   const steeringConfig = loadSteeringConfig({ configPath: options.config });
   const corpusConfig = requireCorpusConfig(steeringConfig, options["corpus-key"], "--corpus-key");
   const catalog = loadJsonFile(options.catalog);
-  const plan = buildReferenceCatalogRegistrationRecords(catalog, {
+  const { client } = createAuthoringClient();
+
+  const planOptions = {
     corpusConfig,
     corpusId: knowledgeCorpusId(corpusConfig),
     classifierId: options.classifier ?? resolveClassifierForCorpus(steeringConfig, corpusConfig),
@@ -899,9 +1105,51 @@ async function registerReferenceCatalog(flags) {
     note: options.note,
     ingestionRationale: options["ingestion-rationale"] ?? options.ingestionRationale,
     actor: options.actor ?? "Papyrus content CLI",
-  });
+  };
+
+  const skipExisting = options["skip-existing"] === undefined
+    ? true
+    : String(options["skip-existing"]).toLowerCase() !== "false";
+  if (skipExisting) {
+    const existingReferences = await client.listRecords("Reference");
+    const existingExternalIds = new Set(
+      existingReferences
+        .filter((ref) => ref.corpusId === planOptions.corpusId)
+        .map((ref) => ref.externalItemId)
+        .filter(Boolean),
+    );
+    const items = catalogItemsForSummary(catalog);
+    const filtered = items.filter((item) => {
+      const externalItemId = item.item_id ?? item.externalItemId ?? item.id;
+      return externalItemId ? !existingExternalIds.has(externalItemId) : true;
+    });
+    if (filtered.length !== items.length) {
+      console.log(`references\tregister-catalog\tskip-existing\t${items.length - filtered.length} duplicates`);
+    }
+    catalog.items = filtered;
+  }
+
+  let plan = buildReferenceCatalogRegistrationRecords(catalog, planOptions);
+  // If we have already registered this exact batch, reuse its importedAt timestamp so reruns are true noops.
+  const existingRun = await client.getRecord("KnowledgeImportRun", plan.importRunId);
+  if (existingRun?.importedAt) {
+    plan = buildReferenceCatalogRegistrationRecords(catalog, {
+      ...planOptions,
+      importedAt: existingRun.importedAt,
+    });
+  }
+  // The raw catalog snapshot is a write-once transparency artifact for the import run.
+  // If it already exists, do not update it on reruns (avoid noisy diffs as snapshot compaction evolves).
+  if (existingRun) {
+    const rawPayloadRecord = plan.records.find((entry) => entry.modelName === "KnowledgeRawPayload");
+    if (rawPayloadRecord?.expected?.id) {
+      const existingPayload = await client.getRecord("KnowledgeRawPayload", rawPayloadRecord.expected.id);
+      if (existingPayload) {
+        plan.records = plan.records.filter((entry) => !(entry.modelName === "KnowledgeRawPayload" && entry.expected.id === rawPayloadRecord.expected.id));
+      }
+    }
+  }
   assertReferenceCatalogPlanSafety(plan);
-  const { client } = createAuthoringClient();
   const changes = await buildRecordChangesToleratingOptionalModels(client, plan.records);
   printReferenceRegistrationSummary(plan, changes, { apply: Boolean(options.apply) });
   if (!options.apply) {
@@ -910,6 +1158,244 @@ async function registerReferenceCatalog(flags) {
   }
   await applyRecordChanges(client, changes);
   await updateNewsroomSummaryAfterReferenceRegistration(client, changes, plan);
+}
+
+function inferReferenceCorpusBucket(item) {
+  const sourceUri = normalizeCliString(item.source_uri ?? item.sourceUri ?? item.url ?? item.uri) ?? "";
+  const mediaType = normalizeCliString(item.media_type ?? item.mediaType) ?? "";
+  let host = "";
+  let pathname = "";
+  try {
+    const parsed = new URL(sourceUri);
+    host = parsed.hostname.toLowerCase();
+    pathname = parsed.pathname.toLowerCase();
+  } catch {
+    // ignore
+  }
+  const uri = sourceUri.toLowerCase();
+
+  if (mediaType === "application/pdf" || uri.endsWith(".pdf") || pathname.endsWith(".pdf")) return "research";
+
+  // Common scholarly sources / paper landing pages.
+  if (host === "arxiv.org") return "research";
+  if (host === "aclanthology.org") return "research";
+  if (host === "openreview.net") return "research";
+  if (host === "proceedings.neurips.cc" || host === "neurips.cc") return "research";
+  if (host === "dl.acm.org" || host === "doi.org") return "research";
+  if (host.endsWith(".ijcai.org") || host === "www.ijcai.org") return "research";
+  if (host === "pmc.ncbi.nlm.nih.gov" || host.endsWith("pubmed.ncbi.nlm.nih.gov")) return "research";
+  if (host === "drops.dagstuhl.de") return "research";
+  if (host.endsWith("nature.com") && pathname.includes("/articles/")) return "research";
+  if (host === "www.science.org" && pathname.includes("/doi/")) return "research";
+  if (host.endsWith("sciencedirect.com") && pathname.includes("/science/article")) return "research";
+  if (host.endsWith("tandfonline.com") && pathname.includes("/doi/")) return "research";
+  if (host.endsWith("frontiersin.org") && pathname.includes("/articles/")) return "research";
+
+  // Everything else defaults to news / non-canonical sources.
+  return "news";
+}
+
+async function registerReferenceCatalogSplit(flags) {
+  const options = parseOptions(flags);
+  if (!options.catalog) throw new Error("references register-catalog-split requires --catalog <catalog.json>.");
+  const steeringConfig = loadSteeringConfig({ configPath: options.config });
+  const researchCorpusKey = options["research-corpus-key"] ?? steeringConfig.canonicalTopicSet?.corpusKey ?? "AI-ML-research";
+  const newsCorpusKey = options["news-corpus-key"] ?? "AI-ML-journalism";
+  const status = normalizeReferenceCurationStatus(options.status, "pending");
+  const reasonCode = normalizeReferenceRejectionReasonCode(options["reason-code"] ?? options.reasonCode, { required: status === "rejected" });
+  const catalog = loadJsonFile(options.catalog);
+  const items = catalogItemsForSummary(catalog);
+  const researchItems = [];
+  const newsItems = [];
+  for (const item of items) {
+    (inferReferenceCorpusBucket(item) === "research" ? researchItems : newsItems).push(item);
+  }
+
+  const preparedCatalog = { ...catalog, items };
+  const { client } = createAuthoringClient();
+  const skipExisting = options["skip-existing"] === undefined
+    ? true
+    : String(options["skip-existing"]).toLowerCase() !== "false";
+  let existingByCorpusId = null;
+  if (skipExisting) {
+    const existingReferences = await client.listRecords("Reference");
+    existingByCorpusId = new Map();
+    for (const ref of existingReferences) {
+      if (!ref?.corpusId || !ref?.externalItemId) continue;
+      const bucket = existingByCorpusId.get(ref.corpusId) ?? new Set();
+      bucket.add(ref.externalItemId);
+      existingByCorpusId.set(ref.corpusId, bucket);
+    }
+  }
+
+  const plans = [];
+  for (const [bucket, corpusKey, bucketItems] of [
+    ["research", researchCorpusKey, researchItems],
+    ["news", newsCorpusKey, newsItems],
+  ]) {
+    if (!bucketItems.length) continue;
+    const corpusConfig = requireCorpusConfig(steeringConfig, corpusKey, `--${bucket}-corpus-key`);
+    const corpusId = knowledgeCorpusId(corpusConfig);
+    const filteredItems = skipExisting && existingByCorpusId
+      ? bucketItems.filter((item) => {
+        const externalItemId = item.item_id ?? item.externalItemId ?? item.id;
+        return externalItemId ? !(existingByCorpusId.get(corpusId)?.has(externalItemId)) : true;
+      })
+      : bucketItems;
+    if (!filteredItems.length) {
+      console.log(`references\tregister-catalog-split\tskip-existing\tbucket\t${bucket}\t0 new items`);
+      continue;
+    }
+    if (filteredItems.length !== bucketItems.length) {
+      console.log(`references\tregister-catalog-split\tskip-existing\tbucket\t${bucket}\t${bucketItems.length - filteredItems.length} duplicates`);
+    }
+    const prepared = buildPreparedReferenceCatalog({ ...preparedCatalog, items: filteredItems }, {
+      corpusConfig,
+      corpusKey,
+      steeringConfig,
+      publicationName: steeringConfig.publication?.name,
+    });
+    const planOptions = {
+      corpusConfig,
+      corpusId,
+      classifierId: options.classifier ?? resolveClassifierForCorpus(steeringConfig, corpusConfig),
+      status,
+      reasonCode,
+      note: options.note,
+      ingestionRationale: options["ingestion-rationale"] ?? options.ingestionRationale,
+      actor: options.actor ?? "Papyrus content CLI",
+    };
+
+    let plan = buildReferenceCatalogRegistrationRecords(prepared, planOptions);
+    const existingRun = await client.getRecord("KnowledgeImportRun", plan.importRunId);
+    if (existingRun?.importedAt) {
+      plan = buildReferenceCatalogRegistrationRecords(prepared, {
+        ...planOptions,
+        importedAt: existingRun.importedAt,
+      });
+    }
+    if (existingRun) {
+      const rawPayloadRecord = plan.records.find((entry) => entry.modelName === "KnowledgeRawPayload");
+      if (rawPayloadRecord?.expected?.id) {
+        const existingPayload = await client.getRecord("KnowledgeRawPayload", rawPayloadRecord.expected.id);
+        if (existingPayload) {
+          plan.records = plan.records.filter((entry) => !(entry.modelName === "KnowledgeRawPayload" && entry.expected.id === rawPayloadRecord.expected.id));
+        }
+      }
+    }
+    assertReferenceCatalogPlanSafety(plan);
+    plans.push({ bucket, corpusKey, plan });
+  }
+
+  if (!plans.length) {
+    console.log("references\tregister-catalog-split\t0 items");
+    return;
+  }
+
+  const apply = Boolean(options.apply);
+  for (const entry of plans) {
+    const changes = await buildRecordChangesToleratingOptionalModels(client, entry.plan.records);
+    console.log(`references\tregister-catalog-split\tbucket\t${entry.bucket}\tcorpus\t${entry.corpusKey}\titems\t${entry.plan.itemCount}\tapply\t${apply ? "yes" : "no"}`);
+    printReferenceRegistrationSummary(entry.plan, changes, { apply });
+    if (!apply) continue;
+    await applyRecordChanges(client, changes);
+    await updateNewsroomSummaryAfterReferenceRegistration(client, changes, entry.plan);
+  }
+}
+
+async function makeReferenceCatalogFromText(flags) {
+  const options = parseOptions(flags);
+  if (!options.input) throw new Error("references make-catalog requires --input <sources.txt|sources.md>.");
+  if (!options.output) throw new Error("references make-catalog requires --output <catalog.json>.");
+
+  const text = fs.readFileSync(options.input, "utf8");
+  const lines = text.split(/\r?\n/);
+  const urlRegex = /(https?:\/\/[^\s)]+)(?:\))?/g;
+
+  const seen = new Set();
+  const items = [];
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const matches = [...line.matchAll(urlRegex)].map((match) => match[1]);
+    if (!matches.length) continue;
+    for (const url of matches) {
+      const normalizedUrl = String(url ?? "").trim();
+      if (!normalizedUrl || seen.has(normalizedUrl)) continue;
+      seen.add(normalizedUrl);
+
+      const before = line.split(normalizedUrl)[0] ?? "";
+      const title = before
+        .replace(/^[\\s>*-]+/, "")
+        .replace(/^\\d+\\.\\s+/, "")
+        .replace(/\\s*—\\s*$/, "")
+        .replace(/\\s*:\\s*$/, "")
+        .trim() || null;
+
+      const id = `web-${hashShort(normalizedUrl)}`;
+      items.push({
+        id,
+        item_id: id,
+        title,
+        source_uri: normalizedUrl,
+      });
+    }
+  }
+
+  writeJsonFile(options.output, {
+    schema_version: 1,
+    catalog_kind: "papyrus-reference-intake",
+    generated_at: options["generated-at"] ?? new Date().toISOString(),
+    items,
+  });
+  console.log(`references\tmake-catalog\t${options.output}\t${items.length} items`);
+}
+
+async function discoverCitationLedReferences(flags) {
+  const options = parseOptions(flags);
+  const steeringConfig = loadSteeringConfig({ configPath: options.config });
+  const anchorCorpusKey = options["anchor-corpus-key"]
+    ?? options["corpus-key"]
+    ?? steeringConfig.canonicalTopicSet?.corpusKey
+    ?? "AI-ML-research";
+  const anchorCorpus = requireCorpusConfig(steeringConfig, anchorCorpusKey, "--anchor-corpus-key");
+  const anchorCorpusPath = path.resolve(anchorCorpus.path);
+  const queryTerms = parseRepeatedOption(flags, "query");
+  const discovery = await runCitationLedDiscovery({
+    runId: normalizeCliString(options["run-id"]),
+    anchorCorpusPath,
+    fromYear: normalizeCliNonNegativeInteger(options["from-year"], "--from-year") ?? 2023,
+    toYear: normalizeCliNonNegativeInteger(options["to-year"], "--to-year") ?? 2026,
+    anchorLimit: normalizeCliPositiveInteger(options["anchor-limit"], "--anchor-limit") ?? 40,
+    citationsPerAnchor: normalizeCliPositiveInteger(options["citations-per-anchor"], "--citations-per-anchor") ?? 12,
+    feedLimit: normalizeCliPositiveInteger(options["feed-limit"], "--feed-limit") ?? 20,
+    queryTerms: queryTerms.length ? queryTerms : DEFAULT_QUERY_TERMS,
+  });
+
+  if (options.output) {
+    fs.mkdirSync(path.dirname(options.output), { recursive: true });
+    fs.copyFileSync(discovery.files.rankedCatalog, options.output);
+  }
+
+  console.log(`references\tdiscover-citation-led\trun-id\t${discovery.runId}`);
+  console.log(`references\tdiscover-citation-led\tanchors\t${discovery.anchorsCount}`);
+  console.log(`references\tdiscover-citation-led\traw\t${discovery.rawCount}`);
+  console.log(`references\tdiscover-citation-led\tscored\t${discovery.scoredCount}`);
+  console.log(`references\tdiscover-citation-led\tranked\t${discovery.rankedCount}`);
+  console.log(`references\tdiscover-citation-led\tresearch\t${discovery.report.counts_by_route_corpus["AI-ML-research"] ?? 0}`);
+  console.log(`references\tdiscover-citation-led\tjournalism\t${discovery.report.counts_by_route_corpus["AI-ML-journalism"] ?? 0}`);
+  console.log(`references\tdiscover-citation-led\thigh\t${discovery.report.counts_by_confidence_tier.high ?? 0}`);
+  console.log(`references\tdiscover-citation-led\tmedium\t${discovery.report.counts_by_confidence_tier.medium ?? 0}`);
+  console.log(`references\tdiscover-citation-led\tlow\t${discovery.report.counts_by_confidence_tier.low ?? 0}`);
+  console.log(`references\tdiscover-citation-led\terrors\t${discovery.report.totals.errors}`);
+  console.log(`references\tdiscover-citation-led\tanchors-file\t${discovery.files.anchors}`);
+  console.log(`references\tdiscover-citation-led\traw-file\t${discovery.files.raw}`);
+  console.log(`references\tdiscover-citation-led\tscored-file\t${discovery.files.scored}`);
+  console.log(`references\tdiscover-citation-led\tranked-file\t${discovery.files.rankedCatalog}`);
+  console.log(`references\tdiscover-citation-led\treport-file\t${discovery.files.report}`);
+  if (options.output) {
+    console.log(`references\tdiscover-citation-led\toutput\t${options.output}`);
+  }
 }
 
 async function prepareReferenceCatalog(flags) {
@@ -1280,6 +1766,284 @@ async function attachExtractedTextReferences(flags) {
   console.log(`references\tattach-extracted-text\tattached\t${changes.filter((entry) => entry.action === "create").length}`);
 }
 
+async function createReferenceDoiBackfillAssignment(flags) {
+  return createReferenceIdentifierBackfillAssignment(doiBackfillCompatibilityFlags(flags));
+}
+
+async function runReferenceDoiBackfillNow(flags) {
+  return runReferenceIdentifierBackfillNow(doiBackfillCompatibilityFlags(flags));
+}
+
+async function executeReferenceDoiBackfillAssignment(flags) {
+  return executeReferenceIdentifierBackfillAssignment(flags);
+}
+
+function doiBackfillCompatibilityFlags(flags) {
+  const next = [];
+  for (let index = 0; index < flags.length; index += 1) {
+    const flag = flags[index];
+    if (flag === "--only-missing-doi") {
+      next.push("--only-missing");
+      if (index + 1 < flags.length && !String(flags[index + 1]).startsWith("--")) {
+        next.push(flags[index + 1]);
+        index += 1;
+      }
+      continue;
+    }
+    next.push(flag);
+  }
+  if (!next.includes("--types")) next.push("--types", "doi");
+  return next;
+}
+
+async function createReferenceIdentifierBackfillAssignment(flags) {
+  const options = parseOptions(flags);
+  if (!options["corpus-key"]) throw new Error("references create-identifier-backfill-assignment requires --corpus-key <key>.");
+  const actorLabel = options.actor || "papyrus-content-cli";
+  const now = new Date().toISOString();
+  const types = normalizeIdentifierTypes(options.types, { defaultTypes: ["doi"] });
+  const runId = options["run-id"] || `reference-identifier-backfill-${timestampForPath(now)}-${hashShort([options["corpus-key"], types.join(",")])}`;
+  const { client } = createAuthoringClient();
+  const assignmentPlan = buildReferenceIdentifierBackfillAssignmentPlan({
+    options,
+    actorLabel,
+    now,
+    runId,
+    types,
+  });
+  const changes = await buildRecordChangesTargetedById(client, assignmentPlan.records);
+  console.log(`references\tcreate-identifier-backfill-assignment\tassignment\t${assignmentPlan.assignment.id}`);
+  console.log(`references\tcreate-identifier-backfill-assignment\tcorpus\t${assignmentPlan.corpusId}`);
+  console.log(`references\tcreate-identifier-backfill-assignment\ttypes\t${types.join(",")}`);
+  console.log(`references\tcreate-identifier-backfill-assignment\trun\t${runId}`);
+  for (const change of changes) {
+    console.log(`${change.action}\t${change.modelName}\t${change.expected.id}`);
+  }
+  if (!options.apply) {
+    console.log("references\tcreate-identifier-backfill-assignment\tapply\tskipped\tpass --apply to write Assignment records");
+    return;
+  }
+  await applyRecordChanges(client, changes);
+  await updateNewsroomSummaryAfterAssignmentCreates(client, changes, {
+    actorLabel,
+    reason: `references create-identifier-backfill-assignment ${assignmentPlan.assignment.id}`,
+  });
+}
+
+async function runReferenceIdentifierBackfillNow(flags) {
+  const options = parseOptions(flags);
+  if (!options["corpus-key"]) throw new Error("references identifier-backfill-now requires --corpus-key <key>.");
+  const now = new Date().toISOString();
+  const types = normalizeIdentifierTypes(options.types, { defaultTypes: ["doi"] });
+  const runNowOptions = {
+    ...options,
+    apply: true,
+    "run-id": options["run-id"] || `reference-identifier-backfill-now-${timestampForPath(now)}`,
+    types: types.join(","),
+  };
+  const actorLabel = runNowOptions["assignee-key"] ?? runNowOptions.assignee ?? runNowOptions.actor ?? "papyrus-content-cli";
+  const { auth, client } = createAuthoringClient();
+  assertJwtUsableForLongRun(auth.claims, "identifier resolver scan");
+  const assignmentPlan = buildReferenceIdentifierBackfillAssignmentPlan({
+    options: runNowOptions,
+    actorLabel,
+    now,
+    runId: runNowOptions["run-id"],
+    types,
+  });
+  runNowOptions.__assignmentMetadata = assignmentPlan.metadata;
+  const assignmentChanges = await buildRecordChangesTargetedById(client, assignmentPlan.records);
+  await applyRecordChanges(client, assignmentChanges);
+  await updateNewsroomSummaryAfterAssignmentCreates(client, assignmentChanges, {
+    actorLabel,
+    reason: `references identifier-backfill-now create ${assignmentPlan.assignment.id}`,
+  });
+  await applyAssignmentAction({
+    client,
+    authClaims: auth.claims,
+    action: "claim",
+    assignmentId: assignmentPlan.assignment.id,
+    options: runNowOptions,
+    actorLabel,
+  });
+  try {
+    const executionResult = await executeAssignmentByType({
+      client,
+      assignmentId: assignmentPlan.assignment.id,
+      options: runNowOptions,
+    });
+    await applyAssignmentAction({
+      client,
+      authClaims: auth.claims,
+      action: "complete",
+      assignmentId: assignmentPlan.assignment.id,
+      options: runNowOptions,
+      actorLabel,
+    });
+    console.log(`references-identifier-backfill-now\tassignment\t${assignmentPlan.assignment.id}`);
+    console.log(`references-identifier-backfill-now\trun\t${executionResult.runId}`);
+    console.log(`references-identifier-backfill-now\tmanifest\t${executionResult.manifestPath}`);
+    console.log(`references-identifier-backfill-now\tresolved\t${executionResult.summary.resolved}`);
+    console.log(`references-identifier-backfill-now\tunresolved\t${executionResult.summary.unresolved}`);
+  } catch (error) {
+    const failure = normalizeError(error);
+    const artifacts = analysisFailureArtifactsFromError(error);
+    const currentAssignment = await client.getRecord("Assignment", assignmentPlan.assignment.id);
+    await appendAssignmentFailedEvent({
+      client,
+      assignmentId: assignmentPlan.assignment.id,
+      assignmentTypeKey: assignmentPlan.assignment.assignmentTypeKey,
+      queueKey: assignmentPlan.assignment.queueKey,
+      fromStatus: currentAssignment?.status ?? "claimed",
+      toStatus: currentAssignment?.status ?? "claimed",
+      actorLabel,
+      note: failure.message,
+      metadata: {
+        kind: "assignment.execution.failed",
+        runId: artifacts.runId ?? runNowOptions["run-id"] ?? null,
+        manifestPath: artifacts.manifestPath ?? null,
+        stdoutLogPaths: artifacts.stdoutLogPaths,
+        stderrLogPaths: artifacts.stderrLogPaths,
+        importRuns: [],
+        importedRecords: 0,
+        error: failure,
+      },
+    });
+    throw error;
+  }
+}
+
+async function executeReferenceIdentifierBackfillAssignment(flags) {
+  const options = parseOptions(flags);
+  const assignmentId = options.assignment;
+  if (!assignmentId) throw new Error("references execute-identifier-backfill requires --assignment <id>.");
+  const { client } = createAuthoringClient();
+  try {
+    await executeAssignmentByType({ client, assignmentId, options });
+  } catch (error) {
+    const assignment = await client.getRecord("Assignment", assignmentId);
+    const failure = normalizeError(error);
+    const artifacts = analysisFailureArtifactsFromError(error);
+    await appendAssignmentFailedEvent({
+      client,
+      assignmentId,
+      assignmentTypeKey: assignment?.assignmentTypeKey ?? "reference.identifier-backfill",
+      queueKey: assignment?.queueKey ?? null,
+      fromStatus: assignment?.status ?? null,
+      toStatus: assignment?.status ?? null,
+      actorLabel: options.actor || "papyrus-content-cli",
+      note: failure.message,
+      metadata: {
+        kind: "assignment.execution.failed",
+        runId: artifacts.runId ?? options["run-id"] ?? null,
+        manifestPath: artifacts.manifestPath ?? null,
+        stdoutLogPaths: artifacts.stdoutLogPaths,
+        stderrLogPaths: artifacts.stderrLogPaths,
+        importRuns: [],
+        importedRecords: 0,
+        error: failure,
+      },
+    });
+    throw error;
+  }
+}
+
+function buildReferenceIdentifierBackfillAssignmentPlan({ options, actorLabel, now, runId, types = null }) {
+  const steeringConfig = loadSteeringConfig({ configPath: options.config });
+  const corpusConfig = requireCorpusConfig(steeringConfig, options["corpus-key"], "--corpus-key");
+  const corpusId = knowledgeCorpusId(corpusConfig);
+  const assignmentTypeKey = "reference.identifier-backfill";
+  const queueKey = `${assignmentTypeKey}#${corpusId}`;
+  const policy = getAssignmentTypePolicy(assignmentTypeKey);
+  const useLlm = parseBooleanOption(options["use-llm"], false, "--use-llm");
+  const maxCount = normalizeCliPositiveInteger(options["max-count"], "--max-count");
+  const selectedTypes = types ?? normalizeIdentifierTypes(options.types, { defaultTypes: ["doi"] });
+  const onlyMissing = parseBooleanOption(options["only-missing"], false, "--only-missing");
+  const progressEvery = normalizeCliPositiveInteger(options["progress-every"], "--progress-every");
+  const writeChunkSize = normalizeCliPositiveInteger(options["write-chunk-size"], "--write-chunk-size") ?? 100;
+  const metadata = {
+    kind: "reference.identifier-backfill.requested",
+    runId,
+    corpusKey: corpusConfig.key,
+    corpusId,
+    types: selectedTypes,
+    scope: {
+      versionState: "current",
+      curationStatus: "all",
+    },
+    resolverMode: "deterministic-first",
+    useLlm,
+    llmModel: normalizeCliString(options["llm-model"]) ?? "gpt-5.4-mini",
+    llmReasoningEffort: normalizeCliString(options["llm-reasoning-effort"]) ?? "low",
+    sidecarPersistenceMode: parseBooleanOption(options["persist-sidecars"], true, "--persist-sidecars") ? "enabled" : "disabled",
+    onlyMissing,
+    progressEvery: progressEvery ?? null,
+    writeChunkSize,
+    maxCount: maxCount ?? null,
+    steeringConfigPath: steeringConfig?.configPath ?? options.config ?? null,
+    corpusPath: corpusConfig.path,
+    assignmentTypePolicy: policy,
+  };
+  const assignment = {
+    id: `assignment-reference-identifier-backfill-${hashShort([corpusId, runId])}`,
+    assignmentTypeKey,
+    queueKey,
+    queueStatusKey: `${queueKey}#open`,
+    status: "open",
+    priority: 45,
+    title: `Identifier backfill for ${corpusConfig.key}`,
+    brief: `Resolve ${selectedTypes.join(", ")} identifiers for current references, write semantic identifier relations, and persist provenance to metadata and sidecars.`,
+    instructions: "Use deterministic identifier resolution first, use LLM adjudication only when ambiguous, create identifier semantic relations, and run one corpus reindex after sidecar updates.",
+    assigneeType: null,
+    assigneeId: null,
+    assigneeKey: null,
+    claimedAt: null,
+    claimExpiresAt: null,
+    completedAt: null,
+    canceledAt: null,
+    corpusId,
+    categorySetId: null,
+    classifierId: null,
+    sourceSnapshotId: null,
+    importRunId: null,
+    createdBy: actorLabel ?? "papyrus-content-cli",
+    createdAt: now,
+    updatedAt: now,
+    newsroomFeedKey: "assignments",
+    metadata: JSON.stringify(metadata),
+  };
+  const records = [
+    { modelName: "Assignment", expected: assignment },
+    { modelName: "AssignmentEvent", expected: assignmentCreatedEventRecord(assignment, actorLabel, now) },
+    { modelName: "SemanticRelation", expected: localSemanticRelationRecord({
+      predicate: "requests_work_on",
+      subjectKind: "assignment",
+      subjectId: assignment.id,
+      subjectLineageId: assignment.id,
+      subjectVersionNumber: null,
+      objectKind: "knowledge_corpus",
+      objectId: corpusId,
+      objectLineageId: corpusId,
+      objectVersionNumber: null,
+      rank: 1,
+      importRunId: null,
+      importedAt: now,
+      metadata: {
+        kind: "reference.identifier-backfill.requests_work_on",
+        corpusKey: corpusConfig.key,
+        types: selectedTypes,
+      },
+    }) },
+  ];
+  return {
+    assignment,
+    records,
+    metadata,
+    corpusId,
+    corpusConfig,
+  };
+}
+
 async function exportReferenceAnalysisManifest(flags) {
   const options = parseOptions(flags);
   if (!options.output) throw new Error("references export-analysis-manifest requires --output <accepted-manifest.json>.");
@@ -1316,12 +2080,14 @@ async function exportReferenceScopeTraining(flags) {
     client.listRecords("Message"),
     client.listRecords("SemanticRelation"),
   ]);
+  const hydratedMessages = await hydrateReferenceCurationMessages(client, messages, relations);
+  const hydratedReferences = await hydrateRejectedReferenceMetadata(client, references);
   const payload = buildReferenceScopeTrainingExport({
     corpusConfig,
     corpusId,
-    references,
+    references: hydratedReferences,
     attachments,
-    messages,
+    messages: hydratedMessages,
     relations,
   });
   writeJsonFile(options.output, payload);
@@ -2152,6 +2918,179 @@ async function listAssignments(flags) {
   }
 }
 
+async function backfillAssignmentSectionIndexes(flags) {
+  const options = parseOptions(flags);
+  const { client } = createAuthoringClient();
+  await assertAssignmentSectionSchemaReady(client);
+  const targetSection = normalizeCliString(options.section);
+  const validSectionKeys = await loadValidNewsroomSectionKeys(client);
+  const assignments = await client.listRecords("Assignment");
+  const changes = [];
+  let skippedInvalidSectionKeys = 0;
+  for (const assignment of assignments) {
+    const rawSectionKey = assignmentSectionKey(assignment);
+    const patch = assignmentSectionIndexPatch(assignment, { validSectionKeys });
+    if (rawSectionKey && !validSectionKeys.has(rawSectionKey)) skippedInvalidSectionKeys += 1;
+    if (targetSection && patch.sectionKey !== targetSection) continue;
+    const expected = { ...assignment, ...patch };
+    if (!assignmentSectionIndexChanged(assignment, expected)) continue;
+    changes.push({ current: assignment, expected });
+  }
+  changes.sort((left, right) => compareAssignmentQueueOrder(left.expected, right.expected));
+  console.log(`assignments\tbackfill-section-indexes\tplanned\t${changes.length}`);
+  if (targetSection) console.log(`assignments\tbackfill-section-indexes\tsection\t${targetSection}`);
+  if (skippedInvalidSectionKeys) console.log(`assignments\tbackfill-section-indexes\tskipped-invalid-section-keys\t${skippedInvalidSectionKeys}`);
+  for (const change of changes.slice(0, 25)) {
+    console.log([
+      "assignment-section-index",
+      change.expected.id,
+      change.current.status ?? "",
+      `section=${change.expected.sectionKey ?? ""}`,
+      `sectionStatusKey=${change.expected.sectionStatusKey ?? ""}`,
+      `sectionQueueStatusKey=${change.expected.sectionQueueStatusKey ?? ""}`,
+      `primaryFocus=${change.expected.primaryFocusCategoryKey ?? ""}`,
+      `topicScope=${(change.expected.topicScopeCategoryKeys ?? []).join(",")}`,
+    ].join("\t"));
+  }
+  if (changes.length > 25) console.log(`assignments\tbackfill-section-indexes\tpreview-truncated\t${changes.length - 25} more`);
+  if (!options.apply) {
+    console.log("assignments\tbackfill-section-indexes\tapply\tskipped\tpass --apply to write Assignment index fields");
+    console.log("assignments\tbackfill-section-indexes\tnext\tnpm run content -- newsroom recount-summary --apply");
+    return;
+  }
+  let updated = 0;
+  for (const change of changes) {
+    await client.upsert("Assignment", change.expected);
+    updated += 1;
+    if (updated === changes.length || updated % 100 === 0) console.error(`assignments\tbackfill-section-indexes\tprogress\t${updated}/${changes.length}`);
+  }
+  console.log(`assignments\tbackfill-section-indexes\tupdated\t${updated}`);
+  console.log("assignments\tbackfill-section-indexes\tnext\tnpm run content -- newsroom recount-summary --apply");
+}
+
+async function backfillOperationalIndexes(flags) {
+  const options = parseOptions(flags);
+  const startedAt = Date.now();
+  const apply = Boolean(options.apply);
+  const asJson = Boolean(options.json);
+  const { client } = createAuthoringClient();
+  await assertOperationalIndexSchemaReady(client);
+  const [assignments, importRuns] = await Promise.all([
+    client.listRecords("Assignment"),
+    client.listRecords("KnowledgeImportRun"),
+  ]);
+  const assignmentChanges = [];
+  for (const assignment of assignments) {
+    const expected = {
+      ...assignment,
+      ...assignmentOperationalIndexPatch(assignment),
+    };
+    if (assignmentOperationalIndexChanged(assignment, expected)) {
+      assignmentChanges.push({ modelName: "Assignment", current: assignment, expected });
+    }
+  }
+  const importRunChanges = [];
+  for (const importRun of importRuns) {
+    const expected = {
+      ...importRun,
+      corpusImportKindKey: knowledgeImportRunCorpusKindKey(importRun),
+    };
+    if ((importRun.corpusImportKindKey ?? null) !== (expected.corpusImportKindKey ?? null)) {
+      importRunChanges.push({ modelName: "KnowledgeImportRun", current: importRun, expected });
+    }
+  }
+  const changes = [...assignmentChanges, ...importRunChanges];
+  changes.sort((left, right) => String(left.modelName).localeCompare(String(right.modelName)) || String(left.expected.id).localeCompare(String(right.expected.id)));
+  if (apply) {
+    let updated = 0;
+    for (const change of changes) {
+      await client.upsert(change.modelName, change.expected);
+      updated += 1;
+      if (updated === changes.length || updated % 100 === 0) console.error(`newsroom\tbackfill-operational-indexes\tprogress\t${updated}/${changes.length}`);
+    }
+  }
+  const result = {
+    ok: true,
+    command: "newsroom backfill-operational-indexes",
+    action: apply ? "apply" : "dry-run",
+    indexes: [
+      "Assignment.sectionStatusKey",
+      "Assignment.sectionQueueStatusKey",
+      "KnowledgeImportRun.corpusImportKindKey",
+    ],
+    scanned: {
+      assignments: assignments.length,
+      importRuns: importRuns.length,
+    },
+    changedByModel: {
+      Assignment: assignmentChanges.length,
+      KnowledgeImportRun: importRunChanges.length,
+    },
+    changedRecords: changes.length,
+    elapsedMs: Date.now() - startedAt,
+    next: apply ? "npm run content -- newsroom recount-summary --apply" : "npm run content -- newsroom backfill-operational-indexes --apply",
+  };
+  if (asJson) {
+    printCompactJson(result);
+    return;
+  }
+  console.log(`newsroom\tbackfill-operational-indexes\taction\t${result.action}`);
+  console.log(`newsroom\tbackfill-operational-indexes\tchanged\t${changes.length}`);
+  console.log(`newsroom\tbackfill-operational-indexes\tassignments\t${assignmentChanges.length}`);
+  console.log(`newsroom\tbackfill-operational-indexes\timport-runs\t${importRunChanges.length}`);
+  for (const change of changes.slice(0, 25)) {
+    console.log([
+      "operational-index",
+      change.modelName,
+      change.expected.id,
+      change.expected.corpusImportKindKey ?? change.expected.sectionStatusKey ?? "",
+      change.expected.sectionQueueStatusKey ?? "",
+    ].join("\t"));
+  }
+  if (changes.length > 25) console.log(`newsroom\tbackfill-operational-indexes\tpreview-truncated\t${changes.length - 25} more`);
+  if (!apply) console.log(`newsroom\tbackfill-operational-indexes\tnext\t${result.next}`);
+}
+
+async function assertOperationalIndexSchemaReady(client) {
+  const assignmentFields = await graphqlTypeFieldNames(client, "Assignment");
+  const importRunFields = await graphqlTypeFieldNames(client, "KnowledgeImportRun");
+  const missing = [
+    ...["sectionStatusKey", "sectionQueueStatusKey"].filter((field) => !assignmentFields.includes(field)).map((field) => `Assignment.${field}`),
+    ...["corpusImportKindKey"].filter((field) => !importRunFields.includes(field)).map((field) => `KnowledgeImportRun.${field}`),
+  ];
+  if (missing.length) {
+    throw new Error(`Operational index fields are not deployed yet. Missing GraphQL fields: ${missing.join(", ")}.`);
+  }
+}
+
+async function loadValidNewsroomSectionKeys(client) {
+  const sections = await client.listRecords("NewsroomSection");
+  return new Set(sections
+    .filter((section) => section.enabled !== false && section.enabledStatus !== "disabled")
+    .flatMap((section) => [
+      normalizeCliString(section.id),
+      normalizeCliString(section.sectionKey),
+    ])
+    .filter(Boolean));
+}
+
+async function assertAssignmentSectionSchemaReady(client) {
+  const required = [
+    "sectionId",
+    "sectionKey",
+    "sectionType",
+    "sectionStatusKey",
+    "sectionQueueStatusKey",
+    "primaryFocusCategoryKey",
+    "topicScopeCategoryKeys",
+  ];
+  const fields = await graphqlTypeFieldNames(client, "Assignment");
+  const missing = required.filter((field) => !fields.includes(field));
+  if (missing.length) {
+    throw new Error(`Assignment section indexes are not deployed yet. Missing GraphQL fields: ${missing.join(", ")}. Wait for the schema deploy, then run: npm run content -- content schema-check --type Assignment --fields ${required.join(",")}`);
+  }
+}
+
 async function listAssignmentsForObject(flags) {
   const options = parseOptions(flags);
   const kind = options.kind;
@@ -2194,7 +3133,7 @@ async function buildAssignmentContext(flags) {
   const context = payload.assignment_agent_context || {};
   console.log(`assignment-context\tassignment\t${assignmentId}`);
   console.log(`assignment-context\tprofile\t${context.contextProfile || "unknown"}\tbudget=${context.contextTokenBudget || 0}`);
-  console.log(`assignment-context\tdesk\t${context.deskCategoryKey || "unknown"}\tfocus=${context.focusCategoryKey || "unknown"}`);
+  console.log(`assignment-context\tsection\t${context.sectionKey || "unknown"}\tprimaryFocus=${context.primaryFocusCategoryKey || context.focusCategoryKey || "unknown"}`);
   console.log(`assignment-context\tblocks\tincluded=${(context.includedBlocks || []).length}\tdropped=${(context.droppedBlocks || []).length}`);
   console.log(`assignment-context\ttokens\t${context.totalTokens || 0}`);
   console.log(`assignment-context\toutput\t${outputPath}`);
@@ -2218,14 +3157,10 @@ async function listAssignmentResearchPackets(flags) {
     .map((relation) => messageById.get(relation.subjectId))
     .filter(Boolean)
     .filter((message) => message.messageKind === "research_packet")
-    .filter((message) => {
-      const metadata = parseJsonish(message.metadata);
-      return metadata.kind === "research.packet.created" || metadata.research;
-    })
     .sort((left, right) => String(right.createdAt ?? "").localeCompare(String(left.createdAt ?? "")));
 
   for (const message of packets) {
-    const metadata = parseJsonish(message.metadata);
+    const metadata = await readJsonModelPayload(client, "message", message.id, "metadata", "metadata") ?? {};
     const research = parseJsonish(metadata.research);
     const sources = Array.isArray(research.sourceSnapshots) ? research.sourceSnapshots : [];
     const proposals = Array.isArray(research.proposedReferences) ? research.proposedReferences : [];
@@ -2240,7 +3175,7 @@ async function listAssignmentResearchPackets(flags) {
       proposals.length,
       sources.length,
       domains || "-",
-      message.summary ?? message.body,
+      message.summary ?? "Stored research packet",
     ].join("\t"));
     for (const proposal of proposals) {
       console.log([
@@ -2263,7 +3198,7 @@ async function listAssignmentEvents(flags) {
     .filter((event) => event.assignmentId === assignmentId)
     .sort((left, right) => String(left.createdAt).localeCompare(String(right.createdAt)));
   for (const event of events) {
-    const metadata = parseAwsJson(event.metadata || "{}");
+    const metadata = await readJsonModelPayload(client, "assignmentEvent", event.id, "metadata", "metadata") ?? {};
     const runId = metadata && typeof metadata === "object" ? metadata.runId ?? "" : "";
     const commandLabel = metadata && typeof metadata === "object" ? metadata.commandLabel ?? "" : "";
     console.log([
@@ -2290,7 +3225,20 @@ async function mutateAssignment(action, flags) {
     assignmentId,
     options,
   });
-  console.log(`assignment\t${action}\t${assignmentId}\t${result.fromStatus}->${result.toStatus}`);
+  if (options.json) {
+    printCompactJson({
+      ok: true,
+      command: `assignments ${action}`,
+      assignmentId,
+      previousStatus: result.fromStatus,
+      status: result.toStatus,
+      eventId: result.eventId,
+      assigneeKey: result.assignment.assigneeKey ?? null,
+      claimExpiresAt: result.assignment.claimExpiresAt ?? null,
+    });
+  } else {
+    console.log(`assignment\t${action}\t${assignmentId}\t${result.fromStatus}->${result.toStatus}`);
+  }
 }
 
 async function planEdition(flags) {
@@ -2364,37 +3312,29 @@ async function createAnalysisReindexAssignment(flags) {
   const options = parseOptions(flags);
   const plan = buildAnalysisReindexPlanFromOptions(options, flags);
   const { client } = createAuthoringClient();
-  const [assignments, assignmentEvents, semanticRelations, categorySets, newsroomSections] = await Promise.all([
-    client.listRecords("Assignment"),
-    client.listRecords("AssignmentEvent"),
-    client.listRecords("SemanticRelation"),
+  const [categorySets, newsroomSections] = await Promise.all([
     client.listRecords("CategorySet"),
     client.listRecords("NewsroomSection"),
   ]);
   const categorySet = selectAnalysisCategorySet(categorySets, plan, options["category-set"]);
   const sectionTarget = resolveNewsroomSectionTarget(newsroomSections, options.section);
-  const existing = mapExistingRecords({
-    Assignment: assignments,
-    AssignmentEvent: assignmentEvents,
-    SemanticRelation: semanticRelations,
-  });
   const assignmentPlan = buildAnalysisReindexAssignmentRecords(plan, {
     categorySet,
     sectionTarget,
-    existing,
     actorLabel: options.actor || "papyrus-content-cli",
   });
   if (options.output) writeJsonFile(options.output, { plan, assignment: assignmentPlan.assignment, records: assignmentPlan.records });
   printAnalysisReindexPlan(plan);
-  for (const record of assignmentPlan.records) {
+  const assignmentChanges = await buildRecordChangesTargetedByIdToleratingOptionalModels(client, assignmentPlan.records.map(plannedRecordInput));
+  for (const record of assignmentChanges) {
     console.log(`${record.action}\t${record.modelName}\t${record.expected.id}`);
   }
   if (!options.apply) {
     console.log("analysis\tcreate-reindex-assignment\tapply\tskipped\tpass --apply to write Assignment records");
     return;
   }
-  await applyRecordChanges(client, assignmentPlan.records);
-  await updateNewsroomSummaryAfterAssignmentCreates(client, assignmentPlan.records, {
+  await applyRecordChanges(client, assignmentChanges);
+  await updateNewsroomSummaryAfterAssignmentCreates(client, assignmentChanges, {
     actorLabel: options.actor || "papyrus-content-cli",
     reason: `analysis create-reindex-assignment ${assignmentPlan.assignment.id}`,
   });
@@ -2410,28 +3350,21 @@ async function runAnalysisReindexNow(flags) {
   const flagsWithRunId = injectRunIdOverride(flags, runNowOptions["run-id"]);
   const plan = buildAnalysisReindexPlanFromOptions(runNowOptions, flagsWithRunId);
   const { auth, client } = createAuthoringClient();
-  const [assignments, assignmentEvents, semanticRelations, categorySets, newsroomSections] = await Promise.all([
-    client.listRecords("Assignment"),
-    client.listRecords("AssignmentEvent"),
-    client.listRecords("SemanticRelation"),
+  const [categorySets, newsroomSections] = await Promise.all([
     client.listRecords("CategorySet"),
     client.listRecords("NewsroomSection"),
   ]);
   const categorySet = selectAnalysisCategorySet(categorySets, plan, runNowOptions["category-set"]);
   const sectionTarget = resolveNewsroomSectionTarget(newsroomSections, runNowOptions.section);
-  const existing = mapExistingRecords({
-    Assignment: assignments,
-    AssignmentEvent: assignmentEvents,
-    SemanticRelation: semanticRelations,
-  });
   const assignmentPlan = buildAnalysisReindexAssignmentRecords(plan, {
     categorySet,
     sectionTarget,
-    existing,
     actorLabel: runNowOptions.actor || "papyrus-content-cli",
   });
-  await applyRecordChanges(client, assignmentPlan.records);
-  await updateNewsroomSummaryAfterAssignmentCreates(client, assignmentPlan.records, {
+  runNowOptions.__assignmentMetadata = assignmentPlan.metadata;
+  const assignmentChanges = await buildRecordChangesTargetedByIdToleratingOptionalModels(client, assignmentPlan.records.map(plannedRecordInput));
+  await applyRecordChanges(client, assignmentChanges);
+  await updateNewsroomSummaryAfterAssignmentCreates(client, assignmentChanges, {
     actorLabel: runNowOptions.actor || "papyrus-content-cli",
     reason: `analysis run-now create ${assignmentPlan.assignment.id}`,
   });
@@ -2551,6 +3484,20 @@ async function executeAssignmentByType({ client, assignmentId, options = {} }) {
       options,
     });
   }
+  if (assignment.assignmentTypeKey === "reference.doi-backfill") {
+    return executeReferenceIdentifierBackfillAssignmentInternal({
+      client,
+      assignment,
+      options,
+    });
+  }
+  if (assignment.assignmentTypeKey === "reference.identifier-backfill") {
+    return executeReferenceIdentifierBackfillAssignmentInternal({
+      client,
+      assignment,
+      options,
+    });
+  }
   throw new Error(`No executor is registered for assignment type ${assignment.assignmentTypeKey}.`);
 }
 
@@ -2563,7 +3510,10 @@ async function executeAnalysisReindexAssignmentInternal({ client, assignment, op
     throw new Error(`Assignment ${assignmentId} must be claimed before execution (current=${assignment.status}).`);
   }
 
-  const metadata = parseJsonish(assignment.metadata);
+  const inlineMetadata = options.__assignmentMetadata && typeof options.__assignmentMetadata === "object"
+    ? options.__assignmentMetadata
+    : null;
+  const metadata = inlineMetadata ?? await assignmentMetadata(client, assignment);
   if (metadata.kind !== "analysis.reindex.requested") {
     throw new Error(`Assignment ${assignmentId} metadata is not analysis.reindex.requested.`);
   }
@@ -2746,7 +3696,7 @@ async function executeReferenceAccessionAssignmentInternal({ client, assignment,
   if (assignment.status !== "claimed") {
     throw new Error(`Assignment ${assignment.id} must be claimed before execution (current=${assignment.status}).`);
   }
-  const metadata = parseJsonish(assignment.metadata);
+  const metadata = await assignmentMetadata(client, assignment);
   if (metadata.kind !== "reference.corpus-accession.requested") {
     throw new Error(`Assignment ${assignment.id} metadata is not reference.corpus-accession.requested.`);
   }
@@ -2756,7 +3706,10 @@ async function executeReferenceAccessionAssignmentInternal({ client, assignment,
   const manifestPath = path.join(runDir, "execution-manifest.json");
   fs.mkdirSync(runDir, { recursive: true });
 
-  const reference = await client.getRecord("Reference", metadata.referenceId);
+  const referenceRecord = await client.getRecord("Reference", metadata.referenceId);
+  const reference = referenceRecord
+    ? { ...referenceRecord, metadata: await readJsonModelPayload(client, "reference", referenceRecord.id, "metadata", "metadata") ?? {} }
+    : null;
   if (!reference) {
     throw createReferenceAccessionError(`Reference ${metadata.referenceId} was not found.`, {
       runId,
@@ -2929,7 +3882,7 @@ async function executeReferenceTextExtractionAssignmentInternal({ client, assign
   if (assignment.status !== "claimed") {
     throw new Error(`Assignment ${assignment.id} must be claimed before execution (current=${assignment.status}).`);
   }
-  const metadata = parseJsonish(assignment.metadata);
+  const metadata = await assignmentMetadata(client, assignment);
   if (metadata.kind !== "reference.text-extraction.requested") {
     throw new Error(`Assignment ${assignment.id} metadata is not reference.text-extraction.requested.`);
   }
@@ -3057,8 +4010,850 @@ async function executeReferenceTextExtractionAssignmentInternal({ client, assign
   }
 }
 
+async function executeReferenceIdentifierBackfillAssignmentInternal({ client, assignment, options = {} }) {
+  if (!["reference.identifier-backfill", "reference.doi-backfill"].includes(assignment.assignmentTypeKey)) {
+    throw new Error(`Assignment ${assignment.id} is ${assignment.assignmentTypeKey}; expected reference.identifier-backfill.`);
+  }
+  if (assignment.status !== "claimed") {
+    throw new Error(`Assignment ${assignment.id} must be claimed before execution (current=${assignment.status}).`);
+  }
+  const inlineMetadata = options.__assignmentMetadata && typeof options.__assignmentMetadata === "object"
+    ? options.__assignmentMetadata
+    : null;
+  const rawMetadata = inlineMetadata ?? await assignmentMetadata(client, assignment);
+  const metadata = normalizeIdentifierAssignmentMetadata(rawMetadata);
+  if (metadata.kind !== "reference.identifier-backfill.requested") {
+    throw new Error(`Assignment ${assignment.id} metadata is not reference.identifier-backfill.requested.`);
+  }
+  const actorLabel = options.actor || options["assignee-key"] || "papyrus-content-cli";
+  const runId = options["run-id"] || metadata.runId || `reference-identifier-backfill-${hashShort([assignment.id, Date.now()])}`;
+  const runDir = path.join(process.cwd(), ".papyrus-runs", runId);
+  const manifestPath = path.join(runDir, "execution-manifest.json");
+  fs.mkdirSync(runDir, { recursive: true });
+  const resumeManifestPath = normalizeCliString(options.resume);
+  const resumeManifest = resumeManifestPath ? loadJsonFile(resumeManifestPath) : null;
+
+  const steeringConfig = loadSteeringConfig({ configPath: options.config || metadata.steeringConfigPath || undefined });
+  const corpusConfig = requireCorpusConfig(steeringConfig, metadata.corpusKey, "assignment.metadata.corpusKey");
+  const corpusId = knowledgeCorpusId(corpusConfig);
+  const corpusPath = path.resolve(corpusConfig.path);
+  const maxCount = normalizeCliPositiveInteger(options["max-count"], "--max-count")
+    ?? normalizeCliPositiveInteger(metadata.maxCount, "assignment.metadata.maxCount");
+  const useLlm = parseBooleanOption(options["use-llm"], Boolean(metadata.useLlm), "--use-llm");
+  const llmModel = normalizeCliString(options["llm-model"]) ?? normalizeCliString(metadata.llmModel) ?? "gpt-5.4-mini";
+  const llmReasoningEffort = normalizeCliString(options["llm-reasoning-effort"]) ?? normalizeCliString(metadata.llmReasoningEffort) ?? "low";
+  const persistSidecars = parseBooleanOption(
+    options["persist-sidecars"],
+    (metadata.sidecarPersistenceMode ?? "enabled") === "enabled",
+    "--persist-sidecars",
+  );
+  const selectedTypes = normalizeIdentifierTypes(options.types ?? metadata.types, { defaultTypes: ["doi"] });
+  const onlyMissing = parseBooleanOption(options["only-missing"], Boolean(metadata.onlyMissing), "--only-missing");
+  const progressEvery = normalizeCliPositiveInteger(options["progress-every"], "--progress-every")
+    ?? normalizeCliPositiveInteger(metadata.progressEvery, "assignment.metadata.progressEvery")
+    ?? 25;
+  const writeChunkSize = normalizeCliPositiveInteger(options["write-chunk-size"], "--write-chunk-size")
+    ?? normalizeCliPositiveInteger(metadata.writeChunkSize, "assignment.metadata.writeChunkSize")
+    ?? 100;
+  const openaiApiKey = normalizeCliString(options["openai-api-key"]) ?? normalizeCliString(process.env.OPENAI_API_KEY);
+  assertCurrentJwtUsableForLongRun("identifier backfill scan");
+
+  await appendAssignmentPhaseEvent({
+    client,
+    assignment,
+    eventType: "executing",
+    actorLabel,
+    note: `Resolving ${selectedTypes.join(", ")} identifiers for current references in ${metadata.corpusKey}.`,
+      metadata: {
+        kind: "reference.identifier-backfill.executing",
+        runId,
+        manifestPath,
+        corpusId,
+        corpusPath,
+        types: selectedTypes,
+        maxCount: maxCount ?? null,
+        useLlm,
+        persistSidecars,
+        onlyMissing,
+        progressEvery,
+        writeChunkSize,
+      },
+    });
+
+  try {
+    const [references, attachments, semanticNodes, semanticRelations] = await Promise.all([
+      client.listRecords("Reference"),
+      client.listRecords("ReferenceAttachment"),
+      client.listRecords("SemanticNode"),
+      client.listRecords("SemanticRelation"),
+    ]);
+    const dedupedReferences = latestRecordsById(references);
+    const dedupedSemanticNodes = latestRecordsById(semanticNodes);
+    const dedupedSemanticRelations = latestRecordsById(semanticRelations);
+    const catalogIndex = parseCatalogItems(corpusPath);
+    const now = new Date().toISOString();
+    const resolved = Array.isArray(resumeManifest?.resolved) ? resumeManifest.resolved : [];
+    const unresolved = Array.isArray(resumeManifest?.unresolved) ? resumeManifest.unresolved : [];
+    const sidecarOperations = [];
+    const plannedRecords = [];
+    const metadataPatchesByReferenceId = new Map();
+    const referencesInScope = dedupedReferences
+      .filter((reference) => reference.corpusId === corpusId)
+      .filter((reference) => reference.versionState === "current")
+      .sort((left, right) => (
+        String(right.updatedAt ?? right.createdAt ?? "").localeCompare(String(left.updatedAt ?? left.createdAt ?? ""))
+        || String(left.externalItemId ?? left.id).localeCompare(String(right.externalItemId ?? right.id))
+      ));
+    const currentRelationsByTypeAndLineage = currentIdentifierRelationsByTypeAndLineage(dedupedSemanticRelations, Object.keys(IDENTIFIER_TYPE_CONFIG));
+    const filteredReferences = onlyMissing
+      ? referencesInScope.filter((reference) => selectedTypes.some((type) => referenceMissingIdentifierType(reference, type, currentRelationsByTypeAndLineage)))
+      : referencesInScope;
+    const scopedReferences = resumeManifest ? [] : (maxCount ? filteredReferences.slice(0, maxCount) : filteredReferences);
+    const currentIdentifierNodesByKey = new Map(
+      dedupedSemanticNodes
+        .filter((node) => node.versionState === "current")
+        .filter((node) => node.nodeKind === "identifier")
+        .map((node) => [node.nodeKey, node]),
+    );
+    for (let index = 0; index < scopedReferences.length; index += 1) {
+      const reference = scopedReferences[index];
+      if (progressEvery > 0 && (index === 0 || (index + 1) % progressEvery === 0 || index + 1 === scopedReferences.length)) {
+        const byType = identifierSummaryByType(selectedTypes, resolved, unresolved);
+        const typeSummary = selectedTypes.map((type) => `${type}:${byType[type].resolved}/${byType[type].unresolved}`).join(",");
+        console.log(`identifier-backfill\tprogress\t${index + 1}/${scopedReferences.length}\tresolved=${resolved.length}\tunresolved=${unresolved.length}\ttypes=${typeSummary}`);
+      }
+      const resolverErrors = [];
+      let referenceMetadata = parseJsonish(reference.metadata);
+      try {
+        const attachmentMetadata = await readJsonModelPayload(client, "reference", reference.id, "metadata", "metadata");
+        if (attachmentMetadata && typeof attachmentMetadata === "object") {
+          referenceMetadata = attachmentMetadata;
+        }
+      } catch (error) {
+        resolverErrors.push({
+          stage: "reference_metadata_attachment",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      const sourceStoragePath = sourceStoragePathForReference(reference, attachments);
+      const localSource = resolveLocalSourcePathForStoragePath(sourceStoragePath, corpusPath);
+      const localSidecarPath = localSource ? `${localSource}.biblicus.yml` : null;
+      const catalogEntry = reference.externalItemId ? catalogIndex.byItemId.get(reference.externalItemId) ?? null : null;
+      let hasPrimaryIdentifier = referenceHasPrimaryIdentifier(reference, {
+        referenceMetadata,
+        catalogEntry,
+        localSidecarPath,
+        currentRelationsByTypeAndLineage,
+      });
+      for (const type of selectedTypes) {
+        if (type === "publisher_item" && hasPrimaryIdentifier) continue;
+        if (onlyMissing && !referenceMissingIdentifierType(reference, type, currentRelationsByTypeAndLineage)) continue;
+        const resolutionErrors = [...resolverErrors];
+        const resolution = await resolveIdentifierForReference({
+          type,
+          reference,
+          metadata: referenceMetadata,
+          catalogEntry,
+          sidecarValue: sidecarIdentifier(localSidecarPath, type),
+          useLlm,
+          openaiModel: llmModel,
+          openaiReasoningEffort: llmReasoningEffort,
+          openaiApiKey,
+          errors: resolutionErrors,
+        });
+        if (resolution.status !== "resolved" || !resolution.value) {
+          unresolved.push(identifierUnresolvedEntry(reference, type, resolution, resolutionErrors));
+          continue;
+        }
+        if (["doi", "arxiv_id", "isbn13"].includes(type)) hasPrimaryIdentifier = true;
+        resolved.push(identifierResolvedEntry(reference, resolution, {
+          sidecarPath: localSidecarPath,
+          sourceStoragePath,
+        }));
+        appendIdentifierPlanningRecords({
+          reference,
+          referenceMetadata,
+          type,
+          resolution,
+          currentIdentifierNodesByKey,
+          currentRelationsByTypeAndLineage,
+          plannedRecords,
+          metadataPatchesByReferenceId,
+          sidecarOperations,
+          sidecarPath: localSidecarPath,
+          sourceStoragePath,
+          actorLabel,
+          now,
+          runId,
+        });
+      }
+    }
+    for (const entry of resolved) {
+      if (!entry.referenceId || !entry.type || !entry.value) continue;
+      if (scopedReferences.length) continue;
+      const reference = dedupedReferences.find((candidate) => candidate.id === entry.referenceId);
+      if (!reference) continue;
+      appendIdentifierPlanningRecords({
+        reference,
+        referenceMetadata: parseJsonish(reference.metadata),
+        type: entry.type,
+        resolution: {
+          status: "resolved",
+          type: entry.type,
+          value: entry.value,
+          source: entry.source,
+          confidence: entry.confidence,
+          llmUsed: Boolean(entry.llmUsed),
+          candidates: entry.candidates ?? [],
+          rationale: entry.rationale ?? "resumed from manifest",
+        },
+        currentIdentifierNodesByKey,
+        currentRelationsByTypeAndLineage,
+        plannedRecords,
+        metadataPatchesByReferenceId,
+        sidecarOperations,
+        sidecarPath: entry.sidecarPath ?? null,
+        sourceStoragePath: entry.sourceStoragePath ?? null,
+        actorLabel,
+        now,
+        runId,
+      });
+    }
+    for (const patch of metadataPatchesByReferenceId.values()) plannedRecords.push(patch);
+
+    let dedupedPlannedRecords = null;
+    try {
+      dedupedPlannedRecords = dedupePlannedRecords(plannedRecords);
+    } catch (error) {
+      const duplicateRelations = [];
+      const relationGroups = new Map();
+      for (const record of plannedRecords) {
+        if (record.modelName !== "SemanticRelation") continue;
+        const id = normalizeCliString(record.expected?.id);
+        if (!id) continue;
+        const entries = relationGroups.get(id) ?? [];
+        entries.push(record.expected);
+        relationGroups.set(id, entries);
+      }
+      for (const [id, entries] of relationGroups.entries()) {
+        if (entries.length < 2) continue;
+        duplicateRelations.push({ id, entries });
+      }
+      const debugPath = path.join(runDir, "identifier-planned-records-debug.json");
+      writeJsonFile(debugPath, {
+        assignmentId: assignment.id,
+        runId,
+        error: error instanceof Error ? error.message : String(error),
+        duplicates: duplicateRelations,
+      });
+      throw createReferenceAccessionError(
+        `Failed to dedupe identifier planned records: ${error instanceof Error ? error.message : String(error)}. See ${debugPath}.`,
+        {
+          runId,
+          manifestPath,
+          kind: "identifier_planning_conflict",
+        },
+      );
+    }
+    const plannedManifest = {
+      runId,
+      assignmentId: assignment.id,
+      assignmentTypeKey: assignment.assignmentTypeKey,
+      status: "planned",
+      corpusId,
+      corpusKey: metadata.corpusKey,
+      corpusPath,
+      plannedAt: now,
+      types: selectedTypes,
+      useLlm,
+      llmModel,
+      llmReasoningEffort,
+      resolved,
+      unresolved,
+      plannedRecordCount: dedupedPlannedRecords.length,
+      writeChunkSize,
+      chunks: [],
+      catalogPath: catalogIndex.catalogPath,
+    };
+    writeJsonFile(manifestPath, plannedManifest);
+    assertCurrentJwtUsableForLongRun("identifier backfill write phase");
+    const writeResult = await applyIdentifierBackfillRecordChunks({
+      client,
+      records: dedupedPlannedRecords,
+      chunkSize: writeChunkSize,
+      manifestPath,
+      manifest: plannedManifest,
+      actorLabel,
+      assignmentId: assignment.id,
+    });
+
+    const sidecarManifest = persistSidecars
+      ? applyIdentifierSidecarUpdates(sidecarOperations, { runId, actorLabel })
+      : {
+          created: [],
+          updated: [],
+          skipped: sidecarOperations.map((entry) => ({
+            referenceId: entry.reference.id,
+            sidecarPath: entry.sidecarPath,
+            reason: "sidecar_persistence_disabled",
+          })),
+          errors: [],
+        };
+    if (sidecarManifest.errors.length) {
+      throw createReferenceAccessionError(
+        `Identifier sidecar updates failed for ${sidecarManifest.errors.length} reference(s).`,
+        {
+          runId,
+          manifestPath,
+          kind: "identifier_sidecar_write_failed",
+        },
+      );
+    }
+
+    let reindexResult = null;
+    if (persistSidecars && (sidecarManifest.created.length || sidecarManifest.updated.length)) {
+      reindexResult = runBiblicusReindexForDoiBackfill({
+        corpusPath,
+        biblicusWorkdir: resolveBiblicusWorkdir(options),
+        runDir,
+      });
+    }
+
+    const importSummary = {
+      importedRecords: writeResult.importedRecords,
+      importRuns: [],
+    };
+    const summary = {
+      processed: resumeManifest ? Number(resumeManifest.summary?.processed ?? 0) : scopedReferences.length,
+      resolved: resolved.length,
+      unresolved: unresolved.length,
+      semanticNodesCreated: writeResult.semanticNodesCreated,
+      semanticRelationsCreated: writeResult.semanticRelationsCreated,
+      semanticRelationsSuperseded: writeResult.semanticRelationsSuperseded,
+      referenceMetadataPatched: writeResult.referenceMetadataPatched,
+      sidecarsCreated: sidecarManifest.created.length,
+      sidecarsUpdated: sidecarManifest.updated.length,
+      sidecarsSkipped: sidecarManifest.skipped.length,
+      sidecarErrors: sidecarManifest.errors.length,
+      byType: identifierSummaryByType(selectedTypes, resolved, unresolved),
+    };
+    const manifest = {
+      runId,
+      assignmentId: assignment.id,
+      assignmentTypeKey: assignment.assignmentTypeKey,
+      status: "executed",
+      corpusId,
+      corpusKey: metadata.corpusKey,
+      corpusPath,
+      executedAt: now,
+      types: selectedTypes,
+      useLlm,
+      llmModel,
+      llmReasoningEffort,
+      importSummary,
+      summary,
+      resolved,
+      unresolved,
+      sidecars: sidecarManifest,
+      reindex: reindexResult,
+      onlyMissing,
+      progressEvery,
+      writeChunkSize,
+      chunks: writeResult.chunks,
+      catalogPath: catalogIndex.catalogPath,
+    };
+    writeJsonFile(manifestPath, manifest);
+    await appendAssignmentPhaseEvent({
+      client,
+      assignment,
+      eventType: "executed",
+      actorLabel,
+      note: `Resolved ${summary.resolved} identifiers and left ${summary.unresolved} unresolved.`,
+      metadata: {
+        kind: "reference.identifier-backfill.executed",
+        runId,
+        manifestPath,
+        types: selectedTypes,
+        importRuns: importSummary.importRuns,
+        importedRecords: importSummary.importedRecords,
+        resolved: summary.resolved,
+        unresolved: summary.unresolved,
+        sidecarsCreated: summary.sidecarsCreated,
+        sidecarsUpdated: summary.sidecarsUpdated,
+        sidecarErrors: summary.sidecarErrors,
+        stdoutLogPaths: reindexResult?.stdoutLogPath ? [reindexResult.stdoutLogPath] : [],
+        stderrLogPaths: reindexResult?.stderrLogPath ? [reindexResult.stderrLogPath] : [],
+      },
+    });
+    return {
+      assignmentId: assignment.id,
+      runId,
+      runDir,
+      manifestPath,
+      importSummary,
+      summary,
+      commandResults: [reindexResult].filter(Boolean),
+    };
+  } catch (error) {
+    const failure = normalizeError(error);
+    const artifacts = analysisFailureArtifactsFromError(error);
+    const existingManifest = fs.existsSync(manifestPath) ? loadJsonFile(manifestPath) : {};
+    const failureManifest = {
+      ...existingManifest,
+      runId,
+      assignmentId: assignment.id,
+      assignmentTypeKey: assignment.assignmentTypeKey,
+      failedAt: new Date().toISOString(),
+      status: "failed",
+      corpusId,
+      error: failure,
+      stdoutLogPaths: artifacts.stdoutLogPaths,
+      stderrLogPaths: artifacts.stderrLogPaths,
+      nextSuggestedCommand: `npm run content -- references execute-identifier-backfill --assignment ${assignment.id} --resume ${manifestPath}`,
+    };
+    writeJsonFile(manifestPath, failureManifest);
+    attachAnalysisFailureArtifacts(error, {
+      runId,
+      manifestPath,
+      kind: failure.kind ?? "reference_identifier_backfill_failed",
+      stdoutLogPaths: artifacts.stdoutLogPaths,
+      stderrLogPaths: artifacts.stderrLogPaths,
+    });
+    throw error;
+  }
+}
+
+function normalizeIdentifierAssignmentMetadata(metadata) {
+  if (metadata?.kind === "reference.identifier-backfill.requested") return metadata;
+  if (metadata?.kind === "reference.doi-backfill.requested") {
+    return {
+      ...metadata,
+      kind: "reference.identifier-backfill.requested",
+      types: ["doi"],
+      onlyMissing: Boolean(metadata.onlyMissingDoi),
+      writeChunkSize: metadata.writeChunkSize ?? 100,
+    };
+  }
+  return metadata ?? {};
+}
+
+function currentIdentifierRelationsByTypeAndLineage(relations, types) {
+  const result = new Map(types.map((type) => [type, new Map()]));
+  const relationKeys = new Map(types.map((type) => [IDENTIFIER_TYPE_CONFIG[type].relationTypeKey, type]));
+  for (const relation of relations) {
+    if (relation.relationState !== "current") continue;
+    const type = relationKeys.get(relation.relationTypeKey ?? relation.predicate);
+    if (!type) continue;
+    const byLineage = result.get(type);
+    const entries = byLineage.get(relation.subjectLineageId) ?? [];
+    entries.push(relation);
+    byLineage.set(relation.subjectLineageId, entries);
+  }
+  return result;
+}
+
+function referenceMissingIdentifierType(reference, type, currentRelationsByTypeAndLineage) {
+  const byLineage = currentRelationsByTypeAndLineage.get(type);
+  if (byLineage?.has(reference.lineageId)) return false;
+  const identifiers = identifiersFromObject(parseJsonish(reference.metadata));
+  return !identifiers[type];
+}
+
+function referenceHasPrimaryIdentifier(reference, {
+  referenceMetadata,
+  catalogEntry,
+  localSidecarPath,
+  currentRelationsByTypeAndLineage,
+}) {
+  const metadataIdentifiers = identifiersFromObject(referenceMetadata);
+  for (const type of ["doi", "arxiv_id", "isbn13"]) {
+    if (!referenceMissingIdentifierType(reference, type, currentRelationsByTypeAndLineage)) return true;
+    if (metadataIdentifiers[type]) return true;
+    if (catalogEntry?.identifiers?.[type]) return true;
+    if (sidecarIdentifier(localSidecarPath, type)) return true;
+  }
+  return false;
+}
+
+function identifierResolvedEntry(reference, resolution, local = {}) {
+  return {
+    referenceId: reference.id,
+    referenceLineageId: reference.lineageId,
+    externalItemId: reference.externalItemId ?? null,
+    title: reference.title ?? null,
+    type: resolution.type,
+    value: resolution.value,
+    doi: resolution.type === "doi" ? resolution.value : null,
+    source: resolution.source,
+    confidence: resolution.confidence,
+    llmUsed: Boolean(resolution.llmUsed),
+    rationale: resolution.rationale ?? null,
+    version: resolution.version ?? null,
+    sidecarPath: local.sidecarPath ?? null,
+    sourceStoragePath: local.sourceStoragePath ?? null,
+  };
+}
+
+function identifierUnresolvedEntry(reference, type, resolution, errors) {
+  return {
+    referenceId: reference.id,
+    referenceLineageId: reference.lineageId,
+    externalItemId: reference.externalItemId ?? null,
+    title: reference.title ?? null,
+    type,
+    reason: resolution.rationale ?? "unresolved",
+    errors,
+    candidateCount: Array.isArray(resolution.candidates) ? resolution.candidates.length : 0,
+  };
+}
+
+function appendIdentifierPlanningRecords({
+  reference,
+  referenceMetadata,
+  type,
+  resolution,
+  currentIdentifierNodesByKey,
+  currentRelationsByTypeAndLineage,
+  plannedRecords,
+  metadataPatchesByReferenceId,
+  sidecarOperations,
+  sidecarPath,
+  sourceStoragePath,
+  actorLabel,
+  now,
+  runId,
+}) {
+  const normalizedValue = normalizeIdentifier(type, resolution.value);
+  if (!normalizedValue) return;
+  const node = ensureIdentifierNode({ type, value: normalizedValue, currentByNodeKey: currentIdentifierNodesByKey, actorLabel, now });
+  if (node.record) plannedRecords.push(node.record);
+  const relation = referenceIdentifierSemanticRelationRecord({ reference, node: node.node, type, now, runId, resolution: { ...resolution, value: normalizedValue } });
+  plannedRecords.push({ modelName: "SemanticRelation", expected: relation });
+  const staleRelations = currentRelationsByTypeAndLineage.get(type)?.get(reference.lineageId) ?? [];
+  for (const stale of staleRelations) {
+    if (stale.id === relation.id) continue;
+    plannedRecords.push({
+      modelName: "SemanticRelation",
+      expected: {
+        id: stale.id,
+        relationState: "superseded",
+        updatedAt: now,
+        metadata: JSON.stringify({
+          ...parseJsonish(stale.metadata),
+          kind: "reference.identifier-backfill.superseded",
+          identifierType: type,
+          supersededByRelationId: relation.id,
+          runId,
+        }),
+      },
+    });
+  }
+  currentRelationsByTypeAndLineage.get(type)?.set(reference.lineageId, [relation]);
+  metadataPatchesByReferenceId.set(reference.id, identifierReferenceMetadataPatch({
+    existingPatch: metadataPatchesByReferenceId.get(reference.id),
+    reference,
+    referenceMetadata,
+    type,
+    value: normalizedValue,
+    resolution,
+    runId,
+    now,
+  }));
+  sidecarOperations.push({ reference, type, value: normalizedValue, sidecarPath, sourceStoragePath, resolution });
+}
+
+function ensureIdentifierNode({ type, value, currentByNodeKey, actorLabel, now }) {
+  const config = IDENTIFIER_TYPE_CONFIG[type];
+  const nodeKey = `${config.nodePrefix}:${value}`;
+  const existing = currentByNodeKey.get(nodeKey);
+  if (existing) return { node: existing, record: null };
+  const lineageId = `semantic-node-identifier-${config.nodePrefix}-${safeId(value)}`;
+  const id = `${lineageId}-v1`;
+  const next = withVersionFields({
+    id,
+    lineageId,
+    nodeKey,
+    nodeKind: "identifier",
+    corpusId: null,
+    categorySetId: null,
+    categoryLineageId: null,
+    categoryKey: null,
+    displayName: value,
+    description: `${config.label} ${value}`,
+    aliases: [],
+    status: "active",
+    importRunId: null,
+    createdAt: now,
+    updatedAt: now,
+    newsroomFeedKey: "semanticNodes",
+  }, {
+    now,
+    actor: actorLabel ?? "papyrus-content-cli",
+    reason: "reference-identifier-backfill",
+  });
+  currentByNodeKey.set(nodeKey, next);
+  return { node: next, record: { modelName: "SemanticNode", expected: next } };
+}
+
+function referenceIdentifierSemanticRelationRecord({ reference, node, type, now, runId, resolution }) {
+  const predicate = IDENTIFIER_TYPE_CONFIG[type].relationTypeKey;
+  const subjectStateKey = semanticStateKey("reference", reference.lineageId ?? reference.id);
+  const objectStateKey = semanticStateKey("semanticNode", node.lineageId ?? node.id);
+  const subjectVersionKey = semanticVersionKey("reference", reference.id);
+  const objectVersionKey = semanticVersionKey("semanticNode", node.id);
+  return {
+    id: `semantic-relation-${hashShort([subjectStateKey, predicate, objectStateKey])}`,
+    relationState: "current",
+    predicate,
+    ...semanticRelationTypeFieldsForPredicate(predicate),
+    subjectKind: "reference",
+    subjectId: reference.id,
+    subjectLineageId: reference.lineageId ?? reference.id,
+    subjectVersionNumber: reference.versionNumber ?? null,
+    objectKind: "semanticNode",
+    objectId: node.id,
+    objectLineageId: node.lineageId ?? node.id,
+    objectVersionNumber: node.versionNumber ?? null,
+    subjectStateKey,
+    objectStateKey,
+    objectSubjectStateKey: `${objectStateKey}#reference`,
+    predicateObjectStateKey: `${predicate}#${objectStateKey}`,
+    subjectVersionKey,
+    objectVersionKey,
+    score: 1,
+    confidence: resolution.confidence ?? null,
+    rank: 1,
+    classifierId: null,
+    modelVersion: null,
+    reviewRecommended: false,
+    sourceSnapshotId: null,
+    importRunId: null,
+    importedAt: now,
+    createdAt: now,
+    updatedAt: now,
+    newsroomFeedKey: "semanticRelations",
+    metadata: JSON.stringify({
+      kind: "reference.identifier-backfill.linked",
+      runId,
+      identifierType: type,
+      source: resolution.source ?? null,
+      confidence: resolution.confidence ?? null,
+      llmUsed: Boolean(resolution.llmUsed),
+    }),
+  };
+}
+
+function identifierReferenceMetadataPatch({ existingPatch, reference, referenceMetadata, type, value, resolution, runId, now }) {
+  const currentMetadata = existingPatch ? parseJsonish(existingPatch.expected.metadata) : referenceMetadata;
+  const identifiers = {
+    ...(currentMetadata.identifiers && typeof currentMetadata.identifiers === "object" ? currentMetadata.identifiers : {}),
+    [IDENTIFIER_TYPE_CONFIG[type].metadataKey]: value,
+  };
+  const identifierResolution = {
+    ...(currentMetadata.identifier_resolution && typeof currentMetadata.identifier_resolution === "object" ? currentMetadata.identifier_resolution : {}),
+    [type]: pruneUndefined({
+      run_id: runId,
+      resolved_at: now,
+      source: resolution.source,
+      confidence: resolution.confidence,
+      llm_used: Boolean(resolution.llmUsed),
+      llm: resolution.llm ?? null,
+      rationale: resolution.rationale ?? null,
+      candidate_count: Array.isArray(resolution.candidates) ? resolution.candidates.length : 0,
+      top_candidates: Array.isArray(resolution.candidates)
+        ? resolution.candidates.slice(0, 5).map((candidate) => ({
+            value: candidate.value,
+            score: candidate.score,
+            sources: candidate.sources ?? [candidate.source],
+          }))
+        : [],
+      version: resolution.version ?? null,
+    }),
+  };
+  const nextMetadata = {
+    ...currentMetadata,
+    identifiers,
+    identifier_resolution: identifierResolution,
+  };
+  if (type === "doi") {
+    nextMetadata.doi = value;
+    nextMetadata.doi_resolution = identifierResolution[type];
+  }
+  return {
+    modelName: "Reference",
+    expected: {
+      id: reference.id,
+      metadata: JSON.stringify(nextMetadata),
+      updatedAt: now,
+    },
+  };
+}
+
+async function applyIdentifierBackfillRecordChunks({ client, records, chunkSize, manifestPath, manifest, actorLabel, assignmentId }) {
+  const chunks = [];
+  const totals = {
+    importedRecords: 0,
+    semanticNodesCreated: 0,
+    semanticRelationsCreated: 0,
+    semanticRelationsSuperseded: 0,
+    referenceMetadataPatched: 0,
+  };
+  for (let index = 0; index < records.length; index += chunkSize) {
+    const chunkNumber = Math.floor(index / chunkSize) + 1;
+    const chunkRecords = records.slice(index, index + chunkSize);
+    console.log(`identifier-backfill\twrite-chunk\t${chunkNumber}\trecords=${chunkRecords.length}`);
+    const changes = await buildRecordChangesTargetedById(client, chunkRecords);
+    await applyRecordChanges(client, changes);
+    await updateNewsroomSummaryAfterAnalysisImport(client, changes, {
+      actorLabel,
+      reason: `references identifier-backfill ${assignmentId} chunk ${chunkNumber}`,
+    });
+    const chunk = {
+      chunk: chunkNumber,
+      records: chunkRecords.length,
+      importedRecords: changes.filter((change) => change.action !== "noop").length,
+      semanticNodesCreated: changes.filter((change) => change.modelName === "SemanticNode" && change.action === "create").length,
+      semanticRelationsCreated: changes.filter((change) => change.modelName === "SemanticRelation" && change.action === "create").length,
+      semanticRelationsSuperseded: changes.filter((change) => change.modelName === "SemanticRelation" && change.action === "update" && change.expected?.relationState === "superseded").length,
+      referenceMetadataPatched: changes.filter((change) => change.modelName === "Reference" && change.action === "update").length,
+    };
+    chunks.push(chunk);
+    totals.importedRecords += chunk.importedRecords;
+    totals.semanticNodesCreated += chunk.semanticNodesCreated;
+    totals.semanticRelationsCreated += chunk.semanticRelationsCreated;
+    totals.semanticRelationsSuperseded += chunk.semanticRelationsSuperseded;
+    totals.referenceMetadataPatched += chunk.referenceMetadataPatched;
+    writeJsonFile(manifestPath, {
+      ...manifest,
+      status: "writing",
+      chunks,
+      lastChunkCompletedAt: new Date().toISOString(),
+    });
+  }
+  return { ...totals, chunks };
+}
+
+function applyIdentifierSidecarUpdates(operations, { runId, actorLabel }) {
+  const created = [];
+  const updated = [];
+  const skipped = [];
+  const errors = [];
+  const now = new Date().toISOString();
+  for (const operation of operations) {
+    const { reference, type, value, sidecarPath, sourceStoragePath, resolution } = operation;
+    if (!sidecarPath) {
+      skipped.push({ referenceId: reference.id, type, sourceStoragePath, reason: "missing_local_source_path" });
+      continue;
+    }
+    try {
+      const existed = fs.existsSync(sidecarPath);
+      const parsed = existed ? parseYamlSidecar(sidecarPath) : {};
+      const currentValue = normalizeIdentifier(type, parsed.identifiers?.[IDENTIFIER_TYPE_CONFIG[type].metadataKey] ?? parsed[type] ?? parsed.metadata?.[type] ?? "");
+      if (currentValue === value) {
+        skipped.push({ referenceId: reference.id, type, sidecarPath, reason: "identifier_already_present" });
+        continue;
+      }
+      parsed.identifiers = {
+        ...(parsed.identifiers && typeof parsed.identifiers === "object" ? parsed.identifiers : {}),
+        [IDENTIFIER_TYPE_CONFIG[type].metadataKey]: value,
+      };
+      if (type === "doi") parsed.doi = value;
+      parsed.papyrus = {
+        ...(parsed.papyrus && typeof parsed.papyrus === "object" ? parsed.papyrus : {}),
+        identifier_backfill: {
+          ...(parsed.papyrus?.identifier_backfill && typeof parsed.papyrus.identifier_backfill === "object" ? parsed.papyrus.identifier_backfill : {}),
+          [type]: pruneUndefined({
+            run_id: runId,
+            resolved_at: now,
+            source: resolution.source ?? null,
+            confidence: resolution.confidence ?? null,
+            llm_used: Boolean(resolution.llmUsed),
+            updated_by: actorLabel ?? "papyrus-content-cli",
+          }),
+        },
+      };
+      fs.mkdirSync(path.dirname(sidecarPath), { recursive: true });
+      fs.writeFileSync(sidecarPath, YAML.stringify(pruneUndefined(parsed)), "utf8");
+      (existed ? updated : created).push({ referenceId: reference.id, type, sidecarPath, value });
+    } catch (error) {
+      errors.push({ referenceId: reference.id, type, sidecarPath, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return { created, updated, skipped, errors };
+}
+
+function identifierSummaryByType(types, resolved, unresolved) {
+  const summary = {};
+  for (const type of types) {
+    summary[type] = {
+      resolved: resolved.filter((entry) => entry.type === type).length,
+      unresolved: unresolved.filter((entry) => entry.type === type).length,
+    };
+  }
+  return summary;
+}
+
+function resolveLocalSourcePathForStoragePath(sourceStoragePath, corpusPath) {
+  const storagePath = normalizeCliString(sourceStoragePath);
+  if (!storagePath) return null;
+  const normalized = storagePath.replace(/\\/g, "/").replace(/^\/+/, "");
+  const basename = path.basename(path.resolve(corpusPath));
+  const prefixed = `corpora/${basename}/`;
+  if (normalized.startsWith(prefixed)) {
+    return path.join(corpusPath, normalized.slice(prefixed.length));
+  }
+  if (normalized.startsWith(`${basename}/`)) {
+    return path.join(corpusPath, normalized.slice(`${basename}/`.length));
+  }
+  return null;
+}
+
+function parseYamlSidecar(filepath) {
+  try {
+    const parsed = YAML.parse(fs.readFileSync(filepath, "utf8"));
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function runBiblicusReindexForDoiBackfill({ corpusPath, biblicusWorkdir, runDir }) {
+  const stdoutLogPath = path.join(runDir, "biblicus-reindex-doi-backfill.stdout.log");
+  const stderrLogPath = path.join(runDir, "biblicus-reindex-doi-backfill.stderr.log");
+  const result = spawnSync("uv", ["run", "biblicus", "reindex", "--corpus", corpusPath], {
+    cwd: biblicusWorkdir,
+    encoding: "utf8",
+    maxBuffer: 1024 * 1024 * 256,
+  });
+  fs.writeFileSync(stdoutLogPath, result.stdout ?? "", "utf8");
+  fs.writeFileSync(stderrLogPath, result.stderr ?? "", "utf8");
+  if (result.error || result.status !== 0) {
+    throw createReferenceAccessionError(`Biblicus reindex failed after DOI sidecar updates for ${corpusPath}. See ${stderrLogPath}.`, {
+      kind: "biblicus_reindex_failed",
+      commandResult: {
+        label: "biblicus-reindex-doi-backfill",
+        stdoutLogPath,
+        stderrLogPath,
+        exitStatus: result.status,
+        signal: result.signal ?? null,
+      },
+      stdoutLogPaths: [stdoutLogPath],
+      stderrLogPaths: [stderrLogPath],
+    });
+  }
+  return {
+    label: "biblicus-reindex-doi-backfill",
+    stdoutLogPath,
+    stderrLogPath,
+    exitStatus: result.status,
+    signal: result.signal ?? null,
+  };
+}
+
 async function processAssignmentQueue(flags) {
   const options = parseOptions(flags);
+  const startedAt = Date.now();
+  const asJson = Boolean(options.json);
   const { auth, client } = createAuthoringClient();
   const assignmentTypeKey = normalizeCliString(options.type);
   if (!assignmentTypeKey) throw new Error("assignments process-queue requires --type <assignment-type-key>.");
@@ -3075,7 +4870,9 @@ async function processAssignmentQueue(flags) {
     ?? normalizeCliString(auth.claims.sub)
     ?? "papyrus-content-cli";
 
-  const candidates = (await client.listRecords("Assignment"))
+  const queryPlan = assignmentQueueQueryPlan({ assignmentTypeKey, queueKey, sectionKey, status: targetStatus });
+  const fetched = await fetchAssignmentQueueCandidates(client, queryPlan);
+  const candidates = fetched.records
     .filter((assignment) => assignment.assignmentTypeKey === assignmentTypeKey)
     .filter((assignment) => !queueKey || assignment.queueKey === queueKey)
     .filter((assignment) => !sectionKey || assignmentSectionKey(assignment) === sectionKey)
@@ -3083,8 +4880,34 @@ async function processAssignmentQueue(flags) {
     .sort(compareAssignmentQueueOrder);
 
   const selected = candidates.slice(0, maxCount);
+  const diagnostics = {
+    indexName: queryPlan.indexName,
+    key: queryPlan.key,
+    postFilter: queryPlan.postFilter ?? null,
+    fetchedCount: fetched.records.length,
+    candidateCount: candidates.length,
+    selectedCount: selected.length,
+    elapsedMs: null,
+  };
   if (dryRun) {
+    diagnostics.elapsedMs = Date.now() - startedAt;
+    if (asJson) {
+      printCompactJson({
+        ok: true,
+        command: "assignments process-queue",
+        mode: "dry-run",
+        type: assignmentTypeKey,
+        sectionKey,
+        queueKey,
+        status: targetStatus,
+        maxCount,
+        query: diagnostics,
+        assignments: selected.map(compactAssignmentQueueRow),
+      });
+      return;
+    }
     console.log(`assignment-process-queue\tdry-run\ttrue`);
+    console.log(`assignment-process-queue\tindex\t${queryPlan.indexName}\t${queryPlan.key}`);
     console.log(`assignment-process-queue\ttype\t${assignmentTypeKey}`);
     console.log(`assignment-process-queue\tsection\t${sectionKey ?? ""}`);
     console.log(`assignment-process-queue\tstatus\t${targetStatus}`);
@@ -3184,7 +5007,25 @@ async function processAssignmentQueue(flags) {
     }
   }
 
+  diagnostics.elapsedMs = Date.now() - startedAt;
+  if (asJson) {
+    printCompactJson({
+      ok: summary.failed === 0,
+      command: "assignments process-queue",
+      mode: "apply",
+      type: assignmentTypeKey,
+      sectionKey,
+      queueKey,
+      status: targetStatus,
+      maxCount,
+      query: diagnostics,
+      summary,
+      results,
+    });
+    return;
+  }
   console.log(`assignment-process-queue\ttype\t${assignmentTypeKey}`);
+  console.log(`assignment-process-queue\tindex\t${queryPlan.indexName}\t${queryPlan.key}`);
   console.log(`assignment-process-queue\tsection\t${sectionKey ?? ""}`);
   console.log(`assignment-process-queue\tstatus\t${targetStatus}`);
   console.log(`assignment-process-queue\tattempted\t${summary.attempted}`);
@@ -3205,6 +5046,48 @@ async function processAssignmentQueue(flags) {
   }
 }
 
+function assignmentQueueQueryPlan({ assignmentTypeKey, queueKey, sectionKey, status }) {
+  if (queueKey) {
+    return {
+      indexName: "listAssignmentsByQueueStatusAndPriority",
+      key: `${queueKey}#${status}`,
+      execute: (client) => client.listAssignmentsByQueueStatusAndPriority(`${queueKey}#${status}`),
+    };
+  }
+  if (sectionKey) {
+    return {
+      indexName: "listAssignmentsByTypeStatusAndCreatedAt",
+      key: assignmentTypeKey,
+      execute: (client) => client.listAssignmentsByTypeStatusAndCreatedAt(assignmentTypeKey),
+      postFilter: "status,sectionKey",
+    };
+  }
+  return {
+    indexName: "listAssignmentsByTypeStatusAndCreatedAt",
+    key: assignmentTypeKey,
+    execute: (client) => client.listAssignmentsByTypeStatusAndCreatedAt(assignmentTypeKey),
+    postFilter: "status",
+  };
+}
+
+async function fetchAssignmentQueueCandidates(client, queryPlan) {
+  const records = await queryPlan.execute(client);
+  return { records };
+}
+
+function compactAssignmentQueueRow(assignment) {
+  return {
+    id: assignment.id,
+    status: assignment.status,
+    type: assignment.assignmentTypeKey,
+    queueKey: assignment.queueKey,
+    sectionKey: assignmentSectionKey(assignment),
+    priority: assignment.priority ?? null,
+    createdAt: assignment.createdAt ?? null,
+    title: assignment.title ?? null,
+  };
+}
+
 async function recountNewsroomSummary(flags) {
   const options = parseOptions(flags);
   const { client } = createAuthoringClient();
@@ -3220,6 +5103,7 @@ async function recountNewsroomSummary(flags) {
     referenceAttachments,
     semanticNodes,
     messages,
+    modelAttachments,
     semanticRelations,
     assignments,
     assignmentEvents,
@@ -3234,10 +5118,26 @@ async function recountNewsroomSummary(flags) {
     client.listRecords("ReferenceAttachment"),
     client.listRecords("SemanticNode"),
     client.listRecords("Message"),
+    client.listRecords("ModelAttachment"),
     client.listRecords("SemanticRelation"),
     client.listRecords("Assignment"),
     client.listRecords("AssignmentEvent"),
   ]);
+  const summaryAttachmentId = modelAttachmentId("knowledgeRawPayload", NEWSROOM_SUMMARY_PAYLOAD_ID, "raw_payload", "summary-snapshot");
+  const modelAttachmentsForRecount = modelAttachments.some((attachment) => attachment.id === summaryAttachmentId)
+    ? modelAttachments
+    : [
+        ...modelAttachments,
+        {
+          id: summaryAttachmentId,
+          ownerKind: "knowledgeRawPayload",
+          ownerId: NEWSROOM_SUMMARY_PAYLOAD_ID,
+          role: "raw_payload",
+          sortKey: "summary-snapshot",
+          mediaType: "application/json",
+          status: "active",
+        },
+      ];
   const payload = buildNewsroomSummaryPayload({
     corpora,
     importRuns,
@@ -3249,6 +5149,7 @@ async function recountNewsroomSummary(flags) {
     referenceAttachments,
     semanticNodes,
     messages,
+    modelAttachments: modelAttachmentsForRecount,
     semanticRelations,
     assignments,
     assignmentEvents,
@@ -3256,17 +5157,53 @@ async function recountNewsroomSummary(flags) {
     source: "recount",
   });
   const expected = buildNewsroomSummaryPayloadRecord(payload, now);
+  const summaryAttachment = buildJsonModelPayloadAttachment({
+    ownerKind: "knowledgeRawPayload",
+    ownerId: expected.id,
+    role: "raw_payload",
+    sortKey: "summary-snapshot",
+    filename: "summary-snapshot.json",
+    content: payload,
+    importRunId: expected.importRunId,
+    now,
+  });
   const current = await client.getRecord("KnowledgeRawPayload", NEWSROOM_SUMMARY_PAYLOAD_ID);
+  const currentPayload = await readJsonModelPayload(client, "knowledgeRawPayload", NEWSROOM_SUMMARY_PAYLOAD_ID, "raw_payload", "summary-snapshot");
   if (current?.createdAt) expected.createdAt = current.createdAt;
   const change = buildRecordChangeFromCurrent("KnowledgeRawPayload", expected, current);
-  printNewsroomSummaryRecount(current, expected, change);
-  if (options.output) writeJsonFile(options.output, { current, expected, action: change.action, payload });
+  const summaryDiff = newsroomSummaryDiff(currentPayload, payload);
+  if (!options.json) printNewsroomSummaryRecount(currentPayload, payload, change);
+  if (options.output) writeJsonFile(options.output, { current, currentPayload, expected, attachment: summaryAttachment.attachment, action: change.action, payload });
   if (!options.apply) {
-    console.log("newsroom\trecount-summary\tapply\tskipped\tpass --apply to write KnowledgeRawPayload snapshot");
+    if (options.json) {
+      printCompactJson({
+        ok: true,
+        command: "newsroom recount-summary",
+        action: "dry-run",
+        countsChanged: summaryDiff.countsChanged,
+        facetSectionsChanged: summaryDiff.facetSectionsChanged,
+        attachmentUpdated: false,
+      });
+    } else {
+      console.log("newsroom\trecount-summary\tapply\tskipped\tpass --apply to write KnowledgeRawPayload snapshot");
+    }
     return;
   }
   await client.upsert("KnowledgeRawPayload", expected);
-  console.log(`newsroom\trecount-summary\t${change.action}\t${expected.id}`);
+  await uploadAttachmentBody(summaryAttachment.attachment, summaryAttachment.body, { client });
+  await client.upsert("ModelAttachment", summaryAttachment.attachment);
+  if (options.json) {
+    printCompactJson({
+      ok: true,
+      command: "newsroom recount-summary",
+      action: change.action,
+      countsChanged: summaryDiff.countsChanged,
+      facetSectionsChanged: summaryDiff.facetSectionsChanged,
+      attachmentUpdated: true,
+    });
+  } else {
+    console.log(`newsroom\trecount-summary\t${change.action}\t${expected.id}`);
+  }
 }
 
 async function backfillNewsroomFeedFields(flags) {
@@ -3339,9 +5276,9 @@ function newsroomFeedPatchFor(modelName, record) {
   return {};
 }
 
-function printNewsroomSummaryRecount(current, expected, change) {
-  const currentPayload = normalizeNewsroomSummaryPayload(current?.payload);
-  const expectedPayload = normalizeNewsroomSummaryPayload(expected.payload);
+function printNewsroomSummaryRecount(currentPayloadValue, expectedPayloadValue, change) {
+  const currentPayload = normalizeNewsroomSummaryPayload(currentPayloadValue);
+  const expectedPayload = normalizeNewsroomSummaryPayload(expectedPayloadValue);
   console.log("Newsroom summary recount:");
   console.log(`Snapshot: ${NEWSROOM_SUMMARY_PAYLOAD_ID}`);
   console.log(`Action: ${change.action}`);
@@ -3359,6 +5296,331 @@ function printNewsroomSummaryRecount(current, expected, change) {
     const currentValue = currentPayload.assignmentStatusCounts[key] ?? 0;
     if (currentValue !== value) console.log(`assignment-status\t${key}\t${currentValue}\t->\t${value}`);
   }
+}
+
+function selectedCorpusConfigs(steeringConfig, corpusKey) {
+  if (corpusKey) return [requireCorpusConfig(steeringConfig, corpusKey, "--corpus-key")];
+  return steeringConfig.corpora ?? [];
+}
+
+async function loadCorpusGraphState(client) {
+  const [
+    corpora,
+    references,
+    referenceAttachments,
+    importRuns,
+  ] = await Promise.all([
+    client.listRecords("KnowledgeCorpus"),
+    client.listRecords("Reference"),
+    client.listRecords("ReferenceAttachment"),
+    client.listRecords("KnowledgeImportRun"),
+  ]);
+  return { corpora, references, referenceAttachments, importRuns };
+}
+
+function buildCorpusStatus(corpus, { graphState, endpoint, force = false }) {
+  const corpusId = knowledgeCorpusId(corpus);
+  const s3Prefix = parseS3Uri(corpus.s3Prefix);
+  const localCatalog = readLocalCorpusCatalogSummary(corpus);
+  const s3Catalog = readS3CorpusCatalogSummary(corpus);
+  const graph = graphCorpusSummary(corpus, corpusId, graphState);
+  const expectedBucket = storageBucketFromAmplifyOutputsLocal();
+  const target = {
+    endpoint,
+    expectedBucket,
+    configuredBucket: s3Prefix?.bucket ?? null,
+    ok: Boolean(force || !expectedBucket || !s3Prefix?.bucket || expectedBucket === s3Prefix.bucket),
+  };
+  const issues = [];
+  if (!target.ok) issues.push("wrong_bucket_for_endpoint");
+  if (!localCatalog.exists) issues.push("missing_local_catalog");
+  if (!s3Catalog.exists) issues.push("missing_s3_catalog");
+  if (localCatalog.exists && s3Catalog.exists && localCatalog.sha256 !== s3Catalog.sha256) issues.push("local_not_synced_to_s3");
+  if (s3Catalog.exists && graph.references.total !== s3Catalog.items) issues.push("s3_not_registered_in_graphql");
+  if (graph.references.accepted === 0) issues.push("accepted_manifest_not_ready");
+  if (graph.references.accepted > 0 && graph.acceptedWithExtractedText < graph.references.accepted) issues.push("missing_extracted_text");
+  return {
+    key: corpus.key,
+    corpusId,
+    role: corpus.role,
+    localPath: corpus.path ?? null,
+    s3Prefix: corpus.s3Prefix ?? null,
+    target,
+    local: localCatalog,
+    s3: s3Catalog,
+    graph,
+    issues,
+    readiness: {
+      readyForWorker: issues.length === 0,
+      readyForGraphqlRegistration: target.ok && localCatalog.exists && s3Catalog.exists && localCatalog.sha256 === s3Catalog.sha256,
+      readyForAcceptedAnalysis: graph.references.accepted > 0 && graph.acceptedWithExtractedText === graph.references.accepted,
+    },
+  };
+}
+
+function graphCorpusSummary(corpus, corpusId, graphState) {
+  const corpusRecord = graphState.corpora.find((entry) => entry.id === corpusId) ?? null;
+  const references = graphState.references.filter((reference) => reference.corpusId === corpusId);
+  const importRuns = graphState.importRuns.filter((run) => run.corpusId === corpusId);
+  const currentReferences = references.filter((reference) => reference.versionState === "current");
+  const referenceIds = new Set(currentReferences.map((reference) => reference.id));
+  const referenceLineageIds = new Set(currentReferences.map((reference) => reference.lineageId).filter(Boolean));
+  const attachments = graphState.referenceAttachments.filter((attachment) => (
+    referenceIds.has(attachment.referenceId)
+    || referenceLineageIds.has(attachment.referenceLineageId)
+  ));
+  const accepted = currentReferences.filter(isCurrentAcceptedReference);
+  const acceptedWithExtractedText = accepted.filter((reference) => textStoragePathForReference(reference, attachments)).length;
+  const byStatus = {};
+  for (const reference of currentReferences) {
+    const status = normalizeReferenceCurationStatus(reference.curationStatus, "pending");
+    byStatus[status] = (byStatus[status] ?? 0) + 1;
+  }
+  return {
+    corpusExists: Boolean(corpusRecord),
+    itemCount: corpusRecord?.itemCount ?? null,
+    importRuns: importRuns.length,
+    latestImportRunId: [...importRuns].sort((left, right) => String(right.importedAt ?? "").localeCompare(String(left.importedAt ?? "")))[0]?.id ?? null,
+    references: {
+      total: currentReferences.length,
+      byStatus,
+      accepted: accepted.length,
+    },
+    referenceAttachments: attachments.length,
+    acceptedWithExtractedText,
+  };
+}
+
+function readLocalCorpusCatalogSummary(corpus) {
+  const catalogPath = path.join(corpus.path ?? `corpora/${corpus.key}`, "metadata", "catalog.json");
+  if (!fs.existsSync(catalogPath)) {
+    return { exists: false, path: catalogPath, items: 0, bytes: 0, sha256: null, updatedAt: null };
+  }
+  const body = fs.readFileSync(catalogPath);
+  const parsed = JSON.parse(body.toString("utf8"));
+  return {
+    exists: true,
+    path: catalogPath,
+    items: catalogItemsForSummary(parsed).length,
+    bytes: body.length,
+    sha256: crypto.createHash("sha256").update(body).digest("hex"),
+    updatedAt: fs.statSync(catalogPath).mtime.toISOString(),
+  };
+}
+
+function readS3CorpusCatalogSummary(corpus) {
+  const parsedPrefix = parseS3Uri(corpus.s3Prefix);
+  if (!parsedPrefix) return { exists: false, uri: null, items: 0, bytes: 0, sha256: null, updatedAt: null };
+  const key = `${parsedPrefix.key.replace(/\/+$/g, "")}/metadata/catalog.json`.replace(/^\/+/, "");
+  const uri = `s3://${parsedPrefix.bucket}/${key}`;
+  const result = spawnSync("aws", ["s3", "cp", uri, "-"], {
+    encoding: "buffer",
+    stdio: ["ignore", "pipe", "pipe"],
+    maxBuffer: 256 * 1024 * 1024,
+  });
+  if (result.status !== 0) {
+    return { exists: false, uri, items: 0, bytes: 0, sha256: null, updatedAt: null, error: String(result.stderr || result.stdout || "").trim() || "s3_catalog_unavailable" };
+  }
+  const body = result.stdout;
+  const parsed = JSON.parse(body.toString("utf8"));
+  return {
+    exists: true,
+    uri,
+    items: catalogItemsForSummary(parsed).length,
+    bytes: body.length,
+    sha256: crypto.createHash("sha256").update(body).digest("hex"),
+    updatedAt: s3ObjectLastModified(parsedPrefix.bucket, key),
+  };
+}
+
+function s3ObjectLastModified(bucket, key) {
+  const result = spawnSync("aws", ["s3api", "head-object", "--bucket", bucket, "--key", key, "--query", "LastModified", "--output", "text"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (result.status !== 0) return null;
+  return result.stdout.trim() || null;
+}
+
+function buildCorpusSyncPlan(corpus, { direction, options }) {
+  const parsedPrefix = parseS3Uri(corpus.s3Prefix);
+  if (!parsedPrefix) throw new Error(`Corpus ${corpus.key} does not define a valid s3Prefix.`);
+  const localPath = corpus.path ?? `corpora/${corpus.key}`;
+  const s3Uri = normalizedS3Uri(corpus.s3Prefix);
+  const expectedBucket = storageBucketFromAmplifyOutputsLocal();
+  if (!options.force && expectedBucket && parsedPrefix.bucket !== expectedBucket) {
+    throw new Error(`Refusing ${direction}: corpus ${corpus.key} points at bucket ${parsedPrefix.bucket}, but amplify_outputs.json expects ${expectedBucket}. Generate a sandbox steering config or pass --force.`);
+  }
+  const args = ["s3", "sync"];
+  if (direction === "from-cloud") {
+    args.push(s3Uri, localPath);
+  } else {
+    args.push(localPath, s3Uri);
+  }
+  args.push("--exclude", ".DS_Store", "--exclude", "*/.DS_Store");
+  if (!options["include-analysis"]) args.push("--exclude", "analysis/*", "--exclude", "*/analysis/*");
+  if (options.delete) args.push("--delete");
+  if (options["dry-run"] !== false && options.apply !== true) args.push("--dryrun");
+  return {
+    command: `corpora ${direction === "from-cloud" ? "sync-from-cloud" : "sync-to-cloud"}`,
+    corpusKey: corpus.key,
+    localPath,
+    s3Uri,
+    expectedBucket,
+    configuredBucket: parsedPrefix.bucket,
+    mode: args.includes("--dryrun") ? "dry-run" : "apply",
+    args,
+  };
+}
+
+function runOrPrintCorpusSyncPlan(plan, options) {
+  if (options.json) {
+    if (plan.mode === "apply") {
+      const result = spawnSync("aws", plan.args, {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        maxBuffer: 1024 * 1024 * 256,
+      });
+      printCompactJson({
+        ok: result.status === 0,
+        command: plan.command,
+        corpusKey: plan.corpusKey,
+        mode: plan.mode,
+        localPath: plan.localPath,
+        s3Uri: plan.s3Uri,
+        status: result.status,
+        stdoutLines: lineCount(result.stdout),
+        stderrLines: lineCount(result.stderr),
+      });
+      if (result.status !== 0) process.exitCode = result.status ?? 1;
+      return;
+    }
+    printCompactJson({
+      ok: true,
+      command: plan.command,
+      corpusKey: plan.corpusKey,
+      mode: plan.mode,
+      localPath: plan.localPath,
+      s3Uri: plan.s3Uri,
+      args: ["aws", ...plan.args],
+    });
+    return;
+  }
+  console.log(`corpora\t${plan.command.split(" ")[1]}\tcorpus\t${plan.corpusKey}`);
+  console.log(`corpora\t${plan.command.split(" ")[1]}\tmode\t${plan.mode}`);
+  console.log(`corpora\t${plan.command.split(" ")[1]}\tlocal\t${plan.localPath}`);
+  console.log(`corpora\t${plan.command.split(" ")[1]}\ts3\t${plan.s3Uri}`);
+  console.log(`corpora\t${plan.command.split(" ")[1]}\tcommand\taws ${plan.args.map(shellQuote).join(" ")}`);
+  const result = spawnSync("aws", plan.args, {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    maxBuffer: 1024 * 1024 * 256,
+  });
+  if (result.stdout) process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
+  if (result.status !== 0) throw new Error(`aws ${plan.args.join(" ")} failed with status ${result.status}.`);
+}
+
+function lineCount(value) {
+  const text = String(value ?? "").trim();
+  return text ? text.split(/\r?\n/).length : 0;
+}
+
+function printCorpusStatus(payload) {
+  console.log(`corpora\tstatus\tendpoint\t${payload.endpoint}`);
+  console.log(`corpora\tstatus\texpected-bucket\t${payload.expectedBucket ?? "-"}`);
+  for (const status of payload.corpora) {
+    console.log(`corpus\t${status.key}\t${status.corpusId}\trole=${status.role}\tready=${status.readiness.readyForWorker ? "yes" : "no"}`);
+    console.log(`corpus\t${status.key}\tlocal\titems=${status.local.items}\tsha256=${status.local.sha256 ?? "-"}\tpath=${status.local.path}`);
+    console.log(`corpus\t${status.key}\ts3\titems=${status.s3.items}\tsha256=${status.s3.sha256 ?? "-"}\turi=${status.s3.uri ?? "-"}`);
+    console.log(`corpus\t${status.key}\tgraphql\treferences=${status.graph.references.total}\taccepted=${status.graph.references.accepted}\tattachments=${status.graph.referenceAttachments}\timports=${status.graph.importRuns}`);
+    if (status.issues.length) console.log(`corpus\t${status.key}\tissues\t${status.issues.join(",")}`);
+  }
+}
+
+function printCorpusWorkerBootstrap(payload) {
+  console.log(`corpora\tworker-bootstrap\tendpoint\t${payload.endpoint}`);
+  console.log(`corpora\tworker-bootstrap\texpected-bucket\t${payload.expectedBucket ?? "-"}`);
+  for (const status of payload.corpora) {
+    console.log(`corpus\t${status.key}\ttarget\t${status.target.ok ? "ok" : "mismatch"}\tconfigured=${status.target.configuredBucket ?? "-"}\texpected=${status.target.expectedBucket ?? "-"}`);
+    console.log(`corpus\t${status.key}\tlocal\t${status.local.exists ? "present" : "missing"}\t${status.local.path}`);
+    console.log(`corpus\t${status.key}\ts3\t${status.s3.exists ? "present" : "missing"}\t${status.s3.uri ?? "-"}`);
+    console.log(`corpus\t${status.key}\tgraphql\treferences=${status.graph.references.total}\taccepted=${status.graph.references.accepted}`);
+    if (status.issues.length) console.log(`corpus\t${status.key}\tissues\t${status.issues.join(",")}`);
+    console.log(`corpus\t${status.key}\tnext\t${status.next}`);
+  }
+}
+
+function nextCorpusBootstrapCommand(status) {
+  if (!status.target.ok) return "generate a sandbox steering config or pass the correct --config for this endpoint";
+  if (!status.local.exists || status.local.sha256 !== status.s3.sha256) {
+    return `npm run content -- corpora sync-from-cloud --config <steering.yml> --corpus-key ${status.key} --dry-run`;
+  }
+  if (status.graph.references.total !== status.s3.items) {
+    return `npm run content -- references prepare-catalog --config <steering.yml> --corpus-key ${status.key} --catalog ${status.local.path} --output .papyrus-runs/<run>/${status.key}-prepared-catalog.json`;
+  }
+  if (!status.readiness.readyForAcceptedAnalysis) {
+    return `npm run content -- references source-status --config <steering.yml> --corpus-key ${status.key} --status accepted`;
+  }
+  return `npm run content -- analysis create-reindex-assignment --config <steering.yml> --corpus-key ${status.key} --profile <profile> --apply`;
+}
+
+function parseS3Uri(value) {
+  const raw = normalizeCliString(value);
+  if (!raw?.startsWith("s3://")) return null;
+  const withoutScheme = raw.slice("s3://".length);
+  const slash = withoutScheme.indexOf("/");
+  const bucket = slash >= 0 ? withoutScheme.slice(0, slash) : withoutScheme;
+  const key = slash >= 0 ? withoutScheme.slice(slash + 1) : "";
+  if (!bucket) return null;
+  return { bucket, key };
+}
+
+function normalizedS3Uri(value) {
+  const parsed = parseS3Uri(value);
+  if (!parsed) throw new Error(`Invalid S3 URI: ${value}`);
+  return `s3://${parsed.bucket}/${parsed.key.replace(/\/+$/g, "")}/`;
+}
+
+function storageBucketFromAmplifyOutputsLocal(filepath = "amplify_outputs.json") {
+  const fullPath = path.resolve(filepath);
+  if (!fs.existsSync(fullPath)) return null;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(fullPath, "utf8"));
+    return parsed.storage?.bucket_name ?? parsed.storage?.bucketName ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function shellQuote(value) {
+  const raw = String(value);
+  if (/^[A-Za-z0-9_./:=@%+-]+$/.test(raw)) return raw;
+  return `'${raw.replace(/'/g, "'\\''")}'`;
+}
+
+function newsroomSummaryDiff(currentPayloadValue, expectedPayloadValue) {
+  const currentPayload = normalizeNewsroomSummaryPayload(currentPayloadValue);
+  const expectedPayload = normalizeNewsroomSummaryPayload(expectedPayloadValue);
+  const countKeys = new Set([
+    ...Object.keys(currentPayload.counts ?? {}),
+    ...Object.keys(expectedPayload.counts ?? {}),
+  ]);
+  let countsChanged = 0;
+  for (const key of countKeys) {
+    if ((currentPayload.counts?.[key] ?? 0) !== (expectedPayload.counts?.[key] ?? 0)) countsChanged += 1;
+  }
+  const facetKeys = new Set([
+    ...Object.keys(currentPayload.facets ?? {}),
+    ...Object.keys(expectedPayload.facets ?? {}),
+  ]);
+  let facetSectionsChanged = 0;
+  for (const key of facetKeys) {
+    if (stableJson(currentPayload.facets?.[key] ?? {}) !== stableJson(expectedPayload.facets?.[key] ?? {})) {
+      facetSectionsChanged += 1;
+    }
+  }
+  return { countsChanged, facetSectionsChanged };
 }
 
 function buildAnalysisReindexPlanFromOptions(options, flags) {
@@ -3903,6 +6165,272 @@ async function importAnalysisAssignmentOutputs({
   };
 }
 
+async function listGraphArtifacts(flags) {
+  const options = parseOptions(flags);
+  const startedAt = Date.now();
+  const asJson = Boolean(options.json);
+  const { client } = createAuthoringClient();
+  const corpusId = graphArtifactCorpusIdFromOptions(options);
+  const { rows: unsortedRows, diagnostics } = await fetchGraphArtifactRowsIndexed(client, { corpusId });
+  const rows = unsortedRows
+    .sort((left, right) => String(right.importedAt ?? "").localeCompare(String(left.importedAt ?? "")) || String(left.importRunId).localeCompare(String(right.importRunId)));
+  diagnostics.elapsedMs = Date.now() - startedAt;
+
+  if (asJson) {
+    console.log(JSON.stringify({
+      ok: true,
+      command: "analysis graph-artifacts",
+      corpusId,
+      query: diagnostics,
+      count: rows.length,
+      artifacts: rows.map(compactGraphArtifactRow),
+    }));
+    return;
+  }
+
+  console.log(`graph-artifacts\tcount\t${rows.length}`);
+  for (const row of rows) {
+    console.log([
+      "graph-artifact",
+      row.importRunId,
+      row.corpusId,
+      row.artifactId ?? row.sourceSnapshotId ?? "-",
+      row.importedAt ?? "-",
+      row.attachment?.storagePath ?? "-",
+      row.attachment?.byteSize ?? "-",
+    ].join("\t"));
+  }
+}
+
+async function fetchGraphArtifactRowsIndexed(client, { corpusId = null } = {}) {
+  const importRunKey = corpusId ? `${corpusId}#graph-export` : "graph-export";
+  const importRuns = corpusId
+    ? await client.listKnowledgeImportRunsByCorpusKindAndImportedAt(importRunKey)
+    : await client.listKnowledgeImportRunsByKindAndImportedAt("graph-export");
+  const artifactLists = await Promise.all(importRuns.map((run) => client.listKnowledgeArtifactsByImportRunAndKind(run.id)));
+  const rows = [];
+  let artifactCount = 0;
+  let payloadFetched = 0;
+  let attachmentFetched = 0;
+  for (let index = 0; index < importRuns.length; index += 1) {
+    const run = importRuns[index];
+    const artifacts = (artifactLists[index] ?? []).filter((artifact) => artifact.artifactKind === "graph-export" || artifact.artifactKind === "graph-snapshot");
+    artifactCount += artifacts.length;
+    const artifact = artifacts[0] ?? null;
+    const rawPayloadId = graphExportSummaryPayloadId(run.id);
+    const [rawPayload, rawPayloadAttachment, graphExportAttachment] = await Promise.all([
+      client.getRecord("KnowledgeRawPayload", rawPayloadId),
+      client.getRecord("ModelAttachment", modelAttachmentId("knowledgeRawPayload", rawPayloadId, "raw_payload", "graph-export-summary")),
+      client.getRecord("ModelAttachment", modelAttachmentId("knowledgeRawPayload", rawPayloadId, "graph_export", "graph-export")),
+    ]);
+    payloadFetched += rawPayload ? 1 : 0;
+    attachmentFetched += (rawPayloadAttachment ? 1 : 0) + (graphExportAttachment ? 1 : 0);
+    rows.push({
+      importRunId: run.id,
+      corpusId: run.corpusId,
+      classifierId: run.classifierId ?? null,
+      sourceSnapshotId: run.sourceSnapshotId ?? null,
+      importedAt: run.importedAt ?? null,
+      status: run.status ?? null,
+      artifact,
+      artifactId: artifact?.artifactId ?? null,
+      rawPayload,
+      rawPayloadAttachment,
+      attachment: graphExportAttachment,
+    });
+  }
+  return {
+    rows,
+    diagnostics: {
+      importRunIndex: corpusId ? "listKnowledgeImportRunsByCorpusKindAndImportedAt" : "listKnowledgeImportRunsByKindAndImportedAt",
+      importRunKey,
+      artifactIndex: "listKnowledgeArtifactsByImportRunAndKind",
+      importRunsFetched: importRuns.length,
+      artifactsFetched: artifactCount,
+      payloadsFetched: payloadFetched,
+      attachmentsFetched: attachmentFetched,
+      elapsedMs: null,
+    },
+  };
+}
+
+function graphArtifactCorpusIdFromOptions(options) {
+  if (!options["corpus-key"]) return null;
+  const steeringConfig = loadSteeringConfig({ configPath: options.config });
+  const corpusConfig = requireCorpusConfig(steeringConfig, options["corpus-key"], "--corpus-key");
+  return knowledgeCorpusId(corpusConfig);
+}
+
+function graphArtifactRows({ importRuns, artifacts, payloads, attachments }) {
+  const artifactByImportRun = new Map((artifacts ?? [])
+    .filter((artifact) => artifact.artifactKind === "graph-export" || artifact.artifactKind === "graph-snapshot")
+    .map((artifact) => [artifact.importRunId, artifact]));
+  const payloadById = new Map((payloads ?? []).map((payload) => [payload.id, payload]));
+  const attachmentByOwnerRole = new Map((attachments ?? []).map((attachment) => [
+    `${attachment.ownerKind}\n${attachment.ownerId}\n${attachment.role}\n${attachment.sortKey}`,
+    attachment,
+  ]));
+  return (importRuns ?? [])
+    .filter((run) => run.importKind === "graph-export" || artifactByImportRun.has(run.id))
+    .map((run) => {
+      const rawPayloadId = graphExportSummaryPayloadId(run.id);
+      const graphExportAttachment = attachmentByOwnerRole.get(`knowledgeRawPayload\n${rawPayloadId}\ngraph_export\ngraph-export`) ?? null;
+      const rawPayloadAttachment = attachmentByOwnerRole.get(`knowledgeRawPayload\n${rawPayloadId}\nraw_payload\ngraph-export-summary`) ?? null;
+      return {
+        importRunId: run.id,
+        corpusId: run.corpusId,
+        classifierId: run.classifierId ?? null,
+        sourceSnapshotId: run.sourceSnapshotId ?? null,
+        importedAt: run.importedAt ?? null,
+        status: run.status ?? null,
+        artifact: artifactByImportRun.get(run.id) ?? null,
+        artifactId: artifactByImportRun.get(run.id)?.artifactId ?? null,
+        rawPayload: payloadById.get(rawPayloadId) ?? null,
+        rawPayloadAttachment,
+        attachment: graphExportAttachment,
+      };
+    });
+}
+
+function compactGraphArtifactRow(row) {
+  return {
+    importRunId: row.importRunId,
+    corpusId: row.corpusId,
+    classifierId: row.classifierId,
+    artifactId: row.artifactId,
+    sourceSnapshotId: row.sourceSnapshotId,
+    importedAt: row.importedAt,
+    status: row.status,
+    attachmentId: row.attachment?.id ?? null,
+    storagePath: row.attachment?.storagePath ?? null,
+    mediaType: row.attachment?.mediaType ?? null,
+    byteSize: row.attachment?.byteSize ?? null,
+    sha256: row.attachment?.sha256 ?? null,
+  };
+}
+
+async function importGraphArtifact(flags) {
+  const options = parseOptions(flags);
+  const importRunId = normalizeCliString(options["import-run"]);
+  if (!importRunId) throw new Error("analysis import-graph-artifact requires --import-run <id>.");
+  const apply = Boolean(options.apply);
+  const asJson = Boolean(options.json);
+  const { client } = createAuthoringClient();
+  const importRun = await client.getRecord("KnowledgeImportRun", importRunId);
+  if (!importRun) throw new Error(`KnowledgeImportRun ${importRunId} was not found.`);
+  if (importRun.importKind !== "graph-export") throw new Error(`KnowledgeImportRun ${importRunId} is ${importRun.importKind}; expected graph-export.`);
+
+  const rawPayloadId = graphExportSummaryPayloadId(importRunId);
+  const attachment = await client.getRecord("ModelAttachment", modelAttachmentId("knowledgeRawPayload", rawPayloadId, "graph_export", "graph-export"));
+  if (!attachment) throw new Error(`Graph export attachment was not found for import run ${importRunId}.`);
+  const graphExportArtifact = await loadGraphExportPayloadFromAttachment(attachment, client);
+  const payload = graphExportArtifact.payload;
+  const importedAt = importRun.importedAt ?? importRun.generatedAt ?? new Date().toISOString();
+  const referenceByExternalItemId = await hydrateGraphReferenceMap(client, importRun.corpusId);
+  const plan = buildGraphExportImportRecords(payload, {
+    corpusId: importRun.corpusId,
+    classifierId: importRun.classifierId,
+    importedAt,
+    referenceByExternalItemId,
+  });
+  if (plan.importRunId !== importRun.id) {
+    throw new Error(`Graph export artifact resolves to import run ${plan.importRunId}, not requested import run ${importRun.id}.`);
+  }
+  setGraphExportSummaryPayload(plan, {
+    attachmentId: attachment.id,
+    storagePath: attachment.storagePath,
+    filename: attachment.filename,
+    mediaType: attachment.mediaType,
+    byteSize: attachment.byteSize,
+    sourceByteSize: graphExportArtifact.sourceByteSize,
+    sha256: attachment.sha256,
+    compressed: attachment.mediaType === "application/gzip" || String(attachment.filename ?? "").endsWith(".gz"),
+  });
+  if (plan.mentionEdgeCount > 0 && plan.mentionRelationCount === 0) {
+    throw new Error(`Graph import could not resolve any accepted References for ${plan.mentionEdgeCount} reference-to-entity edge(s).`);
+  }
+
+  const now = new Date().toISOString();
+  const supersessionChanges = shouldSupersedeGeneratedGraph(plan)
+    ? await buildGeneratedGraphSupersessionChanges(client, {
+      corpusId: importRun.corpusId,
+      extractorId: plan.extractorId,
+      importRunId: plan.importRunId,
+      now,
+    })
+    : [];
+  const importChanges = await buildRecordChangesTargetedByIdToleratingOptionalModels(client, plan.records);
+  const changes = [...supersessionChanges, ...importChanges];
+  const changedRecords = changes.filter((record) => record.action !== "noop").length;
+  const queryDiagnostics = {
+    graphAttachment: "getModelAttachment",
+    recordPlanning: "targeted getRecord by planned id",
+    plannedRecordLookups: plan.records.length,
+    supersession: supersessionChanges.queryDiagnostics ?? null,
+  };
+
+  if (!apply) {
+    const result = {
+      ok: true,
+      command: "analysis import-graph-artifact",
+      mode: "dry-run",
+      importRunId,
+      snapshot: plan.snapshotRef,
+      storagePath: attachment.storagePath,
+      plannedRecords: plan.records.length,
+      changedRecords,
+      query: queryDiagnostics,
+      next: `npm run content -- analysis import-graph-artifact --import-run ${importRunId} --apply`,
+    };
+    if (asJson) console.log(JSON.stringify(result));
+    else {
+      console.log(`graph-artifact-import\tmode\tdry-run`);
+      console.log(`graph-artifact-import\timport-run\t${importRunId}`);
+      console.log(`graph-artifact-import\tsnapshot\t${plan.snapshotRef}`);
+      console.log(`graph-artifact-import\tchanged-records\t${changedRecords}`);
+      console.log(`graph-artifact-import\tnext\t${result.next}`);
+    }
+    return;
+  }
+
+  await applyRecordChanges(client, changes);
+  await updateNewsroomSummaryAfterAnalysisImport(client, changes, {
+    actorLabel: "papyrus-content-cli",
+    reason: `analysis reimport graph artifact ${plan.importRunId}`,
+  });
+  const result = {
+    ok: true,
+    command: "analysis import-graph-artifact",
+    mode: "apply",
+    importRunId,
+    snapshot: plan.snapshotRef,
+    storagePath: attachment.storagePath,
+    changedRecords,
+    semanticNodes: plan.semanticNodeCount,
+    semanticRelations: plan.semanticRelationCount,
+    query: queryDiagnostics,
+  };
+  if (asJson) console.log(JSON.stringify(result));
+  else {
+    printCategoryImportSummary("graph-artifact", plan.importRunId, changes);
+    console.log(`graph-artifact-import\timport-run\t${importRunId}`);
+    console.log(`graph-artifact-import\tsnapshot\t${plan.snapshotRef}`);
+    console.log(`graph-artifact-import\tchanged-records\t${changedRecords}`);
+  }
+}
+
+async function loadGraphExportPayloadFromAttachment(attachment, client) {
+  const buffer = await downloadAttachmentBuffer(attachment, { client });
+  if (!buffer) throw new Error(`Graph export attachment ${attachment.id} is empty.`);
+  const payloadBuffer = attachment.mediaType === "application/gzip" || String(attachment.filename ?? "").endsWith(".gz")
+    ? zlib.gunzipSync(buffer)
+    : buffer;
+  return {
+    payload: JSON.parse(payloadBuffer.toString("utf8")),
+    sourceByteSize: payloadBuffer.length,
+  };
+}
+
 async function importGraphCommandOutput({
   client,
   assignment,
@@ -3927,6 +6455,10 @@ async function importGraphCommandOutput({
     importedAt: now,
     referenceByExternalItemId,
   });
+  const graphExportArtifact = buildGraphExportArtifactAttachment(graphExport.outputPath, plan, {
+    importedAt: now,
+  });
+  attachGraphExportArtifactToPlan(plan, graphExportArtifact);
   if (plan.mentionEdgeCount > 0 && plan.mentionRelationCount === 0) {
     throw createAnalysisCommandError(`Graph import could not resolve any accepted References for ${plan.mentionEdgeCount} reference-to-entity edge(s).`, {
       kind: "graph_import_unresolved_references",
@@ -3935,25 +6467,41 @@ async function importGraphCommandOutput({
       stderrLogPaths: [],
     });
   }
-  const supersessionChanges = await buildGeneratedGraphSupersessionChanges(client, {
-    corpusId,
-    extractorId: plan.extractorId,
-    importRunId: plan.importRunId,
-    now,
+  const supersessionChanges = shouldSupersedeGeneratedGraph(plan)
+    ? await buildGeneratedGraphSupersessionChanges(client, {
+      corpusId,
+      extractorId: plan.extractorId,
+      importRunId: plan.importRunId,
+      now,
+    })
+    : [];
+  const artifactRecords = plan.records.filter(isGraphArtifactImportRecord);
+  const projectionRecords = plan.records.filter((record) => !isGraphArtifactImportRecord(record));
+  const artifactChanges = await buildRecordChangesTargetedByIdToleratingOptionalModels(client, artifactRecords);
+  await applyRecordChanges(client, artifactChanges);
+  await updateNewsroomSummaryAfterAnalysisImport(client, artifactChanges, {
+    actorLabel: "papyrus-content-cli",
+    reason: `analysis store graph artifact ${plan.importRunId}`,
   });
-  const importChanges = await buildRecordChangesToleratingOptionalModels(client, plan.records);
-  const changes = [...supersessionChanges, ...importChanges];
-  await applyRecordChanges(client, changes);
-  await updateNewsroomSummaryAfterAnalysisImport(client, changes, {
+  const importChanges = await buildRecordChangesTargetedByIdToleratingOptionalModels(client, projectionRecords);
+  const projectionChanges = [...supersessionChanges, ...importChanges];
+  await applyRecordChanges(client, projectionChanges);
+  await updateNewsroomSummaryAfterAnalysisImport(client, projectionChanges, {
     actorLabel: "papyrus-content-cli",
     reason: `analysis import graph ${plan.importRunId}`,
   });
+  const changes = [...artifactChanges, ...projectionChanges];
   printCategoryImportSummary("graph", plan.importRunId, changes);
   return {
     assignmentId: assignment.id,
     importRunId: plan.importRunId,
     importedRecords: changes.filter((record) => record.action !== "noop").length,
     graphExportPath: graphExport.outputPath,
+    graphExportArtifactPath: graphExportArtifact.localPath,
+    graphExportStoragePath: graphExportArtifact.attachment.storagePath,
+    graphExportAttachmentId: graphExportArtifact.attachment.id,
+    graphExportByteSize: graphExportArtifact.attachment.byteSize,
+    graphExportSha256: graphExportArtifact.attachment.sha256,
     snapshot: plan.snapshotRef,
     nodes: plan.semanticNodeCount,
     relations: plan.semanticRelationCount,
@@ -3962,6 +6510,21 @@ async function importGraphCommandOutput({
     mentionRelations: plan.mentionRelationCount,
     supersededRecords: supersessionChanges.filter((record) => record.action !== "noop").length,
   };
+}
+
+function isGraphArtifactImportRecord(record) {
+  return record.modelName === "KnowledgeImportRun"
+    || record.modelName === "KnowledgeArtifact"
+    || record.modelName === "KnowledgeRawPayload"
+    || record.modelName === "ModelAttachment";
+}
+
+function shouldSupersedeGeneratedGraph(plan) {
+  const stats = plan?.stats ?? {};
+  const itemsTotal = Number(stats.items_total ?? stats.itemsTotal ?? 0) || 0;
+  const itemsAvailable = Number(stats.items_available ?? stats.itemsAvailable ?? 0) || 0;
+  if (itemsAvailable > 0 && itemsTotal > 0 && itemsTotal < itemsAvailable) return false;
+  return true;
 }
 
 function runGraphExportForCommand({ command, metadata, corpusConfig, runDir }) {
@@ -4018,6 +6581,81 @@ function runGraphExportForCommand({ command, metadata, corpusConfig, runDir }) {
   return {
     outputPath,
     payload: loadJsonFile(outputPath),
+  };
+}
+
+function buildGraphExportArtifactAttachment(outputPath, plan, { importedAt }) {
+  const rawPayloadId = graphExportSummaryPayloadId(plan.importRunId);
+  const sourceBuffer = fs.readFileSync(outputPath);
+  const gzipBuffer = zlib.gzipSync(sourceBuffer, { level: 9 });
+  const localPath = outputPath.endsWith(".json")
+    ? outputPath.replace(/\.json$/u, ".json.gz")
+    : `${outputPath}.gz`;
+  fs.writeFileSync(localPath, gzipBuffer);
+  const entry = buildBinaryModelPayloadAttachment({
+    ownerKind: "knowledgeRawPayload",
+    ownerId: rawPayloadId,
+    role: "graph_export",
+    sortKey: "graph-export",
+    filename: "graph-export.json.gz",
+    mediaType: "application/gzip",
+    content: gzipBuffer,
+    importRunId: plan.importRunId,
+    now: importedAt,
+  });
+  return {
+    localPath,
+    attachment: entry.attachment,
+    body: entry.body,
+    sourceByteSize: sourceBuffer.length,
+  };
+}
+
+function attachGraphExportArtifactToPlan(plan, graphExportArtifact) {
+  setGraphExportSummaryPayload(plan, {
+    attachmentId: graphExportArtifact.attachment.id,
+    storagePath: graphExportArtifact.attachment.storagePath,
+    filename: graphExportArtifact.attachment.filename,
+    mediaType: graphExportArtifact.attachment.mediaType,
+    byteSize: graphExportArtifact.attachment.byteSize,
+    sourceByteSize: graphExportArtifact.sourceByteSize,
+    sha256: graphExportArtifact.attachment.sha256,
+    compressed: true,
+  });
+  plan.records.push({
+    modelName: "ModelAttachment",
+    expected: graphExportArtifact.attachment,
+    attachmentBody: graphExportArtifact.body,
+  });
+}
+
+function setGraphExportSummaryPayload(plan, graphExport) {
+  const summary = graphExportSummaryFromPlan(plan);
+  summary.graphExport = graphExport;
+  const summaryRecord = plan.records.find((record) => (
+    record.modelName === "KnowledgeRawPayload"
+    && record.expected?.id === graphExportSummaryPayloadId(plan.importRunId)
+  ));
+  if (summaryRecord) summaryRecord.expected.payload = JSON.stringify(summary);
+}
+
+function graphExportSummaryPayloadId(importRunId) {
+  return `raw-import-run-${safeId(importRunId)}-graph-export-summary`;
+}
+
+function graphExportSummaryFromPlan(plan) {
+  return {
+    snapshot: plan.snapshotRef,
+    graphId: plan.graphId,
+    extractorId: plan.extractorId,
+    extractionSnapshot: plan.extractionSnapshot,
+    stats: plan.stats ?? {},
+    nodeCount: plan.nodeCount,
+    edgeCount: plan.edgeCount,
+    semanticNodeCount: plan.semanticNodeCount,
+    semanticRelationCount: plan.semanticRelationCount,
+    skippedItemNodes: plan.skippedItemNodes,
+    unresolvedReferences: plan.unresolvedReferences,
   };
 }
 
@@ -4124,10 +6762,10 @@ function buildGraphExportImportRecords(payload, { corpusId, classifierId, import
     expected: {
       id: `knowledge-artifact-${safeId(corpusId)}-${safeId(extractorId)}-${safeId(snapshotId)}`,
       corpusId,
-      artifactKind: "graph-snapshot",
+      artifactKind: "graph-export",
       artifactId: snapshotRef,
       snapshotId,
-      displayName: `Graph snapshot ${snapshotRef}`,
+      displayName: `Graph export ${snapshotRef}`,
       createdAt: importedAt,
       importRunId,
     },
@@ -4135,7 +6773,7 @@ function buildGraphExportImportRecords(payload, { corpusId, classifierId, import
   records.push({
     modelName: "KnowledgeRawPayload",
     expected: {
-      id: `raw-import-run-${safeId(importRunId)}-graph-export-summary`,
+      id: graphExportSummaryPayloadId(importRunId),
       ownerType: "importRun",
       ownerId: importRunId,
       payloadKind: "graph-export-summary",
@@ -4164,6 +6802,11 @@ function buildGraphExportImportRecords(payload, { corpusId, classifierId, import
     extractorId,
     snapshotId,
     snapshotRef,
+    graphId,
+    extractionSnapshot,
+    stats: payload.stats ?? {},
+    nodeCount: nodes.length,
+    edgeCount: edges.length,
     records,
     semanticNodeCount: materializedNodeByGraphNodeId.size,
     semanticRelationCount: relationRecords.records.length,
@@ -4286,10 +6929,13 @@ function buildGraphExportRelationRecords({
 
 async function buildGeneratedGraphSupersessionChanges(client, { corpusId, extractorId, importRunId, now }) {
   const prefix = `knowledge-import-${safeId(corpusId)}-graph-${safeId(extractorId)}-`;
-  const [nodes, relations] = await Promise.all([
-    client.listRecords("SemanticNode"),
-    client.listRecords("SemanticRelation"),
-  ]);
+  const graphRuns = (await client.listKnowledgeImportRunsByCorpusKindAndImportedAt(`${corpusId}#graph-export`))
+    .filter((run) => run.id !== importRunId)
+    .filter((run) => String(run.id ?? "").startsWith(prefix));
+  const nodeLists = await Promise.all(graphRuns.map((run) => client.listSemanticNodesByImportRunAndNodeKey(run.id)));
+  const relationLists = await Promise.all(graphRuns.map((run) => client.listSemanticRelationsByImportRunAndImportedAt(run.id)));
+  const nodes = nodeLists.flat();
+  const relations = relationLists.flat();
   const changes = [];
   for (const node of nodes) {
     if (node.importRunId === importRunId || !String(node.importRunId ?? "").startsWith(prefix)) continue;
@@ -4314,6 +6960,15 @@ async function buildGeneratedGraphSupersessionChanges(client, { corpusId, extrac
     };
     changes.push(buildRecordChangeFromCurrent("SemanticRelation", expected, relation));
   }
+  changes.queryDiagnostics = {
+    importRunIndex: "listKnowledgeImportRunsByCorpusKindAndImportedAt",
+    importRunKey: `${corpusId}#graph-export`,
+    semanticNodeIndex: "listSemanticNodesByImportRunAndNodeKey",
+    semanticRelationIndex: "listSemanticRelationsByImportRunAndImportedAt",
+    priorImportRunsFetched: graphRuns.length,
+    semanticNodesFetched: nodes.length,
+    semanticRelationsFetched: relations.length,
+  };
   return changes;
 }
 
@@ -4342,6 +6997,7 @@ function recordKnowledgeImportRun({
       id: importRunId,
       corpusId,
       importKind: "graph-export",
+      corpusImportKindKey: `${corpusId}#graph-export`,
       classifierId,
       sourceSnapshotId,
       status: "imported",
@@ -4481,7 +7137,9 @@ async function buildEditionPlanningCommandPlan(options) {
   return { client, plan, report };
 }
 
-async function deleteAllContent(client) {
+async function deleteAllContent(client, options = {}) {
+  const deleteAttachments = Boolean(options.deleteAttachments);
+  const bucket = options.bucket ?? null;
   const deleteOrder = [
     "PublishedMediaAsset",
     "PublishedEditionItem",
@@ -4495,6 +7153,7 @@ async function deleteAllContent(client) {
     "Item",
     "Tag",
     "Edition",
+    "ModelAttachment",
     "KnowledgeRawPayload",
     "SteeringDecision",
     "SteeringProposal",
@@ -4519,6 +7178,8 @@ async function deleteAllContent(client) {
 
   for (const modelName of deleteOrder) {
     let totalDeleted = 0;
+    let attachmentObjectsDeleted = 0;
+    let attachmentDeleteBucket = null;
     let pass = 0;
     for (;;) {
       pass += 1;
@@ -4533,18 +7194,20 @@ async function deleteAllContent(client) {
       }
       console.error(`delete\t${modelName}\tpass=${pass}\t${records.length}`);
       if (records.length === 0) {
-        result.push({ modelName, deleted: totalDeleted });
+        result.push({ modelName, deleted: totalDeleted, attachmentObjectsDeleted, bucket: attachmentDeleteBucket });
         break;
       }
-      for (const record of records) {
-        try {
-          await client.deleteRecord(modelName, record.id);
-          totalDeleted += 1;
-        } catch (error) {
-          if (!isDynamoResourceNotFoundError(error)) throw error;
-          console.error(`delete\tskip-record\t${modelName}\t${record.id}\t${normalizeError(error).message}`);
+      if (modelName === "ModelAttachment" && deleteAttachments) {
+        const storagePaths = records.map((record) => record.storagePath).filter(Boolean);
+        const deleteResult = deleteAttachmentStoragePaths(storagePaths, { bucket });
+        attachmentObjectsDeleted += deleteResult.deleted ?? 0;
+        attachmentDeleteBucket = deleteResult.bucket ?? attachmentDeleteBucket;
+        if (deleteResult.attempted) {
+          console.error(`delete\tattachment-objects\tpass=${pass}\tattempted=${deleteResult.attempted}\tdeleted=${deleteResult.deleted}\tchunks=${deleteResult.chunks}`);
         }
       }
+      const deletedRecords = await deleteRecordsForModel(client, modelName, records);
+      totalDeleted += deletedRecords.deleted;
       if (pass >= 20) throw new Error(`delete all did not drain ${modelName} after ${pass} passes.`);
     }
   }
@@ -4552,25 +7215,361 @@ async function deleteAllContent(client) {
   return result;
 }
 
-async function buildRecordChanges(client, records) {
+async function deleteRecordsForModel(client, modelName, records) {
+  const concurrency = deleteConcurrency();
+  if (records.length > 1 && concurrency > 1) console.error(`delete\tconcurrency\t${modelName}\t${concurrency}`);
+  let deleted = 0;
+  let nextIndex = 0;
+  const workers = Array.from({ length: Math.min(concurrency, records.length) }, async () => {
+    for (;;) {
+      const index = nextIndex;
+      nextIndex += 1;
+      if (index >= records.length) return;
+      const record = records[index];
+      try {
+        await client.deleteRecord(modelName, record.id);
+        deleted += 1;
+      } catch (error) {
+        if (!isDynamoResourceNotFoundError(error)) throw error;
+        console.error(`delete\tskip-record\t${modelName}\t${record.id}\t${normalizeError(error).message}`);
+      }
+    }
+  });
+  await Promise.all(workers);
+  return { deleted };
+}
+
+function deleteConcurrency() {
+  const raw = process.env.PAPYRUS_DELETE_CONCURRENCY;
+  if (!raw) return 8;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    throw new Error("PAPYRUS_DELETE_CONCURRENCY must be a positive integer.");
+  }
+  return Math.min(parsed, 24);
+}
+
+async function pruneModelAttachments(flags) {
+  const options = parseOptions(flags);
+  const apply = Boolean(options.apply);
+  const asJson = Boolean(options.json);
+  const bucket = normalizeCliString(options.bucket);
+  const prefix = normalizeCliString(options.prefix) ?? "newsroom/payloads/";
+  const { client } = createAuthoringClient();
+
+  let attachments = [];
+  try {
+    attachments = await client.listRecords("ModelAttachment");
+  } catch (error) {
+    if (isMissingGraphQLModelError(error, "ModelAttachment") || isDynamoResourceNotFoundError(error)) {
+      if (asJson) {
+        printCompactJson({
+          ok: false,
+          command: "newsroom prune-attachments",
+          mode: apply ? "apply" : "dry-run",
+          error: "missing_model",
+        });
+      } else {
+        console.log(`attachment-prune\tmissing-model\tModelAttachment\t${normalizeError(error).message}`);
+      }
+      return;
+    }
+    throw error;
+  }
+
+  const ownerIdsByKind = await loadModelAttachmentOwnerIds(client, attachments);
+  const orphanAttachmentRecords = attachments.filter((attachment) => {
+    const ownerModel = MODEL_ATTACHMENT_OWNER_MODELS[attachment.ownerKind];
+    if (!ownerModel) return true;
+    return !ownerIdsByKind.get(attachment.ownerKind)?.has(attachment.ownerId);
+  });
+  const orphanAttachmentIds = new Set(orphanAttachmentRecords.map((attachment) => attachment.id));
+  const validAttachmentStoragePaths = new Set(attachments
+    .filter((attachment) => !orphanAttachmentIds.has(attachment.id))
+    .map((attachment) => attachment.storagePath)
+    .filter(Boolean));
+  const attachmentStoragePaths = new Set(attachments.map((attachment) => attachment.storagePath).filter(Boolean));
+  const storageListing = listAttachmentStoragePaths({ bucket, prefix });
+  const orphanStoragePaths = storageListing.keys.filter((storagePath) => !attachmentStoragePaths.has(storagePath));
+  const recordStoragePathsToDelete = orphanAttachmentRecords
+    .map((attachment) => attachment.storagePath)
+    .filter((storagePath) => storagePath && !validAttachmentStoragePaths.has(storagePath));
+  const deleted = {
+    attachmentRecords: 0,
+    attachmentRecordObjects: 0,
+    orphanStorageObjects: 0,
+  };
+
+  if (!asJson) {
+    console.log(`attachment-prune\tmode\t${apply ? "apply" : "dry-run"}`);
+    console.log(`attachment-prune\tbucket\t${storageListing.bucket}`);
+    console.log(`attachment-prune\tprefix\t${storageListing.prefix}`);
+    console.log(`attachment-prune\tmodelAttachments\t${attachments.length}`);
+    console.log(`attachment-prune\torphanAttachmentRecords\t${orphanAttachmentRecords.length}`);
+    console.log(`attachment-prune\torphanStorageObjects\t${orphanStoragePaths.length}`);
+  }
+
+  if (apply && recordStoragePathsToDelete.length) {
+    const deleteResult = deleteAttachmentStoragePaths(recordStoragePathsToDelete, { bucket: storageListing.bucket });
+    deleted.attachmentRecordObjects += deleteResult.deleted ?? 0;
+  }
+
+  for (const attachment of orphanAttachmentRecords) {
+    const ownerModel = MODEL_ATTACHMENT_OWNER_MODELS[attachment.ownerKind] ?? "unknown-owner-kind";
+    if (!asJson) console.log(`attachment-prune\torphan-record\t${attachment.id}\t${attachment.ownerKind}\t${ownerModel}\t${attachment.ownerId}\t${attachment.storagePath}`);
+    if (!apply) continue;
+    await client.deleteRecord("ModelAttachment", attachment.id);
+    deleted.attachmentRecords += 1;
+  }
+
+  if (apply && orphanStoragePaths.length) {
+    const deleteResult = deleteAttachmentStoragePaths(orphanStoragePaths, { bucket: storageListing.bucket });
+    deleted.orphanStorageObjects += deleteResult.deleted ?? 0;
+  }
+
+  for (const storagePath of orphanStoragePaths) {
+    if (!asJson) console.log(`attachment-prune\torphan-object\t${storagePath}`);
+  }
+
+  if (asJson) {
+    printCompactJson({
+      ok: true,
+      command: "newsroom prune-attachments",
+      mode: apply ? "apply" : "dry-run",
+      bucket: storageListing.bucket,
+      prefix: storageListing.prefix,
+      counts: {
+        modelAttachments: attachments.length,
+        orphanAttachmentRecords: orphanAttachmentRecords.length,
+        orphanStorageObjects: orphanStoragePaths.length,
+      },
+      deleted,
+      next: apply ? null : "npm run content -- newsroom prune-attachments --apply",
+    });
+  } else if (!apply) {
+    console.log("attachment-prune\tnext\tnpm run content -- newsroom prune-attachments --apply");
+  }
+}
+
+async function loadModelAttachmentOwnerIds(client, attachments) {
+  const ownerKinds = Array.from(new Set(attachments.map((attachment) => attachment.ownerKind).filter(Boolean)));
+  const result = new Map();
+  for (const ownerKind of ownerKinds) {
+    const modelName = MODEL_ATTACHMENT_OWNER_MODELS[ownerKind];
+    if (!modelName) {
+      result.set(ownerKind, new Set());
+      continue;
+    }
+    try {
+      const rows = await client.listRecords(modelName);
+      result.set(ownerKind, new Set(rows.map((row) => row.id).filter(Boolean)));
+    } catch (error) {
+      if (!isMissingGraphQLModelError(error, modelName) && !isDynamoResourceNotFoundError(error)) throw error;
+      result.set(ownerKind, new Set());
+    }
+  }
+  return result;
+}
+
+async function buildRecordChanges(client, records, options = {}) {
+  const skippedModels = options.skippedModels instanceof Set ? options.skippedModels : new Set();
+  const skipModelAttachments = skippedModels.has("ModelAttachment");
   console.error(`prepare\trecords\t${records.length}`);
   const prepared = await prepareVersionedKnowledgeRecords(client, records);
   console.error(`prepare\tplanned\t${prepared.records.length}\tpostChanges\t${prepared.postChanges.length}`);
   const changes = [];
-  const plannedRecords = dedupePlannedRecords(prepared.records);
+  const indexedRecords = prepared.records.map(normalizeOperationalIndexRecord);
+  const expandedRecords = expandPrivatePayloadRecords(indexedRecords, {
+    skipModelAttachments,
+  });
+  const plannedRecords = dedupePlannedRecords(expandedRecords);
   if (plannedRecords.length !== prepared.records.length) {
     console.error(`prepare\tdeduped\t${prepared.records.length - plannedRecords.length}`);
   }
-  const existingByModel = await listExistingRecordsByModel(client, plannedRecords);
-  for (const record of plannedRecords) {
-    changes.push(buildRecordChangeFromCurrent(
+  const filteredPlanned = plannedRecords.filter((record) => !skippedModels.has(record.modelName));
+  const existingByModel = await listExistingRecordsByModel(client, filteredPlanned);
+  for (const record of filteredPlanned) {
+    const change = buildRecordChangeFromCurrent(
       record.modelName,
       record.expected,
       existingByModel.get(record.modelName)?.get(record.expected.id) ?? null,
-    ));
+      { skipModelAttachments },
+    );
+    if (record.attachmentBody !== undefined) change.attachmentBody = record.attachmentBody;
+    changes.push(change);
   }
-  changes.push(...prepared.postChanges);
+  changes.push(...prepared.postChanges.filter((change) => !skippedModels.has(change.modelName)));
   return changes;
+}
+
+function normalizeOperationalIndexRecord(record) {
+  if (!record || !record.expected || typeof record.expected !== "object") return record;
+  if (record.modelName === "Assignment") {
+    return {
+      ...record,
+      expected: {
+        ...record.expected,
+        sectionStatusKey: assignmentSectionStatusKey(record.expected),
+        sectionQueueStatusKey: assignmentSectionQueueStatusKey(record.expected),
+      },
+    };
+  }
+  if (record.modelName === "KnowledgeImportRun") {
+    return {
+      ...record,
+      expected: {
+        ...record.expected,
+        corpusImportKindKey: knowledgeImportRunCorpusKindKey(record.expected),
+      },
+    };
+  }
+  return record;
+}
+
+function plannedRecordInput(record) {
+  return {
+    modelName: record.modelName,
+    expected: record.expected,
+  };
+}
+
+function expandPrivatePayloadRecords(records, options = {}) {
+  const skipModelAttachments = Boolean(options.skipModelAttachments);
+  const expanded = [];
+  for (const record of records) {
+    const expected = record.expected ?? {};
+    const now = expected.updatedAt ?? expected.createdAt ?? new Date().toISOString();
+    const attachments = [];
+    if (!skipModelAttachments && record.modelName === "Message") {
+      if (expected.body !== undefined) {
+        attachments.push(attachmentRecord(buildTextModelPayloadAttachment({
+          ownerKind: "message",
+          ownerId: expected.id,
+          ownerLineageId: expected.id,
+          role: "message_body",
+          sortKey: "message",
+          filename: expected.body && String(expected.body).trim().startsWith("{") ? "message.json" : "message.txt",
+          mediaType: expected.body && String(expected.body).trim().startsWith("{") ? "application/json" : "text/plain",
+          content: String(expected.body ?? ""),
+          importRunId: expected.importRunId,
+          now,
+        })));
+      }
+      if (expected.metadata !== undefined) {
+        attachments.push(attachmentRecord(buildJsonModelPayloadAttachment({
+          ownerKind: "message",
+          ownerId: expected.id,
+          ownerLineageId: expected.id,
+          role: "metadata",
+          sortKey: "metadata",
+          filename: "metadata.json",
+          content: parseJsonish(expected.metadata),
+          importRunId: expected.importRunId,
+          now,
+        })));
+      }
+    } else if (!skipModelAttachments && record.modelName === "Reference" && expected.metadata !== undefined) {
+      attachments.push(attachmentRecord(buildJsonModelPayloadAttachment({
+        ownerKind: "reference",
+        ownerId: expected.id,
+        ownerLineageId: expected.lineageId ?? expected.id,
+        ownerVersionNumber: expected.versionNumber ?? null,
+        ownerVersionKey: semanticVersionKey("reference", expected.id),
+        role: "metadata",
+        sortKey: "metadata",
+        filename: "metadata.json",
+        content: parseJsonish(expected.metadata),
+        importRunId: expected.importRunId,
+        now,
+      })));
+    } else if (!skipModelAttachments && record.modelName === "Assignment") {
+      if (expected.brief !== undefined) attachments.push(attachmentRecord(buildTextModelPayloadAttachment({
+        ownerKind: "assignment",
+        ownerId: expected.id,
+        ownerLineageId: expected.id,
+        role: "assignment_brief",
+        sortKey: "brief",
+        filename: "brief.txt",
+        content: String(expected.brief ?? ""),
+        importRunId: expected.importRunId,
+        now,
+      })));
+      if (expected.instructions !== undefined) attachments.push(attachmentRecord(buildTextModelPayloadAttachment({
+        ownerKind: "assignment",
+        ownerId: expected.id,
+        ownerLineageId: expected.id,
+        role: "assignment_instructions",
+        sortKey: "instructions",
+        filename: "instructions.txt",
+        content: String(expected.instructions ?? ""),
+        importRunId: expected.importRunId,
+        now,
+      })));
+      if (expected.metadata !== undefined) attachments.push(attachmentRecord(buildJsonModelPayloadAttachment({
+        ownerKind: "assignment",
+        ownerId: expected.id,
+        ownerLineageId: expected.id,
+        role: "metadata",
+        sortKey: "metadata",
+        filename: "metadata.json",
+        content: parseJsonish(expected.metadata),
+        importRunId: expected.importRunId,
+        now,
+      })));
+    } else if (!skipModelAttachments && record.modelName === "AssignmentEvent" && expected.metadata !== undefined) {
+      attachments.push(attachmentRecord(buildJsonModelPayloadAttachment({
+        ownerKind: "assignmentEvent",
+        ownerId: expected.id,
+        ownerLineageId: expected.id,
+        role: "metadata",
+        sortKey: "metadata",
+        filename: "metadata.json",
+        content: parseJsonish(expected.metadata),
+        now,
+      })));
+    } else if (!skipModelAttachments && record.modelName === "KnowledgeRawPayload" && expected.payload !== undefined) {
+      attachments.push(attachmentRecord(buildJsonModelPayloadAttachment({
+        ownerKind: "knowledgeRawPayload",
+        ownerId: expected.id,
+        role: "raw_payload",
+        sortKey: expected.payloadKind ?? "payload",
+        filename: `${safeId(expected.payloadKind ?? "payload")}.json`,
+        content: parseJsonish(expected.payload),
+        importRunId: expected.importRunId,
+        now,
+      })));
+    }
+    // If ModelAttachment is not deployed, we must keep payload fields inline on their parent models.
+    const nextExpected = skipModelAttachments ? expected : stripPrivatePayloadFields(record.modelName, expected);
+    expanded.push({ ...record, expected: nextExpected });
+    expanded.push(...attachments);
+  }
+  return expanded;
+}
+
+async function readJsonModelPayload(client, ownerKind, ownerId, role, sortKey = role) {
+  const attachment = await client.getRecord("ModelAttachment", modelAttachmentId(ownerKind, ownerId, role, sortKey));
+  if (!attachment) return null;
+  const body = await downloadAttachmentBody(attachment, { client });
+  if (!body) return null;
+  return parseJsonish(body);
+}
+
+async function readTextModelPayload(client, ownerKind, ownerId, role, sortKey = role) {
+  const attachment = await client.getRecord("ModelAttachment", modelAttachmentId(ownerKind, ownerId, role, sortKey));
+  if (!attachment) return null;
+  return await downloadAttachmentBody(attachment, { client }) ?? null;
+}
+
+async function assignmentMetadata(client, assignment) {
+  try {
+    const payload = await readJsonModelPayload(client, "assignment", assignment.id, "metadata", "metadata");
+    if (payload && typeof payload === "object") return payload;
+  } catch {
+    // Fall back to inline metadata when ModelAttachment storage is unavailable.
+  }
+  const inline = parseJsonish(assignment?.metadata);
+  return inline && typeof inline === "object" ? inline : {};
 }
 
 function dedupePlannedRecords(records) {
@@ -4582,14 +7581,45 @@ function dedupePlannedRecords(records) {
       byKey.set(key, record);
       continue;
     }
-    if (
-      stableJson(existing.expected) !== stableJson(record.expected)
-      && !isBenignPlannedDuplicate(record.modelName, existing.expected, record.expected)
-    ) {
-      throw new Error(`Conflicting planned records for ${key}.`);
+    if (stableJson(existing.expected) !== stableJson(record.expected)) {
+      const semanticResolved = resolveSemanticRelationPlannedConflict(
+        record.modelName,
+        existing.expected,
+        record.expected,
+      );
+      if (semanticResolved) {
+        byKey.set(key, { ...record, expected: semanticResolved });
+        continue;
+      }
+      if (!isBenignPlannedDuplicate(record.modelName, existing.expected, record.expected)) {
+        throw new Error(
+          `Conflicting planned records for ${key}.`
+          + ` left=${plannedRecordConflictSnippet(existing.expected)}`
+          + ` right=${plannedRecordConflictSnippet(record.expected)}`,
+        );
+      }
     }
   }
   return Array.from(byKey.values());
+}
+
+function latestRecordsById(records) {
+  const byId = new Map();
+  for (const record of records ?? []) {
+    const id = normalizeCliString(record?.id);
+    if (!id) continue;
+    const existing = byId.get(id);
+    if (!existing) {
+      byId.set(id, record);
+      continue;
+    }
+    const existingTimestamp = String(existing.updatedAt ?? existing.createdAt ?? "");
+    const nextTimestamp = String(record.updatedAt ?? record.createdAt ?? "");
+    if (nextTimestamp.localeCompare(existingTimestamp) > 0) {
+      byId.set(id, record);
+    }
+  }
+  return Array.from(byId.values());
 }
 
 function isBenignPlannedDuplicate(modelName, left, right) {
@@ -4605,6 +7635,39 @@ function isBenignPlannedDuplicate(modelName, left, right) {
   return stableJson(normalize(left)) === stableJson(normalize(right));
 }
 
+function resolveSemanticRelationPlannedConflict(modelName, left, right) {
+  if (modelName !== "SemanticRelation") return null;
+  if (!left || !right) return null;
+  if (!left.id || left.id !== right.id) return null;
+  const keys = [
+    "predicate",
+    "subjectKind",
+    "subjectId",
+    "subjectLineageId",
+    "objectKind",
+    "objectId",
+    "objectLineageId",
+  ];
+  for (const key of keys) {
+    const leftValue = normalizeCliString(left[key]) ?? null;
+    const rightValue = normalizeCliString(right[key]) ?? null;
+    if (leftValue !== rightValue) return null;
+  }
+  const priority = (state) => {
+    switch (state) {
+      case "current":
+        return 3;
+      case "historical":
+        return 2;
+      case "superseded":
+        return 1;
+      default:
+        return 0;
+    }
+  };
+  return priority(left.relationState) >= priority(right.relationState) ? left : right;
+}
+
 function stableJson(value) {
   if (Array.isArray(value)) return `[${value.map((entry) => stableJson(entry)).join(",")}]`;
   if (value && typeof value === "object") {
@@ -4613,12 +7676,26 @@ function stableJson(value) {
   return JSON.stringify(value);
 }
 
+function plannedRecordConflictSnippet(record) {
+  if (!record || typeof record !== "object") return String(record);
+  return stableJson({
+    id: record.id ?? null,
+    relationState: record.relationState ?? null,
+    predicate: record.predicate ?? null,
+    subjectId: record.subjectId ?? null,
+    subjectLineageId: record.subjectLineageId ?? null,
+    objectId: record.objectId ?? null,
+    objectLineageId: record.objectLineageId ?? null,
+    metadata: record.metadata ?? null,
+  });
+}
+
 async function buildRecordChangesToleratingOptionalModels(client, records) {
   let pendingRecords = records;
   const skippedModels = new Set();
   for (;;) {
     try {
-      return await buildRecordChanges(client, pendingRecords);
+      return await buildRecordChanges(client, pendingRecords, { skippedModels });
     } catch (error) {
       const missingModel = Array.from(OPTIONAL_SCHEMA_MODELS)
         .find((modelName) => !skippedModels.has(modelName) && isMissingGraphQLModelError(error, modelName));
@@ -4628,6 +7705,69 @@ async function buildRecordChangesToleratingOptionalModels(client, records) {
       console.warn(`skip\t${missingModel}\tmodel is not deployed in AppSync yet; skipped optional records.`);
     }
   }
+}
+
+async function buildRecordChangesTargetedById(client, records, options = {}) {
+  const skippedModels = options.skippedModels instanceof Set ? options.skippedModels : new Set();
+  const skipModelAttachments = skippedModels.has("ModelAttachment");
+  console.error(`prepare-targeted\trecords\t${records.length}`);
+  const prepared = await prepareVersionedKnowledgeRecords(client, records);
+  const indexedRecords = prepared.records.map(normalizeOperationalIndexRecord);
+  const expandedRecords = expandPrivatePayloadRecords(indexedRecords, {
+    skipModelAttachments,
+  });
+  const plannedRecords = dedupePlannedRecords(expandedRecords);
+  const filteredPlanned = plannedRecords.filter((record) => !skippedModels.has(record.modelName));
+  const existingByModel = await getExistingRecordsByPlannedId(client, filteredPlanned);
+  const changes = [];
+  for (const record of filteredPlanned) {
+    const change = buildRecordChangeFromCurrent(
+      record.modelName,
+      record.expected,
+      existingByModel.get(record.modelName)?.get(record.expected.id) ?? null,
+      { skipModelAttachments },
+    );
+    if (record.attachmentBody !== undefined) change.attachmentBody = record.attachmentBody;
+    changes.push(change);
+  }
+  changes.push(...prepared.postChanges.filter((change) => !skippedModels.has(change.modelName)));
+  return changes;
+}
+
+async function buildRecordChangesTargetedByIdToleratingOptionalModels(client, records) {
+  let pendingRecords = records;
+  const skippedModels = new Set();
+  for (;;) {
+    try {
+      return await buildRecordChangesTargetedById(client, pendingRecords, { skippedModels });
+    } catch (error) {
+      const missingModel = Array.from(OPTIONAL_SCHEMA_MODELS)
+        .find((modelName) => !skippedModels.has(modelName) && isMissingGraphQLModelError(error, modelName));
+      if (!missingModel) throw error;
+      skippedModels.add(missingModel);
+      pendingRecords = pendingRecords.filter((record) => record.modelName !== missingModel);
+      console.warn(`skip\t${missingModel}\tmodel is not deployed in AppSync yet; skipped optional records.`);
+    }
+  }
+}
+
+async function getExistingRecordsByPlannedId(client, records) {
+  const idsByModel = new Map();
+  for (const record of records) {
+    const id = normalizeCliString(record.expected?.id);
+    if (!id) continue;
+    const ids = idsByModel.get(record.modelName) ?? [];
+    ids.push(id);
+    idsByModel.set(record.modelName, ids);
+  }
+  const existingByModel = new Map();
+  for (const [modelName, ids] of idsByModel.entries()) {
+    const uniqueIds = Array.from(new Set(ids));
+    console.error(`targeted-prefetch\t${modelName}\t${uniqueIds.length}`);
+    const results = await client.getRecordsById(modelName, uniqueIds);
+    existingByModel.set(modelName, results);
+  }
+  return existingByModel;
 }
 
 async function listExistingRecordsByModel(client, records) {
@@ -4674,7 +7814,9 @@ async function prepareVersionedKnowledgeRecords(client, records) {
     const expected = record.expected;
     const current = currentReferenceByLineage.get(expected.lineageId);
     if (!current) {
-      referenceIdMap.set(expected.id, expected);
+      if (expected.lineageId && expected.versionNumber != null) {
+        referenceIdMap.set(expected.id, expected);
+      }
       preparedRecords.push(record);
       continue;
     }
@@ -5191,7 +8333,9 @@ const APPEND_ONLY_EXISTING_NOOP_MODELS = new Set([
   "SteeringDecision",
 ]);
 
-function buildRecordChangeFromCurrent(modelName, expected, current) {
+function buildRecordChangeFromCurrent(modelName, expected, current, options = {}) {
+  const skipModelAttachments = Boolean(options.skipModelAttachments);
+  expected = skipModelAttachments ? expected : stripPrivatePayloadFields(modelName, expected);
   if (current && APPEND_ONLY_EXISTING_NOOP_MODELS.has(modelName)) {
     return { modelName, expected: current, current, action: "noop" };
   }
@@ -5215,33 +8359,74 @@ function isDynamoResourceNotFoundError(error) {
 
 async function applyRecordChanges(client, records) {
   const actionable = records.filter((record) => record.action !== "noop");
-  const concurrency = applyConcurrency();
+  const hasAttachmentUploads = actionable.some((record) => record.modelName === "ModelAttachment" && record.attachmentBody !== undefined);
   console.error(`apply\tchanges\t${actionable.length}`);
+
+  if (hasAttachmentUploads) {
+    const ownerRecords = actionable.filter((record) => !(record.modelName === "ModelAttachment" && record.attachmentBody !== undefined));
+    const attachmentRecords = actionable.filter((record) => record.modelName === "ModelAttachment" && record.attachmentBody !== undefined);
+    const concurrency = applyConcurrency(8);
+    console.error(`apply\tstage\towners\t${ownerRecords.length}`);
+    console.error(`apply\tconcurrency\t${concurrency}`);
+    await applyRecordsConcurrently(client, ownerRecords, {
+      concurrency,
+      label: "owners",
+      applyRecord: async (record) => client.upsert(record.modelName, record.expected),
+    });
+    console.error(`apply\tstage\tattachments\t${attachmentRecords.length}`);
+    await applyRecordsConcurrently(client, attachmentRecords, {
+      concurrency,
+      label: "attachments",
+      applyRecord: async (record) => uploadAttachmentBody(record.expected, record.attachmentBody, { client }),
+    });
+    return;
+  }
+
+  const concurrency = applyConcurrency(1);
   if (concurrency > 1) console.error(`apply\tconcurrency\t${concurrency}`);
+  await applyRecordsConcurrently(client, actionable, {
+    concurrency,
+    label: "records",
+    applyRecord: async (record) => client.upsert(record.modelName, record.expected),
+  });
+}
+
+async function applyRecordsConcurrently(client, records, options) {
+  const concurrency = options.concurrency;
+  const applyRecord = options.applyRecord;
+  const label = options.label ?? "records";
   let applied = 0;
   let nextIndex = 0;
   const workers = Array.from({ length: concurrency }, async () => {
-    while (nextIndex < actionable.length) {
-      const record = actionable[nextIndex];
+    while (nextIndex < records.length) {
+      const record = records[nextIndex];
       nextIndex += 1;
       try {
-        await client.upsert(record.modelName, record.expected);
+        await applyRecord(record);
       } catch (error) {
         const failure = normalizeError(error);
         throw new Error(`Failed to apply ${record.action} ${record.modelName} ${record.expected?.id ?? "<missing-id>"}: ${failure.message}`);
       }
       applied += 1;
-      if (applied === actionable.length || applied % 100 === 0) {
-        console.error(`apply\tprogress\t${applied}/${actionable.length}`);
+      if (applied === records.length || applied % 100 === 0) {
+        console.error(`apply\tprogress\t${label}\t${applied}/${records.length}`);
       }
     }
   });
   await Promise.all(workers);
 }
 
-function applyConcurrency() {
+async function upsertModelPayloadForExistingRecord(client, record) {
+  const expanded = expandPrivatePayloadRecords([record]).filter((entry) => entry.modelName === "ModelAttachment");
+  for (const attachment of expanded) {
+    await uploadAttachmentBody(attachment.expected, attachment.attachmentBody, { client });
+    await client.upsert("ModelAttachment", attachment.expected);
+  }
+}
+
+function applyConcurrency(defaultValue = 1) {
   const raw = process.env.PAPYRUS_APPLY_CONCURRENCY;
-  if (!raw) return 1;
+  if (!raw) return defaultValue;
   const parsed = Number.parseInt(raw, 10);
   if (!Number.isFinite(parsed) || parsed < 1) {
     throw new Error("PAPYRUS_APPLY_CONCURRENCY must be a positive integer.");
@@ -5266,6 +8451,31 @@ function printDeleteSummary(result) {
   for (const record of result) {
     console.log(`delete\t${record.modelName}\t${record.deleted}`);
   }
+}
+
+function printCompactJson(payload) {
+  console.log(JSON.stringify(payload));
+}
+
+function deleteAllJsonResult(result) {
+  const deletedByModel = {};
+  const skippedModels = [];
+  let attachmentObjectsDeleted = 0;
+  let bucket = null;
+  for (const record of result) {
+    deletedByModel[record.modelName] = record.deleted ?? 0;
+    attachmentObjectsDeleted += record.attachmentObjectsDeleted ?? 0;
+    if (record.skipped) skippedModels.push(record.modelName);
+    if (record.bucket) bucket = record.bucket;
+  }
+  return {
+    ok: true,
+    command: "content delete all",
+    deletedByModel,
+    attachmentObjectsDeleted,
+    skippedModels,
+    bucket,
+  };
 }
 
 function printCategoryImportSummary(kind, importRunId, changes) {
@@ -5306,7 +8516,7 @@ function printReferenceRegistrationSummary(plan, changes, { apply }) {
 }
 
 function assertReferenceCatalogPlanSafety(plan) {
-  const allowedModels = new Set(["KnowledgeCorpus", "KnowledgeImportRun", "KnowledgeRawPayload", "Reference", "ReferenceAttachment", "Message", "Assignment", "SemanticRelation"]);
+  const allowedModels = new Set(["KnowledgeCorpus", "KnowledgeImportRun", "KnowledgeRawPayload", "ModelAttachment", "Reference", "ReferenceAttachment", "Message", "Assignment", "SemanticRelation"]);
   const unsafeModels = Array.from(new Set(plan.records.map((record) => record.modelName).filter((modelName) => !allowedModels.has(modelName))));
   if (unsafeModels.length) throw new Error(`references register-catalog produced unsupported models: ${unsafeModels.join(", ")}.`);
   const unsafePredicates = plan.records
@@ -5327,6 +8537,7 @@ async function updateNewsroomSummaryAfterReferenceRegistration(client, changes, 
   const createdAssignments = createdByModel.get("Assignment") ?? [];
   const createdAssignmentFacets = assignmentsWithSummarySection(createdAssignments);
   const createdMessages = createdByModel.get("Message") ?? [];
+  const createdModelAttachments = createdByModel.get("ModelAttachment") ?? [];
   const createdSemanticRelations = createdByModel.get("SemanticRelation") ?? [];
   const createdImportRuns = createdByModel.get("KnowledgeImportRun") ?? [];
   const referenceDelta = computeCurrentReferenceDeltaFromChanges(changes);
@@ -5339,6 +8550,7 @@ async function updateNewsroomSummaryAfterReferenceRegistration(client, changes, 
       referenceAttachments: createdByModel.get("ReferenceAttachment")?.length ?? 0,
       references: referenceDelta.countDelta,
       messages: createdByModel.get("Message")?.length ?? 0,
+      modelAttachments: createdModelAttachments.length,
       assignments: createdByModel.get("Assignment")?.length ?? 0,
       semanticRelations: createdByModel.get("SemanticRelation")?.length ?? 0,
     },
@@ -5362,6 +8574,7 @@ async function updateNewsroomSummaryAfterReferenceRegistration(client, changes, 
         byStatus: countDelta(createdMessages, "status", "unknown"),
         domainByKind: nestedCountDelta(createdMessages, "messageKind", "messageDomain", "unknown", "unknown"),
       },
+      modelAttachments: modelAttachmentFacetDelta(createdModelAttachments),
       references: {
         byCurationStatus: referenceDelta.statusDeltas,
         byCorpus: referenceDelta.corpusDeltas,
@@ -5394,13 +8607,15 @@ async function updateNewsroomSummaryAfterAssignmentCreates(client, changes, { ac
   const createdAssignments = createdByModel.get("Assignment") ?? [];
   const createdAssignmentFacets = assignmentsWithSummarySection(createdAssignments);
   const createdEvents = createdByModel.get("AssignmentEvent") ?? [];
+  const createdAttachments = createdByModel.get("ModelAttachment") ?? [];
   const createdRelations = createdByModel.get("SemanticRelation") ?? [];
-  if (!createdAssignments.length && !createdEvents.length && !createdRelations.length) return;
+  if (!createdAssignments.length && !createdEvents.length && !createdAttachments.length && !createdRelations.length) return;
   await client.updateNewsroomSummary({
     source: "incremental",
     countDeltas: {
       assignments: createdAssignments.length,
       assignmentEvents: createdEvents.length,
+      modelAttachments: createdAttachments.length,
       semanticRelations: createdRelations.length,
     },
     assignmentStatusDeltas: countDelta(createdAssignments, "status", "unknown"),
@@ -5419,6 +8634,7 @@ async function updateNewsroomSummaryAfterAssignmentCreates(client, changes, { ac
         bySubjectKind: countDelta(createdRelations, "subjectKind", "unknown"),
         byObjectKind: countDelta(createdRelations, "objectKind", "unknown"),
       },
+      modelAttachments: modelAttachmentFacetDelta(createdAttachments),
     },
   }, {
     actorLabel,
@@ -5438,6 +8654,7 @@ async function updateNewsroomSummaryAfterAnalysisImport(client, changes, { actor
   const createdCategories = createdByModel.get("Category") ?? [];
   const createdProposals = createdByModel.get("SteeringProposal") ?? [];
   const createdArtifacts = createdByModel.get("KnowledgeArtifact") ?? [];
+  const createdAttachments = createdByModel.get("ModelAttachment") ?? [];
   const semanticNodeDelta = currentSemanticNodeDeltaFromChanges(changes);
   const semanticRelationDelta = currentSemanticRelationDeltaFromChanges(changes);
   if (!createdImportRuns.length
@@ -5445,6 +8662,7 @@ async function updateNewsroomSummaryAfterAnalysisImport(client, changes, { actor
     && !createdCategories.length
     && !createdProposals.length
     && !createdArtifacts.length
+    && !createdAttachments.length
     && !semanticNodeDelta.count
     && !semanticRelationDelta.count) {
     return;
@@ -5459,6 +8677,7 @@ async function updateNewsroomSummaryAfterAnalysisImport(client, changes, { actor
       proposals: createdProposals.length,
       openProposals: createdProposals.filter((proposal) => proposal.status === "proposed").length,
       artifacts: createdArtifacts.length,
+      modelAttachments: createdAttachments.length,
       semanticNodes: semanticNodeDelta.count,
       semanticRelations: semanticRelationDelta.count,
     },
@@ -5466,6 +8685,7 @@ async function updateNewsroomSummaryAfterAnalysisImport(client, changes, { actor
       imports: {
         byCorpus: countDelta(createdImportRuns, "corpusId", "unknown"),
       },
+      modelAttachments: modelAttachmentFacetDelta(createdAttachments),
       semanticNodes: semanticNodeDelta.facets,
       semanticRelations: semanticRelationDelta.facets,
     },
@@ -5544,6 +8764,24 @@ function nestedCountDelta(items, outerKey, innerKey, outerDefaultValue, innerDef
     counts[outer][inner] = (counts[outer][inner] ?? 0) + 1;
   }
   return counts;
+}
+
+function modelAttachmentFacetDelta(attachments) {
+  return {
+    byOwnerKind: countDelta(attachments, "ownerKind", "unknown"),
+    byRole: countDelta(attachments, "role", "unknown"),
+    byMediaType: countDelta(attachments, "mediaType", "unknown"),
+    byStatus: countDelta(attachments, "status", "unknown"),
+  };
+}
+
+function assignmentEventMetadataAttachmentFacetDelta() {
+  return {
+    byOwnerKind: { assignmentEvent: 1 },
+    byRole: { metadata: 1 },
+    byMediaType: { "application/json": 1 },
+    byStatus: { active: 1 },
+  };
 }
 
 function assignmentsWithSummarySection(assignments) {
@@ -6482,6 +9720,7 @@ async function updateNewsroomSummaryAfterReferenceAccession(client, changes, { a
     createdByModel.get(record.modelName).push(record.expected);
   }
   const createdRelations = createdByModel.get("SemanticRelation") ?? [];
+  const createdModelAttachments = createdByModel.get("ModelAttachment") ?? [];
   const referenceDelta = computeCurrentReferenceDeltaFromChanges(changes);
   await client.updateNewsroomSummary({
     source: "incremental",
@@ -6490,6 +9729,7 @@ async function updateNewsroomSummaryAfterReferenceAccession(client, changes, { a
       importRuns: createdByModel.get("KnowledgeImportRun")?.length ?? 0,
       referenceAttachments: createdByModel.get("ReferenceAttachment")?.length ?? 0,
       references: referenceDelta.countDelta,
+      modelAttachments: createdModelAttachments.length,
       semanticRelations: createdRelations.length,
     },
     referenceStatusDeltas: referenceDelta.statusDeltas,
@@ -6499,6 +9739,7 @@ async function updateNewsroomSummaryAfterReferenceAccession(client, changes, { a
         byCorpus: referenceDelta.corpusDeltas,
         statusByCorpus: referenceDelta.statusByCorpusDeltas,
       },
+      modelAttachments: modelAttachmentFacetDelta(createdModelAttachments),
       semanticRelations: {
         byRelationTypeKey: countDelta(createdRelations, "relationTypeKey", "unknown"),
         byRelationDomain: countDelta(createdRelations, "relationDomain", "unknown"),
@@ -6675,6 +9916,29 @@ function referenceCurationMessagesByReferenceLineage(messages, relations) {
     commentsByReferenceLineage.set(relation.objectLineageId, entries);
   }
   return commentsByReferenceLineage;
+}
+
+async function hydrateReferenceCurationMessages(client, messages, relations) {
+  const curationMessageIds = new Set();
+  for (const relation of relations) {
+    if (relation.relationState !== "current") continue;
+    if ((relation.relationTypeKey ?? relation.predicate) !== "comment") continue;
+    if (relation.subjectKind !== "message" || relation.objectKind !== "reference") continue;
+    curationMessageIds.add(relation.subjectId);
+  }
+  return Promise.all(messages.map(async (message) => {
+    if (!curationMessageIds.has(message.id)) return message;
+    const metadata = await readJsonModelPayload(client, "message", message.id, "metadata", "metadata");
+    return metadata ? { ...message, metadata } : message;
+  }));
+}
+
+async function hydrateRejectedReferenceMetadata(client, references) {
+  return Promise.all(references.map(async (reference) => {
+    if (normalizeReferenceCurationStatus(reference.curationStatus, "pending") !== "rejected") return reference;
+    const metadata = await readJsonModelPayload(client, "reference", reference.id, "metadata", "metadata");
+    return metadata ? { ...reference, metadata } : reference;
+  }));
 }
 
 function isCurrentAcceptedReference(reference) {
@@ -7188,7 +10452,7 @@ async function applyAssignmentAction({
   if (!current) throw new Error(`Assignment ${assignmentId} was not found.`);
   const now = new Date().toISOString();
   const nextStatus = assignmentStatusForAction(action, current.status);
-  const currentMetadata = parseJsonish(current.metadata);
+  const currentMetadata = await assignmentMetadata(client, current);
   const update = {
     id: assignmentId,
     assignmentTypeKey: current.assignmentTypeKey,
@@ -7232,8 +10496,9 @@ async function applyAssignmentAction({
     update.canceledAt = null;
   }
   await client.upsert("Assignment", update);
+  const eventId = `assignment-event-${assignmentId}-${now.replace(/[^0-9TZ]/g, "")}`;
   await client.upsert("AssignmentEvent", {
-    id: `assignment-event-${assignmentId}-${now.replace(/[^0-9TZ]/g, "")}`,
+    id: eventId,
     assignmentId,
     assignmentTypeKey: current.assignmentTypeKey,
     queueKey: current.queueKey,
@@ -7244,15 +10509,22 @@ async function applyAssignmentAction({
     actorLabel: actorLabel ?? options["assignee-key"] ?? options.assignee ?? authClaims.email ?? authClaims.sub ?? "jwt-worker",
     note: options.note ?? null,
     createdAt: now,
-    metadata: JSON.stringify({
-      source: "content-cli",
-      kind: `assignment.action.${action}`,
-      ...(action === "claim" ? {
-        assigneeKey: update.assigneeKey ?? null,
-        claimExpiresAt: update.claimExpiresAt ?? null,
-        previousAssigneeKey: current.assigneeKey ?? null,
-      } : {}),
-    }),
+  });
+  await upsertModelPayloadForExistingRecord(client, {
+    modelName: "AssignmentEvent",
+    expected: {
+      id: eventId,
+      createdAt: now,
+      metadata: JSON.stringify({
+        source: "content-cli",
+        kind: `assignment.action.${action}`,
+        ...(action === "claim" ? {
+          assigneeKey: update.assigneeKey ?? null,
+          claimExpiresAt: update.claimExpiresAt ?? null,
+          previousAssigneeKey: current.assigneeKey ?? null,
+        } : {}),
+      }),
+    },
   });
   const statusDeltas = current.status === nextStatus
     ? {}
@@ -7262,6 +10534,7 @@ async function applyAssignmentAction({
     source: "incremental",
     countDeltas: {
       assignmentEvents: 1,
+      modelAttachments: 1,
     },
     assignmentStatusDeltas: statusDeltas,
     facetDeltas: {
@@ -7283,6 +10556,7 @@ async function applyAssignmentAction({
               },
             },
       },
+      modelAttachments: assignmentEventMetadataAttachmentFacetDelta(),
     },
   }, {
     actorLabel: actorLabel ?? options["assignee-key"] ?? options.assignee ?? authClaims.email ?? authClaims.sub ?? "jwt-worker",
@@ -7290,6 +10564,7 @@ async function applyAssignmentAction({
   });
   return {
     assignment: update,
+    eventId,
     fromStatus: current.status,
     toStatus: nextStatus,
   };
@@ -7340,15 +10615,26 @@ async function appendAssignmentFailedEvent({
     actorLabel: actorLabel ?? "papyrus-content-cli",
     note: note ?? "Assignment execution failed.",
     createdAt: now,
-    metadata: JSON.stringify({
-      source: "content-cli",
-      ...metadata,
-    }),
+  });
+  await upsertModelPayloadForExistingRecord(client, {
+    modelName: "AssignmentEvent",
+    expected: {
+      id: `assignment-event-${assignmentId}-failed-${timestampForPath(now)}`,
+      createdAt: now,
+      metadata: JSON.stringify({
+        source: "content-cli",
+        ...metadata,
+      }),
+    },
   });
   await client.updateNewsroomSummary({
     source: "incremental",
     countDeltas: {
       assignmentEvents: 1,
+      modelAttachments: 1,
+    },
+    facetDeltas: {
+      modelAttachments: assignmentEventMetadataAttachmentFacetDelta(),
     },
   }, {
     actorLabel: actorLabel ?? "papyrus-content-cli",
@@ -7365,8 +10651,9 @@ async function appendAssignmentPhaseEvent({
   metadata = {},
 }) {
   const now = new Date().toISOString();
+  const eventId = `assignment-event-${assignment.id}-${eventType}-${timestampForPath(now)}`;
   await client.upsert("AssignmentEvent", {
-    id: `assignment-event-${assignment.id}-${eventType}-${timestampForPath(now)}`,
+    id: eventId,
     assignmentId: assignment.id,
     assignmentTypeKey: assignment.assignmentTypeKey,
     queueKey: assignment.queueKey,
@@ -7377,15 +10664,26 @@ async function appendAssignmentPhaseEvent({
     actorLabel: actorLabel ?? "papyrus-content-cli",
     note: note ?? null,
     createdAt: now,
-    metadata: JSON.stringify({
-      source: "content-cli",
-      ...metadata,
-    }),
+  });
+  await upsertModelPayloadForExistingRecord(client, {
+    modelName: "AssignmentEvent",
+    expected: {
+      id: eventId,
+      createdAt: now,
+      metadata: JSON.stringify({
+        source: "content-cli",
+        ...metadata,
+      }),
+    },
   });
   await client.updateNewsroomSummary({
     source: "incremental",
     countDeltas: {
       assignmentEvents: 1,
+      modelAttachments: 1,
+    },
+    facetDeltas: {
+      modelAttachments: assignmentEventMetadataAttachmentFacetDelta(),
     },
   }, {
     actorLabel: actorLabel ?? "papyrus-content-cli",
@@ -7423,11 +10721,8 @@ function assignmentSortKey(assignment) {
 }
 
 function assignmentSectionKey(assignment) {
-  const metadata = parseJsonish(assignment?.metadata);
   return normalizeCliString(assignment?.sectionKey)
-    ?? normalizeCliString(metadata.sectionKey)
     ?? normalizeCliString(assignment?.sectionId)
-    ?? normalizeCliString(metadata.sectionId)
     ?? null;
 }
 
@@ -7442,6 +10737,54 @@ function assignmentSectionQueueStatusKey(assignment, status = assignment?.status
   const queueKey = normalizeCliString(assignment?.queueKey);
   const normalizedStatus = normalizeCliString(status) ?? "open";
   return sectionKey && queueKey ? `${sectionKey}#${queueKey}#${normalizedStatus}` : null;
+}
+
+function knowledgeImportRunCorpusKindKey(importRun) {
+  const corpusId = normalizeCliString(importRun?.corpusId);
+  const importKind = normalizeCliString(importRun?.importKind);
+  return corpusId && importKind ? `${corpusId}#${importKind}` : null;
+}
+
+function assignmentSectionIndexPatch(assignment, { validSectionKeys = null } = {}) {
+  let sectionKey = assignmentSectionKey(assignment);
+  if (sectionKey && validSectionKeys && !validSectionKeys.has(sectionKey)) sectionKey = null;
+  const status = normalizeCliString(assignment?.status) ?? "open";
+  const queueKey = normalizeCliString(assignment?.queueKey);
+  const topicScopeCategoryKeys = Array.isArray(assignment?.topicScopeCategoryKeys)
+    ? assignment.topicScopeCategoryKeys.map((entry) => normalizeCliString(entry)).filter(Boolean)
+    : [];
+  return {
+    sectionId: sectionKey ? (normalizeCliString(assignment?.sectionId) ?? sectionKey) : null,
+    sectionKey,
+    sectionType: normalizeSectionTypeForAssignment(assignment?.sectionType),
+    sectionStatusKey: sectionKey ? `${sectionKey}#${status}` : null,
+    sectionQueueStatusKey: sectionKey && queueKey ? `${sectionKey}#${queueKey}#${status}` : null,
+    primaryFocusCategoryKey: normalizeCliString(assignment?.primaryFocusCategoryKey),
+    topicScopeCategoryKeys,
+  };
+}
+
+function normalizeSectionTypeForAssignment(value) {
+  const normalized = normalizeCliString(value)?.toLowerCase() ?? null;
+  if (normalized === "rotating") return "floating";
+  return normalized;
+}
+
+function assignmentOperationalIndexPatch(assignment) {
+  return assignmentSectionIndexPatch(assignment);
+}
+
+function assignmentOperationalIndexChanged(current, expected) {
+  for (const key of ["sectionId", "sectionKey", "sectionType", "sectionStatusKey", "sectionQueueStatusKey", "primaryFocusCategoryKey"]) {
+    if ((current[key] ?? null) !== (expected[key] ?? null)) return true;
+  }
+  const currentScope = Array.isArray(current.topicScopeCategoryKeys) ? current.topicScopeCategoryKeys.filter(Boolean) : [];
+  const expectedScope = Array.isArray(expected.topicScopeCategoryKeys) ? expected.topicScopeCategoryKeys.filter(Boolean) : [];
+  return stableJson(currentScope) !== stableJson(expectedScope);
+}
+
+function assignmentSectionIndexChanged(current, expected) {
+  return assignmentOperationalIndexChanged(current, expected);
 }
 
 function compareAssignmentQueueOrder(left, right) {
@@ -7560,6 +10903,7 @@ const KNOWLEDGE_MODELS = new Set([
   "KnowledgeCorpus",
   "KnowledgeImportRun",
   "KnowledgeRawPayload",
+  "ModelAttachment",
   "Message",
   "Reference",
   "ReferenceAttachment",
@@ -7576,6 +10920,7 @@ const KNOWLEDGE_VOLATILE_FIELDS = new Set([
   "importRunId",
   "latestImportRunId",
   "sourceSnapshotId",
+  "etag",
 ]);
 
 function ignoredRecordFields(modelName) {
@@ -7660,11 +11005,19 @@ function slugify(value) {
 function printUsage() {
   console.log("Usage:");
   console.log("  npm run content -- content inspect");
+  console.log("  npm run content -- content schema-check --type Assignment --fields sectionKey,sectionStatusKey,sectionQueueStatusKey");
   console.log("  npm run content -- content list articles");
   console.log("  npm run content -- content diff edition <edition-slug>");
   console.log("  npm run content -- content sync article <slug>");
   console.log("  npm run content -- content sync edition <edition-slug>");
   console.log("  npm run content -- content delete all --yes");
+  console.log("  npm run content -- content delete all --yes --delete-attachments [--json]");
+  console.log("  npm run content -- corpora status --config <steering.yml> [--corpus-key <key>] [--json]");
+  console.log("  npm run content -- corpora worker-bootstrap --config <steering.yml> [--corpus-key <key>] [--json]");
+  console.log("  npm run content -- corpora sync-from-cloud --config <steering.yml> --corpus-key <key> [--dry-run|--apply] [--include-analysis]");
+  console.log("  npm run content -- corpora sync-to-cloud --config <steering.yml> --corpus-key <key> [--dry-run|--apply] [--include-analysis]");
+  console.log("  npm run content -- newsroom prune-attachments [--apply] [--bucket <bucket>] [--prefix newsroom/payloads/] [--json]");
+  console.log("  npm --silent run content -- newsroom prune-attachments --json");
   console.log("  npm run content -- categories import-steering --bundle <steering-export.json>");
   console.log("  npm run content -- categories import-steering --corpus <path> --classifier <classifier-id>");
   console.log("  npm run content -- categories import-steering --config <steering.yml> --corpus-key <key>");
@@ -7688,14 +11041,23 @@ function printUsage() {
   console.log("  npm run content -- relations backfill --config corpora/papyrus-semantic-relation-types.yml --apply");
   console.log("  npm run content -- messages export-legacy-comments --output .papyrus-runs/<timestamp>/legacy-knowledge-comments.json");
   console.log("  npm run content -- messages import-legacy-comments --input .papyrus-runs/<timestamp>/legacy-knowledge-comments.json");
+  console.log("  npm run content -- references make-catalog --input <sources.md> --output <catalog.json>");
+  console.log("  npm run content -- references discover-citation-led --config corpora/papyrus-steering.yml --anchor-corpus-key AI-ML-research --from-year 2023 --to-year 2026 --anchor-limit 40 --citations-per-anchor 12 --feed-limit 20");
   console.log("  npm run content -- references prepare-catalog --config <steering.yml> --corpus-key <key> --catalog <catalog.json> --output <prepared.json>");
   console.log("  npm run content -- references register-catalog --config <steering.yml> --corpus-key <key> --catalog <catalog.json> --status pending --ingestion-rationale <text> --apply");
   console.log("  npm run content -- references register-catalog --config <steering.yml> --corpus-key <key> --catalog <catalog.json> --status rejected --reason-code out_of_scope --note <text> --apply");
+  console.log("  npm run content -- references register-catalog-split --config <steering.yml> --catalog <catalog.json> --research-corpus-key <key> --news-corpus-key <key> --status pending --apply");
   console.log("  npm run content -- references source-status --config <steering.yml> --corpus-key <key> --status all");
   console.log("  npm run content -- references create-accession-assignments --config <steering.yml> --corpus-key <key> --status pending --apply");
   console.log("  npm run content -- references accession-now --reference <reference-id> --assignee-key <worker-run-id>");
   console.log("  npm run content -- references extract-text-now --config <steering.yml> --corpus-key <key> --assignee-key <worker-run-id> --stage pass-through-text,pdf-text,metadata-text");
   console.log("  npm run content -- references attach-extracted-text --config <steering.yml> --corpus-key <key> --max-count 10 --apply");
+  console.log("  npm run content -- references create-identifier-backfill-assignment --config <steering.yml> --corpus-key AI-ML-research --types doi,arxiv_id,isbn13,publisher_item --apply");
+  console.log("  npm run content -- references identifier-backfill-now --config <steering.yml> --corpus-key AI-ML-research --types doi,arxiv_id --only-missing true --progress-every 25 --write-chunk-size 100 --use-llm false");
+  console.log("  npm run content -- references execute-identifier-backfill --assignment <assignment-id> [--resume .papyrus-runs/<run>/execution-manifest.json]");
+  console.log("  npm run content -- references create-doi-backfill-assignment --config <steering.yml> --corpus-key AI-ML-research --apply");
+  console.log("  npm run content -- references doi-backfill-now --config <steering.yml> --corpus-key AI-ML-research --only-missing-doi true --progress-every 25 --use-llm false");
+  console.log("  npm run content -- references execute-doi-backfill --assignment <assignment-id>");
   console.log("  npm run content -- references export-analysis-manifest --config <steering.yml> --corpus-key <key> --output <accepted-manifest.json>");
   console.log("  npm run content -- references export-scope-training --config <steering.yml> --corpus-key <key> --output <scope-training.json>");
   console.log("  npm run content -- references review-curation --reference <id> --action accept|reject|reopen|archive --reason-code out_of_scope --note <text>");
@@ -7705,14 +11067,15 @@ function printUsage() {
   console.log("  npm run content -- references unlabel --relation <authoritative-label-relation-id> --apply");
   console.log("  npm run content -- references labels --reference <reference-id|item-id>");
   console.log("  npm run content -- assignments list --queue <queue-key> --status open");
+  console.log("  npm run content -- assignments backfill-section-indexes --apply");
   console.log("  npm run content -- assignments for-object --kind reference --lineage <reference-lineage-id>");
   console.log("  npm run content -- assignments build-context --assignment <id> --context-profile reporting");
   console.log("  npm run content -- assignments research-packets --assignment <id>");
   console.log("  npm run content -- assignments events --assignment <id>");
   console.log("  npm run content -- assignments process-queue --type analysis.reindex --section technology --status open --max-count 10 --dry-run");
   console.log("  npm run content -- assignments process-queue --type analysis.reindex --section technology --status open --max-count 10 --max-runtime-seconds 3600 --stop-on-error false");
-  console.log("  npm run content -- assignments claim --assignment <id> --assignee-key <worker-run-id> --claim-ttl-seconds 3600");
-  console.log("  npm run content -- assignments complete --assignment <id> --note <text>");
+  console.log("  npm run content -- assignments claim --assignment <id> --assignee-key <worker-run-id> --claim-ttl-seconds 3600 [--json]");
+  console.log("  npm run content -- assignments complete --assignment <id> --note <text> [--json]");
   console.log("  npm run content -- analysis profiles --profiles corpora/papyrus-analysis-profiles.yml");
   console.log("  npm run content -- analysis validate-profiles --profiles corpora/papyrus-analysis-profiles.yml");
   console.log("  npm run content -- analysis reindex-plan --profile canonical-topic-classifier --corpus-key AI-ML-research --override bertopic_analysis.parameters.nr_topics=12");
@@ -7720,7 +11083,10 @@ function printUsage() {
   console.log("  npm run content -- analysis create-reindex-assignment --profile canonical-topic-classifier --corpus-key AI-ML-research --apply");
   console.log("  npm run content -- analysis run-now --profile canonical-topic-classifier --corpus-key AI-ML-research --section science --max-runtime-seconds 3600 --override bertopic_analysis.parameters.nr_topics=12");
   console.log("  npm run content -- analysis execute-assignment --assignment <analysis-assignment-id> --max-runtime-seconds 3600");
-  console.log("  npm run content -- newsroom recount-summary --apply");
+  console.log("  npm run content -- analysis graph-artifacts --corpus-key AI-ML-research [--json]");
+  console.log("  npm run content -- analysis import-graph-artifact --import-run <graph-import-run-id> --apply");
+  console.log("  npm run content -- newsroom recount-summary --apply [--json]");
+  console.log("  npm run content -- newsroom backfill-operational-indexes --apply [--json]");
   console.log("  npm run content -- newsroom backfill-feed-fields --apply");
   console.log("  npm run content -- newsroom import-sections --config corpora/papyrus-newsroom-sections.yml");
   console.log("  npm run content -- editions plan --date YYYY-MM-DD --section-targets desk.key:news,other.desk:history --dry-run");
@@ -7946,6 +11312,18 @@ function validateAuthoringClaims(claims) {
   if (!values.includes(expectedValue)) {
     throw new Error(`PAPYRUS_GRAPHQL_JWT does not include ${expectedValue} in claim ${claimName}.`);
   }
+}
+
+function assertJwtUsableForLongRun(claims, label, minRemainingSeconds = 15 * 60) {
+  if (!claims || typeof claims.exp !== "number") return;
+  const remainingSeconds = claims.exp - Math.floor(Date.now() / 1000);
+  if (remainingSeconds <= minRemainingSeconds) {
+    throw new Error(`PAPYRUS_GRAPHQL_JWT expires too soon for ${label}: ${remainingSeconds}s remaining. Refresh it before running.`);
+  }
+}
+
+function assertCurrentJwtUsableForLongRun(label, minRemainingSeconds = 15 * 60) {
+  assertJwtUsableForLongRun(decodeJwtClaims(getJwtToken()), label, minRemainingSeconds);
 }
 
 function getClaimValues(claims, name) {
