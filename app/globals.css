@@ -2599,6 +2599,11 @@ img {
   width: min(100%, 1120px);
 }
 
+.news-desk-modal__dialog--knowledge-query {
+  max-width: 760px;
+  width: min(100%, 760px);
+}
+
 .news-desk-modal__header {
   align-items: flex-start;
   border-bottom: 2px solid rgb(var(--rule-rgb) / 0.56);
@@ -2663,14 +2668,40 @@ img {
   gap: 12px;
 }
 
+.news-desk-knowledge-query-form {
+  display: grid;
+  gap: 12px;
+}
+
 .news-desk-topic-draft-form {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .news-desk-topic-draft-form label,
-.news-desk-topic-draft-confirm label {
+.news-desk-topic-draft-confirm label,
+.news-desk-knowledge-query-form label {
   display: grid;
   gap: 5px;
+}
+
+.news-desk-knowledge-query-form span {
+  color: var(--muted);
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.news-desk-knowledge-query-form input,
+.news-desk-knowledge-query-form textarea {
+  background: rgb(var(--paper-rgb) / 0.9);
+  border: 1px solid rgb(var(--rule-rgb) / 0.72);
+  color: var(--ink);
+  font: inherit;
+  line-height: 1.35;
+  padding: 8px 9px;
+  resize: vertical;
 }
 
 .news-desk-topic-draft-form label:has(textarea),
@@ -3169,6 +3200,135 @@ img {
   line-height: 1.42;
   margin: 0;
   overflow-wrap: anywhere;
+}
+
+.news-desk-knowledge-query-status {
+  align-items: center;
+  border: 1px solid rgb(var(--rule-rgb) / 0.44);
+  color: var(--muted-strong);
+  display: flex;
+  gap: 8px;
+  min-height: 34px;
+  padding: 8px 10px;
+}
+
+.news-desk-knowledge-query-status[data-state="error"] {
+  border-color: rgb(126 47 47 / 0.5);
+  color: rgb(126 47 47);
+}
+
+.news-desk-knowledge-query-status strong {
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 0.74rem;
+  letter-spacing: 0.02em;
+}
+
+.news-desk-knowledge-query-spinner {
+  animation: news-desk-spin 0.75s linear infinite;
+  border: 2px solid rgb(var(--rule-rgb) / 0.42);
+  border-top-color: var(--ink);
+  border-radius: 999px;
+  display: inline-block;
+  height: 14px;
+  width: 14px;
+}
+
+.news-desk-knowledge-query-result {
+  border-top: 2px solid rgb(var(--rule-rgb) / 0.52);
+  display: grid;
+  gap: 12px;
+  padding-top: 10px;
+}
+
+.news-desk-knowledge-query-result > header,
+.news-desk-knowledge-query-result > footer {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.news-desk-knowledge-query-result > header button {
+  background: transparent;
+  border: 1px solid var(--rule);
+  color: var(--ink);
+  cursor: pointer;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  padding: 6px 8px;
+  text-transform: uppercase;
+}
+
+.news-desk-knowledge-query-result > footer,
+.news-desk-knowledge-query-result details {
+  color: var(--muted);
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.news-desk-markdown-context {
+  display: grid;
+  gap: 9px;
+  overflow-wrap: anywhere;
+}
+
+.news-desk-markdown-context h3,
+.news-desk-markdown-context h4,
+.news-desk-markdown-context h5 {
+  color: rgb(var(--ink-solid-rgb) / var(--ink-display-alpha));
+  font-family: var(--font-serif), Georgia, "Times New Roman", serif;
+  font-weight: 900;
+  letter-spacing: 0;
+  line-height: 1.04;
+  margin: 4px 0 0;
+}
+
+.news-desk-markdown-context h3 {
+  font-size: 1.45rem;
+}
+
+.news-desk-markdown-context h4 {
+  border-top: 1px solid rgb(var(--rule-rgb) / 0.42);
+  font-size: 1.1rem;
+  padding-top: 8px;
+}
+
+.news-desk-markdown-context h5 {
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.news-desk-markdown-context p,
+.news-desk-markdown-context li {
+  color: var(--ink);
+  font-size: 0.9rem;
+  line-height: 1.43;
+  margin: 0;
+}
+
+.news-desk-markdown-context ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.news-desk-markdown-context code {
+  background: rgb(var(--rule-rgb) / 0.12);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.84em;
+  padding: 1px 3px;
+}
+
+@keyframes news-desk-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .news-desk-detail-line strong {

@@ -14,13 +14,16 @@ import {
   loadEditorFullNewsDeskDashboard,
   loadEditorMessagesData,
   loadEditorUserDirectoryData,
+  loadModelPayloadsForOwner,
   loadEditorReferencesData,
   loadEditorSemanticRelationsData,
   loadNewsroomAssignmentPage,
   loadNewsroomMessagePage,
   loadNewsroomReferencePage,
   loadNewsroomSemanticNodePage,
+  runNewsroomKnowledgeQuery,
   selectRootDeskCategoriesForDoctrine,
+  type KnowledgeQueryResponse,
   type NewsroomRecordPage,
 } from "./news-desk-taxonomy-client";
 import { useOptionalNewsDeskClient } from "./news-desk-client-provider";
@@ -42,6 +45,7 @@ import type {
   CategoryKeywordRecord,
   DoctrineRecord,
   MessageRecord,
+  HydratedModelPayload,
   NewsroomSummaryRecord,
   LexicalSteeringRuleRecord,
   NewsroomSectionRecord,
@@ -140,10 +144,33 @@ type NewsroomDataGridRow = {
   cells: ReactNode[];
 };
 type NewsroomDetailAction = {
+  ariaLabel?: string;
+  icon?: ReactNode;
   key: string;
   label: string;
   disabled?: boolean;
   onSelect: () => void;
+};
+
+type KnowledgeQueryAnchor = {
+  kind: "assignment" | "category" | "categorySet" | "item" | "message" | "reference" | "semanticNode";
+  id: string;
+  lineageId?: string | null;
+};
+
+type KnowledgeQueryTarget = {
+  anchor: KnowledgeQueryAnchor;
+  title: string;
+  subtitle?: string | null;
+};
+
+type KnowledgeQueryControl = {
+  action: NewsroomDetailAction;
+  clear: () => void;
+  dialog: ReactNode;
+  error: string | null;
+  loading: boolean;
+  result: KnowledgeQueryResponse | null;
 };
 
 type NewsroomPagedRows<T> = {
@@ -3507,6 +3534,15 @@ function TopicsDeskView({
       .find((node) => node.categoryKey === focusedCategoryKey)
       ?? categoryToCategoryTreeNode(selectedRoot.category)
     : null;
+  const topicKnowledgeQuery = useNewsroomKnowledgeContext(focusedNode ? {
+    anchor: {
+      kind: "category",
+      id: focusedNode.id ?? focusedNode.categoryKey,
+      lineageId: categoryLineageId(focusedNode),
+    },
+    title: focusedNode.displayName,
+    subtitle: focusedNode.categoryKey,
+  } : null);
   const focusedCategory = focusedNode
     ? selectedCategorys.find((category) => category.categoryKey === focusedNode.categoryKey) ?? categoryTreeNodeToCategory(focusedNode)
     : selectedRoot?.category ?? null;
@@ -3697,6 +3733,7 @@ function TopicsDeskView({
       canExpandDetail={Boolean(selectedRoot)}
       detailOpen={isTopicDetailOpen}
       actions={topicActions}
+      utilityActions={[topicKnowledgeQuery.action]}
       lede={(
         <section className="news-desk-lede news-desk-assignment-lede" aria-labelledby="topic-management-title" data-news-desk-topic-lede>
           <div>
@@ -3799,6 +3836,7 @@ function TopicsDeskView({
             onLexicalRuleCreate={onLexicalRuleCreate}
             proposals={proposals}
             root={selectedRoot}
+            knowledgeQuery={topicKnowledgeQuery}
           />
         </section>
       ) : (
@@ -3807,6 +3845,7 @@ function TopicsDeskView({
         </section>
       )}
     />
+    {topicKnowledgeQuery.dialog}
     {topicDraftModal && selectedCategorySet ? (
       <TopicDraftActionModal
         categorySet={selectedCategorySet}
@@ -4071,6 +4110,15 @@ function ConceptsDeskView({
     ?? (requestedNodeLineageId ? selectSemanticNodeSummary(graph, semanticNodes, requestedNodeLineageId) : null)
     ?? categoryFilter
     ?? selectSemanticNodeSummary(graph, visibleNodes);
+  const conceptKnowledgeQuery = useNewsroomKnowledgeContext(selected ? {
+    anchor: {
+      kind: selected.kind === "category" ? "category" : "semanticNode",
+      id: selected.id ?? selected.lineageId,
+      lineageId: selected.lineageId,
+    },
+    title: selected.label,
+    subtitle: selected.subtitle,
+  } : null);
   const detail = categoryFilter
     ? `${visibleNodes.length} graph nodes associated with ${categoryFilter.label}`
     : `${summaryCountFromRecord(summary, "semanticNodes") || visibleNodes.length} graph nodes`;
@@ -4083,65 +4131,69 @@ function ConceptsDeskView({
     pushNewsroomDetailUrl("concepts", lineageId, false);
   };
   return (
-    <NewsroomListDetailShell
-      sectionKey="concepts"
-      canExpandDetail={Boolean(selected)}
-      detailOpen={isConceptDetailOpen}
-      lede={(
-        <section className="news-desk-lede news-desk-assignment-lede" aria-labelledby="semantic-concepts-title">
-          <div>
-            <h2 id="semantic-concepts-title">{formatDeskSectionHeadline("concepts")}</h2>
-            <p>{formatDeskSectionLede("concepts")}</p>
-          </div>
-        </section>
-      )}
-      list={(
-        <section className="category-steering-section category-steering-section--lead" aria-label={detail}>
-          <NewsroomDataGrid
-            columns={[
-              { key: "concept", label: "Concept" },
-              { key: "kind", label: "Kind" },
-              { key: "status", label: "Status" },
-              { key: "updated", label: "Updated" },
-            ]}
-            emptyLabel={feed.isLoading ? "Loading semantic concepts" : feed.error ?? "No semantic nodes imported"}
-            filterLabel="Concept kind"
-            filterOptions={[
-              { key: "", label: "All concept kinds", count: summaryCountFromRecord(summary, "semanticNodes") || visibleNodes.length },
-              ...nodeKinds.map((option) => ({ key: option.key, label: formatAssignmentTypeLabel(option.key), count: option.count })),
-            ]}
-            filterValue={nodeKindFilter}
-            footerLabel={feed.error ?? undefined}
-            hasMore={!categoryFilter && feed.hasMore}
-            isLoadingMore={feed.isLoadingMore}
-            metricValue={nodeStatusFilter}
-            metrics={[
-              { key: "", label: "All", count: summaryCountFromRecord(summary, "semanticNodes") || visibleNodes.length },
-              ...sortedCountOptions(nodeStatusCounts).map((option) => ({ key: option.key, label: option.key, count: option.count })),
-            ]}
-            onFilterChange={setNodeKindFilter}
-            onLoadMore={feed.loadMore}
-            onMetricChange={setNodeStatusFilter}
-            onSelect={selectNode}
-            rows={visibleNodes.map((node) => {
-              const lineageId = node.lineageId ?? node.id;
-              return {
-                id: lineageId,
-                cells: [
-                  node.displayName ?? node.nodeKey,
-                  node.nodeKind,
-                  node.status,
-                  formatDateTime(node.updatedAt ?? node.createdAt ?? node.versionCreatedAt ?? ""),
-                ],
-              };
-            })}
-            selectedId={selected?.kind === "semanticNode" ? selected.lineageId : null}
-          />
-        </section>
-      )}
-      onCloseDetail={() => setIsConceptDetailOpen(false)}
-      detail={<SemanticDetailPanel graph={graph} selected={selected} />}
-    />
+    <>
+      <NewsroomListDetailShell
+        sectionKey="concepts"
+        canExpandDetail={Boolean(selected)}
+        detailOpen={isConceptDetailOpen}
+        utilityActions={[conceptKnowledgeQuery.action]}
+        lede={(
+          <section className="news-desk-lede news-desk-assignment-lede" aria-labelledby="semantic-concepts-title">
+            <div>
+              <h2 id="semantic-concepts-title">{formatDeskSectionHeadline("concepts")}</h2>
+              <p>{formatDeskSectionLede("concepts")}</p>
+            </div>
+          </section>
+        )}
+        list={(
+          <section className="category-steering-section category-steering-section--lead" aria-label={detail}>
+            <NewsroomDataGrid
+              columns={[
+                { key: "concept", label: "Concept" },
+                { key: "kind", label: "Kind" },
+                { key: "status", label: "Status" },
+                { key: "updated", label: "Updated" },
+              ]}
+              emptyLabel={feed.isLoading ? "Loading semantic concepts" : feed.error ?? "No semantic nodes imported"}
+              filterLabel="Concept kind"
+              filterOptions={[
+                { key: "", label: "All concept kinds", count: summaryCountFromRecord(summary, "semanticNodes") || visibleNodes.length },
+                ...nodeKinds.map((option) => ({ key: option.key, label: formatAssignmentTypeLabel(option.key), count: option.count })),
+              ]}
+              filterValue={nodeKindFilter}
+              footerLabel={feed.error ?? undefined}
+              hasMore={!categoryFilter && feed.hasMore}
+              isLoadingMore={feed.isLoadingMore}
+              metricValue={nodeStatusFilter}
+              metrics={[
+                { key: "", label: "All", count: summaryCountFromRecord(summary, "semanticNodes") || visibleNodes.length },
+                ...sortedCountOptions(nodeStatusCounts).map((option) => ({ key: option.key, label: option.key, count: option.count })),
+              ]}
+              onFilterChange={setNodeKindFilter}
+              onLoadMore={feed.loadMore}
+              onMetricChange={setNodeStatusFilter}
+              onSelect={selectNode}
+              rows={visibleNodes.map((node) => {
+                const lineageId = node.lineageId ?? node.id;
+                return {
+                  id: lineageId,
+                  cells: [
+                    node.displayName ?? node.nodeKey,
+                    node.nodeKind,
+                    node.status,
+                    formatDateTime(node.updatedAt ?? node.createdAt ?? node.versionCreatedAt ?? ""),
+                  ],
+                };
+              })}
+              selectedId={selected?.kind === "semanticNode" ? selected.lineageId : null}
+            />
+          </section>
+        )}
+        onCloseDetail={() => setIsConceptDetailOpen(false)}
+        detail={<SemanticDetailPanel graph={graph} selected={selected} knowledgeQuery={conceptKnowledgeQuery} />}
+      />
+      {conceptKnowledgeQuery.dialog}
+    </>
   );
 }
 
@@ -4208,6 +4260,11 @@ function ReferencesDeskView({
     ?? (requestedReferenceLineageId ? references.find((reference) => (reference.lineageId ?? reference.id) === requestedReferenceLineageId) : null)
     ?? filteredReferences[0]
     ?? null;
+  const referenceKnowledgeQuery = useNewsroomKnowledgeContext(selectedReference ? {
+    anchor: { kind: "reference", id: selectedReference.id, lineageId: selectedReference.lineageId ?? selectedReference.id },
+    title: selectedReference.title ?? selectedReference.externalItemId,
+    subtitle: selectedReference.corpusId,
+  } : null);
   const selectedLineageId = selectedReference ? selectedReference.lineageId ?? selectedReference.id : null;
   const detail = categoryFilter
     ? `${filteredReferences.length} references classified as ${categoryFilter.label}`
@@ -4278,75 +4335,80 @@ function ReferencesDeskView({
   }, [selectedReference?.id]);
 
   return (
-    <NewsroomListDetailShell
-      sectionKey="references"
-      canExpandDetail={Boolean(selectedReference)}
-      detailOpen={isReferenceDetailOpen}
-      actions={referenceActions}
-      lede={(
-        <section className="news-desk-lede news-desk-assignment-lede" aria-labelledby="reference-management-title">
-          <div>
-            <h2 id="reference-management-title">{formatDeskSectionHeadline("references")}</h2>
-            <p>{formatDeskSectionLede("references")}</p>
-          </div>
-        </section>
-      )}
-      list={(
-        <section className="category-steering-section category-steering-section--lead" aria-label={detail}>
-          <NewsroomDataGrid
-            columns={[
-              { key: "reference", label: "Reference" },
-              { key: "status", label: "Status" },
-              { key: "media", label: "Media" },
-              { key: "updated", label: "Updated" },
-            ]}
-            emptyLabel={references.length ? "No references match this filter" : "No private references imported"}
-            filterLabel="Curation status"
-            filterOptions={[
-              { key: "", label: "All references", count: totalReferenceCount },
-              { key: "pending", label: "Prospects", count: statusCounts.pending ?? 0 },
-              { key: "accepted", label: "Accepted evidence", count: statusCounts.accepted ?? 0 },
-              { key: "rejected", label: "Scope rejections", count: statusCounts.rejected ?? 0 },
-              { key: "archived", label: "Archived", count: statusCounts.archived ?? 0 },
-            ]}
-            filterValue={statusFilter}
-            metricValue={metricStatusFilter}
-            metrics={[
-              { key: "", label: "All", count: totalReferenceCount },
-              { key: "pending", label: "Pending", count: statusCounts.pending ?? 0 },
-              { key: "accepted", label: "Accepted", count: statusCounts.accepted ?? 0 },
-              { key: "rejected", label: "Rejected", count: statusCounts.rejected ?? 0 },
-              { key: "archived", label: "Archived", count: statusCounts.archived ?? 0 },
-            ]}
-            footerLabel={feed.error ?? undefined}
-            hasMore={!isDemo && !categoryFilter && feed.hasMore}
-            isLoadingMore={feed.isLoadingMore}
-            onFilterChange={setStatusFilter}
-            onLoadMore={feed.loadMore}
-            onMetricChange={setMetricStatusFilter}
-            onSelect={selectReference}
-            rows={rows}
-            selectedId={selectedLineageId}
+    <>
+      <NewsroomListDetailShell
+        sectionKey="references"
+        canExpandDetail={Boolean(selectedReference)}
+        detailOpen={isReferenceDetailOpen}
+        actions={referenceActions}
+        utilityActions={[referenceKnowledgeQuery.action]}
+        lede={(
+          <section className="news-desk-lede news-desk-assignment-lede" aria-labelledby="reference-management-title">
+            <div>
+              <h2 id="reference-management-title">{formatDeskSectionHeadline("references")}</h2>
+              <p>{formatDeskSectionLede("references")}</p>
+            </div>
+          </section>
+        )}
+        list={(
+          <section className="category-steering-section category-steering-section--lead" aria-label={detail}>
+            <NewsroomDataGrid
+              columns={[
+                { key: "reference", label: "Reference" },
+                { key: "status", label: "Status" },
+                { key: "media", label: "Media" },
+                { key: "updated", label: "Updated" },
+              ]}
+              emptyLabel={references.length ? "No references match this filter" : "No private references imported"}
+              filterLabel="Curation status"
+              filterOptions={[
+                { key: "", label: "All references", count: totalReferenceCount },
+                { key: "pending", label: "Prospects", count: statusCounts.pending ?? 0 },
+                { key: "accepted", label: "Accepted evidence", count: statusCounts.accepted ?? 0 },
+                { key: "rejected", label: "Scope rejections", count: statusCounts.rejected ?? 0 },
+                { key: "archived", label: "Archived", count: statusCounts.archived ?? 0 },
+              ]}
+              filterValue={statusFilter}
+              metricValue={metricStatusFilter}
+              metrics={[
+                { key: "", label: "All", count: totalReferenceCount },
+                { key: "pending", label: "Pending", count: statusCounts.pending ?? 0 },
+                { key: "accepted", label: "Accepted", count: statusCounts.accepted ?? 0 },
+                { key: "rejected", label: "Rejected", count: statusCounts.rejected ?? 0 },
+                { key: "archived", label: "Archived", count: statusCounts.archived ?? 0 },
+              ]}
+              footerLabel={feed.error ?? undefined}
+              hasMore={!isDemo && !categoryFilter && feed.hasMore}
+              isLoadingMore={feed.isLoadingMore}
+              onFilterChange={setStatusFilter}
+              onLoadMore={feed.loadMore}
+              onMetricChange={setMetricStatusFilter}
+              onSelect={selectReference}
+              rows={rows}
+              selectedId={selectedLineageId}
+            />
+          </section>
+        )}
+        onCloseDetail={() => setIsReferenceDetailOpen(false)}
+        detail={(
+          <ReferenceDetailPanel
+            categories={categories}
+            categorySets={categorySets}
+            disabled={disabled}
+            graph={graph}
+            note={referenceCurationNote}
+            onNoteChange={setReferenceCurationNote}
+            onReasonCodeChange={setReferenceRejectionReasonCode}
+            onReviewTopicLabel={onReviewTopicLabel}
+            reasonCode={referenceRejectionReasonCode}
+            reference={selectedReference}
+            semanticRelations={semanticRelations}
+            knowledgeQuery={referenceKnowledgeQuery}
           />
-        </section>
-      )}
-      onCloseDetail={() => setIsReferenceDetailOpen(false)}
-      detail={(
-        <ReferenceDetailPanel
-          categories={categories}
-          categorySets={categorySets}
-          disabled={disabled}
-          graph={graph}
-          note={referenceCurationNote}
-          onNoteChange={setReferenceCurationNote}
-          onReasonCodeChange={setReferenceRejectionReasonCode}
-          onReviewTopicLabel={onReviewTopicLabel}
-          reasonCode={referenceRejectionReasonCode}
-          reference={selectedReference}
-          semanticRelations={semanticRelations}
-        />
-      )}
-    />
+        )}
+      />
+      {referenceKnowledgeQuery.dialog}
+    </>
   );
 }
 
@@ -4391,10 +4453,15 @@ function MessagesDeskView({
     ?? visibleMessages[0]
     ?? null;
   const selected = selectedMessage ? graph.resolve("message", selectedMessage.id) : null;
+  const messageKnowledgeQuery = useNewsroomKnowledgeContext(selectedMessage ? {
+    anchor: { kind: "message", id: selectedMessage.id },
+    title: selectedMessage.summary ?? "Stored message payload",
+    subtitle: selectedMessage.messageKind,
+  } : null);
   const rows = visibleMessages.map((message) => ({
     id: message.id,
     cells: [
-      message.summary ?? message.body,
+      message.summary ?? "Stored message payload",
       message.messageKind,
       message.messageDomain,
       formatDateTime(message.createdAt),
@@ -4411,51 +4478,57 @@ function MessagesDeskView({
     pushNewsroomDetailUrl("messages", id, isDemo);
   };
   return (
-    <NewsroomListDetailShell
-      sectionKey="messages"
-      canExpandDetail={Boolean(selectedMessage)}
-      detailOpen={isMessageDetailOpen}
-      lede={(
-        <section className="news-desk-lede news-desk-assignment-lede" aria-labelledby="message-management-title">
-          <div>
-            <h2 id="message-management-title">{formatDeskSectionHeadline("messages")}</h2>
-            <p>{formatDeskSectionLede("messages")}</p>
-          </div>
-        </section>
-      )}
-      list={(
-        <section className="category-steering-section category-steering-section--lead" aria-label="Messages">
-          <NewsroomDataGrid
-            columns={[
-              { key: "message", label: "Message" },
-              { key: "kind", label: "Kind" },
-              { key: "domain", label: "Domain" },
-              { key: "created", label: "Created" },
-            ]}
-            emptyLabel="No private messages recorded"
-            filterLabel="Message kind"
-            filterOptions={[
-              { key: "", label: "All kinds", count: totalMessageCount },
-              ...messageKinds.map((kind) => ({ key: kind, label: kind, count: messageKindCounts[kind] ?? 0 })),
-            ]}
-            filterValue={kindFilter}
-            metricValue={domainFilter}
-            metrics={metrics}
-            footerLabel={feed.error ?? undefined}
-            hasMore={!isDemo && feed.hasMore}
-            isLoadingMore={feed.isLoadingMore}
-            onFilterChange={setKindFilter}
-            onLoadMore={feed.loadMore}
-            onMetricChange={setDomainFilter}
-            onSelect={selectMessage}
-            rows={rows}
-            selectedId={selectedMessage?.id ?? null}
-          />
-        </section>
-      )}
-      onCloseDetail={() => setIsMessageDetailOpen(false)}
-      detail={selectedMessage ? <MessageDetailPanel graph={graph} message={selectedMessage} selected={selected} /> : <SemanticDetailPanel graph={graph} selected={selected} />}
-    />
+    <>
+      <NewsroomListDetailShell
+        sectionKey="messages"
+        canExpandDetail={Boolean(selectedMessage)}
+        detailOpen={isMessageDetailOpen}
+        utilityActions={[messageKnowledgeQuery.action]}
+        lede={(
+          <section className="news-desk-lede news-desk-assignment-lede" aria-labelledby="message-management-title">
+            <div>
+              <h2 id="message-management-title">{formatDeskSectionHeadline("messages")}</h2>
+              <p>{formatDeskSectionLede("messages")}</p>
+            </div>
+          </section>
+        )}
+        list={(
+          <section className="category-steering-section category-steering-section--lead" aria-label="Messages">
+            <NewsroomDataGrid
+              columns={[
+                { key: "message", label: "Message" },
+                { key: "kind", label: "Kind" },
+                { key: "domain", label: "Domain" },
+                { key: "created", label: "Created" },
+              ]}
+              emptyLabel="No private messages recorded"
+              filterLabel="Message kind"
+              filterOptions={[
+                { key: "", label: "All kinds", count: totalMessageCount },
+                ...messageKinds.map((kind) => ({ key: kind, label: kind, count: messageKindCounts[kind] ?? 0 })),
+              ]}
+              filterValue={kindFilter}
+              metricValue={domainFilter}
+              metrics={metrics}
+              footerLabel={feed.error ?? undefined}
+              hasMore={!isDemo && feed.hasMore}
+              isLoadingMore={feed.isLoadingMore}
+              onFilterChange={setKindFilter}
+              onLoadMore={feed.loadMore}
+              onMetricChange={setDomainFilter}
+              onSelect={selectMessage}
+              rows={rows}
+              selectedId={selectedMessage?.id ?? null}
+            />
+          </section>
+        )}
+        onCloseDetail={() => setIsMessageDetailOpen(false)}
+        detail={selectedMessage
+          ? <MessageDetailPanel graph={graph} message={selectedMessage} selected={selected} knowledgeQuery={messageKnowledgeQuery} />
+          : <SemanticDetailPanel graph={graph} selected={selected} knowledgeQuery={messageKnowledgeQuery} />}
+      />
+      {messageKnowledgeQuery.dialog}
+    </>
   );
 }
 
@@ -4619,6 +4692,7 @@ function NewsroomListDetailShell({
   list,
   onCloseDetail,
   sectionKey,
+  utilityActions = [],
 }: {
   actions?: NewsroomDetailAction[];
   canExpandDetail?: boolean;
@@ -4628,6 +4702,7 @@ function NewsroomListDetailShell({
   list: ReactNode;
   onCloseDetail?: () => void;
   sectionKey: "assignments" | "concepts" | "messages" | "references" | "topics";
+  utilityActions?: NewsroomDetailAction[];
 }) {
   const [detailMode, setDetailMode] = useState<"split" | "full">("split");
   const [isActionMenuOpen, setIsActionMenuOpen] = useState(false);
@@ -4635,6 +4710,7 @@ function NewsroomListDetailShell({
   const canToggleDetailMode = useMediaQuery("(min-width: 1101px)");
   const enabledActions = actions.filter((action) => !action.disabled);
   const hasActions = actions.length > 0;
+  const hasUtilityActions = utilityActions.length > 0;
 
   useEffect(() => {
     if (!canExpandDetail && detailMode === "full") setDetailMode("split");
@@ -4682,8 +4758,21 @@ function NewsroomListDetailShell({
             </button>
           </div>
         ) : null}
-        {(canToggleDetailMode || hasActions) && canExpandDetail ? (
+        {(canToggleDetailMode || hasActions || hasUtilityActions) && canExpandDetail ? (
           <div className="newsroom-list-detail-shell__detail-toolbar">
+            {utilityActions.map((action) => (
+              <button
+                type="button"
+                aria-label={action.ariaLabel ?? action.label}
+                className="news-desk-detail-toggle"
+                disabled={action.disabled}
+                key={action.key}
+                onClick={action.onSelect}
+                title={action.label}
+              >
+                {action.icon ?? action.label}
+              </button>
+            ))}
             {hasActions ? (
               <div className="newsroom-list-detail-shell__action-menu-wrap" ref={actionMenuRef}>
                 <button
@@ -4798,6 +4887,26 @@ function EllipsisIcon() {
   );
 }
 
+function SearchIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="news-desk-detail-toggle__icon"
+      fill="none"
+      height="24"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="3"
+      viewBox="0 0 24 24"
+      width="24"
+    >
+      <circle cx="11" cy="11" r="7" />
+      <path d="m20 20-3.5-3.5" />
+    </svg>
+  );
+}
+
 function NewsroomDataGrid({
   columns,
   emptyLabel,
@@ -4904,11 +5013,13 @@ function NewsroomDataGrid({
 function SemanticDetailPanel({
   disabled = false,
   graph,
+  knowledgeQuery,
   onReferenceReview,
   selected,
 }: {
   disabled?: boolean;
   graph: SemanticGraph;
+  knowledgeQuery?: KnowledgeQueryControl;
   onReferenceReview?: (reference: ReferenceRecord, action: ReferenceCurationAction, note?: string, reasonCode?: ReferenceRejectionReasonCode | null) => void;
   selected: SemanticObjectSummary | null;
 }) {
@@ -4942,41 +5053,459 @@ function SemanticDetailPanel({
           <strong>{selected.label}</strong>
           <span>{selected.subtitle ?? selected.lineageId}</span>
         </header>
-        {attachments.length ? (
-          <div className="news-desk-detail-block">
-            <p className="story-label">Attachments</p>
-            {attachments.map((attachment) => (
-              <div className="news-desk-detail-line" key={attachment.id}>
-                <span>{attachment.role}</span>
-                <strong>{attachment.storagePath ?? attachment.sourceUri ?? attachment.filename ?? "unmapped file"}</strong>
+        {knowledgeQuery ? <KnowledgeQueryStatus error={knowledgeQuery.error} loading={knowledgeQuery.loading} /> : null}
+        {knowledgeQuery?.result ? (
+          <KnowledgeQueryResultBlock result={knowledgeQuery.result} onClear={knowledgeQuery.clear} />
+        ) : (
+          <>
+            {attachments.length ? (
+              <div className="news-desk-detail-block">
+                <p className="story-label">Attachments</p>
+                {attachments.map((attachment) => (
+                  <div className="news-desk-detail-line" key={attachment.id}>
+                    <span>{attachment.role}</span>
+                    <strong>{attachment.storagePath ?? attachment.sourceUri ?? attachment.filename ?? "unmapped file"}</strong>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        ) : null}
-        {selectedReference && onReferenceReview ? (
-          <ReferenceCurationPanel
-            disabled={disabled}
-            note={referenceCurationNote}
-            onNoteChange={setReferenceCurationNote}
-            onReasonCodeChange={setReferenceRejectionReasonCode}
-            reasonCode={referenceRejectionReasonCode}
-            reference={selectedReference}
-          />
-        ) : null}
-        {messages.length ? (
-          <div className="news-desk-detail-block">
-            <p className="story-label">Messages</p>
-            {messages.slice(0, 4).map((message) => (
-              <div className="news-desk-detail-line" key={message.id}>
-                <span>{message.messageKind}</span>
-                <strong>{message.body}</strong>
+            ) : null}
+            {selectedReference && onReferenceReview ? (
+              <ReferenceCurationPanel
+                disabled={disabled}
+                note={referenceCurationNote}
+                onNoteChange={setReferenceCurationNote}
+                onReasonCodeChange={setReferenceRejectionReasonCode}
+                reasonCode={referenceRejectionReasonCode}
+                reference={selectedReference}
+              />
+            ) : null}
+            {messages.length ? (
+              <div className="news-desk-detail-block">
+                <p className="story-label">Messages</p>
+                {messages.slice(0, 4).map((message) => (
+                  <div className="news-desk-detail-line" key={message.id}>
+                    <span>{message.messageKind}</span>
+                    <strong>{message.summary ?? "Stored message payload"}</strong>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        ) : null}
-        <NeighborGroups groups={neighborGroups} />
+            ) : null}
+            <NeighborGroups groups={neighborGroups} />
+          </>
+        )}
       </article>
     </section>
+  );
+}
+
+function useModelPayloads(ownerKind: string, ownerId: string | null | undefined, roles: string[] = []) {
+  const rolesKey = roles.join("|");
+  const [state, setState] = useState<{
+    error: string | null;
+    loading: boolean;
+    payloads: HydratedModelPayload[];
+  }>({ error: null, loading: false, payloads: [] });
+
+  useEffect(() => {
+    if (!ownerId) {
+      setState({ error: null, loading: false, payloads: [] });
+      return;
+    }
+
+    let active = true;
+    setState((current) => ({ ...current, error: null, loading: true }));
+    loadModelPayloadsForOwner(ownerKind, ownerId, rolesKey ? rolesKey.split("|") : undefined)
+      .then((payloads) => {
+        if (active) setState({ error: null, loading: false, payloads });
+      })
+      .catch((error) => {
+        if (active) {
+          setState({
+            error: error instanceof Error ? error.message : "Could not load attached payloads.",
+            loading: false,
+            payloads: [],
+          });
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [ownerKind, ownerId, rolesKey]);
+
+  return state;
+}
+
+function modelPayloadByRole(payloads: HydratedModelPayload[], role: string): HydratedModelPayload | null {
+  return payloads.find((payload) => payload.attachment.role === role && payload.attachment.status !== "deleted")
+    ?? payloads.find((payload) => payload.attachment.role === role)
+    ?? null;
+}
+
+function useNewsroomKnowledgeContext(target: KnowledgeQueryTarget | null) {
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [semanticText, setSemanticText] = useState("");
+  const [maxTokens, setMaxTokens] = useState("1600");
+  const [state, setState] = useState<{
+    error: string | null;
+    loading: boolean;
+    result: KnowledgeQueryResponse | null;
+    targetKey: string | null;
+  }>({ error: null, loading: false, result: null, targetKey: null });
+  const targetKey = target ? knowledgeQueryTargetKey(target) : null;
+
+  useEffect(() => {
+    setDialogOpen(false);
+    setSemanticText("");
+    setState({ error: null, loading: false, result: null, targetKey });
+  }, [targetKey]);
+
+  const run = async () => {
+    if (!target) return;
+    const tokenBudget = Math.max(400, Math.min(20_000, Number.parseInt(maxTokens, 10) || 1600));
+    const request = buildNewsroomKnowledgeQueryInput(target, semanticText, tokenBudget);
+    setState((current) => ({ ...current, error: null, loading: true, targetKey }));
+    try {
+      const result = await runNewsroomKnowledgeQuery(request);
+      const text = result.context?.text?.trim();
+      if (!text) {
+        throw new Error("knowledgeQuery returned no markdown context.");
+      }
+      setState({ error: null, loading: false, result, targetKey });
+      setDialogOpen(false);
+    } catch (error) {
+      setState({ error: error instanceof Error ? error.message : "Knowledge query failed.", loading: false, result: null, targetKey });
+    }
+  };
+  const stateMatchesTarget = state.targetKey === targetKey;
+
+  return {
+    action: {
+      ariaLabel: "Search knowledge context",
+      disabled: !target || state.loading,
+      icon: <SearchIcon />,
+      key: "knowledge-search",
+      label: state.loading ? "Searching" : "Search Context",
+      onSelect: () => setDialogOpen(true),
+    } satisfies NewsroomDetailAction,
+    clear: () => setState({ error: null, loading: false, result: null, targetKey }),
+    dialog: target ? (
+      <KnowledgeQueryDialog
+        disabled={state.loading}
+        maxTokens={maxTokens}
+        semanticText={semanticText}
+        target={target}
+        onClose={() => setDialogOpen(false)}
+        onMaxTokensChange={setMaxTokens}
+        onRun={run}
+        onSemanticTextChange={setSemanticText}
+        open={dialogOpen}
+      />
+    ) : null,
+    error: stateMatchesTarget ? state.error : null,
+    loading: stateMatchesTarget ? state.loading : false,
+    result: stateMatchesTarget ? state.result : null,
+  };
+}
+
+function buildNewsroomKnowledgeQueryInput(target: KnowledgeQueryTarget, semanticText: string, maxTokens: number): Record<string, unknown> {
+  const anchor: Record<string, unknown> = {
+    kind: target.anchor.kind,
+    id: target.anchor.id,
+  };
+  if (target.anchor.lineageId) anchor.lineageId = target.anchor.lineageId;
+  return {
+    anchors: [anchor],
+    semanticQuery: semanticText.trim(),
+    scope: {
+      depth: 1,
+      topK: 18,
+      relatedRecordLimit: 8,
+    },
+    profile: "editor",
+    ranking: {
+      profile: "balanced",
+      diversity: "balanced",
+    },
+    output: {
+      format: "markdown",
+      maxTokens,
+    },
+  };
+}
+
+function knowledgeQueryTargetKey(target: KnowledgeQueryTarget): string {
+  return `${target.anchor.kind}:${target.anchor.lineageId ?? target.anchor.id}`;
+}
+
+function KnowledgeQueryDialog({
+  disabled,
+  maxTokens,
+  onClose,
+  onMaxTokensChange,
+  onRun,
+  onSemanticTextChange,
+  open,
+  semanticText,
+  target,
+}: {
+  disabled: boolean;
+  maxTokens: string;
+  onClose: () => void;
+  onMaxTokensChange: (value: string) => void;
+  onRun: () => void;
+  onSemanticTextChange: (value: string) => void;
+  open: boolean;
+  semanticText: string;
+  target: KnowledgeQueryTarget;
+}) {
+  useEffect(() => {
+    if (!open) return;
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose, open]);
+
+  if (!open) return null;
+
+  return (
+    <div
+      className="news-desk-modal"
+      data-news-desk-knowledge-query-modal
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !disabled) onClose();
+      }}
+    >
+      <div className="news-desk-modal__dialog news-desk-modal__dialog--knowledge-query" role="dialog" aria-modal="true" aria-labelledby="knowledge-query-title">
+        <header className="news-desk-modal__header">
+          <div>
+            <p className="story-label">Knowledge Query</p>
+            <h3 id="knowledge-query-title">{target.title}</h3>
+            <span>{target.anchor.kind} / {target.anchor.lineageId ?? target.anchor.id}</span>
+          </div>
+          <button type="button" disabled={disabled} onClick={onClose}>Close</button>
+        </header>
+        <div className="news-desk-knowledge-query-form">
+          <label>
+            <span>Semantic Focus</span>
+            <textarea
+              disabled={disabled}
+              rows={5}
+              value={semanticText}
+              onChange={(event) => onSemanticTextChange(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>Token Budget</span>
+            <input
+              disabled={disabled}
+              inputMode="numeric"
+              min="400"
+              max="20000"
+              step="100"
+              type="number"
+              value={maxTokens}
+              onChange={(event) => onMaxTokensChange(event.target.value)}
+            />
+          </label>
+        </div>
+        <footer className="news-desk-modal__actions">
+          <button type="button" disabled={disabled} onClick={onClose}>Cancel</button>
+          <button type="button" className="news-desk-assignment-create-button" disabled={disabled} onClick={onRun}>
+            {disabled ? "Searching" : "Run Query"}
+          </button>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+function KnowledgeQueryStatus({ error, loading }: { error: string | null; loading: boolean }) {
+  if (!loading && !error) return null;
+  return (
+    <div className="news-desk-knowledge-query-status" role="status" data-state={error ? "error" : "pending"}>
+      {loading ? <span className="news-desk-knowledge-query-spinner" aria-hidden="true" /> : null}
+      <strong>{error ?? "Searching knowledge context..."}</strong>
+    </div>
+  );
+}
+
+function KnowledgeQueryResultBlock({
+  onClear,
+  result,
+}: {
+  onClear: () => void;
+  result: KnowledgeQueryResponse;
+}) {
+  const markdown = result.context?.text?.trim() ?? "";
+  const warnings = result.warnings ?? [];
+  const totalTokens = result.context?.totalTokens;
+  return (
+    <div className="news-desk-knowledge-query-result" data-news-desk-knowledge-query-result>
+      <header>
+        <p className="story-label">Knowledge Context</p>
+        <button type="button" onClick={onClear}>Show Record</button>
+      </header>
+      <MarkdownContext text={markdown} />
+      <footer>
+        {typeof totalTokens === "number" ? <span>{totalTokens} tokens</span> : null}
+        {warnings.length ? <span>{warnings.length} warnings</span> : null}
+      </footer>
+      {warnings.length ? (
+        <details>
+          <summary>Warnings</summary>
+          <ul>
+            {warnings.map((warning, index) => <li key={`${warning}-${index}`}>{warning}</li>)}
+          </ul>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+function MarkdownContext({ text }: { text: string }) {
+  const blocks = useMemo(() => parseMarkdownBlocks(text), [text]);
+  return (
+    <div className="news-desk-markdown-context">
+      {blocks.map((block, index) => renderMarkdownBlock(block, index))}
+    </div>
+  );
+}
+
+type MarkdownBlock =
+  | { type: "code"; text: string }
+  | { type: "heading"; depth: number; text: string }
+  | { type: "list"; items: string[] }
+  | { type: "paragraph"; text: string };
+
+function parseMarkdownBlocks(text: string): MarkdownBlock[] {
+  const blocks: MarkdownBlock[] = [];
+  const lines = text.split(/\r?\n/);
+  let paragraph: string[] = [];
+  let list: string[] = [];
+  let code: string[] = [];
+  let inCode = false;
+  const flushParagraph = () => {
+    if (paragraph.length) {
+      blocks.push({ type: "paragraph", text: paragraph.join(" ").trim() });
+      paragraph = [];
+    }
+  };
+  const flushList = () => {
+    if (list.length) {
+      blocks.push({ type: "list", items: list });
+      list = [];
+    }
+  };
+  for (const line of lines) {
+    if (line.trim().startsWith("```")) {
+      if (inCode) {
+        blocks.push({ type: "code", text: code.join("\n") });
+        code = [];
+        inCode = false;
+      } else {
+        flushParagraph();
+        flushList();
+        inCode = true;
+      }
+      continue;
+    }
+    if (inCode) {
+      code.push(line);
+      continue;
+    }
+    const trimmed = line.trim();
+    if (!trimmed) {
+      flushParagraph();
+      flushList();
+      continue;
+    }
+    const heading = /^(#{1,4})\s+(.+)$/.exec(trimmed);
+    if (heading) {
+      flushParagraph();
+      flushList();
+      blocks.push({ type: "heading", depth: heading[1].length, text: heading[2].trim() });
+      continue;
+    }
+    const bullet = /^(?:[-*+]\s+|\d+[.)]\s+)(.+)$/.exec(trimmed);
+    if (bullet) {
+      flushParagraph();
+      list.push(bullet[1].trim());
+      continue;
+    }
+    flushList();
+    paragraph.push(trimmed);
+  }
+  flushParagraph();
+  flushList();
+  if (code.length) blocks.push({ type: "code", text: code.join("\n") });
+  return blocks;
+}
+
+function renderMarkdownBlock(block: MarkdownBlock, index: number): ReactNode {
+  const key = `${block.type}-${index}`;
+  if (block.type === "code") return <pre className="news-desk-analysis-command" key={key}>{block.text}</pre>;
+  if (block.type === "list") {
+    return (
+      <ul key={key}>
+        {block.items.map((item, itemIndex) => <li key={`${key}-${itemIndex}`}>{renderInlineMarkdown(item)}</li>)}
+      </ul>
+    );
+  }
+  if (block.type === "heading") {
+    if (block.depth <= 1) return <h3 key={key}>{block.text}</h3>;
+    if (block.depth === 2) return <h4 key={key}>{block.text}</h4>;
+    return <h5 key={key}>{block.text}</h5>;
+  }
+  return <p key={key}>{renderInlineMarkdown(block.text)}</p>;
+}
+
+function renderInlineMarkdown(text: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  const pattern = /(`[^`]+`|\*\*[^*]+\*\*)/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > lastIndex) nodes.push(text.slice(lastIndex, match.index));
+    const token = match[0];
+    if (token.startsWith("`")) {
+      nodes.push(<code key={`${match.index}-code`}>{token.slice(1, -1)}</code>);
+    } else {
+      nodes.push(<strong key={`${match.index}-strong`}>{token.slice(2, -2)}</strong>);
+    }
+    lastIndex = match.index + token.length;
+  }
+  if (lastIndex < text.length) nodes.push(text.slice(lastIndex));
+  return nodes;
+}
+
+function PayloadDetailBlock({
+  fallback,
+  label,
+  loading,
+  payload,
+  preferJson = false,
+}: {
+  fallback: string;
+  label: string;
+  loading: boolean;
+  payload: HydratedModelPayload | null;
+  preferJson?: boolean;
+}) {
+  const content = preferJson && payload?.json !== null && payload?.json !== undefined
+    ? JSON.stringify(payload.json, null, 2)
+    : payload?.text;
+  return (
+    <div className="news-desk-detail-block">
+      <p className="story-label">{label}</p>
+      {loading ? <p className="news-desk-detail-copy">Loading attached payload...</p> : null}
+      {!loading && payload?.error ? <p className="news-desk-detail-copy">{payload.error}</p> : null}
+      {!loading && !payload?.error && content ? <pre className="news-desk-analysis-command">{content}</pre> : null}
+      {!loading && !payload && <p className="news-desk-detail-copy">{fallback}</p>}
+      {!loading && payload && !payload.error && !content ? <p className="news-desk-detail-copy">{fallback}</p> : null}
+    </div>
   );
 }
 
@@ -4991,6 +5520,7 @@ function ReferenceDetailPanel({
   onReviewTopicLabel,
   reasonCode,
   reference,
+  knowledgeQuery,
   semanticRelations,
 }: {
   categories: CategorySteeringCategory[];
@@ -5003,8 +5533,10 @@ function ReferenceDetailPanel({
   onReviewTopicLabel: (input: { action: TopicLabelAction; category: CategorySteeringCategory; note?: string | null; reference: ReferenceRecord; sourceRelationId?: string | null }) => void;
   reasonCode: ReferenceRejectionReasonCode;
   reference: ReferenceRecord | null;
+  knowledgeQuery: KnowledgeQueryControl;
   semanticRelations: SemanticRelationRecord[];
 }) {
+  const referencePayloadState = useModelPayloads("reference", reference?.id, ["metadata"]);
   if (!reference) {
     return (
       <section className="category-steering-section" aria-label="Reference detail">
@@ -5018,6 +5550,7 @@ function ReferenceDetailPanel({
   const messages = graph.messagesFor("reference", lineageId);
   const neighborGroups = graph.neighbors("reference", lineageId);
   const authors = reference.authors?.filter(Boolean).join(", ");
+  const metadataPayload = modelPayloadByRole(referencePayloadState.payloads, "metadata");
 
   return (
     <section className="category-steering-section" aria-label="Reference detail" data-news-desk-reference-detail={lineageId}>
@@ -5028,87 +5561,126 @@ function ReferenceDetailPanel({
             <span>{[reference.curationStatus ?? "pending", reference.mediaType ?? "metadata", formatReferenceDate(reference)].filter(Boolean).join(" / ")}</span>
           </div>
         </header>
-        <div className="news-desk-detail-block">
-          <p className="story-label">Source Material</p>
-          <div className="news-desk-detail-line"><span>Corpus</span><strong>{reference.corpusId}</strong></div>
-          <div className="news-desk-detail-line"><span>External ID</span><strong>{reference.externalItemId}</strong></div>
-          {authors ? <div className="news-desk-detail-line"><span>Authors</span><strong>{authors}</strong></div> : null}
-          {reference.sourceUri ? <div className="news-desk-detail-line"><span>Source URI</span><strong>{reference.sourceUri}</strong></div> : null}
-          {reference.storagePath ? <div className="news-desk-detail-line"><span>Storage</span><strong>{reference.storagePath}</strong></div> : null}
-        </div>
-        <ReferenceCurationPanel
-          disabled={disabled}
-          note={note}
-          onNoteChange={onNoteChange}
-          onReasonCodeChange={onReasonCodeChange}
-          reasonCode={reasonCode}
-          reference={reference}
-        />
-        <ReferenceTopicLabelPanel
-          categories={categories}
-          categorySets={categorySets}
-          disabled={disabled}
-          onReviewTopicLabel={onReviewTopicLabel}
-          reference={reference}
-          semanticRelations={semanticRelations}
-        />
-        {attachments.length ? (
-          <div className="news-desk-detail-block">
-            <p className="story-label">Attachments</p>
-            {attachments.map((attachment) => (
-              <div className="news-desk-detail-line" key={attachment.id}>
-                <span>{attachment.role}</span>
-                <strong>{attachment.storagePath ?? attachment.sourceUri ?? attachment.filename ?? "unmapped file"}</strong>
+        <KnowledgeQueryStatus error={knowledgeQuery.error} loading={knowledgeQuery.loading} />
+        {knowledgeQuery.result ? (
+          <KnowledgeQueryResultBlock result={knowledgeQuery.result} onClear={knowledgeQuery.clear} />
+        ) : (
+          <>
+            <div className="news-desk-detail-block">
+              <p className="story-label">Source Material</p>
+              <div className="news-desk-detail-line"><span>Corpus</span><strong>{reference.corpusId}</strong></div>
+              <div className="news-desk-detail-line"><span>External ID</span><strong>{reference.externalItemId}</strong></div>
+              {authors ? <div className="news-desk-detail-line"><span>Authors</span><strong>{authors}</strong></div> : null}
+              {reference.sourceUri ? <div className="news-desk-detail-line"><span>Source URI</span><strong>{reference.sourceUri}</strong></div> : null}
+              {reference.storagePath ? <div className="news-desk-detail-line"><span>Storage</span><strong>{reference.storagePath}</strong></div> : null}
+            </div>
+            <ReferenceCurationPanel
+              disabled={disabled}
+              note={note}
+              onNoteChange={onNoteChange}
+              onReasonCodeChange={onReasonCodeChange}
+              reasonCode={reasonCode}
+              reference={reference}
+            />
+            <ReferenceTopicLabelPanel
+              categories={categories}
+              categorySets={categorySets}
+              disabled={disabled}
+              onReviewTopicLabel={onReviewTopicLabel}
+              reference={reference}
+              semanticRelations={semanticRelations}
+            />
+            {attachments.length ? (
+              <div className="news-desk-detail-block">
+                <p className="story-label">Attachments</p>
+                {attachments.map((attachment) => (
+                  <div className="news-desk-detail-line" key={attachment.id}>
+                    <span>{attachment.role}</span>
+                    <strong>{attachment.storagePath ?? attachment.sourceUri ?? attachment.filename ?? "unmapped file"}</strong>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        ) : null}
-        {messages.length ? (
-          <div className="news-desk-detail-block">
-            <p className="story-label">Messages</p>
-            {messages.slice(0, 4).map((message) => (
-              <div className="news-desk-detail-line" key={message.id}>
-                <span>{message.messageKind}</span>
-                <strong>{message.body}</strong>
+            ) : null}
+            <PayloadDetailBlock
+              fallback="Reference metadata is stored as metadata.json on S3."
+              label="Reference Metadata"
+              loading={referencePayloadState.loading}
+              payload={metadataPayload}
+              preferJson
+            />
+            {referencePayloadState.error ? <p className="news-desk-detail-copy">{referencePayloadState.error}</p> : null}
+            {messages.length ? (
+              <div className="news-desk-detail-block">
+                <p className="story-label">Messages</p>
+                {messages.slice(0, 4).map((message) => (
+                  <div className="news-desk-detail-line" key={message.id}>
+                    <span>{message.messageKind}</span>
+                    <strong>{message.summary ?? "Stored message payload"}</strong>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        ) : null}
-        <NeighborGroups groups={neighborGroups} />
+            ) : null}
+            <NeighborGroups groups={neighborGroups} />
+          </>
+        )}
       </article>
     </section>
   );
 }
 
-function MessageDetailPanel({ graph, message, selected }: { graph: SemanticGraph; message: MessageRecord; selected: SemanticObjectSummary | null }) {
+function MessageDetailPanel({
+  graph,
+  knowledgeQuery,
+  message,
+  selected,
+}: {
+  graph: SemanticGraph;
+  knowledgeQuery: KnowledgeQueryControl;
+  message: MessageRecord;
+  selected: SemanticObjectSummary | null;
+}) {
+  const messagePayloadState = useModelPayloads("message", message.id, ["message_body", "metadata"]);
+  const bodyPayload = modelPayloadByRole(messagePayloadState.payloads, "message_body");
+  const metadataPayload = modelPayloadByRole(messagePayloadState.payloads, "metadata");
   const neighborGroups = selected ? graph.neighbors(selected.kind, selected.lineageId) : [];
   return (
     <section className="category-steering-section" aria-label="Message detail" data-news-desk-message-detail={message.id}>
       <article className="news-desk-semantic-detail">
         <header>
           <div>
-            <strong>{message.summary ?? message.body}</strong>
+            <strong>{message.summary ?? "Stored message payload"}</strong>
             <span>{formatDateTime(message.createdAt)}</span>
           </div>
         </header>
-        <div className="news-desk-detail-block">
-          <p className="story-label">Body</p>
-          <p className="news-desk-detail-copy">{message.body}</p>
-        </div>
-        <div className="news-desk-detail-block">
-          <p className="story-label">Message Metadata</p>
-          <div className="news-desk-detail-line"><span>Status</span><strong>{message.status}</strong></div>
-          <div className="news-desk-detail-line"><span>Source</span><strong>{message.source ?? "unknown"}</strong></div>
-          <div className="news-desk-detail-line"><span>Author</span><strong>{message.authorLabel ?? message.authorSub ?? "unknown"}</strong></div>
-          {message.importRunId ? <div className="news-desk-detail-line"><span>Import run</span><strong>{message.importRunId}</strong></div> : null}
-        </div>
-        {message.metadata ? (
-          <div className="news-desk-detail-block">
-            <p className="story-label">Structured Payload</p>
-            <pre className="news-desk-analysis-command">{JSON.stringify(message.metadata, null, 2)}</pre>
-          </div>
-        ) : null}
-        <NeighborGroups groups={neighborGroups} />
+        <KnowledgeQueryStatus error={knowledgeQuery.error} loading={knowledgeQuery.loading} />
+        {knowledgeQuery.result ? (
+          <KnowledgeQueryResultBlock result={knowledgeQuery.result} onClear={knowledgeQuery.clear} />
+        ) : (
+          <>
+            <PayloadDetailBlock
+              fallback="Message body is stored as a private S3 payload attachment."
+              label="Body"
+              loading={messagePayloadState.loading}
+              payload={bodyPayload}
+            />
+            <div className="news-desk-detail-block">
+              <p className="story-label">Message Metadata</p>
+              <div className="news-desk-detail-line"><span>Status</span><strong>{message.status}</strong></div>
+              <div className="news-desk-detail-line"><span>Source</span><strong>{message.source ?? "unknown"}</strong></div>
+              <div className="news-desk-detail-line"><span>Author</span><strong>{message.authorLabel ?? message.authorSub ?? "unknown"}</strong></div>
+              {message.importRunId ? <div className="news-desk-detail-line"><span>Import run</span><strong>{message.importRunId}</strong></div> : null}
+            </div>
+            <PayloadDetailBlock
+              fallback="Message metadata is stored as metadata.json on S3."
+              label="Structured Payload"
+              loading={messagePayloadState.loading}
+              payload={metadataPayload}
+              preferJson
+            />
+            {messagePayloadState.error ? <p className="news-desk-detail-copy">{messagePayloadState.error}</p> : null}
+            <NeighborGroups groups={neighborGroups} />
+          </>
+        )}
       </article>
     </section>
   );
@@ -5353,6 +5925,11 @@ function AssignmentDeskView({
     ?? (initialAssignmentId ? assignments.find((assignment) => assignment.id === initialAssignmentId) : null)
     ?? filteredAssignments[0]
     ?? null;
+  const assignmentKnowledgeQuery = useNewsroomKnowledgeContext(selectedAssignment ? {
+    anchor: { kind: "assignment", id: selectedAssignment.id },
+    title: selectedAssignment.title,
+    subtitle: selectedAssignment.assignmentTypeKey,
+  } : null);
   const selectAssignment = (assignmentId: string) => {
     setSelectedAssignmentId(assignmentId);
     setIsAssignmentDetailOpen(true);
@@ -5432,6 +6009,7 @@ function AssignmentDeskView({
         canExpandDetail={Boolean(selectedAssignment)}
         detailOpen={isAssignmentDetailOpen}
         actions={assignmentActions}
+        utilityActions={[assignmentKnowledgeQuery.action]}
         lede={(
           <section className="news-desk-lede news-desk-assignment-lede" aria-labelledby="assignment-management-title">
             <div>
@@ -5479,6 +6057,7 @@ function AssignmentDeskView({
             messages={messages}
             note={assignmentActionNote}
             onNoteChange={setAssignmentActionNote}
+            knowledgeQuery={assignmentKnowledgeQuery}
           />
         ) : (
           <section className="category-steering-section">
@@ -5516,6 +6095,7 @@ function AssignmentDeskView({
           </div>
         </div>
       ) : null}
+      {assignmentKnowledgeQuery.dialog}
     </>
   );
 }
@@ -5656,6 +6236,7 @@ function AssignmentRow({
   assignment,
   disabled,
   graph,
+  knowledgeQuery,
   messages,
   note,
   onNoteChange,
@@ -5663,6 +6244,7 @@ function AssignmentRow({
   assignment: AssignmentRecord;
   disabled: boolean;
   graph: SemanticGraph;
+  knowledgeQuery: KnowledgeQueryControl;
   messages: MessageRecord[];
   note: string;
   onNoteChange: (note: string) => void;
@@ -5693,69 +6275,76 @@ function AssignmentRow({
             </p>
           </div>
         </header>
-        <p>{assignment.brief ?? "No assignment brief filed."}</p>
-        {context ? (
+        <KnowledgeQueryStatus error={knowledgeQuery.error} loading={knowledgeQuery.loading} />
+        {knowledgeQuery.result ? (
+          <KnowledgeQueryResultBlock result={knowledgeQuery.result} onClear={knowledgeQuery.clear} />
+        ) : (
           <>
-            <p className="news-desk-assignment-row__angle">
-              <span>{context.deskTitle ?? context.deskKey ?? "Desk"}</span>
-              {`${context.focusTitle ?? context.focusKey ?? "focus"} / ${context.targetSystemType ?? context.contextProfile ?? "context"}`}
-            </p>
-            {context.contextProfile || context.contextTokenBudget ? (
+            <p>{assignment.summary ?? "Detailed assignment brief is stored as a private S3 payload attachment."}</p>
+            {context ? (
+              <>
+                <p className="news-desk-assignment-row__angle">
+                  <span>{context.deskTitle ?? context.deskKey ?? "Desk"}</span>
+                  {`${context.focusTitle ?? context.focusKey ?? "focus"} / ${context.targetSystemType ?? context.contextProfile ?? "context"}`}
+                </p>
+                {context.contextProfile || context.contextTokenBudget ? (
+                  <p className="news-desk-assignment-row__angle">
+                    <span>Context</span>
+                    {[context.contextProfile, context.contextTokenBudget ? `${context.contextTokenBudget} tokens` : null].filter(Boolean).join(" / ")}
+                  </p>
+                ) : null}
+                {context.expectedEvidenceClasses.length ? (
+                  <p className="news-desk-assignment-row__angle">
+                    <span>Evidence</span>
+                    {context.expectedEvidenceClasses.slice(0, 2).join(" / ")}
+                  </p>
+                ) : null}
+                {context.comparisonQuestions.length ? (
+                  <p className="news-desk-assignment-row__angle">
+                    <span>Compare</span>
+                    {context.comparisonQuestions.slice(0, 2).join(" / ")}
+                  </p>
+                ) : null}
+              </>
+            ) : null}
+            {assignment.instructions ? (
               <p className="news-desk-assignment-row__angle">
-                <span>Context</span>
-                {[context.contextProfile, context.contextTokenBudget ? `${context.contextTokenBudget} tokens` : null].filter(Boolean).join(" / ")}
+                <span>Instructions</span>
+                {assignment.instructions}
               </p>
             ) : null}
-            {context.expectedEvidenceClasses.length ? (
-              <p className="news-desk-assignment-row__angle">
-                <span>Evidence</span>
-                {context.expectedEvidenceClasses.slice(0, 2).join(" / ")}
-              </p>
+            {analysisPlan ? (
+              <div className="news-desk-assignment-row__packets">
+                <p className="news-desk-assignment-row__angle">
+                  <span>Analysis plan</span>
+                  {`${analysisPlan.profileTitle} / ${analysisPlan.mode} / ${analysisPlan.corpusKey}`}
+                </p>
+                {analysisPlan.commandLines.slice(0, 2).map((commandLine) => (
+                  <pre className="news-desk-analysis-command" key={commandLine}>{commandLine}</pre>
+                ))}
+                <p className="news-desk-assignment-row__angle">
+                  <span>Destructive preview</span>
+                  {analysisPlan.destructiveSummary}
+                </p>
+              </div>
             ) : null}
-            {context.comparisonQuestions.length ? (
-              <p className="news-desk-assignment-row__angle">
-                <span>Compare</span>
-                {context.comparisonQuestions.slice(0, 2).join(" / ")}
-              </p>
+            {researchPackets.length ? (
+              <div className="news-desk-assignment-row__packets">
+                {researchPackets.slice(0, 2).map((packet) => (
+                  <p className="news-desk-assignment-row__angle" key={packet.id}>
+                    <span>Research packet</span>
+                    {`${packet.summary}${packet.proposedReferenceCount ? ` / ${packet.proposedReferenceCount} proposed refs` : ""}${packet.queryCount ? ` / ${packet.queryCount} queries` : ""}${packet.sourceDomains.length ? ` / ${packet.sourceDomains.slice(0, 2).join(", ")}` : ""}`}
+                  </p>
+                ))}
+              </div>
             ) : null}
+            <div className="news-desk-assignment-row__meta">
+              <span>{assignment.queueKey}</span>
+              <span>{assignment.assigneeKey ?? "unassigned"}</span>
+              <span>{targets.length ? targets.map((target) => target.label).join(" / ") : "no linked targets"}</span>
+            </div>
           </>
-        ) : null}
-        {assignment.instructions ? (
-          <p className="news-desk-assignment-row__angle">
-            <span>Instructions</span>
-            {assignment.instructions}
-          </p>
-        ) : null}
-        {analysisPlan ? (
-          <div className="news-desk-assignment-row__packets">
-            <p className="news-desk-assignment-row__angle">
-              <span>Analysis plan</span>
-              {`${analysisPlan.profileTitle} / ${analysisPlan.mode} / ${analysisPlan.corpusKey}`}
-            </p>
-            {analysisPlan.commandLines.slice(0, 2).map((commandLine) => (
-              <pre className="news-desk-analysis-command" key={commandLine}>{commandLine}</pre>
-            ))}
-            <p className="news-desk-assignment-row__angle">
-              <span>Destructive preview</span>
-              {analysisPlan.destructiveSummary}
-            </p>
-          </div>
-        ) : null}
-        {researchPackets.length ? (
-          <div className="news-desk-assignment-row__packets">
-            {researchPackets.slice(0, 2).map((packet) => (
-              <p className="news-desk-assignment-row__angle" key={packet.id}>
-                <span>Research packet</span>
-                {`${packet.summary} / ${packet.proposedReferenceCount} proposed refs / ${packet.queryCount} queries${packet.sourceDomains.length ? ` / ${packet.sourceDomains.slice(0, 2).join(", ")}` : ""}`}
-              </p>
-            ))}
-          </div>
-        ) : null}
-        <div className="news-desk-assignment-row__meta">
-          <span>{assignment.queueKey}</span>
-          <span>{assignment.assigneeKey ?? "unassigned"}</span>
-          <span>{targets.length ? targets.map((target) => target.label).join(" / ") : "no linked targets"}</span>
-        </div>
+        )}
       </div>
       <div className="news-desk-assignment-row__actions">
         <label>
@@ -7004,6 +7593,7 @@ function CanonicalTopicDetail({
   focusedCategoryKey,
   focusedNode,
   graph,
+  knowledgeQuery,
   lexicalSteeringRules,
   onAction,
   onFocusCategory,
@@ -7017,6 +7607,7 @@ function CanonicalTopicDetail({
   focusedCategoryKey: string | null;
   focusedNode: CategorySteeringCategoryTreeNode | null;
   graph: SemanticGraph;
+  knowledgeQuery?: KnowledgeQueryControl;
   lexicalSteeringRules: LexicalSteeringRuleRecord[];
   onAction: (proposal: CategorySteeringProposal, action: ReviewAction) => void;
   onFocusCategory: (categoryKey: string) => void;
@@ -7037,109 +7628,116 @@ function CanonicalTopicDetail({
           <span>{rootNode.shortTitle ?? deriveShortTitle(rootNode.displayName)}</span>
         </div>
       </header>
-      <dl className="news-desk-topic-detail__stats">
-        <div>
-          <dt>References</dt>
-          <dd>{rootReferenceCount}</dd>
-        </div>
-        <div>
-          <dt>Accepted Subtopics</dt>
-          <dd>{root.subcategorys.length}</dd>
-        </div>
-        <div>
-          <dt>Proposed</dt>
-          <dd>{root.proposedSubcategorys.length}</dd>
-        </div>
-        <div>
-          <dt>Notes</dt>
-          <dd>{relatedProposalCount}</dd>
-        </div>
-      </dl>
-      {rootNode.subtitle ? <p className="category-steering-categoryTree-subtitle">{rootNode.subtitle}</p> : null}
-      <p>{rootNode.description ?? "Accepted root category."}</p>
-      <div className="category-steering-categoryTree-evidence">
-        <span>{compactArray(rootNode.seedItemIds).length} seed refs</span>
-        <span>{compactArray(rootNode.holdoutItemIds).length} holdout refs</span>
-        <span>{rootNode.categoryKey}</span>
-      </div>
-
-      <div className="news-desk-topic-detail__body">
-        <div className="news-desk-topic-detail__subtopics">
-          <p className="category-steering-subcategory-list__label">Accepted Subtopics</p>
-          <div className="news-desk-topic-subtopic-buttons">
-            {(() => {
-              const rootLineageId = categoryLineageId(rootNode);
-              return (
-              <TopicFocusButton
-                active={focusedCategoryKey === rootNode.categoryKey}
-              conceptCount={semanticNodesForCategoryContext(graph, buildTopicDrilldownContext(root, rootNode, categoryByUid)).length}
-              count={referencesForCategoryContext(graph, buildTopicDrilldownContext(root, rootNode, categoryByUid)).length}
-              dataCategoryKey={rootNode.categoryKey}
-              label={rootNode.shortTitle ?? deriveShortTitle(rootNode.displayName)}
-              lineageId={rootLineageId}
-              rootCategoryKey={rootNode.categoryKey}
-              title={rootNode.displayName}
-              onClick={() => onFocusCategory(rootNode.categoryKey)}
-            />
-              );
-            })()}
-            {root.subcategorys.length ? root.subcategorys.map((subcategory) => (
-              (() => {
-                const subcategoryLineageId = categoryLineageId(subcategory);
-                return (
-                  <TopicFocusButton
-                    active={focusedCategoryKey === subcategory.categoryKey}
-                    conceptCount={semanticNodesForCategoryContext(graph, buildTopicDrilldownContext(root, subcategory, categoryByUid)).length}
-                    count={referencesForCategoryContext(graph, buildTopicDrilldownContext(root, subcategory, categoryByUid)).length}
-                    dataCategoryKey={subcategory.categoryKey}
-                    key={subcategory.id}
-                    label={subcategory.shortTitle ?? deriveShortTitle(subcategory.displayName)}
-                    lineageId={subcategoryLineageId}
-                    rootCategoryKey={rootNode.categoryKey}
-                    title={subcategory.displayName}
-                    onClick={() => onFocusCategory(subcategory.categoryKey)}
-                  />
-                );
-              })()
-            )) : null}
-          </div>
-          {!root.subcategorys.length ? <EmptyRow label="No accepted subtopics under this root" /> : null}
-
-          {root.proposedSubcategorys.length ? (
-            <div className="category-steering-subcategory-list category-steering-subcategory-list--proposed">
-              <p className="category-steering-subcategory-list__label">Proposed Subtopics</p>
-              {root.proposedSubcategorys.map((proposal) => (
-                <article className="category-steering-subcategory category-steering-subcategory--proposed" data-news-desk-proposed-subcategory={proposal.categoryKey ?? proposal.id} key={proposal.id}>
-                  <h4>{proposal.displayName ?? proposal.title}</h4>
-                  <span>{proposal.shortTitle ?? deriveShortTitle(proposal.displayName ?? proposal.title)}</span>
-                  {proposal.subtitle ? <p className="category-steering-categoryTree-subtitle">{proposal.subtitle}</p> : null}
-                  <p>{proposal.description ?? proposal.summary ?? "Candidate subtopic from steering proposals."}</p>
-                  <div className="category-steering-categoryTree-evidence">
-                    <span>{proposal.proposalKind}</span>
-                    <span>{proposal.status}</span>
-                    <span>{compactArray(proposal.evidenceItemIds).length} evidence refs</span>
-                    <span>{proposal.categoryKey ?? "new category"}</span>
-                  </div>
-                  <div className="category-steering-proposal__actions category-steering-subcategory__actions" aria-label={`${proposal.title} review actions`}>
-                    <button type="button" data-review-action="accept" disabled={disabled || proposal.status === "accepted"} onClick={() => onAction(proposal, "accept")}>Accept</button>
-                    <button type="button" data-review-action="reject" disabled={disabled || proposal.status === "rejected"} onClick={() => onAction(proposal, "reject")}>Reject</button>
-                  </div>
-                </article>
-              ))}
+      {knowledgeQuery ? <KnowledgeQueryStatus error={knowledgeQuery.error} loading={knowledgeQuery.loading} /> : null}
+      {knowledgeQuery?.result ? (
+        <KnowledgeQueryResultBlock result={knowledgeQuery.result} onClear={knowledgeQuery.clear} />
+      ) : (
+        <>
+          <dl className="news-desk-topic-detail__stats">
+            <div>
+              <dt>References</dt>
+              <dd>{rootReferenceCount}</dd>
             </div>
-          ) : null}
-        </div>
+            <div>
+              <dt>Accepted Subtopics</dt>
+              <dd>{root.subcategorys.length}</dd>
+            </div>
+            <div>
+              <dt>Proposed</dt>
+              <dd>{root.proposedSubcategorys.length}</dd>
+            </div>
+            <div>
+              <dt>Notes</dt>
+              <dd>{relatedProposalCount}</dd>
+            </div>
+          </dl>
+          {rootNode.subtitle ? <p className="category-steering-categoryTree-subtitle">{rootNode.subtitle}</p> : null}
+          <p>{rootNode.description ?? "Accepted root category."}</p>
+          <div className="category-steering-categoryTree-evidence">
+            <span>{compactArray(rootNode.seedItemIds).length} seed refs</span>
+            <span>{compactArray(rootNode.holdoutItemIds).length} holdout refs</span>
+            <span>{rootNode.categoryKey}</span>
+          </div>
 
-          <TopicSemanticContext
-          categoryContext={focusedNode ? buildTopicDrilldownContext(root, focusedNode, categoryByUid) : rootContext}
-          categoryKeywords={categoryKeywords}
-          disabled={disabled}
-          graph={graph}
-          lexicalSteeringRules={lexicalSteeringRules}
-          node={focusedNode ?? rootNode}
-          onLexicalRuleCreate={onLexicalRuleCreate}
-        />
-      </div>
+          <div className="news-desk-topic-detail__body">
+            <div className="news-desk-topic-detail__subtopics">
+              <p className="category-steering-subcategory-list__label">Accepted Subtopics</p>
+              <div className="news-desk-topic-subtopic-buttons">
+                {(() => {
+                  const rootLineageId = categoryLineageId(rootNode);
+                  return (
+                    <TopicFocusButton
+                      active={focusedCategoryKey === rootNode.categoryKey}
+                      conceptCount={semanticNodesForCategoryContext(graph, buildTopicDrilldownContext(root, rootNode, categoryByUid)).length}
+                      count={referencesForCategoryContext(graph, buildTopicDrilldownContext(root, rootNode, categoryByUid)).length}
+                      dataCategoryKey={rootNode.categoryKey}
+                      label={rootNode.shortTitle ?? deriveShortTitle(rootNode.displayName)}
+                      lineageId={rootLineageId}
+                      rootCategoryKey={rootNode.categoryKey}
+                      title={rootNode.displayName}
+                      onClick={() => onFocusCategory(rootNode.categoryKey)}
+                    />
+                  );
+                })()}
+                {root.subcategorys.length ? root.subcategorys.map((subcategory) => (
+                  (() => {
+                    const subcategoryLineageId = categoryLineageId(subcategory);
+                    return (
+                      <TopicFocusButton
+                        active={focusedCategoryKey === subcategory.categoryKey}
+                        conceptCount={semanticNodesForCategoryContext(graph, buildTopicDrilldownContext(root, subcategory, categoryByUid)).length}
+                        count={referencesForCategoryContext(graph, buildTopicDrilldownContext(root, subcategory, categoryByUid)).length}
+                        dataCategoryKey={subcategory.categoryKey}
+                        key={subcategory.id}
+                        label={subcategory.shortTitle ?? deriveShortTitle(subcategory.displayName)}
+                        lineageId={subcategoryLineageId}
+                        rootCategoryKey={rootNode.categoryKey}
+                        title={subcategory.displayName}
+                        onClick={() => onFocusCategory(subcategory.categoryKey)}
+                      />
+                    );
+                  })()
+                )) : null}
+              </div>
+              {!root.subcategorys.length ? <EmptyRow label="No accepted subtopics under this root" /> : null}
+
+              {root.proposedSubcategorys.length ? (
+                <div className="category-steering-subcategory-list category-steering-subcategory-list--proposed">
+                  <p className="category-steering-subcategory-list__label">Proposed Subtopics</p>
+                  {root.proposedSubcategorys.map((proposal) => (
+                    <article className="category-steering-subcategory category-steering-subcategory--proposed" data-news-desk-proposed-subcategory={proposal.categoryKey ?? proposal.id} key={proposal.id}>
+                      <h4>{proposal.displayName ?? proposal.title}</h4>
+                      <span>{proposal.shortTitle ?? deriveShortTitle(proposal.displayName ?? proposal.title)}</span>
+                      {proposal.subtitle ? <p className="category-steering-categoryTree-subtitle">{proposal.subtitle}</p> : null}
+                      <p>{proposal.description ?? proposal.summary ?? "Candidate subtopic from steering proposals."}</p>
+                      <div className="category-steering-categoryTree-evidence">
+                        <span>{proposal.proposalKind}</span>
+                        <span>{proposal.status}</span>
+                        <span>{compactArray(proposal.evidenceItemIds).length} evidence refs</span>
+                        <span>{proposal.categoryKey ?? "new category"}</span>
+                      </div>
+                      <div className="category-steering-proposal__actions category-steering-subcategory__actions" aria-label={`${proposal.title} review actions`}>
+                        <button type="button" data-review-action="accept" disabled={disabled || proposal.status === "accepted"} onClick={() => onAction(proposal, "accept")}>Accept</button>
+                        <button type="button" data-review-action="reject" disabled={disabled || proposal.status === "rejected"} onClick={() => onAction(proposal, "reject")}>Reject</button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+
+            <TopicSemanticContext
+              categoryContext={focusedNode ? buildTopicDrilldownContext(root, focusedNode, categoryByUid) : rootContext}
+              categoryKeywords={categoryKeywords}
+              disabled={disabled}
+              graph={graph}
+              lexicalSteeringRules={lexicalSteeringRules}
+              node={focusedNode ?? rootNode}
+              onLexicalRuleCreate={onLexicalRuleCreate}
+            />
+          </div>
+        </>
+      )}
     </article>
   );
 }
@@ -8044,7 +8642,9 @@ function countAssignmentsForDesk(
 
 function assignmentMetadataCategoryKey(assignment: AssignmentRecord): string | null {
   const metadata = parseMetadataObject(assignment.metadata);
-  return normalizeMetadataString(metadata?.focusCategoryKey)
+  return normalizeMetadataString(assignment.primaryFocusCategoryKey)
+    ?? normalizeMetadataStringList(assignment.topicScopeCategoryKeys)[0]
+    ?? normalizeMetadataString(metadata?.focusCategoryKey)
     ?? normalizeMetadataString(metadata?.deskCategoryKey)
     ?? normalizeMetadataString(metadata?.categoryKey)
     ?? normalizeMetadataString(metadata?.category_key)
@@ -8104,32 +8704,35 @@ function assignmentContextMetadata(assignment: AssignmentRecord): {
   comparisonQuestions: string[];
 } | null {
   const metadata = parseMetadataObject(assignment.metadata);
-  if (!metadata) return null;
-  const deskKey = normalizeMetadataString(metadata.deskCategoryKey)
-    ?? normalizeMetadataString(metadata.rootCategoryKey);
-  const focusKey = normalizeMetadataString(metadata.focusCategoryKey)
-    ?? normalizeMetadataString(metadata.researchLens);
+  const deskKey = normalizeMetadataString(assignment.sectionKey)
+    ?? normalizeMetadataString(assignment.sectionId)
+    ?? normalizeMetadataString(metadata?.deskCategoryKey)
+    ?? normalizeMetadataString(metadata?.rootCategoryKey);
+  const focusKey = normalizeMetadataString(assignment.primaryFocusCategoryKey)
+    ?? normalizeMetadataStringList(assignment.topicScopeCategoryKeys)[0]
+    ?? normalizeMetadataString(metadata?.focusCategoryKey)
+    ?? normalizeMetadataString(metadata?.researchLens);
   if (!deskKey && !focusKey) return null;
-  const contextTokenBudgetValue = typeof metadata.contextTokenBudget === "number"
+  const contextTokenBudgetValue = typeof metadata?.contextTokenBudget === "number"
     ? metadata.contextTokenBudget
-    : typeof metadata.contextTokenBudget === "string" && metadata.contextTokenBudget.trim()
+    : typeof metadata?.contextTokenBudget === "string" && metadata.contextTokenBudget.trim()
       ? Number(metadata.contextTokenBudget)
       : null;
   return {
     deskKey,
-    deskTitle: normalizeMetadataString(metadata.deskCategoryTitle)
-      ?? normalizeMetadataString(metadata.rootCategoryTitle)
+    deskTitle: normalizeMetadataString(metadata?.deskCategoryTitle)
+      ?? normalizeMetadataString(metadata?.rootCategoryTitle)
       ?? deskKey,
     focusKey,
-    focusTitle: normalizeMetadataString(metadata.focusCategoryTitle)
-      ?? normalizeMetadataString(metadata.researchLensTitle)
+    focusTitle: normalizeMetadataString(metadata?.focusCategoryTitle)
+      ?? normalizeMetadataString(metadata?.researchLensTitle)
       ?? focusKey,
-    contextProfile: normalizeMetadataString(metadata.contextProfile),
+    contextProfile: normalizeMetadataString(metadata?.contextProfile),
     contextTokenBudget: Number.isFinite(contextTokenBudgetValue) ? Number(contextTokenBudgetValue) : null,
-    contextSources: normalizeMetadataStringList(metadata.contextSources),
-    targetSystemType: normalizeMetadataString(metadata.targetSystemType),
-    expectedEvidenceClasses: normalizeMetadataStringList(metadata.expectedEvidenceClasses),
-    comparisonQuestions: normalizeMetadataStringList(metadata.comparisonQuestions),
+    contextSources: normalizeMetadataStringList(metadata?.contextSources),
+    targetSystemType: normalizeMetadataString(metadata?.targetSystemType),
+    expectedEvidenceClasses: normalizeMetadataStringList(metadata?.expectedEvidenceClasses),
+    comparisonQuestions: normalizeMetadataStringList(metadata?.comparisonQuestions),
   };
 }
 
@@ -8143,20 +8746,22 @@ type AssignmentAnalysisReindexSummary = {
 
 function assignmentAnalysisReindexMetadata(assignment: AssignmentRecord): AssignmentAnalysisReindexSummary | null {
   const metadata = parseMetadataObject(assignment.metadata);
-  if (!metadata || metadata.kind !== "analysis.reindex.requested") return null;
-  const commandPlan = normalizeMetadataObjectList(metadata.commandPlan);
+  if (!metadata && assignment.assignmentTypeKey !== "analysis.reindex") return null;
+  if (metadata && metadata.kind !== "analysis.reindex.requested" && assignment.assignmentTypeKey !== "analysis.reindex") return null;
+  const commandPlan = normalizeMetadataObjectList(metadata?.commandPlan);
   const commandLines = commandPlan.map((command) => {
     const executable = normalizeMetadataString(command.executable) ?? "uv";
     const args = Array.isArray(command.args) ? command.args.map((arg) => String(arg)) : [];
     return [executable, ...args].join(" ");
   }).filter(Boolean);
-  const destructivePlan = parseMetadataObject(metadata.destructivePlan);
+  const destructivePlan = parseMetadataObject(metadata?.destructivePlan);
   return {
-    profileTitle: normalizeMetadataString(metadata.analysisProfileTitle)
-      ?? normalizeMetadataString(metadata.analysisProfileKey)
+    profileTitle: normalizeMetadataString(metadata?.analysisProfileTitle)
+      ?? normalizeMetadataString(metadata?.analysisProfileKey)
+      ?? normalizeMetadataString(assignment.title)
       ?? "analysis profile",
-    mode: normalizeMetadataString(metadata.reindexMode) ?? "re-index",
-    corpusKey: normalizeMetadataString(metadata.corpusKey) ?? "corpus",
+    mode: normalizeMetadataString(metadata?.reindexMode) ?? "re-index",
+    corpusKey: normalizeMetadataString(metadata?.corpusKey) ?? assignment.corpusId ?? "corpus",
     commandLines,
     destructiveSummary: normalizeMetadataString(destructivePlan?.summary) ?? "Assignment creation does not execute Biblicus or mutate generated analysis.",
   };
@@ -8181,22 +8786,13 @@ function researchPacketsForAssignment(
   return candidates
     .filter((message) => message.messageKind === "research_packet")
     .map((message) => {
-      const metadata = parseMetadataObject(message.metadata);
-      const research = parseMetadataObject(metadata?.research);
-      if (!metadata || metadata.kind !== "research.packet.created") return null;
-      if (normalizeMetadataString(metadata.assignmentId) !== assignment.id) return null;
-      const sourceSnapshots = normalizeMetadataObjectList(research?.sourceSnapshots);
-      const proposedReferences = normalizeMetadataObjectList(research?.proposedReferences);
-      const sourceDomains = sourceSnapshots
-        .map((source) => normalizeMetadataString(source.source_domain) ?? normalizeMetadataString(source.sourceDomain) ?? normalizeMetadataString(source.url))
-        .filter((entry): entry is string => Boolean(entry));
       return {
         id: message.id,
-        summary: message.summary ?? message.body,
+        summary: message.summary ?? "Stored research packet",
         createdAt: message.createdAt,
-        queryCount: normalizeMetadataStringList(research?.queries).length,
-        proposedReferenceCount: proposedReferences.length,
-        sourceDomains,
+        queryCount: 0,
+        proposedReferenceCount: 0,
+        sourceDomains: [] as string[],
       };
     })
     .filter((packet): packet is AssignmentResearchPacketSummary => Boolean(packet))

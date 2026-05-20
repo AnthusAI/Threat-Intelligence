@@ -1,6 +1,7 @@
 "use client";
 
 import { generateClient } from "aws-amplify/data";
+import { downloadData } from "aws-amplify/storage";
 import type { Schema } from "../amplify/data/resource";
 import type { NewsDeskAppendix, NewsDeskCategoryTreeNode } from "../lib/content-types";
 import { createEmptyCategorySteeringDashboard } from "../lib/category-dashboard";
@@ -16,6 +17,8 @@ import type {
   CategorySteeringCategorySet,
   CategoryKeywordRecord,
   MessageRecord,
+  ModelAttachmentRecord,
+  HydratedModelPayload,
   NewsroomSummaryRecord,
   LexicalSteeringRuleRecord,
   AssignmentEventRecord,
@@ -41,7 +44,7 @@ const NEWSROOM_PAGE_LIMIT = 50;
 const NEWSROOM_MESSAGE_FEED_QUERY = `
   query ListMessagesByNewsroomFeedAndCreatedAt($newsroomFeedKey: String!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String, $filter: ModelMessageFilterInput) {
     listMessagesByNewsroomFeedAndCreatedAt(newsroomFeedKey: $newsroomFeedKey, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken, filter: $filter) {
-      items { id messageKind messageDomain status body summary source importRunId authorSub authorUserProfileId authorLabel createdAt updatedAt newsroomFeedKey metadata }
+      items { id messageKind messageDomain status summary source importRunId authorSub authorUserProfileId authorLabel createdAt updatedAt newsroomFeedKey }
       nextToken
     }
   }
@@ -50,7 +53,7 @@ const NEWSROOM_MESSAGE_FEED_QUERY = `
 const NEWSROOM_ASSIGNMENT_FEED_QUERY = `
   query ListAssignmentsByNewsroomFeedAndCreatedAt($newsroomFeedKey: String!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String, $filter: ModelAssignmentFilterInput) {
     listAssignmentsByNewsroomFeedAndCreatedAt(newsroomFeedKey: $newsroomFeedKey, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken, filter: $filter) {
-      items { id assignmentTypeKey queueKey queueStatusKey status priority title brief instructions assigneeType assigneeId assigneeKey claimedAt claimExpiresAt completedAt canceledAt corpusId categorySetId classifierId sourceSnapshotId importRunId createdBy createdAt updatedAt newsroomFeedKey metadata }
+      items { id assignmentTypeKey queueKey queueStatusKey status priority title summary assigneeType assigneeId assigneeKey claimedAt claimExpiresAt completedAt canceledAt corpusId categorySetId classifierId sectionId sectionKey sectionType sectionStatusKey sectionQueueStatusKey primaryFocusCategoryKey topicScopeCategoryKeys sourceSnapshotId importRunId createdBy createdAt updatedAt newsroomFeedKey }
       nextToken
     }
   }
@@ -59,7 +62,7 @@ const NEWSROOM_ASSIGNMENT_FEED_QUERY = `
 const NEWSROOM_REFERENCE_FEED_QUERY = `
   query ListReferencesByNewsroomFeedAndCreatedAt($newsroomFeedKey: String!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String, $filter: ModelReferenceFilterInput) {
     listReferencesByNewsroomFeedAndCreatedAt(newsroomFeedKey: $newsroomFeedKey, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken, filter: $filter) {
-      items { id lineageId versionNumber previousVersionId versionState versionCreatedAt versionCreatedBy changeReason contentHash corpusId externalItemId title authors sourceUri storagePath mediaType byteSize sha256 sourcePublishedAt sourceUpdatedAt retrievedAt importRunId importedAt createdAt curationStatus curationStatusKey curationStatusUpdatedAt curationStatusUpdatedBy curationStatusReason newsroomFeedKey metadata updatedAt }
+      items { id lineageId versionNumber previousVersionId versionState versionCreatedAt versionCreatedBy changeReason contentHash corpusId externalItemId title authors sourceUri storagePath mediaType byteSize sha256 sourcePublishedAt sourceUpdatedAt retrievedAt importRunId importedAt createdAt curationStatus curationStatusKey curationStatusUpdatedAt curationStatusUpdatedBy curationStatusReason newsroomFeedKey updatedAt }
       nextToken
     }
   }
@@ -109,6 +112,108 @@ const NEWSROOM_SECTION_LIST_QUERY = `
   }
 `;
 
+const MODEL_ATTACHMENTS_BY_OWNER_QUERY = `
+  query ListModelAttachmentsByOwnerRoleAndSortKey($ownerId: ID!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String) {
+    listModelAttachmentsByOwnerRoleAndSortKey(ownerId: $ownerId, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken) {
+      items {
+        id
+        ownerKind
+        ownerId
+        ownerLineageId
+        ownerVersionNumber
+        ownerVersionKey
+        role
+        sortKey
+        storagePath
+        filename
+        mediaType
+        byteSize
+        sha256
+        etag
+        importRunId
+        createdAt
+        updatedAt
+        status
+      }
+      nextToken
+    }
+  }
+`;
+
+const CREATE_MODEL_ATTACHMENT_UPLOAD_MUTATION = `
+  mutation CreateModelAttachmentUpload(
+    $ownerKind: String!
+    $ownerId: ID!
+    $ownerLineageId: ID
+    $ownerVersionNumber: Int
+    $ownerVersionKey: String
+    $role: String!
+    $sortKey: String
+    $filename: String!
+    $mediaType: String!
+    $byteSize: Int!
+    $sha256: String
+    $importRunId: ID
+    $status: String
+  ) {
+    createModelAttachmentUpload(
+      ownerKind: $ownerKind
+      ownerId: $ownerId
+      ownerLineageId: $ownerLineageId
+      ownerVersionNumber: $ownerVersionNumber
+      ownerVersionKey: $ownerVersionKey
+      role: $role
+      sortKey: $sortKey
+      filename: $filename
+      mediaType: $mediaType
+      byteSize: $byteSize
+      sha256: $sha256
+      importRunId: $importRunId
+      status: $status
+    ) {
+      ok uploadId attachmentId ownerKind ownerId role sortKey method uploadUrl storagePath mediaType byteSize sha256 expiresAt requiredHeaders
+    }
+  }
+`;
+
+const COMPLETE_MODEL_ATTACHMENT_UPLOAD_MUTATION = `
+  mutation CompleteModelAttachmentUpload(
+    $uploadId: String!
+    $ownerKind: String!
+    $ownerId: ID!
+    $ownerLineageId: ID
+    $ownerVersionNumber: Int
+    $ownerVersionKey: String
+    $role: String!
+    $sortKey: String
+    $filename: String!
+    $mediaType: String!
+    $byteSize: Int!
+    $sha256: String
+    $importRunId: ID
+    $status: String
+  ) {
+    completeModelAttachmentUpload(
+      uploadId: $uploadId
+      ownerKind: $ownerKind
+      ownerId: $ownerId
+      ownerLineageId: $ownerLineageId
+      ownerVersionNumber: $ownerVersionNumber
+      ownerVersionKey: $ownerVersionKey
+      role: $role
+      sortKey: $sortKey
+      filename: $filename
+      mediaType: $mediaType
+      byteSize: $byteSize
+      sha256: $sha256
+      importRunId: $importRunId
+      status: $status
+    ) {
+      id ownerKind ownerId ownerLineageId ownerVersionNumber ownerVersionKey role sortKey storagePath filename mediaType byteSize sha256 etag importRunId createdAt updatedAt status
+    }
+  }
+`;
+
 type GraphQLListResponse<T> = {
   data?: T[] | null;
   nextToken?: string | null;
@@ -128,6 +233,14 @@ export type NewsroomRecordPage<T> = {
 type GraphQLConnectionResponse<T> = {
   data?: Record<string, { items?: Array<T | null> | null; nextToken?: string | null } | null> | null;
   errors?: unknown[] | null;
+};
+
+type ModelAttachmentUploadSlot = {
+  ok: boolean;
+  uploadId: string;
+  requiredHeaders?: Record<string, string> | string | null;
+  method?: string | null;
+  uploadUrl: string;
 };
 
 type NewsroomPageOptions = {
@@ -168,6 +281,20 @@ type SlugQueryableModel<T> = {
 type NewsroomSummaryResponse = {
   data?: unknown;
   errors?: unknown[] | null;
+};
+
+export type KnowledgeQueryResponse = {
+  structured?: unknown;
+  context?: {
+    format?: string;
+    text?: string;
+    maxTokens?: number | null;
+    totalTokens?: number | null;
+    tokenizer?: unknown;
+  } | null;
+  warnings?: string[];
+  provenance?: Record<string, unknown>;
+  debug?: Record<string, unknown>;
 };
 
 export type EditorCategoryTreeState = {
@@ -472,6 +599,164 @@ export async function loadNewsroomAssignmentPage(options: NewsroomAssignmentPage
   });
 }
 
+export async function loadModelPayloadsForOwner(
+  ownerKind: string,
+  ownerId: string,
+  roles?: string[],
+): Promise<HydratedModelPayload[]> {
+  configureAmplifyClient();
+  const client = generateClient<Schema>() as unknown as {
+    graphql: (options: Record<string, unknown>) => Promise<GraphQLConnectionResponse<ModelAttachmentRecord>>;
+  };
+  const allowedRoles = new Set((roles ?? []).filter(Boolean));
+  const attachments: ModelAttachmentRecord[] = [];
+  let nextToken: string | null | undefined = null;
+
+  do {
+    const response = await client.graphql({
+      query: MODEL_ATTACHMENTS_BY_OWNER_QUERY,
+      variables: {
+        ownerId,
+        sortDirection: "ASC",
+        limit: USER_POOL_PAGE_LIMIT,
+        nextToken,
+      },
+      authMode: USER_POOL_AUTH_MODE,
+    });
+    assertNoGraphQLErrors(response.errors);
+    const connection = response.data?.listModelAttachmentsByOwnerRoleAndSortKey;
+    attachments.push(...((connection?.items ?? []).filter(Boolean) as ModelAttachmentRecord[])
+      .filter((attachment) => attachment.ownerKind === ownerKind)
+      .filter((attachment) => !allowedRoles.size || allowedRoles.has(attachment.role)));
+    nextToken = connection?.nextToken ?? null;
+  } while (nextToken);
+
+  return Promise.all(attachments.map(hydrateModelAttachment));
+}
+
+export async function uploadModelPayloadForOwner(input: {
+  ownerKind: string;
+  ownerId: string;
+  ownerLineageId?: string | null;
+  ownerVersionNumber?: number | null;
+  ownerVersionKey?: string | null;
+  role: string;
+  sortKey?: string | null;
+  filename: string;
+  mediaType: string;
+  content: string | Blob | ArrayBuffer | Uint8Array;
+  importRunId?: string | null;
+  status?: string | null;
+}): Promise<ModelAttachmentRecord> {
+  configureAmplifyClient();
+  const client = generateClient<Schema>() as unknown as {
+    graphql: (options: Record<string, unknown>) => Promise<{
+      data?: {
+        createModelAttachmentUpload?: ModelAttachmentUploadSlot | null;
+        completeModelAttachmentUpload?: ModelAttachmentRecord | null;
+      } | null;
+      errors?: unknown[] | null;
+    }>;
+  };
+  const uploadBody = await normalizeUploadBody(input.content);
+  const variables = {
+    ownerKind: input.ownerKind,
+    ownerId: input.ownerId,
+    ownerLineageId: input.ownerLineageId ?? null,
+    ownerVersionNumber: input.ownerVersionNumber ?? null,
+    ownerVersionKey: input.ownerVersionKey ?? null,
+    role: input.role,
+    sortKey: input.sortKey ?? input.role,
+    filename: input.filename,
+    mediaType: input.mediaType,
+    byteSize: uploadBody.byteSize,
+    sha256: await sha256Hex(uploadBody.body),
+    importRunId: input.importRunId ?? null,
+    status: input.status ?? "active",
+  };
+  const slotResponse = await client.graphql({
+    query: CREATE_MODEL_ATTACHMENT_UPLOAD_MUTATION,
+    variables,
+    authMode: USER_POOL_AUTH_MODE,
+  });
+  assertNoGraphQLErrors(slotResponse.errors);
+  const slot = slotResponse.data?.createModelAttachmentUpload;
+  if (!slot?.uploadUrl) throw new Error("Attachment upload slot did not include an upload URL.");
+  const uploadResponse = await fetch(slot.uploadUrl, {
+    method: slot.method ?? "PUT",
+    headers: normalizeUploadHeaders(slot.requiredHeaders),
+    body: uploadBody.body,
+  });
+  if (!uploadResponse.ok) {
+    throw new Error(`Attachment upload failed: ${uploadResponse.status} ${uploadResponse.statusText}`);
+  }
+  const completeResponse = await client.graphql({
+    query: COMPLETE_MODEL_ATTACHMENT_UPLOAD_MUTATION,
+    variables: { uploadId: slot.uploadId, ...variables },
+    authMode: USER_POOL_AUTH_MODE,
+  });
+  assertNoGraphQLErrors(completeResponse.errors);
+  const attachment = completeResponse.data?.completeModelAttachmentUpload;
+  if (!attachment) throw new Error("Attachment upload completed without a ModelAttachment record.");
+  return attachment;
+}
+
+async function hydrateModelAttachment(attachment: ModelAttachmentRecord): Promise<HydratedModelPayload> {
+  try {
+    const downloaded = await downloadData({ path: attachment.storagePath }).result;
+    const body = downloaded.body as { text?: () => Promise<string> };
+    const text = typeof body.text === "function" ? await body.text() : null;
+    const json = text && isJsonMediaType(attachment.mediaType) ? parseAttachmentJson(text) : null;
+    return { attachment, text, json, error: null };
+  } catch (error) {
+    return {
+      attachment,
+      text: null,
+      json: null,
+      error: error instanceof Error ? error.message : "Could not hydrate attachment payload.",
+    };
+  }
+}
+
+async function normalizeUploadBody(content: string | Blob | ArrayBuffer | Uint8Array): Promise<{ body: Blob; byteSize: number }> {
+  if (typeof content === "string") {
+    const body = new Blob([content]);
+    return { body, byteSize: body.size };
+  }
+  if (content instanceof Blob) return { body: content, byteSize: content.size };
+  const body = new Blob([content instanceof Uint8Array ? content.slice() : content]);
+  return { body, byteSize: body.size };
+}
+
+async function sha256Hex(body: Blob): Promise<string> {
+  const bytes = await body.arrayBuffer();
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function normalizeUploadHeaders(value: Record<string, string> | string | null | undefined): Record<string, string> {
+  const parsed = typeof value === "string" ? parseAttachmentJson(value) : value;
+  const headers: Record<string, string> = {};
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return headers;
+  for (const [key, entry] of Object.entries(parsed)) {
+    if (entry !== undefined && entry !== null) headers[key] = String(entry);
+  }
+  return headers;
+}
+
+function isJsonMediaType(mediaType: string | null | undefined): boolean {
+  const normalized = (mediaType ?? "").toLowerCase();
+  return normalized.includes("json") || normalized.endsWith("+json");
+}
+
+function parseAttachmentJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
 export async function loadNewsroomSemanticNodePage(options: NewsroomSemanticNodePageOptions = {}): Promise<NewsroomRecordPage<SemanticNodeRecord>> {
   return loadNewsroomFeedPage<SemanticNodeRecord>({
     query: NEWSROOM_SEMANTIC_NODE_FEED_QUERY,
@@ -505,9 +790,43 @@ export async function loadEditorUserDirectoryData(): Promise<UserDirectoryEntry[
   return loadUserDirectory();
 }
 
+export async function runNewsroomKnowledgeQuery(input: Record<string, unknown>): Promise<KnowledgeQueryResponse> {
+  const client = generateClient<Schema>();
+  const query = client.queries.knowledgeQuery as unknown as (
+    args: { input: string },
+    options: { authMode: typeof USER_POOL_AUTH_MODE },
+  ) => Promise<{ data?: unknown; errors?: unknown[] | null }>;
+  const response = await query({ input: JSON.stringify(input) }, { authMode: USER_POOL_AUTH_MODE });
+  assertNoGraphQLErrors(response.errors);
+  return normalizeKnowledgeQueryResponse(response.data);
+}
+
 export function hasTestEditorOverride(): boolean {
   if (typeof window === "undefined") return false;
   return window.localStorage.getItem(TEST_EDITOR_STORAGE_KEY) === "true";
+}
+
+function normalizeKnowledgeQueryResponse(value: unknown): KnowledgeQueryResponse {
+  let parsed = value;
+  if (typeof parsed === "string") {
+    const rawText = parsed;
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return { warnings: ["knowledgeQuery returned non-JSON text"], context: { format: "markdown", text: rawText } };
+    }
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { warnings: ["knowledgeQuery returned an empty response"], context: null };
+  }
+  const record = parsed as KnowledgeQueryResponse;
+  return {
+    structured: record.structured,
+    context: record.context ?? null,
+    warnings: Array.isArray(record.warnings) ? record.warnings.filter((warning): warning is string => typeof warning === "string") : [],
+    provenance: record.provenance && typeof record.provenance === "object" && !Array.isArray(record.provenance) ? record.provenance as Record<string, unknown> : {},
+    debug: record.debug && typeof record.debug === "object" && !Array.isArray(record.debug) ? record.debug as Record<string, unknown> : {},
+  };
 }
 
 async function loadNewsroomSummary(): Promise<NewsroomSummaryRecord> {
