@@ -211,7 +211,7 @@ function buildAssignmentContextMetadata({
     candidateAngle,
     referenceLineageIds: evidenceReferences.map((reference) => reference.lineageId),
     semanticNodeLineageIds: signalNodes.map((node) => node.lineageId),
-    policyRationale: "Live desk context uses publication doctrine, root-desk doctrine, accepted desk/focus topics, recent desk memory, and linked evidence.",
+    policyRationale: "Live section context uses publication doctrine, section doctrine, accepted topic scope, recent section memory, and linked evidence.",
     expectedOutput: "Private research packet for editor selection, not reader copy.",
     rootCategoryKey: deskCategory.categoryKey,
     rootCategoryLineageId: deskCategory.lineageId,
@@ -232,17 +232,26 @@ function buildAssignmentContextMetadata({
 function summarizeFocusCoverage(assignments) {
   const counts = new Map();
   for (const assignment of assignments) {
-    const metadata = parseMetadataObject(assignment.metadata);
+    const topicScopeCategoryKeys = Array.isArray(assignment.topicScopeCategoryKeys)
+      ? assignment.topicScopeCategoryKeys.map(normalizeString).filter(Boolean)
+      : [];
+    const focusCategoryKey = normalizeString(assignment.primaryFocusCategoryKey)
+      ?? topicScopeCategoryKeys[0]
+      ?? null;
+    const deskCategoryKey = normalizeString(assignment.sectionKey)
+      ?? normalizeString(assignment.sectionId)
+      ?? null;
+    const laneKey = normalizeString(assignment.queueKey)?.split(".").pop() ?? null;
     const key = [
-      metadata.deskCategoryKey ?? metadata.rootCategoryKey ?? "",
-      metadata.laneKey ?? "",
-      metadata.focusCategoryKey ?? metadata.researchLens ?? "",
+      deskCategoryKey ?? "",
+      laneKey ?? "",
+      focusCategoryKey ?? "",
     ].join("\t");
     const current = counts.get(key) ?? {
-      deskCategoryKey: metadata.deskCategoryKey ?? metadata.rootCategoryKey ?? null,
-      laneKey: metadata.laneKey ?? null,
-      focusCategoryKey: metadata.focusCategoryKey ?? metadata.researchLens ?? null,
-      focusCategoryTitle: metadata.focusCategoryTitle ?? metadata.researchLensTitle ?? metadata.focusCategoryKey ?? metadata.researchLens ?? null,
+      deskCategoryKey,
+      laneKey,
+      focusCategoryKey,
+      focusCategoryTitle: focusCategoryKey,
       count: 0,
     };
     current.count += 1;
@@ -256,20 +265,16 @@ function summarizeFocusCoverage(assignments) {
 }
 
 function assignmentDeskCategoryKey(assignment) {
-  const metadata = parseMetadataObject(assignment.metadata);
-  return normalizeString(metadata.deskCategoryKey)
-    ?? normalizeString(metadata.rootCategoryKey)
-    ?? normalizeString(metadata.categoryKey)
+  return normalizeString(assignment.sectionKey)
+    ?? normalizeString(assignment.sectionId)
     ?? null;
 }
 
 function assignmentFocusCategoryKey(assignment) {
-  const metadata = parseMetadataObject(assignment.metadata);
   return normalizeString(assignment.primaryFocusCategoryKey)
-    ?? normalizeString(metadata.primaryFocusCategoryKey)
-    ?? normalizeString(metadata.focusCategoryKey)
-    ?? normalizeString(metadata.researchLens)
-    ?? normalizeString(metadata.categoryKey)
+    ?? (Array.isArray(assignment.topicScopeCategoryKeys)
+      ? assignment.topicScopeCategoryKeys.map(normalizeString).find(Boolean)
+      : null)
     ?? null;
 }
 

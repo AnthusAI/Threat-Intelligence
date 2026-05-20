@@ -198,7 +198,7 @@ function buildEditionPlanningPlan(state, options = {}) {
       label: lane.label,
     })),
     focusCoverage: summarizeFocusCoverage(assignments),
-    sections: Array.from(new Set(assignments.map((assignment) => parseJsonObject(assignment.metadata).sectionId).filter(Boolean))),
+    sections: Array.from(new Set(assignments.map((assignment) => assignment.sectionId ?? assignment.sectionKey).filter(Boolean))),
     desks: selectedGroups.map((group) => summarizeDeskGroup(group)),
     assignments,
     records,
@@ -213,7 +213,7 @@ function buildEditionPlanningPlan(state, options = {}) {
       publicationSlots,
       overassignmentRatio,
       topDeskCount,
-      contextBackedAssignmentCount: assignments.filter((assignment) => Boolean(parseMetadataObject(assignment.metadata).deskCategoryKey)).length,
+      contextBackedAssignmentCount: assignments.filter((assignment) => Boolean(assignment.sectionKey || assignment.primaryFocusCategoryKey)).length,
     },
   };
 }
@@ -267,26 +267,13 @@ function verifyEditionPlanningPlan(state, plan) {
     if (!assignment.sectionKey || !assignment.sectionStatusKey || !assignment.sectionQueueStatusKey) {
       failures.push(`Assignment ${assignment.id} is missing section index fields.`);
     }
-    const metadata = parseJsonObject(assignment.metadata);
-    if ((metadata.referenceLineageIds ?? []).length && !predicates.has("uses_evidence")) {
+    const referenceLineageIds = assignment.referenceLineageIds ?? parseJsonObject(assignment.metadata).referenceLineageIds ?? [];
+    if (Array.isArray(referenceLineageIds) && referenceLineageIds.length && !predicates.has("uses_evidence")) {
       failures.push(`Assignment ${assignment.id} has evidence metadata but no uses_evidence relation.`);
     }
-    for (const key of [
-      "sectionId",
-      "sectionTitle",
-      "sectionType",
-      "deskCategoryKey",
-      "deskCategoryLineageId",
-      "focusCategoryKey",
-      "focusCategoryLineageId",
-      "focusCategoryTitle",
-      "contextProfile",
-      "contextTokenBudget",
-    ]) {
-      if (!metadata[key]) failures.push(`Assignment ${assignment.id} is missing ${key} metadata.`);
-    }
-    if (!Array.isArray(metadata.contextSources) || !metadata.contextSources.length) {
-      failures.push(`Assignment ${assignment.id} is missing contextSources metadata.`);
+    if (!assignment.sectionId && !assignment.sectionKey) failures.push(`Assignment ${assignment.id} is missing section index fields.`);
+    if (!assignment.primaryFocusCategoryKey && !(Array.isArray(assignment.topicScopeCategoryKeys) && assignment.topicScopeCategoryKeys.length)) {
+      failures.push(`Assignment ${assignment.id} is missing topic scope fields.`);
     }
   }
 
@@ -882,7 +869,7 @@ function candidateAngleForLane(lane, root, rank) {
 }
 
 function instructionsForLane(lane, root) {
-  const base = `Use publication doctrine, root-desk doctrine for ${root.displayName}, accepted category context, semantic graph context, and linked references. Return a private research packet for editor selection, not reader-facing copy.`;
+  const base = `Use publication doctrine, section doctrine, accepted topic-scope context for ${root.displayName}, semantic graph context, and linked references. Return a private research packet for editor selection, not reader-facing copy.`;
   if (lane.laneKey === "reporting") return `${base} Emphasize factual findings, source trail, what happened, what is new, and what evidence supports publication.`;
   if (lane.laneKey === "analysis") return `${base} Emphasize explanation, patterns, implications, limits, uncertainty, and how the evidence fits the desk.`;
   if (lane.laneKey === "briefs") return `${base} Emphasize short, high-signal updates that could become compact briefs or evidence notes.`;
@@ -928,8 +915,8 @@ function countActiveAssignmentsForRoot(assignments, rootCategoryKey) {
     assignment.assignmentTypeKey === EDITION_ASSIGNMENT_TYPE
     && !["completed", "canceled"].includes(assignment.status)
     && (
-      parseJsonObject(assignment.metadata).deskCategoryKey === rootCategoryKey
-      || parseJsonObject(assignment.metadata).rootCategoryKey === rootCategoryKey
+      assignment.primaryFocusCategoryKey === rootCategoryKey
+      || (Array.isArray(assignment.topicScopeCategoryKeys) && assignment.topicScopeCategoryKeys.includes(rootCategoryKey))
     )
   )).length;
 }
@@ -940,8 +927,8 @@ function existingEditionRootKeys(assignments, editionSlug) {
   for (const assignment of assignments) {
     if (assignment.assignmentTypeKey !== EDITION_ASSIGNMENT_TYPE || assignment.status === "canceled") continue;
     const metadata = parseJsonObject(assignment.metadata);
-    const deskCategoryKey = metadata.deskCategoryKey ?? metadata.rootCategoryKey;
-    if (metadata.editionSlug !== editionSlug || !deskCategoryKey || seen.has(deskCategoryKey)) continue;
+    const deskCategoryKey = assignment.primaryFocusCategoryKey ?? (Array.isArray(assignment.topicScopeCategoryKeys) ? assignment.topicScopeCategoryKeys[0] : null);
+    if ((metadata.editionSlug && metadata.editionSlug !== editionSlug) || !deskCategoryKey || seen.has(deskCategoryKey)) continue;
     seen.add(deskCategoryKey);
     keys.push(deskCategoryKey);
   }

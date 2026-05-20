@@ -32,6 +32,7 @@ profiles:
       - bertopic_analysis.representation_model.nr_docs
       - bertopic_analysis.representation_model.delay_in_seconds
       - bertopic_analysis.representation_model
+      - extractionSnapshot
       - text_source.sample_size
       - targetTopicRange
     expectedOutputs:
