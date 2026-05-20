@@ -9,6 +9,9 @@ Use this skill when new source materials need to become visible in Papyrus as
 knowledge-base references, or when debugging why newly ingested corpus materials
 are not visible in the Newsroom.
 
+After references exist and need budgeted summaries or quality ratings, use
+[`skills/reference-curation-signals/SKILL.md`](/Users/ryan/Projects/Papyrus/skills/reference-curation-signals/SKILL.md).
+
 If the source material came from a research agent packet, first use
 [`skills/newsroom-research-workflow/SKILL.md`](/Users/ryan/Projects/Papyrus/skills/newsroom-research-workflow/SKILL.md)
 to inspect the assignment packet and extract `proposedReferences`.
