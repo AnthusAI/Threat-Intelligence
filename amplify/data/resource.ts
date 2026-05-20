@@ -6,6 +6,7 @@ import { knowledgeQuery } from "../functions/knowledge-query/resource";
 import { manageUserRole } from "../functions/manage-user-role/resource";
 import { modelAttachmentUpload } from "../functions/model-attachment-upload/resource";
 import { newsroomSummary } from "../functions/newsroom-summary/resource";
+import { readerSettings } from "../functions/reader-settings/resource";
 
 const authoringOperations: ("read" | "create" | "update" | "delete")[] = [
   "read",
@@ -26,6 +27,7 @@ const schema = a.schema({
       displayName: a.string(),
       avatarUrl: a.url(),
       preferences: a.json(),
+      settings: a.json(),
       status: a.string(),
       mergedIntoProfileId: a.id(),
       mergedAt: a.datetime(),
@@ -126,6 +128,11 @@ const schema = a.schema({
     cognitoUserCount: a.integer().required(),
   }),
 
+  ReaderSettingsResult: a.customType({
+    userProfileId: a.id().required(),
+    settings: a.json(),
+  }),
+
   listUserDirectory: a
     .query()
     .returns(a.ref("UserDirectoryResult"))
@@ -168,6 +175,21 @@ const schema = a.schema({
     .returns(a.ref("UserDirectoryEntry"))
     .authorization((allow) => [allow.group(adminGroup)])
     .handler(a.handler.function(manageUserRole)),
+
+  getReaderSettings: a
+    .query()
+    .returns(a.ref("ReaderSettingsResult"))
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(readerSettings)),
+
+  updateReaderSettings: a
+    .mutation()
+    .arguments({
+      settings: a.json().required(),
+    })
+    .returns(a.ref("ReaderSettingsResult"))
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(readerSettings)),
 
   SteeringActionResult: a.customType({
     ok: a.boolean().required(),

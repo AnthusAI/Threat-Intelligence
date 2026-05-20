@@ -11,6 +11,7 @@ import { knowledgeQuery } from "./functions/knowledge-query/resource";
 import { manageUserRole } from "./functions/manage-user-role/resource";
 import { modelAttachmentUpload } from "./functions/model-attachment-upload/resource";
 import { newsroomSummary } from "./functions/newsroom-summary/resource";
+import { readerSettings } from "./functions/reader-settings/resource";
 import { storage } from "./storage/resource";
 
 const knowledgeVectorIndexName = "papyrus-knowledge";
@@ -27,6 +28,7 @@ const backend = defineBackend({
   manageUserRole,
   modelAttachmentUpload,
   newsroomSummary,
+  readerSettings,
   storage,
 });
 
