@@ -4,6 +4,7 @@ import { categoryAction } from "../functions/category-action/resource";
 import { graphqlJwtAuthorizer } from "../functions/graphql-jwt-authorizer/resource";
 import { knowledgeQuery } from "../functions/knowledge-query/resource";
 import { manageUserRole } from "../functions/manage-user-role/resource";
+import { modelAttachmentUpload } from "../functions/model-attachment-upload/resource";
 import { newsroomSummary } from "../functions/newsroom-summary/resource";
 
 const authoringOperations: ("read" | "create" | "update" | "delete")[] = [
@@ -375,6 +376,119 @@ const schema = a.schema({
     .authorization((allow) => [allow.groups(categoryWriteGroups), allow.custom()])
     .handler(a.handler.function(newsroomSummary)),
 
+  ModelAttachmentUploadSlot: a.customType({
+    ok: a.boolean().required(),
+    uploadId: a.string().required(),
+    attachmentId: a.id().required(),
+    ownerKind: a.string().required(),
+    ownerId: a.id().required(),
+    role: a.string().required(),
+    sortKey: a.string().required(),
+    method: a.string().required(),
+    uploadUrl: a.string().required(),
+    storagePath: a.string().required(),
+    mediaType: a.string().required(),
+    byteSize: a.integer().required(),
+    sha256: a.string(),
+    expiresAt: a.datetime().required(),
+    requiredHeaders: a.json(),
+  }),
+
+  ModelAttachmentDownloadSlot: a.customType({
+    ok: a.boolean().required(),
+    attachmentId: a.id().required(),
+    method: a.string().required(),
+    downloadUrl: a.string().required(),
+    storagePath: a.string().required(),
+    mediaType: a.string().required(),
+    byteSize: a.integer().required(),
+    sha256: a.string(),
+    expiresAt: a.datetime().required(),
+    requiredHeaders: a.json(),
+  }),
+
+  ModelAttachmentUploadAbortResult: a.customType({
+    ok: a.boolean().required(),
+    uploadId: a.string().required(),
+    attachmentId: a.id().required(),
+    storagePath: a.string().required(),
+    status: a.string().required(),
+  }),
+
+  createModelAttachmentUpload: a
+    .mutation()
+    .arguments({
+      ownerKind: a.string().required(),
+      ownerId: a.id().required(),
+      ownerLineageId: a.id(),
+      ownerVersionNumber: a.integer(),
+      ownerVersionKey: a.string(),
+      role: a.string().required(),
+      sortKey: a.string(),
+      filename: a.string().required(),
+      mediaType: a.string().required(),
+      byteSize: a.integer().required(),
+      sha256: a.string(),
+      importRunId: a.id(),
+      status: a.string(),
+    })
+    .returns(a.ref("ModelAttachmentUploadSlot"))
+    .authorization((allow) => [allow.groups(categoryWriteGroups), allow.custom()])
+    .handler(a.handler.function(modelAttachmentUpload)),
+
+  completeModelAttachmentUpload: a
+    .mutation()
+    .arguments({
+      uploadId: a.string().required(),
+      ownerKind: a.string().required(),
+      ownerId: a.id().required(),
+      ownerLineageId: a.id(),
+      ownerVersionNumber: a.integer(),
+      ownerVersionKey: a.string(),
+      role: a.string().required(),
+      sortKey: a.string(),
+      filename: a.string().required(),
+      mediaType: a.string().required(),
+      byteSize: a.integer().required(),
+      sha256: a.string(),
+      importRunId: a.id(),
+      status: a.string(),
+    })
+    .returns(a.ref("ModelAttachment"))
+    .authorization((allow) => [allow.groups(categoryWriteGroups), allow.custom()])
+    .handler(a.handler.function(modelAttachmentUpload)),
+
+  abortModelAttachmentUpload: a
+    .mutation()
+    .arguments({
+      uploadId: a.string().required(),
+      ownerKind: a.string().required(),
+      ownerId: a.id().required(),
+      ownerLineageId: a.id(),
+      ownerVersionNumber: a.integer(),
+      ownerVersionKey: a.string(),
+      role: a.string().required(),
+      sortKey: a.string(),
+      filename: a.string().required(),
+      mediaType: a.string().required(),
+      byteSize: a.integer().required(),
+      sha256: a.string(),
+      importRunId: a.id(),
+      status: a.string(),
+    })
+    .returns(a.ref("ModelAttachmentUploadAbortResult"))
+    .authorization((allow) => [allow.groups(categoryWriteGroups), allow.custom()])
+    .handler(a.handler.function(modelAttachmentUpload)),
+
+  createModelAttachmentDownload: a
+    .mutation()
+    .arguments({
+      attachmentId: a.id().required(),
+    })
+    .returns(a.ref("ModelAttachmentDownloadSlot"))
+    .authorization((allow) => [allow.groups(categoryWriteGroups), allow.custom()])
+    .handler(a.handler.function(modelAttachmentUpload)),
+
   AssignmentActionResult: a.customType({
     ok: a.boolean().required(),
     assignmentId: a.id(),
@@ -401,8 +515,7 @@ const schema = a.schema({
     status: a.string().required(),
     priority: a.integer(),
     title: a.string().required(),
-    brief: a.string(),
-    instructions: a.string(),
+    summary: a.string(),
     assigneeType: a.string(),
     assigneeId: a.string(),
     assigneeKey: a.string(),
@@ -425,7 +538,6 @@ const schema = a.schema({
     createdBy: a.string(),
     createdAt: a.datetime().required(),
     updatedAt: a.datetime().required(),
-    metadata: a.json(),
   }),
 
   AssignmentEventSummary: a.customType({
@@ -440,7 +552,6 @@ const schema = a.schema({
     actorLabel: a.string(),
     note: a.string(),
     createdAt: a.datetime().required(),
-    metadata: a.json(),
   }),
 
   AssignmentDoctrineSummary: a.customType({
@@ -566,8 +677,7 @@ const schema = a.schema({
       status: a.string().required(),
       priority: a.integer(),
       title: a.string().required(),
-      brief: a.string(),
-      instructions: a.string(),
+      summary: a.string(),
       assigneeType: a.string(),
       assigneeId: a.string(),
       assigneeKey: a.string(),
@@ -591,7 +701,6 @@ const schema = a.schema({
       createdAt: a.datetime().required(),
       updatedAt: a.datetime().required(),
       newsroomFeedKey: a.string(),
-      metadata: a.json(),
     })
     .secondaryIndexes((index) => [
       index("newsroomFeedKey").sortKeys(["createdAt"]).queryField("listAssignmentsByNewsroomFeedAndCreatedAt"),
@@ -622,7 +731,6 @@ const schema = a.schema({
       actorLabel: a.string(),
       note: a.string(),
       createdAt: a.datetime().required(),
-      metadata: a.json(),
     })
     .secondaryIndexes((index) => [
       index("assignmentId").sortKeys(["createdAt"]).queryField("listAssignmentEventsByAssignmentAndCreatedAt"),
@@ -631,7 +739,7 @@ const schema = a.schema({
     ])
     .authorization((allow) => [
       allow.groups(categoryWriteGroups).to(categoryAppendOnlyOperations),
-      allow.custom().to(categoryAppendOnlyOperations),
+      allow.custom().to(authoringOperations),
     ]),
 
   NewsroomSection: a
@@ -687,6 +795,7 @@ const schema = a.schema({
       id: a.id().required(),
       corpusId: a.id().required(),
       importKind: a.string().required(),
+      corpusImportKindKey: a.string(),
       classifierId: a.string(),
       sourceSnapshotId: a.string(),
       status: a.string().required(),
@@ -703,6 +812,7 @@ const schema = a.schema({
     .secondaryIndexes((index) => [
       index("corpusId").sortKeys(["importedAt"]).queryField("listKnowledgeImportRunsByCorpusAndImportedAt"),
       index("importKind").sortKeys(["importedAt"]).queryField("listKnowledgeImportRunsByKindAndImportedAt"),
+      index("corpusImportKindKey").sortKeys(["importedAt"]).queryField("listKnowledgeImportRunsByCorpusKindAndImportedAt"),
     ])
     .authorization((allow) => [
       allow.groups(categoryWriteGroups).to(["read"]),
@@ -716,7 +826,6 @@ const schema = a.schema({
       ownerId: a.id().required(),
       payloadKind: a.string().required(),
       importRunId: a.id(),
-      payload: a.json(),
       createdAt: a.datetime().required(),
       updatedAt: a.datetime(),
     })
@@ -743,6 +852,7 @@ const schema = a.schema({
     .secondaryIndexes((index) => [
       index("corpusId").sortKeys(["artifactKind"]).queryField("listKnowledgeArtifactsByCorpusAndKind"),
       index("artifactKind").sortKeys(["createdAt"]).queryField("listKnowledgeArtifactsByKindAndCreatedAt"),
+      index("importRunId").sortKeys(["artifactKind"]).queryField("listKnowledgeArtifactsByImportRunAndKind"),
     ])
     .authorization((allow) => [
       allow.groups(categoryWriteGroups).to(["read"]),
@@ -940,7 +1050,7 @@ const schema = a.schema({
     ])
     .authorization((allow) => [
       allow.groups(categoryWriteGroups).to(categoryAppendOnlyOperations),
-      allow.custom().to(categoryAppendOnlyOperations),
+      allow.custom().to(authoringOperations),
     ]),
 
   Reference: a
@@ -975,7 +1085,6 @@ const schema = a.schema({
       curationStatusUpdatedBy: a.string(),
       curationStatusReason: a.string(),
       newsroomFeedKey: a.string(),
-      metadata: a.json(),
       updatedAt: a.datetime(),
     })
     .secondaryIndexes((index) => [
@@ -1054,6 +1163,7 @@ const schema = a.schema({
       index("lineageId").sortKeys(["versionNumber"]).queryField("listSemanticNodesByLineageAndVersion"),
       index("nodeKey").sortKeys(["versionNumber"]).queryField("listSemanticNodesByNodeKeyAndVersion"),
       index("corpusId").sortKeys(["nodeKey"]).queryField("listSemanticNodesByCorpusAndNodeKey"),
+      index("importRunId").sortKeys(["nodeKey"]).queryField("listSemanticNodesByImportRunAndNodeKey"),
       index("versionState").sortKeys(["updatedAt"]).queryField("listSemanticNodesByVersionStateAndUpdatedAt"),
     ])
     .authorization((allow) => [
@@ -1067,7 +1177,6 @@ const schema = a.schema({
       messageKind: a.string().required(),
       messageDomain: a.string().required(),
       status: a.string().required(),
-      body: a.string().required(),
       summary: a.string(),
       source: a.string(),
       importRunId: a.id(),
@@ -1077,7 +1186,6 @@ const schema = a.schema({
       createdAt: a.datetime().required(),
       updatedAt: a.datetime().required(),
       newsroomFeedKey: a.string(),
-      metadata: a.json(),
     })
     .secondaryIndexes((index) => [
       index("newsroomFeedKey").sortKeys(["createdAt"]).queryField("listMessagesByNewsroomFeedAndCreatedAt"),
@@ -1090,7 +1198,40 @@ const schema = a.schema({
     ])
     .authorization((allow) => [
       allow.groups(categoryWriteGroups).to(categoryAppendOnlyOperations),
-      allow.custom().to(categoryAppendOnlyOperations),
+      allow.custom().to(authoringOperations),
+    ]),
+
+  ModelAttachment: a
+    .model({
+      id: a.id().required(),
+      ownerKind: a.string().required(),
+      ownerId: a.id().required(),
+      ownerLineageId: a.id(),
+      ownerVersionNumber: a.integer(),
+      ownerVersionKey: a.string(),
+      role: a.string().required(),
+      sortKey: a.string().required(),
+      storagePath: a.string().required(),
+      filename: a.string(),
+      mediaType: a.string().required(),
+      byteSize: a.integer(),
+      sha256: a.string(),
+      etag: a.string(),
+      importRunId: a.id(),
+      createdAt: a.datetime().required(),
+      updatedAt: a.datetime(),
+      status: a.string().required(),
+    })
+    .secondaryIndexes((index) => [
+      index("ownerId").sortKeys(["role", "sortKey"]).queryField("listModelAttachmentsByOwnerRoleAndSortKey"),
+      index("ownerVersionKey").sortKeys(["role", "sortKey"]).queryField("listModelAttachmentsByOwnerVersionRoleAndSortKey"),
+      index("storagePath").queryField("modelAttachmentByStoragePath"),
+      index("importRunId").sortKeys(["ownerKind", "role"]).queryField("listModelAttachmentsByImportRunKindAndRole"),
+      index("role").sortKeys(["status", "createdAt"]).queryField("listModelAttachmentsByRoleStatusAndCreatedAt"),
+    ])
+    .authorization((allow) => [
+      allow.groups(categoryWriteGroups).to(["read"]),
+      allow.custom().to(authoringOperations),
     ]),
 
   SemanticRelationType: a
@@ -1545,6 +1686,7 @@ const schema = a.schema({
 }).authorization((allow) => [
   allow.resource(categoryAction),
   allow.resource(manageUserRole),
+  allow.resource(modelAttachmentUpload),
   allow.resource(newsroomSummary),
 ]);
 

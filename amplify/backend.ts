@@ -9,6 +9,7 @@ import { categoryAction } from "./functions/category-action/resource";
 import { graphqlJwtAuthorizer } from "./functions/graphql-jwt-authorizer/resource";
 import { knowledgeQuery } from "./functions/knowledge-query/resource";
 import { manageUserRole } from "./functions/manage-user-role/resource";
+import { modelAttachmentUpload } from "./functions/model-attachment-upload/resource";
 import { newsroomSummary } from "./functions/newsroom-summary/resource";
 import { storage } from "./storage/resource";
 
@@ -24,6 +25,7 @@ const backend = defineBackend({
   graphqlJwtAuthorizer,
   knowledgeQuery,
   manageUserRole,
+  modelAttachmentUpload,
   newsroomSummary,
   storage,
 });

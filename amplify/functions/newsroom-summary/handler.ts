@@ -2,11 +2,13 @@ import { getAmplifyDataClientConfig } from "@aws-amplify/backend/function/runtim
 import { Amplify } from "aws-amplify";
 import { generateClient } from "aws-amplify/data";
 import type { Schema } from "../../data/resource";
+import { putJsonModelPayload, readJsonModelPayload } from "../shared/model-payloads";
 
 type DataClient = ReturnType<typeof generateClient<Schema>>;
 type DataClientErrors = Array<{ message?: string | null } | string | null> | null | undefined;
 
 const NEWSROOM_SUMMARY_PAYLOAD_ID = "knowledge-raw-payload-newsroom-summary-current";
+const NEWSROOM_SUMMARY_PAYLOAD_OWNER_KIND = "knowledgeRawPayload";
 const SUMMARY_STALE_AFTER_MS = 15 * 60 * 1000;
 let clientPromise: Promise<DataClient> | null = null;
 
@@ -24,7 +26,8 @@ async function getNewsroomSummary() {
   const client = await getDataClient();
   const response = await client.models.KnowledgeRawPayload.get({ id: NEWSROOM_SUMMARY_PAYLOAD_ID });
   assertNoDataErrors(response.errors, "get Newsroom summary snapshot");
-  return summaryFromSnapshot(response.data);
+  const payload = await readNewsroomSummaryPayload(client);
+  return summaryFromPayload(normalizeSummaryPayload(payload, response.data?.updatedAt ?? new Date().toISOString()));
 }
 
 async function updateNewsroomSummary(event: Parameters<Schema["updateNewsroomSummary"]["functionHandler"]>[0]) {
@@ -32,7 +35,7 @@ async function updateNewsroomSummary(event: Parameters<Schema["updateNewsroomSum
   const now = new Date().toISOString();
   const response = await client.models.KnowledgeRawPayload.get({ id: NEWSROOM_SUMMARY_PAYLOAD_ID });
   assertNoDataErrors(response.errors, "get Newsroom summary snapshot");
-  const currentPayload = normalizeSummaryPayload(response.data?.payload, now);
+  const currentPayload = normalizeSummaryPayload(await readNewsroomSummaryPayload(client), now);
   const delta = parseJsonObject(event.arguments.delta);
   const nextPayload = applySummaryDelta(currentPayload, delta, {
     now,
@@ -66,20 +69,32 @@ async function upsertNewsroomSummaryPayload(
     ownerId: "newsroom",
     payloadKind: "summary-snapshot",
     importRunId: normalizeOptionalString(payload.latestImportRun?.id),
-    payload: JSON.stringify(payload),
     createdAt: current?.createdAt ?? now,
     updatedAt: now,
   };
   if (current) {
     await requireDataResult(client.models.KnowledgeRawPayload.update(input), "update Newsroom summary snapshot");
-    return;
+  } else {
+    await requireDataResult(client.models.KnowledgeRawPayload.create(input), "create Newsroom summary snapshot");
   }
-  await requireDataResult(client.models.KnowledgeRawPayload.create(input), "create Newsroom summary snapshot");
+  await putJsonModelPayload(
+    client as any,
+    { ownerKind: NEWSROOM_SUMMARY_PAYLOAD_OWNER_KIND, ownerId: NEWSROOM_SUMMARY_PAYLOAD_ID, importRunId: input.importRunId },
+    "raw_payload",
+    "summary-snapshot",
+    payload,
+    { filename: "summary-snapshot.json", now },
+  );
 }
 
-function summaryFromSnapshot(snapshot: any) {
-  if (!snapshot) return summaryFromPayload(normalizeSummaryPayload(null, new Date().toISOString()));
-  return summaryFromPayload(normalizeSummaryPayload(snapshot.payload, snapshot.updatedAt ?? new Date().toISOString()));
+async function readNewsroomSummaryPayload(client: DataClient): Promise<Record<string, unknown> | null> {
+  return readJsonModelPayload(
+    client as any,
+    NEWSROOM_SUMMARY_PAYLOAD_OWNER_KIND,
+    NEWSROOM_SUMMARY_PAYLOAD_ID,
+    "raw_payload",
+    "summary-snapshot",
+  );
 }
 
 function summaryFromPayload(payload: ReturnType<typeof normalizeSummaryPayload>) {
@@ -166,6 +181,7 @@ function createEmptyFacets() {
   return {
     assignments: { byStatus: {}, byType: {}, bySection: {}, statusByType: {}, statusBySection: {}, typeBySection: {} },
     messages: { byKind: {}, byDomain: {}, byStatus: {}, domainByKind: {} },
+    modelAttachments: { byOwnerKind: {}, byRole: {}, byMediaType: {}, byStatus: {} },
     references: { byCurationStatus: {}, byCorpus: {}, statusByCorpus: {} },
     semanticNodes: { byNodeKind: {}, byStatus: {}, byCorpus: {}, byCategorySet: {} },
     semanticRelations: { byRelationTypeKey: {}, byRelationDomain: {}, bySubjectKind: {}, byObjectKind: {} },
@@ -178,6 +194,7 @@ function normalizeFacets(value: unknown, legacy: Record<string, unknown>) {
   const parsed = parseJsonObject(value);
   mergeFacetSection(facets.assignments, parsed.assignments, ["statusByType", "statusBySection", "typeBySection"]);
   mergeFacetSection(facets.messages, parsed.messages, ["domainByKind"]);
+  mergeFacetSection(facets.modelAttachments, parsed.modelAttachments);
   mergeFacetSection(facets.references, parsed.references, ["statusByCorpus"]);
   mergeFacetSection(facets.semanticNodes, parsed.semanticNodes);
   mergeFacetSection(facets.semanticRelations, parsed.semanticRelations);

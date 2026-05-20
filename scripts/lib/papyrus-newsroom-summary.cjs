@@ -15,6 +15,7 @@ function buildNewsroomSummaryPayload({
   referenceAttachments = [],
   semanticNodes = [],
   messages = [],
+  modelAttachments = [],
   semanticRelations = [],
   assignments = [],
   assignmentEvents = [],
@@ -33,6 +34,7 @@ function buildNewsroomSummaryPayload({
     references: currentReferences,
     semanticNodes: currentSemanticNodes,
     messages,
+    modelAttachments,
     semanticRelations: currentSemanticRelations,
     assignments,
   });
@@ -54,6 +56,7 @@ function buildNewsroomSummaryPayload({
       referenceAttachments: referenceAttachments.length,
       semanticNodes: currentSemanticNodes.length,
       messages: messages.length,
+      modelAttachments: modelAttachments.length,
       semanticRelations: currentSemanticRelations.length,
       assignments: assignments.length,
       assignmentEvents: assignmentEvents.length,
@@ -74,7 +77,6 @@ function buildNewsroomSummaryPayloadRecord(payload, now = new Date().toISOString
     ownerId: NEWSROOM_SUMMARY_OWNER_ID,
     payloadKind: NEWSROOM_SUMMARY_PAYLOAD_KIND,
     importRunId: payload.latestImportRun?.id ?? null,
-    payload: JSON.stringify(payload),
     createdAt: now,
     updatedAt: now,
   };
@@ -147,6 +149,7 @@ function buildNewsroomSummaryFacets({
   references = [],
   semanticNodes = [],
   messages = [],
+  modelAttachments = [],
   semanticRelations = [],
   assignments = [],
 } = {}) {
@@ -170,6 +173,12 @@ function buildNewsroomSummaryFacets({
     increment(facets.messages.byDomain, domain, 1);
     increment(facets.messages.byStatus, status, 1);
     incrementNested(facets.messages.domainByKind, kind, domain, 1);
+  }
+  for (const attachment of modelAttachments) {
+    increment(facets.modelAttachments.byOwnerKind, stringOrDefault(attachment?.ownerKind, "unknown"), 1);
+    increment(facets.modelAttachments.byRole, stringOrDefault(attachment?.role, "unknown"), 1);
+    increment(facets.modelAttachments.byMediaType, stringOrDefault(attachment?.mediaType, "unknown"), 1);
+    increment(facets.modelAttachments.byStatus, stringOrDefault(attachment?.status, "unknown"), 1);
   }
   for (const reference of references) {
     const status = stringOrDefault(reference?.curationStatus, "pending");
@@ -246,11 +255,8 @@ function isCurrentRelationState(value) {
 }
 
 function assignmentSectionKey(assignment) {
-  const metadata = parseJsonish(assignment?.metadata);
   return stringOrDefault(assignment?.sectionKey, null)
-    ?? stringOrDefault(metadata.sectionKey, null)
     ?? stringOrDefault(assignment?.sectionId, null)
-    ?? stringOrDefault(metadata.sectionId, null)
     ?? "unsectioned";
 }
 
@@ -258,6 +264,7 @@ function createEmptyNewsroomSummaryFacets() {
   return {
     assignments: { byStatus: {}, byType: {}, bySection: {}, statusByType: {}, statusBySection: {}, typeBySection: {} },
     messages: { byKind: {}, byDomain: {}, byStatus: {}, domainByKind: {} },
+    modelAttachments: { byOwnerKind: {}, byRole: {}, byMediaType: {}, byStatus: {} },
     references: { byCurationStatus: {}, byCorpus: {}, statusByCorpus: {} },
     semanticNodes: { byNodeKind: {}, byStatus: {}, byCorpus: {}, byCategorySet: {} },
     semanticRelations: { byRelationTypeKey: {}, byRelationDomain: {}, bySubjectKind: {}, byObjectKind: {} },
@@ -270,6 +277,7 @@ function normalizeNewsroomSummaryFacets(value, legacy = {}) {
   const parsed = parseJsonish(value);
   mergeFacetSection(facets.assignments, parsed.assignments, ["statusByType", "statusBySection", "typeBySection"]);
   mergeFacetSection(facets.messages, parsed.messages, ["domainByKind"]);
+  mergeFacetSection(facets.modelAttachments, parsed.modelAttachments);
   mergeFacetSection(facets.references, parsed.references, ["statusByCorpus"]);
   mergeFacetSection(facets.semanticNodes, parsed.semanticNodes);
   mergeFacetSection(facets.semanticRelations, parsed.semanticRelations);

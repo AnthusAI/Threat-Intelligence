@@ -3,6 +3,7 @@ import { getAmplifyDataClientConfig } from "@aws-amplify/backend/function/runtim
 import { Amplify } from "aws-amplify";
 import { generateClient } from "aws-amplify/data";
 import type { Schema } from "../../data/resource";
+import { putJsonModelPayload, readJsonModelPayload } from "../shared/model-payloads";
 
 type AssignmentHandler =
   | Schema["claimAssignment"]["functionHandler"]
@@ -23,6 +24,7 @@ type DataClientResult<T = unknown> = {
 
 const FINAL_STATUSES = new Set(["completed", "canceled"]);
 const NEWSROOM_SUMMARY_PAYLOAD_ID = "knowledge-raw-payload-newsroom-summary-current";
+const NEWSROOM_SUMMARY_PAYLOAD_OWNER_KIND = "knowledgeRawPayload";
 const SUMMARY_STALE_AFTER_MS = 15 * 60 * 1000;
 const PUBLICATION_DOCTRINE_DEFINITIONS = [
   { scope: "publication", kind: "mission", label: "Editorial Mission", slug: "editorial-doctrine-mission" },
@@ -68,9 +70,16 @@ async function mutateAssignment(event: Parameters<Schema["claimAssignment"]["fun
       actorLabel,
       note: normalizeOptionalString(event.arguments.note),
       createdAt: now,
-      metadata: JSON.stringify(eventMetadata),
     }),
     `create AssignmentEvent ${eventId}`,
+  );
+  await putJsonModelPayload(
+    client as any,
+    { ownerKind: "assignmentEvent", ownerId: eventId, ownerLineageId: eventId },
+    "metadata",
+    "metadata",
+    eventMetadata,
+    { filename: "metadata.json", now },
   );
   await updateNewsroomSummaryForAssignmentAction(client, {
     assignmentTypeKey: normalizeOptionalString(assignment.assignmentTypeKey),
@@ -96,11 +105,16 @@ async function updateNewsroomSummaryForAssignmentAction(
 ): Promise<void> {
   const response = await client.models.KnowledgeRawPayload.get({ id: NEWSROOM_SUMMARY_PAYLOAD_ID });
   assertNoDataErrors(response.errors, "get Newsroom summary snapshot");
-  const payload = normalizeSummaryPayload(response.data?.payload, input.now);
+  const payload = normalizeSummaryPayload(await readNewsroomSummaryPayload(client), input.now);
   payload.generatedAt = input.now;
   payload.staleAt = new Date(Date.parse(input.now) + SUMMARY_STALE_AFTER_MS).toISOString();
   payload.source = "incremental";
   payload.counts.assignmentEvents = Math.max(0, (payload.counts.assignmentEvents ?? 0) + 1);
+  payload.counts.modelAttachments = Math.max(0, (payload.counts.modelAttachments ?? 0) + 1);
+  increment(payload.facets.modelAttachments.byOwnerKind, "assignmentEvent", 1);
+  increment(payload.facets.modelAttachments.byRole, "metadata", 1);
+  increment(payload.facets.modelAttachments.byMediaType, "application/json", 1);
+  increment(payload.facets.modelAttachments.byStatus, "active", 1);
   if (input.previousStatus && input.nextStatus && input.previousStatus !== input.nextStatus) {
     increment(payload.assignmentStatusCounts, input.previousStatus, -1);
     increment(payload.assignmentStatusCounts, input.nextStatus, 1);
@@ -245,7 +259,7 @@ async function resolveRootDeskCategory(client: DataClient, assignment: any, rela
     return category ? resolveRootCategory(client, category) : null;
   }
 
-  const categoryKey = assignmentCategoryKeyFromMetadata(assignment.metadata);
+  const categoryKey = normalizeOptionalString(assignment.primaryFocusCategoryKey);
   if (categoryKey && assignment.categorySetId) {
     const category = await getCurrentCategoryBySetAndKey(client, assignment.categorySetId, categoryKey);
     return category ? resolveRootCategory(client, category) : null;
@@ -264,16 +278,6 @@ function assignmentCategoryLineageIdFromRelations(relations: any[]): string | nu
     && relation.objectKind === "category"
   ));
   return normalizeOptionalString(direct?.objectLineageId);
-}
-
-function assignmentCategoryKeyFromMetadata(value: unknown): string | null {
-  const metadata = parseJsonObject(value);
-  return normalizeOptionalString(metadata?.categoryKey)
-    ?? normalizeOptionalString(metadata?.category_key)
-    ?? normalizeOptionalString(metadata?.rootCategoryKey)
-    ?? normalizeOptionalString(metadata?.root_category_key)
-    ?? normalizeOptionalString(metadata?.topicUid)
-    ?? normalizeOptionalString(metadata?.topic_uid);
 }
 
 async function resolveRootCategory(client: DataClient, category: any): Promise<any | null> {
@@ -476,11 +480,8 @@ function nextAssignmentUpdate(assignment: any, action: string, args: Record<stri
 }
 
 function assignmentSectionKey(assignment: any): string | null {
-  const metadata = parseJsonObject(assignment?.metadata) ?? {};
   return normalizeOptionalString(assignment?.sectionKey)
-    ?? normalizeOptionalString(metadata.sectionKey)
-    ?? normalizeOptionalString(assignment?.sectionId)
-    ?? normalizeOptionalString(metadata.sectionId);
+    ?? normalizeOptionalString(assignment?.sectionId);
 }
 
 function sectionStatusKey(assignment: any, status: string): string | null {
@@ -639,6 +640,7 @@ function normalizeSummaryPayload(value: unknown, now: string): {
       typeBySection: Record<string, Record<string, number>>;
     };
     messages: { byKind: Record<string, number>; byDomain: Record<string, number>; byStatus: Record<string, number>; domainByKind: Record<string, Record<string, number>> };
+    modelAttachments: { byOwnerKind: Record<string, number>; byRole: Record<string, number>; byMediaType: Record<string, number>; byStatus: Record<string, number> };
     references: { byCurationStatus: Record<string, number>; byCorpus: Record<string, number>; statusByCorpus: Record<string, Record<string, number>> };
     semanticNodes: { byNodeKind: Record<string, number>; byStatus: Record<string, number>; byCorpus: Record<string, number>; byCategorySet: Record<string, number> };
     semanticRelations: { byRelationTypeKey: Record<string, number>; byRelationDomain: Record<string, number>; bySubjectKind: Record<string, number>; byObjectKind: Record<string, number> };
@@ -667,6 +669,7 @@ function normalizeFacets(payload: Record<string, unknown>): ReturnType<typeof cr
   const parsed = parseJsonObject(payload.facets) ?? {};
   const assignments = parseJsonObject(parsed.assignments) ?? {};
   const messages = parseJsonObject(parsed.messages) ?? {};
+  const modelAttachments = parseJsonObject(parsed.modelAttachments) ?? {};
   const references = parseJsonObject(parsed.references) ?? {};
   const semanticNodes = parseJsonObject(parsed.semanticNodes) ?? {};
   const semanticRelations = parseJsonObject(parsed.semanticRelations) ?? {};
@@ -681,6 +684,10 @@ function normalizeFacets(payload: Record<string, unknown>): ReturnType<typeof cr
   facets.messages.byDomain = { ...numberRecord(payload.messageDomainCounts), ...numberRecord(messages.byDomain) };
   facets.messages.byStatus = numberRecord(messages.byStatus);
   facets.messages.domainByKind = nestedNumberRecord(messages.domainByKind);
+  facets.modelAttachments.byOwnerKind = numberRecord(modelAttachments.byOwnerKind);
+  facets.modelAttachments.byRole = numberRecord(modelAttachments.byRole);
+  facets.modelAttachments.byMediaType = numberRecord(modelAttachments.byMediaType);
+  facets.modelAttachments.byStatus = numberRecord(modelAttachments.byStatus);
   facets.references.byCurationStatus = { ...numberRecord(payload.referenceStatusCounts), ...numberRecord(references.byCurationStatus) };
   facets.references.byCorpus = numberRecord(references.byCorpus);
   facets.references.statusByCorpus = nestedNumberRecord(references.statusByCorpus);
@@ -700,6 +707,7 @@ function createEmptyFacets() {
   return {
     assignments: { byStatus: {}, byType: {}, bySection: {}, statusByType: {}, statusBySection: {}, typeBySection: {} },
     messages: { byKind: {}, byDomain: {}, byStatus: {}, domainByKind: {} },
+    modelAttachments: { byOwnerKind: {}, byRole: {}, byMediaType: {}, byStatus: {} },
     references: { byCurationStatus: {}, byCorpus: {}, statusByCorpus: {} },
     semanticNodes: { byNodeKind: {}, byStatus: {}, byCorpus: {}, byCategorySet: {} },
     semanticRelations: { byRelationTypeKey: {}, byRelationDomain: {}, bySubjectKind: {}, byObjectKind: {} },
@@ -726,15 +734,32 @@ async function upsertNewsroomSummaryPayload(
     ownerId: "newsroom",
     payloadKind: "summary-snapshot",
     importRunId: normalizeOptionalString(parseJsonObject(payload.latestImportRun)?.id),
-    payload: JSON.stringify(payload),
     createdAt: current?.createdAt ?? now,
     updatedAt: now,
   };
   if (current) {
     await requireDataResult(client.models.KnowledgeRawPayload.update(input), "update Newsroom summary snapshot");
-    return;
+  } else {
+    await requireDataResult(client.models.KnowledgeRawPayload.create(input), "create Newsroom summary snapshot");
   }
-  await requireDataResult(client.models.KnowledgeRawPayload.create(input), "create Newsroom summary snapshot");
+  await putJsonModelPayload(
+    client as any,
+    { ownerKind: NEWSROOM_SUMMARY_PAYLOAD_OWNER_KIND, ownerId: NEWSROOM_SUMMARY_PAYLOAD_ID, importRunId: input.importRunId },
+    "raw_payload",
+    "summary-snapshot",
+    payload,
+    { filename: "summary-snapshot.json", now },
+  );
+}
+
+async function readNewsroomSummaryPayload(client: DataClient): Promise<Record<string, unknown> | null> {
+  return readJsonModelPayload(
+    client as any,
+    NEWSROOM_SUMMARY_PAYLOAD_OWNER_KIND,
+    NEWSROOM_SUMMARY_PAYLOAD_ID,
+    "raw_payload",
+    "summary-snapshot",
+  );
 }
 
 function numberRecord(value: unknown): Record<string, number> {
