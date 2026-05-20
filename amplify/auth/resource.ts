@@ -8,19 +8,25 @@ const authRedirectUrls = [
   "https://main.dbsyytcm9drqa.amplifyapp.com/",
 ];
 
+const disableGoogleOAuth = process.env.PAPYRUS_DISABLE_GOOGLE_OAUTH === "1";
+
 export const auth = defineAuth({
   loginWith: {
     email: true,
-    externalProviders: {
-      google: {
-        clientId: secret("GOOGLE_CLIENT_ID"),
-        clientSecret: secret("GOOGLE_CLIENT_SECRET"),
-        scopes: ["email", "profile", "openid"],
-      },
-      scopes: ["EMAIL", "PROFILE", "OPENID"],
-      callbackUrls: authRedirectUrls,
-      logoutUrls: authRedirectUrls,
-    },
+    ...(disableGoogleOAuth
+      ? {}
+      : {
+          externalProviders: {
+            google: {
+              clientId: secret("GOOGLE_CLIENT_ID"),
+              clientSecret: secret("GOOGLE_CLIENT_SECRET"),
+              scopes: ["email", "profile", "openid"],
+            },
+            scopes: ["EMAIL", "PROFILE", "OPENID"],
+            callbackUrls: authRedirectUrls,
+            logoutUrls: authRedirectUrls,
+          },
+        }),
   },
   groups: ["admin", "editor", "curator"],
   access: (allow) => [
