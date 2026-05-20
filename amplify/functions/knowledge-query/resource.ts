@@ -1,6 +1,6 @@
 import { defineFunction } from "@aws-amplify/backend";
 import { Duration } from "aws-cdk-lib";
-import { Code, Function, Runtime } from "aws-cdk-lib/aws-lambda";
+import { Architecture, Code, Function, Runtime } from "aws-cdk-lib/aws-lambda";
 import { Construct } from "constructs";
 import fs from "node:fs";
 import path from "node:path";
@@ -30,6 +30,7 @@ export const knowledgeQuery = defineFunction(
     return new Function(scope, "papyrus-knowledge-query", {
       functionName: "papyrus-knowledge-query",
       runtime: Runtime.PYTHON_3_12,
+      architecture: Architecture.ARM_64,
       handler: "handler.handler",
       timeout: Duration.seconds(300),
       memorySize: 512,
