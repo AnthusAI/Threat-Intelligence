@@ -2,9 +2,10 @@
 
 import { Hub } from "aws-amplify/utils";
 import { fetchAuthSession } from "aws-amplify/auth";
+import { gsap } from "gsap";
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
 import { generateClient } from "aws-amplify/data";
 import type { Schema } from "../amplify/data/resource";
 import {
@@ -143,6 +144,18 @@ type NewsroomDataGridRow = {
   id: string;
   cells: ReactNode[];
 };
+type NewsroomCardSpan = "1x1" | "2x1" | "1x2" | "2x2";
+type NewsroomCardRecord = {
+  id: string;
+  ariaLabel?: string;
+  body?: ReactNode;
+  dataAttributes?: Record<string, boolean | number | string | undefined>;
+  kicker: ReactNode;
+  meta: ReactNode[];
+  span?: NewsroomCardSpan;
+  stamp?: ReactNode;
+  title: ReactNode;
+};
 type NewsroomDetailAction = {
   ariaLabel?: string;
   icon?: ReactNode;
@@ -170,6 +183,15 @@ type KnowledgeQueryControl = {
   dialog: ReactNode;
   error: string | null;
   loading: boolean;
+  result: KnowledgeQueryResponse | null;
+};
+
+type NewsroomSearchControl = {
+  clear: () => void;
+  dialog: ReactNode;
+  error: string | null;
+  loading: boolean;
+  open: () => void;
   result: KnowledgeQueryResponse | null;
 };
 
@@ -495,6 +517,7 @@ function NewsDeskDashboard({
   const [mergeSelection, setMergeSelection] = useState<MergeSelection | null>(null);
   const [isPending, startTransition] = useTransition();
   const controlsDisabled = isPending || !canEdit;
+  const overviewSearch = useNewsroomSemanticSearchContext({ disabled: controlsDisabled || Boolean(dashboard.isDemo) });
   const showRhythmOverlay = useNewsroomRhythmOverlay();
   const initialAdministrationPanel = normalizeAdministrationPanel(initialSelection.panel);
   const [administrationPanel, setAdministrationPanel] = useState<AdministrationPanel>(initialAdministrationPanel);
@@ -1795,17 +1818,29 @@ function NewsDeskDashboard({
       <section className="scroll-edition news-desk-edition">
         <div className="paper-page paper-page--front paper-page--active">
           <article className="paper-page-content paper-page-content--front news-desk-page" aria-labelledby="news-desk-title">
-        <header className="masthead news-desk-masthead">
-          <div className="masthead__rule" />
-          <h1 id="news-desk-title">
-            <Link href={getNewsDeskTabHref("/newsroom", dashboard.isDemo)}>NEWSROOM</Link>
-          </h1>
-          <div className="masthead__meta" aria-label="Newsroom edition status">
-            <span>Steering Section</span>
-            <span>{mastheadSecondLabel}</span>
-            <span>{dashboard.isDemo ? "Demo Desk" : <ReaderAuthControl className="news-desk-auth-control" showIdentity authState={authState} />}</span>
-          </div>
-        </header>
+	        <header className="masthead news-desk-masthead">
+	          <div className="masthead__rule" />
+	          <h1 id="news-desk-title">
+	            <Link href={getNewsDeskTabHref("/newsroom", dashboard.isDemo)}>NEWSROOM</Link>
+	          </h1>
+	          {activeTab === "overview" ? (
+	            <button
+	              type="button"
+	              className="news-desk-masthead__search"
+	              aria-label="Search knowledge base (semantic + ontology)"
+	              title="Search (semantic + ontology)"
+	              disabled={controlsDisabled || Boolean(dashboard.isDemo)}
+	              onClick={overviewSearch.open}
+	            >
+	              <SearchMarkIcon />
+	            </button>
+	          ) : null}
+	          <div className="masthead__meta" aria-label="Newsroom edition status">
+	            <span>Steering Section</span>
+	            <span>{mastheadSecondLabel}</span>
+	            <span>{dashboard.isDemo ? "Demo Desk" : <ReaderAuthControl className="news-desk-auth-control" showIdentity authState={authState} />}</span>
+	          </div>
+	        </header>
 
         <nav className="news-desk-tabs" aria-label="Newsroom sections">
           {NEWS_DESK_TABS.map((tab) => (
@@ -1820,6 +1855,8 @@ function NewsDeskDashboard({
             />
           ))}
         </nav>
+
+	        {activeTab === "overview" ? <NewsroomOverviewSearch search={overviewSearch} /> : null}
 
         {activeTab !== "overview" && activeTab !== "assignments" && activeTab !== "messages" && activeTab !== "references" && activeTab !== "topics" && activeTab !== "concepts" ? (
           <section className="news-desk-lede-grid" aria-label="Newsroom overview">
@@ -4271,18 +4308,7 @@ function ReferencesDeskView({
     : `${filteredReferences.length} private corpus items`;
   const statusCounts = categoryFilter ? countReferencesByStatus(visibleReferences) : summary?.facets?.references?.byCurationStatus ?? summary?.referenceStatusCounts ?? countReferencesByStatus(visibleReferences);
   const totalReferenceCount = categoryFilter ? visibleReferences.length : summaryCountFromRecord(summary, "references") || visibleReferences.length;
-  const rows = filteredReferences.map((reference) => {
-    const lineageId = reference.lineageId ?? reference.id;
-    return {
-      id: lineageId,
-      cells: [
-        reference.title ?? reference.externalItemId,
-        reference.curationStatus ?? "pending",
-        reference.mediaType ?? "metadata",
-        formatReferenceDate(reference),
-      ],
-    };
-  });
+  const cards = filteredReferences.map((reference, index) => referenceToNewsroomCard(reference, index, selectedLineageId));
   const selectReference = (lineageId: string) => {
     setSelectedReferenceLineageId(lineageId);
     setIsReferenceDetailOpen(true);
@@ -4337,6 +4363,7 @@ function ReferencesDeskView({
   return (
     <>
       <NewsroomListDetailShell
+        animatedDetail
         sectionKey="references"
         canExpandDetail={Boolean(selectedReference)}
         detailOpen={isReferenceDetailOpen}
@@ -4352,13 +4379,8 @@ function ReferencesDeskView({
         )}
         list={(
           <section className="category-steering-section category-steering-section--lead" aria-label={detail}>
-            <NewsroomDataGrid
-              columns={[
-                { key: "reference", label: "Reference" },
-                { key: "status", label: "Status" },
-                { key: "media", label: "Media" },
-                { key: "updated", label: "Updated" },
-              ]}
+            <NewsroomCardGrid
+              cards={cards}
               emptyLabel={references.length ? "No references match this filter" : "No private references imported"}
               filterLabel="Curation status"
               filterOptions={[
@@ -4384,7 +4406,6 @@ function ReferencesDeskView({
               onLoadMore={feed.loadMore}
               onMetricChange={setMetricStatusFilter}
               onSelect={selectReference}
-              rows={rows}
               selectedId={selectedLineageId}
             />
           </section>
@@ -4458,15 +4479,7 @@ function MessagesDeskView({
     title: selectedMessage.summary ?? "Stored message payload",
     subtitle: selectedMessage.messageKind,
   } : null);
-  const rows = visibleMessages.map((message) => ({
-    id: message.id,
-    cells: [
-      message.summary ?? "Stored message payload",
-      message.messageKind,
-      message.messageDomain,
-      formatDateTime(message.createdAt),
-    ],
-  }));
+  const cards = visibleMessages.map((message, index) => messageToNewsroomCard(message, index, selectedMessage?.id ?? null));
   const totalMessageCount = summaryCountFromRecord(summary, "messages") || messages.length;
   const metrics = [
     { key: "", label: "All", count: totalMessageCount },
@@ -4480,6 +4493,7 @@ function MessagesDeskView({
   return (
     <>
       <NewsroomListDetailShell
+        animatedDetail
         sectionKey="messages"
         canExpandDetail={Boolean(selectedMessage)}
         detailOpen={isMessageDetailOpen}
@@ -4494,13 +4508,8 @@ function MessagesDeskView({
         )}
         list={(
           <section className="category-steering-section category-steering-section--lead" aria-label="Messages">
-            <NewsroomDataGrid
-              columns={[
-                { key: "message", label: "Message" },
-                { key: "kind", label: "Kind" },
-                { key: "domain", label: "Domain" },
-                { key: "created", label: "Created" },
-              ]}
+            <NewsroomCardGrid
+              cards={cards}
               emptyLabel="No private messages recorded"
               filterLabel="Message kind"
               filterOptions={[
@@ -4517,7 +4526,6 @@ function MessagesDeskView({
               onLoadMore={feed.loadMore}
               onMetricChange={setDomainFilter}
               onSelect={selectMessage}
-              rows={rows}
               selectedId={selectedMessage?.id ?? null}
             />
           </section>
@@ -4685,6 +4693,7 @@ function mergeNewsroomRows<T>(current: T[], next: T[]): T[] {
 
 function NewsroomListDetailShell({
   actions = [],
+  animatedDetail = false,
   canExpandDetail = true,
   detail,
   detailOpen = false,
@@ -4695,6 +4704,7 @@ function NewsroomListDetailShell({
   utilityActions = [],
 }: {
   actions?: NewsroomDetailAction[];
+  animatedDetail?: boolean;
   canExpandDetail?: boolean;
   detail: ReactNode;
   detailOpen?: boolean;
@@ -4705,16 +4715,110 @@ function NewsroomListDetailShell({
   utilityActions?: NewsroomDetailAction[];
 }) {
   const [detailMode, setDetailMode] = useState<"split" | "full">("split");
+  const [renderedDetailOpen, setRenderedDetailOpen] = useState(detailOpen && canExpandDetail);
   const [isActionMenuOpen, setIsActionMenuOpen] = useState(false);
   const actionMenuRef = useRef<HTMLDivElement | null>(null);
+  const shellRef = useRef<HTMLDivElement | null>(null);
+  const railRef = useRef<HTMLElement | null>(null);
+  const listViewportRef = useRef<HTMLDivElement | null>(null);
+  const listSurfaceRef = useRef<HTMLDivElement | null>(null);
+  const baselineListWidthRef = useRef(0);
   const canToggleDetailMode = useMediaQuery("(min-width: 1101px)");
   const enabledActions = actions.filter((action) => !action.disabled);
   const hasActions = actions.length > 0;
   const hasUtilityActions = utilityActions.length > 0;
+  const requestedDetailOpen = detailOpen && canExpandDetail;
+  const shouldAnimateDetail = animatedDetail && canToggleDetailMode && detailMode === "split" && canExpandDetail;
+  const effectiveDetailOpen = shouldAnimateDetail ? renderedDetailOpen : requestedDetailOpen;
 
   useEffect(() => {
     if (!canExpandDetail && detailMode === "full") setDetailMode("split");
   }, [canExpandDetail, detailMode]);
+
+  useEffect(() => {
+    if (!shouldAnimateDetail) {
+      setRenderedDetailOpen(requestedDetailOpen);
+      return;
+    }
+    if (requestedDetailOpen) setRenderedDetailOpen(true);
+  }, [requestedDetailOpen, shouldAnimateDetail]);
+
+  useLayoutEffect(() => {
+    const shell = shellRef.current;
+    const viewport = listViewportRef.current;
+    const surface = listSurfaceRef.current;
+    const rail = railRef.current;
+    if (!shell || !viewport || !surface || !rail) return;
+    gsap.killTweensOf([surface, viewport, rail]);
+
+    const clearAnimatedLayout = () => {
+      gsap.killTweensOf([surface, viewport, rail]);
+      surface.style.width = "";
+      surface.style.transform = "";
+      surface.style.transformOrigin = "";
+      surface.style.willChange = "";
+      viewport.style.height = "";
+      rail.style.transform = "";
+      rail.style.opacity = "";
+      rail.style.visibility = "";
+      shell.style.setProperty("--newsroom-card-scale", "1");
+      shell.setAttribute("data-newsroom-card-scale", "1");
+    };
+
+    if (!shouldAnimateDetail) {
+      clearAnimatedLayout();
+      return;
+    }
+
+    if (!renderedDetailOpen) {
+      const closedWidth = viewport.getBoundingClientRect().width;
+      if (closedWidth > 0) baselineListWidthRef.current = closedWidth;
+      clearAnimatedLayout();
+      return;
+    }
+
+    const baselineWidth = baselineListWidthRef.current || shell.getBoundingClientRect().width || viewport.getBoundingClientRect().width;
+    const viewportWidth = viewport.getBoundingClientRect().width;
+    const targetScale = baselineWidth > 0 ? viewportWidth / baselineWidth : 1;
+    const boundedScale = targetScale > 0 ? targetScale : 1;
+    const scaledHeight = Math.max(1, surface.scrollHeight * boundedScale);
+    shell.style.setProperty("--newsroom-card-scale", String(boundedScale));
+    shell.setAttribute("data-newsroom-card-scale", boundedScale.toFixed(4));
+    surface.style.width = `${baselineWidth}px`;
+    surface.style.transformOrigin = "top left";
+    surface.style.willChange = "transform";
+    viewport.style.height = `${scaledHeight}px`;
+
+    if (requestedDetailOpen) {
+      gsap.fromTo(
+        surface,
+        { scale: 1 },
+        { scale: boundedScale, duration: 0.42, ease: "power3.out" },
+      );
+      gsap.fromTo(
+        rail,
+        { autoAlpha: 0, x: 42 },
+        { autoAlpha: 1, duration: 0.42, ease: "power3.out", x: 0 },
+      );
+      return;
+    }
+
+    gsap.to(surface, {
+      duration: 0.32,
+      ease: "power2.inOut",
+      onComplete: () => {
+        clearAnimatedLayout();
+        setRenderedDetailOpen(false);
+      },
+      scale: 1,
+    });
+    gsap.to(rail, {
+      autoAlpha: 0,
+      duration: 0.26,
+      ease: "power2.inOut",
+      x: 42,
+    });
+  }, [requestedDetailOpen, renderedDetailOpen, sectionKey, shouldAnimateDetail]);
 
   useEffect(() => {
     if (!isActionMenuOpen) return;
@@ -4739,26 +4843,41 @@ function NewsroomListDetailShell({
 
   return (
     <div
+      ref={shellRef}
       className="news-desk-columns newsroom-list-detail-shell"
       data-news-desk-section={sectionKey}
       data-news-desk-assignments={sectionKey === "assignments" ? true : undefined}
       data-newsroom-list-detail-shell
+      data-animated-detail={animatedDetail ? "true" : undefined}
       data-detail-mode={detailMode}
-      data-detail-open={detailOpen && canExpandDetail ? "true" : "false"}
+      data-detail-open={effectiveDetailOpen ? "true" : "false"}
+      data-newsroom-card-scale="1"
     >
       <div className="news-desk-main-column">
         {lede}
-        {list}
+        <div
+          className="newsroom-list-detail-shell__list-viewport"
+          data-newsroom-card-grid-viewport={animatedDetail ? true : undefined}
+          ref={listViewportRef}
+        >
+          <div
+            className="newsroom-list-detail-shell__list-surface"
+            data-newsroom-card-grid-surface={animatedDetail ? true : undefined}
+            ref={listSurfaceRef}
+          >
+            {list}
+          </div>
+        </div>
       </div>
-      <aside className="news-desk-rail-column">
-        {detailOpen && canExpandDetail && onCloseDetail ? (
+      <aside className="news-desk-rail-column" ref={railRef}>
+        {effectiveDetailOpen && canExpandDetail && onCloseDetail ? (
           <div className="newsroom-list-detail-shell__narrow-toolbar">
             <button type="button" className="news-desk-detail-back-button" onClick={onCloseDetail}>
               Back to list
             </button>
           </div>
         ) : null}
-        {(canToggleDetailMode || hasActions || hasUtilityActions) && canExpandDetail ? (
+        {(canToggleDetailMode || hasActions || hasUtilityActions) && canExpandDetail && effectiveDetailOpen ? (
           <div className="newsroom-list-detail-shell__detail-toolbar">
             {utilityActions.map((action) => (
               <button
@@ -4907,6 +5026,26 @@ function SearchIcon() {
   );
 }
 
+function SearchMarkIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="news-desk-search-mark__icon"
+      fill="none"
+      height="18"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="3"
+      viewBox="0 0 24 24"
+      width="18"
+    >
+      <circle cx="11" cy="11" r="7" />
+      <path d="m20 20-3.5-3.5" />
+    </svg>
+  );
+}
+
 function NewsroomDataGrid({
   columns,
   emptyLabel,
@@ -5007,6 +5146,118 @@ function NewsroomDataGrid({
         ) : null}
       </div>
     </>
+  );
+}
+
+function NewsroomCardGrid({
+  cards,
+  emptyLabel,
+  filterLabel,
+  filterOptions,
+  filterValue,
+  metrics,
+  metricValue,
+  onFilterChange,
+  onMetricChange,
+  onSelect,
+  selectedId,
+  footerLabel,
+  hasMore = false,
+  isLoadingMore = false,
+  onLoadMore,
+}: {
+  cards: NewsroomCardRecord[];
+  emptyLabel: string;
+  filterLabel: string;
+  filterOptions: Array<{ key: string; label: string; count?: number }>;
+  filterValue: string;
+  metrics: NewsroomDataGridMetric[];
+  metricValue: string;
+  onFilterChange: (value: string) => void;
+  onMetricChange: (value: string) => void;
+  onSelect: (id: string) => void;
+  selectedId?: string | null;
+  footerLabel?: string | null;
+  hasMore?: boolean;
+  isLoadingMore?: boolean;
+  onLoadMore?: () => void;
+}) {
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!onLoadMore || !hasMore || isLoadingMore) return;
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) onLoadMore();
+    }, { rootMargin: "240px" });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMore, isLoadingMore, onLoadMore]);
+  return (
+    <div className="newsroom-card-grid-shell" data-newsroom-card-grid-shell>
+      <div className="news-desk-data-grid-filter newsroom-card-grid-filter" data-news-desk-data-grid-filter>
+        <label>
+          <span>{filterLabel}</span>
+          <select value={filterValue} onChange={(event) => onFilterChange(event.target.value)}>
+            {filterOptions.map((option) => (
+              <option key={option.key || "all"} value={option.key}>
+                {option.count === undefined ? option.label : `${option.label} (${option.count})`}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="news-desk-data-grid-filter__metrics">
+          {metrics.map((metric) => (
+            <button
+              type="button"
+              key={metric.key || "all"}
+              data-active={metricValue === metric.key || undefined}
+              onClick={() => onMetricChange(metric.key)}
+            >
+              {metric.count} {metric.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="newsroom-card-grid" data-newsroom-card-grid>
+        {cards.length ? cards.map((card) => {
+          const span = card.span ?? "1x1";
+          return (
+            <button
+              type="button"
+              aria-label={card.ariaLabel}
+              className={`newsroom-card newsroom-card--span-${span}`}
+              data-active={selectedId === card.id || undefined}
+              data-newsroom-card
+              data-newsroom-card-id={card.id}
+              data-newsroom-card-span={span}
+              key={card.id}
+              onClick={() => onSelect(card.id)}
+              {...card.dataAttributes}
+            >
+              <span className="newsroom-card__kicker">{card.kicker}</span>
+              <strong className="newsroom-card__title">{card.title}</strong>
+              {card.body ? <span className="newsroom-card__body">{card.body}</span> : null}
+              <span className="newsroom-card__meta">
+                {card.meta.map((entry, index) => (
+                  <span key={`${card.id}-meta-${index}`}>{entry}</span>
+                ))}
+              </span>
+              {card.stamp ? <span className="newsroom-card__stamp">{card.stamp}</span> : null}
+            </button>
+          );
+        }) : (
+          <div className="newsroom-card-grid__empty">
+            <EmptyRow label={emptyLabel} />
+          </div>
+        )}
+      </div>
+      {onLoadMore ? (
+        <div className="news-desk-data-grid__footer newsroom-card-grid__footer" ref={sentinelRef}>
+          {isLoadingMore ? "Loading more..." : hasMore ? footerLabel ?? "Scroll for more" : footerLabel ?? "End of feed"}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -5208,6 +5459,78 @@ function useNewsroomKnowledgeContext(target: KnowledgeQueryTarget | null) {
   };
 }
 
+function useNewsroomSemanticSearchContext({ disabled }: { disabled: boolean }): NewsroomSearchControl {
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [semanticText, setSemanticText] = useState("");
+  const [maxTokens, setMaxTokens] = useState("1600");
+  const [state, setState] = useState<{ error: string | null; loading: boolean; result: KnowledgeQueryResponse | null }>({
+    error: null,
+    loading: false,
+    result: null,
+  });
+
+  const run = async () => {
+    if (disabled) return;
+    const query = semanticText.trim();
+    if (!query) {
+      setState({ error: "Enter a semantic query before searching.", loading: false, result: null });
+      return;
+    }
+    const tokenBudget = Math.max(400, Math.min(20_000, Number.parseInt(maxTokens, 10) || 1600));
+    const request = buildNewsroomSemanticOnlyQueryInput(query, tokenBudget);
+    setState((current) => ({ ...current, error: null, loading: true }));
+    try {
+      const result = await runNewsroomKnowledgeQuery(request);
+      const text = result.context?.text?.trim();
+      if (!text) throw new Error("knowledgeQuery returned no markdown context.");
+      setState({ error: null, loading: false, result });
+      setDialogOpen(false);
+    } catch (error) {
+      setState({ error: error instanceof Error ? error.message : "Knowledge query failed.", loading: false, result: null });
+    }
+  };
+
+  return {
+    clear: () => setState({ error: null, loading: false, result: null }),
+    dialog: (
+      <NewsroomSearchDialog
+        disabled={disabled || state.loading}
+        maxTokens={maxTokens}
+        semanticText={semanticText}
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        onMaxTokensChange={setMaxTokens}
+        onRun={run}
+        onSemanticTextChange={setSemanticText}
+      />
+    ),
+    error: state.error,
+    loading: state.loading,
+    open: () => setDialogOpen(true),
+    result: state.result,
+  };
+}
+
+function buildNewsroomSemanticOnlyQueryInput(semanticQuery: string, maxTokens: number): Record<string, unknown> {
+  return {
+    semanticQuery,
+    scope: {
+      depth: 1,
+      topK: 24,
+      relatedRecordLimit: 10,
+    },
+    profile: "editor",
+    ranking: {
+      profile: "balanced",
+      diversity: "broad",
+    },
+    output: {
+      format: "markdown",
+      maxTokens,
+    },
+  };
+}
+
 function buildNewsroomKnowledgeQueryInput(target: KnowledgeQueryTarget, semanticText: string, maxTokens: number): Record<string, unknown> {
   const anchor: Record<string, unknown> = {
     kind: target.anchor.kind,
@@ -5236,6 +5559,88 @@ function buildNewsroomKnowledgeQueryInput(target: KnowledgeQueryTarget, semantic
 
 function knowledgeQueryTargetKey(target: KnowledgeQueryTarget): string {
   return `${target.anchor.kind}:${target.anchor.lineageId ?? target.anchor.id}`;
+}
+
+function NewsroomSearchDialog({
+  disabled,
+  maxTokens,
+  onClose,
+  onMaxTokensChange,
+  onRun,
+  onSemanticTextChange,
+  open,
+  semanticText,
+}: {
+  disabled: boolean;
+  maxTokens: string;
+  onClose: () => void;
+  onMaxTokensChange: (value: string) => void;
+  onRun: () => void;
+  onSemanticTextChange: (value: string) => void;
+  open: boolean;
+  semanticText: string;
+}) {
+  useEffect(() => {
+    if (!open) return;
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose, open]);
+
+  if (!open) return null;
+
+  return (
+    <div
+      className="news-desk-modal"
+      data-news-desk-knowledge-query-modal
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !disabled) onClose();
+      }}
+    >
+      <div className="news-desk-modal__dialog news-desk-modal__dialog--knowledge-query" role="dialog" aria-modal="true" aria-labelledby="newsroom-search-title">
+        <header className="news-desk-modal__header">
+          <div>
+            <p className="story-label">Search</p>
+            <h3 id="newsroom-search-title">Search</h3>
+            <span>semantic + ontology</span>
+          </div>
+          <button type="button" disabled={disabled} onClick={onClose}>Close</button>
+        </header>
+        <div className="news-desk-knowledge-query-form">
+          <label>
+            <span>Semantic Query</span>
+            <textarea
+              disabled={disabled}
+              rows={5}
+              value={semanticText}
+              onChange={(event) => onSemanticTextChange(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>Token Budget</span>
+            <input
+              disabled={disabled}
+              inputMode="numeric"
+              min="400"
+              max="20000"
+              step="100"
+              type="number"
+              value={maxTokens}
+              onChange={(event) => onMaxTokensChange(event.target.value)}
+            />
+          </label>
+        </div>
+        <footer className="news-desk-modal__actions">
+          <button type="button" disabled={disabled} onClick={onClose}>Cancel</button>
+          <button type="button" className="news-desk-assignment-create-button" disabled={disabled} onClick={onRun}>
+            {disabled ? "Searching" : "Search"}
+          </button>
+        </footer>
+      </div>
+    </div>
+  );
 }
 
 function KnowledgeQueryDialog({
@@ -5329,6 +5734,25 @@ function KnowledgeQueryStatus({ error, loading }: { error: string | null; loadin
       {loading ? <span className="news-desk-knowledge-query-spinner" aria-hidden="true" /> : null}
       <strong>{error ?? "Searching knowledge context..."}</strong>
     </div>
+  );
+}
+
+function NewsroomOverviewSearch({ search }: { search: NewsroomSearchControl }) {
+  const hasInlineOutput = search.loading || Boolean(search.error) || Boolean(search.result);
+  return (
+    <>
+      {hasInlineOutput ? (
+        <section className="news-desk-overview-search" aria-label="Knowledge search">
+          <KnowledgeQueryStatus error={search.error} loading={search.loading} />
+          {search.result ? (
+            <div className="news-desk-overview-search__result">
+              <KnowledgeQueryResultBlock result={search.result} onClear={search.clear} />
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+      {search.dialog}
+    </>
   );
 }
 
@@ -6005,6 +6429,7 @@ function AssignmentDeskView({
   return (
     <>
       <NewsroomListDetailShell
+        animatedDetail
         sectionKey="assignments"
         canExpandDetail={Boolean(selectedAssignment)}
         detailOpen={isAssignmentDetailOpen}
@@ -6189,15 +6614,10 @@ function AssignmentManagementGrid({
     { key: "completed", label: "Completed", count: metrics.completed },
     { key: "canceled", label: "Canceled", count: metrics.canceled },
   ];
+  const cards = assignments.map((assignment, index) => assignmentToNewsroomCard(assignment, index, selectedAssignmentId));
   return (
-    <NewsroomDataGrid
-      columns={[
-        { key: "assignment", label: "Assignment" },
-        { key: "type", label: "Type" },
-        { key: "status", label: "Status" },
-        { key: "queue", label: "Queue" },
-        { key: "updated", label: "Updated" },
-      ]}
+    <NewsroomCardGrid
+      cards={cards}
       emptyLabel="No assignments found"
       filterLabel="Assignment type"
       filterOptions={[
@@ -6214,19 +6634,6 @@ function AssignmentManagementGrid({
       onLoadMore={onLoadMore}
       onMetricChange={onStatusChange}
       onSelect={onSelect}
-      rows={assignments.map((assignment) => {
-        const analysisPlan = assignmentAnalysisReindexMetadata(assignment);
-        return {
-          id: assignment.id,
-          cells: [
-            assignment.title,
-            analysisPlan ? analysisPlan.profileTitle : formatAssignmentTypeLabel(assignment.assignmentTypeKey),
-            <StatusPill key={`${assignment.id}-status`} status={assignment.status} />,
-            assignment.queueKey,
-            formatDateTime(assignment.updatedAt ?? assignment.createdAt),
-          ],
-        };
-      })}
       selectedId={selectedAssignmentId}
     />
   );
@@ -6981,6 +7388,110 @@ function formatDeskSectionLede(section: NewsDeskTab): string {
   return "";
 }
 
+function referenceToNewsroomCard(reference: ReferenceRecord, index: number, selectedId?: string | null): NewsroomCardRecord {
+  const lineageId = reference.lineageId ?? reference.id;
+  const status = reference.curationStatus ?? "pending";
+  const authors = compactArray(reference.authors).join(", ");
+  const source = reference.sourceUri ?? reference.storagePath ?? reference.externalItemId;
+  return {
+    id: lineageId,
+    ariaLabel: `Open reference ${reference.title ?? reference.externalItemId}`,
+    body: newsroomCardExcerpt(source, 260),
+    kicker: status,
+    meta: [
+      reference.mediaType ?? "metadata",
+      reference.corpusId,
+      authors || "unattributed",
+    ],
+    span: deterministicNewsroomCardSpan({
+      bodyLength: source?.length ?? 0,
+      index,
+      isSelected: selectedId === lineageId,
+      isUrgent: status === "pending",
+    }),
+    stamp: formatReferenceDate(reference),
+    title: reference.title ?? reference.externalItemId,
+  };
+}
+
+function messageToNewsroomCard(message: MessageRecord, index: number, selectedId?: string | null): NewsroomCardRecord {
+  const body = message.body ?? message.summary ?? message.source ?? "";
+  return {
+    id: message.id,
+    ariaLabel: `Open message ${message.summary ?? message.id}`,
+    body: newsroomCardExcerpt(body, 280),
+    kicker: message.messageKind,
+    meta: [
+      message.messageDomain,
+      message.authorLabel ?? message.authorSub ?? "unknown author",
+      message.source ?? message.status,
+    ],
+    span: deterministicNewsroomCardSpan({
+      bodyLength: body.length,
+      index,
+      isSelected: selectedId === message.id,
+      isUrgent: message.status !== "archived",
+    }),
+    stamp: formatDateTime(message.createdAt),
+    title: message.summary ?? "Stored message payload",
+  };
+}
+
+function assignmentToNewsroomCard(assignment: AssignmentRecord, index: number, selectedId?: string | null): NewsroomCardRecord {
+  const analysisPlan = assignmentAnalysisReindexMetadata(assignment);
+  const body = assignment.brief ?? assignment.summary ?? assignment.instructions ?? assignment.queueKey;
+  const priority = typeof assignment.priority === "number" ? assignment.priority : null;
+  return {
+    id: assignment.id,
+    ariaLabel: `Open assignment ${assignment.title}`,
+    body: newsroomCardExcerpt(body, 300),
+    dataAttributes: {
+      "data-assignment-candidate": assignment.id,
+      "data-assignment-status": assignment.status,
+    },
+    kicker: formatAssignmentTypeLabel(assignment.assignmentTypeKey),
+    meta: [
+      analysisPlan ? analysisPlan.profileTitle : assignment.queueKey,
+      assignment.assigneeKey ?? assignment.assigneeType ?? "unassigned",
+      formatDateTime(assignment.updatedAt ?? assignment.createdAt),
+    ],
+    span: deterministicNewsroomCardSpan({
+      bodyLength: body.length,
+      index,
+      isSelected: selectedId === assignment.id,
+      isUrgent: assignment.status === "open" || assignment.status === "claimed" || (priority !== null && priority <= 1),
+    }),
+    stamp: <StatusPill status={assignment.status} />,
+    title: assignment.title,
+  };
+}
+
+function deterministicNewsroomCardSpan({
+  bodyLength,
+  index,
+  isSelected,
+  isUrgent,
+}: {
+  bodyLength: number;
+  index: number;
+  isSelected: boolean;
+  isUrgent: boolean;
+}): NewsroomCardSpan {
+  if (isSelected) return "2x2";
+  if (index === 0 || isUrgent && index < 3) return "2x1";
+  if (bodyLength > 180 || index > 0 && index % 7 === 0) return "1x2";
+  if (index > 0 && index % 11 === 0) return "2x1";
+  return "1x1";
+}
+
+function newsroomCardExcerpt(value: string | null | undefined, maxLength: number): string | null {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  if (!text) return null;
+  if (text.length <= maxLength) return text;
+  const clipped = text.slice(0, maxLength - 3).replace(/\s+\S*$/, "").trim();
+  return `${clipped || text.slice(0, maxLength - 3)}...`;
+}
+
 function formatCompactCount(value: number): string {
   const parts = formatCompactCountParts(value);
   return `${parts.value}${parts.suffix}`;
@@ -7273,17 +7784,26 @@ function NewsDeskAccessGate({ shell }: { shell: NewsDeskShellState | null }) {
       <section className="scroll-edition news-desk-edition">
         <div className="paper-page paper-page--front paper-page--active">
           <article className="paper-page-content paper-page-content--front news-desk-page news-desk-page--gate" aria-labelledby="news-desk-access-title">
-            <header className="masthead news-desk-masthead">
-              <div className="masthead__rule" />
-              <h1 id="news-desk-access-title">
-                <span>NEWSROOM</span>
-              </h1>
-            <div className="masthead__meta" aria-label="Newsroom edition status">
-              <span>Steering Section</span>
-              <span>Restricted Desk</span>
-              <span><ReaderAuthControl className="news-desk-auth-control" showIdentity authState={authState} /></span>
-            </div>
-            </header>
+	            <header className="masthead news-desk-masthead">
+	              <div className="masthead__rule" />
+	              <h1 id="news-desk-access-title">
+	                <span>NEWSROOM</span>
+	              </h1>
+	              <button
+	                type="button"
+	                className="news-desk-masthead__search"
+	                aria-label="Search knowledge base (semantic + ontology)"
+	                title="Search (semantic + ontology)"
+	                disabled
+	              >
+	                <SearchMarkIcon />
+	              </button>
+	            <div className="masthead__meta" aria-label="Newsroom edition status">
+	              <span>Steering Section</span>
+	              <span>Restricted Desk</span>
+	              <span><ReaderAuthControl className="news-desk-auth-control" showIdentity authState={authState} /></span>
+	            </div>
+	            </header>
             <nav className="news-desk-tabs" aria-label="Newsroom sections">
               {NEWS_DESK_TABS.map((tab) => (
                 <NewsDeskTabLink
