@@ -4,8 +4,15 @@ import type { Schema } from "../amplify/data/resource";
 import type { Article, ArticleImage, ArticleImageAsset, ArticleImageLayout } from "./articles";
 import { getAmplifyServerRuntime } from "./amplify-server-runtime";
 import type { ContentRepository, EditionContent, EditionRouteSummary, ListPublishedEditionsOptions, LoadEditionContentOptions } from "./content-types";
+import { createEditionSectionPlan } from "./edition-sections";
 import { normalizeEditionLayoutPlan } from "./layout-plan";
-import { articleToPublicationItem } from "./publication-items";
+import {
+  articleToPublicationItem,
+  publicationItemToArticle,
+  type NonArticlePublicationItem,
+  type PublicationItem,
+  type PublicationItemType,
+} from "./publication-items";
 
 const AUTH_MODE = "apiKey";
 const DEFAULT_EDITION_SLUG = "current";
@@ -42,6 +49,7 @@ type GraphQLEdition = {
   publishedAt?: string | null;
   description?: string | null;
   layoutPlan?: unknown;
+  metadata?: unknown;
 };
 
 type GraphQLEditionItem = {
@@ -138,14 +146,12 @@ export const graphqlContentRepository: ContentRepository = {
   },
 
   async getEditionArticle({ editionDate, articleSlug }) {
-    const edition = await loadPublishedEditionForDate(editionDate);
-    const editionItems = await listEditionItems(edition.id);
-    for (const editionItem of editionItems) {
-      const item = await getItemById(editionItem.publishedItemId);
-      if (!item || item.slug !== articleSlug || item.type !== "article" || item.status !== PUBLISHED_STATUS) continue;
-      return normalizeArticle(item, await listMediaAssets(item.id));
-    }
-    return undefined;
+    const item = await loadEditionItem(editionDate, articleSlug);
+    return item ? publicationItemToArticle(item) : undefined;
+  },
+
+  async getEditionItem({ editionDate, itemSlug }) {
+    return loadEditionItem(editionDate, itemSlug);
   },
 
   async listArticleSlugs() {
@@ -243,13 +249,15 @@ async function listPublishedEditionsForDate(editionDate: string): Promise<GraphQ
 
 async function loadEditionContentFromEdition(edition: GraphQLEdition): Promise<EditionContent> {
   const editionItems = await listEditionItems(edition.id);
-  const articles = await Promise.all(
-    editionItems.map(async (editionItem) => {
-      const item = await getItemById(editionItem.publishedItemId);
-      if (!item || item.type !== "article" || item.status !== PUBLISHED_STATUS) return null;
-      return normalizeArticle(item, await listMediaAssets(item.id));
-    }),
-  );
+  const items = (
+    await Promise.all(
+      editionItems.map(async (editionItem) => {
+        const item = await getItemById(editionItem.publishedItemId);
+        if (!item || item.status !== PUBLISHED_STATUS) return null;
+        return normalizePublicationItem(item, await listMediaAssets(item.id));
+      }),
+    )
+  ).filter((item): item is PublicationItem => item !== null);
 
   return {
     id: edition.id,
@@ -258,8 +266,20 @@ async function loadEditionContentFromEdition(edition: GraphQLEdition): Promise<E
     editionDate: edition.editionDate,
     description: edition.description ?? "GraphQL content loaded from Amplify Data.",
     layoutPlan: normalizeEditionLayoutPlan(edition.layoutPlan, "Edition.layoutPlan"),
-    items: articles.filter((article): article is Article => article !== null).map(articleToPublicationItem),
+    items,
+    sections: createEditionSectionPlan(items, edition.metadata),
   };
+}
+
+async function loadEditionItem(editionDate: string, itemSlug: string): Promise<PublicationItem | undefined> {
+  const edition = await loadPublishedEditionForDate(editionDate);
+  const editionItems = await listEditionItems(edition.id);
+  for (const editionItem of editionItems) {
+    const item = await getItemById(editionItem.publishedItemId);
+    if (!item || item.slug !== itemSlug || item.status !== PUBLISHED_STATUS) continue;
+    return (await normalizePublicationItem(item, await listMediaAssets(item.id))) ?? undefined;
+  }
+  return undefined;
 }
 
 function summarizeEditionRoute(edition: GraphQLEdition): EditionRouteSummary {
@@ -430,6 +450,32 @@ async function normalizeArticle(item: GraphQLItem, mediaAssets: GraphQLMediaAsse
     pullQuotes: compactStrings(item.pullQuotes),
     body: compactStrings(item.body),
   };
+}
+
+async function normalizePublicationItem(item: GraphQLItem, mediaAssets: GraphQLMediaAsset[]): Promise<PublicationItem | null> {
+  if (item.type === "article") return articleToPublicationItem(await normalizeArticle(item, mediaAssets));
+  const type = normalizePublicationItemType(item.type);
+  if (!type) return null;
+  const assets = (
+    await Promise.all(mediaAssets.filter((asset) => asset.type === "image").map((asset) => normalizeImageAsset(item, asset)))
+  ).filter((asset): asset is ArticleImageAsset => asset !== null);
+  const image = assets[0] ?? undefined;
+  const publicationItem: NonArticlePublicationItem = {
+    type,
+    slug: item.slug,
+    section: item.section ?? "News",
+    title: item.headline ?? item.title ?? item.slug,
+    deck: item.deck ?? undefined,
+    body: compactStrings(item.body),
+    image,
+    assets,
+  };
+  return publicationItem;
+}
+
+function normalizePublicationItemType(value: string): Exclude<PublicationItemType, "article"> | null {
+  if (value === "brief" || value === "correction" || value === "promo" || value === "ad" || value === "sectionHeader") return value;
+  return null;
 }
 
 async function normalizeImageAsset(item: GraphQLItem, asset: GraphQLMediaAsset): Promise<ArticleImageAsset | null> {

@@ -1,5 +1,5 @@
 import { notFound, redirect } from "next/navigation";
-import { ArticlePageView } from "../../../../../components/article-page";
+import { ItemPageView } from "../../../../../components/article-page";
 import { contentRepository } from "../../../../../lib/content-repository";
 import { getEditionDatePath, parseEditionArticleRoute } from "../../../../../lib/edition-routes";
 
@@ -19,15 +19,15 @@ export async function generateMetadata({ params }: DateScopedArticlePageProps) {
   const route = parseEditionArticleRoute({ year, month, day, articleSlug });
   if (!route) return {};
 
-  const article = await contentRepository.getEditionArticle({
+  const item = await contentRepository.getEditionItem({
     editionDate: route.editionDate,
-    articleSlug: route.articleSlug,
+    itemSlug: route.articleSlug,
   });
-  if (!article) return {};
+  if (!item) return {};
 
   return {
-    title: `${article.headline} | Papyrus`,
-    description: article.deck,
+    title: `${item.type === "article" ? item.headline : item.title} | Papyrus`,
+    description: item.deck,
   };
 }
 
@@ -37,11 +37,11 @@ export default async function DateScopedArticlePage({ params }: DateScopedArticl
   if (!route) notFound();
   if (!route.isCanonical) redirect(route.canonicalPath);
 
-  const article = await contentRepository.getEditionArticle({
+  const item = await contentRepository.getEditionItem({
     editionDate: route.editionDate,
-    articleSlug: route.articleSlug,
+    itemSlug: route.articleSlug,
   });
-  if (!article) notFound();
+  if (!item) notFound();
 
-  return <ArticlePageView article={article} backHref={`${getEditionDatePath(route.editionDate)}#${article.slug}`} />;
+  return <ItemPageView item={item} backHref={`${getEditionDatePath(route.editionDate)}#${item.slug}`} />;
 }

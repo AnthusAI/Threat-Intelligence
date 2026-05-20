@@ -50,6 +50,8 @@ type NewspaperProps = {
   content: EditionContent;
   editionBasePath?: string;
   initialPageNumber?: number;
+  initialSectionKey?: string;
+  preserveContentLocation?: boolean;
 };
 
 const PAGE_LOOKAROUND = 1;
@@ -64,7 +66,7 @@ type NewsDeskAppendixPage = {
   subcategories: NewsDeskCategoryTreeNode[];
 };
 
-export function Newspaper({ content, editionBasePath, initialPageNumber = 1 }: NewspaperProps) {
+export function Newspaper({ content, editionBasePath, initialPageNumber = 1, initialSectionKey, preserveContentLocation = false }: NewspaperProps) {
   const normalizedInitialPage = Math.max(1, Math.floor(initialPageNumber));
   const shellRef = useRef<HTMLDivElement | null>(null);
   const progressRef = useRef<HTMLElement | null>(null);
@@ -212,7 +214,7 @@ export function Newspaper({ content, editionBasePath, initialPageNumber = 1 }: N
       const pageNumber = clampPageNumber(rawPageNumber, totalPages);
       pendingProgrammaticPageRef.current = pageNumber;
       preservedItemHashPageRef.current = null;
-      writePageLocation(pageNumber, options?.history ?? "push", editionBasePath);
+      if (!preserveContentLocation) writePageLocation(pageNumber, options?.history ?? "push", editionBasePath);
       setPriorityPages((current) => {
         const next = new Set(current);
         next.add(pageNumber);
@@ -225,7 +227,7 @@ export function Newspaper({ content, editionBasePath, initialPageNumber = 1 }: N
         scrollToTarget(target, options);
       });
     },
-    [editionBasePath, layout, scrollToTarget, totalPages],
+    [editionBasePath, layout, preserveContentLocation, scrollToTarget, totalPages],
   );
 
   const scrollToItemAnchor = useCallback(
@@ -282,6 +284,11 @@ export function Newspaper({ content, editionBasePath, initialPageNumber = 1 }: N
     const itemHash = parseItemAnchorHash(window.location.hash);
     if (itemHash && scrollToItemAnchor(itemHash, { immediate: true, history: "none" })) return;
 
+    if (initialSectionKey) {
+      const sectionSlug = findInitialSectionArticleSlug(content, initialSectionKey);
+      if (sectionSlug && scrollToItemAnchor(sectionSlug, { immediate: true, history: "none" })) return;
+    }
+
     const locationPage = editionBasePath
       ? parsePageNumberFromPath(window.location.pathname, editionBasePath)
       : parseHashPageNumber(window.location.hash);
@@ -290,7 +297,7 @@ export function Newspaper({ content, editionBasePath, initialPageNumber = 1 }: N
       return;
     }
     scrollToPage(locationPage, { immediate: true, history: "replace" });
-  }, [editionBasePath, layout, normalizedInitialPage, scrollToItemAnchor, scrollToPage]);
+  }, [content, editionBasePath, initialSectionKey, layout, normalizedInitialPage, scrollToItemAnchor, scrollToPage]);
 
   useEffect(() => {
     if (!layout) return;
@@ -304,8 +311,8 @@ export function Newspaper({ content, editionBasePath, initialPageNumber = 1 }: N
       preservedItemHashPageRef.current = null;
     }
 
-    writePageLocation(visiblePage, "replace", editionBasePath);
-  }, [editionBasePath, layout, visiblePage]);
+    if (!preserveContentLocation) writePageLocation(visiblePage, "replace", editionBasePath);
+  }, [editionBasePath, layout, preserveContentLocation, visiblePage]);
 
   useEffect(() => {
     if (!layout) return;
@@ -1543,6 +1550,11 @@ function computeArticleAnchors(layout: NewspaperLayout | null): { pages: Map<str
   }
 
   return { pages, blockIds };
+}
+
+function findInitialSectionArticleSlug(content: EditionContent, sectionKey: string): string | null {
+  const section = content.sections.find((candidate) => candidate.key === sectionKey);
+  return section?.itemIds[0] ?? null;
 }
 
 function addMaterializedWindow(pages: Set<number>, center: number, totalPages: number) {

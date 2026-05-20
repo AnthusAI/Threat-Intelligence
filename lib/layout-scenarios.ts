@@ -1,5 +1,6 @@
 import { type Article, articles, editionDate } from "./articles";
 import type { EditionContent, NewsDeskAppendix } from "./content-types";
+import { createEditionSectionPlan } from "./edition-sections";
 import { createDefaultEditionLayoutPlan, type EditionLayoutPlan } from "./layout-plan";
 import { articleToPublicationItem, cloneArticle } from "./publication-items";
 
@@ -10,7 +11,11 @@ export type LayoutScenario = EditionContent & {
 
 export const DEFAULT_LAYOUT_SCENARIO_ID = "current-edition";
 
-export const layoutScenarios: LayoutScenario[] = [
+type RawLayoutScenario = Omit<LayoutScenario, "sections"> & {
+  sections?: LayoutScenario["sections"];
+};
+
+const rawLayoutScenarios: RawLayoutScenario[] = [
   {
     id: DEFAULT_LAYOUT_SCENARIO_ID,
     source: "scenario",
@@ -122,6 +127,11 @@ export const layoutScenarios: LayoutScenario[] = [
     items: cloneArticles(articles).map(articleToPublicationItem),
   },
 ];
+
+export const layoutScenarios: LayoutScenario[] = rawLayoutScenarios.map((scenario) => ({
+  ...scenario,
+  sections: scenario.sections ?? createEditionSectionPlan(scenario.items),
+}));
 
 export function getLayoutScenario(id: string | null | undefined): LayoutScenario {
   return layoutScenarios.find((scenario) => scenario.id === id) ?? layoutScenarios[0];

@@ -24,13 +24,14 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en">
+    <html lang="en" data-papyrus-theme="system" suppressHydrationWarning>
       <body className={playfairDisplay.variable}>
         <Script id="papyrus-favicon-color-scheme" strategy="beforeInteractive">
           {`(() => {
   const version = "${faviconVersion}";
   const lightHref = "/icon-light.png?v=" + version;
   const darkHref = "/icon-dark.png?v=" + version;
+  const settingsStorageKey = "papyrus:reader-settings";
 
   const getLink = () => {
     const existingTagged = document.querySelector('link[rel="icon"][data-papyrus-theme-icon="true"]');
@@ -51,7 +52,22 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   };
 
   const iconLink = getLink();
-  const apply = (isDark) => {
+  const readTheme = () => {
+    try {
+      const stored = window.localStorage.getItem(settingsStorageKey);
+      const parsed = stored ? JSON.parse(stored) : null;
+      return parsed && (parsed.theme === "light" || parsed.theme === "dark" || parsed.theme === "system")
+        ? parsed.theme
+        : "system";
+    } catch {
+      return "system";
+    }
+  };
+  const isDarkTheme = (theme) => theme === "dark" || (theme === "system" && media.matches);
+  const apply = () => {
+    const theme = readTheme();
+    document.documentElement.dataset.papyrusTheme = theme;
+    const isDark = isDarkTheme(theme);
     const nextHref = isDark ? darkHref : lightHref;
     if (iconLink.getAttribute("href") !== nextHref) {
       iconLink.setAttribute("href", nextHref);
@@ -59,13 +75,17 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   };
 
   const media = window.matchMedia("(prefers-color-scheme: dark)");
-  apply(media.matches);
+  apply();
 
   if (typeof media.addEventListener === "function") {
-    media.addEventListener("change", (event) => apply(event.matches));
+    media.addEventListener("change", apply);
   } else if (typeof media.addListener === "function") {
-    media.addListener((event) => apply(event.matches));
+    media.addListener(apply);
   }
+  window.addEventListener("storage", (event) => {
+    if (event.key === settingsStorageKey) apply();
+  });
+  window.addEventListener("papyrus:settings-changed", apply);
 })();`}
         </Script>
         <AmplifyClientProvider>{children}</AmplifyClientProvider>

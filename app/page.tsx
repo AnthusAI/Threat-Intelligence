@@ -1,6 +1,7 @@
-import { Newspaper } from "../components/newspaper";
+import { PresentationShell } from "../components/presentation-shell";
 import { contentRepository, getScenarioIdParam } from "../lib/content-repository";
 import type { EditionContent } from "../lib/content-types";
+import { createEditionSectionPlan } from "../lib/edition-sections";
 import { getEditionDatePath } from "../lib/edition-routes";
 import { normalizeEditionLayoutPlan } from "../lib/layout-plan";
 import { redirect } from "next/navigation";
@@ -22,18 +23,18 @@ export default async function Home({ searchParams }: HomePageProps) {
   if (!scenarioId) {
     if (hasOAuthRedirectParams(resolvedSearchParams)) {
       const content = await loadLatestGraphQLEdition();
-      if (!content || content.items.length === 0) return <Newspaper content={createEmptyGraphQLEdition()} />;
-      return <Newspaper content={content} editionBasePath={getEditionDatePath(content.editionDate)} />;
+      if (!content || content.items.length === 0) return <PresentationShell content={createEmptyGraphQLEdition()} />;
+      return <PresentationShell content={content} editionBasePath={getEditionDatePath(content.editionDate)} />;
     }
 
     const latestEdition = await contentRepository.getLatestPublishedEdition();
     if (latestEdition) redirect(getEditionDatePath(latestEdition.editionDate));
-    return <Newspaper content={createEmptyGraphQLEdition()} />;
+    return <PresentationShell content={createEmptyGraphQLEdition()} />;
   }
 
   const content = await loadHomeContent(scenarioId);
-  if (content.items.length === 0) return <Newspaper content={createEmptyGraphQLEdition()} />;
-  return <Newspaper content={content} />;
+  if (content.items.length === 0) return <PresentationShell content={createEmptyGraphQLEdition()} />;
+  return <PresentationShell content={content} />;
 }
 
 async function loadLatestGraphQLEdition(): Promise<EditionContent | null> {
@@ -53,41 +54,44 @@ async function loadHomeContent(scenarioId: string | null): Promise<EditionConten
 
 function createEmptyGraphQLEdition(): EditionContent {
   const placeholderSlug = "empty-edition-placeholder";
+  const items: EditionContent["items"] = [
+    {
+      type: "article",
+      slug: placeholderSlug,
+      shortSlug: "EMPTY",
+      section: "Newsroom",
+      headline: "No Published Edition Yet",
+      deck: "No published GraphQL edition is available yet.",
+      byline: "Papyrus",
+      dateline: "SANDBOX",
+      image: {
+        src: "/papyrus-plant-placeholder.png",
+        alt: "A black papyrus plant silhouette",
+        credit: "",
+        layout: {
+          minHeight: 120,
+          preferredHeight: 180,
+          maxHeight: 260,
+          aspectRatio: 1.5,
+          crop: "contain",
+          wrapsText: true,
+        },
+      },
+      body: [
+        "This sandbox does not have any published edition records yet. Papyrus is showing the production newspaper shell with placeholder source material so operators can verify the publication shape before content is loaded.",
+        "Open the Newsroom to inspect the empty operational skeleton, confirm that counts start at zero, and watch records appear as the GraphQL database is seeded or imported.",
+      ],
+    },
+  ];
+
   return {
     id: "empty-graphql-edition",
     source: "graphql",
     title: "Papyrus",
     editionDate: new Date().toISOString().slice(0, 10),
     description: "No published GraphQL edition is available yet.",
-    items: [
-      {
-        type: "article",
-        slug: placeholderSlug,
-        shortSlug: "EMPTY",
-        section: "Newsroom",
-        headline: "No Published Edition Yet",
-        deck: "No published GraphQL edition is available yet.",
-        byline: "Papyrus",
-        dateline: "SANDBOX",
-        image: {
-          src: "/papyrus-plant-placeholder.png",
-          alt: "A black papyrus plant silhouette",
-          credit: "",
-          layout: {
-            minHeight: 120,
-            preferredHeight: 180,
-            maxHeight: 260,
-            aspectRatio: 1.5,
-            crop: "contain",
-            wrapsText: true,
-          },
-        },
-        body: [
-          "This sandbox does not have any published edition records yet. Papyrus is showing the production newspaper shell with placeholder source material so operators can verify the publication shape before content is loaded.",
-          "Open the Newsroom to inspect the empty operational skeleton, confirm that counts start at zero, and watch records appear as the GraphQL database is seeded or imported.",
-        ],
-      },
-    ],
+    items,
+    sections: createEditionSectionPlan(items),
     layoutPlan: normalizeEditionLayoutPlan({
       pages: [
         {

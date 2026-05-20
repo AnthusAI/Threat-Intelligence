@@ -33,7 +33,11 @@ type ParsedEditionArticleRoute = ParsedEditionDateRoute & {
   articleSlug: string;
 };
 
-const RESERVED_DATE_CHILD_SEGMENTS = new Set(["page"]);
+type ParsedEditionSectionRoute = ParsedEditionDateRoute & {
+  sectionKey: string;
+};
+
+const RESERVED_DATE_CHILD_SEGMENTS = new Set(["page", "section"]);
 
 export function getEditionDatePath(editionDate: string): string {
   const match = editionDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -51,9 +55,15 @@ export function getEditionPagePath(editionDate: string, pageNumber: number): str
   return pageNumber <= 1 ? basePath : `${basePath}/page/${pageNumber}`;
 }
 
+export function getEditionSectionPath(editionDate: string, sectionKey: string): string {
+  return `${getEditionDatePath(editionDate)}/section/${encodeURIComponent(sectionKey)}`;
+}
+
 export function getEditionArticlePath(editionDate: string, articleSlug: string): string {
   return `${getEditionDatePath(editionDate)}/${encodeURIComponent(articleSlug)}`;
 }
+
+export const getEditionItemPath = getEditionArticlePath;
 
 export function parseEditionDateRoute(input: EditionDateRouteInput): ParsedEditionDateRoute | null {
   const parsed = parseEditionDateSegments(input);
@@ -95,6 +105,21 @@ export function parseEditionArticleRoute(input: EditionDateRouteInput & { articl
     canonicalPath,
     isCanonical: currentPath === canonicalPath,
     articleSlug: input.articleSlug,
+  };
+}
+
+export function parseEditionSectionRoute(input: EditionDateRouteInput & { sectionKey: string }): ParsedEditionSectionRoute | null {
+  const parsed = parseEditionDateSegments(input);
+  if (!parsed) return null;
+  if (!input.sectionKey.trim()) return null;
+
+  const canonicalPath = getEditionSectionPath(parsed.editionDate, input.sectionKey);
+  const currentPath = `${getCurrentDatePath(input)}/section/${input.sectionKey}`;
+  return {
+    editionDate: parsed.editionDate,
+    canonicalPath,
+    isCanonical: currentPath === canonicalPath,
+    sectionKey: input.sectionKey,
   };
 }
 

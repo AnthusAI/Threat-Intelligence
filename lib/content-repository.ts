@@ -19,6 +19,9 @@ export const contentRepository: ContentRepository = {
   getEditionArticle(options) {
     return graphqlContentRepository.getEditionArticle(options);
   },
+  getEditionItem(options) {
+    return graphqlContentRepository.getEditionItem(options);
+  },
   listArticleSlugs() {
     return graphqlContentRepository.listArticleSlugs();
   },

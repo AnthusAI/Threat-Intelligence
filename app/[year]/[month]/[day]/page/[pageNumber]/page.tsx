@@ -19,5 +19,5 @@ export default async function EditionPageRoute({ params }: EditionPageRouteProps
   if (!route) notFound();
   if (!route.isCanonical) redirect(route.canonicalPath);
 
-  return <EditionRoutePage day={day} initialPageNumber={route.pageNumber} month={month} year={year} />;
+  return <EditionRoutePage day={day} initialPageNumber={route.pageNumber} lockedPresentation="newspaper" month={month} year={year} />;
 }

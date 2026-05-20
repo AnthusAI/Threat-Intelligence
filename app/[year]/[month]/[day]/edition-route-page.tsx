@@ -1,16 +1,26 @@
 import { notFound, redirect } from "next/navigation";
-import { Newspaper } from "../../../../components/newspaper";
+import { PresentationShell, type PresentationTarget } from "../../../../components/presentation-shell";
 import { contentRepository } from "../../../../lib/content-repository";
 import { parseEditionDateRoute } from "../../../../lib/edition-routes";
+import type { EditionPresentationFormat } from "../../../../lib/content-types";
 
 type EditionRoutePageProps = {
   year: string;
   month: string;
   day: string;
   initialPageNumber?: number;
+  lockedPresentation?: EditionPresentationFormat;
+  target?: PresentationTarget;
 };
 
-export async function EditionRoutePage({ year, month, day, initialPageNumber = 1 }: EditionRoutePageProps) {
+export async function EditionRoutePage({
+  year,
+  month,
+  day,
+  initialPageNumber = 1,
+  lockedPresentation,
+  target = { kind: "edition" },
+}: EditionRoutePageProps) {
   const route = parseEditionDateRoute({ year, month, day });
   if (!route) notFound();
   if (!route.isCanonical) redirect(route.canonicalPath);
@@ -20,7 +30,16 @@ export async function EditionRoutePage({ year, month, day, initialPageNumber = 1
       editionDate: route.editionDate,
     });
     if (initialPageNumber < 1 || initialPageNumber > content.layoutPlan.pages.length) notFound();
-    return <Newspaper content={content} editionBasePath={route.canonicalPath} initialPageNumber={initialPageNumber} />;
+    if (target.kind === "section" && !content.sections.some((section) => section.key === target.sectionKey)) notFound();
+    return (
+      <PresentationShell
+        content={content}
+        editionBasePath={route.canonicalPath}
+        initialPageNumber={initialPageNumber}
+        lockedPresentation={lockedPresentation}
+        target={target}
+      />
+    );
   } catch (error) {
     if (isMissingGraphQLEditionError(error)) notFound();
     throw error;
