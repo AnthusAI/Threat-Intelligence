@@ -1814,7 +1814,12 @@ function NewsDeskDashboard({
       data-news-desk-refreshing={isRefreshing ? "true" : "false"}
       data-rhythm-overlay={showRhythmOverlay ? "true" : "false"}
     >
-      <NewsroomProgressBackLink />
+      <NewsroomProgressBackLink
+        searchAction={activeTab === "overview" ? {
+          disabled: controlsDisabled || Boolean(dashboard.isDemo),
+          onPress: overviewSearch.open,
+        } : null}
+      />
       <section className="scroll-edition news-desk-edition">
         <div className="paper-page paper-page--front paper-page--active">
           <article className="paper-page-content paper-page-content--front news-desk-page" aria-labelledby="news-desk-title">
@@ -1823,19 +1828,7 @@ function NewsDeskDashboard({
 	          <h1 id="news-desk-title">
 	            <Link href={getNewsDeskTabHref("/newsroom", dashboard.isDemo)}>NEWSROOM</Link>
 	          </h1>
-	          {activeTab === "overview" ? (
-	            <button
-	              type="button"
-	              className="news-desk-masthead__search"
-	              aria-label="Search knowledge base (semantic + ontology)"
-	              title="Search (semantic + ontology)"
-	              disabled={controlsDisabled || Boolean(dashboard.isDemo)}
-	              onClick={overviewSearch.open}
-	            >
-	              <SearchMarkIcon />
-	            </button>
-	          ) : null}
-	          <div className="masthead__meta" aria-label="Newsroom edition status">
+		          <div className="masthead__meta" aria-label="Newsroom edition status">
 	            <span>Steering Section</span>
 	            <span>{mastheadSecondLabel}</span>
 	            <span>{dashboard.isDemo ? "Demo Desk" : <ReaderAuthControl className="news-desk-auth-control" showIdentity authState={authState} />}</span>
@@ -7760,7 +7753,11 @@ function readTextClaim(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-function NewsroomProgressBackLink() {
+function NewsroomProgressBackLink({
+  searchAction = null,
+}: {
+  searchAction?: { disabled: boolean; onPress: () => void } | null;
+}) {
   return (
     <nav className="edition-progress edition-progress--newsroom" aria-label="Newsroom navigation">
       <Link className="edition-progress__button edition-progress__button--previous" href="/">
@@ -7769,6 +7766,18 @@ function NewsroomProgressBackLink() {
         </svg>
         Back to Papyrus
       </Link>
+      {searchAction ? (
+        <button
+          type="button"
+          className="edition-progress__button edition-progress__button--next edition-progress__button--search"
+          aria-label="Search knowledge base (semantic + ontology)"
+          title="Search (semantic + ontology)"
+          disabled={searchAction.disabled}
+          onClick={searchAction.onPress}
+        >
+          <SearchMarkIcon />
+        </button>
+      ) : null}
     </nav>
   );
 }
@@ -7789,16 +7798,7 @@ function NewsDeskAccessGate({ shell }: { shell: NewsDeskShellState | null }) {
 	              <h1 id="news-desk-access-title">
 	                <span>NEWSROOM</span>
 	              </h1>
-	              <button
-	                type="button"
-	                className="news-desk-masthead__search"
-	                aria-label="Search knowledge base (semantic + ontology)"
-	                title="Search (semantic + ontology)"
-	                disabled
-	              >
-	                <SearchMarkIcon />
-	              </button>
-	            <div className="masthead__meta" aria-label="Newsroom edition status">
+		            <div className="masthead__meta" aria-label="Newsroom edition status">
 	              <span>Steering Section</span>
 	              <span>Restricted Desk</span>
 	              <span><ReaderAuthControl className="news-desk-auth-control" showIdentity authState={authState} /></span>

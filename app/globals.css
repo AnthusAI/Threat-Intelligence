@@ -211,7 +211,8 @@ img {
 }
 
 .edition-progress--newsroom {
-  grid-template-columns: 1fr;
+  grid-template-columns: 1fr auto;
+  padding-inline: var(--news-desk-progress-padding-x, 16px);
 }
 
 .edition-progress__button {
@@ -1561,6 +1562,7 @@ img {
 }
 
 .news-desk-shell {
+  --news-desk-progress-padding-x: 30px;
   --paper-rhythm: var(--edition-progress-height);
   background: var(--substrate);
   color: var(--ink);
@@ -1777,29 +1779,13 @@ img {
   margin-top: var(--paper-rhythm);
 }
 
-.news-desk-masthead__search {
-  appearance: none;
-  background: transparent;
-  border: 0;
-  color: rgb(var(--ink-solid-rgb) / var(--ink-display-alpha));
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  block-size: var(--paper-rhythm);
-  inline-size: var(--paper-rhythm);
-  justify-content: flex-end;
-  padding: 0;
-  position: absolute;
-  right: 0;
-  top: 0;
+.edition-progress__button--search {
+  justify-self: end;
+  min-inline-size: var(--edition-progress-height);
+  text-decoration: none;
 }
 
-.news-desk-masthead__search:disabled {
-  cursor: default;
-  opacity: 0.4;
-}
-
-.news-desk-masthead__search .news-desk-search-mark__icon {
+.edition-progress__button--search .news-desk-search-mark__icon {
   display: block;
 }
 
@@ -4825,12 +4811,6 @@ img {
     justify-self: end;
   }
 
-  .paper-page-content--front > .masthead .news-desk-masthead__search {
-    bottom: 0;
-    top: auto;
-    transform: none;
-  }
-
   .news-desk-page {
     --news-desk-page-columns: 3;
   }
@@ -4937,6 +4917,10 @@ img {
 @media (max-width: 900px) {
   .news-desk-page {
     --page-padding-x: 18px;
+  }
+
+  .news-desk-shell {
+    --news-desk-progress-padding-x: 18px;
   }
 
   .news-desk-topic-browser__roots,
@@ -5050,6 +5034,14 @@ img {
     --news-desk-page-columns: 1;
     --page-padding-x: 16px;
     min-height: 100vh;
+  }
+
+  .news-desk-shell {
+    --news-desk-progress-padding-x: 16px;
+  }
+
+  .edition-progress--newsroom {
+    padding-inline: var(--news-desk-progress-padding-x, 16px);
   }
 
   .news-desk-masthead {
