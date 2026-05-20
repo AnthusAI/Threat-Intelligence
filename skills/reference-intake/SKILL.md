@@ -182,14 +182,23 @@ npm run content -- references register-catalog \
    `uv run biblicus ...`, producing local corpus artifacts.
 3. Sync the changed corpus working copy to the configured S3 prefix. Review the
    dry run first and do not use `--delete` unless explicitly reconciling the
-   complete prefix:
+   complete prefix. Prefer the Papyrus wrapper so endpoint/bucket mismatches are
+   caught before the AWS command runs:
 
    ```bash
-   aws s3 sync \
-     /Users/ryan/Projects/Biblicus/<configured-corpus-path> \
-     s3://<bucket>/corpora/<corpus-key>/ \
-     --exclude ".DS_Store" \
-     --exclude "*/.DS_Store" \
+   npm run content -- corpora sync-to-cloud \
+     --config <steering.yml> \
+     --corpus-key <corpus-key> \
+     --dryrun
+   ```
+
+   On a new worker machine, pull the durable corpus down before running
+   Biblicus:
+
+   ```bash
+   npm run content -- corpora sync-from-cloud \
+     --config <steering.yml> \
+     --corpus-key <corpus-key> \
      --dryrun
    ```
 
@@ -352,6 +361,18 @@ sidecars, classifier artifacts, graph artifacts, and reproducible analysis
 commands. Papyrus should remain responsible for GraphQL visibility, editor
 review workflow, assignments, comments, semantic links, accepted-only analysis
 manifests, and scope-training exports.
+
+Operational payload attachments are separate from source accession material.
+Messages, assignment payloads, raw payload snapshots, and rich reference
+metadata are stored under `newsroom/payloads/` as `ModelAttachment` records.
+Use the API-managed upload-slot flow for those payloads; do not require client
+or CLI users to have long-lived AWS credentials just to write `ModelAttachment`
+objects. The client reserves a slot through GraphQL, uploads to the short-lived
+signed URL, then completes the attachment through GraphQL.
+For sandbox rebuilds, use `content delete all --yes --delete-attachments` or
+`newsroom prune-attachments --apply` to clean those payloads. Never use those
+maintenance commands as a substitute for corpus accession cleanup under
+`corpora/`.
 
 If the direct CLI needs a Biblicus feature, ask the Biblicus agent for a stable
 contract such as Papyrus intake id to Biblicus `item_id` mapping, artifact path

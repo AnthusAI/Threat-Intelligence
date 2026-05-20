@@ -307,6 +307,13 @@ names the publication corpora, their roles, local classifier ids, and S3
 prefixes. Mirror that YAML to S3 beside the corpus data and materialize it into
 GraphQL with `categories import-config`.
 
+For local or EC2 analysis workers, use
+[`docs/newsroom-worker-bootstrap.md`](docs/newsroom-worker-bootstrap.md).
+Workers must synchronize corpus files from S3 into the local Biblicus working
+copy before running analysis, and must separately verify that Papyrus GraphQL has
+registered `Reference` rows for the same corpus materials. S3 presence alone
+does not make references visible or analysis-eligible.
+
 Private canonical publishing and knowledge records are versioned in place:
 `Item`, `Edition`, `CategorySet`, `Category`, `Reference`, and `SemanticNode`
 carry lineage, version number, previous version, version state, author/time
@@ -332,6 +339,12 @@ keys. New knowledge-base source materials should follow
 [skills/reference-intake/SKILL.md](skills/reference-intake/SKILL.md): register
 references and attachment metadata in Papyrus, keep corpus contents in S3 and
 Biblicus artifacts, and do not model references as publication `Item` rows.
+Private operational text and JSON payloads use `ModelAttachment` rows plus S3
+objects under `newsroom/payloads/`. Clients do not need long-lived AWS
+credentials for those payloads: the API creates short-lived upload slots, the
+client uploads directly to the signed S3 URL, and the API verifies and commits
+the attachment row. Bulk Biblicus corpus sync under `corpora/*` remains a
+worker/admin S3 operation for now.
 `Reference.curationStatus` separates visibility from evidence eligibility:
 pending prospects and rejected scope memory stay visible for curation, comments,
 votes, and training exports, but only current accepted references may feed
@@ -490,6 +503,10 @@ For content inspection and admin against a deployed API:
 ```bash
 npm run content -- content inspect
 npm run content -- content list articles
+npm run content -- corpora worker-bootstrap --config corpora/papyrus-steering.yml --json
+npm run content -- corpora status --config corpora/papyrus-steering.yml --corpus-key <key> --json
+npm run content -- corpora sync-from-cloud --config corpora/papyrus-steering.yml --corpus-key <key> --dry-run
+npm run content -- corpora sync-to-cloud --config corpora/papyrus-steering.yml --corpus-key <key> --dry-run
 npm run content -- categories import-config --config corpora/papyrus-steering.yml
 npm run content -- newsroom import-sections --config corpora/papyrus-newsroom-sections.yml
 npm run content -- categories import-steering --config corpora/papyrus-steering.yml --corpus-key <key>

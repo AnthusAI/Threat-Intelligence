@@ -166,20 +166,23 @@ Store edition association and planning context in `Assignment.metadata`:
 Use stable ids in metadata. Do not key work from display names, short titles,
 or generated slugs when a stable id exists.
 
-For desk-backed research assignments, store the live context contract in
-metadata or equivalent private assignment fields:
+For section-backed research assignments, store the hot operational fields on
+`Assignment` and keep richer doctrine/context data in `Assignment.metadata`:
 
-- `deskCategoryKey`
-- `deskCategoryLineageId`
-- `focusCategoryKey`
-- `focusCategoryLineageId`
-- `focusCategoryTitle`
+- `sectionId`
+- `sectionKey`
+- `sectionType`
+- `sectionStatusKey`
+- `sectionQueueStatusKey`
+- `primaryFocusCategoryKey`
+- `topicScopeCategoryKeys`
 - `contextProfile`
 - `contextTokenBudget`
 - `contextSources`
 
-Compatibility aliases such as `researchTrackKey` and `researchLens` may still
-be present during migration, but they are not canonical.
+Legacy topic aliases such as `deskCategoryKey`, `focusCategoryKey`,
+`researchTrackKey`, and `researchLens` may still be present during migration,
+but sections are the desk identity. Topics are knowledge scope.
 
 The current automated-publication desk workflow is documented in
 [`docs/automated-publication-research-workflow.md`](/Users/ryan/Projects/Papyrus/docs/automated-publication-research-workflow.md).

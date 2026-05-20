@@ -9,6 +9,10 @@ goal is to turn source material into visible `Reference` prospects, curate an
 accepted evidence set, use Biblicus to discover and tune taxonomy/graph
 artifacts, and then import the accepted steering state back into Papyrus.
 
+For worker setup and cloud-to-local corpus synchronization, also read
+[`docs/newsroom-worker-bootstrap.md`](newsroom-worker-bootstrap.md). S3 corpus
+sync, local Biblicus execution, and GraphQL registration are separate steps.
+
 ## Vocabulary
 
 Use these terms consistently:
@@ -119,10 +123,9 @@ duplicate extracted text into a second canonical location.
    generated `analysis/` output unless the test is specifically import-only.
 
    ```bash
-   aws s3 sync corpora/<corpus-key>/ s3://<bucket>/corpora/<corpus-key>/ \
-     --exclude ".DS_Store" \
-     --exclude "*/.DS_Store" \
-     --exclude "analysis/*" \
+   npm run content -- corpora sync-to-cloud \
+     --config <steering.yml> \
+     --corpus-key <corpus-key> \
      --dryrun
    ```
 
@@ -402,6 +405,41 @@ source materials plus config:
 If the rehearsal deletes generated GraphQL analysis data, that is acceptable in
 a sandbox. Do not delete source files from S3 unless the test explicitly covers
 corpus-prefix reconciliation and the local source accession is complete.
+
+## Payload Attachment Maintenance
+
+Private operational payloads for `Message`, `Reference`, `Assignment`,
+`AssignmentEvent`, and `KnowledgeRawPayload` live as `ModelAttachment` rows with
+S3 objects under `newsroom/payloads/`. DynamoDB rows are indexes; S3 owns the
+attached text and JSON.
+
+Operational payload writes go through API-managed upload slots. The client or
+CLI reserves a canonical attachment path through GraphQL, uploads bytes to the
+short-lived signed S3 URL, and completes the `ModelAttachment` row through
+GraphQL. Do not hand out long-lived AWS credentials for normal newsroom payload
+uploads. Large Biblicus corpus sync under `corpora/*` is still a worker/admin
+operation until a separate corpus accession upload service exists.
+
+Use a smart purge when intentionally resetting a sandbox so attachment objects
+are deleted with their index rows:
+
+```bash
+npm run content -- content delete all --yes --delete-attachments
+```
+
+Use attachment pruning after hard resets, failed clone experiments, or manual
+repair work. Dry-run is default:
+
+```bash
+npm run content -- newsroom prune-attachments
+npm run content -- newsroom prune-attachments --apply
+```
+
+`prune-attachments` removes two classes of maintenance garbage: attachment
+index rows whose owner record no longer exists, and `newsroom/payloads/` S3
+objects that no current `ModelAttachment` row references. It must not be pointed
+at `corpora/` prefixes; source accession files are durable corpus material, not
+operational payload garbage.
 
 ## What Not To Do
 

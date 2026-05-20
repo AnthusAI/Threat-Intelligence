@@ -108,6 +108,25 @@ S3 under private `corpora/*` prefixes. Do not make the bucket raw-public. Do not
 use `aws s3 sync --delete` unless this worker is intentionally reconciling S3 to
 its complete local working copy.
 
+Before a worker claims analysis work, verify that local corpus, S3 corpus, and
+GraphQL reference state agree:
+
+```bash
+npm run content -- corpora worker-bootstrap \
+  --config <steering.yml> \
+  --json
+
+npm run content -- corpora status \
+  --config <steering.yml> \
+  --corpus-key <corpus-key> \
+  --json
+```
+
+Use `corpora sync-from-cloud` to initialize a new Mac or EC2 worker from S3, and
+`corpora sync-to-cloud` after adding new local corpus material. S3 sync does not
+register references in GraphQL; `references register-catalog` is still required
+for Newsroom visibility and curation.
+
 Papyrus imports steering state, artifact refs, strict private `Reference`
 metadata, `ReferenceAttachment` paths, `Message` rows,
 `SemanticNode` rows, `SemanticRelation` links, proposals, decisions, and stable

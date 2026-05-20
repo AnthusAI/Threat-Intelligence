@@ -10,6 +10,8 @@ materials rather than operate an already-indexed publication.
 
 The canonical guide is
 [`docs/new-publication-from-corpus.md`](/Users/ryan/Projects/Papyrus/docs/new-publication-from-corpus.md).
+Worker setup and cloud-to-local corpus synchronization are documented in
+[`docs/newsroom-worker-bootstrap.md`](/Users/ryan/Projects/Papyrus/docs/newsroom-worker-bootstrap.md).
 Read that guide first, then use the repo-local skills below for the exact
 sub-workflow:
 
@@ -86,8 +88,9 @@ Papyrus-visible registration contract.
 2. Add or select a steering config that defines the publication corpus set.
 3. For sandbox rehearsals, generate a run-local steering config whose
    `s3Prefix` values point at the sandbox bucket from `amplify_outputs.json`.
-4. Sync source accession data to the target private S3 `corpora/<corpus-key>/`
-   prefix after reviewing `aws s3 sync --dryrun`.
+4. Sync source accession data to or from the target private S3
+   `corpora/<corpus-key>/` prefix with `corpora sync-to-cloud` or
+   `corpora sync-from-cloud` after reviewing the dry run.
 5. Materialize corpus config and relation types in Papyrus.
 6. Prepare catalogs into the run directory when item-level rationales are
    missing. Do not rewrite source catalogs for a rehearsal.
@@ -110,6 +113,10 @@ Materialize config:
 npm run content -- categories sandbox-steering-config \
   --config corpora/papyrus-steering.yml \
   --output .papyrus-runs/<run-id>/sandbox-steering.yml
+
+npm run content -- corpora worker-bootstrap \
+  --config .papyrus-runs/<run-id>/sandbox-steering.yml \
+  --json
 
 npm run content -- references prepare-catalog \
   --config .papyrus-runs/<run-id>/sandbox-steering.yml \
@@ -278,3 +285,24 @@ For a successful bootstrap rehearsal, verify:
   created by catalog registration;
 - generated analysis outputs can be deleted and rebuilt without deleting source
   accession files.
+
+## Maintenance Cleanup
+
+When rehearsing destructive sandbox rebuilds, GraphQL payload rows and S3
+payload objects must be kept together. Use:
+
+```bash
+npm run content -- content delete all --yes --delete-attachments
+```
+
+to reset GraphQL records and delete associated `newsroom/payloads/` objects.
+If a previous reset deleted rows but left S3 payloads behind, run a dry-run
+first, then apply:
+
+```bash
+npm run content -- newsroom prune-attachments
+npm run content -- newsroom prune-attachments --apply
+```
+
+This cleanup is only for operational payload attachments. Do not use it for
+`corpora/` source accession material.
