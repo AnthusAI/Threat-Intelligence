@@ -236,6 +236,8 @@ function buildProjectionImportRecords(payload, options = {}) {
 }
 
 function buildReferenceCatalogRegistrationRecords(catalog, options = {}) {
+  // Callers may pass `importedAt` (for example: reusing an existing import run's timestamp)
+  // to make catalog registration idempotent and avoid timestamp churn on reruns.
   const now = options.importedAt ?? new Date().toISOString();
   const corpusContext = normalizeCorpusContext(catalog.corpus ?? {}, options.corpusConfig ?? options.corpus);
   const corpusId = options.corpusId ?? knowledgeCorpusId(corpusContext);
@@ -1047,23 +1049,30 @@ function referenceMessageRecords(item, reference, context) {
 
 function messageRecord(input) {
   const metadata = sanitizeReferenceMetadata(input.metadata ?? {});
+  const source = stringOrNull(input.source) ?? "papyrus";
+  const authorLabel = stringOrNull(input.authorLabel) ?? source;
+  const body = typeof input.body === "string" ? input.body : String(input.body ?? "");
+  const summary = stringOrNull(input.summary)
+    ?? compactString(body, 200)
+    ?? input.messageKind
+    ?? "message";
   return record("Message", {
     id: `message-${hashShort([
       input.messageKind ?? "comment",
-      input.body,
-      input.source ?? "",
+      body,
+      source,
       metadata,
     ])}`,
     messageKind: input.messageKind ?? "comment",
     messageDomain: input.messageDomain ?? "commentary",
     status: input.status ?? "active",
-    body: input.body,
-    summary: input.summary ?? null,
-    source: input.source ?? null,
+    body,
+    summary,
+    source,
     importRunId: input.importRunId ?? null,
     authorSub: input.authorSub ?? null,
     authorUserProfileId: input.authorUserProfileId ?? null,
-    authorLabel: input.authorLabel ?? null,
+    authorLabel,
     createdAt: input.createdAt,
     updatedAt: input.updatedAt ?? input.createdAt,
     newsroomFeedKey: "messages",
@@ -1775,6 +1784,17 @@ function rawPayloadRecord(ownerType, ownerId, payloadKind, payload, importRunId,
 }
 
 function record(modelName, expected) {
+  if (modelName === "KnowledgeImportRun") {
+    const corpusId = stringOrNull(expected.corpusId);
+    const importKind = stringOrNull(expected.importKind);
+    return {
+      modelName,
+      expected: {
+        ...expected,
+        corpusImportKindKey: corpusId && importKind ? `${corpusId}#${importKind}` : null,
+      },
+    };
+  }
   return { modelName, expected };
 }
 
@@ -2081,11 +2101,23 @@ const STRICT_REFERENCE_METADATA_DENY_KEYS = new Set([
   "transcript",
 ]);
 
+// Operational keys that should never contribute to reference versioning.
+// These are either redundant with first-class Reference fields or change on every import run.
+const STRICT_REFERENCE_METADATA_TRANSIENT_KEYS = new Set([
+  "registered_at",
+  "reference_intake_batch_id",
+  "reference_intake_status",
+  "reference_intake_run_id",
+  "curation_status",
+  "curation_reason_code",
+]);
+
 function sanitizeReferenceMetadata(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const sanitized = {};
   for (const [key, entry] of Object.entries(value)) {
     if (STRICT_REFERENCE_METADATA_DENY_KEYS.has(key)) continue;
+    if (STRICT_REFERENCE_METADATA_TRANSIENT_KEYS.has(key)) continue;
     if (entry === undefined) continue;
     if (Array.isArray(entry)) {
       sanitized[key] = entry
