@@ -55,7 +55,6 @@ function installPythonRequirements(outputDir: string): void {
 export const knowledgeQuery = defineFunction(
   (scope: Construct) => {
     return new Function(scope, "papyrus-knowledge-query", {
-      functionName: "papyrus-knowledge-query",
       runtime: Runtime.PYTHON_3_12,
       architecture: Architecture.ARM_64,
       handler: "handler.handler",
