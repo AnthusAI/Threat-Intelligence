@@ -145,6 +145,12 @@ class KnowledgeGraphProvider(Protocol):
     def list_reference_attachments(self, reference: dict[str, Any]) -> list[dict[str, Any]]:
         ...
 
+    def list_outgoing_relations(self, obj: dict[str, Any]) -> list[dict[str, Any]]:
+        ...
+
+    def list_incoming_relations(self, obj: dict[str, Any]) -> list[dict[str, Any]]:
+        ...
+
 
 class CorpusTextProvider(Protocol):
     name: str
@@ -233,10 +239,11 @@ class S3VectorsProvider:
         except ImportError as exc:  # pragma: no cover - deployment guard
             raise RuntimeError("boto3 is required for S3VectorsProvider") from exc
         client = boto3.client("s3vectors", region_name=self.region_name)
+        query_limit = max(limit, min(100, limit * 5))
         response = client.query_vectors(
             indexArn=self.vector_index_arn,
             queryVector={"float32": vector},
-            topK=limit,
+            topK=query_limit,
             returnDistance=True,
             returnMetadata=True,
             filter=self._metadata_filter(scope),
@@ -246,7 +253,7 @@ class S3VectorsProvider:
             metadata = vector_match.get("metadata") or {}
             matches.append(
                 {
-                    "rank": index + 1,
+                    "providerRank": index + 1,
                     "score": vector_match.get("score"),
                     "distance": vector_match.get("distance"),
                     "kind": metadata.get("kind") or metadata.get("objectKind"),
@@ -257,7 +264,7 @@ class S3VectorsProvider:
                     "metadata": metadata,
                 }
             )
-        return matches
+        return diversify_vector_matches(matches, limit)
 
     def _embed(self, text: str) -> list[float]:
         api_key = os.environ.get("OPENAI_API_KEY")
@@ -378,6 +385,28 @@ class GraphQLKnowledgeGraphProvider:
             "listReferenceAttachmentsByReferenceLineageAndSortKey",
         )
 
+    def list_outgoing_relations(self, obj: dict[str, Any]) -> list[dict[str, Any]]:
+        kind = str(obj.get("kind") or obj.get("subjectKind") or "").strip()
+        lineage_id = str(obj.get("lineageId") or obj.get("subjectLineageId") or obj.get("id") or "").strip()
+        if not kind or not lineage_id:
+            return []
+        return self._list_connection(
+            LIST_RELATIONS_BY_SUBJECT_QUERY,
+            {"subjectStateKey": semantic_state_key(kind, lineage_id)},
+            "listSemanticRelationsBySubjectState",
+        )
+
+    def list_incoming_relations(self, obj: dict[str, Any]) -> list[dict[str, Any]]:
+        kind = str(obj.get("kind") or obj.get("objectKind") or "").strip()
+        lineage_id = str(obj.get("lineageId") or obj.get("objectLineageId") or obj.get("id") or "").strip()
+        if not kind or not lineage_id:
+            return []
+        return self._list_connection(
+            LIST_RELATIONS_BY_OBJECT_QUERY,
+            {"objectStateKey": semantic_state_key(kind, lineage_id)},
+            "listSemanticRelationsByObjectState",
+        )
+
     def _neighbors(self, kind: str, lineage_id: str) -> list[dict[str, Any]]:
         state_key = semantic_state_key(kind, lineage_id)
         outgoing = self._list_connection(LIST_RELATIONS_BY_SUBJECT_QUERY, {"subjectStateKey": state_key}, "listSemanticRelationsBySubjectState")
@@ -455,6 +484,52 @@ def dedupe_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         key = str(record.get("id") or (record.get("subjectStateKey"), record.get("objectStateKey")))
         deduped[key] = record
     return list(deduped.values())
+
+
+def diversify_vector_matches(matches: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    """Prefer source diversity while preserving provider order within each source."""
+
+    if limit <= 0:
+        return []
+    buckets: dict[str, list[dict[str, Any]]] = {}
+    bucket_order: list[str] = []
+    for match in matches:
+        key = _vector_match_diversity_key(match)
+        if key not in buckets:
+            buckets[key] = []
+            bucket_order.append(key)
+        buckets[key].append(match)
+
+    diversified: list[dict[str, Any]] = []
+    while bucket_order and len(diversified) < limit:
+        next_order: list[str] = []
+        for key in bucket_order:
+            bucket = buckets.get(key) or []
+            if not bucket:
+                continue
+            diversified.append(bucket.pop(0))
+            if bucket:
+                next_order.append(key)
+            if len(diversified) >= limit:
+                break
+        bucket_order = next_order
+
+    return [
+        {**match, "rank": index + 1}
+        for index, match in enumerate(diversified)
+    ]
+
+
+def _vector_match_diversity_key(match: dict[str, Any]) -> str:
+    metadata = match.get("metadata") if isinstance(match.get("metadata"), dict) else {}
+    return str(
+        metadata.get("referenceLineageId")
+        or metadata.get("lineageId")
+        or match.get("lineageId")
+        or metadata.get("referenceId")
+        or match.get("id")
+        or len(metadata)
+    )
 
 
 def relation_allowed_for_scope(relation: dict[str, Any], scope: dict[str, Any]) -> bool:

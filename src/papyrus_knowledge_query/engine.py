@@ -8,6 +8,15 @@ from dataclasses import dataclass
 from typing import Any
 
 from .services import KnowledgeQueryServices, NoopSemanticSearchProvider, normalize_anchor
+from .ranking import (
+    QUALITY_RELATION_KEYS,
+    allocate_token_budgets,
+    normalize_ranking_config,
+    quality_signal_from_relations,
+    ranking_sort_key,
+    record_key,
+    score_record,
+)
 
 
 VALID_OUTPUT_FORMATS = {"structured", "markdown", "both"}
@@ -25,6 +34,7 @@ EVIDENCE_RELATION_KEYS = {"uses_evidence", "uses_signal", "supports", "contradic
 TOPIC_RELATION_KEYS = {"classified_as", "authoritative_label", "mentions", "broader_than", "narrower_than", "digital_object_identifier_is"}
 OPERATIONAL_RELATION_DOMAINS = {"commentary", "workflow", "publication"}
 OPERATIONAL_RELATION_KEYS = {"comment", "ingestion_rationale", "requests_work_on", "produces", "blocked_by", "planned_for_edition", "targets_lane", "targets_section"}
+SUMMARY_RELATION_RE = re.compile(r"^reference_summary_(\d+)_tokens$")
 PASSAGE_HEADING_BOOSTS = {
     "abstract": 8,
     "introduction": 4,
@@ -88,6 +98,7 @@ def run_knowledge_query(input: dict[str, Any], services: KnowledgeQueryServices 
             "semanticQuerySource": request["semanticQuerySource"],
             "scope": request["scope"],
             "profile": request["profile"],
+            "ranking": request["ranking"],
             "relationPolicy": request["relationPolicy"],
             "includeExtracts": request["includeExtracts"],
         },
@@ -98,6 +109,10 @@ def run_knowledge_query(input: dict[str, Any], services: KnowledgeQueryServices 
         "relations": [],
         "operationalRelations": [],
         "referenceAttachments": [],
+        "qualityRelations": [],
+        "referenceSummaries": [],
+        "rankingWarnings": [],
+        "referenceTokenBudgets": {},
         "evidencePassages": [],
         "relatedRecords": [],
         "contextBlocks": [],
@@ -158,9 +173,15 @@ def run_knowledge_query(input: dict[str, Any], services: KnowledgeQueryServices 
     structured["relations"] = _dedupe_by_id(structured["relations"])
     structured["operationalRelations"] = _dedupe_by_id(structured["operationalRelations"])
     _assign_object_uris(structured)
+    _collect_quality_ratings(structured, request, services, warnings)
+    _rank_structured_records(structured, request)
+    structured["referenceTokenBudgets"] = _reference_excerpt_token_budgets(structured, request)
+    _collect_reference_summaries(structured, services, warnings)
+    _seed_evidence_from_reference_summaries(structured, request, services)
     _seed_evidence_from_semantic_passages(structured)
     _collect_reference_evidence(structured, request, services, warnings)
     structured["evidencePassages"] = _dedupe_passages(structured["evidencePassages"])
+    _rank_structured_records(structured, request)
     structured["relatedRecords"] = _build_related_records(structured, request, services)
     blocks = _build_context_blocks(structured, request, services)
     structured["contextBlocks"] = [
@@ -196,8 +217,10 @@ def run_knowledge_query(input: dict[str, Any], services: KnowledgeQueryServices 
             "outputFormat": request["outputFormat"],
             "semanticQuery": request["semanticQuery"],
             "semanticQuerySource": request["semanticQuerySource"],
+            "rankingProfile": request["ranking"]["profile"],
             "relationPolicy": request["relationPolicy"],
             "sourceTextMode": source_text_mode,
+            "rankingWarningCount": len(public_structured.get("rankingWarnings") or []),
             "tokenizerProvider": tokenizer_metadata.get("provider"),
             "tokenizerEncoding": tokenizer_metadata.get("encoding"),
             "tokenizerModel": tokenizer_metadata.get("model"),
@@ -274,11 +297,13 @@ def _normalize_request(input: dict[str, Any]) -> tuple[dict[str, Any], list[str]
     if isinstance(include_extracts, str):
         include_extracts = include_extracts.lower() not in {"0", "false", "no"}
     include_provenance_appendix = bool(output.get("includeProvenanceAppendix"))
+    ranking_config = normalize_ranking_config(input, warnings)
     return {
         "anchors": normalized_anchors,
         "semanticQuery": semantic_query,
         "scope": scope,
         "profile": profile,
+        "ranking": ranking_config,
         "outputFormat": output_format,
         "maxTokens": max_tokens,
         "seeAlsoMaxTokens": see_also_max_tokens,
@@ -354,6 +379,7 @@ def _build_context_blocks(
                     "id": primary_reference.get("id"),
                     "lineageId": primary_reference.get("lineageId"),
                     "objectUri": primary_reference.get("objectUri"),
+                    "ranking": primary_reference.get("ranking"),
                 },
             )
         )
@@ -399,7 +425,7 @@ def _build_context_blocks(
                     section="source_excerpts",
                     title=passage.get("referenceTitle") or "Source excerpt",
                     text=passage["text"],
-                    priority=115 + float(passage.get("score") or 0),
+                    priority=115 + (float((passage.get("ranking") or {}).get("finalScore", 0.0)) * 25),
                     provenance={
                         "source": passage.get("selectionReason") or "extracted_text",
                         "referenceId": passage.get("referenceId"),
@@ -410,6 +436,7 @@ def _build_context_blocks(
                         "endChar": passage.get("endChar"),
                         "reason": passage.get("selectionReason"),
                         "truncated": passage.get("truncated"),
+                        "ranking": passage.get("ranking"),
                     },
                 )
             )
@@ -437,13 +464,15 @@ def _build_context_blocks(
                 section="related_records",
                 title=record.get("title") or record.get("objectUri") or "Related record",
                 text=related_record_summary(record),
-                priority=55 - float(record.get("rank") or 0),
+                priority=55 + (float((record.get("ranking") or {}).get("finalScore", 0.0)) * 10),
                 provenance=record.get("provenance") or {},
             )
         )
     related_keys = {_object_key(record) for record in structured.get("relatedRecords") or []}
     for relation in structured["relations"]:
         relation_key = relation.get("relationTypeKey") or relation.get("predicate") or "related_to"
+        if relation_key in QUALITY_RELATION_KEYS:
+            continue
         if relation_key in TOPIC_RELATION_KEYS:
             continue
         section = "relevant_evidence" if relation_key in EVIDENCE_RELATION_KEYS else "related_concepts_and_topics"
@@ -492,13 +521,14 @@ def _build_context_blocks(
                 section=source_section,
                 title=object_title(reference) or "Source",
                 text=source_summary(reference),
-                priority=60,
+                priority=60 + (float((reference.get("ranking") or {}).get("finalScore", 0.0)) * 10),
                 provenance={
                     "source": "reference",
                     "kind": "reference",
                     "id": reference.get("id"),
                     "lineageId": reference.get("lineageId"),
                     "objectUri": reference.get("objectUri"),
+                    "ranking": reference.get("ranking"),
                 },
             )
         )
@@ -1103,8 +1133,383 @@ def _assign_object_uri(obj: dict[str, Any]) -> None:
 def _seed_evidence_from_semantic_passages(structured: dict[str, Any]) -> None:
     if not structured.get("semanticPassages"):
         return
-    structured["evidencePassages"].extend(structured["semanticPassages"])
+    summary_keys = {
+        str(passage.get("referenceLineageId") or passage.get("referenceId") or "")
+        for passage in structured.get("evidencePassages") or []
+        if passage.get("selectionReason") == "reference_summary"
+    }
+    for passage in structured["semanticPassages"]:
+        reference_key = str(passage.get("referenceLineageId") or passage.get("referenceId") or "")
+        if reference_key in summary_keys:
+            summary = next(
+                item for item in structured.get("evidencePassages") or []
+                if item.get("selectionReason") == "reference_summary"
+                and str(item.get("referenceLineageId") or item.get("referenceId") or "") == reference_key
+            )
+            summary_budget = int(summary.get("tokens") or 0)
+            reference_budget = int((structured.get("referenceTokenBudgets") or {}).get(reference_key) or 0)
+            if reference_budget <= summary_budget + 80:
+                continue
+        structured["evidencePassages"].append(passage)
     structured["evidencePassages"] = _dedupe_passages(structured["evidencePassages"])
+
+
+def _collect_reference_summaries(
+    structured: dict[str, Any],
+    services: KnowledgeQueryServices,
+    warnings: list[str],
+) -> None:
+    graph = services.graph
+    if not graph or not hasattr(graph, "list_incoming_relations"):
+        return
+    summaries: list[dict[str, Any]] = []
+    for reference in _reference_objects(structured):
+        lineage_id = str(reference.get("lineageId") or reference.get("id") or "")
+        if not lineage_id:
+            continue
+        try:
+            incoming = graph.list_incoming_relations(reference)  # type: ignore[attr-defined]
+        except Exception as exc:  # pragma: no cover - defensive runtime note
+            warnings.append(f"Could not load reference summaries for {object_title(reference) or anchor_ref(reference)}: {exc}")
+            continue
+        for relation in incoming:
+            summary = _reference_summary_from_relation(reference, relation, graph, services)
+            if summary:
+                summaries.append(summary)
+    structured["referenceSummaries"] = _dedupe_reference_summaries(summaries)
+
+
+def _reference_summary_from_relation(
+    reference: dict[str, Any],
+    relation: dict[str, Any],
+    graph: Any,
+    services: KnowledgeQueryServices,
+) -> dict[str, Any] | None:
+    relation_key = str(relation.get("relationTypeKey") or relation.get("predicate") or "")
+    max_tokens = _summary_tokens_from_relation_type(relation_key)
+    if not max_tokens:
+        return None
+    if relation.get("relationState") not in {None, "", "current"}:
+        return None
+    if relation.get("subjectKind") != "message" or relation.get("objectKind") != "reference":
+        return None
+    message_id = relation.get("subjectId")
+    if not message_id:
+        return None
+    try:
+        message = graph.resolve_anchor({"kind": "message", "id": message_id, "lineageId": relation.get("subjectLineageId")}) or {}
+    except Exception:  # pragma: no cover - defensive runtime fallback
+        message = {}
+    if message.get("messageKind") not in {None, "reference_summary"}:
+        return None
+    if message.get("messageDomain") not in {None, "summarization"}:
+        return None
+    if message.get("status") not in {None, "", "active"}:
+        return None
+    text = str(message.get("summary") or "").strip()
+    if not text:
+        return None
+    metadata = _relation_metadata(relation)
+    actual_tokens = metadata.get("actualTokenEstimate")
+    try:
+        actual_tokens = int(actual_tokens)
+    except (TypeError, ValueError):
+        actual_tokens = services.token_counter.count(text)
+    reference_lineage_id = str(reference.get("lineageId") or reference.get("id") or relation.get("objectLineageId") or "")
+    return {
+        "id": relation.get("id") or f"{reference_lineage_id}:summary:{max_tokens}",
+        "referenceId": reference.get("id") or relation.get("objectId"),
+        "referenceLineageId": reference_lineage_id,
+        "referenceTitle": object_title(reference),
+        "objectUri": object_uri(reference),
+        "messageId": message.get("id") or message_id,
+        "messageLineageId": message.get("lineageId") or relation.get("subjectLineageId"),
+        "relationId": relation.get("id"),
+        "relationTypeKey": relation_key,
+        "maxTokens": max_tokens,
+        "actualTokens": actual_tokens,
+        "createdAt": message.get("createdAt") or relation.get("importedAt"),
+        "model": metadata.get("model"),
+        "tokenizer": metadata.get("tokenizer"),
+        "summary": text,
+        "text": text,
+        "tokens": services.token_counter.count(text),
+    }
+
+
+def _seed_evidence_from_reference_summaries(
+    structured: dict[str, Any],
+    request: dict[str, Any],
+    services: KnowledgeQueryServices,
+) -> None:
+    selected = []
+    summaries_by_reference: dict[str, list[dict[str, Any]]] = {}
+    for summary in structured.get("referenceSummaries") or []:
+        key = str(summary.get("referenceLineageId") or summary.get("referenceId") or "")
+        if key:
+            summaries_by_reference.setdefault(key, []).append(summary)
+    for reference in _reference_objects(structured):
+        reference_key = str(reference.get("lineageId") or reference.get("id") or "")
+        candidates = summaries_by_reference.get(reference_key) or []
+        if not candidates:
+            continue
+        budget = int((structured.get("referenceTokenBudgets") or {}).get(reference_key) or request["maxPassageTokens"])
+        summary = _choose_reference_summary(candidates, budget, services)
+        if not summary:
+            continue
+        text = str(summary["text"])
+        truncated = services.token_counter.count(text) > budget
+        if truncated:
+            text = services.token_counter.truncate(text, max(1, budget))
+        selected.append(
+            {
+                "id": f"{summary['id']}:evidence",
+                "referenceId": summary.get("referenceId"),
+                "referenceLineageId": summary.get("referenceLineageId"),
+                "referenceTitle": summary.get("referenceTitle"),
+                "objectUri": summary.get("objectUri"),
+                "summaryId": summary.get("id"),
+                "summaryRelationId": summary.get("relationId"),
+                "summaryMessageId": summary.get("messageId"),
+                "summaryMaxTokens": summary.get("maxTokens"),
+                "rank": 0,
+                "score": 1000 + int(summary.get("maxTokens") or 0),
+                "selectionReason": "reference_summary",
+                "text": text,
+                "tokens": services.token_counter.count(text),
+                "truncated": truncated,
+            }
+        )
+        ranking = reference.get("ranking") if isinstance(reference.get("ranking"), dict) else {}
+        ranking["summaryTokenBudget"] = budget
+        ranking["selectedSummaryMaxTokens"] = summary.get("maxTokens")
+        reference["ranking"] = ranking
+    structured["evidencePassages"].extend(selected)
+
+
+def _choose_reference_summary(
+    summaries: list[dict[str, Any]],
+    budget: int,
+    services: KnowledgeQueryServices,
+) -> dict[str, Any] | None:
+    if not summaries:
+        return None
+    enriched = []
+    for summary in summaries:
+        token_count = int(summary.get("tokens") or services.token_counter.count(str(summary.get("text") or "")))
+        max_tokens = int(summary.get("maxTokens") or token_count or 0)
+        created_at = str(summary.get("createdAt") or "")
+        enriched.append((summary, token_count, max_tokens, created_at))
+    fitting = [entry for entry in enriched if entry[1] <= max(1, budget)]
+    if fitting:
+        return sorted(fitting, key=lambda item: (item[2], item[1], item[3]), reverse=True)[0][0]
+    return sorted(enriched, key=lambda item: (item[2], item[3]))[0][0]
+
+
+def _dedupe_reference_summaries(summaries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: dict[tuple[str, int], dict[str, Any]] = {}
+    for summary in summaries:
+        key = (str(summary.get("referenceLineageId") or summary.get("referenceId") or ""), int(summary.get("maxTokens") or 0))
+        existing = deduped.get(key)
+        if not existing or str(summary.get("createdAt") or "") > str(existing.get("createdAt") or ""):
+            deduped[key] = summary
+    return sorted(deduped.values(), key=lambda summary: (str(summary.get("referenceLineageId") or ""), int(summary.get("maxTokens") or 0)))
+
+
+def _summary_tokens_from_relation_type(value: str | None) -> int | None:
+    if not value:
+        return None
+    match = SUMMARY_RELATION_RE.match(value)
+    return int(match.group(1)) if match else None
+
+
+def _collect_quality_ratings(
+    structured: dict[str, Any],
+    request: dict[str, Any],
+    services: KnowledgeQueryServices,
+    warnings: list[str],
+) -> None:
+    graph = services.graph
+    references = _reference_objects(structured)
+    if not references:
+        return
+    relation_pool = [
+        relation for relation in [*(structured.get("relations") or []), *(structured.get("operationalRelations") or [])]
+        if isinstance(relation, dict)
+    ]
+    relations_by_reference: dict[str, list[dict[str, Any]]] = {}
+    for relation in relation_pool:
+        if str(relation.get("subjectKind") or "") != "reference":
+            continue
+        lineage_id = str(relation.get("subjectLineageId") or relation.get("subjectId") or "")
+        if lineage_id:
+            relations_by_reference.setdefault(lineage_id, []).append(relation)
+    if graph and hasattr(graph, "list_outgoing_relations"):
+        for reference in references:
+            lineage_id = str(reference.get("lineageId") or reference.get("id") or "")
+            if not lineage_id:
+                continue
+            try:
+                outgoing = graph.list_outgoing_relations(reference)  # type: ignore[attr-defined]
+            except Exception as exc:  # pragma: no cover - defensive runtime note
+                warnings.append(f"Could not load quality relations for {object_title(reference) or anchor_ref(reference)}: {exc}")
+                outgoing = []
+            relations_by_reference.setdefault(lineage_id, []).extend(relation for relation in outgoing if isinstance(relation, dict))
+    selected_relations: list[dict[str, Any]] = []
+    for reference in references:
+        lineage_id = str(reference.get("lineageId") or reference.get("id") or "")
+        if not lineage_id:
+            continue
+        signal, warning = quality_signal_from_relations(
+            relations_by_reference.get(lineage_id, []),
+            float(request["ranking"].get("missingQuality", 0.5)),
+        )
+        if warning:
+            warnings.append(warning)
+            structured.setdefault("rankingWarnings", []).append(warning)
+        if signal.get("qualityRelationId"):
+            relation = next(
+                (candidate for candidate in relations_by_reference.get(lineage_id, []) if candidate.get("id") == signal.get("qualityRelationId")),
+                None,
+            )
+            if relation:
+                selected_relations.append(relation)
+        _apply_quality_signal_to_reference_objects(structured, lineage_id, signal)
+    structured["qualityRelations"] = _dedupe_by_id([*(structured.get("qualityRelations") or []), *selected_relations])
+
+
+def _apply_quality_signal_to_reference_objects(structured: dict[str, Any], lineage_id: str, signal: dict[str, Any]) -> None:
+    if not lineage_id:
+        return
+    for collection in ("anchors", "semanticMatches", "expandedObjects"):
+        for obj in structured.get(collection) or []:
+            if obj.get("kind") != "reference":
+                continue
+            if str(obj.get("lineageId") or obj.get("id") or "") != lineage_id:
+                continue
+            ranking = obj.get("ranking") if isinstance(obj.get("ranking"), dict) else {}
+            ranking.update(signal)
+            obj["ranking"] = ranking
+
+
+def _rank_structured_records(structured: dict[str, Any], request: dict[str, Any]) -> None:
+    ranking_config = request["ranking"]
+    anchors = structured.get("anchors") or []
+    anchor_keys = {_object_key(anchor) for anchor in anchors if _object_key(anchor)}
+    graph_keys = {_object_key(obj) for obj in structured.get("expandedObjects") or [] if _object_key(obj)}
+    for anchor in anchors:
+        _assign_record_ranking(anchor, request, ranking_config, graph_context=1.0, relevance=1.0)
+    for match in structured.get("semanticMatches") or []:
+        key = _object_key(match)
+        graph_context = 0.0
+        if key in graph_keys:
+            graph_context = 0.9
+        elif _shares_context_metadata(match, anchors):
+            graph_context = 0.6
+        _assign_record_ranking(match, request, ranking_config, graph_context=graph_context)
+    for obj in structured.get("expandedObjects") or []:
+        key = _object_key(obj)
+        graph_context = 1.0 if key in anchor_keys else 0.8
+        _assign_record_ranking(obj, request, ranking_config, graph_context=graph_context)
+    for passage in structured.get("semanticPassages") or []:
+        _assign_passage_ranking(passage, structured, request)
+    for passage in structured.get("evidencePassages") or []:
+        _assign_passage_ranking(passage, structured, request)
+
+
+def _assign_record_ranking(
+    record: dict[str, Any],
+    request: dict[str, Any],
+    ranking_config: dict[str, Any],
+    *,
+    graph_context: float,
+    relevance: float | None = None,
+) -> None:
+    existing = record.get("ranking") if isinstance(record.get("ranking"), dict) else {}
+    ranking = score_record(
+        record,
+        ranking_config=ranking_config,
+        semantic_query=request["semanticQuery"],
+        graph_context_score=graph_context,
+        relevance_score=relevance,
+    )
+    ranking.update({key: value for key, value in existing.items() if key.startswith("quality") and value not in {None, ""}})
+    if existing.get("qualityKnown") is not None:
+        ranking = score_record(
+            {**record, "ranking": ranking},
+            ranking_config=ranking_config,
+            semantic_query=request["semanticQuery"],
+            graph_context_score=graph_context,
+            relevance_score=relevance,
+        )
+    record["ranking"] = ranking
+
+
+def _assign_passage_ranking(passage: dict[str, Any], structured: dict[str, Any], request: dict[str, Any]) -> None:
+    reference_key = str(passage.get("referenceLineageId") or passage.get("referenceId") or "")
+    parent = _reference_by_key(structured, reference_key)
+    parent_ranking = parent.get("ranking") if isinstance(parent, dict) and isinstance(parent.get("ranking"), dict) else {}
+    try:
+        passage_relevance = float(passage.get("score") or 0)
+    except (TypeError, ValueError):
+        passage_relevance = 0.0
+    if passage.get("selectionReason") == "semantic_vector":
+        passage_relevance = max(passage_relevance / 25.0, float(parent_ranking.get("relevanceScore", 0.0)))
+    else:
+        passage_relevance = min(1.0, passage_relevance / 12.0)
+    quality_score = float(parent_ranking.get("qualityScore", request["ranking"].get("missingQuality", 0.5)))
+    graph_context = float(parent_ranking.get("graphContextScore", 0.0))
+    weights = request["ranking"].get("weights") or {}
+    final_score = (
+        float(weights.get("relevance", 0.7)) * max(0.0, min(1.0, passage_relevance))
+        + float(weights.get("quality", 0.25)) * max(0.0, min(1.0, quality_score))
+        + float(weights.get("graphContext", 0.05)) * max(0.0, min(1.0, graph_context))
+    )
+    passage["ranking"] = {
+        "profile": request["ranking"].get("profile", "balanced"),
+        "relevanceScore": round(max(0.0, min(1.0, passage_relevance)), 4),
+        "qualityScore": round(max(0.0, min(1.0, quality_score)), 4),
+        "qualityRating": parent_ranking.get("qualityRating"),
+        "qualityKnown": bool(parent_ranking.get("qualityKnown")),
+        "qualityRelationId": parent_ranking.get("qualityRelationId"),
+        "graphContextScore": round(max(0.0, min(1.0, graph_context)), 4),
+        "finalScore": round(max(0.0, min(1.0, final_score)), 4),
+        "tokenBudget": parent_ranking.get("tokenBudget"),
+        "parentReferenceLineageId": reference_key,
+    }
+
+
+def _reference_by_key(structured: dict[str, Any], reference_key: str) -> dict[str, Any] | None:
+    for reference in _reference_objects(structured):
+        if str(reference.get("lineageId") or reference.get("id") or "") == reference_key:
+            return reference
+    return None
+
+
+def _reference_excerpt_token_budgets(structured: dict[str, Any], request: dict[str, Any]) -> dict[str, int]:
+    references = _reference_objects(structured)
+    if not references:
+        return {}
+    max_passages = int(request["maxPassages"])
+    max_passage_tokens = int(request["maxPassageTokens"])
+    if request.get("maxTokens"):
+        total_budget = max(max_passage_tokens, min(max_passages * max_passage_tokens, int(int(request["maxTokens"]) * 0.55)))
+    else:
+        total_budget = max_passages * max_passage_tokens
+    budgets = allocate_token_budgets(
+        references,
+        total_budget,
+        min_tokens=min(80, max_passage_tokens),
+        max_tokens=min(1000, max(160, max_passage_tokens * 3)),
+    )
+    for reference in references:
+        key = record_key(reference)
+        if not key or key not in budgets:
+            continue
+        ranking = reference.get("ranking") if isinstance(reference.get("ranking"), dict) else {}
+        ranking["tokenBudget"] = budgets[key]
+        reference["ranking"] = ranking
+    return budgets
 
 
 def _build_related_records(
@@ -1124,6 +1529,9 @@ def _build_related_records(
         key = _object_key(match)
         if not key or key in anchor_keys:
             continue
+        ranking = match.get("ranking") if isinstance(match.get("ranking"), dict) else {}
+        if anchors and float(ranking.get("relevanceScore", 0.0)) < float(request["ranking"].get("relevanceGate", 0.18)):
+            continue
         reason = _semantic_related_reason(match, anchors, graph_keys)
         if not reason:
             continue
@@ -1137,7 +1545,9 @@ def _build_related_records(
             continue
         records.append(_related_record(obj, rank, "graph context expansion", "graph_expansion", structured, services))
         rank += 1
-    return _dedupe_related_records(records)[:limit]
+    records = _dedupe_related_records(records)[:limit]
+    _allocate_related_record_budgets(records, request, services)
+    return records
 
 
 def _is_related_record_candidate(obj: dict[str, Any]) -> bool:
@@ -1213,6 +1623,7 @@ def _related_record(
         "rank": rank,
         "score": record.get("score"),
         "distance": record.get("distance"),
+        "ranking": record.get("ranking") if isinstance(record.get("ranking"), dict) else {},
         "provenance": {
             "source": source,
             "kind": record.get("kind"),
@@ -1220,6 +1631,10 @@ def _related_record(
             "lineageId": record.get("lineageId"),
             "objectUri": record.get("objectUri"),
             "whyRelated": why_related,
+            "providerRank": record.get("rank"),
+            "score": record.get("score"),
+            "distance": record.get("distance"),
+            "qualityRelationId": (record.get("ranking") or {}).get("qualityRelationId") if isinstance(record.get("ranking"), dict) else None,
         },
     }
 
@@ -1276,10 +1691,16 @@ def _dedupe_related_records(records: list[dict[str, Any]]) -> list[dict[str, Any
         existing = deduped.get(key)
         if not existing or _related_record_priority(record) > _related_record_priority(existing):
             deduped[key] = record
-    return sorted(deduped.values(), key=lambda record: int(record.get("rank") or 999))
+    return sorted(deduped.values(), key=ranking_sort_key)
 
 
 def _related_record_priority(record: dict[str, Any]) -> float:
+    ranking = record.get("ranking") if isinstance(record.get("ranking"), dict) else {}
+    if ranking.get("finalScore") is not None:
+        try:
+            return float(ranking.get("finalScore"))
+        except (TypeError, ValueError):
+            pass
     score = record.get("score")
     if isinstance(score, (int, float)):
         return float(score)
@@ -1288,6 +1709,29 @@ def _related_record_priority(record: dict[str, Any]) -> float:
         return 1.0 - float(distance)
     source = (record.get("provenance") or {}).get("source")
     return 0.5 if source == "semantic_search" else 0.25
+
+
+def _allocate_related_record_budgets(records: list[dict[str, Any]], request: dict[str, Any], services: KnowledgeQueryServices) -> None:
+    if not records:
+        return
+    budgets = allocate_token_budgets(
+        records,
+        int(request.get("seeAlsoMaxTokens") or 300),
+        min_tokens=40,
+        max_tokens=120,
+    )
+    for record in records:
+        key = record_key(record)
+        budget = budgets.get(key)
+        if not budget:
+            continue
+        ranking = record.get("ranking") if isinstance(record.get("ranking"), dict) else {}
+        ranking["tokenBudget"] = budget
+        record["ranking"] = ranking
+        # Keep room for the title, object URI, and reason lines rendered by See Also.
+        summary_budget = max(16, budget - 35)
+        if record.get("summary"):
+            record["summary"] = services.token_counter.truncate(str(record["summary"]), summary_budget)
 
 
 def related_record_summary(record: dict[str, Any]) -> str:
@@ -1329,7 +1773,20 @@ def _collect_reference_evidence(
     structured["referenceAttachments"] = _dedupe_by_id(structured["referenceAttachments"])
 
     remaining = max(0, int(request["maxPassages"]) - len(structured.get("evidencePassages") or []))
-    for reference in references:
+    ordered_references = sorted(references, key=ranking_sort_key)
+    anchor_reference_keys = {
+        str(anchor.get("lineageId") or anchor.get("id") or "")
+        for anchor in structured.get("anchors") or []
+        if anchor.get("kind") == "reference"
+    }
+    ordered_references = sorted(
+        ordered_references,
+        key=lambda reference: (
+            0 if str(reference.get("lineageId") or reference.get("id") or "") in anchor_reference_keys else 1,
+            ranking_sort_key(reference),
+        ),
+    )
+    for reference in ordered_references:
         if reference.get("curationStatus") not in {None, "accepted"}:
             continue
         lineage_id = str(reference.get("lineageId") or reference.get("id") or "")
@@ -1366,34 +1823,47 @@ def _collect_reference_evidence(
                     "tokens": services.token_counter.count(text),
                 }
             )
-            guaranteed_selected = []
-            if _reference_needs_evidence(structured, reference):
-                guaranteed_selected = _select_passages(
-                    text,
-                    reference,
-                    request["semanticQuery"],
-                    storage_path,
-                    max_passages=1,
-                    max_passage_tokens=int(request["maxPassageTokens"]),
-                    services=services,
-                )
-                structured["evidencePassages"].extend(guaranteed_selected)
-                remaining = max(0, remaining - len(guaranteed_selected))
             if remaining <= 0:
                 continue
-            if guaranteed_selected:
-                continue
+            reference_budget = int((structured.get("referenceTokenBudgets") or {}).get(lineage_id) or request["maxPassageTokens"])
+            summary = _selected_summary_passage(structured, lineage_id)
+            if summary:
+                reference_budget = max(0, reference_budget - int(summary.get("tokens") or 0))
+                if reference_budget < 80:
+                    continue
+            max_for_reference = max(1, min(remaining, (reference_budget + int(request["maxPassageTokens"]) - 1) // int(request["maxPassageTokens"])))
+            if _reference_needs_evidence(structured, reference):
+                max_for_reference = max(1, max_for_reference)
+            max_passage_tokens = max(40, min(500, reference_budget // max_for_reference))
             selected = _select_passages(
                 text,
                 reference,
                 request["semanticQuery"],
                 storage_path,
-                max_passages=remaining,
-                max_passage_tokens=int(request["maxPassageTokens"]),
+                max_passages=max_for_reference,
+                max_passage_tokens=max_passage_tokens,
                 services=services,
             )
             structured["evidencePassages"].extend(selected)
             remaining -= len(selected)
+            reference_key = str(reference.get("lineageId") or reference.get("id") or "")
+            summary = _selected_summary_passage(structured, reference_key)
+            if summary:
+                used = int(summary.get("tokens") or 0) + sum(int(passage.get("tokens") or 0) for passage in selected)
+                for obj in _reference_objects(structured):
+                    if str(obj.get("lineageId") or obj.get("id") or "") == reference_key:
+                        ranking = obj.get("ranking") if isinstance(obj.get("ranking"), dict) else {}
+                        ranking["remainingPassageTokenBudget"] = max(0, int((structured.get("referenceTokenBudgets") or {}).get(reference_key) or request["maxPassageTokens"]) - used)
+                        obj["ranking"] = ranking
+
+
+def _selected_summary_passage(structured: dict[str, Any], reference_key: str) -> dict[str, Any] | None:
+    for passage in structured.get("evidencePassages") or []:
+        if passage.get("selectionReason") != "reference_summary":
+            continue
+        if str(passage.get("referenceLineageId") or passage.get("referenceId") or "") == reference_key:
+            return passage
+    return None
 
 
 def _reference_needs_evidence(structured: dict[str, Any], reference: dict[str, Any]) -> bool:

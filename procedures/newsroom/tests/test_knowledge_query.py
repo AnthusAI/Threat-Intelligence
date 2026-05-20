@@ -14,7 +14,8 @@ if str(SRC_ROOT) not in sys.path:
 
 from papyrus_knowledge_query.engine import ContextBlock, _render_markdown_context, run_knowledge_query
 from papyrus_knowledge_query.lambda_handler import handler as lambda_handler
-from papyrus_knowledge_query.services import KnowledgeQueryServices, relation_allowed_for_scope
+from papyrus_knowledge_query.ranking import quality_score_from_rating, quality_signal_from_relations
+from papyrus_knowledge_query.services import KnowledgeQueryServices, diversify_vector_matches, relation_allowed_for_scope
 from papyrus_knowledge_query.tokens import TokenCounter
 
 
@@ -92,10 +93,73 @@ class RecordingVectorSemanticProvider(FakeVectorSemanticProvider):
         return super().search(query, scope, limit)
 
 
+class QualityTieSemanticProvider:
+    name = "quality-tie-semantic"
+
+    def search(self, query, scope, limit):
+        return [
+            {
+                "rank": 1,
+                "distance": 0.05,
+                "kind": "reference",
+                "id": "reference-low-v1",
+                "lineageId": "reference-low",
+                "title": "Relevant But Low Quality",
+                "summary": "Production reliability evaluation for agent systems.",
+                "metadata": {"corpusId": "test-corpus", "categorySetId": "test-category-set"},
+            },
+            {
+                "rank": 2,
+                "distance": 0.35,
+                "kind": "reference",
+                "id": "reference-high-v1",
+                "lineageId": "reference-high",
+                "title": "Relevant And High Quality",
+                "summary": "Production reliability evaluation for agent systems.",
+                "metadata": {"corpusId": "test-corpus", "categorySetId": "test-category-set"},
+            },
+            {
+                "rank": 3,
+                "distance": 0.95,
+                "kind": "reference",
+                "id": "reference-irrelevant-v1",
+                "lineageId": "reference-irrelevant",
+                "title": "Excellent But Irrelevant",
+                "summary": "Unrelated visual design note.",
+                "metadata": {"corpusId": "other-corpus", "categorySetId": "other-category-set"},
+            },
+        ][:limit]
+
+
 class FakeGraphProvider:
     name = "fake-graph"
 
     def resolve_anchor(self, anchor):
+        if anchor["kind"] == "message":
+            summaries = {
+                "message-summary-100": "Short summary: production agents need reliability evaluation and human review.",
+                "message-summary-200": (
+                    "Medium summary: production agents need reliability evaluation before deployment. "
+                    "The source emphasizes task success, regression checks, observability, and human review as practical controls."
+                ),
+                "message-summary-500": (
+                    "Long summary: production agents need reliability evaluation before deployment. "
+                    "The source emphasizes task success, regression checks, observability, and human review as practical controls. "
+                    "It connects measurement choices to production risk, repeatability, and the need to understand failures before agents are trusted."
+                ),
+            }
+            message_id = anchor["id"]
+            return {
+                "kind": "message",
+                "id": message_id,
+                "lineageId": anchor.get("lineageId", message_id),
+                "messageKind": "reference_summary",
+                "messageDomain": "summarization",
+                "status": "active",
+                "summary": summaries.get(message_id, "Summary message."),
+                "source": "papyrus-summary-generator",
+                "createdAt": "2026-05-19T12:00:00Z",
+            }
         if anchor["kind"] == "reference":
             return {
                 "kind": "reference",
@@ -192,6 +256,78 @@ class FakeGraphProvider:
             }
         ]
 
+    def list_outgoing_relations(self, obj):
+        if obj.get("kind") != "reference":
+            return []
+        lineage_id = obj.get("lineageId") or obj.get("id")
+        if lineage_id == "reference-1":
+            return [
+                {
+                    "id": "quality-reference-1",
+                    "relationState": "current",
+                    "predicate": "quality_rating_is",
+                    "relationTypeKey": "quality_rating_is",
+                    "relationDomain": "curation",
+                    "subjectKind": "reference",
+                    "subjectId": "reference-1-v1",
+                    "subjectLineageId": "reference-1",
+                    "objectKind": "semanticNode",
+                    "objectId": "quality.rating.4_star-v1",
+                    "objectLineageId": "quality.rating.4_star",
+                    "score": 4,
+                    "confidence": 0.8,
+                    "updatedAt": "2026-05-19T12:00:00Z",
+                }
+            ]
+        if lineage_id in {"reference-low", "reference-high", "reference-irrelevant"}:
+            score = {"reference-low": 1, "reference-high": 5, "reference-irrelevant": 5}[lineage_id]
+            return [
+                {
+                    "id": f"quality-{lineage_id}",
+                    "relationState": "current",
+                    "predicate": "quality_rating_is",
+                    "relationTypeKey": "quality_rating_is",
+                    "relationDomain": "curation",
+                    "subjectKind": "reference",
+                    "subjectId": f"{lineage_id}-v1",
+                    "subjectLineageId": lineage_id,
+                    "objectKind": "semanticNode",
+                    "objectId": f"quality.rating.{score}_star-v1",
+                    "objectLineageId": f"quality.rating.{score}_star",
+                    "score": score,
+                    "confidence": 0.9,
+                    "updatedAt": "2026-05-19T12:00:00Z",
+                }
+            ]
+        return []
+
+    def list_incoming_relations(self, obj):
+        if obj.get("kind") != "reference":
+            return []
+        lineage_id = obj.get("lineageId") or obj.get("id")
+        if lineage_id != "reference-1":
+            return []
+        relations = []
+        for tokens in (100, 200, 500):
+            relations.append(
+                {
+                    "id": f"summary-reference-1-{tokens}",
+                    "relationState": "current",
+                    "predicate": f"reference_summary_{tokens}_tokens",
+                    "relationTypeKey": f"reference_summary_{tokens}_tokens",
+                    "relationDomain": "summarization",
+                    "subjectKind": "message",
+                    "subjectId": f"message-summary-{tokens}",
+                    "subjectLineageId": f"message-summary-{tokens}",
+                    "objectKind": "reference",
+                    "objectId": "reference-1-v1",
+                    "objectLineageId": "reference-1",
+                    "metadata": {"maxTokens": tokens, "actualTokenEstimate": tokens},
+                    "importedAt": "2026-05-19T12:00:00Z",
+                }
+            )
+        return relations
+
 
 class FakeCorpusTextProvider:
     name = "fake-corpus-text"
@@ -217,6 +353,79 @@ def fake_services():
 
 
 class KnowledgeQueryTests(unittest.TestCase):
+    def test_vector_match_diversification_limits_repeated_reference_chunks(self):
+        matches = [
+            {"id": "ref-a-v1", "lineageId": "ref-a", "providerRank": 1, "metadata": {"referenceLineageId": "ref-a"}},
+            {"id": "ref-a-v1", "lineageId": "ref-a", "providerRank": 2, "metadata": {"referenceLineageId": "ref-a"}},
+            {"id": "ref-a-v1", "lineageId": "ref-a", "providerRank": 3, "metadata": {"referenceLineageId": "ref-a"}},
+            {"id": "ref-b-v1", "lineageId": "ref-b", "providerRank": 4, "metadata": {"referenceLineageId": "ref-b"}},
+            {"id": "ref-c-v1", "lineageId": "ref-c", "providerRank": 5, "metadata": {"referenceLineageId": "ref-c"}},
+        ]
+
+        diversified = diversify_vector_matches(matches, 4)
+
+        self.assertEqual([match["lineageId"] for match in diversified], ["ref-a", "ref-b", "ref-c", "ref-a"])
+        self.assertEqual([match["rank"] for match in diversified], [1, 2, 3, 4])
+
+    def test_quality_signal_reads_current_relation_score(self):
+        signal, warning = quality_signal_from_relations([
+            {
+                "id": "quality-1",
+                "relationState": "current",
+                "relationTypeKey": "quality_rating_is",
+                "predicate": "quality_rating_is",
+                "subjectKind": "reference",
+                "subjectLineageId": "reference-1",
+                "objectKind": "semanticNode",
+                "objectLineageId": "quality.rating.4_star",
+                "score": 4,
+            }
+        ])
+
+        self.assertIsNone(warning)
+        self.assertTrue(signal["qualityKnown"])
+        self.assertEqual(signal["qualityRating"], 4)
+        self.assertEqual(signal["qualityScore"], quality_score_from_rating(4))
+        self.assertEqual(signal["qualityRelationId"], "quality-1")
+
+    def test_quality_signal_uses_object_node_fallback_and_warns_on_duplicates(self):
+        signal, warning = quality_signal_from_relations([
+            {
+                "id": "quality-old",
+                "relationState": "current",
+                "predicate": "quality_rating_is",
+                "subjectKind": "reference",
+                "subjectLineageId": "reference-1",
+                "objectKind": "semanticNode",
+                "objectLineageId": "quality.rating.2_star",
+                "confidence": 0.4,
+                "updatedAt": "2026-05-18T12:00:00Z",
+            },
+            {
+                "id": "quality-new",
+                "relationState": "current",
+                "relationTypeKey": "quality_rating_is",
+                "subjectKind": "reference",
+                "subjectLineageId": "reference-1",
+                "objectKind": "semanticNode",
+                "objectLineageId": "quality.rating.4_star",
+                "confidence": 0.9,
+                "updatedAt": "2026-05-19T12:00:00Z",
+            },
+        ])
+
+        self.assertIn("Multiple current quality_rating_is relations", warning)
+        self.assertEqual(signal["qualityRating"], 4)
+        self.assertEqual(signal["qualityRelationId"], "quality-new")
+
+    def test_quality_missing_is_unknown_and_neutral(self):
+        signal, warning = quality_signal_from_relations([])
+
+        self.assertIsNone(warning)
+        self.assertFalse(signal["qualityKnown"])
+        self.assertIsNone(signal["qualityRating"])
+        self.assertEqual(signal["qualityScore"], 0.5)
+
     def test_token_counter_matches_tiktoken_default_encoding(self):
         try:
             import tiktoken
@@ -544,6 +753,52 @@ class KnowledgeQueryTests(unittest.TestCase):
         self.assertEqual(result["context"]["sourceTextMode"], "excerpted")
         self.assertLessEqual(result["context"]["totalTokens"], 500)
 
+    def test_reference_summaries_are_selected_by_record_budget(self):
+        services = KnowledgeQueryServices(
+            graph=FakeGraphProvider(),
+            semantic=FakeVectorSemanticProvider(),
+            corpus_text=LongFakeCorpusTextProvider(),
+        )
+        result = run_knowledge_query(
+            {
+                "anchors": [{"kind": "reference", "id": "reference-1-v1", "lineageId": "reference-1"}],
+                "semanticQuery": "production reliability evaluation for agents",
+                "output": {"format": "both", "maxTokens": 420, "maxPassageTokens": 120},
+            },
+            services,
+        )
+
+        selected = [
+            passage for passage in result["structured"]["evidencePassages"]
+            if passage["selectionReason"] == "reference_summary"
+        ]
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(selected[0]["summaryMaxTokens"], 500)
+        self.assertIn("summary", result["structured"]["referenceSummaries"][0])
+        self.assertIn("Long summary", result["context"]["text"])
+        self.assertNotIn("reference_summary_100_tokens", result["context"]["text"])
+        self.assertLessEqual(result["context"]["totalTokens"], 420)
+
+    def test_reference_summary_precedes_semantic_chunks_for_same_source(self):
+        services = KnowledgeQueryServices(
+            graph=FakeGraphProvider(),
+            semantic=FakeVectorSemanticProvider(),
+            corpus_text=LongFakeCorpusTextProvider(),
+        )
+        result = run_knowledge_query(
+            {
+                "anchors": [{"kind": "reference", "id": "reference-1-v1", "lineageId": "reference-1"}],
+                "semanticQuery": "production reliability evaluation for agents",
+                "output": {"format": "markdown", "maxTokens": 700, "maxPassageTokens": 120},
+            },
+            services,
+        )
+
+        text = result["context"]["text"]
+        self.assertIn("Long summary", text)
+        self.assertIn("Production agent systems need reliable evaluation", text)
+        self.assertLess(text.index("Long summary"), text.index("Production agent systems need reliable evaluation"))
+
     def test_semantic_only_query_promotes_matches_to_related_records_and_graph_seed(self):
         services = KnowledgeQueryServices(
             graph=FakeGraphProvider(),
@@ -584,7 +839,8 @@ class KnowledgeQueryTests(unittest.TestCase):
         related_uris = {record["objectUri"] for record in result["structured"]["relatedRecords"]}
         self.assertNotIn("papyrus://reference/reference-1", related_uris)
         self.assertIn("papyrus://item/item-agent-eval", related_uris)
-        self.assertEqual(result["structured"]["evidencePassages"][0]["selectionReason"], "semantic_vector")
+        self.assertEqual(result["structured"]["evidencePassages"][0]["selectionReason"], "reference_summary")
+        self.assertTrue(any(passage["selectionReason"] == "semantic_vector" for passage in result["structured"]["evidencePassages"]))
         self.assertLessEqual(result["context"]["totalTokens"], 500)
 
     def test_related_article_records_include_summary_and_object_uri(self):
@@ -606,6 +862,69 @@ class KnowledgeQueryTests(unittest.TestCase):
         self.assertEqual(article["objectUri"], "papyrus://item/item-agent-eval")
         self.assertIn("newsroom article", article["summary"])
         self.assertIn("Object: papyrus://item/item-agent-eval", result["context"]["text"])
+
+    def test_related_records_rank_by_relevance_quality_and_graph_context(self):
+        services = KnowledgeQueryServices(
+            graph=FakeGraphProvider(),
+            semantic=QualityTieSemanticProvider(),
+            corpus_text=None,
+        )
+        result = run_knowledge_query(
+            {
+                "anchors": [{"kind": "category", "id": "category-scaling-v1", "lineageId": "category-scaling"}],
+                "semanticQuery": "production reliability evaluation for agents",
+                "scope": {"topK": 3, "relatedRecordLimit": 3},
+                "output": {"format": "both", "maxTokens": 500},
+            },
+            services,
+        )
+
+        related = result["structured"]["relatedRecords"]
+        self.assertEqual(related[0]["lineageId"], "reference-high")
+        self.assertEqual(related[0]["ranking"]["qualityRating"], 5)
+        self.assertGreater(related[0]["ranking"]["finalScore"], related[1]["ranking"]["finalScore"])
+        self.assertNotIn("reference-irrelevant", {record["lineageId"] for record in related})
+        self.assertNotIn("quality_rating_is", result["context"]["text"])
+
+    def test_ranking_profiles_change_related_record_order(self):
+        services = KnowledgeQueryServices(graph=FakeGraphProvider(), semantic=QualityTieSemanticProvider())
+        relevance_first = run_knowledge_query(
+            {
+                "anchors": [{"kind": "category", "id": "category-scaling-v1", "lineageId": "category-scaling"}],
+                "semanticQuery": "production reliability evaluation for agents",
+                "ranking": {"profile": "relevance_first"},
+                "scope": {"topK": 2, "relatedRecordLimit": 2},
+            },
+            services,
+        )
+        quality_forward = run_knowledge_query(
+            {
+                "anchors": [{"kind": "category", "id": "category-scaling-v1", "lineageId": "category-scaling"}],
+                "semanticQuery": "production reliability evaluation for agents",
+                "ranking": {"profile": "quality_forward"},
+                "scope": {"topK": 2, "relatedRecordLimit": 2},
+            },
+            services,
+        )
+
+        self.assertEqual(relevance_first["structured"]["relatedRecords"][0]["lineageId"], "reference-low")
+        self.assertEqual(quality_forward["structured"]["relatedRecords"][0]["lineageId"], "reference-high")
+
+    def test_see_also_token_budgets_follow_ranking(self):
+        services = KnowledgeQueryServices(graph=FakeGraphProvider(), semantic=QualityTieSemanticProvider())
+        result = run_knowledge_query(
+            {
+                "anchors": [{"kind": "category", "id": "category-scaling-v1", "lineageId": "category-scaling"}],
+                "semanticQuery": "production reliability evaluation for agents",
+                "scope": {"topK": 2, "relatedRecordLimit": 2},
+                "output": {"format": "markdown", "maxTokens": 500, "seeAlsoMaxTokens": 160},
+            },
+            services,
+        )
+
+        related = result["structured"]["relatedRecords"]
+        self.assertGreaterEqual(related[0]["ranking"]["tokenBudget"], related[1]["ranking"]["tokenBudget"])
+        self.assertLessEqual(result["context"]["totalTokens"], 500)
 
     def test_core_renders_appsync_awsjson_metadata_strings(self):
         services = KnowledgeQueryServices(graph=FakeGraphProvider(), semantic=FakeSemanticProvider())
