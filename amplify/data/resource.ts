@@ -2,6 +2,7 @@ import { type ClientSchema, a, defineData } from "@aws-amplify/backend";
 import { assignmentAction } from "../functions/assignment-action/resource";
 import { categoryAction } from "../functions/category-action/resource";
 import { graphqlJwtAuthorizer } from "../functions/graphql-jwt-authorizer/resource";
+import { knowledgeQuery } from "../functions/knowledge-query/resource";
 import { manageUserRole } from "../functions/manage-user-role/resource";
 import { newsroomSummary } from "../functions/newsroom-summary/resource";
 
@@ -353,6 +354,15 @@ const schema = a.schema({
     .returns(a.ref("NewsroomSummary"))
     .authorization((allow) => [allow.groups(categoryWriteGroups), allow.custom()])
     .handler(a.handler.function(newsroomSummary)),
+
+  knowledgeQuery: a
+    .query()
+    .arguments({
+      input: a.json().required(),
+    })
+    .returns(a.json())
+    .authorization((allow) => [allow.groups(categoryWriteGroups), allow.custom()])
+    .handler(a.handler.function(knowledgeQuery)),
 
   updateNewsroomSummary: a
     .mutation()

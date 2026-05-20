@@ -12,6 +12,12 @@ from .newsroom import (
     papyrus_search_semantic_nodes,
 )
 from .tactus_runtime import execute_tactus_harnessed
+from papyrus_knowledge_query.cli import (
+    add_knowledge_query_parser,
+    add_knowledge_vector_index_parser,
+    run_knowledge_query_cli,
+    run_knowledge_vector_index_cli,
+)
 
 
 def _load_repo_dotenv() -> None:
@@ -65,6 +71,8 @@ def main(argv: list[str] | None = None) -> int:
     semantic_search_parser.add_argument("--query", required=True)
     semantic_search_parser.add_argument("--limit", type=int, default=10)
     semantic_search_parser.add_argument("--category-set-id", default="")
+    add_knowledge_query_parser(subparsers)
+    add_knowledge_vector_index_parser(subparsers)
 
     args = parser.parse_args(argv)
     if args.command == "build-assignment-agent-context":
@@ -94,6 +102,10 @@ def main(argv: list[str] | None = None) -> int:
             limit=args.limit,
             category_set_id=args.category_set_id,
         )
+    elif args.command == "knowledge-query":
+        payload = run_knowledge_query_cli(args)
+    elif args.command == "knowledge-vector-index":
+        payload = run_knowledge_vector_index_cli(args)
     else:
         payload = {
             "module": "papyrus_newsroom",

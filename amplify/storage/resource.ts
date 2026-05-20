@@ -1,4 +1,5 @@
 import { defineStorage } from "@aws-amplify/backend";
+import { knowledgeQuery } from "../functions/knowledge-query/resource";
 
 export const storage = defineStorage({
   name: "papyrusMedia",
@@ -11,6 +12,7 @@ export const storage = defineStorage({
     ],
     "corpora/*": [
       allow.groups(["editor", "admin"]).to(["read"]),
+      allow.resource(knowledgeQuery).to(["read"]),
     ],
   }),
 });

@@ -104,6 +104,11 @@ rendering contracts.
   curation or evidence use. Only current accepted `Reference` rows may be used
   for evidence sets, topic modeling, graph analysis, desk memory, context
   packs, assignment evidence, or edition planning.
+- Agents that generate, test, debug, or design knowledge context packs should
+  follow `skills/knowledge-query/SKILL.md`. `knowledgeQuery` is the shared
+  CLI/Lambda query path for model-ready context; prefer local CLI iteration for
+  context-pack content changes and deploy only when the shared logic is ready
+  for AppSync validation.
 - When bootstrapping a new publication from a file pile, follow
   `skills/publication-bootstrap/SKILL.md` and
   `docs/new-publication-from-corpus.md`. Convert loose files into a corpus
