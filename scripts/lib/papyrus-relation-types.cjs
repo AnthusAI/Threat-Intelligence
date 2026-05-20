@@ -15,6 +15,8 @@ const RELATION_DOMAINS = new Set([
   "ontology",
   "generic",
   "classification",
+  "curation",
+  "summarization",
 ]);
 
 let relationTypeSeedCache = null;

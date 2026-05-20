@@ -212,9 +212,11 @@ corpora:
 const steeringConfig = loadSteeringConfig({ configPath });
 const semanticConceptSeeds = loadSemanticConceptSeeds();
 assert.equal(semanticConceptSeeds.filter((concept) => concept.nodeKind === "editorialForm").length, 4);
+assert.equal(semanticConceptSeeds.filter((concept) => concept.nodeKind === "qualityRating").length, 5);
 assert.equal(semanticConceptSeeds.find((concept) => concept.nodeKey === "editorial.form.reporting")?.scope, "global");
 assert.equal(semanticConceptSeeds.find((concept) => concept.nodeKey === "comment.ingestion_rationale")?.scope, "corpus");
 assert.equal(semanticConceptSeeds.find((concept) => concept.nodeKey === "editorial.form.briefs")?.displayName, "Briefs");
+assert.equal(semanticConceptSeeds.find((concept) => concept.nodeKey === "quality.rating.5_star")?.scope, "global");
 assert.deepEqual(DEFAULT_LANES.map((lane) => lane.laneKey), ["reporting", "analysis", "briefs"]);
 const lexicalConfig = loadLexicalSteeringConfig();
 assert.equal(lexicalConfig.keywordDisplay.preview_count, 6);
@@ -915,6 +917,8 @@ assert.equal(getAssignmentTypePolicy("reference.corpus-accession").claimPolicy, 
 assert.equal(getAssignmentTypePolicy("reference.text-extraction").claimPolicy, "exclusive");
 assert.equal(getAssignmentTypePolicy("reference.doi-backfill").claimPolicy, "exclusive");
 assert.equal(getAssignmentTypePolicy("reference.identifier-backfill").claimPolicy, "exclusive");
+assert.equal(getAssignmentTypePolicy("reference.summary-generation").workProductPolicy, "reference-summary-message");
+assert.equal(getAssignmentTypePolicy("reference.quality-assessment").workProductPolicy, "reference-quality-rating");
 const analysisAssignment = findRecord(analysisAssignmentPlan.records, "Assignment", (record) => record.assignmentTypeKey === "analysis.reindex");
 assert.equal(analysisAssignment.status, "open");
 assert.equal(analysisAssignment.queueKey, "analysis:reindex:canonical-corpus:topic-classifier-train");
@@ -1082,6 +1086,9 @@ assert.ok(relationTypeSeeds.some((type) => type.key === "digital_object_identifi
 assert.ok(relationTypeSeeds.some((type) => type.key === "arxiv_identifier_is" && type.domain === "ontology" && type.allowedObjectKinds.includes("semanticNode")));
 assert.ok(relationTypeSeeds.some((type) => type.key === "isbn_identifier_is" && type.domain === "ontology" && type.allowedObjectKinds.includes("semanticNode")));
 assert.ok(relationTypeSeeds.some((type) => type.key === "publisher_item_identifier_is" && type.domain === "ontology" && type.allowedObjectKinds.includes("semanticNode")));
+assert.ok(relationTypeSeeds.some((type) => type.key === "reference_summary_100_tokens" && type.domain === "summarization" && type.allowedObjectKinds.includes("reference")));
+assert.ok(relationTypeSeeds.some((type) => type.key === "reference_summary_500_tokens" && type.domain === "summarization" && type.allowedSubjectKinds.includes("message")));
+assert.ok(relationTypeSeeds.some((type) => type.key === "quality_rating_is" && type.domain === "curation" && type.allowedObjectKinds.includes("semanticNode")));
 assert.ok(relationTypeSeeds.some((type) => type.key === "comment" && type.domain === "commentary" && type.allowedSubjectKinds.includes("message")));
 assert.ok(relationTypeSeeds.some((type) => type.key === "ingestion_rationale" && type.domain === "commentary" && type.allowedObjectKinds.includes("reference")));
 assert.ok(relationTypeSeeds.some((type) => type.key === "planned_for_edition" && type.domain === "publication"));
@@ -1112,6 +1119,16 @@ assert.deepEqual(semanticRelationTypeFieldsForPredicate("arxiv_identifier_is"), 
   relationTypeId: semanticRelationTypeIdFor("arxiv_identifier_is"),
   relationTypeKey: "arxiv_identifier_is",
   relationDomain: "ontology",
+});
+assert.deepEqual(semanticRelationTypeFieldsForPredicate("reference_summary_100_tokens"), {
+  relationTypeId: semanticRelationTypeIdFor("reference_summary_100_tokens"),
+  relationTypeKey: "reference_summary_100_tokens",
+  relationDomain: "summarization",
+});
+assert.deepEqual(semanticRelationTypeFieldsForPredicate("quality_rating_is"), {
+  relationTypeId: semanticRelationTypeIdFor("quality_rating_is"),
+  relationTypeKey: "quality_rating_is",
+  relationDomain: "curation",
 });
 const backfillRecords = buildSemanticRelationBackfillRecords([
   { id: "relation-a", predicate: "classified_as" },

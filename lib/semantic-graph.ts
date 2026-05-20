@@ -28,6 +28,10 @@ export type SemanticObjectKind = typeof SEMANTIC_OBJECT_KINDS[number];
 
 export type SemanticPredicateId =
   | "classified_as"
+  | "quality_rating_is"
+  | "reference_summary_100_tokens"
+  | "reference_summary_200_tokens"
+  | "reference_summary_500_tokens"
   | "mentions"
   | "has_editorial_form"
   | "about"
@@ -50,13 +54,17 @@ export type SemanticPredicateId =
 export type SemanticPredicateDefinition = {
   id: SemanticPredicateId | string;
   label: string;
-  group: "knowledge" | "editorial" | "workflow" | "evidence" | "ontology" | "commentary" | "publication" | "generic" | "classification";
+  group: "knowledge" | "editorial" | "workflow" | "evidence" | "ontology" | "commentary" | "publication" | "generic" | "classification" | "curation" | "summarization";
   inverseLabel: string;
   contextPackTags?: string[];
 };
 
 export const SEMANTIC_PREDICATES: SemanticPredicateDefinition[] = [
   { id: "classified_as", label: "classified as", group: "knowledge", inverseLabel: "classified references/items", contextPackTags: ["reference_graph", "research", "category_context"] },
+  { id: "quality_rating_is", label: "quality rating is", group: "curation", inverseLabel: "quality rating for", contextPackTags: ["reference_curation", "research", "context_ranking"] },
+  { id: "reference_summary_100_tokens", label: "100-token reference summary", group: "summarization", inverseLabel: "100-token summary for", contextPackTags: ["reference_curation", "research", "context_ranking"] },
+  { id: "reference_summary_200_tokens", label: "200-token reference summary", group: "summarization", inverseLabel: "200-token summary for", contextPackTags: ["reference_curation", "research", "context_ranking"] },
+  { id: "reference_summary_500_tokens", label: "500-token reference summary", group: "summarization", inverseLabel: "500-token summary for", contextPackTags: ["reference_curation", "research", "context_ranking"] },
   { id: "mentions", label: "mentions", group: "ontology", inverseLabel: "mentioned by" },
   { id: "has_editorial_form", label: "has editorial form", group: "editorial", inverseLabel: "items by editorial form", contextPackTags: ["editing", "publication", "assignment_context"] },
   { id: "about", label: "about", group: "commentary", inverseLabel: "commentary" },
@@ -398,7 +406,7 @@ function summarizeMessage(record: MessageRecord | null): SemanticObjectSummary |
     lineageId,
     versionNumber: 1,
     label: record.summary ?? record.messageKind,
-    subtitle: record.body,
+    subtitle: record.source ?? record.messageDomain,
     href: newsDeskHrefForSemanticObject("message", lineageId),
     record,
   };

@@ -66,6 +66,50 @@ relationTypes:
     isSymmetric: false
     isTransitive: false
     contextPackTags: [reference_graph, research]
+  - key: reference_summary_100_tokens
+    label: 100-token reference summary
+    inverseLabel: 100-token summary for
+    description: Links a private Message to the Reference it summarizes with a maximum budget of 100 tokens.
+    domain: summarization
+    allowedSubjectKinds: [message]
+    allowedObjectKinds: [reference]
+    isDirectional: true
+    isSymmetric: false
+    isTransitive: false
+    contextPackTags: [reference_curation, research, context_ranking]
+  - key: reference_summary_200_tokens
+    label: 200-token reference summary
+    inverseLabel: 200-token summary for
+    description: Links a private Message to the Reference it summarizes with a maximum budget of 200 tokens.
+    domain: summarization
+    allowedSubjectKinds: [message]
+    allowedObjectKinds: [reference]
+    isDirectional: true
+    isSymmetric: false
+    isTransitive: false
+    contextPackTags: [reference_curation, research, context_ranking]
+  - key: reference_summary_500_tokens
+    label: 500-token reference summary
+    inverseLabel: 500-token summary for
+    description: Links a private Message to the Reference it summarizes with a maximum budget of 500 tokens.
+    domain: summarization
+    allowedSubjectKinds: [message]
+    allowedObjectKinds: [reference]
+    isDirectional: true
+    isSymmetric: false
+    isTransitive: false
+    contextPackTags: [reference_curation, research, context_ranking]
+  - key: quality_rating_is
+    label: quality rating is
+    inverseLabel: quality rating for
+    description: Links a reference to its accepted one-to-five-star quality rating semantic node; SemanticRelation.score stores the numeric rating.
+    domain: curation
+    allowedSubjectKinds: [reference]
+    allowedObjectKinds: [semanticNode]
+    isDirectional: true
+    isSymmetric: false
+    isTransitive: false
+    contextPackTags: [reference_curation, research, context_ranking]
   - key: mentions
     label: mentions
     inverseLabel: mentioned by

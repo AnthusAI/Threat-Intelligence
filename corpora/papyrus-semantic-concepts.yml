@@ -53,3 +53,48 @@ concepts:
     aliases:
       - brief
       - short item
+
+  - key: quality.rating.1_star
+    kind: qualityRating
+    scope: global
+    name: One-Star Quality
+    description: The lowest accepted quality rating for a reference; use for material that should be strongly demoted or excluded from high-quality context unless specifically needed.
+    aliases:
+      - one star
+      - 1 star
+
+  - key: quality.rating.2_star
+    kind: qualityRating
+    scope: global
+    name: Two-Star Quality
+    description: A low quality rating for a reference; use for material with limited reliability, relevance, or utility that should generally be demoted.
+    aliases:
+      - two stars
+      - 2 stars
+
+  - key: quality.rating.3_star
+    kind: qualityRating
+    scope: global
+    name: Three-Star Quality
+    description: A neutral or adequate quality rating for a reference; use when material is usable but not especially strong.
+    aliases:
+      - three stars
+      - 3 stars
+
+  - key: quality.rating.4_star
+    kind: qualityRating
+    scope: global
+    name: Four-Star Quality
+    description: A strong quality rating for a reference; use for material that is reliable, relevant, and useful for context building.
+    aliases:
+      - four stars
+      - 4 stars
+
+  - key: quality.rating.5_star
+    kind: qualityRating
+    scope: global
+    name: Five-Star Quality
+    description: The highest accepted quality rating for a reference; use for especially authoritative, relevant, or context-critical material.
+    aliases:
+      - five stars
+      - 5 stars

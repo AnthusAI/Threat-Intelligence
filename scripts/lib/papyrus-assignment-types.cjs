@@ -47,6 +47,22 @@ const ASSIGNMENT_TYPE_POLICIES = {
     workProductPolicy: "reference-identifier-enrichment",
     description: "Backfills semantic identifiers for current references and persists identifier provenance.",
   },
+  "reference.summary-generation": {
+    assignmentTypeKey: "reference.summary-generation",
+    handlerKey: "reference.summary-generation",
+    claimPolicy: "exclusive",
+    defaultClaimTtlSeconds: 60 * 60,
+    workProductPolicy: "reference-summary-message",
+    description: "Generates budgeted private summary Messages for current references.",
+  },
+  "reference.quality-assessment": {
+    assignmentTypeKey: "reference.quality-assessment",
+    handlerKey: "reference.quality-assessment",
+    claimPolicy: "exclusive",
+    defaultClaimTtlSeconds: 60 * 60,
+    workProductPolicy: "reference-quality-rating",
+    description: "Assesses and records accepted one-to-five-star Reference quality ratings.",
+  },
   "research.edition-candidate": {
     assignmentTypeKey: "research.edition-candidate",
     handlerKey: "newsroom.research",
