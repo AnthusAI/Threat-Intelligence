@@ -500,8 +500,6 @@ const SERIF_TEXT_FONT = 'Georgia, "Times New Roman", serif';
 const SANS_TEXT_FONT = "Arial, Helvetica, sans-serif";
 const IMAGE_CAPTION_FONT_SIZE = 12;
 const IMAGE_CAPTION_HORIZONTAL_PADDING_EM = 0.3;
-const MASTHEAD_TITLE_ROWS = 4;
-const MASTHEAD_HORIZONTAL_ROWS = 6;
 const MASTHEAD_TITLE_GLYPH_HEIGHT_RATIO = 0.736;
 const MASTHEAD_RULE_HEIGHT = 0;
 const MASTHEAD_RULE_MARGIN_BOTTOM = 0;
@@ -2128,7 +2126,7 @@ function getLayoutConfig(pageWidth: number, viewportHeight: number): LayoutConfi
   const sideMargin = narrow ? 18 : 30;
   const contentWidth = Math.max(280, pageWidth - sideMargin * 2);
   const columnCount = getResponsiveColumnCount(pageWidth, contentWidth, gap);
-  const pageChrome = getPageChromeMetrics(pageWidth, narrow, rhythm);
+  const pageChrome = getPageChromeMetrics(pageWidth, narrow, rhythm, columnCount);
   const targetPageHeight = reserveRhythmRows(getTargetPageHeight(pageWidth, viewportHeight), rhythm);
   const frontGridHeight = snapDownToRhythm(getFrontGridHeight(targetPageHeight, narrow, medium), rhythm);
   const frontRowMaxHeight = snapDownToRhythm(narrow ? 520 : medium ? 560 : 620, rhythm);
@@ -2175,12 +2173,19 @@ function getTargetPageHeight(pageWidth: number, viewportHeight: number): number 
   return Math.max(1320, viewportHeight * 1.72);
 }
 
-function getPageChromeMetrics(pageWidth: number, narrow: boolean, rhythm: VerticalRhythm): PageChromeMetrics {
+function getMastheadRowPolicy(columnCount: number): { totalRows: number; titleRows: number } {
+  if (columnCount <= 1) return { totalRows: 4, titleRows: 2 };
+  if (columnCount <= 3) return { totalRows: 5, titleRows: 3 };
+  return { totalRows: 6, titleRows: 4 };
+}
+
+function getPageChromeMetrics(pageWidth: number, narrow: boolean, rhythm: VerticalRhythm, columnCount: number): PageChromeMetrics {
   const pagePaddingTop = rhythm.rowHeight;
   const pagePaddingX = narrow ? 18 : 30;
   const pagePaddingBottom = reserveRhythmRows(narrow ? 18 : 30, rhythm);
+  const mastheadRows = getMastheadRowPolicy(columnCount);
   const mastheadKickerLineHeight = 14;
-  const mastheadTitleLineHeight = rhythm.rowHeight * MASTHEAD_TITLE_ROWS;
+  const mastheadTitleLineHeight = rhythm.rowHeight * mastheadRows.titleRows;
   const mastheadTitleFontSize = mastheadTitleLineHeight / MASTHEAD_TITLE_GLYPH_HEIGHT_RATIO;
   const mastheadTitleMarginTop = rhythm.rowHeight / 2;
   const mastheadTitleMarginBottom = rhythm.rowHeight / 2;
@@ -2203,7 +2208,7 @@ function getPageChromeMetrics(pageWidth: number, narrow: boolean, rhythm: Vertic
     MASTHEAD_PADDING_BOTTOM +
     MASTHEAD_BORDER_BOTTOM +
     MASTHEAD_MARGIN_BOTTOM;
-  const mastheadHeight = rhythm.rowHeight * MASTHEAD_HORIZONTAL_ROWS;
+  const mastheadHeight = rhythm.rowHeight * mastheadRows.totalRows;
   const mastheadMetaPaddingTop = MASTHEAD_META_PADDING_TOP + Math.max(0, mastheadHeight - rawMastheadHeight);
   const frontGridMarginTop = rhythm.rowHeight;
   const insideHeaderHeight = INSIDE_HEADER_PADDING_BOTTOM + INSIDE_HEADER_BORDER_BOTTOM + INSIDE_HEADER_MARGIN_BOTTOM + 18;

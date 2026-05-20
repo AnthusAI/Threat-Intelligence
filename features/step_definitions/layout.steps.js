@@ -644,6 +644,57 @@ Then("the active page should follow the vertical rhythm", async function () {
   assert.deepEqual(report.errors, []);
 });
 
+Then("the masthead should use {int} rhythm rows with {int} title rows and fit the page width", async function (expectedMastheadRows, expectedTitleRows) {
+  const report = await requirePage(this).evaluate(() => {
+    const masthead = document.querySelector(".masthead");
+    const title = masthead?.querySelector("h1");
+    const titleInner = title?.querySelector("span, a");
+    if (!masthead || !title || !titleInner) return null;
+    const mastheadRect = masthead.getBoundingClientRect();
+    const titleRect = titleInner.getBoundingClientRect();
+    const mastheadStyle = getComputedStyle(masthead);
+    const titleStyle = getComputedStyle(title);
+    const rhythm = Number.parseFloat(mastheadStyle.getPropertyValue("--paper-rhythm")) || 19;
+    const metaItems = Array.from(masthead.querySelectorAll(".masthead__meta > *")).map((item) => {
+      const rect = item.getBoundingClientRect();
+      const style = getComputedStyle(item);
+      return {
+        display: style.display,
+        height: rect.height,
+        text: item.textContent?.trim() ?? "",
+        visibility: style.visibility,
+        width: rect.width,
+      };
+    });
+    return {
+      rhythm,
+      mastheadHeight: mastheadRect.height,
+      mastheadWidth: mastheadRect.width,
+      metaItems,
+      titleLineHeight: Number.parseFloat(titleStyle.lineHeight),
+      titleWidth: titleRect.width,
+    };
+  });
+  assert.ok(report, "Expected masthead report");
+  const tolerance = 0.75;
+  assert.ok(
+    Math.abs(report.mastheadHeight - report.rhythm * expectedMastheadRows) <= tolerance,
+    `Expected masthead height ${report.mastheadHeight} to be ${expectedMastheadRows} rhythm rows`,
+  );
+  assert.ok(
+    Math.abs(report.titleLineHeight - report.rhythm * expectedTitleRows) <= tolerance,
+    `Expected title line-height ${report.titleLineHeight} to be ${expectedTitleRows} rhythm rows`,
+  );
+  assert.ok(
+    report.titleWidth <= report.mastheadWidth + tolerance,
+    `Expected masthead title width ${report.titleWidth} to fit within ${report.mastheadWidth}`,
+  );
+  assert.equal(
+    report.metaItems.filter((item) => item.display !== "none" && item.visibility !== "hidden" && item.width > 0 && item.height > 0).length,
+    3,
+  );
+});
+
 Then("no continuation column should be dead", async function () {
   const report = await getActivePageReport(requirePage(this));
   assert.deepEqual(report.deadColumns, []);

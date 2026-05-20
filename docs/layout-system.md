@@ -56,7 +56,19 @@ Use newspaper vocabulary precisely:
   label.
 - The visible front-page masthead chrome is the nameplate plus metadata strip.
 
-Current front-page geometry:
+Current front-page geometry steps down with the solved page column count:
+
+| Page columns | Total masthead chrome | Title line box |
+| --- | ---: | ---: |
+| `6`, `5`, or `4` | `6` rhythm rows | `4` rhythm rows |
+| `3` or `2` | `5` rhythm rows | `3` rhythm rows |
+| `1` | `4` rhythm rows | `2` rhythm rows |
+
+In compact mastheads, keep all three metadata fields visible. Move the left and
+right metadata fields into the row above the nameplate, keep the center metadata
+field below it, and spend the remaining rows on the title line box.
+
+The wide front-page geometry is:
 
 - Nameplate: `5` rhythm rows.
 - Title line box: `4` rhythm rows.
@@ -252,4 +264,3 @@ Scenarios should assert both:
 Use BDD for vertical rhythm, cursor handoff, no cropped measured lines,
 responsive front recipes, no furniture overlap, image captions, pull quote
 sufficiency, archive rhythm, and height policy behavior.
-

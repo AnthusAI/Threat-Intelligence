@@ -39,6 +39,19 @@ Feature: Newspaper layout scenarios
       | 640   | 1200   |
       | 390   | 900    |
 
+  Scenario Outline: Masthead nameplates step down on column breakpoints
+    Given I open the "current-edition" layout scenario at <width> by <height>
+    Then the masthead should use <mastheadRows> rhythm rows with <titleRows> title rows and fit the page width
+    Given I open the newsroom at <width> by <height>
+    Then the masthead should use <mastheadRows> rhythm rows with <titleRows> title rows and fit the page width
+    And no browser console errors should occur
+
+    Examples:
+      | width | height | mastheadRows | titleRows |
+      | 1280  | 900    | 6            | 4         |
+      | 640   | 1200   | 5            | 3         |
+      | 390   | 900    | 4            | 2         |
+
   Scenario Outline: Shared continuations repair blank-column pressure
     Given I open the "shared-blank-column-pressure" layout scenario at <width> by <height>
     Then the solved layout should use <columns> columns
