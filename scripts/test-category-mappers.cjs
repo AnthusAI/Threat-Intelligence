@@ -832,7 +832,7 @@ const rejectedCatalogPlan = buildReferenceCatalogRegistrationRecords({
 const rejectedCatalogReference = findRecord(rejectedCatalogPlan.records, "Reference", (record) => record.externalItemId === "catalog-002");
 assert.equal(rejectedCatalogReference.curationStatus, "rejected");
 assert.equal(rejectedCatalogReference.importRunId, rejectedCatalogPlan.importRunId);
-assert.equal(JSON.parse(rejectedCatalogReference.metadata).curation_reason_code, "out_of_scope");
+assert.equal(JSON.parse(rejectedCatalogReference.metadata).curation_reason_code, undefined);
 assert.equal(rejectedCatalogPlan.records.some((record) => record.modelName === "Assignment"), false);
 const rejectionMessage = findRecord(rejectedCatalogPlan.records, "Message", (record) => record.messageKind === "reference_curation");
 assert.equal(JSON.parse(rejectionMessage.metadata).reasonCode, "out_of_scope");
@@ -913,6 +913,8 @@ assert.equal(getAssignmentTypePolicy("analysis.reindex").claimPolicy, "exclusive
 assert.equal(getAssignmentTypePolicy("research.edition-candidate").claimPolicy, "optional");
 assert.equal(getAssignmentTypePolicy("reference.corpus-accession").claimPolicy, "exclusive");
 assert.equal(getAssignmentTypePolicy("reference.text-extraction").claimPolicy, "exclusive");
+assert.equal(getAssignmentTypePolicy("reference.doi-backfill").claimPolicy, "exclusive");
+assert.equal(getAssignmentTypePolicy("reference.identifier-backfill").claimPolicy, "exclusive");
 const analysisAssignment = findRecord(analysisAssignmentPlan.records, "Assignment", (record) => record.assignmentTypeKey === "analysis.reindex");
 assert.equal(analysisAssignment.status, "open");
 assert.equal(analysisAssignment.queueKey, "analysis:reindex:canonical-corpus:topic-classifier-train");
@@ -1076,6 +1078,10 @@ assert.deepEqual(
 const relationTypeSeeds = loadSemanticRelationTypeSeeds();
 assert.ok(relationTypeSeeds.some((type) => type.key === "classified_as" && type.domain === "knowledge"));
 assert.ok(relationTypeSeeds.some((type) => type.key === "authoritative_label" && type.domain === "classification"));
+assert.ok(relationTypeSeeds.some((type) => type.key === "digital_object_identifier_is" && type.domain === "ontology" && type.allowedObjectKinds.includes("semanticNode")));
+assert.ok(relationTypeSeeds.some((type) => type.key === "arxiv_identifier_is" && type.domain === "ontology" && type.allowedObjectKinds.includes("semanticNode")));
+assert.ok(relationTypeSeeds.some((type) => type.key === "isbn_identifier_is" && type.domain === "ontology" && type.allowedObjectKinds.includes("semanticNode")));
+assert.ok(relationTypeSeeds.some((type) => type.key === "publisher_item_identifier_is" && type.domain === "ontology" && type.allowedObjectKinds.includes("semanticNode")));
 assert.ok(relationTypeSeeds.some((type) => type.key === "comment" && type.domain === "commentary" && type.allowedSubjectKinds.includes("message")));
 assert.ok(relationTypeSeeds.some((type) => type.key === "ingestion_rationale" && type.domain === "commentary" && type.allowedObjectKinds.includes("reference")));
 assert.ok(relationTypeSeeds.some((type) => type.key === "planned_for_edition" && type.domain === "publication"));
@@ -1096,6 +1102,16 @@ assert.deepEqual(semanticRelationTypeFieldsForPredicate("authoritative_label"), 
   relationTypeId: semanticRelationTypeIdFor("authoritative_label"),
   relationTypeKey: "authoritative_label",
   relationDomain: "classification",
+});
+assert.deepEqual(semanticRelationTypeFieldsForPredicate("digital_object_identifier_is"), {
+  relationTypeId: semanticRelationTypeIdFor("digital_object_identifier_is"),
+  relationTypeKey: "digital_object_identifier_is",
+  relationDomain: "ontology",
+});
+assert.deepEqual(semanticRelationTypeFieldsForPredicate("arxiv_identifier_is"), {
+  relationTypeId: semanticRelationTypeIdFor("arxiv_identifier_is"),
+  relationTypeKey: "arxiv_identifier_is",
+  relationDomain: "ontology",
 });
 const backfillRecords = buildSemanticRelationBackfillRecords([
   { id: "relation-a", predicate: "classified_as" },
@@ -1190,6 +1206,7 @@ assert.throws(
 );
 
 const schemaSource = fs.readFileSync(path.join(__dirname, "..", "amplify", "data", "resource.ts"), "utf8");
+const authoringClientSource = fs.readFileSync(path.join(__dirname, "lib", "papyrus-graphql-authoring.cjs"), "utf8");
 assert.match(schemaSource, /ReferenceAttachment:\s*a\s*\n\s*\.model/);
 assert.match(schemaSource, /Message:\s*a\s*\n\s*\.model/);
 assert.doesNotMatch(schemaSource, /KnowledgeComment:\s*a\s*\n\s*\.model/);
@@ -1197,6 +1214,10 @@ assert.match(schemaSource, /Assignment:\s*a\s*\n\s*\.model/);
 assert.match(schemaSource.match(/Assignment:\s*a[\s\S]*?AssignmentEvent:/)?.[0] ?? "", /sectionStatusKey/);
 assert.match(schemaSource.match(/Assignment:\s*a[\s\S]*?AssignmentEvent:/)?.[0] ?? "", /listAssignmentsBySectionStatusAndPriority/);
 assert.match(schemaSource.match(/Assignment:\s*a[\s\S]*?AssignmentEvent:/)?.[0] ?? "", /listAssignmentsBySectionQueueStatusAndPriority/);
+assert.match(schemaSource.match(/Assignment:\s*a[\s\S]*?AssignmentEvent:/)?.[0] ?? "", /listAssignmentsByTypeStatusAndCreatedAt/);
+assert.match(authoringClientSource.match(/const ASSIGNMENT_FIELDS = [^;]+;/)?.[0] ?? "", /sectionStatusKey/);
+assert.match(authoringClientSource, /assignmentsByTypeStatusAndCreatedAt/);
+assert.match(authoringClientSource.match(/const ASSIGNMENT_FIELDS = [^;]+;/)?.[0] ?? "", /topicScopeCategoryKeys/);
 assert.match(schemaSource, /AssignmentEvent:\s*a\s*\n\s*\.model/);
 assert.match(schemaSource, /NewsroomSection:\s*a\s*\n\s*\.model/);
 const claimAssignmentSource = schemaSource.match(/claimAssignment:[\s\S]*?releaseAssignment:/)?.[0] ?? "";
@@ -1225,6 +1246,14 @@ assert.match(schemaSource, /reasonCode:\s*a\.string\(\)/);
 assert.match(schemaSource, /listReferencesByCurationStatusKeyAndUpdatedAt/);
 assert.doesNotMatch(schemaSource.match(/Reference:[\s\S]*?ReferenceAttachment:/)?.[0] ?? "", /a\.boolean\(\)[\s\S]*curation/);
 assert.match(schemaSource, /listAssignmentsByQueueStatusAndPriority/);
+assert.match(schemaSource, /listKnowledgeImportRunsByCorpusKindAndImportedAt/);
+assert.match(schemaSource, /listKnowledgeArtifactsByImportRunAndKind/);
+assert.match(schemaSource, /listSemanticNodesByImportRunAndNodeKey/);
+assert.match(authoringClientSource, /listAssignmentsByTypeStatusAndCreatedAt/);
+assert.match(authoringClientSource, /listKnowledgeImportRunsByCorpusKindAndImportedAt/);
+assert.match(authoringClientSource, /listKnowledgeArtifactsByImportRunAndKind/);
+assert.match(authoringClientSource, /listSemanticNodesByImportRunAndNodeKey/);
+assert.match(authoringClientSource, /getRecordsById/);
 assert.match(schemaSource, /listAssignmentsByNewsroomFeedAndCreatedAt/);
 assert.match(schemaSource, /listMessagesByNewsroomFeedAndCreatedAt/);
 assert.match(schemaSource, /listReferencesByNewsroomFeedAndCreatedAt/);
@@ -1234,6 +1263,12 @@ assert.match(schemaSource, /NewsroomSummary:\s*a\.customType/);
 assert.match(schemaSource, /facets:\s*a\.json\(\)/);
 assert.match(schemaSource, /getNewsroomSummary:\s*a\s*\n\s*\.query/);
 assert.match(schemaSource, /updateNewsroomSummary:\s*a\s*\n\s*\.mutation/);
+assert.match(schemaSource, /ModelAttachmentUploadSlot:\s*a\.customType/);
+assert.match(schemaSource, /ModelAttachmentDownloadSlot:\s*a\.customType/);
+assert.match(schemaSource, /createModelAttachmentUpload:\s*a\s*\n\s*\.mutation/);
+assert.match(schemaSource, /completeModelAttachmentUpload:\s*a\s*\n\s*\.mutation/);
+assert.match(schemaSource, /abortModelAttachmentUpload:\s*a\s*\n\s*\.mutation/);
+assert.match(schemaSource, /createModelAttachmentDownload:\s*a\s*\n\s*\.mutation/);
 assert.match(schemaSource, /allow\.groups\(categoryWriteGroups\)\.to\(categoryAppendOnlyOperations\)/);
 assert.doesNotMatch(schemaSource.match(/UserIdentity:[\s\S]*?UserRoleAssignment:/)?.[0] ?? "", /publicApiKey/);
 assert.doesNotMatch(schemaSource.match(/CategoryKeyword:[\s\S]*?SteeringProposal:/)?.[0] ?? "", /publicApiKey/);
@@ -1264,6 +1299,19 @@ assert.doesNotMatch(summaryHandlerSource, /client\.models\.Assignment\.list/);
 const authoringSource = fs.readFileSync(path.join(__dirname, "lib", "papyrus-graphql-authoring.cjs"), "utf8");
 assert.match(authoringSource, /mutation UpdateNewsroomSummary/);
 assert.match(authoringSource, /updateNewsroomSummary\(delta/);
+assert.match(authoringSource, /mutation CreateModelAttachmentUpload/);
+assert.match(authoringSource, /createModelAttachmentUpload\(attachment/);
+assert.match(authoringSource, /mutation CompleteModelAttachmentUpload/);
+assert.match(authoringSource, /mutation CreateModelAttachmentDownload/);
+assert.match(authoringSource, /createModelAttachmentDownload\(attachmentId/);
+
+const attachmentHelperSource = fs.readFileSync(path.join(__dirname, "lib", "papyrus-model-attachments.cjs"), "utf8");
+const uploadAttachmentBodySource = attachmentHelperSource.match(/async function uploadAttachmentBody[\s\S]*?\n}\n/)?.[0] ?? "";
+assert.match(uploadAttachmentBodySource, /createModelAttachmentUpload/);
+assert.match(uploadAttachmentBodySource, /completeModelAttachmentUpload/);
+assert.doesNotMatch(uploadAttachmentBodySource, /spawnSync\("aws"/);
+const downloadAttachmentBufferSource = attachmentHelperSource.match(/async function downloadAttachmentBuffer[\s\S]*?\n}\n/)?.[0] ?? "";
+assert.match(downloadAttachmentBufferSource, /createModelAttachmentDownload/);
 
 const summaryPayload = buildNewsroomSummaryPayload({
   categorySets: [
@@ -1311,7 +1359,7 @@ const summaryRecord = buildNewsroomSummaryPayloadRecord(summaryPayload, "2026-05
 assert.equal(summaryRecord.id, NEWSROOM_SUMMARY_PAYLOAD_ID);
 assert.equal(summaryRecord.ownerType, "newsroom");
 assert.equal(summaryRecord.payloadKind, "summary-snapshot");
-const deltaPayload = applySummaryDeltas(summaryRecord.payload, {
+const deltaPayload = applySummaryDeltas(summaryPayload, {
   now: "2026-05-18T12:01:00.000Z",
   countDeltas: { messages: 1 },
   messageKindDeltas: { reference_curation: 1 },

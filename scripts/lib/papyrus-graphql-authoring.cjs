@@ -33,6 +33,115 @@ const UPDATE_NEWSROOM_SUMMARY_MUTATION = `
   }
 `;
 
+const MODEL_ATTACHMENT_UPLOAD_FIELDS = `
+  ok
+  uploadId
+  attachmentId
+  ownerKind
+  ownerId
+  role
+  sortKey
+  method
+  uploadUrl
+  storagePath
+  mediaType
+  byteSize
+  sha256
+  expiresAt
+  requiredHeaders
+`;
+
+const CREATE_MODEL_ATTACHMENT_UPLOAD_MUTATION = `
+  mutation CreateModelAttachmentUpload(
+    $ownerKind: String!
+    $ownerId: ID!
+    $ownerLineageId: ID
+    $ownerVersionNumber: Int
+    $ownerVersionKey: String
+    $role: String!
+    $sortKey: String
+    $filename: String!
+    $mediaType: String!
+    $byteSize: Int!
+    $sha256: String
+    $importRunId: ID
+    $status: String
+  ) {
+    createModelAttachmentUpload(
+      ownerKind: $ownerKind
+      ownerId: $ownerId
+      ownerLineageId: $ownerLineageId
+      ownerVersionNumber: $ownerVersionNumber
+      ownerVersionKey: $ownerVersionKey
+      role: $role
+      sortKey: $sortKey
+      filename: $filename
+      mediaType: $mediaType
+      byteSize: $byteSize
+      sha256: $sha256
+      importRunId: $importRunId
+      status: $status
+    ) {
+      ${MODEL_ATTACHMENT_UPLOAD_FIELDS}
+    }
+  }
+`;
+
+const COMPLETE_MODEL_ATTACHMENT_UPLOAD_MUTATION = `
+  mutation CompleteModelAttachmentUpload(
+    $uploadId: String!
+    $ownerKind: String!
+    $ownerId: ID!
+    $ownerLineageId: ID
+    $ownerVersionNumber: Int
+    $ownerVersionKey: String
+    $role: String!
+    $sortKey: String
+    $filename: String!
+    $mediaType: String!
+    $byteSize: Int!
+    $sha256: String
+    $importRunId: ID
+    $status: String
+  ) {
+    completeModelAttachmentUpload(
+      uploadId: $uploadId
+      ownerKind: $ownerKind
+      ownerId: $ownerId
+      ownerLineageId: $ownerLineageId
+      ownerVersionNumber: $ownerVersionNumber
+      ownerVersionKey: $ownerVersionKey
+      role: $role
+      sortKey: $sortKey
+      filename: $filename
+      mediaType: $mediaType
+      byteSize: $byteSize
+      sha256: $sha256
+      importRunId: $importRunId
+      status: $status
+    ) {
+      id ownerKind ownerId ownerLineageId ownerVersionNumber ownerVersionKey role sortKey storagePath filename mediaType byteSize sha256 etag importRunId createdAt updatedAt status
+    }
+  }
+`;
+
+const CREATE_MODEL_ATTACHMENT_DOWNLOAD_MUTATION = `
+  mutation CreateModelAttachmentDownload($attachmentId: ID!) {
+    createModelAttachmentDownload(attachmentId: $attachmentId) {
+      ok
+      attachmentId
+      method
+      downloadUrl
+      storagePath
+      mediaType
+      byteSize
+      sha256
+      expiresAt
+      requiredHeaders
+    }
+  }
+`;
+
 const VERSION_FIELDS = "lineageId versionNumber previousVersionId versionState versionCreatedAt versionCreatedBy changeReason contentHash";
 const ITEM_FIELDS = `${VERSION_FIELDS} id type status typeStatus slug shortSlug section sectionStatus title headline deck body byline dateline publishedAt editionDate sortTitle pullQuotes layout editorial updatedAt`;
 const PUBLISHED_ITEM_FIELDS = "id sourceItemId itemLineageId versionNumber type status typeStatus slug shortSlug section sectionStatus title headline deck body byline dateline publishedAt editionDate sortTitle pullQuotes layout editorial";
@@ -50,17 +159,48 @@ const NEWSROOM_SECTION_FIELDS = "id title type editorialMission editorialPolicy 
 const PROPOSAL_FIELDS = "id categorySetId corpusId importRunId proposalKind steeringDomain status title summary categoryKey targetCategoryKey graphEntityId relationshipType displayName shortTitle subtitle description evidenceItemIds suggestedSeedItemIds suggestedHoldoutItemIds sourceSnapshotId proposedAt reviewedAt reviewedBy updatedAt";
 const DECISION_FIELDS = "id proposalId categorySetId action actorSub actorLabel note selectedCategoryKey createdAt";
 const KNOWLEDGE_CORPUS_FIELDS = "id name role itemCount generatedAt latestImportRunId createdAt updatedAt";
-const KNOWLEDGE_IMPORT_RUN_FIELDS = "id corpusId importKind classifierId sourceSnapshotId status generatedAt importedAt itemCount categoryCount proposalCount artifactCount referenceCount relationCount warningCount";
-const KNOWLEDGE_RAW_PAYLOAD_FIELDS = "id ownerType ownerId payloadKind importRunId payload createdAt updatedAt";
+const KNOWLEDGE_IMPORT_RUN_FIELDS = "id corpusId importKind corpusImportKindKey classifierId sourceSnapshotId status generatedAt importedAt itemCount categoryCount proposalCount artifactCount referenceCount relationCount warningCount";
+const KNOWLEDGE_RAW_PAYLOAD_FIELDS = "id ownerType ownerId payloadKind importRunId createdAt updatedAt";
 const KNOWLEDGE_ARTIFACT_FIELDS = "id corpusId artifactKind artifactId snapshotId displayName createdAt importRunId";
-const ASSIGNMENT_FIELDS = "id assignmentTypeKey queueKey queueStatusKey status priority title brief instructions assigneeType assigneeId assigneeKey claimedAt claimExpiresAt completedAt canceledAt corpusId categorySetId classifierId sourceSnapshotId importRunId createdBy createdAt updatedAt metadata";
-const ASSIGNMENT_EVENT_FIELDS = "id assignmentId assignmentTypeKey queueKey eventType fromStatus toStatus actorSub actorLabel note createdAt metadata";
-const REFERENCE_FIELDS = `${VERSION_FIELDS} id corpusId externalItemId title authors sourceUri storagePath mediaType byteSize sha256 sourcePublishedAt sourceUpdatedAt retrievedAt importRunId importedAt createdAt curationStatus curationStatusKey curationStatusUpdatedAt curationStatusUpdatedBy curationStatusReason metadata updatedAt`;
+const MODEL_ATTACHMENT_FIELDS = "id ownerKind ownerId ownerLineageId ownerVersionNumber ownerVersionKey role sortKey storagePath filename mediaType byteSize sha256 etag importRunId createdAt updatedAt status";
+const ASSIGNMENT_FIELDS = [
+  "id",
+  "assignmentTypeKey",
+  "queueKey",
+  "queueStatusKey",
+  "status",
+  "priority",
+  "title",
+  "assigneeType",
+  "assigneeId",
+  "assigneeKey",
+  "claimedAt",
+  "claimExpiresAt",
+  "completedAt",
+  "canceledAt",
+  "corpusId",
+  "categorySetId",
+  "classifierId",
+  "sourceSnapshotId",
+  "importRunId",
+  "sectionId",
+  "sectionKey",
+  "sectionType",
+  "sectionStatusKey",
+  "sectionQueueStatusKey",
+  "primaryFocusCategoryKey",
+  "topicScopeCategoryKeys",
+  "createdBy",
+  "createdAt",
+  "updatedAt",
+].join(" ");
+const ASSIGNMENT_EVENT_FIELDS = "id assignmentId assignmentTypeKey queueKey eventType fromStatus toStatus actorSub actorLabel note createdAt";
+const REFERENCE_FIELDS = `${VERSION_FIELDS} id corpusId externalItemId title authors sourceUri storagePath mediaType byteSize sha256 sourcePublishedAt sourceUpdatedAt retrievedAt importRunId importedAt createdAt curationStatus curationStatusKey curationStatusUpdatedAt curationStatusUpdatedBy curationStatusReason updatedAt`;
 const REFERENCE_ATTACHMENT_FIELDS = "id referenceId referenceLineageId referenceVersionNumber referenceVersionKey role sortKey storagePath sourceUri filename mediaType byteSize sha256 etag importRunId importedAt metadata";
-const SEMANTIC_NODE_FIELDS = `${VERSION_FIELDS} id nodeKey nodeKind corpusId categorySetId categoryLineageId categoryKey displayName description aliases status importRunId createdAt updatedAt`;
-const MESSAGE_FIELDS = "id messageKind messageDomain status body summary source importRunId authorSub authorUserProfileId authorLabel createdAt updatedAt metadata";
+const SEMANTIC_NODE_FIELDS = `${VERSION_FIELDS} id nodeKey nodeKind corpusId categorySetId categoryLineageId categoryKey displayName description aliases status importRunId createdAt updatedAt newsroomFeedKey`;
+const MESSAGE_FIELDS = "id messageKind messageDomain status summary source importRunId authorSub authorUserProfileId authorLabel createdAt updatedAt";
 const SEMANTIC_RELATION_TYPE_FIELDS = "id key label inverseLabel description domain status allowedSubjectKinds allowedObjectKinds isDirectional isSymmetric isTransitive contextPackTags createdAt updatedAt metadata";
-const SEMANTIC_RELATION_FIELDS = "id relationState predicate relationTypeId relationTypeKey relationDomain subjectKind subjectId subjectLineageId subjectVersionNumber objectKind objectId objectLineageId objectVersionNumber subjectStateKey objectStateKey objectSubjectStateKey predicateObjectStateKey subjectVersionKey objectVersionKey score confidence rank classifierId modelVersion reviewRecommended sourceSnapshotId importRunId importedAt createdAt updatedAt metadata";
+const SEMANTIC_RELATION_FIELDS = "id relationState predicate relationTypeId relationTypeKey relationDomain subjectKind subjectId subjectLineageId subjectVersionNumber objectKind objectId objectLineageId objectVersionNumber subjectStateKey objectStateKey objectSubjectStateKey predicateObjectStateKey subjectVersionKey objectVersionKey score confidence rank classifierId modelVersion reviewRecommended sourceSnapshotId importRunId importedAt createdAt updatedAt newsroomFeedKey metadata";
 
 const LIST_RECORDS = {
   Edition: listDefinition("listEditions", EDITION_FIELDS),
@@ -79,6 +219,7 @@ const LIST_RECORDS = {
   KnowledgeImportRun: listDefinition("listKnowledgeImportRuns", KNOWLEDGE_IMPORT_RUN_FIELDS),
   KnowledgeRawPayload: listDefinition("listKnowledgeRawPayloads", "id ownerType ownerId payloadKind importRunId"),
   KnowledgeArtifact: listDefinition("listKnowledgeArtifacts", KNOWLEDGE_ARTIFACT_FIELDS),
+  ModelAttachment: listDefinition("listModelAttachments", MODEL_ATTACHMENT_FIELDS),
   Assignment: listDefinition("listAssignments", ASSIGNMENT_FIELDS),
   AssignmentEvent: listDefinition("listAssignmentEvents", ASSIGNMENT_EVENT_FIELDS),
   CategorySet: listDefinition("listCategorySets", CATEGORY_SET_FIELDS),
@@ -113,6 +254,7 @@ const GETTERS = {
   KnowledgeImportRun: getDefinition("getKnowledgeImportRun", KNOWLEDGE_IMPORT_RUN_FIELDS),
   KnowledgeRawPayload: getDefinition("getKnowledgeRawPayload", KNOWLEDGE_RAW_PAYLOAD_FIELDS),
   KnowledgeArtifact: getDefinition("getKnowledgeArtifact", KNOWLEDGE_ARTIFACT_FIELDS),
+  ModelAttachment: getDefinition("getModelAttachment", MODEL_ATTACHMENT_FIELDS),
   Assignment: getDefinition("getAssignment", ASSIGNMENT_FIELDS),
   AssignmentEvent: getDefinition("getAssignmentEvent", ASSIGNMENT_EVENT_FIELDS),
   CategorySet: getDefinition("getCategorySet", CATEGORY_SET_FIELDS),
@@ -158,6 +300,32 @@ function getDefinition(field, fields) {
     `,
   };
 }
+
+function indexDefinition(field, partitionKey, fields, partitionType = "String") {
+  return {
+    field,
+    partitionKey,
+    query: `
+      query ${field[0].toUpperCase()}${field.slice(1)}($${partitionKey}: ${partitionType}!, $limit: Int, $nextToken: String) {
+        ${field}(${partitionKey}: $${partitionKey}, limit: $limit, nextToken: $nextToken) {
+          items { ${fields} }
+          nextToken
+        }
+      }
+    `,
+  };
+}
+
+const INDEX_QUERIES = {
+  assignmentsByQueueStatusAndPriority: indexDefinition("listAssignmentsByQueueStatusAndPriority", "queueStatusKey", ASSIGNMENT_FIELDS),
+  assignmentsByTypeStatusAndCreatedAt: indexDefinition("listAssignmentsByTypeStatusAndCreatedAt", "assignmentTypeKey", ASSIGNMENT_FIELDS),
+  assignmentsBySectionQueueStatusAndPriority: indexDefinition("listAssignmentsBySectionQueueStatusAndPriority", "sectionQueueStatusKey", ASSIGNMENT_FIELDS),
+  knowledgeImportRunsByCorpusKindAndImportedAt: indexDefinition("listKnowledgeImportRunsByCorpusKindAndImportedAt", "corpusImportKindKey", KNOWLEDGE_IMPORT_RUN_FIELDS),
+  knowledgeImportRunsByKindAndImportedAt: indexDefinition("listKnowledgeImportRunsByKindAndImportedAt", "importKind", KNOWLEDGE_IMPORT_RUN_FIELDS),
+  knowledgeArtifactsByImportRunAndKind: indexDefinition("listKnowledgeArtifactsByImportRunAndKind", "importRunId", KNOWLEDGE_ARTIFACT_FIELDS, "ID"),
+  semanticNodesByImportRunAndNodeKey: indexDefinition("listSemanticNodesByImportRunAndNodeKey", "importRunId", SEMANTIC_NODE_FIELDS, "ID"),
+  semanticRelationsByImportRunAndImportedAt: indexDefinition("listSemanticRelationsByImportRunAndImportedAt", "importRunId", SEMANTIC_RELATION_FIELDS, "ID"),
+};
 
 function modelMutations(modelName) {
   return {
@@ -227,11 +395,82 @@ class PapyrusGraphQLAuthoringClient {
     return items;
   }
 
+  async listByIndex(indexName, keyValue, options = {}) {
+    const definition = INDEX_QUERIES[indexName];
+    if (!definition) throw new Error(`Unsupported index query: ${indexName}`);
+    const items = [];
+    let nextToken = null;
+    const limit = options.limit ?? 100;
+
+    do {
+      const result = await this.graphql(definition.query, {
+        [definition.partitionKey]: keyValue,
+        limit,
+        nextToken,
+      });
+      const connection = result[definition.field];
+      items.push(...(connection?.items ?? []).filter(Boolean));
+      nextToken = connection?.nextToken ?? null;
+    } while (nextToken);
+
+    return items;
+  }
+
+  async listAssignmentsByQueueStatusAndPriority(queueStatusKey) {
+    return this.listByIndex("assignmentsByQueueStatusAndPriority", queueStatusKey);
+  }
+
+  async listAssignmentsByTypeStatusAndCreatedAt(assignmentTypeKey) {
+    return this.listByIndex("assignmentsByTypeStatusAndCreatedAt", assignmentTypeKey);
+  }
+
+  async listAssignmentsBySectionQueueStatusAndPriority(sectionQueueStatusKey) {
+    return this.listByIndex("assignmentsBySectionQueueStatusAndPriority", sectionQueueStatusKey);
+  }
+
+  async listKnowledgeImportRunsByCorpusKindAndImportedAt(corpusImportKindKey) {
+    return this.listByIndex("knowledgeImportRunsByCorpusKindAndImportedAt", corpusImportKindKey);
+  }
+
+  async listKnowledgeImportRunsByKindAndImportedAt(importKind) {
+    return this.listByIndex("knowledgeImportRunsByKindAndImportedAt", importKind);
+  }
+
+  async listKnowledgeArtifactsByImportRunAndKind(importRunId) {
+    return this.listByIndex("knowledgeArtifactsByImportRunAndKind", importRunId);
+  }
+
+  async listSemanticNodesByImportRunAndNodeKey(importRunId) {
+    return this.listByIndex("semanticNodesByImportRunAndNodeKey", importRunId);
+  }
+
+  async listSemanticRelationsByImportRunAndImportedAt(importRunId) {
+    return this.listByIndex("semanticRelationsByImportRunAndImportedAt", importRunId);
+  }
+
   async getRecord(modelName, id) {
     const definition = GETTERS[modelName];
     if (!definition) throw new Error(`Unsupported model for get: ${modelName}`);
     const result = await this.graphql(definition.query, { id });
     return result[definition.field] ?? null;
+  }
+
+  async getRecordsById(modelName, ids, options = {}) {
+    const uniqueIds = Array.from(new Set((ids ?? []).filter(Boolean)));
+    const concurrency = Math.max(1, Math.min(Number(options.concurrency ?? 20) || 20, 50));
+    const results = new Map();
+    let cursor = 0;
+    const workers = Array.from({ length: Math.min(concurrency, uniqueIds.length) }, async () => {
+      for (;;) {
+        const index = cursor;
+        cursor += 1;
+        if (index >= uniqueIds.length) return;
+        const id = uniqueIds[index];
+        results.set(id, await this.getRecord(modelName, id));
+      }
+    });
+    await Promise.all(workers);
+    return results;
   }
 
   async updateNewsroomSummary(delta, options = {}) {
@@ -243,8 +482,26 @@ class PapyrusGraphQLAuthoringClient {
     return result.updateNewsroomSummary;
   }
 
+  async createModelAttachmentUpload(attachment) {
+    const result = await this.graphql(CREATE_MODEL_ATTACHMENT_UPLOAD_MUTATION, modelAttachmentUploadVariables(attachment));
+    return normalizeModelAttachmentUploadSlot(result.createModelAttachmentUpload);
+  }
+
+  async completeModelAttachmentUpload(uploadId, attachment) {
+    const result = await this.graphql(COMPLETE_MODEL_ATTACHMENT_UPLOAD_MUTATION, {
+      uploadId,
+      ...modelAttachmentUploadVariables(attachment),
+    });
+    return result.completeModelAttachmentUpload;
+  }
+
+  async createModelAttachmentDownload(attachmentId) {
+    const result = await this.graphql(CREATE_MODEL_ATTACHMENT_DOWNLOAD_MUTATION, { attachmentId });
+    return normalizeModelAttachmentDownloadSlot(result.createModelAttachmentDownload);
+  }
+
   async upsert(modelName, input) {
-    const preparedInput = { ...input };
+    const preparedInput = stripUnsupportedPayloadFields(modelName, addOperationalIndexFields(modelName, input));
     const current = await this.getRecord(modelName, preparedInput.id);
     const mutation = current ? MUTATIONS[modelName].update : MUTATIONS[modelName].create;
     await this.graphql(mutation, { input: preparedInput });
@@ -278,6 +535,97 @@ class PapyrusGraphQLAuthoringClient {
 
     return payload.data;
   }
+}
+
+function addOperationalIndexFields(modelName, input) {
+  if (!input || typeof input !== "object") return input;
+  if (modelName === "Assignment") {
+    const status = cleanString(input.status) ?? "open";
+    const queueKey = cleanString(input.queueKey);
+    const sectionKey = cleanString(input.sectionKey) ?? cleanString(input.sectionId);
+    return {
+      ...input,
+      queueStatusKey: queueKey ? `${queueKey}#${status}` : input.queueStatusKey ?? null,
+      sectionStatusKey: sectionKey ? `${sectionKey}#${status}` : null,
+      sectionQueueStatusKey: sectionKey && queueKey ? `${sectionKey}#${queueKey}#${status}` : null,
+    };
+  }
+  if (modelName === "KnowledgeImportRun") {
+    const corpusId = cleanString(input.corpusId);
+    const importKind = cleanString(input.importKind);
+    return {
+      ...input,
+      corpusImportKindKey: corpusId && importKind ? `${corpusId}#${importKind}` : null,
+    };
+  }
+  return input;
+}
+
+function cleanString(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function modelAttachmentUploadVariables(attachment) {
+  return {
+    ownerKind: attachment.ownerKind,
+    ownerId: attachment.ownerId,
+    ownerLineageId: attachment.ownerLineageId ?? null,
+    ownerVersionNumber: attachment.ownerVersionNumber ?? null,
+    ownerVersionKey: attachment.ownerVersionKey ?? null,
+    role: attachment.role,
+    sortKey: attachment.sortKey ?? null,
+    filename: attachment.filename,
+    mediaType: attachment.mediaType,
+    byteSize: attachment.byteSize,
+    sha256: attachment.sha256 ?? null,
+    importRunId: attachment.importRunId ?? null,
+    status: attachment.status ?? null,
+  };
+}
+
+function normalizeModelAttachmentUploadSlot(slot) {
+  if (!slot) return slot;
+  return {
+    ...slot,
+    requiredHeaders: parseGraphqlJson(slot.requiredHeaders),
+  };
+}
+
+function normalizeModelAttachmentDownloadSlot(slot) {
+  if (!slot) return slot;
+  return {
+    ...slot,
+    requiredHeaders: parseGraphqlJson(slot.requiredHeaders),
+  };
+}
+
+function parseGraphqlJson(value) {
+  if (typeof value !== "string") return value ?? {};
+  try {
+    return JSON.parse(value);
+  } catch {
+    return {};
+  }
+}
+
+function stripUnsupportedPayloadFields(modelName, input) {
+  const preparedInput = { ...input };
+  if (modelName === "Message") {
+    delete preparedInput.body;
+    delete preparedInput.metadata;
+  } else if (modelName === "Reference") {
+    delete preparedInput.metadata;
+  } else if (modelName === "Assignment") {
+    delete preparedInput.sectionTypeStatusKey;
+    delete preparedInput.brief;
+    delete preparedInput.instructions;
+    delete preparedInput.metadata;
+  } else if (modelName === "AssignmentEvent") {
+    delete preparedInput.metadata;
+  } else if (modelName === "KnowledgeRawPayload") {
+    delete preparedInput.payload;
+  }
+  return preparedInput;
 }
 
 function toLambdaAuthToken(token) {
