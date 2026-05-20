@@ -38,7 +38,8 @@ but they are no longer canonical desk identity.
 
 ## Context Assembly
 
-The private agent context pack is assembled on demand from:
+The private agent context pack is assembled on demand through the shared
+`knowledgeQuery` engine from:
 
 - publication mission and policies
 - section mission, policies, assignment guidance, and kill criteria
@@ -47,8 +48,24 @@ The private agent context pack is assembled on demand from:
   linked accepted references, and knowledge comments
 - fresh-evidence request parameters for the current lane/profile
 
-Papyrus assembles the source material. Biblicus compacts it into a
-token-budget-limited context pack.
+Papyrus assembles and renders model-ready context with a token budget. The
+shared Python engine powers both the AppSync `knowledgeQuery` Lambda and the
+local `papyrus_newsroom knowledge-query` CLI, so context-pack content changes
+should be iterated locally before sandbox deployment.
+
+Ranking uses relevance, accepted quality ratings, and graph-context signals.
+Quality is read from the current `Reference --quality_rating_is--> SemanticNode`
+relation and missing quality is treated as unknown, not zero. `ranking.profile`
+controls scoring weights; `ranking.diversity` controls source spread and token
+allocation:
+
+- `focused`: fewer sources with deeper source treatment.
+- `balanced`: default source spread and depth.
+- `broad`: smaller slices from more unique sources.
+
+When reusable Reference summaries exist, `knowledgeQuery` should render one
+selected summary per source before spending source budget on semantic vector
+chunks or extracted-text passages.
 
 Only current accepted references enter evidence sets, graph/context analysis,
 desk memory, or edition planning. Pending reference prospects and rejected

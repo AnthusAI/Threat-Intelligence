@@ -325,6 +325,8 @@ const INDEX_QUERIES = {
   knowledgeArtifactsByImportRunAndKind: indexDefinition("listKnowledgeArtifactsByImportRunAndKind", "importRunId", KNOWLEDGE_ARTIFACT_FIELDS, "ID"),
   semanticNodesByImportRunAndNodeKey: indexDefinition("listSemanticNodesByImportRunAndNodeKey", "importRunId", SEMANTIC_NODE_FIELDS, "ID"),
   semanticRelationsByImportRunAndImportedAt: indexDefinition("listSemanticRelationsByImportRunAndImportedAt", "importRunId", SEMANTIC_RELATION_FIELDS, "ID"),
+  semanticRelationsByObjectState: indexDefinition("listSemanticRelationsByObjectState", "objectStateKey", SEMANTIC_RELATION_FIELDS),
+  semanticRelationsBySubjectState: indexDefinition("listSemanticRelationsBySubjectState", "subjectStateKey", SEMANTIC_RELATION_FIELDS),
 };
 
 function modelMutations(modelName) {
@@ -446,6 +448,14 @@ class PapyrusGraphQLAuthoringClient {
 
   async listSemanticRelationsByImportRunAndImportedAt(importRunId) {
     return this.listByIndex("semanticRelationsByImportRunAndImportedAt", importRunId);
+  }
+
+  async listSemanticRelationsByObjectState(objectStateKey) {
+    return this.listByIndex("semanticRelationsByObjectState", objectStateKey);
+  }
+
+  async listSemanticRelationsBySubjectState(subjectStateKey) {
+    return this.listByIndex("semanticRelationsBySubjectState", subjectStateKey);
   }
 
   async getRecord(modelName, id) {

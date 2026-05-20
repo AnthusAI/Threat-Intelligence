@@ -315,6 +315,24 @@ async function main() {
     case "assignments:list":
       await listAssignments(args.slice(2));
       return;
+    case "assignments:create-research":
+      await createResearchAssignment(args.slice(2));
+      return;
+    case "assignments:run-research":
+      await runResearchAssignment(args.slice(2));
+      return;
+    case "assignments:apply-research-packet":
+      await applyResearchPacket(args.slice(2));
+      return;
+    case "assignments:intake-proposals":
+      await intakeAssignmentResearchProposals(args.slice(2));
+      return;
+    case "assignments:research-intake-now":
+      await runResearchIntakeNow(args.slice(2));
+      return;
+    case "assignments:orphan-research-packets":
+      await listOrphanResearchPackets(args.slice(2));
+      return;
     case "assignments:backfill-section-indexes":
       await backfillAssignmentSectionIndexes(args.slice(2));
       return;
@@ -1089,13 +1107,38 @@ async function registerReferenceCatalog(flags) {
   const options = parseOptions(flags);
   if (!options.catalog) throw new Error("references register-catalog requires --catalog <catalog.json>.");
   if (!options["corpus-key"]) throw new Error("references register-catalog requires --corpus-key <key>.");
-  const status = normalizeReferenceCurationStatus(options.status, "pending");
-  const reasonCode = normalizeReferenceRejectionReasonCode(options["reason-code"] ?? options.reasonCode, { required: status === "rejected" });
-  const steeringConfig = loadSteeringConfig({ configPath: options.config });
-  const corpusConfig = requireCorpusConfig(steeringConfig, options["corpus-key"], "--corpus-key");
-  const catalog = loadJsonFile(options.catalog);
   const { client } = createAuthoringClient();
+  const result = await planReferenceCatalogRegistration(client, {
+    catalogPath: options.catalog,
+    configPath: options.config,
+    corpusKey: options["corpus-key"],
+    classifier: options.classifier,
+    status: options.status,
+    reasonCode: options["reason-code"] ?? options.reasonCode,
+    note: options.note,
+    ingestionRationale: options["ingestion-rationale"] ?? options.ingestionRationale,
+    actor: options.actor ?? "Papyrus content CLI",
+    skipExisting: options["skip-existing"],
+    quiet: Boolean(options.json),
+  });
+  printReferenceRegistrationSummary(result.plan, result.changes, { apply: Boolean(options.apply) });
+  if (!options.apply) {
+    console.log("references\tregister-catalog\tapply\tskipped\tpass --apply to write Reference visibility records");
+    return;
+  }
+  await applyReferenceCatalogRegistration(client, result);
+}
 
+async function planReferenceCatalogRegistration(client, options) {
+  const status = normalizeReferenceCurationStatus(options.status, "pending");
+  const reasonCode = normalizeReferenceRejectionReasonCode(options.reasonCode, { required: status === "rejected" });
+  const steeringConfig = loadSteeringConfig({ configPath: options.configPath });
+  const corpusConfig = requireCorpusConfig(steeringConfig, options.corpusKey, "--corpus-key");
+  const sourceCatalog = options.catalog ?? loadJsonFile(options.catalogPath);
+  const catalog = {
+    ...sourceCatalog,
+    items: [...catalogItemsForSummary(sourceCatalog)],
+  };
   const planOptions = {
     corpusConfig,
     corpusId: knowledgeCorpusId(corpusConfig),
@@ -1103,13 +1146,14 @@ async function registerReferenceCatalog(flags) {
     status,
     reasonCode,
     note: options.note,
-    ingestionRationale: options["ingestion-rationale"] ?? options.ingestionRationale,
+    ingestionRationale: options.ingestionRationale,
     actor: options.actor ?? "Papyrus content CLI",
   };
 
-  const skipExisting = options["skip-existing"] === undefined
+  let skippedDuplicateCount = 0;
+  const skipExisting = options.skipExisting === undefined
     ? true
-    : String(options["skip-existing"]).toLowerCase() !== "false";
+    : String(options.skipExisting).toLowerCase() !== "false";
   if (skipExisting) {
     const existingReferences = await client.listRecords("Reference");
     const existingExternalIds = new Set(
@@ -1123,8 +1167,9 @@ async function registerReferenceCatalog(flags) {
       const externalItemId = item.item_id ?? item.externalItemId ?? item.id;
       return externalItemId ? !existingExternalIds.has(externalItemId) : true;
     });
-    if (filtered.length !== items.length) {
-      console.log(`references\tregister-catalog\tskip-existing\t${items.length - filtered.length} duplicates`);
+    skippedDuplicateCount = items.length - filtered.length;
+    if (skippedDuplicateCount && !options.quiet) {
+      console.log(`references\tregister-catalog\tskip-existing\t${skippedDuplicateCount} duplicates`);
     }
     catalog.items = filtered;
   }
@@ -1151,13 +1196,20 @@ async function registerReferenceCatalog(flags) {
   }
   assertReferenceCatalogPlanSafety(plan);
   const changes = await buildRecordChangesToleratingOptionalModels(client, plan.records);
-  printReferenceRegistrationSummary(plan, changes, { apply: Boolean(options.apply) });
-  if (!options.apply) {
-    console.log("references\tregister-catalog\tapply\tskipped\tpass --apply to write Reference visibility records");
-    return;
-  }
-  await applyRecordChanges(client, changes);
-  await updateNewsroomSummaryAfterReferenceRegistration(client, changes, plan);
+  return {
+    plan,
+    changes,
+    corpusConfig,
+    corpusId: planOptions.corpusId,
+    status,
+    reasonCode,
+    skippedDuplicateCount,
+  };
+}
+
+async function applyReferenceCatalogRegistration(client, result) {
+  await applyRecordChanges(client, result.changes);
+  await updateNewsroomSummaryAfterReferenceRegistration(client, result.changes, result.plan);
 }
 
 function inferReferenceCorpusBucket(item) {
@@ -2918,6 +2970,939 @@ async function listAssignments(flags) {
   }
 }
 
+async function createResearchAssignment(flags) {
+  const options = parseOptions(flags);
+  const title = normalizeCliString(options.title);
+  if (!title) throw new Error("assignments create-research requires --title <text>.");
+  const sectionKey = normalizeCliString(options.section);
+  const corpusKey = normalizeCliString(options["corpus-key"]) ?? "AI-ML-research";
+  const researchMode = normalizeResearchModeOption(options["research-mode"] ?? options.researchMode ?? "source_discovery");
+  const now = new Date().toISOString();
+  const assignmentTypeKey = normalizeCliString(options.type) ?? "research.edition-candidate";
+  const status = normalizeCliString(options.status) ?? "open";
+  const priority = normalizeCliNonNegativeInteger(options.priority, "--priority") ?? 50;
+  const queueKey = normalizeCliString(options.queue) ?? `research:${sectionKey ?? "unsectioned"}:exploratory`;
+  const summary = normalizeCliString(options.summary) ?? normalizeCliString(options.brief) ?? title;
+  const brief = normalizeCliString(options.brief) ?? summary;
+  const instructions = normalizeCliString(options.instructions) ?? normalizeCliString(options["research-questions"]) ?? "";
+  const topicScopeCategoryKeys = parseCommaList(options["topic-scope"] ?? options["topic-scope-category-keys"]) ?? [];
+  const primaryFocusCategoryKey = normalizeCliString(options["primary-focus-category-key"]) ?? normalizeCliString(options["primary-focus"]);
+  const { client } = createAuthoringClient();
+  let section = null;
+  if (sectionKey) {
+    section = await client.getRecord("NewsroomSection", sectionKey);
+    if (!section) throw new Error(`Unknown NewsroomSection for --section ${sectionKey}. Run: npm run content -- newsroom import-sections --config corpora/papyrus-newsroom-sections.yml`);
+  }
+  const assignmentId = normalizeCliString(options.id) ?? `assignment-research-${safeId(title).slice(0, 80)}-${timestampForPath(now)}`;
+  const assignment = {
+    id: assignmentId,
+    assignmentTypeKey,
+    queueKey,
+    queueStatusKey: `${queueKey}#${status}`,
+    status,
+    priority,
+    title,
+    summary,
+    brief,
+    instructions,
+    metadata: JSON.stringify({
+      kind: "research.assignment.created",
+      researchMode,
+      corpusKey,
+      sectionKey: sectionKey ?? null,
+      sectionTitle: section?.title ?? section?.displayName ?? sectionKey ?? null,
+      sectionType: normalizeSectionTypeForAssignment(section?.type ?? options["section-type"]),
+      topicScopeCategoryKeys,
+      primaryFocusCategoryKey,
+      contextProfile: "researcher",
+      createdBy: "assignments create-research",
+    }),
+    corpusId: normalizeCliString(options["corpus-id"]) ?? `knowledge-corpus-${safeId(corpusKey)}`,
+    categorySetId: normalizeCliString(options["category-set"]),
+    sectionId: section?.id ?? sectionKey ?? null,
+    sectionKey: sectionKey ?? null,
+    sectionType: normalizeSectionTypeForAssignment(section?.type ?? options["section-type"]),
+    sectionStatusKey: sectionKey ? `${sectionKey}#${status}` : null,
+    sectionQueueStatusKey: sectionKey ? `${sectionKey}#${queueKey}#${status}` : null,
+    primaryFocusCategoryKey,
+    topicScopeCategoryKeys,
+    createdBy: normalizeCliString(options["actor-label"]) ?? "papyrus-content-cli",
+    createdAt: now,
+    updatedAt: now,
+    newsroomFeedKey: `assignment#${status}`,
+  };
+  const event = {
+    id: `assignment-event-${assignmentId}-created`,
+    assignmentId,
+    assignmentTypeKey,
+    queueKey,
+    eventType: "created",
+    fromStatus: null,
+    toStatus: status,
+    actorSub: normalizeCliString(options["actor-sub"]),
+    actorLabel: normalizeCliString(options["actor-label"]) ?? "Papyrus content CLI",
+    note: normalizeCliString(options.note) ?? `Created research assignment: ${title}`,
+    createdAt: now,
+  };
+  const records = [
+    { modelName: "Assignment", expected: assignment },
+    { modelName: "AssignmentEvent", expected: event },
+  ];
+  const changes = await buildRecordChangesTargetedById(client, records);
+  const actionCounts = countDelta(changes, "action", "unknown");
+  const result = {
+    ok: true,
+    command: "assignments create-research",
+    action: options.apply ? "apply" : "dry-run",
+    assignmentId,
+    assignmentTypeKey,
+    status,
+    sectionKey: sectionKey ?? null,
+    queueKey,
+    researchMode,
+    changedRecords: changes.filter((change) => change.action !== "noop").length,
+    changes: actionCounts,
+    next: options.apply
+      ? `PYTHONPATH=../Tactus:src tactus run procedures/newsroom/research_explorer.tac --param assignment_item_id=${assignmentId} --param corpus_key=${corpusKey} --param context_profile=researcher --param research_mode=${researchMode}`
+      : `npm run content -- assignments create-research --title ${JSON.stringify(title)} --section ${sectionKey ?? "<section-key>"} --corpus-key ${corpusKey} --research-mode ${researchMode} --apply`,
+  };
+  if (!options.apply) {
+    if (options.json) {
+      printCompactJson(result);
+      return;
+    }
+    printResearchAssignmentCreateSummary(result, changes);
+    console.log("assignments\tcreate-research\tapply\tskipped\tpass --apply to write Assignment records");
+    console.log(`assignments\tcreate-research\tnext\t${result.next}`);
+    return;
+  }
+  await applyRecordChanges(client, changes);
+  await updateNewsroomSummaryAfterAssignmentCreates(client, changes, {
+    actorLabel: event.actorLabel,
+    reason: `assignments create-research ${assignmentId}`,
+  });
+  if (options.json) {
+    printCompactJson(result);
+    return;
+  }
+  printResearchAssignmentCreateSummary(result, changes);
+  console.log(`assignments\tcreate-research\tnext\t${result.next}`);
+}
+
+function printResearchAssignmentCreateSummary(result, changes) {
+  const modelCounts = countDelta(changes.filter((change) => change.action !== "noop"), "modelName", "unknown");
+  console.log(`assignments\tcreate-research\taction\t${result.action}`);
+  console.log(`assignments\tcreate-research\tassignment\t${result.assignmentId}`);
+  console.log(`assignments\tcreate-research\tstatus\t${result.status}`);
+  console.log(`assignments\tcreate-research\ttype\t${result.assignmentTypeKey}`);
+  console.log(`assignments\tcreate-research\tresearch-mode\t${result.researchMode}`);
+  console.log(`assignments\tcreate-research\tsection\t${result.sectionKey ?? ""}`);
+  console.log(`assignments\tcreate-research\tqueue\t${result.queueKey}`);
+  console.log(`assignments\tcreate-research\tmodels\t${Object.entries(modelCounts).sort(([left], [right]) => left.localeCompare(right)).map(([model, count]) => `${model}=${count}`).join(" ")}`);
+  console.log(`assignments\tcreate-research\tchanges\tcreate=${result.changes.create ?? 0}\tupdate=${result.changes.update ?? 0}\tnoop=${result.changes.noop ?? 0}`);
+}
+
+function normalizeResearchModeOption(value) {
+  const normalized = normalizeCliString(value)?.replace(/-/g, "_") ?? "source_discovery";
+  const allowed = new Set(["internal_brief", "source_discovery", "full_research"]);
+  if (!allowed.has(normalized)) {
+    throw new Error(`Invalid --research-mode ${value}. Expected one of: internal_brief, source_discovery, full_research.`);
+  }
+  return normalized;
+}
+
+async function applyResearchPacket(flags) {
+  const options = parseOptions(flags);
+  const assignmentId = normalizeCliString(options.assignment);
+  if (!assignmentId) throw new Error("assignments apply-research-packet requires --assignment <id>.");
+  const research = readResearchPacketInput(options);
+  const summary = normalizeCliString(research.summary ?? research.synthesis?.summary);
+  if (!summary) throw new Error("assignments apply-research-packet requires research.summary.");
+  const { client } = createAuthoringClient();
+  const assignment = await client.getRecord("Assignment", assignmentId);
+  if (!assignment) throw new Error(`Assignment not found: ${assignmentId}.`);
+  if (!assignment.assignmentTypeKey) throw new Error(`Assignment ${assignmentId} is missing assignmentTypeKey.`);
+  if (!assignment.queueKey) throw new Error(`Assignment ${assignmentId} is missing queueKey.`);
+  const assignmentMeta = await assignmentMetadata(client, assignment);
+  const now = new Date().toISOString();
+  const researchMode = normalizeResearchModeOption(
+    research.research_mode ?? research.researchMode ?? assignmentMeta.researchMode ?? assignmentMeta.research_mode ?? options["research-mode"] ?? "source_discovery",
+  );
+  const packet = normalizeResearchPacketBundle(research, {
+    assignment,
+    assignmentMeta,
+    researchMode,
+  });
+  validateResearchPacketMode(packet);
+  const packetHash = researchPacketHash({ assignmentId, researchMode, packet });
+  const messageId = normalizeCliString(options.id) ?? `message-research-packet-${packetHash}`;
+  const message = {
+    id: messageId,
+    messageKind: "research_packet",
+    messageDomain: "assignment_work",
+    status: "active",
+    summary,
+    body: researchPacketBody(packet),
+    metadata: JSON.stringify({
+      kind: "research.packet.created",
+      assignmentId,
+      assignmentTypeKey: assignment.assignmentTypeKey,
+      queueKey: assignment.queueKey,
+      research: packet,
+    }),
+    source: "assignments apply-research-packet",
+    importRunId: assignment.importRunId ?? null,
+    authorLabel: normalizeCliString(options["actor-label"]) ?? "Papyrus content CLI",
+    createdAt: now,
+    updatedAt: now,
+  };
+  const relation = localSemanticRelationRecord({
+    predicate: "comment",
+    subjectKind: "message",
+    subjectId: messageId,
+    subjectLineageId: messageId,
+    objectKind: "assignment",
+    objectId: assignmentId,
+    objectLineageId: assignmentId,
+    rank: 1,
+    confidence: 1,
+    reviewRecommended: false,
+    importRunId: assignment.importRunId ?? null,
+    importedAt: now,
+    metadata: {
+      lifecycle: "assignment-research-packet",
+      messageKind: "research_packet",
+      metadataKind: "research.packet.created",
+      assignmentTypeKey: assignment.assignmentTypeKey,
+      queueKey: assignment.queueKey,
+      researchMode,
+    },
+  });
+  const records = [
+    { modelName: "Message", expected: message },
+    { modelName: "SemanticRelation", expected: relation },
+  ];
+  const changes = await buildRecordChangesTargetedById(client, records);
+  validateResearchPacketPlannedChanges(changes, { assignmentId, messageId });
+  const result = {
+    ok: true,
+    command: "assignments apply-research-packet",
+    action: options.apply ? "apply" : "dry-run",
+    assignmentId,
+    messageId,
+    packetHash,
+    researchMode,
+    changedRecords: changes.filter((change) => change.action !== "noop").length,
+    changes: countDelta(changes, "action", "unknown"),
+    proposedReferenceCount: packet.proposedReferences.length,
+    sourceSnapshotCount: packet.sourceSnapshots.length,
+    evidenceItemCount: packet.evidenceItemIds.length,
+  };
+  if (!options.apply) {
+    if (options.json) {
+      printCompactJson(result);
+      return;
+    }
+    printResearchPacketApplySummary(result);
+    console.log("assignments\tapply-research-packet\tapply\tskipped\tpass --apply to write Message records");
+    return;
+  }
+  await applyRecordChanges(client, changes);
+  await updateNewsroomSummaryAfterResearchPacketCreates(client, changes, {
+    actorLabel: message.authorLabel,
+    reason: `assignments apply-research-packet ${assignmentId}`,
+  });
+  if (options.json) {
+    printCompactJson(result);
+    return;
+  }
+  printResearchPacketApplySummary(result);
+}
+
+async function runResearchAssignment(flags) {
+  const options = parseOptions(flags);
+  const assignmentId = normalizeCliString(options.assignment);
+  if (!assignmentId) throw new Error("assignments run-research requires --assignment <id>.");
+  const corpusKey = normalizeCliString(options["corpus-key"]) ?? "AI-ML-research";
+  const researchMode = normalizeResearchModeOption(options["research-mode"] ?? options.researchMode ?? "source_discovery");
+  const runId = normalizeCliString(options["run-id"]) ?? `research-${safeId(assignmentId).slice(0, 60)}-${timestampForPath()}`;
+  const runDir = path.join(process.cwd(), ".papyrus-runs", runId);
+  fs.mkdirSync(runDir, { recursive: true });
+  const resultPath = path.join(runDir, "research-result.json");
+  const stdoutPath = path.join(runDir, "research.stdout.log");
+  const stderrPath = path.join(runDir, "research.stderr.log");
+  const question = normalizeCliString(options["research-questions"] ?? options.question) ?? "";
+  const contextProfile = normalizeCliString(options["context-profile"]) ?? "researcher";
+  const maxEvidenceItems = normalizeCliNonNegativeInteger(options["max-evidence-items"], "--max-evidence-items") ?? 20;
+  const command = [
+    "tactus",
+    "run",
+    "procedures/newsroom/research_explorer.tac",
+    "--no-sandbox",
+    "--real-all",
+    "--param", `assignment_item_id=${assignmentId}`,
+    "--param", `corpus_key=${corpusKey}`,
+    "--param", `context_profile=${contextProfile}`,
+    "--param", `research_mode=${researchMode}`,
+    "--param", `research_questions=${question}`,
+    "--param", `max_evidence_items=${maxEvidenceItems}`,
+    "--log-format", "raw",
+  ];
+  const env = {
+    ...process.env,
+    PYTHONPATH: prependPathList(["../Tactus", "src"], process.env.PYTHONPATH),
+  };
+  const startedAt = new Date().toISOString();
+  const proc = spawnSync(command[0], command.slice(1), {
+    cwd: process.cwd(),
+    env,
+    encoding: "utf8",
+    maxBuffer: 1024 * 1024 * 128,
+  });
+  fs.writeFileSync(stdoutPath, proc.stdout ?? "", "utf8");
+  fs.writeFileSync(stderrPath, proc.stderr ?? "", "utf8");
+  const finishedAt = new Date().toISOString();
+  let parsed = extractResearchRunPayload(proc.stdout);
+  let fallback = null;
+  if (!parsed && !options["no-fallback-direct"]) {
+    fallback = runDirectResearchHarness({
+      assignmentId,
+      corpusKey,
+      researchMode,
+      question,
+      maxEvidenceItems,
+      runDir,
+    });
+    parsed = fallback.parsed;
+  }
+  const research = parsed?.research_packet ?? parsed?.researchPacket ?? null;
+  const packet = research ? normalizeResearchPacketBundle(research, {
+    assignment: { id: assignmentId, assignmentTypeKey: "research.edition-candidate", queueKey: "" },
+    assignmentMeta: { researchMode, corpusKey },
+    researchMode,
+  }) : null;
+  const trace = packet?.researchTrace ?? {};
+  const retryCountRaw = Number(
+    parsed?.retry_count ?? parsed?.retryCount ?? trace.retryCount ?? trace.retry_count ?? 0
+  );
+  const retryCount = Number.isFinite(retryCountRaw) && retryCountRaw >= 0 ? retryCountRaw : 0;
+  const validationFailuresRaw =
+    parsed?.validation_failures
+    ?? parsed?.validationFailures
+    ?? trace.validationFailures
+    ?? trace.validation_failures;
+  const validationFailures = Array.isArray(validationFailuresRaw) ? validationFailuresRaw.map((entry) => String(entry)) : [];
+  const result = {
+    ok: fallback ? Boolean(fallback.ok) : proc.status === 0,
+    command: "assignments run-research",
+    action: options.apply ? "apply" : "dry-run",
+    runId,
+    assignmentId,
+    researchMode,
+    corpusKey,
+    startedAt,
+    finishedAt,
+    exitStatus: proc.status,
+    signal: proc.signal ?? null,
+    stdoutPath,
+    stderrPath,
+    fallback: fallback ? {
+      strategy: fallback.strategy,
+      ok: fallback.ok,
+      exitStatus: fallback.exitStatus,
+      signal: fallback.signal,
+      stdoutPath: fallback.stdoutPath,
+      stderrPath: fallback.stderrPath,
+      parsed: Boolean(fallback.parsed),
+    } : null,
+    resultPath,
+    parsed: Boolean(parsed),
+    packet: packet ? {
+      summary: packet.summary,
+      proposedReferenceCount: packet.proposedReferences.length,
+      sourceSnapshotCount: packet.sourceSnapshots.length,
+      evidenceItemCount: packet.evidenceItemIds.length,
+      blockedReason: packet.sourceDiscovery?.blockedReason ?? null,
+      firstProposalUrl: packet.proposedReferences[0]?.url ?? null,
+      attempts: retryCount + 1,
+      recoveryPath: normalizeCliString(
+        parsed?.recovery_path ?? parsed?.recoveryPath ?? trace.recoveryPath ?? trace.recovery_path
+      ) ?? null,
+      firstValidationError: validationFailures[0] ?? null,
+      lastValidationError: validationFailures.length ? validationFailures[validationFailures.length - 1] : null,
+    } : null,
+    next: null,
+  };
+  if (!parsed) {
+    result.next = `Inspect ${stdoutPath} and ${stderrPath}; if the procedure returned JSON, save the packet and run assignments apply-research-packet --assignment ${assignmentId} --research-json <packet.json> --apply`;
+  } else if (!options.apply) {
+    result.next = `npm run content -- assignments apply-research-packet --assignment ${assignmentId} --research-json ${resultPath} --apply`;
+  }
+  writeJsonFile(resultPath, {
+    ...result,
+    commandLine: command,
+    stdout: proc.stdout ?? "",
+    stderr: proc.stderr ?? "",
+    value: parsed,
+  });
+  if (!result.ok) {
+    if (options.json) {
+      printCompactJson(result);
+      return;
+    }
+    printResearchRunSummary(result);
+    return;
+  }
+  if (options.apply) {
+    if (!research) throw new Error(`assignments run-research --apply could not find research_packet in ${resultPath}.`);
+    await applyResearchPacket([
+      "--assignment", assignmentId,
+      "--research-json", JSON.stringify(research),
+      "--research-mode", researchMode,
+      "--apply",
+      ...(options.json ? ["--json"] : []),
+    ]);
+    return;
+  }
+  if (options.json) {
+    printCompactJson(result);
+    return;
+  }
+  printResearchRunSummary(result);
+}
+
+async function runResearchIntakeNow(flags) {
+  const options = parseOptions(flags);
+  const assignmentId = normalizeCliString(options.assignment);
+  if (!assignmentId) throw new Error("assignments research-intake-now requires --assignment <id>.");
+  if (!options.config) throw new Error("assignments research-intake-now requires --config <steering.yml>.");
+  const corpusKey = normalizeCliString(options["corpus-key"]);
+  if (!corpusKey) throw new Error("assignments research-intake-now requires --corpus-key <key>.");
+  const researchMode = normalizeResearchModeOption(options["research-mode"] ?? options.researchMode ?? "source_discovery");
+  const apply = Boolean(options.apply);
+  const asJson = Boolean(options.json);
+  const runId = normalizeCliString(options["run-id"]) ?? `research-intake-${safeId(assignmentId).slice(0, 60)}-${timestampForPath()}`;
+  const runDir = path.join(process.cwd(), ".papyrus-runs", runId);
+  fs.mkdirSync(runDir, { recursive: true });
+
+  const researchRun = runContentCliJson([
+    "assignments",
+    "run-research",
+    "--assignment", assignmentId,
+    "--corpus-key", corpusKey,
+    "--research-mode", researchMode,
+    "--max-evidence-items", String(normalizeCliNonNegativeInteger(options["max-evidence-items"], "--max-evidence-items") ?? 20),
+    "--run-id", `${runId}-research`,
+    "--json",
+    ...(options["research-questions"] ? ["--research-questions", String(options["research-questions"])] : []),
+    ...(options.question ? ["--question", String(options.question)] : []),
+    ...(options["context-profile"] ? ["--context-profile", String(options["context-profile"])] : []),
+  ]);
+  if (!researchRun.ok || !researchRun.payload?.parsed) {
+    const result = {
+      ok: false,
+      command: "assignments research-intake-now",
+      action: apply ? "apply" : "dry-run",
+      assignmentId,
+      researchMode,
+      corpusKey,
+      runId,
+      researchRun: compactResearchRunChildResult(researchRun),
+      messageId: null,
+      catalogPath: null,
+      proposedReferenceCount: 0,
+      registeredReferenceCount: 0,
+      skippedDuplicateCount: 0,
+      curationAssignmentCount: 0,
+      next: researchRun.payload?.next ?? `Inspect .papyrus-runs/${runId}-research`,
+    };
+    if (asJson) {
+      printCompactJson(result);
+      return;
+    }
+    printResearchIntakeNowSummary(result);
+    return;
+  }
+
+  const resultPath = researchRun.payload.resultPath;
+  const researchPayload = loadJsonFile(resultPath);
+  const research = researchPayload.value?.research_packet ?? researchPayload.value?.researchPacket ?? null;
+  if (!research) throw new Error(`assignments research-intake-now could not find research_packet in ${resultPath}.`);
+
+  let messageId = null;
+  let intakeResult = null;
+  if (apply) {
+    const applyRun = runContentCliJson([
+      "assignments",
+      "apply-research-packet",
+      "--assignment", assignmentId,
+      "--research-json", resultPath,
+      "--research-mode", researchMode,
+      "--apply",
+      "--json",
+    ]);
+    if (!applyRun.ok || !applyRun.payload?.messageId) {
+      const result = {
+        ok: false,
+        command: "assignments research-intake-now",
+        action: "apply",
+        assignmentId,
+        researchMode,
+        corpusKey,
+        runId,
+        researchRun: compactResearchRunChildResult(researchRun),
+        applyResearchPacket: applyRun.payload ?? null,
+        messageId: null,
+        catalogPath: null,
+        proposedReferenceCount: researchRun.payload.packet?.proposedReferenceCount ?? 0,
+        registeredReferenceCount: 0,
+        skippedDuplicateCount: 0,
+        curationAssignmentCount: 0,
+        next: `Inspect ${resultPath}`,
+      };
+      if (asJson) {
+        printCompactJson(result);
+        return;
+      }
+      printResearchIntakeNowSummary(result);
+      return;
+    }
+    messageId = applyRun.payload.messageId;
+    intakeResult = await intakeResearchPacketProposals({
+      assignmentId,
+      messageId,
+      configPath: options.config,
+      corpusKey,
+      status: normalizeProposalIntakeStatus(options.status),
+      reasonCode: options["reason-code"] ?? options.reasonCode,
+      note: options.note,
+      apply: true,
+      runId,
+      actor: options.actor ?? "Papyrus content CLI",
+    });
+  } else {
+    const { client } = createAuthoringClient();
+    const assignment = await client.getRecord("Assignment", assignmentId);
+    if (!assignment) throw new Error(`Assignment not found: ${assignmentId}.`);
+    const assignmentMeta = await assignmentMetadata(client, assignment);
+    const packet = normalizeResearchPacketBundle(research, { assignment, assignmentMeta, researchMode });
+    intakeResult = await planResearchPacketProposalIntake({
+      client,
+      assignment,
+      message: null,
+      packet,
+      configPath: options.config,
+      corpusKey,
+      status: normalizeProposalIntakeStatus(options.status),
+      reasonCode: options["reason-code"] ?? options.reasonCode,
+      note: options.note,
+      apply: false,
+      runId,
+      actor: options.actor ?? "Papyrus content CLI",
+    });
+  }
+
+  const result = {
+    ok: true,
+    command: "assignments research-intake-now",
+    action: apply ? "apply" : "dry-run",
+    assignmentId,
+    messageId,
+    researchMode,
+    corpusKey,
+    runId,
+    catalogPath: intakeResult.catalogPath,
+    proposedReferenceCount: intakeResult.proposedReferenceCount,
+    registeredReferenceCount: intakeResult.registeredReferenceCount,
+    skippedDuplicateCount: intakeResult.skippedDuplicateCount,
+    curationAssignmentCount: intakeResult.curationAssignmentCount,
+    importRunId: intakeResult.importRunId,
+    blockedReason: intakeResult.blockedReason,
+    next: intakeResult.next,
+  };
+  if (asJson) {
+    printCompactJson(result);
+    return;
+  }
+  printResearchIntakeNowSummary(result);
+}
+
+function runContentCliJson(args) {
+  const proc = spawnSync(process.execPath, [path.relative(process.cwd(), __filename), ...args], {
+    cwd: process.cwd(),
+    env: process.env,
+    encoding: "utf8",
+    maxBuffer: 1024 * 1024 * 128,
+  });
+  const payload = extractLastJsonObject(proc.stdout);
+  return {
+    ok: proc.status === 0 && Boolean(payload?.ok),
+    status: proc.status,
+    signal: proc.signal ?? null,
+    stdout: proc.stdout ?? "",
+    stderr: proc.stderr ?? "",
+    payload,
+  };
+}
+
+function compactResearchRunChildResult(run) {
+  return {
+    ok: run.ok,
+    status: run.status,
+    signal: run.signal,
+    runId: run.payload?.runId ?? null,
+    resultPath: run.payload?.resultPath ?? null,
+    parsed: Boolean(run.payload?.parsed),
+    packet: run.payload?.packet ?? null,
+  };
+}
+
+function extractLastJsonObject(text) {
+  const lines = String(text ?? "").trim().split(/\r?\n/).reverse();
+  for (const line of lines) {
+    const value = line.trim();
+    if (!value.startsWith("{") || !value.endsWith("}")) continue;
+    try {
+      return JSON.parse(value);
+    } catch {
+      // Continue looking for a compact JSON line.
+    }
+  }
+  return null;
+}
+
+function printResearchIntakeNowSummary(result) {
+  console.log(`assignments\tresearch-intake-now\taction\t${result.action}`);
+  console.log(`assignments\tresearch-intake-now\tassignment\t${result.assignmentId}`);
+  if (result.messageId) console.log(`assignments\tresearch-intake-now\tmessage\t${result.messageId}`);
+  if (result.catalogPath) console.log(`assignments\tresearch-intake-now\tcatalog\t${result.catalogPath}`);
+  console.log(`assignments\tresearch-intake-now\tproposals\t${result.proposedReferenceCount}`);
+  console.log(`assignments\tresearch-intake-now\tregistered\t${result.registeredReferenceCount}`);
+  console.log(`assignments\tresearch-intake-now\tskipped-duplicates\t${result.skippedDuplicateCount}`);
+  console.log(`assignments\tresearch-intake-now\tcuration-assignments\t${result.curationAssignmentCount}`);
+  if (result.blockedReason) console.log(`assignments\tresearch-intake-now\tblocked\t${result.blockedReason}`);
+  if (result.next) console.log(`assignments\tresearch-intake-now\tnext\t${result.next}`);
+}
+
+function runDirectResearchHarness({ assignmentId, corpusKey, researchMode, question, maxEvidenceItems, runDir }) {
+  const directStdoutPath = path.join(runDir, "research-direct.stdout.log");
+  const directStderrPath = path.join(runDir, "research-direct.stderr.log");
+  const query = question || "Find current external references related to the research assignment.";
+  const snippet = `
+local knowledge = knowledge_search(${JSON.stringify(query)}, { top_k = ${Math.max(1, maxEvidenceItems)}, max_tokens = 1200, depth = 1 })
+local search = web_search(${JSON.stringify(query)})
+local ids = evidence_item_ids_from_knowledge(knowledge)
+return finish_research_from_search(search, {
+  research_mode = ${JSON.stringify(researchMode)},
+  evidence_item_ids = ids,
+  recommended_angle = "Review discovered source prospects through reference intake before treating them as accepted evidence.",
+  coverage_gaps = knowledge.warnings or {},
+})
+`;
+  const result = spawnSync("poetry", [
+    "run",
+    "papyrus-newsroom",
+    "execute-tactus",
+    "--harness", "research",
+    "--assignment-id", assignmentId,
+    "--corpus-key", corpusKey,
+    "--research-mode", researchMode,
+    "--max-evidence-items", String(maxEvidenceItems),
+    snippet,
+  ], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    maxBuffer: 1024 * 1024 * 128,
+    env: {
+      ...process.env,
+      PYTHONPATH: prependPathList(["../Tactus", "src"], process.env.PYTHONPATH),
+    },
+  });
+  fs.writeFileSync(directStdoutPath, result.stdout ?? "", "utf8");
+  fs.writeFileSync(directStderrPath, result.stderr ?? "", "utf8");
+  const parsed = extractResearchRunPayload(result.stdout);
+  return {
+    strategy: "direct-harness",
+    ok: result.status === 0 && Boolean(parsed),
+    exitStatus: result.status,
+    signal: result.signal ?? null,
+    stdoutPath: directStdoutPath,
+    stderrPath: directStderrPath,
+    parsed,
+  };
+}
+
+function printResearchRunSummary(result) {
+  console.log(`assignments\trun-research\taction\t${result.action}`);
+  console.log(`assignments\trun-research\trun\t${result.runId}`);
+  console.log(`assignments\trun-research\tassignment\t${result.assignmentId}`);
+  console.log(`assignments\trun-research\tstatus\t${result.exitStatus ?? ""}`);
+  console.log(`assignments\trun-research\tparsed\t${result.parsed}`);
+  if (result.packet) {
+    console.log(`assignments\trun-research\tcounts\tevidence=${result.packet.evidenceItemCount}\tsources=${result.packet.sourceSnapshotCount}\tproposals=${result.packet.proposedReferenceCount}`);
+    console.log(`assignments\trun-research\tattempts\t${result.packet.attempts}`);
+    if (result.packet.recoveryPath) console.log(`assignments\trun-research\trecovery\t${result.packet.recoveryPath}`);
+    if (result.packet.firstValidationError) console.log(`assignments\trun-research\tfirst-validation-error\t${result.packet.firstValidationError}`);
+    if (result.packet.lastValidationError) console.log(`assignments\trun-research\tlast-validation-error\t${result.packet.lastValidationError}`);
+    if (result.packet.firstProposalUrl) console.log(`assignments\trun-research\tfirst-proposal\t${result.packet.firstProposalUrl}`);
+    if (result.packet.blockedReason) console.log(`assignments\trun-research\tblocked\t${result.packet.blockedReason}`);
+  }
+  console.log(`assignments\trun-research\tresult\t${result.resultPath}`);
+  console.log(`assignments\trun-research\tstdout\t${result.stdoutPath}`);
+  console.log(`assignments\trun-research\tstderr\t${result.stderrPath}`);
+  if (result.next) console.log(`assignments\trun-research\tnext\t${result.next}`);
+}
+
+function extractResearchRunPayload(stdout) {
+  const text = String(stdout ?? "").trim();
+  if (!text) return null;
+  const direct = tryParseJson(text);
+  if (direct) return direct.value ?? direct;
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const parsed = tryParseJson(lines[index]);
+    if (parsed) return parsed.value ?? parsed;
+  }
+  const objectMatches = text.match(/\{[\s\S]*\}/g) ?? [];
+  for (let index = objectMatches.length - 1; index >= 0; index -= 1) {
+    const parsed = tryParseJson(objectMatches[index]);
+    if (parsed) return parsed.value ?? parsed;
+  }
+  return null;
+}
+
+function tryParseJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function prependPathList(entries, existing) {
+  return [...entries, existing].filter(Boolean).join(path.delimiter);
+}
+
+function printResearchPacketApplySummary(result) {
+  console.log(`assignments\tapply-research-packet\taction\t${result.action}`);
+  console.log(`assignments\tapply-research-packet\tassignment\t${result.assignmentId}`);
+  console.log(`assignments\tapply-research-packet\tmessage\t${result.messageId}`);
+  console.log(`assignments\tapply-research-packet\tresearch-mode\t${result.researchMode}`);
+  console.log(`assignments\tapply-research-packet\tcounts\tevidence=${result.evidenceItemCount}\tsources=${result.sourceSnapshotCount}\tproposals=${result.proposedReferenceCount}`);
+}
+
+function readResearchPacketInput(options) {
+  const raw = options["research-json"] ?? options.research ?? options.input;
+  if (!raw) throw new Error("assignments apply-research-packet requires --research-json <path-or-json>.");
+  const text = fs.existsSync(String(raw)) ? fs.readFileSync(String(raw), "utf8") : String(raw);
+  const parsed = JSON.parse(text);
+  const value = parsed.value ?? parsed;
+  return value.research_packet ?? value.researchPacket ?? value.research ?? value;
+}
+
+function normalizeResearchPacketBundle(research, { assignment, assignmentMeta, researchMode }) {
+  const evidenceItemIds = parseStringArray(research.evidence_item_ids ?? research.evidenceItemIds);
+  const queries = parseArrayValue(research.queries);
+  const sourceSnapshots = parseArrayValue(research.source_snapshots ?? research.sourceSnapshots);
+  const proposedReferences = parseArrayValue(research.proposed_references ?? research.proposedReferences);
+  const trace = parseObjectValue(research.researchTrace ?? research.research_trace);
+  if (!trace.recoveryPath && research.recoveryPath) trace.recoveryPath = research.recoveryPath;
+  if (trace.retryCount === undefined && trace.retry_count === undefined && research.retryCount !== undefined) trace.retryCount = research.retryCount;
+  if (!trace.validationFailures && !trace.validation_failures && Array.isArray(research.validationFailures)) {
+    trace.validationFailures = research.validationFailures;
+  }
+  const internalFindings = parseObjectValue(research.internalFindings ?? research.internal_findings);
+  const sourceDiscovery = parseObjectValue(research.sourceDiscovery ?? research.source_discovery);
+  const synthesis = parseObjectValue(research.synthesis);
+  const summary = normalizeCliString(research.summary ?? synthesis.summary) ?? "";
+  const recommendedAngle = normalizeCliString(research.recommended_angle ?? research.recommendedAngle ?? synthesis.recommendedAngle ?? synthesis.recommended_angle) ?? "";
+  const openQuestions = parseArrayValue(research.open_questions ?? research.openQuestions ?? synthesis.openQuestions ?? synthesis.open_questions);
+  const coverageGaps = parseArrayValue(research.coverage_gaps ?? research.coverageGaps ?? synthesis.coverageGaps ?? synthesis.coverage_gaps);
+  return {
+    researchMode,
+    status: "researched",
+    summary,
+    corpusKey: research.corpus_key ?? research.corpusKey ?? assignmentMeta.corpusKey ?? assignment.corpusId ?? null,
+    categoryKey: research.category_key ?? research.categoryKey ?? assignmentMeta.focusCategoryKey ?? assignmentMeta.deskCategoryKey ?? null,
+    evidenceItemIds,
+    queries,
+    sourceSnapshots,
+    proposedReferences,
+    internalFindings: {
+      summary: internalFindings.summary ?? research.internalSummary ?? summary,
+      evidenceItemIds: parseStringArray(internalFindings.evidenceItemIds ?? internalFindings.evidence_item_ids ?? evidenceItemIds),
+      queries: parseArrayValue(internalFindings.queries ?? queries),
+      papyrusUrisInspected: parseArrayValue(internalFindings.papyrusUrisInspected ?? internalFindings.papyrus_uris_inspected ?? trace.papyrusUrisInspected),
+    },
+    sourceDiscovery: {
+      webSearches: parseArrayValue(sourceDiscovery.webSearches ?? sourceDiscovery.web_searches ?? trace.webSearches),
+      sourceSnapshots: parseArrayValue(sourceDiscovery.sourceSnapshots ?? sourceDiscovery.source_snapshots ?? sourceSnapshots),
+      proposedReferences: parseArrayValue(sourceDiscovery.proposedReferences ?? sourceDiscovery.proposed_references ?? proposedReferences),
+      blockedReason: sourceDiscovery.blockedReason ?? sourceDiscovery.blocked_reason ?? research.blockedReason ?? research.blocked_reason ?? null,
+    },
+    synthesis: {
+      summary,
+      recommendedAngle,
+      openQuestions,
+      coverageGaps,
+    },
+    researchTrace: {
+      ...trace,
+      knowledgeQueries: parseArrayValue(trace.knowledgeQueries ?? trace.knowledge_queries ?? queries),
+      papyrusUrisInspected: parseArrayValue(trace.papyrusUrisInspected ?? trace.papyrus_uris_inspected),
+      webSearches: parseArrayValue(trace.webSearches ?? trace.web_searches ?? sourceDiscovery.webSearches),
+      acceptedEvidenceIds: parseStringArray(trace.acceptedEvidenceIds ?? trace.accepted_evidence_ids ?? evidenceItemIds),
+      unresolvedGaps: parseArrayValue(trace.unresolvedGaps ?? trace.unresolved_gaps),
+    },
+    openQuestions,
+    coverageGaps,
+    recommendedAngle,
+  };
+}
+
+function validateResearchPacketMode(packet) {
+  if (packet.researchMode === "internal_brief") return;
+  const hasWebSearch = parseArrayValue(packet.sourceDiscovery?.webSearches).length > 0
+    || parseArrayValue(packet.researchTrace?.webSearches).length > 0;
+  const hasSourceSnapshot = parseArrayValue(packet.sourceDiscovery?.sourceSnapshots).length > 0
+    || parseArrayValue(packet.sourceSnapshots).length > 0;
+  const hasProposedReference = parseArrayValue(packet.sourceDiscovery?.proposedReferences).length > 0
+    || parseArrayValue(packet.proposedReferences).length > 0;
+  const blockedReason = normalizeCliString(packet.sourceDiscovery?.blockedReason);
+  if (!hasWebSearch && !hasSourceSnapshot && !hasProposedReference && !blockedReason) {
+    throw new Error(`research mode ${packet.researchMode} requires web discovery fields or blockedReason before persistence.`);
+  }
+}
+
+function researchPacketHash({ assignmentId, researchMode, packet }) {
+  return hashShort(stableJson({
+    assignmentId,
+    researchMode,
+    packet: normalizeResearchPacketForHash(packet),
+  }));
+}
+
+function normalizeResearchPacketForHash(packet) {
+  return parseAnyJsonish(stableJson({
+    researchMode: packet.researchMode,
+    summary: packet.summary,
+    corpusKey: packet.corpusKey,
+    categoryKey: packet.categoryKey,
+    evidenceItemIds: packet.evidenceItemIds,
+    queries: packet.queries,
+    sourceSnapshots: packet.sourceSnapshots,
+    proposedReferences: packet.proposedReferences,
+    internalFindings: packet.internalFindings,
+    sourceDiscovery: packet.sourceDiscovery,
+    synthesis: packet.synthesis,
+    researchTrace: packet.researchTrace,
+    openQuestions: packet.openQuestions,
+    coverageGaps: packet.coverageGaps,
+    recommendedAngle: packet.recommendedAngle,
+  }));
+}
+
+function validateResearchPacketPlannedChanges(changes, { assignmentId, messageId }) {
+  const expectedRecords = changes.map((change) => ({ modelName: change.modelName, expected: change.expected }));
+  const byModelAndId = new Map(expectedRecords.map((record) => [`${record.modelName}:${record.expected?.id}`, record.expected]));
+  const message = byModelAndId.get(`Message:${messageId}`);
+  const relation = changes
+    .map((change) => change.expected)
+    .find((record) => record?.subjectKind === "message" && record.subjectId === messageId && record.objectKind === "assignment" && record.objectId === assignmentId);
+  if (!message) throw new Error(`Research packet preflight failed: planned Message ${messageId} is missing.`);
+  if (!relation) throw new Error(`Research packet preflight failed: planned comment relation for ${messageId} -> ${assignmentId} is missing.`);
+  assertRequiredFields("Message", message, ["id", "messageKind", "messageDomain", "status", "summary", "createdAt", "updatedAt"]);
+  assertRequiredFields("SemanticRelation", relation, [
+    "id",
+    "relationState",
+    "predicate",
+    "relationTypeKey",
+    "relationDomain",
+    "subjectKind",
+    "subjectId",
+    "subjectLineageId",
+    "objectKind",
+    "objectId",
+    "objectLineageId",
+    "subjectStateKey",
+    "objectStateKey",
+    "objectSubjectStateKey",
+    "predicateObjectStateKey",
+    "subjectVersionKey",
+    "objectVersionKey",
+  ]);
+  const attachments = changes
+    .filter((change) => change.modelName === "ModelAttachment")
+    .map((change) => change.expected)
+    .filter((record) => record?.ownerKind === "message" && record.ownerId === messageId);
+  const roles = new Set(attachments.map((attachment) => attachment.role));
+  if (!roles.has("message_body")) throw new Error(`Research packet preflight failed: Message ${messageId} is missing message_body attachment.`);
+  if (!roles.has("metadata")) throw new Error(`Research packet preflight failed: Message ${messageId} is missing metadata attachment.`);
+  for (const attachment of attachments) {
+    assertRequiredFields("ModelAttachment", attachment, ["id", "ownerKind", "ownerId", "role", "sortKey", "storagePath", "filename", "mediaType", "byteSize", "sha256", "status"]);
+  }
+}
+
+function assertRequiredFields(modelName, record, fields) {
+  const missing = fields.filter((field) => record[field] === undefined || record[field] === null || record[field] === "");
+  if (missing.length) {
+    throw new Error(`${modelName} ${record?.id ?? "<missing-id>"} is missing required research packet preflight field(s): ${missing.join(", ")}.`);
+  }
+}
+
+function researchPacketBody(packet) {
+  const lines = [
+    packet.summary,
+    "",
+    "Internal findings",
+    packet.internalFindings?.summary ?? "",
+    ...arrayTextLines("Accepted evidence", packet.internalFindings?.evidenceItemIds),
+    ...arrayTextLines("Papyrus URIs inspected", packet.internalFindings?.papyrusUrisInspected),
+    "",
+    "Source discovery",
+    ...arrayTextLines("Web searches", packet.sourceDiscovery?.webSearches),
+    ...arrayTextLines("Proposed references", (packet.sourceDiscovery?.proposedReferences ?? []).map((entry) => entry.title ?? entry.url)),
+    packet.sourceDiscovery?.blockedReason ? `Blocked reason: ${packet.sourceDiscovery.blockedReason}` : "",
+    "",
+    "Synthesis",
+    packet.synthesis?.recommendedAngle ? `Recommended angle: ${packet.synthesis.recommendedAngle}` : "",
+    ...arrayTextLines("Open questions", packet.synthesis?.openQuestions),
+    ...arrayTextLines("Coverage gaps", packet.synthesis?.coverageGaps),
+  ];
+  return lines.filter((line) => String(line ?? "").trim()).join("\n");
+}
+
+function arrayTextLines(label, values) {
+  const items = parseArrayValue(values).map((value) => typeof value === "string" ? value : value?.title ?? value?.url ?? stableJson(value)).filter(Boolean);
+  if (!items.length) return [];
+  return [`${label}:`, ...items.map((item) => `- ${item}`)];
+}
+
+function parseObjectValue(value) {
+  const parsed = parseAnyJsonish(value);
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+}
+
+function parseArrayValue(value) {
+  const parsed = parseAnyJsonish(value);
+  if (Array.isArray(parsed)) return parsed;
+  return [];
+}
+
+function parseStringArray(value) {
+  return parseArrayValue(value).map((entry) => normalizeCliString(entry)).filter(Boolean);
+}
+
+function parseAnyJsonish(value) {
+  if (value === undefined || value === null || value === "") return value;
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
 async function backfillAssignmentSectionIndexes(flags) {
   const options = parseOptions(flags);
   const { client } = createAuthoringClient();
@@ -3144,26 +4129,28 @@ async function listAssignmentResearchPackets(flags) {
   const assignmentId = options.assignment;
   if (!assignmentId) throw new Error("assignments research-packets requires --assignment.");
   const { client } = createAuthoringClient();
-  const [messages, relations] = await Promise.all([
-    client.listRecords("Message"),
-    client.listRecords("SemanticRelation"),
-  ]);
-  const messageById = new Map(messages.map((message) => [message.id, message]));
-  const packets = relations
-    .filter((relation) => relation.relationState === "current")
-    .filter((relation) => relation.subjectKind === "message" && relation.objectKind === "assignment")
-    .filter((relation) => relation.objectId === assignmentId || relation.objectLineageId === assignmentId)
-    .filter((relation) => (relation.relationTypeKey ?? relation.predicate) === "comment")
-    .map((relation) => messageById.get(relation.subjectId))
-    .filter(Boolean)
-    .filter((message) => message.messageKind === "research_packet")
-    .sort((left, right) => String(right.createdAt ?? "").localeCompare(String(left.createdAt ?? "")));
-
-  for (const message of packets) {
-    const metadata = await readJsonModelPayload(client, "message", message.id, "metadata", "metadata") ?? {};
-    const research = parseJsonish(metadata.research);
-    const sources = Array.isArray(research.sourceSnapshots) ? research.sourceSnapshots : [];
-    const proposals = Array.isArray(research.proposedReferences) ? research.proposedReferences : [];
+  const packets = await loadAssignmentResearchPacketEntries(client, assignmentId);
+  if (options.json) {
+    printCompactJson({
+      ok: true,
+      command: "assignments research-packets",
+      assignmentId,
+      count: packets.length,
+      packets: packets.map((entry) => ({
+        messageId: entry.message.id,
+        createdAt: entry.message.createdAt ?? null,
+        summary: entry.message.summary ?? null,
+        proposedReferenceCount: entry.packet.proposedReferences.length,
+        sourceSnapshotCount: entry.packet.sourceSnapshots.length,
+        blockedReason: entry.packet.sourceDiscovery?.blockedReason ?? null,
+      })),
+    });
+    return;
+  }
+  for (const entry of packets) {
+    const { message, packet } = entry;
+    const sources = Array.isArray(packet.sourceSnapshots) ? packet.sourceSnapshots : [];
+    const proposals = Array.isArray(packet.proposedReferences) ? packet.proposedReferences : [];
     const domains = sources
       .map((source) => source.source_domain ?? source.sourceDomain ?? source.url)
       .filter(Boolean)
@@ -3187,6 +4174,325 @@ async function listAssignmentResearchPackets(flags) {
     }
   }
   if (!packets.length) console.log(`assignment-research-packets\t${assignmentId}\t0`);
+}
+
+async function loadAssignmentResearchPacketEntries(client, assignmentId) {
+  const assignment = await client.getRecord("Assignment", assignmentId);
+  if (!assignment) throw new Error(`Assignment not found: ${assignmentId}.`);
+  const assignmentMeta = await assignmentMetadata(client, assignment);
+  const objectStateKey = semanticStateKey("assignment", assignmentId);
+  const relations = await client.listSemanticRelationsByObjectState(objectStateKey);
+  const packetRelations = relations
+    .filter((relation) => relation.relationState === "current")
+    .filter((relation) => relation.subjectKind === "message" && relation.objectKind === "assignment")
+    .filter((relation) => relation.objectId === assignmentId || relation.objectLineageId === assignmentId)
+    .filter((relation) => (relation.relationTypeKey ?? relation.predicate) === "comment");
+  const messageIds = packetRelations.map((relation) => relation.subjectId);
+  const messageById = await client.getRecordsById("Message", messageIds);
+  const entries = [];
+  for (const relation of packetRelations) {
+    const message = messageById.get(relation.subjectId);
+    if (!message || message.messageKind !== "research_packet") continue;
+    let metadata = {};
+    try {
+      metadata = await readJsonModelPayload(client, "message", message.id, "metadata", "metadata") ?? parseJsonish(message.metadata);
+    } catch {
+      metadata = parseJsonish(message.metadata);
+    }
+    const research = parseJsonish(metadata.research);
+    const researchMode = normalizeResearchModeOption(
+      research.researchMode ?? research.research_mode ?? metadata.researchMode ?? assignmentMeta.researchMode ?? "source_discovery",
+    );
+    const packet = normalizeResearchPacketBundle(research, { assignment, assignmentMeta, researchMode });
+    entries.push({ assignment, message, metadata, relation, packet });
+  }
+  return entries.sort((left, right) => String(right.message.createdAt ?? "").localeCompare(String(left.message.createdAt ?? "")));
+}
+
+async function intakeAssignmentResearchProposals(flags) {
+  const options = parseOptions(flags);
+  const assignmentId = normalizeCliString(options.assignment);
+  if (!assignmentId) throw new Error("assignments intake-proposals requires --assignment <id>.");
+  if (!options.config) throw new Error("assignments intake-proposals requires --config <steering.yml>.");
+  const corpusKey = normalizeCliString(options["corpus-key"]);
+  if (!corpusKey) throw new Error("assignments intake-proposals requires --corpus-key <key>.");
+  const result = await intakeResearchPacketProposals({
+    assignmentId,
+    messageId: normalizeCliString(options.message),
+    configPath: options.config,
+    corpusKey,
+    status: normalizeProposalIntakeStatus(options.status),
+    reasonCode: options["reason-code"] ?? options.reasonCode,
+    note: options.note,
+    apply: Boolean(options.apply),
+    runId: normalizeCliString(options["run-id"]),
+    actor: options.actor ?? "Papyrus content CLI",
+  });
+  if (options.json) {
+    printCompactJson(result);
+    return;
+  }
+  printResearchProposalIntakeSummary(result);
+}
+
+async function intakeResearchPacketProposals({ assignmentId, messageId, configPath, corpusKey, status, reasonCode, note, apply, runId, actor }) {
+  const { client } = createAuthoringClient();
+  const entries = await loadAssignmentResearchPacketEntries(client, assignmentId);
+  const selected = messageId
+    ? entries.find((entry) => entry.message.id === messageId)
+    : entries[0];
+  if (!selected) {
+    throw new Error(messageId
+      ? `Research packet message ${messageId} is not linked to assignment ${assignmentId}.`
+      : `No persisted research_packet message is linked to assignment ${assignmentId}.`);
+  }
+  return await planResearchPacketProposalIntake({
+    client,
+    assignment: selected.assignment,
+    message: selected.message,
+    packet: selected.packet,
+    configPath,
+    corpusKey,
+    status,
+    reasonCode,
+    note,
+    apply,
+    runId,
+    actor,
+  });
+}
+
+async function planResearchPacketProposalIntake({ client, assignment, message, packet, configPath, corpusKey, status, reasonCode, note, apply, runId, actor }) {
+  const command = "assignments intake-proposals";
+  const effectiveRunId = normalizeCliString(runId) ?? `research-proposals-${safeId(assignment.id).slice(0, 60)}-${timestampForPath()}`;
+  const runDir = path.join(process.cwd(), ".papyrus-runs", effectiveRunId);
+  fs.mkdirSync(runDir, { recursive: true });
+  const catalogPath = path.join(runDir, "research-proposals-catalog.json");
+  const proposals = extractResearchPacketProposals(packet);
+  const catalogItems = buildResearchProposalCatalogItems(proposals, {
+    assignment,
+    message,
+    packet,
+  });
+  const blockedReason = normalizeCliString(packet.sourceDiscovery?.blockedReason);
+  const generatedAt = message?.createdAt
+    ?? normalizeCliString(packet.researchTrace?.generatedAt ?? packet.researchTrace?.generated_at)
+    ?? assignment.createdAt
+    ?? new Date().toISOString();
+  const catalog = {
+    schema_version: 1,
+    catalog_kind: "papyrus-research-proposed-references",
+    generated_at: generatedAt,
+    assignment_id: assignment.id,
+    research_packet_message_id: message?.id ?? null,
+    research_mode: packet.researchMode ?? null,
+    blocked_reason: blockedReason ?? null,
+    items: catalogItems,
+  };
+  writeJsonFile(catalogPath, catalog);
+
+  if (!catalogItems.length) {
+    return {
+      ok: true,
+      command,
+      action: apply ? "apply" : "dry-run",
+      assignmentId: assignment.id,
+      messageId: message?.id ?? null,
+      catalogPath,
+      proposedReferenceCount: proposals.length,
+      dedupedProposalCount: 0,
+      registeredReferenceCount: 0,
+      skippedDuplicateCount: 0,
+      curationAssignmentCount: 0,
+      importRunId: null,
+      blockedReason: blockedReason ?? null,
+      next: blockedReason
+        ? `Review blocked reason on research packet ${message?.id ?? "<dry-run>"}`
+        : `Run npm run content -- assignments run-research --assignment ${assignment.id} --research-mode source_discovery --max-evidence-items 20`,
+    };
+  }
+
+  const registration = await planReferenceCatalogRegistration(client, {
+    catalog,
+    configPath,
+    corpusKey,
+    status,
+    reasonCode,
+    note,
+    actor,
+    quiet: true,
+  });
+  if (apply) {
+    await applyReferenceCatalogRegistration(client, registration);
+  }
+  const changedReferences = registration.changes.filter((change) => change.modelName === "Reference" && change.action !== "noop").length;
+  const changedAssignments = registration.changes.filter((change) => change.modelName === "Assignment" && change.action !== "noop").length;
+  const duplicateNoopReferences = registration.changes.filter((change) => change.modelName === "Reference" && change.action === "noop").length;
+  const skippedDuplicateCount = registration.skippedDuplicateCount + duplicateNoopReferences;
+  return {
+    ok: true,
+    command,
+    action: apply ? "apply" : "dry-run",
+    assignmentId: assignment.id,
+    messageId: message?.id ?? null,
+    catalogPath,
+    proposedReferenceCount: proposals.length,
+    dedupedProposalCount: catalogItems.length,
+    registeredReferenceCount: changedReferences,
+    skippedDuplicateCount,
+    curationAssignmentCount: changedAssignments,
+    importRunId: registration.plan.importRunId,
+    blockedReason: blockedReason ?? null,
+    next: `npm run content -- references source-status --config ${configPath} --corpus-key ${corpusKey} --status ${normalizeReferenceCurationStatus(status, "pending")}`,
+  };
+}
+
+function extractResearchPacketProposals(packet) {
+  const proposals = [
+    ...parseArrayValue(packet.proposedReferences),
+    ...parseArrayValue(packet.sourceDiscovery?.proposedReferences),
+  ];
+  const byUrl = new Map();
+  for (const proposal of proposals) {
+    const normalized = normalizeProposalUrl(proposal?.url ?? proposal?.source_uri ?? proposal?.sourceUri ?? proposal?.uri);
+    if (!normalized) continue;
+    if (!byUrl.has(normalized)) byUrl.set(normalized, { ...proposal, url: normalized });
+  }
+  return Array.from(byUrl.values());
+}
+
+function buildResearchProposalCatalogItems(proposals, { assignment, message, packet }) {
+  return proposals.map((proposal) => {
+    const url = normalizeProposalUrl(proposal.url ?? proposal.source_uri ?? proposal.sourceUri ?? proposal.uri);
+    if (!url) return null;
+    const sourceDomain = normalizeCliString(proposal.source_domain ?? proposal.sourceDomain) ?? domainFromUrl(url);
+    const title = normalizeCliString(proposal.title ?? proposal.name) ?? url;
+    const evidenceCandidateId = normalizeCliString(proposal.evidence_candidate_id ?? proposal.evidenceCandidateId ?? proposal.id);
+    const itemId = `research-proposal-${hashShort(url)}`;
+    const ingestionRationale = normalizeCliString(
+      proposal.ingestion_rationale
+      ?? proposal.ingestionRationale
+      ?? proposal.rationale
+      ?? proposal.ingestion_rationale_text
+    ) ?? fallbackResearchProposalRationale({ proposal, title, url, assignment, message, packet });
+    return {
+      id: itemId,
+      item_id: itemId,
+      title,
+      source_uri: url,
+      media_type: normalizeCliString(proposal.media_type ?? proposal.mediaType) ?? "text/html",
+      ingestion_rationale: ingestionRationale,
+      metadata: {
+        source_domain: sourceDomain,
+        evidence_candidate_id: evidenceCandidateId,
+        research_assignment_id: assignment.id,
+        research_packet_message_id: message?.id ?? null,
+        research_mode: packet.researchMode ?? null,
+        research_packet_summary: packet.summary ?? message?.summary ?? null,
+        proposed_reference: proposal,
+      },
+    };
+  }).filter(Boolean);
+}
+
+function fallbackResearchProposalRationale({ title, url, assignment, message, packet }) {
+  const summary = normalizeCliString(packet.summary ?? message?.summary);
+  const titleClause = title ? `${title} was proposed` : "This source was proposed";
+  const assignmentTitle = normalizeCliString(assignment.title) ?? assignment.id;
+  const summaryClause = summary ? ` Packet summary: ${summary}` : "";
+  return `${titleClause} by research assignment ${assignmentTitle}. Source: ${url}.${summaryClause} Review during reference intake before using as evidence.`;
+}
+
+function normalizeProposalUrl(value) {
+  const text = normalizeCliString(value);
+  if (!text) return null;
+  try {
+    const parsed = new URL(text);
+    parsed.hash = "";
+    parsed.hostname = parsed.hostname.toLowerCase();
+    if ((parsed.protocol === "https:" && parsed.port === "443") || (parsed.protocol === "http:" && parsed.port === "80")) parsed.port = "";
+    if (parsed.pathname !== "/") parsed.pathname = parsed.pathname.replace(/\/+$/g, "");
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+function domainFromUrl(value) {
+  try {
+    return new URL(value).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function printResearchProposalIntakeSummary(result) {
+  console.log(`assignments\tintake-proposals\taction\t${result.action}`);
+  console.log(`assignments\tintake-proposals\tassignment\t${result.assignmentId}`);
+  console.log(`assignments\tintake-proposals\tmessage\t${result.messageId ?? ""}`);
+  console.log(`assignments\tintake-proposals\tcatalog\t${result.catalogPath}`);
+  console.log(`assignments\tintake-proposals\tproposals\t${result.proposedReferenceCount}`);
+  console.log(`assignments\tintake-proposals\tdeduped\t${result.dedupedProposalCount}`);
+  console.log(`assignments\tintake-proposals\tregistered\t${result.registeredReferenceCount}`);
+  console.log(`assignments\tintake-proposals\tskipped-duplicates\t${result.skippedDuplicateCount}`);
+  console.log(`assignments\tintake-proposals\tcuration-assignments\t${result.curationAssignmentCount}`);
+  if (result.blockedReason) console.log(`assignments\tintake-proposals\tblocked\t${result.blockedReason}`);
+  if (result.next) console.log(`assignments\tintake-proposals\tnext\t${result.next}`);
+}
+
+function normalizeProposalIntakeStatus(value) {
+  const status = normalizeReferenceCurationStatus(value, "pending");
+  if (status !== "pending" && status !== "rejected") {
+    throw new Error(`Research proposal intake supports --status pending|rejected, not ${status}.`);
+  }
+  return status;
+}
+
+async function listOrphanResearchPackets(flags) {
+  const options = parseOptions(flags);
+  const asJson = Boolean(options.json);
+  const { client } = createAuthoringClient();
+  const [messages, relations] = await Promise.all([
+    client.listRecords("Message"),
+    client.listRecords("SemanticRelation"),
+  ]);
+  const linkedMessageIds = new Set(relations
+    .filter((relation) => relation.relationState === "current")
+    .filter((relation) => relation.subjectKind === "message" && relation.objectKind === "assignment")
+    .filter((relation) => (relation.relationTypeKey ?? relation.predicate) === "comment")
+    .map((relation) => relation.subjectId)
+    .filter(Boolean));
+  const orphans = messages
+    .filter((message) => message.messageKind === "research_packet")
+    .filter((message) => !linkedMessageIds.has(message.id))
+    .sort((left, right) => String(right.createdAt ?? "").localeCompare(String(left.createdAt ?? "")));
+  const rows = orphans.map((message) => ({
+    id: message.id,
+    createdAt: message.createdAt ?? null,
+    status: message.status ?? null,
+    summary: message.summary ?? null,
+  }));
+  if (asJson) {
+    printCompactJson({
+      ok: true,
+      command: "assignments orphan-research-packets",
+      count: rows.length,
+      orphans: rows,
+    });
+    return;
+  }
+  if (!rows.length) {
+    console.log("assignment-research-packet-orphans\t0");
+    return;
+  }
+  for (const row of rows) {
+    console.log([
+      row.createdAt ?? "-",
+      row.id,
+      row.status ?? "-",
+      row.summary ?? "Stored research packet",
+    ].join("\t"));
+  }
 }
 
 async function listAssignmentEvents(flags) {
@@ -8640,7 +9946,46 @@ async function updateNewsroomSummaryAfterAssignmentCreates(client, changes, { ac
     actorLabel,
     reason,
   });
-  console.log(`newsroom\tsummary-snapshot\tincremental\tassignments=${createdAssignments.length}\tevents=${createdEvents.length}\trelations=${createdRelations.length}`);
+  console.error(`newsroom\tsummary-snapshot\tincremental\tassignments=${createdAssignments.length}\tevents=${createdEvents.length}\trelations=${createdRelations.length}`);
+}
+
+async function updateNewsroomSummaryAfterResearchPacketCreates(client, changes, { actorLabel = "Papyrus content CLI", reason = "research packet create" } = {}) {
+  const createdByModel = new Map();
+  for (const record of changes.filter((entry) => entry.action === "create")) {
+    if (!createdByModel.has(record.modelName)) createdByModel.set(record.modelName, []);
+    createdByModel.get(record.modelName).push(record.expected);
+  }
+  const createdMessages = createdByModel.get("Message") ?? [];
+  const createdAttachments = createdByModel.get("ModelAttachment") ?? [];
+  const createdRelations = createdByModel.get("SemanticRelation") ?? [];
+  if (!createdMessages.length && !createdAttachments.length && !createdRelations.length) return;
+  await client.updateNewsroomSummary({
+    source: "incremental",
+    countDeltas: {
+      messages: createdMessages.length,
+      modelAttachments: createdAttachments.length,
+      semanticRelations: createdRelations.length,
+    },
+    facetDeltas: {
+      messages: {
+        byKind: countDelta(createdMessages, "messageKind", "unknown"),
+        byDomain: countDelta(createdMessages, "messageDomain", "unknown"),
+        byStatus: countDelta(createdMessages, "status", "unknown"),
+        domainByKind: nestedCountDelta(createdMessages, "messageKind", "messageDomain", "unknown", "unknown"),
+      },
+      semanticRelations: {
+        byRelationTypeKey: countDelta(createdRelations, "relationTypeKey", "unknown"),
+        byRelationDomain: countDelta(createdRelations, "relationDomain", "unknown"),
+        bySubjectKind: countDelta(createdRelations, "subjectKind", "unknown"),
+        byObjectKind: countDelta(createdRelations, "objectKind", "unknown"),
+      },
+      modelAttachments: modelAttachmentFacetDelta(createdAttachments),
+    },
+  }, {
+    actorLabel,
+    reason,
+  });
+  console.error(`newsroom\tsummary-snapshot\tincremental\tmessages=${createdMessages.length}\trelations=${createdRelations.length}`);
 }
 
 async function updateNewsroomSummaryAfterAnalysisImport(client, changes, { actorLabel = "Papyrus content CLI", reason = "analysis import" } = {}) {
@@ -11067,6 +12412,12 @@ function printUsage() {
   console.log("  npm run content -- references unlabel --relation <authoritative-label-relation-id> --apply");
   console.log("  npm run content -- references labels --reference <reference-id|item-id>");
   console.log("  npm run content -- assignments list --queue <queue-key> --status open");
+  console.log("  npm run content -- assignments create-research --title <text> --summary <text> --section <section-key> --corpus-key <key> --research-mode source_discovery --topic-scope <keys> --apply [--json]");
+  console.log("  npm run content -- assignments run-research --assignment <id> --corpus-key <key> --research-mode source_discovery [--max-evidence-items 20] [--apply] [--json]");
+  console.log("  npm run content -- assignments apply-research-packet --assignment <id> --research-json <packet.json> --apply [--json]");
+  console.log("  npm run content -- assignments intake-proposals --assignment <id> --config <steering.yml> --corpus-key <key> --status pending [--message <message-id>] [--apply] [--json]");
+  console.log("  npm run content -- assignments research-intake-now --assignment <id> --config <steering.yml> --corpus-key <key> --research-mode source_discovery --max-evidence-items 20 [--apply] [--json]");
+  console.log("  npm run content -- assignments orphan-research-packets [--json]");
   console.log("  npm run content -- assignments backfill-section-indexes --apply");
   console.log("  npm run content -- assignments for-object --kind reference --lineage <reference-lineage-id>");
   console.log("  npm run content -- assignments build-context --assignment <id> --context-profile reporting");

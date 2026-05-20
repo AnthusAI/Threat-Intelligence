@@ -938,6 +938,13 @@ def papyrus_get_semantic_object(kind: str, object_id: str) -> dict[str, Any]:
     return _semantic_client().get_semantic_object(kind, object_id)
 
 
+def papyrus_resolve_uri(uri: str) -> dict[str, Any]:
+    """
+    Resolve a papyrus:// object URI to the current GraphQL object when possible.
+    """
+    return _semantic_client().resolve_uri(uri)
+
+
 def papyrus_semantic_outgoing(subject_kind: str, subject_lineage_id: str) -> dict[str, Any]:
     """
     List current SemanticRelation rows leaving one subject lineage.
@@ -1807,7 +1814,68 @@ def _research_packet_metadata(research_payload: dict[str, Any], assignment: dict
     metadata = _normalize_jsonish(assignment.get("metadata") or {})
     if not isinstance(metadata, dict):
         metadata = {}
+    research_mode = _normalize_research_mode(
+        research_payload.get("research_mode")
+        or research_payload.get("researchMode")
+        or metadata.get("researchMode")
+        or metadata.get("research_mode")
+    )
+    source_snapshots = _jsonish_list(
+        research_payload.get("source_snapshots") or research_payload.get("sourceSnapshots") or []
+    )
+    proposed_references = _jsonish_list(
+        research_payload.get("proposed_references") or research_payload.get("proposedReferences") or []
+    )
+    queries = _jsonish_list(research_payload.get("queries") or [])
+    open_questions = _jsonish_list(
+        research_payload.get("open_questions") or research_payload.get("openQuestions") or []
+    )
+    coverage_gaps = _jsonish_list(
+        research_payload.get("coverage_gaps") or research_payload.get("coverageGaps") or []
+    )
+    recommended_angle = str(
+        research_payload.get("recommended_angle")
+        or research_payload.get("recommendedAngle")
+        or ""
+    )
+    research_trace = _normalize_jsonish(research_payload.get("researchTrace") or research_payload.get("research_trace") or {})
+    if not isinstance(research_trace, dict):
+        research_trace = {}
+    internal_findings = _normalize_jsonish(research_payload.get("internalFindings") or research_payload.get("internal_findings") or {})
+    if not isinstance(internal_findings, dict):
+        internal_findings = {}
+    source_discovery = _normalize_jsonish(research_payload.get("sourceDiscovery") or research_payload.get("source_discovery") or {})
+    if not isinstance(source_discovery, dict):
+        source_discovery = {}
+    synthesis = _normalize_jsonish(research_payload.get("synthesis") or {})
+    if not isinstance(synthesis, dict):
+        synthesis = {}
+
+    internal_findings = {
+        "summary": internal_findings.get("summary") or research_payload.get("internalSummary") or research_payload.get("summary") or "",
+        "evidenceItemIds": _string_list(internal_findings.get("evidenceItemIds") or internal_findings.get("evidence_item_ids") or evidence_item_ids),
+        "queries": _jsonish_list(internal_findings.get("queries") or queries),
+        "papyrusUrisInspected": _jsonish_list(
+            internal_findings.get("papyrusUrisInspected")
+            or internal_findings.get("papyrus_uris_inspected")
+            or research_trace.get("papyrusUrisInspected")
+            or []
+        ),
+    }
+    source_discovery = {
+        "webSearches": _jsonish_list(source_discovery.get("webSearches") or source_discovery.get("web_searches") or research_trace.get("webSearches") or []),
+        "sourceSnapshots": _jsonish_list(source_discovery.get("sourceSnapshots") or source_discovery.get("source_snapshots") or source_snapshots),
+        "proposedReferences": _jsonish_list(source_discovery.get("proposedReferences") or source_discovery.get("proposed_references") or proposed_references),
+        "blockedReason": source_discovery.get("blockedReason") or source_discovery.get("blocked_reason") or research_payload.get("blockedReason") or research_payload.get("blocked_reason"),
+    }
+    synthesis = {
+        "summary": synthesis.get("summary") or research_payload.get("summary") or "",
+        "recommendedAngle": synthesis.get("recommendedAngle") or synthesis.get("recommended_angle") or recommended_angle,
+        "openQuestions": _jsonish_list(synthesis.get("openQuestions") or synthesis.get("open_questions") or open_questions),
+        "coverageGaps": _jsonish_list(synthesis.get("coverageGaps") or synthesis.get("coverage_gaps") or coverage_gaps),
+    }
     return {
+        "researchMode": research_mode,
         "status": "researched",
         "summary": str(research_payload.get("summary") or ""),
         "corpusKey": research_payload.get("corpus_key") or research_payload.get("corpusKey") or assignment.get("corpusId"),
@@ -1829,13 +1897,13 @@ def _research_packet_metadata(research_payload: dict[str, Any], assignment: dict
         "doctrineContext": _normalize_jsonish(
             research_payload.get("doctrine_context") or research_payload.get("doctrineContext") or {}
         ),
-        "queries": _jsonish_list(research_payload.get("queries") or []),
-        "sourceSnapshots": _jsonish_list(
-            research_payload.get("source_snapshots") or research_payload.get("sourceSnapshots") or []
-        ),
-        "proposedReferences": _jsonish_list(
-            research_payload.get("proposed_references") or research_payload.get("proposedReferences") or []
-        ),
+        "queries": queries,
+        "sourceSnapshots": source_snapshots,
+        "proposedReferences": proposed_references,
+        "internalFindings": internal_findings,
+        "sourceDiscovery": source_discovery,
+        "synthesis": synthesis,
+        "researchTrace": research_trace,
         "researchNotes": _jsonish_list(
             research_payload.get("research_notes") or research_payload.get("researchNotes") or []
         ),
@@ -1845,17 +1913,9 @@ def _research_packet_metadata(research_payload: dict[str, Any], assignment: dict
         "rubricAssessments": _jsonish_list(
             research_payload.get("rubric_assessments") or research_payload.get("rubricAssessments") or []
         ),
-        "openQuestions": _jsonish_list(
-            research_payload.get("open_questions") or research_payload.get("openQuestions") or []
-        ),
-        "coverageGaps": _jsonish_list(
-            research_payload.get("coverage_gaps") or research_payload.get("coverageGaps") or []
-        ),
-        "recommendedAngle": str(
-            research_payload.get("recommended_angle")
-            or research_payload.get("recommendedAngle")
-            or ""
-        ),
+        "openQuestions": open_questions,
+        "coverageGaps": coverage_gaps,
+        "recommendedAngle": recommended_angle,
         "procedure": {
             "role": "researcher",
             "name": "procedures/newsroom/researcher.tac",
@@ -1863,6 +1923,13 @@ def _research_packet_metadata(research_payload: dict[str, Any], assignment: dict
             "generatedAt": now,
         },
     }
+
+
+def _normalize_research_mode(value: Any) -> str:
+    mode = str(value or "source_discovery").strip().lower().replace("-", "_")
+    if mode not in {"internal_brief", "source_discovery", "full_research"}:
+        return "source_discovery"
+    return mode
 
 
 def _semantic_relation(

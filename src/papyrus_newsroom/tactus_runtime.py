@@ -12,7 +12,9 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
-from . import newsroom
+from . import newsroom, reference_curation_signals
+from papyrus_knowledge_query.engine import run_knowledge_query
+from papyrus_knowledge_query.services import build_environment_services
 
 
 def _jsonable(value: Any) -> Any:
@@ -98,6 +100,11 @@ _ARRAY_SHAPED_KEYS = {
     "rubricAssessments",
     "sourceSnapshots",
     "comparisonFindings",
+    "acceptedEvidenceIds",
+    "knowledgeQueries",
+    "papyrusUrisInspected",
+    "unresolvedGaps",
+    "webSearches",
     "context_sources",
     "coverage_gaps",
     "evidence_item_ids",
@@ -107,6 +114,11 @@ _ARRAY_SHAPED_KEYS = {
     "rubric_assessments",
     "source_snapshots",
     "comparison_findings",
+    "accepted_evidence_ids",
+    "knowledge_queries",
+    "papyrus_uris_inspected",
+    "unresolved_gaps",
+    "web_searches",
 }
 
 
@@ -168,6 +180,13 @@ API_METHODS: dict[tuple[str, str], Callable[[dict[str, Any]], Any]] = {
     ("track", "list"): lambda args: newsroom.papyrus_list_research_tracks(),
     ("track", "get"): lambda args: newsroom.papyrus_get_research_track(args.get("key") or args.get("track_key")),
     ("reference", "get"): lambda args: newsroom.papyrus_get_reference(args.get("id") or args.get("reference_id")),
+    ("reference", "list"): lambda args: reference_curation_signals.reference_list(
+        corpus_key=args.get("corpus_key") or args.get("corpusKey") or "AI-ML-research",
+        limit=args.get("limit") or 25,
+        status=args.get("status") or "",
+        order=args.get("order") or "newest",
+        scan_limit=args.get("scan_limit") or args.get("scanLimit") or 1000,
+    ),
     ("reference", "doi_backfill_plan"): lambda args: newsroom.papyrus_doi_backfill_plan(
         corpus_key=args.get("corpus_key") or args.get("corpusKey") or "AI-ML-research",
         max_count=args.get("max_count") or args.get("maxCount") or 0,
@@ -188,6 +207,43 @@ API_METHODS: dict[tuple[str, str], Callable[[dict[str, Any]], Any]] = {
         run_id=args.get("run_id") or args.get("runId") or "",
         manifest_path=args.get("manifest_path") or args.get("manifestPath") or "",
     ),
+    ("reference", "quality_get"): lambda args: reference_curation_signals.reference_quality_get(
+        reference_id=args.get("reference") or args.get("reference_id") or args.get("referenceId") or args.get("id"),
+    ),
+    ("reference", "quality_set"): lambda args: reference_curation_signals.reference_quality_set(
+        reference_id=args.get("reference") or args.get("reference_id") or args.get("referenceId") or args.get("id"),
+        rating=args.get("rating"),
+        note=args.get("note") or "",
+        actor_label=args.get("actor_label") or args.get("actorLabel") or "papyrus-tactus",
+        apply=bool(args.get("apply") or False),
+        refresh=bool(args.get("refresh") or False),
+        persist_local_metadata=not (args.get("persist_local_metadata") is False or args.get("persistLocalMetadata") is False),
+    ),
+    ("reference", "quality_assess"): lambda args: reference_curation_signals.reference_quality_assess(
+        reference_id=args.get("reference") or args.get("reference_id") or args.get("referenceId") or args.get("id"),
+        model=args.get("model") or "gpt-5.4-mini",
+        apply=bool(args.get("apply") or False),
+        refresh=bool(args.get("refresh") or False),
+        persist_local_metadata=not (args.get("persist_local_metadata") is False or args.get("persistLocalMetadata") is False),
+        source_text=args.get("source_text") or args.get("sourceText") or "",
+        source_text_file=args.get("source_text_file") or args.get("sourceTextFile") or "",
+    ),
+    ("reference", "summarize"): lambda args: reference_curation_signals.reference_summarize(
+        reference_id=args.get("reference") or args.get("reference_id") or args.get("referenceId") or args.get("id"),
+        max_tokens=args.get("max_tokens") or args.get("maxTokens"),
+        summary_text=args.get("summary_text") or args.get("summaryText") or "",
+        source_text=args.get("source_text") or args.get("sourceText") or "",
+        source_text_file=args.get("source_text_file") or args.get("sourceTextFile") or "",
+        model=args.get("model") or "gpt-5.4-mini",
+        apply=bool(args.get("apply") or False),
+        refresh=bool(args.get("refresh") or False),
+    ),
+    ("reference", "summaries"): lambda args: reference_curation_signals.reference_summaries(
+        reference_id=args.get("reference") or args.get("reference_id") or args.get("referenceId") or args.get("id"),
+        max_tokens=args.get("max_tokens") or args.get("maxTokens"),
+    ),
+    ("knowledge", "query"): lambda args: run_knowledge_query(_knowledge_query_input(args), build_environment_services()),
+    ("papyrus", "resolve_uri"): lambda args: newsroom.papyrus_resolve_uri(args.get("uri") or args.get("objectUri")),
     ("semantic", "object"): lambda args: newsroom.papyrus_get_semantic_object(
         kind=args.get("kind"),
         object_id=args.get("id") or args.get("object_id"),
@@ -210,6 +266,37 @@ API_METHODS: dict[tuple[str, str], Callable[[dict[str, Any]], Any]] = {
     ("plan", "assignment_research_packet"): lambda args: newsroom.build_assignment_research_packet_plan(**args),
     ("plan", "draft_update"): lambda args: newsroom.build_draft_update_plan(**args),
 }
+
+
+def _knowledge_query_input(args: dict[str, Any]) -> dict[str, Any]:
+    payload = args.get("input")
+    if isinstance(payload, dict):
+        return payload
+
+    scope = dict(args.get("scope")) if isinstance(args.get("scope"), dict) else {}
+    output = dict(args.get("output")) if isinstance(args.get("output"), dict) else {}
+    if args.get("depth") is not None:
+        scope["depth"] = args.get("depth")
+    top_k = args.get("top_k") if args.get("top_k") is not None else args.get("topK")
+    if top_k is not None:
+        scope["topK"] = top_k
+    max_tokens = args.get("max_tokens") if args.get("max_tokens") is not None else args.get("maxTokens")
+    if max_tokens is not None:
+        output["maxTokens"] = max_tokens
+    if args.get("format") and not output.get("format"):
+        output["format"] = args.get("format")
+
+    anchors = args.get("anchors") or []
+    if args.get("uri") or args.get("objectUri"):
+        anchors = [{"uri": args.get("uri") or args.get("objectUri")}]
+
+    return {
+        "anchors": anchors,
+        "semanticQuery": args.get("query") or args.get("semantic_query") or args.get("semanticQuery") or "",
+        "scope": scope,
+        "profile": args.get("profile") or "researcher",
+        "output": output or {"format": "structured"},
+    }
 
 
 DOCS: dict[str, dict[str, Any]] = {
@@ -329,6 +416,8 @@ HELPER_BINDINGS: tuple[tuple[str, str, str], ...] = (
     ("reference_doi_backfill_plan", "reference", "doi_backfill_plan"),
     ("reference_doi_backfill_run", "reference", "doi_backfill_run"),
     ("reference_doi_backfill_manifest", "reference", "doi_backfill_manifest"),
+    ("knowledge_query", "knowledge", "query"),
+    ("resolve_papyrus_uri", "papyrus", "resolve_uri"),
     ("recent_published_articles", "article", "recent_published"),
     ("biblicus_steering_artifacts", "biblicus", "steering_artifacts"),
     ("biblicus_topic_context", "biblicus", "topic_context"),
@@ -354,7 +443,9 @@ class PapyrusRuntimeModule:
         for namespace, method in API_METHODS:
             methods_by_namespace.setdefault(namespace, set()).add(method)
         for namespace, methods in methods_by_namespace.items():
-            setattr(self, namespace, _Namespace(self._call, namespace, methods))
+            if namespace != "papyrus":
+                setattr(self, namespace, _Namespace(self._call, namespace, methods))
+        self.resolve_uri = self._make_root_call("resolve_uri")
         self.docs = _Namespace(self._call_docs, "docs", {"list", "get"})
         self.api = _Namespace(self._call_api, "api", {"list"})
 
@@ -363,7 +454,10 @@ class PapyrusRuntimeModule:
         return list(self._api_calls)
 
     def _record_api_call(self, namespace: str, method: str) -> None:
-        self._api_calls.append(f"papyrus.{namespace}.{method}")
+        if namespace == "papyrus":
+            self._api_calls.append(f"papyrus.{method}")
+        else:
+            self._api_calls.append(f"papyrus.{namespace}.{method}")
 
     def _call(self, namespace: str, method: str, args: Any = None) -> Any:
         handler = API_METHODS.get((namespace, method))
@@ -372,6 +466,12 @@ class PapyrusRuntimeModule:
         parsed = _args(args)
         self._record_api_call(namespace, method)
         return handler(parsed)
+
+    def _make_root_call(self, method: str) -> Callable[[Any], Any]:
+        def call(args: Any = None) -> Any:
+            return self._call("papyrus", method, args)
+
+        return call
 
     def _call_docs(self, namespace: str, method: str, args: Any = None) -> Any:
         parsed = _args(args)
@@ -406,7 +506,10 @@ class PapyrusRuntimeModule:
         self._record_api_call("api", "list")
         api: dict[str, list[str]] = {}
         for namespace_name, method_name in API_METHODS:
-            api.setdefault(f"papyrus.{namespace_name}", []).append(method_name)
+            if namespace_name == "papyrus":
+                api.setdefault("papyrus", []).append(method_name)
+            else:
+                api.setdefault(f"papyrus.{namespace_name}", []).append(method_name)
         api.setdefault("papyrus.docs", []).extend(["list", "get"])
         api.setdefault("papyrus.api", []).append("list")
         return {key: sorted(set(values)) for key, values in sorted(api.items())}
@@ -422,10 +525,11 @@ def _wrap_tactus_snippet(tactus: str) -> str:
         "end",
     ]
     for helper_name, namespace, method in HELPER_BINDINGS:
+        call_expression = f"papyrus.{method}(args)" if namespace == "papyrus" else f"papyrus.{namespace}.{method}(args)"
         helper_lines.extend(
             [
                 f"function {helper_name}(args)",
-                f"  return __papyrus_capture(papyrus.{namespace}.{method}(args))",
+                f"  return __papyrus_capture({call_expression})",
                 "end",
             ]
         )
@@ -479,6 +583,7 @@ def _research_harness(
     assignment_item_json: str,
     corpus_key: str,
     max_evidence_items: int,
+    research_mode: str = "",
 ) -> str:
     assignment_json = assignment_item_json or "{}"
     evidence_limit = max(int(max_evidence_items or 1), 1)
@@ -488,12 +593,17 @@ def _research_harness(
         else f'local assignment = json.decode({_lua_string(assignment_json)})\nlocal assignment_is_live = assignment.assignmentTypeKey ~= nil and assignment.type == nil'
     )
     return f"""
-local json = require("tactus.io.json")
-local web = require("tactus.web")
+	local json = require("tactus.io.json")
+	local __web = nil
 
-{assignment_loader}
+	{assignment_loader}
 local corpus_key = {_lua_string(corpus_key or "")}
 local max_evidence_items = {evidence_limit}
+local requested_research_mode = {_lua_string(research_mode or "")}
+
+if assignment_is_live and (assignment.queueKey == nil or assignment.queueKey == "") then
+    error("live assignment research packets require assignment.queueKey")
+end
 
 local function trim_results(results)
     local trimmed = {{}}
@@ -506,8 +616,42 @@ local function trim_results(results)
     return trimmed
 end
 
-local function web_search(query)
-    local result = web.search{{
+local function normalize_research_mode(value)
+    local mode = tostring(value or "")
+    mode = string.gsub(string.lower(mode), "%-", "_")
+    if mode == "internal_brief" or mode == "source_discovery" or mode == "full_research" then
+        return mode
+    end
+    return "source_discovery"
+end
+
+local function assignment_metadata()
+    local metadata = assignment.metadata or {{}}
+    if type(metadata) == "string" then
+        local ok, decoded = pcall(json.decode, metadata)
+        if ok and type(decoded) == "table" then
+            metadata = decoded
+        else
+            metadata = {{}}
+        end
+    end
+    if type(metadata) ~= "table" then
+        metadata = {{}}
+    end
+    return metadata
+end
+
+local __metadata = assignment_metadata()
+local research_mode = normalize_research_mode(
+    requested_research_mode ~= "" and requested_research_mode or (__metadata.researchMode or __metadata.research_mode)
+)
+local __web_searches = {{}}
+
+	local function web_search(query)
+	    if __web == nil then
+	        __web = require("tactus.web")
+	    end
+	    local result = __web.search{{
         provider = "openai",
         query = query,
         model = "gpt-5.4-mini",
@@ -515,8 +659,69 @@ local function web_search(query)
         max_results = max_evidence_items,
     }}
     result.results = trim_results(result.results)
+    __web_searches[#__web_searches + 1] = query
     return result
 end
+
+	local function knowledge_search(query, options)
+	    options = options or {{}}
+	    return knowledge_query{{
+	        query = query,
+        profile = options.profile or "researcher",
+        format = options.format or "both",
+        max_tokens = options.max_tokens or options.maxTokens or 1200,
+        top_k = options.top_k or options.topK or max_evidence_items,
+        depth = options.depth or 1,
+	        anchors = options.anchors or {{}},
+	    }}
+	end
+
+	local function resolve_papyrus_uri(uri)
+	    return papyrus.resolve_uri{{ uri = uri }}
+	end
+
+	local function knowledge_search_uri(uri, options)
+	    options = options or {{}}
+	    local anchors = options.anchors or {{ {{ uri = uri }} }}
+	    return knowledge_query{{
+	        query = options.query or options.semantic_query or options.semanticQuery or "",
+	        profile = options.profile or "researcher",
+	        format = options.format or "both",
+	        max_tokens = options.max_tokens or options.maxTokens or 1000,
+	        top_k = options.top_k or options.topK or max_evidence_items,
+	        depth = options.depth or 1,
+	        anchors = anchors,
+	    }}
+	end
+
+	local function evidence_item_ids_from_knowledge(knowledge)
+	    local ids = {{}}
+	    local seen = {{}}
+	    local structured = knowledge and knowledge.structured or {{}}
+	    local collections = {{
+	        structured.semanticMatches or {{}},
+	        structured.relatedRecords or {{}},
+	        structured.expandedObjects or {{}},
+	        structured.anchors or {{}},
+	    }}
+	    local out_index = 1
+	    local collection_index = 1
+	    while collections[collection_index] and out_index <= max_evidence_items do
+	        local records = collections[collection_index]
+	        local index = 1
+	        while records[index] and out_index <= max_evidence_items do
+	            local record = records[index]
+	            if record.kind == "reference" and record.id and record.curationStatus == "accepted" and not seen[record.id] then
+	                ids[out_index] = record.id
+	                seen[record.id] = true
+	                out_index = out_index + 1
+	            end
+	            index = index + 1
+	        end
+	        collection_index = collection_index + 1
+	    end
+	    return ids
+	end
 
 local function compact_record_plan(plan)
     local records = {{}}
@@ -559,8 +764,44 @@ local function compact_record_plan(plan)
 end
 
 local function finish_research(research)
+    research.research_mode = normalize_research_mode(research.research_mode or research.researchMode or research_mode)
     research.corpus_key = research.corpus_key or corpus_key
     research.evidence_item_ids = research.evidence_item_ids or {{}}
+    research.researchTrace = research.researchTrace or {{}}
+    research.researchTrace.webSearches = research.researchTrace.webSearches or __web_searches
+    research.researchTrace.acceptedEvidenceIds = research.researchTrace.acceptedEvidenceIds or research.evidence_item_ids
+    research.internalFindings = research.internalFindings or {{
+        summary = research.internal_summary or research.summary or "",
+        evidenceItemIds = research.evidence_item_ids,
+        queries = research.queries or {{}},
+        papyrusUrisInspected = research.researchTrace.papyrusUrisInspected or {{}},
+    }}
+    research.sourceDiscovery = research.sourceDiscovery or {{
+        webSearches = research.researchTrace.webSearches or {{}},
+        sourceSnapshots = research.source_snapshots or research.sourceSnapshots or {{}},
+        proposedReferences = research.proposed_references or research.proposedReferences or {{}},
+        blockedReason = research.blocked_reason or research.blockedReason,
+    }}
+    research.synthesis = research.synthesis or {{
+        summary = research.summary or "",
+        recommendedAngle = research.recommended_angle or research.recommendedAngle or "",
+        openQuestions = research.open_questions or research.openQuestions or {{}},
+        coverageGaps = research.coverage_gaps or research.coverageGaps or {{}},
+    }}
+    if research.research_mode ~= "internal_brief" then
+        local has_web_search = research.researchTrace.webSearches and research.researchTrace.webSearches[1] ~= nil
+        local has_source_snapshot = (research.source_snapshots and research.source_snapshots[1] ~= nil)
+            or (research.sourceSnapshots and research.sourceSnapshots[1] ~= nil)
+            or (research.sourceDiscovery and research.sourceDiscovery.sourceSnapshots and research.sourceDiscovery.sourceSnapshots[1] ~= nil)
+        local has_proposed_reference = (research.proposed_references and research.proposed_references[1] ~= nil)
+            or (research.proposedReferences and research.proposedReferences[1] ~= nil)
+            or (research.sourceDiscovery and research.sourceDiscovery.proposedReferences and research.sourceDiscovery.proposedReferences[1] ~= nil)
+        local blocked_reason = research.blocked_reason or research.blockedReason
+            or (research.sourceDiscovery and (research.sourceDiscovery.blockedReason or research.sourceDiscovery.blocked_reason))
+        if not has_web_search and not has_source_snapshot and not has_proposed_reference and not blocked_reason then
+            error("research mode " .. research.research_mode .. " requires web discovery or blockedReason")
+        end
+    end
     local plan = nil
     if assignment_is_live then
         plan = plan_assignment_research_packet{{
@@ -655,11 +896,12 @@ end
 local function finish_research_from_search(search, options)
     options = options or {{}}
     return finish_research{{
+        research_mode = options.research_mode or options.researchMode,
         summary = options.summary or search_summary(search),
         queries = {{ search.query }},
         source_snapshots = search.results or {{}},
         proposed_references = options.proposed_references or proposed_references_from_search(search),
-        evidence_item_ids = {{}},
+        evidence_item_ids = options.evidence_item_ids or options.evidenceItemIds or {{}},
         recommended_angle = options.recommended_angle or "Assess the source as a reference prospect before using it as evidence.",
         open_questions = options.open_questions or {{}},
         coverage_gaps = options.coverage_gaps or {{}},
@@ -679,7 +921,8 @@ def execute_tactus_harnessed(
     assignment_id: str = "",
     assignment_item_json: str = "",
     corpus_key: str = "",
-    max_evidence_items: int = 8,
+    max_evidence_items: int = 20,
+    research_mode: str = "",
 ) -> dict[str, Any]:
     if harness == "raw":
         return execute_tactus(tactus)
@@ -690,6 +933,7 @@ def execute_tactus_harnessed(
             assignment_item_json=assignment_item_json,
             corpus_key=corpus_key,
             max_evidence_items=max_evidence_items,
+            research_mode=research_mode,
         )
         return execute_tactus(snippet)
     return _response_envelope(

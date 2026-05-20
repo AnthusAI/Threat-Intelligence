@@ -10,8 +10,10 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from papyrus_newsroom import newsroom as papyrus_newsroom
+from papyrus_newsroom import reference_curation_signals
 from papyrus_newsroom import semantic as papyrus_semantic
 from papyrus_newsroom import tactus_runtime
+from papyrus_knowledge_query.uris import parse_papyrus_uri
 
 
 class NewsroomToolTests(unittest.TestCase):
@@ -36,10 +38,39 @@ class NewsroomToolTests(unittest.TestCase):
         self.assertIn("context", result["value"]["api"]["papyrus.assignment"])
         self.assertIn("assignment_research_packet", result["value"]["api"]["papyrus.plan"])
         self.assertIn("doi_backfill_plan", result["value"]["api"]["papyrus.reference"])
+        self.assertIn("quality_set", result["value"]["api"]["papyrus.reference"])
+        self.assertIn("quality_assess", result["value"]["api"]["papyrus.reference"])
+        self.assertIn("summarize", result["value"]["api"]["papyrus.reference"])
+        self.assertIn("list", result["value"]["api"]["papyrus.reference"])
+        self.assertIn("summaries", result["value"]["api"]["papyrus.reference"])
+        self.assertIn("query", result["value"]["api"]["papyrus.knowledge"])
+        self.assertIn("resolve_uri", result["value"]["api"]["papyrus"])
         self.assertEqual(
             result["api_calls"],
             ["papyrus.api.list", "papyrus.docs.list"],
         )
+
+    def test_parse_papyrus_uri_supports_agent_visible_kinds(self):
+        cases = {
+            "papyrus://reference/reference-1": ("reference", "reference-1"),
+            "papyrus://item/item-1": ("item", "item-1"),
+            "papyrus://category/category-1": ("category", "category-1"),
+            "papyrus://semanticNode/node-1": ("semanticNode", "node-1"),
+            "papyrus://message/message-1": ("message", "message-1"),
+            "papyrus://assignment/assignment-1": ("assignment", "assignment-1"),
+        }
+        for uri, expected in cases.items():
+            with self.subTest(uri=uri):
+                parsed = parse_papyrus_uri(uri)
+                self.assertEqual((parsed["kind"], parsed["id"]), expected)
+                self.assertEqual(parsed["lineageId"], expected[1])
+                self.assertEqual(parsed["objectUri"], uri)
+
+    def test_parse_papyrus_uri_rejects_invalid_uri(self):
+        for uri in ["https://reference/reference-1", "papyrus://unknown/object-1", "papyrus://reference/"]:
+            with self.subTest(uri=uri):
+                with self.assertRaises(ValueError):
+                    parse_papyrus_uri(uri)
 
     def test_execute_tactus_composes_dry_run_plan_code(self):
         result = tactus_runtime.execute_tactus(
@@ -566,6 +597,25 @@ return plan_research_update{ assignment_item = assignment, research = research }
                     }
                 ],
                 "evidence_item_ids": [],
+                "research_mode": "source_discovery",
+                "internalFindings": {
+                    "summary": "Internal evidence is thin.",
+                    "evidenceItemIds": [],
+                    "queries": ["automated publication systems newsroom"],
+                },
+                "sourceDiscovery": {
+                    "webSearches": ["automated publication systems newsroom"],
+                    "sourceSnapshots": [
+                        {
+                            "url": "https://example.com/source",
+                            "source_domain": "example.com",
+                        }
+                    ],
+                },
+                "synthesis": {
+                    "summary": "Found one current source prospect.",
+                    "recommendedAngle": "Review as intake candidate.",
+                },
                 "recommended_angle": "Review as intake candidate.",
             },
         )
@@ -581,6 +631,10 @@ return plan_research_update{ assignment_item = assignment, research = research }
         metadata = json.loads(metadata_attachment["body"])
         self.assertEqual(metadata["kind"], "research.packet.created")
         self.assertEqual(metadata["assignmentId"], "assignment-live-123")
+        self.assertEqual(metadata["research"]["researchMode"], "source_discovery")
+        self.assertEqual(metadata["research"]["internalFindings"]["summary"], "Internal evidence is thin.")
+        self.assertEqual(metadata["research"]["sourceDiscovery"]["webSearches"], ["automated publication systems newsroom"])
+        self.assertEqual(metadata["research"]["synthesis"]["recommendedAngle"], "Review as intake candidate.")
         self.assertEqual(metadata["research"]["sourceSnapshots"][0]["source_domain"], "example.com")
         self.assertEqual(metadata["research"]["proposedReferences"][0]["ingestion_rationale"], "Candidate source relates to the focus and publication mission.")
         relation = plan["records"][3]["input"]
@@ -617,6 +671,189 @@ return plan_assignment_research_packet{ assignment = assignment, research = rese
         self.assertEqual(result["value"]["records"][0]["modelName"], "Message")
         self.assertEqual(result["value"]["records"][3]["input"]["relationTypeKey"], "comment")
         self.assertEqual(result["api_calls"], ["papyrus.plan.assignment_research_packet"])
+
+    def test_execute_tactus_exposes_knowledge_query_helper(self):
+        with mock.patch("papyrus_newsroom.tactus_runtime.build_environment_services", return_value=object()), \
+             mock.patch("papyrus_newsroom.tactus_runtime.run_knowledge_query") as run_query:
+            run_query.return_value = {
+                "structured": {"semanticMatches": []},
+                "context": {"text": "Accepted context."},
+                "warnings": [],
+            }
+            result = tactus_runtime.execute_tactus(
+                'return knowledge_query{ query = "agent memory", max_tokens = 200, top_k = 3, format = "both" }'
+            )
+
+        self.assertTrue(result["ok"], result.get("error"))
+        self.assertEqual(result["value"]["context"]["text"], "Accepted context.")
+        self.assertEqual(result["api_calls"], ["papyrus.knowledge.query"])
+        run_query.assert_called_once()
+        query_input = run_query.call_args.args[0]
+        self.assertEqual(query_input["semanticQuery"], "agent memory")
+        self.assertEqual(query_input["scope"]["topK"], 3)
+        self.assertEqual(query_input["output"]["maxTokens"], 200)
+
+    def test_execute_tactus_exposes_papyrus_uri_resolver(self):
+        with mock.patch("papyrus_newsroom.tactus_runtime.newsroom.papyrus_resolve_uri") as resolve_uri:
+            resolve_uri.return_value = {
+                "uri": "papyrus://reference/reference-1",
+                "kind": "reference",
+                "lineageId": "reference-1",
+                "object": {"id": "reference-1-v1", "lineageId": "reference-1", "curationStatus": "accepted"},
+            }
+            result = tactus_runtime.execute_tactus('return papyrus.resolve_uri{ uri = "papyrus://reference/reference-1" }')
+
+        self.assertTrue(result["ok"], result.get("error"))
+        self.assertEqual(result["value"]["object"]["id"], "reference-1-v1")
+        self.assertEqual(result["api_calls"], ["papyrus.resolve_uri"])
+        resolve_uri.assert_called_once_with("papyrus://reference/reference-1")
+
+    def test_knowledge_query_helper_accepts_uri_anchor(self):
+        with mock.patch("papyrus_newsroom.tactus_runtime.build_environment_services", return_value=object()), \
+             mock.patch("papyrus_newsroom.tactus_runtime.run_knowledge_query") as run_query:
+            run_query.return_value = {
+                "structured": {"anchors": [{"kind": "reference", "lineageId": "reference-1"}]},
+                "context": {"text": "Anchored context."},
+                "warnings": [],
+            }
+            result = tactus_runtime.execute_tactus(
+                'return knowledge_query{ uri = "papyrus://reference/reference-1", max_tokens = 200, top_k = 3 }'
+            )
+
+        self.assertTrue(result["ok"], result.get("error"))
+        self.assertEqual(result["value"]["context"]["text"], "Anchored context.")
+        query_input = run_query.call_args.args[0]
+        self.assertEqual(query_input["anchors"], [{"uri": "papyrus://reference/reference-1"}])
+
+    def test_research_harness_supports_uri_anchored_knowledge_trace(self):
+        assignment = {
+            "id": "assignment-live-123",
+            "assignmentTypeKey": "research.edition-candidate",
+            "queueKey": "research#open",
+            "status": "open",
+            "title": "Explore internal evidence",
+        }
+        with mock.patch("papyrus_newsroom.tactus_runtime.build_environment_services", return_value=object()), \
+             mock.patch("papyrus_newsroom.tactus_runtime.run_knowledge_query") as run_query:
+            run_query.return_value = {
+                "structured": {
+                    "anchors": [
+                        {"kind": "reference", "id": "reference-1-v1", "lineageId": "reference-1", "curationStatus": "accepted"}
+                    ],
+                    "semanticMatches": [],
+                },
+                "context": {"text": "Accepted anchored context."},
+                "warnings": [],
+            }
+            result = tactus_runtime.execute_tactus_harnessed(
+                """
+local knowledge = knowledge_search_uri("papyrus://reference/reference-1", { max_tokens = 300 })
+local ids = evidence_item_ids_from_knowledge(knowledge)
+return finish_research{
+  summary = "Built exploratory packet from internal evidence.",
+  queries = {"anchored query"},
+  source_snapshots = {},
+  proposed_references = {},
+  evidence_item_ids = ids,
+  recommended_angle = "Start with accepted internal evidence.",
+  researchTrace = {
+    knowledgeQueries = {"anchored query"},
+    papyrusUrisInspected = {"papyrus://reference/reference-1"},
+    webSearches = {},
+    acceptedEvidenceIds = ids,
+    unresolvedGaps = {},
+  },
+}
+""",
+                harness="research",
+                assignment_item_json=json.dumps(assignment),
+                corpus_key="AI-ML-research",
+                max_evidence_items=8,
+                research_mode="internal_brief",
+            )
+
+        self.assertTrue(result["ok"], result.get("error"))
+        self.assertEqual(result["value"]["research_packet"]["evidence_item_ids"], ["reference-1-v1"])
+        self.assertEqual(result["value"]["research_packet"]["research_mode"], "internal_brief")
+        self.assertEqual(result["value"]["research_packet"]["researchTrace"]["webSearches"], [])
+        self.assertEqual(result["value"]["research_record_plan"]["records"][0]["modelName"], "Message")
+        self.assertEqual(result["api_calls"], ["papyrus.knowledge.query", "papyrus.plan.assignment_research_packet"])
+
+    def test_research_harness_requires_discovery_for_source_discovery_mode(self):
+        assignment = {
+            "id": "assignment-live-123",
+            "assignmentTypeKey": "research.edition-candidate",
+            "queueKey": "research#open",
+            "status": "open",
+            "title": "Explore source discovery",
+        }
+        result = tactus_runtime.execute_tactus_harnessed(
+            """
+return finish_research{
+  summary = "Internal-only packet should fail in source discovery mode.",
+  queries = {"agent catalog"},
+  source_snapshots = {},
+  proposed_references = {},
+  evidence_item_ids = {},
+  recommended_angle = "Find external source prospects.",
+  researchTrace = {
+    knowledgeQueries = {"agent catalog"},
+    papyrusUrisInspected = {},
+    webSearches = {},
+    acceptedEvidenceIds = {},
+    unresolvedGaps = {},
+  },
+}
+""",
+            harness="research",
+            assignment_item_json=json.dumps(assignment),
+            corpus_key="AI-ML-research",
+            max_evidence_items=8,
+            research_mode="source_discovery",
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertIn("requires web discovery", result["error"]["message"])
+
+    def test_research_harness_accepts_source_discovery_bundle_with_prospects(self):
+        assignment = {
+            "id": "assignment-live-123",
+            "assignmentTypeKey": "research.edition-candidate",
+            "queueKey": "research#open",
+            "status": "open",
+            "title": "Explore source discovery",
+        }
+        result = tactus_runtime.execute_tactus_harnessed(
+            """
+return finish_research{
+  research_mode = "source_discovery",
+  summary = "Internal orientation plus external prospect.",
+  queries = {"agent catalog"},
+  source_snapshots = { { url = "https://example.com/source", source_domain = "example.com" } },
+  proposed_references = { { title = "Candidate", url = "https://example.com/source", ingestion_rationale = "Candidate supports the research focus." } },
+  evidence_item_ids = {},
+  recommended_angle = "Compare current terminology.",
+  researchTrace = {
+    knowledgeQueries = {"agent catalog"},
+    papyrusUrisInspected = {},
+    webSearches = {"agent catalog business process automation"},
+    acceptedEvidenceIds = {},
+    unresolvedGaps = {},
+  },
+}
+""",
+            harness="research",
+            assignment_item_json=json.dumps(assignment),
+            corpus_key="AI-ML-research",
+            max_evidence_items=8,
+            research_mode="source_discovery",
+        )
+
+        self.assertTrue(result["ok"], result.get("error"))
+        packet = result["value"]["research_packet"]
+        self.assertEqual(packet["research_mode"], "source_discovery")
+        self.assertEqual(packet["sourceDiscovery"]["webSearches"], ["agent catalog business process automation"])
+        self.assertEqual(packet["sourceDiscovery"]["proposedReferences"][0]["title"], "Candidate")
 
     def test_track_research_warns_when_doctrine_context_and_rubric_are_missing(self):
         plan = papyrus_newsroom.build_research_update_plan(
@@ -752,6 +989,299 @@ return plan_assignment_research_packet{ assignment = assignment, research = rese
             papyrus_semantic.semantic_predicate_object_state_key("classified_as", "category", "category-1"),
             "classified_as#category#category-1#current",
         )
+
+    def test_semantic_client_resolves_papyrus_uri_by_lineage(self):
+        def fake_graphql(query, variables):
+            if "getReference" in query:
+                self.assertEqual(variables["id"], "reference-1")
+                return {"getReference": None}
+            if "listReferencesByLineageAndVersion" in query:
+                self.assertEqual(variables["lineageId"], "reference-1")
+                return {
+                    "listReferencesByLineageAndVersion": {
+                        "items": [
+                            {"id": "reference-1-v1", "lineageId": "reference-1", "versionNumber": 1, "versionState": "current", "title": "Reference 1"}
+                        ],
+                        "nextToken": None,
+                    }
+                }
+            raise AssertionError(f"Unexpected query {query}")
+
+        client = papyrus_semantic.PapyrusSemanticClient(fake_graphql)
+        resolved = client.resolve_uri("papyrus://reference/reference-1")
+
+        self.assertEqual(resolved["kind"], "reference")
+        self.assertEqual(resolved["lineageId"], "reference-1")
+        self.assertEqual(resolved["object"]["id"], "reference-1-v1")
+
+    def test_reference_quality_plan_uses_score_and_supersedes_stale_relation(self):
+        reference = {
+            "id": "reference-a-v1",
+            "lineageId": "reference-a",
+            "versionNumber": 1,
+            "corpusId": "knowledge-corpus-test",
+            "externalItemId": "item-a",
+            "title": "Reference A",
+            "importRunId": "import-1",
+        }
+
+        class FakeSemantic:
+            def get_semantic_object(self, _kind, _object_id):
+                return {"object": {"id": _object_id}}
+
+            def list_outgoing(self, _kind, _lineage_id):
+                return {
+                    "relations": [
+                        {
+                            "id": "quality-old",
+                            "relationState": "current",
+                            "relationTypeKey": "quality_rating_is",
+                            "predicate": "quality_rating_is",
+                            "objectLineageId": "semantic-node-quality-rating-2-star",
+                            "score": 2,
+                            "metadata": "{}",
+                        }
+                    ]
+                }
+
+        plan = reference_curation_signals.build_reference_quality_plan(
+            reference=reference,
+            rating=4,
+            note="strong source",
+            now="2026-05-19T12:00:00Z",
+            semantic_client=FakeSemantic(),
+        )
+
+        self.assertEqual(plan["action"], "create")
+        create, update = plan["records"]
+        self.assertEqual(update["action"], "update")
+        self.assertEqual(update["input"]["relationState"], "superseded")
+        self.assertEqual(create["input"]["relationTypeKey"], "quality_rating_is")
+        self.assertEqual(create["input"]["objectLineageId"], "semantic-node-quality-rating-4-star")
+        self.assertEqual(create["input"]["score"], 4)
+
+    def test_reference_summary_plan_is_budget_specific_message_relation(self):
+        reference = {
+            "id": "reference-a-v1",
+            "lineageId": "reference-a",
+            "versionNumber": 1,
+            "corpusId": "knowledge-corpus-test",
+            "externalItemId": "item-a",
+            "title": "Reference A",
+            "importRunId": "import-1",
+        }
+
+        class FakeSemantic:
+            def list_incoming(self, _kind, _lineage_id):
+                return {"relations": []}
+
+        plan = reference_curation_signals.build_reference_summary_plan(
+            reference=reference,
+            max_tokens=100,
+            summary_text="A short summary.",
+            source_text="Long source text.",
+            model="manual",
+            now="2026-05-19T12:00:00Z",
+            semantic_client=FakeSemantic(),
+        )
+
+        self.assertEqual(plan["action"], "create")
+        self.assertEqual(plan["message"]["messageKind"], "reference_summary")
+        relation = plan["records"][-1]["input"]
+        self.assertEqual(relation["relationTypeKey"], "reference_summary_100_tokens")
+        self.assertEqual(relation["subjectKind"], "message")
+        self.assertEqual(relation["objectKind"], "reference")
+        self.assertEqual(relation["metadata"]["maxTokens"], 100)
+
+    def test_publication_doctrine_context_loads_mission_and_policy(self):
+        def fake_graphql(_query, variables):
+            slug = variables["slug"]
+            body_by_slug = {
+                "editorial-doctrine-mission": ["Study publication systems as operational systems."],
+                "editorial-doctrine-policy": ["Published stories should distinguish evidence from speculation."],
+            }
+            return {
+                "itemBySlug": {
+                    "items": [
+                        {
+                            "id": f"item-{slug}-v1",
+                            "lineageId": f"item-{slug}",
+                            "versionNumber": 1,
+                            "versionState": "current",
+                            "type": "doctrine",
+                            "status": "private",
+                            "slug": slug,
+                            "title": "Editorial Mission" if "mission" in slug else "Editorial Policy",
+                            "body": body_by_slug[slug],
+                            "editorial": json.dumps({"kind": "mission" if "mission" in slug else "policy"}),
+                        }
+                    ],
+                    "nextToken": None,
+                }
+            }
+
+        context = reference_curation_signals.load_publication_doctrine_context(graphql_func=fake_graphql)
+
+        self.assertEqual(context["status"], "loaded")
+        self.assertEqual(context["scope"], "publication")
+        self.assertEqual(context["policyUse"], "context_only_not_reference_rubric")
+        self.assertEqual(context["slugs"], ["editorial-doctrine-mission", "editorial-doctrine-policy"])
+        self.assertTrue(context["contentHash"])
+
+    def test_summary_prompt_includes_doctrine_and_policy_use_warning(self):
+        context = {
+            "status": "loaded",
+            "scope": "publication",
+            "policyUse": "context_only_not_reference_rubric",
+            "slugs": ["editorial-doctrine-mission", "editorial-doctrine-policy"],
+            "records": [
+                {"slug": "editorial-doctrine-mission", "label": "Editorial Mission", "body": ["Study operational publication systems."]},
+                {"slug": "editorial-doctrine-policy", "label": "Editorial Policy", "body": ["Published items should be evidence-backed."]},
+            ],
+            "contentHash": "hash-1",
+            "warnings": [],
+        }
+        prompt = reference_curation_signals.build_summary_prompt(
+            "Reference source text.",
+            max_tokens=100,
+            reference={"title": "Reference A", "sourceUri": "https://example.test/ref"},
+            doctrine_context=context,
+        )
+
+        self.assertIn("Publication Context:", prompt)
+        self.assertIn("Study operational publication systems.", prompt)
+        self.assertIn("Published items should be evidence-backed.", prompt)
+        self.assertIn("should not be treated as rules that the Reference itself must satisfy", prompt)
+
+    def test_summary_metadata_records_doctrine_context(self):
+        reference = {
+            "id": "reference-a-v1",
+            "lineageId": "reference-a",
+            "versionNumber": 1,
+            "corpusId": "knowledge-corpus-test",
+            "externalItemId": "item-a",
+            "title": "Reference A",
+            "importRunId": "import-1",
+        }
+
+        class FakeSemantic:
+            def list_incoming(self, _kind, _lineage_id):
+                return {"relations": []}
+
+        doctrine_context = {
+            "status": "loaded",
+            "scope": "publication",
+            "policyUse": "context_only_not_reference_rubric",
+            "slugs": ["editorial-doctrine-mission", "editorial-doctrine-policy"],
+            "records": [],
+            "contentHash": "hash-1",
+            "warnings": [],
+        }
+        plan = reference_curation_signals.build_reference_summary_plan(
+            reference=reference,
+            max_tokens=100,
+            summary_text="A short summary.",
+            source_text="Long source text.",
+            model="gpt-5.4-mini",
+            doctrine_context=doctrine_context,
+            now="2026-05-19T12:00:00Z",
+            semantic_client=FakeSemantic(),
+        )
+
+        self.assertEqual(plan["metadata"]["promptVersion"], "reference-summary-v2-publication-doctrine")
+        self.assertEqual(plan["metadata"]["doctrineContextStatus"], "loaded")
+        self.assertEqual(plan["metadata"]["doctrineScope"], "publication")
+        self.assertEqual(plan["metadata"]["policyUse"], "context_only_not_reference_rubric")
+        self.assertEqual(plan["metadata"]["doctrineSlugs"], ["editorial-doctrine-mission", "editorial-doctrine-policy"])
+        self.assertEqual(plan["metadata"]["doctrineContentHash"], "hash-1")
+
+    def test_manual_summary_metadata_records_doctrine_not_used(self):
+        reference = {
+            "id": "reference-a-v1",
+            "lineageId": "reference-a",
+            "versionNumber": 1,
+            "corpusId": "knowledge-corpus-test",
+            "externalItemId": "item-a",
+            "title": "Reference A",
+            "importRunId": "import-1",
+        }
+
+        class FakeSemantic:
+            def list_incoming(self, _kind, _lineage_id):
+                return {"relations": []}
+
+        plan = reference_curation_signals.build_reference_summary_plan(
+            reference=reference,
+            max_tokens=100,
+            summary_text="Manual summary.",
+            model="manual",
+            doctrine_context=reference_curation_signals.manual_summary_doctrine_context(),
+            now="2026-05-19T12:00:00Z",
+            semantic_client=FakeSemantic(),
+        )
+
+        self.assertEqual(plan["metadata"]["doctrineContextStatus"], "not_used_manual_summary")
+        self.assertEqual(plan["metadata"]["policyUse"], "context_only_not_reference_rubric")
+
+    def test_quality_assessment_prompt_includes_doctrine_but_excludes_policy_as_rubric(self):
+        context = {
+            "status": "loaded",
+            "scope": "publication",
+            "policyUse": "context_only_not_reference_rubric",
+            "slugs": ["editorial-doctrine-mission", "editorial-doctrine-policy"],
+            "records": [
+                {"slug": "editorial-doctrine-mission", "label": "Editorial Mission", "body": ["Study operational publication systems."]},
+                {"slug": "editorial-doctrine-policy", "label": "Editorial Policy", "body": ["Published items should be evidence-backed."]},
+            ],
+            "contentHash": "hash-1",
+            "warnings": [],
+        }
+        prompt = reference_curation_signals.build_quality_assessment_prompt(
+            "Reference source text.",
+            reference={"title": "Reference A", "sourceUri": "https://example.test/ref"},
+            rubric="Rate 1 to 5 based on source quality.",
+            doctrine_context=context,
+        )
+
+        self.assertIn("Study operational publication systems.", prompt)
+        self.assertIn("Do not score the Reference by whether it complies with publication policies.", prompt)
+        self.assertIn("Rate 1 to 5 based on source quality.", prompt)
+
+    def test_quality_assessment_result_normalizes_structured_output(self):
+        response_payload = {
+            "output_text": json.dumps({
+                "rating": 4,
+                "rationale": "Strong peer-reviewed source.",
+                "evidence": ["Clear method", "Relevant findings"],
+                "caveats": ["Narrow benchmark"],
+            })
+        }
+
+        class FakeResponse:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def read(self):
+                return json.dumps(response_payload).encode("utf-8")
+
+        with mock.patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}), \
+             mock.patch("papyrus_newsroom.reference_curation_signals.urllib.request.urlopen", return_value=FakeResponse()):
+            result = reference_curation_signals.generate_quality_assessment(
+                "Reference source text.",
+                reference={"title": "Reference A"},
+                model="gpt-5.4-mini",
+                doctrine_context=reference_curation_signals.manual_summary_doctrine_context(),
+            )
+
+        self.assertEqual(result["rating"], 4)
+        self.assertNotIn("confidence", result)
+        self.assertEqual(result["promptVersion"], "reference-quality-v1-publication-doctrine")
+        self.assertEqual(result["evidence"], ["Clear method", "Relevant findings"])
 
     def test_semantic_neighbors_and_walk_use_graph_indexes(self):
         calls = []

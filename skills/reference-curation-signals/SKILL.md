@@ -213,6 +213,61 @@ quality scoring rubric; quality is scored by the explicit quality rubric. Use
 the CLI for direct operator curation or smoke tests. Both paths use the same
 Python planner and write the same graph contracts.
 
+## After Reference Intake
+
+Use this sequence after a pending reference has been accepted and source text is
+available.
+
+1. Decide quality with the user when the source is nuanced. Manual agreement is
+   valid and should be recorded directly:
+
+   ```bash
+   poetry run papyrus-newsroom references quality set \
+     --reference <reference-id> \
+     --rating <1-5> \
+     --note "<why this rating was chosen>" \
+     --actor-label "<operator-or-agent>" \
+     --apply
+   ```
+
+2. If the user wants the agent to classify quality from source text and the
+   quality rubric, use the assessor instead:
+
+   ```bash
+   poetry run papyrus-newsroom references quality assess \
+     --reference <reference-id> \
+     --apply
+   ```
+
+3. Generate budgeted summaries. Use at least a short summary for indexing and
+   broad context packs; add 200/500-token summaries when the source is important
+   enough to justify richer downstream context:
+
+   ```bash
+   poetry run papyrus-newsroom references summarize-batch \
+     --corpus-key <corpus-key> \
+     --budgets 100,200,500 \
+     --only-missing true \
+     --max-count 25 \
+     --apply
+   ```
+
+4. Sync the derived vector index after summaries and extracted-text attachments
+   exist. The vector store is not the source of truth and does not update merely
+   because a `Reference` was accepted:
+
+   ```bash
+   AWS_PROFILE=<profile> AWS_REGION=<region> PYTHONPATH=src \
+     python -m papyrus_newsroom knowledge-vector-index --action sync \
+     --corpus-id <corpus-id> \
+     --max-references 25 \
+     --dry-run
+   ```
+
+   Remove `--dry-run` only after reviewing the prepared vector count. See
+   `skills/knowledge-query/SKILL.md` for vector-index audit, sync, and rebuild
+   rules.
+
 ## Operational Rules
 
 - Run `relations import-types` and the normal semantic concept import path after

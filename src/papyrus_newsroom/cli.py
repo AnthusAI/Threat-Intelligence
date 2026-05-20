@@ -73,7 +73,8 @@ def main(argv: list[str] | None = None) -> int:
     execute_parser.add_argument("--assignment-id", default="")
     execute_parser.add_argument("--assignment-item-json", default="")
     execute_parser.add_argument("--corpus-key", default="")
-    execute_parser.add_argument("--max-evidence-items", type=int, default=8)
+    execute_parser.add_argument("--max-evidence-items", type=int, default=20)
+    execute_parser.add_argument("--research-mode", default="")
 
     semantic_search_parser = subparsers.add_parser(
         "search-semantic-nodes",
@@ -213,6 +214,7 @@ def main(argv: list[str] | None = None) -> int:
             assignment_item_json=args.assignment_item_json,
             corpus_key=args.corpus_key,
             max_evidence_items=args.max_evidence_items,
+            research_mode=args.research_mode,
         )
     elif args.command == "search-semantic-nodes":
         payload = papyrus_search_semantic_nodes(

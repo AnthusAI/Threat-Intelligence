@@ -73,7 +73,7 @@ Procedure {
         corpus_key = field.string{default = "AI-ML-research", description = "Papyrus steering corpus key"},
         context_profile = field.string{default = "", description = "Optional live context profile override"},
         research_questions = field.string{default = "", description = "Optional editor/reporter research questions"},
-        max_evidence_items = field.integer{default = 8, description = "Maximum Biblicus evidence items to use"}
+        max_evidence_items = field.integer{default = 20, description = "Maximum Biblicus evidence items to use"}
     },
     output = {
         assignment_item_id = field.string{required = true},

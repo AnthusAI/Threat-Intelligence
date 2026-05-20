@@ -13,6 +13,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable
 
+from papyrus_knowledge_query.uris import parse_papyrus_uri
 
 SEMANTIC_OBJECT_KINDS = {
     "reference",
@@ -69,6 +70,17 @@ score confidence rank classifierId modelVersion reviewRecommended sourceSnapshot
 """
 
 OBJECT_FIELD_MAP = {
+    "assignment": """
+getAssignment(id: $id) {
+  id assignmentTypeKey queueKey queueStatusKey status title summary sectionKey sectionStatusKey categorySetId priority
+  assigneeKey createdAt updatedAt
+}
+""",
+    "categorySet": """
+getCategorySet(id: $id) {
+  id lineageId versionNumber versionState corpusId classifierId displayName description status generatedAt categoryCount importRunId
+}
+""",
     "reference": f"getReference(id: $id) {{ {REFERENCE_FIELDS} }}",
     "semanticNode": """
 getSemanticNode(id: $id) {
@@ -90,6 +102,45 @@ getItem(id: $id) {
 }
 """,
     "message": f"getMessage(id: $id) {{ {MESSAGE_FIELDS} }}",
+    "semanticRelation": f"getSemanticRelation(id: $id) {{ {RELATION_FIELDS} }}",
+    "steeringProposal": """
+getSteeringProposal(id: $id) {
+  id categorySetId corpusId importRunId proposalKind steeringDomain status title summary categoryKey targetCategoryKey
+  graphEntityId relationshipType displayName description sourceSnapshotId proposedAt reviewedAt updatedAt
+}
+""",
+}
+
+LINEAGE_OBJECT_FIELD_MAP = {
+    "category": (
+        "listCategoriesByLineageAndVersion",
+        """
+  id lineageId versionNumber previousVersionId versionState versionCreatedAt versionCreatedBy changeReason contentHash
+  categorySetId corpusId categoryKey parentCategoryId parentCategoryKey displayName subtitle description aliases status
+  seedItemIds holdoutItemIds rank depth isPinned importRunId updatedAt
+""",
+    ),
+    "categorySet": (
+        "listCategorySetsByLineageAndVersion",
+        """
+  id lineageId versionNumber versionState corpusId classifierId displayName description status generatedAt categoryCount importRunId
+""",
+    ),
+    "item": (
+        "listItemsByLineageAndVersion",
+        """
+  id lineageId versionNumber previousVersionId versionState versionCreatedAt versionCreatedBy changeReason contentHash
+  type status typeStatus slug shortSlug section sectionStatus title headline deck byline dateline publishedAt editionDate sortTitle layout editorial updatedAt
+""",
+    ),
+    "reference": ("listReferencesByLineageAndVersion", REFERENCE_FIELDS),
+    "semanticNode": (
+        "listSemanticNodesByLineageAndVersion",
+        """
+  id lineageId versionNumber previousVersionId versionState versionCreatedAt versionCreatedBy changeReason contentHash
+  nodeKey nodeKind corpusId categorySetId categoryLineageId categoryKey displayName description aliases status importRunId updatedAt
+""",
+    ),
 }
 
 
@@ -253,12 +304,27 @@ class PapyrusSemanticClient:
         if kind not in OBJECT_FIELD_MAP:
             raise ValueError(f"Unsupported semantic object kind: {kind}")
         query = f"query GetSemanticObject($id: ID!) {{ {OBJECT_FIELD_MAP[kind]} }}"
-        data = self.graphql(query, {"id": _required(object_id, "object_id")})
+        object_id = _required(object_id, "object_id")
+        data = self.graphql(query, {"id": object_id})
         field_name = next(key for key in data if key.startswith("get"))
         record = data.get(field_name)
+        if not record and kind in LINEAGE_OBJECT_FIELD_MAP:
+            record = self._resolve_current_by_lineage(kind, object_id)
         if not record:
             raise ValueError(f"{kind} not found: {object_id}")
         return {"kind": kind, "object": self.decode_record(record)}
+
+    def resolve_uri(self, uri: str) -> dict[str, Any]:
+        parsed = parse_papyrus_uri(uri)
+        result = self.get_semantic_object(parsed["kind"], parsed["id"])
+        obj = result["object"]
+        return {
+            "uri": parsed["objectUri"],
+            "kind": parsed["kind"],
+            "id": parsed["id"],
+            "lineageId": obj.get("lineageId") or parsed["lineageId"],
+            "object": obj,
+        }
 
     def list_outgoing(self, subject_kind: str, subject_lineage_id: str) -> dict[str, Any]:
         relations = self._list_connection(
@@ -353,6 +419,19 @@ class PapyrusSemanticClient:
             relations = [relation for relation in relations if relation.get("predicate") == predicate]
         return {"relations": relations, "subjectRefs": [{"kind": relation.get("subjectKind"), "lineageId": relation.get("subjectLineageId"), "id": relation.get("subjectId")} for relation in relations]}
 
+    def _resolve_current_by_lineage(self, kind: str, lineage_id: str) -> dict[str, Any] | None:
+        field_name, fields = LINEAGE_OBJECT_FIELD_MAP[kind]
+        query = f"""
+query ResolveSemanticObjectByLineage($lineageId: ID!, $limit: Int, $nextToken: String) {{
+  {field_name}(lineageId: $lineageId, limit: $limit, nextToken: $nextToken) {{
+    items {{ {fields} }}
+    nextToken
+  }}
+}}
+"""
+        records = self._list_connection(query, {"lineageId": _required(lineage_id, "lineage_id")}, field_name)
+        return _select_current_version(records)
+
     def _list_connection(self, query: str, variables: dict[str, Any], field_name: str) -> list[dict[str, Any]]:
         records: list[dict[str, Any]] = []
         next_token = None
@@ -395,6 +474,14 @@ def _dedupe_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         key = record.get("id") or (record.get("subjectStateKey"), record.get("predicateObjectStateKey"))
         deduped[key] = record
     return list(deduped.values())
+
+
+def _select_current_version(records: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not records:
+        return None
+    current = [record for record in records if record.get("versionState") == "current"]
+    candidates = current or records
+    return sorted(candidates, key=lambda record: int(record.get("versionNumber") or 0), reverse=True)[0]
 
 
 def _required(value: str | None, name: str) -> str:

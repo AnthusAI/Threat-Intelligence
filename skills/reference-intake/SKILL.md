@@ -14,7 +14,9 @@ After references exist and need budgeted summaries or quality ratings, use
 
 If the source material came from a research agent packet, first use
 [`skills/newsroom-research-workflow/SKILL.md`](/Users/ryan/Projects/Papyrus/skills/newsroom-research-workflow/SKILL.md)
-to inspect the assignment packet and extract `proposedReferences`.
+to inspect the assignment packet. Use `assignments intake-proposals` or
+`assignments research-intake-now` to turn `proposedReferences` into pending
+reference-intake work; manual catalog construction is now the fallback.
 
 Papyrus owns newsroom visibility, reference metadata, assignments, comments,
 semantic links, and editorial steering state. Biblicus owns corpus ingestion,
@@ -145,10 +147,11 @@ briefly summarize the source material, explain how it relates to the current
 research focus, and explain why it fits the publication mission.
 
 When a research packet supplies `proposedReferences`, each proposal is still
-only a reference prospect. Register it through `references register-catalog` or
-the repeatable Biblicus corpus path before any curation or evidence use. Do not
-copy web-search `evidence_candidate_id` values into `evidenceItemIds`; those are
-audit identifiers, not accepted reference ids.
+only a reference prospect. Register it through `assignments intake-proposals`,
+`assignments research-intake-now`, `references register-catalog`, or the
+repeatable Biblicus corpus path before any curation or evidence use. Do not copy
+web-search `evidence_candidate_id` values into `evidenceItemIds`; those are audit
+identifiers, not accepted reference ids.
 
 URL-only prospects are reviewable but not extraction-ready. If
 `Reference.sourceUri` is set and `Reference.storagePath` is empty, the source
@@ -161,6 +164,98 @@ materializes the source file. `reference.text-extraction` runs Biblicus
 extraction for accessioned sources and registers snapshot-backed text artifacts as
 `ReferenceAttachment` rows. Neither workflow stores raw source bytes or
 extracted text in DynamoDB.
+
+## Research Packet Intake Path
+
+For normal agent-discovered sources, do not hand-build a catalog. Convert the
+latest linked `research_packet` for an assignment into pending references and
+curation assignments:
+
+```bash
+npm run content -- assignments intake-proposals \
+  --assignment <assignment-id> \
+  --config corpora/papyrus-steering.yml \
+  --corpus-key <corpus-key> \
+  --status pending \
+  --apply \
+  --json
+```
+
+If the research run has not happened yet, use the one-command path:
+
+```bash
+npm run content -- assignments research-intake-now \
+  --assignment <assignment-id> \
+  --config corpora/papyrus-steering.yml \
+  --corpus-key <corpus-key> \
+  --research-mode source_discovery \
+  --max-evidence-items 20 \
+  --apply \
+  --json
+```
+
+These commands deduplicate proposals by normalized URL, preserve each proposal's
+`ingestion_rationale`, write a run-local
+`.papyrus-runs/<run-id>/research-proposals-catalog.json`, and call the same safe
+reference registration mapper used by `references register-catalog`. They create
+pending `Reference` rows and `curation.reference-intake` assignments only; they
+do not accept references, create evidence relations, create publication items,
+or run analysis.
+
+## Human-Agent Screening Loop
+
+After proposal intake, handle references one at a time unless the user clearly
+asks for a batch decision. The agent should present the source title, URL,
+domain, ingestion rationale, source-readiness state, and its recommendation,
+then ask for or record the human decision.
+
+Useful inspection command:
+
+```bash
+npm run content -- references source-status \
+  --config corpora/papyrus-steering.yml \
+  --corpus-key <corpus-key> \
+  --status pending \
+  --limit 25
+```
+
+Accepted means "this belongs in the knowledge base and can become evidence
+after source text is available." Rejected means "retain this as scope memory,
+but do not use it as evidence." Archive is for inactive records that should not
+be part of active curation.
+
+Decision commands:
+
+```bash
+npm run content -- references review-curation \
+  --reference <reference-id> \
+  --action accept \
+  --note "<why accepted>"
+
+npm run content -- references review-curation \
+  --reference <reference-id> \
+  --action reject \
+  --reason-code out_of_scope \
+  --note "<why rejected>"
+```
+
+`review-curation` mutates immediately through the protected GraphQL action. It
+does not use `--apply`.
+
+The post-acceptance completion sequence is:
+
+1. Accession URL-only accepted references into the configured Biblicus corpus if
+   `storagePath` is missing.
+2. Run text extraction and register `extracted_text` `ReferenceAttachment`
+   rows.
+3. Create or assess quality ratings and budgeted summaries using
+   `skills/reference-curation-signals/SKILL.md`.
+4. Sync the derived vector index using `skills/knowledge-query/SKILL.md`.
+5. Export accepted-only manifests before topic modeling or entity-graph work.
+
+Do not confuse these stages. A pending URL is only a prospect. An accepted URL
+without corpus text is evidence-eligible by curation policy, but not yet useful
+for extraction, vector indexing, topic modeling, or entity graph analysis.
 
 ## Current Intake Path
 
@@ -312,12 +407,19 @@ not create `Item`, `EditionItem`, `classified_as`, or `uses_evidence` records.
 To start from a live assignment research packet:
 
 ```bash
-npm run content -- assignments research-packets --assignment <assignment-id>
+npm run content -- assignments intake-proposals \
+  --assignment <assignment-id> \
+  --config corpora/papyrus-steering.yml \
+  --corpus-key <corpus-key> \
+  --status pending \
+  --apply
 ```
 
-Use the listed `proposedReferences` to build the catalog metadata, preserving
-each proposal's ingestion rationale. The catalog registration step is what makes
-the prospect visible as a pending or rejected `Reference`.
+Use `assignments research-packets --assignment <assignment-id>` only when you
+need to inspect packets manually. If `intake-proposals` cannot handle a packet,
+use the listed `proposedReferences` to build fallback catalog metadata,
+preserving each proposal's ingestion rationale. The catalog registration step is
+what makes the prospect visible as a pending or rejected `Reference`.
 
 Export accepted-only manifests before analysis runs:
 

@@ -244,6 +244,34 @@ export type ReferenceAttachmentRecord = {
   metadata?: unknown;
 };
 
+export type ModelAttachmentRecord = {
+  id: string;
+  ownerKind: string;
+  ownerId: string;
+  ownerLineageId?: string | null;
+  ownerVersionNumber?: number | null;
+  ownerVersionKey?: string | null;
+  role: string;
+  sortKey: string;
+  storagePath: string;
+  filename?: string | null;
+  mediaType: string;
+  byteSize?: number | null;
+  sha256?: string | null;
+  etag?: string | null;
+  importRunId?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  status?: string | null;
+};
+
+export type HydratedModelPayload = {
+  attachment: ModelAttachmentRecord;
+  text: string | null;
+  json: unknown | null;
+  error: string | null;
+};
+
 export type SemanticNodeRecord = {
   id: string;
   lineageId?: string | null;
@@ -311,7 +339,6 @@ export type MessageRecord = {
   messageKind: string;
   messageDomain: string;
   status: string;
-  body: string;
   summary?: string | null;
   source?: string | null;
   importRunId?: string | null;
@@ -321,6 +348,7 @@ export type MessageRecord = {
   createdAt: string;
   updatedAt: string;
   newsroomFeedKey?: string | null;
+  body?: string | null;
   metadata?: unknown;
 };
 
@@ -332,6 +360,7 @@ export type AssignmentRecord = {
   status: string;
   priority?: number | null;
   title: string;
+  summary?: string | null;
   brief?: string | null;
   instructions?: string | null;
   assigneeType?: string | null;
