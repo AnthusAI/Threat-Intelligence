@@ -413,15 +413,38 @@ export async function loadEditorResolvedAccessState(): Promise<EditorAccessState
 }
 
 export async function loadEditorNewsDeskDashboard({ isAdmin }: { isAdmin: boolean }): Promise<CategorySteeringDashboard> {
-  const [summary, userDirectory] = await Promise.all([
+  const [summaryResult, userDirectoryResult] = await Promise.allSettled([
     loadNewsroomSummary(),
     isAdmin ? loadUserDirectory() : Promise.resolve([]),
   ]);
+  const summaryError = summaryResult.status === "rejected" ? summaryResult.reason : null;
+  if (summaryError && isUnauthenticatedError(summaryError)) {
+    throw summaryError;
+  }
+  const summary = summaryResult.status === "fulfilled" ? summaryResult.value : null;
+  const userDirectory = userDirectoryResult.status === "fulfilled" ? userDirectoryResult.value : [];
+  const userDirectoryError = userDirectoryResult.status === "rejected"
+    ? formatNewsroomLoaderError("Could not load newsroom user directory.", userDirectoryResult.reason)
+    : null;
+
+  if (summaryError || newsroomSummaryIsMissing(summary)) {
+    return {
+      ...createEmptyCategorySteeringDashboard(),
+      isPublicSkeleton: false,
+      summaryStatus: "missing",
+      canManageUsers: isAdmin,
+      userDirectory,
+      loadError: summaryError
+        ? formatNewsroomLoaderError("Newsroom summary unavailable.", summaryError)
+        : userDirectoryError,
+    };
+  }
 
   return {
-    ...createSummaryCategorySteeringDashboard(summary),
+    ...createSummaryCategorySteeringDashboard(summary!),
     canManageUsers: isAdmin,
     userDirectory,
+    loadError: userDirectoryError,
   };
 }
 
@@ -844,10 +867,21 @@ function createSummaryCategorySteeringDashboard(summary: NewsroomSummaryRecord):
   return {
     ...createEmptyCategorySteeringDashboard(),
     isPublicSkeleton: false,
+    summaryStatus: "ready",
     summary,
     importRuns: latestImportRun ? [latestImportRun] : [],
     loadError: null,
   };
+}
+
+function newsroomSummaryIsMissing(summary: NewsroomSummaryRecord | null | undefined): boolean {
+  return (summary?.source ?? "").trim().toLowerCase() === "missing";
+}
+
+function formatNewsroomLoaderError(prefix: string, error: unknown): string {
+  const detail = error instanceof Error ? error.message : String(error ?? "");
+  const normalizedDetail = detail.trim();
+  return normalizedDetail ? `${prefix} ${normalizedDetail}` : prefix;
 }
 
 function normalizeNewsroomSummary(value: unknown): NewsroomSummaryRecord {

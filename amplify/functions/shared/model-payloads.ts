@@ -123,11 +123,24 @@ export async function readJsonModelPayload(
 }
 
 async function readTextFromStorage(storagePath: string): Promise<string> {
-  const result = await s3.send(new GetObjectCommand({
-    Bucket: payloadBucketName(),
-    Key: storagePath,
-  }));
-  return result.Body?.transformToString("utf8") ?? "";
+  try {
+    const result = await s3.send(new GetObjectCommand({
+      Bucket: payloadBucketName(),
+      Key: storagePath,
+    }));
+    return result.Body?.transformToString("utf8") ?? "";
+  } catch (error) {
+    if (isMissingStorageKeyError(error)) return "";
+    throw error;
+  }
+}
+
+function isMissingStorageKeyError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const record = error as Record<string, unknown>;
+  if (record.name === "NoSuchKey" || record.Code === "NoSuchKey") return true;
+  const message = typeof record.message === "string" ? record.message : "";
+  return message.toLowerCase().includes("the specified key does not exist");
 }
 
 function payloadBucketName(): string {

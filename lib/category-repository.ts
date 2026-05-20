@@ -521,6 +521,7 @@ export type NewsroomSummaryFacets = {
 export type CategorySteeringDashboard = {
   isDemo?: boolean;
   isPublicSkeleton?: boolean;
+  summaryStatus?: "loading" | "missing" | "ready";
   summary?: NewsroomSummaryRecord | null;
   canManageUsers?: boolean;
   canonicalCorpusId?: string | null;
@@ -627,8 +628,7 @@ function knowledgeCorpusIdFromKey(corpusKey: string): string {
   return `knowledge-corpus-${safeKey}`;
 }
 
-export async function loadCategorySteeringDashboard(options?: { demo?: boolean }): Promise<CategorySteeringDashboard> {
-  if (options?.demo) return createDemoCategorySteeringDashboard();
+export async function loadCategorySteeringDashboard(): Promise<CategorySteeringDashboard> {
   return createEmptyCategorySteeringDashboard();
 }
 
@@ -758,6 +758,8 @@ function createDemoCategorySteeringDashboard(): CategorySteeringDashboard {
   const referenceHistoryTwoId = `${referenceHistoryTwoLineageId}-v1`;
   const assignmentHistoryOneId = "assignment-demo-reference-intake-history-001";
   const assignmentHistoryTwoId = "assignment-demo-reference-intake-history-002";
+  const assignmentReportingId = "assignment-demo-reporting-news-001";
+  const reportingPacketMessageId = "message-demo-reporting-news-001-context";
   const scalingCategoryLineageId = "category-category-set-demo-canonical-category-foundation-model-scaling";
   const historyCategoryLineageId = "category-category-set-demo-source-category-symbolic-connectionist-history";
 
@@ -1311,8 +1313,69 @@ function createDemoCategorySteeringDashboard(): CategorySteeringDashboard {
         createdAt: importedAt,
         updatedAt: importedAt,
       },
+      {
+        id: reportingPacketMessageId,
+        messageKind: "reporting_context_packet",
+        messageDomain: "assignment_work",
+        status: "active",
+        body: "Context packet for a section-ready News candidate. Editors can select, merge, brief, hold, or kill this packet without creating reader copy.",
+        summary: "Reporting context packet: model-release accountability angle",
+        source: "procedures/newsroom/reporter.tac",
+        importRunId: "knowledge-import-demo-projection",
+        authorLabel: "newsroom-reporter",
+        createdAt: importedAt,
+        updatedAt: importedAt,
+        metadata: {
+          kind: "reporting.context_packet.created",
+          assignmentId: assignmentReportingId,
+          reporting: {
+            sectionKey: "news",
+            editionId: "edition-demo-planning-v1",
+            candidateRank: 1,
+            editorRecommendation: "hold",
+            acceptedReferenceIds: [referenceHistoryTwoId],
+            proposedReferences: [],
+            copywriterBrief: "Use accepted evidence and recent desk memory before drafting.",
+          },
+        },
+      },
     ],
     assignments: [
+      {
+        id: assignmentReportingId,
+        assignmentTypeKey: "reporting.edition-candidate",
+        queueKey: "edition:edition-demo:section:news:lane:reporting",
+        queueStatusKey: "edition:edition-demo:section:news:lane:reporting#open",
+        status: "open",
+        priority: 20,
+        title: "News reporting candidate 1: Model release accountability",
+        summary: "Create reporting context for a candidate News article; do not create a draft Item until editor selection.",
+        brief: "Report a section-ready candidate for News, option 1.",
+        instructions: "Return a private reporting context packet only. Distinguish accepted references from proposed references.",
+        corpusId,
+        categorySetId,
+        classifierId: "demo-canonical-classifier",
+        sectionId: "news",
+        sectionKey: "news",
+        sectionType: "canonical",
+        sectionStatusKey: "news#open",
+        sectionQueueStatusKey: "news#edition:edition-demo:section:news:lane:reporting#open",
+        primaryFocusCategoryKey: "category.foundation-model-scaling",
+        topicScopeCategoryKeys: ["category.foundation-model-scaling"],
+        importRunId: "knowledge-import-demo-projection",
+        createdBy: "papyrus-content-cli",
+        createdAt: importedAt,
+        updatedAt: importedAt,
+        metadata: {
+          editionId: "edition-demo-planning-v1",
+          editionSlug: "edition-demo",
+          sectionKey: "news",
+          sectionTitle: "News",
+          candidateRank: 1,
+          slotTarget: { sectionKey: "news", slots: 1, candidateRank: 1 },
+          expectedOutput: "Private reporting context packet for editor selection and copywriting, not reader copy.",
+        },
+      },
       {
         id: assignmentHistoryOneId,
         assignmentTypeKey: "curation.reference-intake",
@@ -1410,6 +1473,29 @@ function createDemoCategorySteeringDashboard(): CategorySteeringDashboard {
       },
     ],
     semanticRelations: [
+      {
+        id: "semantic-relation-demo-reporting-context-comment",
+        relationState: "current",
+        predicate: "comment",
+        relationTypeKey: "comment",
+        relationDomain: "commentary",
+        subjectKind: "message",
+        subjectId: reportingPacketMessageId,
+        subjectLineageId: reportingPacketMessageId,
+        objectKind: "assignment",
+        objectId: assignmentReportingId,
+        objectLineageId: assignmentReportingId,
+        subjectStateKey: `message#${reportingPacketMessageId}#current`,
+        objectStateKey: `assignment#${assignmentReportingId}#current`,
+        objectSubjectStateKey: `assignment#${assignmentReportingId}#current#message`,
+        predicateObjectStateKey: `comment#assignment#${assignmentReportingId}#current`,
+        subjectVersionKey: `message#${reportingPacketMessageId}`,
+        objectVersionKey: `assignment#${assignmentReportingId}`,
+        rank: 1,
+        reviewRecommended: false,
+        importRunId: "knowledge-import-demo-projection",
+        importedAt,
+      },
       {
         id: "semantic-relation-demo-assignment-history-001",
         relationState: "current",

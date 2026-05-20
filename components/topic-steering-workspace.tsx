@@ -361,17 +361,19 @@ function NewsDeskTabLink({
   count,
   countSlot = true,
   countVisible = true,
+  countMissing = false,
   demo,
   tab,
 }: {
   active: boolean;
-  count: number;
+  count: number | null;
   countSlot?: boolean;
   countVisible?: boolean;
+  countMissing?: boolean;
   demo?: boolean;
   tab: { id: NewsDeskTab; label: string; detail: string; href: string };
 }) {
-  const countParts = formatCompactCountParts(count);
+  const countParts = typeof count === "number" ? formatCompactCountParts(count) : null;
   return (
     <Link
       aria-current={active ? "page" : undefined}
@@ -383,14 +385,24 @@ function NewsDeskTabLink({
       {countSlot ? (
         <strong
           className="news-desk-tab__count"
-          aria-label={countVisible ? `${formatCompactCount(count)} ${tab.label.toLowerCase()}` : `${tab.label} count loading`}
+          aria-label={
+            countVisible
+              ? countMissing
+                ? `${tab.label} count unavailable`
+                : `${formatCompactCount(count ?? 0)} ${tab.label.toLowerCase()}`
+              : `${tab.label} count loading`
+          }
           data-count-visible={countVisible ? "true" : "false"}
         >
           {countVisible ? (
-            <>
-              <span className="news-desk-tab__count-value">{countParts.value}</span>
-              {countParts.suffix ? <span className="news-desk-tab__count-suffix">{countParts.suffix}</span> : null}
-            </>
+            countMissing ? (
+              <span className="news-desk-tab__count-value">?</span>
+            ) : countParts ? (
+              <>
+                <span className="news-desk-tab__count-value">{countParts.value}</span>
+                {countParts.suffix ? <span className="news-desk-tab__count-suffix">{countParts.suffix}</span> : null}
+              </>
+            ) : null
           ) : null}
         </strong>
       ) : null}
@@ -591,40 +603,43 @@ function NewsDeskDashboard({
       categorySetId: activeCategorySet?.id ?? null,
     })
   ), [activeCategorySet?.id, activeCategoryTreeNodes, categorys]);
-  const acceptedRootCategoryCount = activeCategoryTreeNodes.filter((node) => !node.parentCategoryKey && node.status === "accepted").length;
   const latestImport = useMemo(() => (
     activeCategorySet
       ? importRuns.find((importRun) => importRun.corpusId === activeCategorySet.corpusId) ?? importRuns[0] ?? null
       : importRuns[0] ?? null
   ), [activeCategorySet, importRuns]);
-  const openProposalCount = proposals.filter((proposal) => proposal.status === "proposed").length;
   const latestImportLabel = latestImport ? formatDateTime(latestImport.importedAt) : "Awaiting import";
   const assignmentMetrics = useMemo(() => getAssignmentMetrics(assignments, dashboard.summary), [assignments, dashboard.summary]);
-  const summaryFreshnessLabel = dashboard.summary ? `Summary ${formatDateTime(dashboard.summary.generatedAt)}${dashboard.summary.source ? ` / ${dashboard.summary.source}` : ""}` : latestImportLabel;
-  const mastheadSecondLabel = activeTab === "assignments" ? `${assignmentMetrics.open || dashboard.summary?.assignmentStatusCounts.open || 0} open assignments` : summaryFreshnessLabel;
+  const summaryStatus = newsroomSummaryStatus(dashboard);
+  const summaryFreshnessLabel = dashboard.summary
+    ? `Summary ${formatDateTime(dashboard.summary.generatedAt)}${dashboard.summary.source ? ` / ${dashboard.summary.source}` : ""}`
+    : summaryStatus === "missing"
+      ? "Summary unavailable"
+      : latestImportLabel;
+  const mastheadSecondLabel = activeTab === "assignments"
+    ? summaryStatus === "missing"
+      ? "? open assignments"
+      : dashboard.summary
+        ? `${dashboard.summary.assignmentStatusCounts.open || 0} open assignments`
+        : "Loading assignments"
+    : summaryFreshnessLabel;
   const activeNewsroomSection = sectionPageId
     ? newsroomSections.find((section) => section.id === sectionPageId && section.enabled !== false && section.enabledStatus !== "disabled") ?? null
     : null;
   const mastheadTitle = activeNewsroomSection?.title ?? (isSectionPage ? "SECTION" : "NEWSROOM");
-  const tabCounts = useMemo<Record<NewsDeskTab, number>>(() => ({
+  const tabCounts = useMemo<Record<NewsDeskTab, number | null>>(() => ({
     overview: 0,
-    desks: acceptedRootCategoryCount || summaryCount(dashboard, "categories"),
-    messages: summaryCount(dashboard, "messages") || messages.length,
-    assignments: summaryCount(dashboard, "assignments") || assignments.length,
-    references: summaryCount(dashboard, "references") || references.length,
-    topics: summaryCount(dashboard, "categories") || canonicalCategorys.length,
-    concepts: summaryCount(dashboard, "semanticNodes") || semanticNodes.length,
+    desks: summaryCount(dashboard, "categories"),
+    messages: summaryCount(dashboard, "messages"),
+    assignments: summaryCount(dashboard, "assignments"),
+    references: summaryCount(dashboard, "references"),
+    topics: summaryCount(dashboard, "categories"),
+    concepts: summaryCount(dashboard, "semanticNodes"),
     administration: userDirectory.length + doctrineRecords.length + newsroomSections.length,
     search: 0,
   }), [
-    acceptedRootCategoryCount,
-    assignments.length,
-    canonicalCategorys.length,
     dashboard,
     doctrineRecords.length,
-    messages.length,
-    references.length,
-    semanticNodes.length,
     newsroomSections.length,
     userDirectory.length,
   ]);
@@ -1884,7 +1899,8 @@ function NewsDeskDashboard({
                 active={tab.id === activeTab}
                 count={tabCounts[tab.id]}
                 countSlot={tab.id !== "administration"}
-                countVisible={tab.id !== "administration"}
+                countVisible={tab.id === "administration" || summaryStatus !== "loading"}
+                countMissing={tab.id !== "administration" && summaryStatus === "missing"}
                 demo={dashboard.isDemo}
                 tab={tab}
               />
@@ -2152,11 +2168,12 @@ function OverviewDeskView({
     };
   }, [dashboard.assignments, dashboard.isDemo, dashboard.messages, dashboard.references]);
 
-  const messageCount = summaryCount(dashboard, "messages") || dashboard.messages.length;
-  const assignmentCount = summaryCount(dashboard, "assignments") || assignmentMetrics.total;
-  const openAssignmentCount = dashboard.summary?.assignmentStatusCounts.open || assignmentMetrics.open || 0;
-  const referenceCount = summaryCount(dashboard, "references") || dashboard.references.length;
-  const referenceAttachmentCount = summaryCount(dashboard, "referenceAttachments") || dashboard.referenceAttachments.length;
+  const summaryStatus = newsroomSummaryStatus(dashboard);
+  const messageCount = summaryCount(dashboard, "messages");
+  const assignmentCount = summaryCount(dashboard, "assignments");
+  const openAssignmentCount = dashboard.summary?.assignmentStatusCounts.open ?? null;
+  const referenceCount = summaryCount(dashboard, "references");
+  const referenceAttachmentCount = summaryCount(dashboard, "referenceAttachments");
   const isDemo = Boolean(dashboard.isDemo);
   const messageCards = recentState.messages.slice(0, 4).map((message, index) => withNewsroomOverviewCardLayout(
     messageToNewsroomCard(message, index, null),
@@ -2178,7 +2195,7 @@ function OverviewDeskView({
       <div className="news-desk-overview-feeds" data-newsroom-overview-feeds>
         <NewsroomOverviewSection
           cards={messageCards}
-          detail={`${messageCount} private commentary rows`}
+          detail={formatOverviewCountDetail(summaryStatus, messageCount, "private commentary rows")}
           emptyLabel="No recent messages."
           error={recentState.error}
           isLoading={recentState.isLoading}
@@ -2188,7 +2205,7 @@ function OverviewDeskView({
         />
         <NewsroomOverviewSection
           cards={assignmentCards}
-          detail={`${assignmentCount} assignments / ${openAssignmentCount} open`}
+          detail={formatOverviewDualCountDetail(summaryStatus, assignmentCount, "assignments", openAssignmentCount, "open")}
           emptyLabel="No recent assignments."
           error={recentState.error}
           isLoading={recentState.isLoading}
@@ -2198,7 +2215,7 @@ function OverviewDeskView({
         />
         <NewsroomOverviewSection
           cards={referenceCards}
-          detail={`${referenceCount} references / ${referenceAttachmentCount} attachments`}
+          detail={formatOverviewDualCountDetail(summaryStatus, referenceCount, "references", referenceAttachmentCount, "attachments")}
           emptyLabel="No recent references."
           error={recentState.error}
           isLoading={recentState.isLoading}
@@ -8223,12 +8240,41 @@ function formatCompactCount(value: number): string {
   return `${parts.value}${parts.suffix}`;
 }
 
-function summaryCount(dashboard: Pick<CategorySteeringDashboard, "summary">, key: string): number {
-  return dashboard.summary?.counts?.[key] ?? 0;
+function newsroomSummaryStatus(dashboard: Pick<CategorySteeringDashboard, "summary" | "summaryStatus">): "loading" | "missing" | "ready" {
+  if (dashboard.summary) return "ready";
+  return dashboard.summaryStatus ?? "loading";
 }
 
-function summaryCountFromRecord(summary: NewsroomSummaryRecord | null | undefined, key: string): number {
-  return summary?.counts?.[key] ?? 0;
+function formatOverviewCountDetail(
+  status: "loading" | "missing" | "ready",
+  count: number | null,
+  label: string,
+): string {
+  if (status === "missing") return `? ${label}`;
+  if (typeof count === "number") return `${count} ${label}`;
+  return label;
+}
+
+function formatOverviewDualCountDetail(
+  status: "loading" | "missing" | "ready",
+  primaryCount: number | null,
+  primaryLabel: string,
+  secondaryCount: number | null,
+  secondaryLabel: string,
+): string {
+  if (status === "missing") return `? ${primaryLabel} / ? ${secondaryLabel}`;
+  if (typeof primaryCount === "number" && typeof secondaryCount === "number") {
+    return `${primaryCount} ${primaryLabel} / ${secondaryCount} ${secondaryLabel}`;
+  }
+  return `${primaryLabel} / ${secondaryLabel}`;
+}
+
+function summaryCount(dashboard: Pick<CategorySteeringDashboard, "summary">, key: string): number | null {
+  return dashboard.summary ? (dashboard.summary.counts?.[key] ?? 0) : null;
+}
+
+function summaryCountFromRecord(summary: NewsroomSummaryRecord | null | undefined, key: string): number | null {
+  return summary ? (summary.counts?.[key] ?? 0) : null;
 }
 
 function isCurrentCategorySet(categorySet: CategorySteeringCategorySet): boolean {
@@ -8608,13 +8654,11 @@ function resolveKnowledgeQueryTarget(
   };
 }
 
-function getNewsDeskTabHref(href: string, demo?: boolean): string {
-  if (!demo) return href;
-  const separator = href.includes("?") ? "&" : "?";
-  return `${href}${separator}demo=1`;
+function getNewsDeskTabHref(href: string, _demo?: boolean): string {
+  return href;
 }
 
-function pushNewsroomDetailUrl(tab: "assignments" | "concepts" | "messages" | "references" | "topics", id: string | null, demo?: boolean) {
+function pushNewsroomDetailUrl(tab: "assignments" | "concepts" | "messages" | "references" | "topics", id: string | null, _demo?: boolean) {
   if (typeof window === "undefined") return;
   const encoded = id ? encodeURIComponent(id) : "";
   const base = id
@@ -8624,7 +8668,7 @@ function pushNewsroomDetailUrl(tab: "assignments" | "concepts" | "messages" | "r
         ? `/newsroom/topics?category=${encoded}`
         : `/newsroom/${tab}/${encoded}`
     : `/newsroom/${tab}`;
-  const url = demo ? `${base}${base.includes("?") ? "&" : "?"}demo=1` : base;
+  const url = base;
   if (`${window.location.pathname}${window.location.search}` !== url) {
     window.history.pushState(null, "", url);
   }

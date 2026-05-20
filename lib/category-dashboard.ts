@@ -3,6 +3,7 @@ import type { CategorySteeringDashboard } from "./category-repository";
 export function createEmptyCategorySteeringDashboard(): CategorySteeringDashboard {
   return {
     isPublicSkeleton: true,
+    summaryStatus: "loading",
     summary: null,
     canManageUsers: false,
     canonicalCorpusId: null,

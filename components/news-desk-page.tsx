@@ -28,7 +28,6 @@ export type NewsDeskPageProps = {
 
 export async function NewsDeskPage({ section: routeSection, sectionPageId, selectionPath, searchParams }: NewsDeskPageProps) {
   const resolvedSearchParams = await searchParams;
-  const demo = hasParam(getSearchParam(resolvedSearchParams, "demo"));
   const initialTab = parseNewsDeskTab(routeSection ?? getSearchParam(resolvedSearchParams, "section"), getSearchParam(resolvedSearchParams, "tab"));
   const routeSelection = parseRouteSelection(initialTab, selectionPath);
   const initialSelection = {
@@ -49,7 +48,7 @@ export async function NewsDeskPage({ section: routeSection, sectionPageId, selec
   };
   const analysisProfiles = await loadAnalysisProfileSummaries();
   const configuredCorpora = await loadConfiguredCorpusSummaries();
-  const dashboard = await loadCategorySteeringDashboard({ demo });
+  const dashboard = await loadCategorySteeringDashboard();
   return <NewsDeskWorkspace analysisProfiles={analysisProfiles} configuredCorpora={configuredCorpora} dashboard={dashboard} initialSelection={initialSelection} initialTab={initialTab} sectionPageId={sectionPageId ?? null} />;
 }
 
@@ -69,11 +68,6 @@ function getSearchParam(searchParams: unknown, key: string): string | string[] |
   if (searchParams instanceof URLSearchParams) return searchParams.get(key);
   if (!searchParams || typeof searchParams !== "object") return undefined;
   return (searchParams as Record<string, string | string[] | undefined>)[key];
-}
-
-function hasParam(value: string | string[] | null | undefined): boolean {
-  if (Array.isArray(value)) return value.some(Boolean);
-  return Boolean(value);
 }
 
 function getFirstSearchParam(searchParams: unknown, key: string): string | null {
