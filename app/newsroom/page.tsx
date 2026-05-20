@@ -15,6 +15,12 @@ type NewsDeskRootPageProps = {
     message?: string | string[];
     user?: string | string[];
     item?: string | string[];
+    q?: string | string[];
+    anchorKind?: string | string[];
+    anchorId?: string | string[];
+    anchorLineageId?: string | string[];
+    maxTokens?: string | string[];
+    from?: string | string[];
   }>;
 };
 

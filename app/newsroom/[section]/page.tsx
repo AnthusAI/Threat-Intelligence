@@ -16,6 +16,12 @@ type NewsDeskSectionPageProps = {
     message?: string | string[];
     user?: string | string[];
     item?: string | string[];
+    q?: string | string[];
+    anchorKind?: string | string[];
+    anchorId?: string | string[];
+    anchorLineageId?: string | string[];
+    maxTokens?: string | string[];
+    from?: string | string[];
   }>;
 };
 
@@ -26,6 +32,7 @@ const NEWS_DESK_ROUTE_SECTIONS = new Set<NewsDeskTab>([
   "references",
   "messages",
   "assignments",
+  "search",
 ]);
 
 export default async function NewsDeskSectionPage({ params, searchParams }: NewsDeskSectionPageProps) {

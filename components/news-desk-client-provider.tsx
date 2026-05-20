@@ -21,8 +21,18 @@ import {
   type NewsDeskShellState,
 } from "../lib/news-desk-session";
 
+export type NewsDeskSearchTransition = {
+  href: string;
+  kind: "modal-to-serp";
+  requestKey: string;
+  submittedAt: number;
+};
+
 type NewsDeskClientContextValue = {
+  beginSearchTransition: (transition: NewsDeskSearchTransition) => void;
+  clearSearchTransition: () => void;
   shell: NewsDeskShellState;
+  searchTransition: NewsDeskSearchTransition | null;
   refreshDashboard: () => Promise<void>;
   refreshAssignments: () => Promise<void>;
   refreshDoctrineRecords: () => Promise<void>;
@@ -33,6 +43,7 @@ const NewsDeskClientContext = createContext<NewsDeskClientContextValue | null>(n
 
 export function NewsDeskClientProvider({ children }: Readonly<{ children: React.ReactNode }>) {
   const [shell, setShell] = useState<NewsDeskShellState>(() => createInitialNewsDeskShellState());
+  const [searchTransition, setSearchTransition] = useState<NewsDeskSearchTransition | null>(null);
   const shellRef = useRef(shell);
   const bootstrapSequenceRef = useRef(0);
 
@@ -161,12 +172,15 @@ export function NewsDeskClientProvider({ children }: Readonly<{ children: React.
   }, [refreshDashboard]);
 
   const value = useMemo<NewsDeskClientContextValue>(() => ({
+    beginSearchTransition: (transition) => setSearchTransition(transition),
+    clearSearchTransition: () => setSearchTransition(null),
     shell,
+    searchTransition,
     refreshDashboard,
     refreshAssignments,
     refreshDoctrineRecords,
     refreshUserDirectory,
-  }), [refreshAssignments, refreshDashboard, refreshDoctrineRecords, refreshUserDirectory, shell]);
+  }), [refreshAssignments, refreshDashboard, refreshDoctrineRecords, refreshUserDirectory, searchTransition, shell]);
 
   return <NewsDeskClientContext.Provider value={value}>{children}</NewsDeskClientContext.Provider>;
 }

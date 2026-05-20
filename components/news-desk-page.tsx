@@ -2,6 +2,7 @@ import { NewsDeskWorkspace, type NewsDeskTab } from "./topic-steering-workspace"
 import { loadAnalysisProfileSummaries, loadCategorySteeringDashboard, loadConfiguredCorpusSummaries } from "../lib/category-repository";
 
 export type NewsDeskPageProps = {
+  sectionPageId?: string | null;
   section?: string | string[] | null;
   selectionPath?: string[] | null;
   searchParams?: Promise<{
@@ -16,10 +17,16 @@ export type NewsDeskPageProps = {
     assignment?: string | string[];
     user?: string | string[];
     item?: string | string[];
+    q?: string | string[];
+    anchorKind?: string | string[];
+    anchorId?: string | string[];
+    anchorLineageId?: string | string[];
+    maxTokens?: string | string[];
+    from?: string | string[];
   }>;
 };
 
-export async function NewsDeskPage({ section: routeSection, selectionPath, searchParams }: NewsDeskPageProps) {
+export async function NewsDeskPage({ section: routeSection, sectionPageId, selectionPath, searchParams }: NewsDeskPageProps) {
   const resolvedSearchParams = await searchParams;
   const demo = hasParam(getSearchParam(resolvedSearchParams, "demo"));
   const initialTab = parseNewsDeskTab(routeSection ?? getSearchParam(resolvedSearchParams, "section"), getSearchParam(resolvedSearchParams, "tab"));
@@ -33,11 +40,17 @@ export async function NewsDeskPage({ section: routeSection, selectionPath, searc
     user: getFirstSearchParam(resolvedSearchParams, "user"),
     item: getFirstSearchParam(resolvedSearchParams, "item"),
     panel: routeSelection.panel ?? getFirstSearchParam(resolvedSearchParams, "panel"),
+    searchQuery: getFirstSearchParam(resolvedSearchParams, "q"),
+    searchAnchorKind: getFirstSearchParam(resolvedSearchParams, "anchorKind"),
+    searchAnchorId: getFirstSearchParam(resolvedSearchParams, "anchorId"),
+    searchAnchorLineageId: getFirstSearchParam(resolvedSearchParams, "anchorLineageId"),
+    searchMaxTokens: getFirstSearchParam(resolvedSearchParams, "maxTokens"),
+    searchFrom: getFirstSearchParam(resolvedSearchParams, "from"),
   };
   const analysisProfiles = await loadAnalysisProfileSummaries();
   const configuredCorpora = await loadConfiguredCorpusSummaries();
   const dashboard = await loadCategorySteeringDashboard({ demo });
-  return <NewsDeskWorkspace analysisProfiles={analysisProfiles} configuredCorpora={configuredCorpora} dashboard={dashboard} initialSelection={initialSelection} initialTab={initialTab} />;
+  return <NewsDeskWorkspace analysisProfiles={analysisProfiles} configuredCorpora={configuredCorpora} dashboard={dashboard} initialSelection={initialSelection} initialTab={initialTab} sectionPageId={sectionPageId ?? null} />;
 }
 
 function parseRouteSelection(tab: NewsDeskTab, selectionPath: string[] | null | undefined): { assignment?: string | null; category?: string | null; message?: string | null; panel?: string | null; reference?: string | null } {
@@ -78,6 +91,6 @@ function parseNewsDeskTab(sectionValue: string | string[] | null | undefined, le
     : rawValue === "desks"
       ? "topics"
       : rawValue;
-  if (value === "administration" || value === "topics" || value === "concepts" || value === "references" || value === "messages" || value === "assignments") return value;
+  if (value === "administration" || value === "topics" || value === "concepts" || value === "references" || value === "messages" || value === "assignments" || value === "search") return value;
   return "overview";
 }
