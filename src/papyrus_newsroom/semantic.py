@@ -8,6 +8,7 @@ callers.
 
 from __future__ import annotations
 
+import re
 from collections import deque
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable
@@ -29,6 +30,10 @@ SEMANTIC_OBJECT_KINDS = {
 
 SEMANTIC_PREDICATES: dict[str, dict[str, str]] = {
     "classified_as": {"label": "classified as", "group": "classification", "inverse_label": "classified references/items"},
+    "quality_rating_is": {"label": "quality rating is", "group": "curation", "inverse_label": "quality rating for"},
+    "reference_summary_100_tokens": {"label": "100-token reference summary", "group": "summarization", "inverse_label": "100-token summary for"},
+    "reference_summary_200_tokens": {"label": "200-token reference summary", "group": "summarization", "inverse_label": "200-token summary for"},
+    "reference_summary_500_tokens": {"label": "500-token reference summary", "group": "summarization", "inverse_label": "500-token summary for"},
     "mentions": {"label": "mentions", "group": "ontology", "inverse_label": "mentioned by"},
     "about": {"label": "about", "group": "commentary", "inverse_label": "commentary"},
     "comment": {"label": "comments on", "group": "commentary", "inverse_label": "commented on by"},
@@ -209,6 +214,26 @@ class PapyrusSemanticClient:
         messages = self.list_messages("reference", reference_lineage_id)["messages"]
         return {"messages": messages}
 
+    def list_reference_summaries(self, reference_lineage_id: str, max_tokens: int | None = None) -> dict[str, Any]:
+        relations = self.list_incoming("reference", reference_lineage_id)["relations"]
+        allowed = {f"reference_summary_{max_tokens}_tokens"} if max_tokens else {
+            "reference_summary_100_tokens",
+            "reference_summary_200_tokens",
+            "reference_summary_500_tokens",
+        }
+        summaries: list[dict[str, Any]] = []
+        for relation in relations:
+            relation_type = relation.get("relationTypeKey") or relation.get("predicate")
+            if relation.get("subjectKind") != "message" or relation_type not in allowed:
+                continue
+            try:
+                message = self.get_semantic_object("message", relation["subjectId"])["object"]
+            except ValueError:
+                continue
+            summaries.append({"message": message, "relation": relation, "maxTokens": _summary_tokens_from_relation_type(relation_type)})
+        summaries.sort(key=lambda entry: entry["message"].get("createdAt") or "", reverse=True)
+        return {"summaries": summaries}
+
     def list_messages(self, object_kind: str, object_lineage_id: str) -> dict[str, Any]:
         relations = self.list_incoming(object_kind, object_lineage_id)["relations"]
         messages: list[dict[str, Any]] = []
@@ -376,3 +401,10 @@ def _required(value: str | None, name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{name} is required")
     return value.strip()
+
+
+def _summary_tokens_from_relation_type(value: str | None) -> int | None:
+    if not value:
+        return None
+    match = re.search(r"reference_summary_([0-9]+)_tokens", value)
+    return int(match.group(1)) if match else None
