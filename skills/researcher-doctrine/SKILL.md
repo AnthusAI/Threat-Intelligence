@@ -1,6 +1,6 @@
 ---
 name: researcher-doctrine
-description: Use this skill when doing Papyrus research-agent work, preparing research packets, resolving assignment context, or applying publication and Newsroom desk doctrine to evidence gathering.
+description: Use this skill when doing Papyrus research-agent work, preparing research packets, resolving assignment context, or applying publication and Newsroom section doctrine to evidence gathering.
 ---
 
 # Researcher Doctrine Skill
@@ -10,7 +10,8 @@ procedure, reviewing a research packet, or deciding how a research assignment
 should apply editorial doctrine.
 
 For coding-agent execution details, CLI inspection commands, Message-backed
-research packets, and reference-intake follow-up, also use
+research packets, reporting-packet follow-up, and reference-intake work, also
+use
 [`skills/newsroom-research-workflow/SKILL.md`](/Users/ryan/Projects/Papyrus/skills/newsroom-research-workflow/SKILL.md).
 
 Doctrine is private operating guidance. It is not reader-facing content and it
@@ -83,7 +84,7 @@ doctrine and report that the section doctrine slots are empty.
 
 ## Privacy Boundary
 
-Publication and desk doctrine are private newsroom data.
+Publication and section doctrine are private newsroom data.
 
 Do not quote private doctrine directly in reader-facing drafts unless an editor
 explicitly instructs that the text is publishable. Use doctrine to shape
@@ -96,15 +97,17 @@ copy.
 ## Research Packet Shape
 
 For live `Assignment` records, a research packet is a private work-product
-`Message`, not a file and not a new top-level GraphQL model:
+`Message`, not a file, publication `Item`, folder, or new top-level GraphQL
+model:
 
 - `Message.messageKind = "research_packet"`.
 - `Message.messageDomain = "assignment_work"`.
-- `Message.metadata.kind = "research.packet.created"`.
-- `Message.metadata.assignmentId` names the live `Assignment`.
-- `Message.metadata.research` contains the structured packet.
-- A current `SemanticRelation` with `relationTypeKey = "comment"` links the
-  `Message` to the `Assignment`.
+- `ModelAttachment(role = "message_body")` stores the human-readable packet body.
+- `ModelAttachment(role = "metadata")` stores JSON with
+  `kind = "research.packet.created"`, `assignmentId`, and the structured
+  `research` packet.
+- New writes link `Assignment --produces--> Message`; older
+  `Message --comment--> Assignment` packet links remain readable.
 
 The legacy assignment-`Item` path may still store the packet under
 `Item.editorial.newsroom.research`, but do not extend that path for live

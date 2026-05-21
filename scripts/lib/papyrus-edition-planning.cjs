@@ -11,6 +11,7 @@ const {
   parseMetadataObject,
   resolveContextProfile,
   resolveDeskFocusCategories,
+  selectCoverageConceptNode,
   summarizeFocusCoverage,
 } = require("./papyrus-assignment-context.cjs");
 
@@ -173,6 +174,7 @@ function buildEditionPlanningPlan(state, options = {}) {
   ];
   const assignments = [];
   let assignmentCount = 0;
+  const scopedTopicRelationKeys = new Set();
   const assignmentTargets = isReportingPlan
     ? buildReportingAssignmentTargets(sectionBudgets, selectedGroups)
     : selectedGroups.map((group, index) => ({
@@ -214,6 +216,7 @@ function buildEditionPlanningPlan(state, options = {}) {
           contextProfile: options.contextProfile,
           targetSystemType,
           assignmentTypeKey,
+          scopedTopicRelationKeys,
         });
         assignments.push(assignmentBundle.assignment);
         records.push(...assignmentBundle.records);
@@ -676,7 +679,7 @@ function scoreDeskGroup(group, state, now) {
   };
 }
 
-function buildAssignmentBundle({ categorySet, edition, group, focusCategory, lane, sectionTarget, sectionBudget = null, now, publicationSlots, overassignmentRatio, dispatchCount, candidateRank, priority, existing, contextProfile, targetSystemType, assignmentTypeKey = EDITION_ASSIGNMENT_TYPE }) {
+function buildAssignmentBundle({ categorySet, edition, group, focusCategory, lane, sectionTarget, sectionBudget = null, now, publicationSlots, overassignmentRatio, dispatchCount, candidateRank, priority, existing, contextProfile, targetSystemType, assignmentTypeKey = EDITION_ASSIGNMENT_TYPE, scopedTopicRelationKeys = null }) {
   const isReportingAssignment = assignmentTypeKey === REPORTING_EDITION_ASSIGNMENT_TYPE;
   const queueKey = isReportingAssignment
     ? `edition:${edition.slug}:section:${safeId(sectionTarget?.id ?? group.root.categoryKey)}:lane:${lane.laneKey}`
@@ -690,6 +693,7 @@ function buildAssignmentBundle({ categorySet, edition, group, focusCategory, lan
   ])}`;
   const evidenceReferences = selectEvidenceReferences(group.evidenceReferences, candidateRank);
   const signalNodes = group.signalNodes.slice(0, 3);
+  const coverageNode = selectCoverageConceptNode(signalNodes);
   const candidateAngle = candidateAngleForLane(lane, group.root, candidateRank, { assignmentTypeKey, sectionTarget, sectionBudget, focusCategory });
   const angleDiversity = isReportingAssignment
     ? reportingAngleDiversity({ sectionTarget, focusCategory, candidateRank, evidenceReferences })
@@ -815,6 +819,9 @@ function buildAssignmentBundle({ categorySet, edition, group, focusCategory, lan
     }),
   };
   const laneNode = semanticNodeForLane(lane, now);
+  const scopedTopicRelationKey = coverageNode ? `${coverageNode.lineageId}::${focusCategory.lineageId}` : null;
+  const shouldWriteScopedTopic = Boolean(scopedTopicRelationKey && !scopedTopicRelationKeys?.has(scopedTopicRelationKey));
+  if (shouldWriteScopedTopic && scopedTopicRelationKey) scopedTopicRelationKeys?.add(scopedTopicRelationKey);
   const relationRecords = [
     semanticRelationRecord({
       predicate: "planned_for_edition",
@@ -836,14 +843,20 @@ function buildAssignmentBundle({ categorySet, edition, group, focusCategory, lan
       subjectId: assignment.id,
       subjectLineageId: assignment.id,
       subjectVersionNumber: null,
-      objectKind: "category",
-      objectId: focusCategory.id,
-      objectLineageId: focusCategory.lineageId,
-      objectVersionNumber: focusCategory.versionNumber,
+      objectKind: coverageNode ? "semanticNode" : "category",
+      objectId: coverageNode?.id ?? focusCategory.id,
+      objectLineageId: coverageNode?.lineageId ?? focusCategory.lineageId,
+      objectVersionNumber: coverageNode?.versionNumber ?? focusCategory.versionNumber,
       rank: 1,
       classifierId: categorySet.classifierId,
       importedAt: now,
-      metadata: { categoryKey: focusCategory.categoryKey, deskCategoryKey: group.root.categoryKey, laneKey: lane.laneKey },
+      metadata: {
+        categoryKey: focusCategory.categoryKey,
+        deskCategoryKey: group.root.categoryKey,
+        laneKey: lane.laneKey,
+        coverageConceptKey: coverageNode?.nodeKey ?? null,
+        coverageConceptTitle: coverageNode?.displayName ?? coverageNode?.nodeKey ?? null,
+      },
     }),
     semanticRelationRecord({
       predicate: "targets_section",
@@ -916,6 +929,21 @@ function buildAssignmentBundle({ categorySet, edition, group, focusCategory, lan
       importedAt: now,
       metadata: { nodeKey: node.nodeKey, categoryKey: node.categoryKey },
     })),
+    ...(shouldWriteScopedTopic && coverageNode ? [semanticRelationRecord({
+      predicate: "scoped_to_topic",
+      subjectKind: "semanticNode",
+      subjectId: coverageNode.id,
+      subjectLineageId: coverageNode.lineageId,
+      subjectVersionNumber: coverageNode.versionNumber,
+      objectKind: "category",
+      objectId: focusCategory.id,
+      objectLineageId: focusCategory.lineageId,
+      objectVersionNumber: focusCategory.versionNumber,
+      rank: 1,
+      classifierId: categorySet.classifierId,
+      importedAt: now,
+      metadata: { categoryKey: focusCategory.categoryKey, coverageConceptKey: coverageNode.nodeKey },
+    })] : []),
   ];
   return {
     assignment,

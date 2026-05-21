@@ -179,7 +179,7 @@ relationTypes:
   - key: requests_work_on
     label: requests work on
     inverseLabel: requested work
-    description: Links an assignment to the object or desk it asks someone or an agent to work on.
+    description: Links an assignment to the concrete object, coverage concept, or workflow target it asks someone or an agent to work on.
     domain: workflow
     allowedSubjectKinds: [assignment]
     allowedObjectKinds: [reference, item, category, categorySet, semanticNode, steeringProposal]
@@ -253,6 +253,17 @@ relationTypes:
     isSymmetric: false
     isTransitive: false
     contextPackTags: [assignment_context, editing, publication, research]
+  - key: scoped_to_topic
+    label: scoped to topic
+    inverseLabel: semantic concepts scoped here
+    description: Links a semantic concept, entity, or coverage question to the accepted taxonomy category that scopes it.
+    domain: ontology
+    allowedSubjectKinds: [semanticNode]
+    allowedObjectKinds: [category]
+    isDirectional: true
+    isSymmetric: false
+    isTransitive: false
+    contextPackTags: [assignment_context, research, reference_graph, category_context]
   - key: produces
     label: produces
     inverseLabel: produced by
@@ -278,10 +289,10 @@ relationTypes:
   - key: derived_from
     label: derived from
     inverseLabel: source for
-    description: Connects a derived object to the source artifact, reference, or item it came from.
+    description: Connects a derived object or workflow record to the source packet, assignment, artifact, reference, or item it came from.
     domain: evidence
-    allowedSubjectKinds: [item, reference, message, semanticNode, semanticRelation]
-    allowedObjectKinds: [reference, item, knowledgeArtifact, knowledgeImportRun]
+    allowedSubjectKinds: [assignment, item, reference, message, semanticNode, semanticRelation]
+    allowedObjectKinds: [assignment, message, reference, item, knowledgeArtifact, knowledgeImportRun, semanticNode, semanticRelation]
     isDirectional: true
     isSymmetric: false
     isTransitive: false

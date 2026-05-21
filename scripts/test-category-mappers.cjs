@@ -5,6 +5,20 @@ const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const ts = require("typescript");
+require.extensions[".ts"] = function loadTs(module, filename) {
+  const source = fs.readFileSync(filename, "utf8");
+  const output = ts.transpileModule(source, {
+    compilerOptions: {
+      esModuleInterop: true,
+      module: ts.ModuleKind.CommonJS,
+      moduleResolution: ts.ModuleResolutionKind.Node10,
+      target: ts.ScriptTarget.ES2022,
+    },
+    fileName: filename,
+  });
+  module._compile(output.outputText, filename);
+};
 const {
   buildAcceptedCategorySetPayload,
   buildAcceptedCategoryTreePayload,
@@ -38,6 +52,13 @@ const {
 const {
   buildReportingPacketReviewPlan,
 } = require("./lib/papyrus-reporting-packet-review.cjs");
+const {
+  buildStoryCycleOutput,
+  buildStoryCyclePlan,
+} = require("./lib/papyrus-story-cycle.cjs");
+const {
+  buildReportingStoryBudget,
+} = require("../lib/reporting-story-budget.ts");
 const {
   buildSemanticRelationBackfillRecords,
   buildSemanticRelationTypeRecords,
@@ -1095,8 +1116,14 @@ assert.equal(topicRelation.objectKind, "category");
 assert.equal(topicRelation.objectLineageId, reportingMetadata.focusCategoryLineageId);
 const deskRelation = findRecord(editionPlan.records, "SemanticRelation", (record) => record.subjectId === reportingAssignment.id && record.predicate === "requests_work_on");
 assert.equal(deskRelation.relationTypeKey, "requests_work_on");
-assert.equal(deskRelation.objectKind, "category");
-assert.equal(deskRelation.objectLineageId, reportingMetadata.focusCategoryLineageId);
+assert.equal(deskRelation.objectKind, reportingMetadata.coverageConceptLineageId ? "semanticNode" : "category");
+assert.equal(deskRelation.objectLineageId, reportingMetadata.coverageConceptLineageId ?? reportingMetadata.focusCategoryLineageId);
+if (reportingMetadata.coverageConceptLineageId) {
+  const scopedTopicRelation = findRecord(editionPlan.records, "SemanticRelation", (record) => record.subjectLineageId === reportingMetadata.coverageConceptLineageId && record.predicate === "scoped_to_topic");
+  assert.equal(scopedTopicRelation.relationTypeKey, "scoped_to_topic");
+  assert.equal(scopedTopicRelation.objectKind, "category");
+  assert.equal(scopedTopicRelation.objectLineageId, reportingMetadata.focusCategoryLineageId);
+}
 const evidenceRelation = findRecord(editionPlan.records, "SemanticRelation", (record) => record.subjectId === reportingAssignment.id && record.predicate === "uses_evidence");
 assert.equal(evidenceRelation.relationTypeKey, "uses_evidence");
 assert.equal(evidenceRelation.relationDomain, "evidence");
@@ -1134,6 +1161,8 @@ assert.ok(relationTypeSeeds.some((type) => type.key === "planned_for_edition" &&
 assert.ok(relationTypeSeeds.some((type) => type.key === "targets_lane" && type.contextPackTags.includes("assignment_context")));
 assert.ok(relationTypeSeeds.some((type) => type.key === "targets_section" && type.allowedObjectKinds.includes("newsroomSection")));
 assert.ok(relationTypeSeeds.some((type) => type.key === "targets_topic" && type.allowedObjectKinds.includes("category")));
+assert.ok(relationTypeSeeds.some((type) => type.key === "scoped_to_topic" && type.domain === "ontology" && type.allowedSubjectKinds.includes("semanticNode") && type.allowedObjectKinds.includes("category")));
+assert.ok(relationTypeSeeds.some((type) => type.key === "derived_from" && type.allowedSubjectKinds.includes("assignment") && type.allowedObjectKinds.includes("message")));
 const relationTypeRecords = buildSemanticRelationTypeRecords(relationTypeSeeds, { now: "2026-05-18T12:00:00.000Z" });
 const usesEvidenceType = findRecord(relationTypeRecords, "SemanticRelationType", (record) => record.key === "uses_evidence");
 assert.equal(usesEvidenceType.id, semanticRelationTypeIdFor("uses_evidence"));
@@ -1372,14 +1401,33 @@ const reportingPacketMessage = {
   summary: "Reporting context packet: test",
   createdAt: "2026-05-18T12:00:00.000Z",
   updatedAt: "2026-05-18T12:00:00.000Z",
+  metadata: {
+    kind: "reporting.context_packet.created",
+    assignmentId: reportingCandidate.id,
+    reporting: {
+      summary: "Reporting context packet: test",
+      sectionKey: "technology",
+      editionId: "edition-2026-05-18-v1",
+      candidateRank: 1,
+      slotTarget: { sectionKey: "technology", slots: 2 },
+      editorRecommendation: "hold",
+      recommendedAngle: "Explain the operational impact.",
+      riskFlags: ["Single-source risk."],
+      coverageGaps: ["Need user comment."],
+      openQuestions: ["Is rollout complete?"],
+      acceptedReferenceIds: ["reference-1-v1", "reference-2-v1"],
+      proposedReferences: [{ title: "Fresh prospect", url: "https://example.com/fresh" }],
+    },
+  },
 };
-const reportingPacketCommentRelation = {
+const reportingPacketRelation = {
   relationState: "current",
-  predicate: "comment",
-  subjectKind: "message",
-  subjectId: reportingPacketMessage.id,
-  objectKind: "assignment",
-  objectId: reportingCandidate.id,
+  predicate: "produces",
+  relationTypeKey: "produces",
+  subjectKind: "assignment",
+  subjectId: reportingCandidate.id,
+  objectKind: "message",
+  objectId: reportingPacketMessage.id,
 };
 const holdReviewPlan = buildReportingPacketReviewPlan({
   assignment: reportingCandidate,
@@ -1387,7 +1435,7 @@ const holdReviewPlan = buildReportingPacketReviewPlan({
   decision: "hold",
   note: "Needs one more source.",
   now: "2026-05-18T13:00:00.000Z",
-  semanticRelations: [reportingPacketCommentRelation],
+  semanticRelations: [reportingPacketRelation],
 });
 assert.deepEqual(holdReviewPlan.records.map((record) => record.modelName), ["AssignmentEvent", "ModelAttachment"]);
 assert.equal(holdReviewPlan.event.eventType, "reporting_hold");
@@ -1402,7 +1450,15 @@ const killReviewPlan = buildReportingPacketReviewPlan({
   decision: "kill",
   note: "Duplicate angle.",
   now: "2026-05-18T13:05:00.000Z",
-  semanticRelations: [reportingPacketCommentRelation],
+  semanticRelations: [
+    reportingPacketRelation,
+    {
+      ...reportingPacketRelation,
+      id: "semantic-relation-research-budget-comment",
+      objectId: "message-research-budget-test",
+      objectLineageId: "message-research-budget-test",
+    },
+  ],
 });
 assert.deepEqual(killReviewPlan.records.map((record) => record.modelName), ["AssignmentEvent", "ModelAttachment"]);
 const selectReviewPlan = buildReportingPacketReviewPlan({
@@ -1411,7 +1467,7 @@ const selectReviewPlan = buildReportingPacketReviewPlan({
   decision: "select",
   note: "Move to copywriting.",
   now: "2026-05-18T13:10:00.000Z",
-  semanticRelations: [reportingPacketCommentRelation],
+  semanticRelations: [reportingPacketRelation],
 });
 assert.deepEqual(selectReviewPlan.records.map((record) => record.modelName), ["AssignmentEvent", "ModelAttachment", "Item", "SemanticRelation"]);
 assert.equal(selectReviewPlan.draftItem.type, "article");
@@ -1424,7 +1480,7 @@ const briefReviewPlan = buildReportingPacketReviewPlan({
   message: reportingPacketMessage,
   decision: "brief",
   now: "2026-05-18T13:15:00.000Z",
-  semanticRelations: [reportingPacketCommentRelation],
+  semanticRelations: [reportingPacketRelation],
 });
 assert.equal(briefReviewPlan.draftItem.type, "brief");
 assert.equal(briefReviewPlan.draftItem.typeStatus, "brief#draft");
@@ -1434,12 +1490,12 @@ const mergeReviewPlan = buildReportingPacketReviewPlan({
   decision: "merge",
   targetItem: { id: "item-existing-v1", lineageId: "item-existing", versionNumber: 1 },
   now: "2026-05-18T13:20:00.000Z",
-  semanticRelations: [reportingPacketCommentRelation],
+  semanticRelations: [reportingPacketRelation],
 });
 assert.deepEqual(mergeReviewPlan.records.map((record) => record.modelName), ["AssignmentEvent", "ModelAttachment", "SemanticRelation"]);
 assert.equal(mergeReviewPlan.records.find((record) => record.modelName === "SemanticRelation").expected.objectId, "item-existing-v1");
 assert.throws(
-  () => buildReportingPacketReviewPlan({ assignment: reportingCandidate, message: reportingPacketMessage, decision: "merge", semanticRelations: [reportingPacketCommentRelation] }),
+  () => buildReportingPacketReviewPlan({ assignment: reportingCandidate, message: reportingPacketMessage, decision: "merge", semanticRelations: [reportingPacketRelation] }),
   /target-item/,
 );
 assert.throws(
@@ -1454,6 +1510,233 @@ assert.throws(
   () => buildReportingPacketReviewPlan({ assignment: reportingCandidate, message: reportingPacketMessage, decision: "hold", semanticRelations: [] }),
   /not linked/,
 );
+
+const reportingBudgetSecondCandidate = {
+  ...reportingCandidate,
+  id: "assignment-reporting-budget-second",
+  title: "Reporting budget second candidate",
+  sectionKey: "technology",
+  metadata: JSON.stringify({
+    editionId: "edition-2026-05-18-v1",
+    editionSlug: "edition-2026-05-18",
+    candidateRank: 2,
+    slotTarget: { sectionKey: "technology", slots: 2 },
+  }),
+};
+const reportingStoryBudget = buildReportingStoryBudget({
+  assignments: [
+    reportingCandidate,
+    reportingBudgetSecondCandidate,
+    { ...reportingCandidate, id: "assignment-research-excluded", assignmentTypeKey: "research.edition-candidate" },
+  ],
+  messages: [
+    reportingPacketMessage,
+    {
+      id: "message-research-budget-test",
+      messageKind: "research_packet",
+      messageDomain: "assignment_work",
+      status: "active",
+      summary: "Research packet",
+      createdAt: "2026-05-18T11:00:00.000Z",
+      updatedAt: "2026-05-18T11:00:00.000Z",
+      metadata: { assignmentId: reportingCandidate.id },
+    },
+  ],
+  assignmentEvents: [
+    {
+      id: "assignment-event-budget-select",
+      assignmentId: reportingCandidate.id,
+      assignmentTypeKey: "reporting.edition-candidate",
+      queueKey: reportingCandidate.queueKey,
+      eventType: "reporting_select",
+      createdAt: "2026-05-18T13:30:00.000Z",
+      metadata: { decision: "select", draftItemId: "item-reporting-draft-v1" },
+    },
+  ],
+  semanticRelations: [
+    reportingPacketRelation,
+    {
+      ...reportingPacketRelation,
+      id: "semantic-relation-research-budget-comment",
+      objectId: "message-research-budget-test",
+      objectLineageId: "message-research-budget-test",
+    },
+  ],
+  newsroomSections: [
+    {
+      id: "technology",
+      title: "Technology",
+      shortTitle: "Tech",
+      type: "canonical",
+      editorialMission: "Technology mission",
+      editorialPolicy: "Technology policy",
+      enabled: true,
+      sortOrder: 1,
+      defaultPageBudget: 2,
+    },
+  ],
+});
+assert.equal(reportingStoryBudget.sections.length, 1);
+assert.equal(reportingStoryBudget.sections[0].key, "technology");
+assert.equal(reportingStoryBudget.sections[0].slotCount, 2);
+assert.equal(reportingStoryBudget.sections[0].dispatchedCount, 2);
+assert.equal(reportingStoryBudget.sections[0].selectedCount, 1);
+assert.equal(reportingStoryBudget.sections[0].undecidedCount, 1);
+assert.equal(reportingStoryBudget.sections[0].state, "needs");
+assert.equal(reportingStoryBudget.totals.dispatchedCount, 2);
+const reportingBudgetCandidate = reportingStoryBudget.sections[0].candidates.find((candidate) => candidate.assignmentId === reportingCandidate.id);
+assert.ok(reportingBudgetCandidate);
+assert.equal(reportingBudgetCandidate.hasReportingPacket, true);
+assert.equal(reportingBudgetCandidate.editorRecommendation, "hold");
+assert.equal(reportingBudgetCandidate.recommendedAngle, "Explain the operational impact.");
+assert.equal(reportingBudgetCandidate.riskFlags.length, 1);
+assert.equal(reportingBudgetCandidate.coverageGaps.length, 1);
+assert.equal(reportingBudgetCandidate.openQuestions.length, 1);
+assert.equal(reportingBudgetCandidate.acceptedReferenceCount, 2);
+assert.equal(reportingBudgetCandidate.proposedReferenceCount, 1);
+assert.equal(reportingBudgetCandidate.researchPacketCount, 1);
+assert.equal(reportingBudgetCandidate.decision, "select");
+assert.equal(reportingBudgetCandidate.draftItemId, "item-reporting-draft-v1");
+
+const aiGamesSections = [
+  {
+    id: "culture",
+    title: "Culture",
+    shortTitle: "Culture",
+    type: "floating",
+    editorialMission: "Cover AI's relationship to creativity, culture, media, design, games, music, film, and publishing.",
+    editorialPolicy: "Favor visually interesting and culturally relevant pieces.",
+    enabled: true,
+    sortOrder: 1,
+    defaultArticleTypes: ["article"],
+    defaultPageBudget: 2,
+  },
+  {
+    id: "methods",
+    title: "Methods",
+    shortTitle: "Methods",
+    type: "canonical",
+    editorialMission: "Help practitioners understand how to build, evaluate, operate, or improve AI/ML systems.",
+    editorialPolicy: "Commission practical, implementation-oriented pieces.",
+    enabled: true,
+    sortOrder: 2,
+    defaultArticleTypes: ["article"],
+    defaultPageBudget: 1,
+  },
+  {
+    id: "business",
+    title: "Business",
+    shortTitle: "Business",
+    type: "canonical",
+    editorialMission: "Cover the commercial, organizational, and market impact of AI/ML.",
+    editorialPolicy: "Commission pieces about companies, adoption, labor impact, and commercialization.",
+    enabled: true,
+    sortOrder: 3,
+    defaultArticleTypes: ["article"],
+    defaultPageBudget: 1,
+  },
+  {
+    id: "law",
+    title: "Law",
+    shortTitle: "Law",
+    type: "floating",
+    editorialMission: "Cover legal, regulatory, governance, copyright, liability, and compliance issues around AI/ML.",
+    editorialPolicy: "Prioritize legal stakes and policy consequences.",
+    enabled: true,
+    sortOrder: 4,
+    defaultArticleTypes: ["article"],
+    defaultPageBudget: 1,
+  },
+];
+const aiGamesStoryCycle = buildStoryCyclePlan({
+  date: "2026-05-21",
+  topic: "AI in video games",
+  corpusKey: "AI-ML-research",
+  categoryKey: focusCategoryAlpha.categoryKey,
+  coverageKey: "coverage.ai-in-video-games",
+  runId: "story-cycle-ai-games-test",
+  now: "2026-05-21T12:00:00.000Z",
+  sections: ["culture", "methods", "business", "law"],
+  sectionBudgets: ["culture:2", "methods:1", "business:1", "law:1"],
+  newsroomSections: aiGamesSections,
+  categorySet: fallbackTaxonomy,
+  category: focusCategoryAlpha,
+});
+assert.equal(aiGamesStoryCycle.topic, "AI in video games");
+assert.equal(aiGamesStoryCycle.coverageKey, "coverage.ai-in-video-games");
+assert.equal(aiGamesStoryCycle.coverageNode.nodeKind, "coverageQuestion");
+assert.equal(aiGamesStoryCycle.researchAssignments.length, 4);
+assert.equal(aiGamesStoryCycle.reportingAssignments.length, 9);
+assert.equal(aiGamesStoryCycle.summary.createsItemOrEditionItem, false);
+assert.deepEqual(aiGamesStoryCycle.sections.map((section) => section.key), ["culture", "methods", "business", "law"]);
+assert.deepEqual(
+  aiGamesStoryCycle.sections.map((section) => section.slots),
+  [2, 1, 1, 1],
+);
+assert.ok(aiGamesStoryCycle.researchAssignments.every((assignment) => assignment.assignmentTypeKey === "research.edition-candidate"));
+assert.ok(aiGamesStoryCycle.reportingAssignments.every((assignment) => assignment.assignmentTypeKey === "reporting.edition-candidate"));
+assert.ok(aiGamesStoryCycle.researchAssignments.every((assignment) => JSON.parse(assignment.metadata).coverageConceptKey === "coverage.ai-in-video-games"));
+assert.ok(aiGamesStoryCycle.reportingAssignments.every((assignment) => JSON.parse(assignment.metadata).sourceResearchAssignmentId));
+assert.equal(aiGamesStoryCycle.records.some((record) => record.modelName === "Item" || record.modelName === "EditionItem"), false);
+assert.ok(aiGamesStoryCycle.records.some((record) => record.modelName === "SemanticRelation" && record.expected.predicate === "scoped_to_topic"));
+const aiGamesReportingDerived = aiGamesStoryCycle.records.filter((record) => record.modelName === "SemanticRelation" && record.expected.predicate === "derived_from");
+assert.equal(aiGamesReportingDerived.length, aiGamesStoryCycle.reportingAssignments.length);
+const aiGamesCultureReporting = aiGamesStoryCycle.reportingAssignments.filter((assignment) => assignment.sectionKey === "culture");
+assert.equal(aiGamesCultureReporting.length, 3);
+assert.deepEqual(
+  aiGamesCultureReporting.map((assignment) => JSON.parse(assignment.metadata).angleDiversity.lensKey),
+  ["accountability", "reader-impact", "coverage-gap"],
+);
+const aiGamesManifest = {
+  runId: aiGamesStoryCycle.runId,
+  action: "dry-run",
+  date: aiGamesStoryCycle.date,
+  topic: aiGamesStoryCycle.topic,
+  categoryKey: aiGamesStoryCycle.categoryKey,
+  coverageKey: aiGamesStoryCycle.coverageKey,
+  sections: aiGamesStoryCycle.sections,
+  researchRuns: [{
+    ok: true,
+    phase: "research",
+    sectionKey: "culture",
+    assignmentId: aiGamesStoryCycle.researchAssignments.find((assignment) => assignment.sectionKey === "culture").id,
+    packetPath: ".papyrus-runs/story-cycle-ai-games-test/research/culture.packet.json",
+    packet: {
+      summary: "Culture research packet",
+      evidenceItemIds: ["reference-1-v1"],
+      proposedReferences: [{ title: "Game AI source" }],
+      sourceSnapshots: [{ url: "https://example.com/game-ai" }],
+    },
+  }],
+  reportingRuns: [{
+    ok: true,
+    phase: "reporting",
+    sectionKey: "culture",
+    assignmentId: aiGamesCultureReporting[0].id,
+    angle: "accountability",
+    packetPath: ".papyrus-runs/story-cycle-ai-games-test/reporting/culture.packet.json",
+    packet: {
+      editor_recommendation: "hold",
+      recommended_angle: "Track player impact.",
+      accepted_reference_ids: ["reference-1-v1"],
+      proposed_references: [{ title: "Studio source" }],
+      risk_flags: ["Verify studio claim."],
+      coverage_gaps: ["Need developer comment."],
+      open_questions: ["How widespread is this?"],
+      copywriter_brief: "Use after editor selection.",
+    },
+  }],
+};
+const aiGamesOutput = buildStoryCycleOutput(aiGamesManifest);
+assert.equal(aiGamesOutput.sections.length, 4);
+const aiGamesCultureOutput = aiGamesOutput.sections.find((section) => section.sectionKey === "culture");
+assert.equal(aiGamesCultureOutput.researchPackets[0].acceptedEvidenceCount, 1);
+assert.equal(aiGamesCultureOutput.researchPackets[0].proposedReferenceCount, 1);
+assert.equal(aiGamesCultureOutput.reportingPackets[0].editorRecommendation, "hold");
+assert.equal(aiGamesCultureOutput.reportingPackets[0].riskFlags.length, 1);
+assert.equal(aiGamesCultureOutput.reportingPackets[0].coverageGaps.length, 1);
+assert.equal(aiGamesCultureOutput.reportingPackets[0].openQuestions.length, 1);
+assert.equal(aiGamesCultureOutput.reportingPackets[0].copywriterBrief, "Use after editor selection.");
 
 const schemaSource = fs.readFileSync(path.join(__dirname, "..", "amplify", "data", "resource.ts"), "utf8");
 const authoringClientSource = fs.readFileSync(path.join(__dirname, "lib", "papyrus-graphql-authoring.cjs"), "utf8");

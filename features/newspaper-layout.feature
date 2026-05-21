@@ -347,6 +347,21 @@ Feature: Newspaper layout scenarios
     And assignment "assignment-demo-reporting-news-001" should show a draft item without edition placement
     And no browser console errors should occur
 
+  Scenario: Newsroom story budget groups reporting packets by section
+    Given I am a test editor reader
+    And I open the assignments newsroom at 1280 by 900
+    When I switch assignments to Story Budget view
+    Then the reporting story budget should show section "news" with 1 slot and 1 candidate
+    And story budget candidate "assignment-demo-reporting-news-001" should show packet recommendation "hold"
+    And story budget candidate "assignment-demo-reporting-news-001" should show risk and gap context
+    When I review story budget candidate "assignment-demo-reporting-news-001" as "hold"
+    Then story budget candidate "assignment-demo-reporting-news-001" should show reporting decision "hold"
+    And assignment "assignment-demo-reporting-news-001" should not appear as an edition item
+    When I review story budget candidate "assignment-demo-reporting-news-001" as "select"
+    Then story budget candidate "assignment-demo-reporting-news-001" should show reporting decision "select"
+    And assignment "assignment-demo-reporting-news-001" should show a draft item without edition placement
+    And no browser console errors should occur
+
   Scenario: Production newsroom requires editor access
     Given I open the edition path "/newsroom" at 1280 by 900
     Then the newsroom should show an editor access gate

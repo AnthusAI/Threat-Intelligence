@@ -180,6 +180,7 @@ function buildAssignmentContextMetadata({
 }) {
   const focusTitle = focusCategory.displayName ?? focusCategory.shortTitle ?? focusCategory.categoryKey;
   const deskTitle = deskCategory.displayName ?? deskCategory.shortTitle ?? deskCategory.categoryKey;
+  const coverageNode = selectCoverageConceptNode(signalNodes);
   return {
     deskCategoryKey: deskCategory.categoryKey,
     deskCategoryLineageId: deskCategory.lineageId,
@@ -211,6 +212,10 @@ function buildAssignmentContextMetadata({
     candidateAngle,
     referenceLineageIds: evidenceReferences.map((reference) => reference.lineageId),
     semanticNodeLineageIds: signalNodes.map((node) => node.lineageId),
+    coverageConceptId: coverageNode?.id ?? null,
+    coverageConceptLineageId: coverageNode?.lineageId ?? null,
+    coverageConceptKey: coverageNode?.nodeKey ?? null,
+    coverageConceptTitle: coverageNode?.displayName ?? coverageNode?.nodeKey ?? null,
     policyRationale: "Live section context uses publication doctrine, section doctrine, accepted topic scope, recent section memory, and linked evidence.",
     expectedOutput: "Private research packet for editor selection, not reader copy.",
     rootCategoryKey: deskCategory.categoryKey,
@@ -227,6 +232,14 @@ function buildAssignmentContextMetadata({
     comparisonQuestions: [],
     evidenceRubric: [],
   };
+}
+
+function selectCoverageConceptNode(signalNodes = []) {
+  const nodes = Array.isArray(signalNodes) ? signalNodes.filter(Boolean) : [];
+  return nodes.find((node) => ["coverageQuestion", "coverageTheme", "storyExploration"].includes(node.nodeKind))
+    ?? nodes.find((node) => String(node.nodeKey ?? "").startsWith("coverage."))
+    ?? nodes[0]
+    ?? null;
 }
 
 function summarizeFocusCoverage(assignments) {
@@ -311,5 +324,6 @@ module.exports = {
   resolveContextProfile,
   resolveDeskFocusCategories,
   safeId,
+  selectCoverageConceptNode,
   summarizeFocusCoverage,
 };

@@ -559,7 +559,7 @@ return plan_research_update{ assignment_item = assignment, research = research }
         self.assertEqual(relation_records[0]["input"]["objectId"], "reference-knowledge-corpus-ai-ml-research-research-001-v1")
         self.assertEqual(relation_records[0]["input"]["relationTypeKey"], "uses_evidence")
 
-    def test_live_assignment_research_packet_plan_creates_message_and_comment_relation(self):
+    def test_live_assignment_research_packet_plan_creates_message_and_produces_relation(self):
         plan = papyrus_newsroom.build_assignment_research_packet_plan(
             generated_at="2026-05-18T15:30:00Z",
             assignment={
@@ -638,12 +638,12 @@ return plan_research_update{ assignment_item = assignment, research = research }
         self.assertEqual(metadata["research"]["sourceSnapshots"][0]["source_domain"], "example.com")
         self.assertEqual(metadata["research"]["proposedReferences"][0]["ingestion_rationale"], "Candidate source relates to the focus and publication mission.")
         relation = plan["records"][3]["input"]
-        self.assertEqual(relation["predicate"], "comment")
-        self.assertEqual(relation["relationTypeKey"], "comment")
-        self.assertEqual(relation["relationDomain"], "commentary")
-        self.assertEqual(relation["subjectKind"], "message")
-        self.assertEqual(relation["objectKind"], "assignment")
-        self.assertEqual(relation["objectId"], "assignment-live-123")
+        self.assertEqual(relation["predicate"], "produces")
+        self.assertEqual(relation["relationTypeKey"], "produces")
+        self.assertEqual(relation["relationDomain"], "workflow")
+        self.assertEqual(relation["subjectKind"], "assignment")
+        self.assertEqual(relation["subjectId"], "assignment-live-123")
+        self.assertEqual(relation["objectKind"], "message")
 
     def test_execute_tactus_can_plan_live_assignment_research_packet(self):
         result = tactus_runtime.execute_tactus(
@@ -669,7 +669,7 @@ return plan_assignment_research_packet{ assignment = assignment, research = rese
         self.assertTrue(result["ok"], result.get("error"))
         self.assertEqual(result["value"]["lifecycle"], "assignment-research-packet")
         self.assertEqual(result["value"]["records"][0]["modelName"], "Message")
-        self.assertEqual(result["value"]["records"][3]["input"]["relationTypeKey"], "comment")
+        self.assertEqual(result["value"]["records"][3]["input"]["relationTypeKey"], "produces")
         self.assertEqual(result["api_calls"], ["papyrus.plan.assignment_research_packet"])
 
     def test_live_assignment_reporting_context_packet_plan_creates_private_message_only(self):
@@ -733,9 +733,37 @@ return plan_assignment_research_packet{ assignment = assignment, research = rese
         self.assertEqual(metadata["reporting"]["acceptedReferenceIds"], ["reference-1-v1"])
         self.assertEqual(metadata["reporting"]["editorRecommendation"], "hold")
         relation = plan["records"][3]["input"]
-        self.assertEqual(relation["predicate"], "comment")
-        self.assertEqual(relation["subjectKind"], "message")
-        self.assertEqual(relation["objectKind"], "assignment")
+        self.assertEqual(relation["predicate"], "produces")
+        self.assertEqual(relation["subjectKind"], "assignment")
+        self.assertEqual(relation["objectKind"], "message")
+
+    def test_reporting_context_packet_plan_links_source_research_lineage(self):
+        plan = papyrus_newsroom.build_assignment_reporting_context_packet_plan(
+            generated_at="2026-05-18T16:15:00Z",
+            assignment={
+                "id": "assignment-reporting-derived",
+                "assignmentTypeKey": "reporting.edition-candidate",
+                "queueKey": "edition:edition-2026-05-23:section:science:lane:reporting",
+                "status": "open",
+                "sectionKey": "science",
+            },
+            reporting={
+                "summary": "A reported candidate is derived from research.",
+                "section_key": "science",
+                "edition_id": "edition-2026-05-23-v1",
+                "source_research_packet_id": "message-research-packet-1",
+                "source_research_assignment_id": "assignment-research-1",
+                "copywriter_brief": "Use only after editor selection.",
+            },
+        )
+
+        relation_records = [record["input"] for record in plan["records"] if record["modelName"] == "SemanticRelation"]
+        self.assertEqual([relation["predicate"] for relation in relation_records], ["produces", "derived_from", "derived_from"])
+        self.assertEqual(relation_records[1]["subjectKind"], "assignment")
+        self.assertEqual(relation_records[1]["objectKind"], "message")
+        self.assertEqual(relation_records[1]["objectId"], "message-research-packet-1")
+        self.assertEqual(relation_records[2]["objectKind"], "assignment")
+        self.assertEqual(relation_records[2]["objectId"], "assignment-research-1")
 
     def test_execute_tactus_can_plan_reporting_context_packet(self):
         result = tactus_runtime.execute_tactus(
@@ -764,8 +792,16 @@ return plan_assignment_reporting_context_packet{ assignment = assignment, report
         self.assertTrue(result["ok"], result.get("error"))
         self.assertEqual(result["value"]["lifecycle"], "assignment-reporting-context-packet")
         self.assertEqual(result["value"]["records"][0]["input"]["messageKind"], "reporting_context_packet")
-        self.assertEqual(result["value"]["records"][3]["input"]["relationTypeKey"], "comment")
+        self.assertEqual(result["value"]["records"][3]["input"]["relationTypeKey"], "produces")
         self.assertEqual(result["api_calls"], ["papyrus.plan.assignment_reporting_context_packet"])
+
+    def test_reporter_procedure_routes_live_reporting_assignments_to_context_packets(self):
+        source = (REPO_ROOT / "procedures" / "newsroom" / "reporter.tac").read_text()
+        self.assertIn("reporting.edition-candidate Assignments must produce Message-backed", source)
+        self.assertIn("plan_assignment_reporting_context_packet", source)
+        self.assertIn('"work_product_kind":"reporting_context_packet"', source)
+        self.assertIn("Message + ModelAttachment(body) +", source)
+        self.assertIn("It must not create\n  Item or EditionItem records.", source)
 
     def test_execute_tactus_exposes_knowledge_query_helper(self):
         with mock.patch("papyrus_newsroom.tactus_runtime.build_environment_services", return_value=object()), \

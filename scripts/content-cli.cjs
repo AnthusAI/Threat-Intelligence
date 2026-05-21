@@ -68,6 +68,10 @@ const {
   normalizeReportingReviewDecision,
 } = require("./lib/papyrus-reporting-packet-review.cjs");
 const {
+  buildStoryCycleOutput,
+  buildStoryCyclePlan,
+} = require("./lib/papyrus-story-cycle.cjs");
+const {
   REPORTING_EDITION_ASSIGNMENT_TYPE,
   applyEditionPlanningPlan,
   buildEditionPlanningPlan,
@@ -337,6 +341,12 @@ async function main() {
       return;
     case "assignments:research-intake-now":
       await runResearchIntakeNow(args.slice(2));
+      return;
+    case "assignments:run-story-cycle":
+      await runStoryCycle(args.slice(2));
+      return;
+    case "assignments:story-cycle-output":
+      await showStoryCycleOutput(args.slice(2));
       return;
     case "assignments:orphan-research-packets":
       await listOrphanResearchPackets(args.slice(2));
@@ -3373,13 +3383,13 @@ async function applyResearchPacket(flags) {
     updatedAt: now,
   };
   const relation = localSemanticRelationRecord({
-    predicate: "comment",
-    subjectKind: "message",
-    subjectId: messageId,
-    subjectLineageId: messageId,
-    objectKind: "assignment",
-    objectId: assignmentId,
-    objectLineageId: assignmentId,
+    predicate: "produces",
+    subjectKind: "assignment",
+    subjectId: assignmentId,
+    subjectLineageId: assignmentId,
+    objectKind: "message",
+    objectId: messageId,
+    objectLineageId: messageId,
     rank: 1,
     confidence: 1,
     reviewRecommended: false,
@@ -3392,6 +3402,7 @@ async function applyResearchPacket(flags) {
       assignmentTypeKey: assignment.assignmentTypeKey,
       queueKey: assignment.queueKey,
       researchMode,
+      workProductKind: "research_packet",
     },
   });
   const records = [
@@ -3749,6 +3760,517 @@ async function runResearchIntakeNow(flags) {
   printResearchIntakeNowSummary(result);
 }
 
+async function runStoryCycle(flags) {
+  const options = parseOptions(flags);
+  const date = normalizeCliString(options.date);
+  const topic = normalizeCliString(options.topic);
+  if (!date) throw new Error("assignments run-story-cycle requires --date YYYY-MM-DD.");
+  if (!topic) throw new Error("assignments run-story-cycle requires --topic <text>.");
+  const apply = Boolean(options.apply);
+  const asJson = Boolean(options.json);
+  const planOnly = Boolean(options["plan-only"]);
+  const corpusKey = normalizeCliString(options["corpus-key"]) ?? "AI-ML-research";
+  const categoryKey = normalizeCliString(options.category) ?? corpusKey;
+  const coverageKey = normalizeCliString(options["coverage-key"]) ?? `coverage.${safeId(topic).replace(/-/g, ".")}`;
+  const runId = normalizeCliString(options["run-id"]) ?? `story-cycle-${safeId(topic)}-${timestampForPath()}`;
+  const runDir = path.resolve(options.output ?? path.join(".papyrus-runs", runId));
+  fs.mkdirSync(runDir, { recursive: true });
+  fs.mkdirSync(path.join(runDir, "research"), { recursive: true });
+  fs.mkdirSync(path.join(runDir, "reporting"), { recursive: true });
+
+  const { client } = createAuthoringClient();
+  const context = await loadStoryCyclePlanningContext(client, {
+    corpusKey,
+    categoryKey,
+  });
+  const plan = buildStoryCyclePlan({
+    date,
+    topic,
+    corpusKey,
+    categoryKey,
+    coverageKey,
+    runId,
+    researchMode: options["research-mode"] ?? options.researchMode,
+    overassignmentRatio: options.ratio,
+    sections: parseCommaList(options.sections),
+    sectionBudgets: parseCommaList(options["section-budgets"]),
+    anglesBySection: parseCommaList(options.angles),
+    newsroomSections: context.newsroomSections,
+    categorySet: context.categorySet,
+    category: context.category,
+  });
+  const assignmentChanges = await buildRecordChangesTargetedByIdToleratingOptionalModels(client, plan.records, {
+    prepareVersioned: false,
+  });
+  if (apply) {
+    await applyRecordChanges(client, assignmentChanges);
+    await updateNewsroomSummaryAfterAssignmentCreates(client, assignmentChanges, {
+      actorLabel: "Papyrus content CLI",
+      reason: `assignments run-story-cycle ${runId}`,
+    });
+  }
+
+  const manifestPath = path.join(runDir, "manifest.json");
+  const manifest = {
+    schemaVersion: 1,
+    command: "assignments run-story-cycle",
+    runId,
+    action: apply ? "apply" : "dry-run",
+    date,
+    topic,
+    corpusKey,
+    categoryKey,
+    coverageKey,
+    coverageNodeId: plan.coverageNode.id,
+    runDir,
+    manifestPath,
+    createdAt: new Date().toISOString(),
+    sections: plan.sections,
+    assignmentChangeCounts: changeCounts(assignmentChanges),
+    planSummary: plan.summary,
+    researchAssignments: plan.researchAssignments.map(storyCycleAssignmentSummary),
+    reportingAssignments: plan.reportingAssignments.map(storyCycleAssignmentSummary),
+    researchRuns: [],
+    reportingRuns: [],
+    failures: [],
+    next: null,
+  };
+  writeJsonFile(manifestPath, manifest);
+
+  if (!planOnly) {
+    const maxParallelResearch = normalizeCliNonNegativeInteger(options["max-parallel-research"], "--max-parallel-research") ?? 2;
+    manifest.researchRuns = await runStoryCycleJobs(plan.researchAssignments, maxParallelResearch, async (assignment) => (
+      runStoryCycleResearchJob({
+        client,
+        assignment,
+        apply,
+        runDir,
+        corpusKey,
+        researchMode: plan.researchMode,
+        topic,
+        coverageKey,
+        maxEvidenceItems: normalizeCliNonNegativeInteger(options["max-evidence-items"], "--max-evidence-items") ?? 20,
+      })
+    ));
+    writeJsonFile(manifestPath, manifest);
+
+    const researchBySection = new Map(manifest.researchRuns.map((run) => [run.sectionKey, run]));
+    const maxParallelReporting = normalizeCliNonNegativeInteger(options["max-parallel-reporting"], "--max-parallel-reporting") ?? 3;
+    manifest.reportingRuns = await runStoryCycleJobs(plan.reportingAssignments, maxParallelReporting, async (assignment) => (
+      runStoryCycleReportingJob({
+        client,
+        assignment,
+        apply,
+        runDir,
+        corpusKey,
+        topic,
+        coverageKey,
+        researchRun: researchBySection.get(assignment.sectionKey) ?? null,
+      })
+    ));
+  }
+
+  const output = buildStoryCycleOutput({
+    ...manifest,
+    manifestPath,
+  });
+  const outputPath = path.join(runDir, "story-cycle-output.json");
+  writeJsonFile(outputPath, output);
+  manifest.failures = output.failures;
+  manifest.outputPath = outputPath;
+  manifest.next = `npm run content -- assignments story-cycle-output --run-id ${runId}${asJson ? " --json" : ""}`;
+  writeJsonFile(manifestPath, manifest);
+
+  const result = {
+    ok: output.failures.length === 0,
+    command: "assignments run-story-cycle",
+    action: apply ? "apply" : "dry-run",
+    runId,
+    date,
+    topic,
+    coverageKey,
+    categoryKey,
+    sections: plan.sections.map((section) => section.key),
+    researchAssignments: manifest.researchAssignments,
+    reportingAssignments: manifest.reportingAssignments,
+    researchPackets: output.sections.flatMap((section) => section.researchPackets.map((packet) => ({ sectionKey: section.sectionKey, ...packet }))),
+    reportingPackets: output.sections.flatMap((section) => section.reportingPackets.map((packet) => ({ sectionKey: section.sectionKey, ...packet }))),
+    failures: output.failures,
+    manifestPath,
+    outputPath,
+    next: manifest.next,
+  };
+  if (asJson) {
+    printCompactJson(result);
+    return;
+  }
+  printStoryCycleSummary(result);
+}
+
+async function showStoryCycleOutput(flags) {
+  const options = parseOptions(flags);
+  const manifestPath = findStoryCycleManifestPath({
+    runId: normalizeCliString(options["run-id"]),
+    coverageKey: normalizeCliString(options["coverage-key"]),
+    date: normalizeCliString(options.date),
+    assignmentId: normalizeCliString(options.assignment),
+  });
+  if (!manifestPath) throw new Error("No story-cycle manifest matched the requested filters.");
+  const manifest = loadJsonFile(manifestPath);
+  const output = buildStoryCycleOutput({
+    ...manifest,
+    manifestPath,
+  }, {
+    section: normalizeCliString(options.section),
+  });
+  if (options.json) {
+    printCompactJson(output);
+    return;
+  }
+  printStoryCycleOutput(output);
+}
+
+async function loadStoryCyclePlanningContext(client, { corpusKey, categoryKey }) {
+  const [categorySets, categories, newsroomSections] = await Promise.all([
+    client.listRecords("CategorySet"),
+    client.listRecords("Category"),
+    loadStoryCycleNewsroomSections(client),
+  ]);
+  const categorySet = selectStoryCycleCategorySet(categorySets, corpusKey);
+  const category = selectStoryCycleCategory(categories, categoryKey, categorySet);
+  return {
+    categorySet,
+    category,
+    newsroomSections,
+  };
+}
+
+async function loadStoryCycleNewsroomSections(client) {
+  const seededSections = loadNewsroomSectionSeeds(DEFAULT_NEWSROOM_SECTIONS_PATH);
+  try {
+    const sections = await client.listRecords("NewsroomSection");
+    if (sections.length) {
+      const byId = new Map(seededSections.map((section) => [section.id, section]));
+      for (const section of sections) byId.set(section.id, section);
+      return Array.from(byId.values());
+    }
+  } catch (error) {
+    if (!isMissingGraphQLModelError(error, "NewsroomSection") && !isDynamoResourceNotFoundError(error)) throw error;
+  }
+  return seededSections;
+}
+
+function selectStoryCycleCategorySet(categorySets, corpusKey) {
+  const corpusId = `knowledge-corpus-${safeId(corpusKey)}`;
+  const candidates = (categorySets ?? [])
+    .filter((categorySet) => categorySet.status === "accepted")
+    .filter((categorySet) => !categorySet.versionState || categorySet.versionState === "current")
+    .filter((categorySet) => categorySet.corpusId === corpusId || categorySet.corpusKey === corpusKey || !corpusKey);
+  candidates.sort((left, right) => String(right.generatedAt ?? right.versionCreatedAt ?? "").localeCompare(String(left.generatedAt ?? left.versionCreatedAt ?? "")));
+  return candidates[0] ?? null;
+}
+
+function selectStoryCycleCategory(categories, categoryKey, categorySet) {
+  const matches = (categories ?? [])
+    .filter((category) => !categorySet || category.categorySetId === categorySet.id)
+    .filter((category) => !category.versionState || category.versionState === "current")
+    .filter((category) => category.status !== "archived")
+    .filter((category) => (
+      category.id === categoryKey
+      || category.lineageId === categoryKey
+      || category.categoryKey === categoryKey
+      || category.displayName === categoryKey
+    ));
+  return matches[0] ?? null;
+}
+
+async function runStoryCycleJobs(items, maxParallel, worker) {
+  const limit = Math.max(1, maxParallel);
+  const results = new Array(items.length);
+  let cursor = 0;
+  async function runNext() {
+    for (;;) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= items.length) return;
+      try {
+        results[index] = await worker(items[index], index);
+      } catch (error) {
+        results[index] = {
+          ok: false,
+          phase: "unknown",
+          assignmentId: items[index]?.id ?? null,
+          sectionKey: items[index]?.sectionKey ?? null,
+          error: error instanceof Error ? error.message : String(error ?? ""),
+        };
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => runNext()));
+  return results;
+}
+
+async function runStoryCycleResearchJob({ client, assignment, apply, runDir, corpusKey, researchMode, topic, coverageKey, maxEvidenceItems }) {
+  const sectionKey = assignment.sectionKey ?? "unsectioned";
+  const basePath = path.join(runDir, "research", `${safeId(sectionKey)}-${safeId(assignment.id)}`);
+  const stdoutPath = `${basePath}.stdout.log`;
+  const stderrPath = `${basePath}.stderr.log`;
+  const resultPath = `${basePath}.result.json`;
+  const packetPath = `${basePath}.packet.json`;
+  const params = apply
+    ? [`assignment_item_id=${assignment.id}`]
+    : [`assignment_json=${JSON.stringify(assignment)}`];
+  const command = [
+    "tactus",
+    "run",
+    "procedures/newsroom/research_explorer.tac",
+    "--no-sandbox",
+    "--real-all",
+    "--param", params[0],
+    "--param", `corpus_key=${corpusKey}`,
+    "--param", "context_profile=researcher",
+    "--param", `research_mode=${researchMode}`,
+    "--param", `research_questions=${storyCycleResearchQuestion({ topic, sectionKey, coverageKey })}`,
+    "--param", `max_evidence_items=${maxEvidenceItems}`,
+    "--log-format", "raw",
+  ];
+  const proc = await spawnBuffered(command[0], command.slice(1), {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      PYTHONPATH: prependPathList(["../Tactus", "src"], process.env.PYTHONPATH),
+    },
+  });
+  fs.writeFileSync(stdoutPath, proc.stdout ?? "", "utf8");
+  fs.writeFileSync(stderrPath, proc.stderr ?? "", "utf8");
+  const parsed = extractResearchRunPayload(proc.stdout);
+  const packet = parsed?.research_packet ?? parsed?.researchPacket ?? null;
+  if (packet) writeJsonFile(packetPath, packet);
+  writeJsonFile(resultPath, { command, parsed, stdoutPath, stderrPath });
+  let messageId = null;
+  let applyResult = null;
+  if (apply && parsed?.research_record_plan) {
+    applyResult = await applyStoryCycleTactusPlan(client, parsed.research_record_plan);
+    messageId = applyResult.messageId;
+  }
+  return {
+    ok: proc.status === 0 && Boolean(packet),
+    phase: "research",
+    assignmentId: assignment.id,
+    sectionKey,
+    messageId,
+    packetPath: packet ? packetPath : null,
+    resultPath,
+    stdoutPath,
+    stderrPath,
+    exitStatus: proc.status,
+    signal: proc.signal,
+    packet,
+    applyResult,
+  };
+}
+
+async function runStoryCycleReportingJob({ client, assignment, apply, runDir, corpusKey, topic, coverageKey, researchRun }) {
+  const sectionKey = assignment.sectionKey ?? "unsectioned";
+  const assignmentMeta = parseJsonish(assignment.metadata);
+  const angle = assignmentMeta.angleDiversity?.lensLabel ?? assignmentMeta.angleDiversity?.lensKey ?? null;
+  const assignmentForAgent = {
+    ...assignment,
+    metadata: JSON.stringify({
+      ...assignmentMeta,
+      sourceResearchAssignmentId: researchRun?.assignmentId ?? assignmentMeta.sourceResearchAssignmentId ?? null,
+      sourceResearchPacketId: researchRun?.messageId ?? assignmentMeta.sourceResearchPacketId ?? null,
+      sourceResearchPacketPath: researchRun?.packetPath ?? null,
+    }),
+  };
+  const basePath = path.join(runDir, "reporting", `${safeId(sectionKey)}-${safeId(assignment.id)}`);
+  const stdoutPath = `${basePath}.stdout.log`;
+  const stderrPath = `${basePath}.stderr.log`;
+  const resultPath = `${basePath}.result.json`;
+  const packetPath = `${basePath}.packet.json`;
+  const params = apply
+    ? [`assignment_item_id=${assignment.id}`]
+    : [`assignment_json=${JSON.stringify(assignmentForAgent)}`];
+  const command = [
+    "tactus",
+    "run",
+    "procedures/newsroom/reporter.tac",
+    "--no-sandbox",
+    "--real-all",
+    "--param", params[0],
+    "--param", `corpus_key=${corpusKey}`,
+    "--param", "context_profile=reporting",
+    "--param", `source_research_assignment_id=${researchRun?.assignmentId ?? ""}`,
+    "--param", `source_research_packet_id=${researchRun?.messageId ?? ""}`,
+    "--param", `source_research_packet_path=${researchRun?.packetPath ?? ""}`,
+    "--log-format", "raw",
+  ];
+  const proc = await spawnBuffered(command[0], command.slice(1), {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      PYTHONPATH: prependPathList(["../Tactus", "src"], process.env.PYTHONPATH),
+    },
+  });
+  fs.writeFileSync(stdoutPath, proc.stdout ?? "", "utf8");
+  fs.writeFileSync(stderrPath, proc.stderr ?? "", "utf8");
+  const parsed = extractResearchRunPayload(proc.stdout);
+  const packet = parsed?.reporting_context_packet ?? parsed?.reportingContextPacket ?? null;
+  if (packet) writeJsonFile(packetPath, packet);
+  writeJsonFile(resultPath, { command, parsed, stdoutPath, stderrPath });
+  let messageId = null;
+  let applyResult = null;
+  if (apply && parsed?.reporting_record_plan) {
+    applyResult = await applyStoryCycleTactusPlan(client, parsed.reporting_record_plan);
+    messageId = applyResult.messageId;
+  }
+  return {
+    ok: proc.status === 0 && Boolean(packet),
+    phase: "reporting",
+    assignmentId: assignment.id,
+    sectionKey,
+    angle,
+    messageId,
+    packetPath: packet ? packetPath : null,
+    resultPath,
+    stdoutPath,
+    stderrPath,
+    exitStatus: proc.status,
+    signal: proc.signal,
+    sourceResearchAssignmentId: researchRun?.assignmentId ?? null,
+    sourceResearchPacketId: researchRun?.messageId ?? null,
+    packet,
+    applyResult,
+  };
+}
+
+async function applyStoryCycleTactusPlan(client, plan) {
+  const records = (plan.records ?? [])
+    .filter((record) => record?.modelName && record.input)
+    .map((record) => ({
+      modelName: record.modelName,
+      expected: record.input,
+      attachmentBody: record.body,
+    }));
+  const changes = await buildRecordChangesTargetedByIdToleratingOptionalModels(client, records, {
+    prepareVersioned: false,
+  });
+  await applyRecordChanges(client, changes);
+  const message = records.find((record) => record.modelName === "Message")?.expected ?? null;
+  return {
+    messageId: message?.id ?? null,
+    changes: changeCounts(changes),
+  };
+}
+
+function spawnBuffered(command, args, options = {}) {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, {
+      ...options,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr?.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", (error) => {
+      resolve({
+        status: 127,
+        signal: null,
+        stdout,
+        stderr: `${stderr}${stderr ? "\n" : ""}${error.message}`,
+      });
+    });
+    child.on("close", (status, signal) => {
+      resolve({ status, signal, stdout, stderr });
+    });
+  });
+}
+
+function storyCycleResearchQuestion({ topic, sectionKey, coverageKey }) {
+  return `Research ${topic} for the ${sectionKey} section. Shared coverage concept: ${coverageKey}. Return accepted evidence separately from proposed source prospects.`;
+}
+
+function storyCycleAssignmentSummary(assignment) {
+  const metadata = parseJsonish(assignment.metadata);
+  return {
+    id: assignment.id,
+    assignmentTypeKey: assignment.assignmentTypeKey,
+    sectionKey: assignment.sectionKey ?? null,
+    queueKey: assignment.queueKey,
+    title: assignment.title,
+    angle: metadata.angleDiversity?.lensLabel ?? metadata.angleDiversity?.lensKey ?? null,
+    sourceResearchAssignmentId: metadata.sourceResearchAssignmentId ?? null,
+  };
+}
+
+function findStoryCycleManifestPath({ runId, coverageKey, date, assignmentId }) {
+  if (runId) {
+    const direct = path.resolve(runId);
+    if (fs.existsSync(direct) && fs.statSync(direct).isFile()) return direct;
+    const runPath = path.join(process.cwd(), ".papyrus-runs", runId, "manifest.json");
+    if (fs.existsSync(runPath)) return runPath;
+  }
+  const root = path.join(process.cwd(), ".papyrus-runs");
+  if (!fs.existsSync(root)) return null;
+  const manifests = fs.readdirSync(root)
+    .filter((entry) => entry.startsWith("story-cycle-"))
+    .map((entry) => path.join(root, entry, "manifest.json"))
+    .filter((entry) => fs.existsSync(entry))
+    .map((entry) => ({ filepath: entry, manifest: loadJsonFile(entry) }))
+    .filter(({ manifest }) => !coverageKey || manifest.coverageKey === coverageKey)
+    .filter(({ manifest }) => !date || manifest.date === date)
+    .filter(({ manifest }) => !assignmentId || [
+      ...(manifest.researchAssignments ?? []),
+      ...(manifest.reportingAssignments ?? []),
+    ].some((assignment) => assignment.id === assignmentId))
+    .sort((left, right) => String(right.manifest.createdAt ?? "").localeCompare(String(left.manifest.createdAt ?? "")));
+  return manifests[0]?.filepath ?? null;
+}
+
+function printStoryCycleSummary(result) {
+  console.log(`assignments\trun-story-cycle\taction\t${result.action}`);
+  console.log(`assignments\trun-story-cycle\trun\t${result.runId}`);
+  console.log(`assignments\trun-story-cycle\ttopic\t${result.topic}`);
+  console.log(`assignments\trun-story-cycle\tcoverage\t${result.coverageKey}`);
+  console.log(`assignments\trun-story-cycle\tsections\t${result.sections.join(",")}`);
+  console.log(`assignments\trun-story-cycle\tresearch-assignments\t${result.researchAssignments.length}`);
+  console.log(`assignments\trun-story-cycle\treporting-assignments\t${result.reportingAssignments.length}`);
+  console.log(`assignments\trun-story-cycle\tresearch-packets\t${result.researchPackets.length}`);
+  console.log(`assignments\trun-story-cycle\treporting-packets\t${result.reportingPackets.length}`);
+  console.log(`assignments\trun-story-cycle\tfailures\t${result.failures.length}`);
+  console.log(`assignments\trun-story-cycle\tmanifest\t${result.manifestPath}`);
+  console.log(`assignments\trun-story-cycle\toutput\t${result.outputPath}`);
+  console.log(`assignments\trun-story-cycle\tnext\t${result.next}`);
+}
+
+function printStoryCycleOutput(output) {
+  console.log(`assignments\tstory-cycle-output\trun\t${output.runId}`);
+  console.log(`assignments\tstory-cycle-output\ttopic\t${output.topic}`);
+  console.log(`assignments\tstory-cycle-output\tcoverage\t${output.coverageKey}`);
+  for (const section of output.sections) {
+    console.log(`section\t${section.sectionKey}\t${section.sectionTitle}\tresearch=${section.researchPackets.length}\treporting=${section.reportingPackets.length}`);
+    for (const packet of section.researchPackets) {
+      console.log(`research\t${section.sectionKey}\t${packet.assignmentId}\t${packet.messageId ?? packet.packetPath ?? "-"}\tevidence=${packet.acceptedEvidenceCount}\tproposals=${packet.proposedReferenceCount}\t${packet.summary ?? ""}`);
+    }
+    for (const packet of section.reportingPackets) {
+      console.log(`reporting\t${section.sectionKey}\t${packet.assignmentId}\t${packet.messageId ?? packet.packetPath ?? "-"}\tangle=${packet.angle ?? ""}\trecommendation=${packet.editorRecommendation ?? ""}\trisks=${packet.riskFlags.length}\tgaps=${packet.coverageGaps.length}`);
+    }
+  }
+  if (output.failures.length) {
+    for (const failure of output.failures) {
+      console.log(`failure\t${failure.phase}\t${failure.sectionKey ?? ""}\t${failure.assignmentId ?? ""}\t${failure.error ?? failure.stderrPath ?? ""}`);
+    }
+  }
+}
+
 function runContentCliJson(args) {
   const proc = spawnSync(process.execPath, [path.relative(process.cwd(), __filename), ...args], {
     cwd: process.cwd(),
@@ -4034,9 +4556,9 @@ function validateResearchPacketPlannedChanges(changes, { assignmentId, messageId
   const message = byModelAndId.get(`Message:${messageId}`);
   const relation = changes
     .map((change) => change.expected)
-    .find((record) => record?.subjectKind === "message" && record.subjectId === messageId && record.objectKind === "assignment" && record.objectId === assignmentId);
+    .find((record) => isAssignmentPacketRelation(record, assignmentId, messageId));
   if (!message) throw new Error(`Research packet preflight failed: planned Message ${messageId} is missing.`);
-  if (!relation) throw new Error(`Research packet preflight failed: planned comment relation for ${messageId} -> ${assignmentId} is missing.`);
+  if (!relation) throw new Error(`Research packet preflight failed: planned packet relation for ${assignmentId} -> ${messageId} is missing.`);
   assertRequiredFields("Message", message, ["id", "messageKind", "messageDomain", "status", "summary", "createdAt", "updatedAt"]);
   assertRequiredFields("SemanticRelation", relation, [
     "id",
@@ -4067,6 +4589,22 @@ function validateResearchPacketPlannedChanges(changes, { assignmentId, messageId
   for (const attachment of attachments) {
     assertRequiredFields("ModelAttachment", attachment, ["id", "ownerKind", "ownerId", "role", "sortKey", "storagePath", "filename", "mediaType", "byteSize", "sha256", "status"]);
   }
+}
+
+function isAssignmentPacketRelation(relation, assignmentId, messageId = null) {
+  if (!relation || relation.relationState === "superseded") return false;
+  const relationType = relation.relationTypeKey ?? relation.predicate;
+  const newProducesLink = relationType === "produces"
+    && relation.subjectKind === "assignment"
+    && relation.subjectId === assignmentId
+    && relation.objectKind === "message"
+    && (!messageId || relation.objectId === messageId);
+  const legacyCommentLink = relationType === "comment"
+    && relation.subjectKind === "message"
+    && (!messageId || relation.subjectId === messageId)
+    && relation.objectKind === "assignment"
+    && relation.objectId === assignmentId;
+  return newProducesLink || legacyCommentLink;
 }
 
 function assertRequiredFields(modelName, record, fields) {
@@ -4407,17 +4945,21 @@ async function loadAssignmentResearchPacketEntries(client, assignmentId) {
   if (!assignment) throw new Error(`Assignment not found: ${assignmentId}.`);
   const assignmentMeta = await assignmentMetadata(client, assignment);
   const objectStateKey = semanticStateKey("assignment", assignmentId);
-  const relations = await client.listSemanticRelationsByObjectState(objectStateKey);
+  const subjectStateKey = semanticStateKey("assignment", assignmentId);
+  const [incomingRelations, outgoingRelations] = await Promise.all([
+    client.listSemanticRelationsByObjectState(objectStateKey),
+    client.listSemanticRelationsBySubjectState(subjectStateKey),
+  ]);
+  const relations = [...incomingRelations, ...outgoingRelations];
   const packetRelations = relations
     .filter((relation) => relation.relationState === "current")
-    .filter((relation) => relation.subjectKind === "message" && relation.objectKind === "assignment")
-    .filter((relation) => relation.objectId === assignmentId || relation.objectLineageId === assignmentId)
-    .filter((relation) => (relation.relationTypeKey ?? relation.predicate) === "comment");
-  const messageIds = packetRelations.map((relation) => relation.subjectId);
+    .filter((relation) => isAssignmentPacketRelation(relation, assignmentId));
+  const messageIds = packetRelations.map((relation) => (relation.objectKind === "message" ? relation.objectId : relation.subjectId));
   const messageById = await client.getRecordsById("Message", messageIds);
   const entries = [];
   for (const relation of packetRelations) {
-    const message = messageById.get(relation.subjectId);
+    const messageId = relation.objectKind === "message" ? relation.objectId : relation.subjectId;
+    const message = messageById.get(messageId);
     if (!message || message.messageKind !== "research_packet") continue;
     let metadata = {};
     try {
@@ -4770,9 +5312,11 @@ async function listOrphanResearchPackets(flags) {
   ]);
   const linkedMessageIds = new Set(relations
     .filter((relation) => relation.relationState === "current")
-    .filter((relation) => relation.subjectKind === "message" && relation.objectKind === "assignment")
-    .filter((relation) => (relation.relationTypeKey ?? relation.predicate) === "comment")
-    .map((relation) => relation.subjectId)
+    .filter((relation) => (
+      ((relation.relationTypeKey ?? relation.predicate) === "comment" && relation.subjectKind === "message" && relation.objectKind === "assignment")
+      || ((relation.relationTypeKey ?? relation.predicate) === "produces" && relation.subjectKind === "assignment" && relation.objectKind === "message")
+    ))
+    .map((relation) => (relation.objectKind === "message" ? relation.objectId : relation.subjectId))
     .filter(Boolean));
   const orphans = messages
     .filter((message) => message.messageKind === "research_packet")
@@ -12869,6 +13413,8 @@ function printUsage() {
   console.log("  npm run content -- assignments apply-research-packet --assignment <id> --research-json <packet.json> --apply [--json]");
   console.log("  npm run content -- assignments intake-proposals --assignment <id> --config <steering.yml> --corpus-key <key> --status pending [--message <message-id>] [--apply] [--json]");
   console.log("  npm run content -- assignments research-intake-now --assignment <id> --config <steering.yml> --corpus-key <key> --research-mode source_discovery --max-evidence-items 20 [--apply] [--json]");
+  console.log("  npm run content -- assignments run-story-cycle --date YYYY-MM-DD --topic <text> --category <category-key> --coverage-key <coverage.key> --sections culture,methods,business,law --section-budgets culture:2,methods:1,business:1,law:1 [--apply] [--json]");
+  console.log("  npm run content -- assignments story-cycle-output --run-id <story-cycle-run-id> [--section <key>] [--json]");
   console.log("  npm run content -- assignments orphan-research-packets [--json]");
   console.log("  npm run content -- assignments backfill-section-indexes --apply");
   console.log("  npm run content -- assignments for-object --kind reference --lineage <reference-lineage-id>");

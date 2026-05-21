@@ -1,14 +1,18 @@
 ---
 name: newsroom-research-workflow
-description: Use this skill when a coding agent needs to run or inspect Papyrus research assignments, research packets, web-search handoffs, proposed references, or reference-intake follow-up work.
+description: Use this skill when a coding agent needs to run or inspect Papyrus research assignments, research packets, reporting packets, web-search handoffs, proposed references, or reference-intake follow-up work.
 ---
 
 # Newsroom Research Workflow Skill
 
 Use this skill when you are acting as a coding agent around Papyrus newsroom
-research work, not only when editing Tactus procedures. It explains how to use
-the same workflow through CLI tools, the packaged Python entrypoint, and the
-Newsroom UI.
+research or reporting work, not only when editing Tactus procedures. It explains
+how to use the same workflow through CLI tools, the packaged Python entrypoint,
+and the Newsroom UI.
+
+For multi-section story-cycle runs that dispatch research and parallel reporting
+agents together, also use
+[`skills/newsroom-story-cycle/SKILL.md`](/Users/ryan/Projects/Papyrus/skills/newsroom-story-cycle/SKILL.md).
 
 For reusable Reference summaries and quality ratings that feed ranking or
 context packs, use
@@ -16,15 +20,24 @@ context packs, use
 
 ## Core Model
 
-The `Assignment` is the workflow spine. Agents and humans append work products
-to it.
+The `Assignment` is the workflow spine. Agents and humans append private work
+products to it. Publication `Item` rows are not the assignment queue and not the
+normal output of research or reporting agents.
 
 - Research work products are private `Message` records with
   `messageKind = "research_packet"` and `messageDomain = "assignment_work"`.
-- Each research-packet `Message` links to the live `Assignment` with a current
-  `SemanticRelation` whose `relationTypeKey` is `comment`.
-- `AssignmentEvent` remains lifecycle/audit only: claim, release, complete,
-  cancel, reopen, or status changes.
+- Reporting work products are private `Message` records with
+  `messageKind = "reporting_context_packet"` and
+  `messageDomain = "assignment_work"`.
+- Packet payloads live in `ModelAttachment` rows owned by the `Message`: one
+  `message_body` attachment for the human-readable packet and one `metadata`
+  attachment for structured JSON.
+- New packet writes link the live `Assignment` to the packet `Message` with a
+  current `SemanticRelation` whose `relationTypeKey` is `produces`. Older
+  `Message --comment--> Assignment` links remain readable for compatibility.
+- `AssignmentEvent` is the append-only audit record for lifecycle actions
+  (`claim`, `release`, `complete`, `cancel`, `reopen`) and editorial
+  reporting-packet decisions.
 - `Assignment.assigneeKey` is the flexible claim/lease identity. It only needs
   to be meaningful within the competing worker pool; it can represent a human,
   procedure run, worker process, or coding-agent session.
@@ -38,10 +51,15 @@ to it.
 - Each research run persists as one `research_packet` Message. Internal
   orientation, source discovery, and synthesis are phases inside that one
   packet, not separate Messages.
+- Each reporting run persists as one `reporting_context_packet` Message. It is
+  raw private context for editors and copywriters, not reader copy.
+- Editor `select` and `brief` decisions can create minimal draft `Item` records
+  for copywriting. Packet generation itself must not create `Item` or
+  `EditionItem` records.
 
-Do not treat `source_snapshots`, `proposed_references`, or research packets as
-folders. They are structured metadata fields in private GraphQL work products
-or dry-run plans.
+Do not treat `source_snapshots`, `proposed_references`, research packets, or
+reporting packets as folders. They are structured metadata fields in private
+GraphQL work products or dry-run plans.
 
 ## Research Modes
 
@@ -111,7 +129,7 @@ Use the shared summary delta helpers and `updateNewsroomSummary` integration
 paths in `scripts/content-cli.cjs`; do not hand-edit
 `knowledge-raw-payload-newsroom-summary-current`.
 
-## Standard Coding-Agent Flow
+## Standard Research Flow
 
 1. Create a live research assignment when the user asks for new research and
    no suitable assignment already exists:
@@ -273,6 +291,63 @@ paths in `scripts/content-cli.cjs`; do not hand-edit
    Use low-level `references register-catalog` only for arbitrary manual
    catalogs, compatibility debugging, or fallback inspection.
 
+## Reporting Packet Flow
+
+Use reporting packets when the assignment is
+`assignmentTypeKey = "reporting.edition-candidate"`. A reporting packet is the
+private context required to decide whether a candidate should become reader copy.
+It is not a draft article.
+
+1. Run the reporter procedure in dry-run first:
+
+   ```bash
+   poetry run tactus run procedures/newsroom/reporter.tac \
+     --no-sandbox \
+     --real-all \
+     --param assignment_item_id="<assignment-id>" \
+     --param corpus_key="<corpus-key>" \
+     --param context_profile=reporting
+   ```
+
+2. Verify the returned `reporting_record_plan`. For live reporting assignments it
+   should contain:
+
+   - one `Message` with `messageKind = "reporting_context_packet"`;
+   - one `ModelAttachment` for `message_body`;
+   - one `ModelAttachment` for `metadata`;
+   - one `SemanticRelation` with `relationTypeKey = "produces"`;
+   - optional `derived_from` relations to the source research assignment or
+     research packet.
+
+   It must not contain `Item` or `EditionItem` records.
+
+3. Required reporting-packet fields include:
+
+   - `summary`, `section_key`, `edition_id`, `candidate_rank`, `slot_target`
+   - `why_now`, `nut_graf_candidate`, `recommended_angle`
+   - `confirmed_facts`, `source_trail`, `accepted_reference_ids`
+   - `proposed_references`
+   - `recent_desk_memory_used`, `coverage_gaps`, `open_questions`
+   - `risk_flags`, `verification_needs`, `source_diversity_notes`
+   - `copywriter_brief`
+   - `editor_recommendation`: `select`, `merge`, `brief`, `hold`, or `kill`
+
+4. Editors review packets from `/newsroom/assignments?view=budget` or with:
+
+   ```bash
+   npm run content -- assignments review-reporting-packet \
+     --assignment <assignment-id> \
+     --message <reporting-packet-message-id> \
+     --decision select|merge|brief|hold|kill \
+     --note "<editor rationale>" \
+     --dry-run
+   ```
+
+   Use `--apply` only after reviewing the dry run. `merge` requires
+   `--target-item <id>`. `select` creates a draft article `Item`; `brief`
+   creates a draft brief `Item`; `hold` and `kill` create no Items. No decision
+   creates `EditionItem`.
+
 ## After Proposal Intake
 
 `assignments research-intake-now --apply` is not the end of ingestion. It turns
@@ -388,13 +463,16 @@ conversation-backed screening loop with the user.
 
 For live assignments, the packet is stored as:
 
-- `Message.body`: concise human-readable packet summary.
+- `Message.messageKind`: `research_packet`.
+- `Message.messageDomain`: `assignment_work`.
 - `Message.summary`: short one-line packet summary.
-- `Message.metadata.kind`: `research.packet.created`.
-- `Message.metadata.assignmentId`: live `Assignment.id`.
-- `Message.metadata.research`: structured private research packet.
+- `ModelAttachment(role = "message_body")`: concise human-readable packet body.
+- `ModelAttachment(role = "metadata")`: JSON with
+  `kind = "research.packet.created"`, `assignmentId`, and `research`.
+- `SemanticRelation(relationTypeKey = "produces")` from the live `Assignment` to
+  the packet `Message`.
 
-Inside `Message.metadata.research`, use these fields:
+Inside the structured `research` payload, use these fields:
 
 - `researchMode`: `internal_brief`, `source_discovery`, or `full_research`.
 - `summary`: concise finding or handoff summary.

@@ -213,8 +213,8 @@ classifier, projection, or graph parameters in Papyrus application logic.
 
 Start with `global-topic-granularity` to explore top-level topic count and
 granularity. Use `canonical-topic-classifier` after enough authoritative labels
-exist to seed semi-supervised training. Use `desk-child-topic-discovery` for
-scoped subtopic discovery after root desks exist.
+exist to seed semi-supervised training. Use scoped child-topic discovery after
+the top-level category anchors and operational sections exist.
 
 Generated classifications are predictions. Approved classifications should
 become `authoritative_label` relations. Rejected generated `classified_as`

@@ -45,6 +45,9 @@ export type SemanticPredicateId =
   | "requests_work_on"
   | "planned_for_edition"
   | "targets_lane"
+  | "targets_section"
+  | "targets_topic"
+  | "scoped_to_topic"
   | "produces"
   | "blocked_by"
   | "derived_from"
@@ -79,6 +82,9 @@ export const SEMANTIC_PREDICATES: SemanticPredicateDefinition[] = [
   { id: "uses_signal", label: "uses signal", group: "evidence", inverseLabel: "signal for", contextPackTags: ["assignment_context", "research", "reference_graph"] },
   { id: "planned_for_edition", label: "planned for edition", group: "publication", inverseLabel: "planned assignments", contextPackTags: ["assignment_context", "editing", "publication"] },
   { id: "targets_lane", label: "targets lane", group: "editorial", inverseLabel: "lane targets", contextPackTags: ["assignment_context", "editing", "publication"] },
+  { id: "targets_section", label: "targets section", group: "editorial", inverseLabel: "section assignments", contextPackTags: ["assignment_context", "editing", "publication"] },
+  { id: "targets_topic", label: "targets topic", group: "editorial", inverseLabel: "topic assignments", contextPackTags: ["assignment_context", "editing", "publication", "research"] },
+  { id: "scoped_to_topic", label: "scoped to topic", group: "ontology", inverseLabel: "semantic concepts scoped here", contextPackTags: ["assignment_context", "research", "reference_graph", "category_context"] },
   { id: "produces", label: "produces", group: "workflow", inverseLabel: "produced by" },
   { id: "blocked_by", label: "blocked by", group: "workflow", inverseLabel: "blocks" },
   { id: "derived_from", label: "derived from", group: "evidence", inverseLabel: "source for" },
@@ -275,11 +281,17 @@ export class SemanticGraphSnapshot {
   }
 
   messagesFor(kind: string, lineageId: string): MessageRecord[] {
-    return this.incoming(kind, lineageId)
+    const incomingCommentMessages = this.incoming(kind, lineageId)
       .filter((relation) => relation.subjectKind === "message")
       .filter((relation) => ["comment", "ingestion_rationale"].includes(relationTypeKey(relation)) || ["comment", "ingestion_rationale"].includes(relation.predicate))
       .map((relation) => this.messagesById.get(relation.subjectId))
-      .filter((message): message is MessageRecord => Boolean(message))
+      .filter((message): message is MessageRecord => Boolean(message));
+    const producedMessages = this.outgoing(kind, lineageId)
+      .filter((relation) => relation.objectKind === "message")
+      .filter((relation) => relationTypeKey(relation) === "produces" || relation.predicate === "produces")
+      .map((relation) => this.messagesById.get(relation.objectId))
+      .filter((message): message is MessageRecord => Boolean(message));
+    return uniqueBy([...incomingCommentMessages, ...producedMessages], (message) => message.id)
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
@@ -479,4 +491,14 @@ function pushMap<K, V>(map: Map<K, V[]>, key: K, value: V) {
   const values = map.get(key) ?? [];
   values.push(value);
   map.set(key, values);
+}
+
+function uniqueBy<T>(values: T[], key: (value: T) => string): T[] {
+  const seen = new Set<string>();
+  return values.filter((value) => {
+    const resolved = key(value);
+    if (seen.has(resolved)) return false;
+    seen.add(resolved);
+    return true;
+  });
 }

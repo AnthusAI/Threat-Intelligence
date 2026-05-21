@@ -101,6 +101,11 @@ import {
   type NewsroomCardSpan,
   type NewsroomCardTemplateRole,
 } from "../lib/newsroom-card-layout";
+import {
+  buildReportingStoryBudget,
+  type ReportingStoryBudgetCandidate,
+  type ReportingStoryBudgetSection,
+} from "../lib/reporting-story-budget";
 
 gsap.registerPlugin(Flip);
 
@@ -116,6 +121,7 @@ type ReferenceRejectionReasonCode = typeof REFERENCE_REJECTION_REASON_CODES[numb
 type TopicLabelAction = "manual_label" | "accept_prediction" | "reject_prediction" | "unlabel";
 type AssignmentAction = "claim" | "release" | "complete" | "cancel" | "reopen";
 type ReportingPacketReviewDecision = "select" | "merge" | "brief" | "hold" | "kill";
+type AssignmentDeskViewMode = "queue" | "budget";
 type UserRoleAction = "grant" | "revoke";
 type AdministrationPanel = "users" | "policies" | "sections";
 export type NewsDeskTab = "overview" | "desks" | "topics" | "concepts" | "references" | "messages" | "assignments" | "administration" | "search";
@@ -288,6 +294,7 @@ export type NewsDeskSelection = {
   searchAnchorLineageId?: string | null;
   searchMaxTokens?: string | null;
   searchFrom?: string | null;
+  assignmentView?: string | null;
 };
 
 type CategoryReviewResponse = {
@@ -2339,8 +2346,11 @@ function NewsDeskDashboard({
             corpora={mergeAnalysisCorpora(configuredCorpora, corpora)}
             messages={messages}
             graph={graph}
+            semanticRelations={semanticRelations}
             initialAssignmentId={initialSelection.assignment}
+            initialView={initialSelection.assignmentView}
             isDemo={Boolean(dashboard.isDemo)}
+            newsroomSections={newsroomSections}
             summary={dashboard.summary}
             disabled={controlsDisabled}
             onAction={runAssignmentAction}
@@ -7842,8 +7852,11 @@ function AssignmentDeskView({
   corpora,
   messages,
   graph,
+  semanticRelations,
   initialAssignmentId,
+  initialView,
   isDemo,
+  newsroomSections,
   summary,
   disabled,
   onAction,
@@ -7857,8 +7870,11 @@ function AssignmentDeskView({
   corpora: CategorySteeringCorpus[];
   messages: MessageRecord[];
   graph: SemanticGraph;
+  semanticRelations: SemanticRelationRecord[];
   initialAssignmentId?: string | null;
+  initialView?: string | null;
   isDemo?: boolean;
+  newsroomSections: NewsroomSectionRecord[];
   summary?: NewsroomSummaryRecord | null;
   disabled: boolean;
   onAction: (assignment: AssignmentRecord, action: AssignmentAction, note?: string) => void;
@@ -7870,6 +7886,7 @@ function AssignmentDeskView({
   const [isCreateAssignmentOpen, setIsCreateAssignmentOpen] = useState(false);
   const [selectedAssignmentId, setSelectedAssignmentId] = useState(initialAssignmentId ?? "");
   const [isAssignmentDetailOpen, setIsAssignmentDetailOpen] = useState(Boolean(initialAssignmentId));
+  const [assignmentDeskView, setAssignmentDeskView] = useState<AssignmentDeskViewMode>(initialView === "budget" ? "budget" : "queue");
   const [assignmentActionNote, setAssignmentActionNote] = useState("");
   const [reportingMergeTargetItemId, setReportingMergeTargetItemId] = useState("");
   const feed = useNewsroomPagedRows({
@@ -7915,6 +7932,13 @@ function AssignmentDeskView({
   const selectedReportingPackets = selectedAssignment ? reportingPacketsForAssignment(selectedAssignment, graph, messages) : [];
   const selectedReportingPacket = selectedReportingPackets[0] ?? null;
   const selectedReportingDecision = selectedAssignment ? latestReportingPacketDecisionForAssignment(assignmentEvents, selectedAssignment.id) : null;
+  const storyBudget = useMemo(() => buildReportingStoryBudget({
+    assignments,
+    messages,
+    assignmentEvents,
+    semanticRelations,
+    newsroomSections,
+  }), [assignmentEvents, assignments, messages, newsroomSections, semanticRelations]);
   const runAssignmentDetailAction = (action: AssignmentAction) => {
     if (!selectedAssignment) return;
     onAction(selectedAssignment, action, assignmentActionNote);
@@ -7924,6 +7948,21 @@ function AssignmentDeskView({
     if (!selectedAssignment || !selectedReportingPacket) return;
     onReviewReportingPacket(selectedAssignment, selectedReportingPacket, decision, assignmentActionNote, reportingMergeTargetItemId);
     setAssignmentActionNote("");
+  };
+  const selectAssignmentDeskView = (view: AssignmentDeskViewMode) => {
+    setAssignmentDeskView(view);
+    if (typeof window !== "undefined") {
+      const url = view === "budget" ? "/newsroom/assignments?view=budget" : "/newsroom/assignments";
+      if (`${window.location.pathname}${window.location.search}` !== url) window.history.pushState(null, "", url);
+    }
+  };
+  const runStoryBudgetReviewAction = (candidate: ReportingStoryBudgetCandidate, decision: ReportingPacketReviewDecision) => {
+    const assignment = assignments.find((entry) => entry.id === candidate.assignmentId);
+    const packet = assignment ? reportingPacketsForAssignment(assignment, graph, messages)[0] : null;
+    if (!assignment || !packet) return;
+    onReviewReportingPacket(assignment, packet, decision, "", candidate.targetItemId ?? "");
+    setSelectedAssignmentId(assignment.id);
+    setIsAssignmentDetailOpen(true);
   };
   const assignmentActions: NewsroomDetailAction[] = selectedAssignment ? [
     ...(selectedAssignment.status === "open" ? [{
@@ -8035,6 +8074,22 @@ function AssignmentDeskView({
               <p>Create, filter, claim, and complete newsroom work.</p>
             </div>
             <div className="news-desk-assignment-create-strip">
+              <div className="news-desk-assignment-view-toggle" role="group" aria-label="Assignment view">
+                <button
+                  type="button"
+                  data-active={assignmentDeskView === "queue" || undefined}
+                  onClick={() => selectAssignmentDeskView("queue")}
+                >
+                  Queue
+                </button>
+                <button
+                  type="button"
+                  data-active={assignmentDeskView === "budget" || undefined}
+                  onClick={() => selectAssignmentDeskView("budget")}
+                >
+                  Story Budget
+                </button>
+              </div>
               <button
                 type="button"
                 className="news-desk-assignment-create-button"
@@ -8048,23 +8103,33 @@ function AssignmentDeskView({
         )}
         list={(
           <section className="category-steering-section category-steering-section--lead" aria-label="Assignments queue">
-            <AssignmentManagementGrid
-              assignmentEvents={assignmentEvents}
-              assignments={filteredAssignments}
-              metrics={filteredMetrics}
-              onSelect={selectAssignment}
-              options={assignmentTypeOptions}
-              selectedAssignmentId={selectedAssignment?.id ?? null}
-              statusValue={assignmentStatusFilter}
-              totalCount={totalAssignmentCount}
-              typeValue={assignmentTypeFilter}
-              footerLabel={feed.error ?? undefined}
-              hasMore={!isDemo && feed.hasMore}
-              isLoadingMore={feed.isLoadingMore}
-              onLoadMore={feed.loadMore}
-              onStatusChange={setAssignmentStatusFilter}
-              onTypeChange={setAssignmentTypeFilter}
-            />
+            {assignmentDeskView === "budget" ? (
+              <ReportingStoryBudgetBoard
+                budget={storyBudget}
+                disabled={disabled}
+                onReview={runStoryBudgetReviewAction}
+                onSelect={selectAssignment}
+                selectedAssignmentId={selectedAssignment?.id ?? null}
+              />
+            ) : (
+              <AssignmentManagementGrid
+                assignmentEvents={assignmentEvents}
+                assignments={filteredAssignments}
+                metrics={filteredMetrics}
+                onSelect={selectAssignment}
+                options={assignmentTypeOptions}
+                selectedAssignmentId={selectedAssignment?.id ?? null}
+                statusValue={assignmentStatusFilter}
+                totalCount={totalAssignmentCount}
+                typeValue={assignmentTypeFilter}
+                footerLabel={feed.error ?? undefined}
+                hasMore={!isDemo && feed.hasMore}
+                isLoadingMore={feed.isLoadingMore}
+                onLoadMore={feed.loadMore}
+                onStatusChange={setAssignmentStatusFilter}
+                onTypeChange={setAssignmentTypeFilter}
+              />
+            )}
           </section>
         )}
         onCloseDetail={() => setIsAssignmentDetailOpen(false)}
@@ -8236,6 +8301,175 @@ function AssignmentManagementGrid({
       selectedId={selectedAssignmentId}
     />
   );
+}
+
+function ReportingStoryBudgetBoard({
+  budget,
+  disabled,
+  onReview,
+  onSelect,
+  selectedAssignmentId,
+}: {
+  budget: ReturnType<typeof buildReportingStoryBudget>;
+  disabled: boolean;
+  onReview: (candidate: ReportingStoryBudgetCandidate, decision: ReportingPacketReviewDecision) => void;
+  onSelect: (assignmentId: string) => void;
+  selectedAssignmentId?: string | null;
+}) {
+  const totals = budget.totals;
+  return (
+    <div className="news-desk-story-budget" data-reporting-story-budget>
+      <header className="news-desk-story-budget__summary">
+        <div>
+          <p className="story-label">Story Budget</p>
+          <h3>{totals.slotCount} slots / {totals.dispatchedCount} candidates</h3>
+          <span>{formatBudgetState(totals.state, totals.delta)}</span>
+        </div>
+        <div className="news-desk-story-budget__metrics" aria-label="Reporting story budget totals">
+          <span data-story-budget-total="selected">{totals.selectedCount} selected</span>
+          <span data-story-budget-total="briefed">{totals.briefedCount} briefed</span>
+          <span data-story-budget-total="merged">{totals.mergedCount} merged</span>
+          <span data-story-budget-total="held">{totals.heldCount} held</span>
+          <span data-story-budget-total="killed">{totals.killedCount} killed</span>
+          <span data-story-budget-total="undecided">{totals.undecidedCount} undecided</span>
+        </div>
+      </header>
+      {budget.sections.length ? budget.sections.map((section) => (
+        <ReportingStoryBudgetSectionView
+          disabled={disabled}
+          key={`${section.editionId}-${section.key}`}
+          onReview={onReview}
+          onSelect={onSelect}
+          section={section}
+          selectedAssignmentId={selectedAssignmentId}
+        />
+      )) : <EmptyRow label="No reporting edition-candidate assignments found" />}
+    </div>
+  );
+}
+
+function ReportingStoryBudgetSectionView({
+  disabled,
+  onReview,
+  onSelect,
+  section,
+  selectedAssignmentId,
+}: {
+  disabled: boolean;
+  onReview: (candidate: ReportingStoryBudgetCandidate, decision: ReportingPacketReviewDecision) => void;
+  onSelect: (assignmentId: string) => void;
+  section: ReportingStoryBudgetSection;
+  selectedAssignmentId?: string | null;
+}) {
+  return (
+    <section
+      className="news-desk-story-budget-section"
+      data-story-budget-section={section.key}
+      data-story-budget-edition={section.editionId}
+      data-story-budget-state={section.state}
+    >
+      <header className="news-desk-story-budget-section__header">
+        <div>
+          <p className="story-label">{section.editionLabel}</p>
+          <h4>{section.title}</h4>
+          <span>{formatBudgetState(section.state, section.delta)}</span>
+        </div>
+        <div className="news-desk-story-budget__metrics">
+          <span data-story-budget-metric="slots">{section.slotCount} slots</span>
+          <span data-story-budget-metric="dispatched">{section.dispatchedCount} dispatched</span>
+          <span data-story-budget-metric="selected">{section.selectedCount} selected</span>
+          <span data-story-budget-metric="briefed">{section.briefedCount} briefed</span>
+          <span data-story-budget-metric="undecided">{section.undecidedCount} undecided</span>
+        </div>
+      </header>
+      <div className="news-desk-story-budget-candidates">
+        {section.candidates.map((candidate) => (
+          <ReportingStoryBudgetCandidateRow
+            candidate={candidate}
+            disabled={disabled}
+            key={candidate.assignmentId}
+            onReview={onReview}
+            onSelect={onSelect}
+            selected={selectedAssignmentId === candidate.assignmentId}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ReportingStoryBudgetCandidateRow({
+  candidate,
+  disabled,
+  onReview,
+  onSelect,
+  selected,
+}: {
+  candidate: ReportingStoryBudgetCandidate;
+  disabled: boolean;
+  onReview: (candidate: ReportingStoryBudgetCandidate, decision: ReportingPacketReviewDecision) => void;
+  onSelect: (assignmentId: string) => void;
+  selected: boolean;
+}) {
+  const decisionLabel = candidate.decision ? formatReportingPacketDecision(candidate.decision) : "Undecided";
+  const recommendationDecision = normalizeReportingPacketDecision(candidate.editorRecommendation);
+  return (
+    <article
+      className="news-desk-story-budget-candidate"
+      data-selected={selected || undefined}
+      data-story-budget-candidate={candidate.assignmentId}
+      data-reporting-decision={candidate.decision ?? ""}
+      data-reporting-packet={candidate.hasReportingPacket ? "true" : "false"}
+    >
+      <button
+        type="button"
+        className="news-desk-story-budget-candidate__main"
+        onClick={() => onSelect(candidate.assignmentId)}
+      >
+        <span>{candidate.candidateRank ? `Candidate ${candidate.candidateRank}` : candidate.sectionKey}</span>
+        <strong>{candidate.title}</strong>
+        <em>{candidate.hasReportingPacket ? candidate.summary ?? "Reporting packet available" : "No reporting packet yet"}</em>
+      </button>
+      <div className="news-desk-story-budget-candidate__packet">
+        <span data-story-budget-recommendation={candidate.editorRecommendation ?? "none"}>
+          {recommendationDecision ? `Recommend ${formatReportingPacketDecision(recommendationDecision)}` : "No recommendation"}
+        </span>
+        <span data-story-budget-decision-label>{decisionLabel}</span>
+        {candidate.recommendedAngle ? <p><span>Angle</span>{candidate.recommendedAngle}</p> : null}
+        {candidate.riskFlags.length ? <p><span>Risks</span>{candidate.riskFlags.slice(0, 2).join(" / ")}</p> : null}
+        {candidate.coverageGaps.length ? <p><span>Gaps</span>{candidate.coverageGaps.slice(0, 2).join(" / ")}</p> : null}
+        {candidate.openQuestions.length ? <p><span>Questions</span>{candidate.openQuestions.slice(0, 2).join(" / ")}</p> : null}
+        <div className="news-desk-story-budget-candidate__counts">
+          <span>{candidate.acceptedReferenceCount} accepted refs</span>
+          <span>{candidate.proposedReferenceCount} prospects</span>
+          <span>{candidate.researchPacketCount} research packets</span>
+        </div>
+        {candidate.draftItemId ? (
+          <p data-reporting-draft-item={candidate.draftItemId}><span>Draft</span>{candidate.draftItemId} / not placed in an edition</p>
+        ) : null}
+        {candidate.targetItemId ? <p><span>Merge target</span>{candidate.targetItemId}</p> : null}
+      </div>
+      <div className="news-desk-story-budget-candidate__actions">
+        {(["select", "brief", "hold", "kill"] as ReportingPacketReviewDecision[]).map((decision) => (
+          <button
+            type="button"
+            data-story-budget-decision={decision}
+            disabled={disabled || !candidate.hasReportingPacket}
+            key={decision}
+            onClick={() => onReview(candidate, decision)}
+          >
+            {decision === "select" ? "Select" : decision === "brief" ? "Brief" : decision === "hold" ? "Hold" : "Kill"}
+          </button>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function formatBudgetState(state: "needs" | "full" | "over", delta: number): string {
+  if (state === "full") return "full";
+  if (state === "over") return `over by ${Math.abs(delta)}`;
+  return `needs ${Math.abs(delta)} more`;
 }
 
 function AssignmentRow({

@@ -7,17 +7,19 @@ politics, or any other beat worth watching closely.
 Papyrus turns that focus into a fully automated newsroom. Research agents
 monitor the beat while you sleep, update a publication-specific knowledge base,
 and surface surprising developments. Editor agents turn those signals into
-assignments. Reporter agents draft publishable stories. The next morning, you
-can open your publication and see what your newsroom found and created
-overnight.
+assignments. Reporter agents prepare private reporting packets: the verified
+facts, source trail, open questions, risks, angle, and copywriter brief an editor
+needs before commissioning reader-facing copy. The next morning, you can open
+your newsroom and see what it found, what it recommends, and what is ready for
+editor selection.
 
 You steer it like an executive editor, as much or as little as you want:
-choosing the canonical categories for topic coverage and configuring editorial
-sections for the issue, setting editorial
-policy, voting items up or down, commenting on drafts, and culling assignments
-before publication. When you step back, Papyrus keeps operating from the
-momentum you already gave it: accepted categories, current policy, open
-assignments, prior votes, and rejected proposal memory.
+choosing the canonical categories for topic coverage, configuring editorial
+sections for the issue, setting editorial policy, selecting the strongest
+packets for copywriting, commenting on drafts, and culling assignments before
+publication. When you step back, Papyrus keeps operating from the momentum you
+already gave it: accepted categories, current policy, section doctrine, open
+assignments, prior decisions, and rejected proposal memory.
 
 The beat is configuration, not code. The current AI/ML corpus is pilot content,
 not an application assumption. A Papyrus publication changes subject by
@@ -237,10 +239,11 @@ Papyrus has three distinct GraphQL auth lanes:
 ## Newsroom
 
 `/newsroom` is the Papyrus newsroom operations workspace. `Topics` is the
-taxonomy steering tab. `Desks` is the operational root-topic desk surface.
-`Doctrine` is the publication-wide mission and policies surface. The page is
-driven by the configured corpora for the publication, not by hard-coded corpus
-names. Papyrus owns the human steering state in GraphQL: knowledge corpora,
+taxonomy steering tab. `Sections` is the operational desk surface backed by
+`NewsroomSection` doctrine and budgets. `Doctrine` is the publication-wide
+mission and policies surface. The page is driven by the configured corpora for
+the publication, not by hard-coded corpus names. Papyrus owns the human steering
+state in GraphQL: knowledge corpora,
 import runs, artifacts, accepted category sets, strict-tree categories, private
 `Reference` metadata, private `SemanticRelation` links, proposals, and
 append-only decisions.
@@ -249,19 +252,42 @@ Edition planning and assignment dispatch use first-class private `Assignment`
 records, not `Item` rows with assignment types. Follow
 [skills/edition-planning/SKILL.md](skills/edition-planning/SKILL.md) when
 creating a dated edition, planning section slots, or dispatching surplus
-research assignments. The dated private `Edition` record is created or updated
-first; each assignment is then linked to that edition, its root-desk category,
-its publication lane, and its evidence with `SemanticRelation` rows. The default
-lanes are `reporting`, `analysis`, and `briefs`; `opinion` is opt-in through
-publication or desk policy. The default dispatch ratio is `3/2`: for each
-desk/lane target, dispatch a small surplus of research assignments so editors
-can select the strongest outputs without publishing every result. Assignments
-remain private workflow records with append-only `AssignmentEvent` audit rows
-and `SemanticRelation` links to categories, references, graph entities,
-comments, and eventual drafts. Only selected outputs become reader-facing
-article `Item` records and `EditionItem` placements. The editor-only
-`Assignments` desk tab at `/newsroom/assignments` is the review surface for
-these private queues.
+candidate work. Follow
+[skills/newsroom-story-cycle/SKILL.md](skills/newsroom-story-cycle/SKILL.md)
+when running the repeatable research -> reporting cascade for one topic across
+multiple sections.
+
+The dated private `Edition` record is created or updated first; each assignment
+is then linked to that edition, its `NewsroomSection`, its accepted topic scope,
+its coverage concept, its publication lane, and accepted evidence with
+`SemanticRelation` rows. The default lanes are `reporting`, `analysis`, and
+`briefs`; `opinion` is opt-in through publication or desk policy. The default
+dispatch ratio is `3/2`: for each section/lane target, dispatch a small surplus
+of candidates so editors can select the strongest outputs without publishing
+every result.
+
+Assignments remain private workflow records with append-only `AssignmentEvent`
+audit rows and `SemanticRelation` links to categories, references, graph
+entities, private packet messages, and eventual drafts. Research and reporting
+agents do not create publication Items as their normal work product. They create
+private `Message` work products with `ModelAttachment` payloads:
+
+- `research_packet`: internal evidence, source prospects, source snapshots,
+  open questions, and reference-intake handoff.
+- `reporting_context_packet`: editor-facing context for one candidate story,
+  including the angle, confirmed facts, source trail, risks, gaps, verification
+  needs, recommendation, and copywriter brief.
+
+New packet writes link `Assignment --produces--> Message`; older
+`Message --comment--> Assignment` packet links remain readable for compatibility.
+Fresh web findings stay in packet `proposedReferences` until reference intake
+registers them and curation accepts them as `Reference` evidence. Explicit editor
+selection is the gate from private work product to draft reader-facing content:
+`select` creates a draft article `Item`, `brief` creates a draft brief `Item`,
+`merge` links the packet to an existing draft, and `hold`/`kill` keep the packet
+private. None of those packet-generation paths create `EditionItem` placement.
+The editor-only `Assignments` desk tab at `/newsroom/assignments`, including the
+Story Budget view, is the review surface for these private queues.
 
 Assignment claiming is an execution lease, not universal identity ownership.
 `Assignment.assigneeKey` is the flexible coordination string for the current
@@ -286,8 +312,8 @@ and import only stable steering outputs into Papyrus.
 
 Researcher behavior should follow
 [skills/researcher-doctrine/SKILL.md](skills/researcher-doctrine/SKILL.md):
-publication doctrine is the global editorial constitution, root-desk doctrine
-is the local beat standard, and the assignment brief is the immediate task.
+publication doctrine is the global editorial constitution, section doctrine is
+the local desk standard, and the assignment brief is the immediate task.
 Doctrine stays private and editable in Papyrus data; the skill defines how
 agents apply it while gathering evidence and preparing research packets.
 Coding agents that need to run the same assignment workflow outside a Tactus
@@ -352,8 +378,8 @@ evidence sets, topic modeling, graph analysis, desk memory, context packs, or
 edition planning.
 Research packets and assignment evidence should also follow
 [skills/researcher-doctrine/SKILL.md](skills/researcher-doctrine/SKILL.md) so
-agents apply publication doctrine, inherited root-desk doctrine, assignment
-briefs, graph context, and recent desk activity in the correct order.
+agents apply publication doctrine, section doctrine, assignment briefs, graph
+context, accepted evidence, and recent desk activity in the correct order.
 
 Category proposal review writes an append-only `SteeringDecision` and creates
 new `Category` versions when accepted edits change category copy or tree state.
@@ -479,8 +505,9 @@ Fresh external web research is a Tactus standard-library capability, not a
 Papyrus adapter. Researcher and reporter snippets should use
 `local web = require("tactus.web")` and then call `web.search{...}` or
 `web.synthesize{...}` with `provider = "openai"` when the assignment context
-requests current web evidence. Web results stay in the private research packet
-or draft reasoning path; Papyrus does not write GraphQL records directly from
+requests current web evidence. Web results stay in private `research_packet` or
+`reporting_context_packet` proposed-reference fields until reference intake
+registers them; Papyrus does not write accepted evidence records directly from
 web search.
 
 Copy `.env.example` to `.env` when you need local overrides. `.env*` is ignored
@@ -511,6 +538,9 @@ npm run content -- categories import-config --config corpora/papyrus-steering.ym
 npm run content -- newsroom import-sections --config corpora/papyrus-newsroom-sections.yml
 npm run content -- categories import-steering --config corpora/papyrus-steering.yml --corpus-key <key>
 npm run content -- assignments research-packets --assignment <assignment-id>
+npm run content -- assignments run-story-cycle --date YYYY-MM-DD --topic "<topic>" --category <category-key> --coverage-key <coverage.key> --sections culture,methods,business,law --section-budgets culture:2,methods:1,business:1,law:1 --json
+npm run content -- assignments story-cycle-output --run-id <story-cycle-run-id> --json
+npm run content -- assignments review-reporting-packet --assignment <assignment-id> --message <message-id> --decision select|merge|brief|hold|kill --note "<editor rationale>" --dry-run
 npm run content -- references register-catalog --config corpora/papyrus-steering.yml --corpus-key <key> --catalog <metadata/catalog.json> --status pending --ingestion-rationale "<summary, research focus, editorial mission fit>" --apply
 npm run content -- references export-analysis-manifest --config corpora/papyrus-steering.yml --corpus-key <key> --output accepted-reference-manifest.json
 npm run content -- references export-scope-training --config corpora/papyrus-steering.yml --corpus-key <key> --output reference-scope-training.json

@@ -28,8 +28,8 @@ function buildReportingPacketReviewPlan({
   if (message.messageKind !== REPORTING_PACKET_KIND) {
     throw new Error(`Message ${message.id} must be ${REPORTING_PACKET_KIND}.`);
   }
-  if (Array.isArray(semanticRelations) && !hasPacketAssignmentComment(semanticRelations, message.id, assignment.id)) {
-    throw new Error(`Message ${message.id} is not linked to Assignment ${assignment.id} by a comment relation.`);
+  if (Array.isArray(semanticRelations) && !hasPacketAssignmentLink(semanticRelations, message.id, assignment.id)) {
+    throw new Error(`Message ${message.id} is not linked to Assignment ${assignment.id} by a packet relation.`);
   }
   const normalizedDecision = normalizeReportingReviewDecision(decision);
   if (normalizedDecision === "merge" && !targetItem?.id) {
@@ -135,14 +135,25 @@ function normalizeReportingReviewDecision(value) {
   return normalized;
 }
 
-function hasPacketAssignmentComment(relations, messageId, assignmentId) {
+function hasPacketAssignmentLink(relations, messageId, assignmentId) {
   return relations.some((relation) => (
-    relation?.subjectKind === "message"
-    && relation.subjectId === messageId
-    && relation.objectKind === "assignment"
-    && relation.objectId === assignmentId
-    && (relation.relationTypeKey ?? relation.predicate) === "comment"
-    && relation.relationState !== "superseded"
+    relation?.relationState !== "superseded"
+    && (
+      (
+        relation.subjectKind === "assignment"
+        && relation.subjectId === assignmentId
+        && relation.objectKind === "message"
+        && relation.objectId === messageId
+        && (relation.relationTypeKey ?? relation.predicate) === "produces"
+      )
+      || (
+        relation.subjectKind === "message"
+        && relation.subjectId === messageId
+        && relation.objectKind === "assignment"
+        && relation.objectId === assignmentId
+        && (relation.relationTypeKey ?? relation.predicate) === "comment"
+      )
+    )
   ));
 }
 

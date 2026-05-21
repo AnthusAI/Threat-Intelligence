@@ -1,13 +1,13 @@
 ---
 name: edition-planning
-description: Use this skill when creating a dated Papyrus edition, planning edition slots, dispatching surplus research assignments, overassigning candidate work, or preparing edition-candidate selection workflows.
+description: Use this skill when creating a dated Papyrus edition, planning edition slots, dispatching surplus research or reporting assignments, overassigning candidate work, or preparing edition-candidate selection workflows.
 ---
 
 # Edition Planning Skill
 
 Use this skill when an agent needs to create or prepare a dated Papyrus edition
-record and dispatch private research work ontologically associated with that
-edition.
+record and dispatch private research or reporting work ontologically associated
+with that edition.
 
 The goal is not to publish every assignment. The goal is to over-dispatch
 well-scoped lane work so editors can choose the best outputs for the available
@@ -23,7 +23,9 @@ publication slots.
 - `skills/reference-intake/SKILL.md`: how new source materials become
   cloud-visible references.
 - `skills/researcher-doctrine/SKILL.md`: how researchers apply publication
-  doctrine, desk doctrine, assignment briefs, and evidence context.
+  doctrine, section doctrine, assignment briefs, and evidence context.
+- `skills/newsroom-story-cycle/SKILL.md`: how to run repeatable section-shaped
+  research plus parallel reporting agents for one topic.
 - `amplify/data/resource.ts`: `Assignment`, `AssignmentEvent`,
   `SemanticRelation`, `Edition`, `Item`, and related auth rules.
 - `scripts/content-cli.cjs`: current authoring commands. Do not invent CLI
@@ -41,13 +43,17 @@ reference/category/graph state, not guess from stale local files.
   record. Do not treat the edition as only a date string in assignment metadata.
 - Assignment events are append-only audit records. Lifecycle changes should use
   protected actions or the JWT authoring lane and write `AssignmentEvent` rows.
-- Research assignments are not reader-facing content. Do not attach assignments
-  directly to `EditionItem` rows.
+- Research and reporting assignments are not reader-facing content. Do not
+  attach assignments directly to `EditionItem` rows.
+- Research agents produce private `research_packet` Messages. Reporting agents
+  produce private `reporting_context_packet` Messages. Both are Assignment work
+  products, not draft articles.
 - Publishable reader content is created later as draft or published `Item`
-  records, then selected into an `Edition` through `EditionItem`.
+  records after explicit editor selection, then selected into an `Edition`
+  through `EditionItem`.
 - Dispatch more assignments than publication slots, then cull/select. The
   default overassignment ratio is `3/2`, so dispatch
-  `ceil(publicationSlots * 1.5)` assignments per desk/lane target unless an
+  `ceil(publicationSlots * 1.5)` assignments per section/lane target unless an
   editor specifies another ratio.
 - Dispatch by configurable Newsroom section plus publication lane. Sections are
   the operational desks; topics/categories are optional knowledge scope for
@@ -77,7 +83,7 @@ reference/category/graph state, not guess from stale local files.
    - configurable `NewsroomSection` as the operational desk;
    - optional root/focus categories as knowledge scope;
    - lane key, usually `reporting`, `analysis`, or `briefs`;
-   - intended publication slot count for the desk/lane;
+   - intended publication slot count for the section/lane;
    - desired evidence or source freshness;
    - any editor constraints.
 4. Confirm knowledge state is current:
@@ -94,7 +100,7 @@ reference/category/graph state, not guess from stale local files.
    - coverage gap;
    - desk-policy fit;
    - duplicate-work penalty.
-6. Compute assignment counts per desk/lane:
+6. Compute assignment counts per section/lane:
    - default `dispatchCount = ceil(publicationSlots * 1.5)`;
    - lower the count only when an editor explicitly wants less surplus;
    - cap broad searches to avoid flooding reviewers.
@@ -105,10 +111,14 @@ reference/category/graph state, not guess from stale local files.
    topic scope, lane concept, and evidence with `SemanticRelation` rows. The
    section index fields support hot queue queries; semantic links make the
    edition-assignment graph navigable.
-9. Researchers consume the assignments using `skills/researcher-doctrine/SKILL.md`
-   and return private research packets.
-10. Editors select the strongest outputs. Only selected drafts become
-   reader-facing article `Item` records and `EditionItem` placements.
+9. Researchers consume research assignments using
+   `skills/researcher-doctrine/SKILL.md` and return private `research_packet`
+   Messages.
+10. Reporters consume reporting assignments and section research packets to
+    return private `reporting_context_packet` Messages.
+11. Editors select the strongest reporting packets. Only explicit `select` or
+    `brief` decisions create draft reader-facing `Item` records. `EditionItem`
+    placement remains a later copyediting/layout step.
 
 ## Assignment Contract
 
@@ -203,41 +213,44 @@ Use `SemanticRelation` rows to make assignment context navigable:
   opportunity score.
 - `derived_from`: assignment to a proposal, comment, category, or research
   signal that caused the work.
-- `produces`: assignment to a later draft or published `Item`, once it exists.
+- `produces`: assignment to a private packet `Message`, or later to a draft or
+  published `Item` after explicit editor selection.
 
 Prefer exact lineage/version ids where the model supports them. Do not depend
 on display names for joins.
 
-## Future Edition CLI
+## Story-Cycle CLI And Future Edition CLI
 
-The desired command family is planned, not currently guaranteed to exist:
+For repeatable section-shaped research plus reporting, use the implemented
+story-cycle command:
 
 ```bash
-npm run content -- editions plan \
+npm run content -- assignments run-story-cycle \
   --date YYYY-MM-DD \
-  --slots <edition-slots.yml> \
-  --dry-run
+  --topic "<topic>" \
+  --category <category-key> \
+  --coverage-key <coverage.key> \
+  --sections <section-key>,<section-key> \
+  --section-budgets <section-key>:<slots> \
+  --json
 
-npm run content -- editions dispatch-research \
-  --date YYYY-MM-DD \
-  --ratio 1.5 \
-  --dry-run
-
-npm run content -- editions dispatch-research \
-  --date YYYY-MM-DD \
-  --ratio 1.5 \
-  --apply
+npm run content -- assignments story-cycle-output \
+  --run-id <story-cycle-run-id> \
+  --json
 ```
 
-Target behavior for that future CLI:
+A future edition-specific command family may wrap this lower-level assignment
+workflow later. Do not assume those wrapper commands exist until
+`scripts/content-cli.cjs` exposes them. Target behavior for any future wrapper:
 
 - create or update the dated private `Edition` planning record;
-- compute desk/lane dispatch counts from planned publication slots;
+- compute section/lane dispatch counts from planned publication slots;
 - create or update `Assignment` rows without duplicating active work;
-- link assignments to the `Edition`, root desk category, lane concept,
-  references, and graph signals with `SemanticRelation`;
+- link assignments to the `Edition`, `NewsroomSection`, topic `Category`,
+  coverage `SemanticNode`, lane concept, references, and graph signals with
+  `SemanticRelation`;
 - append `AssignmentEvent` audit rows;
-- emit a verification report with counts by desk, lane, queue, and target type.
+- emit a verification report with counts by section, lane, queue, and target type.
 
 Until that CLI exists, use the currently implemented protected actions and JWT
 authoring tools. If they cannot create the needed rows, report the missing
@@ -260,8 +273,9 @@ After planning or dispatching edition assignments:
   lane key, slot count, dispatch count, category context, and score breakdown;
 - verify every assignment has a `planned_for_edition` `SemanticRelation` to the
   dated `Edition`;
-- verify every assignment has `requests_work_on` for the root desk category and
-  `targets_lane` for the lane semantic concept;
+- verify every assignment has `targets_section`, `targets_topic`,
+  `requests_work_on` for the coverage concept, and `targets_lane` for the lane
+  semantic concept;
 - verify evidence and target links are present through `SemanticRelation`;
 - verify no `Item` rows were created with `type: "assignment"`;
 - verify no assignment was attached directly to reader-facing `EditionItem`.

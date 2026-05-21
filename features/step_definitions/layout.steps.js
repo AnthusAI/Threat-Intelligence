@@ -1089,6 +1089,50 @@ Then("assignment {string} should show a private reporting packet", async functio
   await candidate.locator("text=Reporting context packet: model-release accountability angle").waitFor({ state: "visible", timeout: 10_000 });
 });
 
+When("I switch assignments to Story Budget view", async function () {
+  const page = requirePage(this);
+  await page.getByRole("button", { name: "Story Budget" }).click();
+  await page.locator("[data-reporting-story-budget]").waitFor({ state: "visible", timeout: 10_000 });
+});
+
+Then("the reporting story budget should show section {string} with {int} slot and {int} candidate", async function (sectionKey, slotCount, candidateCount) {
+  const page = requirePage(this);
+  const section = page.locator(`[data-story-budget-section="${sectionKey}"]`);
+  await section.waitFor({ state: "visible", timeout: 10_000 });
+  await section.locator(`[data-story-budget-metric="slots"]`, { hasText: `${slotCount} slots` }).waitFor({ state: "visible", timeout: 10_000 });
+  await section.locator(`[data-story-budget-metric="dispatched"]`, { hasText: `${candidateCount} dispatched` }).waitFor({ state: "visible", timeout: 10_000 });
+});
+
+Then("story budget candidate {string} should show packet recommendation {string}", async function (assignmentId, recommendation) {
+  const page = requirePage(this);
+  const candidate = page.locator(`[data-story-budget-candidate="${assignmentId}"]`);
+  await candidate.waitFor({ state: "visible", timeout: 10_000 });
+  await candidate.locator(`[data-story-budget-recommendation="${recommendation}"]`).waitFor({ state: "visible", timeout: 10_000 });
+});
+
+Then("story budget candidate {string} should show risk and gap context", async function (assignmentId) {
+  const page = requirePage(this);
+  const candidate = page.locator(`[data-story-budget-candidate="${assignmentId}"]`);
+  await candidate.waitFor({ state: "visible", timeout: 10_000 });
+  await candidate.locator("text=Risks").waitFor({ state: "visible", timeout: 10_000 });
+  await candidate.locator("text=Gaps").waitFor({ state: "visible", timeout: 10_000 });
+});
+
+When("I review story budget candidate {string} as {string}", async function (assignmentId, decision) {
+  const page = requirePage(this);
+  const candidate = page.locator(`[data-story-budget-candidate="${assignmentId}"]`);
+  await candidate.waitFor({ state: "visible", timeout: 10_000 });
+  await candidate.locator(`[data-story-budget-decision="${decision}"]`).click();
+});
+
+Then("story budget candidate {string} should show reporting decision {string}", async function (assignmentId, decision) {
+  const page = requirePage(this);
+  await page.waitForFunction(
+    ({ id, expected }) => document.querySelector(`[data-story-budget-candidate="${id}"]`)?.getAttribute("data-reporting-decision") === expected,
+    { id: assignmentId, expected: decision },
+  );
+});
+
 When("I review reporting packet for assignment {string} as {string} with note {string}", async function (assignmentId, decision, note) {
   const page = requirePage(this);
   const candidate = page.locator(`.news-desk-assignment-row[data-assignment-candidate="${assignmentId}"]`);
