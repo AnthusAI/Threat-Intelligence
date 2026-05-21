@@ -3258,6 +3258,8 @@ def _looks_like_list_line(value: str) -> bool:
 
 def _subtitle_has_list_shape(value: Any) -> bool:
     raw = str(value or "")
+    if _looks_like_pdf_catalog_fragment(raw):
+        return True
     lines = [line.strip() for line in re.split(r"[\r\n]+", raw) if line.strip()]
     if len(lines) > 1:
         return True
@@ -3275,11 +3277,20 @@ def _normalize_subtitle_candidate(value: Any) -> str:
     if _subtitle_has_list_shape(value):
         return ""
     text = _clean_text(_strip_html_fragments(value))
+    if text in {"<", ">", "<<", ">>"}:
+        return ""
     if len(text) > 220:
         return ""
     if _subtitle_is_boilerplate(text):
         return ""
     return "" if _placeholder_title_or_subtitle(text) else text
+
+
+def _looks_like_pdf_catalog_fragment(value: str) -> bool:
+    text = str(value or "").strip()
+    if not (text.startswith("<<") and text.endswith(">>")):
+        return False
+    return bool(re.search(r"/(?:Metadata|Names|OpenAction|Outlines|PageMode|Pages|Type|Catalog)\b", text))
 
 
 def _strip_html_fragments(value: Any) -> str:
