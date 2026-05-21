@@ -4019,7 +4019,7 @@ async function runStoryCycleResearchJob({ client, assignment, apply, runDir, cor
   const packetPath = `${basePath}.packet.json`;
   const params = apply
     ? [`assignment_item_id=${assignment.id}`]
-    : [`assignment_json=${JSON.stringify(assignment)}`];
+    : [`assignment_json=${encodeInlineAssignmentParam(assignment)}`];
   const command = [
     "tactus",
     "run",
@@ -4044,9 +4044,20 @@ async function runStoryCycleResearchJob({ client, assignment, apply, runDir, cor
   fs.writeFileSync(stdoutPath, proc.stdout ?? "", "utf8");
   fs.writeFileSync(stderrPath, proc.stderr ?? "", "utf8");
   const parsed = extractResearchRunPayload(proc.stdout);
-  const packet = parsed?.research_packet ?? parsed?.researchPacket ?? null;
+  let packet = parsed?.research_packet ?? parsed?.researchPacket ?? null;
+  let fallback = null;
+  if (!packet) {
+    fallback = buildStoryCycleResearchFallbackPacket({
+      assignment,
+      topic,
+      coverageKey,
+      researchMode,
+      reason: proc.status === 0 ? "missing_research_packet" : "research_procedure_failed",
+    });
+    packet = fallback.packet;
+  }
   if (packet) writeJsonFile(packetPath, packet);
-  writeJsonFile(resultPath, { command, parsed, stdoutPath, stderrPath });
+  writeJsonFile(resultPath, { command, parsed, fallback, stdoutPath, stderrPath });
   let messageId = null;
   let applyResult = null;
   if (apply && parsed?.research_record_plan) {
@@ -4054,7 +4065,7 @@ async function runStoryCycleResearchJob({ client, assignment, apply, runDir, cor
     messageId = applyResult.messageId;
   }
   return {
-    ok: proc.status === 0 && Boolean(packet),
+    ok: Boolean(packet) && (!apply || Boolean(parsed?.research_record_plan)),
     phase: "research",
     assignmentId: assignment.id,
     sectionKey,
@@ -4066,6 +4077,7 @@ async function runStoryCycleResearchJob({ client, assignment, apply, runDir, cor
     exitStatus: proc.status,
     signal: proc.signal,
     packet,
+    fallback,
     applyResult,
   };
 }
@@ -4074,15 +4086,24 @@ async function runStoryCycleReportingJob({ client, assignment, apply, runDir, co
   const sectionKey = assignment.sectionKey ?? "unsectioned";
   const assignmentMeta = parseJsonish(assignment.metadata);
   const angle = assignmentMeta.angleDiversity?.lensLabel ?? assignmentMeta.angleDiversity?.lensKey ?? null;
-  const assignmentForAgent = {
-    ...assignment,
-    metadata: JSON.stringify({
-      ...assignmentMeta,
+  const assignmentForAgent = compactAssignmentForAgent({
+    assignment,
+    metadata: {
+      storyCycleRunId: assignmentMeta.storyCycleRunId ?? null,
+      storyCycleDate: assignmentMeta.storyCycleDate ?? null,
+      topic: assignmentMeta.topic ?? topic ?? null,
+      coverageConceptKey: assignmentMeta.coverageConceptKey ?? coverageKey ?? null,
+      categoryKey: assignmentMeta.categoryKey ?? null,
+      sectionKey: assignmentMeta.sectionKey ?? sectionKey,
+      sectionTitle: assignmentMeta.sectionTitle ?? null,
+      sectionMission: assignmentMeta.sectionMission ?? null,
+      angleDiversity: assignmentMeta.angleDiversity ?? null,
+      slotTarget: assignmentMeta.slotTarget ?? null,
       sourceResearchAssignmentId: researchRun?.assignmentId ?? assignmentMeta.sourceResearchAssignmentId ?? null,
       sourceResearchPacketId: researchRun?.messageId ?? assignmentMeta.sourceResearchPacketId ?? null,
       sourceResearchPacketPath: researchRun?.packetPath ?? null,
-    }),
-  };
+    },
+  });
   const basePath = path.join(runDir, "reporting", `${safeId(sectionKey)}-${safeId(assignment.id)}`);
   const stdoutPath = `${basePath}.stdout.log`;
   const stderrPath = `${basePath}.stderr.log`;
@@ -4090,7 +4111,7 @@ async function runStoryCycleReportingJob({ client, assignment, apply, runDir, co
   const packetPath = `${basePath}.packet.json`;
   const params = apply
     ? [`assignment_item_id=${assignment.id}`]
-    : [`assignment_json=${JSON.stringify(assignmentForAgent)}`];
+    : [`assignment_json=${encodeInlineAssignmentParam(assignmentForAgent)}`];
   const command = [
     "tactus",
     "run",
@@ -4115,17 +4136,31 @@ async function runStoryCycleReportingJob({ client, assignment, apply, runDir, co
   fs.writeFileSync(stdoutPath, proc.stdout ?? "", "utf8");
   fs.writeFileSync(stderrPath, proc.stderr ?? "", "utf8");
   const parsed = extractResearchRunPayload(proc.stdout);
-  const packet = parsed?.reporting_context_packet ?? parsed?.reportingContextPacket ?? null;
+  let packet = parsed?.reporting_context_packet ?? parsed?.reportingContextPacket ?? null;
+  let recordPlan = parsed?.reporting_record_plan ?? parsed?.reportingRecordPlan ?? null;
+  let fallback = null;
+  if (!packet) {
+    fallback = buildStoryCycleReportingFallbackPacket({
+      assignment,
+      assignmentMeta,
+      topic,
+      coverageKey,
+      researchRun,
+      reason: proc.status === 0 ? "missing_reporting_context_packet" : "reporting_procedure_failed",
+    });
+    packet = fallback.packet;
+    recordPlan = fallback.reportingRecordPlan;
+  }
   if (packet) writeJsonFile(packetPath, packet);
-  writeJsonFile(resultPath, { command, parsed, stdoutPath, stderrPath });
+  writeJsonFile(resultPath, { command, parsed, fallback, stdoutPath, stderrPath });
   let messageId = null;
   let applyResult = null;
-  if (apply && parsed?.reporting_record_plan) {
-    applyResult = await applyStoryCycleTactusPlan(client, parsed.reporting_record_plan);
+  if (apply && recordPlan) {
+    applyResult = await applyStoryCycleTactusPlan(client, recordPlan);
     messageId = applyResult.messageId;
   }
   return {
-    ok: proc.status === 0 && Boolean(packet),
+    ok: Boolean(packet) && (!apply || Boolean(recordPlan)),
     phase: "reporting",
     assignmentId: assignment.id,
     sectionKey,
@@ -4140,7 +4175,323 @@ async function runStoryCycleReportingJob({ client, assignment, apply, runDir, co
     sourceResearchAssignmentId: researchRun?.assignmentId ?? null,
     sourceResearchPacketId: researchRun?.messageId ?? null,
     packet,
+    fallback,
     applyResult,
+  };
+}
+
+function buildStoryCycleResearchFallbackPacket({ assignment, topic, coverageKey, researchMode, reason }) {
+  const metadata = parseJsonish(assignment.metadata);
+  const sectionKey = metadata.sectionKey ?? assignment.sectionKey ?? assignment.sectionId ?? "unsectioned";
+  const sectionTitle = metadata.sectionTitle ?? sectionKey;
+  const researchLens = metadata.researchLens ?? null;
+  const summary = `Deterministic fallback research packet for ${topic} through the ${sectionTitle} section lens.`;
+  const packet = {
+    researchMode: researchMode ?? metadata.researchMode ?? "internal_brief",
+    summary,
+    corpusKey: metadata.corpusKey ?? assignment.corpusKey ?? null,
+    categoryKey: metadata.categoryKey ?? assignment.primaryFocusCategoryKey ?? null,
+    coverageConceptKey: metadata.coverageConceptKey ?? coverageKey ?? null,
+    sectionKey,
+    sectionLens: researchLens,
+    queries: [
+      [topic, sectionTitle, researchLens].filter(Boolean).join(" "),
+    ],
+    evidenceItemIds: [],
+    acceptedReferenceIds: [],
+    sourceSnapshots: [],
+    proposedReferences: [],
+    recommendedAngle: researchLens
+      ? `Frame ${topic} through ${researchLens}.`
+      : `Frame ${topic} through the ${sectionTitle} section lens.`,
+    openQuestions: [
+      "Which accepted references can support this section lens?",
+      "Which fresh source prospects need reference intake before reporting?",
+    ],
+    coverageGaps: [
+      "Agent research output was unavailable or malformed during this dry run.",
+      "Run source discovery or accepted-reference intake before using this for reader-facing claims.",
+    ],
+    researchTrace: {
+      recoveryPath: "content_cli_story_cycle_fallback",
+      fallbackReason: reason,
+      knowledgeQueries: [],
+      papyrusUrisInspected: [],
+      webSearches: [],
+      acceptedEvidenceIds: [],
+      unresolvedGaps: ["agent_output_unavailable"],
+    },
+    privateUseOnly: true,
+  };
+  return { kind: "story-cycle.research.fallback", reason, packet };
+}
+
+function buildStoryCycleReportingFallbackPacket({ assignment, assignmentMeta, topic, coverageKey, researchRun, reason }) {
+  const metadata = assignmentMeta ?? parseJsonish(assignment.metadata);
+  const sectionKey = metadata.sectionKey ?? assignment.sectionKey ?? assignment.sectionId ?? "unsectioned";
+  const sectionTitle = metadata.sectionTitle ?? sectionKey;
+  const angleMeta = metadata.angleDiversity && typeof metadata.angleDiversity === "object" ? metadata.angleDiversity : {};
+  const angle = angleMeta.lensLabel ?? angleMeta.lensKey ?? "reader impact";
+  const lensPrompt = angleMeta.lensPrompt ?? angle;
+  const slotTarget = metadata.slotTarget && typeof metadata.slotTarget === "object" ? metadata.slotTarget : null;
+  const sourceResearchAssignmentId = researchRun?.assignmentId ?? metadata.sourceResearchAssignmentId ?? null;
+  const sourceResearchPacketId = researchRun?.messageId ?? metadata.sourceResearchPacketId ?? null;
+  const sourceResearchPacketPath = researchRun?.packetPath ?? metadata.sourceResearchPacketPath ?? null;
+  const acceptedReferenceIds = [
+    ...(researchRun?.packet?.acceptedReferenceIds ?? []),
+    ...(researchRun?.packet?.evidenceItemIds ?? []),
+  ].filter(Boolean);
+  const proposedReferences = Array.isArray(researchRun?.packet?.proposedReferences)
+    ? researchRun.packet.proposedReferences
+    : [];
+  const summary = `Reporting context packet for ${topic} / ${sectionTitle} / ${angle}.`;
+  const editionId = metadata.editionId ?? (metadata.storyCycleDate ? `edition-${metadata.storyCycleDate}` : null);
+  const packet = {
+    summary,
+    section_key: sectionKey,
+    sectionKey,
+    edition_id: editionId,
+    editionId,
+    candidate_rank: slotTarget?.candidateRank ?? null,
+    candidateRank: slotTarget?.candidateRank ?? null,
+    slot_target: slotTarget,
+    slotTarget,
+    why_now: "This story-cycle dry run needs a private reporting context packet for editor selection.",
+    whyNow: "This story-cycle dry run needs a private reporting context packet for editor selection.",
+    nut_graf_candidate: `The ${sectionTitle} desk can evaluate ${topic} through ${lensPrompt}, but accepted evidence still needs review before copywriting.`,
+    nutGrafCandidate: `The ${sectionTitle} desk can evaluate ${topic} through ${lensPrompt}, but accepted evidence still needs review before copywriting.`,
+    recommended_angle: angle,
+    recommendedAngle: angle,
+    confirmed_facts: [],
+    confirmedFacts: [],
+    source_trail: [],
+    sourceTrail: [],
+    accepted_reference_ids: acceptedReferenceIds,
+    acceptedReferenceIds,
+    proposed_references: proposedReferences,
+    proposedReferences,
+    recent_desk_memory_used: [],
+    recentDeskMemoryUsed: [],
+    coverage_gaps: [
+      ...(Array.isArray(researchRun?.packet?.coverageGaps) ? researchRun.packet.coverageGaps : []),
+      "Reporter procedure output was unavailable or malformed; this fallback packet needs editor review.",
+    ],
+    coverageGaps: [
+      ...(Array.isArray(researchRun?.packet?.coverageGaps) ? researchRun.packet.coverageGaps : []),
+      "Reporter procedure output was unavailable or malformed; this fallback packet needs editor review.",
+    ],
+    open_questions: [
+      ...(Array.isArray(researchRun?.packet?.openQuestions) ? researchRun.packet.openQuestions : []),
+      "Which accepted references should anchor this angle?",
+    ],
+    openQuestions: [
+      ...(Array.isArray(researchRun?.packet?.openQuestions) ? researchRun.packet.openQuestions : []),
+      "Which accepted references should anchor this angle?",
+    ],
+    risk_flags: [
+      "Do not treat proposed references as accepted evidence.",
+      "Do not copy private doctrine, desk memory, or source notes directly into reader-facing fields.",
+    ],
+    riskFlags: [
+      "Do not treat proposed references as accepted evidence.",
+      "Do not copy private doctrine, desk memory, or source notes directly into reader-facing fields.",
+    ],
+    verification_needs: [
+      "Run reference intake for fresh prospects before copywriting.",
+      "Confirm accepted evidence ids before editor selection.",
+    ],
+    verificationNeeds: [
+      "Run reference intake for fresh prospects before copywriting.",
+      "Confirm accepted evidence ids before editor selection.",
+    ],
+    source_diversity_notes: [],
+    sourceDiversityNotes: [],
+    copywriter_brief: `Private handoff only: use this packet to decide whether the ${sectionTitle} desk should pursue ${topic} from the ${angle} angle. Do not create reader-facing copy until an editor selects or briefs it.`,
+    copywriterBrief: `Private handoff only: use this packet to decide whether the ${sectionTitle} desk should pursue ${topic} from the ${angle} angle. Do not create reader-facing copy until an editor selects or briefs it.`,
+    editor_recommendation: "hold",
+    editorRecommendation: "hold",
+    coverage_concept_key: metadata.coverageConceptKey ?? coverageKey ?? null,
+    coverageConceptKey: metadata.coverageConceptKey ?? coverageKey ?? null,
+    source_research_assignment_id: sourceResearchAssignmentId,
+    sourceResearchAssignmentId,
+    source_research_packet_id: sourceResearchPacketId,
+    sourceResearchPacketId,
+    doctrine_context: {
+      sourceResearchPacketPath,
+      fallbackReason: reason,
+    },
+    doctrineContext: {
+      sourceResearchPacketPath,
+      fallbackReason: reason,
+    },
+    privateUseOnly: true,
+    fallback: {
+      kind: "story-cycle.reporting.fallback",
+      reason,
+    },
+  };
+  const reportingRecordPlan = buildStoryCycleReportingFallbackRecordPlan({
+    assignment,
+    packet,
+    sourceResearchPacketId,
+  });
+  return { kind: "story-cycle.reporting.fallback", reason, packet, reportingRecordPlan };
+}
+
+function buildStoryCycleReportingFallbackRecordPlan({ assignment, packet, sourceResearchPacketId }) {
+  const now = new Date().toISOString();
+  const summary = packet.summary;
+  const messageId = `message-reporting-context-packet-${hashShort([assignment.id, summary, now])}`;
+  const message = {
+    id: messageId,
+    messageKind: "reporting_context_packet",
+    messageDomain: "assignment_work",
+    status: "active",
+    summary,
+    source: "scripts/content-cli.cjs",
+    importRunId: assignment.importRunId ?? null,
+    authorLabel: "papyrus-content-cli",
+    createdAt: now,
+    updatedAt: now,
+  };
+  const body = reportingPacketBody(packet);
+  const bodyAttachment = attachmentRecord(buildTextModelPayloadAttachment({
+    ownerKind: "message",
+    ownerId: messageId,
+    ownerLineageId: messageId,
+    role: "message_body",
+    sortKey: "message",
+    filename: "message.txt",
+    mediaType: "text/plain",
+    content: body,
+    importRunId: assignment.importRunId ?? null,
+    now,
+  }));
+  const metadataAttachment = attachmentRecord(buildJsonModelPayloadAttachment({
+    ownerKind: "message",
+    ownerId: messageId,
+    ownerLineageId: messageId,
+    role: "metadata",
+    sortKey: "metadata",
+    filename: "metadata.json",
+    content: {
+      kind: "reporting.context_packet.created",
+      assignmentId: assignment.id,
+      assignmentTypeKey: assignment.assignmentTypeKey,
+      queueKey: assignment.queueKey,
+      reporting: packet,
+    },
+    importRunId: assignment.importRunId ?? null,
+    now,
+  }));
+  const records = [
+    { modelName: "Message", action: "create", input: message },
+    { modelName: "ModelAttachment", action: "create", input: bodyAttachment.expected, body: bodyAttachment.attachmentBody },
+    { modelName: "ModelAttachment", action: "create", input: metadataAttachment.expected, body: metadataAttachment.attachmentBody },
+    { modelName: "SemanticRelation", action: "create", input: localSemanticRelationRecord({
+      predicate: "produces",
+      subjectKind: "assignment",
+      subjectId: assignment.id,
+      subjectLineageId: assignment.id,
+      objectKind: "message",
+      objectId: messageId,
+      objectLineageId: messageId,
+      rank: 1,
+      classifierId: assignment.classifierId ?? null,
+      reviewRecommended: false,
+      sourceSnapshotId: assignment.sourceSnapshotId ?? null,
+      importRunId: assignment.importRunId ?? null,
+      importedAt: now,
+      metadata: {
+        lifecycle: "assignment-reporting-context-packet",
+        messageKind: "reporting_context_packet",
+        metadataKind: "reporting.context_packet.created",
+        assignmentTypeKey: assignment.assignmentTypeKey,
+        queueKey: assignment.queueKey,
+        editorRecommendation: packet.editorRecommendation ?? packet.editor_recommendation,
+        workProductKind: "reporting_context_packet",
+      },
+    }) },
+  ];
+  if (sourceResearchPacketId) {
+    records.push({ modelName: "SemanticRelation", action: "create", input: localSemanticRelationRecord({
+      predicate: "derived_from",
+      subjectKind: "message",
+      subjectId: messageId,
+      subjectLineageId: messageId,
+      objectKind: "message",
+      objectId: sourceResearchPacketId,
+      objectLineageId: sourceResearchPacketId,
+      rank: 1,
+      classifierId: assignment.classifierId ?? null,
+      reviewRecommended: false,
+      importRunId: assignment.importRunId ?? null,
+      importedAt: now,
+      metadata: {
+        lifecycle: "assignment-reporting-context-packet",
+        sourceKind: "section_research_packet",
+        workProductKind: "reporting_context_packet",
+      },
+    }) });
+  }
+  return {
+    dryRun: true,
+    lifecycle: "assignment-reporting-context-packet",
+    assignmentId: assignment.id,
+    message,
+    records,
+    warnings: ["reporting context packet generated by deterministic story-cycle fallback"],
+  };
+}
+
+function reportingPacketBody(packet) {
+  const lines = [
+    packet.summary ?? "Reporting context packet",
+    "",
+    `Section: ${packet.sectionKey ?? packet.section_key ?? "unknown"}`,
+    `Editor recommendation: ${packet.editorRecommendation ?? packet.editor_recommendation ?? "hold"}`,
+    `Why now: ${packet.whyNow ?? packet.why_now ?? ""}`,
+    `Recommended angle: ${packet.recommendedAngle ?? packet.recommended_angle ?? ""}`,
+    `Nut graf candidate: ${packet.nutGrafCandidate ?? packet.nut_graf_candidate ?? ""}`,
+    "",
+    "Copywriter brief:",
+    packet.copywriterBrief ?? packet.copywriter_brief ?? "",
+  ];
+  for (const [label, values] of [
+    ["Confirmed facts", packet.confirmedFacts ?? packet.confirmed_facts],
+    ["Accepted references", packet.acceptedReferenceIds ?? packet.accepted_reference_ids],
+    ["Verification needs", packet.verificationNeeds ?? packet.verification_needs],
+    ["Open questions", packet.openQuestions ?? packet.open_questions],
+  ]) {
+    const items = Array.isArray(values) ? values.filter(Boolean) : [];
+    if (!items.length) continue;
+    lines.push("", `${label}:`, ...items.map((item) => `- ${typeof item === "string" ? item : JSON.stringify(item)}`));
+  }
+  return lines.join("\n");
+}
+
+function encodeInlineAssignmentParam(assignment) {
+  return `@urljson:${encodeURIComponent(JSON.stringify(assignment))}`;
+}
+
+function compactAssignmentForAgent({ assignment, metadata }) {
+  return {
+    id: assignment.id,
+    assignmentTypeKey: assignment.assignmentTypeKey,
+    queueKey: assignment.queueKey ?? null,
+    queueStatusKey: assignment.queueStatusKey ?? null,
+    status: assignment.status ?? null,
+    priority: assignment.priority ?? null,
+    title: assignment.title ?? null,
+    summary: assignment.summary ?? null,
+    brief: assignment.brief ?? null,
+    instructions: assignment.instructions ?? null,
+    sectionId: assignment.sectionId ?? assignment.sectionKey ?? null,
+    sectionKey: assignment.sectionKey ?? null,
+    sectionType: assignment.sectionType ?? null,
+    categorySetId: assignment.categorySetId ?? null,
+    classifierId: assignment.classifierId ?? null,
+    metadata: JSON.stringify(metadata ?? {}),
   };
 }
 

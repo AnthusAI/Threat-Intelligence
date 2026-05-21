@@ -92,11 +92,43 @@ Procedure {
         local json = require("tactus.io.json")
 
         local assignment_id = input.assignment_item_id or ""
-        local assignment_json = tostring(input.assignment_json or "")
+        local assignment_json = ""
         local corpus_key = input.corpus_key or "AI-ML-research"
         local research_mode = input.research_mode or "source_discovery"
         local max_evidence_items = input.max_evidence_items or 20
         local max_attempts = 3
+
+        local function percent_decode(text)
+            if type(text) ~= "string" then return "" end
+            return (string.gsub(text, "%%(%x%x)", function(hex)
+                local code = tonumber(hex, 16)
+                if not code then return "" end
+                return string.char(code)
+            end))
+        end
+
+        local function normalize_inline_assignment_json(value)
+            if type(value) == "table" then
+                local ok, encoded = pcall(json.encode, value)
+                if ok and type(encoded) == "string" then return encoded end
+                return ""
+            end
+            if type(value) ~= "string" then
+                return value == nil and "" or tostring(value)
+            end
+            if string.sub(value, 1, 9) == "@urljson:" then
+                return percent_decode(string.sub(value, 10))
+            end
+            return value
+        end
+
+        assignment_json = normalize_inline_assignment_json(input.assignment_json)
+        if assignment_id == "" and assignment_json ~= "" then
+            local ok, decoded = pcall(json.decode, assignment_json)
+            if ok and type(decoded) == "table" and type(decoded.id) == "string" and decoded.id ~= "" then
+                assignment_id = decoded.id
+            end
+        end
 
         local function truncate_text(value, limit)
             local text = tostring(value or "")
