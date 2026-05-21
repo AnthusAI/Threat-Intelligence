@@ -611,7 +611,7 @@ function LoadingPage({ content }: { content: EditionContent }) {
           <span>PAPYRUS</span>
         </h1>
         <div className="masthead__meta">
-          <span>{content.editionDate}</span>
+          <span>{formatShortDate(content.editionDate)}</span>
           <span>INFORMATION ABOUT INFORMATION SYSTEMS</span>
           <span>Measuring type</span>
         </div>
@@ -659,7 +659,7 @@ function SolvedPageView({
             <span>PAPYRUS</span>
           </h1>
           <div className="masthead__meta">
-            <span>{content.editionDate}</span>
+            <span>{formatShortDate(content.editionDate)}</span>
             <span>INFORMATION ABOUT INFORMATION SYSTEMS</span>
             <span>Cybernetic Edition</span>
           </div>
@@ -1679,7 +1679,12 @@ function compactTextArray(values: Array<string | null> | null | undefined): stri
 function formatShortDate(value: string): string {
   const timestamp = Date.parse(value);
   if (Number.isNaN(timestamp)) return value;
-  return new Date(timestamp).toISOString().slice(0, 10);
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(timestamp));
 }
 
 function normalizePath(pathname: string): string {

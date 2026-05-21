@@ -155,7 +155,7 @@ const CATEGORY_SET_FIELDS = `${VERSION_FIELDS} id corpusId classifierId displayN
 const CATEGORY_FIELDS = `${VERSION_FIELDS} id categorySetId corpusId categoryKey parentCategoryId parentCategoryKey displayName shortTitle subtitle description aliases status seedItemIds holdoutItemIds rank depth isPinned importRunId updatedAt`;
 const CATEGORY_KEYWORD_FIELDS = "id categorySetId corpusId categoryKey categoryLineageId categoryId keyword normalizedKeyword weight rank source sourceTopicId importRunId metadata createdAt updatedAt";
 const LEXICAL_STEERING_RULE_FIELDS = "id ruleKind term normalizedTerm scope status corpusId classifierId categorySetId categoryKey note source createdBy createdAt updatedAt metadata";
-const NEWSROOM_SECTION_FIELDS = "id title type editorialMission editorialPolicy enabled enabledStatus sortOrder shortDescription defaultArticleTypes defaultPageBudget assignmentGuidance killCriteria visualGuidance createdAt updatedAt";
+const NEWSROOM_SECTION_FIELDS = "id title shortTitle type editorialMission editorialPolicy enabled enabledStatus sortOrder defaultArticleTypes defaultPageBudget assignmentGuidance killCriteria visualGuidance createdAt updatedAt";
 const PROPOSAL_FIELDS = "id categorySetId corpusId importRunId proposalKind steeringDomain status title summary categoryKey targetCategoryKey graphEntityId relationshipType displayName shortTitle subtitle description evidenceItemIds suggestedSeedItemIds suggestedHoldoutItemIds sourceSnapshotId proposedAt reviewedAt reviewedBy updatedAt";
 const DECISION_FIELDS = "id proposalId categorySetId action actorSub actorLabel note selectedCategoryKey createdAt";
 const KNOWLEDGE_CORPUS_FIELDS = "id name role itemCount generatedAt latestImportRunId createdAt updatedAt";
@@ -195,10 +195,10 @@ const ASSIGNMENT_FIELDS = [
   "updatedAt",
 ].join(" ");
 const ASSIGNMENT_EVENT_FIELDS = "id assignmentId assignmentTypeKey queueKey eventType fromStatus toStatus actorSub actorLabel note createdAt";
-const REFERENCE_FIELDS = `${VERSION_FIELDS} id corpusId externalItemId title authors sourceUri storagePath mediaType byteSize sha256 sourcePublishedAt sourceUpdatedAt retrievedAt importRunId importedAt createdAt curationStatus curationStatusKey curationStatusUpdatedAt curationStatusUpdatedBy curationStatusReason updatedAt`;
+const REFERENCE_FIELDS = `${VERSION_FIELDS} id corpusId externalItemId title authors sourceUri storagePath mediaType byteSize sha256 sourcePublishedAt sourceUpdatedAt retrievedAt importRunId importedAt createdAt curationStatus curationStatusKey curationStatusUpdatedAt curationStatusUpdatedBy curationStatusReason newsroomFeedKey updatedAt`;
 const REFERENCE_ATTACHMENT_FIELDS = "id referenceId referenceLineageId referenceVersionNumber referenceVersionKey role sortKey storagePath sourceUri filename mediaType byteSize sha256 etag importRunId importedAt metadata";
 const SEMANTIC_NODE_FIELDS = `${VERSION_FIELDS} id nodeKey nodeKind corpusId categorySetId categoryLineageId categoryKey displayName description aliases status importRunId createdAt updatedAt newsroomFeedKey`;
-const MESSAGE_FIELDS = "id messageKind messageDomain status summary source importRunId authorSub authorUserProfileId authorLabel createdAt updatedAt";
+const MESSAGE_FIELDS = "id messageKind messageDomain status summary source importRunId authorSub authorUserProfileId authorLabel newsroomFeedKey createdAt updatedAt";
 const SEMANTIC_RELATION_TYPE_FIELDS = "id key label inverseLabel description domain status allowedSubjectKinds allowedObjectKinds isDirectional isSymmetric isTransitive contextPackTags createdAt updatedAt metadata";
 const SEMANTIC_RELATION_FIELDS = "id relationState predicate relationTypeId relationTypeKey relationDomain subjectKind subjectId subjectLineageId subjectVersionNumber objectKind objectId objectLineageId objectVersionNumber subjectStateKey objectStateKey objectSubjectStateKey predicateObjectStateKey subjectVersionKey objectVersionKey score confidence rank classifierId modelVersion reviewRecommended sourceSnapshotId importRunId importedAt createdAt updatedAt newsroomFeedKey metadata";
 

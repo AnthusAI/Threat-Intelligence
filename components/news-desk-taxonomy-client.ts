@@ -39,6 +39,7 @@ const USER_POOL_AUTH_MODE = "userPool";
 const USER_POOL_LIST_LIMIT = 500;
 const USER_POOL_PAGE_LIMIT = 50;
 const TEST_EDITOR_STORAGE_KEY = "papyrus:test-editor";
+const TEST_EDITOR_NEWSROOM_MOCK_STORAGE_KEY = "papyrus:test-newsroom-mock";
 const NEWSROOM_PAGE_LIMIT = 50;
 
 const NEWSROOM_MESSAGE_FEED_QUERY = `
@@ -92,13 +93,13 @@ const NEWSROOM_SECTION_LIST_QUERY = `
       items {
         id
         title
+        shortTitle
         type
         editorialMission
         editorialPolicy
         enabled
         enabledStatus
         sortOrder
-        shortDescription
         defaultArticleTypes
         defaultPageBudget
         assignmentGuidance
@@ -136,6 +137,45 @@ const MODEL_ATTACHMENTS_BY_OWNER_QUERY = `
         status
       }
       nextToken
+    }
+  }
+`;
+
+const GET_REFERENCE_QUERY = `
+  query GetReference($id: ID!) {
+    getReference(id: $id) {
+      id
+      lineageId
+      versionNumber
+      previousVersionId
+      versionState
+      versionCreatedAt
+      versionCreatedBy
+      changeReason
+      contentHash
+      corpusId
+      externalItemId
+      title
+      authors
+      sourceUri
+      storagePath
+      mediaType
+      byteSize
+      sha256
+      sourcePublishedAt
+      sourceUpdatedAt
+      retrievedAt
+      importRunId
+      importedAt
+      createdAt
+      curationStatus
+      curationStatusKey
+      curationStatusUpdatedAt
+      curationStatusUpdatedBy
+      curationStatusReason
+      newsroomFeedKey
+      metadata
+      updatedAt
     }
   }
 `;
@@ -391,6 +431,15 @@ export async function loadEditorCategoryTreeState(options?: {
 }
 
 export async function loadEditorResolvedAccessState(): Promise<EditorAccessState> {
+  if (hasTestEditorOverride()) {
+    return {
+      status: "ready",
+      isEditor: true,
+      isAdmin: true,
+      auth: { status: "signedIn", label: "Test Editor" },
+      error: null,
+    };
+  }
   try {
     const snapshot = await loadReaderSessionSnapshot();
     if (!snapshot.hasSession || snapshot.auth.status === "signedOut") {
@@ -413,6 +462,15 @@ export async function loadEditorResolvedAccessState(): Promise<EditorAccessState
 }
 
 export async function loadEditorNewsDeskDashboard({ isAdmin }: { isAdmin: boolean }): Promise<CategorySteeringDashboard> {
+  const testMock = getTestEditorNewsroomMock();
+  if (testMock?.summary) {
+    return {
+      ...createSummaryCategorySteeringDashboard(normalizeNewsroomSummary(testMock.summary)),
+      canManageUsers: isAdmin,
+      userDirectory: [],
+      loadError: null,
+    };
+  }
   const [summaryResult, userDirectoryResult] = await Promise.allSettled([
     loadNewsroomSummary(),
     isAdmin ? loadUserDirectory() : Promise.resolve([]),
@@ -423,9 +481,6 @@ export async function loadEditorNewsDeskDashboard({ isAdmin }: { isAdmin: boolea
   }
   const summary = summaryResult.status === "fulfilled" ? summaryResult.value : null;
   const userDirectory = userDirectoryResult.status === "fulfilled" ? userDirectoryResult.value : [];
-  const userDirectoryError = userDirectoryResult.status === "rejected"
-    ? formatNewsroomLoaderError("Could not load newsroom user directory.", userDirectoryResult.reason)
-    : null;
 
   if (summaryError || newsroomSummaryIsMissing(summary)) {
     return {
@@ -434,9 +489,7 @@ export async function loadEditorNewsDeskDashboard({ isAdmin }: { isAdmin: boolea
       summaryStatus: "missing",
       canManageUsers: isAdmin,
       userDirectory,
-      loadError: summaryError
-        ? formatNewsroomLoaderError("Newsroom summary unavailable.", summaryError)
-        : userDirectoryError,
+      loadError: null,
     };
   }
 
@@ -444,7 +497,7 @@ export async function loadEditorNewsDeskDashboard({ isAdmin }: { isAdmin: boolea
     ...createSummaryCategorySteeringDashboard(summary!),
     canManageUsers: isAdmin,
     userDirectory,
-    loadError: userDirectoryError,
+    loadError: null,
   };
 }
 
@@ -528,6 +581,8 @@ export async function loadEditorFullNewsDeskDashboard({ isAdmin }: { isAdmin: bo
 }
 
 export async function loadEditorMessagesData(): Promise<MessageRecord[]> {
+  const testMock = getTestEditorNewsroomMock();
+  if (testMock?.messages) return testMock.messages;
   const page = await loadNewsroomMessagePage();
   return page.items;
 }
@@ -551,6 +606,13 @@ export async function loadEditorReferencesData(): Promise<{
   references: ReferenceRecord[];
   referenceAttachments: ReferenceAttachmentRecord[];
 }> {
+  const testMock = getTestEditorNewsroomMock();
+  if (testMock?.references) {
+    return {
+      references: testMock.references,
+      referenceAttachments: [],
+    };
+  }
   const [referencePage, referenceAttachments] = await Promise.all([
     loadNewsroomReferencePage(),
     listUserPoolModelPage<ReferenceAttachmentRecord>("ReferenceAttachment", USER_POOL_PAGE_LIMIT),
@@ -576,6 +638,8 @@ export async function loadNewsroomReferencePage(options: NewsroomReferencePageOp
 }
 
 export async function loadEditorSemanticRelationsData(): Promise<SemanticRelationRecord[]> {
+  const testMock = getTestEditorNewsroomMock();
+  if (testMock?.semanticRelations) return testMock.semanticRelations;
   const page = await loadNewsroomSemanticRelationPage();
   return page.items;
 }
@@ -627,6 +691,12 @@ export async function loadModelPayloadsForOwner(
   ownerId: string,
   roles?: string[],
 ): Promise<HydratedModelPayload[]> {
+  const testMock = getTestEditorNewsroomMock();
+  const mockPayloads = testMock?.payloads?.[`${ownerKind}:${ownerId}`];
+  if (mockPayloads) {
+    const allowedRoles = new Set((roles ?? []).filter(Boolean));
+    return mockPayloads.filter((payload) => !allowedRoles.size || allowedRoles.has(payload.attachment.role));
+  }
   configureAmplifyClient();
   const client = generateClient<Schema>() as unknown as {
     graphql: (options: Record<string, unknown>) => Promise<GraphQLConnectionResponse<ModelAttachmentRecord>>;
@@ -655,6 +725,27 @@ export async function loadModelPayloadsForOwner(
   } while (nextToken);
 
   return Promise.all(attachments.map(hydrateModelAttachment));
+}
+
+export async function loadReferenceRecordById(id: string): Promise<ReferenceRecord | null> {
+  const testMock = getTestEditorNewsroomMock();
+  if (testMock?.references) {
+    return testMock.references.find((reference) => reference.id === id || reference.lineageId === id) ?? null;
+  }
+  configureAmplifyClient();
+  const client = generateClient<Schema>() as unknown as {
+    graphql: (options: Record<string, unknown>) => Promise<{
+      data?: { getReference?: ReferenceRecord | null } | null;
+      errors?: unknown[] | null;
+    }>;
+  };
+  const response = await client.graphql({
+    query: GET_REFERENCE_QUERY,
+    variables: { id },
+    authMode: USER_POOL_AUTH_MODE,
+  });
+  assertNoGraphQLErrors(response.errors);
+  return response.data?.getReference ?? null;
 }
 
 export async function uploadModelPayloadForOwner(input: {
@@ -829,6 +920,27 @@ export function hasTestEditorOverride(): boolean {
   return window.localStorage.getItem(TEST_EDITOR_STORAGE_KEY) === "true";
 }
 
+type TestEditorNewsroomMock = {
+  messages?: MessageRecord[];
+  payloads?: Record<string, HydratedModelPayload[]>;
+  references?: ReferenceRecord[];
+  semanticRelations?: SemanticRelationRecord[];
+  summary?: unknown;
+};
+
+function getTestEditorNewsroomMock(): TestEditorNewsroomMock | null {
+  if (!hasTestEditorOverride() || typeof window === "undefined") return null;
+  const raw = window.localStorage.getItem(TEST_EDITOR_NEWSROOM_MOCK_STORAGE_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return parsed as TestEditorNewsroomMock;
+  } catch {
+    return null;
+  }
+}
+
 function normalizeKnowledgeQueryResponse(value: unknown): KnowledgeQueryResponse {
   let parsed = value;
   if (typeof parsed === "string") {
@@ -876,12 +988,6 @@ function createSummaryCategorySteeringDashboard(summary: NewsroomSummaryRecord):
 
 function newsroomSummaryIsMissing(summary: NewsroomSummaryRecord | null | undefined): boolean {
   return (summary?.source ?? "").trim().toLowerCase() === "missing";
-}
-
-function formatNewsroomLoaderError(prefix: string, error: unknown): string {
-  const detail = error instanceof Error ? error.message : String(error ?? "");
-  const normalizedDetail = detail.trim();
-  return normalizedDetail ? `${prefix} ${normalizedDetail}` : prefix;
 }
 
 function normalizeNewsroomSummary(value: unknown): NewsroomSummaryRecord {

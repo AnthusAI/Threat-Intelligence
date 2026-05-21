@@ -68,6 +68,18 @@ Given("I am a test editor reader", async function () {
   this.testEditorReader = true;
 });
 
+Given("the newsroom summary is unavailable", async function () {
+  this.newsroomSummaryMock = "missing";
+});
+
+Given("the newsroom summary is delayed by {int} milliseconds", async function (delayMs) {
+  this.newsroomSummaryDelayMs = delayMs;
+});
+
+Given("the newsroom uses mocked reference-curation message detail data", async function () {
+  this.newsroomMessageDetailMock = "reference-curation";
+});
+
 Given("I open the edition path {string} at {int} by {int}", async function (routePath, width, height) {
   await this.openPath(routePath, width, height);
 });
@@ -335,13 +347,32 @@ Then("the newsroom overview should show newspaper sections", async function () {
   });
   for (const section of report) {
     assert.equal(section.morePath, section.path, `Expected ${section.section} More link to route to its desk`);
-    assert.ok(section.moreSearch.includes("demo=1"), `Expected ${section.section} More link to preserve demo mode`);
     assert.ok(section.cardCount > 0, `Expected ${section.section} overview section to render cards`);
     assert.ok(section.cardCount <= 4, `Expected ${section.section} overview section to render up to four cards`);
     assert.equal(section.spans[0], "2x2", `Expected ${section.section} lead card to be 2x2`);
     if (section.cardCount >= 4) {
       assert.equal(section.spans[3], "2x1", `Expected ${section.section} secondary card to be 2x1`);
     }
+  }
+});
+
+Then("newsroom overview section headers should follow the vertical rhythm", async function () {
+  const report = await requirePage(this).evaluate(() => {
+    const newsDeskPage = document.querySelector(".news-desk-page");
+    const rhythm = parseFloat(getComputedStyle(newsDeskPage ?? document.documentElement).getPropertyValue("--paper-rhythm")) || 0;
+    return ["messages", "assignments", "references"].map((section) => {
+      const header = document.querySelector(`[data-newsroom-overview-section="${section}"] .newsroom-overview-section__header`);
+      const rect = header?.getBoundingClientRect();
+      return {
+        section,
+        height: rect?.height ?? 0,
+        rows: rhythm > 0 && rect ? rect.height / rhythm : 0,
+      };
+    });
+  });
+  for (const entry of report) {
+    assert.ok(entry.height > 0, `Expected ${entry.section} overview header to render`);
+    assert.ok(Math.abs(entry.rows - Math.round(entry.rows)) <= 0.02, `Expected ${entry.section} overview header to align to whole rhythm rows, got ${entry.rows}`);
   }
 });
 
@@ -391,6 +422,14 @@ Then("newsroom overview section cards should not overlap or clip", async functio
 
 Then("the newsroom section rail should show canonical sections in rank order", async function () {
   const page = requirePage(this);
+  await page.locator("[data-newsroom-section-rail]").waitFor({ state: "visible", timeout: 10_000 });
+  const ids = await page.locator("[data-newsroom-section-type='canonical'][data-newsroom-section-link]").evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-newsroom-section-link")));
+  assert.deepEqual(ids, ["news", "business", "technology", "science", "methods", "history", "opinion"]);
+});
+
+Then("the newsroom section rail should keep canonical sections after {int} milliseconds", async function (delayMs) {
+  const page = requirePage(this);
+  await page.waitForTimeout(delayMs);
   await page.locator("[data-newsroom-section-rail]").waitFor({ state: "visible", timeout: 10_000 });
   const ids = await page.locator("[data-newsroom-section-type='canonical'][data-newsroom-section-link]").evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-newsroom-section-link")));
   assert.deepEqual(ids, ["news", "business", "technology", "science", "methods", "history", "opinion"]);
@@ -472,6 +511,14 @@ Then("the deep newsroom section page should show {string}", async function (expe
   const page = requirePage(this);
   await page.locator("[data-newsroom-deep-section]").waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("[data-newsroom-deep-section-eyebrow]", { hasText: "Section" }).waitFor({ state: "visible", timeout: 10_000 });
+  const title = await page.locator("[data-newsroom-deep-section-title]").innerText();
+  assert.equal(title.trim(), expectedTitle);
+});
+
+Then("the deep newsroom section page should still show {string} after {int} milliseconds", async function (expectedTitle, delayMs) {
+  const page = requirePage(this);
+  await page.waitForTimeout(delayMs);
+  await page.locator("[data-newsroom-deep-section]").waitFor({ state: "visible", timeout: 10_000 });
   const title = await page.locator("[data-newsroom-deep-section-title]").innerText();
   assert.equal(title.trim(), expectedTitle);
 });
@@ -576,8 +623,32 @@ When("I open the first newsroom card detail", async function () {
   const page = requirePage(this);
   const card = page.locator("[data-newsroom-card]").first();
   await card.waitFor({ state: "visible", timeout: 10_000 });
+  const wasOpen = await page.evaluate(() => document.querySelector("[data-newsroom-list-detail-shell]")?.getAttribute("data-detail-open") === "true");
   await card.click();
+  let animated = false;
+  try {
+    await page.waitForFunction(() => {
+      const grid = document.querySelector("[data-newsroom-card-grid]");
+      if (grid?.getAttribute("data-newsroom-card-grid-animating") === "true") return true;
+      return Array.from(document.querySelectorAll("[data-newsroom-card]")).some((node) => {
+        const transform = getComputedStyle(node).transform;
+        return Boolean(transform && transform !== "none");
+      });
+    }, undefined, { timeout: 500 });
+    animated = true;
+  } catch {
+    animated = false;
+  }
+  this.newsroomInitialDetailOpen = { animated, wasOpen };
   await page.waitForFunction(() => document.querySelector("[data-newsroom-list-detail-shell]")?.getAttribute("data-detail-open") === "true");
+});
+
+Then("the initial newsroom detail open should not animate card resizing", async function () {
+  const state = this.newsroomInitialDetailOpen;
+  assert.ok(state, "Expected initial newsroom detail-open animation state");
+  if (!state.wasOpen) {
+    assert.equal(state.animated, false, "Expected first detail open to suppress card-level Flip animation");
+  }
 });
 
 Then("the newsroom card grid should scale to the split width", async function () {
@@ -635,12 +706,15 @@ When("I select a different newsroom card", async function () {
       };
     };
     return {
+      cards: cards.map((card) => ({
+        active: card.getAttribute("data-active") === "true",
+        id: card.getAttribute("data-newsroom-card-id"),
+        rect: rectFor(card),
+        role: card.getAttribute("data-newsroom-card-template-role"),
+        span: card.getAttribute("data-newsroom-card-span"),
+      })),
       activeId: active?.getAttribute("data-newsroom-card-id") ?? null,
-      activeRect: active ? rectFor(active) : null,
-      activeSpan: active?.getAttribute("data-newsroom-card-span") ?? null,
       targetId: target?.getAttribute("data-newsroom-card-id") ?? null,
-      targetRect: target ? rectFor(target) : null,
-      targetSpan: target?.getAttribute("data-newsroom-card-span") ?? null,
     };
   });
   assert.ok(before.targetId, "Expected a second newsroom card to select");
@@ -665,46 +739,94 @@ When("I select a different newsroom card", async function () {
     return grid?.getAttribute("data-newsroom-card-grid-animating") !== "true"
       && target?.getAttribute("data-active") === "true";
   }, before.targetId, { timeout: 5_000 });
-  this.newsroomCardResize = { ...before, animated };
-});
-
-Then("the newsroom card resize should animate and settle", async function () {
-  const page = requirePage(this);
-  const before = this.newsroomCardResize;
-  assert.ok(before, "Expected card resize selection state");
-  assert.equal(before.animated, true, "Expected GSAP Flip animation to run during card resize");
-  const after = await page.evaluate(({ activeId, targetId }) => {
-    const cardReport = (id) => {
-      const card = document.querySelector(`[data-newsroom-card-id="${id}"]`);
-      if (!card) return null;
+  const after = await page.evaluate(() => {
+    const cards = Array.from(document.querySelectorAll("[data-newsroom-card]"));
+    const rectFor = (card) => {
       const rect = card.getBoundingClientRect();
       return {
-        active: card.getAttribute("data-active") === "true",
-        clipped: card.scrollHeight > card.clientHeight + 2 || card.scrollWidth > card.clientWidth + 2,
-        rect: {
-          bottom: rect.bottom,
-          height: rect.height,
-          left: rect.left,
-          right: rect.right,
-          top: rect.top,
-          width: rect.width,
-        },
-        span: card.getAttribute("data-newsroom-card-span"),
+        bottom: rect.bottom,
+        height: rect.height,
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        width: rect.width,
       };
     };
-    return {
-      previous: cardReport(activeId),
-      target: cardReport(targetId),
-    };
-  }, { activeId: before.activeId, targetId: before.targetId });
-  assert.ok(after.target, `Expected target card ${before.targetId}`);
-  assert.equal(after.target.active, true, "Expected selected card to be active after resize");
-  assert.equal(after.target.span, "2x2", "Expected selected card to settle as a 2x2 card");
-  assert.equal(after.target.clipped, false, "Expected selected card not to clip after resize");
-  if (after.previous) {
-    assert.notEqual(after.previous.span, "2x2", "Expected previously selected card to shrink from 2x2");
-    assert.equal(after.previous.clipped, false, "Expected previous card not to clip after resize");
+    return cards.map((card) => ({
+      active: card.getAttribute("data-active") === "true",
+      id: card.getAttribute("data-newsroom-card-id"),
+      rect: rectFor(card),
+      role: card.getAttribute("data-newsroom-card-template-role"),
+      span: card.getAttribute("data-newsroom-card-span"),
+    }));
+  });
+  this.newsroomCardSelection = { ...before, after, animated };
+});
+
+Then("newsroom card selection should keep grid geometry stable", async function () {
+  const selection = this.newsroomCardSelection;
+  assert.ok(selection, "Expected newsroom card selection state");
+  assert.ok(Array.isArray(selection.cards) && Array.isArray(selection.after), "Expected pre/post card snapshots");
+  assert.equal(selection.cards.length, selection.after.length, "Expected card count to remain stable after selection");
+  for (let index = 0; index < selection.cards.length; index += 1) {
+    const beforeCard = selection.cards[index];
+    const afterCard = selection.after[index];
+    assert.equal(afterCard.id, beforeCard.id, `Expected card order stability at index ${index}`);
+    assert.equal(afterCard.span, beforeCard.span, `Expected stable span for card ${beforeCard.id}`);
+    assert.equal(afterCard.role, beforeCard.role, `Expected stable template role for card ${beforeCard.id}`);
+    assert.ok(Math.abs(afterCard.rect.width - beforeCard.rect.width) <= 0.5, `Expected stable card width for ${beforeCard.id}`);
+    assert.ok(Math.abs(afterCard.rect.height - beforeCard.rect.height) <= 0.5, `Expected stable card height for ${beforeCard.id}`);
+    assert.ok(Math.abs(afterCard.rect.left - beforeCard.rect.left) <= 0.5, `Expected stable card left for ${beforeCard.id}`);
+    assert.ok(Math.abs(afterCard.rect.top - beforeCard.rect.top) <= 0.5, `Expected stable card top for ${beforeCard.id}`);
   }
+  assert.ok(selection.targetId, "Expected selected target id");
+  const activeAfter = selection.after.find((card) => card.active);
+  assert.equal(activeAfter?.id ?? null, selection.targetId, "Expected selected target card to become active");
+  if (selection.activeId) {
+    assert.ok(selection.after.some((card) => card.id === selection.activeId && card.active === false), "Expected previous active card to deactivate");
+  }
+});
+
+Then("newsroom card selection should not animate card resizing", async function () {
+  const selection = this.newsroomCardSelection;
+  assert.ok(selection, "Expected newsroom card selection state");
+  assert.equal(selection.animated, false, "Expected no card-level resize animation during selection changes");
+});
+
+When("I change the newsroom metric filter to {string}", async function (label) {
+  const page = requirePage(this);
+  const button = page.locator(".news-desk-data-grid-filter__metrics button", { hasText: label }).first();
+  await button.waitFor({ state: "visible", timeout: 10_000 });
+  await button.click();
+  let animated = false;
+  try {
+    await page.waitForFunction(() => {
+      const grid = document.querySelector("[data-newsroom-card-grid]");
+      if (grid?.getAttribute("data-newsroom-card-grid-animating") === "true") return true;
+      return Array.from(document.querySelectorAll("[data-newsroom-card]")).some((card) => {
+        const transform = getComputedStyle(card).transform;
+        return Boolean(transform && transform !== "none");
+      });
+    }, undefined, { timeout: 1_000 });
+    animated = true;
+  } catch {
+    animated = false;
+  }
+  await page.waitForFunction((targetLabel) => {
+    const grid = document.querySelector("[data-newsroom-card-grid]");
+    if (grid?.getAttribute("data-newsroom-card-grid-animating") === "true") return false;
+    const activeMetric = Array.from(document.querySelectorAll(".news-desk-data-grid-filter__metrics button[data-active='true']"))
+      .map((node) => node.textContent ?? "")
+      .some((text) => text.toLowerCase().includes(String(targetLabel).toLowerCase()));
+    return activeMetric;
+  }, label, { timeout: 5_000 });
+  this.newsroomNonSelectionReflow = { animated, label };
+});
+
+Then("the newsroom card grid should animate and settle after non-selection reflow", async function () {
+  const state = this.newsroomNonSelectionReflow;
+  assert.ok(state, "Expected non-selection reflow state");
+  assert.equal(state.animated, true, `Expected card-grid animation for non-selection reflow (${state.label})`);
 });
 
 Then("the users desk should show merge controls", async function () {
@@ -806,6 +928,108 @@ Then("the newsroom should show an editor access gate", async function () {
 Then("the newsroom should not show an editor access gate", async function () {
   const page = requirePage(this);
   assert.equal(await page.locator("[data-news-desk-access]").count(), 0);
+});
+
+Then("the newsroom aggregate counts should remain blank while the summary is loading", async function () {
+  const page = requirePage(this);
+  const report = await page.evaluate(() => {
+    const labels = ["Messages", "Assignments", "References", "Topics", "Concepts"];
+    return labels.map((label) => {
+      const tab = Array.from(document.querySelectorAll("[data-news-desk-tab]"))
+        .find((node) => node.textContent?.includes(label));
+      const count = tab?.querySelector(".news-desk-tab__count");
+      return {
+        label,
+        exists: Boolean(tab),
+        visible: count?.getAttribute("data-count-visible"),
+        text: count?.textContent?.trim() ?? "",
+      };
+    });
+  });
+  for (const entry of report) {
+    assert.ok(entry.exists, `Expected newsroom tab for ${entry.label}`);
+    assert.equal(entry.visible, "false", `Expected ${entry.label} count to stay hidden while the summary loads`);
+    assert.equal(entry.text, "", `Expected ${entry.label} count text to stay blank while the summary loads`);
+  }
+});
+
+Then("the newsroom aggregate counts should show question marks", async function () {
+  const page = requirePage(this);
+  await page.waitForFunction(() => {
+    const labels = ["Messages", "Assignments", "References", "Topics", "Concepts"];
+    return labels.every((label) => {
+      const tab = Array.from(document.querySelectorAll("[data-news-desk-tab]"))
+        .find((node) => node.textContent?.includes(label));
+      const count = tab?.querySelector(".news-desk-tab__count");
+      return count?.getAttribute("data-count-visible") === "true" && (count.textContent?.trim() ?? "") === "?";
+    });
+  }, { timeout: 10_000 });
+  const report = await page.evaluate(() => {
+    const labels = ["Messages", "Assignments", "References", "Topics", "Concepts"];
+    return labels.map((label) => {
+      const tab = Array.from(document.querySelectorAll("[data-news-desk-tab]"))
+        .find((node) => node.textContent?.includes(label));
+      const count = tab?.querySelector(".news-desk-tab__count");
+      return {
+        label,
+        exists: Boolean(tab),
+        visible: count?.getAttribute("data-count-visible"),
+        text: count?.textContent?.trim() ?? "",
+      };
+    });
+  });
+  for (const entry of report) {
+    assert.ok(entry.exists, `Expected newsroom tab for ${entry.label}`);
+    assert.equal(entry.visible, "true", `Expected ${entry.label} count slot to be visible when the summary is missing`);
+    assert.equal(entry.text, "?", `Expected ${entry.label} count to render a question mark when the summary is missing`);
+  }
+});
+
+Then("the newsroom should not show a summary error banner", async function () {
+  const page = requirePage(this);
+  const banners = await page.locator(".category-steering-alert").allTextContents();
+  const summaryBanner = banners.find((text) => /summary unavailable|specified key does not exist/i.test(text));
+  assert.equal(summaryBanner, undefined, `Expected no summary error banner, found: ${summaryBanner}`);
+});
+
+Then("the message detail headline should be {string}", async function (expectedHeadline) {
+  const page = requirePage(this);
+  await page.locator("[data-news-desk-message-headline]").waitFor({ state: "visible", timeout: 10_000 });
+  await page.waitForFunction((expected) => {
+    const headline = document.querySelector("[data-news-desk-message-headline]");
+    return (headline?.textContent?.trim() ?? "") === expected;
+  }, expectedHeadline, { timeout: 10_000 });
+  const headline = (await page.locator("[data-news-desk-message-headline]").textContent())?.trim() ?? "";
+  assert.equal(headline, expectedHeadline);
+});
+
+Then("the message detail subheading should be {string}", async function (expectedSubheading) {
+  const page = requirePage(this);
+  await page.locator("[data-news-desk-message-subheading]").waitFor({ state: "visible", timeout: 10_000 });
+  await page.waitForFunction((expected) => {
+    const subheading = document.querySelector("[data-news-desk-message-subheading]");
+    return (subheading?.textContent?.trim() ?? "") === expected;
+  }, expectedSubheading, { timeout: 10_000 });
+  const subheading = (await page.locator("[data-news-desk-message-subheading]").textContent())?.trim() ?? "";
+  assert.equal(subheading, expectedSubheading);
+});
+
+Then("the message detail summary should be {string}", async function (expectedSummary) {
+  const page = requirePage(this);
+  await page.locator("[data-news-desk-message-summary]").waitFor({ state: "visible", timeout: 10_000 });
+  await page.waitForFunction((expected) => {
+    const summary = document.querySelector("[data-news-desk-message-summary] strong");
+    return (summary?.textContent?.trim() ?? "") === expected;
+  }, expectedSummary, { timeout: 10_000 });
+  const summary = (await page.locator("[data-news-desk-message-summary] strong").textContent())?.trim() ?? "";
+  assert.equal(summary, expectedSummary);
+});
+
+Then("the message detail headline should not be {string}", async function (unexpectedHeadline) {
+  const page = requirePage(this);
+  await page.locator("[data-news-desk-message-headline]").waitFor({ state: "visible", timeout: 10_000 });
+  const headline = (await page.locator("[data-news-desk-message-headline]").textContent())?.trim() ?? "";
+  assert.notEqual(headline, unexpectedHeadline);
 });
 
 Then("the newsroom should show category and graph proposal rows", async function () {

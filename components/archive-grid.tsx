@@ -78,8 +78,8 @@ export function ArchiveGrid({ initialPreviews, initialNextCursor = null }: Archi
 function formatArchiveDate(editionDate: string): string {
   const date = new Date(`${editionDate}T00:00:00Z`);
   if (Number.isNaN(date.getTime())) return editionDate;
-  return new Intl.DateTimeFormat("en", {
-    month: "short",
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
     day: "numeric",
     year: "numeric",
     timeZone: "UTC",

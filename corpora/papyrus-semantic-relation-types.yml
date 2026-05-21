@@ -132,6 +132,17 @@ relationTypes:
     isSymmetric: false
     isTransitive: false
     contextPackTags: [editing, publication, assignment_context]
+  - key: insight_about
+    label: insight about
+    inverseLabel: has insight
+    description: Links a private insight Message to the object the insight describes.
+    domain: knowledge
+    allowedSubjectKinds: [message]
+    allowedObjectKinds: [reference, item, category, semanticNode, assignment, newsroomSection]
+    isDirectional: true
+    isSymmetric: false
+    isTransitive: false
+    contextPackTags: [research, reference_graph, editing]
   - key: about
     label: about
     inverseLabel: commentary

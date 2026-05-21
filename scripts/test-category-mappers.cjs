@@ -994,6 +994,41 @@ const editionPlanningState = {
       editorialPolicy: "Prioritize practical capabilities.",
       enabled: true,
       sortOrder: 1,
+      defaultArticleTypes: ["article"],
+      defaultPageBudget: 1,
+    },
+    {
+      id: "business",
+      title: "Business",
+      type: "canonical",
+      editorialMission: "Cover commercial impact.",
+      editorialPolicy: "Prioritize durable business implications.",
+      enabled: true,
+      sortOrder: 2,
+      defaultArticleTypes: ["article", "brief"],
+      defaultPageBudget: 1,
+    },
+    {
+      id: "world",
+      title: "World",
+      type: "floating",
+      editorialMission: "Cover international developments.",
+      editorialPolicy: "Prefer verified institutional sources.",
+      enabled: true,
+      sortOrder: 3,
+      defaultArticleTypes: ["article"],
+      defaultPageBudget: 1,
+    },
+    {
+      id: "arts",
+      title: "Arts",
+      type: "floating",
+      editorialMission: "Cover culture and media.",
+      editorialPolicy: "Favor visual, culturally relevant pieces.",
+      enabled: true,
+      sortOrder: 4,
+      defaultArticleTypes: ["article"],
+      defaultPageBudget: 1,
     },
   ],
 };
@@ -1089,6 +1124,7 @@ assert.ok(relationTypeSeeds.some((type) => type.key === "publisher_item_identifi
 assert.ok(relationTypeSeeds.some((type) => type.key === "reference_summary_100_tokens" && type.domain === "summarization" && type.allowedObjectKinds.includes("reference")));
 assert.ok(relationTypeSeeds.some((type) => type.key === "reference_summary_500_tokens" && type.domain === "summarization" && type.allowedSubjectKinds.includes("message")));
 assert.ok(relationTypeSeeds.some((type) => type.key === "quality_rating_is" && type.domain === "curation" && type.allowedObjectKinds.includes("semanticNode")));
+assert.ok(relationTypeSeeds.some((type) => type.key === "insight_about" && type.domain === "knowledge" && type.allowedObjectKinds.includes("newsroomSection")));
 assert.ok(relationTypeSeeds.some((type) => type.key === "comment" && type.domain === "commentary" && type.allowedSubjectKinds.includes("message")));
 assert.ok(relationTypeSeeds.some((type) => type.key === "ingestion_rationale" && type.domain === "commentary" && type.allowedObjectKinds.includes("reference")));
 assert.ok(relationTypeSeeds.some((type) => type.key === "planned_for_edition" && type.domain === "publication"));
@@ -1221,6 +1257,84 @@ assert.throws(
   }),
   /Unknown focus category/,
 );
+const reportingEditionPlan = buildEditionPlanningPlan(editionPlanningState, {
+  editionDate: "2026-05-23",
+  now: "2026-05-18T12:00:00.000Z",
+  assignmentTypeKey: "reporting",
+  topDeskCount: 1,
+  publicationSlots: 1,
+  overassignmentRatio: 1.5,
+  rotatingSectionCount: 1,
+  sectionBudgets: ["technology:2"],
+});
+assert.equal(reportingEditionPlan.summary.assignmentTypeKey, "reporting.edition-candidate");
+assert.equal(reportingEditionPlan.summary.planningKind, "section-centered-reporting-planning");
+assert.deepEqual(
+  reportingEditionPlan.summary.sectionBudgets.map((budget) => budget.section.id),
+  ["technology", "business", "world"],
+);
+assert.equal(JSON.parse(reportingEditionPlan.edition.metadata).planningKind, "section-centered-reporting-planning");
+assert.deepEqual(JSON.parse(reportingEditionPlan.edition.metadata).selectedSectionIds, ["technology", "business", "world"]);
+assert.equal(reportingEditionPlan.assignments.length, 7);
+assert.equal(reportingEditionPlan.records.some((record) => record.modelName === "Item" || record.modelName === "EditionItem"), false);
+assert.ok(reportingEditionPlan.assignments.every((assignment) => assignment.assignmentTypeKey === "reporting.edition-candidate"));
+assert.equal(reportingEditionPlan.assignments.filter((assignment) => assignment.sectionKey === "technology").length, 3);
+assert.equal(reportingEditionPlan.assignments.filter((assignment) => assignment.sectionKey === "business").length, 2);
+assert.equal(reportingEditionPlan.assignments.filter((assignment) => assignment.sectionKey === "world").length, 2);
+const reportingCandidate = reportingEditionPlan.assignments.find((assignment) => assignment.sectionKey === "technology");
+assert.ok(reportingCandidate);
+const reportingCandidateMetadata = JSON.parse(reportingCandidate.metadata);
+assert.equal(reportingCandidate.queueKey, "edition:edition-2026-05-23:section:technology:lane:reporting");
+assert.equal(reportingCandidateMetadata.expectedOutput, "Private reporting context packet for editor selection and copywriting, not reader copy.");
+assert.deepEqual(reportingCandidateMetadata.reportingContextOrder, [
+  "publication-doctrine",
+  "section-doctrine",
+  "assignment-brief",
+  "accepted-knowledge-base-evidence",
+  "recent-section-memory",
+  "fresh-source-needs",
+]);
+assert.equal(reportingCandidateMetadata.slotTarget.sectionKey, "technology");
+assert.equal(reportingCandidateMetadata.slotTarget.slots, 2);
+assert.deepEqual(reportingCandidateMetadata.sectionBudget.defaultArticleTypes, ["article"]);
+assert.equal(reportingCandidateMetadata.angleDiversity.lensKey, "accountability");
+assert.equal(reportingCandidateMetadata.angleDiversity.duplicateAnglePenalty, 0);
+assert.ok(reportingCandidateMetadata.angleDiversity.diversityKey.startsWith("technology:"));
+assert.ok(reportingCandidateMetadata.angleDiversity.diversityKey.includes(":accountability:"));
+const reportingCandidateDiversityKeys = new Set(
+  reportingEditionPlan.assignments.map((assignment) => JSON.parse(assignment.metadata).angleDiversity.diversityKey),
+);
+assert.ok(reportingCandidateDiversityKeys.size > 1);
+const reportingEditionPlanWithStaleResearchAssignments = buildEditionPlanningPlan({
+  ...editionPlanningState,
+  assignments: [{
+    id: "assignment-stale-research-root",
+    assignmentTypeKey: "research.edition-candidate",
+    status: "open",
+    primaryFocusCategoryKey: "category.stale-root",
+    metadata: JSON.stringify({ editionSlug: "edition-2026-05-23" }),
+  }],
+}, {
+  editionDate: "2026-05-23",
+  now: "2026-05-18T12:00:00.000Z",
+  assignmentTypeKey: "reporting",
+  topDeskCount: 1,
+  publicationSlots: 1,
+  overassignmentRatio: 1.5,
+  rotatingSectionCount: 1,
+  sectionBudgets: ["technology:2"],
+});
+assert.equal(reportingEditionPlanWithStaleResearchAssignments.assignments.length, 7);
+assert.ok(reportingEditionPlanWithStaleResearchAssignments.assignments.every((assignment) => assignment.assignmentTypeKey === "reporting.edition-candidate"));
+const reportingSectionRelation = findRecord(reportingEditionPlan.records, "SemanticRelation", (record) => record.subjectId === reportingCandidate.id && record.predicate === "targets_section");
+assert.equal(reportingSectionRelation.objectKind, "newsroomSection");
+assert.equal(reportingSectionRelation.objectLineageId, "technology");
+const reportingEditionRelation = findRecord(reportingEditionPlan.records, "SemanticRelation", (record) => record.subjectId === reportingCandidate.id && record.predicate === "planned_for_edition");
+assert.equal(reportingEditionRelation.objectKind, "edition");
+const reportingTopicRelation = findRecord(reportingEditionPlan.records, "SemanticRelation", (record) => record.subjectId === reportingCandidate.id && record.predicate === "targets_topic");
+assert.equal(reportingTopicRelation.objectKind, "category");
+const reportingEvidenceRelation = findRecord(reportingEditionPlan.records, "SemanticRelation", (record) => record.subjectId === reportingCandidate.id && record.predicate === "uses_evidence");
+assert.equal(reportingEvidenceRelation.objectKind, "reference");
 
 const schemaSource = fs.readFileSync(path.join(__dirname, "..", "amplify", "data", "resource.ts"), "utf8");
 const authoringClientSource = fs.readFileSync(path.join(__dirname, "lib", "papyrus-graphql-authoring.cjs"), "utf8");
@@ -1237,6 +1351,8 @@ assert.match(authoringClientSource, /assignmentsByTypeStatusAndCreatedAt/);
 assert.match(authoringClientSource.match(/const ASSIGNMENT_FIELDS = [^;]+;/)?.[0] ?? "", /topicScopeCategoryKeys/);
 assert.match(schemaSource, /AssignmentEvent:\s*a\s*\n\s*\.model/);
 assert.match(schemaSource, /NewsroomSection:\s*a\s*\n\s*\.model/);
+assert.match(schemaSource.match(/NewsroomSection:\s*a[\s\S]*?secondaryIndexes/)?.[0] ?? "", /shortTitle:\s*a\.string\(\)\.required\(\)/);
+assert.match(authoringClientSource.match(/const NEWSROOM_SECTION_FIELDS = [^;]+;/)?.[0] ?? "", /shortTitle/);
 const claimAssignmentSource = schemaSource.match(/claimAssignment:[\s\S]*?releaseAssignment:/)?.[0] ?? "";
 assert.match(claimAssignmentSource, /assigneeKey:\s*a\.string\(\)/);
 assert.match(claimAssignmentSource, /claimExpiresAt:\s*a\.datetime\(\)/);
@@ -1291,6 +1407,8 @@ assert.doesNotMatch(schemaSource.match(/UserIdentity:[\s\S]*?UserRoleAssignment:
 assert.doesNotMatch(schemaSource.match(/CategoryKeyword:[\s\S]*?SteeringProposal:/)?.[0] ?? "", /publicApiKey/);
 assert.doesNotMatch(schemaSource.match(/Reference:[\s\S]*?Item:/)?.[0] ?? "", /publicApiKey/);
 const semanticGraphSource = fs.readFileSync(path.join(__dirname, "..", "lib", "semantic-graph.ts"), "utf8");
+assert.match(semanticGraphSource, /"newsroomSection"/);
+assert.match(semanticGraphSource, /insightsFor\(kind: string, lineageId: string\)/);
 assert.match(semanticGraphSource, /has_editorial_form/);
 assert.match(semanticGraphSource, /items by editorial form/);
 assert.match(semanticGraphSource, /ingestion_rationale/);

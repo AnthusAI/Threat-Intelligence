@@ -38,6 +38,7 @@ TOPIC_RELATION_KEYS = {"classified_as", "authoritative_label", "mentions", "broa
 OPERATIONAL_RELATION_DOMAINS = {"commentary", "workflow", "publication"}
 OPERATIONAL_RELATION_KEYS = {"comment", "ingestion_rationale", "requests_work_on", "produces", "blocked_by", "planned_for_edition", "targets_lane", "targets_section"}
 SUMMARY_RELATION_RE = re.compile(r"^reference_summary_(\d+)_tokens$")
+INSIGHT_RELATION_KEY = "insight_about"
 PASSAGE_HEADING_BOOSTS = {
     "abstract": 8,
     "introduction": 4,
@@ -126,6 +127,7 @@ def run_knowledge_query(input: dict[str, Any], services: KnowledgeQueryServices 
         "referenceAttachments": [],
         "qualityRelations": [],
         "referenceSummaries": [],
+        "insightMessages": [],
         "rankingWarnings": [],
         "referenceTokenBudgets": {},
         "evidencePassages": [],
@@ -1123,6 +1125,7 @@ def _normalize_semantic_matches(
 ) -> None:
     normalized_matches = []
     semantic_passages = []
+    insight_passages = []
     for match in structured.get("semanticMatches") or []:
         if not isinstance(match, dict):
             continue
@@ -1145,13 +1148,18 @@ def _normalize_semantic_matches(
         if summary_reference:
             normalized = summary_reference["reference"]
             structured["referenceSummaries"].append(summary_reference["summary"])
+        insight_payload = _insight_payload_from_semantic_match(normalized, request, services)
+        if insight_payload:
+            normalized = insight_payload["aboutObject"]
+            structured["insightMessages"].append(insight_payload["insight"])
+            insight_passages.append(insight_payload["passage"])
         _assign_object_uri(normalized)
         normalized_matches.append(normalized)
         passage = _semantic_passage_from_match(normalized, request, services)
         if passage:
             semantic_passages.append(passage)
     structured["semanticMatches"] = normalized_matches
-    structured["semanticPassages"] = _dedupe_passages(semantic_passages)
+    structured["semanticPassages"] = _dedupe_passages([*semantic_passages, *insight_passages])
 
 
 def _semantic_passage_from_match(
@@ -1161,8 +1169,12 @@ def _semantic_passage_from_match(
 ) -> dict[str, Any] | None:
     if match.get("semanticHitKind") == "reference_summary":
         return None
+    if match.get("semanticHitKind") == "insight_message":
+        return None
     metadata = match.get("metadata") if isinstance(match.get("metadata"), dict) else {}
     if metadata.get("semanticHitKind") == "reference_summary":
+        return None
+    if metadata.get("semanticHitKind") == "insight_message":
         return None
     text = metadata.get("text") or match.get("text") or metadata.get("summary") or match.get("summary")
     storage_path = metadata.get("storagePath") or match.get("storagePath")
@@ -1215,6 +1227,190 @@ def _semantic_passage_from_match(
         "tokens": services.token_counter.count(passage_text),
         "truncated": truncated,
     }
+
+
+def _insight_payload_from_semantic_match(
+    match: dict[str, Any],
+    request: dict[str, Any],
+    services: KnowledgeQueryServices,
+) -> dict[str, Any] | None:
+    if not _is_insight_semantic_match(match):
+        return None
+    metadata = match.get("metadata") if isinstance(match.get("metadata"), dict) else {}
+    graph = services.graph
+    message = dict(match)
+    if graph and hasattr(graph, "resolve_anchor"):
+        try:
+            resolved = graph.resolve_anchor({"kind": "message", "id": match.get("id"), "lineageId": match.get("lineageId")})
+        except Exception:  # pragma: no cover - best-effort normalization
+            resolved = None
+        if isinstance(resolved, dict):
+            message.update(resolved)
+    for key in ("messageKind", "messageDomain", "status", "summary", "createdAt", "source", "authorLabel"):
+        if message.get(key) in {None, ""} and metadata.get(key) not in {None, ""}:
+            message[key] = metadata.get(key)
+    relation = _insight_relation_for_message(match, graph)
+    if not relation:
+        return None
+    about = _resolve_insight_about_object(match, relation, graph)
+    if not about:
+        return None
+    _assign_object_uri(about)
+    about_kind = str(about.get("kind") or relation.get("objectKind") or "")
+    about_id = str(about.get("id") or relation.get("objectId") or "")
+    about_lineage_id = str(about.get("lineageId") or relation.get("objectLineageId") or about_id)
+    raw_text = str(
+        metadata.get("text")
+        or match.get("text")
+        or metadata.get("body")
+        or match.get("body")
+        or ""
+    ).strip()
+    if not raw_text:
+        return None
+    token_budget = max(24, int(request.get("maxPassageTokens") or 220))
+    truncated = services.token_counter.count(raw_text) > token_budget
+    insight_text = services.token_counter.truncate(raw_text, token_budget)
+    score = _semantic_match_score(match) + max(
+        0.0,
+        _passage_score(insight_text, object_title(about), _keywords(request["semanticQuery"])),
+    )
+    reference_lineage_id = ""
+    reference_id = ""
+    reference_title = ""
+    if about_kind == "reference":
+        reference_lineage_id = about_lineage_id
+        reference_id = about_id
+        reference_title = object_title(about)
+    passage = {
+        "id": f"insight:{message.get('id') or match.get('id') or about_lineage_id}",
+        "referenceId": reference_id or None,
+        "referenceLineageId": reference_lineage_id or None,
+        "referenceTitle": reference_title or None,
+        "objectUri": about.get("objectUri"),
+        "storagePath": metadata.get("storagePath") or f"papyrus://message/{quote(str(message.get('id') or match.get('id') or ''), safe='')}",
+        "rank": match.get("rank"),
+        "score": round(float(score), 3),
+        "semanticScore": match.get("score"),
+        "distance": match.get("distance"),
+        "heading": f"Insight about {object_title(about) or about_kind or 'record'}",
+        "chunkIndex": metadata.get("chunkIndex", match.get("rank")),
+        "startChar": metadata.get("startChar"),
+        "endChar": metadata.get("endChar"),
+        "selectionReason": "insight_message",
+        "provider": "semantic_search",
+        "text": insight_text,
+        "tokens": services.token_counter.count(insight_text),
+        "truncated": truncated,
+        "insightMessageId": message.get("id") or match.get("id"),
+        "insightMessageLineageId": message.get("lineageId") or match.get("lineageId") or message.get("id") or match.get("id"),
+        "insightRelationId": relation.get("id"),
+        "insightAboutKind": about_kind,
+        "insightAboutId": about_id,
+        "insightAboutLineageId": about_lineage_id,
+    }
+    about_object = {
+        **about,
+        "rank": match.get("rank"),
+        "providerRank": match.get("providerRank"),
+        "score": match.get("score"),
+        "distance": match.get("distance"),
+        "semanticHitKind": "insight_message",
+        "insightMessageId": message.get("id") or match.get("id"),
+        "metadata": {
+            **(about.get("metadata") if isinstance(about.get("metadata"), dict) else {}),
+            "semanticHitKind": "insight_message",
+            "insightMessageId": message.get("id") or match.get("id"),
+            "insightAboutKind": about_kind,
+            "insightAboutLineageId": about_lineage_id,
+        },
+    }
+    insight = {
+        "id": message.get("id") or match.get("id"),
+        "lineageId": message.get("lineageId") or match.get("lineageId") or message.get("id") or match.get("id"),
+        "messageKind": message.get("messageKind"),
+        "messageDomain": message.get("messageDomain"),
+        "status": message.get("status"),
+        "summary": message.get("summary") or metadata.get("summary") or match.get("summary"),
+        "text": raw_text,
+        "createdAt": message.get("createdAt"),
+        "source": message.get("source"),
+        "authorLabel": message.get("authorLabel"),
+        "relationTypeKey": relation.get("relationTypeKey") or relation.get("predicate"),
+        "relationId": relation.get("id"),
+        "aboutKind": about_kind,
+        "aboutId": about_id,
+        "aboutLineageId": about_lineage_id,
+        "aboutObjectUri": about.get("objectUri"),
+        "semanticScore": match.get("score"),
+        "distance": match.get("distance"),
+    }
+    return {"aboutObject": about_object, "insight": insight, "passage": passage}
+
+
+def _is_insight_semantic_match(match: dict[str, Any]) -> bool:
+    metadata = match.get("metadata") if isinstance(match.get("metadata"), dict) else {}
+    if str(match.get("kind") or metadata.get("kind") or metadata.get("objectKind") or "") != "message":
+        return False
+    message_kind = str(match.get("messageKind") or metadata.get("messageKind") or "")
+    message_domain = str(match.get("messageDomain") or metadata.get("messageDomain") or "")
+    relation_key = str(metadata.get("relationTypeKey") or metadata.get("predicate") or match.get("relationTypeKey") or match.get("predicate") or "")
+    if message_kind != "insight" or message_domain != "knowledge":
+        return False
+    if relation_key == INSIGHT_RELATION_KEY:
+        return True
+    return bool(metadata.get("aboutLineageId") or metadata.get("aboutId"))
+
+
+def _insight_relation_for_message(match: dict[str, Any], graph: Any) -> dict[str, Any] | None:
+    metadata = match.get("metadata") if isinstance(match.get("metadata"), dict) else {}
+    relation_key = str(metadata.get("relationTypeKey") or metadata.get("predicate") or match.get("relationTypeKey") or match.get("predicate") or "")
+    if relation_key == INSIGHT_RELATION_KEY and (metadata.get("aboutLineageId") or metadata.get("aboutId")):
+        return {
+            "id": metadata.get("relationId"),
+            "relationTypeKey": INSIGHT_RELATION_KEY,
+            "predicate": INSIGHT_RELATION_KEY,
+            "subjectKind": "message",
+            "subjectId": match.get("id"),
+            "subjectLineageId": match.get("lineageId"),
+            "objectKind": metadata.get("aboutKind"),
+            "objectId": metadata.get("aboutId"),
+            "objectLineageId": metadata.get("aboutLineageId") or metadata.get("aboutId"),
+        }
+    if graph and hasattr(graph, "list_outgoing_relations"):
+        try:
+            outgoing = graph.list_outgoing_relations({"kind": "message", "id": match.get("id"), "lineageId": match.get("lineageId")})
+        except Exception:  # pragma: no cover - best-effort normalization
+            outgoing = []
+        relation = next(
+            (
+                candidate for candidate in outgoing
+                if str(candidate.get("relationTypeKey") or candidate.get("predicate") or "") == INSIGHT_RELATION_KEY
+                and candidate.get("relationState") in {None, "", "current"}
+            ),
+            None,
+        )
+        if relation:
+            return relation
+    return None
+
+
+def _resolve_insight_about_object(match: dict[str, Any], relation: dict[str, Any], graph: Any) -> dict[str, Any] | None:
+    metadata = match.get("metadata") if isinstance(match.get("metadata"), dict) else {}
+    about_kind = relation.get("objectKind") or metadata.get("aboutKind")
+    about_id = relation.get("objectId") or metadata.get("aboutId") or relation.get("objectLineageId") or metadata.get("aboutLineageId")
+    about_lineage = relation.get("objectLineageId") or metadata.get("aboutLineageId") or about_id
+    if not about_kind or not about_id:
+        return None
+    stub = {"kind": about_kind, "id": about_id, "lineageId": about_lineage}
+    if graph and hasattr(graph, "resolve_anchor"):
+        try:
+            resolved = graph.resolve_anchor(stub)
+        except Exception:  # pragma: no cover - best-effort normalization
+            resolved = None
+        if isinstance(resolved, dict):
+            return resolved
+    return stub
 
 
 def _summary_reference_match_from_semantic_match(
@@ -1890,6 +2086,8 @@ def _assign_passage_ranking(passage: dict[str, Any], structured: dict[str, Any],
         passage_relevance = 0.0
     if passage.get("selectionReason") == "semantic_vector":
         passage_relevance = max(passage_relevance / 25.0, float(parent_ranking.get("relevanceScore", 0.0)))
+    elif passage.get("selectionReason") == "insight_message":
+        passage_relevance = max(0.92, float(parent_ranking.get("relevanceScore", 0.0)))
     else:
         passage_relevance = min(1.0, passage_relevance / 12.0)
     quality_score = float(parent_ranking.get("qualityScore", request["ranking"].get("missingQuality", 0.5)))
@@ -2849,6 +3047,8 @@ def _dedupe_passages(passages: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _passage_priority(passage: dict[str, Any]) -> float:
     score = float(passage.get("score") or 0)
+    if passage.get("selectionReason") == "insight_message":
+        score += 140
     if passage.get("selectionReason") == "semantic_vector":
         score += 100
     return score

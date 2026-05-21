@@ -774,7 +774,7 @@ const schema = a.schema({
       enabled: a.boolean().required(),
       enabledStatus: a.string().required(),
       sortOrder: a.integer().required(),
-      shortDescription: a.string(),
+      shortTitle: a.string().required(),
       defaultArticleTypes: a.string().array(),
       defaultPageBudget: a.integer(),
       assignmentGuidance: a.string(),

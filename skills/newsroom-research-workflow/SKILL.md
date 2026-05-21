@@ -202,9 +202,11 @@ paths in `scripts/content-cli.cjs`; do not hand-edit
      --json
    ```
 
-   Omit `--apply` first when testing. The JSON output includes the packet id,
-   generated catalog path, registered reference count, skipped duplicate count,
-   curation assignment count, and the next status command.
+   Omit `--apply` first when testing. For automation, prefer
+   `npm --silent run content -- ... --json` so stdout is one compact JSON
+   object. The JSON output includes the packet id, generated catalog path,
+   import run id, registered reference count, skipped duplicate count, curation
+   assignment count, a compact `references[]` list, and the next status command.
 
 5. Use the lower-level commands only when debugging or reviewing intermediate
    artifacts. Run or dry-run the researcher through the packaged Poetry
@@ -265,8 +267,11 @@ paths in `scripts/content-cli.cjs`; do not hand-edit
    It defaults to the latest linked `research_packet`; pass
    `--message <message-id>` to intake a specific packet. It deduplicates by
    normalized URL, preserves each proposal's ingestion rationale, writes
-   `.papyrus-runs/<run-id>/research-proposals-catalog.json`, and uses the same
-   safe `references register-catalog` path.
+   `.papyrus-runs/<run-id>/research-proposals-catalog.json`, and uses the
+   targeted research-proposal registration path. Re-runs should return the same
+   reference rows as existing/no-op records, not create duplicate curation work.
+   Use low-level `references register-catalog` only for arbitrary manual
+   catalogs, compatibility debugging, or fallback inspection.
 
 ## After Proposal Intake
 

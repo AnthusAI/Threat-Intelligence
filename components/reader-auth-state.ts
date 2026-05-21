@@ -4,9 +4,9 @@ import { fetchAuthSession } from "aws-amplify/auth";
 import { configureAmplifyClient } from "./amplify-client-provider";
 
 export type ReaderAuthSnapshot =
-  | { status: "loading"; label: string }
-  | { status: "signedOut"; label: string }
-  | { status: "signedIn"; label: string };
+  | { status: "loading"; label: string; email?: null }
+  | { status: "signedOut"; label: string; email?: null }
+  | { status: "signedIn"; label: string; email?: string | null };
 
 export type ReaderSessionSnapshot = {
   auth: ReaderAuthSnapshot;
@@ -20,12 +20,13 @@ export async function loadReaderSessionSnapshot(): Promise<ReaderSessionSnapshot
     const session = await fetchAuthSession();
     const accessPayload = session.tokens?.accessToken?.payload ?? {};
     const idPayload = session.tokens?.idToken?.payload ?? {};
+    const email = readTextClaim(idPayload.email ?? accessPayload.email);
     const groups = [
       ...readGroups(accessPayload["cognito:groups"]),
       ...readGroups(idPayload["cognito:groups"]),
     ];
     const label = readIdentityLabel({
-      email: idPayload.email ?? accessPayload.email,
+      email,
       name: idPayload.name ?? accessPayload.name,
       username: idPayload["cognito:username"] ?? accessPayload["cognito:username"] ?? accessPayload.username,
       sub: idPayload.sub ?? accessPayload.sub,
@@ -40,7 +41,7 @@ export async function loadReaderSessionSnapshot(): Promise<ReaderSessionSnapshot
     }
 
     return {
-      auth: { status: "signedIn", label },
+      auth: { status: "signedIn", label, email },
       groups,
       hasSession: true,
     };

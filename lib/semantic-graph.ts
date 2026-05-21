@@ -2,6 +2,7 @@ import type {
   AssignmentRecord,
   CategorySteeringCategory,
   MessageRecord,
+  NewsroomSectionRecord,
   ReferenceAttachmentRecord,
   ReferenceRecord,
   SemanticNodeRecord,
@@ -22,6 +23,7 @@ export const SEMANTIC_OBJECT_KINDS = [
   "steeringDecision",
   "knowledgeArtifact",
   "knowledgeImportRun",
+  "newsroomSection",
 ] as const;
 
 export type SemanticObjectKind = typeof SEMANTIC_OBJECT_KINDS[number];
@@ -36,6 +38,7 @@ export type SemanticPredicateId =
   | "has_editorial_form"
   | "about"
   | "comment"
+  | "insight_about"
   | "ingestion_rationale"
   | "uses_evidence"
   | "uses_signal"
@@ -67,6 +70,7 @@ export const SEMANTIC_PREDICATES: SemanticPredicateDefinition[] = [
   { id: "reference_summary_500_tokens", label: "500-token reference summary", group: "summarization", inverseLabel: "500-token summary for", contextPackTags: ["reference_curation", "research", "context_ranking"] },
   { id: "mentions", label: "mentions", group: "ontology", inverseLabel: "mentioned by" },
   { id: "has_editorial_form", label: "has editorial form", group: "editorial", inverseLabel: "items by editorial form", contextPackTags: ["editing", "publication", "assignment_context"] },
+  { id: "insight_about", label: "insight about", group: "knowledge", inverseLabel: "insights", contextPackTags: ["research", "reference_graph", "editing"] },
   { id: "about", label: "about", group: "commentary", inverseLabel: "commentary" },
   { id: "comment", label: "comments on", group: "commentary", inverseLabel: "commented on by", contextPackTags: ["reference_curation", "editing", "research", "assignment_context"] },
   { id: "ingestion_rationale", label: "ingestion rationale for", group: "commentary", inverseLabel: "ingestion rationale", contextPackTags: ["reference_curation", "editing", "research", "assignment_context"] },
@@ -90,6 +94,7 @@ export type SemanticObjectRecord =
   | CategorySteeringCategory
   | SemanticNodeRecord
   | MessageRecord
+  | NewsroomSectionRecord
   | AssignmentRecord
   | SemanticRelationRecord;
 
@@ -124,6 +129,7 @@ export type SemanticGraphSnapshotInput = {
   categories: CategorySteeringCategory[];
   semanticNodes: SemanticNodeRecord[];
   messages: MessageRecord[];
+  newsroomSections?: NewsroomSectionRecord[];
   semanticRelations: SemanticRelationRecord[];
   assignments?: AssignmentRecord[];
   referenceAttachments?: ReferenceAttachmentRecord[];
@@ -168,6 +174,7 @@ export function newsDeskHrefForSemanticObject(kind: string, lineageId: string): 
   if (kind === "assignment") return `/newsroom/assignments?assignment=${encoded}`;
   if (kind === "item") return `/newsroom?item=${encoded}`;
   if (kind === "message") return `/newsroom/messages?message=${encoded}`;
+  if (kind === "newsroomSection") return `/newsroom/sections/${encoded}`;
   return `/newsroom?object=${encodeURIComponent(kind)}:${encoded}`;
 }
 
@@ -184,6 +191,7 @@ export class SemanticGraphSnapshot {
   private semanticNodesByLineage = new Map<string, SemanticNodeRecord>();
   private messagesById = new Map<string, MessageRecord>();
   private assignmentsById = new Map<string, AssignmentRecord>();
+  private newsroomSectionsById = new Map<string, NewsroomSectionRecord>();
   private relationsBySubjectState = new Map<string, SemanticRelationRecord[]>();
   private relationsByObjectState = new Map<string, SemanticRelationRecord[]>();
 
@@ -205,6 +213,9 @@ export class SemanticGraphSnapshot {
     for (const assignment of input.assignments ?? []) {
       this.assignmentsById.set(assignment.id, assignment);
     }
+    for (const section of input.newsroomSections ?? []) {
+      this.newsroomSectionsById.set(section.id, section);
+    }
     for (const relation of input.semanticRelations.filter((entry) => entry.relationState === "current")) {
       pushMap(this.relationsBySubjectState, relation.subjectStateKey, relation);
       pushMap(this.relationsByObjectState, relation.objectStateKey, relation);
@@ -221,6 +232,7 @@ export class SemanticGraphSnapshot {
     if (kind === "semanticNode") return summarizeSemanticNode(this.semanticNodesByLineage.get(idOrLineageId) ?? this.semanticNodesById.get(idOrLineageId) ?? null);
     if (kind === "message") return summarizeMessage(this.messagesById.get(idOrLineageId) ?? null);
     if (kind === "assignment") return summarizeAssignment(this.assignmentsById.get(idOrLineageId) ?? null);
+    if (kind === "newsroomSection") return summarizeNewsroomSection(this.newsroomSectionsById.get(idOrLineageId) ?? null);
     return null;
   }
 
@@ -268,6 +280,16 @@ export class SemanticGraphSnapshot {
       .filter((relation) => ["comment", "ingestion_rationale"].includes(relationTypeKey(relation)) || ["comment", "ingestion_rationale"].includes(relation.predicate))
       .map((relation) => this.messagesById.get(relation.subjectId))
       .filter((message): message is MessageRecord => Boolean(message))
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  }
+
+  insightsFor(kind: string, lineageId: string): MessageRecord[] {
+    return this.incoming(kind, lineageId)
+      .filter((relation) => relation.subjectKind === "message")
+      .filter((relation) => relationTypeKey(relation) === "insight_about" || relation.predicate === "insight_about")
+      .map((relation) => this.messagesById.get(relation.subjectId))
+      .filter((message): message is MessageRecord => Boolean(message))
+      .filter((message) => message.messageKind === "insight" && message.messageDomain === "knowledge")
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
@@ -421,6 +443,19 @@ function summarizeAssignment(record: AssignmentRecord | null): SemanticObjectSum
     label: record.title,
     subtitle: `${record.assignmentTypeKey} / ${record.status}`,
     href: newsDeskHrefForSemanticObject("assignment", record.id),
+    record,
+  };
+}
+
+function summarizeNewsroomSection(record: NewsroomSectionRecord | null): SemanticObjectSummary | null {
+  if (!record) return null;
+  return {
+    kind: "newsroomSection",
+    id: record.id,
+    lineageId: record.id,
+    label: record.title,
+    subtitle: record.type,
+    href: newsDeskHrefForSemanticObject("newsroomSection", record.id),
     record,
   };
 }

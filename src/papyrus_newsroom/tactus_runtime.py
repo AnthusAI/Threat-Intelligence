@@ -100,6 +100,13 @@ _ARRAY_SHAPED_KEYS = {
     "rubricAssessments",
     "sourceSnapshots",
     "comparisonFindings",
+    "acceptedReferenceIds",
+    "confirmedFacts",
+    "recentDeskMemoryUsed",
+    "riskFlags",
+    "sourceTrail",
+    "sourceDiversityNotes",
+    "verificationNeeds",
     "acceptedEvidenceIds",
     "knowledgeQueries",
     "papyrusUrisInspected",
@@ -114,6 +121,13 @@ _ARRAY_SHAPED_KEYS = {
     "rubric_assessments",
     "source_snapshots",
     "comparison_findings",
+    "accepted_reference_ids",
+    "confirmed_facts",
+    "recent_desk_memory_used",
+    "risk_flags",
+    "source_trail",
+    "source_diversity_notes",
+    "verification_needs",
     "accepted_evidence_ids",
     "knowledge_queries",
     "papyrus_uris_inspected",
@@ -264,6 +278,7 @@ API_METHODS: dict[tuple[str, str], Callable[[dict[str, Any]], Any]] = {
     ("plan", "assignment_dispatch"): lambda args: newsroom.build_assignment_dispatch_plan(**args),
     ("plan", "research_update"): lambda args: newsroom.build_research_update_plan(**args),
     ("plan", "assignment_research_packet"): lambda args: newsroom.build_assignment_research_packet_plan(**args),
+    ("plan", "assignment_reporting_context_packet"): lambda args: newsroom.build_assignment_reporting_context_packet_plan(**args),
     ("plan", "draft_update"): lambda args: newsroom.build_draft_update_plan(**args),
 }
 
@@ -337,7 +352,8 @@ DOCS: dict[str, dict[str, Any]] = {
         "tags": ["plans", "dry-run"],
         "content": (
             "Use papyrus.plan.assignment_dispatch, papyrus.plan.research_update, "
-            "papyrus.plan.assignment_research_packet, and papyrus.plan.draft_update "
+            "papyrus.plan.assignment_research_packet, "
+            "papyrus.plan.assignment_reporting_context_packet, and papyrus.plan.draft_update "
             "to build inspectable dry-run mutation plans. "
             "These helpers do not write GraphQL records."
         ),
@@ -427,6 +443,7 @@ HELPER_BINDINGS: tuple[tuple[str, str, str], ...] = (
     ("plan_assignment_dispatch", "plan", "assignment_dispatch"),
     ("plan_research_update", "plan", "research_update"),
     ("plan_assignment_research_packet", "plan", "assignment_research_packet"),
+    ("plan_assignment_reporting_context_packet", "plan", "assignment_reporting_context_packet"),
     ("plan_draft_update", "plan", "draft_update"),
     ("docs_list", "docs", "list"),
     ("docs_get", "docs", "get"),

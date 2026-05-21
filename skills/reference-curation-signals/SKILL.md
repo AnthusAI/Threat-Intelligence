@@ -1,6 +1,6 @@
 ---
 name: reference-curation-signals
-description: Use this skill when creating, updating, querying, or consuming Papyrus Reference summaries and quality ratings for curation, ranking, context packs, or Tactus procedures.
+description: Use this skill when creating, updating, querying, or consuming Papyrus Reference title/subtitle enrichment, summaries, and quality ratings for curation, ranking, context packs, or Tactus procedures.
 ---
 
 # Reference Curation Signals Skill
@@ -10,6 +10,51 @@ signals for retrieval, ranking, agent context, or editorial review.
 
 Reference summaries and quality ratings are semantic graph signals. They are
 not source ingestion, not curation-status decisions, and not publication Items.
+
+## Title And Subtitle Enrichment
+
+Reference titles and subtitles are durable source metadata, not semantic graph
+signals. `Reference.title` is the first-class title field. Subtitle is v1
+metadata-only and should be stored as `metadata.subtitle`, plus local
+Biblicus sidecar/catalog copies so GraphQL rebuilds can restore it.
+
+Use the title/subtitle resolver when a new or existing Reference lacks usable
+display copy:
+
+```bash
+poetry run papyrus-newsroom references title-subtitle resolve \
+  --reference <reference-id> \
+  --apply
+```
+
+Batch missing values:
+
+```bash
+poetry run papyrus-newsroom references title-subtitle batch \
+  --corpus-key <corpus-key> \
+  --status all \
+  --only-missing true \
+  --max-count 25 \
+  --apply
+```
+
+Reference intake also runs catalog enrichment by default. Disable it only for
+offline or fast deterministic runs:
+
+```bash
+npm run content -- references prepare-catalog \
+  --catalog <catalog.json> \
+  --output <prepared.json> \
+  --corpus-key <corpus-key> \
+  --title-subtitle-enrichment false
+```
+
+The resolver must prefer original source metadata. Prompts for web+LLM
+fallbacks must preserve the contract: use the original title verbatim if
+available, use the original subtitle verbatim if available, and do not
+paraphrase original titles or subtitles. If no original subtitle exists, a
+generated fallback subtitle is allowed only when provenance says
+`subtitle_mode = "generated_fallback"`.
 
 ## Quality Contract
 

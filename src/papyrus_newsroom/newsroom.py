@@ -1625,6 +1625,122 @@ def build_assignment_research_packet_plan(
     }
 
 
+def build_assignment_reporting_context_packet_plan(
+    assignment_json: str = "",
+    assignment: dict[str, Any] | None = None,
+    reporting_json: str = "",
+    reporting: dict[str, Any] | None = None,
+    generated_at: str = "",
+) -> dict[str, Any]:
+    """
+    Build a dry-run Message work-product plan for a live reporting Assignment.
+    """
+    assignment_payload = _decode_record_json(_coerce_payload(assignment, assignment_json, "assignment"))
+    reporting_payload = _coerce_payload(reporting, reporting_json, "reporting")
+    now = generated_at or _now_iso()
+
+    assignment_id = _required(assignment_payload.get("id"), "assignment.id")
+    assignment_type = _required(assignment_payload.get("assignmentTypeKey"), "assignment.assignmentTypeKey")
+    if assignment_type != "reporting.edition-candidate":
+        raise ValueError("reporting context packets require assignment.assignmentTypeKey 'reporting.edition-candidate'")
+    if not assignment_payload.get("queueKey"):
+        raise ValueError("live assignment reporting packets require assignment.queueKey")
+
+    packet = _reporting_context_packet_metadata(reporting_payload, assignment_payload, now)
+    summary = _required(packet.get("summary"), "reporting.summary")
+    _required(packet.get("sectionKey"), "reporting.section_key")
+    _required(packet.get("editionId"), "reporting.edition_id")
+    message_id = f"message-reporting-context-packet-{_hash_short([assignment_id, summary, now])}"
+    message = {
+        "id": message_id,
+        "messageKind": "reporting_context_packet",
+        "messageDomain": "assignment_work",
+        "status": "active",
+        "summary": summary,
+        "source": "procedures/newsroom/reporter.tac",
+        "importRunId": assignment_payload.get("importRunId"),
+        "authorLabel": "newsroom-reporter",
+        "createdAt": now,
+        "updatedAt": now,
+    }
+    body_attachment = _model_attachment(
+        owner_kind="message",
+        owner_id=message_id,
+        role="message_body",
+        sort_key="message",
+        filename="message.txt",
+        media_type="text/plain",
+        content=_reporting_context_packet_body(packet),
+        import_run_id=assignment_payload.get("importRunId"),
+        now=now,
+    )
+    metadata_attachment = _model_attachment(
+        owner_kind="message",
+        owner_id=message_id,
+        role="metadata",
+        sort_key="metadata",
+        filename="metadata.json",
+        media_type="application/json",
+        content={
+            "kind": "reporting.context_packet.created",
+            "assignmentId": assignment_id,
+            "assignmentTypeKey": assignment_type,
+            "queueKey": assignment_payload.get("queueKey"),
+            "reporting": packet,
+        },
+        import_run_id=assignment_payload.get("importRunId"),
+        now=now,
+    )
+    relation = _semantic_relation(
+        predicate="comment",
+        subject_kind="message",
+        subject_id=message_id,
+        subject_lineage_id=message_id,
+        subject_version_number=None,
+        object_kind="assignment",
+        object_id=assignment_id,
+        object_lineage_id=assignment_id,
+        object_version_number=None,
+        rank=1,
+        score=None,
+        confidence=None,
+        classifier_id=assignment_payload.get("classifierId"),
+        model_version=None,
+        review_recommended=False,
+        source_snapshot_id=assignment_payload.get("sourceSnapshotId"),
+        import_run_id=assignment_payload.get("importRunId"),
+        imported_at=now,
+        metadata={
+            "lifecycle": "assignment-reporting-context-packet",
+            "messageKind": "reporting_context_packet",
+            "metadataKind": "reporting.context_packet.created",
+            "assignmentTypeKey": assignment_type,
+            "queueKey": assignment_payload.get("queueKey"),
+            "editorRecommendation": packet.get("editorRecommendation"),
+        },
+    )
+
+    warnings = []
+    if not packet["acceptedReferenceIds"] and not packet["sourceTrail"]:
+        warnings.append("reporting context packet has no accepted reference ids or source trail")
+    if packet["proposedReferences"] and not packet["verificationNeeds"]:
+        warnings.append("fresh proposed references should include verification needs before copywriting")
+
+    return {
+        "dryRun": True,
+        "lifecycle": "assignment-reporting-context-packet",
+        "assignmentId": assignment_id,
+        "message": message,
+        "records": [
+            {"modelName": "Message", "action": "create", "input": message},
+            {"modelName": "ModelAttachment", "action": "create", "input": body_attachment["record"], "body": body_attachment["body"]},
+            {"modelName": "ModelAttachment", "action": "create", "input": metadata_attachment["record"], "body": metadata_attachment["body"]},
+            {"modelName": "SemanticRelation", "action": "create", "input": relation},
+        ],
+        "warnings": warnings,
+    }
+
+
 def build_draft_update_plan(
     assignment_item_json: str = "",
     assignment_item: dict[str, Any] | None = None,
@@ -1923,6 +2039,99 @@ def _research_packet_metadata(research_payload: dict[str, Any], assignment: dict
             "generatedAt": now,
         },
     }
+
+
+def _reporting_context_packet_metadata(reporting_payload: dict[str, Any], assignment: dict[str, Any], now: str) -> dict[str, Any]:
+    metadata = _normalize_jsonish(assignment.get("metadata") or {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+    slot_target = _normalize_jsonish(reporting_payload.get("slot_target") or reporting_payload.get("slotTarget") or metadata.get("slotTarget") or {})
+    if not isinstance(slot_target, dict):
+        slot_target = {}
+    section_key = (
+        reporting_payload.get("section_key")
+        or reporting_payload.get("sectionKey")
+        or assignment.get("sectionKey")
+        or metadata.get("sectionKey")
+        or metadata.get("sectionId")
+    )
+    edition_id = (
+        reporting_payload.get("edition_id")
+        or reporting_payload.get("editionId")
+        or metadata.get("editionId")
+    )
+    candidate_rank = (
+        reporting_payload.get("candidate_rank")
+        or reporting_payload.get("candidateRank")
+        or metadata.get("candidateRank")
+    )
+    editor_recommendation = _normalize_editor_recommendation(
+        reporting_payload.get("editor_recommendation") or reporting_payload.get("editorRecommendation")
+    )
+    return {
+        "status": "reported",
+        "summary": str(reporting_payload.get("summary") or ""),
+        "sectionKey": section_key,
+        "editionId": edition_id,
+        "candidateRank": candidate_rank,
+        "slotTarget": slot_target or metadata.get("slotTarget") or None,
+        "whyNow": str(reporting_payload.get("why_now") or reporting_payload.get("whyNow") or ""),
+        "nutGrafCandidate": str(reporting_payload.get("nut_graf_candidate") or reporting_payload.get("nutGrafCandidate") or ""),
+        "recommendedAngle": str(reporting_payload.get("recommended_angle") or reporting_payload.get("recommendedAngle") or ""),
+        "confirmedFacts": _jsonish_list(reporting_payload.get("confirmed_facts") or reporting_payload.get("confirmedFacts") or []),
+        "sourceTrail": _jsonish_list(reporting_payload.get("source_trail") or reporting_payload.get("sourceTrail") or []),
+        "acceptedReferenceIds": _string_list(reporting_payload.get("accepted_reference_ids") or reporting_payload.get("acceptedReferenceIds") or []),
+        "proposedReferences": _jsonish_list(reporting_payload.get("proposed_references") or reporting_payload.get("proposedReferences") or []),
+        "recentDeskMemoryUsed": _jsonish_list(reporting_payload.get("recent_desk_memory_used") or reporting_payload.get("recentDeskMemoryUsed") or []),
+        "coverageGaps": _jsonish_list(reporting_payload.get("coverage_gaps") or reporting_payload.get("coverageGaps") or []),
+        "openQuestions": _jsonish_list(reporting_payload.get("open_questions") or reporting_payload.get("openQuestions") or []),
+        "riskFlags": _jsonish_list(reporting_payload.get("risk_flags") or reporting_payload.get("riskFlags") or []),
+        "verificationNeeds": _jsonish_list(reporting_payload.get("verification_needs") or reporting_payload.get("verificationNeeds") or []),
+        "sourceDiversityNotes": _jsonish_list(reporting_payload.get("source_diversity_notes") or reporting_payload.get("sourceDiversityNotes") or []),
+        "copywriterBrief": str(reporting_payload.get("copywriter_brief") or reporting_payload.get("copywriterBrief") or ""),
+        "editorRecommendation": editor_recommendation,
+        "doctrineContext": _normalize_jsonish(reporting_payload.get("doctrine_context") or reporting_payload.get("doctrineContext") or {}),
+        "contextOrder": _jsonish_list(metadata.get("reportingContextOrder") or []),
+        "privateUseOnly": True,
+        "procedure": {
+            "role": "reporter",
+            "name": "procedures/newsroom/reporter.tac",
+            "version": NEWSROOM_VERSION,
+            "generatedAt": now,
+        },
+    }
+
+
+def _normalize_editor_recommendation(value: Any) -> str:
+    recommendation = str(value or "hold").strip().lower().replace("-", "_")
+    return recommendation if recommendation in {"select", "merge", "brief", "hold", "kill"} else "hold"
+
+
+def _reporting_context_packet_body(packet: dict[str, Any]) -> str:
+    lines = [
+        str(packet.get("summary") or "Reporting context packet"),
+        "",
+        f"Section: {packet.get('sectionKey') or 'unknown'}",
+        f"Editor recommendation: {packet.get('editorRecommendation') or 'hold'}",
+        f"Why now: {packet.get('whyNow') or ''}",
+        f"Recommended angle: {packet.get('recommendedAngle') or ''}",
+        f"Nut graf candidate: {packet.get('nutGrafCandidate') or ''}",
+        "",
+        "Copywriter brief:",
+        str(packet.get("copywriterBrief") or ""),
+    ]
+    lines.extend(_body_lines("Confirmed facts", packet.get("confirmedFacts")))
+    lines.extend(_body_lines("Accepted references", packet.get("acceptedReferenceIds")))
+    lines.extend(_body_lines("Verification needs", packet.get("verificationNeeds")))
+    lines.extend(_body_lines("Open questions", packet.get("openQuestions")))
+    return "\n".join(line for line in lines if line is not None)
+
+
+def _body_lines(label: str, values: Any) -> list[str]:
+    items = _jsonish_list(values or [])
+    if not items:
+        return []
+    return ["", f"{label}:"] + [f"- {item if isinstance(item, str) else json.dumps(item, sort_keys=True)}" for item in items]
 
 
 def _normalize_research_mode(value: Any) -> str:

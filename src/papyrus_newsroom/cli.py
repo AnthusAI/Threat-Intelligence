@@ -12,6 +12,9 @@ from .newsroom import (
     papyrus_search_semantic_nodes,
 )
 from .reference_curation_signals import (
+    reference_title_subtitle_batch,
+    reference_title_subtitle_enrich_catalog_file,
+    reference_title_subtitle_resolve,
     reference_quality_assess,
     reference_quality_assess_batch,
     reference_quality_get,
@@ -190,6 +193,62 @@ def main(argv: list[str] | None = None) -> int:
     quality_list_parser.add_argument("--rating", type=int)
     quality_list_parser.add_argument("--min-rating", type=int)
     quality_list_parser.add_argument("--limit", type=int, default=100)
+
+    title_subtitle_parser = references_subparsers.add_parser(
+        "title-subtitle",
+        help="Resolve and persist missing Reference titles/subtitles",
+    )
+    title_subtitle_subparsers = title_subtitle_parser.add_subparsers(dest="title_subtitle_command")
+
+    title_subtitle_resolve_parser = title_subtitle_subparsers.add_parser(
+        "resolve",
+        help="Resolve title/subtitle for one Reference",
+    )
+    title_subtitle_resolve_parser.add_argument("--reference", required=True)
+    title_subtitle_resolve_parser.add_argument("--model", default="gpt-5.4-mini")
+    title_subtitle_resolve_parser.add_argument("--web-search", default="true")
+    title_subtitle_resolve_parser.add_argument("--source-text", default="")
+    title_subtitle_resolve_parser.add_argument("--source-text-file", default="")
+    title_subtitle_resolve_parser.add_argument("--apply", action="store_true")
+    title_subtitle_resolve_parser.add_argument("--refresh", action="store_true")
+    title_subtitle_resolve_parser.add_argument("--summary", default="true")
+    title_subtitle_resolve_parser.add_argument("--summary-max-tokens", type=int, default=500)
+    title_subtitle_resolve_parser.add_argument("--refresh-summary", action="store_true")
+    title_subtitle_resolve_parser.add_argument("--persist-local-metadata", default="true")
+    title_subtitle_resolve_parser.add_argument("--vector-sync", default="true")
+
+    title_subtitle_batch_parser = title_subtitle_subparsers.add_parser(
+        "batch",
+        help="Resolve title/subtitle for a batch of References",
+    )
+    title_subtitle_batch_parser.add_argument("--corpus-key", required=True)
+    title_subtitle_batch_parser.add_argument("--status", default="all")
+    title_subtitle_batch_parser.add_argument("--max-count", type=int, default=10)
+    title_subtitle_batch_parser.add_argument("--model", default="gpt-5.4-mini")
+    title_subtitle_batch_parser.add_argument("--web-search", default="true")
+    title_subtitle_batch_parser.add_argument("--only-missing", default="true")
+    title_subtitle_batch_parser.add_argument("--scan-limit", type=int, default=1000)
+    title_subtitle_batch_parser.add_argument("--apply", action="store_true")
+    title_subtitle_batch_parser.add_argument("--refresh", action="store_true")
+    title_subtitle_batch_parser.add_argument("--summary", default="true")
+    title_subtitle_batch_parser.add_argument("--summary-max-tokens", type=int, default=500)
+    title_subtitle_batch_parser.add_argument("--refresh-summary", action="store_true")
+    title_subtitle_batch_parser.add_argument("--persist-local-metadata", default="true")
+    title_subtitle_batch_parser.add_argument("--vector-sync", default="true")
+
+    title_subtitle_catalog_parser = title_subtitle_subparsers.add_parser(
+        "enrich-catalog",
+        help="Enrich a reference intake catalog with title/subtitle fields",
+    )
+    title_subtitle_catalog_parser.add_argument("--catalog", required=True)
+    title_subtitle_catalog_parser.add_argument("--output", required=True)
+    title_subtitle_catalog_parser.add_argument("--model", default="gpt-5.4-mini")
+    title_subtitle_catalog_parser.add_argument("--web-search", default="true")
+    title_subtitle_catalog_parser.add_argument("--summary", default="true")
+    title_subtitle_catalog_parser.add_argument("--summary-max-tokens", type=int, default=500)
+    title_subtitle_catalog_parser.add_argument("--refresh-summary", action="store_true")
+    title_subtitle_catalog_parser.add_argument("--only-missing", default="true")
+    title_subtitle_catalog_parser.add_argument("--max-count", type=int, default=0)
     add_knowledge_query_parser(subparsers)
     add_knowledge_vector_index_parser(subparsers)
 
@@ -237,6 +296,8 @@ def main(argv: list[str] | None = None) -> int:
         }
     json.dump(payload, sys.stdout)
     sys.stdout.write("\n")
+    if isinstance(payload, dict) and payload.get("partialFailure"):
+        return 2
     return 0
 
 
@@ -316,6 +377,51 @@ def _run_references_command(args: argparse.Namespace) -> dict:
                 rating=args.rating,
                 min_rating=args.min_rating,
                 limit=args.limit,
+            )
+    if args.references_command == "title-subtitle":
+        if args.title_subtitle_command == "resolve":
+            return reference_title_subtitle_resolve(
+                reference_id=args.reference,
+                model=args.model,
+                apply=args.apply,
+                refresh=args.refresh,
+                summary=_parse_bool(args.summary),
+                summary_max_tokens=args.summary_max_tokens,
+                refresh_summary=args.refresh_summary,
+                web_search=_parse_bool(args.web_search),
+                persist_local_metadata=_parse_bool(args.persist_local_metadata),
+                vector_sync=_parse_bool(args.vector_sync),
+                source_text=args.source_text,
+                source_text_file=args.source_text_file,
+            )
+        if args.title_subtitle_command == "batch":
+            return reference_title_subtitle_batch(
+                corpus_key=args.corpus_key,
+                max_count=args.max_count,
+                status=args.status,
+                model=args.model,
+                apply=args.apply,
+                refresh=args.refresh,
+                summary=_parse_bool(args.summary),
+                summary_max_tokens=args.summary_max_tokens,
+                refresh_summary=args.refresh_summary,
+                only_missing=_parse_bool(args.only_missing),
+                web_search=_parse_bool(args.web_search),
+                persist_local_metadata=_parse_bool(args.persist_local_metadata),
+                vector_sync=_parse_bool(args.vector_sync),
+                scan_limit=args.scan_limit,
+            )
+        if args.title_subtitle_command == "enrich-catalog":
+            return reference_title_subtitle_enrich_catalog_file(
+                catalog_path=args.catalog,
+                output_path=args.output,
+                model=args.model,
+                web_search=_parse_bool(args.web_search),
+                summary=_parse_bool(args.summary),
+                summary_max_tokens=args.summary_max_tokens,
+                refresh_summary=args.refresh_summary,
+                only_missing=_parse_bool(args.only_missing),
+                max_count=args.max_count,
             )
     raise SystemExit("Missing or unsupported references subcommand.")
 

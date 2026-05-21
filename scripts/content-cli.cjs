@@ -2,10 +2,13 @@
 
 const crypto = require("node:crypto");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const zlib = require("node:zlib");
 const { spawn, spawnSync } = require("node:child_process");
 const YAML = require("yaml");
+
+const PROJECT_ROOT = path.resolve(__dirname, "..");
 
 const {
   decodeJwtClaims,
@@ -61,6 +64,7 @@ const {
   loadNewsroomSectionSeeds,
 } = require("./lib/papyrus-newsroom-sections.cjs");
 const {
+  REPORTING_EDITION_ASSIGNMENT_TYPE,
   applyEditionPlanningPlan,
   buildEditionPlanningPlan,
   loadEditionPlanningState,
@@ -403,6 +407,9 @@ async function main() {
       return;
     case "editions:dispatch-research":
       await dispatchEditionResearch(args.slice(2));
+      return;
+    case "editions:dispatch-reporting":
+      await dispatchEditionReporting(args.slice(2));
       return;
     default:
       printUsage();
@@ -1119,6 +1126,7 @@ async function registerReferenceCatalog(flags) {
     ingestionRationale: options["ingestion-rationale"] ?? options.ingestionRationale,
     actor: options.actor ?? "Papyrus content CLI",
     skipExisting: options["skip-existing"],
+    apply: Boolean(options.apply),
     quiet: Boolean(options.json),
   });
   printReferenceRegistrationSummary(result.plan, result.changes, { apply: Boolean(options.apply) });
@@ -1126,15 +1134,28 @@ async function registerReferenceCatalog(flags) {
     console.log("references\tregister-catalog\tapply\tskipped\tpass --apply to write Reference visibility records");
     return;
   }
-  await applyReferenceCatalogRegistration(client, result);
+  const vectorSync = await applyReferenceCatalogRegistration(client, result);
+  for (const line of vectorSync.lines || []) console.log(line);
 }
 
 async function planReferenceCatalogRegistration(client, options) {
+  const startedAt = Date.now();
   const status = normalizeReferenceCurationStatus(options.status, "pending");
   const reasonCode = normalizeReferenceRejectionReasonCode(options.reasonCode, { required: status === "rejected" });
+  const targetedRegistration = Boolean(options.targeted);
+  const diagnostics = {
+    registrationMode: targetedRegistration ? "targeted" : "scan",
+    fetchedByModel: {},
+    elapsedMs: 0,
+  };
   const steeringConfig = loadSteeringConfig({ configPath: options.configPath });
   const corpusConfig = requireCorpusConfig(steeringConfig, options.corpusKey, "--corpus-key");
-  const sourceCatalog = options.catalog ?? loadJsonFile(options.catalogPath);
+  const sourceCatalog = await maybeEnrichReferenceCatalogTitleSubtitle({
+    catalog: options.catalog ?? loadJsonFile(options.catalogPath),
+    catalogPath: options.catalogPath,
+    options,
+    persist: Boolean(options.apply && options.catalogPath),
+  });
   const catalog = {
     ...sourceCatalog,
     items: [...catalogItemsForSummary(sourceCatalog)],
@@ -1151,11 +1172,14 @@ async function planReferenceCatalogRegistration(client, options) {
   };
 
   let skippedDuplicateCount = 0;
-  const skipExisting = options.skipExisting === undefined
+  const skipExisting = targetedRegistration
+    ? false
+    : options.skipExisting === undefined
     ? true
     : String(options.skipExisting).toLowerCase() !== "false";
   if (skipExisting) {
     const existingReferences = await client.listRecords("Reference");
+    diagnostics.fetchedByModel.Reference = existingReferences.length;
     const existingExternalIds = new Set(
       existingReferences
         .filter((ref) => ref.corpusId === planOptions.corpusId)
@@ -1195,7 +1219,13 @@ async function planReferenceCatalogRegistration(client, options) {
     }
   }
   assertReferenceCatalogPlanSafety(plan);
-  const changes = await buildRecordChangesToleratingOptionalModels(client, plan.records);
+  const changes = targetedRegistration
+    ? await buildRecordChangesTargetedByIdToleratingOptionalModels(client, plan.records, {
+      prepareVersioned: false,
+      diagnostics,
+    })
+    : await buildRecordChangesToleratingOptionalModels(client, plan.records);
+  diagnostics.elapsedMs = Date.now() - startedAt;
   return {
     plan,
     changes,
@@ -1204,12 +1234,129 @@ async function planReferenceCatalogRegistration(client, options) {
     status,
     reasonCode,
     skippedDuplicateCount,
+    diagnostics,
+    options,
   };
 }
 
 async function applyReferenceCatalogRegistration(client, result) {
   await applyRecordChanges(client, result.changes);
-  await updateNewsroomSummaryAfterReferenceRegistration(client, result.changes, result.plan);
+  if (result.changes.some((record) => record.action !== "noop")) {
+    await updateNewsroomSummaryAfterReferenceRegistration(client, result.changes, result.plan);
+  }
+  return syncReferenceVectorsAfterRegistration(result, { options: result.options ?? {} });
+}
+
+function changedReferenceIdsFromChanges(changes = []) {
+  return Array.from(new Set(
+    (changes || [])
+      .filter((change) => change?.modelName === "Reference")
+      .filter((change) => change.action === "create" || change.action === "update")
+      .map((change) => change.expected?.lineageId || change.expected?.id)
+      .filter(Boolean),
+  ));
+}
+
+function chunkValues(values, size) {
+  const chunks = [];
+  for (let index = 0; index < values.length; index += size) chunks.push(values.slice(index, index + size));
+  return chunks;
+}
+
+function syncReferenceVectorsAfterRegistration(result, { options = {} } = {}) {
+  const vectorSyncEnabled = parseBooleanOption(options["vector-sync"], true, "--vector-sync");
+  const referenceIds = changedReferenceIdsFromChanges(result?.changes);
+  const lines = [];
+  if (!vectorSyncEnabled) {
+    const payload = {
+      requested: referenceIds.length,
+      synced: 0,
+      skipped: referenceIds.length,
+      failed: 0,
+      skippedReason: "vector_sync_disabled",
+      results: [],
+    };
+    lines.push("references\tvector-sync\tdisabled");
+    return { payload, lines };
+  }
+  if (!referenceIds.length) {
+    const payload = {
+      requested: 0,
+      synced: 0,
+      skipped: 0,
+      failed: 0,
+      skippedReason: "no_graphql_reference_changes",
+      results: [],
+    };
+    lines.push("references\tvector-sync\tskipped\tno GraphQL Reference changes");
+    return { payload, lines };
+  }
+  const batches = chunkValues(referenceIds, 100);
+  const payload = {
+    requested: referenceIds.length,
+    synced: 0,
+    skipped: 0,
+    failed: 0,
+    results: [],
+  };
+  for (const batch of batches) {
+    const args = [
+      "run",
+      "papyrus-newsroom",
+      "knowledge-vector-index",
+      "--action",
+      "sync",
+      "--force",
+      "--progress-every",
+      "0",
+    ];
+    for (const referenceId of batch) args.push("--reference-id", referenceId);
+    const run = spawnSync("poetry", args, {
+      cwd: PROJECT_ROOT,
+      encoding: "utf8",
+      env: process.env,
+    });
+    let stdoutPayload = null;
+    if (run.stdout && run.stdout.trim()) {
+      try {
+        stdoutPayload = JSON.parse(run.stdout);
+      } catch {
+        stdoutPayload = null;
+      }
+    }
+    if (run.status !== 0) {
+      const nextSuggestedCommand = `poetry run papyrus-newsroom knowledge-vector-index --action sync --force --progress-every 0 ${batch.map((referenceId) => `--reference-id ${referenceId}`).join(" ")}`.trim();
+      const errorMessage = stdoutPayload?.message
+        || run.stderr?.trim()
+        || run.stdout?.trim()
+        || "Unknown vector sync failure";
+      payload.failed += batch.length;
+      payload.results.push({
+        referenceIds: batch,
+        failed: true,
+        message: errorMessage,
+        nextSuggestedCommand,
+      });
+      lines.push(`references\tvector-sync\tfailed\t${batch.length}\t${errorMessage}`);
+      lines.push(`references\tvector-sync\tnext\t${nextSuggestedCommand}`);
+      const error = new Error(`Reference registration updated local/GraphQL state but vector sync failed. Retry with: ${nextSuggestedCommand}. ${errorMessage}`);
+      error.vectorSync = payload;
+      throw error;
+    }
+    const referenceResults = Array.isArray(stdoutPayload?.referenceResults) ? stdoutPayload.referenceResults : [];
+    const indexed = referenceResults.filter((entry) => entry?.status === "indexed").length;
+    const skipped = Math.max(batch.length - indexed, 0);
+    payload.synced += indexed;
+    payload.skipped += skipped;
+    payload.results.push({
+      referenceIds: batch,
+      synced: indexed,
+      skipped,
+      payload: stdoutPayload,
+    });
+    lines.push(`references\tvector-sync\tsynced\t${indexed}\tskipped\t${skipped}`);
+  }
+  return { payload, lines };
 }
 
 function inferReferenceCorpusBucket(item) {
@@ -1255,7 +1402,12 @@ async function registerReferenceCatalogSplit(flags) {
   const newsCorpusKey = options["news-corpus-key"] ?? "AI-ML-journalism";
   const status = normalizeReferenceCurationStatus(options.status, "pending");
   const reasonCode = normalizeReferenceRejectionReasonCode(options["reason-code"] ?? options.reasonCode, { required: status === "rejected" });
-  const catalog = loadJsonFile(options.catalog);
+  const catalog = await maybeEnrichReferenceCatalogTitleSubtitle({
+    catalog: loadJsonFile(options.catalog),
+    catalogPath: options.catalog,
+    options,
+    persist: Boolean(options.apply),
+  });
   const items = catalogItemsForSummary(catalog);
   const researchItems = [];
   const newsItems = [];
@@ -1352,6 +1504,8 @@ async function registerReferenceCatalogSplit(flags) {
     if (!apply) continue;
     await applyRecordChanges(client, changes);
     await updateNewsroomSummaryAfterReferenceRegistration(client, changes, entry.plan);
+    const vectorSync = syncReferenceVectorsAfterRegistration({ changes, options });
+    for (const line of vectorSync.lines || []) console.log(line);
   }
 }
 
@@ -1457,7 +1611,12 @@ async function prepareReferenceCatalog(flags) {
   if (!options["corpus-key"]) throw new Error("references prepare-catalog requires --corpus-key <key>.");
   const steeringConfig = loadSteeringConfig({ configPath: options.config });
   const corpusConfig = requireCorpusConfig(steeringConfig, options["corpus-key"], "--corpus-key");
-  const catalog = loadJsonFile(options.catalog);
+  const catalog = await maybeEnrichReferenceCatalogTitleSubtitle({
+    catalog: loadJsonFile(options.catalog),
+    catalogPath: options.catalog,
+    options,
+    persist: false,
+  });
   const prepared = buildPreparedReferenceCatalog(catalog, {
     corpusConfig,
     corpusKey: options["corpus-key"],
@@ -1468,6 +1627,56 @@ async function prepareReferenceCatalog(flags) {
   const items = catalogItemsForSummary(prepared);
   const rationaleCount = items.filter((item) => item.ingestion_rationale || item.ingestionRationale || item.metadata?.ingestion_rationale || item.metadata?.ingestionRationale).length;
   console.log(`references\tprepare-catalog\t${options["corpus-key"]}\t${options.output}\t${items.length} items\t${rationaleCount} rationales`);
+}
+
+async function maybeEnrichReferenceCatalogTitleSubtitle({ catalog, catalogPath = null, options = {}, persist = false }) {
+  if (parseBooleanOption(options["title-subtitle-enrichment"], true, "--title-subtitle-enrichment") === false) {
+    return catalog;
+  }
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "papyrus-title-subtitle-"));
+  const inputPath = path.join(tempDir, "catalog-input.json");
+  const outputPath = path.join(tempDir, "catalog-output.json");
+  fs.writeFileSync(inputPath, `${JSON.stringify(catalog ?? {}, null, 2)}\n`, "utf8");
+  const webSearch = parseBooleanOption(options["title-subtitle-web-search"], true, "--title-subtitle-web-search");
+  const onlyMissing = parseBooleanOption(options["title-subtitle-only-missing"], true, "--title-subtitle-only-missing");
+  const model = normalizeCliString(options["title-subtitle-model"]) ?? "gpt-5.4-mini";
+  const maxCount = normalizeCliNonNegativeInteger(options["title-subtitle-max-count"], "--title-subtitle-max-count") ?? 0;
+  const args = [
+    "run",
+    "papyrus-newsroom",
+    "references",
+    "title-subtitle",
+    "enrich-catalog",
+    "--catalog",
+    inputPath,
+    "--output",
+    outputPath,
+    "--model",
+    model,
+    "--web-search",
+    String(webSearch),
+    "--only-missing",
+    String(onlyMissing),
+  ];
+  if (maxCount) args.push("--max-count", String(maxCount));
+  const result = spawnSync("poetry", args, {
+    cwd: PROJECT_ROOT,
+    encoding: "utf8",
+    env: process.env,
+  });
+  if (result.status !== 0) {
+    throw new Error(`Reference title/subtitle enrichment failed: ${result.stderr || result.stdout}`);
+  }
+  const summary = JSON.parse(result.stdout || "{}");
+  if (summary.updated || summary.unresolved) {
+    console.error(`references\ttitle-subtitle-enrichment\tupdated=${summary.updated ?? 0}\tunresolved=${summary.unresolved ?? 0}\tnoop=${summary.noop ?? 0}\tweb=${webSearch}`);
+  }
+  const enriched = loadJsonFile(outputPath);
+  if (persist && catalogPath) {
+    writeJsonFile(catalogPath, enriched);
+    console.error(`references\ttitle-subtitle-enrichment\tpersisted\t${catalogPath}`);
+  }
+  return enriched;
 }
 
 async function referenceSourceStatus(flags) {
@@ -3414,6 +3623,8 @@ async function runResearchIntakeNow(flags) {
       registeredReferenceCount: 0,
       skippedDuplicateCount: 0,
       curationAssignmentCount: 0,
+      references: [],
+      diagnostics: null,
       next: researchRun.payload?.next ?? `Inspect .papyrus-runs/${runId}-research`,
     };
     if (asJson) {
@@ -3458,6 +3669,8 @@ async function runResearchIntakeNow(flags) {
         registeredReferenceCount: 0,
         skippedDuplicateCount: 0,
         curationAssignmentCount: 0,
+        references: [],
+        diagnostics: null,
         next: `Inspect ${resultPath}`,
       };
       if (asJson) {
@@ -3517,6 +3730,8 @@ async function runResearchIntakeNow(flags) {
     skippedDuplicateCount: intakeResult.skippedDuplicateCount,
     curationAssignmentCount: intakeResult.curationAssignmentCount,
     importRunId: intakeResult.importRunId,
+    references: intakeResult.references ?? [],
+    diagnostics: intakeResult.diagnostics ?? null,
     blockedReason: intakeResult.blockedReason,
     next: intakeResult.next,
   };
@@ -3574,12 +3789,16 @@ function extractLastJsonObject(text) {
 function printResearchIntakeNowSummary(result) {
   console.log(`assignments\tresearch-intake-now\taction\t${result.action}`);
   console.log(`assignments\tresearch-intake-now\tassignment\t${result.assignmentId}`);
+  console.log(`assignments\tresearch-intake-now\tphase\tpacket-selected`);
   if (result.messageId) console.log(`assignments\tresearch-intake-now\tmessage\t${result.messageId}`);
+  console.log(`assignments\tresearch-intake-now\tphase\tproposals-extracted`);
   if (result.catalogPath) console.log(`assignments\tresearch-intake-now\tcatalog\t${result.catalogPath}`);
   console.log(`assignments\tresearch-intake-now\tproposals\t${result.proposedReferenceCount}`);
+  console.log(`assignments\tresearch-intake-now\tphase\treferences-registered`);
   console.log(`assignments\tresearch-intake-now\tregistered\t${result.registeredReferenceCount}`);
   console.log(`assignments\tresearch-intake-now\tskipped-duplicates\t${result.skippedDuplicateCount}`);
   console.log(`assignments\tresearch-intake-now\tcuration-assignments\t${result.curationAssignmentCount}`);
+  printResearchIntakeReferenceRows("research-intake-now", result.references);
   if (result.blockedReason) console.log(`assignments\tresearch-intake-now\tblocked\t${result.blockedReason}`);
   if (result.next) console.log(`assignments\tresearch-intake-now\tnext\t${result.next}`);
 }
@@ -4305,6 +4524,12 @@ async function planResearchPacketProposalIntake({ client, assignment, message, p
       skippedDuplicateCount: 0,
       curationAssignmentCount: 0,
       importRunId: null,
+      references: [],
+      diagnostics: {
+        registrationMode: "targeted",
+        fetchedByModel: {},
+        elapsedMs: 0,
+      },
       blockedReason: blockedReason ?? null,
       next: blockedReason
         ? `Review blocked reason on research packet ${message?.id ?? "<dry-run>"}`
@@ -4321,10 +4546,12 @@ async function planResearchPacketProposalIntake({ client, assignment, message, p
     note,
     actor,
     quiet: true,
+    targeted: true,
   });
   if (apply) {
     await applyReferenceCatalogRegistration(client, registration);
   }
+  const references = researchProposalIntakeReferenceRows(registration.changes);
   const changedReferences = registration.changes.filter((change) => change.modelName === "Reference" && change.action !== "noop").length;
   const changedAssignments = registration.changes.filter((change) => change.modelName === "Assignment" && change.action !== "noop").length;
   const duplicateNoopReferences = registration.changes.filter((change) => change.modelName === "Reference" && change.action === "noop").length;
@@ -4342,6 +4569,8 @@ async function planResearchPacketProposalIntake({ client, assignment, message, p
     skippedDuplicateCount,
     curationAssignmentCount: changedAssignments,
     importRunId: registration.plan.importRunId,
+    references,
+    diagnostics: registration.diagnostics,
     blockedReason: blockedReason ?? null,
     next: `npm run content -- references source-status --config ${configPath} --corpus-key ${corpusKey} --status ${normalizeReferenceCurationStatus(status, "pending")}`,
   };
@@ -4366,7 +4595,7 @@ function buildResearchProposalCatalogItems(proposals, { assignment, message, pac
     const url = normalizeProposalUrl(proposal.url ?? proposal.source_uri ?? proposal.sourceUri ?? proposal.uri);
     if (!url) return null;
     const sourceDomain = normalizeCliString(proposal.source_domain ?? proposal.sourceDomain) ?? domainFromUrl(url);
-    const title = normalizeCliString(proposal.title ?? proposal.name) ?? url;
+    const title = normalizeCliString(proposal.title ?? proposal.name) ?? null;
     const evidenceCandidateId = normalizeCliString(proposal.evidence_candidate_id ?? proposal.evidenceCandidateId ?? proposal.id);
     const itemId = `research-proposal-${hashShort(url)}`;
     const ingestionRationale = normalizeCliString(
@@ -4418,6 +4647,56 @@ function normalizeProposalUrl(value) {
   }
 }
 
+function researchProposalIntakeReferenceRows(changes) {
+  const recordsForModel = (modelName) => changes
+    .filter((change) => change.modelName === modelName)
+    .map((change) => ({ change, record: change.expected ?? change.current }))
+    .filter((entry) => entry.record);
+  const attachmentRecords = recordsForModel("ReferenceAttachment").map((entry) => entry.record);
+  const attachmentsByReference = new Map();
+  for (const attachment of attachmentRecords) {
+    const referenceId = normalizeCliString(attachment.referenceId);
+    if (!referenceId) continue;
+    if (!attachmentsByReference.has(referenceId)) attachmentsByReference.set(referenceId, []);
+    attachmentsByReference.get(referenceId).push(attachment);
+  }
+  const curationAssignmentByReference = new Map();
+  for (const { record: relation } of recordsForModel("SemanticRelation")) {
+    const relationType = normalizeCliString(relation.relationTypeKey ?? relation.predicate);
+    if (relationType !== "requests_work_on") continue;
+    if (relation.subjectKind !== "assignment" || relation.objectKind !== "reference") continue;
+    const referenceId = normalizeCliString(relation.objectId);
+    const assignmentId = normalizeCliString(relation.subjectId);
+    if (referenceId && assignmentId) curationAssignmentByReference.set(referenceId, assignmentId);
+  }
+  return recordsForModel("Reference")
+    .map(({ change, record: reference }) => {
+      const attachments = attachmentsByReference.get(reference.id) ?? [];
+      const readiness = referenceSourceReadiness(reference, attachments);
+      const row = {
+        reference,
+        readiness,
+        state: readiness.state,
+      };
+      return {
+        referenceId: reference.id,
+        externalItemId: reference.externalItemId ?? null,
+        title: reference.title ?? null,
+        url: reference.sourceUri ?? null,
+        sourceDomain: domainFromUrl(reference.sourceUri) ?? null,
+        status: reference.curationStatus ?? null,
+        sourceReadiness: readiness.state,
+        curationAssignmentId: curationAssignmentByReference.get(reference.id) ?? null,
+        action: change.action,
+        next: nextReferenceSourceCommand(row),
+      };
+    })
+    .sort((left, right) => (
+      String(left.url ?? "").localeCompare(String(right.url ?? ""))
+      || String(left.referenceId).localeCompare(String(right.referenceId))
+    ));
+}
+
 function domainFromUrl(value) {
   try {
     return new URL(value).hostname.toLowerCase();
@@ -4429,15 +4708,41 @@ function domainFromUrl(value) {
 function printResearchProposalIntakeSummary(result) {
   console.log(`assignments\tintake-proposals\taction\t${result.action}`);
   console.log(`assignments\tintake-proposals\tassignment\t${result.assignmentId}`);
+  console.log(`assignments\tintake-proposals\tphase\tpacket-selected`);
   console.log(`assignments\tintake-proposals\tmessage\t${result.messageId ?? ""}`);
+  console.log(`assignments\tintake-proposals\tphase\tproposals-extracted`);
   console.log(`assignments\tintake-proposals\tcatalog\t${result.catalogPath}`);
   console.log(`assignments\tintake-proposals\tproposals\t${result.proposedReferenceCount}`);
   console.log(`assignments\tintake-proposals\tdeduped\t${result.dedupedProposalCount}`);
+  console.log(`assignments\tintake-proposals\tphase\treferences-registered`);
   console.log(`assignments\tintake-proposals\tregistered\t${result.registeredReferenceCount}`);
   console.log(`assignments\tintake-proposals\tskipped-duplicates\t${result.skippedDuplicateCount}`);
   console.log(`assignments\tintake-proposals\tcuration-assignments\t${result.curationAssignmentCount}`);
+  printResearchIntakeReferenceRows("intake-proposals", result.references);
   if (result.blockedReason) console.log(`assignments\tintake-proposals\tblocked\t${result.blockedReason}`);
   if (result.next) console.log(`assignments\tintake-proposals\tnext\t${result.next}`);
+}
+
+function printResearchIntakeReferenceRows(commandSuffix, references = []) {
+  const rows = Array.isArray(references) ? references : [];
+  const limit = 25;
+  for (const reference of rows.slice(0, limit)) {
+    console.log([
+      "assignments",
+      commandSuffix,
+      "reference",
+      reference.action ?? "-",
+      reference.status ?? "-",
+      reference.sourceReadiness ?? "-",
+      reference.referenceId ?? "-",
+      reference.curationAssignmentId ?? "-",
+      reference.url ?? "-",
+      reference.title ?? "-",
+    ].join("\t"));
+  }
+  if (rows.length > limit) {
+    console.log(`assignments\t${commandSuffix}\treferences-omitted\t${rows.length - limit}`);
+  }
 }
 
 function normalizeProposalIntakeStatus(value) {
@@ -4585,6 +4890,42 @@ async function dispatchEditionResearch(flags) {
   if (verification.failures.length) {
     for (const failure of verification.failures) console.log(`failure\t${failure}`);
     throw new Error("Edition planning verification failed.");
+  }
+}
+
+async function dispatchEditionReporting(flags) {
+  const options = parseOptions(flags);
+  options["assignment-type"] = "reporting";
+  const dryRunOnly = !options.apply;
+  const { client, plan, report } = await buildEditionPlanningCommandPlan(options);
+  if (dryRunOnly) {
+    printEditionPlanningSummary(plan, report, "dry-run");
+    console.log("edition-planning\tapply\tskipped\tpass --apply to write reporting Assignment and SemanticRelation records");
+    return;
+  }
+
+  const applyResult = await applyEditionPlanningPlan(client, plan);
+  const refreshedState = await loadEditionPlanningState(client);
+  const verification = verifyEditionPlanningPlan(refreshedState, plan);
+  const applyReport = writeEditionPlanningReport(plan, {
+    mode: "apply",
+    plan,
+    applyResult,
+    verification,
+  }, {
+    outputDir: report.outputDir,
+    filename: "dispatch-reporting-report.json",
+  });
+  writeEditionPlanningReport(plan, verification, {
+    outputDir: report.outputDir,
+    filename: "reporting-verification.json",
+  });
+  printEditionPlanningSummary(plan, applyReport, "apply");
+  console.log(`edition-planning\tapplied\t${applyResult.applied}`);
+  console.log(`edition-planning\tverification\t${verification.ok ? "ok" : "failed"}`);
+  if (verification.failures.length) {
+    for (const failure of verification.failures) console.log(`failure\t${failure}`);
+    throw new Error("Reporting edition planning verification failed.");
   }
 }
 
@@ -8424,12 +8765,15 @@ async function buildEditionPlanningCommandPlan(options) {
   const plan = buildEditionPlanningPlan(state, {
     editionDate,
     editionSlug: options.slug,
+    assignmentTypeKey: options["assignment-type"] === "reporting" ? REPORTING_EDITION_ASSIGNMENT_TYPE : options["assignment-type"],
     topDeskCount: options["top-desks"],
     publicationSlots: options.slots,
     overassignmentRatio: options.ratio,
     maxAssignments: options["max-assignments"],
+    rotatingSectionCount: options["rotating-sections"],
     focusCategories: parseCommaList(options["focus-categories"] ?? options["track-lenses"]),
     sectionTargets: parseCommaList(options["section-targets"]),
+    sectionBudgets: parseCommaList(options["section-budgets"]),
     contextProfile: options["context-profile"],
     targetSystemType: options["target-system-type"],
   });
@@ -9016,15 +9360,20 @@ async function buildRecordChangesToleratingOptionalModels(client, records) {
 async function buildRecordChangesTargetedById(client, records, options = {}) {
   const skippedModels = options.skippedModels instanceof Set ? options.skippedModels : new Set();
   const skipModelAttachments = skippedModels.has("ModelAttachment");
+  const shouldPrepareVersioned = options.prepareVersioned !== false;
   console.error(`prepare-targeted\trecords\t${records.length}`);
-  const prepared = await prepareVersionedKnowledgeRecords(client, records);
+  const prepared = shouldPrepareVersioned
+    ? await prepareVersionedKnowledgeRecords(client, records)
+    : { records, postChanges: [] };
   const indexedRecords = prepared.records.map(normalizeOperationalIndexRecord);
   const expandedRecords = expandPrivatePayloadRecords(indexedRecords, {
     skipModelAttachments,
   });
   const plannedRecords = dedupePlannedRecords(expandedRecords);
   const filteredPlanned = plannedRecords.filter((record) => !skippedModels.has(record.modelName));
-  const existingByModel = await getExistingRecordsByPlannedId(client, filteredPlanned);
+  const existingByModel = await getExistingRecordsByPlannedId(client, filteredPlanned, {
+    diagnostics: options.diagnostics,
+  });
   const changes = [];
   for (const record of filteredPlanned) {
     const change = buildRecordChangeFromCurrent(
@@ -9040,12 +9389,15 @@ async function buildRecordChangesTargetedById(client, records, options = {}) {
   return changes;
 }
 
-async function buildRecordChangesTargetedByIdToleratingOptionalModels(client, records) {
+async function buildRecordChangesTargetedByIdToleratingOptionalModels(client, records, options = {}) {
   let pendingRecords = records;
   const skippedModels = new Set();
   for (;;) {
     try {
-      return await buildRecordChangesTargetedById(client, pendingRecords, { skippedModels });
+      return await buildRecordChangesTargetedById(client, pendingRecords, {
+        ...options,
+        skippedModels,
+      });
     } catch (error) {
       const missingModel = Array.from(OPTIONAL_SCHEMA_MODELS)
         .find((modelName) => !skippedModels.has(modelName) && isMissingGraphQLModelError(error, modelName));
@@ -9057,7 +9409,7 @@ async function buildRecordChangesTargetedByIdToleratingOptionalModels(client, re
   }
 }
 
-async function getExistingRecordsByPlannedId(client, records) {
+async function getExistingRecordsByPlannedId(client, records, options = {}) {
   const idsByModel = new Map();
   for (const record of records) {
     const id = normalizeCliString(record.expected?.id);
@@ -9071,6 +9423,9 @@ async function getExistingRecordsByPlannedId(client, records) {
     const uniqueIds = Array.from(new Set(ids));
     console.error(`targeted-prefetch\t${modelName}\t${uniqueIds.length}`);
     const results = await client.getRecordsById(modelName, uniqueIds);
+    if (options.diagnostics?.fetchedByModel) {
+      options.diagnostics.fetchedByModel[modelName] = (options.diagnostics.fetchedByModel[modelName] ?? 0) + uniqueIds.length;
+    }
     existingByModel.set(modelName, results);
   }
   return existingByModel;
@@ -9901,7 +10256,7 @@ async function updateNewsroomSummaryAfterReferenceRegistration(client, changes, 
     actorLabel: "Papyrus content CLI",
     reason: `references register-catalog ${plan.importRunId}`,
   });
-  console.log(`newsroom\tsummary-snapshot\tincremental\t${created.length} created records`);
+  console.error(`newsroom\tsummary-snapshot\tincremental\t${created.length} created records`);
 }
 
 async function updateNewsroomSummaryAfterAssignmentCreates(client, changes, { actorLabel = "Papyrus content CLI", reason = "assignment create" } = {}) {
@@ -12441,14 +12796,17 @@ function printUsage() {
   console.log("  npm run content -- newsroom backfill-feed-fields --apply");
   console.log("  npm run content -- newsroom import-sections --config corpora/papyrus-newsroom-sections.yml");
   console.log("  npm run content -- editions plan --date YYYY-MM-DD --section-targets desk.key:news,other.desk:history --dry-run");
+  console.log("  npm run content -- editions plan --date YYYY-MM-DD --assignment-type reporting --section-budgets news:2,business:1 --rotating-sections 2 --dry-run");
   console.log("  npm run content -- editions plan --date YYYY-MM-DD --focus-categories automated-publication-systems,agentic-workflows --section-targets automated-publication-systems:methods,agentic-workflows:technology --context-profile analysis --dry-run");
   console.log("  npm run content -- editions dispatch-research --date YYYY-MM-DD --section-targets desk.key:news --apply");
+  console.log("  npm run content -- editions dispatch-reporting --date YYYY-MM-DD --section-budgets news:2,business:1 --rotating-sections 2 --apply");
   console.log("  npm run content -- editions dispatch-research --date YYYY-MM-DD --focus-categories agentic-workflows,evaluation-qa --section-targets agentic-workflows:technology,evaluation-qa:methods --context-profile reporting --apply");
 }
 
 function printEditionPlanningSummary(plan, report, mode) {
   console.log(`edition-planning\tmode\t${mode}`);
   console.log(`edition-planning\tedition\t${plan.edition.id}\t${plan.edition.slug}\t${plan.edition.status}`);
+  console.log(`edition-planning\tassignment-type\t${plan.summary.assignmentTypeKey}`);
   console.log(`edition-planning\tcategory-set\t${plan.categorySet.id}\t${plan.categorySet.displayName}`);
   console.log(`edition-planning\tdesks\t${plan.desks.length}`);
   console.log(`edition-planning\tsections\t${(plan.sections ?? []).join(",") || "none"}`);
@@ -12456,6 +12814,9 @@ function printEditionPlanningSummary(plan, report, mode) {
   console.log(`edition-planning\tcontext-backed\t${plan.summary.contextBackedAssignmentCount}`);
   console.log(`edition-planning\trecords\tcreate=${plan.summary.createCount}\tupdate=${plan.summary.updateCount}\tnoop=${plan.summary.noopCount}`);
   console.log(`edition-planning\treport\t${report.filepath}`);
+  for (const budget of plan.summary.sectionBudgets || []) {
+    console.log(`section-budget\t${budget.section.id}\tslots=${budget.slots}\ttype=${budget.section.type}`);
+  }
   for (const coverage of plan.focusCoverage || []) {
     console.log(`focus-coverage\t${coverage.deskCategoryKey}\t${coverage.laneKey}\t${coverage.focusCategoryKey}\t${coverage.count}`);
   }

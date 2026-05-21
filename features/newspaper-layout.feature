@@ -164,6 +164,25 @@ Feature: Newspaper layout scenarios
     Then the newsroom should render
     And the newsroom should show the knowledge overview
 
+  Scenario: Newsroom renders the body while the summary is still loading
+    Given I am a test editor reader
+    And the newsroom summary is delayed by 5000 milliseconds
+    And I open the edition path "/newsroom" at 1280 by 900
+    Then the newsroom should show the knowledge overview
+    And the newsroom should not show an editor access gate
+    And the newsroom aggregate counts should remain blank while the summary is loading
+    And no browser console errors should occur
+
+  Scenario: Newsroom degrades a missing summary to question marks
+    Given I am a test editor reader
+    And the newsroom summary is unavailable
+    And I open the edition path "/newsroom" at 1280 by 900
+    Then the newsroom should show the knowledge overview
+    And the newsroom should not show an editor access gate
+    And the newsroom aggregate counts should show question marks
+    And the newsroom should not show a summary error banner
+    And no browser console errors should occur
+
   Scenario Outline: Newsroom overview newspaper sections stay readable
     Given I open the newsroom at <width> by <height>
     Then the newsroom overview should show newspaper sections
@@ -175,9 +194,18 @@ Feature: Newspaper layout scenarios
       | 1280  | 900    |
       | 390   | 900    |
 
+  Scenario: Newsroom overview headers follow the vertical rhythm at three columns
+    Given I am a test editor reader
+    And the newsroom summary is unavailable
+    And I open the edition path "/newsroom" at 780 by 1200
+    Then the newsroom should show the knowledge overview
+    And newsroom overview section headers should follow the vertical rhythm
+    And no browser console errors should occur
+
   Scenario: Newsroom overview shows configured section rail
     Given I open the newsroom at 1280 by 900
     Then the newsroom section rail should show canonical sections in rank order
+    And the newsroom section rail should keep canonical sections after 2500 milliseconds
     And the newsroom rotating expander should be collapsed by default
     When I open the newsroom rotating expander
     Then the newsroom rotating expander should be expanded
@@ -189,6 +217,7 @@ Feature: Newspaper layout scenarios
   Scenario: Deep newsroom section pages omit operational tabs
     Given I open the edition path "/newsroom/sections/news?demo=1" at 1280 by 900
     Then the deep newsroom section page should show "News"
+    And the deep newsroom section page should still show "News" after 2500 milliseconds
     And the deep newsroom section page should omit operational tabs
     And no browser console errors should occur
 
@@ -231,7 +260,11 @@ Feature: Newspaper layout scenarios
     Then the newsroom card grid should render for "<section>"
     And newsroom cards should not overlap or clip
     When I open the first newsroom card detail
+    Then the initial newsroom detail open should not animate card resizing
     Then the newsroom card grid should scale to the split width
+    When I select a different newsroom card
+    Then newsroom card selection should keep grid geometry stable
+    And newsroom card selection should not animate card resizing
     And no browser console errors should occur
 
     Examples:
@@ -240,13 +273,21 @@ Feature: Newspaper layout scenarios
       | references  | 1280  | 900    |
       | assignments | 1280  | 900    |
 
-  Scenario: Newsroom assignment cards animate selected span changes
+  Scenario: Newsroom reference-curation message detail uses the linked reference headline and subheading
+    Given I am a test editor reader
+    And the newsroom uses mocked reference-curation message detail data
+    And I open the edition path "/newsroom/messages/message-mock-reference-curation-001" at 1280 by 900
+    Then the message detail headline should be "Red-Teaming for Generative AI"
+    And the message detail subheading should be "Silver Bullet or Security Theater?"
+    And the message detail summary should be "An examination of whether red-teaming materially improves generative AI security outcomes."
+    And the message detail headline should not be "https://example.com/papers/mock-reference.pdf: accepted"
+    And no browser console errors should occur
+
+  Scenario: Newsroom assignment filters animate non-selection reflow
     Given I open the "assignments" newsroom section at 1280 by 900
     Then the newsroom card grid should render for "assignments"
-    When I open the first newsroom card detail
-    Then the newsroom card grid should scale to the split width
-    When I select a different newsroom card
-    Then the newsroom card resize should animate and settle
+    When I change the newsroom metric filter to "Claimed"
+    Then the newsroom card grid should animate and settle after non-selection reflow
     And newsroom cards should not overlap or clip
     And no browser console errors should occur
 

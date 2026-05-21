@@ -125,13 +125,13 @@ export type NewsroomSectionType = "canonical" | "floating" | "rotating";
 export type NewsroomSectionRecord = {
   id: string;
   title: string;
+  shortTitle: string;
   type: NewsroomSectionType;
   editorialMission: string;
   editorialPolicy: string;
   enabled: boolean;
   enabledStatus?: string | null;
   sortOrder: number;
-  shortDescription?: string | null;
   defaultArticleTypes?: Array<string | null> | null;
   defaultPageBudget?: number | null;
   assignmentGuidance?: string | null;
@@ -719,6 +719,8 @@ function normalizeNewsroomSectionSeedRow(entry: Record<string, unknown>, index: 
   if (!id) throw new Error(`Newsroom section at index ${index} is missing id in ${NEWSROOM_SECTIONS_CONFIG_PATH}`);
   const title = stringValue(entry.title);
   if (!title) throw new Error(`Newsroom section '${id}' is missing title in ${NEWSROOM_SECTIONS_CONFIG_PATH}`);
+  const shortTitle = stringValue(entry.shortTitle);
+  if (!shortTitle) throw new Error(`Newsroom section '${id}' is missing shortTitle in ${NEWSROOM_SECTIONS_CONFIG_PATH}`);
   const rawType = stringValue(entry.type).toLowerCase() as NewsroomSectionType;
   if (!NEWSROOM_SECTION_TYPES.has(rawType)) {
     throw new Error(`Newsroom section '${id}' has unsupported type '${stringValue(entry.type)}' in ${NEWSROOM_SECTIONS_CONFIG_PATH}`);
@@ -732,12 +734,12 @@ function normalizeNewsroomSectionSeedRow(entry: Record<string, unknown>, index: 
   return {
     id,
     title,
+    shortTitle,
     type,
     editorialMission,
     editorialPolicy,
     enabled: typeof entry.enabled === "boolean" ? entry.enabled : true,
     sortOrder: integerValue(entry.sortOrder) ?? index + 1,
-    shortDescription: nullableStringValue(entry.shortDescription),
     defaultArticleTypes: stringArray(entry.defaultArticleTypes),
     defaultPageBudget: integerValue(entry.defaultPageBudget),
     assignmentGuidance: nullableStringValue(entry.assignmentGuidance),

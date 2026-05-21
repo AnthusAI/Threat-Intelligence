@@ -196,11 +196,19 @@ npm run content -- assignments research-intake-now \
 
 These commands deduplicate proposals by normalized URL, preserve each proposal's
 `ingestion_rationale`, write a run-local
-`.papyrus-runs/<run-id>/research-proposals-catalog.json`, and call the same safe
-reference registration mapper used by `references register-catalog`. They create
-pending `Reference` rows and `curation.reference-intake` assignments only; they
-do not accept references, create evidence relations, create publication items,
-or run analysis.
+`.papyrus-runs/<run-id>/research-proposals-catalog.json`, and use targeted
+deterministic record lookups for research-generated catalogs instead of broad
+model scans. They create pending `Reference` rows and
+`curation.reference-intake` assignments only; they do not accept references,
+create evidence relations, create publication items, or run analysis.
+
+For automation, prefer `npm --silent run content -- ... --json`. The JSON
+result includes a compact `references[]` list with reference id, item id, title,
+URL, source domain, curation assignment id, source-readiness state, and the next
+source command. Re-running the same packet intake should report the same
+references as existing/no-op rows. Use low-level `references register-catalog`
+only for arbitrary manual catalogs, compatibility debugging, or fallback
+inspection.
 
 ## Human-Agent Screening Loop
 

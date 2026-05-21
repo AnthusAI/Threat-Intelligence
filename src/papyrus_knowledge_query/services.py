@@ -21,6 +21,7 @@ SUPPORTED_ANCHOR_KINDS = {
     "categorySet",
     "item",
     "message",
+    "newsroomSection",
     "reference",
     "semanticNode",
     "semanticRelation",
@@ -85,6 +86,12 @@ getItem(id: $id) {
 }
 """,
     "message": f"getMessage(id: $id) {{ {MESSAGE_FIELDS} }}",
+    "newsroomSection": """
+getNewsroomSection(id: $id) {
+  id title type editorialMission editorialPolicy enabled enabledStatus sortOrder shortDescription
+  defaultArticleTypes defaultPageBudget assignmentGuidance killCriteria visualGuidance createdAt updatedAt
+}
+""",
     "reference": f"getReference(id: $id) {{ {REFERENCE_FIELDS} }}",
     "semanticNode": """
 getSemanticNode(id: $id) {
@@ -291,8 +298,16 @@ class S3VectorsProvider:
         query_limit = _semantic_query_limit(scope, limit)
         diversity = str(scope.get("rankingDiversity") or scope.get("diversity") or "balanced")
         if diversity == "broad":
-            source_matches = self._query_vectors(vector, scope, query_limit, vector_kind="reference_summary")
-            passage_matches = self._query_vectors(vector, scope, min(query_limit, max(limit, 40)), vector_kind="reference_passage")
+            source_matches = (
+                self._query_vectors(vector, scope, query_limit, vector_kind="reference_summary")
+                + self._query_vectors(vector, scope, query_limit, vector_kind="insight_source")
+                + self._query_vectors(vector, scope, query_limit, vector_kind="insight_summary")
+            )
+            passage_limit = min(query_limit, max(limit, 40))
+            passage_matches = (
+                self._query_vectors(vector, scope, passage_limit, vector_kind="reference_passage")
+                + self._query_vectors(vector, scope, passage_limit, vector_kind="insight_passage")
+            )
             matches = source_matches + passage_matches
             if not matches:
                 matches = self._query_vectors(vector, scope, query_limit)
@@ -361,9 +376,19 @@ class S3VectorsProvider:
                 clauses.append({key: {"$eq": value}})
         if vector_kind:
             clauses.append({"vectorKind": {"$eq": vector_kind}})
+        vector_kinds = scope.get("vectorKinds")
+        if isinstance(vector_kinds, list):
+            normalized_kinds = [str(kind) for kind in vector_kinds if str(kind).strip()]
+            if normalized_kinds:
+                clauses.append({"vectorKind": {"$in": normalized_kinds}})
+        elif isinstance(vector_kinds, str) and vector_kinds.strip():
+            clauses.append({"vectorKind": {"$eq": vector_kinds.strip()}})
         object_kinds = scope.get("objectKinds")
         if isinstance(object_kinds, list) and object_kinds:
             clauses.append({"kind": {"$in": [str(kind) for kind in object_kinds]}})
+        object_kind = scope.get("objectKind")
+        if isinstance(object_kind, str) and object_kind.strip():
+            clauses.append({"kind": {"$eq": object_kind.strip()}})
         if not clauses:
             return None
         if len(clauses) == 1:

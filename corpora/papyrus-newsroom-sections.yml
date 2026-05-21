@@ -2,6 +2,7 @@ schemaVersion: 1
 sections:
   - id: news
     title: News
+    shortTitle: Trends & Analysis
     type: canonical
     editorialMission: Cover recent developments that matter to readers.
     editorialPolicy: Focus on product announcements, company announcements, model releases, funding, acquisitions, platform changes, standards, and other current developments. News pieces should explain what changed and why it matters.
@@ -10,6 +11,7 @@ sections:
 
   - id: business
     title: Business
+    shortTitle: Market Structure
     type: canonical
     editorialMission: Cover the commercial, organizational, and market impact of AI/ML.
     editorialPolicy: Commission pieces about companies, enterprise adoption, business models, funding, acquisitions, AI infrastructure economics, labor impact, and commercialization.
@@ -18,6 +20,7 @@ sections:
 
   - id: technology
     title: Technology
+    shortTitle: Infrastructure Landscape
     type: canonical
     editorialMission: Cover tools, platforms, infrastructure, models, APIs, and technical systems.
     editorialPolicy: Focus on what builders can use, how systems are changing, and which technical capabilities are becoming available.
@@ -26,6 +29,7 @@ sections:
 
   - id: science
     title: Science
+    shortTitle: New Findings
     type: canonical
     editorialMission: Cover research, evidence, methods, benchmarks, and technical findings.
     editorialPolicy: Favor papers, empirical claims, experimental results, benchmarks, and research trends. Require careful distinction between claims, evidence, and speculation.
@@ -34,6 +38,7 @@ sections:
 
   - id: methods
     title: Methods
+    shortTitle: Applied Practice
     type: canonical
     editorialMission: Help practitioners understand how to build, evaluate, operate, or improve AI/ML systems.
     editorialPolicy: Commission practical, wonky, implementation-oriented pieces. Suitable for evaluation patterns, knowledge-base maintenance, data flywheels, agent orchestration, human feedback loops, and production practices.
@@ -42,6 +47,7 @@ sections:
 
   - id: history
     title: History
+    shortTitle: Prior Lineage
     type: canonical
     editorialMission: Show where current AI/ML ideas came from.
     editorialPolicy: Commission historical lineage pieces, timelines, forgotten prior art, conceptual archaeology, and comparisons between current systems and earlier technical traditions.
@@ -50,6 +56,7 @@ sections:
 
   - id: opinion
     title: Opinion
+    shortTitle: Editorial Voice
     type: canonical
     editorialMission: Publish arguments, interpretations, predictions, and editorial positions.
     editorialPolicy: Clearly distinguish opinion from reporting. Opinion pieces should make a specific argument and be grounded in evidence, but may be more interpretive or provocative than other sections.
@@ -58,6 +65,7 @@ sections:
 
   - id: world
     title: World
+    shortTitle: Global Affairs
     type: floating
     editorialMission: Cover AI/ML as it relates to governments, geopolitics, international competition, war, regulation, and national strategy.
     editorialPolicy: Commission pieces about state use of AI, military AI, international AI policy, export controls, surveillance, information warfare, and AI competition between countries.
@@ -66,6 +74,7 @@ sections:
 
   - id: arts
     title: Arts
+    shortTitle: Creative Work
     type: floating
     editorialMission: Cover AI's relationship to creativity, culture, media, design, games, music, film, and publishing.
     editorialPolicy: Favor visually interesting and culturally relevant pieces. This section can help make the newspaper more skimmable and image-rich while still staying connected to AI/ML.
@@ -74,6 +83,7 @@ sections:
 
   - id: sports
     title: Sports
+    shortTitle: Signal & Edge
     type: floating
     editorialMission: Cover AI/ML in sports, athletics, broadcasting, performance analytics, officiating, visualization, and fan experience.
     editorialPolicy: Commission concise, visual pieces about computer vision, predictive analytics, real-time visualization, training systems, broadcast enhancement, and sports data platforms.
@@ -82,6 +92,7 @@ sections:
 
   - id: education
     title: Education
+    shortTitle: Learning Systems
     type: floating
     editorialMission: Cover AI in schools, universities, training, tutoring, research workflows, and learning systems.
     editorialPolicy: Include AI tutors, academic integrity, curriculum changes, education platforms, student workflows, and the use of AI in research and teaching.
@@ -90,6 +101,7 @@ sections:
 
   - id: health
     title: Health
+    shortTitle: Clinical Systems
     type: floating
     editorialMission: Cover AI/ML in medicine, healthcare operations, diagnostics, clinical workflows, drug discovery, and patient-facing systems.
     editorialPolicy: Apply stricter editorial standards because health claims are higher-risk. Require careful sourcing and avoid overstating clinical significance.
@@ -98,6 +110,7 @@ sections:
 
   - id: security
     title: Security
+    shortTitle: Threat Awareness
     type: floating
     editorialMission: Cover AI/ML in cybersecurity, misuse, defensive automation, model security, red-teaming, and adversarial systems.
     editorialPolicy: Focus on practical security implications, defensive use cases, attack surfaces, monitoring, and trustworthy deployment.
@@ -106,6 +119,7 @@ sections:
 
   - id: law-policy
     title: Law & Policy
+    shortTitle: Rules & Power
     type: floating
     editorialMission: Cover legal, regulatory, governance, copyright, liability, and compliance issues around AI/ML.
     editorialPolicy: Commission pieces that explain policy developments, legal disputes, regulatory frameworks, and operational compliance implications.
@@ -114,6 +128,7 @@ sections:
 
   - id: labor
     title: Labor
+    shortTitle: Work Change
     type: floating
     editorialMission: Cover how AI changes work, management, professions, hiring, automation, augmentation, and human-machine collaboration.
     editorialPolicy: Focus on practical workplace changes rather than generic automation speculation. Suitable for pieces on call centers, knowledge work, management, training, and productivity systems.

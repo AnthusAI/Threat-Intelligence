@@ -14,16 +14,28 @@ const {
   summarizeFocusCoverage,
 } = require("./papyrus-assignment-context.cjs");
 
-const EDITION_ASSIGNMENT_TYPE = "research.edition-candidate";
+const RESEARCH_EDITION_ASSIGNMENT_TYPE = "research.edition-candidate";
+const REPORTING_EDITION_ASSIGNMENT_TYPE = "reporting.edition-candidate";
+const EDITION_ASSIGNMENT_TYPE = RESEARCH_EDITION_ASSIGNMENT_TYPE;
 const DEFAULT_LANES = [
   { laneKey: "reporting", nodeKey: "editorial.form.reporting", label: "Reporting" },
   { laneKey: "analysis", nodeKey: "editorial.form.analysis", label: "Analysis" },
   { laneKey: "briefs", nodeKey: "editorial.form.briefs", label: "Briefs" },
 ];
+const REPORTING_LANES = [
+  { laneKey: "reporting", nodeKey: "editorial.form.reporting", label: "Reporting" },
+];
+const REPORTING_ANGLE_LENSES = [
+  { key: "accountability", label: "accountability", prompt: "who is responsible, who is affected, and what changed" },
+  { key: "reader-impact", label: "reader impact", prompt: "what a reader can use, decide, or watch next" },
+  { key: "coverage-gap", label: "coverage gap", prompt: "what remains underreported and which source trail can close it" },
+  { key: "evidence-check", label: "evidence check", prompt: "what is confirmed, contested, or still needs verification" },
+];
 const DEFAULT_TOP_DESK_COUNT = 3;
 const DEFAULT_PUBLICATION_SLOTS = 1;
 const DEFAULT_OVERASSIGNMENT_RATIO = 1.5;
 const DEFAULT_MAX_ASSIGNMENTS = 18;
+const DEFAULT_ROTATING_SECTION_COUNT = 2;
 
 async function loadEditionPlanningState(client) {
   const [
@@ -87,7 +99,9 @@ function buildEditionPlanningPlan(state, options = {}) {
   const focusCategories = Array.isArray(options.focusCategories) ? options.focusCategories : [];
   const explicitContextProfile = options.contextProfile ? requiredString(options.contextProfile, "contextProfile") : null;
   const targetSystemType = options.targetSystemType ? requiredString(options.targetSystemType, "targetSystemType") : null;
-  const laneDefinitions = resolveLaneDefinitions(options.lanes ?? DEFAULT_LANES, options.semanticConcepts);
+  const assignmentTypeKey = normalizeAssignmentTypeKey(options.assignmentTypeKey ?? options.assignmentType ?? EDITION_ASSIGNMENT_TYPE);
+  const isReportingPlan = assignmentTypeKey === REPORTING_EDITION_ASSIGNMENT_TYPE;
+  const laneDefinitions = resolveLaneDefinitions(options.lanes ?? (isReportingPlan ? REPORTING_LANES : DEFAULT_LANES), options.semanticConcepts);
   const enabledSections = selectEnabledNewsroomSections(state.newsroomSections ?? []);
   const existing = buildExistingRecordMaps(state);
   const categorySet = selectAcceptedCategorySet(state.categorySets ?? []);
@@ -113,7 +127,7 @@ function buildEditionPlanningPlan(state, options = {}) {
   const scoredGroups = categoryGroups
     .map((group) => scoreDeskGroup(group, state, now))
     .sort((left, right) => right.opportunityScore - left.opportunityScore || compareCategoryRank(left.root, right.root));
-  const existingRootKeys = existingEditionRootKeys(state.assignments ?? [], editionSlug);
+  const existingRootKeys = existingEditionRootKeys(state.assignments ?? [], editionSlug, assignmentTypeKey);
   const requestedFocusKeys = new Set(focusCategories);
   const focusSelectedGroups = focusCategories.length
     ? scoredGroups.filter((group) => Array.from(requestedFocusKeys).some((focusKey) => group.categoryKeys.has(focusKey)))
@@ -122,15 +136,25 @@ function buildEditionPlanningPlan(state, options = {}) {
   if (unknownFocusKeys.length) {
     throw new Error(`Unknown focus category '${unknownFocusKeys[0]}'.`);
   }
-  const selectedGroups = existingRootKeys.length
+  const existingSelectedGroups = existingRootKeys.length
     ? scoredGroups.filter((group) => existingRootKeys.includes(group.root.categoryKey)).sort((left, right) => existingRootKeys.indexOf(left.root.categoryKey) - existingRootKeys.indexOf(right.root.categoryKey))
+    : [];
+  const selectedGroups = existingSelectedGroups.length
+    ? existingSelectedGroups
     : focusSelectedGroups.length
       ? focusSelectedGroups
       : scoredGroups.slice(0, topDeskCount);
-  const sectionTargets = resolveSectionTargets(options.sectionTargets, enabledSections, selectedGroups);
+  const sectionTargets = isReportingPlan ? new Map() : resolveSectionTargets(options.sectionTargets, enabledSections, selectedGroups);
+  const sectionBudgets = isReportingPlan
+    ? resolveSectionBudgets(options.sectionBudgets, enabledSections, {
+      publicationSlots,
+      rotatingSectionCount: positiveInteger(options.rotatingSectionCount, DEFAULT_ROTATING_SECTION_COUNT),
+    })
+    : [];
   attachEditionPlanningMetadata(edition, {
     selectedGroups,
     sectionTargets,
+    sectionBudgets,
     laneDefinitions,
     generatedAt: now,
     publicationSlots,
@@ -138,6 +162,7 @@ function buildEditionPlanningPlan(state, options = {}) {
     maxAssignments,
     contextProfile: explicitContextProfile,
     focusCategories,
+    assignmentTypeKey,
   });
 
   const records = [
@@ -146,7 +171,16 @@ function buildEditionPlanningPlan(state, options = {}) {
   ];
   const assignments = [];
   let assignmentCount = 0;
-  for (const [deskIndex, group] of selectedGroups.entries()) {
+  const assignmentTargets = isReportingPlan
+    ? buildReportingAssignmentTargets(sectionBudgets, selectedGroups)
+    : selectedGroups.map((group, index) => ({
+      group,
+      sectionBudget: null,
+      sectionTarget: sectionTargets.get(group.root.categoryKey),
+      targetIndex: index,
+    }));
+  for (const assignmentTarget of assignmentTargets) {
+    const { group, sectionBudget, sectionTarget, targetIndex: deskIndex } = assignmentTarget;
     const focusPool = resolveDeskFocusCategories(
       group.root,
       categories,
@@ -154,7 +188,8 @@ function buildEditionPlanningPlan(state, options = {}) {
     );
     let focusCursor = 0;
     for (const [laneIndex, lane] of laneDefinitions.entries()) {
-      const dispatchCount = Math.ceil(publicationSlots * overassignmentRatio);
+      const targetPublicationSlots = sectionBudget?.slots ?? publicationSlots;
+      const dispatchCount = Math.ceil(targetPublicationSlots * overassignmentRatio);
       for (let candidateRank = 1; candidateRank <= dispatchCount; candidateRank += 1) {
         if (assignmentCount >= maxAssignments) break;
         const focusCategory = focusPool[focusCursor % focusPool.length];
@@ -165,9 +200,10 @@ function buildEditionPlanningPlan(state, options = {}) {
           group,
           focusCategory,
           lane,
-          sectionTarget: sectionTargets.get(group.root.categoryKey),
+          sectionTarget,
+          sectionBudget,
           now,
-          publicationSlots,
+          publicationSlots: targetPublicationSlots,
           overassignmentRatio,
           dispatchCount,
           candidateRank,
@@ -175,6 +211,7 @@ function buildEditionPlanningPlan(state, options = {}) {
           existing,
           contextProfile: options.contextProfile,
           targetSystemType,
+          assignmentTypeKey,
         });
         assignments.push(assignmentBundle.assignment);
         records.push(...assignmentBundle.records);
@@ -204,6 +241,8 @@ function buildEditionPlanningPlan(state, options = {}) {
     records,
     summary: {
       editionId: edition.id,
+      assignmentTypeKey,
+      planningKind: isReportingPlan ? "section-centered-reporting-planning" : "lane-based-edition-planning",
       assignmentCount: assignments.length,
       recordCount: records.length,
       createCount: records.filter((record) => record.action === "create").length,
@@ -213,6 +252,7 @@ function buildEditionPlanningPlan(state, options = {}) {
       publicationSlots,
       overassignmentRatio,
       topDeskCount,
+      sectionBudgets,
       contextBackedAssignmentCount: assignments.filter((assignment) => Boolean(assignment.sectionKey || assignment.primaryFocusCategoryKey)).length,
     },
   };
@@ -350,17 +390,32 @@ function buildEditionRecord({ existingEdition, editionDate, editionSlug, now }) 
   };
 }
 
-function attachEditionPlanningMetadata(edition, { selectedGroups, sectionTargets, laneDefinitions, generatedAt, publicationSlots, overassignmentRatio, maxAssignments, contextProfile, focusCategories }) {
+function attachEditionPlanningMetadata(edition, { selectedGroups, sectionTargets, sectionBudgets = [], laneDefinitions, generatedAt, publicationSlots, overassignmentRatio, maxAssignments, contextProfile, focusCategories, assignmentTypeKey }) {
   const current = parseJsonObject(edition.metadata);
+  const planningKind = assignmentTypeKey === REPORTING_EDITION_ASSIGNMENT_TYPE
+    ? "section-centered-reporting-planning"
+    : "lane-based-edition-planning";
   const metadata = {
     ...current,
-    planningKind: "lane-based-edition-planning",
+    planningKind,
     generatedAt: current.generatedAt ?? generatedAt,
+    assignmentTypeKey,
     selectedRootCategoryKeys: selectedGroups.map((group) => group.root.categoryKey),
     selectedRootCategoryLineageIds: selectedGroups.map((group) => group.root.lineageId),
-    selectedSectionIds: selectedGroups
-      .map((group) => sectionTargets.get(group.root.categoryKey)?.id ?? null)
+    selectedSectionIds: (sectionBudgets.length
+      ? sectionBudgets.map((budget) => budget.section.id)
+      : selectedGroups.map((group) => sectionTargets.get(group.root.categoryKey)?.id ?? null))
       .filter(Boolean),
+    sectionBudgets: sectionBudgets.map((budget) => ({
+      sectionId: budget.section.id,
+      sectionKey: budget.section.id,
+      title: budget.section.title,
+      type: budget.section.type,
+      slots: budget.slots,
+      defaultArticleTypes: budget.defaultArticleTypes,
+      pageBudget: budget.pageBudget,
+      lengthBudget: budget.lengthBudget,
+    })),
     laneKeys: laneDefinitions.map((lane) => lane.laneKey),
     laneNodeKeys: laneDefinitions.map((lane) => lane.nodeKey),
     publicationSlots,
@@ -378,6 +433,13 @@ function attachEditionPlanningMetadata(edition, { selectedGroups, sectionTargets
     description: edition.description,
     metadata,
   });
+}
+
+function normalizeAssignmentTypeKey(value) {
+  const normalized = String(value ?? "").trim();
+  if (normalized === "reporting" || normalized === REPORTING_EDITION_ASSIGNMENT_TYPE) return REPORTING_EDITION_ASSIGNMENT_TYPE;
+  if (normalized === "research" || normalized === RESEARCH_EDITION_ASSIGNMENT_TYPE || !normalized) return RESEARCH_EDITION_ASSIGNMENT_TYPE;
+  throw new Error(`Unsupported edition assignment type '${value}'. Use research or reporting.`);
 }
 
 function resolveLaneDefinitions(lanes, semanticConcepts = loadSemanticConceptSeeds()) {
@@ -439,6 +501,75 @@ function resolveSectionTargets(sectionTargets, enabledSections, selectedGroups) 
     }
   }
   return targetMap;
+}
+
+function resolveSectionBudgets(sectionBudgets, enabledSections, { publicationSlots, rotatingSectionCount }) {
+  if (!enabledSections.length) {
+    throw new Error("No enabled NewsroomSection records found. Configure sections in /newsroom/administration/sections.");
+  }
+  const sectionById = new Map(enabledSections.map((section) => [section.id, section]));
+  const explicitSlotsBySection = new Map();
+  for (const entry of sectionBudgets ?? []) {
+    const parsed = parseSectionBudgetEntry(entry);
+    if (!parsed) continue;
+    if (!sectionById.has(parsed.sectionId)) throw new Error(`Unknown or disabled section '${parsed.sectionId}' in --section-budgets.`);
+    explicitSlotsBySection.set(parsed.sectionId, parsed.slots);
+  }
+  const canonical = enabledSections.filter((section) => normalizeNewsroomSectionType(section.type) === "canonical");
+  const floating = enabledSections
+    .filter((section) => normalizeNewsroomSectionType(section.type) === "floating")
+    .slice(0, rotatingSectionCount);
+  const selected = uniqueBy([...canonical, ...floating, ...Array.from(explicitSlotsBySection.keys()).map((sectionId) => sectionById.get(sectionId)).filter(Boolean)], (section) => section.id);
+  return selected.map((section) => {
+    const slots = positiveInteger(explicitSlotsBySection.get(section.id), positiveInteger(section.defaultArticleSlots, publicationSlots));
+    return {
+      section: normalizeSectionTarget(section),
+      slots,
+      defaultArticleTypes: normalizeStringList(section.defaultArticleTypes),
+      pageBudget: positiveInteger(section.defaultPageBudget, null),
+      lengthBudget: section.defaultLengthBudget ?? null,
+    };
+  });
+}
+
+function parseSectionBudgetEntry(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  const [sectionId, rawSlots] = text.split(":").map((entry) => String(entry ?? "").trim());
+  if (!sectionId) return null;
+  return {
+    sectionId,
+    slots: positiveInteger(rawSlots, DEFAULT_PUBLICATION_SLOTS),
+  };
+}
+
+function normalizeNewsroomSectionType(value) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (normalized === "rotating" || normalized === "floating") return "floating";
+  return "canonical";
+}
+
+function normalizeSectionTarget(section) {
+  return {
+    id: section.id,
+    title: section.title,
+    type: normalizeNewsroomSectionType(section.type),
+    editorialMission: section.editorialMission ?? null,
+    editorialPolicy: section.editorialPolicy ?? null,
+    assignmentGuidance: section.assignmentGuidance ?? null,
+    killCriteria: section.killCriteria ?? null,
+    visualGuidance: section.visualGuidance ?? null,
+  };
+}
+
+function buildReportingAssignmentTargets(sectionBudgets, selectedGroups) {
+  if (!sectionBudgets.length) throw new Error("Reporting edition planning requires at least one section budget.");
+  return sectionBudgets.map((sectionBudget, index) => ({
+    group: selectedGroups[index % selectedGroups.length],
+    sectionBudget,
+    sectionTarget: sectionBudget.section,
+    targetIndex: index,
+  }));
 }
 
 function semanticNodeForLane(lane, now) {
@@ -540,17 +671,24 @@ function scoreDeskGroup(group, state, now) {
   };
 }
 
-function buildAssignmentBundle({ categorySet, edition, group, focusCategory, lane, sectionTarget, now, publicationSlots, overassignmentRatio, dispatchCount, candidateRank, priority, existing, contextProfile, targetSystemType }) {
-  const queueKey = `edition:${edition.slug}:desk:${safeId(group.root.categoryKey)}:lane:${lane.laneKey}`;
-  const assignmentId = `assignment-${safeId(EDITION_ASSIGNMENT_TYPE)}-${hashShort([
+function buildAssignmentBundle({ categorySet, edition, group, focusCategory, lane, sectionTarget, sectionBudget = null, now, publicationSlots, overassignmentRatio, dispatchCount, candidateRank, priority, existing, contextProfile, targetSystemType, assignmentTypeKey = EDITION_ASSIGNMENT_TYPE }) {
+  const isReportingAssignment = assignmentTypeKey === REPORTING_EDITION_ASSIGNMENT_TYPE;
+  const queueKey = isReportingAssignment
+    ? `edition:${edition.slug}:section:${safeId(sectionTarget?.id ?? group.root.categoryKey)}:lane:${lane.laneKey}`
+    : `edition:${edition.slug}:desk:${safeId(group.root.categoryKey)}:lane:${lane.laneKey}`;
+  const assignmentId = `assignment-${safeId(assignmentTypeKey)}-${hashShort([
     edition.id,
+    sectionTarget?.id ?? "",
     group.root.lineageId,
     lane.laneKey,
     candidateRank,
   ])}`;
   const evidenceReferences = selectEvidenceReferences(group.evidenceReferences, candidateRank);
   const signalNodes = group.signalNodes.slice(0, 3);
-  const candidateAngle = candidateAngleForLane(lane, group.root, candidateRank);
+  const candidateAngle = candidateAngleForLane(lane, group.root, candidateRank, { assignmentTypeKey, sectionTarget, sectionBudget, focusCategory });
+  const angleDiversity = isReportingAssignment
+    ? reportingAngleDiversity({ sectionTarget, focusCategory, candidateRank, evidenceReferences })
+    : null;
   const resolvedContextProfile = resolveContextProfile(contextProfile, lane.laneKey);
   const topicScopeCategoryKeys = unique([group.root.categoryKey, ...group.categories.map((category) => category.categoryKey)]);
   const metadata = {
@@ -578,9 +716,36 @@ function buildAssignmentBundle({ categorySet, edition, group, focusCategory, lan
       signalNodes,
       targetSystemType,
     }),
+    assignmentTypeKey,
+    slotTarget: sectionBudget ? {
+      sectionId: sectionBudget.section.id,
+      sectionKey: sectionBudget.section.id,
+      title: sectionBudget.section.title,
+      slots: sectionBudget.slots,
+      candidateRank,
+    } : null,
+    sectionBudget: sectionBudget ? {
+      slots: sectionBudget.slots,
+      defaultArticleTypes: sectionBudget.defaultArticleTypes,
+      pageBudget: sectionBudget.pageBudget,
+      lengthBudget: sectionBudget.lengthBudget,
+    } : null,
+    reportingContextOrder: isReportingAssignment ? [
+      "publication-doctrine",
+      "section-doctrine",
+      "assignment-brief",
+      "accepted-knowledge-base-evidence",
+      "recent-section-memory",
+      "fresh-source-needs",
+    ] : [],
     primaryFocusCategoryKey: focusCategory.categoryKey,
     topicScopeCategoryKeys,
   };
+  if (isReportingAssignment) {
+    metadata.angleDiversity = angleDiversity;
+    metadata.expectedOutput = "Private reporting context packet for editor selection and copywriting, not reader copy.";
+    metadata.editorSelectionPolicy = "Selected reporting packets may later produce draft Items; unselected packets remain private Assignment work products.";
+  }
   const sectionFields = assignmentSectionFields({
     sectionTarget,
     status: "open",
@@ -590,14 +755,16 @@ function buildAssignmentBundle({ categorySet, edition, group, focusCategory, lan
   });
   const assignment = {
     id: assignmentId,
-    assignmentTypeKey: EDITION_ASSIGNMENT_TYPE,
+    assignmentTypeKey,
     queueKey,
     queueStatusKey: `${queueKey}#open`,
     status: "open",
     priority,
-    title: `${lane.label} candidate ${candidateRank}: ${group.root.displayName}`,
+    title: isReportingAssignment
+      ? `${sectionTarget.title} reporting candidate ${candidateRank}: ${focusCategory.displayName ?? group.root.displayName}`
+      : `${lane.label} candidate ${candidateRank}: ${group.root.displayName}`,
     brief: candidateAngle,
-    instructions: instructionsForLane(lane, group.root),
+    instructions: instructionsForLane(lane, group.root, { assignmentTypeKey, sectionTarget }),
     assigneeType: null,
     assigneeId: null,
     assigneeKey: null,
@@ -627,7 +794,7 @@ function buildAssignmentBundle({ categorySet, edition, group, focusCategory, lan
     toStatus: "open",
     actorSub: null,
     actorLabel: "papyrus-content-cli",
-    note: "Created by lane-based edition planning.",
+    note: isReportingAssignment ? "Created by section-centered reporting planning." : "Created by lane-based edition planning.",
     createdAt: now,
     metadata: JSON.stringify({
       editionId: edition.id,
@@ -861,14 +1028,44 @@ function selectEvidenceReferences(references, candidateRank) {
   return selected.concat(references.slice(0, 3 - selected.length));
 }
 
-function candidateAngleForLane(lane, root, rank) {
+function candidateAngleForLane(lane, root, rank, { assignmentTypeKey = EDITION_ASSIGNMENT_TYPE, sectionTarget = null, focusCategory = null } = {}) {
+  if (assignmentTypeKey === REPORTING_EDITION_ASSIGNMENT_TYPE) {
+    const sectionTitle = sectionTarget?.title ?? "section";
+    const focusTitle = focusCategory?.displayName ?? focusCategory?.shortTitle ?? root.displayName;
+    const lens = reportingAngleLens(rank);
+    return `Report a section-ready ${lens.label} candidate for ${sectionTitle}, option ${rank}: ${focusTitle}. Emphasize ${lens.prompt}.`;
+  }
   if (lane.laneKey === "reporting") return `Report a fresh evidence-led candidate story for ${root.displayName}, option ${rank}.`;
   if (lane.laneKey === "analysis") return `Analyze the pattern, context, and implications around ${root.displayName}, option ${rank}.`;
   if (lane.laneKey === "briefs") return `Prepare concise brief candidates from the latest useful evidence around ${root.displayName}, option ${rank}.`;
   return `Prepare a ${lane.label} candidate for ${root.displayName}, option ${rank}.`;
 }
 
-function instructionsForLane(lane, root) {
+function reportingAngleDiversity({ sectionTarget, focusCategory, candidateRank, evidenceReferences }) {
+  const lens = reportingAngleLens(candidateRank);
+  return {
+    lensKey: lens.key,
+    lensLabel: lens.label,
+    diversityKey: [
+      sectionTarget?.id ?? "section",
+      focusCategory?.categoryKey ?? "topic",
+      lens.key,
+      evidenceReferences.map((reference) => reference.lineageId ?? reference.id).filter(Boolean).sort().join("+") || "no-evidence",
+    ].join(":"),
+    duplicateAnglePenalty: 0,
+    duplicateAnglePenaltyBasis: "New reporting candidates rotate angle lenses and evidence bundles; matching diversity keys should be culled or merged during editor selection.",
+  };
+}
+
+function reportingAngleLens(rank) {
+  return REPORTING_ANGLE_LENSES[(Math.max(1, Number(rank) || 1) - 1) % REPORTING_ANGLE_LENSES.length];
+}
+
+function instructionsForLane(lane, root, { assignmentTypeKey = EDITION_ASSIGNMENT_TYPE, sectionTarget = null } = {}) {
+  if (assignmentTypeKey === REPORTING_EDITION_ASSIGNMENT_TYPE) {
+    const sectionTitle = sectionTarget?.title ?? "the section";
+    return `Build the private reporting context required for copywriting a candidate Item in ${sectionTitle}. Apply publication doctrine first, then section mission, policies, assignment guidance, kill criteria, accepted evidence, recent section memory, and fresh-source needs. Return a reporting context packet only; do not create reader-facing copy, Item, or EditionItem records.`;
+  }
   const base = `Use publication doctrine, section doctrine, accepted topic-scope context for ${root.displayName}, semantic graph context, and linked references. Return a private research packet for editor selection, not reader-facing copy.`;
   if (lane.laneKey === "reporting") return `${base} Emphasize factual findings, source trail, what happened, what is new, and what evidence supports publication.`;
   if (lane.laneKey === "analysis") return `${base} Emphasize explanation, patterns, implications, limits, uncertainty, and how the evidence fits the desk.`;
@@ -910,6 +1107,12 @@ function unique(values) {
   return Array.from(new Set(values.filter(Boolean)));
 }
 
+function normalizeStringList(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.map((entry) => String(entry ?? "").trim()).filter(Boolean);
+  return String(value).split(",").map((entry) => entry.trim()).filter(Boolean);
+}
+
 function countActiveAssignmentsForRoot(assignments, rootCategoryKey) {
   return assignments.filter((assignment) => (
     assignment.assignmentTypeKey === EDITION_ASSIGNMENT_TYPE
@@ -921,11 +1124,11 @@ function countActiveAssignmentsForRoot(assignments, rootCategoryKey) {
   )).length;
 }
 
-function existingEditionRootKeys(assignments, editionSlug) {
+function existingEditionRootKeys(assignments, editionSlug, assignmentTypeKey = EDITION_ASSIGNMENT_TYPE) {
   const keys = [];
   const seen = new Set();
   for (const assignment of assignments) {
-    if (assignment.assignmentTypeKey !== EDITION_ASSIGNMENT_TYPE || assignment.status === "canceled") continue;
+    if (assignment.assignmentTypeKey !== assignmentTypeKey || assignment.status === "canceled") continue;
     const metadata = parseJsonObject(assignment.metadata);
     const deskCategoryKey = assignment.primaryFocusCategoryKey ?? (Array.isArray(assignment.topicScopeCategoryKeys) ? assignment.topicScopeCategoryKeys[0] : null);
     if ((metadata.editionSlug && metadata.editionSlug !== editionSlug) || !deskCategoryKey || seen.has(deskCategoryKey)) continue;
@@ -1072,6 +1275,8 @@ function hashStable(value) {
 module.exports = {
   DEFAULT_LANES,
   EDITION_ASSIGNMENT_TYPE,
+  REPORTING_EDITION_ASSIGNMENT_TYPE,
+  RESEARCH_EDITION_ASSIGNMENT_TYPE,
   applyEditionPlanningPlan,
   buildEditionPlanningPlan,
   loadEditionPlanningState,

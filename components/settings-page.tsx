@@ -1,8 +1,9 @@
 "use client";
 
+import { signOut } from "aws-amplify/auth";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ReaderAuthControl } from "./reader-auth-control";
+import { configureAmplifyClient } from "./amplify-client-provider";
 import { loadReaderSessionSnapshot, type ReaderAuthSnapshot } from "./reader-auth-state";
 import {
   DEFAULT_READER_SETTINGS,
@@ -27,6 +28,8 @@ export function SettingsPage() {
   const [source, setSource] = useState<ReaderSettingsSource>("local");
   const [status, setStatus] = useState<SaveStatus>({ state: "loading", message: "Loading settings" });
   const [pending, setPending] = useState(false);
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
   const userEditedRef = useRef(false);
 
   const refreshSettings = useCallback(async () => {
@@ -37,11 +40,14 @@ export function SettingsPage() {
     setSource("local");
     setStatus({ state: "saved", message: "Saved in this browser" });
     try {
-      const [session, resolution] = await Promise.all([
-        loadReaderSessionSnapshot(),
-        resolveReaderSettings(),
-      ]);
+      const session = await loadReaderSessionSnapshot();
       setAuthState(session.auth);
+      setAuthError(null);
+    } catch {
+      // Keep current auth display if session refresh fails.
+    }
+    try {
+      const resolution = await resolveReaderSettings();
       if (userEditedRef.current) return;
       setSettings(resolution.settings);
       setSource(resolution.source);
@@ -54,6 +60,7 @@ export function SettingsPage() {
       const localSettings = readLocalReaderSettings();
       setSettings(localSettings);
       applyReaderTheme(localSettings.theme);
+      setAuthState((current) => current.status === "loading" ? { status: "signedOut", label: "Signed out" } : current);
       setStatus({ state: "error", message: "Settings sync failed. Browser settings are still active." });
     }
   }, []);
@@ -85,18 +92,53 @@ export function SettingsPage() {
     }
   };
 
+  const logout = async () => {
+    configureAmplifyClient();
+    setAuthBusy(true);
+    setAuthError(null);
+    try {
+      await signOut();
+      const session = await loadReaderSessionSnapshot();
+      setAuthState(session.auth);
+      setSource("local");
+    } catch {
+      setAuthError("Sign-out failed");
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
   return (
     <main className="settings-page">
-      <header className="settings-header">
-        <Link className="settings-header__home" href="/">Papyrus</Link>
-        <div className="settings-header__auth">
-          <ReaderAuthControl authState={authState} showIdentity />
-        </div>
-      </header>
+      <nav className="edition-progress edition-progress--newsroom settings-progress" aria-label="Settings navigation">
+        <Link className="edition-progress__button edition-progress__button--previous" href="/">
+          <svg aria-hidden="true" className="edition-progress__icon" focusable="false" viewBox="0 0 10 10">
+            <path d="M7.5 1 2.5 5 7.5 9Z" fill="currentColor" />
+          </svg>
+          Back to Papyrus
+        </Link>
+      </nav>
 
       <section className="settings-panel" aria-labelledby="reader-settings-title">
         <p className="settings-panel__eyebrow">Reader Settings</p>
         <h1 id="reader-settings-title">Settings</h1>
+        <div className="settings-account" aria-live="polite">
+          <p className="settings-account__email-row">
+            <span>Email</span>
+            <strong>{authState.status === "signedIn" ? (authState.email ?? authState.label) : "—"}</strong>
+            {authState.status === "signedIn" ? (
+              <button
+                className="settings-account__logout"
+                disabled={authBusy}
+                onClick={() => void logout()}
+                type="button"
+              >
+                Logout
+              </button>
+            ) : null}
+          </p>
+          {authError ? <p className="settings-account__error">{authError}</p> : null}
+        </div>
         <div className="settings-status" data-settings-state={status.state} aria-live="polite">
           <span>{status.message}</span>
           {status.state === "error" ? (

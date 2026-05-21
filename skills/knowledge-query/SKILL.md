@@ -61,6 +61,7 @@ Use `anchors` for exact Papyrus objects. Supported kinds are:
 - `semanticRelation`
 - `message`
 - `assignment`
+- `newsroomSection`
 - `steeringProposal`
 
 Prefer stable lineage ids when available. The rendered markdown uses stable
@@ -99,6 +100,25 @@ If vector search returns a summary `Message` instead of the summarized
 `Reference`, normalize the hit back to the target Reference through the current
 `reference_summary_<N>_tokens` relation. Treat the summary as Reference summary
 evidence, not as an orphan `Message` object and not as a chunk excerpt.
+
+Insight messages are first-class knowledge evidence when they follow this
+contract:
+
+- `Message.messageKind = "insight"`
+- `Message.messageDomain = "knowledge"`
+- body text stored as a `ModelAttachment` with role `message_body`
+- a current `SemanticRelation` with `relationTypeKey = "insight_about"`
+
+`insight_about` may point at a `reference`, `item`, `category`,
+`semanticNode`, `assignment`, or `newsroomSection`. General commentary
+messages linked by `comment`, `about`, or `ingestion_rationale` stay outside
+default knowledge context packs.
+
+Insight vector indexing embeds only the `message_body` attachment text.
+`Message.summary` is a UI/list label and may be carried as vector metadata, but
+it must not be used as embedding input or as fallback content. An insight
+without an active, non-empty `message_body` attachment is incomplete for vector
+indexing and should be reported as missing body.
 
 ## Scope Options
 

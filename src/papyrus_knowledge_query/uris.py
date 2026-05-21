@@ -13,6 +13,8 @@ PAPYRUS_URI_KIND_ALIASES = {
     "categorySet": "categorySet",
     "item": "item",
     "message": "message",
+    "newsroomsection": "newsroomSection",
+    "newsroomSection": "newsroomSection",
     "reference": "reference",
     "semanticnode": "semanticNode",
     "semanticNode": "semanticNode",

@@ -672,6 +672,101 @@ return plan_assignment_research_packet{ assignment = assignment, research = rese
         self.assertEqual(result["value"]["records"][3]["input"]["relationTypeKey"], "comment")
         self.assertEqual(result["api_calls"], ["papyrus.plan.assignment_research_packet"])
 
+    def test_live_assignment_reporting_context_packet_plan_creates_private_message_only(self):
+        plan = papyrus_newsroom.build_assignment_reporting_context_packet_plan(
+            generated_at="2026-05-18T16:00:00Z",
+            assignment={
+                "id": "assignment-reporting-123",
+                "assignmentTypeKey": "reporting.edition-candidate",
+                "queueKey": "edition:edition-2026-05-23:section:news:lane:reporting",
+                "queueStatusKey": "edition:edition-2026-05-23:section:news:lane:reporting#open",
+                "status": "open",
+                "title": "News reporting candidate",
+                "sectionKey": "news",
+                "classifierId": "demo-classifier",
+                "metadata": {
+                    "editionId": "edition-2026-05-23-v1",
+                    "candidateRank": 1,
+                    "slotTarget": {"sectionKey": "news", "slots": 2, "candidateRank": 1},
+                    "reportingContextOrder": [
+                        "publication-doctrine",
+                        "section-doctrine",
+                        "assignment-brief",
+                        "accepted-knowledge-base-evidence",
+                        "recent-section-memory",
+                        "fresh-source-needs",
+                    ],
+                },
+            },
+            reporting={
+                "summary": "A reported candidate is ready for editor selection.",
+                "why_now": "The source material changed this week.",
+                "nut_graf_candidate": "The article should explain what changed and why it matters.",
+                "recommended_angle": "Focus on practical reader impact.",
+                "confirmed_facts": ["The accepted reference confirms the release date."],
+                "source_trail": [{"title": "Accepted source", "reference_id": "reference-1-v1"}],
+                "accepted_reference_ids": ["reference-1-v1"],
+                "proposed_references": [{"title": "Fresh source prospect", "url": "https://example.com/source"}],
+                "recent_desk_memory_used": ["Prior News coverage emphasized verification."],
+                "coverage_gaps": ["Need comment from affected users."],
+                "open_questions": ["Is the rollout complete?"],
+                "risk_flags": ["Avoid promotional framing."],
+                "verification_needs": ["Verify the fresh prospect before copywriting."],
+                "source_diversity_notes": ["Accepted evidence is single-source so far."],
+                "copywriter_brief": "Use the accepted source and clearly label unresolved questions.",
+                "editor_recommendation": "hold",
+            },
+        )
+
+        self.assertTrue(plan["dryRun"])
+        self.assertEqual(plan["lifecycle"], "assignment-reporting-context-packet")
+        self.assertEqual([record["modelName"] for record in plan["records"]], ["Message", "ModelAttachment", "ModelAttachment", "SemanticRelation"])
+        self.assertFalse(any(record["modelName"] in {"Item", "EditionItem"} for record in plan["records"]))
+        message = plan["records"][0]["input"]
+        self.assertEqual(message["messageKind"], "reporting_context_packet")
+        self.assertEqual(message["messageDomain"], "assignment_work")
+        metadata = json.loads(plan["records"][2]["body"])
+        self.assertEqual(metadata["kind"], "reporting.context_packet.created")
+        self.assertEqual(metadata["assignmentId"], "assignment-reporting-123")
+        self.assertEqual(metadata["reporting"]["sectionKey"], "news")
+        self.assertEqual(metadata["reporting"]["editionId"], "edition-2026-05-23-v1")
+        self.assertEqual(metadata["reporting"]["acceptedReferenceIds"], ["reference-1-v1"])
+        self.assertEqual(metadata["reporting"]["editorRecommendation"], "hold")
+        relation = plan["records"][3]["input"]
+        self.assertEqual(relation["predicate"], "comment")
+        self.assertEqual(relation["subjectKind"], "message")
+        self.assertEqual(relation["objectKind"], "assignment")
+
+    def test_execute_tactus_can_plan_reporting_context_packet(self):
+        result = tactus_runtime.execute_tactus(
+            """
+local assignment = {
+  id = "assignment-reporting-123",
+  assignmentTypeKey = "reporting.edition-candidate",
+  queueKey = "edition:edition-2026-05-23:section:news:lane:reporting",
+  status = "open",
+  sectionKey = "news",
+  metadata = { editionId = "edition-2026-05-23-v1", candidateRank = 1 },
+}
+local reporting = {
+  summary = "Reporting context ready.",
+  section_key = "news",
+  edition_id = "edition-2026-05-23-v1",
+  confirmed_facts = { "Accepted source confirms the date." },
+  accepted_reference_ids = { "reference-1-v1" },
+  copywriter_brief = "Draft only after editor selection.",
+  editor_recommendation = "select",
+}
+return plan_assignment_reporting_context_packet{ assignment = assignment, reporting = reporting }
+"""
+        )
+
+        self.assertTrue(result["ok"], result.get("error"))
+        self.assertEqual(result["value"]["lifecycle"], "assignment-reporting-context-packet")
+        self.assertEqual(result["value"]["records"][0]["input"]["messageKind"], "reporting_context_packet")
+        self.assertEqual(result["value"]["records"][3]["input"]["relationTypeKey"], "comment")
+        self.assertEqual(result["api_calls"], ["papyrus.plan.assignment_reporting_context_packet"])
+
     def test_execute_tactus_exposes_knowledge_query_helper(self):
         with mock.patch("papyrus_newsroom.tactus_runtime.build_environment_services", return_value=object()), \
              mock.patch("papyrus_newsroom.tactus_runtime.run_knowledge_query") as run_query:
@@ -1282,6 +1377,417 @@ return finish_research{
         self.assertNotIn("confidence", result)
         self.assertEqual(result["promptVersion"], "reference-quality-v1-publication-doctrine")
         self.assertEqual(result["evidence"], ["Clear method", "Relevant findings"])
+
+    def test_title_subtitle_prompt_requires_verbatim_originals(self):
+        prompt = reference_curation_signals.build_title_subtitle_prompt(
+            reference={"title": "", "sourceUri": "https://example.test/paper"},
+            catalog_entry={"item_id": "item-1", "metadata": {"doi": "10.1234/example"}},
+            source_text="Original Paper Title\nOriginal subtitle text",
+        )
+
+        self.assertIn("Use the original title verbatim if available.", prompt)
+        self.assertIn("Use the original subtitle verbatim if available.", prompt)
+        self.assertIn("Do not paraphrase original titles or subtitles.", prompt)
+        self.assertIn("Subtitle must be one short prose line.", prompt)
+        self.assertIn("Do not use Markdown.", prompt)
+        self.assertIn("Do not use bullet points.", prompt)
+        self.assertIn("Do not use numbered lists.", prompt)
+        self.assertIn("Do not include line breaks.", prompt)
+
+    def test_subtitle_normalizer_rejects_list_shaped_values(self):
+        self.assertEqual(reference_curation_signals._normalize_subtitle_candidate("- First bullet"), "")
+        self.assertEqual(reference_curation_signals._normalize_subtitle_candidate("* First bullet"), "")
+        self.assertEqual(reference_curation_signals._normalize_subtitle_candidate("1. First bullet"), "")
+        self.assertEqual(reference_curation_signals._normalize_subtitle_candidate("• First bullet"), "")
+        self.assertEqual(reference_curation_signals._normalize_subtitle_candidate("Line one\nLine two"), "")
+        self.assertEqual(
+            reference_curation_signals._normalize_subtitle_candidate("Abstract page for arXiv paper 2506.01232"),
+            "",
+        )
+        self.assertEqual(
+            reference_curation_signals._normalize_subtitle_candidate("Join the discussion on this paper page"),
+            "",
+        )
+        self.assertEqual(
+            reference_curation_signals._normalize_subtitle_candidate(
+                "<< /Metadata 3 0 R /Names 4 0 R /OpenAction 5 0 R /Outlines 6 0 R /PageMode /UseOutlines /Pages 7 0 R /Type /Catalog >>"
+            ),
+            "",
+        )
+        self.assertEqual(
+            reference_curation_signals._normalize_subtitle_candidate("Concise prose subtitle"),
+            "Concise prose subtitle",
+        )
+
+    def test_title_subtitle_resolver_preserves_local_metadata_verbatim(self):
+        result = reference_curation_signals.resolve_reference_title_subtitle(
+            reference={"id": "reference-1-v1", "title": ""},
+            catalog_entry={
+                "title": "Exact Source Title",
+                "metadata": {"subtitle": "Exact Source Subtitle"},
+            },
+            web_search_enabled=False,
+            now="2026-05-20T12:00:00Z",
+        )
+
+        self.assertEqual(result["status"], "resolved")
+        self.assertEqual(result["title"], "Exact Source Title")
+        self.assertEqual(result["subtitle"], "Exact Source Subtitle")
+        self.assertEqual(result["title_mode"], "original_metadata")
+        self.assertEqual(result["subtitle_mode"], "original_metadata")
+
+    def test_title_subtitle_plan_updates_title_and_metadata_attachment(self):
+        reference = {
+            "id": "reference-a-v1",
+            "lineageId": "reference-a",
+            "versionNumber": 1,
+            "externalItemId": "item-a",
+            "title": "",
+            "sourceUri": "https://example.test/ref",
+            "metadata": {},
+        }
+
+        class FakeSemantic:
+            pass
+
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals.resolve_reference_title_subtitle",
+            return_value={
+                "status": "resolved",
+                "title": "Exact Source Title",
+                "subtitle": "Exact Source Subtitle",
+                "title_mode": "original_web_metadata",
+                "subtitle_mode": "original_web_metadata",
+                "source": "html_metadata",
+                "model": "gpt-5.4-mini",
+                "web_search_used": False,
+                "source_urls": ["https://example.test/ref"],
+                "rationale": "Resolved from metadata.",
+                "summary": "This work reports the main finding and why it matters.",
+                "summary_resolution": {
+                    "summaryTokenBudget": 500,
+                    "actualTokenEstimate": 20,
+                    "model": "gpt-5.4-mini",
+                    "promptVersion": "reference-title-subtitle-summary-v1-outcome",
+                    "source": "llm_outcome_summary",
+                    "source_urls": ["https://example.test/ref"],
+                    "run_id": "run-1",
+                    "resolved_at": "2026-05-20T12:00:00Z",
+                    "rationale": "Outcome summary generated from source text.",
+                },
+                "run_id": "run-1",
+                "resolved_at": "2026-05-20T12:00:00Z",
+                "prompt_version": "",
+                "warnings": [],
+            },
+        ):
+            plan = reference_curation_signals.build_reference_title_subtitle_plan(
+                reference=reference,
+                web_search_enabled=False,
+                now="2026-05-20T12:00:00Z",
+                semantic_client=FakeSemantic(),
+            )
+
+        self.assertEqual(plan["action"], "update")
+        self.assertEqual(plan["records"][0]["modelName"], "Reference")
+        self.assertEqual(plan["records"][0]["input"]["title"], "Exact Source Title")
+        self.assertEqual(plan["records"][1]["modelName"], "ModelAttachment")
+        metadata = json.loads(plan["records"][1]["body"])
+        self.assertEqual(metadata["subtitle"], "Exact Source Subtitle")
+        self.assertEqual(metadata["summary"], "This work reports the main finding and why it matters.")
+        self.assertEqual(metadata["title_subtitle_resolution"]["title_mode"], "original_web_metadata")
+        self.assertEqual(metadata["summary_resolution"]["summaryTokenBudget"], 500)
+
+    def test_title_subtitle_resolve_reports_vector_sync_surface_status(self):
+        reference = {
+            "id": "reference-a-v1",
+            "lineageId": "reference-a",
+            "versionState": "current",
+            "curationStatus": "accepted",
+            "externalItemId": "item-a",
+            "title": "",
+            "sourceUri": "https://example.test/ref",
+            "metadata": {},
+        }
+
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals._semantic_client",
+            return_value=mock.Mock(get_reference=mock.Mock(return_value={"reference": reference})),
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._read_reference_sidecar",
+            return_value={},
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._read_reference_catalog_entry",
+            return_value={},
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals.build_reference_title_subtitle_plan",
+            return_value={
+                "kind": "reference.title-subtitle.plan",
+                "action": "update",
+                "reference": {"id": "reference-a-v1", "lineageId": "reference-a"},
+                "resolution": {"status": "resolved", "title": "Resolved Title", "subtitle": "Resolved Subtitle"},
+                "records": [{"modelName": "Reference", "action": "update", "input": {"id": "reference-a-v1", "title": "Resolved Title"}}],
+                "warnings": [],
+            },
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._apply_plan_if_requested",
+            return_value={"action": "update", "apply": True, "applied": [{"modelName": "Reference", "action": "update", "id": "reference-a-v1"}], "warnings": []},
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals.apply_title_subtitle_local_metadata",
+            return_value={"updated": [{"target": "catalog"}], "errors": [], "skipped": []},
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._sync_reference_vectors",
+            return_value={
+                "failed": False,
+                "resultsByLineageId": {"reference-a": {"updated": True, "skipped": None, "failed": None}},
+                "resultsByReferenceId": {"reference-a-v1": {"updated": True, "skipped": None, "failed": None}},
+            },
+        ):
+            result = reference_curation_signals.reference_title_subtitle_resolve(
+                reference_id="reference-a-v1",
+                apply=True,
+            )
+
+        self.assertTrue(result["localUpdated"])
+        self.assertTrue(result["graphqlUpdated"])
+        self.assertTrue(result["vectorIndexUpdated"])
+        self.assertIsNone(result["vectorIndexSkipped"])
+        self.assertIsNone(result["vectorIndexFailed"])
+
+    def test_title_subtitle_resolve_marks_partial_failure_when_vector_sync_fails(self):
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals._sync_reference_vectors",
+            return_value={
+                "failed": True,
+                "message": "Vector index sync failed after GraphQL/local updates.",
+                "resultsByLineageId": {"reference-a": {"updated": False, "skipped": None, "failed": "Vector index sync failed after GraphQL/local updates."}},
+                "resultsByReferenceId": {"reference-a-v1": {"updated": False, "skipped": None, "failed": "Vector index sync failed after GraphQL/local updates."}},
+            },
+        ):
+            annotated = reference_curation_signals._attach_title_subtitle_surface_statuses(
+                {
+                    "action": "update",
+                    "apply": True,
+                    "applied": [{"modelName": "Reference", "action": "update", "id": "reference-a-v1"}],
+                    "localMetadata": {"updated": [{"target": "catalog"}]},
+                    "warnings": [],
+                },
+                references=[{
+                    "id": "reference-a-v1",
+                    "lineageId": "reference-a",
+                    "versionState": "current",
+                    "curationStatus": "accepted",
+                }],
+                apply=True,
+                vector_sync=True,
+            )
+
+        self.assertIn("vectorSync", annotated)
+        self.assertIsNotNone(annotated["vectorIndexFailed"])
+        self.assertTrue(annotated["partialFailure"])
+
+    def test_catalog_title_subtitle_enrichment_writes_metadata_without_web(self):
+        result = reference_curation_signals.enrich_reference_catalog_title_subtitle(
+            catalog={
+                "items": [
+                    {
+                        "item_id": "item-1",
+                        "metadata": {
+                            "title": "Verbatim Catalog Title",
+                            "subtitle": "Verbatim Catalog Subtitle",
+                            "summary": "Existing metadata summary.",
+                        },
+                    }
+                ]
+            },
+            web_search=False,
+        )
+
+        item = result["catalog"]["items"][0]
+        self.assertEqual(item["title"], "Verbatim Catalog Title")
+        self.assertEqual(item["subtitle"], "Verbatim Catalog Subtitle")
+        self.assertEqual(item["metadata"]["subtitle"], "Verbatim Catalog Subtitle")
+        self.assertEqual(item["summary"], "Existing metadata summary.")
+        self.assertEqual(item["metadata"]["summary"], item["summary"])
+        self.assertEqual(item["metadata"]["title_subtitle_resolution"]["title_mode"], "original_metadata")
+        self.assertIn("summary_resolution", item["metadata"])
+
+    def test_resolver_ignores_bullet_list_subtitle_from_local_metadata(self):
+        result = reference_curation_signals.resolve_reference_title_subtitle(
+            reference={"id": "reference-1-v1", "title": "Reliable Title"},
+            catalog_entry={
+                "title": "Reliable Title",
+                "metadata": {"subtitle": "- one\n- two", "summary": "A valid local summary."},
+            },
+            web_search_enabled=False,
+            now="2026-05-20T12:00:00Z",
+        )
+
+        self.assertEqual(result["status"], "resolved")
+        self.assertEqual(result["title"], "Reliable Title")
+        self.assertEqual(result["subtitle"], "")
+        self.assertEqual(result["subtitle_mode"], "unresolved")
+        self.assertEqual(result["summary"], "A valid local summary.")
+
+    def test_catalog_title_subtitle_enrichment_prefers_newest_items(self):
+        result = reference_curation_signals.enrich_reference_catalog_title_subtitle(
+            catalog={
+                "items": [
+                    {
+                        "id": "older-item",
+                        "created_at": "2026-01-01T00:00:00Z",
+                        "title": "Older Title",
+                        "metadata": {},
+                    },
+                    {
+                        "id": "newer-item",
+                        "created_at": "2026-05-20T00:00:00Z",
+                        "title": "Newer Title",
+                        "metadata": {},
+                    },
+                ]
+            },
+            web_search=False,
+            max_count=1,
+        )
+
+        self.assertEqual(len(result["items"]), 1)
+        self.assertEqual(result["items"][0]["itemKey"], "1")
+
+    def test_catalog_only_missing_requires_title_subtitle_and_summary(self):
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals.generate_outcome_summary",
+            return_value="Generated summary for only-missing test.",
+        ):
+            result = reference_curation_signals.enrich_reference_catalog_title_subtitle(
+                catalog={
+                    "items": [
+                        {
+                            "id": "item-1",
+                            "title": "Existing Title",
+                            "subtitle": "Existing Subtitle",
+                            "metadata": {
+                                "title": "Existing Title",
+                                "subtitle": "Existing Subtitle",
+                            },
+                        }
+                    ]
+                },
+                web_search=False,
+                only_missing=True,
+            )
+
+        self.assertEqual(result["items"][0]["action"], "update")
+        enriched = result["catalog"]["items"][0]
+        self.assertTrue(enriched.get("summary"))
+        self.assertTrue(enriched.get("metadata", {}).get("summary"))
+
+    def test_refresh_summary_updates_metadata_summary_even_with_existing_title_subtitle(self):
+        reference = {
+            "id": "reference-a-v1",
+            "lineageId": "reference-a",
+            "versionNumber": 1,
+            "externalItemId": "item-a",
+            "title": "Existing Title",
+            "sourceUri": "https://example.test/ref",
+            "metadata": {
+                "subtitle": "Existing Subtitle",
+                "summary": "Old summary.",
+                "summary_resolution": {"summaryTokenBudget": 500},
+            },
+        }
+
+        class FakeSemantic:
+            pass
+
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals.resolve_reference_title_subtitle",
+            return_value={
+                "status": "resolved",
+                "title": "Existing Title",
+                "subtitle": "Existing Subtitle",
+                "title_mode": "existing_reference",
+                "subtitle_mode": "existing_reference_metadata",
+                "source": "llm_outcome_summary",
+                "model": "gpt-5.4-mini",
+                "web_search_used": False,
+                "source_urls": [],
+                "rationale": "Summary refresh.",
+                "summary": "New summary content.",
+                "summary_resolution": {
+                    "summaryTokenBudget": 500,
+                    "actualTokenEstimate": 10,
+                    "model": "gpt-5.4-mini",
+                    "promptVersion": "reference-title-subtitle-summary-v1-outcome",
+                    "source": "llm_outcome_summary",
+                    "source_urls": [],
+                    "run_id": "run-1",
+                    "resolved_at": "2026-05-20T12:00:00Z",
+                    "rationale": "Refreshed summary.",
+                },
+                "run_id": "run-1",
+                "resolved_at": "2026-05-20T12:00:00Z",
+                "prompt_version": "",
+                "warnings": [],
+            },
+        ):
+            plan = reference_curation_signals.build_reference_title_subtitle_plan(
+                reference=reference,
+                web_search_enabled=False,
+                refresh=False,
+                refresh_summary=True,
+                now="2026-05-20T12:00:00Z",
+                semantic_client=FakeSemantic(),
+            )
+
+        self.assertEqual(plan["action"], "update")
+        self.assertEqual(plan["records"][0]["modelName"], "Reference")
+        self.assertEqual(plan["records"][0]["input"]["title"], "Existing Title")
+        metadata = json.loads(plan["records"][1]["body"])
+        self.assertEqual(metadata["subtitle"], "Existing Subtitle")
+        self.assertEqual(metadata["summary"], "New summary content.")
+
+    def test_local_title_normalization_strips_citation_wrappers(self):
+        result = reference_curation_signals.resolve_reference_title_subtitle(
+            reference={},
+            catalog_entry={
+                "title": "[2408.15247] AutoGen Studio: A No-Code Developer Tool for Building and Debugging Multi-Agent Systems - arXiv, accessed May 19, 2026,",
+                "metadata": {},
+            },
+            sidecar={},
+            web_search_enabled=False,
+        )
+
+        self.assertEqual(
+            result["title"],
+            "AutoGen Studio: A No-Code Developer Tool for Building and Debugging Multi-Agent Systems",
+        )
+        self.assertEqual(
+            result["subtitle"],
+            "A No-Code Developer Tool for Building and Debugging Multi-Agent Systems",
+        )
+
+    def test_placeholder_title_is_not_written(self):
+        result = reference_curation_signals.resolve_reference_title_subtitle(
+            reference={},
+            catalog_entry={},
+            sidecar={},
+            web_search_enabled=True,
+            llm_resolver=lambda **_: {
+                "title": "Unresolved",
+                "subtitle": "ScienceDirect article metadata unavailable",
+                "title_mode": "unresolved",
+                "subtitle_mode": "generated_fallback",
+                "source_urls": [],
+                "rationale": "Could not verify.",
+                "promptVersion": "test",
+                "model": "gpt-5.4-mini",
+            },
+        )
+
+        self.assertEqual(result["status"], "unresolved")
+        self.assertEqual(result["title"], "")
+        self.assertEqual(result["subtitle"], "")
 
     def test_semantic_neighbors_and_walk_use_graph_indexes(self):
         calls = []

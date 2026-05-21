@@ -11,7 +11,7 @@ import {
 } from "./news-desk-taxonomy-client";
 import {
   beginAccessCheck,
-  beginDeskLoad,
+  beginAuthenticatedDeskHydration,
   createInitialNewsDeskShellState,
   patchDashboard,
   resolveDashboardFailure,
@@ -71,7 +71,7 @@ export function NewsDeskClientProvider({ children }: Readonly<{ children: React.
       return;
     }
 
-    setShell((current) => beginDeskLoad(current, access.auth));
+    setShell((current) => beginAuthenticatedDeskHydration(current, access.auth, { canManageUsers: access.isAdmin }));
 
     try {
       const dashboard = await loadEditorNewsDeskDashboard({ isAdmin: access.isAdmin });
