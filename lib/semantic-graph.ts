@@ -305,6 +305,12 @@ export class SemanticGraphSnapshot {
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
+  currentReferenceQualityRating(referenceLineageId: string): number | null {
+    const relation = this.outgoing("reference", referenceLineageId)
+      .find((entry) => relationTypeKey(entry) === "quality_rating_is" || entry.predicate === "quality_rating_is");
+    return relation ? qualityRatingFromRelation(relation) : null;
+  }
+
   attachmentsForReference(referenceLineageId: string): ReferenceAttachmentRecord[] {
     return (this.attachmentsByReferenceLineage.get(referenceLineageId) ?? []).sort((left, right) => left.sortKey.localeCompare(right.sortKey));
   }
@@ -485,6 +491,17 @@ function fallbackRelationObject(relation: SemanticRelationRecord, side: "subject
     label: `${kind} ${lineageId}`,
     href: newsDeskHrefForSemanticObject(kind, lineageId),
   };
+}
+
+function qualityRatingFromRelation(relation: Pick<SemanticRelationRecord, "score" | "objectLineageId" | "objectId">): number | null {
+  const score = typeof relation.score === "number" ? relation.score : Number(relation.score);
+  if (Number.isFinite(score) && Number.isInteger(score) && score >= 1 && score <= 5) return score;
+  return qualityRatingFromNodeKey(relation.objectLineageId) ?? qualityRatingFromNodeKey(relation.objectId);
+}
+
+function qualityRatingFromNodeKey(value: string | null | undefined): number | null {
+  const match = /(?:quality[-_.]?rating[-_.]?)?([1-5])[-_.]?star/i.exec(value ?? "");
+  return match ? Number(match[1]) : null;
 }
 
 function pushMap<K, V>(map: Map<K, V[]>, key: K, value: V) {

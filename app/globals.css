@@ -3755,8 +3755,14 @@ img {
   grid-column: span 2;
 }
 
+.newsroom-card--span-3x1,
+.newsroom-card--span-3x2 {
+  grid-column: span 3;
+}
+
 .newsroom-card--span-1x2,
-.newsroom-card--span-2x2 {
+.newsroom-card--span-2x2,
+.newsroom-card--span-3x2 {
   min-height: calc(var(--paper-rhythm) * 13);
 }
 
@@ -3799,15 +3805,11 @@ img {
   overflow-wrap: anywhere;
 }
 
-.newsroom-card--span-2x2 .newsroom-card__title {
-  font-size: 2.7rem;
-  line-height: 0.92;
-}
-
-.newsroom-card--span-2x1 .newsroom-card__title,
-.newsroom-card--span-1x2 .newsroom-card__title {
-  font-size: 1.9rem;
-  line-height: 0.94;
+.newsroom-card[data-newsroom-card-quality="low"] .newsroom-card__title {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
 }
 
 .newsroom-card__body {
@@ -4424,6 +4426,74 @@ img {
   gap: 0;
 }
 
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-detail__meta-row {
+  color: var(--muted-strong);
+  display: block;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: var(--paper-rhythm);
+  min-height: var(--paper-rhythm);
+  text-transform: uppercase;
+}
+
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-curation-cluster {
+  float: right;
+  margin: 0 0 var(--paper-rhythm) var(--paper-rhythm);
+  max-width: min(100%, 27rem);
+}
+
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-curation-cluster__row {
+  align-items: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-curation-cluster__decision,
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-curation-cluster .news-desk-detail-toolbar-button,
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-curation-cluster .news-desk-detail-toggle {
+  min-height: var(--paper-rhythm);
+}
+
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-curation-cluster__stars {
+  align-items: center;
+  display: inline-flex;
+  gap: 2px;
+  min-height: var(--paper-rhythm);
+}
+
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-curation-cluster__star {
+  align-items: center;
+  background: transparent;
+  border: 1px solid rgb(var(--rule-rgb) / 0.38);
+  color: rgb(var(--ink-solid-rgb) / 0.54);
+  cursor: pointer;
+  display: inline-flex;
+  height: var(--paper-rhythm);
+  justify-content: center;
+  padding: 0;
+  width: var(--paper-rhythm);
+}
+
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-curation-cluster__star:hover,
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-curation-cluster__star[aria-pressed="true"],
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-curation-cluster__star[data-filled="true"] {
+  background: rgb(var(--ink-solid-rgb) / 0.08);
+  color: rgb(var(--ink-solid-rgb) / var(--ink-display-alpha));
+}
+
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-curation-cluster__star:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-curation-cluster[data-reference-curation-status="rejected"] .news-desk-reference-curation-cluster__star {
+  color: rgb(var(--ink-solid-rgb) / 0.32);
+}
+
 .newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-semantic-detail header .story-label,
 .newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-semantic-detail header span,
 .newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-semantic-detail__subheading,
@@ -4438,6 +4508,11 @@ img {
 
 .newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-semantic-detail header strong {
   line-height: calc(var(--paper-rhythm) * 2);
+}
+
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-semantic-detail__subheading,
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-semantic-detail__summary {
+  display: block;
 }
 
 .newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-detail-block {
@@ -4480,6 +4555,18 @@ img {
 .newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-detail-line button {
   margin-top: 0;
   min-height: var(--paper-rhythm);
+}
+
+@media (max-width: 900px) {
+  .newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-curation-cluster {
+    float: none;
+    margin: var(--paper-rhythm) 0 0;
+    max-width: none;
+  }
+
+  .newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-curation-cluster__row {
+    justify-content: flex-start;
+  }
 }
 
 .news-desk-detail-toggle:hover,
@@ -6196,6 +6283,11 @@ img {
     font-size: 2.45rem;
   }
 
+  .newsroom-card--span-3x1,
+  .newsroom-card--span-3x2 {
+    grid-column: span 2;
+  }
+
   .newsroom-section-rail {
     grid-template-columns: 1fr;
   }
@@ -6291,14 +6383,11 @@ img {
     font-size: 1.18rem;
   }
 
-  .newsroom-card--span-2x2 .newsroom-card__title {
-    font-size: 2.2rem;
+  .newsroom-card--span-3x1,
+  .newsroom-card--span-3x2 {
+    grid-column: span 2;
   }
 
-  .newsroom-card--span-2x1 .newsroom-card__title,
-  .newsroom-card--span-1x2 .newsroom-card__title {
-    font-size: 1.58rem;
-  }
 }
 
 @media (max-width: 599px) {
@@ -6358,14 +6447,11 @@ img {
     font-size: 1.08rem;
   }
 
-  .newsroom-card--span-2x2 .newsroom-card__title {
-    font-size: 1.85rem;
+  .newsroom-card--span-3x1,
+  .newsroom-card--span-3x2 {
+    grid-column: span 2;
   }
 
-  .newsroom-card--span-2x1 .newsroom-card__title,
-  .newsroom-card--span-1x2 .newsroom-card__title {
-    font-size: 1.32rem;
-  }
 }
 
 @media (max-width: 430px) {
@@ -6391,12 +6477,15 @@ img {
   }
 
   .newsroom-card--span-2x1,
-  .newsroom-card--span-2x2 {
+  .newsroom-card--span-2x2,
+  .newsroom-card--span-3x1,
+  .newsroom-card--span-3x2 {
     grid-column: span 1;
   }
 
   .newsroom-card--span-1x2,
-  .newsroom-card--span-2x2 {
+  .newsroom-card--span-2x2,
+  .newsroom-card--span-3x2 {
     min-height: calc(var(--paper-rhythm) * 9);
   }
 }

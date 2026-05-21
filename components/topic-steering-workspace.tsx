@@ -321,6 +321,17 @@ type ReferenceReviewResponse = {
   errors?: Array<{ message?: string | null } | string | null> | null;
 };
 
+type ReferenceQualityResponse = {
+  data?: {
+    ok?: boolean | null;
+    referenceId?: string | null;
+    rating?: number | null;
+    status?: string | null;
+    relationId?: string | null;
+  } | null;
+  errors?: Array<{ message?: string | null } | string | null> | null;
+};
+
 type MergeSelection = {
   source: UserDirectoryEntry;
   targetUserKey: string;
@@ -1254,6 +1265,72 @@ function NewsDeskDashboard({
           setActionState({ id: reference.id, message: `${action} saved`, tone: "ok" });
         } catch (error) {
           setActionState({ id: reference.id, message: error instanceof Error ? error.message : `${action} failed`, tone: "error" });
+        }
+      })();
+    });
+  }
+
+  function runReferenceQualityRating(reference: ReferenceRecord, rating: number) {
+    const current = resolveReferenceCurationDisplayState(reference, graph);
+    const nextStatus = rating >= 3 ? "accepted" : "rejected";
+    if (
+      (nextStatus === "accepted" && current.effectiveStatus === "accepted" && current.persistedQualityRating === rating)
+      || (nextStatus === "rejected" && current.effectiveStatus === "rejected" && current.persistedQualityRating === null)
+    ) {
+      return;
+    }
+    setActionState({ id: `reference-quality-${reference.id}`, message: `${rating}-star rating pending`, tone: "pending" });
+    const now = new Date().toISOString();
+    if (dashboard.isDemo) {
+      applyReferenceRecord(buildReviewedReferenceRecord(referencesRef.current, reference, {
+        actorLabel: authState.label,
+        nextStatus,
+        note: null,
+        now,
+      }));
+      setSemanticRelations((currentRelations) => upsertReferenceQualityRelations(
+        currentRelations,
+        reference,
+        nextStatus === "accepted" ? rating : null,
+        authState.label,
+        now,
+      ));
+      setActionState({ id: `reference-quality-${reference.id}`, message: `${rating}-star rating saved`, tone: "ok" });
+      return;
+    }
+    startTransition(() => {
+      void (async () => {
+        try {
+          const response = await dataClient.mutations.setReferenceQualityRating(
+            {
+              referenceId: reference.id,
+              rating,
+              actorLabel: authState.label,
+            },
+            { authMode: USER_POOL_AUTH_MODE },
+          );
+          const result = assertReferenceQualityMutationSucceeded(response as ReferenceQualityResponse, reference.id, rating);
+          applyReferenceRecord(buildReviewedReferenceRecord(referencesRef.current, reference, {
+            actorLabel: authState.label,
+            nextStatus: result.status ?? nextStatus,
+            note: null,
+            now,
+          }));
+          setSemanticRelations((currentRelations) => upsertReferenceQualityRelations(
+            currentRelations,
+            reference,
+            result.status === "accepted" ? rating : null,
+            authState.label,
+            now,
+            result.relationId ?? null,
+          ));
+          setActionState({ id: `reference-quality-${reference.id}`, message: `${rating}-star rating saved`, tone: "ok" });
+        } catch (error) {
+          setActionState({
+            id: `reference-quality-${reference.id}`,
+            message: error instanceof Error ? error.message : "Quality rating failed",
+            tone: "error",
+          });
         }
       })();
     });
@@ -2448,6 +2525,7 @@ function NewsDeskDashboard({
             summary={summary}
             disabled={controlsDisabled}
             onReview={runReferenceCurationAction}
+            onSetQualityRating={runReferenceQualityRating}
             onCreateInsight={createInsight}
             onReviewTopicLabel={runReferenceTopicLabelAction}
           />
@@ -5099,6 +5177,7 @@ function ReferencesDeskView({
   isDemo,
   onCreateInsight,
   onReview,
+  onSetQualityRating,
   onReviewTopicLabel,
   references,
   semanticRelations,
@@ -5113,6 +5192,7 @@ function ReferencesDeskView({
   isDemo?: boolean;
   onCreateInsight: (target: InsightTarget, summary: string, body: string) => Promise<void>;
   onReview: (reference: ReferenceRecord, action: ReferenceCurationAction, note?: string, reasonCode?: ReferenceRejectionReasonCode | null) => void;
+  onSetQualityRating: (reference: ReferenceRecord, rating: number) => void;
   onReviewTopicLabel: (input: { action: TopicLabelAction; category: CategorySteeringCategory; note?: string | null; reference: ReferenceRecord; sourceRelationId?: string | null }) => void;
   references: ReferenceRecord[];
   semanticRelations: SemanticRelationRecord[];
@@ -5122,7 +5202,6 @@ function ReferencesDeskView({
   const [metricStatusFilter, setMetricStatusFilter] = useState("");
   const [selectedReferenceLineageId, setSelectedReferenceLineageId] = useState(initialReferenceLineageId ?? "");
   const [isReferenceDetailOpen, setIsReferenceDetailOpen] = useState(Boolean(initialReferenceLineageId));
-  const [referenceRejectionReasonCode, setReferenceRejectionReasonCode] = useState<ReferenceRejectionReasonCode>("out_of_scope");
   const categoryContext = useMemo(() => buildCategoryDrilldownContext(categories, initialCategoryLineageId), [categories, initialCategoryLineageId]);
   const effectiveStatusFilter = statusFilter || metricStatusFilter;
   const feed = useNewsroomPagedRows({
@@ -5170,7 +5249,12 @@ function ReferencesDeskView({
     : `${filteredReferences.length} private corpus items`;
   const statusCounts = categoryFilter ? countReferencesByStatus(visibleReferences) : summary?.facets?.references?.byCurationStatus ?? summary?.referenceStatusCounts ?? countReferencesByStatus(visibleReferences);
   const totalReferenceCount = categoryFilter ? visibleReferences.length : summaryCountFromRecord(summary, "references") || visibleReferences.length;
-  const cards = filteredReferences.map((reference, index) => referenceToNewsroomCard(reference, index, referenceSubtitles.get(reference.id) ?? null));
+  const cards = filteredReferences.map((reference, index) => referenceToNewsroomCard(
+    reference,
+    index,
+    referenceSubtitles.get(reference.id) ?? null,
+    referenceQualityForList(reference, graph),
+  ));
   const selectReference = (lineageId: string) => {
     setSelectedReferenceLineageId(lineageId);
     setIsReferenceDetailOpen(true);
@@ -5182,44 +5266,12 @@ function ReferencesDeskView({
       selectedReference,
       action,
       undefined,
-      action === "reject" ? referenceRejectionReasonCode : null,
+      action === "reject" ? "other" : null,
     );
   };
-  const selectedReferenceStatus = selectedReference?.curationStatus ?? "pending";
-  const referenceActions: NewsroomDetailAction[] = selectedReference ? [
-    referenceInsight.action,
-    ...(selectedReferenceStatus === "pending" ? [
-      {
-        key: "accept",
-        label: "Accept",
-        disabled,
-        onSelect: () => runReferenceAction("accept"),
-      },
-      {
-        key: "reject",
-        label: "Reject",
-        disabled,
-        onSelect: () => runReferenceAction("reject"),
-      },
-    ] : [
-      {
-        key: "reopen",
-        label: "Reopen",
-        disabled,
-        onSelect: () => runReferenceAction("reopen"),
-      },
-    ]),
-    ...(selectedReferenceStatus !== "archived" ? [{
-      key: "archive",
-      label: "Archive",
-      disabled,
-      onSelect: () => runReferenceAction("archive"),
-    }] : []),
-  ] : [];
-
-  useEffect(() => {
-    setReferenceRejectionReasonCode("out_of_scope");
-  }, [selectedReference?.id]);
+  const selectedReferenceCuration = selectedReference
+    ? resolveReferenceCurationDisplayState(selectedReference, graph)
+    : null;
 
   return (
     <>
@@ -5229,7 +5281,7 @@ function ReferencesDeskView({
         canExpandDetail={Boolean(selectedReference)}
         detailOpen={isReferenceDetailOpen}
         selectionScrollKey={selectedLineageId}
-        actions={referenceActions}
+        actions={[]}
         utilityActions={[referenceKnowledgeQuery.action]}
         lede={(
           <section className="news-desk-lede news-desk-assignment-lede" aria-labelledby="reference-management-title">
@@ -5279,9 +5331,11 @@ function ReferencesDeskView({
             categorySets={categorySets}
             disabled={disabled}
             graph={graph}
-            onReasonCodeChange={setReferenceRejectionReasonCode}
+            insightAction={referenceInsight.action}
+            onReview={runReferenceAction}
             onReviewTopicLabel={onReviewTopicLabel}
-            reasonCode={referenceRejectionReasonCode}
+            onSetQualityRating={onSetQualityRating}
+            curation={selectedReferenceCuration}
             reference={selectedReference}
             semanticRelations={semanticRelations}
             knowledgeQuery={referenceKnowledgeQuery}
@@ -6037,6 +6091,67 @@ function EllipsisIcon() {
       <circle cx="12" cy="12" r="1" />
       <circle cx="19" cy="12" r="1" />
       <circle cx="5" cy="12" r="1" />
+    </svg>
+  );
+}
+
+function ThumbsUpIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="news-desk-detail-toggle__icon"
+      fill="none"
+      height="24"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2.4"
+      viewBox="0 0 24 24"
+      width="24"
+    >
+      <path d="M7 10v10" />
+      <path d="M11 20h7.2a1.8 1.8 0 0 0 1.8-1.5l1-6.5a1.8 1.8 0 0 0-1.8-2H15V6.8A1.8 1.8 0 0 0 13.2 5L11 10Z" />
+      <path d="M7 20H4V10h3" />
+    </svg>
+  );
+}
+
+function ThumbsDownIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="news-desk-detail-toggle__icon"
+      fill="none"
+      height="24"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2.4"
+      viewBox="0 0 24 24"
+      width="24"
+    >
+      <path d="M7 14V4" />
+      <path d="M11 4h7.2A1.8 1.8 0 0 1 20 5.5l1 6.5a1.8 1.8 0 0 1-1.8 2H15v3.2a1.8 1.8 0 0 1-1.8 1.8L11 14Z" />
+      <path d="M7 4H4v10h3" />
+    </svg>
+  );
+}
+
+function StarIcon({ filled = false }: { filled?: boolean }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className="news-desk-detail-toggle__icon"
+      fill={filled ? "currentColor" : "none"}
+      height="24"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2.2"
+      viewBox="0 0 24 24"
+      width="24"
+    >
+      <path d="m12 3.8 2.55 5.16 5.7.83-4.12 4.02.97 5.68L12 16.8 6.9 19.49l.97-5.68-4.12-4.02 5.7-.83Z" />
     </svg>
   );
 }
@@ -7597,22 +7712,26 @@ function InsightMessageBlock({ insights }: { insights: MessageRecord[] }) {
 function ReferenceDetailPanel({
   categories,
   categorySets,
+  curation,
   disabled,
   graph,
-  onReasonCodeChange,
+  insightAction,
+  onReview,
   onReviewTopicLabel,
-  reasonCode,
+  onSetQualityRating,
   reference,
   knowledgeQuery,
   semanticRelations,
 }: {
   categories: CategorySteeringCategory[];
   categorySets: CategorySteeringCategorySet[];
+  curation: ReferenceCurationDisplayState | null;
   disabled: boolean;
   graph: SemanticGraph;
-  onReasonCodeChange: (reasonCode: ReferenceRejectionReasonCode) => void;
+  insightAction: NewsroomDetailAction | null;
+  onReview: (action: ReferenceCurationAction) => void;
   onReviewTopicLabel: (input: { action: TopicLabelAction; category: CategorySteeringCategory; note?: string | null; reference: ReferenceRecord; sourceRelationId?: string | null }) => void;
-  reasonCode: ReferenceRejectionReasonCode;
+  onSetQualityRating: (reference: ReferenceRecord, rating: number) => void;
   reference: ReferenceRecord | null;
   knowledgeQuery: KnowledgeQueryControl;
   semanticRelations: SemanticRelationRecord[];
@@ -7634,7 +7753,8 @@ function ReferenceDetailPanel({
   const authors = reference.authors?.filter(Boolean).join(", ");
   const metadataPayload = modelPayloadByRole(referencePayloadState.payloads, "metadata");
   const metadataSubtitle = referenceMetadataSubtitle(metadataPayload, reference.metadata) ?? "";
-  const metadataSummary = referenceMetadataSummary(metadataPayload, reference.metadata) ?? "";
+  const metadataSummary = referenceSummaryFromPayload(metadataPayload) ?? "";
+  const detailCuration = curation ?? resolveReferenceCurationDisplayState(reference, graph);
 
   return (
     <section className="category-steering-section" aria-label="Reference detail" data-news-desk-reference-detail={lineageId}>
@@ -7642,7 +7762,16 @@ function ReferenceDetailPanel({
         <header>
           <div>
             <strong>{reference.title ?? reference.externalItemId}</strong>
-            <span>{[reference.curationStatus ?? "pending", reference.mediaType ?? "metadata", formatReferenceDate(reference)].filter(Boolean).join(" / ")}</span>
+            <div className="news-desk-reference-detail__meta-row">
+              <span>{[detailCuration.effectiveStatus, reference.mediaType ?? "metadata", formatReferenceDate(reference)].filter(Boolean).join(" / ")}</span>
+              <ReferenceCurationCluster
+                curation={detailCuration}
+                disabled={disabled}
+                insightAction={insightAction}
+                onReview={onReview}
+                onSetQualityRating={(rating) => onSetQualityRating(reference, rating)}
+              />
+            </div>
             {metadataSubtitle ? <p className="news-desk-semantic-detail__subheading">{metadataSubtitle}</p> : null}
             {metadataSummary ? <p className="news-desk-semantic-detail__summary">{metadataSummary}</p> : null}
           </div>
@@ -7660,12 +7789,6 @@ function ReferenceDetailPanel({
               {reference.sourceUri ? <div className="news-desk-detail-line"><span>Source URI</span><strong>{reference.sourceUri}</strong></div> : null}
               {reference.storagePath ? <div className="news-desk-detail-line"><span>Storage</span><strong>{reference.storagePath}</strong></div> : null}
             </div>
-            <ReferenceCurationPanel
-              disabled={disabled}
-              onReasonCodeChange={onReasonCodeChange}
-              reasonCode={reasonCode}
-              reference={reference}
-            />
             <ReferenceTopicLabelPanel
               categories={categories}
               categorySets={categorySets}
@@ -7743,13 +7866,13 @@ function MessageDetailPanel({
   const referencePayloadState = useModelPayloads("reference", linkedReference?.id, ["metadata"]);
   const referenceMetadataPayload = modelPayloadByRole(referencePayloadState.payloads, "metadata");
   const referenceSubtitle = referenceMetadataSubtitle(referenceMetadataPayload, linkedReference?.metadata);
-  const referenceSummary = referenceMetadataSummary(referenceMetadataPayload, linkedReference?.metadata);
+  const referenceSummary = referenceSummaryFromPayload(referenceMetadataPayload);
   const headerLabel = humanizeNewsroomLabel(message.messageKind ?? "message");
   const headerTitle = message.messageKind === "reference_curation"
     ? linkedReference?.title ?? linkedReference?.externalItemId ?? "Reference curation"
     : message.summary ?? "Stored message payload";
   const detailSummary = message.messageKind === "reference_curation"
-    ? referenceSummary ?? message.summary ?? null
+    ? referenceSummary ?? null
     : message.summary ?? null;
   const neighborGroups = selected ? graph.neighbors(selected.kind, selected.lineageId) : [];
   return (
@@ -7879,6 +8002,166 @@ function referenceCurationMessageRelation(
   return graph.outgoing("message", message.id)
     .find((relation) => relation.objectKind === "reference" && relationTypeKey(relation) === "comment")
     ?? null;
+}
+
+type ReferenceCurationDisplayState = {
+  effectiveDisplayedStars: number;
+  effectiveStatus: string;
+  persistedQualityRating: number | null;
+};
+
+function ReferenceCurationCluster({
+  curation,
+  disabled,
+  insightAction,
+  onReview,
+  onSetQualityRating,
+}: {
+  curation: ReferenceCurationDisplayState;
+  disabled: boolean;
+  insightAction: NewsroomDetailAction | null;
+  onReview: (action: ReferenceCurationAction) => void;
+  onSetQualityRating: (rating: number) => void;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const status = curation.effectiveStatus;
+  const showUnsetStars = status !== "rejected" && curation.persistedQualityRating === null;
+  const filledStars = status === "rejected" ? 0 : curation.effectiveDisplayedStars;
+  const menuActions = [
+    ...(status !== "pending" ? [{
+      key: "reopen",
+      label: "Reopen",
+      onSelect: () => onReview("reopen"),
+    }] : []),
+    ...(status !== "archived" ? [{
+      key: "archive",
+      label: "Archive",
+      onSelect: () => onReview("archive"),
+    }] : []),
+  ];
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    function handlePointerDown(event: PointerEvent) {
+      if (menuRef.current?.contains(event.target as Node)) return;
+      setMenuOpen(false);
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setMenuOpen(false);
+    }
+    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [menuOpen]);
+
+  return (
+    <div
+      className="news-desk-reference-curation-cluster"
+      data-news-desk-reference-curation-cluster
+      data-reference-curation-status={status}
+      data-reference-quality-stars={filledStars}
+      data-reference-quality-unset={showUnsetStars ? "true" : "false"}
+    >
+      <div className="news-desk-reference-curation-cluster__row">
+        <button
+          type="button"
+          aria-label="Accept reference"
+          aria-pressed={status === "accepted"}
+          className="news-desk-detail-toolbar-button news-desk-reference-curation-cluster__decision"
+          data-news-desk-reference-accept
+          disabled={disabled || status === "accepted"}
+          onClick={() => onReview("accept")}
+          title="Accept"
+        >
+          <ThumbsUpIcon />
+        </button>
+        <button
+          type="button"
+          aria-label="Reject reference"
+          aria-pressed={status === "rejected"}
+          className="news-desk-detail-toolbar-button news-desk-reference-curation-cluster__decision"
+          data-news-desk-reference-reject
+          disabled={disabled || status === "rejected"}
+          onClick={() => onReview("reject")}
+          title="Reject"
+        >
+          <ThumbsDownIcon />
+        </button>
+        <div className="news-desk-reference-curation-cluster__stars" role="group" aria-label="Reference quality rating">
+          {[1, 2, 3, 4, 5].map((rating) => {
+            const filled = !showUnsetStars && rating <= filledStars;
+            return (
+              <button
+                type="button"
+                aria-label={`Set ${rating} star quality`}
+                aria-pressed={filled}
+                className="news-desk-reference-curation-cluster__star"
+                data-filled={filled ? "true" : undefined}
+                data-news-desk-reference-quality-star={rating}
+                disabled={disabled}
+                key={rating}
+                onClick={() => onSetQualityRating(rating)}
+                title={`${rating} star${rating === 1 ? "" : "s"}`}
+              >
+                <StarIcon filled={filled} />
+              </button>
+            );
+          })}
+        </div>
+        {insightAction ? (
+          <button
+            type="button"
+            aria-label={insightAction.ariaLabel ?? insightAction.label}
+            className="news-desk-detail-toolbar-button"
+            data-news-desk-reference-insight-trigger
+            disabled={insightAction.disabled}
+            onClick={insightAction.onSelect}
+            title={insightAction.label}
+          >
+            {insightAction.icon ?? <InsightIcon />}
+            <span>Add Insight</span>
+          </button>
+        ) : null}
+        {menuActions.length ? (
+          <div className="newsroom-list-detail-shell__action-menu-wrap" ref={menuRef}>
+            <button
+              type="button"
+              aria-label="Reference curation actions"
+              aria-expanded={menuOpen}
+              className="news-desk-detail-toggle news-desk-detail-toggle--actions"
+              data-news-desk-reference-actions
+              disabled={disabled}
+              onClick={() => setMenuOpen((current) => !current)}
+            >
+              <EllipsisIcon />
+            </button>
+            {menuOpen ? (
+              <div className="newsroom-list-detail-shell__action-menu" role="menu">
+                {menuActions.map((action) => (
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    key={action.key}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      action.onSelect();
+                    }}
+                    role="menuitem"
+                  >
+                    {action.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
 }
 
 function ReferenceCurationPanel({
@@ -9612,19 +9895,24 @@ function formatDeskSectionLede(section: NewsDeskTab): string {
   return "";
 }
 
-function referenceToNewsroomCard(reference: ReferenceRecord, index: number, subtitle?: string | null): NewsroomCardRecord {
+function referenceToNewsroomCard(reference: ReferenceRecord, index: number, subtitle?: string | null, qualityRating?: number | null): NewsroomCardRecord {
   const lineageId = reference.lineageId ?? reference.id;
   const status = reference.curationStatus ?? "pending";
   const authors = compactArray(reference.authors).join(", ");
+  const title = reference.title ?? reference.externalItemId;
   const template = resolveNewsroomCardTemplate({
     bodyLength: subtitle?.length ?? 0,
     index,
     isUrgent: status === "pending",
     mode: "desk",
+    qualityRating,
+    sectionKey: "references",
+    title,
+    updatedAt: reference.updatedAt ?? reference.importedAt ?? null,
   });
   return {
     id: lineageId,
-    ariaLabel: `Open reference ${reference.title ?? reference.externalItemId}`,
+    ariaLabel: `Open reference ${title}`,
     body: subtitle ? newsroomCardExcerpt(subtitle, 180) : null,
     kicker: status,
     meta: [
@@ -9632,11 +9920,131 @@ function referenceToNewsroomCard(reference: ReferenceRecord, index: number, subt
       reference.corpusId,
       authors || "unattributed",
     ],
+    dataAttributes: {
+      "data-newsroom-card-quality": isLowReferenceQualityRating(qualityRating) ? "low" : undefined,
+    },
     span: template.span,
     stamp: formatReferenceDate(reference),
     templateRole: template.role,
-    title: reference.title ?? reference.externalItemId,
+    title,
   };
+}
+
+function resolveReferenceCurationDisplayState(reference: ReferenceRecord, graph: SemanticGraph): ReferenceCurationDisplayState {
+  const effectiveStatus = normalizeReferenceStatus(reference.curationStatus);
+  const persistedQualityRating = graph.currentReferenceQualityRating(reference.lineageId ?? reference.id);
+  return {
+    effectiveDisplayedStars: effectiveStatus === "rejected" ? 0 : persistedQualityRating ?? 0,
+    effectiveStatus,
+    persistedQualityRating,
+  };
+}
+
+function referenceQualityForList(reference: ReferenceRecord, graph: SemanticGraph): number | null {
+  if (normalizeReferenceStatus(reference.curationStatus) === "rejected") return null;
+  return graph.currentReferenceQualityRating(reference.lineageId ?? reference.id);
+}
+
+function qualityRatingFromRelation(relation: SemanticRelationRecord): number | null {
+  const score = typeof relation.score === "number" ? relation.score : Number(relation.score);
+  if (Number.isFinite(score) && Number.isInteger(score) && score >= 1 && score <= 5) return score;
+  return qualityRatingFromNodeKey(relation.objectLineageId) ?? qualityRatingFromNodeKey(relation.objectId);
+}
+
+function qualityRatingFromNodeKey(value: string | null | undefined): number | null {
+  const match = /(?:quality[-_.]?rating[-_.]?)?([1-5])[-_.]?star/i.exec(value ?? "");
+  return match ? Number(match[1]) : null;
+}
+
+function isLowReferenceQualityRating(value: number | null | undefined): boolean {
+  return typeof value === "number" && Number.isFinite(value) && value < 3;
+}
+
+function upsertReferenceQualityRelations(
+  current: SemanticRelationRecord[],
+  reference: ReferenceRecord,
+  rating: number | null,
+  actorLabel: string,
+  now: string,
+  relationId?: string | null,
+): SemanticRelationRecord[] {
+  const referenceLineageId = reference.lineageId ?? reference.id;
+  const nextRelations = current.map((relation) => (
+    relation.relationState === "current"
+      && relation.subjectKind === "reference"
+      && relation.subjectLineageId === referenceLineageId
+      && semanticRelationKind(relation) === "quality_rating_is"
+      ? {
+          ...relation,
+          relationState: "superseded",
+          updatedAt: now,
+          metadata: JSON.stringify({
+            ...metadataRecord(relation.metadata),
+            supersededAt: now,
+            supersededBy: actorLabel,
+          }),
+        }
+      : relation
+  ));
+  if (rating === null) return nextRelations;
+  const relation = buildUiReferenceQualityRelation(reference, rating, actorLabel, now, relationId ?? undefined);
+  return [relation, ...nextRelations.filter((entry) => entry.id !== relation.id)];
+}
+
+function buildUiReferenceQualityRelation(
+  reference: ReferenceRecord,
+  rating: number,
+  actorLabel: string,
+  now: string,
+  relationId?: string,
+): SemanticRelationRecord {
+  const referenceLineageId = reference.lineageId ?? reference.id;
+  const nodeLineageId = qualityNodeLineageId(rating);
+  const nodeId = qualityNodeId(rating);
+  return {
+    id: relationId ?? `semantic-relation-quality-${safeUiId(referenceLineageId)}-${rating}-${now.replace(/[^0-9TZ]/g, "")}`,
+    relationState: "current",
+    predicate: "quality_rating_is",
+    relationTypeId: "semantic-relation-type-quality-rating-is",
+    relationTypeKey: "quality_rating_is",
+    relationDomain: "curation",
+    subjectKind: "reference",
+    subjectId: reference.id,
+    subjectLineageId: referenceLineageId,
+    subjectVersionNumber: reference.versionNumber ?? null,
+    objectKind: "semanticNode",
+    objectId: nodeId,
+    objectLineageId: nodeLineageId,
+    objectVersionNumber: 1,
+    subjectStateKey: `reference#${referenceLineageId}#current`,
+    objectStateKey: `semanticNode#${nodeLineageId}#current`,
+    objectSubjectStateKey: `semanticNode#${nodeLineageId}#current#reference`,
+    predicateObjectStateKey: `quality_rating_is#semanticNode#${nodeLineageId}#current`,
+    subjectVersionKey: `reference#${reference.id}`,
+    objectVersionKey: `semanticNode#${nodeId}`,
+    score: rating,
+    confidence: null,
+    rank: 1,
+    reviewRecommended: false,
+    importedAt: now,
+    createdAt: now,
+    updatedAt: now,
+    newsroomFeedKey: "semanticRelations",
+    metadata: JSON.stringify({
+      actorLabel,
+      kind: "reference.quality-rating.manual",
+      qualityRating: rating,
+      ratedAt: now,
+    }),
+  };
+}
+
+function qualityNodeLineageId(rating: number): string {
+  return `semantic-node-quality-rating-${rating}-star`;
+}
+
+function qualityNodeId(rating: number): string {
+  return `${qualityNodeLineageId(rating)}-v1`;
 }
 
 function messageToNewsroomCard(message: MessageRecord, index: number): NewsroomCardRecord {
@@ -9646,6 +10054,9 @@ function messageToNewsroomCard(message: MessageRecord, index: number): NewsroomC
     index,
     isUrgent: message.status !== "archived",
     mode: "desk",
+    sectionKey: "messages",
+    title: message.summary ?? message.id,
+    updatedAt: message.updatedAt ?? message.createdAt ?? null,
   });
   return {
     id: message.id,
@@ -9673,6 +10084,9 @@ function assignmentToNewsroomCard(assignment: AssignmentRecord, index: number, r
     index,
     isUrgent: assignment.status === "open" || assignment.status === "claimed" || (priority !== null && priority <= 1),
     mode: "desk",
+    sectionKey: "assignments",
+    title: assignment.title,
+    updatedAt: assignment.updatedAt ?? assignment.createdAt ?? null,
   });
   return {
     id: assignment.id,
@@ -9771,10 +10185,6 @@ function referenceMetadataSubtitle(payload: HydratedModelPayload | null, fallbac
   return referenceMetadataField(payload, fallback, "subtitle");
 }
 
-function referenceMetadataSummary(payload: HydratedModelPayload | null, fallback?: unknown): string | null {
-  return referenceMetadataField(payload, fallback, "summary");
-}
-
 function referenceMetadataField(
   payload: HydratedModelPayload | null,
   fallback: unknown,
@@ -9787,6 +10197,15 @@ function referenceMetadataField(
   }
   const fallbackRecord = metadataRecord(fallback);
   return fallbackRecord ? normalizeMetadataString(fallbackRecord[key]) : null;
+}
+
+function referenceSummaryFromPayload(payload: HydratedModelPayload | null): string | null {
+  const payloadRecord = metadataRecord(payload?.json);
+  if (payloadRecord) {
+    const summary = normalizeMetadataString(payloadRecord.summary);
+    if (summary) return summary;
+  }
+  return null;
 }
 
 function metadataRecord(value: unknown): Record<string, unknown> | null {
@@ -11594,6 +12013,26 @@ function assertReferenceReviewMutationSucceeded(response: ReferenceReviewRespons
   }
   if (!response.data.messageId || !response.data.relationId) {
     throw new Error(`Reference review saved without commentary audit rows for ${referenceId}.`);
+  }
+  return response.data;
+}
+
+function assertReferenceQualityMutationSucceeded(
+  response: ReferenceQualityResponse,
+  referenceId: string,
+  rating: number,
+): NonNullable<ReferenceQualityResponse["data"]> {
+  if (response.errors?.length) {
+    throw new Error(response.errors.map(formatGraphQLError).join("; "));
+  }
+  if (!response.data?.ok) {
+    throw new Error(`Reference quality rating was not saved for ${referenceId}.`);
+  }
+  if (response.data.referenceId && response.data.referenceId !== referenceId) {
+    throw new Error(`Reference quality response did not match ${referenceId}.`);
+  }
+  if (typeof response.data.rating === "number" && response.data.rating !== rating) {
+    throw new Error(`Reference quality response returned ${response.data.rating}, expected ${rating}.`);
   }
   return response.data;
 }

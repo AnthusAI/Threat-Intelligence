@@ -255,6 +255,23 @@ Feature: Newspaper layout scenarios
     Then the concepts desk should show semantic nodes and linked objects
     And no browser console errors should occur
 
+  Scenario: Newsroom reference detail renders the header curation cluster
+    Given I open the references newsroom at 1280 by 900
+    When I open reference "reference-knowledge-corpus-demo-source-history-001"
+    Then the reference detail should render the curation cluster
+    And the reference detail should not show the lower curation selector
+    When I open the reference detail curation actions
+    Then the reference detail actions menu should offer "Reopen" and "Archive"
+    When I set the selected reference quality to 1 stars
+    Then the reference detail curation status should be "rejected"
+    And the reference detail should show 0 filled quality stars
+    When I set the selected reference quality to 4 stars
+    Then the reference detail curation status should be "accepted"
+    And the reference detail should show 4 filled quality stars
+    When I open the reference detail insight composer
+    Then the insight modal should be visible
+    And no browser console errors should occur
+
   Scenario Outline: Newsroom operational desks use newspaper card grids
     Given I open the "<section>" newsroom section at <width> by <height>
     Then the newsroom card grid should render for "<section>"

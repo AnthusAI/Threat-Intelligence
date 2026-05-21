@@ -231,6 +231,14 @@ const schema = a.schema({
     relationId: a.id(),
   }),
 
+  ReferenceQualityActionResult: a.customType({
+    ok: a.boolean().required(),
+    referenceId: a.id().required(),
+    rating: a.integer().required(),
+    status: a.string().required(),
+    relationId: a.id(),
+  }),
+
   CategorySetDraftActionResult: a.customType({
     ok: a.boolean().required(),
     action: a.string().required(),
@@ -261,6 +269,22 @@ const schema = a.schema({
       reasonCode: a.string(),
     })
     .returns(a.ref("ReferenceCurationActionResult"))
+    .authorization((allow) => [
+      allow.groups(categoryWriteGroups),
+      allow.custom(),
+    ])
+    .handler(a.handler.function(categoryAction)),
+
+  setReferenceQualityRating: a
+    .mutation()
+    .arguments({
+      referenceId: a.id().required(),
+      rating: a.integer().required(),
+      actorSub: a.string(),
+      actorLabel: a.string(),
+      note: a.string(),
+    })
+    .returns(a.ref("ReferenceQualityActionResult"))
     .authorization((allow) => [
       allow.groups(categoryWriteGroups),
       allow.custom(),

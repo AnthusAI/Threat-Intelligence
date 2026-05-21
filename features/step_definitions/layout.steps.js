@@ -197,6 +197,14 @@ When("I open assignment {string}", async function (assignmentId) {
   await page.locator(`.news-desk-assignment-row[data-assignment-candidate="${assignmentId}"]`).waitFor({ state: "visible", timeout: 10_000 });
 });
 
+When("I open reference {string}", async function (referenceId) {
+  const page = requirePage(this);
+  const card = page.locator(`[data-newsroom-card-id="${referenceId}"]`).first();
+  await card.waitFor({ state: "visible", timeout: 10_000 });
+  await card.click();
+  await page.locator(`[data-news-desk-reference-detail="${referenceId}"]`).waitFor({ state: "visible", timeout: 10_000 });
+});
+
 When("I merge newsroom user {string} into {string}", async function (sourceLabel, targetLabel) {
   const page = requirePage(this);
   const sourceRow = page.locator(".news-desk-user-row", { hasText: sourceLabel }).first();
@@ -546,6 +554,64 @@ Then("the references desk should show reference metadata and semantic neighbors"
   await page.locator("[data-news-desk-reference-detail='reference-knowledge-corpus-demo-source-history-001']").waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("text=Attachments").first().waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("[data-news-desk-neighbors]", { hasText: "classified as" }).first().waitFor({ state: "visible", timeout: 10_000 });
+});
+
+Then("the reference detail should render the curation cluster", async function () {
+  const page = requirePage(this);
+  await page.locator("[data-news-desk-reference-curation-cluster]").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-reference-accept]").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-reference-reject]").waitFor({ state: "visible", timeout: 10_000 });
+});
+
+Then("the reference detail should not show the lower curation selector", async function () {
+  const count = await requirePage(this).locator(
+    "[data-news-desk-reference-detail] .news-desk-detail-block",
+    { hasText: "Reference Curation" },
+  ).count();
+  assert.equal(count, 0, "Expected lower Reference Curation block to be removed from detail body");
+});
+
+When("I open the reference detail curation actions", async function () {
+  const page = requirePage(this);
+  await page.locator("[data-news-desk-reference-actions]").click();
+  await page.locator(".newsroom-list-detail-shell__action-menu").waitFor({ state: "visible", timeout: 10_000 });
+});
+
+Then("the reference detail actions menu should offer {string} and {string}", async function (firstLabel, secondLabel) {
+  const page = requirePage(this);
+  const labels = await page.locator(".newsroom-list-detail-shell__action-menu button").evaluateAll((nodes) => (
+    nodes.map((node) => node.textContent?.trim()).filter(Boolean)
+  ));
+  assert.ok(labels.includes(firstLabel), `Expected actions menu to include ${firstLabel}, found ${labels.join(", ")}`);
+  assert.ok(labels.includes(secondLabel), `Expected actions menu to include ${secondLabel}, found ${labels.join(", ")}`);
+});
+
+When("I set the selected reference quality to {int} stars", async function (rating) {
+  const page = requirePage(this);
+  await page.locator(`[data-news-desk-reference-quality-star="${rating}"]`).click();
+});
+
+Then("the reference detail curation status should be {string}", async function (status) {
+  await requirePage(this).waitForFunction((expectedStatus) => {
+    const cluster = document.querySelector("[data-news-desk-reference-curation-cluster]");
+    return cluster?.getAttribute("data-reference-curation-status") === expectedStatus;
+  }, status, { timeout: 10_000 });
+});
+
+Then("the reference detail should show {int} filled quality stars", async function (filledStars) {
+  await requirePage(this).waitForFunction((expectedStars) => {
+    const cluster = document.querySelector("[data-news-desk-reference-curation-cluster]");
+    return Number(cluster?.getAttribute("data-reference-quality-stars") ?? "-1") === expectedStars;
+  }, filledStars, { timeout: 10_000 });
+});
+
+When("I open the reference detail insight composer", async function () {
+  const page = requirePage(this);
+  await page.locator("[data-news-desk-reference-insight-trigger]").click();
+});
+
+Then("the insight modal should be visible", async function () {
+  await requirePage(this).locator("[data-news-desk-insight-modal]").waitFor({ state: "visible", timeout: 10_000 });
 });
 
 Then("the concepts desk should show semantic nodes and linked objects", async function () {
