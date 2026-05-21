@@ -10,8 +10,8 @@ research or reporting work, not only when editing Tactus procedures. It explains
 how to use the same workflow through CLI tools, the packaged Python entrypoint,
 and the Newsroom UI.
 
-For multi-section story-cycle runs that dispatch research and parallel reporting
-agents together, also use
+For multi-section Coverage Theme runs that dispatch research and parallel
+reporting agents together, also use
 [`skills/newsroom-story-cycle/SKILL.md`](/Users/ryan/Projects/Papyrus/skills/newsroom-story-cycle/SKILL.md).
 
 For reusable Reference summaries and quality ratings that feed ranking or
@@ -53,9 +53,12 @@ normal output of research or reporting agents.
   packet, not separate Messages.
 - Each reporting run persists as one `reporting_context_packet` Message. It is
   raw private context for editors and copywriters, not reader copy.
-- Editor `select` and `brief` decisions can create minimal draft `Item` records
-  for copywriting. Packet generation itself must not create `Item` or
-  `EditionItem` records.
+- Editor `select` and `brief` decisions create child copywriting Assignments,
+  not `Item` records. Packet generation and packet review must not create
+  `Item` or `EditionItem` records.
+- Research, reporting, and copywriting agents produce structured payloads.
+  The CLI or procedure layer owns deterministic persistence plans for Messages,
+  attachments, relations, events, Assignments, and Items.
 
 Do not treat `source_snapshots`, `proposed_references`, research packets, or
 reporting packets as folders. They are structured metadata fields in private
@@ -344,9 +347,16 @@ It is not a draft article.
    ```
 
    Use `--apply` only after reviewing the dry run. `merge` requires
-   `--target-item <id>`. `select` creates a draft article `Item`; `brief`
-   creates a draft brief `Item`; `hold` and `kill` create no Items. No decision
-   creates `EditionItem`.
+   `--target-item <id>`. `select` creates a `copywriting.article-draft`
+   Assignment; `brief` creates a `copywriting.brief-draft` Assignment; `hold`
+   and `kill` create no Items. No packet review creates `Item` or `EditionItem`.
+   Run selected copywriting work with:
+
+   ```bash
+   npm run content -- assignments run-copywriting \
+     --assignment <copywriting-assignment-id> \
+     --dry-run
+   ```
 
 ## After Proposal Intake
 

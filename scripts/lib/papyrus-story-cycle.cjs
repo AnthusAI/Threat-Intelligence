@@ -11,6 +11,7 @@ const DEFAULT_STORY_CYCLE_SECTION_BUDGETS = {
 };
 const DEFAULT_RESEARCH_MODE = "source_discovery";
 const DEFAULT_OVERASSIGNMENT_RATIO = 1.5;
+const STORY_CYCLE_THROUGH_PHASES = ["plan", "research", "reporting"];
 const REPORTING_ANGLE_LENSES = [
   { key: "accountability", label: "accountability", prompt: "who is responsible, who is affected, and what changed" },
   { key: "reader-impact", label: "reader impact", prompt: "what a reader can use, decide, or watch next" },
@@ -187,6 +188,12 @@ function buildStoryCyclePlan(options = {}) {
   return {
     ok: true,
     command: "assignments run-story-cycle",
+    coverageTheme: {
+      runId,
+      label: topic,
+      coverageKey,
+      defaultThrough: "reporting",
+    },
     runId,
     date,
     topic,
@@ -234,6 +241,10 @@ function buildStoryCycleOutput(manifest, options = {}) {
           proposedReferenceCount: countArray(run.packet?.proposedReferences ?? run.packet?.proposed_source_prospects ?? run.packet?.proposedSourceProspects),
           sourceSnapshotCount: countArray(run.packet?.sourceSnapshots ?? run.packet?.source_snapshots),
           ok: Boolean(run.ok),
+          degraded: Boolean(run.degraded ?? run.fallback),
+          fallbackReason: run.fallbackReason ?? run.fallback?.reason ?? null,
+          fallbackKind: run.fallbackKind ?? run.fallback?.kind ?? null,
+          agentExitStatus: run.agentExitStatus ?? run.exitStatus ?? null,
         })),
         reportingPackets: reportingRuns.map((run) => ({
           assignmentId: run.assignmentId,
@@ -249,14 +260,20 @@ function buildStoryCycleOutput(manifest, options = {}) {
           openQuestions: arrayValue(run.packet?.open_questions ?? run.packet?.openQuestions),
           copywriterBrief: run.packet?.copywriter_brief ?? run.packet?.copywriterBrief ?? null,
           ok: Boolean(run.ok),
+          degraded: Boolean(run.degraded ?? run.fallback),
+          fallbackReason: run.fallbackReason ?? run.fallback?.reason ?? null,
+          fallbackKind: run.fallbackKind ?? run.fallback?.kind ?? null,
+          agentExitStatus: run.agentExitStatus ?? run.exitStatus ?? null,
         })),
       };
     });
   return {
     ok: true,
     command: "assignments story-cycle-output",
+    workflowName: manifest.workflowName ?? "Coverage Theme",
     runId: manifest.runId,
     action: manifest.action,
+    through: manifest.through ?? "reporting",
     date: manifest.date,
     topic: manifest.topic,
     coverageKey: manifest.coverageKey,
@@ -273,6 +290,20 @@ function buildStoryCycleOutput(manifest, options = {}) {
       exitStatus: run.exitStatus ?? null,
       stderrPath: run.stderrPath ?? null,
       error: run.error ?? null,
+      persistenceSkippedReason: run.persistenceSkippedReason ?? null,
+    })),
+    degraded: [
+      ...(manifest.researchRuns ?? []),
+      ...(manifest.reportingRuns ?? []),
+    ].filter((run) => Boolean(run.degraded ?? run.fallback)).map((run) => ({
+      phase: run.phase,
+      sectionKey: run.sectionKey,
+      assignmentId: run.assignmentId,
+      exitStatus: run.agentExitStatus ?? run.exitStatus ?? null,
+      fallbackReason: run.fallbackReason ?? run.fallback?.reason ?? null,
+      fallbackKind: run.fallbackKind ?? run.fallback?.kind ?? null,
+      stderrPath: run.stderrPath ?? null,
+      ok: Boolean(run.ok),
     })),
   };
 }
@@ -514,7 +545,10 @@ function storyCycleReportingAssignment({ runId, date, topic, corpusKey, category
 function storyCycleAssignmentMetadata(input) {
   return {
     kind: input.kind,
+    coverageThemeKind: "coverage_theme",
     storyCycleRunId: input.runId,
+    coverageThemeRunId: input.runId,
+    coverageThemeLabel: input.topic,
     storyCycleDate: input.date,
     topic: input.topic,
     corpusKey: input.corpusKey,
@@ -722,6 +756,12 @@ function normalizeResearchMode(value) {
   throw new Error(`Invalid research mode '${value}'.`);
 }
 
+function normalizeStoryCycleThrough(value) {
+  const normalized = String(value ?? "reporting").trim().toLowerCase().replace(/-/g, "_");
+  if (STORY_CYCLE_THROUGH_PHASES.includes(normalized)) return normalized;
+  throw new Error(`Invalid story-cycle --through '${value}'. Expected plan, research, or reporting.`);
+}
+
 function positiveInteger(value, fallback) {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
@@ -777,4 +817,5 @@ module.exports = {
   SECTION_RESEARCH_LENSES,
   buildStoryCycleOutput,
   buildStoryCyclePlan,
+  normalizeStoryCycleThrough,
 };

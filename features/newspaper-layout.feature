@@ -348,7 +348,7 @@ Feature: Newspaper layout scenarios
     And assignment "assignment-demo-reporting-news-001" should not appear as an edition item
     When I review reporting packet for assignment "assignment-demo-reporting-news-001" as "select" with note "Move to copywriting"
     Then assignment "assignment-demo-reporting-news-001" should show reporting decision "select"
-    And assignment "assignment-demo-reporting-news-001" should show a draft item without edition placement
+    And assignment "assignment-demo-reporting-news-001" should show a copywriting assignment without edition placement
     And no browser console errors should occur
 
   Scenario: Newsroom story budget groups reporting packets by section
@@ -363,7 +363,7 @@ Feature: Newspaper layout scenarios
     And assignment "assignment-demo-reporting-news-001" should not appear as an edition item
     When I review story budget candidate "assignment-demo-reporting-news-001" as "select"
     Then story budget candidate "assignment-demo-reporting-news-001" should show reporting decision "select"
-    And assignment "assignment-demo-reporting-news-001" should show a draft item without edition placement
+    And story budget candidate "assignment-demo-reporting-news-001" should show a copywriting assignment
     And no browser console errors should occur
 
   Scenario: Production newsroom requires editor access

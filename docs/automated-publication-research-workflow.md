@@ -103,7 +103,10 @@ knowledge-query evidence, desk memory, or copywriting support.
 
 ## Story-Cycle Run
 
-The repeatable smoke-test and operator flow is CLI-first:
+The repeatable smoke-test and operator flow is CLI-first. In editor-facing
+language, one run is a Coverage Theme: a shared topic or coverage question
+worked through multiple section lenses. The CLI command remains
+`assignments run-story-cycle` for compatibility.
 
 ```bash
 npm run content -- assignments run-story-cycle \
@@ -116,8 +119,15 @@ npm run content -- assignments run-story-cycle \
   --research-mode source_discovery \
   --max-parallel-research 2 \
   --max-parallel-reporting 3 \
+  --through reporting \
   --json
 ```
+
+`--through plan` creates only the Coverage Theme assignment graph.
+`--through research` also persists private `research_packet` work products.
+`--through reporting` also persists private `reporting_context_packet` work
+products and is the default. Story-cycle orchestration never auto-selects
+packets or runs copywriting.
 
 Dry-run is the default. It creates local output under
 `.papyrus-runs/story-cycle-<run-id>/`: `manifest.json`, child research logs,
@@ -125,7 +135,12 @@ child reporting logs, packet JSON files, and `story-cycle-output.json`.
 
 Apply mode persists private work products only: `Assignment`, `AssignmentEvent`,
 `Message`, `ModelAttachment`, and `SemanticRelation`. It must not create
-`Item` or `EditionItem` records during packet generation.
+`Item` or `EditionItem` records during packet generation. In live apply mode,
+degraded agent output fails unless `--allow-fallback` is explicit; use
+`--require-agent-success` in smoke tests when fallback packets should be treated
+as a failure. Applied reruns reuse existing packet Messages by default so a
+Coverage Theme can resume downstream phases; pass `--refresh-packets` only when
+the intent is to regenerate already persisted packet payloads.
 
 Inspect output with:
 
@@ -135,7 +150,9 @@ npm run content -- assignments story-cycle-output \
   --json
 ```
 
-The output is grouped by section and shows the research packet, reporting
+For applied Coverage Themes, output is rediscovered from GraphQL first and uses
+the local manifest only for log paths and diagnostics. The output is grouped by
+section and shows the research packet, reporting
 packets, angles, editor recommendations, accepted evidence counts, proposed
 reference counts, risk flags, gaps, open questions, and copywriter briefs.
 
@@ -155,14 +172,27 @@ npm run content -- assignments review-reporting-packet \
 
 Decision effects:
 
-- `select`: create a minimal draft article `Item`, write a `produces` relation
-  from the reporting assignment to that draft, and record the event.
-- `brief`: create a minimal draft brief `Item`, write a `produces` relation, and
-  record the event.
+- `select`: create a child `copywriting.article-draft` Assignment, link it back
+  to the reporting Assignment and packet Message with `derived_from`, and record
+  the event.
+- `brief`: create a child `copywriting.brief-draft` Assignment, link it back to
+  the reporting Assignment and packet Message with `derived_from`, and record
+  the event.
 - `merge`: require `--target-item <id>`, link the assignment to that target
   `Item`, and record the event.
 - `hold`: record the event and keep the packet private.
 - `kill`: record the event and keep the packet private.
+
+Run the copywriting Assignment after selection:
+
+```bash
+npm run content -- assignments run-copywriting \
+  --assignment <copywriting-assignment-id> \
+  --dry-run
+```
+
+Copywriting creates or versions draft `Item` records. Packet review itself does
+not create `Item` or `EditionItem` records.
 
 Packet review never creates `EditionItem` placement. Placement remains a later
 copyediting/layout step after a draft exists.
@@ -183,10 +213,12 @@ this reporting packet?"
 ## Procedure Usage
 
 Researchers use `procedures/newsroom/research_explorer.tac` or
-`procedures/newsroom/researcher.tac` to produce `research_packet` plans.
+`procedures/newsroom/researcher.tac` to produce `research_packet` payloads.
 Reporters use `procedures/newsroom/reporter.tac` to produce
-`reporting_context_packet` plans for live `reporting.edition-candidate`
-assignments.
+`reporting_context_packet` payloads for live `reporting.edition-candidate`
+assignments. Agents do not own persistence mechanics; the CLI/procedure layer
+turns payloads into deterministic `Message`, `ModelAttachment`, and
+`SemanticRelation` writes.
 
 When current external evidence is required, Tactus snippets should import the
 standard web module:

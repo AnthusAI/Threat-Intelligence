@@ -9,9 +9,10 @@ monitor the beat while you sleep, update a publication-specific knowledge base,
 and surface surprising developments. Editor agents turn those signals into
 assignments. Reporter agents prepare private reporting packets: the verified
 facts, source trail, open questions, risks, angle, and copywriter brief an editor
-needs before commissioning reader-facing copy. The next morning, you can open
-your newsroom and see what it found, what it recommends, and what is ready for
-editor selection.
+needs before commissioning reader-facing copy. Copywriter agents turn selected
+packets into draft Items for review. The next morning, you can open your
+newsroom and see what it found, what it recommends, what needs copywriting, and
+what is ready for review.
 
 You steer it like an executive editor, as much or as little as you want:
 choosing the canonical categories for topic coverage, configuring editorial
@@ -257,6 +258,15 @@ candidate work. Follow
 when running the repeatable research -> reporting cascade for one topic across
 multiple sections.
 
+That repeatable cascade is editor-facing as a Coverage Theme: one shared topic
+or coverage question, shaped by section doctrine into research packets,
+reporting packets, editor decisions, copywriting assignments, draft Items, and
+later placement. `assignments run-story-cycle` is the CLI name for running a
+Coverage Theme; by default it stops after private reporting packets are created.
+Applied reruns reuse existing packet Messages by default so a partial Coverage
+Theme can resume forward; pass `--refresh-packets` when existing packet payloads
+should be regenerated.
+
 The dated private `Edition` record is created or updated first; each assignment
 is then linked to that edition, its `NewsroomSection`, its accepted topic scope,
 its coverage concept, its publication lane, and accepted evidence with
@@ -282,10 +292,12 @@ New packet writes link `Assignment --produces--> Message`; older
 `Message --comment--> Assignment` packet links remain readable for compatibility.
 Fresh web findings stay in packet `proposedReferences` until reference intake
 registers them and curation accepts them as `Reference` evidence. Explicit editor
-selection is the gate from private work product to draft reader-facing content:
-`select` creates a draft article `Item`, `brief` creates a draft brief `Item`,
-`merge` links the packet to an existing draft, and `hold`/`kill` keep the packet
-private. None of those packet-generation paths create `EditionItem` placement.
+selection is the gate from reporting packet to copywriting:
+`select` creates a `copywriting.article-draft` Assignment, `brief` creates a
+`copywriting.brief-draft` Assignment, `merge` links the packet to an existing
+draft, and `hold`/`kill` keep the packet private. Copywriting is the first stage
+allowed to create draft reader-facing `Item` records, and neither packet
+generation nor packet review creates `EditionItem` placement.
 The editor-only `Assignments` desk tab at `/newsroom/assignments`, including the
 Story Budget view, is the review surface for these private queues.
 
@@ -538,9 +550,11 @@ npm run content -- categories import-config --config corpora/papyrus-steering.ym
 npm run content -- newsroom import-sections --config corpora/papyrus-newsroom-sections.yml
 npm run content -- categories import-steering --config corpora/papyrus-steering.yml --corpus-key <key>
 npm run content -- assignments research-packets --assignment <assignment-id>
-npm run content -- assignments run-story-cycle --date YYYY-MM-DD --topic "<topic>" --category <category-key> --coverage-key <coverage.key> --sections culture,methods,business,law --section-budgets culture:2,methods:1,business:1,law:1 --json
+npm run content -- assignments run-story-cycle --date YYYY-MM-DD --topic "<topic>" --category <category-key> --coverage-key <coverage.key> --sections culture,methods,business,law --section-budgets culture:2,methods:1,business:1,law:1 --through plan|research|reporting [--refresh-packets] --json
 npm run content -- assignments story-cycle-output --run-id <story-cycle-run-id> --json
 npm run content -- assignments review-reporting-packet --assignment <assignment-id> --message <message-id> --decision select|merge|brief|hold|kill --note "<editor rationale>" --dry-run
+npm run content -- assignments run-copywriting --assignment <copywriting-assignment-id> --dry-run --json
+npm run content -- assignments copywriting-output --run-id <story-cycle-run-id> --json
 npm run content -- references register-catalog --config corpora/papyrus-steering.yml --corpus-key <key> --catalog <metadata/catalog.json> --status pending --ingestion-rationale "<summary, research focus, editorial mission fit>" --apply
 npm run content -- references export-analysis-manifest --config corpora/papyrus-steering.yml --corpus-key <key> --output accepted-reference-manifest.json
 npm run content -- references export-scope-training --config corpora/papyrus-steering.yml --corpus-key <key> --output reference-scope-training.json

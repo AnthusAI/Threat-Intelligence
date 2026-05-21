@@ -7,6 +7,7 @@ import type {
 } from "./category-repository";
 
 export type ReportingStoryBudgetDecision = "select" | "merge" | "brief" | "hold" | "kill";
+export type ReportingStoryBudgetPhase = "plan" | "research" | "reporting" | "review" | "copywriting" | "draft";
 
 export type ReportingStoryBudgetCandidate = {
   assignment: AssignmentRecord;
@@ -17,6 +18,8 @@ export type ReportingStoryBudgetCandidate = {
   sectionKey: string;
   sectionTitle: string;
   topicKey: string | null;
+  coverageThemeRunId: string | null;
+  phase: ReportingStoryBudgetPhase;
   coverageConceptId: string | null;
   coverageConceptTitle: string | null;
   candidateRank: number | null;
@@ -34,6 +37,12 @@ export type ReportingStoryBudgetCandidate = {
   proposedReferenceCount: number;
   decision: ReportingStoryBudgetDecision | null;
   decisionEventId: string | null;
+  degraded: boolean;
+  fallbackReason: string | null;
+  agentExitStatus: number | null;
+  copywritingAssignmentId: string | null;
+  copywritingStatus: string | null;
+  producedDraftItemId: string | null;
   draftItemId: string | null;
   targetItemId: string | null;
 };
@@ -55,6 +64,12 @@ export type ReportingStoryBudgetSection = {
   delta: number;
   state: "needs" | "full" | "over";
   candidates: ReportingStoryBudgetCandidate[];
+  phase: ReportingStoryBudgetPhase;
+  researchPacketCount: number;
+  reportingPacketCount: number;
+  copywritingAssignmentCount: number;
+  draftItemCount: number;
+  degradedCount: number;
 };
 
 export type ReportingStoryBudget = {
@@ -79,6 +94,9 @@ export function buildReportingStoryBudget(input: ReportingStoryBudgetInput): Rep
   const sectionsByKey = new Map((input.newsroomSections ?? []).map((section) => [section.id, section]));
   const linkedMessageIdsByAssignment = buildLinkedMessageIdsByAssignment(input.semanticRelations ?? []);
   const relationsByAssignment = groupRelationsByAssignment(input.semanticRelations ?? []);
+  const researchPacketIdsByReportingAssignment = buildResearchPacketIdsByReportingAssignment(input.assignments ?? [], input.messages ?? [], input.semanticRelations ?? []);
+  const copywritingByReportingAssignment = buildCopywritingByReportingAssignment(input.assignments ?? [], input.semanticRelations ?? []);
+  const producedDraftItemByCopywritingAssignment = buildProducedItemByAssignment(input.semanticRelations ?? []);
   const messagesById = new Map((input.messages ?? []).map((message) => [message.id, message]));
   const candidates = (input.assignments ?? [])
     .filter((assignment) => assignment.assignmentTypeKey === REPORTING_ASSIGNMENT_TYPE)
@@ -92,10 +110,13 @@ export function buildReportingStoryBudget(input: ReportingStoryBudgetInput): Rep
       const reportingMessages = fallbackMessages
         .filter((message) => message.messageKind === REPORTING_PACKET_KIND)
         .sort(compareCreatedAtDesc);
-      const researchPacketCount = fallbackMessages.filter((message) => message.messageKind === RESEARCH_PACKET_KIND).length;
       const reportingMessage = reportingMessages[0] ?? null;
       const packet = reportingMessage ? reportingPacketMetadata(reportingMessage, input.messagePayloads?.[reportingMessage.id]) : {};
       const assignmentMetadata = parseObject(assignment.metadata);
+      const coverageThemeRunId = normalizeString(packet.coverageThemeRunId)
+        ?? normalizeString(packet.storyCycleRunId)
+        ?? normalizeString(assignmentMetadata.coverageThemeRunId)
+        ?? normalizeString(assignmentMetadata.storyCycleRunId);
       const slotTarget = parseObject(packet.slotTarget ?? assignmentMetadata.slotTarget);
       const relations = relationsByAssignment.get(assignment.id) ?? [];
       const topicRelation = relationByType(relations, "targets_topic", "category");
@@ -117,6 +138,24 @@ export function buildReportingStoryBudget(input: ReportingStoryBudgetInput): Rep
         ?? normalizeString(assignmentMetadata.editionSlug)
         ?? "unplanned";
       const decision = latestReportingDecision(input.assignmentEvents ?? [], assignment.id);
+      const copywritingAssignment = decision?.copywritingAssignmentId
+        ? (input.assignments ?? []).find((entry) => entry.id === decision.copywritingAssignmentId) ?? null
+        : copywritingByReportingAssignment.get(assignment.id) ?? null;
+      const copywritingAssignmentId = copywritingAssignment?.id ?? decision?.copywritingAssignmentId ?? null;
+      const producedDraftItemId = copywritingAssignmentId
+        ? producedDraftItemByCopywritingAssignment.get(copywritingAssignmentId) ?? null
+        : null;
+      const researchPacketCount = Math.max(
+        fallbackMessages.filter((message) => message.messageKind === RESEARCH_PACKET_KIND).length,
+        researchPacketIdsByReportingAssignment.get(assignment.id)?.size ?? 0,
+      );
+      const phase = reportingBudgetPhase({
+        hasReportingPacket: Boolean(reportingMessage),
+        researchPacketCount,
+        decision: decision?.decision ?? null,
+        copywritingAssignmentId,
+        producedDraftItemId,
+      });
       return {
         assignment,
         assignmentId: assignment.id,
@@ -125,6 +164,8 @@ export function buildReportingStoryBudget(input: ReportingStoryBudgetInput): Rep
         editionLabel: normalizeString(assignmentMetadata.editionSlug) ?? editionId,
         sectionKey,
         sectionTitle: section?.title ?? normalizeTitle(sectionKey),
+        coverageThemeRunId,
+        phase,
         topicKey: normalizeString(packet.topicKey)
           ?? normalizeString(assignmentMetadata.focusCategoryKey)
           ?? normalizeString(topicMetadata.categoryKey)
@@ -152,7 +193,13 @@ export function buildReportingStoryBudget(input: ReportingStoryBudgetInput): Rep
         proposedReferenceCount: arrayLength(packet.proposedReferences),
         decision: decision?.decision ?? null,
         decisionEventId: decision?.eventId ?? null,
-        draftItemId: decision?.draftItemId ?? null,
+        degraded: Boolean(packet.degraded ?? packet.fallback),
+        fallbackReason: normalizeString(packet.fallbackReason) ?? normalizeString(parseObject(packet.fallback).reason),
+        agentExitStatus: normalizeNumberAllowZero(packet.agentExitStatus ?? packet.exitStatus),
+        copywritingAssignmentId,
+        copywritingStatus: copywritingAssignment?.status ?? null,
+        producedDraftItemId,
+        draftItemId: producedDraftItemId ?? decision?.draftItemId ?? null,
         targetItemId: decision?.targetItemId ?? null,
       };
     })
@@ -202,6 +249,87 @@ function groupRelationsByAssignment(relations: SemanticRelationRecord[]): Map<st
   return byAssignment;
 }
 
+function buildCopywritingByReportingAssignment(assignments: AssignmentRecord[], relations: SemanticRelationRecord[]): Map<string, AssignmentRecord> {
+  const assignmentById = new Map(assignments.map((assignment) => [assignment.id, assignment]));
+  const result = new Map<string, AssignmentRecord>();
+  for (const assignment of assignments) {
+    if (!assignment.assignmentTypeKey.startsWith("copywriting.")) continue;
+    const metadata = parseObject(assignment.metadata);
+    const sourceReportingAssignmentId = normalizeString(metadata.sourceReportingAssignmentId);
+    if (sourceReportingAssignmentId) result.set(sourceReportingAssignmentId, assignment);
+  }
+  for (const relation of relations) {
+    if (relation.relationState === "superseded") continue;
+    if ((relation.relationTypeKey ?? relation.predicate) !== "derived_from") continue;
+    if (relation.subjectKind !== "assignment" || relation.objectKind !== "assignment") continue;
+    const copywriting = assignmentById.get(relation.subjectId);
+    const reporting = assignmentById.get(relation.objectId);
+    if (!copywriting?.assignmentTypeKey.startsWith("copywriting.")) continue;
+    if (reporting?.assignmentTypeKey !== REPORTING_ASSIGNMENT_TYPE) continue;
+    result.set(reporting.id, copywriting);
+  }
+  return result;
+}
+
+function buildResearchPacketIdsByReportingAssignment(assignments: AssignmentRecord[], messages: MessageRecord[], relations: SemanticRelationRecord[]): Map<string, Set<string>> {
+  const assignmentById = new Map(assignments.map((assignment) => [assignment.id, assignment]));
+  const messageById = new Map(messages.map((message) => [message.id, message]));
+  const producedResearchPacketsByAssignment = new Map<string, Set<string>>();
+  const reportingPacketIdsByAssignment = new Map<string, Set<string>>();
+  const result = new Map<string, Set<string>>();
+  for (const relation of relations) {
+    if (relation.relationState === "superseded") continue;
+    if ((relation.relationTypeKey ?? relation.predicate) !== "produces") continue;
+    if (relation.subjectKind !== "assignment" || relation.objectKind !== "message") continue;
+    const message = messageById.get(relation.objectId);
+    if (message?.messageKind === RESEARCH_PACKET_KIND) {
+      producedResearchPacketsByAssignment.set(relation.subjectId, addToSet(producedResearchPacketsByAssignment.get(relation.subjectId), relation.objectId));
+    }
+    if (message?.messageKind === REPORTING_PACKET_KIND) {
+      reportingPacketIdsByAssignment.set(relation.subjectId, addToSet(reportingPacketIdsByAssignment.get(relation.subjectId), relation.objectId));
+    }
+  }
+  for (const relation of relations) {
+    if (relation.relationState === "superseded") continue;
+    if ((relation.relationTypeKey ?? relation.predicate) !== "derived_from") continue;
+    if (relation.subjectKind === "assignment" && relation.objectKind === "assignment") {
+      const reporting = assignmentById.get(relation.subjectId);
+      const research = assignmentById.get(relation.objectId);
+      if (reporting?.assignmentTypeKey !== REPORTING_ASSIGNMENT_TYPE || research?.assignmentTypeKey !== "research.edition-candidate") continue;
+      for (const packetId of producedResearchPacketsByAssignment.get(research.id) ?? []) {
+        result.set(reporting.id, addToSet(result.get(reporting.id), packetId));
+      }
+    }
+    if (relation.subjectKind === "message" && relation.objectKind === "message") {
+      const researchMessage = messageById.get(relation.objectId);
+      if (researchMessage?.messageKind !== RESEARCH_PACKET_KIND) continue;
+      for (const [reportingAssignmentId, reportingPacketIds] of reportingPacketIdsByAssignment.entries()) {
+        if (reportingPacketIds.has(relation.subjectId)) {
+          result.set(reportingAssignmentId, addToSet(result.get(reportingAssignmentId), relation.objectId));
+        }
+      }
+    }
+  }
+  return result;
+}
+
+function addToSet<T>(set: Set<T> | undefined, value: T): Set<T> {
+  const next = set ?? new Set<T>();
+  next.add(value);
+  return next;
+}
+
+function buildProducedItemByAssignment(relations: SemanticRelationRecord[]): Map<string, string> {
+  const result = new Map<string, string>();
+  for (const relation of relations) {
+    if (relation.relationState === "superseded") continue;
+    if ((relation.relationTypeKey ?? relation.predicate) !== "produces") continue;
+    if (relation.subjectKind !== "assignment" || relation.objectKind !== "item") continue;
+    result.set(relation.subjectId, relation.objectId);
+  }
+  return result;
+}
+
 function relationByType(relations: SemanticRelationRecord[], predicate: string, objectKind?: string): SemanticRelationRecord | null {
   return relations.find((relation) => (
     (relation.relationTypeKey ?? relation.predicate) === predicate
@@ -220,6 +348,11 @@ function buildSectionBudget(candidates: ReportingStoryBudgetCandidate[]): Report
   const undecidedCount = candidates.filter((candidate) => !candidate.decision).length;
   const filledCount = selectedCount + briefedCount;
   const delta = filledCount - slotCount;
+  const researchPacketCount = candidates.reduce((sum, candidate) => sum + candidate.researchPacketCount, 0);
+  const reportingPacketCount = candidates.filter((candidate) => candidate.hasReportingPacket).length;
+  const copywritingAssignmentCount = candidates.filter((candidate) => candidate.copywritingAssignmentId).length;
+  const draftItemCount = candidates.filter((candidate) => candidate.draftItemId).length;
+  const degradedCount = candidates.filter((candidate) => candidate.degraded).length;
   return {
     key: first.sectionKey,
     title: first.sectionTitle,
@@ -237,6 +370,12 @@ function buildSectionBudget(candidates: ReportingStoryBudgetCandidate[]): Report
     delta,
     state: delta > 0 ? "over" : delta === 0 ? "full" : "needs",
     candidates,
+    phase: highestReportingBudgetPhase(candidates.map((candidate) => candidate.phase)),
+    researchPacketCount,
+    reportingPacketCount,
+    copywritingAssignmentCount,
+    draftItemCount,
+    degradedCount,
   };
 }
 
@@ -252,6 +391,11 @@ function totalBudget(sections: ReportingStoryBudgetSection[]): ReportingStoryBud
     undecidedCount: memo.undecidedCount + section.undecidedCount,
     filledCount: memo.filledCount + section.filledCount,
     delta: memo.delta + section.delta,
+    researchPacketCount: memo.researchPacketCount + section.researchPacketCount,
+    reportingPacketCount: memo.reportingPacketCount + section.reportingPacketCount,
+    copywritingAssignmentCount: memo.copywritingAssignmentCount + section.copywritingAssignmentCount,
+    draftItemCount: memo.draftItemCount + section.draftItemCount,
+    degradedCount: memo.degradedCount + section.degradedCount,
   }), {
     slotCount: 0,
     dispatchedCount: 0,
@@ -263,11 +407,39 @@ function totalBudget(sections: ReportingStoryBudgetSection[]): ReportingStoryBud
     undecidedCount: 0,
     filledCount: 0,
     delta: 0,
+    researchPacketCount: 0,
+    reportingPacketCount: 0,
+    copywritingAssignmentCount: 0,
+    draftItemCount: 0,
+    degradedCount: 0,
   });
   return {
     ...totals,
     state: totals.delta > 0 ? "over" : totals.delta === 0 ? "full" : "needs",
+    phase: highestReportingBudgetPhase(sections.map((section) => section.phase)),
   };
+}
+
+function reportingBudgetPhase(input: {
+  hasReportingPacket: boolean;
+  researchPacketCount: number;
+  decision: ReportingStoryBudgetDecision | null;
+  copywritingAssignmentId: string | null;
+  producedDraftItemId: string | null;
+}): ReportingStoryBudgetPhase {
+  if (input.producedDraftItemId) return "draft";
+  if (input.copywritingAssignmentId) return "copywriting";
+  if (input.decision) return "review";
+  if (input.hasReportingPacket) return "reporting";
+  if (input.researchPacketCount > 0) return "research";
+  return "plan";
+}
+
+function highestReportingBudgetPhase(phases: ReportingStoryBudgetPhase[]): ReportingStoryBudgetPhase {
+  const order: ReportingStoryBudgetPhase[] = ["plan", "research", "reporting", "review", "copywriting", "draft"];
+  return phases.reduce((highest, phase) => (
+    order.indexOf(phase) > order.indexOf(highest) ? phase : highest
+  ), "plan" as ReportingStoryBudgetPhase);
 }
 
 function latestReportingDecision(events: AssignmentEventRecord[], assignmentId: string) {
@@ -281,6 +453,7 @@ function latestReportingDecision(events: AssignmentEventRecord[], assignmentId: 
   return {
     decision,
     eventId: event.id,
+    copywritingAssignmentId: normalizeString(metadata.copywritingAssignmentId),
     draftItemId: normalizeString(metadata.draftItemId),
     targetItemId: normalizeString(metadata.targetItemId),
   };
@@ -354,6 +527,11 @@ function normalizeString(value: unknown): string | null {
 function normalizeNumber(value: unknown): number | null {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function normalizeNumberAllowZero(value: unknown): number | null {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
 function normalizeDecision(value: unknown): ReportingStoryBudgetDecision | null {

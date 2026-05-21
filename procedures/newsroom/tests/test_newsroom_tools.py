@@ -797,11 +797,13 @@ return plan_assignment_reporting_context_packet{ assignment = assignment, report
 
     def test_reporter_procedure_routes_live_reporting_assignments_to_context_packets(self):
         source = (REPO_ROOT / "procedures" / "newsroom" / "reporter.tac").read_text()
-        self.assertIn("reporting.edition-candidate Assignments must produce Message-backed", source)
-        self.assertIn("plan_assignment_reporting_context_packet", source)
+        self.assertIn("reporting.edition-candidate Assignments must produce a", source)
+        self.assertIn("reporting_context_packet payload", source)
+        self.assertIn("Do not generate Papyrus persistence snippets", source)
+        self.assertIn("Do not call Papyrus persistence planners", source)
         self.assertIn('"work_product_kind":"reporting_context_packet"', source)
-        self.assertIn("Message + ModelAttachment(body) +", source)
-        self.assertIn("It must not create\n  Item or EditionItem records.", source)
+        self.assertIn("the outer CLI writes Message", source)
+        self.assertIn("return a reporting_context_packet payload only", source)
 
     def test_execute_tactus_exposes_knowledge_query_helper(self):
         with mock.patch("papyrus_newsroom.tactus_runtime.build_environment_services", return_value=object()), \

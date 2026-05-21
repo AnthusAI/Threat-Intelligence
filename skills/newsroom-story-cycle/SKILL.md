@@ -38,7 +38,9 @@ New packet writes use `Assignment --produces--> Message`. Legacy
 
 ## Default Smoke Command
 
-Run dry-run first:
+Run dry-run first. Treat the run as a Coverage Theme in editor-facing language:
+one shared topic worked through multiple section lenses. The command name remains
+`run-story-cycle` for compatibility.
 
 ```bash
 npm run content -- assignments run-story-cycle \
@@ -51,8 +53,14 @@ npm run content -- assignments run-story-cycle \
   --research-mode source_discovery \
   --max-parallel-research 2 \
   --max-parallel-reporting 3 \
+  --through reporting \
   --json
 ```
+
+Use `--through plan` for assignment graph only, `--through research` to stop
+after private research packets, and `--through reporting` to stop after private
+reporting packets. `--through reporting` is the default. Story-cycle runs do not
+auto-select packets or run copywriting.
 
 The command is dry-run unless `--apply` is supplied. Dry-run writes local output
 under `.papyrus-runs/story-cycle-<run-id>/` and should create no GraphQL
@@ -63,6 +71,14 @@ Use `--apply` only when the plan is acceptable and the current
 environment. Apply mode may persist `Assignment`, `AssignmentEvent`, `Message`,
 `ModelAttachment`, and `SemanticRelation` records. It must not create `Item` or
 `EditionItem` records during packet generation.
+
+Applied reruns reuse existing packet Messages by default so a Coverage Theme can
+resume downstream phases without re-running successful upstream agents. Pass
+`--refresh-packets` only when the intent is to regenerate those packet payloads.
+
+In live apply smoke tests, pass `--require-agent-success` so degraded agent
+output fails instead of being masked by deterministic fallback packets. Pass
+`--allow-fallback` only when fallback behavior is the thing being tested.
 
 ## Output Discovery
 
@@ -88,7 +104,8 @@ The output should be grouped by section and show:
 - copywriter brief.
 
 For applied runs, the Story Budget board in `/newsroom/assignments?view=budget`
-should show reporting candidates grouped by edition and section.
+should show Coverage Theme phase state: plan, research, reporting, review,
+copywriting, or draft, with reporting candidates grouped by edition and section.
 
 ## Section Lenses
 
@@ -156,12 +173,21 @@ npm run content -- assignments review-reporting-packet \
 
 Use `--apply` only after reviewing the plan.
 
-- `select` creates a minimal draft article `Item` and a `produces` relation.
-- `brief` creates a minimal draft brief `Item` and a `produces` relation.
+- `select` creates a child `copywriting.article-draft` Assignment and
+  `derived_from` relations to the reporting Assignment and packet Message.
+- `brief` creates a child `copywriting.brief-draft` Assignment and
+  `derived_from` relations to the reporting Assignment and packet Message.
 - `merge` requires `--target-item <id>` and links to that Item.
 - `hold` and `kill` write only the review event and metadata attachment.
 
-No packet review creates `EditionItem` placement.
+No packet review creates `Item` or `EditionItem` placement. Run copywriting
+after selection with:
+
+```bash
+npm run content -- assignments run-copywriting \
+  --assignment <copywriting-assignment-id> \
+  --dry-run
+```
 
 ## Verification
 

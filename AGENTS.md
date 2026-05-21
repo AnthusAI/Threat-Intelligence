@@ -155,9 +155,10 @@ rendering contracts.
   decisions use `AssignmentEvent.eventType` values
   `reporting_select`, `reporting_merge`, `reporting_brief`, `reporting_hold`,
   and `reporting_kill`, with structured metadata in a `ModelAttachment` owned by
-  the event. `select` and `brief` may create minimal draft `Item` rows for
-  copywriting; `hold` and `kill` create no Items; no reporting packet review
-  creates `EditionItem` placement.
+  the event. `select` and `brief` create child private copywriting Assignments
+  (`copywriting.article-draft` or `copywriting.brief-draft`), not `Item` rows.
+  `hold` and `kill` create no Items; no reporting packet review creates
+  `EditionItem` placement.
 - For dated edition setup, section slot planning, and surplus research
   and reporting assignment dispatch, follow `skills/edition-planning/SKILL.md`
   and `skills/newsroom-story-cycle/SKILL.md`. The default
@@ -167,9 +168,20 @@ rendering contracts.
   `SemanticNode`, and publication lane (`reporting`, `analysis`, and `briefs`
   by default). Link assignments to that edition, section, lane, topic, coverage
   node, lineage source, and evidence with `SemanticRelation` rows. Reporting
-  agents produce private context packets first; only explicit editor
-  `select`/`brief` decisions create draft reader-facing `Item` records, and
-  edition placement remains a later copyediting/layout step.
+  agents produce private context packets first; explicit editor `select`/`brief`
+  decisions queue copywriting Assignments; copywriting is the first stage allowed
+  to create draft reader-facing `Item` records. Edition placement remains a
+  later copyediting/layout step.
+- Treat multi-section story-cycle runs as Coverage Themes in editor-facing UX
+  and docs. `assignments run-story-cycle` is the compatibility CLI name; its
+  default stop point is `--through reporting`, after private research and
+  reporting packets but before editor selection or copywriting. Use
+  `--through plan` or `--through research` when intentionally stopping earlier.
+  Applied reruns reuse existing packet Messages by default; use
+  `--refresh-packets` only when the operator intentionally wants to regenerate
+  packet payloads.
+  In live apply smoke tests, require agent success unless fallback/degraded
+  packets are explicitly being tested.
 - Style the Newsroom as a newspaper section or editorial insert, not as an app
   dashboard. Steering is passive and optional: proposals are skimmable notes
   beside the edition, and the system keeps following the accepted category set when
@@ -256,8 +268,9 @@ GraphQL (or `?scenario=<id>` fixture overrides for tests/debug only).
   and `sectionHeader`.
 - Assignments are not `PublicationItem`s and should not appear in reader
   layout. Keep research and reporting output as private `Assignment` work
-  products until an explicit editor decision creates a draft `article` or
-  `brief` `Item` for copywriting. Draft creation is not edition placement.
+  products. Explicit editor selection queues private copywriting Assignments;
+  copywriting creates draft `article` or `brief` `Item` records for review.
+  Draft creation is not edition placement.
 - `articleToPublicationItem` adapts legacy/fixture `Article` objects into
   generic items.
 - `publicationItemToArticle` adapts article items back to `Article` for direct

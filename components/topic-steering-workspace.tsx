@@ -104,6 +104,7 @@ import {
 import {
   buildReportingStoryBudget,
   type ReportingStoryBudgetCandidate,
+  type ReportingStoryBudgetPhase,
   type ReportingStoryBudgetSection,
 } from "../lib/reporting-story-budget";
 
@@ -1377,9 +1378,15 @@ function NewsDeskDashboard({
           targetItemId,
         });
         setAssignmentEvents((current) => [plan.event, ...current.filter((entry) => entry.id !== plan.event.id)]);
-        if (plan.relation) {
-          const relation = plan.relation;
-          setSemanticRelations((current) => [relation, ...current.filter((entry) => entry.id !== relation.id)]);
+        if (plan.copywritingAssignment) {
+          const copywritingAssignment = plan.copywritingAssignment;
+          setAssignments((current) => [copywritingAssignment, ...current.filter((entry) => entry.id !== copywritingAssignment.id)]);
+        }
+        if (plan.relations.length) {
+          setSemanticRelations((current) => [
+            ...plan.relations,
+            ...current.filter((entry) => !plan.relations.some((relation) => relation.id === entry.id)),
+          ]);
         }
         setActionState({ id: actionId, message: `reporting ${decision} saved`, tone: "ok" });
       } catch (error) {
@@ -1406,15 +1413,63 @@ function NewsDeskDashboard({
             targetItemId,
           });
           if (!("AssignmentEvent" in dataClient.models)) throw new Error("GraphQL model AssignmentEvent is not available in the deployed schema.");
-          if (plan.draftItem) {
-            if (!("Item" in dataClient.models)) throw new Error("GraphQL model Item is not available in the deployed schema.");
-            const itemResponse = await dataClient.models.Item.create(plan.draftItem as never, { authMode: USER_POOL_AUTH_MODE });
-            assertNoGraphQLErrors(itemResponse.errors);
+          if (plan.copywritingAssignment) {
+            if (!("Assignment" in dataClient.models)) throw new Error("GraphQL model Assignment is not available in the deployed schema.");
+            const assignmentInput = { ...plan.copywritingAssignment };
+            const assignmentBrief = assignmentInput.brief;
+            const assignmentInstructions = assignmentInput.instructions;
+            const assignmentMetadata = assignmentInput.metadata;
+            delete assignmentInput.brief;
+            delete assignmentInput.instructions;
+            delete assignmentInput.metadata;
+            const assignmentResponse = await dataClient.models.Assignment.create(assignmentInput as never, { authMode: USER_POOL_AUTH_MODE });
+            assertNoGraphQLErrors(assignmentResponse.errors);
+            if (assignmentBrief != null) {
+              await uploadModelPayloadForOwner({
+                ownerKind: "assignment",
+                ownerId: plan.copywritingAssignment.id,
+                ownerLineageId: plan.copywritingAssignment.id,
+                role: "assignment_brief",
+                sortKey: "brief",
+                filename: "brief.txt",
+                mediaType: "text/plain",
+                content: String(assignmentBrief),
+                status: "active",
+              });
+            }
+            if (assignmentInstructions != null) {
+              await uploadModelPayloadForOwner({
+                ownerKind: "assignment",
+                ownerId: plan.copywritingAssignment.id,
+                ownerLineageId: plan.copywritingAssignment.id,
+                role: "assignment_instructions",
+                sortKey: "instructions",
+                filename: "instructions.txt",
+                mediaType: "text/plain",
+                content: String(assignmentInstructions),
+                status: "active",
+              });
+            }
+            if (assignmentMetadata != null) {
+              await uploadModelPayloadForOwner({
+                ownerKind: "assignment",
+                ownerId: plan.copywritingAssignment.id,
+                ownerLineageId: plan.copywritingAssignment.id,
+                role: "metadata",
+                sortKey: "metadata",
+                filename: "metadata.json",
+                mediaType: "application/json",
+                content: JSON.stringify(assignmentMetadata, null, 2),
+                status: "active",
+              });
+            }
           }
-          if (plan.relation) {
+          if (plan.relations.length) {
             if (!("SemanticRelation" in dataClient.models)) throw new Error("GraphQL model SemanticRelation is not available in the deployed schema.");
-            const relationResponse = await dataClient.models.SemanticRelation.create(plan.relation as never, { authMode: USER_POOL_AUTH_MODE });
-            assertNoGraphQLErrors(relationResponse.errors);
+            for (const relation of plan.relations) {
+              const relationResponse = await dataClient.models.SemanticRelation.create(relation as never, { authMode: USER_POOL_AUTH_MODE });
+              assertNoGraphQLErrors(relationResponse.errors);
+            }
           }
           const eventInput = { ...plan.event };
           delete eventInput.metadata;
@@ -1432,9 +1487,15 @@ function NewsDeskDashboard({
             status: "active",
           });
           setAssignmentEvents((current) => [plan.event, ...current.filter((entry) => entry.id !== plan.event.id)]);
-          if (plan.relation) {
-            const relation = plan.relation;
-            setSemanticRelations((current) => [relation, ...current.filter((entry) => entry.id !== relation.id)]);
+          if (plan.copywritingAssignment) {
+            const copywritingAssignment = plan.copywritingAssignment;
+            setAssignments((current) => [copywritingAssignment, ...current.filter((entry) => entry.id !== copywritingAssignment.id)]);
+          }
+          if (plan.relations.length) {
+            setSemanticRelations((current) => [
+              ...plan.relations,
+              ...current.filter((entry) => !plan.relations.some((relation) => relation.id === entry.id)),
+            ]);
           }
           setActionState({ id: actionId, message: `reporting ${decision} saved`, tone: "ok" });
         } catch (error) {
@@ -8398,17 +8459,23 @@ function ReportingStoryBudgetBoard({
     <div className="news-desk-story-budget" data-reporting-story-budget>
       <header className="news-desk-story-budget__summary">
         <div>
-          <p className="story-label">Story Budget</p>
+          <p className="story-label">Coverage Theme Story Budget</p>
           <h3>{totals.slotCount} slots / {totals.dispatchedCount} candidates</h3>
-          <span>{formatBudgetState(totals.state, totals.delta)}</span>
+          <span>{formatBudgetState(totals.state, totals.delta)} / {formatCoverageThemePhase(totals.phase)}</span>
         </div>
         <div className="news-desk-story-budget__metrics" aria-label="Reporting story budget totals">
+          <span data-story-budget-total="phase">{formatCoverageThemePhase(totals.phase)}</span>
+          <span data-story-budget-total="research-packets">{totals.researchPacketCount} research packets</span>
+          <span data-story-budget-total="reporting-packets">{totals.reportingPacketCount} reporting packets</span>
           <span data-story-budget-total="selected">{totals.selectedCount} selected</span>
           <span data-story-budget-total="briefed">{totals.briefedCount} briefed</span>
           <span data-story-budget-total="merged">{totals.mergedCount} merged</span>
           <span data-story-budget-total="held">{totals.heldCount} held</span>
           <span data-story-budget-total="killed">{totals.killedCount} killed</span>
           <span data-story-budget-total="undecided">{totals.undecidedCount} undecided</span>
+          <span data-story-budget-total="copywriting">{totals.copywritingAssignmentCount} copywriting</span>
+          <span data-story-budget-total="drafts">{totals.draftItemCount} drafts</span>
+          {totals.degradedCount ? <span data-story-budget-total="degraded">{totals.degradedCount} degraded</span> : null}
         </div>
       </header>
       {budget.sections.length ? budget.sections.map((section) => (
@@ -8449,14 +8516,20 @@ function ReportingStoryBudgetSectionView({
         <div>
           <p className="story-label">{section.editionLabel}</p>
           <h4>{section.title}</h4>
-          <span>{formatBudgetState(section.state, section.delta)}</span>
+          <span>{formatBudgetState(section.state, section.delta)} / {formatCoverageThemePhase(section.phase)}</span>
         </div>
         <div className="news-desk-story-budget__metrics">
+          <span data-story-budget-metric="phase">{formatCoverageThemePhase(section.phase)}</span>
           <span data-story-budget-metric="slots">{section.slotCount} slots</span>
           <span data-story-budget-metric="dispatched">{section.dispatchedCount} dispatched</span>
+          <span data-story-budget-metric="research-packets">{section.researchPacketCount} research packets</span>
+          <span data-story-budget-metric="reporting-packets">{section.reportingPacketCount} reporting packets</span>
           <span data-story-budget-metric="selected">{section.selectedCount} selected</span>
           <span data-story-budget-metric="briefed">{section.briefedCount} briefed</span>
           <span data-story-budget-metric="undecided">{section.undecidedCount} undecided</span>
+          <span data-story-budget-metric="copywriting">{section.copywritingAssignmentCount} copywriting</span>
+          <span data-story-budget-metric="drafts">{section.draftItemCount} drafts</span>
+          {section.degradedCount ? <span data-story-budget-metric="degraded">{section.degradedCount} degraded</span> : null}
         </div>
       </header>
       <div className="news-desk-story-budget-candidates">
@@ -8521,6 +8594,12 @@ function ReportingStoryBudgetCandidateRow({
           <span>{candidate.proposedReferenceCount} prospects</span>
           <span>{candidate.researchPacketCount} research packets</span>
         </div>
+        {candidate.degraded ? (
+          <p data-story-budget-degraded="true"><span>Degraded</span>{candidate.fallbackReason ?? "agent fallback"}{candidate.agentExitStatus != null ? ` / exit ${candidate.agentExitStatus}` : ""}</p>
+        ) : null}
+        {candidate.copywritingAssignmentId ? (
+          <p data-reporting-copywriting-assignment={candidate.copywritingAssignmentId}><span>Copywriting</span>{candidate.copywritingAssignmentId} / {candidate.copywritingStatus ?? "queued"}</p>
+        ) : null}
         {candidate.draftItemId ? (
           <p data-reporting-draft-item={candidate.draftItemId}><span>Draft</span>{candidate.draftItemId} / not placed in an edition</p>
         ) : null}
@@ -8547,6 +8626,15 @@ function formatBudgetState(state: "needs" | "full" | "over", delta: number): str
   if (state === "full") return "full";
   if (state === "over") return `over by ${Math.abs(delta)}`;
   return `needs ${Math.abs(delta)} more`;
+}
+
+function formatCoverageThemePhase(phase: ReportingStoryBudgetPhase): string {
+  if (phase === "plan") return "Plan";
+  if (phase === "research") return "Research";
+  if (phase === "reporting") return "Reporting";
+  if (phase === "review") return "Review";
+  if (phase === "copywriting") return "Copywriting";
+  return "Draft";
 }
 
 function AssignmentRow({
@@ -8669,6 +8757,12 @@ function AssignmentRow({
                   <span>Editorial decision</span>
                   {reportingDecision ? `${formatReportingPacketDecision(reportingDecision.decision)} / ${reportingDecision.note ?? "no note"}` : "No editor decision yet"}
                 </p>
+                {reportingDecision?.copywritingAssignmentId ? (
+                  <p className="news-desk-assignment-row__angle" data-reporting-copywriting-assignment={reportingDecision.copywritingAssignmentId}>
+                    <span>Copywriting Assignment</span>
+                    {`${reportingDecision.copywritingAssignmentId} / ${reportingDecision.copywritingStatus ?? "queued"}`}
+                  </p>
+                ) : null}
                 {reportingDecision?.draftItemId ? (
                   <p className="news-desk-assignment-row__angle" data-reporting-draft-item={reportingDecision.draftItemId}>
                     <span>Draft Item</span>
@@ -9967,6 +10061,8 @@ function latestReportingPacketDecisionForAssignment(events: AssignmentEventRecor
   if (!decision) return null;
   return {
     decision,
+    copywritingAssignmentId: normalizeMetadataString(metadata.copywritingAssignmentId),
+    copywritingStatus: normalizeMetadataString(metadata.copywritingStatus),
     draftItemId: normalizeMetadataString(metadata.draftItemId),
     eventId: event.id,
     note: event.note ?? null,
@@ -9993,22 +10089,17 @@ function buildUiReportingPacketReviewPlan({
   targetItem?: UiReportingReviewItemTarget | null;
   targetItemId?: string;
 }): {
-  draftItem: Record<string, unknown> | null;
+  copywritingAssignment: AssignmentRecord | null;
   event: AssignmentEventRecord;
-  relation: SemanticRelationRecord | null;
+  relations: SemanticRelationRecord[];
 } {
   if (assignment.assignmentTypeKey !== "reporting.edition-candidate") throw new Error("Only reporting edition-candidate assignments can review reporting packets.");
   if (message.messageKind !== "reporting_context_packet") throw new Error("Only reporting context packets can be reviewed.");
   if (decision === "merge" && !targetItem?.id && !targetItemId.trim()) throw new Error("Merge Packet requires a target Item ID.");
   const resolvedTargetItem = targetItem ?? (targetItemId.trim() ? { id: targetItemId.trim(), lineageId: targetItemId.trim(), versionNumber: null } : null);
-  const draftItem = decision === "select" || decision === "brief"
-    ? buildUiReportingDraftItem({ actorLabel, assignment, decision, message, now })
+  const copywritingAssignment = decision === "select" || decision === "brief"
+    ? buildUiCopywritingAssignment({ actorLabel, assignment, decision, message, now })
     : null;
-  const producedItem = draftItem ? {
-    id: String(draftItem.id),
-    lineageId: String(draftItem.lineageId ?? draftItem.id),
-    versionNumber: Number(draftItem.versionNumber ?? 1),
-  } : resolvedTargetItem;
   const eventType = `reporting_${decision}`;
   const metadata = {
     kind: "reporting.packet_review",
@@ -10017,7 +10108,12 @@ function buildUiReportingPacketReviewPlan({
     messageId: message.id,
     decision,
     targetItemId: resolvedTargetItem?.id ?? null,
-    draftItemId: draftItem?.id ?? null,
+    copywritingAssignmentId: copywritingAssignment?.id ?? null,
+    copywritingStatus: copywritingAssignment?.status ?? null,
+    targetItemType: copywritingAssignment?.assignmentTypeKey === "copywriting.brief-draft" ? "brief" : copywritingAssignment ? "article" : null,
+    draftItemId: null,
+    createsCopywritingAssignment: Boolean(copywritingAssignment),
+    createsDraftItem: false,
     privatePacketMessageKind: "reporting_context_packet",
     createsEditionItem: false,
   };
@@ -10034,74 +10130,96 @@ function buildUiReportingPacketReviewPlan({
     createdAt: now,
     metadata,
   };
-  const relation = producedItem && (decision === "select" || decision === "brief" || decision === "merge")
-    ? buildUiProducesRelation({ assignment, item: producedItem, decision, messageId: message.id, now })
-    : null;
-  return { draftItem, event, relation };
+  const relations: SemanticRelationRecord[] = [];
+  if (copywritingAssignment) {
+    relations.push(buildUiDerivedFromRelation({
+      subjectAssignment: copywritingAssignment,
+      objectKind: "assignment",
+      objectId: assignment.id,
+      objectLineageId: assignment.id,
+      decision,
+      messageId: message.id,
+      now,
+      rank: 1,
+    }));
+    relations.push(buildUiDerivedFromRelation({
+      subjectAssignment: copywritingAssignment,
+      objectKind: "message",
+      objectId: message.id,
+      objectLineageId: message.id,
+      decision,
+      messageId: message.id,
+      now,
+      rank: 2,
+    }));
+  }
+  if (resolvedTargetItem && decision === "merge") {
+    relations.push(buildUiProducesRelation({ assignment, item: resolvedTargetItem, decision, messageId: message.id, now }));
+  }
+  return { copywritingAssignment, event, relations };
 }
 
-function buildUiReportingDraftItem({ actorLabel, assignment, decision, message, now }: {
+function buildUiCopywritingAssignment({ actorLabel, assignment, decision, message, now }: {
   actorLabel: string;
   assignment: AssignmentRecord;
   decision: ReportingPacketReviewDecision;
   message: MessageRecord;
   now: string;
-}): Record<string, unknown> {
+}): AssignmentRecord {
   const type = decision === "brief" ? "brief" : "article";
+  const assignmentTypeKey = type === "brief" ? "copywriting.brief-draft" : "copywriting.article-draft";
   const section = assignment.sectionKey ?? assignment.sectionId ?? "unsectioned";
-  const lineageId = `item-reporting-packet-${safeUiId(type)}-${hashUiKey([assignment.id, message.id, decision])}`;
-  const title = `${type === "brief" ? "Brief" : "Article"} draft from ${assignment.title}`;
-  const editorial = {
-    createdFrom: "reporting-packet-review",
-    assignmentId: assignment.id,
-    reportingPacketMessageId: message.id,
-    decision,
-    privateSource: true,
-    copywriterConsumesPacket: true,
-  };
+  const id = `assignment-copywriting-${safeUiId(type)}-${hashUiKey([assignment.id, message.id, decision])}`;
+  const queueKey = `copywriting:${section}:type:${type}`;
   const assignmentMetadata = parseMetadataObject(assignment.metadata) ?? {};
-  const record: Record<string, unknown> = {
-    id: `${lineageId}-v1`,
-    lineageId,
-    versionNumber: 1,
-    previousVersionId: null,
-    versionState: "draft",
-    versionCreatedAt: now,
-    versionCreatedBy: actorLabel,
-    changeReason: "reporting-packet-review",
-    contentHash: "",
-    type,
-    status: "draft",
-    typeStatus: `${type}#draft`,
-    slug: `draft-${safeUiId(section)}-${hashUiKey([lineageId, assignment.id, message.id])}`,
-    shortSlug: null,
-    section,
-    sectionStatus: `${section}#draft`,
-    title,
-    headline: title,
-    deck: "Private reporting packet selected for copywriting. Draft copy has not been written.",
-    body: [],
-    byline: null,
-    dateline: null,
-    publishedAt: null,
-    editionDate: normalizeMetadataString(assignmentMetadata.editionDate),
-    sortTitle: title,
-    pullQuotes: [],
-    layout: null,
-    editorial,
-    updatedAt: now,
+  const messageMetadata = parseMetadataObject(message.metadata) ?? {};
+  const reporting = parseMetadataObject(messageMetadata.reporting) ?? messageMetadata;
+  const copywriterBrief = normalizeMetadataString(reporting.copywriterBrief)
+    ?? normalizeMetadataString(reporting.copywriter_brief)
+    ?? `Draft a reader-facing ${type} from the selected private reporting packet.`;
+  const metadata = {
+    kind: "copywriting.assignment",
+    createdFrom: "reporting_packet_selection",
+    sourceReportingAssignmentId: assignment.id,
+    sourceReportingPacketMessageId: message.id,
+    decision,
+    targetItemType: type,
+    sectionKey: section,
+    editionId: normalizeMetadataString(reporting.editionId) ?? normalizeMetadataString(reporting.edition_id) ?? normalizeMetadataString(assignmentMetadata.editionId),
+    coverageConceptKey: normalizeMetadataString(reporting.coverageConceptKey) ?? normalizeMetadataString(reporting.coverage_concept_key) ?? normalizeMetadataString(assignmentMetadata.coverageConceptKey),
+    acceptedReferenceIds: Array.isArray(reporting.acceptedReferenceIds) ? reporting.acceptedReferenceIds : reporting.accepted_reference_ids ?? [],
+    proposedReferences: Array.isArray(reporting.proposedReferences) ? reporting.proposedReferences : reporting.proposed_references ?? [],
+    storyCycleRunId: normalizeMetadataString(assignmentMetadata.storyCycleRunId),
   };
-  record.contentHash = hashUiKey([stableStringify({
-    type: record.type,
-    status: record.status,
-    slug: record.slug,
-    section: record.section,
-    title: record.title,
-    deck: record.deck,
-    body: record.body,
-    editorial,
-  })]);
-  return record;
+  return {
+    id,
+    assignmentTypeKey,
+    queueKey,
+    queueStatusKey: `${queueKey}#open`,
+    status: "open",
+    priority: (assignment.priority ?? 100) + 1,
+    title: `${type === "brief" ? "Write brief" : "Write article"} from ${assignment.title}`,
+    summary: `Copywriting handoff for selected ${type} packet from ${assignment.title}.`,
+    brief: copywriterBrief,
+    instructions: "Create a reader-facing draft Item from the selected private reporting packet. Do not create EditionItem placement.",
+    corpusId: assignment.corpusId ?? null,
+    categorySetId: assignment.categorySetId ?? null,
+    classifierId: assignment.classifierId ?? null,
+    sectionId: assignment.sectionId ?? section,
+    sectionKey: section,
+    sectionType: assignment.sectionType ?? null,
+    sectionStatusKey: `${section}#open`,
+    sectionQueueStatusKey: `${section}#${queueKey}#open`,
+    primaryFocusCategoryKey: assignment.primaryFocusCategoryKey ?? null,
+    topicScopeCategoryKeys: assignment.topicScopeCategoryKeys ?? null,
+    sourceSnapshotId: assignment.sourceSnapshotId ?? null,
+    importRunId: assignment.importRunId ?? null,
+    createdBy: actorLabel,
+    createdAt: now,
+    updatedAt: now,
+    newsroomFeedKey: "assignment#open",
+    metadata,
+  };
 }
 
 function buildUiProducesRelation({ assignment, decision, item, messageId, now }: {
@@ -10153,6 +10271,71 @@ function buildUiProducesRelation({ assignment, decision, item, messageId, now }:
       lifecycle: "reporting-packet-review",
       decision,
       assignmentId: assignment.id,
+      messageId,
+    },
+  };
+}
+
+function buildUiDerivedFromRelation({
+  subjectAssignment,
+  objectKind,
+  objectId,
+  objectLineageId,
+  decision,
+  messageId,
+  now,
+  rank,
+}: {
+  subjectAssignment: AssignmentRecord;
+  objectKind: "assignment" | "message";
+  objectId: string;
+  objectLineageId: string;
+  decision: ReportingPacketReviewDecision;
+  messageId: string;
+  now: string;
+  rank: number;
+}): SemanticRelationRecord {
+  const subjectStateKey = semanticStateKey("assignment", subjectAssignment.id);
+  const objectStateKey = semanticStateKey(objectKind, objectLineageId);
+  const subjectVersionKey = semanticVersionKey("assignment", subjectAssignment.id);
+  const objectVersionKey = semanticVersionKey(objectKind, objectId);
+  return {
+    id: `semantic-relation-${hashUiKey([subjectVersionKey, "derived_from", objectVersionKey, rank])}`,
+    relationState: "current",
+    predicate: "derived_from",
+    relationTypeId: "semantic-relation-type-derived-from",
+    relationTypeKey: "derived_from",
+    relationDomain: "workflow",
+    subjectKind: "assignment",
+    subjectId: subjectAssignment.id,
+    subjectLineageId: subjectAssignment.id,
+    subjectVersionNumber: null,
+    objectKind,
+    objectId,
+    objectLineageId,
+    objectVersionNumber: null,
+    subjectStateKey,
+    objectStateKey,
+    objectSubjectStateKey: `${objectStateKey}#assignment`,
+    predicateObjectStateKey: `derived_from#${objectStateKey}`,
+    subjectVersionKey,
+    objectVersionKey,
+    score: 1,
+    confidence: null,
+    rank,
+    classifierId: subjectAssignment.classifierId ?? null,
+    modelVersion: null,
+    reviewRecommended: false,
+    sourceSnapshotId: subjectAssignment.sourceSnapshotId ?? null,
+    importRunId: subjectAssignment.importRunId ?? null,
+    importedAt: now,
+    createdAt: now,
+    updatedAt: now,
+    newsroomFeedKey: "semanticRelations",
+    metadata: {
+      lifecycle: "reporting-packet-review",
+      decision,
+      copywritingAssignmentId: subjectAssignment.id,
       messageId,
     },
   };
@@ -11945,6 +12128,8 @@ type AssignmentResearchPacketSummary = {
 };
 type ReportingPacketDecisionSummary = {
   decision: ReportingPacketReviewDecision;
+  copywritingAssignmentId?: string | null;
+  copywritingStatus?: string | null;
   draftItemId?: string | null;
   eventId: string;
   note?: string | null;

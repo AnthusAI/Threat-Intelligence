@@ -53,8 +53,12 @@ const {
   buildReportingPacketReviewPlan,
 } = require("./lib/papyrus-reporting-packet-review.cjs");
 const {
+  buildCopywritingRunPlan,
+} = require("./lib/papyrus-copywriting.cjs");
+const {
   buildStoryCycleOutput,
   buildStoryCyclePlan,
+  normalizeStoryCycleThrough,
 } = require("./lib/papyrus-story-cycle.cjs");
 const {
   buildReportingStoryBudget,
@@ -1469,11 +1473,13 @@ const selectReviewPlan = buildReportingPacketReviewPlan({
   now: "2026-05-18T13:10:00.000Z",
   semanticRelations: [reportingPacketRelation],
 });
-assert.deepEqual(selectReviewPlan.records.map((record) => record.modelName), ["AssignmentEvent", "ModelAttachment", "Item", "SemanticRelation"]);
-assert.equal(selectReviewPlan.draftItem.type, "article");
-assert.equal(selectReviewPlan.draftItem.status, "draft");
-assert.equal(selectReviewPlan.draftItem.typeStatus, "article#draft");
-assert.equal(selectReviewPlan.records.find((record) => record.modelName === "SemanticRelation").expected.predicate, "produces");
+assert.deepEqual(selectReviewPlan.records.map((record) => record.modelName), ["AssignmentEvent", "ModelAttachment", "Assignment", "SemanticRelation", "SemanticRelation"]);
+assert.equal(selectReviewPlan.copywritingAssignment.assignmentTypeKey, "copywriting.article-draft");
+assert.equal(selectReviewPlan.metadata.createsDraftItem, false);
+assert.equal(selectReviewPlan.metadata.createsCopywritingAssignment, true);
+assert.equal(selectReviewPlan.metadata.copywritingAssignmentId, selectReviewPlan.copywritingAssignment.id);
+assert.equal(selectReviewPlan.records.filter((record) => record.modelName === "SemanticRelation" && record.expected.predicate === "derived_from").length, 2);
+assert.equal(selectReviewPlan.records.some((record) => record.modelName === "Item"), false);
 assert.equal(selectReviewPlan.records.some((record) => record.modelName === "EditionItem"), false);
 const briefReviewPlan = buildReportingPacketReviewPlan({
   assignment: reportingCandidate,
@@ -1482,8 +1488,44 @@ const briefReviewPlan = buildReportingPacketReviewPlan({
   now: "2026-05-18T13:15:00.000Z",
   semanticRelations: [reportingPacketRelation],
 });
-assert.equal(briefReviewPlan.draftItem.type, "brief");
-assert.equal(briefReviewPlan.draftItem.typeStatus, "brief#draft");
+assert.equal(briefReviewPlan.copywritingAssignment.assignmentTypeKey, "copywriting.brief-draft");
+assert.equal(briefReviewPlan.summary.draftItemId, null);
+const copywritingDryRun = buildCopywritingRunPlan({
+  assignment: selectReviewPlan.copywritingAssignment,
+  assignmentMetadata: JSON.parse(selectReviewPlan.copywritingAssignment.metadata),
+  reportingPacketMessage,
+  reportingPacketPayload: reportingPacketMessage.metadata,
+  semanticRelations: selectReviewPlan.records
+    .filter((record) => record.modelName === "SemanticRelation")
+    .map((record) => record.expected),
+  existingItems: [],
+  actorLabel: "test",
+  now: "2026-05-18T13:25:00.000Z",
+});
+assert.equal(copywritingDryRun.draftItem.type, "article");
+assert.equal(copywritingDryRun.draftItem.status, "draft");
+assert.equal(copywritingDryRun.draftItem.typeStatus, "article#draft");
+assert.equal(copywritingDryRun.summary.createsEditionItem, false);
+assert.equal(copywritingDryRun.records.some((record) => record.modelName === "EditionItem"), false);
+const copywritingRerun = buildCopywritingRunPlan({
+  assignment: selectReviewPlan.copywritingAssignment,
+  assignmentMetadata: JSON.parse(selectReviewPlan.copywritingAssignment.metadata),
+  reportingPacketMessage,
+  reportingPacketPayload: reportingPacketMessage.metadata,
+  semanticRelations: [
+    ...copywritingDryRun.records
+      .filter((record) => record.modelName === "SemanticRelation")
+      .map((record) => record.expected),
+  ],
+  existingItems: [copywritingDryRun.draftItem],
+  actorLabel: "test",
+  now: "2026-05-18T13:30:00.000Z",
+});
+assert.equal(copywritingRerun.draftItem.lineageId, copywritingDryRun.draftItem.lineageId);
+assert.equal(copywritingRerun.draftItem.versionNumber, 2);
+assert.equal(copywritingRerun.draftItem.previousVersionId, copywritingDryRun.draftItem.id);
+assert.deepEqual(copywritingRerun.draftItem.editorial.acceptedReferenceIds, ["reference-1-v1", "reference-2-v1"]);
+assert.equal(copywritingRerun.draftItem.editorial.proposedReferences.length, 1);
 const mergeReviewPlan = buildReportingPacketReviewPlan({
   assignment: reportingCandidate,
   message: reportingPacketMessage,
@@ -1526,6 +1568,7 @@ const reportingBudgetSecondCandidate = {
 const reportingStoryBudget = buildReportingStoryBudget({
   assignments: [
     reportingCandidate,
+    selectReviewPlan.copywritingAssignment,
     reportingBudgetSecondCandidate,
     { ...reportingCandidate, id: "assignment-research-excluded", assignmentTypeKey: "research.edition-candidate" },
   ],
@@ -1550,11 +1593,21 @@ const reportingStoryBudget = buildReportingStoryBudget({
       queueKey: reportingCandidate.queueKey,
       eventType: "reporting_select",
       createdAt: "2026-05-18T13:30:00.000Z",
-      metadata: { decision: "select", draftItemId: "item-reporting-draft-v1" },
+      metadata: {
+        decision: "select",
+        copywritingAssignmentId: selectReviewPlan.copywritingAssignment.id,
+        createsDraftItem: false,
+      },
     },
   ],
   semanticRelations: [
     reportingPacketRelation,
+    ...selectReviewPlan.records
+      .filter((record) => record.modelName === "SemanticRelation")
+      .map((record) => record.expected),
+    ...copywritingDryRun.records
+      .filter((record) => record.modelName === "SemanticRelation")
+      .map((record) => record.expected),
     {
       ...reportingPacketRelation,
       id: "semantic-relation-research-budget-comment",
@@ -1583,9 +1636,16 @@ assert.equal(reportingStoryBudget.sections[0].dispatchedCount, 2);
 assert.equal(reportingStoryBudget.sections[0].selectedCount, 1);
 assert.equal(reportingStoryBudget.sections[0].undecidedCount, 1);
 assert.equal(reportingStoryBudget.sections[0].state, "needs");
+assert.equal(reportingStoryBudget.sections[0].phase, "draft");
+assert.equal(reportingStoryBudget.sections[0].researchPacketCount, 1);
+assert.equal(reportingStoryBudget.sections[0].reportingPacketCount, 1);
+assert.equal(reportingStoryBudget.sections[0].copywritingAssignmentCount, 1);
+assert.equal(reportingStoryBudget.sections[0].draftItemCount, 1);
 assert.equal(reportingStoryBudget.totals.dispatchedCount, 2);
+assert.equal(reportingStoryBudget.totals.phase, "draft");
 const reportingBudgetCandidate = reportingStoryBudget.sections[0].candidates.find((candidate) => candidate.assignmentId === reportingCandidate.id);
 assert.ok(reportingBudgetCandidate);
+assert.equal(reportingBudgetCandidate.phase, "draft");
 assert.equal(reportingBudgetCandidate.hasReportingPacket, true);
 assert.equal(reportingBudgetCandidate.editorRecommendation, "hold");
 assert.equal(reportingBudgetCandidate.recommendedAngle, "Explain the operational impact.");
@@ -1596,7 +1656,10 @@ assert.equal(reportingBudgetCandidate.acceptedReferenceCount, 2);
 assert.equal(reportingBudgetCandidate.proposedReferenceCount, 1);
 assert.equal(reportingBudgetCandidate.researchPacketCount, 1);
 assert.equal(reportingBudgetCandidate.decision, "select");
-assert.equal(reportingBudgetCandidate.draftItemId, "item-reporting-draft-v1");
+assert.equal(reportingBudgetCandidate.copywritingAssignmentId, selectReviewPlan.copywritingAssignment.id);
+assert.equal(reportingBudgetCandidate.copywritingStatus, "open");
+assert.equal(reportingBudgetCandidate.producedDraftItemId, copywritingDryRun.draftItem.id);
+assert.equal(reportingBudgetCandidate.draftItemId, copywritingDryRun.draftItem.id);
 
 const aiGamesSections = [
   {
@@ -1662,7 +1725,14 @@ const aiGamesStoryCycle = buildStoryCyclePlan({
   categorySet: fallbackTaxonomy,
   category: focusCategoryAlpha,
 });
+assert.equal(normalizeStoryCycleThrough(undefined), "reporting");
+assert.equal(normalizeStoryCycleThrough("plan"), "plan");
+assert.equal(normalizeStoryCycleThrough("research"), "research");
+assert.equal(normalizeStoryCycleThrough("reporting"), "reporting");
+assert.throws(() => normalizeStoryCycleThrough("copywriting"), /Invalid story-cycle --through/);
 assert.equal(aiGamesStoryCycle.topic, "AI in video games");
+assert.equal(aiGamesStoryCycle.coverageTheme.label, "AI in video games");
+assert.equal(aiGamesStoryCycle.coverageTheme.defaultThrough, "reporting");
 assert.equal(aiGamesStoryCycle.coverageKey, "coverage.ai-in-video-games");
 assert.equal(aiGamesStoryCycle.coverageNode.nodeKind, "coverageQuestion");
 assert.equal(aiGamesStoryCycle.researchAssignments.length, 4);
@@ -1675,6 +1745,7 @@ assert.deepEqual(
 );
 assert.ok(aiGamesStoryCycle.researchAssignments.every((assignment) => assignment.assignmentTypeKey === "research.edition-candidate"));
 assert.ok(aiGamesStoryCycle.reportingAssignments.every((assignment) => assignment.assignmentTypeKey === "reporting.edition-candidate"));
+assert.ok(aiGamesStoryCycle.researchAssignments.every((assignment) => JSON.parse(assignment.metadata).coverageThemeKind === "coverage_theme"));
 assert.ok(aiGamesStoryCycle.researchAssignments.every((assignment) => JSON.parse(assignment.metadata).coverageConceptKey === "coverage.ai-in-video-games"));
 assert.ok(aiGamesStoryCycle.reportingAssignments.every((assignment) => JSON.parse(assignment.metadata).sourceResearchAssignmentId));
 assert.equal(aiGamesStoryCycle.records.some((record) => record.modelName === "Item" || record.modelName === "EditionItem"), false);
@@ -1697,6 +1768,10 @@ const aiGamesManifest = {
   sections: aiGamesStoryCycle.sections,
   researchRuns: [{
     ok: true,
+    degraded: true,
+    fallbackReason: "research_procedure_failed",
+    fallbackKind: "story-cycle.research.fallback",
+    agentExitStatus: 1,
     phase: "research",
     sectionKey: "culture",
     assignmentId: aiGamesStoryCycle.researchAssignments.find((assignment) => assignment.sectionKey === "culture").id,
@@ -1710,6 +1785,10 @@ const aiGamesManifest = {
   }],
   reportingRuns: [{
     ok: true,
+    degraded: true,
+    fallbackReason: "reporting_procedure_failed",
+    fallbackKind: "story-cycle.reporting.fallback",
+    agentExitStatus: 1,
     phase: "reporting",
     sectionKey: "culture",
     assignmentId: aiGamesCultureReporting[0].id,
@@ -1728,6 +1807,8 @@ const aiGamesManifest = {
   }],
 };
 const aiGamesOutput = buildStoryCycleOutput(aiGamesManifest);
+assert.equal(aiGamesOutput.workflowName, "Coverage Theme");
+assert.equal(aiGamesOutput.through, "reporting");
 assert.equal(aiGamesOutput.sections.length, 4);
 const aiGamesCultureOutput = aiGamesOutput.sections.find((section) => section.sectionKey === "culture");
 assert.equal(aiGamesCultureOutput.researchPackets[0].acceptedEvidenceCount, 1);
@@ -1737,6 +1818,11 @@ assert.equal(aiGamesCultureOutput.reportingPackets[0].riskFlags.length, 1);
 assert.equal(aiGamesCultureOutput.reportingPackets[0].coverageGaps.length, 1);
 assert.equal(aiGamesCultureOutput.reportingPackets[0].openQuestions.length, 1);
 assert.equal(aiGamesCultureOutput.reportingPackets[0].copywriterBrief, "Use after editor selection.");
+assert.equal(aiGamesCultureOutput.researchPackets[0].degraded, true);
+assert.equal(aiGamesCultureOutput.researchPackets[0].fallbackReason, "research_procedure_failed");
+assert.equal(aiGamesCultureOutput.reportingPackets[0].degraded, true);
+assert.equal(aiGamesCultureOutput.reportingPackets[0].fallbackReason, "reporting_procedure_failed");
+assert.equal(aiGamesOutput.degraded.length, 2);
 
 const schemaSource = fs.readFileSync(path.join(__dirname, "..", "amplify", "data", "resource.ts"), "utf8");
 const authoringClientSource = fs.readFileSync(path.join(__dirname, "lib", "papyrus-graphql-authoring.cjs"), "utf8");

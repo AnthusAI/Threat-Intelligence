@@ -116,9 +116,11 @@ reference/category/graph state, not guess from stale local files.
    Messages.
 10. Reporters consume reporting assignments and section research packets to
     return private `reporting_context_packet` Messages.
-11. Editors select the strongest reporting packets. Only explicit `select` or
-    `brief` decisions create draft reader-facing `Item` records. `EditionItem`
-    placement remains a later copyediting/layout step.
+11. Editors select the strongest reporting packets. Explicit `select` or
+    `brief` decisions create child copywriting Assignments, not Items.
+12. Copywriting Assignments create or version draft reader-facing `Item`
+    records for review. `EditionItem` placement remains a later
+    copyediting/layout step.
 
 ## Assignment Contract
 
@@ -219,10 +221,12 @@ Use `SemanticRelation` rows to make assignment context navigable:
 Prefer exact lineage/version ids where the model supports them. Do not depend
 on display names for joins.
 
-## Story-Cycle CLI And Future Edition CLI
+## Coverage Theme CLI And Future Edition CLI
 
 For repeatable section-shaped research plus reporting, use the implemented
-story-cycle command:
+story-cycle command. Editor-facing docs and UI should call this a Coverage
+Theme: one shared topic or coverage question worked through several section
+lenses. The CLI keeps the `run-story-cycle` name for compatibility.
 
 ```bash
 npm run content -- assignments run-story-cycle \
@@ -232,12 +236,20 @@ npm run content -- assignments run-story-cycle \
   --coverage-key <coverage.key> \
   --sections <section-key>,<section-key> \
   --section-budgets <section-key>:<slots> \
+  --through reporting \
   --json
 
 npm run content -- assignments story-cycle-output \
   --run-id <story-cycle-run-id> \
   --json
 ```
+
+Use `--through plan` to create only the Coverage Theme assignment graph,
+`--through research` to persist private research packets, and
+`--through reporting` to persist private research and reporting packets. The
+default stop point is through Reporting. Do not auto-select reporting packets,
+run copywriting, create `Item` rows, or create `EditionItem` rows from this
+command.
 
 A future edition-specific command family may wrap this lower-level assignment
 workflow later. Do not assume those wrapper commands exist until

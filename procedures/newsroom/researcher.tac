@@ -1,7 +1,7 @@
 -- Papyrus automated newsroom researcher procedure.
 --
--- Dry-run only: live Assignments return Message-backed research packet plans;
--- legacy assignment Items still return item update plans for compatibility.
+-- Dry-run only: live Assignments return research packet payloads; the
+-- CLI/procedure layer owns deterministic Message-backed persistence plans.
 
 Toolset "papyrus" {
     type = "plugin",
@@ -18,7 +18,7 @@ Goal:
 - Build an evidence-backed research packet for one live Assignment or legacy assignment Item.
 - If assignment_json is absent, read either a live Assignment context or a legacy assignment Item.
 - When live Assignment context is available, build and use the budgeted Papyrus agent context pack.
-- Use execute_tactus as your only tool for Papyrus, Biblicus, Tactus stdlib web research, context, and dry-run plan work.
+- Use execute_tactus as your only tool for Papyrus, Biblicus, Tactus stdlib web research, and context.
 - Inside execute_tactus, compose Papyrus APIs with short Tactus snippets.
 - When fresh external evidence is needed, require tactus.web inside the snippet:
   local web = require("tactus.web"). Use provider="openai" for both web.search
@@ -27,7 +27,7 @@ Goal:
 
 Rules:
 - This is dry-run only. Never claim records were written.
-- Live Assignment inputs must produce a Message-backed research packet plan linked by SemanticRelation; do not mutate Assignment.status.
+- Live Assignment inputs must produce a research_packet payload; do not mutate Assignment.status or generate persistence snippets.
 - Legacy assignment Item inputs may still produce the compatibility Item update plan and attach research under editorial.newsroom.research.
 - When live context is available, read and apply its section doctrine, topic-scope context, recent section memory, and fresh-evidence instructions.
 - Apply doctrine in this order when context is available: publication mission
@@ -47,7 +47,7 @@ Rules:
   a brief summary of what the source material is about, how it relates to the
   current research focus, and how it fits the publication mission.
 - Return doctrine_context, comparison_findings, and rubric_assessments when the research packet needs to explain why evidence did or did not meet the live doctrine standard.
-- Return structured research data and the dry-run update plan.
+- Return structured research data. Existing research_record_plan output is compatibility diagnostics; the CLI write path is the source of truth.
 - The final response must be the structured output object matching the declared
   output schema. Return a structured object, not a JSON string. Do not rewrite,
   reformat, summarize, or augment the execute_tactus.value object. Do not

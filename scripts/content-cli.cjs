@@ -68,8 +68,13 @@ const {
   normalizeReportingReviewDecision,
 } = require("./lib/papyrus-reporting-packet-review.cjs");
 const {
+  COPYWRITING_ASSIGNMENT_TYPES,
+  buildCopywritingRunPlan,
+} = require("./lib/papyrus-copywriting.cjs");
+const {
   buildStoryCycleOutput,
   buildStoryCyclePlan,
+  normalizeStoryCycleThrough,
 } = require("./lib/papyrus-story-cycle.cjs");
 const {
   REPORTING_EDITION_ASSIGNMENT_TYPE,
@@ -365,6 +370,12 @@ async function main() {
       return;
     case "assignments:review-reporting-packet":
       await reviewReportingPacket(args.slice(2));
+      return;
+    case "assignments:run-copywriting":
+      await runCopywritingAssignment(args.slice(2));
+      return;
+    case "assignments:copywriting-output":
+      await showCopywritingOutput(args.slice(2));
       return;
     case "assignments:events":
       await listAssignmentEvents(args.slice(2));
@@ -3769,6 +3780,10 @@ async function runStoryCycle(flags) {
   const apply = Boolean(options.apply);
   const asJson = Boolean(options.json);
   const planOnly = Boolean(options["plan-only"]);
+  const through = normalizeStoryCycleThrough(planOnly ? "plan" : options.through);
+  const requireAgentSuccess = Boolean(options["require-agent-success"]) || (apply && !options["allow-fallback"]);
+  const allowFallback = Boolean(options["allow-fallback"]) || (!apply && !requireAgentSuccess);
+  const refreshPackets = Boolean(options["refresh-packets"]);
   const corpusKey = normalizeCliString(options["corpus-key"]) ?? "AI-ML-research";
   const categoryKey = normalizeCliString(options.category) ?? corpusKey;
   const coverageKey = normalizeCliString(options["coverage-key"]) ?? `coverage.${safeId(topic).replace(/-/g, ".")}`;
@@ -3814,8 +3829,13 @@ async function runStoryCycle(flags) {
   const manifest = {
     schemaVersion: 1,
     command: "assignments run-story-cycle",
+    workflowName: "Coverage Theme",
     runId,
     action: apply ? "apply" : "dry-run",
+    through,
+    requireAgentSuccess,
+    allowFallback,
+    refreshPackets,
     date,
     topic,
     corpusKey,
@@ -3837,13 +3857,16 @@ async function runStoryCycle(flags) {
   };
   writeJsonFile(manifestPath, manifest);
 
-  if (!planOnly) {
+  if (through === "research" || through === "reporting") {
     const maxParallelResearch = normalizeCliNonNegativeInteger(options["max-parallel-research"], "--max-parallel-research") ?? 2;
     manifest.researchRuns = await runStoryCycleJobs(plan.researchAssignments, maxParallelResearch, async (assignment) => (
       runStoryCycleResearchJob({
         client,
         assignment,
         apply,
+        allowFallback,
+        requireAgentSuccess,
+        refreshPackets,
         runDir,
         corpusKey,
         researchMode: plan.researchMode,
@@ -3853,7 +3876,9 @@ async function runStoryCycle(flags) {
       })
     ));
     writeJsonFile(manifestPath, manifest);
+  }
 
+  if (through === "reporting" && !storyCycleHasBlockingFailures(manifest.researchRuns, { requireAgentSuccess })) {
     const researchBySection = new Map(manifest.researchRuns.map((run) => [run.sectionKey, run]));
     const maxParallelReporting = normalizeCliNonNegativeInteger(options["max-parallel-reporting"], "--max-parallel-reporting") ?? 3;
     manifest.reportingRuns = await runStoryCycleJobs(plan.reportingAssignments, maxParallelReporting, async (assignment) => (
@@ -3861,6 +3886,9 @@ async function runStoryCycle(flags) {
         client,
         assignment,
         apply,
+        allowFallback,
+        requireAgentSuccess,
+        refreshPackets,
         runDir,
         corpusKey,
         topic,
@@ -3877,6 +3905,8 @@ async function runStoryCycle(flags) {
   const outputPath = path.join(runDir, "story-cycle-output.json");
   writeJsonFile(outputPath, output);
   manifest.failures = output.failures;
+  manifest.degraded = output.degraded;
+  manifest.degradedCount = output.degraded.length;
   manifest.outputPath = outputPath;
   manifest.next = `npm run content -- assignments story-cycle-output --run-id ${runId}${asJson ? " --json" : ""}`;
   writeJsonFile(manifestPath, manifest);
@@ -3888,6 +3918,7 @@ async function runStoryCycle(flags) {
     runId,
     date,
     topic,
+    through,
     coverageKey,
     categoryKey,
     sections: plan.sections.map((section) => section.key),
@@ -3896,38 +3927,263 @@ async function runStoryCycle(flags) {
     researchPackets: output.sections.flatMap((section) => section.researchPackets.map((packet) => ({ sectionKey: section.sectionKey, ...packet }))),
     reportingPackets: output.sections.flatMap((section) => section.reportingPackets.map((packet) => ({ sectionKey: section.sectionKey, ...packet }))),
     failures: output.failures,
+    degraded: output.degraded,
+    degradedCount: output.degraded.length,
     manifestPath,
     outputPath,
     next: manifest.next,
   };
   if (asJson) {
     printCompactJson(result);
+    if (!result.ok) process.exitCode = 1;
     return;
   }
   printStoryCycleSummary(result);
+  if (!result.ok) process.exitCode = 1;
 }
 
 async function showStoryCycleOutput(flags) {
   const options = parseOptions(flags);
-  const manifestPath = findStoryCycleManifestPath({
+  const filters = {
     runId: normalizeCliString(options["run-id"]),
     coverageKey: normalizeCliString(options["coverage-key"]),
     date: normalizeCliString(options.date),
     assignmentId: normalizeCliString(options.assignment),
-  });
-  if (!manifestPath) throw new Error("No story-cycle manifest matched the requested filters.");
-  const manifest = loadJsonFile(manifestPath);
-  const output = buildStoryCycleOutput({
-    ...manifest,
-    manifestPath,
-  }, {
-    section: normalizeCliString(options.section),
-  });
+  };
+  const manifestPath = findStoryCycleManifestPath(filters);
+  const manifest = manifestPath ? loadJsonFile(manifestPath) : null;
+  let liveError = null;
+  let output = null;
+  if (!options["local-only"]) {
+    try {
+      const { client } = createAuthoringClient();
+      const liveManifest = await loadAppliedStoryCycleManifestFromGraph(client, {
+        ...filters,
+        manifest,
+        manifestPath,
+      });
+      if (liveManifest) {
+        output = buildStoryCycleOutput(liveManifest, {
+          section: normalizeCliString(options.section),
+        });
+      }
+    } catch (error) {
+      liveError = normalizeError(error);
+      if (!manifest) throw error;
+    }
+  }
+  if (!output) {
+    if (!manifest) throw new Error("No story-cycle manifest or applied Coverage Theme records matched the requested filters.");
+    output = buildStoryCycleOutput({
+      ...manifest,
+      manifestPath,
+    }, {
+      section: normalizeCliString(options.section),
+    });
+  }
+  if (liveError) output.warnings = [...(output.warnings ?? []), `Live Coverage Theme rediscovery failed; used local manifest: ${liveError.message}`];
   if (options.json) {
     printCompactJson(output);
     return;
   }
   printStoryCycleOutput(output);
+}
+
+async function loadAppliedStoryCycleManifestFromGraph(client, { runId, coverageKey, date, assignmentId, manifest = null, manifestPath = null }) {
+  const assignments = await client.listRecords("Assignment");
+  const byId = new Map(assignments.map((assignment) => [assignment.id, assignment]));
+  const manifestAssignmentIds = new Set([
+    ...(manifest?.researchAssignments ?? []).map((assignment) => assignment.id),
+    ...(manifest?.reportingAssignments ?? []).map((assignment) => assignment.id),
+  ].filter(Boolean));
+  if (assignmentId) manifestAssignmentIds.add(assignmentId);
+  const candidates = assignments
+    .filter((assignment) => assignment.assignmentTypeKey === "research.edition-candidate" || assignment.assignmentTypeKey === "reporting.edition-candidate")
+    .filter((assignment) => {
+      const metadata = parseJsonish(assignment.metadata);
+      return (
+        (!runId || metadata.storyCycleRunId === runId || metadata.coverageThemeRunId === runId || manifestAssignmentIds.has(assignment.id))
+        && (!coverageKey || metadata.coverageConceptKey === coverageKey)
+        && (!date || metadata.storyCycleDate === date || metadata.editionDate === date)
+        && (!assignmentId || assignment.id === assignmentId || metadata.sourceResearchAssignmentId === assignmentId)
+      );
+    });
+  if (!candidates.length) return null;
+
+  const relationsByAssignment = new Map();
+  await Promise.all(candidates.map(async (assignment) => {
+    relationsByAssignment.set(assignment.id, await client.listSemanticRelationsBySubjectState(semanticStateKey("assignment", assignment.id)));
+  }));
+  const producedMessageIds = Array.from(new Set(Array.from(relationsByAssignment.values())
+    .flat()
+    .filter((relation) => relation.relationState !== "superseded")
+    .filter((relation) => (relation.relationTypeKey ?? relation.predicate) === "produces")
+    .filter((relation) => relation.objectKind === "message")
+    .map((relation) => relation.objectId)
+    .filter(Boolean)));
+  const messageMap = await client.getRecordsById("Message", producedMessageIds);
+  const messages = Array.from(messageMap.values()).filter(Boolean);
+  const payloadByMessageId = new Map();
+  await Promise.all(messages.map(async (message) => {
+    payloadByMessageId.set(message.id, await readJsonModelPayloadOptional(client, "message", message.id, "metadata", "metadata"));
+  }));
+
+  const diagnosticsByAssignment = new Map([
+    ...(manifest?.researchRuns ?? []),
+    ...(manifest?.reportingRuns ?? []),
+  ].map((run) => [run.assignmentId, run]));
+  const researchRuns = [];
+  const reportingRuns = [];
+  for (const assignment of candidates.sort(compareAssignmentsForStoryCycleOutput)) {
+    const metadata = parseJsonish(assignment.metadata);
+    const relations = relationsByAssignment.get(assignment.id) ?? [];
+    const linkedMessages = relations
+      .filter((relation) => relation.relationState !== "superseded")
+      .filter((relation) => (relation.relationTypeKey ?? relation.predicate) === "produces")
+      .filter((relation) => relation.objectKind === "message")
+      .map((relation) => messageMap.get(relation.objectId))
+      .filter(Boolean)
+      .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)));
+    const diagnostic = diagnosticsByAssignment.get(assignment.id) ?? {};
+    if (assignment.assignmentTypeKey === "research.edition-candidate") {
+      const message = linkedMessages.find((entry) => entry.messageKind === "research_packet") ?? null;
+      const payload = message ? payloadByMessageId.get(message.id) : null;
+      const packet = storyCyclePacketPayload(payload, "research") ?? {};
+      const messageDiagnostic = message && diagnostic?.messageId === message.id ? diagnostic : (!message ? diagnostic : {});
+      researchRuns.push({
+        ok: Boolean(message),
+        phase: "research",
+        sectionKey: assignment.sectionKey ?? metadata.sectionKey ?? "unsectioned",
+        assignmentId: assignment.id,
+        messageId: message?.id ?? null,
+        packet,
+        degraded: storyCyclePacketDegraded(packet, messageDiagnostic),
+        fallbackReason: storyCyclePacketFallbackReason(packet, messageDiagnostic),
+        fallbackKind: storyCyclePacketFallbackKind(packet, messageDiagnostic),
+        agentExitStatus: messageDiagnostic.agentExitStatus ?? messageDiagnostic.exitStatus ?? null,
+        exitStatus: messageDiagnostic.exitStatus ?? null,
+        stderrPath: messageDiagnostic.stderrPath ?? null,
+        packetPath: messageDiagnostic.packetPath ?? null,
+      });
+    } else if (assignment.assignmentTypeKey === "reporting.edition-candidate") {
+      const message = linkedMessages.find((entry) => entry.messageKind === "reporting_context_packet") ?? null;
+      const payload = message ? payloadByMessageId.get(message.id) : null;
+      const packet = storyCyclePacketPayload(payload, "reporting") ?? {};
+      const messageDiagnostic = message && diagnostic?.messageId === message.id ? diagnostic : (!message ? diagnostic : {});
+      reportingRuns.push({
+        ok: Boolean(message),
+        phase: "reporting",
+        sectionKey: assignment.sectionKey ?? metadata.sectionKey ?? "unsectioned",
+        assignmentId: assignment.id,
+        messageId: message?.id ?? null,
+        angle: storyCycleAssignmentAngle({ assignment, metadata, diagnostic }),
+        packet,
+        degraded: storyCyclePacketDegraded(packet, messageDiagnostic),
+        fallbackReason: storyCyclePacketFallbackReason(packet, messageDiagnostic),
+        fallbackKind: storyCyclePacketFallbackKind(packet, messageDiagnostic),
+        agentExitStatus: messageDiagnostic.agentExitStatus ?? messageDiagnostic.exitStatus ?? null,
+        exitStatus: messageDiagnostic.exitStatus ?? null,
+        stderrPath: messageDiagnostic.stderrPath ?? null,
+        packetPath: messageDiagnostic.packetPath ?? null,
+      });
+    }
+  }
+
+  const firstMetadata = parseJsonish(candidates[0]?.metadata);
+  const sections = storyCycleSectionsFromAssignments({ assignments: candidates, manifest, newsroomSections: await loadStoryCycleNewsroomSections(client) });
+  return {
+    schemaVersion: 1,
+    command: "assignments story-cycle-output",
+    workflowName: "Coverage Theme",
+    runId: runId ?? manifest?.runId ?? firstMetadata.storyCycleRunId ?? firstMetadata.coverageThemeRunId ?? null,
+    action: "apply",
+    through: manifest?.through ?? (reportingRuns.length ? "reporting" : researchRuns.length ? "research" : "plan"),
+    date: date ?? manifest?.date ?? firstMetadata.storyCycleDate ?? firstMetadata.editionDate ?? null,
+    topic: manifest?.topic ?? firstMetadata.topic ?? firstMetadata.coverageThemeLabel ?? null,
+    categoryKey: manifest?.categoryKey ?? firstMetadata.categoryKey ?? firstMetadata.focusCategoryKey ?? null,
+    coverageKey: coverageKey ?? manifest?.coverageKey ?? firstMetadata.coverageConceptKey ?? null,
+    manifestPath,
+    sections,
+    researchAssignments: candidates.filter((assignment) => assignment.assignmentTypeKey === "research.edition-candidate").map(storyCycleAssignmentSummary),
+    reportingAssignments: candidates.filter((assignment) => assignment.assignmentTypeKey === "reporting.edition-candidate").map(storyCycleAssignmentSummary),
+    researchRuns,
+    reportingRuns,
+  };
+}
+
+function storyCyclePacketPayload(payload, kind) {
+  const parsed = parseJsonish(payload);
+  if (!parsed || typeof parsed !== "object") return null;
+  if (kind === "research") {
+    const nested = parseJsonish(parsed.research ?? parsed.research_packet ?? parsed.researchPacket);
+    return Object.keys(nested).length ? nested : parsed;
+  }
+  if (kind === "reporting") {
+    const nested = parseJsonish(parsed.reporting ?? parsed.reporting_context_packet ?? parsed.reportingContextPacket);
+    return Object.keys(nested).length ? nested : parsed;
+  }
+  return parsed;
+}
+
+function storyCyclePacketDegraded(packet, diagnostic) {
+  const trace = parseJsonish(packet?.researchTrace ?? packet?.research_trace);
+  return Boolean(diagnostic?.degraded ?? diagnostic?.fallback ?? packet?.degraded ?? packet?.fallback ?? trace?.fallbackReason ?? trace?.fallback_reason);
+}
+
+function storyCyclePacketFallbackReason(packet, diagnostic) {
+  const fallback = parseJsonish(packet?.fallback);
+  const trace = parseJsonish(packet?.researchTrace ?? packet?.research_trace);
+  return normalizeCliString(diagnostic?.fallbackReason)
+    ?? normalizeCliString(fallback.reason)
+    ?? normalizeCliString(trace.fallbackReason ?? trace.fallback_reason)
+    ?? null;
+}
+
+function storyCyclePacketFallbackKind(packet, diagnostic) {
+  const fallback = parseJsonish(packet?.fallback);
+  return normalizeCliString(diagnostic?.fallbackKind)
+    ?? normalizeCliString(fallback.kind)
+    ?? null;
+}
+
+function storyCycleAssignmentAngle({ assignment, metadata, diagnostic }) {
+  return normalizeCliString(metadata?.angleDiversity?.lensLabel)
+    ?? normalizeCliString(metadata?.angleDiversity?.lensKey)
+    ?? normalizeCliString(diagnostic?.angle)
+    ?? normalizeCliString(String(assignment?.title ?? "").split(":").slice(1).join(":"))
+    ?? null;
+}
+
+function compareAssignmentsForStoryCycleOutput(left, right) {
+  const leftMeta = parseJsonish(left.metadata);
+  const rightMeta = parseJsonish(right.metadata);
+  return (
+    String(left.sectionKey ?? leftMeta.sectionKey ?? "").localeCompare(String(right.sectionKey ?? rightMeta.sectionKey ?? ""))
+    || String(left.assignmentTypeKey ?? "").localeCompare(String(right.assignmentTypeKey ?? ""))
+    || Number(leftMeta.slotTarget?.candidateRank ?? 0) - Number(rightMeta.slotTarget?.candidateRank ?? 0)
+    || String(left.id).localeCompare(String(right.id))
+  );
+}
+
+function storyCycleSectionsFromAssignments({ assignments, manifest, newsroomSections }) {
+  if (Array.isArray(manifest?.sections) && manifest.sections.length) return manifest.sections;
+  const sectionsById = new Map((newsroomSections ?? []).map((section) => [section.id, section]));
+  const seen = new Set();
+  return assignments
+    .map((assignment) => {
+      const metadata = parseJsonish(assignment.metadata);
+      const key = assignment.sectionKey ?? metadata.sectionKey ?? assignment.sectionId ?? metadata.sectionId ?? "unsectioned";
+      if (seen.has(key)) return null;
+      seen.add(key);
+      const section = sectionsById.get(key);
+      return {
+        key,
+        title: section?.title ?? metadata.sectionTitle ?? key,
+        researchLens: metadata.researchLens ?? null,
+        slots: metadata.slotTarget?.slots ?? section?.defaultPageBudget ?? 1,
+      };
+    })
+    .filter(Boolean);
 }
 
 async function loadStoryCyclePlanningContext(client, { corpusKey, categoryKey }) {
@@ -4010,15 +4266,65 @@ async function runStoryCycleJobs(items, maxParallel, worker) {
   return results;
 }
 
-async function runStoryCycleResearchJob({ client, assignment, apply, runDir, corpusKey, researchMode, topic, coverageKey, maxEvidenceItems }) {
+function storyCycleHasBlockingFailures(runs, { requireAgentSuccess }) {
+  return Boolean(requireAgentSuccess && (runs ?? []).some((run) => !run.ok || run.degraded));
+}
+
+function storyCyclePacketMessageId(assignment, messageKind) {
+  const suffix = messageKind === "research_packet" ? "research_packet" : "reporting_context_packet";
+  return `message-${messageKind.replace(/_/g, "-")}-${hashShort([assignment.id, suffix])}`;
+}
+
+async function loadExistingStoryCyclePacket(client, assignment, messageKind) {
+  const messageId = storyCyclePacketMessageId(assignment, messageKind);
+  const message = await client.getRecord("Message", messageId);
+  if (!message) return null;
+  const metadata = await readJsonModelPayloadOptional(client, "message", message.id, "metadata", "metadata")
+    ?? parseJsonish(message.metadata);
+  const packet = storyCyclePacketPayload(metadata, messageKind === "research_packet" ? "research" : "reporting");
+  if (!packet || !Object.keys(packet).length) return null;
+  return { message, metadata, packet };
+}
+
+async function runStoryCycleResearchJob({ client, assignment, apply, allowFallback, requireAgentSuccess, refreshPackets, runDir, corpusKey, researchMode, topic, coverageKey, maxEvidenceItems }) {
   const sectionKey = assignment.sectionKey ?? "unsectioned";
   const basePath = path.join(runDir, "research", `${safeId(sectionKey)}-${safeId(assignment.id)}`);
   const stdoutPath = `${basePath}.stdout.log`;
   const stderrPath = `${basePath}.stderr.log`;
   const resultPath = `${basePath}.result.json`;
   const packetPath = `${basePath}.packet.json`;
+  if (apply && !refreshPackets) {
+    const existing = await loadExistingStoryCyclePacket(client, assignment, "research_packet");
+    if (existing) {
+      writeJsonFile(packetPath, existing.packet);
+      writeJsonFile(resultPath, { resumed: true, messageId: existing.message.id, packetPath });
+      return {
+        ok: true,
+        degraded: storyCyclePacketDegraded(existing.packet, null),
+        fallbackReason: storyCyclePacketFallbackReason(existing.packet, null),
+        fallbackKind: storyCyclePacketFallbackKind(existing.packet, null),
+        agentExitStatus: null,
+        persistenceSkippedReason: null,
+        phase: "research",
+        assignmentId: assignment.id,
+        sectionKey,
+        messageId: existing.message.id,
+        packetPath,
+        resultPath,
+        stdoutPath: null,
+        stderrPath: null,
+        exitStatus: null,
+        signal: null,
+        packet: existing.packet,
+        fallback: null,
+        recordPlan: null,
+        applyResult: { messageId: existing.message.id, changes: { noop: 1 } },
+        resumed: true,
+      };
+    }
+  }
   const params = apply
-    ? [`assignment_item_id=${assignment.id}`]
+    ? [`assignment_item_id=${assignment.id}`, `assignment_json=${encodeInlineAssignmentParam(assignment)}`]
     : [`assignment_json=${encodeInlineAssignmentParam(assignment)}`];
   const command = [
     "tactus",
@@ -4026,7 +4332,7 @@ async function runStoryCycleResearchJob({ client, assignment, apply, runDir, cor
     "procedures/newsroom/research_explorer.tac",
     "--no-sandbox",
     "--real-all",
-    "--param", params[0],
+    ...params.flatMap((param) => ["--param", param]),
     "--param", `corpus_key=${corpusKey}`,
     "--param", "context_profile=researcher",
     "--param", `research_mode=${researchMode}`,
@@ -4047,25 +4353,37 @@ async function runStoryCycleResearchJob({ client, assignment, apply, runDir, cor
   let packet = parsed?.research_packet ?? parsed?.researchPacket ?? null;
   let fallback = null;
   if (!packet) {
-    fallback = buildStoryCycleResearchFallbackPacket({
-      assignment,
-      topic,
-      coverageKey,
-      researchMode,
-      reason: proc.status === 0 ? "missing_research_packet" : "research_procedure_failed",
-    });
-    packet = fallback.packet;
+    if (allowFallback) {
+      fallback = buildStoryCycleResearchFallbackPacket({
+        assignment,
+        topic,
+        coverageKey,
+        researchMode,
+        reason: proc.status === 0 ? "missing_research_packet" : "research_procedure_failed",
+      });
+      packet = fallback.packet;
+    }
   }
   if (packet) writeJsonFile(packetPath, packet);
   writeJsonFile(resultPath, { command, parsed, fallback, stdoutPath, stderrPath });
+  const degraded = Boolean(fallback) || proc.status !== 0;
+  const persistenceBlocked = Boolean(requireAgentSuccess && degraded);
+  const recordPlan = packet
+    ? buildStoryCycleResearchRecordPlan({ assignment, packet })
+    : null;
   let messageId = null;
   let applyResult = null;
-  if (apply && parsed?.research_record_plan) {
-    applyResult = await applyStoryCycleTactusPlan(client, parsed.research_record_plan);
+  if (apply && recordPlan && !persistenceBlocked) {
+    applyResult = await applyStoryCycleTactusPlan(client, recordPlan);
     messageId = applyResult.messageId;
   }
   return {
-    ok: Boolean(packet) && (!apply || Boolean(parsed?.research_record_plan)),
+    ok: Boolean(packet) && (!apply || (Boolean(recordPlan) && !persistenceBlocked)),
+    degraded,
+    fallbackReason: fallback?.reason ?? (proc.status !== 0 ? "research_procedure_failed" : (!packet ? "missing_research_packet" : null)),
+    fallbackKind: fallback?.kind ?? null,
+    agentExitStatus: proc.status,
+    persistenceSkippedReason: persistenceBlocked ? "require_agent_success" : (!recordPlan && apply ? "missing_record_plan" : null),
     phase: "research",
     assignmentId: assignment.id,
     sectionKey,
@@ -4078,11 +4396,12 @@ async function runStoryCycleResearchJob({ client, assignment, apply, runDir, cor
     signal: proc.signal,
     packet,
     fallback,
+    recordPlan,
     applyResult,
   };
 }
 
-async function runStoryCycleReportingJob({ client, assignment, apply, runDir, corpusKey, topic, coverageKey, researchRun }) {
+async function runStoryCycleReportingJob({ client, assignment, apply, allowFallback, requireAgentSuccess, refreshPackets, runDir, corpusKey, topic, coverageKey, researchRun }) {
   const sectionKey = assignment.sectionKey ?? "unsectioned";
   const assignmentMeta = parseJsonish(assignment.metadata);
   const angle = assignmentMeta.angleDiversity?.lensLabel ?? assignmentMeta.angleDiversity?.lensKey ?? null;
@@ -4109,8 +4428,40 @@ async function runStoryCycleReportingJob({ client, assignment, apply, runDir, co
   const stderrPath = `${basePath}.stderr.log`;
   const resultPath = `${basePath}.result.json`;
   const packetPath = `${basePath}.packet.json`;
+  if (apply && !refreshPackets) {
+    const existing = await loadExistingStoryCyclePacket(client, assignment, "reporting_context_packet");
+    if (existing) {
+      writeJsonFile(packetPath, existing.packet);
+      writeJsonFile(resultPath, { resumed: true, messageId: existing.message.id, packetPath });
+      return {
+        ok: true,
+        degraded: storyCyclePacketDegraded(existing.packet, null),
+        fallbackReason: storyCyclePacketFallbackReason(existing.packet, null),
+        fallbackKind: storyCyclePacketFallbackKind(existing.packet, null),
+        agentExitStatus: null,
+        persistenceSkippedReason: null,
+        phase: "reporting",
+        assignmentId: assignment.id,
+        sectionKey,
+        angle,
+        messageId: existing.message.id,
+        packetPath,
+        resultPath,
+        stdoutPath: null,
+        stderrPath: null,
+        exitStatus: null,
+        signal: null,
+        sourceResearchAssignmentId: researchRun?.assignmentId ?? null,
+        sourceResearchPacketId: researchRun?.messageId ?? null,
+        packet: existing.packet,
+        fallback: null,
+        applyResult: { messageId: existing.message.id, changes: { noop: 1 } },
+        resumed: true,
+      };
+    }
+  }
   const params = apply
-    ? [`assignment_item_id=${assignment.id}`]
+    ? [`assignment_item_id=${assignment.id}`, `assignment_json=${encodeInlineAssignmentParam(assignmentForAgent)}`]
     : [`assignment_json=${encodeInlineAssignmentParam(assignmentForAgent)}`];
   const command = [
     "tactus",
@@ -4118,7 +4469,7 @@ async function runStoryCycleReportingJob({ client, assignment, apply, runDir, co
     "procedures/newsroom/reporter.tac",
     "--no-sandbox",
     "--real-all",
-    "--param", params[0],
+    ...params.flatMap((param) => ["--param", param]),
     "--param", `corpus_key=${corpusKey}`,
     "--param", "context_profile=reporting",
     "--param", `source_research_assignment_id=${researchRun?.assignmentId ?? ""}`,
@@ -4140,27 +4491,44 @@ async function runStoryCycleReportingJob({ client, assignment, apply, runDir, co
   let recordPlan = parsed?.reporting_record_plan ?? parsed?.reportingRecordPlan ?? null;
   let fallback = null;
   if (!packet) {
-    fallback = buildStoryCycleReportingFallbackPacket({
+    if (allowFallback) {
+      fallback = buildStoryCycleReportingFallbackPacket({
+        assignment,
+        assignmentMeta,
+        topic,
+        coverageKey,
+        researchRun,
+        reason: proc.status === 0 ? "missing_reporting_context_packet" : "reporting_procedure_failed",
+      });
+      packet = fallback.packet;
+      recordPlan = fallback.reportingRecordPlan;
+    }
+  }
+  if (packet && !recordPlan) {
+    recordPlan = buildStoryCycleReportingFallbackRecordPlan({
       assignment,
-      assignmentMeta,
-      topic,
-      coverageKey,
-      researchRun,
-      reason: proc.status === 0 ? "missing_reporting_context_packet" : "reporting_procedure_failed",
+      packet,
+      sourceResearchPacketId: researchRun?.messageId ?? assignmentMeta.sourceResearchPacketId ?? null,
+      warning: "reporting context packet generated by reporter procedure; persistence plan generated by story-cycle CLI",
     });
-    packet = fallback.packet;
-    recordPlan = fallback.reportingRecordPlan;
   }
   if (packet) writeJsonFile(packetPath, packet);
   writeJsonFile(resultPath, { command, parsed, fallback, stdoutPath, stderrPath });
+  const degraded = Boolean(fallback) || proc.status !== 0;
+  const persistenceBlocked = Boolean(requireAgentSuccess && degraded);
   let messageId = null;
   let applyResult = null;
-  if (apply && recordPlan) {
+  if (apply && recordPlan && !persistenceBlocked) {
     applyResult = await applyStoryCycleTactusPlan(client, recordPlan);
     messageId = applyResult.messageId;
   }
   return {
-    ok: Boolean(packet) && (!apply || Boolean(recordPlan)),
+    ok: Boolean(packet) && (!apply || (Boolean(recordPlan) && !persistenceBlocked)),
+    degraded,
+    fallbackReason: fallback?.reason ?? (proc.status !== 0 ? "reporting_procedure_failed" : (!packet ? "missing_reporting_context_packet" : null)),
+    fallbackKind: fallback?.kind ?? null,
+    agentExitStatus: proc.status,
+    persistenceSkippedReason: persistenceBlocked ? "require_agent_success" : (!recordPlan && apply ? "missing_record_plan" : null),
     phase: "reporting",
     assignmentId: assignment.id,
     sectionKey,
@@ -4224,6 +4592,89 @@ function buildStoryCycleResearchFallbackPacket({ assignment, topic, coverageKey,
     privateUseOnly: true,
   };
   return { kind: "story-cycle.research.fallback", reason, packet };
+}
+
+function buildStoryCycleResearchRecordPlan({ assignment, packet, warning }) {
+  const now = new Date().toISOString();
+  const summary = packet.summary ?? "Research packet";
+  const messageId = `message-research-packet-${hashShort([assignment.id, "research_packet"])}`;
+  const message = {
+    id: messageId,
+    messageKind: "research_packet",
+    messageDomain: "assignment_work",
+    status: "active",
+    summary,
+    source: "scripts/content-cli.cjs",
+    importRunId: assignment.importRunId ?? null,
+    authorLabel: "papyrus-content-cli",
+    createdAt: now,
+    updatedAt: now,
+  };
+  const bodyAttachment = attachmentRecord(buildTextModelPayloadAttachment({
+    ownerKind: "message",
+    ownerId: messageId,
+    ownerLineageId: messageId,
+    role: "message_body",
+    sortKey: "message",
+    filename: "message.txt",
+    mediaType: "text/plain",
+    content: researchPacketBody(packet),
+    importRunId: assignment.importRunId ?? null,
+    now,
+  }));
+  const metadataAttachment = attachmentRecord(buildJsonModelPayloadAttachment({
+    ownerKind: "message",
+    ownerId: messageId,
+    ownerLineageId: messageId,
+    role: "metadata",
+    sortKey: "metadata",
+    filename: "metadata.json",
+    content: {
+      kind: "research.packet.created",
+      assignmentId: assignment.id,
+      assignmentTypeKey: assignment.assignmentTypeKey,
+      queueKey: assignment.queueKey,
+      research: packet,
+    },
+    importRunId: assignment.importRunId ?? null,
+    now,
+  }));
+  const records = [
+    { modelName: "Message", action: "create", input: message },
+    { modelName: "ModelAttachment", action: "create", input: bodyAttachment.expected, body: bodyAttachment.attachmentBody },
+    { modelName: "ModelAttachment", action: "create", input: metadataAttachment.expected, body: metadataAttachment.attachmentBody },
+    { modelName: "SemanticRelation", action: "create", input: localSemanticRelationRecord({
+      predicate: "produces",
+      subjectKind: "assignment",
+      subjectId: assignment.id,
+      subjectLineageId: assignment.id,
+      objectKind: "message",
+      objectId: messageId,
+      objectLineageId: messageId,
+      rank: 1,
+      classifierId: assignment.classifierId ?? null,
+      reviewRecommended: false,
+      sourceSnapshotId: assignment.sourceSnapshotId ?? null,
+      importRunId: assignment.importRunId ?? null,
+      importedAt: now,
+      metadata: {
+        lifecycle: "assignment-research-packet",
+        messageKind: "research_packet",
+        metadataKind: "research.packet.created",
+        assignmentTypeKey: assignment.assignmentTypeKey,
+        queueKey: assignment.queueKey,
+        workProductKind: "research_packet",
+      },
+    }) },
+  ];
+  return {
+    dryRun: true,
+    lifecycle: "assignment-research-packet",
+    assignmentId: assignment.id,
+    message,
+    records,
+    warnings: [warning ?? "research packet persistence plan generated by story-cycle CLI"],
+  };
 }
 
 function buildStoryCycleReportingFallbackPacket({ assignment, assignmentMeta, topic, coverageKey, researchRun, reason }) {
@@ -4338,10 +4789,10 @@ function buildStoryCycleReportingFallbackPacket({ assignment, assignmentMeta, to
   return { kind: "story-cycle.reporting.fallback", reason, packet, reportingRecordPlan };
 }
 
-function buildStoryCycleReportingFallbackRecordPlan({ assignment, packet, sourceResearchPacketId }) {
+function buildStoryCycleReportingFallbackRecordPlan({ assignment, packet, sourceResearchPacketId, warning }) {
   const now = new Date().toISOString();
   const summary = packet.summary;
-  const messageId = `message-reporting-context-packet-${hashShort([assignment.id, summary, now])}`;
+  const messageId = `message-reporting-context-packet-${hashShort([assignment.id, "reporting_context_packet"])}`;
   const message = {
     id: messageId,
     messageKind: "reporting_context_packet",
@@ -4440,7 +4891,7 @@ function buildStoryCycleReportingFallbackRecordPlan({ assignment, packet, source
     assignmentId: assignment.id,
     message,
     records,
-    warnings: ["reporting context packet generated by deterministic story-cycle fallback"],
+    warnings: [warning ?? "reporting context packet generated by deterministic story-cycle fallback"],
   };
 }
 
@@ -4589,6 +5040,8 @@ function findStoryCycleManifestPath({ runId, coverageKey, date, assignmentId }) 
 function printStoryCycleSummary(result) {
   console.log(`assignments\trun-story-cycle\taction\t${result.action}`);
   console.log(`assignments\trun-story-cycle\trun\t${result.runId}`);
+  console.log(`assignments\trun-story-cycle\tworkflow\tCoverage Theme`);
+  console.log(`assignments\trun-story-cycle\tthrough\t${result.through ?? "reporting"}`);
   console.log(`assignments\trun-story-cycle\ttopic\t${result.topic}`);
   console.log(`assignments\trun-story-cycle\tcoverage\t${result.coverageKey}`);
   console.log(`assignments\trun-story-cycle\tsections\t${result.sections.join(",")}`);
@@ -4597,6 +5050,7 @@ function printStoryCycleSummary(result) {
   console.log(`assignments\trun-story-cycle\tresearch-packets\t${result.researchPackets.length}`);
   console.log(`assignments\trun-story-cycle\treporting-packets\t${result.reportingPackets.length}`);
   console.log(`assignments\trun-story-cycle\tfailures\t${result.failures.length}`);
+  console.log(`assignments\trun-story-cycle\tdegraded\t${result.degradedCount ?? result.degraded?.length ?? 0}`);
   console.log(`assignments\trun-story-cycle\tmanifest\t${result.manifestPath}`);
   console.log(`assignments\trun-story-cycle\toutput\t${result.outputPath}`);
   console.log(`assignments\trun-story-cycle\tnext\t${result.next}`);
@@ -4609,10 +5063,15 @@ function printStoryCycleOutput(output) {
   for (const section of output.sections) {
     console.log(`section\t${section.sectionKey}\t${section.sectionTitle}\tresearch=${section.researchPackets.length}\treporting=${section.reportingPackets.length}`);
     for (const packet of section.researchPackets) {
-      console.log(`research\t${section.sectionKey}\t${packet.assignmentId}\t${packet.messageId ?? packet.packetPath ?? "-"}\tevidence=${packet.acceptedEvidenceCount}\tproposals=${packet.proposedReferenceCount}\t${packet.summary ?? ""}`);
+      console.log(`research\t${section.sectionKey}\t${packet.assignmentId}\t${packet.messageId ?? packet.packetPath ?? "-"}\tevidence=${packet.acceptedEvidenceCount}\tproposals=${packet.proposedReferenceCount}\tdegraded=${packet.degraded ? "true" : "false"}\t${packet.summary ?? ""}`);
     }
     for (const packet of section.reportingPackets) {
-      console.log(`reporting\t${section.sectionKey}\t${packet.assignmentId}\t${packet.messageId ?? packet.packetPath ?? "-"}\tangle=${packet.angle ?? ""}\trecommendation=${packet.editorRecommendation ?? ""}\trisks=${packet.riskFlags.length}\tgaps=${packet.coverageGaps.length}`);
+      console.log(`reporting\t${section.sectionKey}\t${packet.assignmentId}\t${packet.messageId ?? packet.packetPath ?? "-"}\tangle=${packet.angle ?? ""}\trecommendation=${packet.editorRecommendation ?? ""}\trisks=${packet.riskFlags.length}\tgaps=${packet.coverageGaps.length}\tdegraded=${packet.degraded ? "true" : "false"}`);
+    }
+  }
+  if (output.degraded?.length) {
+    for (const degraded of output.degraded) {
+      console.log(`degraded\t${degraded.phase}\t${degraded.sectionKey ?? ""}\t${degraded.assignmentId ?? ""}\texit=${degraded.exitStatus ?? ""}\t${degraded.fallbackReason ?? degraded.fallbackKind ?? ""}`);
     }
   }
   if (output.failures.length) {
@@ -4756,18 +5215,127 @@ function extractResearchRunPayload(stdout) {
   const text = String(stdout ?? "").trim();
   if (!text) return null;
   const direct = tryParseJson(text);
-  if (direct) return direct.value ?? direct;
+  const directPayload = normalizeRunPayloadCandidate(direct);
+  if (directPayload) return directPayload;
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   for (let index = lines.length - 1; index >= 0; index -= 1) {
     const parsed = tryParseJson(lines[index]);
-    if (parsed) return parsed.value ?? parsed;
+    const payload = normalizeRunPayloadCandidate(parsed);
+    if (payload) return payload;
   }
-  const objectMatches = text.match(/\{[\s\S]*\}/g) ?? [];
+  const payloadMatches = extractLikelyJsonPayloadObjects(text);
+  for (let index = payloadMatches.length - 1; index >= 0; index -= 1) {
+    const parsed = tryParseJson(payloadMatches[index]);
+    const payload = normalizeRunPayloadCandidate(parsed);
+    if (payload) return payload;
+  }
+  const objectMatches = extractBalancedJsonObjects(text);
   for (let index = objectMatches.length - 1; index >= 0; index -= 1) {
     const parsed = tryParseJson(objectMatches[index]);
-    if (parsed) return parsed.value ?? parsed;
+    const payload = normalizeRunPayloadCandidate(parsed);
+    if (payload) return payload;
   }
   return null;
+}
+
+function extractLikelyJsonPayloadObjects(text) {
+  const matches = [];
+  const pattern = /\n\{\s*\n\s*"(assignment_item_id|dry_run|work_product_kind|research_packet|researchPacket|reporting_context_packet|reportingContextPacket|draft_record_plan|draftRecordPlan)"/g;
+  let match = pattern.exec(text);
+  while (match) {
+    const start = match.index + 1;
+    const objectText = extractBalancedJsonObjectAt(text, start);
+    if (objectText) matches.push(objectText);
+    match = pattern.exec(text);
+  }
+  return matches;
+}
+
+function extractBalancedJsonObjectAt(text, start) {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === "\"") {
+      inString = true;
+      continue;
+    }
+    if (char === "{") {
+      depth += 1;
+      continue;
+    }
+    if (char === "}" && depth > 0) {
+      depth -= 1;
+      if (depth === 0) return text.slice(start, index + 1);
+    }
+  }
+  return null;
+}
+
+function normalizeRunPayloadCandidate(value) {
+  const candidate = value && typeof value === "object" && !Array.isArray(value) && value.value && typeof value.value === "object"
+    ? value.value
+    : value;
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return null;
+  return (
+    candidate.research_packet
+    || candidate.researchPacket
+    || candidate.reporting_context_packet
+    || candidate.reportingContextPacket
+    || candidate.draft_record_plan
+    || candidate.draftRecordPlan
+    || candidate.work_product_kind
+    || candidate.assignment_item_id
+  ) ? candidate : null;
+}
+
+function extractBalancedJsonObjects(text) {
+  const objects = [];
+  let start = -1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === "\"") {
+      inString = true;
+      continue;
+    }
+    if (char === "{") {
+      if (depth === 0) start = index;
+      depth += 1;
+      continue;
+    }
+    if (char === "}" && depth > 0) {
+      depth -= 1;
+      if (depth === 0 && start >= 0) {
+        objects.push(text.slice(start, index + 1));
+        start = -1;
+      }
+    }
+  }
+  return objects;
 }
 
 function tryParseJson(text) {
@@ -4966,8 +5534,20 @@ function assertRequiredFields(modelName, record, fields) {
 }
 
 function researchPacketBody(packet) {
+  const flatLines = [
+    packet.sectionKey || packet.section_key ? `Section: ${packet.sectionKey ?? packet.section_key}` : "",
+    packet.researchMode || packet.research_mode ? `Research mode: ${packet.researchMode ?? packet.research_mode}` : "",
+    packet.coverageConceptKey || packet.coverage_concept_key ? `Coverage concept: ${packet.coverageConceptKey ?? packet.coverage_concept_key}` : "",
+    packet.recommendedAngle || packet.recommended_angle ? `Recommended angle: ${packet.recommendedAngle ?? packet.recommended_angle}` : "",
+    ...arrayTextLines("Accepted references", packet.acceptedReferenceIds ?? packet.accepted_reference_ids),
+    ...arrayTextLines("Evidence items", packet.evidenceItemIds ?? packet.evidence_item_ids),
+    ...arrayTextLines("Proposed references", packet.proposedReferences ?? packet.proposed_references),
+    ...arrayTextLines("Open questions", packet.openQuestions ?? packet.open_questions),
+    ...arrayTextLines("Coverage gaps", packet.coverageGaps ?? packet.coverage_gaps),
+  ];
   const lines = [
     packet.summary,
+    ...flatLines,
     "",
     "Internal findings",
     packet.internalFindings?.summary ?? "",
@@ -5740,6 +6320,8 @@ async function reviewReportingPacket(flags) {
   if (!assignment) throw new Error(`Assignment ${assignmentId} was not found.`);
   const message = await client.getRecord("Message", messageId);
   if (!message) throw new Error(`Message ${messageId} was not found.`);
+  const messageMetadata = await readJsonModelPayloadOptional(client, "message", message.id, "metadata", "metadata")
+    ?? parseJsonish(message.metadata);
   const targetItemId = normalizeCliString(options["target-item"]);
   const targetItem = targetItemId ? await client.getRecord("Item", targetItemId) : null;
   if (targetItemId && !targetItem) throw new Error(`Target Item ${targetItemId} was not found.`);
@@ -5747,7 +6329,7 @@ async function reviewReportingPacket(flags) {
   const actorLabel = normalizeCliString(options["actor-label"]) ?? normalizeCliString(auth.claims.email) ?? normalizeCliString(auth.claims.sub) ?? "papyrus-content-cli";
   const plan = buildReportingPacketReviewPlan({
     assignment,
-    message,
+    message: { ...message, metadata: messageMetadata },
     decision,
     note: options.note ?? "",
     targetItem,
@@ -5761,7 +6343,13 @@ async function reviewReportingPacket(flags) {
   const report = writeReportingPacketReviewReport(plan, changes, {
     outputDir: options.output,
   });
-  if (apply) await applyRecordChanges(client, changes);
+  if (apply) {
+    await applyRecordChanges(client, changes);
+    await updateNewsroomSummaryAfterAssignmentCreates(client, changes, {
+      actorLabel,
+      reason: `assignments review-reporting-packet ${assignment.id}`,
+    });
+  }
   if (options.json) {
     printCompactJson({
       ok: true,
@@ -5794,12 +6382,188 @@ function printReportingPacketReviewSummary(plan, changes, { apply, report }) {
   console.log(`reporting-packet-review\tassignment\t${plan.assignmentId}`);
   console.log(`reporting-packet-review\tmessage\t${plan.messageId}`);
   console.log(`reporting-packet-review\tdecision\t${plan.decision}`);
+  if (plan.summary.copywritingAssignmentId) console.log(`reporting-packet-review\tcopywriting-assignment\t${plan.summary.copywritingAssignmentId}`);
   if (plan.summary.draftItemId) console.log(`reporting-packet-review\tdraft-item\t${plan.summary.draftItemId}`);
   if (plan.summary.targetItemId) console.log(`reporting-packet-review\ttarget-item\t${plan.summary.targetItemId}`);
   console.log(`reporting-packet-review\tedition-item\tcreated=false`);
   console.log(`reporting-packet-review\treport\t${report.filepath}`);
   console.log(`reporting-packet-review\tchanges\t${formatChangeCounts(changeCounts(changes))}`);
   if (!apply) console.log("reporting-packet-review\tapply\tskipped\tpass --apply to write review records");
+}
+
+async function runCopywritingAssignment(flags) {
+  const options = parseOptions(flags);
+  const assignmentId = normalizeCliString(options.assignment);
+  if (options.apply && options["dry-run"]) throw new Error("assignments run-copywriting accepts --apply or --dry-run, not both.");
+  const apply = Boolean(options.apply);
+  if (!assignmentId) throw new Error("assignments run-copywriting requires --assignment.");
+  const { auth, client } = createAuthoringClient();
+  const assignment = await client.getRecord("Assignment", assignmentId);
+  if (!assignment) throw new Error(`Assignment ${assignmentId} was not found.`);
+  if (!COPYWRITING_ASSIGNMENT_TYPES.has(assignment.assignmentTypeKey)) {
+    throw new Error(`Assignment ${assignmentId} must be copywriting.article-draft or copywriting.brief-draft.`);
+  }
+  const [assignmentMeta, semanticRelations, items] = await Promise.all([
+    assignmentMetadata(client, assignment),
+    client.listRecords("SemanticRelation"),
+    client.listRecords("Item"),
+  ]);
+  const packetMessageId = normalizeCliString(options.message)
+    ?? normalizeCliString(assignmentMeta.sourceReportingPacketMessageId)
+    ?? findSourceReportingPacketMessageId(semanticRelations, assignment.id);
+  if (!packetMessageId) throw new Error(`Copywriting Assignment ${assignment.id} is missing a source reporting packet Message.`);
+  const reportingPacketMessage = await client.getRecord("Message", packetMessageId);
+  if (!reportingPacketMessage) throw new Error(`Reporting packet Message ${packetMessageId} was not found.`);
+  const reportingPacketPayload = await readJsonModelPayloadOptional(client, "message", reportingPacketMessage.id, "metadata", "metadata")
+    ?? parseJsonish(reportingPacketMessage.metadata);
+  const actorLabel = normalizeCliString(options["actor-label"]) ?? normalizeCliString(auth.claims.email) ?? normalizeCliString(auth.claims.sub) ?? "papyrus-content-cli";
+  const plan = buildCopywritingRunPlan({
+    assignment,
+    assignmentMetadata: assignmentMeta,
+    reportingPacketMessage: { ...reportingPacketMessage, metadata: reportingPacketPayload },
+    reportingPacketPayload,
+    semanticRelations,
+    existingItems: items,
+    actorLabel,
+    actorSub: auth.claims.sub ?? null,
+  });
+  const changes = await buildRecordChangesTargetedByIdToleratingOptionalModels(client, plan.records, {
+    prepareVersioned: false,
+  });
+  const report = writeCopywritingRunReport(plan, changes, {
+    outputDir: options.output,
+  });
+  if (apply) await applyRecordChanges(client, changes);
+  if (options.json) {
+    printCompactJson({
+      ok: true,
+      command: "assignments run-copywriting",
+      applied: apply,
+      report: report.filepath,
+      ...plan.summary,
+      changes: changeCounts(changes),
+    });
+    return;
+  }
+  printCopywritingRunSummary(plan, changes, { apply, report });
+}
+
+function findSourceReportingPacketMessageId(relations, assignmentId) {
+  const relation = (relations ?? []).find((entry) => (
+    entry.relationState !== "superseded"
+    && entry.subjectKind === "assignment"
+    && entry.subjectId === assignmentId
+    && entry.objectKind === "message"
+    && (entry.relationTypeKey ?? entry.predicate) === "derived_from"
+  ));
+  return normalizeCliString(relation?.objectId);
+}
+
+function writeCopywritingRunReport(plan, changes, options = {}) {
+  const outputDir = path.resolve(options.outputDir ?? path.join(".papyrus-runs", `copywriting-${safeId(plan.assignmentId).slice(0, 60)}-${timestampForPath()}`));
+  fs.mkdirSync(outputDir, { recursive: true });
+  const filepath = path.join(outputDir, "copywriting-report.json");
+  const serializableChanges = changes.map((change) => ({
+    modelName: change.modelName,
+    action: change.action,
+    id: change.expected?.id ?? null,
+  }));
+  fs.writeFileSync(filepath, `${JSON.stringify({ plan, changes: serializableChanges }, null, 2)}\n`, "utf8");
+  return { outputDir, filepath };
+}
+
+function printCopywritingRunSummary(plan, changes, { apply, report }) {
+  console.log(`copywriting\tmode\t${apply ? "apply" : "dry-run"}`);
+  console.log(`copywriting\tassignment\t${plan.assignmentId}`);
+  console.log(`copywriting\tsource-packet\t${plan.sourceReportingPacketMessageId}`);
+  console.log(`copywriting\ttarget-type\t${plan.targetItemType}`);
+  console.log(`copywriting\tdraft-item\t${plan.summary.draftItemId}`);
+  console.log(`copywriting\tlineage\t${plan.summary.draftItemLineageId}`);
+  console.log(`copywriting\tversion\t${plan.summary.versionNumber}`);
+  console.log(`copywriting\tedition-item\tcreated=false`);
+  console.log(`copywriting\treport\t${report.filepath}`);
+  console.log(`copywriting\tchanges\t${formatChangeCounts(changeCounts(changes))}`);
+  if (!apply) console.log("copywriting\tapply\tskipped\tpass --apply to write draft Item records");
+}
+
+async function showCopywritingOutput(flags) {
+  const options = parseOptions(flags);
+  const asJson = Boolean(options.json);
+  const { client } = createAuthoringClient();
+  const [assignments, assignmentEvents, semanticRelations, items] = await Promise.all([
+    client.listRecords("Assignment"),
+    client.listRecords("AssignmentEvent"),
+    client.listRecords("SemanticRelation"),
+    client.listRecords("Item"),
+  ]);
+  const itemById = new Map(items.map((item) => [item.id, item]));
+  const rows = [];
+  for (const assignment of assignments.filter((entry) => COPYWRITING_ASSIGNMENT_TYPES.has(entry.assignmentTypeKey))) {
+    const metadata = await assignmentMetadata(client, assignment);
+    const producedItems = semanticRelations
+      .filter((relation) => relation.relationState !== "superseded")
+      .filter((relation) => relation.subjectKind === "assignment" && relation.subjectId === assignment.id)
+      .filter((relation) => relation.objectKind === "item" && (relation.relationTypeKey ?? relation.predicate) === "produces")
+      .map((relation) => itemById.get(relation.objectId))
+      .filter(Boolean)
+      .sort((left, right) => Number(right.versionNumber ?? 0) - Number(left.versionNumber ?? 0));
+    const latestEvent = assignmentEvents
+      .filter((event) => event.assignmentId === assignment.id && event.eventType.startsWith("copywriting_"))
+      .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))[0] ?? null;
+    rows.push({
+      assignmentId: assignment.id,
+      assignmentTypeKey: assignment.assignmentTypeKey,
+      status: assignment.status,
+      sectionKey: assignment.sectionKey ?? metadata.sectionKey ?? null,
+      storyCycleRunId: metadata.storyCycleRunId ?? null,
+      coverageConceptKey: metadata.coverageConceptKey ?? null,
+      sourceReportingAssignmentId: metadata.sourceReportingAssignmentId ?? null,
+      sourceReportingPacketMessageId: metadata.sourceReportingPacketMessageId ?? null,
+      targetItemType: metadata.targetItemType ?? (assignment.assignmentTypeKey === "copywriting.brief-draft" ? "brief" : "article"),
+      draftItemId: producedItems[0]?.id ?? null,
+      draftItemLineageId: producedItems[0]?.lineageId ?? null,
+      draftVersionNumber: producedItems[0]?.versionNumber ?? null,
+      latestEventType: latestEvent?.eventType ?? null,
+      latestEventAt: latestEvent?.createdAt ?? null,
+    });
+  }
+  const filtered = rows
+    .filter((row) => !options.assignment || row.assignmentId === normalizeCliString(options.assignment))
+    .filter((row) => !options["run-id"] || row.storyCycleRunId === normalizeCliString(options["run-id"]))
+    .filter((row) => !options["coverage-key"] || row.coverageConceptKey === normalizeCliString(options["coverage-key"]))
+    .filter((row) => !options.section || row.sectionKey === normalizeCliString(options.section))
+    .sort((left, right) => (
+      String(left.storyCycleRunId ?? "").localeCompare(String(right.storyCycleRunId ?? ""))
+      || String(left.sectionKey ?? "").localeCompare(String(right.sectionKey ?? ""))
+      || left.assignmentId.localeCompare(right.assignmentId)
+    ));
+  const output = {
+    ok: true,
+    command: "assignments copywriting-output",
+    count: filtered.length,
+    copywritingAssignments: filtered,
+  };
+  if (asJson) {
+    printCompactJson(output);
+    return;
+  }
+  if (!filtered.length) {
+    console.log("assignments\tcopywriting-output\t0");
+    return;
+  }
+  for (const row of filtered) {
+    console.log([
+      row.storyCycleRunId ?? "-",
+      row.sectionKey ?? "-",
+      row.assignmentId,
+      row.status ?? "-",
+      row.targetItemType ?? "-",
+      row.sourceReportingPacketMessageId ?? "-",
+      row.draftItemId ?? "-",
+      row.draftVersionNumber ?? "-",
+    ].join("\t"));
+  }
+  console.log(`assignments\tcopywriting-output\t${filtered.length}`);
 }
 
 function changeCounts(changes) {
@@ -10197,6 +10961,15 @@ async function readJsonModelPayload(client, ownerKind, ownerId, role, sortKey = 
   return parseJsonish(body);
 }
 
+async function readJsonModelPayloadOptional(client, ownerKind, ownerId, role, sortKey = role) {
+  try {
+    return await readJsonModelPayload(client, ownerKind, ownerId, role, sortKey);
+  } catch (error) {
+    if (isMissingGraphQLModelError(error, "ModelAttachment") || isDynamoResourceNotFoundError(error)) return null;
+    return null;
+  }
+}
+
 async function readTextModelPayload(client, ownerKind, ownerId, role, sortKey = role) {
   const attachment = await client.getRecord("ModelAttachment", modelAttachmentId(ownerKind, ownerId, role, sortKey));
   if (!attachment) return null;
@@ -13764,7 +14537,7 @@ function printUsage() {
   console.log("  npm run content -- assignments apply-research-packet --assignment <id> --research-json <packet.json> --apply [--json]");
   console.log("  npm run content -- assignments intake-proposals --assignment <id> --config <steering.yml> --corpus-key <key> --status pending [--message <message-id>] [--apply] [--json]");
   console.log("  npm run content -- assignments research-intake-now --assignment <id> --config <steering.yml> --corpus-key <key> --research-mode source_discovery --max-evidence-items 20 [--apply] [--json]");
-  console.log("  npm run content -- assignments run-story-cycle --date YYYY-MM-DD --topic <text> --category <category-key> --coverage-key <coverage.key> --sections culture,methods,business,law --section-budgets culture:2,methods:1,business:1,law:1 [--apply] [--json]");
+  console.log("  npm run content -- assignments run-story-cycle --date YYYY-MM-DD --topic <text> --category <category-key> --coverage-key <coverage.key> --sections culture,methods,business,law --section-budgets culture:2,methods:1,business:1,law:1 [--through plan|research|reporting] [--allow-fallback|--require-agent-success] [--refresh-packets] [--apply] [--json]");
   console.log("  npm run content -- assignments story-cycle-output --run-id <story-cycle-run-id> [--section <key>] [--json]");
   console.log("  npm run content -- assignments orphan-research-packets [--json]");
   console.log("  npm run content -- assignments backfill-section-indexes --apply");
@@ -13772,6 +14545,8 @@ function printUsage() {
   console.log("  npm run content -- assignments build-context --assignment <id> --context-profile reporting");
   console.log("  npm run content -- assignments research-packets --assignment <id>");
   console.log("  npm run content -- assignments review-reporting-packet --assignment <id> --message <message-id> --decision select|merge|brief|hold|kill --note <text> [--target-item <id>] [--dry-run|--apply] [--json]");
+  console.log("  npm run content -- assignments run-copywriting --assignment <copywriting-assignment-id> [--dry-run|--apply] [--json]");
+  console.log("  npm run content -- assignments copywriting-output [--assignment <id>|--run-id <id>|--coverage-key <key>|--section <key>] [--json]");
   console.log("  npm run content -- assignments events --assignment <id>");
   console.log("  npm run content -- assignments process-queue --type analysis.reindex --section technology --status open --max-count 10 --dry-run");
   console.log("  npm run content -- assignments process-queue --type analysis.reindex --section technology --status open --max-count 10 --max-runtime-seconds 3600 --stop-on-error false");

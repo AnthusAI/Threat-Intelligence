@@ -1255,13 +1255,18 @@ Then("assignment {string} should show reporting decision {string}", async functi
   );
 });
 
-Then("assignment {string} should show a draft item without edition placement", async function (assignmentId) {
+Then("assignment {string} should show a copywriting assignment without edition placement", async function (assignmentId) {
   const page = requirePage(this);
   const candidate = page.locator(`.news-desk-assignment-row[data-assignment-candidate="${assignmentId}"]`);
-  await candidate.locator("[data-reporting-draft-item]").waitFor({ state: "visible", timeout: 10_000 });
-  await candidate.locator("text=not placed in an edition").waitFor({ state: "visible", timeout: 10_000 });
+  await candidate.locator("[data-reporting-copywriting-assignment]").waitFor({ state: "visible", timeout: 10_000 });
   const editionItemCount = await page.locator("[data-edition-item-id], [data-edition-item]").count();
   assert.equal(editionItemCount, 0, "Expected no EditionItem placement nodes in assignment review");
+});
+
+Then("story budget candidate {string} should show a copywriting assignment", async function (assignmentId) {
+  const page = requirePage(this);
+  const candidate = page.locator(`[data-story-budget-candidate="${assignmentId}"]`);
+  await candidate.locator("[data-reporting-copywriting-assignment]").waitFor({ state: "visible", timeout: 10_000 });
 });
 
 Then("assignment {string} should not appear as an edition item", async function (assignmentId) {
