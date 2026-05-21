@@ -42,6 +42,21 @@ function buildReportingPacketReviewPlan({
   const copywritingAssignment = normalizedDecision === "select" || normalizedDecision === "brief"
     ? copywritingAssignmentForReportingPacket({ assignment, message, decision: normalizedDecision, actorLabel, now })
     : null;
+  const copywritingAssignmentMetadata = copywritingAssignment
+    ? assignmentMetadata(copywritingAssignment)
+    : null;
+  const copywritingAssignmentMetadataAttachment = copywritingAssignment
+    ? attachmentRecord(buildJsonModelPayloadAttachment({
+      ownerKind: "assignment",
+      ownerId: copywritingAssignment.id,
+      ownerLineageId: copywritingAssignment.id,
+      role: "metadata",
+      sortKey: "metadata",
+      filename: "metadata.json",
+      content: copywritingAssignmentMetadata,
+      now,
+    }))
+    : null;
   const producedItem = normalizedDecision === "merge" ? targetItem : null;
   const metadata = reportingReviewMetadata({
     assignment,
@@ -74,6 +89,7 @@ function buildReportingPacketReviewPlan({
   ];
   if (copywritingAssignment) {
     records.push({ modelName: "Assignment", expected: copywritingAssignment });
+    records.push(copywritingAssignmentMetadataAttachment);
     records.push({
       modelName: "SemanticRelation",
       expected: semanticRelationRecord({
@@ -164,6 +180,7 @@ function buildReportingPacketReviewPlan({
     metadata,
     metadataAttachment,
     copywritingAssignment,
+    copywritingAssignmentMetadataAttachment,
     targetItemId: targetItem?.id ?? null,
     records,
     summary: {
@@ -340,13 +357,18 @@ function reportingPacketFields(value) {
   const reporting = metadata.reporting && typeof metadata.reporting === "object" && !Array.isArray(metadata.reporting)
     ? metadata.reporting
     : metadata;
+  const coverageConcept = reporting.coverageConcept && typeof reporting.coverageConcept === "object" && !Array.isArray(reporting.coverageConcept)
+    ? reporting.coverageConcept
+    : reporting.coverage_concept && typeof reporting.coverage_concept === "object" && !Array.isArray(reporting.coverage_concept)
+      ? reporting.coverage_concept
+      : {};
   return {
     summary: cleanString(reporting.summary),
     topic: cleanString(reporting.topic),
     sectionKey: cleanString(reporting.sectionKey ?? reporting.section_key),
     editionId: cleanString(reporting.editionId ?? reporting.edition_id),
-    storyCycleRunId: cleanString(reporting.storyCycleRunId ?? reporting.story_cycle_run_id),
-    coverageConceptKey: cleanString(reporting.coverageConceptKey ?? reporting.coverage_concept_key),
+    storyCycleRunId: cleanString(reporting.storyCycleRunId ?? reporting.story_cycle_run_id ?? reporting.coverageThemeRunId ?? reporting.coverage_theme_run_id),
+    coverageConceptKey: cleanString(reporting.coverageConceptKey ?? reporting.coverage_concept_key ?? coverageConcept.key),
     editorRecommendation: cleanString(reporting.editorRecommendation ?? reporting.editor_recommendation),
     recommendedAngle: cleanString(reporting.recommendedAngle ?? reporting.recommended_angle),
     copywriterBrief: cleanString(reporting.copywriterBrief ?? reporting.copywriter_brief),

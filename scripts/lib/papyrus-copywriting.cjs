@@ -48,6 +48,12 @@ function buildCopywritingRunPlan({
     actorLabel,
     now,
   });
+  const privateEditorialMetadata = privateEditorialMetadataForCopywriting({
+    assignment,
+    metadata,
+    packet,
+    reportingPacketMessage,
+  });
   const event = assignmentEventForCopywriting({
     assignment,
     eventType: "copywriting_drafted",
@@ -69,6 +75,7 @@ function buildCopywritingRunPlan({
     versionNumber: itemVersion.versionNumber,
     previousVersionId: itemVersion.previousVersionId ?? null,
     createsEditionItem: false,
+    privateEditorialMetadata,
   };
   const metadataAttachment = attachmentRecord(buildJsonModelPayloadAttachment({
     ownerKind: "assignmentEvent",
@@ -105,6 +112,7 @@ function buildCopywritingRunPlan({
       draftItemLineageId: itemVersion.lineageId,
       versionNumber: itemVersion.versionNumber,
       createsEditionItem: false,
+      privateEditorialMetadata,
     },
   });
   const records = [
@@ -162,18 +170,6 @@ function draftItemForCopywriting({ assignment, metadata, packet, targetItemType,
     ?? cleanString(assignment.summary)
     ?? "Draft created from a selected private reporting packet.";
   const body = readerFacingBody({ packet, assignment, targetItemType });
-  const editorial = {
-    createdFrom: "copywriting_assignment",
-    copywritingAssignmentId: assignment.id,
-    sourceReportingAssignmentId: metadata.sourceReportingAssignmentId ?? null,
-    reportingPacketMessageId: metadata.sourceReportingPacketMessageId ?? packet.messageId ?? null,
-    privateSource: true,
-    acceptedReferenceIds: arrayValue(metadata.acceptedReferenceIds ?? packet.acceptedReferenceIds),
-    proposedReferences: arrayValue(metadata.proposedReferences ?? packet.proposedReferences),
-    unresolvedProposedReferencesStayPrivate: true,
-    storyCycleRunId: metadata.storyCycleRunId ?? packet.storyCycleRunId ?? null,
-    coverageConceptKey: metadata.coverageConceptKey ?? packet.coverageConceptKey ?? null,
-  };
   const record = {
     id,
     lineageId,
@@ -197,12 +193,10 @@ function draftItemForCopywriting({ assignment, metadata, packet, targetItemType,
     body,
     byline: null,
     dateline: null,
-    publishedAt: null,
     editionDate: metadata.editionDate ?? metadata.storyCycleDate ?? null,
     sortTitle: title,
     pullQuotes: [],
     layout: null,
-    editorial,
     updatedAt: now,
   };
   record.contentHash = hashStable({
@@ -214,9 +208,23 @@ function draftItemForCopywriting({ assignment, metadata, packet, targetItemType,
     headline: record.headline,
     deck: record.deck,
     body: record.body,
-    editorial: record.editorial,
   });
   return record;
+}
+
+function privateEditorialMetadataForCopywriting({ assignment, metadata, packet, reportingPacketMessage }) {
+  return {
+    createdFrom: "copywriting_assignment",
+    copywritingAssignmentId: assignment.id,
+    sourceReportingAssignmentId: metadata.sourceReportingAssignmentId ?? null,
+    reportingPacketMessageId: reportingPacketMessage.id ?? metadata.sourceReportingPacketMessageId ?? packet.messageId ?? null,
+    privateSource: true,
+    acceptedReferenceIds: arrayValue(metadata.acceptedReferenceIds ?? packet.acceptedReferenceIds),
+    proposedReferences: arrayValue(metadata.proposedReferences ?? packet.proposedReferences),
+    unresolvedProposedReferencesStayPrivate: true,
+    storyCycleRunId: metadata.storyCycleRunId ?? packet.storyCycleRunId ?? null,
+    coverageConceptKey: metadata.coverageConceptKey ?? packet.coverageConceptKey ?? null,
+  };
 }
 
 function readerFacingBody({ packet, assignment, targetItemType }) {

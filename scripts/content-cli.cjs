@@ -762,8 +762,11 @@ async function importNewsroomSections(flags) {
   const sections = loadNewsroomSectionSeeds(configPath);
   const { client } = createAuthoringClient();
   const records = buildNewsroomSectionRecords(sections);
-  const changes = await buildRecordChanges(client, records);
-  await applyRecordChanges(client, changes);
+  const changes = [];
+  for (const record of records) {
+    const action = await client.putById(record.modelName, record.expected);
+    changes.push({ ...record, action });
+  }
   printCategoryImportSummary("newsroom-sections", path.basename(configPath), changes);
 }
 
@@ -3784,6 +3787,7 @@ async function runStoryCycle(flags) {
   const requireAgentSuccess = Boolean(options["require-agent-success"]) || (apply && !options["allow-fallback"]);
   const allowFallback = Boolean(options["allow-fallback"]) || (!apply && !requireAgentSuccess);
   const refreshPackets = Boolean(options["refresh-packets"]);
+  const forceRefreshSelected = Boolean(options["force-refresh-selected"]);
   const corpusKey = normalizeCliString(options["corpus-key"]) ?? "AI-ML-research";
   const categoryKey = normalizeCliString(options.category) ?? corpusKey;
   const coverageKey = normalizeCliString(options["coverage-key"]) ?? `coverage.${safeId(topic).replace(/-/g, ".")}`;
@@ -3836,6 +3840,7 @@ async function runStoryCycle(flags) {
     requireAgentSuccess,
     allowFallback,
     refreshPackets,
+    forceRefreshSelected,
     date,
     topic,
     corpusKey,
@@ -3867,6 +3872,7 @@ async function runStoryCycle(flags) {
         allowFallback,
         requireAgentSuccess,
         refreshPackets,
+        forceRefreshSelected,
         runDir,
         corpusKey,
         researchMode: plan.researchMode,
@@ -3878,17 +3884,18 @@ async function runStoryCycle(flags) {
     writeJsonFile(manifestPath, manifest);
   }
 
-  if (through === "reporting" && !storyCycleHasBlockingFailures(manifest.researchRuns, { requireAgentSuccess })) {
-    const researchBySection = new Map(manifest.researchRuns.map((run) => [run.sectionKey, run]));
+  const researchBySection = new Map(manifest.researchRuns.map((run) => [run.sectionKey, run]));
+  if (through === "reporting") {
     const maxParallelReporting = normalizeCliNonNegativeInteger(options["max-parallel-reporting"], "--max-parallel-reporting") ?? 3;
     manifest.reportingRuns = await runStoryCycleJobs(plan.reportingAssignments, maxParallelReporting, async (assignment) => (
-      runStoryCycleReportingJob({
+      runStoryCycleReportingJobOrBlocked({
         client,
         assignment,
         apply,
         allowFallback,
         requireAgentSuccess,
         refreshPackets,
+        forceRefreshSelected,
         runDir,
         corpusKey,
         topic,
@@ -3912,7 +3919,7 @@ async function runStoryCycle(flags) {
   writeJsonFile(manifestPath, manifest);
 
   const result = {
-    ok: output.failures.length === 0,
+    ok: output.failures.length === 0 && !(requireAgentSuccess && output.degraded.length > 0),
     command: "assignments run-story-cycle",
     action: apply ? "apply" : "dry-run",
     runId,
@@ -4064,6 +4071,10 @@ async function loadAppliedStoryCycleManifestFromGraph(client, { runId, coverageK
         exitStatus: messageDiagnostic.exitStatus ?? null,
         stderrPath: messageDiagnostic.stderrPath ?? null,
         packetPath: messageDiagnostic.packetPath ?? null,
+        error: messageDiagnostic.error ?? null,
+        persistenceSkippedReason: messageDiagnostic.persistenceSkippedReason ?? null,
+        refreshSkippedReason: messageDiagnostic.refreshSkippedReason ?? null,
+        protectedBy: messageDiagnostic.protectedBy ?? null,
       });
     } else if (assignment.assignmentTypeKey === "reporting.edition-candidate") {
       const message = linkedMessages.find((entry) => entry.messageKind === "reporting_context_packet") ?? null;
@@ -4085,6 +4096,10 @@ async function loadAppliedStoryCycleManifestFromGraph(client, { runId, coverageK
         exitStatus: messageDiagnostic.exitStatus ?? null,
         stderrPath: messageDiagnostic.stderrPath ?? null,
         packetPath: messageDiagnostic.packetPath ?? null,
+        error: messageDiagnostic.error ?? null,
+        persistenceSkippedReason: messageDiagnostic.persistenceSkippedReason ?? null,
+        refreshSkippedReason: messageDiagnostic.refreshSkippedReason ?? null,
+        protectedBy: messageDiagnostic.protectedBy ?? null,
       });
     }
   }
@@ -4127,15 +4142,65 @@ function storyCyclePacketPayload(payload, kind) {
 
 function storyCyclePacketDegraded(packet, diagnostic) {
   const trace = parseJsonish(packet?.researchTrace ?? packet?.research_trace);
-  return Boolean(diagnostic?.degraded ?? diagnostic?.fallback ?? packet?.degraded ?? packet?.fallback ?? trace?.fallbackReason ?? trace?.fallback_reason);
+  const unresolvedGaps = parseArrayValue(trace.unresolvedGaps ?? trace.unresolved_gaps);
+  const riskFlags = parseArrayValue(packet?.risk_flags ?? packet?.riskFlags);
+  const coverageGaps = parseArrayValue(packet?.coverage_gaps ?? packet?.coverageGaps);
+  const degradationText = [...riskFlags, ...coverageGaps].map((entry) => String(entry).toLowerCase()).join(" ");
+  return Boolean(
+    diagnostic?.degraded
+    || diagnostic?.fallback
+    || packet?.degraded
+    || packet?.fallback
+    || packet?.recoveryPath
+    || packet?.recovery_path
+    || packet?.fallbackReason
+    || packet?.fallback_reason
+    || packet?.blockedReason
+    || packet?.blocked_reason
+    || packet?.evidenceSanitized
+    || packet?.evidence_sanitized
+    || trace?.recoveryPath
+    || trace?.recovery_path
+    || trace?.fallbackReason
+    || trace?.fallback_reason
+    || unresolvedGaps.includes("agent_output_not_structured")
+    || unresolvedGaps.includes("web_search_failed_after_retry")
+    || degradationText.includes("live context unavailable")
+    || degradationText.includes("live context helper")
+    || degradationText.includes("live assignment context helper failed")
+    || degradationText.includes("live assignment context unavailable")
+    || degradationText.includes("live assignment context was unavailable")
+    || degradationText.includes("could not load live assignment context")
+    || degradationText.includes("assignment_context_json was unavailable")
+    || degradationText.includes("inline assignment_json only")
+  );
 }
 
 function storyCyclePacketFallbackReason(packet, diagnostic) {
   const fallback = parseJsonish(packet?.fallback);
   const trace = parseJsonish(packet?.researchTrace ?? packet?.research_trace);
+  const unresolvedGaps = parseArrayValue(trace.unresolvedGaps ?? trace.unresolved_gaps);
+  const riskFlags = parseArrayValue(packet?.risk_flags ?? packet?.riskFlags);
+  const coverageGaps = parseArrayValue(packet?.coverage_gaps ?? packet?.coverageGaps);
+  const degradationText = [...riskFlags, ...coverageGaps].map((entry) => String(entry).toLowerCase()).join(" ");
   return normalizeCliString(diagnostic?.fallbackReason)
+    ?? normalizeCliString(packet?.fallbackReason ?? packet?.fallback_reason)
+    ?? normalizeCliString(packet?.blockedReason ?? packet?.blocked_reason)
+    ?? (packet?.evidenceSanitized || packet?.evidence_sanitized ? "accepted_evidence_sanitized" : null)
     ?? normalizeCliString(fallback.reason)
     ?? normalizeCliString(trace.fallbackReason ?? trace.fallback_reason)
+    ?? (unresolvedGaps.includes("web_search_failed_after_retry") ? "web_search_failed_after_retry" : null)
+    ?? (unresolvedGaps.includes("agent_output_not_structured") ? "agent_output_not_structured" : null)
+    ?? (degradationText.includes("live context unavailable")
+      || degradationText.includes("live context helper")
+      || degradationText.includes("live assignment context helper failed")
+      || degradationText.includes("live assignment context unavailable")
+      || degradationText.includes("live assignment context was unavailable")
+      || degradationText.includes("could not load live assignment context")
+      || degradationText.includes("assignment_context_json was unavailable")
+      || degradationText.includes("inline assignment_json only")
+      ? "live_context_unavailable"
+      : null)
     ?? null;
 }
 
@@ -4286,13 +4351,113 @@ async function loadExistingStoryCyclePacket(client, assignment, messageKind) {
   return { message, metadata, packet };
 }
 
-async function runStoryCycleResearchJob({ client, assignment, apply, allowFallback, requireAgentSuccess, refreshPackets, runDir, corpusKey, researchMode, topic, coverageKey, maxEvidenceItems }) {
+const REPORTING_REVIEW_EVENT_TYPES = new Set([
+  "reporting_select",
+  "reporting_merge",
+  "reporting_brief",
+  "reporting_hold",
+  "reporting_kill",
+]);
+
+async function loadReportingPacketRefreshProtection(client, { assignment, message }) {
+  const [events, downstreamProtection] = await Promise.all([
+    client.listAssignmentEventsByAssignmentAndCreatedAt(assignment.id).catch(() => []),
+    loadMessageDownstreamLineageProtection(client, { assignment, message }),
+  ]);
+  const reviewEvent = (events ?? [])
+    .filter((event) => REPORTING_REVIEW_EVENT_TYPES.has(event.eventType))
+    .sort((left, right) => String(right.createdAt ?? "").localeCompare(String(left.createdAt ?? "")))[0] ?? null;
+  if (reviewEvent) {
+    return {
+      protected: true,
+      reason: `protected_by_${reviewEvent.eventType}`,
+      protectedBy: {
+        kind: "assignment_event",
+        id: reviewEvent.id,
+        eventType: reviewEvent.eventType,
+        createdAt: reviewEvent.createdAt ?? null,
+      },
+    };
+  }
+  if (downstreamProtection.protected) return downstreamProtection;
+  return { protected: false, reason: null, protectedBy: null };
+}
+
+async function loadMessageDownstreamLineageProtection(client, { assignment, message }) {
+  const messageObjectRelations = await client.listSemanticRelationsByObjectState(semanticStateKey("message", message.id)).catch(() => []);
+  const downstreamRelation = (messageObjectRelations ?? []).find((relation) => (
+    relation.relationState !== "superseded"
+    && (relation.subjectKind === "assignment" || relation.subjectKind === "message")
+    && relation.subjectId !== assignment.id
+    && relation.subjectId !== message.id
+    && relation.objectKind === "message"
+    && relation.objectId === message.id
+    && (relation.relationTypeKey ?? relation.predicate) === "derived_from"
+  ));
+  if (downstreamRelation) {
+    return {
+      protected: true,
+      reason: "protected_by_downstream_lineage",
+      protectedBy: {
+        kind: "semantic_relation",
+        id: downstreamRelation.id,
+        subjectKind: downstreamRelation.subjectKind,
+        subjectId: downstreamRelation.subjectId,
+        relationTypeKey: downstreamRelation.relationTypeKey ?? downstreamRelation.predicate ?? null,
+      },
+    };
+  }
+  return { protected: false, reason: null, protectedBy: null };
+}
+
+async function runStoryCycleResearchJob({ client, assignment, apply, allowFallback, requireAgentSuccess, refreshPackets, forceRefreshSelected, runDir, corpusKey, researchMode, topic, coverageKey, maxEvidenceItems }) {
   const sectionKey = assignment.sectionKey ?? "unsectioned";
   const basePath = path.join(runDir, "research", `${safeId(sectionKey)}-${safeId(assignment.id)}`);
   const stdoutPath = `${basePath}.stdout.log`;
   const stderrPath = `${basePath}.stderr.log`;
   const resultPath = `${basePath}.result.json`;
   const packetPath = `${basePath}.packet.json`;
+  if (apply && refreshPackets && !forceRefreshSelected) {
+    const existing = await loadExistingStoryCyclePacket(client, assignment, "research_packet");
+    if (existing) {
+      const protection = await loadMessageDownstreamLineageProtection(client, { assignment, message: existing.message });
+      if (protection.protected) {
+        writeJsonFile(packetPath, existing.packet);
+        writeJsonFile(resultPath, {
+          resumed: true,
+          messageId: existing.message.id,
+          packetPath,
+          refreshSkippedReason: protection.reason,
+          protectedBy: protection.protectedBy,
+        });
+        return {
+          ok: true,
+          degraded: storyCyclePacketDegraded(existing.packet, null),
+          fallbackReason: storyCyclePacketFallbackReason(existing.packet, null),
+          fallbackKind: storyCyclePacketFallbackKind(existing.packet, null),
+          agentExitStatus: null,
+          persistenceSkippedReason: protection.reason,
+          phase: "research",
+          assignmentId: assignment.id,
+          sectionKey,
+          messageId: existing.message.id,
+          packetPath,
+          resultPath,
+          stdoutPath: null,
+          stderrPath: null,
+          exitStatus: null,
+          signal: null,
+          packet: existing.packet,
+          fallback: null,
+          recordPlan: null,
+          applyResult: { messageId: existing.message.id, changes: { noop: 1 } },
+          resumed: true,
+          refreshSkippedReason: protection.reason,
+          protectedBy: protection.protectedBy,
+        };
+      }
+    }
+  }
   if (apply && !refreshPackets) {
     const existing = await loadExistingStoryCyclePacket(client, assignment, "research_packet");
     if (existing) {
@@ -4366,7 +4531,9 @@ async function runStoryCycleResearchJob({ client, assignment, apply, allowFallba
   }
   if (packet) writeJsonFile(packetPath, packet);
   writeJsonFile(resultPath, { command, parsed, fallback, stdoutPath, stderrPath });
-  const degraded = Boolean(fallback) || proc.status !== 0;
+  const detectedDegraded = packet ? storyCyclePacketDegraded(packet, null) : false;
+  const detectedFallbackReason = packet ? storyCyclePacketFallbackReason(packet, null) : null;
+  const degraded = Boolean(fallback) || proc.status !== 0 || detectedDegraded;
   const persistenceBlocked = Boolean(requireAgentSuccess && degraded);
   const recordPlan = packet
     ? buildStoryCycleResearchRecordPlan({ assignment, packet })
@@ -4380,7 +4547,7 @@ async function runStoryCycleResearchJob({ client, assignment, apply, allowFallba
   return {
     ok: Boolean(packet) && (!apply || (Boolean(recordPlan) && !persistenceBlocked)),
     degraded,
-    fallbackReason: fallback?.reason ?? (proc.status !== 0 ? "research_procedure_failed" : (!packet ? "missing_research_packet" : null)),
+    fallbackReason: fallback?.reason ?? (proc.status !== 0 ? "research_procedure_failed" : detectedFallbackReason ?? (!packet ? "missing_research_packet" : null)),
     fallbackKind: fallback?.kind ?? null,
     agentExitStatus: proc.status,
     persistenceSkippedReason: persistenceBlocked ? "require_agent_success" : (!recordPlan && apply ? "missing_record_plan" : null),
@@ -4401,7 +4568,33 @@ async function runStoryCycleResearchJob({ client, assignment, apply, allowFallba
   };
 }
 
-async function runStoryCycleReportingJob({ client, assignment, apply, allowFallback, requireAgentSuccess, refreshPackets, runDir, corpusKey, topic, coverageKey, researchRun }) {
+async function runStoryCycleReportingJobOrBlocked(options) {
+  const { assignment, researchRun, requireAgentSuccess } = options;
+  if (requireAgentSuccess && (!researchRun || !researchRun.ok || researchRun.degraded)) {
+    return {
+      ok: false,
+      degraded: false,
+      phase: "reporting",
+      sectionKey: assignment.sectionKey ?? null,
+      assignmentId: assignment.id,
+      angle: storyCycleAssignmentSummary(assignment).angle,
+      messageId: null,
+      packetPath: null,
+      resultPath: null,
+      stdoutPath: null,
+      stderrPath: null,
+      exitStatus: null,
+      signal: null,
+      sourceResearchAssignmentId: researchRun?.assignmentId ?? null,
+      sourceResearchPacketId: researchRun?.messageId ?? null,
+      error: researchRun ? "blocked_by_degraded_research" : "blocked_by_missing_research",
+      persistenceSkippedReason: "require_agent_success",
+    };
+  }
+  return runStoryCycleReportingJob(options);
+}
+
+async function runStoryCycleReportingJob({ client, assignment, apply, allowFallback, requireAgentSuccess, refreshPackets, forceRefreshSelected, runDir, corpusKey, topic, coverageKey, researchRun }) {
   const sectionKey = assignment.sectionKey ?? "unsectioned";
   const assignmentMeta = parseJsonish(assignment.metadata);
   const angle = assignmentMeta.angleDiversity?.lensLabel ?? assignmentMeta.angleDiversity?.lensKey ?? null;
@@ -4428,6 +4621,49 @@ async function runStoryCycleReportingJob({ client, assignment, apply, allowFallb
   const stderrPath = `${basePath}.stderr.log`;
   const resultPath = `${basePath}.result.json`;
   const packetPath = `${basePath}.packet.json`;
+  if (apply && refreshPackets && !forceRefreshSelected) {
+    const existing = await loadExistingStoryCyclePacket(client, assignment, "reporting_context_packet");
+    if (existing) {
+      const protection = await loadReportingPacketRefreshProtection(client, { assignment, message: existing.message });
+      if (protection.protected) {
+        writeJsonFile(packetPath, existing.packet);
+        writeJsonFile(resultPath, {
+          resumed: true,
+          messageId: existing.message.id,
+          packetPath,
+          refreshSkippedReason: protection.reason,
+          protectedBy: protection.protectedBy,
+        });
+        return {
+          ok: true,
+          degraded: storyCyclePacketDegraded(existing.packet, null),
+          fallbackReason: storyCyclePacketFallbackReason(existing.packet, null),
+          fallbackKind: storyCyclePacketFallbackKind(existing.packet, null),
+          agentExitStatus: null,
+          persistenceSkippedReason: protection.reason,
+          phase: "reporting",
+          assignmentId: assignment.id,
+          sectionKey,
+          angle,
+          messageId: existing.message.id,
+          packetPath,
+          resultPath,
+          stdoutPath: null,
+          stderrPath: null,
+          exitStatus: null,
+          signal: null,
+          sourceResearchAssignmentId: researchRun?.assignmentId ?? null,
+          sourceResearchPacketId: researchRun?.messageId ?? null,
+          packet: existing.packet,
+          fallback: null,
+          applyResult: { messageId: existing.message.id, changes: { noop: 1 } },
+          resumed: true,
+          refreshSkippedReason: protection.reason,
+          protectedBy: protection.protectedBy,
+        };
+      }
+    }
+  }
   if (apply && !refreshPackets) {
     const existing = await loadExistingStoryCyclePacket(client, assignment, "reporting_context_packet");
     if (existing) {
@@ -4504,6 +4740,36 @@ async function runStoryCycleReportingJob({ client, assignment, apply, allowFallb
       recordPlan = fallback.reportingRecordPlan;
     }
   }
+  if (packet) {
+    packet = enrichStoryCycleReportingPacket({
+      packet,
+      assignment,
+      assignmentMeta,
+      topic,
+      coverageKey,
+      sectionKey,
+      angle,
+      researchRun,
+    });
+    packet = sanitizeStoryCycleReportingPacketEvidence({ packet, researchRun });
+    const missingContractFields = reportingPacketMissingContractFields(packet);
+    if (missingContractFields.length) {
+      if (allowFallback) {
+        fallback = buildStoryCycleReportingFallbackPacket({
+          assignment,
+          assignmentMeta,
+          topic,
+          coverageKey,
+          researchRun,
+          reason: `missing_reporting_packet_fields:${missingContractFields.join(",")}`,
+        });
+        packet = fallback.packet;
+        recordPlan = fallback.reportingRecordPlan;
+      } else {
+        packet = null;
+      }
+    }
+  }
   if (packet && !recordPlan) {
     recordPlan = buildStoryCycleReportingFallbackRecordPlan({
       assignment,
@@ -4514,7 +4780,9 @@ async function runStoryCycleReportingJob({ client, assignment, apply, allowFallb
   }
   if (packet) writeJsonFile(packetPath, packet);
   writeJsonFile(resultPath, { command, parsed, fallback, stdoutPath, stderrPath });
-  const degraded = Boolean(fallback) || proc.status !== 0;
+  const detectedDegraded = packet ? storyCyclePacketDegraded(packet, null) : false;
+  const detectedFallbackReason = packet ? storyCyclePacketFallbackReason(packet, null) : null;
+  const degraded = Boolean(fallback) || proc.status !== 0 || detectedDegraded;
   const persistenceBlocked = Boolean(requireAgentSuccess && degraded);
   let messageId = null;
   let applyResult = null;
@@ -4525,7 +4793,7 @@ async function runStoryCycleReportingJob({ client, assignment, apply, allowFallb
   return {
     ok: Boolean(packet) && (!apply || (Boolean(recordPlan) && !persistenceBlocked)),
     degraded,
-    fallbackReason: fallback?.reason ?? (proc.status !== 0 ? "reporting_procedure_failed" : (!packet ? "missing_reporting_context_packet" : null)),
+    fallbackReason: fallback?.reason ?? (proc.status !== 0 ? "reporting_procedure_failed" : detectedFallbackReason ?? (!packet ? "missing_reporting_context_packet" : null)),
     fallbackKind: fallback?.kind ?? null,
     agentExitStatus: proc.status,
     persistenceSkippedReason: persistenceBlocked ? "require_agent_success" : (!recordPlan && apply ? "missing_record_plan" : null),
@@ -4546,6 +4814,107 @@ async function runStoryCycleReportingJob({ client, assignment, apply, allowFallb
     fallback,
     applyResult,
   };
+}
+
+function enrichStoryCycleReportingPacket({ packet, assignment, assignmentMeta, topic, coverageKey, sectionKey, angle, researchRun }) {
+  if (!packet || typeof packet !== "object") return packet;
+  const metadata = assignmentMeta ?? parseJsonish(assignment?.metadata);
+  const coverageConceptKey = normalizeCliString(packet.coverageConceptKey ?? packet.coverage_concept_key)
+    ?? normalizeCliString(packet.coverageConcept?.key ?? packet.coverage_concept?.key)
+    ?? normalizeCliString(metadata.coverageConceptKey ?? coverageKey);
+  const storyCycleRunId = normalizeCliString(packet.storyCycleRunId ?? packet.story_cycle_run_id)
+    ?? normalizeCliString(metadata.storyCycleRunId ?? metadata.coverageThemeRunId);
+  const editionId = normalizeCliString(packet.editionId ?? packet.edition_id)
+    ?? normalizeCliString(metadata.editionId)
+    ?? (metadata.storyCycleDate ? `edition-${metadata.storyCycleDate}` : null);
+  const next = {
+    ...packet,
+    topic: normalizeCliString(packet.topic) ?? normalizeCliString(metadata.topic ?? topic) ?? null,
+    section_key: normalizeCliString(packet.section_key ?? packet.sectionKey) ?? normalizeCliString(sectionKey) ?? null,
+    sectionKey: normalizeCliString(packet.sectionKey ?? packet.section_key) ?? normalizeCliString(sectionKey) ?? null,
+    angle: normalizeCliString(packet.angle) ?? normalizeCliString(angle) ?? null,
+    edition_id: editionId,
+    editionId,
+    story_cycle_run_id: storyCycleRunId,
+    storyCycleRunId,
+    coverage_concept_key: coverageConceptKey,
+    coverageConceptKey,
+    source_research_assignment_id: normalizeCliString(packet.source_research_assignment_id ?? packet.sourceResearchAssignmentId)
+      ?? normalizeCliString(researchRun?.assignmentId ?? metadata.sourceResearchAssignmentId),
+    sourceResearchAssignmentId: normalizeCliString(packet.sourceResearchAssignmentId ?? packet.source_research_assignment_id)
+      ?? normalizeCliString(researchRun?.assignmentId ?? metadata.sourceResearchAssignmentId),
+    source_research_packet_id: normalizeCliString(packet.source_research_packet_id ?? packet.sourceResearchPacketId)
+      ?? normalizeCliString(researchRun?.messageId ?? metadata.sourceResearchPacketId),
+    sourceResearchPacketId: normalizeCliString(packet.sourceResearchPacketId ?? packet.source_research_packet_id)
+      ?? normalizeCliString(researchRun?.messageId ?? metadata.sourceResearchPacketId),
+  };
+  if (coverageConceptKey && (!next.coverage_concept || typeof next.coverage_concept !== "object")) {
+    next.coverage_concept = {
+      key: coverageConceptKey,
+      lineage_id: metadata.coverageConceptLineageId ?? null,
+      label: metadata.coverageConceptTitle ?? metadata.topic ?? topic ?? coverageConceptKey,
+    };
+  }
+  if (coverageConceptKey && (!next.coverageConcept || typeof next.coverageConcept !== "object")) {
+    next.coverageConcept = {
+      key: coverageConceptKey,
+      lineageId: metadata.coverageConceptLineageId ?? null,
+      label: metadata.coverageConceptTitle ?? metadata.topic ?? topic ?? coverageConceptKey,
+    };
+  }
+  return next;
+}
+
+function sanitizeStoryCycleReportingPacketEvidence({ packet, researchRun }) {
+  if (!packet || typeof packet !== "object") return packet;
+  const allowed = new Set([
+    ...parseArrayValue(researchRun?.packet?.acceptedReferenceIds),
+    ...parseArrayValue(researchRun?.packet?.accepted_reference_ids),
+    ...parseArrayValue(researchRun?.packet?.evidenceItemIds),
+    ...parseArrayValue(researchRun?.packet?.evidence_item_ids),
+  ].map((value) => String(value)).filter(Boolean));
+  const claimed = [
+    ...parseArrayValue(packet.accepted_reference_ids),
+    ...parseArrayValue(packet.acceptedReferenceIds),
+  ].map((value) => String(value)).filter(Boolean);
+  if (!claimed.length) return packet;
+  const accepted = claimed.filter((id) => allowed.has(id));
+  if (accepted.length === claimed.length) return packet;
+  const rejected = claimed.filter((id) => !allowed.has(id));
+  const riskFlags = [
+    ...parseArrayValue(packet.risk_flags ?? packet.riskFlags),
+    `Removed unverified accepted reference ids: ${rejected.join(", ")}`,
+  ];
+  const coverageGaps = [
+    ...parseArrayValue(packet.coverage_gaps ?? packet.coverageGaps),
+    "Accepted evidence ids must come from source research packets or accepted Reference rows.",
+  ];
+  return {
+    ...packet,
+    accepted_reference_ids: accepted,
+    acceptedReferenceIds: accepted,
+    risk_flags: riskFlags,
+    riskFlags,
+    coverage_gaps: coverageGaps,
+    coverageGaps,
+    evidenceSanitized: true,
+    evidence_sanitized: true,
+  };
+}
+
+function reportingPacketMissingContractFields(packet) {
+  const missing = [];
+  const hasText = (value) => normalizeCliString(value) !== null;
+  const hasArray = (value) => parseArrayValue(value).length > 0;
+  if (!hasText(packet.editor_recommendation ?? packet.editorRecommendation)) missing.push("editor_recommendation");
+  if (!hasText(packet.recommended_angle ?? packet.recommendedAngle)) missing.push("recommended_angle");
+  if (!hasArray(packet.risk_flags ?? packet.riskFlags)) missing.push("risk_flags");
+  if (!hasArray(packet.coverage_gaps ?? packet.coverageGaps)) missing.push("coverage_gaps");
+  if (!hasArray(packet.open_questions ?? packet.openQuestions)) missing.push("open_questions");
+  if (!hasText(packet.copywriter_brief ?? packet.copywriterBrief) && typeof (packet.copywriter_brief ?? packet.copywriterBrief) !== "object") {
+    missing.push("copywriter_brief");
+  }
+  return missing;
 }
 
 function buildStoryCycleResearchFallbackPacket({ assignment, topic, coverageKey, researchMode, reason }) {
@@ -5288,6 +5657,10 @@ function normalizeRunPayloadCandidate(value) {
     ? value.value
     : value;
   if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return null;
+  if (typeof candidate.reason === "string") {
+    const reasonPayload = normalizeRunPayloadCandidate(tryParseJson(candidate.reason));
+    if (reasonPayload) return reasonPayload;
+  }
   return (
     candidate.research_packet
     || candidate.researchPacket
@@ -6325,7 +6698,7 @@ async function reviewReportingPacket(flags) {
   const targetItemId = normalizeCliString(options["target-item"]);
   const targetItem = targetItemId ? await client.getRecord("Item", targetItemId) : null;
   if (targetItemId && !targetItem) throw new Error(`Target Item ${targetItemId} was not found.`);
-  const semanticRelations = await client.listRecords("SemanticRelation");
+  const semanticRelations = await loadReportingPacketReviewRelations(client, { assignmentId, messageId });
   const actorLabel = normalizeCliString(options["actor-label"]) ?? normalizeCliString(auth.claims.email) ?? normalizeCliString(auth.claims.sub) ?? "papyrus-content-cli";
   const plan = buildReportingPacketReviewPlan({
     assignment,
@@ -6362,6 +6735,20 @@ async function reviewReportingPacket(flags) {
     return;
   }
   printReportingPacketReviewSummary(plan, changes, { apply, report });
+}
+
+async function loadReportingPacketReviewRelations(client, { assignmentId, messageId }) {
+  const [assignmentRelations, messageRelations] = await Promise.all([
+    client.listSemanticRelationsBySubjectState(semanticStateKey("assignment", assignmentId)),
+    client.listSemanticRelationsBySubjectState(semanticStateKey("message", messageId)),
+  ]);
+  const seen = new Set();
+  return [...assignmentRelations, ...messageRelations].filter((relation) => {
+    const key = relation?.id ?? JSON.stringify(relation);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function writeReportingPacketReviewReport(plan, changes, options = {}) {
@@ -6403,11 +6790,13 @@ async function runCopywritingAssignment(flags) {
   if (!COPYWRITING_ASSIGNMENT_TYPES.has(assignment.assignmentTypeKey)) {
     throw new Error(`Assignment ${assignmentId} must be copywriting.article-draft or copywriting.brief-draft.`);
   }
-  const [assignmentMeta, semanticRelations, items] = await Promise.all([
+  const [assignmentMeta, semanticRelations] = await Promise.all([
     assignmentMetadata(client, assignment),
-    client.listRecords("SemanticRelation"),
-    client.listRecords("Item"),
+    client.listSemanticRelationsBySubjectState(semanticStateKey("assignment", assignment.id)),
   ]);
+  const itemIds = producedItemIdsFromRelations(semanticRelations);
+  const itemMap = await client.getRecordsById("Item", itemIds);
+  const items = Array.from(itemMap.values()).filter(Boolean);
   const packetMessageId = normalizeCliString(options.message)
     ?? normalizeCliString(assignmentMeta.sourceReportingPacketMessageId)
     ?? findSourceReportingPacketMessageId(semanticRelations, assignment.id);
@@ -6459,6 +6848,15 @@ function findSourceReportingPacketMessageId(relations, assignmentId) {
   return normalizeCliString(relation?.objectId);
 }
 
+function producedItemIdsFromRelations(relations) {
+  return Array.from(new Set((relations ?? [])
+    .filter((relation) => relation.relationState !== "superseded")
+    .filter((relation) => relation.objectKind === "item")
+    .filter((relation) => (relation.relationTypeKey ?? relation.predicate) === "produces")
+    .map((relation) => relation.objectId)
+    .filter(Boolean)));
+}
+
 function writeCopywritingRunReport(plan, changes, options = {}) {
   const outputDir = path.resolve(options.outputDir ?? path.join(".papyrus-runs", `copywriting-${safeId(plan.assignmentId).slice(0, 60)}-${timestampForPath()}`));
   fs.mkdirSync(outputDir, { recursive: true });
@@ -6490,48 +6888,36 @@ async function showCopywritingOutput(flags) {
   const options = parseOptions(flags);
   const asJson = Boolean(options.json);
   const { client } = createAuthoringClient();
-  const [assignments, assignmentEvents, semanticRelations, items] = await Promise.all([
-    client.listRecords("Assignment"),
-    client.listRecords("AssignmentEvent"),
-    client.listRecords("SemanticRelation"),
-    client.listRecords("Item"),
-  ]);
-  const itemById = new Map(items.map((item) => [item.id, item]));
-  const rows = [];
-  for (const assignment of assignments.filter((entry) => COPYWRITING_ASSIGNMENT_TYPES.has(entry.assignmentTypeKey))) {
-    const metadata = await assignmentMetadata(client, assignment);
-    const producedItems = semanticRelations
-      .filter((relation) => relation.relationState !== "superseded")
-      .filter((relation) => relation.subjectKind === "assignment" && relation.subjectId === assignment.id)
-      .filter((relation) => relation.objectKind === "item" && (relation.relationTypeKey ?? relation.predicate) === "produces")
-      .map((relation) => itemById.get(relation.objectId))
-      .filter(Boolean)
-      .sort((left, right) => Number(right.versionNumber ?? 0) - Number(left.versionNumber ?? 0));
-    const latestEvent = assignmentEvents
-      .filter((event) => event.assignmentId === assignment.id && event.eventType.startsWith("copywriting_"))
-      .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))[0] ?? null;
-    rows.push({
-      assignmentId: assignment.id,
-      assignmentTypeKey: assignment.assignmentTypeKey,
-      status: assignment.status,
-      sectionKey: assignment.sectionKey ?? metadata.sectionKey ?? null,
-      storyCycleRunId: metadata.storyCycleRunId ?? null,
-      coverageConceptKey: metadata.coverageConceptKey ?? null,
-      sourceReportingAssignmentId: metadata.sourceReportingAssignmentId ?? null,
-      sourceReportingPacketMessageId: metadata.sourceReportingPacketMessageId ?? null,
-      targetItemType: metadata.targetItemType ?? (assignment.assignmentTypeKey === "copywriting.brief-draft" ? "brief" : "article"),
-      draftItemId: producedItems[0]?.id ?? null,
-      draftItemLineageId: producedItems[0]?.lineageId ?? null,
-      draftVersionNumber: producedItems[0]?.versionNumber ?? null,
-      latestEventType: latestEvent?.eventType ?? null,
-      latestEventAt: latestEvent?.createdAt ?? null,
-    });
+  const requestedAssignmentId = normalizeCliString(options.assignment);
+  if (requestedAssignmentId) {
+    const assignment = await client.getRecord("Assignment", requestedAssignmentId);
+    const rows = assignment && COPYWRITING_ASSIGNMENT_TYPES.has(assignment.assignmentTypeKey)
+      ? [await copywritingOutputRowForAssignment(client, assignment)]
+      : [];
+    const output = {
+      ok: true,
+      command: "assignments copywriting-output",
+      count: rows.length,
+      copywritingAssignments: rows,
+    };
+    if (asJson) {
+      printCompactJson(output);
+      return;
+    }
+    printCopywritingOutputRows(rows);
+    return;
   }
-  const filtered = rows
-    .filter((row) => !options.assignment || row.assignmentId === normalizeCliString(options.assignment))
-    .filter((row) => !options["run-id"] || row.storyCycleRunId === normalizeCliString(options["run-id"]))
-    .filter((row) => !options["coverage-key"] || row.coverageConceptKey === normalizeCliString(options["coverage-key"]))
-    .filter((row) => !options.section || row.sectionKey === normalizeCliString(options.section))
+  const copywritingAssignments = await loadCopywritingAssignments(client);
+  const assignmentMetadataRows = await Promise.all(copywritingAssignments.map(async (assignment) => ({
+    assignment,
+    metadata: await assignmentMetadata(client, assignment),
+  })));
+  const filteredAssignments = assignmentMetadataRows
+    .filter(({ assignment }) => !options.assignment || assignment.id === normalizeCliString(options.assignment))
+    .filter(({ metadata }) => !options["run-id"] || metadata.storyCycleRunId === normalizeCliString(options["run-id"]))
+    .filter(({ metadata }) => !options["coverage-key"] || metadata.coverageConceptKey === normalizeCliString(options["coverage-key"]))
+    .filter(({ assignment, metadata }) => !options.section || (assignment.sectionKey ?? metadata.sectionKey) === normalizeCliString(options.section));
+  const filtered = (await Promise.all(filteredAssignments.map(({ assignment, metadata }) => copywritingOutputRowForAssignment(client, assignment, metadata))))
     .sort((left, right) => (
       String(left.storyCycleRunId ?? "").localeCompare(String(right.storyCycleRunId ?? ""))
       || String(left.sectionKey ?? "").localeCompare(String(right.sectionKey ?? ""))
@@ -6547,11 +6933,66 @@ async function showCopywritingOutput(flags) {
     printCompactJson(output);
     return;
   }
-  if (!filtered.length) {
+  printCopywritingOutputRows(filtered);
+}
+
+async function loadCopywritingAssignments(client) {
+  const groups = await Promise.all(Array.from(COPYWRITING_ASSIGNMENT_TYPES).map(async (assignmentTypeKey) => {
+    try {
+      return await client.listAssignmentsByTypeStatusAndCreatedAt(assignmentTypeKey);
+    } catch {
+      return [];
+    }
+  }));
+  const assignments = groups.flat().filter((assignment) => COPYWRITING_ASSIGNMENT_TYPES.has(assignment.assignmentTypeKey));
+  const byId = new Map();
+  for (const assignment of assignments) byId.set(assignment.id, assignment);
+  if (byId.size) return Array.from(byId.values());
+  return (await client.listRecords("Assignment"))
+    .filter((assignment) => COPYWRITING_ASSIGNMENT_TYPES.has(assignment.assignmentTypeKey));
+}
+
+async function copywritingOutputRowForAssignment(client, assignment, metadataOverride = null) {
+  const [metadata, semanticRelations, assignmentEvents] = await Promise.all([
+    metadataOverride ?? assignmentMetadata(client, assignment),
+    client.listSemanticRelationsBySubjectState(semanticStateKey("assignment", assignment.id)),
+    client.listAssignmentEventsByAssignmentAndCreatedAt(assignment.id),
+  ]);
+  const itemById = await client.getRecordsById("Item", producedItemIdsFromRelations(semanticRelations));
+  const producedItems = semanticRelations
+    .filter((relation) => relation.relationState !== "superseded")
+    .filter((relation) => relation.subjectKind === "assignment" && relation.subjectId === assignment.id)
+    .filter((relation) => relation.objectKind === "item" && (relation.relationTypeKey ?? relation.predicate) === "produces")
+    .map((relation) => itemById.get(relation.objectId))
+    .filter(Boolean)
+    .sort((left, right) => Number(right.versionNumber ?? 0) - Number(left.versionNumber ?? 0));
+  const latestEvent = assignmentEvents
+    .filter((event) => event.eventType.startsWith("copywriting_"))
+    .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))[0] ?? null;
+  return {
+    assignmentId: assignment.id,
+    assignmentTypeKey: assignment.assignmentTypeKey,
+    status: assignment.status,
+    sectionKey: assignment.sectionKey ?? metadata.sectionKey ?? null,
+    storyCycleRunId: metadata.storyCycleRunId ?? null,
+    coverageConceptKey: metadata.coverageConceptKey ?? null,
+    sourceReportingAssignmentId: metadata.sourceReportingAssignmentId ?? null,
+    sourceReportingPacketMessageId: metadata.sourceReportingPacketMessageId ?? null,
+    targetItemType: metadata.targetItemType ?? (assignment.assignmentTypeKey === "copywriting.brief-draft" ? "brief" : "article"),
+    draftItemId: producedItems[0]?.id ?? null,
+    draftItemLineageId: producedItems[0]?.lineageId ?? null,
+    draftVersionNumber: producedItems[0]?.versionNumber ?? null,
+    latestEventType: latestEvent?.eventType ?? null,
+    latestEventAt: latestEvent?.createdAt ?? null,
+  };
+}
+
+function printCopywritingOutputRows(rows) {
+  if (!rows.length) {
     console.log("assignments\tcopywriting-output\t0");
     return;
   }
-  for (const row of filtered) {
+  for (const row of rows) {
     console.log([
       row.storyCycleRunId ?? "-",
       row.sectionKey ?? "-",
@@ -6563,7 +7004,7 @@ async function showCopywritingOutput(flags) {
       row.draftVersionNumber ?? "-",
     ].join("\t"));
   }
-  console.log(`assignments\tcopywriting-output\t${filtered.length}`);
+  console.log(`assignments\tcopywriting-output\t${rows.length}`);
 }
 
 function changeCounts(changes) {
@@ -14537,7 +14978,7 @@ function printUsage() {
   console.log("  npm run content -- assignments apply-research-packet --assignment <id> --research-json <packet.json> --apply [--json]");
   console.log("  npm run content -- assignments intake-proposals --assignment <id> --config <steering.yml> --corpus-key <key> --status pending [--message <message-id>] [--apply] [--json]");
   console.log("  npm run content -- assignments research-intake-now --assignment <id> --config <steering.yml> --corpus-key <key> --research-mode source_discovery --max-evidence-items 20 [--apply] [--json]");
-  console.log("  npm run content -- assignments run-story-cycle --date YYYY-MM-DD --topic <text> --category <category-key> --coverage-key <coverage.key> --sections culture,methods,business,law --section-budgets culture:2,methods:1,business:1,law:1 [--through plan|research|reporting] [--allow-fallback|--require-agent-success] [--refresh-packets] [--apply] [--json]");
+  console.log("  npm run content -- assignments run-story-cycle --date YYYY-MM-DD --topic <text> --category <category-key> --coverage-key <coverage.key> --sections culture,methods,business,law --section-budgets culture:2,methods:1,business:1,law:1 [--through plan|research|reporting] [--allow-fallback|--require-agent-success] [--refresh-packets] [--force-refresh-selected] [--apply] [--json]");
   console.log("  npm run content -- assignments story-cycle-output --run-id <story-cycle-run-id> [--section <key>] [--json]");
   console.log("  npm run content -- assignments orphan-research-packets [--json]");
   console.log("  npm run content -- assignments backfill-section-indexes --apply");

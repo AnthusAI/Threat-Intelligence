@@ -223,11 +223,16 @@ function buildStoryCyclePlan(options = {}) {
 
 function buildStoryCycleOutput(manifest, options = {}) {
   const sectionFilter = cleanString(options.section);
+  const through = normalizeStoryCycleThrough(manifest.through ?? "reporting");
+  const includeResearch = through === "research" || through === "reporting";
+  const includeReporting = through === "reporting";
+  const researchRunsForOutput = includeResearch ? (manifest.researchRuns ?? []) : [];
+  const reportingRunsForOutput = includeReporting ? (manifest.reportingRuns ?? []) : [];
   const sections = (manifest.sections ?? [])
     .filter((section) => !sectionFilter || section.key === sectionFilter)
     .map((section) => {
-      const researchRuns = (manifest.researchRuns ?? []).filter((run) => run.sectionKey === section.key);
-      const reportingRuns = (manifest.reportingRuns ?? []).filter((run) => run.sectionKey === section.key);
+      const researchRuns = researchRunsForOutput.filter((run) => run.sectionKey === section.key);
+      const reportingRuns = reportingRunsForOutput.filter((run) => run.sectionKey === section.key);
       return {
         sectionKey: section.key,
         sectionTitle: section.title,
@@ -244,6 +249,9 @@ function buildStoryCycleOutput(manifest, options = {}) {
           degraded: Boolean(run.degraded ?? run.fallback),
           fallbackReason: run.fallbackReason ?? run.fallback?.reason ?? null,
           fallbackKind: run.fallbackKind ?? run.fallback?.kind ?? null,
+          refreshSkippedReason: run.refreshSkippedReason ?? null,
+          protectedBy: run.protectedBy ?? null,
+          persistenceSkippedReason: run.persistenceSkippedReason ?? null,
           agentExitStatus: run.agentExitStatus ?? run.exitStatus ?? null,
         })),
         reportingPackets: reportingRuns.map((run) => ({
@@ -263,6 +271,9 @@ function buildStoryCycleOutput(manifest, options = {}) {
           degraded: Boolean(run.degraded ?? run.fallback),
           fallbackReason: run.fallbackReason ?? run.fallback?.reason ?? null,
           fallbackKind: run.fallbackKind ?? run.fallback?.kind ?? null,
+          refreshSkippedReason: run.refreshSkippedReason ?? null,
+          protectedBy: run.protectedBy ?? null,
+          persistenceSkippedReason: run.persistenceSkippedReason ?? null,
           agentExitStatus: run.agentExitStatus ?? run.exitStatus ?? null,
         })),
       };
@@ -273,7 +284,7 @@ function buildStoryCycleOutput(manifest, options = {}) {
     workflowName: manifest.workflowName ?? "Coverage Theme",
     runId: manifest.runId,
     action: manifest.action,
-    through: manifest.through ?? "reporting",
+    through,
     date: manifest.date,
     topic: manifest.topic,
     coverageKey: manifest.coverageKey,
@@ -281,8 +292,8 @@ function buildStoryCycleOutput(manifest, options = {}) {
     manifestPath: manifest.manifestPath ?? null,
     sections,
     failures: [
-      ...(manifest.researchRuns ?? []).filter((run) => !run.ok),
-      ...(manifest.reportingRuns ?? []).filter((run) => !run.ok),
+      ...researchRunsForOutput.filter((run) => !run.ok),
+      ...reportingRunsForOutput.filter((run) => !run.ok),
     ].map((run) => ({
       phase: run.phase,
       sectionKey: run.sectionKey,
@@ -293,8 +304,8 @@ function buildStoryCycleOutput(manifest, options = {}) {
       persistenceSkippedReason: run.persistenceSkippedReason ?? null,
     })),
     degraded: [
-      ...(manifest.researchRuns ?? []),
-      ...(manifest.reportingRuns ?? []),
+      ...researchRunsForOutput,
+      ...reportingRunsForOutput,
     ].filter((run) => Boolean(run.degraded ?? run.fallback)).map((run) => ({
       phase: run.phase,
       sectionKey: run.sectionKey,

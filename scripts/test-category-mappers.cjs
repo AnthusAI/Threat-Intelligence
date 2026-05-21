@@ -1473,8 +1473,10 @@ const selectReviewPlan = buildReportingPacketReviewPlan({
   now: "2026-05-18T13:10:00.000Z",
   semanticRelations: [reportingPacketRelation],
 });
-assert.deepEqual(selectReviewPlan.records.map((record) => record.modelName), ["AssignmentEvent", "ModelAttachment", "Assignment", "SemanticRelation", "SemanticRelation"]);
+assert.deepEqual(selectReviewPlan.records.map((record) => record.modelName), ["AssignmentEvent", "ModelAttachment", "Assignment", "ModelAttachment", "SemanticRelation", "SemanticRelation"]);
 assert.equal(selectReviewPlan.copywritingAssignment.assignmentTypeKey, "copywriting.article-draft");
+assert.equal(selectReviewPlan.copywritingAssignmentMetadataAttachment.expected.ownerKind, "assignment");
+assert.equal(selectReviewPlan.copywritingAssignmentMetadataAttachment.expected.ownerId, selectReviewPlan.copywritingAssignment.id);
 assert.equal(selectReviewPlan.metadata.createsDraftItem, false);
 assert.equal(selectReviewPlan.metadata.createsCopywritingAssignment, true);
 assert.equal(selectReviewPlan.metadata.copywritingAssignmentId, selectReviewPlan.copywritingAssignment.id);
@@ -1524,8 +1526,9 @@ const copywritingRerun = buildCopywritingRunPlan({
 assert.equal(copywritingRerun.draftItem.lineageId, copywritingDryRun.draftItem.lineageId);
 assert.equal(copywritingRerun.draftItem.versionNumber, 2);
 assert.equal(copywritingRerun.draftItem.previousVersionId, copywritingDryRun.draftItem.id);
-assert.deepEqual(copywritingRerun.draftItem.editorial.acceptedReferenceIds, ["reference-1-v1", "reference-2-v1"]);
-assert.equal(copywritingRerun.draftItem.editorial.proposedReferences.length, 1);
+assert.equal(copywritingRerun.draftItem.editorial, undefined);
+assert.deepEqual(copywritingRerun.metadata.privateEditorialMetadata.acceptedReferenceIds, ["reference-1-v1", "reference-2-v1"]);
+assert.equal(copywritingRerun.metadata.privateEditorialMetadata.proposedReferences.length, 1);
 const mergeReviewPlan = buildReportingPacketReviewPlan({
   assignment: reportingCandidate,
   message: reportingPacketMessage,
@@ -1841,9 +1844,9 @@ assert.match(schemaSource, /AssignmentEvent:\s*a\s*\n\s*\.model/);
 assert.match(schemaSource, /NewsroomSection:\s*a\s*\n\s*\.model/);
 assert.match(schemaSource.match(/NewsroomSection:\s*a[\s\S]*?secondaryIndexes/)?.[0] ?? "", /shortTitle:\s*a\.string\(\)\.required\(\)/);
 assert.match(authoringClientSource.match(/const NEWSROOM_SECTION_FIELDS = [^;]+;/)?.[0] ?? "", /shortTitle/);
-assert.match(authoringClientSource, /const GETTER_FALLBACKS = \{/);
-assert.match(authoringClientSource.match(/const GETTER_FALLBACKS = \{[\s\S]*?\n\};/)?.[0] ?? "", /NewsroomSection/);
-assert.match(authoringClientSource.match(/const GETTER_FALLBACKS = \{[\s\S]*?\n\};/)?.[0] ?? "", /NEWSROOM_SECTION_COMPAT_FIELDS/);
+assert.doesNotMatch(authoringClientSource, /NEWSROOM_SECTION_COMPAT_FIELDS/);
+assert.doesNotMatch(authoringClientSource, /GETTER_FALLBACKS/);
+assert.match(authoringClientSource, /async putById\(modelName, input\)/);
 const claimAssignmentSource = schemaSource.match(/claimAssignment:[\s\S]*?releaseAssignment:/)?.[0] ?? "";
 assert.match(claimAssignmentSource, /assigneeKey:\s*a\.string\(\)/);
 assert.match(claimAssignmentSource, /claimExpiresAt:\s*a\.datetime\(\)/);

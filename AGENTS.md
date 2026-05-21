@@ -28,6 +28,16 @@ rendering contracts.
 - Do not commit unless the user explicitly asks.
 - Preserve unrelated uncommitted work. This project is often dirty because it is
   being iterated in conversation.
+- Do not add backward-compatibility fallbacks for old schema, GraphQL, content,
+  layout-plan, or CLI shapes. Fallback read queries, dual-shape normalizers,
+  silent compatibility branches, and long-lived migration shims are technical
+  debt. Treat required-field/schema mismatches as data or deployment errors:
+  fix the production data with a targeted backfill, deploy the current schema
+  or code, and remove any one-time repair path after use.
+- Only create a temporary compatibility repair when the user explicitly approves
+  it to restore production immediately. Keep it narrow, document exactly why it
+  exists, and remove it from normal read, authoring, repository, and solver
+  paths as soon as the data or deployment is corrected.
 - Keep the current one-page React flipper. Do not reintroduce Turn.js, jQuery,
   or DOM-mutating layout loops.
 - Do not make React measure rendered DOM to decide layout. The solver should

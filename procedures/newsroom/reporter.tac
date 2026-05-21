@@ -28,6 +28,9 @@ Goal:
 - When live Assignment context is available, build and use the budgeted Papyrus agent context pack.
 - Use execute_tactus as your only tool for Papyrus, Biblicus, Tactus stdlib web research, and context.
 - Inside execute_tactus, compose Papyrus APIs with short Tactus snippets.
+- Reporter snippets must use the default raw execute_tactus harness. Do not set
+  harness="research"; that harness is only for research_packet finalization and
+  will reject reporting_context_packet payloads.
 - If drafting needs fresh source verification, require tactus.web inside the
   snippet and use provider="openai" with web.search or web.synthesize. Treat web
   results as evidence inputs only; do not write GraphQL records from web search.
@@ -90,35 +93,81 @@ Procedure {
             assignment_source = "inline assignment_json"
         end
 
+        local inline_assignment_json = input.assignment_json or ""
+        local inline_brief = ""
+        if inline_assignment_json ~= "" then
+            inline_brief = string.format([[
+
+Inline reporting Assignment JSON is available for fallback use:
+%s
+]], inline_assignment_json)
+        end
+
         local message = string.format([[
-Create a reporting work-product plan for %s using corpus %s.
+Create a reporting work-product plan for target reporting assignment %s using corpus %s.
 
 Source research assignment id: %s
 Source research packet id: %s
 Source research packet path: %s
+%s
 
 Required tool flow:
 1. Call execute_tactus with one short Tactus snippet.
-2. In that snippet, use assignment_context{ id = "<assignment id>" }, assignment_agent_context{ id = "<assignment id>", context_profile = "reporting" }, and assignment_context_to_item for live Assignment queue work when possible.
-3. Use item_get only when live Assignment context is unavailable.
-4. For live reporting.edition-candidate Assignments, return a reporting_context_packet payload only.
-5. When fresh source verification is needed, use local web = require("tactus.web") and call web.search or web.synthesize inside execute_tactus.
-6. Do not call Papyrus persistence planners. The outer CLI builds any record plan.
-7. When source research ids are provided, include source_research_assignment_id
+2. For live Assignment queue work, use the target reporting Assignment id
+   "%s" for assignment_context and assignment_agent_context. Do not use the
+   source research Assignment id as the target context; source research ids are
+   lineage inputs only.
+3. Convert live context with this exact shape:
+   local ctx = assignment_context{ id = "%s" }
+   local pack = assignment_agent_context{ id = "%s", context_profile = "reporting" }
+   local item = assignment_context_to_item{ assignment_context = ctx.assignment_context }
+4. Use item_get only when live Assignment context is unavailable.
+5. For live reporting.edition-candidate Assignments, return a reporting_context_packet payload only.
+6. When fresh source verification is needed, use local web = require("tactus.web") and call web.search or web.synthesize inside execute_tactus.
+7. Do not call Papyrus persistence planners. The outer CLI builds any record plan.
+8. When source research ids are provided, include source_research_assignment_id
    and source_research_packet_id in the reporting payload so the packet plan can
    write derived_from lineage.
-8. If live context helpers fail but assignment_json is present, return a packet
+9. If live context helpers fail but assignment_json is present, return a packet
    from the assignment_json brief and mark the context gap in risk_flags and
    open_questions. Do not call done without returning a packet payload.
+10. Use raw execute_tactus only. Do not set harness="research" in this reporter
+   procedure.
 
 For live reporting assignments, return assignment_item_id="%s", dry_run=true, work_product_kind="reporting_context_packet", item_status="reported", reporting_context_packet, and a concise summary.
 For legacy draft compatibility, return dry_run=true, work_product_kind="draft_article", item_status="draft", draft_record_plan, and a concise summary.
-]], assignment_source, input.corpus_key, input.source_research_assignment_id or "", input.source_research_packet_id or "", input.source_research_packet_path or "", input.assignment_item_id or "")
+]], assignment_source, input.corpus_key, input.source_research_assignment_id or "", input.source_research_packet_id or "", input.source_research_packet_path or "", inline_brief, input.assignment_item_id or "", input.assignment_item_id or "", input.assignment_item_id or "", input.assignment_item_id or "")
 
         local result = newsroom_reporter({message = message})
         local output = {}
         if result ~= nil and result.output ~= nil then
             output = result.output
+        end
+        if type(output) == "string" then
+            local json = require("tactus.io.json")
+            local ok, decoded = pcall(json.decode, output)
+            if ok and type(decoded) == "table" then
+                output = decoded
+            else
+                output = {
+                    assignment_item_id = input.assignment_item_id,
+                    dry_run = true,
+                    work_product_kind = "reporting_context_packet",
+                    item_status = "reported",
+                    summary = "Reporter returned unstructured text instead of a reporting context packet.",
+                    validation_failures = {"reporter_output_not_structured"},
+                }
+            end
+        end
+        if type(output) ~= "table" then
+            output = {
+                assignment_item_id = input.assignment_item_id,
+                dry_run = true,
+                work_product_kind = "reporting_context_packet",
+                item_status = "reported",
+                summary = "Reporter returned no structured reporting context packet.",
+                validation_failures = {"reporter_output_missing"},
+            }
         end
         if output.assignment_item_id == nil or output.assignment_item_id == "" then
             output.assignment_item_id = input.assignment_item_id
