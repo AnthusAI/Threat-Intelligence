@@ -5,6 +5,15 @@ import json
 import os
 import sys
 
+from .coverage_theme import (
+    coverage_theme_run,
+    editions_plan,
+    load_json_file,
+    parse_csv,
+    parse_section_budgets,
+    signals_trend_report,
+    story_budget_output,
+)
 from .newsroom import (
     BIBLICUS_ROOT,
     PAPYRUS_ROOT,
@@ -249,6 +258,11 @@ def main(argv: list[str] | None = None) -> int:
     title_subtitle_catalog_parser.add_argument("--refresh-summary", action="store_true")
     title_subtitle_catalog_parser.add_argument("--only-missing", default="true")
     title_subtitle_catalog_parser.add_argument("--max-count", type=int, default=0)
+    _add_signals_parser(subparsers)
+    _add_editions_parser(subparsers)
+    _add_coverage_themes_parser(subparsers)
+    _add_story_budget_parser(subparsers)
+    _add_assignments_parser(subparsers)
     add_knowledge_query_parser(subparsers)
     add_knowledge_vector_index_parser(subparsers)
 
@@ -283,6 +297,16 @@ def main(argv: list[str] | None = None) -> int:
         )
     elif args.command == "references":
         payload = _run_references_command(args)
+    elif args.command == "signals":
+        payload = _run_signals_command(args)
+    elif args.command == "editions":
+        payload = _run_editions_command(args)
+    elif args.command == "coverage-themes":
+        payload = _run_coverage_themes_command(args)
+    elif args.command == "story-budget":
+        payload = _run_story_budget_command(args)
+    elif args.command == "assignments":
+        payload = _run_assignments_command(args)
     elif args.command == "knowledge-query":
         payload = run_knowledge_query_cli(args)
     elif args.command == "knowledge-vector-index":
@@ -296,9 +320,219 @@ def main(argv: list[str] | None = None) -> int:
         }
     json.dump(payload, sys.stdout)
     sys.stdout.write("\n")
+    if isinstance(payload, dict) and payload.get("ok") is False:
+        return 2
     if isinstance(payload, dict) and payload.get("partialFailure"):
         return 2
     return 0
+
+
+def _add_signals_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    parser = subparsers.add_parser("signals", help="Knowledge-base signal and trend utilities")
+    signal_subparsers = parser.add_subparsers(dest="signals_command")
+    trend_parser = signal_subparsers.add_parser(
+        "trend-report",
+        help="Build a private edition signal report from recent accepted knowledge-base references",
+    )
+    trend_parser.add_argument("--corpus-key", required=True)
+    trend_parser.add_argument("--date", default="")
+    trend_parser.add_argument("--category", "--category-key", dest="category_key", default="")
+    trend_parser.add_argument("--topic", default="")
+    trend_parser.add_argument("--coverage-key", default="")
+    trend_parser.add_argument("--sections", default="")
+    trend_parser.add_argument("--since-days", type=int, default=30)
+    trend_parser.add_argument("--limit", type=int, default=10)
+    trend_parser.add_argument("--run-id", default="")
+    trend_parser.add_argument("--input", default="", help="Optional fixture JSON with references and semanticNodes")
+    trend_parser.add_argument("--apply", action="store_true")
+    trend_parser.add_argument("--json", action="store_true")
+
+
+def _add_editions_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    parser = subparsers.add_parser("editions", help="Edition intelligence and planning utilities")
+    edition_subparsers = parser.add_subparsers(dest="editions_command")
+    plan_parser = edition_subparsers.add_parser(
+        "plan",
+        help="Plan an edition story budget from signal reports and section budgets",
+    )
+    plan_parser.add_argument("--date", required=True)
+    plan_parser.add_argument("--sections", default=",".join(["culture", "methods", "business", "law"]))
+    plan_parser.add_argument("--section-budgets", default="")
+    plan_parser.add_argument("--corpus-key", default="AI-ML-research")
+    plan_parser.add_argument("--category", "--category-key", dest="category_key", default="")
+    plan_parser.add_argument("--topic", default="")
+    plan_parser.add_argument("--coverage-key", default="")
+    plan_parser.add_argument("--signal-report", default="", help="Optional signal report JSON path")
+    plan_parser.add_argument("--theme-limit", type=int, default=3)
+    plan_parser.add_argument("--run-id", default="")
+    plan_parser.add_argument("--apply", action="store_true")
+    plan_parser.add_argument("--json", action="store_true")
+
+
+def _add_coverage_themes_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    parser = subparsers.add_parser("coverage-themes", help="Coverage Theme orchestration")
+    coverage_subparsers = parser.add_subparsers(dest="coverage_themes_command")
+    run_parser = coverage_subparsers.add_parser(
+        "run",
+        help="Run a Coverage Theme through plan, research, or reporting",
+    )
+    _add_coverage_theme_run_arguments(run_parser)
+    output_parser = coverage_subparsers.add_parser(
+        "output",
+        help="Rediscover Coverage Theme story-budget output",
+    )
+    _add_story_budget_output_arguments(output_parser)
+
+
+def _add_story_budget_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    parser = subparsers.add_parser("story-budget", help="Story Budget discovery utilities")
+    story_budget_subparsers = parser.add_subparsers(dest="story_budget_command")
+    output_parser = story_budget_subparsers.add_parser(
+        "output",
+        help="Show story-budget state grouped by section",
+    )
+    _add_story_budget_output_arguments(output_parser)
+
+
+def _add_assignments_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    parser = subparsers.add_parser("assignments", help="Compatibility assignment workflow aliases")
+    assignment_subparsers = parser.add_subparsers(dest="assignments_command")
+    run_parser = assignment_subparsers.add_parser(
+        "run-story-cycle",
+        help="Compatibility alias for coverage-themes run",
+    )
+    _add_coverage_theme_run_arguments(run_parser)
+    output_parser = assignment_subparsers.add_parser(
+        "story-cycle-output",
+        help="Compatibility alias for story-budget output",
+    )
+    _add_story_budget_output_arguments(output_parser)
+
+
+def _add_coverage_theme_run_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--date", required=True)
+    parser.add_argument("--topic", required=True)
+    parser.add_argument("--category", "--category-key", dest="category_key", default="AI-ML-research")
+    parser.add_argument("--corpus-key", default="")
+    parser.add_argument("--coverage-key", default="")
+    parser.add_argument("--sections", default="culture,methods,business,law")
+    parser.add_argument("--section-budgets", default="")
+    parser.add_argument("--run-id", default="")
+    parser.add_argument("--through", choices=["plan", "research", "reporting"], default="reporting")
+    parser.add_argument("--research-mode", default="source_discovery")
+    parser.add_argument("--max-parallel-research", type=int, default=1)
+    parser.add_argument("--max-parallel-reporting", type=int, default=1)
+    parser.add_argument("--allow-fallback", action="store_true")
+    parser.add_argument("--require-agent-success", action="store_true")
+    parser.add_argument("--refresh-packets", action="store_true")
+    parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--json", action="store_true")
+
+
+def _add_story_budget_output_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--run-id", default="")
+    parser.add_argument("--edition", "--edition-id", dest="edition_id", default="")
+    parser.add_argument("--coverage-key", default="")
+    parser.add_argument("--section", default="")
+    parser.add_argument("--input", default="", help="Optional fixture JSON state")
+    parser.add_argument("--json", action="store_true")
+
+
+def _run_signals_command(args: argparse.Namespace) -> dict:
+    if args.signals_command == "trend-report":
+        fixture = load_json_file(args.input) if args.input else {}
+        return signals_trend_report(
+            corpus_key=args.corpus_key,
+            date=args.date,
+            category_key=args.category_key,
+            topic=args.topic,
+            coverage_key=args.coverage_key,
+            sections=parse_csv(args.sections),
+            since_days=args.since_days,
+            limit=args.limit,
+            run_id=args.run_id,
+            references=fixture.get("references") if fixture else None,
+            semantic_nodes=(fixture.get("semanticNodes") or fixture.get("semantic_nodes")) if fixture else None,
+            apply=args.apply,
+        )
+    raise SystemExit("Missing or unsupported signals subcommand.")
+
+
+def _run_editions_command(args: argparse.Namespace) -> dict:
+    if args.editions_command == "plan":
+        sections = parse_csv(args.sections)
+        return editions_plan(
+            date=args.date,
+            sections=sections,
+            section_budgets=parse_section_budgets(args.section_budgets, sections),
+            corpus_key=args.corpus_key,
+            category_key=args.category_key,
+            topic=args.topic,
+            coverage_key=args.coverage_key,
+            signal_report=load_json_file(args.signal_report) if args.signal_report else None,
+            theme_limit=args.theme_limit,
+            run_id=args.run_id,
+            apply=args.apply,
+        )
+    raise SystemExit("Missing or unsupported editions subcommand.")
+
+
+def _run_coverage_themes_command(args: argparse.Namespace) -> dict:
+    if args.coverage_themes_command == "run":
+        return _run_coverage_theme_run(args)
+    if args.coverage_themes_command == "output":
+        return _run_story_budget_output(args, command="coverage-themes output")
+    raise SystemExit("Missing or unsupported coverage-themes subcommand.")
+
+
+def _run_story_budget_command(args: argparse.Namespace) -> dict:
+    if args.story_budget_command == "output":
+        return _run_story_budget_output(args)
+    raise SystemExit("Missing or unsupported story-budget subcommand.")
+
+
+def _run_assignments_command(args: argparse.Namespace) -> dict:
+    if args.assignments_command == "run-story-cycle":
+        payload = _run_coverage_theme_run(args)
+        payload["command"] = "assignments run-story-cycle"
+        return payload
+    if args.assignments_command == "story-cycle-output":
+        return _run_story_budget_output(args, command="assignments story-cycle-output")
+    raise SystemExit("Missing or unsupported assignments subcommand.")
+
+
+def _run_coverage_theme_run(args: argparse.Namespace) -> dict:
+    sections = parse_csv(args.sections)
+    corpus_key = args.corpus_key or args.category_key
+    return coverage_theme_run(
+        date=args.date,
+        topic=args.topic,
+        corpus_key=corpus_key,
+        category_key=args.category_key,
+        coverage_key=args.coverage_key,
+        sections=sections,
+        section_budgets=parse_section_budgets(args.section_budgets, sections),
+        run_id=args.run_id,
+        through=args.through,
+        research_mode=args.research_mode,
+        allow_fallback=args.allow_fallback,
+        require_agent_success=args.require_agent_success,
+        refresh_packets=args.refresh_packets,
+        apply=args.apply,
+    )
+
+
+def _run_story_budget_output(args: argparse.Namespace, *, command: str = "story-budget output") -> dict:
+    fixture = load_json_file(args.input) if args.input else None
+    payload = story_budget_output(
+        run_id=args.run_id,
+        edition_id=args.edition_id,
+        coverage_key=args.coverage_key,
+        section=args.section,
+        state=fixture,
+    )
+    payload["command"] = command
+    return payload
 
 
 def _run_references_command(args: argparse.Namespace) -> dict:

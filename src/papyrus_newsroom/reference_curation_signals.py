@@ -70,6 +70,25 @@ TITLE_SUBTITLE_SOURCE = "papyrus-title-subtitle-enricher"
 TITLE_SUBTITLE_PROMPT_VERSION = "reference-title-subtitle-v1-verbatim-source"
 TITLE_SUBTITLE_SUMMARY_PROMPT_VERSION = "reference-title-subtitle-summary-v1-outcome"
 TITLE_SUBTITLE_SUMMARY_TOKEN_BUDGET_DEFAULT = 500
+IDENTIFIER_PREPASS_TYPES = ("doi", "arxiv_id", "isbn13", "publisher_item")
+IDENTIFIER_PREPASS_SOURCE_ORDER = {
+    "metadata.identifiers": 0,
+    "explicit_field": 1,
+    "source_uri": 2,
+    "title": 3,
+    "subtitle": 4,
+}
+IDENTIFIER_ALIASES = {
+    "doi": ("doi", "source_doi"),
+    "arxiv_id": ("arxiv_id", "arxivId", "arxiv"),
+    "isbn13": ("isbn13", "isbn"),
+    "publisher_item": ("publisher_item", "publisherItem"),
+}
+DOI_RE = re.compile(r"\b10\.\d{4,9}/[-._;()/:A-Z0-9]+\b", flags=re.IGNORECASE)
+ARXIV_MODERN_RE = re.compile(r"\b([0-9]{4}\.[0-9]{4,5})(?:v\d+)?\b", flags=re.IGNORECASE)
+ARXIV_LEGACY_RE = re.compile(r"\b([a-z-]+(?:\.[a-z]{2})?/[0-9]{7})(?:v\d+)?\b", flags=re.IGNORECASE)
+ISBN13_TEXT_RE = re.compile(r"\b97[89][0-9\-\s]{10,20}\b")
+ISBN10_TEXT_RE = re.compile(r"\b[0-9][0-9\-\s]{8,16}[0-9Xx]\b")
 
 
 REFERENCE_FIELDS = """
@@ -359,6 +378,7 @@ def build_reference_summary_plan(
     refresh: bool = False,
     run_id: str = "",
     assignment_id: str = "",
+    identifier_prepass: dict[str, Any] | None = None,
     now: str | None = None,
     semantic_client: PapyrusSemanticClient | None = None,
 ) -> dict[str, Any]:
@@ -401,6 +421,13 @@ def build_reference_summary_plan(
         "generatedAt": now,
         "rationale": rationale,
     })
+    if isinstance(identifier_prepass, dict):
+        metadata["identifierPrepass"] = {
+            "status": identifier_prepass.get("status"),
+            "failureReason": identifier_prepass.get("failureReason"),
+            "extracted": identifier_prepass.get("extracted") or {},
+            "resolution": identifier_prepass.get("resolution") or {},
+        }
     metadata.update(doctrine_metadata)
     message_id = f"message-reference-summary-{_safe_id(reference['lineageId'])}-{max_tokens}-{_hash_short([summary_text, now, run_id])}"
     message = {
@@ -493,6 +520,7 @@ def resolve_reference_title_subtitle(
     fetcher: Any | None = None,
     llm_resolver: Any | None = None,
     summary_resolver: Any | None = None,
+    identifier_prepass: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Resolve original title/subtitle metadata for a Reference-like record.
 
@@ -508,6 +536,42 @@ def resolve_reference_title_subtitle(
     catalog_entry = catalog_entry or {}
     sidecar = sidecar or {}
     warnings: list[str] = []
+    identifier_prepass = (
+        identifier_prepass
+        if isinstance(identifier_prepass, dict)
+        else _run_identifier_prepass(reference=reference, catalog_entry=catalog_entry)
+    )
+    if identifier_prepass.get("status") == "failed":
+        failure = identifier_prepass.get("failureReason") or "identifier prepass failed"
+        warnings.append(f"identifier prepass failed: {failure}")
+        return _title_subtitle_resolution(
+            status="blocked",
+            title="",
+            subtitle="",
+            title_mode="unresolved",
+            subtitle_mode="unresolved",
+            source="identifier_prepass",
+            model=model,
+            web_search_used=False,
+            source_urls=[],
+            rationale="Identifier prepass failed; title/subtitle and summary generation were blocked.",
+            summary="",
+            summary_resolution=_summary_resolution(
+                summary="",
+                summary_token_budget=summary_max_tokens,
+                model=model,
+                source="identifier_prepass_failed",
+                source_urls=[],
+                run_id=run_id,
+                resolved_at=now,
+                rationale=failure,
+                prompt_version="",
+            ) if include_summary else {},
+            run_id=run_id,
+            resolved_at=now,
+            warnings=warnings,
+            identifier_prepass=identifier_prepass,
+        )
     summary_budget = normalize_title_subtitle_summary_budget(summary_max_tokens)
     local = _title_subtitle_from_local(reference=reference, catalog_entry=catalog_entry, sidecar=sidecar)
     existing_reference_title = _normalize_reference_title_candidate(reference.get("title"))
@@ -550,6 +614,7 @@ def resolve_reference_title_subtitle(
             run_id=run_id,
             resolved_at=now,
             warnings=warnings,
+            identifier_prepass=identifier_prepass,
         )
 
     deterministic = _resolve_title_subtitle_deterministic(
@@ -601,6 +666,7 @@ def resolve_reference_title_subtitle(
             run_id=run_id,
             resolved_at=now,
             warnings=warnings,
+            identifier_prepass=identifier_prepass,
         )
 
     if web_search_enabled:
@@ -681,6 +747,7 @@ def resolve_reference_title_subtitle(
         run_id=run_id,
         resolved_at=now,
         warnings=warnings,
+        identifier_prepass=identifier_prepass,
     )
 
 
@@ -704,6 +771,17 @@ def build_reference_title_subtitle_plan(
     reference = _require_reference(reference)
     run_id = run_id or f"title-subtitle-{_hash_short([reference.get('id'), now])}"
     metadata = _jsonish(reference.get("metadata")) or {}
+    identifier_prepass = _run_identifier_prepass(reference=reference, catalog_entry=catalog_entry or {})
+    if identifier_prepass.get("status") == "failed":
+        return {
+            "kind": "reference.title-subtitle.plan",
+            "action": "blocked",
+            "reference": _reference_summary(reference),
+            "identifierPrepass": identifier_prepass,
+            "failureReason": identifier_prepass.get("failureReason") or "identifier prepass failed",
+            "records": [],
+            "warnings": [f"identifier prepass failed: {identifier_prepass.get('failureReason') or 'unknown error'}"],
+        }
     existing_title = _clean_text(reference.get("title"))
     existing_subtitle = _normalize_subtitle_candidate(metadata.get("subtitle") or reference.get("subtitle"))
     existing_summary = _normalize_outcome_summary_candidate(metadata.get("summary"))
@@ -715,6 +793,7 @@ def build_reference_title_subtitle_plan(
             "title": existing_title,
             "subtitle": existing_subtitle,
             "summary": existing_summary if include_summary else "",
+            "identifierPrepass": identifier_prepass,
             "resolution": _title_subtitle_resolution(
                 status="resolved",
                 title=existing_title,
@@ -741,6 +820,7 @@ def build_reference_title_subtitle_plan(
                 run_id=run_id,
                 resolved_at=now,
                 warnings=[],
+                identifier_prepass=identifier_prepass,
             ),
             "records": [],
             "warnings": [],
@@ -758,21 +838,29 @@ def build_reference_title_subtitle_plan(
         refresh_summary=refresh_summary,
         run_id=run_id,
         now=now,
+        identifier_prepass=identifier_prepass,
     )
     if resolution["status"] != "resolved" or not resolution.get("title"):
+        action = "blocked" if resolution.get("status") == "blocked" else "unresolved"
         return {
             "kind": "reference.title-subtitle.plan",
-            "action": "unresolved",
+            "action": action,
             "reference": _reference_summary(reference),
+            "identifierPrepass": resolution.get("identifierPrepass") or identifier_prepass,
             "resolution": resolution,
             "records": [],
             "warnings": resolution.get("warnings") or [],
         }
+    identifier_metadata = _identifier_metadata_update(
+        metadata=_jsonish(reference.get("metadata")) or {},
+        identifier_prepass=resolution.get("identifierPrepass") or identifier_prepass,
+    )
     next_metadata = {
         **metadata,
         "title": resolution["title"],
         "subtitle": resolution.get("subtitle") or existing_subtitle or "",
         "title_subtitle_resolution": _title_subtitle_provenance(resolution),
+        **identifier_metadata,
     }
     if include_summary:
         next_metadata["summary"] = resolution.get("summary") or existing_summary or ""
@@ -823,6 +911,7 @@ def build_reference_title_subtitle_plan(
         "title": resolution["title"],
         "subtitle": next_metadata.get("subtitle") or "",
         "summary": next_metadata.get("summary") or "",
+        "identifierPrepass": resolution.get("identifierPrepass") or identifier_prepass,
         "resolution": resolution,
         "records": records,
         "warnings": resolution.get("warnings") or [],
@@ -901,6 +990,17 @@ def reference_title_subtitle_batch(
     )
     items = []
     for reference in references:
+        identifier_prepass = _run_identifier_prepass(reference=reference, catalog_entry={})
+        if identifier_prepass.get("status") == "failed":
+            items.append({
+                "kind": "reference.title-subtitle.resolve",
+                "action": "blocked",
+                "reference": _reference_summary(reference),
+                "identifierPrepass": identifier_prepass,
+                "failureReason": identifier_prepass.get("failureReason") or "identifier prepass failed",
+                "apply": False,
+            })
+            continue
         metadata = _jsonish(reference.get("metadata")) or {}
         has_title = bool(_normalize_reference_title_candidate(reference.get("title")))
         has_subtitle = bool(_normalize_subtitle_candidate(metadata.get("subtitle") or reference.get("subtitle")))
@@ -913,6 +1013,7 @@ def reference_title_subtitle_batch(
                 "title": _normalize_reference_title_candidate(reference.get("title")),
                 "subtitle": _normalize_subtitle_candidate(metadata.get("subtitle") or reference.get("subtitle")),
                 "summary": _normalize_outcome_summary_candidate(metadata.get("summary")),
+                "identifierPrepass": identifier_prepass,
                 "apply": False,
             })
             continue
@@ -929,12 +1030,14 @@ def reference_title_subtitle_batch(
                 persist_local_metadata=persist_local_metadata,
                 vector_sync=False,
             )
+            item["identifierPrepass"] = item.get("identifierPrepass") or identifier_prepass
             items.append(item)
         except Exception as exc:
             items.append({
                 "kind": "reference.title-subtitle.resolve",
                 "action": "error",
                 "reference": _reference_summary(reference),
+                "identifierPrepass": identifier_prepass,
                 "error": str(exc),
                 "apply": False,
             })
@@ -992,6 +1095,7 @@ def _title_subtitle_batch_result(
             if item.get("action") == "update" and _clean_text((item.get("resolution") or {}).get("summary"))
         ),
         "unresolved": sum(1 for item in items if item.get("action") == "unresolved"),
+        "blocked": sum(1 for item in items if item.get("action") == "blocked"),
         "noop": sum(1 for item in items if item.get("action") == "noop"),
         "errors": sum(1 for item in items if item.get("action") == "error"),
         "items": items,
@@ -1021,6 +1125,17 @@ def enrich_reference_catalog_title_subtitle(
         if not isinstance(item, dict):
             continue
         metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        reference = _reference_from_catalog_item(item)
+        identifier_prepass = _run_identifier_prepass(reference=reference, catalog_entry=item)
+        if identifier_prepass.get("status") == "failed":
+            processed += 1
+            results.append({
+                "action": "blocked",
+                "itemKey": key,
+                "identifierPrepass": identifier_prepass,
+                "failureReason": identifier_prepass.get("failureReason") or "identifier prepass failed",
+            })
+            continue
         has_durable_title = bool(_clean_text(item.get("title")) and _clean_text(metadata.get("title")))
         has_durable_subtitle = bool(_normalize_subtitle_candidate(item.get("subtitle")) and _normalize_subtitle_candidate(metadata.get("subtitle")))
         has_durable_summary = bool(_normalize_outcome_summary_candidate(item.get("summary")) and _normalize_outcome_summary_candidate(metadata.get("summary")))
@@ -1031,11 +1146,12 @@ def enrich_reference_catalog_title_subtitle(
                 "title": item.get("title"),
                 "subtitle": item.get("subtitle") or metadata.get("subtitle"),
                 "summary": item.get("summary") or metadata.get("summary"),
+                "identifierPrepass": identifier_prepass,
             })
             continue
         processed += 1
         resolution = resolve_reference_title_subtitle(
-            reference=_reference_from_catalog_item(item),
+            reference=reference,
             catalog_entry=item,
             sidecar={},
             source_text=_catalog_source_text(item),
@@ -1044,16 +1160,18 @@ def enrich_reference_catalog_title_subtitle(
             include_summary=summary,
             summary_max_tokens=summary_max_tokens,
             refresh_summary=refresh_summary,
+            identifier_prepass=identifier_prepass,
         )
         if resolution["status"] != "resolved":
-            results.append({"action": "unresolved", "itemKey": key, "resolution": resolution})
+            action = "blocked" if resolution.get("status") == "blocked" else "unresolved"
+            results.append({"action": action, "itemKey": key, "resolution": resolution, "identifierPrepass": identifier_prepass})
             continue
         enriched = apply_title_subtitle_to_catalog_item(item, resolution=resolution)
         if isinstance(output_items, list):
             output_items[int(key)] = enriched
         else:
             output_items[key] = enriched
-        results.append({"action": "update", "itemKey": key, "resolution": resolution})
+        results.append({"action": "update", "itemKey": key, "resolution": resolution, "identifierPrepass": identifier_prepass})
     output = {
         **catalog,
         "items": output_items,
@@ -1071,6 +1189,7 @@ def enrich_reference_catalog_title_subtitle(
                 if item.get("action") == "update" and _clean_text((item.get("resolution") or {}).get("summary"))
             ),
             "unresolved": sum(1 for item in results if item.get("action") == "unresolved"),
+            "blocked": sum(1 for item in results if item.get("action") == "blocked"),
             "noop": sum(1 for item in results if item.get("action") == "noop"),
         },
     }
@@ -1488,8 +1607,8 @@ def reference_list(
     scan_limit: int = 1000,
 ) -> dict[str, Any]:
     references = list_references_by_corpus(_knowledge_corpus_id(corpus_key), limit=max(scan_limit, limit))
-    if status:
-        normalized_status = status.strip().lower()
+    normalized_status = str(status or "").strip().lower()
+    if normalized_status and normalized_status not in {"all", "*"}:
         references = [reference for reference in references if str(reference.get("curationStatus") or "").lower() == normalized_status]
     reverse = order != "oldest"
     references.sort(key=_reference_chrono_key, reverse=reverse)
@@ -1551,6 +1670,19 @@ def reference_summarize(
 ) -> dict[str, Any]:
     semantic = _semantic_client()
     reference = _resolve_reference(semantic, reference_id)
+    identifier_prepass = _run_identifier_prepass(reference=reference, catalog_entry={})
+    if identifier_prepass.get("status") == "failed":
+        return {
+            "kind": "reference.summary.plan",
+            "action": "blocked",
+            "reference": _reference_summary(reference),
+            "maxTokens": normalize_summary_budget(max_tokens),
+            "identifierPrepass": identifier_prepass,
+            "failureReason": identifier_prepass.get("failureReason") or "identifier prepass failed",
+            "warnings": [f"identifier prepass failed: {identifier_prepass.get('failureReason') or 'unknown error'}"],
+            "records": [],
+            "apply": False,
+        }
     relation_key = summary_relation_type_key(max_tokens)
     existing = _current_relations(semantic.list_incoming("reference", reference["lineageId"])["relations"], relation_key)
     if existing and not refresh:
@@ -1560,6 +1692,7 @@ def reference_summarize(
             "reference": _reference_summary(reference),
             "maxTokens": normalize_summary_budget(max_tokens),
             "existingRelationId": existing[0].get("id"),
+            "identifierPrepass": identifier_prepass,
             "records": [],
             "warnings": [],
             "apply": False,
@@ -1579,9 +1712,11 @@ def reference_summarize(
         model=model if not summary_text else "manual",
         doctrine_context=doctrine_context,
         refresh=refresh,
+        identifier_prepass=identifier_prepass,
         semantic_client=semantic,
     )
     result = _apply_plan_if_requested(plan, apply=apply, actor_label=SUMMARY_SOURCE, reason="references summarize")
+    result["identifierPrepass"] = identifier_prepass
     return _with_doctrine_warnings(result, doctrine_context)
 
 
@@ -1600,6 +1735,19 @@ def reference_summarize_batch(
     doctrine_context = load_publication_doctrine_context()
     plans = []
     for reference in references:
+        identifier_prepass = _run_identifier_prepass(reference=reference, catalog_entry={})
+        if identifier_prepass.get("status") == "failed":
+            plans.append({
+                "kind": "reference.summary.plan",
+                "action": "blocked",
+                "reference": _reference_summary(reference),
+                "maxTokens": normalize_summary_budget(budgets[0] if budgets else 100),
+                "identifierPrepass": identifier_prepass,
+                "failureReason": identifier_prepass.get("failureReason") or "identifier prepass failed",
+                "warnings": [f"identifier prepass failed: {identifier_prepass.get('failureReason') or 'unknown error'}"],
+                "records": [],
+            })
+            continue
         for budget in budgets:
             relation_key = summary_relation_type_key(budget)
             existing = _current_relations(semantic.list_incoming("reference", reference["lineageId"])["relations"], relation_key)
@@ -1610,13 +1758,14 @@ def reference_summarize_batch(
                     "reference": _reference_summary(reference),
                     "maxTokens": budget,
                     "existingRelationId": existing[0].get("id"),
+                    "identifierPrepass": identifier_prepass,
                     "records": [],
                     "warnings": [],
                 })
                 continue
             source = _resolve_source_text(reference)
             generated = generate_summary(source, max_tokens=budget, model=model, reference=reference, doctrine_context=doctrine_context)
-            plans.append(build_reference_summary_plan(
+            plan = build_reference_summary_plan(
                 reference=reference,
                 max_tokens=budget,
                 summary_text=generated,
@@ -1624,8 +1773,11 @@ def reference_summarize_batch(
                 model=model,
                 doctrine_context=doctrine_context,
                 refresh=refresh or bool(existing and not only_missing),
+                identifier_prepass=identifier_prepass,
                 semantic_client=semantic,
-            ))
+            )
+            plan["identifierPrepass"] = identifier_prepass
+            plans.append(plan)
     applied = []
     for plan in plans:
         applied.append(_apply_plan_if_requested(plan, apply=apply, actor_label=SUMMARY_SOURCE, reason="references summarize-batch"))
@@ -1875,6 +2027,83 @@ def generate_outcome_summary(
     if not text:
         raise RuntimeError("OpenAI outcome summary request returned no text.")
     return text.strip()
+
+
+def reference_web_search(
+    *,
+    query: str,
+    max_results: int = 20,
+    model: str = "gpt-5.4-mini",
+    return_token_budget: str = "default",
+) -> dict[str, Any]:
+    query = _required(query, "query")
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY is required for web search.")
+    try:
+        limit = int(max_results)
+    except (TypeError, ValueError):
+        limit = 20
+    limit = max(1, min(limit, 50))
+    payload = {
+        "model": model,
+        "input": query,
+        "tools": [{"type": "web_search", "return_token_budget": return_token_budget or "default"}],
+        "tool_choice": "required",
+        "include": ["web_search_call.action.sources"],
+    }
+    request = urllib.request.Request(
+        "https://api.openai.com/v1/responses",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=180) as response:
+            parsed = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        body = error.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"OpenAI web search request failed: {error.code} {body[:400]}") from error
+    answer = _extract_response_text(parsed).strip()
+    urls = []
+    seen: set[str] = set()
+    for url in _web_search_source_urls(parsed):
+        normalized = str(url).strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        urls.append(normalized)
+    results: list[dict[str, Any]] = []
+    for rank, url in enumerate(urls[:limit], start=1):
+        parsed_url = urllib.parse.urlparse(url)
+        source_domain = parsed_url.netloc.lower()
+        results.append({
+            "rank": rank,
+            "url": url,
+            "source_domain": source_domain,
+            "title": url,
+            "evidence_candidate_id": f"evidence-candidate-{_hash_short([query, url, rank])}",
+        })
+    usage = parsed.get("usage") if isinstance(parsed.get("usage"), dict) else {}
+    return {
+        "query": query,
+        "results": results,
+        "metadata": {
+            "answer": answer,
+            "result_count": len(results),
+            "untruncated_result_count": len(urls),
+            "request": {
+                "model": model,
+                "input": query,
+                "tool_choice": "required",
+                "tools": [{"type": "web_search", "return_token_budget": return_token_budget or "default"}],
+                "include": ["web_search_call.action.sources"],
+            },
+            "model": parsed.get("model"),
+            "id": parsed.get("id"),
+            "usage": usage,
+        },
+    }
 
 
 def generate_title_subtitle_with_web_search(
@@ -2200,10 +2429,11 @@ def _quality_assessment_note(assessment: dict[str, Any]) -> str:
 
 
 def _apply_plan_if_requested(plan: dict[str, Any], *, apply: bool, actor_label: str, reason: str) -> dict[str, Any]:
-    if not apply or plan.get("action") == "noop":
+    records = list(plan.get("records") or [])
+    if not apply or plan.get("action") == "noop" or not records:
         return {**plan, "apply": False}
     applied = []
-    for record in plan.get("records") or []:
+    for record in records:
         action = record.get("action")
         model_name = record.get("modelName")
         if model_name == "ModelAttachment":
@@ -2859,18 +3089,29 @@ def _apply_title_subtitle_to_mapping(target: dict[str, Any], resolution: dict[st
     title = _clean_text(resolution.get("title"))
     subtitle = _normalize_subtitle_candidate(resolution.get("subtitle"))
     summary = _normalize_outcome_summary_candidate(resolution.get("summary"))
+    identifier_metadata = _identifier_metadata_update(
+        metadata=target if isinstance(target, dict) else {},
+        identifier_prepass=resolution.get("identifierPrepass") if isinstance(resolution, dict) else {},
+    )
     if title:
         target["title"] = title
     if subtitle:
         target["subtitle"] = subtitle
     if summary:
         target["summary"] = summary
+    target["identifiers"] = identifier_metadata.get("identifiers") or {}
+    target["identifier_resolution"] = identifier_metadata.get("identifier_resolution") or {}
     papyrus = target.get("papyrus") if isinstance(target.get("papyrus"), dict) else {}
     papyrus["title_subtitle"] = {
         "title": title,
         "subtitle": subtitle,
         "summary": summary,
         **_title_subtitle_provenance(resolution),
+    }
+    papyrus["title_subtitle"]["identifier_prepass"] = {
+        "status": (resolution.get("identifierPrepass") or {}).get("status"),
+        "failureReason": (resolution.get("identifierPrepass") or {}).get("failureReason"),
+        "extracted": (resolution.get("identifierPrepass") or {}).get("extracted") or {},
     }
     if summary:
         papyrus["title_subtitle"]["summary_resolution"] = _summary_resolution_provenance(resolution)
@@ -2952,6 +3193,242 @@ def _title_subtitle_from_local(*, reference: dict[str, Any], catalog_entry: dict
         "rationale": f"Resolved from local {title_source or subtitle_source} metadata." if (title or subtitle) else "",
         "summaryRationale": f"Resolved summary from local {summary_source} metadata." if summary else "",
     }
+
+
+def _run_identifier_prepass(*, reference: dict[str, Any], catalog_entry: dict[str, Any]) -> dict[str, Any]:
+    try:
+        ref = reference if isinstance(reference, dict) else {}
+        catalog = catalog_entry if isinstance(catalog_entry, dict) else {}
+        extracted: dict[str, Any] = {}
+        identifiers: dict[str, str] = {}
+        resolution: dict[str, Any] = {}
+
+        for identifier_type in IDENTIFIER_PREPASS_TYPES:
+            selected, candidates = _select_identifier_prepass_candidate(
+                identifier_type=identifier_type,
+                reference=ref,
+                catalog_entry=catalog,
+            )
+            if selected:
+                value = selected.get("value") or ""
+                identifiers[identifier_type] = value
+                extracted[identifier_type] = {
+                    "value": value,
+                    "source": selected.get("source") or "",
+                    "sourceRank": selected.get("sourceRank"),
+                    "raw": selected.get("raw") or "",
+                }
+            resolution[identifier_type] = {
+                "selectedValue": selected.get("value") if selected else "",
+                "selectedSource": selected.get("source") if selected else "",
+                "selectedSourceRank": selected.get("sourceRank") if selected else None,
+                "candidates": [
+                    {
+                        "value": candidate.get("value") or "",
+                        "source": candidate.get("source") or "",
+                        "sourceRank": candidate.get("sourceRank"),
+                        "raw": candidate.get("raw") or "",
+                    }
+                    for candidate in candidates
+                ],
+            }
+
+        status = "ok" if identifiers else "no_identifier_found"
+        return {
+            "status": status,
+            "failureReason": "",
+            "identifiers": identifiers,
+            "extracted": extracted,
+            "resolution": resolution,
+            "sourceOrder": list(IDENTIFIER_PREPASS_SOURCE_ORDER.keys()),
+        }
+    except Exception as exc:
+        return {
+            "status": "failed",
+            "failureReason": str(exc),
+            "identifiers": {},
+            "extracted": {},
+            "resolution": {},
+            "sourceOrder": list(IDENTIFIER_PREPASS_SOURCE_ORDER.keys()),
+        }
+
+
+def _identifier_metadata_update(*, metadata: dict[str, Any], identifier_prepass: dict[str, Any]) -> dict[str, Any]:
+    current_metadata = metadata if isinstance(metadata, dict) else {}
+    prepass = identifier_prepass if isinstance(identifier_prepass, dict) else {}
+    existing = _identifiers_from_mapping(current_metadata)
+    prepass_identifiers = prepass.get("identifiers") if isinstance(prepass.get("identifiers"), dict) else {}
+    prepass_resolution = prepass.get("resolution") if isinstance(prepass.get("resolution"), dict) else {}
+
+    merged: dict[str, str] = {}
+    resolution_types: dict[str, Any] = {}
+    for identifier_type in IDENTIFIER_PREPASS_TYPES:
+        existing_value = _normalize_identifier_value(identifier_type, existing.get(identifier_type))
+        proposed_value = _normalize_identifier_value(identifier_type, prepass_identifiers.get(identifier_type))
+        chosen_value = existing_value or proposed_value
+        if chosen_value:
+            merged[identifier_type] = chosen_value
+
+        type_resolution = prepass_resolution.get(identifier_type) if isinstance(prepass_resolution.get(identifier_type), dict) else {}
+        selected_source = str(type_resolution.get("selectedSource") or "")
+        selected_source_rank = type_resolution.get("selectedSourceRank")
+        if existing_value:
+            selected_source = "metadata.identifiers"
+            selected_source_rank = IDENTIFIER_PREPASS_SOURCE_ORDER.get("metadata.identifiers", 0)
+        resolution_types[identifier_type] = {
+            "value": chosen_value or "",
+            "selectedSource": selected_source,
+            "selectedSourceRank": selected_source_rank,
+            "candidates": type_resolution.get("candidates") if isinstance(type_resolution.get("candidates"), list) else [],
+            "preservedExisting": bool(existing_value and proposed_value and existing_value != proposed_value),
+            "discardedInferredValue": proposed_value if existing_value and proposed_value and existing_value != proposed_value else "",
+        }
+
+    status = str(prepass.get("status") or "").strip() or ("ok" if merged else "no_identifier_found")
+    if status != "failed" and merged:
+        status = "ok"
+
+    return {
+        "identifiers": merged,
+        "identifier_resolution": {
+            "status": status,
+            "failureReason": str(prepass.get("failureReason") or ""),
+            "sourceOrder": list(IDENTIFIER_PREPASS_SOURCE_ORDER.keys()),
+            "types": resolution_types,
+        },
+    }
+
+
+def _select_identifier_prepass_candidate(
+    *,
+    identifier_type: str,
+    reference: dict[str, Any],
+    catalog_entry: dict[str, Any],
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+    candidates_by_value: dict[str, dict[str, Any]] = {}
+    for source, raw in _identifier_raw_inputs(
+        identifier_type=identifier_type,
+        reference=reference,
+        catalog_entry=catalog_entry,
+    ):
+        value = _normalize_identifier_value(identifier_type, raw)
+        if not value:
+            continue
+        source_rank = _identifier_source_rank(source)
+        candidate = {
+            "value": value,
+            "source": source,
+            "sourceRank": source_rank,
+            "raw": _clean_text(raw),
+        }
+        existing = candidates_by_value.get(value)
+        if existing is None:
+            candidates_by_value[value] = candidate
+            continue
+        if source_rank < _identifier_candidate_rank(existing):
+            candidates_by_value[value] = candidate
+            continue
+
+    candidates = sorted(
+        candidates_by_value.values(),
+        key=lambda candidate: (
+            _identifier_candidate_rank(candidate),
+            str(candidate.get("source") or ""),
+            str(candidate.get("value") or ""),
+        ),
+    )
+    return (candidates[0] if candidates else None, candidates)
+
+
+def _identifier_raw_inputs(
+    *,
+    identifier_type: str,
+    reference: dict[str, Any],
+    catalog_entry: dict[str, Any],
+) -> list[tuple[str, str]]:
+    reference_metadata = _jsonish(reference.get("metadata")) or {}
+    catalog_metadata = catalog_entry.get("metadata") if isinstance(catalog_entry.get("metadata"), dict) else {}
+
+    values: list[tuple[str, str]] = []
+
+    def _append(source: str, candidate: Any) -> None:
+        text = _clean_text(candidate)
+        if text:
+            values.append((source, text))
+
+    aliases = IDENTIFIER_ALIASES.get(identifier_type, (identifier_type,))
+    for mapping in (
+        reference_metadata.get("identifiers") if isinstance(reference_metadata.get("identifiers"), dict) else {},
+        catalog_metadata.get("identifiers") if isinstance(catalog_metadata.get("identifiers"), dict) else {},
+    ):
+        for alias in aliases:
+            _append("metadata.identifiers", mapping.get(alias))
+
+    for mapping in (reference, catalog_entry, reference_metadata, catalog_metadata):
+        if not isinstance(mapping, dict):
+            continue
+        for alias in aliases:
+            _append("explicit_field", mapping.get(alias))
+
+    source_uri_fields = ("sourceUri", "source_uri", "url", "uri")
+    for mapping in (reference, catalog_entry, reference_metadata, catalog_metadata):
+        if not isinstance(mapping, dict):
+            continue
+        for key in source_uri_fields:
+            _append("source_uri", mapping.get(key))
+
+    for mapping in (reference, catalog_entry, reference_metadata, catalog_metadata):
+        if not isinstance(mapping, dict):
+            continue
+        _append("title", mapping.get("title"))
+
+    for mapping in (reference, catalog_entry, reference_metadata, catalog_metadata):
+        if not isinstance(mapping, dict):
+            continue
+        for key in ("subtitle", "subTitle", "sub_title", "deck"):
+            _append("subtitle", mapping.get(key))
+
+    return values
+
+
+def _identifier_source_rank(source: str) -> int:
+    return int(IDENTIFIER_PREPASS_SOURCE_ORDER.get(source, 999))
+
+
+def _identifier_candidate_rank(candidate: dict[str, Any]) -> int:
+    value = candidate.get("sourceRank")
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 999
+
+
+def _normalize_identifier_value(identifier_type: str, value: Any) -> str:
+    if identifier_type == "doi":
+        return _normalize_doi(value)
+    if identifier_type == "arxiv_id":
+        return _normalize_arxiv_id(value)
+    if identifier_type == "isbn13":
+        return _normalize_isbn13(value)
+    if identifier_type == "publisher_item":
+        return _normalize_publisher_item(value)
+    return ""
+
+
+def _identifiers_from_mapping(value: dict[str, Any]) -> dict[str, str]:
+    mapping = value if isinstance(value, dict) else {}
+    nested_identifiers = mapping.get("identifiers") if isinstance(mapping.get("identifiers"), dict) else {}
+    resolved: dict[str, str] = {}
+    for identifier_type in IDENTIFIER_PREPASS_TYPES:
+        aliases = IDENTIFIER_ALIASES.get(identifier_type, (identifier_type,))
+        candidates = [nested_identifiers.get(alias) for alias in aliases]
+        candidates.extend(mapping.get(alias) for alias in aliases)
+        for candidate in candidates:
+            normalized = _normalize_identifier_value(identifier_type, candidate)
+            if normalized:
+                resolved[identifier_type] = normalized
+                break
+    return resolved
 
 
 def _resolve_title_subtitle_deterministic(*, reference: dict[str, Any], catalog_entry: dict[str, Any], source_text: str, fetcher: Any) -> dict[str, Any]:
@@ -3128,8 +3605,156 @@ def _clean_html_title(value: str) -> str:
 
 
 def _doi_from_text(value: str) -> str:
-    match = re.search(r"10\.\d{4,9}/[^\s\"'<>]+", value or "", flags=re.IGNORECASE)
-    return match.group(0).rstrip(".,);]") if match else ""
+    return _normalize_doi(value)
+
+
+def _normalize_doi(value: Any) -> str:
+    text = _clean_text(value)
+    if not text:
+        return ""
+    stripped = (
+        text
+        .replace("https://doi.org/", "")
+        .replace("http://doi.org/", "")
+        .replace("https://dx.doi.org/", "")
+        .replace("http://dx.doi.org/", "")
+    )
+    stripped = re.sub(r"^doi:\s*", "", stripped, flags=re.IGNORECASE).strip()
+    match = DOI_RE.search(stripped)
+    if not match:
+        return ""
+    return match.group(0).rstrip(".,);]>").lower()
+
+
+def _normalize_arxiv_id(value: Any) -> str:
+    text = _clean_text(value)
+    if not text:
+        return ""
+    candidates = [text]
+    try:
+        parsed = urllib.parse.urlparse(text)
+        if parsed.scheme in {"http", "https"} and parsed.netloc:
+            path = parsed.path or ""
+            path = re.sub(r"^/(?:abs|pdf|html|src)/", "", path, flags=re.IGNORECASE)
+            path = re.sub(r"\.pdf$", "", path, flags=re.IGNORECASE)
+            path = path.strip("/")
+            if path:
+                candidates.append(path)
+    except Exception:
+        pass
+    for candidate in candidates:
+        cleaned = re.sub(r"^arxiv:\s*", "", candidate, flags=re.IGNORECASE)
+        modern = ARXIV_MODERN_RE.search(cleaned)
+        if modern:
+            return modern.group(1).lower()
+        legacy = ARXIV_LEGACY_RE.search(cleaned)
+        if legacy:
+            return legacy.group(1).lower()
+    return ""
+
+
+def _normalize_isbn13(value: Any) -> str:
+    text = _clean_text(value)
+    if not text:
+        return ""
+    has_isbn_marker = bool(re.search(r"\bisbn(?:-1[03])?:?\b", text, flags=re.IGNORECASE))
+    for pattern in (ISBN13_TEXT_RE, ISBN10_TEXT_RE):
+        for match in pattern.finditer(text):
+            candidate = _isbn13_from_token(match.group(0), allow_isbn10_conversion=has_isbn_marker)
+            if candidate:
+                return candidate
+    return _isbn13_from_token(text, allow_isbn10_conversion=has_isbn_marker)
+
+
+def _isbn13_from_token(value: str, *, allow_isbn10_conversion: bool) -> str:
+    raw = re.sub(r"[^0-9Xx]", "", str(value or "")).upper()
+    if len(raw) == 13 and raw.isdigit() and _is_valid_isbn13(raw):
+        return raw
+    if allow_isbn10_conversion and len(raw) == 10 and re.fullmatch(r"[0-9]{9}[0-9X]", raw) and _is_valid_isbn10(raw):
+        return _isbn10_to_isbn13(raw)
+    return ""
+
+
+def _is_valid_isbn10(value: str) -> bool:
+    total = 0
+    for index, char in enumerate(value[:10]):
+        digit = 10 if char == "X" else int(char)
+        total += digit * (10 - index)
+    return total % 11 == 0
+
+
+def _is_valid_isbn13(value: str) -> bool:
+    total = 0
+    for index, char in enumerate(value[:13]):
+        total += int(char) * (1 if index % 2 == 0 else 3)
+    return total % 10 == 0
+
+
+def _isbn10_to_isbn13(value: str) -> str:
+    body = f"978{value[:9]}"
+    total = 0
+    for index, char in enumerate(body):
+        total += int(char) * (1 if index % 2 == 0 else 3)
+    check = (10 - (total % 10)) % 10
+    return f"{body}{check}"
+
+
+def _normalize_publisher_item(value: Any) -> str:
+    text = _clean_text(value)
+    if not text:
+        return ""
+    parsed = _publisher_item_from_uri(text)
+    candidate = parsed or text
+    if not parsed and (" " in candidate or len(candidate) > 240):
+        return ""
+    normalized = (
+        candidate.lower()
+        .replace("https://", "")
+        .replace("http://", "")
+        .replace("www.", "")
+    )
+    normalized = re.sub(r"[?#].*$", "", normalized)
+    normalized = re.sub(r"/+$", "", normalized)
+    normalized = re.sub(r"[^a-z0-9._:/-]+", "-", normalized)
+    normalized = re.sub(r"-{2,}", "-", normalized).strip("-")
+    return normalized[:240] if normalized else ""
+
+
+def _publisher_item_from_uri(value: str) -> str:
+    try:
+        parsed = urllib.parse.urlparse(value)
+    except Exception:
+        return ""
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return ""
+    host = parsed.netloc.lower()
+    if host.startswith("www."):
+        host = host[4:]
+    path = re.sub(r"/+$", "", parsed.path or "")
+    acl_match = re.match(r"^/([0-9]{4}\.[a-z0-9-]+\.[0-9]+)(?:\.pdf)?$", path, flags=re.IGNORECASE)
+    if host == "aclanthology.org" and acl_match:
+        return f"aclanthology:{acl_match.group(1).lower()}"
+    if host == "openreview.net":
+        query_id = urllib.parse.parse_qs(parsed.query).get("id")
+        if query_id and query_id[0]:
+            return f"openreview:{query_id[0]}"
+        pdf_match = re.search(r"/pdf/([^/]+)$", path, flags=re.IGNORECASE)
+        if pdf_match:
+            return f"openreview:{pdf_match.group(1)}"
+    if host == "neurips.cc":
+        poster_match = re.search(r"/poster/([^/]+)$", path, flags=re.IGNORECASE)
+        if poster_match:
+            return f"neurips-poster:{poster_match.group(1)}"
+    if host == "semanticscholar.org":
+        paper_match = re.search(r"/paper/(?:[^/]+/)?([a-f0-9]{20,})", path, flags=re.IGNORECASE)
+        if paper_match:
+            return f"semanticscholar:{paper_match.group(1).lower()}"
+    if host == "dl.acm.org":
+        doi_match = re.search(r"/doi/(?:abs|fullHtml|pdf)?/?(10\..+)$", path, flags=re.IGNORECASE)
+        if doi_match:
+            normalized_doi = _normalize_doi(doi_match.group(1))
+            return f"acm:{normalized_doi or doi_match.group(1).lower()}"
+    return f"{host}{path}".strip("/")
 
 
 def _fetch_url_text(url: str, *, timeout: int = 20) -> str:
@@ -3155,6 +3780,7 @@ def _title_subtitle_resolution(
     warnings: list[str],
     summary: str = "",
     summary_resolution: dict[str, Any] | None = None,
+    identifier_prepass: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "status": status,
@@ -3173,6 +3799,7 @@ def _title_subtitle_resolution(
         "resolved_at": resolved_at,
         "prompt_version": TITLE_SUBTITLE_PROMPT_VERSION if source == "llm_web_search" else "",
         "warnings": warnings,
+        "identifierPrepass": identifier_prepass or {},
     }
 
 

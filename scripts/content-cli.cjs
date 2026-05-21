@@ -3505,23 +3505,45 @@ async function runResearchAssignment(flags) {
   const finishedAt = new Date().toISOString();
   let parsed = extractResearchRunPayload(proc.stdout);
   let fallback = null;
+  let fallbackUsed = false;
+  const runFallbackDirect = () => runDirectResearchHarness({
+    assignmentId,
+    corpusKey,
+    researchMode,
+    question,
+    maxEvidenceItems,
+    runDir,
+  });
   if (!parsed && !options["no-fallback-direct"]) {
-    fallback = runDirectResearchHarness({
-      assignmentId,
-      corpusKey,
-      researchMode,
-      question,
-      maxEvidenceItems,
-      runDir,
-    });
+    fallback = runFallbackDirect();
     parsed = fallback.parsed;
+    fallbackUsed = Boolean(parsed);
   }
-  const research = parsed?.research_packet ?? parsed?.researchPacket ?? null;
-  const packet = research ? normalizeResearchPacketBundle(research, {
+  let research = parsed?.research_packet ?? parsed?.researchPacket ?? null;
+  let packet = research ? normalizeResearchPacketBundle(research, {
     assignment: { id: assignmentId, assignmentTypeKey: "research.edition-candidate", queueKey: "" },
     assignmentMeta: { researchMode, corpusKey },
     researchMode,
   }) : null;
+  if (!options["no-fallback-direct"] && researchPacketNeedsDiscoveryRecovery(packet, researchMode)) {
+    const recoveryFallback = runFallbackDirect();
+    const recoveryParsed = recoveryFallback.parsed;
+    const recoveryResearch = recoveryParsed?.research_packet ?? recoveryParsed?.researchPacket ?? null;
+    const recoveryPacket = recoveryResearch ? normalizeResearchPacketBundle(recoveryResearch, {
+      assignment: { id: assignmentId, assignmentTypeKey: "research.edition-candidate", queueKey: "" },
+      assignmentMeta: { researchMode, corpusKey },
+      researchMode,
+    }) : null;
+    if (recoveryPacket && !researchPacketNeedsDiscoveryRecovery(recoveryPacket, researchMode)) {
+      fallback = recoveryFallback;
+      parsed = recoveryParsed;
+      research = recoveryResearch;
+      packet = recoveryPacket;
+      fallbackUsed = true;
+    } else if (!fallback) {
+      fallback = recoveryFallback;
+    }
+  }
   const trace = packet?.researchTrace ?? {};
   const retryCountRaw = Number(
     parsed?.retry_count ?? parsed?.retryCount ?? trace.retryCount ?? trace.retry_count ?? 0
@@ -3534,7 +3556,7 @@ async function runResearchAssignment(flags) {
     ?? trace.validation_failures;
   const validationFailures = Array.isArray(validationFailuresRaw) ? validationFailuresRaw.map((entry) => String(entry)) : [];
   const result = {
-    ok: fallback ? Boolean(fallback.ok) : proc.status === 0,
+    ok: fallbackUsed ? Boolean(fallback?.ok) : proc.status === 0,
     command: "assignments run-research",
     action: options.apply ? "apply" : "dry-run",
     runId,
@@ -3555,6 +3577,7 @@ async function runResearchAssignment(flags) {
       stdoutPath: fallback.stdoutPath,
       stderrPath: fallback.stderrPath,
       parsed: Boolean(fallback.parsed),
+      used: fallbackUsed,
     } : null,
     resultPath,
     parsed: Boolean(parsed),
@@ -5557,6 +5580,14 @@ return finish_research_from_search(search, {
     stderrPath: directStderrPath,
     parsed,
   };
+}
+
+function researchPacketNeedsDiscoveryRecovery(packet, researchMode) {
+  if (!packet || researchMode === "internal_brief") return false;
+  const hasSources = Array.isArray(packet.sourceSnapshots) && packet.sourceSnapshots.length > 0;
+  const hasProposals = Array.isArray(packet.proposedReferences) && packet.proposedReferences.length > 0;
+  const blockedReason = normalizeCliString(packet.sourceDiscovery?.blockedReason);
+  return !hasSources && !hasProposals && !blockedReason;
 }
 
 function printResearchRunSummary(result) {

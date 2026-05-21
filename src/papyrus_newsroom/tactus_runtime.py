@@ -201,6 +201,12 @@ API_METHODS: dict[tuple[str, str], Callable[[dict[str, Any]], Any]] = {
         order=args.get("order") or "newest",
         scan_limit=args.get("scan_limit") or args.get("scanLimit") or 1000,
     ),
+    ("reference", "web_search"): lambda args: reference_curation_signals.reference_web_search(
+        query=args.get("query") or args.get("q") or "",
+        max_results=args.get("max_results") or args.get("maxResults") or args.get("limit") or 20,
+        model=args.get("model") or "gpt-5.4-mini",
+        return_token_budget=args.get("return_token_budget") or args.get("returnTokenBudget") or "default",
+    ),
     ("reference", "doi_backfill_plan"): lambda args: newsroom.papyrus_doi_backfill_plan(
         corpus_key=args.get("corpus_key") or args.get("corpusKey") or "AI-ML-research",
         max_count=args.get("max_count") or args.get("maxCount") or 0,
@@ -405,17 +411,18 @@ DOCS: dict[str, dict[str, Any]] = {
     "newsroom.web-research": {
         "id": "newsroom.web-research",
         "title": "Web Research",
-        "summary": "Use the Tactus stdlib web module for fresh external evidence.",
+        "summary": "Use web_search helper or papyrus.reference.web_search for fresh external evidence.",
         "namespace": "newsroom",
         "status": "stable",
         "tags": ["web", "evidence", "tactus"],
         "content": (
-            "Fresh web research belongs to the Tactus standard library, not "
-            "Papyrus. Inside execute_tactus snippets, call local web = "
-            "require(\"tactus.web\"), then use web.search{ provider = "
-            "\"openai\", ... } or web.synthesize{ provider = \"openai\", ... } "
-            "through the OpenAI web_search API. Keep provider selection explicit "
-            "and do not write GraphQL records from web search."
+            "Inside research harness snippets, use web_search(query) directly. "
+            "Outside that harness, call papyrus.reference.web_search{ query = ..., "
+            "max_results = ..., model = ... }. The harness first tries Tactus "
+            "stdlib web.search and falls back to papyrus.reference.web_search when "
+            "tactus.web is unavailable. Keep web discoveries as reference prospects "
+            "until intake accepts them; do not write GraphQL records from search "
+            "results alone."
         ),
     },
 }
@@ -432,6 +439,7 @@ HELPER_BINDINGS: tuple[tuple[str, str, str], ...] = (
     ("reference_doi_backfill_plan", "reference", "doi_backfill_plan"),
     ("reference_doi_backfill_run", "reference", "doi_backfill_run"),
     ("reference_doi_backfill_manifest", "reference", "doi_backfill_manifest"),
+    ("reference_web_search", "reference", "web_search"),
     ("knowledge_query", "knowledge", "query"),
     ("resolve_papyrus_uri", "papyrus", "resolve_uri"),
     ("recent_published_articles", "article", "recent_published"),
@@ -665,16 +673,37 @@ local research_mode = normalize_research_mode(
 local __web_searches = {{}}
 
 	local function web_search(query)
+    local result = nil
 	    if __web == nil then
-	        __web = require("tactus.web")
+        local ok, loaded = pcall(require, "tactus.web")
+        if ok then
+            __web = loaded
+        else
+            __web = false
+        end
 	    end
-	    local result = __web.search{{
-        provider = "openai",
-        query = query,
-        model = "gpt-5.4-mini",
-        return_token_budget = "default",
-        max_results = max_evidence_items,
-    }}
+    if __web and __web.search then
+        local ok, fetched = pcall(__web.search, {{
+            provider = "openai",
+            query = query,
+            model = "gpt-5.4-mini",
+            return_token_budget = "default",
+            max_results = max_evidence_items,
+        }})
+        if ok and type(fetched) == "table" then
+            result = fetched
+        end
+    end
+    if result == nil then
+        result = papyrus.reference.web_search{{
+            query = query,
+            max_results = max_evidence_items,
+            model = "gpt-5.4-mini",
+            return_token_budget = "default",
+        }}
+    end
+    result = result or {{}}
+    result.query = result.query or query
     result.results = trim_results(result.results)
     __web_searches[#__web_searches + 1] = query
     return result
