@@ -1449,7 +1449,7 @@ function runReferenceCurationSignalsForIds(referenceIds, {
         "--web-search",
         String(Boolean(webSearch)),
         "--summary",
-        "false",
+        "true",
         "--apply",
         "--vector-sync",
         "false",

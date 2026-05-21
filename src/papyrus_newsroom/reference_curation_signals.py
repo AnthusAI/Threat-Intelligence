@@ -1591,7 +1591,51 @@ def reference_summarize(
         semantic_client=semantic,
     )
     result = _apply_plan_if_requested(plan, apply=apply, actor_label=SUMMARY_SOURCE, reason="references summarize")
-    return _with_doctrine_warnings(result, doctrine_context)
+    result = _with_doctrine_warnings(result, doctrine_context)
+    summary_text = _normalize_outcome_summary_candidate((result.get("message") or {}).get("summary"))
+    if apply and result.get("action") in {"create", "update"} and summary_text:
+        result["metadataSync"] = _sync_reference_metadata_summary(
+            reference=reference,
+            summary_text=summary_text,
+            semantic_client=semantic,
+        )
+    return result
+
+
+def _sync_reference_metadata_summary(
+    *,
+    reference: dict[str, Any],
+    summary_text: str,
+    semantic_client: PapyrusSemanticClient | None = None,
+) -> dict[str, Any]:
+    reference = _require_reference(reference)
+    summary_text = _normalize_outcome_summary_candidate(summary_text)
+    if not summary_text:
+        return {"kind": "reference.summary.metadata-sync", "action": "noop", "warnings": ["empty_summary"]}
+    metadata = _jsonish(reference.get("metadata")) or {}
+    if _normalize_outcome_summary_candidate(metadata.get("summary")) == summary_text:
+        return {"kind": "reference.summary.metadata-sync", "action": "noop", "warnings": []}
+    now = _now()
+    next_metadata = {**metadata, "summary": summary_text}
+    metadata_attachment = _model_attachment(
+        owner_kind="reference",
+        owner_id=reference["id"],
+        role="metadata",
+        sort_key="metadata",
+        filename="metadata.json",
+        media_type="application/json",
+        content=next_metadata,
+        import_run_id=reference.get("importRunId"),
+        now=now,
+    )
+    plan = {
+        "kind": "reference.summary.metadata-sync",
+        "action": "update",
+        "reference": _reference_summary(reference),
+        "records": [{"modelName": "ModelAttachment", "action": "create", "input": metadata_attachment["record"], "body": metadata_attachment["body"]}],
+        "warnings": [],
+    }
+    return _apply_plan_if_requested(plan, apply=True, actor_label=SUMMARY_SOURCE, reason="references summarize metadata sync")
 
 
 def _select_references_missing_summary_batch(

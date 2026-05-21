@@ -283,6 +283,19 @@ export class SemanticGraphSnapshot {
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
+  summariesFor(kind: string, lineageId: string): MessageRecord[] {
+    const ranked = this.incoming(kind, lineageId)
+      .filter((relation) => relation.subjectKind === "message")
+      .filter((relation) => isReferenceSummaryPredicate(relationTypeKey(relation)) || isReferenceSummaryPredicate(relation.predicate))
+      .map((relation) => ({
+        rank: summaryPredicateRank(relationTypeKey(relation)),
+        message: this.messagesById.get(relation.subjectId),
+      }))
+      .filter((entry): entry is { rank: number; message: MessageRecord } => Boolean(entry.message && entry.message.messageKind === "reference_summary"));
+    ranked.sort((left, right) => left.rank - right.rank || right.message.createdAt.localeCompare(left.message.createdAt));
+    return ranked.map((entry) => entry.message);
+  }
+
   insightsFor(kind: string, lineageId: string): MessageRecord[] {
     return this.incoming(kind, lineageId)
       .filter((relation) => relation.subjectKind === "message")
@@ -479,4 +492,22 @@ function pushMap<K, V>(map: Map<K, V[]>, key: K, value: V) {
   const values = map.get(key) ?? [];
   values.push(value);
   map.set(key, values);
+}
+
+export const REFERENCE_SUMMARY_PREDICATES = [
+  "reference_summary_100_tokens",
+  "reference_summary_200_tokens",
+  "reference_summary_500_tokens",
+] as const;
+
+function isReferenceSummaryPredicate(predicate: string): boolean {
+  return REFERENCE_SUMMARY_PREDICATES.includes(predicate as typeof REFERENCE_SUMMARY_PREDICATES[number])
+    || predicate.startsWith("reference_summary_");
+}
+
+function summaryPredicateRank(predicate: string): number {
+  if (predicate === "reference_summary_100_tokens") return 0;
+  if (predicate === "reference_summary_200_tokens") return 1;
+  if (predicate === "reference_summary_500_tokens") return 2;
+  return 3;
 }

@@ -85,6 +85,11 @@ import {
   referenceCurationStatusForAction,
 } from "../lib/reference-policy";
 import {
+  referenceDisplaySummary,
+  referenceMetadataField,
+  resolveCanonicalReferenceLineage,
+} from "../lib/reference-display";
+import {
   buildCategoryDrilldownContext,
   buildTopicDrilldownContext,
   categoryDrilldownHref,
@@ -5015,8 +5020,11 @@ function ReferencesDeskView({
     .filter((reference) => !statusFilter || (reference.curationStatus ?? "pending") === statusFilter)
     .filter((reference) => !metricStatusFilter || (reference.curationStatus ?? "pending") === metricStatusFilter);
   const requestedReferenceLineageId = selectedReferenceLineageId || initialReferenceLineageId || "";
-  const selectedReference = filteredReferences.find((reference) => (reference.lineageId ?? reference.id) === requestedReferenceLineageId)
-    ?? (requestedReferenceLineageId ? references.find((reference) => (reference.lineageId ?? reference.id) === requestedReferenceLineageId) : null)
+  const canonicalReferenceLineageId = requestedReferenceLineageId
+    ? resolveCanonicalReferenceLineage(references, requestedReferenceLineageId)
+    : "";
+  const selectedReference = filteredReferences.find((reference) => (reference.lineageId ?? reference.id) === canonicalReferenceLineageId)
+    ?? (canonicalReferenceLineageId ? references.find((reference) => (reference.lineageId ?? reference.id) === canonicalReferenceLineageId) : null)
     ?? filteredReferences[0]
     ?? null;
   const referenceKnowledgeQuery = useNewsroomKnowledgeContext(selectedReference ? {
@@ -5038,10 +5046,19 @@ function ReferencesDeskView({
   const totalReferenceCount = categoryFilter ? visibleReferences.length : summaryCountFromRecord(summary, "references") || visibleReferences.length;
   const cards = filteredReferences.map((reference, index) => referenceToNewsroomCard(reference, index, referenceSubtitles.get(reference.id) ?? null));
   const selectReference = (lineageId: string) => {
-    setSelectedReferenceLineageId(lineageId);
+    const canonicalLineageId = resolveCanonicalReferenceLineage(references, lineageId);
+    setSelectedReferenceLineageId(canonicalLineageId);
     setIsReferenceDetailOpen(true);
-    pushNewsroomDetailUrl("references", lineageId, isDemo);
+    pushNewsroomDetailUrl("references", canonicalLineageId, isDemo);
   };
+  useEffect(() => {
+    if (!initialReferenceLineageId || isDemo) return;
+    const canonicalLineageId = resolveCanonicalReferenceLineage(references, initialReferenceLineageId);
+    if (canonicalLineageId === initialReferenceLineageId) return;
+    setSelectedReferenceLineageId(canonicalLineageId);
+    setIsReferenceDetailOpen(true);
+    pushNewsroomDetailUrl("references", canonicalLineageId, isDemo);
+  }, [initialReferenceLineageId, isDemo, references]);
   const runReferenceAction = (action: ReferenceCurationAction) => {
     if (!selectedReference) return;
     onReview(
@@ -7423,8 +7440,8 @@ function ReferenceDetailPanel({
   const neighborGroups = graph.neighbors("reference", lineageId);
   const authors = reference.authors?.filter(Boolean).join(", ");
   const metadataPayload = modelPayloadByRole(referencePayloadState.payloads, "metadata");
-  const metadataSubtitle = referenceMetadataSubtitle(metadataPayload, reference.metadata) ?? "";
-  const metadataSummary = referenceMetadataSummary(metadataPayload, reference.metadata) ?? "";
+  const metadataSubtitle = referenceMetadataField(metadataPayload, reference.metadata, "subtitle") ?? "";
+  const metadataSummary = referenceDisplaySummary(graph, lineageId, metadataPayload, reference.metadata) ?? "";
 
   return (
     <section className="category-steering-section" aria-label="Reference detail" data-news-desk-reference-detail={lineageId}>
@@ -7533,7 +7550,14 @@ function MessageDetailPanel({
   const referencePayloadState = useModelPayloads("reference", linkedReference?.id, ["metadata"]);
   const referenceMetadataPayload = modelPayloadByRole(referencePayloadState.payloads, "metadata");
   const referenceSubtitle = referenceMetadataSubtitle(referenceMetadataPayload, linkedReference?.metadata);
-  const referenceSummary = referenceMetadataSummary(referenceMetadataPayload, linkedReference?.metadata);
+  const referenceSummary = linkedReference
+    ? referenceDisplaySummary(
+      graph,
+      linkedReference.lineageId ?? linkedReference.id,
+      referenceMetadataPayload,
+      linkedReference.metadata,
+    )
+    : null;
   const headerLabel = humanizeNewsroomLabel(message.messageKind ?? "message");
   const headerTitle = message.messageKind === "reference_curation"
     ? linkedReference?.title ?? linkedReference?.externalItemId ?? "Reference curation"
@@ -9301,24 +9325,6 @@ function useReferenceMetadataSubtitles(references: ReferenceRecord[]): Map<strin
 
 function referenceMetadataSubtitle(payload: HydratedModelPayload | null, fallback?: unknown): string | null {
   return referenceMetadataField(payload, fallback, "subtitle");
-}
-
-function referenceMetadataSummary(payload: HydratedModelPayload | null, fallback?: unknown): string | null {
-  return referenceMetadataField(payload, fallback, "summary");
-}
-
-function referenceMetadataField(
-  payload: HydratedModelPayload | null,
-  fallback: unknown,
-  key: "subtitle" | "summary",
-): string | null {
-  const payloadRecord = metadataRecord(payload?.json);
-  if (payloadRecord) {
-    const value = normalizeMetadataString(payloadRecord[key]);
-    if (value) return value;
-  }
-  const fallbackRecord = metadataRecord(fallback);
-  return fallbackRecord ? normalizeMetadataString(fallbackRecord[key]) : null;
 }
 
 function metadataRecord(value: unknown): Record<string, unknown> | null {
