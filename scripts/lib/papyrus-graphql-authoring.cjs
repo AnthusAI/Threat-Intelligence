@@ -156,6 +156,7 @@ const CATEGORY_FIELDS = `${VERSION_FIELDS} id categorySetId corpusId categoryKey
 const CATEGORY_KEYWORD_FIELDS = "id categorySetId corpusId categoryKey categoryLineageId categoryId keyword normalizedKeyword weight rank source sourceTopicId importRunId metadata createdAt updatedAt";
 const LEXICAL_STEERING_RULE_FIELDS = "id ruleKind term normalizedTerm scope status corpusId classifierId categorySetId categoryKey note source createdBy createdAt updatedAt metadata";
 const NEWSROOM_SECTION_FIELDS = "id title shortTitle type editorialMission editorialPolicy enabled enabledStatus sortOrder defaultArticleTypes defaultPageBudget assignmentGuidance killCriteria visualGuidance createdAt updatedAt";
+const NEWSROOM_SECTION_COMPAT_FIELDS = "id title type editorialMission editorialPolicy enabled enabledStatus sortOrder assignmentGuidance killCriteria visualGuidance createdAt updatedAt";
 const PROPOSAL_FIELDS = "id categorySetId corpusId importRunId proposalKind steeringDomain status title summary categoryKey targetCategoryKey graphEntityId relationshipType displayName shortTitle subtitle description evidenceItemIds suggestedSeedItemIds suggestedHoldoutItemIds sourceSnapshotId proposedAt reviewedAt reviewedBy updatedAt";
 const DECISION_FIELDS = "id proposalId categorySetId action actorSub actorLabel note selectedCategoryKey createdAt";
 const KNOWLEDGE_CORPUS_FIELDS = "id name role itemCount generatedAt latestImportRunId createdAt updatedAt";
@@ -237,6 +238,12 @@ const LIST_RECORDS = {
   SemanticRelation: listDefinition("listSemanticRelations", SEMANTIC_RELATION_FIELDS),
 };
 
+const LIST_RECORD_FALLBACKS = {
+  NewsroomSection: [
+    listDefinition("listNewsroomSections", NEWSROOM_SECTION_COMPAT_FIELDS),
+  ],
+};
+
 const GETTERS = {
   Edition: getDefinition("getEdition", EDITION_FIELDS),
   EditionItem: getDefinition("getEditionItem", EDITION_ITEM_FIELDS),
@@ -270,6 +277,12 @@ const GETTERS = {
   Message: getDefinition("getMessage", MESSAGE_FIELDS),
   SemanticRelationType: getDefinition("getSemanticRelationType", SEMANTIC_RELATION_TYPE_FIELDS),
   SemanticRelation: getDefinition("getSemanticRelation", SEMANTIC_RELATION_FIELDS),
+};
+
+const GETTER_FALLBACKS = {
+  NewsroomSection: [
+    getDefinition("getNewsroomSection", NEWSROOM_SECTION_COMPAT_FIELDS),
+  ],
 };
 
 const MUTATIONS = Object.fromEntries(Object.keys(GETTERS).map((modelName) => [modelName, modelMutations(modelName)]));
@@ -380,7 +393,20 @@ class PapyrusGraphQLAuthoringClient {
   async listRecords(modelName) {
     const definition = LIST_RECORDS[modelName];
     if (!definition) throw new Error(`Unsupported model for listing: ${modelName}`);
+    const definitions = [definition, ...(LIST_RECORD_FALLBACKS[modelName] ?? [])];
+    let lastFieldError = null;
+    for (const candidateDefinition of definitions) {
+      try {
+        return await this.listRecordsWithDefinition(candidateDefinition);
+      } catch (error) {
+        if (!isGraphqlFieldUndefinedError(error)) throw error;
+        lastFieldError = error;
+      }
+    }
+    throw lastFieldError;
+  }
 
+  async listRecordsWithDefinition(definition) {
     const items = [];
     let nextToken = null;
 
@@ -461,6 +487,20 @@ class PapyrusGraphQLAuthoringClient {
   async getRecord(modelName, id) {
     const definition = GETTERS[modelName];
     if (!definition) throw new Error(`Unsupported model for get: ${modelName}`);
+    const definitions = [definition, ...(GETTER_FALLBACKS[modelName] ?? [])];
+    let lastFieldError = null;
+    for (const candidateDefinition of definitions) {
+      try {
+        return await this.getRecordWithDefinition(candidateDefinition, id);
+      } catch (error) {
+        if (!isGraphqlFieldUndefinedError(error)) throw error;
+        lastFieldError = error;
+      }
+    }
+    throw lastFieldError;
+  }
+
+  async getRecordWithDefinition(definition, id) {
     const result = await this.graphql(definition.query, { id });
     return result[definition.field] ?? null;
   }
@@ -573,6 +613,11 @@ function addOperationalIndexFields(modelName, input) {
 
 function cleanString(value) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function isGraphqlFieldUndefinedError(error) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return message.includes("FieldUndefined") || message.includes("is undefined @");
 }
 
 function modelAttachmentUploadVariables(attachment) {

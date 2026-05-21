@@ -64,6 +64,10 @@ const {
   loadNewsroomSectionSeeds,
 } = require("./lib/papyrus-newsroom-sections.cjs");
 const {
+  buildReportingPacketReviewPlan,
+  normalizeReportingReviewDecision,
+} = require("./lib/papyrus-reporting-packet-review.cjs");
+const {
   REPORTING_EDITION_ASSIGNMENT_TYPE,
   applyEditionPlanningPlan,
   buildEditionPlanningPlan,
@@ -348,6 +352,9 @@ async function main() {
       return;
     case "assignments:research-packets":
       await listAssignmentResearchPackets(args.slice(2));
+      return;
+    case "assignments:review-reporting-packet":
+      await reviewReportingPacket(args.slice(2));
       return;
     case "assignments:events":
       await listAssignmentEvents(args.slice(2));
@@ -4822,6 +4829,96 @@ async function listAssignmentEvents(flags) {
     ].join("\t"));
   }
   console.log(`assignments\tevents\t${assignmentId}\t${events.length}`);
+}
+
+async function reviewReportingPacket(flags) {
+  const options = parseOptions(flags);
+  const assignmentId = normalizeCliString(options.assignment);
+  const messageId = normalizeCliString(options.message);
+  const decision = normalizeReportingReviewDecision(options.decision);
+  if (options.apply && options["dry-run"]) throw new Error("assignments review-reporting-packet accepts --apply or --dry-run, not both.");
+  const apply = Boolean(options.apply);
+  if (!assignmentId) throw new Error("assignments review-reporting-packet requires --assignment.");
+  if (!messageId) throw new Error("assignments review-reporting-packet requires --message.");
+  const { auth, client } = createAuthoringClient();
+  const assignment = await client.getRecord("Assignment", assignmentId);
+  if (!assignment) throw new Error(`Assignment ${assignmentId} was not found.`);
+  const message = await client.getRecord("Message", messageId);
+  if (!message) throw new Error(`Message ${messageId} was not found.`);
+  const targetItemId = normalizeCliString(options["target-item"]);
+  const targetItem = targetItemId ? await client.getRecord("Item", targetItemId) : null;
+  if (targetItemId && !targetItem) throw new Error(`Target Item ${targetItemId} was not found.`);
+  const semanticRelations = await client.listRecords("SemanticRelation");
+  const actorLabel = normalizeCliString(options["actor-label"]) ?? normalizeCliString(auth.claims.email) ?? normalizeCliString(auth.claims.sub) ?? "papyrus-content-cli";
+  const plan = buildReportingPacketReviewPlan({
+    assignment,
+    message,
+    decision,
+    note: options.note ?? "",
+    targetItem,
+    actorLabel,
+    actorSub: auth.claims.sub ?? null,
+    semanticRelations,
+  });
+  const changes = await buildRecordChangesTargetedByIdToleratingOptionalModels(client, plan.records, {
+    prepareVersioned: false,
+  });
+  const report = writeReportingPacketReviewReport(plan, changes, {
+    outputDir: options.output,
+  });
+  if (apply) await applyRecordChanges(client, changes);
+  if (options.json) {
+    printCompactJson({
+      ok: true,
+      command: "assignments review-reporting-packet",
+      applied: apply,
+      report: report.filepath,
+      ...plan.summary,
+      changes: changeCounts(changes),
+    });
+    return;
+  }
+  printReportingPacketReviewSummary(plan, changes, { apply, report });
+}
+
+function writeReportingPacketReviewReport(plan, changes, options = {}) {
+  const outputDir = path.resolve(options.outputDir ?? path.join(".papyrus-runs", `reporting-packet-review-${safeId(plan.assignmentId).slice(0, 60)}-${timestampForPath()}`));
+  fs.mkdirSync(outputDir, { recursive: true });
+  const filepath = path.join(outputDir, "reporting-packet-review-report.json");
+  const serializableChanges = changes.map((change) => ({
+    modelName: change.modelName,
+    action: change.action,
+    id: change.expected?.id ?? null,
+  }));
+  fs.writeFileSync(filepath, `${JSON.stringify({ plan, changes: serializableChanges }, null, 2)}\n`, "utf8");
+  return { outputDir, filepath };
+}
+
+function printReportingPacketReviewSummary(plan, changes, { apply, report }) {
+  console.log(`reporting-packet-review\tmode\t${apply ? "apply" : "dry-run"}`);
+  console.log(`reporting-packet-review\tassignment\t${plan.assignmentId}`);
+  console.log(`reporting-packet-review\tmessage\t${plan.messageId}`);
+  console.log(`reporting-packet-review\tdecision\t${plan.decision}`);
+  if (plan.summary.draftItemId) console.log(`reporting-packet-review\tdraft-item\t${plan.summary.draftItemId}`);
+  if (plan.summary.targetItemId) console.log(`reporting-packet-review\ttarget-item\t${plan.summary.targetItemId}`);
+  console.log(`reporting-packet-review\tedition-item\tcreated=false`);
+  console.log(`reporting-packet-review\treport\t${report.filepath}`);
+  console.log(`reporting-packet-review\tchanges\t${formatChangeCounts(changeCounts(changes))}`);
+  if (!apply) console.log("reporting-packet-review\tapply\tskipped\tpass --apply to write review records");
+}
+
+function changeCounts(changes) {
+  return changes.reduce((memo, change) => {
+    memo[change.action] = (memo[change.action] ?? 0) + 1;
+    return memo;
+  }, {});
+}
+
+function formatChangeCounts(counts) {
+  return Object.entries(counts)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => `${key}=${value}`)
+    .join("\t");
 }
 
 async function mutateAssignment(action, flags) {
@@ -12777,6 +12874,7 @@ function printUsage() {
   console.log("  npm run content -- assignments for-object --kind reference --lineage <reference-lineage-id>");
   console.log("  npm run content -- assignments build-context --assignment <id> --context-profile reporting");
   console.log("  npm run content -- assignments research-packets --assignment <id>");
+  console.log("  npm run content -- assignments review-reporting-packet --assignment <id> --message <message-id> --decision select|merge|brief|hold|kill --note <text> [--target-item <id>] [--dry-run|--apply] [--json]");
   console.log("  npm run content -- assignments events --assignment <id>");
   console.log("  npm run content -- assignments process-queue --type analysis.reindex --section technology --status open --max-count 10 --dry-run");
   console.log("  npm run content -- assignments process-queue --type analysis.reindex --section technology --status open --max-count 10 --max-runtime-seconds 3600 --stop-on-error false");
@@ -12814,11 +12912,14 @@ function printEditionPlanningSummary(plan, report, mode) {
   console.log(`edition-planning\tcontext-backed\t${plan.summary.contextBackedAssignmentCount}`);
   console.log(`edition-planning\trecords\tcreate=${plan.summary.createCount}\tupdate=${plan.summary.updateCount}\tnoop=${plan.summary.noopCount}`);
   console.log(`edition-planning\treport\t${report.filepath}`);
+  for (const warning of plan.warnings || []) {
+    console.log(`edition-planning\twarning\t${warning}`);
+  }
   for (const budget of plan.summary.sectionBudgets || []) {
     console.log(`section-budget\t${budget.section.id}\tslots=${budget.slots}\ttype=${budget.section.type}`);
   }
   for (const coverage of plan.focusCoverage || []) {
-    console.log(`focus-coverage\t${coverage.deskCategoryKey}\t${coverage.laneKey}\t${coverage.focusCategoryKey}\t${coverage.count}`);
+    console.log(`focus-coverage\t${coverage.deskCategoryKey}\t${coverage.laneKey}\t${coverage.focusCategoryKey}\t${coverage.count}\tqueue=${coverage.queueKey ?? "-"}`);
   }
   for (const desk of plan.desks) {
     console.log(`desk\t${desk.categoryKey}\t${desk.opportunityScore}\trefs=${desk.referenceCount}\tsignals=${desk.signalCount}`);

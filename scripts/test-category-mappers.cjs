@@ -36,6 +36,9 @@ const {
   verifyEditionPlanningPlan,
 } = require("./lib/papyrus-edition-planning.cjs");
 const {
+  buildReportingPacketReviewPlan,
+} = require("./lib/papyrus-reporting-packet-review.cjs");
+const {
   buildSemanticRelationBackfillRecords,
   buildSemanticRelationTypeRecords,
   loadSemanticRelationTypeSeeds,
@@ -1281,6 +1284,8 @@ assert.ok(reportingEditionPlan.assignments.every((assignment) => assignment.assi
 assert.equal(reportingEditionPlan.assignments.filter((assignment) => assignment.sectionKey === "technology").length, 3);
 assert.equal(reportingEditionPlan.assignments.filter((assignment) => assignment.sectionKey === "business").length, 2);
 assert.equal(reportingEditionPlan.assignments.filter((assignment) => assignment.sectionKey === "world").length, 2);
+assert.equal(reportingEditionPlan.focusCoverage.find((coverage) => coverage.deskCategoryKey === "technology").laneKey, "reporting");
+assert.ok(reportingEditionPlan.focusCoverage.find((coverage) => coverage.deskCategoryKey === "technology").queueKey.includes(":section:technology:lane:reporting"));
 const reportingCandidate = reportingEditionPlan.assignments.find((assignment) => assignment.sectionKey === "technology");
 assert.ok(reportingCandidate);
 const reportingCandidateMetadata = JSON.parse(reportingCandidate.metadata);
@@ -1326,6 +1331,30 @@ const reportingEditionPlanWithStaleResearchAssignments = buildEditionPlanningPla
 });
 assert.equal(reportingEditionPlanWithStaleResearchAssignments.assignments.length, 7);
 assert.ok(reportingEditionPlanWithStaleResearchAssignments.assignments.every((assignment) => assignment.assignmentTypeKey === "reporting.edition-candidate"));
+assert.ok(reportingEditionPlanWithStaleResearchAssignments.warnings.some((warning) => warning.includes("Ignored 1 existing research.edition-candidate assignment")));
+assert.equal(reportingEditionPlanWithStaleResearchAssignments.summary.existingRootReuse.ignoredAssignmentTypeCounts[0].assignmentTypeKey, "research.edition-candidate");
+const reportingEditionPlanWithStaleReportingAssignments = buildEditionPlanningPlan({
+  ...editionPlanningState,
+  assignments: [{
+    id: "assignment-stale-reporting-root",
+    assignmentTypeKey: "reporting.edition-candidate",
+    status: "open",
+    primaryFocusCategoryKey: "category.stale-root",
+    metadata: JSON.stringify({ editionSlug: "edition-2026-05-23" }),
+  }],
+}, {
+  editionDate: "2026-05-23",
+  now: "2026-05-18T12:00:00.000Z",
+  assignmentTypeKey: "reporting",
+  topDeskCount: 1,
+  publicationSlots: 1,
+  overassignmentRatio: 1.5,
+  rotatingSectionCount: 1,
+  sectionBudgets: ["technology:2"],
+});
+assert.equal(reportingEditionPlanWithStaleReportingAssignments.assignments.length, 7);
+assert.ok(reportingEditionPlanWithStaleReportingAssignments.warnings.some((warning) => warning.includes("Ignored stale existing reporting.edition-candidate root keys")));
+assert.deepEqual(reportingEditionPlanWithStaleReportingAssignments.summary.existingRootReuse.staleRootKeys, ["category.stale-root"]);
 const reportingSectionRelation = findRecord(reportingEditionPlan.records, "SemanticRelation", (record) => record.subjectId === reportingCandidate.id && record.predicate === "targets_section");
 assert.equal(reportingSectionRelation.objectKind, "newsroomSection");
 assert.equal(reportingSectionRelation.objectLineageId, "technology");
@@ -1335,6 +1364,96 @@ const reportingTopicRelation = findRecord(reportingEditionPlan.records, "Semanti
 assert.equal(reportingTopicRelation.objectKind, "category");
 const reportingEvidenceRelation = findRecord(reportingEditionPlan.records, "SemanticRelation", (record) => record.subjectId === reportingCandidate.id && record.predicate === "uses_evidence");
 assert.equal(reportingEvidenceRelation.objectKind, "reference");
+const reportingPacketMessage = {
+  id: "message-reporting-packet-review-test",
+  messageKind: "reporting_context_packet",
+  messageDomain: "assignment_work",
+  status: "active",
+  summary: "Reporting context packet: test",
+  createdAt: "2026-05-18T12:00:00.000Z",
+  updatedAt: "2026-05-18T12:00:00.000Z",
+};
+const reportingPacketCommentRelation = {
+  relationState: "current",
+  predicate: "comment",
+  subjectKind: "message",
+  subjectId: reportingPacketMessage.id,
+  objectKind: "assignment",
+  objectId: reportingCandidate.id,
+};
+const holdReviewPlan = buildReportingPacketReviewPlan({
+  assignment: reportingCandidate,
+  message: reportingPacketMessage,
+  decision: "hold",
+  note: "Needs one more source.",
+  now: "2026-05-18T13:00:00.000Z",
+  semanticRelations: [reportingPacketCommentRelation],
+});
+assert.deepEqual(holdReviewPlan.records.map((record) => record.modelName), ["AssignmentEvent", "ModelAttachment"]);
+assert.equal(holdReviewPlan.event.eventType, "reporting_hold");
+assert.equal(holdReviewPlan.metadata.decision, "hold");
+assert.equal(holdReviewPlan.metadata.messageId, reportingPacketMessage.id);
+assert.equal(holdReviewPlan.metadataAttachment.expected.ownerKind, "assignmentEvent");
+assert.equal(holdReviewPlan.metadataAttachment.expected.role, "metadata");
+assert.ok(holdReviewPlan.metadataAttachment.attachmentBody);
+const killReviewPlan = buildReportingPacketReviewPlan({
+  assignment: reportingCandidate,
+  message: reportingPacketMessage,
+  decision: "kill",
+  note: "Duplicate angle.",
+  now: "2026-05-18T13:05:00.000Z",
+  semanticRelations: [reportingPacketCommentRelation],
+});
+assert.deepEqual(killReviewPlan.records.map((record) => record.modelName), ["AssignmentEvent", "ModelAttachment"]);
+const selectReviewPlan = buildReportingPacketReviewPlan({
+  assignment: reportingCandidate,
+  message: reportingPacketMessage,
+  decision: "select",
+  note: "Move to copywriting.",
+  now: "2026-05-18T13:10:00.000Z",
+  semanticRelations: [reportingPacketCommentRelation],
+});
+assert.deepEqual(selectReviewPlan.records.map((record) => record.modelName), ["AssignmentEvent", "ModelAttachment", "Item", "SemanticRelation"]);
+assert.equal(selectReviewPlan.draftItem.type, "article");
+assert.equal(selectReviewPlan.draftItem.status, "draft");
+assert.equal(selectReviewPlan.draftItem.typeStatus, "article#draft");
+assert.equal(selectReviewPlan.records.find((record) => record.modelName === "SemanticRelation").expected.predicate, "produces");
+assert.equal(selectReviewPlan.records.some((record) => record.modelName === "EditionItem"), false);
+const briefReviewPlan = buildReportingPacketReviewPlan({
+  assignment: reportingCandidate,
+  message: reportingPacketMessage,
+  decision: "brief",
+  now: "2026-05-18T13:15:00.000Z",
+  semanticRelations: [reportingPacketCommentRelation],
+});
+assert.equal(briefReviewPlan.draftItem.type, "brief");
+assert.equal(briefReviewPlan.draftItem.typeStatus, "brief#draft");
+const mergeReviewPlan = buildReportingPacketReviewPlan({
+  assignment: reportingCandidate,
+  message: reportingPacketMessage,
+  decision: "merge",
+  targetItem: { id: "item-existing-v1", lineageId: "item-existing", versionNumber: 1 },
+  now: "2026-05-18T13:20:00.000Z",
+  semanticRelations: [reportingPacketCommentRelation],
+});
+assert.deepEqual(mergeReviewPlan.records.map((record) => record.modelName), ["AssignmentEvent", "ModelAttachment", "SemanticRelation"]);
+assert.equal(mergeReviewPlan.records.find((record) => record.modelName === "SemanticRelation").expected.objectId, "item-existing-v1");
+assert.throws(
+  () => buildReportingPacketReviewPlan({ assignment: reportingCandidate, message: reportingPacketMessage, decision: "merge", semanticRelations: [reportingPacketCommentRelation] }),
+  /target-item/,
+);
+assert.throws(
+  () => buildReportingPacketReviewPlan({ assignment: { ...reportingCandidate, assignmentTypeKey: "research.edition-candidate" }, message: reportingPacketMessage, decision: "hold" }),
+  /reporting\.edition-candidate/,
+);
+assert.throws(
+  () => buildReportingPacketReviewPlan({ assignment: reportingCandidate, message: { ...reportingPacketMessage, messageKind: "research_packet" }, decision: "hold" }),
+  /reporting_context_packet/,
+);
+assert.throws(
+  () => buildReportingPacketReviewPlan({ assignment: reportingCandidate, message: reportingPacketMessage, decision: "hold", semanticRelations: [] }),
+  /not linked/,
+);
 
 const schemaSource = fs.readFileSync(path.join(__dirname, "..", "amplify", "data", "resource.ts"), "utf8");
 const authoringClientSource = fs.readFileSync(path.join(__dirname, "lib", "papyrus-graphql-authoring.cjs"), "utf8");
@@ -1353,6 +1472,9 @@ assert.match(schemaSource, /AssignmentEvent:\s*a\s*\n\s*\.model/);
 assert.match(schemaSource, /NewsroomSection:\s*a\s*\n\s*\.model/);
 assert.match(schemaSource.match(/NewsroomSection:\s*a[\s\S]*?secondaryIndexes/)?.[0] ?? "", /shortTitle:\s*a\.string\(\)\.required\(\)/);
 assert.match(authoringClientSource.match(/const NEWSROOM_SECTION_FIELDS = [^;]+;/)?.[0] ?? "", /shortTitle/);
+assert.match(authoringClientSource, /const GETTER_FALLBACKS = \{/);
+assert.match(authoringClientSource.match(/const GETTER_FALLBACKS = \{[\s\S]*?\n\};/)?.[0] ?? "", /NewsroomSection/);
+assert.match(authoringClientSource.match(/const GETTER_FALLBACKS = \{[\s\S]*?\n\};/)?.[0] ?? "", /NEWSROOM_SECTION_COMPAT_FIELDS/);
 const claimAssignmentSource = schemaSource.match(/claimAssignment:[\s\S]*?releaseAssignment:/)?.[0] ?? "";
 assert.match(claimAssignmentSource, /assigneeKey:\s*a\.string\(\)/);
 assert.match(claimAssignmentSource, /claimExpiresAt:\s*a\.datetime\(\)/);

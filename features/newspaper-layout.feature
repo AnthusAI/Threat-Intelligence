@@ -334,6 +334,19 @@ Feature: Newspaper layout scenarios
     And assignment "assignment-demo-reporting-news-001" should not appear as an edition item
     And no browser console errors should occur
 
+  Scenario: Newsroom reviews reporting packets without publishing placement
+    Given I am a test editor reader
+    And I open the assignments newsroom at 1280 by 900
+    Then the assignments desk should render
+    When I open assignment "assignment-demo-reporting-news-001"
+    And I review reporting packet for assignment "assignment-demo-reporting-news-001" as "hold" with note "Needs one more source"
+    Then assignment "assignment-demo-reporting-news-001" should show reporting decision "hold"
+    And assignment "assignment-demo-reporting-news-001" should not appear as an edition item
+    When I review reporting packet for assignment "assignment-demo-reporting-news-001" as "select" with note "Move to copywriting"
+    Then assignment "assignment-demo-reporting-news-001" should show reporting decision "select"
+    And assignment "assignment-demo-reporting-news-001" should show a draft item without edition placement
+    And no browser console errors should occur
+
   Scenario: Production newsroom requires editor access
     Given I open the edition path "/newsroom" at 1280 by 900
     Then the newsroom should show an editor access gate

@@ -127,7 +127,8 @@ function buildEditionPlanningPlan(state, options = {}) {
   const scoredGroups = categoryGroups
     .map((group) => scoreDeskGroup(group, state, now))
     .sort((left, right) => right.opportunityScore - left.opportunityScore || compareCategoryRank(left.root, right.root));
-  const existingRootKeys = existingEditionRootKeys(state.assignments ?? [], editionSlug, assignmentTypeKey);
+  const existingRootUsage = existingEditionRootUsage(state.assignments ?? [], editionSlug, assignmentTypeKey, scoredGroups);
+  const existingRootKeys = existingRootUsage.rootKeys;
   const requestedFocusKeys = new Set(focusCategories);
   const focusSelectedGroups = focusCategories.length
     ? scoredGroups.filter((group) => Array.from(requestedFocusKeys).some((focusKey) => group.categoryKeys.has(focusKey)))
@@ -144,6 +145,7 @@ function buildEditionPlanningPlan(state, options = {}) {
     : focusSelectedGroups.length
       ? focusSelectedGroups
       : scoredGroups.slice(0, topDeskCount);
+  existingRootUsage.matchedRootKeys = existingSelectedGroups.map((group) => group.root.categoryKey);
   const sectionTargets = isReportingPlan ? new Map() : resolveSectionTargets(options.sectionTargets, enabledSections, selectedGroups);
   const sectionBudgets = isReportingPlan
     ? resolveSectionBudgets(options.sectionBudgets, enabledSections, {
@@ -222,6 +224,7 @@ function buildEditionPlanningPlan(state, options = {}) {
     if (assignmentCount >= maxAssignments) break;
   }
 
+  const warnings = editionPlanningWarnings(existingRootUsage, assignmentTypeKey);
   return {
     editionDate,
     editionSlug,
@@ -239,6 +242,7 @@ function buildEditionPlanningPlan(state, options = {}) {
     desks: selectedGroups.map((group) => summarizeDeskGroup(group)),
     assignments,
     records,
+    warnings,
     summary: {
       editionId: edition.id,
       assignmentTypeKey,
@@ -253,6 +257,7 @@ function buildEditionPlanningPlan(state, options = {}) {
       overassignmentRatio,
       topDeskCount,
       sectionBudgets,
+      existingRootReuse: existingRootUsage,
       contextBackedAssignmentCount: assignments.filter((assignment) => Boolean(assignment.sectionKey || assignment.primaryFocusCategoryKey)).length,
     },
   };
@@ -1124,18 +1129,50 @@ function countActiveAssignmentsForRoot(assignments, rootCategoryKey) {
   )).length;
 }
 
-function existingEditionRootKeys(assignments, editionSlug, assignmentTypeKey = EDITION_ASSIGNMENT_TYPE) {
+function existingEditionRootUsage(assignments, editionSlug, assignmentTypeKey = EDITION_ASSIGNMENT_TYPE, scoredGroups = []) {
+  const validRootKeys = new Set(scoredGroups.map((group) => group.root.categoryKey));
   const keys = [];
   const seen = new Set();
+  const ignoredTypeCounts = new Map();
   for (const assignment of assignments) {
-    if (assignment.assignmentTypeKey !== assignmentTypeKey || assignment.status === "canceled") continue;
+    if (assignment.status === "canceled") continue;
     const metadata = parseJsonObject(assignment.metadata);
+    if (metadata.editionSlug && metadata.editionSlug !== editionSlug) continue;
+    if (assignment.assignmentTypeKey !== assignmentTypeKey) {
+      const ignoredType = assignment.assignmentTypeKey ?? "unknown";
+      if (isEditionCandidateAssignmentType(ignoredType)) {
+        ignoredTypeCounts.set(ignoredType, (ignoredTypeCounts.get(ignoredType) ?? 0) + 1);
+      }
+      continue;
+    }
     const deskCategoryKey = assignment.primaryFocusCategoryKey ?? (Array.isArray(assignment.topicScopeCategoryKeys) ? assignment.topicScopeCategoryKeys[0] : null);
-    if ((metadata.editionSlug && metadata.editionSlug !== editionSlug) || !deskCategoryKey || seen.has(deskCategoryKey)) continue;
+    if (!deskCategoryKey || seen.has(deskCategoryKey)) continue;
     seen.add(deskCategoryKey);
     keys.push(deskCategoryKey);
   }
-  return keys;
+  return {
+    rootKeys: keys,
+    matchedRootKeys: [],
+    staleRootKeys: keys.filter((key) => !validRootKeys.has(key)),
+    ignoredAssignmentTypeCounts: Array.from(ignoredTypeCounts.entries())
+      .map(([type, count]) => ({ assignmentTypeKey: type, count }))
+      .sort((left, right) => String(left.assignmentTypeKey).localeCompare(String(right.assignmentTypeKey))),
+  };
+}
+
+function isEditionCandidateAssignmentType(value) {
+  return String(value ?? "").endsWith(".edition-candidate");
+}
+
+function editionPlanningWarnings(existingRootUsage, assignmentTypeKey) {
+  const warnings = [];
+  for (const ignored of existingRootUsage.ignoredAssignmentTypeCounts ?? []) {
+    warnings.push(`Ignored ${ignored.count} existing ${ignored.assignmentTypeKey} assignment${ignored.count === 1 ? "" : "s"} while planning ${assignmentTypeKey}.`);
+  }
+  if (existingRootUsage.staleRootKeys?.length) {
+    warnings.push(`Ignored stale existing ${assignmentTypeKey} root keys not found in the current accepted taxonomy: ${existingRootUsage.staleRootKeys.join(", ")}.`);
+  }
+  return warnings;
 }
 
 function summarizeDeskGroup(group) {

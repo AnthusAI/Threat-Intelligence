@@ -115,6 +115,7 @@ type ReferenceCurationAction = "accept" | "reject" | "reopen" | "archive";
 type ReferenceRejectionReasonCode = typeof REFERENCE_REJECTION_REASON_CODES[number];
 type TopicLabelAction = "manual_label" | "accept_prediction" | "reject_prediction" | "unlabel";
 type AssignmentAction = "claim" | "release" | "complete" | "cancel" | "reopen";
+type ReportingPacketReviewDecision = "select" | "merge" | "brief" | "hold" | "kill";
 type UserRoleAction = "grant" | "revoke";
 type AdministrationPanel = "users" | "policies" | "sections";
 export type NewsDeskTab = "overview" | "desks" | "topics" | "concepts" | "references" | "messages" | "assignments" | "administration" | "search";
@@ -1348,6 +1349,106 @@ function NewsDeskDashboard({
     });
   }
 
+  function runReportingPacketReview(assignment: AssignmentRecord, packet: AssignmentResearchPacketSummary, decision: ReportingPacketReviewDecision, note = "", targetItemId = "") {
+    const actionId = `${assignment.id}:${decision}`;
+    setActionState({ id: actionId, message: `reporting ${decision} pending`, tone: "pending" });
+    const message = messages.find((entry) => entry.id === packet.id);
+    if (!message) {
+      setActionState({ id: actionId, message: "reporting packet message missing", tone: "error" });
+      return;
+    }
+    const now = new Date().toISOString();
+    if (dashboard.isDemo) {
+      try {
+        const plan = buildUiReportingPacketReviewPlan({
+          actorLabel: "Papyrus newsroom",
+          assignment,
+          decision,
+          message,
+          note,
+          now,
+          targetItemId,
+        });
+        setAssignmentEvents((current) => [plan.event, ...current.filter((entry) => entry.id !== plan.event.id)]);
+        if (plan.relation) {
+          const relation = plan.relation;
+          setSemanticRelations((current) => [relation, ...current.filter((entry) => entry.id !== relation.id)]);
+        }
+        setActionState({ id: actionId, message: `reporting ${decision} saved`, tone: "ok" });
+      } catch (error) {
+        setActionState({ id: actionId, message: error instanceof Error ? error.message : `reporting ${decision} failed`, tone: "error" });
+      }
+      return;
+    }
+
+    startTransition(() => {
+      void (async () => {
+        try {
+          const actorLabel = await getNewsDeskActorLabel();
+          const targetItem = targetItemId.trim()
+            ? await fetchUiItemForReportingMerge(targetItemId.trim())
+            : null;
+          const plan = buildUiReportingPacketReviewPlan({
+            actorLabel,
+            assignment,
+            decision,
+            message,
+            note,
+            now,
+            targetItem,
+            targetItemId,
+          });
+          if (!("AssignmentEvent" in dataClient.models)) throw new Error("GraphQL model AssignmentEvent is not available in the deployed schema.");
+          if (plan.draftItem) {
+            if (!("Item" in dataClient.models)) throw new Error("GraphQL model Item is not available in the deployed schema.");
+            const itemResponse = await dataClient.models.Item.create(plan.draftItem as never, { authMode: USER_POOL_AUTH_MODE });
+            assertNoGraphQLErrors(itemResponse.errors);
+          }
+          if (plan.relation) {
+            if (!("SemanticRelation" in dataClient.models)) throw new Error("GraphQL model SemanticRelation is not available in the deployed schema.");
+            const relationResponse = await dataClient.models.SemanticRelation.create(plan.relation as never, { authMode: USER_POOL_AUTH_MODE });
+            assertNoGraphQLErrors(relationResponse.errors);
+          }
+          const eventInput = { ...plan.event };
+          delete eventInput.metadata;
+          const eventResponse = await dataClient.models.AssignmentEvent.create(eventInput as never, { authMode: USER_POOL_AUTH_MODE });
+          assertNoGraphQLErrors(eventResponse.errors);
+          await uploadModelPayloadForOwner({
+            ownerKind: "assignmentEvent",
+            ownerId: plan.event.id,
+            ownerLineageId: plan.event.id,
+            role: "metadata",
+            sortKey: "metadata",
+            filename: "metadata.json",
+            mediaType: "application/json",
+            content: JSON.stringify(plan.event.metadata ?? {}, null, 2),
+            status: "active",
+          });
+          setAssignmentEvents((current) => [plan.event, ...current.filter((entry) => entry.id !== plan.event.id)]);
+          if (plan.relation) {
+            const relation = plan.relation;
+            setSemanticRelations((current) => [relation, ...current.filter((entry) => entry.id !== relation.id)]);
+          }
+          setActionState({ id: actionId, message: `reporting ${decision} saved`, tone: "ok" });
+        } catch (error) {
+          setActionState({ id: actionId, message: error instanceof Error ? error.message : `reporting ${decision} failed`, tone: "error" });
+          await refreshEditorAssignments();
+        }
+      })();
+    });
+  }
+
+  async function fetchUiItemForReportingMerge(itemId: string): Promise<UiReportingReviewItemTarget> {
+    if (!("Item" in dataClient.models)) throw new Error("GraphQL model Item is not available in the deployed schema.");
+    const model = dataClient.models.Item as unknown as {
+      get: (input: { id: string }, options: { authMode: typeof USER_POOL_AUTH_MODE }) => Promise<{ data?: UiReportingReviewItemTarget | null; errors?: unknown[] | null }>;
+    };
+    const response = await model.get({ id: itemId }, { authMode: USER_POOL_AUTH_MODE });
+    assertNoGraphQLErrors(response.errors);
+    if (!response.data?.id) throw new Error(`Target Item ${itemId} was not found.`);
+    return response.data;
+  }
+
   function createAnalysisReindexAssignment(profile: AnalysisProfileSummary, draft: AnalysisReindexDraft) {
     const now = new Date().toISOString();
     const actorLabel = dashboard.isDemo ? "Papyrus newsroom" : authState.label || "Papyrus newsroom";
@@ -2233,6 +2334,7 @@ function NewsDeskDashboard({
           <AssignmentDeskView
             actionState={actionState}
             analysisProfiles={analysisProfiles}
+            assignmentEvents={assignmentEvents}
             assignments={assignments}
             corpora={mergeAnalysisCorpora(configuredCorpora, corpora)}
             messages={messages}
@@ -2243,6 +2345,7 @@ function NewsDeskDashboard({
             disabled={controlsDisabled}
             onAction={runAssignmentAction}
             onCreateAnalysisReindexAssignment={createAnalysisReindexAssignment}
+            onReviewReportingPacket={runReportingPacketReview}
           />
         ) : null}
         {!isSectionPage && activeTab === "administration" ? (
@@ -7734,6 +7837,7 @@ function DeskLinkCard({ href, label, value, detail }: { href: string; label: str
 function AssignmentDeskView({
   actionState,
   analysisProfiles,
+  assignmentEvents,
   assignments,
   corpora,
   messages,
@@ -7744,9 +7848,11 @@ function AssignmentDeskView({
   disabled,
   onAction,
   onCreateAnalysisReindexAssignment,
+  onReviewReportingPacket,
 }: {
   actionState: ActionState | null;
   analysisProfiles: AnalysisProfileSummary[];
+  assignmentEvents: AssignmentEventRecord[];
   assignments: AssignmentRecord[];
   corpora: CategorySteeringCorpus[];
   messages: MessageRecord[];
@@ -7757,6 +7863,7 @@ function AssignmentDeskView({
   disabled: boolean;
   onAction: (assignment: AssignmentRecord, action: AssignmentAction, note?: string) => void;
   onCreateAnalysisReindexAssignment: (profile: AnalysisProfileSummary, draft: AnalysisReindexDraft) => void;
+  onReviewReportingPacket: (assignment: AssignmentRecord, packet: AssignmentResearchPacketSummary, decision: ReportingPacketReviewDecision, note?: string, targetItemId?: string) => void;
 }) {
   const [assignmentTypeFilter, setAssignmentTypeFilter] = useState("");
   const [assignmentStatusFilter, setAssignmentStatusFilter] = useState("");
@@ -7764,6 +7871,7 @@ function AssignmentDeskView({
   const [selectedAssignmentId, setSelectedAssignmentId] = useState(initialAssignmentId ?? "");
   const [isAssignmentDetailOpen, setIsAssignmentDetailOpen] = useState(Boolean(initialAssignmentId));
   const [assignmentActionNote, setAssignmentActionNote] = useState("");
+  const [reportingMergeTargetItemId, setReportingMergeTargetItemId] = useState("");
   const feed = useNewsroomPagedRows({
     initialItems: assignments,
     enabled: !isDemo,
@@ -7804,9 +7912,17 @@ function AssignmentDeskView({
     pushNewsroomDetailUrl("assignments", assignmentId, isDemo);
   };
   const selectedAssignmentTerminal = selectedAssignment?.status === "completed" || selectedAssignment?.status === "canceled";
+  const selectedReportingPackets = selectedAssignment ? reportingPacketsForAssignment(selectedAssignment, graph, messages) : [];
+  const selectedReportingPacket = selectedReportingPackets[0] ?? null;
+  const selectedReportingDecision = selectedAssignment ? latestReportingPacketDecisionForAssignment(assignmentEvents, selectedAssignment.id) : null;
   const runAssignmentDetailAction = (action: AssignmentAction) => {
     if (!selectedAssignment) return;
     onAction(selectedAssignment, action, assignmentActionNote);
+    setAssignmentActionNote("");
+  };
+  const runReportingReviewAction = (decision: ReportingPacketReviewDecision) => {
+    if (!selectedAssignment || !selectedReportingPacket) return;
+    onReviewReportingPacket(selectedAssignment, selectedReportingPacket, decision, assignmentActionNote, reportingMergeTargetItemId);
     setAssignmentActionNote("");
   };
   const assignmentActions: NewsroomDetailAction[] = selectedAssignment ? [
@@ -7844,6 +7960,38 @@ function AssignmentDeskView({
       },
     ]),
   ] : [];
+  const reportingReviewActions: NewsroomDetailAction[] = selectedAssignment && selectedReportingPacket ? [
+    {
+      key: "reporting-select",
+      label: "Select Packet",
+      disabled,
+      onSelect: () => runReportingReviewAction("select"),
+    },
+    {
+      key: "reporting-brief",
+      label: "Make Brief",
+      disabled,
+      onSelect: () => runReportingReviewAction("brief"),
+    },
+    {
+      key: "reporting-merge",
+      label: "Merge Packet",
+      disabled: disabled || !reportingMergeTargetItemId.trim(),
+      onSelect: () => runReportingReviewAction("merge"),
+    },
+    {
+      key: "reporting-hold",
+      label: "Hold Packet",
+      disabled,
+      onSelect: () => runReportingReviewAction("hold"),
+    },
+    {
+      key: "reporting-kill",
+      label: "Kill Packet",
+      disabled,
+      onSelect: () => runReportingReviewAction("kill"),
+    },
+  ] : [];
 
   useEffect(() => {
     if (assignmentTypeFilter && !assignmentTypeOptions.some((option) => option.key === assignmentTypeFilter)) {
@@ -7859,6 +8007,7 @@ function AssignmentDeskView({
 
   useEffect(() => {
     setAssignmentActionNote("");
+    setReportingMergeTargetItemId("");
   }, [selectedAssignment?.id, selectedAssignment?.status]);
 
   useEffect(() => {
@@ -7878,7 +8027,7 @@ function AssignmentDeskView({
         canExpandDetail={Boolean(selectedAssignment)}
         detailOpen={isAssignmentDetailOpen}
         actions={assignmentActions}
-        utilityActions={[assignmentKnowledgeQuery.action]}
+        utilityActions={[assignmentKnowledgeQuery.action, ...reportingReviewActions]}
         lede={(
           <section className="news-desk-lede news-desk-assignment-lede" aria-labelledby="assignment-management-title">
             <div>
@@ -7900,6 +8049,7 @@ function AssignmentDeskView({
         list={(
           <section className="category-steering-section category-steering-section--lead" aria-label="Assignments queue">
             <AssignmentManagementGrid
+              assignmentEvents={assignmentEvents}
               assignments={filteredAssignments}
               metrics={filteredMetrics}
               onSelect={selectAssignment}
@@ -7926,6 +8076,9 @@ function AssignmentDeskView({
             messages={messages}
             note={assignmentActionNote}
             onNoteChange={setAssignmentActionNote}
+            reportingDecision={selectedReportingDecision}
+            reportingMergeTargetItemId={reportingMergeTargetItemId}
+            onReportingMergeTargetItemIdChange={setReportingMergeTargetItemId}
             knowledgeQuery={assignmentKnowledgeQuery}
           />
         ) : (
@@ -8021,6 +8174,7 @@ function AssignmentTypeFilter({
 }
 
 function AssignmentManagementGrid({
+  assignmentEvents,
   assignments,
   metrics,
   onSelect,
@@ -8036,6 +8190,7 @@ function AssignmentManagementGrid({
   hasMore,
   isLoadingMore,
 }: {
+  assignmentEvents: AssignmentEventRecord[];
   assignments: AssignmentRecord[];
   metrics: AssignmentMetrics;
   onSelect: (assignmentId: string) => void;
@@ -8058,7 +8213,7 @@ function AssignmentManagementGrid({
     { key: "completed", label: "Completed", count: metrics.completed },
     { key: "canceled", label: "Canceled", count: metrics.canceled },
   ];
-  const cards = assignments.map((assignment, index) => assignmentToNewsroomCard(assignment, index));
+  const cards = assignments.map((assignment, index) => assignmentToNewsroomCard(assignment, index, latestReportingPacketDecisionForAssignment(assignmentEvents, assignment.id)));
   return (
     <NewsroomCardGrid
       cards={cards}
@@ -8091,6 +8246,9 @@ function AssignmentRow({
   messages,
   note,
   onNoteChange,
+  onReportingMergeTargetItemIdChange,
+  reportingDecision,
+  reportingMergeTargetItemId,
 }: {
   assignment: AssignmentRecord;
   disabled: boolean;
@@ -8099,6 +8257,9 @@ function AssignmentRow({
   messages: MessageRecord[];
   note: string;
   onNoteChange: (note: string) => void;
+  onReportingMergeTargetItemIdChange: (value: string) => void;
+  reportingDecision: ReportingPacketDecisionSummary | null;
+  reportingMergeTargetItemId: string;
 }) {
   const targets = graph.outgoing("assignment", assignment.id)
     .filter((relation) => relation.predicate === "requests_work_on")
@@ -8107,6 +8268,7 @@ function AssignmentRow({
   const context = assignmentContextMetadata(assignment);
   const analysisPlan = assignmentAnalysisReindexMetadata(assignment);
   const researchPackets = researchPacketsForAssignment(assignment, graph, messages);
+  const reportingPackets = researchPackets.filter((packet) => packet.kind === "reporting_context_packet");
   const terminal = assignment.status === "completed" || assignment.status === "canceled";
 
   return (
@@ -8115,6 +8277,7 @@ function AssignmentRow({
       data-assignment-candidate={assignment.id}
       data-assignment-id={assignment.id}
       data-assignment-status={assignment.status}
+      data-reporting-decision={reportingDecision?.decision}
     >
       <div className="news-desk-assignment-row__main">
         <header className="news-desk-assignment-row__title">
@@ -8187,6 +8350,30 @@ function AssignmentRow({
                     {`${packet.summary}${packet.proposedReferenceCount ? ` / ${packet.proposedReferenceCount} proposed refs` : ""}${packet.queryCount ? ` / ${packet.queryCount} queries` : ""}${packet.sourceDomains.length ? ` / ${packet.sourceDomains.slice(0, 2).join(", ")}` : ""}`}
                   </p>
                 ))}
+              </div>
+            ) : null}
+            {reportingPackets.length ? (
+              <div className="news-desk-assignment-row__packets" data-reporting-packet-review>
+                <p className="news-desk-assignment-row__angle">
+                  <span>Editorial decision</span>
+                  {reportingDecision ? `${formatReportingPacketDecision(reportingDecision.decision)} / ${reportingDecision.note ?? "no note"}` : "No editor decision yet"}
+                </p>
+                {reportingDecision?.draftItemId ? (
+                  <p className="news-desk-assignment-row__angle" data-reporting-draft-item={reportingDecision.draftItemId}>
+                    <span>Draft Item</span>
+                    {`${reportingDecision.draftItemId} / not placed in an edition`}
+                  </p>
+                ) : null}
+                <label>
+                  <span>Merge target Item ID</span>
+                  <input
+                    data-reporting-merge-target={assignment.id}
+                    disabled={disabled}
+                    value={reportingMergeTargetItemId}
+                    onChange={(event) => onReportingMergeTargetItemIdChange(event.target.value)}
+                    placeholder="Required only for Merge Packet"
+                  />
+                </label>
               </div>
             ) : null}
             <div className="news-desk-assignment-row__meta">
@@ -9009,7 +9196,7 @@ function messageToNewsroomCard(message: MessageRecord, index: number): NewsroomC
   };
 }
 
-function assignmentToNewsroomCard(assignment: AssignmentRecord, index: number): NewsroomCardRecord {
+function assignmentToNewsroomCard(assignment: AssignmentRecord, index: number, reportingDecision: ReportingPacketDecisionSummary | null = null): NewsroomCardRecord {
   const analysisPlan = assignmentAnalysisReindexMetadata(assignment);
   const subtitle = assignmentCardSubtitle(assignment);
   const priority = typeof assignment.priority === "number" ? assignment.priority : null;
@@ -9029,10 +9216,11 @@ function assignmentToNewsroomCard(assignment: AssignmentRecord, index: number): 
     },
     kicker: formatAssignmentTypeLabel(assignment.assignmentTypeKey),
     meta: [
+      reportingDecision ? `reporting ${reportingDecision.decision}` : null,
       analysisPlan ? analysisPlan.profileTitle : assignment.queueKey,
       assignment.assigneeKey ?? assignment.assigneeType ?? "unassigned",
       formatDateTime(assignment.updatedAt ?? assignment.createdAt),
-    ],
+    ].filter(Boolean),
     span: template.span,
     stamp: <StatusPill status={assignment.status} />,
     templateRole: template.role,
@@ -9456,6 +9644,224 @@ function demoAssignmentEvent(assignment: AssignmentRecord, action: AssignmentAct
     note: note.trim() || null,
     createdAt: now,
   };
+}
+
+function latestReportingPacketDecisionForAssignment(events: AssignmentEventRecord[], assignmentId: string): ReportingPacketDecisionSummary | null {
+  const event = events
+    .filter((entry) => entry.assignmentId === assignmentId && entry.eventType.startsWith("reporting_"))
+    .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))[0];
+  if (!event) return null;
+  const metadata = parseMetadataObject(event.metadata) ?? {};
+  const decision = normalizeReportingPacketDecision(metadata.decision ?? event.eventType.replace(/^reporting_/, ""));
+  if (!decision) return null;
+  return {
+    decision,
+    draftItemId: normalizeMetadataString(metadata.draftItemId),
+    eventId: event.id,
+    note: event.note ?? null,
+    targetItemId: normalizeMetadataString(metadata.targetItemId),
+  };
+}
+
+function buildUiReportingPacketReviewPlan({
+  actorLabel,
+  assignment,
+  decision,
+  message,
+  note,
+  now,
+  targetItem = null,
+  targetItemId = "",
+}: {
+  actorLabel: string;
+  assignment: AssignmentRecord;
+  decision: ReportingPacketReviewDecision;
+  message: MessageRecord;
+  note: string;
+  now: string;
+  targetItem?: UiReportingReviewItemTarget | null;
+  targetItemId?: string;
+}): {
+  draftItem: Record<string, unknown> | null;
+  event: AssignmentEventRecord;
+  relation: SemanticRelationRecord | null;
+} {
+  if (assignment.assignmentTypeKey !== "reporting.edition-candidate") throw new Error("Only reporting edition-candidate assignments can review reporting packets.");
+  if (message.messageKind !== "reporting_context_packet") throw new Error("Only reporting context packets can be reviewed.");
+  if (decision === "merge" && !targetItem?.id && !targetItemId.trim()) throw new Error("Merge Packet requires a target Item ID.");
+  const resolvedTargetItem = targetItem ?? (targetItemId.trim() ? { id: targetItemId.trim(), lineageId: targetItemId.trim(), versionNumber: null } : null);
+  const draftItem = decision === "select" || decision === "brief"
+    ? buildUiReportingDraftItem({ actorLabel, assignment, decision, message, now })
+    : null;
+  const producedItem = draftItem ? {
+    id: String(draftItem.id),
+    lineageId: String(draftItem.lineageId ?? draftItem.id),
+    versionNumber: Number(draftItem.versionNumber ?? 1),
+  } : resolvedTargetItem;
+  const eventType = `reporting_${decision}`;
+  const metadata = {
+    kind: "reporting.packet_review",
+    source: "newsroom",
+    assignmentId: assignment.id,
+    messageId: message.id,
+    decision,
+    targetItemId: resolvedTargetItem?.id ?? null,
+    draftItemId: draftItem?.id ?? null,
+    privatePacketMessageKind: "reporting_context_packet",
+    createsEditionItem: false,
+  };
+  const event: AssignmentEventRecord = {
+    id: `assignment-event-${safeUiId(assignment.id)}-${safeUiId(eventType)}-${timestampUiId(now)}`,
+    assignmentId: assignment.id,
+    assignmentTypeKey: assignment.assignmentTypeKey,
+    queueKey: assignment.queueKey,
+    eventType,
+    fromStatus: assignment.status,
+    toStatus: assignment.status,
+    actorLabel,
+    note: note.trim() || null,
+    createdAt: now,
+    metadata,
+  };
+  const relation = producedItem && (decision === "select" || decision === "brief" || decision === "merge")
+    ? buildUiProducesRelation({ assignment, item: producedItem, decision, messageId: message.id, now })
+    : null;
+  return { draftItem, event, relation };
+}
+
+function buildUiReportingDraftItem({ actorLabel, assignment, decision, message, now }: {
+  actorLabel: string;
+  assignment: AssignmentRecord;
+  decision: ReportingPacketReviewDecision;
+  message: MessageRecord;
+  now: string;
+}): Record<string, unknown> {
+  const type = decision === "brief" ? "brief" : "article";
+  const section = assignment.sectionKey ?? assignment.sectionId ?? "unsectioned";
+  const lineageId = `item-reporting-packet-${safeUiId(type)}-${hashUiKey([assignment.id, message.id, decision])}`;
+  const title = `${type === "brief" ? "Brief" : "Article"} draft from ${assignment.title}`;
+  const editorial = {
+    createdFrom: "reporting-packet-review",
+    assignmentId: assignment.id,
+    reportingPacketMessageId: message.id,
+    decision,
+    privateSource: true,
+    copywriterConsumesPacket: true,
+  };
+  const assignmentMetadata = parseMetadataObject(assignment.metadata) ?? {};
+  const record: Record<string, unknown> = {
+    id: `${lineageId}-v1`,
+    lineageId,
+    versionNumber: 1,
+    previousVersionId: null,
+    versionState: "draft",
+    versionCreatedAt: now,
+    versionCreatedBy: actorLabel,
+    changeReason: "reporting-packet-review",
+    contentHash: "",
+    type,
+    status: "draft",
+    typeStatus: `${type}#draft`,
+    slug: `draft-${safeUiId(section)}-${hashUiKey([lineageId, assignment.id, message.id])}`,
+    shortSlug: null,
+    section,
+    sectionStatus: `${section}#draft`,
+    title,
+    headline: title,
+    deck: "Private reporting packet selected for copywriting. Draft copy has not been written.",
+    body: [],
+    byline: null,
+    dateline: null,
+    publishedAt: null,
+    editionDate: normalizeMetadataString(assignmentMetadata.editionDate),
+    sortTitle: title,
+    pullQuotes: [],
+    layout: null,
+    editorial,
+    updatedAt: now,
+  };
+  record.contentHash = hashUiKey([stableStringify({
+    type: record.type,
+    status: record.status,
+    slug: record.slug,
+    section: record.section,
+    title: record.title,
+    deck: record.deck,
+    body: record.body,
+    editorial,
+  })]);
+  return record;
+}
+
+function buildUiProducesRelation({ assignment, decision, item, messageId, now }: {
+  assignment: AssignmentRecord;
+  decision: ReportingPacketReviewDecision;
+  item: UiReportingReviewItemTarget;
+  messageId: string;
+  now: string;
+}): SemanticRelationRecord {
+  const itemLineageId = item.lineageId ?? item.id;
+  const subjectStateKey = semanticStateKey("assignment", assignment.id);
+  const objectStateKey = semanticStateKey("item", itemLineageId);
+  const subjectVersionKey = semanticVersionKey("assignment", assignment.id);
+  const objectVersionKey = semanticVersionKey("item", item.id);
+  return {
+    id: `semantic-relation-${hashUiKey([subjectVersionKey, "produces", objectVersionKey])}`,
+    relationState: "current",
+    predicate: "produces",
+    relationTypeId: "semantic-relation-type-produces",
+    relationTypeKey: "produces",
+    relationDomain: "workflow",
+    subjectKind: "assignment",
+    subjectId: assignment.id,
+    subjectLineageId: assignment.id,
+    subjectVersionNumber: null,
+    objectKind: "item",
+    objectId: item.id,
+    objectLineageId: itemLineageId,
+    objectVersionNumber: item.versionNumber ?? null,
+    subjectStateKey,
+    objectStateKey,
+    objectSubjectStateKey: `${objectStateKey}#assignment`,
+    predicateObjectStateKey: `produces#${objectStateKey}`,
+    subjectVersionKey,
+    objectVersionKey,
+    score: 1,
+    confidence: null,
+    rank: 1,
+    classifierId: assignment.classifierId ?? null,
+    modelVersion: null,
+    reviewRecommended: false,
+    sourceSnapshotId: assignment.sourceSnapshotId ?? null,
+    importRunId: assignment.importRunId ?? null,
+    importedAt: now,
+    createdAt: now,
+    updatedAt: now,
+    newsroomFeedKey: "semanticRelations",
+    metadata: {
+      lifecycle: "reporting-packet-review",
+      decision,
+      assignmentId: assignment.id,
+      messageId,
+    },
+  };
+}
+
+function normalizeReportingPacketDecision(value: unknown): ReportingPacketReviewDecision | null {
+  const normalized = String(value ?? "").replace(/^reporting_/, "");
+  return ["select", "merge", "brief", "hold", "kill"].includes(normalized) ? normalized as ReportingPacketReviewDecision : null;
+}
+
+function formatReportingPacketDecision(decision: ReportingPacketReviewDecision): string {
+  if (decision === "select") return "Selected";
+  if (decision === "merge") return "Merged";
+  if (decision === "brief") return "Briefed";
+  if (decision === "hold") return "Held";
+  return "Killed";
+}
+
+function timestampUiId(value: string): string {
+  return value.replace(/[^0-9TZ]/g, "");
 }
 
 function clampKnowledgeQueryTokenBudget(value: string | number | null | undefined): number {
@@ -11218,6 +11624,7 @@ function assignmentAnalysisReindexMetadata(assignment: AssignmentRecord): Assign
 
 type AssignmentResearchPacketSummary = {
   id: string;
+  kind: string;
   label: string;
   summary: string;
   createdAt: string;
@@ -11225,6 +11632,26 @@ type AssignmentResearchPacketSummary = {
   proposedReferenceCount: number;
   sourceDomains: string[];
 };
+type ReportingPacketDecisionSummary = {
+  decision: ReportingPacketReviewDecision;
+  draftItemId?: string | null;
+  eventId: string;
+  note?: string | null;
+  targetItemId?: string | null;
+};
+type UiReportingReviewItemTarget = {
+  id: string;
+  lineageId?: string | null;
+  versionNumber?: number | null;
+};
+
+function reportingPacketsForAssignment(
+  assignment: AssignmentRecord,
+  graph: SemanticGraph,
+  messages: MessageRecord[],
+): AssignmentResearchPacketSummary[] {
+  return researchPacketsForAssignment(assignment, graph, messages).filter((packet) => packet.kind === "reporting_context_packet");
+}
 
 function researchPacketsForAssignment(
   assignment: AssignmentRecord,
@@ -11238,6 +11665,7 @@ function researchPacketsForAssignment(
     .map((message) => {
       return {
         id: message.id,
+        kind: message.messageKind,
         label: message.messageKind === "reporting_context_packet" ? "Reporting packet" : "Research packet",
         summary: message.summary ?? "Stored research packet",
         createdAt: message.createdAt,

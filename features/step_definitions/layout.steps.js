@@ -1089,6 +1089,42 @@ Then("assignment {string} should show a private reporting packet", async functio
   await candidate.locator("text=Reporting context packet: model-release accountability angle").waitFor({ state: "visible", timeout: 10_000 });
 });
 
+When("I review reporting packet for assignment {string} as {string} with note {string}", async function (assignmentId, decision, note) {
+  const page = requirePage(this);
+  const candidate = page.locator(`.news-desk-assignment-row[data-assignment-candidate="${assignmentId}"]`);
+  await candidate.waitFor({ state: "visible", timeout: 10_000 });
+  await candidate.locator(`[data-assignment-reason="${assignmentId}"]`).fill(note);
+  const labelByDecision = {
+    brief: "Make Brief",
+    hold: "Hold Packet",
+    kill: "Kill Packet",
+    merge: "Merge Packet",
+    select: "Select Packet",
+  };
+  const label = labelByDecision[decision];
+  assert.ok(label, `Unsupported reporting decision ${decision}`);
+  await page.getByRole("button", { name: label }).click();
+});
+
+Then("assignment {string} should show reporting decision {string}", async function (assignmentId, decision) {
+  const page = requirePage(this);
+  const candidate = page.locator(`.news-desk-assignment-row[data-assignment-candidate="${assignmentId}"]`);
+  await candidate.waitFor({ state: "visible", timeout: 10_000 });
+  await page.waitForFunction(
+    ({ id, expected }) => document.querySelector(`.news-desk-assignment-row[data-assignment-candidate="${id}"]`)?.getAttribute("data-reporting-decision") === expected,
+    { id: assignmentId, expected: decision },
+  );
+});
+
+Then("assignment {string} should show a draft item without edition placement", async function (assignmentId) {
+  const page = requirePage(this);
+  const candidate = page.locator(`.news-desk-assignment-row[data-assignment-candidate="${assignmentId}"]`);
+  await candidate.locator("[data-reporting-draft-item]").waitFor({ state: "visible", timeout: 10_000 });
+  await candidate.locator("text=not placed in an edition").waitFor({ state: "visible", timeout: 10_000 });
+  const editionItemCount = await page.locator("[data-edition-item-id], [data-edition-item]").count();
+  assert.equal(editionItemCount, 0, "Expected no EditionItem placement nodes in assignment review");
+});
+
 Then("assignment {string} should not appear as an edition item", async function (assignmentId) {
   const report = await requirePage(this).evaluate((id) => {
     const editionAnchors = Array.from(document.querySelectorAll("a[href]"))

@@ -241,7 +241,11 @@ function summarizeFocusCoverage(assignments) {
     const deskCategoryKey = normalizeString(assignment.sectionKey)
       ?? normalizeString(assignment.sectionId)
       ?? null;
-    const laneKey = normalizeString(assignment.queueKey)?.split(".").pop() ?? null;
+    const metadata = parseMetadataObject(assignment.metadata);
+    const queueKey = normalizeString(assignment.queueKey);
+    const laneKey = normalizeString(metadata.laneKey)
+      ?? laneKeyFromQueueKey(queueKey)
+      ?? null;
     const key = [
       deskCategoryKey ?? "",
       laneKey ?? "",
@@ -250,6 +254,7 @@ function summarizeFocusCoverage(assignments) {
     const current = counts.get(key) ?? {
       deskCategoryKey,
       laneKey,
+      queueKey,
       focusCategoryKey,
       focusCategoryTitle: focusCategoryKey,
       count: 0,
@@ -262,6 +267,15 @@ function summarizeFocusCoverage(assignments) {
     || String(left.laneKey).localeCompare(String(right.laneKey))
     || String(left.focusCategoryKey).localeCompare(String(right.focusCategoryKey))
   ));
+}
+
+function laneKeyFromQueueKey(queueKey) {
+  const normalized = normalizeString(queueKey);
+  if (!normalized) return null;
+  const parts = normalized.split(":");
+  const laneIndex = parts.lastIndexOf("lane");
+  if (laneIndex >= 0 && parts[laneIndex + 1]) return normalizeString(parts[laneIndex + 1]);
+  return normalizeString(normalized.split(".").pop());
 }
 
 function assignmentDeskCategoryKey(assignment) {

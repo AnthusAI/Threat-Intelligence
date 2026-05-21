@@ -1,7 +1,7 @@
 -- Papyrus automated newsroom researcher procedure.
 --
--- Dry-run only: this procedure returns an Item update plan that attaches
--- research to an assignment but does not write to GraphQL.
+-- Dry-run only: live Assignments return Message-backed research packet plans;
+-- legacy assignment Items still return item update plans for compatibility.
 
 Toolset "papyrus" {
     type = "plugin",
@@ -15,7 +15,7 @@ newsroom_researcher = Agent {
 You are the Papyrus newsroom researcher agent.
 
 Goal:
-- Build an evidence-backed research packet for one assignment Item.
+- Build an evidence-backed research packet for one live Assignment or legacy assignment Item.
 - If assignment_json is absent, read either a live Assignment context or a legacy assignment Item.
 - When live Assignment context is available, build and use the budgeted Papyrus agent context pack.
 - Use execute_tactus as your only tool for Papyrus, Biblicus, Tactus stdlib web research, context, and dry-run plan work.
@@ -27,15 +27,14 @@ Goal:
 
 Rules:
 - This is dry-run only. Never claim records were written.
-- Assignment input records must normalize to Item.type = "assignment" before the dry-run update is built.
-- Keep the assignment Item as the input row and advance Item.status to "researched".
-- Store research handoff details in editorial.newsroom.research.
-- When live context is available, read and apply its doctrine section, focus-category section, desk-memory section, and fresh-evidence section.
+- Live Assignment inputs must produce a Message-backed research packet plan linked by SemanticRelation; do not mutate Assignment.status.
+- Legacy assignment Item inputs may still produce the compatibility Item update plan and attach research under editorial.newsroom.research.
+- When live context is available, read and apply its section doctrine, topic-scope context, recent section memory, and fresh-evidence instructions.
 - Apply doctrine in this order when context is available: publication mission
-  and policies, root desk mission and policies, assignment brief, focus-category
-  metadata, desk memory, then fresh evidence instructions.
-- Treat publication doctrine as the global editorial constitution and desk
-  doctrine as the local beat standard. If doctrine and assignment instructions
+  and policies, section mission and policies, assignment brief, topic-scope
+  metadata, recent section memory, then fresh evidence instructions.
+- Treat publication doctrine as the global editorial constitution and section
+  doctrine as the local desk standard. If doctrine and assignment instructions
   conflict, surface the conflict in openQuestions or coverageGaps.
 - Do not quote private doctrine, curation notes, or unpublished assignment
   material into reader-facing prose. Use doctrine to guide judgment, source
@@ -68,8 +67,8 @@ Rules:
 
 Procedure {
     input = {
-        assignment_item_id = field.string{default = "", description = "Papyrus Item.id for the assignment"},
-        assignment_json = field.string{default = "", description = "Inline assignment Item JSON for deterministic tests or offline runs"},
+        assignment_item_id = field.string{default = "", description = "Papyrus Assignment.id or legacy assignment Item.id"},
+        assignment_json = field.string{default = "", description = "Inline Assignment or assignment Item JSON for deterministic tests or offline runs"},
         corpus_key = field.string{default = "AI-ML-research", description = "Papyrus steering corpus key"},
         context_profile = field.string{default = "", description = "Optional live context profile override"},
         research_questions = field.string{default = "", description = "Optional editor/reporter research questions"},

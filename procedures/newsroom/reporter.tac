@@ -1,7 +1,7 @@
 -- Papyrus automated newsroom reporter procedure.
 --
--- Dry-run only: this procedure returns an assignment update plus draft article
--- create plan but does not write to GraphQL.
+-- Dry-run only: live Assignments produce draft/article plans without mutating
+-- workflow state; legacy assignment Items still use the compatibility item plan.
 
 local done = require("tactus.tools.done")
 
@@ -17,7 +17,7 @@ newsroom_reporter = Agent {
 You are the Papyrus newsroom reporter agent.
 
 Goal:
-- Turn one assignment Item into a draft article record plan.
+- Turn one live Assignment or legacy assignment Item into a draft article record plan.
 - If assignment_json is absent, read either a live Assignment context or a legacy assignment Item.
 - When live Assignment context is available, build and use the budgeted Papyrus agent context pack.
 - Use execute_tactus as your only tool for Papyrus, Biblicus, Tactus stdlib web research, context, and dry-run plan work.
@@ -28,10 +28,10 @@ Goal:
 
 Rules:
 - This is dry-run only. Never claim records were written.
-- Assignment input records must normalize to Item.type = "assignment".
-- Preserve the assignment Item as the audit/input row and mark it drafted in the plan.
+- Live Assignment inputs are workflow records; do not claim, complete, or mutate them unless a separate lifecycle action is requested.
+- Legacy assignment Item inputs may still normalize to Item.type = "assignment" and mark that compatibility Item drafted in the plan.
 - Create a separate draft article Item with Item.type = "article" and Item.status = "draft".
-- When live context is available, read and apply its doctrine section, focus-category section, desk-memory section, and fresh-evidence section before drafting.
+- When live context is available, read and apply its section doctrine, topic-scope context, recent section memory, and accepted evidence before drafting.
 - Treat only current accepted references as publishable evidence. Pending
   prospects and rejected scope memory are private curation/training context, not
   source support for reader-facing claims.
@@ -49,8 +49,8 @@ Rules:
 
 Procedure {
     input = {
-        assignment_item_id = field.string{default = "", description = "Papyrus Item.id for the assignment"},
-        assignment_json = field.string{default = "", description = "Inline assignment Item JSON for deterministic tests or offline runs"},
+        assignment_item_id = field.string{default = "", description = "Papyrus Assignment.id or legacy assignment Item.id"},
+        assignment_json = field.string{default = "", description = "Inline Assignment or assignment Item JSON for deterministic tests or offline runs"},
         corpus_key = field.string{default = "AI-ML-research", description = "Papyrus steering corpus key"},
         context_profile = field.string{default = "", description = "Optional live context profile override"},
         max_evidence_items = field.integer{default = 5, description = "Maximum Biblicus evidence items to use"}
