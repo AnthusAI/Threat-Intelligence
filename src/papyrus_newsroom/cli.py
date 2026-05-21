@@ -131,6 +131,8 @@ def main(argv: list[str] | None = None) -> int:
     summarize_batch_parser.add_argument("--budgets", default="100,200,500")
     summarize_batch_parser.add_argument("--only-missing", default="true")
     summarize_batch_parser.add_argument("--max-count", type=int, default=0)
+    summarize_batch_parser.add_argument("--status", default="accepted")
+    summarize_batch_parser.add_argument("--scan-limit", type=int, default=5000)
     summarize_batch_parser.add_argument("--model", default="gpt-5.4-mini")
     summarize_batch_parser.add_argument("--apply", action="store_true")
     summarize_batch_parser.add_argument("--refresh", action="store_true")
@@ -332,6 +334,8 @@ def _run_references_command(args: argparse.Namespace) -> dict:
             budgets=_parse_int_list(args.budgets),
             only_missing=_parse_bool(args.only_missing),
             max_count=args.max_count,
+            status=args.status,
+            scan_limit=args.scan_limit,
             model=args.model,
             apply=args.apply,
             refresh=args.refresh,

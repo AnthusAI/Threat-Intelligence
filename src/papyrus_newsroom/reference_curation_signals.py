@@ -87,6 +87,15 @@ query ListReferencesByCorpus($corpusId: ID!, $limit: Int, $nextToken: String) {{
 }}
 """
 
+LIST_SEMANTIC_RELATIONS_BY_TYPE_QUERY = f"""
+query ListSemanticRelationsByType($relationTypeKey: String!, $limit: Int, $nextToken: String) {{
+  listSemanticRelationsByTypeAndImportedAt(relationTypeKey: $relationTypeKey, limit: $limit, nextToken: $nextToken) {{
+    items {{ id relationState relationTypeKey objectKind objectId objectLineageId }}
+    nextToken
+  }}
+}}
+"""
+
 CREATE_MODEL_ATTACHMENT_UPLOAD_MUTATION = """
 mutation CreateModelAttachmentUpload(
   $ownerKind: String!
@@ -1585,37 +1594,133 @@ def reference_summarize(
     return _with_doctrine_warnings(result, doctrine_context)
 
 
+def _select_references_missing_summary_batch(
+    *,
+    corpus_key: str,
+    budgets: list[int],
+    status: str,
+    max_count: int,
+    scan_limit: int,
+    existing_by_budget: dict[int, set[str]],
+    only_missing: bool,
+    refresh: bool,
+) -> list[dict[str, Any]]:
+    references = list_references_by_corpus(
+        _knowledge_corpus_id(corpus_key),
+        limit=max(scan_limit, max_count or 1),
+    )
+    if status and str(status).strip().lower() not in {"all", "*"}:
+        normalized_status = status.strip().lower()
+        references = [
+            reference
+            for reference in references
+            if str(reference.get("curationStatus") or "").lower() == normalized_status
+        ]
+    references.sort(key=_reference_chrono_key, reverse=True)
+    if refresh or not only_missing:
+        return references[:max(int(max_count or 25), 1)]
+    selected: list[dict[str, Any]] = []
+    for reference in references:
+        lineage_id = str(reference.get("lineageId") or reference.get("id") or "")
+        missing_budget = any(
+            lineage_id not in existing_by_budget.get(budget, set())
+            for budget in budgets
+        )
+        if missing_budget:
+            selected.append(reference)
+        if len(selected) >= max(int(max_count or 25), 1):
+            break
+    return selected
+
+
+def _reference_lineage_ids_with_summary_relation(relation_key: str) -> set[str]:
+    lineage_ids: set[str] = set()
+    next_token = None
+    while True:
+        data = _graphql(
+            LIST_SEMANTIC_RELATIONS_BY_TYPE_QUERY,
+            {"relationTypeKey": relation_key, "limit": 200, "nextToken": next_token},
+        )
+        connection = data.get("listSemanticRelationsByTypeAndImportedAt") or {}
+        for relation in connection.get("items") or []:
+            if relation.get("relationState") != "current" or relation.get("objectKind") != "reference":
+                continue
+            lineage_id = relation.get("objectLineageId") or relation.get("objectId")
+            if lineage_id:
+                lineage_ids.add(str(lineage_id))
+        next_token = connection.get("nextToken")
+        if not next_token:
+            break
+    return lineage_ids
+
+
 def reference_summarize_batch(
     *,
     corpus_key: str,
     budgets: list[int],
     only_missing: bool = True,
     max_count: int = 0,
+    status: str = "accepted",
+    scan_limit: int = 5000,
     model: str = "gpt-5.4-mini",
     apply: bool = False,
     refresh: bool = False,
 ) -> dict[str, Any]:
     semantic = _semantic_client()
-    references = list_references_by_corpus(_knowledge_corpus_id(corpus_key), limit=max_count or 1000)
-    doctrine_context = load_publication_doctrine_context()
+    normalized_budgets = [normalize_summary_budget(budget) for budget in budgets]
+    batch_limit = max(int(max_count or 25), 1)
+    existing_by_budget = {
+        budget: _reference_lineage_ids_with_summary_relation(summary_relation_type_key(budget))
+        for budget in normalized_budgets
+    }
+    references = _select_references_missing_summary_batch(
+        corpus_key=corpus_key,
+        budgets=normalized_budgets,
+        status=status,
+        max_count=batch_limit,
+        scan_limit=scan_limit,
+        existing_by_budget=existing_by_budget,
+        only_missing=only_missing,
+        refresh=refresh,
+    )
+    doctrine_context = load_publication_doctrine_context() if apply else manual_summary_doctrine_context()
     plans = []
     for reference in references:
-        for budget in budgets:
+        lineage_id = str(reference.get("lineageId") or reference.get("id") or "")
+        for budget in normalized_budgets:
             relation_key = summary_relation_type_key(budget)
-            existing = _current_relations(semantic.list_incoming("reference", reference["lineageId"])["relations"], relation_key)
-            if existing and only_missing and not refresh:
+            has_existing = lineage_id in existing_by_budget.get(budget, set())
+            if has_existing and only_missing and not refresh:
                 plans.append({
                     "kind": "reference.summary.plan",
                     "action": "noop",
                     "reference": _reference_summary(reference),
                     "maxTokens": budget,
-                    "existingRelationId": existing[0].get("id"),
+                    "existingRelationId": None,
                     "records": [],
                     "warnings": [],
                 })
                 continue
+            if not apply:
+                plans.append({
+                    "kind": "reference.summary.plan",
+                    "action": "create",
+                    "reference": _reference_summary(reference),
+                    "maxTokens": budget,
+                    "records": [],
+                    "warnings": [],
+                    "apply": False,
+                    "dryRun": True,
+                })
+                continue
             source = _resolve_source_text(reference)
-            generated = generate_summary(source, max_tokens=budget, model=model, reference=reference, doctrine_context=doctrine_context)
+            generated = generate_summary(
+                source,
+                max_tokens=budget,
+                model=model,
+                reference=reference,
+                doctrine_context=doctrine_context,
+            )
             plans.append(build_reference_summary_plan(
                 reference=reference,
                 max_tokens=budget,
@@ -1623,7 +1728,7 @@ def reference_summarize_batch(
                 source_text=source,
                 model=model,
                 doctrine_context=doctrine_context,
-                refresh=refresh or bool(existing and not only_missing),
+                refresh=refresh or bool(has_existing and not only_missing),
                 semantic_client=semantic,
             ))
     applied = []
@@ -1632,13 +1737,18 @@ def reference_summarize_batch(
     return {
         "kind": "reference.summary.batch",
         "corpusKey": corpus_key,
-        "budgets": budgets,
+        "status": status,
+        "budgets": normalized_budgets,
         "apply": apply,
+        "scanLimit": scan_limit,
+        "batchLimit": batch_limit,
+        "selectedReferences": len(references),
         "doctrineContext": doctrine_summary_metadata(doctrine_context),
         "warnings": list(doctrine_context.get("warnings") or []),
         "count": len(applied),
         "created": sum(1 for item in applied if item.get("action") == "create"),
         "noop": sum(1 for item in applied if item.get("action") == "noop"),
+        "dryRun": sum(1 for item in applied if item.get("dryRun")),
         "items": applied,
     }
 
