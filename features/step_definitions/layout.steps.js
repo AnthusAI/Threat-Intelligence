@@ -688,6 +688,73 @@ Then("the newsroom card grid should scale to the split width", async function ()
   );
 });
 
+Then("the newsroom left pane should be scrollable in split view", async function () {
+  const page = requirePage(this);
+  await page.waitForFunction(() => {
+    const shell = document.querySelector("[data-newsroom-list-detail-shell]");
+    const pane = shell?.querySelector("[data-newsroom-list-pane='true']");
+    if (!(pane instanceof HTMLElement)) return false;
+    return shell?.getAttribute("data-detail-mode") === "split";
+  }, undefined, { timeout: 10_000 });
+  const report = await page.evaluate(() => {
+    const shell = document.querySelector("[data-newsroom-list-detail-shell]");
+    const pane = shell?.querySelector("[data-newsroom-list-pane='true']");
+    const lede = pane?.querySelector(".news-desk-lede");
+    if (!(pane instanceof HTMLElement)) return null;
+    return {
+      clientHeight: pane.clientHeight,
+      isOverflowing: pane.scrollHeight > pane.clientHeight + 8,
+      ledeTop: lede ? lede.getBoundingClientRect().top : null,
+      maxHeight: getComputedStyle(pane).maxHeight,
+      overflowY: getComputedStyle(pane).overflowY,
+      scrollHeight: pane.scrollHeight,
+      scrollTop: pane.scrollTop,
+    };
+  });
+  assert.ok(report, "Expected newsroom left pane");
+  assert.ok(report.overflowY === "auto" || report.overflowY === "scroll", `Expected scrollable left pane overflow, found ${report.overflowY}`);
+  assert.notEqual(report.maxHeight, "none", "Expected left pane max-height constraint in wide split");
+  this.newsroomLeftPaneBeforeScroll = report;
+});
+
+When("I scroll the newsroom left pane down", async function () {
+  const page = requirePage(this);
+  const report = await page.evaluate(() => {
+    const shell = document.querySelector("[data-newsroom-list-detail-shell]");
+    const pane = shell?.querySelector("[data-newsroom-list-pane='true']");
+    const lede = pane?.querySelector(".news-desk-lede");
+    if (!(pane instanceof HTMLElement)) return null;
+    const maxScrollTop = Math.max(0, pane.scrollHeight - pane.clientHeight);
+    if (maxScrollTop <= 0) {
+      return {
+        ledeTop: lede ? lede.getBoundingClientRect().top : null,
+        scrollTop: pane.scrollTop,
+        skipped: true,
+      };
+    }
+    const targetScrollTop = Math.min(maxScrollTop, Math.max(120, Math.floor(pane.clientHeight * 0.35)));
+    pane.scrollTo({ top: targetScrollTop, behavior: "auto" });
+    return {
+      ledeTop: lede ? lede.getBoundingClientRect().top : null,
+      skipped: false,
+      scrollTop: pane.scrollTop,
+    };
+  });
+  assert.ok(report, "Expected newsroom left pane");
+  this.newsroomLeftPaneAfterScroll = report;
+});
+
+Then("the newsroom section lede should move up within the left pane", async function () {
+  const before = this.newsroomLeftPaneBeforeScroll;
+  const after = this.newsroomLeftPaneAfterScroll;
+  assert.ok(before && after, "Expected pre/post newsroom pane scroll snapshots");
+  if (after.skipped || !before.isOverflowing) return;
+  assert.ok(after.scrollTop > before.scrollTop + 5, `Expected left pane scrollTop to increase from ${before.scrollTop} to ${after.scrollTop}`);
+  assert.notEqual(before.ledeTop, null, "Expected lede top snapshot before scroll");
+  assert.notEqual(after.ledeTop, null, "Expected lede top snapshot after scroll");
+  assert.ok(after.ledeTop < before.ledeTop - 5, `Expected lede to move up when pane scrolls (${before.ledeTop} -> ${after.ledeTop})`);
+});
+
 When("I select a different newsroom card", async function () {
   const page = requirePage(this);
   const before = await page.evaluate(() => {
@@ -761,6 +828,34 @@ When("I select a different newsroom card", async function () {
     }));
   });
   this.newsroomCardSelection = { ...before, after, animated };
+});
+
+Then("the selected newsroom card should anchor to the top of the list view", async function () {
+  const page = requirePage(this);
+  await page.waitForFunction(() => {
+    const shell = document.querySelector("[data-newsroom-list-detail-shell]");
+    const pane = shell?.querySelector("[data-newsroom-list-pane='true']");
+    const selectedCard = shell?.querySelector("[data-newsroom-card][data-active='true']");
+    if (!(pane instanceof HTMLElement) || !(selectedCard instanceof HTMLElement)) return false;
+    if (pane.scrollHeight <= pane.clientHeight + 8) return true;
+    const selectedTop = selectedCard.getBoundingClientRect().top;
+    const paneTop = pane.getBoundingClientRect().top;
+    return Math.abs(selectedTop - paneTop) <= 14;
+  }, undefined, { timeout: 8_000 });
+  const report = await page.evaluate(() => {
+    const shell = document.querySelector("[data-newsroom-list-detail-shell]");
+    const pane = shell?.querySelector("[data-newsroom-list-pane='true']");
+    const selectedCard = shell?.querySelector("[data-newsroom-card][data-active='true']");
+    if (!(pane instanceof HTMLElement) || !(selectedCard instanceof HTMLElement)) return null;
+    return {
+      scrollTop: pane.scrollTop,
+      topDelta: selectedCard.getBoundingClientRect().top - pane.getBoundingClientRect().top,
+      overflowing: pane.scrollHeight > pane.clientHeight + 8,
+    };
+  });
+  assert.ok(report, "Expected newsroom pane and selected card after card selection");
+  if (!report.overflowing) return;
+  assert.ok(Math.abs(report.topDelta) <= 14, `Expected selected card to anchor near the list viewport top, found delta ${report.topDelta}`);
 });
 
 Then("newsroom card selection should keep grid geometry stable", async function () {

@@ -5104,6 +5104,7 @@ function ReferencesDeskView({
         sectionKey="references"
         canExpandDetail={Boolean(selectedReference)}
         detailOpen={isReferenceDetailOpen}
+        selectionScrollKey={selectedLineageId}
         actions={referenceActions}
         utilityActions={[referenceKnowledgeQuery.action]}
         lede={(
@@ -5233,6 +5234,7 @@ function MessagesDeskView({
         sectionKey="messages"
         canExpandDetail={Boolean(selectedMessage)}
         detailOpen={isMessageDetailOpen}
+        selectionScrollKey={selectedMessage?.id ?? null}
         utilityActions={[messageKnowledgeQuery.action]}
         lede={(
           <section className="news-desk-lede news-desk-assignment-lede" aria-labelledby="message-management-title">
@@ -5478,6 +5480,7 @@ function NewsroomListDetailShell({
   lede,
   list,
   onCloseDetail,
+  selectionScrollKey,
   sectionKey,
   utilityActions = [],
 }: {
@@ -5489,6 +5492,7 @@ function NewsroomListDetailShell({
   lede?: ReactNode;
   list: ReactNode;
   onCloseDetail?: () => void;
+  selectionScrollKey?: string | null;
   sectionKey: "assignments" | "concepts" | "messages" | "references" | "topics";
   utilityActions?: NewsroomDetailAction[];
 }) {
@@ -5497,11 +5501,15 @@ function NewsroomListDetailShell({
   const [isActionMenuOpen, setIsActionMenuOpen] = useState(false);
   const actionMenuRef = useRef<HTMLDivElement | null>(null);
   const shellRef = useRef<HTMLDivElement | null>(null);
+  const mainColumnRef = useRef<HTMLDivElement | null>(null);
   const railRef = useRef<HTMLElement | null>(null);
   const listViewportRef = useRef<HTMLDivElement | null>(null);
   const listSurfaceRef = useRef<HTMLDivElement | null>(null);
   const baselineListWidthRef = useRef(0);
+  const selectionScrollInitializedRef = useRef(false);
+  const previousSelectionScrollKeyRef = useRef<string | null>(null);
   const canToggleDetailMode = useMediaQuery("(min-width: 1101px)");
+  const prefersReducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   const enabledActions = actions.filter((action) => !action.disabled);
   const hasActions = actions.length > 0;
   const hasUtilityActions = utilityActions.length > 0;
@@ -5512,6 +5520,7 @@ function NewsroomListDetailShell({
   const requestedDetailOpen = detailOpen && canExpandDetail;
   const shouldAnimateDetail = animatedDetail && canToggleDetailMode && detailMode === "split" && canExpandDetail;
   const effectiveDetailOpen = shouldAnimateDetail ? renderedDetailOpen : requestedDetailOpen;
+  const isWideSplitListPane = animatedDetail && canToggleDetailMode && detailMode === "split";
 
   useEffect(() => {
     if (!canExpandDetail && detailMode === "full") setDetailMode("split");
@@ -5602,6 +5611,61 @@ function NewsroomListDetailShell({
       x: 42,
     });
   }, [requestedDetailOpen, renderedDetailOpen, sectionKey, shouldAnimateDetail]);
+
+  useLayoutEffect(() => {
+    const shell = shellRef.current;
+    const mainColumn = mainColumnRef.current;
+    if (!shell || !mainColumn) return;
+    if (!isWideSplitListPane) {
+      shell.style.removeProperty("--newsroom-list-pane-max-height");
+      return;
+    }
+
+    let frameId = 0;
+    const updatePaneHeight = () => {
+      const rhythm = Number.parseFloat(getComputedStyle(shell).getPropertyValue("--paper-rhythm"));
+      const bottomBuffer = Number.isFinite(rhythm) && rhythm > 0 ? rhythm * 1.5 : 24;
+      const top = mainColumn.getBoundingClientRect().top;
+      const maxHeight = Math.max(1, Math.floor(window.innerHeight - top - bottomBuffer));
+      shell.style.setProperty("--newsroom-list-pane-max-height", `${maxHeight}px`);
+    };
+    const schedulePaneHeightUpdate = () => {
+      cancelAnimationFrame(frameId);
+      frameId = requestAnimationFrame(updatePaneHeight);
+    };
+    schedulePaneHeightUpdate();
+    window.addEventListener("resize", schedulePaneHeightUpdate);
+    return () => {
+      cancelAnimationFrame(frameId);
+      window.removeEventListener("resize", schedulePaneHeightUpdate);
+    };
+  }, [effectiveDetailOpen, isWideSplitListPane, sectionKey]);
+
+  useEffect(() => {
+    const mainColumn = mainColumnRef.current;
+    if (!mainColumn) return;
+    const currentSelectionScrollKey = selectionScrollKey ?? null;
+    if (!selectionScrollInitializedRef.current) {
+      selectionScrollInitializedRef.current = true;
+      previousSelectionScrollKeyRef.current = currentSelectionScrollKey;
+      return;
+    }
+    if (previousSelectionScrollKeyRef.current === currentSelectionScrollKey) return;
+    previousSelectionScrollKeyRef.current = currentSelectionScrollKey;
+    if (!currentSelectionScrollKey || !isWideSplitListPane) return;
+    const selectedCard = Array.from(mainColumn.querySelectorAll<HTMLElement>("[data-newsroom-card-id]"))
+      .find((card) => card.getAttribute("data-newsroom-card-id") === currentSelectionScrollKey);
+    if (!selectedCard) {
+      mainColumn.scrollTo({ top: 0, behavior: prefersReducedMotion ? "auto" : "smooth" });
+      return;
+    }
+    const targetTopRect = mainColumn.getBoundingClientRect().top;
+    const cardTopRect = selectedCard.getBoundingClientRect().top;
+    const deltaTop = cardTopRect - targetTopRect;
+    const maxScrollTop = Math.max(0, mainColumn.scrollHeight - mainColumn.clientHeight);
+    const targetScrollTop = Math.min(maxScrollTop, Math.max(0, mainColumn.scrollTop + deltaTop));
+    mainColumn.scrollTo({ top: targetScrollTop, behavior: prefersReducedMotion ? "auto" : "smooth" });
+  }, [isWideSplitListPane, prefersReducedMotion, selectionScrollKey]);
 
   useEffect(() => {
     if (!isActionMenuOpen) return;
@@ -5698,7 +5762,7 @@ function NewsroomListDetailShell({
       data-detail-open={effectiveDetailOpen ? "true" : "false"}
       data-newsroom-card-scale="1"
     >
-      <div className="news-desk-main-column">
+      <div className="news-desk-main-column" data-newsroom-list-pane={animatedDetail ? "true" : undefined} ref={mainColumnRef}>
         {lede}
         <div
           className="newsroom-list-detail-shell__list-viewport"
@@ -8077,6 +8141,7 @@ function AssignmentDeskView({
         sectionKey="assignments"
         canExpandDetail={Boolean(selectedAssignment)}
         detailOpen={isAssignmentDetailOpen}
+        selectionScrollKey={selectedAssignment?.id ?? null}
         actions={assignmentActions}
         utilityActions={[assignmentKnowledgeQuery.action, ...reportingReviewActions]}
         lede={(

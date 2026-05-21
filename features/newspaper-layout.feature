@@ -262,7 +262,11 @@ Feature: Newspaper layout scenarios
     When I open the first newsroom card detail
     Then the initial newsroom detail open should not animate card resizing
     Then the newsroom card grid should scale to the split width
+    And the newsroom left pane should be scrollable in split view
+    When I scroll the newsroom left pane down
+    Then the newsroom section lede should move up within the left pane
     When I select a different newsroom card
+    Then the selected newsroom card should anchor to the top of the list view
     Then newsroom card selection should keep grid geometry stable
     And newsroom card selection should not animate card resizing
     And no browser console errors should occur
