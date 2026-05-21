@@ -150,6 +150,31 @@ class PapyrusWorld {
               updatedAt: "2026-05-20T05:34:50.280Z",
             },
           ],
+          payloads: {
+            "reference:reference-mock-001-v1": [
+              {
+                attachment: {
+                  id: "model-attachment-reference-mock-001-v1-metadata",
+                  ownerKind: "reference",
+                  ownerId: "reference-mock-001-v1",
+                  ownerLineageId: "reference-mock-001",
+                  role: "metadata",
+                  sortKey: "metadata",
+                  storagePath: "newsroom/payloads/reference/reference-mock-001-v1/metadata/metadata.json",
+                  filename: "metadata.json",
+                  mediaType: "application/json",
+                  status: "active",
+                },
+                text: null,
+                json: {
+                  title: "Red-Teaming for Generative AI",
+                  subtitle: "Silver Bullet or Security Theater?",
+                  summary: "An examination of whether red-teaming materially improves generative AI security outcomes.",
+                },
+                error: null,
+              },
+            ],
+          },
         }));
       });
     }
