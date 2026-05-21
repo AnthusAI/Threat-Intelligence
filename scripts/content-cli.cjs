@@ -1141,8 +1141,9 @@ async function registerReferenceCatalog(flags) {
     console.log("references\tregister-catalog\tapply\tskipped\tpass --apply to write Reference visibility records");
     return;
   }
-  const vectorSync = await applyReferenceCatalogRegistration(client, result);
-  for (const line of vectorSync.lines || []) console.log(line);
+  const applyResult = await applyReferenceCatalogRegistration(client, result);
+  for (const line of applyResult.enrichment?.lines || []) console.log(line);
+  for (const line of applyResult.vectorSync?.lines || []) console.log(line);
 }
 
 async function planReferenceCatalogRegistration(client, options) {
@@ -1251,7 +1252,9 @@ async function applyReferenceCatalogRegistration(client, result) {
   if (result.changes.some((record) => record.action !== "noop")) {
     await updateNewsroomSummaryAfterReferenceRegistration(client, result.changes, result.plan);
   }
-  return syncReferenceVectorsAfterRegistration(result, { options: result.options ?? {} });
+  const enrichment = await runPostIngestionReferenceEnrichment(result, { options: result.options ?? {} });
+  const vectorSync = syncReferenceVectorsAfterRegistration(result, { options: result.options ?? {} });
+  return { enrichment, vectorSync };
 }
 
 function changedReferenceIdsFromChanges(changes = []) {
@@ -1264,10 +1267,250 @@ function changedReferenceIdsFromChanges(changes = []) {
   ));
 }
 
+function changedReferenceRecordIdsFromChanges(changes = []) {
+  return Array.from(new Set(
+    (changes || [])
+      .filter((change) => change?.modelName === "Reference")
+      .filter((change) => change.action === "create" || change.action === "update")
+      .map((change) => change.expected?.id)
+      .filter(Boolean),
+  ));
+}
+
 function chunkValues(values, size) {
   const chunks = [];
   for (let index = 0; index < values.length; index += size) chunks.push(values.slice(index, index + size));
   return chunks;
+}
+
+async function runPostIngestionReferenceEnrichment(result, { options = {} } = {}) {
+  const lines = [];
+  const enabled = parseBooleanOption(options["post-ingestion-enrichment"], true, "--post-ingestion-enrichment");
+  const referenceIds = changedReferenceRecordIdsFromChanges(result?.changes);
+  const corpusKey = normalizeCliString(options.corpusKey ?? options["corpus-key"] ?? result?.corpusConfig?.key);
+  const summaryTokenBudget = normalizeCliPositiveInteger(
+    options["post-ingestion-summary-max-tokens"],
+    "--post-ingestion-summary-max-tokens",
+  ) ?? 100;
+  const payload = {
+    enabled,
+    requested: referenceIds.length,
+    corpusKey: corpusKey ?? null,
+    identifiers: null,
+    curationSignals: null,
+  };
+
+  if (!enabled) {
+    lines.push("references\tpost-ingestion-enrichment\tdisabled");
+    return { payload, lines };
+  }
+  if (!referenceIds.length) {
+    lines.push("references\tpost-ingestion-enrichment\tskipped\tno GraphQL Reference changes");
+    return { payload, lines };
+  }
+  if (!corpusKey) {
+    lines.push("references\tpost-ingestion-enrichment\tskipped\tmissing corpus key");
+    return { payload, lines };
+  }
+
+  const identifiersEnabled = parseBooleanOption(
+    options["post-ingestion-identifiers"],
+    true,
+    "--post-ingestion-identifiers",
+  );
+  const titleSubtitleEnabled = parseBooleanOption(
+    options["post-ingestion-title-subtitle"],
+    true,
+    "--post-ingestion-title-subtitle",
+  );
+  const summariesEnabled = parseBooleanOption(
+    options["post-ingestion-summaries"],
+    true,
+    "--post-ingestion-summaries",
+  );
+
+  if (identifiersEnabled) {
+    const identifierTypes = normalizeIdentifierTypes(
+      options["post-ingestion-identifier-types"] ?? options["identifier-types"],
+      { defaultTypes: ["doi", "arxiv_id", "isbn13", "publisher_item"] },
+    );
+    const runId = `reference-post-ingest-identifiers-${timestampForPath()}-${hashShort([corpusKey, referenceIds])}`;
+    const identifierFlags = [
+      "--corpus-key",
+      corpusKey,
+      "--types",
+      identifierTypes.join(","),
+      "--only-missing",
+      "true",
+      "--progress-every",
+      "25",
+      "--write-chunk-size",
+      "100",
+      "--use-llm",
+      "false",
+      "--reference-ids",
+      referenceIds.join(","),
+      "--run-id",
+      runId,
+    ];
+    if (options.configPath) identifierFlags.push("--config", String(options.configPath));
+    try {
+      await runReferenceIdentifierBackfillNow(identifierFlags);
+      payload.identifiers = {
+        attempted: true,
+        ok: true,
+        runId,
+        referenceCount: referenceIds.length,
+        types: identifierTypes,
+      };
+      lines.push(`references\tpost-ingestion-identifiers\tok\treferences=${referenceIds.length}\ttypes=${identifierTypes.join(",")}\trun=${runId}`);
+    } catch (error) {
+      payload.identifiers = {
+        attempted: true,
+        ok: false,
+        runId,
+        referenceCount: referenceIds.length,
+        types: identifierTypes,
+        error: error instanceof Error ? error.message : String(error),
+      };
+      lines.push(`references\tpost-ingestion-identifiers\tfailed\t${payload.identifiers.error}`);
+    }
+  } else {
+    lines.push("references\tpost-ingestion-identifiers\tdisabled");
+  }
+
+  if (titleSubtitleEnabled || summariesEnabled) {
+    const curationSignals = runReferenceCurationSignalsForIds(referenceIds, {
+      titleSubtitleEnabled,
+      summariesEnabled,
+      summaryTokenBudget,
+      model: normalizeCliString(options["post-ingestion-title-subtitle-model"] ?? options["title-subtitle-model"]) ?? "gpt-5.4-mini",
+      webSearch: parseBooleanOption(
+        options["post-ingestion-title-subtitle-web-search"],
+        true,
+        "--post-ingestion-title-subtitle-web-search",
+      ),
+    });
+    payload.curationSignals = curationSignals;
+    lines.push(
+      `references\tpost-ingestion-curation-signals\tprocessed=${curationSignals.processed}\t` +
+      `titleSubtitleUpdated=${curationSignals.titleSubtitle.updated}\ttitleSubtitleUnresolved=${curationSignals.titleSubtitle.unresolved}\t` +
+      `summaryCreated=${curationSignals.summaries.created}\tsummaryNoop=${curationSignals.summaries.noop}\t` +
+      `errors=${curationSignals.errors.length}`,
+    );
+    for (const warning of curationSignals.warnings) {
+      lines.push(`references\tpost-ingestion-curation-signals\twarning\t${warning}`);
+    }
+  } else {
+    lines.push("references\tpost-ingestion-curation-signals\tdisabled");
+  }
+
+  return { payload, lines };
+}
+
+function runReferenceCurationSignalsForIds(referenceIds, {
+  titleSubtitleEnabled,
+  summariesEnabled,
+  summaryTokenBudget,
+  model,
+  webSearch,
+} = {}) {
+  const result = {
+    attempted: true,
+    processed: 0,
+    titleSubtitle: {
+      attempted: Boolean(titleSubtitleEnabled),
+      updated: 0,
+      unresolved: 0,
+      noop: 0,
+      errors: 0,
+    },
+    summaries: {
+      attempted: Boolean(summariesEnabled),
+      created: 0,
+      noop: 0,
+      errors: 0,
+    },
+    warnings: [],
+    errors: [],
+  };
+
+  for (const referenceId of referenceIds) {
+    result.processed += 1;
+    if (titleSubtitleEnabled) {
+      const titleSubtitleRun = runPapyrusNewsroomJson([
+        "references",
+        "title-subtitle",
+        "resolve",
+        "--reference",
+        referenceId,
+        "--model",
+        model,
+        "--web-search",
+        String(Boolean(webSearch)),
+        "--summary",
+        "false",
+        "--apply",
+        "--vector-sync",
+        "false",
+      ]);
+      if (titleSubtitleRun.ok) {
+        const action = titleSubtitleRun.payload?.action;
+        if (action === "update") result.titleSubtitle.updated += 1;
+        else if (action === "unresolved") result.titleSubtitle.unresolved += 1;
+        else result.titleSubtitle.noop += 1;
+      } else {
+        result.titleSubtitle.errors += 1;
+        result.errors.push(`title-subtitle ${referenceId}: ${titleSubtitleRun.error}`);
+      }
+    }
+
+    if (summariesEnabled) {
+      const summarizeRun = runPapyrusNewsroomJson([
+        "references",
+        "summarize",
+        "--reference",
+        referenceId,
+        "--max-tokens",
+        String(summaryTokenBudget),
+        "--apply",
+      ]);
+      if (summarizeRun.ok) {
+        const action = summarizeRun.payload?.action;
+        if (action === "create" || action === "update") result.summaries.created += 1;
+        else result.summaries.noop += 1;
+      } else {
+        result.summaries.errors += 1;
+        result.errors.push(`summary ${referenceId}: ${summarizeRun.error}`);
+      }
+    }
+  }
+  return result;
+}
+
+function runPapyrusNewsroomJson(args) {
+  const run = spawnSync("poetry", ["run", "papyrus-newsroom", ...args], {
+    cwd: PROJECT_ROOT,
+    encoding: "utf8",
+    env: process.env,
+    maxBuffer: 1024 * 1024 * 64,
+  });
+  const payload = extractLastJsonObject(run.stdout);
+  if (run.status === 0 && payload && typeof payload === "object") {
+    return {
+      ok: true,
+      payload,
+      stdout: run.stdout ?? "",
+      stderr: run.stderr ?? "",
+    };
+  }
+  return {
+    ok: false,
+    payload: null,
+    stdout: run.stdout ?? "",
+    stderr: run.stderr ?? "",
+    error: run.stderr?.trim() || run.stdout?.trim() || "papyrus-newsroom command failed",
+  };
 }
 
 function syncReferenceVectorsAfterRegistration(result, { options = {} } = {}) {
@@ -2226,6 +2469,9 @@ function buildReferenceIdentifierBackfillAssignmentPlan({ options, actorLabel, n
   const useLlm = parseBooleanOption(options["use-llm"], false, "--use-llm");
   const maxCount = normalizeCliPositiveInteger(options["max-count"], "--max-count");
   const selectedTypes = types ?? normalizeIdentifierTypes(options.types, { defaultTypes: ["doi"] });
+  const referenceIds = (parseCommaList(options["reference-ids"]) ?? [])
+    .map((entry) => normalizeCliString(entry))
+    .filter(Boolean);
   const onlyMissing = parseBooleanOption(options["only-missing"], false, "--only-missing");
   const progressEvery = normalizeCliPositiveInteger(options["progress-every"], "--progress-every");
   const writeChunkSize = normalizeCliPositiveInteger(options["write-chunk-size"], "--write-chunk-size") ?? 100;
@@ -2238,6 +2484,7 @@ function buildReferenceIdentifierBackfillAssignmentPlan({ options, actorLabel, n
     scope: {
       versionState: "current",
       curationStatus: "all",
+      referenceIds: referenceIds.length ? referenceIds : null,
     },
     resolverMode: "deterministic-first",
     useLlm,
@@ -2248,6 +2495,7 @@ function buildReferenceIdentifierBackfillAssignmentPlan({ options, actorLabel, n
     progressEvery: progressEvery ?? null,
     writeChunkSize,
     maxCount: maxCount ?? null,
+    referenceIds,
     steeringConfigPath: steeringConfig?.configPath ?? options.config ?? null,
     corpusPath: corpusConfig.path,
     assignmentTypePolicy: policy,
@@ -5793,6 +6041,13 @@ async function executeReferenceIdentifierBackfillAssignmentInternal({ client, as
   );
   const selectedTypes = normalizeIdentifierTypes(options.types ?? metadata.types, { defaultTypes: ["doi"] });
   const onlyMissing = parseBooleanOption(options["only-missing"], Boolean(metadata.onlyMissing), "--only-missing");
+  const targetedReferenceIds = (
+    Array.isArray(metadata.referenceIds)
+      ? metadata.referenceIds
+      : parseCommaList(options["reference-ids"] ?? metadata.referenceIds)
+  )
+    ?.map((entry) => normalizeCliString(entry))
+    .filter(Boolean) ?? [];
   const progressEvery = normalizeCliPositiveInteger(options["progress-every"], "--progress-every")
     ?? normalizeCliPositiveInteger(metadata.progressEvery, "assignment.metadata.progressEvery")
     ?? 25;
@@ -5819,6 +6074,7 @@ async function executeReferenceIdentifierBackfillAssignmentInternal({ client, as
         useLlm,
         persistSidecars,
         onlyMissing,
+        referenceIds: targetedReferenceIds,
         progressEvery,
         writeChunkSize,
       },
@@ -5848,23 +6104,30 @@ async function executeReferenceIdentifierBackfillAssignmentInternal({ client, as
         String(right.updatedAt ?? right.createdAt ?? "").localeCompare(String(left.updatedAt ?? left.createdAt ?? ""))
         || String(left.externalItemId ?? left.id).localeCompare(String(right.externalItemId ?? right.id))
       ));
+    const scopedReferences = targetedReferenceIds.length
+      ? referencesInScope.filter((reference) => (
+        targetedReferenceIds.includes(reference.id)
+        || targetedReferenceIds.includes(reference.lineageId)
+        || targetedReferenceIds.includes(reference.externalItemId)
+      ))
+      : referencesInScope;
     const currentRelationsByTypeAndLineage = currentIdentifierRelationsByTypeAndLineage(dedupedSemanticRelations, Object.keys(IDENTIFIER_TYPE_CONFIG));
     const filteredReferences = onlyMissing
-      ? referencesInScope.filter((reference) => selectedTypes.some((type) => referenceMissingIdentifierType(reference, type, currentRelationsByTypeAndLineage)))
-      : referencesInScope;
-    const scopedReferences = resumeManifest ? [] : (maxCount ? filteredReferences.slice(0, maxCount) : filteredReferences);
+      ? scopedReferences.filter((reference) => selectedTypes.some((type) => referenceMissingIdentifierType(reference, type, currentRelationsByTypeAndLineage)))
+      : scopedReferences;
+    const referencesToProcess = resumeManifest ? [] : (maxCount ? filteredReferences.slice(0, maxCount) : filteredReferences);
     const currentIdentifierNodesByKey = new Map(
       dedupedSemanticNodes
         .filter((node) => node.versionState === "current")
         .filter((node) => node.nodeKind === "identifier")
         .map((node) => [node.nodeKey, node]),
     );
-    for (let index = 0; index < scopedReferences.length; index += 1) {
-      const reference = scopedReferences[index];
-      if (progressEvery > 0 && (index === 0 || (index + 1) % progressEvery === 0 || index + 1 === scopedReferences.length)) {
+    for (let index = 0; index < referencesToProcess.length; index += 1) {
+      const reference = referencesToProcess[index];
+      if (progressEvery > 0 && (index === 0 || (index + 1) % progressEvery === 0 || index + 1 === referencesToProcess.length)) {
         const byType = identifierSummaryByType(selectedTypes, resolved, unresolved);
         const typeSummary = selectedTypes.map((type) => `${type}:${byType[type].resolved}/${byType[type].unresolved}`).join(",");
-        console.log(`identifier-backfill\tprogress\t${index + 1}/${scopedReferences.length}\tresolved=${resolved.length}\tunresolved=${unresolved.length}\ttypes=${typeSummary}`);
+        console.log(`identifier-backfill\tprogress\t${index + 1}/${referencesToProcess.length}\tresolved=${resolved.length}\tunresolved=${unresolved.length}\ttypes=${typeSummary}`);
       }
       const resolverErrors = [];
       let referenceMetadata = parseJsonish(reference.metadata);
@@ -5934,7 +6197,7 @@ async function executeReferenceIdentifierBackfillAssignmentInternal({ client, as
     }
     for (const entry of resolved) {
       if (!entry.referenceId || !entry.type || !entry.value) continue;
-      if (scopedReferences.length) continue;
+      if (referencesToProcess.length) continue;
       const reference = dedupedReferences.find((candidate) => candidate.id === entry.referenceId);
       if (!reference) continue;
       appendIdentifierPlanningRecords({
@@ -6068,7 +6331,7 @@ async function executeReferenceIdentifierBackfillAssignmentInternal({ client, as
       importRuns: [],
     };
     const summary = {
-      processed: resumeManifest ? Number(resumeManifest.summary?.processed ?? 0) : scopedReferences.length,
+      processed: resumeManifest ? Number(resumeManifest.summary?.processed ?? 0) : referencesToProcess.length,
       resolved: resolved.length,
       unresolved: unresolved.length,
       semanticNodesCreated: writeResult.semanticNodesCreated,
@@ -6101,6 +6364,7 @@ async function executeReferenceIdentifierBackfillAssignmentInternal({ client, as
       sidecars: sidecarManifest,
       reindex: reindexResult,
       onlyMissing,
+      referenceIds: targetedReferenceIds,
       progressEvery,
       writeChunkSize,
       chunks: writeResult.chunks,
@@ -12850,7 +13114,7 @@ function printUsage() {
   console.log("  npm run content -- references extract-text-now --config <steering.yml> --corpus-key <key> --assignee-key <worker-run-id> --stage pass-through-text,pdf-text,metadata-text");
   console.log("  npm run content -- references attach-extracted-text --config <steering.yml> --corpus-key <key> --max-count 10 --apply");
   console.log("  npm run content -- references create-identifier-backfill-assignment --config <steering.yml> --corpus-key AI-ML-research --types doi,arxiv_id,isbn13,publisher_item --apply");
-  console.log("  npm run content -- references identifier-backfill-now --config <steering.yml> --corpus-key AI-ML-research --types doi,arxiv_id --only-missing true --progress-every 25 --write-chunk-size 100 --use-llm false");
+  console.log("  npm run content -- references identifier-backfill-now --config <steering.yml> --corpus-key AI-ML-research --types doi,arxiv_id --only-missing true --progress-every 25 --write-chunk-size 100 --use-llm false [--reference-ids <id,id,...>]");
   console.log("  npm run content -- references execute-identifier-backfill --assignment <assignment-id> [--resume .papyrus-runs/<run>/execution-manifest.json]");
   console.log("  npm run content -- references create-doi-backfill-assignment --config <steering.yml> --corpus-key AI-ML-research --apply");
   console.log("  npm run content -- references doi-backfill-now --config <steering.yml> --corpus-key AI-ML-research --only-missing-doi true --progress-every 25 --use-llm false");
