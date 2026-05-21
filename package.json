@@ -15,6 +15,7 @@
     "sandbox": "ampx sandbox",
     "seed:amplify": "ampx sandbox seed",
     "auth:refresh-jwt": "node scripts/refresh-jwt.cjs",
+    "dispatch:ai-ml-research-papers": "node scripts/dispatch-immediate-ai-ml-academic-research.cjs",
     "test:assignments": "node scripts/test-category-mappers.cjs",
     "test:categories": "node scripts/test-category-mappers.cjs",
     "test:doi-backfill": "node scripts/test-doi-backfill.cjs",
