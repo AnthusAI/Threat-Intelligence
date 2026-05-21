@@ -404,6 +404,30 @@ const TAXONOMY_PROPOSAL_KINDS = new Set([
 
 const USER_POOL_AUTH_MODE = "userPool";
 type SemanticGraph = ReturnType<typeof createSemanticGraphSnapshot>;
+type ReferenceSubscriptionInput = {
+  filter?: {
+    newsroomFeedKey?: {
+      eq?: string;
+    };
+  };
+};
+type ReferenceSubscription = {
+  unsubscribe: () => void;
+};
+type ReferenceSubscriptionModel = {
+  onCreate: (input?: ReferenceSubscriptionInput) => {
+    subscribe: (observer: {
+      next: (value: unknown) => void;
+      error?: (error: unknown) => void;
+    }) => ReferenceSubscription;
+  };
+  onUpdate: (input?: ReferenceSubscriptionInput) => {
+    subscribe: (observer: {
+      next: (value: unknown) => void;
+      error?: (error: unknown) => void;
+    }) => ReferenceSubscription;
+  };
+};
 
 function NewsDeskTabLink({
   active,
@@ -623,6 +647,10 @@ function NewsDeskDashboard({
   onRefreshUserDirectory?: () => Promise<void>;
 }) {
   const dataClient = useMemo(() => generateClient<Schema>(), []);
+  const referenceSubscriptionClient = useMemo(
+    () => generateClient<Schema>({ authMode: USER_POOL_AUTH_MODE }),
+    [],
+  );
   const activeTab = initialTab;
   const isSectionPage = Boolean(sectionPageId);
   const [corpora, setCorpora] = useState(dashboard.corpora);
@@ -639,6 +667,7 @@ function NewsDeskDashboard({
   const [categoryTreeLoadError, setCategoryTreeLoadError] = useState<string | null>(null);
   const [proposals, setProposals] = useState(dashboard.proposals);
   const [references, setReferences] = useState(dashboard.references);
+  const [summary, setSummary] = useState<NewsroomSummaryRecord | null>(dashboard.summary ?? null);
   const [referenceAttachments, setReferenceAttachments] = useState(dashboard.referenceAttachments);
   const [messages, setMessages] = useState(dashboard.messages);
   const [semanticRelations, setSemanticRelations] = useState(dashboard.semanticRelations);
@@ -669,6 +698,12 @@ function NewsDeskDashboard({
     fullDashboard: !dashboard.summary && !dashboard.isPublicSkeleton,
   });
   const [hasRefreshedNewsroomSections, setHasRefreshedNewsroomSections] = useState(false);
+  const [hasHydratedReferences, setHasHydratedReferences] = useState(dashboard.references.length > 0);
+  const referencesRef = useRef(references);
+
+  useEffect(() => {
+    referencesRef.current = references;
+  }, [references]);
 
   const categoryProposals = proposals.filter(isTailoredCategoryProposal);
   const genericProposals = proposals.filter((proposal) => !isTailoredCategoryProposal(proposal));
@@ -709,26 +744,26 @@ function NewsDeskDashboard({
       categorySetId: activeCategorySet?.id ?? null,
     })
   ), [activeCategorySet?.id, activeCategoryTreeNodes, categorys]);
-  const assignmentMetrics = useMemo(() => getAssignmentMetrics(assignments, dashboard.summary), [assignments, dashboard.summary]);
-  const summaryStatus = newsroomSummaryStatus(dashboard);
+  const assignmentMetrics = useMemo(() => getAssignmentMetrics(assignments, summary), [assignments, summary]);
+  const summaryStatus = newsroomSummaryStatus({ summary, summaryStatus: dashboard.summaryStatus });
   const activeNewsroomSection = sectionPageId
     ? newsroomSections.find((section) => section.id === sectionPageId && section.enabled !== false && section.enabledStatus !== "disabled") ?? null
     : null;
   const mastheadTitle = activeNewsroomSection?.title ?? (isSectionPage ? "SECTION" : "NEWSROOM");
   const tabCounts = useMemo<Record<NewsDeskTab, number | null>>(() => ({
     overview: 0,
-    desks: summaryCount(dashboard, "categories"),
-    messages: summaryCount(dashboard, "messages"),
-    assignments: summaryCount(dashboard, "assignments"),
-    references: summaryCount(dashboard, "references"),
-    topics: summaryCount(dashboard, "categories"),
-    concepts: summaryCount(dashboard, "semanticNodes"),
+    desks: summaryCountFromRecord(summary, "categories"),
+    messages: summaryCountFromRecord(summary, "messages"),
+    assignments: summaryCountFromRecord(summary, "assignments"),
+    references: summaryCountFromRecord(summary, "references"),
+    topics: summaryCountFromRecord(summary, "categories"),
+    concepts: summaryCountFromRecord(summary, "semanticNodes"),
     administration: userDirectory.length + doctrineRecords.length + newsroomSections.length,
     search: 0,
   }), [
-    dashboard,
     doctrineRecords.length,
     newsroomSections.length,
+    summary,
     userDirectory.length,
   ]);
   const graph = useMemo(() => createSemanticGraphSnapshot({
@@ -825,6 +860,10 @@ function NewsDeskDashboard({
   useEffect(() => {
     setProposals(dashboard.proposals);
   }, [dashboard.proposals]);
+
+  useEffect(() => {
+    setSummary(dashboard.summary ?? null);
+  }, [dashboard.summary]);
 
   useEffect(() => {
     setReferences(dashboard.references);
@@ -941,6 +980,7 @@ function NewsDeskDashboard({
           if (!active) return;
           setReferences(nextReferences);
           setReferenceAttachments(referenceAttachments);
+          setHasHydratedReferences(true);
         })
         .catch((error) => {
           if (active) setActionState({ id: "references-load", message: error instanceof Error ? error.message : "references load failed", tone: "error" });
@@ -1046,6 +1086,39 @@ function NewsDeskDashboard({
     refreshNewsroomSections,
   ]);
 
+  const applyReferenceRecord = useCallback((nextReference: ReferenceRecord) => {
+    const { nextRecords, previousRecord } = upsertReferenceRecords(referencesRef.current, nextReference);
+    referencesRef.current = nextRecords;
+    setReferences(nextRecords);
+    setSummary((current) => patchReferenceSummary(current, previousRecord, nextReference));
+    return { nextRecords, previousRecord };
+  }, []);
+
+  useEffect(() => {
+    if (dashboard.isDemo || activeTab !== "references" || authState.status !== "signedIn" || !hasHydratedReferences) return;
+    const referenceModel = referenceSubscriptionClient.models.Reference as unknown as ReferenceSubscriptionModel | undefined;
+    if (!referenceModel || typeof referenceModel.onCreate !== "function" || typeof referenceModel.onUpdate !== "function") return;
+    const input = { filter: { newsroomFeedKey: { eq: "references" } } };
+    const handleReferenceEvent = (value: unknown) => {
+      const nextReference = normalizeReferenceSubscriptionPayload(value);
+      if (!nextReference) return;
+      applyReferenceRecord(nextReference);
+    };
+    const createSubscription = referenceModel.onCreate(input).subscribe({ next: handleReferenceEvent });
+    const updateSubscription = referenceModel.onUpdate(input).subscribe({ next: handleReferenceEvent });
+    return () => {
+      createSubscription.unsubscribe();
+      updateSubscription.unsubscribe();
+    };
+  }, [
+    activeTab,
+    applyReferenceRecord,
+    authState.status,
+    dashboard.isDemo,
+    hasHydratedReferences,
+    referenceSubscriptionClient.models.Reference,
+  ]);
+
   function runProposalAction(proposal: CategorySteeringProposal, action: ReviewAction) {
     setActionState({ id: proposal.id, message: `${action} pending`, tone: "pending" });
     if (dashboard.isDemo) {
@@ -1105,17 +1178,12 @@ function NewsDeskDashboard({
       const now = new Date().toISOString();
       const messageId = `message-demo-${reference.id}-${action}-${now.replace(/[^0-9]/g, "")}`;
       const relationId = `semantic-relation-demo-${messageId}`;
-      setReferences((current) => current.map((entry) => entry.id === reference.id
-        ? {
-            ...entry,
-            curationStatus: nextStatus,
-            curationStatusKey: `${entry.corpusId}#${nextStatus}`,
-            curationStatusUpdatedAt: now,
-            curationStatusUpdatedBy: authState.label,
-            curationStatusReason: note ?? null,
-            updatedAt: now,
-          }
-        : entry));
+      applyReferenceRecord(buildReviewedReferenceRecord(referencesRef.current, reference, {
+        actorLabel: authState.label,
+        nextStatus,
+        note: note ?? null,
+        now,
+      }));
       setMessages((current) => [{
         id: messageId,
         messageKind: "reference_curation",
@@ -1177,17 +1245,12 @@ function NewsDeskDashboard({
           const review = assertReferenceReviewMutationSucceeded(response, reference.id);
           const status = review.status ?? nextStatus;
           const now = new Date().toISOString();
-          setReferences((current) => current.map((entry) => entry.id === reference.id
-            ? {
-                ...entry,
-                curationStatus: status,
-                curationStatusKey: `${entry.corpusId}#${status}`,
-                curationStatusUpdatedAt: now,
-                curationStatusUpdatedBy: authState.label,
-                curationStatusReason: note?.trim() || null,
-                updatedAt: now,
-              }
-            : entry));
+          applyReferenceRecord(buildReviewedReferenceRecord(referencesRef.current, reference, {
+            actorLabel: authState.label,
+            nextStatus: status,
+            note: note?.trim() || null,
+            now,
+          }));
           setActionState({ id: reference.id, message: `${action} saved`, tone: "ok" });
         } catch (error) {
           setActionState({ id: reference.id, message: error instanceof Error ? error.message : `${action} failed`, tone: "error" });
@@ -2369,7 +2432,7 @@ function NewsDeskDashboard({
             initialNodeLineageId={initialSelection.node}
             onCreateInsight={createInsight}
             semanticNodes={semanticNodes}
-            summary={dashboard.summary}
+            summary={summary}
           />
         ) : null}
         {!isSectionPage && activeTab === "references" ? (
@@ -2382,7 +2445,7 @@ function NewsDeskDashboard({
             isDemo={Boolean(dashboard.isDemo)}
             references={references}
             semanticRelations={semanticRelations}
-            summary={dashboard.summary}
+            summary={summary}
             disabled={controlsDisabled}
             onReview={runReferenceCurationAction}
             onCreateInsight={createInsight}
@@ -2395,7 +2458,7 @@ function NewsDeskDashboard({
             initialMessageId={initialSelection.message}
             isDemo={Boolean(dashboard.isDemo)}
             messages={messages}
-            summary={dashboard.summary}
+            summary={summary}
           />
         ) : null}
         {!isSectionPage && activeTab === "assignments" ? (
@@ -2412,7 +2475,7 @@ function NewsDeskDashboard({
             initialView={initialSelection.assignmentView}
             isDemo={Boolean(dashboard.isDemo)}
             newsroomSections={newsroomSections}
-            summary={dashboard.summary}
+            summary={summary}
             disabled={controlsDisabled}
             onAction={runAssignmentAction}
             onCreateAnalysisReindexAssignment={createAnalysisReindexAssignment}
@@ -11801,6 +11864,151 @@ function uniqueSemanticSummaries(objects: SemanticObjectSummary[]): SemanticObje
   const map = new Map<string, SemanticObjectSummary>();
   for (const object of objects) map.set(`${object.kind}#${object.lineageId}`, object);
   return Array.from(map.values()).sort((left, right) => left.label.localeCompare(right.label));
+}
+
+function normalizeReferenceSubscriptionPayload(value: unknown): ReferenceRecord | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as { data?: unknown; id?: unknown };
+  if (typeof record.id === "string") return record as ReferenceRecord;
+  if (record.data && typeof record.data === "object" && typeof (record.data as { id?: unknown }).id === "string") {
+    return record.data as ReferenceRecord;
+  }
+  return null;
+}
+
+function buildReviewedReferenceRecord(
+  records: ReferenceRecord[],
+  reference: ReferenceRecord,
+  options: {
+    actorLabel: string;
+    nextStatus: string;
+    note: string | null;
+    now: string;
+  },
+): ReferenceRecord {
+  const current = records.find((entry) => entry.id === reference.id) ?? reference;
+  return {
+    ...current,
+    curationStatus: options.nextStatus,
+    curationStatusKey: `${current.corpusId}#${options.nextStatus}`,
+    curationStatusUpdatedAt: options.now,
+    curationStatusUpdatedBy: options.actorLabel,
+    curationStatusReason: options.note,
+    updatedAt: options.now,
+  };
+}
+
+function upsertReferenceRecords(
+  current: ReferenceRecord[],
+  nextReference: ReferenceRecord,
+): { nextRecords: ReferenceRecord[]; previousRecord: ReferenceRecord | null } {
+  const previousRecord = current.find((entry) => entry.id === nextReference.id) ?? null;
+  return {
+    nextRecords: [
+      nextReference,
+      ...current.filter((entry) => entry.id !== nextReference.id),
+    ].sort(compareReferencesByRecency),
+    previousRecord,
+  };
+}
+
+function patchReferenceSummary(
+  summary: NewsroomSummaryRecord | null | undefined,
+  previousReference: ReferenceRecord | null,
+  nextReference: ReferenceRecord,
+): NewsroomSummaryRecord | null {
+  if (!summary) return null;
+  const totalDelta = previousReference ? 0 : 1;
+  const previousStatus = previousReference ? normalizeReferenceStatus(previousReference.curationStatus) : null;
+  const nextStatus = normalizeReferenceStatus(nextReference.curationStatus);
+  const previousCorpusId = previousReference?.corpusId ?? null;
+  const nextCorpusId = nextReference.corpusId;
+
+  const counts = applyCountDelta(summary.counts, "references", totalDelta);
+  const referenceStatusCounts = { ...summary.referenceStatusCounts };
+  const facets = summary.facets ? { ...summary.facets } : undefined;
+  const referenceFacets = summary.facets?.references
+    ? {
+        ...summary.facets.references,
+        byCurationStatus: { ...(summary.facets.references.byCurationStatus ?? {}) },
+        byCorpus: { ...(summary.facets.references.byCorpus ?? {}) },
+        statusByCorpus: cloneNestedNumberCounts(summary.facets.references.statusByCorpus),
+      }
+    : undefined;
+
+  if (previousStatus !== nextStatus) {
+    if (previousStatus) decrementCount(referenceStatusCounts, previousStatus);
+    incrementCount(referenceStatusCounts, nextStatus);
+    if (referenceFacets?.byCurationStatus) {
+      if (previousStatus) decrementCount(referenceFacets.byCurationStatus, previousStatus);
+      incrementCount(referenceFacets.byCurationStatus, nextStatus);
+    }
+  } else if (!previousReference) {
+    incrementCount(referenceStatusCounts, nextStatus);
+    if (referenceFacets?.byCurationStatus) incrementCount(referenceFacets.byCurationStatus, nextStatus);
+  }
+
+  if (!previousReference) {
+    if (referenceFacets?.byCorpus) incrementCount(referenceFacets.byCorpus, nextCorpusId);
+    if (referenceFacets?.statusByCorpus) {
+      const corpusCounts = { ...(referenceFacets.statusByCorpus[nextCorpusId] ?? {}) };
+      incrementCount(corpusCounts, nextStatus);
+      referenceFacets.statusByCorpus[nextCorpusId] = corpusCounts;
+    }
+  } else if (referenceFacets?.statusByCorpus) {
+    const previousKey = previousCorpusId ?? nextCorpusId;
+    const previousCorpusCounts = { ...(referenceFacets.statusByCorpus[previousKey] ?? {}) };
+    if (previousKey !== nextCorpusId) {
+      decrementCount(previousCorpusCounts, previousStatus ?? nextStatus);
+      referenceFacets.statusByCorpus[previousKey] = previousCorpusCounts;
+      if (referenceFacets.byCorpus) decrementCount(referenceFacets.byCorpus, previousKey);
+      if (referenceFacets.byCorpus) incrementCount(referenceFacets.byCorpus, nextCorpusId);
+      const nextCorpusCounts = { ...(referenceFacets.statusByCorpus[nextCorpusId] ?? {}) };
+      incrementCount(nextCorpusCounts, nextStatus);
+      referenceFacets.statusByCorpus[nextCorpusId] = nextCorpusCounts;
+    } else if (previousStatus !== nextStatus) {
+      decrementCount(previousCorpusCounts, previousStatus ?? nextStatus);
+      incrementCount(previousCorpusCounts, nextStatus);
+      referenceFacets.statusByCorpus[nextCorpusId] = previousCorpusCounts;
+    }
+  }
+
+  if (facets && referenceFacets) facets.references = referenceFacets;
+  return {
+    ...summary,
+    counts,
+    referenceStatusCounts,
+    facets: facets ?? summary.facets,
+  };
+}
+
+function cloneNestedNumberCounts(value: Record<string, Record<string, number>> | null | undefined): Record<string, Record<string, number>> {
+  const result: Record<string, Record<string, number>> = {};
+  for (const [key, counts] of Object.entries(value ?? {})) {
+    result[key] = { ...counts };
+  }
+  return result;
+}
+
+function applyCountDelta(counts: Record<string, number>, key: string, delta: number): Record<string, number> {
+  if (!delta) return counts;
+  const nextCounts = { ...counts };
+  const nextValue = (nextCounts[key] ?? 0) + delta;
+  nextCounts[key] = nextValue < 0 ? 0 : nextValue;
+  return nextCounts;
+}
+
+function incrementCount(counts: Record<string, number>, key: string): void {
+  counts[key] = (counts[key] ?? 0) + 1;
+}
+
+function decrementCount(counts: Record<string, number>, key: string): void {
+  const nextValue = (counts[key] ?? 0) - 1;
+  counts[key] = nextValue < 0 ? 0 : nextValue;
+}
+
+function normalizeReferenceStatus(status: string | null | undefined): string {
+  return status?.trim() || "pending";
 }
 
 function sortReferencesByRecency(references: ReferenceRecord[]): ReferenceRecord[] {
