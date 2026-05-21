@@ -748,7 +748,7 @@ function normalizeNewsroomSectionSeedRow(entry: Record<string, unknown>, index: 
   };
 }
 
-function createDemoCategorySteeringDashboard(): CategorySteeringDashboard {
+export function createDemoCategorySteeringDashboard(): CategorySteeringDashboard {
   const importedAt = "2026-05-16T12:00:00.000Z";
   const corpusId = "knowledge-corpus-demo-canonical";
   const sourceCorpusId = "knowledge-corpus-demo-source";

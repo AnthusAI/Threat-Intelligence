@@ -1,5 +1,10 @@
 import { NewsDeskWorkspace, type NewsDeskTab } from "./topic-steering-workspace";
-import { loadAnalysisProfileSummaries, loadCategorySteeringDashboard, loadConfiguredCorpusSummaries } from "../lib/category-repository";
+import {
+  createDemoCategorySteeringDashboard,
+  loadAnalysisProfileSummaries,
+  loadCategorySteeringDashboard,
+  loadConfiguredCorpusSummaries,
+} from "../lib/category-repository";
 
 export type NewsDeskPageProps = {
   sectionPageId?: string | null;
@@ -46,9 +51,10 @@ export async function NewsDeskPage({ section: routeSection, sectionPageId, selec
     searchMaxTokens: getFirstSearchParam(resolvedSearchParams, "maxTokens"),
     searchFrom: getFirstSearchParam(resolvedSearchParams, "from"),
   };
+  const useDemoDashboard = getFirstSearchParam(resolvedSearchParams, "demo") === "1";
   const analysisProfiles = await loadAnalysisProfileSummaries();
   const configuredCorpora = await loadConfiguredCorpusSummaries();
-  const dashboard = await loadCategorySteeringDashboard();
+  const dashboard = useDemoDashboard ? createDemoCategorySteeringDashboard() : await loadCategorySteeringDashboard();
   return <NewsDeskWorkspace analysisProfiles={analysisProfiles} configuredCorpora={configuredCorpora} dashboard={dashboard} initialSelection={initialSelection} initialTab={initialTab} sectionPageId={sectionPageId ?? null} />;
 }
 
