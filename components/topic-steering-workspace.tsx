@@ -5457,6 +5457,18 @@ function newsroomCardGridAnimationContext(grid: HTMLElement): { absolute: boolea
   };
 }
 
+function resolveRhythmicSplitScale(targetScale: number, shell: HTMLElement): number {
+  const boundedTargetScale = Number.isFinite(targetScale) ? Math.min(Math.max(targetScale, 0.0001), 1) : 1;
+  if (boundedTargetScale >= 0.999) return 1;
+  const rhythm = Number.parseFloat(getComputedStyle(shell).getPropertyValue("--paper-rhythm"));
+  if (!Number.isFinite(rhythm) || rhythm <= 0) return boundedTargetScale;
+  const scaledRhythm = rhythm * boundedTargetScale;
+  const snappedScaledRhythm = Math.floor(scaledRhythm);
+  if (snappedScaledRhythm <= 0) return boundedTargetScale;
+  const snappedScale = snappedScaledRhythm / rhythm;
+  return Math.min(boundedTargetScale, Math.max(snappedScale, 1 / rhythm));
+}
+
 function NewsroomListDetailShell({
   actions = [],
   animatedDetail = false,
@@ -5550,7 +5562,7 @@ function NewsroomListDetailShell({
     const baselineWidth = baselineListWidthRef.current || shell.getBoundingClientRect().width || viewport.getBoundingClientRect().width;
     const viewportWidth = viewport.getBoundingClientRect().width;
     const targetScale = baselineWidth > 0 ? viewportWidth / baselineWidth : 1;
-    const boundedScale = targetScale > 0 ? targetScale : 1;
+    const boundedScale = resolveRhythmicSplitScale(targetScale, shell);
     const scaledHeight = Math.max(1, surface.scrollHeight * boundedScale);
     shell.style.setProperty("--newsroom-card-scale", String(boundedScale));
     shell.setAttribute("data-newsroom-card-scale", boundedScale.toFixed(4));
