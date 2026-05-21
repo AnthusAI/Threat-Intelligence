@@ -13,6 +13,12 @@ and the Newsroom UI.
 For multi-section Coverage Theme runs that dispatch research and parallel
 reporting agents together, also use
 [`skills/newsroom-story-cycle/SKILL.md`](/Users/ryan/Projects/Papyrus/skills/newsroom-story-cycle/SKILL.md).
+The Python operator surface for that loop is
+`poetry run papyrus-newsroom signals trend-report`,
+`poetry run papyrus-newsroom editions plan`,
+`poetry run papyrus-newsroom coverage-themes run`, and
+`poetry run papyrus-newsroom story-budget output`; Node `assignments
+run-story-cycle` remains a compatibility alias.
 
 For reusable Reference summaries and quality ratings that feed ranking or
 context packs, use

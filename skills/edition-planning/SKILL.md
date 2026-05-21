@@ -221,15 +221,21 @@ Use `SemanticRelation` rows to make assignment context navigable:
 Prefer exact lineage/version ids where the model supports them. Do not depend
 on display names for joins.
 
-## Coverage Theme CLI And Future Edition CLI
+## Coverage Theme CLI And Edition Intelligence CLI
 
-For repeatable section-shaped research plus reporting, use the implemented
-story-cycle command. Editor-facing docs and UI should call this a Coverage
+For repeatable section-shaped research plus reporting, use the Python
+Coverage Theme commands. Editor-facing docs and UI should call this a Coverage
 Theme: one shared topic or coverage question worked through several section
-lenses. The CLI keeps the `run-story-cycle` name for compatibility.
+lenses. The older `run-story-cycle` name remains as compatibility language.
 
 ```bash
-npm run content -- assignments run-story-cycle \
+poetry run papyrus-newsroom signals trend-report \
+  --corpus-key <corpus-key> \
+  --topic "<topic>" \
+  --sections <section-key>,<section-key> \
+  --json
+
+poetry run papyrus-newsroom coverage-themes run \
   --date YYYY-MM-DD \
   --topic "<topic>" \
   --category <category-key> \
@@ -239,8 +245,8 @@ npm run content -- assignments run-story-cycle \
   --through reporting \
   --json
 
-npm run content -- assignments story-cycle-output \
-  --run-id <story-cycle-run-id> \
+poetry run papyrus-newsroom story-budget output \
+  --run-id <coverage-theme-run-id> \
   --json
 ```
 
@@ -251,9 +257,8 @@ default stop point is through Reporting. Do not auto-select reporting packets,
 run copywriting, create `Item` rows, or create `EditionItem` rows from this
 command.
 
-A future edition-specific command family may wrap this lower-level assignment
-workflow later. Do not assume those wrapper commands exist until
-`scripts/content-cli.cjs` exposes them. Target behavior for any future wrapper:
+Use `poetry run papyrus-newsroom editions plan` when the edition budget should
+be generated from a signal report plus section slots. Its target behavior:
 
 - create or update the dated private `Edition` planning record;
 - compute section/lane dispatch counts from planned publication slots;

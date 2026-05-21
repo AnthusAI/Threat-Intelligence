@@ -502,6 +502,10 @@ poetry install
 poetry run papyrus-newsroom --help
 poetry run papyrus-newsroom build-assignment-agent-context --assignment-id <assignment-id>
 poetry run papyrus-newsroom execute-tactus 'return api_list{}'
+poetry run papyrus-newsroom signals trend-report --corpus-key <key> --topic "<topic>" --sections culture,methods --json
+poetry run papyrus-newsroom editions plan --date YYYY-MM-DD --sections culture,methods --section-budgets culture:2,methods:1 --signal-report <signal-report.json> --json
+poetry run papyrus-newsroom coverage-themes run --date YYYY-MM-DD --topic "<topic>" --category <category-key> --coverage-key <coverage.key> --sections culture,methods --section-budgets culture:2,methods:1 --through plan|research|reporting --json
+poetry run papyrus-newsroom story-budget output --run-id <coverage-theme-run-id> --json
 poetry run python procedures/newsroom/tests/test_newsroom_tools.py
 ```
 
@@ -512,6 +516,15 @@ reads, desk context assembly, Biblicus evidence, docs/API discovery, and dry-run
 record-plan builders. The older compatibility shims under
 `procedures/newsroom/tools/` still exist for path-based tooling, but the
 canonical implementation now lives in `src/papyrus_newsroom/`.
+
+Coverage Theme orchestration is Python-first. `signals trend-report` is the
+assignment-desk signal feed, `editions plan` turns signals plus section slots
+into private assignment graphs, `coverage-themes run` advances that graph
+through research or reporting packet creation, and `story-budget output`
+rediscovers the applied private state from GraphQL. The older
+`npm run content -- assignments run-story-cycle` and
+`assignments story-cycle-output` commands remain compatibility surfaces while
+operators migrate.
 
 Fresh external web research is a Tactus standard-library capability, not a
 Papyrus adapter. Researcher and reporter snippets should use
@@ -550,6 +563,9 @@ npm run content -- categories import-config --config corpora/papyrus-steering.ym
 npm run content -- newsroom import-sections --config corpora/papyrus-newsroom-sections.yml
 npm run content -- categories import-steering --config corpora/papyrus-steering.yml --corpus-key <key>
 npm run content -- assignments research-packets --assignment <assignment-id>
+poetry run papyrus-newsroom signals trend-report --corpus-key <key> --topic "<topic>" --sections culture,methods --json
+poetry run papyrus-newsroom coverage-themes run --date YYYY-MM-DD --topic "<topic>" --category <category-key> --coverage-key <coverage.key> --sections culture,methods --section-budgets culture:2,methods:1 --through reporting --json
+poetry run papyrus-newsroom story-budget output --run-id <coverage-theme-run-id> --json
 npm run content -- assignments run-story-cycle --date YYYY-MM-DD --topic "<topic>" --category <category-key> --coverage-key <coverage.key> --sections culture,methods,business,law --section-budgets culture:2,methods:1,business:1,law:1 --through plan|research|reporting [--refresh-packets] --json
 npm run content -- assignments story-cycle-output --run-id <story-cycle-run-id> --json
 npm run content -- assignments review-reporting-packet --assignment <assignment-id> --message <message-id> --decision select|merge|brief|hold|kill --note "<editor rationale>" --dry-run

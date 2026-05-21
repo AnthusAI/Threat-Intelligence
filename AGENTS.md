@@ -183,15 +183,20 @@ rendering contracts.
   to create draft reader-facing `Item` records. Edition placement remains a
   later copyediting/layout step.
 - Treat multi-section story-cycle runs as Coverage Themes in editor-facing UX
-  and docs. `assignments run-story-cycle` is the compatibility CLI name; its
-  default stop point is `--through reporting`, after private research and
-  reporting packets but before editor selection or copywriting. Use
+  and docs. The Python `papyrus-newsroom coverage-themes run` command is the
+  primary operator surface; `assignments run-story-cycle` is the compatibility
+  CLI name. The default stop point is `--through reporting`, after private
+  research and reporting packets but before editor selection or copywriting. Use
   `--through plan` or `--through research` when intentionally stopping earlier.
   Applied reruns reuse existing packet Messages by default; use
   `--refresh-packets` only when the operator intentionally wants to regenerate
   packet payloads.
   In live apply smoke tests, require agent success unless fallback/degraded
   packets are explicitly being tested.
+- Use `papyrus-newsroom signals trend-report` and `papyrus-newsroom editions
+  plan` as the Python assignment-desk layer when an edition should be planned
+  from recent accepted knowledge-base trends, section slots, and Coverage Theme
+  candidates.
 - Style the Newsroom as a newspaper section or editorial insert, not as an app
   dashboard. Steering is passive and optional: proposals are skimmable notes
   beside the edition, and the system keeps following the accepted category set when

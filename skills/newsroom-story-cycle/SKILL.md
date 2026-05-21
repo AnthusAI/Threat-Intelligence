@@ -39,11 +39,12 @@ New packet writes use `Assignment --produces--> Message`. Legacy
 ## Default Smoke Command
 
 Run dry-run first. Treat the run as a Coverage Theme in editor-facing language:
-one shared topic worked through multiple section lenses. The command name remains
-`run-story-cycle` for compatibility.
+one shared topic worked through multiple section lenses. The Python
+`coverage-themes run` command is the primary operator surface; the older Node
+`assignments run-story-cycle` name remains a compatibility alias.
 
 ```bash
-npm run content -- assignments run-story-cycle \
+poetry run papyrus-newsroom coverage-themes run \
   --date 2026-05-21 \
   --topic "AI in video games" \
   --category AI-ML-research \
@@ -54,6 +55,17 @@ npm run content -- assignments run-story-cycle \
   --max-parallel-research 2 \
   --max-parallel-reporting 3 \
   --through reporting \
+  --json
+```
+
+Use the assignment-desk signal feed before edition planning when the topic is
+not already chosen:
+
+```bash
+poetry run papyrus-newsroom signals trend-report \
+  --corpus-key AI-ML-research \
+  --topic "AI in video games" \
+  --sections culture,methods,business,law \
   --json
 ```
 
@@ -85,8 +97,8 @@ output fails instead of being masked by deterministic fallback packets. Pass
 After a run, inspect the grouped private output:
 
 ```bash
-npm run content -- assignments story-cycle-output \
-  --run-id <story-cycle-run-id> \
+poetry run papyrus-newsroom story-budget output \
+  --run-id <coverage-theme-run-id> \
   --json
 ```
 
