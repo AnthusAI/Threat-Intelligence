@@ -563,6 +563,51 @@ Then("the reference detail should render the curation cluster", async function (
   await page.locator("[data-news-desk-reference-reject]").waitFor({ state: "visible", timeout: 10_000 });
 });
 
+Then("the reference detail curation controls should share one height", async function () {
+  const report = await requirePage(this).evaluate(() => {
+    const selectors = [
+      ["research", ".newsroom-list-detail-shell__detail-toolbar .news-desk-detail-toolbar-button--utility"],
+      ["close", ".newsroom-list-detail-shell__detail-toolbar .news-desk-detail-toggle--close"],
+      ["accept", "[data-news-desk-reference-accept]"],
+      ["reject", "[data-news-desk-reference-reject]"],
+      ["stars", ".news-desk-reference-curation-cluster__stars"],
+      ["insight", "[data-news-desk-reference-insight-trigger]"],
+      ["menu", "[data-news-desk-reference-actions]"],
+    ];
+    return selectors.map(([label, selector]) => {
+      const node = document.querySelector(selector);
+      const rect = node?.getBoundingClientRect();
+      return { label, height: rect?.height ?? 0, visible: Boolean(rect && rect.width > 0 && rect.height > 0) };
+    });
+  });
+  const visible = report.filter((entry) => entry.visible);
+  assert.equal(visible.length, report.length, `Expected all reference curation controls to be visible: ${JSON.stringify(report)}`);
+  const heights = visible.map((entry) => entry.height);
+  const min = Math.min(...heights);
+  const max = Math.max(...heights);
+  assert.ok(max - min <= 0.75, `Expected matching control heights, found ${JSON.stringify(report)}`);
+});
+
+Then("the reference detail curation cluster should align with the top toolbar", async function () {
+  const report = await requirePage(this).evaluate(() => {
+    const rectFor = (selector) => {
+      const node = document.querySelector(selector);
+      const rect = node?.getBoundingClientRect();
+      return rect ? { left: rect.left, right: rect.right, width: rect.width } : null;
+    };
+    return {
+      cluster: rectFor("[data-news-desk-reference-curation-cluster]"),
+      toolbar: rectFor(".newsroom-list-detail-shell__detail-toolbar"),
+      trailing: rectFor(".newsroom-list-detail-shell__detail-toolbar-trailing"),
+    };
+  });
+  assert.ok(report.cluster, "Expected curation cluster rect");
+  assert.ok(report.toolbar, "Expected detail toolbar rect");
+  assert.ok(report.trailing, "Expected toolbar trailing rect");
+  assert.ok(Math.abs(report.cluster.right - report.toolbar.right) <= 1, `Expected curation cluster to align to toolbar right edge: ${JSON.stringify(report)}`);
+  assert.ok(report.cluster.left <= report.trailing.right, `Expected curation cluster to sit under the toolbar controls: ${JSON.stringify(report)}`);
+});
+
 Then("the reference detail should not show the lower curation selector", async function () {
   const count = await requirePage(this).locator(
     "[data-news-desk-reference-detail] .news-desk-detail-block",

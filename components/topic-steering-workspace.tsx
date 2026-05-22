@@ -5637,6 +5637,8 @@ function newsroomCardGridAnimationContext(grid: HTMLElement): { absolute: boolea
   };
 }
 
+const NEWSROOM_SPLIT_TARGET_TEXT_SCALE = 3 / 4;
+
 function resolveRhythmicSplitScale(targetScale: number, shell: HTMLElement): number {
   const boundedTargetScale = Number.isFinite(targetScale) ? Math.min(Math.max(targetScale, 0.0001), 1) : 1;
   if (boundedTargetScale >= 0.999) return 1;
@@ -5731,6 +5733,7 @@ function NewsroomListDetailShell({
       rail.style.opacity = "";
       rail.style.visibility = "";
       shell.style.setProperty("--newsroom-card-scale", "1");
+      shell.style.setProperty("--newsroom-card-text-scale", "1");
       shell.setAttribute("data-newsroom-card-scale", "1");
     };
 
@@ -5750,8 +5753,12 @@ function NewsroomListDetailShell({
     const viewportWidth = viewport.getBoundingClientRect().width;
     const targetScale = baselineWidth > 0 ? viewportWidth / baselineWidth : 1;
     const boundedScale = resolveRhythmicSplitScale(targetScale, shell);
-    const scaledHeight = Math.max(1, surface.scrollHeight * boundedScale);
+    const textScale = boundedScale > 0
+      ? Math.max(1, NEWSROOM_SPLIT_TARGET_TEXT_SCALE / boundedScale)
+      : 1;
     shell.style.setProperty("--newsroom-card-scale", String(boundedScale));
+    shell.style.setProperty("--newsroom-card-text-scale", String(textScale));
+    const scaledHeight = Math.max(1, surface.scrollHeight * boundedScale);
     shell.setAttribute("data-newsroom-card-scale", boundedScale.toFixed(4));
     surface.style.width = `${baselineWidth}px`;
     surface.style.transformOrigin = "top left";
@@ -7762,8 +7769,7 @@ function ReferenceDetailPanel({
         <header>
           <div>
             <strong>{reference.title ?? reference.externalItemId}</strong>
-            <div className="news-desk-reference-detail__meta-row">
-              <span>{[detailCuration.effectiveStatus, reference.mediaType ?? "metadata", formatReferenceDate(reference)].filter(Boolean).join(" / ")}</span>
+            <div className="news-desk-reference-detail__header-flow">
               <ReferenceCurationCluster
                 curation={detailCuration}
                 disabled={disabled}
@@ -7771,9 +7777,12 @@ function ReferenceDetailPanel({
                 onReview={onReview}
                 onSetQualityRating={(rating) => onSetQualityRating(reference, rating)}
               />
+              <p className="news-desk-reference-detail__meta-row">
+                <span>{[detailCuration.effectiveStatus, reference.mediaType ?? "metadata", formatReferenceDate(reference)].filter(Boolean).join(" / ")}</span>
+              </p>
+              {metadataSubtitle ? <p className="news-desk-semantic-detail__subheading">{metadataSubtitle}</p> : null}
+              {metadataSummary ? <p className="news-desk-semantic-detail__summary">{metadataSummary}</p> : null}
             </div>
-            {metadataSubtitle ? <p className="news-desk-semantic-detail__subheading">{metadataSubtitle}</p> : null}
-            {metadataSummary ? <p className="news-desk-semantic-detail__summary">{metadataSummary}</p> : null}
           </div>
         </header>
         <KnowledgeQueryStatus error={knowledgeQuery.error} loading={knowledgeQuery.loading} />

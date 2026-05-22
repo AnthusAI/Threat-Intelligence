@@ -259,6 +259,8 @@ Feature: Newspaper layout scenarios
     Given I open the references newsroom at 1280 by 900
     When I open reference "reference-knowledge-corpus-demo-source-history-001"
     Then the reference detail should render the curation cluster
+    And the reference detail curation controls should share one height
+    And the reference detail curation cluster should align with the top toolbar
     And the reference detail should not show the lower curation selector
     When I open the reference detail curation actions
     Then the reference detail actions menu should offer "Reopen" and "Archive"
