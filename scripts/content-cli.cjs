@@ -290,6 +290,9 @@ async function main() {
     case "references:prepare-catalog":
       await prepareReferenceCatalog(args.slice(2));
       return;
+    case "references:curate-recent":
+      await curateRecentReferences(args.slice(2));
+      return;
     case "references:source-status":
       await referenceSourceStatus(args.slice(2));
       return;
@@ -1658,6 +1661,98 @@ async function prepareReferenceCatalog(flags) {
   const items = catalogItemsForSummary(prepared);
   const rationaleCount = items.filter((item) => item.ingestion_rationale || item.ingestionRationale || item.metadata?.ingestion_rationale || item.metadata?.ingestionRationale).length;
   console.log(`references\tprepare-catalog\t${options["corpus-key"]}\t${options.output}\t${items.length} items\t${rationaleCount} rationales`);
+}
+
+async function curateRecentReferences(flags) {
+  const options = parseOptions(flags);
+  const references = parseRepeatedOption(flags, "reference");
+  const apply = parseBooleanOption(options.apply, false, "--apply");
+  const dryRun = parseBooleanOption(options["dry-run"], false, "--dry-run");
+  const jsonOutput = parseBooleanOption(options.json, false, "--json");
+  if (apply && dryRun) throw new Error("references curate-recent does not allow --apply with --dry-run.");
+  if (!options["corpus-key"]) throw new Error("references curate-recent requires --corpus-key <key>.");
+
+  const args = [
+    "references",
+    "curate-recent",
+    "--corpus-key",
+    options["corpus-key"],
+    "--model",
+    normalizeCliString(options.model) ?? "gpt-5.4-mini",
+    "--summary-max-tokens",
+    String(normalizeCliPositiveInteger(options["summary-max-tokens"], "--summary-max-tokens") ?? 500),
+    "--since-hours",
+    String(normalizeCliNonNegativeInteger(options["since-hours"], "--since-hours") ?? 48),
+    "--max-count",
+    String(normalizeCliNonNegativeInteger(options["max-count"], "--max-count") ?? 0),
+    "--scan-limit",
+    String(normalizeCliPositiveInteger(options["scan-limit"], "--scan-limit") ?? 1000),
+    "--max-parallel",
+    String(normalizeCliPositiveInteger(options["max-parallel"], "--max-parallel") ?? 1),
+  ];
+  const since = normalizeCliString(options.since);
+  if (since) args.push("--since", since);
+  const resume = normalizeCliString(options.resume);
+  if (resume) args.push("--resume", resume);
+  for (const referenceId of references) args.push("--reference", referenceId);
+  if (parseBooleanOption(options["refresh-summary"], false, "--refresh-summary")) args.push("--refresh-summary");
+  if (parseBooleanOption(options["refresh-quality"], false, "--refresh-quality")) args.push("--refresh-quality");
+  if (apply && !dryRun) args.push("--apply");
+  if (dryRun) args.push("--dry-run");
+
+  const result = spawnSync("poetry", ["run", "papyrus-newsroom", ...args], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  });
+  const payload = extractLastJsonObject(result.stdout || "");
+  if (!payload || typeof payload !== "object") {
+    throw new Error(`Papyrus newsroom references curate-recent returned invalid JSON: ${result.stderr || result.stdout || "unknown error"}`);
+  }
+
+  if (jsonOutput) {
+    console.log(JSON.stringify(payload, null, 2));
+  } else {
+    const summary = payload.summary ?? {};
+    console.log(`references\tcurate-recent\trun\t${payload.runId ?? "-"}`);
+    console.log(`references\tcurate-recent\tmanifest\t${payload.manifestPath ?? "-"}`);
+    console.log(`references\tcurate-recent\tapply\t${payload.apply ? "yes" : "no"}`);
+    console.log(`references\tcurate-recent\tok\t${payload.ok ? "yes" : "no"}`);
+    console.log(`references\tcurate-recent\tdegraded\t${payload.degraded ? "yes" : "no"}`);
+    console.log(`references\tcurate-recent\tselected\t${summary.selectedCount ?? 0}`);
+    console.log(`references\tcurate-recent\tprocessed\t${summary.processedCount ?? 0}`);
+    console.log(`references\tcurate-recent\tsucceeded\t${summary.succeededCount ?? 0}`);
+    console.log(`references\tcurate-recent\tfailed\t${summary.failedCount ?? 0}`);
+    for (const failure of payload.selectionFailures ?? []) {
+      console.log(`reference-curation\tselection-failed\t${failure.referenceId ?? "-"}\t${failure.failureReason ?? "selection failed"}`);
+    }
+    for (const item of payload.items ?? []) {
+      const reference = item.reference ?? {};
+      const stages = item.stages ?? {};
+      const prepassStatus = stages.identifierPrepass?.status ?? "-";
+      const titleStatus = stages.titleSubtitle?.status ?? "-";
+      const summaryStatus = stages.summary?.status ?? "-";
+      const qualityStatus = stages.quality?.status ?? "-";
+      console.log([
+        "reference-curation",
+        item.failed ? "failed" : "ok",
+        reference.id ?? item.referenceId ?? "-",
+        prepassStatus,
+        titleStatus,
+        summaryStatus,
+        qualityStatus,
+        (item.failureReasons ?? []).join("; ") || "-",
+        reference.title ?? "-",
+      ].join("\t"));
+    }
+    for (const warning of payload.warnings ?? []) {
+      console.log(`references\tcurate-recent\twarning\t${warning}`);
+    }
+  }
+
+  if (result.status && result.status !== 0) {
+    process.exitCode = result.status;
+    return;
+  }
 }
 
 async function maybeEnrichReferenceCatalogTitleSubtitle({ catalog, catalogPath = null, options = {}, persist = false }) {
@@ -14981,6 +15076,7 @@ function printUsage() {
   console.log("  npm run content -- references make-catalog --input <sources.md> --output <catalog.json>");
   console.log("  npm run content -- references discover-citation-led --config corpora/papyrus-steering.yml --anchor-corpus-key AI-ML-research --from-year 2023 --to-year 2026 --anchor-limit 40 --citations-per-anchor 12 --feed-limit 20");
   console.log("  npm run content -- references prepare-catalog --config <steering.yml> --corpus-key <key> --catalog <catalog.json> --output <prepared.json>");
+  console.log("  npm run content -- references curate-recent --corpus-key <key> [--since-hours 48|--since 2026-05-20T00:00:00Z] [--reference <id> ...] [--max-count 25] [--scan-limit 1000] [--summary-max-tokens 500] [--refresh-summary] [--refresh-quality] [--dry-run|--apply] [--resume .papyrus-runs/reference-curation-<run>/manifest.json] [--json]");
   console.log("  npm run content -- references register-catalog --config <steering.yml> --corpus-key <key> --catalog <catalog.json> --status pending --ingestion-rationale <text> --apply");
   console.log("  npm run content -- references register-catalog --config <steering.yml> --corpus-key <key> --catalog <catalog.json> --status rejected --reason-code out_of_scope --note <text> --apply");
   console.log("  npm run content -- references register-catalog-split --config <steering.yml> --catalog <catalog.json> --research-corpus-key <key> --news-corpus-key <key> --status pending --apply");

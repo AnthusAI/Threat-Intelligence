@@ -654,6 +654,10 @@ npm run content -- content inspect
 npm run content -- content list articles
 ```
 
+Treat `npm run content -- content inspect` as a hard preflight gate for live
+CLI smoke runs. If it fails (for example `401 Unauthorized`), refresh JWT auth
+first and do not continue with live write/read smoke commands.
+
 For production content refreshes, use targeted GraphQL upserts. The safe pattern
 is:
 

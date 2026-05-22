@@ -361,6 +361,10 @@ npm run content -- content inspect
 npm run content -- categories run-curation-cycle --config corpora/papyrus-steering.yml
 ```
 
+`npm run content -- content inspect` is the hard auth preflight before any live
+CLI smoke run. If it fails, stop and refresh JWT auth before running additional
+reference commands.
+
 Inspect `.papyrus-runs/<timestamp>/verification.json` after the cycle.
 
 When reporting completion, include: corpus key, Biblicus `item_id`s, whether S3

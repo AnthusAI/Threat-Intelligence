@@ -1,6 +1,7 @@
 import json
 import pathlib
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -2102,6 +2103,299 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
 
         self.assertEqual(result["count"], 1)
         self.assertEqual(result["items"][0]["id"], "reference-a-v1")
+
+    def test_reference_curate_recent_defaults_to_48h_all_statuses(self):
+        references = [
+            {
+                "id": "reference-new-v1",
+                "lineageId": "reference-new",
+                "versionNumber": 1,
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "externalItemId": "new",
+                "title": "Newest",
+                "curationStatus": "pending",
+                "importedAt": "2026-05-22T11:00:00Z",
+            },
+            {
+                "id": "reference-mid-v1",
+                "lineageId": "reference-mid",
+                "versionNumber": 1,
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "externalItemId": "mid",
+                "title": "Within 48 hours",
+                "curationStatus": "accepted",
+                "importedAt": "2026-05-21T13:00:00Z",
+            },
+            {
+                "id": "reference-old-v1",
+                "lineageId": "reference-old",
+                "versionNumber": 1,
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "externalItemId": "old",
+                "title": "Older than 48 hours",
+                "curationStatus": "accepted",
+                "importedAt": "2026-05-20T08:00:00Z",
+            },
+        ]
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals._now",
+            return_value="2026-05-22T12:00:00Z",
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals.list_references_by_corpus",
+            return_value=references,
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_curation_identifier_stage",
+            return_value=(
+                {"status": "ok", "identifiers": {"doi": "10.1/test"}},
+                {"status": "ok", "success": True, "action": "run", "failureReason": ""},
+            ),
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_curation_title_stage",
+            return_value={"status": "update", "success": True, "action": "update", "failureReason": ""},
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_curation_summary_stage",
+            return_value={"status": "create", "success": True, "action": "create", "failureReason": ""},
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_curation_quality_stage",
+            return_value={"status": "create", "success": True, "action": "create", "failureReason": ""},
+        ):
+            result = reference_curation_signals.reference_curate_recent(
+                corpus_key="AI-ML-research",
+                apply=False,
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["summary"]["selectedCount"], 2)
+        self.assertEqual({item["reference"]["curationStatus"] for item in result["items"]}, {"pending", "accepted"})
+
+    def test_reference_curate_recent_reference_ids_override_window_selection(self):
+        reference = {
+            "id": "reference-explicit-v1",
+            "lineageId": "reference-explicit",
+            "versionNumber": 1,
+            "corpusId": "knowledge-corpus-ai-ml-research",
+            "externalItemId": "explicit",
+            "title": "Explicit selection",
+            "curationStatus": "pending",
+            "importedAt": "2026-05-10T08:00:00Z",
+        }
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals._now",
+            return_value="2026-05-22T12:00:00Z",
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._resolve_reference",
+            return_value=reference,
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_curation_identifier_stage",
+            return_value=(
+                {"status": "ok", "identifiers": {"doi": "10.1/test"}},
+                {"status": "ok", "success": True, "action": "run", "failureReason": ""},
+            ),
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_curation_title_stage",
+            return_value={"status": "noop", "success": True, "action": "noop", "failureReason": ""},
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_curation_summary_stage",
+            return_value={"status": "noop", "success": True, "action": "noop", "failureReason": ""},
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_curation_quality_stage",
+            return_value={"status": "noop", "success": True, "action": "noop", "failureReason": ""},
+        ):
+            result = reference_curation_signals.reference_curate_recent(
+                corpus_key="AI-ML-research",
+                reference_ids=["reference-explicit-v1"],
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["summary"]["selectedCount"], 1)
+        self.assertEqual(result["items"][0]["reference"]["id"], "reference-explicit-v1")
+
+    def test_reference_curate_recent_enforces_stage_order(self):
+        reference = {
+            "id": "reference-order-v1",
+            "lineageId": "reference-order",
+            "versionNumber": 1,
+            "corpusId": "knowledge-corpus-ai-ml-research",
+            "externalItemId": "order",
+            "title": "Order check",
+            "curationStatus": "accepted",
+            "importedAt": "2026-05-22T11:00:00Z",
+        }
+        call_order = []
+
+        def identifier_stage(**kwargs):
+            call_order.append("identifier")
+            return (
+                {"status": "ok", "identifiers": {"doi": "10.1/test"}},
+                {"status": "ok", "success": True, "action": "run", "failureReason": ""},
+            )
+
+        def title_stage(**kwargs):
+            call_order.append("title")
+            return {"status": "update", "success": True, "action": "update", "failureReason": ""}
+
+        def summary_stage(**kwargs):
+            call_order.append("summary")
+            return {"status": "create", "success": True, "action": "create", "failureReason": ""}
+
+        def quality_stage(**kwargs):
+            call_order.append("quality")
+            return {"status": "create", "success": True, "action": "create", "failureReason": ""}
+
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals._now",
+            return_value="2026-05-22T12:00:00Z",
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals.list_references_by_corpus",
+            return_value=[reference],
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_curation_identifier_stage",
+            side_effect=identifier_stage,
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_curation_title_stage",
+            side_effect=title_stage,
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_curation_summary_stage",
+            side_effect=summary_stage,
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_curation_quality_stage",
+            side_effect=quality_stage,
+        ):
+            result = reference_curation_signals.reference_curate_recent(
+                corpus_key="AI-ML-research",
+                apply=False,
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(call_order, ["identifier", "title", "summary", "quality"])
+
+    def test_reference_curate_recent_returns_partial_failure_when_any_reference_fails(self):
+        references = [
+            {
+                "id": "reference-pass-v1",
+                "lineageId": "reference-pass",
+                "versionNumber": 1,
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "externalItemId": "pass",
+                "title": "Pass",
+                "curationStatus": "accepted",
+                "importedAt": "2026-05-22T11:00:00Z",
+            },
+            {
+                "id": "reference-fail-v1",
+                "lineageId": "reference-fail",
+                "versionNumber": 1,
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "externalItemId": "fail",
+                "title": "Fail",
+                "curationStatus": "accepted",
+                "importedAt": "2026-05-22T10:00:00Z",
+            },
+        ]
+        identifier_stage_outputs = [
+            (
+                {"status": "ok", "identifiers": {"doi": "10.1/pass"}},
+                {"status": "ok", "success": True, "action": "run", "failureReason": ""},
+            ),
+            (
+                {"status": "failed", "failureReason": "prepass failure", "identifiers": {}},
+                {"status": "failed", "success": False, "action": "run", "failureReason": "prepass failure"},
+            ),
+        ]
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals._now",
+            return_value="2026-05-22T12:00:00Z",
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals.list_references_by_corpus",
+            return_value=references,
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_curation_identifier_stage",
+            side_effect=identifier_stage_outputs,
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_curation_title_stage",
+            side_effect=[
+                {"status": "update", "success": True, "action": "update", "failureReason": ""},
+                {"status": "skipped", "success": False, "action": "skip", "failureReason": "identifier prepass failed"},
+            ],
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_curation_summary_stage",
+            side_effect=[
+                {"status": "create", "success": True, "action": "create", "failureReason": ""},
+                {"status": "skipped", "success": False, "action": "skip", "failureReason": "identifier prepass failed"},
+            ],
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_curation_quality_stage",
+            side_effect=[
+                {"status": "create", "success": True, "action": "create", "failureReason": ""},
+                {"status": "skipped", "success": False, "action": "skip", "failureReason": "identifier prepass failed"},
+            ],
+        ):
+            result = reference_curation_signals.reference_curate_recent(
+                corpus_key="AI-ML-research",
+                apply=False,
+            )
+
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["degraded"])
+        self.assertEqual(result["summary"]["failedCount"], 1)
+
+    def test_reference_curate_recent_resume_skips_completed_successful_stages(self):
+        reference = {
+            "id": "reference-resume-v1",
+            "lineageId": "reference-resume",
+            "versionNumber": 1,
+            "corpusId": "knowledge-corpus-ai-ml-research",
+            "externalItemId": "resume",
+            "title": "Resume",
+            "curationStatus": "accepted",
+            "importedAt": "2026-05-22T11:00:00Z",
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = pathlib.Path(tmpdir) / "manifest.json"
+            with mock.patch(
+                "papyrus_newsroom.reference_curation_signals._now",
+                return_value="2026-05-22T12:00:00Z",
+            ), mock.patch(
+                "papyrus_newsroom.reference_curation_signals.list_references_by_corpus",
+                return_value=[reference],
+            ), mock.patch(
+                "papyrus_newsroom.reference_curation_signals._resolve_reference",
+                return_value=reference,
+            ), mock.patch(
+                "papyrus_newsroom.reference_curation_signals._reference_curation_manifest_path",
+                return_value=manifest_path,
+            ), mock.patch(
+                "papyrus_newsroom.reference_curation_signals._run_identifier_prepass",
+                return_value={"status": "ok", "failureReason": "", "identifiers": {"doi": "10.1/resume"}},
+            ), mock.patch(
+                "papyrus_newsroom.reference_curation_signals.reference_title_subtitle_resolve",
+                return_value={"action": "update"},
+            ) as title_mock, mock.patch(
+                "papyrus_newsroom.reference_curation_signals.reference_summarize",
+                return_value={"action": "create"},
+            ) as summary_mock, mock.patch(
+                "papyrus_newsroom.reference_curation_signals.reference_quality_assess",
+                return_value={"action": "create"},
+            ) as quality_mock:
+                first = reference_curation_signals.reference_curate_recent(
+                    corpus_key="AI-ML-research",
+                    apply=False,
+                )
+                second = reference_curation_signals.reference_curate_recent(
+                    corpus_key="AI-ML-research",
+                    apply=False,
+                    resume=str(manifest_path),
+                )
+
+            self.assertTrue(first["ok"])
+            self.assertTrue(second["ok"])
+            self.assertEqual(title_mock.call_count, 1)
+            self.assertEqual(summary_mock.call_count, 1)
+            self.assertEqual(quality_mock.call_count, 1)
+            self.assertEqual(second["items"][0]["stages"]["identifierPrepass"]["status"], "reused")
+            self.assertEqual(second["items"][0]["stages"]["titleSubtitle"]["status"], "reused")
+            self.assertEqual(second["items"][0]["stages"]["summary"]["status"], "reused")
+            self.assertEqual(second["items"][0]["stages"]["quality"]["status"], "reused")
 
     def test_placeholder_title_is_not_written(self):
         result = reference_curation_signals.resolve_reference_title_subtitle(

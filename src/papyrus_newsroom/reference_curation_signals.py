@@ -1629,6 +1629,646 @@ def reference_list(
     }
 
 
+def reference_curate_recent(
+    *,
+    corpus_key: str,
+    reference_ids: list[str] | None = None,
+    since_hours: int = 48,
+    since: str = "",
+    max_count: int = 0,
+    scan_limit: int = 1000,
+    max_parallel: int = 1,
+    model: str = "gpt-5.4-mini",
+    summary_max_tokens: int = 500,
+    refresh_summary: bool = False,
+    refresh_quality: bool = False,
+    apply: bool = False,
+    resume: str = "",
+) -> dict[str, Any]:
+    run_started_at = _now()
+    now_dt = _parse_iso_datetime(run_started_at) or _dt.datetime.now(_dt.UTC)
+    explicit_reference_ids = [str(value).strip() for value in (reference_ids or []) if str(value).strip()]
+
+    requested_since = _clean_text(since)
+    since_source = "since" if requested_since else "since_hours"
+    if requested_since:
+        since_dt = _parse_iso_datetime(requested_since)
+        if since_dt is None:
+            raise ValueError(f"Invalid --since value: {since}")
+    else:
+        since_dt = now_dt - _dt.timedelta(hours=max(int(since_hours or 0), 0))
+
+    run_id = _hash_short([
+        "reference-curation",
+        run_started_at,
+        corpus_key,
+        explicit_reference_ids,
+        requested_since or max(int(since_hours or 0), 0),
+        int(max_count or 0),
+        int(scan_limit or 0),
+    ])
+    manifest_path = _reference_curation_manifest_path(run_id=run_id, resume=resume)
+    manifest = _load_reference_curation_manifest(
+        manifest_path=manifest_path,
+        run_id=run_id,
+        corpus_key=corpus_key,
+        apply=apply,
+        model=model,
+        summary_max_tokens=summary_max_tokens,
+        since=requested_since,
+        since_hours=max(int(since_hours or 0), 0),
+        max_count=max(int(max_count or 0), 0),
+        scan_limit=max(int(scan_limit or 1), 1),
+        explicit_reference_ids=explicit_reference_ids,
+    )
+    manifest["updatedAt"] = run_started_at
+    _save_reference_curation_manifest(manifest_path, manifest)
+
+    semantic = _semantic_client()
+    selection_failures: list[dict[str, Any]] = []
+
+    if explicit_reference_ids:
+        selected_references = []
+        for reference_id in explicit_reference_ids:
+            try:
+                resolved = _resolve_reference(semantic, reference_id)
+            except Exception as exc:
+                selection_failures.append({
+                    "referenceId": reference_id,
+                    "status": "selection_failed",
+                    "failureReason": str(exc),
+                })
+                continue
+            selected_references.append(resolved)
+    elif resume:
+        selected_references = []
+        manifest_references = manifest.get("references") if isinstance(manifest.get("references"), dict) else {}
+        for reference_id in manifest_references.keys():
+            try:
+                resolved = _resolve_reference(semantic, str(reference_id))
+            except Exception as exc:
+                entry = manifest_references.get(reference_id) if isinstance(manifest_references.get(reference_id), dict) else {}
+                snapshot = entry.get("reference") if isinstance(entry.get("reference"), dict) else {}
+                if snapshot.get("id"):
+                    selected_references.append({
+                        "id": snapshot.get("id"),
+                        "lineageId": snapshot.get("lineageId"),
+                        "externalItemId": snapshot.get("externalItemId"),
+                        "curationStatus": snapshot.get("curationStatus"),
+                        "title": snapshot.get("title"),
+                    })
+                    selection_failures.append({
+                        "referenceId": str(reference_id),
+                        "status": "resume_snapshot_used",
+                        "failureReason": f"Could not resolve live reference: {exc}",
+                    })
+                    continue
+                selection_failures.append({
+                    "referenceId": str(reference_id),
+                    "status": "selection_failed",
+                    "failureReason": str(exc),
+                })
+                continue
+            selected_references.append(resolved)
+    else:
+        selected_references = _select_references_for_curate_recent(
+            corpus_key=corpus_key,
+            since_dt=since_dt,
+            max_count=max_count,
+            scan_limit=scan_limit,
+        )
+
+    results: list[dict[str, Any]] = []
+    for reference in selected_references:
+        reference_id = str(reference.get("id") or "")
+        if not reference_id:
+            continue
+        manifest_reference = _reference_curation_manifest_reference_entry(
+            manifest=manifest,
+            reference=reference,
+            reference_id=reference_id,
+        )
+        manifest_reference["updatedAt"] = _now()
+        manifest_reference["status"] = "running"
+        _save_reference_curation_manifest(manifest_path, manifest)
+
+        result = {
+            "reference": _reference_summary(reference),
+            "referenceId": reference_id,
+            "identifierPrepass": {},
+            "stages": {},
+            "failed": False,
+            "degraded": False,
+            "failureReasons": [],
+            "apply": apply,
+        }
+
+        identifier_prepass, stage_result = _run_reference_curation_identifier_stage(
+            reference=reference,
+            manifest_reference=manifest_reference,
+            allow_resume=True,
+        )
+        result["identifierPrepass"] = identifier_prepass
+        result["stages"]["identifierPrepass"] = stage_result
+
+        identifier_failed = not stage_result.get("success")
+
+        title_result = _run_reference_curation_title_stage(
+            reference=reference,
+            model=model,
+            apply=apply,
+            manifest_reference=manifest_reference,
+            identifier_failed=identifier_failed,
+        )
+        result["stages"]["titleSubtitle"] = title_result
+
+        summary_result = _run_reference_curation_summary_stage(
+            reference=reference,
+            model=model,
+            apply=apply,
+            summary_max_tokens=summary_max_tokens,
+            refresh_summary=refresh_summary,
+            manifest_reference=manifest_reference,
+            identifier_failed=identifier_failed,
+        )
+        result["stages"]["summary"] = summary_result
+
+        quality_result = _run_reference_curation_quality_stage(
+            reference=reference,
+            model=model,
+            apply=apply,
+            refresh_quality=refresh_quality,
+            manifest_reference=manifest_reference,
+            identifier_failed=identifier_failed,
+        )
+        result["stages"]["quality"] = quality_result
+
+        stage_failures = [
+            stage for stage in result["stages"].values()
+            if not stage.get("success")
+        ]
+        result["failed"] = len(stage_failures) > 0
+        result["degraded"] = result["failed"]
+        result["failureReasons"] = [stage.get("failureReason") for stage in stage_failures if stage.get("failureReason")]
+        result["status"] = "failed" if result["failed"] else "ok"
+        manifest_reference["status"] = result["status"]
+        manifest_reference["updatedAt"] = _now()
+        manifest_reference["completedAt"] = _now()
+        if result["failureReasons"]:
+            manifest_reference["lastError"] = result["failureReasons"][-1]
+        results.append(result)
+        _save_reference_curation_manifest(manifest_path, manifest)
+
+    failed_count = sum(1 for item in results if item.get("failed")) + len(selection_failures)
+    succeeded_count = sum(1 for item in results if not item.get("failed"))
+    manifest["updatedAt"] = _now()
+    manifest["summary"] = {
+        "selectedCount": len(selected_references),
+        "processedCount": len(results),
+        "succeededCount": succeeded_count,
+        "failedCount": failed_count,
+        "selectionFailures": len(selection_failures),
+        "titleUpdatedCount": sum(
+            1 for item in results
+            if (item.get("stages", {}).get("titleSubtitle", {}).get("action") == "update")
+        ),
+        "summaryCreatedCount": sum(
+            1 for item in results
+            if (item.get("stages", {}).get("summary", {}).get("action") == "create")
+        ),
+        "qualityCreatedCount": sum(
+            1 for item in results
+            if (item.get("stages", {}).get("quality", {}).get("action") == "create")
+        ),
+    }
+    _save_reference_curation_manifest(manifest_path, manifest)
+
+    return {
+        "kind": "reference.curate-recent",
+        "ok": failed_count == 0,
+        "degraded": failed_count > 0,
+        "command": "references curate-recent",
+        "runId": manifest.get("runId"),
+        "manifestPath": str(manifest_path),
+        "apply": apply,
+        "corpusKey": corpus_key,
+        "selection": {
+            "mode": "explicit" if explicit_reference_ids else ("resume" if resume else "recent_window"),
+            "referenceIds": explicit_reference_ids,
+            "since": requested_since or (since_dt.isoformat().replace("+00:00", "Z") if since_dt else ""),
+            "sinceSource": since_source,
+            "sinceHours": max(int(since_hours or 0), 0),
+            "maxCount": max(int(max_count or 0), 0),
+            "scanLimit": max(int(scan_limit or 1), 1),
+            "maxParallel": max(int(max_parallel or 1), 1),
+            "resume": str(manifest_path) if resume else "",
+        },
+        "summary": dict(manifest.get("summary") or {}),
+        "selectionFailures": selection_failures,
+        "count": len(results),
+        "items": results,
+        "warnings": (
+            [f"max_parallel={max_parallel} requested; deterministic sequential execution is used in v1."]
+            if int(max_parallel or 1) > 1 else []
+        ),
+    }
+
+
+def _run_reference_curation_identifier_stage(
+    *,
+    reference: dict[str, Any],
+    manifest_reference: dict[str, Any],
+    allow_resume: bool,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    prior = _reference_curation_manifest_stage(manifest_reference, "identifierPrepass")
+    if allow_resume and prior.get("success"):
+        output = prior.get("output") if isinstance(prior.get("output"), dict) else {}
+        return output, {
+            "status": "reused",
+            "success": True,
+            "action": "reuse",
+            "failureReason": "",
+            "cached": True,
+            "identifierPrepass": output,
+        }
+    prepass = _run_identifier_prepass(reference=reference, catalog_entry={})
+    success = str(prepass.get("status") or "") in {"ok", "no_identifier_found"}
+    stage = {
+        "status": str(prepass.get("status") or "failed"),
+        "success": success,
+        "action": "run",
+        "failureReason": str(prepass.get("failureReason") or ""),
+        "cached": False,
+        "identifierPrepass": prepass,
+    }
+    manifest_reference["stages"]["identifierPrepass"] = {
+        "status": stage["status"],
+        "success": success,
+        "action": stage["action"],
+        "failureReason": stage["failureReason"],
+        "updatedAt": _now(),
+        "output": prepass,
+    }
+    return prepass, stage
+
+
+def _run_reference_curation_title_stage(
+    *,
+    reference: dict[str, Any],
+    model: str,
+    apply: bool,
+    manifest_reference: dict[str, Any],
+    identifier_failed: bool,
+) -> dict[str, Any]:
+    if identifier_failed:
+        stage = {
+            "status": "skipped",
+            "success": False,
+            "action": "skip",
+            "failureReason": "identifier prepass failed",
+            "cached": False,
+        }
+        manifest_reference["stages"]["titleSubtitle"] = {
+            **stage,
+            "updatedAt": _now(),
+            "output": {},
+        }
+        return stage
+    prior = _reference_curation_manifest_stage(manifest_reference, "titleSubtitle")
+    if prior.get("success"):
+        return {
+            "status": "reused",
+            "success": True,
+            "action": "reuse",
+            "failureReason": "",
+            "cached": True,
+            "output": prior.get("output") if isinstance(prior.get("output"), dict) else {},
+        }
+    try:
+        output = reference_title_subtitle_resolve(
+            reference_id=str(reference.get("id") or ""),
+            model=model,
+            apply=apply,
+            summary=False,
+            persist_local_metadata=True,
+            vector_sync=True,
+        )
+        action = str(output.get("action") or "")
+        success = action in {"update", "noop"}
+        stage = {
+            "status": action or "unknown",
+            "success": success,
+            "action": action or "unknown",
+            "failureReason": "" if success else (output.get("failureReason") or f"title/subtitle action={action or 'unknown'}"),
+            "cached": False,
+            "output": output,
+        }
+    except Exception as exc:
+        stage = {
+            "status": "error",
+            "success": False,
+            "action": "error",
+            "failureReason": str(exc),
+            "cached": False,
+            "output": {"error": str(exc)},
+        }
+    manifest_reference["stages"]["titleSubtitle"] = {
+        "status": stage["status"],
+        "success": stage["success"],
+        "action": stage["action"],
+        "failureReason": stage["failureReason"],
+        "updatedAt": _now(),
+        "output": stage.get("output") if isinstance(stage.get("output"), dict) else {},
+    }
+    return stage
+
+
+def _run_reference_curation_summary_stage(
+    *,
+    reference: dict[str, Any],
+    model: str,
+    apply: bool,
+    summary_max_tokens: int,
+    refresh_summary: bool,
+    manifest_reference: dict[str, Any],
+    identifier_failed: bool,
+) -> dict[str, Any]:
+    if identifier_failed:
+        stage = {
+            "status": "skipped",
+            "success": False,
+            "action": "skip",
+            "failureReason": "identifier prepass failed",
+            "cached": False,
+        }
+        manifest_reference["stages"]["summary"] = {
+            **stage,
+            "updatedAt": _now(),
+            "output": {},
+        }
+        return stage
+    prior = _reference_curation_manifest_stage(manifest_reference, "summary")
+    if prior.get("success") and not refresh_summary:
+        return {
+            "status": "reused",
+            "success": True,
+            "action": "reuse",
+            "failureReason": "",
+            "cached": True,
+            "output": prior.get("output") if isinstance(prior.get("output"), dict) else {},
+        }
+    try:
+        output = reference_summarize(
+            reference_id=str(reference.get("id") or ""),
+            max_tokens=summary_max_tokens,
+            model=model,
+            apply=apply,
+            refresh=refresh_summary,
+        )
+        action = str(output.get("action") or "")
+        success = action in {"create", "noop"}
+        stage = {
+            "status": action or "unknown",
+            "success": success,
+            "action": action or "unknown",
+            "failureReason": "" if success else (output.get("failureReason") or f"summary action={action or 'unknown'}"),
+            "cached": False,
+            "output": output,
+        }
+    except Exception as exc:
+        stage = {
+            "status": "error",
+            "success": False,
+            "action": "error",
+            "failureReason": str(exc),
+            "cached": False,
+            "output": {"error": str(exc)},
+        }
+    manifest_reference["stages"]["summary"] = {
+        "status": stage["status"],
+        "success": stage["success"],
+        "action": stage["action"],
+        "failureReason": stage["failureReason"],
+        "updatedAt": _now(),
+        "output": stage.get("output") if isinstance(stage.get("output"), dict) else {},
+    }
+    return stage
+
+
+def _run_reference_curation_quality_stage(
+    *,
+    reference: dict[str, Any],
+    model: str,
+    apply: bool,
+    refresh_quality: bool,
+    manifest_reference: dict[str, Any],
+    identifier_failed: bool,
+) -> dict[str, Any]:
+    if identifier_failed:
+        stage = {
+            "status": "skipped",
+            "success": False,
+            "action": "skip",
+            "failureReason": "identifier prepass failed",
+            "cached": False,
+        }
+        manifest_reference["stages"]["quality"] = {
+            **stage,
+            "updatedAt": _now(),
+            "output": {},
+        }
+        return stage
+    prior = _reference_curation_manifest_stage(manifest_reference, "quality")
+    if prior.get("success") and not refresh_quality:
+        return {
+            "status": "reused",
+            "success": True,
+            "action": "reuse",
+            "failureReason": "",
+            "cached": True,
+            "output": prior.get("output") if isinstance(prior.get("output"), dict) else {},
+        }
+    try:
+        output = reference_quality_assess(
+            reference_id=str(reference.get("id") or ""),
+            model=model,
+            apply=apply,
+            refresh=refresh_quality,
+            persist_local_metadata=True,
+        )
+        action = str(output.get("action") or "")
+        success = action in {"create", "noop"}
+        stage = {
+            "status": action or "unknown",
+            "success": success,
+            "action": action or "unknown",
+            "failureReason": "" if success else (output.get("failureReason") or f"quality action={action or 'unknown'}"),
+            "cached": False,
+            "output": output,
+        }
+    except Exception as exc:
+        stage = {
+            "status": "error",
+            "success": False,
+            "action": "error",
+            "failureReason": str(exc),
+            "cached": False,
+            "output": {"error": str(exc)},
+        }
+    manifest_reference["stages"]["quality"] = {
+        "status": stage["status"],
+        "success": stage["success"],
+        "action": stage["action"],
+        "failureReason": stage["failureReason"],
+        "updatedAt": _now(),
+        "output": stage.get("output") if isinstance(stage.get("output"), dict) else {},
+    }
+    return stage
+
+
+def _select_references_for_curate_recent(
+    *,
+    corpus_key: str,
+    since_dt: _dt.datetime,
+    max_count: int,
+    scan_limit: int,
+) -> list[dict[str, Any]]:
+    references = list_references_by_corpus(_knowledge_corpus_id(corpus_key), limit=max(scan_limit, max_count or 1))
+    references.sort(key=_reference_chrono_key, reverse=True)
+    selected: list[dict[str, Any]] = []
+    for reference in references:
+        reference_dt = _reference_datetime(reference)
+        if reference_dt is None:
+            continue
+        if reference_dt < since_dt:
+            continue
+        selected.append(reference)
+        if max_count and len(selected) >= int(max_count):
+            break
+    return selected
+
+
+def _reference_datetime(reference: dict[str, Any]) -> _dt.datetime | None:
+    for key in ("importedAt", "updatedAt", "retrievedAt", "sourceUpdatedAt", "sourcePublishedAt"):
+        parsed = _parse_iso_datetime(reference.get(key))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _parse_iso_datetime(value: Any) -> _dt.datetime | None:
+    text = _clean_text(value)
+    if not text:
+        return None
+    normalized = f"{text[:-1]}+00:00" if text.endswith("Z") else text
+    try:
+        parsed = _dt.datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=_dt.UTC)
+    return parsed.astimezone(_dt.UTC)
+
+
+def _reference_curation_manifest_path(*, run_id: str, resume: str = "") -> Path:
+    if resume:
+        return Path(resume).expanduser().resolve()
+    directory = PAPYRUS_ROOT / ".papyrus-runs" / f"reference-curation-{run_id}"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory / "manifest.json"
+
+
+def _load_reference_curation_manifest(
+    *,
+    manifest_path: Path,
+    run_id: str,
+    corpus_key: str,
+    apply: bool,
+    model: str,
+    summary_max_tokens: int,
+    since: str,
+    since_hours: int,
+    max_count: int,
+    scan_limit: int,
+    explicit_reference_ids: list[str],
+) -> dict[str, Any]:
+    if manifest_path.exists():
+        parsed = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if not isinstance(parsed, dict):
+            raise ValueError(f"Invalid resume manifest payload: {manifest_path}")
+        parsed.setdefault("references", {})
+        parsed.setdefault("summary", {})
+        parsed["updatedAt"] = _now()
+        return parsed
+    now = _now()
+    return {
+        "kind": "reference.curate-recent.manifest",
+        "version": 1,
+        "runId": run_id,
+        "createdAt": now,
+        "updatedAt": now,
+        "references": {},
+        "summary": {},
+        "inputs": {
+            "corpusKey": corpus_key,
+            "apply": apply,
+            "model": model,
+            "summaryMaxTokens": summary_max_tokens,
+            "since": since,
+            "sinceHours": since_hours,
+            "maxCount": max_count,
+            "scanLimit": scan_limit,
+            "referenceIds": explicit_reference_ids,
+        },
+    }
+
+
+def _save_reference_curation_manifest(manifest_path: Path, manifest: dict[str, Any]) -> None:
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _reference_curation_manifest_reference_entry(
+    *,
+    manifest: dict[str, Any],
+    reference: dict[str, Any],
+    reference_id: str,
+) -> dict[str, Any]:
+    entries = manifest.get("references")
+    if not isinstance(entries, dict):
+        entries = {}
+        manifest["references"] = entries
+    existing = entries.get(reference_id) if isinstance(entries.get(reference_id), dict) else {}
+    entry = {
+        "reference": {
+            "id": reference_id,
+            "lineageId": reference.get("lineageId"),
+            "externalItemId": reference.get("externalItemId"),
+            "curationStatus": reference.get("curationStatus"),
+            "title": reference.get("title"),
+        },
+        "status": existing.get("status") or "pending",
+        "startedAt": existing.get("startedAt") or _now(),
+        "updatedAt": _now(),
+        "completedAt": existing.get("completedAt"),
+        "lastError": existing.get("lastError") or "",
+        "stages": existing.get("stages") if isinstance(existing.get("stages"), dict) else {},
+    }
+    entries[reference_id] = entry
+    return entry
+
+
+def _reference_curation_manifest_stage(manifest_reference: dict[str, Any], stage_key: str) -> dict[str, Any]:
+    stages = manifest_reference.get("stages")
+    if not isinstance(stages, dict):
+        stages = {}
+        manifest_reference["stages"] = stages
+    value = stages.get(stage_key)
+    if isinstance(value, dict):
+        return value
+    return {}
+
+
 def _select_references_for_curation_batch(
     *,
     corpus_key: str,

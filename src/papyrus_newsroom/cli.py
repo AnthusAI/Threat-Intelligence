@@ -21,6 +21,7 @@ from .newsroom import (
     papyrus_search_semantic_nodes,
 )
 from .reference_curation_signals import (
+    reference_curate_recent,
     reference_title_subtitle_batch,
     reference_title_subtitle_enrich_catalog_file,
     reference_title_subtitle_resolve,
@@ -111,6 +112,26 @@ def main(argv: list[str] | None = None) -> int:
     list_parser.add_argument("--status", default="")
     list_parser.add_argument("--order", choices=["newest", "oldest"], default="newest")
     list_parser.add_argument("--scan-limit", type=int, default=1000)
+
+    curate_recent_parser = references_subparsers.add_parser(
+        "curate-recent",
+        help="Curate recent references end-to-end (identifier prepass, title/subtitle, summary, quality)",
+    )
+    curate_recent_parser.add_argument("--corpus-key", required=True)
+    curate_recent_parser.add_argument("--reference", action="append", default=[])
+    curate_recent_parser.add_argument("--since-hours", type=int, default=48)
+    curate_recent_parser.add_argument("--since", default="")
+    curate_recent_parser.add_argument("--max-count", type=int, default=0)
+    curate_recent_parser.add_argument("--scan-limit", type=int, default=1000)
+    curate_recent_parser.add_argument("--max-parallel", type=int, default=1)
+    curate_recent_parser.add_argument("--model", default="gpt-5.4-mini")
+    curate_recent_parser.add_argument("--summary-max-tokens", type=int, default=500)
+    curate_recent_parser.add_argument("--refresh-summary", action="store_true")
+    curate_recent_parser.add_argument("--refresh-quality", action="store_true")
+    curate_recent_parser.add_argument("--resume", default="")
+    curate_recent_parser.add_argument("--apply", action="store_true")
+    curate_recent_parser.add_argument("--dry-run", action="store_true")
+    curate_recent_parser.add_argument("--json", action="store_true")
 
     summaries_parser = references_subparsers.add_parser(
         "summaries",
@@ -536,6 +557,24 @@ def _run_story_budget_output(args: argparse.Namespace, *, command: str = "story-
 
 
 def _run_references_command(args: argparse.Namespace) -> dict:
+    if args.references_command == "curate-recent":
+        if args.apply and args.dry_run:
+            raise ValueError("--apply and --dry-run cannot be used together.")
+        return reference_curate_recent(
+            corpus_key=args.corpus_key,
+            reference_ids=args.reference,
+            since_hours=args.since_hours,
+            since=args.since,
+            max_count=args.max_count,
+            scan_limit=args.scan_limit,
+            max_parallel=args.max_parallel,
+            model=args.model,
+            summary_max_tokens=args.summary_max_tokens,
+            refresh_summary=args.refresh_summary,
+            refresh_quality=args.refresh_quality,
+            apply=(args.apply and not args.dry_run),
+            resume=args.resume,
+        )
     if args.references_command == "summarize":
         return reference_summarize(
             reference_id=args.reference,
