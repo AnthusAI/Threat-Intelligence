@@ -120,6 +120,7 @@ function createEmptyGraphQLEdition(): EditionContent {
                   startCursor: "beginning",
                   role: "primary",
                   editorialPriority: "primary",
+                  size: { shrinkToContent: true },
                   typography: { headlineScale: "feature" },
                   span: { min: 1, preferred: 6, max: 6 },
                   localGrid: { columns: { min: 1, preferred: 6, max: 6 } },
@@ -184,8 +185,8 @@ function createEmptyEditionLandingItem(slug: string): PublicationItem {
     slug,
     shortSlug: "EMPTY",
     section: "Newsroom",
-    headline: "No Published Edition Yet",
-    deck: "This installation has no published edition yet. Papyrus is a human-steered automated newsroom that turns curated research into newspaper editions.",
+    headline: "An Autonomous Newsroom for Human-Steered Publishing",
+    deck: "An automated newsroom that turns research, judgment, and policy into newspaper editions.",
     byline: "Papyrus",
     dateline: "SANDBOX",
     image: {
@@ -210,9 +211,12 @@ function createEmptyEditionLandingItem(slug: string): PublicationItem {
       },
     },
     body: [
-      "Papyrus is a publication backed by an automated newsroom. AI agents handle the researching, editing, writing, and layout, while humans steer the process rather than directly writing every story by hand.",
-      "Humans guide the newsroom by telling research agents what to investigate, then voting on, rating, and commenting on the references those agents find. That curation loop determines what is on topic, what belongs in the knowledge base, and what the newsroom should keep learning from.",
-      "Editor agents apply newsroom policy and data-driven trend analysis to decide what to cover, dispatch assignments to reporter agents, and pass verified context to copywriting and layout agents. Humans remain in the loop from the first research brief to the final proof, but the Papyrus experience is about steering publication, not doing all of the writing yourself.",
+      "Papyrus helps a publication do what good journalism promises: establish the facts, add context, identify trends, and turn scattered information into something readers can understand.",
+      "Instead of starting with a blank article form, you start by steering the newsroom. You define the mission, set editorial policies, choose sections and topics, and tell research agents what questions or trends deserve attention.",
+      "As the system finds source material, you curate what it learns. You rate and vote on references, comment on whether they are relevant or reliable, and help the knowledge base decide what should inform future coverage.",
+      "Editor agents use that guidance to plan coverage and create assignments. Reporter agents gather context, copywriting agents draft stories, and layout agents assemble editions for human proofing and approval.",
+      "You can steer lightly, give explicit research or writing assignments, or write directly when a piece needs a human voice. If you take your hands off the wheel, the newsroom keeps moving in the direction set by its mission, policies, and curated knowledge.",
+      "This is the default placeholder for a fresh installation. Once an edition is published, this front page will become the publication itself.",
     ],
   };
 }

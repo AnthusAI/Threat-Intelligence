@@ -942,20 +942,20 @@ function solveFrontArticleFrame(
   const chrome = getStoryChromeMetrics(config, item, storyRole, headlineScale, blockWidth, preludeImage?.height ?? 0, blockSpec.chrome);
   const chromeHeight = getStoryChromeHeight(chrome);
   const jumpReserveHeight = getStoryJumpReserveHeight(chrome);
-  const rowHeight = placement.rowHeight ?? getFrontRowHeight(config, placement.solveIndex);
+  const rowHeight = getFrontArticleRowHeight(placement, config);
   const baseBodySlotHeight = Math.max(getMinimumTextFrameHeight(config), snapDownToRhythm(rowHeight - chromeHeight - jumpReserveHeight, config.rhythm));
   const imageWrap = !preludeImage && storyRole === "feature" ? getLeadImageWrap(item, blockWidth, config) : null;
-  const bodySlotHeight = imageWrap
+  let bodySlotHeight = imageWrap
     ? Math.max(baseBodySlotHeight, reserveRhythmRows(imageWrap.height, config.rhythm))
     : baseBodySlotHeight;
   const lineLimitHeight = blockSpec.cutPolicy?.maxBodyLines
     ? getLineLimitHeight(blockSpec.cutPolicy.maxBodyLines, config.lineHeight, config.linePaintHeight, config.rhythm)
     : bodySlotHeight;
-  const maxHeight = Math.min(bodySlotHeight, lineLimitHeight);
-  const blockHeight = Math.max(rowHeight, reserveRhythmRows(chromeHeight + bodySlotHeight + jumpReserveHeight, config.rhythm));
   const startCursor = { ...flow.currentCursor };
-  const result = layoutTextLines({
-    prepared: getPrepared(prepared, item, config.frontBodyFont),
+  const text = getPrepared(prepared, item, config.frontBodyFont);
+  let maxHeight = Math.min(bodySlotHeight, lineLimitHeight);
+  let result = layoutTextLines({
+    prepared: text,
     cursor: startCursor,
     maxHeight,
     maxWidth: blockWidth,
@@ -965,6 +965,22 @@ function solveFrontArticleFrame(
     fontFamily: SERIF_TEXT_FONT,
     obstacles: imageWrap ? [imageWrap] : [],
   });
+  while (shouldGrowFrontArticleToContent(blockSpec) && result.hasMore) {
+    bodySlotHeight = reserveRhythmRows(bodySlotHeight + config.rhythm.rowHeight, config.rhythm);
+    maxHeight = bodySlotHeight;
+    result = layoutTextLines({
+      prepared: text,
+      cursor: startCursor,
+      maxHeight,
+      maxWidth: blockWidth,
+      lineHeight: config.lineHeight,
+      linePaintHeight: config.linePaintHeight,
+      fontSize: config.frontBodyFontSize,
+      fontFamily: SERIF_TEXT_FONT,
+      obstacles: imageWrap ? [imageWrap] : [],
+    });
+  }
+  const blockHeight = Math.max(rowHeight, reserveRhythmRows(chromeHeight + bodySlotHeight + jumpReserveHeight, config.rhythm));
   const range = createTextRange({
     flow,
     pageId: pageIdFor(pageNumber),
@@ -1038,7 +1054,7 @@ function solveComposedFrontArticleFrame(
   const localConfig = { ...config, columnCount: localColumnCount, contentWidth: blockWidth };
   const chrome = getStoryChromeMetrics(config, item, storyRole, headlineScale, blockWidth, 0, blockSpec.chrome);
 
-  const rowHeight = placement.rowHeight ?? getFrontRowHeight(config, placement.solveIndex);
+  const rowHeight = getFrontArticleRowHeight(placement, config);
   const jumpReserveHeight = getStoryJumpReserveHeight(chrome);
   const topMediaVariant = resolveTopMediaCompositionVariant(blockSpec, localConfig);
   const compositionMode = getFrontCompositionFlowMode(placement, config, localConfig, topMediaVariant);
@@ -2312,6 +2328,17 @@ function getFrontRowHeight(config: LayoutConfig, articleIndex: number): number {
   return config.frontRows.find((row) => articleIndex >= row.startIndex && articleIndex <= row.endIndex)?.height ?? reserveRhythmRows(420, config.rhythm);
 }
 
+function getFrontArticleRowHeight(placement: FrontArticlePlacement, config: LayoutConfig): number {
+  const baseHeight = placement.rowHeight ?? getFrontRowHeight(config, placement.solveIndex);
+  const requestedRows = placement.block.size?.defaultRows;
+  if (!requestedRows) return baseHeight;
+  return Math.max(baseHeight, reserveRhythmRows(requestedRows * config.rhythm.rowHeight, config.rhythm));
+}
+
+function shouldGrowFrontArticleToContent(blockSpec: ArticleFrameBlockSpec): boolean {
+  return Boolean(blockSpec.size?.shrinkToContent && !blockSpec.cutPolicy?.maxBodyLines && !blockSpec.cutPolicy?.jumpTargetPage);
+}
+
 function getBlockSpan(config: LayoutConfig, span: ResponsiveSpanPolicy | undefined): number {
   if (config.columnCount === 1) return 1;
   return clamp(span?.preferred ?? config.columnCount, span?.min ?? 1, Math.min(span?.max ?? config.columnCount, config.columnCount));
@@ -2984,7 +3011,7 @@ function getPrepared(
   const key = `${article.slug}:${font}`;
   const cached = cache.get(key);
   if (cached) return cached;
-  const prepared = prepareWithSegments(getPublicationItemText(article), font);
+  const prepared = prepareWithSegments(getPublicationItemText(article), font, { whiteSpace: "pre-wrap" });
   cache.set(key, prepared);
   return prepared;
 }

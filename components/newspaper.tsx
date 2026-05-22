@@ -1255,6 +1255,7 @@ function PlaceholderItemPanel({ item }: { item: PublicationItem }) {
   const deck = item.deck;
   const href = item.type === "article" ? undefined : item.href;
   const ctaLabel = getMetadataString(item, "ctaLabel") ?? "Open";
+  const isCta = kind === "cta";
   return (
     <article
       className={`placeholder-panel placeholder-panel--${toClassSuffix(item.type)} placeholder-panel--${toClassSuffix(kind)}`}
@@ -1263,12 +1264,12 @@ function PlaceholderItemPanel({ item }: { item: PublicationItem }) {
       data-placeholder-kind={kind}
     >
       <p className="placeholder-panel__kicker">{getPlaceholderPanelKicker(item)}</p>
-      <h4>{href ? <Link href={href}>{title}</Link> : title}</h4>
+      <h4>{href ? <Link href={href}>{ctaLabel}</Link> : title}</h4>
       {deck ? <p className="placeholder-panel__deck">{deck}</p> : null}
       {body.map((paragraph, index) => (
         <p className="placeholder-panel__body" key={`${item.slug}-body-${index}`}>{paragraph}</p>
       ))}
-      {href ? <Link className="placeholder-panel__link" href={href}>{ctaLabel}</Link> : null}
+      {href && !isCta ? <Link className="placeholder-panel__link" href={href}>{ctaLabel}</Link> : null}
     </article>
   );
 }
@@ -1303,7 +1304,7 @@ function getPlaceholderPanelKicker(item: PublicationItem): string {
   if (kind === "section" && placeholderType === "canonical") return "Canonical Section";
   if (kind === "section") return "Rotating Section";
   if (kind === "topic") return "Curated Root Topic";
-  if (kind === "cta") return "Newsroom Link";
+  if (kind === "cta") return "Newsroom";
   return item.section ?? item.type;
 }
 
