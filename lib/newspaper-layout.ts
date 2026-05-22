@@ -140,6 +140,7 @@ export type SolvedBlock = {
   headlineScale?: HeadlineScaleId;
   editorialPriority?: EditorialPriorityId;
   item?: PublicationItem;
+  items?: PublicationItem[];
   article?: ArticlePublicationItem;
   pageNumber: number;
   jumpTargetPage?: number;
@@ -942,12 +943,16 @@ function solveFrontArticleFrame(
   const chromeHeight = getStoryChromeHeight(chrome);
   const jumpReserveHeight = getStoryJumpReserveHeight(chrome);
   const rowHeight = placement.rowHeight ?? getFrontRowHeight(config, placement.solveIndex);
-  const bodySlotHeight = Math.max(getMinimumTextFrameHeight(config), snapDownToRhythm(rowHeight - chromeHeight - jumpReserveHeight, config.rhythm));
+  const baseBodySlotHeight = Math.max(getMinimumTextFrameHeight(config), snapDownToRhythm(rowHeight - chromeHeight - jumpReserveHeight, config.rhythm));
+  const imageWrap = !preludeImage && storyRole === "feature" ? getLeadImageWrap(item, blockWidth, config) : null;
+  const bodySlotHeight = imageWrap
+    ? Math.max(baseBodySlotHeight, reserveRhythmRows(imageWrap.height, config.rhythm))
+    : baseBodySlotHeight;
   const lineLimitHeight = blockSpec.cutPolicy?.maxBodyLines
     ? getLineLimitHeight(blockSpec.cutPolicy.maxBodyLines, config.lineHeight, config.linePaintHeight, config.rhythm)
     : bodySlotHeight;
   const maxHeight = Math.min(bodySlotHeight, lineLimitHeight);
-  const imageWrap = !preludeImage && storyRole === "feature" ? getLeadImageWrap(item, blockWidth, config) : null;
+  const blockHeight = Math.max(rowHeight, reserveRhythmRows(chromeHeight + bodySlotHeight + jumpReserveHeight, config.rhythm));
   const startCursor = { ...flow.currentCursor };
   const result = layoutTextLines({
     prepared: getPrepared(prepared, item, config.frontBodyFont),
@@ -997,7 +1002,7 @@ function solveFrontArticleFrame(
     x: 0,
     y: 0,
     width: blockWidth,
-    height: rowHeight,
+    height: blockHeight,
     span,
     columnCount: 1,
     columns: [result.lines],
@@ -1005,7 +1010,7 @@ function solveFrontArticleFrame(
     textRange: range,
     hasMore: result.hasMore,
     front: {
-      rowHeight,
+      rowHeight: blockHeight,
       bodySlotHeight,
       chromeHeight,
       jumpReserveHeight,
@@ -1664,18 +1669,24 @@ function solveStaticBlock(
   const width = config.contentWidth;
   if (blockSpec.type === "itemStack") {
     const items = blockSpec.itemIds.map((itemId) => requireKnownItem(itemId, itemsBySlug));
-    const stackHeight = clampRhythmHeight(220 + items.length * 72, getMinimumTextFrameHeight(config), allocatedHeight, config.rhythm);
+    const gridColumnCount = Math.max(1, Math.min(config.columnCount, 4));
+    const rowCount = Math.ceil(items.length / gridColumnCount);
+    const stackHeight = reserveRhythmRows(
+      Math.max(getMinimumTextFrameHeight(config), 220 + rowCount * 170),
+      config.rhythm,
+    );
     return {
       id: blockSpec.id,
       type: blockSpec.type,
       pageNumber: pageSpec.pageNumber,
       title: blockSpec.title,
+      items,
       x: 0,
       y: 0,
       width,
       height: stackHeight,
       span: config.columnCount,
-      columnCount: 1,
+      columnCount: gridColumnCount,
       columns: [],
       furniture: [],
     };
@@ -2829,17 +2840,46 @@ function measureWrappedTextBlock(
 }
 
 function getLeadImageWrap(article: ArticlePublicationItem, width: number, config: LayoutConfig): TextObstacle | null {
-  if (width < 520) return null;
   const layout = article.image.layout;
-  const preferredHeight = layout?.preferredHeight ?? config.lineHeight * 8;
   const minHeight = layout?.minHeight ?? config.lineHeight * 6;
   const maxHeight = layout?.maxHeight ?? config.lineHeight * 12;
+  const targetWidth = getInlineFloatWidth(layout, width, config);
+  const imageWidth = clamp(
+    Math.round(targetWidth),
+    Math.min(layout?.inlineFloat?.minWidth ?? 72, Math.round(width * 0.24)),
+    Math.round(width * (layout?.inlineFloat?.maxWidthRatio ?? 0.42)),
+  );
+  const naturalHeight = layout?.crop === "contain"
+    ? Math.round(imageWidth / getImageAspectRatio(article.image))
+    : Math.round(layout?.preferredHeight ?? config.lineHeight * 8);
+  const height = layout?.crop === "contain"
+    ? snapPreservedImageHeightToRhythm(naturalHeight, config.rhythm, minHeight, maxHeight)
+    : snapPreferredHeightToRhythm(naturalHeight, config.rhythm, minHeight, maxHeight);
   return {
-    x: Math.round(width * 0.58),
+    x: Math.round(width - imageWidth),
     y: 0,
-    width: Math.round(width * 0.42),
-    height: snapPreferredHeightToRhythm(Math.round(preferredHeight), config.rhythm, minHeight, maxHeight),
+    width: imageWidth,
+    height,
   };
+}
+
+function getInlineFloatWidth(
+  layout: ArticlePublicationItem["image"]["layout"],
+  width: number,
+  config: LayoutConfig,
+): number {
+  const intent = layout?.inlineFloat;
+  if (
+    intent &&
+    config.columnCount >= (intent.minColumnCount ?? 2) &&
+    (intent.columnSpan ?? 0) > 0
+  ) {
+    return getSpanWidth(config, intent.columnSpan ?? 1);
+  }
+  const ratio = config.columnCount === 1
+    ? intent?.narrowWidthRatio ?? 0.34
+    : intent?.widthRatio ?? 0.42;
+  return width * ratio;
 }
 
 function createFrontPreludeImage(

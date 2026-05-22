@@ -264,7 +264,7 @@ async function seedArticle(article: Article, index: number, editionConfig: SeedE
       maxHeight: asset.layout?.maxHeight,
       crop: asset.layout?.crop,
       wrapsText: asset.layout?.wrapsText,
-      metadata: toAwsJson({ sourceUrl: asset.src }),
+      metadata: toAwsJson(getMediaMetadata(asset)),
     });
     await upsert("PublishedMediaAsset", {
       id: `published-${mediaId}`,
@@ -290,7 +290,7 @@ async function seedArticle(article: Article, index: number, editionConfig: SeedE
       maxHeight: asset.layout?.maxHeight,
       crop: asset.layout?.crop,
       wrapsText: asset.layout?.wrapsText,
-      metadata: toAwsJson({ sourceUrl: asset.src }),
+      metadata: toAwsJson(getMediaMetadata(asset)),
     });
   }
 }
@@ -488,6 +488,13 @@ function assertNoGraphQLErrors(errors: unknown[] | null | undefined): void {
 
 function toAwsJson(value: unknown): string {
   return JSON.stringify(value);
+}
+
+function getMediaMetadata(asset: ArticleImageAsset): Record<string, unknown> {
+  return {
+    sourceUrl: asset.src,
+    ...(asset.layout?.inlineFloat ? { inlineFloat: asset.layout.inlineFloat } : {}),
+  };
 }
 
 function withVersionFields<T extends Record<string, unknown>>(

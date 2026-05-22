@@ -12238,7 +12238,7 @@ async function buildArticleDiff(client, article, editionConfig, index) {
       maxHeight: asset.layout?.maxHeight ?? null,
       crop: asset.layout?.crop ?? null,
       wrapsText: asset.layout?.wrapsText ?? null,
-      metadata: toAwsJson({ sourceUrl: asset.src }),
+      metadata: toAwsJson(mediaAssetMetadata(asset)),
     };
     records.push(await buildRecordChange(client, "MediaAsset", mediaRecord));
     records.push(await buildRecordChange(client, "PublishedMediaAsset", {
@@ -15042,6 +15042,13 @@ function withVersionFields(record, { now, actor, reason }) {
 
 function toAwsJson(value) {
   return JSON.stringify(value);
+}
+
+function mediaAssetMetadata(asset) {
+  return {
+    sourceUrl: asset.src,
+    ...(asset.layout?.inlineFloat ? { inlineFloat: asset.layout.inlineFloat } : {}),
+  };
 }
 
 function parseAwsJson(value) {

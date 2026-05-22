@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ARCHIVE_PREVIEW_HEIGHT, ARCHIVE_PREVIEW_WIDTH } from "../lib/archive-types";
 import type { EditionContent, NewsDeskAppendix, NewsDeskCategoryTreeNode } from "../lib/content-types";
 import { shouldBypassImageOptimization } from "../lib/image-url";
+import type { PublicationItem } from "../lib/publication-items";
 import { loadEditorCategoryTreeState } from "./news-desk-taxonomy-client";
 import { ReaderAuthControl } from "./reader-auth-control";
 import {
@@ -135,6 +136,13 @@ export function Newspaper({ content, editionBasePath, initialPageNumber = 1, ini
   useEffect(() => {
     let active = true;
     setEditorAppendixReady(false);
+    if (content.placeholderMode === "emptyEdition") {
+      setEditorAppendix(null);
+      setEditorAppendixReady(true);
+      return () => {
+        active = false;
+      };
+    }
     const refreshAppendix = async () => {
       const state = await loadEditorCategoryTreeState({
         scenarioAppendix: content.newsDeskAppendix,
@@ -160,7 +168,7 @@ export function Newspaper({ content, editionBasePath, initialPageNumber = 1, ini
       active = false;
       unsubscribe();
     };
-  }, [content.newsDeskAppendix, content.source]);
+  }, [content.newsDeskAppendix, content.placeholderMode, content.source]);
 
   const appendixPages = useMemo(() => buildNewsDeskAppendixPages(editorAppendix, layout?.pages.length ?? 0), [editorAppendix, layout?.pages.length]);
   const totalPages = (layout?.pages.length ?? 0) + appendixPages.length;
@@ -694,6 +702,7 @@ function SolvedPageView({
                 index={index}
                 key={block.id}
                 scrollToPage={scrollToPage}
+                suppressDirectArticleLink={content.placeholderMode === "emptyEdition"}
               />
             ))}
           </div>
@@ -996,6 +1005,7 @@ function FrontStoryBlock({
   disableLinks = false,
   editionBasePath,
   scrollToPage,
+  suppressDirectArticleLink = false,
 }: {
   anchorId?: string;
   block: SolvedBlock;
@@ -1003,10 +1013,12 @@ function FrontStoryBlock({
   editionBasePath?: string;
   index: number;
   scrollToPage: (pageNumber: number, options?: ScrollToPageOptions) => void;
+  suppressDirectArticleLink?: boolean;
 }) {
   const article = block.article;
   if (!article || !block.front) return null;
   const articleHref = getArticleHref(article.slug, editionBasePath);
+  const disableArticleLinks = disableLinks || suppressDirectArticleLink;
   const composed = Boolean(block.front.composition);
   const preludeImages = block.furniture.filter((furniture): furniture is SolvedImageFurniture => (
     furniture.kind === "image" && furniture.templateId === "front-prelude"
@@ -1030,7 +1042,7 @@ function FrontStoryBlock({
             articleHref={articleHref}
             borderTopHeight={block.front?.chrome.borderTopHeight ?? 0}
             box={box}
-            disableLinks={disableLinks}
+            disableLinks={disableArticleLinks}
             key={box.id}
           />
         ))}
@@ -1062,19 +1074,21 @@ function FrontStoryBlock({
             ))}
           </div>
         </div>
-        <div className="jump-line">
-          {block.jumpTargetPage ? (
-            disableLinks ? (
-              <span>{block.jumpLabel ?? `SEE MORE ON A${block.jumpTargetPage}`}</span>
+        {block.jumpTargetPage || !suppressDirectArticleLink ? (
+          <div className="jump-line">
+            {block.jumpTargetPage ? (
+              disableLinks ? (
+                <span>{block.jumpLabel ?? `SEE MORE ON A${block.jumpTargetPage}`}</span>
+              ) : (
+                <Link href={getPageHref(block.jumpTargetPage, editionBasePath)} onClick={(event) => handleJumpClick(event, block.jumpTargetPage ?? 1, scrollToPage)}>
+                  {block.jumpLabel ?? `SEE MORE ON A${block.jumpTargetPage}`}
+                </Link>
+              )
             ) : (
-              <Link href={getPageHref(block.jumpTargetPage, editionBasePath)} onClick={(event) => handleJumpClick(event, block.jumpTargetPage ?? 1, scrollToPage)}>
-                {block.jumpLabel ?? `SEE MORE ON A${block.jumpTargetPage}`}
-              </Link>
-            )
-          ) : (
-            disableLinks ? <span>Read the full article</span> : <Link href={articleHref}>Read the full article</Link>
-          )}
-        </div>
+              disableLinks ? <span>Read the full article</span> : <Link href={articleHref}>Read the full article</Link>
+            )}
+          </div>
+        ) : null}
       </article>
     );
   }
@@ -1091,7 +1105,7 @@ function FrontStoryBlock({
       {preludeImages.map((furniture) => <LeadPhotoFigure furniture={furniture} key={furniture.id} />)}
       <div className="story-label">{article.section}</div>
       <h2>
-        {disableLinks ? <span>{article.headline}</span> : <Link href={articleHref}>{article.headline}</Link>}
+        {disableArticleLinks ? <span>{article.headline}</span> : <Link href={articleHref}>{article.headline}</Link>}
       </h2>
       <p className="story-deck">{article.deck}</p>
       <div className="story-byline">{`${article.byline} / ${article.dateline}`}</div>
@@ -1099,19 +1113,21 @@ function FrontStoryBlock({
         {measureFurniture.map((furniture) => <LeadPhotoFigure furniture={furniture} key={furniture.id} />)}
         <MeasuredLines lines={block.columns[0] ?? []} />
       </div>
-      <div className="jump-line">
-        {block.jumpTargetPage ? (
-          disableLinks ? (
-            <span>{block.jumpLabel ?? `SEE MORE ON A${block.jumpTargetPage}`}</span>
+      {block.jumpTargetPage || !suppressDirectArticleLink ? (
+        <div className="jump-line">
+          {block.jumpTargetPage ? (
+            disableLinks ? (
+              <span>{block.jumpLabel ?? `SEE MORE ON A${block.jumpTargetPage}`}</span>
+            ) : (
+              <Link href={getPageHref(block.jumpTargetPage, editionBasePath)} onClick={(event) => handleJumpClick(event, block.jumpTargetPage ?? 1, scrollToPage)}>
+                {block.jumpLabel ?? `SEE MORE ON A${block.jumpTargetPage}`}
+              </Link>
+            )
           ) : (
-            <Link href={getPageHref(block.jumpTargetPage, editionBasePath)} onClick={(event) => handleJumpClick(event, block.jumpTargetPage ?? 1, scrollToPage)}>
-              {block.jumpLabel ?? `SEE MORE ON A${block.jumpTargetPage}`}
-            </Link>
-          )
-        ) : (
-          disableLinks ? <span>Read the full article</span> : <Link href={articleHref}>Read the full article</Link>
-        )}
-      </div>
+            disableLinks ? <span>Read the full article</span> : <Link href={articleHref}>Read the full article</Link>
+          )}
+        </div>
+      ) : null}
     </article>
   );
 }
@@ -1168,6 +1184,9 @@ function SolvedBlockView({
   if (block.type === "articleFrame" && block.article) {
     return <ArticleFrameBlock anchorId={anchorId} block={block} editionBasePath={editionBasePath} layout={layout} />;
   }
+  if (block.type === "itemStack" && block.items?.length) {
+    return <ItemStackBlock block={block} />;
+  }
   if (block.type === "adBlock") {
     return <AdBlock block={block} />;
   }
@@ -1176,6 +1195,127 @@ function SolvedBlockView({
       {block.title ? <h2>{block.title}</h2> : null}
     </article>
   );
+}
+
+function ItemStackBlock({ block }: { block: SolvedBlock }) {
+  const items = block.items ?? [];
+  const panelGroups = getPlaceholderItemGroups(items);
+  const headerDescription = getPlaceholderStackDescription(block);
+  return (
+    <article
+      className={`solved-block solved-block--itemStack placeholder-item-stack placeholder-item-stack--${toClassSuffix(block.title ?? "stack")}`}
+      data-block-id={block.id}
+      data-block-type={block.type}
+      style={
+        {
+          height: block.height,
+          "--placeholder-stack-columns": block.columnCount,
+        } as CSSProperties
+      }
+    >
+      {block.title ? (
+        <header className="placeholder-item-stack__header">
+          <div className="placeholder-item-stack__title-lockup">
+            <p className="placeholder-item-stack__eyebrow">Public placeholder register</p>
+            <h2>{block.title}</h2>
+          </div>
+          {headerDescription ? <p className="placeholder-item-stack__deck">{headerDescription}</p> : null}
+        </header>
+      ) : null}
+      <div className="placeholder-item-stack__body">
+        {panelGroups.map((group) => (
+          <section className="placeholder-item-stack__group" data-placeholder-group={group.key} key={group.key}>
+            {group.label ? <h3>{group.label}</h3> : null}
+            <div className="placeholder-item-stack__grid">
+              {group.items.map((item) => (
+                <PlaceholderItemPanel item={item} key={item.slug} />
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function getPlaceholderStackDescription(block: SolvedBlock): string | null {
+  if (block.id === "empty-edition-sections-stack") {
+    return "These sections are configured by the human editorial staff in the Newsroom.";
+  }
+  if (block.id === "empty-edition-topics-stack") {
+    return "These topics are data-driven: derived from the knowledge base of curated references using AI/ML techniques.";
+  }
+  return null;
+}
+
+function PlaceholderItemPanel({ item }: { item: PublicationItem }) {
+  const kind = getMetadataString(item, "placeholderKind") ?? item.type;
+  const body = item.type === "article" ? item.body : item.body ?? [];
+  const title = item.type === "article" ? item.headline : item.title;
+  const deck = item.deck;
+  const href = item.type === "article" ? undefined : item.href;
+  const ctaLabel = getMetadataString(item, "ctaLabel") ?? "Open";
+  return (
+    <article
+      className={`placeholder-panel placeholder-panel--${toClassSuffix(item.type)} placeholder-panel--${toClassSuffix(kind)}`}
+      data-item-id={item.slug}
+      data-item-type={item.type}
+      data-placeholder-kind={kind}
+    >
+      <p className="placeholder-panel__kicker">{getPlaceholderPanelKicker(item)}</p>
+      <h4>{href ? <Link href={href}>{title}</Link> : title}</h4>
+      {deck ? <p className="placeholder-panel__deck">{deck}</p> : null}
+      {body.map((paragraph, index) => (
+        <p className="placeholder-panel__body" key={`${item.slug}-body-${index}`}>{paragraph}</p>
+      ))}
+      {href ? <Link className="placeholder-panel__link" href={href}>{ctaLabel}</Link> : null}
+    </article>
+  );
+}
+
+function getPlaceholderItemGroups(items: PublicationItem[]): Array<{ key: string; label?: string; items: PublicationItem[] }> {
+  const sectionItems = items.filter((item) => getMetadataString(item, "placeholderKind") === "section");
+  const ctaItems = items.filter((item) => getMetadataString(item, "placeholderKind") === "cta");
+  if (sectionItems.length + ctaItems.length === items.length && sectionItems.length > 0) {
+    return [
+      {
+        key: "canonical",
+        label: "Canonical Sections",
+        items: sectionItems.filter((item) => getMetadataString(item, "placeholderGroup") === "canonical"),
+      },
+      {
+        key: "rotating",
+        label: "Rotating Sections",
+        items: [
+          ...sectionItems.filter((item) => getMetadataString(item, "placeholderGroup") === "rotating"),
+          ...ctaItems,
+        ],
+      },
+    ].filter((group) => group.items.length > 0);
+  }
+
+  return [{ key: "items", items }];
+}
+
+function getPlaceholderPanelKicker(item: PublicationItem): string {
+  const kind = getMetadataString(item, "placeholderKind");
+  const placeholderType = getMetadataString(item, "placeholderType");
+  if (kind === "section" && placeholderType === "canonical") return "Canonical Section";
+  if (kind === "section") return "Rotating Section";
+  if (kind === "topic") return "Curated Root Topic";
+  if (kind === "cta") return "Newsroom Link";
+  return item.section ?? item.type;
+}
+
+function getMetadataString(item: PublicationItem, key: string): string | null {
+  if (item.type === "article") return null;
+  const value = item.metadata?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function toClassSuffix(value: string): string {
+  const suffix = value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return suffix || "item";
 }
 
 function ArticleFrameBlock({ anchorId, block, editionBasePath, layout }: { anchorId?: string; block: SolvedBlock; editionBasePath?: string; layout: NewspaperLayout }) {

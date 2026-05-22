@@ -5,6 +5,14 @@ export type ArticleImageLayout = {
   aspectRatio: number;
   crop: "cover" | "contain";
   wrapsText: boolean;
+  inlineFloat?: {
+    minColumnCount?: number;
+    columnSpan?: number;
+    widthRatio?: number;
+    narrowWidthRatio?: number;
+    maxWidthRatio?: number;
+    minWidth?: number;
+  };
   focalPoint?: {
     x: number;
     y: number;
