@@ -273,13 +273,23 @@ function copywritingAssignmentForReportingPacket({ assignment, message, decision
   const packet = reportingPacketPayload(message);
   const reporting = reportingPacketFields(packet);
   const coverageConceptKey = reporting.coverageConceptKey
+    ?? reporting.coverageKey
     ?? metadata.coverageConceptKey
     ?? metadata.coverageKey
     ?? null;
   const editionId = reporting.editionId
     ?? metadata.editionId
     ?? (metadata.storyCycleDate ? `edition-${metadata.storyCycleDate}` : null);
-  const storyCycleRunId = metadata.storyCycleRunId ?? reporting.storyCycleRunId ?? null;
+  const editionDate = metadata.editionDate
+    ?? metadata.storyCycleDate
+    ?? reporting.editionDate
+    ?? dateFromId(editionId);
+  const storyCycleRunId = metadata.storyCycleRunId
+    ?? metadata.coverageThemeRunId
+    ?? metadata.runId
+    ?? reporting.storyCycleRunId
+    ?? message.importRunId
+    ?? null;
   const id = `assignment-copywriting-${safeId(targetItemType)}-${hashShort([assignment.id, message.id, decision])}`;
   const queueKey = `copywriting:${editionId ?? "unplanned"}:section:${section}:type:${targetItemType}`;
   const copywriterBrief = cleanString(reporting.copywriterBrief)
@@ -295,6 +305,8 @@ function copywritingAssignmentForReportingPacket({ assignment, message, decision
     targetItemType,
     sectionKey: section,
     editionId,
+    editionDate,
+    storyCycleDate: editionDate,
     coverageConceptKey,
     topic: reporting.topic ?? metadata.topic ?? null,
     acceptedReferenceIds: arrayValue(reporting.acceptedReferenceIds),
@@ -367,8 +379,10 @@ function reportingPacketFields(value) {
     topic: cleanString(reporting.topic),
     sectionKey: cleanString(reporting.sectionKey ?? reporting.section_key),
     editionId: cleanString(reporting.editionId ?? reporting.edition_id),
+    editionDate: cleanString(reporting.editionDate ?? reporting.edition_date),
     storyCycleRunId: cleanString(reporting.storyCycleRunId ?? reporting.story_cycle_run_id ?? reporting.coverageThemeRunId ?? reporting.coverage_theme_run_id),
-    coverageConceptKey: cleanString(reporting.coverageConceptKey ?? reporting.coverage_concept_key ?? coverageConcept.key),
+    coverageKey: cleanString(reporting.coverageKey ?? reporting.coverage_key),
+    coverageConceptKey: cleanString(reporting.coverageConceptKey ?? reporting.coverage_concept_key ?? reporting.coverageKey ?? reporting.coverage_key ?? coverageConcept.key),
     editorRecommendation: cleanString(reporting.editorRecommendation ?? reporting.editor_recommendation),
     recommendedAngle: cleanString(reporting.recommendedAngle ?? reporting.recommended_angle),
     copywriterBrief: cleanString(reporting.copywriterBrief ?? reporting.copywriter_brief),
@@ -465,6 +479,11 @@ function hashShort(value) {
 
 function hashStable(value) {
   return crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+function dateFromId(value) {
+  const match = String(value ?? "").match(/\d{4}-\d{2}-\d{2}/);
+  return match ? match[0] : null;
 }
 
 module.exports = {

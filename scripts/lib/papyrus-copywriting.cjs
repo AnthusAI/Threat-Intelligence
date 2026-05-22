@@ -170,6 +170,9 @@ function draftItemForCopywriting({ assignment, metadata, packet, targetItemType,
     ?? cleanString(assignment.summary)
     ?? "Draft created from a selected private reporting packet.";
   const body = readerFacingBody({ packet, assignment, targetItemType });
+  const editionDate = cleanString(metadata.editionDate ?? metadata.storyCycleDate)
+    ?? cleanString(packet.editionDate)
+    ?? dateFromId(metadata.editionId ?? packet.editionId);
   const record = {
     id,
     lineageId,
@@ -193,7 +196,7 @@ function draftItemForCopywriting({ assignment, metadata, packet, targetItemType,
     body,
     byline: null,
     dateline: null,
-    editionDate: metadata.editionDate ?? metadata.storyCycleDate ?? null,
+    editionDate,
     sortTitle: title,
     pullQuotes: [],
     layout: null,
@@ -222,8 +225,8 @@ function privateEditorialMetadataForCopywriting({ assignment, metadata, packet, 
     acceptedReferenceIds: arrayValue(metadata.acceptedReferenceIds ?? packet.acceptedReferenceIds),
     proposedReferences: arrayValue(metadata.proposedReferences ?? packet.proposedReferences),
     unresolvedProposedReferencesStayPrivate: true,
-    storyCycleRunId: metadata.storyCycleRunId ?? packet.storyCycleRunId ?? null,
-    coverageConceptKey: metadata.coverageConceptKey ?? packet.coverageConceptKey ?? null,
+    storyCycleRunId: metadata.storyCycleRunId ?? metadata.coverageThemeRunId ?? metadata.runId ?? packet.storyCycleRunId ?? assignment.importRunId ?? null,
+    coverageConceptKey: metadata.coverageConceptKey ?? metadata.coverageKey ?? packet.coverageConceptKey ?? packet.coverageKey ?? null,
   };
 }
 
@@ -329,8 +332,9 @@ function normalizeReportingPacket(payload) {
     summary: cleanString(reporting.summary),
     sectionKey: cleanString(reporting.sectionKey ?? reporting.section_key),
     editionId: cleanString(reporting.editionId ?? reporting.edition_id),
-    storyCycleRunId: cleanString(reporting.storyCycleRunId ?? reporting.story_cycle_run_id),
-    coverageConceptKey: cleanString(reporting.coverageConceptKey ?? reporting.coverage_concept_key),
+    editionDate: cleanString(reporting.editionDate ?? reporting.edition_date),
+    storyCycleRunId: cleanString(reporting.storyCycleRunId ?? reporting.story_cycle_run_id ?? reporting.coverageThemeRunId ?? reporting.coverage_theme_run_id),
+    coverageConceptKey: cleanString(reporting.coverageConceptKey ?? reporting.coverage_concept_key ?? reporting.coverageKey ?? reporting.coverage_key),
     whyNow: cleanString(reporting.whyNow ?? reporting.why_now),
     nutGrafCandidate: cleanString(reporting.nutGrafCandidate ?? reporting.nut_graf_candidate),
     recommendedAngle: cleanString(reporting.recommendedAngle ?? reporting.recommended_angle),
@@ -372,6 +376,11 @@ function titleCase(value) {
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function dateFromId(value) {
+  const match = String(value ?? "").match(/\d{4}-\d{2}-\d{2}/);
+  return match ? match[0] : null;
 }
 
 function semanticStateKey(kind, lineageId) {

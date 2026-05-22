@@ -7040,8 +7040,16 @@ async function showCopywritingOutput(flags) {
   })));
   const filteredAssignments = assignmentMetadataRows
     .filter(({ assignment }) => !options.assignment || assignment.id === normalizeCliString(options.assignment))
-    .filter(({ metadata }) => !options["run-id"] || metadata.storyCycleRunId === normalizeCliString(options["run-id"]))
-    .filter(({ metadata }) => !options["coverage-key"] || metadata.coverageConceptKey === normalizeCliString(options["coverage-key"]))
+    .filter(({ assignment, metadata }) => !options["run-id"] || normalizeCliString(options["run-id"]) === (
+      metadata.storyCycleRunId
+      ?? metadata.coverageThemeRunId
+      ?? metadata.runId
+      ?? assignment.importRunId
+    ))
+    .filter(({ metadata }) => !options["coverage-key"] || normalizeCliString(options["coverage-key"]) === (
+      metadata.coverageConceptKey
+      ?? metadata.coverageKey
+    ))
     .filter(({ assignment, metadata }) => !options.section || (assignment.sectionKey ?? metadata.sectionKey) === normalizeCliString(options.section));
   const filtered = (await Promise.all(filteredAssignments.map(({ assignment, metadata }) => copywritingOutputRowForAssignment(client, assignment, metadata))))
     .sort((left, right) => (
@@ -7100,8 +7108,8 @@ async function copywritingOutputRowForAssignment(client, assignment, metadataOve
     assignmentTypeKey: assignment.assignmentTypeKey,
     status: assignment.status,
     sectionKey: assignment.sectionKey ?? metadata.sectionKey ?? null,
-    storyCycleRunId: metadata.storyCycleRunId ?? null,
-    coverageConceptKey: metadata.coverageConceptKey ?? null,
+    storyCycleRunId: metadata.storyCycleRunId ?? metadata.coverageThemeRunId ?? metadata.runId ?? assignment.importRunId ?? null,
+    coverageConceptKey: metadata.coverageConceptKey ?? metadata.coverageKey ?? null,
     sourceReportingAssignmentId: metadata.sourceReportingAssignmentId ?? null,
     sourceReportingPacketMessageId: metadata.sourceReportingPacketMessageId ?? null,
     targetItemType: metadata.targetItemType ?? (assignment.assignmentTypeKey === "copywriting.brief-draft" ? "brief" : "article"),
@@ -11605,6 +11613,23 @@ function latestRecordsById(records) {
 }
 
 function isBenignPlannedDuplicate(modelName, left, right) {
+  if (modelName === "ModelAttachment") {
+    const normalize = (record) => ({
+      id: record?.id ?? null,
+      ownerKind: record?.ownerKind ?? null,
+      ownerId: record?.ownerId ?? null,
+      ownerLineageId: record?.ownerLineageId ?? null,
+      role: record?.role ?? null,
+      sortKey: record?.sortKey ?? null,
+      storagePath: record?.storagePath ?? null,
+      filename: record?.filename ?? null,
+      mediaType: record?.mediaType ?? null,
+      byteSize: record?.byteSize ?? null,
+      sha256: record?.sha256 ?? null,
+      status: record?.status ?? null,
+    });
+    return stableJson(normalize(left)) === stableJson(normalize(right));
+  }
   if (modelName !== "Category") return false;
   const normalize = (record) => {
     const next = { ...record };
