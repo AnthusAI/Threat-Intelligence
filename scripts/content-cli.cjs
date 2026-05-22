@@ -11293,7 +11293,7 @@ function writeReferenceSourceAccession({ reference, sourceMaterial, corpusConfig
     dates: {
       published_at: reference.sourcePublishedAt ?? undefined,
       updated_at: reference.sourceUpdatedAt ?? undefined,
-      retrieved_at: reference.retrievedAt ?? new Date().toISOString(),
+      retrieved_at: String(reference.retrievedAt ?? new Date().toISOString()),
     },
     papyrus: {
       reference_id: reference.id,
@@ -11303,7 +11303,11 @@ function writeReferenceSourceAccession({ reference, sourceMaterial, corpusConfig
       accessioned_at: new Date().toISOString(),
     },
   };
-  fs.writeFileSync(sidecarPath, YAML.stringify(pruneUndefined(sidecar)), "utf8");
+  fs.writeFileSync(
+    sidecarPath,
+    YAML.stringify(pruneUndefined(sidecar), { defaultStringType: "QUOTE_DOUBLE" }),
+    "utf8",
+  );
   return {
     biblicusItemId,
     localPath,
