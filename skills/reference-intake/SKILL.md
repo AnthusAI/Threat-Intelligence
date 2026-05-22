@@ -261,6 +261,17 @@ The post-acceptance completion sequence is:
 4. Sync the derived vector index using `skills/knowledge-query/SKILL.md`.
 5. Export accepted-only manifests before topic modeling or entity-graph work.
 
+Use this standard curation sequence for recent references:
+
+1. `npm run content -- content inspect`
+2. `npm run content -- references curate-recent --corpus-key <key> --since-hours 48 --max-count 25 --dry-run --json`
+3. rerun with `--apply` after reviewing dry-run diagnostics.
+
+`references curate-recent` enforces identifier prepass before title/subtitle,
+summary, and quality updates. It writes a resumable manifest at
+`.papyrus-runs/reference-curation-<run-id>/manifest.json`; use `--resume` to
+continue unfinished runs without redoing completed successful stages.
+
 Do not confuse these stages. A pending URL is only a prospect. An accepted URL
 without corpus text is evidence-eligible by curation policy, but not yet useful
 for extraction, vector indexing, topic modeling, or entity graph analysis.

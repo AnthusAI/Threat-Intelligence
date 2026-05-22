@@ -571,6 +571,8 @@ npm run content -- assignments story-cycle-output --run-id <story-cycle-run-id> 
 npm run content -- assignments review-reporting-packet --assignment <assignment-id> --message <message-id> --decision select|merge|brief|hold|kill --note "<editor rationale>" --dry-run
 npm run content -- assignments run-copywriting --assignment <copywriting-assignment-id> --dry-run --json
 npm run content -- assignments copywriting-output --run-id <story-cycle-run-id> --json
+npm run content -- references curate-recent --corpus-key <key> --since-hours 48 --max-count 25 --dry-run --json
+npm run content -- references curate-recent --corpus-key <key> --since-hours 48 --max-count 25 --apply --json
 npm run content -- references register-catalog --config corpora/papyrus-steering.yml --corpus-key <key> --catalog <metadata/catalog.json> --status pending --ingestion-rationale "<summary, research focus, editorial mission fit>" --apply
 npm run content -- references export-analysis-manifest --config corpora/papyrus-steering.yml --corpus-key <key> --output accepted-reference-manifest.json
 npm run content -- references export-scope-training --config corpora/papyrus-steering.yml --corpus-key <key> --output reference-scope-training.json
@@ -586,6 +588,17 @@ files into Papyrus workflow state. With `--apply`, it creates a
 `SemanticRelation` links, and one open `curation.reference-intake` `Assignment`
 per pending reference. The filesystem catalog is not the queue after
 registration; pending references and assignments are.
+
+For routine reference curation, use the operator runbook:
+
+1. `npm run content -- content inspect`
+2. `npm run content -- references curate-recent --corpus-key <key> --since-hours 48 --max-count 25 --dry-run --json`
+3. rerun with `--apply` once dry-run output looks correct.
+
+`references curate-recent` runs identifier prepass first, then title/subtitle,
+summary, and quality in order. It writes resumable manifests under
+`.papyrus-runs/reference-curation-<run-id>/manifest.json` and returns nonzero
+when any reference fails so automation can detect degraded runs.
 
 Set `PAPYRUS_GRAPHQL_ENDPOINT` and `PAPYRUS_GRAPHQL_JWT` before running
 authoring commands. The JWT is sent in the AppSync `Authorization` header using
