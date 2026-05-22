@@ -104,11 +104,18 @@ rendering contracts.
   curation or evidence use. Only current accepted `Reference` rows may be used
   for evidence sets, topic modeling, graph analysis, desk memory, context
   packs, assignment evidence, or edition planning.
-- Agents that generate, test, debug, or design knowledge context packs should
-  follow `skills/knowledge-query/SKILL.md`. `knowledgeQuery` is the shared
-  CLI/Lambda query path for model-ready context; prefer local CLI iteration for
-  context-pack content changes and deploy only when the shared logic is ready
-  for AppSync validation.
+- For **internal knowledge base search** (accepted references, semantic + graph
+  context packs), read `docs/internal-knowledge-research.md` first, then
+  `skills/knowledge-query/SKILL.md`. Run queries with
+  `PYTHONPATH=src python -m papyrus_newsroom knowledge-query` or
+  `poetry run papyrus-newsroom knowledge-query` (not ad-hoc GraphQL). Use
+  `--execution local` only when developing engine behavior; default remote
+  execution needs `PAPYRUS_GRAPHQL_ENDPOINT` and `PAPYRUS_GRAPHQL_JWT`.
+  `knowledgeQuery` is the shared CLI/Lambda path; prefer local CLI iteration
+  for context-pack content changes and deploy only when ready for AppSync.
+- Bounded exploratory researcher loops vs one-shot researchers are documented in
+  `docs/agent-loop-patterns.md` (`research_explorer.tac` vs `researcher.tac`).
+  “Ralph loop” is an external host-loop pattern; this repo does not implement it.
 - When bootstrapping a new publication from a file pile, follow
   `skills/publication-bootstrap/SKILL.md` and
   `docs/new-publication-from-corpus.md`. Convert loose files into a corpus

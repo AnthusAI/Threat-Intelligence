@@ -9,6 +9,11 @@ Use this skill when an agent needs model-ready context from the Papyrus
 knowledge base. `knowledgeQuery` is the shared query path for research,
 reporting, editing, reviewing, chat grounding, and context-pack experiments.
 
+**Coding agents:** start with [`docs/internal-knowledge-research.md`](../../docs/internal-knowledge-research.md)
+for prerequisites, CLI smoke commands, assignment-shaped queries, and
+troubleshooting. For multi-step `knowledge_search` inside Tactus research harnesses,
+see [`docs/agent-loop-patterns.md`](../../docs/agent-loop-patterns.md).
+
 The same Python engine powers both entrypoints:
 
 - AppSync custom query: `knowledgeQuery(input: AWSJSON!): AWSJSON`
@@ -338,6 +343,10 @@ Check `structured.request.semanticQuerySource`:
 
 ## CLI Usage
 
+Requires `PAPYRUS_GRAPHQL_ENDPOINT` and `PAPYRUS_GRAPHQL_JWT` for default
+remote execution. Use `--execution local` when changing engine code under
+`src/papyrus_knowledge_query/`.
+
 Semantic-only smoke:
 
 ```bash
@@ -345,6 +354,16 @@ PYTHONPATH=src python -m papyrus_newsroom knowledge-query \
   --query "agent memory systems" \
   --format both \
   --max-tokens 600
+```
+
+Anchored smoke:
+
+```bash
+PYTHONPATH=src python -m papyrus_newsroom knowledge-query \
+  --anchor papyrus://reference/<lineage-id> \
+  --profile researcher \
+  --format both \
+  --max-tokens 800
 ```
 
 Input-file smoke:
