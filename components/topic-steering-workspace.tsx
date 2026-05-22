@@ -116,6 +116,16 @@ type ActionState = {
   tone: "ok" | "error" | "pending";
 };
 
+type ReferenceQualityActionState = {
+  displayedStars: number;
+  effectiveStatus: string;
+  message: string;
+  referenceId: string;
+  requestedRating: number;
+  showUnsetStars: boolean;
+  tone: ActionState["tone"];
+};
+
 type ReviewAction = "accept" | "reject";
 type ReferenceCurationAction = "accept" | "reject" | "reopen" | "archive";
 type ReferenceRejectionReasonCode = typeof REFERENCE_REJECTION_REASON_CODES[number];
@@ -693,6 +703,7 @@ function NewsDeskDashboard({
   const [newsroomSections, setNewsroomSections] = useState(fallbackNewsroomSections);
   const [userDirectory, setUserDirectory] = useState(dashboard.userDirectory);
   const [actionState, setActionState] = useState<ActionState | null>(null);
+  const [referenceQualityActionState, setReferenceQualityActionState] = useState<ReferenceQualityActionState | null>(null);
   const [mergeSelection, setMergeSelection] = useState<MergeSelection | null>(null);
   const [isPending, startTransition] = useTransition();
   const controlsDisabled = isPending || !canEdit;
@@ -715,6 +726,15 @@ function NewsDeskDashboard({
   useEffect(() => {
     referencesRef.current = references;
   }, [references]);
+
+  useEffect(() => {
+    if (referenceQualityActionState?.tone !== "ok") return;
+    const qualityState = referenceQualityActionState;
+    const timeout = window.setTimeout(() => {
+      setReferenceQualityActionState((current) => (current === qualityState ? null : current));
+    }, 1600);
+    return () => window.clearTimeout(timeout);
+  }, [referenceQualityActionState]);
 
   const categoryProposals = proposals.filter(isTailoredCategoryProposal);
   const genericProposals = proposals.filter((proposal) => !isTailoredCategoryProposal(proposal));
@@ -1277,10 +1297,36 @@ function NewsDeskDashboard({
       (nextStatus === "accepted" && current.effectiveStatus === "accepted" && current.persistedQualityRating === rating)
       || (nextStatus === "rejected" && current.effectiveStatus === "rejected" && current.persistedQualityRating === null)
     ) {
+      setReferenceQualityActionState(referenceQualityActionStateFromRating(
+        reference.id,
+        rating,
+        "ok",
+        `${rating}-star rating saved`,
+      ));
       return;
     }
+    setReferenceQualityActionState(referenceQualityActionStateFromRating(
+      reference.id,
+      rating,
+      "pending",
+      "Saving",
+    ));
     setActionState({ id: `reference-quality-${reference.id}`, message: `${rating}-star rating pending`, tone: "pending" });
     const now = new Date().toISOString();
+    if (shouldFailReferenceQualityMutationForTest()) {
+      window.setTimeout(() => {
+        const message = "Reference quality rating was not saved for test.";
+        setReferenceQualityActionState(referenceQualityActionStateFromConfirmed(
+          reference.id,
+          rating,
+          current,
+          "error",
+          message,
+        ));
+        setActionState({ id: `reference-quality-${reference.id}`, message, tone: "error" });
+      }, 250);
+      return;
+    }
     if (dashboard.isDemo) {
       applyReferenceRecord(buildReviewedReferenceRecord(referencesRef.current, reference, {
         actorLabel: authState.label,
@@ -1294,6 +1340,12 @@ function NewsDeskDashboard({
         nextStatus === "accepted" ? rating : null,
         authState.label,
         now,
+      ));
+      setReferenceQualityActionState(referenceQualityActionStateFromRating(
+        reference.id,
+        rating,
+        "ok",
+        "Saved",
       ));
       setActionState({ id: `reference-quality-${reference.id}`, message: `${rating}-star rating saved`, tone: "ok" });
       return;
@@ -1310,22 +1362,36 @@ function NewsDeskDashboard({
             { authMode: USER_POOL_AUTH_MODE },
           );
           const result = assertReferenceQualityMutationSucceeded(response as ReferenceQualityResponse, reference.id, rating);
+          const savedStatus = result.status ?? nextStatus;
           applyReferenceRecord(buildReviewedReferenceRecord(referencesRef.current, reference, {
             actorLabel: authState.label,
-            nextStatus: result.status ?? nextStatus,
+            nextStatus: savedStatus,
             note: null,
             now,
           }));
           setSemanticRelations((currentRelations) => upsertReferenceQualityRelations(
             currentRelations,
             reference,
-            result.status === "accepted" ? rating : null,
+            savedStatus === "accepted" ? rating : null,
             authState.label,
             now,
             result.relationId ?? null,
           ));
+          setReferenceQualityActionState(referenceQualityActionStateFromRating(
+            reference.id,
+            rating,
+            "ok",
+            "Saved",
+          ));
           setActionState({ id: `reference-quality-${reference.id}`, message: `${rating}-star rating saved`, tone: "ok" });
         } catch (error) {
+          setReferenceQualityActionState(referenceQualityActionStateFromConfirmed(
+            reference.id,
+            rating,
+            current,
+            "error",
+            error instanceof Error ? error.message : "Quality rating failed",
+          ));
           setActionState({
             id: `reference-quality-${reference.id}`,
             message: error instanceof Error ? error.message : "Quality rating failed",
@@ -2520,6 +2586,7 @@ function NewsDeskDashboard({
             initialCategoryLineageId={initialSelection.category}
             initialReferenceLineageId={initialSelection.reference}
             isDemo={Boolean(dashboard.isDemo)}
+            qualityActionState={referenceQualityActionState}
             references={references}
             semanticRelations={semanticRelations}
             summary={summary}
@@ -5179,6 +5246,7 @@ function ReferencesDeskView({
   onReview,
   onSetQualityRating,
   onReviewTopicLabel,
+  qualityActionState,
   references,
   semanticRelations,
   summary,
@@ -5194,6 +5262,7 @@ function ReferencesDeskView({
   onReview: (reference: ReferenceRecord, action: ReferenceCurationAction, note?: string, reasonCode?: ReferenceRejectionReasonCode | null) => void;
   onSetQualityRating: (reference: ReferenceRecord, rating: number) => void;
   onReviewTopicLabel: (input: { action: TopicLabelAction; category: CategorySteeringCategory; note?: string | null; reference: ReferenceRecord; sourceRelationId?: string | null }) => void;
+  qualityActionState: ReferenceQualityActionState | null;
   references: ReferenceRecord[];
   semanticRelations: SemanticRelationRecord[];
   summary?: NewsroomSummaryRecord | null;
@@ -5272,6 +5341,9 @@ function ReferencesDeskView({
   const selectedReferenceCuration = selectedReference
     ? resolveReferenceCurationDisplayState(selectedReference, graph)
     : null;
+  const selectedReferenceQualityActionState = selectedReference && qualityActionState?.referenceId === selectedReference.id
+    ? qualityActionState
+    : null;
 
   return (
     <>
@@ -5336,6 +5408,7 @@ function ReferencesDeskView({
             onReviewTopicLabel={onReviewTopicLabel}
             onSetQualityRating={onSetQualityRating}
             curation={selectedReferenceCuration}
+            qualityActionState={selectedReferenceQualityActionState}
             reference={selectedReference}
             semanticRelations={semanticRelations}
             knowledgeQuery={referenceKnowledgeQuery}
@@ -7726,6 +7799,7 @@ function ReferenceDetailPanel({
   onReview,
   onReviewTopicLabel,
   onSetQualityRating,
+  qualityActionState,
   reference,
   knowledgeQuery,
   semanticRelations,
@@ -7739,6 +7813,7 @@ function ReferenceDetailPanel({
   onReview: (action: ReferenceCurationAction) => void;
   onReviewTopicLabel: (input: { action: TopicLabelAction; category: CategorySteeringCategory; note?: string | null; reference: ReferenceRecord; sourceRelationId?: string | null }) => void;
   onSetQualityRating: (reference: ReferenceRecord, rating: number) => void;
+  qualityActionState: ReferenceQualityActionState | null;
   reference: ReferenceRecord | null;
   knowledgeQuery: KnowledgeQueryControl;
   semanticRelations: SemanticRelationRecord[];
@@ -7774,6 +7849,7 @@ function ReferenceDetailPanel({
                 curation={detailCuration}
                 disabled={disabled}
                 insightAction={insightAction}
+                qualityActionState={qualityActionState}
                 onReview={onReview}
                 onSetQualityRating={(rating) => onSetQualityRating(reference, rating)}
               />
@@ -8019,24 +8095,75 @@ type ReferenceCurationDisplayState = {
   persistedQualityRating: number | null;
 };
 
+function referenceQualityActionStateFromRating(
+  referenceId: string,
+  rating: number,
+  tone: ActionState["tone"],
+  message: string,
+): ReferenceQualityActionState {
+  const accepted = rating >= 3;
+  return {
+    displayedStars: accepted ? rating : 0,
+    effectiveStatus: accepted ? "accepted" : "rejected",
+    message,
+    referenceId,
+    requestedRating: rating,
+    showUnsetStars: false,
+    tone,
+  };
+}
+
+function referenceQualityActionStateFromConfirmed(
+  referenceId: string,
+  requestedRating: number,
+  curation: ReferenceCurationDisplayState,
+  tone: ActionState["tone"],
+  message: string,
+): ReferenceQualityActionState {
+  const rejected = curation.effectiveStatus === "rejected";
+  return {
+    displayedStars: rejected ? 0 : curation.effectiveDisplayedStars,
+    effectiveStatus: curation.effectiveStatus,
+    message,
+    referenceId,
+    requestedRating,
+    showUnsetStars: !rejected && curation.persistedQualityRating === null,
+    tone,
+  };
+}
+
+function shouldFailReferenceQualityMutationForTest(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem("papyrus:test-reference-quality-mutation") === "fail";
+  } catch {
+    return false;
+  }
+}
+
 function ReferenceCurationCluster({
   curation,
   disabled,
   insightAction,
+  qualityActionState,
   onReview,
   onSetQualityRating,
 }: {
   curation: ReferenceCurationDisplayState;
   disabled: boolean;
   insightAction: NewsroomDetailAction | null;
+  qualityActionState: ReferenceQualityActionState | null;
   onReview: (action: ReferenceCurationAction) => void;
   onSetQualityRating: (rating: number) => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
-  const status = curation.effectiveStatus;
-  const showUnsetStars = status !== "rejected" && curation.persistedQualityRating === null;
-  const filledStars = status === "rejected" ? 0 : curation.effectiveDisplayedStars;
+  const status = qualityActionState?.effectiveStatus ?? curation.effectiveStatus;
+  const showUnsetStars = qualityActionState?.showUnsetStars ?? (status !== "rejected" && curation.persistedQualityRating === null);
+  const filledStars = qualityActionState?.displayedStars ?? (status === "rejected" ? 0 : curation.effectiveDisplayedStars);
+  const qualityTone = qualityActionState?.tone ?? "idle";
+  const qualityPending = qualityTone === "pending";
+  const clusterDisabled = disabled || qualityPending;
   const menuActions = [
     ...(status !== "pending" ? [{
       key: "reopen",
@@ -8073,6 +8200,7 @@ function ReferenceCurationCluster({
       data-news-desk-reference-curation-cluster
       data-reference-curation-status={status}
       data-reference-quality-stars={filledStars}
+      data-reference-quality-tone={qualityTone}
       data-reference-quality-unset={showUnsetStars ? "true" : "false"}
     >
       <div className="news-desk-reference-curation-cluster__row">
@@ -8082,7 +8210,7 @@ function ReferenceCurationCluster({
           aria-pressed={status === "accepted"}
           className="news-desk-detail-toolbar-button news-desk-reference-curation-cluster__decision"
           data-news-desk-reference-accept
-          disabled={disabled || status === "accepted"}
+          disabled={clusterDisabled || status === "accepted"}
           onClick={() => onReview("accept")}
           title="Accept"
         >
@@ -8094,13 +8222,20 @@ function ReferenceCurationCluster({
           aria-pressed={status === "rejected"}
           className="news-desk-detail-toolbar-button news-desk-reference-curation-cluster__decision"
           data-news-desk-reference-reject
-          disabled={disabled || status === "rejected"}
+          disabled={clusterDisabled || status === "rejected"}
           onClick={() => onReview("reject")}
           title="Reject"
         >
           <ThumbsDownIcon />
         </button>
-        <div className="news-desk-reference-curation-cluster__stars" role="group" aria-label="Reference quality rating">
+        <div
+          className="news-desk-reference-curation-cluster__stars"
+          data-reference-quality-stars-control
+          data-reference-quality-tone={qualityTone}
+          role="group"
+          aria-busy={qualityPending ? "true" : undefined}
+          aria-label="Reference quality rating"
+        >
           {[1, 2, 3, 4, 5].map((rating) => {
             const filled = !showUnsetStars && rating <= filledStars;
             return (
@@ -8111,7 +8246,7 @@ function ReferenceCurationCluster({
                 className="news-desk-reference-curation-cluster__star"
                 data-filled={filled ? "true" : undefined}
                 data-news-desk-reference-quality-star={rating}
-                disabled={disabled}
+                disabled={clusterDisabled}
                 key={rating}
                 onClick={() => onSetQualityRating(rating)}
                 title={`${rating} star${rating === 1 ? "" : "s"}`}
@@ -8127,7 +8262,7 @@ function ReferenceCurationCluster({
             aria-label={insightAction.ariaLabel ?? insightAction.label}
             className="news-desk-detail-toolbar-button"
             data-news-desk-reference-insight-trigger
-            disabled={insightAction.disabled}
+            disabled={clusterDisabled || insightAction.disabled}
             onClick={insightAction.onSelect}
             title={insightAction.label}
           >
@@ -8143,7 +8278,7 @@ function ReferenceCurationCluster({
               aria-expanded={menuOpen}
               className="news-desk-detail-toggle news-desk-detail-toggle--actions"
               data-news-desk-reference-actions
-              disabled={disabled}
+              disabled={clusterDisabled}
               onClick={() => setMenuOpen((current) => !current)}
             >
               <EllipsisIcon />
@@ -8153,7 +8288,7 @@ function ReferenceCurationCluster({
                 {menuActions.map((action) => (
                   <button
                     type="button"
-                    disabled={disabled}
+                    disabled={clusterDisabled}
                     key={action.key}
                     onClick={() => {
                       setMenuOpen(false);
@@ -8169,6 +8304,14 @@ function ReferenceCurationCluster({
           </div>
         ) : null}
       </div>
+      <span
+        className="news-desk-reference-curation-cluster__quality-state"
+        data-reference-quality-state-message
+        data-tone={qualityTone}
+        aria-live="polite"
+      >
+        {qualityActionState?.message ?? ""}
+      </span>
     </div>
   );
 }

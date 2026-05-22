@@ -14,6 +14,7 @@ class PapyrusWorld {
     this.newsroomSummaryDelayMs = 0;
     this.newsroomSummaryMock = null;
     this.newsroomMessageDetailMock = null;
+    this.newsroomQualityMutationMock = null;
   }
 
   async openScenario(scenarioId, width, height) {
@@ -178,7 +179,16 @@ class PapyrusWorld {
         }));
       });
     }
-    if (this.newsroomSummaryDelayMs > 0 || this.newsroomSummaryMock === "missing" || this.newsroomMessageDetailMock === "reference-curation") {
+    if (this.newsroomQualityMutationMock === "fail") {
+      await this.page.addInitScript(() => {
+        window.localStorage.setItem("papyrus:test-reference-quality-mutation", "fail");
+      });
+    }
+    if (
+      this.newsroomSummaryDelayMs > 0 ||
+      this.newsroomSummaryMock === "missing" ||
+      this.newsroomMessageDetailMock === "reference-curation"
+    ) {
       const delayMs = this.newsroomSummaryDelayMs;
       const mock = this.newsroomSummaryMock;
       const messageDetailMock = this.newsroomMessageDetailMock;

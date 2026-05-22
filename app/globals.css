@@ -4499,6 +4499,17 @@ img {
   padding: 0 6px;
 }
 
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-curation-cluster__stars[data-reference-quality-tone="pending"] {
+  background: rgb(var(--ink-solid-rgb) / 0.06);
+  border-style: dashed;
+  color: rgb(var(--ink-solid-rgb) / 0.72);
+}
+
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-curation-cluster__stars[data-reference-quality-tone="error"] {
+  border-color: rgb(140 28 28 / 0.72);
+  color: rgb(140 28 28 / 0.88);
+}
+
 .newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-curation-cluster__star {
   align-items: center;
   background: transparent;
@@ -4530,8 +4541,33 @@ img {
   opacity: 0.45;
 }
 
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-curation-cluster__stars[data-reference-quality-tone="pending"] .news-desk-reference-curation-cluster__star:disabled,
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-curation-cluster__stars[data-reference-quality-tone="error"] .news-desk-reference-curation-cluster__star:disabled {
+  opacity: 0.84;
+}
+
 .newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-curation-cluster[data-reference-curation-status="rejected"] .news-desk-reference-curation-cluster__star {
   color: rgb(var(--ink-solid-rgb) / 0.32);
+}
+
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-curation-cluster__quality-state {
+  color: var(--muted-strong);
+  display: block;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: var(--paper-rhythm);
+  min-height: var(--paper-rhythm);
+  text-align: right;
+  text-transform: uppercase;
+}
+
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-curation-cluster__quality-state[data-tone="ok"] {
+  color: rgb(var(--ink-solid-rgb) / 0.74);
+}
+
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-curation-cluster__quality-state[data-tone="error"] {
+  color: rgb(140 28 28 / 0.92);
 }
 
 .newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-semantic-detail header .story-label,

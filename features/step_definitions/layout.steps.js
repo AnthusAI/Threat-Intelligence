@@ -80,6 +80,10 @@ Given("the newsroom uses mocked reference-curation message detail data", async f
   this.newsroomMessageDetailMock = "reference-curation";
 });
 
+Given("the reference quality mutation fails", async function () {
+  this.newsroomQualityMutationMock = "fail";
+});
+
 Given("I open the edition path {string} at {int} by {int}", async function (routePath, width, height) {
   await this.openPath(routePath, width, height);
 });
@@ -636,6 +640,14 @@ When("I set the selected reference quality to {int} stars", async function (rati
   await page.locator(`[data-news-desk-reference-quality-star="${rating}"]`).click();
 });
 
+Then("the reference detail should immediately show {int} filled quality stars", async function (filledStars) {
+  const page = requirePage(this);
+  const cluster = page.locator("[data-news-desk-reference-curation-cluster]");
+  await cluster.waitFor({ state: "visible", timeout: 10_000 });
+  const actualStars = Number(await cluster.getAttribute("data-reference-quality-stars") ?? "-1");
+  assert.equal(actualStars, filledStars);
+});
+
 Then("the reference detail curation status should be {string}", async function (status) {
   await requirePage(this).waitForFunction((expectedStatus) => {
     const cluster = document.querySelector("[data-news-desk-reference-curation-cluster]");
@@ -648,6 +660,21 @@ Then("the reference detail should show {int} filled quality stars", async functi
     const cluster = document.querySelector("[data-news-desk-reference-curation-cluster]");
     return Number(cluster?.getAttribute("data-reference-quality-stars") ?? "-1") === expectedStars;
   }, filledStars, { timeout: 10_000 });
+});
+
+Then("the reference detail quality save state should become {string}", async function (tone) {
+  await requirePage(this).waitForFunction((expectedTone) => {
+    const cluster = document.querySelector("[data-news-desk-reference-curation-cluster]");
+    return cluster?.getAttribute("data-reference-quality-tone") === expectedTone;
+  }, tone, { timeout: 10_000 });
+});
+
+Then("the reference detail quality message should mention {string}", async function (message) {
+  const page = requirePage(this);
+  await page.waitForFunction((expectedMessage) => {
+    const state = document.querySelector("[data-reference-quality-state-message]");
+    return state?.textContent?.toLowerCase().includes(String(expectedMessage).toLowerCase());
+  }, message, { timeout: 10_000 });
 });
 
 When("I open the reference detail insight composer", async function () {

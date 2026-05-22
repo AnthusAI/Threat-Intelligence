@@ -268,10 +268,23 @@ Feature: Newspaper layout scenarios
     Then the reference detail curation status should be "rejected"
     And the reference detail should show 0 filled quality stars
     When I set the selected reference quality to 4 stars
-    Then the reference detail curation status should be "accepted"
+    Then the reference detail should immediately show 4 filled quality stars
+    And the reference detail curation status should be "accepted"
     And the reference detail should show 4 filled quality stars
     When I open the reference detail insight composer
     Then the insight modal should be visible
+    And no browser console errors should occur
+
+  Scenario: Newsroom reference quality failure restores the confirmed header state
+    Given the reference quality mutation fails
+    And I open the references newsroom at 1280 by 900
+    When I open reference "reference-knowledge-corpus-demo-source-history-001"
+    And I set the selected reference quality to 4 stars
+    Then the reference detail should immediately show 4 filled quality stars
+    And the reference detail quality save state should become "error"
+    And the reference detail curation status should be "accepted"
+    And the reference detail should show 0 filled quality stars
+    And the reference detail quality message should mention "not saved"
     And no browser console errors should occur
 
   Scenario Outline: Newsroom operational desks use newspaper card grids
