@@ -1,6 +1,7 @@
 import type { Article } from "../../lib/articles";
 
 const PAPYRUS_SECTION = "Papyrus";
+const NEWSROOM_HOW_TO_SECTION = "Newsroom How-To";
 
 export const seedEditionArticles: Article[] = [
   {
@@ -138,6 +139,36 @@ export const seedEditionArticles: Article[] = [
     ],
   },
   {
+    slug: "papyrus-data-ownership",
+    shortSlug: "DATA",
+    section: PAPYRUS_SECTION,
+    headline: "Your Newsroom, Your Data",
+    deck: "Papyrus stores source material in portable S3-backed patterns, runs on open code, and keeps the publication under your control.",
+    byline: "Papyrus Editorial Team",
+    dateline: "NEWSROOM",
+    image: {
+      src: "/agent-procedure-continuum.svg",
+      alt: "A continuum from scripts to bounded agents",
+      caption: "Papyrus keeps the publication's source material and operating code under owner control.",
+      credit: "Papyrus chart",
+      layout: {
+        minHeight: 100,
+        preferredHeight: 210,
+        maxHeight: 360,
+        aspectRatio: 1.5,
+        crop: "contain",
+        wrapsText: true,
+      },
+    },
+    body: [
+      "Papyrus is designed to avoid the trap of turning your publication into somebody else's content silo. The newsroom stores source material through ordinary S3-backed corpus patterns, with metadata that describes where references came from and how the newsroom should treat them.",
+      "That matters because the knowledge base is part of the publication's institutional memory. References, attachments, extracted text, catalogs, and curation decisions should remain portable enough that an operator can inspect them, back them up, process them, or move them without negotiating with a proprietary storage format.",
+      "S3 is not magic, but it is a durable, boring boundary. You can put your own processing next to it, run additional enrichment jobs, export manifests, audit source material, or connect another analysis system without asking Papyrus for permission to reach your own data.",
+      "The same control principle applies to the application itself. The code is open, and a publication can host its own installation, adapt the newsroom workflow, customize layouts, or add policies and procedures that match its editorial mission.",
+      "That does not mean every installation has to become a software project. It means the owner of the publication keeps real leverage. Papyrus can automate the newsroom, but it should not own the newsroom's memory, source material, or future.",
+    ],
+  },
+  {
     slug: "papyrus-operating-modes",
     shortSlug: "MODES",
     section: PAPYRUS_SECTION,
@@ -200,7 +231,7 @@ export const seedEditionArticles: Article[] = [
   {
     slug: "papyrus-first-install",
     shortSlug: "START",
-    section: PAPYRUS_SECTION,
+    section: NEWSROOM_HOW_TO_SECTION,
     headline: "What to Do in a Fresh Installation",
     deck: "Set doctrine, configure sections, curate references, and publish the first edition to establish a stable newsroom trajectory.",
     byline: "Papyrus Editorial Team",
@@ -224,6 +255,122 @@ export const seedEditionArticles: Article[] = [
       "Next, configure sections and topic priorities that match the publication scope you want readers to experience.",
       "Then curate initial references to establish quality expectations for what the knowledge base will trust and reuse.",
       "After those inputs are set, publish the first edition. From that point, the newsroom can continue operating in the direction you established, with ongoing human steering as needed.",
+    ],
+  },
+  {
+    slug: "howto-dispatch-research-agents",
+    shortSlug: "RESEARCH",
+    section: NEWSROOM_HOW_TO_SECTION,
+    headline: "Dispatch Research Agents",
+    deck: "Turn an editorial question into a private research assignment, run the agent, and review the packet before anything becomes reader-facing.",
+    byline: "Papyrus Editorial Team",
+    dateline: "NEWSROOM",
+    image: {
+      src: "/agent-procedure-continuum.svg",
+      alt: "A continuum from scripts to bounded agents",
+      caption: "Research assignments produce private packets before editors decide what should move forward.",
+      credit: "Papyrus chart",
+      layout: {
+        minHeight: 100,
+        preferredHeight: 210,
+        maxHeight: 360,
+        aspectRatio: 1.5,
+        crop: "contain",
+        wrapsText: true,
+      },
+    },
+    body: [
+      "Start with a question the newsroom should investigate, not a headline the system should already believe. Research assignments are meant to collect source material, surface context, and show what the newsroom found before editors decide what belongs in an edition.",
+      "In the Newsroom, use the assignments desk when it is available to create or inspect research work. The command-line path is the same workflow in operator form: `npm run content -- assignments create-research --title <text> --section <section-key> --corpus-key <key> --research-mode source_discovery --apply`.",
+      "Run the assignment with `npm run content -- assignments run-research --assignment <id> --corpus-key <key> --research-mode source_discovery --apply --json`. The run produces a research packet, not a published article.",
+      "Inspect the packet with `npm run content -- assignments research-packets --assignment <id>`. Editors can use that packet to decide whether to register proposed references, request more research, brief reporting work, or leave the finding out of the publication.",
+    ],
+  },
+  {
+    slug: "howto-curate-references",
+    shortSlug: "CURATE",
+    section: NEWSROOM_HOW_TO_SECTION,
+    headline: "Curate References by Hand",
+    deck: "Use `/newsroom/references` to review new and old source material, record quality judgments, and keep the knowledge base aligned.",
+    byline: "Papyrus Editorial Team",
+    dateline: "NEWSROOM",
+    image: {
+      src: "/papyrus-plant-placeholder.png",
+      alt: "A black papyrus plant silhouette",
+      caption: "Reference curation is the durable editorial memory behind future coverage.",
+      credit: "Papyrus",
+      layout: {
+        minHeight: 100,
+        preferredHeight: 210,
+        maxHeight: 360,
+        aspectRatio: 0.785,
+        crop: "contain",
+        wrapsText: true,
+      },
+    },
+    body: [
+      "The References desk is where source material becomes newsroom memory. Open `/newsroom/references` to inspect a reference, review its current status, and decide whether it belongs in the accepted knowledge base.",
+      "Accept references that are in scope, relevant, and reliable enough to inform future planning. Reject or archive references that are off mission, weakly sourced, duplicative, stale, or outside the publication's coverage boundaries.",
+      "Ratings and comments matter. They are not just notes for the current session; they become steering memory that tells future research, planning, and reporting work which sources deserve attention and which patterns should be treated cautiously.",
+      "Old references can be curated again when the publication's mission changes or when better context arrives. Reopening a decision is part of maintaining the knowledge base, not a sign that the original review failed.",
+    ],
+  },
+  {
+    slug: "howto-register-source-material",
+    shortSlug: "REGISTER",
+    section: NEWSROOM_HOW_TO_SECTION,
+    headline: "Register Source Material",
+    deck: "Bring corpus files, catalogs, and proposed references into Papyrus without turning them into published content.",
+    byline: "Papyrus Editorial Team",
+    dateline: "NEWSROOM",
+    image: {
+      src: "/agent-procedure-continuum.svg",
+      alt: "A continuum from scripts to bounded agents",
+      caption: "Registration creates reference records and intake work while source material remains S3-backed.",
+      credit: "Papyrus chart",
+      layout: {
+        minHeight: 100,
+        preferredHeight: 210,
+        maxHeight: 360,
+        aspectRatio: 1.5,
+        crop: "contain",
+        wrapsText: true,
+      },
+    },
+    body: [
+      "Registration is the bridge between source material and newsroom curation. It does not publish anything by itself; it creates reference records, attachment metadata, and intake work so humans and agents can decide what the knowledge base should trust.",
+      "For catalog-backed imports, use `npm run content -- references register-catalog --config corpora/papyrus-steering.yml --corpus-key <key> --catalog <metadata/catalog.json> --status pending --ingestion-rationale <summary> --apply`.",
+      "The source material remains in the corpus/S3 storage pattern. Papyrus records the editorial visibility layer: what the reference is, where it lives, how it entered the system, and what curation status it currently has.",
+      "Research packets can also propose references. Treat those proposals as prospects until they are registered and curated; proposed links are not accepted evidence just because an agent found them.",
+    ],
+  },
+  {
+    slug: "howto-maintain-reference-quality",
+    shortSlug: "QUALITY",
+    section: NEWSROOM_HOW_TO_SECTION,
+    headline: "Maintain Reference Quality",
+    deck: "Run routine curation passes, enrich identifiers and titles, and keep accepted references ready for analysis.",
+    byline: "Papyrus Editorial Team",
+    dateline: "NEWSROOM",
+    image: {
+      src: "/papyrus-plant-placeholder.png",
+      alt: "A black papyrus plant silhouette",
+      caption: "Routine reference maintenance keeps the newsroom from drifting toward stale or weak evidence.",
+      credit: "Papyrus",
+      layout: {
+        minHeight: 100,
+        preferredHeight: 210,
+        maxHeight: 360,
+        aspectRatio: 0.785,
+        crop: "contain",
+        wrapsText: true,
+      },
+    },
+    body: [
+      "Reference quality is an ongoing operation. New material arrives, old material ages, identifiers change, and titles or subtitles may need enrichment before the source is useful for analysis.",
+      "Use `npm run content -- references curate-recent --corpus-key <key> --since-hours 48 --max-count 25 --dry-run --json` to preview a routine pass. Add `--apply` when the plan is correct and the operator is ready to write updates.",
+      "A curation pass can refresh summaries, check identifiers, enrich title and subtitle metadata, and produce a manifest of what succeeded or failed. Failures should be treated as operator signals, not silently ignored.",
+      "Accepted references are the only safe input for analysis manifests, topic modeling, graph work, and edition planning. Keeping that accepted set clean is one of the highest-leverage ways to improve the autonomous newsroom.",
     ],
   },
 ];
@@ -259,14 +406,11 @@ function createSeedEditionLayoutPlan(itemIds: string[]) {
     "papyrus-reader-contract",
     "papyrus-introduction",
     "papyrus-agent-workflow",
+    "papyrus-data-ownership",
   ];
-  const pageTwoItemIds = new Set(["papyrus-first-install"]);
   const frontItemIds = itemIds.length < 3
     ? itemIds
-    : [
-        ...featuredFrontItemIds.filter((itemId) => itemIds.includes(itemId)),
-        ...itemIds.filter((itemId) => !featuredFrontItemIds.includes(itemId) && !pageTwoItemIds.has(itemId)),
-      ];
+    : featuredFrontItemIds.filter((itemId) => itemIds.includes(itemId));
   return {
     pages: [
       {
@@ -387,23 +531,9 @@ function createSeedEditionLayoutPlan(itemIds: string[]) {
         grid: { columns: { min: 1, preferred: 6, max: 6 } },
         regions: [
           {
-            id: "papyrus-first-install-guide",
-            type: "stack",
-            role: "top",
-            size: { ratio: 0.5 },
-            blocks: [
-              createSeedPageArticleBlock("papyrus-first-install", 2, {
-                required: false,
-                anchor: "right",
-                span: { min: 1, preferred: 2, max: 2 },
-                vertical: "top",
-              }),
-            ],
-          },
-          {
             id: "papyrus-reader-contract-continuation",
             type: "stack",
-            role: "bottom",
+            role: "top",
             size: { ratio: 0.5 },
             blocks: [
               createSeedContinuationBlock("papyrus-reader-contract", 2, {
@@ -411,6 +541,20 @@ function createSeedEditionLayoutPlan(itemIds: string[]) {
                 anchor: "center",
                 span: { min: 1, preferred: 2, max: 3 },
                 vertical: "upperThird",
+              }),
+            ],
+          },
+          {
+            id: "papyrus-data-ownership-continuation",
+            type: "stack",
+            role: "bottom",
+            size: { ratio: 0.5 },
+            blocks: [
+              createSeedContinuationBlock("papyrus-data-ownership", 2, {
+                required: false,
+                anchor: "right",
+                span: { min: 1, preferred: 2, max: 2 },
+                vertical: "top",
               }),
             ],
           },
@@ -447,6 +591,150 @@ function createSeedEditionLayoutPlan(itemIds: string[]) {
                 anchor: "center",
                 span: { min: 2, preferred: 2, max: 2 },
                 vertical: "top",
+              }),
+            ],
+          },
+        ],
+      },
+      {
+        id: "page-4",
+        pageNumber: 4,
+        presetId: "page.regionStack",
+        grid: { columns: { min: 1, preferred: 6, max: 6 } },
+        regions: [
+          {
+            id: "newsroom-how-to-first-install",
+            type: "stack",
+            role: "top",
+            size: { ratio: 0.5 },
+            blocks: [
+              createSeedPageArticleBlock("papyrus-first-install", 4, {
+                required: false,
+                anchor: "right",
+                span: { min: 1, preferred: 2, max: 2 },
+                vertical: "top",
+              }),
+            ],
+          },
+          {
+            id: "newsroom-how-to-dispatch-research",
+            type: "stack",
+            role: "bottom",
+            size: { ratio: 0.5 },
+            blocks: [
+              createSeedPageArticleBlock("howto-dispatch-research-agents", 4, {
+                required: false,
+                anchor: "center",
+                span: { min: 1, preferred: 2, max: 3 },
+                vertical: "upperThird",
+              }),
+            ],
+          },
+        ],
+      },
+      {
+        id: "page-5",
+        pageNumber: 5,
+        presetId: "page.regionStack",
+        grid: { columns: { min: 1, preferred: 6, max: 6 } },
+        regions: [
+          {
+            id: "newsroom-how-to-curate-references",
+            type: "stack",
+            role: "top",
+            size: { ratio: 0.5 },
+            blocks: [
+              createSeedPageArticleBlock("howto-curate-references", 5, {
+                required: false,
+                anchor: "right",
+                span: { min: 1, preferred: 2, max: 2 },
+                vertical: "top",
+              }),
+            ],
+          },
+          {
+            id: "newsroom-how-to-register-source-material",
+            type: "stack",
+            role: "bottom",
+            size: { ratio: 0.5 },
+            blocks: [
+              createSeedPageArticleBlock("howto-register-source-material", 5, {
+                required: false,
+                anchor: "center",
+                span: { min: 1, preferred: 2, max: 3 },
+                vertical: "upperThird",
+              }),
+            ],
+          },
+        ],
+      },
+      {
+        id: "page-6",
+        pageNumber: 6,
+        presetId: "page.regionStack",
+        grid: { columns: { min: 1, preferred: 6, max: 6 } },
+        regions: [
+          {
+            id: "newsroom-how-to-maintain-reference-quality",
+            type: "stack",
+            role: "top",
+            size: { ratio: 0.5 },
+            blocks: [
+              createSeedPageArticleBlock("howto-maintain-reference-quality", 6, {
+                required: false,
+                anchor: "right",
+                span: { min: 1, preferred: 2, max: 2 },
+                vertical: "top",
+              }),
+            ],
+          },
+          {
+            id: "papyrus-steering-and-curation-guide",
+            type: "stack",
+            role: "bottom",
+            size: { ratio: 0.5 },
+            blocks: [
+              createSeedPageArticleBlock("papyrus-steering-and-curation", 6, {
+                required: false,
+                anchor: "center",
+                span: { min: 1, preferred: 2, max: 3 },
+                vertical: "upperThird",
+              }),
+            ],
+          },
+        ],
+      },
+      {
+        id: "page-7",
+        pageNumber: 7,
+        presetId: "page.regionStack",
+        grid: { columns: { min: 1, preferred: 6, max: 6 } },
+        regions: [
+          {
+            id: "papyrus-operating-modes-guide",
+            type: "stack",
+            role: "top",
+            size: { ratio: 0.5 },
+            blocks: [
+              createSeedPageArticleBlock("papyrus-operating-modes", 7, {
+                required: false,
+                anchor: "right",
+                span: { min: 1, preferred: 2, max: 2 },
+                vertical: "top",
+              }),
+            ],
+          },
+          {
+            id: "papyrus-reference-governance-guide",
+            type: "stack",
+            role: "bottom",
+            size: { ratio: 0.5 },
+            blocks: [
+              createSeedPageArticleBlock("papyrus-reference-governance", 7, {
+                required: false,
+                anchor: "center",
+                span: { min: 1, preferred: 2, max: 3 },
+                vertical: "upperThird",
               }),
             ],
           },

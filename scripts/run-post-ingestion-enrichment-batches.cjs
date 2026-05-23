@@ -1,23 +1,54 @@
 #!/usr/bin/env node
 /**
  * Run reference curation (identifiers, title/subtitle, summaries) in batches via Python newsroom CLI.
+ *
  * Usage:
- *   node scripts/run-post-ingestion-enrichment-batches.cjs [--batch-size 25] [--start-batch 0]
+ *   node scripts/run-post-ingestion-enrichment-batches.cjs \
+ *     --corpus-key <corpus-key> \
+ *     [--batch-size 25] [--start-batch 0] [--max-batches 0] \
+ *     [--scan-limit 5000] [--summary-max-tokens 100] [--model gpt-5.4-mini] \
+ *     [--recent-only]
  */
 const fs = require("node:fs");
 const path = require("node:path");
-const { spawnSync } = require("node:child_process");
 
 const PROJECT_ROOT = path.resolve(__dirname, "..");
-const RUN_DIR = path.join(PROJECT_ROOT, ".papyrus-runs", "post-ingestion-enrichment-bulk");
+const {
+  defaultRunDir,
+  parseNonNegativeInteger,
+  parsePositiveInteger,
+  runPoetryWithRetries,
+} = require("./lib/papyrus-batch-cli.cjs");
 
 function parseArgs(argv) {
-  const options = { batchSize: 25, startBatch: 0, maxBatches: 0 };
+  const options = {
+    corpusKey: null,
+    batchSize: 25,
+    startBatch: 0,
+    maxBatches: 0,
+    scanLimit: 5000,
+    summaryMaxTokens: 100,
+    model: "gpt-5.4-mini",
+    curateAll: true,
+    runDir: null,
+  };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
-    if (arg === "--batch-size") options.batchSize = Number(argv[++index]);
-    else if (arg === "--start-batch") options.startBatch = Number(argv[++index]);
-    else if (arg === "--max-batches") options.maxBatches = Number(argv[++index]);
+    if (arg === "--batch-size") options.batchSize = parsePositiveInteger(argv[++index], "--batch-size");
+    else if (arg === "--start-batch") options.startBatch = parseNonNegativeInteger(argv[++index], "--start-batch");
+    else if (arg === "--max-batches") options.maxBatches = parseNonNegativeInteger(argv[++index], "--max-batches");
+    else if (arg === "--corpus-key") options.corpusKey = String(argv[++index] ?? "").trim();
+    else if (arg === "--scan-limit") options.scanLimit = parsePositiveInteger(argv[++index], "--scan-limit");
+    else if (arg === "--summary-max-tokens") {
+      options.summaryMaxTokens = parsePositiveInteger(argv[++index], "--summary-max-tokens");
+    } else if (arg === "--model") options.model = String(argv[++index] ?? "").trim();
+    else if (arg === "--all") options.curateAll = true;
+    else if (arg === "--recent-only") options.curateAll = false;
+    else if (arg === "--run-dir") options.runDir = path.resolve(PROJECT_ROOT, argv[++index]);
+    else throw new Error(`Unknown argument: ${arg}`);
+  }
+  if (!options.corpusKey) {
+    throw new Error("--corpus-key is required.");
   }
   return options;
 }
@@ -40,12 +71,19 @@ function extractJson(stdout) {
 
 function main() {
   const options = parseArgs(process.argv.slice(2));
-  fs.mkdirSync(RUN_DIR, { recursive: true });
-  const manifestPath = path.join(RUN_DIR, "manifest.json");
-  let manifest = fs.existsSync(manifestPath) ? JSON.parse(fs.readFileSync(manifestPath, "utf8")) : { batches: [] };
+  const runDir = options.runDir || defaultRunDir(PROJECT_ROOT, "post-ingestion-enrichment-bulk", options.corpusKey);
+  fs.mkdirSync(runDir, { recursive: true });
+  const manifestPath = path.join(runDir, "manifest.json");
+  let manifest = fs.existsSync(manifestPath)
+    ? JSON.parse(fs.readFileSync(manifestPath, "utf8"))
+    : { corpusKey: options.corpusKey, batches: [] };
 
+  console.log(`post-ingestion-enrichment\tcorpus\t${options.corpusKey}`);
   console.log(`post-ingestion-enrichment\tbatch-size\t${options.batchSize}`);
   console.log(`post-ingestion-enrichment\tstart-batch\t${options.startBatch}`);
+  console.log(`post-ingestion-enrichment\tscan-limit\t${options.scanLimit}`);
+  console.log(`post-ingestion-enrichment\tall-references\t${options.curateAll}`);
+  console.log(`post-ingestion-enrichment\trun-dir\t${runDir}`);
 
   let batchIndex = options.startBatch;
   let processed = 0;
@@ -57,50 +95,44 @@ function main() {
       "references",
       "curate-recent",
       "--corpus-key",
-      "AI-ML-research",
-      "--since-hours",
-      "87600",
+      options.corpusKey,
       "--max-count",
       String(options.batchSize),
       "--scan-limit",
-      "5000",
+      String(options.scanLimit),
       "--summary-max-tokens",
-      "100",
+      String(options.summaryMaxTokens),
+      "--model",
+      options.model,
       "--apply",
       "--json",
     ];
+    if (options.curateAll) {
+      args.push("--all");
+    } else {
+      args.push("--since-hours", "48");
+    }
 
     console.log(`post-ingestion-enrichment\twave\t${batchIndex + 1}`);
     const startedAt = Date.now();
-    const result = spawnSync("poetry", args, {
-      cwd: PROJECT_ROOT,
-      encoding: "utf8",
-      env: process.env,
-      maxBuffer: 1024 * 1024 * 256,
-    });
+    const result = runPoetryWithRetries(PROJECT_ROOT, args);
     const elapsedMs = Date.now() - startedAt;
     const payload = extractJson(result.stdout);
     const selected = payload?.summary?.selectedCount ?? null;
     const succeeded = payload?.summary?.succeededCount ?? null;
 
-    const failed = payload?.summary?.failedCount ?? null;
-    const degraded = payload?.degraded === true;
-
     manifest.batches.push({
       batchIndex,
       selectedCount: selected,
       succeededCount: succeeded,
-      failedCount: failed,
-      degraded,
       exitCode: result.status,
       elapsedMs,
       completedAt: new Date().toISOString(),
     });
+    manifest.updatedAt = new Date().toISOString();
     fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
 
-    const partialSuccess = Boolean(payload && (succeeded ?? 0) > 0);
-    const hardFailure = result.status !== 0 && !partialSuccess;
-    if (hardFailure) {
+    if (result.status !== 0) {
       console.error(result.stdout || "");
       console.error(result.stderr || "");
       throw new Error(`Wave ${batchIndex + 1} failed with exit code ${result.status}.`);
@@ -108,9 +140,6 @@ function main() {
 
     if (payload) {
       console.log(JSON.stringify(payload.summary || payload, null, 2));
-    }
-    if (degraded && (failed ?? 0) > 0) {
-      console.log(`post-ingestion-enrichment\twarning\t${failed} reference(s) failed in wave ${batchIndex + 1}; continuing`);
     }
 
     if (!selected || selected === 0) {

@@ -316,6 +316,7 @@ def references_curate_recent(flags: list[str]) -> None:
         raise ValueError("references curate-recent does not allow --apply with --dry-run.")
     if not options.get("corpus-key"):
         raise ValueError("references curate-recent requires --corpus-key <key>.")
+    curate_all = parse_boolean_option(options.get("all"), False, "--all")
     args = [
         "run",
         "papyrus-newsroom",
@@ -327,8 +328,6 @@ def references_curate_recent(flags: list[str]) -> None:
         normalize_string(options.get("model")) or "gpt-5.4-mini",
         "--summary-max-tokens",
         str(normalize_non_negative_integer(options.get("summary-max-tokens"), "--summary-max-tokens") or 500),
-        "--since-hours",
-        str(normalize_non_negative_integer(options.get("since-hours"), "--since-hours") or 48),
         "--max-count",
         str(normalize_non_negative_integer(options.get("max-count"), "--max-count") or 0),
         "--scan-limit",
@@ -336,6 +335,15 @@ def references_curate_recent(flags: list[str]) -> None:
         "--max-parallel",
         str(normalize_positive_integer(options.get("max-parallel"), "--max-parallel") or 1),
     ]
+    if curate_all:
+        args.append("--all")
+    else:
+        args.extend(
+            [
+                "--since-hours",
+                str(normalize_non_negative_integer(options.get("since-hours"), "--since-hours") or 48),
+            ]
+        )
     since = normalize_string(options.get("since"))
     if since:
         args.extend(["--since", since])
