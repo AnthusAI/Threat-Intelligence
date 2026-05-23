@@ -141,6 +141,62 @@ export type NewsroomSectionRecord = {
   updatedAt?: string | null;
 };
 
+export type ProcedureDefinitionRecord = {
+  id: string;
+  procedureKey: string;
+  title: string;
+  category: string;
+  description?: string | null;
+  enabled: boolean;
+  enabledStatus?: string | null;
+  currentVersionId?: string | null;
+  createdBy?: string | null;
+  createdAt?: string | null;
+  updatedBy?: string | null;
+  updatedAt?: string | null;
+  newsroomFeedKey?: string | null;
+};
+
+export type ProcedureVersionRecord = {
+  id: string;
+  procedureId: string;
+  procedureKey: string;
+  versionNumber: number;
+  status: string;
+  isCurrent: boolean;
+  label?: string | null;
+  tactusSource: string;
+  parameterSchema?: unknown;
+  defaults?: unknown;
+  changelog?: string | null;
+  createdBy?: string | null;
+  createdAt?: string | null;
+  updatedBy?: string | null;
+  updatedAt?: string | null;
+};
+
+export type ProcedureRunRecord = {
+  id: string;
+  procedureId: string;
+  procedureKey: string;
+  procedureVersionId: string;
+  procedureVersionNumber?: number | null;
+  assignmentId?: string | null;
+  runStatus: string;
+  requestedBy?: string | null;
+  requestedAt?: string | null;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  input?: unknown;
+  normalizedInput?: unknown;
+  resultSummary?: string | null;
+  errorSummary?: string | null;
+  output?: unknown;
+  error?: unknown;
+  attempt?: number | null;
+  newsroomFeedKey?: string | null;
+};
+
 const NEWSROOM_SECTIONS_CONFIG_PATH = path.join(process.cwd(), "corpora", "papyrus-newsroom-sections.yml");
 const NEWSROOM_SECTION_TYPES = new Set<NewsroomSectionType>(["canonical", "floating", "rotating"]);
 let newsroomSectionSeedRowsCache: Array<Omit<NewsroomSectionRecord, "sortOrder" | "enabled" | "enabledStatus" | "createdAt" | "updatedAt"> & {
@@ -546,6 +602,9 @@ export type CategorySteeringDashboard = {
   assignmentEvents: AssignmentEventRecord[];
   doctrineRecords: DoctrineRecord[];
   newsroomSections: NewsroomSectionRecord[];
+  procedureDefinitions: ProcedureDefinitionRecord[];
+  procedureVersions: ProcedureVersionRecord[];
+  procedureRuns: ProcedureRunRecord[];
   loadError?: string | null;
 };
 
@@ -1439,6 +1498,9 @@ export function createDemoCategorySteeringDashboard(): CategorySteeringDashboard
       },
     ],
     newsroomSections: defaultNewsroomSections(importedAt),
+    procedureDefinitions: [],
+    procedureVersions: [],
+    procedureRuns: [],
     doctrineRecords: [
       {
         id: "item-editorial-doctrine-mission-v1",

@@ -149,6 +149,41 @@ const MODEL_ATTACHMENT_OWNER_MODELS = {
   message: "Message",
   reference: "Reference",
 };
+const REQUIRED_PROCEDURES_CONFIG_PATH = path.join(PROJECT_ROOT, "corpora", "papyrus-required-procedures.json");
+const DEFAULT_CLOUD_PROCEDURE_WAIT_MS = 30_000;
+const CLOUD_PROCEDURE_POLL_MS = 500;
+
+const GET_PROCEDURE_DEFINITION_QUERY = `
+  query GetProcedureDefinition($procedureKey: String!) {
+    getNewsroomProcedureDefinition(procedureKey: $procedureKey)
+  }
+`;
+
+const START_PROCEDURE_RUN_MUTATION = `
+  mutation StartProcedureRun(
+    $procedureKey: String
+    $procedureVersionId: ID
+    $title: String
+    $summary: String
+    $actorLabel: String
+    $input: AWSJSON
+  ) {
+    startNewsroomProcedureRun(
+      procedureKey: $procedureKey
+      procedureVersionId: $procedureVersionId
+      title: $title
+      summary: $summary
+      actorLabel: $actorLabel
+      input: $input
+    )
+  }
+`;
+
+const GET_PROCEDURE_RUN_QUERY = `
+  query GetProcedureRun($id: ID!) {
+    getNewsroomProcedureRun(id: $id)
+  }
+`;
 
 async function main() {
   loadDotEnv();
@@ -442,6 +477,9 @@ async function main() {
     case "editions:dispatch-reporting":
       await dispatchEditionReporting(args.slice(2));
       return;
+    case "editions:purge":
+      await purgeEditions(args.slice(2));
+      return;
     default:
       printUsage();
       process.exitCode = 1;
@@ -463,6 +501,109 @@ function createAuthoringClient() {
     },
     client: new PapyrusGraphQLAuthoringClient({ endpoint, authToken: token }),
   };
+}
+
+let requiredProcedureConfigCache = null;
+
+function loadRequiredCliProcedureConfig() {
+  if (requiredProcedureConfigCache) return requiredProcedureConfigCache;
+  const parsed = JSON.parse(fs.readFileSync(REQUIRED_PROCEDURES_CONFIG_PATH, "utf8"));
+  const requiredCliProcedures = parsed?.requiredCliProcedures;
+  if (!requiredCliProcedures || typeof requiredCliProcedures !== "object") {
+    throw new Error(`Invalid required procedures config at ${REQUIRED_PROCEDURES_CONFIG_PATH}.`);
+  }
+  requiredProcedureConfigCache = {
+    map: requiredCliProcedures,
+    keys: Array.from(new Set(Object.values(requiredCliProcedures).map((value) => String(value ?? "").trim()).filter(Boolean))),
+  };
+  return requiredProcedureConfigCache;
+}
+
+function requiredProcedureKeyFor(alias) {
+  const config = loadRequiredCliProcedureConfig();
+  const key = config.map[alias];
+  const normalized = String(key ?? "").trim();
+  if (!normalized) throw new Error(`Required procedure alias '${alias}' is not configured in ${REQUIRED_PROCEDURES_CONFIG_PATH}.`);
+  return normalized;
+}
+
+function normalizeGraphqlJsonValue(value) {
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return value;
+    }
+  }
+  return value;
+}
+
+async function getCloudProcedureDefinitionByKey(client, procedureKey) {
+  const data = await client.graphql(GET_PROCEDURE_DEFINITION_QUERY, { procedureKey });
+  const definition = normalizeGraphqlJsonValue(data?.getNewsroomProcedureDefinition);
+  if (!definition || typeof definition !== "object" || !definition.id) return null;
+  return definition;
+}
+
+function missingRequiredProcedureError(alias, procedureKey) {
+  return new Error(
+    `Missing required cloud procedure '${procedureKey}' for ${alias}. Run npm run seed:amplify to preload standard procedures.`,
+  );
+}
+
+async function startCloudProcedureRun({ client, alias, actorLabel, title, summary, input, waitMs = DEFAULT_CLOUD_PROCEDURE_WAIT_MS }) {
+  const procedureKey = requiredProcedureKeyFor(alias);
+  let definition = null;
+  try {
+    definition = await getCloudProcedureDefinitionByKey(client, procedureKey);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error ?? "");
+    if (message.toLowerCase().includes("not found")) throw missingRequiredProcedureError(alias, procedureKey);
+    throw error;
+  }
+  if (!definition) throw missingRequiredProcedureError(alias, procedureKey);
+  const startData = await client.graphql(START_PROCEDURE_RUN_MUTATION, {
+    procedureKey,
+    procedureVersionId: definition.currentVersionId ?? null,
+    title,
+    summary,
+    actorLabel: actorLabel ?? null,
+    input: JSON.stringify(input ?? {}),
+  });
+  const started = normalizeGraphqlJsonValue(startData?.startNewsroomProcedureRun);
+  const runId = normalizeCliString(started?.runId);
+  if (!runId) {
+    throw new Error(`Cloud procedure '${procedureKey}' did not return runId.`);
+  }
+  return await waitForCloudProcedureRun({
+    client,
+    runId,
+    procedureKey,
+    waitMs,
+  });
+}
+
+async function waitForCloudProcedureRun({ client, runId, procedureKey, waitMs }) {
+  const started = Date.now();
+  let latest = null;
+  while ((Date.now() - started) < waitMs) {
+    const data = await client.graphql(GET_PROCEDURE_RUN_QUERY, { id: runId });
+    latest = normalizeGraphqlJsonValue(data?.getNewsroomProcedureRun);
+    const status = normalizeCliString(latest?.runStatus)?.toLowerCase();
+    if (status === "completed") {
+      return latest;
+    }
+    if (status === "failed") {
+      const errorSummary = normalizeCliString(latest?.errorSummary) ?? "cloud procedure run failed";
+      throw new Error(`Cloud procedure '${procedureKey}' failed: ${errorSummary}`);
+    }
+    await delay(CLOUD_PROCEDURE_POLL_MS);
+  }
+  throw new Error(`Timed out waiting for cloud procedure '${procedureKey}' run ${runId}.`);
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function warnIfEndpointDoesNotMatchAmplifyOutputs(endpoint) {
@@ -3398,7 +3539,7 @@ async function createResearchAssignment(flags) {
     changedRecords: changes.filter((change) => change.action !== "noop").length,
     changes: actionCounts,
     next: options.apply
-      ? `PYTHONPATH=../Tactus:src tactus run procedures/newsroom/research_explorer.tac --param assignment_item_id=${assignmentId} --param corpus_key=${corpusKey} --param context_profile=researcher --param research_mode=${researchMode}`
+      ? `npm run content -- assignments run-research --assignment ${assignmentId} --corpus-key ${corpusKey} --research-mode ${researchMode}`
       : `npm run content -- assignments create-research --title ${JSON.stringify(title)} --section ${sectionKey ?? "<section-key>"} --corpus-key ${corpusKey} --research-mode ${researchMode} --apply`,
   };
   if (!options.apply) {
@@ -3565,80 +3706,44 @@ async function runResearchAssignment(flags) {
   const runDir = path.join(process.cwd(), ".papyrus-runs", runId);
   fs.mkdirSync(runDir, { recursive: true });
   const resultPath = path.join(runDir, "research-result.json");
-  const stdoutPath = path.join(runDir, "research.stdout.log");
-  const stderrPath = path.join(runDir, "research.stderr.log");
+  const stdoutPath = null;
+  const stderrPath = null;
   const question = normalizeCliString(options["research-questions"] ?? options.question) ?? "";
   const contextProfile = normalizeCliString(options["context-profile"]) ?? "researcher";
   const maxEvidenceItems = normalizeCliNonNegativeInteger(options["max-evidence-items"], "--max-evidence-items") ?? 20;
-  const command = [
-    "tactus",
-    "run",
-    "procedures/newsroom/research_explorer.tac",
-    "--no-sandbox",
-    "--real-all",
-    "--param", `assignment_item_id=${assignmentId}`,
-    "--param", `corpus_key=${corpusKey}`,
-    "--param", `context_profile=${contextProfile}`,
-    "--param", `research_mode=${researchMode}`,
-    "--param", `research_questions=${question}`,
-    "--param", `max_evidence_items=${maxEvidenceItems}`,
-    "--log-format", "raw",
-  ];
-  const env = {
-    ...process.env,
-    PYTHONPATH: prependPathList(["../Tactus", "src"], process.env.PYTHONPATH),
-  };
   const startedAt = new Date().toISOString();
-  const proc = spawnSync(command[0], command.slice(1), {
-    cwd: process.cwd(),
-    env,
-    encoding: "utf8",
-    maxBuffer: 1024 * 1024 * 128,
+  const { client } = createAuthoringClient();
+  const run = await startCloudProcedureRun({
+    client,
+    alias: "assignments.run-research",
+    actorLabel: normalizeCliString(options.actor) ?? "papyrus-content-cli",
+    title: `Run research assignment ${assignmentId}`,
+    summary: "Triggered by assignments run-research via cloud procedure dispatch.",
+    input: {
+      assignment_item_id: assignmentId,
+      corpus_key: corpusKey,
+      context_profile: contextProfile,
+      research_mode: researchMode,
+      research_questions: question,
+      max_evidence_items: maxEvidenceItems,
+    },
   });
-  fs.writeFileSync(stdoutPath, proc.stdout ?? "", "utf8");
-  fs.writeFileSync(stderrPath, proc.stderr ?? "", "utf8");
   const finishedAt = new Date().toISOString();
-  let parsed = extractResearchRunPayload(proc.stdout);
-  let fallback = null;
-  let fallbackUsed = false;
-  const runFallbackDirect = () => runDirectResearchHarness({
-    assignmentId,
-    corpusKey,
-    researchMode,
-    question,
-    maxEvidenceItems,
-    runDir,
-  });
-  if (!parsed && !options["no-fallback-direct"]) {
-    fallback = runFallbackDirect();
-    parsed = fallback.parsed;
-    fallbackUsed = Boolean(parsed);
+  const parsed = normalizeGraphqlJsonValue(run.output);
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error(`Cloud procedure output for assignment ${assignmentId} did not return a JSON object payload.`);
   }
   let research = parsed?.research_packet ?? parsed?.researchPacket ?? null;
+  if (!research) {
+    throw new Error(`Cloud procedure output for assignment ${assignmentId} is missing research_packet. Run npm run seed:amplify if procedure seeds are stale.`);
+  }
   let packet = research ? normalizeResearchPacketBundle(research, {
     assignment: { id: assignmentId, assignmentTypeKey: "research.edition-candidate", queueKey: "" },
     assignmentMeta: { researchMode, corpusKey },
     researchMode,
   }) : null;
-  if (!options["no-fallback-direct"] && researchPacketNeedsDiscoveryRecovery(packet, researchMode)) {
-    const recoveryFallback = runFallbackDirect();
-    const recoveryParsed = recoveryFallback.parsed;
-    const recoveryResearch = recoveryParsed?.research_packet ?? recoveryParsed?.researchPacket ?? null;
-    const recoveryPacket = recoveryResearch ? normalizeResearchPacketBundle(recoveryResearch, {
-      assignment: { id: assignmentId, assignmentTypeKey: "research.edition-candidate", queueKey: "" },
-      assignmentMeta: { researchMode, corpusKey },
-      researchMode,
-    }) : null;
-    if (recoveryPacket && !researchPacketNeedsDiscoveryRecovery(recoveryPacket, researchMode)) {
-      fallback = recoveryFallback;
-      parsed = recoveryParsed;
-      research = recoveryResearch;
-      packet = recoveryPacket;
-      fallbackUsed = true;
-    } else if (!fallback) {
-      fallback = recoveryFallback;
-    }
-  }
+  if (!packet) throw new Error(`Cloud procedure output for assignment ${assignmentId} returned an invalid research packet shape.`);
+  validateResearchPacketMode(packet);
   const trace = packet?.researchTrace ?? {};
   const retryCountRaw = Number(
     parsed?.retry_count ?? parsed?.retryCount ?? trace.retryCount ?? trace.retry_count ?? 0
@@ -3651,7 +3756,7 @@ async function runResearchAssignment(flags) {
     ?? trace.validation_failures;
   const validationFailures = Array.isArray(validationFailuresRaw) ? validationFailuresRaw.map((entry) => String(entry)) : [];
   const result = {
-    ok: fallbackUsed ? Boolean(fallback?.ok) : proc.status === 0,
+    ok: true,
     command: "assignments run-research",
     action: options.apply ? "apply" : "dry-run",
     runId,
@@ -3660,20 +3765,11 @@ async function runResearchAssignment(flags) {
     corpusKey,
     startedAt,
     finishedAt,
-    exitStatus: proc.status,
-    signal: proc.signal ?? null,
+    exitStatus: 0,
+    signal: null,
     stdoutPath,
     stderrPath,
-    fallback: fallback ? {
-      strategy: fallback.strategy,
-      ok: fallback.ok,
-      exitStatus: fallback.exitStatus,
-      signal: fallback.signal,
-      stdoutPath: fallback.stdoutPath,
-      stderrPath: fallback.stderrPath,
-      parsed: Boolean(fallback.parsed),
-      used: fallbackUsed,
-    } : null,
+    fallback: null,
     resultPath,
     parsed: Boolean(parsed),
     packet: packet ? {
@@ -3692,26 +3788,20 @@ async function runResearchAssignment(flags) {
     } : null,
     next: null,
   };
-  if (!parsed) {
-    result.next = `Inspect ${stdoutPath} and ${stderrPath}; if the procedure returned JSON, save the packet and run assignments apply-research-packet --assignment ${assignmentId} --research-json <packet.json> --apply`;
-  } else if (!options.apply) {
+  if (!options.apply) {
     result.next = `npm run content -- assignments apply-research-packet --assignment ${assignmentId} --research-json ${resultPath} --apply`;
   }
   writeJsonFile(resultPath, {
     ...result,
-    commandLine: command,
-    stdout: proc.stdout ?? "",
-    stderr: proc.stderr ?? "",
+    cloudProcedure: {
+      runId: run.id ?? null,
+      procedureKey: run.procedureKey ?? null,
+      procedureVersionId: run.procedureVersionId ?? null,
+      procedureVersionNumber: run.procedureVersionNumber ?? null,
+      runStatus: run.runStatus ?? null,
+    },
     value: parsed,
   });
-  if (!result.ok) {
-    if (options.json) {
-      printCompactJson(result);
-      return;
-    }
-    printResearchRunSummary(result);
-    return;
-  }
   if (options.apply) {
     if (!research) throw new Error(`assignments run-research --apply could not find research_packet in ${resultPath}.`);
     await applyResearchPacket([
@@ -4606,33 +4696,23 @@ async function runStoryCycleResearchJob({ client, assignment, apply, allowFallba
       };
     }
   }
-  const params = apply
-    ? [`assignment_item_id=${assignment.id}`, `assignment_json=${encodeInlineAssignmentParam(assignment)}`]
-    : [`assignment_json=${encodeInlineAssignmentParam(assignment)}`];
-  const command = [
-    "tactus",
-    "run",
-    "procedures/newsroom/research_explorer.tac",
-    "--no-sandbox",
-    "--real-all",
-    ...params.flatMap((param) => ["--param", param]),
-    "--param", `corpus_key=${corpusKey}`,
-    "--param", "context_profile=researcher",
-    "--param", `research_mode=${researchMode}`,
-    "--param", `research_questions=${storyCycleResearchQuestion({ topic, sectionKey, coverageKey })}`,
-    "--param", `max_evidence_items=${maxEvidenceItems}`,
-    "--log-format", "raw",
-  ];
-  const proc = await spawnBuffered(command[0], command.slice(1), {
-    cwd: process.cwd(),
-    env: {
-      ...process.env,
-      PYTHONPATH: prependPathList(["../Tactus", "src"], process.env.PYTHONPATH),
+  const cloudRun = await startCloudProcedureRun({
+    client,
+    alias: "story-cycle.research",
+    actorLabel: "papyrus-content-cli",
+    title: `Story-cycle research ${assignment.id}`,
+    summary: "Triggered by story-cycle research phase via cloud procedure dispatch.",
+    input: {
+      assignment_item_id: apply ? assignment.id : null,
+      assignment_json: assignment,
+      corpus_key: corpusKey,
+      context_profile: "researcher",
+      research_mode: researchMode,
+      research_questions: storyCycleResearchQuestion({ topic, sectionKey, coverageKey }),
+      max_evidence_items: maxEvidenceItems,
     },
   });
-  fs.writeFileSync(stdoutPath, proc.stdout ?? "", "utf8");
-  fs.writeFileSync(stderrPath, proc.stderr ?? "", "utf8");
-  const parsed = extractResearchRunPayload(proc.stdout);
+  const parsed = normalizeGraphqlJsonValue(cloudRun.output);
   let packet = parsed?.research_packet ?? parsed?.researchPacket ?? null;
   let fallback = null;
   if (!packet) {
@@ -4642,16 +4722,30 @@ async function runStoryCycleResearchJob({ client, assignment, apply, allowFallba
         topic,
         coverageKey,
         researchMode,
-        reason: proc.status === 0 ? "missing_research_packet" : "research_procedure_failed",
+        reason: "missing_research_packet",
       });
       packet = fallback.packet;
+    } else {
+      throw new Error(`Cloud procedure output is missing research_packet for assignment ${assignment.id}. Run npm run seed:amplify if procedure seeds are stale.`);
     }
   }
   if (packet) writeJsonFile(packetPath, packet);
-  writeJsonFile(resultPath, { command, parsed, fallback, stdoutPath, stderrPath });
+  writeJsonFile(resultPath, {
+    cloudProcedure: {
+      runId: cloudRun.id ?? null,
+      procedureKey: cloudRun.procedureKey ?? null,
+      procedureVersionId: cloudRun.procedureVersionId ?? null,
+      procedureVersionNumber: cloudRun.procedureVersionNumber ?? null,
+      runStatus: cloudRun.runStatus ?? null,
+    },
+    parsed,
+    fallback,
+    stdoutPath,
+    stderrPath,
+  });
   const detectedDegraded = packet ? storyCyclePacketDegraded(packet, null) : false;
   const detectedFallbackReason = packet ? storyCyclePacketFallbackReason(packet, null) : null;
-  const degraded = Boolean(fallback) || proc.status !== 0 || detectedDegraded;
+  const degraded = Boolean(fallback) || detectedDegraded;
   const persistenceBlocked = Boolean(requireAgentSuccess && degraded);
   const recordPlan = packet
     ? buildStoryCycleResearchRecordPlan({ assignment, packet })
@@ -4665,9 +4759,9 @@ async function runStoryCycleResearchJob({ client, assignment, apply, allowFallba
   return {
     ok: Boolean(packet) && (!apply || (Boolean(recordPlan) && !persistenceBlocked)),
     degraded,
-    fallbackReason: fallback?.reason ?? (proc.status !== 0 ? "research_procedure_failed" : detectedFallbackReason ?? (!packet ? "missing_research_packet" : null)),
+    fallbackReason: fallback?.reason ?? (detectedFallbackReason ?? (!packet ? "missing_research_packet" : null)),
     fallbackKind: fallback?.kind ?? null,
-    agentExitStatus: proc.status,
+    agentExitStatus: 0,
     persistenceSkippedReason: persistenceBlocked ? "require_agent_success" : (!recordPlan && apply ? "missing_record_plan" : null),
     phase: "research",
     assignmentId: assignment.id,
@@ -4677,8 +4771,8 @@ async function runStoryCycleResearchJob({ client, assignment, apply, allowFallba
     resultPath,
     stdoutPath,
     stderrPath,
-    exitStatus: proc.status,
-    signal: proc.signal,
+    exitStatus: 0,
+    signal: null,
     packet,
     fallback,
     recordPlan,
@@ -4814,33 +4908,23 @@ async function runStoryCycleReportingJob({ client, assignment, apply, allowFallb
       };
     }
   }
-  const params = apply
-    ? [`assignment_item_id=${assignment.id}`, `assignment_json=${encodeInlineAssignmentParam(assignmentForAgent)}`]
-    : [`assignment_json=${encodeInlineAssignmentParam(assignmentForAgent)}`];
-  const command = [
-    "tactus",
-    "run",
-    "procedures/newsroom/reporter.tac",
-    "--no-sandbox",
-    "--real-all",
-    ...params.flatMap((param) => ["--param", param]),
-    "--param", `corpus_key=${corpusKey}`,
-    "--param", "context_profile=reporting",
-    "--param", `source_research_assignment_id=${researchRun?.assignmentId ?? ""}`,
-    "--param", `source_research_packet_id=${researchRun?.messageId ?? ""}`,
-    "--param", `source_research_packet_path=${researchRun?.packetPath ?? ""}`,
-    "--log-format", "raw",
-  ];
-  const proc = await spawnBuffered(command[0], command.slice(1), {
-    cwd: process.cwd(),
-    env: {
-      ...process.env,
-      PYTHONPATH: prependPathList(["../Tactus", "src"], process.env.PYTHONPATH),
+  const cloudRun = await startCloudProcedureRun({
+    client,
+    alias: "story-cycle.reporting",
+    actorLabel: "papyrus-content-cli",
+    title: `Story-cycle reporting ${assignment.id}`,
+    summary: "Triggered by story-cycle reporting phase via cloud procedure dispatch.",
+    input: {
+      assignment_item_id: apply ? assignment.id : null,
+      assignment_json: assignmentForAgent,
+      corpus_key: corpusKey,
+      context_profile: "reporting",
+      source_research_assignment_id: researchRun?.assignmentId ?? "",
+      source_research_packet_id: researchRun?.messageId ?? "",
+      source_research_packet_path: researchRun?.packetPath ?? "",
     },
   });
-  fs.writeFileSync(stdoutPath, proc.stdout ?? "", "utf8");
-  fs.writeFileSync(stderrPath, proc.stderr ?? "", "utf8");
-  const parsed = extractResearchRunPayload(proc.stdout);
+  const parsed = normalizeGraphqlJsonValue(cloudRun.output);
   let packet = parsed?.reporting_context_packet ?? parsed?.reportingContextPacket ?? null;
   let recordPlan = parsed?.reporting_record_plan ?? parsed?.reportingRecordPlan ?? null;
   let fallback = null;
@@ -4852,7 +4936,7 @@ async function runStoryCycleReportingJob({ client, assignment, apply, allowFallb
         topic,
         coverageKey,
         researchRun,
-        reason: proc.status === 0 ? "missing_reporting_context_packet" : "reporting_procedure_failed",
+        reason: "missing_reporting_context_packet",
       });
       packet = fallback.packet;
       recordPlan = fallback.reportingRecordPlan;
@@ -4884,7 +4968,7 @@ async function runStoryCycleReportingJob({ client, assignment, apply, allowFallb
         packet = fallback.packet;
         recordPlan = fallback.reportingRecordPlan;
       } else {
-        packet = null;
+        throw new Error(`Cloud reporting packet is missing required fields (${missingContractFields.join(", ")}) for assignment ${assignment.id}.`);
       }
     }
   }
@@ -4897,10 +4981,22 @@ async function runStoryCycleReportingJob({ client, assignment, apply, allowFallb
     });
   }
   if (packet) writeJsonFile(packetPath, packet);
-  writeJsonFile(resultPath, { command, parsed, fallback, stdoutPath, stderrPath });
+  writeJsonFile(resultPath, {
+    cloudProcedure: {
+      runId: cloudRun.id ?? null,
+      procedureKey: cloudRun.procedureKey ?? null,
+      procedureVersionId: cloudRun.procedureVersionId ?? null,
+      procedureVersionNumber: cloudRun.procedureVersionNumber ?? null,
+      runStatus: cloudRun.runStatus ?? null,
+    },
+    parsed,
+    fallback,
+    stdoutPath,
+    stderrPath,
+  });
   const detectedDegraded = packet ? storyCyclePacketDegraded(packet, null) : false;
   const detectedFallbackReason = packet ? storyCyclePacketFallbackReason(packet, null) : null;
-  const degraded = Boolean(fallback) || proc.status !== 0 || detectedDegraded;
+  const degraded = Boolean(fallback) || detectedDegraded;
   const persistenceBlocked = Boolean(requireAgentSuccess && degraded);
   let messageId = null;
   let applyResult = null;
@@ -4911,9 +5007,9 @@ async function runStoryCycleReportingJob({ client, assignment, apply, allowFallb
   return {
     ok: Boolean(packet) && (!apply || (Boolean(recordPlan) && !persistenceBlocked)),
     degraded,
-    fallbackReason: fallback?.reason ?? (proc.status !== 0 ? "reporting_procedure_failed" : detectedFallbackReason ?? (!packet ? "missing_reporting_context_packet" : null)),
+    fallbackReason: fallback?.reason ?? (detectedFallbackReason ?? (!packet ? "missing_reporting_context_packet" : null)),
     fallbackKind: fallback?.kind ?? null,
-    agentExitStatus: proc.status,
+    agentExitStatus: 0,
     persistenceSkippedReason: persistenceBlocked ? "require_agent_success" : (!recordPlan && apply ? "missing_record_plan" : null),
     phase: "reporting",
     assignmentId: assignment.id,
@@ -4924,8 +5020,8 @@ async function runStoryCycleReportingJob({ client, assignment, apply, allowFallb
     resultPath,
     stdoutPath,
     stderrPath,
-    exitStatus: proc.status,
-    signal: proc.signal,
+    exitStatus: 0,
+    signal: null,
     sourceResearchAssignmentId: researchRun?.assignmentId ?? null,
     sourceResearchPacketId: researchRun?.messageId ?? null,
     packet,
@@ -5627,62 +5723,6 @@ function printResearchIntakeNowSummary(result) {
   printResearchIntakeReferenceRows("research-intake-now", result.references);
   if (result.blockedReason) console.log(`assignments\tresearch-intake-now\tblocked\t${result.blockedReason}`);
   if (result.next) console.log(`assignments\tresearch-intake-now\tnext\t${result.next}`);
-}
-
-function runDirectResearchHarness({ assignmentId, corpusKey, researchMode, question, maxEvidenceItems, runDir }) {
-  const directStdoutPath = path.join(runDir, "research-direct.stdout.log");
-  const directStderrPath = path.join(runDir, "research-direct.stderr.log");
-  const query = question || "Find current external references related to the research assignment.";
-  const snippet = `
-local knowledge = knowledge_search(${JSON.stringify(query)}, { top_k = ${Math.max(1, maxEvidenceItems)}, max_tokens = 1200, depth = 1 })
-local search = web_search(${JSON.stringify(query)})
-local ids = evidence_item_ids_from_knowledge(knowledge)
-return finish_research_from_search(search, {
-  research_mode = ${JSON.stringify(researchMode)},
-  evidence_item_ids = ids,
-  recommended_angle = "Review discovered source prospects through reference intake before treating them as accepted evidence.",
-  coverage_gaps = knowledge.warnings or {},
-})
-`;
-  const result = spawnSync("poetry", [
-    "run",
-    "papyrus-newsroom",
-    "execute-tactus",
-    "--harness", "research",
-    "--assignment-id", assignmentId,
-    "--corpus-key", corpusKey,
-    "--research-mode", researchMode,
-    "--max-evidence-items", String(maxEvidenceItems),
-    snippet,
-  ], {
-    cwd: process.cwd(),
-    encoding: "utf8",
-    maxBuffer: 1024 * 1024 * 128,
-    env: {
-      ...process.env,
-      PYTHONPATH: prependPathList(["../Tactus", "src"], process.env.PYTHONPATH),
-    },
-  });
-  fs.writeFileSync(directStdoutPath, result.stdout ?? "", "utf8");
-  fs.writeFileSync(directStderrPath, result.stderr ?? "", "utf8");
-  const parsed = extractResearchRunPayload(result.stdout);
-  return {
-    strategy: "direct-harness",
-    ok: result.status === 0 && Boolean(parsed),
-    exitStatus: result.status,
-    signal: result.signal ?? null,
-    stdoutPath: directStdoutPath,
-    stderrPath: directStderrPath,
-    parsed,
-  };
-}
-
-function researchPacketNeedsDiscoveryRecovery(packet, researchMode) {
-  if (!packet || researchMode === "internal_brief") return false;
-  const hasSources = Array.isArray(packet.sourceSnapshots) && packet.sourceSnapshots.length > 0;
-  const hasProposals = Array.isArray(packet.proposedReferences) && packet.proposedReferences.length > 0;
-  const blockedReason = normalizeCliString(packet.sourceDiscovery?.blockedReason);
-  return !hasSources && !hasProposals && !blockedReason;
 }
 
 function printResearchRunSummary(result) {
@@ -7258,6 +7298,263 @@ async function dispatchEditionReporting(flags) {
     for (const failure of verification.failures) console.log(`failure\t${failure}`);
     throw new Error("Reporting edition planning verification failed.");
   }
+}
+
+async function purgeEditions(flags) {
+  const options = parseOptions(flags);
+  const mode = normalizeCliString(options.mode);
+  if (mode !== "edition-only" && mode !== "edition-and-items") {
+    throw new Error("editions purge requires --mode edition-only|edition-and-items.");
+  }
+  const purgeAll = Boolean(options.all);
+  const editionSelector = normalizeCliString(options.edition);
+  if (purgeAll && editionSelector) throw new Error("editions purge accepts either --all or --edition, not both.");
+  if (!purgeAll && !editionSelector) throw new Error("editions purge requires --edition <id|slug|date> or --all.");
+
+  const { client } = createAuthoringClient();
+  const plan = await buildEditionPurgePlan(client, { mode, purgeAll, editionSelector });
+  const result = await applyEditionPurgePlan(client, plan);
+  if (options.json) {
+    printCompactJson({
+      ok: true,
+      command: "editions purge",
+      mode,
+      selector: purgeAll ? "all" : editionSelector,
+      targetedEditionLineages: Array.from(plan.targetEditionLineageIds).sort(),
+      deleted: result.deleted,
+      skipped: result.skipped,
+    });
+    return;
+  }
+
+  console.log(`editions-purge\tmode\t${mode}`);
+  console.log(`editions-purge\tselector\t${purgeAll ? "all" : editionSelector}`);
+  console.log(`editions-purge\ttargeted-lineages\t${plan.targetEditionLineageIds.size}`);
+  for (const [modelName, deleted] of Object.entries(result.deleted)) {
+    console.log(`editions-purge\tdeleted\t${modelName}\t${deleted}`);
+  }
+  for (const [modelName, reason] of Object.entries(result.skipped)) {
+    console.log(`editions-purge\tskipped\t${modelName}\t${reason}`);
+  }
+}
+
+async function buildEditionPurgePlan(client, { mode, purgeAll, editionSelector }) {
+  const [editions, publishedEditions, editionItems, publishedEditionItems] = await Promise.all([
+    safeListRecordsForPurge(client, "Edition"),
+    safeListRecordsForPurge(client, "PublishedEdition"),
+    safeListRecordsForPurge(client, "EditionItem"),
+    safeListRecordsForPurge(client, "PublishedEditionItem"),
+  ]);
+
+  const normalizedEditions = editions.map((record) => ({
+    id: normalizeCliString(record.id),
+    lineageId: normalizeCliString(record.lineageId) ?? normalizeCliString(record.id),
+    slug: normalizeCliString(record.slug),
+    editionDate: normalizeCliString(record.editionDate),
+  })).filter((record) => record.id && record.lineageId);
+  const normalizedPublishedEditions = publishedEditions.map((record) => ({
+    id: normalizeCliString(record.id),
+    sourceEditionId: normalizeCliString(record.sourceEditionId),
+    lineageId: normalizeCliString(record.editionLineageId) ?? normalizeCliString(record.sourceEditionId),
+    slug: normalizeCliString(record.slug),
+    editionDate: normalizeCliString(record.editionDate),
+  })).filter((record) => record.id && record.lineageId);
+
+  const targetEditionLineageIds = resolveEditionPurgeLineages({
+    editions: normalizedEditions,
+    publishedEditions: normalizedPublishedEditions,
+    purgeAll,
+    editionSelector,
+  });
+  if (targetEditionLineageIds.size === 0) {
+    return {
+      mode,
+      targetEditionLineageIds,
+      ids: {},
+    };
+  }
+
+  const targetEditionIds = new Set(
+    normalizedEditions
+      .filter((record) => targetEditionLineageIds.has(record.lineageId))
+      .map((record) => record.id),
+  );
+  const targetPublishedEditionIds = new Set(
+    normalizedPublishedEditions
+      .filter((record) => targetEditionLineageIds.has(record.lineageId) || (record.sourceEditionId && targetEditionIds.has(record.sourceEditionId)))
+      .map((record) => record.id),
+  );
+  const targetEditionItemRows = editionItems.filter((record) =>
+    targetEditionIds.has(normalizeCliString(record.editionId))
+    || targetEditionLineageIds.has(normalizeCliString(record.editionLineageId)),
+  );
+  const targetPublishedEditionItemRows = publishedEditionItems.filter((record) =>
+    targetPublishedEditionIds.has(normalizeCliString(record.publishedEditionId))
+    || targetEditionLineageIds.has(normalizeCliString(record.editionLineageId))
+    || targetEditionIds.has(normalizeCliString(record.sourceEditionId)),
+  );
+
+  const targetItemLineages = new Set(
+    targetEditionItemRows
+      .map((record) => normalizeCliString(record.itemLineageId) ?? normalizeCliString(record.itemId))
+      .concat(targetPublishedEditionItemRows.map((record) => normalizeCliString(record.itemLineageId) ?? normalizeCliString(record.sourceItemId)))
+      .filter(Boolean),
+  );
+
+  const ids = {
+    Edition: new Set(Array.from(targetEditionIds).filter(Boolean)),
+    PublishedEdition: new Set(Array.from(targetPublishedEditionIds).filter(Boolean)),
+    EditionItem: new Set(targetEditionItemRows.map((record) => normalizeCliString(record.id)).filter(Boolean)),
+    PublishedEditionItem: new Set(targetPublishedEditionItemRows.map((record) => normalizeCliString(record.id)).filter(Boolean)),
+    Item: new Set(),
+    PublishedItem: new Set(),
+    MediaAsset: new Set(),
+    PublishedMediaAsset: new Set(),
+    ItemTag: new Set(),
+    Tag: new Set(),
+  };
+
+  if (mode === "edition-only") {
+    return {
+      mode,
+      targetEditionLineageIds,
+      ids,
+    };
+  }
+
+  const [items, publishedItems, mediaAssets, publishedMediaAssets, itemTags, tags] = await Promise.all([
+    safeListRecordsForPurge(client, "Item"),
+    safeListRecordsForPurge(client, "PublishedItem"),
+    safeListRecordsForPurge(client, "MediaAsset"),
+    safeListRecordsForPurge(client, "PublishedMediaAsset"),
+    safeListRecordsForPurge(client, "ItemTag"),
+    safeListRecordsForPurge(client, "Tag"),
+  ]);
+
+  const survivingItemLineages = new Set(
+    editionItems
+      .filter((record) => !ids.EditionItem.has(normalizeCliString(record.id)))
+      .map((record) => normalizeCliString(record.itemLineageId) ?? normalizeCliString(record.itemId))
+      .concat(
+        publishedEditionItems
+          .filter((record) => !ids.PublishedEditionItem.has(normalizeCliString(record.id)))
+          .map((record) => normalizeCliString(record.itemLineageId) ?? normalizeCliString(record.sourceItemId)),
+      )
+      .filter(Boolean),
+  );
+  const purgeItemLineages = new Set(Array.from(targetItemLineages).filter((lineageId) => !survivingItemLineages.has(lineageId)));
+  const itemRowsToDelete = items.filter((record) => {
+    const lineageId = normalizeCliString(record.lineageId) ?? normalizeCliString(record.id);
+    return lineageId && purgeItemLineages.has(lineageId);
+  });
+  const publishedItemRowsToDelete = publishedItems.filter((record) => {
+    const lineageId = normalizeCliString(record.itemLineageId) ?? normalizeCliString(record.sourceItemId);
+    return lineageId && purgeItemLineages.has(lineageId);
+  });
+  const itemIdsToDelete = new Set(itemRowsToDelete.map((record) => normalizeCliString(record.id)).filter(Boolean));
+  const publishedItemIdsToDelete = new Set(publishedItemRowsToDelete.map((record) => normalizeCliString(record.id)).filter(Boolean));
+  const sourceItemIdsFromPublished = new Set(publishedItemRowsToDelete.map((record) => normalizeCliString(record.sourceItemId)).filter(Boolean));
+  for (const sourceItemId of sourceItemIdsFromPublished) itemIdsToDelete.add(sourceItemId);
+
+  const mediaAssetIdsToDelete = new Set(
+    mediaAssets
+      .filter((record) => itemIdsToDelete.has(normalizeCliString(record.itemId)))
+      .map((record) => normalizeCliString(record.id))
+      .filter(Boolean),
+  );
+  const publishedMediaAssetIdsToDelete = new Set(
+    publishedMediaAssets
+      .filter((record) => {
+        const sourceItemId = normalizeCliString(record.sourceItemId);
+        const itemLineageId = normalizeCliString(record.itemLineageId);
+        const publishedItemId = normalizeCliString(record.publishedItemId);
+        return itemIdsToDelete.has(sourceItemId)
+          || purgeItemLineages.has(itemLineageId)
+          || publishedItemIdsToDelete.has(publishedItemId);
+      })
+      .map((record) => normalizeCliString(record.id))
+      .filter(Boolean),
+  );
+  const itemTagRowsToDelete = itemTags.filter((record) => itemIdsToDelete.has(normalizeCliString(record.itemId)));
+  const itemTagIdsToDelete = new Set(itemTagRowsToDelete.map((record) => normalizeCliString(record.id)).filter(Boolean));
+  const candidateTagIds = new Set(itemTagRowsToDelete.map((record) => normalizeCliString(record.tagId)).filter(Boolean));
+  const tagIdsStillLinked = new Set(
+    itemTags
+      .filter((record) => !itemTagIdsToDelete.has(normalizeCliString(record.id)))
+      .map((record) => normalizeCliString(record.tagId))
+      .filter(Boolean),
+  );
+  const tagIdsToDelete = new Set(
+    tags
+      .map((record) => normalizeCliString(record.id))
+      .filter((tagId) => candidateTagIds.has(tagId) && !tagIdsStillLinked.has(tagId)),
+  );
+
+  ids.Item = new Set(itemIdsToDelete);
+  ids.PublishedItem = new Set(publishedItemIdsToDelete);
+  ids.MediaAsset = mediaAssetIdsToDelete;
+  ids.PublishedMediaAsset = publishedMediaAssetIdsToDelete;
+  ids.ItemTag = itemTagIdsToDelete;
+  ids.Tag = tagIdsToDelete;
+
+  return {
+    mode,
+    targetEditionLineageIds,
+    ids,
+  };
+}
+
+function resolveEditionPurgeLineages({ editions, publishedEditions, purgeAll, editionSelector }) {
+  if (purgeAll) {
+    return new Set(
+      editions.map((record) => record.lineageId).concat(publishedEditions.map((record) => record.lineageId)).filter(Boolean),
+    );
+  }
+  const selector = normalizeCliString(editionSelector);
+  if (!selector) return new Set();
+  const matches = [
+    ...editions.filter((record) => record.id === selector || record.slug === selector || record.editionDate === selector || record.lineageId === selector),
+    ...publishedEditions.filter((record) => record.id === selector || record.slug === selector || record.editionDate === selector || record.lineageId === selector || record.sourceEditionId === selector),
+  ];
+  return new Set(matches.map((record) => record.lineageId).filter(Boolean));
+}
+
+async function safeListRecordsForPurge(client, modelName) {
+  try {
+    return await client.listRecords(modelName);
+  } catch (error) {
+    if (!isMissingGraphQLModelError(error, modelName) && !isDynamoResourceNotFoundError(error)) throw error;
+    return [];
+  }
+}
+
+async function applyEditionPurgePlan(client, plan) {
+  const deleted = {};
+  const skipped = {};
+  if (!plan || !plan.ids || plan.targetEditionLineageIds.size === 0) {
+    return { deleted, skipped };
+  }
+
+  const deleteOrder = plan.mode === "edition-and-items"
+    ? ["PublishedMediaAsset", "MediaAsset", "ItemTag", "PublishedEditionItem", "EditionItem", "PublishedItem", "Item", "Tag", "PublishedEdition", "Edition"]
+    : ["PublishedEditionItem", "EditionItem", "PublishedEdition", "Edition"];
+
+  for (const modelName of deleteOrder) {
+    const ids = plan.ids[modelName] ? Array.from(plan.ids[modelName]).filter(Boolean) : [];
+    if (ids.length === 0) {
+      deleted[modelName] = 0;
+      continue;
+    }
+    try {
+      const result = await deleteRecordsForModel(client, modelName, ids.map((id) => ({ id })));
+      deleted[modelName] = result.deleted;
+    } catch (error) {
+      if (!isMissingGraphQLModelError(error, modelName) && !isDynamoResourceNotFoundError(error)) throw error;
+      skipped[modelName] = normalizeError(error).message;
+      deleted[modelName] = 0;
+    }
+  }
+  return { deleted, skipped };
 }
 
 async function listAnalysisProfiles(flags) {
@@ -15171,6 +15468,9 @@ function printUsage() {
   console.log("  npm run content -- editions dispatch-research --date YYYY-MM-DD --section-targets desk.key:news --apply");
   console.log("  npm run content -- editions dispatch-reporting --date YYYY-MM-DD --section-budgets news:2,business:1 --rotating-sections 2 --apply");
   console.log("  npm run content -- editions dispatch-research --date YYYY-MM-DD --focus-categories agentic-workflows,evaluation-qa --section-targets agentic-workflows:technology,evaluation-qa:methods --context-profile reporting --apply");
+  console.log("  npm run content -- editions purge --edition <id|slug|date> --mode edition-only");
+  console.log("  npm run content -- editions purge --edition <id|slug|date> --mode edition-and-items");
+  console.log("  npm run content -- editions purge --all --mode edition-and-items");
 }
 
 function printEditionPlanningSummary(plan, report, mode) {

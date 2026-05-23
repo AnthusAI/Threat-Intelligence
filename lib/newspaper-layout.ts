@@ -444,6 +444,10 @@ type FrontArticlePlacement = {
   rowHeight?: number;
 };
 
+type FrontArticleSolveOptions = {
+  enforcePlacementHeight?: boolean;
+};
+
 type FrontCompositionFlowMode = "offsetBody" | "integrated" | "titleStackedMedia" | "stackedMedia";
 
 type PreparedTextCache = Map<string, PreparedTextWithSegments>;
@@ -641,10 +645,20 @@ function solveFrontMosaicPage(
     ...placement,
     rowHeight: getResponsiveFrontPlacementHeight(placement, baseRowHeights, config.rowGap),
   }));
-  const blocks = solvedPlacements.map((placement) => (
-    solveFrontArticleFrame(placement, itemsBySlug, flows, prepared, config, pageSpec.pageNumber)
+  const previewFlows = new Map<string, ArticleFlow>();
+  const provisionalBlocks = solvedPlacements.map((placement) => (
+    solveFrontArticleFrame(placement, itemsBySlug, previewFlows, prepared, config, pageSpec.pageNumber)
   ));
-  const rowHeights = getSolvedResponsiveFrontRowHeights(baseRowHeights, blocks, config);
+  const rowHeights = getSolvedResponsiveFrontRowHeights(baseRowHeights, provisionalBlocks, config);
+  const finalPlacements = solvedPlacements.map((placement) => ({
+    ...placement,
+    rowHeight: getResponsiveFrontPlacementHeight(placement, rowHeights, config.rowGap),
+  }));
+  const blocks = finalPlacements.map((placement) => (
+    solveFrontArticleFrame(placement, itemsBySlug, flows, prepared, config, pageSpec.pageNumber, {
+      enforcePlacementHeight: true,
+    })
+  ));
   const gridHeight = getFrontPageGridHeightFromRowHeights(rowHeights, config.rowGap);
   const frontFooter = solveFrontFooter(blocks, config, pageSpec.pageNumber);
   const regionY = config.pageChrome.pagePaddingTop + config.pageChrome.mastheadHeight + config.pageChrome.frontGridMarginTop;
@@ -925,6 +939,7 @@ function solveFrontArticleFrame(
   prepared: PreparedTextCache,
   config: LayoutConfig,
   pageNumber: number,
+  options: FrontArticleSolveOptions = {},
 ): SolvedBlock {
   const { block: blockSpec } = placement;
   const item = requireArticleItem(blockSpec.itemId, itemsBySlug);
@@ -934,7 +949,7 @@ function solveFrontArticleFrame(
   const span = placement.gridPlacement?.columnSpan ?? Math.min(blockSpec.span?.preferred ?? 1, config.columnCount);
   const blockWidth = getSpanWidth(config, span);
   if (blockSpec.composition) {
-    return solveComposedFrontArticleFrame(placement, item, flow, prepared, config, pageNumber, span, blockWidth);
+    return solveComposedFrontArticleFrame(placement, item, flow, prepared, config, pageNumber, span, blockWidth, options);
   }
   const preludeImage = createFrontPreludeImage(item, blockSpec, blockWidth, config, flow.usedImageAssetIds);
   const storyRole = resolveFrontStoryRole(blockSpec, span, preludeImage !== null);
@@ -948,12 +963,13 @@ function solveFrontArticleFrame(
   let bodySlotHeight = imageWrap
     ? Math.max(baseBodySlotHeight, reserveRhythmRows(imageWrap.height, config.rhythm))
     : baseBodySlotHeight;
-  const lineLimitHeight = blockSpec.cutPolicy?.maxBodyLines
-    ? getLineLimitHeight(blockSpec.cutPolicy.maxBodyLines, config.lineHeight, config.linePaintHeight, config.rhythm)
-    : bodySlotHeight;
+  const textLimit = getFrontTeaserTextLimit(blockSpec, config);
+  if (textLimit?.mode === "bodyDepth") {
+    bodySlotHeight = Math.max(bodySlotHeight, textLimit.height);
+  }
   const startCursor = { ...flow.currentCursor };
   const text = getPrepared(prepared, item, config.frontBodyFont);
-  let maxHeight = Math.min(bodySlotHeight, lineLimitHeight);
+  let maxHeight = getFrontTeaserMeasureHeight(textLimit, bodySlotHeight);
   let result = layoutTextLines({
     prepared: text,
     cursor: startCursor,
@@ -980,7 +996,8 @@ function solveFrontArticleFrame(
       obstacles: imageWrap ? [imageWrap] : [],
     });
   }
-  const blockHeight = Math.max(rowHeight, reserveRhythmRows(chromeHeight + bodySlotHeight + jumpReserveHeight, config.rhythm));
+  const requiredBlockHeight = Math.max(rowHeight, reserveRhythmRows(chromeHeight + bodySlotHeight + jumpReserveHeight, config.rhythm));
+  const blockHeight = options.enforcePlacementHeight ? rowHeight : requiredBlockHeight;
   const range = createTextRange({
     flow,
     pageId: pageIdFor(pageNumber),
@@ -1046,6 +1063,7 @@ function solveComposedFrontArticleFrame(
   pageNumber: number,
   span: number,
   blockWidth: number,
+  options: FrontArticleSolveOptions = {},
 ): SolvedBlock {
   const { block: blockSpec } = placement;
   const storyRole = resolveFrontStoryRole(blockSpec, span, false);
@@ -1081,9 +1099,7 @@ function solveComposedFrontArticleFrame(
 
   const bodyTop = compositionMode === "offsetBody" ? reserveRhythmRows(titleBottom, config.rhythm) : 0;
   let bodySlotHeight = Math.max(getMinimumTextFrameHeight(config), snapDownToRhythm(rowHeight - bodyTop - jumpReserveHeight, config.rhythm));
-  const lineLimitHeight = blockSpec.cutPolicy?.maxBodyLines
-    ? getLineLimitHeight(blockSpec.cutPolicy.maxBodyLines, config.lineHeight, config.linePaintHeight, config.rhythm)
-    : bodySlotHeight;
+  const textLimit = getFrontTeaserTextLimit(blockSpec, config);
   const leadBoxes: SolvedChromeBox[] = [];
   const renderLeadBoxes: SolvedChromeBox[] = [];
   const furniture: SolvedFurniture[] = [];
@@ -1163,10 +1179,10 @@ function solveComposedFrontArticleFrame(
   if (compositionMode === "stackedMedia" || compositionMode === "titleStackedMedia") {
     bodySlotHeight = Math.max(bodySlotHeight, reserveRhythmRows(copyBandTop + getMinimumTextFrameHeight(config), config.rhythm));
   }
-  const maxHeight = Math.min(
-    bodySlotHeight,
-    compositionMode === "stackedMedia" || compositionMode === "titleStackedMedia" ? copyBandTop + lineLimitHeight : lineLimitHeight,
-  );
+  if (textLimit?.mode === "bodyDepth") {
+    bodySlotHeight = Math.max(bodySlotHeight, reserveRhythmRows(copyBandTop + textLimit.height, config.rhythm));
+  }
+  const maxHeight = getComposedFrontTextMeasureHeight(textLimit, compositionMode, copyBandTop, bodySlotHeight);
   const textResult = layoutTextColumns({
     item,
     prepared,
@@ -1180,7 +1196,8 @@ function solveComposedFrontArticleFrame(
     minimumLineStartYByColumn: columnCopyBandTops,
     chromeBoxes: textChromeBoxes,
   });
-  const solvedRowHeight = Math.max(rowHeight, reserveRhythmRows(bodyTop + bodySlotHeight + jumpReserveHeight, config.rhythm));
+  const requiredRowHeight = Math.max(rowHeight, reserveRhythmRows(bodyTop + bodySlotHeight + jumpReserveHeight, config.rhythm));
+  const solvedRowHeight = options.enforcePlacementHeight ? rowHeight : requiredRowHeight;
   const range = createTextRange({
     flow,
     pageId: pageIdFor(pageNumber),
@@ -1762,6 +1779,7 @@ function layoutTextColumns({
   cursor,
   columnCount,
   textHeight,
+  maximumTextHeightByColumn = [],
   localConfig,
   furniture,
   chromeBoxes = [],
@@ -1774,6 +1792,7 @@ function layoutTextColumns({
   cursor: LayoutCursor;
   columnCount: number;
   textHeight: number;
+  maximumTextHeightByColumn?: number[];
   localConfig: LayoutConfig;
   furniture: SolvedFurniture[];
   chromeBoxes?: SolvedChromeBox[];
@@ -1791,7 +1810,7 @@ function layoutTextColumns({
     const result = layoutTextLines({
       prepared: preparedText,
       cursor: current,
-      maxHeight: textHeight,
+      maxHeight: maximumTextHeightByColumn[columnIndex] ?? textHeight,
       maxWidth: columnWidth,
       lineHeight: localConfig.lineHeight,
       linePaintHeight: localConfig.linePaintHeight,
@@ -1850,11 +1869,12 @@ function getPullQuoteVariants(
 }
 
 function resolvePlacementVariants(placement: ResponsivePlacementSpec, config: LayoutConfig): PlacementVariant[] {
-  const collapsed = config.columnCount < placement.span.min;
+  const effectiveSpan = getEffectivePlacementSpanPolicy(placement, config.columnCount);
+  const collapsed = config.columnCount < effectiveSpan.min;
   if (collapsed && placement.collapse === "omit") return [];
   const spans = collapsed
     ? [placement.collapse === "fullWidth" ? config.columnCount : 1]
-    : getSpanCandidates(placement.span, config.columnCount);
+    : getSpanCandidates(effectiveSpan, config.columnCount);
   return spans.flatMap((span, index) => {
     const anchor = collapsed && placement.collapse === "inline" ? "inline" : placement.anchor ?? "left";
     const columnStart = getColumnStartForPlacement(placement, resolveAnchor(anchor), span, config.columnCount, collapsed);
@@ -1867,6 +1887,16 @@ function resolvePlacementVariants(placement: ResponsivePlacementSpec, config: La
       fallbackPenalty: index * 120 + (collapsed ? 320 : 0),
     }];
   });
+}
+
+function getEffectivePlacementSpanPolicy(
+  placement: ResponsivePlacementSpec,
+  columnCount: number,
+): ResponsiveSpanPolicy {
+  const override = placement.spanOverrides?.[String(columnCount)];
+  if (!override) return placement.span;
+  const clamped = clamp(override, placement.span.min, placement.span.max);
+  return { min: clamped, preferred: clamped, max: clamped };
 }
 
 function resolvePreferredPlacementVariant(placement: ResponsivePlacementSpec, config: LayoutConfig): PlacementVariant | null {
@@ -2336,7 +2366,52 @@ function getFrontArticleRowHeight(placement: FrontArticlePlacement, config: Layo
 }
 
 function shouldGrowFrontArticleToContent(blockSpec: ArticleFrameBlockSpec): boolean {
-  return Boolean(blockSpec.size?.shrinkToContent && !blockSpec.cutPolicy?.maxBodyLines && !blockSpec.cutPolicy?.jumpTargetPage);
+  return Boolean(
+    blockSpec.size?.shrinkToContent &&
+      !blockSpec.cutPolicy?.bodyDepthRows &&
+      !blockSpec.cutPolicy?.maxBodyLines &&
+      !blockSpec.cutPolicy?.jumpTargetPage,
+  );
+}
+
+function getFrontTeaserTextLimit(
+  blockSpec: ArticleFrameBlockSpec,
+  config: LayoutConfig,
+): { mode: "bodyDepth" | "lineCount"; height: number } | null {
+  if (blockSpec.cutPolicy?.bodyDepthRows) {
+    return {
+      mode: "bodyDepth",
+      height: getLineLimitHeight(blockSpec.cutPolicy.bodyDepthRows, config.lineHeight, config.linePaintHeight, config.rhythm),
+    };
+  }
+  if (blockSpec.cutPolicy?.maxBodyLines) {
+    return {
+      mode: "lineCount",
+      height: getLineLimitHeight(blockSpec.cutPolicy.maxBodyLines, config.lineHeight, config.linePaintHeight, config.rhythm),
+    };
+  }
+  return null;
+}
+
+function getFrontTeaserMeasureHeight(
+  textLimit: { mode: "bodyDepth" | "lineCount"; height: number } | null,
+  bodySlotHeight: number,
+): number {
+  if (!textLimit || textLimit.mode === "bodyDepth") return bodySlotHeight;
+  return Math.min(bodySlotHeight, textLimit.height);
+}
+
+function getComposedFrontTextMeasureHeight(
+  textLimit: { mode: "bodyDepth" | "lineCount"; height: number } | null,
+  compositionMode: FrontCompositionFlowMode,
+  copyBandTop: number,
+  bodySlotHeight: number,
+): number {
+  if (!textLimit || textLimit.mode === "bodyDepth") return bodySlotHeight;
+  const lineLimitHeight = compositionMode === "stackedMedia" || compositionMode === "titleStackedMedia"
+    ? copyBandTop + textLimit.height
+    : textLimit.height;
+  return Math.min(bodySlotHeight, lineLimitHeight);
 }
 
 function getBlockSpan(config: LayoutConfig, span: ResponsiveSpanPolicy | undefined): number {

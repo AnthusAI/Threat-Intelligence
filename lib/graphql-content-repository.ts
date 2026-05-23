@@ -132,6 +132,15 @@ export const graphqlContentRepository: ContentRepository = {
     }
   },
 
+  async getFirstPublishedEdition() {
+    try {
+      return summarizeEditionRoute(await loadFirstPublishedEdition());
+    } catch (error) {
+      if (isMissingGraphQLEditionError(error)) return null;
+      throw error;
+    }
+  },
+
   async listPublishedEditions(options?: ListPublishedEditionsOptions) {
     const result = await listPublishedEditionSummaries(options);
     return {
@@ -200,6 +209,15 @@ async function loadLatestPublishedEdition(): Promise<GraphQLEdition> {
   );
   if (latestByEditionDate) return latestByEditionDate;
 
+  throw new Error("No published GraphQL edition found. Seed the Amplify sandbox or set PAPYRUS_EDITION_SLUG.");
+}
+
+async function loadFirstPublishedEdition(): Promise<GraphQLEdition> {
+  const editions = await listAll<GraphQLEdition>((options) =>
+    getPublishedEditionModel().listPublishedEditionsByStatusAndEditionDate({ status: PUBLISHED_STATUS }, options),
+  );
+  const [firstEdition] = editions.sort(compareEditionsByOldest);
+  if (firstEdition) return firstEdition;
   throw new Error("No published GraphQL edition found. Seed the Amplify sandbox or set PAPYRUS_EDITION_SLUG.");
 }
 
@@ -297,6 +315,14 @@ function compareEditionsByFreshness(left: GraphQLEdition, right: GraphQLEdition)
   const leftPublishedAt = left.publishedAt ?? `${left.editionDate}T00:00:00.000Z`;
   const rightPublishedAt = right.publishedAt ?? `${right.editionDate}T00:00:00.000Z`;
   return rightPublishedAt.localeCompare(leftPublishedAt) || right.id.localeCompare(left.id);
+}
+
+function compareEditionsByOldest(left: GraphQLEdition, right: GraphQLEdition): number {
+  const leftPublishedAt = left.publishedAt ?? `${left.editionDate}T00:00:00.000Z`;
+  const rightPublishedAt = right.publishedAt ?? `${right.editionDate}T00:00:00.000Z`;
+  return left.editionDate.localeCompare(right.editionDate)
+    || leftPublishedAt.localeCompare(rightPublishedAt)
+    || left.id.localeCompare(right.id);
 }
 
 function isMissingGraphQLEditionError(error: unknown): boolean {

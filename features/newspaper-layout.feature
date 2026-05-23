@@ -101,6 +101,12 @@ Feature: Newspaper layout scenarios
     And no measured line should overlap solved furniture
     And no browser console errors should occur
 
+  Scenario: Front teaser body-depth rows keep the lead trio aligned
+    Given I open the "front-body-depth-rows" layout scenario at 1280 by 900
+    Then the front lead trio should share one equal-height row
+    And no measured line should be cropped
+    And no browser console errors should occur
+
   Scenario: Primary front story leads the mobile sequence
     Given I open the "current-edition" layout scenario at 390 by 900
     Then the solved layout should use 1 columns

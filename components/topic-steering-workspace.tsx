@@ -20,13 +20,18 @@ import {
   loadEditorUserDirectoryData,
   loadModelPayloadsForOwner,
   loadEditorReferencesData,
+  loadEditorProcedureData,
   loadEditorSemanticRelationsData,
   loadNewsroomAssignmentPage,
   loadNewsroomMessagePage,
   loadNewsroomReferencePage,
   loadNewsroomSemanticNodePage,
+  publishProcedureVersionRecord,
   runNewsroomKnowledgeQuery,
+  saveProcedureDefinitionRecord,
+  saveProcedureVersionDraftRecord,
   selectRootDeskCategoriesForDoctrine,
+  startProcedureRunRecord,
   uploadModelPayloadForOwner,
   type KnowledgeQueryResponse,
   type NewsroomRecordPage,
@@ -53,6 +58,9 @@ import type {
   NewsroomSummaryRecord,
   LexicalSteeringRuleRecord,
   NewsroomSectionRecord,
+  ProcedureDefinitionRecord,
+  ProcedureRunRecord,
+  ProcedureVersionRecord,
   ReferenceAttachmentRecord,
   ReferenceRecord,
   SemanticNodeRecord,
@@ -130,11 +138,11 @@ type ReviewAction = "accept" | "reject";
 type ReferenceCurationAction = "accept" | "reject" | "reopen" | "archive";
 type ReferenceRejectionReasonCode = typeof REFERENCE_REJECTION_REASON_CODES[number];
 type TopicLabelAction = "manual_label" | "accept_prediction" | "reject_prediction" | "unlabel";
-type AssignmentAction = "claim" | "release" | "complete" | "cancel" | "reopen";
+type AssignmentAction = "claim" | "release" | "complete" | "cancel" | "reopen" | "retry";
 type ReportingPacketReviewDecision = "select" | "merge" | "brief" | "hold" | "kill";
 type AssignmentDeskViewMode = "queue" | "budget";
 type UserRoleAction = "grant" | "revoke";
-type AdministrationPanel = "users" | "policies" | "sections";
+type AdministrationPanel = "users" | "policies" | "sections" | "procedures";
 export type NewsDeskTab = "overview" | "desks" | "topics" | "concepts" | "references" | "messages" | "assignments" | "administration" | "search";
 type LexicalRuleScope = "publication" | "corpus" | "classifier" | "category";
 type AnalysisReindexMode = "online-update" | "classifier-retrain" | "scoped-topic-rebuild" | "entity-graph-rebuild" | "generated-analysis-rebuild";
@@ -412,7 +420,7 @@ const NEWS_DESK_TABS: Array<{ id: NewsDeskTab; label: string; detail: string; hr
   { id: "references", label: "References", detail: "Knowledge Base", href: "/newsroom/references" },
   { id: "topics", label: "Topics", detail: "Taxonomy", href: "/newsroom/topics" },
   { id: "concepts", label: "Concepts", detail: "Ontology", href: "/newsroom/concepts" },
-  { id: "administration", label: "Administration", detail: "Users & Policies", href: "/newsroom/administration" },
+  { id: "administration", label: "Administration", detail: "Users, Policies & Procedures", href: "/newsroom/administration" },
 ];
 
 const TAXONOMY_PROPOSAL_KINDS = new Set([
@@ -701,6 +709,9 @@ function NewsDeskDashboard({
     [dashboard.newsroomSections],
   );
   const [newsroomSections, setNewsroomSections] = useState(fallbackNewsroomSections);
+  const [procedureDefinitions, setProcedureDefinitions] = useState(dashboard.procedureDefinitions ?? []);
+  const [procedureVersions, setProcedureVersions] = useState(dashboard.procedureVersions ?? []);
+  const [procedureRuns, setProcedureRuns] = useState(dashboard.procedureRuns ?? []);
   const [userDirectory, setUserDirectory] = useState(dashboard.userDirectory);
   const [actionState, setActionState] = useState<ActionState | null>(null);
   const [referenceQualityActionState, setReferenceQualityActionState] = useState<ReferenceQualityActionState | null>(null);
@@ -789,11 +800,12 @@ function NewsDeskDashboard({
     references: summaryCountFromRecord(summary, "references"),
     topics: summaryCountFromRecord(summary, "categories"),
     concepts: summaryCountFromRecord(summary, "semanticNodes"),
-    administration: userDirectory.length + doctrineRecords.length + newsroomSections.length,
+    administration: userDirectory.length + doctrineRecords.length + newsroomSections.length + procedureDefinitions.length,
     search: 0,
   }), [
     doctrineRecords.length,
     newsroomSections.length,
+    procedureDefinitions.length,
     summary,
     userDirectory.length,
   ]);
@@ -934,8 +946,29 @@ function NewsDeskDashboard({
   }, [dashboard.newsroomSections]);
 
   useEffect(() => {
+    setProcedureDefinitions(dashboard.procedureDefinitions ?? []);
+    setProcedureVersions(dashboard.procedureVersions ?? []);
+    setProcedureRuns(dashboard.procedureRuns ?? []);
+  }, [dashboard.procedureDefinitions, dashboard.procedureRuns, dashboard.procedureVersions]);
+
+  useEffect(() => {
     setAdministrationPanel(normalizeAdministrationPanel(initialSelection.panel));
   }, [initialSelection.panel]);
+
+  useEffect(() => {
+    if (activeTab !== "administration") return;
+    if (administrationPanel !== "procedures") return;
+    if (dashboard.isDemo || !dashboard.canManageUsers) return;
+    if (procedureDefinitions.length > 0 && procedureVersions.length > 0) return;
+    void refreshProcedureAdministrationData();
+  }, [
+    activeTab,
+    administrationPanel,
+    dashboard.canManageUsers,
+    dashboard.isDemo,
+    procedureDefinitions.length,
+    procedureVersions.length,
+  ]);
 
   useEffect(() => {
     setUserDirectory(dashboard.userDirectory);
@@ -2029,8 +2062,135 @@ function NewsDeskDashboard({
     });
   }
 
+  async function refreshProcedureAdministrationData() {
+    if (dashboard.isDemo) return;
+    if (!dashboard.canManageUsers) return;
+    const payload = await loadEditorProcedureData();
+    setProcedureDefinitions(payload.definitions);
+    setProcedureVersions(payload.versions);
+    setProcedureRuns(payload.runs);
+  }
+
+  function runProcedureDefinitionSave(input: {
+    id?: string;
+    procedureKey: string;
+    title: string;
+    category: string;
+    description?: string;
+    enabled: boolean;
+  }) {
+    const recordKey = `procedure-definition-${input.procedureKey}`;
+    setActionState({ id: recordKey, message: "procedure save pending", tone: "pending" });
+    if (dashboard.isDemo) {
+      setActionState({ id: recordKey, message: "procedure saved (demo)", tone: "ok" });
+      return;
+    }
+    if (!dashboard.canManageUsers) {
+      setActionState({ id: recordKey, message: "admin role required", tone: "error" });
+      return;
+    }
+    startTransition(() => {
+      void (async () => {
+        try {
+          await saveProcedureDefinitionRecord(input);
+          await refreshProcedureAdministrationData();
+          setActionState({ id: recordKey, message: "procedure saved", tone: "ok" });
+        } catch (error) {
+          setActionState({ id: recordKey, message: error instanceof Error ? error.message : "procedure save failed", tone: "error" });
+        }
+      })();
+    });
+  }
+
+  function runProcedureVersionDraftSave(input: {
+    id?: string;
+    procedureId: string;
+    procedureKey?: string;
+    label?: string;
+    tactusSource: string;
+    parameterSchema: Record<string, unknown>;
+    defaults?: Record<string, unknown>;
+    changelog?: string;
+  }) {
+    const recordKey = `procedure-version-${input.procedureId}`;
+    setActionState({ id: recordKey, message: "procedure draft save pending", tone: "pending" });
+    if (dashboard.isDemo) {
+      setActionState({ id: recordKey, message: "procedure draft saved (demo)", tone: "ok" });
+      return;
+    }
+    if (!dashboard.canManageUsers) {
+      setActionState({ id: recordKey, message: "admin role required", tone: "error" });
+      return;
+    }
+    startTransition(() => {
+      void (async () => {
+        try {
+          await saveProcedureVersionDraftRecord(input);
+          await refreshProcedureAdministrationData();
+          setActionState({ id: recordKey, message: "procedure draft saved", tone: "ok" });
+        } catch (error) {
+          setActionState({ id: recordKey, message: error instanceof Error ? error.message : "procedure draft save failed", tone: "error" });
+        }
+      })();
+    });
+  }
+
+  function runProcedureVersionPublish(versionId: string) {
+    const recordKey = `procedure-publish-${versionId}`;
+    setActionState({ id: recordKey, message: "publish pending", tone: "pending" });
+    if (dashboard.isDemo) {
+      setActionState({ id: recordKey, message: "published (demo)", tone: "ok" });
+      return;
+    }
+    if (!dashboard.canManageUsers) {
+      setActionState({ id: recordKey, message: "admin role required", tone: "error" });
+      return;
+    }
+    startTransition(() => {
+      void (async () => {
+        try {
+          await publishProcedureVersionRecord(versionId);
+          await refreshProcedureAdministrationData();
+          setActionState({ id: recordKey, message: "published", tone: "ok" });
+        } catch (error) {
+          setActionState({ id: recordKey, message: error instanceof Error ? error.message : "publish failed", tone: "error" });
+        }
+      })();
+    });
+  }
+
+  function runProcedureNow(input: {
+    procedureId?: string;
+    procedureKey?: string;
+    procedureVersionId?: string;
+    title?: string;
+    summary?: string;
+    parameters?: Record<string, unknown>;
+  }) {
+    const key = `procedure-run-${input.procedureKey ?? input.procedureId ?? "unknown"}`;
+    setActionState({ id: key, message: "procedure run pending", tone: "pending" });
+    if (dashboard.isDemo) {
+      setActionState({ id: key, message: "procedure run queued (demo)", tone: "ok" });
+      return;
+    }
+    startTransition(() => {
+      void (async () => {
+        try {
+          await startProcedureRunRecord({ ...input, actorLabel: authState.label });
+          if (dashboard.canManageUsers) await refreshProcedureAdministrationData();
+          const nextDashboard = await loadEditorFullNewsDeskDashboard({ isAdmin: Boolean(dashboard.canManageUsers) });
+          setAssignments(nextDashboard.assignments);
+          setAssignmentEvents(nextDashboard.assignmentEvents);
+          setActionState({ id: key, message: "procedure run dispatched", tone: "ok" });
+        } catch (error) {
+          setActionState({ id: key, message: error instanceof Error ? error.message : "procedure run failed", tone: "error" });
+        }
+      })();
+    });
+  }
+
   async function executeAssignmentAction(assignmentId: string, action: AssignmentAction, actorLabel: string, note: string) {
-    const mutationName = `${action}Assignment` as keyof typeof dataClient.mutations;
+    const mutationName = (action === "retry" ? "retryImmediateAssignment" : `${action}Assignment`) as keyof typeof dataClient.mutations;
     const mutation = dataClient.mutations[mutationName] as unknown as ((args: Record<string, unknown>, options: { authMode: typeof USER_POOL_AUTH_MODE }) => Promise<unknown>) | undefined;
     if (!mutation) throw new Error(`Assignment action ${mutationName} is not available in the deployed schema.`);
     await mutation({
@@ -2651,6 +2811,13 @@ function NewsDeskDashboard({
             onSectionReorder={runSectionReorder}
             onSectionSave={runSectionUpsert}
             onRoleAction={runUserRoleAction}
+            onProcedureDefinitionSave={runProcedureDefinitionSave}
+            onProcedureVersionDraftSave={runProcedureVersionDraftSave}
+            onProcedureVersionPublish={runProcedureVersionPublish}
+            onProcedureRun={runProcedureNow}
+            procedures={procedureDefinitions}
+            procedureVersions={procedureVersions}
+            procedureRuns={procedureRuns}
             users={userDirectory}
           />
         ) : null}
@@ -3247,9 +3414,16 @@ function AdministrationDeskView({
   onPanelChange,
   onPolicyChange,
   onPolicySave,
+  onProcedureDefinitionSave,
+  onProcedureRun,
+  onProcedureVersionDraftSave,
+  onProcedureVersionPublish,
   onSectionReorder,
   onSectionSave,
   onRoleAction,
+  procedureRuns,
+  procedureVersions,
+  procedures,
   users,
 }: {
   actionState: ActionState | null;
@@ -3271,16 +3445,46 @@ function AdministrationDeskView({
   onPanelChange: (panel: AdministrationPanel) => void;
   onPolicyChange: (kind: DoctrineKind, text: string) => void;
   onPolicySave: (kind: DoctrineKind) => void;
+  onProcedureDefinitionSave: (input: {
+    id?: string;
+    procedureKey: string;
+    title: string;
+    category: string;
+    description?: string;
+    enabled: boolean;
+  }) => void;
+  onProcedureVersionDraftSave: (input: {
+    id?: string;
+    procedureId: string;
+    procedureKey?: string;
+    label?: string;
+    tactusSource: string;
+    parameterSchema: Record<string, unknown>;
+    defaults?: Record<string, unknown>;
+    changelog?: string;
+  }) => void;
+  onProcedureVersionPublish: (versionId: string) => void;
+  onProcedureRun: (input: {
+    procedureId?: string;
+    procedureKey?: string;
+    procedureVersionId?: string;
+    title?: string;
+    summary?: string;
+    parameters?: Record<string, unknown>;
+  }) => void;
   onSectionReorder: (nextOrder: NewsroomSectionRecord[]) => void;
   onSectionSave: (input: NewsroomSectionRecord, existingId?: string) => void;
   onRoleAction: (user: UserDirectoryEntry, role: string, action: UserRoleAction) => void;
+  procedureRuns: ProcedureRunRecord[];
+  procedureVersions: ProcedureVersionRecord[];
+  procedures: ProcedureDefinitionRecord[];
   users: UserDirectoryEntry[];
 }) {
   return (
     <div className="news-desk-columns news-desk-columns--administration" data-news-desk-section="administration">
       <div className="news-desk-main-column">
         <section className="category-steering-section category-steering-section--lead" aria-labelledby="newsroom-administration-title">
-          <SectionHeader title="Administration" detail="Settings for users, policies, and newspaper sections" />
+          <SectionHeader title="Administration" detail="Settings for users, policies, sections, and procedures" />
           <div className="news-desk-settings-shell">
             <nav className="news-desk-settings-nav" aria-label="Administration settings">
               <Link
@@ -3309,6 +3513,15 @@ function AdministrationDeskView({
               >
                 <strong>Sections</strong>
                 <span>Canonical and floating newspaper sections</span>
+              </Link>
+              <Link
+                href={administrationPanelHref("procedures", isDemo)}
+                data-news-desk-admin-nav="procedures"
+                data-active={administrationPanel === "procedures" || undefined}
+                onClick={() => onPanelChange("procedures")}
+              >
+                <strong>Procedures</strong>
+                <span>Procedure registry and versioned Tactus code</span>
               </Link>
             </nav>
             <div className="news-desk-settings-panel">
@@ -3345,6 +3558,20 @@ function AdministrationDeskView({
                   sections={newsroomSections}
                   onReorder={onSectionReorder}
                   onSave={onSectionSave}
+                />
+              ) : null}
+              {administrationPanel === "procedures" ? (
+                <AdministrationProceduresPanel
+                  actionState={actionState}
+                  canManageUsers={canManageUsers}
+                  disabled={disabled}
+                  onProcedureDefinitionSave={onProcedureDefinitionSave}
+                  onProcedureRun={onProcedureRun}
+                  onProcedureVersionDraftSave={onProcedureVersionDraftSave}
+                  onProcedureVersionPublish={onProcedureVersionPublish}
+                  procedures={procedures}
+                  procedureRuns={procedureRuns}
+                  procedureVersions={procedureVersions}
                 />
               ) : null}
             </div>
@@ -4040,6 +4267,397 @@ function DoctrineEditorCard({
       </div>
     </article>
   );
+}
+
+function AdministrationProceduresPanel({
+  actionState,
+  canManageUsers,
+  disabled,
+  onProcedureDefinitionSave,
+  onProcedureRun,
+  onProcedureVersionDraftSave,
+  onProcedureVersionPublish,
+  procedures,
+  procedureRuns,
+  procedureVersions,
+}: {
+  actionState: ActionState | null;
+  canManageUsers: boolean;
+  disabled: boolean;
+  onProcedureDefinitionSave: (input: {
+    id?: string;
+    procedureKey: string;
+    title: string;
+    category: string;
+    description?: string;
+    enabled: boolean;
+  }) => void;
+  onProcedureVersionDraftSave: (input: {
+    id?: string;
+    procedureId: string;
+    procedureKey?: string;
+    label?: string;
+    tactusSource: string;
+    parameterSchema: Record<string, unknown>;
+    defaults?: Record<string, unknown>;
+    changelog?: string;
+  }) => void;
+  onProcedureVersionPublish: (versionId: string) => void;
+  onProcedureRun: (input: {
+    procedureId?: string;
+    procedureKey?: string;
+    procedureVersionId?: string;
+    title?: string;
+    summary?: string;
+    parameters?: Record<string, unknown>;
+  }) => void;
+  procedures: ProcedureDefinitionRecord[];
+  procedureVersions: ProcedureVersionRecord[];
+  procedureRuns: ProcedureRunRecord[];
+}) {
+  type ProcedureDefinitionPanelRecord = ProcedureDefinitionRecord & {
+    currentVersion?: ProcedureVersionRecord | null;
+    versions?: ProcedureVersionRecord[] | null;
+  };
+  const sortedProcedures = useMemo(
+    () => [...(procedures as ProcedureDefinitionPanelRecord[])].sort((left, right) => String(left.procedureKey).localeCompare(String(right.procedureKey))),
+    [procedures],
+  );
+  const [selectedProcedureId, setSelectedProcedureId] = useState<string | null>(null);
+  const [createMode, setCreateMode] = useState(false);
+  const selectedProcedure = sortedProcedures.find((entry) => entry.id === selectedProcedureId) ?? null;
+  const showEditor = createMode || Boolean(selectedProcedure);
+  const versions = useMemo(() => {
+    if (!selectedProcedure) return [];
+    const listedVersions = procedureVersions
+      .filter((entry) => entry.procedureId === selectedProcedure.id)
+      .sort((left, right) => (right.versionNumber ?? 0) - (left.versionNumber ?? 0));
+    if (listedVersions.length > 0) return listedVersions;
+    const embeddedVersions = Array.isArray(selectedProcedure.versions)
+      ? selectedProcedure.versions.filter((entry): entry is ProcedureVersionRecord => Boolean(entry?.id && entry?.procedureId))
+      : [];
+    return embeddedVersions.sort((left, right) => (right.versionNumber ?? 0) - (left.versionNumber ?? 0));
+  }, [procedureVersions, selectedProcedure]);
+  const currentVersion = versions.find((entry) => entry.isCurrent) ?? versions[0] ?? null;
+  const fallbackCurrentVersion = currentVersion
+    ?? (selectedProcedure?.currentVersion && selectedProcedure.currentVersion.id ? selectedProcedure.currentVersion : null);
+  const runs = useMemo(
+    () => (selectedProcedure
+      ? procedureRuns.filter((entry) => entry.procedureId === selectedProcedure.id).sort((left, right) => String(right.requestedAt ?? "").localeCompare(String(left.requestedAt ?? ""))).slice(0, 12)
+      : []),
+    [procedureRuns, selectedProcedure],
+  );
+
+  const [definitionDraft, setDefinitionDraft] = useState({
+    procedureKey: "",
+    title: "",
+    category: "ingestion",
+    description: "",
+    enabled: true,
+  });
+  const [versionLabel, setVersionLabel] = useState(fallbackCurrentVersion?.label ?? "");
+  const [versionSource, setVersionSource] = useState(fallbackCurrentVersion?.tactusSource ?? "-- Write Tactus/Lua procedure body here");
+  const [parameterSchemaText, setParameterSchemaText] = useState(
+    stringifyUiJson(fallbackCurrentVersion?.parameterSchema ?? {
+      type: "object",
+      required: [],
+      properties: {},
+    }),
+  );
+  const [defaultsText, setDefaultsText] = useState(stringifyUiJson(fallbackCurrentVersion?.defaults ?? {}));
+  const [runInputText, setRunInputText] = useState(stringifyUiJson(fallbackCurrentVersion?.defaults ?? {}));
+
+  useEffect(() => {
+    if (createMode) {
+      setDefinitionDraft({
+        procedureKey: "",
+        title: "",
+        category: "ingestion",
+        description: "",
+        enabled: true,
+      });
+      return;
+    }
+    setDefinitionDraft({
+      procedureKey: selectedProcedure?.procedureKey ?? "",
+      title: selectedProcedure?.title ?? "",
+      category: selectedProcedure?.category ?? "ingestion",
+      description: selectedProcedure?.description ?? "",
+      enabled: selectedProcedure?.enabled ?? true,
+    });
+  }, [createMode, selectedProcedure?.category, selectedProcedure?.description, selectedProcedure?.enabled, selectedProcedure?.procedureKey, selectedProcedure?.title]);
+
+  useEffect(() => {
+    setVersionLabel(fallbackCurrentVersion?.label ?? "");
+    setVersionSource(fallbackCurrentVersion?.tactusSource ?? "-- Write Tactus/Lua procedure body here");
+    setParameterSchemaText(
+      stringifyUiJson(fallbackCurrentVersion?.parameterSchema ?? {
+        type: "object",
+        required: [],
+        properties: {},
+      }),
+    );
+    setDefaultsText(stringifyUiJson(fallbackCurrentVersion?.defaults ?? {}));
+    setRunInputText(stringifyUiJson(fallbackCurrentVersion?.defaults ?? {}));
+  }, [fallbackCurrentVersion?.defaults, fallbackCurrentVersion?.label, fallbackCurrentVersion?.parameterSchema, fallbackCurrentVersion?.tactusSource]);
+
+  const parsedSchema = parseUiJsonRecord(parameterSchemaText);
+  const parsedDefaults = parseUiJsonRecord(defaultsText);
+  const parsedRunInput = parseUiJsonRecord(runInputText);
+
+  function saveDefinition() {
+    if (!definitionDraft.procedureKey.trim() || !definitionDraft.title.trim()) return;
+    onProcedureDefinitionSave({
+      id: selectedProcedure?.id,
+      procedureKey: definitionDraft.procedureKey.trim(),
+      title: definitionDraft.title.trim(),
+      category: definitionDraft.category.trim() || "ingestion",
+      description: definitionDraft.description.trim() || undefined,
+      enabled: Boolean(definitionDraft.enabled),
+    });
+  }
+
+  function saveVersionDraft() {
+    if (!selectedProcedure) return;
+    if (!versionSource.trim()) return;
+    if (parsedSchema.error || parsedDefaults.error) return;
+    onProcedureVersionDraftSave({
+      procedureId: selectedProcedure.id,
+      procedureKey: selectedProcedure.procedureKey,
+      label: versionLabel.trim() || undefined,
+      tactusSource: versionSource,
+      parameterSchema: parsedSchema.value ?? {},
+      defaults: parsedDefaults.value ?? {},
+    });
+  }
+
+  function runNow() {
+    if (!selectedProcedure) return;
+    if (parsedRunInput.error) return;
+    onProcedureRun({
+      procedureId: selectedProcedure.id,
+      procedureKey: selectedProcedure.procedureKey,
+      procedureVersionId: currentVersion?.id ?? selectedProcedure.currentVersionId ?? undefined,
+      title: `Run ${selectedProcedure.title}`,
+      summary: "Triggered from Newsroom Administration procedures panel.",
+      parameters: parsedRunInput.value ?? {},
+    });
+  }
+
+  return (
+    <div data-news-desk-admin-panel="procedures">
+      <SectionHeader title="Procedure Registry" detail={canManageUsers ? `${procedures.length} procedure definitions` : "Admin role required"} />
+      {!canManageUsers ? <div className="category-steering-alert">Only admins can manage procedures.</div> : null}
+      <div className="news-desk-administration-category-layout">
+        <div className="news-desk-administration-category-list">
+          <button
+            type="button"
+            className="news-desk-primary-action-button"
+            disabled={disabled || !canManageUsers}
+            onClick={() => {
+              setCreateMode(true);
+              setSelectedProcedureId(null);
+            }}
+          >
+            Create Procedure
+          </button>
+          {sortedProcedures.length ? sortedProcedures.map((procedure) => (
+            <button
+              key={procedure.id}
+              type="button"
+              className="news-desk-administration-category-button"
+              data-selected={selectedProcedure?.id === procedure.id || undefined}
+              onClick={() => {
+                setCreateMode(false);
+                setSelectedProcedureId(procedure.id);
+              }}
+            >
+              <span>{procedure.title}</span>
+              <small>{procedure.procedureKey} / {procedure.enabled ? "enabled" : "disabled"}</small>
+            </button>
+          )) : <EmptyRow label="No procedures yet. Click Create Procedure to start." />}
+        </div>
+        <div className="news-desk-doctrine-list">
+          {!showEditor ? <EmptyRow label="Select a procedure row on the left (or choose Create Procedure) to open the editor and Tactus source." /> : null}
+          {showEditor ? (
+            <>
+          <article className="news-desk-doctrine-card">
+            <h3>Definition</h3>
+            <label className="news-desk-doctrine-card__field">
+              <span>Procedure Key</span>
+              <input
+                value={definitionDraft.procedureKey}
+                disabled={disabled || !canManageUsers}
+                onChange={(event) => setDefinitionDraft((current) => ({ ...current, procedureKey: event.target.value }))}
+              />
+            </label>
+            <label className="news-desk-doctrine-card__field">
+              <span>Title</span>
+              <input
+                value={definitionDraft.title}
+                disabled={disabled || !canManageUsers}
+                onChange={(event) => setDefinitionDraft((current) => ({ ...current, title: event.target.value }))}
+              />
+            </label>
+            <label className="news-desk-doctrine-card__field">
+              <span>Category</span>
+              <input
+                value={definitionDraft.category}
+                disabled={disabled || !canManageUsers}
+                onChange={(event) => setDefinitionDraft((current) => ({ ...current, category: event.target.value }))}
+              />
+            </label>
+            <label className="news-desk-doctrine-card__field">
+              <span>Description</span>
+              <textarea
+                rows={3}
+                value={definitionDraft.description}
+                disabled={disabled || !canManageUsers}
+                onChange={(event) => setDefinitionDraft((current) => ({ ...current, description: event.target.value }))}
+              />
+            </label>
+            <label className="news-desk-doctrine-card__field">
+              <span>Enabled</span>
+              <input
+                type="checkbox"
+                checked={definitionDraft.enabled}
+                disabled={disabled || !canManageUsers}
+                onChange={(event) => setDefinitionDraft((current) => ({ ...current, enabled: event.target.checked }))}
+              />
+            </label>
+            <div className="news-desk-doctrine-card__footer">
+              <div className="news-desk-doctrine-card__actions">
+                <button type="button" disabled={disabled || !canManageUsers} onClick={saveDefinition}>
+                  Save Definition
+                </button>
+              </div>
+            </div>
+          </article>
+
+          <article className="news-desk-doctrine-card">
+            <h3>Version Draft</h3>
+            <label className="news-desk-doctrine-card__field">
+              <span>Label</span>
+              <input
+                value={versionLabel}
+                disabled={disabled || !canManageUsers}
+                onChange={(event) => setVersionLabel(event.target.value)}
+              />
+            </label>
+            <label className="news-desk-doctrine-card__field">
+              <span>Parameter JSON Schema</span>
+              <textarea
+                rows={8}
+                value={parameterSchemaText}
+                disabled={disabled || !canManageUsers}
+                onChange={(event) => setParameterSchemaText(event.target.value)}
+              />
+            </label>
+            {parsedSchema.error ? <div className="category-steering-alert">{parsedSchema.error}</div> : null}
+            <label className="news-desk-doctrine-card__field">
+              <span>Defaults JSON</span>
+              <textarea
+                rows={5}
+                value={defaultsText}
+                disabled={disabled || !canManageUsers}
+                onChange={(event) => setDefaultsText(event.target.value)}
+              />
+            </label>
+            {parsedDefaults.error ? <div className="category-steering-alert">{parsedDefaults.error}</div> : null}
+            <label className="news-desk-doctrine-card__field">
+              <span>Tactus/Lua Source</span>
+              <textarea
+                rows={12}
+                value={versionSource}
+                disabled={disabled || !canManageUsers}
+                onChange={(event) => setVersionSource(event.target.value)}
+              />
+            </label>
+            <div className="news-desk-doctrine-card__footer">
+              <div className="news-desk-doctrine-card__actions">
+                <button type="button" disabled={disabled || !canManageUsers || !selectedProcedure} onClick={saveVersionDraft}>
+                  Save Draft Version
+                </button>
+                <button
+                  type="button"
+                  disabled={disabled || !canManageUsers || !currentVersion}
+                  onClick={() => currentVersion && onProcedureVersionPublish(currentVersion.id)}
+                >
+                  Publish Current Version
+                </button>
+              </div>
+            </div>
+          </article>
+
+          <article className="news-desk-doctrine-card">
+            <h3>Run Procedure</h3>
+            <label className="news-desk-doctrine-card__field">
+              <span>Input Parameters (JSON)</span>
+              <textarea
+                rows={8}
+                value={runInputText}
+                disabled={disabled || !selectedProcedure}
+                onChange={(event) => setRunInputText(event.target.value)}
+              />
+            </label>
+            {parsedRunInput.error ? <div className="category-steering-alert">{parsedRunInput.error}</div> : null}
+            <div className="news-desk-doctrine-card__footer">
+              <span>{currentVersion ? `v${currentVersion.versionNumber} (${currentVersion.status})` : "No version selected"}</span>
+              <div className="news-desk-doctrine-card__actions">
+                <button type="button" disabled={disabled || !selectedProcedure || Boolean(parsedRunInput.error)} onClick={runNow}>
+                  Run Now
+                </button>
+              </div>
+            </div>
+          </article>
+
+          <article className="news-desk-ledger-item">
+            <header>
+              <strong>Recent Runs</strong>
+              <span>{runs.length}</span>
+            </header>
+            {runs.length ? (
+              <dl>
+                {runs.map((run) => (
+                  <div key={run.id}>
+                    <dt>{run.runStatus}</dt>
+                    <dd>{run.requestedAt ?? "-"} / attempt {run.attempt ?? 1}</dd>
+                  </div>
+                ))}
+              </dl>
+            ) : <EmptyRow label="No runs for this procedure yet." />}
+          </article>
+          {actionState?.id?.startsWith("procedure-") ? (
+            <div className="category-steering-alert" data-tone={actionState.tone}>{actionState.message}</div>
+          ) : null}
+            </>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function parseUiJsonRecord(value: string): { value: Record<string, unknown> | null; error: string | null } {
+  const text = value.trim();
+  if (!text) return { value: {}, error: null };
+  try {
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { value: null, error: "Expected a JSON object." };
+    }
+    return { value: parsed as Record<string, unknown>, error: null };
+  } catch (error) {
+    return { value: null, error: error instanceof Error ? error.message : "Invalid JSON." };
+  }
+}
+
+function stringifyUiJson(value: unknown): string {
+  try {
+    return `${JSON.stringify(value ?? {}, null, 2)}\n`;
+  } catch {
+    return "{}\n";
+  }
 }
 
 function UserDirectoryRow({
@@ -8600,39 +9218,59 @@ function AssignmentDeskView({
     setIsAssignmentDetailOpen(true);
   };
   const assignmentActions: NewsroomDetailAction[] = selectedAssignment ? [
-    ...(selectedAssignment.status === "open" ? [{
-      key: "claim",
-      label: "Claim",
-      disabled,
-      onSelect: () => runAssignmentDetailAction("claim"),
-    }] : []),
-    ...(selectedAssignment.status === "claimed" ? [{
-      key: "release",
-      label: "Release",
-      disabled,
-      onSelect: () => runAssignmentDetailAction("release"),
-    }] : []),
-    ...(!selectedAssignmentTerminal ? [
-      {
-        key: "complete",
-        label: "Complete",
-        disabled,
-        onSelect: () => runAssignmentDetailAction("complete"),
-      },
-      {
-        key: "cancel",
-        label: "Cancel",
-        disabled,
-        onSelect: () => runAssignmentDetailAction("cancel"),
-      },
-    ] : [
-      {
-        key: "reopen",
-        label: "Reopen",
-        disabled,
-        onSelect: () => runAssignmentDetailAction("reopen"),
-      },
-    ]),
+    ...(selectedAssignment.status === "open"
+      ? [
+          {
+            key: "claim",
+            label: "Claim",
+            disabled,
+            onSelect: () => runAssignmentDetailAction("claim"),
+          },
+          ...(assignmentExecutionModeForUi(selectedAssignment.assignmentTypeKey) === "immediate"
+            ? [
+                {
+                  key: "retry",
+                  label: "Retry Immediate",
+                  disabled,
+                  onSelect: () => runAssignmentDetailAction("retry"),
+                },
+              ]
+            : []),
+        ]
+      : []),
+    ...(selectedAssignment.status === "claimed"
+      ? [
+          {
+            key: "release",
+            label: "Release",
+            disabled,
+            onSelect: () => runAssignmentDetailAction("release"),
+          },
+        ]
+      : []),
+    ...(!selectedAssignmentTerminal
+      ? [
+          {
+            key: "complete",
+            label: "Complete",
+            disabled,
+            onSelect: () => runAssignmentDetailAction("complete"),
+          },
+          {
+            key: "cancel",
+            label: "Cancel",
+            disabled,
+            onSelect: () => runAssignmentDetailAction("cancel"),
+          },
+        ]
+      : [
+          {
+            key: "reopen",
+            label: "Reopen",
+            disabled,
+            onSelect: () => runAssignmentDetailAction("reopen"),
+          },
+        ]),
   ] : [];
   const reportingReviewActions: NewsroomDetailAction[] = selectedAssignment && selectedReportingPacket ? [
     {
@@ -9836,7 +10474,7 @@ function semanticVersionKey(kind: string, id: string): string {
 }
 
 function normalizeAdministrationPanel(value: string | null | undefined): AdministrationPanel {
-  if (value === "policies" || value === "sections") return value;
+  if (value === "policies" || value === "sections" || value === "procedures") return value;
   return "users";
 }
 
@@ -10043,7 +10681,7 @@ function formatDeskSectionLede(section: NewsDeskTab): string {
   if (section === "references") return "Review source materials before they become usable evidence.";
   if (section === "messages") return "Read notes, rationales, and work products from people and agents.";
   if (section === "assignments") return "Create, filter, claim, and complete newsroom work.";
-  if (section === "administration") return "Manage users, roles, doctrine, and configurable newspaper sections.";
+  if (section === "administration") return "Manage users, roles, doctrine, configurable newspaper sections, and newsroom procedures.";
   return "";
 }
 
@@ -10651,6 +11289,8 @@ function assignmentStatusRank(status: string): number {
 function applyAssignmentActionLocally(assignment: AssignmentRecord, action: AssignmentAction, now: string): AssignmentRecord {
   const status = action === "claim"
     ? "claimed"
+    : action === "retry"
+    ? "claimed"
     : action === "release" || action === "reopen"
       ? "open"
       : action === "complete"
@@ -10662,11 +11302,15 @@ function applyAssignmentActionLocally(assignment: AssignmentRecord, action: Assi
     ...assignment,
     status,
     queueStatusKey: `${assignment.queueKey}#${status}`,
-    claimedAt: action === "claim" ? now : action === "release" ? null : assignment.claimedAt,
+    claimedAt: action === "claim" || action === "retry" ? now : action === "release" ? null : assignment.claimedAt,
     completedAt: action === "complete" ? now : action === "reopen" ? null : assignment.completedAt,
     canceledAt: action === "cancel" ? now : action === "reopen" ? null : assignment.canceledAt,
     updatedAt: now,
   };
+}
+
+function assignmentExecutionModeForUi(assignmentTypeKey: string | null | undefined): "immediate" | "queued" {
+  return assignmentTypeKey === "procedure.run" ? "immediate" : "queued";
 }
 
 function demoAssignmentEvent(assignment: AssignmentRecord, action: AssignmentAction, now: string, note: string): AssignmentEventRecord {

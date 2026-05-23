@@ -3562,6 +3562,7 @@ img {
   max-width: 720px;
 }
 
+.news-desk-primary-action-button,
 .news-desk-assignment-create-button,
 .news-desk-modal__header button,
 .news-desk-analysis-form button {
@@ -3576,6 +3577,7 @@ img {
   text-transform: uppercase;
 }
 
+.news-desk-primary-action-button,
 .news-desk-assignment-create-button,
 .news-desk-analysis-form button[data-news-desk-analysis-create-assignment] {
   background: var(--ink);
@@ -3588,6 +3590,7 @@ img {
   color: var(--ink);
 }
 
+.news-desk-primary-action-button:disabled,
 .news-desk-assignment-create-button:disabled,
 .news-desk-analysis-form button:disabled {
   background: transparent;
@@ -4137,7 +4140,7 @@ img {
   text-transform: uppercase;
 }
 
-.news-desk-modal__actions button:not(.news-desk-assignment-create-button) {
+.news-desk-modal__actions button:not(.news-desk-assignment-create-button):not(.news-desk-primary-action-button) {
   background: transparent;
   color: var(--ink);
 }

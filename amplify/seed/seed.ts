@@ -8,35 +8,139 @@ import { signOut } from "aws-amplify/auth";
 import { uploadData } from "aws-amplify/storage";
 import YAML from "yaml";
 import type { Schema } from "../data/resource";
-import * as articlesModule from "../../lib/articles";
 import type { Article, ArticleImageAsset } from "../../lib/articles";
 import * as amplifyServerRuntimeModule from "../../lib/amplify-server-runtime";
+import { getSeedEditionConfig, seedEditionArticles } from "./seed-edition-content";
+import { getArticleImageAssets } from "../../lib/articles";
 
-const articlesRuntime = getRuntimeModule(articlesModule);
 const amplifyServerRuntime = getRuntimeModule(amplifyServerRuntimeModule);
-const { articles, editionDate, getArticleImageAssets } = articlesRuntime as typeof import("../../lib/articles");
 const { getAmplifyServerRuntime } = amplifyServerRuntime as typeof import("../../lib/amplify-server-runtime");
 
 const EDITOR_GROUP = "editor";
+const ADMIN_GROUP = "admin";
 const NEWSROOM_SECTIONS_CONFIG_PATH = path.join(process.cwd(), "corpora", "papyrus-newsroom-sections.yml");
+const REQUIRED_PROCEDURES_CONFIG_PATH = path.join(process.cwd(), "corpora", "papyrus-required-procedures.json");
 const NEWSROOM_SECTION_TYPES = new Set(["canonical", "floating", "rotating"]);
 
 type DataClient = ReturnType<typeof generateClient<Schema>>;
 type NewsroomSectionSeed = {
   id: string;
   title: string;
+  shortTitle: string;
   type: "canonical" | "floating" | "rotating";
   editorialMission: string;
   editorialPolicy: string;
   enabled: boolean;
   sortOrder: number;
-  shortDescription: string | null;
   defaultArticleTypes: string[];
   defaultPageBudget: number | null;
   assignmentGuidance: string | null;
   killCriteria: string | null;
   visualGuidance: string | null;
 };
+
+type ProcedureSeed = {
+  key: string;
+  title: string;
+  category: string;
+  description: string;
+  versionLabel: string;
+  tactusSource: string;
+  parameterSchema: Record<string, unknown>;
+  defaults: Record<string, unknown>;
+};
+
+const REQUIRED_CLI_PROCEDURE_KEYS = loadRequiredCliProcedureKeys();
+const PROCEDURE_SOURCE_DIR = path.join(process.cwd(), "procedures", "newsroom");
+
+function loadProcedureSeedSource(filename: string): string {
+  const sourcePath = path.join(PROCEDURE_SOURCE_DIR, filename);
+  const source = fs.readFileSync(sourcePath, "utf8").trimEnd();
+  return `${source}\n`;
+}
+
+const PROCEDURE_SEED_BY_KEY: Record<string, ProcedureSeed> = {
+  "ingestion.reference.register": {
+    key: "ingestion.reference.register",
+    title: "Ingest Reference",
+    category: "ingestion",
+    description: "Registers one reference intake payload and dispatches immediate enrichment workflow.",
+    versionLabel: "starter",
+    tactusSource: loadProcedureSeedSource("ingestion_reference_register.tac"),
+    parameterSchema: {
+      type: "object",
+      required: ["externalItemId", "sourceUri"],
+      properties: {
+        externalItemId: { type: "string" },
+        sourceUri: { type: "string" },
+        title: { type: "string" },
+        corpusKey: { type: "string" },
+      },
+    },
+    defaults: {
+      corpusKey: "AI-ML-research",
+    },
+  },
+  "newsroom.research.explorer": {
+    key: "newsroom.research.explorer",
+    title: "Newsroom Research Explorer",
+    category: "newsroom",
+    description: "Builds structured research packets for assignment-backed newsroom workflows.",
+    versionLabel: "starter",
+    tactusSource: loadProcedureSeedSource("research_explorer.tac"),
+    parameterSchema: {
+      type: "object",
+      required: ["corpus_key"],
+      properties: {
+        assignment_item_id: { type: "string" },
+        assignment_json: { type: "object" },
+        corpus_key: { type: "string" },
+        context_profile: { type: "string" },
+        research_mode: { type: "string" },
+        research_questions: { type: "string" },
+        max_evidence_items: { type: "number" },
+      },
+    },
+    defaults: {
+      context_profile: "researcher",
+      research_mode: "source_discovery",
+      max_evidence_items: 20,
+    },
+  },
+  "newsroom.reporting.context": {
+    key: "newsroom.reporting.context",
+    title: "Newsroom Reporting Context",
+    category: "newsroom",
+    description: "Builds structured reporting context packets from assignment-backed runs.",
+    versionLabel: "starter",
+    tactusSource: loadProcedureSeedSource("reporter.tac"),
+    parameterSchema: {
+      type: "object",
+      required: ["corpus_key"],
+      properties: {
+        assignment_item_id: { type: "string" },
+        assignment_json: { type: "object" },
+        corpus_key: { type: "string" },
+        context_profile: { type: "string" },
+        source_research_assignment_id: { type: "string" },
+        source_research_packet_id: { type: "string" },
+        source_research_packet_path: { type: "string" },
+      },
+    },
+    defaults: {
+      context_profile: "reporting",
+    },
+  },
+};
+
+const PROCEDURE_SEEDS: ProcedureSeed[] = [
+  PROCEDURE_SEED_BY_KEY["ingestion.reference.register"],
+  ...REQUIRED_CLI_PROCEDURE_KEYS.map((key) => {
+    const seed = PROCEDURE_SEED_BY_KEY[key];
+    if (!seed) throw new Error(`Missing ProcedureSeed for required CLI procedure '${key}'.`);
+    return seed;
+  }),
+];
 
 let cachedClient: DataClient | null = null;
 
@@ -56,7 +160,7 @@ async function main() {
   const editionConfig = getSeedEditionConfig();
 
   try {
-    const orderedArticles = orderArticles(articles, editionConfig.articleOrder);
+    const orderedArticles = orderArticles(seedEditionArticles, editionConfig.articleOrder);
     const editionRecord = withVersionFields({
       id: editionConfig.id,
       slug: editionConfig.slug,
@@ -89,6 +193,7 @@ async function main() {
       metadata: toAwsJson({ source: "fixture-seed" }),
     });
     await seedNewsroomSections(editionConfig.publishedAt);
+    await seedProcedureDefinitions(editionConfig.publishedAt);
 
     for (const [index, article] of orderedArticles.entries()) {
       await seedArticle(article, index, editionConfig);
@@ -120,6 +225,7 @@ async function signInSeedEditor() {
   }
 
   await addToUserGroup({ username }, EDITOR_GROUP);
+  await addToUserGroup({ username }, ADMIN_GROUP);
   const signedIn = await signInUser({
     username,
     password,
@@ -301,13 +407,13 @@ async function seedNewsroomSections(importedAt: string) {
     await upsert("NewsroomSection", {
       id: section.id,
       title: section.title,
+      shortTitle: section.shortTitle,
       type: section.type,
       editorialMission: section.editorialMission,
       editorialPolicy: section.editorialPolicy,
       enabled: section.enabled,
       enabledStatus: section.enabled ? "enabled" : "disabled",
       sortOrder: section.sortOrder,
-      shortDescription: section.shortDescription,
       defaultArticleTypes: section.defaultArticleTypes,
       defaultPageBudget: section.defaultPageBudget,
       assignmentGuidance: section.assignmentGuidance,
@@ -317,6 +423,64 @@ async function seedNewsroomSections(importedAt: string) {
       updatedAt: importedAt,
     });
   }
+}
+
+async function seedProcedureDefinitions(importedAt: string) {
+  for (const seed of PROCEDURE_SEEDS) {
+    const procedureId = `procedure-definition-${safeProcedureId(seed.key)}`;
+    const versionId = `procedure-version-${safeProcedureId(seed.key)}-1`;
+    await upsert("ProcedureDefinition", {
+      id: procedureId,
+      procedureKey: seed.key,
+      title: seed.title,
+      category: seed.category,
+      description: seed.description,
+      enabled: true,
+      enabledStatus: "enabled",
+      currentVersionId: versionId,
+      createdBy: "amplify-seed",
+      createdAt: importedAt,
+      updatedBy: "amplify-seed",
+      updatedAt: importedAt,
+      newsroomFeedKey: "procedures",
+    });
+    await upsert("ProcedureVersion", {
+      id: versionId,
+      procedureId,
+      procedureKey: seed.key,
+      versionNumber: 1,
+      status: "published",
+      isCurrent: true,
+      label: seed.versionLabel,
+      tactusSource: seed.tactusSource,
+      parameterSchema: toAwsJson(seed.parameterSchema),
+      defaults: toAwsJson(seed.defaults),
+      changelog: "Seeded starter procedure.",
+      createdBy: "amplify-seed",
+      createdAt: importedAt,
+      updatedBy: "amplify-seed",
+      updatedAt: importedAt,
+    });
+  }
+}
+
+function safeProcedureId(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "procedure";
+}
+
+function loadRequiredCliProcedureKeys(configPath = REQUIRED_PROCEDURES_CONFIG_PATH): string[] {
+  const parsed = JSON.parse(fs.readFileSync(configPath, "utf8")) as {
+    requiredCliProcedures?: Record<string, unknown>;
+  };
+  const map = parsed?.requiredCliProcedures;
+  if (!map || typeof map !== "object") {
+    throw new Error(`Invalid required procedures config file: ${configPath}`);
+  }
+  const keys = Array.from(new Set(Object.values(map).map((value) => String(value ?? "").trim()).filter(Boolean)));
+  if (!keys.length) {
+    throw new Error(`No required CLI procedure keys were configured in ${configPath}.`);
+  }
+  return keys;
 }
 
 function loadNewsroomSectionSeeds(configPath = NEWSROOM_SECTIONS_CONFIG_PATH): NewsroomSectionSeed[] {
@@ -342,12 +506,12 @@ function normalizeNewsroomSectionSeed(entry: Record<string, unknown>, index: num
   return {
     id,
     title,
+    shortTitle: requiredText(entry.shortTitle, `shortTitle for section ${id}`),
     type: typeValue as NewsroomSectionSeed["type"],
     editorialMission: requiredText(entry.editorialMission, `editorialMission for section ${id}`),
     editorialPolicy: requiredText(entry.editorialPolicy, `editorialPolicy for section ${id}`),
     enabled: typeof entry.enabled === "boolean" ? entry.enabled : true,
     sortOrder: positiveInteger(entry.sortOrder, index + 1),
-    shortDescription: optionalText(entry.shortDescription),
     defaultArticleTypes: normalizeStringList(entry.defaultArticleTypes),
     defaultPageBudget: optionalInteger(entry.defaultPageBudget),
     assignmentGuidance: optionalText(entry.assignmentGuidance),
@@ -550,294 +714,6 @@ function publishedEditionId(editionId: string): string {
 
 function publishedItemId(itemId: string): string {
   return `published-${itemId}`;
-}
-
-function getSeedEditionConfig() {
-  const publishDate = "2026-05-13";
-  return {
-    id: "edition-current",
-    slug: "current",
-    title: "Current Edition",
-    description: "Seeded Papyrus fixture content.",
-    displayDate: editionDate,
-    publishDate,
-    publishedAt: `${publishDate}T12:00:00.000Z`,
-    articleOrder: articles.map((article) => article.slug),
-    layoutPlan: createSeedEditionLayoutPlan(articles.map((article) => article.slug)),
-  };
-}
-
-function createSeedEditionLayoutPlan(itemIds: string[]) {
-  const frontItemIds = itemIds.length < 3 ? itemIds : [itemIds[1], itemIds[0], itemIds[2], ...itemIds.slice(3)];
-  return {
-    pages: [
-      {
-        id: "page-1",
-        pageNumber: 1,
-        presetId: "front.mosaic",
-        grid: { columns: { min: 1, preferred: 6, max: 6 } },
-        regions: [
-          {
-            id: "front-page-news",
-            type: "fullPage",
-            localGrid: { columns: { min: 1, preferred: 6, max: 6 } },
-            responsiveLayouts: getSeedFrontResponsiveLayouts(),
-            blocks: frontItemIds.map((itemId, index) => ({
-              id: `front-${itemId}`,
-              type: "articleFrame",
-              presetId: "front.teaser",
-              itemId,
-              flowKey: itemId,
-              startCursor: "beginning",
-              role: index === 1 ? "feature" : index === 0 || index === 2 ? "rail" : "standard",
-              editorialPriority: index === 1 ? "primary" : index === 0 || index === 2 ? "secondary" : "tertiary",
-              typography: { headlineScale: index === 1 ? "feature" : index === 0 || index === 2 ? "rail" : "standard" },
-              span: { min: 1, preferred: [1, 4, 1, 2, 2, 2][index] ?? 1, max: [1, 4, 1, 2, 2, 2][index] ?? 1 },
-              localGrid: index === 1 ? { columns: { min: 1, preferred: 4, max: 4 } } : undefined,
-              media: index === 1
-                ? [
-                    {
-                      required: true,
-                      assetRole: "lead",
-                      placement: {
-                        anchor: "right",
-                        span: { min: 1, preferred: 2, max: 2 },
-                        vertical: "top",
-                        collapse: "inline",
-                        crop: "preserve",
-                        wrapsText: true,
-                      },
-                    },
-                  ]
-                : [],
-              composition: index === 1
-                ? {
-                    title: [
-                      {
-                        slot: "label",
-                        placement: {
-                          columnStart: 1,
-                          span: { min: 1, preferred: 2, max: 2 },
-                          vertical: "top",
-                          collapse: "inline",
-                          crop: "preserve",
-                          wrapsText: false,
-                        },
-                      },
-                      {
-                        slot: "headline",
-                        placement: {
-                          columnStart: 1,
-                          span: { min: 1, preferred: 2, max: 2 },
-                          vertical: "top",
-                          collapse: "inline",
-                          crop: "preserve",
-                          wrapsText: false,
-                        },
-                      },
-                    ],
-                    lead: [
-                      {
-                        slot: "deck",
-                        placement: {
-                          columnStart: 1,
-                          span: { min: 1, preferred: 2, max: 2 },
-                          vertical: "top",
-                          collapse: "inline",
-                          crop: "preserve",
-                          wrapsText: true,
-                        },
-                      },
-                      {
-                        slot: "byline",
-                        placement: {
-                          columnStart: 1,
-                          span: { min: 1, preferred: 2, max: 2 },
-                          vertical: "top",
-                          collapse: "inline",
-                          crop: "preserve",
-                          wrapsText: true,
-                        },
-                      },
-                      {
-                        slot: "media",
-                        mediaIndex: 0,
-                        placement: {
-                          anchor: "right",
-                          span: { min: 1, preferred: 2, max: 2 },
-                          vertical: "top",
-                          collapse: "inline",
-                          crop: "preserve",
-                          wrapsText: true,
-                        },
-                      },
-                    ],
-                  }
-                : undefined,
-              cutPolicy: getSeedCutPolicy(itemId),
-            })),
-          },
-        ],
-      },
-      {
-        id: "page-2",
-        pageNumber: 2,
-        presetId: "page.regionStack",
-        grid: { columns: { min: 1, preferred: 6, max: 6 } },
-        regions: [
-          {
-            id: "agent-procedure-patterns-continuation",
-            type: "fullPage",
-            size: { shrinkToContent: true },
-            blocks: [
-              createSeedContinuationBlock("agent-procedure-patterns", 2, {
-                required: true,
-                anchor: "center",
-                span: { min: 1, preferred: 2, max: 3 },
-                vertical: "upperThird",
-              }),
-            ],
-          },
-        ],
-      },
-      {
-        id: "page-3",
-        pageNumber: 3,
-        presetId: "page.regionStack",
-        grid: { columns: { min: 1, preferred: 6, max: 6 } },
-        regions: [
-          {
-            id: "schools-reading-lab-tail",
-            type: "stack",
-            role: "top",
-            size: { ratio: 0.5 },
-            blocks: [
-              createSeedContinuationBlock("schools-reading-lab", 3, {
-                required: false,
-                anchor: "right",
-                span: { min: 1, preferred: 2, max: 2 },
-                vertical: "top",
-              }),
-            ],
-          },
-          {
-            id: "market-hall-tail",
-            type: "stack",
-            role: "bottom",
-            size: { ratio: 0.5 },
-            blocks: [
-              createSeedContinuationBlock("market-hall", 3, {
-                required: false,
-                anchor: "center",
-                span: { min: 2, preferred: 2, max: 2 },
-                vertical: "top",
-              }),
-            ],
-          },
-        ],
-      },
-    ],
-  };
-}
-
-function getSeedFrontResponsiveLayouts() {
-  return [
-    {
-      minColumns: 4,
-      maxColumns: 4,
-      order: "editorialPriority",
-      slots: [
-        {
-          editorialPriority: "primary",
-          priorityOccurrence: 1,
-          columnStart: 1,
-          columnSpan: 4,
-          rowStart: 1,
-          rowSpan: 1,
-        },
-        {
-          editorialPriority: "secondary",
-          priorityOccurrence: 1,
-          columnStart: 1,
-          columnSpan: 2,
-          rowStart: 2,
-          rowSpan: 1,
-        },
-        {
-          editorialPriority: "secondary",
-          priorityOccurrence: 2,
-          columnStart: 3,
-          columnSpan: 2,
-          rowStart: 2,
-          rowSpan: 1,
-        },
-      ],
-      overflow: { columnSpan: 2, rowSpan: 1 },
-    },
-    {
-      minColumns: 1,
-      maxColumns: 3,
-      order: "editorialPriority",
-      slots: [],
-      overflow: { columnSpan: "full", rowSpan: 1 },
-    },
-  ];
-}
-
-function createSeedContinuationBlock(
-  itemId: string,
-  pageNumber: number,
-  media: {
-    required: boolean;
-    anchor: string;
-    span: { min: number; preferred: number; max: number };
-    vertical: string;
-  },
-) {
-  return {
-    id: `${itemId}-page-${pageNumber}`,
-    type: "articleFrame",
-    presetId: "article.mediaInset",
-    itemId,
-    flowKey: itemId,
-    startCursor: "current",
-    role: "primary",
-    localGrid: { columns: { min: 2, preferred: 6, max: 6 } },
-    media: [
-      {
-        required: media.required,
-        assetRole: "continuationInset",
-        placement: {
-          anchor: media.anchor,
-          span: media.span,
-          vertical: media.vertical,
-          collapse: "inline",
-          crop: "preserve",
-          wrapsText: true,
-        },
-      },
-    ],
-    pullQuote: {
-      required: false,
-      placements: [
-        {
-          anchor: media.anchor === "left" ? "right" : "left",
-          span: { min: 1, preferred: 1, max: 2 },
-          vertical: "middle",
-          collapse: "omit",
-          crop: "preserve",
-          wrapsText: true,
-        },
-      ],
-    },
-  };
-}
-
-function getSeedCutPolicy(itemId: string) {
-  if (itemId === "agent-procedure-patterns") return { maxBodyLines: 22, jumpTargetPage: 2 };
-  if (itemId === "schools-reading-lab") return { maxBodyLines: 16, jumpTargetPage: 3 };
-  if (itemId === "market-hall") return { maxBodyLines: 14, jumpTargetPage: 3 };
-  return undefined;
 }
 
 await main();

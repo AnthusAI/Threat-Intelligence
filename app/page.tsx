@@ -29,9 +29,16 @@ export default async function Home({ searchParams }: HomePageProps) {
   const scenarioId = getScenarioIdParam(resolvedSearchParams?.scenario);
   if (!scenarioId) {
     if (hasOAuthRedirectParams(resolvedSearchParams)) {
+      const mastheadHomeHref = await loadFirstPublishedEditionPath();
       const content = await loadLatestGraphQLEdition();
       if (!content || content.items.length === 0) return <PresentationShell content={createEmptyGraphQLEdition()} />;
-      return <PresentationShell content={content} editionBasePath={getEditionDatePath(content.editionDate)} />;
+      return (
+        <PresentationShell
+          content={content}
+          editionBasePath={getEditionDatePath(content.editionDate)}
+          mastheadHomeHref={mastheadHomeHref}
+        />
+      );
     }
 
     const latestEdition = await contentRepository.getLatestPublishedEdition();
@@ -48,6 +55,12 @@ async function loadLatestGraphQLEdition(): Promise<EditionContent | null> {
   const latestEdition = await contentRepository.getLatestPublishedEdition();
   if (!latestEdition) return null;
   return contentRepository.loadEditionContent({ editionDate: latestEdition.editionDate });
+}
+
+async function loadFirstPublishedEditionPath(): Promise<string | undefined> {
+  const firstEdition = await contentRepository.getFirstPublishedEdition();
+  if (!firstEdition) return undefined;
+  return getEditionDatePath(firstEdition.editionDate);
 }
 
 async function loadHomeContent(scenarioId: string | null): Promise<EditionContent> {

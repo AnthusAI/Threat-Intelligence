@@ -61,6 +61,17 @@ const rawLayoutScenarios: RawLayoutScenario[] = [
     items: cloneArticles(articles).map(articleToPublicationItem),
   },
   {
+    id: "front-body-depth-rows",
+    source: "scenario",
+    title: "Front Body Depth Rows",
+    editionDate,
+    scenarioId: "front-body-depth-rows",
+    description:
+      "Per-column front teaser depth should keep the lead trio aligned while still continuing onto later pages.",
+    layoutPlan: createFrontBodyDepthLayoutPlan(),
+    items: cloneArticles(articles).map(articleToPublicationItem),
+  },
+  {
     id: "furniture-sufficiency-pressure",
     source: "scenario",
     title: "Furniture Sufficiency Pressure",
@@ -363,6 +374,19 @@ function createCompactChromeLayoutPlan(): EditionLayoutPlan {
         lineHeight: "0.95em",
         paintHeight: "1.1em",
       },
+    };
+  }
+  return plan;
+}
+
+function createFrontBodyDepthLayoutPlan(): EditionLayoutPlan {
+  const plan = cloneLayoutPlan(createDefaultEditionLayoutPlan(articles.map((article) => article.slug)));
+  for (const blockId of ["front-agent-procedure-patterns", "front-schools-reading-lab", "front-market-hall"]) {
+    const block = findPlanBlock(plan, blockId);
+    if (block?.type !== "articleFrame") continue;
+    block.cutPolicy = {
+      bodyDepthRows: 14,
+      jumpTargetPage: block.cutPolicy?.jumpTargetPage ?? (blockId === "front-agent-procedure-patterns" ? 2 : 3),
     };
   }
   return plan;

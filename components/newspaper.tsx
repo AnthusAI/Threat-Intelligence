@@ -5,6 +5,7 @@ import { ScrollToPlugin } from "gsap/ScrollToPlugin";
 import { Hub } from "aws-amplify/utils";
 import Image from "next/image";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import type { CSSProperties, MouseEvent as ReactMouseEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ARCHIVE_PREVIEW_HEIGHT, ARCHIVE_PREVIEW_WIDTH } from "../lib/archive-types";
@@ -50,6 +51,7 @@ type PapyrusTestWindow = Window & typeof globalThis & {
 type NewspaperProps = {
   content: EditionContent;
   editionBasePath?: string;
+  mastheadHomeHref?: string;
   initialPageNumber?: number;
   initialSectionKey?: string;
   preserveContentLocation?: boolean;
@@ -67,7 +69,15 @@ type NewsDeskAppendixPage = {
   subcategories: NewsDeskCategoryTreeNode[];
 };
 
-export function Newspaper({ content, editionBasePath, initialPageNumber = 1, initialSectionKey, preserveContentLocation = false }: NewspaperProps) {
+export function Newspaper({
+  content,
+  editionBasePath,
+  mastheadHomeHref,
+  initialPageNumber = 1,
+  initialSectionKey,
+  preserveContentLocation = false,
+}: NewspaperProps) {
+  const pathname = usePathname();
   const normalizedInitialPage = Math.max(1, Math.floor(initialPageNumber));
   const shellRef = useRef<HTMLDivElement | null>(null);
   const progressRef = useRef<HTMLElement | null>(null);
@@ -172,6 +182,7 @@ export function Newspaper({ content, editionBasePath, initialPageNumber = 1, ini
 
   const appendixPages = useMemo(() => buildNewsDeskAppendixPages(editorAppendix, layout?.pages.length ?? 0), [editorAppendix, layout?.pages.length]);
   const totalPages = (layout?.pages.length ?? 0) + appendixPages.length;
+  const mastheadHref = pathname === "/" ? (mastheadHomeHref ?? "/") : "/";
 
   useEffect(() => {
     if (!layout) return;
@@ -408,7 +419,7 @@ export function Newspaper({ content, editionBasePath, initialPageNumber = 1, ini
         totalPages={layout ? totalPages : null}
       />
       {!layout ? (
-        <LoadingPage content={content} />
+        <LoadingPage content={content} mastheadHref={mastheadHref} />
       ) : (
         <section className="scroll-edition">
           {layout.pages.map((page) => {
@@ -435,6 +446,7 @@ export function Newspaper({ content, editionBasePath, initialPageNumber = 1, ini
                     content={content}
                     editionBasePath={editionBasePath}
                     layout={layout}
+                    mastheadHref={mastheadHref}
                     page={page}
                     scrollToItemAnchor={scrollToItemAnchor}
                     scrollToPage={scrollToPage}
@@ -534,6 +546,7 @@ export function NewspaperFrontPreview({ content }: { content: EditionContent }) 
             disableLinks
             editionTitleId={`archive-edition-title-${content.id}`}
             layout={layout}
+            mastheadHref="/"
             page={page}
             scrollToItemAnchor={scrollToItemAnchor}
             scrollToPage={scrollToPage}
@@ -610,13 +623,13 @@ function AppendixPagePlaceholder({ pageNumber }: { pageNumber: number }) {
   );
 }
 
-function LoadingPage({ content }: { content: EditionContent }) {
+function LoadingPage({ content, mastheadHref }: { content: EditionContent; mastheadHref: string }) {
   return (
     <section className="paper-page-content paper-page-content--front paper-page-content--loading" aria-label="Loading edition">
       <header className="masthead">
         <div className="masthead__rule" />
         <h1>
-          <span>PAPYRUS</span>
+          <Link href={mastheadHref}>PAPYRUS</Link>
         </h1>
         <div className="masthead__meta">
           <span>{formatShortDate(content.editionDate)}</span>
@@ -635,6 +648,7 @@ function SolvedPageView({
   editionBasePath,
   editionTitleId: rawEditionTitleId,
   layout,
+  mastheadHref,
   page,
   scrollToItemAnchor,
   scrollToPage,
@@ -645,6 +659,7 @@ function SolvedPageView({
   editionBasePath?: string;
   editionTitleId?: string;
   layout: NewspaperLayout;
+  mastheadHref: string;
   page: SolvedPage;
   scrollToItemAnchor: (articleSlug: string, options?: ScrollToPageOptions) => boolean;
   scrollToPage: (pageNumber: number, options?: ScrollToPageOptions) => void;
@@ -664,7 +679,7 @@ function SolvedPageView({
         <header className="masthead">
           <div className="masthead__rule" />
           <h1 id={editionTitleId}>
-            <span>PAPYRUS</span>
+            <Link href={mastheadHref}>PAPYRUS</Link>
           </h1>
           <div className="masthead__meta">
             <span>{formatShortDate(content.editionDate)}</span>

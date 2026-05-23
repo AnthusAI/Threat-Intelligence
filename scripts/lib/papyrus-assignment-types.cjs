@@ -2,6 +2,7 @@ const ASSIGNMENT_TYPE_POLICIES = {
   "analysis.reindex": {
     assignmentTypeKey: "analysis.reindex",
     handlerKey: "analysis.reindex",
+    executionMode: "queued",
     claimPolicy: "exclusive",
     defaultClaimTtlSeconds: 6 * 60 * 60,
     workProductPolicy: "assignment-events-and-messages",
@@ -10,6 +11,7 @@ const ASSIGNMENT_TYPE_POLICIES = {
   "curation.reference-intake": {
     assignmentTypeKey: "curation.reference-intake",
     handlerKey: "curation.reference-intake",
+    executionMode: "queued",
     claimPolicy: "exclusive",
     defaultClaimTtlSeconds: 60 * 60,
     workProductPolicy: "reference-curation-decision",
@@ -18,6 +20,7 @@ const ASSIGNMENT_TYPE_POLICIES = {
   "reference.corpus-accession": {
     assignmentTypeKey: "reference.corpus-accession",
     handlerKey: "reference.corpus-accession",
+    executionMode: "queued",
     claimPolicy: "exclusive",
     defaultClaimTtlSeconds: 60 * 60,
     workProductPolicy: "reference-attachment-and-corpus-file",
@@ -26,6 +29,7 @@ const ASSIGNMENT_TYPE_POLICIES = {
   "reference.text-extraction": {
     assignmentTypeKey: "reference.text-extraction",
     handlerKey: "reference.text-extraction",
+    executionMode: "queued",
     claimPolicy: "exclusive",
     defaultClaimTtlSeconds: 2 * 60 * 60,
     workProductPolicy: "reference-extracted-text-attachment",
@@ -34,6 +38,7 @@ const ASSIGNMENT_TYPE_POLICIES = {
   "reference.doi-backfill": {
     assignmentTypeKey: "reference.doi-backfill",
     handlerKey: "reference.doi-backfill",
+    executionMode: "queued",
     claimPolicy: "exclusive",
     defaultClaimTtlSeconds: 2 * 60 * 60,
     workProductPolicy: "reference-identifier-enrichment",
@@ -42,6 +47,7 @@ const ASSIGNMENT_TYPE_POLICIES = {
   "reference.identifier-backfill": {
     assignmentTypeKey: "reference.identifier-backfill",
     handlerKey: "reference.identifier-backfill",
+    executionMode: "queued",
     claimPolicy: "exclusive",
     defaultClaimTtlSeconds: 4 * 60 * 60,
     workProductPolicy: "reference-identifier-enrichment",
@@ -50,6 +56,7 @@ const ASSIGNMENT_TYPE_POLICIES = {
   "reference.summary-generation": {
     assignmentTypeKey: "reference.summary-generation",
     handlerKey: "reference.summary-generation",
+    executionMode: "queued",
     claimPolicy: "exclusive",
     defaultClaimTtlSeconds: 60 * 60,
     workProductPolicy: "reference-summary-message",
@@ -58,6 +65,7 @@ const ASSIGNMENT_TYPE_POLICIES = {
   "reference.quality-assessment": {
     assignmentTypeKey: "reference.quality-assessment",
     handlerKey: "reference.quality-assessment",
+    executionMode: "queued",
     claimPolicy: "exclusive",
     defaultClaimTtlSeconds: 60 * 60,
     workProductPolicy: "reference-quality-rating",
@@ -66,16 +74,27 @@ const ASSIGNMENT_TYPE_POLICIES = {
   "research.edition-candidate": {
     assignmentTypeKey: "research.edition-candidate",
     handlerKey: "newsroom.research",
+    executionMode: "queued",
     claimPolicy: "optional",
     defaultClaimTtlSeconds: 2 * 60 * 60,
     workProductPolicy: "research-packet-message",
     description: "Produces assignment-linked research packets for edition planning.",
+  },
+  "procedure.run": {
+    assignmentTypeKey: "procedure.run",
+    handlerKey: "procedure.run",
+    executionMode: "immediate",
+    claimPolicy: "exclusive",
+    defaultClaimTtlSeconds: 15 * 60,
+    workProductPolicy: "procedure-run-record",
+    description: "Executes a named newsroom procedure immediately and records immutable run artifacts.",
   },
 };
 
 const DEFAULT_ASSIGNMENT_TYPE_POLICY = {
   assignmentTypeKey: "unknown",
   handlerKey: "manual",
+  executionMode: "queued",
   claimPolicy: "optional",
   defaultClaimTtlSeconds: null,
   workProductPolicy: "assignment-events-and-messages",

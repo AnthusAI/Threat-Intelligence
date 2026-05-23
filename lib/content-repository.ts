@@ -10,6 +10,9 @@ export const contentRepository: ContentRepository = {
   getLatestPublishedEdition() {
     return graphqlContentRepository.getLatestPublishedEdition();
   },
+  getFirstPublishedEdition() {
+    return graphqlContentRepository.getFirstPublishedEdition();
+  },
   listPublishedEditions(options) {
     return graphqlContentRepository.listPublishedEditions(options);
   },

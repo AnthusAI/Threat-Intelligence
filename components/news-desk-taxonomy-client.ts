@@ -25,6 +25,9 @@ import type {
   AssignmentRecord,
   DoctrineRecord,
   NewsroomSectionRecord,
+  ProcedureDefinitionRecord,
+  ProcedureVersionRecord,
+  ProcedureRunRecord,
   ReferenceAttachmentRecord,
   ReferenceRecord,
   SemanticNodeRecord,
@@ -251,6 +254,58 @@ const COMPLETE_MODEL_ATTACHMENT_UPLOAD_MUTATION = `
     ) {
       id ownerKind ownerId ownerLineageId ownerVersionNumber ownerVersionKey role sortKey storagePath filename mediaType byteSize sha256 etag importRunId createdAt updatedAt status
     }
+  }
+`;
+
+const LIST_PROCEDURE_DEFINITIONS_QUERY = `
+  query ListProcedureDefinitions {
+    listNewsroomProcedureDefinitions
+  }
+`;
+
+const GET_PROCEDURE_DEFINITION_QUERY = `
+  query GetProcedureDefinition($id: ID, $procedureKey: String) {
+    getNewsroomProcedureDefinition(id: $id, procedureKey: $procedureKey)
+  }
+`;
+
+const SAVE_PROCEDURE_DEFINITION_MUTATION = `
+  mutation SaveProcedureDefinition($input: AWSJSON!) {
+    saveNewsroomProcedureDefinition(input: $input)
+  }
+`;
+
+const SAVE_PROCEDURE_VERSION_DRAFT_MUTATION = `
+  mutation SaveProcedureVersionDraft($input: AWSJSON!) {
+    saveNewsroomProcedureVersionDraft(input: $input)
+  }
+`;
+
+const PUBLISH_PROCEDURE_VERSION_MUTATION = `
+  mutation PublishProcedureVersion($versionId: ID!) {
+    publishNewsroomProcedureVersion(versionId: $versionId)
+  }
+`;
+
+const START_PROCEDURE_RUN_MUTATION = `
+  mutation StartProcedureRun(
+    $procedureId: ID
+    $procedureKey: String
+    $procedureVersionId: ID
+    $title: String
+    $summary: String
+    $input: AWSJSON
+    $actorLabel: String
+  ) {
+    startNewsroomProcedureRun(
+      procedureId: $procedureId
+      procedureKey: $procedureKey
+      procedureVersionId: $procedureVersionId
+      title: $title
+      summary: $summary
+      input: $input
+      actorLabel: $actorLabel
+    )
   }
 `;
 
@@ -502,6 +557,13 @@ export async function loadEditorNewsDeskDashboard({ isAdmin }: { isAdmin: boolea
 }
 
 export async function loadEditorFullNewsDeskDashboard({ isAdmin }: { isAdmin: boolean }): Promise<CategorySteeringDashboard> {
+  const procedureDataPromise = isAdmin
+    ? loadEditorProcedureData().catch(() => ({ definitions: [], versions: [], runs: [] }))
+    : Promise.resolve<{ definitions: ProcedureDefinitionRecord[]; versions: ProcedureVersionRecord[]; runs: ProcedureRunRecord[] }>({
+      definitions: [],
+      versions: [],
+      runs: [],
+    });
   const [
     corpora,
     importRuns,
@@ -518,6 +580,7 @@ export async function loadEditorFullNewsDeskDashboard({ isAdmin }: { isAdmin: bo
     semanticRelations,
     assignmentState,
     newsroomSections,
+    procedureData,
     userDirectory,
   ] = await Promise.all([
     listUserPoolModel<CategorySteeringCorpus>("KnowledgeCorpus"),
@@ -535,6 +598,7 @@ export async function loadEditorFullNewsDeskDashboard({ isAdmin }: { isAdmin: bo
     listUserPoolModel<SemanticRelationRecord>("SemanticRelation"),
     loadEditorAssignmentsData(),
     listOptionalUserPoolModel<NewsroomSectionRecord>("NewsroomSection"),
+    procedureDataPromise,
     isAdmin ? loadUserDirectory() : Promise.resolve([]),
   ]);
 
@@ -576,8 +640,161 @@ export async function loadEditorFullNewsDeskDashboard({ isAdmin }: { isAdmin: bo
     assignmentEvents: assignmentState.assignmentEvents,
     doctrineRecords,
     newsroomSections: sortedNewsroomSections,
+    procedureDefinitions: procedureData.definitions,
+    procedureVersions: procedureData.versions,
+    procedureRuns: procedureData.runs,
     loadError: null,
   };
+}
+
+export async function loadEditorProcedureData(): Promise<{
+  definitions: ProcedureDefinitionRecord[];
+  versions: ProcedureVersionRecord[];
+  runs: ProcedureRunRecord[];
+}> {
+  const dataClient = generateClient<Schema>();
+  const graphClient = dataClient as unknown as {
+    graphql: (options: Record<string, unknown>) => Promise<{ data?: Record<string, unknown> | null; errors?: unknown[] | null }>;
+  };
+  const response = await graphClient.graphql({
+    query: LIST_PROCEDURE_DEFINITIONS_QUERY,
+    authMode: USER_POOL_AUTH_MODE,
+  });
+  assertNoGraphQLErrors(response.errors);
+  const payload = normalizeJsonValue(response.data?.listNewsroomProcedureDefinitions);
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  const definitions: ProcedureDefinitionRecord[] = [];
+  const versions: ProcedureVersionRecord[] = [];
+  const runs: ProcedureRunRecord[] = [];
+  const versionIds = new Set<string>();
+  const runIds = new Set<string>();
+  const hydrateDefinitionIds: string[] = [];
+
+  const pushVersion = (value: unknown) => {
+    const normalized = normalizeJsonValue(value);
+    if (!normalized?.id || !normalized?.procedureId) return;
+    const id = String(normalized.id);
+    if (versionIds.has(id)) return;
+    versionIds.add(id);
+    versions.push(normalized as ProcedureVersionRecord);
+  };
+
+  const pushRun = (value: unknown) => {
+    const normalized = normalizeJsonValue(value);
+    if (!normalized?.id || !normalized?.procedureId) return;
+    const id = String(normalized.id);
+    if (runIds.has(id)) return;
+    runIds.add(id);
+    runs.push(normalized as ProcedureRunRecord);
+  };
+
+  for (const item of items) {
+    const row = normalizeJsonValue(item);
+    if (!row || !row.id || !row.procedureKey) continue;
+    definitions.push(row as ProcedureDefinitionRecord);
+    pushVersion(row.currentVersion);
+    const rowVersions = Array.isArray(row.versions) ? row.versions : [];
+    for (const version of rowVersions) pushVersion(version);
+    if (rowVersions.length === 0) hydrateDefinitionIds.push(String(row.id));
+    const rowRuns = Array.isArray(row.recentRuns) ? row.recentRuns : [];
+    for (const run of rowRuns) pushRun(run);
+  }
+
+  if (hydrateDefinitionIds.length > 0) {
+    await Promise.all(hydrateDefinitionIds.map(async (definitionId) => {
+      const detailResponse = await graphClient.graphql({
+        query: GET_PROCEDURE_DEFINITION_QUERY,
+        variables: { id: definitionId },
+        authMode: USER_POOL_AUTH_MODE,
+      });
+      assertNoGraphQLErrors(detailResponse.errors);
+      const detail = normalizeJsonValue(detailResponse.data?.getNewsroomProcedureDefinition);
+      if (!detail) return;
+      pushVersion(detail.currentVersion);
+      const detailVersions = Array.isArray(detail.versions) ? detail.versions : [];
+      for (const version of detailVersions) pushVersion(version);
+      const detailRuns = Array.isArray(detail.recentRuns) ? detail.recentRuns : [];
+      for (const run of detailRuns) pushRun(run);
+    }));
+  }
+
+  return {
+    definitions: definitions.sort((left, right) => (right.updatedAt ?? "").localeCompare(left.updatedAt ?? "")),
+    versions: versions.sort((left, right) => (right.versionNumber ?? 0) - (left.versionNumber ?? 0)),
+    runs: runs.sort((left, right) => (right.requestedAt ?? "").localeCompare(left.requestedAt ?? "")),
+  };
+}
+
+export async function saveProcedureDefinitionRecord(input: Record<string, unknown>) {
+  const dataClient = generateClient<Schema>();
+  const graphClient = dataClient as unknown as {
+    graphql: (options: Record<string, unknown>) => Promise<{ data?: Record<string, unknown> | null; errors?: unknown[] | null }>;
+  };
+  const response = await graphClient.graphql({
+    query: SAVE_PROCEDURE_DEFINITION_MUTATION,
+    variables: { input },
+    authMode: USER_POOL_AUTH_MODE,
+  });
+  assertNoGraphQLErrors(response.errors);
+  return normalizeJsonValue(response.data?.saveNewsroomProcedureDefinition);
+}
+
+export async function saveProcedureVersionDraftRecord(input: Record<string, unknown>) {
+  const dataClient = generateClient<Schema>();
+  const graphClient = dataClient as unknown as {
+    graphql: (options: Record<string, unknown>) => Promise<{ data?: Record<string, unknown> | null; errors?: unknown[] | null }>;
+  };
+  const response = await graphClient.graphql({
+    query: SAVE_PROCEDURE_VERSION_DRAFT_MUTATION,
+    variables: { input },
+    authMode: USER_POOL_AUTH_MODE,
+  });
+  assertNoGraphQLErrors(response.errors);
+  return normalizeJsonValue(response.data?.saveNewsroomProcedureVersionDraft);
+}
+
+export async function publishProcedureVersionRecord(versionId: string) {
+  const dataClient = generateClient<Schema>();
+  const graphClient = dataClient as unknown as {
+    graphql: (options: Record<string, unknown>) => Promise<{ data?: Record<string, unknown> | null; errors?: unknown[] | null }>;
+  };
+  const response = await graphClient.graphql({
+    query: PUBLISH_PROCEDURE_VERSION_MUTATION,
+    variables: { versionId },
+    authMode: USER_POOL_AUTH_MODE,
+  });
+  assertNoGraphQLErrors(response.errors);
+  return normalizeJsonValue(response.data?.publishNewsroomProcedureVersion);
+}
+
+export async function startProcedureRunRecord(input: {
+  procedureId?: string;
+  procedureKey?: string;
+  procedureVersionId?: string;
+  title?: string;
+  summary?: string;
+  actorLabel?: string;
+  parameters?: Record<string, unknown>;
+}) {
+  const dataClient = generateClient<Schema>();
+  const graphClient = dataClient as unknown as {
+    graphql: (options: Record<string, unknown>) => Promise<{ data?: Record<string, unknown> | null; errors?: unknown[] | null }>;
+  };
+  const response = await graphClient.graphql({
+    query: START_PROCEDURE_RUN_MUTATION,
+    variables: {
+      procedureId: input.procedureId,
+      procedureKey: input.procedureKey,
+      procedureVersionId: input.procedureVersionId,
+      title: input.title,
+      summary: input.summary,
+      actorLabel: input.actorLabel,
+      input: input.parameters ?? {},
+    },
+    authMode: USER_POOL_AUTH_MODE,
+  });
+  assertNoGraphQLErrors(response.errors);
+  return normalizeJsonValue(response.data?.startNewsroomProcedureRun);
 }
 
 export async function loadEditorMessagesData(): Promise<MessageRecord[]> {
@@ -1559,6 +1776,20 @@ function categoryTreeStatusRank(status: string): number {
 
 function categoryTreeDate(categoryTree: CategorySteeringCategoryTree): string {
   return categoryTree.generatedAt ?? categoryTree.updatedAt ?? categoryTree.createdAt ?? "";
+}
+
+function normalizeJsonValue(value: unknown): Record<string, any> | null {
+  if (!value) return null;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, any> : null;
+    } catch {
+      return null;
+    }
+  }
+  if (typeof value === "object" && !Array.isArray(value)) return value as Record<string, any>;
+  return null;
 }
 
 function assertNoGraphQLErrors(errors?: unknown[] | null) {

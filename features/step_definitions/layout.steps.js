@@ -3087,6 +3087,74 @@ Then("the front article {string} should stack its image below title chrome", asy
   assert.ok(rendered.jump.top >= rendered.image.bottom - 0.75, `Expected rendered jump label to clear stacked image`);
 });
 
+Then("the front lead trio should share one equal-height row", async function () {
+  const articleIds = ["agent-procedure-patterns", "schools-reading-lab", "market-hall"];
+  const solvedBlocks = await Promise.all(articleIds.map((articleId) => getFrontSolvedBlock(requirePage(this), articleId)));
+  for (const [index, block] of solvedBlocks.entries()) {
+    assert.ok(block, `Expected solved front block for ${articleIds[index]}`);
+    assert.equal(block.hasMore, true, `Expected ${articleIds[index]} front teaser to continue`);
+    assert.ok(block.front, `Expected front metrics for ${articleIds[index]}`);
+  }
+
+  const solvedRowHeights = solvedBlocks.map((block) => block.front.rowHeight);
+  assert.ok(
+    solvedRowHeights.every((height) => height === solvedRowHeights[0]),
+    `Expected lead trio to share one solved row height; found ${solvedRowHeights.join(", ")}`,
+  );
+  const solvedBlockHeights = solvedBlocks.map((block) => block.height);
+  assert.ok(
+    solvedBlockHeights.every((height) => height === solvedBlockHeights[0]),
+    `Expected lead trio to share one solved block height; found ${solvedBlockHeights.join(", ")}`,
+  );
+
+  const rendered = await requirePage(this).evaluate((targetArticleIds) => {
+    return targetArticleIds.map((articleId) => {
+      const story = document.querySelector(`.front-story[data-article-id="${articleId}"]`);
+      if (!story) return null;
+      const storyRect = story.getBoundingClientRect();
+      const measure = story.querySelector(".story-measure");
+      const measureRect = measure?.getBoundingClientRect();
+      const lines = Array.from(story.querySelectorAll(".measured-line"));
+      return {
+        articleId,
+        storyHeight: storyRect.height,
+        measureBottom: measureRect ? measureRect.bottom - storyRect.top : 0,
+        lineBottom: Math.max(...lines.map((line) => line.getBoundingClientRect().bottom - storyRect.top), 0),
+      };
+    });
+  }, articleIds);
+  assert.ok(rendered.every(Boolean), "Expected rendered front lead trio");
+
+  const renderedHeights = rendered.map((story) => story.storyHeight);
+  assert.ok(
+    renderedHeights.every((height) => Math.abs(height - renderedHeights[0]) <= 1),
+    `Expected rendered lead trio to share one row height; found ${renderedHeights.join(", ")}`,
+  );
+
+  const rhythm = await requirePage(this).evaluate(() => window.__PAPYRUS_LAYOUT__?.rhythm?.rowHeight ?? 19);
+  for (const story of rendered) {
+    const slack = story.measureBottom - story.lineBottom;
+    assert.ok(
+      slack >= -1 && slack <= rhythm * 2,
+      `Expected ${story.articleId} copy to spend the shared row body area; found ${slack}px bottom slack`,
+    );
+  }
+
+  const composedBlock = solvedBlocks.find((block) => block.id === "front-agent-procedure-patterns");
+  assert.ok(composedBlock, "Expected composed center front block");
+  const image = composedBlock.furniture.find((furniture) => furniture.kind === "image");
+  assert.ok(image, "Expected center front block to have image furniture");
+  const imageColumnIndexes = Array.from({ length: image.columnSpan }, (_, index) => image.columnStart + index);
+  const imageBottom = image.y + image.height;
+  const flowsBelowImage = imageColumnIndexes.some((columnIndex) => (
+    (composedBlock.columns[columnIndex] ?? []).some((line) => line.y >= imageBottom - 0.75)
+  ));
+  assert.ok(
+    flowsBelowImage,
+    "Expected composed center body copy to resume in the image column after the image clears",
+  );
+});
+
 Then(
   "the front headline for article {string} should be larger than articles {string} and {string}",
   async function (featureArticleId, firstRailArticleId, secondRailArticleId) {

@@ -91,6 +91,7 @@ export type GetEditionItemOptions = {
 export type ContentRepository = {
   loadEditionContent(options?: LoadEditionContentOptions): EditionContent | Promise<EditionContent>;
   getLatestPublishedEdition(): EditionRouteSummary | null | Promise<EditionRouteSummary | null>;
+  getFirstPublishedEdition(): EditionRouteSummary | null | Promise<EditionRouteSummary | null>;
   listPublishedEditions(options?: ListPublishedEditionsOptions): PublishedEditionConnection | Promise<PublishedEditionConnection>;
   getArticle(slug: string): Article | undefined | Promise<Article | undefined>;
   getEditionArticle(options: GetEditionArticleOptions): Article | undefined | Promise<Article | undefined>;

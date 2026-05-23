@@ -11,6 +11,7 @@ type AssignmentHandler =
   | Schema["completeAssignment"]["functionHandler"]
   | Schema["cancelAssignment"]["functionHandler"]
   | Schema["reopenAssignment"]["functionHandler"]
+  | Schema["retryImmediateAssignment"]["functionHandler"]
   | Schema["getAssignmentContext"]["functionHandler"]
   | Schema["listAssignmentQueue"]["functionHandler"]
   | Schema["listAssignmentsForObject"]["functionHandler"];
@@ -23,6 +24,7 @@ type DataClientResult<T = unknown> = {
 };
 
 const FINAL_STATUSES = new Set(["completed", "canceled"]);
+const IMMEDIATE_ASSIGNMENT_TYPES = new Set(["procedure.run"]);
 const NEWSROOM_SUMMARY_PAYLOAD_ID = "knowledge-raw-payload-newsroom-summary-current";
 const NEWSROOM_SUMMARY_PAYLOAD_OWNER_KIND = "knowledgeRawPayload";
 const SUMMARY_STALE_AFTER_MS = 15 * 60 * 1000;
@@ -37,6 +39,7 @@ export const handler = async (event: any): Promise<any> => {
   if (fieldName === "getAssignmentContext") return getAssignmentContext(event as Parameters<Schema["getAssignmentContext"]["functionHandler"]>[0]);
   if (fieldName === "listAssignmentQueue") return listAssignmentQueue(event as Parameters<Schema["listAssignmentQueue"]["functionHandler"]>[0]);
   if (fieldName === "listAssignmentsForObject") return listAssignmentsForObject(event as Parameters<Schema["listAssignmentsForObject"]["functionHandler"]>[0]);
+  if (fieldName === "retryImmediateAssignment") return retryImmediateAssignment(event as Parameters<Schema["retryImmediateAssignment"]["functionHandler"]>[0]);
   return mutateAssignment(event as Parameters<Schema["claimAssignment"]["functionHandler"]>[0], fieldName);
 };
 
@@ -88,15 +91,135 @@ async function mutateAssignment(event: Parameters<Schema["claimAssignment"]["fun
     nextStatus: normalizeOptionalString(next.status) ?? normalizeOptionalString(assignment.status),
     now,
   });
+  let finalStatus = normalizeOptionalString(next.status) ?? normalizeOptionalString(assignment.status) ?? "open";
+  if (action === "claim" && assignmentExecutionMode(assignment.assignmentTypeKey) === "immediate") {
+    const execution = await executeImmediateClaimedAssignment(client, {
+      assignment: { ...assignment, ...next, id: assignmentId },
+      actorSub,
+      actorLabel,
+      now: new Date().toISOString(),
+      note: normalizeOptionalString(event.arguments.note),
+      trigger: "claim",
+    });
+    finalStatus = execution.status;
+  }
   return {
     ok: true,
     assignmentId,
     eventId,
-    status: next.status ?? assignment.status,
+    status: finalStatus,
     action,
     assigneeKey: normalizeOptionalString(next.assigneeKey),
     claimExpiresAt: normalizeOptionalString(next.claimExpiresAt),
   };
+}
+
+async function retryImmediateAssignment(event: Parameters<Schema["retryImmediateAssignment"]["functionHandler"]>[0]) {
+  const client = await getDataClient();
+  const assignmentId = normalizeRequiredString(event.arguments.assignmentId, "assignmentId");
+  const assignment = await getRequiredRecord(client.models.Assignment, assignmentId, "Assignment");
+  if (assignmentExecutionMode(assignment.assignmentTypeKey) !== "immediate") {
+    throw new Error(`Assignment ${assignmentId} is ${assignment.assignmentTypeKey}; only immediate assignment types support retry.`);
+  }
+  if (normalizeOptionalString(assignment.status) !== "open") {
+    throw new Error(`Assignment ${assignmentId} is ${assignment.status}; retry requires open status.`);
+  }
+  const actorSub = normalizeOptionalString(event.arguments.actorSub) ?? getIdentitySub(event);
+  const actorLabel = normalizeOptionalString(event.arguments.actorLabel) ?? getIdentityLabel(event);
+  const now = new Date().toISOString();
+  const retryRunId = normalizeOptionalString(assignment.assignmentTypeKey) === "procedure.run"
+    ? await cloneProcedureRunForRetry(client, assignment, now, actorLabel ?? actorSub ?? "Papyrus newsroom")
+    : null;
+  const claimIdentity = resolveClaimIdentity({
+    assigneeType: "user",
+    assigneeId: actorSub ?? actorLabel ?? "unknown",
+    assigneeKey: `user#${actorSub ?? actorLabel ?? "unknown"}`,
+  });
+  const claimedUpdate = {
+    status: "claimed",
+    queueStatusKey: `${assignment.queueKey}#claimed`,
+    sectionStatusKey: sectionStatusKey(assignment, "claimed"),
+    sectionQueueStatusKey: sectionQueueStatusKey(assignment, "claimed"),
+    assigneeType: claimIdentity.assigneeType,
+    assigneeId: claimIdentity.assigneeId,
+    assigneeKey: claimIdentity.assigneeKey,
+    claimedAt: now,
+    claimExpiresAt: null,
+    sourceSnapshotId: retryRunId ?? assignment.sourceSnapshotId ?? null,
+    updatedAt: now,
+  };
+  await requireDataResult(client.models.Assignment.update({ id: assignmentId, ...claimedUpdate }), `retry claim Assignment ${assignmentId}`);
+  const retryEventId = `assignment-event-${assignmentId}-${now.replace(/[^0-9TZ]/g, "")}-${randomUUID().slice(0, 8)}`;
+  await requireDataResult(
+    client.models.AssignmentEvent.create({
+      id: retryEventId,
+      assignmentId,
+      assignmentTypeKey: assignment.assignmentTypeKey,
+      queueKey: assignment.queueKey,
+      eventType: "retry",
+      fromStatus: assignment.status,
+      toStatus: "claimed",
+      actorSub,
+      actorLabel,
+      note: normalizeOptionalString(event.arguments.note) ?? "manual immediate retry",
+      createdAt: now,
+    }),
+    `create AssignmentEvent ${retryEventId}`,
+  );
+  await updateNewsroomSummaryForAssignmentAction(client, {
+    assignmentTypeKey: normalizeOptionalString(assignment.assignmentTypeKey),
+    sectionKey: assignmentSectionKey(assignment),
+    previousStatus: normalizeOptionalString(assignment.status),
+    nextStatus: "claimed",
+    now,
+  });
+  const execution = await executeImmediateClaimedAssignment(client, {
+    assignment: { ...assignment, ...claimedUpdate, id: assignmentId },
+    actorSub,
+    actorLabel,
+    now: new Date().toISOString(),
+    note: normalizeOptionalString(event.arguments.note),
+    trigger: "retry",
+  });
+  return {
+    ok: true,
+    assignmentId,
+    eventId: retryEventId,
+    status: execution.status,
+    action: "retry",
+    assigneeKey: claimIdentity.assigneeKey,
+    claimExpiresAt: null,
+  };
+}
+
+async function cloneProcedureRunForRetry(client: DataClient, assignment: any, now: string, actorLabel: string): Promise<string> {
+  const sourceRunId = normalizeOptionalString(assignment.sourceSnapshotId);
+  if (!sourceRunId) throw new Error(`Assignment ${assignment.id} has no sourceSnapshotId for immediate retry.`);
+  const priorRun = await getRequiredRecord((client.models as any).ProcedureRun, sourceRunId, "ProcedureRun");
+  const nextAttempt = (normalizeOptionalPositiveInteger(priorRun.attempt) ?? 1) + 1;
+  const retryRunId = `procedure-run-retry-${safeId(assignment.id)}-${now.replace(/[^0-9TZ]/g, "")}-${randomUUID().slice(0, 6)}`;
+  await requireDataResult((client.models as any).ProcedureRun.create({
+    id: retryRunId,
+    procedureId: priorRun.procedureId,
+    procedureKey: priorRun.procedureKey,
+    procedureVersionId: priorRun.procedureVersionId,
+    procedureVersionNumber: priorRun.procedureVersionNumber ?? null,
+    assignmentId: assignment.id,
+    runStatus: "queued",
+    requestedBy: actorLabel,
+    requestedAt: now,
+    startedAt: null,
+    finishedAt: null,
+    input: priorRun.input ?? {},
+    normalizedInput: priorRun.normalizedInput ?? priorRun.input ?? {},
+    resultSummary: null,
+    errorSummary: null,
+    output: null,
+    error: null,
+    attempt: nextAttempt,
+    newsroomFeedKey: priorRun.newsroomFeedKey ?? "procedures",
+  }), `create ProcedureRun retry ${retryRunId}`);
+  return retryRunId;
 }
 
 async function updateNewsroomSummaryForAssignmentAction(
@@ -479,6 +602,336 @@ function nextAssignmentUpdate(assignment: any, action: string, args: Record<stri
   throw new Error(`Unsupported assignment action ${action}.`);
 }
 
+function assignmentExecutionMode(assignmentTypeKey: unknown): "immediate" | "queued" {
+  return IMMEDIATE_ASSIGNMENT_TYPES.has(normalizeOptionalString(assignmentTypeKey) ?? "") ? "immediate" : "queued";
+}
+
+async function executeImmediateClaimedAssignment(
+  client: DataClient,
+  input: {
+    assignment: any;
+    actorSub: string | null;
+    actorLabel: string | null;
+    now: string;
+    note: string | null;
+    trigger: "claim" | "retry";
+  },
+): Promise<{ status: "completed" | "open"; eventId: string }> {
+  const assignmentId = normalizeRequiredString(input.assignment.id, "assignment.id");
+  const assignmentTypeKey = normalizeOptionalString(input.assignment.assignmentTypeKey) ?? "unknown";
+  const queueKey = normalizeOptionalString(input.assignment.queueKey) ?? `${assignmentTypeKey}#unknown`;
+  const startEventId = `assignment-event-${assignmentId}-execution-start-${input.now.replace(/[^0-9TZ]/g, "")}-${randomUUID().slice(0, 6)}`;
+  await requireDataResult(
+    client.models.AssignmentEvent.create({
+      id: startEventId,
+      assignmentId,
+      assignmentTypeKey,
+      queueKey,
+      eventType: "execution_started",
+      fromStatus: "claimed",
+      toStatus: "claimed",
+      actorSub: input.actorSub,
+      actorLabel: input.actorLabel,
+      note: input.note ?? `${input.trigger} immediate execution`,
+      createdAt: input.now,
+    }),
+    `create AssignmentEvent ${startEventId}`,
+  );
+  let executionResult: { runId?: string | null; summary: string; output?: unknown } = { summary: "No executor response." };
+  try {
+    executionResult = await runImmediateAssignmentExecutor(client, input.assignment, input.now);
+    const completedAt = new Date().toISOString();
+    await requireDataResult(client.models.Assignment.update({
+      id: assignmentId,
+      status: "completed",
+      queueStatusKey: `${queueKey}#completed`,
+      sectionStatusKey: sectionStatusKey(input.assignment, "completed"),
+      sectionQueueStatusKey: sectionQueueStatusKey(input.assignment, "completed"),
+      completedAt,
+      updatedAt: completedAt,
+    }), `complete immediate Assignment ${assignmentId}`);
+    const completeEventId = `assignment-event-${assignmentId}-execution-complete-${completedAt.replace(/[^0-9TZ]/g, "")}-${randomUUID().slice(0, 6)}`;
+    await requireDataResult(
+      client.models.AssignmentEvent.create({
+        id: completeEventId,
+        assignmentId,
+        assignmentTypeKey,
+        queueKey,
+        eventType: "execution_completed",
+        fromStatus: "claimed",
+        toStatus: "completed",
+        actorSub: input.actorSub,
+        actorLabel: input.actorLabel,
+        note: executionResult.summary,
+        createdAt: completedAt,
+      }),
+      `create AssignmentEvent ${completeEventId}`,
+    );
+    await putJsonModelPayload(
+      client as any,
+      { ownerKind: "assignmentEvent", ownerId: completeEventId, ownerLineageId: completeEventId },
+      "result",
+      "result",
+      {
+        trigger: input.trigger,
+        runId: executionResult.runId ?? null,
+        summary: executionResult.summary,
+        output: executionResult.output ?? null,
+      },
+      { filename: "result.json", now: completedAt },
+    );
+    await updateNewsroomSummaryForAssignmentAction(client, {
+      assignmentTypeKey,
+      sectionKey: assignmentSectionKey(input.assignment),
+      previousStatus: "claimed",
+      nextStatus: "completed",
+      now: completedAt,
+    });
+    return { status: "completed", eventId: completeEventId };
+  } catch (error) {
+    const failedAt = new Date().toISOString();
+    const errorMessage = error instanceof Error ? error.message : "Immediate execution failed.";
+    await requireDataResult(client.models.Assignment.update({
+      id: assignmentId,
+      status: "open",
+      queueStatusKey: `${queueKey}#open`,
+      sectionStatusKey: sectionStatusKey(input.assignment, "open"),
+      sectionQueueStatusKey: sectionQueueStatusKey(input.assignment, "open"),
+      assigneeType: null,
+      assigneeId: null,
+      assigneeKey: null,
+      claimedAt: null,
+      claimExpiresAt: null,
+      updatedAt: failedAt,
+    }), `reopen failed immediate Assignment ${assignmentId}`);
+    const failedEventId = `assignment-event-${assignmentId}-execution-failed-${failedAt.replace(/[^0-9TZ]/g, "")}-${randomUUID().slice(0, 6)}`;
+    await requireDataResult(
+      client.models.AssignmentEvent.create({
+        id: failedEventId,
+        assignmentId,
+        assignmentTypeKey,
+        queueKey,
+        eventType: "execution_failed",
+        fromStatus: "claimed",
+        toStatus: "open",
+        actorSub: input.actorSub,
+        actorLabel: input.actorLabel,
+        note: errorMessage,
+        createdAt: failedAt,
+      }),
+      `create AssignmentEvent ${failedEventId}`,
+    );
+    await putJsonModelPayload(
+      client as any,
+      { ownerKind: "assignmentEvent", ownerId: failedEventId, ownerLineageId: failedEventId },
+      "error",
+      "error",
+      {
+        trigger: input.trigger,
+        runId: executionResult.runId ?? null,
+        error: errorMessage,
+      },
+      { filename: "error.json", now: failedAt },
+    );
+    await updateNewsroomSummaryForAssignmentAction(client, {
+      assignmentTypeKey,
+      sectionKey: assignmentSectionKey(input.assignment),
+      previousStatus: "claimed",
+      nextStatus: "open",
+      now: failedAt,
+    });
+    return { status: "open", eventId: failedEventId };
+  }
+}
+
+async function runImmediateAssignmentExecutor(client: DataClient, assignment: any, now: string): Promise<{ runId?: string | null; summary: string; output?: unknown }> {
+  const assignmentTypeKey = normalizeOptionalString(assignment.assignmentTypeKey) ?? "";
+  if (assignmentTypeKey === "procedure.run") {
+    return await executeImmediateProcedureRun(client, assignment, now);
+  }
+  throw new Error(`No immediate executor is registered for ${assignmentTypeKey}.`);
+}
+
+async function executeImmediateProcedureRun(client: DataClient, assignment: any, now: string): Promise<{ runId?: string | null; summary: string; output?: unknown }> {
+  const runId = normalizeOptionalString(assignment.sourceSnapshotId);
+  if (!runId) throw new Error(`Assignment ${assignment.id} is missing sourceSnapshotId for procedure run execution.`);
+  const run = await getRequiredRecord((client.models as any).ProcedureRun, runId, "ProcedureRun");
+  const version = await getRequiredRecord((client.models as any).ProcedureVersion, normalizeRequiredString(run.procedureVersionId, "procedureVersionId"), "ProcedureVersion");
+  const definition = await getRequiredRecord((client.models as any).ProcedureDefinition, normalizeRequiredString(run.procedureId, "procedureId"), "ProcedureDefinition");
+  const attempt = normalizeOptionalPositiveInteger(run.attempt) ?? 1;
+  const inputPayload = parseJsonObject(run.normalizedInput) ?? parseJsonObject(run.input) ?? {};
+  const startedAt = run.startedAt ?? now;
+  try {
+    const procedureKey = normalizeOptionalString(definition.procedureKey) ?? "unknown";
+    const procedureKind = resolveProcedureKind(version, definition);
+    const payload = executeSeededProcedurePayload({
+      procedureKey,
+      procedureKind,
+      assignmentId: normalizeOptionalString(assignment.id),
+      runId: run.id,
+      attempt,
+      now,
+      input: inputPayload,
+    });
+    const executionOutput = {
+      procedureKey,
+      procedureKind,
+      versionNumber: Number(version.versionNumber ?? 1),
+      attempt,
+      executedAt: now,
+      mode: "immediate",
+      input: inputPayload,
+      ...payload,
+    };
+    const finishedAt = new Date().toISOString();
+    await requireDataResult((client.models as any).ProcedureRun.update({
+      id: run.id,
+      runStatus: "completed",
+      startedAt,
+      finishedAt,
+      resultSummary: `Completed immediate run for ${definition.procedureKey} v${version.versionNumber}.`,
+      errorSummary: null,
+      output: executionOutput,
+      error: null,
+      attempt,
+    }), `update ProcedureRun ${run.id}`);
+    return {
+      runId: run.id,
+      summary: `Procedure ${definition.procedureKey} completed.`,
+      output: executionOutput,
+    };
+  } catch (error) {
+    const finishedAt = new Date().toISOString();
+    const errorMessage = error instanceof Error ? error.message : "Procedure execution failed.";
+    await requireDataResult((client.models as any).ProcedureRun.update({
+      id: run.id,
+      runStatus: "failed",
+      startedAt,
+      finishedAt,
+      resultSummary: null,
+      errorSummary: errorMessage,
+      output: null,
+      error: {
+        message: errorMessage,
+        procedureKey: normalizeOptionalString(definition.procedureKey),
+        procedureVersionId: normalizeOptionalString(version.id),
+      },
+      attempt,
+    }), `update failed ProcedureRun ${run.id}`);
+    throw error;
+  }
+}
+
+function resolveProcedureKind(version: any, definition: any): string {
+  const source = String(version?.tactusSource ?? "");
+  const marker = source.match(/papyrus-procedure-kind:\s*([a-z0-9._-]+)/i)?.[1];
+  if (marker) return marker;
+  return normalizeOptionalString(definition?.procedureKey) ?? "unknown";
+}
+
+function executeSeededProcedurePayload(input: {
+  procedureKey: string;
+  procedureKind: string;
+  assignmentId: string | null;
+  runId: string;
+  attempt: number;
+  now: string;
+  input: Record<string, unknown>;
+}): Record<string, unknown> {
+  if (input.procedureKind === "newsroom.research.explorer") {
+    return {
+      research_packet: buildLambdaResearchPacket(input),
+      retry_count: 0,
+      validation_failures: [],
+    };
+  }
+  if (input.procedureKind === "newsroom.reporting.context") {
+    return {
+      reporting_context_packet: buildLambdaReportingPacket(input),
+    };
+  }
+  if (input.procedureKind === "ingestion.reference.register") {
+    return {
+      result: {
+        ok: true,
+        kind: "ingestion.reference.register",
+        assignmentId: input.assignmentId,
+        runId: input.runId,
+      },
+    };
+  }
+  throw new Error(`Unsupported seeded procedure kind '${input.procedureKind}' for ${input.procedureKey}.`);
+}
+
+function buildLambdaResearchPacket(input: {
+  procedureKey: string;
+  assignmentId: string | null;
+  runId: string;
+  now: string;
+  input: Record<string, unknown>;
+}): Record<string, unknown> {
+  const researchMode = normalizeOptionalString(input.input.research_mode) ?? "source_discovery";
+  const corpusKey = normalizeOptionalString(input.input.corpus_key);
+  const question = normalizeOptionalString(input.input.research_questions);
+  const blockedReason = "Lambda immediate seeded procedure executed without external Tactus tool calls.";
+  return {
+    summary: `Immediate research packet generated for ${input.assignmentId ?? "assignment"}.`,
+    corpus_key: corpusKey,
+    research_mode: researchMode,
+    queries: question ? [question] : [],
+    evidence_item_ids: [],
+    source_snapshots: [],
+    proposed_references: [],
+    source_discovery: {
+      source_snapshots: [],
+      proposed_references: [],
+      blocked_reason: blockedReason,
+    },
+    recommended_angle: "Gather accepted references before drafting reporting context.",
+    open_questions: [
+      "Which accepted references should anchor this angle?",
+    ],
+    coverage_gaps: [
+      "No external discovery executed in immediate Lambda seeded procedure mode.",
+    ],
+    researchTrace: {
+      recoveryPath: "lambda_immediate_seeded_procedure",
+      runId: input.runId,
+      executedAt: input.now,
+      blockedReason,
+    },
+  };
+}
+
+function buildLambdaReportingPacket(input: {
+  assignmentId: string | null;
+  runId: string;
+  now: string;
+  input: Record<string, unknown>;
+}): Record<string, unknown> {
+  return {
+    editor_recommendation: "hold",
+    recommended_angle: "Collect stronger accepted-reference evidence before copywriting.",
+    accepted_reference_ids: [],
+    risk_flags: [
+      "Immediate seeded Lambda procedure produced a placeholder reporting packet.",
+    ],
+    coverage_gaps: [
+      "Run full reporting procedure after confirming source research packet and accepted references.",
+    ],
+    open_questions: [
+      "What primary claim should this section make next?",
+    ],
+    copywriter_brief: "Hold draft creation until reporting packet evidence is enriched.",
+    source_research_assignment_id: normalizeOptionalString(input.input.source_research_assignment_id),
+    source_research_packet_id: normalizeOptionalString(input.input.source_research_packet_id),
+    source_research_packet_path: normalizeOptionalString(input.input.source_research_packet_path),
+    run_id: input.runId,
+    generated_at: input.now,
+    assignment_id: input.assignmentId,
+  };
+}
+
 function assignmentSectionKey(assignment: any): string | null {
   return normalizeOptionalString(assignment?.sectionKey)
     ?? normalizeOptionalString(assignment?.sectionId);
@@ -617,6 +1070,15 @@ function parseJsonObject(value: unknown): Record<string, unknown> | null {
   } catch {
     return null;
   }
+}
+
+function safeId(value: unknown): string {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    || "item";
 }
 
 function normalizeSummaryPayload(value: unknown, now: string): {
