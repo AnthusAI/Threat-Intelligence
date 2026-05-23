@@ -2598,19 +2598,29 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertIn("derived_from", relation_types)
 
     def test_coverage_theme_reporting_requires_agent_success_without_fallback(self):
-        result = papyrus_coverage_theme.coverage_theme_run(
-            date="2026-05-21",
-            topic="AI in video games",
-            corpus_key="AI-ML-research",
-            category_key="AI-ML-research",
-            coverage_key="coverage.ai-in-video-games",
-            sections=["culture"],
-            section_budgets={"arts": 1},
-            run_id="coverage-theme-test",
-            through="reporting",
-            require_agent_success=True,
-            now="2026-05-21T12:00:00Z",
-        )
+        with mock.patch.object(
+            papyrus_coverage_theme,
+            "_create_cloud_procedure_client",
+            return_value=object(),
+        ), mock.patch.object(
+            papyrus_coverage_theme,
+            "_start_cloud_procedure_run",
+            side_effect=RuntimeError("cloud unavailable"),
+        ):
+            result = papyrus_coverage_theme.coverage_theme_run(
+                date="2026-05-21",
+                topic="AI in video games",
+                corpus_key="AI-ML-research",
+                category_key="AI-ML-research",
+                coverage_key="coverage.ai-in-video-games",
+                sections=["culture"],
+                section_budgets={"arts": 1},
+                run_id="coverage-theme-test",
+                through="reporting",
+                require_agent_success=True,
+                allow_fallback=True,
+                now="2026-05-21T12:00:00Z",
+            )
 
         self.assertFalse(result["ok"])
         self.assertTrue(result["degraded"])
