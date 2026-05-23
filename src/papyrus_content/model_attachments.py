@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
 import tempfile
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -11,7 +13,7 @@ from typing import Any
 
 from .env import PAPYRUS_ROOT, storage_bucket_from_amplify_outputs
 from .graphql_authoring import PapyrusGraphQLAuthoringClient, strip_unsupported_payload_fields
-from .ids import hash_short, safe_id
+from .ids import safe_id
 
 MODEL_ATTACHMENT_OWNER_MODELS = {
     "assignment": "Assignment",
@@ -83,7 +85,7 @@ def build_model_payload_attachment(input_payload: dict[str, Any]) -> dict[str, A
         "filename": filename,
         "mediaType": input_payload.get("mediaType") or "application/octet-stream",
         "byteSize": len(body),
-        "sha256": hash_short(body),
+        "sha256": hashlib.sha256(body).hexdigest(),
         "etag": None,
         "importRunId": input_payload.get("importRunId"),
         "createdAt": now,
@@ -101,6 +103,24 @@ def attachment_record(entry: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _upload_error_is_transient(error: BaseException) -> bool:
+    if isinstance(error, urllib.error.HTTPError):
+        return error.code in {502, 503, 504}
+    message = str(error)
+    return any(
+        token in message
+        for token in (
+            "Connection reset",
+            "timed out",
+            "Temporary failure",
+            "ECONNRESET",
+            "503",
+            "502",
+            "504",
+        )
+    )
+
+
 def upload_attachment_body(
     client: PapyrusGraphQLAuthoringClient,
     attachment: dict[str, Any],
@@ -109,23 +129,34 @@ def upload_attachment_body(
     buffer = body if isinstance(body, (bytes, bytearray)) else str(body).encode("utf-8")
     slot = client.create_model_attachment_upload(attachment)
     headers = {str(key): str(value) for key, value in (slot.get("requiredHeaders") or {}).items()}
-    request = urllib.request.Request(
-        slot["uploadUrl"],
-        data=buffer,
-        headers=headers,
-        method=slot.get("method") or "PUT",
-    )
-    try:
-        with urllib.request.urlopen(request) as response:
-            if response.status >= 400:
-                raise RuntimeError(f"Upload failed with status {response.status}")
-    except urllib.error.HTTPError as error:
-        detail = error.read().decode("utf-8", errors="replace")
+    last_error: BaseException | None = None
+    for attempt in range(1, 4):
+        request = urllib.request.Request(
+            slot["uploadUrl"],
+            data=buffer,
+            headers=headers,
+            method=slot.get("method") or "PUT",
+        )
+        try:
+            with urllib.request.urlopen(request) as response:
+                if response.status >= 400:
+                    raise RuntimeError(f"Upload failed with status {response.status}")
+            return client.complete_model_attachment_upload(slot["uploadId"], attachment)
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, RuntimeError) as error:
+            last_error = error
+            if not _upload_error_is_transient(error) or attempt == 3:
+                break
+            time.sleep(attempt * 2)
+    assert last_error is not None
+    if isinstance(last_error, urllib.error.HTTPError):
+        detail = last_error.read().decode("utf-8", errors="replace")
         raise RuntimeError(
             f"Failed to upload ModelAttachment {attachment['id']} to {slot.get('storagePath')}: "
-            f"{error.code} {error.reason} {detail[:240]}"
-        ) from error
-    return client.complete_model_attachment_upload(slot["uploadId"], attachment)
+            f"{last_error.code} {last_error.reason} {detail[:240]}"
+        ) from last_error
+    raise RuntimeError(
+        f"Failed to upload ModelAttachment {attachment['id']} to {slot.get('storagePath')}: {last_error}"
+    ) from last_error
 
 
 def expand_private_payload_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:

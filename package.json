@@ -20,6 +20,7 @@
     "test:categories": "node scripts/test-category-mappers.cjs",
     "test:doi-backfill": "node scripts/test-doi-backfill.cjs",
     "test:identifier-backfill": "node scripts/test-doi-backfill.cjs",
+    "test:content-cli-live": "poetry run python -m unittest procedures.newsroom.tests.test_content_cli_live -v",
     "test:bdd": "cucumber-js",
     "test:bdd:headed": "PAPYRUS_HEADLESS=false cucumber-js"
   },

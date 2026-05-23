@@ -6,6 +6,26 @@ const os = require("node:os");
 const path = require("node:path");
 const zlib = require("node:zlib");
 const { spawn, spawnSync } = require("node:child_process");
+
+const PYTHON_PORTED_COMMANDS = new Set([
+  "content:inspect",
+  "content:schema-check",
+  "content:list",
+  "corpora:status",
+  "corpora:worker-bootstrap",
+  "corpora:sync-from-cloud",
+  "corpora:sync-to-cloud",
+  "references:make-catalog",
+  "references:prepare-catalog",
+  "references:register-catalog",
+  "references:register-catalog-split",
+  "references:source-status",
+  "references:create-accession-assignments",
+  "references:accession-now",
+  "assignments:list",
+  "analysis:profiles",
+  "analysis:validate-profiles",
+]);
 const YAML = require("yaml");
 
 const PROJECT_ROOT = path.resolve(__dirname, "..");
@@ -204,11 +224,28 @@ const UPDATE_PROCEDURE_RUN_MUTATION = `
   }
 `;
 
+function runPythonContentCommand(args) {
+  if (process.env.PAPYRUS_CONTENT_SKIP_PYTHON === "1") return false;
+  const [group, command] = args;
+  const route = `${group}:${command}`;
+  if (!PYTHON_PORTED_COMMANDS.has(route)) return false;
+  const pythonArgs = ["run", "papyrus-content", group, command, ...args.slice(2)];
+  const result = spawnSync("poetry", pythonArgs, {
+    cwd: PROJECT_ROOT,
+    encoding: "utf8",
+    env: process.env,
+    stdio: "inherit",
+  });
+  process.exitCode = result.status ?? 1;
+  return true;
+}
+
 async function main() {
   loadDotEnv();
 
   const args = process.argv.slice(2);
   const [group, command, value] = args;
+  if (runPythonContentCommand(args)) return;
   if (group !== "content" && group !== "categories" && group !== "assignments" && group !== "editions" && group !== "relations" && group !== "references" && group !== "messages" && group !== "analysis" && group !== "newsroom" && group !== "corpora") {
     printUsage();
     process.exitCode = 1;
