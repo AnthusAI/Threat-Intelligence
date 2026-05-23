@@ -1,6 +1,7 @@
 "use client";
 
 import { generateClient } from "aws-amplify/data";
+import { usePathname } from "next/navigation";
 import type { Schema } from "../amplify/data/resource";
 import { loadReaderSessionSnapshot, type ReaderSessionSnapshot } from "./reader-auth-state";
 import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -57,9 +58,12 @@ function getClient(): DataClient {
 }
 
 export function PapyrusConsoleShell({ children }: PapyrusConsoleShellProps) {
+  const pathname = usePathname();
   const [session, setSession] = useState<ReaderSessionSnapshot | null>(null);
   const [open, setOpen] = useState(false);
+  const isNewsroomPath = pathname === "/newsroom" || pathname.startsWith("/newsroom/");
   const canUseConsole = Boolean(session?.hasSession && session.groups.some((group) => group === "editor" || group === "admin"));
+  const shouldOfferConsole = canUseConsole || isNewsroomPath;
 
   useEffect(() => {
     let active = true;
@@ -97,16 +101,40 @@ export function PapyrusConsoleShell({ children }: PapyrusConsoleShellProps) {
       <div className={canUseConsole && open ? "papyrus-console-page papyrus-console-page--open" : "papyrus-console-page"}>
         {children}
       </div>
-      {canUseConsole ? (
+      {shouldOfferConsole ? (
         <aside className={open ? "papyrus-console papyrus-console--open" : "papyrus-console"} aria-label="Papyrus console">
           <button className="papyrus-console__tab" onClick={toggleOpen} type="button" aria-expanded={open}>
             <span aria-hidden="true">{open ? "›" : "‹"}</span>
             <span>{open ? "Close Console" : "Console"}</span>
           </button>
-          {open ? <ConsolePanel actorLabel={session?.auth.label ?? "Papyrus editor"} /> : null}
+          {open ? (
+            canUseConsole
+              ? <ConsolePanel actorLabel={session?.auth.label ?? "Papyrus editor"} />
+              : <ConsoleAccessPanel session={session} />
+          ) : null}
         </aside>
       ) : null}
     </>
+  );
+}
+
+function ConsoleAccessPanel({ session }: { session: ReaderSessionSnapshot | null }) {
+  return (
+    <div className="papyrus-console__panel papyrus-console__panel--access">
+      <header className="papyrus-console__header">
+        <p>Editor Console</p>
+        <h2>Console Access</h2>
+        <span>{session?.auth.label ?? "Checking editor session"}</span>
+      </header>
+      <div className="papyrus-console__empty">
+        <strong>Checking Newsroom credentials.</strong>
+        <span>
+          The Newsroom is visible, but this console is waiting for the client session groups.
+          Refresh after the current deployment finishes if this does not resolve.
+        </span>
+        <span>Groups: {session?.groups.length ? session.groups.join(", ") : "none loaded"}</span>
+      </div>
+    </div>
   );
 }
 
