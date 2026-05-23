@@ -7043,10 +7043,6 @@ img {
   z-index: 1301;
 }
 
-.papyrus-console--open .papyrus-console__tab {
-  right: calc(var(--papyrus-console-width) + 52px);
-}
-
 .papyrus-console__tab:hover,
 .papyrus-console__tab:focus-visible {
   background: rgb(var(--ink-rgb) / 0.08);
@@ -7067,34 +7063,6 @@ img {
 .papyrus-console__header {
   border-bottom: 1px solid rgb(var(--rule-rgb) / 0.28);
   padding: calc(var(--edition-progress-height, 19px) + 16px) 18px 14px;
-  position: relative;
-}
-
-.papyrus-console__close {
-  align-items: center;
-  appearance: none;
-  background: transparent;
-  border: 0;
-  color: var(--ink);
-  cursor: pointer;
-  display: flex;
-  height: var(--edition-progress-height, 19px);
-  justify-content: center;
-  padding: 0;
-  position: absolute;
-  right: 12px;
-  top: 0;
-  width: var(--edition-progress-height, 19px);
-}
-
-.papyrus-console__close:hover,
-.papyrus-console__close:focus-visible {
-  background: rgb(var(--ink-rgb) / 0.08);
-  outline: 0;
-}
-
-.papyrus-console__close-icon {
-  display: block;
 }
 
 .papyrus-console__header p,

@@ -109,12 +109,12 @@ export function PapyrusConsoleShell({ children }: PapyrusConsoleShellProps) {
       {shouldOfferConsole ? (
         <aside className={open ? "papyrus-console papyrus-console--open" : "papyrus-console"} aria-label="Papyrus console">
           <button className="papyrus-console__tab" onClick={toggleOpen} type="button" aria-expanded={open} aria-label={open ? "Close console" : "Open console"}>
-            <MessagesSquareIcon />
+            {open ? <LucideXIcon /> : <MessagesSquareIcon />}
           </button>
           {open ? (
             canUseConsole
-              ? <ConsolePanel actorLabel={session?.auth.label ?? "Papyrus editor"} onClose={toggleOpen} />
-              : <ConsoleAccessPanel onClose={toggleOpen} session={session} />
+              ? <ConsolePanel actorLabel={session?.auth.label ?? "Papyrus editor"} />
+              : <ConsoleAccessPanel session={session} />
           ) : null}
         </aside>
       ) : null}
@@ -122,11 +122,10 @@ export function PapyrusConsoleShell({ children }: PapyrusConsoleShellProps) {
   );
 }
 
-function ConsoleAccessPanel({ onClose, session }: { onClose: () => void; session: ReaderSessionSnapshot | null }) {
+function ConsoleAccessPanel({ session }: { session: ReaderSessionSnapshot | null }) {
   return (
     <div className="papyrus-console__panel papyrus-console__panel--access">
       <ConsolePanelHeader
-        onClose={onClose}
         subtitle={session?.auth.label ?? "Checking editor session"}
         title="Console Access"
       />
@@ -142,7 +141,7 @@ function ConsoleAccessPanel({ onClose, session }: { onClose: () => void; session
   );
 }
 
-function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: () => void }) {
+function ConsolePanel({ actorLabel }: { actorLabel: string }) {
   const [thread, setThread] = useState<ConsoleThread | null>(null);
   const [messages, setMessages] = useState<ConsoleMessage[]>([]);
   const [draft, setDraft] = useState("");
@@ -318,7 +317,6 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
   return (
     <div className="papyrus-console__panel">
       <ConsolePanelHeader
-        onClose={onClose}
         subtitle={actorLabel}
         title={thread?.title ?? "Papyrus Console"}
       />
@@ -361,19 +359,14 @@ function truncateConsoleSummary(value: string): string {
 }
 
 function ConsolePanelHeader({
-  onClose,
   subtitle,
   title,
 }: {
-  onClose: () => void;
   subtitle: string;
   title: string;
 }) {
   return (
     <header className="papyrus-console__header">
-      <button className="papyrus-console__close" onClick={onClose} type="button" aria-label="Close console">
-        <LucideXIcon />
-      </button>
       <p>Editor Console</p>
       <h2>{title}</h2>
       <span>{subtitle}</span>
@@ -385,14 +378,14 @@ function LucideXIcon() {
   return (
     <svg
       aria-hidden="true"
-      className="papyrus-console__close-icon"
+      className="papyrus-console__icon news-desk-search-mark__icon"
       fill="none"
       focusable="false"
       height="18"
       stroke="currentColor"
       strokeLinecap="round"
       strokeLinejoin="round"
-      strokeWidth="2"
+      strokeWidth="3"
       viewBox="0 0 24 24"
       width="18"
     >
