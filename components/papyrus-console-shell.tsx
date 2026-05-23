@@ -46,6 +46,11 @@ type ConsoleThread = {
   updatedAt: string;
 };
 
+type AmplifyResult<T> = {
+  data?: T | null;
+  errors?: Array<{ message?: string | null; errorType?: string | null } | string | null> | null;
+};
+
 type PapyrusConsoleShellProps = {
   children: ReactNode;
 };
@@ -146,6 +151,7 @@ function ConsolePanel({ actorLabel }: { actorLabel: string }) {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const loadRef = useRef<() => Promise<void>>(async () => undefined);
+  const hasLoadedRef = useRef(false);
 
   const sortedMessages = useMemo(() => (
     [...messages].sort((left, right) => (left.sequenceNumber ?? 0) - (right.sequenceNumber ?? 0) || left.createdAt.localeCompare(right.createdAt))
@@ -164,7 +170,8 @@ function ConsolePanel({ actorLabel }: { actorLabel: string }) {
   }, []);
 
   const loadThread = useCallback(async () => {
-    setLoading(true);
+    const initialLoad = !hasLoadedRef.current;
+    if (initialLoad) setLoading(true);
     setError(null);
     try {
       const client = getClient();
@@ -180,9 +187,11 @@ function ConsolePanel({ actorLabel }: { actorLabel: string }) {
       setThread(existingThread);
       if (existingThread) await loadMessages(existingThread.id);
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Unable to load console thread.");
+      console.error("[PapyrusConsole] Unable to load console thread", nextError);
+      if (initialLoad) setError(nextError instanceof Error ? nextError.message : "Unable to load console thread.");
     } finally {
-      setLoading(false);
+      hasLoadedRef.current = true;
+      if (initialLoad) setLoading(false);
     }
   }, [loadMessages]);
 
@@ -223,9 +232,11 @@ function ConsolePanel({ actorLabel }: { actorLabel: string }) {
       createdAt: now,
       updatedAt: now,
     } as ConsoleThread;
-    const response = await getClient().models.MessageThread.create(nextThread as never, { authMode: USER_POOL_AUTH_MODE });
-    const created = response.data as ConsoleThread | null | undefined;
-    if (!created?.id) throw new Error("Unable to create console thread.");
+    const response = await getClient().models.MessageThread.create(nextThread as never, { authMode: USER_POOL_AUTH_MODE }) as AmplifyResult<ConsoleThread>;
+    const created = requireAmplifyData(response, "create console thread", {
+      id: nextThread.id,
+      primaryAnchorKey: CONSOLE_THREAD_ANCHOR_KEY,
+    });
     setThread(created);
     return created;
   }
@@ -257,7 +268,7 @@ function ConsolePanel({ actorLabel }: { actorLabel: string }) {
       };
       setMessages((current) => [...current, message]);
       setDraft("");
-      await getClient().models.Message.create({
+      requireAmplifyData(await getClient().models.Message.create({
         ...message,
         messageDomain: CONSOLE_MESSAGE_DOMAIN,
         status: "active",
@@ -274,14 +285,20 @@ function ConsolePanel({ actorLabel }: { actorLabel: string }) {
         },
         updatedAt: now,
         newsroomFeedKey: CONSOLE_NEWSROOM_FEED_KEY,
-      } as never, { authMode: USER_POOL_AUTH_MODE });
-      await getClient().models.MessageThread.update({
+      } as never, { authMode: USER_POOL_AUTH_MODE }) as AmplifyResult<ConsoleMessage>, "create console message", {
+        id: message.id,
+        threadId: activeThread.id,
+      });
+      requireAmplifyData(await getClient().models.MessageThread.update({
         id: activeThread.id,
         messageCount: sequenceNumber,
         lastMessageId: message.id,
         lastMessageAt: now,
         updatedAt: now,
-      } as never, { authMode: USER_POOL_AUTH_MODE });
+      } as never, { authMode: USER_POOL_AUTH_MODE }) as AmplifyResult<ConsoleThread>, "update console thread", {
+        id: activeThread.id,
+        lastMessageId: message.id,
+      });
       setThread((current) => current ? {
         ...current,
         messageCount: sequenceNumber,
@@ -290,6 +307,7 @@ function ConsolePanel({ actorLabel }: { actorLabel: string }) {
         updatedAt: now,
       } : current);
     } catch (nextError) {
+      console.error("[PapyrusConsole] Unable to send console message", nextError);
       setError(nextError instanceof Error ? nextError.message : "Unable to send console message.");
     } finally {
       setSending(false);
@@ -341,4 +359,23 @@ function ConsolePanel({ actorLabel }: { actorLabel: string }) {
 function truncateConsoleSummary(value: string): string {
   const normalized = value.replace(/\s+/g, " ").trim();
   return normalized.length > 180 ? `${normalized.slice(0, 179)}…` : normalized;
+}
+
+function requireAmplifyData<T>(response: AmplifyResult<T>, operation: string, context: Record<string, unknown>): T {
+  if (response.errors?.length) {
+    const message = response.errors.map(formatAmplifyError).join("; ");
+    console.error(`[PapyrusConsole] ${operation} returned GraphQL errors`, { errors: response.errors, context });
+    throw new Error(`${operation} failed: ${message}`);
+  }
+  if (!response.data) {
+    console.error(`[PapyrusConsole] ${operation} returned no data`, { response, context });
+    throw new Error(`${operation} failed: no data returned`);
+  }
+  return response.data;
+}
+
+function formatAmplifyError(error: { message?: string | null; errorType?: string | null } | string | null): string {
+  if (typeof error === "string") return error;
+  if (!error) return "Unknown GraphQL error";
+  return [error.errorType, error.message].filter(Boolean).join(": ") || "Unknown GraphQL error";
 }
