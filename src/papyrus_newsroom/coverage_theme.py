@@ -554,7 +554,23 @@ def coverage_theme_run(
     records = list(plan["records"])
     packet_runs: dict[str, list[dict[str, Any]]] = {"research": [], "reporting": []}
     degraded = False
-    cloud_client = _create_cloud_procedure_client() if through in {"research", "reporting"} else None
+    cloud_client = None
+    if through in {"research", "reporting"}:
+        try:
+            cloud_client = _create_cloud_procedure_client()
+        except Exception as error:
+            if not allow_fallback:
+                return _coverage_theme_cloud_error(
+                    plan,
+                    through,
+                    apply,
+                    {
+                        "code": "cloud_procedure_failed",
+                        "message": str(error),
+                        "alias": "story-cycle.research",
+                        "remediation": "Run npm run seed:amplify to preload standard procedures if the required cloud procedure is missing or stale.",
+                    },
+                )
     if through in {"research", "reporting"}:
         for assignment in plan["researchAssignments"]:
             packet_plan = run_or_fallback_research_packet_records(
@@ -678,6 +694,26 @@ def run_or_fallback_research_packet_records(
     allow_fallback: bool,
     refresh_packets: bool,
 ) -> dict[str, Any]:
+    if client is None:
+        if not allow_fallback:
+            return {
+                "ok": False,
+                "error": _cloud_procedure_error_payload(
+                    "story-cycle.research",
+                    assignment,
+                    ValueError("Cloud procedure client is unavailable."),
+                ),
+            }
+        return build_research_packet_records(
+            assignment=assignment,
+            topic=topic,
+            corpus_key=corpus_key,
+            coverage_key=coverage_key,
+            research_mode=research_mode,
+            now=now,
+            degraded=True,
+            refresh_packets=refresh_packets,
+        )
     try:
         return build_cloud_research_packet_records(
             client=client,
@@ -719,6 +755,27 @@ def run_or_fallback_reporting_packet_records(
     allow_fallback: bool,
     refresh_packets: bool,
 ) -> dict[str, Any]:
+    if client is None:
+        if not allow_fallback:
+            return {
+                "ok": False,
+                "error": _cloud_procedure_error_payload(
+                    "story-cycle.reporting",
+                    assignment,
+                    ValueError("Cloud procedure client is unavailable."),
+                ),
+            }
+        return build_reporting_packet_records(
+            assignment=assignment,
+            topic=topic,
+            corpus_key=corpus_key,
+            coverage_key=coverage_key,
+            source_research_assignment=source_research_assignment,
+            source_research_packet_id=source_research_packet_id,
+            now=now,
+            degraded=True,
+            refresh_packets=refresh_packets,
+        )
     try:
         return build_cloud_reporting_packet_records(
             client=client,
@@ -1104,6 +1161,62 @@ def build_research_packet_records(
     }
 
 
+def build_research_packet_records_from_packet(
+    *,
+    assignment: dict[str, Any],
+    packet: dict[str, Any],
+    cloud_run: dict[str, Any],
+    now: str,
+    refresh_packets: bool,
+) -> dict[str, Any]:
+    message_id = story_cycle_packet_message_id(assignment, "research_packet")
+    message = packet_message(message_id, "research_packet", packet["summary"], "papyrus-newsroom coverage-themes run", assignment, now)
+    records = [
+        _record("Message", message),
+        _attachment_record(message_id, "message_body", "message", "message.txt", "text/plain", _research_packet_body(packet), assignment.get("importRunId"), now),
+        _attachment_record(message_id, "metadata", "metadata", "metadata.json", "application/json", {
+            "kind": "research.packet.created",
+            "assignmentId": assignment["id"],
+            "research": packet,
+            "cloudProcedure": cloud_run_metadata(cloud_run),
+        }, assignment.get("importRunId"), now),
+        _record("SemanticRelation", semantic_relation(
+            predicate="produces",
+            subject_kind="assignment",
+            subject_id=assignment["id"],
+            object_kind="message",
+            object_id=message_id,
+            object_lineage_id=message_id,
+            rank=1,
+            classifier_id=assignment.get("classifierId"),
+            import_run_id=assignment.get("importRunId"),
+            now=now,
+            metadata={
+                "workProductKind": "research_packet",
+                "messageKind": "research_packet",
+                "refreshPackets": refresh_packets,
+                "procedureRunId": cloud_run.get("id"),
+                "procedureKey": cloud_run.get("procedureKey"),
+                "procedureVersionId": cloud_run.get("procedureVersionId"),
+            },
+        )),
+    ]
+    return {
+        "degraded": False,
+        "records": records,
+        "run": {
+            "ok": True,
+            "phase": "research",
+            "assignmentId": assignment["id"],
+            "sectionKey": assignment.get("sectionKey"),
+            "messageId": message_id,
+            "packet": packet,
+            "degraded": False,
+            "cloudProcedure": cloud_run_metadata(cloud_run),
+        },
+    }
+
+
 def build_reporting_packet_records(
     *,
     assignment: dict[str, Any],
@@ -1198,6 +1311,167 @@ def build_reporting_packet_records(
             "fallbackKind": "reporting_context_packet" if degraded else None,
         },
     }
+
+
+def build_reporting_packet_records_from_packet(
+    *,
+    assignment: dict[str, Any],
+    packet: dict[str, Any],
+    cloud_run: dict[str, Any],
+    source_research_packet_id: str | None,
+    now: str,
+    refresh_packets: bool,
+) -> dict[str, Any]:
+    message_id = story_cycle_packet_message_id(assignment, "reporting_context_packet")
+    message = packet_message(message_id, "reporting_context_packet", packet["summary"], "papyrus-newsroom coverage-themes run", assignment, now)
+    records = [
+        _record("Message", message),
+        _attachment_record(message_id, "message_body", "message", "message.txt", "text/plain", _reporting_packet_body(packet), assignment.get("importRunId"), now),
+        _attachment_record(message_id, "metadata", "metadata", "metadata.json", "application/json", {
+            "kind": "reporting.context_packet.created",
+            "assignmentId": assignment["id"],
+            "reporting": packet,
+            "cloudProcedure": cloud_run_metadata(cloud_run),
+        }, assignment.get("importRunId"), now),
+        _record("SemanticRelation", semantic_relation(
+            predicate="produces",
+            subject_kind="assignment",
+            subject_id=assignment["id"],
+            object_kind="message",
+            object_id=message_id,
+            object_lineage_id=message_id,
+            rank=1,
+            classifier_id=assignment.get("classifierId"),
+            import_run_id=assignment.get("importRunId"),
+            now=now,
+            metadata={
+                "workProductKind": "reporting_context_packet",
+                "messageKind": "reporting_context_packet",
+                "editorRecommendation": packet["editor_recommendation"],
+                "refreshPackets": refresh_packets,
+                "procedureRunId": cloud_run.get("id"),
+                "procedureKey": cloud_run.get("procedureKey"),
+                "procedureVersionId": cloud_run.get("procedureVersionId"),
+            },
+        )),
+    ]
+    if source_research_packet_id:
+        records.append(_record("SemanticRelation", semantic_relation(
+            predicate="derived_from",
+            subject_kind="message",
+            subject_id=message_id,
+            object_kind="message",
+            object_id=source_research_packet_id,
+            object_lineage_id=source_research_packet_id,
+            rank=1,
+            classifier_id=assignment.get("classifierId"),
+            import_run_id=assignment.get("importRunId"),
+            now=now,
+            metadata={"sourceKind": "section_research_packet", "coverageKey": packet.get("coverage_key")},
+        )))
+    return {
+        "degraded": False,
+        "records": records,
+        "run": {
+            "ok": True,
+            "phase": "reporting",
+            "assignmentId": assignment["id"],
+            "sectionKey": assignment.get("sectionKey"),
+            "messageId": message_id,
+            "angle": packet.get("recommended_angle"),
+            "packet": packet,
+            "degraded": False,
+            "cloudProcedure": cloud_run_metadata(cloud_run),
+        },
+    }
+
+
+def cloud_run_metadata(cloud_run: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "runId": cloud_run.get("id"),
+        "procedureKey": cloud_run.get("procedureKey"),
+        "procedureVersionId": cloud_run.get("procedureVersionId"),
+        "procedureVersionNumber": cloud_run.get("procedureVersionNumber"),
+        "runStatus": cloud_run.get("runStatus"),
+        "sourcePath": cloud_run.get("sourcePath"),
+        "stdoutPath": cloud_run.get("stdoutPath"),
+        "stderrPath": cloud_run.get("stderrPath"),
+    }
+
+
+def normalize_story_cycle_research_packet(
+    packet: dict[str, Any],
+    *,
+    assignment: dict[str, Any],
+    topic: str,
+    corpus_key: str,
+    coverage_key: str,
+    research_mode: str,
+) -> dict[str, Any]:
+    metadata = _metadata(assignment)
+    return {
+        **packet,
+        "summary": _packet_value(packet, "summary") or f"Research packet for {topic}.",
+        "corpus_key": _packet_value(packet, "corpus_key", "corpusKey") or corpus_key,
+        "research_mode": _packet_value(packet, "research_mode", "researchMode") or research_mode,
+        "section_key": _packet_value(packet, "section_key", "sectionKey") or assignment.get("sectionKey"),
+        "coverage_key": _packet_value(packet, "coverage_key", "coverageKey") or coverage_key,
+        "coverage_node_id": _packet_value(packet, "coverage_node_id", "coverageNodeId") or metadata.get("coverageConceptId"),
+        "section_lens": _packet_value(packet, "section_lens", "sectionLens") or metadata.get("researchLens"),
+        "evidence_item_ids": _packet_list(packet, "evidence_item_ids", "evidenceItemIds"),
+        "source_snapshots": _packet_list(packet, "source_snapshots", "sourceSnapshots"),
+        "proposed_references": _packet_list(packet, "proposed_references", "proposedReferences"),
+        "open_questions": _packet_list(packet, "open_questions", "openQuestions"),
+        "coverage_gaps": _packet_list(packet, "coverage_gaps", "coverageGaps"),
+        "recommended_angle": _packet_value(packet, "recommended_angle", "recommendedAngle") or metadata.get("researchLens") or "",
+        "degraded": False,
+        "fallbackReason": None,
+    }
+
+
+def normalize_story_cycle_reporting_packet(
+    packet: dict[str, Any],
+    *,
+    assignment: dict[str, Any],
+    topic: str,
+    coverage_key: str,
+    source_research_assignment: dict[str, Any] | None,
+    source_research_packet_id: str | None,
+) -> dict[str, Any]:
+    metadata = _metadata(assignment)
+    angle = (metadata.get("angleDiversity") or {}).get("lensLabel") or "reader impact"
+    return {
+        **packet,
+        "summary": _packet_value(packet, "summary") or f"Reporting context packet for {topic}.",
+        "section_key": _packet_value(packet, "section_key", "sectionKey") or assignment.get("sectionKey"),
+        "edition_id": _packet_value(packet, "edition_id", "editionId") or metadata.get("editionId"),
+        "coverage_key": _packet_value(packet, "coverage_key", "coverageKey") or coverage_key,
+        "recommended_angle": _packet_value(packet, "recommended_angle", "recommendedAngle") or angle,
+        "editor_recommendation": _packet_value(packet, "editor_recommendation", "editorRecommendation") or "hold",
+        "risk_flags": _packet_list(packet, "risk_flags", "riskFlags"),
+        "coverage_gaps": _packet_list(packet, "coverage_gaps", "coverageGaps"),
+        "open_questions": _packet_list(packet, "open_questions", "openQuestions"),
+        "accepted_reference_ids": _packet_list(packet, "accepted_reference_ids", "acceptedReferenceIds", "accepted_referenceIds"),
+        "proposed_references": _packet_list(packet, "proposed_references", "proposedReferences"),
+        "copywriter_brief": _packet_value(packet, "copywriter_brief", "copywriterBrief") or "",
+        "source_research_assignment_id": _packet_value(packet, "source_research_assignment_id", "sourceResearchAssignmentId") or (source_research_assignment or {}).get("id"),
+        "source_research_packet_id": _packet_value(packet, "source_research_packet_id", "sourceResearchPacketId") or source_research_packet_id,
+        "degraded": False,
+        "fallbackReason": None,
+    }
+
+
+def _packet_value(packet: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = packet.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _packet_list(packet: dict[str, Any], *keys: str) -> list[Any]:
+    value = _packet_value(packet, *keys)
+    return value if isinstance(value, list) else []
 
 
 def story_budget_output(
