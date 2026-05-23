@@ -7181,11 +7181,13 @@ img {
   font-size: 0.78rem;
 }
 
-.papyrus-console__pending {
-  color: var(--muted);
-  font-size: 0.76rem;
-  font-style: italic;
-  margin: 0;
+.papyrus-console__thinking {
+  padding-bottom: var(--paper-rhythm, var(--edition-progress-height, 19px));
+}
+
+.papyrus-console__thinking-shimmer {
+  --color-background: var(--paper);
+  --color-muted-foreground: var(--ink);
 }
 
 .papyrus-console__error {
