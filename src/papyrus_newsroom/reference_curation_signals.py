@@ -15,10 +15,12 @@ import json
 import os
 import re
 import sys
+import threading
 import urllib.error
 import urllib.request
 import urllib.parse
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -2401,70 +2403,112 @@ def reference_summarize_batch(
     budgets: list[int],
     only_missing: bool = True,
     max_count: int = 0,
+    max_parallel: int = 4,
+    scan_limit: int = 5000,
     model: str = "gpt-5.4-mini",
     apply: bool = False,
     refresh: bool = False,
 ) -> dict[str, Any]:
+    if not budgets:
+        budgets = [100]
+    budget = normalize_summary_budget(budgets[0])
+    relation_key = summary_relation_type_key(budget)
+    max_parallel = max(1, min(int(max_parallel or 1), 12))
+    scan_limit = max(int(scan_limit or 1), 1)
+    create_limit = max(int(max_count or 0), 0)
+
     semantic = _semantic_client()
-    references = list_references_by_corpus(_knowledge_corpus_id(corpus_key), limit=max_count or 1000)
     doctrine_context = load_publication_doctrine_context()
-    plans = []
+    references = list_references_by_corpus(_knowledge_corpus_id(corpus_key), limit=scan_limit)
+    candidates: list[dict[str, Any]] = []
+    skipped_existing = 0
     for reference in references:
+        if reference.get("curationStatus") not in {None, "accepted"}:
+            continue
+        existing = _current_relations(
+            semantic.list_incoming("reference", reference["lineageId"])["relations"],
+            relation_key,
+        )
+        if existing and only_missing and not refresh:
+            skipped_existing += 1
+            continue
+        candidates.append(reference)
+        if create_limit and len(candidates) >= create_limit:
+            break
+
+    apply_lock = threading.Lock()
+
+    def process_reference(reference: dict[str, Any]) -> dict[str, Any]:
         identifier_prepass = _run_identifier_prepass(reference=reference, catalog_entry={})
         if identifier_prepass.get("status") == "failed":
-            plans.append({
+            return {
                 "kind": "reference.summary.plan",
                 "action": "blocked",
                 "reference": _reference_summary(reference),
-                "maxTokens": normalize_summary_budget(budgets[0] if budgets else 100),
+                "maxTokens": budget,
                 "identifierPrepass": identifier_prepass,
                 "failureReason": identifier_prepass.get("failureReason") or "identifier prepass failed",
                 "warnings": [f"identifier prepass failed: {identifier_prepass.get('failureReason') or 'unknown error'}"],
                 "records": [],
-            })
-            continue
-        for budget in budgets:
-            relation_key = summary_relation_type_key(budget)
-            existing = _current_relations(semantic.list_incoming("reference", reference["lineageId"])["relations"], relation_key)
-            if existing and only_missing and not refresh:
-                plans.append({
-                    "kind": "reference.summary.plan",
-                    "action": "noop",
-                    "reference": _reference_summary(reference),
-                    "maxTokens": budget,
-                    "existingRelationId": existing[0].get("id"),
-                    "identifierPrepass": identifier_prepass,
-                    "records": [],
-                    "warnings": [],
-                })
-                continue
-            source = _resolve_source_text(reference)
-            generated = generate_summary(source, max_tokens=budget, model=model, reference=reference, doctrine_context=doctrine_context)
-            plan = build_reference_summary_plan(
-                reference=reference,
-                max_tokens=budget,
-                summary_text=generated,
-                source_text=source,
-                model=model,
-                doctrine_context=doctrine_context,
-                refresh=refresh or bool(existing and not only_missing),
-                identifier_prepass=identifier_prepass,
-                semantic_client=semantic,
-            )
-            plan["identifierPrepass"] = identifier_prepass
-            plans.append(plan)
-    applied = []
-    for plan in plans:
-        applied.append(_apply_plan_if_requested(plan, apply=apply, actor_label=SUMMARY_SOURCE, reason="references summarize-batch"))
+            }
+        source = _resolve_source_text(reference)
+        generated = generate_summary(
+            source,
+            max_tokens=budget,
+            model=model,
+            reference=reference,
+            doctrine_context=doctrine_context,
+        )
+        plan = build_reference_summary_plan(
+            reference=reference,
+            max_tokens=budget,
+            summary_text=generated,
+            source_text=source,
+            model=model,
+            doctrine_context=doctrine_context,
+            refresh=refresh,
+            identifier_prepass=identifier_prepass,
+            semantic_client=semantic,
+        )
+        plan["identifierPrepass"] = identifier_prepass
+        if apply and plan.get("action") != "noop" and plan.get("records"):
+            with apply_lock:
+                return _apply_plan_if_requested(
+                    plan,
+                    apply=True,
+                    actor_label=SUMMARY_SOURCE,
+                    reason="references summarize-batch",
+                )
+        return {**plan, "apply": False}
+
+    applied: list[dict[str, Any]] = []
+    if candidates:
+        if max_parallel == 1:
+            applied = [process_reference(reference) for reference in candidates]
+        else:
+            with ThreadPoolExecutor(max_workers=max_parallel) as executor:
+                futures = [executor.submit(process_reference, reference) for reference in candidates]
+                for future in as_completed(futures):
+                    applied.append(future.result())
+
+    applied.sort(key=lambda item: str((item.get("reference") or {}).get("id") or ""))
     return {
         "kind": "reference.summary.batch",
         "corpusKey": corpus_key,
-        "budgets": budgets,
+        "budgets": [budget],
         "apply": apply,
+        "onlyMissing": only_missing,
+        "maxParallel": max_parallel,
+        "scanLimit": scan_limit,
+        "scannedReferences": len(references),
+        "skippedExisting": skipped_existing,
+        "selectedCount": len(candidates),
         "doctrineContext": doctrine_summary_metadata(doctrine_context),
         "warnings": list(doctrine_context.get("warnings") or []),
         "count": len(applied),
         "created": sum(1 for item in applied if item.get("action") == "create"),
+        "blocked": sum(1 for item in applied if item.get("action") == "blocked"),
+        "failed": sum(1 for item in applied if item.get("action") not in {"create", "noop", "blocked"} and item.get("failureReason")),
         "noop": sum(1 for item in applied if item.get("action") == "noop"),
         "items": applied,
     }

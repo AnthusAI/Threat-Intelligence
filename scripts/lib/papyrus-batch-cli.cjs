@@ -9,7 +9,7 @@ const DEFAULT_STEERING_CONFIG = "corpora/papyrus-steering.yml";
 const DEFAULT_INGESTION_RATIONALE =
   "Source material registered for knowledge-base extraction, indexing, and analysis.";
 
-const TRANSIENT_FAILURE_PATTERN = /Connection reset|timed out|Temporary failure|ECONNRESET|503|502|504/i;
+const TRANSIENT_FAILURE_PATTERN = /Connection reset|timed out|Temporary failure|ECONNRESET|429|503|502|504/i;
 
 function safeId(value) {
   return String(value ?? "")
