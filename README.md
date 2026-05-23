@@ -623,6 +623,57 @@ AWS_PROFILE=default AWS_REGION=us-east-1 npm run seed:amplify
 AWS_PROFILE=default npm run dev
 ```
 
+## Newsroom Cloud Procedures Runbook
+
+Papyrus newsroom procedures are cloud records (`ProcedureDefinition` and
+`ProcedureVersion`) managed in `/newsroom` Administration under the
+`Procedures` panel.
+
+Source of truth for seeded procedure code:
+
+- `procedures/newsroom/research_explorer.tac`
+- `procedures/newsroom/reporter.tac`
+- `procedures/newsroom/ingestion_reference_register.tac`
+
+The seed process copies those files into `ProcedureVersion.tactusSource`:
+
+- `amplify/seed/seed.ts` loads source files from `procedures/newsroom/`
+- `npm run seed:amplify` upserts `ProcedureDefinition` + published v1
+  `ProcedureVersion` rows
+
+After editing local `.tac` files, reseed to refresh cloud procedure source:
+
+```bash
+AWS_PROFILE=<profile> AWS_REGION=<region> npm run seed:amplify -- --identifier <sandbox-id>
+```
+
+CLI cloud resolution contract:
+
+- Required CLI procedure aliases are defined in
+  `corpora/papyrus-required-procedures.json`
+- `scripts/content-cli.cjs` resolves required procedure keys by alias, fetches
+  cloud definitions by key, starts cloud runs, and waits for `ProcedureRun`
+  completion
+- If a required key is missing, CLI fails hard with explicit remediation:
+  `Run npm run seed:amplify to preload standard procedures.`
+
+Operator verification checklist:
+
+1. Open `/newsroom` -> Administration -> Procedures.
+2. Select a procedure row and verify `Version Draft -> Tactus/Lua Source`
+   shows real code, not a placeholder.
+3. Run `npm run content -- assignments run-research --assignment <id> ...` and
+   confirm it resolves and runs the cloud procedure.
+
+Current execution limitation (important):
+
+- Immediate assignment execution currently dispatches by procedure marker/key in
+  `amplify/functions/assignment-action/handler.ts`.
+- It does not yet execute arbitrary Tactus source directly in Lambda runtime.
+- Editing procedure source in admin updates cloud `ProcedureVersion` records and
+  CLI procedure metadata, but full runtime behavior remains bounded by the
+  current immediate runner implementation.
+
 ## Production Content Operations
 
 Production content lives in Amplify Data. The reader path uses API-key GraphQL
