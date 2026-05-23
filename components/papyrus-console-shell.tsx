@@ -68,7 +68,7 @@ export function PapyrusConsoleShell({ children }: PapyrusConsoleShellProps) {
   const [open, setOpen] = useState(false);
   const isNewsroomPath = pathname === "/newsroom" || pathname.startsWith("/newsroom/");
   const canUseConsole = Boolean(session?.hasSession && session.groups.some((group) => group === "editor" || group === "admin"));
-  const shouldOfferConsole = canUseConsole || isNewsroomPath;
+  const shouldOfferConsole = isNewsroomPath && canUseConsole;
 
   useEffect(() => {
     let active = true;
@@ -109,7 +109,7 @@ export function PapyrusConsoleShell({ children }: PapyrusConsoleShellProps) {
       {shouldOfferConsole ? (
         <aside className={open ? "papyrus-console papyrus-console--open" : "papyrus-console"} aria-label="Papyrus console">
           <button className="papyrus-console__tab" onClick={toggleOpen} type="button" aria-expanded={open} aria-label={open ? "Close console" : "Open console"}>
-            <MessageSquareIcon />
+            <MessagesSquareIcon />
           </button>
           {open ? (
             canUseConsole
@@ -360,10 +360,11 @@ function truncateConsoleSummary(value: string): string {
   return normalized.length > 180 ? `${normalized.slice(0, 179)}…` : normalized;
 }
 
-function MessageSquareIcon() {
+function MessagesSquareIcon() {
   return (
     <svg aria-hidden="true" className="papyrus-console__icon" focusable="false" viewBox="0 0 24 24">
-      <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z" />
+      <path d="M14 9a2 2 0 0 1-2 2H6.5L3 14V5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2Z" />
+      <path d="M18 9h1a2 2 0 0 1 2 2v9l-3.5-3H12a2 2 0 0 1-2-2v-1" />
     </svg>
   );
 }

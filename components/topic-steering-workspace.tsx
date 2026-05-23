@@ -2585,12 +2585,12 @@ function NewsDeskDashboard({
       data-rhythm-overlay={showRhythmOverlay ? "true" : "false"}
     >
       <NewsroomProgressBackLink
-        searchAction={{
-          disabled: Boolean(dashboard.isDemo),
+        searchAction={canEdit && editorShellReady && !dashboard.isDemo ? {
+          disabled: false,
           onPress: activeTab === "search"
             ? focusNewsroomSearchForm
             : topBarSearchControl.open,
-        }}
+        } : null}
       />
       <section className="scroll-edition news-desk-edition">
         <div className="paper-page paper-page--front paper-page--active">
