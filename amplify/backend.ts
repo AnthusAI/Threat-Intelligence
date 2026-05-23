@@ -42,7 +42,13 @@ const amplifyBackendDir = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(amplifyBackendDir, "..");
 
 const messageTable = backend.data.resources.tables.Message;
-const messageCfnTable = messageTable.node.defaultChild as dynamodb.CfnTable;
+const messageCfnTable =
+  (messageTable.node.defaultChild as dynamodb.CfnTable | undefined) ??
+  (messageTable.node.tryFindChild("Resource") as dynamodb.CfnTable | undefined) ??
+  backend.data.resources.cfnResources.cfnTables.Message;
+if (!messageCfnTable) {
+  throw new Error("ConsoleChatResponder requires a Message DynamoDB table resource.");
+}
 messageCfnTable.streamSpecification = {
   streamViewType: dynamodb.StreamViewType.NEW_IMAGE,
 };
