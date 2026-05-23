@@ -118,15 +118,25 @@ function main() {
 
     console.log(`catalog-registration\tbatch\t${batchIndex + 1}/${totalBatches}\toffset\t${offset}\tcount\t${slice.length}`);
     const startedAt = Date.now();
-    const result = spawnSync("poetry", args, {
-      cwd: PROJECT_ROOT,
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        PAPYRUS_APPLY_CONCURRENCY: process.env.PAPYRUS_APPLY_CONCURRENCY ?? "8",
-      },
-      maxBuffer: 1024 * 1024 * 256,
-    });
+    let result = null;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      if (attempt > 1) {
+        console.log(`catalog-registration\tretry\tbatch\t${batchIndex + 1}\tattempt\t${attempt}`);
+      }
+      result = spawnSync("poetry", args, {
+        cwd: PROJECT_ROOT,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          PAPYRUS_APPLY_CONCURRENCY: process.env.PAPYRUS_APPLY_CONCURRENCY ?? "8",
+        },
+        maxBuffer: 1024 * 1024 * 256,
+      });
+      if (result.status === 0) break;
+      const combined = `${result.stdout || ""}\n${result.stderr || ""}`;
+      const transient = /Connection reset|timed out|Temporary failure|ECONNRESET|503|502|504/i.test(combined);
+      if (!transient || attempt === 3) break;
+    }
     const elapsedMs = Date.now() - startedAt;
     const entry = {
       batchIndex,
