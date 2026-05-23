@@ -1,16 +1,21 @@
 import { defineBackend, secret } from "@aws-amplify/backend";
+import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import { PolicyStatement } from "aws-cdk-lib/aws-iam";
 import { Function as LambdaFunction } from "aws-cdk-lib/aws-lambda";
 import { CfnIndex, CfnVectorBucket, CfnVectorBucketPolicy } from "aws-cdk-lib/aws-s3vectors";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { auth } from "./auth/resource";
 import { data } from "./data/resource";
 import { assignmentAction } from "./functions/assignment-action/resource";
 import { categoryAction } from "./functions/category-action/resource";
+import { ConsoleChatResponderStack } from "./functions/console-chat-responder/resource";
 import { graphqlJwtAuthorizer } from "./functions/graphql-jwt-authorizer/resource";
 import { knowledgeQuery } from "./functions/knowledge-query/resource";
 import { manageUserRole } from "./functions/manage-user-role/resource";
 import { modelAttachmentUpload } from "./functions/model-attachment-upload/resource";
 import { newsroomSummary } from "./functions/newsroom-summary/resource";
+import { procedureAction } from "./functions/procedure-action/resource";
 import { readerSettings } from "./functions/reader-settings/resource";
 import { storage } from "./storage/resource";
 
@@ -28,8 +33,32 @@ const backend = defineBackend({
   manageUserRole,
   modelAttachmentUpload,
   newsroomSummary,
+  procedureAction,
   readerSettings,
   storage,
+});
+
+const amplifyBackendDir = dirname(fileURLToPath(import.meta.url));
+const projectRoot = resolve(amplifyBackendDir, "..");
+
+const messageTable = backend.data.resources.tables.Message;
+const messageCfnTable = messageTable.node.defaultChild as dynamodb.CfnTable;
+messageCfnTable.streamSpecification = {
+  streamViewType: dynamodb.StreamViewType.NEW_IMAGE,
+};
+if (!messageTable.tableStreamArn) {
+  throw new Error("ConsoleChatResponder requires the Message table stream ARN.");
+}
+
+const messageThreadTable = backend.data.resources.tables.MessageThread;
+
+new ConsoleChatResponderStack(backend.createStack("console-chat-responder"), "ConsoleChatResponder", {
+  messageTable,
+  threadTable: messageThreadTable,
+  projectRoot,
+  responseTarget: process.env.PAPYRUS_CONSOLE_RESPONSE_TARGET,
+  openaiApiKeySsmParam: process.env.PAPYRUS_CONSOLE_OPENAI_API_KEY_SSM_PARAM,
+  model: process.env.PAPYRUS_CONSOLE_MODEL,
 });
 
 const knowledgeVectorsStack = backend.createStack("knowledge-vectors");

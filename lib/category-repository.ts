@@ -401,11 +401,51 @@ export type MessageRecord = {
   authorSub?: string | null;
   authorUserProfileId?: string | null;
   authorLabel?: string | null;
+  threadId?: string | null;
+  parentMessageId?: string | null;
+  sequenceNumber?: number | null;
+  role?: string | null;
+  messageType?: string | null;
+  content?: string | null;
+  semanticLayer?: string | null;
+  searchVisibility?: string | null;
+  responseTarget?: string | null;
+  responseStatus?: string | null;
+  responseOwner?: string | null;
+  responseStartedAt?: string | null;
+  responseCompletedAt?: string | null;
+  responseError?: string | null;
   createdAt: string;
   updatedAt: string;
   newsroomFeedKey?: string | null;
   body?: string | null;
   metadata?: unknown;
+};
+
+export type MessageThreadRecord = {
+  id: string;
+  threadKind: string;
+  status: string;
+  title: string;
+  summary?: string | null;
+  primaryAnchorKind?: string | null;
+  primaryAnchorId?: string | null;
+  primaryAnchorLineageId?: string | null;
+  primaryAnchorKey?: string | null;
+  createdBySub?: string | null;
+  createdByUserProfileId?: string | null;
+  createdByLabel?: string | null;
+  messageCount?: number | null;
+  lastMessageId?: string | null;
+  lastMessageAt?: string | null;
+  contextDigest?: string | null;
+  activeResponseMessageId?: string | null;
+  responseLockOwner?: string | null;
+  responseLockExpiresAt?: string | null;
+  metadata?: unknown;
+  createdAt: string;
+  updatedAt: string;
+  newsroomFeedKey?: string | null;
 };
 
 export type AssignmentRecord = {

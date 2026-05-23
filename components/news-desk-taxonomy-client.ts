@@ -48,7 +48,7 @@ const NEWSROOM_PAGE_LIMIT = 50;
 const NEWSROOM_MESSAGE_FEED_QUERY = `
   query ListMessagesByNewsroomFeedAndCreatedAt($newsroomFeedKey: String!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String, $filter: ModelMessageFilterInput) {
     listMessagesByNewsroomFeedAndCreatedAt(newsroomFeedKey: $newsroomFeedKey, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken, filter: $filter) {
-      items { id messageKind messageDomain status summary source importRunId authorSub authorUserProfileId authorLabel createdAt updatedAt newsroomFeedKey }
+      items { id messageKind messageDomain status summary source importRunId authorSub authorUserProfileId authorLabel threadId parentMessageId sequenceNumber role messageType content semanticLayer searchVisibility responseTarget responseStatus responseOwner responseStartedAt responseCompletedAt responseError metadata createdAt updatedAt newsroomFeedKey }
       nextToken
     }
   }

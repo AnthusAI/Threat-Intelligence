@@ -857,6 +857,23 @@ class KnowledgeQueryTests(unittest.TestCase):
         self.assertIn("insight_summary", queried_kinds)
         self.assertIn("insight_passage", queried_kinds)
 
+    def test_s3_vector_filter_can_target_explicit_chat_detail(self):
+        provider = S3VectorsProvider(vector_index_arn="arn:test:index")
+
+        metadata_filter = provider._metadata_filter({
+            "semanticLayer": "chat_detail",
+            "searchVisibility": "explicit",
+            "objectKind": "message",
+        })
+
+        self.assertEqual(metadata_filter, {
+            "$and": [
+                {"semanticLayer": {"$eq": "chat_detail"}},
+                {"searchVisibility": {"$eq": "explicit"}},
+                {"kind": {"$eq": "message"}},
+            ]
+        })
+
     def test_quality_signal_reads_current_relation_score(self):
         signal, warning = quality_signal_from_relations([
             {

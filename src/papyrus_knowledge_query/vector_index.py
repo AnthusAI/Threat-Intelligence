@@ -39,7 +39,7 @@ LIST_INSIGHT_MESSAGES_QUERY = """
 query ListInsightMessages($messageKind: String!, $limit: Int, $nextToken: String) {
   listMessagesByKindAndCreatedAt(messageKind: $messageKind, limit: $limit, nextToken: $nextToken) {
     items {
-      id messageKind messageDomain status summary source importRunId authorLabel createdAt updatedAt
+      id messageKind messageDomain status summary source importRunId authorLabel semanticLayer searchVisibility threadId createdAt updatedAt
     }
     nextToken
   }
@@ -804,6 +804,9 @@ def _base_insight_metadata(message: dict[str, Any], relation: dict[str, Any], op
         "messageLineageId": message_lineage_id,
         "messageKind": message.get("messageKind"),
         "messageDomain": message.get("messageDomain"),
+        "semanticLayer": message.get("semanticLayer") or "insight",
+        "searchVisibility": message.get("searchVisibility") or "default",
+        "threadId": message.get("threadId"),
         "status": message.get("status"),
         "relationTypeKey": "insight_about",
         "aboutKind": about_kind,

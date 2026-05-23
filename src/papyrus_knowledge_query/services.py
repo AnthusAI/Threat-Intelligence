@@ -35,7 +35,7 @@ sourcePublishedAt sourceUpdatedAt retrievedAt importRunId importedAt curationSta
 """
 
 MESSAGE_FIELDS = """
-id messageKind messageDomain status summary source importRunId authorLabel createdAt updatedAt
+id messageKind messageDomain status summary source importRunId authorLabel semanticLayer searchVisibility threadId createdAt updatedAt
 """
 
 RELATION_FIELDS = """
@@ -383,6 +383,17 @@ class S3VectorsProvider:
                 clauses.append({"vectorKind": {"$in": normalized_kinds}})
         elif isinstance(vector_kinds, str) and vector_kinds.strip():
             clauses.append({"vectorKind": {"$eq": vector_kinds.strip()}})
+        semantic_layer = scope.get("semanticLayer")
+        if isinstance(semantic_layer, str) and semantic_layer.strip():
+            clauses.append({"semanticLayer": {"$eq": semantic_layer.strip()}})
+        semantic_layers = scope.get("semanticLayers")
+        if isinstance(semantic_layers, list):
+            normalized_layers = [str(layer).strip() for layer in semantic_layers if str(layer).strip()]
+            if normalized_layers:
+                clauses.append({"semanticLayer": {"$in": normalized_layers}})
+        search_visibility = scope.get("searchVisibility")
+        if isinstance(search_visibility, str) and search_visibility.strip():
+            clauses.append({"searchVisibility": {"$eq": search_visibility.strip()}})
         object_kinds = scope.get("objectKinds")
         if isinstance(object_kinds, list) and object_kinds:
             clauses.append({"kind": {"$in": [str(kind) for kind in object_kinds]}})
