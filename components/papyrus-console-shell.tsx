@@ -1,8 +1,15 @@
 "use client";
 
-import { generateClient } from "aws-amplify/data";
 import { usePathname } from "next/navigation";
-import type { Schema } from "../amplify/data/resource";
+import {
+  createConsoleMessage,
+  createConsoleThread,
+  listConsoleMessagesByThread,
+  listConsoleThreadByAnchor,
+  updateConsoleThread,
+  type ConsoleChatMessage,
+  type ConsoleChatThread,
+} from "../lib/console-chat-client";
 import {
   Conversation,
   ConversationContent,
@@ -21,7 +28,6 @@ import { MessageSquare } from "lucide-react";
 import type { UIMessage } from "ai";
 import { createContext, type FormEvent, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
-const USER_POOL_AUTH_MODE = "userPool";
 const CONSOLE_THREAD_ANCHOR_KEY = "site#papyrus";
 const CONSOLE_NEWSROOM_FEED_KEY = "consoleChat";
 const CONSOLE_MESSAGE_KIND = "console_chat_turn";
@@ -29,42 +35,6 @@ const CONSOLE_MESSAGE_DOMAIN = "conversation";
 const CONSOLE_SEMANTIC_LAYER = "chat_detail";
 const CONSOLE_SEARCH_VISIBILITY = "explicit";
 const CONSOLE_RESPONSE_TARGET = process.env.NEXT_PUBLIC_PAPYRUS_CONSOLE_RESPONSE_TARGET?.trim() || "cloud";
-
-type DataClient = ReturnType<typeof generateClient<Schema>>;
-
-type ConsoleMessage = {
-  id: string;
-  threadId?: string | null;
-  parentMessageId?: string | null;
-  sequenceNumber?: number | null;
-  role?: string | null;
-  messageKind?: string | null;
-  messageType?: string | null;
-  content?: string | null;
-  summary?: string | null;
-  responseStatus?: string | null;
-  responseError?: string | null;
-  createdAt: string;
-};
-
-type ConsoleThread = {
-  id: string;
-  title: string;
-  status: string;
-  threadKind: string;
-  contextDigest?: string | null;
-  messageCount?: number | null;
-  lastMessageId?: string | null;
-  lastMessageAt?: string | null;
-  metadata?: unknown;
-  createdAt: string;
-  updatedAt: string;
-};
-
-type AmplifyResult<T> = {
-  data?: T | null;
-  errors?: Array<{ message?: string | null; errorType?: string | null } | string | null> | null;
-};
 
 type PapyrusConsoleShellProps = {
   children: ReactNode;
@@ -78,13 +48,6 @@ type PapyrusConsoleContextValue = {
 };
 
 const PapyrusConsoleContext = createContext<PapyrusConsoleContextValue | null>(null);
-
-let dataClient: DataClient | null = null;
-
-function getClient(): DataClient {
-  dataClient ??= generateClient<Schema>({ authMode: USER_POOL_AUTH_MODE });
-  return dataClient;
-}
 
 export function PapyrusConsoleShell({ children }: PapyrusConsoleShellProps) {
   const pathname = usePathname();
@@ -190,8 +153,8 @@ function ConsoleAccessPanel({ session }: { session: ReaderSessionSnapshot | null
 
 function ConsolePanel({ actorLabel }: { actorLabel: string }) {
   const { closeConsole } = useContext(PapyrusConsoleContext)!;
-  const [thread, setThread] = useState<ConsoleThread | null>(null);
-  const [messages, setMessages] = useState<ConsoleMessage[]>([]);
+  const [thread, setThread] = useState<ConsoleChatThread | null>(null);
+  const [messages, setMessages] = useState<ConsoleChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
@@ -204,15 +167,7 @@ function ConsolePanel({ actorLabel }: { actorLabel: string }) {
   ), [messages]);
 
   const loadMessages = useCallback(async (threadId: string) => {
-    const response = await (getClient().models.Message.listMessagesByThreadAndSequence as never as (input: {
-      threadId: string;
-      sortDirection?: "ASC" | "DESC";
-      limit?: number;
-    }, options?: { authMode: typeof USER_POOL_AUTH_MODE }) => Promise<{ data?: ConsoleMessage[] | null }>)(
-      { threadId, sortDirection: "ASC", limit: 100 },
-      { authMode: USER_POOL_AUTH_MODE },
-    );
-    setMessages(Array.isArray(response.data) ? response.data : []);
+    setMessages(await listConsoleMessagesByThread(threadId));
   }, []);
 
   const loadThread = useCallback(async () => {
@@ -220,16 +175,7 @@ function ConsolePanel({ actorLabel }: { actorLabel: string }) {
     if (initialLoad) setLoading(true);
     setError(null);
     try {
-      const client = getClient();
-      const response = await (client.models.MessageThread.listMessageThreadsByAnchorAndUpdatedAt as never as (input: {
-        primaryAnchorKey: string;
-        sortDirection?: "ASC" | "DESC";
-        limit?: number;
-      }, options?: { authMode: typeof USER_POOL_AUTH_MODE }) => Promise<{ data?: ConsoleThread[] | null }>)(
-        { primaryAnchorKey: CONSOLE_THREAD_ANCHOR_KEY, sortDirection: "DESC", limit: 1 },
-        { authMode: USER_POOL_AUTH_MODE },
-      );
-      const existingThread = Array.isArray(response.data) ? response.data[0] ?? null : null;
+      const existingThread = await listConsoleThreadByAnchor(CONSOLE_THREAD_ANCHOR_KEY);
       setThread(existingThread);
       if (existingThread) await loadMessages(existingThread.id);
     } catch (nextError) {
@@ -253,10 +199,10 @@ function ConsolePanel({ actorLabel }: { actorLabel: string }) {
     return () => window.clearInterval(interval);
   }, [loadThread]);
 
-  async function ensureThread(): Promise<ConsoleThread> {
+  async function ensureThread(): Promise<ConsoleChatThread> {
     if (thread) return thread;
     const now = new Date().toISOString();
-    const nextThread: ConsoleThread = {
+    const nextThread: ConsoleChatThread = {
       id: `message-thread-console-${crypto.randomUUID()}`,
       threadKind: "console",
       status: "active",
@@ -277,12 +223,8 @@ function ConsolePanel({ actorLabel }: { actorLabel: string }) {
       newsroomFeedKey: CONSOLE_NEWSROOM_FEED_KEY,
       createdAt: now,
       updatedAt: now,
-    } as ConsoleThread;
-    const response = await getClient().models.MessageThread.create(nextThread as never, { authMode: USER_POOL_AUTH_MODE }) as AmplifyResult<ConsoleThread>;
-    const created = requireAmplifyData(response, "create console thread", {
-      id: nextThread.id,
-      primaryAnchorKey: CONSOLE_THREAD_ANCHOR_KEY,
-    });
+    };
+    const created = await createConsoleThread(nextThread);
     setThread(created);
     return created;
   }
@@ -299,7 +241,7 @@ function ConsolePanel({ actorLabel }: { actorLabel: string }) {
       const previousSequenceNumber = previousMessage?.sequenceNumber ?? activeThread.messageCount ?? 0;
       const sequenceNumber = previousSequenceNumber + 1;
       const now = new Date().toISOString();
-      const message: ConsoleMessage = {
+      const message: ConsoleChatMessage = {
         id: `message-console-user-${crypto.randomUUID()}`,
         threadId: activeThread.id,
         parentMessageId: previousMessage?.id ?? null,
@@ -314,7 +256,7 @@ function ConsolePanel({ actorLabel }: { actorLabel: string }) {
       };
       setMessages((current) => [...current, message]);
       setDraft("");
-      requireAmplifyData(await getClient().models.Message.create({
+      await createConsoleMessage({
         ...message,
         messageDomain: CONSOLE_MESSAGE_DOMAIN,
         status: "active",
@@ -331,19 +273,13 @@ function ConsolePanel({ actorLabel }: { actorLabel: string }) {
         }),
         updatedAt: now,
         newsroomFeedKey: CONSOLE_NEWSROOM_FEED_KEY,
-      } as never, { authMode: USER_POOL_AUTH_MODE }) as AmplifyResult<ConsoleMessage>, "create console message", {
-        id: message.id,
-        threadId: activeThread.id,
       });
-      requireAmplifyData(await getClient().models.MessageThread.update({
+      await updateConsoleThread({
         id: activeThread.id,
         messageCount: sequenceNumber,
         lastMessageId: message.id,
         lastMessageAt: now,
         updatedAt: now,
-      } as never, { authMode: USER_POOL_AUTH_MODE }) as AmplifyResult<ConsoleThread>, "update console thread", {
-        id: activeThread.id,
-        lastMessageId: message.id,
       });
       setThread((current) => current ? {
         ...current,
@@ -507,23 +443,4 @@ function MessagesSquareIcon() {
 
 function toAwsJson(value: unknown): string {
   return JSON.stringify(value ?? {});
-}
-
-function requireAmplifyData<T>(response: AmplifyResult<T>, operation: string, context: Record<string, unknown>): T {
-  if (response.errors?.length) {
-    const message = response.errors.map(formatAmplifyError).join("; ");
-    console.error(`[PapyrusConsole] ${operation} returned GraphQL errors`, { errors: response.errors, context });
-    throw new Error(`${operation} failed: ${message}`);
-  }
-  if (!response.data) {
-    console.error(`[PapyrusConsole] ${operation} returned no data`, { response, context });
-    throw new Error(`${operation} failed: no data returned`);
-  }
-  return response.data;
-}
-
-function formatAmplifyError(error: { message?: string | null; errorType?: string | null } | string | null): string {
-  if (typeof error === "string") return error;
-  if (!error) return "Unknown GraphQL error";
-  return [error.errorType, error.message].filter(Boolean).join(": ") || "Unknown GraphQL error";
 }
