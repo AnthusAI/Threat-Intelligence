@@ -2549,13 +2549,21 @@ img {
   margin-top: var(--paper-rhythm);
 }
 
-.edition-progress__button--search {
+.edition-progress__trailing {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
   justify-self: end;
+}
+
+.edition-progress__button--search,
+.edition-progress__button--console {
   min-inline-size: var(--edition-progress-height);
   text-decoration: none;
 }
 
-.edition-progress__button--search .news-desk-search-mark__icon {
+.edition-progress__button--search .news-desk-search-mark__icon,
+.edition-progress__button--console .news-desk-search-mark__icon {
   display: block;
 }
 
@@ -7022,40 +7030,6 @@ img {
   box-shadow: -18px 0 32px -28px rgb(0 0 0 / 0.7);
   pointer-events: auto;
   width: var(--papyrus-console-width);
-}
-
-.papyrus-console__tab {
-  align-items: center;
-  appearance: none;
-  background: transparent;
-  border: 0;
-  color: var(--ink);
-  cursor: pointer;
-  display: flex;
-  height: var(--edition-progress-height, 19px);
-  justify-content: center;
-  padding: 0;
-  pointer-events: auto;
-  position: fixed;
-  right: 52px;
-  top: 0;
-  width: var(--edition-progress-height, 19px);
-  z-index: 1301;
-}
-
-.papyrus-console--open .papyrus-console__tab {
-  right: 18px;
-  top: var(--edition-progress-height, 19px);
-}
-
-.papyrus-console__tab:hover,
-.papyrus-console__tab:focus-visible {
-  background: rgb(var(--ink-rgb) / 0.08);
-  outline: 0;
-}
-
-.papyrus-console__icon {
-  display: block;
 }
 
 .papyrus-console__panel {

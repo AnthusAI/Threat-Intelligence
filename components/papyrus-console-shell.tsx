@@ -19,7 +19,7 @@ import {
 import { loadReaderSessionSnapshot, type ReaderSessionSnapshot } from "./reader-auth-state";
 import { MessageSquare } from "lucide-react";
 import type { UIMessage } from "ai";
-import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, type FormEvent, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 const USER_POOL_AUTH_MODE = "userPool";
 const CONSOLE_THREAD_ANCHOR_KEY = "site#papyrus";
@@ -70,6 +70,14 @@ type PapyrusConsoleShellProps = {
   children: ReactNode;
 };
 
+type PapyrusConsoleContextValue = {
+  open: boolean;
+  shouldOfferConsole: boolean;
+  toggleOpen: () => void;
+};
+
+const PapyrusConsoleContext = createContext<PapyrusConsoleContextValue | null>(null);
+
 let dataClient: DataClient | null = null;
 
 function getClient(): DataClient {
@@ -104,7 +112,7 @@ export function PapyrusConsoleShell({ children }: PapyrusConsoleShellProps) {
     };
   }, []);
 
-  const toggleOpen = () => {
+  const toggleOpen = useCallback(() => {
     setOpen((current) => {
       const next = !current;
       try {
@@ -114,18 +122,21 @@ export function PapyrusConsoleShell({ children }: PapyrusConsoleShellProps) {
       }
       return next;
     });
-  };
+  }, []);
+
+  const consoleContext = useMemo<PapyrusConsoleContextValue>(() => ({
+    open,
+    shouldOfferConsole,
+    toggleOpen,
+  }), [open, shouldOfferConsole, toggleOpen]);
 
   return (
-    <>
+    <PapyrusConsoleContext.Provider value={consoleContext}>
       <div className={canUseConsole && open ? "papyrus-console-page papyrus-console-page--open" : "papyrus-console-page"}>
         {children}
       </div>
       {shouldOfferConsole ? (
         <aside className={open ? "papyrus-console papyrus-console--open" : "papyrus-console"} aria-label="Papyrus console">
-          <button className="papyrus-console__tab" onClick={toggleOpen} type="button" aria-expanded={open} aria-label={open ? "Close console" : "Open console"}>
-            {open ? <LucideXIcon /> : <MessagesSquareIcon />}
-          </button>
           {open ? (
             canUseConsole
               ? <ConsolePanel actorLabel={session?.auth.label ?? "Papyrus editor"} />
@@ -133,7 +144,27 @@ export function PapyrusConsoleShell({ children }: PapyrusConsoleShellProps) {
           ) : null}
         </aside>
       ) : null}
-    </>
+    </PapyrusConsoleContext.Provider>
+  );
+}
+
+export function NewsroomConsoleProgressToggle() {
+  const consoleContext = useContext(PapyrusConsoleContext);
+  if (!consoleContext?.shouldOfferConsole) return null;
+
+  const { open, toggleOpen } = consoleContext;
+
+  return (
+    <button
+      type="button"
+      className="edition-progress__button edition-progress__button--next edition-progress__button--console"
+      aria-expanded={open}
+      aria-label={open ? "Close console" : "Open console"}
+      onClick={toggleOpen}
+      title={open ? "Close console" : "Open console"}
+    >
+      {open ? <LucideXIcon /> : <MessagesSquareIcon />}
+    </button>
   );
 }
 
