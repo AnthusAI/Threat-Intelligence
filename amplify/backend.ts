@@ -1,5 +1,4 @@
 import { defineBackend, secret } from "@aws-amplify/backend";
-import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import { PolicyStatement } from "aws-cdk-lib/aws-iam";
 import { Function as LambdaFunction } from "aws-cdk-lib/aws-lambda";
 import { CfnIndex, CfnVectorBucket, CfnVectorBucketPolicy } from "aws-cdk-lib/aws-s3vectors";
@@ -42,16 +41,6 @@ const amplifyBackendDir = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(amplifyBackendDir, "..");
 
 const messageTable = backend.data.resources.tables.Message;
-const messageCfnTable =
-  (messageTable.node.defaultChild as dynamodb.CfnTable | undefined) ??
-  (messageTable.node.tryFindChild("Resource") as dynamodb.CfnTable | undefined) ??
-  backend.data.resources.cfnResources.cfnTables.Message;
-if (!messageCfnTable) {
-  throw new Error("ConsoleChatResponder requires a Message DynamoDB table resource.");
-}
-messageCfnTable.streamSpecification = {
-  streamViewType: dynamodb.StreamViewType.NEW_IMAGE,
-};
 if (!messageTable.tableStreamArn) {
   throw new Error("ConsoleChatResponder requires the Message table stream ARN.");
 }
