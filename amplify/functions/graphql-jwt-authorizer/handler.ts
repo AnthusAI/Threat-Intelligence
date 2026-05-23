@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { GetParameterCommand, SSMClient } from "@aws-sdk/client-ssm";
 
 type AppSyncAuthorizerEvent = {
   authorizationToken?: string;
@@ -26,7 +27,8 @@ type JwtClaims = {
 export const handler = async (event: AppSyncAuthorizerEvent) => {
   try {
     const token = normalizeAuthorizationToken(event.authorizationToken);
-    const claims = verifyHs256Jwt(token);
+    const jwtSecret = await getJwtSecret();
+    const claims = verifyHs256Jwt(token, jwtSecret);
     assertExpectedIssuer(claims);
     assertExpectedAudience(claims);
     assertRequiredScope(claims);
@@ -59,7 +61,7 @@ function normalizeAuthorizationToken(value: string | undefined): string {
   return token;
 }
 
-function verifyHs256Jwt(token: string): JwtClaims {
+function verifyHs256Jwt(token: string, jwtSecret: string): JwtClaims {
   const [encodedHeader, encodedPayload, encodedSignature] = token.split(".");
   if (!encodedHeader || !encodedPayload || !encodedSignature) {
     throw new Error("JWT must have header, payload, and signature.");
@@ -71,7 +73,7 @@ function verifyHs256Jwt(token: string): JwtClaims {
   }
 
   const claims = decodeJson<JwtClaims>(encodedPayload);
-  const expectedSignature = createHmac("sha256", getJwtSecret())
+  const expectedSignature = createHmac("sha256", jwtSecret)
     .update(`${encodedHeader}.${encodedPayload}`)
     .digest("base64url");
 
@@ -98,10 +100,50 @@ function decodeJson<T>(encoded: string): T {
   }
 }
 
-function getJwtSecret(): string {
-  const secret = process.env.PAPYRUS_JWT_SECRET;
-  if (!secret) throw new Error("PAPYRUS_JWT_SECRET is not configured.");
+let cachedJwtSecret: string | null = null;
+let ssmClient: SSMClient | null = null;
+
+async function getJwtSecret(): Promise<string> {
+  if (cachedJwtSecret) return cachedJwtSecret;
+
+  const directSecret = normalizeOptionalString(process.env.PAPYRUS_JWT_SECRET);
+  if (directSecret && !isAmplifySecretPlaceholder(directSecret)) {
+    cachedJwtSecret = directSecret;
+    return directSecret;
+  }
+
+  const parameterName = resolveAmplifySsmSecretPath("PAPYRUS_JWT_SECRET");
+  if (!parameterName) throw new Error("PAPYRUS_JWT_SECRET is not configured.");
+  ssmClient ??= new SSMClient({});
+  const response = await ssmClient.send(new GetParameterCommand({
+    Name: parameterName,
+    WithDecryption: true,
+  }));
+  const secret = normalizeOptionalString(response.Parameter?.Value);
+  if (!secret) throw new Error(`SSM parameter ${parameterName} did not return a value.`);
+  cachedJwtSecret = secret;
   return secret;
+}
+
+function isAmplifySecretPlaceholder(value: string): boolean {
+  return /^<.*will be resolved.*>$/i.test(value);
+}
+
+function resolveAmplifySsmSecretPath(name: string): string | null {
+  const rawConfig = normalizeOptionalString(process.env.AMPLIFY_SSM_ENV_CONFIG);
+  if (!rawConfig) return null;
+  try {
+    const config = JSON.parse(rawConfig) as Record<string, { path?: string; sharedPath?: string } | undefined>;
+    return normalizeOptionalString(config[name]?.path) ?? normalizeOptionalString(config[name]?.sharedPath);
+  } catch {
+    throw new Error("AMPLIFY_SSM_ENV_CONFIG contains invalid JSON.");
+  }
+}
+
+function normalizeOptionalString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
 }
 
 function assertExpectedIssuer(claims: JwtClaims): void {
