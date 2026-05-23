@@ -1,14 +1,25 @@
 from __future__ import annotations
 
-import hashlib
 import json
-import time
+import os
+import subprocess
+import tempfile
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Any
 
+from .env import PAPYRUS_ROOT, storage_bucket_from_amplify_outputs
 from .graphql_authoring import PapyrusGraphQLAuthoringClient, strip_unsupported_payload_fields
-from .ids import safe_id
+from .ids import hash_short, safe_id
+
+MODEL_ATTACHMENT_OWNER_MODELS = {
+    "assignment": "Assignment",
+    "assignmentEvent": "AssignmentEvent",
+    "knowledgeRawPayload": "KnowledgeRawPayload",
+    "message": "Message",
+    "reference": "Reference",
+}
 
 
 def model_payload_storage_path(owner_kind: str, owner_id: str, role: str, filename: str) -> str:
@@ -72,7 +83,7 @@ def build_model_payload_attachment(input_payload: dict[str, Any]) -> dict[str, A
         "filename": filename,
         "mediaType": input_payload.get("mediaType") or "application/octet-stream",
         "byteSize": len(body),
-        "sha256": hashlib.sha256(body).hexdigest(),
+        "sha256": hash_short(body),
         "etag": None,
         "importRunId": input_payload.get("importRunId"),
         "createdAt": now,
@@ -104,41 +115,17 @@ def upload_attachment_body(
         headers=headers,
         method=slot.get("method") or "PUT",
     )
-    last_error: Exception | None = None
-    for attempt in range(1, 4):
-        try:
-            with urllib.request.urlopen(request) as response:
-                if response.status >= 400:
-                    raise RuntimeError(f"Upload failed with status {response.status}")
-            return client.complete_model_attachment_upload(slot["uploadId"], attachment)
-        except (urllib.error.URLError, TimeoutError, RuntimeError) as error:
-            last_error = error
-            message = str(error)
-            transient = any(
-                token in message
-                for token in (
-                    "Connection reset",
-                    "timed out",
-                    "Temporary failure",
-                    "ECONNRESET",
-                    "503",
-                    "502",
-                    "504",
-                )
-            )
-            if not transient or attempt == 3:
-                break
-            time.sleep(attempt * 2)
-    assert last_error is not None
-    if isinstance(last_error, urllib.error.HTTPError):
-        detail = last_error.read().decode("utf-8", errors="replace")
+    try:
+        with urllib.request.urlopen(request) as response:
+            if response.status >= 400:
+                raise RuntimeError(f"Upload failed with status {response.status}")
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode("utf-8", errors="replace")
         raise RuntimeError(
             f"Failed to upload ModelAttachment {attachment['id']} to {slot.get('storagePath')}: "
-            f"{last_error.code} {last_error.reason} {detail[:240]}"
-        ) from last_error
-    raise RuntimeError(
-        f"Failed to upload ModelAttachment {attachment['id']} to {slot.get('storagePath')}: {last_error}"
-    ) from last_error
+            f"{error.code} {error.reason} {detail[:240]}"
+        ) from error
+    return client.complete_model_attachment_upload(slot["uploadId"], attachment)
 
 
 def expand_private_payload_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -239,3 +226,132 @@ def parse_jsonish(value: Any) -> Any:
 
 def semantic_version_key(kind: str, version_id: str) -> str:
     return f"{kind}#{version_id}"
+
+
+def download_attachment_buffer(
+    client: PapyrusGraphQLAuthoringClient,
+    attachment: dict[str, Any],
+    *,
+    bucket: str | None = None,
+) -> bytes | None:
+    if not attachment.get("storagePath"):
+        return None
+    slot = client.create_model_attachment_download(attachment["id"])
+    if not slot.get("downloadUrl"):
+        raise ValueError(f"ModelAttachment {attachment['id']} download slot did not include a URL.")
+    headers = {str(key): str(value) for key, value in (slot.get("requiredHeaders") or {}).items()}
+    request = urllib.request.Request(
+        slot["downloadUrl"],
+        headers=headers,
+        method=slot.get("method") or "GET",
+    )
+    try:
+        with urllib.request.urlopen(request) as response:
+            return response.read()
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode("utf-8", errors="replace")
+        raise RuntimeError(
+            f"Failed to download ModelAttachment {attachment['id']} from {slot.get('storagePath')}: "
+            f"{error.code} {error.reason} {detail[:240]}"
+        ) from error
+
+
+def list_attachment_storage_paths(*, bucket: str | None = None, prefix: str = "newsroom/payloads/") -> dict[str, Any]:
+    resolved_bucket = bucket or storage_bucket_from_amplify_outputs()
+    if not resolved_bucket:
+        raise ValueError("Could not resolve storage bucket for ModelAttachment listing. Pass --bucket or refresh amplify_outputs.json.")
+    keys: list[str] = []
+    continuation_token: str | None = None
+    while True:
+        args = [
+            "s3api",
+            "list-objects-v2",
+            "--bucket",
+            resolved_bucket,
+            "--prefix",
+            prefix,
+            "--output",
+            "json",
+        ]
+        if continuation_token:
+            args.extend(["--continuation-token", continuation_token])
+        result = subprocess.run(
+            ["aws", *args],
+            cwd=PAPYRUS_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Failed to list ModelAttachment objects in s3://{resolved_bucket}/{prefix}: "
+                f"{result.stderr or result.stdout}"
+            )
+        parsed = json.loads(result.stdout or "{}")
+        keys.extend(entry["Key"] for entry in parsed.get("Contents") or [] if entry.get("Key"))
+        continuation_token = parsed.get("NextContinuationToken") if parsed.get("IsTruncated") else None
+        if not continuation_token:
+            break
+    return {"bucket": resolved_bucket, "prefix": prefix, "keys": keys}
+
+
+def delete_attachment_storage_paths(
+    storage_paths: list[str],
+    *,
+    bucket: str | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    paths = sorted({str(path) for path in storage_paths if path})
+    resolved_bucket = bucket or storage_bucket_from_amplify_outputs()
+    if not resolved_bucket:
+        raise ValueError("Could not resolve storage bucket for ModelAttachment batch delete. Pass --bucket or refresh amplify_outputs.json.")
+    if not paths:
+        return {"bucket": resolved_bucket, "attempted": 0, "deleted": 0, "chunks": 0, "errors": []}
+    if dry_run:
+        return {"bucket": resolved_bucket, "attempted": len(paths), "deleted": 0, "chunks": 0, "errors": [], "dryRun": True}
+    deleted = 0
+    errors: list[dict[str, Any]] = []
+    chunks = 0
+    for index in range(0, len(paths), 1000):
+        chunks += 1
+        chunk = paths[index : index + 1000]
+        delete_payload = {"Objects": [{"Key": storage_path} for storage_path in chunk], "Quiet": False}
+        temp_path = Path(tempfile.gettempdir()) / f"papyrus-delete-objects-{os.getpid()}-{chunks}.json"
+        temp_path.write_text(json.dumps(delete_payload), encoding="utf-8")
+        try:
+            result = subprocess.run(
+                [
+                    "aws",
+                    "s3api",
+                    "delete-objects",
+                    "--bucket",
+                    resolved_bucket,
+                    "--delete",
+                    f"file://{temp_path}",
+                    "--output",
+                    "json",
+                ],
+                cwd=PAPYRUS_ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(result.stderr or result.stdout or f"aws s3api delete-objects exited with {result.returncode}")
+            parsed = json.loads(result.stdout or "{}")
+            deleted += len(parsed.get("Deleted") or chunk)
+            for entry in parsed.get("Errors") or []:
+                errors.append(
+                    {
+                        "storagePath": entry.get("Key"),
+                        "code": entry.get("Code"),
+                        "message": entry.get("Message"),
+                    }
+                )
+        finally:
+            temp_path.unlink(missing_ok=True)
+    if errors:
+        preview = ", ".join(f"{entry.get('storagePath') or 'unknown'}:{entry.get('code') or 'error'}" for entry in errors[:3])
+        raise RuntimeError(f"Failed to delete {len(errors)} ModelAttachment S3 object(s): {preview}")
+    return {"bucket": resolved_bucket, "attempted": len(paths), "deleted": deleted, "chunks": chunks, "errors": errors}
+

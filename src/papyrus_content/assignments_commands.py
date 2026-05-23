@@ -1,30 +1,40 @@
 from __future__ import annotations
 
-from typing import Any
+import json
 
+from .assignments_workflow import (
+    apply_research_packet,
+    backfill_section_indexes,
+    build_assignment_context,
+    copywriting_output,
+    create_research_assignment,
+    intake_research_packet_proposals,
+    list_assignment_events,
+    list_assignment_research_packets,
+    list_assignments_for_object,
+    mutate_assignment,
+    orphan_research_packets,
+    process_assignment_queue,
+    review_reporting_packet,
+    run_copywriting_assignment,
+    run_research_assignment,
+    run_story_cycle,
+    story_cycle_output,
+)
 from .graphql_authoring import create_authoring_client
-from .options import normalize_string, parse_options
-
-
-def _assignment_section_key(assignment: dict[str, Any]) -> str | None:
-    return normalize_string(assignment.get("sectionKey")) or normalize_string(assignment.get("sectionId"))
-
-
-def _assignment_sort_key(assignment: dict[str, Any]) -> str:
-    priority = str(assignment.get("priority") if assignment.get("priority") is not None else 999999).zfill(6)
-    created_at = assignment.get("createdAt") or ""
-    record_id = assignment.get("id") or ""
-    return f"{priority}#{created_at}#{record_id}"
+from .options import parse_options
 
 
 def assignments_list(flags: list[str]) -> None:
+    from .assignments_workflow import assignment_section_key, assignment_sort_key
+
     options = parse_options(flags)
     client, _ = create_authoring_client()
     assignments = client.list_records("Assignment")
-    queue = normalize_string(options.get("queue"))
-    status = normalize_string(options.get("status"))
-    assignment_type = normalize_string(options.get("type"))
-    section = normalize_string(options.get("section"))
+    queue = options.get("queue")
+    status = options.get("status")
+    assignment_type = options.get("type")
+    section = options.get("section")
     if queue:
         assignments = [row for row in assignments if row.get("queueKey") == queue]
     if status:
@@ -32,11 +42,160 @@ def assignments_list(flags: list[str]) -> None:
     if assignment_type:
         assignments = [row for row in assignments if row.get("assignmentTypeKey") == assignment_type]
     if section:
-        assignments = [row for row in assignments if _assignment_section_key(row) == section]
-    assignments.sort(key=_assignment_sort_key)
+        assignments = [row for row in assignments if assignment_section_key(row) == section]
+    assignments.sort(key=assignment_sort_key)
     for assignment in assignments:
-        section_key = _assignment_section_key(assignment) or ""
+        section_key = assignment_section_key(assignment) or ""
         print(
             f"{assignment.get('status')}\t{assignment.get('id')}\t{assignment.get('assignmentTypeKey')}\t"
             f"{assignment.get('queueKey')}\tsection={section_key}\t{assignment.get('title')}"
         )
+
+
+def assignments_create_research(flags: list[str]) -> None:
+    options = parse_options(flags)
+    client, _ = create_authoring_client()
+    result = create_research_assignment(client, options)
+    if options.get("json"):
+        print(json.dumps({"ok": True, **result}, indent=2))
+
+
+def assignments_run_research(flags: list[str]) -> None:
+    run_research_assignment(flags)
+
+
+def assignments_apply_research_packet(flags: list[str]) -> None:
+    options = parse_options(flags)
+    client, _ = create_authoring_client()
+    result = apply_research_packet(client, options)
+    if options.get("json"):
+        print(json.dumps({"ok": True, **result}, indent=2))
+
+
+def assignments_intake_proposals(flags: list[str]) -> None:
+    options = parse_options(flags)
+    client, _ = create_authoring_client()
+    result = intake_research_packet_proposals(client, options)
+    if options.get("json"):
+        print(json.dumps({"ok": True, **result}, indent=2))
+        return
+    print(f"assignments\tintake-proposals\tassignment\t{result['assignmentId']}")
+    print(f"assignments\tintake-proposals\tcatalog\t{result.get('catalogPath')}")
+    print(f"assignments\tintake-proposals\tregistered\t{result.get('registeredReferenceCount')}")
+
+
+def assignments_research_intake_now(flags: list[str]) -> None:
+    options = parse_options(flags)
+    if not options.get("assignment"):
+        raise ValueError("assignments research-intake-now requires --assignment <id>.")
+    if not options.get("config"):
+        raise ValueError("assignments research-intake-now requires --config <steering.yml>.")
+    if not options.get("corpus-key"):
+        raise ValueError("assignments research-intake-now requires --corpus-key <key>.")
+    research_flags = [
+        "--assignment",
+        str(options["assignment"]),
+        "--corpus-key",
+        str(options["corpus-key"]),
+        "--research-mode",
+        str(options.get("research-mode") or "source_discovery"),
+    ]
+    if options.get("run-id"):
+        research_flags.extend(["--run-id", f"{options['run-id']}-research"])
+    run_research_assignment(research_flags)
+    client, _ = create_authoring_client()
+    apply_options = dict(options)
+    apply_options["apply"] = options.get("apply")
+    apply_result = apply_research_packet(client, apply_options) if options.get("apply") else None
+    intake_result = intake_research_packet_proposals(client, options)
+    if options.get("json"):
+        print(json.dumps({"ok": True, "applyResult": apply_result, **intake_result}, indent=2))
+        return
+    print(f"assignments\tresearch-intake-now\tassignment\t{intake_result['assignmentId']}")
+    print(f"assignments\tresearch-intake-now\tregistered\t{intake_result.get('registeredReferenceCount')}")
+
+
+def assignments_run_story_cycle(flags: list[str]) -> None:
+    run_story_cycle(flags)
+
+
+def assignments_story_cycle_output(flags: list[str]) -> None:
+    story_cycle_output(flags)
+
+
+def assignments_orphan_research_packets(flags: list[str]) -> None:
+    options = parse_options(flags)
+    client, _ = create_authoring_client()
+    orphan_research_packets(client, options)
+
+
+def assignments_backfill_section_indexes(flags: list[str]) -> None:
+    options = parse_options(flags)
+    client, _ = create_authoring_client()
+    backfill_section_indexes(client, options)
+
+
+def assignments_for_object(flags: list[str]) -> None:
+    options = parse_options(flags)
+    client, _ = create_authoring_client()
+    list_assignments_for_object(client, options)
+
+
+def assignments_build_context(flags: list[str]) -> None:
+    build_assignment_context(flags)
+
+
+def assignments_research_packets(flags: list[str]) -> None:
+    options = parse_options(flags)
+    client, _ = create_authoring_client()
+    list_assignment_research_packets(client, options)
+
+
+def assignments_review_reporting_packet(flags: list[str]) -> None:
+    options = parse_options(flags)
+    client, auth = create_authoring_client()
+    review_reporting_packet(client, auth, options)
+
+
+def assignments_run_copywriting(flags: list[str]) -> None:
+    options = parse_options(flags)
+    client, auth = create_authoring_client()
+    run_copywriting_assignment(client, auth, options)
+
+
+def assignments_copywriting_output(flags: list[str]) -> None:
+    options = parse_options(flags)
+    client, _ = create_authoring_client()
+    copywriting_output(client, options)
+
+
+def assignments_events(flags: list[str]) -> None:
+    options = parse_options(flags)
+    client, _ = create_authoring_client()
+    list_assignment_events(client, options)
+
+
+def assignments_process_queue(flags: list[str]) -> None:
+    options = parse_options(flags)
+    client, auth = create_authoring_client()
+    process_assignment_queue(client, auth, options)
+
+
+def assignments_claim(flags: list[str]) -> None:
+    mutate_assignment(*create_authoring_client(), "claim", parse_options(flags))
+
+
+def assignments_release(flags: list[str]) -> None:
+    mutate_assignment(*create_authoring_client(), "release", parse_options(flags))
+
+
+def assignments_complete(flags: list[str]) -> None:
+    mutate_assignment(*create_authoring_client(), "complete", parse_options(flags))
+
+
+def assignments_cancel(flags: list[str]) -> None:
+    mutate_assignment(*create_authoring_client(), "cancel", parse_options(flags))
+
+
+def assignments_reopen(flags: list[str]) -> None:
+    mutate_assignment(*create_authoring_client(), "reopen", parse_options(flags))

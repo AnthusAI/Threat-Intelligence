@@ -12,6 +12,87 @@ APPEND_ONLY_EXISTING_NOOP_MODELS = frozenset(
     {"Assignment", "AssignmentEvent", "Message", "SteeringDecision"}
 )
 
+OPTIONAL_SCHEMA_MODELS = frozenset({"CategoryKeyword", "LexicalSteeringRule", "ModelAttachment"})
+
+
+def is_missing_graphql_model_error(error: Exception, model_name: str) -> bool:
+    message = str(error)
+    list_field = f"list{model_name}s"
+    get_field = f"get{model_name}"
+    return "FieldUndefined" in message and (list_field in message or get_field in message or model_name in message)
+
+
+def build_record_changes_tolerating_optional_models(
+    client: PapyrusGraphQLAuthoringClient,
+    records: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    pending = list(records)
+    skipped_models: set[str] = set()
+    while True:
+        try:
+            filtered = [record for record in pending if record["modelName"] not in skipped_models]
+            return build_record_changes(client, filtered)
+        except RuntimeError as error:
+            missing_model = next(
+                (
+                    model_name
+                    for model_name in OPTIONAL_SCHEMA_MODELS
+                    if model_name not in skipped_models and is_missing_graphql_model_error(error, model_name)
+                ),
+                None,
+            )
+            if missing_model is None:
+                raise
+            skipped_models.add(missing_model)
+            pending = [record for record in pending if record["modelName"] != missing_model]
+            print(f"skip\t{missing_model}\tmodel is not deployed in AppSync yet; skipped optional records.")
+
+
+def build_steering_config_record_changes(
+    client: PapyrusGraphQLAuthoringClient,
+    records: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    changes: list[dict[str, Any]] = []
+    for record in records:
+        current = client.get_record(record["modelName"], record["expected"]["id"])
+        if not current:
+            changes.append({**record, "current": current, "action": "create"})
+            continue
+        action = (
+            "noop"
+            if current.get("name") == record["expected"].get("name")
+            and current.get("role") == record["expected"].get("role")
+            else "update"
+        )
+        expected = record["expected"]
+        if action == "update":
+            expected = {
+                "id": expected["id"],
+                "name": expected["name"],
+                "role": expected["role"],
+                "updatedAt": expected["updatedAt"],
+            }
+        changes.append(
+            {
+                "modelName": record["modelName"],
+                "expected": expected,
+                "current": current,
+                "action": action,
+            }
+        )
+    return changes
+
+
+def build_record_changes_targeted_by_id(
+    client: PapyrusGraphQLAuthoringClient,
+    records: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    changes: list[dict[str, Any]] = []
+    for record in records:
+        current = client.get_record(record["modelName"], record["expected"]["id"])
+        changes.append(build_record_change_from_current(record["modelName"], record["expected"], current))
+    return changes
+
 
 def build_record_change_from_current(
     model_name: str,

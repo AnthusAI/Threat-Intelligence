@@ -29,6 +29,7 @@ const PYTHON_PORTED_COMMANDS = new Set([
 const YAML = require("yaml");
 
 const PROJECT_ROOT = path.resolve(__dirname, "..");
+const SKIP_PYTHON_ENV = "PAPYRUS_CONTENT_SKIP_PYTHON";
 
 const {
   decodeJwtClaims,

@@ -11,6 +11,26 @@ VERSION_FIELDS = (
     "lineageId versionNumber previousVersionId versionState versionCreatedAt "
     "versionCreatedBy changeReason contentHash"
 )
+CATEGORY_SET_FIELDS = (
+    f"{VERSION_FIELDS} id corpusId classifierId displayName description status generatedAt "
+    "categoryCount importRunId"
+)
+CATEGORY_FIELDS = (
+    f"{VERSION_FIELDS} id categorySetId corpusId categoryKey parentCategoryId parentCategoryKey "
+    "displayName shortTitle subtitle description aliases status seedItemIds holdoutItemIds rank depth "
+    "isPinned importRunId updatedAt"
+)
+PROPOSAL_FIELDS = (
+    "id categorySetId corpusId importRunId proposalKind steeringDomain status title summary categoryKey "
+    "targetCategoryKey graphEntityId relationshipType displayName shortTitle subtitle description "
+    "evidenceItemIds suggestedSeedItemIds suggestedHoldoutItemIds sourceSnapshotId proposedAt "
+    "reviewedAt reviewedBy updatedAt"
+)
+DECISION_FIELDS = "id proposalId categorySetId action actorSub actorLabel note selectedCategoryKey createdAt"
+SEMANTIC_RELATION_TYPE_FIELDS = (
+    "id key label inverseLabel description domain status allowedSubjectKinds allowedObjectKinds "
+    "isDirectional isSymmetric isTransitive contextPackTags createdAt updatedAt metadata"
+)
 KNOWLEDGE_CORPUS_FIELDS = "id name role itemCount generatedAt latestImportRunId createdAt updatedAt"
 KNOWLEDGE_IMPORT_RUN_FIELDS = (
     "id corpusId importKind corpusImportKindKey classifierId sourceSnapshotId status generatedAt "
@@ -50,6 +70,48 @@ MODEL_ATTACHMENT_FIELDS = (
     "id ownerKind ownerId ownerLineageId ownerVersionNumber ownerVersionKey role sortKey storagePath filename "
     "mediaType byteSize sha256 etag importRunId createdAt updatedAt status"
 )
+NEWSROOM_SECTION_FIELDS = (
+    "id title shortTitle type editorialMission editorialPolicy enabled enabledStatus sortOrder "
+    "defaultArticleTypes defaultPageBudget assignmentGuidance killCriteria visualGuidance createdAt updatedAt"
+)
+EDITION_FIELDS = (
+    f"{VERSION_FIELDS} id slug title status editionDate publishedAt description layoutPlan metadata"
+)
+PUBLISHED_EDITION_FIELDS = (
+    "id sourceEditionId editionLineageId versionNumber slug title status editionDate publishedAt description layoutPlan metadata"
+)
+EDITION_ITEM_FIELDS = (
+    "id editionId editionLineageId itemId itemLineageId placementKey sortKey pageNumber priority metadata"
+)
+PUBLISHED_EDITION_ITEM_FIELDS = (
+    "id publishedEditionId publishedItemId sourceEditionItemId sourceEditionId sourceItemId editionLineageId "
+    "itemLineageId placementKey sortKey pageNumber priority metadata"
+)
+ITEM_FIELDS = (
+    f"{VERSION_FIELDS} id type status typeStatus slug shortSlug section sectionStatus title headline deck body "
+    "byline dateline publishedAt editionDate sortTitle pullQuotes layout editorial updatedAt"
+)
+PUBLISHED_ITEM_FIELDS = (
+    "id sourceItemId itemLineageId versionNumber type status typeStatus slug shortSlug section sectionStatus "
+    "title headline deck body byline dateline publishedAt editionDate sortTitle pullQuotes layout editorial"
+)
+MEDIA_ASSET_FIELDS = (
+    "id itemId type role sortKey storagePath externalUrl alt caption credit width height aspectRatio focalX focalY "
+    "minHeight preferredHeight maxHeight crop wrapsText metadata"
+)
+PUBLISHED_MEDIA_ASSET_FIELDS = (
+    "id sourceMediaAssetId publishedItemId sourceItemId itemLineageId type role sortKey storagePath externalUrl alt "
+    "caption credit width height aspectRatio focalX focalY minHeight preferredHeight maxHeight crop wrapsText metadata"
+)
+ITEM_TAG_FIELDS = "id itemId tagId"
+TAG_FIELDS = "id slug label"
+SEMANTIC_NODE_FIELDS = (
+    f"{VERSION_FIELDS} id nodeKey nodeKind corpusId categorySetId categoryLineageId categoryKey displayName "
+    "description aliases status importRunId createdAt updatedAt newsroomFeedKey"
+)
+KNOWLEDGE_ARTIFACT_FIELDS = (
+    "id corpusId artifactKind artifactId snapshotId displayName createdAt importRunId"
+)
 
 LIST_DEFINITIONS: dict[str, dict[str, str]] = {
     "KnowledgeCorpus": {"field": "listKnowledgeCorpuses", "fields": KNOWLEDGE_CORPUS_FIELDS},
@@ -59,9 +121,27 @@ LIST_DEFINITIONS: dict[str, dict[str, str]] = {
     "ReferenceAttachment": {"field": "listReferenceAttachments", "fields": REFERENCE_ATTACHMENT_FIELDS},
     "Assignment": {"field": "listAssignments", "fields": ASSIGNMENT_FIELDS},
     "AssignmentEvent": {"field": "listAssignmentEvents", "fields": ASSIGNMENT_EVENT_FIELDS},
+    "CategorySet": {"field": "listCategorySets", "fields": CATEGORY_SET_FIELDS},
+    "Category": {"field": "listCategories", "fields": CATEGORY_FIELDS},
+    "SteeringProposal": {"field": "listSteeringProposals", "fields": PROPOSAL_FIELDS},
+    "SteeringDecision": {"field": "listSteeringDecisions", "fields": DECISION_FIELDS},
+    "SemanticRelationType": {"field": "listSemanticRelationTypes", "fields": SEMANTIC_RELATION_TYPE_FIELDS},
     "SemanticRelation": {"field": "listSemanticRelations", "fields": SEMANTIC_RELATION_FIELDS},
     "Message": {"field": "listMessages", "fields": MESSAGE_FIELDS},
     "ModelAttachment": {"field": "listModelAttachments", "fields": MODEL_ATTACHMENT_FIELDS},
+    "NewsroomSection": {"field": "listNewsroomSections", "fields": NEWSROOM_SECTION_FIELDS},
+    "Edition": {"field": "listEditions", "fields": EDITION_FIELDS},
+    "PublishedEdition": {"field": "listPublishedEditions", "fields": PUBLISHED_EDITION_FIELDS},
+    "EditionItem": {"field": "listEditionItems", "fields": EDITION_ITEM_FIELDS},
+    "PublishedEditionItem": {"field": "listPublishedEditionItems", "fields": PUBLISHED_EDITION_ITEM_FIELDS},
+    "Item": {"field": "listItems", "fields": ITEM_FIELDS},
+    "PublishedItem": {"field": "listPublishedItems", "fields": PUBLISHED_ITEM_FIELDS},
+    "MediaAsset": {"field": "listMediaAssets", "fields": MEDIA_ASSET_FIELDS},
+    "PublishedMediaAsset": {"field": "listPublishedMediaAssets", "fields": PUBLISHED_MEDIA_ASSET_FIELDS},
+    "ItemTag": {"field": "listItemTags", "fields": ITEM_TAG_FIELDS},
+    "Tag": {"field": "listTags", "fields": TAG_FIELDS},
+    "SemanticNode": {"field": "listSemanticNodes", "fields": SEMANTIC_NODE_FIELDS},
+    "KnowledgeArtifact": {"field": "listKnowledgeArtifacts", "fields": KNOWLEDGE_ARTIFACT_FIELDS},
 }
 
 GET_DEFINITIONS: dict[str, dict[str, str]] = {
@@ -208,6 +288,96 @@ mutation CompleteModelAttachmentUpload(
 }}
 """
 
+CREATE_MODEL_ATTACHMENT_DOWNLOAD_MUTATION = """
+mutation CreateModelAttachmentDownload($attachmentId: ID!) {
+  createModelAttachmentDownload(attachmentId: $attachmentId) {
+    ok
+    attachmentId
+    method
+    downloadUrl
+    storagePath
+    mediaType
+    byteSize
+    expiresAt
+    requiredHeaders
+  }
+}
+"""
+
+INDEX_DEFINITIONS: dict[str, dict[str, str]] = {
+    "assignmentsByQueueStatusAndPriority": {
+        "field": "listAssignmentsByQueueStatusAndPriority",
+        "partitionKey": "queueStatusKey",
+        "fields": ASSIGNMENT_FIELDS,
+    },
+    "assignmentsByTypeStatusAndCreatedAt": {
+        "field": "listAssignmentsByTypeStatusAndCreatedAt",
+        "partitionKey": "assignmentTypeKey",
+        "fields": ASSIGNMENT_FIELDS,
+    },
+    "assignmentsBySectionQueueStatusAndPriority": {
+        "field": "listAssignmentsBySectionQueueStatusAndPriority",
+        "partitionKey": "sectionQueueStatusKey",
+        "fields": ASSIGNMENT_FIELDS,
+    },
+    "assignmentEventsByAssignmentAndCreatedAt": {
+        "field": "listAssignmentEventsByAssignmentAndCreatedAt",
+        "partitionKey": "assignmentId",
+        "fields": ASSIGNMENT_EVENT_FIELDS,
+        "partitionType": "ID",
+    },
+    "semanticRelationsByObjectState": {
+        "field": "listSemanticRelationsByObjectState",
+        "partitionKey": "objectStateKey",
+        "fields": SEMANTIC_RELATION_FIELDS,
+    },
+    "semanticRelationsBySubjectState": {
+        "field": "listSemanticRelationsBySubjectState",
+        "partitionKey": "subjectStateKey",
+        "fields": SEMANTIC_RELATION_FIELDS,
+    },
+    "knowledgeImportRunsByCorpusKindAndImportedAt": {
+        "field": "listKnowledgeImportRunsByCorpusKindAndImportedAt",
+        "partitionKey": "corpusImportKindKey",
+        "fields": KNOWLEDGE_IMPORT_RUN_FIELDS,
+    },
+    "knowledgeImportRunsByKindAndImportedAt": {
+        "field": "listKnowledgeImportRunsByKindAndImportedAt",
+        "partitionKey": "importKind",
+        "fields": KNOWLEDGE_IMPORT_RUN_FIELDS,
+    },
+    "knowledgeArtifactsByImportRunAndKind": {
+        "field": "listKnowledgeArtifactsByImportRunAndKind",
+        "partitionKey": "importRunId",
+        "fields": KNOWLEDGE_ARTIFACT_FIELDS,
+        "partitionType": "ID",
+    },
+    "semanticNodesByImportRunAndNodeKey": {
+        "field": "listSemanticNodesByImportRunAndNodeKey",
+        "partitionKey": "importRunId",
+        "fields": SEMANTIC_NODE_FIELDS,
+        "partitionType": "ID",
+    },
+    "semanticRelationsByImportRunAndImportedAt": {
+        "field": "listSemanticRelationsByImportRunAndImportedAt",
+        "partitionKey": "importRunId",
+        "fields": SEMANTIC_RELATION_FIELDS,
+        "partitionType": "ID",
+    },
+}
+
+
+def _index_query(field: str, partition_key: str, fields: str, partition_type: str = "String") -> str:
+    operation = field[0].upper() + field[1:]
+    return f"""
+query {operation}(${partition_key}: {partition_type}!, $limit: Int, $nextToken: String) {{
+  {field}({partition_key}: ${partition_key}, limit: $limit, nextToken: $nextToken) {{
+    items {{ {fields} }}
+    nextToken
+  }}
+}}
+"""
+
 
 def _list_query(field: str, fields: str) -> str:
     operation = field[0].upper() + field[1:]
@@ -331,6 +501,89 @@ class PapyrusGraphQLAuthoringClient:
         result = self.graphql(query, {"id": record_id})
         return result.get(definition["field"])
 
+    def get_records_by_id(self, model_name: str, record_ids: list[str]) -> dict[str, dict[str, Any]]:
+        unique_ids = [record_id for record_id in dict.fromkeys(record_ids) if record_id]
+        if not unique_ids:
+            return {}
+        if model_name not in LIST_DEFINITIONS:
+            raise ValueError(f"Unsupported model for get_records_by_id: {model_name}")
+        rows = self.list_records(model_name)
+        by_id = {row["id"]: row for row in rows if row.get("id")}
+        return {record_id: by_id[record_id] for record_id in unique_ids if record_id in by_id}
+
+    def list_by_index(self, index_name: str, key_value: str, *, limit: int = 100) -> list[dict[str, Any]]:
+        definition = INDEX_DEFINITIONS[index_name]
+        query = _index_query(
+            definition["field"],
+            definition["partitionKey"],
+            definition["fields"],
+            definition.get("partitionType", "String"),
+        )
+        items: list[dict[str, Any]] = []
+        next_token = None
+        while True:
+            result = self.graphql(
+                query,
+                {
+                    definition["partitionKey"]: key_value,
+                    "limit": limit,
+                    "nextToken": next_token,
+                },
+            )
+            connection = result.get(definition["field"]) or {}
+            items.extend(entry for entry in connection.get("items") or [] if entry)
+            next_token = connection.get("nextToken")
+            if not next_token:
+                break
+        return items
+
+    def list_assignments_by_queue_status_and_priority(self, queue_status_key: str) -> list[dict[str, Any]]:
+        return self.list_by_index("assignmentsByQueueStatusAndPriority", queue_status_key)
+
+    def list_assignments_by_type_status_and_created_at(self, assignment_type_key: str) -> list[dict[str, Any]]:
+        return self.list_by_index("assignmentsByTypeStatusAndCreatedAt", assignment_type_key)
+
+    def list_assignments_by_section_queue_status_and_priority(self, section_queue_status_key: str) -> list[dict[str, Any]]:
+        return self.list_by_index("assignmentsBySectionQueueStatusAndPriority", section_queue_status_key)
+
+    def list_assignment_events_by_assignment_and_created_at(self, assignment_id: str) -> list[dict[str, Any]]:
+        return self.list_by_index("assignmentEventsByAssignmentAndCreatedAt", assignment_id)
+
+    def list_semantic_relations_by_object_state(self, object_state_key: str) -> list[dict[str, Any]]:
+        return self.list_by_index("semanticRelationsByObjectState", object_state_key)
+
+    def list_semantic_relations_by_subject_state(self, subject_state_key: str) -> list[dict[str, Any]]:
+        return self.list_by_index("semanticRelationsBySubjectState", subject_state_key)
+
+    def list_knowledge_import_runs_by_corpus_kind_and_imported_at(self, corpus_import_kind_key: str) -> list[dict[str, Any]]:
+        return self.list_by_index("knowledgeImportRunsByCorpusKindAndImportedAt", corpus_import_kind_key)
+
+    def list_knowledge_import_runs_by_kind_and_imported_at(self, import_kind: str) -> list[dict[str, Any]]:
+        return self.list_by_index("knowledgeImportRunsByKindAndImportedAt", import_kind)
+
+    def list_knowledge_artifacts_by_import_run_and_kind(self, import_run_id: str) -> list[dict[str, Any]]:
+        return self.list_by_index("knowledgeArtifactsByImportRunAndKind", import_run_id)
+
+    def list_semantic_nodes_by_import_run_and_node_key(self, import_run_id: str) -> list[dict[str, Any]]:
+        return self.list_by_index("semanticNodesByImportRunAndNodeKey", import_run_id)
+
+    def list_semantic_relations_by_import_run_and_imported_at(self, import_run_id: str) -> list[dict[str, Any]]:
+        return self.list_by_index("semanticRelationsByImportRunAndImportedAt", import_run_id)
+
+    def delete_record(self, model_name: str, record_id: str) -> None:
+        if model_name not in MUTATIONS:
+            raise ValueError(f"Unsupported model for delete: {model_name}")
+        self.graphql(MUTATIONS[model_name]["delete"], {"input": {"id": record_id}})
+
+    def safe_list_records(self, model_name: str) -> list[dict[str, Any]]:
+        try:
+            return self.list_records(model_name)
+        except RuntimeError as error:
+            message = str(error)
+            if "FieldUndefined" in message or "not available" in message.lower():
+                return []
+            raise
+
     def update_newsroom_summary(
         self,
         delta: dict[str, Any],
@@ -373,6 +626,17 @@ class PapyrusGraphQLAuthoringClient:
         variables = {"uploadId": upload_id, **model_attachment_upload_variables(attachment)}
         result = self.graphql(COMPLETE_MODEL_ATTACHMENT_UPLOAD_MUTATION, variables)
         return result.get("completeModelAttachmentUpload") or {}
+
+    def create_model_attachment_download(self, attachment_id: str) -> dict[str, Any]:
+        result = self.graphql(CREATE_MODEL_ATTACHMENT_DOWNLOAD_MUTATION, {"attachmentId": attachment_id})
+        slot = result.get("createModelAttachmentDownload") or {}
+        headers = slot.get("requiredHeaders")
+        if isinstance(headers, str):
+            try:
+                slot["requiredHeaders"] = json.loads(headers)
+            except json.JSONDecodeError:
+                slot["requiredHeaders"] = {}
+        return slot
 
 
 def create_authoring_client() -> tuple[PapyrusGraphQLAuthoringClient, dict[str, Any]]:

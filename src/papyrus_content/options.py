@@ -60,6 +60,19 @@ def parse_comma_list(value: Any) -> list[str] | None:
     return cleaned or None
 
 
+def parse_repeated_option(flags: list[str], key: str) -> list[str]:
+    prefix = f"--{key}"
+    values: list[str] = []
+    index = 0
+    while index < len(flags):
+        if flags[index] == prefix and index + 1 < len(flags):
+            values.append(flags[index + 1])
+            index += 2
+        else:
+            index += 1
+    return values
+
+
 def normalize_non_negative_integer(value: Any, label: str) -> int | None:
     if value is None or value is True:
         return None

@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 
 PAPYRUS_ROOT = Path(__file__).resolve().parents[2]
+BIBLICUS_ROOT = Path(os.environ.get("BIBLICUS_WORKDIR", str(PAPYRUS_ROOT.parent / "Biblicus")))
 
 
 def load_dotenv() -> None:

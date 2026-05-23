@@ -1,0 +1,35 @@
+{
+  "generated_at": "2026-01-01T00:00:00Z",
+  "corpus": {
+    "name": "AI-ML-research",
+    "item_count": 2
+  },
+  "topic_set": {
+    "classifier_id": "ai-ml-v1",
+    "display_name": "AI/ML Research",
+    "description": "Test set",
+    "topics": [
+      {
+        "topic_uid": "category.ml",
+        "display_name": "Machine Learning",
+        "description": "ML topics",
+        "seed_item_ids": ["item-1"],
+        "holdout_item_ids": []
+      },
+      {
+        "topic_uid": "category.nlp",
+        "display_name": "NLP",
+        "description": "NLP topics"
+      }
+    ]
+  },
+  "artifacts": [
+    {
+      "kind": "topic-governance",
+      "artifact_id": "gov-1",
+      "snapshot_id": "snap-1"
+    }
+  ],
+  "proposals": [],
+  "warnings": []
+}

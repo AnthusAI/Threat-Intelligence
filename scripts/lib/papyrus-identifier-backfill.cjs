@@ -505,10 +505,48 @@ function sidecarDoi(sidecarPath) {
 function identifiersFromObject(value) {
   const source = value && typeof value === "object" ? value : {};
   return {
-    doi: normalizeDoi(source.doi ?? source.metadata?.doi ?? source.metadata?.source_doi ?? source.identifiers?.doi ?? source.identifier?.doi ?? ""),
-    arxiv_id: normalizeArxivId(source.arxiv_id ?? source.arxivId ?? source.metadata?.arxiv_id ?? source.metadata?.arxivId ?? source.identifiers?.arxiv_id ?? source.identifiers?.arxivId ?? ""),
-    isbn13: normalizeIsbn13(source.isbn13 ?? source.isbn ?? source.metadata?.isbn13 ?? source.metadata?.isbn ?? source.identifiers?.isbn13 ?? source.identifiers?.isbn ?? ""),
-    publisher_item: normalizePublisherItem(source.publisher_item ?? source.publisherItem ?? source.metadata?.publisher_item ?? source.metadata?.publisherItem ?? source.identifiers?.publisher_item ?? source.identifiers?.publisherItem ?? ""),
+    doi: normalizeDoi(
+      source.doi
+      ?? source.metadata?.doi
+      ?? source.metadata?.source_doi
+      ?? source.metadata?.identifiers?.doi
+      ?? source.identifiers?.doi
+      ?? source.identifier?.doi
+      ?? "",
+    ),
+    arxiv_id: normalizeArxivId(
+      source.arxiv_id
+      ?? source.arxivId
+      ?? source.metadata?.arxiv_id
+      ?? source.metadata?.arxivId
+      ?? source.metadata?.identifiers?.arxiv_id
+      ?? source.metadata?.identifiers?.arxivId
+      ?? source.identifiers?.arxiv_id
+      ?? source.identifiers?.arxivId
+      ?? "",
+    ),
+    isbn13: normalizeIsbn13(
+      source.isbn13
+      ?? source.isbn
+      ?? source.metadata?.isbn13
+      ?? source.metadata?.isbn
+      ?? source.metadata?.identifiers?.isbn13
+      ?? source.metadata?.identifiers?.isbn
+      ?? source.identifiers?.isbn13
+      ?? source.identifiers?.isbn
+      ?? "",
+    ),
+    publisher_item: normalizePublisherItem(
+      source.publisher_item
+      ?? source.publisherItem
+      ?? source.metadata?.publisher_item
+      ?? source.metadata?.publisherItem
+      ?? source.metadata?.identifiers?.publisher_item
+      ?? source.metadata?.identifiers?.publisherItem
+      ?? source.identifiers?.publisher_item
+      ?? source.identifiers?.publisherItem
+      ?? "",
+    ),
   };
 }
 

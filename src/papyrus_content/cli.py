@@ -18,10 +18,87 @@ from .accession import (
     require_corpus_config_by_id_or_key,
     reference_accession_assignment_id,
 )
+from .analysis_commands import (
+    analysis_create_reindex_assignment,
+    analysis_execute_assignment,
+    analysis_graph_artifacts,
+    analysis_import_graph_artifact,
+    analysis_reindex_plan,
+    analysis_run_now,
+)
 from .analysis_profiles import analysis_profiles, validate_analysis_profiles
 from .assignments import apply_assignment_action
-from .assignments_commands import assignments_list
+from .assignments_commands import (
+    assignments_apply_research_packet,
+    assignments_backfill_section_indexes,
+    assignments_build_context,
+    assignments_cancel,
+    assignments_claim,
+    assignments_complete,
+    assignments_copywriting_output,
+    assignments_create_research,
+    assignments_events,
+    assignments_for_object,
+    assignments_intake_proposals,
+    assignments_list,
+    assignments_orphan_research_packets,
+    assignments_process_queue,
+    assignments_release,
+    assignments_reopen,
+    assignments_research_intake_now,
+    assignments_research_packets,
+    assignments_review_reporting_packet,
+    assignments_run_copywriting,
+    assignments_run_research,
+    assignments_run_story_cycle,
+    assignments_story_cycle_output,
+)
+from .editions_commands import (
+    editions_dispatch_reporting,
+    editions_dispatch_research,
+    editions_plan,
+    editions_purge,
+)
+from .categories_commands import (
+    categories_draft_add_topic,
+    categories_draft_archive_topic,
+    categories_draft_create,
+    categories_draft_promote,
+    categories_draft_update_topic,
+    categories_export_category_set,
+    categories_export_category_tree,
+    categories_export_classifier_seed_manifest,
+    categories_export_lexical_steering,
+    categories_export_steering_feedback,
+    categories_import_config,
+    categories_import_projection,
+    categories_import_steering,
+    categories_review_proposal,
+    categories_run_curation_cycle,
+    categories_sandbox_steering_config,
+)
 from .content_commands import content_inspect, content_list, content_schema_check
+from .messages_commands import messages_export_legacy_comments, messages_import_legacy_comments
+from .references_commands import (
+    references_attach_extracted_text,
+    references_create_doi_backfill_assignment,
+    references_create_identifier_backfill_assignment,
+    references_curate_recent,
+    references_discover_citation_led,
+    references_doi_backfill_now,
+    references_execute_doi_backfill,
+    references_execute_identifier_backfill,
+    references_export_analysis_manifest,
+    references_export_scope_training,
+    references_extract_text_now,
+    references_identifier_backfill_now,
+    references_label,
+    references_labels,
+    references_list_predictions,
+    references_review_classification,
+    references_review_curation,
+    references_unlabel,
+)
 from .node_delegate import delegate_or_raise
 from .catalog import (
     assert_reference_catalog_plan_safety,
@@ -40,6 +117,13 @@ from .corpora import (
 from .env import PAPYRUS_ROOT, graphql_endpoint, load_dotenv, storage_bucket_from_amplify_outputs
 from .graphql_authoring import create_authoring_client
 from .ids import knowledge_corpus_id
+from .newsroom_commands import (
+    newsroom_backfill_feed_fields,
+    newsroom_backfill_operational_indexes,
+    newsroom_import_sections,
+    newsroom_prune_attachments,
+    newsroom_recount_summary,
+)
 from .newsroom_summary import (
     update_newsroom_summary_after_assignment_creates,
     update_newsroom_summary_after_reference_registration,
@@ -65,6 +149,7 @@ from .steering import (
     selected_corpus_configs,
 )
 
+
 PORTED_COMMANDS = frozenset(
     {
         "content:inspect",
@@ -81,9 +166,85 @@ PORTED_COMMANDS = frozenset(
         "references:source-status",
         "references:create-accession-assignments",
         "references:accession-now",
+        "references:review-curation",
+        "references:list-predictions",
+        "references:review-classification",
+        "references:label",
+        "references:unlabel",
+        "references:labels",
+        "references:discover-citation-led",
+        "references:curate-recent",
+        "references:extract-text-now",
+        "references:attach-extracted-text",
+        "references:create-doi-backfill-assignment",
+        "references:doi-backfill-now",
+        "references:execute-doi-backfill",
+        "references:create-identifier-backfill-assignment",
+        "references:identifier-backfill-now",
+        "references:execute-identifier-backfill",
+        "references:export-analysis-manifest",
+        "references:export-scope-training",
         "assignments:list",
+        "assignments:create-research",
+        "assignments:run-research",
+        "assignments:apply-research-packet",
+        "assignments:intake-proposals",
+        "assignments:research-intake-now",
+        "assignments:run-story-cycle",
+        "assignments:story-cycle-output",
+        "assignments:orphan-research-packets",
+        "assignments:backfill-section-indexes",
+        "assignments:for-object",
+        "assignments:build-context",
+        "assignments:research-packets",
+        "assignments:review-reporting-packet",
+        "assignments:run-copywriting",
+        "assignments:copywriting-output",
+        "assignments:events",
+        "assignments:process-queue",
+        "assignments:claim",
+        "assignments:release",
+        "assignments:complete",
+        "assignments:cancel",
+        "assignments:reopen",
+        "editions:plan",
+        "editions:dispatch-research",
+        "editions:dispatch-reporting",
+        "editions:purge",
         "analysis:profiles",
         "analysis:validate-profiles",
+        "analysis:reindex-plan",
+        "analysis:preview-reindex",
+        "analysis:create-reindex-assignment",
+        "analysis:run-now",
+        "analysis:execute-assignment",
+        "analysis:graph-artifacts",
+        "analysis:import-graph-artifact",
+        "newsroom:recount-summary",
+        "newsroom:prune-attachments",
+        "newsroom:backfill-feed-fields",
+        "newsroom:backfill-operational-indexes",
+        "newsroom:import-sections",
+        "relations:import-types",
+        "relations:backfill",
+        "messages:export-legacy-comments",
+        "messages:import-legacy-comments",
+        "categories:import-steering",
+        "categories:import-config",
+        "categories:sandbox-steering-config",
+        "categories:export-category-set",
+        "categories:export-category-tree",
+        "categories:export-steering-feedback",
+        "categories:export-lexical-steering",
+        "categories:export-classifier-seed-manifest",
+        "categories:import-projection",
+        "categories:draft-create",
+        "categories:draft-add-topic",
+        "categories:draft-update-topic",
+        "categories:draft-archive-topic",
+        "categories:draft-promote",
+        "categories:review-proposal",
+        "categories:run-curation-cycle",
     }
 )
 
@@ -141,12 +302,162 @@ def dispatch(group: str, command: str, flags: list[str]) -> None:
         references_create_accession_assignments(flags)
     elif route == "references:accession-now":
         references_accession_now(flags)
+    elif route == "references:review-curation":
+        references_review_curation(flags)
+    elif route == "references:list-predictions":
+        references_list_predictions(flags)
+    elif route == "references:review-classification":
+        references_review_classification(flags)
+    elif route == "references:label":
+        references_label(flags)
+    elif route == "references:unlabel":
+        references_unlabel(flags)
+    elif route == "references:labels":
+        references_labels(flags)
+    elif route == "references:discover-citation-led":
+        references_discover_citation_led(flags)
+    elif route == "references:curate-recent":
+        references_curate_recent(flags)
+    elif route == "references:extract-text-now":
+        references_extract_text_now(flags)
+    elif route == "references:attach-extracted-text":
+        references_attach_extracted_text(flags)
+    elif route == "references:create-doi-backfill-assignment":
+        references_create_doi_backfill_assignment(flags)
+    elif route == "references:doi-backfill-now":
+        references_doi_backfill_now(flags)
+    elif route == "references:execute-doi-backfill":
+        references_execute_doi_backfill(flags)
+    elif route == "references:create-identifier-backfill-assignment":
+        references_create_identifier_backfill_assignment(flags)
+    elif route == "references:identifier-backfill-now":
+        references_identifier_backfill_now(flags)
+    elif route == "references:execute-identifier-backfill":
+        references_execute_identifier_backfill(flags)
+    elif route == "references:export-analysis-manifest":
+        references_export_analysis_manifest(flags)
+    elif route == "references:export-scope-training":
+        references_export_scope_training(flags)
     elif route == "assignments:list":
         assignments_list(flags)
+    elif route == "assignments:create-research":
+        assignments_create_research(flags)
+    elif route == "assignments:run-research":
+        assignments_run_research(flags)
+    elif route == "assignments:apply-research-packet":
+        assignments_apply_research_packet(flags)
+    elif route == "assignments:intake-proposals":
+        assignments_intake_proposals(flags)
+    elif route == "assignments:research-intake-now":
+        assignments_research_intake_now(flags)
+    elif route == "assignments:run-story-cycle":
+        assignments_run_story_cycle(flags)
+    elif route == "assignments:story-cycle-output":
+        assignments_story_cycle_output(flags)
+    elif route == "assignments:orphan-research-packets":
+        assignments_orphan_research_packets(flags)
+    elif route == "assignments:backfill-section-indexes":
+        assignments_backfill_section_indexes(flags)
+    elif route == "assignments:for-object":
+        assignments_for_object(flags)
+    elif route == "assignments:build-context":
+        assignments_build_context(flags)
+    elif route == "assignments:research-packets":
+        assignments_research_packets(flags)
+    elif route == "assignments:review-reporting-packet":
+        assignments_review_reporting_packet(flags)
+    elif route == "assignments:run-copywriting":
+        assignments_run_copywriting(flags)
+    elif route == "assignments:copywriting-output":
+        assignments_copywriting_output(flags)
+    elif route == "assignments:events":
+        assignments_events(flags)
+    elif route == "assignments:process-queue":
+        assignments_process_queue(flags)
+    elif route == "assignments:claim":
+        assignments_claim(flags)
+    elif route == "assignments:release":
+        assignments_release(flags)
+    elif route == "assignments:complete":
+        assignments_complete(flags)
+    elif route == "assignments:cancel":
+        assignments_cancel(flags)
+    elif route == "assignments:reopen":
+        assignments_reopen(flags)
+    elif route == "editions:plan":
+        editions_plan(flags)
+    elif route == "editions:dispatch-research":
+        editions_dispatch_research(flags)
+    elif route == "editions:dispatch-reporting":
+        editions_dispatch_reporting(flags)
+    elif route == "editions:purge":
+        editions_purge(flags)
     elif route == "analysis:profiles":
         analysis_profiles(flags)
     elif route == "analysis:validate-profiles":
         validate_analysis_profiles(flags)
+    elif route in {"analysis:reindex-plan", "analysis:preview-reindex"}:
+        analysis_reindex_plan(flags)
+    elif route == "analysis:create-reindex-assignment":
+        analysis_create_reindex_assignment(flags)
+    elif route == "analysis:run-now":
+        analysis_run_now(flags)
+    elif route == "analysis:execute-assignment":
+        analysis_execute_assignment(flags)
+    elif route == "analysis:graph-artifacts":
+        analysis_graph_artifacts(flags)
+    elif route == "analysis:import-graph-artifact":
+        analysis_import_graph_artifact(flags)
+    elif route == "newsroom:recount-summary":
+        newsroom_recount_summary(flags)
+    elif route == "newsroom:prune-attachments":
+        newsroom_prune_attachments(flags)
+    elif route == "newsroom:backfill-feed-fields":
+        newsroom_backfill_feed_fields(flags)
+    elif route == "newsroom:backfill-operational-indexes":
+        newsroom_backfill_operational_indexes(flags)
+    elif route == "newsroom:import-sections":
+        newsroom_import_sections(flags)
+    elif route == "relations:import-types":
+        relations_import_types(flags)
+    elif route == "relations:backfill":
+        relations_backfill(flags)
+    elif route == "messages:export-legacy-comments":
+        messages_export_legacy_comments(flags)
+    elif route == "messages:import-legacy-comments":
+        messages_import_legacy_comments(flags)
+    elif route == "categories:import-steering":
+        categories_import_steering(flags)
+    elif route == "categories:import-config":
+        categories_import_config(flags)
+    elif route == "categories:sandbox-steering-config":
+        categories_sandbox_steering_config(flags)
+    elif route == "categories:export-category-set":
+        categories_export_category_set(flags)
+    elif route == "categories:export-category-tree":
+        categories_export_category_tree(flags)
+    elif route == "categories:export-steering-feedback":
+        categories_export_steering_feedback(flags)
+    elif route == "categories:export-lexical-steering":
+        categories_export_lexical_steering(flags)
+    elif route == "categories:export-classifier-seed-manifest":
+        categories_export_classifier_seed_manifest(flags)
+    elif route == "categories:import-projection":
+        categories_import_projection(flags)
+    elif route == "categories:draft-create":
+        categories_draft_create(flags)
+    elif route == "categories:draft-add-topic":
+        categories_draft_add_topic(flags)
+    elif route == "categories:draft-update-topic":
+        categories_draft_update_topic(flags)
+    elif route == "categories:draft-archive-topic":
+        categories_draft_archive_topic(flags)
+    elif route == "categories:draft-promote":
+        categories_draft_promote(flags)
+    elif route == "categories:review-proposal":
+        categories_review_proposal(flags)
+    elif route == "categories:run-curation-cycle":
+        categories_run_curation_cycle(flags)
     else:
         raise ValueError(f"Unsupported papyrus-content command: {group} {command}")
 
@@ -728,6 +1039,11 @@ def _utc_now() -> str:
 def print_usage() -> None:
     print("Usage: poetry run papyrus-content <group> <command> [options]")
     print("Python-native: content inspect, content schema-check, content list articles,")
-    print("  corpora status/worker-bootstrap/sync-*, references catalog/accession commands,")
-    print("  assignments list, analysis profiles/validate-profiles")
+    print("  corpora status/worker-bootstrap/sync-*, references catalog/accession/curation/export commands,")
+    print("  assignments list, analysis profiles/validate-profiles/reindex-plan/preview-reindex/")
+    print("  create-reindex-assignment/run-now/execute-assignment/graph-artifacts/import-graph-artifact,")
+    print("  newsroom recount-summary/prune-attachments/backfill-feed-fields/")
+    print("  backfill-operational-indexes/import-sections,")
+    print("  relations import-types/backfill, messages export/import-legacy-comments,")
+    print("  categories import/export/draft/review/curation-cycle commands")
     print("All other routes delegate to scripts/content-cli.cjs (Node).")

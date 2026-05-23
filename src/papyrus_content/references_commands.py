@@ -1,0 +1,703 @@
+from __future__ import annotations
+
+import json
+import re
+import subprocess
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from .assignments import apply_assignment_action
+from .env import PAPYRUS_ROOT
+from .graphql_authoring import create_authoring_client
+from .ids import hash_short, knowledge_corpus_id
+from .newsroom_summary import (
+    semantic_relation_count_delta,
+    update_newsroom_summary_after_assignment_creates,
+    update_newsroom_summary_after_extracted_text_attachments,
+    update_newsroom_summary_delta,
+)
+from .options import (
+    normalize_non_negative_integer,
+    normalize_positive_integer,
+    normalize_string,
+    parse_boolean_option,
+    parse_options,
+    parse_repeated_option,
+)
+from .records import apply_record_changes, build_record_changes, build_record_changes_targeted_by_id
+from .reference_assignments import (
+    build_reference_identifier_backfill_assignment_plan,
+    build_text_extraction_assignment_records,
+    delegate_reference_execution_to_node,
+    doi_backfill_compatibility_flags,
+    execute_reference_text_extraction_assignment,
+    normalize_identifier_types,
+    timestamp_for_path,
+)
+from .reference_attachments import build_extracted_text_attachment_plans
+from .reference_exports import build_reference_analysis_manifest, build_reference_scope_training_export
+from .reference_labels import (
+    apply_label_relation,
+    apply_unlabel_relation,
+    build_accept_authoritative_label_from_prediction,
+    build_classification_prediction_rows,
+    build_label_rows,
+    build_manual_authoritative_label_relation,
+    find_current_authoritative_label,
+    print_reference_label_plan,
+    resolve_category_any,
+    resolve_category_in_set,
+    resolve_reference_any,
+    resolve_reference_for_label,
+)
+from .reference_policy import normalize_reference_rejection_reason_code
+from .source_readiness import build_extraction_index
+from .steering import load_steering_config, require_corpus_config, require_steering_config
+
+
+REVIEW_REFERENCE_CURATION_MUTATION = """
+mutation ReviewReferenceCuration($referenceId: ID!, $action: String!, $note: String, $actorLabel: String, $reasonCode: String) {
+  reviewReferenceCuration(referenceId: $referenceId, action: $action, note: $note, actorLabel: $actorLabel, reasonCode: $reasonCode) {
+    ok action referenceId status reasonCode messageId relationId
+  }
+}
+"""
+
+
+def references_review_curation(flags: list[str]) -> None:
+    options = parse_options(flags)
+    reference_id = options.get("reference") or options.get("reference-id")
+    if not reference_id:
+        raise ValueError("references review-curation requires --reference <id>.")
+    if not options.get("action"):
+        raise ValueError("references review-curation requires --action accept|reject|reopen|archive.")
+    reason_code = normalize_reference_rejection_reason_code(
+        options.get("reason-code") or options.get("reasonCode"),
+        required=str(options.get("action")).lower() == "reject",
+    )
+    client, _ = create_authoring_client()
+    result = client.graphql(
+        REVIEW_REFERENCE_CURATION_MUTATION,
+        {
+            "referenceId": reference_id,
+            "action": options["action"],
+            "note": options.get("note"),
+            "actorLabel": options.get("actor") or "Papyrus content CLI",
+            "reasonCode": reason_code,
+        },
+    )
+    review = result.get("reviewReferenceCuration") or {}
+    print(
+        f"references\treview-curation\t{review.get('referenceId')}\t{review.get('action')}\t"
+        f"{review.get('status')}\t{review.get('reasonCode') or ''}\t{review.get('messageId') or ''}"
+    )
+
+
+def references_list_predictions(flags: list[str]) -> None:
+    options = parse_options(flags)
+    limit = normalize_positive_integer(options.get("limit"), "--limit")
+    status = str(options.get("status") or "current").lower()
+    corpus_key = normalize_string(options.get("corpus-key"))
+    category_set_id = normalize_string(options.get("category-set"))
+    steering_config = load_steering_config(options.get("config")) if corpus_key else None
+    corpus_id = (
+        knowledge_corpus_id(require_corpus_config(steering_config, corpus_key, "--corpus-key"))
+        if corpus_key and steering_config
+        else None
+    )
+    client, _ = create_authoring_client()
+    relations = client.list_records("SemanticRelation")
+    references = client.list_records("Reference")
+    categories = client.list_records("Category")
+    predictions = build_classification_prediction_rows(
+        relations=relations,
+        references=references,
+        categories=categories,
+        corpus_id=corpus_id,
+        category_set_id=category_set_id,
+        status=status,
+        limit=limit,
+    )
+    for entry in predictions:
+        print(
+            "\t".join(
+                [
+                    entry["relation"]["id"],
+                    entry["relation"].get("relationState") or "-",
+                    entry["reference"].get("corpusId") or "-",
+                    entry["reference"].get("externalItemId") or "-",
+                    entry["reference"].get("title") or "-",
+                    entry["category"].get("categoryKey") or entry["category"]["id"],
+                    entry["category"].get("displayName") or "-",
+                    "authoritative" if entry["hasAuthoritativeLabel"] else "predicted",
+                ]
+            )
+        )
+    if not predictions:
+        print("references\tlist-predictions\t0")
+
+
+def references_review_classification(flags: list[str]) -> None:
+    options = parse_options(flags)
+    relation_id = options.get("relation") or options.get("relation-id")
+    action = str(options.get("action") or "").lower()
+    if not relation_id:
+        raise ValueError("references review-classification requires --relation <semantic-relation-id>.")
+    if action not in {"accept", "reject"}:
+        raise ValueError("references review-classification requires --action accept|reject.")
+    client, _ = create_authoring_client()
+    relation = client.get_record("SemanticRelation", relation_id)
+    if not relation:
+        raise ValueError(f"SemanticRelation {relation_id} was not found.")
+    predicate = relation.get("relationTypeKey") or relation.get("predicate")
+    if predicate != "classified_as":
+        raise ValueError(f"SemanticRelation {relation_id} is not a classified_as prediction.")
+    if relation.get("relationState") != "current":
+        raise ValueError(
+            f"SemanticRelation {relation_id} is {relation.get('relationState')}; only current predictions are reviewable."
+        )
+    if relation.get("subjectKind") != "reference" or relation.get("objectKind") != "category":
+        raise ValueError(f"SemanticRelation {relation_id} must be reference -> category.")
+    if action == "reject":
+        client.delete_record("SemanticRelation", relation_id)
+        update_newsroom_summary_delta(
+            client,
+            {
+                "countDeltas": {"semanticRelations": -1},
+                "facetDeltas": {
+                    "semanticRelations": {
+                        "byRelationTypeKey": {"classified_as": -1},
+                        "byRelationDomain": {relation.get("relationDomain") or "unknown": -1},
+                        "bySubjectKind": {relation.get("subjectKind") or "unknown": -1},
+                        "byObjectKind": {relation.get("objectKind") or "unknown": -1},
+                    },
+                },
+            },
+            f"references review-classification reject {relation_id}",
+        )
+        print(f"references\treview-classification\t{relation_id}\treject\tdeleted_prediction")
+        return
+    authoritative = build_accept_authoritative_label_from_prediction(relation, note=options.get("note"))
+    client.upsert("SemanticRelation", authoritative)
+    update_newsroom_summary_delta(
+        client,
+        semantic_relation_count_delta(authoritative, 1),
+        f"references review-classification accept {relation_id}",
+    )
+    print(f"references\treview-classification\t{relation_id}\taccept\t{authoritative['id']}")
+
+
+def references_label(flags: list[str]) -> None:
+    options = parse_options(flags)
+    if not options.get("reference"):
+        raise ValueError("references label requires --reference <reference-id|item-id>.")
+    if not options.get("category"):
+        raise ValueError("references label requires --category <category-key|lineage-id|id>.")
+    if not options.get("category-set"):
+        raise ValueError("references label requires --category-set <id>.")
+    if not options.get("note"):
+        raise ValueError("references label requires --note <text>.")
+    client, _ = create_authoring_client()
+    category_set = client.get_record("CategorySet", options["category-set"])
+    if not category_set:
+        raise ValueError(f"CategorySet {options['category-set']} was not found.")
+    references = client.list_records("Reference")
+    categories = client.list_records("Category")
+    relations = client.list_records("SemanticRelation")
+    reference = resolve_reference_for_label(references, options["reference"])
+    category = resolve_category_in_set(
+        [entry for entry in categories if entry.get("categorySetId") == category_set["id"]],
+        options["category"],
+        label="--category",
+    )
+    if category.get("status") in {"deprecated", "archived"}:
+        raise ValueError(f"Category {category['id']} is {category['status']}; label an active draft/current category.")
+    authoritative = build_manual_authoritative_label_relation(
+        reference=reference,
+        category=category,
+        category_set=category_set,
+        note=options["note"],
+        actor=options.get("actor") or "Papyrus content CLI",
+    )
+    existing = find_current_authoritative_label(relations, authoritative)
+    if existing:
+        print(
+            f"references\tlabel\t{reference['id']}\t{category.get('categoryKey')}\tidempotent\t{existing['id']}"
+        )
+        return
+    print_reference_label_plan("label", [authoritative], apply=bool(options.get("apply")))
+    if not options.get("apply"):
+        print("references\tlabel\tapply\tskipped\tpass --apply to create the authoritative_label relation")
+        return
+    apply_label_relation(
+        client,
+        authoritative,
+        reference_id=reference["id"],
+        category_key=str(category.get("categoryKey") or category["id"]),
+    )
+    print(f"references\tlabel\t{reference['id']}\t{category.get('categoryKey')}\t{authoritative['id']}")
+
+
+def references_unlabel(flags: list[str]) -> None:
+    options = parse_options(flags)
+    relation_id = options.get("relation") or options.get("relation-id")
+    if not relation_id:
+        raise ValueError("references unlabel requires --relation <authoritative-label-relation-id>.")
+    client, _ = create_authoring_client()
+    relation = client.get_record("SemanticRelation", relation_id)
+    if not relation:
+        raise ValueError(f"SemanticRelation {relation_id} was not found.")
+    if (relation.get("relationTypeKey") or relation.get("predicate")) != "authoritative_label":
+        raise ValueError(f"SemanticRelation {relation_id} is not an authoritative_label relation.")
+    print_reference_label_plan("unlabel", [relation], apply=bool(options.get("apply")))
+    if not options.get("apply"):
+        print("references\tunlabel\tapply\tskipped\tpass --apply to delete only this authoritative_label relation")
+        return
+    apply_unlabel_relation(client, relation)
+    print(f"references\tunlabel\t{relation_id}\tdeleted_authoritative_label")
+
+
+def references_labels(flags: list[str]) -> None:
+    options = parse_options(flags)
+    client, _ = create_authoring_client()
+    references = client.list_records("Reference")
+    categories = client.list_records("Category")
+    relations = client.list_records("SemanticRelation")
+    reference = resolve_reference_any(references, options["reference"]) if options.get("reference") else None
+    category = None
+    if options.get("category"):
+        candidates = (
+            [entry for entry in categories if entry.get("categorySetId") == options.get("category-set")]
+            if options.get("category-set")
+            else categories
+        )
+        category = resolve_category_any(candidates, options["category"])
+    limit = normalize_positive_integer(options.get("limit"), "--limit")
+    rows = build_label_rows(
+        relations=relations,
+        references=references,
+        categories=categories,
+        reference=reference,
+        category=category,
+        limit=limit,
+    )
+    for row in rows:
+        print(
+            "\t".join(
+                [
+                    row["relation"]["id"],
+                    row["relation"].get("relationTypeKey") or row["relation"].get("predicate") or "-",
+                    row["reference"].get("curationStatus") or "-",
+                    row["reference"].get("externalItemId") or row["reference"]["id"],
+                    row["reference"].get("title") or "-",
+                    row["category"].get("categoryKey") or row["category"]["id"],
+                    row["category"].get("displayName") or "-",
+                    row["category"].get("categorySetId") or "-",
+                ]
+            )
+        )
+    if not rows:
+        print("references\tlabels\t0")
+
+
+def references_discover_citation_led(flags: list[str]) -> None:
+    delegate_reference_execution_to_node("discover-citation-led", flags)
+
+
+def references_curate_recent(flags: list[str]) -> None:
+    options = parse_options(flags)
+    references = parse_repeated_option(flags, "reference")
+    apply = parse_boolean_option(options.get("apply"), False, "--apply")
+    dry_run = parse_boolean_option(options.get("dry-run"), False, "--dry-run")
+    json_output = parse_boolean_option(options.get("json"), False, "--json")
+    if apply and dry_run:
+        raise ValueError("references curate-recent does not allow --apply with --dry-run.")
+    if not options.get("corpus-key"):
+        raise ValueError("references curate-recent requires --corpus-key <key>.")
+    args = [
+        "run",
+        "papyrus-newsroom",
+        "references",
+        "curate-recent",
+        "--corpus-key",
+        options["corpus-key"],
+        "--model",
+        normalize_string(options.get("model")) or "gpt-5.4-mini",
+        "--summary-max-tokens",
+        str(normalize_non_negative_integer(options.get("summary-max-tokens"), "--summary-max-tokens") or 500),
+        "--since-hours",
+        str(normalize_non_negative_integer(options.get("since-hours"), "--since-hours") or 48),
+        "--max-count",
+        str(normalize_non_negative_integer(options.get("max-count"), "--max-count") or 0),
+        "--scan-limit",
+        str(normalize_positive_integer(options.get("scan-limit"), "--scan-limit") or 1000),
+        "--max-parallel",
+        str(normalize_positive_integer(options.get("max-parallel"), "--max-parallel") or 1),
+    ]
+    since = normalize_string(options.get("since"))
+    if since:
+        args.extend(["--since", since])
+    resume = normalize_string(options.get("resume"))
+    if resume:
+        args.extend(["--resume", resume])
+    for reference_id in references:
+        args.extend(["--reference", reference_id])
+    if parse_boolean_option(options.get("refresh-summary"), False, "--refresh-summary"):
+        args.append("--refresh-summary")
+    if parse_boolean_option(options.get("refresh-quality"), False, "--refresh-quality"):
+        args.append("--refresh-quality")
+    if apply and not dry_run:
+        args.append("--apply")
+    if dry_run:
+        args.append("--dry-run")
+    completed = subprocess.run(["poetry", *args], cwd=PAPYRUS_ROOT, capture_output=True, text=True, check=False)
+    payload = extract_last_json_object(completed.stdout or "")
+    if not payload:
+        raise RuntimeError(
+            "Papyrus newsroom references curate-recent returned invalid JSON: "
+            f"{completed.stderr or completed.stdout or 'unknown error'}"
+        )
+    if json_output:
+        print(json.dumps(payload, indent=2))
+    else:
+        summary = payload.get("summary") or {}
+        print(f"references\tcurate-recent\trun\t{payload.get('runId', '-')}")
+        print(f"references\tcurate-recent\tmanifest\t{payload.get('manifestPath', '-')}")
+        print(f"references\tcurate-recent\tapply\t{'yes' if payload.get('apply') else 'no'}")
+        print(f"references\tcurate-recent\tok\t{'yes' if payload.get('ok') else 'no'}")
+        print(f"references\tcurate-recent\tdegraded\t{'yes' if payload.get('degraded') else 'no'}")
+        print(f"references\tcurate-recent\tselected\t{summary.get('selectedCount', 0)}")
+        print(f"references\tcurate-recent\tprocessed\t{summary.get('processedCount', 0)}")
+        print(f"references\tcurate-recent\tsucceeded\t{summary.get('succeededCount', 0)}")
+        print(f"references\tcurate-recent\tfailed\t{summary.get('failedCount', 0)}")
+        for failure in payload.get("selectionFailures") or []:
+            print(
+                f"reference-curation\tselection-failed\t{failure.get('referenceId', '-')}\t"
+                f"{failure.get('failureReason', 'selection failed')}"
+            )
+        for item in payload.get("items") or []:
+            reference = item.get("reference") or {}
+            stages = item.get("stages") or {}
+            print(
+                "\t".join(
+                    [
+                        "reference-curation",
+                        "failed" if item.get("failed") else "ok",
+                        reference.get("id") or item.get("referenceId") or "-",
+                        (stages.get("identifierPrepass") or {}).get("status") or "-",
+                        (stages.get("titleSubtitle") or {}).get("status") or "-",
+                        (stages.get("summary") or {}).get("status") or "-",
+                        (stages.get("quality") or {}).get("status") or "-",
+                        "; ".join(item.get("failureReasons") or []) or "-",
+                        reference.get("title") or "-",
+                    ]
+                )
+            )
+        for warning in payload.get("warnings") or []:
+            print(f"references\tcurate-recent\twarning\t{warning}")
+    if completed.returncode != 0:
+        raise RuntimeError(f"papyrus-newsroom references curate-recent exited with status {completed.returncode}")
+
+
+def references_extract_text_now(flags: list[str]) -> None:
+    options = parse_options(flags)
+    if not options.get("corpus-key"):
+        raise ValueError("references extract-text-now requires --corpus-key <key>.")
+    steering_config = load_steering_config(options.get("config")) or require_steering_config()
+    corpus_config = require_corpus_config(steering_config, options["corpus-key"], "--corpus-key")
+    corpus_id = knowledge_corpus_id(corpus_config)
+    client, auth = create_authoring_client()
+    now = _utc_now()
+    actor_label = options.get("assignee-key") or options.get("assignee") or options.get("actor") or "Papyrus content CLI"
+    run_id = options.get("run-id") or (
+        f"reference-text-extraction-{timestamp_for_path(now)}-"
+        f"{hash_short([corpus_id, options.get('stage'), options.get('configuration'), options.get('force')])}"
+    )
+    records = build_text_extraction_assignment_records(
+        corpus_config=corpus_config,
+        corpus_id=corpus_id,
+        actor_label=actor_label,
+        now=now,
+        options=options,
+        run_id=run_id,
+    )
+    changes = build_record_changes(client, records)
+    apply_record_changes(client, changes)
+    update_newsroom_summary_after_assignment_creates(
+        client,
+        changes,
+        actor_label=actor_label,
+        reason=f"references extract-text-now create {corpus_id}",
+    )
+    assignment_id = records[0]["expected"]["id"]
+    apply_assignment_action(
+        client,
+        auth_claims=auth,
+        action="claim",
+        assignment_id=assignment_id,
+        options=options,
+        actor_label=actor_label,
+    )
+    assignment = client.get_record("Assignment", assignment_id)
+    if not assignment:
+        raise ValueError(f"Assignment {assignment_id} was not found after planning.")
+    execution = execute_reference_text_extraction_assignment(client, assignment, options)
+    apply_assignment_action(
+        client,
+        auth_claims=auth,
+        action="complete",
+        assignment_id=assignment_id,
+        options=options,
+        actor_label=actor_label,
+    )
+    print(f"reference-text-extraction-now\tassignment\t{assignment_id}")
+    print(f"reference-text-extraction-now\trun\t{execution['runId']}")
+    print(f"reference-text-extraction-now\tmanifest\t{execution['manifestPath']}")
+    print(f"reference-text-extraction-now\tattachments\t{execution['importSummary'].get('importedRecords', 0)}")
+
+
+def references_attach_extracted_text(flags: list[str]) -> None:
+    options = parse_options(flags)
+    if not options.get("corpus-key"):
+        raise ValueError("references attach-extracted-text requires --corpus-key <key>.")
+    steering_config = load_steering_config(options.get("config")) or require_steering_config()
+    corpus_config = require_corpus_config(steering_config, options["corpus-key"], "--corpus-key")
+    corpus_id = knowledge_corpus_id(corpus_config)
+    actor_label = options.get("actor") or "Papyrus content CLI"
+    client, _ = create_authoring_client()
+    references = client.list_records("Reference")
+    attachments = client.list_records("ReferenceAttachment")
+    extraction_index = build_extraction_index(corpus_config.get("path"))
+    all_plans = build_extracted_text_attachment_plans(
+        corpus_config=corpus_config,
+        corpus_id=corpus_id,
+        references=references,
+        attachments=attachments,
+        extraction_index=extraction_index,
+    )
+    max_count = normalize_positive_integer(options.get("max-count"), "--max-count")
+    plans = all_plans[:max_count] if max_count else all_plans
+    records = [plan["record"] for plan in plans if plan.get("record")]
+    changes = build_record_changes(client, records)
+    print(f"references\tattach-extracted-text\tcorpus\t{corpus_id}")
+    print(f"references\tattach-extracted-text\tsnapshots\t{len(extraction_index.snapshot_ids)}")
+    print(f"references\tattach-extracted-text\teligible\t{len(all_plans)}")
+    if max_count:
+        print(f"references\tattach-extracted-text\tmax-count\t{max_count}")
+    print(f"references\tattach-extracted-text\tsnapshot_attachments\t{len(plans)}")
+    print(f"references\tattach-extracted-text\tplanned\t{len(records)}")
+    changed = [change for change in changes if change.get("action") != "noop"]
+    print_limit = 25 if options.get("limit") is None else normalize_non_negative_integer(options.get("limit"), "--limit")
+    print_limit = print_limit if print_limit is not None else 25
+    print(f"references\tattach-extracted-text\tchanges\t{len(changed)}")
+    for change in changed[:print_limit]:
+        print(f"{change['action']}\t{change['modelName']}\t{change['expected']['id']}")
+    if len(changed) > print_limit:
+        print(
+            f"references\tattach-extracted-text\tomitted\t{len(changed) - print_limit}\t"
+            f"pass --limit {len(changed)} to print every planned change"
+        )
+    if not options.get("apply"):
+        print(
+            "references\tattach-extracted-text\tapply\tskipped\tpass --apply to write snapshot-backed ReferenceAttachment records"
+        )
+        return
+    apply_record_changes(client, changes)
+    update_newsroom_summary_after_extracted_text_attachments(
+        client,
+        changes,
+        actor_label=actor_label,
+        reason=f"references attach-extracted-text {corpus_id}",
+    )
+    attached = len([change for change in changes if change.get("action") == "create"])
+    print(f"references\tattach-extracted-text\tattached\t{attached}")
+
+
+def references_create_identifier_backfill_assignment(flags: list[str]) -> None:
+    options = parse_options(flags)
+    if not options.get("corpus-key"):
+        raise ValueError("references create-identifier-backfill-assignment requires --corpus-key <key>.")
+    actor_label = options.get("actor") or "papyrus-content-cli"
+    now = _utc_now()
+    types = normalize_identifier_types(options.get("types"))
+    run_id = options.get("run-id") or (
+        f"reference-identifier-backfill-{timestamp_for_path(now)}-{hash_short([options['corpus-key'], ','.join(types)])}"
+    )
+    client, _ = create_authoring_client()
+    assignment_plan = build_reference_identifier_backfill_assignment_plan(
+        options=options,
+        actor_label=actor_label,
+        now=now,
+        run_id=run_id,
+        types=types,
+    )
+    changes = build_record_changes_targeted_by_id(client, assignment_plan["records"])
+    print(f"references\tcreate-identifier-backfill-assignment\tassignment\t{assignment_plan['assignment']['id']}")
+    print(f"references\tcreate-identifier-backfill-assignment\tcorpus\t{assignment_plan['corpusId']}")
+    print(f"references\tcreate-identifier-backfill-assignment\ttypes\t{','.join(types)}")
+    print(f"references\tcreate-identifier-backfill-assignment\trun\t{run_id}")
+    for change in changes:
+        print(f"{change['action']}\t{change['modelName']}\t{change['expected']['id']}")
+    if not options.get("apply"):
+        print(
+            "references\tcreate-identifier-backfill-assignment\tapply\tskipped\tpass --apply to write Assignment records"
+        )
+        return
+    apply_record_changes(client, changes)
+    update_newsroom_summary_after_assignment_creates(
+        client,
+        changes,
+        actor_label=actor_label,
+        reason=f"references create-identifier-backfill-assignment {assignment_plan['assignment']['id']}",
+    )
+
+
+def references_identifier_backfill_now(flags: list[str]) -> None:
+    options = parse_options(flags)
+    if not options.get("corpus-key"):
+        raise ValueError("references identifier-backfill-now requires --corpus-key <key>.")
+    now = _utc_now()
+    types = normalize_identifier_types(options.get("types"))
+    run_now_options = {
+        **options,
+        "apply": True,
+        "run-id": options.get("run-id") or f"reference-identifier-backfill-now-{timestamp_for_path(now)}",
+        "types": ",".join(types),
+    }
+    actor_label = (
+        run_now_options.get("assignee-key")
+        or run_now_options.get("assignee")
+        or run_now_options.get("actor")
+        or "papyrus-content-cli"
+    )
+    client, auth = create_authoring_client()
+    assignment_plan = build_reference_identifier_backfill_assignment_plan(
+        options=run_now_options,
+        actor_label=actor_label,
+        now=now,
+        run_id=run_now_options["run-id"],
+        types=types,
+    )
+    run_now_options["__assignmentMetadata"] = assignment_plan["metadata"]
+    assignment_changes = build_record_changes_targeted_by_id(client, assignment_plan["records"])
+    apply_record_changes(client, assignment_changes)
+    update_newsroom_summary_after_assignment_creates(
+        client,
+        assignment_changes,
+        actor_label=actor_label,
+        reason=f"references identifier-backfill-now create {assignment_plan['assignment']['id']}",
+    )
+    apply_assignment_action(
+        client,
+        auth_claims=auth,
+        action="claim",
+        assignment_id=assignment_plan["assignment"]["id"],
+        options=run_now_options,
+        actor_label=actor_label,
+    )
+    delegate_reference_execution_to_node(
+        "execute-identifier-backfill",
+        ["--assignment", assignment_plan["assignment"]["id"]],
+    )
+    apply_assignment_action(
+        client,
+        auth_claims=auth,
+        action="complete",
+        assignment_id=assignment_plan["assignment"]["id"],
+        options=run_now_options,
+        actor_label=actor_label,
+    )
+
+
+def references_execute_identifier_backfill(flags: list[str]) -> None:
+    delegate_reference_execution_to_node("execute-identifier-backfill", flags)
+
+
+def references_create_doi_backfill_assignment(flags: list[str]) -> None:
+    references_create_identifier_backfill_assignment(doi_backfill_compatibility_flags(flags))
+
+
+def references_doi_backfill_now(flags: list[str]) -> None:
+    references_identifier_backfill_now(doi_backfill_compatibility_flags(flags))
+
+
+def references_execute_doi_backfill(flags: list[str]) -> None:
+    delegate_reference_execution_to_node("execute-doi-backfill", flags)
+
+
+def references_export_analysis_manifest(flags: list[str]) -> None:
+    options = parse_options(flags)
+    if not options.get("output"):
+        raise ValueError("references export-analysis-manifest requires --output <accepted-manifest.json>.")
+    if not options.get("corpus-key"):
+        raise ValueError("references export-analysis-manifest requires --corpus-key <key>.")
+    steering_config = load_steering_config(options.get("config")) or require_steering_config()
+    corpus_config = require_corpus_config(steering_config, options["corpus-key"], "--corpus-key")
+    corpus_id = knowledge_corpus_id(corpus_config)
+    client, _ = create_authoring_client()
+    references = client.list_records("Reference")
+    attachments = client.list_records("ReferenceAttachment")
+    payload = build_reference_analysis_manifest(
+        corpus_config=corpus_config,
+        corpus_id=corpus_id,
+        references=references,
+        attachments=attachments,
+    )
+    _write_json_file(options["output"], payload)
+    print(
+        f"references\texport-analysis-manifest\t{corpus_id}\t{options['output']}\t{len(payload['items'])} accepted"
+    )
+
+
+def references_export_scope_training(flags: list[str]) -> None:
+    options = parse_options(flags)
+    if not options.get("output"):
+        raise ValueError("references export-scope-training requires --output <scope-training.json>.")
+    if not options.get("corpus-key"):
+        raise ValueError("references export-scope-training requires --corpus-key <key>.")
+    steering_config = load_steering_config(options.get("config")) or require_steering_config()
+    corpus_config = require_corpus_config(steering_config, options["corpus-key"], "--corpus-key")
+    corpus_id = knowledge_corpus_id(corpus_config)
+    client, _ = create_authoring_client()
+    references = client.list_records("Reference")
+    attachments = client.list_records("ReferenceAttachment")
+    messages = client.list_records("Message")
+    relations = client.list_records("SemanticRelation")
+    payload = build_reference_scope_training_export(
+        corpus_config=corpus_config,
+        corpus_id=corpus_id,
+        references=references,
+        attachments=attachments,
+        messages=messages,
+        relations=relations,
+    )
+    _write_json_file(options["output"], payload)
+    print(
+        f"references\texport-scope-training\t{corpus_id}\t{options['output']}\t"
+        f"{payload['counts']['positive']} positive\t{payload['counts']['negative']} negative"
+    )
+
+
+def extract_last_json_object(text: str) -> dict[str, Any] | None:
+    for line in reversed(text.strip().splitlines()):
+        value = line.strip()
+        if not value.startswith("{") or not value.endswith("}"):
+            continue
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return None
+
+
+def _write_json_file(path: str, payload: Any) -> None:
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")

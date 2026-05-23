@@ -165,3 +165,81 @@ def _optional_string(value: Any) -> str | None:
     if not isinstance(value, str) or not value.strip():
         return None
     return value.strip()
+
+
+def find_corpus_config_by_path(config: dict[str, Any] | None, corpus_path: str | None) -> dict[str, Any] | None:
+    if not config or not corpus_path:
+        return None
+    normalized = corpus_path.rstrip("/")
+    for corpus in config.get("corpora") or []:
+        path_value = corpus.get("path")
+        if not path_value:
+            continue
+        if path_value == normalized or path_value.rstrip("/") == normalized:
+            return corpus
+        if normalized.endswith(path_value.rstrip("/")):
+            return corpus
+    return None
+
+
+def resolve_steering_import_corpus(config: dict[str, Any] | None, options: dict[str, Any]) -> dict[str, Any]:
+    if options.get("corpus-key"):
+        required_config = config or require_steering_config(options.get("config"))
+        corpus_config = require_corpus_config(required_config, options["corpus-key"], "--corpus-key")
+        return {
+            "corpusConfig": corpus_config,
+            "corpusPath": options.get("corpus") or corpus_config.get("path"),
+            "classifierId": resolve_classifier_for_corpus(
+                required_config,
+                corpus_config,
+                options.get("classifier"),
+            ),
+        }
+    corpus_config = find_corpus_config_by_path(config, options.get("corpus"))
+    classifier_id = options.get("classifier")
+    if not classifier_id and corpus_config and config:
+        classifier_id = resolve_classifier_for_corpus(config, corpus_config, None)
+    return {
+        "corpusConfig": corpus_config,
+        "corpusPath": options.get("corpus"),
+        "classifierId": classifier_id,
+    }
+
+
+def resolve_projection_import_corpora(config: dict[str, Any] | None, options: dict[str, Any]) -> dict[str, Any]:
+    from .ids import knowledge_corpus_id
+
+    target_corpus = None
+    authority_corpus = None
+    if options.get("target-corpus-key"):
+        required_config = config or require_steering_config(options.get("config"))
+        target_corpus = require_corpus_config(required_config, options["target-corpus-key"], "--target-corpus-key")
+        authority_key = options.get("authority-corpus-key") or (
+            (target_corpus.get("canonicalProjection") or {}).get("authorityCorpusKey")
+        )
+        if authority_key:
+            authority_corpus = require_corpus_config(required_config, authority_key, "--authority-corpus-key")
+        classifier_id = (
+            options.get("classifier")
+            or (target_corpus.get("canonicalProjection") or {}).get("classifierId")
+            or required_config["canonicalTopicSet"]["classifierId"]
+        )
+        return {
+            "targetCorpus": target_corpus,
+            "authorityCorpus": authority_corpus,
+            "targetCorpusId": options.get("target-corpus-id") or knowledge_corpus_id(target_corpus),
+            "authorityCorpusId": options.get("authority-corpus-id")
+            or (knowledge_corpus_id(authority_corpus) if authority_corpus else None),
+            "classifierId": classifier_id,
+        }
+    if options.get("authority-corpus-key"):
+        required_config = config or require_steering_config(options.get("config"))
+        authority_corpus = require_corpus_config(required_config, options["authority-corpus-key"], "--authority-corpus-key")
+    return {
+        "targetCorpus": target_corpus,
+        "authorityCorpus": authority_corpus,
+        "targetCorpusId": options.get("target-corpus-id"),
+        "authorityCorpusId": options.get("authority-corpus-id")
+        or (knowledge_corpus_id(authority_corpus) if authority_corpus else None),
+        "classifierId": options.get("classifier"),
+    }

@@ -72,6 +72,33 @@ TITLE_SUBTITLE_SOURCE = "papyrus-title-subtitle-enricher"
 TITLE_SUBTITLE_PROMPT_VERSION = "reference-title-subtitle-v1-verbatim-source"
 TITLE_SUBTITLE_SUMMARY_PROMPT_VERSION = "reference-title-subtitle-summary-v1-outcome"
 TITLE_SUBTITLE_SUMMARY_TOKEN_BUDGET_DEFAULT = 500
+BIBLICUS_CATALOG_ITEM_ROOT_FIELDS = frozenset(
+    {
+        "id",
+        "relpath",
+        "sha256",
+        "bytes",
+        "media_type",
+        "title",
+        "tags",
+        "metadata",
+        "dates",
+        "created_at",
+        "source_uri",
+    }
+)
+CATALOG_EXTENSION_ROOT_FIELDS = frozenset(
+    {
+        "identifiers",
+        "identifier_resolution",
+        "papyrus",
+        "summary",
+        "summary_resolution",
+        "title_subtitle_resolution",
+        "subtitle",
+        "quality",
+    }
+)
 IDENTIFIER_PREPASS_TYPES = ("doi", "arxiv_id", "isbn13", "publisher_item")
 IDENTIFIER_PREPASS_SOURCE_ORDER = {
     "metadata.identifiers": 0,
@@ -1558,11 +1585,7 @@ def apply_quality_local_metadata(
                         "quality_rating": payload,
                     }
                     item["metadata"] = metadata
-                    item["quality"] = {
-                        **(item.get("quality") if isinstance(item.get("quality"), dict) else {}),
-                        "rating": rating,
-                        "rating_node_key": quality_node_key(rating),
-                    }
+                    item.pop("quality", None)
                     catalog_path.write_text(json.dumps(catalog, indent=2, sort_keys=True) + "\n", encoding="utf-8")
                     updated.append({"target": "catalog", "path": str(catalog_path), "itemKey": catalog_item_key})
         except Exception as exc:
@@ -3763,10 +3786,23 @@ def apply_title_subtitle_local_metadata(*, reference: dict[str, Any], resolution
 def apply_title_subtitle_to_catalog_item(item: dict[str, Any], *, resolution: dict[str, Any]) -> dict[str, Any]:
     enriched = dict(item)
     metadata = dict(enriched.get("metadata") if isinstance(enriched.get("metadata"), dict) else {})
+    if _is_biblicus_catalog_item(enriched):
+        title = _clean_text(resolution.get("title"))
+        if title:
+            enriched["title"] = title
+        _apply_title_subtitle_to_mapping(metadata, resolution)
+        enriched["metadata"] = metadata
+        for key in CATALOG_EXTENSION_ROOT_FIELDS:
+            enriched.pop(key, None)
+        return enriched
     _apply_title_subtitle_to_mapping(enriched, resolution)
     _apply_title_subtitle_to_mapping(metadata, resolution)
     enriched["metadata"] = metadata
     return enriched
+
+
+def _is_biblicus_catalog_item(item: dict[str, Any]) -> bool:
+    return bool(_clean_text(item.get("relpath")) and _clean_text(item.get("sha256")))
 
 
 def _apply_title_subtitle_to_mapping(target: dict[str, Any], resolution: dict[str, Any]) -> None:
