@@ -114,6 +114,7 @@ function main() {
       RATIONALE,
     ];
     if (!options.dryRun) args.push("--apply");
+    args.push("--title-subtitle-enrichment", "false");
 
     console.log(`catalog-registration\tbatch\t${batchIndex + 1}/${totalBatches}\toffset\t${offset}\tcount\t${slice.length}`);
     const startedAt = Date.now();
