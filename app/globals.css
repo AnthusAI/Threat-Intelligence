@@ -7041,6 +7041,8 @@ img {
 
 /* Scoped shadcn / AI Elements tokens mapped to the newspaper palette. */
 .papyrus-console-ui {
+  --radius: 0.625rem;
+  --font-sans: Arial, Helvetica, sans-serif;
   --background: var(--paper);
   --foreground: var(--ink);
   --card: var(--paper);
