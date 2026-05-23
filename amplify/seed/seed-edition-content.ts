@@ -166,6 +166,12 @@ export const seedEditionArticles: Article[] = [
       "S3 is not magic, but it is a durable, boring boundary. You can put your own processing next to it, run additional enrichment jobs, export manifests, audit source material, or connect another analysis system without asking Papyrus for permission to reach your own data.",
       "The same control principle applies to the application itself. The code is open, and a publication can host its own installation, adapt the newsroom workflow, customize layouts, or add policies and procedures that match its editorial mission.",
       "That does not mean every installation has to become a software project. It means the owner of the publication keeps real leverage. Papyrus can automate the newsroom, but it should not own the newsroom's memory, source material, or future.",
+      "The storage pattern is intentionally plain enough for operators to reason about. Source files, extracted text, catalogs, and reference metadata can be inspected with standard cloud tools, mirrored into a backup account, or handed to another processing pipeline without asking a vendor to export the publication's memory.",
+      "That portability also changes the relationship between Papyrus and the rest of an organization. A team can run its own classifiers, enrichment scripts, compliance checks, archival jobs, or analytics over the same source material the newsroom uses.",
+      "If a publication outgrows the default workflows, it can extend them. The newsroom procedures, content CLI, layout plans, and data models are code and configuration, not hidden product magic. Operators can trace what happens, replace pieces, or build new ones.",
+      "Self-hosting is part of the same promise. A publication can use a managed deployment when that is convenient, but the architecture should still leave room for an organization to run its own installation and make its own operational tradeoffs.",
+      "This is especially important for publications that treat their sources as sensitive institutional knowledge. The point of automation is to make the newsroom more capable, not to turn source history, curation memory, or editorial policy into a locked dependency.",
+      "The practical test is simple: if you decide to leave, you should still have your source material, your reference catalog, your curation record, your policies, and the code needed to understand how the system worked. Papyrus should help you build a newsroom you control, not rent one you cannot take with you.",
     ],
   },
   {
@@ -775,8 +781,15 @@ function getSeedFrontResponsiveLayouts() {
           rowStart: 1,
           rowSpan: 1,
         },
+        {
+          blockId: "front-papyrus-data-ownership",
+          columnStart: 1,
+          columnSpan: 6,
+          rowStart: 2,
+          rowSpan: 1,
+        },
       ],
-      overflow: { columnSpan: 2, rowSpan: 1 },
+      overflow: { columnSpan: "full", rowSpan: 1 },
     },
     {
       minColumns: 5,
@@ -807,8 +820,15 @@ function getSeedFrontResponsiveLayouts() {
           rowStart: 1,
           rowSpan: 1,
         },
+        {
+          blockId: "front-papyrus-data-ownership",
+          columnStart: 1,
+          columnSpan: 5,
+          rowStart: 2,
+          rowSpan: 1,
+        },
       ],
-      overflow: { columnSpan: 2, rowSpan: 1 },
+      overflow: { columnSpan: "full", rowSpan: 1 },
     },
     {
       minColumns: 4,
@@ -839,8 +859,15 @@ function getSeedFrontResponsiveLayouts() {
           rowStart: 2,
           rowSpan: 1,
         },
+        {
+          blockId: "front-papyrus-data-ownership",
+          columnStart: 1,
+          columnSpan: 4,
+          rowStart: 3,
+          rowSpan: 1,
+        },
       ],
-      overflow: { columnSpan: 2, rowSpan: 1 },
+      overflow: { columnSpan: "full", rowSpan: 1 },
     },
     {
       minColumns: 1,
@@ -941,5 +968,6 @@ function getSeedCutPolicy(itemId: string) {
   if (itemId === "papyrus-reader-contract") return { bodyDepthRows: 14, jumpTargetPage: 2 };
   if (itemId === "papyrus-introduction") return { bodyDepthRows: 14, jumpTargetPage: 3 };
   if (itemId === "papyrus-agent-workflow") return { bodyDepthRows: 14, jumpTargetPage: 3 };
+  if (itemId === "papyrus-data-ownership") return { bodyDepthRows: 8, jumpTargetPage: 2 };
   return undefined;
 }
