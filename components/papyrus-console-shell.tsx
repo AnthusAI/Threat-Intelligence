@@ -16,6 +16,16 @@ const CONSOLE_SEARCH_VISIBILITY = "explicit";
 const CONSOLE_RESPONSE_TARGET = process.env.NEXT_PUBLIC_PAPYRUS_CONSOLE_RESPONSE_TARGET?.trim() || "cloud";
 
 type DataClient = ReturnType<typeof generateClient<Schema>>;
+type GraphQLClient = {
+  graphql: (options: {
+    authMode?: typeof USER_POOL_AUTH_MODE;
+    query: string;
+    variables?: Record<string, unknown>;
+  }) => Promise<{
+    data?: Record<string, unknown> | null;
+    errors?: Array<{ message?: string | null; errorType?: string | null } | string | null> | null;
+  }>;
+};
 
 type ConsoleMessage = {
   id: string;
@@ -56,10 +66,16 @@ type PapyrusConsoleShellProps = {
 };
 
 let dataClient: DataClient | null = null;
+let graphqlClient: GraphQLClient | null = null;
 
 function getClient(): DataClient {
   dataClient ??= generateClient<Schema>({ authMode: USER_POOL_AUTH_MODE });
   return dataClient;
+}
+
+function getGraphQLClient(): GraphQLClient {
+  graphqlClient ??= generateClient<Schema>() as unknown as GraphQLClient;
+  return graphqlClient;
 }
 
 export function PapyrusConsoleShell({ children }: PapyrusConsoleShellProps) {
@@ -109,12 +125,12 @@ export function PapyrusConsoleShell({ children }: PapyrusConsoleShellProps) {
       {shouldOfferConsole ? (
         <aside className={open ? "papyrus-console papyrus-console--open" : "papyrus-console"} aria-label="Papyrus console">
           <button className="papyrus-console__tab" onClick={toggleOpen} type="button" aria-expanded={open} aria-label={open ? "Close console" : "Open console"}>
-            {open ? <LucideXIcon /> : <MessagesSquareIcon />}
+            <MessagesSquareIcon />
           </button>
           {open ? (
             canUseConsole
-              ? <ConsolePanel actorLabel={session?.auth.label ?? "Papyrus editor"} />
-              : <ConsoleAccessPanel session={session} />
+              ? <ConsolePanel actorLabel={session?.auth.label ?? "Papyrus editor"} onClose={toggleOpen} />
+              : <ConsoleAccessPanel onClose={toggleOpen} session={session} />
           ) : null}
         </aside>
       ) : null}
@@ -122,13 +138,10 @@ export function PapyrusConsoleShell({ children }: PapyrusConsoleShellProps) {
   );
 }
 
-function ConsoleAccessPanel({ session }: { session: ReaderSessionSnapshot | null }) {
+function ConsoleAccessPanel({ onClose, session }: { onClose: () => void; session: ReaderSessionSnapshot | null }) {
   return (
     <div className="papyrus-console__panel papyrus-console__panel--access">
-      <ConsolePanelHeader
-        subtitle={session?.auth.label ?? "Checking editor session"}
-        title="Console Access"
-      />
+      <ConsolePanelHeader onClose={onClose} />
       <div className="papyrus-console__empty">
         <strong>Checking Newsroom credentials.</strong>
         <span>
@@ -141,7 +154,7 @@ function ConsoleAccessPanel({ session }: { session: ReaderSessionSnapshot | null
   );
 }
 
-function ConsolePanel({ actorLabel }: { actorLabel: string }) {
+function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: () => void }) {
   const [thread, setThread] = useState<ConsoleThread | null>(null);
   const [threads, setThreads] = useState<ConsoleThread[]>([]);
   const [messages, setMessages] = useState<ConsoleMessage[]>([]);
@@ -169,15 +182,7 @@ function ConsolePanel({ actorLabel }: { actorLabel: string }) {
   }, []);
 
   const loadThreads = useCallback(async () => {
-    const response = await (getClient().models.MessageThread.listMessageThreadsByKindAndUpdatedAt as never as (input: {
-      threadKind: string;
-      sortDirection?: "ASC" | "DESC";
-      limit?: number;
-    }, options?: { authMode: typeof USER_POOL_AUTH_MODE }) => Promise<{ data?: ConsoleThread[] | null }>)(
-      { threadKind: "console", sortDirection: "DESC", limit: 25 },
-      { authMode: USER_POOL_AUTH_MODE },
-    );
-    return Array.isArray(response.data) ? response.data : [];
+    return listConsoleThreads(25);
   }, []);
 
   const loadThread = useCallback(async () => {
@@ -336,10 +341,7 @@ function ConsolePanel({ actorLabel }: { actorLabel: string }) {
 
   return (
     <div className="papyrus-console__panel">
-      <ConsolePanelHeader
-        subtitle={actorLabel}
-        title={thread?.title ?? "Papyrus Console"}
-      />
+      <ConsolePanelHeader onClose={onClose} />
       <div className="papyrus-console__sessions">
         <label>
           <span>Session</span>
@@ -415,18 +417,57 @@ function formatConsoleThreadOption(thread: ConsoleThread): string {
   return `${thread.title || "Papyrus Console"}${suffix}`;
 }
 
-function ConsolePanelHeader({
-  subtitle,
-  title,
-}: {
-  subtitle: string;
-  title: string;
-}) {
+async function listConsoleThreads(limit: number): Promise<ConsoleThread[]> {
+  const response = await getGraphQLClient().graphql({
+    authMode: USER_POOL_AUTH_MODE,
+    query: `
+      query ListMessageThreadsByKindAndUpdatedAt($threadKind: String!, $sortDirection: ModelSortDirection, $limit: Int) {
+        listMessageThreadsByKindAndUpdatedAt(threadKind: $threadKind, sortDirection: $sortDirection, limit: $limit) {
+          items {
+            id
+            threadKind
+            status
+            title
+            summary
+            primaryAnchorKey
+            createdByLabel
+            messageCount
+            lastMessageId
+            lastMessageAt
+            contextDigest
+            metadata
+            createdAt
+            updatedAt
+            newsroomFeedKey
+          }
+        }
+      }
+    `,
+    variables: { threadKind: "console", sortDirection: "DESC", limit },
+  });
+  return readGraphQLConnection<ConsoleThread>(response, "listMessageThreadsByKindAndUpdatedAt");
+}
+
+function readGraphQLConnection<T>(
+  response: Awaited<ReturnType<GraphQLClient["graphql"]>>,
+  fieldName: string,
+): T[] {
+  if (response.errors?.length) {
+    throw new Error(response.errors.map(formatAmplifyError).join("; "));
+  }
+  const connection = response.data?.[fieldName];
+  if (!connection || typeof connection !== "object") return [];
+  const items = (connection as { items?: unknown }).items;
+  return Array.isArray(items) ? items as T[] : [];
+}
+
+function ConsolePanelHeader({ onClose }: { onClose: () => void }) {
   return (
     <header className="papyrus-console__header">
-      <p>Editor Console</p>
-      <h2>{title}</h2>
-      <span>{subtitle}</span>
+      <p className="papyrus-console__header-label">Chat</p>
+      <button className="papyrus-console__close" onClick={onClose} type="button" aria-label="Close console">
+        <LucideXIcon />
+      </button>
     </header>
   );
 }
@@ -435,7 +476,7 @@ function LucideXIcon() {
   return (
     <svg
       aria-hidden="true"
-      className="papyrus-console__icon news-desk-search-mark__icon"
+      className="papyrus-console__close-icon news-desk-search-mark__icon"
       fill="none"
       focusable="false"
       height="18"
