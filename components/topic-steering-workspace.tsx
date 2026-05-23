@@ -194,6 +194,20 @@ type NewsroomCardRecord = {
   templateRole?: NewsroomCardTemplateRole;
   title: ReactNode;
 };
+type ConsoleThreadSummary = {
+  id: string;
+  threadKind: string;
+  status: string;
+  title: string;
+  summary?: string | null;
+  primaryAnchorKey?: string | null;
+  createdByLabel?: string | null;
+  messageCount?: number | null;
+  lastMessageAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  newsroomFeedKey?: string | null;
+};
 type NewsroomDetailAction = {
   ariaLabel?: string;
   icon?: ReactNode;
@@ -6056,25 +6070,56 @@ function MessagesDeskView({
   const [domainFilter, setDomainFilter] = useState("");
   const [selectedMessageId, setSelectedMessageId] = useState(initialMessageId ?? "");
   const [isMessageDetailOpen, setIsMessageDetailOpen] = useState(Boolean(initialMessageId));
+  const [consoleThreads, setConsoleThreads] = useState<ConsoleThreadSummary[]>([]);
+  const [consoleThreadsError, setConsoleThreadsError] = useState<string | null>(null);
+  const dataClient = useMemo(() => generateClient<Schema>({ authMode: USER_POOL_AUTH_MODE }), []);
+  const messageKind = kindFilter === "__chat_detail" ? "console_chat_turn" : kindFilter;
   const feed = useNewsroomPagedRows({
     initialItems: messages,
-    enabled: !isDemo,
+    enabled: !isDemo && kindFilter !== "__chat_sessions",
     resetKey: `messages:${kindFilter}:${domainFilter}`,
     loadPage: (nextToken) => loadNewsroomMessagePage({
-      kind: kindFilter,
+      kind: messageKind,
       domain: domainFilter,
       nextToken,
     }),
   });
+  useEffect(() => {
+    if (isDemo || kindFilter !== "__chat_sessions") return;
+    let active = true;
+    const model = dataClient.models.MessageThread as unknown as {
+      listMessageThreadsByKindAndUpdatedAt: (
+        input: { threadKind: string; sortDirection?: "ASC" | "DESC"; limit?: number },
+        options?: { authMode: typeof USER_POOL_AUTH_MODE },
+      ) => Promise<{ data?: ConsoleThreadSummary[] | null }>;
+    };
+    model.listMessageThreadsByKindAndUpdatedAt({ threadKind: "console", sortDirection: "DESC", limit: 100 }, { authMode: USER_POOL_AUTH_MODE })
+      .then((response) => {
+        if (!active) return;
+        setConsoleThreads(Array.isArray(response.data) ? response.data : []);
+        setConsoleThreadsError(null);
+      })
+      .catch((error) => {
+        if (!active) return;
+        setConsoleThreadsError(error instanceof Error ? error.message : "Unable to load chat sessions.");
+      });
+    return () => {
+      active = false;
+    };
+  }, [dataClient, isDemo, kindFilter]);
   const feedMessages = isDemo ? messages : feed.items;
   const messageKindCounts = summary?.facets?.messages?.byKind ?? summary?.messageKindCounts ?? countMessagesBy(messages, "messageKind");
   const messageDomainCounts = summary?.facets?.messages?.byDomain ?? summary?.messageDomainCounts ?? countMessagesBy(messages, "messageDomain");
   const messageKinds = useMemo(() => sortedCountOptions(messageKindCounts).map((option) => option.key), [messageKindCounts]);
   const messageDomains = useMemo(() => sortedCountOptions(messageDomainCounts).map((option) => option.key), [messageDomainCounts]);
-  const visibleMessages = useMemo(() => feedMessages
-    .filter((message) => !kindFilter || message.messageKind === kindFilter)
-    .filter((message) => !domainFilter || message.messageDomain === domainFilter)
-    .sort((left, right) => right.createdAt.localeCompare(left.createdAt)), [domainFilter, feedMessages, kindFilter]);
+  const chatSessionMessages = useMemo(() => consoleThreads.map(consoleThreadToMessageRecord), [consoleThreads]);
+  const visibleMessages = useMemo(() => {
+    if (kindFilter === "__chat_sessions") return chatSessionMessages;
+    return feedMessages
+      .filter((message) => !messageKind || message.messageKind === messageKind)
+      .filter((message) => !domainFilter || message.messageDomain === domainFilter)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  }, [chatSessionMessages, domainFilter, feedMessages, kindFilter, messageKind]);
   const selectedMessage = visibleMessages.find((message) => message.id === selectedMessageId)
     ?? (initialMessageId ? messages.find((message) => message.id === initialMessageId) : null)
     ?? visibleMessages[0]
@@ -6121,13 +6166,15 @@ function MessagesDeskView({
               filterLabel="Message kind"
               filterOptions={[
                 { key: "", label: "All kinds", count: totalMessageCount },
+                { key: "__chat_sessions", label: "Chat sessions", count: consoleThreads.length || undefined },
+                { key: "__chat_detail", label: "Chat detail", count: messageKindCounts.console_chat_turn ?? 0 },
                 ...messageKinds.map((kind) => ({ key: kind, label: kind, count: messageKindCounts[kind] ?? 0 })),
               ]}
               filterValue={kindFilter}
               metricValue={domainFilter}
               metrics={metrics}
-              footerLabel={feed.error ?? undefined}
-              hasMore={!isDemo && feed.hasMore}
+              footerLabel={consoleThreadsError ?? feed.error ?? undefined}
+              hasMore={!isDemo && kindFilter !== "__chat_sessions" && feed.hasMore}
               isLoadingMore={feed.isLoadingMore}
               onFilterChange={setKindFilter}
               onLoadMore={feed.loadMore}
@@ -10862,6 +10909,29 @@ function messageToNewsroomCard(message: MessageRecord, index: number): NewsroomC
     stamp: formatDateTime(message.createdAt),
     templateRole: template.role,
     title: message.summary ?? "Stored message payload",
+  };
+}
+
+function consoleThreadToMessageRecord(thread: ConsoleThreadSummary): MessageRecord {
+  const updatedAt = thread.updatedAt ?? thread.lastMessageAt ?? thread.createdAt;
+  return {
+    id: thread.id,
+    messageKind: "console_thread",
+    messageDomain: "conversation",
+    status: thread.status,
+    summary: thread.summary ?? thread.title,
+    source: "papyrus-console",
+    authorLabel: thread.createdByLabel ?? null,
+    createdAt: thread.createdAt,
+    updatedAt,
+    newsroomFeedKey: thread.newsroomFeedKey ?? "consoleChat",
+    metadata: {
+      threadId: thread.id,
+      threadKind: thread.threadKind,
+      messageCount: thread.messageCount ?? 0,
+      lastMessageAt: thread.lastMessageAt ?? null,
+      primaryAnchorKey: thread.primaryAnchorKey ?? null,
+    },
   };
 }
 

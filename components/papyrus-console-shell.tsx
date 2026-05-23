@@ -143,6 +143,7 @@ function ConsoleAccessPanel({ session }: { session: ReaderSessionSnapshot | null
 
 function ConsolePanel({ actorLabel }: { actorLabel: string }) {
   const [thread, setThread] = useState<ConsoleThread | null>(null);
+  const [threads, setThreads] = useState<ConsoleThread[]>([]);
   const [messages, setMessages] = useState<ConsoleMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(false);
@@ -167,21 +168,28 @@ function ConsolePanel({ actorLabel }: { actorLabel: string }) {
     setMessages(Array.isArray(response.data) ? response.data : []);
   }, []);
 
+  const loadThreads = useCallback(async () => {
+    const response = await (getClient().models.MessageThread.listMessageThreadsByKindAndUpdatedAt as never as (input: {
+      threadKind: string;
+      sortDirection?: "ASC" | "DESC";
+      limit?: number;
+    }, options?: { authMode: typeof USER_POOL_AUTH_MODE }) => Promise<{ data?: ConsoleThread[] | null }>)(
+      { threadKind: "console", sortDirection: "DESC", limit: 25 },
+      { authMode: USER_POOL_AUTH_MODE },
+    );
+    return Array.isArray(response.data) ? response.data : [];
+  }, []);
+
   const loadThread = useCallback(async () => {
     const initialLoad = !hasLoadedRef.current;
     if (initialLoad) setLoading(true);
     setError(null);
     try {
-      const client = getClient();
-      const response = await (client.models.MessageThread.listMessageThreadsByAnchorAndUpdatedAt as never as (input: {
-        primaryAnchorKey: string;
-        sortDirection?: "ASC" | "DESC";
-        limit?: number;
-      }, options?: { authMode: typeof USER_POOL_AUTH_MODE }) => Promise<{ data?: ConsoleThread[] | null }>)(
-        { primaryAnchorKey: CONSOLE_THREAD_ANCHOR_KEY, sortDirection: "DESC", limit: 1 },
-        { authMode: USER_POOL_AUTH_MODE },
-      );
-      const existingThread = Array.isArray(response.data) ? response.data[0] ?? null : null;
+      const recentThreads = await loadThreads();
+      const existingThread = thread && recentThreads.some((entry) => entry.id === thread.id)
+        ? recentThreads.find((entry) => entry.id === thread.id) ?? thread
+        : recentThreads[0] ?? null;
+      setThreads(recentThreads);
       setThread(existingThread);
       if (existingThread) await loadMessages(existingThread.id);
     } catch (nextError) {
@@ -191,7 +199,7 @@ function ConsolePanel({ actorLabel }: { actorLabel: string }) {
       hasLoadedRef.current = true;
       if (initialLoad) setLoading(false);
     }
-  }, [loadMessages]);
+  }, [loadMessages, loadThreads, thread]);
 
   useEffect(() => {
     loadRef.current = loadThread;
@@ -205,8 +213,14 @@ function ConsolePanel({ actorLabel }: { actorLabel: string }) {
     return () => window.clearInterval(interval);
   }, [loadThread]);
 
-  async function ensureThread(): Promise<ConsoleThread> {
-    if (thread) return thread;
+  const selectThread = useCallback((threadId: string) => {
+    const nextThread = threads.find((entry) => entry.id === threadId) ?? null;
+    setThread(nextThread);
+    setMessages([]);
+    if (nextThread) void loadMessages(nextThread.id);
+  }, [loadMessages, threads]);
+
+  async function createNewThread(): Promise<ConsoleThread> {
     const now = new Date().toISOString();
     const nextThread: ConsoleThread = {
       id: `message-thread-console-${crypto.randomUUID()}`,
@@ -236,7 +250,13 @@ function ConsolePanel({ actorLabel }: { actorLabel: string }) {
       primaryAnchorKey: CONSOLE_THREAD_ANCHOR_KEY,
     });
     setThread(created);
+    setThreads((current) => [created, ...current.filter((entry) => entry.id !== created.id)]);
+    setMessages([]);
     return created;
+  }
+
+  async function ensureThread(): Promise<ConsoleThread> {
+    return thread ?? createNewThread();
   }
 
   async function sendMessage(event: FormEvent<HTMLFormElement>) {
@@ -320,6 +340,34 @@ function ConsolePanel({ actorLabel }: { actorLabel: string }) {
         subtitle={actorLabel}
         title={thread?.title ?? "Papyrus Console"}
       />
+      <div className="papyrus-console__sessions">
+        <label>
+          <span>Session</span>
+          <select
+            aria-label="Console chat session"
+            onChange={(event) => selectThread(event.target.value)}
+            value={thread?.id ?? ""}
+          >
+            {!thread ? <option value="">No session selected</option> : null}
+            {threads.map((entry) => (
+              <option key={entry.id} value={entry.id}>
+                {formatConsoleThreadOption(entry)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          className="papyrus-console__new-session"
+          disabled={sending}
+          onClick={() => void createNewThread().catch((nextError) => {
+            console.error("[PapyrusConsole] Unable to create console thread", nextError);
+            setError(nextError instanceof Error ? nextError.message : "Unable to create console thread.");
+          })}
+          type="button"
+        >
+          New chat
+        </button>
+      </div>
       <div className="papyrus-console__body" role="log" aria-live="polite">
         {loading && !sortedMessages.length ? <p className="papyrus-console__empty">Loading conversation…</p> : null}
         {!loading && !sortedMessages.length ? (
@@ -356,6 +404,15 @@ function ConsolePanel({ actorLabel }: { actorLabel: string }) {
 function truncateConsoleSummary(value: string): string {
   const normalized = value.replace(/\s+/g, " ").trim();
   return normalized.length > 180 ? `${normalized.slice(0, 179)}…` : normalized;
+}
+
+function formatConsoleThreadOption(thread: ConsoleThread): string {
+  const stamp = thread.lastMessageAt ?? thread.updatedAt ?? thread.createdAt;
+  const date = stamp ? new Date(stamp) : null;
+  const suffix = date && Number.isFinite(date.getTime())
+    ? ` — ${date.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`
+    : "";
+  return `${thread.title || "Papyrus Console"}${suffix}`;
 }
 
 function ConsolePanelHeader({

@@ -7102,6 +7102,63 @@ img {
   font-size: 0.76rem;
 }
 
+.papyrus-console__sessions {
+  align-items: end;
+  border-bottom: 1px solid rgb(var(--rule-rgb) / 0.18);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 10px 18px;
+}
+
+.papyrus-console__sessions label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.papyrus-console__sessions span {
+  color: var(--muted-strong);
+  font-size: 0.58rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.papyrus-console__sessions select {
+  appearance: none;
+  background: rgb(var(--paper-rgb) / 0.92);
+  border: 1px solid rgb(var(--rule-rgb) / 0.28);
+  color: var(--ink);
+  font: 0.78rem/1.2 Arial, Helvetica, sans-serif;
+  min-width: 0;
+  padding: 0.45rem 0.55rem;
+}
+
+.papyrus-console__new-session {
+  appearance: none;
+  background: transparent;
+  border: 1px solid rgb(var(--rule-rgb) / 0.36);
+  color: var(--ink);
+  cursor: pointer;
+  font: 700 0.66rem/1 Arial, Helvetica, sans-serif;
+  letter-spacing: 0.1em;
+  padding: 0.55rem 0.62rem;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.papyrus-console__new-session:hover,
+.papyrus-console__new-session:focus-visible {
+  background: rgb(var(--ink-rgb) / 0.08);
+  outline: 0;
+}
+
+.papyrus-console__new-session:disabled {
+  color: var(--disabled);
+  cursor: default;
+}
+
 .papyrus-console__body {
   display: flex;
   flex-direction: column;
