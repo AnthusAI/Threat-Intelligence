@@ -1,0 +1,503 @@
+from __future__ import annotations
+
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from .graphql_authoring import create_authoring_client
+from .ids import safe_id
+from .model_attachments import (
+    MODEL_ATTACHMENT_OWNER_MODELS,
+    build_json_model_payload_attachment,
+    delete_attachment_storage_paths,
+    list_attachment_storage_paths,
+    model_attachment_id,
+    upload_attachment_body,
+)
+from .newsroom_sections import DEFAULT_NEWSROOM_SECTIONS_PATH, build_newsroom_section_records, load_newsroom_section_seeds
+from .newsroom_summary import (
+    NEWSROOM_SUMMARY_PAYLOAD_ID,
+    build_newsroom_summary_payload,
+    build_newsroom_summary_payload_record,
+    newsroom_summary_diff,
+    print_newsroom_summary_recount,
+    read_json_model_payload,
+)
+from .options import normalize_string, parse_options
+from .records import build_record_change_from_current, is_missing_graphql_model_error
+from .relations_commands import print_category_import_summary
+
+
+def newsroom_recount_summary(flags: list[str]) -> None:
+    options = parse_options(flags)
+    client, _ = create_authoring_client()
+    now = _utc_now()
+    corpora = client.list_records("KnowledgeCorpus")
+    import_runs = client.list_records("KnowledgeImportRun")
+    category_sets = client.list_records("CategorySet")
+    categories = client.list_records("Category")
+    proposals = client.list_records("SteeringProposal")
+    artifacts = client.list_records("KnowledgeArtifact")
+    references = client.list_records("Reference")
+    reference_attachments = client.list_records("ReferenceAttachment")
+    semantic_nodes = client.list_records("SemanticNode")
+    messages = client.list_records("Message")
+    model_attachments = client.safe_list_records("ModelAttachment")
+    semantic_relations = client.list_records("SemanticRelation")
+    assignments = client.list_records("Assignment")
+    assignment_events = client.list_records("AssignmentEvent")
+    summary_attachment_id = model_attachment_id(
+        "knowledgeRawPayload",
+        NEWSROOM_SUMMARY_PAYLOAD_ID,
+        "raw_payload",
+        "summary-snapshot",
+    )
+    model_attachments_for_recount = (
+        model_attachments
+        if any(attachment.get("id") == summary_attachment_id for attachment in model_attachments)
+        else [
+            *model_attachments,
+            {
+                "id": summary_attachment_id,
+                "ownerKind": "knowledgeRawPayload",
+                "ownerId": NEWSROOM_SUMMARY_PAYLOAD_ID,
+                "role": "raw_payload",
+                "sortKey": "summary-snapshot",
+                "mediaType": "application/json",
+                "status": "active",
+            },
+        ]
+    )
+    payload = build_newsroom_summary_payload(
+        corpora=corpora,
+        import_runs=import_runs,
+        category_sets=category_sets,
+        categories=categories,
+        proposals=proposals,
+        artifacts=artifacts,
+        references=references,
+        reference_attachments=reference_attachments,
+        semantic_nodes=semantic_nodes,
+        messages=messages,
+        model_attachments=model_attachments_for_recount,
+        semantic_relations=semantic_relations,
+        assignments=assignments,
+        assignment_events=assignment_events,
+        now=now,
+        source="recount",
+    )
+    expected = build_newsroom_summary_payload_record(payload, now)
+    summary_attachment = build_json_model_payload_attachment(
+        {
+            "ownerKind": "knowledgeRawPayload",
+            "ownerId": expected["id"],
+            "role": "raw_payload",
+            "sortKey": "summary-snapshot",
+            "filename": "summary-snapshot.json",
+            "content": payload,
+            "importRunId": expected.get("importRunId"),
+            "now": now,
+        }
+    )
+    current = client.get_record("KnowledgeRawPayload", NEWSROOM_SUMMARY_PAYLOAD_ID)
+    current_payload = read_json_model_payload(
+        client,
+        "knowledgeRawPayload",
+        NEWSROOM_SUMMARY_PAYLOAD_ID,
+        "raw_payload",
+        "summary-snapshot",
+    )
+    if current and current.get("createdAt"):
+        expected["createdAt"] = current["createdAt"]
+    change = build_record_change_from_current("KnowledgeRawPayload", expected, current)
+    summary_diff = newsroom_summary_diff(current_payload, payload)
+    if not options.get("json"):
+        print_newsroom_summary_recount(current_payload, payload, change)
+    if options.get("output"):
+        _write_json_file(
+            options["output"],
+            {
+                "current": current,
+                "currentPayload": current_payload,
+                "expected": expected,
+                "attachment": summary_attachment["attachment"],
+                "action": change["action"],
+                "payload": payload,
+            },
+        )
+    if not options.get("apply"):
+        if options.get("json"):
+            print(
+                json.dumps(
+                    {
+                        "ok": True,
+                        "command": "newsroom recount-summary",
+                        "action": "dry-run",
+                        "countsChanged": summary_diff["countsChanged"],
+                        "facetSectionsChanged": summary_diff["facetSectionsChanged"],
+                        "attachmentUpdated": False,
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            print("newsroom\trecount-summary\tapply\tskipped\tpass --apply to write KnowledgeRawPayload snapshot")
+        return
+    client.upsert("KnowledgeRawPayload", expected)
+    upload_attachment_body(client, summary_attachment["attachment"], summary_attachment["body"])
+    client.upsert("ModelAttachment", summary_attachment["attachment"])
+    if options.get("json"):
+        print(
+            json.dumps(
+                {
+                    "ok": True,
+                    "command": "newsroom recount-summary",
+                    "action": change["action"],
+                    "countsChanged": summary_diff["countsChanged"],
+                    "facetSectionsChanged": summary_diff["facetSectionsChanged"],
+                    "attachmentUpdated": True,
+                },
+                indent=2,
+            )
+        )
+    else:
+        print(f"newsroom\trecount-summary\t{change['action']}\t{expected['id']}")
+
+
+def newsroom_backfill_feed_fields(flags: list[str]) -> None:
+    options = parse_options(flags)
+    client, _ = create_authoring_client()
+    models = ["Message", "Assignment", "Reference", "SemanticNode", "SemanticRelation"]
+    changes: list[dict[str, Any]] = []
+    for model_name in models:
+        for record in client.list_records(model_name):
+            patch = _newsroom_feed_patch_for(model_name, record)
+            if not any(record.get(key) != patch.get(key) for key in patch):
+                continue
+            changes.append({"modelName": model_name, "expected": {**record, **patch}, "current": record})
+    print(f"newsroom\tbackfill-feed-fields\tplanned\t{len(changes)} updates")
+    for change in changes[:20]:
+        expected = change["expected"]
+        print(
+            f"{change['modelName']}\t{change['current']['id']}\tcreatedAt={expected.get('createdAt') or ''}\t"
+            f"updatedAt={expected.get('updatedAt') or ''}\tfeed={expected.get('newsroomFeedKey') or ''}"
+        )
+    if len(changes) > 20:
+        print(f"newsroom\tbackfill-feed-fields\tpreview-truncated\t{len(changes) - 20} more")
+    if not options.get("apply"):
+        print("newsroom\tbackfill-feed-fields\tapply\tskipped\tpass --apply to write feed fields")
+        return
+    for change in changes:
+        client.upsert(change["modelName"], change["expected"])
+    print(f"newsroom\tbackfill-feed-fields\tupdated\t{len(changes)}")
+
+
+def newsroom_backfill_operational_indexes(flags: list[str]) -> None:
+    options = parse_options(flags)
+    started_at = datetime.now(timezone.utc)
+    apply = bool(options.get("apply"))
+    client, _ = create_authoring_client()
+    _assert_operational_index_schema_ready(client)
+    assignments = client.list_records("Assignment")
+    import_runs = client.list_records("KnowledgeImportRun")
+    assignment_changes: list[dict[str, Any]] = []
+    for assignment in assignments:
+        expected = {**assignment, **_assignment_operational_index_patch(assignment)}
+        if _assignment_operational_index_changed(assignment, expected):
+            assignment_changes.append({"modelName": "Assignment", "current": assignment, "expected": expected})
+    import_run_changes: list[dict[str, Any]] = []
+    for import_run in import_runs:
+        expected = {**import_run, "corpusImportKindKey": _knowledge_import_run_corpus_kind_key(import_run)}
+        if (import_run.get("corpusImportKindKey") or None) != (expected.get("corpusImportKindKey") or None):
+            import_run_changes.append({"modelName": "KnowledgeImportRun", "current": import_run, "expected": expected})
+    changes = sorted(
+        [*assignment_changes, *import_run_changes],
+        key=lambda left: (str(left["modelName"]), str(left["expected"]["id"])),
+    )
+    if apply:
+        for index, change in enumerate(changes, start=1):
+            client.upsert(change["modelName"], change["expected"])
+            if index == len(changes) or index % 100 == 0:
+                print(f"newsroom\tbackfill-operational-indexes\tprogress\t{index}/{len(changes)}", flush=True)
+    elapsed_ms = int((datetime.now(timezone.utc) - started_at).total_seconds() * 1000)
+    result = {
+        "ok": True,
+        "command": "newsroom backfill-operational-indexes",
+        "action": "apply" if apply else "dry-run",
+        "indexes": [
+            "Assignment.sectionStatusKey",
+            "Assignment.sectionQueueStatusKey",
+            "KnowledgeImportRun.corpusImportKindKey",
+        ],
+        "scanned": {"assignments": len(assignments), "importRuns": len(import_runs)},
+        "changedByModel": {
+            "Assignment": len(assignment_changes),
+            "KnowledgeImportRun": len(import_run_changes),
+        },
+        "changedRecords": len(changes),
+        "elapsedMs": elapsed_ms,
+        "next": (
+            "poetry run papyrus-content newsroom recount-summary --apply"
+            if apply
+            else "poetry run papyrus-content newsroom backfill-operational-indexes --apply"
+        ),
+    }
+    if options.get("json"):
+        print(json.dumps(result, indent=2))
+        return
+    print(f"newsroom\tbackfill-operational-indexes\taction\t{result['action']}")
+    print(f"newsroom\tbackfill-operational-indexes\tchanged\t{len(changes)}")
+    print(f"newsroom\tbackfill-operational-indexes\tassignments\t{len(assignment_changes)}")
+    print(f"newsroom\tbackfill-operational-indexes\timport-runs\t{len(import_run_changes)}")
+    for change in changes[:25]:
+        expected = change["expected"]
+        print(
+            "\t".join(
+                [
+                    "operational-index",
+                    change["modelName"],
+                    expected["id"],
+                    str(expected.get("corpusImportKindKey") or expected.get("sectionStatusKey") or ""),
+                    str(expected.get("sectionQueueStatusKey") or ""),
+                ]
+            )
+        )
+    if len(changes) > 25:
+        print(f"newsroom\tbackfill-operational-indexes\tpreview-truncated\t{len(changes) - 25} more")
+    if not apply:
+        print(f"newsroom\tbackfill-operational-indexes\tnext\t{result['next']}")
+
+
+def newsroom_import_sections(flags: list[str]) -> None:
+    options = parse_options(flags)
+    config_path = options.get("config") or str(DEFAULT_NEWSROOM_SECTIONS_PATH)
+    sections = load_newsroom_section_seeds(config_path)
+    client, _ = create_authoring_client()
+    records = build_newsroom_section_records(sections)
+    changes: list[dict[str, Any]] = []
+    for record in records:
+        action = client.upsert(record["modelName"], record["expected"])
+        changes.append({**record, "action": action})
+    print_category_import_summary("newsroom-sections", Path(config_path).name, changes)
+
+
+def newsroom_prune_attachments(flags: list[str]) -> None:
+    options = parse_options(flags)
+    apply = bool(options.get("apply"))
+    bucket = normalize_string(options.get("bucket"))
+    prefix = normalize_string(options.get("prefix")) or "newsroom/payloads/"
+    client, _ = create_authoring_client()
+    try:
+        attachments = client.list_records("ModelAttachment")
+    except RuntimeError as error:
+        if is_missing_graphql_model_error(error, "ModelAttachment"):
+            if options.get("json"):
+                print(json.dumps({"ok": False, "command": "newsroom prune-attachments", "mode": "apply" if apply else "dry-run", "error": "missing_model"}, indent=2))
+            else:
+                print(f"attachment-prune\tmissing-model\tModelAttachment\t{error}")
+            return
+        raise
+    owner_ids_by_kind = _load_model_attachment_owner_ids(client, attachments)
+    orphan_attachment_records = [
+        attachment
+        for attachment in attachments
+        if not _attachment_owner_exists(attachment, owner_ids_by_kind)
+    ]
+    orphan_attachment_ids = {attachment["id"] for attachment in orphan_attachment_records}
+    valid_attachment_storage_paths = {
+        attachment["storagePath"]
+        for attachment in attachments
+        if attachment.get("id") not in orphan_attachment_ids and attachment.get("storagePath")
+    }
+    attachment_storage_paths = {attachment["storagePath"] for attachment in attachments if attachment.get("storagePath")}
+    storage_listing = list_attachment_storage_paths(bucket=bucket, prefix=prefix)
+    orphan_storage_paths = [path for path in storage_listing["keys"] if path not in attachment_storage_paths]
+    record_storage_paths_to_delete = [
+        attachment["storagePath"]
+        for attachment in orphan_attachment_records
+        if attachment.get("storagePath") and attachment["storagePath"] not in valid_attachment_storage_paths
+    ]
+    deleted = {"attachmentRecords": 0, "attachmentRecordObjects": 0, "orphanStorageObjects": 0}
+    if not options.get("json"):
+        print(f"attachment-prune\tmode\t{'apply' if apply else 'dry-run'}")
+        print(f"attachment-prune\tbucket\t{storage_listing['bucket']}")
+        print(f"attachment-prune\tprefix\t{storage_listing['prefix']}")
+        print(f"attachment-prune\tmodelAttachments\t{len(attachments)}")
+        print(f"attachment-prune\torphanAttachmentRecords\t{len(orphan_attachment_records)}")
+        print(f"attachment-prune\torphanStorageObjects\t{len(orphan_storage_paths)}")
+    if apply and record_storage_paths_to_delete:
+        delete_result = delete_attachment_storage_paths(record_storage_paths_to_delete, bucket=storage_listing["bucket"])
+        deleted["attachmentRecordObjects"] += delete_result.get("deleted", 0)
+    for attachment in orphan_attachment_records:
+        owner_model = MODEL_ATTACHMENT_OWNER_MODELS.get(attachment.get("ownerKind") or "", "unknown-owner-kind")
+        if not options.get("json"):
+            print(
+                f"attachment-prune\torphan-record\t{attachment['id']}\t{attachment.get('ownerKind')}\t"
+                f"{owner_model}\t{attachment.get('ownerId')}\t{attachment.get('storagePath')}"
+            )
+        if not apply:
+            continue
+        client.delete_record("ModelAttachment", attachment["id"])
+        deleted["attachmentRecords"] += 1
+    if apply and orphan_storage_paths:
+        delete_result = delete_attachment_storage_paths(orphan_storage_paths, bucket=storage_listing["bucket"])
+        deleted["orphanStorageObjects"] += delete_result.get("deleted", 0)
+    for storage_path in orphan_storage_paths:
+        if not options.get("json"):
+            print(f"attachment-prune\torphan-object\t{storage_path}")
+    if options.get("json"):
+        print(
+            json.dumps(
+                {
+                    "ok": True,
+                    "command": "newsroom prune-attachments",
+                    "mode": "apply" if apply else "dry-run",
+                    "bucket": storage_listing["bucket"],
+                    "prefix": storage_listing["prefix"],
+                    "counts": {
+                        "modelAttachments": len(attachments),
+                        "orphanAttachmentRecords": len(orphan_attachment_records),
+                        "orphanStorageObjects": len(orphan_storage_paths),
+                    },
+                    "deleted": deleted,
+                    "next": None if apply else "poetry run papyrus-content newsroom prune-attachments --apply",
+                },
+                indent=2,
+            )
+        )
+    elif not apply:
+        print("attachment-prune\tnext\tpoetry run papyrus-content newsroom prune-attachments --apply")
+
+
+def _newsroom_feed_patch_for(model_name: str, record: dict[str, Any]) -> dict[str, Any]:
+    now = _utc_now()
+    if model_name == "Message":
+        return {
+            "createdAt": record.get("createdAt") or record.get("updatedAt") or now,
+            "updatedAt": record.get("updatedAt") or record.get("createdAt") or now,
+            "newsroomFeedKey": "messages",
+        }
+    if model_name == "Assignment":
+        return {
+            "createdAt": record.get("createdAt") or record.get("updatedAt") or now,
+            "updatedAt": record.get("updatedAt") or record.get("createdAt") or now,
+            "newsroomFeedKey": "assignments",
+        }
+    if model_name == "Reference":
+        created_at = record.get("createdAt") or record.get("importedAt") or record.get("versionCreatedAt") or record.get("updatedAt") or now
+        return {
+            "createdAt": created_at,
+            "updatedAt": record.get("updatedAt") or record.get("curationStatusUpdatedAt") or record.get("importedAt") or created_at,
+            "newsroomFeedKey": "references",
+        }
+    if model_name == "SemanticNode":
+        created_at = record.get("createdAt") or record.get("versionCreatedAt") or record.get("updatedAt") or now
+        return {
+            "createdAt": created_at,
+            "updatedAt": record.get("updatedAt") or created_at,
+            "newsroomFeedKey": "semanticNodes",
+        }
+    if model_name == "SemanticRelation":
+        created_at = record.get("createdAt") or record.get("importedAt") or record.get("updatedAt") or now
+        return {
+            "createdAt": created_at,
+            "updatedAt": record.get("updatedAt") or record.get("importedAt") or created_at,
+            "newsroomFeedKey": "semanticRelations",
+        }
+    return {}
+
+
+def _assignment_operational_index_patch(assignment: dict[str, Any]) -> dict[str, Any]:
+    status = normalize_string(assignment.get("status")) or "open"
+    queue_key = normalize_string(assignment.get("queueKey"))
+    section_key = normalize_string(assignment.get("sectionKey")) or normalize_string(assignment.get("sectionId"))
+    return {
+        "sectionId": assignment.get("sectionId") or section_key,
+        "sectionKey": section_key,
+        "sectionType": assignment.get("sectionType"),
+        "sectionStatusKey": f"{section_key}#{status}" if section_key else None,
+        "sectionQueueStatusKey": f"{section_key}#{queue_key}#{status}" if section_key and queue_key else None,
+        "primaryFocusCategoryKey": assignment.get("primaryFocusCategoryKey"),
+        "topicScopeCategoryKeys": assignment.get("topicScopeCategoryKeys") or [],
+    }
+
+
+def _assignment_operational_index_changed(current: dict[str, Any], expected: dict[str, Any]) -> bool:
+    for key in [
+        "sectionId",
+        "sectionKey",
+        "sectionType",
+        "sectionStatusKey",
+        "sectionQueueStatusKey",
+        "primaryFocusCategoryKey",
+    ]:
+        if (current.get(key) or None) != (expected.get(key) or None):
+            return True
+    current_scope = [value for value in (current.get("topicScopeCategoryKeys") or []) if value]
+    expected_scope = [value for value in (expected.get("topicScopeCategoryKeys") or []) if value]
+    return current_scope != expected_scope
+
+
+def _knowledge_import_run_corpus_kind_key(import_run: dict[str, Any]) -> str | None:
+    corpus_id = normalize_string(import_run.get("corpusId"))
+    import_kind = normalize_string(import_run.get("importKind"))
+    return f"{corpus_id}#{import_kind}" if corpus_id and import_kind else import_run.get("corpusImportKindKey")
+
+
+def _assert_operational_index_schema_ready(client) -> None:
+    assignment_fields = client.graphql_type_field_names("Assignment")
+    import_run_fields = client.graphql_type_field_names("KnowledgeImportRun")
+    missing = [
+        *[
+            f"Assignment.{field}"
+            for field in ["sectionStatusKey", "sectionQueueStatusKey"]
+            if field not in assignment_fields
+        ],
+        *[
+            f"KnowledgeImportRun.{field}"
+            for field in ["corpusImportKindKey"]
+            if field not in import_run_fields
+        ],
+    ]
+    if missing:
+        raise ValueError(
+            f"Operational index fields are not deployed yet. Missing GraphQL fields: {', '.join(missing)}."
+        )
+
+
+def _load_model_attachment_owner_ids(client, attachments: list[dict[str, Any]]) -> dict[str, set[str]]:
+    owner_kinds = sorted({attachment.get("ownerKind") for attachment in attachments if attachment.get("ownerKind")})
+    result: dict[str, set[str]] = {}
+    for owner_kind in owner_kinds:
+        model_name = MODEL_ATTACHMENT_OWNER_MODELS.get(str(owner_kind))
+        if not model_name:
+            result[str(owner_kind)] = set()
+            continue
+        try:
+            rows = client.list_records(model_name)
+            result[str(owner_kind)] = {row["id"] for row in rows if row.get("id")}
+        except RuntimeError as error:
+            if is_missing_graphql_model_error(error, model_name):
+                result[str(owner_kind)] = set()
+                continue
+            raise
+    return result
+
+
+def _attachment_owner_exists(attachment: dict[str, Any], owner_ids_by_kind: dict[str, set[str]]) -> bool:
+    owner_kind = str(attachment.get("ownerKind") or "")
+    owner_model = MODEL_ATTACHMENT_OWNER_MODELS.get(owner_kind)
+    if not owner_model:
+        return False
+    return attachment.get("ownerId") in owner_ids_by_kind.get(owner_kind, set())
+
+
+def _write_json_file(path: str, payload: Any) -> None:
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")

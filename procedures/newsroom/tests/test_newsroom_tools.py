@@ -1827,6 +1827,39 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertEqual(item["metadata"]["title_subtitle_resolution"]["title_mode"], "original_metadata")
         self.assertIn("summary_resolution", item["metadata"])
 
+    def test_biblicus_catalog_item_keeps_editorial_fields_in_metadata_only(self):
+        enriched = reference_curation_signals.apply_title_subtitle_to_catalog_item(
+            {
+                "id": "item-1",
+                "relpath": "raw/paper.pdf",
+                "sha256": "abc123",
+                "bytes": 10,
+                "media_type": "application/pdf",
+                "created_at": "2026-05-01T00:00:00Z",
+                "title": "Old title",
+                "metadata": {},
+                "papyrus": {"legacy": True},
+                "summary": "Legacy root summary",
+            },
+            resolution={
+                "status": "resolved",
+                "title": "Updated title",
+                "subtitle": "Updated subtitle",
+                "summary": "Updated summary",
+                "title_mode": "original_metadata",
+                "subtitle_mode": "original_metadata",
+                "summary_mode": "original_metadata",
+            },
+        )
+
+        self.assertEqual(enriched["title"], "Updated title")
+        self.assertNotIn("subtitle", enriched)
+        self.assertNotIn("summary", enriched)
+        self.assertNotIn("papyrus", enriched)
+        self.assertEqual(enriched["metadata"]["subtitle"], "Updated subtitle")
+        self.assertEqual(enriched["metadata"]["summary"], "Updated summary")
+        self.assertIn("papyrus", enriched["metadata"])
+
     def test_resolver_ignores_bullet_list_subtitle_from_local_metadata(self):
         result = reference_curation_signals.resolve_reference_title_subtitle(
             reference={"id": "reference-1-v1", "title": "Reliable Title"},

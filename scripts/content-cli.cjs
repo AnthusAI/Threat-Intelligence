@@ -9,6 +9,7 @@ const { spawn, spawnSync } = require("node:child_process");
 const YAML = require("yaml");
 
 const PROJECT_ROOT = path.resolve(__dirname, "..");
+const SKIP_PYTHON_ENV = "PAPYRUS_CONTENT_SKIP_PYTHON";
 
 const {
   decodeJwtClaims,
