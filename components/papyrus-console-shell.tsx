@@ -113,8 +113,8 @@ export function PapyrusConsoleShell({ children }: PapyrusConsoleShellProps) {
           </button>
           {open ? (
             canUseConsole
-              ? <ConsolePanel actorLabel={session?.auth.label ?? "Papyrus editor"} />
-              : <ConsoleAccessPanel session={session} />
+              ? <ConsolePanel actorLabel={session?.auth.label ?? "Papyrus editor"} onClose={toggleOpen} />
+              : <ConsoleAccessPanel onClose={toggleOpen} session={session} />
           ) : null}
         </aside>
       ) : null}
@@ -122,14 +122,14 @@ export function PapyrusConsoleShell({ children }: PapyrusConsoleShellProps) {
   );
 }
 
-function ConsoleAccessPanel({ session }: { session: ReaderSessionSnapshot | null }) {
+function ConsoleAccessPanel({ onClose, session }: { onClose: () => void; session: ReaderSessionSnapshot | null }) {
   return (
     <div className="papyrus-console__panel papyrus-console__panel--access">
-      <header className="papyrus-console__header">
-        <p>Editor Console</p>
-        <h2>Console Access</h2>
-        <span>{session?.auth.label ?? "Checking editor session"}</span>
-      </header>
+      <ConsolePanelHeader
+        onClose={onClose}
+        subtitle={session?.auth.label ?? "Checking editor session"}
+        title="Console Access"
+      />
       <div className="papyrus-console__empty">
         <strong>Checking Newsroom credentials.</strong>
         <span>
@@ -142,7 +142,7 @@ function ConsoleAccessPanel({ session }: { session: ReaderSessionSnapshot | null
   );
 }
 
-function ConsolePanel({ actorLabel }: { actorLabel: string }) {
+function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: () => void }) {
   const [thread, setThread] = useState<ConsoleThread | null>(null);
   const [messages, setMessages] = useState<ConsoleMessage[]>([]);
   const [draft, setDraft] = useState("");
@@ -317,11 +317,11 @@ function ConsolePanel({ actorLabel }: { actorLabel: string }) {
 
   return (
     <div className="papyrus-console__panel">
-      <header className="papyrus-console__header">
-        <p>Editor Console</p>
-        <h2>{thread?.title ?? "Papyrus Console"}</h2>
-        <span>{actorLabel}</span>
-      </header>
+      <ConsolePanelHeader
+        onClose={onClose}
+        subtitle={actorLabel}
+        title={thread?.title ?? "Papyrus Console"}
+      />
       <div className="papyrus-console__body" role="log" aria-live="polite">
         {loading && !sortedMessages.length ? <p className="papyrus-console__empty">Loading conversation…</p> : null}
         {!loading && !sortedMessages.length ? (
@@ -358,6 +358,48 @@ function ConsolePanel({ actorLabel }: { actorLabel: string }) {
 function truncateConsoleSummary(value: string): string {
   const normalized = value.replace(/\s+/g, " ").trim();
   return normalized.length > 180 ? `${normalized.slice(0, 179)}…` : normalized;
+}
+
+function ConsolePanelHeader({
+  onClose,
+  subtitle,
+  title,
+}: {
+  onClose: () => void;
+  subtitle: string;
+  title: string;
+}) {
+  return (
+    <header className="papyrus-console__header">
+      <button className="papyrus-console__close" onClick={onClose} type="button" aria-label="Close console">
+        <LucideXIcon />
+      </button>
+      <p>Editor Console</p>
+      <h2>{title}</h2>
+      <span>{subtitle}</span>
+    </header>
+  );
+}
+
+function LucideXIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="papyrus-console__close-icon"
+      fill="none"
+      focusable="false"
+      height="18"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+      width="18"
+    >
+      <path d="M18 6 6 18" />
+      <path d="m6 6 12 12" />
+    </svg>
+  );
 }
 
 function MessagesSquareIcon() {
