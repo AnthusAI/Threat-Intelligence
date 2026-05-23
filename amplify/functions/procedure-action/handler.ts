@@ -219,11 +219,14 @@ async function startProcedureRun(event: ProcedureEvent) {
   if (!versionId) throw new Error(`Procedure ${definition.procedureKey} does not have a current version.`);
   const version = await getRequiredRecord(client.models.ProcedureVersion, versionId, "ProcedureVersion");
   const input = normalizeJson(event.arguments.input);
+  const executionMode = normalizeOptionalString(input.__papyrusExecutionMode);
+  delete input.__papyrusExecutionMode;
   const validation = validateJsonSchemaInput(normalizeJson(version.parameterSchema), input);
   if (!validation.ok) throw new Error(`Procedure parameter validation failed: ${validation.error}`);
   const normalizedInput = validation.normalizedInput;
+  const isExternalCliRun = executionMode === "external_cli";
   const runId = `procedure-run-${safeId(definition.procedureKey)}-${now.replace(/[^0-9TZ]/g, "")}-${randomUUID().slice(0, 8)}`;
-  const assignmentId = `assignment-procedure-run-${hashShort([runId, definition.id, version.id])}`;
+  const assignmentId = isExternalCliRun ? null : `assignment-procedure-run-${hashShort([runId, definition.id, version.id])}`;
   const runResponse = await client.models.ProcedureRun.create({
     id: runId,
     procedureId: definition.id,
@@ -231,10 +234,10 @@ async function startProcedureRun(event: ProcedureEvent) {
     procedureVersionId: version.id,
     procedureVersionNumber: Number(version.versionNumber ?? 1),
     assignmentId,
-    runStatus: "queued",
+    runStatus: isExternalCliRun ? "running" : "queued",
     requestedBy: actorLabel,
     requestedAt: now,
-    startedAt: null,
+    startedAt: isExternalCliRun ? now : null,
     finishedAt: null,
     input,
     normalizedInput,
@@ -247,6 +250,19 @@ async function startProcedureRun(event: ProcedureEvent) {
   } as never, { authMode: LAMBDA_DATA_AUTH_MODE });
   assertNoDataErrors(runResponse.errors, "create ProcedureRun");
   if (!runResponse.data) throw new Error("ProcedureRun create returned no data.");
+  if (isExternalCliRun) {
+    return {
+      ok: true,
+      assignmentId: null,
+      assignmentStatus: null,
+      runId,
+      procedureId: definition.id,
+      procedureKey: definition.procedureKey,
+      procedureVersionId: version.id,
+      procedureVersionNumber: Number(version.versionNumber ?? 1),
+      executionMode,
+    };
+  }
   const assignmentTypeKey = "procedure.run";
   const queueKey = `${assignmentTypeKey}#${definition.id}`;
   const assignmentCreate = await client.models.Assignment.create({
@@ -302,7 +318,7 @@ async function startProcedureRun(event: ProcedureEvent) {
     assertNoDataErrors(claimResult.errors, "claimAssignment immediate dispatch");
     assignmentStatus = normalizeOptionalString(claimResult.data?.status) ?? "open";
   }
-  const assignment = await getRequiredRecord(client.models.Assignment, assignmentId, "Assignment");
+  const assignment = await getRequiredRecord(client.models.Assignment, assignmentId as string, "Assignment");
   return {
     ok: true,
     assignmentId,

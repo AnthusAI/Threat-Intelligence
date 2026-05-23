@@ -740,7 +740,7 @@ const schema = a.schema({
       procedureKey: a.string(),
     })
     .returns(a.json())
-    .authorization((allow) => [allow.group(adminGroup)])
+    .authorization((allow) => [allow.group(adminGroup), allow.custom()])
     .handler(a.handler.function(procedureAction)),
 
   saveNewsroomProcedureDefinition: a

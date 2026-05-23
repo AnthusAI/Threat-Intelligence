@@ -652,8 +652,9 @@ CLI cloud resolution contract:
 - Required CLI procedure aliases are defined in
   `corpora/papyrus-required-procedures.json`
 - `scripts/content-cli.cjs` resolves required procedure keys by alias, fetches
-  cloud definitions by key, starts cloud runs, and waits for `ProcedureRun`
-  completion
+  cloud definitions by key, writes the selected `ProcedureVersion.tactusSource`
+  into the run directory, executes that source with `tactus run`, and records
+  the parsed output/error back on `ProcedureRun`
 - If a required key is missing, CLI fails hard with explicit remediation:
   `Run npm run seed:amplify to preload standard procedures.`
 
@@ -667,12 +668,11 @@ Operator verification checklist:
 
 Current execution limitation (important):
 
-- Immediate assignment execution currently dispatches by procedure marker/key in
-  `amplify/functions/assignment-action/handler.ts`.
-- It does not yet execute arbitrary Tactus source directly in Lambda runtime.
-- Editing procedure source in admin updates cloud `ProcedureVersion` records and
-  CLI procedure metadata, but full runtime behavior remains bounded by the
-  current immediate runner implementation.
+- CLI-backed research/reporting runs execute cloud `ProcedureVersion.tactusSource`
+  as user-editable Tactus code.
+- Direct Lambda immediate execution still dispatches by procedure marker/key in
+  `amplify/functions/assignment-action/handler.ts`; it does not yet execute
+  arbitrary Tactus source inside Lambda.
 
 ## Production Content Operations
 

@@ -150,8 +150,6 @@ const MODEL_ATTACHMENT_OWNER_MODELS = {
   reference: "Reference",
 };
 const REQUIRED_PROCEDURES_CONFIG_PATH = path.join(PROJECT_ROOT, "corpora", "papyrus-required-procedures.json");
-const DEFAULT_CLOUD_PROCEDURE_WAIT_MS = 30_000;
-const CLOUD_PROCEDURE_POLL_MS = 500;
 
 const GET_PROCEDURE_DEFINITION_QUERY = `
   query GetProcedureDefinition($procedureKey: String!) {
@@ -179,9 +177,29 @@ const START_PROCEDURE_RUN_MUTATION = `
   }
 `;
 
-const GET_PROCEDURE_RUN_QUERY = `
-  query GetProcedureRun($id: ID!) {
-    getNewsroomProcedureRun(id: $id)
+const UPDATE_PROCEDURE_RUN_MUTATION = `
+  mutation UpdateProcedureRun($input: UpdateProcedureRunInput!) {
+    updateProcedureRun(input: $input) {
+      id
+      procedureId
+      procedureKey
+      procedureVersionId
+      procedureVersionNumber
+      assignmentId
+      runStatus
+      requestedBy
+      requestedAt
+      startedAt
+      finishedAt
+      input
+      normalizedInput
+      resultSummary
+      errorSummary
+      output
+      error
+      attempt
+      newsroomFeedKey
+    }
   }
 `;
 
@@ -551,8 +569,79 @@ function missingRequiredProcedureError(alias, procedureKey) {
   );
 }
 
-async function startCloudProcedureRun({ client, alias, actorLabel, title, summary, input, waitMs = DEFAULT_CLOUD_PROCEDURE_WAIT_MS }) {
+function currentCloudProcedureVersion(definition) {
+  const current = normalizeGraphqlJsonValue(definition?.currentVersion);
+  if (current && typeof current === "object" && current.id) return current;
+  const versions = Array.isArray(definition?.versions) ? definition.versions.map(normalizeGraphqlJsonValue) : [];
+  return versions.find((version) => version?.id && version.id === definition.currentVersionId)
+    ?? versions.find((version) => version?.isCurrent)
+    ?? versions[0]
+    ?? null;
+}
+
+function cloudProcedureSourceOrThrow(alias, procedureKey, version) {
+  const source = typeof version?.tactusSource === "string" ? version.tactusSource.trim() : "";
+  if (!source) {
+    throw new Error(`Cloud procedure '${procedureKey}' for ${alias} has no Tactus source. Run npm run seed:amplify to preload standard procedures.`);
+  }
+  if (!/\bProcedure\s*\{/m.test(source)) {
+    throw new Error(`Cloud procedure '${procedureKey}' for ${alias} does not contain executable Tactus Procedure source. Run npm run seed:amplify to refresh stale procedure seeds.`);
+  }
+  return `${source}\n`;
+}
+
+function tactusParamValue(value) {
+  if (value === undefined) return undefined;
+  if (value === null) return "";
+  if (typeof value === "object") return encodeInlineAssignmentParam(value);
+  return String(value);
+}
+
+function normalizeCloudProcedureInput(input) {
+  return Object.fromEntries(
+    Object.entries(input ?? {}).filter(([, value]) => value !== undefined && value !== null),
+  );
+}
+
+function cloudProcedureTactusCommand(sourcePath, input) {
+  const params = [];
+  for (const [key, value] of Object.entries(input ?? {})) {
+    const encoded = tactusParamValue(value);
+    if (encoded === undefined) continue;
+    params.push("--param", `${key}=${encoded}`);
+  }
+  return [
+    "tactus",
+    "run",
+    sourcePath,
+    "--no-sandbox",
+    "--real-all",
+    ...params,
+    "--log-format",
+    "raw",
+  ];
+}
+
+async function updateCloudProcedureRunRecord(client, input) {
+  const data = await client.graphql(UPDATE_PROCEDURE_RUN_MUTATION, {
+    input: {
+      id: input.id,
+      runStatus: input.runStatus,
+      startedAt: input.startedAt ?? null,
+      finishedAt: input.finishedAt ?? null,
+      resultSummary: input.resultSummary ?? null,
+      errorSummary: input.errorSummary ?? null,
+      output: input.output === undefined || input.output === null ? null : JSON.stringify(input.output),
+      error: input.error === undefined || input.error === null ? null : JSON.stringify(input.error),
+      attempt: input.attempt ?? null,
+    },
+  });
+  return normalizeGraphqlJsonValue(data?.updateProcedureRun);
+}
+
+async function startCloudProcedureRun({ client, alias, actorLabel, title, summary, input, runDir, stdoutPath, stderrPath, sourcePath }) {
   const procedureKey = requiredProcedureKeyFor(alias);
+  const procedureInput = normalizeCloudProcedureInput(input);
   let definition = null;
   try {
     definition = await getCloudProcedureDefinitionByKey(client, procedureKey);
@@ -562,48 +651,94 @@ async function startCloudProcedureRun({ client, alias, actorLabel, title, summar
     throw error;
   }
   if (!definition) throw missingRequiredProcedureError(alias, procedureKey);
+  const version = currentCloudProcedureVersion(definition);
+  if (!version?.id) throw new Error(`Cloud procedure '${procedureKey}' has no current version. Run npm run seed:amplify to preload standard procedures.`);
+  const tactusSource = cloudProcedureSourceOrThrow(alias, procedureKey, version);
   const startData = await client.graphql(START_PROCEDURE_RUN_MUTATION, {
     procedureKey,
-    procedureVersionId: definition.currentVersionId ?? null,
+    procedureVersionId: version.id,
     title,
     summary,
     actorLabel: actorLabel ?? null,
-    input: JSON.stringify(input ?? {}),
+    input: JSON.stringify({
+      ...procedureInput,
+      __papyrusExecutionMode: "external_cli",
+    }),
   });
   const started = normalizeGraphqlJsonValue(startData?.startNewsroomProcedureRun);
   const runId = normalizeCliString(started?.runId);
   if (!runId) {
     throw new Error(`Cloud procedure '${procedureKey}' did not return runId.`);
   }
-  return await waitForCloudProcedureRun({
-    client,
-    runId,
-    procedureKey,
-    waitMs,
+  const startedAt = new Date().toISOString();
+  const effectiveRunDir = runDir ?? path.join(process.cwd(), ".papyrus-runs", runId);
+  const effectiveSourcePath = sourcePath ?? path.join(effectiveRunDir, `${safeId(procedureKey)}.cloud.tac`);
+  const effectiveStdoutPath = stdoutPath ?? path.join(effectiveRunDir, `${safeId(procedureKey)}.stdout.log`);
+  const effectiveStderrPath = stderrPath ?? path.join(effectiveRunDir, `${safeId(procedureKey)}.stderr.log`);
+  fs.mkdirSync(path.dirname(effectiveSourcePath), { recursive: true });
+  fs.mkdirSync(path.dirname(effectiveStdoutPath), { recursive: true });
+  fs.mkdirSync(path.dirname(effectiveStderrPath), { recursive: true });
+  fs.writeFileSync(effectiveSourcePath, tactusSource, "utf8");
+  const command = cloudProcedureTactusCommand(effectiveSourcePath, procedureInput);
+  const proc = await spawnBuffered(command[0], command.slice(1), {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      PYTHONPATH: prependPathList(["../Tactus", "src"], process.env.PYTHONPATH),
+    },
   });
-}
-
-async function waitForCloudProcedureRun({ client, runId, procedureKey, waitMs }) {
-  const started = Date.now();
-  let latest = null;
-  while ((Date.now() - started) < waitMs) {
-    const data = await client.graphql(GET_PROCEDURE_RUN_QUERY, { id: runId });
-    latest = normalizeGraphqlJsonValue(data?.getNewsroomProcedureRun);
-    const status = normalizeCliString(latest?.runStatus)?.toLowerCase();
-    if (status === "completed") {
-      return latest;
+  fs.writeFileSync(effectiveStdoutPath, proc.stdout ?? "", "utf8");
+  fs.writeFileSync(effectiveStderrPath, proc.stderr ?? "", "utf8");
+  const finishedAt = new Date().toISOString();
+  const parsed = extractResearchRunPayload(proc.stdout);
+  const executionOutput = parsed && typeof parsed === "object"
+    ? {
+      procedureKey,
+      procedureVersionId: version.id,
+      procedureVersionNumber: version.versionNumber ?? null,
+      executedAt: finishedAt,
+      mode: "cli_tactus_source",
+      source: "ProcedureVersion.tactusSource",
+      input: procedureInput,
+      ...parsed,
     }
-    if (status === "failed") {
-      const errorSummary = normalizeCliString(latest?.errorSummary) ?? "cloud procedure run failed";
-      throw new Error(`Cloud procedure '${procedureKey}' failed: ${errorSummary}`);
-    }
-    await delay(CLOUD_PROCEDURE_POLL_MS);
-  }
-  throw new Error(`Timed out waiting for cloud procedure '${procedureKey}' run ${runId}.`);
-}
-
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+    : null;
+  const error = proc.status === 0 && executionOutput
+    ? null
+    : {
+      message: proc.status === 0 ? "Tactus procedure completed without a JSON procedure payload." : `Tactus procedure exited with status ${proc.status}.`,
+      exitStatus: proc.status,
+      signal: proc.signal ?? null,
+      stdoutPath: effectiveStdoutPath,
+      stderrPath: effectiveStderrPath,
+    };
+  const updated = await updateCloudProcedureRunRecord(client, {
+    id: runId,
+    runStatus: error ? "failed" : "completed",
+    startedAt,
+    finishedAt,
+    resultSummary: error ? null : `Completed cloud Tactus procedure ${procedureKey} v${version.versionNumber ?? ""}.`,
+    errorSummary: error?.message ?? null,
+    output: executionOutput,
+    error,
+    attempt: 1,
+  });
+  return {
+    ...(updated ?? {}),
+    id: runId,
+    procedureKey,
+    procedureVersionId: version.id,
+    procedureVersionNumber: version.versionNumber ?? null,
+    runStatus: error ? "failed" : "completed",
+    output: executionOutput,
+    error,
+    exitStatus: proc.status,
+    signal: proc.signal ?? null,
+    commandLine: command,
+    sourcePath: effectiveSourcePath,
+    stdoutPath: effectiveStdoutPath,
+    stderrPath: effectiveStderrPath,
+  };
 }
 
 function warnIfEndpointDoesNotMatchAmplifyOutputs(endpoint) {
@@ -3706,8 +3841,9 @@ async function runResearchAssignment(flags) {
   const runDir = path.join(process.cwd(), ".papyrus-runs", runId);
   fs.mkdirSync(runDir, { recursive: true });
   const resultPath = path.join(runDir, "research-result.json");
-  const stdoutPath = null;
-  const stderrPath = null;
+  const sourcePath = path.join(runDir, "research.cloud.tac");
+  const stdoutPath = path.join(runDir, "research.stdout.log");
+  const stderrPath = path.join(runDir, "research.stderr.log");
   const question = normalizeCliString(options["research-questions"] ?? options.question) ?? "";
   const contextProfile = normalizeCliString(options["context-profile"]) ?? "researcher";
   const maxEvidenceItems = normalizeCliNonNegativeInteger(options["max-evidence-items"], "--max-evidence-items") ?? 20;
@@ -3719,6 +3855,10 @@ async function runResearchAssignment(flags) {
     actorLabel: normalizeCliString(options.actor) ?? "papyrus-content-cli",
     title: `Run research assignment ${assignmentId}`,
     summary: "Triggered by assignments run-research via cloud procedure dispatch.",
+    runDir,
+    sourcePath,
+    stdoutPath,
+    stderrPath,
     input: {
       assignment_item_id: assignmentId,
       corpus_key: corpusKey,
@@ -3799,7 +3939,9 @@ async function runResearchAssignment(flags) {
       procedureVersionId: run.procedureVersionId ?? null,
       procedureVersionNumber: run.procedureVersionNumber ?? null,
       runStatus: run.runStatus ?? null,
+      sourcePath: run.sourcePath ?? null,
     },
+    commandLine: run.commandLine ?? null,
     value: parsed,
   });
   if (options.apply) {
@@ -4623,6 +4765,7 @@ async function runStoryCycleResearchJob({ client, assignment, apply, allowFallba
   const basePath = path.join(runDir, "research", `${safeId(sectionKey)}-${safeId(assignment.id)}`);
   const stdoutPath = `${basePath}.stdout.log`;
   const stderrPath = `${basePath}.stderr.log`;
+  const sourcePath = `${basePath}.cloud.tac`;
   const resultPath = `${basePath}.result.json`;
   const packetPath = `${basePath}.packet.json`;
   if (apply && refreshPackets && !forceRefreshSelected) {
@@ -4702,6 +4845,10 @@ async function runStoryCycleResearchJob({ client, assignment, apply, allowFallba
     actorLabel: "papyrus-content-cli",
     title: `Story-cycle research ${assignment.id}`,
     summary: "Triggered by story-cycle research phase via cloud procedure dispatch.",
+    runDir,
+    sourcePath,
+    stdoutPath,
+    stderrPath,
     input: {
       assignment_item_id: apply ? assignment.id : null,
       assignment_json: assignment,
@@ -4737,7 +4884,9 @@ async function runStoryCycleResearchJob({ client, assignment, apply, allowFallba
       procedureVersionId: cloudRun.procedureVersionId ?? null,
       procedureVersionNumber: cloudRun.procedureVersionNumber ?? null,
       runStatus: cloudRun.runStatus ?? null,
+      sourcePath: cloudRun.sourcePath ?? null,
     },
+    commandLine: cloudRun.commandLine ?? null,
     parsed,
     fallback,
     stdoutPath,
@@ -4745,7 +4894,8 @@ async function runStoryCycleResearchJob({ client, assignment, apply, allowFallba
   });
   const detectedDegraded = packet ? storyCyclePacketDegraded(packet, null) : false;
   const detectedFallbackReason = packet ? storyCyclePacketFallbackReason(packet, null) : null;
-  const degraded = Boolean(fallback) || detectedDegraded;
+  const procedureFailed = String(cloudRun.runStatus ?? "").toLowerCase() === "failed";
+  const degraded = Boolean(fallback) || procedureFailed || detectedDegraded;
   const persistenceBlocked = Boolean(requireAgentSuccess && degraded);
   const recordPlan = packet
     ? buildStoryCycleResearchRecordPlan({ assignment, packet })
@@ -4759,9 +4909,9 @@ async function runStoryCycleResearchJob({ client, assignment, apply, allowFallba
   return {
     ok: Boolean(packet) && (!apply || (Boolean(recordPlan) && !persistenceBlocked)),
     degraded,
-    fallbackReason: fallback?.reason ?? (detectedFallbackReason ?? (!packet ? "missing_research_packet" : null)),
+    fallbackReason: fallback?.reason ?? (procedureFailed ? "research_procedure_failed" : detectedFallbackReason ?? (!packet ? "missing_research_packet" : null)),
     fallbackKind: fallback?.kind ?? null,
-    agentExitStatus: 0,
+    agentExitStatus: cloudRun.exitStatus ?? (procedureFailed ? 1 : 0),
     persistenceSkippedReason: persistenceBlocked ? "require_agent_success" : (!recordPlan && apply ? "missing_record_plan" : null),
     phase: "research",
     assignmentId: assignment.id,
@@ -4771,8 +4921,8 @@ async function runStoryCycleResearchJob({ client, assignment, apply, allowFallba
     resultPath,
     stdoutPath,
     stderrPath,
-    exitStatus: 0,
-    signal: null,
+    exitStatus: cloudRun.exitStatus ?? (procedureFailed ? 1 : 0),
+    signal: cloudRun.signal ?? null,
     packet,
     fallback,
     recordPlan,
@@ -4831,6 +4981,7 @@ async function runStoryCycleReportingJob({ client, assignment, apply, allowFallb
   const basePath = path.join(runDir, "reporting", `${safeId(sectionKey)}-${safeId(assignment.id)}`);
   const stdoutPath = `${basePath}.stdout.log`;
   const stderrPath = `${basePath}.stderr.log`;
+  const sourcePath = `${basePath}.cloud.tac`;
   const resultPath = `${basePath}.result.json`;
   const packetPath = `${basePath}.packet.json`;
   if (apply && refreshPackets && !forceRefreshSelected) {
@@ -4914,6 +5065,10 @@ async function runStoryCycleReportingJob({ client, assignment, apply, allowFallb
     actorLabel: "papyrus-content-cli",
     title: `Story-cycle reporting ${assignment.id}`,
     summary: "Triggered by story-cycle reporting phase via cloud procedure dispatch.",
+    runDir,
+    sourcePath,
+    stdoutPath,
+    stderrPath,
     input: {
       assignment_item_id: apply ? assignment.id : null,
       assignment_json: assignmentForAgent,
@@ -4988,7 +5143,9 @@ async function runStoryCycleReportingJob({ client, assignment, apply, allowFallb
       procedureVersionId: cloudRun.procedureVersionId ?? null,
       procedureVersionNumber: cloudRun.procedureVersionNumber ?? null,
       runStatus: cloudRun.runStatus ?? null,
+      sourcePath: cloudRun.sourcePath ?? null,
     },
+    commandLine: cloudRun.commandLine ?? null,
     parsed,
     fallback,
     stdoutPath,
@@ -4996,7 +5153,8 @@ async function runStoryCycleReportingJob({ client, assignment, apply, allowFallb
   });
   const detectedDegraded = packet ? storyCyclePacketDegraded(packet, null) : false;
   const detectedFallbackReason = packet ? storyCyclePacketFallbackReason(packet, null) : null;
-  const degraded = Boolean(fallback) || detectedDegraded;
+  const procedureFailed = String(cloudRun.runStatus ?? "").toLowerCase() === "failed";
+  const degraded = Boolean(fallback) || procedureFailed || detectedDegraded;
   const persistenceBlocked = Boolean(requireAgentSuccess && degraded);
   let messageId = null;
   let applyResult = null;
@@ -5007,9 +5165,9 @@ async function runStoryCycleReportingJob({ client, assignment, apply, allowFallb
   return {
     ok: Boolean(packet) && (!apply || (Boolean(recordPlan) && !persistenceBlocked)),
     degraded,
-    fallbackReason: fallback?.reason ?? (detectedFallbackReason ?? (!packet ? "missing_reporting_context_packet" : null)),
+    fallbackReason: fallback?.reason ?? (procedureFailed ? "reporting_procedure_failed" : detectedFallbackReason ?? (!packet ? "missing_reporting_context_packet" : null)),
     fallbackKind: fallback?.kind ?? null,
-    agentExitStatus: 0,
+    agentExitStatus: cloudRun.exitStatus ?? (procedureFailed ? 1 : 0),
     persistenceSkippedReason: persistenceBlocked ? "require_agent_success" : (!recordPlan && apply ? "missing_record_plan" : null),
     phase: "reporting",
     assignmentId: assignment.id,
@@ -5020,8 +5178,8 @@ async function runStoryCycleReportingJob({ client, assignment, apply, allowFallb
     resultPath,
     stdoutPath,
     stderrPath,
-    exitStatus: 0,
-    signal: null,
+    exitStatus: cloudRun.exitStatus ?? (procedureFailed ? 1 : 0),
+    signal: cloudRun.signal ?? null,
     sourceResearchAssignmentId: researchRun?.assignmentId ?? null,
     sourceResearchPacketId: researchRun?.messageId ?? null,
     packet,
