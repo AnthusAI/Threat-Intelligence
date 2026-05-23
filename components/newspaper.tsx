@@ -146,7 +146,7 @@ export function Newspaper({
   useEffect(() => {
     let active = true;
     setEditorAppendixReady(false);
-    if (content.placeholderMode === "emptyEdition") {
+    if (content.placeholderMode === "emptyEdition" || content.suppressNewsDeskAppendix) {
       setEditorAppendix(null);
       setEditorAppendixReady(true);
       return () => {
@@ -178,7 +178,7 @@ export function Newspaper({
       active = false;
       unsubscribe();
     };
-  }, [content.newsDeskAppendix, content.placeholderMode, content.source]);
+  }, [content.newsDeskAppendix, content.placeholderMode, content.source, content.suppressNewsDeskAppendix]);
 
   const appendixPages = useMemo(() => buildNewsDeskAppendixPages(editorAppendix, layout?.pages.length ?? 0), [editorAppendix, layout?.pages.length]);
   const totalPages = (layout?.pages.length ?? 0) + appendixPages.length;

@@ -170,7 +170,7 @@ async function main() {
       publishedAt: editionConfig.publishedAt,
       description: editionConfig.description,
       layoutPlan: toAwsJson(editionConfig.layoutPlan),
-      metadata: toAwsJson({ source: "fixture-seed" }),
+      metadata: toAwsJson(editionConfig.metadata),
     }, {
       lineageId: editionConfig.id,
       versionCreatedAt: editionConfig.publishedAt,
@@ -190,7 +190,7 @@ async function main() {
       publishedAt: editionConfig.publishedAt,
       description: editionConfig.description,
       layoutPlan: toAwsJson(editionConfig.layoutPlan),
-      metadata: toAwsJson({ source: "fixture-seed" }),
+      metadata: toAwsJson(editionConfig.metadata),
     });
     await seedNewsroomSections(editionConfig.publishedAt);
     await seedProcedureDefinitions(editionConfig.publishedAt);

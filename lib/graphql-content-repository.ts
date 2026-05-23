@@ -268,6 +268,7 @@ async function listPublishedEditionsForDate(editionDate: string): Promise<GraphQ
 
 async function loadEditionContentFromEdition(edition: GraphQLEdition): Promise<EditionContent> {
   const editionItems = await listEditionItems(edition.id);
+  const editionMetadata = parseObjectMetadata(edition.metadata);
   const items = (
     await Promise.all(
       editionItems.map(async (editionItem) => {
@@ -287,6 +288,7 @@ async function loadEditionContentFromEdition(edition: GraphQLEdition): Promise<E
     layoutPlan: normalizeEditionLayoutPlan(edition.layoutPlan, "Edition.layoutPlan"),
     items,
     sections: createEditionSectionPlan(items, edition.metadata),
+    suppressNewsDeskAppendix: editionMetadata?.suppressNewsDeskAppendix === true,
   };
 }
 

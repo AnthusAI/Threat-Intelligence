@@ -12,6 +12,8 @@ if str(SRC_ROOT) not in sys.path:
 from papyrus_content import cli as papyrus_content_cli
 from papyrus_content.catalog import build_prepared_reference_catalog, build_reference_catalog_registration_records, catalog_items
 from papyrus_content.ids import hash_short, knowledge_corpus_id, reference_lineage_id_for
+from papyrus_content.model_attachments import build_text_model_payload_attachment
+from papyrus_content.seed_edition import build_seed_edition_records, load_seed_payload, seed_edition_config
 from papyrus_content.source_readiness import reference_source_readiness
 from papyrus_content.steering import load_steering_config, require_corpus_config
 
@@ -21,8 +23,35 @@ class PapyrusContentTests(unittest.TestCase):
         self.assertTrue(papyrus_content_cli.is_ported_command("corpora", "status"))
         self.assertTrue(papyrus_content_cli.is_ported_command("references", "accession-now"))
         self.assertTrue(papyrus_content_cli.is_ported_command("content", "inspect"))
+        self.assertTrue(papyrus_content_cli.is_ported_command("content", "seed-edition"))
         self.assertTrue(papyrus_content_cli.is_ported_command("assignments", "list"))
         self.assertFalse(papyrus_content_cli.is_ported_command("assignments", "orphan-research-packets"))
+
+    def test_seed_edition_payload_builds_current_edition_records(self) -> None:
+        payload = load_seed_payload(REPO_ROOT / "amplify" / "seed" / "seed-edition-content.json")
+        records = build_seed_edition_records(payload)
+        by_model = {}
+        for record in records:
+            by_model.setdefault(record["modelName"], []).append(record["expected"])
+        self.assertEqual(payload["id"], "edition-current")
+        self.assertEqual(len(by_model["Item"]), len(payload["articles"]))
+        self.assertEqual(len(by_model["PublishedItem"]), len(payload["articles"]))
+        self.assertEqual(len(by_model["EditionItem"]), len(payload["articles"]))
+        self.assertIn("papyrus-data-ownership", [article["slug"] for article in payload["articles"]])
+        self.assertEqual(by_model["Edition"][0]["status"], "published")
+        self.assertTrue(by_model["Edition"][0]["contentHash"].startswith("sha256:"))
+
+    def test_seed_edition_layout_plan_references_seeded_items(self) -> None:
+        payload = load_seed_payload(REPO_ROOT / "amplify" / "seed" / "seed-edition-content.json")
+        article_ids = {article["slug"] for article in payload["articles"]}
+        config = seed_edition_config(payload)
+        referenced = set()
+        for page in config["layoutPlan"]["pages"]:
+            for region in page["regions"]:
+                for block in region["blocks"]:
+                    if block.get("itemId"):
+                        referenced.add(block["itemId"])
+        self.assertFalse(referenced - article_ids)
 
     def test_analysis_profiles_load(self) -> None:
         from papyrus_content.analysis_profiles import load_analysis_profiles, summarize_analysis_profiles
