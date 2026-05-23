@@ -1,4 +1,4 @@
-FROM rust:1.89-bookworm AS build
+FROM rust:1.91.1-bookworm AS build
 WORKDIR /workspace/amplify/functions/console-chat-responder
 
 COPY amplify/functions/console-chat-responder/Cargo.toml amplify/functions/console-chat-responder/Cargo.lock ./
