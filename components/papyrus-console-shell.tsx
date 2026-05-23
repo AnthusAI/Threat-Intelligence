@@ -362,7 +362,19 @@ function truncateConsoleSummary(value: string): string {
 
 function MessagesSquareIcon() {
   return (
-    <svg aria-hidden="true" className="papyrus-console__icon" focusable="false" viewBox="0 0 24 24">
+    <svg
+      aria-hidden="true"
+      className="papyrus-console__icon news-desk-search-mark__icon"
+      fill="none"
+      focusable="false"
+      height="18"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="3"
+      viewBox="0 0 24 24"
+      width="18"
+    >
       <path d="M14 9a2 2 0 0 1-2 2H6.5L3 14V5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2Z" />
       <path d="M18 9h1a2 2 0 0 1 2 2v9l-3.5-3H12a2 2 0 0 1-2-2v-1" />
     </svg>

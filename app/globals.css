@@ -7054,13 +7054,7 @@ img {
 }
 
 .papyrus-console__icon {
-  fill: none;
-  height: 13px;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 2.2;
-  width: 13px;
+  display: block;
 }
 
 .papyrus-console__panel {
