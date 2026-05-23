@@ -71,6 +71,7 @@ type PapyrusConsoleShellProps = {
 };
 
 type PapyrusConsoleContextValue = {
+  closeConsole: () => void;
   open: boolean;
   shouldOfferConsole: boolean;
   toggleOpen: () => void;
@@ -94,6 +95,11 @@ export function PapyrusConsoleShell({ children }: PapyrusConsoleShellProps) {
   const shouldOfferConsole = isNewsroomPath && canUseConsole;
 
   useEffect(() => {
+    try {
+      window.localStorage.removeItem("papyrus:console-open");
+    } catch {
+      // Ignore storage failures.
+    }
     let active = true;
     void loadReaderSessionSnapshot()
       .then((snapshot) => {
@@ -102,33 +108,25 @@ export function PapyrusConsoleShell({ children }: PapyrusConsoleShellProps) {
       .catch(() => {
         if (active) setSession({ auth: { status: "signedOut", label: "Signed out" }, groups: [], hasSession: false });
       });
-    try {
-      setOpen(window.localStorage.getItem("papyrus:console-open") === "true");
-    } catch {
-      setOpen(false);
-    }
     return () => {
       active = false;
     };
   }, []);
 
   const toggleOpen = useCallback(() => {
-    setOpen((current) => {
-      const next = !current;
-      try {
-        window.localStorage.setItem("papyrus:console-open", String(next));
-      } catch {
-        // Ignore storage failures.
-      }
-      return next;
-    });
+    setOpen((current) => !current);
+  }, []);
+
+  const closeConsole = useCallback(() => {
+    setOpen(false);
   }, []);
 
   const consoleContext = useMemo<PapyrusConsoleContextValue>(() => ({
+    closeConsole,
     open,
     shouldOfferConsole,
     toggleOpen,
-  }), [open, shouldOfferConsole, toggleOpen]);
+  }), [closeConsole, open, shouldOfferConsole, toggleOpen]);
 
   return (
     <PapyrusConsoleContext.Provider value={consoleContext}>
@@ -150,28 +148,31 @@ export function PapyrusConsoleShell({ children }: PapyrusConsoleShellProps) {
 
 export function NewsroomConsoleProgressToggle() {
   const consoleContext = useContext(PapyrusConsoleContext);
-  if (!consoleContext?.shouldOfferConsole) return null;
+  if (!consoleContext?.shouldOfferConsole || consoleContext.open) return null;
 
-  const { open, toggleOpen } = consoleContext;
+  const { toggleOpen } = consoleContext;
 
   return (
     <button
       type="button"
       className="edition-progress__button edition-progress__button--next edition-progress__button--console"
-      aria-expanded={open}
-      aria-label={open ? "Close console" : "Open console"}
+      aria-expanded={false}
+      aria-label="Open console"
       onClick={toggleOpen}
-      title={open ? "Close console" : "Open console"}
+      title="Open console"
     >
-      {open ? <LucideXIcon /> : <MessagesSquareIcon />}
+      <MessagesSquareIcon />
     </button>
   );
 }
 
 function ConsoleAccessPanel({ session }: { session: ReaderSessionSnapshot | null }) {
+  const { closeConsole } = useContext(PapyrusConsoleContext)!;
+
   return (
     <div className="papyrus-console__panel papyrus-console__panel--access papyrus-console-ui">
       <ConsolePanelHeader
+        onClose={closeConsole}
         subtitle={session?.auth.label ?? "Checking editor session"}
         title="Console Access"
       />
@@ -188,6 +189,7 @@ function ConsoleAccessPanel({ session }: { session: ReaderSessionSnapshot | null
 }
 
 function ConsolePanel({ actorLabel }: { actorLabel: string }) {
+  const { closeConsole } = useContext(PapyrusConsoleContext)!;
   const [thread, setThread] = useState<ConsoleThread | null>(null);
   const [messages, setMessages] = useState<ConsoleMessage[]>([]);
   const [draft, setDraft] = useState("");
@@ -364,6 +366,7 @@ function ConsolePanel({ actorLabel }: { actorLabel: string }) {
   return (
     <div className="papyrus-console__panel papyrus-console-ui">
       <ConsolePanelHeader
+        onClose={closeConsole}
         subtitle={actorLabel}
         title={thread?.title ?? "Papyrus Console"}
       />
@@ -434,14 +437,25 @@ function truncateConsoleSummary(value: string): string {
 }
 
 function ConsolePanelHeader({
+  onClose,
   subtitle,
   title,
 }: {
+  onClose: () => void;
   subtitle: string;
   title: string;
 }) {
   return (
     <header className="papyrus-console__header">
+      <button
+        type="button"
+        className="papyrus-console__header-close edition-progress__button edition-progress__button--console"
+        aria-label="Close console"
+        onClick={onClose}
+        title="Close console"
+      >
+        <LucideXIcon />
+      </button>
       <p>Editor Console</p>
       <h2>{title}</h2>
       <span>{subtitle}</span>

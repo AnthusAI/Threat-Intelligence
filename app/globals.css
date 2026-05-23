@@ -7025,9 +7025,9 @@ img {
 }
 
 .papyrus-console--open {
-  background: rgb(var(--paper-rgb) / 0.96);
+  background: var(--paper-page-background, var(--paper-background, var(--paper)));
   border-left: 1px solid rgb(var(--rule-rgb) / 0.3);
-  box-shadow: -18px 0 32px -28px rgb(0 0 0 / 0.7);
+  box-shadow: var(--paper-drop-shadow);
   pointer-events: auto;
   width: var(--papyrus-console-width);
 }
@@ -7039,29 +7039,60 @@ img {
   min-height: 0;
 }
 
-/* Scoped shadcn / AI Elements tokens — globals.css redefines --muted for the newspaper. */
+/* Scoped shadcn / AI Elements tokens mapped to the newspaper palette. */
 .papyrus-console-ui {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-sans, Arial, Helvetica, sans-serif);
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: var(--paper);
+  --card-foreground: var(--ink);
+  --popover: var(--paper);
+  --popover-foreground: var(--ink);
+  --primary: var(--ink);
+  --primary-foreground: var(--paper);
+  --secondary: rgb(var(--ink-rgb) / 0.11);
+  --secondary-foreground: var(--ink);
+  --muted: rgb(var(--ink-rgb) / 0.055);
+  --muted-foreground: var(--muted-strong);
+  --accent: rgb(var(--ink-rgb) / 0.08);
+  --accent-foreground: var(--ink);
+  --destructive: #9b1c1c;
+  --border: rgb(var(--rule-rgb) / 0.35);
+  --input: rgb(var(--paper-rgb) / 0.92);
+  --ring: rgb(var(--ink-rgb) / 0.22);
+  --radius: 14px;
+  background: var(--paper-page-background, var(--paper-background, var(--paper)));
+  color: var(--ink);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.papyrus-console-ui .is-assistant > div {
+  border: 1px solid rgb(var(--rule-rgb) / 0.14);
+  border-radius: 14px;
+  font-size: 0.92rem;
+  line-height: 1.42;
+  padding: 0.78rem 0.88rem;
+}
+
+.papyrus-console-ui .is-user > div {
+  border: 1px solid rgb(var(--rule-rgb) / 0.14);
+  border-radius: 14px;
+  font-size: 0.92rem;
+  line-height: 1.42;
+}
+
+.papyrus-console-ui [data-slot="input-group"],
+.papyrus-console-ui [data-slot="input-group"] textarea {
+  background: rgb(var(--paper-rgb) / 0.92);
+  border-color: rgb(var(--rule-rgb) / 0.35);
+  color: var(--ink);
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 0.92rem;
+}
+
+.papyrus-console-ui [data-slot="input-group"] button[type="submit"] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
 }
 
 .papyrus-console__conversation {
@@ -7070,7 +7101,20 @@ img {
 
 .papyrus-console__header {
   border-bottom: 1px solid rgb(var(--rule-rgb) / 0.28);
-  padding: calc(var(--edition-progress-height, 19px) + 16px) 18px 14px;
+  padding: 18px 52px 14px 18px;
+  position: relative;
+}
+
+.papyrus-console__header-close {
+  position: absolute;
+  right: 18px;
+  top: 18px;
+}
+
+.papyrus-console__header-close:hover,
+.papyrus-console__header-close:focus-visible {
+  background: rgb(var(--ink-rgb) / 0.08);
+  outline: 0;
 }
 
 .papyrus-console__header p,
