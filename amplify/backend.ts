@@ -40,39 +40,44 @@ const backend = defineBackend({
 
 const amplifyBackendDir = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(amplifyBackendDir, "..");
+const enableConsoleResponder = ["1", "true", "yes", "on"].includes(
+  (process.env.PAPYRUS_ENABLE_CONSOLE_RESPONDER ?? "").trim().toLowerCase(),
+);
 
-const messageTable = backend.data.resources.tables.Message;
-const cfnTables = backend.data.resources.cfnResources.cfnTables;
-const messageCfnTable =
-  cfnTables.Message
-  ?? cfnTables.MessageTable
-  ?? Object.entries(cfnTables).find(([key]) => {
-    const normalized = key.toLowerCase();
-    return normalized.includes("message") && !normalized.includes("thread");
-  })?.[1];
+if (enableConsoleResponder) {
+  const messageTable = backend.data.resources.tables.Message;
+  const cfnTables = backend.data.resources.cfnResources.cfnTables;
+  const messageCfnTable =
+    cfnTables.Message
+    ?? cfnTables.MessageTable
+    ?? Object.entries(cfnTables).find(([key]) => {
+      const normalized = key.toLowerCase();
+      return normalized.includes("message") && !normalized.includes("thread");
+    })?.[1];
 
-if (messageCfnTable) {
-  messageCfnTable.streamSpecification = {
-    streamViewType: dynamodb.StreamViewType.NEW_IMAGE,
-  };
+  if (messageCfnTable) {
+    messageCfnTable.streamSpecification = {
+      streamViewType: dynamodb.StreamViewType.NEW_IMAGE,
+    };
+  }
+
+  const messageStreamArn = messageTable.tableStreamArn ?? messageCfnTable?.attrStreamArn;
+  if (!messageStreamArn) {
+    throw new Error(`ConsoleChatResponder requires Message table stream ARN. cfnTables=${Object.keys(cfnTables).join(",")}`);
+  }
+
+  const messageThreadTable = backend.data.resources.tables.MessageThread;
+
+  new ConsoleChatResponderStack(backend.createStack("console-chat-responder"), "ConsoleChatResponder", {
+    messageTable,
+    messageStreamArn,
+    threadTable: messageThreadTable,
+    projectRoot,
+    responseTarget: process.env.PAPYRUS_CONSOLE_RESPONSE_TARGET,
+    openaiApiKeySsmParam: process.env.PAPYRUS_CONSOLE_OPENAI_API_KEY_SSM_PARAM,
+    model: process.env.PAPYRUS_CONSOLE_MODEL,
+  });
 }
-
-const messageStreamArn = messageTable.tableStreamArn ?? messageCfnTable?.attrStreamArn;
-if (!messageStreamArn) {
-  throw new Error(`ConsoleChatResponder requires Message table stream ARN. cfnTables=${Object.keys(cfnTables).join(",")}`);
-}
-
-const messageThreadTable = backend.data.resources.tables.MessageThread;
-
-new ConsoleChatResponderStack(backend.createStack("console-chat-responder"), "ConsoleChatResponder", {
-  messageTable,
-  messageStreamArn,
-  threadTable: messageThreadTable,
-  projectRoot,
-  responseTarget: process.env.PAPYRUS_CONSOLE_RESPONSE_TARGET,
-  openaiApiKeySsmParam: process.env.PAPYRUS_CONSOLE_OPENAI_API_KEY_SSM_PARAM,
-  model: process.env.PAPYRUS_CONSOLE_MODEL,
-});
 
 const knowledgeVectorsStack = backend.createStack("knowledge-vectors");
 const knowledgeVectorBucket = new CfnVectorBucket(knowledgeVectorsStack, "PapyrusKnowledgeVectorBucket", {
