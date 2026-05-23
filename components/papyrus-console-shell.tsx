@@ -222,12 +222,12 @@ function ConsolePanel({ actorLabel }: { actorLabel: string }) {
       primaryAnchorKey: CONSOLE_THREAD_ANCHOR_KEY,
       createdByLabel: actorLabel,
       messageCount: 0,
-      metadata: {
+      metadata: toAwsJson({
         console: {
           cache: "lambda-tmp-jit",
           rawChatSearchVisibility: CONSOLE_SEARCH_VISIBILITY,
         },
-      },
+      }),
       newsroomFeedKey: CONSOLE_NEWSROOM_FEED_KEY,
       createdAt: now,
       updatedAt: now,
@@ -277,12 +277,12 @@ function ConsolePanel({ actorLabel }: { actorLabel: string }) {
         semanticLayer: CONSOLE_SEMANTIC_LAYER,
         searchVisibility: CONSOLE_SEARCH_VISIBILITY,
         responseTarget: CONSOLE_RESPONSE_TARGET,
-        metadata: {
+        metadata: toAwsJson({
           previousSequenceNumber,
           previousMessageId: previousMessage?.id ?? null,
           previousContextDigest: activeThread.contextDigest ?? null,
           cacheHint: "lambda-tmp-jit",
-        },
+        }),
         updatedAt: now,
         newsroomFeedKey: CONSOLE_NEWSROOM_FEED_KEY,
       } as never, { authMode: USER_POOL_AUTH_MODE }) as AmplifyResult<ConsoleMessage>, "create console message", {
@@ -359,6 +359,10 @@ function ConsolePanel({ actorLabel }: { actorLabel: string }) {
 function truncateConsoleSummary(value: string): string {
   const normalized = value.replace(/\s+/g, " ").trim();
   return normalized.length > 180 ? `${normalized.slice(0, 179)}…` : normalized;
+}
+
+function toAwsJson(value: unknown): string {
+  return JSON.stringify(value ?? {});
 }
 
 function requireAmplifyData<T>(response: AmplifyResult<T>, operation: string, context: Record<string, unknown>): T {
