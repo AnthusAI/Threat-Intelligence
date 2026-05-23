@@ -108,9 +108,8 @@ export function PapyrusConsoleShell({ children }: PapyrusConsoleShellProps) {
       </div>
       {shouldOfferConsole ? (
         <aside className={open ? "papyrus-console papyrus-console--open" : "papyrus-console"} aria-label="Papyrus console">
-          <button className="papyrus-console__tab" onClick={toggleOpen} type="button" aria-expanded={open}>
-            <span aria-hidden="true">{open ? "›" : "‹"}</span>
-            <span>{open ? "Close Console" : "Console"}</span>
+          <button className="papyrus-console__tab" onClick={toggleOpen} type="button" aria-expanded={open} aria-label={open ? "Close console" : "Open console"}>
+            <MessageSquareIcon />
           </button>
           {open ? (
             canUseConsole
@@ -359,6 +358,14 @@ function ConsolePanel({ actorLabel }: { actorLabel: string }) {
 function truncateConsoleSummary(value: string): string {
   const normalized = value.replace(/\s+/g, " ").trim();
   return normalized.length > 180 ? `${normalized.slice(0, 179)}…` : normalized;
+}
+
+function MessageSquareIcon() {
+  return (
+    <svg aria-hidden="true" className="papyrus-console__icon" focusable="false" viewBox="0 0 24 24">
+      <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z" />
+    </svg>
+  );
 }
 
 function toAwsJson(value: unknown): string {

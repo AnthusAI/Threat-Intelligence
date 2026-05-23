@@ -136,7 +136,9 @@ async fn process_record(record: &Value, state: &AppState) -> Result<RecordOutcom
         .pointer("/dynamodb/NewImage")
         .and_then(Value::as_object)
         .ok_or_else(|| anyhow!("DynamoDB stream record did not include NewImage"))?;
-    let message = ChatMessage::from_stream_image(image)?;
+    let Some(message) = ChatMessage::from_stream_image(image)? else {
+        return Ok(RecordOutcome::Skipped);
+    };
     if !message.should_handle(&state.config.response_target) {
         return Ok(RecordOutcome::Skipped);
     }
@@ -258,26 +260,49 @@ struct ChatMessage {
 }
 
 impl ChatMessage {
-    fn from_stream_image(image: &serde_json::Map<String, Value>) -> Result<Self> {
+    fn from_stream_image(image: &serde_json::Map<String, Value>) -> Result<Option<Self>> {
         let metadata = image
             .get("metadata")
             .map(dynamodb_json_to_value)
             .unwrap_or(Value::Null);
-        Ok(Self {
-            id: stream_string(image, "id")?,
-            thread_id: stream_string(image, "threadId")?,
-            role: stream_string(image, "role").unwrap_or_default(),
-            message_kind: stream_string(image, "messageKind")?,
-            message_type: stream_string(image, "messageType")
-                .unwrap_or_else(|_| "MESSAGE".to_string()),
+        let id = stream_string(image, "id")?;
+        let message_kind = stream_string(image, "messageKind")?;
+        let role = stream_string(image, "role").unwrap_or_default();
+        let message_type =
+            stream_string(image, "messageType").unwrap_or_else(|_| "MESSAGE".to_string());
+        let response_status = stream_string(image, "responseStatus").unwrap_or_default();
+        if message_kind != MESSAGE_KIND_CHAT_TURN
+            || role != "USER"
+            || message_type != "MESSAGE"
+            || response_status != "PENDING"
+        {
+            return Ok(None);
+        }
+        let thread_id = match stream_string(image, "threadId") {
+            Ok(value) => value,
+            Err(error) => {
+                warn!(
+                    message_id = id,
+                    error = %error,
+                    "skipping pending console chat message without threadId"
+                );
+                return Ok(None);
+            }
+        };
+        Ok(Some(Self {
+            id,
+            thread_id,
+            role,
+            message_kind,
+            message_type,
             content: stream_string(image, "content")
                 .or_else(|_| stream_string(image, "summary"))?,
             response_target: stream_string(image, "responseTarget").unwrap_or_default(),
-            response_status: stream_string(image, "responseStatus").unwrap_or_default(),
+            response_status,
             sequence_number: stream_i64(image, "sequenceNumber").unwrap_or(0),
             created_at: stream_string(image, "createdAt").unwrap_or_else(|_| now_iso()),
             metadata,
-        })
+        }))
     }
 
     fn should_handle(&self, expected_target: &str) -> bool {
