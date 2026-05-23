@@ -16,6 +16,12 @@ from .services import GraphQLKnowledgeGraphProvider, KnowledgeQueryServices
 
 SUMMARY_RELATION_RE = re.compile(r"^reference_summary_(\d+)_tokens$")
 
+MAX_FILTERABLE_METADATA_CHARS = 480
+MAX_FILTERABLE_SUMMARY_CHARS = 320
+MAX_FILTERABLE_REFERENCE_SUMMARY_CHARS = 320
+MAX_FILTERABLE_TITLE_CHARS = 180
+MAX_FILTERABLE_SUBTITLE_CHARS = 180
+
 
 LIST_REFERENCES_QUERY = """
 query ListReferences($limit: Int, $nextToken: String) {
@@ -611,8 +617,6 @@ def _prepare_source_vector(
     reference_summary_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     clean = _clean_text(text)
-    if len(clean) < 80:
-        return None
     title = object_title(reference) or reference.get("id") or "Reference"
     subtitle = _reference_subtitle(reference)
     summary_text = str((reference_summary_payload or {}).get("summary") or "")
@@ -629,6 +633,8 @@ def _prepare_source_vector(
             if part
         )
     )
+    if len(source_text) < 80:
+        return None
     digest = hashlib.sha256(str(reference.get("lineageId") or reference.get("id") or title).encode("utf-8")).hexdigest()[:20]
     return {
             "key": f"reference-summary-{digest}",
@@ -636,8 +642,8 @@ def _prepare_source_vector(
         "metadata": {
             **_base_reference_metadata(reference, options, reference_summary_payload=reference_summary_payload),
             "vectorKind": "reference_summary",
-            "summary": source_text[:900],
-            "text": source_text[:2400],
+            "summary": _truncate_filterable_metadata(source_text, MAX_FILTERABLE_SUMMARY_CHARS),
+            "text": _truncate_filterable_metadata(source_text, MAX_FILTERABLE_METADATA_CHARS),
             "sourceUri": reference.get("sourceUri"),
             "storagePath": storage_path,
         },
@@ -663,8 +669,8 @@ def _prepare_chunks(
             "metadata": {
                 **_base_reference_metadata(reference, options, reference_summary_payload=reference_summary_payload),
                 "vectorKind": "reference_passage",
-                "summary": clean[:600],
-                "text": clean[:1800],
+                "summary": _truncate_filterable_metadata(clean, MAX_FILTERABLE_SUMMARY_CHARS),
+                "text": _truncate_filterable_metadata(clean, MAX_FILTERABLE_METADATA_CHARS),
                 "sourceUri": reference.get("sourceUri"),
                 "storagePath": storage_path,
                 "chunkIndex": index,
@@ -694,9 +700,9 @@ def _base_reference_metadata(
         "referenceLineageId": reference.get("lineageId"),
         "corpusId": reference.get("corpusId"),
         "categorySetId": options.category_set_id,
-        "title": title,
-        "subtitle": subtitle,
-        "referenceSummary": reference_summary[:1200] if reference_summary else "",
+        "title": _truncate_filterable_metadata(str(title), MAX_FILTERABLE_TITLE_CHARS),
+        "subtitle": _truncate_filterable_metadata(str(subtitle), MAX_FILTERABLE_SUBTITLE_CHARS),
+        "referenceSummary": _truncate_filterable_metadata(reference_summary, MAX_FILTERABLE_REFERENCE_SUMMARY_CHARS) if reference_summary else "",
         "referenceSummaryMaxTokens": summary_payload.get("maxTokens"),
         "referenceSummaryMessageId": summary_payload.get("messageId"),
         "referenceSummaryRelationId": summary_payload.get("relationId"),
@@ -704,6 +710,15 @@ def _base_reference_metadata(
         "curationStatus": reference.get("curationStatus"),
         "curationStatusKey": reference.get("curationStatusKey"),
     }
+
+
+def _truncate_filterable_metadata(value: str, limit: int) -> str:
+    clean = _clean_text(value)
+    if len(clean) <= limit:
+        return clean
+    if limit <= 1:
+        return clean[:limit]
+    return clean[: limit - 1].rstrip() + "…"
 
 
 def _reference_summary_payload_for_indexing(

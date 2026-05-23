@@ -742,6 +742,13 @@ class FakeVectorIndexTextProvider:
             )
         ) * 8
 
+
+class ShortFakeVectorIndexTextProvider(FakeVectorIndexTextProvider):
+    def read_text(self, storage_path):
+        if "message-insight-1" in storage_path:
+            return super().read_text(storage_path)
+        return "Tiny source text."
+
     def list_incoming_relations(self, obj):
         if obj.get("kind") != "reference":
             return []
@@ -1858,6 +1865,33 @@ class KnowledgeQueryTests(unittest.TestCase):
         self.assertEqual(second["vectorsWritten"], 0)
         embed_mock.assert_not_called()
         put_mock.assert_not_called()
+
+    def test_vector_index_uses_summary_when_extracted_text_is_short(self):
+        services = KnowledgeQueryServices(
+            graph=FakeVectorIndexGraphProvider(),
+            corpus_text=ShortFakeVectorIndexTextProvider(),
+        )
+        written_batches = []
+        with mock.patch.dict(os.environ, {"PAPYRUS_S3_VECTOR_INDEX_ARN": "arn:test:index"}), \
+             mock.patch("papyrus_knowledge_query.vector_index._list_index_vectors", return_value=[]), \
+             mock.patch("papyrus_knowledge_query.vector_index._embed", return_value=[[0.1, 0.2, 0.3]] * 2), \
+             mock.patch("papyrus_knowledge_query.vector_index._put_vectors", side_effect=lambda index_arn, vectors: written_batches.append(vectors)):
+            result = index_reference_passages(
+                services,
+                VectorIndexOptions(action="sync", max_chunks_per_reference=0, progress_every=0),
+            )
+
+        written = [vector for batch in written_batches for vector in batch]
+        source_vector = next(
+            vector
+            for vector in written
+            if vector["metadata"]["referenceLineageId"] == "reference-1" and vector["metadata"]["vectorKind"] == "reference_summary"
+        )
+        self.assertEqual(result["sourceVectorsPrepared"], 2)
+        self.assertIn("Long summary: production readiness", source_vector["metadata"]["text"])
+        self.assertLessEqual(len(source_vector["metadata"]["text"]), 480)
+        self.assertLessEqual(len(source_vector["metadata"]["summary"]), 320)
+        self.assertLessEqual(len(source_vector["metadata"]["referenceSummary"]), 320)
 
 
 if __name__ == "__main__":
