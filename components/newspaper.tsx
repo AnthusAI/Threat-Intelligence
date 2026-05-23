@@ -624,6 +624,7 @@ function AppendixPagePlaceholder({ pageNumber }: { pageNumber: number }) {
 }
 
 function LoadingPage({ content, mastheadHref }: { content: EditionContent; mastheadHref: string }) {
+  const frontEditionLabel = getFrontEditionLabel(content.title);
   return (
     <section className="paper-page-content paper-page-content--front paper-page-content--loading" aria-label="Loading edition">
       <header className="masthead">
@@ -634,7 +635,7 @@ function LoadingPage({ content, mastheadHref }: { content: EditionContent; masth
         <div className="masthead__meta">
           <span>{formatShortDate(content.editionDate)}</span>
           <span>INFORMATION ABOUT INFORMATION SYSTEMS</span>
-          <span>Measuring type</span>
+          <span>{frontEditionLabel}</span>
         </div>
       </header>
     </section>
@@ -665,6 +666,7 @@ function SolvedPageView({
   scrollToPage: (pageNumber: number, options?: ScrollToPageOptions) => void;
 }) {
   const front = page.kind === "front";
+  const frontEditionLabel = getFrontEditionLabel(content.title);
   const editionTitleId = front ? rawEditionTitleId ?? "edition-title" : undefined;
   const frontRegion = front ? page.regions[0] : undefined;
   return (
@@ -684,7 +686,7 @@ function SolvedPageView({
           <div className="masthead__meta">
             <span>{formatShortDate(content.editionDate)}</span>
             <span>INFORMATION ABOUT INFORMATION SYSTEMS</span>
-            <span>Cybernetic Edition</span>
+            <span>{frontEditionLabel}</span>
           </div>
         </header>
       ) : (
@@ -1841,6 +1843,11 @@ function formatShortDate(value: string): string {
     year: "numeric",
     timeZone: "UTC",
   }).format(new Date(timestamp));
+}
+
+function getFrontEditionLabel(title: string): string {
+  const trimmedTitle = title.trim();
+  return trimmedTitle.length > 0 ? trimmedTitle : "WEEKLY EDITION";
 }
 
 function normalizePath(pathname: string): string {

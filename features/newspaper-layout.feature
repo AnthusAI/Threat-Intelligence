@@ -52,6 +52,16 @@ Feature: Newspaper layout scenarios
       | 640   | 1200   | 5            | 3         |
       | 390   | 900    | 4            | 2         |
 
+  Scenario: Front page masthead uses the edition title
+    Given I open the "current-edition" layout scenario at 1280 by 900
+    Then the front page masthead edition label should say "Current Edition"
+    And no browser console errors should occur
+
+  Scenario: Front page masthead falls back when the edition title is blank
+    Given I open the "blank-edition-title" layout scenario at 1280 by 900
+    Then the front page masthead edition label should say "WEEKLY EDITION"
+    And no browser console errors should occur
+
   Scenario Outline: Shared continuations repair blank-column pressure
     Given I open the "shared-blank-column-pressure" layout scenario at <width> by <height>
     Then the solved layout should use <columns> columns

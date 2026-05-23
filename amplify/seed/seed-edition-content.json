@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "edition-current",
   "slug": "current",
-  "title": "Papyrus First Edition",
+  "title": "Weekly Edition",
   "description": "Seeded first edition introducing Papyrus newsroom workflows.",
   "publishDate": "2026-05-22",
   "suppressNewsDeskAppendix": true,

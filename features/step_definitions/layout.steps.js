@@ -1537,6 +1537,16 @@ Then("the active edition should include article {string}", async function (expec
   );
 });
 
+Then("the front page masthead edition label should say {string}", async function (expectedLabel) {
+  const label = await requirePage(this).evaluate(() => {
+    const activeFrontPage = document.querySelector(".paper-page--active .paper-page-content--front");
+    if (!activeFrontPage) return null;
+    const value = activeFrontPage.querySelector(".masthead__meta > :last-child")?.textContent ?? "";
+    return value.trim();
+  });
+  assert.equal(label, expectedLabel);
+});
+
 Then("edition pages should sit on a neutral gray substrate with one rhythm row between pages", async function () {
   const report = await requirePage(this).evaluate(() => {
     const layout = window.__PAPYRUS_LAYOUT__;

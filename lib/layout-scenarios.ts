@@ -28,6 +28,16 @@ const rawLayoutScenarios: RawLayoutScenario[] = [
     newsDeskAppendix: createDemoNewsDeskAppendix(),
   },
   {
+    id: "blank-edition-title",
+    source: "scenario",
+    title: "   ",
+    editionDate,
+    scenarioId: "blank-edition-title",
+    description: "A fixture edition with a blank title used to verify masthead fallback labeling.",
+    layoutPlan: createDefaultEditionLayoutPlan(articles.map((article) => article.slug)),
+    items: cloneArticles(articles).map(articleToPublicationItem),
+  },
+  {
     id: "shared-blank-column-pressure",
     source: "scenario",
     title: "Shared Continuation Blank Column Pressure",
