@@ -191,11 +191,195 @@ def create_research_assignment(client: PapyrusGraphQLAuthoringClient, options: d
 
 
 def run_research_assignment(flags: list[str]) -> None:
-    from .node_delegate import run_node_content_cli
+    from .cloud_procedures import start_cloud_procedure_run
+    from .graphql_authoring import create_authoring_client
+    from .ids import safe_id
 
-    exit_code = run_node_content_cli("assignments", "run-research", flags)
-    if exit_code != 0:
-        raise RuntimeError(f"assignments run-research failed with exit code {exit_code}")
+    options = parse_options(flags)
+    assignment_id = normalize_string(options.get("assignment"))
+    if not assignment_id:
+        raise ValueError("assignments run-research requires --assignment <id>.")
+    corpus_key = normalize_string(options.get("corpus-key")) or "AI-ML-research"
+    research_mode = normalize_research_mode(
+        options.get("research-mode") or options.get("researchMode") or "source_discovery"
+    )
+    run_id = normalize_string(options.get("run-id")) or (
+        f"research-{safe_id(assignment_id)[:60]}-{timestamp_for_path()}"
+    )
+    run_dir = PAPYRUS_ROOT / ".papyrus-runs" / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    result_path = run_dir / "research-result.json"
+    source_path = run_dir / "research.cloud.tac"
+    stdout_path = run_dir / "research.stdout.log"
+    stderr_path = run_dir / "research.stderr.log"
+    question = normalize_string(options.get("research-questions") or options.get("question")) or ""
+    context_profile = normalize_string(options.get("context-profile")) or "researcher"
+    max_evidence_items = normalize_non_negative_integer(options.get("max-evidence-items"), "--max-evidence-items") or 20
+    started_at = _utc_now()
+    client, _ = create_authoring_client()
+    run = start_cloud_procedure_run(
+        client=client,
+        alias="assignments.run-research",
+        actor_label=normalize_string(options.get("actor")) or "papyrus-content-cli",
+        title=f"Run research assignment {assignment_id}",
+        summary="Triggered by assignments run-research via cloud procedure dispatch.",
+        input_payload={
+            "assignment_item_id": assignment_id,
+            "corpus_key": corpus_key,
+            "context_profile": context_profile,
+            "research_mode": research_mode,
+            "research_questions": question,
+            "max_evidence_items": max_evidence_items,
+        },
+        run_dir=run_dir,
+        source_path=source_path,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+    )
+    finished_at = _utc_now()
+    parsed = run.get("output")
+    if not isinstance(parsed, dict):
+        raise ValueError(
+            f"Cloud procedure output for assignment {assignment_id} did not return a JSON object payload."
+        )
+    research = parsed.get("research_packet") or parsed.get("researchPacket")
+    if not research:
+        raise ValueError(
+            f"Cloud procedure output for assignment {assignment_id} is missing research_packet. "
+            "Run npm run seed:amplify if procedure seeds are stale."
+        )
+    packet = normalize_research_packet_bundle(
+        research,
+        assignment={
+            "id": assignment_id,
+            "assignmentTypeKey": "research.edition-candidate",
+            "queueKey": "",
+        },
+        assignment_meta={"researchMode": research_mode, "corpusKey": corpus_key},
+        research_mode=research_mode,
+    )
+    validate_research_packet_mode(packet)
+    trace = packet.get("researchTrace") or {}
+    retry_count_raw = parsed.get("retry_count") or parsed.get("retryCount") or trace.get("retryCount") or trace.get("retry_count") or 0
+    try:
+        retry_count = max(0, int(retry_count_raw))
+    except (TypeError, ValueError):
+        retry_count = 0
+    validation_failures_raw = (
+        parsed.get("validation_failures")
+        or parsed.get("validationFailures")
+        or trace.get("validationFailures")
+        or trace.get("validation_failures")
+    )
+    validation_failures = (
+        [str(entry) for entry in validation_failures_raw]
+        if isinstance(validation_failures_raw, list)
+        else []
+    )
+    result = {
+        "ok": True,
+        "command": "assignments run-research",
+        "action": "apply" if options.get("apply") else "dry-run",
+        "runId": run_id,
+        "assignmentId": assignment_id,
+        "researchMode": research_mode,
+        "corpusKey": corpus_key,
+        "startedAt": started_at,
+        "finishedAt": finished_at,
+        "exitStatus": 0,
+        "signal": None,
+        "stdoutPath": str(stdout_path),
+        "stderrPath": str(stderr_path),
+        "fallback": None,
+        "resultPath": str(result_path),
+        "parsed": True,
+        "packet": {
+            "summary": packet.get("summary"),
+            "proposedReferenceCount": len(packet.get("proposedReferences") or []),
+            "sourceSnapshotCount": len(packet.get("sourceSnapshots") or []),
+            "evidenceItemCount": len(packet.get("evidenceItemIds") or []),
+            "blockedReason": (packet.get("sourceDiscovery") or {}).get("blockedReason"),
+            "firstProposalUrl": ((packet.get("proposedReferences") or [{}])[0] or {}).get("url"),
+            "attempts": retry_count + 1,
+            "recoveryPath": normalize_string(
+                parsed.get("recovery_path") or parsed.get("recoveryPath") or trace.get("recoveryPath") or trace.get("recovery_path")
+            ),
+            "firstValidationError": validation_failures[0] if validation_failures else None,
+            "lastValidationError": validation_failures[-1] if validation_failures else None,
+        },
+        "next": None,
+    }
+    if not options.get("apply"):
+        result["next"] = (
+            f"poetry run papyrus-content assignments apply-research-packet "
+            f"--assignment {assignment_id} --research-json {result_path} --apply"
+        )
+    result_path.write_text(
+        json.dumps(
+            {
+                **result,
+                "cloudProcedure": {
+                    "runId": run.get("id"),
+                    "procedureKey": run.get("procedureKey"),
+                    "procedureVersionId": run.get("procedureVersionId"),
+                    "procedureVersionNumber": run.get("procedureVersionNumber"),
+                    "runStatus": run.get("runStatus"),
+                    "sourcePath": run.get("sourcePath"),
+                },
+                "commandLine": run.get("commandLine"),
+                "value": parsed,
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    if options.get("apply"):
+        apply_research_packet(
+            client,
+            {
+                "assignment": assignment_id,
+                "research-json": json.dumps(research),
+                "research-mode": research_mode,
+                "apply": True,
+                **({"json": True} if options.get("json") else {}),
+            },
+        )
+        return
+    if options.get("json"):
+        print(json.dumps(result, indent=2))
+        return
+    _print_research_run_summary(result)
+
+
+def _print_research_run_summary(result: dict[str, Any]) -> None:
+    print(f"assignments\trun-research\taction\t{result.get('action')}")
+    print(f"assignments\trun-research\trun\t{result.get('runId')}")
+    print(f"assignments\trun-research\tassignment\t{result.get('assignmentId')}")
+    print(f"assignments\trun-research\tstatus\t{result.get('exitStatus') or ''}")
+    print(f"assignments\trun-research\tparsed\t{result.get('parsed')}")
+    packet = result.get("packet") or {}
+    if packet:
+        print(
+            f"assignments\trun-research\tcounts\tevidence={packet.get('evidenceItemCount')}\t"
+            f"sources={packet.get('sourceSnapshotCount')}\tproposals={packet.get('proposedReferenceCount')}"
+        )
+        print(f"assignments\trun-research\tattempts\t{packet.get('attempts')}")
+        if packet.get("recoveryPath"):
+            print(f"assignments\trun-research\trecovery\t{packet.get('recoveryPath')}")
+        if packet.get("firstValidationError"):
+            print(f"assignments\trun-research\tfirst-validation-error\t{packet.get('firstValidationError')}")
+        if packet.get("lastValidationError"):
+            print(f"assignments\trun-research\tlast-validation-error\t{packet.get('lastValidationError')}")
+        if packet.get("firstProposalUrl"):
+            print(f"assignments\trun-research\tfirst-proposal\t{packet.get('firstProposalUrl')}")
+        if packet.get("blockedReason"):
+            print(f"assignments\trun-research\tblocked\t{packet.get('blockedReason')}")
+    print(f"assignments\trun-research\tresult\t{result.get('resultPath')}")
+    print(f"assignments\trun-research\tstdout\t{result.get('stdoutPath')}")
+    print(f"assignments\trun-research\tstderr\t{result.get('stderrPath')}")
+    if result.get("next"):
+        print(f"assignments\trun-research\tnext\t{result.get('next')}")
 
 
 def apply_research_packet(client: PapyrusGraphQLAuthoringClient, options: dict[str, Any]) -> dict[str, Any]:
@@ -1413,11 +1597,7 @@ def _execute_assignment_by_type(
     assignment_id: str,
     options: dict[str, Any],
 ) -> dict[str, Any]:
-    assignment = client.get_record("Assignment", assignment_id)
-    if not assignment:
-        raise ValueError(f"Assignment {assignment_id} was not found.")
-    assignment_type = assignment.get("assignmentTypeKey")
-    if assignment_type == "reference.corpus-accession":
-        return execute_reference_accession_assignment(client, assignment, options)
-    raise ValueError(f"No executor is registered for assignment type {assignment_type}.")
+    from .assignment_executors import execute_assignment_by_type
+
+    return execute_assignment_by_type(client, assignment_id, options)
 

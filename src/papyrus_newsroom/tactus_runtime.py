@@ -609,6 +609,7 @@ def _research_harness(
     corpus_key: str,
     max_evidence_items: int,
     research_mode: str = "",
+    disable_tactus_web: bool = False,
 ) -> str:
     assignment_json = assignment_item_json or "{}"
     evidence_limit = max(int(max_evidence_items or 1), 1)
@@ -625,6 +626,7 @@ def _research_harness(
 local corpus_key = {_lua_string(corpus_key or "")}
 local max_evidence_items = {evidence_limit}
 local requested_research_mode = {_lua_string(research_mode or "")}
+local disable_tactus_web = {"true" if disable_tactus_web else "false"}
 
 if assignment_is_live and (assignment.queueKey == nil or assignment.queueKey == "") then
     error("live assignment research packets require assignment.queueKey")
@@ -674,6 +676,7 @@ local __web_searches = {{}}
 
 	local function web_search(query)
     local result = nil
+	    if not disable_tactus_web then
 	    if __web == nil then
         local ok, loaded = pcall(require, "tactus.web")
         if ok then
@@ -694,6 +697,7 @@ local __web_searches = {{}}
             result = fetched
         end
     end
+	    end
     if result == nil then
         result = papyrus.reference.web_search{{
             query = query,
@@ -969,6 +973,7 @@ def execute_tactus_harnessed(
     corpus_key: str = "",
     max_evidence_items: int = 20,
     research_mode: str = "",
+    disable_tactus_web: bool = False,
 ) -> dict[str, Any]:
     if harness == "raw":
         return execute_tactus(tactus)
@@ -980,6 +985,7 @@ def execute_tactus_harnessed(
             corpus_key=corpus_key,
             max_evidence_items=max_evidence_items,
             research_mode=research_mode,
+            disable_tactus_web=disable_tactus_web,
         )
         return execute_tactus(snippet)
     return _response_envelope(

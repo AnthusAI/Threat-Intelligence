@@ -17,7 +17,7 @@ from .analysis_profiles import (
 )
 from .graphql_authoring import create_authoring_client
 from .ids import knowledge_corpus_id, safe_id
-from .node_delegate import run_node_content_cli
+from .content_cli_bridge import call_content_cli_export
 from .options import normalize_string, parse_options
 from .records import apply_record_changes, build_record_changes_tolerating_optional_models
 from .newsroom_summary import update_newsroom_summary_after_analysis_import, update_newsroom_summary_after_assignment_creates
@@ -72,15 +72,11 @@ def analysis_create_reindex_assignment(flags: list[str]) -> None:
 
 
 def analysis_run_now(flags: list[str]) -> None:
-    exit_code = run_node_content_cli("analysis", "run-now", flags)
-    if exit_code != 0:
-        raise RuntimeError(f"analysis run-now failed with exit code {exit_code}")
+    call_content_cli_export("runAnalysisReindexNowCli", flags)
 
 
 def analysis_execute_assignment(flags: list[str]) -> None:
-    exit_code = run_node_content_cli("analysis", "execute-assignment", flags)
-    if exit_code != 0:
-        raise RuntimeError(f"analysis execute-assignment failed with exit code {exit_code}")
+    call_content_cli_export("executeAnalysisReindexAssignmentCli", flags)
 
 
 def analysis_graph_artifacts(flags: list[str]) -> None:

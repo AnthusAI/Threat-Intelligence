@@ -1025,6 +1025,7 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
                 corpus_key="AI-ML-research",
                 max_evidence_items=8,
                 research_mode="source_discovery",
+                disable_tactus_web=True,
             )
 
         self.assertTrue(result["ok"], result.get("error"))
