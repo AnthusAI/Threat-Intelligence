@@ -170,7 +170,7 @@ export function NewsroomConsoleProgressToggle() {
 
 function ConsoleAccessPanel({ session }: { session: ReaderSessionSnapshot | null }) {
   return (
-    <div className="papyrus-console__panel papyrus-console__panel--access">
+    <div className="papyrus-console__panel papyrus-console__panel--access papyrus-console-ui">
       <ConsolePanelHeader
         subtitle={session?.auth.label ?? "Checking editor session"}
         title="Console Access"
@@ -362,7 +362,7 @@ function ConsolePanel({ actorLabel }: { actorLabel: string }) {
   const submitStatus = sending ? "submitted" : pending ? "streaming" : "ready";
 
   return (
-    <div className="papyrus-console__panel">
+    <div className="papyrus-console__panel papyrus-console-ui">
       <ConsolePanelHeader
         subtitle={actorLabel}
         title={thread?.title ?? "Papyrus Console"}
