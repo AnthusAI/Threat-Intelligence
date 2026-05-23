@@ -108,7 +108,7 @@ async fn handler(event: LambdaEvent<Value>, state: Arc<AppState>) -> Result<Valu
             Ok(RecordOutcome::Processed) => processed += 1,
             Ok(RecordOutcome::Skipped) => skipped += 1,
             Err(error) => {
-                error!(sequence, error = %error, "failed to process console chat stream record");
+                error!(sequence, error = %format_error_chain(&error), "failed to process console chat stream record");
                 if !sequence.is_empty() {
                     failures.push(json!({ "itemIdentifier": sequence }));
                 }
@@ -481,7 +481,17 @@ async fn load_prompt_context(
             return Ok(cache);
         }
     }
-    let mut cache = rebuild_context_from_dynamodb(state, message).await?;
+    let mut cache = match rebuild_context_from_dynamodb(state, message).await {
+        Ok(cache) => cache,
+        Err(error) => {
+            warn!(
+                thread_id = message.thread_id,
+                error = %format_error_chain(&error),
+                "failed to rebuild prompt context from DynamoDB; falling back to trigger message only"
+            );
+            one_message_context(message)
+        }
+    };
     if !cache
         .recent_messages
         .iter()
@@ -511,6 +521,21 @@ async fn load_prompt_context(
         "rebuilt prompt context from DynamoDB"
     );
     Ok(cache)
+}
+
+fn one_message_context(message: &ChatMessage) -> ThreadContextCache {
+    let mut cache = ThreadContextCache {
+        schema_version: CONTEXT_CACHE_SCHEMA_VERSION,
+        thread_id: message.thread_id.clone(),
+        last_sequence_number: message.sequence_number,
+        last_message_id: message.id.clone(),
+        context_digest: String::new(),
+        rolling_summary: String::new(),
+        recent_messages: vec![CachedPromptMessage::from_chat(message)],
+        updated_at: now_iso(),
+    };
+    cache.context_digest = compute_context_digest(&cache);
+    cache
 }
 
 fn cache_is_valid_for_message(cache: &ThreadContextCache, message: &ChatMessage) -> bool {
@@ -1053,6 +1078,14 @@ fn optional_env(name: &str) -> Option<String> {
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
+}
+
+fn format_error_chain(error: &anyhow::Error) -> String {
+    error
+        .chain()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(": ")
 }
 
 fn to_hex(bytes: &[u8]) -> String {

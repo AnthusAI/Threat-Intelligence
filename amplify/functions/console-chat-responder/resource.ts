@@ -83,6 +83,14 @@ export class ConsoleChatResponderStack extends NestedStack {
     props.threadTable.grantReadWriteData(this.responderFunction);
     this.responderFunction.addToRolePolicy(new PolicyStatement({
       effect: Effect.ALLOW,
+      actions: ["dynamodb:Query"],
+      resources: [
+        `${props.messageTable.tableArn}/index/*`,
+        `${props.threadTable.tableArn}/index/*`,
+      ],
+    }));
+    this.responderFunction.addToRolePolicy(new PolicyStatement({
+      effect: Effect.ALLOW,
       actions: ["ssm:GetParameter"],
       resources: ["*"],
     }));
