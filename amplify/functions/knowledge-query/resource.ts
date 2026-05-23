@@ -25,6 +25,18 @@ function storageBucketName(): string {
   }
 }
 
+function bundleKnowledgeQuery(outputDir: string): void {
+  const packageDir = path.join(outputDir, "papyrus_knowledge_query");
+  fs.mkdirSync(packageDir, { recursive: true });
+  fs.copyFileSync(
+    path.join(projectRoot, "amplify/functions/knowledge-query/handler.py"),
+    path.join(outputDir, "handler.py"),
+  );
+  fs.cpSync(path.join(projectRoot, "src/papyrus_knowledge_query"), packageDir, {
+    recursive: true,
+  });
+}
+
 export const knowledgeQuery = defineFunction(
   (scope: Construct) => {
     return new Function(scope, "papyrus-knowledge-query", {
@@ -39,6 +51,12 @@ export const knowledgeQuery = defineFunction(
       code: Code.fromAsset(projectRoot, {
         bundling: {
           image: Runtime.PYTHON_3_12.bundlingImage,
+          local: {
+            tryBundle(outputDir: string): boolean {
+              bundleKnowledgeQuery(outputDir);
+              return true;
+            },
+          },
           command: [
             "bash",
             "-c",
@@ -47,7 +65,6 @@ export const knowledgeQuery = defineFunction(
               "mkdir -p /asset-output/papyrus_knowledge_query",
               "cp amplify/functions/knowledge-query/handler.py /asset-output/handler.py",
               "cp -R src/papyrus_knowledge_query/. /asset-output/papyrus_knowledge_query/",
-              "if [ -s amplify/functions/knowledge-query/requirements.txt ]; then python -m pip install -r amplify/functions/knowledge-query/requirements.txt -t /asset-output; fi",
             ].join(" && "),
           ],
         },
