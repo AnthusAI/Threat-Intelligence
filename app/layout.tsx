@@ -1,9 +1,14 @@
 import type { Metadata } from "next";
-import { Playfair_Display } from "next/font/google";
+import { Playfair_Display, Geist } from "next/font/google";
 import Script from "next/script";
 import { AmplifyClientProvider } from "../components/amplify-client-provider";
 import { PapyrusConsoleShell } from "../components/papyrus-console-shell";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import "./tailwind.css";
 import "./globals.css";
+import { cn } from "@/lib/utils";
+
+const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 
 const playfairDisplay = Playfair_Display({
   subsets: ["latin"],
@@ -25,7 +30,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" data-papyrus-theme="system" suppressHydrationWarning>
+    <html lang="en" data-papyrus-theme="system" suppressHydrationWarning className={cn("font-sans", geist.variable)}>
       <body className={playfairDisplay.variable}>
         <Script id="papyrus-favicon-color-scheme" strategy="beforeInteractive">
           {`(() => {
@@ -90,7 +95,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
 })();`}
         </Script>
         <AmplifyClientProvider>
-          <PapyrusConsoleShell>{children}</PapyrusConsoleShell>
+          <TooltipProvider>
+            <PapyrusConsoleShell>{children}</PapyrusConsoleShell>
+          </TooltipProvider>
         </AmplifyClientProvider>
       </body>
     </html>

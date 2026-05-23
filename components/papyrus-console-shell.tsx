@@ -3,7 +3,22 @@
 import { generateClient } from "aws-amplify/data";
 import { usePathname } from "next/navigation";
 import type { Schema } from "../amplify/data/resource";
+import {
+  Conversation,
+  ConversationContent,
+  ConversationEmptyState,
+  ConversationScrollButton,
+} from "@/components/ai-elements/conversation";
+import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
+import {
+  PromptInput,
+  type PromptInputMessage,
+  PromptInputSubmit,
+  PromptInputTextarea,
+} from "@/components/ai-elements/prompt-input";
 import { loadReaderSessionSnapshot, type ReaderSessionSnapshot } from "./reader-auth-state";
+import { MessageSquare } from "lucide-react";
+import type { UIMessage } from "ai";
 import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const USER_POOL_AUTH_MODE = "userPool";
@@ -239,9 +254,9 @@ function ConsolePanel({ actorLabel }: { actorLabel: string }) {
     return created;
   }
 
-  async function sendMessage(event: FormEvent<HTMLFormElement>) {
+  async function sendMessage(message: PromptInputMessage, event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const content = draft.trim();
+    const content = message.text.trim();
     if (!content || sending) return;
     setSending(true);
     setError(null);
@@ -313,6 +328,7 @@ function ConsolePanel({ actorLabel }: { actorLabel: string }) {
   }
 
   const pending = sortedMessages.some((message) => message.role === "USER" && message.responseStatus === "PENDING");
+  const submitStatus = sending ? "submitted" : pending ? "streaming" : "ready";
 
   return (
     <div className="papyrus-console__panel">
@@ -320,37 +336,65 @@ function ConsolePanel({ actorLabel }: { actorLabel: string }) {
         subtitle={actorLabel}
         title={thread?.title ?? "Papyrus Console"}
       />
-      <div className="papyrus-console__body" role="log" aria-live="polite">
-        {loading && !sortedMessages.length ? <p className="papyrus-console__empty">Loading conversation…</p> : null}
-        {!loading && !sortedMessages.length ? (
-          <div className="papyrus-console__empty">
-            <strong>Ask Papyrus about this newsroom.</strong>
-            <span>Raw chat turns are marked as chat detail and excluded from default semantic search.</span>
-          </div>
-        ) : null}
-        {sortedMessages.map((message) => (
-          <article className={message.role === "USER" ? "papyrus-console-message papyrus-console-message--user" : "papyrus-console-message papyrus-console-message--assistant"} key={message.id}>
-            <p>{message.role === "USER" ? "You" : message.role === "TOOL" ? "Tool" : "Papyrus"}</p>
-            <div>{message.content ?? message.summary}</div>
-            {message.responseStatus === "FAILED" ? <span className="papyrus-console-message__error">{message.responseError ?? "Responder failed"}</span> : null}
-          </article>
-        ))}
-        {pending ? <p className="papyrus-console__pending">Responder is reading the thread cache…</p> : null}
-      </div>
+      <Conversation className="papyrus-console__conversation min-h-0 flex-1">
+        <ConversationContent className="gap-4 p-4">
+          {loading && !sortedMessages.length ? (
+            <ConversationEmptyState
+              description="Loading the editor console thread."
+              title="Loading conversation…"
+            />
+          ) : null}
+          {!loading && !sortedMessages.length ? (
+            <ConversationEmptyState
+              description="Raw chat turns are marked as chat detail and excluded from default semantic search."
+              icon={<MessageSquare className="size-10" strokeWidth={1.5} />}
+              title="Ask Papyrus about this newsroom."
+            />
+          ) : null}
+          {sortedMessages.map((message) => (
+            <Message from={toConsoleMessageRole(message.role)} key={message.id}>
+              <MessageContent>
+                <MessageResponse>{message.content ?? message.summary ?? ""}</MessageResponse>
+                {message.responseStatus === "FAILED" ? (
+                  <p className="papyrus-console-message__error text-destructive text-xs">
+                    {message.responseError ?? "Responder failed"}
+                  </p>
+                ) : null}
+              </MessageContent>
+            </Message>
+          ))}
+          {pending ? <p className="papyrus-console__pending text-muted-foreground text-sm">Responder is reading the thread cache…</p> : null}
+        </ConversationContent>
+        <ConversationScrollButton />
+      </Conversation>
       {error ? <p className="papyrus-console__error">{error}</p> : null}
-      <form className="papyrus-console__composer" onSubmit={(event) => void sendMessage(event)}>
-        <textarea
+      <PromptInput
+        className="papyrus-console__composer relative border-t p-3"
+        onSubmit={(message, event) => void sendMessage(message, event)}
+      >
+        <PromptInputTextarea
           aria-label="Console message"
+          className="min-h-20 pr-12"
           disabled={sending}
-          onChange={(event) => setDraft(event.target.value)}
+          onChange={(event) => setDraft(event.currentTarget.value)}
           placeholder="Ask about this edition, newsroom, or knowledge graph…"
-          rows={3}
           value={draft}
         />
-        <button disabled={!draft.trim() || sending} type="submit">{sending ? "Sending…" : "Send"}</button>
-      </form>
+        <PromptInputSubmit
+          className="absolute right-4 bottom-4"
+          disabled={!draft.trim() || sending}
+          status={submitStatus}
+        />
+      </PromptInput>
     </div>
   );
+}
+
+function toConsoleMessageRole(role: string | null | undefined): UIMessage["role"] {
+  if (role === "USER") return "user";
+  if (role === "ASSISTANT") return "assistant";
+  if (role === "SYSTEM") return "system";
+  return "assistant";
 }
 
 function truncateConsoleSummary(value: string): string {
