@@ -83,17 +83,24 @@ function main() {
     const selected = payload?.summary?.selectedCount ?? null;
     const succeeded = payload?.summary?.succeededCount ?? null;
 
+    const failed = payload?.summary?.failedCount ?? null;
+    const degraded = payload?.degraded === true;
+
     manifest.batches.push({
       batchIndex,
       selectedCount: selected,
       succeededCount: succeeded,
+      failedCount: failed,
+      degraded,
       exitCode: result.status,
       elapsedMs,
       completedAt: new Date().toISOString(),
     });
     fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
 
-    if (result.status !== 0) {
+    const partialSuccess = Boolean(payload && (succeeded ?? 0) > 0);
+    const hardFailure = result.status !== 0 && !partialSuccess;
+    if (hardFailure) {
       console.error(result.stdout || "");
       console.error(result.stderr || "");
       throw new Error(`Wave ${batchIndex + 1} failed with exit code ${result.status}.`);
@@ -101,6 +108,9 @@ function main() {
 
     if (payload) {
       console.log(JSON.stringify(payload.summary || payload, null, 2));
+    }
+    if (degraded && (failed ?? 0) > 0) {
+      console.log(`post-ingestion-enrichment\twarning\t${failed} reference(s) failed in wave ${batchIndex + 1}; continuing`);
     }
 
     if (!selected || selected === 0) {
