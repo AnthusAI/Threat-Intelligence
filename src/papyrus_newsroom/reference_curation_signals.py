@@ -1660,6 +1660,7 @@ def reference_curate_recent(
     reference_ids: list[str] | None = None,
     since_hours: int = 48,
     since: str = "",
+    curate_all: bool = False,
     max_count: int = 0,
     scan_limit: int = 1000,
     max_parallel: int = 1,
@@ -1675,8 +1676,10 @@ def reference_curate_recent(
     explicit_reference_ids = [str(value).strip() for value in (reference_ids or []) if str(value).strip()]
 
     requested_since = _clean_text(since)
-    since_source = "since" if requested_since else "since_hours"
-    if requested_since:
+    since_source = "all" if curate_all else ("since" if requested_since else "since_hours")
+    if curate_all:
+        since_dt = None
+    elif requested_since:
         since_dt = _parse_iso_datetime(requested_since)
         if since_dt is None:
             raise ValueError(f"Invalid --since value: {since}")
@@ -1688,7 +1691,7 @@ def reference_curate_recent(
         run_started_at,
         corpus_key,
         explicit_reference_ids,
-        requested_since or max(int(since_hours or 0), 0),
+        "all" if curate_all else (requested_since or max(int(since_hours or 0), 0)),
         int(max_count or 0),
         int(scan_limit or 0),
     ])
@@ -1702,6 +1705,7 @@ def reference_curate_recent(
         summary_max_tokens=summary_max_tokens,
         since=requested_since,
         since_hours=max(int(since_hours or 0), 0),
+        curate_all=bool(curate_all),
         max_count=max(int(max_count or 0), 0),
         scan_limit=max(int(scan_limit or 1), 1),
         explicit_reference_ids=explicit_reference_ids,
@@ -1759,6 +1763,7 @@ def reference_curate_recent(
         selected_references = _select_references_for_curate_recent(
             corpus_key=corpus_key,
             since_dt=since_dt,
+            curate_all=curate_all,
             max_count=max_count,
             scan_limit=scan_limit,
         )
@@ -1878,11 +1883,14 @@ def reference_curate_recent(
         "apply": apply,
         "corpusKey": corpus_key,
         "selection": {
-            "mode": "explicit" if explicit_reference_ids else ("resume" if resume else "recent_window"),
+            "mode": "explicit"
+            if explicit_reference_ids
+            else ("resume" if resume else ("all" if curate_all else "recent_window")),
             "referenceIds": explicit_reference_ids,
             "since": requested_since or (since_dt.isoformat().replace("+00:00", "Z") if since_dt else ""),
             "sinceSource": since_source,
             "sinceHours": max(int(since_hours or 0), 0),
+            "curateAll": bool(curate_all),
             "maxCount": max(int(max_count or 0), 0),
             "scanLimit": max(int(scan_limit or 1), 1),
             "maxParallel": max(int(max_parallel or 1), 1),
@@ -2154,7 +2162,8 @@ def _run_reference_curation_quality_stage(
 def _select_references_for_curate_recent(
     *,
     corpus_key: str,
-    since_dt: _dt.datetime,
+    since_dt: _dt.datetime | None,
+    curate_all: bool = False,
     max_count: int,
     scan_limit: int,
 ) -> list[dict[str, Any]]:
@@ -2162,11 +2171,12 @@ def _select_references_for_curate_recent(
     references.sort(key=_reference_chrono_key, reverse=True)
     selected: list[dict[str, Any]] = []
     for reference in references:
-        reference_dt = _reference_datetime(reference)
-        if reference_dt is None:
-            continue
-        if reference_dt < since_dt:
-            continue
+        if not curate_all and since_dt is not None:
+            reference_dt = _reference_datetime(reference)
+            if reference_dt is None:
+                continue
+            if reference_dt < since_dt:
+                continue
         selected.append(reference)
         if max_count and len(selected) >= int(max_count):
             break
@@ -2213,6 +2223,7 @@ def _load_reference_curation_manifest(
     summary_max_tokens: int,
     since: str,
     since_hours: int,
+    curate_all: bool = False,
     max_count: int,
     scan_limit: int,
     explicit_reference_ids: list[str],
@@ -2241,6 +2252,7 @@ def _load_reference_curation_manifest(
             "summaryMaxTokens": summary_max_tokens,
             "since": since,
             "sinceHours": since_hours,
+            "curateAll": curate_all,
             "maxCount": max_count,
             "scanLimit": scan_limit,
             "referenceIds": explicit_reference_ids,

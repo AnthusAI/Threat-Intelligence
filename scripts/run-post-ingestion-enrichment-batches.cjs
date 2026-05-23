@@ -1,37 +1,54 @@
 #!/usr/bin/env node
 /**
- * Backfill missing 100-token reference summaries via parallel summarize-batch waves.
+ * Run reference curation (identifiers, title/subtitle, summaries) in batches via Python newsroom CLI.
+ *
  * Usage:
- *   node scripts/run-post-ingestion-enrichment-batches.cjs [--batch-size 50] [--max-parallel 6]
+ *   node scripts/run-post-ingestion-enrichment-batches.cjs \
+ *     --corpus-key <corpus-key> \
+ *     [--batch-size 25] [--start-batch 0] [--max-batches 0] \
+ *     [--scan-limit 5000] [--summary-max-tokens 100] [--model gpt-5.4-mini] \
+ *     [--recent-only]
  */
 const fs = require("node:fs");
 const path = require("node:path");
-const { spawnSync } = require("node:child_process");
 
 const PROJECT_ROOT = path.resolve(__dirname, "..");
-const RUN_DIR = path.join(PROJECT_ROOT, ".papyrus-runs", "post-ingestion-enrichment-bulk");
+const {
+  defaultRunDir,
+  parseNonNegativeInteger,
+  parsePositiveInteger,
+  runPoetryWithRetries,
+} = require("./lib/papyrus-batch-cli.cjs");
 
 function parseArgs(argv) {
   const options = {
-    batchSize: 50,
-    maxParallel: 6,
+    corpusKey: null,
+    batchSize: 25,
+    startBatch: 0,
+    maxBatches: 0,
     scanLimit: 5000,
-    maxWaves: 0,
-    corpusKey: "AI-ML-research",
+    summaryMaxTokens: 100,
+    model: "gpt-5.4-mini",
+    curateAll: true,
+    runDir: null,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
-    if (arg === "--batch-size") options.batchSize = Number(argv[++index]);
-    else if (arg === "--max-parallel") options.maxParallel = Number(argv[++index]);
-    else if (arg === "--scan-limit") options.scanLimit = Number(argv[++index]);
-    else if (arg === "--max-waves") options.maxWaves = Number(argv[++index]);
-    else if (arg === "--corpus-key") options.corpusKey = argv[++index];
+    if (arg === "--batch-size") options.batchSize = parsePositiveInteger(argv[++index], "--batch-size");
+    else if (arg === "--start-batch") options.startBatch = parseNonNegativeInteger(argv[++index], "--start-batch");
+    else if (arg === "--max-batches") options.maxBatches = parseNonNegativeInteger(argv[++index], "--max-batches");
+    else if (arg === "--corpus-key") options.corpusKey = String(argv[++index] ?? "").trim();
+    else if (arg === "--scan-limit") options.scanLimit = parsePositiveInteger(argv[++index], "--scan-limit");
+    else if (arg === "--summary-max-tokens") {
+      options.summaryMaxTokens = parsePositiveInteger(argv[++index], "--summary-max-tokens");
+    } else if (arg === "--model") options.model = String(argv[++index] ?? "").trim();
+    else if (arg === "--all") options.curateAll = true;
+    else if (arg === "--recent-only") options.curateAll = false;
+    else if (arg === "--run-dir") options.runDir = path.resolve(PROJECT_ROOT, argv[++index]);
+    else throw new Error(`Unknown argument: ${arg}`);
   }
-  if (!Number.isFinite(options.batchSize) || options.batchSize < 1) {
-    throw new Error("--batch-size must be a positive integer.");
-  }
-  if (!Number.isFinite(options.maxParallel) || options.maxParallel < 1) {
-    throw new Error("--max-parallel must be a positive integer.");
+  if (!options.corpusKey) {
+    throw new Error("--corpus-key is required.");
   }
   return options;
 }
@@ -54,73 +71,60 @@ function extractJson(stdout) {
 
 function main() {
   const options = parseArgs(process.argv.slice(2));
-  fs.mkdirSync(RUN_DIR, { recursive: true });
-  const manifestPath = path.join(RUN_DIR, "manifest.json");
-  let manifest = fs.existsSync(manifestPath) ? JSON.parse(fs.readFileSync(manifestPath, "utf8")) : { batches: [] };
+  const runDir = options.runDir || defaultRunDir(PROJECT_ROOT, "post-ingestion-enrichment-bulk", options.corpusKey);
+  fs.mkdirSync(runDir, { recursive: true });
+  const manifestPath = path.join(runDir, "manifest.json");
+  let manifest = fs.existsSync(manifestPath)
+    ? JSON.parse(fs.readFileSync(manifestPath, "utf8"))
+    : { corpusKey: options.corpusKey, batches: [] };
 
-  console.log(`summary-backfill\tmode\tsummarize-batch`);
-  console.log(`summary-backfill\tcorpus\t${options.corpusKey}`);
-  console.log(`summary-backfill\tbatch-size\t${options.batchSize}`);
-  console.log(`summary-backfill\tmax-parallel\t${options.maxParallel}`);
-  console.log(`summary-backfill\tscan-limit\t${options.scanLimit}`);
+  console.log(`post-ingestion-enrichment\tcorpus\t${options.corpusKey}`);
+  console.log(`post-ingestion-enrichment\tbatch-size\t${options.batchSize}`);
+  console.log(`post-ingestion-enrichment\tstart-batch\t${options.startBatch}`);
+  console.log(`post-ingestion-enrichment\tscan-limit\t${options.scanLimit}`);
+  console.log(`post-ingestion-enrichment\tall-references\t${options.curateAll}`);
+  console.log(`post-ingestion-enrichment\trun-dir\t${runDir}`);
 
-  let waveIndex = 0;
-  let totalCreated = 0;
+  let batchIndex = options.startBatch;
+  let processed = 0;
   while (true) {
-    if (options.maxWaves && waveIndex >= options.maxWaves) break;
-
+    if (options.maxBatches && processed >= options.maxBatches) break;
     const args = [
       "run",
       "papyrus-newsroom",
       "references",
-      "summarize-batch",
+      "curate-recent",
       "--corpus-key",
       options.corpusKey,
-      "--budgets",
-      "100",
-      "--only-missing",
-      "true",
       "--max-count",
       String(options.batchSize),
-      "--max-parallel",
-      String(options.maxParallel),
       "--scan-limit",
       String(options.scanLimit),
+      "--summary-max-tokens",
+      String(options.summaryMaxTokens),
+      "--model",
+      options.model,
       "--apply",
+      "--json",
     ];
-
-    console.log(`summary-backfill\twave\t${waveIndex + 1}`);
-    const startedAt = Date.now();
-    let result = null;
-    for (let attempt = 1; attempt <= 3; attempt += 1) {
-      if (attempt > 1) {
-        console.log(`summary-backfill\tretry\twave\t${waveIndex + 1}\tattempt\t${attempt}`);
-      }
-      result = spawnSync("poetry", args, {
-        cwd: PROJECT_ROOT,
-        encoding: "utf8",
-        env: process.env,
-        maxBuffer: 1024 * 1024 * 256,
-      });
-      if (result.status === 0) break;
-      const combined = `${result.stdout || ""}\n${result.stderr || ""}`;
-      const transient = /Connection reset|timed out|Temporary failure|ECONNRESET|503|502|504|429/i.test(combined);
-      if (!transient || attempt === 3) break;
+    if (options.curateAll) {
+      args.push("--all");
+    } else {
+      args.push("--since-hours", "48");
     }
 
+    console.log(`post-ingestion-enrichment\twave\t${batchIndex + 1}`);
+    const startedAt = Date.now();
+    const result = runPoetryWithRetries(PROJECT_ROOT, args);
     const elapsedMs = Date.now() - startedAt;
     const payload = extractJson(result.stdout);
-    const created = payload?.created ?? 0;
-    const selected = payload?.selectedCount ?? 0;
-    const skippedExisting = payload?.skippedExisting ?? null;
-    const blocked = payload?.blocked ?? 0;
+    const selected = payload?.summary?.selectedCount ?? null;
+    const succeeded = payload?.summary?.succeededCount ?? null;
 
     manifest.batches.push({
-      waveIndex,
-      created,
+      batchIndex,
       selectedCount: selected,
-      skippedExisting,
-      blocked,
+      succeededCount: succeeded,
       exitCode: result.status,
       elapsedMs,
       completedAt: new Date().toISOString(),
@@ -131,41 +135,29 @@ function main() {
     if (result.status !== 0) {
       console.error(result.stdout || "");
       console.error(result.stderr || "");
-      throw new Error(`Wave ${waveIndex + 1} failed with exit code ${result.status}.`);
+      throw new Error(`Wave ${batchIndex + 1} failed with exit code ${result.status}.`);
     }
 
     if (payload) {
-      console.log(
-        JSON.stringify(
-          {
-            created: payload.created,
-            selectedCount: payload.selectedCount,
-            skippedExisting: payload.skippedExisting,
-            blocked: payload.blocked,
-            maxParallel: payload.maxParallel,
-            elapsedMs,
-          },
-          null,
-          2,
-        ),
-      );
+      console.log(JSON.stringify(payload.summary || payload, null, 2));
     }
 
-    totalCreated += created;
-    waveIndex += 1;
-
-    if (!selected || created === 0) {
-      console.log("summary-backfill\tcomplete\tno remaining missing summaries");
+    if (!selected || selected === 0) {
+      console.log("post-ingestion-enrichment\tcomplete\tno remaining references");
       break;
     }
+    if (succeeded === 0 && payload?.summary?.failedCount > 0) {
+      console.log("post-ingestion-enrichment\tcomplete\tbatch failed without successes");
+      break;
+    }
+
+    batchIndex += 1;
+    processed += 1;
   }
 
   manifest.finishedAt = new Date().toISOString();
-  manifest.totalCreated = totalCreated;
-  manifest.wavesProcessed = waveIndex;
   fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-  console.log(`summary-backfill\twaves-processed\t${waveIndex}`);
-  console.log(`summary-backfill\ttotal-created\t${totalCreated}`);
+  console.log(`post-ingestion-enrichment\twaves-processed\t${processed}`);
 }
 
 main();

@@ -2138,6 +2138,41 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertEqual(result["count"], 1)
         self.assertEqual(result["items"][0]["id"], "reference-a-v1")
 
+    def test_reference_curate_recent_all_includes_undated_and_old_references(self):
+        references = [
+            {
+                "id": "reference-old-v1",
+                "lineageId": "reference-old",
+                "versionNumber": 1,
+                "corpusId": "knowledge-corpus-demo",
+                "externalItemId": "old",
+                "title": "Old",
+                "curationStatus": "accepted",
+                "importedAt": "2020-01-01T00:00:00Z",
+            },
+            {
+                "id": "reference-undated-v1",
+                "lineageId": "reference-undated",
+                "versionNumber": 1,
+                "corpusId": "knowledge-corpus-demo",
+                "externalItemId": "undated",
+                "title": "Undated",
+                "curationStatus": "accepted",
+            },
+        ]
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals.list_references_by_corpus",
+            return_value=references,
+        ):
+            selected = reference_curation_signals._select_references_for_curate_recent(
+                corpus_key="demo-corpus",
+                since_dt=None,
+                curate_all=True,
+                max_count=0,
+                scan_limit=100,
+            )
+        self.assertEqual(len(selected), 2)
+
     def test_reference_curate_recent_defaults_to_48h_all_statuses(self):
         references = [
             {

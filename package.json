@@ -9,6 +9,8 @@
     "start": "next start",
     "favicon:generate": "node scripts/favicon/generate-favicon.mjs",
     "content": "poetry run papyrus-content",
+    "content:register-catalog-bulk": "node scripts/run-catalog-registration-batches.cjs",
+    "content:enrich-references-bulk": "node scripts/run-post-ingestion-enrichment-batches.cjs",
     "lint": "eslint .",
     "test:newsroom": "node scripts/test-newsroom-session.cjs",
     "test:newsroom-card-layout": "node scripts/test-newsroom-card-layout.cjs",

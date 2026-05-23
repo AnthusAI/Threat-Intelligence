@@ -121,6 +121,11 @@ def main(argv: list[str] | None = None) -> int:
     curate_recent_parser.add_argument("--reference", action="append", default=[])
     curate_recent_parser.add_argument("--since-hours", type=int, default=48)
     curate_recent_parser.add_argument("--since", default="")
+    curate_recent_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Select references without a recency window (for bulk post-ingestion enrichment).",
+    )
     curate_recent_parser.add_argument("--max-count", type=int, default=0)
     curate_recent_parser.add_argument("--scan-limit", type=int, default=1000)
     curate_recent_parser.add_argument("--max-parallel", type=int, default=1)
@@ -562,11 +567,14 @@ def _run_references_command(args: argparse.Namespace) -> dict:
     if args.references_command == "curate-recent":
         if args.apply and args.dry_run:
             raise ValueError("--apply and --dry-run cannot be used together.")
+        if args.all and (args.since or args.reference):
+            raise ValueError("--all cannot be combined with --since or --reference.")
         return reference_curate_recent(
             corpus_key=args.corpus_key,
             reference_ids=args.reference,
             since_hours=args.since_hours,
             since=args.since,
+            curate_all=args.all,
             max_count=args.max_count,
             scan_limit=args.scan_limit,
             max_parallel=args.max_parallel,

@@ -536,21 +536,6 @@ def coverage_theme_run(
 ) -> dict[str, Any]:
     now = now or _now_iso()
     through = normalize_through(through)
-    if through in {"research", "reporting"} and apply and not allow_fallback:
-        return {
-            "ok": False,
-            "command": "coverage-themes run",
-            "date": date,
-            "topic": topic,
-            "coverageKey": coverage_key,
-            "through": through,
-            "apply": False,
-            "degraded": True,
-            "error": {
-                "code": "fallback_not_allowed",
-                "message": "coverage-themes run would persist deterministic fallback packets; pass --allow-fallback to apply degraded packet output.",
-            },
-        }
     state_models = ["NewsroomSection", "Category", "CategorySet"]
     state = load_live_state(models=state_models) if apply else {}
     plan = build_coverage_theme_plan(
@@ -569,18 +554,23 @@ def coverage_theme_run(
     records = list(plan["records"])
     packet_runs: dict[str, list[dict[str, Any]]] = {"research": [], "reporting": []}
     degraded = False
+    cloud_client = _create_cloud_procedure_client() if through in {"research", "reporting"} else None
     if through in {"research", "reporting"}:
         for assignment in plan["researchAssignments"]:
-            packet_plan = build_research_packet_records(
+            packet_plan = run_or_fallback_research_packet_records(
+                client=cloud_client,
+                run_id=plan["runId"],
                 assignment=assignment,
                 topic=topic,
                 corpus_key=corpus_key,
                 coverage_key=coverage_key,
                 research_mode=research_mode,
                 now=now,
-                degraded=True,
+                allow_fallback=allow_fallback,
                 refresh_packets=refresh_packets,
             )
+            if packet_plan.get("ok") is False:
+                return _coverage_theme_cloud_error(plan, through, apply, packet_plan["error"])
             degraded = degraded or bool(packet_plan["degraded"])
             packet_runs["research"].append(packet_plan["run"])
             records.extend(packet_plan["records"])
@@ -588,7 +578,9 @@ def coverage_theme_run(
         research_by_section = {assignment["sectionKey"]: assignment for assignment in plan["researchAssignments"]}
         research_messages = {run["sectionKey"]: run.get("messageId") for run in packet_runs["research"]}
         for assignment in plan["reportingAssignments"]:
-            packet_plan = build_reporting_packet_records(
+            packet_plan = run_or_fallback_reporting_packet_records(
+                client=cloud_client,
+                run_id=plan["runId"],
                 assignment=assignment,
                 topic=topic,
                 corpus_key=corpus_key,
@@ -596,9 +588,11 @@ def coverage_theme_run(
                 source_research_assignment=research_by_section.get(assignment["sectionKey"]),
                 source_research_packet_id=research_messages.get(assignment["sectionKey"]),
                 now=now,
-                degraded=True,
+                allow_fallback=allow_fallback,
                 refresh_packets=refresh_packets,
             )
+            if packet_plan.get("ok") is False:
+                return _coverage_theme_cloud_error(plan, through, apply, packet_plan["error"])
             degraded = degraded or bool(packet_plan["degraded"])
             packet_runs["reporting"].append(packet_plan["run"])
             records.extend(packet_plan["records"])
@@ -636,6 +630,249 @@ def coverage_theme_run(
     if apply:
         output = {**output, **apply_records(output["records"])}
     return output
+
+
+def _coverage_theme_cloud_error(plan: dict[str, Any], through: str, apply: bool, error: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **_without_records(plan),
+        "ok": False,
+        "command": "coverage-themes run",
+        "through": through,
+        "apply": False,
+        "degraded": False,
+        "error": error,
+        "summary": {
+            **(plan.get("summary") or {}),
+            "researchPacketCount": 0,
+            "reportingPacketCount": 0,
+            "degraded": False,
+            "createsItemOrEditionItem": False,
+            "requestedApply": apply,
+        },
+    }
+
+
+def _create_cloud_procedure_client() -> Any:
+    from papyrus_content.graphql_authoring import create_authoring_client
+
+    client, _ = create_authoring_client()
+    return client
+
+
+def _start_cloud_procedure_run(**kwargs: Any) -> dict[str, Any]:
+    from papyrus_content.cloud_procedures import start_cloud_procedure_run
+
+    return start_cloud_procedure_run(**kwargs)
+
+
+def run_or_fallback_research_packet_records(
+    *,
+    client: Any,
+    run_id: str,
+    assignment: dict[str, Any],
+    topic: str,
+    corpus_key: str,
+    coverage_key: str,
+    research_mode: str,
+    now: str,
+    allow_fallback: bool,
+    refresh_packets: bool,
+) -> dict[str, Any]:
+    try:
+        return build_cloud_research_packet_records(
+            client=client,
+            run_id=run_id,
+            assignment=assignment,
+            topic=topic,
+            corpus_key=corpus_key,
+            coverage_key=coverage_key,
+            research_mode=research_mode,
+            now=now,
+            refresh_packets=refresh_packets,
+        )
+    except Exception as error:
+        if not allow_fallback:
+            return {"ok": False, "error": _cloud_procedure_error_payload("story-cycle.research", assignment, error)}
+        return build_research_packet_records(
+            assignment=assignment,
+            topic=topic,
+            corpus_key=corpus_key,
+            coverage_key=coverage_key,
+            research_mode=research_mode,
+            now=now,
+            degraded=True,
+            refresh_packets=refresh_packets,
+        )
+
+
+def run_or_fallback_reporting_packet_records(
+    *,
+    client: Any,
+    run_id: str,
+    assignment: dict[str, Any],
+    topic: str,
+    corpus_key: str,
+    coverage_key: str,
+    source_research_assignment: dict[str, Any] | None,
+    source_research_packet_id: str | None,
+    now: str,
+    allow_fallback: bool,
+    refresh_packets: bool,
+) -> dict[str, Any]:
+    try:
+        return build_cloud_reporting_packet_records(
+            client=client,
+            run_id=run_id,
+            assignment=assignment,
+            topic=topic,
+            corpus_key=corpus_key,
+            coverage_key=coverage_key,
+            source_research_assignment=source_research_assignment,
+            source_research_packet_id=source_research_packet_id,
+            now=now,
+            refresh_packets=refresh_packets,
+        )
+    except Exception as error:
+        if not allow_fallback:
+            return {"ok": False, "error": _cloud_procedure_error_payload("story-cycle.reporting", assignment, error)}
+        return build_reporting_packet_records(
+            assignment=assignment,
+            topic=topic,
+            corpus_key=corpus_key,
+            coverage_key=coverage_key,
+            source_research_assignment=source_research_assignment,
+            source_research_packet_id=source_research_packet_id,
+            now=now,
+            degraded=True,
+            refresh_packets=refresh_packets,
+        )
+
+
+def build_cloud_research_packet_records(
+    *,
+    client: Any,
+    run_id: str,
+    assignment: dict[str, Any],
+    topic: str,
+    corpus_key: str,
+    coverage_key: str,
+    research_mode: str,
+    now: str,
+    refresh_packets: bool,
+) -> dict[str, Any]:
+    metadata = _metadata(assignment)
+    run_dir = Path(".papyrus-runs") / run_id / _safe_id(assignment["id"])
+    cloud_run = _start_cloud_procedure_run(
+        client=client,
+        alias="story-cycle.research",
+        actor_label="papyrus-newsroom coverage-themes run",
+        title=f"Run story-cycle research for {metadata.get('sectionTitle') or assignment.get('sectionKey')}",
+        summary=f"Coverage Theme research for {topic}.",
+        input_payload={
+            "assignment_item_id": assignment["id"],
+            "assignment_json": assignment,
+            "corpus_key": corpus_key,
+            "context_profile": "researcher",
+            "research_mode": research_mode,
+            "research_questions": metadata.get("researchLens") or "",
+            "max_evidence_items": 20,
+        },
+        run_dir=run_dir,
+        source_path=run_dir / "research.cloud.tac",
+        stdout_path=run_dir / "research.stdout.log",
+        stderr_path=run_dir / "research.stderr.log",
+    )
+    output = cloud_run.get("output") if isinstance(cloud_run.get("output"), dict) else {}
+    packet = output.get("research_packet") or output.get("researchPacket")
+    if not isinstance(packet, dict):
+        raise ValueError(
+            f"Cloud procedure output for {assignment['id']} is missing research_packet. "
+            "Run npm run seed:amplify if procedure seeds are stale."
+        )
+    normalized_packet = normalize_story_cycle_research_packet(
+        packet,
+        assignment=assignment,
+        topic=topic,
+        corpus_key=corpus_key,
+        coverage_key=coverage_key,
+        research_mode=research_mode,
+    )
+    return build_research_packet_records_from_packet(
+        assignment=assignment,
+        packet=normalized_packet,
+        cloud_run=cloud_run,
+        now=now,
+        refresh_packets=refresh_packets,
+    )
+
+
+def build_cloud_reporting_packet_records(
+    *,
+    client: Any,
+    run_id: str,
+    assignment: dict[str, Any],
+    topic: str,
+    corpus_key: str,
+    coverage_key: str,
+    source_research_assignment: dict[str, Any] | None,
+    source_research_packet_id: str | None,
+    now: str,
+    refresh_packets: bool,
+) -> dict[str, Any]:
+    metadata = _metadata(assignment)
+    run_dir = Path(".papyrus-runs") / run_id / _safe_id(assignment["id"])
+    cloud_run = _start_cloud_procedure_run(
+        client=client,
+        alias="story-cycle.reporting",
+        actor_label="papyrus-newsroom coverage-themes run",
+        title=f"Run story-cycle reporting for {metadata.get('sectionTitle') or assignment.get('sectionKey')}",
+        summary=f"Coverage Theme reporting context for {topic}.",
+        input_payload={
+            "assignment_item_id": assignment["id"],
+            "assignment_json": assignment,
+            "corpus_key": corpus_key,
+            "context_profile": "reporting",
+            "source_research_assignment_id": (source_research_assignment or {}).get("id"),
+            "source_research_packet_id": source_research_packet_id,
+        },
+        run_dir=run_dir,
+        source_path=run_dir / "reporting.cloud.tac",
+        stdout_path=run_dir / "reporting.stdout.log",
+        stderr_path=run_dir / "reporting.stderr.log",
+    )
+    output = cloud_run.get("output") if isinstance(cloud_run.get("output"), dict) else {}
+    packet = output.get("reporting_context_packet") or output.get("reportingContextPacket")
+    if not isinstance(packet, dict):
+        raise ValueError(
+            f"Cloud procedure output for {assignment['id']} is missing reporting_context_packet. "
+            "Run npm run seed:amplify if procedure seeds are stale."
+        )
+    normalized_packet = normalize_story_cycle_reporting_packet(
+        packet,
+        assignment=assignment,
+        topic=topic,
+        coverage_key=coverage_key,
+        source_research_assignment=source_research_assignment,
+        source_research_packet_id=source_research_packet_id,
+    )
+    return build_reporting_packet_records_from_packet(
+        assignment=assignment,
+        packet=normalized_packet,
+        cloud_run=cloud_run,
+        source_research_packet_id=source_research_packet_id,
+        now=now,
+        refresh_packets=refresh_packets,
+    )
+
+
+def _cloud_procedure_error_payload(alias: str, assignment: dict[str, Any], error: Exception) -> dict[str, Any]:
+    return {
+        "code": "cloud_procedure_failed",
+        "message": str(error),
+        "alias": alias,
+        "assignmentId": assignment.get("id"),
+        "remediation": "Run npm run seed:amplify to preload standard procedures if the required cloud procedure is missing or stale.",
+    }
 
 
 def build_coverage_theme_plan(
