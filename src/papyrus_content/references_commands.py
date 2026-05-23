@@ -29,12 +29,13 @@ from .records import apply_record_changes, build_record_changes, build_record_ch
 from .reference_assignments import (
     build_reference_identifier_backfill_assignment_plan,
     build_text_extraction_assignment_records,
-    delegate_reference_execution_to_node,
     doi_backfill_compatibility_flags,
     execute_reference_text_extraction_assignment,
     normalize_identifier_types,
     timestamp_for_path,
 )
+from .reference_discovery import run_citation_led_discovery
+from .assignment_executors import execute_assignment_by_type
 from .reference_attachments import build_extracted_text_attachment_plans
 from .reference_exports import build_reference_analysis_manifest, build_reference_scope_training_export
 from .reference_labels import (
@@ -302,7 +303,7 @@ def references_labels(flags: list[str]) -> None:
 
 
 def references_discover_citation_led(flags: list[str]) -> None:
-    delegate_reference_execution_to_node("discover-citation-led", flags)
+    run_citation_led_discovery(flags)
 
 
 def references_curate_recent(flags: list[str]) -> None:
@@ -596,9 +597,10 @@ def references_identifier_backfill_now(flags: list[str]) -> None:
         options=run_now_options,
         actor_label=actor_label,
     )
-    delegate_reference_execution_to_node(
-        "execute-identifier-backfill",
-        ["--assignment", assignment_plan["assignment"]["id"]],
+    execution_result = execute_assignment_by_type(
+        client,
+        assignment_plan["assignment"]["id"],
+        run_now_options,
     )
     apply_assignment_action(
         client,
@@ -608,10 +610,21 @@ def references_identifier_backfill_now(flags: list[str]) -> None:
         options=run_now_options,
         actor_label=actor_label,
     )
+    summary = execution_result.get("summary") or {}
+    print(f"references-identifier-backfill-now\tassignment\t{assignment_plan['assignment']['id']}")
+    print(f"references-identifier-backfill-now\trun\t{execution_result.get('runId')}")
+    print(f"references-identifier-backfill-now\tmanifest\t{execution_result.get('manifestPath')}")
+    print(f"references-identifier-backfill-now\tresolved\t{summary.get('resolved', 0)}")
+    print(f"references-identifier-backfill-now\tunresolved\t{summary.get('unresolved', 0)}")
 
 
 def references_execute_identifier_backfill(flags: list[str]) -> None:
-    delegate_reference_execution_to_node("execute-identifier-backfill", flags)
+    options = parse_options(flags)
+    assignment_id = options.get("assignment")
+    if not assignment_id:
+        raise ValueError("references execute-identifier-backfill requires --assignment <id>.")
+    client, _ = create_authoring_client()
+    execute_assignment_by_type(client, assignment_id, options)
 
 
 def references_create_doi_backfill_assignment(flags: list[str]) -> None:
@@ -623,7 +636,12 @@ def references_doi_backfill_now(flags: list[str]) -> None:
 
 
 def references_execute_doi_backfill(flags: list[str]) -> None:
-    delegate_reference_execution_to_node("execute-doi-backfill", flags)
+    options = parse_options(doi_backfill_compatibility_flags(flags))
+    assignment_id = options.get("assignment")
+    if not assignment_id:
+        raise ValueError("references execute-doi-backfill requires --assignment <id>.")
+    client, _ = create_authoring_client()
+    execute_assignment_by_type(client, assignment_id, options)
 
 
 def references_export_analysis_manifest(flags: list[str]) -> None:

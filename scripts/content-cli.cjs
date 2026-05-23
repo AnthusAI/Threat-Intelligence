@@ -15921,7 +15921,37 @@ function formatClaim(value) {
   return String(value);
 }
 
-main().catch((error) => {
-  console.error(error.message);
-  process.exitCode = 1;
-});
+async function executeAssignmentByTypeCli(payload) {
+  loadDotEnv();
+  const assignmentId = normalizeCliString(payload?.assignmentId);
+  if (!assignmentId) throw new Error("executeAssignmentByTypeCli requires assignmentId.");
+  const { client } = createAuthoringClient();
+  return executeAssignmentByType({
+    client,
+    assignmentId,
+    options: payload?.options && typeof payload.options === "object" ? payload.options : {},
+  });
+}
+
+async function runAnalysisReindexNowCli(flags) {
+  loadDotEnv();
+  return runAnalysisReindexNow(Array.isArray(flags) ? flags : []);
+}
+
+async function executeAnalysisReindexAssignmentCli(flags) {
+  loadDotEnv();
+  return executeAnalysisReindexAssignment(Array.isArray(flags) ? flags : []);
+}
+
+module.exports = {
+  executeAssignmentByTypeCli,
+  runAnalysisReindexNowCli,
+  executeAnalysisReindexAssignmentCli,
+};
+
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error.message);
+    process.exitCode = 1;
+  });
+}

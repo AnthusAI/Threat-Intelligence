@@ -11,7 +11,6 @@ from .accession import assignment_created_event_record, resolve_biblicus_workdir
 from .catalog import semantic_relation_record
 from .env import PAPYRUS_ROOT
 from .ids import hash_short, knowledge_corpus_id
-from .node_delegate import run_node_content_cli
 from .options import parse_boolean_option
 from .reference_attachments import build_extracted_text_attachment_plans
 from .records import apply_record_changes, build_record_changes, build_record_changes_targeted_by_id
@@ -381,12 +380,6 @@ def execute_reference_text_extraction_assignment(client, assignment: dict[str, A
         "importSummary": import_summary,
         "commandResults": [extraction_result],
     }
-
-
-def delegate_reference_execution_to_node(command: str, flags: list[str]) -> None:
-    exit_code = run_node_content_cli("references", command, flags)
-    if exit_code != 0:
-        raise RuntimeError(f"Node content CLI references {command} exited with status {exit_code}")
 
 
 def doi_backfill_compatibility_flags(flags: list[str]) -> list[str]:
