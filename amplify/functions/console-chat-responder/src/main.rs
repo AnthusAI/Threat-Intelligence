@@ -982,7 +982,7 @@ fn execute_papyrus_tool(
 
 async fn load_openai_api_key(ssm: &SsmClient, config: &AppConfig) -> Result<String> {
     if let Some(value) = optional_env("OPENAI_API_KEY") {
-        return Ok(value);
+        return Ok(value.trim().to_string());
     }
     let Some(parameter_name) = &config.openai_api_key_ssm_param else {
         return Err(anyhow!(
@@ -999,8 +999,8 @@ async fn load_openai_api_key(ssm: &SsmClient, config: &AppConfig) -> Result<Stri
     response
         .parameter()
         .and_then(|parameter| parameter.value())
-        .map(str::to_string)
-        .filter(|value| !value.trim().is_empty())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
         .ok_or_else(|| anyhow!("SSM parameter {parameter_name} did not include a value"))
 }
 
