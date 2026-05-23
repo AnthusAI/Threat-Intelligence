@@ -71,4 +71,5 @@ export const knowledgeQuery = defineFunction(
       }),
     });
   },
+  { resourceGroupName: "data" },
 );
