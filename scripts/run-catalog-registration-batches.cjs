@@ -20,6 +20,7 @@ function parseArgs(argv) {
     batchSize: 75,
     startBatch: 0,
     maxBatches: 0,
+    catalogPath: CATALOG_PATH,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -27,6 +28,7 @@ function parseArgs(argv) {
     else if (arg === "--batch-size") options.batchSize = Number(argv[++index]);
     else if (arg === "--start-batch") options.startBatch = Number(argv[++index]);
     else if (arg === "--max-batches") options.maxBatches = Number(argv[++index]);
+    else if (arg === "--catalog") options.catalogPath = path.resolve(PROJECT_ROOT, argv[++index]);
   }
   if (!Number.isFinite(options.batchSize) || options.batchSize < 1) {
     throw new Error("--batch-size must be a positive integer.");
@@ -67,7 +69,7 @@ function buildBatchCatalog(catalog, slice) {
 
 function main() {
   const options = parseArgs(process.argv.slice(2));
-  const catalog = JSON.parse(fs.readFileSync(CATALOG_PATH, "utf8"));
+  const catalog = JSON.parse(fs.readFileSync(options.catalogPath, "utf8"));
   const items = catalogItems(catalog);
   fs.mkdirSync(RUN_DIR, { recursive: true });
 
@@ -82,6 +84,8 @@ function main() {
   console.log(`catalog-registration\tbatch-size\t${options.batchSize}`);
   console.log(`catalog-registration\ttotal-batches\t${totalBatches}`);
   console.log(`catalog-registration\tstart-batch\t${options.startBatch}`);
+  console.log(`catalog-registration\tcatalog\t${options.catalogPath}`);
+
   console.log(`catalog-registration\tdry-run\t${options.dryRun}`);
 
   let processed = 0;
