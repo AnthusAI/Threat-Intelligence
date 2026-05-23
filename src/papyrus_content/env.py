@@ -55,7 +55,11 @@ def graphql_jwt() -> str:
         raise ValueError(
             "Missing PAPYRUS_GRAPHQL_JWT. Set a direct AppSync Lambda-authorizer authoring JWT before running content commands."
         )
-    return normalize_jwt(token)
+    normalized = normalize_jwt(token)
+    claims = decode_jwt_claims(normalized)
+    if is_jwt_expired(claims):
+        raise ValueError("PAPYRUS_GRAPHQL_JWT is expired. Run: npm run auth:refresh-jwt -- --write-env .env")
+    return normalized
 
 
 def normalize_jwt(token: str) -> str:
@@ -64,6 +68,15 @@ def normalize_jwt(token: str) -> str:
 
 def lambda_auth_header(token: str) -> str:
     return f"PapyrusJwt {normalize_jwt(token)}"
+
+
+def is_jwt_expired(claims: dict) -> bool:
+    exp = claims.get("exp")
+    if not isinstance(exp, (int, float)):
+        return False
+    import time
+
+    return float(exp) <= time.time()
 
 
 def decode_jwt_claims(token: str) -> dict:

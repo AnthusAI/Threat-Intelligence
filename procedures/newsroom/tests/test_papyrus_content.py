@@ -20,7 +20,16 @@ class PapyrusContentTests(unittest.TestCase):
     def test_is_ported_command(self) -> None:
         self.assertTrue(papyrus_content_cli.is_ported_command("corpora", "status"))
         self.assertTrue(papyrus_content_cli.is_ported_command("references", "accession-now"))
-        self.assertFalse(papyrus_content_cli.is_ported_command("assignments", "list"))
+        self.assertTrue(papyrus_content_cli.is_ported_command("content", "inspect"))
+        self.assertTrue(papyrus_content_cli.is_ported_command("assignments", "list"))
+        self.assertFalse(papyrus_content_cli.is_ported_command("assignments", "orphan-research-packets"))
+
+    def test_analysis_profiles_load(self) -> None:
+        from papyrus_content.analysis_profiles import load_analysis_profiles, summarize_analysis_profiles
+
+        config = load_analysis_profiles(REPO_ROOT / "corpora" / "papyrus-analysis-profiles.yml")
+        summaries = summarize_analysis_profiles(config)
+        self.assertGreaterEqual(len(summaries), 1)
 
     def test_steering_config_loads(self) -> None:
         config = load_steering_config(str(REPO_ROOT / "corpora" / "papyrus-steering.yml"))

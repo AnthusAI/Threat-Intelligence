@@ -143,6 +143,33 @@ mutation CreateModelAttachmentUpload(
 }}
 """
 
+LIST_EDITIONS_QUERY = """
+query ListPublishedEditionsByStatusAndEditionDate($status: String!, $limit: Int, $nextToken: String) {
+  listPublishedEditionsByStatusAndEditionDate(status: $status, limit: $limit, nextToken: $nextToken) {
+    items { id slug title editionDate publishedAt description }
+    nextToken
+  }
+}
+"""
+
+LIST_ARTICLES_QUERY = """
+query ListPublishedItemsByTypeStatusAndPublishedAt($typeStatus: String!, $limit: Int, $nextToken: String) {
+  listPublishedItemsByTypeStatusAndPublishedAt(typeStatus: $typeStatus, limit: $limit, nextToken: $nextToken) {
+    items { id slug shortSlug headline title publishedAt }
+    nextToken
+  }
+}
+"""
+
+SCHEMA_TYPE_FIELDS_QUERY = """
+query PapyrusSchemaCheck($type: String!) {
+  __type(name: $type) {
+    name
+    fields { name }
+  }
+}
+"""
+
 COMPLETE_MODEL_ATTACHMENT_UPLOAD_MUTATION = f"""
 mutation CompleteModelAttachmentUpload(
   $uploadId: String!
@@ -257,6 +284,32 @@ class PapyrusGraphQLAuthoringClient:
         if not isinstance(data, dict):
             raise RuntimeError("GraphQL response did not include data.")
         return data
+
+    def inspect_reachability(self) -> dict[str, Any]:
+        return self.graphql(LIST_EDITIONS_QUERY, {"status": "published", "limit": 1})
+
+    def list_published_articles(self) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        next_token = None
+        while True:
+            result = self.graphql(
+                LIST_ARTICLES_QUERY,
+                {"typeStatus": "article#published", "limit": 100, "nextToken": next_token},
+            )
+            connection = result.get("listPublishedItemsByTypeStatusAndPublishedAt") or {}
+            items.extend(entry for entry in connection.get("items") or [] if entry)
+            next_token = connection.get("nextToken")
+            if not next_token:
+                break
+        return items
+
+    def graphql_type_field_names(self, type_name: str) -> list[str]:
+        result = self.graphql(SCHEMA_TYPE_FIELDS_QUERY, {"type": type_name})
+        graphql_type = result.get("__type")
+        if not graphql_type:
+            raise ValueError(f"GraphQL type '{type_name}' was not found.")
+        fields = graphql_type.get("fields") or []
+        return sorted(str(field.get("name")) for field in fields if field.get("name"))
 
     def list_records(self, model_name: str) -> list[dict[str, Any]]:
         definition = LIST_DEFINITIONS[model_name]

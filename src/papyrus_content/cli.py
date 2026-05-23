@@ -18,7 +18,11 @@ from .accession import (
     require_corpus_config_by_id_or_key,
     reference_accession_assignment_id,
 )
+from .analysis_profiles import analysis_profiles, validate_analysis_profiles
 from .assignments import apply_assignment_action
+from .assignments_commands import assignments_list
+from .content_commands import content_inspect, content_list, content_schema_check
+from .node_delegate import delegate_or_raise
 from .catalog import (
     assert_reference_catalog_plan_safety,
     build_prepared_reference_catalog,
@@ -63,6 +67,9 @@ from .steering import (
 
 PORTED_COMMANDS = frozenset(
     {
+        "content:inspect",
+        "content:schema-check",
+        "content:list",
         "corpora:status",
         "corpora:worker-bootstrap",
         "corpora:sync-from-cloud",
@@ -74,6 +81,9 @@ PORTED_COMMANDS = frozenset(
         "references:source-status",
         "references:create-accession-assignments",
         "references:accession-now",
+        "assignments:list",
+        "analysis:profiles",
+        "analysis:validate-profiles",
     }
 )
 
@@ -88,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
     if len(args) < 2:
         print_usage()
         return 1
-    group, command, *rest = args[0], args[1], args[2:]
+    group, command, *rest = args
     try:
         dispatch(group, command, rest)
         return 0
@@ -99,7 +109,17 @@ def main(argv: list[str] | None = None) -> int:
 
 def dispatch(group: str, command: str, flags: list[str]) -> None:
     route = f"{group}:{command}"
-    if route == "corpora:status":
+    if not is_ported_command(group, command):
+        delegate_or_raise(group, command, flags)
+        return
+    if route == "content:inspect":
+        content_inspect(flags)
+    elif route == "content:schema-check":
+        content_schema_check(flags)
+    elif route == "content:list":
+        positional = [token for token in flags if not token.startswith("--")]
+        content_list(positional[0] if positional else None, flags)
+    elif route == "corpora:status":
         corpora_status(flags)
     elif route == "corpora:worker-bootstrap":
         corpora_worker_bootstrap(flags)
@@ -121,6 +141,12 @@ def dispatch(group: str, command: str, flags: list[str]) -> None:
         references_create_accession_assignments(flags)
     elif route == "references:accession-now":
         references_accession_now(flags)
+    elif route == "assignments:list":
+        assignments_list(flags)
+    elif route == "analysis:profiles":
+        analysis_profiles(flags)
+    elif route == "analysis:validate-profiles":
+        validate_analysis_profiles(flags)
     else:
         raise ValueError(f"Unsupported papyrus-content command: {group} {command}")
 
@@ -701,6 +727,7 @@ def _utc_now() -> str:
 
 def print_usage() -> None:
     print("Usage: poetry run papyrus-content <group> <command> [options]")
-    print("Ported groups: corpora (status, worker-bootstrap, sync-from-cloud, sync-to-cloud)")
-    print("Ported references: make-catalog, prepare-catalog, register-catalog, register-catalog-split,")
-    print("  source-status, create-accession-assignments, accession-now")
+    print("Python-native: content inspect, content schema-check, content list articles,")
+    print("  corpora status/worker-bootstrap/sync-*, references catalog/accession commands,")
+    print("  assignments list, analysis profiles/validate-profiles")
+    print("All other routes delegate to scripts/content-cli.cjs (Node).")

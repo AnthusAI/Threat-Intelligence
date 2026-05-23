@@ -52,6 +52,14 @@ def normalize_positive_integer(value: Any, label: str) -> int | None:
     return parsed
 
 
+def parse_comma_list(value: Any) -> list[str] | None:
+    if value is None or value is True:
+        return None
+    parts = [part.strip() for part in str(value).split(",")]
+    cleaned = [part for part in parts if part]
+    return cleaned or None
+
+
 def normalize_non_negative_integer(value: Any, label: str) -> int | None:
     if value is None or value is True:
         return None

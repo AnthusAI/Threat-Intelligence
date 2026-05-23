@@ -8,6 +8,9 @@ const zlib = require("node:zlib");
 const { spawn, spawnSync } = require("node:child_process");
 
 const PYTHON_PORTED_COMMANDS = new Set([
+  "content:inspect",
+  "content:schema-check",
+  "content:list",
   "corpora:status",
   "corpora:worker-bootstrap",
   "corpora:sync-from-cloud",
@@ -19,6 +22,9 @@ const PYTHON_PORTED_COMMANDS = new Set([
   "references:source-status",
   "references:create-accession-assignments",
   "references:accession-now",
+  "assignments:list",
+  "analysis:profiles",
+  "analysis:validate-profiles",
 ]);
 const YAML = require("yaml");
 
@@ -218,6 +224,7 @@ const UPDATE_PROCEDURE_RUN_MUTATION = `
 `;
 
 function runPythonContentCommand(args) {
+  if (process.env.PAPYRUS_CONTENT_SKIP_PYTHON === "1") return false;
   const [group, command] = args;
   const route = `${group}:${command}`;
   if (!PYTHON_PORTED_COMMANDS.has(route)) return false;
