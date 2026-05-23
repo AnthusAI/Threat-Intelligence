@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import urllib.error
 import urllib.request
 from typing import Any
 
 from .graphql_authoring import PapyrusGraphQLAuthoringClient, strip_unsupported_payload_fields
-from .ids import hash_short, safe_id
+from .ids import safe_id
 
 
 def model_payload_storage_path(owner_kind: str, owner_id: str, role: str, filename: str) -> str:
@@ -70,7 +71,7 @@ def build_model_payload_attachment(input_payload: dict[str, Any]) -> dict[str, A
         "filename": filename,
         "mediaType": input_payload.get("mediaType") or "application/octet-stream",
         "byteSize": len(body),
-        "sha256": hash_short(body),
+        "sha256": hashlib.sha256(body).hexdigest(),
         "etag": None,
         "importRunId": input_payload.get("importRunId"),
         "createdAt": now,
