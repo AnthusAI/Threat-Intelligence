@@ -239,8 +239,8 @@ async function startProcedureRun(event: ProcedureEvent) {
     requestedAt: now,
     startedAt: isExternalCliRun ? now : null,
     finishedAt: null,
-    input,
-    normalizedInput,
+    input: toAwsJson(input),
+    normalizedInput: toAwsJson(normalizedInput),
     resultSummary: null,
     errorSummary: null,
     output: null,
@@ -563,6 +563,11 @@ function normalizeJson(value: unknown): Record<string, unknown> {
 function normalizeOptionalJson(value: unknown): Record<string, unknown> | null {
   if (value === null || value === undefined || value === "") return null;
   return normalizeJson(value);
+}
+
+function toAwsJson(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  return JSON.stringify(value);
 }
 
 function arrayOfStrings(value: unknown): string[] {

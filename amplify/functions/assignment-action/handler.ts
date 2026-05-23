@@ -210,8 +210,8 @@ async function cloneProcedureRunForRetry(client: DataClient, assignment: any, no
     requestedAt: now,
     startedAt: null,
     finishedAt: null,
-    input: priorRun.input ?? {},
-    normalizedInput: priorRun.normalizedInput ?? priorRun.input ?? {},
+    input: toAwsJson(priorRun.input ?? {}),
+    normalizedInput: toAwsJson(priorRun.normalizedInput ?? priorRun.input ?? {}),
     resultSummary: null,
     errorSummary: null,
     output: null,
@@ -791,7 +791,7 @@ async function executeImmediateProcedureRun(client: DataClient, assignment: any,
       finishedAt,
       resultSummary: `Completed immediate run for ${definition.procedureKey} v${version.versionNumber}.`,
       errorSummary: null,
-      output: executionOutput,
+      output: toAwsJson(executionOutput),
       error: null,
       attempt,
     }), `update ProcedureRun ${run.id}`);
@@ -811,11 +811,11 @@ async function executeImmediateProcedureRun(client: DataClient, assignment: any,
       resultSummary: null,
       errorSummary: errorMessage,
       output: null,
-      error: {
+      error: toAwsJson({
         message: errorMessage,
         procedureKey: normalizeOptionalString(definition.procedureKey),
         procedureVersionId: normalizeOptionalString(version.id),
-      },
+      }),
       attempt,
     }), `update failed ProcedureRun ${run.id}`);
     throw error;
@@ -1258,4 +1258,10 @@ function getIdentityLabel(event: any): string | null {
     ?? normalizeOptionalString(identity?.claims?.name)
     ?? normalizeOptionalString(identity?.username)
     ?? getIdentitySub(event);
+}
+
+function toAwsJson(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string") return value;
+  return JSON.stringify(value);
 }

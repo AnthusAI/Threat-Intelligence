@@ -355,7 +355,7 @@ def start_cloud_procedure_run(
             "title": title,
             "summary": summary,
             "actorLabel": actor_label,
-            "input": json.dumps({**procedure_input, "__papyrusExecutionMode": "external_cli"}),
+            "input": {**procedure_input, "__papyrusExecutionMode": "external_cli"},
         },
     )
     started = normalize_graphql_json_value(start_data.get("startNewsroomProcedureRun")) or {}

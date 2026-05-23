@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 
 from .accession import execute_reference_accession_assignment
 from .assignments import apply_assignment_action, assignment_metadata
-from .catalog import semantic_relation_record
+from .catalog import message_record, semantic_relation_record
 from .copywriting import COPYWRITING_ASSIGNMENT_TYPES, build_copywriting_run_plan
 from .env import PAPYRUS_ROOT
 from .graphql_authoring import PapyrusGraphQLAuthoringClient
@@ -410,28 +410,30 @@ def apply_research_packet(client: PapyrusGraphQLAuthoringClient, options: dict[s
     validate_research_packet_mode(packet)
     packet_hash = research_packet_hash(assignment_id=assignment_id, research_mode=research_mode, packet=packet)
     message_id = normalize_string(options.get("id")) or f"message-research-packet-{packet_hash}"
-    message = {
-        "id": message_id,
-        "messageKind": "research_packet",
-        "messageDomain": "assignment_work",
-        "status": "active",
-        "summary": summary,
-        "body": research_packet_body(packet),
-        "metadata": json.dumps(
-            {
+    message = message_record(
+        {
+            "id": message_id,
+            "messageKind": "research_packet",
+            "messageDomain": "assignment_work",
+            "status": "active",
+            "summary": summary,
+            "body": research_packet_body(packet),
+            "metadata": {
                 "kind": "research.packet.created",
                 "assignmentId": assignment_id,
                 "assignmentTypeKey": assignment["assignmentTypeKey"],
                 "queueKey": assignment["queueKey"],
                 "research": packet,
-            }
-        ),
-        "source": "assignments apply-research-packet",
-        "importRunId": assignment.get("importRunId"),
-        "authorLabel": normalize_string(options.get("actor-label")) or "Papyrus content CLI",
-        "createdAt": now,
-        "updatedAt": now,
-    }
+            },
+            "source": "assignments apply-research-packet",
+            "importRunId": assignment.get("importRunId"),
+            "authorLabel": normalize_string(options.get("actor-label")) or "Papyrus content CLI",
+            "createdAt": now,
+            "updatedAt": now,
+        }
+    )["expected"]
+    message["responseTarget"] = "cloud"
+    message["responseStatus"] = "complete"
     relation = semantic_relation_record(
         {
             "predicate": "produces",

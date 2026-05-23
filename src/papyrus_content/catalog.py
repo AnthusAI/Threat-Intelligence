@@ -546,10 +546,11 @@ def message_record(input_payload: dict[str, Any]) -> dict[str, Any]:
     source = _string_or_null(input_payload.get("source")) or "papyrus"
     body = str(input_payload.get("body") or "")
     summary = _string_or_null(input_payload.get("summary")) or body[:200] or input_payload.get("messageKind") or "message"
+    record_id = input_payload.get("id") or f"message-{hash_short([input_payload.get('messageKind'), body, source, metadata])}"
     return _record(
         "Message",
         {
-            "id": f"message-{hash_short([input_payload.get('messageKind'), body, source, metadata])}",
+            "id": record_id,
             "messageKind": input_payload.get("messageKind") or "comment",
             "messageDomain": input_payload.get("messageDomain") or "commentary",
             "status": input_payload.get("status") or "active",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -83,7 +84,7 @@ def build_model_payload_attachment(input_payload: dict[str, Any]) -> dict[str, A
         "filename": filename,
         "mediaType": input_payload.get("mediaType") or "application/octet-stream",
         "byteSize": len(body),
-        "sha256": hash_short(body),
+        "sha256": hashlib.sha256(body).hexdigest(),
         "etag": None,
         "importRunId": input_payload.get("importRunId"),
         "createdAt": now,

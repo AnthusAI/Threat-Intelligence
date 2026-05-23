@@ -64,6 +64,7 @@ SEMANTIC_RELATION_FIELDS = (
 )
 MESSAGE_FIELDS = (
     "id messageKind messageDomain status summary source importRunId authorSub authorUserProfileId authorLabel "
+    "responseTarget responseStatus responseOwner responseStartedAt responseCompletedAt responseError "
     "newsroomFeedKey createdAt updatedAt"
 )
 MODEL_ATTACHMENT_FIELDS = (
