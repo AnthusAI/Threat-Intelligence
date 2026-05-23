@@ -74,11 +74,11 @@ export function cloneArticle(article: Article): Article {
     ...article,
     image: {
       ...article.image,
-      layout: article.image.layout ? { ...article.image.layout } : undefined,
+      layout: cloneImageLayout(article.image.layout),
     },
     assets: article.assets?.map((asset) => ({
       ...asset,
-      layout: asset.layout ? { ...asset.layout } : undefined,
+      layout: cloneImageLayout(asset.layout),
       roles: asset.roles ? [...asset.roles] : undefined,
     })),
     pullQuotes: article.pullQuotes ? [...article.pullQuotes] : undefined,
@@ -92,15 +92,24 @@ function cloneNonArticleItem(item: NonArticlePublicationItem): NonArticlePublica
     image: item.image
       ? {
           ...item.image,
-          layout: item.image.layout ? { ...item.image.layout } : undefined,
+          layout: cloneImageLayout(item.image.layout),
         }
       : undefined,
     assets: item.assets?.map((asset) => ({
       ...asset,
-      layout: asset.layout ? { ...asset.layout } : undefined,
+      layout: cloneImageLayout(asset.layout),
       roles: asset.roles ? [...asset.roles] : undefined,
     })),
     body: item.body ? [...item.body] : undefined,
     metadata: item.metadata ? { ...item.metadata } : undefined,
   };
+}
+
+function cloneImageLayout<T extends Article["image"]["layout"]>(layout: T): T {
+  if (!layout) return undefined as T;
+  return {
+    ...layout,
+    inlineFloat: layout.inlineFloat ? { ...layout.inlineFloat } : undefined,
+    focalPoint: layout.focalPoint ? { ...layout.focalPoint } : undefined,
+  } as T;
 }

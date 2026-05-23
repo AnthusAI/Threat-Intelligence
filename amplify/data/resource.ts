@@ -6,6 +6,7 @@ import { knowledgeQuery } from "../functions/knowledge-query/resource";
 import { manageUserRole } from "../functions/manage-user-role/resource";
 import { modelAttachmentUpload } from "../functions/model-attachment-upload/resource";
 import { newsroomSummary } from "../functions/newsroom-summary/resource";
+import { procedureAction } from "../functions/procedure-action/resource";
 import { readerSettings } from "../functions/reader-settings/resource";
 
 const authoringOperations: ("read" | "create" | "update" | "delete")[] = [
@@ -231,6 +232,14 @@ const schema = a.schema({
     relationId: a.id(),
   }),
 
+  ReferenceQualityActionResult: a.customType({
+    ok: a.boolean().required(),
+    referenceId: a.id().required(),
+    rating: a.integer().required(),
+    status: a.string().required(),
+    relationId: a.id(),
+  }),
+
   CategorySetDraftActionResult: a.customType({
     ok: a.boolean().required(),
     action: a.string().required(),
@@ -261,6 +270,22 @@ const schema = a.schema({
       reasonCode: a.string(),
     })
     .returns(a.ref("ReferenceCurationActionResult"))
+    .authorization((allow) => [
+      allow.groups(categoryWriteGroups),
+      allow.custom(),
+    ])
+    .handler(a.handler.function(categoryAction)),
+
+  setReferenceQualityRating: a
+    .mutation()
+    .arguments({
+      referenceId: a.id().required(),
+      rating: a.integer().required(),
+      actorSub: a.string(),
+      actorLabel: a.string(),
+      note: a.string(),
+    })
+    .returns(a.ref("ReferenceQualityActionResult"))
     .authorization((allow) => [
       allow.groups(categoryWriteGroups),
       allow.custom(),
@@ -690,6 +715,94 @@ const schema = a.schema({
     .authorization((allow) => [allow.groups(categoryWriteGroups), allow.custom()])
     .handler(a.handler.function(assignmentAction)),
 
+  retryImmediateAssignment: a
+    .mutation()
+    .arguments({
+      assignmentId: a.id().required(),
+      actorSub: a.string(),
+      actorLabel: a.string(),
+      note: a.string(),
+    })
+    .returns(a.ref("AssignmentActionResult"))
+    .authorization((allow) => [allow.groups(categoryWriteGroups), allow.custom()])
+    .handler(a.handler.function(assignmentAction)),
+
+  listNewsroomProcedureDefinitions: a
+    .query()
+    .returns(a.json())
+    .authorization((allow) => [allow.group(adminGroup)])
+    .handler(a.handler.function(procedureAction)),
+
+  getNewsroomProcedureDefinition: a
+    .query()
+    .arguments({
+      id: a.id(),
+      procedureKey: a.string(),
+    })
+    .returns(a.json())
+    .authorization((allow) => [allow.group(adminGroup), allow.custom()])
+    .handler(a.handler.function(procedureAction)),
+
+  saveNewsroomProcedureDefinition: a
+    .mutation()
+    .arguments({
+      input: a.json().required(),
+    })
+    .returns(a.json())
+    .authorization((allow) => [allow.group(adminGroup)])
+    .handler(a.handler.function(procedureAction)),
+
+  saveNewsroomProcedureVersionDraft: a
+    .mutation()
+    .arguments({
+      input: a.json().required(),
+    })
+    .returns(a.json())
+    .authorization((allow) => [allow.group(adminGroup)])
+    .handler(a.handler.function(procedureAction)),
+
+  publishNewsroomProcedureVersion: a
+    .mutation()
+    .arguments({
+      versionId: a.id().required(),
+    })
+    .returns(a.json())
+    .authorization((allow) => [allow.group(adminGroup)])
+    .handler(a.handler.function(procedureAction)),
+
+  startNewsroomProcedureRun: a
+    .mutation()
+    .arguments({
+      procedureId: a.id(),
+      procedureKey: a.string(),
+      procedureVersionId: a.id(),
+      title: a.string(),
+      summary: a.string(),
+      input: a.json(),
+      actorLabel: a.string(),
+    })
+    .returns(a.json())
+    .authorization((allow) => [allow.groups(categoryWriteGroups), allow.custom()])
+    .handler(a.handler.function(procedureAction)),
+
+  getNewsroomProcedureRun: a
+    .query()
+    .arguments({
+      id: a.id().required(),
+    })
+    .returns(a.json())
+    .authorization((allow) => [allow.groups(categoryWriteGroups), allow.custom()])
+    .handler(a.handler.function(procedureAction)),
+
+  listNewsroomProcedureRunsByProcedure: a
+    .query()
+    .arguments({
+      procedureId: a.id().required(),
+    })
+    .returns(a.json())
+    .authorization((allow) => [allow.groups(categoryWriteGroups), allow.custom()])
+    .handler(a.handler.function(procedureAction)),
+
   Assignment: a
     .model({
       id: a.id().required(),
@@ -761,6 +874,94 @@ const schema = a.schema({
     ])
     .authorization((allow) => [
       allow.groups(categoryWriteGroups).to(categoryAppendOnlyOperations),
+      allow.custom().to(authoringOperations),
+    ]),
+
+  ProcedureDefinition: a
+    .model({
+      id: a.id().required(),
+      procedureKey: a.string().required(),
+      title: a.string().required(),
+      category: a.string().required(),
+      description: a.string(),
+      enabled: a.boolean().required(),
+      enabledStatus: a.string().required(),
+      currentVersionId: a.id(),
+      createdBy: a.string(),
+      createdAt: a.datetime().required(),
+      updatedBy: a.string(),
+      updatedAt: a.datetime().required(),
+      newsroomFeedKey: a.string(),
+    })
+    .secondaryIndexes((index) => [
+      index("procedureKey").sortKeys(["updatedAt"]).queryField("listProcedureDefinitionsByKeyAndUpdatedAt"),
+      index("enabledStatus").sortKeys(["updatedAt"]).queryField("listProcedureDefinitionsByEnabledAndUpdatedAt"),
+      index("newsroomFeedKey").sortKeys(["updatedAt"]).queryField("listProcedureDefinitionsByFeedAndUpdatedAt"),
+    ])
+    .authorization((allow) => [
+      allow.group(adminGroup),
+      allow.custom().to(authoringOperations),
+    ]),
+
+  ProcedureVersion: a
+    .model({
+      id: a.id().required(),
+      procedureId: a.id().required(),
+      procedureKey: a.string().required(),
+      versionNumber: a.integer().required(),
+      status: a.string().required(),
+      isCurrent: a.boolean().required(),
+      label: a.string(),
+      tactusSource: a.string().required(),
+      parameterSchema: a.json().required(),
+      defaults: a.json(),
+      changelog: a.string(),
+      createdBy: a.string(),
+      createdAt: a.datetime().required(),
+      updatedBy: a.string(),
+      updatedAt: a.datetime().required(),
+    })
+    .secondaryIndexes((index) => [
+      index("procedureId").sortKeys(["versionNumber"]).queryField("listProcedureVersionsByProcedureAndVersion"),
+      index("procedureId").sortKeys(["createdAt"]).queryField("listProcedureVersionsByProcedureAndCreatedAt"),
+      index("status").sortKeys(["updatedAt"]).queryField("listProcedureVersionsByStatusAndUpdatedAt"),
+    ])
+    .authorization((allow) => [
+      allow.group(adminGroup),
+      allow.custom().to(authoringOperations),
+    ]),
+
+  ProcedureRun: a
+    .model({
+      id: a.id().required(),
+      procedureId: a.id().required(),
+      procedureKey: a.string().required(),
+      procedureVersionId: a.id().required(),
+      procedureVersionNumber: a.integer(),
+      assignmentId: a.id(),
+      runStatus: a.string().required(),
+      requestedBy: a.string(),
+      requestedAt: a.datetime().required(),
+      startedAt: a.datetime(),
+      finishedAt: a.datetime(),
+      input: a.json(),
+      normalizedInput: a.json(),
+      resultSummary: a.string(),
+      errorSummary: a.string(),
+      output: a.json(),
+      error: a.json(),
+      attempt: a.integer(),
+      newsroomFeedKey: a.string(),
+    })
+    .secondaryIndexes((index) => [
+      index("procedureId").sortKeys(["requestedAt"]).queryField("listProcedureRunsByProcedureAndRequestedAt"),
+      index("assignmentId").sortKeys(["requestedAt"]).queryField("listProcedureRunsByAssignmentAndRequestedAt"),
+      index("runStatus").sortKeys(["requestedAt"]).queryField("listProcedureRunsByStatusAndRequestedAt"),
+      index("newsroomFeedKey").sortKeys(["requestedAt"]).queryField("listProcedureRunsByFeedAndRequestedAt"),
+    ])
+    .authorization((allow) => [
+      allow.group("editor").to(["read"]),
+      allow.group(adminGroup).to(authoringOperations),
       allow.custom().to(authoringOperations),
     ]),
 
@@ -1710,6 +1911,7 @@ const schema = a.schema({
   allow.resource(manageUserRole),
   allow.resource(modelAttachmentUpload),
   allow.resource(newsroomSummary),
+  allow.resource(procedureAction),
 ]);
 
 export type Schema = ClientSchema<typeof schema>;

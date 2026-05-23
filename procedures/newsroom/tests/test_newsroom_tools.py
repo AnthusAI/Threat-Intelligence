@@ -1,6 +1,7 @@
 import json
 import pathlib
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -10,6 +11,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from papyrus_newsroom import newsroom as papyrus_newsroom
+from papyrus_newsroom import coverage_theme as papyrus_coverage_theme
 from papyrus_newsroom import reference_curation_signals
 from papyrus_newsroom import semantic as papyrus_semantic
 from papyrus_newsroom import tactus_runtime
@@ -43,6 +45,7 @@ class NewsroomToolTests(unittest.TestCase):
         self.assertIn("summarize", result["value"]["api"]["papyrus.reference"])
         self.assertIn("list", result["value"]["api"]["papyrus.reference"])
         self.assertIn("summaries", result["value"]["api"]["papyrus.reference"])
+        self.assertIn("web_search", result["value"]["api"]["papyrus.reference"])
         self.assertIn("query", result["value"]["api"]["papyrus.knowledge"])
         self.assertIn("resolve_uri", result["value"]["api"]["papyrus"])
         self.assertEqual(
@@ -559,7 +562,7 @@ return plan_research_update{ assignment_item = assignment, research = research }
         self.assertEqual(relation_records[0]["input"]["objectId"], "reference-knowledge-corpus-ai-ml-research-research-001-v1")
         self.assertEqual(relation_records[0]["input"]["relationTypeKey"], "uses_evidence")
 
-    def test_live_assignment_research_packet_plan_creates_message_and_comment_relation(self):
+    def test_live_assignment_research_packet_plan_creates_message_and_produces_relation(self):
         plan = papyrus_newsroom.build_assignment_research_packet_plan(
             generated_at="2026-05-18T15:30:00Z",
             assignment={
@@ -638,12 +641,12 @@ return plan_research_update{ assignment_item = assignment, research = research }
         self.assertEqual(metadata["research"]["sourceSnapshots"][0]["source_domain"], "example.com")
         self.assertEqual(metadata["research"]["proposedReferences"][0]["ingestion_rationale"], "Candidate source relates to the focus and publication mission.")
         relation = plan["records"][3]["input"]
-        self.assertEqual(relation["predicate"], "comment")
-        self.assertEqual(relation["relationTypeKey"], "comment")
-        self.assertEqual(relation["relationDomain"], "commentary")
-        self.assertEqual(relation["subjectKind"], "message")
-        self.assertEqual(relation["objectKind"], "assignment")
-        self.assertEqual(relation["objectId"], "assignment-live-123")
+        self.assertEqual(relation["predicate"], "produces")
+        self.assertEqual(relation["relationTypeKey"], "produces")
+        self.assertEqual(relation["relationDomain"], "workflow")
+        self.assertEqual(relation["subjectKind"], "assignment")
+        self.assertEqual(relation["subjectId"], "assignment-live-123")
+        self.assertEqual(relation["objectKind"], "message")
 
     def test_execute_tactus_can_plan_live_assignment_research_packet(self):
         result = tactus_runtime.execute_tactus(
@@ -669,7 +672,7 @@ return plan_assignment_research_packet{ assignment = assignment, research = rese
         self.assertTrue(result["ok"], result.get("error"))
         self.assertEqual(result["value"]["lifecycle"], "assignment-research-packet")
         self.assertEqual(result["value"]["records"][0]["modelName"], "Message")
-        self.assertEqual(result["value"]["records"][3]["input"]["relationTypeKey"], "comment")
+        self.assertEqual(result["value"]["records"][3]["input"]["relationTypeKey"], "produces")
         self.assertEqual(result["api_calls"], ["papyrus.plan.assignment_research_packet"])
 
     def test_live_assignment_reporting_context_packet_plan_creates_private_message_only(self):
@@ -733,9 +736,37 @@ return plan_assignment_research_packet{ assignment = assignment, research = rese
         self.assertEqual(metadata["reporting"]["acceptedReferenceIds"], ["reference-1-v1"])
         self.assertEqual(metadata["reporting"]["editorRecommendation"], "hold")
         relation = plan["records"][3]["input"]
-        self.assertEqual(relation["predicate"], "comment")
-        self.assertEqual(relation["subjectKind"], "message")
-        self.assertEqual(relation["objectKind"], "assignment")
+        self.assertEqual(relation["predicate"], "produces")
+        self.assertEqual(relation["subjectKind"], "assignment")
+        self.assertEqual(relation["objectKind"], "message")
+
+    def test_reporting_context_packet_plan_links_source_research_lineage(self):
+        plan = papyrus_newsroom.build_assignment_reporting_context_packet_plan(
+            generated_at="2026-05-18T16:15:00Z",
+            assignment={
+                "id": "assignment-reporting-derived",
+                "assignmentTypeKey": "reporting.edition-candidate",
+                "queueKey": "edition:edition-2026-05-23:section:science:lane:reporting",
+                "status": "open",
+                "sectionKey": "science",
+            },
+            reporting={
+                "summary": "A reported candidate is derived from research.",
+                "section_key": "science",
+                "edition_id": "edition-2026-05-23-v1",
+                "source_research_packet_id": "message-research-packet-1",
+                "source_research_assignment_id": "assignment-research-1",
+                "copywriter_brief": "Use only after editor selection.",
+            },
+        )
+
+        relation_records = [record["input"] for record in plan["records"] if record["modelName"] == "SemanticRelation"]
+        self.assertEqual([relation["predicate"] for relation in relation_records], ["produces", "derived_from", "derived_from"])
+        self.assertEqual(relation_records[1]["subjectKind"], "assignment")
+        self.assertEqual(relation_records[1]["objectKind"], "message")
+        self.assertEqual(relation_records[1]["objectId"], "message-research-packet-1")
+        self.assertEqual(relation_records[2]["objectKind"], "assignment")
+        self.assertEqual(relation_records[2]["objectId"], "assignment-research-1")
 
     def test_execute_tactus_can_plan_reporting_context_packet(self):
         result = tactus_runtime.execute_tactus(
@@ -764,8 +795,18 @@ return plan_assignment_reporting_context_packet{ assignment = assignment, report
         self.assertTrue(result["ok"], result.get("error"))
         self.assertEqual(result["value"]["lifecycle"], "assignment-reporting-context-packet")
         self.assertEqual(result["value"]["records"][0]["input"]["messageKind"], "reporting_context_packet")
-        self.assertEqual(result["value"]["records"][3]["input"]["relationTypeKey"], "comment")
+        self.assertEqual(result["value"]["records"][3]["input"]["relationTypeKey"], "produces")
         self.assertEqual(result["api_calls"], ["papyrus.plan.assignment_reporting_context_packet"])
+
+    def test_reporter_procedure_routes_live_reporting_assignments_to_context_packets(self):
+        source = (REPO_ROOT / "procedures" / "newsroom" / "reporter.tac").read_text()
+        self.assertIn("reporting.edition-candidate Assignments must produce a", source)
+        self.assertIn("reporting_context_packet payload", source)
+        self.assertIn("Do not generate Papyrus persistence snippets", source)
+        self.assertIn("Do not call Papyrus persistence planners", source)
+        self.assertIn('"work_product_kind":"reporting_context_packet"', source)
+        self.assertIn("the outer CLI writes Message", source)
+        self.assertIn("return a reporting_context_packet payload only", source)
 
     def test_execute_tactus_exposes_knowledge_query_helper(self):
         with mock.patch("papyrus_newsroom.tactus_runtime.build_environment_services", return_value=object()), \
@@ -949,6 +990,50 @@ return finish_research{
         self.assertEqual(packet["research_mode"], "source_discovery")
         self.assertEqual(packet["sourceDiscovery"]["webSearches"], ["agent catalog business process automation"])
         self.assertEqual(packet["sourceDiscovery"]["proposedReferences"][0]["title"], "Candidate")
+
+    def test_research_harness_web_search_falls_back_to_reference_web_search_api(self):
+        assignment = {
+            "id": "assignment-live-123",
+            "assignmentTypeKey": "research.edition-candidate",
+            "queueKey": "research#open",
+            "status": "open",
+            "title": "Explore source discovery",
+        }
+        with mock.patch(
+            "papyrus_newsroom.tactus_runtime.reference_curation_signals.reference_web_search",
+            return_value={
+                "query": "ancient language ai decipherment",
+                "results": [
+                    {
+                        "title": "Ithaca Nature paper",
+                        "url": "https://example.org/ithaca",
+                        "source_domain": "example.org",
+                        "evidence_candidate_id": "evidence-candidate-1",
+                        "rank": 1,
+                    }
+                ],
+                "metadata": {"answer": "Project and paper references for ancient-text decipherment."},
+            },
+        ) as web_search:
+            result = tactus_runtime.execute_tactus_harnessed(
+                """
+local search = web_search("ancient language ai decipherment")
+return finish_research_from_search(search, { research_mode = "source_discovery" })
+""",
+                harness="research",
+                assignment_item_json=json.dumps(assignment),
+                corpus_key="AI-ML-research",
+                max_evidence_items=8,
+                research_mode="source_discovery",
+            )
+
+        self.assertTrue(result["ok"], result.get("error"))
+        packet = result["value"]["research_packet"]
+        self.assertEqual(packet["source_snapshots"][0]["url"], "https://example.org/ithaca")
+        self.assertEqual(packet["proposed_references"][0]["url"], "https://example.org/ithaca")
+        self.assertEqual(packet["researchTrace"]["webSearches"], ["ancient language ai decipherment"])
+        web_search.assert_called_once()
+        self.assertEqual(web_search.call_args.kwargs["query"], "ancient language ai decipherment")
 
     def test_track_research_warns_when_doctrine_context_and_rubric_are_missing(self):
         plan = papyrus_newsroom.build_research_update_plan(
@@ -1419,6 +1504,136 @@ return finish_research{
             "Concise prose subtitle",
         )
 
+    def test_identifier_prepass_extracts_doi_and_arxiv_from_title_subtitle_without_uri(self):
+        prepass = reference_curation_signals._run_identifier_prepass(
+            reference={"id": "reference-1-v1", "lineageId": "reference-1", "title": ""},
+            catalog_entry={
+                "title": "[2408.15247] AutoGen Studio: A No-Code Developer Tool for Building and Debugging Multi-Agent Systems - arXiv",
+                "subtitle": "Published draft DOI: 10.1145/1234567.8901234",
+                "metadata": {},
+            },
+        )
+
+        self.assertEqual(prepass["status"], "ok")
+        self.assertEqual(prepass["identifiers"]["arxiv_id"], "2408.15247")
+        self.assertEqual(prepass["identifiers"]["doi"], "10.1145/1234567.8901234")
+        self.assertNotIn("isbn13", prepass["identifiers"])
+        self.assertEqual(prepass["resolution"]["arxiv_id"]["selectedSource"], "title")
+        self.assertEqual(prepass["resolution"]["doi"]["selectedSource"], "subtitle")
+
+    def test_identifier_prepass_extracts_isbn13_only_when_isbn_marker_present(self):
+        without_marker = reference_curation_signals._run_identifier_prepass(
+            reference={"id": "reference-1-v1", "lineageId": "reference-1", "title": "Numbers 0306406152"},
+            catalog_entry={},
+        )
+        with_marker = reference_curation_signals._run_identifier_prepass(
+            reference={"id": "reference-1-v1", "lineageId": "reference-1", "title": "ISBN 0-306-40615-2"},
+            catalog_entry={},
+        )
+
+        self.assertNotIn("isbn13", without_marker["identifiers"])
+        self.assertEqual(with_marker["identifiers"]["isbn13"], "9780306406157")
+
+    def test_identifier_prepass_prefers_metadata_identifiers_over_title_inference(self):
+        prepass = reference_curation_signals._run_identifier_prepass(
+            reference={
+                "id": "reference-1-v1",
+                "lineageId": "reference-1",
+                "metadata": {
+                    "identifiers": {"doi": "10.5555/accepted-doi"},
+                },
+            },
+            catalog_entry={
+                "title": "Potential alternate DOI 10.9999/weaker-doi in title",
+                "metadata": {},
+            },
+        )
+
+        self.assertEqual(prepass["status"], "ok")
+        self.assertEqual(prepass["identifiers"]["doi"], "10.5555/accepted-doi")
+        self.assertEqual(prepass["resolution"]["doi"]["selectedSource"], "metadata.identifiers")
+
+    def test_identifier_prepass_reports_no_identifier_found(self):
+        prepass = reference_curation_signals._run_identifier_prepass(
+            reference={"id": "reference-1-v1", "lineageId": "reference-1", "title": "No IDs in this title"},
+            catalog_entry={"metadata": {}},
+        )
+
+        self.assertEqual(prepass["status"], "no_identifier_found")
+        self.assertEqual(prepass["identifiers"], {})
+
+    def test_identifier_prepass_failure_blocks_title_subtitle_plan(self):
+        reference = {
+            "id": "reference-a-v1",
+            "lineageId": "reference-a",
+            "versionNumber": 1,
+            "externalItemId": "item-a",
+            "title": "",
+            "sourceUri": "https://example.test/ref",
+            "metadata": {},
+        }
+
+        class FakeSemantic:
+            pass
+
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_identifier_prepass",
+            return_value={
+                "status": "failed",
+                "failureReason": "unit-test-prepass-failure",
+                "identifiers": {},
+                "extracted": {},
+                "resolution": {},
+            },
+        ):
+            plan = reference_curation_signals.build_reference_title_subtitle_plan(
+                reference=reference,
+                web_search_enabled=False,
+                now="2026-05-20T12:00:00Z",
+                semantic_client=FakeSemantic(),
+            )
+
+        self.assertEqual(plan["action"], "blocked")
+        self.assertEqual(plan["failureReason"], "unit-test-prepass-failure")
+        self.assertEqual(plan["records"], [])
+
+    def test_identifier_prepass_failure_blocks_summary_plan(self):
+        reference = {
+            "id": "reference-a-v1",
+            "lineageId": "reference-a",
+            "versionNumber": 1,
+            "externalItemId": "item-a",
+            "title": "Some title",
+            "sourceUri": "https://example.test/ref",
+            "metadata": {},
+        }
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals._semantic_client",
+            return_value=mock.Mock(),
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._resolve_reference",
+            return_value=reference,
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_identifier_prepass",
+            return_value={
+                "status": "failed",
+                "failureReason": "unit-test-prepass-failure",
+                "identifiers": {},
+                "extracted": {},
+                "resolution": {},
+            },
+        ):
+            result = reference_curation_signals.reference_summarize(
+                reference_id="reference-a-v1",
+                max_tokens=100,
+                apply=True,
+            )
+
+        self.assertEqual(result["action"], "blocked")
+        self.assertFalse(result["apply"])
+        self.assertEqual(result["records"], [])
+        self.assertEqual(result["failureReason"], "unit-test-prepass-failure")
+
     def test_title_subtitle_resolver_preserves_local_metadata_verbatim(self):
         result = reference_curation_signals.resolve_reference_title_subtitle(
             reference={"id": "reference-1-v1", "title": ""},
@@ -1767,6 +1982,421 @@ return finish_research{
             "A No-Code Developer Tool for Building and Debugging Multi-Agent Systems",
         )
 
+    def test_title_subtitle_plan_captures_arxiv_identifier_before_title_normalization(self):
+        reference = {
+            "id": "reference-a-v1",
+            "lineageId": "reference-a",
+            "versionNumber": 1,
+            "externalItemId": "item-a",
+            "title": "",
+            "metadata": {},
+        }
+
+        class FakeSemantic:
+            pass
+
+        plan = reference_curation_signals.build_reference_title_subtitle_plan(
+            reference=reference,
+            catalog_entry={
+                "title": "[2408.15247] AutoGen Studio: A No-Code Developer Tool for Building and Debugging Multi-Agent Systems - arXiv",
+                "metadata": {},
+            },
+            web_search_enabled=False,
+            include_summary=False,
+            now="2026-05-20T12:00:00Z",
+            semantic_client=FakeSemantic(),
+        )
+
+        self.assertEqual(plan["action"], "update")
+        metadata = json.loads(plan["records"][1]["body"])
+        self.assertEqual(
+            metadata["title"],
+            "AutoGen Studio: A No-Code Developer Tool for Building and Debugging Multi-Agent Systems",
+        )
+        self.assertEqual(metadata["identifiers"]["arxiv_id"], "2408.15247")
+        self.assertEqual(metadata["identifier_resolution"]["status"], "ok")
+
+    def test_reference_list_status_all_does_not_filter(self):
+        references = [
+            {
+                "id": "reference-a-v1",
+                "lineageId": "reference-a",
+                "versionNumber": 1,
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "externalItemId": "a",
+                "title": "Accepted reference",
+                "curationStatus": "accepted",
+                "importedAt": "2026-05-21T00:00:00Z",
+                "updatedAt": "2026-05-21T00:00:00Z",
+                "sourceUri": "https://example.com/a",
+                "storagePath": "corpora/AI-ML-research/a.txt",
+            },
+            {
+                "id": "reference-b-v1",
+                "lineageId": "reference-b",
+                "versionNumber": 1,
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "externalItemId": "b",
+                "title": "Pending reference",
+                "curationStatus": "pending",
+                "importedAt": "2026-05-20T00:00:00Z",
+                "updatedAt": "2026-05-20T00:00:00Z",
+                "sourceUri": "https://example.com/b",
+                "storagePath": "corpora/AI-ML-research/b.txt",
+            },
+        ]
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals.list_references_by_corpus",
+            return_value=references,
+        ):
+            result = reference_curation_signals.reference_list(
+                corpus_key="AI-ML-research",
+                limit=10,
+                status="all",
+                order="newest",
+                scan_limit=1000,
+            )
+
+        self.assertEqual(result["count"], 2)
+        self.assertEqual({item["curationStatus"] for item in result["items"]}, {"accepted", "pending"})
+
+    def test_reference_list_status_filter_remains_exact(self):
+        references = [
+            {
+                "id": "reference-a-v1",
+                "lineageId": "reference-a",
+                "versionNumber": 1,
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "externalItemId": "a",
+                "title": "Accepted reference",
+                "curationStatus": "accepted",
+                "importedAt": "2026-05-21T00:00:00Z",
+                "updatedAt": "2026-05-21T00:00:00Z",
+                "sourceUri": "https://example.com/a",
+                "storagePath": "corpora/AI-ML-research/a.txt",
+            },
+            {
+                "id": "reference-b-v1",
+                "lineageId": "reference-b",
+                "versionNumber": 1,
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "externalItemId": "b",
+                "title": "Pending reference",
+                "curationStatus": "pending",
+                "importedAt": "2026-05-20T00:00:00Z",
+                "updatedAt": "2026-05-20T00:00:00Z",
+                "sourceUri": "https://example.com/b",
+                "storagePath": "corpora/AI-ML-research/b.txt",
+            },
+        ]
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals.list_references_by_corpus",
+            return_value=references,
+        ):
+            result = reference_curation_signals.reference_list(
+                corpus_key="AI-ML-research",
+                limit=10,
+                status="accepted",
+                order="newest",
+                scan_limit=1000,
+            )
+
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["items"][0]["id"], "reference-a-v1")
+
+    def test_reference_curate_recent_defaults_to_48h_all_statuses(self):
+        references = [
+            {
+                "id": "reference-new-v1",
+                "lineageId": "reference-new",
+                "versionNumber": 1,
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "externalItemId": "new",
+                "title": "Newest",
+                "curationStatus": "pending",
+                "importedAt": "2026-05-22T11:00:00Z",
+            },
+            {
+                "id": "reference-mid-v1",
+                "lineageId": "reference-mid",
+                "versionNumber": 1,
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "externalItemId": "mid",
+                "title": "Within 48 hours",
+                "curationStatus": "accepted",
+                "importedAt": "2026-05-21T13:00:00Z",
+            },
+            {
+                "id": "reference-old-v1",
+                "lineageId": "reference-old",
+                "versionNumber": 1,
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "externalItemId": "old",
+                "title": "Older than 48 hours",
+                "curationStatus": "accepted",
+                "importedAt": "2026-05-20T08:00:00Z",
+            },
+        ]
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals._now",
+            return_value="2026-05-22T12:00:00Z",
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals.list_references_by_corpus",
+            return_value=references,
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_curation_identifier_stage",
+            return_value=(
+                {"status": "ok", "identifiers": {"doi": "10.1/test"}},
+                {"status": "ok", "success": True, "action": "run", "failureReason": ""},
+            ),
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_curation_title_stage",
+            return_value={"status": "update", "success": True, "action": "update", "failureReason": ""},
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_curation_summary_stage",
+            return_value={"status": "create", "success": True, "action": "create", "failureReason": ""},
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_curation_quality_stage",
+            return_value={"status": "create", "success": True, "action": "create", "failureReason": ""},
+        ):
+            result = reference_curation_signals.reference_curate_recent(
+                corpus_key="AI-ML-research",
+                apply=False,
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["summary"]["selectedCount"], 2)
+        self.assertEqual({item["reference"]["curationStatus"] for item in result["items"]}, {"pending", "accepted"})
+
+    def test_reference_curate_recent_reference_ids_override_window_selection(self):
+        reference = {
+            "id": "reference-explicit-v1",
+            "lineageId": "reference-explicit",
+            "versionNumber": 1,
+            "corpusId": "knowledge-corpus-ai-ml-research",
+            "externalItemId": "explicit",
+            "title": "Explicit selection",
+            "curationStatus": "pending",
+            "importedAt": "2026-05-10T08:00:00Z",
+        }
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals._now",
+            return_value="2026-05-22T12:00:00Z",
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._resolve_reference",
+            return_value=reference,
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_curation_identifier_stage",
+            return_value=(
+                {"status": "ok", "identifiers": {"doi": "10.1/test"}},
+                {"status": "ok", "success": True, "action": "run", "failureReason": ""},
+            ),
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_curation_title_stage",
+            return_value={"status": "noop", "success": True, "action": "noop", "failureReason": ""},
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_curation_summary_stage",
+            return_value={"status": "noop", "success": True, "action": "noop", "failureReason": ""},
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_curation_quality_stage",
+            return_value={"status": "noop", "success": True, "action": "noop", "failureReason": ""},
+        ):
+            result = reference_curation_signals.reference_curate_recent(
+                corpus_key="AI-ML-research",
+                reference_ids=["reference-explicit-v1"],
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["summary"]["selectedCount"], 1)
+        self.assertEqual(result["items"][0]["reference"]["id"], "reference-explicit-v1")
+
+    def test_reference_curate_recent_enforces_stage_order(self):
+        reference = {
+            "id": "reference-order-v1",
+            "lineageId": "reference-order",
+            "versionNumber": 1,
+            "corpusId": "knowledge-corpus-ai-ml-research",
+            "externalItemId": "order",
+            "title": "Order check",
+            "curationStatus": "accepted",
+            "importedAt": "2026-05-22T11:00:00Z",
+        }
+        call_order = []
+
+        def identifier_stage(**kwargs):
+            call_order.append("identifier")
+            return (
+                {"status": "ok", "identifiers": {"doi": "10.1/test"}},
+                {"status": "ok", "success": True, "action": "run", "failureReason": ""},
+            )
+
+        def title_stage(**kwargs):
+            call_order.append("title")
+            return {"status": "update", "success": True, "action": "update", "failureReason": ""}
+
+        def summary_stage(**kwargs):
+            call_order.append("summary")
+            return {"status": "create", "success": True, "action": "create", "failureReason": ""}
+
+        def quality_stage(**kwargs):
+            call_order.append("quality")
+            return {"status": "create", "success": True, "action": "create", "failureReason": ""}
+
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals._now",
+            return_value="2026-05-22T12:00:00Z",
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals.list_references_by_corpus",
+            return_value=[reference],
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_curation_identifier_stage",
+            side_effect=identifier_stage,
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_curation_title_stage",
+            side_effect=title_stage,
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_curation_summary_stage",
+            side_effect=summary_stage,
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_curation_quality_stage",
+            side_effect=quality_stage,
+        ):
+            result = reference_curation_signals.reference_curate_recent(
+                corpus_key="AI-ML-research",
+                apply=False,
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(call_order, ["identifier", "title", "summary", "quality"])
+
+    def test_reference_curate_recent_returns_partial_failure_when_any_reference_fails(self):
+        references = [
+            {
+                "id": "reference-pass-v1",
+                "lineageId": "reference-pass",
+                "versionNumber": 1,
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "externalItemId": "pass",
+                "title": "Pass",
+                "curationStatus": "accepted",
+                "importedAt": "2026-05-22T11:00:00Z",
+            },
+            {
+                "id": "reference-fail-v1",
+                "lineageId": "reference-fail",
+                "versionNumber": 1,
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "externalItemId": "fail",
+                "title": "Fail",
+                "curationStatus": "accepted",
+                "importedAt": "2026-05-22T10:00:00Z",
+            },
+        ]
+        identifier_stage_outputs = [
+            (
+                {"status": "ok", "identifiers": {"doi": "10.1/pass"}},
+                {"status": "ok", "success": True, "action": "run", "failureReason": ""},
+            ),
+            (
+                {"status": "failed", "failureReason": "prepass failure", "identifiers": {}},
+                {"status": "failed", "success": False, "action": "run", "failureReason": "prepass failure"},
+            ),
+        ]
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals._now",
+            return_value="2026-05-22T12:00:00Z",
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals.list_references_by_corpus",
+            return_value=references,
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_curation_identifier_stage",
+            side_effect=identifier_stage_outputs,
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_curation_title_stage",
+            side_effect=[
+                {"status": "update", "success": True, "action": "update", "failureReason": ""},
+                {"status": "skipped", "success": False, "action": "skip", "failureReason": "identifier prepass failed"},
+            ],
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_curation_summary_stage",
+            side_effect=[
+                {"status": "create", "success": True, "action": "create", "failureReason": ""},
+                {"status": "skipped", "success": False, "action": "skip", "failureReason": "identifier prepass failed"},
+            ],
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_curation_quality_stage",
+            side_effect=[
+                {"status": "create", "success": True, "action": "create", "failureReason": ""},
+                {"status": "skipped", "success": False, "action": "skip", "failureReason": "identifier prepass failed"},
+            ],
+        ):
+            result = reference_curation_signals.reference_curate_recent(
+                corpus_key="AI-ML-research",
+                apply=False,
+            )
+
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["degraded"])
+        self.assertEqual(result["summary"]["failedCount"], 1)
+
+    def test_reference_curate_recent_resume_skips_completed_successful_stages(self):
+        reference = {
+            "id": "reference-resume-v1",
+            "lineageId": "reference-resume",
+            "versionNumber": 1,
+            "corpusId": "knowledge-corpus-ai-ml-research",
+            "externalItemId": "resume",
+            "title": "Resume",
+            "curationStatus": "accepted",
+            "importedAt": "2026-05-22T11:00:00Z",
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = pathlib.Path(tmpdir) / "manifest.json"
+            with mock.patch(
+                "papyrus_newsroom.reference_curation_signals._now",
+                return_value="2026-05-22T12:00:00Z",
+            ), mock.patch(
+                "papyrus_newsroom.reference_curation_signals.list_references_by_corpus",
+                return_value=[reference],
+            ), mock.patch(
+                "papyrus_newsroom.reference_curation_signals._resolve_reference",
+                return_value=reference,
+            ), mock.patch(
+                "papyrus_newsroom.reference_curation_signals._reference_curation_manifest_path",
+                return_value=manifest_path,
+            ), mock.patch(
+                "papyrus_newsroom.reference_curation_signals._run_identifier_prepass",
+                return_value={"status": "ok", "failureReason": "", "identifiers": {"doi": "10.1/resume"}},
+            ), mock.patch(
+                "papyrus_newsroom.reference_curation_signals.reference_title_subtitle_resolve",
+                return_value={"action": "update"},
+            ) as title_mock, mock.patch(
+                "papyrus_newsroom.reference_curation_signals.reference_summarize",
+                return_value={"action": "create"},
+            ) as summary_mock, mock.patch(
+                "papyrus_newsroom.reference_curation_signals.reference_quality_assess",
+                return_value={"action": "create"},
+            ) as quality_mock:
+                first = reference_curation_signals.reference_curate_recent(
+                    corpus_key="AI-ML-research",
+                    apply=False,
+                )
+                second = reference_curation_signals.reference_curate_recent(
+                    corpus_key="AI-ML-research",
+                    apply=False,
+                    resume=str(manifest_path),
+                )
+
+            self.assertTrue(first["ok"])
+            self.assertTrue(second["ok"])
+            self.assertEqual(title_mock.call_count, 1)
+            self.assertEqual(summary_mock.call_count, 1)
+            self.assertEqual(quality_mock.call_count, 1)
+            self.assertEqual(second["items"][0]["stages"]["identifierPrepass"]["status"], "reused")
+            self.assertEqual(second["items"][0]["stages"]["titleSubtitle"]["status"], "reused")
+            self.assertEqual(second["items"][0]["stages"]["summary"]["status"], "reused")
+            self.assertEqual(second["items"][0]["stages"]["quality"]["status"], "reused")
+
     def test_placeholder_title_is_not_written(self):
         result = reference_curation_signals.resolve_reference_title_subtitle(
             reference={},
@@ -1826,6 +2456,199 @@ return finish_research{
         walked = client.walk("reference", "ref", depth=1)
         self.assertIn({"kind": "category", "lineageId": "cat"}, walked["nodes"])
         self.assertEqual(calls[0]["subjectStateKey"], "reference#ref#current")
+
+    def test_signal_trend_report_scores_recent_accepted_references(self):
+        result = papyrus_coverage_theme.signals_trend_report(
+            corpus_key="AI-ML-research",
+            topic="AI in video games",
+            coverage_key="coverage.ai-in-video-games",
+            sections=["culture", "methods"],
+            references=[
+                {
+                    "id": "reference-ai-games-1",
+                    "lineageId": "reference-ai-games-1",
+                    "versionState": "current",
+                    "corpusId": "knowledge-corpus-ai-ml-research",
+                    "title": "AI tools reshape video game design workflows",
+                    "sourceUri": "https://example.com/ai-games",
+                    "sourcePublishedAt": "2026-05-20T12:00:00Z",
+                    "curationStatus": "accepted",
+                },
+                {
+                    "id": "reference-ai-games-2",
+                    "lineageId": "reference-ai-games-2",
+                    "versionState": "current",
+                    "corpusId": "knowledge-corpus-ai-ml-research",
+                    "title": "Studios test generative NPC behavior in games",
+                    "sourceUri": "https://studio.example/npc",
+                    "sourcePublishedAt": "2026-05-19T12:00:00Z",
+                    "curationStatus": "accepted",
+                },
+            ],
+            semantic_nodes=[],
+            now="2026-05-21T12:00:00Z",
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["signals"][0]["coverageKey"], "coverage.ai-in-video-games")
+        self.assertEqual(result["signals"][0]["acceptedEvidenceCount"], 2)
+        self.assertIn("arts", result["signals"][0]["sectionFit"])
+        self.assertFalse(any(record["modelName"] in {"Item", "EditionItem"} for record in result["records"]))
+        self.assertEqual(result["records"][0]["input"]["messageKind"], "edition_signal_report")
+        evidence_relations = [
+            record for record in result["records"]
+            if record["modelName"] == "SemanticRelation" and record["input"]["relationTypeKey"] == "uses_evidence"
+        ]
+        self.assertEqual(len(evidence_relations), 2)
+
+    def test_coverage_theme_plan_counts_assignments_and_avoids_items(self):
+        plan = papyrus_coverage_theme.build_coverage_theme_plan(
+            date="2026-05-21",
+            topic="AI in video games",
+            corpus_key="AI-ML-research",
+            category_key="AI-ML-research",
+            coverage_key="coverage.ai-in-video-games",
+            sections=["culture", "methods"],
+            section_budgets={"arts": 2, "methods": 1},
+            run_id="coverage-theme-test",
+            now="2026-05-21T12:00:00Z",
+        )
+
+        self.assertEqual(plan["summary"]["researchAssignmentCount"], 2)
+        self.assertEqual(plan["summary"]["reportingAssignmentCount"], 5)
+        self.assertFalse(any(record["modelName"] in {"Message", "Item", "EditionItem"} for record in plan["records"]))
+        relation_types = {
+            record["input"]["relationTypeKey"]
+            for record in plan["records"]
+            if record["modelName"] == "SemanticRelation"
+        }
+        self.assertIn("planned_for_edition", relation_types)
+        self.assertIn("targets_section", relation_types)
+        self.assertIn("requests_work_on", relation_types)
+        self.assertIn("targets_lane", relation_types)
+        self.assertIn("derived_from", relation_types)
+
+    def test_coverage_theme_reporting_requires_agent_success_without_fallback(self):
+        result = papyrus_coverage_theme.coverage_theme_run(
+            date="2026-05-21",
+            topic="AI in video games",
+            corpus_key="AI-ML-research",
+            category_key="AI-ML-research",
+            coverage_key="coverage.ai-in-video-games",
+            sections=["culture"],
+            section_budgets={"arts": 1},
+            run_id="coverage-theme-test",
+            through="reporting",
+            require_agent_success=True,
+            now="2026-05-21T12:00:00Z",
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["degraded"])
+        self.assertEqual(result["error"]["code"], "agent_success_required")
+
+    def test_coverage_theme_reporting_allow_fallback_creates_private_packets_only(self):
+        result = papyrus_coverage_theme.coverage_theme_run(
+            date="2026-05-21",
+            topic="AI in video games",
+            corpus_key="AI-ML-research",
+            category_key="AI-ML-research",
+            coverage_key="coverage.ai-in-video-games",
+            sections=["culture", "methods"],
+            section_budgets={"arts": 2, "methods": 1},
+            run_id="coverage-theme-test",
+            through="reporting",
+            allow_fallback=True,
+            now="2026-05-21T12:00:00Z",
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["degraded"])
+        self.assertEqual(result["summary"]["researchPacketCount"], 2)
+        self.assertEqual(result["summary"]["reportingPacketCount"], 5)
+        self.assertFalse(any(record["modelName"] in {"Item", "EditionItem"} for record in result["records"]))
+        message_kinds = [
+            record["input"]["messageKind"]
+            for record in result["records"]
+            if record["modelName"] == "Message"
+        ]
+        self.assertEqual(message_kinds.count("research_packet"), 2)
+        self.assertEqual(message_kinds.count("reporting_context_packet"), 5)
+        produces = [
+            record for record in result["records"]
+            if record["modelName"] == "SemanticRelation" and record["input"]["relationTypeKey"] == "produces"
+        ]
+        self.assertEqual(len(produces), 7)
+
+    def test_story_budget_output_groups_reporting_candidates_from_graph_state(self):
+        assignment = papyrus_coverage_theme.reporting_assignment_record(
+            run_id="coverage-theme-test",
+            date="2026-05-21",
+            topic="AI in video games",
+            corpus_key="AI-ML-research",
+            category_key="AI-ML-research",
+            category=None,
+            category_set=None,
+            coverage_node={
+                "id": "semantic-node-coverage-ai-in-video-games-v1",
+                "lineageId": "semantic-node-coverage-ai-in-video-games",
+                "versionNumber": 1,
+                "nodeKey": "coverage.ai-in-video-games",
+                "displayName": "AI in video games",
+            },
+            edition={"id": "edition-edition-2026-05-21-v1", "lineageId": "edition-edition-2026-05-21"},
+            section={"id": "arts", "title": "Arts", "type": "canonical"},
+            slots=1,
+            dispatch_count=2,
+            angle={"key": "reader-impact", "label": "reader impact", "prompt": "reader impact"},
+            candidate_rank=1,
+            source_research_assignment={"id": "assignment-research"},
+            signal=None,
+            now="2026-05-21T12:00:00Z",
+            priority=101,
+        )
+        message = {
+            "id": "message-reporting-context-packet-test",
+            "messageKind": "reporting_context_packet",
+            "messageDomain": "assignment_work",
+            "summary": "Reporting packet ready.",
+        }
+        relation = papyrus_coverage_theme.semantic_relation(
+            predicate="produces",
+            subject_kind="assignment",
+            subject_id=assignment["id"],
+            object_kind="message",
+            object_id=message["id"],
+            now="2026-05-21T12:00:00Z",
+            metadata={},
+        )
+        result = papyrus_coverage_theme.story_budget_output(
+            run_id="coverage-theme-test",
+            state={
+                "assignments": [assignment],
+                "messages": [message],
+                "semanticRelations": [relation],
+                "assignmentEvents": [
+                    {
+                        "id": "assignment-event-review",
+                        "assignmentId": assignment["id"],
+                        "eventType": "reporting_hold",
+                        "note": "Needs stronger evidence.",
+                        "createdAt": "2026-05-21T12:30:00Z",
+                    }
+                ],
+                "modelAttachments": [],
+                "items": [],
+                "editionItems": [],
+            },
+        )
+
+        self.assertEqual(result["summary"]["sectionCount"], 1)
+        section = result["sections"][0]
+        self.assertEqual(section["sectionKey"], "arts")
+        self.assertEqual(section["counts"]["reporting"], 1)
+        self.assertEqual(section["counts"]["held"], 1)
+        self.assertTrue(section["reportingCandidates"][0]["packetAvailable"])
 
 
 if __name__ == "__main__":

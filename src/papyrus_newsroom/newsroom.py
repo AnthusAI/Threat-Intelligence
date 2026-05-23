@@ -52,6 +52,21 @@ RELATION_TYPE_FIELDS = {
         "relationTypeKey": "uses_evidence",
         "relationDomain": "evidence",
     },
+    "produces": {
+        "relationTypeId": "semantic-relation-type-produces",
+        "relationTypeKey": "produces",
+        "relationDomain": "workflow",
+    },
+    "derived_from": {
+        "relationTypeId": "semantic-relation-type-derived-from",
+        "relationTypeKey": "derived_from",
+        "relationDomain": "evidence",
+    },
+    "scoped_to_topic": {
+        "relationTypeId": "semantic-relation-type-scoped-to-topic",
+        "relationTypeKey": "scoped_to_topic",
+        "relationDomain": "ontology",
+    },
 }
 
 
@@ -534,7 +549,14 @@ def papyrus_build_assignment_agent_context(
     """
     context = papyrus_get_assignment_context(assignment_id)["assignment_context"]
     assignment = _decode_record_json(context.get("assignment") or {})
+    targets = _normalize_jsonish(context.get("targets") or [])
+    if not isinstance(targets, list):
+        targets = []
     metadata = _normalize_assignment_metadata(assignment.get("metadata") or {})
+    metadata = {
+        **_assignment_target_metadata(targets),
+        **metadata,
+    }
     section_key = (
         assignment.get("sectionKey")
         or metadata.get("sectionKey")
@@ -579,12 +601,23 @@ def papyrus_build_assignment_agent_context(
         assignment.get("categorySetId"),
         [category_key for category_key in [desk_category.get("categoryKey") if desk_category else None, focus_category.get("categoryKey") if focus_category else None] if category_key],
     )
+    semantic = _semantic_client()
+    coverage_assignment_ids = _assignment_ids_for_coverage_concept(
+        semantic,
+        metadata.get("coverageConceptLineageId"),
+    )
     recent_assignments = _list_assignments()
-    desk_assignments = _assignments_for_desk(recent_assignments, metadata, desk_category, focus_category, section_key=section_key)
+    desk_assignments = _assignments_for_desk(
+        recent_assignments,
+        metadata,
+        desk_category,
+        focus_category,
+        section_key=section_key,
+        coverage_assignment_ids=coverage_assignment_ids,
+    )
     assignment_events = _assignment_events_for_assignments([entry.get("id") for entry in desk_assignments][:8])
     recent_published_items = _recent_published_items(recent_days)
     desk_published_items = _published_items_for_desk(recent_published_items, desk_category, focus_category)
-    semantic = _semantic_client()
     reference_summaries = _desk_reference_summaries(semantic, desk_category, focus_category)
     comment_summaries = _desk_comment_summaries(semantic, reference_summaries)
     coverage_gaps: list[str] = []
@@ -1579,14 +1612,14 @@ def build_assignment_research_packet_plan(
         now=now,
     )
     relation = _semantic_relation(
-        predicate="comment",
-        subject_kind="message",
-        subject_id=message_id,
-        subject_lineage_id=message_id,
+        predicate="produces",
+        subject_kind="assignment",
+        subject_id=assignment_id,
+        subject_lineage_id=assignment_id,
         subject_version_number=None,
-        object_kind="assignment",
-        object_id=assignment_id,
-        object_lineage_id=assignment_id,
+        object_kind="message",
+        object_id=message_id,
+        object_lineage_id=message_id,
         object_version_number=None,
         rank=1,
         score=None,
@@ -1603,6 +1636,7 @@ def build_assignment_research_packet_plan(
             "metadataKind": "research.packet.created",
             "assignmentTypeKey": assignment_payload.get("assignmentTypeKey"),
             "queueKey": assignment_payload.get("queueKey"),
+            "workProductKind": "research_packet",
         },
     )
 
@@ -1692,14 +1726,14 @@ def build_assignment_reporting_context_packet_plan(
         now=now,
     )
     relation = _semantic_relation(
-        predicate="comment",
-        subject_kind="message",
-        subject_id=message_id,
-        subject_lineage_id=message_id,
+        predicate="produces",
+        subject_kind="assignment",
+        subject_id=assignment_id,
+        subject_lineage_id=assignment_id,
         subject_version_number=None,
-        object_kind="assignment",
-        object_id=assignment_id,
-        object_lineage_id=assignment_id,
+        object_kind="message",
+        object_id=message_id,
+        object_lineage_id=message_id,
         object_version_number=None,
         rank=1,
         score=None,
@@ -1717,7 +1751,14 @@ def build_assignment_reporting_context_packet_plan(
             "assignmentTypeKey": assignment_type,
             "queueKey": assignment_payload.get("queueKey"),
             "editorRecommendation": packet.get("editorRecommendation"),
+            "workProductKind": "reporting_context_packet",
         },
+    )
+    lineage_relations = _reporting_packet_lineage_relations(
+        assignment_id=assignment_id,
+        assignment_payload=assignment_payload,
+        packet=packet,
+        now=now,
     )
 
     warnings = []
@@ -1736,6 +1777,10 @@ def build_assignment_reporting_context_packet_plan(
             {"modelName": "ModelAttachment", "action": "create", "input": body_attachment["record"], "body": body_attachment["body"]},
             {"modelName": "ModelAttachment", "action": "create", "input": metadata_attachment["record"], "body": metadata_attachment["body"]},
             {"modelName": "SemanticRelation", "action": "create", "input": relation},
+            *[
+                {"modelName": "SemanticRelation", "action": "create", "input": lineage_relation}
+                for lineage_relation in lineage_relations
+            ],
         ],
         "warnings": warnings,
     }
@@ -2007,6 +2052,12 @@ def _research_packet_metadata(research_payload: dict[str, Any], assignment: dict
         "focusCategoryKey": metadata.get("focusCategoryKey"),
         "focusCategoryLineageId": metadata.get("focusCategoryLineageId"),
         "focusCategoryTitle": metadata.get("focusCategoryTitle"),
+        "sectionKey": assignment.get("sectionKey") or metadata.get("sectionKey") or assignment.get("sectionId") or metadata.get("sectionId"),
+        "sectionTitle": metadata.get("sectionTitle") or assignment.get("sectionKey") or metadata.get("sectionKey"),
+        "coverageConceptId": metadata.get("coverageConceptId"),
+        "coverageConceptLineageId": metadata.get("coverageConceptLineageId"),
+        "coverageConceptKey": metadata.get("coverageConceptKey"),
+        "coverageConceptTitle": metadata.get("coverageConceptTitle"),
         "contextProfile": metadata.get("contextProfile"),
         "contextTokenBudget": metadata.get("contextTokenBudget"),
         "contextSources": _jsonish_list(metadata.get("contextSources") or []),
@@ -2083,6 +2134,12 @@ def _reporting_context_packet_metadata(reporting_payload: dict[str, Any], assign
         "acceptedReferenceIds": _string_list(reporting_payload.get("accepted_reference_ids") or reporting_payload.get("acceptedReferenceIds") or []),
         "proposedReferences": _jsonish_list(reporting_payload.get("proposed_references") or reporting_payload.get("proposedReferences") or []),
         "recentDeskMemoryUsed": _jsonish_list(reporting_payload.get("recent_desk_memory_used") or reporting_payload.get("recentDeskMemoryUsed") or []),
+        "coverageConceptId": reporting_payload.get("coverage_concept_id") or reporting_payload.get("coverageConceptId") or metadata.get("coverageConceptId"),
+        "coverageConceptLineageId": reporting_payload.get("coverage_concept_lineage_id") or reporting_payload.get("coverageConceptLineageId") or metadata.get("coverageConceptLineageId"),
+        "coverageConceptKey": reporting_payload.get("coverage_concept_key") or reporting_payload.get("coverageConceptKey") or metadata.get("coverageConceptKey"),
+        "coverageConceptTitle": reporting_payload.get("coverage_concept_title") or reporting_payload.get("coverageConceptTitle") or metadata.get("coverageConceptTitle"),
+        "sourceResearchPacketId": reporting_payload.get("source_research_packet_id") or reporting_payload.get("sourceResearchPacketId") or metadata.get("sourceResearchPacketId"),
+        "sourceResearchAssignmentId": reporting_payload.get("source_research_assignment_id") or reporting_payload.get("sourceResearchAssignmentId") or metadata.get("sourceResearchAssignmentId"),
         "coverageGaps": _jsonish_list(reporting_payload.get("coverage_gaps") or reporting_payload.get("coverageGaps") or []),
         "openQuestions": _jsonish_list(reporting_payload.get("open_questions") or reporting_payload.get("openQuestions") or []),
         "riskFlags": _jsonish_list(reporting_payload.get("risk_flags") or reporting_payload.get("riskFlags") or []),
@@ -2139,6 +2196,52 @@ def _normalize_research_mode(value: Any) -> str:
     if mode not in {"internal_brief", "source_discovery", "full_research"}:
         return "source_discovery"
     return mode
+
+
+def _reporting_packet_lineage_relations(
+    *,
+    assignment_id: str,
+    assignment_payload: dict[str, Any],
+    packet: dict[str, Any],
+    now: str,
+) -> list[dict[str, Any]]:
+    relations: list[dict[str, Any]] = []
+    sources = [
+        ("message", packet.get("sourceResearchPacketId"), "source_research_packet"),
+        ("assignment", packet.get("sourceResearchAssignmentId"), "source_research_assignment"),
+    ]
+    for rank, (object_kind, source_id, source_kind) in enumerate(sources, start=1):
+        if not source_id:
+            continue
+        source_id = str(source_id)
+        relations.append(_semantic_relation(
+            predicate="derived_from",
+            subject_kind="assignment",
+            subject_id=assignment_id,
+            subject_lineage_id=assignment_id,
+            subject_version_number=None,
+            object_kind=object_kind,
+            object_id=source_id,
+            object_lineage_id=source_id,
+            object_version_number=None,
+            rank=rank,
+            score=None,
+            confidence=None,
+            classifier_id=assignment_payload.get("classifierId"),
+            model_version=None,
+            review_recommended=False,
+            source_snapshot_id=assignment_payload.get("sourceSnapshotId"),
+            import_run_id=assignment_payload.get("importRunId"),
+            imported_at=now,
+            metadata={
+                "lifecycle": "assignment-reporting-context-packet",
+                "sourceKind": source_kind,
+                "assignmentTypeKey": assignment_payload.get("assignmentTypeKey"),
+                "queueKey": assignment_payload.get("queueKey"),
+                "workProductKind": "reporting_context_packet",
+            },
+        ))
+    return relations
 
 
 def _semantic_relation(
@@ -2745,6 +2848,8 @@ def _context_semantic_terms(
         metadata.get("researchLens"),
         metadata.get("researchLensTitle"),
         metadata.get("targetSystemType"),
+        metadata.get("coverageConceptKey"),
+        metadata.get("coverageConceptTitle"),
         (desk_category or {}).get("displayName"),
         (desk_category or {}).get("categoryKey"),
         (focus_category or {}).get("displayName"),
@@ -2759,6 +2864,53 @@ def _context_semantic_terms(
             seen.add(term)
             terms.append(term)
     return terms
+
+
+def _assignment_target_metadata(targets: list[Any]) -> dict[str, Any]:
+    metadata: dict[str, Any] = {}
+    signal_lineage_ids: list[str] = []
+    for target in targets:
+        if not isinstance(target, dict):
+            continue
+        detail = str(target.get("detail") or "")
+        kind = str(target.get("kind") or "")
+        if detail == "targets_topic" and kind == "category":
+            metadata.setdefault("focusCategoryLineageId", target.get("lineageId"))
+            metadata.setdefault("focusCategoryTitle", target.get("label"))
+        elif detail == "requests_work_on" and kind == "semanticNode":
+            metadata.setdefault("coverageConceptId", target.get("id"))
+            metadata.setdefault("coverageConceptLineageId", target.get("lineageId"))
+            metadata.setdefault("coverageConceptTitle", target.get("label"))
+        elif detail == "uses_signal" and kind == "semanticNode":
+            if target.get("lineageId"):
+                signal_lineage_ids.append(str(target.get("lineageId")))
+            metadata.setdefault("coverageConceptId", target.get("id"))
+            metadata.setdefault("coverageConceptLineageId", target.get("lineageId"))
+            metadata.setdefault("coverageConceptTitle", target.get("label"))
+        elif detail == "targets_section" and kind == "newsroomSection":
+            metadata.setdefault("sectionId", target.get("id"))
+            metadata.setdefault("sectionKey", target.get("lineageId") or target.get("id"))
+            metadata.setdefault("sectionTitle", target.get("label"))
+    if signal_lineage_ids:
+        metadata.setdefault("semanticNodeLineageIds", signal_lineage_ids)
+    return metadata
+
+
+def _assignment_ids_for_coverage_concept(semantic: Any, coverage_lineage_id: Any) -> set[str]:
+    if not coverage_lineage_id:
+        return set()
+    try:
+        relations = semantic.list_incoming("semanticNode", str(coverage_lineage_id))["relations"]
+    except Exception:
+        return set()
+    return {
+        str(relation.get("subjectId"))
+        for relation in relations
+        if relation.get("relationState") == "current"
+        and relation.get("subjectKind") == "assignment"
+        and (relation.get("relationTypeKey") or relation.get("predicate")) in {"requests_work_on", "uses_signal"}
+        and relation.get("subjectId")
+    }
 
 
 def _search_semantic_nodes(
@@ -2837,12 +2989,16 @@ def _assignments_for_desk(
     desk_category: dict[str, Any] | None,
     focus_category: dict[str, Any] | None,
     section_key: Any = None,
+    coverage_assignment_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     desk_key = (desk_category or {}).get("categoryKey") or metadata.get("deskCategoryKey") or metadata.get("rootCategoryKey")
     focus_key = (focus_category or {}).get("categoryKey") or metadata.get("focusCategoryKey") or metadata.get("researchLens")
     normalized_section_key = str(section_key or "").strip()
     result = []
     for assignment in assignments:
+        if coverage_assignment_ids and assignment.get("id") in coverage_assignment_ids:
+            result.append(assignment)
+            continue
         assignment_section_key = str(
             assignment.get("sectionKey")
             or assignment.get("sectionId")
@@ -3071,6 +3227,23 @@ def _build_assignment_context_blocks(
                 "taxonomy",
                 "Semantic node/entity matches:\n" + "\n".join(semantic_lines),
                 metadata={"semanticNodeCount": len(semantic_nodes)},
+            )
+        )
+    if metadata.get("coverageConceptLineageId") or metadata.get("coverageConceptTitle"):
+        blocks.append(
+            _context_block(
+                "taxonomy-coverage-concept",
+                "taxonomy",
+                "\n".join([
+                    f"Coverage concept: {metadata.get('coverageConceptTitle') or metadata.get('coverageConceptKey') or metadata.get('coverageConceptLineageId')}",
+                    f"coverage_concept_lineage_id: {metadata.get('coverageConceptLineageId') or ''}",
+                    f"coverage_concept_key: {metadata.get('coverageConceptKey') or ''}",
+                ]),
+                required=True,
+                metadata={
+                    "sourceKind": "semanticNode",
+                    "semanticNodeLineageId": metadata.get("coverageConceptLineageId"),
+                },
             )
         )
     linked_reference_ids = _string_list(metadata.get("referenceLineageIds") or [])

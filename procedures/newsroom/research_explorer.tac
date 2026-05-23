@@ -15,10 +15,12 @@ newsroom_research_explorer = Agent {
 You are the Papyrus exploratory newsroom researcher agent.
 
 Goal:
-- Build a Message-backed research packet for one live Assignment or legacy assignment Item.
+- Build a research_packet payload for one live Assignment or legacy assignment
+  Item. The outer CLI/procedure layer owns deterministic Message,
+  ModelAttachment, and SemanticRelation persistence.
 - Use execute_tactus as your only tool.
 - Explore internal knowledge before using web search unless the assignment explicitly asks for current external evidence.
-- Produce the same dry-run research packet contract as the constrained researcher.
+- Produce the same dry-run research packet payload contract as the constrained researcher.
 - Respect research_mode:
   - internal_brief: synthesize internal Papyrus knowledge only.
   - source_discovery: orient with internal knowledge, then perform web search for new reference prospects.
@@ -28,6 +30,12 @@ Allowed tool strategy:
 - You may call execute_tactus at most 6 times total.
 - Use at most 3 knowledge_query calls, 2 Papyrus URI lookups, and 2 web searches.
 - Always finish with one execute_tactus call using harness="research" so finish_research(...) or finish_research_from_search(...) builds the standard dry-run plan.
+- Helper scope is strict: knowledge_search, web_search, finish_research,
+  finish_research_from_search, evidence_item_ids_from_knowledge, and
+  proposed_references_from_search only exist inside execute_tactus calls that
+  set harness="research". Never call those helpers in a raw execute_tactus
+  snippet. Raw snippets may use assignment_context, assignment_agent_context,
+  knowledge_query, papyrus.resolve_uri, and direct tactus.web search only.
 
 Required policy sequence:
 1. Read assignment context and budgeted agent context when assignment_id is live.
@@ -92,11 +100,43 @@ Procedure {
         local json = require("tactus.io.json")
 
         local assignment_id = input.assignment_item_id or ""
-        local assignment_json = tostring(input.assignment_json or "")
+        local assignment_json = ""
         local corpus_key = input.corpus_key or "AI-ML-research"
         local research_mode = input.research_mode or "source_discovery"
         local max_evidence_items = input.max_evidence_items or 20
         local max_attempts = 3
+
+        local function percent_decode(text)
+            if type(text) ~= "string" then return "" end
+            return (string.gsub(text, "%%(%x%x)", function(hex)
+                local code = tonumber(hex, 16)
+                if not code then return "" end
+                return string.char(code)
+            end))
+        end
+
+        local function normalize_inline_assignment_json(value)
+            if type(value) == "table" then
+                local ok, encoded = pcall(json.encode, value)
+                if ok and type(encoded) == "string" then return encoded end
+                return ""
+            end
+            if type(value) ~= "string" then
+                return value == nil and "" or tostring(value)
+            end
+            if string.sub(value, 1, 9) == "@urljson:" then
+                return percent_decode(string.sub(value, 10))
+            end
+            return value
+        end
+
+        assignment_json = normalize_inline_assignment_json(input.assignment_json)
+        if assignment_id == "" and assignment_json ~= "" then
+            local ok, decoded = pcall(json.decode, assignment_json)
+            if ok and type(decoded) == "table" and type(decoded.id) == "string" and decoded.id ~= "" then
+                assignment_id = decoded.id
+            end
+        end
 
         local function truncate_text(value, limit)
             local text = tostring(value or "")
@@ -177,14 +217,16 @@ Procedure {
         local function normalize_payload(payload)
             payload = as_table(payload)
             if type(payload) ~= "table" then return nil end
+            local research_packet = payload.research_packet or payload.researchPacket
+            local research_packet_table = as_table(research_packet) or {}
             local normalized = {
                 assignment_item_id = payload.assignment_item_id or payload.assignmentItemId or assignment_id or "assignment-unknown",
                 corpus_key = payload.corpus_key or payload.corpusKey or corpus_key or "AI-ML-research",
                 dry_run = payload.dry_run,
                 item_status = payload.item_status or payload.itemStatus,
-                research_packet = payload.research_packet or payload.researchPacket,
+                research_packet = research_packet,
                 research_record_plan = payload.research_record_plan or payload.researchRecordPlan,
-                summary = payload.summary,
+                summary = payload.summary or research_packet_table.summary,
                 recovery_path = payload.recovery_path or payload.recoveryPath,
                 retry_count = payload.retry_count or payload.retryCount,
                 validation_failures = payload.validation_failures or payload.validationFailures,
@@ -249,6 +291,10 @@ Corrective requirements:
 - dry_run must be boolean.
 - research_packet and research_record_plan must be objects.
 - Keep source_discovery/full_research discovery guardrails unchanged.
+- If you use knowledge_search, web_search, finish_research,
+  finish_research_from_search, evidence_item_ids_from_knowledge, or
+  proposed_references_from_search, the execute_tactus call must set
+  harness="research". Those helpers are unavailable in raw execute_tactus.
 ]], base_message, attempt, max_attempts, error_text, output_text)
         end
 
@@ -286,6 +332,10 @@ Bounded exploration:
 - In source_discovery mode, run at least one web_search after internal orientation, unless you return blockedReason.
 - In full_research mode, run at least one web_search and synthesize internal findings plus external prospects, unless you return blockedReason.
 - Finish with execute_tactus using harness="research", assignment_id=%s when no inline JSON is present, assignment_item_json when inline JSON is present, corpus_key=%s, research_mode=%s, and max_evidence_items=%d.
+- Do not call knowledge_search, web_search, finish_research,
+  finish_research_from_search, evidence_item_ids_from_knowledge, or
+  proposed_references_from_search in raw execute_tactus. Those helpers are
+  injected only by the research harness.
 
 Useful raw snippets before finalization:
 local context = assignment_context{ id = "%s" }
@@ -374,6 +424,8 @@ if mode == "internal_brief" then
     return finish_research{
         research_mode = mode,
         summary = "Fallback internal brief generated after structured-output retries failed.",
+        recoveryPath = "procedure_fallback",
+        fallbackReason = "agent_output_not_structured",
         queries = {query},
         source_snapshots = {},
         proposed_references = {},
@@ -386,6 +438,8 @@ if mode == "internal_brief" then
             papyrusUrisInspected = {},
             webSearches = {},
             acceptedEvidenceIds = evidence_ids,
+            recoveryPath = "procedure_fallback",
+            fallbackReason = "agent_output_not_structured",
             unresolvedGaps = {"agent_output_not_structured"},
         },
     }
@@ -395,6 +449,8 @@ if (not search_ok) or (not search) then
     return finish_research{
         research_mode = mode,
         summary = "Fallback discovery packet generated with blocked web search after structured-output retries failed.",
+        recoveryPath = "procedure_fallback",
+        fallbackReason = "web_search_failed_after_retry",
         queries = {query},
         source_snapshots = {},
         proposed_references = {},
@@ -408,6 +464,8 @@ if (not search_ok) or (not search) then
             papyrusUrisInspected = {},
             webSearches = {query},
             acceptedEvidenceIds = evidence_ids,
+            recoveryPath = "procedure_fallback",
+            fallbackReason = "web_search_failed_after_retry",
             unresolvedGaps = {"web_search_failed_after_retry"},
         },
     }
@@ -415,6 +473,8 @@ end
 return finish_research{
     research_mode = mode,
     summary = "Fallback discovery packet generated after structured-output retries failed.",
+    recoveryPath = "procedure_fallback",
+    fallbackReason = "agent_output_not_structured",
     queries = {query},
     source_snapshots = search.results or {},
     proposed_references = proposed_references_from_search(search),
@@ -427,6 +487,8 @@ return finish_research{
         papyrusUrisInspected = {},
         webSearches = {query},
         acceptedEvidenceIds = evidence_ids,
+        recoveryPath = "procedure_fallback",
+        fallbackReason = "agent_output_not_structured",
         unresolvedGaps = {"agent_output_not_structured"},
     },
 }
@@ -456,13 +518,65 @@ Do not add prose.
         local fallback_payload = normalize_payload(fallback_decoded)
         local fallback_errors = validate_payload(fallback_payload)
         if #fallback_errors > 0 then
-            error(string.format(
-                "newsroom_research_explorer fallback returned invalid payload. first_error=%s last_error=%s fallback_error=%s fallback_output=%s",
-                first_error or "none",
-                last_error or "none",
-                table.concat(fallback_errors, "; "),
-                truncate_text(encode_for_feedback(fallback_output), 1200)
-            ))
+            local mode = normalize_research_mode(research_mode)
+            local query = fallback_query ~= "" and fallback_query or "the research assignment focus"
+            local fallback_packet = {
+                research_mode = mode,
+                summary = "Deterministic fallback research packet generated after agent output could not be structured.",
+                recoveryPath = "procedure_fallback",
+                fallbackReason = "agent_output_not_structured",
+                queries = {query},
+                source_snapshots = {},
+                proposed_references = {},
+                evidence_item_ids = {},
+                recommended_angle = "Retry the research agent or run source discovery again before using this packet as evidence.",
+                open_questions = {"What accepted evidence and source prospects should replace this fallback packet?"},
+                coverage_gaps = {"Agent output was not structured enough to create a grounded research packet."},
+                researchTrace = {
+                    knowledgeQueries = {query},
+                    papyrusUrisInspected = {},
+                    webSearches = {},
+                    acceptedEvidenceIds = {},
+                    recoveryPath = "procedure_fallback",
+                    fallbackReason = "agent_output_not_structured",
+                    unresolvedGaps = {"agent_output_not_structured"},
+                },
+            }
+            if mode ~= "internal_brief" then
+                fallback_packet.blockedReason = "agent_output_not_structured"
+                table.insert(fallback_packet.open_questions, "Can source discovery be retried with a structured final response?")
+                table.insert(fallback_packet.coverage_gaps, "External discovery did not produce a structured source prospect list.")
+            end
+            append_recovery_trace(
+                fallback_packet,
+                "procedure_fallback",
+                max_attempts,
+                validation_failures
+            )
+            return {
+                assignment_item_id = assignment_id ~= "" and assignment_id or "assignment-unknown",
+                corpus_key = corpus_key,
+                dry_run = true,
+                item_status = "researched",
+                research_packet = fallback_packet,
+                research_record_plan = {
+                    dryRun = true,
+                    lifecycle = "assignment-research-packet",
+                    records = {},
+                    warnings = {
+                        string.format(
+                            "fallback agent output invalid: first_error=%s last_error=%s fallback_error=%s",
+                            first_error or "none",
+                            last_error or "none",
+                            table.concat(fallback_errors, "; ")
+                        )
+                    },
+                },
+                summary = fallback_packet.summary,
+                recovery_path = "procedure_fallback",
+                retry_count = max_attempts,
+                validation_failures = validation_failures,
+            }
         end
         append_recovery_trace(
             fallback_payload.research_packet,

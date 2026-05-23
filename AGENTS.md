@@ -28,6 +28,16 @@ rendering contracts.
 - Do not commit unless the user explicitly asks.
 - Preserve unrelated uncommitted work. This project is often dirty because it is
   being iterated in conversation.
+- Do not add backward-compatibility fallbacks for old schema, GraphQL, content,
+  layout-plan, or CLI shapes. Fallback read queries, dual-shape normalizers,
+  silent compatibility branches, and long-lived migration shims are technical
+  debt. Treat required-field/schema mismatches as data or deployment errors:
+  fix the production data with a targeted backfill, deploy the current schema
+  or code, and remove any one-time repair path after use.
+- Only create a temporary compatibility repair when the user explicitly approves
+  it to restore production immediately. Keep it narrow, document exactly why it
+  exists, and remove it from normal read, authoring, repository, and solver
+  paths as soon as the data or deployment is corrected.
 - Keep the current one-page React flipper. Do not reintroduce Turn.js, jQuery,
   or DOM-mutating layout loops.
 - Do not make React measure rendered DOM to decide layout. The solver should
@@ -63,19 +73,23 @@ rendering contracts.
   defines publication corpus keys, roles, classifier ids, local paths, and S3
   prefixes. Do not hard-code the AI/ML pilot corpus names in Papyrus logic.
   Materialize config changes with `npm run content -- categories import-config`.
-- Research agents should be driven by editable publication doctrine, root-desk
+- Research agents should be driven by editable publication doctrine, section
   doctrine, publication/corpus config, accepted category state, and assignment
   context, not by hard-coded subject assumptions. Follow
   `skills/researcher-doctrine/SKILL.md` when designing or running researcher
   behavior. Keep domain-specific guidance in doctrine/config data and do not add
   domain assumptions to `/newsroom`, the content CLI, GraphQL models, or layout
   code.
-- Coding agents that operate the research workflow should follow
-  `skills/newsroom-research-workflow/SKILL.md`. Live Assignment research packets
-  are private `Message` work products linked to `Assignment` by a `comment`
-  `SemanticRelation`; they are not files, folders, or new top-level models.
-  Inspect them with
-  `npm run content -- assignments research-packets --assignment <id>`.
+- Coding agents that operate research, reporting, or story-cycle workflows
+  should follow `skills/newsroom-research-workflow/SKILL.md` and
+  `skills/newsroom-story-cycle/SKILL.md`. Live Assignment packets are private
+  `Message` work products with `ModelAttachment` payloads; they are not files,
+  folders, publication `Item` rows, or new top-level models. New packet writes
+  use `Assignment --produces--> Message`; legacy
+  `Message --comment--> Assignment` packet links remain readable. Inspect
+  research packets with
+  `npm run content -- assignments research-packets --assignment <id>`, and use
+  `assignments story-cycle-output` for run-level research/reporting output.
 - Use an AWS profile for local Amplify/AWS access.
 - `.env` is for Papyrus runtime settings and the seed editor credentials used by
   `npm run seed:amplify`. `.env*` must stay ignored, and `.env.example` is the
@@ -129,9 +143,10 @@ rendering contracts.
   docs, and tests. Future assignment and research queues should become desk tabs
   instead of separate one-off management pages.
 - `/newsroom/doctrine` manages publication-wide mission and policies.
-  `/newsroom/desks` manages root-topic desk identity and each desk's mission and
-  policies. Desk doctrine is private `Item` data tied to `Category.lineageId`;
-  child topics inherit root desk doctrine in v1.
+  `/newsroom/sections` manages the operational desk surface through
+  `NewsroomSection` mission, policies, assignment guidance, kill criteria, and
+  budgets. Legacy category-tied desk doctrine may still exist for migration, but
+  new assignment context should prefer section doctrine.
 - Assignments are first-class private `Assignment` work records, not cloud
   `Item` rows with `type: "assignment"`. Do not create assignment Items or
   encode pending work in article/item status fields.
@@ -153,14 +168,42 @@ rendering contracts.
   and append `AssignmentEvent` audit rows. The Newsroom `Assignments` tab
   should show claim/release/complete/cancel/reopen workflow actions, not
   edition-candidate culling.
+- Editorial selection is separate from assignment lifecycle. Reporting packet
+  decisions use `AssignmentEvent.eventType` values
+  `reporting_select`, `reporting_merge`, `reporting_brief`, `reporting_hold`,
+  and `reporting_kill`, with structured metadata in a `ModelAttachment` owned by
+  the event. `select` and `brief` create child private copywriting Assignments
+  (`copywriting.article-draft` or `copywriting.brief-draft`), not `Item` rows.
+  `hold` and `kill` create no Items; no reporting packet review creates
+  `EditionItem` placement.
 - For dated edition setup, section slot planning, and surplus research
-  assignment dispatch, follow `skills/edition-planning/SKILL.md`. The default
+  and reporting assignment dispatch, follow `skills/edition-planning/SKILL.md`
+  and `skills/newsroom-story-cycle/SKILL.md`. The default
   overassignment ratio is `3/2`, but assignments remain private `Assignment`
   records. Create or update the dated private `Edition` record first, then
-  dispatch by root desk category plus publication lane (`reporting`, `analysis`,
-  and `briefs` by default) and link assignments to that edition, lane, and
-  evidence with `SemanticRelation` rows until selected outputs become
-  reader-facing `Item` and `EditionItem` records.
+  dispatch by configurable `NewsroomSection`, accepted topic scope, coverage
+  `SemanticNode`, and publication lane (`reporting`, `analysis`, and `briefs`
+  by default). Link assignments to that edition, section, lane, topic, coverage
+  node, lineage source, and evidence with `SemanticRelation` rows. Reporting
+  agents produce private context packets first; explicit editor `select`/`brief`
+  decisions queue copywriting Assignments; copywriting is the first stage allowed
+  to create draft reader-facing `Item` records. Edition placement remains a
+  later copyediting/layout step.
+- Treat multi-section story-cycle runs as Coverage Themes in editor-facing UX
+  and docs. The Python `papyrus-newsroom coverage-themes run` command is the
+  primary operator surface; `assignments run-story-cycle` is the compatibility
+  CLI name. The default stop point is `--through reporting`, after private
+  research and reporting packets but before editor selection or copywriting. Use
+  `--through plan` or `--through research` when intentionally stopping earlier.
+  Applied reruns reuse existing packet Messages by default; use
+  `--refresh-packets` only when the operator intentionally wants to regenerate
+  packet payloads.
+  In live apply smoke tests, require agent success unless fallback/degraded
+  packets are explicitly being tested.
+- Use `papyrus-newsroom signals trend-report` and `papyrus-newsroom editions
+  plan` as the Python assignment-desk layer when an edition should be planned
+  from recent accepted knowledge-base trends, section slots, and Coverage Theme
+  candidates.
 - Style the Newsroom as a newspaper section or editorial insert, not as an app
   dashboard. Steering is passive and optional: proposals are skimmable notes
   beside the edition, and the system keeps following the accepted category set when
@@ -246,9 +289,10 @@ GraphQL (or `?scenario=<id>` fixture overrides for tests/debug only).
 - Supported item types are `article`, `brief`, `correction`, `promo`, `ad`,
   and `sectionHeader`.
 - Assignments are not `PublicationItem`s and should not appear in reader
-  layout. Keep assignment work in the private `Assignment` queue until a
-  reporter or publishing procedure produces a draft or publishable `article`
-  Item.
+  layout. Keep research and reporting output as private `Assignment` work
+  products. Explicit editor selection queues private copywriting Assignments;
+  copywriting creates draft `article` or `brief` `Item` records for review.
+  Draft creation is not edition placement.
 - `articleToPublicationItem` adapts legacy/fixture `Article` objects into
   generic items.
 - `publicationItemToArticle` adapts article items back to `Article` for direct
@@ -495,9 +539,10 @@ To add or change article data:
 
 - Update content in GraphQL (`Item`, `MediaAsset`, `Edition`, `EditionItem`)
   through the CLI authoring lane.
-- Use `skills/edition-planning/SKILL.md` when creating a dated edition that
-  needs new research assignments. Edition-candidate assignments are private
-  `Assignment` records linked to the private `Edition` through
+- Use `skills/edition-planning/SKILL.md` and
+  `skills/newsroom-story-cycle/SKILL.md` when creating a dated edition that
+  needs new research or reporting candidates. Edition-candidate assignments are
+  private `Assignment` records linked to the private `Edition` through
   `SemanticRelation`, and must not be published directly into `EditionItem` rows.
 - Published editions must set `status`, `editionDate`, and `publishedAt`.
   `publishedAt` is required for archive listing and freshness order, even when

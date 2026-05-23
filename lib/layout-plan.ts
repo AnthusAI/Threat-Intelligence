@@ -266,6 +266,7 @@ const PlacementSchema = z
     anchor: z.enum(RESPONSIVE_PLACEMENT_ANCHORS).default("left"),
     columnStart: z.number().int().positive().optional(),
     span: SpanPolicySchema,
+    spanOverrides: z.record(z.string(), z.number().int().positive()).optional(),
     vertical: z.enum(RESPONSIVE_VERTICAL_PLACEMENTS).default("upperThird"),
     collapse: z.enum(RESPONSIVE_COLLAPSE_POLICIES).default("inline"),
     crop: z.enum(RESPONSIVE_CROP_POLICIES).default("preserve"),
@@ -307,6 +308,7 @@ const ArticleFrameCompositionSchema = z
 
 const CutPolicySchema = z
   .object({
+    bodyDepthRows: z.number().int().positive().optional(),
     maxBodyLines: z.number().int().positive().optional(),
     jumpTargetPage: z.number().int().positive().optional(),
   })

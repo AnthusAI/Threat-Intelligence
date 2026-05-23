@@ -102,6 +102,7 @@ type GraphQLMediaAsset = {
   maxHeight?: number | null;
   crop?: string | null;
   wrapsText?: boolean | null;
+  metadata?: unknown;
 };
 
 const IMAGE_ROLES: NonNullable<ArticleImageAsset["roles"]> = [
@@ -125,6 +126,15 @@ export const graphqlContentRepository: ContentRepository = {
   async getLatestPublishedEdition() {
     try {
       return summarizeEditionRoute(await loadLatestPublishedEdition());
+    } catch (error) {
+      if (isMissingGraphQLEditionError(error)) return null;
+      throw error;
+    }
+  },
+
+  async getFirstPublishedEdition() {
+    try {
+      return summarizeEditionRoute(await loadFirstPublishedEdition());
     } catch (error) {
       if (isMissingGraphQLEditionError(error)) return null;
       throw error;
@@ -199,6 +209,15 @@ async function loadLatestPublishedEdition(): Promise<GraphQLEdition> {
   );
   if (latestByEditionDate) return latestByEditionDate;
 
+  throw new Error("No published GraphQL edition found. Seed the Amplify sandbox or set PAPYRUS_EDITION_SLUG.");
+}
+
+async function loadFirstPublishedEdition(): Promise<GraphQLEdition> {
+  const editions = await listAll<GraphQLEdition>((options) =>
+    getPublishedEditionModel().listPublishedEditionsByStatusAndEditionDate({ status: PUBLISHED_STATUS }, options),
+  );
+  const [firstEdition] = editions.sort(compareEditionsByOldest);
+  if (firstEdition) return firstEdition;
   throw new Error("No published GraphQL edition found. Seed the Amplify sandbox or set PAPYRUS_EDITION_SLUG.");
 }
 
@@ -296,6 +315,14 @@ function compareEditionsByFreshness(left: GraphQLEdition, right: GraphQLEdition)
   const leftPublishedAt = left.publishedAt ?? `${left.editionDate}T00:00:00.000Z`;
   const rightPublishedAt = right.publishedAt ?? `${right.editionDate}T00:00:00.000Z`;
   return rightPublishedAt.localeCompare(leftPublishedAt) || right.id.localeCompare(left.id);
+}
+
+function compareEditionsByOldest(left: GraphQLEdition, right: GraphQLEdition): number {
+  const leftPublishedAt = left.publishedAt ?? `${left.editionDate}T00:00:00.000Z`;
+  const rightPublishedAt = right.publishedAt ?? `${right.editionDate}T00:00:00.000Z`;
+  return left.editionDate.localeCompare(right.editionDate)
+    || leftPublishedAt.localeCompare(rightPublishedAt)
+    || left.id.localeCompare(right.id);
 }
 
 function isMissingGraphQLEditionError(error: unknown): boolean {
@@ -517,6 +544,7 @@ async function getSignedStorageUrl(storagePath: string): Promise<string> {
 function getImageLayout(asset: GraphQLMediaAsset): ArticleImageLayout | undefined {
   const aspectRatio = asset.aspectRatio ?? (asset.width && asset.height ? asset.width / asset.height : null);
   if (!aspectRatio) return undefined;
+  const metadata = parseObjectMetadata(asset.metadata);
 
   return {
     minHeight: asset.minHeight ?? 110,
@@ -525,6 +553,7 @@ function getImageLayout(asset: GraphQLMediaAsset): ArticleImageLayout | undefine
     aspectRatio,
     crop: asset.crop === "contain" ? "contain" : "cover",
     wrapsText: asset.wrapsText ?? true,
+    inlineFloat: parseInlineFloatMetadata(metadata?.inlineFloat),
     focalPoint:
       typeof asset.focalX === "number" && typeof asset.focalY === "number"
         ? {
@@ -533,6 +562,36 @@ function getImageLayout(asset: GraphQLMediaAsset): ArticleImageLayout | undefine
           }
         : undefined,
   };
+}
+
+function parseObjectMetadata(value: unknown): Record<string, unknown> | undefined {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+  if (typeof value !== "string") return undefined;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseInlineFloatMetadata(value: unknown): ArticleImageLayout["inlineFloat"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  return {
+    minColumnCount: optionalPositiveNumber(record.minColumnCount),
+    columnSpan: optionalPositiveNumber(record.columnSpan),
+    widthRatio: optionalPositiveNumber(record.widthRatio),
+    narrowWidthRatio: optionalPositiveNumber(record.narrowWidthRatio),
+    maxWidthRatio: optionalPositiveNumber(record.maxWidthRatio),
+    minWidth: optionalPositiveNumber(record.minWidth),
+  };
+}
+
+function optionalPositiveNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
 function getFallbackImage(item: GraphQLItem): ArticleImage {

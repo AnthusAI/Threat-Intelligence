@@ -4,6 +4,13 @@ import type { EditionContent } from "../lib/content-types";
 import { createEditionSectionPlan } from "../lib/edition-sections";
 import { getEditionDatePath } from "../lib/edition-routes";
 import { normalizeEditionLayoutPlan } from "../lib/layout-plan";
+import {
+  loadPublicPlaceholderSections,
+  loadPublicPlaceholderTopics,
+  type PublicPlaceholderSection,
+  type PublicPlaceholderTopic,
+} from "../lib/public-placeholder-config";
+import type { PublicationItem } from "../lib/publication-items";
 import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
@@ -22,9 +29,16 @@ export default async function Home({ searchParams }: HomePageProps) {
   const scenarioId = getScenarioIdParam(resolvedSearchParams?.scenario);
   if (!scenarioId) {
     if (hasOAuthRedirectParams(resolvedSearchParams)) {
+      const mastheadHomeHref = await loadFirstPublishedEditionPath();
       const content = await loadLatestGraphQLEdition();
       if (!content || content.items.length === 0) return <PresentationShell content={createEmptyGraphQLEdition()} />;
-      return <PresentationShell content={content} editionBasePath={getEditionDatePath(content.editionDate)} />;
+      return (
+        <PresentationShell
+          content={content}
+          editionBasePath={getEditionDatePath(content.editionDate)}
+          mastheadHomeHref={mastheadHomeHref}
+        />
+      );
     }
 
     const latestEdition = await contentRepository.getLatestPublishedEdition();
@@ -43,6 +57,12 @@ async function loadLatestGraphQLEdition(): Promise<EditionContent | null> {
   return contentRepository.loadEditionContent({ editionDate: latestEdition.editionDate });
 }
 
+async function loadFirstPublishedEditionPath(): Promise<string | undefined> {
+  const firstEdition = await contentRepository.getFirstPublishedEdition();
+  if (!firstEdition) return undefined;
+  return getEditionDatePath(firstEdition.editionDate);
+}
+
 async function loadHomeContent(scenarioId: string | null): Promise<EditionContent> {
   try {
     return await contentRepository.loadEditionContent({ scenarioId });
@@ -54,39 +74,38 @@ async function loadHomeContent(scenarioId: string | null): Promise<EditionConten
 
 function createEmptyGraphQLEdition(): EditionContent {
   const placeholderSlug = "empty-edition-placeholder";
+  const configuredSections = loadPublicPlaceholderSections();
+  const publicTopics = loadPublicPlaceholderTopics();
+  const sectionItems = createPlaceholderSectionItems(configuredSections);
+  const topicItems = createPlaceholderTopicItems(publicTopics);
+  const sectionsCta = createPlaceholderCtaItem({
+    slug: "empty-edition-sections-newsroom",
+    title: "Manage sections in Newsroom",
+    deck: "Canonical and rotating sections are managed from the Newsroom.",
+    href: "/newsroom/sections",
+    group: "sections",
+    ctaLabel: "Manage sections in Newsroom",
+  });
+  const topicsCta = createPlaceholderCtaItem({
+    slug: "empty-edition-topics-newsroom",
+    title: "Curate topics in Newsroom",
+    deck: "The AI/ML technology that powers the knowledge base is curated from the Newsroom.",
+    href: "/newsroom/topics",
+    group: "topics",
+    ctaLabel: "Curate topics in Newsroom",
+  });
   const items: EditionContent["items"] = [
-    {
-      type: "article",
-      slug: placeholderSlug,
-      shortSlug: "EMPTY",
-      section: "Newsroom",
-      headline: "No Published Edition Yet",
-      deck: "No published GraphQL edition is available yet.",
-      byline: "Papyrus",
-      dateline: "SANDBOX",
-      image: {
-        src: "/papyrus-plant-placeholder.png",
-        alt: "A black papyrus plant silhouette",
-        credit: "",
-        layout: {
-          minHeight: 120,
-          preferredHeight: 180,
-          maxHeight: 260,
-          aspectRatio: 1.5,
-          crop: "contain",
-          wrapsText: true,
-        },
-      },
-      body: [
-        "This sandbox does not have any published edition records yet. Papyrus is showing the production newspaper shell with placeholder source material so operators can verify the publication shape before content is loaded.",
-        "Open the Newsroom to inspect the empty operational skeleton, confirm that counts start at zero, and watch records appear as the GraphQL database is seeded or imported.",
-      ],
-    },
+    createEmptyEditionLandingItem(placeholderSlug),
+    ...sectionItems,
+    sectionsCta,
+    ...topicItems,
+    topicsCta,
   ];
 
   return {
     id: "empty-graphql-edition",
     source: "graphql",
+    placeholderMode: "emptyEdition",
     title: "Papyrus",
     editionDate: new Date().toISOString().slice(0, 10),
     description: "No published GraphQL edition is available yet.",
@@ -114,6 +133,7 @@ function createEmptyGraphQLEdition(): EditionContent {
                   startCursor: "beginning",
                   role: "primary",
                   editorialPriority: "primary",
+                  size: { shrinkToContent: true },
                   typography: { headlineScale: "feature" },
                   span: { min: 1, preferred: 6, max: 6 },
                   localGrid: { columns: { min: 1, preferred: 6, max: 6 } },
@@ -123,8 +143,154 @@ function createEmptyGraphQLEdition(): EditionContent {
             },
           ],
         },
+        {
+          id: "page-2",
+          pageNumber: 2,
+          presetId: "page.full",
+          grid: { columns: { min: 1, preferred: 6, max: 6 } },
+          regions: [
+            {
+              id: "empty-sections-page",
+              type: "fullPage",
+              size: { shrinkToContent: true },
+              localGrid: { columns: { min: 1, preferred: 6, max: 6 } },
+              blocks: [
+                {
+                  id: "empty-edition-sections-stack",
+                  type: "itemStack",
+                  title: "Sections",
+                  itemIds: [...sectionItems.map((item) => item.slug), sectionsCta.slug],
+                },
+              ],
+            },
+          ],
+        },
+        {
+          id: "page-3",
+          pageNumber: 3,
+          presetId: "page.full",
+          grid: { columns: { min: 1, preferred: 6, max: 6 } },
+          regions: [
+            {
+              id: "empty-topics-page",
+              type: "fullPage",
+              size: { shrinkToContent: true },
+              localGrid: { columns: { min: 1, preferred: 6, max: 6 } },
+              blocks: [
+                {
+                  id: "empty-edition-topics-stack",
+                  type: "itemStack",
+                  title: "Topics",
+                  itemIds: [...topicItems.map((item) => item.slug), topicsCta.slug],
+                },
+              ],
+            },
+          ],
+        },
       ],
     }, "EmptyGraphQLEdition.layoutPlan"),
+  };
+}
+
+function createEmptyEditionLandingItem(slug: string): PublicationItem {
+  return {
+    type: "article",
+    slug,
+    shortSlug: "EMPTY",
+    section: "Newsroom",
+    headline: "An Autonomous Newsroom for Human-Steered Publishing",
+    deck: "An automated newsroom that turns research, judgment, and policy into newspaper editions.",
+    byline: "Papyrus",
+    dateline: "SANDBOX",
+    image: {
+      src: "/papyrus-plant-placeholder.png",
+      alt: "A black papyrus plant silhouette",
+      credit: "",
+      layout: {
+        minHeight: 120,
+        preferredHeight: 320,
+        maxHeight: 440,
+        aspectRatio: 0.785,
+        crop: "contain",
+        wrapsText: true,
+        inlineFloat: {
+          minColumnCount: 4,
+          columnSpan: 1,
+          widthRatio: 0.42,
+          narrowWidthRatio: 0.34,
+          maxWidthRatio: 0.42,
+          minWidth: 72,
+        },
+      },
+    },
+    body: [
+      "Papyrus helps a publication do what good journalism promises: establish the facts, add context, identify trends, and turn scattered information into something readers can understand.",
+      "Instead of starting with a blank article form, you start by steering the newsroom. You define the mission, set editorial policies, choose sections and topics, and tell research agents what questions or trends deserve attention.",
+      "As the system finds source material, you curate what it learns. You rate and vote on references, comment on whether they are relevant or reliable, and help the knowledge base decide what should inform future coverage.",
+      "Editor agents use that guidance to plan coverage and create assignments. Reporter agents gather context, copywriting agents draft stories, and layout agents assemble editions for human proofing and approval.",
+      "You can steer lightly, give explicit research or writing assignments, or write directly when a piece needs a human voice. If you take your hands off the wheel, the newsroom keeps moving in the direction set by its mission, policies, and curated knowledge.",
+      "This is the default placeholder for a fresh installation. Once an edition is published, this front page will become the publication itself.",
+    ],
+  };
+}
+
+function createPlaceholderSectionItems(sections: PublicPlaceholderSection[]): PublicationItem[] {
+  return sections.map((section) => ({
+    type: "sectionHeader",
+    slug: `empty-edition-section-${section.id}`,
+    section: section.type === "canonical" ? "Canonical Section" : "Rotating Section",
+    title: section.title,
+    deck: section.shortTitle,
+    metadata: {
+      placeholderKind: "section",
+      placeholderGroup: section.type === "canonical" ? "canonical" : "rotating",
+      placeholderType: section.type === "canonical" ? "canonical" : "rotating",
+    },
+  }));
+}
+
+function createPlaceholderTopicItems(topics: PublicPlaceholderTopic[]): PublicationItem[] {
+  return topics.map((topic) => ({
+    type: "sectionHeader",
+    slug: `empty-edition-topic-${topic.key}`,
+    section: "Inferred Topic",
+    title: topic.title,
+    deck: topic.shortTitle,
+    body: [topic.description],
+    metadata: {
+      placeholderKind: "topic",
+      placeholderGroup: "topics",
+    },
+  }));
+}
+
+function createPlaceholderCtaItem({
+  slug,
+  title,
+  deck,
+  href,
+  group,
+  ctaLabel,
+}: {
+  slug: string;
+  title: string;
+  deck: string;
+  href: string;
+  group: string;
+  ctaLabel: string;
+}): PublicationItem {
+  return {
+    type: "promo",
+    slug,
+    section: "Newsroom",
+    title,
+    deck,
+    href,
+    metadata: {
+      placeholderKind: "cta",
+      placeholderGroup: group,
+      ctaLabel,
+    },
   };
 }
 

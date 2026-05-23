@@ -28,6 +28,7 @@ export type NewsDeskPageProps = {
     anchorLineageId?: string | string[];
     maxTokens?: string | string[];
     from?: string | string[];
+    view?: string | string[];
   }>;
 };
 
@@ -50,6 +51,7 @@ export async function NewsDeskPage({ section: routeSection, sectionPageId, selec
     searchAnchorLineageId: getFirstSearchParam(resolvedSearchParams, "anchorLineageId"),
     searchMaxTokens: getFirstSearchParam(resolvedSearchParams, "maxTokens"),
     searchFrom: getFirstSearchParam(resolvedSearchParams, "from"),
+    assignmentView: getFirstSearchParam(resolvedSearchParams, "view"),
   };
   const useDemoDashboard = getFirstSearchParam(resolvedSearchParams, "demo") === "1";
   const analysisProfiles = await loadAnalysisProfileSummaries();

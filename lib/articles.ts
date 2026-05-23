@@ -5,6 +5,14 @@ export type ArticleImageLayout = {
   aspectRatio: number;
   crop: "cover" | "contain";
   wrapsText: boolean;
+  inlineFloat?: {
+    minColumnCount?: number;
+    columnSpan?: number;
+    widthRatio?: number;
+    narrowWidthRatio?: number;
+    maxWidthRatio?: number;
+    minWidth?: number;
+  };
   focalPoint?: {
     x: number;
     y: number;
@@ -258,7 +266,7 @@ export function getArticle(slug: string): Article | undefined {
 }
 
 export function getArticleText(article: Article): string {
-  return `${article.deck}\n\n${article.body.join("\n\n")}`;
+  return article.body.join("\n\n");
 }
 
 export function getArticleImageAssets(article: Article): ArticleImageAsset[] {

@@ -8,6 +8,8 @@ const { semanticRelationTypeFieldsForPredicate } = require("./papyrus-relation-t
 const REPORTING_ASSIGNMENT_TYPE = "reporting.edition-candidate";
 const REPORTING_PACKET_KIND = "reporting_context_packet";
 const REPORTING_REVIEW_DECISIONS = new Set(["select", "merge", "brief", "hold", "kill"]);
+const COPYWRITING_ARTICLE_ASSIGNMENT_TYPE = "copywriting.article-draft";
+const COPYWRITING_BRIEF_ASSIGNMENT_TYPE = "copywriting.brief-draft";
 
 function buildReportingPacketReviewPlan({
   assignment,
@@ -28,8 +30,8 @@ function buildReportingPacketReviewPlan({
   if (message.messageKind !== REPORTING_PACKET_KIND) {
     throw new Error(`Message ${message.id} must be ${REPORTING_PACKET_KIND}.`);
   }
-  if (Array.isArray(semanticRelations) && !hasPacketAssignmentComment(semanticRelations, message.id, assignment.id)) {
-    throw new Error(`Message ${message.id} is not linked to Assignment ${assignment.id} by a comment relation.`);
+  if (Array.isArray(semanticRelations) && !hasPacketAssignmentLink(semanticRelations, message.id, assignment.id)) {
+    throw new Error(`Message ${message.id} is not linked to Assignment ${assignment.id} by a packet relation.`);
   }
   const normalizedDecision = normalizeReportingReviewDecision(decision);
   if (normalizedDecision === "merge" && !targetItem?.id) {
@@ -37,15 +39,30 @@ function buildReportingPacketReviewPlan({
   }
 
   const eventType = `reporting_${normalizedDecision}`;
-  const draftItem = normalizedDecision === "select" || normalizedDecision === "brief"
-    ? draftItemForReportingPacket({ assignment, message, decision: normalizedDecision, actorLabel, now })
+  const copywritingAssignment = normalizedDecision === "select" || normalizedDecision === "brief"
+    ? copywritingAssignmentForReportingPacket({ assignment, message, decision: normalizedDecision, actorLabel, now })
     : null;
-  const producedItem = draftItem ?? (normalizedDecision === "merge" ? targetItem : null);
+  const copywritingAssignmentMetadata = copywritingAssignment
+    ? assignmentMetadata(copywritingAssignment)
+    : null;
+  const copywritingAssignmentMetadataAttachment = copywritingAssignment
+    ? attachmentRecord(buildJsonModelPayloadAttachment({
+      ownerKind: "assignment",
+      ownerId: copywritingAssignment.id,
+      ownerLineageId: copywritingAssignment.id,
+      role: "metadata",
+      sortKey: "metadata",
+      filename: "metadata.json",
+      content: copywritingAssignmentMetadata,
+      now,
+    }))
+    : null;
+  const producedItem = normalizedDecision === "merge" ? targetItem : null;
   const metadata = reportingReviewMetadata({
     assignment,
     message,
     decision: normalizedDecision,
-    draftItem,
+    copywritingAssignment,
     targetItem,
   });
   const event = assignmentEventForReportingReview({
@@ -70,7 +87,60 @@ function buildReportingPacketReviewPlan({
     { modelName: "AssignmentEvent", expected: event },
     metadataAttachment,
   ];
-  if (draftItem) records.push({ modelName: "Item", expected: draftItem });
+  if (copywritingAssignment) {
+    records.push({ modelName: "Assignment", expected: copywritingAssignment });
+    records.push(copywritingAssignmentMetadataAttachment);
+    records.push({
+      modelName: "SemanticRelation",
+      expected: semanticRelationRecord({
+        predicate: "derived_from",
+        subjectKind: "assignment",
+        subjectId: copywritingAssignment.id,
+        subjectLineageId: copywritingAssignment.id,
+        objectKind: "assignment",
+        objectId: assignment.id,
+        objectLineageId: assignment.id,
+        rank: 1,
+        classifierId: assignment.classifierId ?? null,
+        importedAt: now,
+        createdAt: now,
+        updatedAt: now,
+        metadata: {
+          lifecycle: "reporting-packet-review",
+          sourceKind: "reporting_assignment",
+          decision: normalizedDecision,
+          reportingAssignmentId: assignment.id,
+          reportingPacketMessageId: message.id,
+          copywritingAssignmentId: copywritingAssignment.id,
+        },
+      }),
+    });
+    records.push({
+      modelName: "SemanticRelation",
+      expected: semanticRelationRecord({
+        predicate: "derived_from",
+        subjectKind: "assignment",
+        subjectId: copywritingAssignment.id,
+        subjectLineageId: copywritingAssignment.id,
+        objectKind: "message",
+        objectId: message.id,
+        objectLineageId: message.id,
+        rank: 2,
+        classifierId: assignment.classifierId ?? null,
+        importedAt: now,
+        createdAt: now,
+        updatedAt: now,
+        metadata: {
+          lifecycle: "reporting-packet-review",
+          sourceKind: "reporting_context_packet",
+          decision: normalizedDecision,
+          reportingAssignmentId: assignment.id,
+          reportingPacketMessageId: message.id,
+          copywritingAssignmentId: copywritingAssignment.id,
+        },
+      }),
+    });
+  }
   if (producedItem) {
     records.push({
       modelName: "SemanticRelation",
@@ -93,7 +163,7 @@ function buildReportingPacketReviewPlan({
           decision: normalizedDecision,
           assignmentId: assignment.id,
           messageId: message.id,
-          draftItemId: draftItem?.id ?? null,
+          copywritingAssignmentId: null,
           targetItemId: targetItem?.id ?? null,
         },
       }),
@@ -109,7 +179,8 @@ function buildReportingPacketReviewPlan({
     event,
     metadata,
     metadataAttachment,
-    draftItem,
+    copywritingAssignment,
+    copywritingAssignmentMetadataAttachment,
     targetItemId: targetItem?.id ?? null,
     records,
     summary: {
@@ -118,9 +189,11 @@ function buildReportingPacketReviewPlan({
       decision: normalizedDecision,
       eventId: event.id,
       metadataAttachmentId: metadataAttachment.expected.id,
-      draftItemId: draftItem?.id ?? null,
+      copywritingAssignmentId: copywritingAssignment?.id ?? null,
+      draftItemId: null,
       targetItemId: targetItem?.id ?? null,
-      createsDraftItem: Boolean(draftItem),
+      createsCopywritingAssignment: Boolean(copywritingAssignment),
+      createsDraftItem: false,
       createsEditionItem: false,
       recordCount: records.length,
     },
@@ -135,18 +208,29 @@ function normalizeReportingReviewDecision(value) {
   return normalized;
 }
 
-function hasPacketAssignmentComment(relations, messageId, assignmentId) {
+function hasPacketAssignmentLink(relations, messageId, assignmentId) {
   return relations.some((relation) => (
-    relation?.subjectKind === "message"
-    && relation.subjectId === messageId
-    && relation.objectKind === "assignment"
-    && relation.objectId === assignmentId
-    && (relation.relationTypeKey ?? relation.predicate) === "comment"
-    && relation.relationState !== "superseded"
+    relation?.relationState !== "superseded"
+    && (
+      (
+        relation.subjectKind === "assignment"
+        && relation.subjectId === assignmentId
+        && relation.objectKind === "message"
+        && relation.objectId === messageId
+        && (relation.relationTypeKey ?? relation.predicate) === "produces"
+      )
+      || (
+        relation.subjectKind === "message"
+        && relation.subjectId === messageId
+        && relation.objectKind === "assignment"
+        && relation.objectId === assignmentId
+        && (relation.relationTypeKey ?? relation.predicate) === "comment"
+      )
+    )
   ));
 }
 
-function reportingReviewMetadata({ assignment, message, decision, draftItem, targetItem }) {
+function reportingReviewMetadata({ assignment, message, decision, copywritingAssignment, targetItem }) {
   return {
     kind: "reporting.packet_review",
     source: "content-cli",
@@ -154,7 +238,10 @@ function reportingReviewMetadata({ assignment, message, decision, draftItem, tar
     messageId: message.id,
     decision,
     targetItemId: targetItem?.id ?? null,
-    draftItemId: draftItem?.id ?? null,
+    copywritingAssignmentId: copywritingAssignment?.id ?? null,
+    targetItemType: copywritingAssignment ? copywritingTargetItemType(copywritingAssignment.assignmentTypeKey) : null,
+    createsCopywritingAssignment: Boolean(copywritingAssignment),
+    createsDraftItem: false,
     privatePacketMessageKind: REPORTING_PACKET_KIND,
     createsEditionItem: false,
   };
@@ -176,63 +263,140 @@ function assignmentEventForReportingReview({ assignment, eventType, note, now, a
   };
 }
 
-function draftItemForReportingPacket({ assignment, message, decision, actorLabel, now }) {
-  const type = decision === "brief" ? "brief" : "article";
+function copywritingAssignmentForReportingPacket({ assignment, message, decision, actorLabel, now }) {
+  const targetItemType = decision === "brief" ? "brief" : "article";
+  const assignmentTypeKey = targetItemType === "brief"
+    ? COPYWRITING_BRIEF_ASSIGNMENT_TYPE
+    : COPYWRITING_ARTICLE_ASSIGNMENT_TYPE;
   const section = assignment.sectionKey ?? assignment.sectionId ?? "unsectioned";
-  const lineageId = `item-reporting-packet-${safeId(type)}-${hashShort([assignment.id, message.id, decision])}`;
-  const title = `${type === "brief" ? "Brief" : "Article"} draft from ${assignment.title || "reporting packet"}`;
-  const slug = `draft-${safeId(section)}-${hashShort([lineageId, assignment.id, message.id])}`;
-  const editorial = {
-    createdFrom: "reporting-packet-review",
-    assignmentId: assignment.id,
-    reportingPacketMessageId: message.id,
+  const metadata = assignmentMetadata(assignment);
+  const packet = reportingPacketPayload(message);
+  const reporting = reportingPacketFields(packet);
+  const coverageConceptKey = reporting.coverageConceptKey
+    ?? reporting.coverageKey
+    ?? metadata.coverageConceptKey
+    ?? metadata.coverageKey
+    ?? null;
+  const editionId = reporting.editionId
+    ?? metadata.editionId
+    ?? (metadata.storyCycleDate ? `edition-${metadata.storyCycleDate}` : null);
+  const editionDate = metadata.editionDate
+    ?? metadata.storyCycleDate
+    ?? reporting.editionDate
+    ?? dateFromId(editionId);
+  const storyCycleRunId = metadata.storyCycleRunId
+    ?? metadata.coverageThemeRunId
+    ?? metadata.runId
+    ?? reporting.storyCycleRunId
+    ?? message.importRunId
+    ?? null;
+  const id = `assignment-copywriting-${safeId(targetItemType)}-${hashShort([assignment.id, message.id, decision])}`;
+  const queueKey = `copywriting:${editionId ?? "unplanned"}:section:${section}:type:${targetItemType}`;
+  const copywriterBrief = cleanString(reporting.copywriterBrief)
+    ?? cleanString(message.summary)
+    ?? `Draft a reader-facing ${targetItemType} from the selected private reporting packet.`;
+  const copywritingMetadata = {
+    kind: "copywriting.assignment",
+    createdFrom: "reporting_packet_selection",
+    sourceReportingAssignmentId: assignment.id,
+    sourceReportingPacketMessageId: message.id,
+    sourceReportingPacketKind: REPORTING_PACKET_KIND,
     decision,
-    privateSource: true,
-    copywriterConsumesPacket: true,
+    targetItemType,
+    sectionKey: section,
+    editionId,
+    editionDate,
+    storyCycleDate: editionDate,
+    coverageConceptKey,
+    topic: reporting.topic ?? metadata.topic ?? null,
+    acceptedReferenceIds: arrayValue(reporting.acceptedReferenceIds),
+    proposedReferences: arrayValue(reporting.proposedReferences),
+    storyCycleRunId,
+    recommendedAngle: reporting.recommendedAngle ?? null,
+    editorRecommendation: reporting.editorRecommendation ?? null,
+    reportingPacketSummary: reporting.summary ?? message.summary ?? null,
   };
-  const record = {
-    id: `${lineageId}-v1`,
-    lineageId,
-    versionNumber: 1,
-    previousVersionId: null,
-    versionState: "draft",
-    versionCreatedAt: now,
-    versionCreatedBy: actorLabel,
-    changeReason: "reporting-packet-review",
-    contentHash: "",
-    type,
-    status: "draft",
-    typeStatus: `${type}#draft`,
-    slug,
-    shortSlug: null,
-    section,
-    sectionStatus: `${section}#draft`,
-    title,
-    headline: title,
-    deck: "Private reporting packet selected for copywriting. Draft copy has not been written.",
-    body: [],
-    byline: null,
-    dateline: null,
-    publishedAt: null,
-    editionDate: assignmentMetadata(assignment).editionDate ?? null,
-    sortTitle: title,
-    pullQuotes: [],
-    layout: null,
-    editorial,
+  return {
+    id,
+    assignmentTypeKey,
+    queueKey,
+    queueStatusKey: `${queueKey}#open`,
+    status: "open",
+    priority: (Number.isFinite(Number(assignment.priority)) ? Number(assignment.priority) : 100) + 1,
+    title: `${targetItemType === "brief" ? "Write brief" : "Write article"} from ${assignment.title || "selected reporting packet"}`,
+    summary: `Copywriting handoff for selected ${targetItemType} packet from ${assignment.title || assignment.id}.`,
+    brief: copywriterBrief,
+    instructions: [
+      "Consume the private reporting_context_packet and copywriter brief.",
+      "Create a complete reader-facing draft Item for editor review.",
+      "Do not publish the Item and do not create EditionItem placement.",
+      "Do not copy internal doctrine, desk memory, private source notes, or unresolved proposed references into reader-facing fields.",
+    ].join("\n"),
+    metadata: JSON.stringify(copywritingMetadata),
+    corpusId: assignment.corpusId ?? null,
+    categorySetId: assignment.categorySetId ?? null,
+    classifierId: assignment.classifierId ?? null,
+    sourceSnapshotId: assignment.sourceSnapshotId ?? null,
+    importRunId: assignment.importRunId ?? null,
+    sectionId: assignment.sectionId ?? section,
+    sectionKey: section,
+    sectionType: assignment.sectionType ?? null,
+    sectionStatusKey: `${section}#open`,
+    sectionQueueStatusKey: `${section}#${queueKey}#open`,
+    primaryFocusCategoryKey: assignment.primaryFocusCategoryKey ?? metadata.categoryKey ?? null,
+    topicScopeCategoryKeys: Array.isArray(assignment.topicScopeCategoryKeys)
+      ? assignment.topicScopeCategoryKeys.filter(Boolean)
+      : [metadata.categoryKey ?? assignment.primaryFocusCategoryKey].filter(Boolean),
+    createdBy: actorLabel,
+    createdAt: now,
     updatedAt: now,
+    newsroomFeedKey: "assignment#open",
   };
-  record.contentHash = hashStable({
-    type: record.type,
-    status: record.status,
-    slug: record.slug,
-    section: record.section,
-    title: record.title,
-    headline: record.headline,
-    deck: record.deck,
-    body: record.body,
-    editorial: record.editorial,
-  });
-  return record;
+}
+
+function copywritingTargetItemType(assignmentTypeKey) {
+  return assignmentTypeKey === COPYWRITING_BRIEF_ASSIGNMENT_TYPE ? "brief" : "article";
+}
+
+function reportingPacketPayload(message) {
+  return reportingPacketFields(message?.metadata);
+}
+
+function reportingPacketFields(value) {
+  const metadata = value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : assignmentMetadata({ metadata: value });
+  const reporting = metadata.reporting && typeof metadata.reporting === "object" && !Array.isArray(metadata.reporting)
+    ? metadata.reporting
+    : metadata;
+  const coverageConcept = reporting.coverageConcept && typeof reporting.coverageConcept === "object" && !Array.isArray(reporting.coverageConcept)
+    ? reporting.coverageConcept
+    : reporting.coverage_concept && typeof reporting.coverage_concept === "object" && !Array.isArray(reporting.coverage_concept)
+      ? reporting.coverage_concept
+      : {};
+  return {
+    summary: cleanString(reporting.summary),
+    topic: cleanString(reporting.topic),
+    sectionKey: cleanString(reporting.sectionKey ?? reporting.section_key),
+    editionId: cleanString(reporting.editionId ?? reporting.edition_id),
+    editionDate: cleanString(reporting.editionDate ?? reporting.edition_date),
+    storyCycleRunId: cleanString(reporting.storyCycleRunId ?? reporting.story_cycle_run_id ?? reporting.coverageThemeRunId ?? reporting.coverage_theme_run_id),
+    coverageKey: cleanString(reporting.coverageKey ?? reporting.coverage_key),
+    coverageConceptKey: cleanString(reporting.coverageConceptKey ?? reporting.coverage_concept_key ?? reporting.coverageKey ?? reporting.coverage_key ?? coverageConcept.key),
+    editorRecommendation: cleanString(reporting.editorRecommendation ?? reporting.editor_recommendation),
+    recommendedAngle: cleanString(reporting.recommendedAngle ?? reporting.recommended_angle),
+    copywriterBrief: cleanString(reporting.copywriterBrief ?? reporting.copywriter_brief),
+    acceptedReferenceIds: reporting.acceptedReferenceIds ?? reporting.accepted_reference_ids,
+    proposedReferences: reporting.proposedReferences ?? reporting.proposed_references,
+  };
+}
+
+function cleanString(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function arrayValue(value) {
+  return Array.isArray(value) ? value : [];
 }
 
 function semanticRelationRecord(input) {
@@ -317,7 +481,14 @@ function hashStable(value) {
   return crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
+function dateFromId(value) {
+  const match = String(value ?? "").match(/\d{4}-\d{2}-\d{2}/);
+  return match ? match[0] : null;
+}
+
 module.exports = {
+  COPYWRITING_ARTICLE_ASSIGNMENT_TYPE,
+  COPYWRITING_BRIEF_ASSIGNMENT_TYPE,
   REPORTING_PACKET_KIND,
   REPORTING_REVIEW_DECISIONS,
   buildReportingPacketReviewPlan,

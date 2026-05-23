@@ -80,6 +80,10 @@ Given("the newsroom uses mocked reference-curation message detail data", async f
   this.newsroomMessageDetailMock = "reference-curation";
 });
 
+Given("the reference quality mutation fails", async function () {
+  this.newsroomQualityMutationMock = "fail";
+});
+
 Given("I open the edition path {string} at {int} by {int}", async function (routePath, width, height) {
   await this.openPath(routePath, width, height);
 });
@@ -195,6 +199,14 @@ When("I open assignment {string}", async function (assignmentId) {
   await card.waitFor({ state: "visible", timeout: 10_000 });
   await card.click();
   await page.locator(`.news-desk-assignment-row[data-assignment-candidate="${assignmentId}"]`).waitFor({ state: "visible", timeout: 10_000 });
+});
+
+When("I open reference {string}", async function (referenceId) {
+  const page = requirePage(this);
+  const card = page.locator(`[data-newsroom-card-id="${referenceId}"]`).first();
+  await card.waitFor({ state: "visible", timeout: 10_000 });
+  await card.click();
+  await page.locator(`[data-news-desk-reference-detail="${referenceId}"]`).waitFor({ state: "visible", timeout: 10_000 });
 });
 
 When("I merge newsroom user {string} into {string}", async function (sourceLabel, targetLabel) {
@@ -548,6 +560,132 @@ Then("the references desk should show reference metadata and semantic neighbors"
   await page.locator("[data-news-desk-neighbors]", { hasText: "classified as" }).first().waitFor({ state: "visible", timeout: 10_000 });
 });
 
+Then("the reference detail should render the curation cluster", async function () {
+  const page = requirePage(this);
+  await page.locator("[data-news-desk-reference-curation-cluster]").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-reference-accept]").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-reference-reject]").waitFor({ state: "visible", timeout: 10_000 });
+});
+
+Then("the reference detail curation controls should share one height", async function () {
+  const report = await requirePage(this).evaluate(() => {
+    const selectors = [
+      ["research", ".newsroom-list-detail-shell__detail-toolbar .news-desk-detail-toolbar-button--utility"],
+      ["close", ".newsroom-list-detail-shell__detail-toolbar .news-desk-detail-toggle--close"],
+      ["accept", "[data-news-desk-reference-accept]"],
+      ["reject", "[data-news-desk-reference-reject]"],
+      ["stars", ".news-desk-reference-curation-cluster__stars"],
+      ["insight", "[data-news-desk-reference-insight-trigger]"],
+      ["menu", "[data-news-desk-reference-actions]"],
+    ];
+    return selectors.map(([label, selector]) => {
+      const node = document.querySelector(selector);
+      const rect = node?.getBoundingClientRect();
+      return { label, height: rect?.height ?? 0, visible: Boolean(rect && rect.width > 0 && rect.height > 0) };
+    });
+  });
+  const visible = report.filter((entry) => entry.visible);
+  assert.equal(visible.length, report.length, `Expected all reference curation controls to be visible: ${JSON.stringify(report)}`);
+  const heights = visible.map((entry) => entry.height);
+  const min = Math.min(...heights);
+  const max = Math.max(...heights);
+  assert.ok(max - min <= 0.75, `Expected matching control heights, found ${JSON.stringify(report)}`);
+});
+
+Then("the reference detail curation cluster should align with the top toolbar", async function () {
+  const report = await requirePage(this).evaluate(() => {
+    const rectFor = (selector) => {
+      const node = document.querySelector(selector);
+      const rect = node?.getBoundingClientRect();
+      return rect ? { left: rect.left, right: rect.right, width: rect.width } : null;
+    };
+    return {
+      cluster: rectFor("[data-news-desk-reference-curation-cluster]"),
+      toolbar: rectFor(".newsroom-list-detail-shell__detail-toolbar"),
+      trailing: rectFor(".newsroom-list-detail-shell__detail-toolbar-trailing"),
+    };
+  });
+  assert.ok(report.cluster, "Expected curation cluster rect");
+  assert.ok(report.toolbar, "Expected detail toolbar rect");
+  assert.ok(report.trailing, "Expected toolbar trailing rect");
+  assert.ok(Math.abs(report.cluster.right - report.toolbar.right) <= 1, `Expected curation cluster to align to toolbar right edge: ${JSON.stringify(report)}`);
+  assert.ok(report.cluster.left <= report.trailing.right, `Expected curation cluster to sit under the toolbar controls: ${JSON.stringify(report)}`);
+});
+
+Then("the reference detail should not show the lower curation selector", async function () {
+  const count = await requirePage(this).locator(
+    "[data-news-desk-reference-detail] .news-desk-detail-block",
+    { hasText: "Reference Curation" },
+  ).count();
+  assert.equal(count, 0, "Expected lower Reference Curation block to be removed from detail body");
+});
+
+When("I open the reference detail curation actions", async function () {
+  const page = requirePage(this);
+  await page.locator("[data-news-desk-reference-actions]").click();
+  await page.locator(".newsroom-list-detail-shell__action-menu").waitFor({ state: "visible", timeout: 10_000 });
+});
+
+Then("the reference detail actions menu should offer {string} and {string}", async function (firstLabel, secondLabel) {
+  const page = requirePage(this);
+  const labels = await page.locator(".newsroom-list-detail-shell__action-menu button").evaluateAll((nodes) => (
+    nodes.map((node) => node.textContent?.trim()).filter(Boolean)
+  ));
+  assert.ok(labels.includes(firstLabel), `Expected actions menu to include ${firstLabel}, found ${labels.join(", ")}`);
+  assert.ok(labels.includes(secondLabel), `Expected actions menu to include ${secondLabel}, found ${labels.join(", ")}`);
+});
+
+When("I set the selected reference quality to {int} stars", async function (rating) {
+  const page = requirePage(this);
+  await page.locator(`[data-news-desk-reference-quality-star="${rating}"]`).click();
+});
+
+Then("the reference detail should immediately show {int} filled quality stars", async function (filledStars) {
+  const page = requirePage(this);
+  const cluster = page.locator("[data-news-desk-reference-curation-cluster]");
+  await cluster.waitFor({ state: "visible", timeout: 10_000 });
+  const actualStars = Number(await cluster.getAttribute("data-reference-quality-stars") ?? "-1");
+  assert.equal(actualStars, filledStars);
+});
+
+Then("the reference detail curation status should be {string}", async function (status) {
+  await requirePage(this).waitForFunction((expectedStatus) => {
+    const cluster = document.querySelector("[data-news-desk-reference-curation-cluster]");
+    return cluster?.getAttribute("data-reference-curation-status") === expectedStatus;
+  }, status, { timeout: 10_000 });
+});
+
+Then("the reference detail should show {int} filled quality stars", async function (filledStars) {
+  await requirePage(this).waitForFunction((expectedStars) => {
+    const cluster = document.querySelector("[data-news-desk-reference-curation-cluster]");
+    return Number(cluster?.getAttribute("data-reference-quality-stars") ?? "-1") === expectedStars;
+  }, filledStars, { timeout: 10_000 });
+});
+
+Then("the reference detail quality save state should become {string}", async function (tone) {
+  await requirePage(this).waitForFunction((expectedTone) => {
+    const cluster = document.querySelector("[data-news-desk-reference-curation-cluster]");
+    return cluster?.getAttribute("data-reference-quality-tone") === expectedTone;
+  }, tone, { timeout: 10_000 });
+});
+
+Then("the reference detail quality message should mention {string}", async function (message) {
+  const page = requirePage(this);
+  await page.waitForFunction((expectedMessage) => {
+    const state = document.querySelector("[data-reference-quality-state-message]");
+    return state?.textContent?.toLowerCase().includes(String(expectedMessage).toLowerCase());
+  }, message, { timeout: 10_000 });
+});
+
+When("I open the reference detail insight composer", async function () {
+  const page = requirePage(this);
+  await page.locator("[data-news-desk-reference-insight-trigger]").click();
+});
+
+Then("the insight modal should be visible", async function () {
+  await requirePage(this).locator("[data-news-desk-insight-modal]").waitFor({ state: "visible", timeout: 10_000 });
+});
+
 Then("the concepts desk should show semantic nodes and linked objects", async function () {
   const page = requirePage(this);
   const conceptRow = page.locator("[data-news-desk-section='concepts'] .news-desk-data-grid__row").first();
@@ -688,6 +826,73 @@ Then("the newsroom card grid should scale to the split width", async function ()
   );
 });
 
+Then("the newsroom left pane should be scrollable in split view", async function () {
+  const page = requirePage(this);
+  await page.waitForFunction(() => {
+    const shell = document.querySelector("[data-newsroom-list-detail-shell]");
+    const pane = shell?.querySelector("[data-newsroom-list-pane='true']");
+    if (!(pane instanceof HTMLElement)) return false;
+    return shell?.getAttribute("data-detail-mode") === "split";
+  }, undefined, { timeout: 10_000 });
+  const report = await page.evaluate(() => {
+    const shell = document.querySelector("[data-newsroom-list-detail-shell]");
+    const pane = shell?.querySelector("[data-newsroom-list-pane='true']");
+    const lede = pane?.querySelector(".news-desk-lede");
+    if (!(pane instanceof HTMLElement)) return null;
+    return {
+      clientHeight: pane.clientHeight,
+      isOverflowing: pane.scrollHeight > pane.clientHeight + 8,
+      ledeTop: lede ? lede.getBoundingClientRect().top : null,
+      maxHeight: getComputedStyle(pane).maxHeight,
+      overflowY: getComputedStyle(pane).overflowY,
+      scrollHeight: pane.scrollHeight,
+      scrollTop: pane.scrollTop,
+    };
+  });
+  assert.ok(report, "Expected newsroom left pane");
+  assert.ok(report.overflowY === "auto" || report.overflowY === "scroll", `Expected scrollable left pane overflow, found ${report.overflowY}`);
+  assert.notEqual(report.maxHeight, "none", "Expected left pane max-height constraint in wide split");
+  this.newsroomLeftPaneBeforeScroll = report;
+});
+
+When("I scroll the newsroom left pane down", async function () {
+  const page = requirePage(this);
+  const report = await page.evaluate(() => {
+    const shell = document.querySelector("[data-newsroom-list-detail-shell]");
+    const pane = shell?.querySelector("[data-newsroom-list-pane='true']");
+    const lede = pane?.querySelector(".news-desk-lede");
+    if (!(pane instanceof HTMLElement)) return null;
+    const maxScrollTop = Math.max(0, pane.scrollHeight - pane.clientHeight);
+    if (maxScrollTop <= 0) {
+      return {
+        ledeTop: lede ? lede.getBoundingClientRect().top : null,
+        scrollTop: pane.scrollTop,
+        skipped: true,
+      };
+    }
+    const targetScrollTop = Math.min(maxScrollTop, Math.max(120, Math.floor(pane.clientHeight * 0.35)));
+    pane.scrollTo({ top: targetScrollTop, behavior: "auto" });
+    return {
+      ledeTop: lede ? lede.getBoundingClientRect().top : null,
+      skipped: false,
+      scrollTop: pane.scrollTop,
+    };
+  });
+  assert.ok(report, "Expected newsroom left pane");
+  this.newsroomLeftPaneAfterScroll = report;
+});
+
+Then("the newsroom section lede should move up within the left pane", async function () {
+  const before = this.newsroomLeftPaneBeforeScroll;
+  const after = this.newsroomLeftPaneAfterScroll;
+  assert.ok(before && after, "Expected pre/post newsroom pane scroll snapshots");
+  if (after.skipped || !before.isOverflowing) return;
+  assert.ok(after.scrollTop > before.scrollTop + 5, `Expected left pane scrollTop to increase from ${before.scrollTop} to ${after.scrollTop}`);
+  assert.notEqual(before.ledeTop, null, "Expected lede top snapshot before scroll");
+  assert.notEqual(after.ledeTop, null, "Expected lede top snapshot after scroll");
+  assert.ok(after.ledeTop < before.ledeTop - 5, `Expected lede to move up when pane scrolls (${before.ledeTop} -> ${after.ledeTop})`);
+});
+
 When("I select a different newsroom card", async function () {
   const page = requirePage(this);
   const before = await page.evaluate(() => {
@@ -761,6 +966,34 @@ When("I select a different newsroom card", async function () {
     }));
   });
   this.newsroomCardSelection = { ...before, after, animated };
+});
+
+Then("the selected newsroom card should anchor to the top of the list view", async function () {
+  const page = requirePage(this);
+  await page.waitForFunction(() => {
+    const shell = document.querySelector("[data-newsroom-list-detail-shell]");
+    const pane = shell?.querySelector("[data-newsroom-list-pane='true']");
+    const selectedCard = shell?.querySelector("[data-newsroom-card][data-active='true']");
+    if (!(pane instanceof HTMLElement) || !(selectedCard instanceof HTMLElement)) return false;
+    if (pane.scrollHeight <= pane.clientHeight + 8) return true;
+    const selectedTop = selectedCard.getBoundingClientRect().top;
+    const paneTop = pane.getBoundingClientRect().top;
+    return Math.abs(selectedTop - paneTop) <= 14;
+  }, undefined, { timeout: 8_000 });
+  const report = await page.evaluate(() => {
+    const shell = document.querySelector("[data-newsroom-list-detail-shell]");
+    const pane = shell?.querySelector("[data-newsroom-list-pane='true']");
+    const selectedCard = shell?.querySelector("[data-newsroom-card][data-active='true']");
+    if (!(pane instanceof HTMLElement) || !(selectedCard instanceof HTMLElement)) return null;
+    return {
+      scrollTop: pane.scrollTop,
+      topDelta: selectedCard.getBoundingClientRect().top - pane.getBoundingClientRect().top,
+      overflowing: pane.scrollHeight > pane.clientHeight + 8,
+    };
+  });
+  assert.ok(report, "Expected newsroom pane and selected card after card selection");
+  if (!report.overflowing) return;
+  assert.ok(Math.abs(report.topDelta) <= 14, `Expected selected card to anchor near the list viewport top, found delta ${report.topDelta}`);
 });
 
 Then("newsroom card selection should keep grid geometry stable", async function () {
@@ -1089,6 +1322,50 @@ Then("assignment {string} should show a private reporting packet", async functio
   await candidate.locator("text=Reporting context packet: model-release accountability angle").waitFor({ state: "visible", timeout: 10_000 });
 });
 
+When("I switch assignments to Story Budget view", async function () {
+  const page = requirePage(this);
+  await page.getByRole("button", { name: "Story Budget" }).click();
+  await page.locator("[data-reporting-story-budget]").waitFor({ state: "visible", timeout: 10_000 });
+});
+
+Then("the reporting story budget should show section {string} with {int} slot and {int} candidate", async function (sectionKey, slotCount, candidateCount) {
+  const page = requirePage(this);
+  const section = page.locator(`[data-story-budget-section="${sectionKey}"]`);
+  await section.waitFor({ state: "visible", timeout: 10_000 });
+  await section.locator(`[data-story-budget-metric="slots"]`, { hasText: `${slotCount} slots` }).waitFor({ state: "visible", timeout: 10_000 });
+  await section.locator(`[data-story-budget-metric="dispatched"]`, { hasText: `${candidateCount} dispatched` }).waitFor({ state: "visible", timeout: 10_000 });
+});
+
+Then("story budget candidate {string} should show packet recommendation {string}", async function (assignmentId, recommendation) {
+  const page = requirePage(this);
+  const candidate = page.locator(`[data-story-budget-candidate="${assignmentId}"]`);
+  await candidate.waitFor({ state: "visible", timeout: 10_000 });
+  await candidate.locator(`[data-story-budget-recommendation="${recommendation}"]`).waitFor({ state: "visible", timeout: 10_000 });
+});
+
+Then("story budget candidate {string} should show risk and gap context", async function (assignmentId) {
+  const page = requirePage(this);
+  const candidate = page.locator(`[data-story-budget-candidate="${assignmentId}"]`);
+  await candidate.waitFor({ state: "visible", timeout: 10_000 });
+  await candidate.locator("text=Risks").waitFor({ state: "visible", timeout: 10_000 });
+  await candidate.locator("text=Gaps").waitFor({ state: "visible", timeout: 10_000 });
+});
+
+When("I review story budget candidate {string} as {string}", async function (assignmentId, decision) {
+  const page = requirePage(this);
+  const candidate = page.locator(`[data-story-budget-candidate="${assignmentId}"]`);
+  await candidate.waitFor({ state: "visible", timeout: 10_000 });
+  await candidate.locator(`[data-story-budget-decision="${decision}"]`).click();
+});
+
+Then("story budget candidate {string} should show reporting decision {string}", async function (assignmentId, decision) {
+  const page = requirePage(this);
+  await page.waitForFunction(
+    ({ id, expected }) => document.querySelector(`[data-story-budget-candidate="${id}"]`)?.getAttribute("data-reporting-decision") === expected,
+    { id: assignmentId, expected: decision },
+  );
+});
+
 When("I review reporting packet for assignment {string} as {string} with note {string}", async function (assignmentId, decision, note) {
   const page = requirePage(this);
   const candidate = page.locator(`.news-desk-assignment-row[data-assignment-candidate="${assignmentId}"]`);
@@ -1116,13 +1393,18 @@ Then("assignment {string} should show reporting decision {string}", async functi
   );
 });
 
-Then("assignment {string} should show a draft item without edition placement", async function (assignmentId) {
+Then("assignment {string} should show a copywriting assignment without edition placement", async function (assignmentId) {
   const page = requirePage(this);
   const candidate = page.locator(`.news-desk-assignment-row[data-assignment-candidate="${assignmentId}"]`);
-  await candidate.locator("[data-reporting-draft-item]").waitFor({ state: "visible", timeout: 10_000 });
-  await candidate.locator("text=not placed in an edition").waitFor({ state: "visible", timeout: 10_000 });
+  await candidate.locator("[data-reporting-copywriting-assignment]").waitFor({ state: "visible", timeout: 10_000 });
   const editionItemCount = await page.locator("[data-edition-item-id], [data-edition-item]").count();
   assert.equal(editionItemCount, 0, "Expected no EditionItem placement nodes in assignment review");
+});
+
+Then("story budget candidate {string} should show a copywriting assignment", async function (assignmentId) {
+  const page = requirePage(this);
+  const candidate = page.locator(`[data-story-budget-candidate="${assignmentId}"]`);
+  await candidate.locator("[data-reporting-copywriting-assignment]").waitFor({ state: "visible", timeout: 10_000 });
 });
 
 Then("assignment {string} should not appear as an edition item", async function (assignmentId) {
@@ -2803,6 +3085,74 @@ Then("the front article {string} should stack its image below title chrome", asy
   assert.ok(rendered.firstLine.top >= rendered.image.bottom + block.front.chrome.jumpPaddingBottom - 0.75, `Expected rendered body copy to leave one rhythm row below image`);
   assert.ok(rendered.jump.top >= rendered.firstLine.bottom - 0.75, `Expected rendered jump label to clear body copy`);
   assert.ok(rendered.jump.top >= rendered.image.bottom - 0.75, `Expected rendered jump label to clear stacked image`);
+});
+
+Then("the front lead trio should share one equal-height row", async function () {
+  const articleIds = ["agent-procedure-patterns", "schools-reading-lab", "market-hall"];
+  const solvedBlocks = await Promise.all(articleIds.map((articleId) => getFrontSolvedBlock(requirePage(this), articleId)));
+  for (const [index, block] of solvedBlocks.entries()) {
+    assert.ok(block, `Expected solved front block for ${articleIds[index]}`);
+    assert.equal(block.hasMore, true, `Expected ${articleIds[index]} front teaser to continue`);
+    assert.ok(block.front, `Expected front metrics for ${articleIds[index]}`);
+  }
+
+  const solvedRowHeights = solvedBlocks.map((block) => block.front.rowHeight);
+  assert.ok(
+    solvedRowHeights.every((height) => height === solvedRowHeights[0]),
+    `Expected lead trio to share one solved row height; found ${solvedRowHeights.join(", ")}`,
+  );
+  const solvedBlockHeights = solvedBlocks.map((block) => block.height);
+  assert.ok(
+    solvedBlockHeights.every((height) => height === solvedBlockHeights[0]),
+    `Expected lead trio to share one solved block height; found ${solvedBlockHeights.join(", ")}`,
+  );
+
+  const rendered = await requirePage(this).evaluate((targetArticleIds) => {
+    return targetArticleIds.map((articleId) => {
+      const story = document.querySelector(`.front-story[data-article-id="${articleId}"]`);
+      if (!story) return null;
+      const storyRect = story.getBoundingClientRect();
+      const measure = story.querySelector(".story-measure");
+      const measureRect = measure?.getBoundingClientRect();
+      const lines = Array.from(story.querySelectorAll(".measured-line"));
+      return {
+        articleId,
+        storyHeight: storyRect.height,
+        measureBottom: measureRect ? measureRect.bottom - storyRect.top : 0,
+        lineBottom: Math.max(...lines.map((line) => line.getBoundingClientRect().bottom - storyRect.top), 0),
+      };
+    });
+  }, articleIds);
+  assert.ok(rendered.every(Boolean), "Expected rendered front lead trio");
+
+  const renderedHeights = rendered.map((story) => story.storyHeight);
+  assert.ok(
+    renderedHeights.every((height) => Math.abs(height - renderedHeights[0]) <= 1),
+    `Expected rendered lead trio to share one row height; found ${renderedHeights.join(", ")}`,
+  );
+
+  const rhythm = await requirePage(this).evaluate(() => window.__PAPYRUS_LAYOUT__?.rhythm?.rowHeight ?? 19);
+  for (const story of rendered) {
+    const slack = story.measureBottom - story.lineBottom;
+    assert.ok(
+      slack >= -1 && slack <= rhythm * 2,
+      `Expected ${story.articleId} copy to spend the shared row body area; found ${slack}px bottom slack`,
+    );
+  }
+
+  const composedBlock = solvedBlocks.find((block) => block.id === "front-agent-procedure-patterns");
+  assert.ok(composedBlock, "Expected composed center front block");
+  const image = composedBlock.furniture.find((furniture) => furniture.kind === "image");
+  assert.ok(image, "Expected center front block to have image furniture");
+  const imageColumnIndexes = Array.from({ length: image.columnSpan }, (_, index) => image.columnStart + index);
+  const imageBottom = image.y + image.height;
+  const flowsBelowImage = imageColumnIndexes.some((columnIndex) => (
+    (composedBlock.columns[columnIndex] ?? []).some((line) => line.y >= imageBottom - 0.75)
+  ));
+  assert.ok(
+    flowsBelowImage,
+    "Expected composed center body copy to resume in the image column after the image clears",
+  );
 });
 
 Then(

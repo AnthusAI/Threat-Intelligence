@@ -7,17 +7,20 @@ politics, or any other beat worth watching closely.
 Papyrus turns that focus into a fully automated newsroom. Research agents
 monitor the beat while you sleep, update a publication-specific knowledge base,
 and surface surprising developments. Editor agents turn those signals into
-assignments. Reporter agents draft publishable stories. The next morning, you
-can open your publication and see what your newsroom found and created
-overnight.
+assignments. Reporter agents prepare private reporting packets: the verified
+facts, source trail, open questions, risks, angle, and copywriter brief an editor
+needs before commissioning reader-facing copy. Copywriter agents turn selected
+packets into draft Items for review. The next morning, you can open your
+newsroom and see what it found, what it recommends, what needs copywriting, and
+what is ready for review.
 
 You steer it like an executive editor, as much or as little as you want:
-choosing the canonical categories for topic coverage and configuring editorial
-sections for the issue, setting editorial
-policy, voting items up or down, commenting on drafts, and culling assignments
-before publication. When you step back, Papyrus keeps operating from the
-momentum you already gave it: accepted categories, current policy, open
-assignments, prior votes, and rejected proposal memory.
+choosing the canonical categories for topic coverage, configuring editorial
+sections for the issue, setting editorial policy, selecting the strongest
+packets for copywriting, commenting on drafts, and culling assignments before
+publication. When you step back, Papyrus keeps operating from the momentum you
+already gave it: accepted categories, current policy, section doctrine, open
+assignments, prior decisions, and rejected proposal memory.
 
 The beat is configuration, not code. The current AI/ML corpus is pilot content,
 not an application assumption. A Papyrus publication changes subject by
@@ -237,10 +240,11 @@ Papyrus has three distinct GraphQL auth lanes:
 ## Newsroom
 
 `/newsroom` is the Papyrus newsroom operations workspace. `Topics` is the
-taxonomy steering tab. `Desks` is the operational root-topic desk surface.
-`Doctrine` is the publication-wide mission and policies surface. The page is
-driven by the configured corpora for the publication, not by hard-coded corpus
-names. Papyrus owns the human steering state in GraphQL: knowledge corpora,
+taxonomy steering tab. `Sections` is the operational desk surface backed by
+`NewsroomSection` doctrine and budgets. `Doctrine` is the publication-wide
+mission and policies surface. The page is driven by the configured corpora for
+the publication, not by hard-coded corpus names. Papyrus owns the human steering
+state in GraphQL: knowledge corpora,
 import runs, artifacts, accepted category sets, strict-tree categories, private
 `Reference` metadata, private `SemanticRelation` links, proposals, and
 append-only decisions.
@@ -249,19 +253,53 @@ Edition planning and assignment dispatch use first-class private `Assignment`
 records, not `Item` rows with assignment types. Follow
 [skills/edition-planning/SKILL.md](skills/edition-planning/SKILL.md) when
 creating a dated edition, planning section slots, or dispatching surplus
-research assignments. The dated private `Edition` record is created or updated
-first; each assignment is then linked to that edition, its root-desk category,
-its publication lane, and its evidence with `SemanticRelation` rows. The default
-lanes are `reporting`, `analysis`, and `briefs`; `opinion` is opt-in through
-publication or desk policy. The default dispatch ratio is `3/2`: for each
-desk/lane target, dispatch a small surplus of research assignments so editors
-can select the strongest outputs without publishing every result. Assignments
-remain private workflow records with append-only `AssignmentEvent` audit rows
-and `SemanticRelation` links to categories, references, graph entities,
-comments, and eventual drafts. Only selected outputs become reader-facing
-article `Item` records and `EditionItem` placements. The editor-only
-`Assignments` desk tab at `/newsroom/assignments` is the review surface for
-these private queues.
+candidate work. Follow
+[skills/newsroom-story-cycle/SKILL.md](skills/newsroom-story-cycle/SKILL.md)
+when running the repeatable research -> reporting cascade for one topic across
+multiple sections.
+
+That repeatable cascade is editor-facing as a Coverage Theme: one shared topic
+or coverage question, shaped by section doctrine into research packets,
+reporting packets, editor decisions, copywriting assignments, draft Items, and
+later placement. `assignments run-story-cycle` is the CLI name for running a
+Coverage Theme; by default it stops after private reporting packets are created.
+Applied reruns reuse existing packet Messages by default so a partial Coverage
+Theme can resume forward; pass `--refresh-packets` when existing packet payloads
+should be regenerated.
+
+The dated private `Edition` record is created or updated first; each assignment
+is then linked to that edition, its `NewsroomSection`, its accepted topic scope,
+its coverage concept, its publication lane, and accepted evidence with
+`SemanticRelation` rows. The default lanes are `reporting`, `analysis`, and
+`briefs`; `opinion` is opt-in through publication or desk policy. The default
+dispatch ratio is `3/2`: for each section/lane target, dispatch a small surplus
+of candidates so editors can select the strongest outputs without publishing
+every result.
+
+Assignments remain private workflow records with append-only `AssignmentEvent`
+audit rows and `SemanticRelation` links to categories, references, graph
+entities, private packet messages, and eventual drafts. Research and reporting
+agents do not create publication Items as their normal work product. They create
+private `Message` work products with `ModelAttachment` payloads:
+
+- `research_packet`: internal evidence, source prospects, source snapshots,
+  open questions, and reference-intake handoff.
+- `reporting_context_packet`: editor-facing context for one candidate story,
+  including the angle, confirmed facts, source trail, risks, gaps, verification
+  needs, recommendation, and copywriter brief.
+
+New packet writes link `Assignment --produces--> Message`; older
+`Message --comment--> Assignment` packet links remain readable for compatibility.
+Fresh web findings stay in packet `proposedReferences` until reference intake
+registers them and curation accepts them as `Reference` evidence. Explicit editor
+selection is the gate from reporting packet to copywriting:
+`select` creates a `copywriting.article-draft` Assignment, `brief` creates a
+`copywriting.brief-draft` Assignment, `merge` links the packet to an existing
+draft, and `hold`/`kill` keep the packet private. Copywriting is the first stage
+allowed to create draft reader-facing `Item` records, and neither packet
+generation nor packet review creates `EditionItem` placement.
+The editor-only `Assignments` desk tab at `/newsroom/assignments`, including the
+Story Budget view, is the review surface for these private queues.
 
 Assignment claiming is an execution lease, not universal identity ownership.
 `Assignment.assigneeKey` is the flexible coordination string for the current
@@ -286,8 +324,8 @@ and import only stable steering outputs into Papyrus.
 
 Researcher behavior should follow
 [skills/researcher-doctrine/SKILL.md](skills/researcher-doctrine/SKILL.md):
-publication doctrine is the global editorial constitution, root-desk doctrine
-is the local beat standard, and the assignment brief is the immediate task.
+publication doctrine is the global editorial constitution, section doctrine is
+the local desk standard, and the assignment brief is the immediate task.
 Doctrine stays private and editable in Papyrus data; the skill defines how
 agents apply it while gathering evidence and preparing research packets.
 Coding agents that need to run the same assignment workflow outside a Tactus
@@ -352,8 +390,8 @@ evidence sets, topic modeling, graph analysis, desk memory, context packs, or
 edition planning.
 Research packets and assignment evidence should also follow
 [skills/researcher-doctrine/SKILL.md](skills/researcher-doctrine/SKILL.md) so
-agents apply publication doctrine, inherited root-desk doctrine, assignment
-briefs, graph context, and recent desk activity in the correct order.
+agents apply publication doctrine, section doctrine, assignment briefs, graph
+context, accepted evidence, and recent desk activity in the correct order.
 
 Category proposal review writes an append-only `SteeringDecision` and creates
 new `Category` versions when accepted edits change category copy or tree state.
@@ -488,6 +526,10 @@ poetry install
 poetry run papyrus-newsroom --help
 poetry run papyrus-newsroom build-assignment-agent-context --assignment-id <assignment-id>
 poetry run papyrus-newsroom execute-tactus 'return api_list{}'
+poetry run papyrus-newsroom signals trend-report --corpus-key <key> --topic "<topic>" --sections culture,methods --json
+poetry run papyrus-newsroom editions plan --date YYYY-MM-DD --sections culture,methods --section-budgets culture:2,methods:1 --signal-report <signal-report.json> --json
+poetry run papyrus-newsroom coverage-themes run --date YYYY-MM-DD --topic "<topic>" --category <category-key> --coverage-key <coverage.key> --sections culture,methods --section-budgets culture:2,methods:1 --through plan|research|reporting --json
+poetry run papyrus-newsroom story-budget output --run-id <coverage-theme-run-id> --json
 poetry run python procedures/newsroom/tests/test_newsroom_tools.py
 ```
 
@@ -499,12 +541,22 @@ record-plan builders. The older compatibility shims under
 `procedures/newsroom/tools/` still exist for path-based tooling, but the
 canonical implementation now lives in `src/papyrus_newsroom/`.
 
+Coverage Theme orchestration is Python-first. `signals trend-report` is the
+assignment-desk signal feed, `editions plan` turns signals plus section slots
+into private assignment graphs, `coverage-themes run` advances that graph
+through research or reporting packet creation, and `story-budget output`
+rediscovers the applied private state from GraphQL. The older
+`npm run content -- assignments run-story-cycle` and
+`assignments story-cycle-output` commands remain compatibility surfaces while
+operators migrate.
+
 Fresh external web research is a Tactus standard-library capability, not a
 Papyrus adapter. Researcher and reporter snippets should use
 `local web = require("tactus.web")` and then call `web.search{...}` or
 `web.synthesize{...}` with `provider = "openai"` when the assignment context
-requests current web evidence. Web results stay in the private research packet
-or draft reasoning path; Papyrus does not write GraphQL records directly from
+requests current web evidence. Web results stay in private `research_packet` or
+`reporting_context_packet` proposed-reference fields until reference intake
+registers them; Papyrus does not write accepted evidence records directly from
 web search.
 
 Copy `.env.example` to `.env` when you need local overrides. `.env*` is ignored
@@ -535,6 +587,16 @@ npm run content -- categories import-config --config corpora/papyrus-steering.ym
 npm run content -- newsroom import-sections --config corpora/papyrus-newsroom-sections.yml
 npm run content -- categories import-steering --config corpora/papyrus-steering.yml --corpus-key <key>
 npm run content -- assignments research-packets --assignment <assignment-id>
+poetry run papyrus-newsroom signals trend-report --corpus-key <key> --topic "<topic>" --sections culture,methods --json
+poetry run papyrus-newsroom coverage-themes run --date YYYY-MM-DD --topic "<topic>" --category <category-key> --coverage-key <coverage.key> --sections culture,methods --section-budgets culture:2,methods:1 --through reporting --json
+poetry run papyrus-newsroom story-budget output --run-id <coverage-theme-run-id> --json
+npm run content -- assignments run-story-cycle --date YYYY-MM-DD --topic "<topic>" --category <category-key> --coverage-key <coverage.key> --sections culture,methods,business,law --section-budgets culture:2,methods:1,business:1,law:1 --through plan|research|reporting [--refresh-packets] --json
+npm run content -- assignments story-cycle-output --run-id <story-cycle-run-id> --json
+npm run content -- assignments review-reporting-packet --assignment <assignment-id> --message <message-id> --decision select|merge|brief|hold|kill --note "<editor rationale>" --dry-run
+npm run content -- assignments run-copywriting --assignment <copywriting-assignment-id> --dry-run --json
+npm run content -- assignments copywriting-output --run-id <story-cycle-run-id> --json
+npm run content -- references curate-recent --corpus-key <key> --since-hours 48 --max-count 25 --dry-run --json
+npm run content -- references curate-recent --corpus-key <key> --since-hours 48 --max-count 25 --apply --json
 npm run content -- references register-catalog --config corpora/papyrus-steering.yml --corpus-key <key> --catalog <metadata/catalog.json> --status pending --ingestion-rationale "<summary, research focus, editorial mission fit>" --apply
 npm run content -- references export-analysis-manifest --config corpora/papyrus-steering.yml --corpus-key <key> --output accepted-reference-manifest.json
 npm run content -- references export-scope-training --config corpora/papyrus-steering.yml --corpus-key <key> --output reference-scope-training.json
@@ -550,6 +612,17 @@ files into Papyrus workflow state. With `--apply`, it creates a
 `SemanticRelation` links, and one open `curation.reference-intake` `Assignment`
 per pending reference. The filesystem catalog is not the queue after
 registration; pending references and assignments are.
+
+For routine reference curation, use the operator runbook:
+
+1. `npm run content -- content inspect`
+2. `npm run content -- references curate-recent --corpus-key <key> --since-hours 48 --max-count 25 --dry-run --json`
+3. rerun with `--apply` once dry-run output looks correct.
+
+`references curate-recent` runs identifier prepass first, then title/subtitle,
+summary, and quality in order. It writes resumable manifests under
+`.papyrus-runs/reference-curation-<run-id>/manifest.json` and returns nonzero
+when any reference fails so automation can detect degraded runs.
 
 Set `PAPYRUS_GRAPHQL_ENDPOINT` and `PAPYRUS_GRAPHQL_JWT` before running
 authoring commands. The JWT is sent in the AppSync `Authorization` header using
@@ -573,6 +646,57 @@ AWS_PROFILE=default AWS_REGION=us-east-1 npm run sandbox
 AWS_PROFILE=default AWS_REGION=us-east-1 npm run seed:amplify
 AWS_PROFILE=default npm run dev
 ```
+
+## Newsroom Cloud Procedures Runbook
+
+Papyrus newsroom procedures are cloud records (`ProcedureDefinition` and
+`ProcedureVersion`) managed in `/newsroom` Administration under the
+`Procedures` panel.
+
+Source of truth for seeded procedure code:
+
+- `procedures/newsroom/research_explorer.tac`
+- `procedures/newsroom/reporter.tac`
+- `procedures/newsroom/ingestion_reference_register.tac`
+
+The seed process copies those files into `ProcedureVersion.tactusSource`:
+
+- `amplify/seed/seed.ts` loads source files from `procedures/newsroom/`
+- `npm run seed:amplify` upserts `ProcedureDefinition` + published v1
+  `ProcedureVersion` rows
+
+After editing local `.tac` files, reseed to refresh cloud procedure source:
+
+```bash
+AWS_PROFILE=<profile> AWS_REGION=<region> npm run seed:amplify -- --identifier <sandbox-id>
+```
+
+CLI cloud resolution contract:
+
+- Required CLI procedure aliases are defined in
+  `corpora/papyrus-required-procedures.json`
+- `scripts/content-cli.cjs` resolves required procedure keys by alias, fetches
+  cloud definitions by key, writes the selected `ProcedureVersion.tactusSource`
+  into the run directory, executes that source with `tactus run`, and records
+  the parsed output/error back on `ProcedureRun`
+- If a required key is missing, CLI fails hard with explicit remediation:
+  `Run npm run seed:amplify to preload standard procedures.`
+
+Operator verification checklist:
+
+1. Open `/newsroom` -> Administration -> Procedures.
+2. Select a procedure row and verify `Version Draft -> Tactus/Lua Source`
+   shows real code, not a placeholder.
+3. Run `npm run content -- assignments run-research --assignment <id> ...` and
+   confirm it resolves and runs the cloud procedure.
+
+Current execution limitation (important):
+
+- CLI-backed research/reporting runs execute cloud `ProcedureVersion.tactusSource`
+  as user-editable Tactus code.
+- Direct Lambda immediate execution still dispatches by procedure marker/key in
+  `amplify/functions/assignment-action/handler.ts`; it does not yet execute
+  arbitrary Tactus source inside Lambda.
 
 ## Production Content Operations
 
@@ -617,6 +741,10 @@ Then verify the authoring lane before writing:
 npm run content -- content inspect
 npm run content -- content list articles
 ```
+
+Treat `npm run content -- content inspect` as a hard preflight gate for live
+CLI smoke runs. If it fails (for example `401 Unauthorized`), refresh JWT auth
+first and do not continue with live write/read smoke commands.
 
 For production content refreshes, use targeted GraphQL upserts. The safe pattern
 is:

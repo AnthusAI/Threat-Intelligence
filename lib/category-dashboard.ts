@@ -28,6 +28,9 @@ export function createEmptyCategorySteeringDashboard(): CategorySteeringDashboar
     assignmentEvents: [],
     doctrineRecords: [],
     newsroomSections: [],
+    procedureDefinitions: [],
+    procedureVersions: [],
+    procedureRuns: [],
     loadError: null,
   };
 }

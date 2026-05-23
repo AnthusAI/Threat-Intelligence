@@ -101,6 +101,12 @@ Feature: Newspaper layout scenarios
     And no measured line should overlap solved furniture
     And no browser console errors should occur
 
+  Scenario: Front teaser body-depth rows keep the lead trio aligned
+    Given I open the "front-body-depth-rows" layout scenario at 1280 by 900
+    Then the front lead trio should share one equal-height row
+    And no measured line should be cropped
+    And no browser console errors should occur
+
   Scenario: Primary front story leads the mobile sequence
     Given I open the "current-edition" layout scenario at 390 by 900
     Then the solved layout should use 1 columns
@@ -255,6 +261,38 @@ Feature: Newspaper layout scenarios
     Then the concepts desk should show semantic nodes and linked objects
     And no browser console errors should occur
 
+  Scenario: Newsroom reference detail renders the header curation cluster
+    Given I open the references newsroom at 1280 by 900
+    When I open reference "reference-knowledge-corpus-demo-source-history-001"
+    Then the reference detail should render the curation cluster
+    And the reference detail curation controls should share one height
+    And the reference detail curation cluster should align with the top toolbar
+    And the reference detail should not show the lower curation selector
+    When I open the reference detail curation actions
+    Then the reference detail actions menu should offer "Reopen" and "Archive"
+    When I set the selected reference quality to 1 stars
+    Then the reference detail curation status should be "rejected"
+    And the reference detail should show 0 filled quality stars
+    When I set the selected reference quality to 4 stars
+    Then the reference detail should immediately show 4 filled quality stars
+    And the reference detail curation status should be "accepted"
+    And the reference detail should show 4 filled quality stars
+    When I open the reference detail insight composer
+    Then the insight modal should be visible
+    And no browser console errors should occur
+
+  Scenario: Newsroom reference quality failure restores the confirmed header state
+    Given the reference quality mutation fails
+    And I open the references newsroom at 1280 by 900
+    When I open reference "reference-knowledge-corpus-demo-source-history-001"
+    And I set the selected reference quality to 4 stars
+    Then the reference detail should immediately show 4 filled quality stars
+    And the reference detail quality save state should become "error"
+    And the reference detail curation status should be "accepted"
+    And the reference detail should show 0 filled quality stars
+    And the reference detail quality message should mention "not saved"
+    And no browser console errors should occur
+
   Scenario Outline: Newsroom operational desks use newspaper card grids
     Given I open the "<section>" newsroom section at <width> by <height>
     Then the newsroom card grid should render for "<section>"
@@ -262,7 +300,11 @@ Feature: Newspaper layout scenarios
     When I open the first newsroom card detail
     Then the initial newsroom detail open should not animate card resizing
     Then the newsroom card grid should scale to the split width
+    And the newsroom left pane should be scrollable in split view
+    When I scroll the newsroom left pane down
+    Then the newsroom section lede should move up within the left pane
     When I select a different newsroom card
+    Then the selected newsroom card should anchor to the top of the list view
     Then newsroom card selection should keep grid geometry stable
     And newsroom card selection should not animate card resizing
     And no browser console errors should occur
@@ -344,7 +386,22 @@ Feature: Newspaper layout scenarios
     And assignment "assignment-demo-reporting-news-001" should not appear as an edition item
     When I review reporting packet for assignment "assignment-demo-reporting-news-001" as "select" with note "Move to copywriting"
     Then assignment "assignment-demo-reporting-news-001" should show reporting decision "select"
-    And assignment "assignment-demo-reporting-news-001" should show a draft item without edition placement
+    And assignment "assignment-demo-reporting-news-001" should show a copywriting assignment without edition placement
+    And no browser console errors should occur
+
+  Scenario: Newsroom story budget groups reporting packets by section
+    Given I am a test editor reader
+    And I open the assignments newsroom at 1280 by 900
+    When I switch assignments to Story Budget view
+    Then the reporting story budget should show section "news" with 1 slot and 1 candidate
+    And story budget candidate "assignment-demo-reporting-news-001" should show packet recommendation "hold"
+    And story budget candidate "assignment-demo-reporting-news-001" should show risk and gap context
+    When I review story budget candidate "assignment-demo-reporting-news-001" as "hold"
+    Then story budget candidate "assignment-demo-reporting-news-001" should show reporting decision "hold"
+    And assignment "assignment-demo-reporting-news-001" should not appear as an edition item
+    When I review story budget candidate "assignment-demo-reporting-news-001" as "select"
+    Then story budget candidate "assignment-demo-reporting-news-001" should show reporting decision "select"
+    And story budget candidate "assignment-demo-reporting-news-001" should show a copywriting assignment
     And no browser console errors should occur
 
   Scenario: Production newsroom requires editor access

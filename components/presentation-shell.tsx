@@ -19,6 +19,7 @@ import { readLocalReaderSettings, resolveReaderSettings, subscribeReaderSettings
 type PresentationShellProps = {
   content: EditionContent;
   editionBasePath?: string;
+  mastheadHomeHref?: string;
   initialPageNumber?: number;
   lockedPresentation?: EditionPresentationFormat;
   target?: PresentationTarget;
@@ -45,6 +46,7 @@ const MAGAZINE_TEXT_STYLE = {
 export function PresentationShell({
   content,
   editionBasePath,
+  mastheadHomeHref,
   initialPageNumber = 1,
   lockedPresentation,
   target = { kind: "edition" },
@@ -73,6 +75,7 @@ export function PresentationShell({
         <Newspaper
           content={content}
           editionBasePath={editionBasePath}
+          mastheadHomeHref={mastheadHomeHref}
           initialPageNumber={initialPageNumber}
           initialSectionKey={targetSection?.key}
           preserveContentLocation={Boolean(targetSection)}

@@ -1,0 +1,37 @@
+schemaVersion: 1
+topics:
+  - key: foundation-model-scaling
+    title: Foundation Model Scaling
+    shortTitle: Scaling
+    description: Model capability curves, training compute, data mixtures, and benchmark saturation.
+    rank: 1
+
+  - key: agent-systems
+    title: Agent Systems
+    shortTitle: Agents
+    description: Tool use, orchestration, memory, planning, and long-running autonomous workflows.
+    rank: 2
+
+  - key: evaluation-benchmarks
+    title: Evaluation and Benchmarks
+    shortTitle: Evaluation
+    description: Measurement quality, benchmark drift, contamination, and operational reliability.
+    rank: 3
+
+  - key: knowledge-infrastructure
+    title: Knowledge Infrastructure
+    shortTitle: Knowledge
+    description: Retrieval, corpora, semantic graphs, curation loops, and context engineering.
+    rank: 4
+
+  - key: production-platforms
+    title: Production Platforms
+    shortTitle: Platforms
+    description: Deployment patterns, APIs, infrastructure economics, monitoring, and governance controls.
+    rank: 5
+
+  - key: governance-and-society
+    title: Governance and Society
+    shortTitle: Governance
+    description: Policy, labor, education, security, and institutional adoption of AI systems.
+    rank: 6

@@ -40,6 +40,15 @@ SEMANTIC_PREDICATES: dict[str, dict[str, str]] = {
     "comment": {"label": "comments on", "group": "commentary", "inverse_label": "commented on by"},
     "ingestion_rationale": {"label": "ingestion rationale for", "group": "commentary", "inverse_label": "ingestion rationale"},
     "uses_evidence": {"label": "uses evidence", "group": "evidence", "inverse_label": "used by"},
+    "uses_signal": {"label": "uses signal", "group": "evidence", "inverse_label": "signal for"},
+    "requests_work_on": {"label": "requests work on", "group": "workflow", "inverse_label": "requested work"},
+    "planned_for_edition": {"label": "planned for edition", "group": "publication", "inverse_label": "planned assignments"},
+    "targets_lane": {"label": "targets lane", "group": "editorial", "inverse_label": "lane targets"},
+    "targets_section": {"label": "targets section", "group": "editorial", "inverse_label": "section assignments"},
+    "targets_topic": {"label": "targets topic", "group": "editorial", "inverse_label": "topic assignments"},
+    "scoped_to_topic": {"label": "scoped to topic", "group": "ontology", "inverse_label": "semantic concepts scoped here"},
+    "produces": {"label": "produces", "group": "workflow", "inverse_label": "produced by"},
+    "derived_from": {"label": "derived from", "group": "evidence", "inverse_label": "source for"},
     "related_to": {"label": "related to", "group": "generic", "inverse_label": "related from"},
     "broader_than": {"label": "broader than", "group": "ontology", "inverse_label": "narrower concept"},
     "narrower_than": {"label": "narrower than", "group": "ontology", "inverse_label": "broader concept"},
@@ -287,13 +296,21 @@ class PapyrusSemanticClient:
 
     def list_messages(self, object_kind: str, object_lineage_id: str) -> dict[str, Any]:
         relations = self.list_incoming(object_kind, object_lineage_id)["relations"]
+        if object_kind == "assignment":
+            relations.extend(self.list_outgoing(object_kind, object_lineage_id)["relations"])
         messages: list[dict[str, Any]] = []
         for relation in relations:
             relation_type = relation.get("relationTypeKey") or relation.get("predicate")
-            if relation.get("subjectKind") != "message" or relation_type != "comment":
+            if relation_type == "comment":
+                if relation.get("subjectKind") != "message":
+                    continue
+                message_id = relation["subjectId"]
+            elif relation_type == "produces" and relation.get("objectKind") == "message":
+                message_id = relation["objectId"]
+            else:
                 continue
             try:
-                messages.append(self.get_semantic_object("message", relation["subjectId"])["object"])
+                messages.append(self.get_semantic_object("message", message_id)["object"])
             except ValueError:
                 continue
         messages.sort(key=lambda message: message.get("createdAt") or "", reverse=True)

@@ -15,6 +15,7 @@ corpora/*
 !corpora/papyrus-semantic-concepts.yml
 !corpora/papyrus-lexical-steering.yml
 !corpora/papyrus-newsroom-sections.yml
+!corpora/papyrus-public-topics.yml
 .papyrus-runs/
 AGENTS.local.md
 .amplify/

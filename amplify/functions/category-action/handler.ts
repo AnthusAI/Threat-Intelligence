@@ -7,6 +7,7 @@ import { putJsonModelPayload, putTextModelPayload, readJsonModelPayload } from "
 
 type ReviewHandler = Schema["reviewSteeringProposal"]["functionHandler"];
 type ReferenceCurationHandler = Schema["reviewReferenceCuration"]["functionHandler"];
+type ReferenceQualityHandler = Schema["setReferenceQualityRating"]["functionHandler"];
 type CreateCategorySetDraftHandler = Schema["createCategorySetDraft"]["functionHandler"];
 type PromoteCategorySetDraftHandler = Schema["promoteCategorySetDraft"]["functionHandler"];
 type DiscardCategorySetDraftHandler = Schema["discardCategorySetDraft"]["functionHandler"];
@@ -17,6 +18,7 @@ type ReviewReferenceTopicLabelHandler = Schema["reviewReferenceTopicLabel"]["fun
 type CategoryActionEvent =
   | Parameters<ReviewHandler>[0]
   | Parameters<ReferenceCurationHandler>[0]
+  | Parameters<ReferenceQualityHandler>[0]
   | Parameters<CreateCategorySetDraftHandler>[0]
   | Parameters<PromoteCategorySetDraftHandler>[0]
   | Parameters<DiscardCategorySetDraftHandler>[0]
@@ -56,6 +58,9 @@ export const handler = async (event: CategoryActionEvent) => {
   if (fieldName === "reviewReferenceCuration") {
     return reviewReferenceCuration(event as Parameters<ReferenceCurationHandler>[0]);
   }
+  if (fieldName === "setReferenceQualityRating") {
+    return setReferenceQualityRating(event as Parameters<ReferenceQualityHandler>[0]);
+  }
   if (fieldName === "createCategorySetDraft") return createCategorySetDraft(event as Parameters<CreateCategorySetDraftHandler>[0]);
   if (fieldName === "promoteCategorySetDraft") return promoteCategorySetDraft(event as Parameters<PromoteCategorySetDraftHandler>[0]);
   if (fieldName === "discardCategorySetDraft") return discardCategorySetDraft(event as Parameters<DiscardCategorySetDraftHandler>[0]);
@@ -75,6 +80,9 @@ export const handler = async (event: CategoryActionEvent) => {
   if ("categoryId" in event.arguments) {
     if ("displayName" in event.arguments || "parentCategoryKey" in event.arguments) return updateDraftCategory(event as Parameters<UpdateDraftCategoryHandler>[0]);
     return archiveDraftCategory(event as Parameters<ArchiveDraftCategoryHandler>[0]);
+  }
+  if ("referenceId" in event.arguments && "rating" in event.arguments) {
+    return setReferenceQualityRating(event as Parameters<ReferenceQualityHandler>[0]);
   }
   if ("referenceId" in event.arguments) return reviewReferenceCuration(event as Parameters<ReferenceCurationHandler>[0]);
   return reviewSteeringProposal(event as Parameters<ReviewHandler>[0]);
@@ -276,6 +284,108 @@ async function reviewReferenceCuration(event: Parameters<ReferenceCurationHandle
     status: nextStatus,
     reasonCode,
     messageId,
+    relationId,
+  };
+}
+
+async function setReferenceQualityRating(event: Parameters<ReferenceQualityHandler>[0]) {
+  const client = await getDataClient();
+  const referenceId = normalizeRequiredString(event.arguments.referenceId, "referenceId");
+  const rating = normalizeReferenceQualityRating(event.arguments.rating);
+  const reference = await getRequiredRecord(client.models.Reference, referenceId, "Reference");
+  const now = new Date().toISOString();
+  const actorSub = normalizeOptionalString(event.arguments.actorSub) ?? getIdentitySub(event);
+  const actorLabel = normalizeOptionalString(event.arguments.actorLabel) ?? getIdentityLabel(event);
+  const actor = actorLabel ?? actorSub ?? "Papyrus newsroom";
+  const note = normalizeOptionalString(event.arguments.note);
+  const referenceLineageId = normalizeOptionalString(reference.lineageId) ?? referenceId;
+  const nextStatus = rating >= 3 ? "accepted" : "rejected";
+  const existingRelations = await listCurrentSemanticRelationsBySubject(
+    client,
+    "quality_rating_is",
+    semanticStateKey("reference", referenceLineageId),
+  );
+  const existingRating = existingRelations.length === 1 ? qualityRatingFromRelation(existingRelations[0]) : null;
+  const currentStatus = normalizeOptionalString(reference.curationStatus) ?? "pending";
+  const alreadyAcceptedAtRating = nextStatus === "accepted"
+    && currentStatus === "accepted"
+    && existingRelations.length === 1
+    && existingRating === rating;
+  const alreadyRejectedWithoutQuality = nextStatus === "rejected"
+    && currentStatus === "rejected"
+    && existingRelations.length === 0;
+
+  if (alreadyAcceptedAtRating || alreadyRejectedWithoutQuality) {
+    return {
+      ok: true,
+      referenceId,
+      rating,
+      status: nextStatus,
+      relationId: alreadyAcceptedAtRating ? existingRelations[0]?.id ?? null : null,
+    };
+  }
+
+  for (const relation of existingRelations) {
+    await requireDataResult(
+      client.models.SemanticRelation.update({
+        id: relation.id,
+        relationState: "superseded",
+        updatedAt: now,
+        metadata: JSON.stringify({
+          ...parseMetadataObject(relation.metadata),
+          supersededAt: now,
+          supersededBy: actor,
+          supersededByRating: rating,
+        }),
+      }),
+      "supersede quality_rating_is",
+    );
+  }
+
+  let relationId: string | null = null;
+  if (rating >= 3) {
+    const qualityNode = await getRequiredRecord(client.models.SemanticNode, qualityNodeId(rating), "SemanticNode");
+    const relation = buildReferenceQualityRelation({
+      actor,
+      note,
+      now,
+      qualityNode,
+      rating,
+      reference,
+    });
+    await requireDataResult(client.models.SemanticRelation.create(relation), "create quality_rating_is");
+    await updateNewsroomSummaryForSemanticRelationDelta(client, relation, 1, now);
+    relationId = relation.id;
+  }
+
+  await requireDataResult(
+    client.models.Reference.update({
+      id: referenceId,
+      curationStatus: nextStatus,
+      curationStatusKey: `${normalizeRequiredString(reference.corpusId, "reference.corpusId")}#${nextStatus}`,
+      curationStatusUpdatedAt: now,
+      curationStatusUpdatedBy: actor,
+      curationStatusReason: note,
+      newsroomFeedKey: reference.newsroomFeedKey ?? "references",
+      updatedAt: now,
+    }),
+    "update Reference quality status",
+  );
+
+  if (currentStatus !== nextStatus) {
+    await updateNewsroomSummaryForReferenceStatus(client, {
+      corpusId: normalizeOptionalString(reference.corpusId),
+      previousStatus: currentStatus,
+      nextStatus,
+      now,
+    });
+  }
+
+  return {
+    ok: true,
+    referenceId,
+    rating,
+    status: nextStatus,
     relationId,
   };
 }
@@ -923,6 +1033,33 @@ async function findCurrentSemanticRelationByState(
   return null;
 }
 
+async function listCurrentSemanticRelationsBySubject(
+  client: DataClient,
+  relationTypeKey: string,
+  subjectStateKey: string,
+): Promise<any[]> {
+  const model = client.models.SemanticRelation as any;
+  let nextToken: string | null | undefined;
+  const matches: any[] = [];
+  do {
+    const page = await model.listSemanticRelationsBySubjectState(
+      { subjectStateKey },
+      { limit: 100, nextToken },
+    );
+    assertNoDataErrors(page.errors, "list SemanticRelation by subject");
+    for (const relation of page.data ?? []) {
+      if (
+        relation?.relationState === "current"
+        && ((relation.relationTypeKey ?? relation.predicate) === relationTypeKey)
+      ) {
+        matches.push(relation);
+      }
+    }
+    nextToken = page.nextToken;
+  } while (nextToken);
+  return matches;
+}
+
 function semanticRelationTypeFieldsForPredicate(predicate: string): {
   relationTypeId: string;
   relationTypeKey: string;
@@ -940,6 +1077,13 @@ function semanticRelationTypeFieldsForPredicate(predicate: string): {
       relationTypeId: "semantic-relation-type-classified-as",
       relationTypeKey: "classified_as",
       relationDomain: "taxonomy",
+    };
+  }
+  if (predicate === "quality_rating_is") {
+    return {
+      relationTypeId: "semantic-relation-type-quality-rating-is",
+      relationTypeKey: "quality_rating_is",
+      relationDomain: "curation",
     };
   }
   return {
@@ -1013,6 +1157,68 @@ function buildAuthoritativeLabelRelation({
       sourcePredictionId: sourceRelationId,
       categorySetId: normalizeOptionalString(category.categorySetId),
       categoryKey: normalizeOptionalString(category.categoryKey),
+    }),
+  };
+}
+
+function buildReferenceQualityRelation({
+  actor,
+  note,
+  now,
+  qualityNode,
+  rating,
+  reference,
+}: {
+  actor: string;
+  note: string | null;
+  now: string;
+  qualityNode: any;
+  rating: number;
+  reference: any;
+}): any {
+  const subjectLineageId = normalizeOptionalString(reference.lineageId) ?? normalizeRequiredString(reference.id, "reference.id");
+  const objectLineageId = normalizeOptionalString(qualityNode.lineageId) ?? normalizeRequiredString(qualityNode.id, "qualityNode.id");
+  const subjectStateKey = semanticStateKey("reference", subjectLineageId);
+  const objectStateKey = semanticStateKey("semanticNode", objectLineageId);
+  const subjectVersionKey = semanticVersionKey("reference", normalizeRequiredString(reference.id, "reference.id"));
+  const objectVersionKey = semanticVersionKey("semanticNode", normalizeRequiredString(qualityNode.id, "qualityNode.id"));
+  return {
+    id: `semantic-relation-quality-${safeId(subjectLineageId)}-${rating}-${now.replace(/[^0-9TZ]/g, "")}-${randomUUID().slice(0, 8)}`,
+    relationState: "current",
+    predicate: "quality_rating_is",
+    ...semanticRelationTypeFieldsForPredicate("quality_rating_is"),
+    subjectKind: "reference",
+    subjectId: reference.id,
+    subjectLineageId,
+    subjectVersionNumber: typeof reference.versionNumber === "number" ? reference.versionNumber : null,
+    objectKind: "semanticNode",
+    objectId: qualityNode.id,
+    objectLineageId,
+    objectVersionNumber: typeof qualityNode.versionNumber === "number" ? qualityNode.versionNumber : 1,
+    subjectStateKey,
+    objectStateKey,
+    objectSubjectStateKey: `${objectStateKey}#reference`,
+    predicateObjectStateKey: `quality_rating_is#${objectStateKey}`,
+    subjectVersionKey,
+    objectVersionKey,
+    score: rating,
+    confidence: null,
+    rank: 1,
+    classifierId: null,
+    modelVersion: null,
+    reviewRecommended: false,
+    sourceSnapshotId: null,
+    importRunId: null,
+    importedAt: now,
+    createdAt: now,
+    updatedAt: now,
+    newsroomFeedKey: "semanticRelations",
+    metadata: JSON.stringify({
+      kind: "reference.quality-rating.manual",
+      actor,
+      note,
+      qualityRating: rating,
+      ratedAt: now,
     }),
   };
 }
@@ -1117,6 +1323,43 @@ function normalizeReferenceRejectionReasonCode(value: unknown, required: boolean
   return normalized;
 }
 
+function normalizeReferenceQualityRating(value: unknown): number {
+  const numeric = typeof value === "number" ? value : Number(value);
+  if (Number.isInteger(numeric) && numeric >= 1 && numeric <= 5) return numeric;
+  throw new Error("rating must be an integer from 1 to 5.");
+}
+
+function qualityNodeId(rating: number): string {
+  return `${qualityNodeLineageId(rating)}-v1`;
+}
+
+function qualityNodeLineageId(rating: number): string {
+  return `semantic-node-${safeId(`quality.rating.${rating}_star`)}`;
+}
+
+function qualityRatingFromRelation(relation: any): number | null {
+  const score = typeof relation?.score === "number" ? relation.score : Number(relation?.score);
+  if (Number.isFinite(score) && Number.isInteger(score) && score >= 1 && score <= 5) return score;
+  return qualityRatingFromNodeKey(normalizeOptionalString(relation?.objectLineageId) ?? normalizeOptionalString(relation?.objectId));
+}
+
+function qualityRatingFromNodeKey(value: string | null): number | null {
+  const match = /(?:quality[-_.]?rating[-_.]?)?([1-5])[-_.]?star/i.exec(value ?? "");
+  return match ? Number(match[1]) : null;
+}
+
+function parseMetadataObject(value: unknown): Record<string, unknown> {
+  if (!value) return {};
+  if (typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+  if (typeof value !== "string") return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
 function normalizePolicyToken(value: unknown): string {
   return String(value ?? "")
     .trim()
@@ -1166,6 +1409,28 @@ async function updateNewsroomSummaryForReferenceCuration(
   increment(payload.facets.semanticRelations.byRelationDomain, "workflow", 1);
   increment(payload.facets.semanticRelations.bySubjectKind, "message", 1);
   increment(payload.facets.semanticRelations.byObjectKind, "reference", 1);
+  await upsertNewsroomSummaryPayload(client, payload, response.data, input.now);
+}
+
+async function updateNewsroomSummaryForReferenceStatus(
+  client: DataClient,
+  input: { corpusId: string | null; previousStatus: string; nextStatus: string; now: string },
+): Promise<void> {
+  const response = await client.models.KnowledgeRawPayload.get({ id: NEWSROOM_SUMMARY_PAYLOAD_ID });
+  assertNoDataErrors(response.errors, "get Newsroom summary snapshot");
+  const payload = normalizeSummaryPayload(await readNewsroomSummaryPayload(client), input.now);
+  payload.generatedAt = input.now;
+  payload.staleAt = new Date(Date.parse(input.now) + SUMMARY_STALE_AFTER_MS).toISOString();
+  payload.source = "incremental";
+  increment(payload.referenceStatusCounts, input.previousStatus, -1);
+  increment(payload.referenceStatusCounts, input.nextStatus, 1);
+  increment(payload.facets.references.byCurationStatus, input.previousStatus, -1);
+  increment(payload.facets.references.byCurationStatus, input.nextStatus, 1);
+  if (input.corpusId) {
+    if (!payload.facets.references.statusByCorpus[input.corpusId]) payload.facets.references.statusByCorpus[input.corpusId] = {};
+    increment(payload.facets.references.statusByCorpus[input.corpusId], input.previousStatus, -1);
+    increment(payload.facets.references.statusByCorpus[input.corpusId], input.nextStatus, 1);
+  }
   await upsertNewsroomSummaryPayload(client, payload, response.data, input.now);
 }
 
