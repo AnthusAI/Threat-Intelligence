@@ -1,4 +1,5 @@
 import { defineBackend, secret } from "@aws-amplify/backend";
+import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import { PolicyStatement } from "aws-cdk-lib/aws-iam";
 import { Function as LambdaFunction } from "aws-cdk-lib/aws-lambda";
 import { CfnIndex, CfnVectorBucket, CfnVectorBucketPolicy } from "aws-cdk-lib/aws-s3vectors";
@@ -41,14 +42,31 @@ const amplifyBackendDir = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(amplifyBackendDir, "..");
 
 const messageTable = backend.data.resources.tables.Message;
-if (!messageTable.tableStreamArn) {
-  throw new Error("ConsoleChatResponder requires the Message table stream ARN.");
+const cfnTables = backend.data.resources.cfnResources.cfnTables;
+const messageCfnTable =
+  cfnTables.Message
+  ?? cfnTables.MessageTable
+  ?? Object.entries(cfnTables).find(([key]) => {
+    const normalized = key.toLowerCase();
+    return normalized.includes("message") && !normalized.includes("thread");
+  })?.[1];
+
+if (messageCfnTable) {
+  messageCfnTable.streamSpecification = {
+    streamViewType: dynamodb.StreamViewType.NEW_IMAGE,
+  };
+}
+
+const messageStreamArn = messageTable.tableStreamArn ?? messageCfnTable?.attrStreamArn;
+if (!messageStreamArn) {
+  throw new Error(`ConsoleChatResponder requires Message table stream ARN. cfnTables=${Object.keys(cfnTables).join(",")}`);
 }
 
 const messageThreadTable = backend.data.resources.tables.MessageThread;
 
 new ConsoleChatResponderStack(backend.createStack("console-chat-responder"), "ConsoleChatResponder", {
   messageTable,
+  messageStreamArn,
   threadTable: messageThreadTable,
   projectRoot,
   responseTarget: process.env.PAPYRUS_CONSOLE_RESPONSE_TARGET,

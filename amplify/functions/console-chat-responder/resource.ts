@@ -1,13 +1,12 @@
 import { Duration, NestedStack, type NestedStackProps } from "aws-cdk-lib";
 import { Effect, PolicyStatement } from "aws-cdk-lib/aws-iam";
-import { DockerImageCode, DockerImageFunction } from "aws-cdk-lib/aws-lambda";
-import { StartingPosition } from "aws-cdk-lib/aws-lambda";
-import { DynamoEventSource } from "aws-cdk-lib/aws-lambda-event-sources";
+import { CfnEventSourceMapping, DockerImageCode, DockerImageFunction } from "aws-cdk-lib/aws-lambda";
 import type { ITable } from "aws-cdk-lib/aws-dynamodb";
 import { Construct } from "constructs";
 
 export type ConsoleChatResponderStackProps = NestedStackProps & {
   messageTable: ITable;
+  messageStreamArn: string;
   threadTable: ITable;
   projectRoot: string;
   responseTarget?: string;
@@ -59,12 +58,14 @@ export class ConsoleChatResponderStack extends NestedStack {
       description: "Rust responder for Papyrus editor console chat Message stream",
     });
 
-    this.responderFunction.addEventSource(new DynamoEventSource(props.messageTable, {
-      startingPosition: StartingPosition.LATEST,
+    new CfnEventSourceMapping(this, "ConsoleResponderMessageStreamMapping", {
       batchSize: 1,
-      reportBatchItemFailures: true,
-      retryAttempts: 2,
-    }));
+      eventSourceArn: props.messageStreamArn,
+      functionName: this.responderFunction.functionArn,
+      functionResponseTypes: ["ReportBatchItemFailures"],
+      maximumRetryAttempts: 2,
+      startingPosition: "LATEST",
+    });
 
     props.messageTable.grantReadWriteData(this.responderFunction);
     props.threadTable.grantReadWriteData(this.responderFunction);
@@ -72,6 +73,16 @@ export class ConsoleChatResponderStack extends NestedStack {
       effect: Effect.ALLOW,
       actions: ["ssm:GetParameter"],
       resources: ["*"],
+    }));
+    this.responderFunction.addToRolePolicy(new PolicyStatement({
+      effect: Effect.ALLOW,
+      actions: [
+        "dynamodb:DescribeStream",
+        "dynamodb:GetRecords",
+        "dynamodb:GetShardIterator",
+        "dynamodb:ListStreams",
+      ],
+      resources: [props.messageStreamArn],
     }));
   }
 }
