@@ -7043,6 +7043,11 @@ img {
   z-index: 1301;
 }
 
+.papyrus-console--open .papyrus-console__tab {
+  right: 18px;
+  top: var(--edition-progress-height, 19px);
+}
+
 .papyrus-console__tab:hover,
 .papyrus-console__tab:focus-visible {
   background: rgb(var(--ink-rgb) / 0.08);
