@@ -1,4 +1,5 @@
 import { Duration, NestedStack, type NestedStackProps } from "aws-cdk-lib";
+import { Repository } from "aws-cdk-lib/aws-ecr";
 import { Effect, PolicyStatement } from "aws-cdk-lib/aws-iam";
 import { CfnEventSourceMapping, DockerImageCode, DockerImageFunction } from "aws-cdk-lib/aws-lambda";
 import type { ITable } from "aws-cdk-lib/aws-dynamodb";
@@ -12,6 +13,7 @@ export type ConsoleChatResponderStackProps = NestedStackProps & {
   responseTarget?: string;
   openaiApiKeySsmParam?: string;
   model?: string;
+  prebuiltImageUri?: string;
 };
 
 export class ConsoleChatResponderStack extends NestedStack {
@@ -32,8 +34,14 @@ export class ConsoleChatResponderStack extends NestedStack {
     const openaiParam = props.openaiApiKeySsmParam?.trim() || process.env.PAPYRUS_CONSOLE_OPENAI_API_KEY_SSM_PARAM || "";
     if (openaiParam) environment.PAPYRUS_CONSOLE_OPENAI_API_KEY_SSM_PARAM = openaiParam;
 
-    this.responderFunction = new DockerImageFunction(this, "ConsoleChatResponderFunction", {
-      code: DockerImageCode.fromImageAsset(props.projectRoot, {
+    const imageUri = props.prebuiltImageUri?.trim() || process.env.PAPYRUS_CONSOLE_RESPONDER_IMAGE_URI?.trim() || "";
+    let code: DockerImageCode;
+    if (imageUri) {
+      const { repositoryName, tagOrDigest } = parseEcrImageUri(imageUri);
+      const repository = Repository.fromRepositoryName(this, "ConsoleChatResponderRepository", repositoryName);
+      code = DockerImageCode.fromEcr(repository, { tagOrDigest });
+    } else {
+      code = DockerImageCode.fromImageAsset(props.projectRoot, {
         file: "amplify/functions/console-chat-responder/Dockerfile",
         exclude: [
           ".git",
@@ -51,7 +59,11 @@ export class ConsoleChatResponderStack extends NestedStack {
           "amplify_outputs.json.*",
           "amplify/functions/console-chat-responder/target",
         ],
-      }),
+      });
+    }
+
+    this.responderFunction = new DockerImageFunction(this, "ConsoleChatResponderFunction", {
+      code,
       timeout: Duration.minutes(2),
       memorySize: 1024,
       environment,
@@ -85,4 +97,28 @@ export class ConsoleChatResponderStack extends NestedStack {
       resources: [props.messageStreamArn],
     }));
   }
+}
+
+function parseEcrImageUri(imageUri: string): { repositoryName: string; tagOrDigest: string } {
+  const trimmed = imageUri.trim();
+  const hostAndPath = trimmed.split("/");
+  if (hostAndPath.length < 2) {
+    throw new Error(`Invalid PAPYRUS_CONSOLE_RESPONDER_IMAGE_URI: ${trimmed}`);
+  }
+  const imagePath = hostAndPath.slice(1).join("/");
+  if (imagePath.includes("@sha256:")) {
+    const [repositoryName, digest] = imagePath.split("@", 2);
+    if (!repositoryName || !digest) {
+      throw new Error(`Invalid PAPYRUS_CONSOLE_RESPONDER_IMAGE_URI digest form: ${trimmed}`);
+    }
+    return { repositoryName, tagOrDigest: digest };
+  }
+  const colonIndex = imagePath.lastIndexOf(":");
+  if (colonIndex <= 0 || colonIndex === imagePath.length - 1) {
+    throw new Error(`PAPYRUS_CONSOLE_RESPONDER_IMAGE_URI must include a tag (repo:tag) or digest: ${trimmed}`);
+  }
+  return {
+    repositoryName: imagePath.slice(0, colonIndex),
+    tagOrDigest: imagePath.slice(colonIndex + 1),
+  };
 }

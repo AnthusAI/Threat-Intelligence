@@ -76,6 +76,7 @@ if (enableConsoleResponder) {
     responseTarget: process.env.PAPYRUS_CONSOLE_RESPONSE_TARGET,
     openaiApiKeySsmParam: process.env.PAPYRUS_CONSOLE_OPENAI_API_KEY_SSM_PARAM,
     model: process.env.PAPYRUS_CONSOLE_MODEL,
+    prebuiltImageUri: process.env.PAPYRUS_CONSOLE_RESPONDER_IMAGE_URI,
   });
 }
 
