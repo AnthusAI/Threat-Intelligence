@@ -1,0 +1,45 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+import uuid
+from typing import Any
+
+
+def hash_short(value: Any) -> str:
+    if isinstance(value, str):
+        payload = value
+    else:
+        payload = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def safe_id(value: Any) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "-", str(value or "").lower()).strip("-")
+    normalized = normalized[:140] if normalized else ""
+    return normalized or hash_short(value)
+
+
+def knowledge_corpus_id(corpus: dict[str, Any]) -> str:
+    key = corpus.get("key") or corpus.get("name") or corpus.get("corpus_uri") or "unknown"
+    return f"knowledge-corpus-{safe_id(key)}"
+
+
+def reference_lineage_id_for(corpus_id: str, external_item_id: str) -> str:
+    return f"reference-{safe_id(corpus_id)}-{safe_id(external_item_id)}"
+
+
+def is_uuid_string(value: Any) -> bool:
+    if not value:
+        return False
+    try:
+        uuid.UUID(str(value))
+        return True
+    except ValueError:
+        return False
+
+
+def deterministic_uuid(seed: str) -> str:
+    digest = hashlib.sha256(seed.encode("utf-8")).digest()
+    return str(uuid.UUID(bytes=digest[:16]))

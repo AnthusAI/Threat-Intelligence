@@ -1,0 +1,392 @@
+from __future__ import annotations
+
+import json
+import urllib.error
+import urllib.request
+from typing import Any
+
+from .env import graphql_endpoint, graphql_jwt, lambda_auth_header
+
+VERSION_FIELDS = (
+    "lineageId versionNumber previousVersionId versionState versionCreatedAt "
+    "versionCreatedBy changeReason contentHash"
+)
+KNOWLEDGE_CORPUS_FIELDS = "id name role itemCount generatedAt latestImportRunId createdAt updatedAt"
+KNOWLEDGE_IMPORT_RUN_FIELDS = (
+    "id corpusId importKind corpusImportKindKey classifierId sourceSnapshotId status generatedAt "
+    "importedAt itemCount categoryCount proposalCount artifactCount referenceCount relationCount warningCount"
+)
+KNOWLEDGE_RAW_PAYLOAD_FIELDS = "id ownerType ownerId payloadKind importRunId createdAt updatedAt"
+REFERENCE_FIELDS = (
+    f"{VERSION_FIELDS} id corpusId externalItemId title authors sourceUri storagePath mediaType byteSize sha256 "
+    "sourcePublishedAt sourceUpdatedAt retrievedAt importRunId importedAt createdAt curationStatus "
+    "curationStatusKey curationStatusUpdatedAt curationStatusUpdatedBy curationStatusReason newsroomFeedKey updatedAt"
+)
+REFERENCE_ATTACHMENT_FIELDS = (
+    "id referenceId referenceLineageId referenceVersionNumber referenceVersionKey role sortKey storagePath "
+    "sourceUri filename mediaType byteSize sha256 etag importRunId importedAt metadata"
+)
+ASSIGNMENT_FIELDS = (
+    "id assignmentTypeKey queueKey queueStatusKey status priority title assigneeType assigneeId assigneeKey "
+    "claimedAt claimExpiresAt completedAt canceledAt corpusId categorySetId classifierId sourceSnapshotId "
+    "importRunId sectionId sectionKey sectionType sectionStatusKey sectionQueueStatusKey primaryFocusCategoryKey "
+    "topicScopeCategoryKeys createdBy createdAt updatedAt"
+)
+ASSIGNMENT_EVENT_FIELDS = (
+    "id assignmentId assignmentTypeKey queueKey eventType fromStatus toStatus actorSub actorLabel note createdAt"
+)
+SEMANTIC_RELATION_FIELDS = (
+    "id relationState predicate relationTypeId relationTypeKey relationDomain subjectKind subjectId "
+    "subjectLineageId subjectVersionNumber objectKind objectId objectLineageId objectVersionNumber "
+    "subjectStateKey objectStateKey objectSubjectStateKey predicateObjectStateKey subjectVersionKey "
+    "objectVersionKey score confidence rank classifierId modelVersion reviewRecommended sourceSnapshotId "
+    "importRunId importedAt createdAt updatedAt newsroomFeedKey metadata"
+)
+MESSAGE_FIELDS = (
+    "id messageKind messageDomain status summary source importRunId authorSub authorUserProfileId authorLabel "
+    "newsroomFeedKey createdAt updatedAt"
+)
+MODEL_ATTACHMENT_FIELDS = (
+    "id ownerKind ownerId ownerLineageId ownerVersionNumber ownerVersionKey role sortKey storagePath filename "
+    "mediaType byteSize sha256 etag importRunId createdAt updatedAt status"
+)
+
+LIST_DEFINITIONS: dict[str, dict[str, str]] = {
+    "KnowledgeCorpus": {"field": "listKnowledgeCorpuses", "fields": KNOWLEDGE_CORPUS_FIELDS},
+    "KnowledgeImportRun": {"field": "listKnowledgeImportRuns", "fields": KNOWLEDGE_IMPORT_RUN_FIELDS},
+    "KnowledgeRawPayload": {"field": "listKnowledgeRawPayloads", "fields": KNOWLEDGE_RAW_PAYLOAD_FIELDS},
+    "Reference": {"field": "listReferences", "fields": REFERENCE_FIELDS},
+    "ReferenceAttachment": {"field": "listReferenceAttachments", "fields": REFERENCE_ATTACHMENT_FIELDS},
+    "Assignment": {"field": "listAssignments", "fields": ASSIGNMENT_FIELDS},
+    "AssignmentEvent": {"field": "listAssignmentEvents", "fields": ASSIGNMENT_EVENT_FIELDS},
+    "SemanticRelation": {"field": "listSemanticRelations", "fields": SEMANTIC_RELATION_FIELDS},
+    "Message": {"field": "listMessages", "fields": MESSAGE_FIELDS},
+    "ModelAttachment": {"field": "listModelAttachments", "fields": MODEL_ATTACHMENT_FIELDS},
+}
+
+GET_DEFINITIONS: dict[str, dict[str, str]] = {
+    model: {
+        "field": f"get{model}",
+        "fields": LIST_DEFINITIONS[model]["fields"],
+    }
+    for model in LIST_DEFINITIONS
+}
+
+UPDATE_NEWSROOM_SUMMARY_MUTATION = """
+mutation UpdateNewsroomSummary($delta: AWSJSON!, $actorLabel: String, $reason: String) {
+  updateNewsroomSummary(delta: $delta, actorLabel: $actorLabel, reason: $reason) {
+    generatedAt
+    staleAt
+    source
+    counts
+    facets
+    assignmentStatusCounts
+    assignmentTypeCounts
+    referenceStatusCounts
+    messageKindCounts
+    messageDomainCounts
+  }
+}
+"""
+
+MODEL_ATTACHMENT_UPLOAD_FIELDS = """
+  ok
+  uploadId
+  attachmentId
+  ownerKind
+  ownerId
+  role
+  sortKey
+  method
+  uploadUrl
+  storagePath
+  mediaType
+  byteSize
+  sha256
+  expiresAt
+  requiredHeaders
+"""
+
+CREATE_MODEL_ATTACHMENT_UPLOAD_MUTATION = f"""
+mutation CreateModelAttachmentUpload(
+  $ownerKind: String!
+  $ownerId: ID!
+  $ownerLineageId: ID
+  $ownerVersionNumber: Int
+  $ownerVersionKey: String
+  $role: String!
+  $sortKey: String
+  $filename: String!
+  $mediaType: String!
+  $byteSize: Int!
+  $sha256: String
+  $importRunId: ID
+  $status: String
+) {{
+  createModelAttachmentUpload(
+    ownerKind: $ownerKind
+    ownerId: $ownerId
+    ownerLineageId: $ownerLineageId
+    ownerVersionNumber: $ownerVersionNumber
+    ownerVersionKey: $ownerVersionKey
+    role: $role
+    sortKey: $sortKey
+    filename: $filename
+    mediaType: $mediaType
+    byteSize: $byteSize
+    sha256: $sha256
+    importRunId: $importRunId
+    status: $status
+  ) {{
+    {MODEL_ATTACHMENT_UPLOAD_FIELDS}
+  }}
+}}
+"""
+
+COMPLETE_MODEL_ATTACHMENT_UPLOAD_MUTATION = f"""
+mutation CompleteModelAttachmentUpload(
+  $uploadId: String!
+  $ownerKind: String!
+  $ownerId: ID!
+  $ownerLineageId: ID
+  $ownerVersionNumber: Int
+  $ownerVersionKey: String
+  $role: String!
+  $sortKey: String
+  $filename: String!
+  $mediaType: String!
+  $byteSize: Int!
+  $sha256: String
+  $importRunId: ID
+  $status: String
+) {{
+  completeModelAttachmentUpload(
+    uploadId: $uploadId
+    ownerKind: $ownerKind
+    ownerId: $ownerId
+    ownerLineageId: $ownerLineageId
+    ownerVersionNumber: $ownerVersionNumber
+    ownerVersionKey: $ownerVersionKey
+    role: $role
+    sortKey: $sortKey
+    filename: $filename
+    mediaType: $mediaType
+    byteSize: $byteSize
+    sha256: $sha256
+    importRunId: $importRunId
+    status: $status
+  ) {{
+    id ownerKind ownerId role sortKey storagePath filename mediaType byteSize sha256 importRunId createdAt updatedAt status
+  }}
+}}
+"""
+
+
+def _list_query(field: str, fields: str) -> str:
+    operation = field[0].upper() + field[1:]
+    return f"""
+query {operation}($limit: Int, $nextToken: String) {{
+  {field}(limit: $limit, nextToken: $nextToken) {{
+    items {{ {fields} }}
+    nextToken
+  }}
+}}
+"""
+
+
+def _get_query(field: str, fields: str) -> str:
+    operation = field[0].upper() + field[1:]
+    return f"""
+query {operation}($id: ID!) {{
+  {field}(id: $id) {{ {fields} }}
+}}
+"""
+
+
+def _model_mutations(model_name: str) -> dict[str, str]:
+    return {
+        "create": f"""
+mutation Create{model_name}($input: Create{model_name}Input!) {{
+  create{model_name}(input: $input) {{ id }}
+}}
+""",
+        "update": f"""
+mutation Update{model_name}($input: Update{model_name}Input!) {{
+  update{model_name}(input: $input) {{ id }}
+}}
+""",
+        "delete": f"""
+mutation Delete{model_name}($input: Delete{model_name}Input!) {{
+  delete{model_name}(input: $input) {{ id }}
+}}
+""",
+    }
+
+
+MUTATIONS = {model: _model_mutations(model) for model in LIST_DEFINITIONS}
+
+
+class PapyrusGraphQLAuthoringClient:
+    def __init__(self, endpoint: str | None = None, auth_token: str | None = None) -> None:
+        self.endpoint = endpoint or graphql_endpoint()
+        self.auth_token = auth_token or graphql_jwt()
+
+    def graphql(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
+        payload = json.dumps({"query": query, "variables": variables or {}}).encode("utf-8")
+        request = urllib.request.Request(
+            self.endpoint,
+            data=payload,
+            headers={
+                "content-type": "application/json",
+                "Authorization": lambda_auth_header(self.auth_token),
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request) as response:
+                body = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as error:
+            detail = error.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"GraphQL request failed: {error.code} {error.reason}: {detail}") from error
+
+        errors = body.get("errors") or []
+        if errors:
+            messages = "; ".join(str(entry.get("message") or entry) for entry in errors)
+            raise RuntimeError(f"GraphQL request failed: {messages}")
+        data = body.get("data")
+        if not isinstance(data, dict):
+            raise RuntimeError("GraphQL response did not include data.")
+        return data
+
+    def list_records(self, model_name: str) -> list[dict[str, Any]]:
+        definition = LIST_DEFINITIONS[model_name]
+        query = _list_query(definition["field"], definition["fields"])
+        items: list[dict[str, Any]] = []
+        next_token = None
+        while True:
+            result = self.graphql(query, {"limit": 100, "nextToken": next_token})
+            connection = result.get(definition["field"]) or {}
+            items.extend(entry for entry in connection.get("items") or [] if entry)
+            next_token = connection.get("nextToken")
+            if not next_token:
+                break
+        return items
+
+    def get_record(self, model_name: str, record_id: str) -> dict[str, Any] | None:
+        definition = GET_DEFINITIONS[model_name]
+        query = _get_query(definition["field"], definition["fields"])
+        result = self.graphql(query, {"id": record_id})
+        return result.get(definition["field"])
+
+    def update_newsroom_summary(
+        self,
+        delta: dict[str, Any],
+        *,
+        actor_label: str | None = None,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        result = self.graphql(
+            UPDATE_NEWSROOM_SUMMARY_MUTATION,
+            {
+                "delta": json.dumps(delta),
+                "actorLabel": actor_label,
+                "reason": reason,
+            },
+        )
+        return result.get("updateNewsroomSummary") or {}
+
+    def upsert(self, model_name: str, input_payload: dict[str, Any]) -> str:
+        prepared = strip_unsupported_payload_fields(model_name, add_operational_index_fields(model_name, input_payload))
+        current = self.get_record(model_name, prepared["id"])
+        mutation = MUTATIONS[model_name]["update" if current else "create"]
+        self.graphql(mutation, {"input": prepared})
+        return "updated" if current else "created"
+
+    def create_model_attachment_upload(self, attachment: dict[str, Any]) -> dict[str, Any]:
+        result = self.graphql(
+            CREATE_MODEL_ATTACHMENT_UPLOAD_MUTATION,
+            model_attachment_upload_variables(attachment),
+        )
+        slot = result.get("createModelAttachmentUpload") or {}
+        headers = slot.get("requiredHeaders")
+        if isinstance(headers, str):
+            try:
+                slot["requiredHeaders"] = json.loads(headers)
+            except json.JSONDecodeError:
+                slot["requiredHeaders"] = {}
+        return slot
+
+    def complete_model_attachment_upload(self, upload_id: str, attachment: dict[str, Any]) -> dict[str, Any]:
+        variables = {"uploadId": upload_id, **model_attachment_upload_variables(attachment)}
+        result = self.graphql(COMPLETE_MODEL_ATTACHMENT_UPLOAD_MUTATION, variables)
+        return result.get("completeModelAttachmentUpload") or {}
+
+
+def create_authoring_client() -> tuple[PapyrusGraphQLAuthoringClient, dict[str, Any]]:
+    from .env import decode_jwt_claims
+
+    token = graphql_jwt()
+    return PapyrusGraphQLAuthoringClient(auth_token=token), decode_jwt_claims(token)
+
+
+def model_attachment_upload_variables(attachment: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "ownerKind": attachment["ownerKind"],
+        "ownerId": attachment["ownerId"],
+        "ownerLineageId": attachment.get("ownerLineageId"),
+        "ownerVersionNumber": attachment.get("ownerVersionNumber"),
+        "ownerVersionKey": attachment.get("ownerVersionKey"),
+        "role": attachment["role"],
+        "sortKey": attachment.get("sortKey"),
+        "filename": attachment["filename"],
+        "mediaType": attachment["mediaType"],
+        "byteSize": attachment["byteSize"],
+        "sha256": attachment.get("sha256"),
+        "importRunId": attachment.get("importRunId"),
+        "status": attachment.get("status"),
+    }
+
+
+def add_operational_index_fields(model_name: str, input_payload: dict[str, Any]) -> dict[str, Any]:
+    prepared = dict(input_payload)
+    if model_name == "Assignment":
+        status = _clean_string(prepared.get("status")) or "open"
+        queue_key = _clean_string(prepared.get("queueKey"))
+        section_key = _clean_string(prepared.get("sectionKey")) or _clean_string(prepared.get("sectionId"))
+        prepared["queueStatusKey"] = prepared.get("queueStatusKey") or (f"{queue_key}#{status}" if queue_key else None)
+        prepared["sectionStatusKey"] = f"{section_key}#{status}" if section_key else None
+        prepared["sectionQueueStatusKey"] = (
+            f"{section_key}#{queue_key}#{status}" if section_key and queue_key else None
+        )
+    if model_name == "KnowledgeImportRun":
+        corpus_id = _clean_string(prepared.get("corpusId"))
+        import_kind = _clean_string(prepared.get("importKind"))
+        prepared["corpusImportKindKey"] = (
+            f"{corpus_id}#{import_kind}" if corpus_id and import_kind else prepared.get("corpusImportKindKey")
+        )
+    return prepared
+
+
+def strip_unsupported_payload_fields(model_name: str, input_payload: dict[str, Any]) -> dict[str, Any]:
+    prepared = dict(input_payload)
+    if model_name == "Message":
+        prepared.pop("body", None)
+        prepared.pop("metadata", None)
+    elif model_name == "Reference":
+        prepared.pop("metadata", None)
+    elif model_name == "Assignment":
+        prepared.pop("sectionTypeStatusKey", None)
+        prepared.pop("brief", None)
+        prepared.pop("instructions", None)
+        prepared.pop("metadata", None)
+    elif model_name == "AssignmentEvent":
+        prepared.pop("metadata", None)
+    elif model_name == "KnowledgeRawPayload":
+        prepared.pop("payload", None)
+    return prepared
+
+
+def _clean_string(value: Any) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return value.strip()
