@@ -7010,7 +7010,7 @@ img {
   inset: 0 0 0 auto;
   pointer-events: none;
   position: fixed;
-  width: min(420px, 34vw);
+  width: 0;
   z-index: 1300;
 }
 
@@ -7019,6 +7019,7 @@ img {
   border-left: 1px solid rgb(var(--rule-rgb) / 0.3);
   box-shadow: -18px 0 32px -28px rgb(0 0 0 / 0.7);
   pointer-events: auto;
+  width: min(420px, 34vw);
 }
 
 .papyrus-console__tab {
