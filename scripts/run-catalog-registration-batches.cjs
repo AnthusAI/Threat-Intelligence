@@ -118,7 +118,7 @@ function main() {
 
     console.log(`catalog-registration\tbatch\t${batchIndex + 1}/${totalBatches}\toffset\t${offset}\tcount\t${slice.length}`);
     const startedAt = Date.now();
-    const result = spawnSync("npm", args, {
+    const result = spawnSync("poetry", args, {
       cwd: PROJECT_ROOT,
       encoding: "utf8",
       env: {
