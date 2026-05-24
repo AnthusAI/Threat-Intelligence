@@ -12,8 +12,8 @@ import {
   type ConsoleChatThread,
 } from "../lib/console-chat-client";
 import { loadReaderSessionSnapshot, type ReaderSessionSnapshot } from "./reader-auth-state";
-import { ModelSelector } from "./ai-elements/model-selector";
-import { PromptInput, PromptInputBody, PromptInputFooter, type PromptInputMessage, PromptInputSubmit, PromptInputTextarea, PromptInputTools } from "./ai-elements/prompt-input";
+import { Conversation, ConversationContent, ConversationScrollButton } from "./ai-elements/conversation";
+import { PromptInput, PromptInputBody, PromptInputFooter, type PromptInputMessage, PromptInputSelect, PromptInputSelectItem, PromptInputSubmit, PromptInputTextarea, PromptInputTools } from "./ai-elements/prompt-input";
 import { Shimmer } from "./ai-elements/shimmer";
 import { Suggestion, Suggestions } from "./ai-elements/suggestion";
 import { CONNECTION_STATE_CHANGE, ConnectionState } from "aws-amplify/data";
@@ -168,11 +168,9 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState(DEFAULT_CONSOLE_MODEL);
-  const [isNearBottom, setIsNearBottom] = useState(true);
   const hasLoadedRef = useRef(false);
   const activeThreadIdRef = useRef<string | null>(null);
   const threadRef = useRef<ConsoleChatThread | null>(null);
-  const messageBodyRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     threadRef.current = thread;
@@ -181,18 +179,6 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
   const sortedMessages = useMemo(() => (
     [...messages].sort((left, right) => (left.sequenceNumber ?? 0) - (right.sequenceNumber ?? 0) || left.createdAt.localeCompare(right.createdAt))
   ), [messages]);
-
-  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
-    const element = messageBodyRef.current;
-    if (!element) return;
-    element.scrollTo({ top: element.scrollHeight, behavior });
-    setIsNearBottom(true);
-  }, []);
-
-  const updateNearBottomState = useCallback((element: HTMLDivElement) => {
-    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
-    setIsNearBottom(distanceFromBottom <= 72);
-  }, []);
 
   const mergeMessage = useCallback((message: ConsoleChatMessage) => {
     setMessages((current) => upsertConsoleMessage(current, message));
@@ -249,26 +235,6 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
   useEffect(() => {
     void loadThread();
   }, [loadThread]);
-
-  useEffect(() => {
-    if (!thread?.id) return;
-    setIsNearBottom(true);
-    requestAnimationFrame(() => scrollToBottom("auto"));
-  }, [scrollToBottom, thread?.id]);
-
-  useEffect(() => {
-    if (!isNearBottom) return;
-    requestAnimationFrame(() => scrollToBottom("auto"));
-  }, [isNearBottom, scrollToBottom, sortedMessages]);
-
-  useEffect(() => {
-    const element = messageBodyRef.current;
-    if (!element) return;
-    const onScroll = () => updateNearBottomState(element);
-    updateNearBottomState(element);
-    element.addEventListener("scroll", onScroll);
-    return () => element.removeEventListener("scroll", onScroll);
-  }, [thread?.id, updateNearBottomState]);
 
   useEffect(() => {
     if (!thread?.id) return;
@@ -497,31 +463,34 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
           </button>
         ) : null}
       </div>
-      <div className="papyrus-console__body" ref={messageBodyRef} role="log" aria-live="polite">
-        {loading && !sortedMessages.length ? <p className="papyrus-console__empty">Loading conversation…</p> : null}
-        {sortedMessages.map((message) => (
-          <article className={message.role === "USER" ? "papyrus-console-message papyrus-console-message--user" : "papyrus-console-message papyrus-console-message--assistant"} key={message.id}>
-            <p>{message.role === "USER" ? "You" : message.role === "TOOL" ? "Tool" : "Papyrus"}</p>
-            <div>{message.content ?? message.summary}</div>
-            {message.responseStatus === "FAILED" ? <span className="papyrus-console-message__error">{message.responseError ?? "Responder failed"}</span> : null}
-          </article>
-        ))}
-        {pending ? (
-          <p className="papyrus-console__thinking papyrus-console-ui" role="status" aria-live="polite">
-            <Shimmer className="papyrus-console__thinking-shimmer">Thinking...</Shimmer>
-          </p>
-        ) : null}
-        {!isNearBottom && sortedMessages.length ? (
-          <button
-            aria-label="Scroll to latest message"
-            className="papyrus-console__scroll-bottom"
-            onClick={() => scrollToBottom()}
-            type="button"
-          >
-            <ChevronDownIcon />
-          </button>
-        ) : null}
-      </div>
+      <Conversation className="papyrus-console__conversation">
+        <ConversationContent
+          aria-live="polite"
+          className="papyrus-console__body"
+          role="log"
+          watch={`${thread?.id ?? "none"}:${sortedMessages.length}:${pending ? "pending" : "idle"}:${sortedMessages.at(-1)?.content?.length ?? 0}`}
+        >
+          {loading && !sortedMessages.length ? <p className="papyrus-console__empty">Loading conversation…</p> : null}
+          {sortedMessages.map((message) => (
+            <article className={message.role === "USER" ? "papyrus-console-message papyrus-console-message--user" : "papyrus-console-message papyrus-console-message--assistant"} key={message.id}>
+              <p>{message.role === "USER" ? "You" : message.role === "TOOL" ? "Tool" : "Papyrus"}</p>
+              <div>{message.content ?? message.summary}</div>
+              {message.responseStatus === "FAILED" ? <span className="papyrus-console-message__error">{message.responseError ?? "Responder failed"}</span> : null}
+            </article>
+          ))}
+          {pending ? (
+            <p className="papyrus-console__thinking papyrus-console-ui" role="status" aria-live="polite">
+              <Shimmer className="papyrus-console__thinking-shimmer">Thinking...</Shimmer>
+            </p>
+          ) : null}
+        </ConversationContent>
+        <ConversationScrollButton
+          aria-label="Scroll to latest message"
+          className="papyrus-console__scroll-bottom"
+        >
+          <ChevronDownIcon />
+        </ConversationScrollButton>
+      </Conversation>
       {!loading && !sortedMessages.length ? (
         <div className="papyrus-console__suggestions papyrus-console-ui">
           <Suggestions>
@@ -550,13 +519,18 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
         </PromptInputBody>
         <PromptInputFooter>
           <PromptInputTools>
-            <ModelSelector
+            <PromptInputSelect
               aria-label="Console model"
               disabled={sending}
               onValueChange={handleModelChange}
-              options={CONSOLE_MODEL_OPTIONS}
               value={selectedModel}
-            />
+            >
+              {CONSOLE_MODEL_OPTIONS.map((option) => (
+                <PromptInputSelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </PromptInputSelectItem>
+              ))}
+            </PromptInputSelect>
           </PromptInputTools>
           <PromptInputSubmit
             disabled={!draft.trim() || sending}

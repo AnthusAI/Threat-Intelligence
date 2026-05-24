@@ -7142,6 +7142,17 @@ img {
   width: 100%;
 }
 
+.papyrus-console-prompt-input__select {
+  appearance: none;
+  background: rgb(var(--paper-rgb) / 0.92);
+  border: 1px solid rgb(var(--rule-rgb) / 0.28);
+  color: var(--ink);
+  font: 0.78rem/1.2 Arial, Helvetica, sans-serif;
+  min-width: 0;
+  padding: 0.45rem 0.55rem;
+  width: 100%;
+}
+
 .papyrus-console__session-select {
   appearance: none;
   background: rgb(var(--paper-rgb) / 0.92);
@@ -7187,6 +7198,13 @@ img {
   min-height: 0;
   overflow-y: auto;
   padding: 18px;
+  position: relative;
+}
+
+.papyrus-console__conversation {
+  display: flex;
+  flex: 1;
+  min-height: 0;
   position: relative;
 }
 
@@ -7328,16 +7346,16 @@ img {
   background: rgb(var(--paper-rgb) / 0.94);
   border: 1px solid rgb(var(--rule-rgb) / 0.42);
   border-radius: 999px;
-  bottom: 14px;
+  bottom: 18px;
   color: var(--ink);
   cursor: pointer;
   display: inline-flex;
   height: 30px;
   justify-content: center;
-  padding: 0;
-  position: sticky;
-  right: 0;
   margin-left: auto;
+  padding: 0;
+  position: absolute;
+  right: 18px;
   width: 30px;
   z-index: 2;
 }

@@ -48,6 +48,26 @@ export function PromptInputTools({ className, ...props }: PromptInputToolsProps)
   return <div className={cn("papyrus-console-prompt-input__tools", className)} {...props} />;
 }
 
+export type PromptInputSelectProps = Omit<ComponentPropsWithoutRef<"select">, "onChange"> & {
+  onValueChange?: (value: string) => void;
+};
+
+export function PromptInputSelect({ className, onValueChange, ...props }: PromptInputSelectProps) {
+  return (
+    <select
+      className={cn("papyrus-console-prompt-input__select", className)}
+      onChange={(event) => onValueChange?.(event.currentTarget.value)}
+      {...props}
+    />
+  );
+}
+
+export type PromptInputSelectItemProps = ComponentPropsWithoutRef<"option">;
+
+export function PromptInputSelectItem(props: PromptInputSelectItemProps) {
+  return <option {...props} />;
+}
+
 export function PromptInputTextarea({ className, name = "prompt", onKeyDown, ...props }: PromptInputTextareaProps) {
   const handleKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
     onKeyDown?.(event);
