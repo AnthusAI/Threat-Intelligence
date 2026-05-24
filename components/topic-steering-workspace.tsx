@@ -36,6 +36,7 @@ import {
   type KnowledgeQueryResponse,
   type NewsroomRecordPage,
 } from "./news-desk-taxonomy-client";
+import { listConsoleThreads } from "../lib/console-chat-client";
 import { useOptionalNewsDeskClient } from "./news-desk-client-provider";
 import type { ReaderAuthSnapshot } from "./reader-auth-state";
 import type {
@@ -6072,7 +6073,6 @@ function MessagesDeskView({
   const [isMessageDetailOpen, setIsMessageDetailOpen] = useState(Boolean(initialMessageId));
   const [consoleThreads, setConsoleThreads] = useState<ConsoleThreadSummary[]>([]);
   const [consoleThreadsError, setConsoleThreadsError] = useState<string | null>(null);
-  const dataClient = useMemo(() => generateClient<Schema>({ authMode: USER_POOL_AUTH_MODE }), []);
   const messageKind = kindFilter === "__chat_detail" ? "console_chat_turn" : kindFilter;
   const feed = useNewsroomPagedRows({
     initialItems: messages,
@@ -6087,16 +6087,10 @@ function MessagesDeskView({
   useEffect(() => {
     if (isDemo || kindFilter !== "__chat_sessions") return;
     let active = true;
-    const model = dataClient.models.MessageThread as unknown as {
-      listMessageThreadsByKindAndUpdatedAt: (
-        input: { threadKind: string; sortDirection?: "ASC" | "DESC"; limit?: number },
-        options?: { authMode: typeof USER_POOL_AUTH_MODE },
-      ) => Promise<{ data?: ConsoleThreadSummary[] | null }>;
-    };
-    model.listMessageThreadsByKindAndUpdatedAt({ threadKind: "console", sortDirection: "DESC", limit: 100 }, { authMode: USER_POOL_AUTH_MODE })
-      .then((response) => {
+    void listConsoleThreads(100)
+      .then((threads) => {
         if (!active) return;
-        setConsoleThreads(Array.isArray(response.data) ? response.data : []);
+        setConsoleThreads(threads);
         setConsoleThreadsError(null);
       })
       .catch((error) => {
@@ -6106,7 +6100,7 @@ function MessagesDeskView({
     return () => {
       active = false;
     };
-  }, [dataClient, isDemo, kindFilter]);
+  }, [isDemo, kindFilter]);
   const feedMessages = isDemo ? messages : feed.items;
   const messageKindCounts = summary?.facets?.messages?.byKind ?? summary?.messageKindCounts ?? countMessagesBy(messages, "messageKind");
   const messageDomainCounts = summary?.facets?.messages?.byDomain ?? summary?.messageDomainCounts ?? countMessagesBy(messages, "messageDomain");
@@ -6748,7 +6742,7 @@ function ArrowLeftToLineIcon() {
       stroke="currentColor"
       strokeLinecap="round"
       strokeLinejoin="round"
-      strokeWidth="3"
+      strokeWidth="2"
       viewBox="0 0 24 24"
       width="24"
     >
@@ -6769,7 +6763,7 @@ function ChevronLeftIcon() {
       stroke="currentColor"
       strokeLinecap="round"
       strokeLinejoin="round"
-      strokeWidth="2.5"
+      strokeWidth="2"
       viewBox="0 0 24 24"
       width="24"
     >
@@ -6788,7 +6782,7 @@ function ArrowRightFromLineIcon() {
       stroke="currentColor"
       strokeLinecap="round"
       strokeLinejoin="round"
-      strokeWidth="3"
+      strokeWidth="2"
       viewBox="0 0 24 24"
       width="24"
     >
@@ -6809,7 +6803,7 @@ function CloseIcon() {
       stroke="currentColor"
       strokeLinecap="round"
       strokeLinejoin="round"
-      strokeWidth="3"
+      strokeWidth="2"
       viewBox="0 0 24 24"
       width="24"
     >
@@ -6829,7 +6823,7 @@ function EllipsisIcon() {
       stroke="currentColor"
       strokeLinecap="round"
       strokeLinejoin="round"
-      strokeWidth="3"
+      strokeWidth="2"
       viewBox="0 0 24 24"
       width="24"
     >
@@ -6850,7 +6844,7 @@ function ThumbsUpIcon() {
       stroke="currentColor"
       strokeLinecap="round"
       strokeLinejoin="round"
-      strokeWidth="2.4"
+      strokeWidth="2"
       viewBox="0 0 24 24"
       width="24"
     >
@@ -6871,7 +6865,7 @@ function ThumbsDownIcon() {
       stroke="currentColor"
       strokeLinecap="round"
       strokeLinejoin="round"
-      strokeWidth="2.4"
+      strokeWidth="2"
       viewBox="0 0 24 24"
       width="24"
     >
@@ -6892,7 +6886,7 @@ function StarIcon({ filled = false }: { filled?: boolean }) {
       stroke="currentColor"
       strokeLinecap="round"
       strokeLinejoin="round"
-      strokeWidth="2.2"
+      strokeWidth="2"
       viewBox="0 0 24 24"
       width="24"
     >
@@ -6932,7 +6926,7 @@ function InsightIcon() {
       stroke="currentColor"
       strokeLinecap="round"
       strokeLinejoin="round"
-      strokeWidth="3"
+      strokeWidth="2"
       viewBox="0 0 24 24"
       width="24"
     >
@@ -6953,7 +6947,7 @@ function SearchMarkIcon() {
       stroke="currentColor"
       strokeLinecap="round"
       strokeLinejoin="round"
-      strokeWidth="3"
+      strokeWidth="2"
       viewBox="0 0 24 24"
       width="18"
     >

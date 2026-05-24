@@ -1,12 +1,26 @@
 "use client";
 
-import { generateClient } from "aws-amplify/data";
 import { usePathname } from "next/navigation";
-import type { Schema } from "../amplify/data/resource";
+import {
+  createConsoleMessage,
+  createConsoleThread,
+  listConsoleMessagesByThread,
+  listConsoleThreads,
+  updateConsoleThread,
+  type ConsoleChatMessage,
+  type ConsoleChatThread,
+} from "../lib/console-chat-client";
 import { loadReaderSessionSnapshot, type ReaderSessionSnapshot } from "./reader-auth-state";
-import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Shimmer } from "./ai-elements/shimmer";
+import { Suggestion, Suggestions } from "./ai-elements/suggestion";
+import { type FormEvent, type KeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-const USER_POOL_AUTH_MODE = "userPool";
+const CONSOLE_STARTER_SUGGESTIONS = [
+  "Start a research assignment",
+  "Start a reporting assignment",
+  "Discuss a reference",
+] as const;
+
 const CONSOLE_THREAD_ANCHOR_KEY = "site#papyrus";
 const CONSOLE_NEWSROOM_FEED_KEY = "consoleChat";
 const CONSOLE_MESSAGE_KIND = "console_chat_turn";
@@ -15,68 +29,9 @@ const CONSOLE_SEMANTIC_LAYER = "chat_detail";
 const CONSOLE_SEARCH_VISIBILITY = "explicit";
 const CONSOLE_RESPONSE_TARGET = process.env.NEXT_PUBLIC_PAPYRUS_CONSOLE_RESPONSE_TARGET?.trim() || "cloud";
 
-type DataClient = ReturnType<typeof generateClient<Schema>>;
-type GraphQLClient = {
-  graphql: (options: {
-    authMode?: typeof USER_POOL_AUTH_MODE;
-    query: string;
-    variables?: Record<string, unknown>;
-  }) => Promise<{
-    data?: Record<string, unknown> | null;
-    errors?: Array<{ message?: string | null; errorType?: string | null } | string | null> | null;
-  }>;
-};
-
-type ConsoleMessage = {
-  id: string;
-  threadId?: string | null;
-  parentMessageId?: string | null;
-  sequenceNumber?: number | null;
-  role?: string | null;
-  messageKind?: string | null;
-  messageType?: string | null;
-  content?: string | null;
-  summary?: string | null;
-  responseStatus?: string | null;
-  responseError?: string | null;
-  createdAt: string;
-};
-
-type ConsoleThread = {
-  id: string;
-  title: string;
-  status: string;
-  threadKind: string;
-  contextDigest?: string | null;
-  messageCount?: number | null;
-  lastMessageId?: string | null;
-  lastMessageAt?: string | null;
-  metadata?: unknown;
-  createdAt: string;
-  updatedAt: string;
-};
-
-type AmplifyResult<T> = {
-  data?: T | null;
-  errors?: Array<{ message?: string | null; errorType?: string | null } | string | null> | null;
-};
-
 type PapyrusConsoleShellProps = {
   children: ReactNode;
 };
-
-let dataClient: DataClient | null = null;
-let graphqlClient: GraphQLClient | null = null;
-
-function getClient(): DataClient {
-  dataClient ??= generateClient<Schema>({ authMode: USER_POOL_AUTH_MODE });
-  return dataClient;
-}
-
-function getGraphQLClient(): GraphQLClient {
-  graphqlClient ??= generateClient<Schema>() as unknown as GraphQLClient;
-  return graphqlClient;
-}
 
 export function PapyrusConsoleShell({ children }: PapyrusConsoleShellProps) {
   const pathname = usePathname();
@@ -155,34 +110,47 @@ function ConsoleAccessPanel({ onClose, session }: { onClose: () => void; session
 }
 
 function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: () => void }) {
-  const [thread, setThread] = useState<ConsoleThread | null>(null);
-  const [threads, setThreads] = useState<ConsoleThread[]>([]);
-  const [messages, setMessages] = useState<ConsoleMessage[]>([]);
+  const [thread, setThread] = useState<ConsoleChatThread | null>(null);
+  const [threads, setThreads] = useState<ConsoleChatThread[]>([]);
+  const [messages, setMessages] = useState<ConsoleChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const loadRef = useRef<() => Promise<void>>(async () => undefined);
   const hasLoadedRef = useRef(false);
+  const activeThreadIdRef = useRef<string | null>(null);
+  const threadRef = useRef<ConsoleChatThread | null>(null);
+
+  useEffect(() => {
+    threadRef.current = thread;
+  }, [thread]);
 
   const sortedMessages = useMemo(() => (
     [...messages].sort((left, right) => (left.sequenceNumber ?? 0) - (right.sequenceNumber ?? 0) || left.createdAt.localeCompare(right.createdAt))
   ), [messages]);
 
   const loadMessages = useCallback(async (threadId: string) => {
-    const response = await (getClient().models.Message.listMessagesByThreadAndSequence as never as (input: {
-      threadId: string;
-      sortDirection?: "ASC" | "DESC";
-      limit?: number;
-    }, options?: { authMode: typeof USER_POOL_AUTH_MODE }) => Promise<{ data?: ConsoleMessage[] | null }>)(
-      { threadId, sortDirection: "ASC", limit: 100 },
-      { authMode: USER_POOL_AUTH_MODE },
-    );
-    setMessages(Array.isArray(response.data) ? response.data : []);
+    setMessages(await listConsoleMessagesByThread(threadId));
   }, []);
 
   const loadThreads = useCallback(async () => {
     return listConsoleThreads(25);
+  }, []);
+
+  const resolveActiveThread = useCallback((
+    recentThreads: ConsoleChatThread[],
+    currentThread: ConsoleChatThread | null,
+  ): ConsoleChatThread | null => {
+    const preferredId = activeThreadIdRef.current ?? currentThread?.id ?? null;
+    if (preferredId) {
+      const match = recentThreads.find((entry) => entry.id === preferredId);
+      if (match) return match;
+      if (currentThread?.id === preferredId) return currentThread;
+    }
+    const fallback = recentThreads[0] ?? null;
+    if (fallback) activeThreadIdRef.current = fallback.id;
+    return fallback;
   }, []);
 
   const loadThread = useCallback(async () => {
@@ -191,12 +159,14 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
     setError(null);
     try {
       const recentThreads = await loadThreads();
-      const existingThread = thread && recentThreads.some((entry) => entry.id === thread.id)
-        ? recentThreads.find((entry) => entry.id === thread.id) ?? thread
-        : recentThreads[0] ?? null;
+      const nextThread = resolveActiveThread(recentThreads, threadRef.current);
       setThreads(recentThreads);
-      setThread(existingThread);
-      if (existingThread) await loadMessages(existingThread.id);
+      setThread(nextThread);
+      if (nextThread) {
+        await loadMessages(nextThread.id);
+      } else {
+        setMessages([]);
+      }
     } catch (nextError) {
       console.error("[PapyrusConsole] Unable to load console thread", nextError);
       if (initialLoad) setError(nextError instanceof Error ? nextError.message : "Unable to load console thread.");
@@ -204,7 +174,7 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
       hasLoadedRef.current = true;
       if (initialLoad) setLoading(false);
     }
-  }, [loadMessages, loadThreads, thread]);
+  }, [loadMessages, loadThreads, resolveActiveThread]);
 
   useEffect(() => {
     loadRef.current = loadThread;
@@ -219,15 +189,16 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
   }, [loadThread]);
 
   const selectThread = useCallback((threadId: string) => {
+    activeThreadIdRef.current = threadId;
     const nextThread = threads.find((entry) => entry.id === threadId) ?? null;
     setThread(nextThread);
     setMessages([]);
     if (nextThread) void loadMessages(nextThread.id);
   }, [loadMessages, threads]);
 
-  async function createNewThread(): Promise<ConsoleThread> {
+  async function createNewThread(): Promise<ConsoleChatThread> {
     const now = new Date().toISOString();
-    const nextThread: ConsoleThread = {
+    const nextThread: ConsoleChatThread = {
       id: `message-thread-console-${crypto.randomUUID()}`,
       threadKind: "console",
       status: "active",
@@ -248,25 +219,23 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
       newsroomFeedKey: CONSOLE_NEWSROOM_FEED_KEY,
       createdAt: now,
       updatedAt: now,
-    } as ConsoleThread;
-    const response = await getClient().models.MessageThread.create(nextThread as never, { authMode: USER_POOL_AUTH_MODE }) as AmplifyResult<ConsoleThread>;
-    const created = requireAmplifyData(response, "create console thread", {
-      id: nextThread.id,
-      primaryAnchorKey: CONSOLE_THREAD_ANCHOR_KEY,
-    });
+    };
+    activeThreadIdRef.current = nextThread.id;
+    setThread(nextThread);
+    setThreads((current) => [nextThread, ...current]);
+    setMessages([]);
+    const created = await createConsoleThread(nextThread);
+    activeThreadIdRef.current = created.id;
     setThread(created);
     setThreads((current) => [created, ...current.filter((entry) => entry.id !== created.id)]);
-    setMessages([]);
     return created;
   }
 
-  async function ensureThread(): Promise<ConsoleThread> {
+  async function ensureThread(): Promise<ConsoleChatThread> {
     return thread ?? createNewThread();
   }
 
-  async function sendMessage(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const content = draft.trim();
+  async function submitMessage(content: string) {
     if (!content || sending) return;
     setSending(true);
     setError(null);
@@ -276,7 +245,7 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
       const previousSequenceNumber = previousMessage?.sequenceNumber ?? activeThread.messageCount ?? 0;
       const sequenceNumber = previousSequenceNumber + 1;
       const now = new Date().toISOString();
-      const message: ConsoleMessage = {
+      const message: ConsoleChatMessage = {
         id: `message-console-user-${crypto.randomUUID()}`,
         threadId: activeThread.id,
         parentMessageId: previousMessage?.id ?? null,
@@ -290,8 +259,7 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
         createdAt: now,
       };
       setMessages((current) => [...current, message]);
-      setDraft("");
-      requireAmplifyData(await getClient().models.Message.create({
+      await createConsoleMessage({
         ...message,
         messageDomain: CONSOLE_MESSAGE_DOMAIN,
         status: "active",
@@ -308,19 +276,13 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
         }),
         updatedAt: now,
         newsroomFeedKey: CONSOLE_NEWSROOM_FEED_KEY,
-      } as never, { authMode: USER_POOL_AUTH_MODE }) as AmplifyResult<ConsoleMessage>, "create console message", {
-        id: message.id,
-        threadId: activeThread.id,
       });
-      requireAmplifyData(await getClient().models.MessageThread.update({
+      await updateConsoleThread({
         id: activeThread.id,
         messageCount: sequenceNumber,
         lastMessageId: message.id,
         lastMessageAt: now,
         updatedAt: now,
-      } as never, { authMode: USER_POOL_AUTH_MODE }) as AmplifyResult<ConsoleThread>, "update console thread", {
-        id: activeThread.id,
-        lastMessageId: message.id,
       });
       setThread((current) => current ? {
         ...current,
@@ -337,47 +299,60 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
     }
   }
 
+  async function sendMessage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const content = draft.trim();
+    if (!content) return;
+    setDraft("");
+    await submitMessage(content);
+  }
+
+  function handleSuggestionClick(suggestion: string) {
+    if (sending) return;
+    void submitMessage(suggestion);
+  }
+
+  function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+    event.preventDefault();
+    event.currentTarget.form?.requestSubmit();
+  }
+
   const pending = sortedMessages.some((message) => message.role === "USER" && message.responseStatus === "PENDING");
 
   return (
     <div className="papyrus-console__panel">
       <ConsolePanelHeader onClose={onClose} />
       <div className="papyrus-console__sessions">
-        <label>
-          <span>Session</span>
-          <select
-            aria-label="Console chat session"
-            onChange={(event) => selectThread(event.target.value)}
-            value={thread?.id ?? ""}
-          >
-            {!thread ? <option value="">No session selected</option> : null}
-            {threads.map((entry) => (
-              <option key={entry.id} value={entry.id}>
-                {formatConsoleThreadOption(entry)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button
-          className="papyrus-console__new-session"
-          disabled={sending}
-          onClick={() => void createNewThread().catch((nextError) => {
-            console.error("[PapyrusConsole] Unable to create console thread", nextError);
-            setError(nextError instanceof Error ? nextError.message : "Unable to create console thread.");
-          })}
-          type="button"
+        <select
+          aria-label="Console chat session"
+          className="papyrus-console__session-select"
+          onChange={(event) => selectThread(event.target.value)}
+          value={thread?.id ?? ""}
         >
-          New chat
-        </button>
+          {!thread ? <option value="">No session selected</option> : null}
+          {threads.map((entry) => (
+            <option key={entry.id} value={entry.id}>
+              {formatConsoleThreadOption(entry)}
+            </option>
+          ))}
+        </select>
+        {sortedMessages.length > 0 ? (
+          <button
+            className="papyrus-console__new-session"
+            disabled={sending}
+            onClick={() => void createNewThread().catch((nextError) => {
+              console.error("[PapyrusConsole] Unable to create console thread", nextError);
+              setError(nextError instanceof Error ? nextError.message : "Unable to create console thread.");
+            })}
+            type="button"
+          >
+            New chat
+          </button>
+        ) : null}
       </div>
       <div className="papyrus-console__body" role="log" aria-live="polite">
         {loading && !sortedMessages.length ? <p className="papyrus-console__empty">Loading conversation…</p> : null}
-        {!loading && !sortedMessages.length ? (
-          <div className="papyrus-console__empty">
-            <strong>Ask Papyrus about this newsroom.</strong>
-            <span>Raw chat turns are marked as chat detail and excluded from default semantic search.</span>
-          </div>
-        ) : null}
         {sortedMessages.map((message) => (
           <article className={message.role === "USER" ? "papyrus-console-message papyrus-console-message--user" : "papyrus-console-message papyrus-console-message--assistant"} key={message.id}>
             <p>{message.role === "USER" ? "You" : message.role === "TOOL" ? "Tool" : "Papyrus"}</p>
@@ -385,14 +360,33 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
             {message.responseStatus === "FAILED" ? <span className="papyrus-console-message__error">{message.responseError ?? "Responder failed"}</span> : null}
           </article>
         ))}
-        {pending ? <p className="papyrus-console__pending">Responder is reading the thread cache…</p> : null}
+        {pending ? (
+          <p className="papyrus-console__thinking papyrus-console-ui" role="status" aria-live="polite">
+            <Shimmer className="papyrus-console__thinking-shimmer">Thinking...</Shimmer>
+          </p>
+        ) : null}
       </div>
+      {!loading && !sortedMessages.length ? (
+        <div className="papyrus-console__suggestions papyrus-console-ui">
+          <Suggestions>
+            {CONSOLE_STARTER_SUGGESTIONS.map((suggestion) => (
+              <Suggestion
+                disabled={sending}
+                key={suggestion}
+                onClick={handleSuggestionClick}
+                suggestion={suggestion}
+              />
+            ))}
+          </Suggestions>
+        </div>
+      ) : null}
       {error ? <p className="papyrus-console__error">{error}</p> : null}
       <form className="papyrus-console__composer" onSubmit={(event) => void sendMessage(event)}>
         <textarea
           aria-label="Console message"
           disabled={sending}
           onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={handleComposerKeyDown}
           placeholder="Ask about this edition, newsroom, or knowledge graph…"
           rows={3}
           value={draft}
@@ -408,57 +402,13 @@ function truncateConsoleSummary(value: string): string {
   return normalized.length > 180 ? `${normalized.slice(0, 179)}…` : normalized;
 }
 
-function formatConsoleThreadOption(thread: ConsoleThread): string {
+function formatConsoleThreadOption(thread: ConsoleChatThread): string {
   const stamp = thread.lastMessageAt ?? thread.updatedAt ?? thread.createdAt;
   const date = stamp ? new Date(stamp) : null;
   const suffix = date && Number.isFinite(date.getTime())
     ? ` — ${date.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`
     : "";
   return `${thread.title || "Papyrus Console"}${suffix}`;
-}
-
-async function listConsoleThreads(limit: number): Promise<ConsoleThread[]> {
-  const response = await getGraphQLClient().graphql({
-    authMode: USER_POOL_AUTH_MODE,
-    query: `
-      query ListMessageThreadsByKindAndUpdatedAt($threadKind: String!, $sortDirection: ModelSortDirection, $limit: Int) {
-        listMessageThreadsByKindAndUpdatedAt(threadKind: $threadKind, sortDirection: $sortDirection, limit: $limit) {
-          items {
-            id
-            threadKind
-            status
-            title
-            summary
-            primaryAnchorKey
-            createdByLabel
-            messageCount
-            lastMessageId
-            lastMessageAt
-            contextDigest
-            metadata
-            createdAt
-            updatedAt
-            newsroomFeedKey
-          }
-        }
-      }
-    `,
-    variables: { threadKind: "console", sortDirection: "DESC", limit },
-  });
-  return readGraphQLConnection<ConsoleThread>(response, "listMessageThreadsByKindAndUpdatedAt");
-}
-
-function readGraphQLConnection<T>(
-  response: Awaited<ReturnType<GraphQLClient["graphql"]>>,
-  fieldName: string,
-): T[] {
-  if (response.errors?.length) {
-    throw new Error(response.errors.map(formatAmplifyError).join("; "));
-  }
-  const connection = response.data?.[fieldName];
-  if (!connection || typeof connection !== "object") return [];
-  const items = (connection as { items?: unknown }).items;
-  return Array.isArray(items) ? items as T[] : [];
 }
 
 function ConsolePanelHeader({ onClose }: { onClose: () => void }) {
@@ -483,7 +433,7 @@ function LucideXIcon() {
       stroke="currentColor"
       strokeLinecap="round"
       strokeLinejoin="round"
-      strokeWidth="3"
+      strokeWidth="2"
       viewBox="0 0 24 24"
       width="18"
     >
@@ -504,7 +454,7 @@ function MessagesSquareIcon() {
       stroke="currentColor"
       strokeLinecap="round"
       strokeLinejoin="round"
-      strokeWidth="3"
+      strokeWidth="2"
       viewBox="0 0 24 24"
       width="18"
     >
@@ -516,23 +466,4 @@ function MessagesSquareIcon() {
 
 function toAwsJson(value: unknown): string {
   return JSON.stringify(value ?? {});
-}
-
-function requireAmplifyData<T>(response: AmplifyResult<T>, operation: string, context: Record<string, unknown>): T {
-  if (response.errors?.length) {
-    const message = response.errors.map(formatAmplifyError).join("; ");
-    console.error(`[PapyrusConsole] ${operation} returned GraphQL errors`, { errors: response.errors, context });
-    throw new Error(`${operation} failed: ${message}`);
-  }
-  if (!response.data) {
-    console.error(`[PapyrusConsole] ${operation} returned no data`, { response, context });
-    throw new Error(`${operation} failed: no data returned`);
-  }
-  return response.data;
-}
-
-function formatAmplifyError(error: { message?: string | null; errorType?: string | null } | string | null): string {
-  if (typeof error === "string") return error;
-  if (!error) return "Unknown GraphQL error";
-  return [error.errorType, error.message].filter(Boolean).join(": ") || "Unknown GraphQL error";
 }
