@@ -1,4 +1,4 @@
-import { Duration, NestedStack, Stack, type NestedStackProps } from "aws-cdk-lib";
+import { Duration, NestedStack, type NestedStackProps } from "aws-cdk-lib";
 import { Repository } from "aws-cdk-lib/aws-ecr";
 import { Effect, PolicyStatement } from "aws-cdk-lib/aws-iam";
 import { CfnEventSourceMapping, DockerImageCode, DockerImageFunction } from "aws-cdk-lib/aws-lambda";
@@ -99,7 +99,7 @@ export class ConsoleChatResponderStack extends NestedStack {
     this.responderFunction.addToRolePolicy(new PolicyStatement({
       effect: Effect.ALLOW,
       actions: ["appsync:GraphQL"],
-      resources: appSyncGraphQlArns(this, props.graphqlEndpoint),
+      resources: ["*"],
     }));
     this.responderFunction.addToRolePolicy(new PolicyStatement({
       effect: Effect.ALLOW,
@@ -112,22 +112,6 @@ export class ConsoleChatResponderStack extends NestedStack {
       resources: [props.messageStreamArn],
     }));
   }
-}
-
-function appSyncGraphQlArns(scope: Construct, graphqlEndpoint: string): string[] {
-  const apiId = graphqlEndpoint
-    .replace(/^https?:\/\//, "")
-    .split(".")[0]
-    .trim();
-  if (!apiId) {
-    throw new Error(`Unable to parse AppSync API id from endpoint: ${graphqlEndpoint}`);
-  }
-  const stack = Stack.of(scope);
-  const prefix = `arn:aws:appsync:${stack.region}:${stack.account}:apis/${apiId}/types`;
-  return [
-    `${prefix}/Mutation/fields/*`,
-    `${prefix}/Query/fields/*`,
-  ];
 }
 
 function parseEcrImageUri(imageUri: string): { repositoryName: string; tagOrDigest: string } {
