@@ -99,6 +99,12 @@ from .references_commands import (
     references_review_curation,
     references_unlabel,
 )
+from .rehydration_commands import (
+    rehydration_audit_records,
+    rehydration_backfill_records,
+    rehydration_export_manifest,
+    rehydration_hydrate,
+)
 from .node_delegate import delegate_or_raise
 from .catalog import (
     assert_reference_catalog_plan_safety,
@@ -225,6 +231,10 @@ PORTED_COMMANDS = frozenset(
         "newsroom:backfill-feed-fields",
         "newsroom:backfill-operational-indexes",
         "newsroom:import-sections",
+        "rehydration:audit-records",
+        "rehydration:backfill-records",
+        "rehydration:export-manifest",
+        "rehydration:hydrate",
         "relations:import-types",
         "relations:backfill",
         "messages:export-legacy-comments",
@@ -418,6 +428,14 @@ def dispatch(group: str, command: str, flags: list[str]) -> None:
         newsroom_backfill_operational_indexes(flags)
     elif route == "newsroom:import-sections":
         newsroom_import_sections(flags)
+    elif route == "rehydration:audit-records":
+        rehydration_audit_records(flags)
+    elif route == "rehydration:backfill-records":
+        rehydration_backfill_records(flags)
+    elif route == "rehydration:export-manifest":
+        rehydration_export_manifest(flags)
+    elif route == "rehydration:hydrate":
+        rehydration_hydrate(flags)
     elif route == "relations:import-types":
         relations_import_types(flags)
     elif route == "relations:backfill":
@@ -1044,6 +1062,7 @@ def print_usage() -> None:
     print("  create-reindex-assignment/run-now/execute-assignment/graph-artifacts/import-graph-artifact,")
     print("  newsroom recount-summary/prune-attachments/backfill-feed-fields/")
     print("  backfill-operational-indexes/import-sections,")
+    print("  rehydration audit-records/backfill-records/export-manifest/hydrate,")
     print("  relations import-types/backfill, messages export/import-legacy-comments,")
     print("  categories import/export/draft/review/curation-cycle commands")
     print("All other routes delegate to scripts/content-cli.cjs (Node).")

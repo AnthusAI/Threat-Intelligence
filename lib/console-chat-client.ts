@@ -164,33 +164,6 @@ export type ConsoleChatMessage = {
   updatedAt?: string | null;
 };
 
-type ConsoleMessageSubscriptionInput = {
-  filter?: {
-    threadId?: {
-      eq?: string;
-    };
-  };
-};
-
-type ConsoleMessageSubscription = {
-  unsubscribe: () => void;
-};
-
-type ConsoleMessageSubscriptionModel = {
-  onCreate: (input?: ConsoleMessageSubscriptionInput) => {
-    subscribe: (observer: {
-      next: (value: unknown) => void;
-      error?: (error: unknown) => void;
-    }) => ConsoleMessageSubscription;
-  };
-  onUpdate: (input?: ConsoleMessageSubscriptionInput) => {
-    subscribe: (observer: {
-      next: (value: unknown) => void;
-      error?: (error: unknown) => void;
-    }) => ConsoleMessageSubscription;
-  };
-};
-
 type GraphQLClient = {
   graphql: (options: {
     query: string;
@@ -310,35 +283,35 @@ export function subscribeConsoleMessages(
   onMessage: (message: ConsoleChatMessage) => void,
   onError?: (error: unknown) => void,
 ): () => void {
-  configureAmplifyClient();
-  const client = generateClient<Schema>() as unknown as {
-    models: {
-      Message?: ConsoleMessageSubscriptionModel;
-    };
+  let active = true;
+  const fingerprints = new Map<string, string>();
+  const pollMessages = async () => {
+    try {
+      const messages = await listConsoleMessagesByThread(threadId);
+      if (!active) return;
+      for (const message of messages) {
+        const fingerprint = JSON.stringify([
+          message.updatedAt,
+          message.responseStatus,
+          message.responseStartedAt,
+          message.responseCompletedAt,
+          message.responseError,
+          message.content,
+        ]);
+        if (fingerprints.get(message.id) === fingerprint) continue;
+        fingerprints.set(message.id, fingerprint);
+        onMessage(message);
+      }
+    } catch (error) {
+      onError?.(error);
+    }
   };
-  const messageModel = client.models.Message;
-  if (!messageModel || typeof messageModel.onCreate !== "function" || typeof messageModel.onUpdate !== "function") {
-    return () => undefined;
-  }
-  const input = { filter: { threadId: { eq: threadId } } };
-  const handleEvent = (value: unknown) => {
-    const message = normalizeConsoleMessageSubscriptionPayload(value);
-    if (message) onMessage(message);
-  };
-  const createSubscription = messageModel.onCreate(input).subscribe({ next: handleEvent, error: onError });
-  const updateSubscription = messageModel.onUpdate(input).subscribe({ next: handleEvent, error: onError });
+  void pollMessages();
+  const interval = window.setInterval(() => {
+    void pollMessages();
+  }, 2500);
   return () => {
-    createSubscription.unsubscribe();
-    updateSubscription.unsubscribe();
+    active = false;
+    window.clearInterval(interval);
   };
-}
-
-function normalizeConsoleMessageSubscriptionPayload(value: unknown): ConsoleChatMessage | null {
-  if (!value || typeof value !== "object") return null;
-  const record = value as { data?: unknown; id?: unknown };
-  if (typeof record.id === "string") return record as ConsoleChatMessage;
-  if (record.data && typeof record.data === "object" && typeof (record.data as { id?: unknown }).id === "string") {
-    return record.data as ConsoleChatMessage;
-  }
-  return null;
 }

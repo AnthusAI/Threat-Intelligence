@@ -17,9 +17,38 @@ from .ids import hash_short, safe_id
 MODEL_ATTACHMENT_OWNER_MODELS = {
     "assignment": "Assignment",
     "assignmentEvent": "AssignmentEvent",
+    "category": "Category",
+    "categorySet": "CategorySet",
+    "edition": "Edition",
+    "editionItem": "EditionItem",
+    "item": "Item",
+    "itemTag": "ItemTag",
+    "knowledgeArtifact": "KnowledgeArtifact",
+    "knowledgeCorpus": "KnowledgeCorpus",
+    "knowledgeImportRun": "KnowledgeImportRun",
     "knowledgeRawPayload": "KnowledgeRawPayload",
+    "mediaAsset": "MediaAsset",
     "message": "Message",
+    "messageThread": "MessageThread",
+    "newsroomSection": "NewsroomSection",
+    "procedureDefinition": "ProcedureDefinition",
+    "procedureRun": "ProcedureRun",
+    "procedureVersion": "ProcedureVersion",
+    "publishedEdition": "PublishedEdition",
+    "publishedEditionItem": "PublishedEditionItem",
+    "publishedItem": "PublishedItem",
+    "publishedMediaAsset": "PublishedMediaAsset",
+    "publishedCategorySet": "PublishedCategorySet",
+    "publishedCategory": "PublishedCategory",
     "reference": "Reference",
+    "referenceAttachment": "ReferenceAttachment",
+    "semanticNode": "SemanticNode",
+    "semanticRelation": "SemanticRelation",
+    "semanticRelationType": "SemanticRelationType",
+    "steeringDecision": "SteeringDecision",
+    "steeringProposal": "SteeringProposal",
+    "tag": "Tag",
+    "userRoleAssignment": "UserRoleAssignment",
 }
 
 
@@ -355,4 +384,3 @@ def delete_attachment_storage_paths(
         preview = ", ".join(f"{entry.get('storagePath') or 'unknown'}:{entry.get('code') or 'error'}" for entry in errors[:3])
         raise RuntimeError(f"Failed to delete {len(errors)} ModelAttachment S3 object(s): {preview}")
     return {"bucket": resolved_bucket, "attempted": len(paths), "deleted": deleted, "chunks": chunks, "errors": errors}
-

@@ -6,6 +6,7 @@ const authRedirectUrls = [
   "http://localhost:3000/",
   "https://p.apyr.us/",
   "https://main.dbsyytcm9drqa.amplifyapp.com/",
+  "https://codex-rehydration-api-split.dbsyytcm9drqa.amplifyapp.com/",
 ];
 
 const disableGoogleOAuth = process.env.PAPYRUS_DISABLE_GOOGLE_OAUTH === "1";

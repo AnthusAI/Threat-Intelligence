@@ -22,7 +22,42 @@ const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const MAX_GRAPH_EXPORT_ATTACHMENT_BYTES = 512 * 1024 * 1024;
 const UPLOAD_EXPIRES_SECONDS = 10 * 60;
 const DOWNLOAD_EXPIRES_SECONDS = 10 * 60;
-const ALLOWED_OWNER_KINDS = new Set(["assignment", "assignmentEvent", "knowledgeRawPayload", "message", "reference"]);
+const ALLOWED_OWNER_KINDS = new Set([
+  "assignment",
+  "assignmentEvent",
+  "category",
+  "categorySet",
+  "edition",
+  "editionItem",
+  "item",
+  "itemTag",
+  "knowledgeArtifact",
+  "knowledgeCorpus",
+  "knowledgeImportRun",
+  "knowledgeRawPayload",
+  "mediaAsset",
+  "message",
+  "messageThread",
+  "newsroomSection",
+  "procedureDefinition",
+  "procedureRun",
+  "procedureVersion",
+  "publishedEdition",
+  "publishedEditionItem",
+  "publishedItem",
+  "publishedMediaAsset",
+  "publishedCategorySet",
+  "publishedCategory",
+  "reference",
+  "referenceAttachment",
+  "semanticNode",
+  "semanticRelation",
+  "semanticRelationType",
+  "steeringDecision",
+  "steeringProposal",
+  "tag",
+  "userRoleAssignment",
+]);
 const ALLOWED_ROLES = new Set([
   "assignment_brief",
   "assignment_instructions",
@@ -30,6 +65,7 @@ const ALLOWED_ROLES = new Set([
   "metadata",
   "graph_export",
   "raw_payload",
+  "record",
 ]);
 const ALLOWED_MEDIA_TYPES = new Set([
   "application/json",
@@ -251,9 +287,38 @@ function uploadIdFor(input: ReturnType<typeof normalizeAttachmentInput>): string
 function ownerModelName(ownerKind: string): string {
   if (ownerKind === "assignment") return "Assignment";
   if (ownerKind === "assignmentEvent") return "AssignmentEvent";
+  if (ownerKind === "category") return "Category";
+  if (ownerKind === "categorySet") return "CategorySet";
+  if (ownerKind === "edition") return "Edition";
+  if (ownerKind === "editionItem") return "EditionItem";
+  if (ownerKind === "item") return "Item";
+  if (ownerKind === "itemTag") return "ItemTag";
+  if (ownerKind === "knowledgeArtifact") return "KnowledgeArtifact";
+  if (ownerKind === "knowledgeCorpus") return "KnowledgeCorpus";
+  if (ownerKind === "knowledgeImportRun") return "KnowledgeImportRun";
   if (ownerKind === "knowledgeRawPayload") return "KnowledgeRawPayload";
+  if (ownerKind === "mediaAsset") return "MediaAsset";
   if (ownerKind === "message") return "Message";
+  if (ownerKind === "messageThread") return "MessageThread";
+  if (ownerKind === "newsroomSection") return "NewsroomSection";
+  if (ownerKind === "procedureDefinition") return "ProcedureDefinition";
+  if (ownerKind === "procedureRun") return "ProcedureRun";
+  if (ownerKind === "procedureVersion") return "ProcedureVersion";
+  if (ownerKind === "publishedEdition") return "PublishedEdition";
+  if (ownerKind === "publishedEditionItem") return "PublishedEditionItem";
+  if (ownerKind === "publishedItem") return "PublishedItem";
+  if (ownerKind === "publishedMediaAsset") return "PublishedMediaAsset";
+  if (ownerKind === "publishedCategorySet") return "PublishedCategorySet";
+  if (ownerKind === "publishedCategory") return "PublishedCategory";
   if (ownerKind === "reference") return "Reference";
+  if (ownerKind === "referenceAttachment") return "ReferenceAttachment";
+  if (ownerKind === "semanticNode") return "SemanticNode";
+  if (ownerKind === "semanticRelation") return "SemanticRelation";
+  if (ownerKind === "semanticRelationType") return "SemanticRelationType";
+  if (ownerKind === "steeringDecision") return "SteeringDecision";
+  if (ownerKind === "steeringProposal") return "SteeringProposal";
+  if (ownerKind === "tag") return "Tag";
+  if (ownerKind === "userRoleAssignment") return "UserRoleAssignment";
   throw new Error(`Unsupported ModelAttachment ownerKind ${ownerKind}.`);
 }
 
