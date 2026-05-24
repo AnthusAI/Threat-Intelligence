@@ -180,7 +180,7 @@ async fn process_record(record: &Value, state: &AppState) -> Result<RecordOutcom
     if !claim_message(state, &message).await? {
         return Ok(RecordOutcome::Skipped);
     }
-    publish_message_status(state, &message.id, "RUNNING", None).await?;
+    publish_message_status(state, &message.id, &message.created_at, "RUNNING", None).await?;
     let lock_owner = format!(
         "{}:{}",
         std::env::var("AWS_LAMBDA_FUNCTION_NAME")
@@ -191,7 +191,14 @@ async fn process_record(record: &Value, state: &AppState) -> Result<RecordOutcom
     let result = answer_claimed_message(state, &message, &lock_owner).await;
     if let Err(error) = &result {
         mark_message_failed(state, &message, error).await?;
-        publish_message_status(state, &message.id, "FAILED", Some(&error.to_string())).await?;
+        publish_message_status(
+            state,
+            &message.id,
+            &message.created_at,
+            "FAILED",
+            Some(&error.to_string()),
+        )
+        .await?;
         release_thread_lock(state, &message, &lock_owner, None).await?;
     }
     result?;
@@ -210,6 +217,7 @@ async fn answer_claimed_message(
         id: format!("message-console-assistant-{}", Uuid::new_v4()),
         thread_id: message.thread_id.clone(),
         parent_message_id: Some(message.id.clone()),
+        created_at: now.clone(),
         sequence_number: starting_sequence + 1,
         role: "ASSISTANT".to_string(),
         message_kind: MESSAGE_KIND_CHAT_TURN.to_string(),
@@ -247,6 +255,7 @@ async fn answer_claimed_message(
             id: format!("message-console-tool-{}", Uuid::new_v4()),
             thread_id: message.thread_id.clone(),
             parent_message_id: Some(message.id.clone()),
+            created_at: now.clone(),
             sequence_number: next_sequence,
             role: tool_message.role,
             message_kind: tool_message.message_kind,
@@ -308,7 +317,14 @@ async fn answer_claimed_message(
     write_context_cache(&state.config.cache_root, &context)?;
 
     mark_message_completed(state, message).await?;
-    publish_message_status(state, &message.id, "COMPLETED", None).await?;
+    publish_message_status(
+        state,
+        &message.id,
+        &message.created_at,
+        "COMPLETED",
+        None,
+    )
+    .await?;
     release_thread_lock(state, message, lock_owner, Some(&context)).await?;
     update_thread_graphql(state, &message.thread_id, &context).await?;
     info!(
@@ -786,6 +802,7 @@ struct PersistedMessage {
     id: String,
     thread_id: String,
     parent_message_id: Option<String>,
+    created_at: String,
     sequence_number: i64,
     role: String,
     message_kind: String,
@@ -802,6 +819,7 @@ struct PersistedMessage {
 struct AssistantStreamWriter<'a> {
     state: &'a AppState,
     message_id: String,
+    message_created_at: String,
     content: String,
     last_flush_at: DateTime<Utc>,
     last_flush_len: usize,
@@ -812,6 +830,7 @@ impl<'a> AssistantStreamWriter<'a> {
         Self {
             state,
             message_id: message.id,
+            message_created_at: message.created_at,
             content: message.content,
             last_flush_at: Utc::now(),
             last_flush_len: 0,
@@ -843,6 +862,7 @@ impl<'a> AssistantStreamWriter<'a> {
             self.state,
             json!({
                 "id": self.message_id,
+                "createdAt": self.message_created_at,
                 "content": self.content,
                 "summary": truncate_summary(&self.content),
                 "responseStatus": "RUNNING",
@@ -860,6 +880,7 @@ impl<'a> AssistantStreamWriter<'a> {
             self.state,
             json!({
                 "id": self.message_id,
+                "createdAt": self.message_created_at,
                 "content": self.content,
                 "summary": truncate_summary(&self.content),
                 "responseStatus": "COMPLETED",
@@ -937,7 +958,7 @@ async fn create_message_graphql(
         "searchVisibility": EXPLICIT_SEARCH,
         "source": "papyrus-console",
         "newsroomFeedKey": NEWSROOM_FEED_CONSOLE_CHAT,
-        "createdAt": now,
+        "createdAt": message.created_at,
         "updatedAt": now,
         "metadata": message.metadata.to_string(),
     });
@@ -982,11 +1003,13 @@ async fn update_message_graphql(state: &AppState, input: Value) -> Result<()> {
 async fn publish_message_status(
     state: &AppState,
     message_id: &str,
+    message_created_at: &str,
     status: &str,
     error: Option<&str>,
 ) -> Result<()> {
     let mut input = json!({
         "id": message_id,
+        "createdAt": message_created_at,
         "responseStatus": status,
         "updatedAt": now_iso(),
     });
