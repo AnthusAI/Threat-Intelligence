@@ -449,6 +449,30 @@ const TAXONOMY_PROPOSAL_KINDS = new Set([
 
 const USER_POOL_AUTH_MODE = "userPool";
 type SemanticGraph = ReturnType<typeof createSemanticGraphSnapshot>;
+type ReferenceSubscriptionInput = {
+  filter?: {
+    newsroomFeedKey?: {
+      eq?: string;
+    };
+  };
+};
+type ReferenceSubscription = {
+  unsubscribe: () => void;
+};
+type ReferenceSubscriptionModel = {
+  onCreate: (input?: ReferenceSubscriptionInput) => {
+    subscribe: (observer: {
+      next: (value: unknown) => void;
+      error?: (error: unknown) => void;
+    }) => ReferenceSubscription;
+  };
+  onUpdate: (input?: ReferenceSubscriptionInput) => {
+    subscribe: (observer: {
+      next: (value: unknown) => void;
+      error?: (error: unknown) => void;
+    }) => ReferenceSubscription;
+  };
+};
 
 function NewsDeskTabLink({
   active,
@@ -668,6 +692,10 @@ function NewsDeskDashboard({
   onRefreshUserDirectory?: () => Promise<void>;
 }) {
   const dataClient = useMemo(() => generateClient<Schema>(), []);
+  const referenceSubscriptionClient = useMemo(
+    () => generateClient<Schema>({ authMode: USER_POOL_AUTH_MODE }),
+    [],
+  );
   const activeTab = initialTab;
   const isSectionPage = Boolean(sectionPageId);
   const [corpora, setCorpora] = useState(dashboard.corpora);
@@ -1148,24 +1176,19 @@ function NewsDeskDashboard({
 
   useEffect(() => {
     if (dashboard.isDemo || activeTab !== "references" || authState.status !== "signedIn" || !hasHydratedReferences) return;
-    let active = true;
-    const refreshReferences = async () => {
-      try {
-        const page = await loadNewsroomReferencePage({ limit: Math.max(100, referencesRef.current.length) });
-        if (!active) return;
-        for (const nextReference of page.items) {
-          applyReferenceRecord(nextReference);
-        }
-      } catch (error) {
-        console.warn("[Newsroom] Reference polling failed", error);
-      }
+    const referenceModel = referenceSubscriptionClient.models.Reference as unknown as ReferenceSubscriptionModel | undefined;
+    if (!referenceModel || typeof referenceModel.onCreate !== "function" || typeof referenceModel.onUpdate !== "function") return;
+    const input = { filter: { newsroomFeedKey: { eq: "references" } } };
+    const handleReferenceEvent = (value: unknown) => {
+      const nextReference = normalizeReferenceSubscriptionPayload(value);
+      if (!nextReference) return;
+      applyReferenceRecord(nextReference);
     };
-    const interval = window.setInterval(() => {
-      void refreshReferences();
-    }, 15000);
+    const createSubscription = referenceModel.onCreate(input).subscribe({ next: handleReferenceEvent });
+    const updateSubscription = referenceModel.onUpdate(input).subscribe({ next: handleReferenceEvent });
     return () => {
-      active = false;
-      window.clearInterval(interval);
+      createSubscription.unsubscribe();
+      updateSubscription.unsubscribe();
     };
   }, [
     activeTab,
@@ -1173,6 +1196,7 @@ function NewsDeskDashboard({
     authState.status,
     dashboard.isDemo,
     hasHydratedReferences,
+    referenceSubscriptionClient.models.Reference,
   ]);
 
   function runProposalAction(proposal: CategorySteeringProposal, action: ReviewAction) {
@@ -13147,6 +13171,16 @@ function uniqueSemanticSummaries(objects: SemanticObjectSummary[]): SemanticObje
   const map = new Map<string, SemanticObjectSummary>();
   for (const object of objects) map.set(`${object.kind}#${object.lineageId}`, object);
   return Array.from(map.values()).sort((left, right) => left.label.localeCompare(right.label));
+}
+
+function normalizeReferenceSubscriptionPayload(value: unknown): ReferenceRecord | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as { data?: unknown; id?: unknown };
+  if (typeof record.id === "string") return record as ReferenceRecord;
+  if (record.data && typeof record.data === "object" && typeof (record.data as { id?: unknown }).id === "string") {
+    return record.data as ReferenceRecord;
+  }
+  return null;
 }
 
 function buildReviewedReferenceRecord(

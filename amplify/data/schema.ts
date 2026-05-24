@@ -20,6 +20,7 @@ const categoryWriteGroups = ["editor", "admin"];
 const categoryAppendOnlyOperations: ("read" | "create")[] = ["read", "create"];
 const modelWithoutSubscriptions = <Fields extends Parameters<typeof a.model>[0]>(fields: Fields) =>
   a.model(fields).disableOperations(["subscriptions"]);
+const realtimeModel = <Fields extends Parameters<typeof a.model>[0]>(fields: Fields) => a.model(fields);
 
 export const schema = a.schema({
   UserProfile: modelWithoutSubscriptions({
@@ -1258,7 +1259,7 @@ export const schema = a.schema({
       allow.custom().to(authoringOperations),
     ]),
 
-  Reference: modelWithoutSubscriptions({
+  Reference: realtimeModel({
       id: a.id().required(),
       lineageId: a.id().required(),
       versionNumber: a.integer().required(),
@@ -1373,7 +1374,7 @@ export const schema = a.schema({
       allow.custom().to(authoringOperations),
     ]),
 
-  Message: modelWithoutSubscriptions({
+  Message: realtimeModel({
       id: a.id().required(),
       messageKind: a.string().required(),
       messageDomain: a.string().required(),
@@ -1422,7 +1423,7 @@ export const schema = a.schema({
       allow.custom().to(authoringOperations),
     ]),
 
-  MessageThread: modelWithoutSubscriptions({
+  MessageThread: realtimeModel({
       id: a.id().required(),
       threadKind: a.string().required(),
       status: a.string().required(),
