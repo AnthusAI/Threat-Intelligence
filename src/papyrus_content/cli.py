@@ -26,6 +26,8 @@ from .analysis_commands import (
     analysis_reindex_plan,
     analysis_run_now,
 )
+from .auth_commands import refresh_jwt
+from .batch_commands import register_catalog_batches, run_post_ingestion_enrichment_batches
 from .analysis_profiles import analysis_profiles, validate_analysis_profiles
 from .assignments import apply_assignment_action
 from .assignments_commands import (
@@ -78,6 +80,7 @@ from .categories_commands import (
     categories_sandbox_steering_config,
 )
 from .content_commands import content_inspect, content_list, content_schema_check
+from .dev_tests import run_category_mapper_tests, run_identifier_backfill_tests
 from .messages_commands import messages_export_legacy_comments, messages_import_legacy_comments
 from .references_commands import (
     references_attach_extracted_text,
@@ -99,7 +102,6 @@ from .references_commands import (
     references_review_curation,
     references_unlabel,
 )
-from .node_delegate import delegate_or_raise
 from .catalog import (
     assert_reference_catalog_plan_safety,
     build_prepared_reference_catalog,
@@ -129,6 +131,7 @@ from .newsroom_summary import (
     update_newsroom_summary_after_reference_registration,
 )
 from .options import normalize_non_negative_integer, normalize_string, parse_boolean_option, parse_options
+from .policy_checks import check_backend_node_scripts
 from .records import apply_record_changes, build_record_changes
 from .reference_policy import (
     normalize_reference_curation_status,
@@ -141,6 +144,7 @@ from .source_readiness import (
     build_reference_source_status_rows,
     reference_source_readiness,
 )
+from .seed_edition import seed_edition_content
 from .steering import (
     load_steering_config,
     require_corpus_config,
@@ -155,6 +159,7 @@ PORTED_COMMANDS = frozenset(
         "content:inspect",
         "content:schema-check",
         "content:list",
+        "content:seed-edition",
         "corpora:status",
         "corpora:worker-bootstrap",
         "corpora:sync-from-cloud",
@@ -245,6 +250,13 @@ PORTED_COMMANDS = frozenset(
         "categories:draft-promote",
         "categories:review-proposal",
         "categories:run-curation-cycle",
+        "auth:refresh-jwt",
+        "batch:register-catalog",
+        "batch:enrich-references",
+        "test:category-mappers",
+        "test:doi-backfill",
+        "test:identifier-backfill",
+        "policy:check-backend-node-scripts",
     }
 )
 
@@ -271,8 +283,7 @@ def main(argv: list[str] | None = None) -> int:
 def dispatch(group: str, command: str, flags: list[str]) -> None:
     route = f"{group}:{command}"
     if not is_ported_command(group, command):
-        delegate_or_raise(group, command, flags)
-        return
+        raise ValueError(f"Unsupported papyrus-content command: {group} {command}")
     if route == "content:inspect":
         content_inspect(flags)
     elif route == "content:schema-check":
@@ -280,6 +291,8 @@ def dispatch(group: str, command: str, flags: list[str]) -> None:
     elif route == "content:list":
         positional = [token for token in flags if not token.startswith("--")]
         content_list(positional[0] if positional else None, flags)
+    elif route == "content:seed-edition":
+        seed_edition_content(flags)
     elif route == "corpora:status":
         corpora_status(flags)
     elif route == "corpora:worker-bootstrap":
@@ -458,6 +471,18 @@ def dispatch(group: str, command: str, flags: list[str]) -> None:
         categories_review_proposal(flags)
     elif route == "categories:run-curation-cycle":
         categories_run_curation_cycle(flags)
+    elif route == "auth:refresh-jwt":
+        refresh_jwt(flags)
+    elif route == "batch:register-catalog":
+        register_catalog_batches(flags)
+    elif route == "batch:enrich-references":
+        run_post_ingestion_enrichment_batches(flags)
+    elif route == "test:category-mappers":
+        run_category_mapper_tests(flags)
+    elif route in {"test:doi-backfill", "test:identifier-backfill"}:
+        run_identifier_backfill_tests(flags)
+    elif route == "policy:check-backend-node-scripts":
+        check_backend_node_scripts(flags)
     else:
         raise ValueError(f"Unsupported papyrus-content command: {group} {command}")
 
@@ -1045,5 +1070,6 @@ def print_usage() -> None:
     print("  newsroom recount-summary/prune-attachments/backfill-feed-fields/")
     print("  backfill-operational-indexes/import-sections,")
     print("  relations import-types/backfill, messages export/import-legacy-comments,")
-    print("  categories import/export/draft/review/curation-cycle commands")
-    print("All other routes delegate to scripts/content-cli.cjs (Node).")
+    print("  categories import/export/draft/review/curation-cycle commands,")
+    print("  auth refresh-jwt, batch register-catalog/enrich-references,")
+    print("  and test category-mappers/doi-backfill/identifier-backfill")

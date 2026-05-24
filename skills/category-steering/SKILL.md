@@ -29,12 +29,12 @@ from configuration and steering state, not application logic.
 - `corpora/papyrus-analysis-profiles.yml`: YAML-backed Biblicus analysis and
   re-index profiles for topic modeling, classifier retraining, projection, and
   entity-graph work.
-- `scripts/content-cli.cjs`: CLI command registration.
-- `scripts/lib/papyrus-steering-config.cjs`: steering config parsing and corpus
+- `papyrus-content`: CLI command registration.
+- `src/papyrus_content/steering.py`: steering config parsing and corpus
   resolution.
-- `scripts/lib/papyrus-categories.cjs`: category/reference/proposal import and
+- `src/papyrus_content/categories_steering.py`: category/reference/proposal import and
   export logic.
-- `scripts/lib/papyrus-curation-cycle.cjs`: repeatable curation-cycle
+- `src/papyrus_content/curation_cycle.py`: repeatable curation-cycle
   orchestration.
 - `amplify/data/resource.ts`: GraphQL data model and auth rules.
 - `AGENTS.md`: current Papyrus operating constraints.

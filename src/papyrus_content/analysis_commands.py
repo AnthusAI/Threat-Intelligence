@@ -17,7 +17,6 @@ from .analysis_profiles import (
 )
 from .graphql_authoring import create_authoring_client
 from .ids import knowledge_corpus_id, safe_id
-from .content_cli_bridge import call_content_cli_export
 from .options import normalize_string, parse_options
 from .records import apply_record_changes, build_record_changes_tolerating_optional_models
 from .newsroom_summary import update_newsroom_summary_after_analysis_import, update_newsroom_summary_after_assignment_creates
@@ -72,11 +71,65 @@ def analysis_create_reindex_assignment(flags: list[str]) -> None:
 
 
 def analysis_run_now(flags: list[str]) -> None:
-    call_content_cli_export("runAnalysisReindexNowCli", flags)
+    options = parse_options(flags)
+    if not options.get("profile"):
+        raise ValueError("analysis run-now requires --profile <key>.")
+    plan = _build_analysis_reindex_plan_from_options(options, flags)
+    client, auth = create_authoring_client()
+    category_sets = client.list_records("CategorySet")
+    newsroom_sections = client.safe_list_records("NewsroomSection")
+    category_set = _select_analysis_category_set(category_sets, plan, options.get("category-set"))
+    section_target = _resolve_newsroom_section_target(newsroom_sections, options.get("section"))
+    assignment_plan = build_analysis_reindex_assignment_records(
+        plan,
+        category_set=category_set,
+        section_target=section_target,
+        actor_label=normalize_string(options.get("actor")) or "papyrus-content-cli",
+    )
+    from .assignments import apply_assignment_action
+    from .assignment_executors import execute_assignment_by_type
+
+    assignment_changes = build_record_changes_tolerating_optional_models(
+        client,
+        [{"modelName": record["modelName"], "expected": record["expected"]} for record in assignment_plan["records"]],
+    )
+    apply_record_changes(client, assignment_changes)
+    update_newsroom_summary_after_assignment_creates(
+        client,
+        assignment_changes,
+        actor_label=normalize_string(options.get("actor")) or "papyrus-content-cli",
+        reason=f"analysis run-now create {assignment_plan['assignment']['id']}",
+    )
+    apply_assignment_action(
+        client,
+        auth_claims=auth,
+        action="claim",
+        assignment_id=assignment_plan["assignment"]["id"],
+        options=options,
+        actor_label=normalize_string(options.get("actor")) or "papyrus-content-cli",
+    )
+    execution_result = execute_assignment_by_type(client, assignment_plan["assignment"]["id"], options)
+    apply_assignment_action(
+        client,
+        auth_claims=auth,
+        action="complete",
+        assignment_id=assignment_plan["assignment"]["id"],
+        options=options,
+        actor_label=normalize_string(options.get("actor")) or "papyrus-content-cli",
+    )
+    print(json.dumps(execution_result, indent=2))
 
 
 def analysis_execute_assignment(flags: list[str]) -> None:
-    call_content_cli_export("executeAnalysisReindexAssignmentCli", flags)
+    options = parse_options(flags)
+    assignment_id = normalize_string(options.get("assignment"))
+    if not assignment_id:
+        raise ValueError("analysis execute-assignment requires --assignment <id>.")
+    client, _ = create_authoring_client()
+    from .assignment_executors import execute_assignment_by_type
+
+    result = execute_assignment_by_type(client, assignment_id, options)
+    print(json.dumps(result, indent=2))
 
 
 def analysis_graph_artifacts(flags: list[str]) -> None:

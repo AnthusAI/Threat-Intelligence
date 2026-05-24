@@ -54,7 +54,7 @@ verification have succeeded.
   S3 prefixes, roles, and classifier ids.
 - `skills/category-steering/SKILL.md`: production JWT setup, curation-cycle
   commands, S3 corpus rules, and Biblicus escalation rules.
-- `scripts/lib/papyrus-categories.cjs`: current reference, attachment, message,
+- `src/papyrus_content/categories_steering.py`: current reference, attachment, message,
   assignment, and semantic-relation import mappers.
 - `amplify/data/resource.ts`: `Reference`, `ReferenceAttachment`,
   `Message`, `Assignment`, and `SemanticRelation` schema/auth rules.

@@ -28,7 +28,7 @@ publication slots.
   research plus parallel reporting agents for one topic.
 - `amplify/data/resource.ts`: `Assignment`, `AssignmentEvent`,
   `SemanticRelation`, `Edition`, `Item`, and related auth rules.
-- `scripts/content-cli.cjs`: current authoring commands. Do not invent CLI
+- `papyrus-content`: current authoring commands. Do not invent CLI
   commands that are not present.
 
 If the edition depends on fresh corpus evidence, run the reference-intake and

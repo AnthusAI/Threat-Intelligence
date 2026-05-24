@@ -135,7 +135,7 @@ npm run content -- newsroom recount-summary --apply
 ```
 
 Use the shared summary delta helpers and `updateNewsroomSummary` integration
-paths in `scripts/content-cli.cjs`; do not hand-edit
+paths in `papyrus-content`; do not hand-edit
 `knowledge-raw-payload-newsroom-summary-current`.
 
 ## Standard Research Flow
@@ -675,7 +675,7 @@ Use these checks after changing research workflow code or docs:
 ```bash
 poetry run python procedures/newsroom/tests/test_newsroom_tools.py
 tactus validate procedures/newsroom/researcher.tac
-node scripts/test-category-mappers.cjs
+npm run test:categories
 npm run typecheck
 ```
 

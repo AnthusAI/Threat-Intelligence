@@ -488,6 +488,8 @@ npm run content -- categories import-projection --config corpora/papyrus-steerin
 npm run content -- relations import-types --config corpora/papyrus-semantic-relation-types.yml
 npm run content -- relations backfill --config corpora/papyrus-semantic-relation-types.yml --apply
 npm run test:bdd
+npm run test:bdd:backend
+npm run test:bdd:agent-live
 ```
 
 ## Python Newsroom Package
@@ -541,6 +543,12 @@ by git, while `.env.example` is intentionally committed as the template.
 `npm run test:bdd` runs the Gherkin layout scenarios against a running app. It
 defaults to `http://localhost:3001`; set `PAPYRUS_BASE_URL` to test another
 server.
+
+`npm run test:bdd:backend` runs deterministic backend Behave features (Python)
+and excludes live-agent scenarios.
+
+`npm run test:bdd:agent-live` runs only the backend live-agent Gherkin smoke
+suite via Behave (Python).
 
 In development, no query string means the live GraphQL edition. Use
 `/?scenario=current-edition` or another named scenario id only when you need a
@@ -651,7 +659,7 @@ CLI cloud resolution contract:
 
 - Required CLI procedure aliases are defined in
   `corpora/papyrus-required-procedures.json`
-- `scripts/content-cli.cjs` resolves required procedure keys by alias, fetches
+- `papyrus-content` resolves required procedure keys by alias, fetches
   cloud definitions by key, writes the selected `ProcedureVersion.tactusSource`
   into the run directory, executes that source with `tactus run`, and records
   the parsed output/error back on `ProcedureRun`
@@ -804,7 +812,7 @@ inside the feature file.
   `PublicationItem` objects.
 - `amplify/` defines the Gen2 Auth, Data, Storage, and seed resources for the
   cloud content backend.
-- `scripts/content-cli.cjs` is the JWT-backed content authoring CLI for
+- `papyrus-content` is the JWT-backed content authoring CLI for
   GraphQL inspect/list/diff/sync workflows.
 - `lib/content-types.ts` defines `EditionContent` and `ContentRepository`.
 - `lib/publication-items.ts` defines generic publication items and article

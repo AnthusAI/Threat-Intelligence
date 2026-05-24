@@ -5,14 +5,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from papyrus_newsroom.coverage_theme import editions_plan as newsroom_editions_plan
+
 from .env import PAPYRUS_ROOT
 from .graphql_authoring import PapyrusGraphQLAuthoringClient
-from .node_lib_bridge import call_node_export
 from .options import normalize_string, parse_comma_list
 
 RESEARCH_EDITION_ASSIGNMENT_TYPE = "research.edition-candidate"
 REPORTING_EDITION_ASSIGNMENT_TYPE = "reporting.edition-candidate"
-EDITION_PLANNING_MODULE = "scripts/lib/papyrus-edition-planning.cjs"
 
 
 def load_edition_planning_state(client: PapyrusGraphQLAuthoringClient) -> dict[str, Any]:
@@ -32,11 +32,81 @@ def load_edition_planning_state(client: PapyrusGraphQLAuthoringClient) -> dict[s
 
 
 def build_edition_planning_plan(state: dict[str, Any], options: dict[str, Any]) -> dict[str, Any]:
-    return call_node_export(EDITION_PLANNING_MODULE, "buildEditionPlanningPlan", state, options)
+    del state
+    edition_date = normalize_string(options.get("editionDate"))
+    if not edition_date:
+        raise ValueError("Edition planning requires editionDate.")
+    sections = parse_comma_list(options.get("sectionTargets") or options.get("sections")) or []
+    section_budgets = _parse_section_budgets(options.get("sectionBudgets"))
+    if not section_budgets:
+        default_slots = int(options.get("publicationSlots") or 1)
+        section_budgets = {section: default_slots for section in sections}
+    corpus_key = normalize_string(options.get("corpusKey")) or "AI-ML-research"
+    signal_topic = normalize_string(options.get("topic")) or normalize_string(options.get("focusCategories")) or corpus_key
+    coverage_key = normalize_string(options.get("coverageKey")) or f"coverage.{signal_topic.replace(' ', '-').lower()}"
+
+    payload = newsroom_editions_plan(
+        date=edition_date,
+        sections=list(section_budgets.keys()) or sections or ["general"],
+        section_budgets=section_budgets or {"general": 1},
+        corpus_key=corpus_key,
+        category_key=normalize_string(options.get("categoryKey")) or "",
+        topic=signal_topic,
+        coverage_key=coverage_key,
+        theme_limit=int(options.get("maxAssignments") or 3),
+        run_id=normalize_string(options.get("runId")) or "",
+        apply=False,
+        now=normalize_string(options.get("now")) or "",
+    )
+
+    records = payload.get("records") or []
+    create_count = sum(1 for record in records if record.get("action") == "create")
+    update_count = sum(1 for record in records if record.get("action") == "update")
+    noop_count = sum(1 for record in records if record.get("action") == "noop")
+    assignment_records = [record.get("expected") or {} for record in records if record.get("modelName") == "Assignment"]
+    return {
+        "generatedAt": _utc_now(),
+        "editionDate": edition_date,
+        "edition": {
+            "id": f"edition-{edition_date}",
+            "slug": normalize_string(options.get("editionSlug")) or edition_date,
+            "status": "draft",
+        },
+        "categorySet": {},
+        "sections": list(section_budgets.keys()) or sections,
+        "assignments": assignment_records,
+        "records": records,
+        "summary": {
+            "assignmentTypeKey": options.get("assignmentTypeKey") or RESEARCH_EDITION_ASSIGNMENT_TYPE,
+            "contextBackedAssignmentCount": len(assignment_records),
+            "createCount": create_count,
+            "updateCount": update_count,
+            "noopCount": noop_count,
+            "sectionBudgets": [
+                {"section": {"id": key, "type": "floating"}, "slots": value}
+                for key, value in section_budgets.items()
+            ],
+        },
+        "warnings": payload.get("warnings") or [],
+        "desks": [
+            {
+                "categoryKey": theme.get("categoryKey") or theme.get("coverageKey"),
+                "opportunityScore": theme.get("summary", {}).get("coverageThemeCount", 0),
+                "referenceCount": theme.get("summary", {}).get("acceptedReferenceCount", 0),
+                "signalCount": 1,
+            }
+            for theme in payload.get("coverageThemes") or []
+        ],
+        "focusCoverage": [],
+        "raw": payload,
+    }
 
 
 def verify_edition_planning_plan(state: dict[str, Any], plan: dict[str, Any]) -> dict[str, Any]:
-    return call_node_export(EDITION_PLANNING_MODULE, "verifyEditionPlanningPlan", state, plan)
+    assignment_ids = {assignment.get("id") for assignment in plan.get("assignments") or [] if assignment.get("id")}
+    existing_ids = {assignment.get("id") for assignment in state.get("assignments") or [] if assignment.get("id")}
+    missing = sorted(assignment_ids - existing_ids)
+    return {"ok": not missing, "failures": [f"missing assignment {assignment_id}" for assignment_id in missing]}
 
 
 def apply_edition_planning_plan(client: PapyrusGraphQLAuthoringClient, plan: dict[str, Any]) -> dict[str, Any]:
@@ -79,9 +149,7 @@ def build_edition_planning_command_plan(
         {
             "editionDate": edition_date,
             "editionSlug": options.get("slug"),
-            "assignmentTypeKey": REPORTING_EDITION_ASSIGNMENT_TYPE
-            if assignment_type == "reporting"
-            else assignment_type,
+            "assignmentTypeKey": REPORTING_EDITION_ASSIGNMENT_TYPE if assignment_type == "reporting" else assignment_type,
             "topDeskCount": options.get("top-desks"),
             "publicationSlots": options.get("slots"),
             "overassignmentRatio": options.get("ratio"),
@@ -92,6 +160,8 @@ def build_edition_planning_command_plan(
             "sectionBudgets": parse_comma_list(options.get("section-budgets")),
             "contextProfile": options.get("context-profile"),
             "targetSystemType": options.get("target-system-type"),
+            "categoryKey": options.get("category-key"),
+            "corpusKey": options.get("corpus-key"),
         },
     )
     report = write_edition_planning_report(
@@ -126,11 +196,6 @@ def print_edition_planning_summary(plan: dict[str, Any], report: dict[str, str],
     for budget in summary.get("sectionBudgets") or []:
         section = budget.get("section") or {}
         print(f"section-budget\t{section.get('id')}\tslots={budget.get('slots')}\ttype={section.get('type')}")
-    for coverage in plan.get("focusCoverage") or []:
-        print(
-            f"focus-coverage\t{coverage.get('deskCategoryKey')}\t{coverage.get('laneKey')}\t"
-            f"{coverage.get('focusCategoryKey')}\t{coverage.get('count')}\tqueue={coverage.get('queueKey') or '-'}"
-        )
     for desk in plan.get("desks") or []:
         print(
             f"desk\t{desk.get('categoryKey')}\t{desk.get('opportunityScore')}\t"
@@ -144,3 +209,22 @@ def timestamp_for_path(value: str) -> str:
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _parse_section_budgets(raw: Any) -> dict[str, int]:
+    if isinstance(raw, dict):
+        return {str(key): int(value) for key, value in raw.items()}
+    budgets: dict[str, int] = {}
+    for token in raw or []:
+        text = str(token)
+        if ":" not in text:
+            continue
+        key, value = text.split(":", 1)
+        key = key.strip()
+        if not key:
+            continue
+        try:
+            budgets[key] = max(int(value.strip()), 0)
+        except ValueError:
+            continue
+    return budgets

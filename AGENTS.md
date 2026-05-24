@@ -28,6 +28,10 @@ rendering contracts.
 - Do not commit unless the user explicitly asks.
 - Preserve unrelated uncommitted work. This project is often dirty because it is
   being iterated in conversation.
+- Papyrus is Python-first for backend workflows. Create new backend utilities,
+  CLIs, automation, API tests, and backend BDD harnesses in Python by default.
+  Use JavaScript/TypeScript only for the Next.js/React frontend and
+  frontend-specific test harnesses.
 - Do not add backward-compatibility fallbacks for old schema, GraphQL, content,
   layout-plan, or CLI shapes. Fallback read queries, dual-shape normalizers,
   silent compatibility branches, and long-lived migration shims are technical
@@ -38,6 +42,8 @@ rendering contracts.
   it to restore production immediately. Keep it narrow, document exactly why it
   exists, and remove it from normal read, authoring, repository, and solver
   paths as soon as the data or deployment is corrected.
+- Default to clean breaks. Do not add fallback behavior, compatibility shims, or
+  multi-path read/write logic unless the user explicitly requests that fallback.
 - Keep the current one-page React flipper. Do not reintroduce Turn.js, jQuery,
   or DOM-mutating layout loops.
 - Do not make React measure rendered DOM to decide layout. The solver should
@@ -352,11 +358,12 @@ GraphQL (or `?scenario=<id>` fixture overrides for tests/debug only).
   `PAPYRUS_JWT_SECRET`. The model rules allow public reads, Cognito `editor`
   group writes, and custom JWT-authorizer writes.
 
-`scripts/` owns the content authoring CLI:
+`src/papyrus_content` owns the content authoring CLI:
 
-- `scripts/content-cli.cjs` is the entrypoint exposed by `npm run content --`.
+- `poetry run papyrus-content` is the canonical backend CLI surfaced by
+  `npm run content --`.
 - The CLI is GraphQL authoring and inspection.
-- `scripts/lib/papyrus-graphql-authoring.cjs` owns JWT-authenticated GraphQL
+- `src/papyrus_content/graphql_authoring.py` owns JWT-authenticated GraphQL
   authoring calls.
 - `content inspect`, `content list`, and `content delete all --yes` are the
   stable deployed-API operations. `content diff` and `content sync` are
@@ -603,6 +610,7 @@ npm run lint
 npm run typecheck
 npm run build
 npm run test:bdd
+npm run test:bdd:agent-live
 ```
 
 Amplify checks when cloud content changes:
@@ -650,3 +658,6 @@ do not stop or restart it unless asked.
 `npm run test:bdd` expects a running app and defaults to `http://localhost:3001`.
 Use `PAPYRUS_BASE_URL` for another server. Use `PAPYRUS_HEADLESS=false` or
 `npm run test:bdd:headed` when debugging geometry visually.
+
+`npm run test:bdd:agent-live` runs backend live-agent BDD (Behave/Python),
+not frontend browser geometry checks.

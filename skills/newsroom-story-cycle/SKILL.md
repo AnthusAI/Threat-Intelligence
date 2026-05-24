@@ -206,7 +206,7 @@ npm run content -- assignments run-copywriting \
 For story-cycle or packet-review changes, run:
 
 ```bash
-node scripts/test-category-mappers.cjs
+npm run test:categories
 python procedures/newsroom/tests/test_newsroom_tools.py
 ```
 
