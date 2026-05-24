@@ -37,6 +37,7 @@ import {
   type NewsroomRecordPage,
 } from "./news-desk-taxonomy-client";
 import { listConsoleThreads } from "../lib/console-chat-client";
+import { NewsroomConsoleProgressToggle } from "./papyrus-console-shell";
 import { useOptionalNewsDeskClient } from "./news-desk-client-provider";
 import type { ReaderAuthSnapshot } from "./reader-auth-state";
 import type {
@@ -11934,17 +11935,24 @@ function NewsroomProgressBackLink({
         Back to Papyrus
       </Link>
       {searchAction ? (
-        <button
-          type="button"
-          className="edition-progress__button edition-progress__button--next edition-progress__button--search"
-          aria-label="Search knowledge base (semantic + ontology)"
-          title="Search (semantic + ontology)"
-          disabled={searchAction.disabled}
-          onClick={searchAction.onPress}
-        >
-          <SearchMarkIcon />
-        </button>
-      ) : null}
+        <div className="edition-progress__trailing">
+          <NewsroomConsoleProgressToggle />
+          <button
+            type="button"
+            className="edition-progress__button edition-progress__button--next edition-progress__button--search"
+            aria-label="Search knowledge base (semantic + ontology)"
+            title="Search (semantic + ontology)"
+            disabled={searchAction.disabled}
+            onClick={searchAction.onPress}
+          >
+            <SearchMarkIcon />
+          </button>
+        </div>
+      ) : (
+        <div className="edition-progress__trailing">
+          <NewsroomConsoleProgressToggle />
+        </div>
+      )}
     </nav>
   );
 }

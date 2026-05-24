@@ -10,8 +10,10 @@ export type ConsoleChatResponderStackProps = NestedStackProps & {
   messageStreamArn: string;
   threadTable: ITable;
   projectRoot: string;
+  graphqlEndpoint: string;
   responseTarget?: string;
   openaiApiKeySsmParam?: string;
+  jwtSecretSsmParam?: string;
   model?: string;
   prebuiltImageUri?: string;
 };
@@ -27,12 +29,15 @@ export class ConsoleChatResponderStack extends NestedStack {
       PAPYRUS_MESSAGE_TABLE_NAME: props.messageTable.tableName,
       PAPYRUS_MESSAGE_THREAD_TABLE_NAME: props.threadTable.tableName,
       PAPYRUS_MESSAGE_THREAD_SEQUENCE_INDEX_NAME: "messagesByThreadSequence",
+      PAPYRUS_GRAPHQL_ENDPOINT: props.graphqlEndpoint,
       PAPYRUS_CONSOLE_RESPONSE_TARGET: responseTarget,
       PAPYRUS_CONSOLE_MODEL: props.model?.trim() || process.env.PAPYRUS_CONSOLE_MODEL || "gpt-4o-mini",
       PAPYRUS_CONSOLE_CONTEXT_CACHE_ROOT: "/tmp/papyrus-console/thread-context",
     };
     const openaiParam = props.openaiApiKeySsmParam?.trim() || process.env.PAPYRUS_CONSOLE_OPENAI_API_KEY_SSM_PARAM || "";
     if (openaiParam) environment.PAPYRUS_CONSOLE_OPENAI_API_KEY_SSM_PARAM = openaiParam;
+    const jwtParam = props.jwtSecretSsmParam?.trim() || process.env.PAPYRUS_CONSOLE_JWT_SECRET_SSM_PARAM || process.env.PAPYRUS_JWT_SECRET_SSM_PARAM || "";
+    if (jwtParam) environment.PAPYRUS_CONSOLE_JWT_SECRET_SSM_PARAM = jwtParam;
 
     const imageUri = props.prebuiltImageUri?.trim() || process.env.PAPYRUS_CONSOLE_RESPONDER_IMAGE_URI?.trim() || "";
     let code: DockerImageCode;

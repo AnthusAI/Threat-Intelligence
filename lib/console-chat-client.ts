@@ -38,6 +38,9 @@ const CONSOLE_MESSAGE_FIELDS = `
   content
   summary
   responseStatus
+  responseOwner
+  responseStartedAt
+  responseCompletedAt
   responseError
   createdAt
   updatedAt
@@ -153,9 +156,39 @@ export type ConsoleChatMessage = {
   content?: string | null;
   summary?: string | null;
   responseStatus?: string | null;
+  responseOwner?: string | null;
+  responseStartedAt?: string | null;
+  responseCompletedAt?: string | null;
   responseError?: string | null;
   createdAt: string;
   updatedAt?: string | null;
+};
+
+type ConsoleMessageSubscriptionInput = {
+  filter?: {
+    threadId?: {
+      eq?: string;
+    };
+  };
+};
+
+type ConsoleMessageSubscription = {
+  unsubscribe: () => void;
+};
+
+type ConsoleMessageSubscriptionModel = {
+  onCreate: (input?: ConsoleMessageSubscriptionInput) => {
+    subscribe: (observer: {
+      next: (value: unknown) => void;
+      error?: (error: unknown) => void;
+    }) => ConsoleMessageSubscription;
+  };
+  onUpdate: (input?: ConsoleMessageSubscriptionInput) => {
+    subscribe: (observer: {
+      next: (value: unknown) => void;
+      error?: (error: unknown) => void;
+    }) => ConsoleMessageSubscription;
+  };
 };
 
 type GraphQLClient = {
@@ -270,4 +303,42 @@ export async function createConsoleMessage(input: CreateConsoleMessageInput): Pr
     authMode: USER_POOL_AUTH_MODE,
   });
   return assertGraphQL<ConsoleChatMessage>(response, "createMessage");
+}
+
+export function subscribeConsoleMessages(
+  threadId: string,
+  onMessage: (message: ConsoleChatMessage) => void,
+  onError?: (error: unknown) => void,
+): () => void {
+  configureAmplifyClient();
+  const client = generateClient<Schema>() as unknown as {
+    models: {
+      Message?: ConsoleMessageSubscriptionModel;
+    };
+  };
+  const messageModel = client.models.Message;
+  if (!messageModel || typeof messageModel.onCreate !== "function" || typeof messageModel.onUpdate !== "function") {
+    return () => undefined;
+  }
+  const input = { filter: { threadId: { eq: threadId } } };
+  const handleEvent = (value: unknown) => {
+    const message = normalizeConsoleMessageSubscriptionPayload(value);
+    if (message) onMessage(message);
+  };
+  const createSubscription = messageModel.onCreate(input).subscribe({ next: handleEvent, error: onError });
+  const updateSubscription = messageModel.onUpdate(input).subscribe({ next: handleEvent, error: onError });
+  return () => {
+    createSubscription.unsubscribe();
+    updateSubscription.unsubscribe();
+  };
+}
+
+function normalizeConsoleMessageSubscriptionPayload(value: unknown): ConsoleChatMessage | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as { data?: unknown; id?: unknown };
+  if (typeof record.id === "string") return record as ConsoleChatMessage;
+  if (record.data && typeof record.data === "object" && typeof (record.data as { id?: unknown }).id === "string") {
+    return record.data as ConsoleChatMessage;
+  }
+  return null;
 }

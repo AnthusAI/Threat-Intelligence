@@ -6,6 +6,7 @@ import {
   createConsoleThread,
   listConsoleMessagesByThread,
   listConsoleThreads,
+  subscribeConsoleMessages,
   updateConsoleThread,
   type ConsoleChatMessage,
   type ConsoleChatThread,
@@ -13,7 +14,20 @@ import {
 import { loadReaderSessionSnapshot, type ReaderSessionSnapshot } from "./reader-auth-state";
 import { Shimmer } from "./ai-elements/shimmer";
 import { Suggestion, Suggestions } from "./ai-elements/suggestion";
-import { type FormEvent, type KeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CONNECTION_STATE_CHANGE, ConnectionState } from "aws-amplify/data";
+import { Hub } from "aws-amplify/utils";
+import {
+  createContext,
+  type FormEvent,
+  type KeyboardEvent,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 const CONSOLE_STARTER_SUGGESTIONS = [
   "Start a research assignment",
@@ -32,6 +46,14 @@ const CONSOLE_RESPONSE_TARGET = process.env.NEXT_PUBLIC_PAPYRUS_CONSOLE_RESPONSE
 type PapyrusConsoleShellProps = {
   children: ReactNode;
 };
+
+type PapyrusConsoleContextValue = {
+  open: boolean;
+  shouldOfferConsole: boolean;
+  toggleOpen: () => void;
+};
+
+const PapyrusConsoleContext = createContext<PapyrusConsoleContextValue | null>(null);
 
 export function PapyrusConsoleShell({ children }: PapyrusConsoleShellProps) {
   const pathname = usePathname();
@@ -60,7 +82,7 @@ export function PapyrusConsoleShell({ children }: PapyrusConsoleShellProps) {
     };
   }, []);
 
-  const toggleOpen = () => {
+  const toggleOpen = useCallback(() => {
     setOpen((current) => {
       const next = !current;
       try {
@@ -70,18 +92,21 @@ export function PapyrusConsoleShell({ children }: PapyrusConsoleShellProps) {
       }
       return next;
     });
-  };
+  }, []);
+
+  const consoleContext = useMemo<PapyrusConsoleContextValue>(() => ({
+    open,
+    shouldOfferConsole,
+    toggleOpen,
+  }), [open, shouldOfferConsole, toggleOpen]);
 
   return (
-    <>
+    <PapyrusConsoleContext.Provider value={consoleContext}>
       <div className={canUseConsole && open ? "papyrus-console-page papyrus-console-page--open" : "papyrus-console-page"}>
         {children}
       </div>
       {shouldOfferConsole ? (
         <aside className={open ? "papyrus-console papyrus-console--open" : "papyrus-console"} aria-label="Papyrus console">
-          <button className="papyrus-console__tab" onClick={toggleOpen} type="button" aria-expanded={open} aria-label={open ? "Close console" : "Open console"}>
-            <MessagesSquareIcon />
-          </button>
           {open ? (
             canUseConsole
               ? <ConsolePanel actorLabel={session?.auth.label ?? "Papyrus editor"} onClose={toggleOpen} />
@@ -89,7 +114,25 @@ export function PapyrusConsoleShell({ children }: PapyrusConsoleShellProps) {
           ) : null}
         </aside>
       ) : null}
-    </>
+    </PapyrusConsoleContext.Provider>
+  );
+}
+
+export function NewsroomConsoleProgressToggle() {
+  const consoleContext = useContext(PapyrusConsoleContext);
+  if (!consoleContext?.shouldOfferConsole || consoleContext.open) return null;
+
+  return (
+    <button
+      type="button"
+      className="edition-progress__button edition-progress__button--next edition-progress__button--console"
+      aria-expanded={false}
+      aria-label="Open console"
+      onClick={consoleContext.toggleOpen}
+      title="Open console"
+    >
+      <MessagesSquareIcon />
+    </button>
   );
 }
 
@@ -117,7 +160,6 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const loadRef = useRef<() => Promise<void>>(async () => undefined);
   const hasLoadedRef = useRef(false);
   const activeThreadIdRef = useRef<string | null>(null);
   const threadRef = useRef<ConsoleChatThread | null>(null);
@@ -130,8 +172,13 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
     [...messages].sort((left, right) => (left.sequenceNumber ?? 0) - (right.sequenceNumber ?? 0) || left.createdAt.localeCompare(right.createdAt))
   ), [messages]);
 
+  const mergeMessage = useCallback((message: ConsoleChatMessage) => {
+    setMessages((current) => upsertConsoleMessage(current, message));
+  }, []);
+
   const loadMessages = useCallback(async (threadId: string) => {
-    setMessages(await listConsoleMessagesByThread(threadId));
+    const nextMessages = await listConsoleMessagesByThread(threadId);
+    setMessages(nextMessages);
   }, []);
 
   const loadThreads = useCallback(async () => {
@@ -177,16 +224,39 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
   }, [loadMessages, loadThreads, resolveActiveThread]);
 
   useEffect(() => {
-    loadRef.current = loadThread;
+    void loadThread();
   }, [loadThread]);
 
   useEffect(() => {
-    void loadThread();
-    const interval = window.setInterval(() => {
-      void loadRef.current();
-    }, 2500);
-    return () => window.clearInterval(interval);
-  }, [loadThread]);
+    if (!thread?.id) return;
+    const activeThreadId = thread.id;
+    const unsubscribe = subscribeConsoleMessages(
+      activeThreadId,
+      (message) => {
+        if (message.threadId !== activeThreadIdRef.current) return;
+        mergeMessage(message);
+      },
+      (nextError) => {
+        console.warn("[PapyrusConsole] Console message subscription failed", nextError);
+      },
+    );
+    return unsubscribe;
+  }, [mergeMessage, thread?.id]);
+
+  useEffect(() => {
+    let previousState: ConnectionState | null = null;
+    const unsubscribe = Hub.listen("api", ({ payload }) => {
+      if (payload.event !== CONNECTION_STATE_CHANGE) return;
+      const data = payload.data as { connectionState?: ConnectionState } | undefined;
+      const nextState = data?.connectionState;
+      if (previousState && previousState !== ConnectionState.Connected && nextState === ConnectionState.Connected) {
+        const activeThreadId = activeThreadIdRef.current;
+        if (activeThreadId) void loadMessages(activeThreadId);
+      }
+      previousState = nextState ?? previousState;
+    });
+    return () => unsubscribe();
+  }, [loadMessages]);
 
   const selectThread = useCallback((threadId: string) => {
     activeThreadIdRef.current = threadId;
@@ -258,7 +328,7 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
         responseStatus: "PENDING",
         createdAt: now,
       };
-      setMessages((current) => [...current, message]);
+      mergeMessage(message);
       await createConsoleMessage({
         ...message,
         messageDomain: CONSOLE_MESSAGE_DOMAIN,
@@ -318,7 +388,10 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
     event.currentTarget.form?.requestSubmit();
   }
 
-  const pending = sortedMessages.some((message) => message.role === "USER" && message.responseStatus === "PENDING");
+  const pending = sortedMessages.some((message) => (
+    (message.role === "USER" && ["PENDING", "RUNNING"].includes(message.responseStatus ?? ""))
+    || (message.role === "ASSISTANT" && message.responseStatus === "RUNNING" && !(message.content ?? "").trim())
+  ));
 
   return (
     <div className="papyrus-console__panel">
@@ -400,6 +473,14 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
 function truncateConsoleSummary(value: string): string {
   const normalized = value.replace(/\s+/g, " ").trim();
   return normalized.length > 180 ? `${normalized.slice(0, 179)}…` : normalized;
+}
+
+function upsertConsoleMessage(messages: ConsoleChatMessage[], message: ConsoleChatMessage): ConsoleChatMessage[] {
+  const index = messages.findIndex((entry) => entry.id === message.id);
+  const next = index >= 0
+    ? messages.map((entry, currentIndex) => currentIndex === index ? { ...entry, ...message } : entry)
+    : [...messages, message];
+  return next.sort((left, right) => (left.sequenceNumber ?? 0) - (right.sequenceNumber ?? 0) || left.createdAt.localeCompare(right.createdAt));
 }
 
 function formatConsoleThreadOption(thread: ConsoleChatThread): string {

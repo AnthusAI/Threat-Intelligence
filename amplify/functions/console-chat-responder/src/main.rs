@@ -3,7 +3,10 @@ use aws_config::BehaviorVersion;
 use aws_sdk_dynamodb::Client as DynamoClient;
 use aws_sdk_dynamodb::types::AttributeValue;
 use aws_sdk_ssm::Client as SsmClient;
-use chrono::{Duration, Utc};
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use chrono::{DateTime, Duration, Utc};
+use futures_util::StreamExt;
 use lambda_runtime::{Error, LambdaEvent, run, service_fn};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -25,6 +28,8 @@ const NEWSROOM_FEED_CONSOLE_CHAT: &str = "consoleChat";
 const CHAT_DETAIL_LAYER: &str = "chat_detail";
 const EXPLICIT_SEARCH: &str = "explicit";
 const CONTEXT_CACHE_SCHEMA_VERSION: u32 = 1;
+const STREAM_FLUSH_INTERVAL_MS: i64 = 200;
+const STREAM_FLUSH_CHARS: usize = 96;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
@@ -34,11 +39,13 @@ async fn main() -> Result<(), Error> {
     let ssm = SsmClient::new(&aws_config);
     let config = AppConfig::from_env();
     let openai_api_key = load_openai_api_key(&ssm, &config).await?;
+    let jwt_secret = load_jwt_secret(&ssm, &config).await?;
     let state = Arc::new(AppState {
         config,
         dynamo,
         http: reqwest::Client::new(),
         openai_api_key,
+        jwt_secret,
     });
     run(service_fn(move |event| {
         let state = Arc::clone(&state);
@@ -55,6 +62,12 @@ struct AppConfig {
     response_target: String,
     model: String,
     openai_api_key_ssm_param: Option<String>,
+    graphql_endpoint: String,
+    jwt_secret_ssm_param: Option<String>,
+    jwt_issuer: String,
+    jwt_subject: String,
+    jwt_audience: String,
+    jwt_scope: String,
     cache_root: PathBuf,
 }
 
@@ -70,6 +83,21 @@ impl AppConfig {
             response_target: env_or("PAPYRUS_CONSOLE_RESPONSE_TARGET", DEFAULT_RESPONSE_TARGET),
             model: env_or("PAPYRUS_CONSOLE_MODEL", DEFAULT_MODEL),
             openai_api_key_ssm_param: optional_env("PAPYRUS_CONSOLE_OPENAI_API_KEY_SSM_PARAM"),
+            graphql_endpoint: required_env("PAPYRUS_GRAPHQL_ENDPOINT"),
+            jwt_secret_ssm_param: optional_env("PAPYRUS_CONSOLE_JWT_SECRET_SSM_PARAM")
+                .or_else(|| optional_env("PAPYRUS_JWT_SECRET_SSM_PARAM")),
+            jwt_issuer: optional_env("PAPYRUS_CONSOLE_JWT_ISSUER")
+                .or_else(|| optional_env("PAPYRUS_JWT_ISSUER"))
+                .unwrap_or_else(|| "papyrus-cli".to_string()),
+            jwt_subject: optional_env("PAPYRUS_CONSOLE_JWT_SUBJECT")
+                .or_else(|| optional_env("PAPYRUS_JWT_SUBJECT"))
+                .unwrap_or_else(|| "papyrus-console-responder".to_string()),
+            jwt_audience: optional_env("PAPYRUS_CONSOLE_JWT_AUDIENCE")
+                .or_else(|| optional_env("PAPYRUS_JWT_AUDIENCE"))
+                .unwrap_or_else(|| "papyrus-authoring".to_string()),
+            jwt_scope: optional_env("PAPYRUS_CONSOLE_JWT_SCOPE")
+                .or_else(|| optional_env("PAPYRUS_JWT_SCOPE"))
+                .unwrap_or_else(|| "papyrus:write".to_string()),
             cache_root: PathBuf::from(env_or(
                 "PAPYRUS_CONSOLE_CONTEXT_CACHE_ROOT",
                 "/tmp/papyrus-console/thread-context",
@@ -84,6 +112,7 @@ struct AppState {
     dynamo: DynamoClient,
     http: reqwest::Client,
     openai_api_key: String,
+    jwt_secret: String,
 }
 
 async fn handler(event: LambdaEvent<Value>, state: Arc<AppState>) -> Result<Value, Error> {
@@ -151,6 +180,7 @@ async fn process_record(record: &Value, state: &AppState) -> Result<RecordOutcom
     if !claim_message(state, &message).await? {
         return Ok(RecordOutcome::Skipped);
     }
+    publish_message_status(state, &message.id, "RUNNING", None).await?;
     let lock_owner = format!(
         "{}:{}",
         std::env::var("AWS_LAMBDA_FUNCTION_NAME")
@@ -161,6 +191,7 @@ async fn process_record(record: &Value, state: &AppState) -> Result<RecordOutcom
     let result = answer_claimed_message(state, &message, &lock_owner).await;
     if let Err(error) = &result {
         mark_message_failed(state, &message, error).await?;
+        publish_message_status(state, &message.id, "FAILED", Some(&error.to_string())).await?;
         release_thread_lock(state, &message, &lock_owner, None).await?;
     }
     result?;
@@ -174,9 +205,41 @@ async fn answer_claimed_message(
 ) -> Result<()> {
     let mut context = load_prompt_context(state, message).await?;
     let starting_sequence = context.last_sequence_number.max(message.sequence_number);
-    let tool_and_assistant = run_agent_turn(state, message, &context).await?;
     let now = now_iso();
-    let mut next_sequence = starting_sequence + 1;
+    let assistant_record = PersistedMessage {
+        id: format!("message-console-assistant-{}", Uuid::new_v4()),
+        thread_id: message.thread_id.clone(),
+        parent_message_id: Some(message.id.clone()),
+        sequence_number: starting_sequence + 1,
+        role: "ASSISTANT".to_string(),
+        message_kind: MESSAGE_KIND_CHAT_TURN.to_string(),
+        message_type: "MESSAGE".to_string(),
+        content: String::new(),
+        summary: "Papyrus is responding.".to_string(),
+        response_status: Some("RUNNING".to_string()),
+        response_error: None,
+        response_started_at: Some(now.clone()),
+        response_completed_at: None,
+        metadata: json!({
+            "responder": "rust-lambda",
+            "model": state.config.model,
+            "triggerMessageId": message.id,
+            "triggerCreatedAt": message.created_at,
+            "streaming": true,
+        }),
+    };
+    create_message_graphql(state, &assistant_record, &now).await?;
+
+    let mut writer = AssistantStreamWriter::new(state, assistant_record.clone());
+    let tool_and_assistant = run_agent_turn(state, message, &context, &mut writer).await?;
+    if writer.content.trim().is_empty() && !tool_and_assistant.assistant_content.trim().is_empty() {
+        writer
+            .push_delta(&tool_and_assistant.assistant_content)
+            .await?;
+    }
+    writer.finish_success().await?;
+
+    let mut next_sequence = assistant_record.sequence_number + 1;
     let mut persisted_messages = Vec::new();
 
     for tool_message in tool_and_assistant.tool_messages {
@@ -190,9 +253,13 @@ async fn answer_claimed_message(
             message_type: tool_message.message_type,
             content: tool_message.content,
             summary: tool_message.summary,
+            response_status: None,
+            response_error: None,
+            response_started_at: None,
+            response_completed_at: None,
             metadata: tool_message.metadata,
         };
-        put_message(state, &record, &now).await?;
+        create_message_graphql(state, &record, &now).await?;
         context
             .recent_messages
             .push(CachedPromptMessage::from_persisted(&record));
@@ -200,43 +267,54 @@ async fn answer_claimed_message(
         next_sequence += 1;
     }
 
-    let assistant_summary = truncate_summary(&tool_and_assistant.assistant_content);
-    let assistant_record = PersistedMessage {
-        id: format!("message-console-assistant-{}", Uuid::new_v4()),
-        thread_id: message.thread_id.clone(),
-        parent_message_id: Some(message.id.clone()),
-        sequence_number: next_sequence,
-        role: "ASSISTANT".to_string(),
-        message_kind: MESSAGE_KIND_CHAT_TURN.to_string(),
-        message_type: "MESSAGE".to_string(),
-        content: tool_and_assistant.assistant_content,
-        summary: assistant_summary,
-        metadata: json!({
-            "responder": "rust-lambda",
-            "model": state.config.model,
-            "triggerMessageId": message.id,
-            "triggerCreatedAt": message.created_at,
-        }),
+    let assistant_content = tool_and_assistant.assistant_content;
+    let final_assistant_sequence = if persisted_messages.is_empty() {
+        assistant_record.sequence_number
+    } else {
+        next_sequence
     };
-    put_message(state, &assistant_record, &now).await?;
+    let completed_assistant_record = PersistedMessage {
+        sequence_number: final_assistant_sequence,
+        content: assistant_content.clone(),
+        summary: truncate_summary(&assistant_content),
+        response_status: Some("COMPLETED".to_string()),
+        response_started_at: assistant_record.response_started_at.clone(),
+        response_completed_at: Some(now_iso()),
+        ..assistant_record
+    };
+    if completed_assistant_record.sequence_number != starting_sequence + 1 {
+        update_message_graphql(
+            state,
+            json!({
+                "id": completed_assistant_record.id,
+                "sequenceNumber": completed_assistant_record.sequence_number,
+                "updatedAt": now_iso(),
+            }),
+        )
+        .await?;
+    }
     context
         .recent_messages
-        .push(CachedPromptMessage::from_persisted(&assistant_record));
-    persisted_messages.push(assistant_record.clone());
+        .push(CachedPromptMessage::from_persisted(
+            &completed_assistant_record,
+        ));
+    persisted_messages.push(completed_assistant_record.clone());
 
-    context.last_sequence_number = assistant_record.sequence_number;
-    context.last_message_id = assistant_record.id.clone();
+    context.last_sequence_number = completed_assistant_record.sequence_number;
+    context.last_message_id = completed_assistant_record.id.clone();
     trim_recent_messages(&mut context.recent_messages);
     context.context_digest = compute_context_digest(&context);
     context.updated_at = now.clone();
     write_context_cache(&state.config.cache_root, &context)?;
 
     mark_message_completed(state, message).await?;
+    publish_message_status(state, &message.id, "COMPLETED", None).await?;
     release_thread_lock(state, message, lock_owner, Some(&context)).await?;
+    update_thread_graphql(state, &message.thread_id, &context).await?;
     info!(
         message_id = message.id,
         thread_id = message.thread_id,
-        assistant_message_id = assistant_record.id,
+        assistant_message_id = completed_assistant_record.id,
         persisted = persisted_messages.len(),
         cache_digest = context.context_digest,
         "console chat message completed"
@@ -714,50 +792,267 @@ struct PersistedMessage {
     message_type: String,
     content: String,
     summary: String,
+    response_status: Option<String>,
+    response_error: Option<String>,
+    response_started_at: Option<String>,
+    response_completed_at: Option<String>,
     metadata: Value,
 }
 
-async fn put_message(state: &AppState, message: &PersistedMessage, now: &str) -> Result<()> {
-    let mut item = HashMap::from([
-        ("id".to_string(), av_s(&message.id)),
-        ("threadId".to_string(), av_s(&message.thread_id)),
-        (
-            "sequenceNumber".to_string(),
-            AttributeValue::N(message.sequence_number.to_string()),
-        ),
-        ("role".to_string(), av_s(&message.role)),
-        ("messageKind".to_string(), av_s(&message.message_kind)),
-        (
-            "messageDomain".to_string(),
-            av_s(MESSAGE_DOMAIN_CONVERSATION),
-        ),
-        ("messageType".to_string(), av_s(&message.message_type)),
-        ("status".to_string(), av_s("active")),
-        ("summary".to_string(), av_s(&message.summary)),
-        ("content".to_string(), av_s(&message.content)),
-        ("semanticLayer".to_string(), av_s(CHAT_DETAIL_LAYER)),
-        ("searchVisibility".to_string(), av_s(EXPLICIT_SEARCH)),
-        ("source".to_string(), av_s("papyrus-console")),
-        (
-            "newsroomFeedKey".to_string(),
-            av_s(NEWSROOM_FEED_CONSOLE_CHAT),
-        ),
-        ("createdAt".to_string(), av_s(now)),
-        ("updatedAt".to_string(), av_s(now)),
-        ("metadata".to_string(), json_to_attr(&message.metadata)),
-    ]);
-    if let Some(parent_id) = &message.parent_message_id {
-        item.insert("parentMessageId".to_string(), av_s(parent_id));
+struct AssistantStreamWriter<'a> {
+    state: &'a AppState,
+    message_id: String,
+    content: String,
+    last_flush_at: DateTime<Utc>,
+    last_flush_len: usize,
+}
+
+impl<'a> AssistantStreamWriter<'a> {
+    fn new(state: &'a AppState, message: PersistedMessage) -> Self {
+        Self {
+            state,
+            message_id: message.id,
+            content: message.content,
+            last_flush_at: Utc::now(),
+            last_flush_len: 0,
+        }
     }
-    state
-        .dynamo
-        .put_item()
-        .table_name(&state.config.message_table)
-        .set_item(Some(item))
+
+    async fn push_delta(&mut self, delta: &str) -> Result<()> {
+        if delta.is_empty() {
+            return Ok(());
+        }
+        self.content.push_str(delta);
+        let now = Utc::now();
+        let elapsed_ms = now
+            .signed_duration_since(self.last_flush_at)
+            .num_milliseconds();
+        if elapsed_ms >= STREAM_FLUSH_INTERVAL_MS
+            || self.content.len().saturating_sub(self.last_flush_len) >= STREAM_FLUSH_CHARS
+        {
+            self.flush().await?;
+        }
+        Ok(())
+    }
+
+    async fn flush(&mut self) -> Result<()> {
+        if self.content.len() == self.last_flush_len {
+            return Ok(());
+        }
+        update_message_graphql(
+            self.state,
+            json!({
+                "id": self.message_id,
+                "content": self.content,
+                "summary": truncate_summary(&self.content),
+                "responseStatus": "RUNNING",
+                "updatedAt": now_iso(),
+            }),
+        )
+        .await?;
+        self.last_flush_at = Utc::now();
+        self.last_flush_len = self.content.len();
+        Ok(())
+    }
+
+    async fn finish_success(&mut self) -> Result<()> {
+        update_message_graphql(
+            self.state,
+            json!({
+                "id": self.message_id,
+                "content": self.content,
+                "summary": truncate_summary(&self.content),
+                "responseStatus": "COMPLETED",
+                "responseCompletedAt": now_iso(),
+                "updatedAt": now_iso(),
+            }),
+        )
+        .await?;
+        self.last_flush_at = Utc::now();
+        self.last_flush_len = self.content.len();
+        Ok(())
+    }
+}
+
+const MESSAGE_SELECTION: &str = r#"
+  id
+  threadId
+  parentMessageId
+  sequenceNumber
+  role
+  messageKind
+  messageDomain
+  messageType
+  status
+  source
+  authorLabel
+  content
+  summary
+  semanticLayer
+  searchVisibility
+  responseTarget
+  responseStatus
+  responseOwner
+  responseStartedAt
+  responseCompletedAt
+  responseError
+  metadata
+  createdAt
+  updatedAt
+  newsroomFeedKey
+"#;
+
+const THREAD_SELECTION: &str = r#"
+  id
+  threadKind
+  status
+  title
+  messageCount
+  lastMessageId
+  lastMessageAt
+  contextDigest
+  activeResponseMessageId
+  responseLockOwner
+  responseLockExpiresAt
+  updatedAt
+"#;
+
+async fn create_message_graphql(
+    state: &AppState,
+    message: &PersistedMessage,
+    now: &str,
+) -> Result<()> {
+    let mut input = json!({
+        "id": message.id,
+        "threadId": message.thread_id,
+        "sequenceNumber": message.sequence_number,
+        "role": message.role,
+        "messageKind": message.message_kind,
+        "messageDomain": MESSAGE_DOMAIN_CONVERSATION,
+        "messageType": message.message_type,
+        "status": "active",
+        "summary": message.summary,
+        "content": message.content,
+        "semanticLayer": CHAT_DETAIL_LAYER,
+        "searchVisibility": EXPLICIT_SEARCH,
+        "source": "papyrus-console",
+        "newsroomFeedKey": NEWSROOM_FEED_CONSOLE_CHAT,
+        "createdAt": now,
+        "updatedAt": now,
+        "metadata": message.metadata.to_string(),
+    });
+    if let Some(parent_id) = &message.parent_message_id {
+        input["parentMessageId"] = Value::String(parent_id.clone());
+    }
+    if let Some(status) = &message.response_status {
+        input["responseStatus"] = Value::String(status.clone());
+    }
+    if let Some(error) = &message.response_error {
+        input["responseError"] = Value::String(error.clone());
+    }
+    if let Some(started_at) = &message.response_started_at {
+        input["responseStartedAt"] = Value::String(started_at.clone());
+    }
+    if let Some(completed_at) = &message.response_completed_at {
+        input["responseCompletedAt"] = Value::String(completed_at.clone());
+    }
+    graphql(
+        state,
+        &format!(
+            "mutation CreateMessage($input: CreateMessageInput!) {{ createMessage(input: $input) {{ {MESSAGE_SELECTION} }} }}"
+        ),
+        json!({ "input": input }),
+    )
+    .await?;
+    Ok(())
+}
+
+async fn update_message_graphql(state: &AppState, input: Value) -> Result<()> {
+    graphql(
+        state,
+        &format!(
+            "mutation UpdateMessage($input: UpdateMessageInput!) {{ updateMessage(input: $input) {{ {MESSAGE_SELECTION} }} }}"
+        ),
+        json!({ "input": input }),
+    )
+    .await?;
+    Ok(())
+}
+
+async fn publish_message_status(
+    state: &AppState,
+    message_id: &str,
+    status: &str,
+    error: Option<&str>,
+) -> Result<()> {
+    let mut input = json!({
+        "id": message_id,
+        "responseStatus": status,
+        "updatedAt": now_iso(),
+    });
+    if status == "RUNNING" {
+        input["responseOwner"] = Value::String("rust-lambda".to_string());
+        input["responseStartedAt"] = Value::String(now_iso());
+    }
+    if matches!(status, "COMPLETED" | "FAILED") {
+        input["responseCompletedAt"] = Value::String(now_iso());
+    }
+    if let Some(error) = error {
+        input["responseError"] = Value::String(error.to_string());
+    }
+    update_message_graphql(state, input).await
+}
+
+async fn update_thread_graphql(
+    state: &AppState,
+    thread_id: &str,
+    context: &ThreadContextCache,
+) -> Result<()> {
+    graphql(
+        state,
+        &format!(
+            "mutation UpdateMessageThread($input: UpdateMessageThreadInput!) {{ updateMessageThread(input: $input) {{ {THREAD_SELECTION} }} }}"
+        ),
+        json!({
+            "input": {
+                "id": thread_id,
+                "messageCount": context.last_sequence_number,
+                "lastMessageId": context.last_message_id,
+                "lastMessageAt": context.updated_at,
+                "contextDigest": context.context_digest,
+                "activeResponseMessageId": null,
+                "responseLockOwner": null,
+                "responseLockExpiresAt": null,
+                "updatedAt": now_iso(),
+            }
+        }),
+    )
+    .await?;
+    Ok(())
+}
+
+async fn graphql(state: &AppState, query: &str, variables: Value) -> Result<Value> {
+    let token = sign_authoring_jwt(&state.config, &state.jwt_secret)?;
+    let response = state
+        .http
+        .post(&state.config.graphql_endpoint)
+        .header("content-type", "application/json")
+        .header("authorization", format!("PapyrusJwt {token}"))
+        .json(&json!({ "query": query, "variables": variables }))
         .send()
         .await
-        .context("put console responder Message")?;
-    Ok(())
+        .context("send AppSync GraphQL mutation")?;
+    let status = response.status();
+    let payload: Value = response
+        .json()
+        .await
+        .context("parse AppSync GraphQL response")?;
+    if !status.is_success() || payload.get("errors").is_some() {
+        return Err(anyhow!(
+            "AppSync GraphQL mutation failed with {status}: {payload}"
+        ));
+    }
+    Ok(payload.get("data").cloned().unwrap_or(Value::Null))
 }
 
 #[derive(Debug)]
@@ -780,22 +1075,15 @@ async fn run_agent_turn(
     state: &AppState,
     trigger: &ChatMessage,
     context: &ThreadContextCache,
+    assistant_writer: &mut AssistantStreamWriter<'_>,
 ) -> Result<AgentTurnOutput> {
     let mut messages = build_openai_messages(context);
     let request = openai_request(&state.config.model, messages.clone());
-    let first = send_openai_chat(state, request).await?;
-    let tool_calls = first
-        .get("tool_calls")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
+    let first = stream_openai_chat(state, request, Some(&mut *assistant_writer)).await?;
+    let tool_calls = first.tool_calls;
     if tool_calls.is_empty() {
         return Ok(AgentTurnOutput {
-            assistant_content: first
-                .get("content")
-                .and_then(Value::as_str)
-                .unwrap_or("I could not generate a response.")
-                .to_string(),
+            assistant_content: fallback_assistant_content(first.content),
             tool_messages: Vec::new(),
         });
     }
@@ -803,7 +1091,7 @@ async fn run_agent_turn(
     let mut persisted_tool_messages = Vec::new();
     messages.push(json!({
         "role": "assistant",
-        "content": first.get("content").cloned().unwrap_or(Value::Null),
+        "content": if first.content.is_empty() { Value::Null } else { Value::String(first.content) },
         "tool_calls": tool_calls,
     }));
     for call in tool_calls {
@@ -848,15 +1136,14 @@ async fn run_agent_turn(
         }));
     }
 
-    let second = send_openai_chat(state, openai_request(&state.config.model, messages)).await?;
+    let second = stream_openai_chat(
+        state,
+        openai_request(&state.config.model, messages),
+        Some(&mut *assistant_writer),
+    )
+    .await?;
     Ok(AgentTurnOutput {
-        assistant_content: second
-            .get("content")
-            .and_then(Value::as_str)
-            .unwrap_or(
-                "I used the available Papyrus context but could not generate a final response.",
-            )
-            .to_string(),
+        assistant_content: fallback_tool_assistant_content(second.content),
         tool_messages: persisted_tool_messages,
     })
 }
@@ -914,7 +1201,26 @@ fn openai_request(model: &str, messages: Vec<Value>) -> Value {
     })
 }
 
-async fn send_openai_chat(state: &AppState, body: Value) -> Result<Value> {
+#[derive(Debug)]
+struct StreamedChatMessage {
+    content: String,
+    tool_calls: Vec<Value>,
+}
+
+#[derive(Debug, Default, Clone)]
+struct ToolCallAccumulator {
+    id: Option<String>,
+    call_type: Option<String>,
+    function_name: Option<String>,
+    function_arguments: String,
+}
+
+async fn stream_openai_chat(
+    state: &AppState,
+    mut body: Value,
+    mut assistant_writer: Option<&mut AssistantStreamWriter<'_>>,
+) -> Result<StreamedChatMessage> {
+    body["stream"] = Value::Bool(true);
     let response = state
         .http
         .post("https://api.openai.com/v1/chat/completions")
@@ -922,21 +1228,148 @@ async fn send_openai_chat(state: &AppState, body: Value) -> Result<Value> {
         .json(&body)
         .send()
         .await
-        .context("send OpenAI chat completion")?;
+        .context("send OpenAI streaming chat completion")?;
     let status = response.status();
-    let payload: Value = response.json().await.context("parse OpenAI response")?;
     if !status.is_success() {
+        let payload = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "unable to read OpenAI error body".to_string());
         return Err(anyhow!(
             "OpenAI chat completion failed with {status}: {payload}"
         ));
     }
-    payload
-        .get("choices")
-        .and_then(Value::as_array)
-        .and_then(|choices| choices.first())
-        .and_then(|choice| choice.get("message"))
-        .cloned()
-        .ok_or_else(|| anyhow!("OpenAI response did not include choices[0].message"))
+
+    let mut stream = response.bytes_stream();
+    let mut buffer = String::new();
+    let mut content = String::new();
+    let mut tool_calls: Vec<ToolCallAccumulator> = Vec::new();
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.context("read OpenAI streaming chunk")?;
+        buffer.push_str(&String::from_utf8_lossy(&chunk));
+        while let Some(index) = buffer.find("\n\n") {
+            let frame = buffer[..index].to_string();
+            buffer = buffer[index + 2..].to_string();
+            process_openai_sse_frame(
+                &frame,
+                &mut content,
+                &mut tool_calls,
+                assistant_writer.as_deref_mut(),
+            )
+            .await?;
+        }
+    }
+    if !buffer.trim().is_empty() {
+        process_openai_sse_frame(
+            &buffer,
+            &mut content,
+            &mut tool_calls,
+            assistant_writer.as_deref_mut(),
+        )
+        .await?;
+    }
+    if let Some(writer) = assistant_writer.as_deref_mut() {
+        writer.flush().await?;
+    }
+
+    Ok(StreamedChatMessage {
+        content,
+        tool_calls: tool_calls
+            .into_iter()
+            .filter_map(tool_call_accumulator_to_value)
+            .collect(),
+    })
+}
+
+async fn process_openai_sse_frame(
+    frame: &str,
+    content: &mut String,
+    tool_calls: &mut Vec<ToolCallAccumulator>,
+    mut assistant_writer: Option<&mut AssistantStreamWriter<'_>>,
+) -> Result<()> {
+    for line in frame.lines() {
+        let Some(data) = line.strip_prefix("data:") else {
+            continue;
+        };
+        let data = data.trim();
+        if data.is_empty() || data == "[DONE]" {
+            continue;
+        }
+        let payload: Value = serde_json::from_str(data)
+            .with_context(|| format!("parse OpenAI streaming event: {data}"))?;
+        let Some(delta) = payload
+            .get("choices")
+            .and_then(Value::as_array)
+            .and_then(|choices| choices.first())
+            .and_then(|choice| choice.get("delta"))
+        else {
+            continue;
+        };
+        if let Some(text) = delta.get("content").and_then(Value::as_str) {
+            content.push_str(text);
+            if let Some(writer) = assistant_writer.as_deref_mut() {
+                writer.push_delta(text).await?;
+            }
+        }
+        if let Some(calls) = delta.get("tool_calls").and_then(Value::as_array) {
+            merge_tool_call_deltas(tool_calls, calls);
+        }
+    }
+    Ok(())
+}
+
+fn merge_tool_call_deltas(tool_calls: &mut Vec<ToolCallAccumulator>, calls: &[Value]) {
+    for call in calls {
+        let index = call.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
+        while tool_calls.len() <= index {
+            tool_calls.push(ToolCallAccumulator::default());
+        }
+        let entry = &mut tool_calls[index];
+        if let Some(id) = call.get("id").and_then(Value::as_str) {
+            entry.id = Some(id.to_string());
+        }
+        if let Some(call_type) = call.get("type").and_then(Value::as_str) {
+            entry.call_type = Some(call_type.to_string());
+        }
+        if let Some(function) = call.get("function").and_then(Value::as_object) {
+            if let Some(name) = function.get("name").and_then(Value::as_str) {
+                entry.function_name = Some(name.to_string());
+            }
+            if let Some(arguments) = function.get("arguments").and_then(Value::as_str) {
+                entry.function_arguments.push_str(arguments);
+            }
+        }
+    }
+}
+
+fn tool_call_accumulator_to_value(call: ToolCallAccumulator) -> Option<Value> {
+    let id = call.id?;
+    let function_name = call.function_name?;
+    Some(json!({
+        "id": id,
+        "type": call.call_type.unwrap_or_else(|| "function".to_string()),
+        "function": {
+            "name": function_name,
+            "arguments": call.function_arguments,
+        }
+    }))
+}
+
+fn fallback_assistant_content(content: String) -> String {
+    if content.trim().is_empty() {
+        "I could not generate a response.".to_string()
+    } else {
+        content
+    }
+}
+
+fn fallback_tool_assistant_content(content: String) -> String {
+    if content.trim().is_empty() {
+        "I used the available Papyrus context but could not generate a final response.".to_string()
+    } else {
+        content
+    }
 }
 
 fn execute_papyrus_tool(
@@ -1004,6 +1437,84 @@ async fn load_openai_api_key(ssm: &SsmClient, config: &AppConfig) -> Result<Stri
         .ok_or_else(|| anyhow!("SSM parameter {parameter_name} did not include a value"))
 }
 
+async fn load_jwt_secret(ssm: &SsmClient, config: &AppConfig) -> Result<String> {
+    if let Some(value) =
+        optional_env("PAPYRUS_CONSOLE_JWT_SECRET").or_else(|| optional_env("PAPYRUS_JWT_SECRET"))
+    {
+        return Ok(value);
+    }
+    let Some(parameter_name) = &config.jwt_secret_ssm_param else {
+        return Err(anyhow!(
+            "PAPYRUS_CONSOLE_JWT_SECRET, PAPYRUS_JWT_SECRET, PAPYRUS_CONSOLE_JWT_SECRET_SSM_PARAM, or PAPYRUS_JWT_SECRET_SSM_PARAM is required"
+        ));
+    };
+    let response = ssm
+        .get_parameter()
+        .name(parameter_name)
+        .with_decryption(true)
+        .send()
+        .await
+        .context("load Papyrus GraphQL JWT secret from SSM")?;
+    response
+        .parameter()
+        .and_then(|parameter| parameter.value())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| anyhow!("SSM parameter {parameter_name} did not include a value"))
+}
+
+fn sign_authoring_jwt(config: &AppConfig, secret: &str) -> Result<String> {
+    let now = Utc::now().timestamp();
+    let header = json!({ "alg": "HS256", "typ": "JWT" });
+    let payload = json!({
+        "iss": config.jwt_issuer,
+        "sub": config.jwt_subject,
+        "aud": config.jwt_audience,
+        "scope": config.jwt_scope,
+        "groups": ["editor"],
+        "iat": now,
+        "nbf": now - 5,
+        "exp": now + 300,
+    });
+    let encoded_header = base64url_json(&header)?;
+    let encoded_payload = base64url_json(&payload)?;
+    let signing_input = format!("{encoded_header}.{encoded_payload}");
+    let signature =
+        URL_SAFE_NO_PAD.encode(hmac_sha256(secret.as_bytes(), signing_input.as_bytes()));
+    Ok(format!("{signing_input}.{signature}"))
+}
+
+fn base64url_json(value: &Value) -> Result<String> {
+    Ok(URL_SAFE_NO_PAD.encode(serde_json::to_vec(value)?))
+}
+
+fn hmac_sha256(key: &[u8], message: &[u8]) -> Vec<u8> {
+    const BLOCK_SIZE: usize = 64;
+    let mut normalized_key = if key.len() > BLOCK_SIZE {
+        Sha256::digest(key).to_vec()
+    } else {
+        key.to_vec()
+    };
+    normalized_key.resize(BLOCK_SIZE, 0);
+
+    let mut inner_pad = [0x36_u8; BLOCK_SIZE];
+    let mut outer_pad = [0x5c_u8; BLOCK_SIZE];
+    for (index, byte) in normalized_key.iter().enumerate() {
+        inner_pad[index] ^= byte;
+        outer_pad[index] ^= byte;
+    }
+
+    let mut inner = Sha256::new();
+    inner.update(inner_pad);
+    inner.update(message);
+    let inner_digest = inner.finalize();
+
+    let mut outer = Sha256::new();
+    outer.update(outer_pad);
+    outer.update(inner_digest);
+    outer.finalize().to_vec()
+}
+
 fn dynamodb_json_to_value(value: &Value) -> Value {
     if let Some(s) = value.get("S").and_then(Value::as_str) {
         return Value::String(s.to_string());
@@ -1031,21 +1542,6 @@ fn dynamodb_json_to_value(value: &Value) -> Value {
         return Value::Array(list.iter().map(dynamodb_json_to_value).collect());
     }
     Value::Null
-}
-
-fn json_to_attr(value: &Value) -> AttributeValue {
-    match value {
-        Value::Null => AttributeValue::Null(true),
-        Value::Bool(value) => AttributeValue::Bool(*value),
-        Value::Number(number) => AttributeValue::N(number.to_string()),
-        Value::String(value) => AttributeValue::S(value.clone()),
-        Value::Array(values) => AttributeValue::L(values.iter().map(json_to_attr).collect()),
-        Value::Object(map) => AttributeValue::M(
-            map.iter()
-                .map(|(key, value)| (key.clone(), json_to_attr(value)))
-                .collect(),
-        ),
-    }
 }
 
 fn stream_string(image: &serde_json::Map<String, Value>, key: &str) -> Result<String> {
