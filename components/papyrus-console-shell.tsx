@@ -713,8 +713,8 @@ function sanitizeConsoleSummary(summary: string): string {
 }
 
 function ConsoleChatMessageContent({ role, text }: { role: string | null | undefined; text: string }) {
-  if (role !== "ASSISTANT") return text;
   const blocks = useMemo(() => parseConsoleMarkdownBlocks(text), [text]);
+  if (role !== "ASSISTANT") return text;
   return (
     <>
       {blocks.map((block, index) => renderConsoleMarkdownBlock(block, index))}
