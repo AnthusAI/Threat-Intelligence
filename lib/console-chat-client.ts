@@ -57,7 +57,6 @@ const CONSOLE_MESSAGE_FIELDS_LEGACY = `
   id
   messageKind
   messageDomain
-  status
   summary
   source
   importRunId
@@ -85,7 +84,6 @@ const CONSOLE_MESSAGE_SELECTION_CANDIDATES = [
   "responseCompletedAt",
   "responseError",
   "messageDomain",
-  "status",
   "source",
   "importRunId",
   "authorSub",
@@ -327,11 +325,14 @@ function formatGraphQLError(error: { message?: string | null; errorType?: string
 function assertGraphQL<T>(response: {
   data?: Record<string, unknown> | null;
   errors?: Array<{ message?: string | null; errorType?: string | null } | string | null> | null;
-}, field: string): T {
+}, field: string, options?: { allowPartialData?: boolean }): T {
+  const value = response.data?.[field];
   if (response.errors?.length) {
+    if (options?.allowPartialData && value !== undefined && value !== null) {
+      return value as T;
+    }
     throw new Error(response.errors.map(formatGraphQLError).join("; "));
   }
-  const value = response.data?.[field];
   if (value === undefined || value === null) {
     throw new Error(
       `Console chat API is unavailable (${field}). Regenerate amplify_outputs.json from the current backend or deploy the MessageThread schema.`,
@@ -934,8 +935,10 @@ async function listMessagesWithQuery(
         nextToken,
       },
       map: (response) => {
-        const connection = assertGraphQL<unknown>(response, field);
-        const items = readConnectionItems<Record<string, unknown>>(connection).map(normalizeConsoleMessageRecord);
+        const connection = assertGraphQL<unknown>(response, field, { allowPartialData: true });
+        const items = readConnectionItems<Record<string, unknown> | null>(connection)
+          .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"))
+          .map(normalizeConsoleMessageRecord);
         return {
           page: items,
           nextCursor: readConnectionNextToken(connection),
@@ -1040,6 +1043,9 @@ function isUnavailableQueryError(error: unknown): boolean {
   const text = (stringifyUnknownError(error) ?? "").toLowerCase();
   if (!text) return false;
   return (
+    text.includes("unauthorized") ||
+    text.includes("not authorized") ||
+    text.includes("access denied") ||
     text.includes("fieldundefined") ||
     text.includes("cannot query field") ||
     text.includes("unknown type") ||
