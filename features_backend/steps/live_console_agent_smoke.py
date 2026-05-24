@@ -206,7 +206,12 @@ def _invoke_local_responder(
             pass
 
 
-def scenario_prompt(name: str, run_id: str, seeded_assignment_id: str | None = None) -> str:
+def scenario_prompt(
+    name: str,
+    run_id: str,
+    seeded_assignment_id: str | None = None,
+    reference_corpus_key: str | None = None,
+) -> str:
     marker = f"{LIVE_AGENT_MARKER}-{run_id}"
     if name == "hello":
         return "\n".join(
@@ -312,6 +317,65 @@ def scenario_prompt(name: str, run_id: str, seeded_assignment_id: str | None = N
                 "return Assignment.create{ type = 'research', apply = true }",
                 "Do not mask or paraphrase errors; return tool result as-is.",
                 "After the failing tool call, reply with only `invalid-input-tested`.",
+            ]
+        )
+    if name == "discuss-reference":
+        if not reference_corpus_key:
+            raise RuntimeError("discuss-reference scenario requires a non-empty reference corpus key")
+        return "\n".join(
+            [
+                f"Model policy: use {DEFAULT_AGENT_MODEL}.",
+                f"Marker: {marker}",
+                "Use execute_tactus for Reference discussion test. Do not answer until all required tool calls succeed.",
+                "Do not call docs_list or docs_get.",
+                "Execute exactly two tool calls: first list, then get.",
+                "Step 1 required snippet:",
+                f"return papyrus.reference.list{{ corpus_key = '{reference_corpus_key}', limit = 5 }}",
+                "Step 2 required snippet:",
+                "return papyrus.reference.get{ id = '<reference id from step 1 first item>' }",
+                "After both tool calls succeed, reply with only `reference-discussion-tested`.",
+            ]
+        )
+    if name == "rate-reference-quality":
+        if not reference_corpus_key:
+            raise RuntimeError("rate-reference-quality scenario requires a non-empty reference corpus key")
+        return "\n".join(
+            [
+                f"Model policy: use {DEFAULT_AGENT_MODEL}.",
+                f"Marker: {marker}",
+                "Use execute_tactus for Reference quality rating test. Do not answer until all required tool calls succeed.",
+                "Do not call docs_list or docs_get.",
+                "Execute exactly three tool calls: list, quality_set, quality_get.",
+                "Step 1 required snippet:",
+                f"return papyrus.reference.list{{ corpus_key = '{reference_corpus_key}', limit = 5 }}",
+                "Step 2 required snippet:",
+                (
+                    "return papyrus.reference.quality_set{ reference_id = '<reference id from step 1 first item>', "
+                    f"rating = 4, note = '{marker} quality smoke', actor_label = 'behave-live-agent', apply = true, refresh = true }}"
+                ),
+                "Step 3 required snippet:",
+                "return papyrus.reference.quality_get{ reference_id = '<reference id from step 1 first item>' }",
+                "After all tool calls succeed, reply with only `reference-quality-tested`.",
+            ]
+        )
+    if name == "curate-reference-summary":
+        if not reference_corpus_key:
+            raise RuntimeError("curate-reference-summary scenario requires a non-empty reference corpus key")
+        return "\n".join(
+            [
+                f"Model policy: use {DEFAULT_AGENT_MODEL}.",
+                f"Marker: {marker}",
+                "Use execute_tactus for Reference summary curation test. Do not answer until all required tool calls succeed.",
+                "Do not call docs_list or docs_get.",
+                "Execute exactly two tool calls: list, summarize.",
+                "Step 1 required snippet:",
+                f"return papyrus.reference.list{{ corpus_key = '{reference_corpus_key}', limit = 5 }}",
+                "Step 2 required snippet:",
+                (
+                    "return papyrus.reference.summarize{ reference_id = '<reference id from step 1 first item>', "
+                    "max_tokens = 100, apply = false, refresh = false }"
+                ),
+                "After all tool calls succeed, reply with only `reference-summary-tested`.",
             ]
         )
     raise RuntimeError(f"Unknown scenario: {name}")
@@ -592,6 +656,33 @@ def _seed_update_assignment(client: GraphqlClient, marker: str) -> str:
     return assignment_id
 
 
+def _discover_reference_corpus_key(client: GraphqlClient) -> str:
+    payload = client.graphql(
+        """
+        query DiscoverReferenceCorpus($limit: Int) {
+          listReferences(limit: $limit) {
+            items { corpusId }
+          }
+        }
+        """,
+        {"limit": 200},
+        "listReferences",
+    )
+    items = [item for item in (payload.get("items") or []) if isinstance(item, dict)]
+    corpus_counts: dict[str, int] = {}
+    for item in items:
+        corpus_id = str(item.get("corpusId") or "").strip()
+        if not corpus_id:
+            continue
+        corpus_counts[corpus_id] = corpus_counts.get(corpus_id, 0) + 1
+    if not corpus_counts:
+        raise RuntimeError("No references available in sandbox for reference scenarios.")
+    corpus_id = max(corpus_counts, key=corpus_counts.get)
+    if corpus_id.startswith("knowledge-corpus-"):
+        return corpus_id[len("knowledge-corpus-") :]
+    return corpus_id
+
+
 def run_scenario(
     scenario_name: str,
     *,
@@ -607,6 +698,7 @@ def run_scenario(
     errors: list[dict[str, Any]] = []
     marker = f"{LIVE_AGENT_MARKER}-{run_id}"
     seeded_assignment_id: str | None = None
+    reference_corpus_key: str | None = None
     response_target = CONSOLE_RESPONSE_TARGET_LOCAL if _local_responder_enabled() else CONSOLE_RESPONSE_TARGET_CLOUD
     thread_id = f"thread-console-smoke-{run_id}"
     thread_record: dict[str, Any] | None = None
@@ -642,7 +734,14 @@ def run_scenario(
         if scenario_name == "update-research-assignment":
             seeded_assignment_id = _seed_update_assignment(client, marker)
             assignment_ids.add(seeded_assignment_id)
-        prompt = scenario_prompt(scenario_name, run_id, seeded_assignment_id=seeded_assignment_id)
+        if scenario_name in {"discuss-reference", "rate-reference-quality", "curate-reference-summary"}:
+            reference_corpus_key = _discover_reference_corpus_key(client)
+        prompt = scenario_prompt(
+            scenario_name,
+            run_id,
+            seeded_assignment_id=seeded_assignment_id,
+            reference_corpus_key=reference_corpus_key,
+        )
         message_input = {
             "id": f"message-console-user-smoke-{uuid.uuid4()}",
             "threadId": thread_id,
@@ -814,6 +913,35 @@ def run_scenario(
             )
         if scenario_name == "invalid-assignment-input" and not errors:
             raise RuntimeError("Expected structured error payload for invalid assignment input, but saw none.")
+        if scenario_name == "discuss-reference":
+            required = {"papyrus.reference.list", "papyrus.reference.get"}
+            if not required.issubset(set(api_calls)):
+                raise RuntimeError(
+                    f"Expected reference list/get tool calls. Saw: {', '.join(api_calls)}. Assistant said: {content}"
+                )
+        if scenario_name == "rate-reference-quality":
+            required = {
+                "papyrus.reference.list",
+                "papyrus.reference.quality_set",
+                "papyrus.reference.quality_get",
+            }
+            if not required.issubset(set(api_calls)):
+                raise RuntimeError(
+                    f"Expected reference quality tool calls. Saw: {', '.join(api_calls)}. Assistant said: {content}"
+                )
+        if scenario_name == "curate-reference-summary":
+            required = {
+                "papyrus.reference.list",
+                "papyrus.reference.summarize",
+            }
+            if not required.issubset(set(api_calls)):
+                raise RuntimeError(
+                    f"Expected reference summary tool calls. Saw: {', '.join(api_calls)}. Assistant said: {content}"
+                )
+        if scenario_name in {"discuss-reference", "rate-reference-quality", "curate-reference-summary"} and errors:
+            raise RuntimeError(
+                f"Expected no structured tool errors for {scenario_name}, saw: {json.dumps(errors)}. Assistant said: {content}"
+            )
 
         if (
             response_target == CONSOLE_RESPONSE_TARGET_LOCAL
@@ -832,6 +960,12 @@ def run_scenario(
                 raise RuntimeError(
                     f"Expected deterministic local response content to equal assignment id {expected_assignment_id}, got: {content}"
                 )
+        if scenario_name == "discuss-reference" and content != "reference-discussion-tested":
+            raise RuntimeError(f"Expected reference-discussion-tested, got: {content}")
+        if scenario_name == "rate-reference-quality" and content != "reference-quality-tested":
+            raise RuntimeError(f"Expected reference-quality-tested, got: {content}")
+        if scenario_name == "curate-reference-summary" and content != "reference-summary-tested":
+            raise RuntimeError(f"Expected reference-summary-tested, got: {content}")
 
         model = DEFAULT_AGENT_MODEL
         try:

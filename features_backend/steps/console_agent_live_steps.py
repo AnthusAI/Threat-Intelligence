@@ -27,6 +27,9 @@ def step_run_live_console_agent_smoke_scenario(context, scenario: str) -> None:
         "get-research-assignment",
         "update-research-assignment",
         "invalid-assignment-input",
+        "discuss-reference",
+        "rate-reference-quality",
+        "curate-reference-summary",
     }
     attempts = 3 if scenario in retryable_scenarios else 1
     last_error: Exception | None = None
