@@ -289,6 +289,56 @@ API_METHODS: dict[tuple[str, str], Callable[[dict[str, Any]], Any]] = {
 }
 
 
+RESOURCE_METHODS: dict[tuple[str, str], Callable[[dict[str, Any]], Any]] = {
+    ("Assignment", "create"): lambda args: newsroom.papyrus_assignment_create(args),
+    ("Assignment", "get"): lambda args: newsroom.papyrus_get_assignment(args.get("id") or args.get("assignmentId") or args.get("assignment_id")),
+    ("Assignment", "list"): lambda args: newsroom.papyrus_list_assignments(
+        limit=args.get("limit", 25),
+        status=args.get("status") or "",
+        type=args.get("type") or "",
+        section_key=args.get("sectionKey") or args.get("section_key") or "",
+        import_run_id=args.get("importRunId") or args.get("import_run_id") or "",
+    ),
+}
+
+
+RESOURCE_API_SCHEMA: dict[str, Any] = {
+    "resources": {
+        "Assignment": {
+            "verbs": ["create", "get", "list"],
+            "description": "Private newsroom work records for research, reporting, copywriting, analysis, and future assignment types.",
+            "create": {
+                "supportedTypes": ["research"],
+                "required": ["type", "title"],
+                "optional": [
+                    "summary",
+                    "sectionKey",
+                    "instructions",
+                    "corpusKey",
+                    "researchMode",
+                    "priority",
+                    "status",
+                    "importRunId",
+                    "actorLabel",
+                    "apply",
+                ],
+                "writes": ["Assignment", "AssignmentEvent"],
+                "applyDefault": False,
+            },
+            "get": {"required": ["id"]},
+            "list": {"optional": ["limit", "status", "type", "sectionKey", "importRunId"]},
+        },
+        "AssignmentEvent": {"verbs": ["get", "list"], "description": "Audit events for Assignment lifecycle changes. Writes happen through Assignment verbs in v1."},
+        "Message": {"verbs": ["get", "list"], "description": "Private work-product and console-message records."},
+        "Reference": {"verbs": ["get", "list"], "description": "Knowledge-base source material prospects and accepted references."},
+        "Item": {"verbs": ["get", "list"], "description": "Reader-facing publication items. Assignments are not Items."},
+        "Edition": {"verbs": ["get", "list"], "description": "Dated private or published edition records."},
+        "NewsroomSection": {"verbs": ["get", "list"], "description": "Operational desk sections with mission, policies, guidance, and budgets."},
+    },
+    "docs": {"verbs": ["list", "get"], "namespaces": ["mcp", "resources", "newsroom"]},
+}
+
+
 def _knowledge_query_input(args: dict[str, Any]) -> dict[str, Any]:
     payload = args.get("input")
     if isinstance(payload, dict):
@@ -330,9 +380,52 @@ DOCS: dict[str, dict[str, Any]] = {
         "tags": ["mcp", "tactus", "newsroom"],
         "content": (
             "Papyrus agents should call execute_tactus with a short Tactus snippet. "
-            "The runtime injects a global papyrus host module plus helper aliases. "
-            "Use papyrus.api.list{} for available namespaces and papyrus.docs.list{} "
-            "before loading focused documentation with papyrus.docs.get{ id = ... }."
+            "The canonical write surface is resource-oriented: GraphQL-model-style "
+            "resources such as Assignment expose consistent verbs such as create, "
+            "get, and list. For example:\n\n"
+            "return Assignment.create{\n"
+            "  type = \"research\",\n"
+            "  title = \"Research recent AI newsroom reliability metrics\",\n"
+            "  summary = \"Find evidence and angles for an edition-candidate story.\",\n"
+            "  sectionKey = \"technology\",\n"
+            "  researchMode = \"source_discovery\",\n"
+            "  apply = true,\n"
+            "}\n\n"
+            "Use api_list{} to inspect the resource/verb schema. Use docs_list{ namespace = \"resources\" } "
+            "before non-trivial writes, then load focused documentation with "
+            "docs_get{ id = \"resources.Assignment\" }."
+        ),
+    },
+    "resources.Assignment": {
+        "id": "resources.Assignment",
+        "title": "Assignment Resource",
+        "summary": "Create, read, and list first-class private newsroom Assignment records.",
+        "namespace": "resources",
+        "status": "stable",
+        "tags": ["assignment", "resource-api", "writes"],
+        "content": (
+            "Assignment is the first-class private newsroom work record. Use the "
+            "PascalCase resource table and consistent verbs; do not invent helper "
+            "names like createResearchAssignment. The v1 write path supports "
+            "Assignment.create{ type = \"research\", title = ..., apply = ... }.\n\n"
+            "Required for create: type, title. Supported type: research. Optional: "
+            "summary, sectionKey, instructions, corpusKey, researchMode, priority, "
+            "status, importRunId, actorLabel, apply. apply = false returns a dry-run "
+            "plan. apply = true writes one Assignment and one AssignmentEvent through "
+            "the Papyrus GraphQL authoring lane.\n\n"
+            "Example:\n"
+            "return Assignment.create{\n"
+            "  type = \"research\",\n"
+            "  title = \"Research recent AI newsroom reliability metrics\",\n"
+            "  summary = \"Find evidence and angles for an edition-candidate story.\",\n"
+            "  sectionKey = \"technology\",\n"
+            "  researchMode = \"source_discovery\",\n"
+            "  apply = true,\n"
+            "}\n\n"
+            "Use Assignment.get{ id = \"assignment-id\" } to read one assignment. "
+            "Use Assignment.list{ type = \"research\", status = \"open\", limit = 10 } "
+            "for discovery. For writes beyond simple research assignment creation, "
+            "load the relevant resource docs first."
         ),
     },
     "newsroom.assignment-context": {
@@ -470,6 +563,11 @@ class PapyrusRuntimeModule:
         for namespace, methods in methods_by_namespace.items():
             if namespace != "papyrus":
                 setattr(self, namespace, _Namespace(self._call, namespace, methods))
+        resource_methods: dict[str, set[str]] = {}
+        for resource, method in RESOURCE_METHODS:
+            resource_methods.setdefault(resource, set()).add(method)
+        for resource, methods in resource_methods.items():
+            setattr(self, resource, _Namespace(self._call_resource, resource, methods))
         self.resolve_uri = self._make_root_call("resolve_uri")
         self.docs = _Namespace(self._call_docs, "docs", {"list", "get"})
         self.api = _Namespace(self._call_api, "api", {"list"})
@@ -490,6 +588,14 @@ class PapyrusRuntimeModule:
             raise ValueError(f"Unsupported Papyrus runtime API: papyrus.{namespace}.{method}")
         parsed = _args(args)
         self._record_api_call(namespace, method)
+        return handler(parsed)
+
+    def _call_resource(self, resource: str, method: str, args: Any = None) -> Any:
+        handler = RESOURCE_METHODS.get((resource, method))
+        if handler is None:
+            raise ValueError(f"Unsupported Papyrus resource API: {resource}.{method}")
+        parsed = _args(args)
+        self._api_calls.append(f"papyrus.{resource}.{method}")
         return handler(parsed)
 
     def _make_root_call(self, method: str) -> Callable[[Any], Any]:
@@ -529,15 +635,7 @@ class PapyrusRuntimeModule:
         if method != "list":
             raise ValueError(f"Unsupported Papyrus runtime API: papyrus.api.{method}")
         self._record_api_call("api", "list")
-        api: dict[str, list[str]] = {}
-        for namespace_name, method_name in API_METHODS:
-            if namespace_name == "papyrus":
-                api.setdefault("papyrus", []).append(method_name)
-            else:
-                api.setdefault(f"papyrus.{namespace_name}", []).append(method_name)
-        api.setdefault("papyrus.docs", []).extend(["list", "get"])
-        api.setdefault("papyrus.api", []).append("list")
-        return {key: sorted(set(values)) for key, values in sorted(api.items())}
+        return RESOURCE_API_SCHEMA
 
 
 def _wrap_tactus_snippet(tactus: str) -> str:
@@ -558,6 +656,19 @@ def _wrap_tactus_snippet(tactus: str) -> str:
                 "end",
             ]
         )
+    resource_methods: dict[str, list[str]] = {}
+    for resource, method in RESOURCE_METHODS:
+        resource_methods.setdefault(resource, []).append(method)
+    for resource, methods in sorted(resource_methods.items()):
+        helper_lines.append(f"{resource} = {{}}")
+        for method in sorted(methods):
+            helper_lines.extend(
+                [
+                    f"function {resource}.{method}(args)",
+                    f"  return __papyrus_capture(papyrus.{resource}.{method}(args))",
+                    "end",
+                ]
+            )
     return "\n".join(
         [
             *helper_lines,
@@ -1073,25 +1184,28 @@ def execute_tactus(tactus: str) -> dict[str, Any]:
 EXECUTE_TACTUS_DESCRIPTION = """Execute a short Tactus snippet inside the Papyrus newsroom runtime.
 
 Use this as the only tool for Papyrus newsroom agent work. The runtime injects a
-global `papyrus` host module with namespaces such as `assignment`, `edition`,
-`item`, `article`, `biblicus`, `plan`, `docs`, and `api`.
+global `papyrus` host module and canonical PascalCase resource tables such as
+`Assignment`.
 
 Ground rules:
 - `papyrus` is already available; do not require arbitrary Python modules.
-- Use table arguments: `assignment_context{ id = "assignment-123" }`.
+- Prefer canonical resources for writes: `Assignment.create{ type = "research", title = "...", apply = true }`.
+- Use table arguments: `Assignment.get{ id = "assignment-123" }`.
 - The runtime returns the last Papyrus operation if your snippet does not return
   explicitly.
 - Use `api_list{}` and `docs_list{}` for discovery instead of guessing.
+- Load `docs_get{ id = "resources.Assignment" }` before non-trivial Assignment writes.
 - Record-plan helpers are dry-run builders; they do not write GraphQL records.
 
 Example:
 ```tactus
-local context = assignment_context{ id = "assignment-live-123" }
-local pack = assignment_agent_context{ id = "assignment-live-123", context_profile = "reporting" }
-local item = assignment_context_to_item{ assignment_context = context.assignment_context }
-return {
-  context = pack.assignment_agent_context,
-  item = item.item,
+return Assignment.create{
+  type = "research",
+  title = "Research recent AI newsroom reliability metrics",
+  summary = "Find evidence and angles for an edition-candidate story.",
+  sectionKey = "technology",
+  researchMode = "source_discovery",
+  apply = true,
 }
 ```
 """

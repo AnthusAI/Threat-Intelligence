@@ -12,7 +12,7 @@ use lambda_runtime::{Error, LambdaEvent, run, service_fn};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -213,7 +213,7 @@ async fn process_record(record: &Value, state: &AppState) -> Result<RecordOutcom
     if !claim_message(state, &message).await? {
         return Ok(RecordOutcome::Skipped);
     }
-    publish_message_status(state, &message.id, &message.created_at, "RUNNING", None).await?;
+    publish_message_status(state, &message, "RUNNING", None).await?;
     let lock_owner = format!(
         "{}:{}",
         std::env::var("AWS_LAMBDA_FUNCTION_NAME")
@@ -226,8 +226,7 @@ async fn process_record(record: &Value, state: &AppState) -> Result<RecordOutcom
         mark_message_failed(state, &message, error).await?;
         publish_message_status(
             state,
-            &message.id,
-            &message.created_at,
+            &message,
             "FAILED",
             Some(&error.to_string()),
         )
@@ -354,13 +353,7 @@ async fn answer_claimed_message(
     write_context_cache(&state.config.cache_root, &context)?;
 
     mark_message_completed(state, message).await?;
-    publish_message_status(
-        state,
-        &message.id,
-        &message.created_at,
-        "COMPLETED",
-        None,
-    )
+    publish_message_status(state, message, "COMPLETED", None)
     .await?;
     release_thread_lock(state, message, lock_owner, Some(&context)).await?;
     update_thread_graphql(state, &message.thread_id, &context).await?;
@@ -589,7 +582,13 @@ struct CachedPromptMessage {
     id: String,
     sequence_number: i64,
     role: String,
+    #[serde(default)]
+    message_kind: String,
+    #[serde(default)]
+    message_type: String,
     content: String,
+    #[serde(default)]
+    metadata: Value,
 }
 
 impl CachedPromptMessage {
@@ -598,7 +597,10 @@ impl CachedPromptMessage {
             id: message.id.clone(),
             sequence_number: message.sequence_number,
             role: message.role.clone(),
+            message_kind: message.message_kind.clone(),
+            message_type: message.message_type.clone(),
             content: message.content.clone(),
+            metadata: message.metadata.clone(),
         }
     }
 
@@ -607,7 +609,10 @@ impl CachedPromptMessage {
             id: message.id.clone(),
             sequence_number: message.sequence_number,
             role: message.role.clone(),
+            message_kind: message.message_kind.clone(),
+            message_type: message.message_type.clone(),
             content: message.content.clone(),
+            metadata: message.metadata.clone(),
         }
     }
 }
@@ -753,19 +758,23 @@ async fn rebuild_context_from_dynamodb(
 
 fn cached_message_from_item(item: &HashMap<String, AttributeValue>) -> Option<CachedPromptMessage> {
     let role = attr_string(item.get("role"))?;
-    if role != "USER" && role != "ASSISTANT" {
+    if role != "USER" && role != "ASSISTANT" && role != "TOOL" {
         return None;
     }
     let message_type =
         attr_string(item.get("messageType")).unwrap_or_else(|| "MESSAGE".to_string());
-    if message_type != "MESSAGE" {
+    if message_type != "MESSAGE" && message_type != "TOOL_CALL" && message_type != "TOOL_RESPONSE" {
         return None;
     }
+    let message_kind = attr_string(item.get("messageKind")).unwrap_or_default();
     Some(CachedPromptMessage {
         id: attr_string(item.get("id"))?,
         sequence_number: attr_i64(item.get("sequenceNumber")).unwrap_or(0),
         role,
+        message_kind,
+        message_type,
         content: attr_string(item.get("content")).or_else(|| attr_string(item.get("summary")))?,
+        metadata: attr_json(item.get("metadata")),
     })
 }
 
@@ -1057,7 +1066,12 @@ struct PersistedMessage {
 struct AssistantStreamWriter<'a> {
     state: &'a AppState,
     message_id: String,
+    thread_id: String,
     message_created_at: String,
+    sequence_number: i64,
+    role: String,
+    message_kind: String,
+    message_type: String,
     content: String,
     last_flush_at: DateTime<Utc>,
     last_flush_len: usize,
@@ -1068,7 +1082,12 @@ impl<'a> AssistantStreamWriter<'a> {
         Self {
             state,
             message_id: message.id,
+            thread_id: message.thread_id,
             message_created_at: message.created_at,
+            sequence_number: message.sequence_number,
+            role: message.role,
+            message_kind: message.message_kind,
+            message_type: message.message_type,
             content: message.content,
             last_flush_at: Utc::now(),
             last_flush_len: 0,
@@ -1100,11 +1119,22 @@ impl<'a> AssistantStreamWriter<'a> {
             self.state,
             json!({
                 "id": self.message_id,
+                "threadId": self.thread_id,
                 "createdAt": self.message_created_at,
+                "sequenceNumber": self.sequence_number,
+                "role": self.role,
+                "messageKind": self.message_kind,
+                "messageDomain": MESSAGE_DOMAIN_CONVERSATION,
+                "messageType": self.message_type,
+                "source": "papyrus-console",
                 "content": self.content,
                 "summary": truncate_summary(&self.content),
+                "semanticLayer": CHAT_DETAIL_LAYER,
+                "searchVisibility": EXPLICIT_SEARCH,
+                "responseTarget": DEFAULT_RESPONSE_TARGET,
                 "responseStatus": "RUNNING",
                 "updatedAt": now_iso(),
+                "newsroomFeedKey": NEWSROOM_FEED_CONSOLE_CHAT,
             }),
         )
         .await?;
@@ -1118,12 +1148,23 @@ impl<'a> AssistantStreamWriter<'a> {
             self.state,
             json!({
                 "id": self.message_id,
+                "threadId": self.thread_id,
                 "createdAt": self.message_created_at,
+                "sequenceNumber": self.sequence_number,
+                "role": self.role,
+                "messageKind": self.message_kind,
+                "messageDomain": MESSAGE_DOMAIN_CONVERSATION,
+                "messageType": self.message_type,
+                "source": "papyrus-console",
                 "content": self.content,
                 "summary": truncate_summary(&self.content),
+                "semanticLayer": CHAT_DETAIL_LAYER,
+                "searchVisibility": EXPLICIT_SEARCH,
+                "responseTarget": DEFAULT_RESPONSE_TARGET,
                 "responseStatus": "COMPLETED",
                 "responseCompletedAt": now_iso(),
                 "updatedAt": now_iso(),
+                "newsroomFeedKey": NEWSROOM_FEED_CONSOLE_CHAT,
             }),
         )
         .await?;
@@ -1241,16 +1282,28 @@ async fn update_message_graphql(state: &AppState, input: Value) -> Result<()> {
 
 async fn publish_message_status(
     state: &AppState,
-    message_id: &str,
-    message_created_at: &str,
+    message: &ChatMessage,
     status: &str,
     error: Option<&str>,
 ) -> Result<()> {
     let mut input = json!({
-        "id": message_id,
-        "createdAt": message_created_at,
+        "id": message.id,
+        "threadId": message.thread_id,
+        "createdAt": message.created_at,
+        "sequenceNumber": message.sequence_number,
+        "role": message.role,
+        "messageKind": message.message_kind,
+        "messageDomain": MESSAGE_DOMAIN_CONVERSATION,
+        "messageType": message.message_type,
+        "source": "papyrus-console",
+        "content": message.content,
+        "summary": truncate_summary(&message.content),
+        "semanticLayer": CHAT_DETAIL_LAYER,
+        "searchVisibility": EXPLICIT_SEARCH,
+        "responseTarget": message.response_target,
         "responseStatus": status,
         "updatedAt": now_iso(),
+        "newsroomFeedKey": NEWSROOM_FEED_CONSOLE_CHAT,
     });
     if status == "RUNNING" {
         input["responseOwner"] = Value::String("rust-lambda".to_string());
@@ -1499,7 +1552,7 @@ fn build_openai_messages(
         messages.push(json!({
             "role": "system",
             "content": format!(
-                "execute_tactus supports progressive documentation. Use docs_list{{}} first, then docs_get{{ id = \"...\" }} for focused details.\nAvailable doc topics:\n{}",
+                "execute_tactus supports a resource-oriented Papyrus API. Use api_list{{}} for the resource/verb schema. Use docs_list{{ namespace = \"resources\" }} first, then docs_get{{ id = \"resources.Assignment\" }} before non-trivial writes. To create a research assignment, use Assignment.create{{ type = \"research\", title = \"...\", apply = true }}.\nAvailable doc topics:\n{}",
                 docs_lines
             )
         }));
@@ -1510,17 +1563,68 @@ fn build_openai_messages(
             "content": format!("Thread rolling summary:\n{}", context.rolling_summary)
         }));
     }
+    let mut emitted_tool_call_ids = HashSet::new();
     for cached in &context.recent_messages {
-        let role = match cached.role.as_str() {
-            "ASSISTANT" => "assistant",
-            "USER" => "user",
+        if cached.content.trim().is_empty() {
+            continue;
+        }
+        match cached.role.as_str() {
+            "ASSISTANT" => messages.push(json!({ "role": "assistant", "content": cached.content })),
+            "USER" => messages.push(json!({ "role": "user", "content": cached.content })),
+            "TOOL" if cached.message_kind == MESSAGE_KIND_TOOL_CALL => {
+                let tool_call_id = cached_tool_call_id(cached);
+                emitted_tool_call_ids.insert(tool_call_id);
+                messages.push(json!({
+                    "role": "assistant",
+                    "content": Value::Null,
+                    "tool_calls": [cached_tool_call(cached)],
+                }));
+            }
+            "TOOL" if cached.message_kind == MESSAGE_KIND_TOOL_RESULT => {
+                let tool_call_id = cached_tool_call_id(cached);
+                if !emitted_tool_call_ids.contains(&tool_call_id) {
+                    continue;
+                }
+                messages.push(json!({
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": cached.content,
+                }));
+            }
             _ => continue,
-        };
-        if !cached.content.trim().is_empty() {
-            messages.push(json!({ "role": role, "content": cached.content }));
         }
     }
     messages
+}
+
+fn cached_tool_call(cached: &CachedPromptMessage) -> Value {
+    let arguments = cached
+        .metadata
+        .get("arguments")
+        .and_then(Value::as_str)
+        .unwrap_or(&cached.content);
+    let name = cached
+        .metadata
+        .get("toolName")
+        .and_then(Value::as_str)
+        .unwrap_or("execute_tactus");
+    json!({
+        "id": cached_tool_call_id(cached),
+        "type": "function",
+        "function": {
+            "name": name,
+            "arguments": arguments,
+        }
+    })
+}
+
+fn cached_tool_call_id(cached: &CachedPromptMessage) -> String {
+    cached
+        .metadata
+        .get("toolCallId")
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
+        .unwrap_or_else(|| format!("cached-tool-call-{}", cached.id))
 }
 
 fn openai_request(model: &str, messages: Vec<Value>) -> Value {
@@ -1533,7 +1637,7 @@ fn openai_request(model: &str, messages: Vec<Value>) -> Value {
                 "type": "function",
                 "function": {
                     "name": "execute_tactus",
-                    "description": "Execute a short Tactus snippet inside the Papyrus newsroom runtime. Use docs_list/docs_get for progressive documentation discovery.",
+                    "description": "Execute a short Tactus snippet inside the Papyrus newsroom runtime. Use api_list and docs_list/docs_get for progressive documentation discovery. Canonical writes use resources such as Assignment.create{ type = \"research\", title = \"...\", apply = true }.",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -1924,6 +2028,36 @@ fn stream_i64(image: &serde_json::Map<String, Value>, key: &str) -> Option<i64> 
 
 fn attr_string(value: Option<&AttributeValue>) -> Option<String> {
     value.and_then(|attr| attr.as_s().ok().cloned())
+}
+
+fn attr_json(value: Option<&AttributeValue>) -> Value {
+    let Some(attr) = value else {
+        return Value::Null;
+    };
+    if let Ok(text) = attr.as_s() {
+        return serde_json::from_str(text).unwrap_or_else(|_| Value::String(text.clone()));
+    }
+    if let Ok(map) = attr.as_m() {
+        return Value::Object(
+            map.iter()
+                .map(|(key, entry)| (key.clone(), attr_json(Some(entry))))
+                .collect(),
+        );
+    }
+    if let Ok(list) = attr.as_l() {
+        return Value::Array(list.iter().map(|entry| attr_json(Some(entry))).collect());
+    }
+    if let Ok(n) = attr.as_n() {
+        return n
+            .parse::<i64>()
+            .map(Value::from)
+            .or_else(|_| n.parse::<f64>().map(Value::from))
+            .unwrap_or_else(|_| Value::String(n.clone()));
+    }
+    if let Ok(value) = attr.as_bool() {
+        return Value::Bool(*value);
+    }
+    Value::Null
 }
 
 fn attr_i64(value: Option<&AttributeValue>) -> Option<i64> {

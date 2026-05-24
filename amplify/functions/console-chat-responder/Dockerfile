@@ -8,7 +8,7 @@ RUN cargo build --release
 FROM public.ecr.aws/lambda/provided:al2023
 COPY --from=build /workspace/amplify/functions/console-chat-responder/target/release/papyrus_console_chat_responder /var/runtime/bootstrap
 RUN dnf --setopt=cachedir=/tmp/dnf-cache install -y python3 python3-pip \
-    && python3 -m pip install --no-cache-dir PyYAML tiktoken \
+    && python3 -m pip install --no-cache-dir PyYAML botocore tiktoken \
     && (python3 -m pip install --no-cache-dir tactus || true) \
     && dnf clean all \
     && rm -rf /tmp/dnf-cache /var/cache/dnf /var/cache/yum

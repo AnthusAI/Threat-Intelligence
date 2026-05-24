@@ -14,7 +14,9 @@ import json
 import os
 import re
 import subprocess
+import uuid
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -298,6 +300,57 @@ query ListAssignments($limit: Int, $nextToken: String) {
 }
 """
 
+CREATE_ASSIGNMENT_MUTATION = """
+mutation CreateAssignment($input: CreateAssignmentInput!) {
+  createAssignment(input: $input) {
+    id
+    assignmentTypeKey
+    queueKey
+    queueStatusKey
+    status
+    priority
+    title
+    summary
+    assigneeType
+    assigneeId
+    assigneeKey
+    corpusId
+    categorySetId
+    classifierId
+    sectionId
+    sectionKey
+    sectionType
+    sectionStatusKey
+    sectionQueueStatusKey
+    primaryFocusCategoryKey
+    topicScopeCategoryKeys
+    sourceSnapshotId
+    importRunId
+    createdBy
+    createdAt
+    updatedAt
+  }
+}
+"""
+
+CREATE_ASSIGNMENT_EVENT_MUTATION = """
+mutation CreateAssignmentEvent($input: CreateAssignmentEventInput!) {
+  createAssignmentEvent(input: $input) {
+    id
+    assignmentId
+    assignmentTypeKey
+    queueKey
+    eventType
+    fromStatus
+    toStatus
+    actorSub
+    actorLabel
+    note
+    createdAt
+  }
+}
+"""
+
 LIST_PUBLISHED_ITEMS_QUERY = """
 query ListPublishedItems($limit: Int, $nextToken: String) {
   listPublishedItems(limit: $limit, nextToken: $nextToken) {
@@ -511,6 +564,137 @@ def papyrus_get_assignment(assignment_id: str) -> dict[str, Any]:
     decoded = _decode_record_json(assignment)
     _hydrate_assignment_payloads(decoded)
     return {"assignment": decoded}
+
+
+def papyrus_list_assignments(
+    *,
+    limit: int | str = 25,
+    status: str = "",
+    type: str = "",  # noqa: A002 - resource API uses `type`.
+    section_key: str = "",
+    import_run_id: str = "",
+) -> dict[str, Any]:
+    """
+    List live Papyrus Assignments with small client-side filters for agent discovery.
+    """
+    max_items = max(1, min(int(limit or 25), 100))
+    assignments = _list_assignments()
+    if status:
+        assignments = [item for item in assignments if str(item.get("status") or "") == status]
+    if type:
+        expected_type = _assignment_type_key_for_resource_type(type)
+        assignments = [item for item in assignments if str(item.get("assignmentTypeKey") or "") == expected_type]
+    if section_key:
+        assignments = [item for item in assignments if str(item.get("sectionKey") or "") == section_key]
+    if import_run_id:
+        assignments = [item for item in assignments if str(item.get("importRunId") or "") == import_run_id]
+    assignments.sort(key=lambda item: str(item.get("createdAt") or ""), reverse=True)
+    return {"assignments": assignments[:max_items], "count": len(assignments[:max_items])}
+
+
+def papyrus_assignment_create(args: dict[str, Any]) -> dict[str, Any]:
+    """
+    Resource-oriented Assignment.create implementation for execute_tactus.
+    """
+    payload = dict(args or {})
+    assignment_type = str(payload.get("type") or payload.get("assignmentType") or "").strip()
+    title = _required(payload.get("title"), "title")
+    if assignment_type != "research":
+        raise ValueError('Assignment.create currently supports type = "research" only')
+
+    plan = _build_research_assignment_resource_plan(payload, title)
+    result: dict[str, Any] = {
+        "ok": True,
+        "resource": "Assignment",
+        "verb": "create",
+        "applied": False,
+        "assignmentId": plan["assignment"]["id"],
+        "assignment": plan["assignment"],
+        "event": plan["event"],
+        "changes": [
+            {"model": "Assignment", "operation": "create", "id": plan["assignment"]["id"]},
+            {"model": "AssignmentEvent", "operation": "create", "id": plan["event"]["id"]},
+        ],
+        "api_calls": ["papyrus.Assignment.create"],
+        "error": None,
+    }
+    if not bool(payload.get("apply") or False):
+        return result
+
+    assignment_data = _graphql(CREATE_ASSIGNMENT_MUTATION, {"input": plan["assignment"]})
+    event_data = _graphql(CREATE_ASSIGNMENT_EVENT_MUTATION, {"input": plan["event"]})
+    result["applied"] = True
+    result["assignment"] = _decode_record_json(assignment_data.get("createAssignment") or plan["assignment"])
+    result["event"] = _decode_record_json(event_data.get("createAssignmentEvent") or plan["event"])
+    return result
+
+
+def _assignment_type_key_for_resource_type(resource_type: str) -> str:
+    if str(resource_type).strip() == "research":
+        return "research.edition-candidate"
+    raise ValueError(f"Unsupported Assignment type: {resource_type}")
+
+
+def _build_research_assignment_resource_plan(payload: dict[str, Any], title: str) -> dict[str, Any]:
+    now = _now_iso()
+    section_key = str(payload.get("sectionKey") or payload.get("section_key") or "").strip()
+    corpus_key = str(payload.get("corpusKey") or payload.get("corpus_key") or "AI-ML-research").strip()
+    research_mode = str(payload.get("researchMode") or payload.get("research_mode") or "source_discovery").strip()
+    status = str(payload.get("status") or "open").strip()
+    priority = int(payload.get("priority") or 50)
+    actor_label = str(payload.get("actorLabel") or payload.get("actor_label") or "papyrus-console-agent").strip()
+    import_run_id = str(payload.get("importRunId") or payload.get("import_run_id") or "").strip()
+    summary = str(payload.get("summary") or "").strip() or title
+    instructions = str(payload.get("instructions") or "").strip()
+    assignment_type_key = _assignment_type_key_for_resource_type("research")
+    queue_key = str(payload.get("queueKey") or payload.get("queue_key") or f"research:{section_key or 'unsectioned'}:exploratory").strip()
+    assignment_id = str(payload.get("id") or "").strip() or (
+        f"assignment-research-{_safe_id(title)}-{uuid.uuid4().hex[:12]}"
+    )
+
+    assignment: dict[str, Any] = {
+        "id": assignment_id,
+        "assignmentTypeKey": assignment_type_key,
+        "queueKey": queue_key,
+        "queueStatusKey": f"{queue_key}#{status}",
+        "status": status,
+        "priority": priority,
+        "title": title,
+        "summary": summary,
+        "corpusId": f"knowledge-corpus-{_safe_id(corpus_key)}",
+        "importRunId": import_run_id or None,
+        "createdBy": actor_label,
+        "createdAt": now,
+        "updatedAt": now,
+        "newsroomFeedKey": f"assignment#{status}",
+    }
+    if section_key:
+        assignment["sectionKey"] = section_key
+        assignment["sectionType"] = "newsroom_section"
+        assignment["sectionStatusKey"] = f"{section_key}#{status}"
+        assignment["sectionQueueStatusKey"] = f"{section_key}#{queue_key}#{status}"
+
+    event_note_parts = [f"Created research assignment: {title}"]
+    if research_mode:
+        event_note_parts.append(f"Research mode: {research_mode}")
+    if instructions:
+        event_note_parts.append(f"Instructions: {instructions}")
+    event: dict[str, Any] = {
+        "id": f"assignment-event-{assignment_id}-created",
+        "assignmentId": assignment_id,
+        "assignmentTypeKey": assignment_type_key,
+        "queueKey": queue_key,
+        "eventType": "created",
+        "toStatus": status,
+        "actorSub": actor_label,
+        "actorLabel": actor_label,
+        "note": "\n".join(event_note_parts),
+        "createdAt": now,
+    }
+    return {
+        "assignment": {key: value for key, value in assignment.items() if value is not None},
+        "event": {key: value for key, value in event.items() if value is not None},
+    }
 
 
 def papyrus_get_assignment_context(assignment_id: str) -> dict[str, Any]:
@@ -2442,17 +2626,17 @@ def _graphql(query: str, variables: dict[str, Any]) -> dict[str, Any]:
     token = os.environ.get("PAPYRUS_GRAPHQL_JWT")
     if not endpoint:
         raise ValueError("Missing PAPYRUS_GRAPHQL_ENDPOINT for Papyrus GraphQL read tool.")
-    if not token:
-        raise ValueError("Missing PAPYRUS_GRAPHQL_JWT for Papyrus GraphQL read tool.")
 
     body = json.dumps({"query": query, "variables": variables}).encode("utf-8")
+    headers = {"content-type": "application/json"}
+    if token:
+        headers["Authorization"] = _lambda_auth_token(token)
+    else:
+        headers.update(_iam_signed_graphql_headers(endpoint, body))
     request = urllib.request.Request(
         endpoint,
         data=body,
-        headers={
-            "content-type": "application/json",
-            "Authorization": _lambda_auth_token(token),
-        },
+        headers=headers,
         method="POST",
     )
     try:
@@ -2465,6 +2649,39 @@ def _graphql(query: str, variables: dict[str, Any]) -> dict[str, Any]:
     if payload.get("errors"):
         raise RuntimeError("; ".join(error.get("message", str(error)) for error in payload["errors"]))
     return payload.get("data") or {}
+
+
+def _iam_signed_graphql_headers(endpoint: str, body: bytes) -> dict[str, str]:
+    try:
+        from botocore.auth import SigV4Auth
+        from botocore.awsrequest import AWSRequest
+        from botocore.session import Session
+    except Exception as exc:  # pragma: no cover - depends on Lambda/local deps
+        raise ValueError("Missing PAPYRUS_GRAPHQL_JWT and botocore is unavailable for IAM AppSync signing.") from exc
+
+    parsed = urllib.parse.urlparse(endpoint)
+    region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or _region_from_appsync_host(parsed.netloc)
+    session = Session()
+    credentials = session.get_credentials()
+    if credentials is None:
+        raise ValueError("Missing PAPYRUS_GRAPHQL_JWT and AWS credentials are unavailable for IAM AppSync signing.")
+    frozen = credentials.get_frozen_credentials()
+    request = AWSRequest(
+        method="POST",
+        url=endpoint,
+        data=body,
+        headers={
+            "content-type": "application/json",
+            "host": parsed.netloc,
+        },
+    )
+    SigV4Auth(frozen, "appsync", region).add_auth(request)
+    return {str(key): str(value) for key, value in request.headers.items()}
+
+
+def _region_from_appsync_host(host: str) -> str:
+    match = re.search(r"\.appsync-api\.([a-z0-9-]+)\.amazonaws\.com", host)
+    return match.group(1) if match else "us-east-1"
 
 
 def _hydrate_assignment_payloads(assignment: dict[str, Any]) -> None:
