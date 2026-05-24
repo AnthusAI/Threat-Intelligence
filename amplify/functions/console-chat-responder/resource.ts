@@ -1,4 +1,4 @@
-import { Duration, NestedStack, type NestedStackProps } from "aws-cdk-lib";
+import { Duration, NestedStack, Stack, type NestedStackProps } from "aws-cdk-lib";
 import { Repository } from "aws-cdk-lib/aws-ecr";
 import { Effect, PolicyStatement } from "aws-cdk-lib/aws-iam";
 import { CfnEventSourceMapping, DockerImageCode, DockerImageFunction } from "aws-cdk-lib/aws-lambda";
@@ -13,7 +13,6 @@ export type ConsoleChatResponderStackProps = NestedStackProps & {
   graphqlEndpoint: string;
   responseTarget?: string;
   openaiApiKeySsmParam?: string;
-  jwtSecretSsmParam?: string;
   model?: string;
   prebuiltImageUri?: string;
 };
@@ -36,8 +35,6 @@ export class ConsoleChatResponderStack extends NestedStack {
     };
     const openaiParam = props.openaiApiKeySsmParam?.trim() || process.env.PAPYRUS_CONSOLE_OPENAI_API_KEY_SSM_PARAM || "";
     if (openaiParam) environment.PAPYRUS_CONSOLE_OPENAI_API_KEY_SSM_PARAM = openaiParam;
-    const jwtParam = props.jwtSecretSsmParam?.trim() || process.env.PAPYRUS_CONSOLE_JWT_SECRET_SSM_PARAM || process.env.PAPYRUS_JWT_SECRET_SSM_PARAM || "";
-    if (jwtParam) environment.PAPYRUS_CONSOLE_JWT_SECRET_SSM_PARAM = jwtParam;
 
     const imageUri = props.prebuiltImageUri?.trim() || process.env.PAPYRUS_CONSOLE_RESPONDER_IMAGE_URI?.trim() || "";
     let code: DockerImageCode;
@@ -101,6 +98,11 @@ export class ConsoleChatResponderStack extends NestedStack {
     }));
     this.responderFunction.addToRolePolicy(new PolicyStatement({
       effect: Effect.ALLOW,
+      actions: ["appsync:GraphQL"],
+      resources: [appSyncGraphQlArn(this, props.graphqlEndpoint)],
+    }));
+    this.responderFunction.addToRolePolicy(new PolicyStatement({
+      effect: Effect.ALLOW,
       actions: [
         "dynamodb:DescribeStream",
         "dynamodb:GetRecords",
@@ -110,6 +112,18 @@ export class ConsoleChatResponderStack extends NestedStack {
       resources: [props.messageStreamArn],
     }));
   }
+}
+
+function appSyncGraphQlArn(scope: Construct, graphqlEndpoint: string): string {
+  const apiId = graphqlEndpoint
+    .replace(/^https?:\/\//, "")
+    .split(".")[0]
+    .trim();
+  if (!apiId) {
+    throw new Error(`Unable to parse AppSync API id from endpoint: ${graphqlEndpoint}`);
+  }
+  const stack = Stack.of(scope);
+  return `arn:aws:appsync:${stack.region}:${stack.account}:apis/${apiId}/*`;
 }
 
 function parseEcrImageUri(imageUri: string): { repositoryName: string; tagOrDigest: string } {
