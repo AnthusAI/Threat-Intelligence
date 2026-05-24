@@ -462,6 +462,29 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
     (message) => message.role === "ASSISTANT" && message.responseStatus === "RUNNING",
   );
   const pending = pendingUserResponse || pendingAssistantResponse;
+  useEffect(() => {
+    if (!thread?.id || !pending) return;
+    let cancelled = false;
+    let timer: number | null = null;
+
+    const refresh = async () => {
+      if (cancelled) return;
+      try {
+        await loadMessages(thread.id);
+      } catch (nextError) {
+        console.warn("[PapyrusConsole] Pending message refresh failed", nextError);
+      } finally {
+        if (!cancelled) timer = window.setTimeout(refresh, 1200);
+      }
+    };
+
+    timer = window.setTimeout(refresh, 1200);
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [loadMessages, pending, thread?.id]);
+
   const displayMessages = useMemo<DisplayConsoleMessage[]>(() => {
     if (!latestAwaitingAssistantUserMessage) return sortedMessages;
     return [

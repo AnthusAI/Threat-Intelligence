@@ -787,12 +787,35 @@ export function subscribeConsoleMessages(
 }
 
 function normalizeConsoleMessageSubscriptionPayload(value: unknown): ConsoleChatMessage | null {
-  if (!value || typeof value !== "object") return null;
-  const record = value as { data?: unknown; id?: unknown };
-  if (typeof record.id === "string") return normalizeConsoleMessageRecord(record as Record<string, unknown>);
-  if (record.data && typeof record.data === "object" && typeof (record.data as { id?: unknown }).id === "string") {
-    return normalizeConsoleMessageRecord(record.data as Record<string, unknown>);
+  const record = resolveConsoleMessageSubscriptionRecord(value);
+  if (!record) return null;
+  return normalizeConsoleMessageRecord(record);
+}
+
+function resolveConsoleMessageSubscriptionRecord(value: unknown): Record<string, unknown> | null {
+  const queue: unknown[] = [value];
+  const visited = new Set<unknown>();
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || typeof current !== "object" || visited.has(current)) continue;
+    visited.add(current);
+    const record = current as Record<string, unknown>;
+    if (typeof record.id === "string") return record;
+
+    for (const [key, nested] of Object.entries(record)) {
+      if (!nested || typeof nested !== "object") continue;
+      if (
+        key === "data"
+        || key === "value"
+        || key.startsWith("onCreate")
+        || key.startsWith("onUpdate")
+      ) {
+        queue.push(nested);
+      }
+    }
   }
+
   return null;
 }
 

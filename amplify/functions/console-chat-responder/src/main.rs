@@ -14,9 +14,13 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
+use tokio::io::AsyncWriteExt;
+use tokio::process::Command;
+use tokio::time::{Duration as TokioDuration, timeout};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -31,8 +35,11 @@ const NEWSROOM_FEED_CONSOLE_CHAT: &str = "consoleChat";
 const CHAT_DETAIL_LAYER: &str = "chat_detail";
 const EXPLICIT_SEARCH: &str = "explicit";
 const CONTEXT_CACHE_SCHEMA_VERSION: u32 = 1;
+const STATIC_PROMPT_CACHE_SCHEMA_VERSION: u32 = 1;
 const STREAM_FLUSH_INTERVAL_MS: i64 = 200;
 const STREAM_FLUSH_CHARS: usize = 96;
+const DEFAULT_STATIC_PROMPT_CACHE_TTL_SECONDS: i64 = 900;
+const DEFAULT_EXECUTE_TACTUS_TIMEOUT_SECONDS: u64 = 30;
 const SHARED_OPENAI_API_KEY_SSM_PARAM: &str = "/amplify/shared/papyrus/OPENAI_API_KEY";
 
 #[tokio::main]
@@ -75,6 +82,9 @@ struct AppConfig {
     model: String,
     graphql_endpoint: String,
     cache_root: PathBuf,
+    execute_tactus_runner: PathBuf,
+    execute_tactus_timeout_seconds: u64,
+    static_prompt_cache_ttl_seconds: i64,
 }
 
 impl AppConfig {
@@ -93,6 +103,18 @@ impl AppConfig {
                 "PAPYRUS_CONSOLE_CONTEXT_CACHE_ROOT",
                 "/tmp/papyrus-console/thread-context",
             )),
+            execute_tactus_runner: PathBuf::from(env_or(
+                "PAPYRUS_EXECUTE_TACTUS_RUNNER",
+                "/opt/papyrus/execute_tactus_runner.py",
+            )),
+            execute_tactus_timeout_seconds: optional_env("PAPYRUS_EXECUTE_TACTUS_TIMEOUT_SECONDS")
+                .and_then(|value| value.parse::<u64>().ok())
+                .filter(|value| *value > 0)
+                .unwrap_or(DEFAULT_EXECUTE_TACTUS_TIMEOUT_SECONDS),
+            static_prompt_cache_ttl_seconds: optional_env("PAPYRUS_CONSOLE_STATIC_CONTEXT_TTL_SECONDS")
+                .and_then(|value| value.parse::<i64>().ok())
+                .filter(|value| *value > 0)
+                .unwrap_or(DEFAULT_STATIC_PROMPT_CACHE_TTL_SECONDS),
         }
     }
 }
@@ -105,6 +127,25 @@ struct AppState {
     openai_api_key: String,
     aws_region: String,
     credentials_provider: SharedCredentialsProvider,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StaticPromptDocSummary {
+    id: String,
+    title: String,
+    summary: String,
+    namespace: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StaticPromptContext {
+    schema_version: u32,
+    graphql_endpoint: String,
+    generated_at: String,
+    expires_at_epoch: i64,
+    publication_mission: String,
+    publication_policy: String,
+    docs_index: Vec<StaticPromptDocSummary>,
 }
 
 async fn handler(event: LambdaEvent<Value>, state: Arc<AppState>) -> Result<Value, Error> {
@@ -204,6 +245,7 @@ async fn answer_claimed_message(
 ) -> Result<()> {
     let selected_model = resolve_message_model(&state.config.model, message);
     let mut context = load_prompt_context(state, message).await?;
+    let static_prompt = load_static_prompt_context(state).await?;
     let starting_sequence = context.last_sequence_number.max(message.sequence_number);
     let now = now_iso();
     let assistant_record = PersistedMessage {
@@ -232,7 +274,9 @@ async fn answer_claimed_message(
     create_message_graphql(state, &assistant_record, &now).await?;
 
     let mut writer = AssistantStreamWriter::new(state, assistant_record.clone());
-    let tool_and_assistant = run_agent_turn(state, message, &context, &selected_model, &mut writer).await?;
+    let tool_and_assistant =
+        run_agent_turn(state, message, &context, &static_prompt, &selected_model, &mut writer)
+            .await?;
     if writer.content.trim().is_empty() && !tool_and_assistant.assistant_content.trim().is_empty() {
         writer
             .push_delta(&tool_and_assistant.assistant_content)
@@ -785,6 +829,212 @@ fn compute_context_digest(cache: &ThreadContextCache) -> String {
     to_hex(&hasher.finalize())
 }
 
+async fn load_static_prompt_context(state: &AppState) -> Result<StaticPromptContext> {
+    if let Some(cache) = read_static_prompt_cache(&state.config.cache_root)? {
+        let now_epoch = Utc::now().timestamp();
+        if cache.schema_version == STATIC_PROMPT_CACHE_SCHEMA_VERSION
+            && cache.graphql_endpoint == state.config.graphql_endpoint
+            && cache.expires_at_epoch > now_epoch
+        {
+            return Ok(cache);
+        }
+    }
+
+    let (mission, policy) = load_publication_doctrine(state).await?;
+    let docs_index = match load_execute_tactus_docs_index(state).await {
+        Ok(entries) => entries,
+        Err(error) => {
+            warn!(
+                error = %format_error_chain(&error),
+                "failed to load execute_tactus docs index; using empty docs list"
+            );
+            Vec::new()
+        }
+    };
+    let generated_at = now_iso();
+    let expires_at_epoch = Utc::now()
+        .checked_add_signed(Duration::seconds(
+            state.config.static_prompt_cache_ttl_seconds,
+        ))
+        .map(|dt| dt.timestamp())
+        .unwrap_or_else(|| Utc::now().timestamp() + state.config.static_prompt_cache_ttl_seconds);
+    let cache = StaticPromptContext {
+        schema_version: STATIC_PROMPT_CACHE_SCHEMA_VERSION,
+        graphql_endpoint: state.config.graphql_endpoint.clone(),
+        generated_at,
+        expires_at_epoch,
+        publication_mission: mission,
+        publication_policy: policy,
+        docs_index,
+    };
+    write_static_prompt_cache(&state.config.cache_root, &cache)?;
+    Ok(cache)
+}
+
+fn read_static_prompt_cache(root: &Path) -> Result<Option<StaticPromptContext>> {
+    let path = static_prompt_cache_path(root);
+    let text = match fs::read_to_string(&path) {
+        Ok(value) => value,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("read static prompt cache {}", path.display()));
+        }
+    };
+    let cache: StaticPromptContext = serde_json::from_str(&text)
+        .with_context(|| format!("parse static prompt cache {}", path.display()))?;
+    Ok(Some(cache))
+}
+
+fn write_static_prompt_cache(root: &Path, cache: &StaticPromptContext) -> Result<()> {
+    fs::create_dir_all(root)
+        .with_context(|| format!("create static prompt cache directory {}", root.display()))?;
+    let path = static_prompt_cache_path(root);
+    let tmp_path = path.with_extension("json.tmp");
+    let text = serde_json::to_string(cache)?;
+    fs::write(&tmp_path, text)
+        .with_context(|| format!("write static prompt cache {}", tmp_path.display()))?;
+    fs::rename(&tmp_path, &path)
+        .with_context(|| format!("move static prompt cache {}", path.display()))?;
+    Ok(())
+}
+
+fn static_prompt_cache_path(root: &Path) -> PathBuf {
+    root.join("static_prompt_context.json")
+}
+
+async fn load_publication_doctrine(state: &AppState) -> Result<(String, String)> {
+    let query = r#"
+      query ListCurrentDoctrineItems($versionState: String!, $limit: Int, $nextToken: String) {
+        listItemsByVersionStateAndUpdatedAt(versionState: $versionState, limit: $limit, nextToken: $nextToken) {
+          items {
+            id
+            type
+            typeStatus
+            slug
+            body
+          }
+          nextToken
+        }
+      }
+    "#;
+    let mut next_token: Option<String> = None;
+    let mut mission = String::new();
+    let mut policy = String::new();
+    loop {
+        let variables = json!({
+            "versionState": "current",
+            "limit": 150,
+            "nextToken": next_token,
+        });
+        let data = match graphql(state, query, variables).await {
+            Ok(value) => value,
+            Err(error) => {
+                warn!(
+                    error = %format_error_chain(&error),
+                    "failed loading doctrine from GraphQL"
+                );
+                break;
+            }
+        };
+        let connection = data
+            .get("listItemsByVersionStateAndUpdatedAt")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let items = connection
+            .get("items")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        for item in items {
+            let item_type = item.get("type").and_then(Value::as_str).unwrap_or_default();
+            if item_type != "doctrine" {
+                continue;
+            }
+            let type_status = item
+                .get("typeStatus")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if type_status != "doctrine#private" {
+                continue;
+            }
+            let slug = item.get("slug").and_then(Value::as_str).unwrap_or_default();
+            let text = item
+                .get("body")
+                .and_then(Value::as_array)
+                .map(|lines| {
+                    lines
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::trim)
+                        .filter(|line| !line.is_empty())
+                        .collect::<Vec<&str>>()
+                        .join("\n\n")
+                })
+                .unwrap_or_default();
+            if slug == "editorial-doctrine-mission" && !text.trim().is_empty() {
+                mission = text;
+            } else if slug == "editorial-doctrine-policy" && !text.trim().is_empty() {
+                policy = text;
+            }
+        }
+        if !mission.is_empty() && !policy.is_empty() {
+            break;
+        }
+        next_token = connection
+            .get("nextToken")
+            .and_then(Value::as_str)
+            .map(ToString::to_string);
+        if next_token.is_none() {
+            break;
+        }
+    }
+    Ok((mission, policy))
+}
+
+async fn load_execute_tactus_docs_index(state: &AppState) -> Result<Vec<StaticPromptDocSummary>> {
+    let runner_input = json!({
+        "mode": "docs_index"
+    });
+    let output = call_execute_tactus_runner(state, &runner_input).await?;
+    let entries = output
+        .get("entries")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut docs = Vec::with_capacity(entries.len());
+    for value in entries {
+        let id = value
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        if id.is_empty() {
+            continue;
+        }
+        docs.push(StaticPromptDocSummary {
+            id,
+            title: value
+                .get("title")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            summary: value
+                .get("summary")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            namespace: value
+                .get("namespace")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+        });
+    }
+    docs.sort_by(|left, right| left.id.cmp(&right.id));
+    Ok(docs)
+}
+
 #[derive(Debug, Clone)]
 struct PersistedMessage {
     id: String,
@@ -892,7 +1142,6 @@ const MESSAGE_SELECTION: &str = r#"
   messageKind
   messageDomain
   messageType
-  status
   source
   authorLabel
   content
@@ -955,6 +1204,8 @@ async fn create_message_graphql(
     }
     if let Some(status) = &message.response_status {
         input["responseStatus"] = Value::String(status.clone());
+    } else {
+        input["responseStatus"] = Value::String("COMPLETED".to_string());
     }
     if let Some(error) = &message.response_error {
         input["responseError"] = Value::String(error.clone());
@@ -1123,85 +1374,136 @@ async fn run_agent_turn(
     state: &AppState,
     trigger: &ChatMessage,
     context: &ThreadContextCache,
+    static_prompt: &StaticPromptContext,
     model: &str,
     assistant_writer: &mut AssistantStreamWriter<'_>,
 ) -> Result<AgentTurnOutput> {
-    let mut messages = build_openai_messages(context);
-    let request = openai_request(model, messages.clone());
-    let first = stream_openai_chat(state, request, Some(&mut *assistant_writer)).await?;
-    let tool_calls = first.tool_calls;
-    if tool_calls.is_empty() {
-        return Ok(AgentTurnOutput {
-            assistant_content: fallback_assistant_content(first.content),
-            tool_messages: Vec::new(),
-        });
-    }
-
+    const MAX_TOOL_ROUNDS: usize = 4;
+    let mut messages = build_openai_messages(context, static_prompt);
     let mut persisted_tool_messages = Vec::new();
-    messages.push(json!({
-        "role": "assistant",
-        "content": if first.content.is_empty() { Value::Null } else { Value::String(first.content) },
-        "tool_calls": tool_calls,
-    }));
-    for call in tool_calls {
-        let call_id = call
-            .get("id")
-            .and_then(Value::as_str)
-            .unwrap_or("tool-call");
-        let function = call
-            .get("function")
-            .and_then(Value::as_object)
-            .cloned()
-            .unwrap_or_default();
-        let name = function
-            .get("name")
-            .and_then(Value::as_str)
-            .unwrap_or("execute_papyrus");
-        let arguments = function
-            .get("arguments")
-            .and_then(Value::as_str)
-            .unwrap_or("{}");
-        let tool_result = execute_papyrus_tool(trigger, context, name, arguments);
-        persisted_tool_messages.push(PersistedToolMessage {
-            role: "TOOL".to_string(),
-            message_kind: MESSAGE_KIND_TOOL_CALL.to_string(),
-            message_type: "TOOL_CALL".to_string(),
-            content: arguments.to_string(),
-            summary: truncate_summary(&format!("{name} tool call")),
-            metadata: json!({ "toolCallId": call_id, "toolName": name, "arguments": arguments }),
-        });
-        persisted_tool_messages.push(PersistedToolMessage {
-            role: "TOOL".to_string(),
-            message_kind: MESSAGE_KIND_TOOL_RESULT.to_string(),
-            message_type: "TOOL_RESPONSE".to_string(),
-            content: tool_result.to_string(),
-            summary: truncate_summary(&format!("{name} tool result")),
-            metadata: json!({ "toolCallId": call_id, "toolName": name }),
-        });
+    let mut saw_tool_calls = false;
+    let mut last_assistant_content = String::new();
+
+    for _round in 0..MAX_TOOL_ROUNDS {
+        let turn = stream_openai_chat(
+            state,
+            openai_request(model, messages.clone()),
+            Some(&mut *assistant_writer),
+        )
+        .await?;
+        let assistant_content = turn.content;
+        let tool_calls = turn.tool_calls;
+        last_assistant_content = assistant_content.clone();
+
+        if tool_calls.is_empty() {
+            return Ok(AgentTurnOutput {
+                assistant_content: if saw_tool_calls {
+                    fallback_tool_assistant_content(assistant_content)
+                } else {
+                    fallback_assistant_content(assistant_content)
+                },
+                tool_messages: persisted_tool_messages,
+            });
+        }
+
+        saw_tool_calls = true;
         messages.push(json!({
-            "role": "tool",
-            "tool_call_id": call_id,
-            "content": tool_result.to_string(),
+            "role": "assistant",
+            "content": if assistant_content.is_empty() { Value::Null } else { Value::String(assistant_content) },
+            "tool_calls": tool_calls,
         }));
+
+        for call in tool_calls {
+            let call_id = call
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or("tool-call");
+            let function = call
+                .get("function")
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default();
+            let name = function
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("execute_tactus");
+            let arguments = function
+                .get("arguments")
+                .and_then(Value::as_str)
+                .unwrap_or("{}");
+            let tool_result = execute_tactus_tool(state, trigger, context, name, arguments).await;
+            persisted_tool_messages.push(PersistedToolMessage {
+                role: "TOOL".to_string(),
+                message_kind: MESSAGE_KIND_TOOL_CALL.to_string(),
+                message_type: "TOOL_CALL".to_string(),
+                content: arguments.to_string(),
+                summary: truncate_summary(&format!("{name} tool call")),
+                metadata: json!({ "toolCallId": call_id, "toolName": name, "arguments": arguments }),
+            });
+            persisted_tool_messages.push(PersistedToolMessage {
+                role: "TOOL".to_string(),
+                message_kind: MESSAGE_KIND_TOOL_RESULT.to_string(),
+                message_type: "TOOL_RESPONSE".to_string(),
+                content: tool_result.to_string(),
+                summary: truncate_summary(&format!("{name} tool result")),
+                metadata: json!({ "toolCallId": call_id, "toolName": name }),
+            });
+            messages.push(json!({
+                "role": "tool",
+                "tool_call_id": call_id,
+                "content": tool_result.to_string(),
+            }));
+        }
     }
 
-    let second = stream_openai_chat(
-        state,
-        openai_request(model, messages),
-        Some(&mut *assistant_writer),
-    )
-    .await?;
     Ok(AgentTurnOutput {
-        assistant_content: fallback_tool_assistant_content(second.content),
+        assistant_content: fallback_tool_assistant_content(last_assistant_content),
         tool_messages: persisted_tool_messages,
     })
 }
 
-fn build_openai_messages(context: &ThreadContextCache) -> Vec<Value> {
+fn build_openai_messages(
+    context: &ThreadContextCache,
+    static_prompt: &StaticPromptContext,
+) -> Vec<Value> {
     let mut messages = vec![json!({
         "role": "system",
-        "content": "You are the Papyrus Console assistant for an editor-facing autonomous newsroom. Be concise, accurate, and concrete. Raw console chat turns are detailed working memory and are excluded from default semantic searches unless explicitly requested. When a chat produces durable insight, recommend creating an insight Message rather than making every chat turn canonical knowledge. You may call execute_papyrus for local Papyrus context."
+        "content": "You are Papyrus, an editorial assistant for an autonomous newsroom. Be concise, accurate, and concrete. Raw console chat turns are working memory and are excluded from default semantic searches unless explicitly requested. When a chat produces durable insight, recommend creating an insight Message instead of making every chat turn canonical knowledge. Use execute_tactus for Papyrus runtime work."
     })];
+    if !static_prompt.publication_mission.trim().is_empty() {
+        messages.push(json!({
+            "role": "system",
+            "content": format!("Publication mission:\n{}", static_prompt.publication_mission.trim())
+        }));
+    }
+    if !static_prompt.publication_policy.trim().is_empty() {
+        messages.push(json!({
+            "role": "system",
+            "content": format!("Publication policies:\n{}", static_prompt.publication_policy.trim())
+        }));
+    }
+    if !static_prompt.docs_index.is_empty() {
+        let docs_lines = static_prompt
+            .docs_index
+            .iter()
+            .map(|entry| {
+                format!(
+                    "- {} [{}]: {}",
+                    entry.id,
+                    entry.namespace,
+                    entry.summary.trim()
+                )
+            })
+            .collect::<Vec<String>>()
+            .join("\n");
+        messages.push(json!({
+            "role": "system",
+            "content": format!(
+                "execute_tactus supports progressive documentation. Use docs_list{{}} first, then docs_get{{ id = \"...\" }} for focused details.\nAvailable doc topics:\n{}",
+                docs_lines
+            )
+        }));
+    }
     if !context.rolling_summary.trim().is_empty() {
         messages.push(json!({
             "role": "system",
@@ -1230,18 +1532,20 @@ fn openai_request(model: &str, messages: Vec<Value>) -> Value {
             {
                 "type": "function",
                 "function": {
-                    "name": "execute_papyrus",
-                    "description": "Inspect a small, whitelisted slice of the current Papyrus console runtime context.",
+                    "name": "execute_tactus",
+                    "description": "Execute a short Tactus snippet inside the Papyrus newsroom runtime. Use docs_list/docs_get for progressive documentation discovery.",
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "operation": {
-                                "type": "string",
-                                "enum": ["help", "thread_context", "recent_messages"]
-                            },
-                            "arguments": { "type": "object" }
+                            "tactus": { "type": "string" },
+                            "harness": { "type": "string" },
+                            "assignment_id": { "type": "string" },
+                            "assignment_item_json": { "type": "string" },
+                            "corpus_key": { "type": "string" },
+                            "max_evidence_items": { "type": "integer" },
+                            "research_mode": { "type": "string" }
                         },
-                        "required": ["operation"]
+                        "required": ["tactus"]
                     }
                 }
             }
@@ -1421,45 +1725,92 @@ fn fallback_tool_assistant_content(content: String) -> String {
     }
 }
 
-fn execute_papyrus_tool(
+async fn execute_tactus_tool(
+    state: &AppState,
     trigger: &ChatMessage,
     context: &ThreadContextCache,
     name: &str,
     arguments: &str,
 ) -> Value {
-    if name != "execute_papyrus" {
+    if name != "execute_tactus" {
         return json!({ "ok": false, "error": format!("Unsupported tool {name}") });
     }
-    let parsed: Value = serde_json::from_str(arguments).unwrap_or_else(|_| json!({}));
-    match parsed
-        .get("operation")
-        .and_then(Value::as_str)
-        .unwrap_or("help")
-    {
-        "thread_context" => json!({
-            "ok": true,
+    let parsed_args: Value = serde_json::from_str(arguments).unwrap_or_else(|_| json!({}));
+    let tool_input = json!({
+        "mode": "execute_tactus",
+        "arguments": parsed_args,
+        "thread_context": {
             "threadId": trigger.thread_id,
             "triggerMessageId": trigger.id,
             "triggerSequenceNumber": trigger.sequence_number,
             "cacheDigest": context.context_digest,
             "cachedRecentMessageCount": context.recent_messages.len(),
             "lastCachedSequenceNumber": context.last_sequence_number,
-        }),
-        "recent_messages" => json!({
-            "ok": true,
-            "messages": context.recent_messages.iter().map(|entry| json!({
-                "id": entry.id,
-                "sequenceNumber": entry.sequence_number,
-                "role": entry.role,
-                "content": entry.content,
-            })).collect::<Vec<Value>>(),
-        }),
-        _ => json!({
-            "ok": true,
-            "operations": ["help", "thread_context", "recent_messages"],
-            "note": "This Rust tool surface is intentionally small and whitelisted; protected Papyrus mutations should use dedicated GraphQL actions."
+        }
+    });
+    match call_execute_tactus_runner(state, &tool_input).await {
+        Ok(value) => value,
+        Err(error) => json!({
+            "ok": false,
+            "error": {
+                "code": "runner_failed",
+                "message": error.to_string(),
+                "retryable": true
+            }
         }),
     }
+}
+
+async fn call_execute_tactus_runner(state: &AppState, input: &Value) -> Result<Value> {
+    let mut command = Command::new("python3");
+    command
+        .arg(&state.config.execute_tactus_runner)
+        .env("PYTHONUNBUFFERED", "1")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let mut child = command
+        .spawn()
+        .with_context(|| {
+            format!(
+                "spawn execute_tactus runner {}",
+                state.config.execute_tactus_runner.display()
+            )
+        })?;
+    let encoded =
+        serde_json::to_vec(input).context("serialize execute_tactus runner payload to JSON")?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(&encoded)
+            .await
+            .context("write execute_tactus runner payload")?;
+    }
+    let output = timeout(
+        TokioDuration::from_secs(state.config.execute_tactus_timeout_seconds),
+        child.wait_with_output(),
+    )
+    .await
+    .with_context(|| {
+        format!(
+            "execute_tactus runner timed out after {} seconds",
+            state.config.execute_tactus_timeout_seconds
+        )
+    })?
+    .context("wait for execute_tactus runner")?;
+    if !output.status.success() {
+        return Err(anyhow!(
+            "execute_tactus runner exited with {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    let stdout = String::from_utf8(output.stdout)
+        .context("parse execute_tactus runner stdout as utf8")?;
+    if stdout.trim().is_empty() {
+        return Err(anyhow!("execute_tactus runner returned empty stdout"));
+    }
+    serde_json::from_str(stdout.trim())
+        .with_context(|| format!("parse execute_tactus runner JSON: {}", stdout.trim()))
 }
 
 async fn load_openai_api_key(ssm: &SsmClient) -> Result<String> {
