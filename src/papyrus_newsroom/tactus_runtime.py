@@ -194,12 +194,42 @@ API_METHODS: dict[tuple[str, str], Callable[[dict[str, Any]], Any]] = {
     ("track", "list"): lambda args: newsroom.papyrus_list_research_tracks(),
     ("track", "get"): lambda args: newsroom.papyrus_get_research_track(args.get("key") or args.get("track_key")),
     ("reference", "get"): lambda args: newsroom.papyrus_get_reference(args.get("id") or args.get("reference_id")),
+    ("reference", "curation_review"): lambda args: newsroom.papyrus_reference_curation_review(
+        reference_id=args.get("reference_id") or args.get("referenceId") or args.get("id"),
+        action=args.get("action") or "",
+        actor_label=args.get("actor_label") or args.get("actorLabel") or "",
+        note=args.get("note") or "",
+        reason_code=args.get("reason_code") or args.get("reasonCode") or "",
+    ),
     ("reference", "list"): lambda args: reference_curation_signals.reference_list(
         corpus_key=args.get("corpus_key") or args.get("corpusKey") or "AI-ML-research",
         limit=args.get("limit") or 25,
         status=args.get("status") or "",
         order=args.get("order") or "newest",
         scan_limit=args.get("scan_limit") or args.get("scanLimit") or 1000,
+    ),
+    ("reference", "insight_create"): lambda args: newsroom.papyrus_reference_insight_create(
+        reference_id=args.get("reference_id") or args.get("referenceId") or args.get("id"),
+        summary=args.get("summary") or "",
+        body=args.get("body") or "",
+        actor_label=args.get("actor_label") or args.get("actorLabel") or "",
+    ),
+    ("reference", "insight_list"): lambda args: newsroom.papyrus_reference_insight_list(
+        args.get("reference_lineage_id") or args.get("referenceLineageId") or args.get("lineage_id") or args.get("lineageId") or ""
+    ),
+    ("reference", "move_corpus"): lambda args: newsroom.papyrus_reference_move_corpus(
+        reference_id=args.get("reference_id") or args.get("referenceId") or args.get("id"),
+        corpus_id=args.get("corpus_id") or args.get("corpusId") or "",
+        actor_label=args.get("actor_label") or args.get("actorLabel") or "",
+        note=args.get("note") or "",
+    ),
+    ("reference", "curation_start"): lambda args: newsroom.papyrus_reference_curation_start(
+        reference_id=args.get("reference_id") or args.get("referenceId") or args.get("id"),
+        actor_label=args.get("actor_label") or args.get("actorLabel") or "",
+        curation_policy=args.get("curation_policy") or args.get("curationPolicy"),
+    ),
+    ("reference", "curation_status"): lambda args: newsroom.papyrus_reference_curation_status(
+        assignment_id=args.get("assignment_id") or args.get("assignmentId") or args.get("id"),
     ),
     ("reference", "web_search"): lambda args: reference_curation_signals.reference_web_search(
         query=args.get("query") or args.get("q") or "",
@@ -230,14 +260,11 @@ API_METHODS: dict[tuple[str, str], Callable[[dict[str, Any]], Any]] = {
     ("reference", "quality_get"): lambda args: reference_curation_signals.reference_quality_get(
         reference_id=args.get("reference") or args.get("reference_id") or args.get("referenceId") or args.get("id"),
     ),
-    ("reference", "quality_set"): lambda args: reference_curation_signals.reference_quality_set(
+    ("reference", "quality_rate"): lambda args: newsroom.papyrus_reference_quality_rate(
         reference_id=args.get("reference") or args.get("reference_id") or args.get("referenceId") or args.get("id"),
-        rating=args.get("rating"),
+        rating=args.get("rating") or 0,
         note=args.get("note") or "",
         actor_label=args.get("actor_label") or args.get("actorLabel") or "papyrus-tactus",
-        apply=bool(args.get("apply") or False),
-        refresh=bool(args.get("refresh") or False),
-        persist_local_metadata=not (args.get("persist_local_metadata") is False or args.get("persistLocalMetadata") is False),
     ),
     ("reference", "quality_assess"): lambda args: reference_curation_signals.reference_quality_assess(
         reference_id=args.get("reference") or args.get("reference_id") or args.get("referenceId") or args.get("id"),
@@ -299,13 +326,14 @@ RESOURCE_METHODS: dict[tuple[str, str], Callable[[dict[str, Any]], Any]] = {
         section_key=args.get("sectionKey") or args.get("section_key") or "",
         import_run_id=args.get("importRunId") or args.get("import_run_id") or "",
     ),
+    ("Assignment", "update"): lambda args: newsroom.papyrus_assignment_update(args),
 }
 
 
 RESOURCE_API_SCHEMA: dict[str, Any] = {
     "resources": {
         "Assignment": {
-            "verbs": ["create", "get", "list"],
+            "verbs": ["create", "get", "list", "update"],
             "description": "Private newsroom work records for research, reporting, copywriting, analysis, and future assignment types.",
             "create": {
                 "supportedTypes": ["research"],
@@ -327,6 +355,12 @@ RESOURCE_API_SCHEMA: dict[str, Any] = {
             },
             "get": {"required": ["id"]},
             "list": {"optional": ["limit", "status", "type", "sectionKey", "importRunId"]},
+            "update": {
+                "required": ["id", "status"],
+                "optional": ["note", "actorLabel", "apply"],
+                "writes": ["Assignment", "AssignmentEvent"],
+                "applyDefault": True,
+            },
         },
         "AssignmentEvent": {"verbs": ["get", "list"], "description": "Audit events for Assignment lifecycle changes. Writes happen through Assignment verbs in v1."},
         "Message": {"verbs": ["get", "list"], "description": "Private work-product and console-message records."},
@@ -424,7 +458,9 @@ DOCS: dict[str, dict[str, Any]] = {
             "}\n\n"
             "Use Assignment.get{ id = \"assignment-id\" } to read one assignment. "
             "Use Assignment.list{ type = \"research\", status = \"open\", limit = 10 } "
-            "for discovery. For writes beyond simple research assignment creation, "
+            "for discovery. Use Assignment.update{ id = \"assignment-id\", status = \"claimed\", apply = true } "
+            "to change lifecycle status and append an AssignmentEvent. "
+            "For writes beyond simple research assignment creation, "
             "load the relevant resource docs first."
         ),
     },

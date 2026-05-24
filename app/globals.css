@@ -4829,6 +4829,10 @@ img {
   width: 100%;
 }
 
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-semantic-detail > header > div {
+  width: 100%;
+}
+
 .newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-detail__meta-date-row {
   align-items: center;
   color: var(--muted-strong);
@@ -4868,7 +4872,7 @@ img {
   margin-top: 0;
 }
 
-@container (max-width: 44rem) {
+@container (max-width: 34rem) {
   .newsroom-list-detail-shell[data-news-desk-section="references"][data-detail-open="true"][data-detail-mode="split"] [data-news-desk-reference-detail] .news-desk-reference-detail__header-flow {
     grid-template-columns: minmax(0, 1fr);
   }

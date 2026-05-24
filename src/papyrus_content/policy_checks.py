@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .env import PAPYRUS_ROOT
+from .graphql_authoring import create_authoring_client
 
 
 ALLOWED_BACKEND_NODE_SCRIPT_FILES = {
@@ -34,3 +35,49 @@ def check_backend_node_scripts(_flags: list[str]) -> None:
             f"Violations:\n{rendered}"
         )
     print("policy\tbackend-node-scripts\tok")
+
+
+REFERENCE_ACTION_SCHEMA_QUERY = """
+query ReferenceActionSchemaContract {
+  queryType: __type(name: "Query") { fields { name } }
+  mutationType: __type(name: "Mutation") { fields { name } }
+}
+"""
+
+
+def check_reference_action_contract(_flags: list[str]) -> None:
+    client, _ = create_authoring_client()
+    payload = client.graphql(REFERENCE_ACTION_SCHEMA_QUERY, {})
+    mutation_fields = {
+        entry.get("name")
+        for entry in (payload.get("mutationType") or {}).get("fields") or []
+        if isinstance(entry, dict) and entry.get("name")
+    }
+    query_fields = {
+        entry.get("name")
+        for entry in (payload.get("queryType") or {}).get("fields") or []
+        if isinstance(entry, dict) and entry.get("name")
+    }
+    required_mutations = {
+        "reviewReferenceCuration",
+        "setReferenceQualityRating",
+        "createReferenceInsight",
+        "moveReferenceCorpus",
+        "startReferenceCuration",
+    }
+    required_queries = {
+        "getReferenceCurationStatus",
+    }
+    missing_mutations = sorted(required_mutations - mutation_fields)
+    missing_queries = sorted(required_queries - query_fields)
+    if missing_mutations or missing_queries:
+        details: list[str] = []
+        if missing_mutations:
+            details.append(f"missing mutations: {', '.join(missing_mutations)}")
+        if missing_queries:
+            details.append(f"missing queries: {', '.join(missing_queries)}")
+        raise RuntimeError(
+            "Reference action schema contract failed: "
+            + "; ".join(details)
+        )
+    print("policy\treference-action-contract\tok")

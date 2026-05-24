@@ -30,7 +30,7 @@ export class ConsoleChatResponderStack extends NestedStack {
       PAPYRUS_MESSAGE_THREAD_SEQUENCE_INDEX_NAME: "messagesByThreadSequence",
       PAPYRUS_GRAPHQL_ENDPOINT: props.graphqlEndpoint,
       PAPYRUS_CONSOLE_RESPONSE_TARGET: responseTarget,
-      PAPYRUS_CONSOLE_MODEL: props.model?.trim() || process.env.PAPYRUS_CONSOLE_MODEL || "gpt-4o-mini",
+      PAPYRUS_CONSOLE_MODEL: props.model?.trim() || process.env.PAPYRUS_CONSOLE_MODEL || "gpt-5-nano",
       PAPYRUS_CONSOLE_CONTEXT_CACHE_ROOT: "/tmp/papyrus-console/thread-context",
       PAPYRUS_CONSOLE_STATIC_CONTEXT_TTL_SECONDS: process.env.PAPYRUS_CONSOLE_STATIC_CONTEXT_TTL_SECONDS || "900",
       PAPYRUS_EXECUTE_TACTUS_RUNNER: process.env.PAPYRUS_EXECUTE_TACTUS_RUNNER || "/opt/papyrus/execute_tactus_runner.py",
@@ -38,6 +38,7 @@ export class ConsoleChatResponderStack extends NestedStack {
     };
 
     const imageUri = props.prebuiltImageUri?.trim() || process.env.PAPYRUS_CONSOLE_RESPONDER_IMAGE_URI?.trim() || "";
+    const allowLocalImageBuild = parseBooleanEnv(process.env.PAPYRUS_CONSOLE_RESPONDER_ALLOW_LOCAL_BUILD);
     let code: DockerImageCode;
     if (imageUri) {
       const { repositoryName, tagOrDigest } = parseEcrImageUri(imageUri);
@@ -45,6 +46,12 @@ export class ConsoleChatResponderStack extends NestedStack {
       const repository = Repository.fromRepositoryName(this, "ConsoleChatResponderRepository", repositoryName);
       code = DockerImageCode.fromEcr(repository, { tagOrDigest });
     } else {
+      if (!allowLocalImageBuild) {
+        throw new Error(
+          "ConsoleChatResponder requires PAPYRUS_CONSOLE_RESPONDER_IMAGE_URI (prebuilt ECR image). "
+          + "Set PAPYRUS_CONSOLE_RESPONDER_ALLOW_LOCAL_BUILD=true only when intentionally using local Docker image builds.",
+        );
+      }
       code = DockerImageCode.fromImageAsset(props.projectRoot, {
         file: "amplify/functions/console-chat-responder/Dockerfile",
         platform: Platform.LINUX_ARM64,
@@ -116,6 +123,11 @@ export class ConsoleChatResponderStack extends NestedStack {
       resources: [props.messageStreamArn],
     }));
   }
+}
+
+function parseBooleanEnv(value: string | undefined): boolean {
+  if (!value) return false;
+  return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
 }
 
 function parseEcrImageUri(imageUri: string): { repositoryName: string; tagOrDigest: string } {

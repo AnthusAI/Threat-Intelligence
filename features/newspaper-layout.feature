@@ -280,7 +280,9 @@ Feature: Newspaper layout scenarios
 
   Scenario: Newsroom reference detail renders the header curation cluster
     Given I open the references newsroom at 1280 by 900
+    Then the selected reference deep link URL should be "reference-knowledge-corpus-demo-source-history-001"
     When I open reference "reference-knowledge-corpus-demo-source-history-001"
+    Then the selected reference deep link URL should be "reference-knowledge-corpus-demo-source-history-001"
     Then the reference detail should render the curation cluster
     And the reference detail curation controls should share one height
     And the reference detail curation cluster should align with the top toolbar
@@ -290,13 +292,16 @@ Feature: Newspaper layout scenarios
     And the reference detail toolbar next action should be enabled
     When I open the next reference from the detail toolbar
     Then the selected reference detail should change
+    And the current URL should match the selected reference detail
     And the reference detail toolbar previous action should be enabled
     When I open the previous reference from the detail toolbar
     Then the selected reference detail should return to the original selection
+    And the selected reference deep link URL should be "reference-knowledge-corpus-demo-source-history-001"
     When I open the reference detail curation actions
     Then the reference detail actions menu should offer "Research" and "Archive"
     And the reference detail actions menu should not offer "Reopen"
     And the reference detail actions menu should show an icon for "Research"
+    And semantic reference links should use canonical path URLs
     When I set the selected reference quality to 1 stars
     Then the reference detail curation status should be "rejected"
     And the reference detail should show 0 filled quality stars
@@ -319,6 +324,27 @@ Feature: Newspaper layout scenarios
     And the reference detail curation status should be "accepted"
     And the reference detail should show 0 filled quality stars
     And the reference detail quality message should mention "not saved"
+    And no browser console errors should occur
+
+  Scenario: Newsroom reference detail removes duplicated source URI from summary body
+    Given I am a test editor reader
+    And the newsroom uses mocked reference summaries with leading source URI
+    And I open the references newsroom at 1280 by 900
+    When I open reference "reference-knowledge-corpus-demo-source-history-001"
+    Then the reference detail source URI should be clickable
+    And the reference detail should not show source URI above the summary
+    And the reference detail summary should not start with source URI
+    And the reference detail summary should be "Trimmed summary body for mock reference one."
+    When I open reference "reference-knowledge-corpus-demo-source-history-002"
+    Then the reference detail source URI should be clickable
+    And the reference detail should not show source URI above the summary
+    And the reference detail summary should be "Unchanged summary for mock reference two."
+    And no browser console errors should occur
+
+  Scenario: Newsroom reference detail loads from canonical deep links
+    Given I open the newsroom path "/newsroom/references/reference-knowledge-corpus-demo-source-history-002?demo=1" at 1280 by 900
+    Then the selected reference detail should be "reference-knowledge-corpus-demo-source-history-002"
+    And the selected reference deep link URL should be "reference-knowledge-corpus-demo-source-history-002"
     And no browser console errors should occur
 
   Scenario Outline: Newsroom operational desks use newspaper card grids

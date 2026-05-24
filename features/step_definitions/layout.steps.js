@@ -92,6 +92,11 @@ Given("the newsroom uses mocked reference-curation message detail data", async f
   this.newsroomMessageDetailMock = "reference-curation";
 });
 
+Given("the newsroom uses mocked reference summaries with leading source URI", async function () {
+  this.testEditorReader = true;
+  this.newsroomReferenceSummaryPayloadMock = "dedup";
+});
+
 Given("the reference quality mutation fails", async function () {
   this.newsroomQualityMutationMock = "fail";
 });
@@ -620,6 +625,8 @@ Then("the reference detail curation cluster should align with the top toolbar", 
     };
     const cluster = document.querySelector("[data-news-desk-reference-curation-cluster]");
     const clusterStyle = cluster ? window.getComputedStyle(cluster) : null;
+    const headerFlow = document.querySelector("[data-news-desk-reference-detail] .news-desk-reference-detail__header-flow");
+    const headerFlowStyle = headerFlow ? window.getComputedStyle(headerFlow) : null;
     const detail = document.querySelector("[data-news-desk-reference-detail]");
     const detailStyle = detail ? window.getComputedStyle(detail) : null;
     return {
@@ -627,6 +634,8 @@ Then("the reference detail curation cluster should align with the top toolbar", 
       toolbar: rectFor(".newsroom-list-detail-shell__detail-toolbar"),
       trailing: rectFor(".newsroom-list-detail-shell__detail-toolbar-trailing"),
       detail: rectFor("[data-news-desk-reference-detail]"),
+      headerFlow: rectFor("[data-news-desk-reference-detail] .news-desk-reference-detail__header-flow"),
+      headerFlowMarginTop: toNumber(headerFlowStyle?.marginTop),
       clusterPaddingTop: toNumber(clusterStyle?.paddingTop),
       rhythm: toNumber(detailStyle?.getPropertyValue("--paper-rhythm")),
     };
@@ -639,7 +648,8 @@ Then("the reference detail curation cluster should align with the top toolbar", 
     assert.ok(report.detail, `Expected detail panel rect when toolbar is hidden: ${JSON.stringify(report)}`);
     assert.ok(Math.abs(report.cluster.right - report.detail.right) <= 1, `Expected curation cluster to align to detail panel right edge: ${JSON.stringify(report)}`);
   }
-  assert.ok(Math.abs(report.clusterPaddingTop - report.rhythm) <= 0.75, `Expected curation cluster top padding to equal one rhythm row: ${JSON.stringify(report)}`);
+  const topOffset = report.headerFlowMarginTop + report.clusterPaddingTop;
+  assert.ok(Math.abs(topOffset - report.rhythm) <= 0.75, `Expected curation cluster top offset to equal one rhythm row: ${JSON.stringify(report)}`);
 });
 
 Then("the reference detail should not show the lower curation selector", async function () {
@@ -679,6 +689,14 @@ Then("the reference detail actions menu should show an icon for {string}", async
     .locator(".newsroom-list-detail-shell__action-menu-icon svg")
     .count();
   assert.ok(hasIcon > 0, `Expected actions menu item ${label} to include an icon`);
+});
+
+Then("semantic reference links should use canonical path URLs", async function () {
+  const { newsDeskHrefForSemanticObject } = loadSemanticGraphModule();
+  assert.equal(
+    newsDeskHrefForSemanticObject("reference", "reference-knowledge-corpus-demo-source-history-001"),
+    "/newsroom/references/reference-knowledge-corpus-demo-source-history-001",
+  );
 });
 
 Then("the reference detail toolbar should show previous and next actions", async function () {
@@ -811,13 +829,74 @@ Then("the reference detail should render topic workflow and corpus selector", as
   await page.locator("[data-reference-topic-workflow]").waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("[data-reference-topic-state]").waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("[data-reference-topic-input]").waitFor({ state: "visible", timeout: 10_000 });
-  await page.locator("[data-reference-corpus-workflow]").waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("[data-reference-corpus-input]").waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("[data-reference-corpus-input] select").waitFor({ state: "visible", timeout: 10_000 });
 });
 
 Then("the reference detail insight composer should be visible", async function () {
   await requirePage(this).locator("[data-news-desk-reference-insight-form]").waitFor({ state: "visible", timeout: 10_000 });
+});
+
+Then("the reference detail source URI should be clickable", async function () {
+  const page = requirePage(this);
+  const link = page.locator("[data-news-desk-reference-detail] .news-desk-reference-detail__source-meta-row--uri a").first();
+  await link.waitFor({ state: "visible", timeout: 10_000 });
+  const href = await link.getAttribute("href");
+  assert.ok(href && /^(https?|s3):\/\//.test(href), `Expected clickable Source URI href, received: ${href}`);
+});
+
+Then("the reference detail summary should not start with source URI", async function () {
+  const page = requirePage(this);
+  const report = await page.evaluate(() => {
+    const summary = document.querySelector("[data-news-desk-reference-detail] .news-desk-semantic-detail__summary")?.textContent?.trim() ?? "";
+    const sourceUri = document.querySelector("[data-news-desk-reference-detail] .news-desk-reference-detail__source-meta-row--uri a")?.textContent?.trim() ?? "";
+    return { summary, sourceUri };
+  });
+  assert.ok(report.summary.length > 0, "Expected non-empty reference summary text");
+  assert.ok(report.sourceUri.length > 0, "Expected source URI text to be present");
+  assert.equal(report.summary.startsWith(report.sourceUri), false, `Expected summary not to start with source URI, got: ${report.summary}`);
+});
+
+Then("the reference detail should not show source URI above the summary", async function () {
+  const page = requirePage(this);
+  const report = await page.evaluate(() => {
+    const sourceUri = document.querySelector("[data-news-desk-reference-detail] .news-desk-reference-detail__source-meta-row--uri a")?.textContent?.trim() ?? "";
+    const subheading = document.querySelector("[data-news-desk-reference-detail] .news-desk-semantic-detail__subheading")?.textContent?.trim() ?? "";
+    return { sourceUri, subheading };
+  });
+  assert.ok(report.sourceUri.length > 0, "Expected source URI text to be present");
+  assert.notEqual(report.subheading, report.sourceUri, "Expected source URI not to render as the reference detail subheading");
+});
+
+Then("the reference detail summary should be {string}", async function (expectedSummary) {
+  const page = requirePage(this);
+  await page.locator("[data-news-desk-reference-detail] .news-desk-semantic-detail__summary").waitFor({ state: "visible", timeout: 10_000 });
+  const actual = (await page.locator("[data-news-desk-reference-detail] .news-desk-semantic-detail__summary").first().textContent())?.trim() ?? "";
+  assert.equal(actual, expectedSummary);
+});
+
+Then("the selected reference deep link URL should be {string}", async function (referenceId) {
+  const page = requirePage(this);
+  await page.waitForFunction((id) => {
+    const expectedPath = `/newsroom/references/${encodeURIComponent(id)}`;
+    return window.location.pathname === expectedPath;
+  }, referenceId, { timeout: 10_000 });
+  const pathname = await page.evaluate(() => window.location.pathname);
+  assert.equal(pathname, `/newsroom/references/${encodeURIComponent(referenceId)}`);
+});
+
+Then("the current URL should match the selected reference detail", async function () {
+  const page = requirePage(this);
+  await page.waitForFunction(() => {
+    const detailId = document.querySelector("[data-news-desk-reference-detail]")?.getAttribute("data-news-desk-reference-detail");
+    return Boolean(detailId && window.location.pathname === `/newsroom/references/${encodeURIComponent(detailId)}`);
+  }, { timeout: 10_000 });
+});
+
+Then("the selected reference detail should be {string}", async function (referenceId) {
+  await requirePage(this)
+    .locator(`[data-news-desk-reference-detail="${referenceId}"]`)
+    .waitFor({ state: "visible", timeout: 10_000 });
 });
 
 Then("the concepts desk should show semantic nodes and linked objects", async function () {
@@ -3644,6 +3723,11 @@ function loadLayoutPlanModule() {
 function loadEditionRoutesModule() {
   registerTypeScriptRequire();
   return require(path.resolve(__dirname, "../../lib/edition-routes.ts"));
+}
+
+function loadSemanticGraphModule() {
+  registerTypeScriptRequire();
+  return require(path.resolve(__dirname, "../../lib/semantic-graph.ts"));
 }
 
 function parseDatedTestPath(routePath) {

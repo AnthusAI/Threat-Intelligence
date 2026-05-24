@@ -209,6 +209,7 @@ export type ConsoleChatThread = {
   messageCount?: number | null;
   lastMessageId?: string | null;
   lastMessageAt?: string | null;
+  activeResponseMessageId?: string | null;
   contextDigest?: string | null;
   metadata?: unknown;
   createdAt: string;
@@ -685,6 +686,7 @@ export async function updateConsoleThread(input: Pick<ConsoleChatThread, "id"> &
         messageCount: input.messageCount ?? null,
         lastMessageId: input.lastMessageId ?? null,
         lastMessageAt: input.lastMessageAt ?? null,
+        activeResponseMessageId: input.activeResponseMessageId ?? null,
         contextDigest: input.contextDigest ?? null,
         metadata: input.metadata ?? null,
         createdAt: input.createdAt ?? now,
@@ -757,6 +759,68 @@ export async function createConsoleMessage(input: CreateConsoleMessageInput): Pr
   }
 
   throw normalizeUnknownError(lastError, "createMessage");
+}
+
+export async function updateConsoleMessage(
+  input: Pick<ConsoleChatMessage, "id"> & Partial<ConsoleChatMessage>,
+): Promise<ConsoleChatMessage> {
+  const now = new Date().toISOString();
+  const normalizedInput: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (value !== undefined) normalizedInput[key] = value;
+  }
+  if (!normalizedInput.updatedAt) normalizedInput.updatedAt = now;
+  const snapshot = await loadConsoleSchemaSnapshot();
+  const selectionSets = snapshot.messageFields.size
+    ? [chooseMessageSelectionSet(snapshot.messageFields)]
+    : [CONSOLE_MESSAGE_FIELDS, CONSOLE_MESSAGE_FIELDS_LEGACY];
+  let lastError: unknown = null;
+
+  for (const selectionSet of selectionSets) {
+    const updateMutation = `
+      mutation UpdateMessage($input: UpdateMessageInput!) {
+        updateMessage(input: $input) {
+          ${selectionSet}
+        }
+      }
+    `;
+    try {
+      const response = await getGraphQLClient().graphql({
+        query: updateMutation,
+        variables: { input: normalizedInput },
+        authMode: USER_POOL_AUTH_MODE,
+      });
+      return normalizeConsoleMessageRecord(assertGraphQL<Record<string, unknown>>(response, "updateMessage"));
+    } catch (error) {
+      if (!isUnavailableQueryError(error)) throw normalizeUnknownError(error, "updateMessage");
+      lastError = error;
+    }
+  }
+
+  if (lastError) {
+    return {
+      id: input.id,
+      threadId: input.threadId ?? null,
+      parentMessageId: input.parentMessageId ?? null,
+      sequenceNumber: input.sequenceNumber ?? null,
+      role: input.role ?? null,
+      messageKind: input.messageKind ?? null,
+      messageType: input.messageType ?? null,
+      content: input.content ?? null,
+      summary: input.summary ?? null,
+      responseStatus: input.responseStatus ?? null,
+      responseOwner: input.responseOwner ?? null,
+      responseStartedAt: input.responseStartedAt ?? null,
+      responseCompletedAt: input.responseCompletedAt ?? null,
+      responseError: input.responseError ?? null,
+      source: input.source ?? null,
+      authorLabel: input.authorLabel ?? null,
+      createdAt: input.createdAt ?? now,
+      updatedAt: (normalizedInput.updatedAt as string) ?? now,
+    };
+  }
+
+  throw normalizeUnknownError(lastError, "updateMessage");
 }
 
 export function subscribeConsoleMessages(

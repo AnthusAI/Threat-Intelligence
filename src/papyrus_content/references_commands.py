@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from papyrus_newsroom import reference_actions as newsroom_reference_actions
+
 from .assignments import apply_assignment_action
 from .env import PAPYRUS_ROOT
 from .graphql_authoring import create_authoring_client
@@ -57,15 +59,6 @@ from .source_readiness import build_extraction_index
 from .steering import load_steering_config, require_corpus_config, require_steering_config
 
 
-REVIEW_REFERENCE_CURATION_MUTATION = """
-mutation ReviewReferenceCuration($referenceId: ID!, $action: String!, $note: String, $actorLabel: String, $reasonCode: String) {
-  reviewReferenceCuration(referenceId: $referenceId, action: $action, note: $note, actorLabel: $actorLabel, reasonCode: $reasonCode) {
-    ok action referenceId status reasonCode messageId relationId
-  }
-}
-"""
-
-
 def references_review_curation(flags: list[str]) -> None:
     options = parse_options(flags)
     reference_id = options.get("reference") or options.get("reference-id")
@@ -78,17 +71,14 @@ def references_review_curation(flags: list[str]) -> None:
         required=str(options.get("action")).lower() == "reject",
     )
     client, _ = create_authoring_client()
-    result = client.graphql(
-        REVIEW_REFERENCE_CURATION_MUTATION,
-        {
-            "referenceId": reference_id,
-            "action": options["action"],
-            "note": options.get("note"),
-            "actorLabel": options.get("actor") or "Papyrus content CLI",
-            "reasonCode": reason_code,
-        },
+    review = newsroom_reference_actions.review_reference_curation(
+        client.graphql,
+        reference_id=str(reference_id),
+        action=str(options["action"]),
+        note=str(options.get("note") or ""),
+        actor_label=str(options.get("actor") or "Papyrus content CLI"),
+        reason_code=reason_code or "",
     )
-    review = result.get("reviewReferenceCuration") or {}
     print(
         f"references\treview-curation\t{review.get('referenceId')}\t{review.get('action')}\t"
         f"{review.get('status')}\t{review.get('reasonCode') or ''}\t{review.get('messageId') or ''}"
@@ -317,6 +307,11 @@ def references_curate_recent(flags: list[str]) -> None:
     if not options.get("corpus-key"):
         raise ValueError("references curate-recent requires --corpus-key <key>.")
     curate_all = parse_boolean_option(options.get("all"), False, "--all")
+    if parse_boolean_option(options.get("refresh-quality"), False, "--refresh-quality"):
+        raise ValueError(
+            "references curate-recent no longer supports --refresh-quality. "
+            "Quality is human-only; use references review-curation / quality actions explicitly."
+        )
     args = [
         "run",
         "papyrus-newsroom",
@@ -354,12 +349,7 @@ def references_curate_recent(flags: list[str]) -> None:
         args.extend(["--reference", reference_id])
     if parse_boolean_option(options.get("refresh-summary"), False, "--refresh-summary"):
         args.append("--refresh-summary")
-    if parse_boolean_option(options.get("refresh-quality"), False, "--refresh-quality"):
-        args.append("--refresh-quality")
-    if apply and not dry_run:
-        args.append("--apply")
-    if dry_run:
-        args.append("--dry-run")
+    args.append("--dry-run")
     completed = subprocess.run(["poetry", *args], cwd=PAPYRUS_ROOT, capture_output=True, text=True, check=False)
     payload = extract_last_json_object(completed.stdout or "")
     if not payload:
@@ -367,46 +357,87 @@ def references_curate_recent(flags: list[str]) -> None:
             "Papyrus newsroom references curate-recent returned invalid JSON: "
             f"{completed.stderr or completed.stdout or 'unknown error'}"
         )
-    if json_output:
-        print(json.dumps(payload, indent=2))
-    else:
-        summary = payload.get("summary") or {}
-        print(f"references\tcurate-recent\trun\t{payload.get('runId', '-')}")
-        print(f"references\tcurate-recent\tmanifest\t{payload.get('manifestPath', '-')}")
-        print(f"references\tcurate-recent\tapply\t{'yes' if payload.get('apply') else 'no'}")
-        print(f"references\tcurate-recent\tok\t{'yes' if payload.get('ok') else 'no'}")
-        print(f"references\tcurate-recent\tdegraded\t{'yes' if payload.get('degraded') else 'no'}")
-        print(f"references\tcurate-recent\tselected\t{summary.get('selectedCount', 0)}")
-        print(f"references\tcurate-recent\tprocessed\t{summary.get('processedCount', 0)}")
-        print(f"references\tcurate-recent\tsucceeded\t{summary.get('succeededCount', 0)}")
-        print(f"references\tcurate-recent\tfailed\t{summary.get('failedCount', 0)}")
-        for failure in payload.get("selectionFailures") or []:
-            print(
-                f"reference-curation\tselection-failed\t{failure.get('referenceId', '-')}\t"
-                f"{failure.get('failureReason', 'selection failed')}"
-            )
-        for item in payload.get("items") or []:
-            reference = item.get("reference") or {}
-            stages = item.get("stages") or {}
-            print(
-                "\t".join(
-                    [
-                        "reference-curation",
-                        "failed" if item.get("failed") else "ok",
-                        reference.get("id") or item.get("referenceId") or "-",
-                        (stages.get("identifierPrepass") or {}).get("status") or "-",
-                        (stages.get("titleSubtitle") or {}).get("status") or "-",
-                        (stages.get("summary") or {}).get("status") or "-",
-                        (stages.get("quality") or {}).get("status") or "-",
-                        "; ".join(item.get("failureReasons") or []) or "-",
-                        reference.get("title") or "-",
-                    ]
-                )
-            )
-        for warning in payload.get("warnings") or []:
-            print(f"references\tcurate-recent\twarning\t{warning}")
     if completed.returncode != 0:
         raise RuntimeError(f"papyrus-newsroom references curate-recent exited with status {completed.returncode}")
+    summary = payload.get("selectionSummary") or payload.get("summary") or {}
+    selected_reference_ids = [
+        normalize_string(value)
+        for value in (payload.get("selectedReferenceIds") or [])
+        if normalize_string(value)
+    ]
+    if not selected_reference_ids:
+        for item in payload.get("items") or []:
+            if not isinstance(item, dict):
+                continue
+            if item.get("failed"):
+                continue
+            reference = item.get("reference") if isinstance(item.get("reference"), dict) else {}
+            reference_id = (
+                normalize_string(reference.get("id"))
+                or normalize_string(item.get("referenceId"))
+            )
+            if reference_id:
+                selected_reference_ids.append(reference_id)
+    selected_reference_ids = sorted(set(selected_reference_ids))
+    dispatches: list[dict[str, Any]] = []
+    if apply and selected_reference_ids:
+        client, _ = create_authoring_client()
+        actor_label = normalize_string(options.get("actor")) or "Papyrus content CLI"
+        for reference_id in selected_reference_ids:
+            result = newsroom_reference_actions.start_reference_curation(
+                client.graphql,
+                reference_id=reference_id,
+                actor_label=actor_label,
+                curation_policy=None,
+            )
+            dispatches.append(
+                {
+                    "referenceId": normalize_string(result.get("referenceId")) or reference_id,
+                    "assignmentId": normalize_string(result.get("assignmentId")),
+                    "status": normalize_string(result.get("status")) or "queued",
+                    "runId": normalize_string(result.get("runId")),
+                }
+            )
+    output = {
+        "mode": "assignment_dispatch",
+        "ok": bool(payload.get("ok", True)),
+        "degraded": bool(payload.get("degraded", False)),
+        "runId": payload.get("runId"),
+        "manifestPath": payload.get("manifestPath"),
+        "selectedReferenceIds": selected_reference_ids,
+        "selectedCount": len(selected_reference_ids),
+        "selectionSummary": summary,
+        "selectionFailures": payload.get("selectionFailures") or [],
+        "warnings": payload.get("warnings") or [],
+        "apply": bool(apply and not dry_run),
+        "dispatches": dispatches,
+        "dispatchCount": len(dispatches),
+    }
+    if json_output:
+        print(json.dumps(output, indent=2))
+        return
+    print(f"references\tcurate-recent\tmode\tassignment-dispatch")
+    print(f"references\tcurate-recent\trun\t{payload.get('runId', '-')}")
+    print(f"references\tcurate-recent\tmanifest\t{payload.get('manifestPath', '-')}")
+    print(f"references\tcurate-recent\tselected\t{len(selected_reference_ids)}")
+    print(f"references\tcurate-recent\tapply\t{'yes' if output['apply'] else 'no'}")
+    print(f"references\tcurate-recent\tdispatches\t{len(dispatches)}")
+    for reference_id in selected_reference_ids:
+        print(f"reference-curation\tselected\t{reference_id}")
+    for dispatch in dispatches:
+        print(
+            f"reference-curation\tdispatched\t{dispatch.get('referenceId') or '-'}\t"
+            f"{dispatch.get('assignmentId') or '-'}\t{dispatch.get('status') or '-'}"
+        )
+    for failure in output["selectionFailures"]:
+        if not isinstance(failure, dict):
+            continue
+        print(
+            f"reference-curation\tselection-failed\t{failure.get('referenceId', '-')}\t"
+            f"{failure.get('failureReason', 'selection failed')}"
+        )
+    for warning in output["warnings"]:
+        print(f"references\tcurate-recent\twarning\t{warning}")
 
 
 def references_extract_text_now(flags: list[str]) -> None:

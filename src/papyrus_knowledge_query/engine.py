@@ -166,7 +166,9 @@ def run_knowledge_query(input: dict[str, Any], services: KnowledgeQueryServices 
                 warnings.extend(str(item) for item in expansion.get("warnings") or [])
     mark_stage("resolve_and_expand_anchors", anchorCount=len(structured["anchors"]))
 
-    if not request["semanticQuery"] and structured["anchors"]:
+    semantic_search_enabled = bool(request["scope"].get("semanticSearch", True))
+
+    if semantic_search_enabled and not request["semanticQuery"] and structured["anchors"]:
         derived_query = _derive_semantic_query_from_anchors(structured["anchors"], services)
         if derived_query:
             request["semanticQuery"] = derived_query
@@ -175,7 +177,7 @@ def run_knowledge_query(input: dict[str, Any], services: KnowledgeQueryServices 
             structured["request"]["semanticQuerySource"] = "anchor_derived"
     mark_stage("derive_semantic_query")
 
-    if request["semanticQuery"]:
+    if semantic_search_enabled and request["semanticQuery"]:
         try:
             semantic_scope = {
                 **request["scope"],
@@ -265,7 +267,7 @@ def run_knowledge_query(input: dict[str, Any], services: KnowledgeQueryServices 
             "semanticUniqueSourceCount": _unique_semantic_match_source_count(public_structured),
             "semanticSourceTarget": _semantic_source_target(request),
             "sourceBudgetCount": len(public_structured.get("referenceTokenBudgets") or {}),
-            "vectorDiversification": "source_round_robin" if request["semanticQuery"] else "not_applied",
+            "vectorDiversification": "source_round_robin" if semantic_search_enabled and request["semanticQuery"] else "not_applied",
             "relationPolicy": request["relationPolicy"],
             "sourceTextMode": source_text_mode,
             "extractMode": request["extractMode"],
@@ -310,6 +312,10 @@ def _normalize_request(input: dict[str, Any]) -> tuple[dict[str, Any], list[str]
         if isinstance(value, str):
             value = value.lower() in {"1", "true", "yes"}
         scope[key] = bool(value)
+    semantic_search = scope.get("semanticSearch", True)
+    if isinstance(semantic_search, str):
+        semantic_search = semantic_search.lower() in {"1", "true", "yes"}
+    scope["semanticSearch"] = bool(semantic_search)
     anchors = input.get("anchors") or []
     if isinstance(anchors, dict):
         anchors = [anchors]

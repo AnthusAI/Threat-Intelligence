@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import sys
+from typing import Any
 
 from .coverage_theme import (
     coverage_theme_run,
@@ -18,6 +19,7 @@ from .newsroom import (
     BIBLICUS_ROOT,
     PAPYRUS_ROOT,
     papyrus_build_assignment_agent_context,
+    papyrus_reference_curation_start,
     papyrus_search_semantic_nodes,
 )
 from .reference_curation_signals import (
@@ -115,7 +117,7 @@ def main(argv: list[str] | None = None) -> int:
 
     curate_recent_parser = references_subparsers.add_parser(
         "curate-recent",
-        help="Curate recent references end-to-end (identifier prepass, title/subtitle, summary, quality)",
+        help="Select recent references and dispatch assignment-backed curation refresh jobs",
     )
     curate_recent_parser.add_argument("--corpus-key", required=True)
     curate_recent_parser.add_argument("--reference", action="append", default=[])
@@ -132,7 +134,7 @@ def main(argv: list[str] | None = None) -> int:
     curate_recent_parser.add_argument("--model", default="gpt-5.4-mini")
     curate_recent_parser.add_argument("--summary-max-tokens", type=int, default=500)
     curate_recent_parser.add_argument("--refresh-summary", action="store_true")
-    curate_recent_parser.add_argument("--refresh-quality", action="store_true")
+    curate_recent_parser.add_argument("--actor-label", default="papyrus-newsroom")
     curate_recent_parser.add_argument("--resume", default="")
     curate_recent_parser.add_argument("--apply", action="store_true")
     curate_recent_parser.add_argument("--dry-run", action="store_true")
@@ -569,7 +571,7 @@ def _run_references_command(args: argparse.Namespace) -> dict:
             raise ValueError("--apply and --dry-run cannot be used together.")
         if args.all and (args.since or args.reference):
             raise ValueError("--all cannot be combined with --since or --reference.")
-        return reference_curate_recent(
+        selection = reference_curate_recent(
             corpus_key=args.corpus_key,
             reference_ids=args.reference,
             since_hours=args.since_hours,
@@ -581,10 +583,57 @@ def _run_references_command(args: argparse.Namespace) -> dict:
             model=args.model,
             summary_max_tokens=args.summary_max_tokens,
             refresh_summary=args.refresh_summary,
-            refresh_quality=args.refresh_quality,
-            apply=(args.apply and not args.dry_run),
+            refresh_quality=False,
+            apply=False,
             resume=args.resume,
         )
+        selected_reference_ids: list[str] = []
+        for item in selection.get("items") or []:
+            if not isinstance(item, dict) or item.get("failed"):
+                continue
+            reference = item.get("reference") if isinstance(item.get("reference"), dict) else {}
+            reference_id = (
+                (reference.get("id") if isinstance(reference, dict) else None)
+                or item.get("referenceId")
+            )
+            if reference_id:
+                selected_reference_ids.append(str(reference_id))
+        selected_reference_ids = sorted(set(selected_reference_ids))
+        dispatches: list[dict[str, Any]] = []
+        if args.apply and not args.dry_run:
+            for reference_id in selected_reference_ids:
+                dispatched = papyrus_reference_curation_start(
+                    reference_id=reference_id,
+                    actor_label=args.actor_label or "papyrus-newsroom",
+                    curation_policy=None,
+                )
+                dispatches.append(
+                    {
+                        "referenceId": dispatched.get("referenceId") or reference_id,
+                        "assignmentId": dispatched.get("assignmentId"),
+                        "status": dispatched.get("status") or "queued",
+                        "runId": dispatched.get("runId"),
+                    }
+                )
+        return {
+            "kind": "reference.curate-recent",
+            "command": "references curate-recent",
+            "mode": "assignment_dispatch",
+            "ok": bool(selection.get("ok", True)),
+            "degraded": bool(selection.get("degraded", False)),
+            "apply": bool(args.apply and not args.dry_run),
+            "runId": selection.get("runId"),
+            "manifestPath": selection.get("manifestPath"),
+            "corpusKey": args.corpus_key,
+            "selection": selection.get("selection") or {},
+            "selectionSummary": selection.get("summary") or {},
+            "selectionFailures": selection.get("selectionFailures") or [],
+            "warnings": selection.get("warnings") or [],
+            "selectedReferenceIds": selected_reference_ids,
+            "selectedCount": len(selected_reference_ids),
+            "dispatches": dispatches,
+            "dispatchCount": len(dispatches),
+        }
     if args.references_command == "summarize":
         return reference_summarize(
             reference_id=args.reference,

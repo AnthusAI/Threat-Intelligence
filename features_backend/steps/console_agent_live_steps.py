@@ -29,7 +29,9 @@ def step_run_live_console_agent_smoke_scenario(context, scenario: str) -> None:
         "invalid-assignment-input",
         "discuss-reference",
         "rate-reference-quality",
-        "curate-reference-summary",
+        "review-reference-curation",
+        "insight-reference",
+        "curate-reference-refresh",
     }
     attempts = 3 if scenario in retryable_scenarios else 1
     last_error: Exception | None = None
@@ -74,6 +76,12 @@ def step_live_console_agent_response_should_match_regex(context, pattern: str) -
 def step_live_console_agent_smoke_should_include_tool_call(context, tool_call: str) -> None:
     api_calls = context.live_console_agent_smoke_result.get("apiCalls") or []
     assert tool_call in api_calls, f"Expected {tool_call}; saw {', '.join(api_calls)}"
+
+
+@then('the live console agent smoke result should include no tool call "{tool_call}"')
+def step_live_console_agent_smoke_should_exclude_tool_call(context, tool_call: str) -> None:
+    api_calls = context.live_console_agent_smoke_result.get("apiCalls") or []
+    assert tool_call not in api_calls, f"Expected no {tool_call}; saw {', '.join(api_calls)}"
 
 
 @then("the live console agent smoke result should include no tool calls")

@@ -240,6 +240,44 @@ const schema = a.schema({
     relationId: a.id(),
   }),
 
+  ReferenceInsightActionResult: a.customType({
+    ok: a.boolean().required(),
+    referenceId: a.id().required(),
+    messageId: a.id().required(),
+    relationId: a.id().required(),
+    status: a.string().required(),
+  }),
+
+  ReferenceCorpusMoveActionResult: a.customType({
+    ok: a.boolean().required(),
+    referenceId: a.id().required(),
+    referenceLineageId: a.id().required(),
+    previousReferenceId: a.id(),
+    previousCorpusId: a.id(),
+    corpusId: a.id().required(),
+    status: a.string().required(),
+  }),
+
+  ReferenceCurationStartResult: a.customType({
+    ok: a.boolean().required(),
+    referenceId: a.id().required(),
+    assignmentId: a.id().required(),
+    status: a.string().required(),
+    runId: a.string(),
+  }),
+
+  ReferenceCurationStatusResult: a.customType({
+    ok: a.boolean().required(),
+    referenceId: a.id(),
+    assignmentId: a.id().required(),
+    status: a.string().required(),
+    runId: a.string(),
+    lifecycleStatus: a.string(),
+    stageStatuses: a.json(),
+    changedOutputs: a.json(),
+    error: a.json(),
+  }),
+
   CategorySetDraftActionResult: a.customType({
     ok: a.boolean().required(),
     action: a.string().required(),
@@ -286,6 +324,65 @@ const schema = a.schema({
       note: a.string(),
     })
     .returns(a.ref("ReferenceQualityActionResult"))
+    .authorization((allow) => [
+      allow.groups(categoryWriteGroups),
+      allow.custom(),
+    ])
+    .handler(a.handler.function(categoryAction)),
+
+  createReferenceInsight: a
+    .mutation()
+    .arguments({
+      referenceId: a.id().required(),
+      summary: a.string().required(),
+      body: a.string().required(),
+      actorSub: a.string(),
+      actorLabel: a.string(),
+    })
+    .returns(a.ref("ReferenceInsightActionResult"))
+    .authorization((allow) => [
+      allow.groups(categoryWriteGroups),
+      allow.custom(),
+    ])
+    .handler(a.handler.function(categoryAction)),
+
+  moveReferenceCorpus: a
+    .mutation()
+    .arguments({
+      referenceId: a.id().required(),
+      corpusId: a.id().required(),
+      actorSub: a.string(),
+      actorLabel: a.string(),
+      note: a.string(),
+    })
+    .returns(a.ref("ReferenceCorpusMoveActionResult"))
+    .authorization((allow) => [
+      allow.groups(categoryWriteGroups),
+      allow.custom(),
+    ])
+    .handler(a.handler.function(categoryAction)),
+
+  startReferenceCuration: a
+    .mutation()
+    .arguments({
+      referenceId: a.id().required(),
+      actorSub: a.string(),
+      actorLabel: a.string(),
+      curationPolicy: a.json(),
+    })
+    .returns(a.ref("ReferenceCurationStartResult"))
+    .authorization((allow) => [
+      allow.groups(categoryWriteGroups),
+      allow.custom(),
+    ])
+    .handler(a.handler.function(categoryAction)),
+
+  getReferenceCurationStatus: a
+    .query()
+    .arguments({
+      assignmentId: a.id().required(),
+    })
+    .returns(a.ref("ReferenceCurationStatusResult"))
     .authorization((allow) => [
       allow.groups(categoryWriteGroups),
       allow.custom(),

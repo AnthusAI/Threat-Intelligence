@@ -23,6 +23,7 @@ from typing import Any
 
 from .semantic import PapyrusSemanticClient
 from .reference_policy import is_evidence_eligible_reference
+from . import reference_actions
 
 try:
     import yaml
@@ -351,6 +352,43 @@ mutation CreateAssignmentEvent($input: CreateAssignmentEventInput!) {
 }
 """
 
+UPDATE_ASSIGNMENT_MUTATION = """
+mutation UpdateAssignment($input: UpdateAssignmentInput!) {
+  updateAssignment(input: $input) {
+    id
+    assignmentTypeKey
+    queueKey
+    queueStatusKey
+    status
+    priority
+    title
+    summary
+    assigneeType
+    assigneeId
+    assigneeKey
+    claimedAt
+    claimExpiresAt
+    completedAt
+    canceledAt
+    corpusId
+    categorySetId
+    classifierId
+    sectionId
+    sectionKey
+    sectionType
+    sectionStatusKey
+    sectionQueueStatusKey
+    primaryFocusCategoryKey
+    topicScopeCategoryKeys
+    sourceSnapshotId
+    importRunId
+    createdBy
+    createdAt
+    updatedAt
+  }
+}
+"""
+
 LIST_PUBLISHED_ITEMS_QUERY = """
 query ListPublishedItems($limit: Int, $nextToken: String) {
   listPublishedItems(limit: $limit, nextToken: $nextToken) {
@@ -629,6 +667,92 @@ def papyrus_assignment_create(args: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def papyrus_assignment_update(args: dict[str, Any]) -> dict[str, Any]:
+    """
+    Resource-oriented Assignment.update implementation for execute_tactus.
+    """
+    payload = dict(args or {})
+    assignment_id = _required(
+        payload.get("id") or payload.get("assignmentId") or payload.get("assignment_id"),
+        "id",
+    )
+    to_status = _required(
+        payload.get("status") or payload.get("toStatus") or payload.get("to_status"),
+        "status",
+    )
+    now = _now_iso()
+    actor_label = str(payload.get("actorLabel") or payload.get("actor_label") or "papyrus-console-agent").strip()
+    apply = bool(payload.get("apply", True))
+
+    assignment = papyrus_get_assignment(assignment_id).get("assignment") or {}
+    from_status = str(assignment.get("status") or "")
+    queue_key = str(assignment.get("queueKey") or "").strip()
+    section_key = str(assignment.get("sectionKey") or "").strip()
+    assignment_type_key = str(assignment.get("assignmentTypeKey") or "research.edition-candidate").strip()
+    note = str(payload.get("note") or f"Updated assignment status: {from_status} -> {to_status}").strip()
+
+    assignment_patch: dict[str, Any] = {
+        "id": assignment_id,
+        "assignmentTypeKey": assignment_type_key,
+        "status": to_status,
+        "priority": assignment.get("priority"),
+        "queueStatusKey": f"{queue_key}#{to_status}" if queue_key else to_status,
+        "createdAt": assignment.get("createdAt"),
+        "assigneeKey": assignment.get("assigneeKey"),
+        "updatedAt": now,
+        "newsroomFeedKey": f"assignment#{to_status}",
+    }
+    if section_key:
+        assignment_patch["sectionStatusKey"] = f"{section_key}#{to_status}"
+        assignment_patch["sectionQueueStatusKey"] = (
+            f"{section_key}#{queue_key}#{to_status}" if queue_key else f"{section_key}#{to_status}"
+        )
+    if to_status == "claimed":
+        assignment_patch["claimedAt"] = now
+    elif to_status == "completed":
+        assignment_patch["completedAt"] = now
+    elif to_status == "canceled":
+        assignment_patch["canceledAt"] = now
+
+    event = {
+        "id": f"assignment-event-{assignment_id}-status-{_safe_id(to_status)}-{uuid.uuid4().hex[:8]}",
+        "assignmentId": assignment_id,
+        "assignmentTypeKey": assignment_type_key,
+        "queueKey": queue_key or "research:unsectioned:exploratory",
+        "eventType": "status_changed",
+        "fromStatus": from_status or None,
+        "toStatus": to_status,
+        "actorSub": actor_label,
+        "actorLabel": actor_label,
+        "note": note,
+        "createdAt": now,
+    }
+    result: dict[str, Any] = {
+        "ok": True,
+        "resource": "Assignment",
+        "verb": "update",
+        "applied": False,
+        "assignmentId": assignment_id,
+        "assignment": {**assignment, **assignment_patch},
+        "event": event,
+        "changes": [
+            {"model": "Assignment", "operation": "update", "id": assignment_id},
+            {"model": "AssignmentEvent", "operation": "create", "id": event["id"]},
+        ],
+        "api_calls": ["papyrus.Assignment.update"],
+        "error": None,
+    }
+    if not apply:
+        return result
+
+    assignment_data = _graphql(UPDATE_ASSIGNMENT_MUTATION, {"input": assignment_patch})
+    event_data = _graphql(CREATE_ASSIGNMENT_EVENT_MUTATION, {"input": event})
+    result["applied"] = True
+    result["assignment"] = _decode_record_json(assignment_data.get("updateAssignment") or result["assignment"])
+    result["event"] = _decode_record_json(event_data.get("createAssignmentEvent") or event)
+    return result
+
+
 def _assignment_type_key_for_resource_type(resource_type: str) -> str:
     if str(resource_type).strip() == "research":
         return "research.edition-candidate"
@@ -702,24 +826,17 @@ def papyrus_get_assignment_context(assignment_id: str) -> dict[str, Any]:
     Read live Assignment context, including doctrine, targets, and events.
     """
     assignment_id = _required(assignment_id, "assignment_id")
-    try:
-        data = _graphql(GET_ASSIGNMENT_CONTEXT_QUERY, {"assignmentId": assignment_id})
-        context = data.get("getAssignmentContext")
-        if not context:
-            raise ValueError(f"Assignment context not found: {assignment_id}")
-        decoded = _decode_record_json(context)
-        if isinstance(decoded.get("assignment"), dict):
-            _hydrate_assignment_payloads(decoded["assignment"])
-        for event in decoded.get("events") or []:
-            if isinstance(event, dict):
-                _hydrate_assignment_event_metadata(event)
-        return {"assignment_context": decoded}
-    except RuntimeError as error:
-        message = str(error)
-        if "data environment variables are malformed" not in message:
-            raise
-        # Fallback path when the assignment-action Lambda resolver is misconfigured.
-        return {"assignment_context": _fallback_assignment_context(assignment_id)}
+    data = _graphql(GET_ASSIGNMENT_CONTEXT_QUERY, {"assignmentId": assignment_id})
+    context = data.get("getAssignmentContext")
+    if not context:
+        raise ValueError(f"Assignment context not found: {assignment_id}")
+    decoded = _decode_record_json(context)
+    if isinstance(decoded.get("assignment"), dict):
+        _hydrate_assignment_payloads(decoded["assignment"])
+    for event in decoded.get("events") or []:
+        if isinstance(event, dict):
+            _hydrate_assignment_event_metadata(event)
+    return {"assignment_context": decoded}
 
 
 def papyrus_build_assignment_agent_context(
@@ -1001,6 +1118,125 @@ def papyrus_list_reference_messages(reference_lineage_id: str) -> dict[str, Any]
     List private messages attached to one Reference lineage.
     """
     return _semantic_client().list_reference_messages(reference_lineage_id)
+
+
+def papyrus_reference_curation_review(
+    *,
+    reference_id: str,
+    action: str,
+    actor_label: str = "",
+    note: str = "",
+    reason_code: str = "",
+) -> dict[str, Any]:
+    """
+    Canonical Reference editorial disposition action.
+    """
+    return reference_actions.review_reference_curation(
+        _graphql,
+        reference_id=reference_id,
+        action=action,
+        actor_label=actor_label,
+        note=note,
+        reason_code=reason_code,
+    )
+
+
+def papyrus_reference_quality_rate(
+    *,
+    reference_id: str,
+    rating: int,
+    actor_label: str = "",
+    note: str = "",
+) -> dict[str, Any]:
+    """
+    Canonical human quality rating action.
+    """
+    return reference_actions.set_reference_quality_rating(
+        _graphql,
+        reference_id=reference_id,
+        rating=rating,
+        actor_label=actor_label,
+        note=note,
+    )
+
+
+def papyrus_reference_insight_create(
+    *,
+    reference_id: str,
+    summary: str,
+    body: str,
+    actor_label: str = "",
+) -> dict[str, Any]:
+    """
+    Canonical insight creation action for a reference.
+    """
+    return reference_actions.create_reference_insight(
+        _graphql,
+        reference_id=reference_id,
+        summary=summary,
+        body=body,
+        actor_label=actor_label,
+    )
+
+
+def papyrus_reference_insight_list(reference_lineage_id: str) -> dict[str, Any]:
+    """
+    List insight messages for one reference lineage.
+    """
+    payload = papyrus_list_reference_messages(reference_lineage_id)
+    messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
+    insights = [message for message in messages if str(message.get("messageKind") or "") == "insight"]
+    return {
+        "referenceLineageId": reference_lineage_id,
+        "items": insights,
+        "count": len(insights),
+    }
+
+
+def papyrus_reference_move_corpus(
+    *,
+    reference_id: str,
+    corpus_id: str,
+    actor_label: str = "",
+    note: str = "",
+) -> dict[str, Any]:
+    """
+    Canonical explicit corpus-move action for a reference lineage.
+    """
+    return reference_actions.move_reference_corpus(
+        _graphql,
+        reference_id=reference_id,
+        corpus_id=corpus_id,
+        actor_label=actor_label,
+        note=note,
+    )
+
+
+def papyrus_reference_curation_start(
+    *,
+    reference_id: str,
+    actor_label: str = "",
+    curation_policy: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Canonical async curation start action (Assignment-backed).
+    """
+    return reference_actions.start_reference_curation(
+        _graphql,
+        reference_id=reference_id,
+        actor_label=actor_label,
+        curation_policy=curation_policy,
+    )
+
+
+def papyrus_reference_curation_status(*, assignment_id: str) -> dict[str, Any]:
+    """
+    Canonical curation run status lookup.
+    """
+    return reference_actions.get_reference_curation_status(
+        _graphql,
+        assignment_id=assignment_id,
+    )
 
 
 def papyrus_doi_backfill_plan(
@@ -2983,52 +3219,6 @@ query ListAssignmentEventsByAssignment($assignmentId: ID!, $limit: Int, $nextTok
             _hydrate_assignment_event_metadata(event)
             events.append(event)
     return sorted(events, key=lambda item: item.get("createdAt") or "", reverse=True)
-
-
-def _fallback_assignment_context(assignment_id: str) -> dict[str, Any]:
-    assignment = papyrus_get_assignment(assignment_id).get("assignment") or {}
-    relations = _list_connection(
-        """
-query ListSemanticRelationsBySubjectState($subjectStateKey: String!, $limit: Int, $nextToken: String) {
-  listSemanticRelationsBySubjectState(subjectStateKey: $subjectStateKey, limit: $limit, nextToken: $nextToken) {
-    items {
-      id
-      relationState
-      predicate
-      relationTypeKey
-      subjectKind
-      subjectId
-      subjectLineageId
-      objectKind
-      objectId
-      objectLineageId
-      metadata
-    }
-    nextToken
-  }
-}
-""",
-        {"subjectStateKey": _semantic_state_key("assignment", assignment_id)},
-        "listSemanticRelationsBySubjectState",
-    )
-    targets = [
-        {
-            "kind": relation.get("objectKind"),
-            "id": relation.get("objectId"),
-            "lineageId": relation.get("objectLineageId"),
-            "label": relation.get("objectLineageId") or relation.get("objectId"),
-            "detail": relation.get("relationTypeKey") or relation.get("predicate"),
-        }
-        for relation in relations
-        if relation.get("relationState") == "current"
-    ]
-    events = _assignment_events_for_assignments([assignment_id])
-    return {
-        "assignment": assignment,
-        "doctrine": [],
-        "targets": targets,
-        "events": events,
-    }
 
 
 def _normalize_assignment_metadata(value: Any) -> dict[str, Any]:

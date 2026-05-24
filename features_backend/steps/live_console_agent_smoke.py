@@ -50,6 +50,7 @@ MESSAGE_FIELD_CANDIDATES = [
 SCHEMA_INTROSPECTION = """
 query ConsoleAgentSmokeSchema {
   queryType: __type(name: "Query") { fields { name } }
+  mutationType: __type(name: "Mutation") { fields { name } }
   messageType: __type(name: "Message") { fields { name } }
   createMessageInputType: __type(name: "CreateMessageInput") { inputFields { name } }
   assignmentType: __type(name: "Assignment") { fields { name } }
@@ -231,7 +232,7 @@ def scenario_prompt(
                 "Do not answer from memory or prior context; call tools first.",
                 "First call exactly: docs_list{ namespace = \"resources\" }.",
                 "Then call exactly: docs_get{ id = \"resources.Assignment\" }.",
-                "Only after both tool calls succeed, reply with one sentence describing the Assignment resource.",
+                "Only after both tool calls succeed, reply with only `docs-progressive-tested`.",
             ]
         )
     if name == "create-research-assignment":
@@ -345,37 +346,79 @@ def scenario_prompt(
                 f"Marker: {marker}",
                 "Use execute_tactus for Reference quality rating test. Do not answer until all required tool calls succeed.",
                 "Do not call docs_list or docs_get.",
-                "Execute exactly three tool calls: list, quality_set, quality_get.",
+                "Execute exactly three tool calls: list, quality_rate, quality_get.",
                 "Step 1 required snippet:",
                 f"return papyrus.reference.list{{ corpus_key = '{reference_corpus_key}', limit = 5 }}",
                 "Step 2 required snippet:",
                 (
-                    "return papyrus.reference.quality_set{ reference_id = '<reference id from step 1 first item>', "
-                    f"rating = 4, note = '{marker} quality smoke', actor_label = 'behave-live-agent', apply = true, refresh = true }}"
+                    "return papyrus.reference.quality_rate{ reference_id = '<reference id from step 1 first item>', "
+                    f"rating = 4, note = '{marker} quality smoke', actor_label = 'behave-live-agent' }}"
                 ),
                 "Step 3 required snippet:",
                 "return papyrus.reference.quality_get{ reference_id = '<reference id from step 1 first item>' }",
                 "After all tool calls succeed, reply with only `reference-quality-tested`.",
             ]
         )
-    if name == "curate-reference-summary":
+    if name == "review-reference-curation":
         if not reference_corpus_key:
-            raise RuntimeError("curate-reference-summary scenario requires a non-empty reference corpus key")
+            raise RuntimeError("review-reference-curation scenario requires a non-empty reference corpus key")
         return "\n".join(
             [
                 f"Model policy: use {DEFAULT_AGENT_MODEL}.",
                 f"Marker: {marker}",
-                "Use execute_tactus for Reference summary curation test. Do not answer until all required tool calls succeed.",
+                "Use execute_tactus for Reference editorial disposition test. Do not answer until all required tool calls succeed.",
                 "Do not call docs_list or docs_get.",
-                "Execute exactly two tool calls: list, summarize.",
+                "Execute exactly two tool calls: list, curation_review.",
                 "Step 1 required snippet:",
                 f"return papyrus.reference.list{{ corpus_key = '{reference_corpus_key}', limit = 5 }}",
                 "Step 2 required snippet:",
                 (
-                    "return papyrus.reference.summarize{ reference_id = '<reference id from step 1 first item>', "
-                    "max_tokens = 100, apply = false, refresh = false }"
+                    "return papyrus.reference.curation_review{ reference_id = '<reference id from step 1 first item>', "
+                    f"action = 'accept', actor_label = 'behave-live-agent', note = '{marker} curation review' }}"
                 ),
-                "After all tool calls succeed, reply with only `reference-summary-tested`.",
+                "After all tool calls succeed, reply with only `reference-curation-review-tested`.",
+            ]
+        )
+    if name == "insight-reference":
+        if not reference_corpus_key:
+            raise RuntimeError("insight-reference scenario requires a non-empty reference corpus key")
+        return "\n".join(
+            [
+                f"Model policy: use {DEFAULT_AGENT_MODEL}.",
+                f"Marker: {marker}",
+                "Use execute_tactus for Reference insight test. Do not answer until all required tool calls succeed.",
+                "Do not call docs_list or docs_get.",
+                "Execute exactly three tool calls: list, insight_create, insight_list.",
+                "Step 1 required snippet:",
+                f"return papyrus.reference.list{{ corpus_key = '{reference_corpus_key}', limit = 5 }}",
+                "Step 2 required snippet:",
+                (
+                    "return papyrus.reference.insight_create{ reference_id = '<reference id from step 1 first item>', "
+                    f"summary = '{marker} insight', body = '{marker} insight body', actor_label = 'behave-live-agent' }}"
+                ),
+                "Step 3 required snippet:",
+                "return papyrus.reference.insight_list{ reference_lineage_id = '<reference lineage id from step 1 first item>' }",
+                "After all tool calls succeed, reply with only `reference-insight-tested`.",
+            ]
+        )
+    if name == "curate-reference-refresh":
+        if not reference_corpus_key:
+            raise RuntimeError("curate-reference-refresh scenario requires a non-empty reference corpus key")
+        return "\n".join(
+            [
+                f"Model policy: use {DEFAULT_AGENT_MODEL}.",
+                f"Marker: {marker}",
+                "Use execute_tactus for async Reference re-curation test. Do not answer until all required tool calls succeed.",
+                "Do not call docs_list or docs_get.",
+                "Execute exactly three tool calls: list, curation_start, curation_status.",
+                "Step 1 required snippet:",
+                f"return papyrus.reference.list{{ corpus_key = '{reference_corpus_key}', limit = 5 }}",
+                "Step 2 required snippet:",
+                "return papyrus.reference.curation_start{ reference_id = '<reference id from step 1 first item>', actor_label = 'behave-live-agent' }",
+                "Step 3 required snippet:",
+                "return papyrus.reference.curation_status{ assignment_id = '<assignment id from step 2>' }",
+                "Do not call papyrus.reference.quality_rate in this scenario.",
+                "After all tool calls succeed, reply with only `reference-curation-refresh-tested`.",
             ]
         )
     raise RuntimeError(f"Unknown scenario: {name}")
@@ -420,6 +463,7 @@ class GraphqlClient:
         data = self.graphql(SCHEMA_INTROSPECTION)
         self.schema_cache = {
             "queryFields": {entry["name"] for entry in data.get("queryType", {}).get("fields", []) if entry.get("name")},
+            "mutationFields": {entry["name"] for entry in data.get("mutationType", {}).get("fields", []) if entry.get("name")},
             "messageFields": {entry["name"] for entry in data.get("messageType", {}).get("fields", []) if entry.get("name")},
             "createMessageInputFields": {
                 entry["name"] for entry in data.get("createMessageInputType", {}).get("inputFields", []) if entry.get("name")
@@ -442,6 +486,44 @@ class GraphqlClient:
     def sanitize_input(self, payload: dict[str, Any]) -> dict[str, Any]:
         allowed = self.schema()["createMessageInputFields"]
         return {key: value for key, value in payload.items() if key in allowed and value is not None}
+
+
+def _assert_required_reference_actions(client: GraphqlClient, scenario_name: str) -> None:
+    reference_scenarios = {
+        "discuss-reference",
+        "rate-reference-quality",
+        "review-reference-curation",
+        "insight-reference",
+        "curate-reference-refresh",
+    }
+    if scenario_name not in reference_scenarios:
+        return
+    schema = client.schema()
+    mutation_fields = schema.get("mutationFields", set())
+    query_fields = schema.get("queryFields", set())
+    required_mutations = {
+        "reviewReferenceCuration",
+        "setReferenceQualityRating",
+        "createReferenceInsight",
+        "moveReferenceCorpus",
+        "startReferenceCuration",
+    }
+    required_queries = {
+        "getReferenceCurationStatus",
+    }
+    missing_mutations = sorted(required_mutations - mutation_fields)
+    missing_queries = sorted(required_queries - query_fields)
+    if missing_mutations or missing_queries:
+        details: list[str] = []
+        if missing_mutations:
+            details.append(f"missing mutations: {', '.join(missing_mutations)}")
+        if missing_queries:
+            details.append(f"missing queries: {', '.join(missing_queries)}")
+        raise RuntimeError(
+            "Reference action schema drift detected for live-agent smoke lane: "
+            + "; ".join(details)
+            + ". Deploy current Amplify schema/functions before running these scenarios."
+        )
 
 
 def _now_iso() -> str:
@@ -692,6 +774,7 @@ def run_scenario(
     run_id: str | None = None,
 ) -> dict[str, Any]:
     client = GraphqlClient.from_env(repo_root)
+    _assert_required_reference_actions(client, scenario_name)
     run_id = run_id or f"agent-smoke-{int(time.time() * 1000)}-{uuid.uuid4().hex[:6]}"
     assignment_ids: set[str] = set()
     assignment_event_ids: set[str] = set()
@@ -734,7 +817,13 @@ def run_scenario(
         if scenario_name == "update-research-assignment":
             seeded_assignment_id = _seed_update_assignment(client, marker)
             assignment_ids.add(seeded_assignment_id)
-        if scenario_name in {"discuss-reference", "rate-reference-quality", "curate-reference-summary"}:
+        if scenario_name in {
+            "discuss-reference",
+            "rate-reference-quality",
+            "review-reference-curation",
+            "insight-reference",
+            "curate-reference-refresh",
+        }:
             reference_corpus_key = _discover_reference_corpus_key(client)
         prompt = scenario_prompt(
             scenario_name,
@@ -922,23 +1011,53 @@ def run_scenario(
         if scenario_name == "rate-reference-quality":
             required = {
                 "papyrus.reference.list",
-                "papyrus.reference.quality_set",
+                "papyrus.reference.quality_rate",
                 "papyrus.reference.quality_get",
             }
             if not required.issubset(set(api_calls)):
                 raise RuntimeError(
                     f"Expected reference quality tool calls. Saw: {', '.join(api_calls)}. Assistant said: {content}"
                 )
-        if scenario_name == "curate-reference-summary":
+        if scenario_name == "review-reference-curation":
             required = {
                 "papyrus.reference.list",
-                "papyrus.reference.summarize",
+                "papyrus.reference.curation_review",
             }
             if not required.issubset(set(api_calls)):
                 raise RuntimeError(
-                    f"Expected reference summary tool calls. Saw: {', '.join(api_calls)}. Assistant said: {content}"
+                    f"Expected reference curation-review tool calls. Saw: {', '.join(api_calls)}. Assistant said: {content}"
                 )
-        if scenario_name in {"discuss-reference", "rate-reference-quality", "curate-reference-summary"} and errors:
+        if scenario_name == "insight-reference":
+            required = {
+                "papyrus.reference.list",
+                "papyrus.reference.insight_create",
+                "papyrus.reference.insight_list",
+            }
+            if not required.issubset(set(api_calls)):
+                raise RuntimeError(
+                    f"Expected reference insight tool calls. Saw: {', '.join(api_calls)}. Assistant said: {content}"
+                )
+        if scenario_name == "curate-reference-refresh":
+            required = {
+                "papyrus.reference.list",
+                "papyrus.reference.curation_start",
+                "papyrus.reference.curation_status",
+            }
+            if not required.issubset(set(api_calls)):
+                raise RuntimeError(
+                    f"Expected reference curation-refresh tool calls. Saw: {', '.join(api_calls)}. Assistant said: {content}"
+                )
+            if "papyrus.reference.quality_rate" in api_calls:
+                raise RuntimeError(
+                    f"Curation-refresh scenario must not call quality_rate. Saw: {', '.join(api_calls)}."
+                )
+        if scenario_name in {
+            "discuss-reference",
+            "rate-reference-quality",
+            "review-reference-curation",
+            "insight-reference",
+            "curate-reference-refresh",
+        } and errors:
             raise RuntimeError(
                 f"Expected no structured tool errors for {scenario_name}, saw: {json.dumps(errors)}. Assistant said: {content}"
             )
@@ -964,8 +1083,12 @@ def run_scenario(
             raise RuntimeError(f"Expected reference-discussion-tested, got: {content}")
         if scenario_name == "rate-reference-quality" and content != "reference-quality-tested":
             raise RuntimeError(f"Expected reference-quality-tested, got: {content}")
-        if scenario_name == "curate-reference-summary" and content != "reference-summary-tested":
-            raise RuntimeError(f"Expected reference-summary-tested, got: {content}")
+        if scenario_name == "review-reference-curation" and content != "reference-curation-review-tested":
+            raise RuntimeError(f"Expected reference-curation-review-tested, got: {content}")
+        if scenario_name == "insight-reference" and content != "reference-insight-tested":
+            raise RuntimeError(f"Expected reference-insight-tested, got: {content}")
+        if scenario_name == "curate-reference-refresh" and content != "reference-curation-refresh-tested":
+            raise RuntimeError(f"Expected reference-curation-refresh-tested, got: {content}")
 
         model = DEFAULT_AGENT_MODEL
         try:

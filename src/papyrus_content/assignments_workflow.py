@@ -432,8 +432,6 @@ def apply_research_packet(client: PapyrusGraphQLAuthoringClient, options: dict[s
             "updatedAt": now,
         }
     )["expected"]
-    message["responseTarget"] = "cloud"
-    message["responseStatus"] = "complete"
     relation = semantic_relation_record(
         {
             "predicate": "produces",
@@ -1602,4 +1600,3 @@ def _execute_assignment_by_type(
     from .assignment_executors import execute_assignment_by_type
 
     return execute_assignment_by_type(client, assignment_id, options)
-

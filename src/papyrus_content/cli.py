@@ -131,7 +131,7 @@ from .newsroom_summary import (
     update_newsroom_summary_after_reference_registration,
 )
 from .options import normalize_non_negative_integer, normalize_string, parse_boolean_option, parse_options
-from .policy_checks import check_backend_node_scripts
+from .policy_checks import check_backend_node_scripts, check_reference_action_contract
 from .records import apply_record_changes, build_record_changes
 from .reference_policy import (
     normalize_reference_curation_status,
@@ -257,6 +257,7 @@ PORTED_COMMANDS = frozenset(
         "test:doi-backfill",
         "test:identifier-backfill",
         "policy:check-backend-node-scripts",
+        "policy:check-reference-action-contract",
     }
 )
 
@@ -483,6 +484,8 @@ def dispatch(group: str, command: str, flags: list[str]) -> None:
         run_identifier_backfill_tests(flags)
     elif route == "policy:check-backend-node-scripts":
         check_backend_node_scripts(flags)
+    elif route == "policy:check-reference-action-contract":
+        check_reference_action_contract(flags)
     else:
         raise ValueError(f"Unsupported papyrus-content command: {group} {command}")
 

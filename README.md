@@ -549,6 +549,21 @@ and excludes live-agent scenarios.
 
 `npm run test:bdd:agent-live` runs only the backend live-agent Gherkin smoke
 suite via Behave (Python).
+The live-agent suite is sandbox-only (`/Users/ryan/Projects/Papyrus` workspace)
+and defaults the chat-agent model policy to `gpt-5-nano`.
+Live scenarios persist tagged test records by default for dogfooding
+(`behave-live-agent-*` prefixes); set `PAPYRUS_LIVE_AGENT_CLEANUP=1` to delete
+records after each run.
+`npm run test:bdd:agent-local` runs the same live-agent Behave scenarios but
+invokes the local Rust console responder binary directly (no Lambda deploy).
+This uses a dedicated local responder lane (`responseTarget=local`) so cloud
+Lambda processing does not interfere with local runs, while still writing
+Message rows through the configured GraphQL endpoint.
+Use focused local loops for faster iteration:
+`npm run test:bdd:agent-local:hello`, `:docs`, `:create`, `:get`, `:update`,
+and `:error-shape`.
+Before local/live agent runs, validate the reference action GraphQL contract
+with `npm run check:reference-action-contract`.
 
 In development, no query string means the live GraphQL edition. Use
 `/?scenario=current-edition` or another named scenario id only when you need a
@@ -588,6 +603,10 @@ npm run content -- categories export-category-set --category-set <id> --output a
 npm run content -- categories import-projection --config corpora/papyrus-steering.yml --target-corpus-key <key> --authority-corpus-key <key> --bundle projection-results.json
 npm run content -- content delete all --yes
 ```
+
+`references curate-recent` is assignment-only for re-curation operations:
+`--apply` dispatches `curation.reference-refresh` assignments and returns queue
+status; it does not execute inline curation stages.
 
 `references register-catalog` is the canonical bridge from corpus accession
 files into Papyrus workflow state. With `--apply`, it creates a

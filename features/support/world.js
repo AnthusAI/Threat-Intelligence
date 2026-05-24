@@ -14,6 +14,7 @@ class PapyrusWorld {
     this.newsroomSummaryDelayMs = 0;
     this.newsroomSummaryMock = null;
     this.newsroomMessageDetailMock = null;
+    this.newsroomReferenceSummaryPayloadMock = null;
     this.newsroomQualityMutationMock = null;
   }
 
@@ -171,6 +172,59 @@ class PapyrusWorld {
                   title: "Red-Teaming for Generative AI",
                   subtitle: "Silver Bullet or Security Theater?",
                   summary: "An examination of whether red-teaming materially improves generative AI security outcomes.",
+                },
+                error: null,
+              },
+            ],
+          },
+        }));
+      });
+    }
+    if (this.newsroomReferenceSummaryPayloadMock === "dedup") {
+      await this.page.addInitScript(() => {
+        window.localStorage.setItem("papyrus:test-newsroom-mock", JSON.stringify({
+          payloads: {
+            "reference:reference-knowledge-corpus-demo-source-history-001-v1": [
+              {
+                attachment: {
+                  id: "model-attachment-reference-history-001-metadata",
+                  ownerKind: "reference",
+                  ownerId: "reference-knowledge-corpus-demo-source-history-001-v1",
+                  ownerLineageId: "reference-knowledge-corpus-demo-source-history-001",
+                  role: "metadata",
+                  sortKey: "metadata",
+                  storagePath: "newsroom/payloads/reference/reference-knowledge-corpus-demo-source-history-001/metadata/metadata.json",
+                  filename: "metadata.json",
+                  mediaType: "application/json",
+                  status: "active",
+                },
+                text: null,
+                json: {
+                  title: "Symbolic And Connectionist History Reader",
+                  subtitle: "s3://papyrus-demo/corpora/history/history-001.md",
+                  summary: "s3://papyrus-demo/corpora/history/history-001.md\n\nTrimmed summary body for mock reference one.",
+                },
+                error: null,
+              },
+            ],
+            "reference:reference-knowledge-corpus-demo-source-history-002-v1": [
+              {
+                attachment: {
+                  id: "model-attachment-reference-history-002-metadata",
+                  ownerKind: "reference",
+                  ownerId: "reference-knowledge-corpus-demo-source-history-002-v1",
+                  ownerLineageId: "reference-knowledge-corpus-demo-source-history-002",
+                  role: "metadata",
+                  sortKey: "metadata",
+                  storagePath: "newsroom/payloads/reference/reference-knowledge-corpus-demo-source-history-002/metadata/metadata.json",
+                  filename: "metadata.json",
+                  mediaType: "application/json",
+                  status: "active",
+                },
+                text: null,
+                json: {
+                  title: "Foundation Model Scaling Retrospective",
+                  summary: "Unchanged summary for mock reference two.",
                 },
                 error: null,
               },

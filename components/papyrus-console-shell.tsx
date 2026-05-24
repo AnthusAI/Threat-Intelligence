@@ -9,10 +9,13 @@ import {
   listConsoleMessagesByThread,
   listConsoleThreads,
   subscribeConsoleMessages,
+  updateConsoleMessage,
   updateConsoleThread,
   type ConsoleChatMessage,
   type ConsoleChatThread,
 } from "../lib/console-chat-client";
+import { buildNewsroomKnowledgeQueryInput, type NewsroomKnowledgeQueryTarget } from "../lib/newsroom-knowledge-query-request";
+import { runNewsroomKnowledgeQuery } from "./news-desk-taxonomy-client";
 import { loadReaderSessionSnapshot, type ReaderSessionSnapshot } from "./reader-auth-state";
 import { Conversation, ConversationContent, ConversationScrollButton } from "./ai-elements/conversation";
 import {
@@ -59,6 +62,7 @@ const CONSOLE_SEMANTIC_LAYER = "chat_detail";
 const CONSOLE_SEARCH_VISIBILITY = "explicit";
 const CONSOLE_RESPONSE_TARGET = process.env.NEXT_PUBLIC_PAPYRUS_CONSOLE_RESPONSE_TARGET?.trim() || "cloud";
 const DEFAULT_CONSOLE_MODEL = process.env.NEXT_PUBLIC_PAPYRUS_CONSOLE_MODEL?.trim() || "gpt-5.4-mini";
+const CONSOLE_SELECT_THREAD_EVENT = "papyrus:console-select-thread";
 const CONSOLE_MODEL_OPTIONS = [
   { value: "gpt-5.5", label: "GPT 5.5", provider: "openai" },
   { value: "gpt-5.4", label: "GPT 5.4", provider: "openai" },
@@ -72,7 +76,10 @@ type PapyrusConsoleShellProps = {
 
 type PapyrusConsoleContextValue = {
   open: boolean;
+  openingReferenceChat: boolean;
+  openConsole: () => void;
   shouldOfferConsole: boolean;
+  startReferenceChat: (target: NewsroomKnowledgeQueryTarget) => Promise<void>;
   toggleOpen: () => void;
 };
 
@@ -86,6 +93,7 @@ export function PapyrusConsoleShell({ children }: PapyrusConsoleShellProps) {
   const pathname = usePathname();
   const [session, setSession] = useState<ReaderSessionSnapshot | null>(null);
   const [open, setOpen] = useState(false);
+  const [openingReferenceChat, setOpeningReferenceChat] = useState(false);
   const isNewsroomPath = pathname === "/newsroom" || pathname.startsWith("/newsroom/");
   const canUseConsole = Boolean(session?.hasSession && session.groups.some((group) => group === "editor" || group === "admin"));
   const shouldOfferConsole = isNewsroomPath && canUseConsole;
@@ -121,11 +129,170 @@ export function PapyrusConsoleShell({ children }: PapyrusConsoleShellProps) {
     });
   }, []);
 
+  const openConsole = useCallback(() => {
+    setOpen(true);
+    try {
+      window.localStorage.setItem("papyrus:console-open", "true");
+    } catch {
+      // Ignore storage failures.
+    }
+  }, []);
+
+  const startReferenceChat = useCallback(async (target: NewsroomKnowledgeQueryTarget) => {
+    if (!canUseConsole) {
+      throw new Error("Chat is only available to editor/admin sessions.");
+    }
+    if (openingReferenceChat) return;
+    setOpeningReferenceChat(true);
+    try {
+      openConsole();
+      const now = new Date().toISOString();
+      const title = target.title?.trim() || "Reference";
+      const summary = `Reference chat for ${title}`.slice(0, 180);
+      const lineageId = target.anchor.lineageId ?? target.anchor.id;
+      const thread = await createConsoleThread({
+        id: `message-thread-console-${crypto.randomUUID()}`,
+        threadKind: "console",
+        status: "active",
+        title: "Reference Chat",
+        summary,
+        primaryAnchorKind: "site",
+        primaryAnchorId: "papyrus",
+        primaryAnchorLineageId: "papyrus",
+        primaryAnchorKey: CONSOLE_THREAD_ANCHOR_KEY,
+        createdByLabel: session?.auth.label ?? "Papyrus editor",
+        messageCount: 0,
+        metadata: toAwsJson({
+          console: {
+            cache: "lambda-tmp-jit",
+            model: DEFAULT_CONSOLE_MODEL,
+            rawChatSearchVisibility: CONSOLE_SEARCH_VISIBILITY,
+          },
+          bootstrap: {
+            mode: "reference_chat",
+            anchor: target.anchor,
+          },
+        }),
+        newsroomFeedKey: CONSOLE_NEWSROOM_FEED_KEY,
+        createdAt: now,
+        updatedAt: now,
+      });
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent(CONSOLE_SELECT_THREAD_EVENT, { detail: { threadId: thread.id } }));
+      }
+      const pendingMessage = await createConsoleMessage({
+        id: `message-console-assistant-${crypto.randomUUID()}`,
+        threadId: thread.id,
+        parentMessageId: null,
+        sequenceNumber: 1,
+        role: "ASSISTANT",
+        messageKind: CONSOLE_MESSAGE_KIND,
+        messageType: "MESSAGE",
+        content: "",
+        summary: "Thinking...",
+        messageDomain: CONSOLE_MESSAGE_DOMAIN,
+        status: "active",
+        source: "papyrus-console",
+        authorLabel: "Papyrus",
+        semanticLayer: CONSOLE_SEMANTIC_LAYER,
+        searchVisibility: CONSOLE_SEARCH_VISIBILITY,
+        responseTarget: CONSOLE_RESPONSE_TARGET,
+        responseStatus: "RUNNING",
+        responseStartedAt: now,
+        metadata: toAwsJson({
+          model: DEFAULT_CONSOLE_MODEL,
+          bootstrap: "reference-chat",
+          anchor: target.anchor,
+        }),
+        createdAt: now,
+        updatedAt: now,
+        newsroomFeedKey: CONSOLE_NEWSROOM_FEED_KEY,
+      });
+      await updateConsoleThread({
+        id: thread.id,
+        messageCount: 1,
+        lastMessageId: pendingMessage.id,
+        lastMessageAt: now,
+        activeResponseMessageId: pendingMessage.id,
+        updatedAt: now,
+      });
+
+      const tokenBudget = 1600;
+      const request = buildNewsroomKnowledgeQueryInput(target, "", tokenBudget);
+      const completedAt = new Date().toISOString();
+      let markdown: string;
+      try {
+        const result = await runNewsroomKnowledgeQuery(request);
+        markdown = result.context?.text?.trim() ?? "";
+        if (!markdown) throw new Error("knowledgeQuery returned no markdown context.");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        markdown = `Unable to preload reference context.\n\n${message}`;
+      }
+      let completedMessage: ConsoleChatMessage;
+      try {
+        completedMessage = await updateConsoleMessage({
+          id: pendingMessage.id,
+          content: markdown,
+          summary: truncateConsoleSummary(markdown),
+          responseStatus: "COMPLETED",
+          responseCompletedAt: completedAt,
+          updatedAt: completedAt,
+        });
+      } catch {
+        completedMessage = await createConsoleMessage({
+          id: `message-console-assistant-${crypto.randomUUID()}`,
+          threadId: thread.id,
+          parentMessageId: pendingMessage.id,
+          sequenceNumber: 2,
+          role: "ASSISTANT",
+          messageKind: CONSOLE_MESSAGE_KIND,
+          messageType: "MESSAGE",
+          content: markdown,
+          summary: truncateConsoleSummary(markdown),
+          messageDomain: CONSOLE_MESSAGE_DOMAIN,
+          status: "active",
+          source: "papyrus-console",
+          authorLabel: "Papyrus",
+          semanticLayer: CONSOLE_SEMANTIC_LAYER,
+          searchVisibility: CONSOLE_SEARCH_VISIBILITY,
+          responseTarget: CONSOLE_RESPONSE_TARGET,
+          responseStatus: "COMPLETED",
+          responseCompletedAt: completedAt,
+          metadata: toAwsJson({
+            model: DEFAULT_CONSOLE_MODEL,
+            bootstrap: "reference-chat",
+            anchor: target.anchor,
+          }),
+          createdAt: completedAt,
+          updatedAt: completedAt,
+          newsroomFeedKey: CONSOLE_NEWSROOM_FEED_KEY,
+        });
+      }
+      await updateConsoleThread({
+        id: thread.id,
+        messageCount: 1,
+        lastMessageId: completedMessage.id,
+        lastMessageAt: completedAt,
+        activeResponseMessageId: null,
+        updatedAt: completedAt,
+      });
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent(CONSOLE_SELECT_THREAD_EVENT, { detail: { threadId: thread.id } }));
+      }
+    } finally {
+      setOpeningReferenceChat(false);
+    }
+  }, [canUseConsole, openConsole, openingReferenceChat, session?.auth.label]);
+
   const consoleContext = useMemo<PapyrusConsoleContextValue>(() => ({
     open,
+    openingReferenceChat,
+    openConsole,
     shouldOfferConsole,
+    startReferenceChat,
     toggleOpen,
-  }), [open, shouldOfferConsole, toggleOpen]);
+  }), [open, openConsole, openingReferenceChat, shouldOfferConsole, startReferenceChat, toggleOpen]);
 
   return (
     <PapyrusConsoleContext.Provider value={consoleContext}>
@@ -146,7 +313,7 @@ export function PapyrusConsoleShell({ children }: PapyrusConsoleShellProps) {
 }
 
 export function NewsroomConsoleProgressToggle() {
-  const consoleContext = useContext(PapyrusConsoleContext);
+  const consoleContext = usePapyrusConsole();
   if (!consoleContext?.shouldOfferConsole || consoleContext.open) return null;
 
   return (
@@ -158,9 +325,13 @@ export function NewsroomConsoleProgressToggle() {
       onClick={consoleContext.toggleOpen}
       title="Open console"
     >
-      <MessagesSquareIcon />
+      <PapyrusConsoleChatIcon />
     </button>
   );
+}
+
+export function usePapyrusConsole(): PapyrusConsoleContextValue | null {
+  return useContext(PapyrusConsoleContext);
 }
 
 function ConsoleAccessPanel({ onClose, session }: { onClose: () => void; session: ReaderSessionSnapshot | null }) {
@@ -273,6 +444,28 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
     );
     return unsubscribe;
   }, [mergeMessage, thread?.id]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onSelectThread = (event: Event) => {
+      const detail = (event as CustomEvent<{ threadId?: string }>).detail;
+      const threadId = detail?.threadId?.trim();
+      if (!threadId) return;
+      activeThreadIdRef.current = threadId;
+      const currentMatch = threads.find((entry) => entry.id === threadId) ?? null;
+      if (currentMatch) {
+        setThread(currentMatch);
+        setSelectedModel(resolveThreadModel(currentMatch));
+        void loadMessages(threadId);
+        return;
+      }
+      void loadThread();
+    };
+    window.addEventListener(CONSOLE_SELECT_THREAD_EVENT, onSelectThread as EventListener);
+    return () => {
+      window.removeEventListener(CONSOLE_SELECT_THREAD_EVENT, onSelectThread as EventListener);
+    };
+  }, [loadMessages, loadThread, threads]);
 
   useEffect(() => {
     let previousState: ConnectionState | null = null;
@@ -1028,7 +1221,7 @@ function LucideXIcon() {
   );
 }
 
-function MessagesSquareIcon() {
+export function PapyrusConsoleChatIcon() {
   return (
     <svg
       aria-hidden="true"

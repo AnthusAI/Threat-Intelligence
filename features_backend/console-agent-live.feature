@@ -17,7 +17,7 @@ Feature: Live console agent behavior
     Then the live console agent smoke result should include tool call "papyrus.docs.list"
     And the live console agent smoke result should include tool call "papyrus.docs.get"
     And the live console agent smoke result should include tool calls in order "papyrus.docs.list" then "papyrus.docs.get"
-    And the live console agent response should include "Assignment"
+    And the live console agent response should equal "docs-progressive-tested"
     And the live console agent smoke result should include no structured errors
     And the live console agent smoke result should default to model "gpt-5-nano"
 
@@ -75,18 +75,39 @@ Feature: Live console agent behavior
   Scenario: The console agent can rate Reference quality
     When I run the live console agent smoke scenario "rate-reference-quality"
     Then the live console agent smoke result should include tool call "papyrus.reference.list"
-    And the live console agent smoke result should include tool call "papyrus.reference.quality_set"
+    And the live console agent smoke result should include tool call "papyrus.reference.quality_rate"
     And the live console agent smoke result should include tool call "papyrus.reference.quality_get"
-    And the live console agent smoke result should include tool calls in order "papyrus.reference.list" then "papyrus.reference.quality_set"
+    And the live console agent smoke result should include tool calls in order "papyrus.reference.list" then "papyrus.reference.quality_rate"
     And the live console agent smoke result should include no structured errors
     And the live console agent response should equal "reference-quality-tested"
     And the live console agent smoke result should default to model "gpt-5-nano"
 
-  Scenario: The console agent can run Reference summary curation
-    When I run the live console agent smoke scenario "curate-reference-summary"
+  Scenario: The console agent can review Reference editorial status
+    When I run the live console agent smoke scenario "review-reference-curation"
     Then the live console agent smoke result should include tool call "papyrus.reference.list"
-    And the live console agent smoke result should include tool call "papyrus.reference.summarize"
-    And the live console agent smoke result should include tool calls in order "papyrus.reference.list" then "papyrus.reference.summarize"
+    And the live console agent smoke result should include tool call "papyrus.reference.curation_review"
+    And the live console agent smoke result should include tool calls in order "papyrus.reference.list" then "papyrus.reference.curation_review"
     And the live console agent smoke result should include no structured errors
-    And the live console agent response should equal "reference-summary-tested"
+    And the live console agent response should equal "reference-curation-review-tested"
+    And the live console agent smoke result should default to model "gpt-5-nano"
+
+  Scenario: The console agent can create and list Reference insights
+    When I run the live console agent smoke scenario "insight-reference"
+    Then the live console agent smoke result should include tool call "papyrus.reference.list"
+    And the live console agent smoke result should include tool call "papyrus.reference.insight_create"
+    And the live console agent smoke result should include tool call "papyrus.reference.insight_list"
+    And the live console agent smoke result should include tool calls in order "papyrus.reference.list" then "papyrus.reference.insight_create"
+    And the live console agent smoke result should include no structured errors
+    And the live console agent response should equal "reference-insight-tested"
+    And the live console agent smoke result should default to model "gpt-5-nano"
+
+  Scenario: The console agent can queue and inspect Reference re-curation
+    When I run the live console agent smoke scenario "curate-reference-refresh"
+    Then the live console agent smoke result should include tool call "papyrus.reference.list"
+    And the live console agent smoke result should include tool call "papyrus.reference.curation_start"
+    And the live console agent smoke result should include tool call "papyrus.reference.curation_status"
+    And the live console agent smoke result should include tool calls in order "papyrus.reference.list" then "papyrus.reference.curation_start"
+    And the live console agent smoke result should include no tool call "papyrus.reference.quality_rate"
+    And the live console agent smoke result should include no structured errors
+    And the live console agent response should equal "reference-curation-refresh-tested"
     And the live console agent smoke result should default to model "gpt-5-nano"

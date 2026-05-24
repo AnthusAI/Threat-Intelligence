@@ -4,7 +4,7 @@ import { Hub } from "aws-amplify/utils";
 import { fetchAuthSession } from "aws-amplify/auth";
 import { gsap } from "gsap";
 import { Flip } from "gsap/Flip";
-import { ArchiveIcon } from "lucide-react";
+import { ArchiveIcon, RefreshCwIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ReactNode, RefObject } from "react";
@@ -38,7 +38,8 @@ import {
   type NewsroomRecordPage,
 } from "./news-desk-taxonomy-client";
 import { listConsoleThreads } from "../lib/console-chat-client";
-import { NewsroomConsoleProgressToggle } from "./papyrus-console-shell";
+import { buildNewsroomKnowledgeQueryInput, type NewsroomKnowledgeQueryAnchor as KnowledgeQueryAnchor, type NewsroomKnowledgeQueryTarget as KnowledgeQueryTarget } from "../lib/newsroom-knowledge-query-request";
+import { NewsroomConsoleProgressToggle, PapyrusConsoleChatIcon, usePapyrusConsole } from "./papyrus-console-shell";
 import { useOptionalNewsDeskClient } from "./news-desk-client-provider";
 import type { ReaderAuthSnapshot } from "./reader-auth-state";
 import type {
@@ -220,18 +221,6 @@ type NewsroomDetailAction = {
   onSelect: () => void;
 };
 
-type KnowledgeQueryAnchor = {
-  kind: "assignment" | "category" | "categorySet" | "item" | "message" | "newsroomSection" | "reference" | "semanticNode";
-  id: string;
-  lineageId?: string | null;
-};
-
-type KnowledgeQueryTarget = {
-  anchor: KnowledgeQueryAnchor;
-  title: string;
-  subtitle?: string | null;
-};
-
 type InsightTarget = {
   kind: "assignment" | "category" | "item" | "newsroomSection" | "reference" | "semanticNode";
   id: string;
@@ -365,6 +354,67 @@ type ReferenceQualityResponse = {
     relationId?: string | null;
   } | null;
   errors?: Array<{ message?: string | null } | string | null> | null;
+};
+
+type ReferenceInsightResponse = {
+  data?: {
+    ok?: boolean | null;
+    referenceId?: string | null;
+    messageId?: string | null;
+    relationId?: string | null;
+    status?: string | null;
+  } | null;
+  errors?: Array<{ message?: string | null } | string | null> | null;
+};
+
+type ReferenceCorpusMoveResponse = {
+  data?: {
+    ok?: boolean | null;
+    referenceId?: string | null;
+    referenceLineageId?: string | null;
+    previousReferenceId?: string | null;
+    previousCorpusId?: string | null;
+    corpusId?: string | null;
+    status?: string | null;
+  } | null;
+  errors?: Array<{ message?: string | null } | string | null> | null;
+};
+
+type ReferenceCurationStartResponse = {
+  data?: {
+    ok?: boolean | null;
+    referenceId?: string | null;
+    assignmentId?: string | null;
+    status?: string | null;
+    runId?: string | null;
+  } | null;
+  errors?: Array<{ message?: string | null } | string | null> | null;
+};
+
+type ReferenceCurationStatusResponse = {
+  data?: {
+    ok?: boolean | null;
+    referenceId?: string | null;
+    assignmentId?: string | null;
+    status?: string | null;
+    runId?: string | null;
+    lifecycleStatus?: string | null;
+    stageStatuses?: Record<string, unknown> | null;
+    changedOutputs?: Record<string, unknown> | null;
+    error?: Record<string, unknown> | null;
+  } | null;
+  errors?: Array<{ message?: string | null } | string | null> | null;
+};
+
+type ReferenceCurationRunStatus = {
+  assignmentId: string;
+  status: string;
+  lifecycleStatus: string;
+  runId?: string | null;
+  stageStatuses: Record<string, unknown>;
+  changedOutputs: Record<string, unknown>;
+  error: Record<string, unknown> | null;
+  updatedAt: string;
 };
 
 type MergeSelection = {
@@ -732,6 +782,7 @@ function NewsDeskDashboard({
   const [userDirectory, setUserDirectory] = useState(dashboard.userDirectory);
   const [actionState, setActionState] = useState<ActionState | null>(null);
   const [referenceQualityActionState, setReferenceQualityActionState] = useState<ReferenceQualityActionState | null>(null);
+  const [referenceCurationRunsByLineage, setReferenceCurationRunsByLineage] = useState<Record<string, ReferenceCurationRunStatus>>({});
   const [mergeSelection, setMergeSelection] = useState<MergeSelection | null>(null);
   const [isPending, startTransition] = useTransition();
   const controlsDisabled = isPending || !canEdit;
@@ -1472,6 +1523,134 @@ function NewsDeskDashboard({
     });
   }
 
+  function runReferenceCorpusMove(reference: ReferenceRecord, corpusId: string) {
+    if (!corpusId || corpusId === reference.corpusId) return;
+    setActionState({ id: `reference-corpus-${reference.id}`, message: "corpus move pending", tone: "pending" });
+    if (dashboard.isDemo) {
+      applyReferenceRecord({
+        ...reference,
+        corpusId,
+        updatedAt: new Date().toISOString(),
+      });
+      setActionState({ id: `reference-corpus-${reference.id}`, message: "corpus moved", tone: "ok" });
+      return;
+    }
+    startTransition(() => {
+      void (async () => {
+        try {
+          const response = await dataClient.mutations.moveReferenceCorpus(
+            {
+              referenceId: reference.id,
+              corpusId,
+              actorLabel: authState.label,
+              note: "Moved from newsroom reference detail.",
+            },
+            { authMode: USER_POOL_AUTH_MODE },
+          );
+          const moved = assertReferenceMoveCorpusMutationSucceeded(response as ReferenceCorpusMoveResponse, reference.id, corpusId);
+          const movedReference = await loadReferenceRecordById(moved.referenceId ?? reference.id);
+          if (movedReference) {
+            applyReferenceRecord(movedReference);
+          } else {
+            applyReferenceRecord({
+              ...reference,
+              corpusId,
+              updatedAt: new Date().toISOString(),
+            });
+          }
+          setActionState({ id: `reference-corpus-${reference.id}`, message: "corpus moved", tone: "ok" });
+        } catch (error) {
+          setActionState({
+            id: `reference-corpus-${reference.id}`,
+            message: error instanceof Error ? error.message : "Corpus move failed",
+            tone: "error",
+          });
+        }
+      })();
+    });
+  }
+
+  function runReferenceCurationStart(reference: ReferenceRecord) {
+    const lineageId = reference.lineageId ?? reference.id;
+    setActionState({ id: `reference-curation-${lineageId}`, message: "curation queued", tone: "pending" });
+    if (dashboard.isDemo) {
+      setReferenceCurationRunsByLineage((current) => ({
+        ...current,
+        [lineageId]: {
+          assignmentId: `assignment-demo-curation-${safeUiId(lineageId)}`,
+          status: "queued",
+          lifecycleStatus: "queued",
+          runId: `assignment-demo-curation-${safeUiId(lineageId)}`,
+          stageStatuses: {},
+          changedOutputs: {},
+          error: null,
+          updatedAt: new Date().toISOString(),
+        },
+      }));
+      setActionState({ id: `reference-curation-${lineageId}`, message: "curation queued", tone: "ok" });
+      return;
+    }
+    startTransition(() => {
+      void (async () => {
+        try {
+          const response = await dataClient.mutations.startReferenceCuration(
+            {
+              referenceId: reference.id,
+              actorLabel: authState.label,
+            },
+            { authMode: USER_POOL_AUTH_MODE },
+          );
+          const started = assertReferenceCurationStartMutationSucceeded(response as ReferenceCurationStartResponse, reference.id);
+          const assignmentId = started.assignmentId ?? "";
+          if (!assignmentId) throw new Error("startReferenceCuration did not return assignmentId.");
+          setReferenceCurationRunsByLineage((current) => ({
+            ...current,
+            [lineageId]: {
+              assignmentId,
+              status: started.status ?? "queued",
+              lifecycleStatus: started.status ?? "queued",
+              runId: started.runId ?? assignmentId,
+              stageStatuses: {},
+              changedOutputs: {},
+              error: null,
+              updatedAt: new Date().toISOString(),
+            },
+          }));
+          for (let attempt = 0; attempt < 20; attempt += 1) {
+            const statusResponse = await dataClient.queries.getReferenceCurationStatus(
+              { assignmentId },
+              { authMode: USER_POOL_AUTH_MODE },
+            );
+            const status = assertReferenceCurationStatusQuerySucceeded(statusResponse as ReferenceCurationStatusResponse, assignmentId);
+            const lifecycle = status.lifecycleStatus ?? status.status ?? "queued";
+            setReferenceCurationRunsByLineage((current) => ({
+              ...current,
+              [lineageId]: {
+                assignmentId,
+                status: status.status ?? lifecycle,
+                lifecycleStatus: lifecycle,
+                runId: status.runId ?? assignmentId,
+                stageStatuses: status.stageStatuses ?? {},
+                changedOutputs: status.changedOutputs ?? {},
+                error: status.error ?? null,
+                updatedAt: new Date().toISOString(),
+              },
+            }));
+            if (["completed", "failed", "degraded"].includes(lifecycle)) break;
+            await new Promise((resolve) => window.setTimeout(resolve, 1500));
+          }
+          setActionState({ id: `reference-curation-${lineageId}`, message: "curation status updated", tone: "ok" });
+        } catch (error) {
+          setActionState({
+            id: `reference-curation-${lineageId}`,
+            message: error instanceof Error ? error.message : "Start curation failed",
+            tone: "error",
+          });
+        }
+      })();
+    });
+  }
+
   async function createInsight(target: InsightTarget, summary: string, body: string): Promise<void> {
     const cleanSummary = summary.trim();
     const cleanBody = body.trim();
@@ -1511,6 +1690,37 @@ function NewsDeskDashboard({
       setMessages((current) => [message, ...current.filter((entry) => entry.id !== message.id)]);
       setSemanticRelations((current) => [relation, ...current.filter((entry) => entry.id !== relation.id)]);
       setActionState({ id: messageId, message: "insight saved", tone: "ok" });
+      return;
+    }
+
+    if (target.kind === "reference") {
+      const response = await dataClient.mutations.createReferenceInsight(
+        {
+          referenceId: target.id,
+          summary: cleanSummary,
+          body: cleanBody,
+          actorLabel: authState.label,
+        },
+        { authMode: USER_POOL_AUTH_MODE },
+      );
+      const created = assertReferenceInsightMutationSucceeded(response as ReferenceInsightResponse, target.id);
+      const persistedMessageId = created.messageId ?? messageId;
+      const persistedRelationId = created.relationId ?? relation.id;
+      const persistedMessage: MessageRecord = {
+        ...message,
+        id: persistedMessageId,
+      };
+      const persistedRelation: SemanticRelationRecord = {
+        ...relation,
+        id: persistedRelationId,
+        subjectId: persistedMessageId,
+        subjectLineageId: persistedMessageId,
+        subjectVersionKey: semanticVersionKey("message", persistedMessageId),
+        subjectStateKey: semanticStateKey("message", persistedMessageId),
+      };
+      setMessages((current) => [persistedMessage, ...current.filter((entry) => entry.id !== persistedMessage.id)]);
+      setSemanticRelations((current) => [persistedRelation, ...current.filter((entry) => entry.id !== persistedRelation.id)]);
+      setActionState({ id: persistedMessageId, message: "insight saved", tone: "ok" });
       return;
     }
 
@@ -2780,6 +2990,7 @@ function NewsDeskDashboard({
             categories={mergeCategoryRecords(categorys, activeCategoryTreeNodes)}
             categorySets={categorySets}
             corpora={corpora}
+            curationRunsByLineage={referenceCurationRunsByLineage}
             graph={graph}
             initialCategoryLineageId={initialSelection.category}
             initialReferenceLineageId={initialSelection.reference}
@@ -2789,7 +3000,9 @@ function NewsDeskDashboard({
             semanticRelations={semanticRelations}
             summary={summary}
             disabled={controlsDisabled}
+            onMoveCorpus={runReferenceCorpusMove}
             onReview={runReferenceCurationAction}
+            onStartCuration={runReferenceCurationStart}
             onSetQualityRating={runReferenceQualityRating}
             onCreateInsight={createInsight}
             onReviewTopicLabel={runReferenceTopicLabelAction}
@@ -5894,13 +6107,16 @@ function ReferencesDeskView({
   categories,
   categorySets,
   corpora,
+  curationRunsByLineage,
   disabled,
   graph,
   initialCategoryLineageId,
   initialReferenceLineageId,
   isDemo,
   onCreateInsight,
+  onMoveCorpus,
   onReview,
+  onStartCuration,
   onSetQualityRating,
   onReviewTopicLabel,
   qualityActionState,
@@ -5911,13 +6127,16 @@ function ReferencesDeskView({
   categories: CategorySteeringCategory[];
   categorySets: CategorySteeringCategorySet[];
   corpora: CategorySteeringCorpus[];
+  curationRunsByLineage: Record<string, ReferenceCurationRunStatus>;
   disabled: boolean;
   graph: SemanticGraph;
   initialCategoryLineageId?: string | null;
   initialReferenceLineageId?: string | null;
   isDemo?: boolean;
   onCreateInsight: (target: InsightTarget, summary: string, body: string) => Promise<void>;
+  onMoveCorpus: (reference: ReferenceRecord, corpusId: string) => void;
   onReview: (reference: ReferenceRecord, action: ReferenceCurationAction, note?: string, reasonCode?: ReferenceRejectionReasonCode | null) => void;
+  onStartCuration: (reference: ReferenceRecord) => void;
   onSetQualityRating: (reference: ReferenceRecord, rating: number) => void;
   onReviewTopicLabel: (input: { action: TopicLabelAction; category: CategorySteeringCategory; note?: string | null; reference: ReferenceRecord; sourceRelationId?: string | null }) => void;
   qualityActionState: ReferenceQualityActionState | null;
@@ -5925,6 +6144,7 @@ function ReferencesDeskView({
   semanticRelations: SemanticRelationRecord[];
   summary?: NewsroomSummaryRecord | null;
 }) {
+  const consoleContext = usePapyrusConsole();
   const [statusFilter, setStatusFilter] = useState("");
   const [metricStatusFilter, setMetricStatusFilter] = useState("");
   const [selectedReferenceLineageId, setSelectedReferenceLineageId] = useState(initialReferenceLineageId ?? "");
@@ -5969,6 +6189,44 @@ function ReferencesDeskView({
     title: selectedReference.title ?? selectedReference.externalItemId,
     subtitle: selectedReference.corpusId,
   } : null);
+  const referenceChatAction: NewsroomDetailAction | null = selectedReference && consoleContext?.shouldOfferConsole ? {
+    ariaLabel: "Open chat with this reference",
+    disabled: disabled || consoleContext.openingReferenceChat,
+    icon: <PapyrusConsoleChatIcon />,
+    key: "reference-chat",
+    label: consoleContext.openingReferenceChat ? "Opening Chat" : "Chat",
+    onSelect: () => {
+      if (!selectedReference) return;
+      void consoleContext.startReferenceChat({
+        anchor: {
+          kind: "reference",
+          id: selectedReference.id,
+          lineageId: selectedReference.lineageId ?? selectedReference.id,
+        },
+        title: selectedReference.title ?? selectedReference.externalItemId,
+        subtitle: selectedReference.corpusId ?? null,
+      }).catch((error) => {
+        console.error("[ReferencesDesk] Unable to open reference chat", error);
+      });
+    },
+  } : null;
+  const selectedReferenceCurationRunStatus = selectedReference
+    ? curationRunsByLineage[selectedReference.lineageId ?? selectedReference.id] ?? null
+    : null;
+  const curationLifecycle = selectedReferenceCurationRunStatus?.lifecycleStatus ?? selectedReferenceCurationRunStatus?.status ?? "";
+  const curationInFlight = curationLifecycle === "queued" || curationLifecycle === "running";
+  const referenceStartCurationAction: NewsroomDetailAction | null = selectedReference ? {
+    ariaLabel: "Start reference re-curation",
+    disabled: disabled || curationInFlight,
+    icon: <RefreshCwIcon />,
+    key: "reference-curation-start",
+    label: curationInFlight ? "Curating" : "Curate",
+    onSelect: () => onStartCuration(selectedReference),
+  } : null;
+  const curationMenuActions: NewsroomDetailAction[] = [];
+  if (referenceStartCurationAction) curationMenuActions.push(referenceStartCurationAction);
+  if (referenceChatAction) curationMenuActions.push(referenceChatAction);
+  curationMenuActions.push(referenceKnowledgeQuery.action);
   const selectedLineageId = selectedReference ? selectedReference.lineageId ?? selectedReference.id : null;
   const selectedFilteredReferenceIndex = selectedLineageId
     ? filteredReferences.findIndex((reference) => (reference.lineageId ?? reference.id) === selectedLineageId)
@@ -5985,6 +6243,11 @@ function ReferencesDeskView({
     referenceSubtitles.get(reference.id) ?? null,
     referenceQualityForList(reference, graph),
   ));
+  useEffect(() => {
+    if (!selectedLineageId || typeof window === "undefined") return;
+    replaceNewsroomDetailUrl("references", selectedLineageId, isDemo);
+  }, [isDemo, selectedLineageId]);
+
   const selectReference = (lineageId: string) => {
     setSelectedReferenceLineageId(lineageId);
     setIsReferenceDetailOpen(true);
@@ -6090,15 +6353,17 @@ function ReferencesDeskView({
             disabled={disabled}
             graph={graph}
             onCreateInsight={onCreateInsight}
+            onMoveCorpus={onMoveCorpus}
             onReview={runReferenceAction}
             onReviewTopicLabel={onReviewTopicLabel}
             onSetQualityRating={onSetQualityRating}
             curation={selectedReferenceCuration}
+            curationRunStatus={selectedReferenceCurationRunStatus}
             qualityActionState={selectedReferenceQualityActionState}
             reference={selectedReference}
             semanticRelations={semanticRelations}
             knowledgeQuery={referenceKnowledgeQuery}
-            researchAction={referenceKnowledgeQuery.action}
+            curationMenuActions={curationMenuActions}
           />
         )}
       />
@@ -7738,35 +8003,6 @@ function parseNewsroomSearchRequest(selection: NewsDeskSelection): NewsroomSearc
   };
 }
 
-function buildNewsroomKnowledgeQueryInput(target: KnowledgeQueryTarget | null, semanticText: string, maxTokens: number): Record<string, unknown> {
-  const request: Record<string, unknown> = {
-    semanticQuery: semanticText.trim(),
-    scope: {
-      depth: 1,
-      topK: target ? 18 : 24,
-      relatedRecordLimit: target ? 8 : 10,
-    },
-    profile: "editor",
-    ranking: {
-      profile: "balanced",
-      diversity: target ? "balanced" : "broad",
-    },
-    output: {
-      format: "markdown",
-      maxTokens,
-    },
-  };
-  if (target) {
-    const anchor: Record<string, unknown> = {
-      kind: target.anchor.kind,
-      id: target.anchor.id,
-    };
-    if (target.anchor.lineageId) anchor.lineageId = target.anchor.lineageId;
-    request.anchors = [anchor];
-  }
-  return request;
-}
-
 function knowledgeQueryTargetKey(target: KnowledgeQueryTarget): string {
   return `${target.anchor.kind}:${target.anchor.lineageId ?? target.anchor.id}`;
 }
@@ -8510,12 +8746,14 @@ function ReferenceDetailPanel({
   disabled,
   graph,
   onCreateInsight,
+  onMoveCorpus,
   onReview,
   onReviewTopicLabel,
   onSetQualityRating,
   qualityActionState,
   reference,
-  researchAction,
+  curationRunStatus,
+  curationMenuActions,
   knowledgeQuery,
   semanticRelations,
 }: {
@@ -8526,12 +8764,14 @@ function ReferenceDetailPanel({
   disabled: boolean;
   graph: SemanticGraph;
   onCreateInsight: (target: InsightTarget, summary: string, body: string) => Promise<void>;
+  onMoveCorpus: (reference: ReferenceRecord, corpusId: string) => void;
   onReview: (action: ReferenceCurationAction) => void;
   onReviewTopicLabel: (input: { action: TopicLabelAction; category: CategorySteeringCategory; note?: string | null; reference: ReferenceRecord; sourceRelationId?: string | null }) => void;
   onSetQualityRating: (reference: ReferenceRecord, rating: number) => void;
   qualityActionState: ReferenceQualityActionState | null;
   reference: ReferenceRecord | null;
-  researchAction: NewsroomDetailAction;
+  curationRunStatus: ReferenceCurationRunStatus | null;
+  curationMenuActions: NewsroomDetailAction[];
   knowledgeQuery: KnowledgeQueryControl;
   semanticRelations: SemanticRelationRecord[];
 }) {
@@ -8551,8 +8791,14 @@ function ReferenceDetailPanel({
   const neighborGroups = graph.neighbors("reference", lineageId);
   const authors = reference.authors?.filter(Boolean).join(", ");
   const metadataPayload = modelPayloadByRole(referencePayloadState.payloads, "metadata");
-  const metadataSubtitle = referenceMetadataSubtitle(metadataPayload, reference.metadata) ?? "";
-  const metadataSummary = referenceSummaryFromPayload(metadataPayload) ?? "";
+  const metadataSubtitle = normalizeReferenceDetailSubtitleForDisplay(
+    referenceMetadataSubtitle(metadataPayload, reference.metadata),
+    reference.sourceUri,
+  ) ?? "";
+  const metadataSummary = normalizeReferenceDetailSummaryForDisplay(
+    referenceSummaryFromPayload(metadataPayload),
+    reference.sourceUri,
+  ) ?? "";
   const detailCuration = curation ?? resolveReferenceCurationDisplayState(reference, graph);
 
   return (
@@ -8565,7 +8811,7 @@ function ReferenceDetailPanel({
               <ReferenceCurationCluster
                 curation={detailCuration}
                 disabled={disabled}
-                menuActions={[researchAction]}
+                menuActions={curationMenuActions}
                 qualityActionState={qualityActionState}
                 onReview={onReview}
                 onSetQualityRating={(rating) => onSetQualityRating(reference, rating)}
@@ -8580,6 +8826,12 @@ function ReferenceDetailPanel({
               </p>
               {metadataSubtitle ? <p className="news-desk-semantic-detail__subheading">{metadataSubtitle}</p> : null}
               {metadataSummary ? <p className="news-desk-semantic-detail__summary">{metadataSummary}</p> : null}
+              {curationRunStatus ? (
+                <div className="news-desk-detail-line">
+                  <span>Curation</span>
+                  <strong>{curationRunStatus.lifecycleStatus}</strong>
+                </div>
+              ) : null}
             </div>
           </div>
         </header>
@@ -8607,9 +8859,12 @@ function ReferenceDetailPanel({
                   </span>
                 </p>
               ) : null}
-              <ReferenceCorpusRow corpora={corpora} reference={reference} />
+              <ReferenceCorpusRow corpora={corpora} disabled={disabled} onMoveCorpus={onMoveCorpus} reference={reference} />
               {reference.storagePath ? <div className="news-desk-detail-line"><span>Storage</span><strong>{reference.storagePath}</strong></div> : null}
             </div>
+            {curationRunStatus ? (
+              <ReferenceCurationStatusPanel status={curationRunStatus} />
+            ) : null}
             <ReferenceTopicLabelPanel
               categories={categories}
               categorySets={categorySets}
@@ -9251,12 +9506,19 @@ function ReferenceTopicLabelPanel({
 
 function ReferenceCorpusRow({
   corpora,
+  disabled,
+  onMoveCorpus,
   reference,
 }: {
   corpora: CategorySteeringCorpus[];
+  disabled: boolean;
+  onMoveCorpus: (reference: ReferenceRecord, corpusId: string) => void;
   reference: ReferenceRecord;
 }) {
   const [selectedCorpusId, setSelectedCorpusId] = useState(reference.corpusId);
+  useEffect(() => {
+    setSelectedCorpusId(reference.corpusId);
+  }, [reference.corpusId, reference.id]);
   const selectableCorpora = corpora.length
     ? corpora
     : [{ id: reference.corpusId, name: reference.corpusId, role: "source" }];
@@ -9265,7 +9527,16 @@ function ReferenceCorpusRow({
       <span className="news-desk-reference-detail__source-meta-label">Corpus</span>
       <span className="news-desk-reference-detail__source-meta-value news-desk-reference-detail__source-meta-value--control">
         <span className="news-desk-reference-corpus-control news-desk-reference-corpus-control--inline" data-reference-corpus-input>
-          <select aria-label="Corpus" value={selectedCorpusId} onChange={(event) => setSelectedCorpusId(event.target.value)}>
+          <select
+            aria-label="Corpus"
+            disabled={disabled}
+            value={selectedCorpusId}
+            onChange={(event) => {
+              const nextCorpusId = event.target.value;
+              setSelectedCorpusId(nextCorpusId);
+              if (nextCorpusId !== reference.corpusId) onMoveCorpus(reference, nextCorpusId);
+            }}
+          >
             {selectableCorpora.map((entry) => (
               <option key={entry.id} value={entry.id}>{entry.name}</option>
             ))}
@@ -9276,6 +9547,41 @@ function ReferenceCorpusRow({
         </span>
       </span>
     </p>
+  );
+}
+
+function ReferenceCurationStatusPanel({ status }: { status: ReferenceCurationRunStatus }) {
+  const stageOrder = ["identifier", "publicationDate", "titleSubtitle", "summary", "topicPredictions"];
+  return (
+    <section className="news-desk-reference-workflow" data-reference-curation-status-panel>
+      <header className="news-desk-reference-workflow__header">
+        <p className="story-label">Re-curation Run</p>
+      </header>
+      <div className="news-desk-reference-workflow__state">
+        <div className="news-desk-detail-line"><span>Lifecycle</span><strong>{status.lifecycleStatus}</strong></div>
+        <div className="news-desk-detail-line"><span>Assignment</span><strong>{status.assignmentId}</strong></div>
+        <div className="news-desk-detail-line"><span>Updated</span><strong>{formatDateTime(status.updatedAt)}</strong></div>
+        {stageOrder.map((stageKey) => {
+          const stageValue = status.stageStatuses[stageKey];
+          const stageRecord = stageValue && typeof stageValue === "object" && !Array.isArray(stageValue)
+            ? stageValue as Record<string, unknown>
+            : {};
+          const stageState = normalizeMetadataString(stageRecord.status) ?? "unknown";
+          return (
+            <div className="news-desk-detail-line" key={stageKey}>
+              <span>{stageKey}</span>
+              <strong>{stageState}</strong>
+            </div>
+          );
+        })}
+        {status.error ? (
+          <div className="news-desk-detail-line">
+            <span>Error</span>
+            <strong>{normalizeMetadataString(status.error.message) ?? "Unknown error"}</strong>
+          </div>
+        ) : null}
+      </div>
+    </section>
   );
 }
 
@@ -11370,6 +11676,69 @@ function referenceSummaryFromPayload(payload: HydratedModelPayload | null): stri
   return null;
 }
 
+function normalizeReferenceDetailSubtitleForDisplay(subtitle: string | null, sourceUri?: string | null): string | null {
+  const trimmed = subtitle?.trim();
+  if (!trimmed) return null;
+  const normalizedSubtitleUri = normalizeReferenceDetailSourceUri(trimmed)
+    ?? normalizeReferenceDetailSourceUri(extractReferenceDetailFirstUri(trimmed));
+  const normalizedSourceUri = normalizeReferenceDetailSourceUri(sourceUri);
+  return normalizedSubtitleUri && normalizedSourceUri && normalizedSubtitleUri === normalizedSourceUri
+    ? null
+    : trimmed;
+}
+
+function normalizeReferenceDetailSummaryForDisplay(summary: string | null, sourceUri?: string | null): string | null {
+  const trimmed = summary?.trim();
+  if (!trimmed) return null;
+
+  const normalizedSourceUri = normalizeReferenceDetailSourceUri(sourceUri);
+  if (!normalizedSourceUri) return trimmed;
+
+  const lines = trimmed.split(/\r?\n/);
+  const firstNonEmptyLineIndex = lines.findIndex((line) => line.trim().length > 0);
+  if (firstNonEmptyLineIndex < 0) return null;
+  const firstLine = lines[firstNonEmptyLineIndex];
+  const normalizedFirstLineUri = normalizeReferenceDetailSourceUri(firstLine)
+    ?? normalizeReferenceDetailSourceUri(extractReferenceDetailFirstUri(firstLine));
+  if (!normalizedFirstLineUri || normalizedFirstLineUri !== normalizedSourceUri) return trimmed;
+
+  let startIndex = firstNonEmptyLineIndex + 1;
+  if (startIndex < lines.length && lines[startIndex].trim().length === 0) startIndex += 1;
+  const nextSummary = lines.slice(startIndex).join("\n").trim();
+  return nextSummary || null;
+}
+
+function normalizeReferenceDetailSourceUri(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const markdownLinkMatch = trimmed.match(/^\[[^\]]+\]\(([^)]+)\)$/);
+  const unwrapped = markdownLinkMatch ? markdownLinkMatch[1].trim() : trimmed.replace(/^<|>$/g, "").trim();
+  if (!unwrapped) return null;
+
+  const urlCandidateMatch = unwrapped.match(/^(https?:\/\/\S+|s3:\/\/\S+)$/i);
+  if (!urlCandidateMatch) return null;
+
+  try {
+    const parsed = new URL(urlCandidateMatch[1]);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      const normalizedPath = parsed.pathname !== "/" ? parsed.pathname.replace(/\/+$/, "") : "/";
+      return `${parsed.protocol}//${parsed.host}${normalizedPath}${parsed.search}${parsed.hash}`;
+    }
+    return parsed.toString();
+  } catch {
+    return urlCandidateMatch[1];
+  }
+}
+
+function extractReferenceDetailFirstUri(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const match = value.match(/(https?:\/\/[^\s)\]>]+|s3:\/\/[^\s)\]>]+)/i);
+  if (!match?.[1]) return null;
+  return match[1].replace(/[.,;:!?]+$/, "");
+}
+
 function metadataRecord(value: unknown): Record<string, unknown> | null {
   if (typeof value === "string") {
     try {
@@ -12189,19 +12558,30 @@ function getNewsDeskTabHref(href: string, _demo?: boolean): string {
   return href;
 }
 
-function pushNewsroomDetailUrl(tab: "assignments" | "concepts" | "messages" | "references" | "topics", id: string | null, _demo?: boolean) {
-  if (typeof window === "undefined") return;
+function buildNewsroomDetailUrl(tab: "assignments" | "concepts" | "messages" | "references" | "topics", id: string | null): string {
   const encoded = id ? encodeURIComponent(id) : "";
-  const base = id
+  return id
     ? tab === "concepts"
       ? `/newsroom/concepts?node=${encoded}`
       : tab === "topics"
         ? `/newsroom/topics?category=${encoded}`
         : `/newsroom/${tab}/${encoded}`
     : `/newsroom/${tab}`;
-  const url = base;
+}
+
+function pushNewsroomDetailUrl(tab: "assignments" | "concepts" | "messages" | "references" | "topics", id: string | null, _demo?: boolean) {
+  if (typeof window === "undefined") return;
+  const url = buildNewsroomDetailUrl(tab, id);
   if (`${window.location.pathname}${window.location.search}` !== url) {
     window.history.pushState(null, "", url);
+  }
+}
+
+function replaceNewsroomDetailUrl(tab: "assignments" | "concepts" | "messages" | "references" | "topics", id: string | null, _demo?: boolean) {
+  if (typeof window === "undefined") return;
+  const url = buildNewsroomDetailUrl(tab, id);
+  if (`${window.location.pathname}${window.location.search}` !== url) {
+    window.history.replaceState(null, "", url);
   }
 }
 
@@ -13208,6 +13588,80 @@ function assertReferenceQualityMutationSucceeded(
   }
   if (typeof response.data.rating === "number" && response.data.rating !== rating) {
     throw new Error(`Reference quality response returned ${response.data.rating}, expected ${rating}.`);
+  }
+  return response.data;
+}
+
+function assertReferenceInsightMutationSucceeded(
+  response: ReferenceInsightResponse,
+  referenceId: string,
+): NonNullable<ReferenceInsightResponse["data"]> {
+  if (response.errors?.length) {
+    throw new Error(response.errors.map(formatGraphQLError).join("; "));
+  }
+  if (!response.data?.ok) {
+    throw new Error(`Reference insight was not saved for ${referenceId}.`);
+  }
+  if (response.data.referenceId && response.data.referenceId !== referenceId) {
+    throw new Error(`Reference insight response did not match ${referenceId}.`);
+  }
+  if (!response.data.messageId || !response.data.relationId) {
+    throw new Error(`Reference insight saved without required audit relations for ${referenceId}.`);
+  }
+  return response.data;
+}
+
+function assertReferenceMoveCorpusMutationSucceeded(
+  response: ReferenceCorpusMoveResponse,
+  referenceId: string,
+  corpusId: string,
+): NonNullable<ReferenceCorpusMoveResponse["data"]> {
+  if (response.errors?.length) {
+    throw new Error(response.errors.map(formatGraphQLError).join("; "));
+  }
+  if (!response.data?.ok) {
+    throw new Error(`Reference corpus move was not saved for ${referenceId}.`);
+  }
+  if (response.data.referenceId && response.data.referenceId !== referenceId) {
+    throw new Error(`Reference corpus move response did not match ${referenceId}.`);
+  }
+  if (response.data.corpusId && response.data.corpusId !== corpusId) {
+    throw new Error(`Reference corpus move response returned ${response.data.corpusId}, expected ${corpusId}.`);
+  }
+  return response.data;
+}
+
+function assertReferenceCurationStartMutationSucceeded(
+  response: ReferenceCurationStartResponse,
+  referenceId: string,
+): NonNullable<ReferenceCurationStartResponse["data"]> {
+  if (response.errors?.length) {
+    throw new Error(response.errors.map(formatGraphQLError).join("; "));
+  }
+  if (!response.data?.ok) {
+    throw new Error(`Reference curation start failed for ${referenceId}.`);
+  }
+  if (response.data.referenceId && response.data.referenceId !== referenceId) {
+    throw new Error(`Reference curation start response did not match ${referenceId}.`);
+  }
+  if (!response.data.assignmentId) {
+    throw new Error(`Reference curation start returned no assignmentId for ${referenceId}.`);
+  }
+  return response.data;
+}
+
+function assertReferenceCurationStatusQuerySucceeded(
+  response: ReferenceCurationStatusResponse,
+  assignmentId: string,
+): NonNullable<ReferenceCurationStatusResponse["data"]> {
+  if (response.errors?.length) {
+    throw new Error(response.errors.map(formatGraphQLError).join("; "));
+  }
+  if (!response.data?.ok) {
+    throw new Error(`Reference curation status failed for ${assignmentId}.`);
+  }
+  if (response.data.assignmentId && response.data.assignmentId !== assignmentId) {
+    throw new Error(`Reference curation status response did not match ${assignmentId}.`);
   }
   return response.data;
 }

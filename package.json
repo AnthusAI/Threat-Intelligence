@@ -23,11 +23,19 @@
     "test:doi-backfill": "poetry run papyrus-content test doi-backfill",
     "test:identifier-backfill": "poetry run papyrus-content test identifier-backfill",
     "check:backend-node-policy": "poetry run papyrus-content policy check-backend-node-scripts",
+    "check:reference-action-contract": "poetry run papyrus-content policy check-reference-action-contract",
     "test:content-cli-live": "poetry run python -m unittest procedures.newsroom.tests.test_content_cli_live -v",
     "test:bdd": "cucumber-js",
     "test:bdd:headed": "PAPYRUS_HEADLESS=false cucumber-js",
     "test:bdd:backend": "poetry run behave features_backend --tags=~@live-agent",
-    "test:bdd:agent-live": "PAPYRUS_LIVE_AGENT_BDD=1 poetry run behave features_backend/console-agent-live.feature --tags=@live-agent"
+    "test:bdd:agent-live": "npm run -s check:reference-action-contract && PAPYRUS_LIVE_AGENT_BDD=1 poetry run behave features_backend/console-agent-live.feature --tags=@live-agent",
+    "test:bdd:agent-local": "npm run -s check:reference-action-contract && PAPYRUS_LIVE_AGENT_BDD=1 PAPYRUS_LIVE_AGENT_LOCAL_RESPONDER=1 poetry run behave features_backend/console-agent-live.feature --tags=@live-agent",
+    "test:bdd:agent-local:hello": "npm run -s check:reference-action-contract && PAPYRUS_LIVE_AGENT_BDD=1 PAPYRUS_LIVE_AGENT_LOCAL_RESPONDER=1 poetry run behave features_backend/console-agent-live.feature --tags=@live-agent --name \"The console agent responds to hello\"",
+    "test:bdd:agent-local:docs": "npm run -s check:reference-action-contract && PAPYRUS_LIVE_AGENT_BDD=1 PAPYRUS_LIVE_AGENT_LOCAL_RESPONDER=1 poetry run behave features_backend/console-agent-live.feature --tags=@live-agent --name \"The console agent discovers resource documentation progressively\"",
+    "test:bdd:agent-local:create": "npm run -s check:reference-action-contract && PAPYRUS_LIVE_AGENT_BDD=1 PAPYRUS_LIVE_AGENT_LOCAL_RESPONDER=1 poetry run behave features_backend/console-agent-live.feature --tags=@live-agent --name \"The console agent creates a research Assignment\"",
+    "test:bdd:agent-local:get": "npm run -s check:reference-action-contract && PAPYRUS_LIVE_AGENT_BDD=1 PAPYRUS_LIVE_AGENT_LOCAL_RESPONDER=1 poetry run behave features_backend/console-agent-live.feature --tags=@live-agent --name \"The console agent can fetch Assignment info\"",
+    "test:bdd:agent-local:update": "npm run -s check:reference-action-contract && PAPYRUS_LIVE_AGENT_BDD=1 PAPYRUS_LIVE_AGENT_LOCAL_RESPONDER=1 poetry run behave features_backend/console-agent-live.feature --tags=@live-agent --name \"The console agent can update Assignment status\"",
+    "test:bdd:agent-local:error-shape": "npm run -s check:reference-action-contract && PAPYRUS_LIVE_AGENT_BDD=1 PAPYRUS_LIVE_AGENT_LOCAL_RESPONDER=1 poetry run behave features_backend/console-agent-live.feature --tags=@live-agent --name \"The console agent returns structured error shape for invalid Assignment input\""
   },
   "keywords": [
     "nextjs",
