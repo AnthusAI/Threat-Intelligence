@@ -78,6 +78,7 @@ from .categories_commands import (
     categories_sandbox_steering_config,
 )
 from .content_commands import content_inspect, content_list, content_schema_check
+from .seed_edition import seed_edition_content
 from .messages_commands import messages_export_legacy_comments, messages_import_legacy_comments
 from .references_commands import (
     references_attach_extracted_text,
@@ -155,6 +156,7 @@ PORTED_COMMANDS = frozenset(
         "content:inspect",
         "content:schema-check",
         "content:list",
+        "content:seed-edition",
         "corpora:status",
         "corpora:worker-bootstrap",
         "corpora:sync-from-cloud",
@@ -280,6 +282,8 @@ def dispatch(group: str, command: str, flags: list[str]) -> None:
     elif route == "content:list":
         positional = [token for token in flags if not token.startswith("--")]
         content_list(positional[0] if positional else None, flags)
+    elif route == "content:seed-edition":
+        seed_edition_content(flags)
     elif route == "corpora:status":
         corpora_status(flags)
     elif route == "corpora:worker-bootstrap":
@@ -1038,7 +1042,7 @@ def _utc_now() -> str:
 
 def print_usage() -> None:
     print("Usage: poetry run papyrus-content <group> <command> [options]")
-    print("Python-native: content inspect, content schema-check, content list articles,")
+    print("Python-native: content inspect, content schema-check, content list articles, content seed-edition,")
     print("  corpora status/worker-bootstrap/sync-*, references catalog/accession/curation/export commands,")
     print("  assignments list, analysis profiles/validate-profiles/reindex-plan/preview-reindex/")
     print("  create-reindex-assignment/run-now/execute-assignment/graph-artifacts/import-graph-artifact,")
