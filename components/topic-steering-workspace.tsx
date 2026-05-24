@@ -8537,9 +8537,6 @@ function ReferenceDetailPanel({
                 onReview={onReview}
                 onSetQualityRating={(rating) => onSetQualityRating(reference, rating)}
               />
-              <p className="news-desk-reference-detail__meta-row">
-                <span>{[detailCuration.effectiveStatus, reference.mediaType ?? "metadata"].filter(Boolean).join(" / ")}</span>
-              </p>
               <p className="news-desk-reference-detail__meta-date-row">
                 <span className="news-desk-reference-detail__meta-date-label">Published</span>
                 <span className="news-desk-reference-detail__meta-date-value">{formatReferencePublishedDate(reference)}</span>
@@ -8559,7 +8556,6 @@ function ReferenceDetailPanel({
         ) : (
           <>
             <div className="news-desk-detail-block news-desk-detail-block--source-material">
-              <div className="news-desk-detail-line"><span>Corpus</span><strong>{reference.corpusId}</strong></div>
               <p className="news-desk-reference-detail__source-meta-row">
                 <span className="news-desk-reference-detail__source-meta-label">External ID</span>
                 <span
@@ -8578,6 +8574,7 @@ function ReferenceDetailPanel({
                   </span>
                 </p>
               ) : null}
+              <ReferenceCorpusRow corpora={corpora} reference={reference} />
               {reference.storagePath ? <div className="news-desk-detail-line"><span>Storage</span><strong>{reference.storagePath}</strong></div> : null}
             </div>
             <ReferenceTopicLabelPanel
@@ -8588,7 +8585,6 @@ function ReferenceDetailPanel({
               reference={reference}
               semanticRelations={semanticRelations}
             />
-            <ReferenceCorpusPanel corpora={corpora} reference={reference} />
             <ReferenceInsightPanel
               disabled={disabled}
               insights={insights}
@@ -8872,6 +8868,9 @@ function ReferenceCurationCluster({
   const qualityTone = qualityActionState?.tone ?? "idle";
   const qualityPending = qualityTone === "pending";
   const clusterDisabled = disabled || qualityPending;
+  const acceptDisabled = clusterDisabled || status === "accepted";
+  const rejectDisabled = clusterDisabled || status === "rejected";
+  const statusLabel = status === "accepted" ? "Accepted" : status === "rejected" ? "Rejected" : null;
   const menuActions = [
     ...(status !== "pending" ? [{
       key: "reopen",
@@ -8912,17 +8911,19 @@ function ReferenceCurationCluster({
       data-reference-quality-unset={showUnsetStars ? "true" : "false"}
     >
       <div className="news-desk-reference-curation-cluster__row">
+        {statusLabel ? <span className="news-desk-reference-curation-cluster__status-label">{statusLabel}</span> : null}
         <button
           type="button"
           aria-label="Accept reference"
           aria-pressed={status === "accepted"}
           className="news-desk-detail-toolbar-button news-desk-reference-curation-cluster__decision"
           data-news-desk-reference-accept
-          disabled={clusterDisabled || status === "accepted"}
+          disabled={acceptDisabled}
           onClick={() => onReview("accept")}
           title="Accept"
         >
           <ThumbsUpIcon />
+          {!acceptDisabled ? <span>Accept</span> : null}
         </button>
         <button
           type="button"
@@ -8930,11 +8931,12 @@ function ReferenceCurationCluster({
           aria-pressed={status === "rejected"}
           className="news-desk-detail-toolbar-button news-desk-reference-curation-cluster__decision"
           data-news-desk-reference-reject
-          disabled={clusterDisabled || status === "rejected"}
+          disabled={rejectDisabled}
           onClick={() => onReview("reject")}
           title="Reject"
         >
           <ThumbsDownIcon />
+          {!rejectDisabled ? <span>Reject</span> : null}
         </button>
         <div
           className="news-desk-reference-curation-cluster__stars"
@@ -9214,7 +9216,7 @@ function ReferenceTopicLabelPanel({
   );
 }
 
-function ReferenceCorpusPanel({
+function ReferenceCorpusRow({
   corpora,
   reference,
 }: {
@@ -9226,10 +9228,10 @@ function ReferenceCorpusPanel({
     ? corpora
     : [{ id: reference.corpusId, name: reference.corpusId, role: "source" }];
   return (
-    <section className="news-desk-reference-workflow" data-reference-corpus-workflow>
-      <header className="news-desk-reference-workflow__header">
-        <p className="story-label">Corpus</p>
-        <div className="news-desk-reference-corpus-control" data-reference-corpus-input>
+    <p className="news-desk-reference-detail__source-meta-row news-desk-reference-detail__source-meta-row--corpus">
+      <span className="news-desk-reference-detail__source-meta-label">Corpus</span>
+      <span className="news-desk-reference-detail__source-meta-value news-desk-reference-detail__source-meta-value--control">
+        <span className="news-desk-reference-corpus-control news-desk-reference-corpus-control--inline" data-reference-corpus-input>
           <select aria-label="Corpus" value={selectedCorpusId} onChange={(event) => setSelectedCorpusId(event.target.value)}>
             {selectableCorpora.map((entry) => (
               <option key={entry.id} value={entry.id}>{entry.name}</option>
@@ -9238,9 +9240,9 @@ function ReferenceCorpusPanel({
           <span className="news-desk-reference-corpus-control__icon" aria-hidden="true">
             <RotatingSectionTriangleIcon expanded />
           </span>
-        </div>
-      </header>
-    </section>
+        </span>
+      </span>
+    </p>
   );
 }
 
