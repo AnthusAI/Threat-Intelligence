@@ -4,6 +4,7 @@ import { Hub } from "aws-amplify/utils";
 import { fetchAuthSession } from "aws-amplify/auth";
 import { gsap } from "gsap";
 import { Flip } from "gsap/Flip";
+import { ArchiveIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ReactNode, RefObject } from "react";
@@ -137,7 +138,7 @@ type ReferenceQualityActionState = {
 };
 
 type ReviewAction = "accept" | "reject";
-type ReferenceCurationAction = "accept" | "reject" | "reopen" | "archive";
+type ReferenceCurationAction = "accept" | "reject" | "archive";
 type ReferenceRejectionReasonCode = typeof REFERENCE_REJECTION_REASON_CODES[number];
 type TopicLabelAction = "manual_label" | "accept_prediction" | "reject_prediction" | "unlabel";
 type AssignmentAction = "claim" | "release" | "complete" | "cancel" | "reopen" | "retry";
@@ -5927,7 +5928,7 @@ function ReferencesDeskView({
   const [statusFilter, setStatusFilter] = useState("");
   const [metricStatusFilter, setMetricStatusFilter] = useState("");
   const [selectedReferenceLineageId, setSelectedReferenceLineageId] = useState(initialReferenceLineageId ?? "");
-  const [isReferenceDetailOpen, setIsReferenceDetailOpen] = useState(Boolean(initialReferenceLineageId));
+  const [isReferenceDetailOpen, setIsReferenceDetailOpen] = useState(true);
   const categoryContext = useMemo(() => buildCategoryDrilldownContext(categories, initialCategoryLineageId), [categories, initialCategoryLineageId]);
   const effectiveStatusFilter = statusFilter || metricStatusFilter;
   const feed = useNewsroomPagedRows({
@@ -5969,6 +5970,9 @@ function ReferencesDeskView({
     subtitle: selectedReference.corpusId,
   } : null);
   const selectedLineageId = selectedReference ? selectedReference.lineageId ?? selectedReference.id : null;
+  const selectedFilteredReferenceIndex = selectedLineageId
+    ? filteredReferences.findIndex((reference) => (reference.lineageId ?? reference.id) === selectedLineageId)
+    : -1;
   const referenceSubtitles = useReferenceMetadataSubtitles(filteredReferences);
   const detail = categoryFilter
     ? `${filteredReferences.length} references classified as ${categoryFilter.label}`
@@ -5986,6 +5990,30 @@ function ReferencesDeskView({
     setIsReferenceDetailOpen(true);
     pushNewsroomDetailUrl("references", lineageId, isDemo);
   };
+  const previousReference = selectedFilteredReferenceIndex > 0 ? filteredReferences[selectedFilteredReferenceIndex - 1] : null;
+  const nextReference = selectedFilteredReferenceIndex >= 0 && selectedFilteredReferenceIndex < filteredReferences.length - 1
+    ? filteredReferences[selectedFilteredReferenceIndex + 1]
+    : null;
+  const referenceNavigationActions: NewsroomDetailAction[] = [
+    {
+      key: "reference-previous",
+      label: "Previous",
+      disabled: !previousReference,
+      onSelect: () => {
+        if (!previousReference) return;
+        selectReference(previousReference.lineageId ?? previousReference.id);
+      },
+    },
+    {
+      key: "reference-next",
+      label: "Next",
+      disabled: !nextReference,
+      onSelect: () => {
+        if (!nextReference) return;
+        selectReference(nextReference.lineageId ?? nextReference.id);
+      },
+    },
+  ];
   const runReferenceAction = (action: ReferenceCurationAction) => {
     if (!selectedReference) return;
     onReview(
@@ -6011,7 +6039,7 @@ function ReferencesDeskView({
         detailOpen={isReferenceDetailOpen}
         selectionScrollKey={selectedLineageId}
         actions={[]}
-        utilityActions={[referenceKnowledgeQuery.action]}
+        utilityActions={referenceNavigationActions}
         lede={(
           <section className="news-desk-lede news-desk-assignment-lede" aria-labelledby="reference-management-title">
             <div>
@@ -6070,6 +6098,7 @@ function ReferencesDeskView({
             reference={selectedReference}
             semanticRelations={semanticRelations}
             knowledgeQuery={referenceKnowledgeQuery}
+            researchAction={referenceKnowledgeQuery.action}
           />
         )}
       />
@@ -6670,14 +6699,15 @@ function NewsroomListDetailShell({
                   }}
                   role="menuitem"
                 >
-                  {action.label}
+                  {action.icon ? <span className="newsroom-list-detail-shell__action-menu-icon">{action.icon}</span> : null}
+                  <span>{action.label}</span>
                 </button>
               ))}
             </div>
           ) : null}
         </div>
       ) : null}
-      {canToggleDetailMode && onCloseDetail ? (
+      {canToggleDetailMode && onCloseDetail && effectiveDetailOpen ? (
         <button
           type="button"
           aria-label="Close detail"
@@ -6731,7 +6761,7 @@ function NewsroomListDetailShell({
             {detailToolbarActions}
           </div>
         ) : null}
-        {canToggleDetailMode && canExpandDetail && effectiveDetailOpen ? (
+        {canToggleDetailMode && canExpandDetail && (effectiveDetailOpen || hasUtilityActions || hasActions) ? (
           <div className="newsroom-list-detail-shell__detail-toolbar">
             <div className="newsroom-list-detail-shell__detail-toolbar-leading">
               {canToggleDetailMode ? (
@@ -8485,6 +8515,7 @@ function ReferenceDetailPanel({
   onSetQualityRating,
   qualityActionState,
   reference,
+  researchAction,
   knowledgeQuery,
   semanticRelations,
 }: {
@@ -8500,6 +8531,7 @@ function ReferenceDetailPanel({
   onSetQualityRating: (reference: ReferenceRecord, rating: number) => void;
   qualityActionState: ReferenceQualityActionState | null;
   reference: ReferenceRecord | null;
+  researchAction: NewsroomDetailAction;
   knowledgeQuery: KnowledgeQueryControl;
   semanticRelations: SemanticRelationRecord[];
 }) {
@@ -8533,6 +8565,7 @@ function ReferenceDetailPanel({
               <ReferenceCurationCluster
                 curation={detailCuration}
                 disabled={disabled}
+                menuActions={[researchAction]}
                 qualityActionState={qualityActionState}
                 onReview={onReview}
                 onSetQualityRating={(rating) => onSetQualityRating(reference, rating)}
@@ -8850,12 +8883,14 @@ function shouldFailReferenceQualityMutationForTest(): boolean {
 function ReferenceCurationCluster({
   curation,
   disabled,
+  menuActions = [],
   qualityActionState,
   onReview,
   onSetQualityRating,
 }: {
   curation: ReferenceCurationDisplayState;
   disabled: boolean;
+  menuActions?: NewsroomDetailAction[];
   qualityActionState: ReferenceQualityActionState | null;
   onReview: (action: ReferenceCurationAction) => void;
   onSetQualityRating: (rating: number) => void;
@@ -8871,17 +8906,14 @@ function ReferenceCurationCluster({
   const acceptDisabled = clusterDisabled || status === "accepted";
   const rejectDisabled = clusterDisabled || status === "rejected";
   const statusLabel = status === "accepted" ? "Accepted" : status === "rejected" ? "Rejected" : null;
-  const menuActions = [
-    ...(status !== "pending" ? [{
-      key: "reopen",
-      label: "Reopen",
-      onSelect: () => onReview("reopen"),
-    }] : []),
+  const resolvedMenuActions: NewsroomDetailAction[] = [
+    ...menuActions,
     ...(status !== "archived" ? [{
       key: "archive",
+      icon: <ArchiveIcon />,
       label: "Archive",
       onSelect: () => onReview("archive"),
-    }] : []),
+    } satisfies NewsroomDetailAction] : []),
   ];
 
   useEffect(() => {
@@ -8966,7 +8998,7 @@ function ReferenceCurationCluster({
             );
           })}
         </div>
-        {menuActions.length ? (
+        {resolvedMenuActions.length ? (
           <div className="newsroom-list-detail-shell__action-menu-wrap" ref={menuRef}>
             <button
               type="button"
@@ -8981,10 +9013,10 @@ function ReferenceCurationCluster({
             </button>
             {menuOpen ? (
               <div className="newsroom-list-detail-shell__action-menu" role="menu">
-                {menuActions.map((action) => (
+                {resolvedMenuActions.map((action) => (
                   <button
                     type="button"
-                    disabled={clusterDisabled}
+                    disabled={clusterDisabled || action.disabled}
                     key={action.key}
                     onClick={() => {
                       setMenuOpen(false);
@@ -8992,7 +9024,8 @@ function ReferenceCurationCluster({
                     }}
                     role="menuitem"
                   >
-                    {action.label}
+                    {action.icon ? <span className="newsroom-list-detail-shell__action-menu-icon">{action.icon}</span> : null}
+                    <span>{action.label}</span>
                   </button>
                 ))}
               </div>
