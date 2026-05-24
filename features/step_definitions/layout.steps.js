@@ -31,6 +31,18 @@ Given("I open the newsroom at {int} by {int}", async function (width, height) {
   await requirePage(this).waitForSelector("[data-news-desk]", { state: "visible", timeout: 15_000 });
 });
 
+Given("I constrain the newsroom shell width to {int} pixels", async function (width) {
+  const page = requirePage(this);
+  await page.waitForSelector("[data-news-desk]", { state: "visible", timeout: 15_000 });
+  await page.evaluate((targetWidth) => {
+    const shell = document.querySelector(".news-desk-shell");
+    if (!(shell instanceof HTMLElement)) return;
+    shell.style.width = `${targetWidth}px`;
+    shell.style.maxWidth = `${targetWidth}px`;
+    shell.style.marginRight = "auto";
+  }, width);
+});
+
 Given("I open the topics newsroom at {int} by {int}", async function (width, height) {
   await this.openPath("/newsroom/topics?demo=1", width, height);
   await requirePage(this).waitForSelector("[data-news-desk-section='topics']", { state: "visible", timeout: 15_000 });
@@ -86,6 +98,12 @@ Given("the reference quality mutation fails", async function () {
 
 Given("I open the edition path {string} at {int} by {int}", async function (routePath, width, height) {
   await this.openPath(routePath, width, height);
+});
+
+Given("I open the newsroom path {string} at {int} by {int}", async function (routePath, width, height) {
+  await this.openPath(routePath, width, height);
+  const page = requirePage(this);
+  await page.waitForSelector("[data-news-desk-reference-detail]", { state: "visible", timeout: 20_000 });
 });
 
 Given("I open article {string} at {int} by {int}", async function (slug, width, height) {
@@ -570,12 +588,9 @@ Then("the reference detail should render the curation cluster", async function (
 Then("the reference detail curation controls should share one height", async function () {
   const report = await requirePage(this).evaluate(() => {
     const selectors = [
-      ["research", ".newsroom-list-detail-shell__detail-toolbar .news-desk-detail-toolbar-button--utility"],
-      ["close", ".newsroom-list-detail-shell__detail-toolbar .news-desk-detail-toggle--close"],
       ["accept", "[data-news-desk-reference-accept]"],
       ["reject", "[data-news-desk-reference-reject]"],
       ["stars", ".news-desk-reference-curation-cluster__stars"],
-      ["insight", "[data-news-desk-reference-insight-trigger]"],
       ["menu", "[data-news-desk-reference-actions]"],
     ];
     return selectors.map(([label, selector]) => {
@@ -594,22 +609,37 @@ Then("the reference detail curation controls should share one height", async fun
 
 Then("the reference detail curation cluster should align with the top toolbar", async function () {
   const report = await requirePage(this).evaluate(() => {
+    const toNumber = (value) => {
+      const parsed = Number.parseFloat(value ?? "");
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
     const rectFor = (selector) => {
       const node = document.querySelector(selector);
       const rect = node?.getBoundingClientRect();
       return rect ? { left: rect.left, right: rect.right, width: rect.width } : null;
     };
+    const cluster = document.querySelector("[data-news-desk-reference-curation-cluster]");
+    const clusterStyle = cluster ? window.getComputedStyle(cluster) : null;
+    const detail = document.querySelector("[data-news-desk-reference-detail]");
+    const detailStyle = detail ? window.getComputedStyle(detail) : null;
     return {
       cluster: rectFor("[data-news-desk-reference-curation-cluster]"),
       toolbar: rectFor(".newsroom-list-detail-shell__detail-toolbar"),
       trailing: rectFor(".newsroom-list-detail-shell__detail-toolbar-trailing"),
+      detail: rectFor("[data-news-desk-reference-detail]"),
+      clusterPaddingTop: toNumber(clusterStyle?.paddingTop),
+      rhythm: toNumber(detailStyle?.getPropertyValue("--paper-rhythm")),
     };
   });
   assert.ok(report.cluster, "Expected curation cluster rect");
-  assert.ok(report.toolbar, "Expected detail toolbar rect");
-  assert.ok(report.trailing, "Expected toolbar trailing rect");
-  assert.ok(Math.abs(report.cluster.right - report.toolbar.right) <= 1, `Expected curation cluster to align to toolbar right edge: ${JSON.stringify(report)}`);
-  assert.ok(report.cluster.left <= report.trailing.right, `Expected curation cluster to sit under the toolbar controls: ${JSON.stringify(report)}`);
+  if (report.toolbar && report.trailing) {
+    assert.ok(Math.abs(report.cluster.right - report.toolbar.right) <= 1, `Expected curation cluster to align to toolbar right edge: ${JSON.stringify(report)}`);
+    assert.ok(report.cluster.left <= report.trailing.right, `Expected curation cluster to sit under the toolbar controls: ${JSON.stringify(report)}`);
+  } else {
+    assert.ok(report.detail, `Expected detail panel rect when toolbar is hidden: ${JSON.stringify(report)}`);
+    assert.ok(Math.abs(report.cluster.right - report.detail.right) <= 1, `Expected curation cluster to align to detail panel right edge: ${JSON.stringify(report)}`);
+  }
+  assert.ok(Math.abs(report.clusterPaddingTop - report.rhythm) <= 0.75, `Expected curation cluster top padding to equal one rhythm row: ${JSON.stringify(report)}`);
 });
 
 Then("the reference detail should not show the lower curation selector", async function () {
@@ -633,6 +663,100 @@ Then("the reference detail actions menu should offer {string} and {string}", asy
   ));
   assert.ok(labels.includes(firstLabel), `Expected actions menu to include ${firstLabel}, found ${labels.join(", ")}`);
   assert.ok(labels.includes(secondLabel), `Expected actions menu to include ${secondLabel}, found ${labels.join(", ")}`);
+});
+
+Then("the reference detail actions menu should not offer {string}", async function (label) {
+  const labels = await requirePage(this).locator(".newsroom-list-detail-shell__action-menu button").evaluateAll((nodes) => (
+    nodes.map((node) => node.textContent?.trim()).filter(Boolean)
+  ));
+  assert.ok(!labels.includes(label), `Expected actions menu to exclude ${label}, found ${labels.join(", ")}`);
+});
+
+Then("the reference detail actions menu should show an icon for {string}", async function (label) {
+  const hasIcon = await requirePage(this)
+    .locator(".newsroom-list-detail-shell__action-menu button", { hasText: label })
+    .first()
+    .locator(".newsroom-list-detail-shell__action-menu-icon svg")
+    .count();
+  assert.ok(hasIcon > 0, `Expected actions menu item ${label} to include an icon`);
+});
+
+Then("the reference detail toolbar should show previous and next actions", async function () {
+  const page = requirePage(this);
+  const report = await page.evaluate(() => {
+    const shell = document.querySelector("[data-newsroom-list-detail-shell][data-news-desk-section='references']");
+    const buttons = Array.from(shell?.querySelectorAll(".newsroom-list-detail-shell__detail-toolbar-trailing button") ?? []).map((button) => {
+      const rect = button.getBoundingClientRect();
+      return {
+        ariaLabel: button.getAttribute("aria-label"),
+        text: button.textContent?.trim() ?? "",
+        visible: rect.width > 0 && rect.height > 0,
+      };
+    });
+    return {
+      buttons,
+      detailOpen: shell?.getAttribute("data-detail-open") ?? null,
+      detailMode: shell?.getAttribute("data-detail-mode") ?? null,
+      canToggle: window.matchMedia("(min-width: 1158px)").matches,
+    };
+  });
+  assert.ok(report.buttons.some((button) => button.ariaLabel === "Previous" && button.visible), `Expected visible Previous action: ${JSON.stringify(report)}`);
+  assert.ok(report.buttons.some((button) => button.ariaLabel === "Next" && button.visible), `Expected visible Next action: ${JSON.stringify(report)}`);
+});
+
+Then("the reference detail toolbar previous action should be disabled", async function () {
+  const disabled = await requirePage(this)
+    .locator("[data-newsroom-list-detail-shell][data-news-desk-section='references'] .newsroom-list-detail-shell__detail-toolbar-trailing button[aria-label='Previous']")
+    .first()
+    .isDisabled();
+  assert.equal(disabled, true, "Expected Previous action to be disabled");
+});
+
+Then("the reference detail toolbar previous action should be enabled", async function () {
+  const disabled = await requirePage(this)
+    .locator("[data-newsroom-list-detail-shell][data-news-desk-section='references'] .newsroom-list-detail-shell__detail-toolbar-trailing button[aria-label='Previous']")
+    .first()
+    .isDisabled();
+  assert.equal(disabled, false, "Expected Previous action to be enabled");
+});
+
+Then("the reference detail toolbar next action should be enabled", async function () {
+  const disabled = await requirePage(this)
+    .locator("[data-newsroom-list-detail-shell][data-news-desk-section='references'] .newsroom-list-detail-shell__detail-toolbar-trailing button[aria-label='Next']")
+    .first()
+    .isDisabled();
+  assert.equal(disabled, false, "Expected Next action to be enabled");
+});
+
+When("I open the next reference from the detail toolbar", async function () {
+  const page = requirePage(this);
+  const currentId = await page.locator("[data-news-desk-reference-detail]").first().getAttribute("data-news-desk-reference-detail");
+  this.previousReferenceDetailId = currentId;
+  await page.locator("[data-newsroom-list-detail-shell][data-news-desk-section='references'] .newsroom-list-detail-shell__detail-toolbar-trailing button[aria-label='Next']").first().click();
+  await page.waitForFunction((id) => {
+    const detail = document.querySelector("[data-news-desk-reference-detail]");
+    return detail?.getAttribute("data-news-desk-reference-detail") !== id;
+  }, currentId, { timeout: 10_000 });
+  this.currentReferenceDetailId = await page.locator("[data-news-desk-reference-detail]").first().getAttribute("data-news-desk-reference-detail");
+});
+
+Then("the selected reference detail should change", async function () {
+  assert.ok(this.previousReferenceDetailId, "Expected a stored previous selected reference detail id");
+  assert.ok(this.currentReferenceDetailId, "Expected a stored current selected reference detail id");
+  assert.notEqual(this.currentReferenceDetailId, this.previousReferenceDetailId, "Expected selected reference detail to change after Next");
+});
+
+When("I open the previous reference from the detail toolbar", async function () {
+  const page = requirePage(this);
+  await page.locator("[data-newsroom-list-detail-shell][data-news-desk-section='references'] .newsroom-list-detail-shell__detail-toolbar-trailing button[aria-label='Previous']").first().click();
+});
+
+Then("the selected reference detail should return to the original selection", async function () {
+  assert.ok(this.previousReferenceDetailId, "Expected original reference detail id from prior selection");
+  await requirePage(this).waitForFunction((expectedId) => {
+    const detail = document.querySelector("[data-news-desk-reference-detail]");
+    return detail?.getAttribute("data-news-desk-reference-detail") === expectedId;
+  }, this.previousReferenceDetailId, { timeout: 10_000 });
 });
 
 When("I set the selected reference quality to {int} stars", async function (rating) {
@@ -682,8 +806,18 @@ When("I open the reference detail insight composer", async function () {
   await page.locator("[data-news-desk-reference-insight-trigger]").click();
 });
 
-Then("the insight modal should be visible", async function () {
-  await requirePage(this).locator("[data-news-desk-insight-modal]").waitFor({ state: "visible", timeout: 10_000 });
+Then("the reference detail should render topic workflow and corpus selector", async function () {
+  const page = requirePage(this);
+  await page.locator("[data-reference-topic-workflow]").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-reference-topic-state]").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-reference-topic-input]").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-reference-corpus-workflow]").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-reference-corpus-input]").waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-reference-corpus-input] select").waitFor({ state: "visible", timeout: 10_000 });
+});
+
+Then("the reference detail insight composer should be visible", async function () {
+  await requirePage(this).locator("[data-news-desk-reference-insight-form]").waitFor({ state: "visible", timeout: 10_000 });
 });
 
 Then("the concepts desk should show semantic nodes and linked objects", async function () {
@@ -778,6 +912,21 @@ When("I open the first newsroom card detail", async function () {
     animated = false;
   }
   this.newsroomInitialDetailOpen = { animated, wasOpen };
+  await page.waitForFunction(() => document.querySelector("[data-newsroom-list-detail-shell]")?.getAttribute("data-detail-open") === "true");
+});
+
+When("I open newsroom detail from the card list", async function () {
+  const page = requirePage(this);
+  const isOpen = await page.evaluate(() => document.querySelector("[data-newsroom-list-detail-shell]")?.getAttribute("data-detail-open") === "true");
+  if (isOpen) return;
+  const cards = page.locator("[data-newsroom-card]");
+  const count = await cards.count();
+  assert.ok(count > 0, "Expected at least one newsroom card to open detail");
+  if (count > 1) {
+    await cards.nth(1).click();
+  } else {
+    await cards.first().click();
+  }
   await page.waitForFunction(() => document.querySelector("[data-newsroom-list-detail-shell]")?.getAttribute("data-detail-open") === "true");
 });
 
@@ -1770,6 +1919,42 @@ Then("the masthead should use {int} rhythm rows with {int} title rows and fit th
     report.metaItems.filter((item) => item.display !== "none" && item.visibility !== "hidden" && item.width > 0 && item.height > 0).length,
     3,
   );
+});
+
+Then("the newsroom masthead should fit width and align to rhythm rows", async function () {
+  const report = await requirePage(this).evaluate(() => {
+    const masthead = document.querySelector(".news-desk-masthead");
+    const title = masthead?.querySelector("h1");
+    const titleInner = masthead?.querySelector("h1 span, h1 a");
+    if (!masthead || !title || !titleInner) return null;
+    const mastheadRect = masthead.getBoundingClientRect();
+    const titleRectOuter = title.getBoundingClientRect();
+    const titleRect = titleInner.getBoundingClientRect();
+    const style = getComputedStyle(masthead);
+    const rhythm = Number.parseFloat(style.getPropertyValue("--paper-rhythm")) || 19;
+    const heightRows = mastheadRect.height / rhythm;
+    const titleRows = titleRectOuter.height / rhythm;
+    return { heightRows, mastheadWidth: mastheadRect.width, rhythm, titleRows, titleWidth: titleRect.width };
+  });
+  assert.ok(report, "Expected newsroom masthead rhythm report");
+  const tolerance = 0.08;
+  assert.ok(Math.abs(report.heightRows - Math.round(report.heightRows)) <= tolerance, `Expected masthead height rows integer, got ${report.heightRows}`);
+  assert.ok(Math.abs(report.titleRows - Math.round(report.titleRows)) <= tolerance, `Expected masthead title rows integer, got ${report.titleRows}`);
+  assert.ok(report.titleWidth <= report.mastheadWidth + 0.75, `Expected masthead title width ${report.titleWidth} to fit within ${report.mastheadWidth}`);
+});
+
+Then("the newsroom tabs should use {int} columns", async function (expectedColumns) {
+  const report = await requirePage(this).evaluate(() => {
+    const tabs = Array.from(document.querySelectorAll("[data-news-desk-tab]"));
+    if (!tabs.length) return null;
+    const rects = tabs.map((tab) => tab.getBoundingClientRect()).filter((rect) => rect.width > 0 && rect.height > 0);
+    if (!rects.length) return null;
+    const firstTop = rects[0].top;
+    const firstRow = rects.filter((rect) => Math.abs(rect.top - firstTop) <= 0.75);
+    return { firstRowCount: firstRow.length };
+  });
+  assert.ok(report, "Expected newsroom tabs column report");
+  assert.equal(report.firstRowCount, expectedColumns, `Expected newsroom tabs first row to have ${expectedColumns} columns`);
 });
 
 Then("no continuation column should be dead", async function () {

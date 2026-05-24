@@ -52,6 +52,13 @@ Feature: Newspaper layout scenarios
       | 640   | 1200   | 5            | 3         |
       | 390   | 900    | 4            | 2         |
 
+  Scenario: Newsroom top shell responds to constrained container width
+    Given I open the newsroom at 1280 by 900
+    And I constrain the newsroom shell width to 760 pixels
+    Then the newsroom masthead should fit width and align to rhythm rows
+    And the newsroom tabs should use 3 columns
+    And no browser console errors should occur
+
   Scenario: Front page masthead uses the edition title
     Given I open the "current-edition" layout scenario at 1280 by 900
     Then the front page masthead edition label should say "Current Edition"
@@ -278,8 +285,18 @@ Feature: Newspaper layout scenarios
     And the reference detail curation controls should share one height
     And the reference detail curation cluster should align with the top toolbar
     And the reference detail should not show the lower curation selector
+    And the reference detail toolbar should show previous and next actions
+    And the reference detail toolbar previous action should be disabled
+    And the reference detail toolbar next action should be enabled
+    When I open the next reference from the detail toolbar
+    Then the selected reference detail should change
+    And the reference detail toolbar previous action should be enabled
+    When I open the previous reference from the detail toolbar
+    Then the selected reference detail should return to the original selection
     When I open the reference detail curation actions
-    Then the reference detail actions menu should offer "Reopen" and "Archive"
+    Then the reference detail actions menu should offer "Research" and "Archive"
+    And the reference detail actions menu should not offer "Reopen"
+    And the reference detail actions menu should show an icon for "Research"
     When I set the selected reference quality to 1 stars
     Then the reference detail curation status should be "rejected"
     And the reference detail should show 0 filled quality stars
@@ -287,8 +304,9 @@ Feature: Newspaper layout scenarios
     Then the reference detail should immediately show 4 filled quality stars
     And the reference detail curation status should be "accepted"
     And the reference detail should show 4 filled quality stars
+    And the reference detail should render topic workflow and corpus selector
     When I open the reference detail insight composer
-    Then the insight modal should be visible
+    Then the reference detail insight composer should be visible
     And no browser console errors should occur
 
   Scenario: Newsroom reference quality failure restores the confirmed header state
