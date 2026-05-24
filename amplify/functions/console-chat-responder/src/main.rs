@@ -1,10 +1,11 @@
 use anyhow::{Context, Result, anyhow};
 use aws_config::BehaviorVersion;
+use aws_credential_types::provider::{ProvideCredentials, SharedCredentialsProvider};
 use aws_sdk_dynamodb::Client as DynamoClient;
 use aws_sdk_dynamodb::types::AttributeValue;
 use aws_sdk_ssm::Client as SsmClient;
-use base64::Engine;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use aws_sigv4::http_request::{SignableBody, SignableRequest, SigningSettings, sign};
+use aws_sigv4::sign::v4;
 use chrono::{DateTime, Duration, Utc};
 use futures_util::StreamExt;
 use lambda_runtime::{Error, LambdaEvent, run, service_fn};
@@ -15,6 +16,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::SystemTime;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -39,13 +41,21 @@ async fn main() -> Result<(), Error> {
     let ssm = SsmClient::new(&aws_config);
     let config = AppConfig::from_env();
     let openai_api_key = load_openai_api_key(&ssm, &config).await?;
-    let jwt_secret = load_jwt_secret(&ssm, &config).await?;
+    let region = aws_config
+        .region()
+        .map(|value| value.as_ref().to_string())
+        .or_else(|| appsync_region_from_endpoint(&config.graphql_endpoint))
+        .ok_or_else(|| anyhow!("Unable to determine AWS region for AppSync IAM signing"))?;
+    let credentials_provider = aws_config
+        .credentials_provider()
+        .ok_or_else(|| anyhow!("AWS credentials provider is unavailable for AppSync IAM signing"))?;
     let state = Arc::new(AppState {
         config,
         dynamo,
         http: reqwest::Client::new(),
         openai_api_key,
-        jwt_secret,
+        aws_region: region,
+        credentials_provider,
     });
     run(service_fn(move |event| {
         let state = Arc::clone(&state);
@@ -63,11 +73,6 @@ struct AppConfig {
     model: String,
     openai_api_key_ssm_param: Option<String>,
     graphql_endpoint: String,
-    jwt_secret_ssm_param: Option<String>,
-    jwt_issuer: String,
-    jwt_subject: String,
-    jwt_audience: String,
-    jwt_scope: String,
     cache_root: PathBuf,
 }
 
@@ -84,20 +89,6 @@ impl AppConfig {
             model: env_or("PAPYRUS_CONSOLE_MODEL", DEFAULT_MODEL),
             openai_api_key_ssm_param: optional_env("PAPYRUS_CONSOLE_OPENAI_API_KEY_SSM_PARAM"),
             graphql_endpoint: required_env("PAPYRUS_GRAPHQL_ENDPOINT"),
-            jwt_secret_ssm_param: optional_env("PAPYRUS_CONSOLE_JWT_SECRET_SSM_PARAM")
-                .or_else(|| optional_env("PAPYRUS_JWT_SECRET_SSM_PARAM")),
-            jwt_issuer: optional_env("PAPYRUS_CONSOLE_JWT_ISSUER")
-                .or_else(|| optional_env("PAPYRUS_JWT_ISSUER"))
-                .unwrap_or_else(|| "papyrus-cli".to_string()),
-            jwt_subject: optional_env("PAPYRUS_CONSOLE_JWT_SUBJECT")
-                .or_else(|| optional_env("PAPYRUS_JWT_SUBJECT"))
-                .unwrap_or_else(|| "papyrus-console-responder".to_string()),
-            jwt_audience: optional_env("PAPYRUS_CONSOLE_JWT_AUDIENCE")
-                .or_else(|| optional_env("PAPYRUS_JWT_AUDIENCE"))
-                .unwrap_or_else(|| "papyrus-authoring".to_string()),
-            jwt_scope: optional_env("PAPYRUS_CONSOLE_JWT_SCOPE")
-                .or_else(|| optional_env("PAPYRUS_JWT_SCOPE"))
-                .unwrap_or_else(|| "papyrus:write".to_string()),
             cache_root: PathBuf::from(env_or(
                 "PAPYRUS_CONSOLE_CONTEXT_CACHE_ROOT",
                 "/tmp/papyrus-console/thread-context",
@@ -112,7 +103,8 @@ struct AppState {
     dynamo: DynamoClient,
     http: reqwest::Client,
     openai_api_key: String,
-    jwt_secret: String,
+    aws_region: String,
+    credentials_provider: SharedCredentialsProvider,
 }
 
 async fn handler(event: LambdaEvent<Value>, state: Arc<AppState>) -> Result<Value, Error> {
@@ -180,7 +172,7 @@ async fn process_record(record: &Value, state: &AppState) -> Result<RecordOutcom
     if !claim_message(state, &message).await? {
         return Ok(RecordOutcome::Skipped);
     }
-    publish_message_status(state, &message.id, "RUNNING", None).await?;
+    publish_message_status(state, &message.id, &message.created_at, "RUNNING", None).await?;
     let lock_owner = format!(
         "{}:{}",
         std::env::var("AWS_LAMBDA_FUNCTION_NAME")
@@ -191,7 +183,14 @@ async fn process_record(record: &Value, state: &AppState) -> Result<RecordOutcom
     let result = answer_claimed_message(state, &message, &lock_owner).await;
     if let Err(error) = &result {
         mark_message_failed(state, &message, error).await?;
-        publish_message_status(state, &message.id, "FAILED", Some(&error.to_string())).await?;
+        publish_message_status(
+            state,
+            &message.id,
+            &message.created_at,
+            "FAILED",
+            Some(&error.to_string()),
+        )
+        .await?;
         release_thread_lock(state, &message, &lock_owner, None).await?;
     }
     result?;
@@ -210,6 +209,7 @@ async fn answer_claimed_message(
         id: format!("message-console-assistant-{}", Uuid::new_v4()),
         thread_id: message.thread_id.clone(),
         parent_message_id: Some(message.id.clone()),
+        created_at: now.clone(),
         sequence_number: starting_sequence + 1,
         role: "ASSISTANT".to_string(),
         message_kind: MESSAGE_KIND_CHAT_TURN.to_string(),
@@ -247,6 +247,7 @@ async fn answer_claimed_message(
             id: format!("message-console-tool-{}", Uuid::new_v4()),
             thread_id: message.thread_id.clone(),
             parent_message_id: Some(message.id.clone()),
+            created_at: now.clone(),
             sequence_number: next_sequence,
             role: tool_message.role,
             message_kind: tool_message.message_kind,
@@ -308,7 +309,14 @@ async fn answer_claimed_message(
     write_context_cache(&state.config.cache_root, &context)?;
 
     mark_message_completed(state, message).await?;
-    publish_message_status(state, &message.id, "COMPLETED", None).await?;
+    publish_message_status(
+        state,
+        &message.id,
+        &message.created_at,
+        "COMPLETED",
+        None,
+    )
+    .await?;
     release_thread_lock(state, message, lock_owner, Some(&context)).await?;
     update_thread_graphql(state, &message.thread_id, &context).await?;
     info!(
@@ -786,6 +794,7 @@ struct PersistedMessage {
     id: String,
     thread_id: String,
     parent_message_id: Option<String>,
+    created_at: String,
     sequence_number: i64,
     role: String,
     message_kind: String,
@@ -802,6 +811,7 @@ struct PersistedMessage {
 struct AssistantStreamWriter<'a> {
     state: &'a AppState,
     message_id: String,
+    message_created_at: String,
     content: String,
     last_flush_at: DateTime<Utc>,
     last_flush_len: usize,
@@ -812,6 +822,7 @@ impl<'a> AssistantStreamWriter<'a> {
         Self {
             state,
             message_id: message.id,
+            message_created_at: message.created_at,
             content: message.content,
             last_flush_at: Utc::now(),
             last_flush_len: 0,
@@ -843,6 +854,7 @@ impl<'a> AssistantStreamWriter<'a> {
             self.state,
             json!({
                 "id": self.message_id,
+                "createdAt": self.message_created_at,
                 "content": self.content,
                 "summary": truncate_summary(&self.content),
                 "responseStatus": "RUNNING",
@@ -860,6 +872,7 @@ impl<'a> AssistantStreamWriter<'a> {
             self.state,
             json!({
                 "id": self.message_id,
+                "createdAt": self.message_created_at,
                 "content": self.content,
                 "summary": truncate_summary(&self.content),
                 "responseStatus": "COMPLETED",
@@ -937,7 +950,7 @@ async fn create_message_graphql(
         "searchVisibility": EXPLICIT_SEARCH,
         "source": "papyrus-console",
         "newsroomFeedKey": NEWSROOM_FEED_CONSOLE_CHAT,
-        "createdAt": now,
+        "createdAt": message.created_at,
         "updatedAt": now,
         "metadata": message.metadata.to_string(),
     });
@@ -982,11 +995,13 @@ async fn update_message_graphql(state: &AppState, input: Value) -> Result<()> {
 async fn publish_message_status(
     state: &AppState,
     message_id: &str,
+    message_created_at: &str,
     status: &str,
     error: Option<&str>,
 ) -> Result<()> {
     let mut input = json!({
         "id": message_id,
+        "createdAt": message_created_at,
         "responseStatus": status,
         "updatedAt": now_iso(),
     });
@@ -1032,14 +1047,51 @@ async fn update_thread_graphql(
 }
 
 async fn graphql(state: &AppState, query: &str, variables: Value) -> Result<Value> {
-    let token = sign_authoring_jwt(&state.config, &state.jwt_secret)?;
-    let response = state
+    let body = serde_json::to_vec(&json!({ "query": query, "variables": variables }))
+        .context("serialize AppSync GraphQL request body")?;
+    let credentials = state
+        .credentials_provider
+        .provide_credentials()
+        .await
+        .context("load AWS credentials for AppSync IAM signing")?;
+    let identity = credentials.into();
+    let signable_request = SignableRequest::new(
+        "POST",
+        &state.config.graphql_endpoint,
+        [("content-type", "application/json")].into_iter(),
+        SignableBody::Bytes(&body),
+    )
+    .context("construct signable AppSync request")?;
+    let signing_params = v4::SigningParams::builder()
+        .identity(&identity)
+        .region(&state.aws_region)
+        .name("appsync")
+        .time(SystemTime::now())
+        .settings(SigningSettings::default())
+        .build()
+        .context("build AppSync SigV4 signing params")?
+        .into();
+    let (instructions, _signature) = sign(signable_request, &signing_params)
+        .context("sign AppSync GraphQL request")?
+        .into_parts();
+    let mut signed_request = http::Request::builder()
+        .method("POST")
+        .uri(&state.config.graphql_endpoint)
+        .header("content-type", "application/json")
+        .body(())
+        .context("build AppSync HTTP request for signing")?;
+    instructions.apply_to_request_http1x(&mut signed_request);
+
+    let mut request_builder = state
         .http
         .post(&state.config.graphql_endpoint)
-        .header("content-type", "application/json")
-        .header("authorization", format!("PapyrusJwt {token}"))
-        .json(&json!({ "query": query, "variables": variables }))
-        .send()
+        .body(body);
+    for (name, value) in signed_request.headers() {
+        request_builder = request_builder.header(name, value);
+    }
+    let response = state
+        .http
+        .execute(request_builder.build().context("build signed AppSync request")?)
         .await
         .context("send AppSync GraphQL mutation")?;
     let status = response.status();
@@ -1437,82 +1489,16 @@ async fn load_openai_api_key(ssm: &SsmClient, config: &AppConfig) -> Result<Stri
         .ok_or_else(|| anyhow!("SSM parameter {parameter_name} did not include a value"))
 }
 
-async fn load_jwt_secret(ssm: &SsmClient, config: &AppConfig) -> Result<String> {
-    if let Some(value) =
-        optional_env("PAPYRUS_CONSOLE_JWT_SECRET").or_else(|| optional_env("PAPYRUS_JWT_SECRET"))
-    {
-        return Ok(value);
-    }
-    let Some(parameter_name) = &config.jwt_secret_ssm_param else {
-        return Err(anyhow!(
-            "PAPYRUS_CONSOLE_JWT_SECRET, PAPYRUS_JWT_SECRET, PAPYRUS_CONSOLE_JWT_SECRET_SSM_PARAM, or PAPYRUS_JWT_SECRET_SSM_PARAM is required"
-        ));
-    };
-    let response = ssm
-        .get_parameter()
-        .name(parameter_name)
-        .with_decryption(true)
-        .send()
-        .await
-        .context("load Papyrus GraphQL JWT secret from SSM")?;
-    response
-        .parameter()
-        .and_then(|parameter| parameter.value())
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| anyhow!("SSM parameter {parameter_name} did not include a value"))
-}
-
-fn sign_authoring_jwt(config: &AppConfig, secret: &str) -> Result<String> {
-    let now = Utc::now().timestamp();
-    let header = json!({ "alg": "HS256", "typ": "JWT" });
-    let payload = json!({
-        "iss": config.jwt_issuer,
-        "sub": config.jwt_subject,
-        "aud": config.jwt_audience,
-        "scope": config.jwt_scope,
-        "groups": ["editor"],
-        "iat": now,
-        "nbf": now - 5,
-        "exp": now + 300,
-    });
-    let encoded_header = base64url_json(&header)?;
-    let encoded_payload = base64url_json(&payload)?;
-    let signing_input = format!("{encoded_header}.{encoded_payload}");
-    let signature =
-        URL_SAFE_NO_PAD.encode(hmac_sha256(secret.as_bytes(), signing_input.as_bytes()));
-    Ok(format!("{signing_input}.{signature}"))
-}
-
-fn base64url_json(value: &Value) -> Result<String> {
-    Ok(URL_SAFE_NO_PAD.encode(serde_json::to_vec(value)?))
-}
-
-fn hmac_sha256(key: &[u8], message: &[u8]) -> Vec<u8> {
-    const BLOCK_SIZE: usize = 64;
-    let mut normalized_key = if key.len() > BLOCK_SIZE {
-        Sha256::digest(key).to_vec()
-    } else {
-        key.to_vec()
-    };
-    normalized_key.resize(BLOCK_SIZE, 0);
-
-    let mut inner_pad = [0x36_u8; BLOCK_SIZE];
-    let mut outer_pad = [0x5c_u8; BLOCK_SIZE];
-    for (index, byte) in normalized_key.iter().enumerate() {
-        inner_pad[index] ^= byte;
-        outer_pad[index] ^= byte;
-    }
-
-    let mut inner = Sha256::new();
-    inner.update(inner_pad);
-    inner.update(message);
-    let inner_digest = inner.finalize();
-
-    let mut outer = Sha256::new();
-    outer.update(outer_pad);
-    outer.update(inner_digest);
-    outer.finalize().to_vec()
+fn appsync_region_from_endpoint(endpoint: &str) -> Option<String> {
+    let host = endpoint
+        .trim()
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .split('/')
+        .next()?;
+    let parts: Vec<&str> = host.split('.').collect();
+    let idx = parts.iter().position(|part| *part == "appsync-api")?;
+    parts.get(idx + 1).map(|value| value.to_string())
 }
 
 fn dynamodb_json_to_value(value: &Value) -> Value {

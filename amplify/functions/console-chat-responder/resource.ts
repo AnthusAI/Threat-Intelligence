@@ -13,7 +13,6 @@ export type ConsoleChatResponderStackProps = NestedStackProps & {
   graphqlEndpoint: string;
   responseTarget?: string;
   openaiApiKeySsmParam?: string;
-  jwtSecretSsmParam?: string;
   model?: string;
   prebuiltImageUri?: string;
 };
@@ -36,8 +35,6 @@ export class ConsoleChatResponderStack extends NestedStack {
     };
     const openaiParam = props.openaiApiKeySsmParam?.trim() || process.env.PAPYRUS_CONSOLE_OPENAI_API_KEY_SSM_PARAM || "";
     if (openaiParam) environment.PAPYRUS_CONSOLE_OPENAI_API_KEY_SSM_PARAM = openaiParam;
-    const jwtParam = props.jwtSecretSsmParam?.trim() || process.env.PAPYRUS_CONSOLE_JWT_SECRET_SSM_PARAM || process.env.PAPYRUS_JWT_SECRET_SSM_PARAM || "";
-    if (jwtParam) environment.PAPYRUS_CONSOLE_JWT_SECRET_SSM_PARAM = jwtParam;
 
     const imageUri = props.prebuiltImageUri?.trim() || process.env.PAPYRUS_CONSOLE_RESPONDER_IMAGE_URI?.trim() || "";
     let code: DockerImageCode;
@@ -97,6 +94,11 @@ export class ConsoleChatResponderStack extends NestedStack {
     this.responderFunction.addToRolePolicy(new PolicyStatement({
       effect: Effect.ALLOW,
       actions: ["ssm:GetParameter"],
+      resources: ["*"],
+    }));
+    this.responderFunction.addToRolePolicy(new PolicyStatement({
+      effect: Effect.ALLOW,
+      actions: ["appsync:GraphQL"],
       resources: ["*"],
     }));
     this.responderFunction.addToRolePolicy(new PolicyStatement({

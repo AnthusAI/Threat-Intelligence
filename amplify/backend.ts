@@ -76,7 +76,6 @@ if (enableConsoleResponder) {
     graphqlEndpoint: backend.data.resources.cfnResources.cfnGraphqlApi.attrGraphQlUrl,
     responseTarget: process.env.PAPYRUS_CONSOLE_RESPONSE_TARGET,
     openaiApiKeySsmParam: process.env.PAPYRUS_CONSOLE_OPENAI_API_KEY_SSM_PARAM,
-    jwtSecretSsmParam: process.env.PAPYRUS_CONSOLE_JWT_SECRET_SSM_PARAM || process.env.PAPYRUS_JWT_SECRET_SSM_PARAM,
     model: process.env.PAPYRUS_CONSOLE_MODEL,
     prebuiltImageUri: process.env.PAPYRUS_CONSOLE_RESPONDER_IMAGE_URI,
   });

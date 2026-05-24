@@ -388,10 +388,13 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
     event.currentTarget.form?.requestSubmit();
   }
 
-  const pending = sortedMessages.some((message) => (
-    (message.role === "USER" && ["PENDING", "RUNNING"].includes(message.responseStatus ?? ""))
-    || (message.role === "ASSISTANT" && message.responseStatus === "RUNNING" && !(message.content ?? "").trim())
-  ));
+  const pendingUserResponse = sortedMessages.some(
+    (message) => message.role === "USER" && message.responseStatus === "PENDING",
+  );
+  const pendingAssistantResponse = sortedMessages.some(
+    (message) => message.role === "ASSISTANT" && message.responseStatus === "RUNNING" && !(message.content ?? "").trim(),
+  );
+  const pending = pendingUserResponse || pendingAssistantResponse;
 
   return (
     <div className="papyrus-console__panel">

@@ -848,6 +848,7 @@ export const schema = a.schema({
     ])
     .authorization((allow) => [
       allow.groups(categoryWriteGroups).to(categoryAppendOnlyOperations),
+      allow.authenticated("identityPool").to(authoringOperations),
       allow.custom().to(authoringOperations),
     ]),
 
@@ -1457,6 +1458,7 @@ export const schema = a.schema({
     ])
     .authorization((allow) => [
       allow.groups(categoryWriteGroups).to(["read", "create", "update"]),
+      allow.authenticated("identityPool").to(authoringOperations),
       allow.custom().to(authoringOperations),
     ]),
 
