@@ -41,6 +41,7 @@ export class ConsoleChatResponderStack extends NestedStack {
     let code: DockerImageCode;
     if (imageUri) {
       const { repositoryName, tagOrDigest } = parseEcrImageUri(imageUri);
+      assertArm64ImageUri(imageUri, tagOrDigest);
       const repository = Repository.fromRepositoryName(this, "ConsoleChatResponderRepository", repositoryName);
       code = DockerImageCode.fromEcr(repository, { tagOrDigest });
     } else {
@@ -139,4 +140,13 @@ function parseEcrImageUri(imageUri: string): { repositoryName: string; tagOrDige
     repositoryName: imagePath.slice(0, colonIndex),
     tagOrDigest: imagePath.slice(colonIndex + 1),
   };
+}
+
+function assertArm64ImageUri(imageUri: string, tagOrDigest: string): void {
+  const normalized = `${imageUri} ${tagOrDigest}`.toLowerCase();
+  if (normalized.includes("amd64") || normalized.includes("x86_64")) {
+    throw new Error(
+      `PAPYRUS_CONSOLE_RESPONDER_IMAGE_URI must reference an ARM64 image, but received: ${imageUri}`,
+    );
+  }
 }

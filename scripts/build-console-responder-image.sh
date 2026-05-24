@@ -10,14 +10,14 @@ set -euo pipefail
 # Optional env:
 #   ECR_REPOSITORY (default: papyrus-console-chat-responder)
 #   IMAGE_TAG (default: git SHA or "latest")
-#   IMAGE_PLATFORM (default: linux/amd64)
+#   IMAGE_PLATFORM (default: linux/arm64)
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 AWS_REGION="${AWS_REGION:-}"
 AWS_ACCOUNT_ID="${AWS_ACCOUNT_ID:-}"
 ECR_REPOSITORY="${ECR_REPOSITORY:-papyrus-console-chat-responder}"
-IMAGE_TAG="${IMAGE_TAG:-$(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || echo latest)}"
-IMAGE_PLATFORM="${IMAGE_PLATFORM:-linux/amd64}"
+IMAGE_TAG="${IMAGE_TAG:-papyrus-console-responder-$(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || echo latest)-lambda-arm64}"
+IMAGE_PLATFORM="${IMAGE_PLATFORM:-linux/arm64}"
 
 if [[ -z "$AWS_REGION" || -z "$AWS_ACCOUNT_ID" ]]; then
   echo "AWS_REGION and AWS_ACCOUNT_ID are required" >&2
