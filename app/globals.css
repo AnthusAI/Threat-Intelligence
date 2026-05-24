@@ -7131,6 +7131,35 @@ img {
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
+.papyrus-console__model-row {
+  align-items: center;
+  display: grid;
+  flex-shrink: 0;
+  gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr);
+  padding: 0 18px 10px;
+}
+
+.papyrus-console__model-label {
+  color: var(--muted-strong);
+  font-size: 0.64rem;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.papyrus-console-model-selector {
+  appearance: none;
+  background: rgb(var(--paper-rgb) / 0.92);
+  border: 1px solid rgb(var(--rule-rgb) / 0.28);
+  color: var(--ink);
+  font: 0.78rem/1.2 Arial, Helvetica, sans-serif;
+  min-width: 0;
+  padding: 0.45rem 0.55rem;
+  width: 100%;
+}
+
 .papyrus-console__session-select {
   appearance: none;
   background: rgb(var(--paper-rgb) / 0.92);
@@ -7176,6 +7205,7 @@ img {
   min-height: 0;
   overflow-y: auto;
   padding: 18px;
+  position: relative;
 }
 
 .papyrus-console__empty {
@@ -7308,6 +7338,32 @@ img {
 .papyrus-console__thinking-shimmer {
   --color-background: var(--paper);
   --color-muted-foreground: var(--ink);
+}
+
+.papyrus-console__scroll-bottom {
+  align-items: center;
+  appearance: none;
+  background: rgb(var(--paper-rgb) / 0.94);
+  border: 1px solid rgb(var(--rule-rgb) / 0.42);
+  border-radius: 999px;
+  bottom: 14px;
+  color: var(--ink);
+  cursor: pointer;
+  display: inline-flex;
+  height: 30px;
+  justify-content: center;
+  padding: 0;
+  position: sticky;
+  right: 0;
+  margin-left: auto;
+  width: 30px;
+  z-index: 2;
+}
+
+.papyrus-console__scroll-bottom:hover,
+.papyrus-console__scroll-bottom:focus-visible {
+  background: rgb(var(--ink-rgb) / 0.08);
+  outline: 0;
 }
 
 .papyrus-console__composer {

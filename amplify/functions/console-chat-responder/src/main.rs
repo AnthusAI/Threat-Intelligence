@@ -22,6 +22,7 @@ use uuid::Uuid;
 
 const DEFAULT_RESPONSE_TARGET: &str = "cloud";
 const DEFAULT_MODEL: &str = "gpt-4o-mini";
+const SUPPORTED_CONSOLE_MODELS: [&str; 4] = ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"];
 const MESSAGE_KIND_CHAT_TURN: &str = "console_chat_turn";
 const MESSAGE_KIND_TOOL_CALL: &str = "console_tool_call";
 const MESSAGE_KIND_TOOL_RESULT: &str = "console_tool_result";
@@ -202,6 +203,7 @@ async fn answer_claimed_message(
     message: &ChatMessage,
     lock_owner: &str,
 ) -> Result<()> {
+    let selected_model = resolve_message_model(&state.config.model, message);
     let mut context = load_prompt_context(state, message).await?;
     let starting_sequence = context.last_sequence_number.max(message.sequence_number);
     let now = now_iso();
@@ -222,7 +224,7 @@ async fn answer_claimed_message(
         response_completed_at: None,
         metadata: json!({
             "responder": "rust-lambda",
-            "model": state.config.model,
+            "model": selected_model,
             "triggerMessageId": message.id,
             "triggerCreatedAt": message.created_at,
             "streaming": true,
@@ -231,7 +233,7 @@ async fn answer_claimed_message(
     create_message_graphql(state, &assistant_record, &now).await?;
 
     let mut writer = AssistantStreamWriter::new(state, assistant_record.clone());
-    let tool_and_assistant = run_agent_turn(state, message, &context, &mut writer).await?;
+    let tool_and_assistant = run_agent_turn(state, message, &context, &selected_model, &mut writer).await?;
     if writer.content.trim().is_empty() && !tool_and_assistant.assistant_content.trim().is_empty() {
         writer
             .push_delta(&tool_and_assistant.assistant_content)
@@ -654,17 +656,12 @@ fn cache_is_valid_for_message(cache: &ThreadContextCache, message: &ChatMessage)
     {
         return false;
     }
-    let previous_sequence = message
-        .metadata
-        .get("previousSequenceNumber")
-        .and_then(Value::as_i64)
-        .unwrap_or(message.sequence_number - 1);
-    let previous_digest = message
-        .metadata
-        .get("previousContextDigest")
-        .and_then(Value::as_str);
+    let previous_sequence =
+        metadata_i64_field(&message.metadata, "previousSequenceNumber").unwrap_or(message.sequence_number - 1);
+    let previous_digest = metadata_string_field(&message.metadata, "previousContextDigest");
     cache.last_sequence_number == previous_sequence
         && previous_digest
+            .as_deref()
             .map(|digest| digest == cache.context_digest)
             .unwrap_or(true)
 }
@@ -1127,10 +1124,11 @@ async fn run_agent_turn(
     state: &AppState,
     trigger: &ChatMessage,
     context: &ThreadContextCache,
+    model: &str,
     assistant_writer: &mut AssistantStreamWriter<'_>,
 ) -> Result<AgentTurnOutput> {
     let mut messages = build_openai_messages(context);
-    let request = openai_request(&state.config.model, messages.clone());
+    let request = openai_request(model, messages.clone());
     let first = stream_openai_chat(state, request, Some(&mut *assistant_writer)).await?;
     let tool_calls = first.tool_calls;
     if tool_calls.is_empty() {
@@ -1190,7 +1188,7 @@ async fn run_agent_turn(
 
     let second = stream_openai_chat(
         state,
-        openai_request(&state.config.model, messages),
+        openai_request(model, messages),
         Some(&mut *assistant_writer),
     )
     .await?;
@@ -1499,6 +1497,39 @@ fn appsync_region_from_endpoint(endpoint: &str) -> Option<String> {
     let parts: Vec<&str> = host.split('.').collect();
     let idx = parts.iter().position(|part| *part == "appsync-api")?;
     parts.get(idx + 1).map(|value| value.to_string())
+}
+
+fn resolve_message_model(default_model: &str, message: &ChatMessage) -> String {
+    let selected = metadata_string_field(&message.metadata, "model")
+        .or_else(|| metadata_string_field(&message.metadata, "selectedModel"))
+        .unwrap_or_else(|| default_model.to_string());
+    if SUPPORTED_CONSOLE_MODELS
+        .iter()
+        .any(|candidate| *candidate == selected)
+    {
+        selected
+    } else {
+        default_model.to_string()
+    }
+}
+
+fn metadata_string_field(metadata: &Value, key: &str) -> Option<String> {
+    metadata_value_field(metadata, key)
+        .and_then(|value| value.as_str().map(|entry| entry.trim().to_string()))
+        .filter(|entry| !entry.is_empty())
+}
+
+fn metadata_i64_field(metadata: &Value, key: &str) -> Option<i64> {
+    metadata_value_field(metadata, key).and_then(|value| value.as_i64())
+}
+
+fn metadata_value_field(metadata: &Value, key: &str) -> Option<Value> {
+    if let Some(value) = metadata.get(key) {
+        return Some(value.clone());
+    }
+    let text = metadata.as_str()?;
+    let parsed: Value = serde_json::from_str(text).ok()?;
+    parsed.get(key).cloned()
 }
 
 fn dynamodb_json_to_value(value: &Value) -> Value {

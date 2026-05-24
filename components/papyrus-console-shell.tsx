@@ -12,14 +12,14 @@ import {
   type ConsoleChatThread,
 } from "../lib/console-chat-client";
 import { loadReaderSessionSnapshot, type ReaderSessionSnapshot } from "./reader-auth-state";
+import { ModelSelector } from "./ai-elements/model-selector";
+import { PromptInput, type PromptInputMessage, PromptInputSubmit, PromptInputTextarea } from "./ai-elements/prompt-input";
 import { Shimmer } from "./ai-elements/shimmer";
 import { Suggestion, Suggestions } from "./ai-elements/suggestion";
 import { CONNECTION_STATE_CHANGE, ConnectionState } from "aws-amplify/data";
 import { Hub } from "aws-amplify/utils";
 import {
   createContext,
-  type FormEvent,
-  type KeyboardEvent,
   type ReactNode,
   useCallback,
   useContext,
@@ -42,6 +42,13 @@ const CONSOLE_MESSAGE_DOMAIN = "conversation";
 const CONSOLE_SEMANTIC_LAYER = "chat_detail";
 const CONSOLE_SEARCH_VISIBILITY = "explicit";
 const CONSOLE_RESPONSE_TARGET = process.env.NEXT_PUBLIC_PAPYRUS_CONSOLE_RESPONSE_TARGET?.trim() || "cloud";
+const DEFAULT_CONSOLE_MODEL = process.env.NEXT_PUBLIC_PAPYRUS_CONSOLE_MODEL?.trim() || "gpt-5.4-mini";
+const CONSOLE_MODEL_OPTIONS = [
+  { value: "gpt-5.5", label: "GPT 5.5" },
+  { value: "gpt-5.4", label: "GPT 5.4" },
+  { value: "gpt-5.4-mini", label: "GPT 5.4 Mini" },
+  { value: "gpt-5.4-nano", label: "GPT 5.4 Nano" },
+] as const;
 
 type PapyrusConsoleShellProps = {
   children: ReactNode;
@@ -160,9 +167,12 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState(DEFAULT_CONSOLE_MODEL);
+  const [isNearBottom, setIsNearBottom] = useState(true);
   const hasLoadedRef = useRef(false);
   const activeThreadIdRef = useRef<string | null>(null);
   const threadRef = useRef<ConsoleChatThread | null>(null);
+  const messageBodyRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     threadRef.current = thread;
@@ -171,6 +181,18 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
   const sortedMessages = useMemo(() => (
     [...messages].sort((left, right) => (left.sequenceNumber ?? 0) - (right.sequenceNumber ?? 0) || left.createdAt.localeCompare(right.createdAt))
   ), [messages]);
+
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+    const element = messageBodyRef.current;
+    if (!element) return;
+    element.scrollTo({ top: element.scrollHeight, behavior });
+    setIsNearBottom(true);
+  }, []);
+
+  const updateNearBottomState = useCallback((element: HTMLDivElement) => {
+    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+    setIsNearBottom(distanceFromBottom <= 72);
+  }, []);
 
   const mergeMessage = useCallback((message: ConsoleChatMessage) => {
     setMessages((current) => upsertConsoleMessage(current, message));
@@ -209,6 +231,7 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
       const nextThread = resolveActiveThread(recentThreads, threadRef.current);
       setThreads(recentThreads);
       setThread(nextThread);
+      setSelectedModel(resolveThreadModel(nextThread));
       if (nextThread) {
         await loadMessages(nextThread.id);
       } else {
@@ -226,6 +249,26 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
   useEffect(() => {
     void loadThread();
   }, [loadThread]);
+
+  useEffect(() => {
+    if (!thread?.id) return;
+    setIsNearBottom(true);
+    requestAnimationFrame(() => scrollToBottom("auto"));
+  }, [scrollToBottom, thread?.id]);
+
+  useEffect(() => {
+    if (!isNearBottom) return;
+    requestAnimationFrame(() => scrollToBottom("auto"));
+  }, [isNearBottom, scrollToBottom, sortedMessages]);
+
+  useEffect(() => {
+    const element = messageBodyRef.current;
+    if (!element) return;
+    const onScroll = () => updateNearBottomState(element);
+    updateNearBottomState(element);
+    element.addEventListener("scroll", onScroll);
+    return () => element.removeEventListener("scroll", onScroll);
+  }, [thread?.id, updateNearBottomState]);
 
   useEffect(() => {
     if (!thread?.id) return;
@@ -262,6 +305,7 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
     activeThreadIdRef.current = threadId;
     const nextThread = threads.find((entry) => entry.id === threadId) ?? null;
     setThread(nextThread);
+    setSelectedModel(resolveThreadModel(nextThread));
     setMessages([]);
     if (nextThread) void loadMessages(nextThread.id);
   }, [loadMessages, threads]);
@@ -283,6 +327,7 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
       metadata: toAwsJson({
         console: {
           cache: "lambda-tmp-jit",
+          model: selectedModel,
           rawChatSearchVisibility: CONSOLE_SEARCH_VISIBILITY,
         },
       }),
@@ -297,6 +342,7 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
     const created = await createConsoleThread(nextThread);
     activeThreadIdRef.current = created.id;
     setThread(created);
+    setSelectedModel(resolveThreadModel(created));
     setThreads((current) => [created, ...current.filter((entry) => entry.id !== created.id)]);
     return created;
   }
@@ -339,6 +385,7 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
         searchVisibility: CONSOLE_SEARCH_VISIBILITY,
         responseTarget: CONSOLE_RESPONSE_TARGET,
         metadata: toAwsJson({
+          model: selectedModel,
           previousSequenceNumber,
           previousMessageId: previousMessage?.id ?? null,
           previousContextDigest: activeThread.contextDigest ?? null,
@@ -369,9 +416,8 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
     }
   }
 
-  async function sendMessage(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const content = draft.trim();
+  async function sendMessage(message: PromptInputMessage) {
+    const content = message.text.trim();
     if (!content) return;
     setDraft("");
     await submitMessage(content);
@@ -382,11 +428,35 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
     void submitMessage(suggestion);
   }
 
-  function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
-    event.preventDefault();
-    event.currentTarget.form?.requestSubmit();
-  }
+  const handleModelChange = useCallback((nextModel: string) => {
+    setSelectedModel(nextModel);
+    const activeThread = threadRef.current;
+    if (!activeThread) return;
+    const metadata = readAwsJsonObject(activeThread.metadata) ?? {};
+    const nextMetadata = {
+      ...metadata,
+      console: {
+        ...(readNestedObject(metadata, "console") ?? {}),
+        model: nextModel,
+      },
+    };
+    const now = new Date().toISOString();
+    void updateConsoleThread({
+      id: activeThread.id,
+      metadata: toAwsJson(nextMetadata),
+      updatedAt: now,
+    })
+      .then((updated) => {
+        setThread(updated);
+        setThreads((current) => current.map((entry) => (
+          entry.id === updated.id ? updated : entry
+        )));
+      })
+      .catch((nextError) => {
+        console.error("[PapyrusConsole] Unable to update console thread model", nextError);
+        setError(nextError instanceof Error ? nextError.message : "Unable to update console model.");
+      });
+  }, []);
 
   const pendingUserResponse = sortedMessages.some(
     (message) => message.role === "USER" && message.responseStatus === "PENDING",
@@ -427,7 +497,17 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
           </button>
         ) : null}
       </div>
-      <div className="papyrus-console__body" role="log" aria-live="polite">
+      <div className="papyrus-console__model-row">
+        <p className="papyrus-console__model-label">Model</p>
+        <ModelSelector
+          aria-label="Console model"
+          disabled={sending}
+          onValueChange={handleModelChange}
+          options={CONSOLE_MODEL_OPTIONS}
+          value={selectedModel}
+        />
+      </div>
+      <div className="papyrus-console__body" ref={messageBodyRef} role="log" aria-live="polite">
         {loading && !sortedMessages.length ? <p className="papyrus-console__empty">Loading conversation…</p> : null}
         {sortedMessages.map((message) => (
           <article className={message.role === "USER" ? "papyrus-console-message papyrus-console-message--user" : "papyrus-console-message papyrus-console-message--assistant"} key={message.id}>
@@ -440,6 +520,16 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
           <p className="papyrus-console__thinking papyrus-console-ui" role="status" aria-live="polite">
             <Shimmer className="papyrus-console__thinking-shimmer">Thinking...</Shimmer>
           </p>
+        ) : null}
+        {!isNearBottom && sortedMessages.length ? (
+          <button
+            aria-label="Scroll to latest message"
+            className="papyrus-console__scroll-bottom"
+            onClick={() => scrollToBottom()}
+            type="button"
+          >
+            <ChevronDownIcon />
+          </button>
         ) : null}
       </div>
       {!loading && !sortedMessages.length ? (
@@ -457,18 +547,22 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
         </div>
       ) : null}
       {error ? <p className="papyrus-console__error">{error}</p> : null}
-      <form className="papyrus-console__composer" onSubmit={(event) => void sendMessage(event)}>
-        <textarea
+      <PromptInput className="papyrus-console__composer" onSubmit={(message) => void sendMessage(message)}>
+        <PromptInputTextarea
           aria-label="Console message"
           disabled={sending}
           onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={handleComposerKeyDown}
           placeholder="Ask about this edition, newsroom, or knowledge graph…"
           rows={3}
           value={draft}
         />
-        <button disabled={!draft.trim() || sending} type="submit">{sending ? "Sending…" : "Send"}</button>
-      </form>
+        <PromptInputSubmit
+          disabled={!draft.trim() || sending}
+          status={pending ? "streaming" : "ready"}
+        >
+          {sending ? "Sending…" : "Send"}
+        </PromptInputSubmit>
+      </PromptInput>
     </div>
   );
 }
@@ -493,6 +587,48 @@ function formatConsoleThreadOption(thread: ConsoleChatThread): string {
     ? ` — ${date.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`
     : "";
   return `${thread.title || "Papyrus Console"}${suffix}`;
+}
+
+function resolveThreadModel(thread: ConsoleChatThread | null): string {
+  const metadata = readAwsJsonObject(thread?.metadata);
+  const model =
+    readNestedString(metadata, ["console", "model"])
+    ?? readNestedString(metadata, ["model"]);
+  return isSupportedConsoleModel(model) ? model : DEFAULT_CONSOLE_MODEL;
+}
+
+function isSupportedConsoleModel(model: unknown): model is string {
+  return typeof model === "string" && CONSOLE_MODEL_OPTIONS.some((option) => option.value === model);
+}
+
+function readNestedObject(value: Record<string, unknown> | null, key: string): Record<string, unknown> | null {
+  if (!value) return null;
+  const candidate = value[key];
+  return candidate && typeof candidate === "object" && !Array.isArray(candidate)
+    ? candidate as Record<string, unknown>
+    : null;
+}
+
+function readNestedString(value: Record<string, unknown> | null, path: string[]): string | null {
+  let cursor: unknown = value;
+  for (const key of path) {
+    if (!cursor || typeof cursor !== "object" || Array.isArray(cursor)) return null;
+    cursor = (cursor as Record<string, unknown>)[key];
+  }
+  return typeof cursor === "string" && cursor.trim() ? cursor.trim() : null;
+}
+
+function readAwsJsonObject(value: unknown): Record<string, unknown> | null {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }
 
 function ConsolePanelHeader({ onClose }: { onClose: () => void }) {
@@ -544,6 +680,25 @@ function MessagesSquareIcon() {
     >
       <path d="M14 9a2 2 0 0 1-2 2H6.5L3 14V5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2Z" />
       <path d="M18 9h1a2 2 0 0 1 2 2v9l-3.5-3H12a2 2 0 0 1-2-2v-1" />
+    </svg>
+  );
+}
+
+function ChevronDownIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      focusable="false"
+      height="16"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+      width="16"
+    >
+      <path d="m6 9 6 6 6-6" />
     </svg>
   );
 }
