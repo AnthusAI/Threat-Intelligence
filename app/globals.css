@@ -4812,7 +4812,7 @@ img {
   box-sizing: border-box;
   color: var(--muted-strong);
   display: inline-flex;
-  gap: 1px;
+  gap: 4px;
   height: var(--news-desk-detail-control-height);
   min-height: var(--news-desk-detail-control-height);
   padding: 0 6px;
