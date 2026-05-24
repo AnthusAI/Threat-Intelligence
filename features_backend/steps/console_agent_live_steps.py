@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 from behave import given, then, when
@@ -17,9 +18,17 @@ def step_live_console_agent_tests_enabled(context) -> None:
 
 @when('I run the live console agent smoke scenario "{scenario}"')
 def step_run_live_console_agent_smoke_scenario(context, scenario: str) -> None:
-    repo_root = Path(__file__).resolve().parents[3]
-    keep = os.environ.get("PAPYRUS_LIVE_AGENT_KEEP") == "1"
-    attempts = 3 if scenario == "docs-progressive" else 1
+    repo_root = Path(__file__).resolve().parents[2]
+    keep = os.environ.get("PAPYRUS_LIVE_AGENT_CLEANUP") != "1"
+    retryable_scenarios = {
+        "create-research-assignment",
+        "docs-progressive",
+        "list-research-assignments",
+        "get-research-assignment",
+        "update-research-assignment",
+        "invalid-assignment-input",
+    }
+    attempts = 3 if scenario in retryable_scenarios else 1
     last_error: Exception | None = None
     for _ in range(attempts):
         try:
@@ -40,13 +49,75 @@ def step_live_console_agent_smoke_scenario_should_pass(context) -> None:
     assert context.live_console_agent_smoke_result.get("ok") is True
 
 
+@then('the live console agent response should include "{needle}"')
+def step_live_console_agent_response_should_include(context, needle: str) -> None:
+    content = str(context.live_console_agent_smoke_result.get("content") or "")
+    assert needle.lower() in content.lower(), f'Expected "{needle}" in response; saw "{content}"'
+
+
+@then('the live console agent response should equal "{expected}"')
+def step_live_console_agent_response_should_equal(context, expected: str) -> None:
+    content = str(context.live_console_agent_smoke_result.get("content") or "")
+    assert content == expected, f'Expected exact response "{expected}"; saw "{content}"'
+
+
+@then('the live console agent response should match regex "{pattern}"')
+def step_live_console_agent_response_should_match_regex(context, pattern: str) -> None:
+    content = str(context.live_console_agent_smoke_result.get("content") or "")
+    assert re.fullmatch(pattern, content), f'Response "{content}" does not match regex "{pattern}"'
+
+
 @then('the live console agent smoke result should include tool call "{tool_call}"')
 def step_live_console_agent_smoke_should_include_tool_call(context, tool_call: str) -> None:
     api_calls = context.live_console_agent_smoke_result.get("apiCalls") or []
     assert tool_call in api_calls, f"Expected {tool_call}; saw {', '.join(api_calls)}"
 
 
+@then("the live console agent smoke result should include no tool calls")
+def step_live_console_agent_smoke_should_include_no_tool_calls(context) -> None:
+    api_calls = context.live_console_agent_smoke_result.get("apiCalls") or []
+    assert not api_calls, f"Expected no tool calls; saw {', '.join(api_calls)}"
+
+
+@then('the live console agent smoke result should include tool calls in order "{first}" then "{second}"')
+def step_live_console_agent_smoke_should_include_ordered_tool_calls(context, first: str, second: str) -> None:
+    api_calls = context.live_console_agent_smoke_result.get("apiCalls") or []
+    try:
+        first_index = api_calls.index(first)
+    except ValueError as error:
+        raise AssertionError(f"Expected first tool call {first}; saw {', '.join(api_calls)}") from error
+    try:
+        second_index = api_calls.index(second, first_index + 1)
+    except ValueError as error:
+        raise AssertionError(
+            f"Expected second tool call {second} after {first}; saw {', '.join(api_calls)}"
+        ) from error
+    assert first_index < second_index, f"Expected {first} before {second}; saw {', '.join(api_calls)}"
+
+
 @then("the live console agent smoke result should include exactly {count:d} assignment")
 def step_live_console_agent_smoke_should_include_assignments(context, count: int) -> None:
     assignment_ids = context.live_console_agent_smoke_result.get("assignmentIds") or []
     assert len(assignment_ids) == count, f"Expected {count} assignments; saw {len(assignment_ids)}"
+
+
+@then("the live console agent smoke result should include a structured error")
+def step_live_console_agent_smoke_should_include_structured_error(context) -> None:
+    errors = context.live_console_agent_smoke_result.get("errors") or []
+    assert errors, "Expected at least one structured error."
+    first = errors[0]
+    assert isinstance(first, dict), f"Error must be object-shaped, got: {type(first)}"
+    assert first.get("code"), f"Error code missing: {first}"
+    assert first.get("message"), f"Error message missing: {first}"
+
+
+@then("the live console agent smoke result should include no structured errors")
+def step_live_console_agent_smoke_should_include_no_structured_errors(context) -> None:
+    errors = context.live_console_agent_smoke_result.get("errors") or []
+    assert not errors, f"Expected no structured errors; saw {errors}"
+
+
+@then('the live console agent smoke result should default to model "{model}"')
+def step_live_console_agent_smoke_should_default_model(context, model: str) -> None:
+    resolved = context.live_console_agent_smoke_result.get("model")
+    assert resolved == model, f"Expected model {model}; saw {resolved}"

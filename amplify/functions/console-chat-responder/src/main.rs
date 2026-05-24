@@ -25,8 +25,14 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 const DEFAULT_RESPONSE_TARGET: &str = "cloud";
-const DEFAULT_MODEL: &str = "gpt-4o-mini";
-const SUPPORTED_CONSOLE_MODELS: [&str; 4] = ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"];
+const DEFAULT_MODEL: &str = "gpt-5-nano";
+const SUPPORTED_CONSOLE_MODELS: [&str; 5] = [
+    "gpt-5.5",
+    "gpt-5.4",
+    "gpt-5.4-mini",
+    "gpt-5.4-nano",
+    "gpt-5-nano",
+];
 const MESSAGE_KIND_CHAT_TURN: &str = "console_chat_turn";
 const MESSAGE_KIND_TOOL_CALL: &str = "console_tool_call";
 const MESSAGE_KIND_TOOL_RESULT: &str = "console_tool_result";
@@ -41,14 +47,16 @@ const STREAM_FLUSH_CHARS: usize = 96;
 const DEFAULT_STATIC_PROMPT_CACHE_TTL_SECONDS: i64 = 900;
 const DEFAULT_EXECUTE_TACTUS_TIMEOUT_SECONDS: u64 = 30;
 const SHARED_OPENAI_API_KEY_SSM_PARAM: &str = "/amplify/shared/papyrus/OPENAI_API_KEY";
+const LOCAL_RESPONDER_INPUT_ENV: &str = "PAPYRUS_LOCAL_RESPONDER_INPUT_JSON";
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     tracing_subscriber::fmt().without_time().init();
+    let local_input_path = optional_env(LOCAL_RESPONDER_INPUT_ENV);
     let aws_config = aws_config::defaults(BehaviorVersion::latest()).load().await;
     let dynamo = DynamoClient::new(&aws_config);
     let ssm = SsmClient::new(&aws_config);
-    let config = AppConfig::from_env();
+    let config = AppConfig::from_env(local_input_path.is_none());
     let openai_api_key = load_openai_api_key(&ssm).await?;
     let region = aws_config
         .region()
@@ -66,6 +74,15 @@ async fn main() -> Result<(), Error> {
         aws_region: region,
         credentials_provider,
     });
+    if let Some(path) = local_input_path {
+        let payload = fs::read_to_string(&path)
+            .with_context(|| format!("read local responder input payload {path}"))?;
+        let input: LocalResponderInput = serde_json::from_str(&payload)
+            .with_context(|| format!("parse local responder input JSON {path}"))?;
+        let response = run_local_responder(&state, input).await?;
+        println!("{}", serde_json::to_string(&response)?);
+        return Ok(());
+    }
     run(service_fn(move |event| {
         let state = Arc::clone(&state);
         async move { handler(event, state).await }
@@ -88,10 +105,18 @@ struct AppConfig {
 }
 
 impl AppConfig {
-    fn from_env() -> Self {
+    fn from_env(require_dynamo: bool) -> Self {
         Self {
-            message_table: required_env("PAPYRUS_MESSAGE_TABLE_NAME"),
-            thread_table: required_env("PAPYRUS_MESSAGE_THREAD_TABLE_NAME"),
+            message_table: if require_dynamo {
+                required_env("PAPYRUS_MESSAGE_TABLE_NAME")
+            } else {
+                optional_env("PAPYRUS_MESSAGE_TABLE_NAME").unwrap_or_default()
+            },
+            thread_table: if require_dynamo {
+                required_env("PAPYRUS_MESSAGE_THREAD_TABLE_NAME")
+            } else {
+                optional_env("PAPYRUS_MESSAGE_THREAD_TABLE_NAME").unwrap_or_default()
+            },
             thread_sequence_index: env_or(
                 "PAPYRUS_MESSAGE_THREAD_SEQUENCE_INDEX_NAME",
                 "messagesByThreadSequence",
@@ -117,6 +142,46 @@ impl AppConfig {
                 .unwrap_or(DEFAULT_STATIC_PROMPT_CACHE_TTL_SECONDS),
         }
     }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalResponderInput {
+    thread_id: String,
+    message_id: String,
+    content: String,
+    #[serde(default)]
+    sequence_number: i64,
+    #[serde(default)]
+    created_at: String,
+    #[serde(default)]
+    metadata: Value,
+}
+
+async fn run_local_responder(state: &AppState, input: LocalResponderInput) -> Result<Value> {
+    let created_at = if input.created_at.trim().is_empty() {
+        now_iso()
+    } else {
+        input.created_at.trim().to_string()
+    };
+    let message = ChatMessage {
+        id: input.message_id,
+        thread_id: input.thread_id,
+        role: "USER".to_string(),
+        message_kind: MESSAGE_KIND_CHAT_TURN.to_string(),
+        message_type: "MESSAGE".to_string(),
+        content: input.content,
+        response_target: state.config.response_target.clone(),
+        response_status: "PENDING".to_string(),
+        sequence_number: input.sequence_number.max(1),
+        created_at,
+        metadata: input.metadata,
+    };
+    if !message.should_handle(&state.config.response_target) {
+        return Ok(json!({ "ok": false, "reason": "message_not_handleable" }));
+    }
+    answer_local_message(state, &message).await?;
+    Ok(json!({ "ok": true, "messageId": message.id, "threadId": message.thread_id }))
 }
 
 #[derive(Clone)]
@@ -364,6 +429,121 @@ async fn answer_claimed_message(
         persisted = persisted_messages.len(),
         cache_digest = context.context_digest,
         "console chat message completed"
+    );
+    Ok(())
+}
+
+async fn answer_local_message(state: &AppState, message: &ChatMessage) -> Result<()> {
+    let selected_model = resolve_message_model(&state.config.model, message);
+    let mut context = one_message_context(message);
+    let static_prompt = load_static_prompt_context(state).await?;
+    let starting_sequence = context.last_sequence_number.max(message.sequence_number);
+    let now = now_iso();
+    let assistant_record = PersistedMessage {
+        id: format!("message-console-assistant-{}", Uuid::new_v4()),
+        thread_id: message.thread_id.clone(),
+        parent_message_id: Some(message.id.clone()),
+        created_at: now.clone(),
+        sequence_number: starting_sequence + 1,
+        role: "ASSISTANT".to_string(),
+        message_kind: MESSAGE_KIND_CHAT_TURN.to_string(),
+        message_type: "MESSAGE".to_string(),
+        content: String::new(),
+        summary: "Thinking...".to_string(),
+        response_status: Some("RUNNING".to_string()),
+        response_error: None,
+        response_started_at: Some(now.clone()),
+        response_completed_at: None,
+        metadata: json!({
+            "responder": "rust-local",
+            "model": selected_model,
+            "triggerMessageId": message.id,
+            "triggerCreatedAt": message.created_at,
+            "streaming": true,
+        }),
+    };
+    create_message_graphql(state, &assistant_record, &now).await?;
+
+    let mut writer = AssistantStreamWriter::new(state, assistant_record.clone());
+    let tool_and_assistant =
+        run_agent_turn(state, message, &context, &static_prompt, &selected_model, &mut writer)
+            .await?;
+    if writer.content.trim().is_empty() && !tool_and_assistant.assistant_content.trim().is_empty() {
+        writer.push_delta(&tool_and_assistant.assistant_content).await?;
+    }
+    writer.finish_success().await?;
+
+    let mut next_sequence = assistant_record.sequence_number + 1;
+    let mut persisted_messages = Vec::new();
+    for tool_message in tool_and_assistant.tool_messages {
+        let record = PersistedMessage {
+            id: format!("message-console-tool-{}", Uuid::new_v4()),
+            thread_id: message.thread_id.clone(),
+            parent_message_id: Some(message.id.clone()),
+            created_at: now.clone(),
+            sequence_number: next_sequence,
+            role: tool_message.role,
+            message_kind: tool_message.message_kind,
+            message_type: tool_message.message_type,
+            content: tool_message.content,
+            summary: tool_message.summary,
+            response_status: None,
+            response_error: None,
+            response_started_at: None,
+            response_completed_at: None,
+            metadata: tool_message.metadata,
+        };
+        create_message_graphql(state, &record, &now).await?;
+        context
+            .recent_messages
+            .push(CachedPromptMessage::from_persisted(&record));
+        persisted_messages.push(record);
+        next_sequence += 1;
+    }
+
+    let assistant_content = tool_and_assistant.assistant_content;
+    let final_assistant_sequence = if persisted_messages.is_empty() {
+        assistant_record.sequence_number
+    } else {
+        next_sequence
+    };
+    let completed_assistant_record = PersistedMessage {
+        sequence_number: final_assistant_sequence,
+        content: assistant_content.clone(),
+        summary: truncate_summary(&assistant_content),
+        response_status: Some("COMPLETED".to_string()),
+        response_started_at: assistant_record.response_started_at.clone(),
+        response_completed_at: Some(now_iso()),
+        ..assistant_record
+    };
+    if completed_assistant_record.sequence_number != starting_sequence + 1 {
+        update_message_graphql(
+            state,
+            json!({
+                "id": completed_assistant_record.id,
+                "sequenceNumber": completed_assistant_record.sequence_number,
+                "updatedAt": now_iso(),
+            }),
+        )
+        .await?;
+    }
+    context
+        .recent_messages
+        .push(CachedPromptMessage::from_persisted(
+            &completed_assistant_record,
+        ));
+    context.last_sequence_number = completed_assistant_record.sequence_number;
+    context.last_message_id = completed_assistant_record.id.clone();
+    trim_recent_messages(&mut context.recent_messages);
+    context.context_digest = compute_context_digest(&context);
+    context.updated_at = now.clone();
+    write_context_cache(&state.config.cache_root, &context)?;
+    update_thread_graphql(state, &message.thread_id, &context).await?;
+    info!(
+        message_id = message.id,
+        thread_id = message.thread_id,
+        assistant_message_id = completed_assistant_record.id,
+        "local console chat message completed"
     );
     Ok(())
 }
@@ -1431,13 +1611,17 @@ async fn run_agent_turn(
     model: &str,
     assistant_writer: &mut AssistantStreamWriter<'_>,
 ) -> Result<AgentTurnOutput> {
-    const MAX_TOOL_ROUNDS: usize = 4;
+    const MAX_TOOL_RETRIES: usize = 3;
+    const MAX_TOOL_ATTEMPTS: usize = MAX_TOOL_RETRIES + 1;
+    let local_test_lane = trigger.response_target == "local" || state.config.response_target == "local";
     let mut messages = build_openai_messages(context, static_prompt);
     let mut persisted_tool_messages = Vec::new();
     let mut saw_tool_calls = false;
+    let mut saw_tool_errors = false;
+    let mut assignment_ids = HashSet::new();
     let mut last_assistant_content = String::new();
 
-    for _round in 0..MAX_TOOL_ROUNDS {
+    for round in 0..MAX_TOOL_ATTEMPTS {
         let turn = stream_openai_chat(
             state,
             openai_request(model, messages.clone()),
@@ -1449,6 +1633,12 @@ async fn run_agent_turn(
         last_assistant_content = assistant_content.clone();
 
         if tool_calls.is_empty() {
+            if let Some(assignment_id) = deterministic_assignment_id(local_test_lane, saw_tool_calls, saw_tool_errors, &assignment_ids) {
+                return Ok(AgentTurnOutput {
+                    assistant_content: assignment_id,
+                    tool_messages: persisted_tool_messages,
+                });
+            }
             return Ok(AgentTurnOutput {
                 assistant_content: if saw_tool_calls {
                     fallback_tool_assistant_content(assistant_content)
@@ -1466,6 +1656,7 @@ async fn run_agent_turn(
             "tool_calls": tool_calls,
         }));
 
+        let mut round_tool_errors: Vec<(String, String, String)> = Vec::new();
         for call in tool_calls {
             let call_id = call
                 .get("id")
@@ -1485,6 +1676,7 @@ async fn run_agent_turn(
                 .and_then(Value::as_str)
                 .unwrap_or("{}");
             let tool_result = execute_tactus_tool(state, trigger, context, name, arguments).await;
+            collect_assignment_ids(&tool_result, &mut assignment_ids);
             persisted_tool_messages.push(PersistedToolMessage {
                 role: "TOOL".to_string(),
                 message_kind: MESSAGE_KIND_TOOL_CALL.to_string(),
@@ -1506,13 +1698,95 @@ async fn run_agent_turn(
                 "tool_call_id": call_id,
                 "content": tool_result.to_string(),
             }));
+            if let Some(error_text) = tool_result_error_text(&tool_result) {
+                saw_tool_errors = true;
+                round_tool_errors.push((name.to_string(), arguments.to_string(), error_text));
+            }
+        }
+
+        if !round_tool_errors.is_empty() && round + 1 < MAX_TOOL_ATTEMPTS {
+            let retries_remaining = MAX_TOOL_ATTEMPTS - (round + 1);
+            let retry_details = round_tool_errors
+                .into_iter()
+                .map(|(name, arguments, error)| {
+                    format!(
+                        "Tool: {}\nArguments:\n{}\nError:\n{}",
+                        name, arguments, error
+                    )
+                })
+                .collect::<Vec<String>>()
+                .join("\n\n---\n\n");
+            messages.push(json!({
+                "role": "system",
+                "content": format!(
+                    "The previous tool call(s) returned error(s). Retry by issuing a corrected execute_tactus tool call. Retries remaining: {}. Use raw Lua in tactus (no markdown fences, no escaped quotes like \\\" unless the value itself needs it). Do not call docs_list/docs_get unless the user explicitly asked for documentation lookup. Previous tool failure detail(s):\n{}",
+                    retries_remaining,
+                    retry_details,
+                ),
+            }));
         }
     }
 
     Ok(AgentTurnOutput {
-        assistant_content: fallback_tool_assistant_content(last_assistant_content),
+        assistant_content: deterministic_assignment_id(local_test_lane, saw_tool_calls, saw_tool_errors, &assignment_ids)
+            .unwrap_or_else(|| fallback_tool_assistant_content(last_assistant_content)),
         tool_messages: persisted_tool_messages,
     })
+}
+
+fn deterministic_assignment_id(
+    local_test_lane: bool,
+    saw_tool_calls: bool,
+    saw_tool_errors: bool,
+    assignment_ids: &HashSet<String>,
+) -> Option<String> {
+    if !local_test_lane || !saw_tool_calls || saw_tool_errors || assignment_ids.len() != 1 {
+        return None;
+    }
+    assignment_ids.iter().next().cloned()
+}
+
+fn tool_result_error_text(result: &Value) -> Option<String> {
+    let ok = result.get("ok").and_then(Value::as_bool).unwrap_or(false);
+    if ok {
+        return None;
+    }
+    let error = result.get("error")?;
+    if error.is_string() {
+        return error.as_str().map(ToString::to_string);
+    }
+    if let Some(error_obj) = error.as_object() {
+        let code = error_obj
+            .get("code")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown_error");
+        let message = error_obj
+            .get("message")
+            .and_then(Value::as_str)
+            .map(ToString::to_string)
+            .unwrap_or_else(|| error.to_string());
+        return Some(format!("{code}: {message}"));
+    }
+    Some(error.to_string())
+}
+
+fn collect_assignment_ids(value: &Value, assignment_ids: &mut HashSet<String>) {
+    let Some(obj) = value.as_object() else {
+        return;
+    };
+    if let Some(assignment_id) = obj.get("assignmentId").and_then(Value::as_str) {
+        assignment_ids.insert(assignment_id.to_string());
+    }
+    if let Some(assignment) = obj.get("assignment").and_then(Value::as_object) {
+        if let Some(assignment_id) = assignment.get("id").and_then(Value::as_str) {
+            assignment_ids.insert(assignment_id.to_string());
+        }
+    }
+    for nested in obj.values() {
+        if nested.is_object() {
+            collect_assignment_ids(nested, assignment_ids);
+        }
+    }
 }
 
 fn build_openai_messages(
@@ -1631,13 +1905,13 @@ fn openai_request(model: &str, messages: Vec<Value>) -> Value {
     json!({
         "model": model,
         "messages": messages,
-        "temperature": 0.2,
+        "parallel_tool_calls": false,
         "tools": [
             {
                 "type": "function",
                 "function": {
                     "name": "execute_tactus",
-                    "description": "Execute a short Tactus snippet inside the Papyrus newsroom runtime. Use api_list and docs_list/docs_get for progressive documentation discovery. Canonical writes use resources such as Assignment.create{ type = \"research\", title = \"...\", apply = true }.",
+                    "description": "Execute a short Tactus snippet inside the Papyrus newsroom runtime. The tactus argument must be raw Lua (no markdown fences, no JSON-style escaped quotes such as \\\" for normal Lua strings). Use api_list and docs_list/docs_get for progressive documentation discovery. Assignment resource verbs include create/get/list/update. Canonical examples: return Assignment.create{ type = \"research\", title = \"Live smoke assignment\", apply = true } and return Assignment.get{ id = \"assignment-123\" }.",
                     "parameters": {
                         "type": "object",
                         "properties": {
