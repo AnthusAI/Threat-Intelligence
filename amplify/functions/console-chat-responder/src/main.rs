@@ -33,6 +33,7 @@ const EXPLICIT_SEARCH: &str = "explicit";
 const CONTEXT_CACHE_SCHEMA_VERSION: u32 = 1;
 const STREAM_FLUSH_INTERVAL_MS: i64 = 200;
 const STREAM_FLUSH_CHARS: usize = 96;
+const SHARED_OPENAI_API_KEY_SSM_PARAM: &str = "/amplify/shared/papyrus/OPENAI_API_KEY";
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
@@ -41,7 +42,7 @@ async fn main() -> Result<(), Error> {
     let dynamo = DynamoClient::new(&aws_config);
     let ssm = SsmClient::new(&aws_config);
     let config = AppConfig::from_env();
-    let openai_api_key = load_openai_api_key(&ssm, &config).await?;
+    let openai_api_key = load_openai_api_key(&ssm).await?;
     let region = aws_config
         .region()
         .map(|value| value.as_ref().to_string())
@@ -72,7 +73,6 @@ struct AppConfig {
     thread_sequence_index: String,
     response_target: String,
     model: String,
-    openai_api_key_ssm_param: Option<String>,
     graphql_endpoint: String,
     cache_root: PathBuf,
 }
@@ -88,7 +88,6 @@ impl AppConfig {
             ),
             response_target: env_or("PAPYRUS_CONSOLE_RESPONSE_TARGET", DEFAULT_RESPONSE_TARGET),
             model: env_or("PAPYRUS_CONSOLE_MODEL", DEFAULT_MODEL),
-            openai_api_key_ssm_param: optional_env("PAPYRUS_CONSOLE_OPENAI_API_KEY_SSM_PARAM"),
             graphql_endpoint: required_env("PAPYRUS_GRAPHQL_ENDPOINT"),
             cache_root: PathBuf::from(env_or(
                 "PAPYRUS_CONSOLE_CONTEXT_CACHE_ROOT",
@@ -217,7 +216,7 @@ async fn answer_claimed_message(
         message_kind: MESSAGE_KIND_CHAT_TURN.to_string(),
         message_type: "MESSAGE".to_string(),
         content: String::new(),
-        summary: "Papyrus is responding.".to_string(),
+        summary: "Thinking...".to_string(),
         response_status: Some("RUNNING".to_string()),
         response_error: None,
         response_started_at: Some(now.clone()),
@@ -1463,28 +1462,23 @@ fn execute_papyrus_tool(
     }
 }
 
-async fn load_openai_api_key(ssm: &SsmClient, config: &AppConfig) -> Result<String> {
+async fn load_openai_api_key(ssm: &SsmClient) -> Result<String> {
     if let Some(value) = optional_env("OPENAI_API_KEY") {
         return Ok(value.trim().to_string());
     }
-    let Some(parameter_name) = &config.openai_api_key_ssm_param else {
-        return Err(anyhow!(
-            "OPENAI_API_KEY or PAPYRUS_CONSOLE_OPENAI_API_KEY_SSM_PARAM is required"
-        ));
-    };
     let response = ssm
         .get_parameter()
-        .name(parameter_name)
+        .name(SHARED_OPENAI_API_KEY_SSM_PARAM)
         .with_decryption(true)
         .send()
         .await
-        .context("load OpenAI API key from SSM")?;
+        .context("load OpenAI API key from shared SSM parameter")?;
     response
         .parameter()
         .and_then(|parameter| parameter.value())
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| anyhow!("SSM parameter {parameter_name} did not include a value"))
+        .ok_or_else(|| anyhow!("SSM parameter {SHARED_OPENAI_API_KEY_SSM_PARAM} did not include a value"))
 }
 
 fn appsync_region_from_endpoint(endpoint: &str) -> Option<String> {

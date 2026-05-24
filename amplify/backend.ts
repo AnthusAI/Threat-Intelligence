@@ -40,8 +40,8 @@ const backend = defineBackend({
 
 const amplifyBackendDir = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(amplifyBackendDir, "..");
-const enableConsoleResponder = ["1", "true", "yes", "on"].includes(
-  (process.env.PAPYRUS_ENABLE_CONSOLE_RESPONDER ?? "").trim().toLowerCase(),
+const enableConsoleResponder = !["0", "false", "no", "off"].includes(
+  (process.env.PAPYRUS_ENABLE_CONSOLE_RESPONDER ?? "true").trim().toLowerCase(),
 );
 
 if (enableConsoleResponder) {
@@ -75,7 +75,6 @@ if (enableConsoleResponder) {
     projectRoot,
     graphqlEndpoint: backend.data.resources.cfnResources.cfnGraphqlApi.attrGraphQlUrl,
     responseTarget: process.env.PAPYRUS_CONSOLE_RESPONSE_TARGET,
-    openaiApiKeySsmParam: process.env.PAPYRUS_CONSOLE_OPENAI_API_KEY_SSM_PARAM,
     model: process.env.PAPYRUS_CONSOLE_MODEL,
     prebuiltImageUri: process.env.PAPYRUS_CONSOLE_RESPONDER_IMAGE_URI,
   });

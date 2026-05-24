@@ -1,105 +1,168 @@
 "use client";
 
-import { cn } from "../../lib/utils";
-import type { ComponentPropsWithoutRef, ReactNode } from "react";
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import type { UIMessage } from "ai";
+import { ArrowDownIcon, DownloadIcon } from "lucide-react";
+import type { ComponentProps } from "react";
+import { useCallback } from "react";
+import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 
-type ConversationContextValue = {
-  contentRef: React.RefObject<HTMLDivElement | null>;
-  isNearBottom: boolean;
-  scrollToBottom: (behavior?: ScrollBehavior) => void;
+export type ConversationProps = ComponentProps<typeof StickToBottom>;
+
+export const Conversation = ({ className, ...props }: ConversationProps) => (
+  <StickToBottom
+    className={cn("relative flex-1 overflow-y-hidden", className)}
+    initial="smooth"
+    resize="smooth"
+    role="log"
+    {...props}
+  />
+);
+
+export type ConversationContentProps = ComponentProps<
+  typeof StickToBottom.Content
+>;
+
+export const ConversationContent = ({
+  className,
+  ...props
+}: ConversationContentProps) => (
+  <StickToBottom.Content
+    className={cn("flex flex-col gap-8 p-4", className)}
+    {...props}
+  />
+);
+
+export type ConversationEmptyStateProps = ComponentProps<"div"> & {
+  title?: string;
+  description?: string;
+  icon?: React.ReactNode;
 };
 
-const ConversationContext = createContext<ConversationContextValue | null>(null);
+export const ConversationEmptyState = ({
+  className,
+  title = "No messages yet",
+  description = "Start a conversation to see messages here",
+  icon,
+  children,
+  ...props
+}: ConversationEmptyStateProps) => (
+  <div
+    className={cn(
+      "flex size-full flex-col items-center justify-center gap-3 p-8 text-center",
+      className
+    )}
+    {...props}
+  >
+    {children ?? (
+      <>
+        {icon && <div className="text-muted-foreground">{icon}</div>}
+        <div className="space-y-1">
+          <h3 className="font-medium text-sm">{title}</h3>
+          {description && (
+            <p className="text-muted-foreground text-sm">{description}</p>
+          )}
+        </div>
+      </>
+    )}
+  </div>
+);
 
-export type ConversationProps = ComponentPropsWithoutRef<"div">;
+export type ConversationScrollButtonProps = ComponentProps<typeof Button>;
 
-export function Conversation({ className, children, ...props }: ConversationProps) {
-  const contentRef = useRef<HTMLDivElement | null>(null);
-  const [isNearBottom, setIsNearBottom] = useState(true);
+export const ConversationScrollButton = ({
+  className,
+  ...props
+}: ConversationScrollButtonProps) => {
+  const { isAtBottom, scrollToBottom } = useStickToBottomContext();
 
-  const updateNearBottom = useCallback(() => {
-    const element = contentRef.current;
-    if (!element) return;
-    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
-    setIsNearBottom(distanceFromBottom <= 72);
-  }, []);
-
-  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
-    const element = contentRef.current;
-    if (!element) return;
-    element.scrollTo({ top: element.scrollHeight, behavior });
-    setIsNearBottom(true);
-  }, []);
-
-  useEffect(() => {
-    const element = contentRef.current;
-    if (!element) return;
-    updateNearBottom();
-    const onScroll = () => updateNearBottom();
-    element.addEventListener("scroll", onScroll);
-    return () => element.removeEventListener("scroll", onScroll);
-  }, [updateNearBottom]);
-
-  const context = useMemo<ConversationContextValue>(() => ({
-    contentRef,
-    isNearBottom,
-    scrollToBottom,
-  }), [isNearBottom, scrollToBottom]);
+  const handleScrollToBottom = useCallback(() => {
+    scrollToBottom();
+  }, [scrollToBottom]);
 
   return (
-    <ConversationContext.Provider value={context}>
-      <div className={cn(className)} {...props}>
-        {children}
-      </div>
-    </ConversationContext.Provider>
+    !isAtBottom && (
+      <Button
+        className={cn(
+          "absolute bottom-4 left-[50%] translate-x-[-50%] rounded-full dark:bg-background dark:hover:bg-muted",
+          className
+        )}
+        onClick={handleScrollToBottom}
+        size="icon"
+        type="button"
+        variant="outline"
+        {...props}
+      >
+        <ArrowDownIcon className="size-4" />
+      </Button>
+    )
   );
-}
-
-export type ConversationContentProps = ComponentPropsWithoutRef<"div"> & {
-  watch?: unknown;
 };
 
-export function ConversationContent({ className, watch, children, ...props }: ConversationContentProps) {
-  const context = useConversationContext();
+const getMessageText = (message: UIMessage): string =>
+  message.parts
+    .filter((part) => part.type === "text")
+    .map((part) => part.text)
+    .join("");
 
-  useEffect(() => {
-    if (!context.isNearBottom) return;
-    requestAnimationFrame(() => context.scrollToBottom("auto"));
-  }, [context, watch]);
-
-  return (
-    <div
-      className={cn(className)}
-      ref={context.contentRef}
-      {...props}
-    >
-      {children}
-    </div>
-  );
-}
-
-export type ConversationScrollButtonProps = Omit<ComponentPropsWithoutRef<"button">, "children"> & {
-  children?: ReactNode;
+export type ConversationDownloadProps = Omit<
+  ComponentProps<typeof Button>,
+  "onClick"
+> & {
+  messages: UIMessage[];
+  filename?: string;
+  formatMessage?: (message: UIMessage, index: number) => string;
 };
 
-export function ConversationScrollButton({ className, children, ...props }: ConversationScrollButtonProps) {
-  const context = useConversationContext();
-  if (context.isNearBottom) return null;
+const defaultFormatMessage = (message: UIMessage): string => {
+  const roleLabel =
+    message.role.charAt(0).toUpperCase() + message.role.slice(1);
+  return `**${roleLabel}:** ${getMessageText(message)}`;
+};
+
+export const messagesToMarkdown = (
+  messages: UIMessage[],
+  formatMessage: (
+    message: UIMessage,
+    index: number
+  ) => string = defaultFormatMessage
+): string => messages.map((msg, i) => formatMessage(msg, i)).join("\n\n");
+
+export const ConversationDownload = ({
+  messages,
+  filename = "conversation.md",
+  formatMessage = defaultFormatMessage,
+  className,
+  children,
+  ...props
+}: ConversationDownloadProps) => {
+  const handleDownload = useCallback(() => {
+    const markdown = messagesToMarkdown(messages, formatMessage);
+    const blob = new Blob([markdown], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }, [messages, filename, formatMessage]);
+
   return (
-    <button
-      className={cn(className)}
-      onClick={() => context.scrollToBottom()}
+    <Button
+      className={cn(
+        "absolute top-4 right-4 rounded-full dark:bg-background dark:hover:bg-muted",
+        className
+      )}
+      onClick={handleDownload}
+      size="icon"
       type="button"
+      variant="outline"
       {...props}
     >
-      {children}
-    </button>
+      {children ?? <DownloadIcon className="size-4" />}
+    </Button>
   );
-}
-
-function useConversationContext(): ConversationContextValue {
-  const context = useContext(ConversationContext);
-  if (!context) throw new Error("Conversation components must be rendered within <Conversation>.");
-  return context;
-}
+};

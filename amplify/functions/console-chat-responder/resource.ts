@@ -1,7 +1,8 @@
 import { Duration, NestedStack, type NestedStackProps } from "aws-cdk-lib";
+import { Platform } from "aws-cdk-lib/aws-ecr-assets";
 import { Repository } from "aws-cdk-lib/aws-ecr";
 import { Effect, PolicyStatement } from "aws-cdk-lib/aws-iam";
-import { CfnEventSourceMapping, DockerImageCode, DockerImageFunction } from "aws-cdk-lib/aws-lambda";
+import { Architecture, CfnEventSourceMapping, DockerImageCode, DockerImageFunction } from "aws-cdk-lib/aws-lambda";
 import type { ITable } from "aws-cdk-lib/aws-dynamodb";
 import { Construct } from "constructs";
 
@@ -12,7 +13,6 @@ export type ConsoleChatResponderStackProps = NestedStackProps & {
   projectRoot: string;
   graphqlEndpoint: string;
   responseTarget?: string;
-  openaiApiKeySsmParam?: string;
   model?: string;
   prebuiltImageUri?: string;
 };
@@ -33,8 +33,6 @@ export class ConsoleChatResponderStack extends NestedStack {
       PAPYRUS_CONSOLE_MODEL: props.model?.trim() || process.env.PAPYRUS_CONSOLE_MODEL || "gpt-4o-mini",
       PAPYRUS_CONSOLE_CONTEXT_CACHE_ROOT: "/tmp/papyrus-console/thread-context",
     };
-    const openaiParam = props.openaiApiKeySsmParam?.trim() || process.env.PAPYRUS_CONSOLE_OPENAI_API_KEY_SSM_PARAM || "";
-    if (openaiParam) environment.PAPYRUS_CONSOLE_OPENAI_API_KEY_SSM_PARAM = openaiParam;
 
     const imageUri = props.prebuiltImageUri?.trim() || process.env.PAPYRUS_CONSOLE_RESPONDER_IMAGE_URI?.trim() || "";
     let code: DockerImageCode;
@@ -45,6 +43,7 @@ export class ConsoleChatResponderStack extends NestedStack {
     } else {
       code = DockerImageCode.fromImageAsset(props.projectRoot, {
         file: "amplify/functions/console-chat-responder/Dockerfile",
+        platform: Platform.LINUX_ARM64,
         exclude: [
           ".git",
           ".env",
@@ -66,6 +65,7 @@ export class ConsoleChatResponderStack extends NestedStack {
 
     this.responderFunction = new DockerImageFunction(this, "ConsoleChatResponderFunction", {
       code,
+      architecture: Architecture.ARM_64,
       timeout: Duration.minutes(2),
       memorySize: 1024,
       environment,

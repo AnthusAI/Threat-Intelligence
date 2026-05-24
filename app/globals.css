@@ -1,4 +1,53 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+}
+
 :root {
+  --radius: 0.875rem;
+  --background: rgb(var(--paper-rgb) / 0.98);
+  --foreground: var(--ink);
+  --card: rgb(var(--paper-rgb) / 0.98);
+  --card-foreground: var(--ink);
+  --popover: rgb(var(--paper-rgb) / 0.98);
+  --popover-foreground: var(--ink);
+  --primary: var(--ink);
+  --primary-foreground: var(--paper);
+  --secondary: rgb(var(--ink-rgb) / 0.08);
+  --secondary-foreground: var(--ink);
+  --muted: rgb(var(--ink-rgb) / 0.06);
+  --muted-foreground: var(--muted-strong);
+  --accent: rgb(var(--ink-rgb) / 0.08);
+  --accent-foreground: var(--ink);
+  --destructive: #9b1c1c;
+  --destructive-foreground: #fff;
+  --border: rgb(var(--rule-rgb) / 0.32);
+  --input: rgb(var(--rule-rgb) / 0.28);
+  --ring: rgb(var(--ink-rgb) / 0.22);
   color-scheme: light;
   --ink-solid-rgb: 0 0 0;
   --ink-alpha: 0.9;
@@ -7109,15 +7158,6 @@ img {
   display: block;
 }
 
-.papyrus-console-message p {
-  color: var(--muted-strong);
-  font-size: 0.64rem;
-  font-weight: 900;
-  letter-spacing: 0.14em;
-  margin: 0;
-  text-transform: uppercase;
-}
-
 .papyrus-console__sessions {
   align-items: start;
   display: grid;
@@ -7188,15 +7228,17 @@ img {
   cursor: default;
 }
 
+.papyrus-console__scrollport {
+  min-height: 0;
+}
+
 .papyrus-console__body {
   border-top: 1px solid rgb(var(--rule-rgb) / 0.28);
   display: flex;
-  flex: 1;
   flex-direction: column;
   gap: 14px;
   justify-content: flex-start;
-  min-height: 0;
-  overflow-y: auto;
+  min-height: 100%;
   padding: 18px;
   position: relative;
 }
@@ -7231,25 +7273,12 @@ img {
   width: 100%;
 }
 
-.papyrus-console-ui .papyrus-ui-button {
-  appearance: none;
-  background: rgb(var(--ink-rgb) / 0.92);
-  border: 1px solid rgb(var(--rule-rgb) / 0.36);
-  color: var(--paper);
-  cursor: pointer;
-  font: 700 0.72rem/1.2 Arial, Helvetica, sans-serif;
-  letter-spacing: 0.04em;
-  padding: 0.55rem 0.85rem;
-  text-align: left;
-}
-
-.papyrus-console-ui .papyrus-ui-button--outline,
 .papyrus-console-ui .papyrus-console-suggestion {
   background: rgb(var(--paper-rgb) / 0.96);
   border: 1px solid rgb(var(--rule-rgb) / 0.34);
   border-radius: 999px;
   color: var(--ink);
-  font-weight: 600;
+  font: 600 0.72rem/1.2 Arial, Helvetica, sans-serif;
   letter-spacing: 0;
   padding: 0.62rem 1rem;
   text-align: center;
@@ -7257,18 +7286,6 @@ img {
   width: 100%;
 }
 
-.papyrus-console-ui .papyrus-ui-button--sm {
-  font-size: 0.72rem;
-}
-
-.papyrus-console-ui .papyrus-ui-button:hover,
-.papyrus-console-ui .papyrus-ui-button:focus-visible {
-  background: rgb(var(--ink-rgb) / 0.08);
-  outline: 0;
-}
-
-.papyrus-console-ui .papyrus-ui-button--outline:hover,
-.papyrus-console-ui .papyrus-ui-button--outline:focus-visible,
 .papyrus-console-ui .papyrus-console-suggestion:hover,
 .papyrus-console-ui .papyrus-console-suggestion:focus-visible {
   background: rgb(var(--ink-rgb) / 0.06);
@@ -7276,7 +7293,6 @@ img {
   color: var(--ink);
 }
 
-.papyrus-console-ui .papyrus-ui-button:disabled,
 .papyrus-console-ui .papyrus-console-suggestion:disabled {
   color: var(--disabled);
   cursor: default;
@@ -7298,6 +7314,76 @@ img {
   white-space: pre-wrap;
 }
 
+.papyrus-console-message__markdown {
+  display: grid;
+  gap: 0.42rem;
+  white-space: normal;
+}
+
+.papyrus-console-message__markdown h3,
+.papyrus-console-message__markdown h4,
+.papyrus-console-message__markdown h5 {
+  color: rgb(var(--ink-solid-rgb) / var(--ink-display-alpha));
+  font-family: var(--font-serif), Georgia, "Times New Roman", serif;
+  font-weight: 900;
+  letter-spacing: 0;
+  line-height: 1.08;
+  margin: 0;
+}
+
+.papyrus-console-message__markdown h3 {
+  font-size: 1.08rem;
+}
+
+.papyrus-console-message__markdown h4 {
+  font-size: 0.96rem;
+}
+
+.papyrus-console-message__markdown h5 {
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 0.74rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.papyrus-console-message__markdown p,
+.papyrus-console-message__markdown li {
+  margin: 0;
+}
+
+.papyrus-console-message__markdown ul,
+.papyrus-console-message__markdown ol {
+  margin: 0;
+  padding-left: 1.15rem;
+}
+
+.papyrus-console-message__markdown a {
+  color: rgb(var(--ink-solid-rgb) / var(--ink-display-alpha));
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.papyrus-console-message__markdown code {
+  background: rgb(var(--rule-rgb) / 0.13);
+  border-radius: 4px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.84em;
+  padding: 0 3px;
+}
+
+.papyrus-console-message__code {
+  background: rgb(var(--ink-rgb) / 0.06);
+  border: 1px solid rgb(var(--rule-rgb) / 0.2);
+  border-radius: 8px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.84rem;
+  line-height: 1.45;
+  margin: 0;
+  overflow-x: auto;
+  padding: 0.62rem 0.68rem;
+  white-space: pre;
+}
+
 .papyrus-console-message--user {
   justify-self: end;
   margin-left: auto;
@@ -7313,23 +7399,6 @@ img {
   font-size: 0.78rem;
 }
 
-.papyrus-console-ui .papyrus-console-shimmer {
-  --bg: linear-gradient(
-    90deg,
-    #0000 calc(50% - var(--spread)),
-    var(--color-background),
-    #0000 calc(50% + var(--spread))
-  );
-  background-clip: text;
-  background-repeat: no-repeat, padding-box;
-  background-size: 250% 100%, auto;
-  color: transparent;
-  display: inline-block;
-  font: 600 0.76rem/1.2 Arial, Helvetica, sans-serif;
-  position: relative;
-  -webkit-background-clip: text;
-}
-
 .papyrus-console__thinking {
   margin: 0;
   padding-bottom: var(--paper-rhythm, var(--edition-progress-height, 19px));
@@ -7338,6 +7407,7 @@ img {
 .papyrus-console__thinking-shimmer {
   --color-background: var(--paper);
   --color-muted-foreground: var(--ink);
+  font: 600 0.76rem/1.2 Arial, Helvetica, sans-serif;
 }
 
 .papyrus-console__scroll-bottom {
@@ -7368,58 +7438,34 @@ img {
 
 .papyrus-console__composer {
   border-top: 1px solid rgb(var(--rule-rgb) / 0.28);
-  display: grid;
   flex-shrink: 0;
-  gap: 10px;
   padding: 14px 18px 18px;
 }
 
-.papyrus-console-prompt-input__body {
-  display: grid;
-}
-
-.papyrus-console-prompt-input__footer {
-  align-items: center;
-  display: flex;
-  gap: 10px;
-  justify-content: space-between;
-}
-
-.papyrus-console-prompt-input__tools {
-  display: flex;
-  flex: 1;
-  min-width: 0;
-}
-
-.papyrus-console__composer textarea {
+.papyrus-console__composer [data-slot="input-group"] {
   background: rgb(var(--paper-rgb) / 0.86);
-  border: 1px solid rgb(var(--rule-rgb) / 0.35);
+  border-color: rgb(var(--rule-rgb) / 0.35);
+  box-shadow: none;
+}
+
+.papyrus-console__composer [data-slot="input-group-addon"] {
+  color: var(--muted-strong);
+}
+
+.papyrus-console__composer [data-slot="input-group-control"] {
   color: var(--ink);
   font: 0.92rem/1.35 Arial, Helvetica, sans-serif;
   min-height: 82px;
-  padding: 0.7rem;
-  resize: vertical;
 }
 
-.papyrus-console__composer button {
-  appearance: none;
-  background: var(--ink);
-  border: 1px solid var(--ink);
-  color: var(--paper);
-  cursor: pointer;
-  font: inherit;
-  font-size: 0.75rem;
-  font-weight: 900;
-  justify-self: end;
-  letter-spacing: 0.12em;
-  padding: 0.62rem 1rem;
-  text-transform: uppercase;
+.papyrus-console__composer [data-slot="button"] {
+  font-family: Arial, Helvetica, sans-serif;
 }
 
-.papyrus-console__composer button:disabled,
-.papyrus-console__composer textarea:disabled {
-  cursor: not-allowed;
-  opacity: 0.52;
+.papyrus-console__composer [data-slot="dialog-content"] {
+  background: rgb(var(--paper-rgb) / 0.98);
+  border: 1px solid rgb(var(--rule-rgb) / 0.35);
+  color: var(--ink);
 }
 
 .papyrus-console__error {
