@@ -13,7 +13,7 @@ import {
 } from "../lib/console-chat-client";
 import { loadReaderSessionSnapshot, type ReaderSessionSnapshot } from "./reader-auth-state";
 import { ModelSelector } from "./ai-elements/model-selector";
-import { PromptInput, type PromptInputMessage, PromptInputSubmit, PromptInputTextarea } from "./ai-elements/prompt-input";
+import { PromptInput, PromptInputBody, PromptInputFooter, type PromptInputMessage, PromptInputSubmit, PromptInputTextarea, PromptInputTools } from "./ai-elements/prompt-input";
 import { Shimmer } from "./ai-elements/shimmer";
 import { Suggestion, Suggestions } from "./ai-elements/suggestion";
 import { CONNECTION_STATE_CHANGE, ConnectionState } from "aws-amplify/data";
@@ -497,16 +497,6 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
           </button>
         ) : null}
       </div>
-      <div className="papyrus-console__model-row">
-        <p className="papyrus-console__model-label">Model</p>
-        <ModelSelector
-          aria-label="Console model"
-          disabled={sending}
-          onValueChange={handleModelChange}
-          options={CONSOLE_MODEL_OPTIONS}
-          value={selectedModel}
-        />
-      </div>
       <div className="papyrus-console__body" ref={messageBodyRef} role="log" aria-live="polite">
         {loading && !sortedMessages.length ? <p className="papyrus-console__empty">Loading conversation…</p> : null}
         {sortedMessages.map((message) => (
@@ -548,20 +538,33 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
       ) : null}
       {error ? <p className="papyrus-console__error">{error}</p> : null}
       <PromptInput className="papyrus-console__composer" onSubmit={(message) => void sendMessage(message)}>
-        <PromptInputTextarea
-          aria-label="Console message"
-          disabled={sending}
-          onChange={(event) => setDraft(event.target.value)}
-          placeholder="Ask about this edition, newsroom, or knowledge graph…"
-          rows={3}
-          value={draft}
-        />
-        <PromptInputSubmit
-          disabled={!draft.trim() || sending}
-          status={pending ? "streaming" : "ready"}
-        >
-          {sending ? "Sending…" : "Send"}
-        </PromptInputSubmit>
+        <PromptInputBody>
+          <PromptInputTextarea
+            aria-label="Console message"
+            disabled={sending}
+            onChange={(event) => setDraft(event.target.value)}
+            placeholder="Ask about this edition, newsroom, or knowledge graph…"
+            rows={3}
+            value={draft}
+          />
+        </PromptInputBody>
+        <PromptInputFooter>
+          <PromptInputTools>
+            <ModelSelector
+              aria-label="Console model"
+              disabled={sending}
+              onValueChange={handleModelChange}
+              options={CONSOLE_MODEL_OPTIONS}
+              value={selectedModel}
+            />
+          </PromptInputTools>
+          <PromptInputSubmit
+            disabled={!draft.trim() || sending}
+            status={pending ? "streaming" : "ready"}
+          >
+            {sending ? "Sending…" : "Send"}
+          </PromptInputSubmit>
+        </PromptInputFooter>
       </PromptInput>
     </div>
   );

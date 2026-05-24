@@ -30,6 +30,24 @@ export function PromptInput({ className, onSubmit, ...props }: PromptInputProps)
 
 export type PromptInputTextareaProps = ComponentPropsWithoutRef<"textarea">;
 
+export type PromptInputBodyProps = ComponentPropsWithoutRef<"div">;
+
+export function PromptInputBody({ className, ...props }: PromptInputBodyProps) {
+  return <div className={cn("papyrus-console-prompt-input__body", className)} {...props} />;
+}
+
+export type PromptInputFooterProps = ComponentPropsWithoutRef<"div">;
+
+export function PromptInputFooter({ className, ...props }: PromptInputFooterProps) {
+  return <div className={cn("papyrus-console-prompt-input__footer", className)} {...props} />;
+}
+
+export type PromptInputToolsProps = ComponentPropsWithoutRef<"div">;
+
+export function PromptInputTools({ className, ...props }: PromptInputToolsProps) {
+  return <div className={cn("papyrus-console-prompt-input__tools", className)} {...props} />;
+}
+
 export function PromptInputTextarea({ className, name = "prompt", onKeyDown, ...props }: PromptInputTextareaProps) {
   const handleKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
     onKeyDown?.(event);

@@ -7131,24 +7131,6 @@ img {
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
-.papyrus-console__model-row {
-  align-items: center;
-  display: grid;
-  flex-shrink: 0;
-  gap: 10px;
-  grid-template-columns: auto minmax(0, 1fr);
-  padding: 0 18px 10px;
-}
-
-.papyrus-console__model-label {
-  color: var(--muted-strong);
-  font-size: 0.64rem;
-  font-weight: 900;
-  letter-spacing: 0.14em;
-  margin: 0;
-  text-transform: uppercase;
-}
-
 .papyrus-console-model-selector {
   appearance: none;
   background: rgb(var(--paper-rgb) / 0.92);
@@ -7372,6 +7354,23 @@ img {
   flex-shrink: 0;
   gap: 10px;
   padding: 14px 18px 18px;
+}
+
+.papyrus-console-prompt-input__body {
+  display: grid;
+}
+
+.papyrus-console-prompt-input__footer {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.papyrus-console-prompt-input__tools {
+  display: flex;
+  flex: 1;
+  min-width: 0;
 }
 
 .papyrus-console__composer textarea {
