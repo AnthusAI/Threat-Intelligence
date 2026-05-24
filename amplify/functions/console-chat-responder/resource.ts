@@ -99,7 +99,7 @@ export class ConsoleChatResponderStack extends NestedStack {
     this.responderFunction.addToRolePolicy(new PolicyStatement({
       effect: Effect.ALLOW,
       actions: ["appsync:GraphQL"],
-      resources: [appSyncGraphQlArn(this, props.graphqlEndpoint)],
+      resources: appSyncGraphQlArns(this, props.graphqlEndpoint),
     }));
     this.responderFunction.addToRolePolicy(new PolicyStatement({
       effect: Effect.ALLOW,
@@ -114,7 +114,7 @@ export class ConsoleChatResponderStack extends NestedStack {
   }
 }
 
-function appSyncGraphQlArn(scope: Construct, graphqlEndpoint: string): string {
+function appSyncGraphQlArns(scope: Construct, graphqlEndpoint: string): string[] {
   const apiId = graphqlEndpoint
     .replace(/^https?:\/\//, "")
     .split(".")[0]
@@ -123,7 +123,11 @@ function appSyncGraphQlArn(scope: Construct, graphqlEndpoint: string): string {
     throw new Error(`Unable to parse AppSync API id from endpoint: ${graphqlEndpoint}`);
   }
   const stack = Stack.of(scope);
-  return `arn:aws:appsync:${stack.region}:${stack.account}:apis/${apiId}/*`;
+  const prefix = `arn:aws:appsync:${stack.region}:${stack.account}:apis/${apiId}/types`;
+  return [
+    `${prefix}/Mutation/fields/*`,
+    `${prefix}/Query/fields/*`,
+  ];
 }
 
 function parseEcrImageUri(imageUri: string): { repositoryName: string; tagOrDigest: string } {
