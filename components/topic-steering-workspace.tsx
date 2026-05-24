@@ -2778,6 +2778,7 @@ function NewsDeskDashboard({
           <ReferencesDeskView
             categories={mergeCategoryRecords(categorys, activeCategoryTreeNodes)}
             categorySets={categorySets}
+            corpora={corpora}
             graph={graph}
             initialCategoryLineageId={initialSelection.category}
             initialReferenceLineageId={initialSelection.reference}
@@ -5891,6 +5892,7 @@ function ConceptsDeskView({
 function ReferencesDeskView({
   categories,
   categorySets,
+  corpora,
   disabled,
   graph,
   initialCategoryLineageId,
@@ -5907,6 +5909,7 @@ function ReferencesDeskView({
 }: {
   categories: CategorySteeringCategory[];
   categorySets: CategorySteeringCategorySet[];
+  corpora: CategorySteeringCorpus[];
   disabled: boolean;
   graph: SemanticGraph;
   initialCategoryLineageId?: string | null;
@@ -5965,11 +5968,6 @@ function ReferencesDeskView({
     title: selectedReference.title ?? selectedReference.externalItemId,
     subtitle: selectedReference.corpusId,
   } : null);
-  const referenceInsight = useNewsroomInsightComposer(
-    selectedReference ? insightTargetForReference(selectedReference) : null,
-    disabled,
-    onCreateInsight,
-  );
   const selectedLineageId = selectedReference ? selectedReference.lineageId ?? selectedReference.id : null;
   const referenceSubtitles = useReferenceMetadataSubtitles(filteredReferences);
   const detail = categoryFilter
@@ -6060,9 +6058,10 @@ function ReferencesDeskView({
           <ReferenceDetailPanel
             categories={categories}
             categorySets={categorySets}
+            corpora={corpora}
             disabled={disabled}
             graph={graph}
-            insightAction={referenceInsight.action}
+            onCreateInsight={onCreateInsight}
             onReview={runReferenceAction}
             onReviewTopicLabel={onReviewTopicLabel}
             onSetQualityRating={onSetQualityRating}
@@ -6075,7 +6074,6 @@ function ReferencesDeskView({
         )}
       />
       {referenceKnowledgeQuery.dialog}
-      {referenceInsight.dialog}
     </>
   );
 }
@@ -6446,7 +6444,7 @@ function NewsroomListDetailShell({
   const baselineListWidthRef = useRef(0);
   const selectionScrollInitializedRef = useRef(false);
   const previousSelectionScrollKeyRef = useRef<string | null>(null);
-  const canToggleDetailMode = useMediaQuery("(min-width: 1101px)");
+  const canToggleDetailMode = useMediaQuery("(min-width: 1158px)");
   const prefersReducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   const enabledActions = actions.filter((action) => !action.disabled);
   const hasActions = actions.length > 0;
@@ -8477,10 +8475,11 @@ function InsightMessageBlock({ insights }: { insights: MessageRecord[] }) {
 function ReferenceDetailPanel({
   categories,
   categorySets,
+  corpora,
   curation,
   disabled,
   graph,
-  insightAction,
+  onCreateInsight,
   onReview,
   onReviewTopicLabel,
   onSetQualityRating,
@@ -8491,10 +8490,11 @@ function ReferenceDetailPanel({
 }: {
   categories: CategorySteeringCategory[];
   categorySets: CategorySteeringCategorySet[];
+  corpora: CategorySteeringCorpus[];
   curation: ReferenceCurationDisplayState | null;
   disabled: boolean;
   graph: SemanticGraph;
-  insightAction: NewsroomDetailAction | null;
+  onCreateInsight: (target: InsightTarget, summary: string, body: string) => Promise<void>;
   onReview: (action: ReferenceCurationAction) => void;
   onReviewTopicLabel: (input: { action: TopicLabelAction; category: CategorySteeringCategory; note?: string | null; reference: ReferenceRecord; sourceRelationId?: string | null }) => void;
   onSetQualityRating: (reference: ReferenceRecord, rating: number) => void;
@@ -8533,7 +8533,6 @@ function ReferenceDetailPanel({
               <ReferenceCurationCluster
                 curation={detailCuration}
                 disabled={disabled}
-                insightAction={insightAction}
                 qualityActionState={qualityActionState}
                 onReview={onReview}
                 onSetQualityRating={(rating) => onSetQualityRating(reference, rating)}
@@ -8563,13 +8562,18 @@ function ReferenceDetailPanel({
               <div className="news-desk-detail-line"><span>Corpus</span><strong>{reference.corpusId}</strong></div>
               <p className="news-desk-reference-detail__source-meta-row">
                 <span className="news-desk-reference-detail__source-meta-label">External ID</span>
-                <span className="news-desk-reference-detail__source-meta-value" title={reference.externalItemId}>{reference.externalItemId}</span>
+                <span
+                  className="news-desk-reference-detail__source-meta-value news-desk-reference-detail__source-meta-value--external-id"
+                  title={reference.externalItemId}
+                >
+                  {reference.externalItemId}
+                </span>
               </p>
               {authors ? <div className="news-desk-detail-line"><span>Authors</span><strong>{authors}</strong></div> : null}
               {reference.sourceUri ? (
-                <p className="news-desk-reference-detail__source-meta-row">
+                <p className="news-desk-reference-detail__source-meta-row news-desk-reference-detail__source-meta-row--uri">
                   <span className="news-desk-reference-detail__source-meta-label">Source URI</span>
-                  <span className="news-desk-reference-detail__source-meta-value" title={reference.sourceUri}>
+                  <span className="news-desk-reference-detail__source-meta-value news-desk-reference-detail__source-meta-value--uri" title={reference.sourceUri}>
                     <a href={reference.sourceUri} rel="noopener noreferrer" target="_blank">{reference.sourceUri}</a>
                   </span>
                 </p>
@@ -8583,6 +8587,13 @@ function ReferenceDetailPanel({
               onReviewTopicLabel={onReviewTopicLabel}
               reference={reference}
               semanticRelations={semanticRelations}
+            />
+            <ReferenceCorpusPanel corpora={corpora} reference={reference} />
+            <ReferenceInsightPanel
+              disabled={disabled}
+              insights={insights}
+              onCreateInsight={onCreateInsight}
+              reference={reference}
             />
             {attachments.length ? (
               <div className="news-desk-detail-block">
@@ -8612,9 +8623,6 @@ function ReferenceDetailPanel({
               />
             </NewsroomExpander>
             {referencePayloadState.error ? <p className="news-desk-detail-copy">{referencePayloadState.error}</p> : null}
-            {insights.length ? (
-              <InsightMessageBlock insights={insights} />
-            ) : null}
             {messages.length ? (
               <div className="news-desk-detail-block">
                 <p className="story-label">Messages</p>
@@ -8846,14 +8854,12 @@ function shouldFailReferenceQualityMutationForTest(): boolean {
 function ReferenceCurationCluster({
   curation,
   disabled,
-  insightAction,
   qualityActionState,
   onReview,
   onSetQualityRating,
 }: {
   curation: ReferenceCurationDisplayState;
   disabled: boolean;
-  insightAction: NewsroomDetailAction | null;
   qualityActionState: ReferenceQualityActionState | null;
   onReview: (action: ReferenceCurationAction) => void;
   onSetQualityRating: (rating: number) => void;
@@ -8958,20 +8964,6 @@ function ReferenceCurationCluster({
             );
           })}
         </div>
-        {insightAction ? (
-          <button
-            type="button"
-            aria-label={insightAction.ariaLabel ?? insightAction.label}
-            className="news-desk-detail-toolbar-button"
-            data-news-desk-reference-insight-trigger
-            disabled={clusterDisabled || insightAction.disabled}
-            onClick={insightAction.onSelect}
-            title={insightAction.label}
-          >
-            {insightAction.icon ?? <InsightIcon />}
-            <span>Add Insight</span>
-          </button>
-        ) : null}
         {menuActions.length ? (
           <div className="newsroom-list-detail-shell__action-menu-wrap" ref={menuRef}>
             <button
@@ -9076,6 +9068,7 @@ function ReferenceTopicLabelPanel({
 }) {
   const [categoryId, setCategoryId] = useState("");
   const [note, setNote] = useState("");
+  const [composerOpen, setComposerOpen] = useState(false);
   const currentCategorySetIds = new Set(categorySets.filter((set) => set.versionState === "current" || set.versionState === "draft").map((set) => set.id));
   const labelableCategories = categories
     .filter((category) => currentCategorySetIds.has(category.categorySetId))
@@ -9090,61 +9083,298 @@ function ReferenceTopicLabelPanel({
     && ["classified_as", "authoritative_label"].includes(semanticRelationKind(relation))
   ));
   const canLabel = isCurrentAcceptedReferenceRecord(reference);
+  const relationRows = relations.map((relation) => {
+    const category = categories.find((entry) => entry.id === relation.objectId || entry.lineageId === relation.objectLineageId) ?? null;
+    const relationKind = semanticRelationKind(relation);
+    const metadata = metadataRecord(relation.metadata);
+    const explanation = normalizeMetadataString(metadata?.explanation)
+      ?? normalizeMetadataString(metadata?.reason)
+      ?? normalizeMetadataString(metadata?.note);
+    const source = relation.importRunId
+      ? `import ${relation.importRunId}`
+      : relation.classifierId
+        ? `classifier ${relation.classifierId}`
+        : relationKind === "authoritative_label"
+          ? "editor"
+          : "system";
+    return {
+      category,
+      explanation,
+      relation,
+      relationKind,
+      source,
+    };
+  });
+
   return (
-    <div className="news-desk-detail-block" data-reference-topic-labels>
-      <p className="story-label">Topic Labels</p>
-      {!canLabel ? <p className="news-desk-detail-copy">Only current accepted references can receive authoritative labels.</p> : null}
-      <label className="news-desk-reference-curation-note">
-        <span>Topic</span>
-        <select disabled={disabled || !canLabel} value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
-          <option value="">Select topic</option>
-          {labelableCategories.map((category) => {
-            const categorySet = categorySets.find((set) => set.id === category.categorySetId);
-            return (
-              <option key={category.id} value={category.id}>
-                {category.depth ? " - " : ""}{category.displayName} ({categorySet?.versionState ?? "set"})
-              </option>
-            );
-          })}
-        </select>
-      </label>
-      <label className="news-desk-reference-curation-note">
-        <span>Rationale</span>
-        <input disabled={disabled || !canLabel} value={note} onChange={(event) => setNote(event.target.value)} placeholder="Why this reference is a seed example" />
-      </label>
-      <button
-        type="button"
-        disabled={disabled || !canLabel || !selectedCategory}
-        onClick={() => {
-          if (!selectedCategory) return;
-          onReviewTopicLabel({ action: "manual_label", category: selectedCategory, reference, note });
-          setCategoryId("");
-          setNote("");
-        }}
-      >
-        Add authoritative label
-      </button>
-      {relations.length ? relations.map((relation) => {
-        const category = categories.find((entry) => entry.id === relation.objectId || entry.lineageId === relation.objectLineageId);
-        const kind = semanticRelationKind(relation);
-        return (
-          <div className="news-desk-detail-line" key={relation.id}>
-            <span>{kind}</span>
-            <strong>{category?.displayName ?? relation.objectId}</strong>
-            {kind === "authoritative_label" && category ? (
-              <button type="button" disabled={disabled} onClick={() => onReviewTopicLabel({ action: "unlabel", category, reference, sourceRelationId: relation.id })}>Remove</button>
-            ) : null}
-            {kind === "classified_as" && category ? (
-              <>
-                <button type="button" disabled={disabled || !canLabel} onClick={() => onReviewTopicLabel({ action: "accept_prediction", category, reference, sourceRelationId: relation.id })}>Accept</button>
-                <button type="button" disabled={disabled} onClick={() => onReviewTopicLabel({ action: "reject_prediction", category, reference, sourceRelationId: relation.id })}>Reject</button>
-              </>
-            ) : null}
-          </div>
-        );
-      }) : <EmptyRow label="No predicted or authoritative topic labels for this reference." />}
-    </div>
+    <section className="news-desk-reference-workflow" data-reference-topic-workflow>
+      <header className="news-desk-reference-workflow__header">
+        <p className="story-label">Topic Labels</p>
+        {canLabel && !composerOpen ? (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => {
+              setComposerOpen(true);
+            }}
+          >
+            Add topic
+          </button>
+        ) : null}
+      </header>
+      <div className="news-desk-reference-workflow__columns">
+        <div className="news-desk-reference-workflow__state" data-reference-topic-state>
+          {relationRows.length ? relationRows.map((row) => (
+            <article className="news-desk-reference-topic-state-row" key={row.relation.id}>
+              <div className="news-desk-reference-topic-state-row__headline">
+                <strong>{row.category?.displayName ?? row.relation.objectId}</strong>
+                <span>{row.relationKind === "authoritative_label" ? "Authoritative label" : "Predicted topic"}</span>
+              </div>
+              <div className="news-desk-reference-topic-state-row__meta">
+                <span>{row.source}</span>
+                {row.explanation ? <p>{row.explanation}</p> : <p>No explanation attached.</p>}
+              </div>
+            </article>
+          )) : <EmptyRow label="No predicted or authoritative topic labels for this reference." />}
+        </div>
+        <div className="news-desk-reference-workflow__input" data-reference-topic-input>
+          {!canLabel ? <p className="news-desk-detail-copy">Only current accepted references can receive authoritative labels.</p> : null}
+          {canLabel && composerOpen ? (
+            <form
+              className="news-desk-reference-topic-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (disabled || !selectedCategory) return;
+                onReviewTopicLabel({ action: "manual_label", category: selectedCategory, reference, note });
+                setCategoryId("");
+                setNote("");
+                setComposerOpen(false);
+              }}
+            >
+              <label className="news-desk-reference-curation-note">
+                <span>Topic</span>
+                <select disabled={disabled} value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
+                  <option value="">Select topic</option>
+                  {labelableCategories.map((category) => {
+                    const categorySet = categorySets.find((set) => set.id === category.categorySetId);
+                    return (
+                      <option key={category.id} value={category.id}>
+                        {category.depth ? " - " : ""}{category.displayName} ({categorySet?.versionState ?? "set"})
+                      </option>
+                    );
+                  })}
+                </select>
+              </label>
+              <label className="news-desk-reference-curation-note">
+                <span>Rationale</span>
+                <input disabled={disabled} value={note} onChange={(event) => setNote(event.target.value)} placeholder="Why this reference is a seed example" />
+              </label>
+              <div className="news-desk-reference-topic-form__actions">
+                <button type="submit" disabled={disabled || !selectedCategory}>
+                  Add topic
+                </button>
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => {
+                    setComposerOpen(false);
+                    setCategoryId("");
+                    setNote("");
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          ) : null}
+          {relationRows.length ? (
+            <div className="news-desk-reference-topic-actions">
+              {relationRows.map((row) => {
+                const category = row.category;
+                return (
+                  <div className="news-desk-reference-topic-actions__row" key={`actions-${row.relation.id}`}>
+                    <strong>{category?.displayName ?? row.relation.objectId}</strong>
+                    {row.relationKind === "authoritative_label" && category ? (
+                      <button type="button" disabled={disabled} onClick={() => onReviewTopicLabel({ action: "unlabel", category, reference, sourceRelationId: row.relation.id })}>Remove</button>
+                    ) : null}
+                    {row.relationKind === "classified_as" && category ? (
+                      <>
+                        <button type="button" disabled={disabled || !canLabel} onClick={() => onReviewTopicLabel({ action: "accept_prediction", category, reference, sourceRelationId: row.relation.id })}>Accept</button>
+                        <button type="button" disabled={disabled} onClick={() => onReviewTopicLabel({ action: "reject_prediction", category, reference, sourceRelationId: row.relation.id })}>Reject</button>
+                      </>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </section>
   );
+}
+
+function ReferenceCorpusPanel({
+  corpora,
+  reference,
+}: {
+  corpora: CategorySteeringCorpus[];
+  reference: ReferenceRecord;
+}) {
+  const [selectedCorpusId, setSelectedCorpusId] = useState(reference.corpusId);
+  const selectableCorpora = corpora.length
+    ? corpora
+    : [{ id: reference.corpusId, name: reference.corpusId, role: "source" }];
+  return (
+    <section className="news-desk-reference-workflow" data-reference-corpus-workflow>
+      <header className="news-desk-reference-workflow__header">
+        <p className="story-label">Corpus</p>
+        <div className="news-desk-reference-corpus-control" data-reference-corpus-input>
+          <select aria-label="Corpus" value={selectedCorpusId} onChange={(event) => setSelectedCorpusId(event.target.value)}>
+            {selectableCorpora.map((entry) => (
+              <option key={entry.id} value={entry.id}>{entry.name}</option>
+            ))}
+          </select>
+          <span className="news-desk-reference-corpus-control__icon" aria-hidden="true">
+            <RotatingSectionTriangleIcon expanded />
+          </span>
+        </div>
+      </header>
+    </section>
+  );
+}
+
+function ReferenceInsightPanel({
+  disabled,
+  insights,
+  onCreateInsight,
+  reference,
+}: {
+  disabled: boolean;
+  insights: MessageRecord[];
+  onCreateInsight: (target: InsightTarget, summary: string, body: string) => Promise<void>;
+  reference: ReferenceRecord;
+}) {
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [body, setBody] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const target = useMemo(() => insightTargetForReference(reference), [reference]);
+  const hasInsights = insights.length > 0;
+
+  return (
+    <section className="news-desk-reference-workflow" data-reference-insight-workflow>
+      <header className="news-desk-reference-workflow__header">
+        <p className="story-label">Insights</p>
+        {!hasInsights && !composerOpen ? (
+          <button
+            type="button"
+            data-news-desk-reference-insight-trigger
+            disabled={disabled || saving}
+            onClick={() => {
+              setComposerOpen(true);
+              setError(null);
+            }}
+          >
+            Add insight
+          </button>
+        ) : null}
+      </header>
+      <div className="news-desk-reference-insight-shell" data-reference-insight-input>
+        {hasInsights ? (
+          <div className="news-desk-reference-insight-list" data-reference-insight-state>
+            {insights.map((message) => (
+              <article className="news-desk-reference-topic-state-row" key={message.id}>
+                <div className="news-desk-reference-topic-state-row__headline">
+                  <strong>{message.summary ?? "Stored insight"}</strong>
+                  <span>{message.authorLabel ?? message.source ?? "knowledge"}</span>
+                </div>
+                <div className="news-desk-reference-topic-state-row__meta">
+                  <span>{formatDateTime(message.createdAt)}</span>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : null}
+        {hasInsights && !composerOpen ? (
+          <button
+            type="button"
+            data-news-desk-reference-insight-trigger
+            disabled={disabled || saving}
+            onClick={() => {
+              setComposerOpen(true);
+              setError(null);
+            }}
+          >
+            Add insight
+          </button>
+        ) : null}
+        {composerOpen ? (
+          <form
+            className="news-desk-reference-insight-form"
+            data-news-desk-reference-insight-form
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (disabled || saving) return;
+              const cleanBody = body.trim();
+              if (!cleanBody) {
+                setError("Insight text is required.");
+                return;
+              }
+              const cleanSummary = summarizeInsightForStorage(cleanBody);
+              setSaving(true);
+              setError(null);
+              void onCreateInsight(target, cleanSummary, cleanBody)
+                .then(() => {
+                  setSaving(false);
+                  setBody("");
+                  setComposerOpen(false);
+                })
+                .catch((submitError) => {
+                  setSaving(false);
+                  setError(submitError instanceof Error ? submitError.message : "Could not save insight.");
+                });
+            }}
+          >
+              <label className="news-desk-reference-curation-note">
+                <span>Insight</span>
+                <textarea
+                  disabled={disabled || saving}
+                  value={body}
+                  onChange={(event) => setBody(event.target.value)}
+                />
+              </label>
+            {error ? <p className="news-desk-detail-copy">{error}</p> : null}
+            <div className="news-desk-reference-insight-form__actions">
+              <button type="submit" disabled={disabled || saving || !body.trim()}>
+                {saving ? "Saving" : "Save insight"}
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => {
+                  setComposerOpen(false);
+                  setBody("");
+                  setError(null);
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function summarizeInsightForStorage(body: string): string {
+  const normalized = body.trim().replace(/\s+/g, " ");
+  if (!normalized) return "Insight";
+  const firstSentenceMatch = normalized.match(/(.+?[.!?])(?:\s|$)/);
+  const candidate = (firstSentenceMatch?.[1] ?? normalized).trim();
+  if (candidate.length <= 120) return candidate;
+  return `${candidate.slice(0, 117).trimEnd()}...`;
 }
 
 function NeighborGroups({ groups }: { groups: SemanticNeighborGroup[] }) {
