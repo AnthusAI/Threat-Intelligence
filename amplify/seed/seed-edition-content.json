@@ -116,15 +116,15 @@
       "byline": "Papyrus Editorial Team",
       "dateline": "NEWSROOM",
       "image": {
-        "src": "/papyrus-plant-placeholder.png",
-        "alt": "A black papyrus plant silhouette",
+        "src": "/agent-procedure-continuum.svg",
+        "alt": "A continuum from scripts to bounded agents",
         "caption": "The newsroom pipeline moves from research to approved edition while preserving human oversight.",
-        "credit": "Papyrus",
+        "credit": "Papyrus chart",
         "layout": {
           "minHeight": 120,
-          "preferredHeight": 230,
-          "maxHeight": 420,
-          "aspectRatio": 0.785,
+          "preferredHeight": 220,
+          "maxHeight": 380,
+          "aspectRatio": 1.5,
           "crop": "contain",
           "wrapsText": true
         }
@@ -186,15 +186,15 @@
       "byline": "Papyrus Editorial Team",
       "dateline": "NEWSROOM",
       "image": {
-        "src": "/papyrus-plant-placeholder.png",
-        "alt": "A black papyrus plant silhouette",
+        "src": "/agent-procedure-continuum.svg",
+        "alt": "A continuum from scripts to bounded agents",
         "caption": "Teams can choose the amount of steering per cycle without changing the core workflow.",
-        "credit": "Papyrus",
+        "credit": "Papyrus chart",
         "layout": {
           "minHeight": 100,
           "preferredHeight": 210,
           "maxHeight": 360,
-          "aspectRatio": 0.785,
+          "aspectRatio": 1.5,
           "crop": "contain",
           "wrapsText": true
         }
@@ -246,15 +246,15 @@
       "byline": "Papyrus Editorial Team",
       "dateline": "NEWSROOM",
       "image": {
-        "src": "/papyrus-plant-placeholder.png",
-        "alt": "A black papyrus plant silhouette",
+        "src": "/agent-procedure-continuum.svg",
+        "alt": "A continuum from scripts to bounded agents",
         "caption": "First-install setup defines the direction the newsroom will continue to follow.",
-        "credit": "Papyrus",
+        "credit": "Papyrus chart",
         "layout": {
           "minHeight": 100,
           "preferredHeight": 210,
           "maxHeight": 360,
-          "aspectRatio": 0.785,
+          "aspectRatio": 1.5,
           "crop": "contain",
           "wrapsText": true
         }
@@ -304,15 +304,15 @@
       "byline": "Papyrus Editorial Team",
       "dateline": "NEWSROOM",
       "image": {
-        "src": "/papyrus-plant-placeholder.png",
-        "alt": "A black papyrus plant silhouette",
+        "src": "/agent-procedure-continuum.svg",
+        "alt": "A continuum from scripts to bounded agents",
         "caption": "Reference curation is the durable editorial memory behind future coverage.",
-        "credit": "Papyrus",
+        "credit": "Papyrus chart",
         "layout": {
           "minHeight": 100,
           "preferredHeight": 210,
           "maxHeight": 360,
-          "aspectRatio": 0.785,
+          "aspectRatio": 1.5,
           "crop": "contain",
           "wrapsText": true
         }
@@ -362,15 +362,15 @@
       "byline": "Papyrus Editorial Team",
       "dateline": "NEWSROOM",
       "image": {
-        "src": "/papyrus-plant-placeholder.png",
-        "alt": "A black papyrus plant silhouette",
+        "src": "/agent-procedure-continuum.svg",
+        "alt": "A continuum from scripts to bounded agents",
         "caption": "Routine reference maintenance keeps the newsroom from drifting toward stale or weak evidence.",
-        "credit": "Papyrus",
+        "credit": "Papyrus chart",
         "layout": {
           "minHeight": 100,
           "preferredHeight": 210,
           "maxHeight": 360,
-          "aspectRatio": 0.785,
+          "aspectRatio": 1.5,
           "crop": "contain",
           "wrapsText": true
         }
