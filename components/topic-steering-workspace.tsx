@@ -1167,10 +1167,10 @@ function NewsDeskDashboard({
   ]);
 
   const applyReferenceRecord = useCallback((nextReference: ReferenceRecord) => {
-    const { nextRecords, previousRecord } = upsertReferenceRecords(referencesRef.current, nextReference);
+    const { nextRecords, nextRecord, previousRecord } = upsertReferenceRecords(referencesRef.current, nextReference);
     referencesRef.current = nextRecords;
     setReferences(nextRecords);
-    setSummary((current) => patchReferenceSummary(current, previousRecord, nextReference));
+    setSummary((current) => patchReferenceSummary(current, previousRecord, nextRecord));
     return { nextRecords, previousRecord };
   }, []);
 
@@ -1198,6 +1198,26 @@ function NewsDeskDashboard({
     hasHydratedReferences,
     referenceSubscriptionClient.models.Reference,
   ]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let isTestEditor = false;
+    try {
+      isTestEditor = window.localStorage.getItem("papyrus:test-editor") === "true";
+    } catch {
+      isTestEditor = false;
+    }
+    if (!isTestEditor) return;
+    const handleTestReferenceUpdate = (event: Event) => {
+      const nextReference = normalizeReferenceSubscriptionPayload((event as CustomEvent<unknown>).detail);
+      if (!nextReference) return;
+      applyReferenceRecord(nextReference);
+    };
+    window.addEventListener("papyrus:test-reference-update", handleTestReferenceUpdate);
+    return () => {
+      window.removeEventListener("papyrus:test-reference-update", handleTestReferenceUpdate);
+    };
+  }, [applyReferenceRecord]);
 
   function runProposalAction(proposal: CategorySteeringProposal, action: ReviewAction) {
     setActionState({ id: proposal.id, message: `${action} pending`, tone: "pending" });
@@ -5927,12 +5947,17 @@ function ReferencesDeskView({
       ? references.filter((reference) => categoryReferenceLineages.has(reference.lineageId ?? reference.id))
       : isDemo ? references : feed.items
   ), [categoryReferenceLineages, feed.items, isDemo, references]);
-  const filteredReferences = visibleReferences
+  const canonicalVisibleReferences = useMemo(
+    () => selectCanonicalReferenceRecords(visibleReferences),
+    [visibleReferences],
+  );
+  const filteredReferences = canonicalVisibleReferences
     .filter((reference) => !statusFilter || (reference.curationStatus ?? "pending") === statusFilter)
     .filter((reference) => !metricStatusFilter || (reference.curationStatus ?? "pending") === metricStatusFilter);
   const requestedReferenceLineageId = selectedReferenceLineageId || initialReferenceLineageId || "";
-  const selectedReference = filteredReferences.find((reference) => (reference.lineageId ?? reference.id) === requestedReferenceLineageId)
-    ?? (requestedReferenceLineageId ? references.find((reference) => (reference.lineageId ?? reference.id) === requestedReferenceLineageId) : null)
+  const selectedReference = selectedReferenceRecordByLineage(filteredReferences, requestedReferenceLineageId)
+    ?? selectedReferenceRecordByLineage(canonicalVisibleReferences, requestedReferenceLineageId)
+    ?? selectedReferenceRecordByLineage(references, requestedReferenceLineageId)
     ?? filteredReferences[0]
     ?? null;
   const referenceKnowledgeQuery = useNewsroomKnowledgeContext(selectedReference ? {
@@ -5950,8 +5975,8 @@ function ReferencesDeskView({
   const detail = categoryFilter
     ? `${filteredReferences.length} references classified as ${categoryFilter.label}`
     : `${filteredReferences.length} private corpus items`;
-  const statusCounts = categoryFilter ? countReferencesByStatus(visibleReferences) : summary?.facets?.references?.byCurationStatus ?? summary?.referenceStatusCounts ?? countReferencesByStatus(visibleReferences);
-  const totalReferenceCount = categoryFilter ? visibleReferences.length : summaryCountFromRecord(summary, "references") || visibleReferences.length;
+  const statusCounts = categoryFilter ? countReferencesByStatus(canonicalVisibleReferences) : summary?.facets?.references?.byCurationStatus ?? summary?.referenceStatusCounts ?? countReferencesByStatus(canonicalVisibleReferences);
+  const totalReferenceCount = categoryFilter ? canonicalVisibleReferences.length : summaryCountFromRecord(summary, "references") || canonicalVisibleReferences.length;
   const cards = filteredReferences.map((reference, index) => referenceToNewsroomCard(
     reference,
     index,
@@ -8514,7 +8539,15 @@ function ReferenceDetailPanel({
                 onSetQualityRating={(rating) => onSetQualityRating(reference, rating)}
               />
               <p className="news-desk-reference-detail__meta-row">
-                <span>{[detailCuration.effectiveStatus, reference.mediaType ?? "metadata", formatReferenceDate(reference)].filter(Boolean).join(" / ")}</span>
+                <span>{[detailCuration.effectiveStatus, reference.mediaType ?? "metadata"].filter(Boolean).join(" / ")}</span>
+              </p>
+              <p className="news-desk-reference-detail__meta-date-row">
+                <span className="news-desk-reference-detail__meta-date-label">Published</span>
+                <span className="news-desk-reference-detail__meta-date-value">{formatReferencePublishedDate(reference)}</span>
+              </p>
+              <p className="news-desk-reference-detail__meta-date-row">
+                <span className="news-desk-reference-detail__meta-date-label">Imported</span>
+                <span className="news-desk-reference-detail__meta-date-value">{formatReferenceImportedDate(reference)}</span>
               </p>
               {metadataSubtitle ? <p className="news-desk-semantic-detail__subheading">{metadataSubtitle}</p> : null}
               {metadataSummary ? <p className="news-desk-semantic-detail__summary">{metadataSummary}</p> : null}
@@ -8527,11 +8560,20 @@ function ReferenceDetailPanel({
         ) : (
           <>
             <div className="news-desk-detail-block news-desk-detail-block--source-material">
-              <p className="story-label">Source Material</p>
               <div className="news-desk-detail-line"><span>Corpus</span><strong>{reference.corpusId}</strong></div>
-              <div className="news-desk-detail-line"><span>External ID</span><strong>{reference.externalItemId}</strong></div>
+              <p className="news-desk-reference-detail__source-meta-row">
+                <span className="news-desk-reference-detail__source-meta-label">External ID</span>
+                <span className="news-desk-reference-detail__source-meta-value" title={reference.externalItemId}>{reference.externalItemId}</span>
+              </p>
               {authors ? <div className="news-desk-detail-line"><span>Authors</span><strong>{authors}</strong></div> : null}
-              {reference.sourceUri ? <div className="news-desk-detail-line"><span>Source URI</span><strong>{reference.sourceUri}</strong></div> : null}
+              {reference.sourceUri ? (
+                <p className="news-desk-reference-detail__source-meta-row">
+                  <span className="news-desk-reference-detail__source-meta-label">Source URI</span>
+                  <span className="news-desk-reference-detail__source-meta-value" title={reference.sourceUri}>
+                    <a href={reference.sourceUri} rel="noopener noreferrer" target="_blank">{reference.sourceUri}</a>
+                  </span>
+                </p>
+              ) : null}
               {reference.storagePath ? <div className="news-desk-detail-line"><span>Storage</span><strong>{reference.storagePath}</strong></div> : null}
             </div>
             <ReferenceTopicLabelPanel
@@ -11043,7 +11085,7 @@ function referenceMetadataSubtitle(payload: HydratedModelPayload | null, fallbac
 function referenceMetadataField(
   payload: HydratedModelPayload | null,
   fallback: unknown,
-  key: "subtitle" | "summary",
+  key: "subtitle",
 ): string | null {
   const payloadRecord = metadataRecord(payload?.json);
   if (payloadRecord) {
@@ -13208,13 +13250,18 @@ function buildReviewedReferenceRecord(
 function upsertReferenceRecords(
   current: ReferenceRecord[],
   nextReference: ReferenceRecord,
-): { nextRecords: ReferenceRecord[]; previousRecord: ReferenceRecord | null } {
-  const previousRecord = current.find((entry) => entry.id === nextReference.id) ?? null;
+): { nextRecords: ReferenceRecord[]; nextRecord: ReferenceRecord; previousRecord: ReferenceRecord | null } {
+  const lineageId = referenceLineageId(nextReference);
+  const previousRecord = selectedReferenceRecordByLineage(current, lineageId);
+  const merged = [
+    nextReference,
+    ...current.filter((entry) => entry.id !== nextReference.id),
+  ];
+  const nextRecords = sortReferencesByRecency(selectCanonicalReferenceRecords(merged));
+  const nextRecord = selectedReferenceRecordByLineage(nextRecords, lineageId) ?? nextReference;
   return {
-    nextRecords: [
-      nextReference,
-      ...current.filter((entry) => entry.id !== nextReference.id),
-    ].sort(compareReferencesByRecency),
+    nextRecords,
+    nextRecord,
     previousRecord,
   };
 }
@@ -13336,11 +13383,64 @@ function compareReferencesByRecency(left: ReferenceRecord, right: ReferenceRecor
   return (left.title ?? left.externalItemId).localeCompare(right.title ?? right.externalItemId);
 }
 
+function selectedReferenceRecordByLineage(
+  references: ReferenceRecord[],
+  requestedLineageId: string | null | undefined,
+): ReferenceRecord | null {
+  if (!requestedLineageId) return null;
+  const lineageMatches = references.filter((reference) => referenceLineageId(reference) === requestedLineageId);
+  if (!lineageMatches.length) return null;
+  return lineageMatches.reduce((best, current) => (
+    compareReferencesForCanonicalChoice(current, best) < 0 ? current : best
+  ));
+}
+
+function selectCanonicalReferenceRecords(references: ReferenceRecord[]): ReferenceRecord[] {
+  const byLineage = new Map<string, ReferenceRecord>();
+  for (const reference of references) {
+    const key = referenceLineageId(reference);
+    const current = byLineage.get(key);
+    if (!current || compareReferencesForCanonicalChoice(reference, current) < 0) {
+      byLineage.set(key, reference);
+    }
+  }
+  return Array.from(byLineage.values());
+}
+
+function referenceLineageId(reference: ReferenceRecord): string {
+  return reference.lineageId ?? reference.id;
+}
+
+function compareReferencesForCanonicalChoice(left: ReferenceRecord, right: ReferenceRecord): number {
+  const leftCurrent = left.versionState === "current" ? 1 : 0;
+  const rightCurrent = right.versionState === "current" ? 1 : 0;
+  if (leftCurrent !== rightCurrent) return rightCurrent - leftCurrent;
+
+  const leftVersion = Number.isFinite(left.versionNumber) ? Number(left.versionNumber) : 0;
+  const rightVersion = Number.isFinite(right.versionNumber) ? Number(right.versionNumber) : 0;
+  if (leftVersion !== rightVersion) return rightVersion - leftVersion;
+
+  return compareReferencesByRecency(left, right);
+}
+
 function referenceSortDate(reference: ReferenceRecord): string {
   return reference.sourcePublishedAt
     ?? reference.sourceUpdatedAt
     ?? reference.retrievedAt
     ?? reference.importedAt
+    ?? reference.updatedAt
+    ?? "";
+}
+
+function referencePublishedDate(reference: ReferenceRecord): string {
+  return reference.sourcePublishedAt
+    ?? reference.sourceUpdatedAt
+    ?? "";
+}
+
+function referenceImportedDate(reference: ReferenceRecord): string {
+  return reference.importedAt
+    ?? reference.retrievedAt
     ?? reference.updatedAt
     ?? "";
 }
@@ -13353,6 +13453,16 @@ function referenceSummarySortDate(reference: SemanticObjectSummary): string {
 
 function formatReferenceDate(reference: ReferenceRecord): string {
   const value = referenceSortDate(reference);
+  return value ? formatShortDate(value) : "undated";
+}
+
+function formatReferencePublishedDate(reference: ReferenceRecord): string {
+  const value = referencePublishedDate(reference);
+  return value ? formatShortDate(value) : "undated";
+}
+
+function formatReferenceImportedDate(reference: ReferenceRecord): string {
+  const value = referenceImportedDate(reference);
   return value ? formatShortDate(value) : "undated";
 }
 
