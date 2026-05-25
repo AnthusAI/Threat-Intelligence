@@ -371,6 +371,42 @@ API_METHODS: dict[tuple[str, str], Callable[[dict[str, Any]], Any]] = {
 }
 
 
+def _reference_list_resource(args: dict[str, Any]) -> Any:
+    result = reference_curation_signals.reference_list(
+        corpus_key=args.get("corpusKey") or args.get("corpus_key") or "AI-ML-research",
+        limit=args.get("limit") or 25,
+        status=args.get("status") or "",
+        order=args.get("order") or "newest",
+        scan_limit=args.get("scanLimit") or args.get("scan_limit") or 1000,
+    )
+    response_format = str(args.get("format") or "markdown").strip().lower()
+    if response_format in {"json", "object", "raw"}:
+        return result
+
+    items = list(result.get("items") or [])
+    lines: list[str] = []
+    if items:
+        lines.append("## Recent References")
+        for index, item in enumerate(items, 1):
+            title = str(item.get("title") or "(untitled reference)").strip()
+            reference_id = str(item.get("id") or "").strip()
+            corpus_id = str(item.get("corpusId") or "").strip()
+            status = str(item.get("curationStatus") or "").strip()
+            updated_at = str(item.get("updatedAt") or item.get("createdAt") or "").strip()
+            lines.append(f"{index}. **{title}**")
+            if reference_id:
+                lines.append(f"   - id: `{reference_id}`")
+            if updated_at:
+                lines.append(f"   - updated: `{updated_at}`")
+            if corpus_id:
+                lines.append(f"   - corpus: `{corpus_id}`")
+            if status:
+                lines.append(f"   - status: `{status}`")
+    else:
+        lines.append("No references found for the current filter.")
+    return "\n".join(lines)
+
+
 RESOURCE_METHODS: dict[tuple[str, str], Callable[[dict[str, Any]], Any]] = {
     ("Assignment", "create"): lambda args: newsroom.papyrus_assignment_create(args),
     ("Assignment", "get"): lambda args: newsroom.papyrus_get_assignment(args.get("id") or args.get("assignmentId") or args.get("assignment_id")),
@@ -383,13 +419,7 @@ RESOURCE_METHODS: dict[tuple[str, str], Callable[[dict[str, Any]], Any]] = {
     ),
     ("Assignment", "update"): lambda args: newsroom.papyrus_assignment_update(args),
     ("Reference", "get"): lambda args: newsroom.papyrus_get_reference(args.get("id") or args.get("referenceId") or args.get("reference_id")),
-    ("Reference", "list"): lambda args: reference_curation_signals.reference_list(
-        corpus_key=args.get("corpusKey") or args.get("corpus_key") or "AI-ML-research",
-        limit=args.get("limit") or 25,
-        status=args.get("status") or "",
-        order=args.get("order") or "newest",
-        scan_limit=args.get("scanLimit") or args.get("scan_limit") or 1000,
-    ),
+    ("Reference", "list"): _reference_list_resource,
 }
 
 
