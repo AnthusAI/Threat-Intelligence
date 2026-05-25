@@ -149,6 +149,38 @@ export function PapyrusConsoleShell({ children }: PapyrusConsoleShellProps) {
     };
   }, []);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!(open && shouldOfferConsole)) return;
+
+    const { body, documentElement } = document;
+    const lockedScrollY = window.scrollY;
+
+    const previousBodyOverflow = body.style.overflow;
+    const previousBodyPosition = body.style.position;
+    const previousBodyTop = body.style.top;
+    const previousBodyWidth = body.style.width;
+    const previousBodyOverscrollBehaviorY = body.style.overscrollBehaviorY;
+    const previousHtmlOverscrollBehaviorY = documentElement.style.overscrollBehaviorY;
+
+    documentElement.style.overscrollBehaviorY = "none";
+    body.style.overscrollBehaviorY = "none";
+    body.style.overflow = "hidden";
+    body.style.position = "fixed";
+    body.style.top = `-${lockedScrollY}px`;
+    body.style.width = "100%";
+
+    return () => {
+      body.style.overflow = previousBodyOverflow;
+      body.style.position = previousBodyPosition;
+      body.style.top = previousBodyTop;
+      body.style.width = previousBodyWidth;
+      body.style.overscrollBehaviorY = previousBodyOverscrollBehaviorY;
+      documentElement.style.overscrollBehaviorY = previousHtmlOverscrollBehaviorY;
+      window.scrollTo(0, lockedScrollY);
+    };
+  }, [open, shouldOfferConsole]);
+
   const toggleOpen = useCallback(() => {
     setOpen((current) => {
       const next = !current;

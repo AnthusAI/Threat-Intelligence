@@ -8088,6 +8088,10 @@ img {
 
 .papyrus-console__scrollport {
   min-height: 0;
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
 }
 
 .papyrus-console__body {
@@ -8096,16 +8100,21 @@ img {
   flex-direction: column;
   gap: 14px;
   justify-content: flex-start;
+  max-width: 100%;
   min-height: 100%;
+  overflow-x: hidden;
   padding: 18px;
   position: relative;
+  touch-action: pan-y;
 }
 
 .papyrus-console__conversation {
   display: flex;
   flex: 1;
   min-height: 0;
+  overflow-x: hidden;
   position: relative;
+  touch-action: pan-y;
 }
 
 .papyrus-console__empty {
@@ -8160,6 +8169,7 @@ img {
   display: grid;
   gap: 0.38rem;
   max-width: 92%;
+  min-width: 0;
 }
 
 .papyrus-console-message > div {
@@ -8168,6 +8178,7 @@ img {
   border-radius: 14px;
   font-size: 0.92rem;
   line-height: 1.42;
+  min-width: 0;
   padding: 0.78rem 0.88rem;
   white-space: pre-wrap;
 }
