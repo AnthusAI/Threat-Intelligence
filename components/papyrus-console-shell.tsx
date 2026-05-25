@@ -162,38 +162,6 @@ export function PapyrusConsoleShell({ children }: PapyrusConsoleShellProps) {
     };
   }, []);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (!(open && shouldOfferConsole)) return;
-
-    const { body, documentElement } = document;
-    const lockedScrollY = window.scrollY;
-
-    const previousBodyOverflow = body.style.overflow;
-    const previousBodyPosition = body.style.position;
-    const previousBodyTop = body.style.top;
-    const previousBodyWidth = body.style.width;
-    const previousBodyOverscrollBehaviorY = body.style.overscrollBehaviorY;
-    const previousHtmlOverscrollBehaviorY = documentElement.style.overscrollBehaviorY;
-
-    documentElement.style.overscrollBehaviorY = "none";
-    body.style.overscrollBehaviorY = "none";
-    body.style.overflow = "hidden";
-    body.style.position = "fixed";
-    body.style.top = `-${lockedScrollY}px`;
-    body.style.width = "100%";
-
-    return () => {
-      body.style.overflow = previousBodyOverflow;
-      body.style.position = previousBodyPosition;
-      body.style.top = previousBodyTop;
-      body.style.width = previousBodyWidth;
-      body.style.overscrollBehaviorY = previousBodyOverscrollBehaviorY;
-      documentElement.style.overscrollBehaviorY = previousHtmlOverscrollBehaviorY;
-      window.scrollTo(0, lockedScrollY);
-    };
-  }, [open, shouldOfferConsole]);
-
   const toggleOpen = useCallback(() => {
     setOpen((current) => {
       const next = !current;
@@ -866,19 +834,16 @@ function ConsolePanel({ actorEmail, actorLabel, onClose }: { actorEmail: string 
     ))
   ), [sortedMessages]);
   const latestVisibleAvatarAnchorMessageId = useMemo(() => {
-    let latestAssistantMessageId: string | null = null;
-    let latestToolSignalMessageId: string | null = null;
+    let latestAgentMessageId: string | null = null;
     for (const message of displayMessages) {
       const content = (message.content ?? "").trim();
       if (isSupersededRunningAssistantMessage(message, content)) continue;
-      if (message.role === "ASSISTANT") {
-        latestAssistantMessageId = message.id;
-        if (message.messageKind === CONSOLE_TOOL_CALL_KIND || message.messageKind === CONSOLE_TOOL_RESULT_KIND) {
-          latestToolSignalMessageId = message.id;
-        }
+      const isAgentRole = message.role === "ASSISTANT" || message.role === "TOOL";
+      if (isAgentRole) {
+        latestAgentMessageId = message.id;
       }
     }
-    return latestToolSignalMessageId ?? latestAssistantMessageId;
+    return latestAgentMessageId;
   }, [displayMessages, isSupersededRunningAssistantMessage]);
   const streamingAutoStickSignal = useMemo(() => {
     const activeStreamingAssistant = [...displayMessages]
@@ -939,7 +904,7 @@ function ConsolePanel({ actorEmail, actorLabel, onClose }: { actorEmail: string 
             const summary = (message.summary ?? "").trim();
             const sanitizedSummary = sanitizeConsoleSummary(summary);
             const isSupersededRunningAssistant = isSupersededRunningAssistantMessage(message, content);
-            const showAssistantAvatar = message.role === "ASSISTANT" && message.id === latestVisibleAvatarAnchorMessageId;
+            const showAssistantAvatar = message.id === latestVisibleAvatarAnchorMessageId;
             const assistantAvatar = showAssistantAvatar
               ? resolveAssistantAvatarPresentation(message, content, motionSetting === "low", pending)
               : null;
