@@ -43,6 +43,7 @@ import {
 import { PromptInput, PromptInputBody, PromptInputButton, PromptInputFooter, type PromptInputMessage, PromptInputSubmit, PromptInputTextarea, PromptInputTools } from "./ai-elements/prompt-input";
 import { Shimmer } from "./ai-elements/shimmer";
 import { Suggestion, Suggestions } from "./ai-elements/suggestion";
+import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from "./ai-elements/tool";
 import { CONNECTION_STATE_CHANGE, ConnectionState } from "aws-amplify/data";
 import { Hub } from "aws-amplify/utils";
 import {
@@ -124,6 +125,22 @@ type PapyrusConsoleContextValue = {
 type DisplayConsoleMessage = ConsoleChatMessage & {
   pendingPlaceholder?: boolean;
 };
+
+type ConsoleToolTimelineEntry = {
+  id: string;
+  firstSequence: number;
+  firstCreatedAt: string;
+  messageKind: string;
+  role: "TOOL";
+  toolCallId: string;
+  toolName: string;
+  callMessage?: DisplayConsoleMessage;
+  resultMessage?: DisplayConsoleMessage;
+};
+
+type ConsoleTimelineEntry =
+  | { kind: "message"; id: string; message: DisplayConsoleMessage }
+  | { kind: "tool"; id: string; tool: ConsoleToolTimelineEntry };
 
 type AssistantAvatarTone = "default" | "error";
 type ConsoleAuthorIdentity = {
@@ -820,6 +837,55 @@ function ConsolePanel({ actorEmail, actorLabel, onClose }: { actorEmail: string 
       },
     ];
   }, [latestAwaitingAssistantUserMessage, sortedMessages]);
+  const timelineEntries = useMemo<ConsoleTimelineEntry[]>(() => {
+    const groupedTools = new Map<string, ConsoleToolTimelineEntry>();
+    const entries: ConsoleTimelineEntry[] = [];
+
+    for (const message of displayMessages) {
+      const isToolMessage = message.messageKind === CONSOLE_TOOL_CALL_KIND || message.messageKind === CONSOLE_TOOL_RESULT_KIND;
+      if (!isToolMessage) {
+        entries.push({ kind: "message", id: message.id, message });
+        continue;
+      }
+      const metadata = readAwsJsonObject(message.metadata);
+      const toolCallId = readNestedString(metadata, ["toolCallId"]);
+      const toolName = readNestedString(metadata, ["toolName"]);
+      if (!toolCallId) {
+        entries.push({ kind: "message", id: message.id, message });
+        continue;
+      }
+
+      const existing = groupedTools.get(toolCallId);
+      if (!existing) {
+        const firstSequence = typeof message.sequenceNumber === "number" ? message.sequenceNumber : Number.MAX_SAFE_INTEGER;
+        const next: ConsoleToolTimelineEntry = {
+          id: `tool-timeline-${toolCallId}`,
+          firstSequence,
+          firstCreatedAt: message.createdAt,
+          messageKind: message.messageKind ?? CONSOLE_TOOL_CALL_KIND,
+          role: "TOOL",
+          toolCallId,
+          toolName: toolName ?? "execute_tactus",
+          callMessage: message.messageKind === CONSOLE_TOOL_CALL_KIND ? message : undefined,
+          resultMessage: message.messageKind === CONSOLE_TOOL_RESULT_KIND ? message : undefined,
+        };
+        groupedTools.set(toolCallId, next);
+        entries.push({ kind: "tool", id: next.id, tool: next });
+        continue;
+      }
+
+      if (!existing.toolName && toolName) existing.toolName = toolName;
+      if (message.messageKind === CONSOLE_TOOL_CALL_KIND) existing.callMessage = message;
+      if (message.messageKind === CONSOLE_TOOL_RESULT_KIND) existing.resultMessage = message;
+      const sequence = typeof message.sequenceNumber === "number" ? message.sequenceNumber : Number.MAX_SAFE_INTEGER;
+      if (sequence < existing.firstSequence || (sequence === existing.firstSequence && message.createdAt < existing.firstCreatedAt)) {
+        existing.firstSequence = sequence;
+        existing.firstCreatedAt = message.createdAt;
+      }
+    }
+
+    return entries;
+  }, [displayMessages]);
   const isSupersededRunningAssistantMessage = useCallback((
     message: DisplayConsoleMessage,
     _trimmedContent: string,
@@ -833,18 +899,20 @@ function ConsolePanel({ actorEmail, actorLabel, onClose }: { actorEmail: string 
       && (candidate.parentMessageId === message.id || (candidate.sequenceNumber ?? 0) > (message.sequenceNumber ?? 0))
     ))
   ), [sortedMessages]);
-  const latestVisibleAvatarAnchorMessageId = useMemo(() => {
-    let latestAgentMessageId: string | null = null;
-    for (const message of displayMessages) {
-      const content = (message.content ?? "").trim();
-      if (isSupersededRunningAssistantMessage(message, content)) continue;
-      const isAgentRole = message.role === "ASSISTANT" || message.role === "TOOL";
-      if (isAgentRole) {
-        latestAgentMessageId = message.id;
+  const latestVisibleAvatarAnchorId = useMemo(() => {
+    let latestAgentEntryId: string | null = null;
+    for (const entry of timelineEntries) {
+      if (entry.kind === "tool") {
+        latestAgentEntryId = entry.id;
+        continue;
       }
+      const content = (entry.message.content ?? "").trim();
+      if (isSupersededRunningAssistantMessage(entry.message, content)) continue;
+      const isAgentRole = entry.message.role === "ASSISTANT" || entry.message.role === "TOOL";
+      if (isAgentRole) latestAgentEntryId = entry.id;
     }
-    return latestAgentMessageId;
-  }, [displayMessages, isSupersededRunningAssistantMessage]);
+    return latestAgentEntryId;
+  }, [isSupersededRunningAssistantMessage, timelineEntries]);
   const streamingAutoStickSignal = useMemo(() => {
     const activeStreamingAssistant = [...displayMessages]
       .reverse()
@@ -899,14 +967,40 @@ function ConsolePanel({ actorEmail, actorLabel, onClose }: { actorEmail: string 
           role="log"
         >
           {loading && !sortedMessages.length ? <p className="papyrus-console__empty">Loading conversation…</p> : null}
-          {displayMessages.map((message) => {
+          {timelineEntries.map((entry) => {
+            if (entry.kind === "tool") {
+              const showAssistantAvatar = entry.id === latestVisibleAvatarAnchorId;
+              const assistantAvatar = showAssistantAvatar
+                ? resolveAssistantAvatarPresentation(entry.tool, motionSetting === "low", pending)
+                : null;
+              return (
+                <ConsoleToolTimelineRow key={entry.id}>
+                  <ConsoleToolMessageContent tool={entry.tool} />
+                  {assistantAvatar ? (
+                    <span className="papyrus-console-message__assistant-avatar" data-tone={assistantAvatar.tone}>
+                      <VultusBotAvatar
+                        ariaLabel={assistantAvatar.ariaLabel}
+                        lightColor={assistantAvatar.tone === "error" ? ASSISTANT_AVATAR_ERROR_LIGHT_COLOR : ASSISTANT_AVATAR_DEFAULT_LIGHT_COLOR}
+                        neutralIdleMode={assistantAvatar.neutralIdleMode}
+                        shadowColor={assistantAvatar.tone === "error" ? ASSISTANT_AVATAR_ERROR_SHADOW_COLOR : ASSISTANT_AVATAR_DEFAULT_SHADOW_COLOR}
+                        size={ASSISTANT_AVATAR_SIZE_PX}
+                        state={assistantAvatar.state}
+                        transitionDurationSeconds={0.35}
+                      />
+                    </span>
+                  ) : null}
+                </ConsoleToolTimelineRow>
+              );
+            }
+
+            const message = entry.message;
             const content = (message.content ?? "").trim();
             const summary = (message.summary ?? "").trim();
             const sanitizedSummary = sanitizeConsoleSummary(summary);
             const isSupersededRunningAssistant = isSupersededRunningAssistantMessage(message, content);
-            const showAssistantAvatar = message.id === latestVisibleAvatarAnchorMessageId;
+            const showAssistantAvatar = entry.id === latestVisibleAvatarAnchorId;
             const assistantAvatar = showAssistantAvatar
-              ? resolveAssistantAvatarPresentation(message, content, motionSetting === "low", pending)
+              ? resolveAssistantAvatarPresentation(message, motionSetting === "low", pending)
               : null;
             const userAvatarHash = message.role === "USER" ? readConsoleAuthorAvatarHash(message) : null;
             const userAuthorEmail = message.role === "USER" ? readConsoleAuthorEmail(message) : null;
@@ -1159,21 +1253,21 @@ function ConsoleUserAvatar({ authorEmail, avatarHash }: { authorEmail: string | 
 }
 
 function resolveAssistantAvatarPresentation(
-  message: DisplayConsoleMessage,
-  trimmedContent: string,
+  entry: DisplayConsoleMessage | ConsoleToolTimelineEntry,
   forceLowMotion: boolean,
   hasActiveResponse: boolean,
 ): { ariaLabel: string; neutralIdleMode?: "bored-random" | "static"; state: BotAvatarState; tone: AssistantAvatarTone } {
+  const failedState = resolveConsoleEntryFailedState(entry);
   if (forceLowMotion) {
     return {
       ariaLabel: "Assistant avatar in low-motion mode",
       neutralIdleMode: "static",
       state: "neutral",
-      tone: message.responseStatus === "FAILED" ? "error" : "default",
+      tone: failedState ? "error" : "default",
     };
   }
 
-  if (message.responseStatus === "FAILED") {
+  if (failedState) {
     return {
       ariaLabel: "Assistant avatar in error state",
       neutralIdleMode: "static",
@@ -1181,35 +1275,43 @@ function resolveAssistantAvatarPresentation(
       tone: "error",
     };
   }
-  if (hasActiveResponse && message.messageKind === CONSOLE_TOOL_CALL_KIND) {
+  if (isToolTimelineEntry(entry) && hasActiveResponse) {
+    const toolHasResult = isToolTimelineResultAvailable(entry);
+    if (toolHasResult) {
+      return {
+        ariaLabel: "Assistant avatar while handling tool results",
+        state: "toolResponse",
+        tone: "default",
+      };
+    }
     return {
       ariaLabel: "Assistant avatar while calling tools",
       state: "toolCalling",
       tone: "default",
     };
   }
-  if (hasActiveResponse && message.messageKind === CONSOLE_TOOL_RESULT_KIND) {
-    return {
-      ariaLabel: "Assistant avatar while handling tool results",
-      state: "toolResponse",
-      tone: "default",
-    };
-  }
-  if (message.responseStatus === "RUNNING" && !hasActiveResponse) {
+  if (isToolTimelineEntry(entry)) return {
+    ariaLabel: "Assistant avatar in neutral state",
+    state: "neutral",
+    tone: "default",
+  };
+
+  const trimmedContent = (entry.content ?? "").trim();
+  if (entry.responseStatus === "RUNNING" && !hasActiveResponse) {
     return {
       ariaLabel: "Assistant avatar in neutral state",
       state: "neutral",
       tone: "default",
     };
   }
-  if (message.pendingPlaceholder || (message.responseStatus === "RUNNING" && !trimmedContent)) {
+  if (entry.pendingPlaceholder || (entry.responseStatus === "RUNNING" && !trimmedContent)) {
     return {
       ariaLabel: "Assistant avatar while thinking",
       state: "thinking",
       tone: "default",
     };
   }
-  if (message.responseStatus === "RUNNING" && trimmedContent) {
+  if (entry.responseStatus === "RUNNING" && trimmedContent) {
     return {
       ariaLabel: "Assistant avatar while speaking",
       state: "speakingOpen",
@@ -1221,6 +1323,111 @@ function resolveAssistantAvatarPresentation(
     state: "neutral",
     tone: "default",
   };
+}
+
+function resolveConsoleEntryFailedState(entry: DisplayConsoleMessage | ConsoleToolTimelineEntry): boolean {
+  if (!isToolTimelineEntry(entry)) return entry.responseStatus === "FAILED";
+  if (!entry.resultMessage) return false;
+  const metadata = readAwsJsonObject(entry.resultMessage.metadata);
+  const toolResult = readNestedValue(metadata, ["toolResultJson"]);
+  if (toolResult && typeof toolResult === "object" && !Array.isArray(toolResult)) {
+    const toolResultObject = toolResult as Record<string, unknown>;
+    if (toolResultObject.ok === false) return true;
+    if (toolResultObject.error) return true;
+  }
+  const markdown = entry.resultMessage.content?.toLowerCase() ?? "";
+  return /(^|\n)-\s*ok:\s*false\b/.test(markdown);
+}
+
+function isToolTimelineEntry(entry: DisplayConsoleMessage | ConsoleToolTimelineEntry): entry is ConsoleToolTimelineEntry {
+  return typeof (entry as ConsoleToolTimelineEntry).toolCallId === "string";
+}
+
+function isToolTimelineResultAvailable(entry: ConsoleToolTimelineEntry): boolean {
+  return Boolean(entry.resultMessage);
+}
+
+function ConsoleToolMessageContent({ tool }: { tool: ConsoleToolTimelineEntry }) {
+  const callMessage = tool.callMessage;
+  const resultMessage = tool.resultMessage;
+  const callMetadata = readAwsJsonObject(callMessage?.metadata);
+  const resultMetadata = readAwsJsonObject(resultMessage?.metadata);
+  const toolState: "input-available" | "output-available" | "output-error" = resultMessage
+    ? (resolveConsoleEntryFailedState(tool) ? "output-error" : "output-available")
+    : "input-available";
+  const toolInput = (
+    readNestedValue(callMetadata, ["arguments"])
+    ?? callMessage?.content
+    ?? null
+  );
+  const toolResultOutput = resultMessage
+    ? (
+      readNestedValue(resultMetadata, ["toolResultJson"])
+      ?? resultMessage.content
+      ?? null
+    )
+    : null;
+  const toolErrorText = toolState === "output-error" && resultMessage
+    ? (
+      readNestedString(resultMetadata, ["toolResultJson", "error", "message"])
+      ?? readNestedString(resultMetadata, ["toolResultJson", "error"])
+      ?? resultMessage.content
+      ?? "Tool error"
+    )
+    : undefined;
+
+  return (
+    <div className="papyrus-console-tool-row__content">
+      <Tool>
+        <ToolHeader
+          state={toolState}
+          toolName={tool.toolName}
+          type={`tool-${tool.toolName}`}
+        />
+        <ToolContent>
+          <ToolInput input={toolInput} />
+          <ToolOutput
+            errorText={toolErrorText}
+            output={toolState === "output-error" ? undefined : formatToolOutputText(toolResultOutput)}
+          />
+        </ToolContent>
+      </Tool>
+    </div>
+  );
+}
+
+function ConsoleToolTimelineRow({ children }: { children: ReactNode }) {
+  const rowRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const row = rowRef.current;
+    if (!row || prefersReducedMotion()) return;
+    const tween = gsap.fromTo(
+      row,
+      { autoAlpha: 0, y: 8 },
+      { autoAlpha: 1, y: 0, duration: 0.16, ease: "power2.out", overwrite: "auto" },
+    );
+    return () => {
+      tween.kill();
+      gsap.killTweensOf(row);
+    };
+  }, []);
+
+  return (
+    <article className="papyrus-console-tool-row" ref={rowRef}>
+      {children}
+    </article>
+  );
+}
+
+function formatToolOutputText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value === undefined || value === null) return "";
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
 }
 
 function ConsoleChatMessageContent({ role, text }: { role: string | null | undefined; text: string }) {
@@ -1487,6 +1694,15 @@ function readNestedString(value: Record<string, unknown> | null, path: string[])
     cursor = (cursor as Record<string, unknown>)[key];
   }
   return typeof cursor === "string" && cursor.trim() ? cursor.trim() : null;
+}
+
+function readNestedValue(value: Record<string, unknown> | null, path: string[]): unknown {
+  let cursor: unknown = value;
+  for (const key of path) {
+    if (!cursor || typeof cursor !== "object" || Array.isArray(cursor)) return null;
+    cursor = (cursor as Record<string, unknown>)[key];
+  }
+  return cursor ?? null;
 }
 
 function readAwsJsonObject(value: unknown): Record<string, unknown> | null {
