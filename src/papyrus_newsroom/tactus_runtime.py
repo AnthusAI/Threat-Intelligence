@@ -802,23 +802,6 @@ def _run_async(coro: Any) -> Any:
     return result.get("value")
 
 
-def _attach_papyrus_runtime(runtime: Any, papyrus: Any) -> None:
-    original_inject = getattr(runtime, "_inject_primitives", None)
-    if not callable(original_inject):
-        raise RuntimeError("execute_tactus requires TactusRuntime._inject_primitives support.")
-
-    def _wrapped_inject_primitives() -> Any:
-        result = original_inject()
-        sandbox = getattr(runtime, "lua_sandbox", None)
-        inject_primitive = getattr(sandbox, "inject_primitive", None)
-        if not callable(inject_primitive):
-            raise RuntimeError("execute_tactus requires Lua sandbox inject_primitive support.")
-        inject_primitive("papyrus", papyrus)
-        return result
-
-    runtime._inject_primitives = _wrapped_inject_primitives
-
-
 def _lua_string(value: str) -> str:
     return json.dumps(str(value))
 
@@ -1265,7 +1248,11 @@ def execute_tactus(tactus: str) -> dict[str, Any]:
                     run_id=trace_id,
                     source_file_path="<papyrus execute_tactus>",
                 )
-                _attach_papyrus_runtime(runtime, papyrus)
+                sandbox = getattr(runtime, "lua_sandbox", None)
+                inject_primitive = getattr(sandbox, "inject_primitive", None)
+                if not callable(inject_primitive):
+                    raise RuntimeError("execute_tactus requires Lua sandbox inject_primitive support.")
+                inject_primitive("papyrus", papyrus)
                 return await runtime.execute(_wrap_tactus_snippet(tactus), context={}, format="lua")
 
         runtime_result = _run_async(run())
