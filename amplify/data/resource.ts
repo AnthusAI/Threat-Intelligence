@@ -131,7 +131,9 @@ const schema = a.schema({
 
   ReaderSettingsResult: a.customType({
     userProfileId: a.id().required(),
+    email: a.email(),
     settings: a.json(),
+    avatarHash: a.string(),
   }),
 
   listUserDirectory: a

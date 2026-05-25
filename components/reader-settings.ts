@@ -21,16 +21,22 @@ export type ReaderSettingsResolution = {
   settings: ReaderSettings;
   source: ReaderSettingsSource;
   signedIn: boolean;
+  email?: string | null;
   userProfileId?: string | null;
+  avatarHash?: string | null;
 };
 
 type DataClientErrors = Array<{ message?: string | null } | string | null> | null | undefined;
 type ReaderSettingsResult = {
+  email?: string | null;
   userProfileId?: string | null;
+  avatarHash?: string | null;
   settings?: ReaderSettings | null;
 };
 type RawReaderSettingsResult = {
+  email?: string | null;
   userProfileId?: string | null;
+  avatarHash?: string | null;
   settings?: unknown;
 };
 
@@ -147,7 +153,9 @@ export async function resolveReaderSettings(): Promise<ReaderSettingsResolution>
         settings: remote.settings,
         source: "cloud",
         signedIn: true,
+        email: remote.email,
         userProfileId: remote.userProfileId,
+        avatarHash: remote.avatarHash,
       };
     }
     const saved = await saveRemoteReaderSettings(localSettings);
@@ -155,7 +163,9 @@ export async function resolveReaderSettings(): Promise<ReaderSettingsResolution>
       settings: saved.settings ?? localSettings,
       source: "cloud",
       signedIn: true,
+      email: saved.email,
       userProfileId: saved.userProfileId,
+      avatarHash: saved.avatarHash,
     };
   } catch (error) {
     if (isUnauthenticatedError(error)) {
@@ -179,7 +189,9 @@ export async function saveReaderSettings(settings: ReaderSettings): Promise<Read
     settings: savedSettings,
     source: "cloud",
     signedIn: true,
+    email: saved.email,
     userProfileId: saved.userProfileId,
+    avatarHash: saved.avatarHash,
   };
 }
 
@@ -219,7 +231,9 @@ async function saveRemoteReaderSettings(settings: ReaderSettings): Promise<Reade
 function normalizeReaderSettingsResult(value: RawReaderSettingsResult | null | undefined): ReaderSettingsResult {
   if (!value) return {};
   return {
+    email: typeof value.email === "string" && value.email.trim() ? value.email.trim() : null,
     userProfileId: value.userProfileId ?? null,
+    avatarHash: typeof value.avatarHash === "string" && value.avatarHash.trim() ? value.avatarHash.trim() : null,
     settings: value.settings ? normalizeReaderSettings(value.settings) : null,
   };
 }

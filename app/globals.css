@@ -4279,8 +4279,14 @@ img {
 }
 
 .newsroom-list-detail-shell[data-news-desk-section="references"] .newsroom-card__body {
+  color: rgb(var(--ink-solid-rgb) / 0.72);
   display: block;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 0.84rem;
+  font-weight: 500;
+  letter-spacing: 0;
   line-height: var(--paper-rhythm);
+  text-transform: none;
 }
 
 @media (min-width: 1158px) {
@@ -8413,15 +8419,29 @@ img {
   background: rgb(var(--ink-rgb) / 0.11);
 }
 
-.papyrus-console-message--user > div::before {
+.papyrus-console-message__user-avatar {
+  align-items: center;
   background: rgb(var(--ink-solid-rgb) / 0.22);
   border-radius: 50%;
-  content: "";
-  display: block;
+  color: rgb(var(--paper-rgb) / 0.9);
+  display: inline-flex;
   float: right;
   height: 1.28em;
+  justify-content: center;
   margin: 0.04em 0.04em 0 0.58em;
+  overflow: hidden;
   width: 1.28em;
+}
+
+.papyrus-console-message__user-avatar-image {
+  display: block;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.papyrus-console-message__user-avatar-icon {
+  display: block;
 }
 
 .papyrus-console-message__error,

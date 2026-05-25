@@ -49,6 +49,8 @@ const CONSOLE_MESSAGE_FIELDS = `
   responseStartedAt
   responseCompletedAt
   responseError
+  authorUserProfileId
+  metadata
   createdAt
   updatedAt
 `;
@@ -233,7 +235,9 @@ export type ConsoleChatMessage = {
   responseCompletedAt?: string | null;
   responseError?: string | null;
   source?: string | null;
+  authorUserProfileId?: string | null;
   authorLabel?: string | null;
+  metadata?: unknown;
   createdAt: string;
   updatedAt?: string | null;
 };
@@ -388,7 +392,7 @@ function fieldValuesForCreateMessageInput(input: CreateConsoleMessageInput): Rec
     source: input.source,
     importRunId: null,
     authorSub: null,
-    authorUserProfileId: null,
+    authorUserProfileId: input.authorUserProfileId ?? null,
     authorLabel: input.authorLabel,
     threadId: input.threadId ?? null,
     parentMessageId: input.parentMessageId ?? null,
@@ -550,7 +554,7 @@ function sanitizeCreateMessageInput(
     source: input.source,
     importRunId: null,
     authorSub: null,
-    authorUserProfileId: null,
+    authorUserProfileId: input.authorUserProfileId ?? null,
     authorLabel: input.authorLabel,
     threadId: input.threadId ?? null,
     parentMessageId: input.parentMessageId ?? null,
@@ -1098,6 +1102,8 @@ function isUnavailableQueryError(error: unknown): boolean {
 
 function normalizeConsoleMessageRecord(record: Record<string, unknown>): ConsoleChatMessage {
   const metadata = readJsonObject(record.metadata);
+  const metadataConsole = readJsonObject(metadata?.console);
+  const metadataConsoleAuthor = readJsonObject(metadataConsole?.author);
   const createdAt = readString(record.createdAt) ?? new Date().toISOString();
   const source = readString(record.source);
   const authorLabel = readString(record.authorLabel);
@@ -1127,7 +1133,14 @@ function normalizeConsoleMessageRecord(record: Record<string, unknown>): Console
     responseCompletedAt: readString(record.responseCompletedAt) ?? readString(metadata?.responseCompletedAt) ?? null,
     responseError: readString(record.responseError) ?? readString(metadata?.responseError) ?? null,
     source,
+    authorUserProfileId: (
+      readString(record.authorUserProfileId)
+      ?? readString(metadata?.authorUserProfileId)
+      ?? readString(metadataConsoleAuthor?.userProfileId)
+      ?? null
+    ),
     authorLabel,
+    metadata,
     createdAt,
     updatedAt: readString(record.updatedAt) ?? null,
   };

@@ -3,7 +3,8 @@
 import type { BotAvatarState } from "anthus-vultus";
 import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
-import { CheckIcon } from "lucide-react";
+import { CheckIcon, UserIcon } from "lucide-react";
+import { Md5 } from "@smithy/md5-js";
 import { gsap } from "gsap";
 import {
   createConsoleMessage,
@@ -19,7 +20,12 @@ import {
 import { buildNewsroomKnowledgeQueryInput, type NewsroomKnowledgeQueryTarget } from "../lib/newsroom-knowledge-query-request";
 import { runNewsroomKnowledgeQuery } from "./news-desk-taxonomy-client";
 import { loadReaderSessionSnapshot, type ReaderSessionSnapshot } from "./reader-auth-state";
-import { readLocalReaderSettings, subscribeReaderSettingsChanges, type ReaderMotionSetting } from "./reader-settings";
+import {
+  readLocalReaderSettings,
+  resolveReaderSettings,
+  subscribeReaderSettingsChanges,
+  type ReaderMotionSetting,
+} from "./reader-settings";
 import { Conversation, ConversationContent, ConversationScrollButton } from "./ai-elements/conversation";
 import {
   ModelSelector,
@@ -120,6 +126,11 @@ type DisplayConsoleMessage = ConsoleChatMessage & {
 };
 
 type AssistantAvatarTone = "default" | "error";
+type ConsoleAuthorIdentity = {
+  avatarHash: string | null;
+  email: string | null;
+  userProfileId: string | null;
+};
 
 const PapyrusConsoleContext = createContext<PapyrusConsoleContextValue | null>(null);
 
@@ -373,7 +384,7 @@ export function PapyrusConsoleShell({ children }: PapyrusConsoleShellProps) {
         <aside className={open ? "papyrus-console papyrus-console--open" : "papyrus-console"} aria-label="Papyrus console">
           {open ? (
             canUseConsole
-              ? <ConsolePanel actorLabel={session?.auth.label ?? "Papyrus editor"} onClose={toggleOpen} />
+              ? <ConsolePanel actorEmail={session?.auth.status === "signedIn" ? (session.auth.email ?? null) : null} actorLabel={session?.auth.label ?? "Papyrus editor"} onClose={toggleOpen} />
               : <ConsoleAccessPanel onClose={toggleOpen} session={session} />
           ) : null}
         </aside>
@@ -420,7 +431,7 @@ function ConsoleAccessPanel({ onClose, session }: { onClose: () => void; session
   );
 }
 
-function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: () => void }) {
+function ConsolePanel({ actorEmail, actorLabel, onClose }: { actorEmail: string | null; actorLabel: string; onClose: () => void }) {
   const [thread, setThread] = useState<ConsoleChatThread | null>(null);
   const [threads, setThreads] = useState<ConsoleChatThread[]>([]);
   const [messages, setMessages] = useState<ConsoleChatMessage[]>([]);
@@ -431,6 +442,8 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
   const [selectedModel, setSelectedModel] = useState(DEFAULT_CONSOLE_MODEL);
   const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
   const [motionSetting, setMotionSetting] = useState<ReaderMotionSetting>("standard");
+  const [authorIdentity, setAuthorIdentity] = useState<ConsoleAuthorIdentity>({ avatarHash: null, email: null, userProfileId: null });
+  const [fallbackAvatarHash, setFallbackAvatarHash] = useState<string | null>(null);
   const hasLoadedRef = useRef(false);
   const activeThreadIdRef = useRef<string | null>(null);
   const threadRef = useRef<ConsoleChatThread | null>(null);
@@ -445,6 +458,52 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
       setMotionSetting(settings.motion);
     });
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    void resolveReaderSettings()
+      .then((resolution) => {
+        if (!active) return;
+        setAuthorIdentity({
+          avatarHash: resolution.avatarHash ?? null,
+          email: resolution.email ?? actorEmail ?? null,
+          userProfileId: resolution.userProfileId ?? null,
+        });
+      })
+      .catch(() => {
+        if (!active) return;
+        setAuthorIdentity({ avatarHash: null, email: actorEmail ?? null, userProfileId: null });
+      });
+    return () => {
+      active = false;
+    };
+  }, [actorEmail]);
+
+  useEffect(() => {
+    let active = true;
+    if (!actorEmail) {
+      setFallbackAvatarHash(null);
+      return () => {
+        active = false;
+      };
+    }
+    void computeAvatarHashFromEmail(actorEmail)
+      .then((hash) => {
+        if (active) setFallbackAvatarHash(hash);
+      })
+      .catch(() => {
+        if (active) setFallbackAvatarHash(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [actorEmail]);
+
+  const effectiveAuthorIdentity = useMemo<ConsoleAuthorIdentity>(() => ({
+    avatarHash: authorIdentity.avatarHash ?? fallbackAvatarHash,
+    email: authorIdentity.email ?? actorEmail ?? null,
+    userProfileId: authorIdentity.userProfileId,
+  }), [actorEmail, authorIdentity.avatarHash, authorIdentity.email, authorIdentity.userProfileId, fallbackAvatarHash]);
 
   const sortedMessages = useMemo(() => (
     [...messages].sort((left, right) => (left.sequenceNumber ?? 0) - (right.sequenceNumber ?? 0) || left.createdAt.localeCompare(right.createdAt))
@@ -620,6 +679,20 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
       const previousSequenceNumber = previousMessage?.sequenceNumber ?? activeThread.messageCount ?? 0;
       const sequenceNumber = previousSequenceNumber + 1;
       const now = new Date().toISOString();
+      const messageMetadata = {
+        model: selectedModel,
+        previousSequenceNumber,
+        previousMessageId: previousMessage?.id ?? null,
+        previousContextDigest: activeThread.contextDigest ?? null,
+        cacheHint: "lambda-tmp-jit",
+        console: {
+          author: {
+            avatarHash: effectiveAuthorIdentity.avatarHash,
+            email: effectiveAuthorIdentity.email,
+            userProfileId: effectiveAuthorIdentity.userProfileId,
+          },
+        },
+      };
       const message: ConsoleChatMessage = {
         id: `message-console-user-${crypto.randomUUID()}`,
         threadId: activeThread.id,
@@ -631,6 +704,8 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
         content,
         summary: truncateConsoleSummary(content),
         responseStatus: "PENDING",
+        authorUserProfileId: effectiveAuthorIdentity.userProfileId,
+        metadata: messageMetadata,
         createdAt: now,
       };
       mergeMessage(message);
@@ -640,16 +715,11 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
         status: "active",
         source: "papyrus-console",
         authorLabel: actorLabel,
+        authorUserProfileId: effectiveAuthorIdentity.userProfileId,
         semanticLayer: CONSOLE_SEMANTIC_LAYER,
         searchVisibility: CONSOLE_SEARCH_VISIBILITY,
         responseTarget: CONSOLE_RESPONSE_TARGET,
-        metadata: toAwsJson({
-          model: selectedModel,
-          previousSequenceNumber,
-          previousMessageId: previousMessage?.id ?? null,
-          previousContextDigest: activeThread.contextDigest ?? null,
-          cacheHint: "lambda-tmp-jit",
-        }),
+        metadata: toAwsJson(messageMetadata),
         updatedAt: now,
         newsroomFeedKey: CONSOLE_NEWSROOM_FEED_KEY,
       });
@@ -873,6 +943,8 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
             const assistantAvatar = showAssistantAvatar
               ? resolveAssistantAvatarPresentation(message, content, motionSetting === "low", pending)
               : null;
+            const userAvatarHash = message.role === "USER" ? readConsoleAuthorAvatarHash(message) : null;
+            const userAuthorEmail = message.role === "USER" ? readConsoleAuthorEmail(message) : null;
             const shouldShowThinking = (
               message.pendingPlaceholder
               || (message.role === "ASSISTANT" && message.responseStatus === "RUNNING" && !content && !isSupersededRunningAssistant)
@@ -882,6 +954,7 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
             return (
               <ConsoleChatMessageRow key={message.id} role={message.role}>
                 <div className={message.role === "ASSISTANT" ? "papyrus-console-message__markdown" : undefined}>
+                  {message.role === "USER" ? <ConsoleUserAvatar authorEmail={userAuthorEmail} avatarHash={userAvatarHash} /> : null}
                   {shouldShowThinking ? (
                     <Shimmer className="papyrus-console__thinking-shimmer">Thinking...</Shimmer>
                   ) : <ConsoleChatMessageContent role={message.role} text={content || sanitizedSummary} />}
@@ -1052,6 +1125,72 @@ function sanitizeConsoleSummary(summary: string): string {
   if (lowered === "thinking...") return "";
   if (lowered.endsWith("responding.")) return "";
   return summary;
+}
+
+function readConsoleAuthorAvatarHash(message: ConsoleChatMessage): string | null {
+  const metadata = readAwsJsonObject(message.metadata);
+  return (
+    readNestedString(metadata, ["console", "author", "avatarHash"])
+    ?? readNestedString(metadata, ["author", "avatarHash"])
+  );
+}
+
+function readConsoleAuthorEmail(message: ConsoleChatMessage): string | null {
+  const metadata = readAwsJsonObject(message.metadata);
+  return (
+    readNestedString(metadata, ["console", "author", "email"])
+    ?? readNestedString(metadata, ["author", "email"])
+  );
+}
+
+function gravatarUrlFromHash(hash: string, size: number): string {
+  const normalized = hash.trim().toLowerCase();
+  return `https://www.gravatar.com/avatar/${encodeURIComponent(normalized)}?s=${size}&d=404`;
+}
+
+async function computeAvatarHashFromEmail(email: string): Promise<string | null> {
+  const normalized = email.trim().toLowerCase();
+  if (!normalized) return null;
+  return computeMd5Hex(normalized);
+}
+
+async function computeMd5Hex(value: string): Promise<string> {
+  const md5 = new Md5();
+  md5.update(new TextEncoder().encode(value));
+  const digest = await md5.digest();
+  return Array.from(digest)
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function ConsoleUserAvatar({ authorEmail, avatarHash }: { authorEmail: string | null; avatarHash: string | null }) {
+  const [imageFailed, setImageFailed] = useState(false);
+  useEffect(() => {
+    setImageFailed(false);
+  }, [avatarHash]);
+  const imageUrl = avatarHash ? gravatarUrlFromHash(avatarHash, 64) : null;
+  const showImage = Boolean(imageUrl && !imageFailed);
+  const tooltip = authorEmail ?? "Email unavailable";
+
+  return (
+    <span
+      aria-label={`Message author email: ${tooltip}`}
+      className="papyrus-console-message__user-avatar"
+      role="img"
+      title={tooltip}
+    >
+      {showImage ? (
+        <img
+          alt=""
+          className="papyrus-console-message__user-avatar-image"
+          onError={() => setImageFailed(true)}
+          src={imageUrl ?? undefined}
+        />
+      ) : (
+        <UserIcon className="papyrus-console-message__user-avatar-icon" size={14} strokeWidth={2} />
+      )}
+    </span>
+  );
 }
 
 function resolveAssistantAvatarPresentation(
