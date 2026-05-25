@@ -8807,6 +8807,7 @@ function ReferenceDetailPanel({
         <header>
           <div>
             <strong>{reference.title ?? reference.externalItemId}</strong>
+            {metadataSubtitle ? <p className="news-desk-semantic-detail__subheading">{metadataSubtitle}</p> : null}
             <div className="news-desk-reference-detail__header-flow">
               <ReferenceCurationCluster
                 curation={detailCuration}
@@ -8824,7 +8825,6 @@ function ReferenceDetailPanel({
                 <span className="news-desk-reference-detail__meta-date-label">Imported</span>
                 <span className="news-desk-reference-detail__meta-date-value">{formatReferenceImportedDate(reference)}</span>
               </p>
-              {metadataSubtitle ? <p className="news-desk-semantic-detail__subheading">{metadataSubtitle}</p> : null}
               {metadataSummary ? <p className="news-desk-semantic-detail__summary">{metadataSummary}</p> : null}
               {curationRunStatus ? (
                 <div className="news-desk-detail-line">
