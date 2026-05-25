@@ -193,6 +193,42 @@ query GetAssignment($id: ID!) {
 }
 """
 
+GET_NEWSROOM_SECTION_QUERY = """
+query GetNewsroomSection($id: ID!) {
+  getNewsroomSection(id: $id) {
+    id
+    title
+    shortTitle
+    type
+    editorialMission
+    editorialPolicy
+    assignmentGuidance
+    killCriteria
+    visualGuidance
+    enabled
+    sortOrder
+    updatedAt
+  }
+}
+"""
+
+GET_DOCTRINE_BY_SLUG_QUERY = """
+query DoctrineBySlug($slug: String!, $limit: Int) {
+  itemBySlug(slug: $slug, limit: $limit) {
+    items {
+      id
+      slug
+      title
+      type
+      status
+      body
+      updatedAt
+    }
+    nextToken
+  }
+}
+"""
+
 GET_ASSIGNMENT_CONTEXT_QUERY = """
 query GetAssignmentContext($assignmentId: ID!) {
   getAssignmentContext(assignmentId: $assignmentId) {
@@ -826,17 +862,158 @@ def papyrus_get_assignment_context(assignment_id: str) -> dict[str, Any]:
     Read live Assignment context, including doctrine, targets, and events.
     """
     assignment_id = _required(assignment_id, "assignment_id")
-    data = _graphql(GET_ASSIGNMENT_CONTEXT_QUERY, {"assignmentId": assignment_id})
-    context = data.get("getAssignmentContext")
-    if not context:
+    assignment_data = _graphql(GET_ASSIGNMENT_QUERY, {"id": assignment_id})
+    assignment = _decode_record_json(assignment_data.get("getAssignment") or {})
+    if not assignment:
         raise ValueError(f"Assignment context not found: {assignment_id}")
-    decoded = _decode_record_json(context)
-    if isinstance(decoded.get("assignment"), dict):
-        _hydrate_assignment_payloads(decoded["assignment"])
-    for event in decoded.get("events") or []:
+    _hydrate_assignment_payloads(assignment)
+    relations = _assignment_relations_for_assignment(assignment_id)
+    targets = _assignment_targets_from_relations(relations)
+    doctrine = _assignment_doctrine_context(assignment)
+    events = _assignment_events_for_assignments([assignment_id])
+    for event in events:
         if isinstance(event, dict):
             _hydrate_assignment_event_metadata(event)
-    return {"assignment_context": decoded}
+    return {
+        "assignment_context": {
+            "assignment": assignment,
+            "doctrine": doctrine,
+            "targets": targets,
+            "events": events,
+        }
+    }
+
+
+def _assignment_relations_for_assignment(assignment_id: str) -> list[dict[str, Any]]:
+    try:
+        semantic = _semantic_client()
+        response = semantic.list_outgoing("assignment", assignment_id)
+        relations = _normalize_jsonish(response.get("relations") or [])
+        if not isinstance(relations, list):
+            return []
+        normalized: list[dict[str, Any]] = []
+        for relation in relations:
+            if not isinstance(relation, dict):
+                continue
+            decoded = _decode_record_json(relation)
+            if (decoded.get("relationState") or "current") != "current":
+                continue
+            normalized.append(decoded)
+        return normalized
+    except Exception:
+        return []
+
+
+def _assignment_targets_from_relations(relations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    targets: list[dict[str, Any]] = []
+    for relation in relations:
+        metadata = _normalize_jsonish(relation.get("metadata") or {})
+        if not isinstance(metadata, dict):
+            metadata = {}
+        label = (
+            metadata.get("title")
+            or metadata.get("displayName")
+            or metadata.get("externalItemId")
+            or relation.get("objectLineageId")
+            or relation.get("objectId")
+        )
+        targets.append(
+            {
+                "kind": relation.get("objectKind"),
+                "id": relation.get("objectId"),
+                "lineageId": relation.get("objectLineageId"),
+                "label": label,
+                "detail": relation.get("relationTypeKey") or relation.get("predicate"),
+            }
+        )
+    return targets
+
+
+def _assignment_doctrine_context(assignment: dict[str, Any]) -> list[dict[str, Any]]:
+    doctrine: list[dict[str, Any]] = []
+    for kind, label, slug in (
+        ("mission", "Editorial Mission", "editorial-doctrine-mission"),
+        ("policy", "Editorial Policy", "editorial-doctrine-policy"),
+    ):
+        record = _doctrine_item_by_slug(slug)
+        if not record:
+            continue
+        doctrine.append(
+            {
+                "scope": "publication",
+                "kind": kind,
+                "label": label,
+                "slug": slug,
+                "body": _normalize_string_array(record.get("body") or []),
+                "categoryKey": None,
+                "categoryLineageId": None,
+            }
+        )
+    section_key = assignment.get("sectionKey") or assignment.get("sectionId")
+    section = _newsroom_section_by_id(section_key)
+    if section:
+        doctrine.append(
+            {
+                "scope": "desk",
+                "kind": "mission",
+                "label": "Desk Mission",
+                "slug": f"desk-section-{section.get('id')}-mission",
+                "body": _normalize_string_array([section.get("editorialMission")]),
+                "categoryKey": section.get("id"),
+                "categoryLineageId": section.get("id"),
+            }
+        )
+        doctrine.append(
+            {
+                "scope": "desk",
+                "kind": "policy",
+                "label": "Desk Policies",
+                "slug": f"desk-section-{section.get('id')}-policy",
+                "body": _normalize_string_array([section.get("editorialPolicy")]),
+                "categoryKey": section.get("id"),
+                "categoryLineageId": section.get("id"),
+            }
+        )
+    return doctrine
+
+
+def _newsroom_section_by_id(section_id: Any) -> dict[str, Any] | None:
+    key = str(section_id or "").strip()
+    if not key:
+        return None
+    try:
+        data = _graphql(GET_NEWSROOM_SECTION_QUERY, {"id": key})
+    except Exception:
+        return None
+    section = data.get("getNewsroomSection")
+    if not isinstance(section, dict):
+        return None
+    return _decode_record_json(section)
+
+
+def _doctrine_item_by_slug(slug: str) -> dict[str, Any] | None:
+    try:
+        data = _graphql(GET_DOCTRINE_BY_SLUG_QUERY, {"slug": slug, "limit": 10})
+    except Exception:
+        return None
+    connection = data.get("itemBySlug") or {}
+    items = connection.get("items") or []
+    for item in items:
+        decoded = _decode_record_json(item)
+        if decoded.get("type") == "doctrine" and decoded.get("status") in {"private", "published"}:
+            return decoded
+    return _decode_record_json(items[0]) if items else None
+
+
+def _normalize_string_array(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for entry in value:
+        text = str(entry or "").strip()
+        if text:
+            result.append(text)
+    return result
 
 
 def papyrus_build_assignment_agent_context(
@@ -1363,7 +1540,7 @@ def papyrus_doi_backfill_run(
             "stdout": result.stdout,
             "stderr": result.stderr,
             "nextCommands": {
-                "inspectAssignmentQueue": "npm run content -- assignments list --type reference.doi-backfill --status open",
+                "inspectAssignmentQueue": "poetry run papyrus assignments list --type reference.doi-backfill --status open",
                 "inspectManifest": f"cat {manifest_path}" if manifest_path else None,
             },
         }

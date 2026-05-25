@@ -25,7 +25,7 @@ def build_copywriting_run_plan(
     reporting_packet_payload: dict[str, Any] | None = None,
     semantic_relations: list[dict[str, Any]] | None = None,
     existing_items: list[dict[str, Any]] | None = None,
-    actor_label: str = "papyrus-content-cli",
+    actor_label: str = "papyrus-cli",
     actor_sub: str | None = None,
     now: str | None = None,
 ) -> dict[str, Any]:

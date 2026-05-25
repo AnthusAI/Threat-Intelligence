@@ -135,7 +135,7 @@ def execute_reference_identifier_backfill_assignment(
     args = [
         "poetry",
         "run",
-        "papyrus-newsroom",
+        "papyrus",
         "references",
         "curate-recent",
         "--corpus-key",

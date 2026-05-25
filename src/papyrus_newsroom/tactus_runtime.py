@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import io
 import json
+import re
 import threading
 import time
 import uuid
@@ -53,15 +54,69 @@ def _args(args: Any = None) -> dict[str, Any]:
     return converted
 
 
-def _structured_error(code: str, message: str, exc: BaseException | None = None) -> dict[str, Any]:
+def _structured_error(
+    code: str,
+    message: str,
+    exc: BaseException | None = None,
+    *,
+    retryable: bool = False,
+    details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "code": code,
         "message": message,
-        "retryable": False,
+        "retryable": retryable,
     }
     if exc is not None:
         payload["type"] = exc.__class__.__name__
+    if details:
+        payload["details"] = _jsonable(details)
     return payload
+
+
+_JS_SHAPE_API_CALL_RE = re.compile(
+    r"\b(?:api_list|docs_list|docs_get|Assignment\.[A-Za-z_]\w*|papyrus\.[A-Za-z_][\w\.]*)\s*\(",
+    re.IGNORECASE,
+)
+_EXECUTE_TACTUS_CONTRACT_VERSION = "execute_tactus_snippet_contract_v1"
+
+
+def _unsupported_snippet_error(tactus: str) -> dict[str, Any] | None:
+    snippet = tactus.strip()
+    if not snippet:
+        return None
+    matched = _JS_SHAPE_API_CALL_RE.search(snippet)
+    if not matched:
+        return None
+    excerpt = snippet.replace("\n", " ")
+    if len(excerpt) > 240:
+        excerpt = excerpt[:240] + "..."
+    return _structured_error(
+        "unsupported_snippet",
+        "Snippet rejected: execute_tactus expects Tactus/Lua table-call syntax. "
+        "You used JS/object-call syntax with parentheses.",
+        retryable=True,
+        details={
+            "contractVersion": _EXECUTE_TACTUS_CONTRACT_VERSION,
+            "rejectedSnippetExcerpt": excerpt,
+            "acceptedExamples": [
+                "return docs_get{ id = \"resources.Assignment\" }",
+                "return Assignment.create{ type = \"research\", title = \"Live smoke assignment\", apply = true }",
+            ],
+            "guidance": {
+                "do": [
+                    "Use raw Lua/Tactus snippets in the tactus string.",
+                    "Use table arguments with braces, e.g. docs_get{ id = \"...\" }.",
+                    "Prefix the call with return when you want the tool value.",
+                ],
+                "dont": [
+                    "Do not use JS/object-call syntax like docs_get({ id: \"...\" }).",
+                    "Do not use markdown fences around the snippet.",
+                    "Do not JSON-escape normal Lua quotes.",
+                ],
+            },
+        },
+    )
 
 
 def _response_envelope(
@@ -1164,6 +1219,17 @@ def execute_tactus(tactus: str) -> dict[str, Any]:
             started_at=started,
             api_calls=[],
             error=_structured_error("invalid_request", "tactus must be a non-empty string"),
+        )
+
+    unsupported_error = _unsupported_snippet_error(tactus)
+    if unsupported_error is not None:
+        return _response_envelope(
+            ok=False,
+            value=None,
+            trace_id=trace_id,
+            started_at=started,
+            api_calls=[],
+            error=unsupported_error,
         )
 
     papyrus = PapyrusRuntimeModule()

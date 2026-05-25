@@ -31,7 +31,7 @@ def build_reporting_packet_review_plan(
     decision: str,
     note: str = "",
     target_item: dict[str, Any] | None = None,
-    actor_label: str = "papyrus-content-cli",
+    actor_label: str = "papyrus-cli",
     actor_sub: str | None = None,
     now: str | None = None,
     semantic_relations: list[dict[str, Any]] | None = None,

@@ -24,7 +24,7 @@ def build_canonical_message_expected(
     else:
         metadata_json = json.dumps(metadata_value or {}, sort_keys=True)
 
-    return {
+    expected = {
         "id": _string(payload.get("id")) or "",
         "messageKind": _string(payload.get("messageKind")) or "comment",
         "messageDomain": _string(payload.get("messageDomain")) or "commentary",
@@ -54,6 +54,7 @@ def build_canonical_message_expected(
         "updatedAt": _string(payload.get("updatedAt")) or created_at,
         "newsroomFeedKey": _string(payload.get("newsroomFeedKey")) or "messages",
     }
+    return {key: value for key, value in expected.items() if value is not None}
 
 
 def _default_summary(payload: dict[str, Any]) -> str:

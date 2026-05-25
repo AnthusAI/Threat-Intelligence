@@ -43,7 +43,13 @@ SUMMARY_TOKEN_BUDGETS = (100, 200, 500)
 SUMMARY_MESSAGE_KIND = "reference_summary"
 SUMMARY_MESSAGE_DOMAIN = "summarization"
 SUMMARY_SOURCE = "papyrus-summary-generator"
-SUMMARY_PROMPT_VERSION = "reference-summary-v2-publication-doctrine"
+SUMMARY_PROMPT_VERSION = "reference-summary-v3-source-voice"
+SUMMARY_PROCEDURE_ALIAS_SUMMARIZE = "references.summarize"
+SUMMARY_PROCEDURE_ALIAS_SUMMARIZE_BATCH = "references.summarize-batch"
+SUMMARY_PROCEDURE_ALIAS_TITLE_SUBTITLE_RESOLVE = "references.title-subtitle.resolve"
+SUMMARY_PROCEDURE_ALIAS_TITLE_SUBTITLE_BATCH = "references.title-subtitle.batch"
+SUMMARY_PROCEDURE_ALIAS_TITLE_SUBTITLE_ENRICH_CATALOG = "references.title-subtitle.enrich-catalog"
+SUMMARY_PROCEDURE_OUTPUT_MARKERS = ("mode", "summary_text", "prompt_version")
 PUBLICATION_DOCTRINE_SLUGS = ("editorial-doctrine-mission", "editorial-doctrine-policy")
 DOCTRINE_POLICY_USE = "context_only_not_reference_rubric"
 QUALITY_RELATION_TYPE_KEY = "quality_rating_is"
@@ -70,7 +76,7 @@ QUALITY_NODE_KEYS = {
 }
 TITLE_SUBTITLE_SOURCE = "papyrus-title-subtitle-enricher"
 TITLE_SUBTITLE_PROMPT_VERSION = "reference-title-subtitle-v1-verbatim-source"
-TITLE_SUBTITLE_SUMMARY_PROMPT_VERSION = "reference-title-subtitle-summary-v1-outcome"
+TITLE_SUBTITLE_SUMMARY_PROMPT_VERSION = "reference-title-subtitle-summary-v2-source-voice"
 TITLE_SUBTITLE_SUMMARY_TOKEN_BUDGET_DEFAULT = 500
 BIBLICUS_CATALOG_ITEM_ROOT_FIELDS = frozenset(
     {
@@ -296,7 +302,7 @@ def build_reference_quality_plan(
     reference: dict[str, Any],
     rating: int,
     note: str = "",
-    actor_label: str = "papyrus-newsroom",
+    actor_label: str = "papyrus",
     source: str = "manual",
     refresh: bool = False,
     run_id: str = "",
@@ -464,6 +470,7 @@ def build_reference_summary_plan(
         "messageKind": SUMMARY_MESSAGE_KIND,
         "messageDomain": SUMMARY_MESSAGE_DOMAIN,
         "status": "active",
+        "responseStatus": "COMPLETED",
         "summary": summary_text,
         "source": SUMMARY_SOURCE,
         "importRunId": reference.get("importRunId"),
@@ -549,6 +556,7 @@ def resolve_reference_title_subtitle(
     fetcher: Any | None = None,
     llm_resolver: Any | None = None,
     summary_resolver: Any | None = None,
+    summary_procedure_alias: str = SUMMARY_PROCEDURE_ALIAS_TITLE_SUBTITLE_RESOLVE,
     identifier_prepass: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Resolve original title/subtitle metadata for a Reference-like record.
@@ -615,6 +623,7 @@ def resolve_reference_title_subtitle(
     rationale = local.get("rationale") or ""
     summary_source = local.get("summarySource") or source
     summary_rationale = local.get("summaryRationale") or ("Resolved from local metadata summary." if summary else "")
+    summary_prompt_version = ""
 
     if title and subtitle and (summary if include_summary else True) and not refresh and not refresh_summary:
         return _title_subtitle_resolution(
@@ -733,17 +742,26 @@ def resolve_reference_title_subtitle(
 
     if include_summary and not summary:
         try:
-            summary = _normalize_outcome_summary_candidate(summary_resolver(
+            summary_result = summary_resolver(
                 source_text,
                 reference=reference,
                 title=title,
                 subtitle=subtitle,
                 max_tokens=summary_budget,
                 model=model,
-            ))
+                procedure_alias=summary_procedure_alias,
+            )
+            if isinstance(summary_result, str):
+                summary_text = summary_result
+                summary_prompt = TITLE_SUBTITLE_SUMMARY_PROMPT_VERSION
+            else:
+                summary_text = (summary_result or {}).get("summary_text")
+                summary_prompt = _clean_text((summary_result or {}).get("prompt_version")) or TITLE_SUBTITLE_SUMMARY_PROMPT_VERSION
+            summary = _normalize_outcome_summary_candidate(summary_text)
             if summary:
                 summary_source = "llm_outcome_summary"
                 summary_rationale = "Generated outcome-focused summary from source text."
+                summary_prompt_version = summary_prompt
         except Exception as exc:
             warnings.append(f"summary generation failed: {exc}")
 
@@ -756,7 +774,7 @@ def resolve_reference_title_subtitle(
         run_id=run_id,
         resolved_at=now,
         rationale=summary_rationale if summary else "No reliable summary was produced.",
-        prompt_version=TITLE_SUBTITLE_SUMMARY_PROMPT_VERSION if summary_source == "llm_outcome_summary" else "",
+        prompt_version=summary_prompt_version if summary_source == "llm_outcome_summary" else "",
     ) if include_summary else {}
 
     status = "resolved" if title else "unresolved"
@@ -792,6 +810,7 @@ def build_reference_title_subtitle_plan(
     include_summary: bool = True,
     summary_max_tokens: int = TITLE_SUBTITLE_SUMMARY_TOKEN_BUDGET_DEFAULT,
     refresh_summary: bool = False,
+    summary_procedure_alias: str = SUMMARY_PROCEDURE_ALIAS_TITLE_SUBTITLE_RESOLVE,
     run_id: str = "",
     now: str | None = None,
     semantic_client: PapyrusSemanticClient | None = None,
@@ -865,6 +884,7 @@ def build_reference_title_subtitle_plan(
         include_summary=include_summary,
         summary_max_tokens=summary_max_tokens,
         refresh_summary=refresh_summary,
+        summary_procedure_alias=summary_procedure_alias,
         run_id=run_id,
         now=now,
         identifier_prepass=identifier_prepass,
@@ -957,6 +977,7 @@ def reference_title_subtitle_resolve(
     summary_max_tokens: int = TITLE_SUBTITLE_SUMMARY_TOKEN_BUDGET_DEFAULT,
     refresh_summary: bool = False,
     web_search: bool = True,
+    summary_procedure_alias: str = SUMMARY_PROCEDURE_ALIAS_TITLE_SUBTITLE_RESOLVE,
     persist_local_metadata: bool = True,
     vector_sync: bool = True,
     source_text: str = "",
@@ -978,6 +999,7 @@ def reference_title_subtitle_resolve(
         include_summary=summary,
         summary_max_tokens=summary_max_tokens,
         refresh_summary=refresh_summary,
+        summary_procedure_alias=summary_procedure_alias,
         semantic_client=semantic,
     )
     result = _apply_plan_if_requested(plan, apply=apply, actor_label=TITLE_SUBTITLE_SOURCE, reason="references title-subtitle resolve")
@@ -1056,6 +1078,7 @@ def reference_title_subtitle_batch(
                 summary_max_tokens=summary_max_tokens,
                 refresh_summary=refresh_summary,
                 web_search=web_search,
+                summary_procedure_alias=SUMMARY_PROCEDURE_ALIAS_TITLE_SUBTITLE_BATCH,
                 persist_local_metadata=persist_local_metadata,
                 vector_sync=False,
             )
@@ -1189,6 +1212,7 @@ def enrich_reference_catalog_title_subtitle(
             include_summary=summary,
             summary_max_tokens=summary_max_tokens,
             refresh_summary=refresh_summary,
+            summary_procedure_alias=SUMMARY_PROCEDURE_ALIAS_TITLE_SUBTITLE_ENRICH_CATALOG,
             identifier_prepass=identifier_prepass,
         )
         if resolution["status"] != "resolved":
@@ -1260,7 +1284,7 @@ def reference_quality_set(
     reference_id: str,
     rating: int,
     note: str = "",
-    actor_label: str = "papyrus-newsroom",
+    actor_label: str = "papyrus",
     apply: bool = False,
     refresh: bool = False,
     persist_local_metadata: bool = True,
@@ -1502,7 +1526,7 @@ def build_quality_local_metadata_plan(
     reference: dict[str, Any],
     rating: int,
     note: str = "",
-    actor_label: str = "papyrus-newsroom",
+    actor_label: str = "papyrus",
 ) -> dict[str, Any]:
     reference = _require_reference(reference)
     sidecar_path = _sidecar_path_for_reference(reference)
@@ -1526,7 +1550,7 @@ def apply_quality_local_metadata(
     reference: dict[str, Any],
     rating: int,
     note: str = "",
-    actor_label: str = "papyrus-newsroom",
+    actor_label: str = "papyrus",
 ) -> dict[str, Any]:
     now = _now()
     rating = normalize_quality_rating(rating)
@@ -2380,13 +2404,29 @@ def reference_summarize(
         else ""
     )
     doctrine_context = manual_summary_doctrine_context() if summary_text else load_publication_doctrine_context()
-    generated = summary_text or generate_summary(source, max_tokens=max_tokens, model=model, reference=reference, doctrine_context=doctrine_context)
+    generated_result = (
+        {
+            "summary_text": summary_text,
+            "prompt_version": SUMMARY_PROMPT_VERSION,
+            "model": "manual",
+        }
+        if summary_text
+        else generate_summary(
+            source,
+            max_tokens=max_tokens,
+            model=model,
+            reference=reference,
+            doctrine_context=doctrine_context,
+        )
+    )
+    generated = generated_result.get("summary_text") or ""
     plan = build_reference_summary_plan(
         reference=reference,
         max_tokens=max_tokens,
         summary_text=generated,
         source_text=source,
-        model=model if not summary_text else "manual",
+        model=generated_result.get("model") or (model if not summary_text else "manual"),
+        prompt_version=generated_result.get("prompt_version") or SUMMARY_PROMPT_VERSION,
         doctrine_context=doctrine_context,
         refresh=refresh,
         identifier_prepass=identifier_prepass,
@@ -2452,19 +2492,22 @@ def reference_summarize_batch(
                 "records": [],
             }
         source = _resolve_source_text(reference)
-        generated = generate_summary(
+        generated_result = generate_summary(
             source,
             max_tokens=budget,
             model=model,
             reference=reference,
             doctrine_context=doctrine_context,
+            procedure_alias=SUMMARY_PROCEDURE_ALIAS_SUMMARIZE_BATCH,
         )
+        generated = generated_result.get("summary_text") or ""
         plan = build_reference_summary_plan(
             reference=reference,
             max_tokens=budget,
             summary_text=generated,
             source_text=source,
-            model=model,
+            model=generated_result.get("model") or model,
+            prompt_version=generated_result.get("prompt_version") or SUMMARY_PROMPT_VERSION,
             doctrine_context=doctrine_context,
             refresh=refresh,
             identifier_prepass=identifier_prepass,
@@ -2583,33 +2626,6 @@ def doctrine_summary_metadata(doctrine_context: dict[str, Any] | None) -> dict[s
     }
 
 
-def build_summary_prompt(
-    source_text: str,
-    *,
-    max_tokens: int,
-    reference: dict[str, Any],
-    doctrine_context: dict[str, Any] | None = None,
-) -> str:
-    budget = normalize_summary_budget(max_tokens)
-    context = doctrine_context or load_publication_doctrine_context()
-    doctrine_block = _format_publication_doctrine_prompt_block(context)
-    return "\n".join([
-        f"Write a concise summary of this reference in no more than {budget} tokens.",
-        "Preserve the central contribution, method, evidence type, and relevance to the knowledge base.",
-        "Do not add citations or claims that are not supported by the provided text.",
-        "",
-        "Publication Context:",
-        doctrine_block,
-        "",
-        "Important policy-use rule: Editorial policies describe standards for downstream published Papyrus content. They are included only as publication context for this Reference summary and should not be treated as rules that the Reference itself must satisfy.",
-        "",
-        f"Title: {reference.get('title') or ''}",
-        f"Source URI: {reference.get('sourceUri') or ''}",
-        "",
-        source_text[:50000],
-    ])
-
-
 def build_quality_assessment_prompt(
     source_text: str,
     *,
@@ -2670,35 +2686,93 @@ def build_title_subtitle_prompt(
     ])
 
 
-def build_outcome_summary_prompt(
+def _reference_summarization_cloud_input(
     *,
-    reference: dict[str, Any],
+    mode: str,
     source_text: str,
-    title: str,
-    subtitle: str,
-    max_tokens: int = TITLE_SUBTITLE_SUMMARY_TOKEN_BUDGET_DEFAULT,
-) -> str:
-    budget = normalize_title_subtitle_summary_budget(max_tokens)
-    media_type = _clean_text(reference.get("mediaType"))
-    source_uri = _clean_text(reference.get("sourceUri"))
-    return "\n".join([
-        f"Write an outcome-focused summary of this reference in no more than {budget} tokens.",
-        "This is not a teaser and not a topical overview. Explain what the reference is actually saying.",
-        "Focus on findings, conclusions, outcomes, recommendations, or the central message.",
-        "If this is a research paper, emphasize method-backed findings, evidence, and conclusions.",
-        "If this is an institutional report, emphasize main claims, recommendations, and operational implications.",
-        "If this is a news/article/blog/document source, begin with a concise explanatory paragraph about the point being made.",
-        "Bullet points are allowed only after that opening explanatory paragraph.",
-        "If you include bullets, put them on separate lines after a blank line following the opening paragraph.",
-        "Do not start with bullets. Do not add unsupported claims.",
-        "",
-        f"Known title: {title}",
-        f"Known subtitle: {subtitle}",
-        f"Reference media type: {media_type}",
-        f"Source URI: {source_uri}",
-        "",
-        source_text[:50000],
-    ])
+    max_tokens: int,
+    model: str,
+    reference: dict[str, Any],
+    title: str = "",
+    subtitle: str = "",
+    doctrine_context: dict[str, Any] | None = None,
+    prompt_version: str = "",
+) -> dict[str, Any]:
+    return _compact_dict({
+        "mode": mode,
+        "source_text": source_text[:50000],
+        "max_tokens": int(max_tokens),
+        "reference_title": _clean_text(reference.get("title")),
+        "source_uri": _clean_text(reference.get("sourceUri")),
+        "known_title": _clean_text(title),
+        "known_subtitle": _clean_text(subtitle),
+        "media_type": _clean_text(reference.get("mediaType")),
+        "doctrine_context_text": _format_publication_doctrine_prompt_block(doctrine_context or {}),
+        "model": model,
+        "prompt_version": prompt_version,
+    })
+
+
+def _run_reference_summarization_cloud_procedure(
+    *,
+    alias: str,
+    mode: str,
+    source_text: str,
+    max_tokens: int,
+    model: str,
+    reference: dict[str, Any],
+    title: str = "",
+    subtitle: str = "",
+    doctrine_context: dict[str, Any] | None = None,
+    prompt_version: str = "",
+) -> dict[str, str]:
+    from papyrus_content.cloud_procedures import start_cloud_procedure_run
+    from papyrus_content.graphql_authoring import create_authoring_client
+    from papyrus_content.ids import safe_id
+    from papyrus_content.reference_assignments import timestamp_for_path
+
+    run_id = f"reference-summarization-{safe_id(mode)}-{safe_id(reference.get('lineageId') or reference.get('id') or 'reference')[:80]}-{timestamp_for_path()}"
+    run_dir = PAPYRUS_ROOT / ".papyrus-runs" / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    source_path = run_dir / "reference-summarization.cloud.tac"
+    stdout_path = run_dir / "reference-summarization.stdout.log"
+    stderr_path = run_dir / "reference-summarization.stderr.log"
+    client, _ = create_authoring_client()
+    run = start_cloud_procedure_run(
+        client=client,
+        alias=alias,
+        actor_label=SUMMARY_SOURCE,
+        title=f"Run reference summarization ({mode}) for {reference.get('id') or reference.get('lineageId') or 'reference'}",
+        summary="Triggered by reference summarization workflow via cloud procedure dispatch.",
+        input_payload=_reference_summarization_cloud_input(
+            mode=mode,
+            source_text=source_text,
+            max_tokens=max_tokens,
+            model=model,
+            reference=reference,
+            title=title,
+            subtitle=subtitle,
+            doctrine_context=doctrine_context,
+            prompt_version=prompt_version,
+        ),
+        run_dir=run_dir,
+        source_path=source_path,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+        output_markers=SUMMARY_PROCEDURE_OUTPUT_MARKERS,
+    )
+    output = run.get("output")
+    if not isinstance(output, dict):
+        raise RuntimeError("Cloud summarization procedure did not return a JSON object payload.")
+    summary_text = _clean_text(output.get("summary_text"))
+    if not summary_text:
+        raise RuntimeError("Cloud summarization procedure output is missing summary_text.")
+    return {
+        "mode": _clean_text(output.get("mode")) or mode,
+        "summary_text": summary_text,
+        "prompt_version": _clean_text(output.get("prompt_version")) or _clean_text(prompt_version),
+        "model": _clean_text(output.get("model")) or _clean_text(model),
+    }
 
 
 def generate_outcome_summary(
@@ -2709,43 +2783,21 @@ def generate_outcome_summary(
     subtitle: str,
     max_tokens: int = TITLE_SUBTITLE_SUMMARY_TOKEN_BUDGET_DEFAULT,
     model: str = "gpt-5.4-mini",
-) -> str:
+    procedure_alias: str = SUMMARY_PROCEDURE_ALIAS_TITLE_SUBTITLE_RESOLVE,
+) -> dict[str, str]:
     source_text = _required(source_text, "source_text")
-    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is required to generate metadata summary.")
     budget = normalize_title_subtitle_summary_budget(max_tokens)
-    prompt = build_outcome_summary_prompt(
-        reference=reference,
+    return _run_reference_summarization_cloud_procedure(
+        alias=procedure_alias,
+        mode="outcome_summary",
         source_text=source_text,
+        max_tokens=budget,
+        model=model,
+        reference=reference,
         title=title,
         subtitle=subtitle,
-        max_tokens=budget,
+        prompt_version=TITLE_SUBTITLE_SUMMARY_PROMPT_VERSION,
     )
-    payload = {
-        "model": model,
-        "input": [
-            {"role": "system", "content": "You write concise outcome summaries for editorial curation metadata."},
-            {"role": "user", "content": prompt},
-        ],
-        "max_output_tokens": budget + 120,
-    }
-    request = urllib.request.Request(
-        "https://api.openai.com/v1/responses",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=120) as response:
-            parsed = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as error:
-        body = error.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"OpenAI outcome summary request failed: {error.code} {body[:400]}") from error
-    text = _extract_response_text(parsed)
-    if not text:
-        raise RuntimeError("OpenAI outcome summary request returned no text.")
-    return text.strip()
 
 
 def reference_web_search(
@@ -2971,37 +3023,20 @@ def generate_summary(
     model: str,
     reference: dict[str, Any],
     doctrine_context: dict[str, Any] | None = None,
-) -> str:
+    procedure_alias: str = SUMMARY_PROCEDURE_ALIAS_SUMMARIZE,
+) -> dict[str, str]:
     source_text = _required(source_text, "source_text")
-    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is required unless --summary-text is provided.")
     budget = normalize_summary_budget(max_tokens)
-    prompt = build_summary_prompt(source_text, max_tokens=budget, reference=reference, doctrine_context=doctrine_context)
-    payload = {
-        "model": model,
-        "input": [
-            {"role": "system", "content": "You summarize research and source material for a private editorial knowledge base."},
-            {"role": "user", "content": prompt},
-        ],
-        "max_output_tokens": budget + 80,
-    }
-    request = urllib.request.Request(
-        "https://api.openai.com/v1/responses",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        method="POST",
+    return _run_reference_summarization_cloud_procedure(
+        alias=procedure_alias,
+        mode="reference_summary",
+        source_text=source_text,
+        max_tokens=budget,
+        model=model,
+        reference=reference,
+        doctrine_context=doctrine_context,
+        prompt_version=SUMMARY_PROMPT_VERSION,
     )
-    try:
-        with urllib.request.urlopen(request, timeout=120) as response:
-            parsed = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as error:
-        body = error.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"OpenAI summary request failed: {error.code} {body[:400]}") from error
-    text = _extract_response_text(parsed)
-    if not text:
-        raise RuntimeError("OpenAI summary request returned no text.")
-    return text.strip()
 
 
 def estimate_tokens(text: str, *, model: str = "") -> int:
@@ -3335,7 +3370,7 @@ def _sync_reference_vectors(references: list[dict[str, Any]]) -> dict[str, Any]:
 
 def _reference_vector_sync_command(reference_ids: tuple[str, ...]) -> str:
     flags = " ".join(f"--reference-id {reference_id}" for reference_id in reference_ids)
-    return f"poetry run papyrus-newsroom knowledge-vector-index --action sync --force --progress-every 0 {flags}".strip()
+    return f"poetry run papyrus knowledge-vector-index --action sync --force --progress-every 0 {flags}".strip()
 
 
 def _reference_is_vector_eligible(reference: dict[str, Any]) -> bool:
@@ -3515,7 +3550,7 @@ def _quality_semantic_node_record(rating: int, now: str) -> dict[str, Any]:
         "previousVersionId": None,
         "versionState": "current",
         "versionCreatedAt": now,
-        "versionCreatedBy": "papyrus-newsroom",
+        "versionCreatedBy": "papyrus",
         "changeReason": "qualityRating-seed",
         "contentHash": _hash_short([node_key, QUALITY_NODE_KIND, display_name, description]),
         "nodeKey": node_key,

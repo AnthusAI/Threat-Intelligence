@@ -575,7 +575,7 @@ def message_record(input_payload: dict[str, Any]) -> dict[str, Any]:
             },
             default_source="papyrus",
             default_author_label=source,
-            default_response_owner="papyrus-content-cli",
+            default_response_owner="papyrus-cli",
         ),
     )
 

@@ -26,7 +26,7 @@ reference state agree, and accepted references have extracted text attachments.
    values point at the sandbox bucket from `amplify_outputs.json`:
 
    ```bash
-   npm run content -- categories sandbox-steering-config \
+   poetry run papyrus ops categories sandbox-steering-config \
      --config corpora/papyrus-steering.yml \
      --output .papyrus-runs/<run-id>/sandbox-steering.yml
    ```
@@ -34,7 +34,7 @@ reference state agree, and accepted references have extracted text attachments.
 4. Inspect worker readiness:
 
    ```bash
-   npm run content -- corpora worker-bootstrap \
+   poetry run papyrus ops corpora worker-bootstrap \
      --config <steering.yml> \
      --json
    ```
@@ -42,12 +42,12 @@ reference state agree, and accepted references have extracted text attachments.
 5. Pull corpus files from S3 into the local Biblicus working copy:
 
    ```bash
-   npm run content -- corpora sync-from-cloud \
+   poetry run papyrus ops corpora sync-from-cloud \
      --config <steering.yml> \
      --corpus-key <corpus-key> \
      --dry-run
 
-   npm run content -- corpora sync-from-cloud \
+   poetry run papyrus ops corpora sync-from-cloud \
      --config <steering.yml> \
      --corpus-key <corpus-key> \
      --apply
@@ -56,7 +56,7 @@ reference state agree, and accepted references have extracted text attachments.
 6. Recheck readiness before claiming analysis work:
 
    ```bash
-   npm run content -- corpora status \
+   poetry run papyrus ops corpora status \
      --config <steering.yml> \
      --corpus-key <corpus-key> \
      --json
@@ -71,12 +71,12 @@ When new source material is added locally, push the corpus accession to S3
 before registering or analyzing it:
 
 ```bash
-npm run content -- corpora sync-to-cloud \
+poetry run papyrus ops corpora sync-to-cloud \
   --config <steering.yml> \
   --corpus-key <corpus-key> \
   --dry-run
 
-npm run content -- corpora sync-to-cloud \
+poetry run papyrus ops corpora sync-to-cloud \
   --config <steering.yml> \
   --corpus-key <corpus-key> \
   --apply
@@ -85,13 +85,13 @@ npm run content -- corpora sync-to-cloud \
 Then register the catalog into GraphQL:
 
 ```bash
-npm run content -- references prepare-catalog \
+poetry run papyrus references prepare-catalog \
   --config <steering.yml> \
   --corpus-key <corpus-key> \
   --catalog corpora/<corpus-key>/metadata/catalog.json \
   --output .papyrus-runs/<run-id>/<corpus-key>-prepared-catalog.json
 
-npm run content -- references register-catalog \
+poetry run papyrus references register-catalog \
   --config <steering.yml> \
   --corpus-key <corpus-key> \
   --catalog .papyrus-runs/<run-id>/<corpus-key>-prepared-catalog.json \

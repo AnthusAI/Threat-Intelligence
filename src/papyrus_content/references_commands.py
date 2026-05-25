@@ -314,7 +314,7 @@ def references_curate_recent(flags: list[str]) -> None:
         )
     args = [
         "run",
-        "papyrus-newsroom",
+        "papyrus",
         "references",
         "curate-recent",
         "--corpus-key",
@@ -354,11 +354,11 @@ def references_curate_recent(flags: list[str]) -> None:
     payload = extract_last_json_object(completed.stdout or "")
     if not payload:
         raise RuntimeError(
-            "Papyrus newsroom references curate-recent returned invalid JSON: "
+            "papyrus references curate-recent returned invalid JSON: "
             f"{completed.stderr or completed.stdout or 'unknown error'}"
         )
     if completed.returncode != 0:
-        raise RuntimeError(f"papyrus-newsroom references curate-recent exited with status {completed.returncode}")
+        raise RuntimeError(f"papyrus references curate-recent exited with status {completed.returncode}")
     summary = payload.get("selectionSummary") or payload.get("summary") or {}
     selected_reference_ids = [
         normalize_string(value)
@@ -558,7 +558,7 @@ def references_create_identifier_backfill_assignment(flags: list[str]) -> None:
     options = parse_options(flags)
     if not options.get("corpus-key"):
         raise ValueError("references create-identifier-backfill-assignment requires --corpus-key <key>.")
-    actor_label = options.get("actor") or "papyrus-content-cli"
+    actor_label = options.get("actor") or "papyrus-cli"
     now = _utc_now()
     types = normalize_identifier_types(options.get("types"))
     run_id = options.get("run-id") or (
@@ -609,7 +609,7 @@ def references_identifier_backfill_now(flags: list[str]) -> None:
         run_now_options.get("assignee-key")
         or run_now_options.get("assignee")
         or run_now_options.get("actor")
-        or "papyrus-content-cli"
+        or "papyrus-cli"
     )
     client, auth = create_authoring_client()
     assignment_plan = build_reference_identifier_backfill_assignment_plan(

@@ -13,6 +13,13 @@ from .env import PAPYRUS_ROOT
 from .graphql_authoring import PapyrusGraphQLAuthoringClient
 
 REQUIRED_PROCEDURES_CONFIG_PATH = PAPYRUS_ROOT / "corpora" / "papyrus-required-procedures.json"
+SEED_REQUIRED_PROCEDURES_COMMAND = (
+    "poetry run papyrus procedures seed-required --apply"
+)
+
+
+def seed_required_procedures_remediation() -> str:
+    return f"Run {SEED_REQUIRED_PROCEDURES_COMMAND} to preload standard procedures."
 
 GET_PROCEDURE_DEFINITION_QUERY = """
   query GetProcedureDefinition($procedureKey: String!) {
@@ -114,12 +121,12 @@ def cloud_procedure_source_or_throw(alias: str, procedure_key: str, version: dic
     if not source:
         raise ValueError(
             f"Cloud procedure '{procedure_key}' for {alias} has no Tactus source. "
-            "Run npm run seed:amplify to preload standard procedures."
+            f"{seed_required_procedures_remediation()}"
         )
     if not re.search(r"\bProcedure\s*\{", source, flags=re.MULTILINE):
         raise ValueError(
             f"Cloud procedure '{procedure_key}' for {alias} does not contain executable Tactus Procedure source. "
-            "Run npm run seed:amplify to refresh stale procedure seeds."
+            f"{seed_required_procedures_remediation()}"
         )
     return f"{source}\n"
 
@@ -184,7 +191,19 @@ def try_parse_json(text: str) -> Any:
         return None
 
 
-def normalize_run_payload_candidate(value: Any) -> dict[str, Any] | None:
+DEFAULT_PROCEDURE_OUTPUT_MARKERS = (
+    "research_packet",
+    "researchPacket",
+    "reporting_context_packet",
+    "reportingContextPacket",
+    "draft_record_plan",
+    "draftRecordPlan",
+    "work_product_kind",
+    "assignment_item_id",
+)
+
+
+def normalize_run_payload_candidate(value: Any, *, markers: tuple[str, ...] = DEFAULT_PROCEDURE_OUTPUT_MARKERS) -> dict[str, Any] | None:
     candidate = value
     if isinstance(value, dict) and isinstance(value.get("value"), dict) and not isinstance(value.get("value"), list):
         candidate = value["value"]
@@ -192,19 +211,9 @@ def normalize_run_payload_candidate(value: Any) -> dict[str, Any] | None:
         return None
     reason = candidate.get("reason")
     if isinstance(reason, str):
-        reason_payload = normalize_run_payload_candidate(try_parse_json(reason))
+        reason_payload = normalize_run_payload_candidate(try_parse_json(reason), markers=markers)
         if reason_payload:
             return reason_payload
-    markers = (
-        "research_packet",
-        "researchPacket",
-        "reporting_context_packet",
-        "reportingContextPacket",
-        "draft_record_plan",
-        "draftRecordPlan",
-        "work_product_kind",
-        "assignment_item_id",
-    )
     if any(marker in candidate for marker in markers):
         return candidate
     return None
@@ -282,27 +291,138 @@ def extract_balanced_json_objects(text: str) -> list[str]:
     return objects
 
 
-def extract_research_run_payload(stdout: str) -> dict[str, Any] | None:
+def extract_research_run_payload(stdout: str, *, markers: tuple[str, ...] = DEFAULT_PROCEDURE_OUTPUT_MARKERS) -> dict[str, Any] | None:
     text = str(stdout or "").strip()
     if not text:
         return None
-    direct_payload = normalize_run_payload_candidate(try_parse_json(text))
+    direct_payload = normalize_run_payload_candidate(try_parse_json(text), markers=markers)
     if direct_payload:
         return direct_payload
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     for line in reversed(lines):
-        payload = normalize_run_payload_candidate(try_parse_json(line))
+        payload = normalize_run_payload_candidate(try_parse_json(line), markers=markers)
         if payload:
             return payload
     for candidate in reversed(extract_likely_json_payload_objects(text)):
-        payload = normalize_run_payload_candidate(try_parse_json(candidate))
+        payload = normalize_run_payload_candidate(try_parse_json(candidate), markers=markers)
         if payload:
             return payload
     for candidate in reversed(extract_balanced_json_objects(text)):
-        payload = normalize_run_payload_candidate(try_parse_json(candidate))
+        payload = normalize_run_payload_candidate(try_parse_json(candidate), markers=markers)
         if payload:
             return payload
     return None
+
+
+def line_number_at(text: str, index: int) -> int:
+    return text.count("\n", 0, max(index, 0)) + 1
+
+
+def extract_execute_tactus_call_traces(stdout: str) -> list[dict[str, Any]]:
+    text = str(stdout or "")
+    if not text:
+        return []
+    agent_markers: list[tuple[int, str]] = [
+        (match.start(), match.group(1))
+        for match in re.finditer(r"^→ Agent ([^:]+):", text, flags=re.MULTILINE)
+    ]
+    traces: list[dict[str, Any]] = []
+    for call_index, match in enumerate(re.finditer(r"^→ Tool execute_tactus\s*$", text, flags=re.MULTILINE), start=1):
+        start = match.start()
+        line = line_number_at(text, start)
+        agent = ""
+        for agent_pos, agent_name in reversed(agent_markers):
+            if agent_pos < start:
+                agent = agent_name
+                break
+        args_marker = re.search(r"^\s*Args:\s*", text[match.end() :], flags=re.MULTILINE)
+        args_object_text = None
+        args = None
+        args_start = -1
+        args_end = -1
+        if args_marker:
+            marker_start = match.end() + args_marker.start()
+            brace_start = text.find("{", marker_start)
+            if brace_start >= 0:
+                args_start = brace_start
+                args_object_text = extract_balanced_json_object_at(text, brace_start)
+                if args_object_text:
+                    args_end = brace_start + len(args_object_text)
+                    args = try_parse_json(args_object_text)
+        result_line_text = ""
+        if args_end >= 0:
+            result_line_match = re.search(r"^\s*Result:\s*(.+)$", text[args_end:], flags=re.MULTILINE)
+            if result_line_match:
+                result_line_text = result_line_match.group(1).strip()
+        traces.append(
+            {
+                "callIndex": call_index,
+                "line": line,
+                "agent": agent or None,
+                "tool": "execute_tactus",
+                "args": args if isinstance(args, dict) else {},
+                "argsRaw": args_object_text or "",
+                "harness": (args or {}).get("harness") if isinstance(args, dict) else None,
+                "assignmentId": (args or {}).get("assignment_id") if isinstance(args, dict) else None,
+                "contextProfile": (args or {}).get("context_profile") if isinstance(args, dict) else None,
+                "corpusKey": (args or {}).get("corpus_key") if isinstance(args, dict) else None,
+                "researchMode": (args or {}).get("research_mode") if isinstance(args, dict) else None,
+                "tactusSnippet": (args or {}).get("tactus") if isinstance(args, dict) else None,
+                "resultPreview": result_line_text,
+            }
+        )
+    return traces
+
+
+def write_llm_context_trace_artifacts(
+    *,
+    run_dir: Path,
+    alias: str,
+    procedure_key: str,
+    run_id: str,
+    input_payload: dict[str, Any],
+    stdout: str,
+    stdout_path: Path,
+) -> dict[str, Any]:
+    llm_dir = run_dir / "llm-context"
+    llm_dir.mkdir(parents=True, exist_ok=True)
+    calls = extract_execute_tactus_call_traces(stdout)
+    calls_path = llm_dir / "execute_tactus_calls.jsonl"
+    with calls_path.open("w", encoding="utf-8") as handle:
+        for call in calls:
+            handle.write(json.dumps(call, sort_keys=True) + "\n")
+    summary = {
+        "version": 1,
+        "alias": alias,
+        "procedureKey": procedure_key,
+        "runId": run_id,
+        "generatedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "sourceStdoutPath": str(stdout_path),
+        "inputPayload": input_payload,
+        "executeTactusCallCount": len(calls),
+        "callsPath": str(calls_path),
+        "calls": [
+            {
+                "callIndex": call.get("callIndex"),
+                "line": call.get("line"),
+                "agent": call.get("agent"),
+                "harness": call.get("harness"),
+                "assignmentId": call.get("assignmentId"),
+                "contextProfile": call.get("contextProfile"),
+                "corpusKey": call.get("corpusKey"),
+                "researchMode": call.get("researchMode"),
+            }
+            for call in calls
+        ],
+    }
+    summary_path = llm_dir / "summary.json"
+    summary_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    return {
+        "llmContextDir": str(llm_dir),
+        "llmContextSummaryPath": str(summary_path),
+        "llmContextCallsPath": str(calls_path),
+        "llmContextCallCount": len(calls),
+    }
 
 
 def prepend_path_list(entries: list[str], existing: str | None) -> str:
@@ -322,6 +442,7 @@ def start_cloud_procedure_run(
     stdout_path: Path | None = None,
     stderr_path: Path | None = None,
     source_path: Path | None = None,
+    output_markers: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     procedure_key = required_procedure_key_for(alias)
     procedure_input = normalize_cloud_procedure_input(input_payload)
@@ -332,19 +453,19 @@ def start_cloud_procedure_run(
         if "not found" in message:
             raise ValueError(
                 f"Missing required cloud procedure '{procedure_key}' for {alias}. "
-                "Run npm run seed:amplify to preload standard procedures."
+                f"{seed_required_procedures_remediation()}"
             ) from error
         raise
     if not definition:
         raise ValueError(
             f"Missing required cloud procedure '{procedure_key}' for {alias}. "
-            "Run npm run seed:amplify to preload standard procedures."
+            f"{seed_required_procedures_remediation()}"
         )
     version = current_cloud_procedure_version(definition)
     if not version or not version.get("id"):
         raise ValueError(
             f"Cloud procedure '{procedure_key}' has no current version. "
-            "Run npm run seed:amplify to preload standard procedures."
+            f"{seed_required_procedures_remediation()}"
         )
     tactus_source = cloud_procedure_source_or_throw(alias, procedure_key, version)
     start_data = client.graphql(
@@ -355,7 +476,7 @@ def start_cloud_procedure_run(
             "title": title,
             "summary": summary,
             "actorLabel": actor_label,
-            "input": {**procedure_input, "__papyrusExecutionMode": "external_cli"},
+            "input": json.dumps({**procedure_input, "__papyrusExecutionMode": "external_cli"}),
         },
     )
     started = normalize_graphql_json_value(start_data.get("startNewsroomProcedureRun")) or {}
@@ -387,8 +508,20 @@ def start_cloud_procedure_run(
     )
     effective_stdout_path.write_text(completed.stdout or "", encoding="utf-8")
     effective_stderr_path.write_text(completed.stderr or "", encoding="utf-8")
+    llm_context = write_llm_context_trace_artifacts(
+        run_dir=effective_run_dir,
+        alias=alias,
+        procedure_key=procedure_key,
+        run_id=run_id,
+        input_payload=procedure_input,
+        stdout=completed.stdout or "",
+        stdout_path=effective_stdout_path,
+    )
     finished_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    parsed = extract_research_run_payload(completed.stdout or "")
+    parsed = extract_research_run_payload(
+        completed.stdout or "",
+        markers=output_markers or DEFAULT_PROCEDURE_OUTPUT_MARKERS,
+    )
     execution_output = None
     if completed.returncode == 0 and isinstance(parsed, dict):
         execution_output = {
@@ -399,6 +532,7 @@ def start_cloud_procedure_run(
             "mode": "cli_tactus_source",
             "source": "ProcedureVersion.tactusSource",
             "input": procedure_input,
+            "llmContext": llm_context,
             **parsed,
         }
     error = None
@@ -445,6 +579,7 @@ def start_cloud_procedure_run(
         "sourcePath": str(effective_source_path),
         "stdoutPath": str(effective_stdout_path),
         "stderrPath": str(effective_stderr_path),
+        **llm_context,
     }
     if error:
         raise RuntimeError(error["message"])

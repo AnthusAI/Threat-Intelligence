@@ -1681,7 +1681,7 @@ async fn run_agent_turn(
             "tool_calls": tool_calls,
         }));
 
-        let mut round_tool_errors: Vec<(String, String, String)> = Vec::new();
+        let mut round_tool_errors: Vec<(String, String, Option<String>, String)> = Vec::new();
         for call in tool_calls {
             let call_id = call
                 .get("id")
@@ -1725,27 +1725,47 @@ async fn run_agent_turn(
             }));
             if let Some(error_text) = tool_result_error_text(&tool_result) {
                 saw_tool_errors = true;
-                round_tool_errors.push((name.to_string(), arguments.to_string(), error_text));
+                let error_code = tool_result_error_code(&tool_result);
+                round_tool_errors.push((
+                    name.to_string(),
+                    arguments.to_string(),
+                    error_code,
+                    error_text,
+                ));
             }
         }
 
         if !round_tool_errors.is_empty() && round + 1 < MAX_TOOL_ATTEMPTS {
             let retries_remaining = MAX_TOOL_ATTEMPTS - (round + 1);
+            let unsupported_snippet_seen = round_tool_errors
+                .iter()
+                .any(|(_, _, code, _)| code.as_deref() == Some("unsupported_snippet"));
             let retry_details = round_tool_errors
                 .into_iter()
-                .map(|(name, arguments, error)| {
+                .map(|(name, arguments, code, error)| {
+                    let code_prefix = code
+                        .as_deref()
+                        .map(|value| format!("Code: {}\n", value))
+                        .unwrap_or_default();
                     format!(
-                        "Tool: {}\nArguments:\n{}\nError:\n{}",
-                        name, arguments, error
+                        "Tool: {}\nArguments:\n{}\n{}Error:\n{}",
+                        name, arguments, code_prefix, error
                     )
                 })
                 .collect::<Vec<String>>()
                 .join("\n\n---\n\n");
+            let correction_hint = if unsupported_snippet_seen {
+                "At least one error was unsupported_snippet: your previous call used JS/object-call shape. \
+Use Lua/Tactus table-call syntax instead (for example: return docs_get{ id = \"resources.Assignment\" })."
+            } else {
+                "Use raw Lua in tactus (no markdown fences, no escaped quotes like \\\" unless the value itself needs it)."
+            };
             messages.push(json!({
                 "role": "system",
                 "content": format!(
-                    "The previous tool call(s) returned error(s). Retry by issuing a corrected execute_tactus tool call. Retries remaining: {}. Use raw Lua in tactus (no markdown fences, no escaped quotes like \\\" unless the value itself needs it). Do not call docs_list/docs_get unless the user explicitly asked for documentation lookup. Previous tool failure detail(s):\n{}",
+                    "The previous tool call(s) returned error(s). Retry by issuing a corrected execute_tactus tool call. Retries remaining: {}. {} Do not call docs_list/docs_get unless the user explicitly asked for documentation lookup. Previous tool failure detail(s):\n{}",
                     retries_remaining,
+                    correction_hint,
                     retry_details,
                 ),
             }));
@@ -1793,6 +1813,21 @@ fn tool_result_error_text(result: &Value) -> Option<String> {
         return Some(format!("{code}: {message}"));
     }
     Some(error.to_string())
+}
+
+fn tool_result_error_code(result: &Value) -> Option<String> {
+    let ok = result.get("ok").and_then(Value::as_bool).unwrap_or(false);
+    if ok {
+        return None;
+    }
+    let error = result.get("error")?;
+    if let Some(error_obj) = error.as_object() {
+        return error_obj
+            .get("code")
+            .and_then(Value::as_str)
+            .map(ToString::to_string);
+    }
+    None
 }
 
 fn collect_assignment_ids(value: &Value, assignment_ids: &mut HashSet<String>) {

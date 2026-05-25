@@ -134,3 +134,12 @@ sections:
     editorialPolicy: Focus on practical workplace changes rather than generic automation speculation. Suitable for pieces on call centers, knowledge work, management, training, and productivity systems.
     enabled: true
     sortOrder: 15
+
+  - id: gaming
+    title: Gaming
+    shortTitle: Play Systems
+    type: rotating
+    editorialMission: Cover AI in game development, game worlds, player experiences, and interactive media systems.
+    editorialPolicy: Commission reporting on AI-assisted game production, procedural generation, NPC behavior, moderation, creator tools, and platform policy changes affecting game ecosystems.
+    enabled: true
+    sortOrder: 16

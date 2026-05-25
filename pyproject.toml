@@ -11,11 +11,11 @@ dependencies = [
 ]
 
 [project.scripts]
-papyrus-newsroom = "papyrus_newsroom.cli:main"
-papyrus-content = "papyrus_content.cli:main"
+papyrus = "papyrus.cli:main"
 
 [tool.poetry]
 packages = [
+    { include = "papyrus", from = "src" },
     { include = "papyrus_newsroom", from = "src" },
     { include = "papyrus_knowledge_query", from = "src" },
     { include = "papyrus_content", from = "src" },

@@ -44,7 +44,7 @@ def analysis_create_reindex_assignment(flags: list[str]) -> None:
         plan,
         category_set=category_set,
         section_target=section_target,
-        actor_label=normalize_string(options.get("actor")) or "papyrus-content-cli",
+        actor_label=normalize_string(options.get("actor")) or "papyrus-cli",
     )
     if options.get("output"):
         _write_json_file(
@@ -65,7 +65,7 @@ def analysis_create_reindex_assignment(flags: list[str]) -> None:
     update_newsroom_summary_after_assignment_creates(
         client,
         assignment_changes,
-        actor_label=normalize_string(options.get("actor")) or "papyrus-content-cli",
+        actor_label=normalize_string(options.get("actor")) or "papyrus-cli",
         reason=f"analysis create-reindex-assignment {assignment_plan['assignment']['id']}",
     )
 
@@ -84,7 +84,7 @@ def analysis_run_now(flags: list[str]) -> None:
         plan,
         category_set=category_set,
         section_target=section_target,
-        actor_label=normalize_string(options.get("actor")) or "papyrus-content-cli",
+        actor_label=normalize_string(options.get("actor")) or "papyrus-cli",
     )
     from .assignments import apply_assignment_action
     from .assignment_executors import execute_assignment_by_type
@@ -97,7 +97,7 @@ def analysis_run_now(flags: list[str]) -> None:
     update_newsroom_summary_after_assignment_creates(
         client,
         assignment_changes,
-        actor_label=normalize_string(options.get("actor")) or "papyrus-content-cli",
+        actor_label=normalize_string(options.get("actor")) or "papyrus-cli",
         reason=f"analysis run-now create {assignment_plan['assignment']['id']}",
     )
     apply_assignment_action(
@@ -106,7 +106,7 @@ def analysis_run_now(flags: list[str]) -> None:
         action="claim",
         assignment_id=assignment_plan["assignment"]["id"],
         options=options,
-        actor_label=normalize_string(options.get("actor")) or "papyrus-content-cli",
+        actor_label=normalize_string(options.get("actor")) or "papyrus-cli",
     )
     execution_result = execute_assignment_by_type(client, assignment_plan["assignment"]["id"], options)
     apply_assignment_action(
@@ -115,7 +115,7 @@ def analysis_run_now(flags: list[str]) -> None:
         action="complete",
         assignment_id=assignment_plan["assignment"]["id"],
         options=options,
-        actor_label=normalize_string(options.get("actor")) or "papyrus-content-cli",
+        actor_label=normalize_string(options.get("actor")) or "papyrus-cli",
     )
     print(json.dumps(execution_result, indent=2))
 
@@ -198,7 +198,7 @@ def analysis_import_graph_artifact(flags: list[str]) -> None:
             "storagePath": result["attachment"].get("storagePath"),
             "plannedRecords": len(result["plan"]["records"]),
             "changedRecords": changed_records,
-            "next": f"poetry run papyrus-content analysis import-graph-artifact --import-run {import_run_id} --apply",
+            "next": f"poetry run papyrus analysis import-graph-artifact --import-run {import_run_id} --apply",
         }
         if options.get("json"):
             print(json.dumps(payload, indent=2))
@@ -213,7 +213,7 @@ def analysis_import_graph_artifact(flags: list[str]) -> None:
     update_newsroom_summary_after_analysis_import(
         client,
         result["changes"],
-        actor_label="papyrus-content-cli",
+        actor_label="papyrus-cli",
         reason=f"analysis reimport graph artifact {result['plan']['importRunId']}",
     )
     if options.get("json"):

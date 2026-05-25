@@ -168,7 +168,7 @@ def assignment_created_event_record(assignment: dict[str, Any], actor_label: str
         "actorLabel": actor_label,
         "note": assignment.get("brief"),
         "createdAt": now,
-        "metadata": json.dumps({"kind": f"{assignment['assignmentTypeKey']}.created", "source": "papyrus-content-cli"}),
+        "metadata": json.dumps({"kind": f"{assignment['assignmentTypeKey']}.created", "source": "papyrus-cli"}),
     }
 
 
@@ -218,7 +218,7 @@ def execute_reference_accession_assignment(
     metadata = assignment_metadata(client, assignment)
     if metadata.get("kind") != "reference.corpus-accession.requested":
         raise ValueError(f"Assignment {assignment['id']} metadata is not reference.corpus-accession.requested.")
-    actor_label = options.get("actor") or options.get("assignee-key") or "papyrus-content-cli"
+    actor_label = options.get("actor") or options.get("assignee-key") or "papyrus-cli"
     run_id = options.get("run-id") or f"reference-accession-{hash_short([assignment['id'], _utc_now()])}"
     run_dir = Path.cwd() / ".papyrus-runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -705,7 +705,7 @@ def print_reference_accession_assignment_summary(rows: list[dict[str, Any]], cha
 
 def next_reference_source_command(row: dict[str, Any]) -> str:
     if row["state"] == SOURCE_READINESS_STATES["URL_ONLY"]:
-        return f"poetry run papyrus-content references accession-now --reference {row['reference']['id']}"
+        return f"poetry run papyrus references accession-now --reference {row['reference']['id']}"
     if row["readiness"].get("textState") == "snapshot_extracted":
         return "run references attach-extracted-text for this corpus"
     if row["state"] == SOURCE_READINESS_STATES["EXTRACTABLE"]:

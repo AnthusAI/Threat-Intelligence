@@ -830,11 +830,11 @@ def categories_review_proposal(flags: list[str]) -> None:
     print(f"categories\treview-proposal\t{proposal['id']}\t{action}\t{category['id'] if category else ''}")
     if category:
         print(
-            f"categories\treview-proposal\tnext\tpoetry run papyrus-content categories export-category-set "
+            f"categories\treview-proposal\tnext\tpoetry run papyrus knowledge topics export-category-set "
             f"--category-set {category['categorySetId']} --output .papyrus-runs/{timestamp_for_path(now)}-{category['categorySetId']}.json"
         )
     else:
-        print("categories\treview-proposal\tnext\tpoetry run papyrus-content newsroom recount-summary")
+        print("categories\treview-proposal\tnext\tpoetry run papyrus sections recount-summary")
 
 
 def categories_run_curation_cycle(flags: list[str]) -> None:

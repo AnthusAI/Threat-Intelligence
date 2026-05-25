@@ -110,28 +110,28 @@ Papyrus-visible registration contract.
 Materialize config:
 
 ```bash
-npm run content -- categories sandbox-steering-config \
+poetry run papyrus ops categories sandbox-steering-config \
   --config corpora/papyrus-steering.yml \
   --output .papyrus-runs/<run-id>/sandbox-steering.yml
 
-npm run content -- corpora worker-bootstrap \
+poetry run papyrus ops corpora worker-bootstrap \
   --config .papyrus-runs/<run-id>/sandbox-steering.yml \
   --json
 
-npm run content -- references prepare-catalog \
+poetry run papyrus references prepare-catalog \
   --config .papyrus-runs/<run-id>/sandbox-steering.yml \
   --corpus-key <corpus-key> \
   --catalog corpora/<corpus-key>/metadata/catalog.json \
   --output .papyrus-runs/<run-id>/<corpus-key>-prepared-catalog.json
 
-npm run content -- categories import-config --config <steering.yml>
-npm run content -- relations import-types --config corpora/papyrus-semantic-relation-types.yml
+poetry run papyrus ops categories import-config --config <steering.yml>
+poetry run papyrus knowledge concepts import-types --config corpora/papyrus-semantic-relation-types.yml
 ```
 
 Register source materials:
 
 ```bash
-npm run content -- references register-catalog \
+poetry run papyrus references register-catalog \
   --config <steering.yml> \
   --corpus-key <corpus-key> \
   --catalog .papyrus-runs/<run-id>/<corpus-key>-prepared-catalog.json \
@@ -142,12 +142,12 @@ npm run content -- references register-catalog \
 Export accepted-only inputs:
 
 ```bash
-npm run content -- references export-analysis-manifest \
+poetry run papyrus references export-analysis-manifest \
   --config <steering.yml> \
   --corpus-key <corpus-key> \
   --output .papyrus-runs/<run-id>/accepted-reference-manifest.json
 
-npm run content -- references export-scope-training \
+poetry run papyrus references export-scope-training \
   --config <steering.yml> \
   --corpus-key <corpus-key> \
   --output .papyrus-runs/<run-id>/scope-training.json
@@ -156,13 +156,13 @@ npm run content -- references export-scope-training \
 Preview and create re-index work:
 
 ```bash
-npm run content -- analysis reindex-plan \
+poetry run papyrus analysis reindex-plan \
   --profiles corpora/papyrus-analysis-profiles.yml \
   --profile global-topic-granularity \
   --corpus-key <corpus-key> \
   --override targetTopicRange=10:20
 
-npm run content -- analysis create-reindex-assignment \
+poetry run papyrus analysis create-reindex-assignment \
   --profiles corpora/papyrus-analysis-profiles.yml \
   --profile global-topic-granularity \
   --corpus-key <corpus-key> \
@@ -173,14 +173,14 @@ npm run content -- analysis create-reindex-assignment \
 Execute from claimed assignment metadata:
 
 ```bash
-npm run content -- analysis execute-assignment \
+poetry run papyrus analysis execute-assignment \
   --assignment <analysis-assignment-id>
 ```
 
 Immediate assignment-backed run (create, claim, execute, complete):
 
 ```bash
-npm run content -- analysis run-now \
+poetry run papyrus analysis run-now \
   --profiles corpora/papyrus-analysis-profiles.yml \
   --profile global-topic-granularity \
   --corpus-key <corpus-key> \
@@ -190,7 +190,7 @@ npm run content -- analysis run-now \
 Queue worker mode for batch processing:
 
 ```bash
-npm run content -- assignments process-queue \
+poetry run papyrus assignments process-queue \
   --type analysis.reindex \
   --status open \
   --max-count 10 \
@@ -200,7 +200,7 @@ npm run content -- assignments process-queue \
 Claim exclusive analysis work before execution:
 
 ```bash
-npm run content -- assignments claim \
+poetry run papyrus assignments claim \
   --assignment <assignment-id> \
   --assignee-key "procedure-run:<run-id>" \
   --claim-ttl-seconds 21600
@@ -224,19 +224,19 @@ When expected top-level topics are missing or unclear, sculpt a draft category
 set instead of trying to tune BERTopic into the exact desired taxonomy:
 
 ```bash
-npm run content -- categories draft-create \
+poetry run papyrus knowledge topics draft-create \
   --from-category-set <current-category-set-id> \
   --title "Initial topic sculpting pass" \
   --apply
 
-npm run content -- categories draft-add-topic \
+poetry run papyrus knowledge topics draft-add-topic \
   --category-set <draft-category-set-id> \
   --display-name "<expected topic>" \
   --short-title "<one-or-two-word label>" \
   --subtitle "<short description>" \
   --apply
 
-npm run content -- references label \
+poetry run papyrus references label \
   --reference <accepted-reference-id-or-item-id> \
   --category <category-key-or-lineage-id> \
   --category-set <draft-category-set-id> \
@@ -248,7 +248,7 @@ Export a classifier seed manifest from authoritative labels, not from mixed
 pending/rejected material:
 
 ```bash
-npm run content -- categories export-classifier-seed-manifest \
+poetry run papyrus knowledge topics export-classifier-seed-manifest \
   --config <steering.yml> \
   --category-set <draft-category-set-id> \
   --corpus-key <corpus-key> \
@@ -258,7 +258,7 @@ npm run content -- categories export-classifier-seed-manifest \
 Use that manifest in `canonical-topic-classifier` retraining:
 
 ```bash
-npm run content -- analysis preview-reindex \
+poetry run papyrus analysis preview-reindex \
   --profiles corpora/papyrus-analysis-profiles.yml \
   --profile canonical-topic-classifier \
   --corpus-key <corpus-key> \
@@ -292,7 +292,7 @@ When rehearsing destructive sandbox rebuilds, GraphQL payload rows and S3
 payload objects must be kept together. Use:
 
 ```bash
-npm run content -- content delete all --yes --delete-attachments
+poetry run papyrus ops content delete all --yes --delete-attachments
 ```
 
 to reset GraphQL records and delete associated `newsroom/payloads/` objects.
@@ -300,8 +300,8 @@ If a previous reset deleted rows but left S3 payloads behind, run a dry-run
 first, then apply:
 
 ```bash
-npm run content -- newsroom prune-attachments
-npm run content -- newsroom prune-attachments --apply
+poetry run papyrus sections prune-attachments
+poetry run papyrus sections prune-attachments --apply
 ```
 
 This cleanup is only for operational payload attachments. Do not use it for

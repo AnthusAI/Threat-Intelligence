@@ -286,7 +286,9 @@ private `Message` work products with `ModelAttachment` payloads:
   open questions, and reference-intake handoff.
 - `reporting_context_packet`: editor-facing context for one candidate story,
   including the angle, confirmed facts, source trail, risks, gaps, verification
-  needs, recommendation, and copywriter brief.
+  needs, recommendation, and copywriter brief. Reporting packets must include
+  knowledge-first orientation trace (`sourceTrail` plus
+  `knowledgeQueries`/`papyrusUrisInspected`, or `knowledgeBlockedReason`).
 
 New packet writes link `Assignment --produces--> Message`; older
 `Message --comment--> Assignment` packet links remain readable for compatibility.
@@ -298,6 +300,10 @@ selection is the gate from reporting packet to copywriting:
 draft, and `hold`/`kill` keep the packet private. Copywriting is the first stage
 allowed to create draft reader-facing `Item` records, and neither packet
 generation nor packet review creates `EditionItem` placement.
+When reporting runs multiple times for the same Assignment, each run writes a
+new immutable packet Message. The most recent successful
+`reporting_context_packet` is canonical for downstream copywriting intake by
+default.
 The editor-only `Assignments` desk tab at `/newsroom/assignments`, including the
 Story Budget view, is the review surface for these private queues.
 
@@ -409,7 +415,7 @@ Rejected proposals must influence future category steering. Before a new taxonom
 ontology, or graph proposal cycle, export the Papyrus review memory:
 
 ```bash
-npm run content -- categories export-steering-feedback \
+poetry run papyrus ops categories export-steering-feedback \
   --category-set <category-set-id> \
   --output /tmp/papyrus-steering-feedback.json
 ```
@@ -431,7 +437,7 @@ such as citation/header noise. Defaults live in
 cycle with:
 
 ```bash
-npm run content -- categories export-lexical-steering \
+poetry run papyrus ops categories export-lexical-steering \
   --output /tmp/papyrus-lexical-steering.json
 ```
 
@@ -469,24 +475,25 @@ of trusting this README as the layout source of truth.
 
 ```bash
 npm run dev
+npm run dev:127
 npm run lint
 npm run typecheck
 npm run build
 poetry install
-poetry run papyrus-newsroom --help
-poetry run papyrus-newsroom execute-tactus 'return api_list{}'
+poetry run papyrus --help
+poetry run papyrus procedures execute-tactus 'return api_list{}'
 poetry run python procedures/newsroom/tests/test_newsroom_tools.py
 npm run sandbox
 npm run seed:amplify
-npm run content -- content inspect
-npm run content -- categories import-config --config corpora/papyrus-steering.yml
-npm run content -- newsroom import-sections --config corpora/papyrus-newsroom-sections.yml
-npm run content -- categories import-steering --config corpora/papyrus-steering.yml --corpus-key <key>
-npm run content -- categories import-steering --bundle <steering-export.json>
-npm run content -- categories export-category-set --category-set <id> --output <accepted-category-set.json>
-npm run content -- categories import-projection --config corpora/papyrus-steering.yml --target-corpus-key <key> --authority-corpus-key <key> --bundle <projection.json>
-npm run content -- relations import-types --config corpora/papyrus-semantic-relation-types.yml
-npm run content -- relations backfill --config corpora/papyrus-semantic-relation-types.yml --apply
+poetry run papyrus ops content inspect
+poetry run papyrus ops categories import-config --config corpora/papyrus-steering.yml
+poetry run papyrus sections import --config corpora/papyrus-newsroom-sections.yml
+poetry run papyrus ops categories import-steering --config corpora/papyrus-steering.yml --corpus-key <key>
+poetry run papyrus ops categories import-steering --bundle <steering-export.json>
+poetry run papyrus knowledge topics export-category-set --category-set <id> --output <accepted-category-set.json>
+poetry run papyrus ops categories import-projection --config corpora/papyrus-steering.yml --target-corpus-key <key> --authority-corpus-key <key> --bundle <projection.json>
+poetry run papyrus knowledge concepts import-types --config corpora/papyrus-semantic-relation-types.yml
+poetry run papyrus knowledge concepts backfill --config corpora/papyrus-semantic-relation-types.yml --apply
 npm run test:bdd
 npm run test:bdd:backend
 npm run test:bdd:agent-live
@@ -495,19 +502,19 @@ npm run test:bdd:agent-live
 ## Python Newsroom Package
 
 Papyrus now packages its Python newsroom tooling as the Poetry-managed
-`papyrus-newsroom` module.
+`papyrus` module.
 
 Use Poetry as the canonical Python entrypoint:
 
 ```bash
 poetry install
-poetry run papyrus-newsroom --help
-poetry run papyrus-newsroom build-assignment-agent-context --assignment-id <assignment-id>
-poetry run papyrus-newsroom execute-tactus 'return api_list{}'
-poetry run papyrus-newsroom signals trend-report --corpus-key <key> --topic "<topic>" --sections culture,methods --json
-poetry run papyrus-newsroom editions plan --date YYYY-MM-DD --sections culture,methods --section-budgets culture:2,methods:1 --signal-report <signal-report.json> --json
-poetry run papyrus-newsroom coverage-themes run --date YYYY-MM-DD --topic "<topic>" --category <category-key> --coverage-key <coverage.key> --sections culture,methods --section-budgets culture:2,methods:1 --through plan|research|reporting --json
-poetry run papyrus-newsroom story-budget output --run-id <coverage-theme-run-id> --json
+poetry run papyrus --help
+poetry run papyrus assignments build-context --assignment <assignment-id>
+poetry run papyrus procedures execute-tactus 'return api_list{}'
+poetry run papyrus knowledge signals trend-report --corpus-key <key> --topic "<topic>" --sections culture,methods --json
+poetry run papyrus editions plan --date YYYY-MM-DD --sections culture,methods --section-budgets culture:2,methods:1 --signal-report <signal-report.json> --json
+poetry run papyrus assignments run-story-cycle --date YYYY-MM-DD --topic "<topic>" --category <category-key> --coverage-key <coverage.key> --sections culture,methods --section-budgets culture:2,methods:1 --through plan|research|reporting --json
+poetry run papyrus assignments story-cycle-output --run-id <coverage-theme-run-id> --json
 poetry run python procedures/newsroom/tests/test_newsroom_tools.py
 ```
 
@@ -521,10 +528,10 @@ canonical implementation now lives in `src/papyrus_newsroom/`.
 
 Coverage Theme orchestration is Python-first. `signals trend-report` is the
 assignment-desk signal feed, `editions plan` turns signals plus section slots
-into private assignment graphs, `coverage-themes run` advances that graph
-through research or reporting packet creation, and `story-budget output`
+into private assignment graphs, `assignments run-story-cycle` advances that graph
+through research or reporting packet creation, and `assignments story-cycle-output`
 rediscovers the applied private state from GraphQL. The older
-`npm run content -- assignments run-story-cycle` and
+`poetry run papyrus assignments run-story-cycle` and
 `assignments story-cycle-output` commands remain compatibility surfaces while
 operators migrate.
 
@@ -541,7 +548,7 @@ Copy `.env.example` to `.env` when you need local overrides. `.env*` is ignored
 by git, while `.env.example` is intentionally committed as the template.
 
 `npm run test:bdd` runs the Gherkin layout scenarios against a running app. It
-defaults to `http://localhost:3001`; set `PAPYRUS_BASE_URL` to test another
+defaults to `http://127.0.0.1:3001`; set `PAPYRUS_BASE_URL` to test another
 server.
 
 `npm run test:bdd:backend` runs deterministic backend Behave features (Python)
@@ -576,32 +583,32 @@ sandbox. After the sandbox has generated `amplify_outputs.json`, run
 For content inspection and admin against a deployed API:
 
 ```bash
-npm run content -- content inspect
-npm run content -- content list articles
-npm run content -- corpora worker-bootstrap --config corpora/papyrus-steering.yml --json
-npm run content -- corpora status --config corpora/papyrus-steering.yml --corpus-key <key> --json
-npm run content -- corpora sync-from-cloud --config corpora/papyrus-steering.yml --corpus-key <key> --dry-run
-npm run content -- corpora sync-to-cloud --config corpora/papyrus-steering.yml --corpus-key <key> --dry-run
-npm run content -- categories import-config --config corpora/papyrus-steering.yml
-npm run content -- newsroom import-sections --config corpora/papyrus-newsroom-sections.yml
-npm run content -- categories import-steering --config corpora/papyrus-steering.yml --corpus-key <key>
-npm run content -- assignments research-packets --assignment <assignment-id>
-poetry run papyrus-newsroom signals trend-report --corpus-key <key> --topic "<topic>" --sections culture,methods --json
-poetry run papyrus-newsroom coverage-themes run --date YYYY-MM-DD --topic "<topic>" --category <category-key> --coverage-key <coverage.key> --sections culture,methods --section-budgets culture:2,methods:1 --through reporting --json
-poetry run papyrus-newsroom story-budget output --run-id <coverage-theme-run-id> --json
-npm run content -- assignments run-story-cycle --date YYYY-MM-DD --topic "<topic>" --category <category-key> --coverage-key <coverage.key> --sections culture,methods,business,law --section-budgets culture:2,methods:1,business:1,law:1 --through plan|research|reporting [--refresh-packets] --json
-npm run content -- assignments story-cycle-output --run-id <story-cycle-run-id> --json
-npm run content -- assignments review-reporting-packet --assignment <assignment-id> --message <message-id> --decision select|merge|brief|hold|kill --note "<editor rationale>" --dry-run
-npm run content -- assignments run-copywriting --assignment <copywriting-assignment-id> --dry-run --json
-npm run content -- assignments copywriting-output --run-id <story-cycle-run-id> --json
-npm run content -- references curate-recent --corpus-key <key> --since-hours 48 --max-count 25 --dry-run --json
-npm run content -- references curate-recent --corpus-key <key> --since-hours 48 --max-count 25 --apply --json
-npm run content -- references register-catalog --config corpora/papyrus-steering.yml --corpus-key <key> --catalog <metadata/catalog.json> --status pending --ingestion-rationale "<summary, research focus, editorial mission fit>" --apply
-npm run content -- references export-analysis-manifest --config corpora/papyrus-steering.yml --corpus-key <key> --output accepted-reference-manifest.json
-npm run content -- references export-scope-training --config corpora/papyrus-steering.yml --corpus-key <key> --output reference-scope-training.json
-npm run content -- categories export-category-set --category-set <id> --output accepted-category-set.json
-npm run content -- categories import-projection --config corpora/papyrus-steering.yml --target-corpus-key <key> --authority-corpus-key <key> --bundle projection-results.json
-npm run content -- content delete all --yes
+poetry run papyrus ops content inspect
+poetry run papyrus ops content list articles
+poetry run papyrus ops corpora worker-bootstrap --config corpora/papyrus-steering.yml --json
+poetry run papyrus ops corpora status --config corpora/papyrus-steering.yml --corpus-key <key> --json
+poetry run papyrus ops corpora sync-from-cloud --config corpora/papyrus-steering.yml --corpus-key <key> --dry-run
+poetry run papyrus ops corpora sync-to-cloud --config corpora/papyrus-steering.yml --corpus-key <key> --dry-run
+poetry run papyrus ops categories import-config --config corpora/papyrus-steering.yml
+poetry run papyrus sections import --config corpora/papyrus-newsroom-sections.yml
+poetry run papyrus ops categories import-steering --config corpora/papyrus-steering.yml --corpus-key <key>
+poetry run papyrus assignments research-packets --assignment <assignment-id>
+poetry run papyrus knowledge signals trend-report --corpus-key <key> --topic "<topic>" --sections culture,methods --json
+poetry run papyrus assignments run-story-cycle --date YYYY-MM-DD --topic "<topic>" --category <category-key> --coverage-key <coverage.key> --sections culture,methods --section-budgets culture:2,methods:1 --through reporting --json
+poetry run papyrus assignments story-cycle-output --run-id <coverage-theme-run-id> --json
+poetry run papyrus assignments run-story-cycle --date YYYY-MM-DD --topic "<topic>" --category <category-key> --coverage-key <coverage.key> --sections culture,methods,business,law --section-budgets culture:2,methods:1,business:1,law:1 --through plan|research|reporting [--refresh-packets] --json
+poetry run papyrus assignments story-cycle-output --run-id <story-cycle-run-id> --json
+poetry run papyrus assignments review-reporting-packet --assignment <assignment-id> --message <message-id> --decision select|merge|brief|hold|kill --note "<editor rationale>" --dry-run
+poetry run papyrus assignments run-copywriting --assignment <copywriting-assignment-id> --dry-run --json
+poetry run papyrus assignments copywriting-output --run-id <story-cycle-run-id> --json
+poetry run papyrus references curate-recent --corpus-key <key> --since-hours 48 --max-count 25 --dry-run --json
+poetry run papyrus references curate-recent --corpus-key <key> --since-hours 48 --max-count 25 --apply --json
+poetry run papyrus references register-catalog --config corpora/papyrus-steering.yml --corpus-key <key> --catalog <metadata/catalog.json> --status pending --ingestion-rationale "<summary, research focus, editorial mission fit>" --apply
+poetry run papyrus references export-analysis-manifest --config corpora/papyrus-steering.yml --corpus-key <key> --output accepted-reference-manifest.json
+poetry run papyrus references export-scope-training --config corpora/papyrus-steering.yml --corpus-key <key> --output reference-scope-training.json
+poetry run papyrus knowledge topics export-category-set --category-set <id> --output accepted-category-set.json
+poetry run papyrus ops categories import-projection --config corpora/papyrus-steering.yml --target-corpus-key <key> --authority-corpus-key <key> --bundle projection-results.json
+poetry run papyrus ops content delete all --yes
 ```
 
 `references curate-recent` is assignment-only for re-curation operations:
@@ -618,14 +625,43 @@ registration; pending references and assignments are.
 
 For routine reference curation, use the operator runbook:
 
-1. `npm run content -- content inspect`
-2. `npm run content -- references curate-recent --corpus-key <key> --since-hours 48 --max-count 25 --dry-run --json`
+1. `poetry run papyrus ops content inspect`
+2. `poetry run papyrus references curate-recent --corpus-key <key> --since-hours 48 --max-count 25 --dry-run --json`
 3. rerun with `--apply` once dry-run output looks correct.
+
+Common curation command recipes:
+
+```bash
+# List candidate references (newest first)
+poetry run papyrus references list --corpus-key <key> --status accepted --limit 25
+
+# Curate one specific reference (dry-run)
+poetry run papyrus references curate-recent --corpus-key <key> --reference <reference-lineage-id> --dry-run --json
+
+# Curate a recent batch (dry-run)
+poetry run papyrus references curate-recent --corpus-key <key> --since-hours 48 --max-count 25 --dry-run --json
+
+# Curate all references in a corpus (dry-run; add --apply to dispatch)
+poetry run papyrus references curate-recent --corpus-key <key> --all --max-count 250 --dry-run --json
+```
 
 `references curate-recent` runs identifier prepass first, then title/subtitle,
 summary, and quality in order. It writes resumable manifests under
 `.papyrus-runs/reference-curation-<run-id>/manifest.json` and returns nonzero
 when any reference fails so automation can detect degraded runs.
+
+Knowledge search quick recipes:
+
+```bash
+# General semantic knowledge search
+poetry run papyrus knowledge query --query "text classifier benchmarking" --max-tokens 600 --format both
+
+# Desk-anchored semantic knowledge search (section/desk anchor)
+poetry run papyrus knowledge query --query "AI in games" --anchor newsroomSection:technology --max-tokens 600 --format structured
+
+# Build the exact desk-aware assignment agent context used by research/reporting
+poetry run papyrus assignments build-assignment-agent-context --assignment-id <assignment-id> --max-tokens 4000 --recent-days 30
+```
 
 Set `PAPYRUS_GRAPHQL_ENDPOINT` and `PAPYRUS_GRAPHQL_JWT` before running
 authoring commands. The JWT is sent in the AppSync `Authorization` header using
@@ -647,8 +683,24 @@ For local cloud work, use an AWS profile, for example:
 ```bash
 AWS_PROFILE=default AWS_REGION=us-east-1 npm run sandbox
 AWS_PROFILE=default AWS_REGION=us-east-1 npm run seed:amplify
-AWS_PROFILE=default npm run dev
+AWS_PROFILE=default npm run dev:127
 ```
+
+## Local Dev 431 Troubleshooting
+
+For Papyrus local workflows, prefer `http://127.0.0.1:3000` (run
+`npm run dev:127`) instead of `localhost`. Browser cookies on `localhost` are
+shared across local projects and can eventually trigger `HTTP 431` from an
+oversized request header.
+
+Quick diagnostic (no code changes):
+
+```bash
+curl -I -H "Cookie: x=$(python - <<'PY'\nprint('a'*20000)\nPY)" http://127.0.0.1:3000/newsroom/assignments
+```
+
+If that returns `431`, the error class is header-size/cookie bloat rather than
+route logic.
 
 ## Newsroom Cloud Procedures Runbook
 
@@ -678,7 +730,7 @@ CLI cloud resolution contract:
 
 - Required CLI procedure aliases are defined in
   `corpora/papyrus-required-procedures.json`
-- `papyrus-content` resolves required procedure keys by alias, fetches
+- `papyrus` resolves required procedure keys by alias, fetches
   cloud definitions by key, writes the selected `ProcedureVersion.tactusSource`
   into the run directory, executes that source with `tactus run`, and records
   the parsed output/error back on `ProcedureRun`
@@ -690,8 +742,12 @@ Operator verification checklist:
 1. Open `/newsroom` -> Administration -> Procedures.
 2. Select a procedure row and verify `Version Draft -> Tactus/Lua Source`
    shows real code, not a placeholder.
-3. Run `npm run content -- assignments run-research --assignment <id> ...` and
+3. Run `poetry run papyrus assignments run-research --assignment <id> ...` and
    confirm it resolves and runs the cloud procedure.
+4. Inspect `.papyrus-runs/<run-id>/llm-context/summary.json` and
+   `.papyrus-runs/<run-id>/llm-context/execute_tactus_calls.jsonl` to verify the
+   exact `execute_tactus` inputs (`assignment_context`, `assignment_agent_context`,
+   `knowledge_query`, and any web calls) used during the agent run.
 
 Current execution limitation (important):
 
@@ -741,11 +797,11 @@ eval "$(npm run -s auth:refresh-jwt -- --format shell)"
 Then verify the authoring lane before writing:
 
 ```bash
-npm run content -- content inspect
-npm run content -- content list articles
+poetry run papyrus ops content inspect
+poetry run papyrus ops content list articles
 ```
 
-Treat `npm run content -- content inspect` as a hard preflight gate for live
+Treat `poetry run papyrus ops content inspect` as a hard preflight gate for live
 CLI smoke runs. If it fails (for example `401 Unauthorized`), refresh JWT auth
 first and do not continue with live write/read smoke commands.
 
@@ -831,7 +887,7 @@ inside the feature file.
   `PublicationItem` objects.
 - `amplify/` defines the Gen2 Auth, Data, Storage, and seed resources for the
   cloud content backend.
-- `papyrus-content` is the JWT-backed content authoring CLI for
+- `papyrus` is the JWT-backed content authoring CLI for
   GraphQL inspect/list/diff/sync workflows.
 - `lib/content-types.ts` defines `EditionContent` and `ContentRepository`.
 - `lib/publication-items.ts` defines generic publication items and article

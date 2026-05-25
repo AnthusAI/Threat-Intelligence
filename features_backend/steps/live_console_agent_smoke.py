@@ -22,6 +22,7 @@ CONSOLE_RESPONSE_TARGET_CLOUD = "cloud"
 CONSOLE_RESPONSE_TARGET_LOCAL = "local"
 LIVE_AGENT_MARKER = "behave-live-agent"
 DEFAULT_AGENT_MODEL = "gpt-5-nano"
+EXPECTED_SNIPPET_CONTRACT_VERSION = "execute_tactus_snippet_contract_v1"
 EDITORIAL_CURATION_SCENARIOS = {
     "review-reference-curation-accept": {
         "requiredInitialStatus": "pending",
@@ -317,6 +318,20 @@ def scenario_prompt(
                 "Step 2 required snippet:",
                 "return docs_get{ id = 'resources.Assignment' }",
                 "Only after both tool calls succeed, reply with only `docs-progressive-tested`.",
+            ]
+        )
+    if name == "unsupported-snippet-retry":
+        return "\n".join(
+            [
+                f"Model policy: use {DEFAULT_AGENT_MODEL}.",
+                f"Marker: {marker}",
+                "Use execute_tactus for strict retry recovery validation.",
+                "This is a strict integration test: execute exactly two tool calls in this order.",
+                "Step 1 must intentionally fail with unsupported_snippet using JS/object-call syntax:",
+                "docs_get({ id: \"resources.Assignment\" })",
+                "Step 2 must correct syntax and succeed using Lua/Tactus table-call form:",
+                "return docs_get{ id = \"resources.Assignment\" }",
+                "After the corrected call succeeds, reply with only `unsupported-snippet-retry-tested`.",
             ]
         )
     if name == "create-research-assignment":
@@ -976,6 +991,7 @@ def run_scenario(
             "markerInBody": False,
         },
     }
+    tool_history: list[dict[str, Any]] = []
     response_target = CONSOLE_RESPONSE_TARGET_LOCAL if _local_responder_enabled() else CONSOLE_RESPONSE_TARGET_CLOUD
     thread_id = f"thread-console-smoke-{run_id}"
     thread_record: dict[str, Any] | None = None
@@ -1144,14 +1160,45 @@ def run_scenario(
 
         api_calls: list[str] = []
         for message in messages:
-            if message.get("messageKind") != "console_tool_result":
-                continue
             if str(message.get("parentMessageId") or "") != str(message_input["id"]):
+                continue
+            if message.get("messageKind") == "console_tool_call":
+                tool_name = ""
+                arguments = {}
+                metadata_raw = message.get("metadata")
+                if isinstance(metadata_raw, str):
+                    try:
+                        metadata = json.loads(metadata_raw)
+                        tool_name = str(metadata.get("toolName") or "")
+                        arguments_raw = metadata.get("arguments")
+                        if isinstance(arguments_raw, str):
+                            arguments = json.loads(arguments_raw)
+                    except Exception:
+                        arguments = {}
+                tool_history.append(
+                    {
+                        "kind": "call",
+                        "toolName": tool_name,
+                        "arguments": arguments,
+                        "content": _message_content(message),
+                        "messageId": message.get("id"),
+                    }
+                )
+            if message.get("messageKind") != "console_tool_result":
                 continue
             try:
                 parsed = json.loads(_message_content(message))
             except Exception:
                 continue
+            tool_history.append(
+                {
+                    "kind": "result",
+                    "messageId": message.get("id"),
+                    "ok": bool(parsed.get("ok")),
+                    "api_calls": [str(call) for call in (parsed.get("api_calls") or [])],
+                    "error": parsed.get("error") if isinstance(parsed.get("error"), dict) else None,
+                }
+            )
             for call in parsed.get("api_calls") or []:
                 api_calls.append(str(call))
             value = parsed.get("value")
@@ -1283,6 +1330,53 @@ def run_scenario(
                 raise RuntimeError(
                     f"Curation-refresh scenario must not call quality_rate. Saw: {', '.join(api_calls)}."
                 )
+        if scenario_name == "unsupported-snippet-retry":
+            first_error = next(
+                (
+                    entry.get("error")
+                    for entry in tool_history
+                    if entry.get("kind") == "result" and isinstance(entry.get("error"), dict)
+                ),
+                None,
+            )
+            if not isinstance(first_error, dict):
+                raise RuntimeError(
+                    f"Expected an initial structured tool error for unsupported snippet. Tool history: {json.dumps(tool_history)}"
+                )
+            if str(first_error.get("code") or "") != "unsupported_snippet":
+                raise RuntimeError(
+                    f"Expected unsupported_snippet on first failed call, saw {first_error}. Tool history: {json.dumps(tool_history)}"
+                )
+            if bool(first_error.get("retryable")) is not True:
+                raise RuntimeError(
+                    f"Expected unsupported_snippet.retryable=true, saw {first_error}. Tool history: {json.dumps(tool_history)}"
+                )
+            details = first_error.get("details")
+            if not isinstance(details, dict):
+                raise RuntimeError(
+                    f"Expected unsupported_snippet.details payload, saw {first_error}. Tool history: {json.dumps(tool_history)}"
+                )
+            contract_version = str(details.get("contractVersion") or "")
+            if contract_version != EXPECTED_SNIPPET_CONTRACT_VERSION:
+                raise RuntimeError(
+                    "Runtime drift detected: execute_tactus unsupported_snippet contractVersion "
+                    f"expected '{EXPECTED_SNIPPET_CONTRACT_VERSION}', observed '{contract_version or 'missing'}'. "
+                    f"Diagnostics: {json.dumps({'responseTarget': response_target, 'assistantMetadata': assistant.get('metadata'), 'errors': errors, 'toolHistory': tool_history})}"
+                )
+            call_entries = [entry for entry in tool_history if entry.get("kind") == "call"]
+            if len(call_entries) < 2:
+                raise RuntimeError(
+                    f"Expected retry evidence with at least two tool calls, saw {len(call_entries)}. Tool history: {json.dumps(tool_history)}"
+                )
+            first_call_content = str(call_entries[0].get("content") or "")
+            if "docs_get({" not in first_call_content:
+                raise RuntimeError(
+                    f"Expected first call to use JS/object-call syntax, saw: {first_call_content}"
+                )
+            if "papyrus.docs.get" not in api_calls:
+                raise RuntimeError(
+                    f"Expected corrected retry to succeed with papyrus.docs.get call. Saw: {', '.join(api_calls)}. Tool history: {json.dumps(tool_history)}"
+                )
         if scenario_name in {
             "discuss-reference",
             "rate-reference-quality",
@@ -1393,6 +1487,8 @@ def run_scenario(
             raise RuntimeError(f"Expected reference-insight-tested, got: {content}")
         if scenario_name == "curate-reference-refresh" and content != "reference-curation-refresh-tested":
             raise RuntimeError(f"Expected reference-curation-refresh-tested, got: {content}")
+        if scenario_name == "unsupported-snippet-retry" and content != "unsupported-snippet-retry-tested":
+            raise RuntimeError(f"Expected unsupported-snippet-retry-tested, got: {content}")
         if scenario_name == "invalid-assignment-input" and content != "invalid-input-tested":
             # Local lane deterministic shaping: when the required invalid create call produced a
             # structured error, normalize the assistant sentinel so the BDD assertion stays stable.
@@ -1406,10 +1502,14 @@ def run_scenario(
                 raise RuntimeError(f"Expected invalid-input-tested, got: {content}")
 
         model = DEFAULT_AGENT_MODEL
+        responder = "unknown"
         try:
-            model = str(json.loads(assistant.get("metadata") or "{}").get("model") or DEFAULT_AGENT_MODEL)
+            assistant_metadata = json.loads(assistant.get("metadata") or "{}")
+            model = str(assistant_metadata.get("model") or DEFAULT_AGENT_MODEL)
+            responder = str(assistant_metadata.get("responder") or "unknown")
         except Exception:
             model = DEFAULT_AGENT_MODEL
+            responder = "unknown"
 
         return {
             "ok": True,
@@ -1424,6 +1524,14 @@ def run_scenario(
             "responseTarget": response_target,
             "triggerMessageId": message_input["id"],
             "reference": reference_diagnostics,
+            "toolHistory": tool_history,
+            "runtimeDiagnostics": {
+                "graphqlEndpoint": client.endpoint,
+                "responder": responder,
+                "model": model,
+                "responseTarget": response_target,
+                "expectedSnippetContractVersion": EXPECTED_SNIPPET_CONTRACT_VERSION,
+            },
         }
     finally:
         if not keep:

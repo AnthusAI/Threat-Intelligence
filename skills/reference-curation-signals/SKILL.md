@@ -22,7 +22,7 @@ Use the title/subtitle resolver when a new or existing Reference lacks usable
 display copy:
 
 ```bash
-poetry run papyrus-newsroom references title-subtitle resolve \
+poetry run papyrus references title-subtitle resolve \
   --reference <reference-id> \
   --apply
 ```
@@ -30,7 +30,7 @@ poetry run papyrus-newsroom references title-subtitle resolve \
 Batch missing values:
 
 ```bash
-poetry run papyrus-newsroom references title-subtitle batch \
+poetry run papyrus references title-subtitle batch \
   --corpus-key <corpus-key> \
   --status all \
   --only-missing true \
@@ -42,7 +42,7 @@ Reference intake also runs catalog enrichment by default. Disable it only for
 offline or fast deterministic runs:
 
 ```bash
-npm run content -- references prepare-catalog \
+poetry run papyrus references prepare-catalog \
   --catalog <catalog.json> \
   --output <prepared.json> \
   --corpus-key <corpus-key> \
@@ -88,7 +88,7 @@ not zero.
 Manual quality setting does not require an LLM:
 
 ```bash
-poetry run papyrus-newsroom references quality set \
+poetry run papyrus references quality set \
   --reference <reference-id> \
   --rating 4 \
   --note "Strong source for context building." \
@@ -99,9 +99,9 @@ poetry run papyrus-newsroom references quality set \
 Inspect quality:
 
 ```bash
-poetry run papyrus-newsroom references quality get --reference <reference-id>
+poetry run papyrus references quality get --reference <reference-id>
 
-poetry run papyrus-newsroom references quality list \
+poetry run papyrus references quality list \
   --corpus-key <corpus-key> \
   --min-rating 4
 ```
@@ -150,7 +150,7 @@ Context-pack diversity affects summary selection indirectly:
 List references before selecting a target:
 
 ```bash
-poetry run papyrus-newsroom references list \
+poetry run papyrus references list \
   --corpus-key <corpus-key> \
   --status accepted \
   --limit 25
@@ -158,6 +158,30 @@ poetry run papyrus-newsroom references list \
 
 The list command returns current references newest-first by default, using
 import/update timestamps from GraphQL.
+
+Dispatch assignment-backed curation refreshes:
+
+```bash
+# one specific reference lineage
+poetry run papyrus references curate-recent \
+  --corpus-key <corpus-key> \
+  --reference <reference-lineage-id> \
+  --dry-run --json
+
+# a recent batch
+poetry run papyrus references curate-recent \
+  --corpus-key <corpus-key> \
+  --since-hours 48 \
+  --max-count 25 \
+  --dry-run --json
+
+# all references in the corpus
+poetry run papyrus references curate-recent \
+  --corpus-key <corpus-key> \
+  --all \
+  --max-count 250 \
+  --dry-run --json
+```
 
 There should be exactly one current summary relation per
 `(reference lineage, maxTokens)`. Refreshing a summary creates a new `Message`
@@ -201,7 +225,7 @@ record `doctrineContextStatus = "not_used_manual_summary"`.
 Generate or dry-run a single summary:
 
 ```bash
-poetry run papyrus-newsroom references summarize \
+poetry run papyrus references summarize \
   --reference <reference-id> \
   --max-tokens 100 \
   --summary-text "Manual or externally generated summary."
@@ -210,7 +234,7 @@ poetry run papyrus-newsroom references summarize \
 Apply the write:
 
 ```bash
-poetry run papyrus-newsroom references summarize \
+poetry run papyrus references summarize \
   --reference <reference-id> \
   --max-tokens 100 \
   --summary-text "Manual or externally generated summary." \
@@ -224,7 +248,7 @@ passing `--source-text-file` when local source text resolution is uncertain.
 Batch missing summaries:
 
 ```bash
-poetry run papyrus-newsroom references summarize-batch \
+poetry run papyrus references summarize-batch \
   --corpus-key <corpus-key> \
   --budgets 100,200,500 \
   --only-missing true \
@@ -236,7 +260,7 @@ Add `--apply` only after reviewing the dry-run output.
 Read summaries already linked to a reference:
 
 ```bash
-poetry run papyrus-newsroom references summaries \
+poetry run papyrus references summaries \
   --reference <reference-id> \
   --max-tokens 100
 ```
@@ -267,7 +291,7 @@ available.
    valid and should be recorded directly:
 
    ```bash
-   poetry run papyrus-newsroom references quality set \
+   poetry run papyrus references quality set \
      --reference <reference-id> \
      --rating <1-5> \
      --note "<why this rating was chosen>" \
@@ -279,7 +303,7 @@ available.
    quality rubric, use the assessor instead:
 
    ```bash
-   poetry run papyrus-newsroom references quality assess \
+   poetry run papyrus references quality assess \
      --reference <reference-id> \
      --apply
    ```
@@ -289,7 +313,7 @@ available.
    enough to justify richer downstream context:
 
    ```bash
-   poetry run papyrus-newsroom references summarize-batch \
+   poetry run papyrus references summarize-batch \
      --corpus-key <corpus-key> \
      --budgets 100,200,500 \
      --only-missing true \
@@ -303,7 +327,7 @@ available.
 
    ```bash
    AWS_PROFILE=<profile> AWS_REGION=<region> PYTHONPATH=src \
-     python -m papyrus_newsroom knowledge-vector-index --action sync \
+     poetry run papyrus knowledge vector-index --action sync \
      --corpus-id <corpus-id> \
      --max-references 25 \
      --dry-run
@@ -321,7 +345,7 @@ available.
   update fails or drift is suspected, run:
 
   ```bash
-  npm run content -- newsroom recount-summary --apply
+  poetry run papyrus sections recount-summary --apply
   ```
 
 - Do not store raw source text in `Message.summary`, `Message` payloads, or

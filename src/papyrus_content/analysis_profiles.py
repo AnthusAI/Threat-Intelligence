@@ -289,7 +289,7 @@ def build_analysis_reindex_assignment_records(
     section_target: dict[str, Any] | None = None,
     existing: dict[str, dict[str, dict[str, Any]]] | None = None,
     now: str | None = None,
-    actor_label: str = "papyrus-content-cli",
+    actor_label: str = "papyrus-cli",
 ) -> dict[str, Any]:
     existing = existing or {}
     assignment_type_key = "analysis.reindex"

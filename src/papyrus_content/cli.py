@@ -31,6 +31,7 @@ from .batch_commands import register_catalog_batches, run_post_ingestion_enrichm
 from .analysis_profiles import analysis_profiles, validate_analysis_profiles
 from .assignments import apply_assignment_action
 from .assignments_commands import (
+    assignments_apply_reporting_packet,
     assignments_apply_research_packet,
     assignments_backfill_section_indexes,
     assignments_build_context,
@@ -51,6 +52,7 @@ from .assignments_commands import (
     assignments_research_packets,
     assignments_review_reporting_packet,
     assignments_run_copywriting,
+    assignments_run_reporting,
     assignments_run_research,
     assignments_run_story_cycle,
     assignments_story_cycle_output,
@@ -82,6 +84,7 @@ from .categories_commands import (
 from .content_commands import content_inspect, content_list, content_schema_check
 from .dev_tests import run_category_mapper_tests, run_identifier_backfill_tests
 from .messages_commands import messages_export_legacy_comments, messages_import_legacy_comments
+from .relations_commands import relations_backfill, relations_import_types
 from .references_commands import (
     references_attach_extracted_text,
     references_create_doi_backfill_assignment,
@@ -125,6 +128,7 @@ from .newsroom_commands import (
     newsroom_import_sections,
     newsroom_prune_attachments,
     newsroom_recount_summary,
+    newsroom_seed_required_procedures,
 )
 from .newsroom_summary import (
     update_newsroom_summary_after_assignment_creates,
@@ -192,7 +196,9 @@ PORTED_COMMANDS = frozenset(
         "assignments:list",
         "assignments:create-research",
         "assignments:run-research",
+        "assignments:run-reporting",
         "assignments:apply-research-packet",
+        "assignments:apply-reporting-packet",
         "assignments:intake-proposals",
         "assignments:research-intake-now",
         "assignments:run-story-cycle",
@@ -230,6 +236,7 @@ PORTED_COMMANDS = frozenset(
         "newsroom:backfill-feed-fields",
         "newsroom:backfill-operational-indexes",
         "newsroom:import-sections",
+        "newsroom:seed-required-procedures",
         "relations:import-types",
         "relations:backfill",
         "messages:export-legacy-comments",
@@ -284,7 +291,7 @@ def main(argv: list[str] | None = None) -> int:
 def dispatch(group: str, command: str, flags: list[str]) -> None:
     route = f"{group}:{command}"
     if not is_ported_command(group, command):
-        raise ValueError(f"Unsupported papyrus-content command: {group} {command}")
+        raise ValueError(f"Unsupported papyrus command: {group} {command}")
     if route == "content:inspect":
         content_inspect(flags)
     elif route == "content:schema-check":
@@ -358,8 +365,12 @@ def dispatch(group: str, command: str, flags: list[str]) -> None:
         assignments_create_research(flags)
     elif route == "assignments:run-research":
         assignments_run_research(flags)
+    elif route == "assignments:run-reporting":
+        assignments_run_reporting(flags)
     elif route == "assignments:apply-research-packet":
         assignments_apply_research_packet(flags)
+    elif route == "assignments:apply-reporting-packet":
+        assignments_apply_reporting_packet(flags)
     elif route == "assignments:intake-proposals":
         assignments_intake_proposals(flags)
     elif route == "assignments:research-intake-now":
@@ -432,6 +443,8 @@ def dispatch(group: str, command: str, flags: list[str]) -> None:
         newsroom_backfill_operational_indexes(flags)
     elif route == "newsroom:import-sections":
         newsroom_import_sections(flags)
+    elif route == "newsroom:seed-required-procedures":
+        newsroom_seed_required_procedures(flags)
     elif route == "relations:import-types":
         relations_import_types(flags)
     elif route == "relations:backfill":
@@ -487,7 +500,7 @@ def dispatch(group: str, command: str, flags: list[str]) -> None:
     elif route == "policy:check-reference-action-contract":
         check_reference_action_contract(flags)
     else:
-        raise ValueError(f"Unsupported papyrus-content command: {group} {command}")
+        raise ValueError(f"Unsupported papyrus command: {group} {command}")
 
 
 def corpora_status(flags: list[str]) -> None:
@@ -939,7 +952,7 @@ def sync_reference_vectors_after_registration(result: dict[str, Any], options: d
         batch = reference_ids[index : index + 100]
         args = [
             "run",
-            "papyrus-newsroom",
+            "papyrus",
             "knowledge-vector-index",
             "--action",
             "sync",
@@ -971,7 +984,7 @@ def maybe_enrich_reference_catalog_title_subtitle(
         input_path.write_text(json.dumps(catalog, indent=2) + "\n", encoding="utf-8")
         args = [
             "run",
-            "papyrus-newsroom",
+            "papyrus",
             "references",
             "title-subtitle",
             "enrich-catalog",
@@ -1065,7 +1078,7 @@ def _utc_now() -> str:
 
 
 def print_usage() -> None:
-    print("Usage: poetry run papyrus-content <group> <command> [options]")
+    print("Usage: poetry run papyrus <group> <command> [options]")
     print("Python-native: content inspect, content schema-check, content list articles,")
     print("  corpora status/worker-bootstrap/sync-*, references catalog/accession/curation/export commands,")
     print("  assignments list, analysis profiles/validate-profiles/reindex-plan/preview-reindex/")

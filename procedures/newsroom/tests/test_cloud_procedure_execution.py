@@ -46,7 +46,7 @@ class FakeProcedureClient:
 class CloudProcedureExecutionTests(unittest.TestCase):
     def test_missing_required_procedure_points_to_seed_command(self) -> None:
         client = FakeProcedureClient(None)
-        with self.assertRaisesRegex(ValueError, "Run npm run seed:amplify"):
+        with self.assertRaisesRegex(ValueError, "papyrus procedures seed-required --apply"):
             start_cloud_procedure_run(
                 client=client,
                 alias="assignments.run-research",
@@ -66,7 +66,7 @@ class CloudProcedureExecutionTests(unittest.TestCase):
                 "tactusSource": "-- stale stub",
             },
         })
-        with self.assertRaisesRegex(ValueError, "Run npm run seed:amplify"):
+        with self.assertRaisesRegex(ValueError, "papyrus procedures seed-required --apply"):
             start_cloud_procedure_run(
                 client=client,
                 alias="assignments.run-research",
@@ -118,6 +118,126 @@ class CloudProcedureExecutionTests(unittest.TestCase):
             self.assertEqual(result["output"]["source"], "ProcedureVersion.tactusSource")
             self.assertIn("research_packet", result["output"])
             self.assertEqual(json.loads(client.update_inputs[0]["output"])["mode"], "cli_tactus_source")
+            self.assertEqual(result["llmContextCallCount"], 0)
+            self.assertTrue(pathlib.Path(result["llmContextSummaryPath"]).exists())
+            self.assertTrue(pathlib.Path(result["llmContextCallsPath"]).exists())
+
+    def test_run_reporting_executes_cloud_source_and_updates_run_record(self) -> None:
+        client = FakeProcedureClient({
+            "id": "procedure-definition-newsroom-reporting-context",
+            "procedureKey": "newsroom.reporting.context",
+            "currentVersion": {
+                "id": "procedure-version-newsroom-reporting-context-1",
+                "versionNumber": 1,
+                "tactusSource": "Procedure {\n  function(input)\n    return {}\n  end\n}\n",
+            },
+        })
+        stdout = json.dumps({
+            "assignment_item_id": "assignment-2",
+            "dry_run": True,
+            "item_status": "reported",
+            "reporting_context_packet": {
+                "summary": "Cloud reporting packet",
+                "section_key": "news",
+                "edition_id": "edition-2026-05-25-v1",
+                "recommended_angle": "Reader impact.",
+                "editor_recommendation": "hold",
+                "coverage_gaps": [],
+                "open_questions": [],
+                "risk_flags": [],
+                "accepted_reference_ids": [],
+                "proposed_references": [],
+                "copywriter_brief": "Use after editor selection.",
+            },
+            "summary": "Cloud reporting packet",
+        })
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch("papyrus_content.cloud_procedures.subprocess.run") as run:
+            run.return_value = subprocess.CompletedProcess(args=["tactus"], returncode=0, stdout=stdout, stderr="")
+            source_path = pathlib.Path(tmpdir) / "reporting.cloud.tac"
+            result = start_cloud_procedure_run(
+                client=client,
+                alias="assignments.run-reporting",
+                actor_label="test",
+                title="Run reporting",
+                summary="summary",
+                input_payload={"assignment_item_id": "assignment-2", "corpus_key": "AI-ML-research"},
+                run_dir=pathlib.Path(tmpdir),
+                source_path=source_path,
+                stdout_path=pathlib.Path(tmpdir) / "reporting.stdout.log",
+                stderr_path=pathlib.Path(tmpdir) / "reporting.stderr.log",
+            )
+
+            self.assertEqual(result["runStatus"], "completed")
+            self.assertEqual(run.call_args.args[0][0:2], ["tactus", "run"])
+            self.assertEqual(run.call_args.args[0][2], str(source_path))
+            self.assertIn("reporting_context_packet", result["output"])
+            self.assertEqual(result["llmContextCallCount"], 0)
+            self.assertTrue(pathlib.Path(result["llmContextSummaryPath"]).exists())
+            self.assertTrue(pathlib.Path(result["llmContextCallsPath"]).exists())
+
+    def test_run_research_extracts_execute_tactus_call_traces(self) -> None:
+        client = FakeProcedureClient({
+            "id": "procedure-definition-newsroom-research-explorer",
+            "procedureKey": "newsroom.research.explorer",
+            "currentVersion": {
+                "id": "procedure-version-newsroom-research-explorer-1",
+                "versionNumber": 1,
+                "tactusSource": "Procedure {\n  function(input)\n    return {}\n  end\n}\n",
+            },
+        })
+        stdout = "\n".join(
+            [
+                "Running procedure: research_explorer.tac (lua format)",
+                "→ Agent newsroom_research_explorer: Waiting for response...",
+                "→ Tool execute_tactus",
+                "  Args: {",
+                '  "harness": "raw",',
+                '  "assignment_id": "assignment-1",',
+                '  "corpus_key": "AI-ML-research",',
+                '  "research_mode": "source_discovery",',
+                '  "tactus": "local context = assignment_context{ id = \\"assignment-1\\" }"',
+                "}",
+                "  Result: {'ok': True, 'value': {'assignment_context': {}}}",
+                json.dumps(
+                    {
+                        "assignment_item_id": "assignment-1",
+                        "corpus_key": "AI-ML-research",
+                        "dry_run": True,
+                        "item_status": "researched",
+                        "research_packet": {"summary": "Cloud research packet"},
+                        "research_record_plan": {},
+                        "summary": "Cloud research packet",
+                    }
+                ),
+            ]
+        )
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch("papyrus_content.cloud_procedures.subprocess.run") as run:
+            run.return_value = subprocess.CompletedProcess(args=["tactus"], returncode=0, stdout=stdout, stderr="")
+            source_path = pathlib.Path(tmpdir) / "research.cloud.tac"
+            result = start_cloud_procedure_run(
+                client=client,
+                alias="assignments.run-research",
+                actor_label="test",
+                title="Run research",
+                summary="summary",
+                input_payload={"assignment_item_id": "assignment-1", "corpus_key": "AI-ML-research"},
+                run_dir=pathlib.Path(tmpdir),
+                source_path=source_path,
+                stdout_path=pathlib.Path(tmpdir) / "research.stdout.log",
+                stderr_path=pathlib.Path(tmpdir) / "research.stderr.log",
+            )
+
+            self.assertEqual(result["runStatus"], "completed")
+            self.assertEqual(result["llmContextCallCount"], 1)
+            summary = json.loads(pathlib.Path(result["llmContextSummaryPath"]).read_text(encoding="utf-8"))
+            self.assertEqual(summary["executeTactusCallCount"], 1)
+            self.assertEqual(summary["calls"][0]["agent"], "newsroom_research_explorer")
+            calls = pathlib.Path(result["llmContextCallsPath"]).read_text(encoding="utf-8").strip().splitlines()
+            self.assertEqual(len(calls), 1)
+            first = json.loads(calls[0])
+            self.assertEqual(first["assignmentId"], "assignment-1")
+            self.assertEqual(first["harness"], "raw")
+            self.assertIn("assignment_context", first["tactusSnippet"])
 
 
 class CoverageThemeCloudProcedureTests(unittest.TestCase):
@@ -203,12 +323,12 @@ class CoverageThemeCloudProcedureTests(unittest.TestCase):
 
     def test_coverage_theme_fails_without_fallback_when_cloud_procedure_fails(self) -> None:
         with mock.patch.object(coverage_theme, "_create_cloud_procedure_client", return_value=object()), \
-             mock.patch.object(coverage_theme, "_start_cloud_procedure_run", side_effect=ValueError("Missing required cloud procedure 'newsroom.research.explorer'. Run npm run seed:amplify to preload standard procedures.")):
+             mock.patch.object(coverage_theme, "_start_cloud_procedure_run", side_effect=ValueError("Missing required cloud procedure 'newsroom.research.explorer'. Run poetry run papyrus procedures seed-required --apply to preload standard procedures.")):
             result = self._run(through="research")
 
             self.assertFalse(result["ok"])
             self.assertEqual(result["error"]["code"], "cloud_procedure_failed")
-            self.assertIn("Run npm run seed:amplify", result["error"]["message"])
+            self.assertIn("papyrus procedures seed-required --apply", result["error"]["message"])
 
     def test_coverage_theme_uses_deterministic_packets_only_with_explicit_fallback(self) -> None:
         with mock.patch.object(coverage_theme, "_create_cloud_procedure_client", return_value=object()), \

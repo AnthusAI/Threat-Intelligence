@@ -312,6 +312,36 @@ Corrective requirements:
             packet.validationFailures = validation_failures
         end
 
+        local function has_entries(value)
+            return type(value) == "table" and next(value) ~= nil
+        end
+
+        local function ensure_discovery_block_reason(payload, mode_value)
+            if type(payload) ~= "table" then return end
+            local packet = as_table(payload.research_packet)
+            if type(packet) ~= "table" then return end
+            local mode = normalize_research_mode(mode_value or packet.research_mode or payload.research_mode)
+            if mode == "internal_brief" then
+                payload.research_packet = packet
+                return
+            end
+            local discovery = as_table(packet.sourceDiscovery or packet.source_discovery) or {}
+            local source_snapshots = discovery.sourceSnapshots or discovery.source_snapshots or packet.source_snapshots or packet.sourceSnapshots
+            local proposed_references = discovery.proposedReferences or discovery.proposed_references or packet.proposed_references or packet.proposedReferences
+            local blocked_reason = discovery.blockedReason or discovery.blocked_reason or packet.blockedReason or packet.blocked_reason
+            if (not has_entries(source_snapshots)) and (not has_entries(proposed_references)) then
+                if type(blocked_reason) ~= "string" or blocked_reason == "" then
+                    blocked_reason = "no_web_prospects_found"
+                end
+            end
+            if type(blocked_reason) == "string" and blocked_reason ~= "" then
+                discovery.blockedReason = blocked_reason
+                packet.blockedReason = blocked_reason
+            end
+            packet.sourceDiscovery = discovery
+            payload.research_packet = packet
+        end
+
         local message = string.format([[
 Create an exploratory research packet for assignment %s using corpus %s.
 
@@ -394,6 +424,7 @@ research_packet, research_record_plan, and summary.
                     attempt - 1,
                     validation_failures
                 )
+                ensure_discovery_block_reason(normalized, research_mode)
                 normalized.recovery_path = recovery_path
                 normalized.retry_count = attempt - 1
                 normalized.validation_failures = validation_failures
@@ -584,6 +615,7 @@ Do not add prose.
             max_attempts,
             validation_failures
         )
+        ensure_discovery_block_reason(fallback_payload, research_mode)
         if type(fallback_payload.summary) ~= "string" or fallback_payload.summary == "" then
             fallback_payload.summary = "Created dry-run exploratory research packet via deterministic fallback."
         end

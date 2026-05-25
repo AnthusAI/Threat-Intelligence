@@ -23,6 +23,7 @@ def step_run_live_console_agent_smoke_scenario(context, scenario: str) -> None:
     retryable_scenarios = {
         "create-research-assignment",
         "docs-progressive",
+        "unsupported-snippet-retry",
         "list-research-assignments",
         "get-research-assignment",
         "update-research-assignment",

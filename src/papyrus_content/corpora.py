@@ -242,21 +242,21 @@ def next_corpus_bootstrap_command(status: dict[str, Any]) -> str:
         return "generate a sandbox steering config or pass the correct --config for this endpoint"
     if not status["local"]["exists"] or status["local"]["sha256"] != status["s3"]["sha256"]:
         return (
-            f"poetry run papyrus-content corpora sync-from-cloud --config <steering.yml> "
+            f"poetry run papyrus ops corpora sync-from-cloud --config <steering.yml> "
             f"--corpus-key {status['key']} --dry-run"
         )
     if status["graph"]["references"]["total"] != status["s3"]["items"]:
         return (
-            f"poetry run papyrus-content references register-catalog --config <steering.yml> "
+            f"poetry run papyrus references register-catalog --config <steering.yml> "
             f"--corpus-key {status['key']} --catalog {status['local']['path']} --apply"
         )
     if not status["readiness"]["readyForAcceptedAnalysis"]:
         return (
-            f"poetry run papyrus-content references source-status --config <steering.yml> "
+            f"poetry run papyrus references source-status --config <steering.yml> "
             f"--corpus-key {status['key']} --status accepted"
         )
     return (
-        "poetry run papyrus-content analysis create-reindex-assignment --config <steering.yml> "
+        "poetry run papyrus analysis create-reindex-assignment --config <steering.yml> "
         f"--corpus-key {status['key']} --profile <profile> --apply"
     )
 

@@ -36,18 +36,13 @@ class NewsroomToolTests(unittest.TestCase):
         )
 
         self.assertTrue(result["ok"])
-        self.assertIn("papyrus.assignment", result["value"]["api"])
-        self.assertIn("context", result["value"]["api"]["papyrus.assignment"])
-        self.assertIn("assignment_research_packet", result["value"]["api"]["papyrus.plan"])
-        self.assertIn("doi_backfill_plan", result["value"]["api"]["papyrus.reference"])
-        self.assertIn("quality_set", result["value"]["api"]["papyrus.reference"])
-        self.assertIn("quality_assess", result["value"]["api"]["papyrus.reference"])
-        self.assertIn("summarize", result["value"]["api"]["papyrus.reference"])
-        self.assertIn("list", result["value"]["api"]["papyrus.reference"])
-        self.assertIn("summaries", result["value"]["api"]["papyrus.reference"])
-        self.assertIn("web_search", result["value"]["api"]["papyrus.reference"])
-        self.assertIn("query", result["value"]["api"]["papyrus.knowledge"])
-        self.assertIn("resolve_uri", result["value"]["api"]["papyrus"])
+        resources = result["value"]["api"]["resources"]
+        self.assertIn("Assignment", resources)
+        self.assertIn("Reference", resources)
+        self.assertIn("NewsroomSection", resources)
+        self.assertIn("create", resources["Assignment"])
+        self.assertIn("update", resources["Assignment"])
+        self.assertIn("docs", result["value"]["api"])
         self.assertEqual(
             result["api_calls"],
             ["papyrus.api.list", "papyrus.docs.list"],
@@ -804,9 +799,16 @@ return plan_assignment_reporting_context_packet{ assignment = assignment, report
         self.assertIn("reporting_context_packet payload", source)
         self.assertIn("Do not generate Papyrus persistence snippets", source)
         self.assertIn("Do not call Papyrus persistence planners", source)
+        self.assertIn("run one broad knowledge_query", source)
+        self.assertIn("source_trail plus related metadata fields", source)
         self.assertIn('"work_product_kind":"reporting_context_packet"', source)
         self.assertIn("the outer CLI writes Message", source)
         self.assertIn("return a reporting_context_packet payload only", source)
+
+    def test_research_explorer_requires_broad_knowledge_query_orientation(self):
+        source = (REPO_ROOT / "procedures" / "newsroom" / "research_explorer.tac").read_text()
+        self.assertIn("Required policy sequence:", source)
+        self.assertIn("Run one broad knowledge_query", source)
 
     def test_execute_tactus_exposes_knowledge_query_helper(self):
         with mock.patch("papyrus_newsroom.tactus_runtime.build_environment_services", return_value=object()), \
@@ -1309,30 +1311,69 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertEqual(context["slugs"], ["editorial-doctrine-mission", "editorial-doctrine-policy"])
         self.assertTrue(context["contentHash"])
 
-    def test_summary_prompt_includes_doctrine_and_policy_use_warning(self):
-        context = {
-            "status": "loaded",
-            "scope": "publication",
-            "policyUse": "context_only_not_reference_rubric",
-            "slugs": ["editorial-doctrine-mission", "editorial-doctrine-policy"],
-            "records": [
-                {"slug": "editorial-doctrine-mission", "label": "Editorial Mission", "body": ["Study operational publication systems."]},
-                {"slug": "editorial-doctrine-policy", "label": "Editorial Policy", "body": ["Published items should be evidence-backed."]},
-            ],
-            "contentHash": "hash-1",
-            "warnings": [],
-        }
-        prompt = reference_curation_signals.build_summary_prompt(
-            "Reference source text.",
-            max_tokens=100,
-            reference={"title": "Reference A", "sourceUri": "https://example.test/ref"},
-            doctrine_context=context,
-        )
+    def test_reference_summarization_procedure_contains_source_voice_guidance(self):
+        source = (REPO_ROOT / "procedures" / "newsroom" / "reference_summarization.tac").read_text()
+        self.assertIn("State what the source says directly", source)
+        self.assertIn('Do not use referential lead-ins such as:', source)
+        self.assertIn('"This paper..."', source)
+        self.assertIn("Publication Context:", source)
+        self.assertIn("should not be treated as rules that the Reference itself must satisfy", source)
 
-        self.assertIn("Publication Context:", prompt)
-        self.assertIn("Study operational publication systems.", prompt)
-        self.assertIn("Published items should be evidence-backed.", prompt)
-        self.assertIn("should not be treated as rules that the Reference itself must satisfy", prompt)
+    def test_generate_summary_dispatches_cloud_procedure_alias(self):
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_summarization_cloud_procedure",
+            return_value={
+                "mode": "reference_summary",
+                "summary_text": "Summarized source voice text.",
+                "prompt_version": "reference-summary-v3-source-voice",
+                "model": "gpt-5.4-mini",
+            },
+        ) as runner:
+            result = reference_curation_signals.generate_summary(
+                "Source text.",
+                max_tokens=100,
+                model="gpt-5.4-mini",
+                reference={"title": "Reference A", "sourceUri": "https://example.test/ref"},
+                doctrine_context={"records": []},
+            )
+        self.assertEqual(result["summary_text"], "Summarized source voice text.")
+        self.assertEqual(runner.call_args.kwargs["alias"], "references.summarize")
+
+    def test_generate_outcome_summary_dispatches_cloud_procedure_alias(self):
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_summarization_cloud_procedure",
+            return_value={
+                "mode": "outcome_summary",
+                "summary_text": "Outcome-focused source voice summary.",
+                "prompt_version": "reference-title-subtitle-summary-v2-source-voice",
+                "model": "gpt-5.4-mini",
+            },
+        ) as runner:
+            result = reference_curation_signals.generate_outcome_summary(
+                "Source text.",
+                reference={"title": "Reference A", "sourceUri": "https://example.test/ref", "mediaType": "application/pdf"},
+                title="Known title",
+                subtitle="Known subtitle",
+                model="gpt-5.4-mini",
+            )
+        self.assertEqual(result["summary_text"], "Outcome-focused source voice summary.")
+        self.assertEqual(runner.call_args.kwargs["alias"], "references.title-subtitle.resolve")
+
+    def test_generate_summary_surfaces_missing_procedure_remediation(self):
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_summarization_cloud_procedure",
+            side_effect=ValueError(
+                "Missing required cloud procedure 'newsroom.reference.summarization'. "
+                "Run poetry run papyrus procedures seed-required --apply to preload standard procedures."
+            ),
+        ):
+            with self.assertRaisesRegex(ValueError, "papyrus procedures seed-required --apply"):
+                reference_curation_signals.generate_summary(
+                    "Source text.",
+                    max_tokens=100,
+                    model="gpt-5.4-mini",
+                    reference={"title": "Reference A", "sourceUri": "https://example.test/ref"},
+                )
 
     def test_summary_metadata_records_doctrine_context(self):
         reference = {
@@ -1369,7 +1410,7 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
             semantic_client=FakeSemantic(),
         )
 
-        self.assertEqual(plan["metadata"]["promptVersion"], "reference-summary-v2-publication-doctrine")
+        self.assertEqual(plan["metadata"]["promptVersion"], "reference-summary-v3-source-voice")
         self.assertEqual(plan["metadata"]["doctrineContextStatus"], "loaded")
         self.assertEqual(plan["metadata"]["doctrineScope"], "publication")
         self.assertEqual(plan["metadata"]["policyUse"], "context_only_not_reference_rubric")
@@ -1684,7 +1725,7 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
                     "summaryTokenBudget": 500,
                     "actualTokenEstimate": 20,
                     "model": "gpt-5.4-mini",
-                    "promptVersion": "reference-title-subtitle-summary-v1-outcome",
+                    "promptVersion": "reference-title-subtitle-summary-v2-source-voice",
                     "source": "llm_outcome_summary",
                     "source_urls": ["https://example.test/ref"],
                     "run_id": "run-1",
@@ -1967,7 +2008,7 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
                     "summaryTokenBudget": 500,
                     "actualTokenEstimate": 10,
                     "model": "gpt-5.4-mini",
-                    "promptVersion": "reference-title-subtitle-summary-v1-outcome",
+                    "promptVersion": "reference-title-subtitle-summary-v2-source-voice",
                     "source": "llm_outcome_summary",
                     "source_urls": [],
                     "run_id": "run-1",

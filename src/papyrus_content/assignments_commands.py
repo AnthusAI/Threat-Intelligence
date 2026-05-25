@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 from .assignments_workflow import (
+    apply_reporting_packet,
     apply_research_packet,
     backfill_section_indexes,
     build_assignment_context,
@@ -17,6 +18,7 @@ from .assignments_workflow import (
     process_assignment_queue,
     review_reporting_packet,
     run_copywriting_assignment,
+    run_reporting_assignment,
     run_research_assignment,
     run_story_cycle,
     story_cycle_output,
@@ -64,10 +66,22 @@ def assignments_run_research(flags: list[str]) -> None:
     run_research_assignment(flags)
 
 
+def assignments_run_reporting(flags: list[str]) -> None:
+    run_reporting_assignment(flags)
+
+
 def assignments_apply_research_packet(flags: list[str]) -> None:
     options = parse_options(flags)
     client, _ = create_authoring_client()
     result = apply_research_packet(client, options)
+    if options.get("json"):
+        print(json.dumps({"ok": True, **result}, indent=2))
+
+
+def assignments_apply_reporting_packet(flags: list[str]) -> None:
+    options = parse_options(flags)
+    client, _ = create_authoring_client()
+    result = apply_reporting_packet(client, options)
     if options.get("json"):
         print(json.dumps({"ok": True, **result}, indent=2))
 

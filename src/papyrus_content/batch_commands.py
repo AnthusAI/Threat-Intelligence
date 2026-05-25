@@ -13,7 +13,7 @@ from .steering import DEFAULT_STEERING_CONFIG, load_steering_config, require_cor
 from .env import PAPYRUS_ROOT
 
 DEFAULT_INGESTION_RATIONALE = (
-    "bulk-registration: register curated catalog entries in controlled batches via papyrus-content."
+    "bulk-registration: register curated catalog entries in controlled batches via papyrus."
 )
 
 
@@ -77,7 +77,7 @@ def register_catalog_batches(flags: list[str]) -> None:
         args = [
             "poetry",
             "run",
-            "papyrus-content",
+            "papyrus",
             "references",
             "register-catalog",
             "--config",
@@ -154,7 +154,7 @@ def run_post_ingestion_enrichment_batches(flags: list[str]) -> None:
         args = [
             "poetry",
             "run",
-            "papyrus-newsroom",
+            "papyrus",
             "references",
             "curate-recent",
             "--corpus-key",

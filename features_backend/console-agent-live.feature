@@ -21,6 +21,13 @@ Feature: Live console agent behavior
     And the live console agent smoke result should include no structured errors
     And the live console agent smoke result should default to model "gpt-5-nano"
 
+  Scenario: The console agent retries after unsupported execute_tactus snippet syntax
+    When I run the live console agent smoke scenario "unsupported-snippet-retry"
+    Then the live console agent smoke result should include tool call "papyrus.docs.get"
+    And the live console agent smoke result should include a structured error
+    And the live console agent response should equal "unsupported-snippet-retry-tested"
+    And the live console agent smoke result should default to model "gpt-5-nano"
+
   Scenario: The console agent creates a research Assignment
     When I run the live console agent smoke scenario "create-research-assignment"
     Then the live console agent smoke result should include tool call "papyrus.Assignment.create"

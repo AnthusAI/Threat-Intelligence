@@ -159,11 +159,20 @@ def list_existing_records_by_model(
     client: PapyrusGraphQLAuthoringClient,
     records: list[dict[str, Any]],
 ) -> dict[str, dict[str, dict[str, Any]]]:
-    model_names = sorted({record["modelName"] for record in records})
     existing_by_model: dict[str, dict[str, dict[str, Any]]] = {}
-    for model_name in model_names:
-        rows = client.list_records(model_name)
-        existing_by_model[model_name] = {row["id"]: row for row in rows if row.get("id")}
+    seen_ids: set[tuple[str, str]] = set()
+    for record in records:
+        model_name = record["modelName"]
+        record_id = str(record["expected"].get("id") or "")
+        if not record_id:
+            continue
+        key = (model_name, record_id)
+        if key in seen_ids:
+            continue
+        seen_ids.add(key)
+        current = client.get_record(model_name, record_id)
+        if current:
+            existing_by_model.setdefault(model_name, {})[record_id] = current
     return existing_by_model
 
 

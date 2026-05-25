@@ -5,7 +5,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .env import PAPYRUS_ROOT
 from .graphql_authoring import create_authoring_client
+from .cloud_procedures import (
+    SEED_REQUIRED_PROCEDURES_COMMAND,
+    load_required_cli_procedure_config,
+)
 from .ids import safe_id
 from .model_attachments import (
     MODEL_ATTACHMENT_OWNER_MODELS,
@@ -27,6 +32,30 @@ from .newsroom_summary import (
 from .options import normalize_string, parse_options
 from .records import build_record_change_from_current, is_missing_graphql_model_error
 from .relations_commands import print_category_import_summary
+
+CREATE_PROCEDURE_DEFINITION_MUTATION = """
+mutation CreateProcedureDefinition($input: CreateProcedureDefinitionInput!) {
+  createProcedureDefinition(input: $input) { id }
+}
+"""
+
+UPDATE_PROCEDURE_DEFINITION_MUTATION = """
+mutation UpdateProcedureDefinition($input: UpdateProcedureDefinitionInput!) {
+  updateProcedureDefinition(input: $input) { id }
+}
+"""
+
+CREATE_PROCEDURE_VERSION_MUTATION = """
+mutation CreateProcedureVersion($input: CreateProcedureVersionInput!) {
+  createProcedureVersion(input: $input) { id }
+}
+"""
+
+UPDATE_PROCEDURE_VERSION_MUTATION = """
+mutation UpdateProcedureVersion($input: UpdateProcedureVersionInput!) {
+  updateProcedureVersion(input: $input) { id }
+}
+"""
 
 
 def newsroom_recount_summary(flags: list[str]) -> None:
@@ -238,9 +267,9 @@ def newsroom_backfill_operational_indexes(flags: list[str]) -> None:
         "changedRecords": len(changes),
         "elapsedMs": elapsed_ms,
         "next": (
-            "poetry run papyrus-content newsroom recount-summary --apply"
+            "poetry run papyrus sections recount-summary --apply"
             if apply
-            else "poetry run papyrus-content newsroom backfill-operational-indexes --apply"
+            else "poetry run papyrus sections backfill-operational-indexes --apply"
         ),
     }
     if options.get("json"):
@@ -280,6 +309,251 @@ def newsroom_import_sections(flags: list[str]) -> None:
         action = client.upsert(record["modelName"], record["expected"])
         changes.append({**record, "action": action})
     print_category_import_summary("newsroom-sections", Path(config_path).name, changes)
+
+
+def newsroom_seed_required_procedures(flags: list[str]) -> None:
+    options = parse_options(flags)
+    apply = bool(options.get("apply"))
+    seeds = _required_procedure_seed_specs()
+    payload = {
+        "ok": True,
+        "command": "procedures seed-required",
+        "action": "apply" if apply else "dry-run",
+        "procedures": [
+            {
+                "procedureKey": seed["procedureKey"],
+                "procedureId": seed["procedureId"],
+                "versionId": seed["versionId"],
+                "sourcePath": str(seed["sourcePath"]),
+            }
+            for seed in seeds
+        ],
+        "next": None if apply else SEED_REQUIRED_PROCEDURES_COMMAND,
+    }
+    if not apply:
+        if options.get("json"):
+            print(json.dumps(payload, indent=2))
+        else:
+            print("procedures\tseed-required\taction\tdry-run")
+            for entry in payload["procedures"]:
+                print(
+                    "procedures\tseed-required\tplanned\t"
+                    f"{entry['procedureKey']}\t{entry['sourcePath']}"
+                )
+            print(
+                "procedures\tseed-required\tapply\tskipped\t"
+                "pass --apply to write ProcedureDefinition/ProcedureVersion records"
+            )
+        return
+
+    client, _ = create_authoring_client()
+    now = _utc_now()
+    results: list[dict[str, Any]] = []
+    for seed in seeds:
+        definition_payload = {
+            "id": seed["procedureId"],
+            "procedureKey": seed["procedureKey"],
+            "title": seed["title"],
+            "category": seed["category"],
+            "description": seed["description"],
+            "enabled": True,
+            "enabledStatus": "enabled",
+            "currentVersionId": seed["versionId"],
+            "createdBy": "papyrus-cli",
+            "createdAt": now,
+            "updatedBy": "papyrus-cli",
+            "updatedAt": now,
+            "newsroomFeedKey": "procedures",
+        }
+        version_payload = {
+            "id": seed["versionId"],
+            "procedureId": seed["procedureId"],
+            "procedureKey": seed["procedureKey"],
+            "versionNumber": 1,
+            "status": "published",
+            "isCurrent": True,
+            "label": seed["versionLabel"],
+            "tactusSource": seed["tactusSource"],
+            "parameterSchema": json.dumps(seed["parameterSchema"]),
+            "defaults": json.dumps(seed["defaults"]),
+            "changelog": "Seeded via papyrus procedures seed-required.",
+            "createdBy": "papyrus-cli",
+            "createdAt": now,
+            "updatedBy": "papyrus-cli",
+            "updatedAt": now,
+        }
+        definition_mode = _create_or_update_procedure_record(
+            client,
+            create_query=CREATE_PROCEDURE_DEFINITION_MUTATION,
+            update_query=UPDATE_PROCEDURE_DEFINITION_MUTATION,
+            payload=definition_payload,
+            kind=f"ProcedureDefinition {seed['procedureKey']}",
+        )
+        version_mode = _create_or_update_procedure_record(
+            client,
+            create_query=CREATE_PROCEDURE_VERSION_MUTATION,
+            update_query=UPDATE_PROCEDURE_VERSION_MUTATION,
+            payload=version_payload,
+            kind=f"ProcedureVersion {seed['versionId']}",
+        )
+        # Ensure the definition points at the seeded current version after updates.
+        client.graphql(
+            UPDATE_PROCEDURE_DEFINITION_MUTATION,
+            {
+                "input": {
+                    "id": seed["procedureId"],
+                    "currentVersionId": seed["versionId"],
+                    "enabled": True,
+                    "enabledStatus": "enabled",
+                    "updatedBy": "papyrus-cli",
+                    "updatedAt": now,
+                }
+            },
+        )
+        results.append(
+            {
+                "procedureKey": seed["procedureKey"],
+                "definition": definition_mode,
+                "version": version_mode,
+                "sourcePath": str(seed["sourcePath"]),
+            }
+        )
+    if options.get("json"):
+        print(json.dumps({**payload, "results": results}, indent=2))
+        return
+    print("procedures\tseed-required\taction\tapply")
+    for result in results:
+        print(
+            "procedures\tseed-required\tseeded\t"
+            f"{result['procedureKey']}\tdefinition={result['definition']}\tversion={result['version']}"
+        )
+
+
+def _required_procedure_seed_specs() -> list[dict[str, Any]]:
+    config = load_required_cli_procedure_config()
+    source_by_key = {
+        "newsroom.research.explorer": PAPYRUS_ROOT / "procedures" / "newsroom" / "research_explorer.tac",
+        "newsroom.reporting.context": PAPYRUS_ROOT / "procedures" / "newsroom" / "reporter.tac",
+        "newsroom.reference.summarization": PAPYRUS_ROOT / "procedures" / "newsroom" / "reference_summarization.tac",
+    }
+    details_by_key = {
+        "newsroom.research.explorer": {
+            "title": "Newsroom Research Explorer",
+            "category": "newsroom",
+            "description": "Builds structured research packets for assignment-backed newsroom workflows.",
+            "versionLabel": "starter",
+            "parameterSchema": {
+                "type": "object",
+                "required": ["corpus_key"],
+                "properties": {
+                    "assignment_item_id": {"type": "string"},
+                    "assignment_json": {"type": "object"},
+                    "corpus_key": {"type": "string"},
+                    "context_profile": {"type": "string"},
+                    "research_mode": {"type": "string"},
+                    "research_questions": {"type": "string"},
+                    "max_evidence_items": {"type": "number"},
+                },
+            },
+            "defaults": {
+                "context_profile": "researcher",
+                "research_mode": "source_discovery",
+                "max_evidence_items": 20,
+            },
+        },
+        "newsroom.reporting.context": {
+            "title": "Newsroom Reporting Context",
+            "category": "newsroom",
+            "description": "Builds structured reporting context packets from assignment-backed runs.",
+            "versionLabel": "starter",
+            "parameterSchema": {
+                "type": "object",
+                "required": ["corpus_key"],
+                "properties": {
+                    "assignment_item_id": {"type": "string"},
+                    "assignment_json": {"type": "object"},
+                    "corpus_key": {"type": "string"},
+                    "context_profile": {"type": "string"},
+                    "source_research_assignment_id": {"type": "string"},
+                    "source_research_packet_id": {"type": "string"},
+                    "source_research_packet_path": {"type": "string"},
+                },
+            },
+            "defaults": {"context_profile": "reporting"},
+        },
+        "newsroom.reference.summarization": {
+            "title": "Newsroom Reference Summarization",
+            "category": "newsroom",
+            "description": "Generates source-voice reference summaries for curation metadata and summary messages.",
+            "versionLabel": "starter",
+            "parameterSchema": {
+                "type": "object",
+                "required": ["mode", "source_text"],
+                "properties": {
+                    "mode": {"type": "string"},
+                    "source_text": {"type": "string"},
+                    "max_tokens": {"type": "number"},
+                    "reference_title": {"type": "string"},
+                    "source_uri": {"type": "string"},
+                    "known_title": {"type": "string"},
+                    "known_subtitle": {"type": "string"},
+                    "media_type": {"type": "string"},
+                    "doctrine_context_text": {"type": "string"},
+                    "model": {"type": "string"},
+                    "prompt_version": {"type": "string"},
+                },
+            },
+            "defaults": {
+                "mode": "reference_summary",
+                "max_tokens": 500,
+                "model": "gpt-5.4-mini",
+            },
+        },
+    }
+    seeds: list[dict[str, Any]] = []
+    for procedure_key in config["keys"]:
+        source_path = source_by_key.get(procedure_key)
+        details = details_by_key.get(procedure_key)
+        if not source_path or not details:
+            raise ValueError(
+                f"Missing seed metadata for required procedure '{procedure_key}'. "
+                "Update newsroom_seed_required_procedures metadata."
+            )
+        if not source_path.exists():
+            raise ValueError(f"Missing procedure source file for {procedure_key}: {source_path}")
+        slug = safe_id(procedure_key)[:120]
+        seeds.append(
+            {
+                "procedureKey": procedure_key,
+                "procedureId": f"procedure-definition-{slug}",
+                "versionId": f"procedure-version-{slug}-1",
+                "sourcePath": source_path,
+                "tactusSource": source_path.read_text(encoding="utf-8").strip() + "\n",
+                **details,
+            }
+        )
+    return seeds
+
+
+def _create_or_update_procedure_record(
+    client,
+    *,
+    create_query: str,
+    update_query: str,
+    payload: dict[str, Any],
+    kind: str,
+) -> str:
+    try:
+        client.graphql(create_query, {"input": payload})
+        return "created"
+    except RuntimeError as create_error:
+        try:
+            client.graphql(update_query, {"input": payload})
+            return "updated"
+        except RuntimeError as update_error:
+            raise ValueError(
+                f"Failed to seed {kind}. create error={create_error}; update error={update_error}"
+            ) from update_error
 
 
 def newsroom_prune_attachments(flags: list[str]) -> None:
@@ -361,13 +635,13 @@ def newsroom_prune_attachments(flags: list[str]) -> None:
                         "orphanStorageObjects": len(orphan_storage_paths),
                     },
                     "deleted": deleted,
-                    "next": None if apply else "poetry run papyrus-content newsroom prune-attachments --apply",
+                    "next": None if apply else "poetry run papyrus sections prune-attachments --apply",
                 },
                 indent=2,
             )
         )
     elif not apply:
-        print("attachment-prune\tnext\tpoetry run papyrus-content newsroom prune-attachments --apply")
+        print("attachment-prune\tnext\tpoetry run papyrus sections prune-attachments --apply")
 
 
 def _newsroom_feed_patch_for(model_name: str, record: dict[str, Any]) -> dict[str, Any]:

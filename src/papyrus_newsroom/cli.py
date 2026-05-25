@@ -134,7 +134,7 @@ def main(argv: list[str] | None = None) -> int:
     curate_recent_parser.add_argument("--model", default="gpt-5.4-mini")
     curate_recent_parser.add_argument("--summary-max-tokens", type=int, default=500)
     curate_recent_parser.add_argument("--refresh-summary", action="store_true")
-    curate_recent_parser.add_argument("--actor-label", default="papyrus-newsroom")
+    curate_recent_parser.add_argument("--actor-label", default="papyrus")
     curate_recent_parser.add_argument("--resume", default="")
     curate_recent_parser.add_argument("--apply", action="store_true")
     curate_recent_parser.add_argument("--dry-run", action="store_true")
@@ -187,7 +187,7 @@ def main(argv: list[str] | None = None) -> int:
     quality_set_parser.add_argument("--reference", required=True)
     quality_set_parser.add_argument("--rating", type=int, required=True)
     quality_set_parser.add_argument("--note", default="")
-    quality_set_parser.add_argument("--actor-label", default="papyrus-newsroom")
+    quality_set_parser.add_argument("--actor-label", default="papyrus")
     quality_set_parser.add_argument("--apply", action="store_true")
     quality_set_parser.add_argument("--refresh", action="store_true")
     quality_set_parser.add_argument("--persist-local-metadata", default="true")
@@ -604,7 +604,7 @@ def _run_references_command(args: argparse.Namespace) -> dict:
             for reference_id in selected_reference_ids:
                 dispatched = papyrus_reference_curation_start(
                     reference_id=reference_id,
-                    actor_label=args.actor_label or "papyrus-newsroom",
+                    actor_label=args.actor_label or "papyrus",
                     curation_policy=None,
                 )
                 dispatches.append(

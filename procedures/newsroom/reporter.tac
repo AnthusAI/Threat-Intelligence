@@ -31,6 +31,8 @@ Goal:
 - Reporter snippets must use the default raw execute_tactus harness. Do not set
   harness="research"; that harness is only for research_packet finalization and
   will reject reporting_context_packet payloads.
+- For live reporting assignments, orient from internal Papyrus knowledge first:
+  one broad knowledge_query is required before optional web freshness checks.
 - If drafting needs fresh source verification, require tactus.web inside the
   snippet and use provider="openai" with web.search or web.synthesize. Treat web
   results as evidence inputs only; do not write GraphQL records from web search.
@@ -45,6 +47,15 @@ Rules:
 - Include editor_recommendation, recommended_angle, risk_flags, coverage_gaps,
   open_questions, accepted_reference_ids, proposed_references, and
   copywriter_brief in the reporting payload.
+- reporting_context_packet.summary is required and must be a concise one- or
+  two-sentence summary of the packet state.
+- editor_recommendation must be one of: select, merge, brief, hold, kill.
+  If knowledge orientation is blocked or accepted evidence is missing, default
+  to hold unless the assignment should be explicitly killed.
+- Include knowledge-orientation trace in existing packet fields:
+  source_trail plus related metadata fields knowledge_queries,
+  papyrus_uris_inspected, and knowledge_blocked_reason when orientation is
+  blocked.
 - Legacy assignment Item inputs may still normalize to Item.type = "assignment" and mark that compatibility Item drafted in the plan.
 - Create a separate draft article Item with Item.type = "article" and Item.status = "draft".
 - When live context is available, read and apply its section doctrine, topic-scope context, recent section memory, and accepted evidence before drafting.
@@ -121,42 +132,75 @@ Required tool flow:
    local ctx = assignment_context{ id = "%s" }
    local pack = assignment_agent_context{ id = "%s", context_profile = "reporting" }
    local item = assignment_context_to_item{ assignment_context = ctx.assignment_context }
-4. Use item_get only when live Assignment context is unavailable.
-5. For live reporting.edition-candidate Assignments, return a reporting_context_packet payload only.
-6. When fresh source verification is needed, use local web = require("tactus.web") and call web.search or web.synthesize inside execute_tactus.
-7. Do not call Papyrus persistence planners. The outer CLI builds any record plan.
-8. When source research ids are provided, include source_research_assignment_id
+4. For live Assignment queue work, run one broad knowledge_query seeded from
+   assignment target/brief before deciding optional web checks. Include
+   knowledge trace in source_trail and related metadata fields.
+5. Optionally run anchored knowledge_query (uri/objectUri) or papyrus.resolve_uri
+   follow-up when specific internal hits need inspection.
+6. Use item_get only when live Assignment context is unavailable.
+7. For live reporting.edition-candidate Assignments, return a reporting_context_packet payload only.
+8. When fresh source verification is needed, use local web = require("tactus.web") and call web.search or web.synthesize inside execute_tactus after internal orientation.
+9. Do not call Papyrus persistence planners. The outer CLI builds any record plan.
+10. When source research ids are provided, include source_research_assignment_id
    and source_research_packet_id in the reporting payload so the packet plan can
    write derived_from lineage.
-9. If live context helpers fail but assignment_json is present, return a packet
+11. If live context helpers fail but assignment_json is present, return a packet
    from the assignment_json brief and mark the context gap in risk_flags and
    open_questions. Do not call done without returning a packet payload.
-10. Use raw execute_tactus only. Do not set harness="research" in this reporter
+12. Use raw execute_tactus only. Do not set harness="research" in this reporter
    procedure.
 
 For live reporting assignments, return assignment_item_id="%s", dry_run=true, work_product_kind="reporting_context_packet", item_status="reported", reporting_context_packet, and a concise summary.
 For legacy draft compatibility, return dry_run=true, work_product_kind="draft_article", item_status="draft", draft_record_plan, and a concise summary.
+Set reporting_context_packet.editor_recommendation to exactly one enum value:
+select, merge, brief, hold, or kill.
+Set reporting_context_packet.summary to a concise packet-level summary.
 ]], assignment_source, input.corpus_key, input.source_research_assignment_id or "", input.source_research_packet_id or "", input.source_research_packet_path or "", inline_brief, input.assignment_item_id or "", input.assignment_item_id or "", input.assignment_item_id or "", input.assignment_item_id or "")
+
+        local json = require("tactus.io.json")
+
+        local function decode_last_json_object(text)
+            if type(text) ~= "string" or text == "" then return nil end
+            local close_index = string.match(text, ".*()}")
+            if not close_index then return nil end
+            for start = close_index, 1, -1 do
+                if string.sub(text, start, start) == "{" then
+                    local candidate = string.sub(text, start, close_index)
+                    local ok, decoded = pcall(json.decode, candidate)
+                    if ok and type(decoded) == "table" then
+                        return decoded
+                    end
+                end
+            end
+            return nil
+        end
 
         local result = newsroom_reporter({message = message})
         local output = {}
         if result ~= nil and result.output ~= nil then
             output = result.output
         end
+        if type(output) == "table" and type(output.value) == "table" then
+            output = output.value
+        end
         if type(output) == "string" then
-            local json = require("tactus.io.json")
             local ok, decoded = pcall(json.decode, output)
             if ok and type(decoded) == "table" then
                 output = decoded
             else
-                output = {
-                    assignment_item_id = input.assignment_item_id,
-                    dry_run = true,
-                    work_product_kind = "reporting_context_packet",
-                    item_status = "reported",
-                    summary = "Reporter returned unstructured text instead of a reporting context packet.",
-                    validation_failures = {"reporter_output_not_structured"},
-                }
+                local extracted = decode_last_json_object(output)
+                if type(extracted) == "table" then
+                    output = extracted
+                else
+                    output = {
+                        assignment_item_id = input.assignment_item_id,
+                        dry_run = true,
+                        work_product_kind = "reporting_context_packet",
+                        item_status = "reported",
+                        summary = "Reporter returned unstructured text instead of a reporting context packet.",
+                        validation_failures = {"reporter_output_not_structured"},
+                    }
+                end
             end
         end
         if type(output) ~= "table" then
@@ -200,6 +244,35 @@ For legacy draft compatibility, return dry_run=true, work_product_kind="draft_ar
                 output.summary = "No reporting payload was returned."
             end
         end
+        if type(output.reporting_context_packet) == "table" then
+            local packet = output.reporting_context_packet
+            if type(packet.summary) ~= "string" or packet.summary == "" then
+                packet.summary = output.summary
+            end
+            local recommendation = packet.editor_recommendation or packet.editorRecommendation
+            local normalized = string.lower(tostring(recommendation or ""))
+            normalized = string.gsub(normalized, "[^a-z]", "")
+            local allowed = {
+                select = true,
+                merge = true,
+                brief = true,
+                hold = true,
+                kill = true,
+            }
+            if not allowed[normalized] then
+                local blocked_reason = packet.knowledge_blocked_reason or packet.knowledgeBlockedReason
+                local has_accepted = type(packet.accepted_reference_ids) == "table" and next(packet.accepted_reference_ids) ~= nil
+                if type(blocked_reason) == "string" and blocked_reason ~= "" then
+                    normalized = "hold"
+                elseif not has_accepted then
+                    normalized = "hold"
+                else
+                    normalized = "brief"
+                end
+            end
+            packet.editor_recommendation = normalized
+            output.reporting_context_packet = packet
+        end
         return output
     end
 }
@@ -225,8 +298,8 @@ Feature: Newsroom reporter procedure
     And the input assignment_item_id is "assignment-live-123"
     And the input corpus_key is "AI-ML-research"
     And the input context_profile is "reporting"
-    And the agent "newsroom_reporter" calls tool "execute_tactus" with args {"tactus": "local context = assignment_context{ id = \"assignment-live-123\" }; local pack = assignment_agent_context{ id = \"assignment-live-123\", context_profile = \"reporting\" }; return { assignment = context.assignment_context.assignment, context = pack }"}
-    And the agent "newsroom_reporter" returns data {"assignment_item_id":"assignment-live-123","dry_run":True,"work_product_kind":"reporting_context_packet","item_status":"reported","reporting_context_packet":{"summary":"Reporting context ready.","editor_recommendation":"hold","recommended_angle":"Reader impact.","risk_flags":["Verify one claim."],"coverage_gaps":["Need second source."],"open_questions":["Who is affected?"],"accepted_reference_ids":[],"proposed_references":[],"copywriter_brief":"Use the packet after editor selection."},"summary":"Created one dry-run reporting context packet payload from a live assignment context."}
+    And the agent "newsroom_reporter" calls tool "execute_tactus" with args {"tactus": "local context = assignment_context{ id = \"assignment-live-123\" }; local pack = assignment_agent_context{ id = \"assignment-live-123\", context_profile = \"reporting\" }; local knowledge = knowledge_query{ query = \"assignment-live-123 reporting focus\", profile = \"reporting\", format = \"both\", max_tokens = 1200, top_k = 12, depth = 1 }; return { assignment = context.assignment_context.assignment, context = pack, knowledge = knowledge }"}
+    And the agent "newsroom_reporter" returns data {"assignment_item_id":"assignment-live-123","dry_run":True,"work_product_kind":"reporting_context_packet","item_status":"reported","reporting_context_packet":{"summary":"Reporting context ready.","editor_recommendation":"hold","recommended_angle":"Reader impact.","risk_flags":["Verify one claim."],"coverage_gaps":["Need second source."],"open_questions":["Who is affected?"],"accepted_reference_ids":[],"proposed_references":[],"source_trail":[{"source_kind":"knowledge_query","note":"Oriented to accepted internal context."}],"knowledge_queries":["assignment-live-123 reporting focus"],"papyrus_uris_inspected":[],"copywriter_brief":"Use the packet after editor selection."},"summary":"Created one dry-run reporting context packet payload from a live assignment context."}
     When the procedure runs
     Then the procedure should complete successfully
     And the output dry_run should be true

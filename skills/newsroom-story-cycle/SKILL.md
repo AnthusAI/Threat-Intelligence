@@ -44,7 +44,7 @@ one shared topic worked through multiple section lenses. The Python
 `assignments run-story-cycle` name remains a compatibility alias.
 
 ```bash
-poetry run papyrus-newsroom coverage-themes run \
+poetry run papyrus assignments run-story-cycle \
   --date 2026-05-21 \
   --topic "AI in video games" \
   --category AI-ML-research \
@@ -62,7 +62,7 @@ Use the assignment-desk signal feed before edition planning when the topic is
 not already chosen:
 
 ```bash
-poetry run papyrus-newsroom signals trend-report \
+poetry run papyrus knowledge signals trend-report \
   --corpus-key AI-ML-research \
   --topic "AI in video games" \
   --sections culture,methods,business,law \
@@ -97,7 +97,7 @@ output fails instead of being masked by deterministic fallback packets. Pass
 After a run, inspect the grouped private output:
 
 ```bash
-poetry run papyrus-newsroom story-budget output \
+poetry run papyrus assignments story-cycle-output \
   --run-id <coverage-theme-run-id> \
   --json
 ```
@@ -175,7 +175,7 @@ inside the story-cycle run.
 Review a reporting packet with:
 
 ```bash
-npm run content -- assignments review-reporting-packet \
+poetry run papyrus assignments review-reporting-packet \
   --assignment <assignment-id> \
   --message <message-id> \
   --decision select|merge|brief|hold|kill \
@@ -196,7 +196,7 @@ No packet review creates `Item` or `EditionItem` placement. Run copywriting
 after selection with:
 
 ```bash
-npm run content -- assignments run-copywriting \
+poetry run papyrus assignments run-copywriting \
   --assignment <copywriting-assignment-id> \
   --dry-run
 ```

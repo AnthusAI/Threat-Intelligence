@@ -12,7 +12,7 @@ reporting, editing, reviewing, chat grounding, and context-pack experiments.
 The same Python engine powers both entrypoints:
 
 - AppSync custom query: `knowledgeQuery(input: AWSJSON!): AWSJSON`
-- CLI: `PYTHONPATH=src python -m papyrus_newsroom knowledge-query`
+- CLI: `poetry run papyrus knowledge query`
 
 Keep behavior changes in `src/papyrus_knowledge_query/` so Lambda and CLI stay
 identical.
@@ -341,7 +341,7 @@ Check `structured.request.semanticQuerySource`:
 Semantic-only smoke:
 
 ```bash
-PYTHONPATH=src python -m papyrus_newsroom knowledge-query \
+poetry run papyrus knowledge query \
   --query "agent memory systems" \
   --format both \
   --max-tokens 600
@@ -350,7 +350,7 @@ PYTHONPATH=src python -m papyrus_newsroom knowledge-query \
 Input-file smoke:
 
 ```bash
-PYTHONPATH=src python -m papyrus_newsroom knowledge-query \
+poetry run papyrus knowledge query \
   --input .papyrus-runs/knowledge-query/input.json |
   jq
 ```
@@ -358,13 +358,33 @@ PYTHONPATH=src python -m papyrus_newsroom knowledge-query \
 Write markdown for review:
 
 ```bash
-PYTHONPATH=src python -m papyrus_newsroom knowledge-query \
+poetry run papyrus knowledge query \
   --input .papyrus-runs/knowledge-query/input.json \
   > .papyrus-runs/knowledge-query/result.json
 
 jq -r '.context.text // ""' \
   .papyrus-runs/knowledge-query/result.json \
   > .papyrus-runs/knowledge-query/context.md
+```
+
+Desk-anchored smoke (operational section / news desk):
+
+```bash
+poetry run papyrus knowledge query \
+  --query "AI in games" \
+  --anchor newsroomSection:technology \
+  --max-tokens 600 \
+  --format structured
+```
+
+When debugging local code changes before Lambda deploy, force local engine execution:
+
+```bash
+poetry run papyrus knowledge query \
+  --query "AI in games" \
+  --anchor newsroomSection:technology \
+  --execution local \
+  --format structured
 ```
 
 The CLI uses local environment configuration:
@@ -404,14 +424,14 @@ Audit coverage before writing vectors:
 
 ```bash
 AWS_PROFILE=<profile> AWS_REGION=<region> PYTHONPATH=src \
-  python -m papyrus_newsroom knowledge-vector-index --action audit
+  poetry run papyrus knowledge vector-index --action audit
 ```
 
 Sync missing vectors with a dry run first:
 
 ```bash
 AWS_PROFILE=<profile> AWS_REGION=<region> PYTHONPATH=src \
-  python -m papyrus_newsroom knowledge-vector-index --action sync \
+  poetry run papyrus knowledge vector-index --action sync \
   --corpus-id <corpus-id> \
   --max-references 25 \
   --dry-run

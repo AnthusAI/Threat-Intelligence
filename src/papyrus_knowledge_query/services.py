@@ -91,7 +91,7 @@ getItem(id: $id) {
     "message": f"getMessage(id: $id) {{ {MESSAGE_FIELDS} }}",
     "newsroomSection": """
 getNewsroomSection(id: $id) {
-  id title type editorialMission editorialPolicy enabled enabledStatus sortOrder shortDescription
+  id title shortTitle type editorialMission editorialPolicy enabled enabledStatus sortOrder
   defaultArticleTypes defaultPageBudget assignmentGuidance killCriteria visualGuidance createdAt updatedAt
 }
 """,

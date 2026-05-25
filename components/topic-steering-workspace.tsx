@@ -6146,17 +6146,15 @@ function ReferencesDeskView({
 }) {
   const consoleContext = usePapyrusConsole();
   const [statusFilter, setStatusFilter] = useState("");
-  const [metricStatusFilter, setMetricStatusFilter] = useState("");
   const [selectedReferenceLineageId, setSelectedReferenceLineageId] = useState(initialReferenceLineageId ?? "");
   const [isReferenceDetailOpen, setIsReferenceDetailOpen] = useState(true);
   const categoryContext = useMemo(() => buildCategoryDrilldownContext(categories, initialCategoryLineageId), [categories, initialCategoryLineageId]);
-  const effectiveStatusFilter = statusFilter || metricStatusFilter;
   const feed = useNewsroomPagedRows({
     initialItems: references,
     enabled: !isDemo && !categoryContext.primary,
-    resetKey: `references:${effectiveStatusFilter}`,
+    resetKey: `references:${statusFilter}`,
     loadPage: (nextToken) => loadNewsroomReferencePage({
-      status: effectiveStatusFilter,
+      status: statusFilter,
       nextToken,
     }),
   });
@@ -6176,8 +6174,7 @@ function ReferencesDeskView({
     [visibleReferences],
   );
   const filteredReferences = canonicalVisibleReferences
-    .filter((reference) => !statusFilter || (reference.curationStatus ?? "pending") === statusFilter)
-    .filter((reference) => !metricStatusFilter || (reference.curationStatus ?? "pending") === metricStatusFilter);
+    .filter((reference) => !statusFilter || (reference.curationStatus ?? "pending") === statusFilter);
   const requestedReferenceLineageId = selectedReferenceLineageId || initialReferenceLineageId || "";
   const selectedReference = selectedReferenceRecordByLineage(filteredReferences, requestedReferenceLineageId)
     ?? selectedReferenceRecordByLineage(canonicalVisibleReferences, requestedReferenceLineageId)
@@ -6317,15 +6314,9 @@ function ReferencesDeskView({
               cards={cards}
               emptyLabel={references.length ? "No references match this filter" : "No private references imported"}
               filterLabel="Curation status"
-              filterOptions={[
-                { key: "", label: "All references", count: totalReferenceCount },
-                { key: "pending", label: "Prospects", count: statusCounts.pending ?? 0 },
-                { key: "accepted", label: "Accepted evidence", count: statusCounts.accepted ?? 0 },
-                { key: "rejected", label: "Scope rejections", count: statusCounts.rejected ?? 0 },
-                { key: "archived", label: "Archived", count: statusCounts.archived ?? 0 },
-              ]}
+              filterOptions={[]}
               filterValue={statusFilter}
-              metricValue={metricStatusFilter}
+              metricValue={statusFilter}
               metrics={[
                 { key: "", label: "All", count: totalReferenceCount },
                 { key: "pending", label: "Pending", count: statusCounts.pending ?? 0 },
@@ -6338,7 +6329,7 @@ function ReferencesDeskView({
               isLoadingMore={feed.isLoadingMore}
               onFilterChange={setStatusFilter}
               onLoadMore={feed.loadMore}
-              onMetricChange={setMetricStatusFilter}
+              onMetricChange={setStatusFilter}
               onSelect={selectReference}
               selectedId={selectedLineageId}
             />
@@ -7434,20 +7425,25 @@ function NewsroomCardGrid({
   }, [captureLayout, hasMore, isLoadingMore, onLoadMore]);
   return (
     <div className="newsroom-card-grid-shell" data-newsroom-card-grid-shell>
-      <div className="news-desk-data-grid-filter newsroom-card-grid-filter" data-news-desk-data-grid-filter>
-        <label>
-          <span>{filterLabel}</span>
-          <select value={filterValue} onChange={(event) => {
-            captureLayout();
-            onFilterChange(event.target.value);
-          }}>
-            {filterOptions.map((option) => (
-              <option key={option.key || "all"} value={option.key}>
-                {option.count === undefined ? option.label : `${option.label} (${option.count})`}
-              </option>
-            ))}
-          </select>
-        </label>
+      <div
+        className={`news-desk-data-grid-filter newsroom-card-grid-filter${filterOptions.length ? "" : " news-desk-data-grid-filter--metrics-only"}`}
+        data-news-desk-data-grid-filter
+      >
+        {filterOptions.length ? (
+          <label>
+            <span>{filterLabel}</span>
+            <select value={filterValue} onChange={(event) => {
+              captureLayout();
+              onFilterChange(event.target.value);
+            }}>
+              {filterOptions.map((option) => (
+                <option key={option.key || "all"} value={option.key}>
+                  {option.count === undefined ? option.label : `${option.label} (${option.count})`}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         <div className="news-desk-data-grid-filter__metrics">
           {metrics.map((metric) => (
             <button

@@ -17,7 +17,7 @@ def refresh_jwt(flags: list[str]) -> None:
     options = parse_options(flags)
     ttl_seconds = normalize_non_negative_integer(options.get("ttl-seconds"), "--ttl-seconds") or 3600
     issuer = normalize_string(options.get("issuer")) or normalize_string(os.environ.get("PAPYRUS_JWT_ISSUER")) or "papyrus-cli"
-    subject = normalize_string(options.get("subject")) or "papyrus-content-cli"
+    subject = normalize_string(options.get("subject")) or "papyrus-cli"
     audience = normalize_string(options.get("audience")) or normalize_string(os.environ.get("PAPYRUS_JWT_AUDIENCE")) or "papyrus-authoring"
     scope = (
         normalize_string(options.get("scope"))
