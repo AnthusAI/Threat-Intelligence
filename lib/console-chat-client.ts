@@ -797,29 +797,6 @@ export async function updateConsoleMessage(
     }
   }
 
-  if (lastError) {
-    return {
-      id: input.id,
-      threadId: input.threadId ?? null,
-      parentMessageId: input.parentMessageId ?? null,
-      sequenceNumber: input.sequenceNumber ?? null,
-      role: input.role ?? null,
-      messageKind: input.messageKind ?? null,
-      messageType: input.messageType ?? null,
-      content: input.content ?? null,
-      summary: input.summary ?? null,
-      responseStatus: input.responseStatus ?? null,
-      responseOwner: input.responseOwner ?? null,
-      responseStartedAt: input.responseStartedAt ?? null,
-      responseCompletedAt: input.responseCompletedAt ?? null,
-      responseError: input.responseError ?? null,
-      source: input.source ?? null,
-      authorLabel: input.authorLabel ?? null,
-      createdAt: input.createdAt ?? now,
-      updatedAt: (normalizedInput.updatedAt as string) ?? now,
-    };
-  }
-
   throw normalizeUnknownError(lastError, "updateMessage");
 }
 

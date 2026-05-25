@@ -29,7 +29,10 @@ def step_run_live_console_agent_smoke_scenario(context, scenario: str) -> None:
         "invalid-assignment-input",
         "discuss-reference",
         "rate-reference-quality",
-        "review-reference-curation",
+        "review-reference-curation-accept",
+        "review-reference-curation-reject",
+        "review-reference-curation-archive",
+        "review-reference-curation-reopen",
         "insight-reference",
         "curate-reference-refresh",
     }

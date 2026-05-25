@@ -69,7 +69,8 @@ mediaType byteSize sha256 etag importRunId importedAt metadata
 """
 
 MESSAGE_FIELDS = """
-id messageKind messageDomain status summary source importRunId authorSub authorUserProfileId authorLabel createdAt updatedAt
+id messageKind messageDomain status summary source importRunId authorSub authorUserProfileId authorLabel
+content metadata createdAt updatedAt
 """
 
 RELATION_FIELDS = """
@@ -301,7 +302,7 @@ class PapyrusSemanticClient:
         messages: list[dict[str, Any]] = []
         for relation in relations:
             relation_type = relation.get("relationTypeKey") or relation.get("predicate")
-            if relation_type == "comment":
+            if relation_type in {"comment", "insight_about"}:
                 if relation.get("subjectKind") != "message":
                     continue
                 message_id = relation["subjectId"]

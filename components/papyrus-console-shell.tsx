@@ -222,7 +222,11 @@ export function PapyrusConsoleShell({ children }: PapyrusConsoleShellProps) {
       const completedAt = new Date().toISOString();
       let markdown: string;
       try {
-        const result = await runNewsroomKnowledgeQuery(request);
+        const result = await withTimeout(
+          runNewsroomKnowledgeQuery(request),
+          45_000,
+          "Reference context preload timed out.",
+        );
         markdown = result.context?.text?.trim() ?? "";
         if (!markdown) throw new Error("knowledgeQuery returned no markdown context.");
       } catch (error) {
@@ -651,9 +655,15 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
       ))
     ));
   const pendingUserResponse = Boolean(latestAwaitingAssistantUserMessage);
-  const pendingAssistantResponse = sortedMessages.some(
-    (message) => message.role === "ASSISTANT" && message.responseStatus === "RUNNING",
-  );
+  const pendingAssistantResponse = sortedMessages.some((message, index) => {
+    if (message.role !== "ASSISTANT" || message.responseStatus !== "RUNNING") return false;
+    return !sortedMessages.slice(index + 1).some((candidate) => (
+      candidate.role === "ASSISTANT"
+      && candidate.threadId === message.threadId
+      && candidate.responseStatus === "COMPLETED"
+      && (candidate.parentMessageId === message.id || (candidate.sequenceNumber ?? 0) > (message.sequenceNumber ?? 0))
+    ));
+  });
   const pending = pendingUserResponse || pendingAssistantResponse;
   useEffect(() => {
     if (!thread?.id || !pending) return;
@@ -756,10 +766,21 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
             const content = (message.content ?? "").trim();
             const summary = (message.summary ?? "").trim();
             const sanitizedSummary = sanitizeConsoleSummary(summary);
+            const isSupersededRunningAssistant = (
+              message.role === "ASSISTANT"
+              && message.responseStatus === "RUNNING"
+              && sortedMessages.some((candidate) => (
+                candidate.role === "ASSISTANT"
+                && candidate.threadId === message.threadId
+                && candidate.responseStatus === "COMPLETED"
+                && (candidate.parentMessageId === message.id || (candidate.sequenceNumber ?? 0) > (message.sequenceNumber ?? 0))
+              ))
+            );
             const shouldShowThinking = (
               message.pendingPlaceholder
-              || (message.role === "ASSISTANT" && message.responseStatus === "RUNNING" && !content)
+              || (message.role === "ASSISTANT" && message.responseStatus === "RUNNING" && !content && !isSupersededRunningAssistant)
             );
+            if (isSupersededRunningAssistant && !content) return null;
 
             return (
               <ConsoleChatMessageRow key={message.id} role={message.role}>
@@ -849,6 +870,24 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
 function truncateConsoleSummary(value: string): string {
   const normalized = value.replace(/\s+/g, " ").trim();
   return normalized.length > 180 ? `${normalized.slice(0, 179)}…` : normalized;
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      reject(new Error(message));
+    }, timeoutMs);
+    promise.then(
+      (value) => {
+        window.clearTimeout(timeout);
+        resolve(value);
+      },
+      (error) => {
+        window.clearTimeout(timeout);
+        reject(error);
+      },
+    );
+  });
 }
 
 function upsertConsoleMessage(messages: ConsoleChatMessage[], message: ConsoleChatMessage): ConsoleChatMessage[] {
