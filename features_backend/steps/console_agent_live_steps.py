@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 from pathlib import Path
@@ -29,6 +30,10 @@ def step_run_live_console_agent_smoke_scenario(context, scenario: str) -> None:
         "update-research-assignment",
         "invalid-assignment-input",
         "discuss-reference",
+        "list-recent-references",
+        "get-specific-reference",
+        "knowledge-query-single-reference",
+        "knowledge-query-three-references",
         "rate-reference-quality",
         "review-reference-curation-accept",
         "review-reference-curation-reject",
@@ -136,3 +141,96 @@ def step_live_console_agent_smoke_should_include_no_structured_errors(context) -
 def step_live_console_agent_smoke_should_default_model(context, model: str) -> None:
     resolved = context.live_console_agent_smoke_result.get("model")
     assert resolved == model, f"Expected model {model}; saw {resolved}"
+
+
+@then('the live console agent model context should include "{needle}"')
+def step_live_console_agent_model_context_should_include(context, needle: str) -> None:
+    model_context = context.live_console_agent_smoke_result.get("modelContext")
+    assert model_context is not None, "Model context snapshot is missing from smoke result."
+    serialized = json.dumps(model_context, ensure_ascii=False)
+    assert needle in serialized, f'Expected "{needle}" in model context; saw {serialized}'
+
+
+@then('the live console agent model context should include role "{role}" containing "{needle}"')
+def step_live_console_agent_model_context_role_contains(context, role: str, needle: str) -> None:
+    model_context = context.live_console_agent_smoke_result.get("modelContext")
+    assert isinstance(model_context, dict), f"Model context must be an object; saw {type(model_context)}"
+    attempts = model_context.get("attempts")
+    assert isinstance(attempts, list), f"Model context attempts missing or invalid: {model_context}"
+    for attempt in attempts:
+        if not isinstance(attempt, dict):
+            continue
+        messages = attempt.get("messages")
+        if not isinstance(messages, list):
+            continue
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            if str(message.get("role") or "") != role:
+                continue
+            content = str(message.get("content") or "")
+            if needle in content:
+                return
+    raise AssertionError(f'Expected role "{role}" context containing "{needle}", saw {json.dumps(model_context, ensure_ascii=False)}')
+
+
+@then('the live console agent model context should include tool result entries in order "{first}" then "{second}"')
+def step_live_console_agent_model_context_tool_entries_in_order(context, first: str, second: str) -> None:
+    model_context = context.live_console_agent_smoke_result.get("modelContext")
+    assert isinstance(model_context, dict), f"Model context must be an object; saw {type(model_context)}"
+    attempts = model_context.get("attempts")
+    assert isinstance(attempts, list), f"Model context attempts missing or invalid: {model_context}"
+    for attempt in attempts:
+        if not isinstance(attempt, dict):
+            continue
+        messages = attempt.get("messages")
+        if not isinstance(messages, list):
+            continue
+        tool_contents: list[str] = []
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            if str(message.get("role") or "") != "tool":
+                continue
+            content = str(message.get("content") or "")
+            if content:
+                tool_contents.append(content)
+        if not tool_contents:
+            continue
+        first_index = next((idx for idx, text in enumerate(tool_contents) if first in text), None)
+        if first_index is None:
+            continue
+        second_index = next(
+            (idx for idx, text in enumerate(tool_contents[first_index + 1 :], start=first_index + 1) if second in text),
+            None,
+        )
+        if second_index is not None and first_index < second_index:
+            return
+    raise AssertionError(
+        f'Expected tool-result sequence "{first}" then "{second}" in model context; saw {json.dumps(model_context, ensure_ascii=False)}'
+    )
+
+
+@then('the live console agent model context should include execute_tactus tool call entries')
+def step_live_console_agent_model_context_should_include_execute_tactus_calls(context) -> None:
+    model_context = context.live_console_agent_smoke_result.get("modelContext")
+    assert isinstance(model_context, dict), f"Model context must be an object; saw {type(model_context)}"
+    attempts = model_context.get("attempts")
+    assert isinstance(attempts, list), f"Model context attempts missing or invalid: {model_context}"
+    for attempt in attempts:
+        if not isinstance(attempt, dict):
+            continue
+        messages = attempt.get("messages")
+        if not isinstance(messages, list):
+            continue
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            if str(message.get("role") or "") != "assistant":
+                continue
+            names = message.get("toolCallNames")
+            if isinstance(names, list) and any(str(name) == "execute_tactus" for name in names):
+                return
+    raise AssertionError(
+        f'Expected assistant tool call entries with "execute_tactus" in model context; saw {json.dumps(model_context, ensure_ascii=False)}'
+    )
