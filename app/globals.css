@@ -8286,7 +8286,9 @@ img {
   border-radius: 14px;
   font-size: 0.92rem;
   line-height: 1.42;
+  max-width: 100%;
   min-width: 0;
+  overflow: hidden;
   padding: 0.78rem 0.88rem;
   white-space: pre-wrap;
 }
@@ -8320,6 +8322,9 @@ img {
 
 .papyrus-console-message__markdown {
   display: block;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
   white-space: normal;
 }
 
@@ -8356,6 +8361,8 @@ img {
 .papyrus-console-message__markdown p,
 .papyrus-console-message__markdown li {
   margin: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .papyrus-console-message__markdown ul,
@@ -8375,7 +8382,9 @@ img {
   border-radius: 4px;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 0.84em;
+  overflow-wrap: anywhere;
   padding: 0 3px;
+  word-break: break-word;
 }
 
 .papyrus-console-message__code {
@@ -8385,10 +8394,14 @@ img {
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 0.84rem;
   line-height: 1.45;
+  max-width: 100%;
   margin: 0;
-  overflow-x: auto;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
   padding: 0.62rem 0.68rem;
-  white-space: pre;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .papyrus-console-message--user {
