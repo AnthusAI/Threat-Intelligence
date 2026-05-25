@@ -8172,10 +8172,40 @@ img {
   white-space: pre-wrap;
 }
 
+.papyrus-console-message > div::before {
+  content: none;
+}
+
+.papyrus-console-message__assistant-avatar {
+  background: transparent;
+  border-radius: 50%;
+  display: inline-flex;
+  height: 32px;
+  margin: 0 0 0 0.2rem;
+  overflow: hidden;
+  align-items: center;
+  justify-content: center;
+  vertical-align: top;
+  width: 32px;
+}
+
+.papyrus-console-message__assistant-avatar svg {
+  display: block;
+  height: 100%;
+  width: 100%;
+}
+
+.papyrus-console-message__assistant-avatar[data-tone="error"] {
+  background: transparent;
+}
+
 .papyrus-console-message__markdown {
-  display: grid;
-  gap: 0.42rem;
+  display: block;
   white-space: normal;
+}
+
+.papyrus-console-message__markdown > * + * {
+  margin-top: 0.42rem;
 }
 
 .papyrus-console-message__markdown h3,
@@ -8249,6 +8279,17 @@ img {
 
 .papyrus-console-message--user > div {
   background: rgb(var(--ink-rgb) / 0.11);
+}
+
+.papyrus-console-message--user > div::before {
+  background: rgb(var(--ink-solid-rgb) / 0.22);
+  border-radius: 50%;
+  content: "";
+  display: block;
+  float: right;
+  height: 1.28em;
+  margin: 0.04em 0.04em 0 0.58em;
+  width: 1.28em;
 }
 
 .papyrus-console-message__error,

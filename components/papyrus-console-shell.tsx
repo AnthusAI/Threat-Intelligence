@@ -1,5 +1,7 @@
 "use client";
 
+import type { BotAvatarState } from "anthus-vultus";
+import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { CheckIcon } from "lucide-react";
 import { gsap } from "gsap";
@@ -37,6 +39,7 @@ import { Suggestion, Suggestions } from "./ai-elements/suggestion";
 import { CONNECTION_STATE_CHANGE, ConnectionState } from "aws-amplify/data";
 import { Hub } from "aws-amplify/utils";
 import {
+  type ComponentType,
   createContext,
   type ReactNode,
   useCallback,
@@ -57,12 +60,39 @@ const CONSOLE_STARTER_SUGGESTIONS = [
 const CONSOLE_THREAD_ANCHOR_KEY = "site#papyrus";
 const CONSOLE_NEWSROOM_FEED_KEY = "consoleChat";
 const CONSOLE_MESSAGE_KIND = "console_chat_turn";
+const CONSOLE_TOOL_CALL_KIND = "console_tool_call";
+const CONSOLE_TOOL_RESULT_KIND = "console_tool_result";
 const CONSOLE_MESSAGE_DOMAIN = "conversation";
 const CONSOLE_SEMANTIC_LAYER = "chat_detail";
 const CONSOLE_SEARCH_VISIBILITY = "explicit";
 const CONSOLE_RESPONSE_TARGET = process.env.NEXT_PUBLIC_PAPYRUS_CONSOLE_RESPONSE_TARGET?.trim() || "cloud";
 const DEFAULT_CONSOLE_MODEL = process.env.NEXT_PUBLIC_PAPYRUS_CONSOLE_MODEL?.trim() || "gpt-5.4-mini";
 const CONSOLE_SELECT_THREAD_EVENT = "papyrus:console-select-thread";
+const ASSISTANT_AVATAR_SIZE_PX = 32;
+const ASSISTANT_AVATAR_DEFAULT_SHADOW_COLOR = "rgb(var(--ink-solid-rgb) / var(--ink-display-alpha))";
+const ASSISTANT_AVATAR_DEFAULT_LIGHT_COLOR = "rgb(var(--paper-rgb) / 1)";
+const ASSISTANT_AVATAR_ERROR_SHADOW_COLOR = ASSISTANT_AVATAR_DEFAULT_SHADOW_COLOR;
+const ASSISTANT_AVATAR_ERROR_LIGHT_COLOR = ASSISTANT_AVATAR_DEFAULT_LIGHT_COLOR;
+type VultusBotAvatarProps = {
+  ariaLabel?: string;
+  lightColor?: string;
+  shadowColor?: string;
+  size?: number;
+  state?: BotAvatarState;
+  transitionDurationSeconds?: number;
+};
+const VULTUS_BOT_AVATAR_FALLBACK: ComponentType<VultusBotAvatarProps> = () => null;
+const VultusBotAvatar = dynamic<VultusBotAvatarProps>(
+  () => (
+    import("anthus-vultus")
+      .then((module) => module.BotAvatar as ComponentType<VultusBotAvatarProps>)
+      .catch((error) => {
+        console.error("[PapyrusConsole] Failed to load anthus-vultus BotAvatar", error);
+        return VULTUS_BOT_AVATAR_FALLBACK;
+      })
+  ),
+  { ssr: false },
+);
 const CONSOLE_MODEL_OPTIONS = [
   { value: "gpt-5.5", label: "GPT 5.5", provider: "openai" },
   { value: "gpt-5.4", label: "GPT 5.4", provider: "openai" },
@@ -86,6 +116,8 @@ type PapyrusConsoleContextValue = {
 type DisplayConsoleMessage = ConsoleChatMessage & {
   pendingPlaceholder?: boolean;
 };
+
+type AssistantAvatarTone = "default" | "error";
 
 const PapyrusConsoleContext = createContext<PapyrusConsoleContextValue | null>(null);
 
@@ -708,6 +740,29 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
       },
     ];
   }, [latestAwaitingAssistantUserMessage, sortedMessages]);
+  const isSupersededRunningAssistantMessage = useCallback((
+    message: DisplayConsoleMessage,
+    trimmedContent: string,
+  ) => (
+    message.role === "ASSISTANT"
+    && message.responseStatus === "RUNNING"
+    && sortedMessages.some((candidate) => (
+      candidate.role === "ASSISTANT"
+      && candidate.threadId === message.threadId
+      && candidate.responseStatus === "COMPLETED"
+      && (candidate.parentMessageId === message.id || (candidate.sequenceNumber ?? 0) > (message.sequenceNumber ?? 0))
+    ))
+    && !trimmedContent
+  ), [sortedMessages]);
+  const latestVisibleAssistantMessageId = useMemo(() => {
+    let latest: string | null = null;
+    for (const message of displayMessages) {
+      const content = (message.content ?? "").trim();
+      if (isSupersededRunningAssistantMessage(message, content)) continue;
+      if (message.role === "ASSISTANT") latest = message.id;
+    }
+    return latest;
+  }, [displayMessages, isSupersededRunningAssistantMessage]);
   const streamingAutoStickSignal = useMemo(() => {
     const activeStreamingAssistant = [...displayMessages]
       .reverse()
@@ -766,21 +821,14 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
             const content = (message.content ?? "").trim();
             const summary = (message.summary ?? "").trim();
             const sanitizedSummary = sanitizeConsoleSummary(summary);
-            const isSupersededRunningAssistant = (
-              message.role === "ASSISTANT"
-              && message.responseStatus === "RUNNING"
-              && sortedMessages.some((candidate) => (
-                candidate.role === "ASSISTANT"
-                && candidate.threadId === message.threadId
-                && candidate.responseStatus === "COMPLETED"
-                && (candidate.parentMessageId === message.id || (candidate.sequenceNumber ?? 0) > (message.sequenceNumber ?? 0))
-              ))
-            );
+            const isSupersededRunningAssistant = isSupersededRunningAssistantMessage(message, content);
+            const showAssistantAvatar = message.role === "ASSISTANT" && message.id === latestVisibleAssistantMessageId;
+            const assistantAvatar = showAssistantAvatar ? resolveAssistantAvatarPresentation(message, content) : null;
             const shouldShowThinking = (
               message.pendingPlaceholder
               || (message.role === "ASSISTANT" && message.responseStatus === "RUNNING" && !content && !isSupersededRunningAssistant)
             );
-            if (isSupersededRunningAssistant && !content) return null;
+            if (isSupersededRunningAssistant) return null;
 
             return (
               <ConsoleChatMessageRow key={message.id} role={message.role}>
@@ -790,6 +838,18 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
                   ) : <ConsoleChatMessageContent role={message.role} text={content || sanitizedSummary} />}
                 </div>
                 {message.responseStatus === "FAILED" ? <span className="papyrus-console-message__error">{message.responseError ?? "Responder failed"}</span> : null}
+                {assistantAvatar ? (
+                  <span className="papyrus-console-message__assistant-avatar" data-tone={assistantAvatar.tone}>
+                    <VultusBotAvatar
+                      ariaLabel={assistantAvatar.ariaLabel}
+                      lightColor={assistantAvatar.tone === "error" ? ASSISTANT_AVATAR_ERROR_LIGHT_COLOR : ASSISTANT_AVATAR_DEFAULT_LIGHT_COLOR}
+                      shadowColor={assistantAvatar.tone === "error" ? ASSISTANT_AVATAR_ERROR_SHADOW_COLOR : ASSISTANT_AVATAR_DEFAULT_SHADOW_COLOR}
+                      size={ASSISTANT_AVATAR_SIZE_PX}
+                      state={assistantAvatar.state}
+                      transitionDurationSeconds={0.35}
+                    />
+                  </span>
+                ) : null}
               </ConsoleChatMessageRow>
             );
           })}
@@ -820,7 +880,7 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
             aria-label="Console message"
             disabled={sending}
             onChange={(event) => setDraft(event.target.value)}
-            placeholder="Ask about this edition, newsroom, or knowledge graph…"
+            placeholder="Write a message..."
             rows={3}
             value={draft}
           />
@@ -942,6 +1002,52 @@ function sanitizeConsoleSummary(summary: string): string {
   if (lowered === "thinking...") return "";
   if (lowered.endsWith("responding.")) return "";
   return summary;
+}
+
+function resolveAssistantAvatarPresentation(
+  message: DisplayConsoleMessage,
+  trimmedContent: string,
+): { ariaLabel: string; state: BotAvatarState; tone: AssistantAvatarTone } {
+  if (message.responseStatus === "FAILED") {
+    return {
+      ariaLabel: "Assistant avatar in error state",
+      state: "neutral",
+      tone: "error",
+    };
+  }
+  if (message.messageKind === CONSOLE_TOOL_CALL_KIND) {
+    return {
+      ariaLabel: "Assistant avatar while calling tools",
+      state: "toolCalling",
+      tone: "default",
+    };
+  }
+  if (message.messageKind === CONSOLE_TOOL_RESULT_KIND) {
+    return {
+      ariaLabel: "Assistant avatar while handling tool results",
+      state: "toolResponse",
+      tone: "default",
+    };
+  }
+  if (message.pendingPlaceholder || (message.responseStatus === "RUNNING" && !trimmedContent)) {
+    return {
+      ariaLabel: "Assistant avatar while thinking",
+      state: "thinking",
+      tone: "default",
+    };
+  }
+  if (message.responseStatus === "RUNNING" && trimmedContent) {
+    return {
+      ariaLabel: "Assistant avatar while speaking",
+      state: "speakingOpen",
+      tone: "default",
+    };
+  }
+  return {
+    ariaLabel: "Assistant avatar in neutral state",
+    state: "neutral",
+    tone: "default",
+  };
 }
 
 function ConsoleChatMessageContent({ role, text }: { role: string | null | undefined; text: string }) {
@@ -1123,47 +1229,42 @@ function ConsoleChatMessageRow({
 }
 
 function ConsoleStreamingAutoStick({ active, streamSignal }: { active: boolean; streamSignal: string | null }) {
-  const { isAtBottom, scrollRef, scrollToBottom } = useStickToBottomContext();
-  const wasAtBottomRef = useRef(true);
+  const { scrollRef, scrollToBottom } = useStickToBottomContext();
   const previousSignalRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    wasAtBottomRef.current = isAtBottom;
-    if (!isAtBottom && scrollRef.current) {
-      gsap.killTweensOf(scrollRef.current);
-    }
-  }, [isAtBottom, scrollRef]);
-
-  useEffect(() => {
-    return () => {
-      if (scrollRef.current) gsap.killTweensOf(scrollRef.current);
-    };
-  }, [scrollRef]);
+  const snapToBottom = useCallback(() => {
+    void scrollToBottom({ animation: "instant" });
+    const scrollElement = scrollRef.current;
+    if (!scrollElement) return;
+    scrollElement.scrollTop = Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight);
+  }, [scrollRef, scrollToBottom]);
 
   useEffect(() => {
     if (!active || !streamSignal) return;
     if (previousSignalRef.current === streamSignal) return;
-    const shouldStick = wasAtBottomRef.current;
     previousSignalRef.current = streamSignal;
-    if (!shouldStick) return;
-    if (prefersReducedMotion()) {
-      void scrollToBottom({ animation: "instant" });
-      return;
-    }
-    const scrollElement = scrollRef.current;
-    if (!scrollElement) {
-      void scrollToBottom({ animation: "instant" });
-      return;
-    }
-    gsap.killTweensOf(scrollElement);
-    const targetScrollTop = Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight);
-    gsap.to(scrollElement, {
-      scrollTop: targetScrollTop,
-      duration: 0.18,
-      ease: "power2.out",
-      overwrite: "auto",
+
+    snapToBottom();
+    const frame = window.requestAnimationFrame(() => {
+      snapToBottom();
     });
-  }, [active, scrollRef, scrollToBottom, streamSignal]);
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [active, snapToBottom, streamSignal]);
+
+  useEffect(() => {
+    if (!active) return;
+    let frame = 0;
+    const pin = () => {
+      snapToBottom();
+      frame = window.requestAnimationFrame(pin);
+    };
+    pin();
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [active, snapToBottom]);
 
   useEffect(() => {
     if (!active) previousSignalRef.current = null;
