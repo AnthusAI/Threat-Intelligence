@@ -786,14 +786,20 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
     ))
     && !trimmedContent
   ), [sortedMessages]);
-  const latestVisibleAssistantMessageId = useMemo(() => {
-    let latest: string | null = null;
+  const latestVisibleAvatarAnchorMessageId = useMemo(() => {
+    let latestAssistantMessageId: string | null = null;
+    let latestToolSignalMessageId: string | null = null;
     for (const message of displayMessages) {
       const content = (message.content ?? "").trim();
       if (isSupersededRunningAssistantMessage(message, content)) continue;
-      if (message.role === "ASSISTANT") latest = message.id;
+      if (message.role === "ASSISTANT") {
+        latestAssistantMessageId = message.id;
+        if (message.messageKind === CONSOLE_TOOL_CALL_KIND || message.messageKind === CONSOLE_TOOL_RESULT_KIND) {
+          latestToolSignalMessageId = message.id;
+        }
+      }
     }
-    return latest;
+    return latestToolSignalMessageId ?? latestAssistantMessageId;
   }, [displayMessages, isSupersededRunningAssistantMessage]);
   const streamingAutoStickSignal = useMemo(() => {
     const activeStreamingAssistant = [...displayMessages]
@@ -854,7 +860,7 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
             const summary = (message.summary ?? "").trim();
             const sanitizedSummary = sanitizeConsoleSummary(summary);
             const isSupersededRunningAssistant = isSupersededRunningAssistantMessage(message, content);
-            const showAssistantAvatar = message.role === "ASSISTANT" && message.id === latestVisibleAssistantMessageId;
+            const showAssistantAvatar = message.role === "ASSISTANT" && message.id === latestVisibleAvatarAnchorMessageId;
             const assistantAvatar = showAssistantAvatar ? resolveAssistantAvatarPresentation(message, content) : null;
             const shouldShowThinking = (
               message.pendingPlaceholder
