@@ -731,17 +731,7 @@ class PapyrusRuntimeModule:
 
 def _wrap_tactus_snippet(tactus: str) -> str:
     helper_lines = [
-        "local __papyrus_module = papyrus",
-        "if __papyrus_module == nil then",
-        '  local __papyrus_ok, __papyrus_loaded = pcall(require, "papyrus")',
-        "  if __papyrus_ok then",
-        "    __papyrus_module = __papyrus_loaded",
-        "  end",
-        "end",
-        "if __papyrus_module == nil then",
-        '  error("papyrus runtime module unavailable")',
-        "end",
-        "local papyrus = __papyrus_module",
+        'local papyrus = require("papyrus")',
         "local __papyrus_last_result = nil",
         "local function __papyrus_capture(value)",
         "  __papyrus_last_result = value",
@@ -807,34 +797,6 @@ def _run_async(coro: Any) -> Any:
     if error:
         raise error["error"]
     return result.get("value")
-
-
-def _attach_papyrus_runtime(runtime: Any, papyrus: Any) -> None:
-    register = getattr(runtime, "register_python_module", None)
-    if callable(register):
-        register("papyrus", papyrus)
-        return
-
-    original_inject = getattr(runtime, "_inject_primitives", None)
-    if not callable(original_inject):
-        raise RuntimeError(
-            "execute_tactus requires a Tactus runtime with register_python_module or _inject_primitives support."
-        )
-
-    def _wrapped_inject_primitives() -> Any:
-        result = original_inject()
-        sandbox = getattr(runtime, "lua_sandbox", None)
-        inject_primitive = getattr(sandbox, "inject_primitive", None)
-        if callable(inject_primitive):
-            inject_primitive("papyrus", papyrus)
-            return result
-        set_global = getattr(sandbox, "set_global", None)
-        if callable(set_global):
-            set_global("papyrus", papyrus)
-            return result
-        raise RuntimeError("Tactus Lua sandbox does not support papyrus module injection.")
-
-    runtime._inject_primitives = _wrapped_inject_primitives
 
 
 def _lua_string(value: str) -> str:
@@ -1283,7 +1245,11 @@ def execute_tactus(tactus: str) -> dict[str, Any]:
                     run_id=trace_id,
                     source_file_path="<papyrus execute_tactus>",
                 )
-                _attach_papyrus_runtime(runtime, papyrus)
+                if not hasattr(runtime, "register_python_module"):
+                    raise RuntimeError(
+                        "execute_tactus requires TactusRuntime.register_python_module; update tactus."
+                    )
+                runtime.register_python_module("papyrus", papyrus)
                 return await runtime.execute(_wrap_tactus_snippet(tactus), context={}, format="lua")
 
         runtime_result = _run_async(run())
