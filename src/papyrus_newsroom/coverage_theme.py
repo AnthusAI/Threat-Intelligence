@@ -2786,12 +2786,14 @@ def _graphql(query: str, variables: dict[str, Any]) -> dict[str, Any]:
     if not token:
         raise RuntimeError("PAPYRUS_GRAPHQL_JWT is required")
     auth_prefix = os.environ.get("PAPYRUS_GRAPHQL_AUTH_PREFIX", "PapyrusJwt").strip()
+    sanitized_token = re.sub(r"^Bearer\s+", "", token, flags=re.IGNORECASE)
+    auth_header = f"{auth_prefix} {sanitized_token}" if auth_prefix else sanitized_token
     request = urllib.request.Request(
         endpoint,
         data=json.dumps({"query": query, "variables": variables}).encode("utf-8"),
         headers={
             "Content-Type": "application/json",
-            "Authorization": f"{auth_prefix} {re.sub(r'^Bearer\\s+', '', token, flags=re.IGNORECASE)}" if auth_prefix else token,
+            "Authorization": auth_header,
         },
         method="POST",
     )

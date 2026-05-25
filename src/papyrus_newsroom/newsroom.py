@@ -3179,7 +3179,8 @@ def _storage_bucket_name() -> str | None:
 
 
 def _lambda_auth_token(token: str) -> str:
-    return f"PapyrusJwt {re.sub(r'^Bearer\s+', '', token.strip(), flags=re.IGNORECASE)}"
+    sanitized = re.sub(r"^Bearer\s+", "", token.strip(), flags=re.IGNORECASE)
+    return f"PapyrusJwt {sanitized}"
 
 
 def _resolve_corpus(corpus_key: str, config_path: str = "") -> dict[str, Any]:
