@@ -731,7 +731,10 @@ class PapyrusRuntimeModule:
 
 def _wrap_tactus_snippet(tactus: str) -> str:
     helper_lines = [
-        'local papyrus = require("papyrus")',
+        "local papyrus = papyrus",
+        "if papyrus == nil then",
+        '  error("papyrus runtime module unavailable")',
+        "end",
         "local __papyrus_last_result = nil",
         "local function __papyrus_capture(value)",
         "  __papyrus_last_result = value",
@@ -797,6 +800,23 @@ def _run_async(coro: Any) -> Any:
     if error:
         raise error["error"]
     return result.get("value")
+
+
+def _attach_papyrus_runtime(runtime: Any, papyrus: Any) -> None:
+    original_inject = getattr(runtime, "_inject_primitives", None)
+    if not callable(original_inject):
+        raise RuntimeError("execute_tactus requires TactusRuntime._inject_primitives support.")
+
+    def _wrapped_inject_primitives() -> Any:
+        result = original_inject()
+        sandbox = getattr(runtime, "lua_sandbox", None)
+        inject_primitive = getattr(sandbox, "inject_primitive", None)
+        if not callable(inject_primitive):
+            raise RuntimeError("execute_tactus requires Lua sandbox inject_primitive support.")
+        inject_primitive("papyrus", papyrus)
+        return result
+
+    runtime._inject_primitives = _wrapped_inject_primitives
 
 
 def _lua_string(value: str) -> str:
@@ -1245,11 +1265,7 @@ def execute_tactus(tactus: str) -> dict[str, Any]:
                     run_id=trace_id,
                     source_file_path="<papyrus execute_tactus>",
                 )
-                if not hasattr(runtime, "register_python_module"):
-                    raise RuntimeError(
-                        "execute_tactus requires TactusRuntime.register_python_module; update tactus."
-                    )
-                runtime.register_python_module("papyrus", papyrus)
+                _attach_papyrus_runtime(runtime, papyrus)
                 return await runtime.execute(_wrap_tactus_snippet(tactus), context={}, format="lua")
 
         runtime_result = _run_async(run())
