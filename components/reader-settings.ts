@@ -7,10 +7,12 @@ import { configureAmplifyClient } from "./amplify-client-provider";
 import { isUnauthenticatedError, loadReaderSessionSnapshot } from "./reader-auth-state";
 
 export type ReaderThemeSetting = "system" | "light" | "dark";
+export type ReaderMotionSetting = "standard" | "low";
 
 export type ReaderSettings = {
   presentation: EditionPresentationFormat;
   theme: ReaderThemeSetting;
+  motion: ReaderMotionSetting;
 };
 
 export type ReaderSettingsSource = "local" | "cloud";
@@ -42,6 +44,7 @@ const SETTINGS_EVENT = "papyrus:settings-changed";
 export const DEFAULT_READER_SETTINGS: ReaderSettings = {
   presentation: "newspaper",
   theme: "system",
+  motion: "standard",
 };
 
 export const PRESENTATION_OPTIONS: Array<{
@@ -73,6 +76,14 @@ export const THEME_OPTIONS: Array<{
   { value: "system", label: "System" },
   { value: "light", label: "Light" },
   { value: "dark", label: "Dark" },
+];
+
+export const MOTION_OPTIONS: Array<{
+  value: ReaderMotionSetting;
+  label: string;
+}> = [
+  { value: "standard", label: "Standard" },
+  { value: "low", label: "Low Motion" },
 ];
 
 export function readLocalReaderSettings(): ReaderSettings {
@@ -218,6 +229,7 @@ export function normalizeReaderSettings(value: unknown): ReaderSettings {
   return {
     presentation: normalizePresentation(candidate.presentation),
     theme: normalizeTheme(candidate.theme),
+    motion: normalizeMotion(candidate.motion),
   };
 }
 
@@ -238,6 +250,10 @@ function normalizePresentation(value: unknown): EditionPresentationFormat {
 
 function normalizeTheme(value: unknown): ReaderThemeSetting {
   return value === "light" || value === "dark" || value === "system" ? value : DEFAULT_READER_SETTINGS.theme;
+}
+
+function normalizeMotion(value: unknown): ReaderMotionSetting {
+  return value === "low" || value === "standard" ? value : DEFAULT_READER_SETTINGS.motion;
 }
 
 function readPresentationValue(value: string | null | undefined): EditionPresentationFormat | null {

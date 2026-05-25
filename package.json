@@ -57,7 +57,7 @@
     "@chenglou/pretext": "^0.0.7",
     "@tailwindcss/postcss": "^4.3.0",
     "ai": "^6.0.191",
-    "anthus-vultus": "github:AnthusAI/Vultus#c3930fd",
+    "anthus-vultus": "github:AnthusAI/Vultus#af98d57",
     "aws-amplify": "^6.17.0",
     "aws-cdk-lib": "^2.257.0",
     "class-variance-authority": "^0.7.1",

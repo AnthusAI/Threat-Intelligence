@@ -19,6 +19,7 @@ import {
 import { buildNewsroomKnowledgeQueryInput, type NewsroomKnowledgeQueryTarget } from "../lib/newsroom-knowledge-query-request";
 import { runNewsroomKnowledgeQuery } from "./news-desk-taxonomy-client";
 import { loadReaderSessionSnapshot, type ReaderSessionSnapshot } from "./reader-auth-state";
+import { readLocalReaderSettings, subscribeReaderSettingsChanges, type ReaderMotionSetting } from "./reader-settings";
 import { Conversation, ConversationContent, ConversationScrollButton } from "./ai-elements/conversation";
 import {
   ModelSelector,
@@ -76,6 +77,7 @@ const ASSISTANT_AVATAR_ERROR_LIGHT_COLOR = ASSISTANT_AVATAR_DEFAULT_LIGHT_COLOR;
 type VultusBotAvatarProps = {
   ariaLabel?: string;
   lightColor?: string;
+  neutralIdleMode?: "bored-random" | "static";
   shadowColor?: string;
   size?: number;
   state?: BotAvatarState;
@@ -428,6 +430,7 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
   const [error, setError] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState(DEFAULT_CONSOLE_MODEL);
   const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
+  const [motionSetting, setMotionSetting] = useState<ReaderMotionSetting>("standard");
   const hasLoadedRef = useRef(false);
   const activeThreadIdRef = useRef<string | null>(null);
   const threadRef = useRef<ConsoleChatThread | null>(null);
@@ -435,6 +438,13 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
   useEffect(() => {
     threadRef.current = thread;
   }, [thread]);
+
+  useEffect(() => {
+    setMotionSetting(readLocalReaderSettings().motion);
+    return subscribeReaderSettingsChanges((settings) => {
+      setMotionSetting(settings.motion);
+    });
+  }, []);
 
   const sortedMessages = useMemo(() => (
     [...messages].sort((left, right) => (left.sequenceNumber ?? 0) - (right.sequenceNumber ?? 0) || left.createdAt.localeCompare(right.createdAt))
@@ -774,7 +784,7 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
   }, [latestAwaitingAssistantUserMessage, sortedMessages]);
   const isSupersededRunningAssistantMessage = useCallback((
     message: DisplayConsoleMessage,
-    trimmedContent: string,
+    _trimmedContent: string,
   ) => (
     message.role === "ASSISTANT"
     && message.responseStatus === "RUNNING"
@@ -784,7 +794,6 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
       && candidate.responseStatus === "COMPLETED"
       && (candidate.parentMessageId === message.id || (candidate.sequenceNumber ?? 0) > (message.sequenceNumber ?? 0))
     ))
-    && !trimmedContent
   ), [sortedMessages]);
   const latestVisibleAvatarAnchorMessageId = useMemo(() => {
     let latestAssistantMessageId: string | null = null;
@@ -861,7 +870,9 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
             const sanitizedSummary = sanitizeConsoleSummary(summary);
             const isSupersededRunningAssistant = isSupersededRunningAssistantMessage(message, content);
             const showAssistantAvatar = message.role === "ASSISTANT" && message.id === latestVisibleAvatarAnchorMessageId;
-            const assistantAvatar = showAssistantAvatar ? resolveAssistantAvatarPresentation(message, content) : null;
+            const assistantAvatar = showAssistantAvatar
+              ? resolveAssistantAvatarPresentation(message, content, motionSetting === "low", pending)
+              : null;
             const shouldShowThinking = (
               message.pendingPlaceholder
               || (message.role === "ASSISTANT" && message.responseStatus === "RUNNING" && !content && !isSupersededRunningAssistant)
@@ -881,6 +892,7 @@ function ConsolePanel({ actorLabel, onClose }: { actorLabel: string; onClose: ()
                     <VultusBotAvatar
                       ariaLabel={assistantAvatar.ariaLabel}
                       lightColor={assistantAvatar.tone === "error" ? ASSISTANT_AVATAR_ERROR_LIGHT_COLOR : ASSISTANT_AVATAR_DEFAULT_LIGHT_COLOR}
+                      neutralIdleMode={assistantAvatar.neutralIdleMode}
                       shadowColor={assistantAvatar.tone === "error" ? ASSISTANT_AVATAR_ERROR_SHADOW_COLOR : ASSISTANT_AVATAR_DEFAULT_SHADOW_COLOR}
                       size={ASSISTANT_AVATAR_SIZE_PX}
                       state={assistantAvatar.state}
@@ -1045,25 +1057,44 @@ function sanitizeConsoleSummary(summary: string): string {
 function resolveAssistantAvatarPresentation(
   message: DisplayConsoleMessage,
   trimmedContent: string,
-): { ariaLabel: string; state: BotAvatarState; tone: AssistantAvatarTone } {
+  forceLowMotion: boolean,
+  hasActiveResponse: boolean,
+): { ariaLabel: string; neutralIdleMode?: "bored-random" | "static"; state: BotAvatarState; tone: AssistantAvatarTone } {
+  if (forceLowMotion) {
+    return {
+      ariaLabel: "Assistant avatar in low-motion mode",
+      neutralIdleMode: "static",
+      state: "neutral",
+      tone: message.responseStatus === "FAILED" ? "error" : "default",
+    };
+  }
+
   if (message.responseStatus === "FAILED") {
     return {
       ariaLabel: "Assistant avatar in error state",
+      neutralIdleMode: "static",
       state: "neutral",
       tone: "error",
     };
   }
-  if (message.messageKind === CONSOLE_TOOL_CALL_KIND) {
+  if (hasActiveResponse && message.messageKind === CONSOLE_TOOL_CALL_KIND) {
     return {
       ariaLabel: "Assistant avatar while calling tools",
       state: "toolCalling",
       tone: "default",
     };
   }
-  if (message.messageKind === CONSOLE_TOOL_RESULT_KIND) {
+  if (hasActiveResponse && message.messageKind === CONSOLE_TOOL_RESULT_KIND) {
     return {
       ariaLabel: "Assistant avatar while handling tool results",
       state: "toolResponse",
+      tone: "default",
+    };
+  }
+  if (message.responseStatus === "RUNNING" && !hasActiveResponse) {
+    return {
+      ariaLabel: "Assistant avatar in neutral state",
+      state: "neutral",
       tone: "default",
     };
   }
