@@ -36,6 +36,7 @@ const USER_POOL_AUTH_MODE = "userPool";
 const SETTINGS_STORAGE_KEY = "papyrus:reader-settings";
 const LEGACY_PRESENTATION_STORAGE_KEY = "papyrus:presentation";
 const LEGACY_PRESENTATION_COOKIE = "papyrus-presentation";
+const LEGACY_COOKIE_CLEANUP_STORAGE_KEY = "papyrus:legacy-presentation-cookie-cleaned";
 const SETTINGS_EVENT = "papyrus:settings-changed";
 
 export const DEFAULT_READER_SETTINGS: ReaderSettings = {
@@ -76,9 +77,9 @@ export const THEME_OPTIONS: Array<{
 
 export function readLocalReaderSettings(): ReaderSettings {
   if (typeof window === "undefined") return DEFAULT_READER_SETTINGS;
+  cleanupLegacyPresentationCookie();
   const parsed = parseStoredSettings(window.localStorage.getItem(SETTINGS_STORAGE_KEY));
-  const legacyPresentation = readPresentationValue(window.localStorage.getItem(LEGACY_PRESENTATION_STORAGE_KEY))
-    ?? readPresentationValue(readCookie(LEGACY_PRESENTATION_COOKIE));
+  const legacyPresentation = readPresentationValue(window.localStorage.getItem(LEGACY_PRESENTATION_STORAGE_KEY));
   return normalizeReaderSettings({
     ...parsed,
     presentation: parsed?.presentation ?? legacyPresentation ?? DEFAULT_READER_SETTINGS.presentation,
@@ -87,10 +88,10 @@ export function readLocalReaderSettings(): ReaderSettings {
 
 export function writeLocalReaderSettings(settings: ReaderSettings) {
   if (typeof window === "undefined") return;
+  cleanupLegacyPresentationCookie();
   const normalized = normalizeReaderSettings(settings);
   window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(normalized));
   window.localStorage.setItem(LEGACY_PRESENTATION_STORAGE_KEY, normalized.presentation);
-  document.cookie = `${LEGACY_PRESENTATION_COOKIE}=${normalized.presentation}; path=/; max-age=31536000; samesite=lax`;
   applyReaderTheme(normalized.theme);
   window.dispatchEvent(new CustomEvent(SETTINGS_EVENT, { detail: normalized }));
 }
@@ -243,13 +244,11 @@ function readPresentationValue(value: string | null | undefined): EditionPresent
   return value === "newspaper" || value === "blog" || value === "magazine" ? value : null;
 }
 
-function readCookie(name: string): string | null {
-  const prefix = `${name}=`;
-  return document.cookie
-    .split(";")
-    .map((entry) => entry.trim())
-    .find((entry) => entry.startsWith(prefix))
-    ?.slice(prefix.length) ?? null;
+function cleanupLegacyPresentationCookie() {
+  if (typeof document === "undefined" || typeof window === "undefined") return;
+  if (window.localStorage.getItem(LEGACY_COOKIE_CLEANUP_STORAGE_KEY) === "true") return;
+  document.cookie = `${LEGACY_PRESENTATION_COOKIE}=; path=/; max-age=0; samesite=lax`;
+  window.localStorage.setItem(LEGACY_COOKIE_CLEANUP_STORAGE_KEY, "true");
 }
 
 function updateThemeMeta(theme: ReaderThemeSetting) {

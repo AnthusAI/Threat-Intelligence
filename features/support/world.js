@@ -5,7 +5,7 @@ setDefaultTimeout(60_000);
 
 class PapyrusWorld {
   constructor() {
-    this.baseUrl = process.env.PAPYRUS_BASE_URL ?? "http://localhost:3001";
+    this.baseUrl = process.env.PAPYRUS_BASE_URL ?? "http://127.0.0.1:3001";
     this.browser = null;
     this.page = null;
     this.consoleErrors = [];

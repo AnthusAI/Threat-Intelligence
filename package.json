@@ -5,6 +5,7 @@
   "description": "A Pretext-powered responsive newspaper layout lab.",
   "scripts": {
     "dev": "next dev",
+    "dev:127": "next dev --hostname 127.0.0.1",
     "build": "next build",
     "start": "next start",
     "favicon:generate": "node scripts/favicon/generate-favicon.mjs",
