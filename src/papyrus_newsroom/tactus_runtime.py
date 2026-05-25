@@ -824,13 +824,13 @@ def _attach_papyrus_runtime(runtime: Any, papyrus: Any) -> None:
     def _wrapped_inject_primitives() -> Any:
         result = original_inject()
         sandbox = getattr(runtime, "lua_sandbox", None)
-        set_global = getattr(sandbox, "set_global", None)
-        if callable(set_global):
-            set_global("papyrus", papyrus)
-            return result
         inject_primitive = getattr(sandbox, "inject_primitive", None)
         if callable(inject_primitive):
             inject_primitive("papyrus", papyrus)
+            return result
+        set_global = getattr(sandbox, "set_global", None)
+        if callable(set_global):
+            set_global("papyrus", papyrus)
             return result
         raise RuntimeError("Tactus Lua sandbox does not support papyrus module injection.")
 
