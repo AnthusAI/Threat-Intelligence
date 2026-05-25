@@ -191,7 +191,7 @@ type NewsroomCardRecord = {
   body?: ReactNode;
   dataAttributes?: Record<string, boolean | number | string | undefined>;
   href?: string;
-  kicker: ReactNode;
+  kicker?: ReactNode;
   meta: ReactNode[];
   span?: NewsroomCardSpan;
   stamp?: ReactNode;
@@ -3632,14 +3632,16 @@ function withNewsroomOverviewCardLayout(card: NewsroomCardRecord, index: number,
 function NewsroomCardContents({ card }: { card: NewsroomCardRecord }) {
   return (
     <>
-      <span className="newsroom-card__kicker">{card.kicker}</span>
+      {card.kicker ? <span className="newsroom-card__kicker">{card.kicker}</span> : null}
       <strong className="newsroom-card__title">{card.title}</strong>
       {card.body ? <span className="newsroom-card__body">{card.body}</span> : null}
-      <span className="newsroom-card__meta">
-        {card.meta.map((entry, index) => (
-          <span key={`${card.id}-meta-${index}`}>{entry}</span>
-        ))}
-      </span>
+      {card.meta.length ? (
+        <span className="newsroom-card__meta">
+          {card.meta.map((entry, index) => (
+            <span key={`${card.id}-meta-${index}`}>{entry}</span>
+          ))}
+        </span>
+      ) : null}
       {card.stamp ? <span className="newsroom-card__stamp">{card.stamp}</span> : null}
     </>
   );
@@ -7670,7 +7672,11 @@ function SemanticDetailPanel({
                 {messages.slice(0, 4).map((message) => (
                   <div className="news-desk-detail-line" key={message.id}>
                     <span>{message.messageKind}</span>
-                    <strong>{message.summary ?? "Stored message payload"}</strong>
+                    <strong>
+                      {message.messageKind === "reference_curation"
+                        ? "Canonical summary is stored on the linked reference metadata attachment."
+                        : (message.summary ?? "Stored message payload")}
+                    </strong>
                   </div>
                 ))}
               </div>
@@ -7683,8 +7689,14 @@ function SemanticDetailPanel({
   );
 }
 
-function useModelPayloads(ownerKind: string, ownerId: string | null | undefined, roles: string[] = []) {
+function useModelPayloads(
+  ownerKind: string,
+  ownerId: string | null | undefined,
+  roles: string[] = [],
+  options: { refreshIntervalMs?: number } = {},
+) {
   const rolesKey = roles.join("|");
+  const refreshIntervalMs = Math.max(0, Number(options.refreshIntervalMs ?? 0) || 0);
   const [state, setState] = useState<{
     error: string | null;
     loading: boolean;
@@ -7698,33 +7710,61 @@ function useModelPayloads(ownerKind: string, ownerId: string | null | undefined,
     }
 
     let active = true;
-    setState((current) => ({ ...current, error: null, loading: true }));
-    loadModelPayloadsForOwner(ownerKind, ownerId, rolesKey ? rolesKey.split("|") : undefined)
-      .then((payloads) => {
-        if (active) setState({ error: null, loading: false, payloads });
-      })
-      .catch((error) => {
-        if (active) {
-          setState({
-            error: error instanceof Error ? error.message : "Could not load attached payloads.",
-            loading: false,
-            payloads: [],
-          });
-        }
-      });
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+    const runLoad = (showLoading: boolean) => {
+      if (showLoading) setState((current) => ({ ...current, error: null, loading: true }));
+      return loadModelPayloadsForOwner(ownerKind, ownerId, rolesKey ? rolesKey.split("|") : undefined)
+        .then((payloads) => {
+          if (active) setState({ error: null, loading: false, payloads });
+        })
+        .catch((error) => {
+          if (active) {
+            setState({
+              error: error instanceof Error ? error.message : "Could not load attached payloads.",
+              loading: false,
+              payloads: [],
+            });
+          }
+        });
+    };
+
+    void runLoad(true);
+
+    const handleFocus = () => {
+      void runLoad(false);
+    };
+    window.addEventListener("focus", handleFocus);
+
+    if (refreshIntervalMs > 0) {
+      pollTimer = setInterval(() => {
+        void runLoad(false);
+      }, refreshIntervalMs);
+    }
 
     return () => {
       active = false;
+      if (pollTimer) clearInterval(pollTimer);
+      window.removeEventListener("focus", handleFocus);
     };
-  }, [ownerKind, ownerId, rolesKey]);
+  }, [ownerKind, ownerId, refreshIntervalMs, rolesKey]);
 
   return state;
 }
 
 function modelPayloadByRole(payloads: HydratedModelPayload[], role: string): HydratedModelPayload | null {
-  return payloads.find((payload) => payload.attachment.role === role && payload.attachment.status !== "deleted")
-    ?? payloads.find((payload) => payload.attachment.role === role)
-    ?? null;
+  const candidates = payloads.filter((payload) => payload.attachment.role === role);
+  if (!candidates.length) return null;
+  const activeCandidates = candidates.filter((payload) => payload.attachment.status !== "deleted");
+  const ranked = (activeCandidates.length ? activeCandidates : candidates).slice().sort((left, right) => {
+    const leftTs = Date.parse(left.attachment.updatedAt || left.attachment.createdAt || "");
+    const rightTs = Date.parse(right.attachment.updatedAt || right.attachment.createdAt || "");
+    const leftRank = Number.isFinite(leftTs) ? leftTs : 0;
+    const rightRank = Number.isFinite(rightTs) ? rightTs : 0;
+    if (leftRank !== rightRank) return rightRank - leftRank;
+    return right.attachment.id.localeCompare(left.attachment.id);
+  });
+  return ranked[0] ?? null;
 }
 
 function useNewsroomKnowledgeContext(target: KnowledgeQueryTarget | null) {
@@ -8771,7 +8811,7 @@ function ReferenceDetailPanel({
   knowledgeQuery: KnowledgeQueryControl;
   semanticRelations: SemanticRelationRecord[];
 }) {
-  const referencePayloadState = useModelPayloads("reference", reference?.id, ["metadata"]);
+  const referencePayloadState = useModelPayloads("reference", reference?.id, ["metadata"], { refreshIntervalMs: 10000 });
   if (!reference) {
     return (
       <section className="category-steering-section" aria-label="Reference detail">
@@ -8787,10 +8827,8 @@ function ReferenceDetailPanel({
   const neighborGroups = graph.neighbors("reference", lineageId);
   const authors = reference.authors?.filter(Boolean).join(", ");
   const metadataPayload = modelPayloadByRole(referencePayloadState.payloads, "metadata");
-  const metadataSubtitle = normalizeReferenceDetailSubtitleForDisplay(
-    referenceMetadataSubtitle(metadataPayload, reference.metadata),
-    reference.sourceUri,
-  ) ?? "";
+  const metadataTitle = referenceMetadataTitle(metadataPayload) ?? reference.title ?? reference.externalItemId;
+  const metadataSubtitle = referenceMetadataSubtitle(metadataPayload) ?? "";
   const metadataSummary = normalizeReferenceDetailSummaryForDisplay(
     referenceSummaryFromPayload(metadataPayload),
     reference.sourceUri,
@@ -8802,7 +8840,7 @@ function ReferenceDetailPanel({
       <article className="news-desk-semantic-detail">
         <header>
           <div>
-            <strong>{reference.title ?? reference.externalItemId}</strong>
+            <strong>{metadataTitle}</strong>
             {metadataSubtitle ? <p className="news-desk-semantic-detail__subheading">{metadataSubtitle}</p> : null}
             <div className="news-desk-reference-detail__header-flow">
               <ReferenceCurationCluster
@@ -8909,7 +8947,11 @@ function ReferenceDetailPanel({
                 {messages.slice(0, 4).map((message) => (
                   <div className="news-desk-detail-line" key={message.id}>
                     <span>{message.messageKind}</span>
-                    <strong>{message.summary ?? "Stored message payload"}</strong>
+                    <strong>
+                      {message.messageKind === "reference_curation"
+                        ? (metadataSummary ?? "Canonical summary unavailable")
+                        : (message.summary ?? "Stored message payload")}
+                    </strong>
                   </div>
                 ))}
               </div>
@@ -8938,9 +8980,9 @@ function MessageDetailPanel({
   const metadataPayload = modelPayloadByRole(messagePayloadState.payloads, "metadata");
   const messageMetadata = metadataRecord(metadataPayload?.json) ?? metadataRecord(message.metadata);
   const linkedReference = useReferenceCurationMessageReference(graph, message, messageMetadata);
-  const referencePayloadState = useModelPayloads("reference", linkedReference?.id, ["metadata"]);
+  const referencePayloadState = useModelPayloads("reference", linkedReference?.id, ["metadata"], { refreshIntervalMs: 10000 });
   const referenceMetadataPayload = modelPayloadByRole(referencePayloadState.payloads, "metadata");
-  const referenceSubtitle = referenceMetadataSubtitle(referenceMetadataPayload, linkedReference?.metadata);
+  const referenceSubtitle = referenceMetadataSubtitle(referenceMetadataPayload);
   const referenceSummary = referenceSummaryFromPayload(referenceMetadataPayload);
   const headerLabel = humanizeNewsroomLabel(message.messageKind ?? "message");
   const headerTitle = message.messageKind === "reference_curation"
@@ -11339,7 +11381,6 @@ function formatDeskSectionLede(section: NewsDeskTab): string {
 function referenceToNewsroomCard(reference: ReferenceRecord, index: number, subtitle?: string | null, qualityRating?: number | null): NewsroomCardRecord {
   const lineageId = reference.lineageId ?? reference.id;
   const status = reference.curationStatus ?? "pending";
-  const authors = compactArray(reference.authors).join(", ");
   const title = reference.title ?? reference.externalItemId;
   const template = resolveNewsroomCardTemplate({
     bodyLength: subtitle?.length ?? 0,
@@ -11355,12 +11396,8 @@ function referenceToNewsroomCard(reference: ReferenceRecord, index: number, subt
     id: lineageId,
     ariaLabel: `Open reference ${title}`,
     body: subtitle ? newsroomCardExcerpt(subtitle, 180) : null,
-    kicker: status,
-    meta: [
-      reference.mediaType ?? "metadata",
-      reference.corpusId,
-      authors || "unattributed",
-    ],
+    kicker: null,
+    meta: [],
     dataAttributes: {
       "data-newsroom-card-quality": isLowReferenceQualityRating(qualityRating) ? "low" : undefined,
     },
@@ -11582,7 +11619,8 @@ function messageCardSubtitle(message: MessageRecord): string | null {
   );
 }
 
-const referenceMetadataSubtitleCache = new Map<string, string | null>();
+const REFERENCE_METADATA_SUBTITLE_CACHE_TTL_MS = 15_000;
+const referenceMetadataSubtitleCache = new Map<string, { subtitle: string | null; fetchedAt: number }>();
 
 function mapsEqualStringNullable(a: Map<string, string | null>, b: Map<string, string | null>): boolean {
   if (a.size !== b.size) return false;
@@ -11594,9 +11632,20 @@ function mapsEqualStringNullable(a: Map<string, string | null>, b: Map<string, s
 
 function useReferenceMetadataSubtitles(references: ReferenceRecord[]): Map<string, string | null> {
   const [subtitles, setSubtitles] = useState<Map<string, string | null>>(() => new Map());
+  const [refreshTick, setRefreshTick] = useState(0);
   const referenceIds = useMemo(() => references.map((reference) => reference.id).filter(Boolean), [references]);
   const referenceKey = useMemo(() => referenceIds.join("|"), [referenceIds]);
   const stableReferenceIds = useMemo(() => (referenceKey ? referenceKey.split("|") : []), [referenceKey]);
+
+  useEffect(() => {
+    const onFocus = () => setRefreshTick((value) => value + 1);
+    const timer = setInterval(() => setRefreshTick((value) => value + 1), REFERENCE_METADATA_SUBTITLE_CACHE_TTL_MS);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, []);
 
   useEffect(() => {
     if (!stableReferenceIds.length) {
@@ -11606,10 +11655,13 @@ function useReferenceMetadataSubtitles(references: ReferenceRecord[]): Map<strin
 
     const cached = new Map<string, string | null>();
     const missing: string[] = [];
+    const now = Date.now();
     for (const referenceId of stableReferenceIds) {
-      if (referenceMetadataSubtitleCache.has(referenceId)) {
-        cached.set(referenceId, referenceMetadataSubtitleCache.get(referenceId) ?? null);
+      const cachedEntry = referenceMetadataSubtitleCache.get(referenceId);
+      if (cachedEntry && now - cachedEntry.fetchedAt <= REFERENCE_METADATA_SUBTITLE_CACHE_TTL_MS) {
+        cached.set(referenceId, cachedEntry.subtitle ?? null);
       } else {
+        if (cachedEntry) referenceMetadataSubtitleCache.delete(referenceId);
         missing.push(referenceId);
       }
     }
@@ -11622,10 +11674,10 @@ function useReferenceMetadataSubtitles(references: ReferenceRecord[]): Map<strin
         const payloads = await loadModelPayloadsForOwner("reference", referenceId, ["metadata"]);
         const metadataPayload = modelPayloadByRole(payloads, "metadata");
         const subtitle = referenceMetadataSubtitle(metadataPayload);
-        referenceMetadataSubtitleCache.set(referenceId, subtitle);
+        referenceMetadataSubtitleCache.set(referenceId, { subtitle, fetchedAt: Date.now() });
         return [referenceId, subtitle] as const;
       } catch {
-        referenceMetadataSubtitleCache.set(referenceId, null);
+        referenceMetadataSubtitleCache.set(referenceId, { subtitle: null, fetchedAt: Date.now() });
         return [referenceId, null] as const;
       }
     })).then((entries) => {
@@ -11640,27 +11692,29 @@ function useReferenceMetadataSubtitles(references: ReferenceRecord[]): Map<strin
     return () => {
       active = false;
     };
-  }, [referenceKey, stableReferenceIds]);
+  }, [referenceKey, refreshTick, stableReferenceIds]);
 
   return subtitles;
 }
 
-function referenceMetadataSubtitle(payload: HydratedModelPayload | null, fallback?: unknown): string | null {
-  return referenceMetadataField(payload, fallback, "subtitle");
+function referenceMetadataSubtitle(payload: HydratedModelPayload | null): string | null {
+  return referenceMetadataField(payload, "subtitle");
+}
+
+function referenceMetadataTitle(payload: HydratedModelPayload | null): string | null {
+  return referenceMetadataField(payload, "title");
 }
 
 function referenceMetadataField(
   payload: HydratedModelPayload | null,
-  fallback: unknown,
-  key: "subtitle",
+  key: "title" | "subtitle",
 ): string | null {
   const payloadRecord = metadataRecord(payload?.json);
   if (payloadRecord) {
     const value = normalizeMetadataString(payloadRecord[key]);
     if (value) return value;
   }
-  const fallbackRecord = metadataRecord(fallback);
-  return fallbackRecord ? normalizeMetadataString(fallbackRecord[key]) : null;
+  return null;
 }
 
 function referenceSummaryFromPayload(payload: HydratedModelPayload | null): string | null {
@@ -11670,17 +11724,6 @@ function referenceSummaryFromPayload(payload: HydratedModelPayload | null): stri
     if (summary) return summary;
   }
   return null;
-}
-
-function normalizeReferenceDetailSubtitleForDisplay(subtitle: string | null, sourceUri?: string | null): string | null {
-  const trimmed = subtitle?.trim();
-  if (!trimmed) return null;
-  const normalizedSubtitleUri = normalizeReferenceDetailSourceUri(trimmed)
-    ?? normalizeReferenceDetailSourceUri(extractReferenceDetailFirstUri(trimmed));
-  const normalizedSourceUri = normalizeReferenceDetailSourceUri(sourceUri);
-  return normalizedSubtitleUri && normalizedSourceUri && normalizedSubtitleUri === normalizedSourceUri
-    ? null
-    : trimmed;
 }
 
 function normalizeReferenceDetailSummaryForDisplay(summary: string | null, sourceUri?: string | null): string | null {

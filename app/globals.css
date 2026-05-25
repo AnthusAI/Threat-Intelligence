@@ -4268,6 +4268,9 @@ img {
 .newsroom-list-detail-shell[data-news-desk-section="references"] .newsroom-card {
   border-top-width: 1px;
   box-sizing: border-box;
+  gap: calc(var(--paper-rhythm) * 0.5);
+  grid-template-rows: auto auto;
+  min-height: calc(var(--paper-rhythm) * 4);
   padding-bottom: calc(var(--paper-rhythm) - 1px);
   padding-top: calc(var(--paper-rhythm) - 1px);
 }
@@ -4287,6 +4290,14 @@ img {
   letter-spacing: 0;
   line-height: var(--paper-rhythm);
   text-transform: none;
+}
+
+.newsroom-list-detail-shell[data-news-desk-section="references"] .newsroom-card__stamp {
+  line-height: var(--paper-rhythm);
+  min-height: var(--paper-rhythm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (min-width: 1158px) {
