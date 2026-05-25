@@ -382,6 +382,14 @@ RESOURCE_METHODS: dict[tuple[str, str], Callable[[dict[str, Any]], Any]] = {
         import_run_id=args.get("importRunId") or args.get("import_run_id") or "",
     ),
     ("Assignment", "update"): lambda args: newsroom.papyrus_assignment_update(args),
+    ("Reference", "get"): lambda args: newsroom.papyrus_get_reference(args.get("id") or args.get("referenceId") or args.get("reference_id")),
+    ("Reference", "list"): lambda args: reference_curation_signals.reference_list(
+        corpus_key=args.get("corpusKey") or args.get("corpus_key") or "AI-ML-research",
+        limit=args.get("limit") or 25,
+        status=args.get("status") or "",
+        order=args.get("order") or "newest",
+        scan_limit=args.get("scanLimit") or args.get("scan_limit") or 1000,
+    ),
 }
 
 
