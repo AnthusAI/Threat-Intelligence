@@ -1701,6 +1701,7 @@ async fn run_agent_turn(
                 .and_then(Value::as_str)
                 .unwrap_or("{}");
             let tool_result = execute_tactus_tool(state, trigger, context, name, arguments).await;
+            let tool_result_markdown = render_tool_result_markdown(&tool_result);
             collect_assignment_ids(&tool_result, &mut assignment_ids);
             persisted_tool_messages.push(PersistedToolMessage {
                 role: "TOOL".to_string(),
@@ -1714,14 +1715,14 @@ async fn run_agent_turn(
                 role: "TOOL".to_string(),
                 message_kind: MESSAGE_KIND_TOOL_RESULT.to_string(),
                 message_type: "TOOL_RESPONSE".to_string(),
-                content: tool_result.to_string(),
+                content: tool_result_markdown.clone(),
                 summary: truncate_summary(&format!("{name} tool result")),
                 metadata: json!({ "toolCallId": call_id, "toolName": name }),
             });
             messages.push(json!({
                 "role": "tool",
                 "tool_call_id": call_id,
-                "content": tool_result.to_string(),
+                "content": tool_result_markdown,
             }));
             if let Some(error_text) = tool_result_error_text(&tool_result) {
                 saw_tool_errors = true;
@@ -1830,6 +1831,89 @@ fn tool_result_error_code(result: &Value) -> Option<String> {
     None
 }
 
+fn render_tool_result_markdown(result: &Value) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    if let Some(ok) = result.get("ok").and_then(Value::as_bool) {
+        lines.push(format!("- status: {}", if ok { "ok" } else { "error" }));
+    }
+    if let Some(api_calls) = result.get("api_calls").and_then(Value::as_array) {
+        let calls = api_calls
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<&str>>();
+        if !calls.is_empty() {
+            lines.push("- api_calls:".to_string());
+            for call in calls {
+                lines.push(format!("  - `{}`", call));
+            }
+        }
+    }
+    if let Some(error) = result.get("error").and_then(Value::as_object) {
+        lines.push("- error:".to_string());
+        if let Some(code) = error.get("code").and_then(Value::as_str) {
+            lines.push(format!("  - code: `{}`", code));
+        }
+        if let Some(message) = error.get("message").and_then(Value::as_str) {
+            lines.push(format!("  - message: {}", message));
+        }
+        if let Some(retryable) = error.get("retryable").and_then(Value::as_bool) {
+            lines.push(format!("  - retryable: {}", retryable));
+        }
+    } else if let Some(value) = result.get("value") {
+        lines.push("- value:".to_string());
+        lines.extend(render_value_markdown(value, 2));
+    }
+    if lines.is_empty() {
+        return "- status: empty tool result".to_string();
+    }
+    lines.join("\n")
+}
+
+fn render_value_markdown(value: &Value, indent: usize) -> Vec<String> {
+    let pad = " ".repeat(indent);
+    match value {
+        Value::Null => vec![format!("{}- null", pad)],
+        Value::Bool(boolean) => vec![format!("{}- {}", pad, boolean)],
+        Value::Number(number) => vec![format!("{}- {}", pad, number)],
+        Value::String(text) => text
+            .lines()
+            .map(|line| format!("{}- {}", pad, line))
+            .collect(),
+        Value::Array(items) => {
+            if items.is_empty() {
+                return vec![format!("{}- []", pad)];
+            }
+            let mut lines = Vec::new();
+            for item in items {
+                lines.extend(render_value_markdown(item, indent));
+            }
+            lines
+        }
+        Value::Object(map) => {
+            if map.is_empty() {
+                return vec![format!("{}- {{}}", pad)];
+            }
+            let mut lines = Vec::new();
+            let mut keys = map.keys().collect::<Vec<&String>>();
+            keys.sort();
+            for key in keys {
+                let entry = map.get(key).unwrap_or(&Value::Null);
+                match entry {
+                    Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
+                        let rendered = render_value_markdown(entry, 0).join(" ").trim().trim_start_matches('-').trim().to_string();
+                        lines.push(format!("{}- **{}**: {}", pad, key, rendered));
+                    }
+                    _ => {
+                        lines.push(format!("{}- **{}**:", pad, key));
+                        lines.extend(render_value_markdown(entry, indent + 2));
+                    }
+                }
+            }
+            lines
+        }
+    }
+}
+
 fn collect_assignment_ids(value: &Value, assignment_ids: &mut HashSet<String>) {
     let Some(obj) = value.as_object() else {
         return;
@@ -1886,7 +1970,7 @@ fn build_openai_messages(
         messages.push(json!({
             "role": "system",
             "content": format!(
-                "execute_tactus supports a resource-oriented Papyrus API. Use api_list{{}} for the resource/verb schema. For recent-reference requests, call Reference.list{{ limit = <count>, order = \"newest\", format = \"markdown\" }} and then summarize results. Prefer markdown format responses over JSON unless the user explicitly asks for structured JSON. Use docs_list{{ namespace = \"resources\" }} first, then docs_get{{ id = \"resources.Assignment\" }} before non-trivial writes. To create a research assignment, use Assignment.create{{ type = \"research\", title = \"...\", apply = true }}.\nAvailable doc topics:\n{}",
+                "execute_tactus supports a resource-oriented Papyrus API. Use api_list{{}} for the resource/verb schema. For recent-reference requests, call Reference.list{{ limit = <count>, order = \"newest\", format = \"markdown\" }} and then summarize results. Tool responses should be markdown, not JSON. Use docs_list{{ namespace = \"resources\" }} first, then docs_get{{ id = \"resources.Assignment\" }} before non-trivial writes. To create a research assignment, use Assignment.create{{ type = \"research\", title = \"...\", apply = true }}.\nAvailable doc topics:\n{}",
                 docs_lines
             )
         }));
