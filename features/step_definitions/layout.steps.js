@@ -97,6 +97,11 @@ Given("the newsroom uses mocked reference summaries with leading source URI", as
   this.newsroomReferenceSummaryPayloadMock = "dedup";
 });
 
+Given("the newsroom uses mocked extracted text payload for reference detail", async function () {
+  this.testEditorReader = true;
+  this.newsroomReferenceExtractedTextMock = "history-001";
+});
+
 Given("the reference quality mutation fails", async function () {
   this.newsroomQualityMutationMock = "fail";
 });
@@ -824,6 +829,18 @@ When("I open the reference detail insight composer", async function () {
   await page.locator("[data-news-desk-reference-insight-trigger]").click();
 });
 
+When("I open the reference detail extracted text panel", async function () {
+  const page = requirePage(this);
+  const toggle = page
+    .locator("[data-news-desk-reference-extracted-text-state='available'] .news-desk-extracted-text-expander__toggle")
+    .first();
+  await toggle.waitFor({ state: "visible", timeout: 10_000 });
+  const expanded = await toggle.getAttribute("aria-expanded");
+  if (expanded !== "true") {
+    await toggle.click();
+  }
+});
+
 Then("the reference detail should render topic workflow and corpus selector", async function () {
   const page = requirePage(this);
   await page.locator("[data-reference-topic-workflow]").waitFor({ state: "visible", timeout: 10_000 });
@@ -837,6 +854,53 @@ Then("the reference detail insight composer should be visible", async function (
   await requirePage(this).locator("[data-news-desk-reference-insight-form]").waitFor({ state: "visible", timeout: 10_000 });
 });
 
+Then("the reference detail should place extracted text below metadata", async function () {
+  const report = await requirePage(this).evaluate(() => {
+    const metadata = document.querySelector("[data-news-desk-reference-metadata-expander]");
+    const extracted = document.querySelector("[data-news-desk-reference-extracted-text-state]");
+    if (!metadata || !extracted) return null;
+    return {
+      order: metadata.compareDocumentPosition(extracted),
+      state: extracted.getAttribute("data-news-desk-reference-extracted-text-state"),
+    };
+  });
+  assert.ok(report, "Expected metadata and extracted text sections in reference detail");
+  assert.equal(report.state, "available", `Expected available extracted text state: ${JSON.stringify(report)}`);
+  assert.equal(
+    Boolean(report.order & 4),
+    true,
+    `Expected extracted text section to render after metadata: ${JSON.stringify(report)}`,
+  );
+});
+
+Then("the reference detail extracted text should include {string}", async function (expectedText) {
+  const page = requirePage(this);
+  const content = page.locator("[data-news-desk-reference-extracted-text-content]").first();
+  await content.waitFor({ state: "visible", timeout: 10_000 });
+  const text = (await content.textContent()) ?? "";
+  assert.ok(text.includes(expectedText), `Expected extracted text content to include "${expectedText}", received: ${text}`);
+});
+
+Then("the reference detail should show a disabled missing extracted text state", async function () {
+  const report = await requirePage(this).evaluate(() => {
+    const state = document.querySelector("[data-news-desk-reference-extracted-text-state='missing']");
+    const toggle = state?.querySelector("[data-news-desk-reference-extracted-text-toggle='disabled']");
+    const message = state?.querySelector("[data-news-desk-reference-extracted-text-missing]");
+    return {
+      ariaDisabled: toggle?.getAttribute("aria-disabled") ?? null,
+      message: message?.textContent?.trim() ?? "",
+      stateExists: Boolean(state),
+      toggleExists: Boolean(toggle),
+      messageExists: Boolean(message),
+    };
+  });
+  assert.equal(report.stateExists, true, `Expected missing extracted text state block: ${JSON.stringify(report)}`);
+  assert.equal(report.toggleExists, true, `Expected disabled extracted text toggle: ${JSON.stringify(report)}`);
+  assert.equal(report.ariaDisabled, "true", `Expected extracted text toggle aria-disabled=true: ${JSON.stringify(report)}`);
+  assert.equal(report.messageExists, true, `Expected missing extracted text state container: ${JSON.stringify(report)}`);
+  assert.equal(report.message, "", `Expected no explicit missing extracted text copy: ${JSON.stringify(report)}`);
+});
+
 Then("the reference detail source URI should be clickable", async function () {
   const page = requirePage(this);
   const link = page.locator("[data-news-desk-reference-detail] .news-desk-reference-detail__source-meta-row--uri a").first();
@@ -845,8 +909,34 @@ Then("the reference detail source URI should be clickable", async function () {
   assert.ok(href && /^(https?|s3):\/\//.test(href), `Expected clickable Source URI href, received: ${href}`);
 });
 
+Then("the reference detail should use link-standard value typography for source URI, storage, and attachments", async function () {
+  const report = await requirePage(this).evaluate(() => {
+    const expectedClass = "news-desk-reference-detail__link-value";
+    const source = document.querySelector("[data-news-desk-reference-source-uri-value]");
+    const storage = document.querySelector("[data-news-desk-reference-storage-value]");
+    const attachmentPaths = Array.from(
+      document.querySelectorAll("[data-news-desk-reference-attachment-path]"),
+    );
+    return {
+      attachmentCount: attachmentPaths.length,
+      sourceHasClass: source?.classList.contains(expectedClass) ?? false,
+      sourceValue: source?.textContent?.trim() ?? "",
+      storageHasClass: storage?.classList.contains(expectedClass) ?? false,
+      storageValue: storage?.textContent?.trim() ?? "",
+      attachmentMissingClassCount: attachmentPaths.filter((node) => !node.classList.contains(expectedClass)).length,
+    };
+  });
+  assert.equal(report.sourceHasClass, true, `Expected Source URI value to use link value class: ${JSON.stringify(report)}`);
+  assert.ok(report.sourceValue.length > 0, `Expected Source URI value text: ${JSON.stringify(report)}`);
+  assert.equal(report.storageHasClass, true, `Expected Storage value to use link value class: ${JSON.stringify(report)}`);
+  assert.ok(report.storageValue.length > 0, `Expected Storage value text: ${JSON.stringify(report)}`);
+  assert.ok(report.attachmentCount > 0, `Expected attachment path rows in reference detail: ${JSON.stringify(report)}`);
+  assert.equal(report.attachmentMissingClassCount, 0, `Expected all attachment paths to use link value class: ${JSON.stringify(report)}`);
+});
+
 Then("the reference detail summary should not start with source URI", async function () {
   const page = requirePage(this);
+  await page.locator("[data-news-desk-reference-detail] .news-desk-semantic-detail__summary").first().waitFor({ state: "visible", timeout: 10_000 });
   const report = await page.evaluate(() => {
     const summary = document.querySelector("[data-news-desk-reference-detail] .news-desk-semantic-detail__summary")?.textContent?.trim() ?? "";
     const sourceUri = document.querySelector("[data-news-desk-reference-detail] .news-desk-reference-detail__source-meta-row--uri a")?.textContent?.trim() ?? "";

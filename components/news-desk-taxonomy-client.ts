@@ -183,6 +183,30 @@ const GET_REFERENCE_QUERY = `
   }
 `;
 
+const LIST_REFERENCE_ATTACHMENTS_BY_REFERENCE_LINEAGE_AND_SORT_KEY_QUERY = `
+  query ListReferenceAttachmentsByReferenceLineageAndSortKey($referenceLineageId: ID!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String) {
+    listReferenceAttachmentsByReferenceLineageAndSortKey(referenceLineageId: $referenceLineageId, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken) {
+      items {
+        id
+        referenceId
+        referenceLineageId
+        referenceVersionNumber
+        referenceVersionKey
+        role
+        sortKey
+        storagePath
+        sourceUri
+        filename
+        mediaType
+        sha256
+        importRunId
+        importedAt
+      }
+      nextToken
+    }
+  }
+`;
+
 const CREATE_MODEL_ATTACHMENT_UPLOAD_MUTATION = `
   mutation CreateModelAttachmentUpload(
     $ownerKind: String!
@@ -215,6 +239,23 @@ const CREATE_MODEL_ATTACHMENT_UPLOAD_MUTATION = `
       status: $status
     ) {
       ok uploadId attachmentId ownerKind ownerId role sortKey method uploadUrl storagePath mediaType byteSize sha256 expiresAt requiredHeaders
+    }
+  }
+`;
+
+const CREATE_MODEL_ATTACHMENT_DOWNLOAD_MUTATION = `
+  mutation CreateModelAttachmentDownload($attachmentId: ID!) {
+    createModelAttachmentDownload(attachmentId: $attachmentId) {
+      ok
+      attachmentId
+      method
+      downloadUrl
+      storagePath
+      mediaType
+      byteSize
+      sha256
+      expiresAt
+      requiredHeaders
     }
   }
 `;
@@ -824,15 +865,25 @@ export async function loadEditorReferencesData(): Promise<{
   referenceAttachments: ReferenceAttachmentRecord[];
 }> {
   const testMock = getTestEditorNewsroomMock();
-  if (testMock?.references) {
+  if (testMock?.references || testMock?.referenceAttachments) {
+    const referenceAttachments = (testMock.referenceAttachments ?? [])
+      .slice()
+      .sort((left, right) => left.sortKey.localeCompare(right.sortKey));
+    if (testMock.references) {
+      return {
+        references: testMock.references,
+        referenceAttachments,
+      };
+    }
+    const referencePage = await loadNewsroomReferencePage();
     return {
-      references: testMock.references,
-      referenceAttachments: [],
+      references: referencePage.items,
+      referenceAttachments,
     };
   }
   const [referencePage, referenceAttachments] = await Promise.all([
     loadNewsroomReferencePage(),
-    listUserPoolModelPage<ReferenceAttachmentRecord>("ReferenceAttachment", USER_POOL_PAGE_LIMIT),
+    listUserPoolModel<ReferenceAttachmentRecord>("ReferenceAttachment"),
   ]);
   return {
     references: referencePage.items,
@@ -965,6 +1016,48 @@ export async function loadReferenceRecordById(id: string): Promise<ReferenceReco
   return response.data?.getReference ?? null;
 }
 
+export async function loadReferenceAttachmentsForLineageId(referenceLineageId: string): Promise<ReferenceAttachmentRecord[]> {
+  if (!referenceLineageId) return [];
+  const testMock = getTestEditorNewsroomMock();
+  if (testMock?.referenceAttachments) {
+    return testMock.referenceAttachments
+      .filter((attachment) => attachment.referenceLineageId === referenceLineageId)
+      .slice()
+      .sort((left, right) => left.sortKey.localeCompare(right.sortKey));
+  }
+  configureAmplifyClient();
+  const client = generateClient<Schema>() as unknown as {
+    graphql: (options: Record<string, unknown>) => Promise<{
+      data?: {
+        listReferenceAttachmentsByReferenceLineageAndSortKey?: {
+          items?: ReferenceAttachmentRecord[] | null;
+          nextToken?: string | null;
+        } | null;
+      } | null;
+      errors?: unknown[] | null;
+    }>;
+  };
+  const attachments: ReferenceAttachmentRecord[] = [];
+  let nextToken: string | null | undefined = null;
+  do {
+    const response = await client.graphql({
+      query: LIST_REFERENCE_ATTACHMENTS_BY_REFERENCE_LINEAGE_AND_SORT_KEY_QUERY,
+      variables: {
+        referenceLineageId,
+        sortDirection: "ASC",
+        limit: USER_POOL_PAGE_LIMIT,
+        nextToken,
+      },
+      authMode: USER_POOL_AUTH_MODE,
+    });
+    assertNoGraphQLErrors(response.errors);
+    const connection = response.data?.listReferenceAttachmentsByReferenceLineageAndSortKey;
+    attachments.push(...((connection?.items ?? []).filter(Boolean) as ReferenceAttachmentRecord[]));
+    nextToken = connection?.nextToken ?? null;
+  } while (nextToken);
+  return attachments.sort((left, right) => left.sortKey.localeCompare(right.sortKey));
+}
+
 export async function uploadModelPayloadForOwner(input: {
   ownerKind: string;
   ownerId: string;
@@ -1034,9 +1127,9 @@ export async function uploadModelPayloadForOwner(input: {
 
 async function hydrateModelAttachment(attachment: ModelAttachmentRecord): Promise<HydratedModelPayload> {
   try {
-    const downloaded = await downloadData({ path: attachment.storagePath }).result;
-    const body = downloaded.body as { text?: () => Promise<string> };
-    const text = typeof body.text === "function" ? await body.text() : null;
+    const text = attachment.storagePath?.startsWith("newsroom/payloads/")
+      ? await downloadModelAttachmentText(attachment)
+      : await downloadStoragePathTextRaw(attachment.storagePath);
     const json = text && isJsonMediaType(attachment.mediaType) ? parseAttachmentJson(text) : null;
     return { attachment, text, json, error: null };
   } catch (error) {
@@ -1047,6 +1140,68 @@ async function hydrateModelAttachment(attachment: ModelAttachmentRecord): Promis
       error: error instanceof Error ? error.message : "Could not hydrate attachment payload.",
     };
   }
+}
+
+export async function loadStoragePathText(path: string | null | undefined): Promise<{ error: string | null; text: string | null }> {
+  if (!path) {
+    return { error: "Extracted text attachment is missing a storage path.", text: null };
+  }
+  const testMock = getTestEditorNewsroomMock();
+  const mockText = testMock?.storageTextByPath?.[path];
+  if (typeof mockText === "string") {
+    return { error: null, text: mockText };
+  }
+  try {
+    const text = await downloadStoragePathTextRaw(path);
+    return { error: null, text };
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : "Could not load extracted text.",
+      text: null,
+    };
+  }
+}
+
+async function downloadStoragePathTextRaw(path: string | null | undefined): Promise<string | null> {
+  if (!path) return null;
+  const downloaded = await downloadData({ path }).result;
+  const body = downloaded.body as { text?: () => Promise<string> };
+  return typeof body.text === "function" ? await body.text() : null;
+}
+
+async function downloadModelAttachmentText(attachment: ModelAttachmentRecord): Promise<string | null> {
+  if (!attachment.id) return null;
+  configureAmplifyClient();
+  const client = generateClient<Schema>() as unknown as {
+    graphql: (options: Record<string, unknown>) => Promise<{
+      data?: {
+        createModelAttachmentDownload?: {
+          downloadUrl?: string | null;
+          method?: string | null;
+          requiredHeaders?: Record<string, string> | string | null;
+        } | null;
+      } | null;
+      errors?: unknown[] | null;
+    }>;
+  };
+  const response = await client.graphql({
+    query: CREATE_MODEL_ATTACHMENT_DOWNLOAD_MUTATION,
+    variables: { attachmentId: attachment.id },
+    authMode: USER_POOL_AUTH_MODE,
+  });
+  assertNoGraphQLErrors(response.errors);
+  const slot = response.data?.createModelAttachmentDownload;
+  const downloadUrl = slot?.downloadUrl;
+  if (!downloadUrl) return downloadStoragePathTextRaw(attachment.storagePath);
+  const fetchResponse = await fetch(downloadUrl, {
+    method: slot?.method ?? "GET",
+    headers: normalizeUploadHeaders(slot?.requiredHeaders),
+    cache: "no-store",
+  });
+  if (!fetchResponse.ok) {
+    throw new Error(`Attachment download failed: ${fetchResponse.status} ${fetchResponse.statusText}`);
+  }
+  return fetchResponse.text();
 }
 
 async function normalizeUploadBody(content: string | Blob | ArrayBuffer | Uint8Array): Promise<{ body: Blob; byteSize: number }> {
@@ -1134,14 +1289,19 @@ export async function runNewsroomKnowledgeQuery(input: Record<string, unknown>):
 
 export function hasTestEditorOverride(): boolean {
   if (typeof window === "undefined") return false;
+  const allowOverride = process.env.NODE_ENV === "test"
+    || process.env.NEXT_PUBLIC_ENABLE_TEST_EDITOR_OVERRIDE === "true";
+  if (!allowOverride) return false;
   return window.localStorage.getItem(TEST_EDITOR_STORAGE_KEY) === "true";
 }
 
 type TestEditorNewsroomMock = {
   messages?: MessageRecord[];
   payloads?: Record<string, HydratedModelPayload[]>;
+  referenceAttachments?: ReferenceAttachmentRecord[];
   references?: ReferenceRecord[];
   semanticRelations?: SemanticRelationRecord[];
+  storageTextByPath?: Record<string, string>;
   summary?: unknown;
 };
 

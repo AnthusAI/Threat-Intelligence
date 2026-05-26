@@ -17,9 +17,11 @@ import {
   loadEditorDoctrineRecordsData,
   loadEditorFullNewsDeskDashboard,
   loadEditorMessagesData,
+  loadReferenceAttachmentsForLineageId,
   loadReferenceRecordById,
   loadEditorUserDirectoryData,
   loadModelPayloadsForOwner,
+  loadStoragePathText,
   loadEditorReferencesData,
   loadEditorProcedureData,
   loadEditorSemanticRelationsData,
@@ -793,13 +795,15 @@ function NewsDeskDashboard({
   const [loadedSections, setLoadedSections] = useState<Record<string, boolean>>({
     assignments: dashboard.assignments.length > 0,
     messages: dashboard.messages.length > 0,
-    references: dashboard.references.length > 0,
+    references: dashboard.isDemo ? dashboard.references.length > 0 : false,
     sections: dashboard.isDemo || !canEdit,
     semanticRelations: dashboard.semanticRelations.length > 0,
     fullDashboard: !dashboard.summary && !dashboard.isPublicSkeleton,
   });
   const [hasRefreshedNewsroomSections, setHasRefreshedNewsroomSections] = useState(false);
-  const [hasHydratedReferences, setHasHydratedReferences] = useState(dashboard.references.length > 0);
+  const [hasHydratedReferences, setHasHydratedReferences] = useState(
+    dashboard.isDemo ? dashboard.references.length > 0 : false,
+  );
   const referencesRef = useRef(references);
 
   useEffect(() => {
@@ -7767,6 +7771,35 @@ function modelPayloadByRole(payloads: HydratedModelPayload[], role: string): Hyd
   return ranked[0] ?? null;
 }
 
+function latestReferenceAttachmentByRole(
+  attachments: ReferenceAttachmentRecord[],
+  role: string,
+): ReferenceAttachmentRecord | null {
+  const candidates = attachments
+    .filter((attachment) => attachment.role === role)
+    .slice()
+    .sort((left, right) => {
+      const leftTs = Date.parse(left.importedAt || "");
+      const rightTs = Date.parse(right.importedAt || "");
+      const leftRank = Number.isFinite(leftTs) ? leftTs : 0;
+      const rightRank = Number.isFinite(rightTs) ? rightTs : 0;
+      if (leftRank !== rightRank) return rightRank - leftRank;
+      return right.id.localeCompare(left.id);
+    });
+  return candidates[0] ?? null;
+}
+
+const EXTRACTED_TEXT_MISSING_SENTINELS = new Set([
+  "extracted text is missing for this reference.",
+  "extracted text is missing for this reference",
+]);
+
+function isMissingExtractedTextSentinel(text: string | null | undefined): boolean {
+  const normalized = (text ?? "").trim().toLowerCase();
+  if (!normalized) return false;
+  return EXTRACTED_TEXT_MISSING_SENTINELS.has(normalized);
+}
+
 function useNewsroomKnowledgeContext(target: KnowledgeQueryTarget | null) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [semanticText, setSemanticText] = useState("");
@@ -8812,6 +8845,77 @@ function ReferenceDetailPanel({
   semanticRelations: SemanticRelationRecord[];
 }) {
   const referencePayloadState = useModelPayloads("reference", reference?.id, ["metadata"], { refreshIntervalMs: 10000 });
+  const referenceLineageId = reference?.lineageId ?? reference?.id ?? "";
+  const graphAttachments = useMemo(
+    () => (reference ? graph.attachmentsForReference(referenceLineageId) : []),
+    [graph, reference, referenceLineageId],
+  );
+  const [attachments, setAttachments] = useState<ReferenceAttachmentRecord[]>(graphAttachments);
+
+  useEffect(() => {
+    setAttachments(graphAttachments);
+  }, [graphAttachments]);
+
+  useEffect(() => {
+    if (!referenceLineageId) {
+      setAttachments([]);
+      return;
+    }
+    let active = true;
+    void loadReferenceAttachmentsForLineageId(referenceLineageId)
+      .then((loadedAttachments) => {
+        if (!active || !loadedAttachments.length) return;
+        const merged = new Map<string, ReferenceAttachmentRecord>();
+        for (const attachment of [...graphAttachments, ...loadedAttachments]) {
+          merged.set(attachment.id, attachment);
+        }
+        setAttachments(Array.from(merged.values()).sort((left, right) => left.sortKey.localeCompare(right.sortKey)));
+      })
+      .catch(() => {
+        if (!active) return;
+        setAttachments(graphAttachments);
+      });
+    return () => {
+      active = false;
+    };
+  }, [graphAttachments, referenceLineageId]);
+
+  const extractedTextAttachment = useMemo(
+    () => latestReferenceAttachmentByRole(attachments, "extracted_text"),
+    [attachments],
+  );
+  const [extractedTextState, setExtractedTextState] = useState<{
+    error: string | null;
+    loading: boolean;
+    text: string | null;
+  }>({ error: null, loading: false, text: null });
+
+  useEffect(() => {
+    const storagePath = extractedTextAttachment?.storagePath ?? null;
+    if (!storagePath) {
+      setExtractedTextState({ error: null, loading: false, text: null });
+      return;
+    }
+    let active = true;
+    setExtractedTextState({ error: null, loading: true, text: null });
+    void loadStoragePathText(storagePath)
+      .then((result) => {
+        if (!active) return;
+        setExtractedTextState({ error: result.error, loading: false, text: result.text });
+      })
+      .catch((error) => {
+        if (!active) return;
+        setExtractedTextState({
+          error: error instanceof Error ? error.message : "Could not load extracted text.",
+          loading: false,
+          text: null,
+        });
+      });
+    return () => {
+      active = false;
+    };
+  }, [extractedTextAttachment?.storagePath]);
+
   if (!reference) {
     return (
       <section className="category-steering-section" aria-label="Reference detail">
@@ -8820,20 +8924,25 @@ function ReferenceDetailPanel({
     );
   }
 
-  const lineageId = reference.lineageId ?? reference.id;
-  const attachments = graph.attachmentsForReference(lineageId);
+  const lineageId = referenceLineageId;
   const messages = graph.messagesFor("reference", lineageId);
   const insights = graph.insightsFor("reference", lineageId);
   const neighborGroups = graph.neighbors("reference", lineageId);
   const authors = reference.authors?.filter(Boolean).join(", ");
   const metadataPayload = modelPayloadByRole(referencePayloadState.payloads, "metadata");
   const metadataTitle = referenceMetadataTitle(metadataPayload) ?? reference.title ?? reference.externalItemId;
-  const metadataSubtitle = referenceMetadataSubtitle(metadataPayload) ?? "";
+  const metadataSubtitle = normalizeReferenceDetailSubtitleForDisplay(
+    referenceMetadataSubtitle(metadataPayload),
+    reference.sourceUri,
+  ) ?? "";
   const metadataSummary = normalizeReferenceDetailSummaryForDisplay(
     referenceSummaryFromPayload(metadataPayload),
     reference.sourceUri,
   ) ?? "";
   const detailCuration = curation ?? resolveReferenceCurationDisplayState(reference, graph);
+  const extractedTextIsMissingSentinel = isMissingExtractedTextSentinel(extractedTextState.text);
+  const showMissingExtractedTextState = !extractedTextAttachment
+    || (!extractedTextState.loading && !extractedTextState.error && extractedTextIsMissingSentinel);
 
   return (
     <section className="category-steering-section" aria-label="Reference detail" data-news-desk-reference-detail={lineageId}>
@@ -8888,13 +8997,22 @@ function ReferenceDetailPanel({
               {reference.sourceUri ? (
                 <p className="news-desk-reference-detail__source-meta-row news-desk-reference-detail__source-meta-row--uri">
                   <span className="news-desk-reference-detail__source-meta-label">Source URI</span>
-                  <span className="news-desk-reference-detail__source-meta-value news-desk-reference-detail__source-meta-value--uri" title={reference.sourceUri}>
+                  <span
+                    className="news-desk-reference-detail__source-meta-value news-desk-reference-detail__source-meta-value--uri news-desk-reference-detail__link-value"
+                    data-news-desk-reference-source-uri-value
+                    title={reference.sourceUri}
+                  >
                     <a href={reference.sourceUri} rel="noopener noreferrer" target="_blank">{reference.sourceUri}</a>
                   </span>
                 </p>
               ) : null}
               <ReferenceCorpusRow corpora={corpora} disabled={disabled} onMoveCorpus={onMoveCorpus} reference={reference} />
-              {reference.storagePath ? <div className="news-desk-detail-line"><span>Storage</span><strong>{reference.storagePath}</strong></div> : null}
+              {reference.storagePath ? (
+                <div className="news-desk-detail-line">
+                  <span>Storage</span>
+                  <strong className="news-desk-reference-detail__link-value" data-news-desk-reference-storage-value>{reference.storagePath}</strong>
+                </div>
+              ) : null}
             </div>
             {curationRunStatus ? (
               <ReferenceCurationStatusPanel status={curationRunStatus} />
@@ -8913,33 +9031,78 @@ function ReferenceDetailPanel({
               onCreateInsight={onCreateInsight}
               reference={reference}
             />
+            <div data-news-desk-reference-metadata-expander>
+              <NewsroomExpander
+                className="news-desk-metadata-expander"
+                label="Metadata"
+                panelClassName="news-desk-metadata-expander__panel"
+                panelInnerClassName="news-desk-metadata-expander__panel-inner"
+                toggleClassName="newsroom-section-rail__rotating-toggle news-desk-metadata-expander__toggle"
+              >
+                <PayloadDetailBlock
+                  fallback="Reference metadata is stored as metadata.json on S3."
+                  hideLabel
+                  label="Reference Metadata"
+                  loading={referencePayloadState.loading}
+                  payload={metadataPayload}
+                  preferJson
+                />
+              </NewsroomExpander>
+            </div>
+            {!showMissingExtractedTextState ? (
+              <div data-news-desk-reference-extracted-text-state="available">
+                <NewsroomExpander
+                  className="news-desk-metadata-expander news-desk-extracted-text-expander"
+                  defaultExpanded
+                  label="Extracted Text"
+                  panelClassName="news-desk-metadata-expander__panel"
+                  panelInnerClassName="news-desk-metadata-expander__panel-inner"
+                  toggleClassName="newsroom-section-rail__rotating-toggle news-desk-metadata-expander__toggle news-desk-extracted-text-expander__toggle"
+                >
+                  <div className="news-desk-detail-block" data-news-desk-reference-extracted-text-panel>
+                    {extractedTextState.loading ? <p className="news-desk-detail-copy">Loading extracted text...</p> : null}
+                    {!extractedTextState.loading && extractedTextState.error ? (
+                      <p className="news-desk-detail-copy" data-news-desk-reference-extracted-text-error>{extractedTextState.error}</p>
+                    ) : null}
+                    {!extractedTextState.loading && !extractedTextState.error && extractedTextState.text ? (
+                      <pre className="news-desk-analysis-command" data-news-desk-reference-extracted-text-content>{extractedTextState.text}</pre>
+                    ) : null}
+                    {!extractedTextState.loading && !extractedTextState.error && !extractedTextState.text ? (
+                      <p className="news-desk-detail-copy" data-news-desk-reference-extracted-text-empty>Extracted text attachment is empty.</p>
+                    ) : null}
+                  </div>
+                </NewsroomExpander>
+              </div>
+            ) : (
+              <div
+                className="news-desk-metadata-expander news-desk-extracted-text-expander news-desk-extracted-text-expander--disabled"
+                data-news-desk-reference-extracted-text-state="missing"
+              >
+                <div
+                  className="newsroom-section-rail__rotating-toggle news-desk-metadata-expander__toggle news-desk-extracted-text-expander__toggle news-desk-extracted-text-expander__toggle--disabled"
+                  aria-disabled="true"
+                  data-news-desk-reference-extracted-text-toggle="disabled"
+                >
+                  <span className="newsroom-section-rail__rotating-toggle-label">Extracted Text</span>
+                  <RotatingSectionTriangleIcon expanded={false} />
+                </div>
+                <div className="news-desk-detail-block news-desk-extracted-text-expander__missing" data-news-desk-reference-extracted-text-missing>
+                </div>
+              </div>
+            )}
             {attachments.length ? (
               <div className="news-desk-detail-block">
                 <p className="story-label">Attachments</p>
                 {attachments.map((attachment) => (
-                  <div className="news-desk-detail-line" key={attachment.id}>
+                  <div className="news-desk-detail-line news-desk-reference-detail__attachment-line" key={attachment.id}>
                     <span>{attachment.role}</span>
-                    <strong>{attachment.storagePath ?? attachment.sourceUri ?? attachment.filename ?? "unmapped file"}</strong>
+                    <strong className="news-desk-reference-detail__link-value" data-news-desk-reference-attachment-path>
+                      {attachment.storagePath ?? attachment.sourceUri ?? attachment.filename ?? "unmapped file"}
+                    </strong>
                   </div>
                 ))}
               </div>
             ) : null}
-            <NewsroomExpander
-              className="news-desk-metadata-expander"
-              label="Metadata"
-              panelClassName="news-desk-metadata-expander__panel"
-              panelInnerClassName="news-desk-metadata-expander__panel-inner"
-              toggleClassName="newsroom-section-rail__rotating-toggle news-desk-metadata-expander__toggle"
-            >
-              <PayloadDetailBlock
-                fallback="Reference metadata is stored as metadata.json on S3."
-                hideLabel
-                label="Reference Metadata"
-                loading={referencePayloadState.loading}
-                payload={metadataPayload}
-                preferJson
-              />
-            </NewsroomExpander>
             {referencePayloadState.error ? <p className="news-desk-detail-copy">{referencePayloadState.error}</p> : null}
             {messages.length ? (
               <div className="news-desk-detail-block">
@@ -11620,7 +11783,7 @@ function messageCardSubtitle(message: MessageRecord): string | null {
 }
 
 const REFERENCE_METADATA_SUBTITLE_CACHE_TTL_MS = 15_000;
-const referenceMetadataSubtitleCache = new Map<string, { subtitle: string | null; fetchedAt: number }>();
+const referenceMetadataSubtitleCache = new Map<string, { subtitle: string | null; fetchedAt: number; revision: string }>();
 
 function mapsEqualStringNullable(a: Map<string, string | null>, b: Map<string, string | null>): boolean {
   if (a.size !== b.size) return false;
@@ -11633,9 +11796,17 @@ function mapsEqualStringNullable(a: Map<string, string | null>, b: Map<string, s
 function useReferenceMetadataSubtitles(references: ReferenceRecord[]): Map<string, string | null> {
   const [subtitles, setSubtitles] = useState<Map<string, string | null>>(() => new Map());
   const [refreshTick, setRefreshTick] = useState(0);
-  const referenceIds = useMemo(() => references.map((reference) => reference.id).filter(Boolean), [references]);
-  const referenceKey = useMemo(() => referenceIds.join("|"), [referenceIds]);
-  const stableReferenceIds = useMemo(() => (referenceKey ? referenceKey.split("|") : []), [referenceKey]);
+  const referenceMeta = useMemo(
+    () => references.map((reference) => ({
+      id: reference.id,
+      revision: `${reference.id}:${reference.updatedAt ?? reference.importedAt ?? ""}`,
+    })).filter((entry) => Boolean(entry.id)),
+    [references],
+  );
+  const referenceKey = useMemo(
+    () => referenceMeta.map((entry) => entry.revision).join("|"),
+    [referenceMeta],
+  );
 
   useEffect(() => {
     const onFocus = () => setRefreshTick((value) => value + 1);
@@ -11648,36 +11819,41 @@ function useReferenceMetadataSubtitles(references: ReferenceRecord[]): Map<strin
   }, []);
 
   useEffect(() => {
-    if (!stableReferenceIds.length) {
+    if (!referenceMeta.length) {
       setSubtitles((current) => (current.size ? new Map() : current));
       return;
     }
 
     const cached = new Map<string, string | null>();
-    const missing: string[] = [];
+    const missing: Array<{ id: string; revision: string }> = [];
     const now = Date.now();
-    for (const referenceId of stableReferenceIds) {
+    for (const entry of referenceMeta) {
+      const referenceId = entry.id;
       const cachedEntry = referenceMetadataSubtitleCache.get(referenceId);
-      if (cachedEntry && now - cachedEntry.fetchedAt <= REFERENCE_METADATA_SUBTITLE_CACHE_TTL_MS) {
+      if (
+        cachedEntry
+        && cachedEntry.revision === entry.revision
+        && now - cachedEntry.fetchedAt <= REFERENCE_METADATA_SUBTITLE_CACHE_TTL_MS
+      ) {
         cached.set(referenceId, cachedEntry.subtitle ?? null);
       } else {
         if (cachedEntry) referenceMetadataSubtitleCache.delete(referenceId);
-        missing.push(referenceId);
+        missing.push(entry);
       }
     }
     setSubtitles((current) => (mapsEqualStringNullable(current, cached) ? current : cached));
     if (!missing.length) return;
 
     let active = true;
-    Promise.all(missing.map(async (referenceId) => {
+    Promise.all(missing.map(async ({ id: referenceId, revision }) => {
       try {
         const payloads = await loadModelPayloadsForOwner("reference", referenceId, ["metadata"]);
         const metadataPayload = modelPayloadByRole(payloads, "metadata");
         const subtitle = referenceMetadataSubtitle(metadataPayload);
-        referenceMetadataSubtitleCache.set(referenceId, { subtitle, fetchedAt: Date.now() });
+        referenceMetadataSubtitleCache.set(referenceId, { subtitle, fetchedAt: Date.now(), revision });
         return [referenceId, subtitle] as const;
       } catch {
-        referenceMetadataSubtitleCache.set(referenceId, { subtitle: null, fetchedAt: Date.now() });
+        referenceMetadataSubtitleCache.set(referenceId, { subtitle: null, fetchedAt: Date.now(), revision });
         return [referenceId, null] as const;
       }
     })).then((entries) => {
@@ -11692,7 +11868,7 @@ function useReferenceMetadataSubtitles(references: ReferenceRecord[]): Map<strin
     return () => {
       active = false;
     };
-  }, [referenceKey, refreshTick, stableReferenceIds]);
+  }, [referenceKey, refreshTick, referenceMeta]);
 
   return subtitles;
 }
@@ -11745,6 +11921,17 @@ function normalizeReferenceDetailSummaryForDisplay(summary: string | null, sourc
   if (startIndex < lines.length && lines[startIndex].trim().length === 0) startIndex += 1;
   const nextSummary = lines.slice(startIndex).join("\n").trim();
   return nextSummary || null;
+}
+
+function normalizeReferenceDetailSubtitleForDisplay(subtitle: string | null, sourceUri?: string | null): string | null {
+  const trimmed = subtitle?.trim();
+  if (!trimmed) return null;
+  const normalizedSubtitleUri = normalizeReferenceDetailSourceUri(trimmed)
+    ?? normalizeReferenceDetailSourceUri(extractReferenceDetailFirstUri(trimmed));
+  if (!normalizedSubtitleUri) return trimmed;
+  const normalizedSourceUri = normalizeReferenceDetailSourceUri(sourceUri);
+  if (!normalizedSourceUri) return trimmed;
+  return normalizedSubtitleUri === normalizedSourceUri ? null : trimmed;
 }
 
 function normalizeReferenceDetailSourceUri(value: string | null | undefined): string | null {

@@ -15,6 +15,7 @@ class PapyrusWorld {
     this.newsroomSummaryMock = null;
     this.newsroomMessageDetailMock = null;
     this.newsroomReferenceSummaryPayloadMock = null;
+    this.newsroomReferenceExtractedTextMock = null;
     this.newsroomQualityMutationMock = null;
   }
 
@@ -231,6 +232,32 @@ class PapyrusWorld {
             ],
           },
         }));
+      });
+    }
+    if (this.newsroomReferenceExtractedTextMock === "history-001") {
+      await this.page.addInitScript(() => {
+        const key = "papyrus:test-newsroom-mock";
+        let existing = {};
+        try {
+          const raw = window.localStorage.getItem(key);
+          existing = raw ? JSON.parse(raw) : {};
+        } catch {
+          existing = {};
+        }
+        const storageTextByPath = {
+          ...(existing.storageTextByPath ?? {}),
+          "corpora/history/extracted/pipeline/snapshot-demo-history/text/history-001.txt": [
+            "History 001 extracted text line one.",
+            "History 001 extracted text line two.",
+          ].join("\n"),
+        };
+        window.localStorage.setItem(
+          key,
+          JSON.stringify({
+            ...existing,
+            storageTextByPath,
+          }),
+        );
       });
     }
     if (this.newsroomQualityMutationMock === "fail") {
