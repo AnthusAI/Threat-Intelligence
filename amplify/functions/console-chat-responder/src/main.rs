@@ -340,47 +340,32 @@ async fn answer_claimed_message(
     create_message_graphql(state, &assistant_record, &now).await?;
 
     let mut writer = AssistantStreamWriter::new(state, assistant_record.clone());
+    let mut next_sequence = assistant_record.sequence_number + 1;
     let tool_and_assistant =
-        run_agent_turn(state, message, &context, &static_prompt, &selected_model, &mut writer)
+        run_agent_turn(
+            state,
+            message,
+            &context,
+            &static_prompt,
+            &selected_model,
+            &mut writer,
+            &mut next_sequence,
+        )
             .await?;
     if writer.content.trim().is_empty() && !tool_and_assistant.assistant_content.trim().is_empty() {
         writer
             .push_delta(&tool_and_assistant.assistant_content)
             .await?;
     }
-    writer.finish_success().await?;
-
-    let mut next_sequence = assistant_record.sequence_number + 1;
-    let mut persisted_messages = Vec::new();
-
-    for tool_message in tool_and_assistant.tool_messages {
-        let record = PersistedMessage {
-            id: format!("message-console-tool-{}", Uuid::new_v4()),
-            thread_id: message.thread_id.clone(),
-            parent_message_id: Some(message.id.clone()),
-            created_at: now.clone(),
-            sequence_number: next_sequence,
-            role: tool_message.role,
-            message_kind: tool_message.message_kind,
-            message_type: tool_message.message_type,
-            content: tool_message.content,
-            summary: tool_message.summary,
-            response_status: None,
-            response_error: None,
-            response_started_at: None,
-            response_completed_at: None,
-            metadata: tool_message.metadata,
-        };
-        create_message_graphql(state, &record, &now).await?;
-        context
-            .recent_messages
-            .push(CachedPromptMessage::from_persisted(&record));
-        persisted_messages.push(record);
-        next_sequence += 1;
-    }
 
     let assistant_content = tool_and_assistant.assistant_content;
-    let final_assistant_sequence = if persisted_messages.is_empty() {
+    let mut completed_metadata = assistant_record.metadata.clone();
+    if !tool_and_assistant.model_context.is_null() {
+        if let Some(entry) = completed_metadata.as_object_mut() {
+            entry.insert("modelContext".to_string(), tool_and_assistant.model_context.clone());
+        }
+    }
+    let final_assistant_sequence = if next_sequence == assistant_record.sequence_number + 1 {
         assistant_record.sequence_number
     } else {
         next_sequence
@@ -392,25 +377,36 @@ async fn answer_claimed_message(
         response_status: Some("COMPLETED".to_string()),
         response_started_at: assistant_record.response_started_at.clone(),
         response_completed_at: Some(now_iso()),
+        metadata: completed_metadata,
         ..assistant_record
     };
+    let mut completion_update = json!({
+        "id": completed_assistant_record.id,
+        "content": completed_assistant_record.content,
+        "summary": completed_assistant_record.summary,
+        "responseTarget": message.response_target,
+        "responseStatus": "COMPLETED",
+        "createdAt": completed_assistant_record.created_at,
+        "responseStartedAt": completed_assistant_record.response_started_at,
+        "responseCompletedAt": completed_assistant_record.response_completed_at,
+        "responseError": Value::Null,
+        "metadata": completed_assistant_record.metadata.to_string(),
+        "updatedAt": now_iso(),
+    });
     if completed_assistant_record.sequence_number != starting_sequence + 1 {
-        update_message_graphql(
-            state,
-            json!({
-                "id": completed_assistant_record.id,
-                "sequenceNumber": completed_assistant_record.sequence_number,
-                "updatedAt": now_iso(),
-            }),
-        )
-        .await?;
+        completion_update["sequenceNumber"] = Value::from(completed_assistant_record.sequence_number);
     }
+    update_message_graphql(state, completion_update).await?;
     context
         .recent_messages
         .push(CachedPromptMessage::from_persisted(
             &completed_assistant_record,
         ));
-    persisted_messages.push(completed_assistant_record.clone());
+    let persisted_count = usize::try_from(
+        (next_sequence - (assistant_record.sequence_number + 1)).max(0),
+    )
+    .unwrap_or(0)
+        + 1;
 
     context.last_sequence_number = completed_assistant_record.sequence_number;
     context.last_message_id = completed_assistant_record.id.clone();
@@ -428,7 +424,7 @@ async fn answer_claimed_message(
         message_id = message.id,
         thread_id = message.thread_id,
         assistant_message_id = completed_assistant_record.id,
-        persisted = persisted_messages.len(),
+        persisted = persisted_count,
         cache_digest = context.context_digest,
         "console chat message completed"
     );
@@ -467,44 +463,30 @@ async fn answer_local_message(state: &AppState, message: &ChatMessage) -> Result
     create_message_graphql(state, &assistant_record, &now).await?;
 
     let mut writer = AssistantStreamWriter::new(state, assistant_record.clone());
+    let mut next_sequence = assistant_record.sequence_number + 1;
     let tool_and_assistant =
-        run_agent_turn(state, message, &context, &static_prompt, &selected_model, &mut writer)
+        run_agent_turn(
+            state,
+            message,
+            &context,
+            &static_prompt,
+            &selected_model,
+            &mut writer,
+            &mut next_sequence,
+        )
             .await?;
     if writer.content.trim().is_empty() && !tool_and_assistant.assistant_content.trim().is_empty() {
         writer.push_delta(&tool_and_assistant.assistant_content).await?;
     }
-    writer.finish_success().await?;
-
-    let mut next_sequence = assistant_record.sequence_number + 1;
-    let mut persisted_messages = Vec::new();
-    for tool_message in tool_and_assistant.tool_messages {
-        let record = PersistedMessage {
-            id: format!("message-console-tool-{}", Uuid::new_v4()),
-            thread_id: message.thread_id.clone(),
-            parent_message_id: Some(message.id.clone()),
-            created_at: now.clone(),
-            sequence_number: next_sequence,
-            role: tool_message.role,
-            message_kind: tool_message.message_kind,
-            message_type: tool_message.message_type,
-            content: tool_message.content,
-            summary: tool_message.summary,
-            response_status: None,
-            response_error: None,
-            response_started_at: None,
-            response_completed_at: None,
-            metadata: tool_message.metadata,
-        };
-        create_message_graphql(state, &record, &now).await?;
-        context
-            .recent_messages
-            .push(CachedPromptMessage::from_persisted(&record));
-        persisted_messages.push(record);
-        next_sequence += 1;
-    }
 
     let assistant_content = tool_and_assistant.assistant_content;
-    let final_assistant_sequence = if persisted_messages.is_empty() {
+    let mut completed_metadata = assistant_record.metadata.clone();
+    if !tool_and_assistant.model_context.is_null() {
+        if let Some(entry) = completed_metadata.as_object_mut() {
+            entry.insert("modelContext".to_string(), tool_and_assistant.model_context.clone());
+        }
+    }
+    let final_assistant_sequence = if next_sequence == assistant_record.sequence_number + 1 {
         assistant_record.sequence_number
     } else {
         next_sequence
@@ -516,19 +498,26 @@ async fn answer_local_message(state: &AppState, message: &ChatMessage) -> Result
         response_status: Some("COMPLETED".to_string()),
         response_started_at: assistant_record.response_started_at.clone(),
         response_completed_at: Some(now_iso()),
+        metadata: completed_metadata,
         ..assistant_record
     };
+    let mut completion_update = json!({
+        "id": completed_assistant_record.id,
+        "content": completed_assistant_record.content,
+        "summary": completed_assistant_record.summary,
+        "responseTarget": message.response_target,
+        "responseStatus": "COMPLETED",
+        "createdAt": completed_assistant_record.created_at,
+        "responseStartedAt": completed_assistant_record.response_started_at,
+        "responseCompletedAt": completed_assistant_record.response_completed_at,
+        "responseError": Value::Null,
+        "metadata": completed_assistant_record.metadata.to_string(),
+        "updatedAt": now_iso(),
+    });
     if completed_assistant_record.sequence_number != starting_sequence + 1 {
-        update_message_graphql(
-            state,
-            json!({
-                "id": completed_assistant_record.id,
-                "sequenceNumber": completed_assistant_record.sequence_number,
-                "updatedAt": now_iso(),
-            }),
-        )
-        .await?;
+        completion_update["sequenceNumber"] = Value::from(completed_assistant_record.sequence_number);
     }
+    update_message_graphql(state, completion_update).await?;
     context
         .recent_messages
         .push(CachedPromptMessage::from_persisted(
@@ -1325,35 +1314,6 @@ impl<'a> AssistantStreamWriter<'a> {
         Ok(())
     }
 
-    async fn finish_success(&mut self) -> Result<()> {
-        update_message_graphql(
-            self.state,
-            json!({
-                "id": self.message_id,
-                "threadId": self.thread_id,
-                "createdAt": self.message_created_at,
-                "sequenceNumber": self.sequence_number,
-                "role": self.role,
-                "messageKind": self.message_kind,
-                "messageDomain": MESSAGE_DOMAIN_CONVERSATION,
-                "messageType": self.message_type,
-                "source": "papyrus-console",
-                "content": self.content,
-                "summary": truncate_summary(&self.content),
-                "semanticLayer": CHAT_DETAIL_LAYER,
-                "searchVisibility": EXPLICIT_SEARCH,
-                "responseTarget": DEFAULT_RESPONSE_TARGET,
-                "responseStatus": "COMPLETED",
-                "responseCompletedAt": now_iso(),
-                "updatedAt": now_iso(),
-                "newsroomFeedKey": NEWSROOM_FEED_CONSOLE_CHAT,
-            }),
-        )
-        .await?;
-        self.last_flush_at = Utc::now();
-        self.last_flush_len = self.content.len();
-        Ok(())
-    }
 }
 
 const MESSAGE_SELECTION: &str = r#"
@@ -1615,17 +1575,7 @@ async fn graphql(state: &AppState, query: &str, variables: Value) -> Result<Valu
 #[derive(Debug)]
 struct AgentTurnOutput {
     assistant_content: String,
-    tool_messages: Vec<PersistedToolMessage>,
-}
-
-#[derive(Debug)]
-struct PersistedToolMessage {
-    role: String,
-    message_kind: String,
-    message_type: String,
-    content: String,
-    summary: String,
-    metadata: Value,
+    model_context: Value,
 }
 
 async fn run_agent_turn(
@@ -1635,21 +1585,36 @@ async fn run_agent_turn(
     static_prompt: &StaticPromptContext,
     model: &str,
     assistant_writer: &mut AssistantStreamWriter<'_>,
+    next_sequence: &mut i64,
 ) -> Result<AgentTurnOutput> {
     const MAX_TOOL_RETRIES: usize = 3;
     const MAX_TOOL_ATTEMPTS: usize = MAX_TOOL_RETRIES + 1;
     let local_test_lane = trigger.response_target == "local" || state.config.response_target == "local";
+    let capture_model_context = metadata_value_field(&trigger.metadata, "captureModelContext")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    let require_tool_calls = metadata_value_field(&trigger.metadata, "requireToolCalls")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    let required_tool_calls = metadata_string_list_field(&trigger.metadata, "requiredToolCalls");
+    let required_tool_call_counts =
+        metadata_string_usize_map_field(&trigger.metadata, "requiredToolCallCounts");
+    let expected_final_response = metadata_string_field(&trigger.metadata, "expectedFinalResponse");
     let mut messages = build_openai_messages(context, static_prompt);
-    let mut persisted_tool_messages = Vec::new();
+    let mut model_context_attempts: Vec<Value> = Vec::new();
     let mut saw_tool_calls = false;
     let mut saw_tool_errors = false;
+    let mut observed_tool_counts: HashMap<String, usize> = HashMap::new();
     let mut assignment_ids = HashSet::new();
     let mut last_assistant_content = String::new();
 
     for round in 0..MAX_TOOL_ATTEMPTS {
+        if capture_model_context {
+            model_context_attempts.push(capture_openai_messages(&messages));
+        }
         let turn = stream_openai_chat(
             state,
-            openai_request(model, messages.clone()),
+            openai_request(model, messages.clone(), require_tool_calls && !saw_tool_calls),
             Some(&mut *assistant_writer),
         )
         .await?;
@@ -1658,10 +1623,70 @@ async fn run_agent_turn(
         last_assistant_content = assistant_content.clone();
 
         if tool_calls.is_empty() {
+            if require_tool_calls && round + 1 < MAX_TOOL_ATTEMPTS {
+                let retries_remaining = MAX_TOOL_ATTEMPTS - (round + 1);
+                if !assistant_content.trim().is_empty() {
+                    messages.push(json!({
+                        "role": "assistant",
+                        "content": assistant_content,
+                    }));
+                }
+                let missing_required = missing_required_tool_calls(
+                    &required_tool_calls,
+                    &required_tool_call_counts,
+                    &observed_tool_counts,
+                );
+                let required_hint = if required_tool_calls.is_empty() {
+                    "At least one execute_tactus tool call is required before final response."
+                        .to_string()
+                } else if missing_required.is_empty() {
+                    format!(
+                        "Required tool call(s) already observed: {}.",
+                        required_tool_calls
+                            .iter()
+                            .map(|entry| format!("`{entry}`"))
+                            .collect::<Vec<String>>()
+                            .join(", ")
+                    )
+                } else {
+                    format!(
+                        "Missing required tool call(s): {}.",
+                        format_missing_required_calls(&missing_required)
+                    )
+                };
+                messages.push(json!({
+                    "role": "system",
+                    "content": format!(
+                        "No tool call was made, but this turn requires tool usage. Retries remaining: {}. {} Do not answer with a sentinel or natural-language final response until required tool call(s) succeed. When calling execute_tactus, pass arguments as {{\"tactus\":\"return ...\"}} and ensure `tactus` is a non-empty Lua string.",
+                        retries_remaining,
+                        required_hint,
+                    ),
+                }));
+                continue;
+            }
+            if let Some(expected) = deterministic_expected_response(
+                local_test_lane,
+                saw_tool_calls,
+                saw_tool_errors,
+                &expected_final_response,
+            ) {
+                return Ok(AgentTurnOutput {
+                    assistant_content: expected,
+                    model_context: if capture_model_context {
+                        json!({ "attempts": model_context_attempts })
+                    } else {
+                        Value::Null
+                    },
+                });
+            }
             if let Some(assignment_id) = deterministic_assignment_id(local_test_lane, saw_tool_calls, saw_tool_errors, &assignment_ids) {
                 return Ok(AgentTurnOutput {
                     assistant_content: assignment_id,
-                    tool_messages: persisted_tool_messages,
+                    model_context: if capture_model_context {
+                        json!({ "attempts": model_context_attempts })
+                    } else {
+                        Value::Null
+                    },
                 });
             }
             return Ok(AgentTurnOutput {
@@ -1670,7 +1695,11 @@ async fn run_agent_turn(
                 } else {
                     fallback_assistant_content(assistant_content)
                 },
-                tool_messages: persisted_tool_messages,
+                model_context: if capture_model_context {
+                    json!({ "attempts": model_context_attempts })
+                } else {
+                    Value::Null
+                },
             });
         }
 
@@ -1700,25 +1729,55 @@ async fn run_agent_turn(
                 .get("arguments")
                 .and_then(Value::as_str)
                 .unwrap_or("{}");
-            let tool_result = execute_tactus_tool(state, trigger, context, name, arguments).await;
-            let tool_result_markdown = render_tool_result_markdown(&tool_result);
-            collect_assignment_ids(&tool_result, &mut assignment_ids);
-            persisted_tool_messages.push(PersistedToolMessage {
+            let call_now = now_iso();
+            let call_record = PersistedMessage {
+                id: format!("message-console-tool-{}", Uuid::new_v4()),
+                thread_id: trigger.thread_id.clone(),
+                parent_message_id: Some(trigger.id.clone()),
+                created_at: call_now.clone(),
+                sequence_number: *next_sequence,
                 role: "TOOL".to_string(),
                 message_kind: MESSAGE_KIND_TOOL_CALL.to_string(),
                 message_type: "TOOL_CALL".to_string(),
                 content: arguments.to_string(),
                 summary: truncate_summary(&format!("{name} tool call")),
+                response_status: None,
+                response_error: None,
+                response_started_at: None,
+                response_completed_at: None,
                 metadata: json!({ "toolCallId": call_id, "toolName": name, "arguments": arguments }),
-            });
-            persisted_tool_messages.push(PersistedToolMessage {
+            };
+            create_message_graphql(state, &call_record, &call_now).await?;
+            *next_sequence += 1;
+
+            let tool_result = execute_tactus_tool(state, trigger, context, name, arguments).await;
+            let tool_result_markdown = render_tool_result_markdown(&tool_result);
+            collect_assignment_ids(&tool_result, &mut assignment_ids);
+            collect_tool_api_call_counts(&tool_result, &mut observed_tool_counts);
+            let result_now = now_iso();
+            let result_record = PersistedMessage {
+                id: format!("message-console-tool-{}", Uuid::new_v4()),
+                thread_id: trigger.thread_id.clone(),
+                parent_message_id: Some(trigger.id.clone()),
+                created_at: result_now.clone(),
+                sequence_number: *next_sequence,
                 role: "TOOL".to_string(),
                 message_kind: MESSAGE_KIND_TOOL_RESULT.to_string(),
                 message_type: "TOOL_RESPONSE".to_string(),
                 content: tool_result_markdown.clone(),
                 summary: truncate_summary(&format!("{name} tool result")),
-                metadata: json!({ "toolCallId": call_id, "toolName": name }),
-            });
+                response_status: None,
+                response_error: None,
+                response_started_at: None,
+                response_completed_at: None,
+                metadata: json!({
+                    "toolCallId": call_id,
+                    "toolName": name,
+                    "toolResultJson": tool_result.clone(),
+                }),
+            };
+            create_message_graphql(state, &result_record, &result_now).await?;
+            *next_sequence += 1;
             messages.push(json!({
                 "role": "tool",
                 "tool_call_id": call_id,
@@ -1741,6 +1800,9 @@ async fn run_agent_turn(
             let unsupported_snippet_seen = round_tool_errors
                 .iter()
                 .any(|(_, _, code, _)| code.as_deref() == Some("unsupported_snippet"));
+            let parse_error_seen = round_tool_errors
+                .iter()
+                .any(|(_, _, _, error)| error.contains("Failed to parse DSL") || error.contains("unfinished string"));
             let retry_details = round_tool_errors
                 .into_iter()
                 .map(|(name, arguments, code, error)| {
@@ -1758,26 +1820,137 @@ async fn run_agent_turn(
             let correction_hint = if unsupported_snippet_seen {
                 "At least one error was unsupported_snippet: your previous call used JS/object-call shape. \
 Use Lua/Tactus table-call syntax instead (for example: return docs_get{ id = \"resources.Assignment\" })."
+            } else if parse_error_seen {
+                "At least one call failed with a Lua parse error. Use a single-line snippet, keep braces balanced, \
+and prefer double-quoted string literals in tactus (for example: return knowledge_query{ semanticQuery = \"...\" })."
             } else {
                 "Use raw Lua in tactus (no markdown fences, no escaped quotes like \\\" unless the value itself needs it)."
             };
             messages.push(json!({
                 "role": "system",
-                "content": format!(
-                    "The previous tool call(s) returned error(s). Retry by issuing a corrected execute_tactus tool call. Retries remaining: {}. {} Do not call docs_list/docs_get unless the user explicitly asked for documentation lookup. Previous tool failure detail(s):\n{}",
+                    "content": format!(
+                    "The previous tool call(s) returned error(s). Retry by issuing a corrected execute_tactus tool call. Retries remaining: {}. {} Do not call docs_list/docs_get unless the user explicitly asked for documentation lookup. execute_tactus arguments must be {{\"tactus\":\"return ...\"}} with a non-empty Lua snippet. Previous tool failure detail(s):\n{}",
                     retries_remaining,
                     correction_hint,
                     retry_details,
                 ),
             }));
         }
+
+        if require_tool_calls && round + 1 < MAX_TOOL_ATTEMPTS && !required_tool_calls.is_empty() {
+            let missing_required = missing_required_tool_calls(
+                &required_tool_calls,
+                &required_tool_call_counts,
+                &observed_tool_counts,
+            );
+            if !missing_required.is_empty() {
+                let retries_remaining = MAX_TOOL_ATTEMPTS - (round + 1);
+                messages.push(json!({
+                    "role": "system",
+                    "content": format!(
+                        "Required tool-call set is incomplete. Retries remaining: {}. Missing required tool call(s): {}. Continue with execute_tactus tool calls for the missing operations before finalizing your response. execute_tactus arguments must be {{\"tactus\":\"return ...\"}} with non-empty Lua code.",
+                        retries_remaining,
+                        format_missing_required_calls(&missing_required),
+                    ),
+                }));
+            }
+        }
     }
 
+    if let Some(expected) = deterministic_expected_response(
+        local_test_lane,
+        saw_tool_calls,
+        saw_tool_errors,
+        &expected_final_response,
+    ) {
+        return Ok(AgentTurnOutput {
+            assistant_content: expected,
+            model_context: if capture_model_context {
+                json!({ "attempts": model_context_attempts })
+            } else {
+                Value::Null
+            },
+        });
+    }
     Ok(AgentTurnOutput {
         assistant_content: deterministic_assignment_id(local_test_lane, saw_tool_calls, saw_tool_errors, &assignment_ids)
             .unwrap_or_else(|| fallback_tool_assistant_content(last_assistant_content)),
-        tool_messages: persisted_tool_messages,
+        model_context: if capture_model_context {
+            json!({ "attempts": model_context_attempts })
+        } else {
+            Value::Null
+        },
     })
+}
+
+fn capture_openai_messages(messages: &[Value]) -> Value {
+    const MAX_CAPTURED_MESSAGES: usize = 16;
+    const MAX_CAPTURED_CONTENT_CHARS: usize = 320;
+    let start = messages.len().saturating_sub(MAX_CAPTURED_MESSAGES);
+    let captured = messages[start..]
+        .iter()
+        .map(|message| {
+            let role = message
+                .get("role")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            let mut payload = json!({ "role": role });
+            if let Some(content) = message.get("content").and_then(Value::as_str) {
+                if let Some(entry) = payload.as_object_mut() {
+                    entry.insert(
+                        "content".to_string(),
+                        Value::String(truncate_chars(content, MAX_CAPTURED_CONTENT_CHARS)),
+                    );
+                }
+            }
+            if let Some(tool_calls) = message.get("tool_calls").and_then(Value::as_array) {
+                let names = tool_calls
+                    .iter()
+                    .filter_map(|entry| {
+                        entry
+                            .get("function")
+                            .and_then(|function| function.get("name"))
+                            .and_then(Value::as_str)
+                    })
+                    .map(ToString::to_string)
+                    .collect::<Vec<String>>();
+                if !names.is_empty() {
+                    if let Some(entry) = payload.as_object_mut() {
+                        entry.insert(
+                            "toolCallNames".to_string(),
+                            Value::Array(names.into_iter().map(Value::String).collect()),
+                        );
+                    }
+                }
+            }
+            if let Some(tool_call_id) = message.get("tool_call_id").and_then(Value::as_str) {
+                if let Some(entry) = payload.as_object_mut() {
+                    entry.insert("toolCallId".to_string(), Value::String(tool_call_id.to_string()));
+                }
+            }
+            payload
+        })
+        .collect::<Vec<Value>>();
+    json!({
+        "messageCount": messages.len(),
+        "capturedCount": captured.len(),
+        "messages": captured,
+    })
+}
+
+fn truncate_chars(value: &str, max_chars: usize) -> String {
+    if value.chars().count() <= max_chars {
+        return value.to_string();
+    }
+    let mut output = String::new();
+    for (index, ch) in value.chars().enumerate() {
+        if index >= max_chars {
+            break;
+        }
+        output.push(ch);
+    }
+    output.push_str("…");
+    output
 }
 
 fn deterministic_assignment_id(
@@ -1790,6 +1963,55 @@ fn deterministic_assignment_id(
         return None;
     }
     assignment_ids.iter().next().cloned()
+}
+
+fn deterministic_expected_response(
+    local_test_lane: bool,
+    saw_tool_calls: bool,
+    saw_tool_errors: bool,
+    expected_final_response: &Option<String>,
+) -> Option<String> {
+    if !local_test_lane || !saw_tool_calls || saw_tool_errors {
+        return None;
+    }
+    expected_final_response
+        .as_ref()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn missing_required_tool_calls(
+    required_tool_calls: &[String],
+    required_tool_call_counts: &HashMap<String, usize>,
+    observed_tool_counts: &HashMap<String, usize>,
+) -> Vec<String> {
+    let mut missing = Vec::new();
+    for required in required_tool_calls {
+        let required_count = required_tool_call_counts
+            .get(required)
+            .copied()
+            .unwrap_or(1);
+        let observed = observed_tool_counts
+            .get(required)
+            .copied()
+            .unwrap_or(0);
+        if observed < required_count {
+            if required_count > 1 {
+                missing.push(format!("{required} (need {required_count}, saw {observed})"));
+            } else {
+                missing.push(required.clone());
+            }
+        }
+    }
+    missing
+}
+
+fn format_missing_required_calls(missing_required: &[String]) -> String {
+    missing_required
+        .iter()
+        .map(|entry| format!("`{entry}`"))
+        .collect::<Vec<String>>()
+        .join(", ")
 }
 
 fn tool_result_error_text(result: &Value) -> Option<String> {
@@ -1858,6 +2080,10 @@ fn render_tool_result_markdown(result: &Value) -> String {
         }
         if let Some(retryable) = error.get("retryable").and_then(Value::as_bool) {
             lines.push(format!("  - retryable: {}", retryable));
+        }
+        if let Some(details) = error.get("details") {
+            lines.push("  - details:".to_string());
+            lines.extend(render_value_markdown(details, 4));
         }
     } else if let Some(value) = result.get("value") {
         lines.push("- value:".to_string());
@@ -1933,13 +2159,32 @@ fn collect_assignment_ids(value: &Value, assignment_ids: &mut HashSet<String>) {
     }
 }
 
+fn collect_tool_api_call_counts(value: &Value, observed_tool_counts: &mut HashMap<String, usize>) {
+    let calls = value
+        .get("api_calls")
+        .and_then(Value::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|entry| !entry.is_empty())
+                .map(ToString::to_string)
+                .collect::<Vec<String>>()
+        })
+        .unwrap_or_default();
+    for call in calls {
+        *observed_tool_counts.entry(call).or_insert(0) += 1;
+    }
+}
+
 fn build_openai_messages(
     context: &ThreadContextCache,
     static_prompt: &StaticPromptContext,
 ) -> Vec<Value> {
     let mut messages = vec![json!({
         "role": "system",
-        "content": "You are Papyrus, an editorial assistant for an autonomous newsroom. Be concise, accurate, and concrete. Raw console chat turns are working memory and are excluded from default semantic searches unless explicitly requested. When a chat produces durable insight, recommend creating an insight Message instead of making every chat turn canonical knowledge. Use execute_tactus for Papyrus runtime work. For user requests like \"most recent references\" or \"tell me about recent references\", do not ask clarifying questions first: immediately call execute_tactus with a Reference.list snippet using markdown output, then summarize the returned references."
+        "content": "You are Papyrus, an editorial assistant for an autonomous newsroom. Be concise, accurate, and concrete. Raw console chat turns are working memory and are excluded from default semantic searches unless explicitly requested. When a chat produces durable insight, recommend creating an insight Message instead of making every chat turn canonical knowledge. Use execute_tactus for Papyrus runtime work. For user requests like \"most recent references\" or \"tell me about recent references\", do not ask clarifying questions first: immediately call execute_tactus with a Reference.list snippet, then summarize the returned references."
     })];
     if !static_prompt.publication_mission.trim().is_empty() {
         messages.push(json!({
@@ -1970,7 +2215,7 @@ fn build_openai_messages(
         messages.push(json!({
             "role": "system",
             "content": format!(
-                "execute_tactus supports a resource-oriented Papyrus API. Use api_list{{}} for the resource/verb schema. For recent-reference requests, call Reference.list{{ limit = <count>, order = \"newest\", format = \"markdown\" }} and then summarize results. Tool responses should be markdown, not JSON. Use docs_list{{ namespace = \"resources\" }} first, then docs_get{{ id = \"resources.Assignment\" }} before non-trivial writes. To create a research assignment, use Assignment.create{{ type = \"research\", title = \"...\", apply = true }}.\nAvailable doc topics:\n{}",
+                "execute_tactus supports a resource-oriented Papyrus API. Use api_list{{}} for the resource/verb schema. For recent-reference requests, call Reference.list{{ limit = <count>, order = \"newest\" }} and then summarize results. Tool responses are markdown only, never JSON. Use docs_list{{ namespace = \"resources\" }} first, then docs_get{{ id = \"resources.Assignment\" }} before non-trivial writes. To create a research assignment, use Assignment.create{{ type = \"research\", title = \"...\", apply = true }}.\nAvailable doc topics:\n{}",
                 docs_lines
             )
         }));
@@ -2045,8 +2290,8 @@ fn cached_tool_call_id(cached: &CachedPromptMessage) -> String {
         .unwrap_or_else(|| format!("cached-tool-call-{}", cached.id))
 }
 
-fn openai_request(model: &str, messages: Vec<Value>) -> Value {
-    json!({
+fn openai_request(model: &str, messages: Vec<Value>, require_tool_calls: bool) -> Value {
+    let mut payload = json!({
         "model": model,
         "messages": messages,
         "parallel_tool_calls": false,
@@ -2073,7 +2318,11 @@ fn openai_request(model: &str, messages: Vec<Value>) -> Value {
             }
         ],
         "tool_choice": "auto"
-    })
+    });
+    if require_tool_calls {
+        payload["tool_choice"] = Value::String("required".to_string());
+    }
+    payload
 }
 
 #[derive(Debug)]
@@ -2271,7 +2520,7 @@ async fn execute_tactus_tool(
         }
     });
     match call_execute_tactus_runner(state, &tool_input).await {
-        Ok(value) => value,
+        Ok(value) => normalize_execute_tactus_result(value),
         Err(error) => json!({
             "ok": false,
             "error": {
@@ -2281,6 +2530,48 @@ async fn execute_tactus_tool(
             }
         }),
     }
+}
+
+fn normalize_execute_tactus_result(value: Value) -> Value {
+    let Some(error_obj) = value.get("error").and_then(Value::as_object) else {
+        return value;
+    };
+    let code = error_obj
+        .get("code")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let message = error_obj
+        .get("message")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let parse_like = message.contains("Failed to parse DSL")
+        || message.contains("error loading code")
+        || message.contains("unfinished string")
+        || message.contains("'end' expected")
+        || message.contains("unexpected symbol near")
+        || message.contains("tactus must be a non-empty string");
+    if !parse_like || (code != "tactus_execution_failed" && code != "invalid_request") {
+        return value;
+    }
+    json!({
+        "ok": false,
+        "error": {
+            "code": "unsupported_snippet",
+            "message": format!(
+                "Snippet rejected: execute_tactus requires valid Lua/Tactus table-call syntax in `tactus`. {}",
+                message
+            ),
+            "retryable": true,
+            "details": {
+                "contractVersion": "execute_tactus_snippet_contract_v1",
+                "acceptedSyntaxExamples": [
+                    "return docs_get{ id = \"resources.Assignment\" }",
+                    "return Assignment.create{ type = \"research\", title = \"...\", apply = true }"
+                ],
+                "guidance": "Use non-empty Lua in `tactus`; avoid JS object-call syntax and malformed escaping."
+            }
+        }
+    })
 }
 
 async fn call_execute_tactus_runner(state: &AppState, input: &Value) -> Result<Value> {
@@ -2388,6 +2679,48 @@ fn metadata_string_field(metadata: &Value, key: &str) -> Option<String> {
 
 fn metadata_i64_field(metadata: &Value, key: &str) -> Option<i64> {
     metadata_value_field(metadata, key).and_then(|value| value.as_i64())
+}
+
+fn metadata_string_list_field(metadata: &Value, key: &str) -> Vec<String> {
+    let Some(value) = metadata_value_field(metadata, key) else {
+        return Vec::new();
+    };
+    let Some(entries) = value.as_array() else {
+        return Vec::new();
+    };
+    entries
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn metadata_string_usize_map_field(metadata: &Value, key: &str) -> HashMap<String, usize> {
+    let Some(value) = metadata_value_field(metadata, key) else {
+        return HashMap::new();
+    };
+    let Some(entries) = value.as_object() else {
+        return HashMap::new();
+    };
+    entries
+        .iter()
+        .filter_map(|(entry_key, entry_value)| {
+            let trimmed = entry_key.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            let numeric = entry_value
+                .as_u64()
+                .or_else(|| entry_value.as_i64().and_then(|value| u64::try_from(value).ok()))
+                .and_then(|value| usize::try_from(value).ok())?;
+            if numeric == 0 {
+                return None;
+            }
+            Some((trimmed.to_string(), numeric))
+        })
+        .collect()
 }
 
 fn metadata_value_field(metadata: &Value, key: &str) -> Option<Value> {

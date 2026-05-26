@@ -14,6 +14,8 @@ type ReaderAuthControlProps = {
   authState?: ReaderAuthSnapshot;
 };
 
+const POST_AUTH_PATH_KEY = "papyrus:reader-auth:post-auth-path";
+
 export function ReaderAuthControl({
   className,
   dataFooterUtility,
@@ -27,9 +29,12 @@ export function ReaderAuthControl({
   const isExternallyManaged = Boolean(externalAuthState);
 
   const replaceWithPostAuthPath = useCallback(() => {
-    if (!postAuthPath) return;
+    const storedPath = typeof window === "undefined" ? null : window.sessionStorage.getItem(POST_AUTH_PATH_KEY);
+    const nextPath = postAuthPath ?? storedPath;
+    if (!nextPath) return;
     if (window.location.pathname !== "/" || window.location.search || window.location.hash) return;
-    window.history.replaceState(window.history.state, "", postAuthPath);
+    if (storedPath) window.sessionStorage.removeItem(POST_AUTH_PATH_KEY);
+    window.history.replaceState(window.history.state, "", nextPath);
   }, [postAuthPath]);
 
   const refreshAuthState = useCallback(async () => {
@@ -64,7 +69,9 @@ export function ReaderAuthControl({
       ) {
         void refreshIfActive();
       }
-      if (payload.event === "signInWithRedirect_failure") setError("Sign-in failed");
+      if (payload.event === "signInWithRedirect_failure") {
+        setError(formatAuthFailure(payload.data));
+      }
     });
 
     return () => {
@@ -78,10 +85,21 @@ export function ReaderAuthControl({
     setBusy(true);
     setError(null);
     try {
+      if (typeof window !== "undefined") {
+        const intendedPath = postAuthPath ?? `${window.location.pathname}${window.location.search}${window.location.hash}`;
+        if (intendedPath && intendedPath !== "/") {
+          window.sessionStorage.setItem(POST_AUTH_PATH_KEY, intendedPath);
+        } else {
+          window.sessionStorage.removeItem(POST_AUTH_PATH_KEY);
+        }
+        if (window.location.pathname !== "/" || window.location.search || window.location.hash) {
+          window.history.replaceState(window.history.state, "", "/");
+        }
+      }
       await signInWithRedirect({ provider: "Google" });
-    } catch {
+    } catch (error) {
       setBusy(false);
-      setError("Sign-in failed");
+      setError(formatAuthFailure(error));
     }
   };
 
@@ -120,4 +138,25 @@ export function ReaderAuthControl({
       </button>
     </span>
   );
+}
+
+function formatAuthFailure(error: unknown): string {
+  const detail = extractAuthFailureDetail(error);
+  return detail ? `Sign-in failed: ${detail}` : "Sign-in failed";
+}
+
+function extractAuthFailureDetail(error: unknown): string | null {
+  if (!error) return null;
+  if (typeof error === "string") return error;
+  if (typeof error !== "object") return null;
+
+  const record = error as Record<string, unknown>;
+  const message = record.message;
+  if (typeof message === "string" && message.trim().length > 0) return message;
+  const name = record.name;
+  if (typeof name === "string" && name.trim().length > 0) return name;
+
+  const nested = record.error;
+  if (nested && nested !== error) return extractAuthFailureDetail(nested);
+  return null;
 }

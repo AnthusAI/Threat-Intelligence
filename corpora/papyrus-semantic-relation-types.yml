@@ -99,6 +99,28 @@ relationTypes:
     isSymmetric: false
     isTransitive: false
     contextPackTags: [reference_curation, research, context_ranking]
+  - key: reference_summary_1000_tokens
+    label: 1000-token reference summary
+    inverseLabel: 1000-token summary for
+    description: Links a private Message to the Reference it summarizes with a maximum budget of 1000 tokens.
+    domain: summarization
+    allowedSubjectKinds: [message]
+    allowedObjectKinds: [reference]
+    isDirectional: true
+    isSymmetric: false
+    isTransitive: false
+    contextPackTags: [reference_curation, research, context_ranking]
+  - key: reference_summary_1800_tokens
+    label: 1800-token reference summary
+    inverseLabel: 1800-token summary for
+    description: Links a private Message to the Reference it summarizes with a maximum budget of 1800 tokens.
+    domain: summarization
+    allowedSubjectKinds: [message]
+    allowedObjectKinds: [reference]
+    isDirectional: true
+    isSymmetric: false
+    isTransitive: false
+    contextPackTags: [reference_curation, research, context_ranking]
   - key: quality_rating_is
     label: quality rating is
     inverseLabel: quality rating for

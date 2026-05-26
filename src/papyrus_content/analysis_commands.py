@@ -189,6 +189,7 @@ def analysis_import_graph_artifact(flags: list[str]) -> None:
     result = plan_graph_artifact_import(client, import_run_id)
     changed_records = sum(1 for change in result["changes"] if change.get("action") != "noop")
     if not apply:
+        unresolved_reference_item_ids = result["plan"].get("unresolvedReferenceItemIds") or []
         payload = {
             "ok": True,
             "command": "analysis import-graph-artifact",
@@ -198,6 +199,10 @@ def analysis_import_graph_artifact(flags: list[str]) -> None:
             "storagePath": result["attachment"].get("storagePath"),
             "plannedRecords": len(result["plan"]["records"]),
             "changedRecords": changed_records,
+            "mentionEdges": result["plan"]["mentionEdgeCount"],
+            "mentionRelations": result["plan"]["mentionRelationCount"],
+            "unresolvedReferences": result["plan"]["unresolvedReferences"],
+            "unresolvedReferenceItemIds": unresolved_reference_item_ids[:50],
             "next": f"poetry run papyrus analysis import-graph-artifact --import-run {import_run_id} --apply",
         }
         if options.get("json"):
@@ -207,6 +212,14 @@ def analysis_import_graph_artifact(flags: list[str]) -> None:
             print(f"graph-artifact-import\timport-run\t{import_run_id}")
             print(f"graph-artifact-import\tsnapshot\t{result['plan']['snapshotRef']}")
             print(f"graph-artifact-import\tchanged-records\t{changed_records}")
+            print(f"graph-artifact-import\tmention-edges\t{result['plan']['mentionEdgeCount']}")
+            print(f"graph-artifact-import\tmention-relations\t{result['plan']['mentionRelationCount']}")
+            print(f"graph-artifact-import\tunresolved-references\t{result['plan']['unresolvedReferences']}")
+            if unresolved_reference_item_ids:
+                print(
+                    "graph-artifact-import\tunresolved-reference-item-ids\t"
+                    f"{', '.join(str(value) for value in unresolved_reference_item_ids[:20])}"
+                )
             print(f"graph-artifact-import\tnext\t{payload['next']}")
         return
     apply_record_changes(client, result["changes"])
@@ -229,6 +242,10 @@ def analysis_import_graph_artifact(flags: list[str]) -> None:
                     "changedRecords": changed_records,
                     "semanticNodes": result["plan"]["semanticNodeCount"],
                     "semanticRelations": result["plan"]["semanticRelationCount"],
+                    "mentionEdges": result["plan"]["mentionEdgeCount"],
+                    "mentionRelations": result["plan"]["mentionRelationCount"],
+                    "unresolvedReferences": result["plan"]["unresolvedReferences"],
+                    "unresolvedReferenceItemIds": (result["plan"].get("unresolvedReferenceItemIds") or [])[:50],
                 },
                 indent=2,
             )
@@ -238,6 +255,138 @@ def analysis_import_graph_artifact(flags: list[str]) -> None:
         print(f"graph-artifact-import\timport-run\t{import_run_id}")
         print(f"graph-artifact-import\tsnapshot\t{result['plan']['snapshotRef']}")
         print(f"graph-artifact-import\tchanged-records\t{changed_records}")
+        print(f"graph-artifact-import\tmention-edges\t{result['plan']['mentionEdgeCount']}")
+        print(f"graph-artifact-import\tmention-relations\t{result['plan']['mentionRelationCount']}")
+        print(f"graph-artifact-import\tunresolved-references\t{result['plan']['unresolvedReferences']}")
+
+
+def analysis_doctor_entity_graph(flags: list[str]) -> None:
+    options = parse_options(flags)
+    started_at = datetime.now(timezone.utc)
+    client, _ = create_authoring_client()
+    corpus_id = _graph_artifact_corpus_id_from_options(options)
+    references = [
+        row
+        for row in client.list_records("Reference")
+        if (not corpus_id or row.get("corpusId") == corpus_id)
+        and row.get("versionState") == "current"
+        and row.get("curationStatus") == "accepted"
+    ]
+    semantic_nodes = [
+        row
+        for row in client.list_records("SemanticNode")
+        if (not corpus_id or row.get("corpusId") == corpus_id) and row.get("versionState") == "current"
+    ]
+    rows, diagnostics = fetch_graph_artifact_rows_indexed(client, corpus_id=corpus_id)
+    graph_import_run_ids = {str(row.get("importRunId")) for row in rows if row.get("importRunId")}
+    semantic_relations = client.list_records("SemanticRelation")
+    graph_semantic_relations = [
+        row
+        for row in semantic_relations
+        if row.get("relationState") == "current" and row.get("importRunId") in graph_import_run_ids
+    ]
+    mention_relations = [row for row in graph_semantic_relations if row.get("predicate") == "mentions"]
+    unresolved_references = 0
+    unresolved_reference_item_ids: list[str] = []
+    for row in rows:
+        payload_record = row.get("rawPayload") or {}
+        payload_blob = payload_record.get("payload")
+        if not payload_blob:
+            continue
+        try:
+            parsed = json.loads(payload_blob)
+        except json.JSONDecodeError:
+            continue
+        unresolved_references += int(parsed.get("unresolvedReferences") or 0)
+        for value in parsed.get("unresolvedReferenceItemIds") or []:
+            normalized = normalize_string(value)
+            if normalized and normalized not in unresolved_reference_item_ids:
+                unresolved_reference_item_ids.append(normalized)
+    semantic_node_kind_counts: dict[str, int] = {}
+    for row in semantic_nodes:
+        key = normalize_string(row.get("nodeKind")) or "unknown"
+        semantic_node_kind_counts[key] = semantic_node_kind_counts.get(key, 0) + 1
+    mention_edges = 0
+    latest_row = None
+    if rows:
+        rows.sort(
+            key=lambda left: (
+                str(left.get("importedAt") or ""),
+                str(left.get("importRunId") or ""),
+            ),
+            reverse=True,
+        )
+        latest_row = rows[0]
+        latest_payload_record = (latest_row.get("rawPayload") or {}).get("payload")
+        if isinstance(latest_payload_record, str):
+            try:
+                latest_payload = json.loads(latest_payload_record)
+                mention_edges = int(latest_payload.get("stats", {}).get("mentions_found") or latest_payload.get("edgeCount") or 0)
+            except json.JSONDecodeError:
+                mention_edges = 0
+    blockers: list[str] = []
+    if not rows:
+        blockers.append("no_graph_artifact")
+    if rows and not semantic_nodes:
+        blockers.append("graph_artifact_without_semantic_nodes")
+    if unresolved_references > 0:
+        blockers.append("unresolved_reference_item_ids")
+    if rows and not mention_relations:
+        blockers.append("no_mentions_relations")
+    elapsed_ms = int((datetime.now(timezone.utc) - started_at).total_seconds() * 1000)
+    diagnostics["elapsedMs"] = elapsed_ms
+    result = {
+        "ok": len(blockers) == 0,
+        "command": "analysis doctor-entity-graph",
+        "corpusId": corpus_id,
+        "counts": {
+            "acceptedReferences": len(references),
+            "graphArtifacts": len(rows),
+            "semanticNodes": len(semantic_nodes),
+            "semanticNodesByKind": semantic_node_kind_counts,
+            "graphSemanticRelations": len(graph_semantic_relations),
+            "mentionsRelations": len(mention_relations),
+            "unresolvedReferences": unresolved_references,
+            "mentionsEdgesEstimate": mention_edges,
+        },
+        "latest": {
+            "importRunId": (latest_row or {}).get("importRunId"),
+            "artifactId": (latest_row or {}).get("artifactId"),
+            "snapshotId": (latest_row or {}).get("sourceSnapshotId"),
+            "importedAt": (latest_row or {}).get("importedAt"),
+        },
+        "blockers": blockers,
+        "unresolvedReferenceItemIds": unresolved_reference_item_ids[:100],
+        "query": diagnostics,
+        "next": (
+            "poetry run papyrus analysis run-now --profile entity-extraction --apply "
+            if not rows
+            else (
+                "poetry run papyrus analysis import-graph-artifact --import-run <id> --apply"
+                if rows and not graph_semantic_relations
+                else None
+            )
+        ),
+    }
+    if options.get("json"):
+        print(json.dumps(result, indent=2))
+        return
+    print(f"analysis-doctor\tentity-graph\tok\t{result['ok']}")
+    print(f"analysis-doctor\tentity-graph\tcorpus\t{corpus_id or '-'}")
+    print(f"analysis-doctor\tentity-graph\taccepted-references\t{result['counts']['acceptedReferences']}")
+    print(f"analysis-doctor\tentity-graph\tgraph-artifacts\t{result['counts']['graphArtifacts']}")
+    print(f"analysis-doctor\tentity-graph\tsemantic-nodes\t{result['counts']['semanticNodes']}")
+    print(f"analysis-doctor\tentity-graph\tmentions-relations\t{result['counts']['mentionsRelations']}")
+    print(f"analysis-doctor\tentity-graph\tunresolved-references\t{result['counts']['unresolvedReferences']}")
+    if blockers:
+        print(f"analysis-doctor\tentity-graph\tblockers\t{', '.join(blockers)}")
+    if unresolved_reference_item_ids:
+        print(
+            "analysis-doctor\tentity-graph\tunresolved-item-ids\t"
+            f"{', '.join(unresolved_reference_item_ids[:20])}"
+        )
+    if result["next"]:
+        print(f"analysis-doctor\tentity-graph\tnext\t{result['next']}")
 
 
 def _build_analysis_reindex_plan_from_options(options: dict[str, Any], flags: list[str]) -> dict[str, Any]:

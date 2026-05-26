@@ -303,6 +303,7 @@ class S3VectorsProvider:
         if diversity == "broad":
             source_matches = (
                 self._query_vectors(vector, scope, query_limit, vector_kind="reference_summary")
+                + self._query_vectors(vector, scope, query_limit, vector_kind="reference_card")
                 + self._query_vectors(vector, scope, query_limit, vector_kind="insight_source")
                 + self._query_vectors(vector, scope, query_limit, vector_kind="insight_summary")
             )

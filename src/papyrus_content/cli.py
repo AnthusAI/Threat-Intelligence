@@ -20,6 +20,7 @@ from .accession import (
 )
 from .analysis_commands import (
     analysis_create_reindex_assignment,
+    analysis_doctor_entity_graph,
     analysis_execute_assignment,
     analysis_graph_artifacts,
     analysis_import_graph_artifact,
@@ -127,6 +128,7 @@ from .newsroom_commands import (
     newsroom_backfill_operational_indexes,
     newsroom_import_sections,
     newsroom_prune_attachments,
+    newsroom_repair_message_status,
     newsroom_recount_summary,
     newsroom_seed_required_procedures,
 )
@@ -231,7 +233,9 @@ PORTED_COMMANDS = frozenset(
         "analysis:execute-assignment",
         "analysis:graph-artifacts",
         "analysis:import-graph-artifact",
+        "analysis:doctor-entity-graph",
         "newsroom:recount-summary",
+        "newsroom:repair-message-status",
         "newsroom:prune-attachments",
         "newsroom:backfill-feed-fields",
         "newsroom:backfill-operational-indexes",
@@ -433,8 +437,12 @@ def dispatch(group: str, command: str, flags: list[str]) -> None:
         analysis_graph_artifacts(flags)
     elif route == "analysis:import-graph-artifact":
         analysis_import_graph_artifact(flags)
+    elif route == "analysis:doctor-entity-graph":
+        analysis_doctor_entity_graph(flags)
     elif route == "newsroom:recount-summary":
         newsroom_recount_summary(flags)
+    elif route == "newsroom:repair-message-status":
+        newsroom_repair_message_status(flags)
     elif route == "newsroom:prune-attachments":
         newsroom_prune_attachments(flags)
     elif route == "newsroom:backfill-feed-fields":
@@ -1082,8 +1090,8 @@ def print_usage() -> None:
     print("Python-native: content inspect, content schema-check, content list articles,")
     print("  corpora status/worker-bootstrap/sync-*, references catalog/accession/curation/export commands,")
     print("  assignments list, analysis profiles/validate-profiles/reindex-plan/preview-reindex/")
-    print("  create-reindex-assignment/run-now/execute-assignment/graph-artifacts/import-graph-artifact,")
-    print("  newsroom recount-summary/prune-attachments/backfill-feed-fields/")
+    print("  create-reindex-assignment/run-now/execute-assignment/graph-artifacts/import-graph-artifact/doctor-entity-graph,")
+    print("  newsroom recount-summary/repair-message-status/prune-attachments/backfill-feed-fields/")
     print("  backfill-operational-indexes/import-sections,")
     print("  relations import-types/backfill, messages export/import-legacy-comments,")
     print("  categories import/export/draft/review/curation-cycle commands,")

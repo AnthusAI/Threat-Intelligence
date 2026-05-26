@@ -53,6 +53,19 @@ PASSAGE_STOPWORDS = {
     "or", "our", "that", "the", "their", "this", "to", "we", "what", "with",
 }
 
+MODEL_ATTACHMENT_FIELDS = """
+id ownerKind ownerId role sortKey storagePath status createdAt updatedAt
+"""
+
+LIST_MODEL_ATTACHMENTS_BY_OWNER_QUERY = f"""
+query ListModelAttachmentsByOwner($ownerId: ID!, $limit: Int, $nextToken: String) {{
+  listModelAttachmentsByOwnerRoleAndSortKey(ownerId: $ownerId, limit: $limit, nextToken: $nextToken) {{
+    items {{ {MODEL_ATTACHMENT_FIELDS} }}
+    nextToken
+  }}
+}}
+"""
+
 
 def _default_see_also_max_tokens(max_tokens: int | None) -> int:
     if not max_tokens:
@@ -1736,51 +1749,98 @@ def _collect_reference_summaries(
     warnings: list[str],
 ) -> None:
     graph = services.graph
-    if not graph or not hasattr(graph, "list_incoming_relations"):
+    if not graph:
         return
     summaries: list[dict[str, Any]] = []
     references = _reference_objects(structured)
 
-    def load_summaries(reference: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
-        local_summaries: list[dict[str, Any]] = []
+    def load_summary(reference: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
         local_warnings: list[str] = []
-        lineage_id = str(reference.get("lineageId") or reference.get("id") or "")
-        if not lineage_id:
-            return local_summaries, local_warnings
-        try:
-            incoming = graph.list_incoming_relations(reference)  # type: ignore[attr-defined]
-        except Exception as exc:  # pragma: no cover - defensive runtime note
-            local_warnings.append(f"Could not load reference summaries for {object_title(reference) or anchor_ref(reference)}: {exc}")
-            return local_summaries, local_warnings
-        for relation in incoming:
-            summary = _reference_summary_from_relation(reference, relation, graph, services)
-            if summary:
-                local_summaries.append(summary)
-        return local_summaries, local_warnings
+        attachment_summary = None
+        if hasattr(graph, "graphql") and services.corpus_text is not None:
+            try:
+                attachment_summary = _reference_summary_from_metadata_attachment(reference, graph, services)
+            except Exception as exc:  # pragma: no cover - defensive runtime note
+                local_warnings.append(f"Could not load reference summaries for {object_title(reference) or anchor_ref(reference)}: {exc}")
+        if attachment_summary:
+            return [attachment_summary], local_warnings
+        if hasattr(graph, "list_incoming_relations"):
+            try:
+                incoming = graph.list_incoming_relations(reference)  # type: ignore[attr-defined]
+            except Exception as exc:  # pragma: no cover - defensive runtime note
+                local_warnings.append(f"Could not load legacy reference summaries for {object_title(reference) or anchor_ref(reference)}: {exc}")
+                return [], local_warnings
+            return [
+                summary
+                for relation in incoming or []
+                for summary in [_reference_summary_from_relation(reference, relation, graph, services)]
+                if summary
+            ], local_warnings
+        return [], local_warnings
 
-    if hasattr(graph, "list_incoming_relations_batch"):
-        incoming_by_reference = graph.list_incoming_relations_batch(references)  # type: ignore[attr-defined]
-        results = []
-        for reference in references:
-            lineage_id = str(reference.get("lineageId") or reference.get("id") or "")
-            local_summaries = []
-            for relation in incoming_by_reference.get(lineage_id, []):
-                summary = _reference_summary_from_relation(reference, relation, graph, services)
-                if summary:
-                    local_summaries.append(summary)
-            results.append((local_summaries, []))
+    worker_count = _graph_fetch_worker_count(request, len(references))
+    if worker_count <= 1:
+        results = [load_summary(reference) for reference in references]
     else:
-        worker_count = _graph_fetch_worker_count(request, len(references))
-        if worker_count <= 1:
-            results = [load_summaries(reference) for reference in references]
-        else:
-            with ThreadPoolExecutor(max_workers=worker_count) as executor:
-                futures = [executor.submit(load_summaries, reference) for reference in references]
-                results = [future.result() for future in as_completed(futures)]
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            futures = [executor.submit(load_summary, reference) for reference in references]
+            results = [future.result() for future in as_completed(futures)]
     for local_summaries, local_warnings in results:
         summaries.extend(local_summaries)
         warnings.extend(local_warnings)
     structured["referenceSummaries"] = _dedupe_reference_summaries([*(structured.get("referenceSummaries") or []), *summaries])
+
+
+def _reference_summary_from_metadata_attachment(
+    reference: dict[str, Any],
+    graph: Any,
+    services: KnowledgeQueryServices,
+) -> dict[str, Any] | None:
+    attachment = _reference_metadata_attachment(graph, reference)
+    if not attachment:
+        return None
+    storage_path = str(attachment.get("storagePath") or "").strip()
+    if not storage_path:
+        return None
+    text_payload = services.corpus_text.read_text(storage_path)
+    if not text_payload:
+        return None
+    try:
+        metadata_payload = json.loads(text_payload)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(metadata_payload, dict):
+        return None
+    text = str(metadata_payload.get("summary") or "").strip()
+    if not text:
+        return None
+    summary_resolution = metadata_payload.get("summary_resolution") if isinstance(metadata_payload.get("summary_resolution"), dict) else {}
+    max_tokens = summary_resolution.get("summaryTokenBudget")
+    try:
+        max_tokens = int(max_tokens)
+    except (TypeError, ValueError):
+        max_tokens = services.token_counter.count(text)
+    reference_lineage_id = str(reference.get("lineageId") or reference.get("id") or "")
+    actual_tokens = services.token_counter.count(text)
+    return {
+        "id": f"{reference_lineage_id}:summary:{max_tokens}",
+        "referenceId": reference.get("id"),
+        "referenceLineageId": reference_lineage_id,
+        "referenceTitle": object_title(reference),
+        "objectUri": object_uri(reference),
+        "messageId": None,
+        "messageLineageId": None,
+        "relationId": None,
+        "relationTypeKey": "reference_summary_metadata_attachment",
+        "maxTokens": max_tokens,
+        "actualTokens": actual_tokens,
+        "createdAt": attachment.get("updatedAt") or attachment.get("createdAt"),
+        "model": summary_resolution.get("model"),
+        "tokenizer": None,
+        "summary": text,
+        "text": text,
+        "tokens": actual_tokens,
+    }
 
 
 def _reference_summary_from_relation(
@@ -1839,6 +1899,38 @@ def _reference_summary_from_relation(
         "text": text,
         "tokens": services.token_counter.count(text),
     }
+
+
+def _reference_metadata_attachment(graph: Any, reference: dict[str, Any]) -> dict[str, Any] | None:
+    if not hasattr(graph, "graphql"):
+        return None
+    reference_id = str(reference.get("id") or "")
+    if not reference_id:
+        return None
+    next_token = None
+    while True:
+        payload = graph.graphql(
+            LIST_MODEL_ATTACHMENTS_BY_OWNER_QUERY,
+            {"ownerId": reference_id, "limit": 50, "nextToken": next_token},
+        )
+        connection = payload.get("listModelAttachmentsByOwnerRoleAndSortKey") or {}
+        items = connection.get("items") or []
+        candidates = [
+            item
+            for item in items
+            if item
+            and item.get("ownerKind") == "reference"
+            and item.get("ownerId") == reference_id
+            and item.get("role") == "metadata"
+            and item.get("sortKey") == "metadata"
+            and item.get("status") != "deleted"
+            and item.get("storagePath")
+        ]
+        if candidates:
+            return sorted(candidates, key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""), reverse=True)[0]
+        next_token = connection.get("nextToken")
+        if not next_token:
+            return None
 
 
 def _seed_evidence_from_reference_summaries(

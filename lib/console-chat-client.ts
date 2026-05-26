@@ -898,7 +898,12 @@ async function listConsoleMessagesRaw(pageSize: number, maxMessages: number): Pr
   const selectionSets = schema.messageFields.size
     ? [chooseMessageSelectionSet(schema.messageFields)]
     : [CONSOLE_MESSAGE_FIELDS, CONSOLE_MESSAGE_FIELDS_LEGACY];
-  const attempts: Array<{ field: string; query: string; variables: Record<string, unknown> }> = [];
+  const attempts: Array<{
+    field: string;
+    query: string;
+    variables: Record<string, unknown>;
+    messageKinds?: string[];
+  }> = [];
 
   const addDynamicAttempt = (
     field: "listMessagesByNewsroomFeedAndCreatedAt" | "listMessagesByKindAndCreatedAt" | "listMessagesByDomainAndCreatedAt" | "listMessages",
@@ -919,10 +924,14 @@ async function listConsoleMessagesRaw(pageSize: number, maxMessages: number): Pr
       limit: pageSize,
     });
 
-    addDynamicAttempt("listMessagesByKindAndCreatedAt", selectionSet, {
-      messageKind: CONSOLE_MESSAGE_KIND,
-      limit: pageSize,
-    });
+    if (schema.queryFields.size === 0 || schema.queryFields.has("listMessagesByKindAndCreatedAt")) {
+      attempts.push({
+        field: "listMessagesByKindAndCreatedAt",
+        query: buildListMessagesQuery("listMessagesByKindAndCreatedAt", selectionSet),
+        variables: { limit: pageSize },
+        messageKinds: [CONSOLE_MESSAGE_KIND, CONSOLE_TOOL_CALL_KIND, CONSOLE_TOOL_RESULT_KIND],
+      });
+    }
 
     addDynamicAttempt("listMessagesByDomainAndCreatedAt", selectionSet, {
       messageDomain: CONSOLE_MESSAGE_DOMAIN,
@@ -952,6 +961,15 @@ async function listConsoleMessagesRaw(pageSize: number, maxMessages: number): Pr
   let lastError: unknown = null;
   for (const attempt of attempts) {
     try {
+      if (attempt.messageKinds?.length && attempt.field === "listMessagesByKindAndCreatedAt") {
+        return await listMessagesByKindsWithQuery(
+          attempt.field,
+          attempt.query,
+          attempt.variables,
+          attempt.messageKinds,
+          maxMessages,
+        );
+      }
       return await listMessagesWithQuery(attempt.field, attempt.query, attempt.variables, maxMessages);
     } catch (error) {
       if (!isUnavailableQueryError(error)) throw error;
@@ -960,6 +978,27 @@ async function listConsoleMessagesRaw(pageSize: number, maxMessages: number): Pr
   }
 
   throw lastError instanceof Error ? lastError : new Error("Console chat listMessages failed: no compatible query shape.");
+}
+
+async function listMessagesByKindsWithQuery(
+  field: string,
+  query: string,
+  baseVariables: Record<string, unknown>,
+  messageKinds: string[],
+  maxMessages: number,
+): Promise<ConsoleChatMessage[]> {
+  const byId = new Map<string, ConsoleChatMessage>();
+  for (const messageKind of messageKinds) {
+    const page = await listMessagesWithQuery(field, query, { ...baseVariables, messageKind }, maxMessages);
+    for (const message of page) {
+      byId.set(message.id, message);
+    }
+  }
+  return [...byId.values()].sort(
+    (left, right) =>
+      (left.sequenceNumber ?? 0) - (right.sequenceNumber ?? 0) ||
+      left.createdAt.localeCompare(right.createdAt),
+  );
 }
 
 async function listMessagesWithQuery(

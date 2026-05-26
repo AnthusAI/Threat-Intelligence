@@ -59,6 +59,7 @@ def _map_sections(command: str, flags: list[str]) -> None:
     mapped = {
         "import": "import-sections",
         "recount-summary": "recount-summary",
+        "repair-message-status": "repair-message-status",
         "backfill-feed-fields": "backfill-feed-fields",
         "backfill-operational-indexes": "backfill-operational-indexes",
         "prune-attachments": "prune-attachments",
@@ -100,6 +101,7 @@ def _map_references(command: str, flags: list[str]) -> int:
         "summaries",
         "summarize",
         "summarize-batch",
+        "summary-cleanup-legacy",
         "quality",
         "title-subtitle",
     }

@@ -50,6 +50,15 @@ MODEL_ATTACHMENT_FIELDS = """
 id ownerKind ownerId ownerLineageId role sortKey storagePath filename mediaType byteSize sha256 status createdAt updatedAt
 """
 
+LIST_MODEL_ATTACHMENTS_BY_OWNER_QUERY = f"""
+query ListModelAttachmentsByOwner($ownerId: ID!, $limit: Int, $nextToken: String) {{
+  listModelAttachmentsByOwnerRoleAndSortKey(ownerId: $ownerId, limit: $limit, nextToken: $nextToken) {{
+    items {{ {MODEL_ATTACHMENT_FIELDS} }}
+    nextToken
+  }}
+}}
+"""
+
 
 @dataclass(frozen=True)
 class VectorIndexOptions:
@@ -233,12 +242,18 @@ def _prepare_reference_for_indexing(
         result["status"] = "empty_extracted_text"
         result["warnings"].append(f"empty extracted text for {reference.get('id')}")
         return result
-    summary_payload = _reference_summary_payload_for_indexing(services, reference)
+    metadata_payload = _reference_metadata_payload_for_indexing(services, reference)
+    summary_payload = _reference_summary_payload_from_metadata(metadata_payload)
+    if not summary_payload.get("summary"):
+        summary_payload = _reference_summary_payload_for_indexing_legacy(services, reference)
+    if not summary_payload.get("summary"):
+        result["warnings"].append(f"missing canonical summary in reference metadata attachment for {reference.get('id')}")
     result["candidates"] = _prepare_reference_vectors(
         text,
         reference,
         str(extracted["storagePath"]),
         options,
+        reference_metadata_payload=metadata_payload,
         reference_summary_payload=summary_payload,
     )
     result["status"] = "prepared"
@@ -276,7 +291,7 @@ def _consume_prepared_reference(
     wrote_any = False
     for candidate in candidates:
         stats["vectorsPrepared"] += 1
-        if candidate["metadata"].get("vectorKind") == "reference_summary":
+        if candidate["metadata"].get("vectorKind") in {"reference_card", "reference_summary"}:
             stats["sourceVectorsPrepared"] += 1
             reference_result["sourceVectorCount"] += 1
         elif candidate["metadata"].get("vectorKind") == "reference_passage":
@@ -527,6 +542,7 @@ def _prepare_reference_vectors(
     reference: dict[str, Any],
     storage_path: str,
     options: VectorIndexOptions,
+    reference_metadata_payload: dict[str, Any] | None = None,
     reference_summary_payload: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     vectors: list[dict[str, Any]] = []
@@ -536,6 +552,7 @@ def _prepare_reference_vectors(
             reference,
             storage_path,
             options,
+            reference_metadata_payload=reference_metadata_payload,
             reference_summary_payload=reference_summary_payload,
         )
         if source_vector:
@@ -547,6 +564,7 @@ def _prepare_reference_vectors(
                 reference,
                 storage_path,
                 options,
+                reference_metadata_payload=reference_metadata_payload,
                 reference_summary_payload=reference_summary_payload,
             )
         )
@@ -614,11 +632,12 @@ def _prepare_source_vector(
     reference: dict[str, Any],
     storage_path: str,
     options: VectorIndexOptions,
+    reference_metadata_payload: dict[str, Any] | None = None,
     reference_summary_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     clean = _clean_text(text)
-    title = object_title(reference) or reference.get("id") or "Reference"
-    subtitle = _reference_subtitle(reference)
+    title = _reference_title(reference, reference_metadata_payload)
+    subtitle = _reference_subtitle(reference, reference_metadata_payload)
     summary_text = str((reference_summary_payload or {}).get("summary") or "")
     source_text = _clean_text(
         "\n\n".join(
@@ -637,10 +656,15 @@ def _prepare_source_vector(
         return None
     digest = hashlib.sha256(str(reference.get("lineageId") or reference.get("id") or title).encode("utf-8")).hexdigest()[:20]
     return {
-            "key": f"reference-summary-{digest}",
+        "key": f"reference-summary-{digest}",
         "text": source_text,
         "metadata": {
-            **_base_reference_metadata(reference, options, reference_summary_payload=reference_summary_payload),
+            **_base_reference_metadata(
+                reference,
+                options,
+                reference_metadata_payload=reference_metadata_payload,
+                reference_summary_payload=reference_summary_payload,
+            ),
             "vectorKind": "reference_summary",
             "summary": _truncate_filterable_metadata(source_text, MAX_FILTERABLE_SUMMARY_CHARS),
             "text": _truncate_filterable_metadata(source_text, MAX_FILTERABLE_METADATA_CHARS),
@@ -655,6 +679,7 @@ def _prepare_chunks(
     reference: dict[str, Any],
     storage_path: str,
     options: VectorIndexOptions,
+    reference_metadata_payload: dict[str, Any] | None = None,
     reference_summary_payload: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     chunks: list[dict[str, Any]] = []
@@ -667,7 +692,12 @@ def _prepare_chunks(
             "key": f"reference-passage-{digest}",
             "text": clean,
             "metadata": {
-                **_base_reference_metadata(reference, options, reference_summary_payload=reference_summary_payload),
+                **_base_reference_metadata(
+                    reference,
+                    options,
+                    reference_metadata_payload=reference_metadata_payload,
+                    reference_summary_payload=reference_summary_payload,
+                ),
                 "vectorKind": "reference_passage",
                 "summary": _truncate_filterable_metadata(clean, MAX_FILTERABLE_SUMMARY_CHARS),
                 "text": _truncate_filterable_metadata(clean, MAX_FILTERABLE_METADATA_CHARS),
@@ -686,10 +716,11 @@ def _prepare_chunks(
 def _base_reference_metadata(
     reference: dict[str, Any],
     options: VectorIndexOptions,
+    reference_metadata_payload: dict[str, Any] | None = None,
     reference_summary_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    title = object_title(reference) or reference.get("id") or "Reference"
-    subtitle = _reference_subtitle(reference)
+    title = _reference_title(reference, reference_metadata_payload)
+    subtitle = _reference_subtitle(reference, reference_metadata_payload)
     summary_payload = reference_summary_payload or {}
     reference_summary = str(summary_payload.get("summary") or "")
     return {
@@ -707,6 +738,8 @@ def _base_reference_metadata(
         "referenceSummaryMessageId": summary_payload.get("messageId"),
         "referenceSummaryRelationId": summary_payload.get("relationId"),
         "referenceSummaryRelationTypeKey": summary_payload.get("relationTypeKey"),
+        "referenceSummaryPromptVersion": summary_payload.get("promptVersion"),
+        "referenceSummaryResolvedAt": summary_payload.get("resolvedAt"),
         "curationStatus": reference.get("curationStatus"),
         "curationStatusKey": reference.get("curationStatusKey"),
     }
@@ -721,7 +754,84 @@ def _truncate_filterable_metadata(value: str, limit: int) -> str:
     return clean[: limit - 1].rstrip() + "…"
 
 
-def _reference_summary_payload_for_indexing(
+def _reference_metadata_payload_for_indexing(
+    services: KnowledgeQueryServices,
+    reference: dict[str, Any],
+) -> dict[str, Any]:
+    graph = services.graph
+    corpus_text = services.corpus_text
+    if not graph or not hasattr(graph, "graphql") or corpus_text is None:
+        return {}
+    reference_id = str(reference.get("id") or "")
+    if not reference_id:
+        return {}
+    attachment = _reference_metadata_attachment(graph, reference_id)
+    if not attachment:
+        return {}
+    storage_path = str(attachment.get("storagePath") or "")
+    if not storage_path:
+        return {}
+    try:
+        payload = corpus_text.read_text(storage_path)
+    except Exception:
+        return {}
+    if not payload:
+        return {}
+    try:
+        parsed = json.loads(payload)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _reference_metadata_attachment(graph: GraphQLKnowledgeGraphProvider, reference_id: str) -> dict[str, Any] | None:
+    next_token = None
+    while True:
+        payload = graph.graphql(
+            LIST_MODEL_ATTACHMENTS_BY_OWNER_QUERY,
+            {"ownerId": reference_id, "limit": 50, "nextToken": next_token},
+        )
+        connection = payload.get("listModelAttachmentsByOwnerRoleAndSortKey") or {}
+        items = connection.get("items") or []
+        candidates = [
+            item
+            for item in items
+            if item
+            and item.get("ownerKind") == "reference"
+            and item.get("ownerId") == reference_id
+            and item.get("role") == "metadata"
+            and item.get("sortKey") == "metadata"
+            and item.get("status") != "deleted"
+            and item.get("storagePath")
+        ]
+        if candidates:
+            return sorted(candidates, key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""), reverse=True)[0]
+        next_token = connection.get("nextToken")
+        if not next_token:
+            return None
+
+
+def _reference_summary_payload_from_metadata(metadata_payload: dict[str, Any] | None) -> dict[str, Any]:
+    payload = metadata_payload if isinstance(metadata_payload, dict) else {}
+    summary = _clean_text(str(payload.get("summary") or ""))
+    summary_resolution = payload.get("summary_resolution") if isinstance(payload.get("summary_resolution"), dict) else {}
+    if not summary:
+        return {}
+    max_tokens = summary_resolution.get("summaryTokenBudget")
+    if max_tokens is not None:
+        try:
+            max_tokens = int(max_tokens)
+        except (TypeError, ValueError):
+            max_tokens = None
+    return {
+        "summary": summary,
+        "maxTokens": max_tokens,
+        "promptVersion": summary_resolution.get("promptVersion"),
+        "resolvedAt": summary_resolution.get("resolvedAt"),
+    }
+
+
+def _reference_summary_payload_for_indexing_legacy(
     services: KnowledgeQueryServices,
     reference: dict[str, Any],
 ) -> dict[str, Any]:
@@ -821,15 +931,35 @@ def _base_insight_metadata(message: dict[str, Any], relation: dict[str, Any], op
     return metadata
 
 
-def _reference_subtitle(reference: dict[str, Any]) -> str:
-    metadata = reference.get("metadata")
-    if isinstance(metadata, str):
-        try:
-            metadata = json.loads(metadata)
-        except json.JSONDecodeError:
-            metadata = {}
-    if not isinstance(metadata, dict):
-        metadata = {}
+def _reference_title(reference: dict[str, Any], metadata_payload: dict[str, Any] | None = None) -> str:
+    metadata = metadata_payload if isinstance(metadata_payload, dict) else {}
+    if not metadata:
+        raw_metadata = reference.get("metadata")
+        if isinstance(raw_metadata, str):
+            try:
+                raw_metadata = json.loads(raw_metadata)
+            except json.JSONDecodeError:
+                raw_metadata = {}
+        if isinstance(raw_metadata, dict):
+            metadata = raw_metadata
+    title = _clean_text(str(metadata.get("title") or ""))
+    if title:
+        return title
+    fallback = _clean_text(str(object_title(reference) or reference.get("id") or "Reference"))
+    return fallback or "Reference"
+
+
+def _reference_subtitle(reference: dict[str, Any], metadata_payload: dict[str, Any] | None = None) -> str:
+    metadata = metadata_payload if isinstance(metadata_payload, dict) else {}
+    if not metadata:
+        raw_metadata = reference.get("metadata")
+        if isinstance(raw_metadata, str):
+            try:
+                raw_metadata = json.loads(raw_metadata)
+            except json.JSONDecodeError:
+                raw_metadata = {}
+        if isinstance(raw_metadata, dict):
+            metadata = raw_metadata
     subtitle = metadata.get("subtitle")
     if subtitle is None:
         subtitle = (
@@ -838,7 +968,7 @@ def _reference_subtitle(reference: dict[str, Any]) -> str:
             else None
         )
     subtitle_text = _clean_text(subtitle or "")
-    title_text = _clean_text(reference.get("title") or "")
+    title_text = _reference_title(reference, metadata)
     if subtitle_text and subtitle_text != title_text:
         return subtitle_text
     return ""

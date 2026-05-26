@@ -34,6 +34,7 @@ from .reference_curation_signals import (
     reference_quality_set,
     reference_summarize,
     reference_summarize_batch,
+    reference_summary_cleanup_legacy,
     reference_list,
     reference_summaries,
 )
@@ -132,7 +133,7 @@ def main(argv: list[str] | None = None) -> int:
     curate_recent_parser.add_argument("--scan-limit", type=int, default=1000)
     curate_recent_parser.add_argument("--max-parallel", type=int, default=1)
     curate_recent_parser.add_argument("--model", default="gpt-5.4-mini")
-    curate_recent_parser.add_argument("--summary-max-tokens", type=int, default=500)
+    curate_recent_parser.add_argument("--summary-max-tokens", type=int, default=1800)
     curate_recent_parser.add_argument("--refresh-summary", action="store_true")
     curate_recent_parser.add_argument("--actor-label", default="papyrus")
     curate_recent_parser.add_argument("--resume", default="")
@@ -142,17 +143,17 @@ def main(argv: list[str] | None = None) -> int:
 
     summaries_parser = references_subparsers.add_parser(
         "summaries",
-        help="List budgeted summary Messages linked to one Reference",
+        help="Show canonical summary from the Reference metadata attachment",
     )
     summaries_parser.add_argument("--reference", required=True)
     summaries_parser.add_argument("--max-tokens", type=int)
 
     summarize_parser = references_subparsers.add_parser(
         "summarize",
-        help="Create or refresh one budgeted Reference summary Message",
+        help="Create or refresh canonical Reference summary metadata attachment",
     )
     summarize_parser.add_argument("--reference", required=True)
-    summarize_parser.add_argument("--max-tokens", type=int, required=True)
+    summarize_parser.add_argument("--max-tokens", type=int, default=1800)
     summarize_parser.add_argument("--summary-text", default="")
     summarize_parser.add_argument("--source-text", default="")
     summarize_parser.add_argument("--source-text-file", default="")
@@ -162,10 +163,10 @@ def main(argv: list[str] | None = None) -> int:
 
     summarize_batch_parser = references_subparsers.add_parser(
         "summarize-batch",
-        help="Create budgeted summaries for references in a corpus",
+        help="Create canonical summaries for references in a corpus",
     )
     summarize_batch_parser.add_argument("--corpus-key", required=True)
-    summarize_batch_parser.add_argument("--budgets", default="100,200,500")
+    summarize_batch_parser.add_argument("--budgets", default="1800")
     summarize_batch_parser.add_argument("--only-missing", default="true")
     summarize_batch_parser.add_argument("--max-count", type=int, default=0)
     summarize_batch_parser.add_argument("--max-parallel", type=int, default=4)
@@ -173,6 +174,13 @@ def main(argv: list[str] | None = None) -> int:
     summarize_batch_parser.add_argument("--model", default="gpt-5.4-mini")
     summarize_batch_parser.add_argument("--apply", action="store_true")
     summarize_batch_parser.add_argument("--refresh", action="store_true")
+
+    summary_cleanup_parser = references_subparsers.add_parser(
+        "summary-cleanup-legacy",
+        help="Delete legacy summary Message/SemanticRelation history for one Reference",
+    )
+    summary_cleanup_parser.add_argument("--reference", required=True)
+    summary_cleanup_parser.add_argument("--apply", action="store_true")
 
     quality_parser = references_subparsers.add_parser(
         "quality",
@@ -235,13 +243,13 @@ def main(argv: list[str] | None = None) -> int:
 
     title_subtitle_parser = references_subparsers.add_parser(
         "title-subtitle",
-        help="Resolve and persist missing Reference titles/subtitles",
+        help="Resolve and persist Reference titles/subtitles (subtitle is stored and shown verbatim from metadata attachment)",
     )
     title_subtitle_subparsers = title_subtitle_parser.add_subparsers(dest="title_subtitle_command")
 
     title_subtitle_resolve_parser = title_subtitle_subparsers.add_parser(
         "resolve",
-        help="Resolve title/subtitle for one Reference",
+        help="Resolve title/subtitle for one Reference; subtitle quality is prompt-driven",
     )
     title_subtitle_resolve_parser.add_argument("--reference", required=True)
     title_subtitle_resolve_parser.add_argument("--model", default="gpt-5.4-mini")
@@ -250,15 +258,15 @@ def main(argv: list[str] | None = None) -> int:
     title_subtitle_resolve_parser.add_argument("--source-text-file", default="")
     title_subtitle_resolve_parser.add_argument("--apply", action="store_true")
     title_subtitle_resolve_parser.add_argument("--refresh", action="store_true")
-    title_subtitle_resolve_parser.add_argument("--summary", default="true")
-    title_subtitle_resolve_parser.add_argument("--summary-max-tokens", type=int, default=500)
+    title_subtitle_resolve_parser.add_argument("--summary", default="false")
+    title_subtitle_resolve_parser.add_argument("--summary-max-tokens", type=int, default=1800)
     title_subtitle_resolve_parser.add_argument("--refresh-summary", action="store_true")
     title_subtitle_resolve_parser.add_argument("--persist-local-metadata", default="true")
     title_subtitle_resolve_parser.add_argument("--vector-sync", default="true")
 
     title_subtitle_batch_parser = title_subtitle_subparsers.add_parser(
         "batch",
-        help="Resolve title/subtitle for a batch of References",
+        help="Resolve title/subtitle for a batch of References; subtitle quality is prompt-driven",
     )
     title_subtitle_batch_parser.add_argument("--corpus-key", required=True)
     title_subtitle_batch_parser.add_argument("--status", default="all")
@@ -269,22 +277,22 @@ def main(argv: list[str] | None = None) -> int:
     title_subtitle_batch_parser.add_argument("--scan-limit", type=int, default=1000)
     title_subtitle_batch_parser.add_argument("--apply", action="store_true")
     title_subtitle_batch_parser.add_argument("--refresh", action="store_true")
-    title_subtitle_batch_parser.add_argument("--summary", default="true")
-    title_subtitle_batch_parser.add_argument("--summary-max-tokens", type=int, default=500)
+    title_subtitle_batch_parser.add_argument("--summary", default="false")
+    title_subtitle_batch_parser.add_argument("--summary-max-tokens", type=int, default=1800)
     title_subtitle_batch_parser.add_argument("--refresh-summary", action="store_true")
     title_subtitle_batch_parser.add_argument("--persist-local-metadata", default="true")
     title_subtitle_batch_parser.add_argument("--vector-sync", default="true")
 
     title_subtitle_catalog_parser = title_subtitle_subparsers.add_parser(
         "enrich-catalog",
-        help="Enrich a reference intake catalog with title/subtitle fields",
+        help="Enrich a reference intake catalog with title/subtitle fields; subtitle quality is prompt-driven",
     )
     title_subtitle_catalog_parser.add_argument("--catalog", required=True)
     title_subtitle_catalog_parser.add_argument("--output", required=True)
     title_subtitle_catalog_parser.add_argument("--model", default="gpt-5.4-mini")
     title_subtitle_catalog_parser.add_argument("--web-search", default="true")
-    title_subtitle_catalog_parser.add_argument("--summary", default="true")
-    title_subtitle_catalog_parser.add_argument("--summary-max-tokens", type=int, default=500)
+    title_subtitle_catalog_parser.add_argument("--summary", default="false")
+    title_subtitle_catalog_parser.add_argument("--summary-max-tokens", type=int, default=1800)
     title_subtitle_catalog_parser.add_argument("--refresh-summary", action="store_true")
     title_subtitle_catalog_parser.add_argument("--only-missing", default="true")
     title_subtitle_catalog_parser.add_argument("--max-count", type=int, default=0)
@@ -669,6 +677,11 @@ def _run_references_command(args: argparse.Namespace) -> dict:
             model=args.model,
             apply=args.apply,
             refresh=args.refresh,
+        )
+    if args.references_command == "summary-cleanup-legacy":
+        return reference_summary_cleanup_legacy(
+            reference_id=args.reference,
+            apply=args.apply,
         )
     if args.references_command == "quality":
         if args.quality_command == "set":

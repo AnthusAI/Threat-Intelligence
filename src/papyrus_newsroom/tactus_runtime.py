@@ -379,9 +379,6 @@ def _reference_list_resource(args: dict[str, Any]) -> Any:
         order=args.get("order") or "newest",
         scan_limit=args.get("scanLimit") or args.get("scan_limit") or 1000,
     )
-    response_format = str(args.get("format") or "markdown").strip().lower()
-    if response_format in {"json", "object", "raw"}:
-        return result
 
     items = list(result.get("items") or [])
     lines: list[str] = []

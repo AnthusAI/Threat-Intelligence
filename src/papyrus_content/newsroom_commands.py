@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .env import PAPYRUS_ROOT
+from .env import PAPYRUS_ROOT, storage_bucket_from_amplify_outputs
 from .graphql_authoring import create_authoring_client
 from .cloud_procedures import (
     SEED_REQUIRED_PROCEDURES_COMMAND,
@@ -14,11 +15,11 @@ from .cloud_procedures import (
 from .ids import safe_id
 from .model_attachments import (
     MODEL_ATTACHMENT_OWNER_MODELS,
+    build_text_model_payload_attachment,
     build_json_model_payload_attachment,
     delete_attachment_storage_paths,
     list_attachment_storage_paths,
     model_attachment_id,
-    upload_attachment_body,
 )
 from .newsroom_sections import DEFAULT_NEWSROOM_SECTIONS_PATH, build_newsroom_section_records, load_newsroom_section_seeds
 from .newsroom_summary import (
@@ -29,7 +30,7 @@ from .newsroom_summary import (
     print_newsroom_summary_recount,
     read_json_model_payload,
 )
-from .options import normalize_string, parse_options
+from .options import normalize_non_negative_integer, normalize_string, parse_options
 from .records import build_record_change_from_current, is_missing_graphql_model_error
 from .relations_commands import print_category_import_summary
 
@@ -71,7 +72,16 @@ def newsroom_recount_summary(flags: list[str]) -> None:
     references = client.list_records("Reference")
     reference_attachments = client.list_records("ReferenceAttachment")
     semantic_nodes = client.list_records("SemanticNode")
-    messages = client.list_records("Message")
+    try:
+        messages = client.list_records("Message")
+    except RuntimeError as error:
+        if _is_message_status_null_error(error):
+            raise ValueError(
+                "newsroom recount-summary failed because at least one Message has null status. "
+                "Run `poetry run papyrus newsroom repair-message-status` (dry-run) and then "
+                "`poetry run papyrus newsroom repair-message-status --apply`."
+            ) from error
+        raise
     model_attachments = client.safe_list_records("ModelAttachment")
     semantic_relations = client.list_records("SemanticRelation")
     assignments = client.list_records("Assignment")
@@ -192,6 +202,106 @@ def newsroom_recount_summary(flags: list[str]) -> None:
         )
     else:
         print(f"newsroom\trecount-summary\t{change['action']}\t{expected['id']}")
+
+
+def newsroom_repair_message_status(flags: list[str]) -> None:
+    options = parse_options(flags)
+    apply = bool(options.get("apply"))
+    status_value = normalize_string(options.get("status")) or "active"
+    max_scan_option = normalize_non_negative_integer(options.get("max-scan"), "--max-scan")
+    max_scan = max_scan_option if max_scan_option is not None else (None if apply else 2000)
+    client, _ = create_authoring_client()
+    scanned = 0
+    truncated = False
+    candidates: list[dict[str, Any]] = []
+    next_token: str | None = None
+    while True:
+        rows, next_token = client.list_messages_safe(limit=100, next_token=next_token)
+        if max_scan is not None and scanned + len(rows) > max_scan:
+            rows = rows[: max_scan - scanned]
+            truncated = True
+        scanned += len(rows)
+        for row in rows:
+            message_id = normalize_string(row.get("id"))
+            if not message_id:
+                continue
+            try:
+                status_row = client.get_message_status(message_id)
+                if normalize_string((status_row or {}).get("status")):
+                    continue
+            except RuntimeError as error:
+                if not _is_message_status_null_error(error):
+                    raise
+            candidates.append(
+                {
+                    "id": message_id,
+                    "messageKind": row.get("messageKind"),
+                    "messageDomain": row.get("messageDomain"),
+                    "createdAt": row.get("createdAt"),
+                    "updatedAt": row.get("updatedAt"),
+                }
+            )
+        if not options.get("json") and (scanned == len(rows) or scanned % 500 == 0):
+            print(f"newsroom\trepair-message-status\tscan-progress\t{scanned}", flush=True)
+        if max_scan is not None and scanned >= max_scan:
+            break
+        if not next_token:
+            break
+    candidates.sort(key=lambda entry: (str(entry.get("createdAt") or ""), str(entry["id"])))
+    if apply:
+        now = _utc_now()
+        for index, entry in enumerate(candidates, start=1):
+            client.update_record(
+                "Message",
+                {
+                    "id": entry["id"],
+                    "status": status_value,
+                    "updatedAt": entry.get("updatedAt") or now,
+                },
+            )
+            if index == len(candidates) or index % 100 == 0:
+                print(f"newsroom\trepair-message-status\tprogress\t{index}/{len(candidates)}", flush=True)
+    if options.get("json"):
+        print(
+            json.dumps(
+                {
+                    "ok": True,
+                    "command": "newsroom repair-message-status",
+                    "mode": "apply" if apply else "dry-run",
+                    "status": status_value,
+                    "scanned": scanned,
+                    "plannedUpdates": len(candidates),
+                    "updated": len(candidates) if apply else 0,
+                    "truncated": truncated,
+                    "maxScan": max_scan,
+                    "sample": candidates[:20],
+                    "next": None
+                    if apply
+                    else f"poetry run papyrus sections repair-message-status --status {status_value} --apply",
+                },
+                indent=2,
+            )
+        )
+        return
+    print(f"newsroom\trepair-message-status\tmode\t{'apply' if apply else 'dry-run'}")
+    print(f"newsroom\trepair-message-status\tstatus\t{status_value}")
+    print(f"newsroom\trepair-message-status\tscanned\t{scanned}")
+    print(f"newsroom\trepair-message-status\tmax-scan\t{max_scan if max_scan is not None else 'none'}")
+    if truncated:
+        print("newsroom\trepair-message-status\ttruncated\ttrue")
+    print(f"newsroom\trepair-message-status\tplanned-updates\t{len(candidates)}")
+    for entry in candidates[:20]:
+        print(
+            "newsroom\trepair-message-status\tcandidate\t"
+            f"{entry['id']}\t{entry.get('messageKind') or '-'}\t{entry.get('messageDomain') or '-'}"
+        )
+    if len(candidates) > 20:
+        print(f"newsroom\trepair-message-status\tpreview-truncated\t{len(candidates) - 20}")
+    if not apply:
+        print(
+            "newsroom\trepair-message-status\tnext\t"
+            f"poetry run papyrus sections repair-message-status --status {status_value} --apply"
+        )
 
 
 def newsroom_backfill_feed_fields(flags: list[str]) -> None:
@@ -373,7 +483,7 @@ def newsroom_seed_required_procedures(flags: list[str]) -> None:
             "status": "published",
             "isCurrent": True,
             "label": seed["versionLabel"],
-            "tactusSource": seed["tactusSource"],
+            "tactusSource": "attachment://code.tac",
             "parameterSchema": json.dumps(seed["parameterSchema"]),
             "defaults": json.dumps(seed["defaults"]),
             "changelog": "Seeded via papyrus procedures seed-required.",
@@ -396,6 +506,23 @@ def newsroom_seed_required_procedures(flags: list[str]) -> None:
             payload=version_payload,
             kind=f"ProcedureVersion {seed['versionId']}",
         )
+        code_attachment = build_text_model_payload_attachment(
+            {
+                "ownerKind": "procedureVersion",
+                "ownerId": seed["versionId"],
+                "ownerLineageId": seed["versionId"],
+                "role": "code",
+                "sortKey": "code",
+                "filename": "code.tac",
+                "mediaType": "text/plain",
+                "content": seed["tactusSource"],
+                "status": "active",
+                "importRunId": None,
+                "now": now,
+            }
+        )
+        _upload_model_attachment_to_s3(code_attachment["attachment"], code_attachment["body"])
+        client.upsert("ModelAttachment", code_attachment["attachment"])
         # Ensure the definition points at the seeded current version after updates.
         client.graphql(
             UPDATE_PROCEDURE_DEFINITION_MUTATION,
@@ -554,6 +681,29 @@ def _create_or_update_procedure_record(
             raise ValueError(
                 f"Failed to seed {kind}. create error={create_error}; update error={update_error}"
             ) from update_error
+
+
+def _upload_model_attachment_to_s3(attachment: dict[str, Any], body: bytes) -> None:
+    try:
+        import boto3
+    except ModuleNotFoundError as error:
+        raise RuntimeError("boto3 is required to upload procedure code attachments.") from error
+    bucket = (
+        os.environ.get("papyrusMedia_BUCKET_NAME")
+        or os.environ.get("PAPYRUS_MEDIA_BUCKET_NAME")
+        or os.environ.get("STORAGE_BUCKET_NAME")
+        or os.environ.get("AMPLIFY_STORAGE_BUCKET_NAME")
+        or storage_bucket_from_amplify_outputs()
+    )
+    if not bucket:
+        raise RuntimeError("Could not resolve storage bucket for procedure code attachments.")
+    s3 = boto3.client("s3")
+    s3.put_object(
+        Bucket=bucket,
+        Key=str(attachment["storagePath"]),
+        Body=body,
+        ContentType=str(attachment.get("mediaType") or "text/plain"),
+    )
 
 
 def newsroom_prune_attachments(flags: list[str]) -> None:
@@ -765,6 +915,15 @@ def _attachment_owner_exists(attachment: dict[str, Any], owner_ids_by_kind: dict
     if not owner_model:
         return False
     return attachment.get("ownerId") in owner_ids_by_kind.get(owner_kind, set())
+
+
+def _is_message_status_null_error(error: Exception) -> bool:
+    text = str(error)
+    return (
+        "Message" in text
+        and "status" in text
+        and "Cannot return null for non-nullable type" in text
+    )
 
 
 def _write_json_file(path: str, payload: Any) -> None:

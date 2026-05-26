@@ -1243,7 +1243,7 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertEqual(create["input"]["objectLineageId"], "semantic-node-quality-rating-4-star")
         self.assertEqual(create["input"]["score"], 4)
 
-    def test_reference_summary_plan_is_budget_specific_message_relation(self):
+    def test_reference_summary_plan_writes_reference_metadata_attachment(self):
         reference = {
             "id": "reference-a-v1",
             "lineageId": "reference-a",
@@ -1269,12 +1269,10 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         )
 
         self.assertEqual(plan["action"], "create")
-        self.assertEqual(plan["message"]["messageKind"], "reference_summary")
-        relation = plan["records"][-1]["input"]
-        self.assertEqual(relation["relationTypeKey"], "reference_summary_100_tokens")
-        self.assertEqual(relation["subjectKind"], "message")
-        self.assertEqual(relation["objectKind"], "reference")
-        self.assertEqual(relation["metadata"]["maxTokens"], 100)
+        self.assertEqual(plan["records"][0]["modelName"], "ModelAttachment")
+        metadata = json.loads(plan["records"][0]["body"])
+        self.assertEqual(metadata["summary"], "A short summary.")
+        self.assertEqual(metadata["summary_resolution"]["summaryTokenBudget"], 100)
 
     def test_publication_doctrine_context_loads_mission_and_policy(self):
         def fake_graphql(_query, variables):
@@ -1520,30 +1518,35 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertIn("Do not use bullet points.", prompt)
         self.assertIn("Do not use numbered lists.", prompt)
         self.assertIn("Do not include line breaks.", prompt)
+        self.assertIn("typically 4 to 12 words.", prompt)
+        self.assertIn("Avoid self-referential document framing", prompt)
+        self.assertIn("concrete content signal", prompt)
+        self.assertIn("You MAY mention evidence/method terms such as survey", prompt)
+        self.assertIn("Good subtitle: 'Survey finds 72% of teens have used AI companions'", prompt)
+        self.assertIn("Bad subtitle: 'This article reports survey results'", prompt)
 
-    def test_subtitle_normalizer_rejects_list_shaped_values(self):
-        self.assertEqual(reference_curation_signals._normalize_subtitle_candidate("- First bullet"), "")
-        self.assertEqual(reference_curation_signals._normalize_subtitle_candidate("* First bullet"), "")
-        self.assertEqual(reference_curation_signals._normalize_subtitle_candidate("1. First bullet"), "")
-        self.assertEqual(reference_curation_signals._normalize_subtitle_candidate("• First bullet"), "")
-        self.assertEqual(reference_curation_signals._normalize_subtitle_candidate("Line one\nLine two"), "")
-        self.assertEqual(
-            reference_curation_signals._normalize_subtitle_candidate("Abstract page for arXiv paper 2506.01232"),
-            "",
-        )
-        self.assertEqual(
-            reference_curation_signals._normalize_subtitle_candidate("Join the discussion on this paper page"),
-            "",
-        )
-        self.assertEqual(
-            reference_curation_signals._normalize_subtitle_candidate(
-                "<< /Metadata 3 0 R /Names 4 0 R /OpenAction 5 0 R /Outlines 6 0 R /PageMode /UseOutlines /Pages 7 0 R /Type /Catalog >>"
-            ),
-            "",
-        )
+    def test_subtitle_normalizer_is_trim_only(self):
+        self.assertEqual(reference_curation_signals._normalize_subtitle_candidate("- First bullet"), "- First bullet")
+        self.assertEqual(reference_curation_signals._normalize_subtitle_candidate("1. First bullet"), "1. First bullet")
+        self.assertEqual(reference_curation_signals._normalize_subtitle_candidate("Line one\nLine two"), "Line one Line two")
         self.assertEqual(
             reference_curation_signals._normalize_subtitle_candidate("Concise prose subtitle"),
             "Concise prose subtitle",
+        )
+        self.assertEqual(
+            reference_curation_signals._normalize_subtitle_candidate("https://phys.org/news/2025-07-quarters-teens-ai-companions.html"),
+            "https://phys.org/news/2025-07-quarters-teens-ai-companions.html",
+        )
+        self.assertEqual(
+            reference_curation_signals._normalize_subtitle_candidate("phys.org/news/2025-07-quarters-teens-ai-companions.html"),
+            "phys.org/news/2025-07-quarters-teens-ai-companions.html",
+        )
+        self.assertEqual(reference_curation_signals._normalize_subtitle_candidate("Study"), "Study")
+
+    def test_title_normalizer_strips_trailing_colon_source_label(self):
+        self.assertEqual(
+            reference_curation_signals._normalize_reference_title_candidate("Three quarters of US teens use AI companions despite risks: Study"),
+            "Three quarters of US teens use AI companions despite risks",
         )
 
     def test_identifier_prepass_extracts_doi_and_arxiv_from_title_subtitle_without_uri(self):
@@ -1693,6 +1696,96 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertEqual(result["title_mode"], "original_metadata")
         self.assertEqual(result["subtitle_mode"], "original_metadata")
 
+    def test_title_subtitle_resolver_uses_toolless_llm_when_web_search_disabled(self):
+        result = reference_curation_signals.resolve_reference_title_subtitle(
+            reference={"id": "reference-1-v1", "title": "Known title"},
+            catalog_entry={},
+            sidecar={},
+            web_search_enabled=False,
+            llm_toolless_resolver=lambda **_: {
+                "title": "Known title",
+                "subtitle": "Survey finds routine AI companion use among U.S. teens",
+                "title_mode": "original_metadata",
+                "subtitle_mode": "generated",
+                "source_urls": [],
+                "rationale": "Generated from local source context.",
+            },
+            llm_resolver=lambda **_: (_ for _ in ()).throw(AssertionError("web resolver should not run")),
+            now="2026-05-20T12:00:00Z",
+        )
+
+        self.assertEqual(result["subtitle"], "Survey finds routine AI companion use among U.S. teens")
+        self.assertEqual(result["subtitle_mode"], "generated")
+        self.assertFalse(result["web_search_used"])
+
+    def test_generated_subtitle_quality_gate_rejects_generic_or_url_values(self):
+        generic = reference_curation_signals.resolve_reference_title_subtitle(
+            reference={"id": "reference-1-v1", "title": "Known title"},
+            catalog_entry={},
+            sidecar={},
+            web_search_enabled=False,
+            llm_toolless_resolver=lambda **_: {
+                "title": "Known title",
+                "subtitle": "Study",
+                "title_mode": "original_metadata",
+                "subtitle_mode": "generated",
+                "source_urls": [],
+                "rationale": "Generated from source.",
+            },
+            now="2026-05-20T12:00:00Z",
+        )
+        self.assertEqual(generic["subtitle"], "")
+        self.assertEqual(generic["subtitle_mode"], "unresolved")
+        self.assertTrue(any("generic one-word label" in warning for warning in generic.get("warnings", [])))
+
+        url_like = reference_curation_signals.resolve_reference_title_subtitle(
+            reference={"id": "reference-1-v1", "title": "Known title"},
+            catalog_entry={},
+            sidecar={},
+            web_search_enabled=False,
+            llm_toolless_resolver=lambda **_: {
+                "title": "Known title",
+                "subtitle": "https://phys.org/news/2025-07-quarters-teens-ai-companions.html",
+                "title_mode": "original_metadata",
+                "subtitle_mode": "generated",
+                "source_urls": [],
+                "rationale": "Generated from source.",
+            },
+            now="2026-05-20T12:00:00Z",
+        )
+        self.assertEqual(url_like["subtitle"], "")
+        self.assertEqual(url_like["subtitle_mode"], "unresolved")
+        self.assertTrue(any("looks like URL" in warning for warning in url_like.get("warnings", [])))
+
+    def test_generated_subtitle_allows_substantive_survey_wording(self):
+        result = reference_curation_signals.resolve_reference_title_subtitle(
+            reference={"id": "reference-1-v1", "title": "Known title"},
+            catalog_entry={},
+            sidecar={},
+            web_search_enabled=False,
+            llm_toolless_resolver=lambda **_: {
+                "title": "Known title",
+                "subtitle": "Survey finds frequent AI companion use among U.S. teens",
+                "title_mode": "original_metadata",
+                "subtitle_mode": "generated",
+                "source_urls": [],
+                "rationale": "Generated from source.",
+            },
+            now="2026-05-20T12:00:00Z",
+        )
+
+        self.assertEqual(result["subtitle"], "Survey finds frequent AI companion use among U.S. teens")
+        self.assertEqual(result["subtitle_mode"], "generated")
+
+    def test_non_generated_subtitle_quality_gate_rejects_generic_pilot_study(self):
+        self.assertEqual(
+            reference_curation_signals._non_generated_subtitle_quality_issue(
+                "a pilot study",
+                subtitle_mode="original_web_metadata",
+            ),
+            "generic pilot-study subtitle",
+        )
+
     def test_title_subtitle_plan_updates_title_and_metadata_attachment(self):
         reference = {
             "id": "reference-a-v1",
@@ -1746,14 +1839,54 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
             )
 
         self.assertEqual(plan["action"], "update")
-        self.assertEqual(plan["records"][0]["modelName"], "Reference")
-        self.assertEqual(plan["records"][0]["input"]["title"], "Exact Source Title")
-        self.assertEqual(plan["records"][1]["modelName"], "ModelAttachment")
-        metadata = json.loads(plan["records"][1]["body"])
+        self.assertEqual(plan["records"][0]["modelName"], "ModelAttachment")
+        metadata = json.loads(plan["records"][0]["body"])
+        self.assertEqual(metadata["title"], "Exact Source Title")
         self.assertEqual(metadata["subtitle"], "Exact Source Subtitle")
-        self.assertEqual(metadata["summary"], "This work reports the main finding and why it matters.")
         self.assertEqual(metadata["title_subtitle_resolution"]["title_mode"], "original_web_metadata")
-        self.assertEqual(metadata["summary_resolution"]["summaryTokenBudget"], 500)
+        self.assertNotIn("summary", metadata)
+        self.assertNotIn("summary_resolution", metadata)
+
+    def test_title_subtitle_plan_does_not_noop_when_existing_subtitle_is_url(self):
+        reference = {
+            "id": "reference-a-v1",
+            "lineageId": "reference-a",
+            "versionNumber": 1,
+            "externalItemId": "item-a",
+            "title": "Reference title",
+            "sourceUri": "https://example.test/ref",
+            "metadata": {
+                "subtitle": "https://example.test/path/to/article",
+            },
+        }
+
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals.resolve_reference_title_subtitle",
+            return_value={
+                "status": "resolved",
+                "title": "Reference title",
+                "subtitle": "Concise informative subtitle for this reference",
+                "title_mode": "original_metadata",
+                "subtitle_mode": "generated",
+                "source": "llm_no_web_search",
+                "model": "gpt-5.4-mini",
+                "web_search_used": False,
+                "source_urls": ["https://example.test/ref"],
+                "rationale": "Generated replacement subtitle.",
+                "summary": "",
+                "summary_resolution": {},
+                "run_id": "run-1",
+                "resolved_at": "2026-05-20T12:00:00Z",
+                "warnings": [],
+            },
+        ):
+            plan = reference_curation_signals.build_reference_title_subtitle_plan(
+                reference=reference,
+                web_search_enabled=False,
+                now="2026-05-20T12:00:00Z",
+            )
+
+        self.assertEqual(plan["action"], "update")
 
     def test_title_subtitle_resolve_reports_vector_sync_surface_status(self):
         reference = {
@@ -1864,10 +1997,10 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertEqual(item["title"], "Verbatim Catalog Title")
         self.assertEqual(item["subtitle"], "Verbatim Catalog Subtitle")
         self.assertEqual(item["metadata"]["subtitle"], "Verbatim Catalog Subtitle")
-        self.assertEqual(item["summary"], "Existing metadata summary.")
-        self.assertEqual(item["metadata"]["summary"], item["summary"])
+        self.assertNotIn("summary", item)
+        self.assertEqual(item["metadata"]["summary"], "Existing metadata summary.")
         self.assertEqual(item["metadata"]["title_subtitle_resolution"]["title_mode"], "original_metadata")
-        self.assertIn("summary_resolution", item["metadata"])
+        self.assertNotIn("summary_resolution", item["metadata"])
 
     def test_biblicus_catalog_item_keeps_editorial_fields_in_metadata_only(self):
         enriched = reference_curation_signals.apply_title_subtitle_to_catalog_item(
@@ -1902,7 +2035,7 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertEqual(enriched["metadata"]["summary"], "Updated summary")
         self.assertIn("papyrus", enriched["metadata"])
 
-    def test_resolver_ignores_bullet_list_subtitle_from_local_metadata(self):
+    def test_resolver_preserves_local_subtitle_verbatim(self):
         result = reference_curation_signals.resolve_reference_title_subtitle(
             reference={"id": "reference-1-v1", "title": "Reliable Title"},
             catalog_entry={
@@ -1915,9 +2048,9 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
 
         self.assertEqual(result["status"], "resolved")
         self.assertEqual(result["title"], "Reliable Title")
-        self.assertEqual(result["subtitle"], "")
-        self.assertEqual(result["subtitle_mode"], "unresolved")
-        self.assertEqual(result["summary"], "A valid local summary.")
+        self.assertEqual(result["subtitle"], "- one - two")
+        self.assertEqual(result["subtitle_mode"], "original_metadata")
+        self.assertEqual(result["summary"], "")
 
     def test_catalog_title_subtitle_enrichment_prefers_newest_items(self):
         result = reference_curation_signals.enrich_reference_catalog_title_subtitle(
@@ -1967,10 +2100,7 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
                 only_missing=True,
             )
 
-        self.assertEqual(result["items"][0]["action"], "update")
-        enriched = result["catalog"]["items"][0]
-        self.assertTrue(enriched.get("summary"))
-        self.assertTrue(enriched.get("metadata", {}).get("summary"))
+        self.assertEqual(result["items"][0]["action"], "noop")
 
     def test_refresh_summary_updates_metadata_summary_even_with_existing_title_subtitle(self):
         reference = {
@@ -2031,11 +2161,10 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
             )
 
         self.assertEqual(plan["action"], "update")
-        self.assertEqual(plan["records"][0]["modelName"], "Reference")
-        self.assertEqual(plan["records"][0]["input"]["title"], "Existing Title")
-        metadata = json.loads(plan["records"][1]["body"])
+        self.assertEqual(plan["records"][0]["modelName"], "ModelAttachment")
+        metadata = json.loads(plan["records"][0]["body"])
         self.assertEqual(metadata["subtitle"], "Existing Subtitle")
-        self.assertEqual(metadata["summary"], "New summary content.")
+        self.assertNotIn("summary", metadata)
 
     def test_local_title_normalization_strips_citation_wrappers(self):
         result = reference_curation_signals.resolve_reference_title_subtitle(
@@ -2052,10 +2181,7 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
             result["title"],
             "AutoGen Studio: A No-Code Developer Tool for Building and Debugging Multi-Agent Systems",
         )
-        self.assertEqual(
-            result["subtitle"],
-            "A No-Code Developer Tool for Building and Debugging Multi-Agent Systems",
-        )
+        self.assertEqual(result["subtitle"], "")
 
     def test_title_subtitle_plan_captures_arxiv_identifier_before_title_normalization(self):
         reference = {
@@ -2083,7 +2209,7 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         )
 
         self.assertEqual(plan["action"], "update")
-        metadata = json.loads(plan["records"][1]["body"])
+        metadata = json.loads(plan["records"][0]["body"])
         self.assertEqual(
             metadata["title"],
             "AutoGen Studio: A No-Code Developer Tool for Building and Debugging Multi-Agent Systems",
@@ -2527,7 +2653,7 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
 
         self.assertEqual(result["status"], "unresolved")
         self.assertEqual(result["title"], "")
-        self.assertEqual(result["subtitle"], "")
+        self.assertEqual(result["subtitle"], "ScienceDirect article metadata unavailable")
 
     def test_semantic_neighbors_and_walk_use_graph_indexes(self):
         calls = []

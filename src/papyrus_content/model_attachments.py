@@ -19,6 +19,7 @@ MODEL_ATTACHMENT_OWNER_MODELS = {
     "assignmentEvent": "AssignmentEvent",
     "knowledgeRawPayload": "KnowledgeRawPayload",
     "message": "Message",
+    "procedureVersion": "ProcedureVersion",
     "reference": "Reference",
 }
 
@@ -355,4 +356,3 @@ def delete_attachment_storage_paths(
         preview = ", ".join(f"{entry.get('storagePath') or 'unknown'}:{entry.get('code') or 'error'}" for entry in errors[:3])
         raise RuntimeError(f"Failed to delete {len(errors)} ModelAttachment S3 object(s): {preview}")
     return {"bucket": resolved_bucket, "attempted": len(paths), "deleted": deleted, "chunks": chunks, "errors": errors}
-

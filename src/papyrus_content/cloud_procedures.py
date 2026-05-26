@@ -118,14 +118,55 @@ def current_cloud_procedure_version(definition: dict[str, Any]) -> dict[str, Any
 
 def cloud_procedure_source_or_throw(alias: str, procedure_key: str, version: dict[str, Any]) -> str:
     source = str(version.get("tactusSource") or "").strip()
-    if not source:
+    if source and re.search(r"\bProcedure\s*\{", source, flags=re.MULTILINE):
+        return f"{source}\n"
+    raise ValueError(
+        f"Cloud procedure '{procedure_key}' for {alias} does not contain executable Tactus Procedure source. "
+        f"{seed_required_procedures_remediation()}"
+    )
+
+
+def cloud_procedure_source_from_attachment_or_throw(
+    client: PapyrusGraphQLAuthoringClient,
+    *,
+    alias: str,
+    procedure_key: str,
+    version: dict[str, Any],
+) -> str:
+    from .model_attachments import download_attachment_buffer
+
+    version_id = str(version.get("id") or "").strip()
+    if not version_id:
         raise ValueError(
-            f"Cloud procedure '{procedure_key}' for {alias} has no Tactus source. "
+            f"Cloud procedure '{procedure_key}' for {alias} is missing a version id. "
             f"{seed_required_procedures_remediation()}"
         )
+    attachments = client.list_by_index("modelAttachmentsByOwnerRoleAndSortKey", version_id, limit=20)
+    code_entries = [
+        entry
+        for entry in attachments
+        if str(entry.get("role") or "").strip() == "code" and str(entry.get("status") or "ready").strip() != "deleted"
+    ]
+    code_attachment = next(
+        (entry for entry in code_entries if str(entry.get("status") or "").strip() == "active"),
+        None,
+    )
+    if code_attachment is None and code_entries:
+        statuses = ", ".join(sorted({str(entry.get("status") or "ready").strip() for entry in code_entries}))
+        raise ValueError(
+            f"Cloud procedure '{procedure_key}' for {alias} has code attachment(s) for version {version_id} "
+            f"but none are active (statuses: {statuses}). {seed_required_procedures_remediation()}"
+        )
+    if not code_attachment:
+        raise ValueError(
+            f"Cloud procedure '{procedure_key}' for {alias} has no code attachment (role=code) for version {version_id}. "
+            f"{seed_required_procedures_remediation()}"
+        )
+    buffer = download_attachment_buffer(client, code_attachment)
+    source = (buffer or b"").decode("utf-8", errors="replace").strip()
     if not re.search(r"\bProcedure\s*\{", source, flags=re.MULTILINE):
         raise ValueError(
-            f"Cloud procedure '{procedure_key}' for {alias} does not contain executable Tactus Procedure source. "
+            f"Cloud procedure '{procedure_key}' for {alias} code attachment does not contain executable Tactus Procedure source. "
             f"{seed_required_procedures_remediation()}"
         )
     return f"{source}\n"
@@ -467,7 +508,27 @@ def start_cloud_procedure_run(
             f"Cloud procedure '{procedure_key}' has no current version. "
             f"{seed_required_procedures_remediation()}"
         )
-    tactus_source = cloud_procedure_source_or_throw(alias, procedure_key, version)
+    tactus_source_pointer = str(version.get("tactusSource") or "").strip()
+    if tactus_source_pointer.startswith("attachment://"):
+        tactus_source = cloud_procedure_source_from_attachment_or_throw(
+            client,
+            alias=alias,
+            procedure_key=procedure_key,
+            version=version,
+        )
+    else:
+        try:
+            tactus_source = cloud_procedure_source_or_throw(alias, procedure_key, version)
+        except ValueError as source_error:
+            try:
+                tactus_source = cloud_procedure_source_from_attachment_or_throw(
+                    client,
+                    alias=alias,
+                    procedure_key=procedure_key,
+                    version=version,
+                )
+            except Exception:
+                raise source_error
     start_data = client.graphql(
         START_PROCEDURE_RUN_MUTATION,
         {

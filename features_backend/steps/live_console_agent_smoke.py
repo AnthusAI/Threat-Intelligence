@@ -49,6 +49,49 @@ EDITORIAL_CURATION_SCENARIOS = {
         "sentinel": "reference-curation-reopen-tested",
     },
 }
+SCENARIO_REQUIRED_TOOL_CALLS: dict[str, list[str]] = {
+    "docs-progressive": ["papyrus.docs.list", "papyrus.docs.get"],
+    "unsupported-snippet-retry": ["papyrus.docs.get"],
+    "create-research-assignment": ["papyrus.Assignment.create"],
+    "list-research-assignments": ["papyrus.Assignment.create", "papyrus.Assignment.list"],
+    "get-research-assignment": ["papyrus.Assignment.create", "papyrus.Assignment.get"],
+    "update-research-assignment": ["papyrus.Assignment.update"],
+    "invalid-assignment-input": ["papyrus.Assignment.create"],
+    "discuss-reference": ["papyrus.reference.list", "papyrus.reference.get"],
+    "list-recent-references": ["papyrus.Reference.list"],
+    "get-specific-reference": ["papyrus.Reference.get"],
+    "knowledge-query-single-reference": ["papyrus.Reference.get", "papyrus.knowledge.query"],
+    "knowledge-query-three-references": ["papyrus.knowledge.query"],
+    "rate-reference-quality": ["papyrus.reference.list", "papyrus.reference.quality_rate", "papyrus.reference.quality_get"],
+    "review-reference-curation-accept": ["papyrus.reference.list", "papyrus.reference.curation_review"],
+    "review-reference-curation-reject": ["papyrus.reference.list", "papyrus.reference.curation_review"],
+    "review-reference-curation-archive": ["papyrus.reference.list", "papyrus.reference.curation_review"],
+    "review-reference-curation-reopen": ["papyrus.reference.list", "papyrus.reference.curation_review"],
+    "insight-reference": ["papyrus.reference.list", "papyrus.reference.insight_create", "papyrus.reference.insight_list"],
+    "curate-reference-refresh": ["papyrus.reference.list", "papyrus.reference.curation_start", "papyrus.reference.curation_status"],
+}
+SCENARIO_REQUIRED_TOOL_CALL_COUNTS: dict[str, dict[str, int]] = {
+    "review-reference-curation-accept": {"papyrus.reference.curation_review": 2},
+    "review-reference-curation-reject": {"papyrus.reference.curation_review": 2},
+    "review-reference-curation-archive": {"papyrus.reference.curation_review": 2},
+    "review-reference-curation-reopen": {"papyrus.reference.curation_review": 2},
+}
+SCENARIO_EXPECTED_FINAL_RESPONSE: dict[str, str] = {
+    "docs-progressive": "docs-progressive-tested",
+    "unsupported-snippet-retry": "unsupported-snippet-retry-tested",
+    "invalid-assignment-input": "invalid-input-tested",
+    "discuss-reference": "reference-discussion-tested",
+    "list-recent-references": "reference-recent-tested",
+    "get-specific-reference": "reference-detail-tested",
+    "knowledge-query-single-reference": "reference-knowledge-single-tested",
+    "knowledge-query-three-references": "reference-knowledge-group-tested",
+    "rate-reference-quality": "reference-quality-tested",
+    "review-reference-curation-accept": "reference-curation-accept-tested",
+    "review-reference-curation-reject": "reference-curation-reject-tested",
+    "review-reference-curation-archive": "reference-curation-archive-tested",
+    "review-reference-curation-reopen": "reference-curation-reopen-tested",
+    "insight-reference": "reference-insight-tested",
+}
 MESSAGE_FIELD_CANDIDATES = [
     "id",
     "threadId",
@@ -169,6 +212,87 @@ def _collect_errors(value: Any, errors: list[dict[str, Any]]) -> None:
         for nested in value.values():
             if isinstance(nested, dict):
                 _collect_errors(nested, errors)
+
+
+def _parse_markdown_tool_result(content: str) -> dict[str, Any]:
+    parsed: dict[str, Any] = {"api_calls": []}
+    lines = [line.rstrip() for line in str(content or "").splitlines()]
+    in_api_calls = False
+    in_error = False
+    in_error_details = False
+    error: dict[str, Any] = {}
+    error_details: dict[str, Any] = {}
+    for raw in lines:
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("- api_calls:"):
+            in_api_calls = True
+            in_error = False
+            in_error_details = False
+            continue
+        if line.startswith("- error:"):
+            in_api_calls = False
+            in_error = True
+            in_error_details = False
+            continue
+        if line.startswith("- value:"):
+            in_api_calls = False
+            in_error = False
+            in_error_details = False
+            continue
+        if line.startswith("- status:"):
+            status = line.split(":", 1)[1].strip()
+            parsed["ok"] = status == "ok"
+            continue
+        if in_api_calls and line.startswith("-"):
+            call = line[1:].strip().strip("`")
+            if call:
+                parsed.setdefault("api_calls", []).append(call)
+            continue
+        if in_error and line.startswith("-"):
+            body = line[1:].strip()
+            if body.startswith("details:"):
+                in_error_details = True
+                continue
+            if body.startswith("code:"):
+                in_error_details = False
+                error["code"] = body.split(":", 1)[1].strip().strip("`")
+                continue
+            if body.startswith("message:"):
+                in_error_details = False
+                error["message"] = body.split(":", 1)[1].strip()
+                continue
+            if body.startswith("retryable:"):
+                in_error_details = False
+                value = body.split(":", 1)[1].strip().lower()
+                error["retryable"] = value == "true"
+                continue
+            if in_error_details and body.startswith("**") and "**:" in body:
+                key_part, value_part = body.split(":", 1)
+                key = key_part.strip().strip("*").strip()
+                value = value_part.strip().strip("`")
+                if key:
+                    error_details[key] = value
+                continue
+    if error_details:
+        error["details"] = error_details
+    if error:
+        parsed["error"] = error
+    return parsed
+
+
+def _parse_tool_result_content(content: str) -> dict[str, Any]:
+    text = str(content or "").strip()
+    if not text:
+        return {}
+    try:
+        value = json.loads(text)
+        if isinstance(value, dict):
+            return value
+    except Exception:
+        pass
+    return _parse_markdown_tool_result(text)
 
 
 def _collect_reference_tool_diagnostics(value: Any, diagnostics: dict[str, Any], marker: str) -> None:
@@ -436,6 +560,87 @@ def scenario_prompt(
                 "After both tool calls succeed, reply with only `reference-discussion-tested`.",
             ]
         )
+    if name == "list-recent-references":
+        if not reference_corpus_key:
+            raise RuntimeError("list-recent-references scenario requires a non-empty reference corpus key")
+        return "\n".join(
+            [
+                f"Model policy: use {DEFAULT_AGENT_MODEL}.",
+                f"Marker: {marker}",
+                "Use execute_tactus for recent-reference listing test. Do not answer until required tool call succeeds.",
+                "Do not call docs_list or docs_get.",
+                "Execute exactly one tool call.",
+                "Required snippet:",
+                f"return Reference.list{{ corpusKey = '{reference_corpus_key}', limit = 3, order = 'newest' }}",
+                "After the tool call succeeds, reply with only `reference-recent-tested`.",
+            ]
+        )
+    if name == "get-specific-reference":
+        if not isinstance(reference_target, dict):
+            raise RuntimeError("get-specific-reference scenario requires a selected reference target.")
+        reference_id = str(reference_target.get("id") or "").strip()
+        if not reference_id:
+            raise RuntimeError("get-specific-reference scenario requires selected reference id.")
+        return "\n".join(
+            [
+                f"Model policy: use {DEFAULT_AGENT_MODEL}.",
+                f"Marker: {marker}",
+                f"Selected reference id: {reference_id}.",
+                "Use execute_tactus for specific-reference detail test. Do not answer until required tool call succeeds.",
+                "Do not call docs_list or docs_get.",
+                "Execute exactly one tool call.",
+                "Required snippet:",
+                f"return Reference.get{{ id = '{reference_id}' }}",
+                "After the tool call succeeds, reply with only `reference-detail-tested`.",
+            ]
+        )
+    if name == "knowledge-query-single-reference":
+        if not isinstance(reference_target, dict):
+            raise RuntimeError("knowledge-query-single-reference scenario requires a selected reference target.")
+        reference_id = str(reference_target.get("id") or "").strip()
+        if not reference_id:
+            raise RuntimeError("knowledge-query-single-reference scenario requires selected reference id.")
+        return "\n".join(
+            [
+                f"Model policy: use {DEFAULT_AGENT_MODEL}.",
+                f"Marker: {marker}",
+                f"Selected reference id: {reference_id}.",
+                "Use execute_tactus for reference-scoped knowledge query test.",
+                "Do not call docs_list or docs_get.",
+                "Execute exactly two tool calls in order: Reference.get then knowledge_query.",
+                "Step 1 required snippet:",
+                f"return Reference.get{{ id = '{reference_id}' }}",
+                "Step 2 required snippet:",
+                (
+                    f"return knowledge_query{{ semanticQuery = \"Summarize the key ideas and practical implications of this reference.\", "
+                    f"anchors = {{ {{ uri = \"papyrus://reference/{reference_id}\" }} }} }}"
+                ),
+                "After both tool calls succeed, reply with only `reference-knowledge-single-tested`.",
+            ]
+        )
+    if name == "knowledge-query-three-references":
+        if not isinstance(reference_target, dict):
+            raise RuntimeError("knowledge-query-three-references scenario requires selected references.")
+        reference_ids = [str(entry).strip() for entry in (reference_target.get("referenceIds") or []) if str(entry).strip()]
+        if len(reference_ids) < 3:
+            raise RuntimeError("knowledge-query-three-references scenario requires three selected reference ids.")
+        anchors = ", ".join([f"{{ uri = 'papyrus://reference/{reference_id}' }}" for reference_id in reference_ids[:3]])
+        return "\n".join(
+            [
+                f"Model policy: use {DEFAULT_AGENT_MODEL}.",
+                f"Marker: {marker}",
+                f"Selected reference ids: {', '.join(reference_ids[:3])}.",
+                "Use execute_tactus for multi-reference knowledge query test.",
+                "Do not call docs_list or docs_get.",
+                "Execute exactly one tool call.",
+                "Required snippet:",
+                (
+                    "return knowledge_query{ semanticQuery = 'Compare and contrast these references: shared themes, key differences, and strongest evidence.', "
+                    f"anchors = {{ {anchors} }}, scope = {{ topK = 12 }}, output = {{ format = 'structured', maxTokens = 700 }} }}"
+                ),
+                "After the tool call succeeds, reply with only `reference-knowledge-group-tested`.",
+            ]
+        )
     if name == "rate-reference-quality":
         if not reference_corpus_key:
             raise RuntimeError("rate-reference-quality scenario requires a non-empty reference corpus key")
@@ -547,7 +752,7 @@ def scenario_prompt(
                 "Step 3 required snippet:",
                 "return papyrus.reference.curation_status{ assignment_id = '<assignment id from step 2>' }",
                 "Do not call papyrus.reference.quality_rate in this scenario.",
-                "After all tool calls succeed, reply with only `reference-curation-refresh-tested`.",
+                "After all tool calls succeed, reply with only the assignment id from step 2.",
             ]
         )
     raise RuntimeError(f"Unknown scenario: {name}")
@@ -1029,6 +1234,10 @@ def run_scenario(
             assignment_ids.add(seeded_assignment_id)
         if scenario_name in {
             "discuss-reference",
+            "list-recent-references",
+            "get-specific-reference",
+            "knowledge-query-single-reference",
+            "knowledge-query-three-references",
             "rate-reference-quality",
             "review-reference-curation-accept",
             "review-reference-curation-reject",
@@ -1038,6 +1247,30 @@ def run_scenario(
             "curate-reference-refresh",
         }:
             reference_corpus_key = _discover_reference_corpus_key(client)
+        if scenario_name in {
+            "get-specific-reference",
+            "knowledge-query-single-reference",
+            "knowledge-query-three-references",
+        }:
+            candidates = _list_reference_candidates(client, corpus_key=str(reference_corpus_key or ""), scan_limit=10)
+            if not candidates:
+                raise RuntimeError("No references available in sandbox for selected reference scenarios.")
+            if scenario_name == "knowledge-query-three-references":
+                if len(candidates) < 3:
+                    raise RuntimeError(
+                        f"knowledge-query-three-references requires at least 3 references in corpus '{reference_corpus_key}', found {len(candidates)}."
+                    )
+                reference_target = {
+                    "referenceIds": [str(item.get("id") or "") for item in candidates[:3]],
+                }
+            else:
+                reference_target = candidates[0]
+                reference_diagnostics["selectedReference"] = {
+                    "id": reference_target.get("id"),
+                    "lineageId": reference_target.get("lineageId"),
+                    "title": reference_target.get("title"),
+                    "initialStatus": reference_target.get("curationStatus"),
+                }
         if scenario_name in EDITORIAL_CURATION_SCENARIOS:
             scenario = EDITORIAL_CURATION_SCENARIOS[scenario_name]
             reference_target = _select_reference_for_status(
@@ -1077,6 +1310,20 @@ def run_scenario(
             reference_target=reference_target,
             insight_marker=assertion_marker if scenario_name == "insight-reference" else None,
         )
+        required_tool_calls = list(SCENARIO_REQUIRED_TOOL_CALLS.get(scenario_name, []))
+        required_tool_call_counts = dict(SCENARIO_REQUIRED_TOOL_CALL_COUNTS.get(scenario_name, {}))
+        expected_final_response = SCENARIO_EXPECTED_FINAL_RESPONSE.get(scenario_name)
+        force_assignment_id_response = scenario_name in {
+            "create-research-assignment",
+            "list-research-assignments",
+            "get-research-assignment",
+            "update-research-assignment",
+            "curate-reference-refresh",
+        }
+        allow_expected_response_with_tool_errors = scenario_name in {
+            "unsupported-snippet-retry",
+            "invalid-assignment-input",
+        }
         message_input = {
             "id": f"message-console-user-smoke-{uuid.uuid4()}",
             "threadId": thread_id,
@@ -1104,6 +1351,13 @@ def run_scenario(
                     "smokeRunId": run_id,
                     "marker": marker,
                     "model": DEFAULT_AGENT_MODEL,
+                    "captureModelContext": True,
+                    "requireToolCalls": bool(required_tool_calls),
+                    "requiredToolCalls": required_tool_calls,
+                    "requiredToolCallCounts": required_tool_call_counts,
+                    "expectedFinalResponse": expected_final_response,
+                    "forceAssignmentIdResponse": force_assignment_id_response,
+                    "allowExpectedResponseWithToolErrors": allow_expected_response_with_tool_errors,
                 }
             ),
             "createdAt": now,
@@ -1186,9 +1440,18 @@ def run_scenario(
                 )
             if message.get("messageKind") != "console_tool_result":
                 continue
-            try:
-                parsed = json.loads(_message_content(message))
-            except Exception:
+            parsed: dict[str, Any] = {}
+            metadata_raw = message.get("metadata")
+            if isinstance(metadata_raw, str):
+                try:
+                    metadata = json.loads(metadata_raw)
+                    if isinstance(metadata, dict) and isinstance(metadata.get("toolResultJson"), dict):
+                        parsed = dict(metadata.get("toolResultJson") or {})
+                except Exception:
+                    parsed = {}
+            if not parsed:
+                parsed = _parse_tool_result_content(_message_content(message))
+            if not parsed:
                 continue
             tool_history.append(
                 {
@@ -1286,6 +1549,30 @@ def run_scenario(
             if not required.issubset(set(api_calls)):
                 raise RuntimeError(
                     f"Expected reference list/get tool calls. Saw: {', '.join(api_calls)}. Assistant said: {content}"
+                )
+        if scenario_name == "list-recent-references":
+            required = {"papyrus.Reference.list"}
+            if not required.issubset(set(api_calls)):
+                raise RuntimeError(
+                    f"Expected Reference.list tool call. Saw: {', '.join(api_calls)}. Assistant said: {content}"
+                )
+        if scenario_name == "get-specific-reference":
+            required = {"papyrus.Reference.get"}
+            if not required.issubset(set(api_calls)):
+                raise RuntimeError(
+                    f"Expected Reference.get tool call. Saw: {', '.join(api_calls)}. Assistant said: {content}"
+                )
+        if scenario_name == "knowledge-query-single-reference":
+            required = {"papyrus.Reference.get", "papyrus.knowledge.query"}
+            if not required.issubset(set(api_calls)):
+                raise RuntimeError(
+                    f"Expected Reference.get + knowledge.query tool calls. Saw: {', '.join(api_calls)}. Assistant said: {content}"
+                )
+        if scenario_name == "knowledge-query-three-references":
+            required = {"papyrus.knowledge.query"}
+            if not required.issubset(set(api_calls)):
+                raise RuntimeError(
+                    f"Expected knowledge.query tool call. Saw: {', '.join(api_calls)}. Assistant said: {content}"
                 )
         if scenario_name == "rate-reference-quality":
             required = {
@@ -1479,14 +1766,23 @@ def run_scenario(
                 )
         if scenario_name == "discuss-reference" and content != "reference-discussion-tested":
             raise RuntimeError(f"Expected reference-discussion-tested, got: {content}")
+        if scenario_name == "list-recent-references" and content != "reference-recent-tested":
+            raise RuntimeError(f"Expected reference-recent-tested, got: {content}")
+        if scenario_name == "get-specific-reference" and content != "reference-detail-tested":
+            raise RuntimeError(f"Expected reference-detail-tested, got: {content}")
+        if scenario_name == "knowledge-query-single-reference" and content != "reference-knowledge-single-tested":
+            raise RuntimeError(f"Expected reference-knowledge-single-tested, got: {content}")
+        if scenario_name == "knowledge-query-three-references" and content != "reference-knowledge-group-tested":
+            raise RuntimeError(f"Expected reference-knowledge-group-tested, got: {content}")
         if scenario_name == "rate-reference-quality" and content != "reference-quality-tested":
             raise RuntimeError(f"Expected reference-quality-tested, got: {content}")
         if scenario_name in EDITORIAL_CURATION_SCENARIOS and content != EDITORIAL_CURATION_SCENARIOS[scenario_name]["sentinel"]:
             raise RuntimeError(f"Expected {EDITORIAL_CURATION_SCENARIOS[scenario_name]['sentinel']}, got: {content}")
         if scenario_name == "insight-reference" and content != "reference-insight-tested":
             raise RuntimeError(f"Expected reference-insight-tested, got: {content}")
-        if scenario_name == "curate-reference-refresh" and content != "reference-curation-refresh-tested":
-            raise RuntimeError(f"Expected reference-curation-refresh-tested, got: {content}")
+        if scenario_name == "curate-reference-refresh":
+            if not re.match(r"^assignment[-_][A-Za-z0-9_-]+$", content):
+                raise RuntimeError(f"Expected assignment id content for curation refresh, got: {content}")
         if scenario_name == "unsupported-snippet-retry" and content != "unsupported-snippet-retry-tested":
             raise RuntimeError(f"Expected unsupported-snippet-retry-tested, got: {content}")
         if scenario_name == "invalid-assignment-input" and content != "invalid-input-tested":
@@ -1503,10 +1799,13 @@ def run_scenario(
 
         model = DEFAULT_AGENT_MODEL
         responder = "unknown"
+        model_context: dict[str, Any] | list[Any] | None = None
         try:
             assistant_metadata = json.loads(assistant.get("metadata") or "{}")
             model = str(assistant_metadata.get("model") or DEFAULT_AGENT_MODEL)
             responder = str(assistant_metadata.get("responder") or "unknown")
+            if isinstance(assistant_metadata.get("modelContext"), (dict, list)):
+                model_context = assistant_metadata.get("modelContext")
         except Exception:
             model = DEFAULT_AGENT_MODEL
             responder = "unknown"
@@ -1523,6 +1822,7 @@ def run_scenario(
             "model": model,
             "responseTarget": response_target,
             "triggerMessageId": message_input["id"],
+            "modelContext": model_context,
             "reference": reference_diagnostics,
             "toolHistory": tool_history,
             "runtimeDiagnostics": {
@@ -1530,6 +1830,7 @@ def run_scenario(
                 "responder": responder,
                 "model": model,
                 "responseTarget": response_target,
+                "modelContextCaptured": model_context is not None,
                 "expectedSnippetContractVersion": EXPECTED_SNIPPET_CONTRACT_VERSION,
             },
         }

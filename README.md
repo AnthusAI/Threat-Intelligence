@@ -649,6 +649,8 @@ poetry run papyrus references curate-recent --corpus-key <key> --all --max-count
 summary, and quality in order. It writes resumable manifests under
 `.papyrus-runs/reference-curation-<run-id>/manifest.json` and returns nonzero
 when any reference fails so automation can detect degraded runs.
+Reference subtitle display is canonical: the Newsroom UI shows `metadata.subtitle`
+from the reference metadata attachment verbatim when present.
 
 Knowledge search quick recipes:
 

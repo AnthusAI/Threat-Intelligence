@@ -18,6 +18,7 @@ Always write in source voice:
 - Do not frame as commentary about the source.
 - Avoid openings like "This paper/article/review/work/study..." or "In this paper...".
 - Do not describe the document itself ("A systematic review examines...", "The study investigates...", "The paper argues...").
+- You may mention substantive evidence/method terms (survey, poll, trial, study, experiment) when they are part of the finding itself.
 - Write claims directly (example: "Intelligent assessment and generative AI can strengthen learner agency when used as support, but can weaken it when over-relied on.").
 
 Grounding rules:
@@ -34,7 +35,7 @@ Procedure {
     input = {
         mode = field.string{required = true, description = "reference_summary or outcome_summary"},
         source_text = field.string{required = true, description = "Source text content"},
-        max_tokens = field.number{default = 500, description = "Target summary token budget"},
+        max_tokens = field.number{default = 1800, description = "Target summary token budget"},
         reference_title = field.string{default = "", description = "Reference title"},
         source_uri = field.string{default = "", description = "Reference source URI"},
         known_title = field.string{default = "", description = "Resolved title for outcome mode"},
@@ -52,7 +53,7 @@ Procedure {
     },
     function(input)
         local mode = input.mode or ""
-        local budget = tonumber(input.max_tokens) or 500
+        local budget = tonumber(input.max_tokens) or 1800
         if budget < 100 then
             budget = 100
         end
@@ -86,6 +87,7 @@ Do not use referential lead-ins such as:
 - "A systematic review examines..."
 - "The study investigates..."
 - "The paper argues..."
+You may mention substantive evidence/method terms (survey, poll, trial, study, experiment) when they are part of the finding itself.
 
 Preserve the central contribution, method, evidence type, and relevance.
 Do not add claims that are not supported by the provided text.
@@ -120,6 +122,7 @@ Do not use referential lead-ins such as:
 - "A systematic review examines..."
 - "The study investigates..."
 - "The paper argues..."
+You may mention substantive evidence/method terms (survey, poll, trial, study, experiment) when they are part of the finding itself.
 
 Explain findings, conclusions, outcomes, recommendations, or the central
 message. Keep claims grounded in the source text.

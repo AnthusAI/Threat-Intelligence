@@ -78,6 +78,8 @@ TITLE_SUBTITLE_SOURCE = "papyrus-title-subtitle-enricher"
 TITLE_SUBTITLE_PROMPT_VERSION = "reference-title-subtitle-v1-verbatim-source"
 TITLE_SUBTITLE_SUMMARY_PROMPT_VERSION = "reference-title-subtitle-summary-v2-source-voice"
 TITLE_SUBTITLE_SUMMARY_TOKEN_BUDGET_DEFAULT = 1800
+TITLE_SUBTITLE_BATCH_WORKERS = 8
+SUMMARY_SOURCE_TEXT_MAX_CHARS = 12000
 BIBLICUS_CATALOG_ITEM_ROOT_FIELDS = frozenset(
     {
         "id",
@@ -532,6 +534,7 @@ def resolve_reference_title_subtitle(
     now: str | None = None,
     fetcher: Any | None = None,
     llm_resolver: Any | None = None,
+    llm_toolless_resolver: Any | None = None,
     summary_resolver: Any | None = None,
     summary_procedure_alias: str = SUMMARY_PROCEDURE_ALIAS_TITLE_SUBTITLE_RESOLVE,
     identifier_prepass: dict[str, Any] | None = None,
@@ -544,6 +547,7 @@ def resolve_reference_title_subtitle(
     now = now or _now()
     fetcher = fetcher or _fetch_url_text
     llm_resolver = llm_resolver or generate_title_subtitle_with_web_search
+    llm_toolless_resolver = llm_toolless_resolver or generate_title_subtitle_without_web_search
     summary_resolver = summary_resolver or generate_outcome_summary
     reference = reference or {}
     catalog_entry = catalog_entry or {}
@@ -589,7 +593,7 @@ def resolve_reference_title_subtitle(
     local = _title_subtitle_from_local(reference=reference, catalog_entry=catalog_entry, sidecar=sidecar)
     existing_reference_title = _normalize_reference_title_candidate(reference.get("title"))
     title = local.get("title") if refresh or not existing_reference_title else existing_reference_title
-    subtitle = _normalize_subtitle_candidate(local.get("subtitle"))
+    subtitle = "" if refresh else _normalize_subtitle_candidate(local.get("subtitle"))
     local_summary = _normalize_outcome_summary_candidate(local.get("summary"))
     summary = "" if (refresh or refresh_summary) else local_summary
     title_mode = local.get("titleMode") if title else None
@@ -653,6 +657,15 @@ def resolve_reference_title_subtitle(
         rationale = deterministic["rationale"]
         source = deterministic.get("source") or source
 
+    deterministic_subtitle_issue = _non_generated_subtitle_quality_issue(
+        subtitle,
+        subtitle_mode=subtitle_mode or "",
+    )
+    if deterministic_subtitle_issue:
+        warnings.append(f"subtitle candidate rejected: {deterministic_subtitle_issue}")
+        subtitle = ""
+        subtitle_mode = "unresolved"
+
     if title and subtitle and (summary if include_summary else True):
         return _title_subtitle_resolution(
             status="resolved",
@@ -683,7 +696,33 @@ def resolve_reference_title_subtitle(
             identifier_prepass=identifier_prepass,
         )
 
-    if web_search_enabled:
+    if not subtitle:
+        try:
+            llm = llm_toolless_resolver(
+                reference=reference,
+                catalog_entry=catalog_entry,
+                source_text=source_text,
+                known_title=title or "",
+                known_subtitle=subtitle or "",
+                model=model,
+            )
+            if llm.get("source_urls"):
+                source_urls.extend(str(url) for url in llm.get("source_urls") or [] if str(url or "").strip())
+            if not title and llm.get("title"):
+                title = _clean_text(llm.get("title"))
+                title_mode = _title_subtitle_mode(llm.get("title_mode"), default="original_web_metadata")
+            if not subtitle and llm.get("subtitle"):
+                candidate_subtitle = _clean_text(llm.get("subtitle"))
+                candidate_subtitle_mode = _title_subtitle_mode(llm.get("subtitle_mode"), default="generated")
+                if candidate_subtitle:
+                    subtitle = candidate_subtitle
+                    subtitle_mode = candidate_subtitle_mode
+            rationale = _clean_text(llm.get("rationale")) or rationale
+            source = "llm_no_web_search"
+        except Exception as exc:
+            warnings.append(f"title/subtitle tool-less LLM resolution failed: {exc}")
+
+    if web_search_enabled and not subtitle:
         try:
             llm = llm_resolver(
                 reference=reference,
@@ -714,6 +753,14 @@ def resolve_reference_title_subtitle(
         title = ""
         title_mode = "unresolved"
     subtitle = _clean_text(subtitle)
+    subtitle_quality_issue = _generated_subtitle_quality_issue(
+        subtitle,
+        subtitle_mode=subtitle_mode or "",
+    )
+    if subtitle_quality_issue:
+        warnings.append(f"generated subtitle rejected: {subtitle_quality_issue}")
+        subtitle = ""
+        subtitle_mode = "unresolved"
 
     if include_summary and not summary:
         try:
@@ -761,7 +808,7 @@ def resolve_reference_title_subtitle(
         subtitle_mode=subtitle_mode or ("unresolved" if not subtitle else "generated"),
         source=source if status == "resolved" else "unresolved",
         model=model,
-        web_search_used=web_search_enabled,
+        web_search_used=bool(web_search_enabled and source == "llm_web_search"),
         source_urls=source_urls,
         rationale=rationale or ("Resolved title/subtitle." if status == "resolved" else "No reliable title candidate was found."),
         summary=summary if include_summary else "",
@@ -806,7 +853,14 @@ def build_reference_title_subtitle_plan(
             "warnings": [f"identifier prepass failed: {identifier_prepass.get('failureReason') or 'unknown error'}"],
         }
     existing_title = _normalize_reference_title_candidate(metadata.get("title") or reference.get("title"))
-    existing_subtitle = _normalize_subtitle_candidate(metadata.get("subtitle") or reference.get("subtitle"))
+    existing_subtitle_raw = _normalize_subtitle_candidate(metadata.get("subtitle") or reference.get("subtitle"))
+    existing_resolution = metadata.get("title_subtitle_resolution") if isinstance(metadata.get("title_subtitle_resolution"), dict) else {}
+    existing_subtitle_mode = _clean_text(existing_resolution.get("subtitle_mode")) or "existing_reference_metadata"
+    existing_subtitle_issue = _subtitle_candidate_quality_issue(
+        existing_subtitle_raw,
+        subtitle_mode=existing_subtitle_mode,
+    )
+    existing_subtitle = "" if existing_subtitle_issue else existing_subtitle_raw
     existing_summary = _normalize_outcome_summary_candidate(metadata.get("summary"))
     if existing_title and existing_subtitle and ((existing_summary and include_summary) or not include_summary) and not refresh and not refresh_summary:
         return {
@@ -1009,25 +1063,31 @@ def reference_title_subtitle_batch(
         max_count=max_count,
         scan_limit=scan_limit,
     )
-    items = []
-    for reference in references:
+    worker_count = TITLE_SUBTITLE_BATCH_WORKERS
+
+    def _process_reference(reference: dict[str, Any]) -> dict[str, Any]:
         identifier_prepass = _run_identifier_prepass(reference=reference, catalog_entry={})
         if identifier_prepass.get("status") == "failed":
-            items.append({
+            return {
                 "kind": "reference.title-subtitle.resolve",
                 "action": "blocked",
                 "reference": _reference_summary(reference),
                 "identifierPrepass": identifier_prepass,
                 "failureReason": identifier_prepass.get("failureReason") or "identifier prepass failed",
                 "apply": False,
-            })
-            continue
+            }
         metadata = _load_reference_metadata_payload(reference)
         has_title = bool(_normalize_reference_title_candidate(metadata.get("title") or reference.get("title")))
-        has_subtitle = bool(_normalize_subtitle_candidate(metadata.get("subtitle") or reference.get("subtitle")))
+        subtitle_candidate = _normalize_subtitle_candidate(metadata.get("subtitle") or reference.get("subtitle"))
+        subtitle_resolution = metadata.get("title_subtitle_resolution") if isinstance(metadata.get("title_subtitle_resolution"), dict) else {}
+        subtitle_mode = _clean_text(subtitle_resolution.get("subtitle_mode")) or "existing_reference_metadata"
+        has_subtitle = bool(subtitle_candidate) and not _subtitle_candidate_quality_issue(
+            subtitle_candidate,
+            subtitle_mode=subtitle_mode,
+        )
         has_summary = bool(_normalize_outcome_summary_candidate(metadata.get("summary")))
         if only_missing and has_title and has_subtitle and (has_summary if summary else True) and not refresh and not refresh_summary:
-            items.append({
+            return {
                 "kind": "reference.title-subtitle.resolve",
                 "action": "noop",
                 "reference": _reference_summary(reference),
@@ -1036,8 +1096,7 @@ def reference_title_subtitle_batch(
                 "summary": _normalize_outcome_summary_candidate(metadata.get("summary")),
                 "identifierPrepass": identifier_prepass,
                 "apply": False,
-            })
-            continue
+            }
         try:
             item = reference_title_subtitle_resolve(
                 reference_id=reference["id"],
@@ -1053,16 +1112,42 @@ def reference_title_subtitle_batch(
                 vector_sync=False,
             )
             item["identifierPrepass"] = item.get("identifierPrepass") or identifier_prepass
-            items.append(item)
+            return item
         except Exception as exc:
-            items.append({
+            return {
                 "kind": "reference.title-subtitle.resolve",
                 "action": "error",
                 "reference": _reference_summary(reference),
                 "identifierPrepass": identifier_prepass,
                 "error": str(exc),
                 "apply": False,
-            })
+            }
+
+    items_by_index: dict[int, dict[str, Any]] = {}
+    if worker_count == 1 or len(references) <= 1:
+        for index, reference in enumerate(references):
+            items_by_index[index] = _process_reference(reference)
+    else:
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            futures = {
+                executor.submit(_process_reference, reference): index
+                for index, reference in enumerate(references)
+            }
+            for future in as_completed(futures):
+                index = futures[future]
+                try:
+                    items_by_index[index] = future.result()
+                except Exception as exc:  # pragma: no cover - defensive worker guard
+                    reference = references[index]
+                    items_by_index[index] = {
+                        "kind": "reference.title-subtitle.resolve",
+                        "action": "error",
+                        "reference": _reference_summary(reference),
+                        "identifierPrepass": {"status": "failed", "failureReason": "worker execution failed"},
+                        "error": str(exc),
+                        "apply": False,
+                    }
+    items = [items_by_index[index] for index in range(len(references))]
     result = _title_subtitle_batch_result(
         kind="reference.title-subtitle.batch",
         corpus_key=corpus_key,
@@ -2677,14 +2762,16 @@ def build_title_subtitle_prompt(
         "Use the original title verbatim if available. Use the original subtitle verbatim if available. Do not paraphrase original titles or subtitles.",
         "If the known title includes citation wrappers or source labels like leading arXiv ids, trailing '- arXiv', trailing publisher branding, or 'accessed <date>', remove that noise and recover the original work title.",
         "If no original subtitle exists, generate one concise, informative subtitle and set subtitle_mode to generated.",
-        "Generated subtitles must be specific and meaningful, not generic labels.",
+        "Generated subtitles must be specific and meaningful, not generic labels, and typically 4 to 12 words.",
         "Avoid self-referential document framing such as 'This article', 'This paper', 'This report', or 'This release'.",
         "You MAY mention evidence/method terms such as survey, poll, trial, study, or experiment when they are substantive to the finding.",
+        "Generated subtitle must include at least one concrete content signal (who, what, result, or population).",
         "Do not return URLs, domains, source labels, or placeholder subtitles.",
         "Subtitle must be one short prose line. Do not use Markdown. Do not use bullet points. Do not use numbered lists. Do not include line breaks.",
         "Do not return placeholder subtitles like 'No subtitle available', 'generated fallback subtitle', 'arXiv preprint', or source-brand labels.",
         "Examples:",
         "Good subtitle: 'Survey finds 72% of teens have used AI companions'",
+        "Good subtitle: 'U.S. teens report routine AI companion use'",
         "Bad subtitle: 'This article reports survey results'",
         "Bad subtitle: 'https://phys.org/news/...'",
         "Bad subtitle: 'Study'",
@@ -2716,9 +2803,10 @@ def _reference_summarization_cloud_input(
     doctrine_context: dict[str, Any] | None = None,
     prompt_version: str = "",
 ) -> dict[str, Any]:
+    sanitized_source_text = str(source_text or "").replace("\x00", "")
     return _compact_dict({
         "mode": mode,
-        "source_text": source_text[:50000],
+        "source_text": sanitized_source_text[:SUMMARY_SOURCE_TEXT_MAX_CHARS],
         "max_tokens": int(max_tokens),
         "reference_title": _clean_text(reference.get("title")),
         "source_uri": _clean_text(reference.get("sourceUri")),
@@ -2803,7 +2891,7 @@ def generate_outcome_summary(
     model: str = "gpt-5.4-mini",
     procedure_alias: str = SUMMARY_PROCEDURE_ALIAS_TITLE_SUBTITLE_RESOLVE,
 ) -> dict[str, str]:
-    source_text = _required(source_text, "source_text")
+    source_text = _required(source_text, "source_text").replace("\x00", "")
     budget = normalize_title_subtitle_summary_budget(max_tokens)
     return _run_reference_summarization_cloud_procedure(
         alias=procedure_alias,
@@ -2895,7 +2983,7 @@ def reference_web_search(
     }
 
 
-def generate_title_subtitle_with_web_search(
+def _generate_title_subtitle_llm(
     *,
     reference: dict[str, Any],
     catalog_entry: dict[str, Any] | None = None,
@@ -2903,10 +2991,11 @@ def generate_title_subtitle_with_web_search(
     known_title: str = "",
     known_subtitle: str = "",
     model: str = "gpt-5.4-mini",
+    web_search_enabled: bool,
 ) -> dict[str, Any]:
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is required for title/subtitle web+LLM enrichment.")
+        raise RuntimeError("OPENAI_API_KEY is required for title/subtitle LLM enrichment.")
     catalog_entry = catalog_entry or {}
     prompt = build_title_subtitle_prompt(
         reference=reference,
@@ -2921,9 +3010,6 @@ def generate_title_subtitle_with_web_search(
             {"role": "system", "content": "You resolve bibliographic title metadata for a private editorial knowledge base. Return strict JSON only."},
             {"role": "user", "content": prompt},
         ],
-        "tools": [{"type": "web_search"}],
-        "tool_choice": "auto",
-        "include": ["web_search_call.action.sources"],
         "text": {
             "format": {
                 "type": "json_schema",
@@ -2944,6 +3030,10 @@ def generate_title_subtitle_with_web_search(
             },
         },
     }
+    if web_search_enabled:
+        payload["tools"] = [{"type": "web_search"}]
+        payload["tool_choice"] = "auto"
+        payload["include"] = ["web_search_call.action.sources"]
     request = urllib.request.Request(
         "https://api.openai.com/v1/responses",
         data=json.dumps(payload).encode("utf-8"),
@@ -2955,7 +3045,8 @@ def generate_title_subtitle_with_web_search(
             parsed = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as error:
         body = error.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"OpenAI title/subtitle request failed: {error.code} {body[:400]}") from error
+        lane = "web+LLM" if web_search_enabled else "tool-less"
+        raise RuntimeError(f"OpenAI title/subtitle {lane} request failed: {error.code} {body[:400]}") from error
     text = _extract_response_text(parsed)
     if not text:
         raise RuntimeError("OpenAI title/subtitle request returned no text.")
@@ -2964,7 +3055,8 @@ def generate_title_subtitle_with_web_search(
     except json.JSONDecodeError as exc:
         raise RuntimeError("OpenAI title/subtitle request did not return JSON.") from exc
     urls = _string_list(result.get("source_urls") or [])
-    urls.extend(_web_search_source_urls(parsed))
+    if web_search_enabled:
+        urls.extend(_web_search_source_urls(parsed))
     return {
         "title": _clean_text(result.get("title")),
         "subtitle": _clean_text(result.get("subtitle")),
@@ -2975,6 +3067,46 @@ def generate_title_subtitle_with_web_search(
         "promptVersion": TITLE_SUBTITLE_PROMPT_VERSION,
         "model": model,
     }
+
+
+def generate_title_subtitle_without_web_search(
+    *,
+    reference: dict[str, Any],
+    catalog_entry: dict[str, Any] | None = None,
+    source_text: str = "",
+    known_title: str = "",
+    known_subtitle: str = "",
+    model: str = "gpt-5.4-mini",
+) -> dict[str, Any]:
+    return _generate_title_subtitle_llm(
+        reference=reference,
+        catalog_entry=catalog_entry,
+        source_text=source_text,
+        known_title=known_title,
+        known_subtitle=known_subtitle,
+        model=model,
+        web_search_enabled=False,
+    )
+
+
+def generate_title_subtitle_with_web_search(
+    *,
+    reference: dict[str, Any],
+    catalog_entry: dict[str, Any] | None = None,
+    source_text: str = "",
+    known_title: str = "",
+    known_subtitle: str = "",
+    model: str = "gpt-5.4-mini",
+) -> dict[str, Any]:
+    return _generate_title_subtitle_llm(
+        reference=reference,
+        catalog_entry=catalog_entry,
+        source_text=source_text,
+        known_title=known_title,
+        known_subtitle=known_subtitle,
+        model=model,
+        web_search_enabled=True,
+    )
 
 
 def generate_quality_assessment(
@@ -3043,7 +3175,7 @@ def generate_summary(
     doctrine_context: dict[str, Any] | None = None,
     procedure_alias: str = SUMMARY_PROCEDURE_ALIAS_SUMMARIZE,
 ) -> dict[str, str]:
-    source_text = _required(source_text, "source_text")
+    source_text = _required(source_text, "source_text").replace("\x00", "")
     budget = normalize_summary_budget(max_tokens)
     return _run_reference_summarization_cloud_procedure(
         alias=procedure_alias,
@@ -3097,9 +3229,19 @@ def _load_reference_metadata_payload(reference: dict[str, Any]) -> dict[str, Any
         from papyrus_content.model_attachments import download_attachment_buffer
 
         client, _ = create_authoring_client()
-        attachment = client.get_record("ModelAttachment", _reference_metadata_attachment_id(reference_id))
-        if not attachment or attachment.get("status") == "deleted":
+        attachments = client.list_by_index("modelAttachmentsByOwnerRoleAndSortKey", reference_id, limit=20)
+        metadata_candidates = [
+            entry
+            for entry in attachments
+            if str(entry.get("role") or "").strip() == "metadata"
+            and str(entry.get("status") or "").strip() != "deleted"
+        ]
+        if not metadata_candidates:
             return {}
+        attachment = next(
+            (entry for entry in metadata_candidates if str(entry.get("status") or "").strip() == "active"),
+            metadata_candidates[0],
+        )
         payload = download_attachment_buffer(client, attachment)
         if not payload:
             return {}
@@ -4651,7 +4793,7 @@ def _title_subtitle_resolution(
         "rationale": rationale,
         "run_id": run_id,
         "resolved_at": resolved_at,
-        "prompt_version": TITLE_SUBTITLE_PROMPT_VERSION if source == "llm_web_search" else "",
+        "prompt_version": TITLE_SUBTITLE_PROMPT_VERSION if source in {"llm_web_search", "llm_no_web_search"} else "",
         "warnings": warnings,
         "identifierPrepass": identifier_prepass or {},
     }
@@ -4730,7 +4872,7 @@ def _source_excerpt(value: str, *, max_chars: int) -> str:
 
 
 def _clean_text(value: Any) -> str:
-    return re.sub(r"\s+", " ", str(value or "")).strip()
+    return re.sub(r"\s+", " ", str(value or "").replace("\x00", " ")).strip()
 
 
 def _looks_like_list_line(value: str) -> bool:
@@ -4739,6 +4881,68 @@ def _looks_like_list_line(value: str) -> bool:
 
 def _normalize_subtitle_candidate(value: Any) -> str:
     return _clean_text(_strip_html_fragments(value))
+
+
+def _generated_subtitle_quality_issue(value: Any, *, subtitle_mode: str) -> str:
+    if _title_subtitle_mode(subtitle_mode, default="") != "generated":
+        return ""
+    text = _normalize_subtitle_candidate(value)
+    if not text:
+        return ""
+    lowered = text.lower()
+    if re.match(r"^https?://", text, flags=re.IGNORECASE):
+        return "looks like URL"
+    if re.match(r"^[a-z0-9.-]+\.[a-z]{2,}(?:/|$)", lowered):
+        return "looks like domain or URL path"
+    if re.match(r"^(?:www\.)?[a-z0-9.-]+\.[a-z]{2,}$", lowered):
+        return "looks like domain"
+    words = re.findall(r"[A-Za-z0-9]+", text)
+    if len(words) == 1 and words[0].lower() in {"study", "survey", "report", "paper", "article", "review", "preprint"}:
+        return "generic one-word label"
+    if len(words) < 2:
+        return "must be informative multi-word phrase"
+    return ""
+
+
+def _subtitle_candidate_quality_issue(value: Any, *, subtitle_mode: str) -> str:
+    text = _normalize_subtitle_candidate(value)
+    if not text:
+        return ""
+    lowered = text.lower()
+    if re.match(r"^https?://", text, flags=re.IGNORECASE):
+        return "looks like URL"
+    if re.match(r"^[a-z0-9.-]+\.[a-z]{2,}(?:/|$)", lowered):
+        return "looks like domain or URL path"
+    if re.match(r"^(?:www\.)?[a-z0-9.-]+\.[a-z]{2,}$", lowered):
+        return "looks like domain"
+    generated_issue = _generated_subtitle_quality_issue(value, subtitle_mode=subtitle_mode)
+    if generated_issue:
+        return generated_issue
+    return _non_generated_subtitle_quality_issue(value, subtitle_mode=subtitle_mode)
+
+
+def _non_generated_subtitle_quality_issue(value: Any, *, subtitle_mode: str) -> str:
+    mode = _title_subtitle_mode(subtitle_mode, default="")
+    if mode in {"", "generated", "original_metadata", "existing_reference_metadata", "existing_reference"}:
+        return ""
+    text = _normalize_subtitle_candidate(value)
+    if not text:
+        return ""
+    lowered = text.lower()
+    if re.match(r"^\s*(?:this|the)\s+(?:pilot\s+)?(?:study|survey|report|paper|article|review|work)\b", lowered):
+        return "self-referential subtitle framing"
+    if re.match(r"^\s*(?:an?\s+|the\s+)?pilot study\s*$", lowered):
+        return "generic pilot-study subtitle"
+    if re.match(r"^\s*abstract page for arxiv paper\b", lowered):
+        return "source-page boilerplate subtitle"
+    if re.match(r"^\s*(?:an?\s+|the\s+)?(?:study|survey|report|paper|article|review|preprint)\s*$", lowered):
+        return "generic non-informative subtitle"
+    words = re.findall(r"[A-Za-z0-9]+", text)
+    if len(words) > 20 or len(text) > 180:
+        return "subtitle looks like an abstract/description instead of a subtitle"
+    if len(words) < 4:
+        return "subtitle is too short to be informative"
+    return ""
 
 
 def _strip_html_fragments(value: Any) -> str:

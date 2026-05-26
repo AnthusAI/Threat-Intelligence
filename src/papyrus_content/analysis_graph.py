@@ -242,6 +242,7 @@ def build_graph_export_import_records(
                         "semanticRelationCount": len(relation_records["records"]),
                         "skippedItemNodes": skipped_item_nodes,
                         "unresolvedReferences": relation_records["unresolvedReferences"],
+                        "unresolvedReferenceItemIds": relation_records["unresolvedReferenceItemIds"],
                     }
                 ),
                 "createdAt": imported_at,
@@ -265,6 +266,7 @@ def build_graph_export_import_records(
         "semanticRelationCount": len(relation_records["records"]),
         "skippedItemNodes": skipped_item_nodes,
         "unresolvedReferences": relation_records["unresolvedReferences"],
+        "unresolvedReferenceItemIds": relation_records["unresolvedReferenceItemIds"],
         "mentionEdgeCount": relation_records["mentionEdgeCount"],
         "mentionRelationCount": relation_records["mentionRelationCount"],
     }
@@ -354,8 +356,12 @@ def plan_graph_artifact_import(
             f"Graph export artifact resolves to import run {plan['importRunId']}, not requested import run {import_run['id']}."
         )
     if plan["mentionEdgeCount"] > 0 and plan["mentionRelationCount"] == 0:
+        unresolved_ids = [str(value) for value in (plan.get("unresolvedReferenceItemIds") or []) if value]
+        unresolved_preview = ", ".join(unresolved_ids[:20])
+        unresolved_suffix = f" Unresolved item ids: {unresolved_preview}" if unresolved_preview else ""
         raise ValueError(
-            f"Graph import could not resolve any accepted References for {plan['mentionEdgeCount']} reference-to-entity edge(s)."
+            "Graph import could not resolve any accepted References for "
+            f"{plan['mentionEdgeCount']} reference-to-entity edge(s).{unresolved_suffix}"
         )
     now = _utc_now()
     supersession_changes = (
@@ -400,6 +406,9 @@ def _build_graph_export_relation_records(
     records: list[dict[str, Any]] = []
     seen: set[str] = set()
     unresolved_references = 0
+    unresolved_reference_item_ids_limit = 500
+    unresolved_reference_item_ids: list[str] = []
+    unresolved_reference_item_ids_seen: set[str] = set()
     mention_edge_count = 0
     mention_relation_count = 0
 
@@ -434,6 +443,13 @@ def _build_graph_export_relation_records(
             reference = reference_by_external_item_id.get(source_item_id) if source_item_id else None
             if not reference:
                 unresolved_references += 1
+                if (
+                    source_item_id
+                    and source_item_id not in unresolved_reference_item_ids_seen
+                    and len(unresolved_reference_item_ids) < unresolved_reference_item_ids_limit
+                ):
+                    unresolved_reference_item_ids_seen.add(source_item_id)
+                    unresolved_reference_item_ids.append(source_item_id)
                 continue
             relation = _graph_semantic_relation_record(
                 id_parts=[snapshot_ref, source_item_id, edge_id, "mentions"],
@@ -486,6 +502,7 @@ def _build_graph_export_relation_records(
     return {
         "records": records,
         "unresolvedReferences": unresolved_references,
+        "unresolvedReferenceItemIds": unresolved_reference_item_ids,
         "mentionEdgeCount": mention_edge_count,
         "mentionRelationCount": mention_relation_count,
     }

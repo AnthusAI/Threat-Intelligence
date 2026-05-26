@@ -34,6 +34,7 @@ export type SemanticPredicateId =
   | "reference_summary_100_tokens"
   | "reference_summary_200_tokens"
   | "reference_summary_500_tokens"
+  | "reference_summary_1000_tokens"
   | "mentions"
   | "has_editorial_form"
   | "about"
@@ -71,6 +72,7 @@ export const SEMANTIC_PREDICATES: SemanticPredicateDefinition[] = [
   { id: "reference_summary_100_tokens", label: "100-token reference summary", group: "summarization", inverseLabel: "100-token summary for", contextPackTags: ["reference_curation", "research", "context_ranking"] },
   { id: "reference_summary_200_tokens", label: "200-token reference summary", group: "summarization", inverseLabel: "200-token summary for", contextPackTags: ["reference_curation", "research", "context_ranking"] },
   { id: "reference_summary_500_tokens", label: "500-token reference summary", group: "summarization", inverseLabel: "500-token summary for", contextPackTags: ["reference_curation", "research", "context_ranking"] },
+  { id: "reference_summary_1000_tokens", label: "1000-token reference summary", group: "summarization", inverseLabel: "1000-token summary for", contextPackTags: ["reference_curation", "research", "context_ranking"] },
   { id: "mentions", label: "mentions", group: "ontology", inverseLabel: "mentioned by" },
   { id: "has_editorial_form", label: "has editorial form", group: "editorial", inverseLabel: "items by editorial form", contextPackTags: ["editing", "publication", "assignment_context"] },
   { id: "insight_about", label: "insight about", group: "knowledge", inverseLabel: "insights", contextPackTags: ["research", "reference_graph", "editing"] },
