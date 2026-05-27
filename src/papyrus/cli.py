@@ -1,13 +1,20 @@
 from __future__ import annotations
 
+import os
+import shlex
 import sys
+from pathlib import Path
 
 from papyrus_content import cli as content_cli
+from papyrus_content.env import PAPYRUS_ROOT
 from papyrus_newsroom import cli as newsroom_cli
+
+_ALLOW_CROSS_ROOT_FLAG = "--allow-cross-root"
+_TRUTHY = {"1", "true", "yes", "on"}
 
 
 def _usage() -> None:
-    print("Usage: poetry run papyrus <group> <command> [options]")
+    print("Usage: poetry run papyrus [--allow-cross-root] <group> <command> [options]")
     print(
         "Groups: assignments, reporting, research, references, knowledge, sections, editions, procedures, analysis, auth, batch, ops"
     )
@@ -157,13 +164,64 @@ def _map_ops(command: str, flags: list[str]) -> int:
     return 0
 
 
+def _find_operator_repo_root(start: Path) -> Path | None:
+    resolved = start.resolve()
+    for candidate in [resolved, *resolved.parents]:
+        if not (candidate / "pyproject.toml").exists():
+            continue
+        if (candidate / "src" / "papyrus").exists() and (candidate / "src" / "papyrus_content").exists():
+            return candidate
+    return None
+
+
+def _consume_cross_root_override(args: list[str]) -> tuple[bool, list[str]]:
+    allow_cross_root = str(os.environ.get("PAPYRUS_ALLOW_CROSS_ROOT", "")).strip().lower() in _TRUTHY
+    filtered_args: list[str] = []
+    for token in args:
+        if token == _ALLOW_CROSS_ROOT_FLAG:
+            allow_cross_root = True
+            continue
+        filtered_args.append(token)
+    return allow_cross_root, filtered_args
+
+
+def _command_display(args: list[str]) -> str:
+    if not args:
+        return "poetry run papyrus"
+    return "poetry run papyrus " + " ".join(shlex.quote(value) for value in args)
+
+
+def _enforce_root_guard(args: list[str], *, cwd: Path | None = None, module_root: Path | None = None) -> None:
+    operator_cwd = (cwd or Path.cwd()).resolve()
+    operator_root = _find_operator_repo_root(operator_cwd)
+    if operator_root is None:
+        return
+    resolved_module_root = (module_root or PAPYRUS_ROOT).resolve()
+    if operator_root == resolved_module_root:
+        return
+    module_file = Path(content_cli.__file__).resolve()
+    recovery = f"cd {shlex.quote(str(operator_root))} && {_command_display(args)}"
+    raise ValueError(
+        "papyrus-root-guard\tblocked\tcross-root invocation detected\n"
+        f"papyrus-root-guard\tcwd\t{operator_cwd}\n"
+        f"papyrus-root-guard\toperator-root\t{operator_root}\n"
+        f"papyrus-root-guard\tmodule-root\t{resolved_module_root}\n"
+        f"papyrus-root-guard\tmodule-file\t{module_file}\n"
+        f"papyrus-root-guard\tnext\t{recovery}\n"
+        "papyrus-root-guard\toverride\tpass --allow-cross-root or set PAPYRUS_ALLOW_CROSS_ROOT=1"
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     args = list(argv if argv is not None else sys.argv[1:])
+    allow_cross_root, args = _consume_cross_root_override(args)
     if not args:
         _usage()
         return 1
-    group = args[0]
     try:
+        if not allow_cross_root:
+            _enforce_root_guard(args)
+        group = args[0]
         if group == "assignments":
             command, flags = _require_command(group, args)
             return _map_assignments(command, flags)

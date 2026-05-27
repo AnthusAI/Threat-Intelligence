@@ -39,6 +39,34 @@ Procedure {
         concept_profile = field.object{required = true}
     },
     function(input)
+        local function safe_get(table_like, key)
+            if type(table_like) ~= "table" then
+                return nil
+            end
+            local ok, value = pcall(function()
+                return table_like[key]
+            end)
+            if ok then
+                return value
+            end
+            return nil
+        end
+
+        local function normalize_table(value)
+            if type(value) == "table" then
+                return value
+            end
+            return {}
+        end
+
+        local function normalize_number(value, default_value)
+            local as_number = tonumber(value)
+            if as_number == nil then
+                return default_value
+            end
+            return as_number
+        end
+
         local context = input.context_json
         local message = string.format([[
 Create a Papyrus ontology Concept profile from the supplied JSON context.
@@ -60,7 +88,36 @@ Context JSON:
 %s
 ]], json.encode(context))
         local result = ontology_concept_profiler({message = message})
-        return result.output
+        local output = safe_get(result, "output")
+        local profile = safe_get(output, "concept_profile")
+        if type(profile) ~= "table" then
+            profile = safe_get(output, "conceptProfile")
+        end
+        if type(profile) ~= "table" then
+            profile = safe_get(result, "concept_profile")
+        end
+        if type(profile) ~= "table" then
+            profile = safe_get(result, "conceptProfile")
+        end
+        if type(profile) ~= "table" and type(output) == "table" and safe_get(output, "meaning") ~= nil then
+            profile = output
+        end
+        if type(profile) ~= "table" and type(result) == "table" and safe_get(result, "meaning") ~= nil then
+            profile = result
+        end
+        profile = normalize_table(profile)
+        profile.meaning = tostring(profile.meaning or "No concept profile was generated.")
+        profile.contextualVariants = normalize_table(profile.contextualVariants)
+        profile.aliases = normalize_table(profile.aliases)
+        profile.disambiguators = normalize_table(profile.disambiguators)
+        profile.exemplarSources = normalize_table(profile.exemplarSources)
+        profile.likelyDuplicates = normalize_table(profile.likelyDuplicates)
+        profile.recommendedRelations = normalize_table(profile.recommendedRelations)
+        profile.confidence = normalize_number(profile.confidence, 0.0)
+        profile.model = tostring(profile.model or "gpt-5.4-mini")
+        return {
+            concept_profile = profile
+        }
     end
 }
 

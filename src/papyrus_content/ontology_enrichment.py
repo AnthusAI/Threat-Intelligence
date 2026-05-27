@@ -74,6 +74,10 @@ SUPPORTED_CONTEXT_MODELS = [
     "SteeringProposal",
     "NewsroomSection",
 ]
+FAST_CONTEXT_MODELS = [
+    "SemanticNode",
+    "SemanticRelation",
+]
 MODEL_TO_KIND = {
     "Reference": "reference",
     "ReferenceAttachment": "referenceAttachment",
@@ -94,15 +98,29 @@ KIND_TO_MODEL = {value: key for key, value in MODEL_TO_KIND.items()}
 def ontology_rank(flags: list[str]) -> None:
     options = parse_options(flags)
     client, _ = create_authoring_client()
-    state = load_ontology_state(client, include_attachment_payloads=True)
-    ranked = rank_concepts(state, include_operational=bool(options.get("include-operational")))
+    state = load_ontology_state(
+        client,
+        include_attachment_payloads=True,
+        model_names=_ontology_model_scope(options),
+    )
+    ranked = rank_concepts(state, include_operational=bool(options.get("include-operational")), include_profile_status=False)
     limit = _int_option(options, "limit", 100)
-    payload = {"ok": True, "concepts": ranked[:limit], "totalConcepts": len(ranked)}
+    top = [dict(row) for row in ranked[:limit]]
+    if top and not options.get("skip-freshness"):
+        nodes_by_id = {str(node.get("id")): node for node in current_semantic_nodes(state)}
+        scoped_nodes = [nodes_by_id[str(row.get("id"))] for row in top if str(row.get("id")) in nodes_by_id]
+        status_by_id = {
+            str(entry["concept"].get("id")): entry.get("status", "missing")
+            for entry in concept_profile_status(state, scoped_nodes)
+        }
+        for row in top:
+            row["profileStatus"] = status_by_id.get(str(row.get("id")), row.get("profileStatus", "unknown"))
+    payload = {"ok": True, "concepts": top, "totalConcepts": len(ranked)}
     if options.get("json"):
         print(json.dumps(payload, indent=2))
         return
     print(f"ontology-rank\tconcepts\t{len(ranked)}")
-    for index, row in enumerate(ranked[:limit], start=1):
+    for index, row in enumerate(payload["concepts"], start=1):
         print(
             "ontology-rank\t"
             f"{index}\t{row['score']:.8f}\t{row.get('nodeKey') or '-'}\t"
@@ -114,8 +132,16 @@ def ontology_rank(flags: list[str]) -> None:
 def ontology_status(flags: list[str]) -> None:
     options = parse_options(flags)
     client, _ = create_authoring_client()
-    state = load_ontology_state(client, include_attachment_payloads=True)
-    ranked = rank_concepts(state, include_operational=bool(options.get("include-operational"))) if options.get("ranked") else []
+    state = load_ontology_state(
+        client,
+        include_attachment_payloads=True,
+        model_names=_ontology_model_scope(options),
+    )
+    ranked = (
+        rank_concepts(state, include_operational=bool(options.get("include-operational")), include_profile_status=False)
+        if options.get("ranked")
+        else []
+    )
     limit = _int_option(options, "limit", 100)
     relation_scope = select_relation_scope(state, ranked, options, limit=limit)
     concept_scope = select_concept_scope(state, ranked, options, limit=limit)
@@ -160,14 +186,28 @@ def ontology_explain(flags: list[str]) -> None:
     for index, status in enumerate(targets, start=1):
         relation = status["relation"]
         context = build_relation_context(state, relation, input_fingerprint=status["inputFingerprint"])
-        output = run_relationship_explainer(context, use_llm=use_llm, dry_run=not apply)
+        relation_id = str(relation.get("id") or "")
+        try:
+            output = run_relationship_explainer(context, use_llm=use_llm, dry_run=not apply)
+        except Exception as error:
+            _emit_ontology_llm_failure(
+                command="ontology-explain",
+                target_kind="relation",
+                target_id=relation_id,
+                error=error,
+                next_commands=[
+                    f"poetry run papyrus knowledge ontology explain --relation-id {relation_id} --no-llm --apply",
+                    f"poetry run papyrus knowledge ontology explain --relation-id {relation_id} --apply",
+                ],
+            )
+            raise
         outputs.append({"relationId": relation["id"], "output": output, "inputFingerprint": status["inputFingerprint"]})
         records.extend(build_relation_explanation_records(relation, context, output, now=_utc_now()))
-        print(
-            f"ontology-explain\tprogress\t{index}/{len(targets)}\t{relation['id']}\t"
-            f"confidence={output.get('confidence')}\tllm={'yes' if use_llm else 'no'}",
-            file=sys.stderr,
-            flush=True,
+        _ontology_progress(
+            "ontology-explain",
+            "progress",
+            f"{index}/{len(targets)}",
+            f"{relation_id}\tconfidence={output.get('confidence')}\tllm={'yes' if use_llm else 'no'}",
         )
     result = apply_or_report(client, "ontology-relation-explanations", records, apply=apply)
     payload = {
@@ -208,14 +248,28 @@ def ontology_profile(flags: list[str]) -> None:
     for index, status in enumerate(targets, start=1):
         concept = status["concept"]
         context = build_concept_context(state, concept, input_fingerprint=status["inputFingerprint"])
-        output = run_concept_profiler(context, use_llm=use_llm, dry_run=not apply)
+        concept_id = str(concept.get("id") or "")
+        try:
+            output = run_concept_profiler(context, use_llm=use_llm, dry_run=not apply)
+        except Exception as error:
+            _emit_ontology_llm_failure(
+                command="ontology-profile",
+                target_kind="concept",
+                target_id=concept_id,
+                error=error,
+                next_commands=[
+                    f"poetry run papyrus knowledge ontology profile --concept-id {concept_id} --no-llm --apply",
+                    f"poetry run papyrus knowledge ontology profile --concept-id {concept_id} --apply",
+                ],
+            )
+            raise
         outputs.append({"conceptId": concept["id"], "output": output, "inputFingerprint": status["inputFingerprint"]})
         records.extend(build_concept_profile_records(concept, context, output, now=_utc_now()))
-        print(
-            f"ontology-profile\tprogress\t{index}/{len(targets)}\t{concept['id']}\t"
-            f"confidence={output.get('confidence')}\tllm={'yes' if use_llm else 'no'}",
-            file=sys.stderr,
-            flush=True,
+        _ontology_progress(
+            "ontology-profile",
+            "progress",
+            f"{index}/{len(targets)}",
+            f"{concept_id}\tconfidence={output.get('confidence')}\tllm={'yes' if use_llm else 'no'}",
         )
     result = apply_or_report(client, "ontology-concept-profiles", records, apply=apply)
     payload = {
@@ -271,8 +325,12 @@ def ontology_dedupe(flags: list[str]) -> None:
 def ontology_doctor(flags: list[str]) -> None:
     options = parse_options(flags)
     client, _ = create_authoring_client()
-    state = load_ontology_state(client, include_attachment_payloads=True)
-    ranked = rank_concepts(state)
+    state = load_ontology_state(
+        client,
+        include_attachment_payloads=True,
+        model_names=_ontology_model_scope(options),
+    )
+    ranked = rank_concepts(state, include_profile_status=False)
     relation_status = relation_explanation_status(state, current_relations(state))
     concept_status = concept_profile_status(state, current_semantic_nodes(state))
     payload = ontology_status_payload(relation_status, concept_status, ranked=ranked[: _int_option(options, "limit", 20)])
@@ -288,17 +346,25 @@ def load_ontology_state(
     client: PapyrusGraphQLAuthoringClient,
     *,
     include_attachment_payloads: bool = False,
+    model_names: list[str] | None = None,
 ) -> dict[str, Any]:
     models: dict[str, list[dict[str, Any]]] = {}
-    for model_name in [*SUPPORTED_CONTEXT_MODELS, "ModelAttachment", "SemanticRelationType"]:
+    requested_models = [*model_names] if model_names else [*SUPPORTED_CONTEXT_MODELS]
+    requested_models.extend(["ModelAttachment", "SemanticRelationType"])
+    for model_name in requested_models:
+        _ontology_progress("ontology-state", "model-load", "start", model_name)
         models[model_name] = client.safe_list_records(model_name)
+        _ontology_progress("ontology-state", "model-load", "done", f"{model_name}\trows={len(models[model_name])}")
     state = build_state_indexes(models)
     state["corpusText"] = resolve_corpus_text_provider()
     state["attachmentPayloadClient"] = client
     if include_attachment_payloads:
+        _ontology_progress("ontology-state", "attachment-payloads", "start", f"attachments={len(state['attachments'])}")
         state["attachmentPayloads"] = load_attachment_payloads(client, state["attachments"])
+        _ontology_progress("ontology-state", "attachment-payloads", "done", f"loaded={len(state['attachmentPayloads'])}")
     else:
         state["attachmentPayloads"] = {}
+    _ontology_progress("ontology-state", "ready", "ok")
     return state
 
 
@@ -336,10 +402,13 @@ def load_attachment_payloads(client: PapyrusGraphQLAuthoringClient, attachments:
         if attachment.get("role") in {RELATION_EXPLANATION_ROLE, CONCEPT_PROFILE_ROLE}
         and attachment.get("status") not in {"deleted", "aborted"}
     ]
-    for attachment in relevant:
+    total = len(relevant)
+    for index, attachment in enumerate(relevant, start=1):
         payload = parse_attachment_payload(client, attachment)
         if isinstance(payload, dict):
             payloads[str(attachment["id"])] = payload
+        if index == 1 or index % 25 == 0 or index == total:
+            _ontology_progress("ontology-state", "attachment-payloads", "progress", f"{index}/{total}\tloaded={len(payloads)}")
     return payloads
 
 
@@ -357,7 +426,12 @@ def current_relations(state: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-def rank_concepts(state: dict[str, Any], *, include_operational: bool = False) -> list[dict[str, Any]]:
+def rank_concepts(
+    state: dict[str, Any],
+    *,
+    include_operational: bool = False,
+    include_profile_status: bool = True,
+) -> list[dict[str, Any]]:
     nodes = current_semantic_nodes(state)
     node_lineages = {str(node.get("lineageId") or node.get("id")) for node in nodes}
     graph_nodes: set[str] = {f"semanticNode#{lineage}" for lineage in node_lineages if lineage}
@@ -392,10 +466,12 @@ def rank_concepts(state: dict[str, Any], *, include_operational: bool = False) -
             relation_count_by_node[subject_lineage] += 1
             source_kinds_by_node[subject_lineage].add(object_kind)
     pagerank = compute_pagerank(graph_nodes, weighted_edges)
-    profile_status_by_id = {
-        entry["concept"]["id"]: entry["status"]
-        for entry in concept_profile_status(state, nodes)
-    }
+    profile_status_by_id: dict[str, str] = {}
+    if include_profile_status:
+        profile_status_by_id = {
+            str(entry["concept"].get("id")): str(entry.get("status") or "missing")
+            for entry in concept_profile_status(state, nodes)
+        }
     ranked: list[dict[str, Any]] = []
     for node in nodes:
         lineage_id = str(node.get("lineageId") or node.get("id") or "")
@@ -403,7 +479,13 @@ def rank_concepts(state: dict[str, Any], *, include_operational: bool = False) -
         accepted_mentions = len(mentions_by_node.get(lineage_id, set()))
         distinct_source_kinds = len(source_kinds_by_node.get(lineage_id, set()))
         relation_count = relation_count_by_node.get(lineage_id, 0)
-        freshness_boost = {"missing": 0.12, "stale": 0.08, "fresh": 0.0}.get(profile_status_by_id.get(str(node.get("id"))), 0.05)
+        if include_profile_status:
+            freshness_boost = {"missing": 0.12, "stale": 0.08, "fresh": 0.0}.get(
+                profile_status_by_id.get(str(node.get("id"))),
+                0.05,
+            )
+        else:
+            freshness_boost = 0.05
         score = pagerank.get(ref, 0.0) + accepted_mentions * 0.003 + distinct_source_kinds * 0.01 + relation_count * 0.0005 + freshness_boost
         ranked.append(
             {
@@ -866,28 +948,41 @@ def neighbor_relations_for_relation(state: dict[str, Any], relation: dict[str, A
 
 
 def run_relationship_explainer(context: dict[str, Any], *, use_llm: bool, dry_run: bool) -> dict[str, Any]:
+    relation_id = str((context.get("relation") or {}).get("id") or "")
     if use_llm and not dry_run:
         return run_tactus_json_procedure(
             PAPYRUS_ROOT / RELATION_EXPLAINER_PROCEDURE,
             {"context_json": context},
             markers=("relation_explanation", "meaning", "confidence"),
+            target_kind="relation",
+            target_id=relation_id,
         ).get("relation_explanation") or {}
     return deterministic_relation_explanation(context)
 
 
 def run_concept_profiler(context: dict[str, Any], *, use_llm: bool, dry_run: bool) -> dict[str, Any]:
+    concept_id = str((context.get("concept") or {}).get("id") or "")
     if use_llm and not dry_run:
         return run_tactus_json_procedure(
             PAPYRUS_ROOT / CONCEPT_PROFILER_PROCEDURE,
             {"context_json": context},
             markers=("concept_profile", "meaning", "confidence"),
+            target_kind="concept",
+            target_id=concept_id,
         ).get("concept_profile") or {}
     return deterministic_concept_profile(context)
 
 
-def run_tactus_json_procedure(path: Path, params: dict[str, Any], *, markers: tuple[str, ...]) -> dict[str, Any]:
+def run_tactus_json_procedure(
+    path: Path,
+    params: dict[str, Any],
+    *,
+    markers: tuple[str, ...],
+    target_kind: str,
+    target_id: str,
+) -> dict[str, Any]:
     if not path.exists():
-        raise RuntimeError(f"Missing Tactus procedure: {path}")
+        raise RuntimeError(f"Missing Tactus procedure: {path}\ttarget={target_kind}:{target_id}")
     command = ["tactus", "run", str(path), "--no-sandbox", "--real-all"]
     for key, value in params.items():
         encoded = urllib.parse.quote(json.dumps(value), safe="")
@@ -897,12 +992,24 @@ def run_tactus_json_procedure(path: Path, params: dict[str, Any], *, markers: tu
     env["PYTHONPATH"] = os.pathsep.join(part for part in [str(PAPYRUS_ROOT.parent / "Tactus"), str(PAPYRUS_ROOT / "src"), env.get("PYTHONPATH", "")] if part)
     completed = subprocess.run(command, cwd=PAPYRUS_ROOT, capture_output=True, text=True, check=False, env=env)
     if completed.returncode != 0:
-        raise RuntimeError(completed.stderr.strip() or completed.stdout.strip() or f"Tactus exited {completed.returncode}")
+        stderr_excerpt = _log_excerpt(completed.stderr)
+        stdout_excerpt = _log_excerpt(completed.stdout)
+        raise RuntimeError(
+            "Tactus ontology procedure failed "
+            f"target={target_kind}:{target_id} path={path} exit={completed.returncode} "
+            f"stderr={stderr_excerpt!r} stdout={stdout_excerpt!r}"
+        )
     from .cloud_procedures import extract_research_run_payload
 
     payload = extract_research_run_payload(completed.stdout, markers=markers)
     if not isinstance(payload, dict):
-        raise RuntimeError("Tactus ontology procedure completed without a JSON payload.")
+        stderr_excerpt = _log_excerpt(completed.stderr)
+        stdout_excerpt = _log_excerpt(completed.stdout)
+        raise RuntimeError(
+            "Tactus ontology procedure completed without a JSON payload "
+            f"target={target_kind}:{target_id} path={path} "
+            f"stderr={stderr_excerpt!r} stdout={stdout_excerpt!r}"
+        )
     return payload
 
 
@@ -1385,6 +1492,41 @@ def object_title(record: dict[str, Any]) -> str:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return ""
+
+
+def _ontology_progress(command: str, stage: str, status: str, detail: str | None = None) -> None:
+    if detail:
+        print(f"{command}\t{stage}\t{status}\t{detail}", file=sys.stderr, flush=True)
+    else:
+        print(f"{command}\t{stage}\t{status}", file=sys.stderr, flush=True)
+
+
+def _emit_ontology_llm_failure(
+    *,
+    command: str,
+    target_kind: str,
+    target_id: str,
+    error: Exception,
+    next_commands: list[str],
+) -> None:
+    _ontology_progress(command, "ontology-error", "failed", f"{target_kind}={target_id}\terror={error}")
+    for index, next_command in enumerate(next_commands, start=1):
+        _ontology_progress(command, "ontology-next", str(index), next_command)
+
+
+def _log_excerpt(text: str | None, *, max_lines: int = 8, max_chars: int = 600) -> str:
+    raw = str(text or "").strip()
+    if not raw:
+        return ""
+    lines = raw.splitlines()
+    tail = "\n".join(lines[-max_lines:])
+    return tail[-max_chars:]
+
+
+def _ontology_model_scope(options: dict[str, Any]) -> list[str] | None:
+    if options.get("deep-context"):
+        return None
+    return FAST_CONTEXT_MODELS
 
 
 def _number_or_none(value: Any) -> float | None:

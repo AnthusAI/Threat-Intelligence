@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import pathlib
+import tempfile
 import sys
 import unittest
+from contextlib import redirect_stderr
+from io import StringIO
+from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 SRC_ROOT = REPO_ROOT / "src"
@@ -167,6 +171,56 @@ class OntologyEnrichmentTests(unittest.TestCase):
         self.assertIsNotNone(candidate)
         self.assertEqual(candidate["metadata"]["vectorKind"], "ontology_concept_profile")
         self.assertEqual(candidate["metadata"]["inputFingerprint"], "fingerprint-1")
+
+    def test_rank_concepts_can_skip_profile_status_scan(self):
+        state = self.build_state()
+        with mock.patch.object(ontology, "concept_profile_status", side_effect=RuntimeError("should-not-run")):
+            ranked = ontology.rank_concepts(state, include_profile_status=False)
+        self.assertEqual(len(ranked), 2)
+        self.assertEqual(ranked[0]["profileStatus"], "missing")
+
+    def test_run_tactus_json_procedure_failure_reports_target_and_excerpt(self):
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            mock.patch("papyrus_content.ontology_enrichment.subprocess.run") as run,
+        ):
+            procedure_path = pathlib.Path(tmpdir) / "fake-procedure.tac"
+            procedure_path.write_text("Procedure {}", encoding="utf-8")
+            run.return_value = mock.Mock(
+                returncode=1,
+                stdout="stdout line one\nstdout line two",
+                stderr="stderr line one\nstderr line two",
+            )
+            with self.assertRaises(RuntimeError) as raised:
+                ontology.run_tactus_json_procedure(
+                    procedure_path,
+                    {"context_json": {"id": "x"}},
+                    markers=("relation_explanation",),
+                    target_kind="relation",
+                    target_id="semantic-relation-1",
+                )
+        message = str(raised.exception)
+        self.assertIn("target=relation:semantic-relation-1", message)
+        self.assertIn(str(procedure_path), message)
+        self.assertIn("stderr line two", message)
+
+    def test_emit_ontology_llm_failure_prints_next_commands(self):
+        stderr = StringIO()
+        with redirect_stderr(stderr):
+            ontology._emit_ontology_llm_failure(
+                command="ontology-explain",
+                target_kind="relation",
+                target_id="semantic-relation-1",
+                error=RuntimeError("boom"),
+                next_commands=[
+                    "poetry run papyrus knowledge ontology explain --relation-id semantic-relation-1 --no-llm --apply",
+                    "poetry run papyrus knowledge ontology explain --relation-id semantic-relation-1 --apply",
+                ],
+            )
+        output = stderr.getvalue()
+        self.assertIn("ontology-explain\tontology-error\tfailed", output)
+        self.assertIn("ontology-explain\tontology-next\t1", output)
+        self.assertIn("ontology-explain\tontology-next\t2", output)
 
 
 if __name__ == "__main__":

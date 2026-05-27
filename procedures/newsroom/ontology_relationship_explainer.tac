@@ -39,6 +39,34 @@ Procedure {
         relation_explanation = field.object{required = true}
     },
     function(input)
+        local function safe_get(table_like, key)
+            if type(table_like) ~= "table" then
+                return nil
+            end
+            local ok, value = pcall(function()
+                return table_like[key]
+            end)
+            if ok then
+                return value
+            end
+            return nil
+        end
+
+        local function normalize_table(value)
+            if type(value) == "table" then
+                return value
+            end
+            return {}
+        end
+
+        local function normalize_number(value, default_value)
+            local as_number = tonumber(value)
+            if as_number == nil then
+                return default_value
+            end
+            return as_number
+        end
+
         local context = input.context_json
         local message = string.format([[
 Explain this Papyrus ontology relation from the supplied JSON context.
@@ -57,7 +85,33 @@ Context JSON:
 %s
 ]], json.encode(context))
         local result = ontology_relationship_explainer({message = message})
-        return result.output
+        local output = safe_get(result, "output")
+        local explanation = safe_get(output, "relation_explanation")
+        if type(explanation) ~= "table" then
+            explanation = safe_get(output, "relationExplanation")
+        end
+        if type(explanation) ~= "table" then
+            explanation = safe_get(result, "relation_explanation")
+        end
+        if type(explanation) ~= "table" then
+            explanation = safe_get(result, "relationExplanation")
+        end
+        if type(explanation) ~= "table" and type(output) == "table" and safe_get(output, "meaning") ~= nil then
+            explanation = output
+        end
+        if type(explanation) ~= "table" and type(result) == "table" and safe_get(result, "meaning") ~= nil then
+            explanation = result
+        end
+        explanation = normalize_table(explanation)
+        explanation.meaning = tostring(explanation.meaning or "No contextual explanation was generated.")
+        explanation.evidence = normalize_table(explanation.evidence)
+        explanation.ambiguity = normalize_table(explanation.ambiguity)
+        explanation.candidateAssociations = normalize_table(explanation.candidateAssociations)
+        explanation.confidence = normalize_number(explanation.confidence, 0.0)
+        explanation.model = tostring(explanation.model or "gpt-5.4-mini")
+        return {
+            relation_explanation = explanation
+        }
     end
 }
 
