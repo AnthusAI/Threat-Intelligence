@@ -19,6 +19,7 @@ import {
   loadEditorMessagesData,
   loadReferenceAttachmentsForLineageId,
   loadReferenceRecordById,
+  loadStoragePathUrl,
   loadEditorUserDirectoryData,
   loadModelPayloadsForOwner,
   loadStoragePathText,
@@ -2960,6 +2961,7 @@ function NewsDeskDashboard({
             disabled={controlsDisabled}
             graph={graph}
             initialCategoryLineageId={initialSelection.category}
+            isDemo={Boolean(dashboard.isDemo)}
             lexicalSteeringRules={lexicalSteeringRules}
             references={references}
             semanticRelations={semanticRelations}
@@ -5344,6 +5346,7 @@ function TopicsDeskView({
   disabled,
   graph,
   initialCategoryLineageId,
+  isDemo,
   lexicalSteeringRules,
   references,
   semanticRelations,
@@ -5374,6 +5377,7 @@ function TopicsDeskView({
   disabled: boolean;
   graph: SemanticGraph;
   initialCategoryLineageId?: string | null;
+  isDemo?: boolean;
   lexicalSteeringRules: LexicalSteeringRuleRecord[];
   references: ReferenceRecord[];
   semanticRelations: SemanticRelationRecord[];
@@ -5451,38 +5455,66 @@ function TopicsDeskView({
     ? selectedCategoryByUid.get(focusedCategoryKey)
       ?? (selectedRoot?.category.categoryKey === focusedCategoryKey ? selectedRoot.category : undefined)
     : selectedRoot?.category;
-  const visibleRoots = topicMetricFilter === "withProposals"
-    ? roots.filter((root) => root.proposedSubcategorys.length > 0 || countRelatedCategoryTreeProposals((root.node ?? categoryToCategoryTreeNode(root.category)).categoryKey, root.subcategorys, proposals) > 0)
-    : roots;
-  const visibleTopicRows = visibleRoots.flatMap((root) => {
-    const rootNode = root.node ?? categoryToCategoryTreeNode(root.category);
-    const rootContext = buildTopicDrilldownContext(root, rootNode, categoryByUid);
-    const rows: NewsroomDataGridRow[] = [{
-      id: rootNode.categoryKey,
-      cells: [
-        rootNode.displayName,
-        rootNode.shortTitle ?? rootNode.categoryKey,
-        String(root.subcategorys.length),
-        String(referencesForCategoryContext(graph, rootContext).length),
-        formatDateTime(rootNode.updatedAt ?? rootNode.versionCreatedAt ?? ""),
-      ],
-    }];
-    if (topicScopeFilter !== "all") return rows;
-    for (const subcategory of root.subcategorys) {
-      const subcategoryContext = buildTopicDrilldownContext(root, subcategory, categoryByUid);
-      rows.push({
-        id: subcategory.categoryKey,
-        cells: [
-          `Subtopic: ${subcategory.displayName}`,
-          subcategory.shortTitle ?? subcategory.categoryKey,
-          "Child",
-          String(referencesForCategoryContext(graph, subcategoryContext).length),
-          formatDateTime(subcategory.updatedAt ?? subcategory.versionCreatedAt ?? ""),
-        ],
-      });
+  const proposalCountByCategoryKey = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const root of roots) {
+      const rootNode = root.node ?? categoryToCategoryTreeNode(root.category);
+      counts.set(
+        rootNode.categoryKey,
+        countRelatedCategoryTreeProposals(rootNode.categoryKey, root.subcategorys, proposals),
+      );
+      for (const subcategory of root.subcategorys) {
+        counts.set(
+          subcategory.categoryKey,
+          countRelatedCategoryTreeProposals(subcategory.categoryKey, [], proposals),
+        );
+      }
     }
-    return rows;
-  });
+    return counts;
+  }, [proposals, roots]);
+  const rootWithProposalCount = useMemo(() => (
+    roots.reduce((count, root) => (
+      count + ((proposalCountByCategoryKey.get(root.category.categoryKey) ?? 0) > 0 ? 1 : 0)
+    ), 0)
+  ), [proposalCountByCategoryKey, roots]);
+  const visibleRoots = topicMetricFilter === "withProposals"
+    ? roots.filter((root) => (proposalCountByCategoryKey.get(root.category.categoryKey) ?? 0) > 0)
+    : roots;
+  const visibleTopicCards = useMemo(() => {
+    const entries: Array<{
+      kind: "root" | "subcategory";
+      node: CategorySteeringCategoryTreeNode;
+      parentCategoryKey: string | null;
+      proposalCount: number;
+      referenceCount: number;
+      subtopicCount: number | null;
+    }> = [];
+    for (const root of visibleRoots) {
+      const rootNode = root.node ?? categoryToCategoryTreeNode(root.category);
+      const rootContext = buildTopicDrilldownContext(root, rootNode, categoryByUid);
+      entries.push({
+        kind: "root",
+        node: rootNode,
+        parentCategoryKey: null,
+        proposalCount: proposalCountByCategoryKey.get(rootNode.categoryKey) ?? 0,
+        referenceCount: referencesForCategoryContext(graph, rootContext).length,
+        subtopicCount: root.subcategorys.length,
+      });
+      if (topicScopeFilter !== "all") continue;
+      for (const subcategory of root.subcategorys) {
+        const subcategoryContext = buildTopicDrilldownContext(root, subcategory, categoryByUid);
+        entries.push({
+          kind: "subcategory",
+          node: subcategory,
+          parentCategoryKey: rootNode.categoryKey,
+          proposalCount: proposalCountByCategoryKey.get(subcategory.categoryKey) ?? 0,
+          referenceCount: referencesForCategoryContext(graph, subcategoryContext).length,
+          subtopicCount: null,
+        });
+      }
+    }
+    return entries.map((entry, index) => topicTreeNodeToNewsroomCard(entry, index));
+  }, [categoryByUid, graph, proposalCountByCategoryKey, topicScopeFilter, visibleRoots]);
   const detail = activeCategoryTree || roots.length
     ? `${roots.length} canonical / ${subcategoryCount} accepted subtopics / ${proposedSubcategoryCount} proposed`
     : categoryTreeLoadError
@@ -5500,7 +5532,7 @@ function TopicsDeskView({
     setSelectedRootKey(root.category.categoryKey);
     setFocusedCategoryKey(focused.categoryKey);
     setIsTopicDetailOpen(true);
-    pushNewsroomDetailUrl("topics", categoryLineageId(focused), false);
+    pushNewsroomDetailUrl("topics", categoryLineageId(focused), isDemo);
   };
   const createEditableDraft = async () => {
     if (!currentCategorySet || isCreatingTaxonomyDraft) return;
@@ -5583,6 +5615,52 @@ function TopicsDeskView({
         },
       ]
       : [];
+  const topicLedeControls = topicToolbarActions.length || isDraftMode ? (
+    <div className="news-desk-topic-lede-controls">
+      {topicToolbarActions.length ? (
+        <div className="newsroom-list-detail-shell__action-menu-wrap news-desk-topic-list-toolbar" ref={topicToolbarMenuRef}>
+          <button
+            type="button"
+            aria-label="Taxonomy actions"
+            aria-expanded={isTopicToolbarMenuOpen}
+            className="news-desk-detail-toggle news-desk-detail-toggle--actions"
+            title={topicToolbarError ?? undefined}
+            disabled={topicToolbarActions.every((action) => action.disabled)}
+            onClick={() => setIsTopicToolbarMenuOpen((current) => !current)}
+          >
+            <EllipsisIcon />
+          </button>
+          {isTopicToolbarMenuOpen ? (
+            <div className="newsroom-list-detail-shell__action-menu news-desk-topic-toolbar-menu" role="menu">
+              {topicToolbarActions.map((action) => (
+                <button
+                  type="button"
+                  disabled={action.disabled}
+                  key={action.key}
+                  onClick={() => {
+                    setIsTopicToolbarMenuOpen(false);
+                    action.onSelect();
+                  }}
+                  role="menuitem"
+                >
+                  {action.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      {isDraftMode ? (
+        <div className="news-desk-assignment-create-strip">
+          <span className="news-desk-assignment-create-note">Draft taxonomy</span>
+          <span className="news-desk-assignment-create-note">
+            Draft edits do not affect publication sections until promoted.
+          </span>
+        </div>
+      ) : null}
+    </div>
+  ) : null;
+  const selectedTopicCardId = focusedCategoryKey ?? selectedRoot?.category.categoryKey ?? null;
 
   useEffect(() => {
     if (!roots.length) {
@@ -5630,61 +5708,19 @@ function TopicsDeskView({
   return (
     <>
     <NewsroomListDetailShell
+      animatedDetail
       sectionKey="topics"
       canExpandDetail={Boolean(selectedRoot)}
       detailOpen={isTopicDetailOpen}
+      selectionScrollKey={selectedTopicCardId}
       actions={topicActions}
       utilityActions={[topicKnowledgeQuery.action]}
       lede={(
-        <section className="news-desk-lede news-desk-assignment-lede" aria-labelledby="topic-management-title" data-news-desk-topic-lede>
-          <div>
-            <h2 id="topic-management-title">{formatDeskSectionHeadline("topics")}</h2>
-            <p>{formatDeskSectionLede("topics")}</p>
-          </div>
-          {topicToolbarActions.length ? (
-            <div className="newsroom-list-detail-shell__action-menu-wrap news-desk-topic-list-toolbar" ref={topicToolbarMenuRef}>
-              <button
-                type="button"
-                aria-label="Taxonomy actions"
-                aria-expanded={isTopicToolbarMenuOpen}
-                className="news-desk-detail-toggle news-desk-detail-toggle--actions"
-                title={topicToolbarError ?? undefined}
-                disabled={topicToolbarActions.every((action) => action.disabled)}
-                onClick={() => setIsTopicToolbarMenuOpen((current) => !current)}
-              >
-                <EllipsisIcon />
-              </button>
-              {isTopicToolbarMenuOpen ? (
-                <div className="newsroom-list-detail-shell__action-menu news-desk-topic-toolbar-menu" role="menu">
-                  {topicToolbarActions.map((action) => (
-                    <button
-                      type="button"
-                      disabled={action.disabled}
-                      key={action.key}
-                      onClick={() => {
-                        setIsTopicToolbarMenuOpen(false);
-                        action.onSelect();
-                      }}
-                      role="menuitem"
-                    >
-                      {action.label}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-          <div className="news-desk-assignment-create-strip">
-            {isDraftMode ? (
-              <span className="news-desk-assignment-create-note">Draft taxonomy</span>
-            ) : null}
-            {isDraftMode ? (
-              <span className="news-desk-assignment-create-note">
-                Draft edits do not affect publication sections until promoted.
-              </span>
-            ) : null}
-          </div>
-        </section>
+        <NewsroomDeskSectionLede
+          headingId="topic-management-title"
+          section="topics"
+          controls={topicLedeControls}
+        />
       )}
       list={(
         <section className="category-steering-section category-steering-section--lead" aria-label={detail}>
@@ -5693,14 +5729,8 @@ function TopicsDeskView({
               {categoryTreeLoadError}
             </div>
           ) : null}
-          <NewsroomDataGrid
-            columns={[
-              { key: "topic", label: "Topic" },
-              { key: "key", label: "Short Title / Key" },
-              { key: "subtopics", label: "Subtopics" },
-              { key: "references", label: "References" },
-              { key: "updated", label: "Updated" },
-            ]}
+          <NewsroomCardGrid
+            cards={visibleTopicCards}
             emptyLabel={categoryTreeLoadError ?? (validCategorySets.length ? "No active topics in selected topic set" : "No current or draft topic set available.")}
             filterLabel="Topic scope"
             filterOptions={[
@@ -5710,14 +5740,13 @@ function TopicsDeskView({
             filterValue={topicScopeFilter}
             metricValue={topicMetricFilter}
             metrics={[
-              { key: "", label: "All", count: visibleTopicRows.length },
-              { key: "withProposals", label: "With proposals", count: roots.filter((root) => root.proposedSubcategorys.length > 0).length },
+              { key: "", label: "All", count: visibleTopicCards.length },
+              { key: "withProposals", label: "With proposals", count: rootWithProposalCount },
             ]}
             onFilterChange={setTopicScopeFilter}
             onMetricChange={setTopicMetricFilter}
             onSelect={selectTopic}
-            rows={visibleTopicRows}
-            selectedId={focusedCategoryKey ?? selectedRoot?.category.categoryKey ?? null}
+            selectedId={selectedTopicCardId}
           />
         </section>
       )}
@@ -5987,7 +6016,7 @@ function ConceptsDeskView({
   const [nodeKindFilter, setNodeKindFilter] = useState("");
   const [nodeStatusFilter, setNodeStatusFilter] = useState("");
   const [selectedNodeLineageId, setSelectedNodeLineageId] = useState(initialNodeLineageId ?? "");
-  const [isConceptDetailOpen, setIsConceptDetailOpen] = useState(Boolean(initialNodeLineageId || initialCategoryLineageId));
+  const [isConceptDetailOpen, setIsConceptDetailOpen] = useState(Boolean(initialNodeLineageId));
   const categoryContext = useMemo(() => buildCategoryDrilldownContext(categories, initialCategoryLineageId), [categories, initialCategoryLineageId]);
   const feed = useNewsroomPagedRows({
     initialItems: semanticNodes,
@@ -6005,16 +6034,30 @@ function ConceptsDeskView({
       ? new Set(semanticNodesForCategoryContext(graph, categoryContext).map((node) => node.lineageId))
       : null
   ), [categoryContext, graph]);
+  const feedNodes = useMemo(() => (
+    feed.items.length
+      ? feed.items
+      : (feed.isLoading || Boolean(feed.error))
+        ? semanticNodes
+        : feed.items
+  ), [feed.error, feed.isLoading, feed.items, semanticNodes]);
   const visibleNodes = useMemo(() => (
     categoryConceptLineages
       ? semanticNodes.filter((node) => categoryConceptLineages.has(node.lineageId ?? node.id))
-      : feed.items
-  ), [categoryConceptLineages, feed.items, semanticNodes]);
+      : feedNodes
+  ), [categoryConceptLineages, feedNodes, semanticNodes]);
+  const fallbackConceptCategories = useMemo(() => (
+    visibleNodes.length
+      ? []
+      : categories.filter((category) => category.status !== "deprecated" && category.status !== "archived")
+  ), [categories, visibleNodes.length]);
   const requestedNodeLineageId = selectedNodeLineageId || initialNodeLineageId || "";
   const selected = selectSemanticNodeSummary(graph, visibleNodes, requestedNodeLineageId)
     ?? (requestedNodeLineageId ? selectSemanticNodeSummary(graph, semanticNodes, requestedNodeLineageId) : null)
+    ?? (requestedNodeLineageId ? selectCategorySummary(graph, categories, requestedNodeLineageId) : null)
     ?? categoryFilter
-    ?? selectSemanticNodeSummary(graph, visibleNodes);
+    ?? selectSemanticNodeSummary(graph, visibleNodes)
+    ?? selectCategorySummary(graph, fallbackConceptCategories);
   const conceptKnowledgeQuery = useNewsroomKnowledgeContext(selected ? {
     anchor: {
       kind: selected.kind === "category" ? "category" : "semanticNode",
@@ -6031,10 +6074,17 @@ function ConceptsDeskView({
   );
   const detail = categoryFilter
     ? `${visibleNodes.length} graph nodes associated with ${categoryFilter.label}`
-    : `${summaryCountFromRecord(summary, "semanticNodes") || visibleNodes.length} graph nodes`;
+    : visibleNodes.length
+      ? `${summaryCountFromRecord(summary, "semanticNodes") || visibleNodes.length} graph nodes`
+      : `${fallbackConceptCategories.length} taxonomy concepts`;
   const nodeKindCounts = categoryFilter ? countSemanticNodesByKind(visibleNodes) : summary?.facets?.semanticNodes?.byNodeKind ?? countSemanticNodesByKind(visibleNodes);
   const nodeStatusCounts = categoryFilter ? countSemanticNodesByStatus(visibleNodes) : summary?.facets?.semanticNodes?.byStatus ?? countSemanticNodesByStatus(visibleNodes);
   const nodeKinds = sortedCountOptions(nodeKindCounts).slice(0, 8);
+  const cards = visibleNodes.length
+    ? visibleNodes.map((node, index) => semanticNodeToNewsroomCard(node, index))
+    : fallbackConceptCategories.map((category, index) => categoryToConceptNewsroomCard(category, index));
+  const cardIds = useMemo(() => new Set(cards.map((card) => card.id)), [cards]);
+  const selectedLineageId = selected && cardIds.has(selected.lineageId) ? selected.lineageId : null;
   const selectNode = (lineageId: string) => {
     setSelectedNodeLineageId(lineageId);
     setIsConceptDetailOpen(true);
@@ -6043,28 +6093,20 @@ function ConceptsDeskView({
   return (
     <>
       <NewsroomListDetailShell
+        animatedDetail
         sectionKey="concepts"
         canExpandDetail={Boolean(selected)}
         detailOpen={isConceptDetailOpen}
+        selectionScrollKey={selectedLineageId}
         actions={[conceptInsight.action]}
         utilityActions={[conceptKnowledgeQuery.action]}
         lede={(
-          <section className="news-desk-lede news-desk-assignment-lede" aria-labelledby="semantic-concepts-title">
-            <div>
-              <h2 id="semantic-concepts-title">{formatDeskSectionHeadline("concepts")}</h2>
-              <p>{formatDeskSectionLede("concepts")}</p>
-            </div>
-          </section>
+          <NewsroomDeskSectionLede headingId="semantic-concepts-title" section="concepts" />
         )}
         list={(
           <section className="category-steering-section category-steering-section--lead" aria-label={detail}>
-            <NewsroomDataGrid
-              columns={[
-                { key: "concept", label: "Concept" },
-                { key: "kind", label: "Kind" },
-                { key: "status", label: "Status" },
-                { key: "updated", label: "Updated" },
-              ]}
+            <NewsroomCardGrid
+              cards={cards}
               emptyLabel={feed.isLoading ? "Loading semantic concepts" : feed.error ?? "No semantic nodes imported"}
               filterLabel="Concept kind"
               filterOptions={[
@@ -6084,19 +6126,7 @@ function ConceptsDeskView({
               onLoadMore={feed.loadMore}
               onMetricChange={setNodeStatusFilter}
               onSelect={selectNode}
-              rows={visibleNodes.map((node) => {
-                const lineageId = node.lineageId ?? node.id;
-                return {
-                  id: lineageId,
-                  cells: [
-                    node.displayName ?? node.nodeKey,
-                    node.nodeKind,
-                    node.status,
-                    formatDateTime(node.updatedAt ?? node.createdAt ?? node.versionCreatedAt ?? ""),
-                  ],
-                };
-              })}
-              selectedId={selected?.kind === "semanticNode" ? selected.lineageId : null}
+              selectedId={selectedLineageId}
             />
           </section>
         )}
@@ -6153,7 +6183,7 @@ function ReferencesDeskView({
   const consoleContext = usePapyrusConsole();
   const [statusFilter, setStatusFilter] = useState("");
   const [selectedReferenceLineageId, setSelectedReferenceLineageId] = useState(initialReferenceLineageId ?? "");
-  const [isReferenceDetailOpen, setIsReferenceDetailOpen] = useState(true);
+  const [isReferenceDetailOpen, setIsReferenceDetailOpen] = useState(Boolean(initialReferenceLineageId));
   const categoryContext = useMemo(() => buildCategoryDrilldownContext(categories, initialCategoryLineageId), [categories, initialCategoryLineageId]);
   const feed = useNewsroomPagedRows({
     initialItems: references,
@@ -6182,11 +6212,12 @@ function ReferencesDeskView({
   const filteredReferences = canonicalVisibleReferences
     .filter((reference) => !statusFilter || (reference.curationStatus ?? "pending") === statusFilter);
   const requestedReferenceLineageId = selectedReferenceLineageId || initialReferenceLineageId || "";
-  const selectedReference = selectedReferenceRecordByLineage(filteredReferences, requestedReferenceLineageId)
-    ?? selectedReferenceRecordByLineage(canonicalVisibleReferences, requestedReferenceLineageId)
-    ?? selectedReferenceRecordByLineage(references, requestedReferenceLineageId)
-    ?? filteredReferences[0]
-    ?? null;
+  const selectedReference = requestedReferenceLineageId
+    ? selectedReferenceRecordByLineage(filteredReferences, requestedReferenceLineageId)
+      ?? selectedReferenceRecordByLineage(canonicalVisibleReferences, requestedReferenceLineageId)
+      ?? selectedReferenceRecordByLineage(references, requestedReferenceLineageId)
+      ?? null
+    : null;
   const referenceKnowledgeQuery = useNewsroomKnowledgeContext(selectedReference ? {
     anchor: { kind: "reference", id: selectedReference.id, lineageId: selectedReference.lineageId ?? selectedReference.id },
     title: selectedReference.title ?? selectedReference.externalItemId,
@@ -6240,6 +6271,13 @@ function ReferencesDeskView({
     : `${filteredReferences.length} private corpus items`;
   const statusCounts = categoryFilter ? countReferencesByStatus(canonicalVisibleReferences) : summary?.facets?.references?.byCurationStatus ?? summary?.referenceStatusCounts ?? countReferencesByStatus(canonicalVisibleReferences);
   const totalReferenceCount = categoryFilter ? canonicalVisibleReferences.length : summaryCountFromRecord(summary, "references") || canonicalVisibleReferences.length;
+  const statusFilterOptions = [
+    { key: "", label: "All statuses", count: totalReferenceCount },
+    { key: "pending", label: "Pending", count: statusCounts.pending ?? 0 },
+    { key: "accepted", label: "Accepted", count: statusCounts.accepted ?? 0 },
+    { key: "rejected", label: "Rejected", count: statusCounts.rejected ?? 0 },
+    { key: "archived", label: "Archived", count: statusCounts.archived ?? 0 },
+  ];
   const cards = filteredReferences.map((reference, index) => referenceToNewsroomCard(
     reference,
     index,
@@ -6307,12 +6345,7 @@ function ReferencesDeskView({
         actions={[]}
         utilityActions={referenceNavigationActions}
         lede={(
-          <section className="news-desk-lede news-desk-assignment-lede" aria-labelledby="reference-management-title">
-            <div>
-              <h2 id="reference-management-title">{formatDeskSectionHeadline("references")}</h2>
-              <p>{formatDeskSectionLede("references")}</p>
-            </div>
-          </section>
+          <NewsroomDeskSectionLede headingId="reference-management-title" section="references" />
         )}
         list={(
           <section className="category-steering-section category-steering-section--lead" aria-label={detail}>
@@ -6320,7 +6353,7 @@ function ReferencesDeskView({
               cards={cards}
               emptyLabel={references.length ? "No references match this filter" : "No private references imported"}
               filterLabel="Curation status"
-              filterOptions={[]}
+              filterOptions={statusFilterOptions}
               filterValue={statusFilter}
               metricValue={statusFilter}
               metrics={[
@@ -6366,6 +6399,26 @@ function ReferencesDeskView({
       />
       {referenceKnowledgeQuery.dialog}
     </>
+  );
+}
+
+function NewsroomDeskSectionLede({
+  controls,
+  headingId,
+  section,
+}: {
+  controls?: ReactNode;
+  headingId: string;
+  section: NewsDeskTab;
+}) {
+  return (
+    <section className="news-desk-lede news-desk-assignment-lede" aria-labelledby={headingId}>
+      <div>
+        <h2 id={headingId}>{formatDeskSectionHeadline(section)}</h2>
+        <p>{formatDeskSectionLede(section)}</p>
+      </div>
+      {controls ?? null}
+    </section>
   );
 }
 
@@ -8889,6 +8942,7 @@ function ReferenceDetailPanel({
     loading: boolean;
     text: string | null;
   }>({ error: null, loading: false, text: null });
+  const [attachmentLinksById, setAttachmentLinksById] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const storagePath = extractedTextAttachment?.storagePath ?? null;
@@ -8915,6 +8969,54 @@ function ReferenceDetailPanel({
       active = false;
     };
   }, [extractedTextAttachment?.storagePath]);
+
+  useEffect(() => {
+    if (!attachments.length) {
+      setAttachmentLinksById({});
+      return;
+    }
+    let active = true;
+    const staticLinks = new Map<string, string>();
+    const storageLookups: Array<{ id: string; storagePath: string }> = [];
+
+    for (const attachment of attachments) {
+      const sourceHref = normalizeReferenceDetailHttpUri(attachment.sourceUri);
+      if (sourceHref) {
+        staticLinks.set(attachment.id, sourceHref);
+        continue;
+      }
+      if (attachment.storagePath) {
+        storageLookups.push({ id: attachment.id, storagePath: attachment.storagePath });
+      }
+    }
+
+    if (!storageLookups.length) {
+      setAttachmentLinksById(Object.fromEntries(staticLinks.entries()));
+      return;
+    }
+
+    setAttachmentLinksById(Object.fromEntries(staticLinks.entries()));
+    void Promise.all(storageLookups.map(async (lookup) => {
+      const result = await loadStoragePathUrl(lookup.storagePath);
+      return { id: lookup.id, url: result.url };
+    }))
+      .then((resolved) => {
+        if (!active) return;
+        const merged = new Map(staticLinks);
+        for (const entry of resolved) {
+          if (entry.url) merged.set(entry.id, entry.url);
+        }
+        setAttachmentLinksById(Object.fromEntries(merged.entries()));
+      })
+      .catch(() => {
+        if (!active) return;
+        setAttachmentLinksById(Object.fromEntries(staticLinks.entries()));
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [attachments]);
 
   if (!reference) {
     return (
@@ -9007,12 +9109,6 @@ function ReferenceDetailPanel({
                 </p>
               ) : null}
               <ReferenceCorpusRow corpora={corpora} disabled={disabled} onMoveCorpus={onMoveCorpus} reference={reference} />
-              {reference.storagePath ? (
-                <div className="news-desk-detail-line">
-                  <span>Storage</span>
-                  <strong className="news-desk-reference-detail__link-value" data-news-desk-reference-storage-value>{reference.storagePath}</strong>
-                </div>
-              ) : null}
             </div>
             {curationRunStatus ? (
               <ReferenceCurationStatusPanel status={curationRunStatus} />
@@ -9097,7 +9193,11 @@ function ReferenceDetailPanel({
                   <div className="news-desk-detail-line news-desk-reference-detail__attachment-line" key={attachment.id}>
                     <span>{attachment.role}</span>
                     <strong className="news-desk-reference-detail__link-value" data-news-desk-reference-attachment-path>
-                      {attachment.storagePath ?? attachment.sourceUri ?? attachment.filename ?? "unmapped file"}
+                      {attachmentLinksById[attachment.id] ? (
+                        <a href={attachmentLinksById[attachment.id]} rel="noopener noreferrer" target="_blank">
+                          {attachment.storagePath ?? attachment.sourceUri ?? attachment.filename ?? "unmapped file"}
+                        </a>
+                      ) : (attachment.storagePath ?? attachment.sourceUri ?? attachment.filename ?? "unmapped file")}
                     </strong>
                   </div>
                 ))}
@@ -9626,7 +9726,7 @@ function ReferenceTopicLabelPanel({
                 {row.explanation ? <p>{row.explanation}</p> : <p>No explanation attached.</p>}
               </div>
             </article>
-          )) : <EmptyRow label="No predicted or authoritative topic labels for this reference." />}
+          )) : null}
         </div>
         <div className="news-desk-reference-workflow__input" data-reference-topic-input>
           {!canLabel ? <p className="news-desk-detail-copy">Only current accepted references can receive authoritative labels.</p> : null}
@@ -10023,10 +10123,14 @@ function AssignmentDeskView({
   }, [assignmentStatusFilter, typeFilteredAssignments]);
   const filteredMetrics = getAssignmentMetrics(typeFilteredAssignments, summary, assignmentTypeFilter);
   const totalAssignmentCount = summaryCountFromRecord(summary, "assignments") || assignments.length;
-  const selectedAssignment = filteredAssignments.find((assignment) => assignment.id === selectedAssignmentId)
-    ?? (initialAssignmentId ? assignments.find((assignment) => assignment.id === initialAssignmentId) : null)
-    ?? filteredAssignments[0]
-    ?? null;
+  const requestedAssignmentId = selectedAssignmentId || initialAssignmentId || "";
+  const selectedAssignment = requestedAssignmentId
+    ? filteredAssignments.find((assignment) => assignment.id === requestedAssignmentId)
+      ?? typeFilteredAssignments.find((assignment) => assignment.id === requestedAssignmentId)
+      ?? feedAssignments.find((assignment) => assignment.id === requestedAssignmentId)
+      ?? assignments.find((assignment) => assignment.id === requestedAssignmentId)
+      ?? null
+    : null;
   const assignmentKnowledgeQuery = useNewsroomKnowledgeContext(selectedAssignment ? {
     anchor: { kind: "assignment", id: selectedAssignment.id },
     title: selectedAssignment.title,
@@ -10198,38 +10302,38 @@ function AssignmentDeskView({
         actions={assignmentActions}
         utilityActions={[assignmentKnowledgeQuery.action, ...reportingReviewActions]}
         lede={(
-          <section className="news-desk-lede news-desk-assignment-lede" aria-labelledby="assignment-management-title">
-            <div>
-              <h2 id="assignment-management-title">Assignments</h2>
-              <p>Create, filter, claim, and complete newsroom work.</p>
-            </div>
-            <div className="news-desk-assignment-create-strip">
-              <div className="news-desk-assignment-view-toggle" role="group" aria-label="Assignment view">
+          <NewsroomDeskSectionLede
+            headingId="assignment-management-title"
+            section="assignments"
+            controls={(
+              <div className="news-desk-assignment-create-strip">
+                <div className="news-desk-assignment-view-toggle" role="group" aria-label="Assignment view">
+                  <button
+                    type="button"
+                    data-active={assignmentDeskView === "queue" || undefined}
+                    onClick={() => selectAssignmentDeskView("queue")}
+                  >
+                    Queue
+                  </button>
+                  <button
+                    type="button"
+                    data-active={assignmentDeskView === "budget" || undefined}
+                    onClick={() => selectAssignmentDeskView("budget")}
+                  >
+                    Story Budget
+                  </button>
+                </div>
                 <button
                   type="button"
-                  data-active={assignmentDeskView === "queue" || undefined}
-                  onClick={() => selectAssignmentDeskView("queue")}
+                  className="news-desk-assignment-create-button"
+                  disabled={disabled}
+                  onClick={() => setIsCreateAssignmentOpen(true)}
                 >
-                  Queue
-                </button>
-                <button
-                  type="button"
-                  data-active={assignmentDeskView === "budget" || undefined}
-                  onClick={() => selectAssignmentDeskView("budget")}
-                >
-                  Story Budget
+                  Create Assignment
                 </button>
               </div>
-              <button
-                type="button"
-                className="news-desk-assignment-create-button"
-                disabled={disabled}
-                onClick={() => setIsCreateAssignmentOpen(true)}
-              >
-                Create Assignment
-              </button>
-            </div>
-          </section>
+            )}
+          />
         )}
         list={(
           <section className="category-steering-section category-steering-section--lead" aria-label="Assignments queue">
@@ -10314,57 +10418,6 @@ function AssignmentDeskView({
       ) : null}
       {assignmentKnowledgeQuery.dialog}
     </>
-  );
-}
-
-function AssignmentTypeFilter({
-  metrics,
-  onChange,
-  onStatusChange,
-  options,
-  statusValue,
-  totalCount,
-  value,
-}: {
-  metrics: AssignmentMetrics;
-  onChange: (value: string) => void;
-  onStatusChange: (value: string) => void;
-  options: AssignmentTypeOption[];
-  statusValue: string;
-  totalCount: number;
-  value: string;
-}) {
-  const statusFilters = [
-    { key: "", label: "All", count: metrics.total },
-    { key: "open", label: "Open", count: metrics.open },
-    { key: "claimed", label: "Claimed", count: metrics.claimed },
-    { key: "completed", label: "Completed", count: metrics.completed },
-    { key: "canceled", label: "Canceled", count: metrics.canceled },
-  ];
-  return (
-    <div className="news-desk-assignment-filter" data-news-desk-assignment-filter>
-      <label>
-        <span>Assignment type</span>
-        <select value={value} onChange={(event) => onChange(event.target.value)}>
-          <option value="">All assignment types ({totalCount})</option>
-          {options.map((option) => (
-            <option key={option.key} value={option.key}>{option.label} ({option.count})</option>
-          ))}
-        </select>
-      </label>
-      <div className="news-desk-assignment-filter__metrics">
-        {statusFilters.map((filter) => (
-          <button
-            type="button"
-            key={filter.key || "all"}
-            data-active={statusValue === filter.key || undefined}
-            onClick={() => onStatusChange(filter.key)}
-          >
-            {filter.count} {filter.label}
-          </button>
-        ))}
-      </div>
-    </div>
   );
 }
 
@@ -11541,6 +11594,134 @@ function formatDeskSectionLede(section: NewsDeskTab): string {
   return "";
 }
 
+function topicTreeNodeToNewsroomCard(
+  entry: {
+    kind: "root" | "subcategory";
+    node: CategorySteeringCategoryTreeNode;
+    parentCategoryKey: string | null;
+    proposalCount: number;
+    referenceCount: number;
+    subtopicCount: number | null;
+  },
+  index: number,
+): NewsroomCardRecord {
+  const title = entry.kind === "subcategory" ? `Subtopic: ${entry.node.displayName}` : entry.node.displayName;
+  const subtitle = distinctNewsroomCardSubtitle(
+    entry.node.displayName,
+    entry.node.subtitle
+      ?? entry.node.description
+      ?? (entry.parentCategoryKey ? `Part of ${entry.parentCategoryKey}` : null),
+  );
+  const template = resolveNewsroomCardTemplate({
+    bodyLength: subtitle?.length ?? 0,
+    index,
+    isUrgent: entry.proposalCount > 0 || entry.node.status === "proposed" || entry.node.status === "draft",
+    mode: "desk",
+    sectionKey: "topics",
+    title,
+    updatedAt: entry.node.updatedAt ?? entry.node.versionCreatedAt ?? null,
+  });
+  return {
+    id: entry.node.categoryKey,
+    ariaLabel: `Open topic ${entry.node.displayName}`,
+    body: subtitle ? newsroomCardExcerpt(subtitle, 200) : null,
+    dataAttributes: {
+      "data-newsroom-card-topic-kind": entry.kind,
+      "data-newsroom-card-topic-parent": entry.parentCategoryKey ?? undefined,
+      "data-newsroom-card-topic-proposals": entry.proposalCount || undefined,
+      "data-newsroom-card-topic-status": entry.node.status ?? "",
+    },
+    kicker: entry.kind === "subcategory" ? "Subtopic" : "Topic",
+    meta: [
+      entry.node.shortTitle ?? null,
+      entry.subtopicCount !== null ? `${entry.subtopicCount} subtopics` : entry.parentCategoryKey ? `Parent ${entry.parentCategoryKey}` : null,
+      `${entry.referenceCount} references`,
+      entry.proposalCount > 0 ? `${entry.proposalCount} proposals` : null,
+      entry.node.status ?? null,
+    ].filter(Boolean),
+    span: template.span,
+    stamp: formatDateTime(entry.node.updatedAt ?? entry.node.versionCreatedAt ?? ""),
+    templateRole: template.role,
+    title,
+  };
+}
+
+function semanticNodeToNewsroomCard(node: SemanticNodeRecord, index: number): NewsroomCardRecord {
+  const lineageId = node.lineageId ?? node.id;
+  const title = node.displayName ?? node.nodeKey;
+  const subtitle = distinctNewsroomCardSubtitle(
+    title,
+    node.description
+      ?? deriveDelimitedSubtitle(title)
+      ?? null,
+  );
+  const template = resolveNewsroomCardTemplate({
+    bodyLength: subtitle?.length ?? 0,
+    index,
+    isUrgent: node.status === "candidate" || node.status === "draft",
+    mode: "desk",
+    sectionKey: "concepts",
+    title,
+    updatedAt: node.updatedAt ?? node.createdAt ?? node.versionCreatedAt ?? null,
+  });
+  return {
+    id: lineageId,
+    ariaLabel: `Open concept ${title}`,
+    body: subtitle ? newsroomCardExcerpt(subtitle, 220) : null,
+    dataAttributes: {
+      "data-newsroom-card-node-kind": node.nodeKind,
+      "data-newsroom-card-node-status": node.status,
+    },
+    kicker: formatAssignmentTypeLabel(node.nodeKind),
+    meta: [
+      node.status,
+      node.corpusId ?? null,
+    ].filter(Boolean),
+    span: template.span,
+    stamp: formatDateTime(node.updatedAt ?? node.createdAt ?? node.versionCreatedAt ?? ""),
+    templateRole: template.role,
+    title,
+  };
+}
+
+function categoryToConceptNewsroomCard(category: CategorySteeringCategory, index: number): NewsroomCardRecord {
+  const lineageId = category.lineageId ?? category.id;
+  const title = category.displayName;
+  const subtitle = distinctNewsroomCardSubtitle(
+    title,
+    category.subtitle
+      ?? category.description
+      ?? null,
+  );
+  const template = resolveNewsroomCardTemplate({
+    bodyLength: subtitle?.length ?? 0,
+    index,
+    isUrgent: category.status === "proposed",
+    mode: "desk",
+    sectionKey: "concepts",
+    title,
+    updatedAt: category.updatedAt ?? category.versionCreatedAt ?? null,
+  });
+  return {
+    id: lineageId,
+    ariaLabel: `Open concept ${title}`,
+    body: subtitle ? newsroomCardExcerpt(subtitle, 220) : null,
+    dataAttributes: {
+      "data-newsroom-card-node-kind": "category",
+      "data-newsroom-card-node-status": category.status ?? "",
+    },
+    kicker: "Topic",
+    meta: [
+      category.shortTitle ?? null,
+      category.status ?? null,
+    ].filter(Boolean),
+    span: template.span,
+    stamp: formatDateTime(category.updatedAt ?? category.versionCreatedAt ?? ""),
+    templateRole: template.role,
+    title,
+  };
+}
+
 function referenceToNewsroomCard(reference: ReferenceRecord, index: number, subtitle?: string | null, qualityRating?: number | null): NewsroomCardRecord {
   const lineageId = reference.lineageId ?? reference.id;
   const status = reference.curationStatus ?? "pending";
@@ -11958,6 +12139,13 @@ function normalizeReferenceDetailSourceUri(value: string | null | undefined): st
   }
 }
 
+function normalizeReferenceDetailHttpUri(value: string | null | undefined): string | null {
+  const normalized = normalizeReferenceDetailSourceUri(value);
+  if (!normalized) return null;
+  if (normalized.startsWith("http://") || normalized.startsWith("https://")) return normalized;
+  return null;
+}
+
 function extractReferenceDetailFirstUri(value: string | null | undefined): string | null {
   if (!value) return null;
   const match = value.match(/(https?:\/\/[^\s)\]>]+|s3:\/\/[^\s)\]>]+)/i);
@@ -12155,8 +12343,63 @@ function selectReferenceSummary(graph: SemanticGraph, references: ReferenceRecor
 function selectSemanticNodeSummary(graph: SemanticGraph, nodes: SemanticNodeRecord[], lineageId?: string | null): SemanticObjectSummary | null {
   const selected = lineageId ? graph.resolve("semanticNode", lineageId) : null;
   if (selected) return selected;
+  if (lineageId) {
+    const matched = nodes.find((node) => (
+      (node.lineageId ?? node.id) === lineageId
+      || node.id === lineageId
+      || node.nodeKey === lineageId
+    ));
+    if (matched) return summarizeSemanticNodeSummary(matched);
+    return null;
+  }
   const first = nodes[0];
-  return first ? graph.resolve("semanticNode", first.lineageId ?? first.id) : null;
+  if (!first) return null;
+  return graph.resolve("semanticNode", first.lineageId ?? first.id) ?? summarizeSemanticNodeSummary(first);
+}
+
+function selectCategorySummary(graph: SemanticGraph, categories: CategorySteeringCategory[], lineageId?: string | null): SemanticObjectSummary | null {
+  const selected = lineageId ? graph.resolve("category", lineageId) : null;
+  if (selected) return selected;
+  if (lineageId) {
+    const matched = categories.find((category) => (
+      categoryLineageId(category) === lineageId
+      || category.id === lineageId
+      || category.categoryKey === lineageId
+    ));
+    if (matched) return summarizeCategorySummary(matched);
+    return null;
+  }
+  const first = categories[0];
+  if (!first) return null;
+  return graph.resolve("category", categoryLineageId(first)) ?? summarizeCategorySummary(first);
+}
+
+function summarizeSemanticNodeSummary(node: SemanticNodeRecord): SemanticObjectSummary {
+  const lineageId = node.lineageId ?? node.id;
+  return {
+    kind: "semanticNode",
+    id: node.id,
+    lineageId,
+    versionNumber: node.versionNumber,
+    label: node.displayName ?? node.nodeKey,
+    subtitle: node.nodeKind,
+    href: newsDeskHrefForSemanticObject("semanticNode", lineageId),
+    record: node,
+  };
+}
+
+function summarizeCategorySummary(category: CategorySteeringCategory): SemanticObjectSummary {
+  const lineageId = categoryLineageId(category);
+  return {
+    kind: "category",
+    id: category.id,
+    lineageId,
+    versionNumber: category.versionNumber,
+    label: category.displayName,
+    subtitle: category.subtitle ?? category.categoryKey,
+    href: newsDeskHrefForSemanticObject("category", lineageId),
+    record: category,
+  };
 }
 
 type AssignmentMetrics = {

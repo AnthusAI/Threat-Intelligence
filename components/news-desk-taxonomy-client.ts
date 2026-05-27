@@ -1,7 +1,7 @@
 "use client";
 
 import { generateClient } from "aws-amplify/data";
-import { downloadData } from "aws-amplify/storage";
+import { downloadData, getUrl } from "aws-amplify/storage";
 import type { Schema } from "../amplify/data/resource";
 import type { NewsDeskAppendix, NewsDeskCategoryTreeNode } from "../lib/content-types";
 import { createEmptyCategorySteeringDashboard } from "../lib/category-dashboard";
@@ -1162,6 +1162,34 @@ export async function loadStoragePathText(path: string | null | undefined): Prom
   }
 }
 
+export async function loadStoragePathUrl(path: string | null | undefined): Promise<{ error: string | null; url: string | null }> {
+  if (!path) {
+    return { error: "Attachment is missing a storage path.", url: null };
+  }
+  const testMock = getTestEditorNewsroomMock();
+  const mockUrl = testMock?.storageUrlByPath?.[path];
+  if (typeof mockUrl === "string" && mockUrl.trim().length > 0) {
+    return { error: null, url: mockUrl };
+  }
+  try {
+    configureAmplifyClient();
+    const signed = await getUrl({
+      path,
+      options: { validateObjectExistence: true },
+    });
+    const url = signed?.url ? signed.url.toString() : null;
+    if (!url) {
+      return { error: "Could not resolve attachment URL.", url: null };
+    }
+    return { error: null, url };
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : "Could not resolve attachment URL.",
+      url: null,
+    };
+  }
+}
+
 async function downloadStoragePathTextRaw(path: string | null | undefined): Promise<string | null> {
   if (!path) return null;
   const downloaded = await downloadData({ path }).result;
@@ -1302,6 +1330,7 @@ type TestEditorNewsroomMock = {
   references?: ReferenceRecord[];
   semanticRelations?: SemanticRelationRecord[];
   storageTextByPath?: Record<string, string>;
+  storageUrlByPath?: Record<string, string>;
   summary?: unknown;
 };
 

@@ -280,7 +280,6 @@ Feature: Newspaper layout scenarios
 
   Scenario: Newsroom reference detail renders the header curation cluster
     Given I open the references newsroom at 1280 by 900
-    Then the selected reference deep link URL should be "reference-knowledge-corpus-demo-source-history-001"
     When I open reference "reference-knowledge-corpus-demo-source-history-001"
     Then the selected reference deep link URL should be "reference-knowledge-corpus-demo-source-history-001"
     Then the reference detail should render the curation cluster
@@ -332,7 +331,7 @@ Feature: Newspaper layout scenarios
     And I open the references newsroom at 1280 by 900
     When I open reference "reference-knowledge-corpus-demo-source-history-001"
     Then the reference detail source URI should be clickable
-    And the reference detail should use link-standard value typography for source URI, storage, and attachments
+    And the reference detail should use link-standard value typography for source URI and attachments
     And the reference detail should not show source URI above the summary
     And the reference detail summary should not start with source URI
     And the reference detail summary should be "Trimmed summary body for mock reference one."
@@ -381,6 +380,8 @@ Feature: Newspaper layout scenarios
 
     Examples:
       | section     | width | height |
+      | topics      | 1280  | 900    |
+      | concepts    | 1280  | 900    |
       | messages    | 1280  | 900    |
       | references  | 1280  | 900    |
       | assignments | 1280  | 900    |
@@ -411,6 +412,8 @@ Feature: Newspaper layout scenarios
 
     Examples:
       | section     |
+      | topics      |
+      | concepts    |
       | messages    |
       | references  |
       | assignments |
@@ -466,6 +469,8 @@ Feature: Newspaper layout scenarios
     Then the reporting story budget should show section "news" with 1 slot and 1 candidate
     And story budget candidate "assignment-demo-reporting-news-001" should show packet recommendation "hold"
     And story budget candidate "assignment-demo-reporting-news-001" should show risk and gap context
+    When I open story budget candidate "assignment-demo-reporting-news-001"
+    Then assignment "assignment-demo-reporting-news-001" should show a private reporting packet
     When I review story budget candidate "assignment-demo-reporting-news-001" as "hold"
     Then story budget candidate "assignment-demo-reporting-news-001" should show reporting decision "hold"
     And assignment "assignment-demo-reporting-news-001" should not appear as an edition item

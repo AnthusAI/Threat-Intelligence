@@ -70,7 +70,7 @@ Given("I open the assignments newsroom at {int} by {int}", async function (width
 });
 
 Given("I open the {string} newsroom section at {int} by {int}", async function (sectionId, width, height) {
-  assert.ok(["assignments", "messages", "references"].includes(sectionId), `Unsupported card-grid section: ${sectionId}`);
+  assert.ok(["assignments", "concepts", "messages", "references", "topics"].includes(sectionId), `Unsupported card-grid section: ${sectionId}`);
   await this.openPath(`/newsroom/${sectionId}?demo=1`, width, height);
   await waitForNewsroomSection(requirePage(this), sectionId);
   await requirePage(this).waitForSelector("[data-newsroom-card-grid]", { state: "visible", timeout: 15_000 });
@@ -226,6 +226,14 @@ When("I open assignment {string}", async function (assignmentId) {
   const card = page.locator(`[data-newsroom-card][data-assignment-candidate="${assignmentId}"]`).first();
   await card.waitFor({ state: "visible", timeout: 10_000 });
   await card.click();
+  await page.locator(`.news-desk-assignment-row[data-assignment-candidate="${assignmentId}"]`).waitFor({ state: "visible", timeout: 10_000 });
+});
+
+When("I open story budget candidate {string}", async function (assignmentId) {
+  const page = requirePage(this);
+  const candidate = page.locator(`[data-story-budget-candidate="${assignmentId}"] .news-desk-story-budget-candidate__main`).first();
+  await candidate.waitFor({ state: "visible", timeout: 10_000 });
+  await candidate.click();
   await page.locator(`.news-desk-assignment-row[data-assignment-candidate="${assignmentId}"]`).waitFor({ state: "visible", timeout: 10_000 });
 });
 
@@ -573,8 +581,9 @@ Then("the topics desk should render", async function () {
   const page = requirePage(this);
   await page.locator("[data-news-desk]").waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("[data-news-desk-tab='topics'][aria-current='page']").waitFor({ state: "visible", timeout: 10_000 });
-  await page.locator("[data-news-desk-section='topics']").waitFor({ state: "visible", timeout: 10_000 });
-  await page.locator("text=Source Demo Categories").first().waitFor({ state: "visible", timeout: 10_000 });
+  const shell = page.locator("[data-news-desk-section='topics']");
+  await shell.waitFor({ state: "visible", timeout: 10_000 });
+  assert.equal(await shell.getAttribute("data-detail-open"), "false");
 });
 
 Then("the references desk should show reference metadata and semantic neighbors", async function () {
@@ -909,11 +918,10 @@ Then("the reference detail source URI should be clickable", async function () {
   assert.ok(href && /^(https?|s3):\/\//.test(href), `Expected clickable Source URI href, received: ${href}`);
 });
 
-Then("the reference detail should use link-standard value typography for source URI, storage, and attachments", async function () {
+Then("the reference detail should use link-standard value typography for source URI and attachments", async function () {
   const report = await requirePage(this).evaluate(() => {
     const expectedClass = "news-desk-reference-detail__link-value";
     const source = document.querySelector("[data-news-desk-reference-source-uri-value]");
-    const storage = document.querySelector("[data-news-desk-reference-storage-value]");
     const attachmentPaths = Array.from(
       document.querySelectorAll("[data-news-desk-reference-attachment-path]"),
     );
@@ -921,15 +929,11 @@ Then("the reference detail should use link-standard value typography for source 
       attachmentCount: attachmentPaths.length,
       sourceHasClass: source?.classList.contains(expectedClass) ?? false,
       sourceValue: source?.textContent?.trim() ?? "",
-      storageHasClass: storage?.classList.contains(expectedClass) ?? false,
-      storageValue: storage?.textContent?.trim() ?? "",
       attachmentMissingClassCount: attachmentPaths.filter((node) => !node.classList.contains(expectedClass)).length,
     };
   });
   assert.equal(report.sourceHasClass, true, `Expected Source URI value to use link value class: ${JSON.stringify(report)}`);
   assert.ok(report.sourceValue.length > 0, `Expected Source URI value text: ${JSON.stringify(report)}`);
-  assert.equal(report.storageHasClass, true, `Expected Storage value to use link value class: ${JSON.stringify(report)}`);
-  assert.ok(report.storageValue.length > 0, `Expected Storage value text: ${JSON.stringify(report)}`);
   assert.ok(report.attachmentCount > 0, `Expected attachment path rows in reference detail: ${JSON.stringify(report)}`);
   assert.equal(report.attachmentMissingClassCount, 0, `Expected all attachment paths to use link value class: ${JSON.stringify(report)}`);
 });
@@ -991,9 +995,9 @@ Then("the selected reference detail should be {string}", async function (referen
 
 Then("the concepts desk should show semantic nodes and linked objects", async function () {
   const page = requirePage(this);
-  const conceptRow = page.locator("[data-news-desk-section='concepts'] .news-desk-data-grid__row").first();
-  await conceptRow.waitFor({ state: "visible", timeout: 10_000 });
-  await conceptRow.click();
+  const conceptCard = page.locator("[data-news-desk-section='concepts'] [data-newsroom-card]").first();
+  await conceptCard.waitFor({ state: "visible", timeout: 10_000 });
+  await conceptCard.click();
   await page.locator("[data-news-desk-semantic-detail]").first().waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("[data-news-desk-neighbors]").first().waitFor({ state: "visible", timeout: 10_000 });
 });
@@ -1468,6 +1472,8 @@ Then("the assignments desk should render", async function () {
   await page.locator("[data-newsroom-card-grid]").waitFor({ state: "visible", timeout: 10_000 });
   await page.locator('[data-newsroom-card][data-assignment-candidate="assignment-demo-reference-intake-history-001"]').waitFor({ state: "visible", timeout: 10_000 });
   await page.locator('[data-newsroom-card][data-assignment-candidate="assignment-demo-reference-intake-history-002"][data-assignment-status="claimed"]').waitFor({ state: "visible", timeout: 10_000 });
+  const detailOpen = await page.locator("[data-news-desk-assignments]").first().getAttribute("data-detail-open");
+  assert.equal(detailOpen, "false", `Expected assignments detail to start closed, found ${detailOpen}`);
 });
 
 Then("the newsroom should show an editor access gate", async function () {
