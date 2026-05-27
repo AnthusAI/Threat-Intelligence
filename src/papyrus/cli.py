@@ -30,6 +30,7 @@ def _require_command(group: str, argv: list[str]) -> tuple[str, list[str]]:
 
 def _map_reporting(command: str, flags: list[str]) -> None:
     mapped = {
+        "create": "create-reporting",
         "run": "run-reporting",
         "apply": "apply-reporting-packet",
         "review": "review-reporting-packet",
@@ -58,6 +59,7 @@ def _map_research(command: str, flags: list[str]) -> None:
 def _map_sections(command: str, flags: list[str]) -> None:
     mapped = {
         "import": "import-sections",
+        "import-doctrine": "import-doctrine",
         "recount-summary": "recount-summary",
         "repair-message-status": "repair-message-status",
         "backfill-feed-fields": "backfill-feed-fields",

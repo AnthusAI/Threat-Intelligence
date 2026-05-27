@@ -747,9 +747,12 @@ Operator verification checklist:
 3. Run `poetry run papyrus assignments run-research --assignment <id> ...` and
    confirm it resolves and runs the cloud procedure.
 4. Inspect `.papyrus-runs/<run-id>/llm-context/summary.json` and
-   `.papyrus-runs/<run-id>/llm-context/execute_tactus_calls.jsonl` to verify the
-   exact `execute_tactus` inputs (`assignment_context`, `assignment_agent_context`,
-   `knowledge_query`, and any web calls) used during the agent run.
+   `.papyrus-runs/<run-id>/llm-context/calls.jsonl` to verify the exact per-call
+   LLM message history (including system prompt and user/tool messages) used during
+   the agent run.
+5. Use `.papyrus-runs/<run-id>/llm-context/execute_tactus_calls.jsonl` to verify
+   tool-level context inputs (`assignment_context`, `assignment_agent_context`,
+   `knowledge_query`, and any web calls) used during the run.
 
 Current execution limitation (important):
 

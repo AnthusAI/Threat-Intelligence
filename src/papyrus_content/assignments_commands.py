@@ -8,6 +8,7 @@ from .assignments_workflow import (
     backfill_section_indexes,
     build_assignment_context,
     copywriting_output,
+    create_reporting_assignment,
     create_research_assignment,
     intake_research_packet_proposals,
     list_assignment_events,
@@ -58,6 +59,14 @@ def assignments_create_research(flags: list[str]) -> None:
     options = parse_options(flags)
     client, _ = create_authoring_client()
     result = create_research_assignment(client, options)
+    if options.get("json"):
+        print(json.dumps({"ok": True, **result}, indent=2))
+
+
+def assignments_create_reporting(flags: list[str]) -> None:
+    options = parse_options(flags)
+    client, _ = create_authoring_client()
+    result = create_reporting_assignment(client, options)
     if options.get("json"):
         print(json.dumps({"ok": True, **result}, indent=2))
 

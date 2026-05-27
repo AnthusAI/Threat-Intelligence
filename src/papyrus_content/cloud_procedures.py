@@ -199,7 +199,7 @@ def cloud_procedure_tactus_command(source_path: Path, input_payload: dict[str, A
         if encoded is None:
             continue
         command.extend(["--param", f"{key}={encoded}"])
-    command.extend(["--log-format", "raw"])
+    command.extend(["--log-format", "raw", "--debug"])
     return command
 
 
@@ -230,6 +230,43 @@ def try_parse_json(text: str) -> Any:
         return json.loads(text)
     except json.JSONDecodeError:
         return None
+
+
+def try_parse_json_lenient(text: str) -> Any:
+    parsed = try_parse_json(text)
+    if parsed is not None:
+        return parsed
+    if not isinstance(text, str) or not text:
+        return None
+    repaired_chars: list[str] = []
+    in_string = False
+    escaped = False
+    for char in text:
+        if in_string:
+            if escaped:
+                escaped = False
+                repaired_chars.append(char)
+                continue
+            if char == "\\":
+                escaped = True
+                repaired_chars.append(char)
+                continue
+            if char == '"':
+                in_string = False
+                repaired_chars.append(char)
+                continue
+            if char == "\n":
+                repaired_chars.append("\\n")
+                continue
+            if char == "\r":
+                repaired_chars.append("\\r")
+                continue
+            repaired_chars.append(char)
+            continue
+        if char == '"':
+            in_string = True
+        repaired_chars.append(char)
+    return try_parse_json("".join(repaired_chars))
 
 
 DEFAULT_PROCEDURE_OUTPUT_MARKERS = (
@@ -283,6 +320,33 @@ def extract_balanced_json_object_at(text: str, start: int) -> str | None:
             depth += 1
             continue
         if char == "}" and depth > 0:
+            depth -= 1
+            if depth == 0:
+                return text[start : index + 1]
+    return None
+
+
+def extract_balanced_json_array_at(text: str, start: int) -> str | None:
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+            continue
+        if char == "[":
+            depth += 1
+            continue
+        if char == "]" and depth > 0:
             depth -= 1
             if depth == 0:
                 return text[start : index + 1]
@@ -391,7 +455,7 @@ def extract_execute_tactus_call_traces(stdout: str) -> list[dict[str, Any]]:
                 args_object_text = extract_balanced_json_object_at(text, brace_start)
                 if args_object_text:
                     args_end = brace_start + len(args_object_text)
-                    args = try_parse_json(args_object_text)
+                    args = try_parse_json_lenient(args_object_text)
         result_line_text = ""
         if args_end >= 0:
             result_line_match = re.search(r"^\s*Result:\s*(.+)$", text[args_end:], flags=re.MULTILINE)
@@ -417,6 +481,82 @@ def extract_execute_tactus_call_traces(stdout: str) -> list[dict[str, Any]]:
     return traces
 
 
+def extract_llm_message_call_traces(stdout: str) -> list[dict[str, Any]]:
+    text = str(stdout or "")
+    if not text:
+        return []
+
+    agent_markers: list[tuple[int, str]] = []
+    for match in re.finditer(r"^→ Agent ([^:]+):", text, flags=re.MULTILINE):
+        agent_markers.append((match.start(), match.group(1).strip()))
+    for match in re.finditer(r"Agent '([^']+)' turn \d+", text):
+        agent_markers.append((match.start(), match.group(1).strip()))
+    agent_markers.sort(key=lambda entry: entry[0])
+
+    tool_count_markers: list[tuple[int, int]] = []
+    for match in re.finditer(r"\[RAWMODULE\] Passing (\d+) tools to LM", text):
+        try:
+            tool_count_markers.append((match.start(), int(match.group(1))))
+        except ValueError:
+            continue
+
+    traces: list[dict[str, Any]] = []
+    payload_pattern = re.compile(r"\[RAWMODULE\] LLM messages payload:\s*\n")
+    for call_index, match in enumerate(payload_pattern.finditer(text), start=1):
+        start = match.start()
+        line = line_number_at(text, start)
+        array_start = text.find("[", match.end())
+        if array_start < 0:
+            continue
+        payload_text = extract_balanced_json_array_at(text, array_start)
+        if not payload_text:
+            continue
+        payload = try_parse_json(payload_text)
+        if not isinstance(payload, list):
+            continue
+
+        agent = None
+        for marker_pos, marker_agent in reversed(agent_markers):
+            if marker_pos < start:
+                agent = marker_agent
+                break
+
+        tool_count = None
+        for marker_pos, marker_count in reversed(tool_count_markers):
+            if marker_pos < start:
+                tool_count = marker_count
+                break
+
+        system_prompt = ""
+        user_message = ""
+        roles: list[str] = []
+        for entry in payload:
+            if not isinstance(entry, dict):
+                continue
+            role = str(entry.get("role") or "").strip()
+            if role:
+                roles.append(role)
+            if role == "system" and not system_prompt:
+                system_prompt = str(entry.get("content") or "")
+            if role == "user":
+                user_message = str(entry.get("content") or "")
+
+        traces.append(
+            {
+                "callIndex": call_index,
+                "line": line,
+                "agent": agent,
+                "messageCount": len(payload),
+                "roles": roles,
+                "toolCount": tool_count,
+                "systemPrompt": system_prompt,
+                "userMessage": user_message,
+                "messages": payload,
+            }
+        )
+    return traces
+
+
 def write_llm_context_trace_artifacts(
     *,
     run_dir: Path,
@@ -425,25 +565,38 @@ def write_llm_context_trace_artifacts(
     run_id: str,
     input_payload: dict[str, Any],
     stdout: str,
+    stderr: str = "",
     stdout_path: Path,
+    stderr_path: Path | None = None,
 ) -> dict[str, Any]:
     llm_dir = run_dir / "llm-context"
     llm_dir.mkdir(parents=True, exist_ok=True)
-    calls = extract_execute_tactus_call_traces(stdout)
-    calls_path = llm_dir / "execute_tactus_calls.jsonl"
-    with calls_path.open("w", encoding="utf-8") as handle:
-        for call in calls:
+    execute_tactus_calls = extract_execute_tactus_call_traces(stdout)
+    execute_tactus_calls_path = llm_dir / "execute_tactus_calls.jsonl"
+    with execute_tactus_calls_path.open("w", encoding="utf-8") as handle:
+        for call in execute_tactus_calls:
+            handle.write(json.dumps(call, sort_keys=True) + "\n")
+    # execute_tactus call markers are emitted in procedure stdout; LLM message
+    # payload traces can appear in stderr debug logs depending on runtime config.
+    llm_parse_text = f"{stdout}\n{stderr}" if stderr else stdout
+    llm_message_calls = extract_llm_message_call_traces(llm_parse_text)
+    llm_message_calls_path = llm_dir / "calls.jsonl"
+    with llm_message_calls_path.open("w", encoding="utf-8") as handle:
+        for call in llm_message_calls:
             handle.write(json.dumps(call, sort_keys=True) + "\n")
     summary = {
-        "version": 1,
+        "version": 2,
         "alias": alias,
         "procedureKey": procedure_key,
         "runId": run_id,
         "generatedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "sourceStdoutPath": str(stdout_path),
+        "sourceStderrPath": str(stderr_path) if stderr_path else None,
         "inputPayload": input_payload,
-        "executeTactusCallCount": len(calls),
-        "callsPath": str(calls_path),
+        "executeTactusCallCount": len(execute_tactus_calls),
+        "executeTactusCallsPath": str(execute_tactus_calls_path),
+        "llmCallCount": len(llm_message_calls),
+        "llmCallsPath": str(llm_message_calls_path),
         "calls": [
             {
                 "callIndex": call.get("callIndex"),
@@ -455,7 +608,18 @@ def write_llm_context_trace_artifacts(
                 "corpusKey": call.get("corpusKey"),
                 "researchMode": call.get("researchMode"),
             }
-            for call in calls
+            for call in execute_tactus_calls
+        ],
+        "llmCalls": [
+            {
+                "callIndex": call.get("callIndex"),
+                "line": call.get("line"),
+                "agent": call.get("agent"),
+                "messageCount": call.get("messageCount"),
+                "toolCount": call.get("toolCount"),
+                "roles": call.get("roles"),
+            }
+            for call in llm_message_calls
         ],
     }
     summary_path = llm_dir / "summary.json"
@@ -463,8 +627,10 @@ def write_llm_context_trace_artifacts(
     return {
         "llmContextDir": str(llm_dir),
         "llmContextSummaryPath": str(summary_path),
-        "llmContextCallsPath": str(calls_path),
-        "llmContextCallCount": len(calls),
+        "llmContextCallsPath": str(execute_tactus_calls_path),
+        "llmContextCallCount": len(execute_tactus_calls),
+        "llmContextLlmCallsPath": str(llm_message_calls_path),
+        "llmContextLlmCallCount": len(llm_message_calls),
     }
 
 
@@ -561,6 +727,7 @@ def start_cloud_procedure_run(
         [str(PAPYRUS_ROOT.parent / "Tactus"), str(PAPYRUS_ROOT / "src")],
         env.get("PYTHONPATH"),
     )
+    env.setdefault("TACTUS_TRACE_LLM_MESSAGES", "1")
     completed = subprocess.run(
         command,
         cwd=PAPYRUS_ROOT,
@@ -578,7 +745,9 @@ def start_cloud_procedure_run(
         run_id=run_id,
         input_payload=procedure_input,
         stdout=completed.stdout or "",
+        stderr=completed.stderr or "",
         stdout_path=effective_stdout_path,
+        stderr_path=effective_stderr_path,
     )
     finished_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     parsed = extract_research_run_payload(

@@ -139,6 +139,8 @@ Cloud procedure runs also write structured per-call LLM context trace artifacts
 under each run directory:
 
 - `llm-context/summary.json`: indexed metadata and call list
+- `llm-context/calls.jsonl`: one record per LLM call with the exact message
+  array sent to the model (system prompt + history + user/tool messages)
 - `llm-context/execute_tactus_calls.jsonl`: one record per `execute_tactus`
   call, including harness, args, and the exact `tactus` snippet passed to the
   runtime

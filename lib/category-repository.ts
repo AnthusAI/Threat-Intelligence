@@ -1570,8 +1570,8 @@ export function createDemoCategorySteeringDashboard(): CategorySteeringDashboard
         slug: "editorial-doctrine-mission",
         title: "Editorial Mission",
         body: [
-          "Papyrus exists to help editors define a publication with a clear civic and intellectual purpose.",
-          "The newsroom should make its coverage priorities legible to its staff before those priorities ever become layout or publishing decisions.",
+          "Papyrus publishes bounded editions that help readers understand what changed, why it matters, and what remains uncertain.",
+          "Coverage should be accurate, source-disciplined, and legible about evidence quality and editorial judgment.",
         ],
         editorial: { kind: "mission" },
         updatedAt: importedAt,
@@ -1589,7 +1589,9 @@ export function createDemoCategorySteeringDashboard(): CategorySteeringDashboard
         slug: "editorial-doctrine-policy",
         title: "Editorial Policy",
         body: [
-          "Editorial policy stays private to the newsroom and records the standards that govern sourcing, review, and publication decisions.",
+          "Publication doctrine is the global inclusion standard; desk doctrine sets local source priorities and framing.",
+          "News reporting should prioritize current, journalistic, and official sources; desk workflows may use academic research as background unless a desk policy explicitly makes research the primary evidence class.",
+          "High-risk domains, including health-related claims, require stricter sourcing, explicit uncertainty handling, and clear separation between verified facts and interpretation.",
         ],
         editorial: { kind: "policy" },
         updatedAt: importedAt,

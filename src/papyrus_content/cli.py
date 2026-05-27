@@ -43,6 +43,7 @@ from .assignments_commands import (
     assignments_complete,
     assignments_copywriting_output,
     assignments_create_research,
+    assignments_create_reporting,
     assignments_events,
     assignments_for_object,
     assignments_intake_proposals,
@@ -128,6 +129,7 @@ from .ids import knowledge_corpus_id
 from .newsroom_commands import (
     newsroom_backfill_feed_fields,
     newsroom_backfill_operational_indexes,
+    newsroom_import_doctrine,
     newsroom_import_sections,
     newsroom_prune_attachments,
     newsroom_repair_message_status,
@@ -199,6 +201,7 @@ PORTED_COMMANDS = frozenset(
         "references:export-scope-training",
         "assignments:list",
         "assignments:create-research",
+        "assignments:create-reporting",
         "assignments:run-research",
         "assignments:run-reporting",
         "assignments:apply-research-packet",
@@ -244,6 +247,7 @@ PORTED_COMMANDS = frozenset(
         "newsroom:backfill-feed-fields",
         "newsroom:backfill-operational-indexes",
         "newsroom:import-sections",
+        "newsroom:import-doctrine",
         "newsroom:seed-required-procedures",
         "relations:import-types",
         "relations:backfill",
@@ -379,6 +383,8 @@ def dispatch(group: str, command: str, flags: list[str]) -> None:
         assignments_list(flags)
     elif route == "assignments:create-research":
         assignments_create_research(flags)
+    elif route == "assignments:create-reporting":
+        assignments_create_reporting(flags)
     elif route == "assignments:run-research":
         assignments_run_research(flags)
     elif route == "assignments:run-reporting":
@@ -467,6 +473,8 @@ def dispatch(group: str, command: str, flags: list[str]) -> None:
         newsroom_backfill_operational_indexes(flags)
     elif route == "newsroom:import-sections":
         newsroom_import_sections(flags)
+    elif route == "newsroom:import-doctrine":
+        newsroom_import_doctrine(flags)
     elif route == "newsroom:seed-required-procedures":
         newsroom_seed_required_procedures(flags)
     elif route == "relations:import-types":

@@ -23,6 +23,11 @@ from .model_attachments import (
     model_attachment_id,
 )
 from .newsroom_sections import DEFAULT_NEWSROOM_SECTIONS_PATH, build_newsroom_section_records, load_newsroom_section_seeds
+from .newsroom_doctrine import (
+    DEFAULT_PUBLICATION_DOCTRINE_PATH,
+    build_publication_doctrine_records,
+    load_publication_doctrine_seed,
+)
 from .newsroom_summary import (
     NEWSROOM_SUMMARY_PAYLOAD_ID,
     build_newsroom_summary_payload,
@@ -474,6 +479,19 @@ def newsroom_import_sections(flags: list[str]) -> None:
         action = client.upsert(record["modelName"], record["expected"])
         changes.append({**record, "action": action})
     print_category_import_summary("newsroom-sections", Path(config_path).name, changes)
+
+
+def newsroom_import_doctrine(flags: list[str]) -> None:
+    options = parse_options(flags)
+    config_path = options.get("config") or str(DEFAULT_PUBLICATION_DOCTRINE_PATH)
+    seed = load_publication_doctrine_seed(config_path)
+    records = build_publication_doctrine_records(seed["doctrine"])
+    client, _ = create_authoring_client()
+    changes: list[dict[str, Any]] = []
+    for record in records:
+        action = client.upsert(record["modelName"], record["expected"])
+        changes.append({**record, "action": action})
+    print_category_import_summary("publication-doctrine", Path(config_path).name, changes)
 
 
 def newsroom_seed_required_procedures(flags: list[str]) -> None:

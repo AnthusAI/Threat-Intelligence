@@ -19,6 +19,7 @@ const { getAmplifyServerRuntime } = amplifyServerRuntime as typeof import("../..
 const EDITOR_GROUP = "editor";
 const ADMIN_GROUP = "admin";
 const NEWSROOM_SECTIONS_CONFIG_PATH = path.join(process.cwd(), "corpora", "papyrus-newsroom-sections.yml");
+const PUBLICATION_DOCTRINE_CONFIG_PATH = path.join(process.cwd(), "corpora", "papyrus-publication-doctrine.yml");
 const REQUIRED_PROCEDURES_CONFIG_PATH = path.join(process.cwd(), "corpora", "papyrus-required-procedures.json");
 const NEWSROOM_SECTION_TYPES = new Set(["canonical", "floating", "rotating"]);
 
@@ -37,6 +38,11 @@ type NewsroomSectionSeed = {
   assignmentGuidance: string | null;
   killCriteria: string | null;
   visualGuidance: string | null;
+};
+
+type PublicationDoctrineSeed = {
+  kind: "mission" | "policy";
+  body: string[];
 };
 
 type ProcedureSeed = {
@@ -225,6 +231,7 @@ async function main() {
       metadata: toAwsJson(editionConfig.metadata),
     });
     await seedNewsroomSections(editionConfig.publishedAt);
+    await seedPublicationDoctrine(editionConfig.publishedAt);
     await seedProcedureDefinitions(editionConfig.publishedAt);
 
     for (const [index, article] of orderedArticles.entries()) {
@@ -457,6 +464,41 @@ async function seedNewsroomSections(importedAt: string) {
   }
 }
 
+async function seedPublicationDoctrine(importedAt: string) {
+  const doctrine = loadPublicationDoctrineSeeds();
+  for (const entry of doctrine) {
+    const details =
+      entry.kind === "mission"
+        ? {
+            id: "item-editorial-doctrine-mission-v1",
+            lineageId: "item-editorial-doctrine-mission",
+            slug: "editorial-doctrine-mission",
+            title: "Editorial Mission",
+          }
+        : {
+            id: "item-editorial-doctrine-policy-v1",
+            lineageId: "item-editorial-doctrine-policy",
+            slug: "editorial-doctrine-policy",
+            title: "Editorial Policy",
+          };
+    await upsert("Item", {
+      id: details.id,
+      lineageId: details.lineageId,
+      versionNumber: 1,
+      versionState: "current",
+      versionCreatedAt: importedAt,
+      versionCreatedBy: "amplify-seed",
+      type: "doctrine",
+      status: "private",
+      typeStatus: "doctrine#private",
+      slug: details.slug,
+      title: details.title,
+      body: entry.body,
+      updatedAt: importedAt,
+    });
+  }
+}
+
 async function seedProcedureDefinitions(importedAt: string) {
   for (const seed of PROCEDURE_SEEDS) {
     const procedureId = `procedure-definition-${safeProcedureId(seed.key)}`;
@@ -526,6 +568,24 @@ function loadNewsroomSectionSeeds(configPath = NEWSROOM_SECTIONS_CONFIG_PATH): N
   return parsed.sections.map((entry, index) => normalizeNewsroomSectionSeed(entry, index, configPath));
 }
 
+function loadPublicationDoctrineSeeds(configPath = PUBLICATION_DOCTRINE_CONFIG_PATH): PublicationDoctrineSeed[] {
+  const parsed = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
+    schemaVersion?: number;
+    doctrine?: Array<Record<string, unknown>>;
+  };
+  if (!parsed || parsed.schemaVersion !== 1 || !Array.isArray(parsed.doctrine)) {
+    throw new Error(`Invalid publication doctrine seed file: ${configPath}`);
+  }
+  const entries = parsed.doctrine.map((entry, index) => normalizePublicationDoctrineSeed(entry, index, configPath));
+  const byKind = new Map(entries.map((entry) => [entry.kind, entry]));
+  for (const kind of ["mission", "policy"] as const) {
+    if (!byKind.has(kind)) {
+      throw new Error(`Publication doctrine seed file ${configPath} is missing kind '${kind}'.`);
+    }
+  }
+  return [byKind.get("mission")!, byKind.get("policy")!];
+}
+
 function normalizeNewsroomSectionSeed(entry: Record<string, unknown>, index: number, configPath: string): NewsroomSectionSeed {
   const id = String(entry.id ?? "").trim();
   if (!id) throw new Error(`Newsroom section at index ${index} in ${configPath} is missing id.`);
@@ -549,6 +609,27 @@ function normalizeNewsroomSectionSeed(entry: Record<string, unknown>, index: num
     assignmentGuidance: optionalText(entry.assignmentGuidance),
     killCriteria: optionalText(entry.killCriteria),
     visualGuidance: optionalText(entry.visualGuidance),
+  };
+}
+
+function normalizePublicationDoctrineSeed(
+  entry: Record<string, unknown>,
+  index: number,
+  configPath: string,
+): PublicationDoctrineSeed {
+  const kindValue = String(entry.kind ?? "").trim().toLowerCase();
+  if (kindValue !== "mission" && kindValue !== "policy") {
+    throw new Error(
+      `Publication doctrine entry at index ${index} in ${configPath} has unsupported kind '${String(entry.kind ?? "")}'.`,
+    );
+  }
+  const body = normalizeStringList(entry.body);
+  if (!body.length) {
+    throw new Error(`Publication doctrine entry '${kindValue}' in ${configPath} requires non-empty body.`);
+  }
+  return {
+    kind: kindValue,
+    body,
   };
 }
 

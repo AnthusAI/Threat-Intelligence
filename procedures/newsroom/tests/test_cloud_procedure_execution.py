@@ -229,11 +229,108 @@ class CloudProcedureExecutionTests(unittest.TestCase):
 
             self.assertEqual(result["runStatus"], "completed")
             self.assertEqual(result["llmContextCallCount"], 1)
+            self.assertEqual(result["llmContextLlmCallCount"], 0)
             summary = json.loads(pathlib.Path(result["llmContextSummaryPath"]).read_text(encoding="utf-8"))
             self.assertEqual(summary["executeTactusCallCount"], 1)
+            self.assertEqual(summary["llmCallCount"], 0)
             self.assertEqual(summary["calls"][0]["agent"], "newsroom_research_explorer")
             calls = pathlib.Path(result["llmContextCallsPath"]).read_text(encoding="utf-8").strip().splitlines()
             self.assertEqual(len(calls), 1)
+            first = json.loads(calls[0])
+            self.assertEqual(first["assignmentId"], "assignment-1")
+            self.assertEqual(first["harness"], "raw")
+            self.assertIn("assignment_context", first["tactusSnippet"])
+
+    def test_run_reporting_extracts_llm_message_history_and_lenient_execute_tactus_args(self) -> None:
+        client = FakeProcedureClient({
+            "id": "procedure-definition-newsroom-reporting-context",
+            "procedureKey": "newsroom.reporting.context",
+            "currentVersion": {
+                "id": "procedure-version-newsroom-reporting-context-1",
+                "versionNumber": 1,
+                "tactusSource": "Procedure {\n  function(input)\n    return {}\n  end\n}\n",
+            },
+        })
+        stdout = "\n".join(
+            [
+                "Running procedure: reporting.tac (lua format)",
+                "→ Agent newsroom_reporter: Waiting for response...",
+                "→ Tool execute_tactus",
+                "  Args: {",
+                '  "tactus": "local ctx = assignment_context{}',
+                'return { ok = true }",',
+                '  "harness": "raw",',
+                '  "assignment_id": "assignment-1",',
+                '  "corpus_key": "AI-ML-research",',
+                '  "research_mode": "reporting"',
+                "}",
+                "  Result: {'ok': True, 'value': {'ok': True}}",
+                json.dumps(
+                    {
+                        "assignment_item_id": "assignment-1",
+                        "dry_run": True,
+                        "item_status": "reported",
+                        "reporting_context_packet": {
+                            "summary": "Reporting packet",
+                            "editor_recommendation": "hold",
+                            "recommended_angle": "Angle",
+                            "coverage_gaps": [],
+                            "open_questions": [],
+                            "risk_flags": [],
+                            "accepted_reference_ids": [],
+                            "proposed_references": [],
+                            "source_trail": [],
+                            "knowledge_queries": ["q1"],
+                            "papyrus_uris_inspected": [],
+                            "copywriter_brief": "brief",
+                        },
+                        "summary": "Reporting packet",
+                    }
+                ),
+            ]
+        )
+        stderr = "\n".join(
+            [
+                "2026-05-27 00:10:52,799 DEBUG tactus.dspy.agent: Agent 'newsroom_reporter' turn 1",
+                "2026-05-27 00:10:52,800 DEBUG tactus.dspy.module: [RAWMODULE] Passing 1 tools to LM with tool_choice=auto",
+                "2026-05-27 00:10:52,801 DEBUG tactus.dspy.module: [RAWMODULE] LLM messages payload:",
+                "[",
+                '  {"role": "system", "content": "Reporter system prompt"},',
+                '  {"role": "user", "content": "Build the reporting packet"}',
+                "]",
+            ]
+        )
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch("papyrus_content.cloud_procedures.subprocess.run") as run:
+            run.return_value = subprocess.CompletedProcess(args=["tactus"], returncode=0, stdout=stdout, stderr=stderr)
+            result = start_cloud_procedure_run(
+                client=client,
+                alias="assignments.run-reporting",
+                actor_label="test",
+                title="Run reporting",
+                summary="summary",
+                input_payload={"assignment_item_id": "assignment-1", "corpus_key": "AI-ML-research"},
+                run_dir=pathlib.Path(tmpdir),
+                source_path=pathlib.Path(tmpdir) / "reporting.cloud.tac",
+                stdout_path=pathlib.Path(tmpdir) / "reporting.stdout.log",
+                stderr_path=pathlib.Path(tmpdir) / "reporting.stderr.log",
+            )
+
+            self.assertEqual(result["runStatus"], "completed")
+            self.assertEqual(result["llmContextCallCount"], 1)
+            self.assertEqual(result["llmContextLlmCallCount"], 1)
+            summary = json.loads(pathlib.Path(result["llmContextSummaryPath"]).read_text(encoding="utf-8"))
+            self.assertEqual(summary["executeTactusCallCount"], 1)
+            self.assertEqual(summary["llmCallCount"], 1)
+            llm_calls_path = pathlib.Path(result["llmContextLlmCallsPath"])
+            self.assertTrue(llm_calls_path.exists())
+            llm_calls = llm_calls_path.read_text(encoding="utf-8").strip().splitlines()
+            self.assertEqual(len(llm_calls), 1)
+            llm_first = json.loads(llm_calls[0])
+            self.assertEqual(llm_first["agent"], "newsroom_reporter")
+            self.assertEqual(llm_first["toolCount"], 1)
+            self.assertEqual(llm_first["messageCount"], 2)
+            self.assertEqual(llm_first["systemPrompt"], "Reporter system prompt")
+            calls = pathlib.Path(result["llmContextCallsPath"]).read_text(encoding="utf-8").strip().splitlines()
             first = json.loads(calls[0])
             self.assertEqual(first["assignmentId"], "assignment-1")
             self.assertEqual(first["harness"], "raw")

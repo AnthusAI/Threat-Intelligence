@@ -191,6 +191,124 @@ def create_research_assignment(client: PapyrusGraphQLAuthoringClient, options: d
     return result
 
 
+def create_reporting_assignment(client: PapyrusGraphQLAuthoringClient, options: dict[str, Any]) -> dict[str, Any]:
+    title = normalize_string(options.get("title"))
+    if not title:
+        raise ValueError("assignments create-reporting requires --title <text>.")
+    section_key = normalize_string(options.get("section"))
+    corpus_key = normalize_string(options.get("corpus-key")) or "AI-ML-research"
+    now = _utc_now()
+    assignment_type_key = normalize_string(options.get("type")) or "reporting.edition-candidate"
+    if assignment_type_key != "reporting.edition-candidate":
+        raise ValueError("assignments create-reporting only supports --type reporting.edition-candidate.")
+    status = normalize_string(options.get("status")) or "open"
+    priority = normalize_non_negative_integer(options.get("priority"), "--priority") or 50
+    queue_key = normalize_string(options.get("queue")) or f"reporting:{section_key or 'unsectioned'}:exploratory"
+    summary = normalize_string(options.get("summary")) or normalize_string(options.get("brief")) or title
+    brief = normalize_string(options.get("brief")) or summary
+    instructions = normalize_string(options.get("instructions")) or "Build a private reporting_context_packet only."
+    topic_scope = parse_comma_list(options.get("topic-scope") or options.get("topic-scope-category-keys")) or []
+    primary_focus = normalize_string(options.get("primary-focus-category-key")) or normalize_string(
+        options.get("primary-focus")
+    )
+    section = client.get_record("NewsroomSection", section_key) if section_key else None
+    if section_key and not section:
+        raise ValueError(
+            f"Unknown NewsroomSection for --section {section_key}. "
+            "Run: poetry run papyrus sections import --config corpora/papyrus-newsroom-sections.yml"
+        )
+    assignment_id = normalize_string(options.get("id")) or (
+        f"assignment-reporting-{safe_id(title)[:80]}-{timestamp_for_path(now)}"
+    )
+    assignment = {
+        "id": assignment_id,
+        "assignmentTypeKey": assignment_type_key,
+        "queueKey": queue_key,
+        "queueStatusKey": f"{queue_key}#{status}",
+        "status": status,
+        "priority": priority,
+        "title": title,
+        "summary": summary,
+        "brief": brief,
+        "instructions": instructions,
+        "metadata": json.dumps(
+            {
+                "kind": "reporting.assignment.created",
+                "corpusKey": corpus_key,
+                "sectionKey": section_key,
+                "sectionTitle": (section or {}).get("title") or (section or {}).get("displayName") or section_key,
+                "sectionType": _normalize_section_type((section or {}).get("type") or options.get("section-type")),
+                "topicScopeCategoryKeys": topic_scope,
+                "primaryFocusCategoryKey": primary_focus,
+                "contextProfile": "reporting",
+                "createdBy": "assignments create-reporting",
+            }
+        ),
+        "corpusId": normalize_string(options.get("corpus-id")) or knowledge_corpus_id({"key": corpus_key}),
+        "categorySetId": normalize_string(options.get("category-set")),
+        "sectionId": (section or {}).get("id") or section_key,
+        "sectionKey": section_key,
+        "sectionType": _normalize_section_type((section or {}).get("type") or options.get("section-type")),
+        "sectionStatusKey": f"{section_key}#{status}" if section_key else None,
+        "sectionQueueStatusKey": f"{section_key}#{queue_key}#{status}" if section_key else None,
+        "primaryFocusCategoryKey": primary_focus,
+        "topicScopeCategoryKeys": topic_scope,
+        "createdBy": normalize_string(options.get("actor-label")) or "papyrus-cli",
+        "createdAt": now,
+        "updatedAt": now,
+        "newsroomFeedKey": f"assignment#{status}",
+    }
+    event = {
+        "id": f"assignment-event-{assignment_id}-created",
+        "assignmentId": assignment_id,
+        "assignmentTypeKey": assignment_type_key,
+        "queueKey": queue_key,
+        "eventType": "created",
+        "fromStatus": None,
+        "toStatus": status,
+        "actorSub": normalize_string(options.get("actor-sub")),
+        "actorLabel": normalize_string(options.get("actor-label")) or "Papyrus content CLI",
+        "note": normalize_string(options.get("note")) or f"Created reporting assignment: {title}",
+        "createdAt": now,
+    }
+    records = [
+        {"modelName": "Assignment", "expected": assignment},
+        {"modelName": "AssignmentEvent", "expected": event},
+    ]
+    changes = build_record_changes(client, records)
+    result = {
+        "assignmentId": assignment_id,
+        "assignmentTypeKey": assignment_type_key,
+        "status": status,
+        "sectionKey": section_key,
+        "queueKey": queue_key,
+        "corpusKey": corpus_key,
+        "changes": _count_delta(changes, "action"),
+        "next": (
+            f"poetry run papyrus assignments run-reporting --assignment {assignment_id} "
+            f"--corpus-key {corpus_key}"
+            if options.get("apply")
+            else f"poetry run papyrus assignments create-reporting --title {json.dumps(title)} "
+            f"--section {section_key or '<section-key>'} --corpus-key {corpus_key} --apply"
+        ),
+    }
+    if not options.get("apply"):
+        _print_create_reporting_summary("dry-run", result, changes)
+        print("assignments\tcreate-reporting\tapply\tskipped\tpass --apply to write Assignment records")
+        print(f"assignments\tcreate-reporting\tnext\t{result['next']}")
+        return result
+    apply_record_changes(client, changes)
+    update_newsroom_summary_after_assignment_creates(
+        client,
+        changes,
+        actor_label=event["actorLabel"],
+        reason=f"assignments create-reporting {assignment_id}",
+    )
+    _print_create_reporting_summary("apply", result, changes)
+    print(f"assignments\tcreate-reporting\tnext\t{result['next']}")
+    return result
+
+
 def run_research_assignment(flags: list[str]) -> None:
     from .cloud_procedures import start_cloud_procedure_run
     from .graphql_authoring import create_authoring_client
@@ -296,6 +414,8 @@ def run_research_assignment(flags: list[str]) -> None:
         "llmContextSummaryPath": run.get("llmContextSummaryPath"),
         "llmContextCallsPath": run.get("llmContextCallsPath"),
         "llmContextCallCount": run.get("llmContextCallCount"),
+        "llmContextLlmCallsPath": run.get("llmContextLlmCallsPath"),
+        "llmContextLlmCallCount": run.get("llmContextLlmCallCount"),
         "parsed": True,
         "packet": {
             "summary": packet.get("summary"),
@@ -445,6 +565,8 @@ def run_reporting_assignment(flags: list[str]) -> None:
         "llmContextSummaryPath": run.get("llmContextSummaryPath"),
         "llmContextCallsPath": run.get("llmContextCallsPath"),
         "llmContextCallCount": run.get("llmContextCallCount"),
+        "llmContextLlmCallsPath": run.get("llmContextLlmCallsPath"),
+        "llmContextLlmCallCount": run.get("llmContextLlmCallCount"),
         "parsed": True,
         "packet": {
             "summary": packet.get("summary"),
@@ -536,6 +658,10 @@ def _print_research_run_summary(result: dict[str, Any]) -> None:
         print(f"assignments\trun-research\tllm-context-calls\t{result.get('llmContextCallsPath')}")
     if result.get("llmContextCallCount") is not None:
         print(f"assignments\trun-research\tllm-context-call-count\t{result.get('llmContextCallCount')}")
+    if result.get("llmContextLlmCallsPath"):
+        print(f"assignments\trun-research\tllm-context-llm-calls\t{result.get('llmContextLlmCallsPath')}")
+    if result.get("llmContextLlmCallCount") is not None:
+        print(f"assignments\trun-research\tllm-context-llm-call-count\t{result.get('llmContextLlmCallCount')}")
     if result.get("next"):
         print(f"assignments\trun-research\tnext\t{result.get('next')}")
 
@@ -576,6 +702,10 @@ def _print_reporting_run_summary(result: dict[str, Any]) -> None:
         print(f"assignments\trun-reporting\tllm-context-calls\t{result.get('llmContextCallsPath')}")
     if result.get("llmContextCallCount") is not None:
         print(f"assignments\trun-reporting\tllm-context-call-count\t{result.get('llmContextCallCount')}")
+    if result.get("llmContextLlmCallsPath"):
+        print(f"assignments\trun-reporting\tllm-context-llm-calls\t{result.get('llmContextLlmCallsPath')}")
+    if result.get("llmContextLlmCallCount") is not None:
+        print(f"assignments\trun-reporting\tllm-context-llm-call-count\t{result.get('llmContextLlmCallCount')}")
     if result.get("next"):
         print(f"assignments\trun-reporting\tnext\t{result.get('next')}")
 
@@ -1479,6 +1609,20 @@ def _print_create_research_summary(action: str, result: dict[str, Any], changes:
     action_counts = _count_delta(changes, "action")
     print(
         f"assignments\tcreate-research\tchanges\tcreate={action_counts.get('create', 0)}\t"
+        f"update={action_counts.get('update', 0)}\tnoop={action_counts.get('noop', 0)}"
+    )
+
+
+def _print_create_reporting_summary(action: str, result: dict[str, Any], changes: list[dict[str, Any]]) -> None:
+    print(f"assignments\tcreate-reporting\taction\t{action}")
+    print(f"assignments\tcreate-reporting\tassignment\t{result['assignmentId']}")
+    print(f"assignments\tcreate-reporting\tstatus\t{result['status']}")
+    print(f"assignments\tcreate-reporting\ttype\t{result['assignmentTypeKey']}")
+    print(f"assignments\tcreate-reporting\tsection\t{result.get('sectionKey') or ''}")
+    print(f"assignments\tcreate-reporting\tqueue\t{result['queueKey']}")
+    action_counts = _count_delta(changes, "action")
+    print(
+        f"assignments\tcreate-reporting\tchanges\tcreate={action_counts.get('create', 0)}\t"
         f"update={action_counts.get('update', 0)}\tnoop={action_counts.get('noop', 0)}"
     )
 
