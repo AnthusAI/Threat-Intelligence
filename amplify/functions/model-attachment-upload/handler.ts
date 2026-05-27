@@ -37,6 +37,8 @@ const ALLOWED_ROLES = new Set([
   "assignment_instructions",
   "message_body",
   "metadata",
+  "ontology_concept_profile",
+  "ontology_relation_explanation",
   "code",
   "graph_export",
   "raw_payload",
