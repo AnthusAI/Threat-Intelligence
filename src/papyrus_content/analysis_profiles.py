@@ -81,6 +81,9 @@ SAFE_OVERRIDE_KEYS = frozenset(
         "graph.max_relation_entities_per_sentence",
         "graph.min_relation_weight",
         "graph.max_items",
+        "graph.item_timeout_seconds",
+        "graph.item_retry_attempts",
+        "graph.heartbeat_interval_seconds",
     }
 )
 
@@ -842,6 +845,12 @@ def _graph_override_args(effective: dict[str, Any], profile: dict[str, Any]) -> 
     for key, mapped in graph_key_map.items():
         if key in profile.get("allowedOverrides", []) and key in effective:
             args.extend(["--override", f"{mapped}={_format_override_value(effective[key])}"])
+    if "graph.item_timeout_seconds" in profile.get("allowedOverrides", []) and effective.get("graph.item_timeout_seconds") is not None:
+        args.extend(["--item-timeout-seconds", str(effective["graph.item_timeout_seconds"])])
+    if "graph.item_retry_attempts" in profile.get("allowedOverrides", []) and effective.get("graph.item_retry_attempts") is not None:
+        args.extend(["--item-retry-attempts", str(effective["graph.item_retry_attempts"])])
+    if "graph.heartbeat_interval_seconds" in profile.get("allowedOverrides", []) and effective.get("graph.heartbeat_interval_seconds") is not None:
+        args.extend(["--heartbeat-interval-seconds", str(effective["graph.heartbeat_interval_seconds"])])
     if "graph.max_items" in profile.get("allowedOverrides", []) and effective.get("graph.max_items") is not None:
         args.extend(["--max-items", str(effective["graph.max_items"])])
     return args

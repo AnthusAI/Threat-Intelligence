@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import threading
+import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -51,6 +53,8 @@ def execute_analysis_reindex_assignment(
 ) -> dict[str, Any]:
     metadata = assignment_metadata(client, assignment)
     command_plan = metadata.get("commandPlan") if isinstance(metadata.get("commandPlan"), list) else []
+    if not command_plan and isinstance(options.get("__commandPlan"), list):
+        command_plan = options.get("__commandPlan") or []
     if assignment.get("status") != "claimed":
         raise ValueError(
             f"Assignment {assignment['id']} must be claimed before execution (current={assignment.get('status')})."
@@ -58,9 +62,14 @@ def execute_analysis_reindex_assignment(
     run_id = str(options.get("run-id") or metadata.get("planRunId") or f"analysis-reindex-{assignment['id']}")
     run_dir = PAPYRUS_ROOT / ".papyrus-runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
+    max_runtime_seconds = _analysis_max_runtime_seconds(metadata, options)
     command_results: list[dict[str, Any]] = []
+    run_started = time.monotonic()
+    total_commands = sum(1 for command in command_plan if (command.get("argv") or command.get("executable")))
     for index, command in enumerate(command_plan, start=1):
         argv = [str(part) for part in command.get("argv") or []]
+        if not argv and command.get("executable"):
+            argv = [str(command["executable"]), *[str(part) for part in command.get("args") or []]]
         if not argv:
             continue
         cwd_value = command.get("cwd")
@@ -70,30 +79,101 @@ def execute_analysis_reindex_assignment(
         label = str(command.get("label") or f"command-{index:02d}")
         stdout_log = run_dir / f"{label}.stdout.log"
         stderr_log = run_dir / f"{label}.stderr.log"
-        completed = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, check=False)
-        stdout_log.write_text(completed.stdout or "", encoding="utf-8")
-        stderr_log.write_text(completed.stderr or "", encoding="utf-8")
+        elapsed_before = time.monotonic() - run_started
+        timeout_seconds = _analysis_command_timeout_seconds(max_runtime_seconds, elapsed_before)
+        if timeout_seconds is not None and timeout_seconds <= 0:
+            raise RuntimeError(
+                "Analysis reindex runtime budget exhausted before command start. "
+                f"assignment={assignment['id']} run_id={run_id} command={label}. "
+                f"Next: poetry run papyrus analysis execute-assignment --assignment {assignment['id']} --run-id {run_id}"
+            )
+        print(
+            "analysis-reindex\tphase\tcommand\tstart\t"
+            f"assignment={assignment['id']}\trun={run_id}\tindex={index}\ttotal={total_commands}"
+            f"\tlabel={label}\telapsedMs={int(elapsed_before * 1000)}\ttimeoutSeconds={timeout_seconds or '-'}",
+            flush=True,
+        )
+        completed = _execute_streamed_command(
+            argv=argv,
+            cwd=cwd,
+            timeout_seconds=timeout_seconds,
+            label=label,
+        )
+        if completed["timedOut"]:
+            stdout_log.write_text(completed["stdout"], encoding="utf-8")
+            stderr_log.write_text(completed["stderr"], encoding="utf-8")
+            elapsed_after = time.monotonic() - run_started
+            print(
+                "analysis-reindex\tphase\tcommand\tfailed\t"
+                f"assignment={assignment['id']}\trun={run_id}\tindex={index}\ttotal={total_commands}"
+                f"\tlabel={label}\treason=timeout\ttimeoutSeconds={timeout_seconds or '-'}"
+                f"\telapsedMs={int(elapsed_after * 1000)}",
+                flush=True,
+            )
+            _write_analysis_execution_manifest(
+                run_dir=run_dir,
+                run_id=run_id,
+                assignment=assignment,
+                command_results=command_results,
+                failed_command={
+                    "label": label,
+                    "argv": argv,
+                    "cwd": str(cwd),
+                    "exitStatus": None,
+                    "stdoutLogPath": str(stdout_log),
+                    "stderrLogPath": str(stderr_log),
+                    "timeoutSeconds": timeout_seconds,
+                    "failureReason": "timeout",
+                },
+                status="failed",
+            )
+            raise RuntimeError(
+                "Analysis reindex command timed out. "
+                f"assignment={assignment['id']} run_id={run_id} command={label} timeoutSeconds={timeout_seconds or '-'} "
+                f"stdoutLog={stdout_log} stderrLog={stderr_log}. "
+                f"Next: poetry run papyrus analysis execute-assignment --assignment {assignment['id']} --run-id {run_id}"
+            )
+        stdout_log.write_text(completed["stdout"], encoding="utf-8")
+        stderr_log.write_text(completed["stderr"], encoding="utf-8")
+        elapsed_after = time.monotonic() - run_started
         command_result = {
             "label": label,
             "argv": argv,
             "cwd": str(cwd),
-            "exitStatus": int(completed.returncode or 0),
+            "exitStatus": int(completed["returncode"] or 0),
             "stdoutLogPath": str(stdout_log),
             "stderrLogPath": str(stderr_log),
+            "timeoutSeconds": timeout_seconds,
+            "elapsedMs": int(elapsed_after * 1000),
         }
         command_results.append(command_result)
-        if completed.returncode != 0:
-            manifest_path = run_dir / "execution-manifest.json"
-            manifest = {
-                "runId": run_id,
-                "assignmentId": assignment["id"],
-                "assignmentTypeKey": assignment["assignmentTypeKey"],
-                "status": "failed",
-                "failedCommand": command_result,
-                "commandResults": command_results,
-            }
-            manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-            raise RuntimeError(f"Analysis reindex command failed: {label}")
+        print(
+            "analysis-reindex\tphase\tcommand\tcomplete\t"
+            f"assignment={assignment['id']}\trun={run_id}\tindex={index}\ttotal={total_commands}"
+            f"\tlabel={label}\texit={command_result['exitStatus']}\telapsedMs={command_result['elapsedMs']}",
+            flush=True,
+        )
+        if completed["returncode"] != 0:
+            _write_analysis_execution_manifest(
+                run_dir=run_dir,
+                run_id=run_id,
+                assignment=assignment,
+                command_results=command_results,
+                failed_command=command_result,
+                status="failed",
+            )
+            print(
+                "analysis-reindex\tphase\tcommand\tfailed\t"
+                f"assignment={assignment['id']}\trun={run_id}\tindex={index}\ttotal={total_commands}"
+                f"\tlabel={label}\treason=exit-nonzero\texit={command_result['exitStatus']}",
+                flush=True,
+            )
+            raise RuntimeError(
+                "Analysis reindex command failed. "
+                f"assignment={assignment['id']} run_id={run_id} command={label} exit={command_result['exitStatus']} "
+                f"stdoutLog={stdout_log} stderrLog={stderr_log}. "
+                f"Next: poetry run papyrus analysis execute-assignment --assignment {assignment['id']} --run-id {run_id}"
+            )
     manifest_path = run_dir / "execution-manifest.json"
     manifest = {
         "runId": run_id,
@@ -101,6 +181,7 @@ def execute_analysis_reindex_assignment(
         "assignmentTypeKey": assignment["assignmentTypeKey"],
         "status": "executed",
         "commandResults": command_results,
+        "maxRuntimeSeconds": max_runtime_seconds,
     }
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     return {
@@ -110,6 +191,107 @@ def execute_analysis_reindex_assignment(
         "manifestPath": str(manifest_path),
         "commandResults": command_results,
     }
+
+
+def _analysis_max_runtime_seconds(metadata: dict[str, Any], options: dict[str, Any]) -> int | None:
+    override = options.get("max-runtime-seconds")
+    if override not in {None, ""}:
+        value = int(str(override))
+        if value <= 0:
+            raise ValueError("--max-runtime-seconds must be a positive integer.")
+        return value
+    execution = metadata.get("execution") if isinstance(metadata.get("execution"), dict) else {}
+    raw = execution.get("maxRuntimeSeconds")
+    if raw in {None, ""}:
+        return None
+    value = int(str(raw))
+    return value if value > 0 else None
+
+
+def _analysis_command_timeout_seconds(max_runtime_seconds: int | None, elapsed_seconds: float) -> int | None:
+    if max_runtime_seconds is None:
+        return None
+    remaining = max_runtime_seconds - int(elapsed_seconds)
+    return remaining if remaining > 0 else 0
+
+
+def _execute_streamed_command(
+    *,
+    argv: list[str],
+    cwd: Path,
+    timeout_seconds: int | None,
+    label: str,
+) -> dict[str, Any]:
+    process = subprocess.Popen(
+        argv,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
+    stdout_lines: list[str] = []
+    stderr_lines: list[str] = []
+
+    def _pump(stream, sink: list[str], stream_name: str) -> None:
+        if stream is None:
+            return
+        for line in iter(stream.readline, ""):
+            sink.append(line)
+            rendered = line.rstrip("\n")
+            if rendered:
+                print(
+                    "analysis-reindex\tphase\tcommand-output\t"
+                    f"{stream_name}\tlabel={label}\t{rendered}",
+                    flush=True,
+                )
+        stream.close()
+
+    stdout_thread = threading.Thread(target=_pump, args=(process.stdout, stdout_lines, "stdout"), daemon=True)
+    stderr_thread = threading.Thread(target=_pump, args=(process.stderr, stderr_lines, "stderr"), daemon=True)
+    stdout_thread.start()
+    stderr_thread.start()
+    started = time.monotonic()
+    timed_out = False
+    while True:
+        return_code = process.poll()
+        if return_code is not None:
+            break
+        if timeout_seconds is not None and (time.monotonic() - started) >= timeout_seconds:
+            timed_out = True
+            process.kill()
+            break
+        time.sleep(0.1)
+    return_code = process.wait()
+    stdout_thread.join(timeout=2)
+    stderr_thread.join(timeout=2)
+    return {
+        "returncode": return_code,
+        "stdout": "".join(stdout_lines),
+        "stderr": "".join(stderr_lines),
+        "timedOut": timed_out,
+    }
+
+
+def _write_analysis_execution_manifest(
+    *,
+    run_dir: Path,
+    run_id: str,
+    assignment: dict[str, Any],
+    command_results: list[dict[str, Any]],
+    failed_command: dict[str, Any],
+    status: str,
+) -> None:
+    manifest_path = run_dir / "execution-manifest.json"
+    manifest = {
+        "runId": run_id,
+        "assignmentId": assignment["id"],
+        "assignmentTypeKey": assignment["assignmentTypeKey"],
+        "status": status,
+        "failedCommand": failed_command,
+        "commandResults": command_results,
+    }
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
 
 def execute_reference_identifier_backfill_assignment(

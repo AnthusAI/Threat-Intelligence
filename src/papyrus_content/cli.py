@@ -21,9 +21,11 @@ from .accession import (
 from .analysis_commands import (
     analysis_create_reindex_assignment,
     analysis_doctor_entity_graph,
+    analysis_entity_graph_preflight,
     analysis_execute_assignment,
     analysis_graph_artifacts,
     analysis_import_graph_artifact,
+    analysis_publish_graph_snapshot,
     analysis_reindex_plan,
     analysis_run_now,
 )
@@ -231,7 +233,9 @@ PORTED_COMMANDS = frozenset(
         "analysis:create-reindex-assignment",
         "analysis:run-now",
         "analysis:execute-assignment",
+        "analysis:entity-graph-preflight",
         "analysis:graph-artifacts",
+        "analysis:publish-graph-snapshot",
         "analysis:import-graph-artifact",
         "analysis:doctor-entity-graph",
         "newsroom:recount-summary",
@@ -243,6 +247,14 @@ PORTED_COMMANDS = frozenset(
         "newsroom:seed-required-procedures",
         "relations:import-types",
         "relations:backfill",
+        "ontology:preflight",
+        "ontology:rank",
+        "ontology:status",
+        "ontology:explain",
+        "ontology:profile",
+        "ontology:associate",
+        "ontology:dedupe",
+        "ontology:doctor",
         "messages:export-legacy-comments",
         "messages:import-legacy-comments",
         "categories:import-steering",
@@ -433,8 +445,12 @@ def dispatch(group: str, command: str, flags: list[str]) -> None:
         analysis_run_now(flags)
     elif route == "analysis:execute-assignment":
         analysis_execute_assignment(flags)
+    elif route == "analysis:entity-graph-preflight":
+        analysis_entity_graph_preflight(flags)
     elif route == "analysis:graph-artifacts":
         analysis_graph_artifacts(flags)
+    elif route == "analysis:publish-graph-snapshot":
+        analysis_publish_graph_snapshot(flags)
     elif route == "analysis:import-graph-artifact":
         analysis_import_graph_artifact(flags)
     elif route == "analysis:doctor-entity-graph":
@@ -457,6 +473,36 @@ def dispatch(group: str, command: str, flags: list[str]) -> None:
         relations_import_types(flags)
     elif route == "relations:backfill":
         relations_backfill(flags)
+    elif route.startswith("ontology:"):
+        from .ontology_enrichment import (
+            ontology_associate,
+            ontology_dedupe,
+            ontology_doctor,
+            ontology_explain,
+            ontology_preflight,
+            ontology_profile,
+            ontology_rank,
+            ontology_status,
+        )
+
+        if route == "ontology:preflight":
+            ontology_preflight(flags)
+        elif route == "ontology:rank":
+            ontology_rank(flags)
+        elif route == "ontology:status":
+            ontology_status(flags)
+        elif route == "ontology:explain":
+            ontology_explain(flags)
+        elif route == "ontology:profile":
+            ontology_profile(flags)
+        elif route == "ontology:associate":
+            ontology_associate(flags)
+        elif route == "ontology:dedupe":
+            ontology_dedupe(flags)
+        elif route == "ontology:doctor":
+            ontology_doctor(flags)
+        else:
+            raise ValueError(f"Unsupported ontology command: {route}")
     elif route == "messages:export-legacy-comments":
         messages_export_legacy_comments(flags)
     elif route == "messages:import-legacy-comments":
@@ -1090,10 +1136,11 @@ def print_usage() -> None:
     print("Python-native: content inspect, content schema-check, content list articles,")
     print("  corpora status/worker-bootstrap/sync-*, references catalog/accession/curation/export commands,")
     print("  assignments list, analysis profiles/validate-profiles/reindex-plan/preview-reindex/")
-    print("  create-reindex-assignment/run-now/execute-assignment/graph-artifacts/import-graph-artifact/doctor-entity-graph,")
+    print("  create-reindex-assignment/run-now/execute-assignment/entity-graph-preflight/graph-artifacts/publish-graph-snapshot/import-graph-artifact/doctor-entity-graph,")
     print("  newsroom recount-summary/repair-message-status/prune-attachments/backfill-feed-fields/")
     print("  backfill-operational-indexes/import-sections,")
-    print("  relations import-types/backfill, messages export/import-legacy-comments,")
+    print("  relations import-types/backfill, ontology preflight/rank/status/explain/profile/associate/dedupe/doctor,")
+    print("  messages export/import-legacy-comments,")
     print("  categories import/export/draft/review/curation-cycle commands,")
     print("  auth refresh-jwt, batch register-catalog/enrich-references,")
     print("  and test category-mappers/doi-backfill/identifier-backfill")

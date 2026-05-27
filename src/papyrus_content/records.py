@@ -395,14 +395,42 @@ def apply_record_changes(
         _apply_change(client, change)
 
     for change in attachment_changes:
-        upload_attachment_body(client, change["expected"], change["attachmentBody"])
-        client.upsert("ModelAttachment", change["expected"])
+        completed = upload_attachment_body(client, change["expected"], change["attachmentBody"])
+        if isinstance(completed, dict):
+            merged = {**change["expected"], **completed}
+        else:
+            merged = change["expected"]
+        _apply_change(
+            client,
+            {
+                "action": change.get("action"),
+                "modelName": "ModelAttachment",
+                "expected": merged,
+            },
+        )
 
 
 def _apply_change(client: PapyrusGraphQLAuthoringClient, change: dict[str, Any]) -> None:
+    action = str(change.get("action") or "").strip().lower()
     try:
-        client.upsert(change["modelName"], change["expected"])
+        if action == "create":
+            client.create_record(change["modelName"], change["expected"])
+        elif action == "update":
+            client.update_record(change["modelName"], change["expected"])
+        else:
+            client.upsert(change["modelName"], change["expected"])
     except RuntimeError as error:
+        if action == "create" and _is_conditional_conflict_error(error):
+            try:
+                client.update_record(change["modelName"], change["expected"])
+                return
+            except RuntimeError:
+                pass
         raise RuntimeError(
             f"Failed to apply {change.get('action')} {change.get('modelName')} {change.get('expected', {}).get('id')}: {error}"
         ) from error
+
+
+def _is_conditional_conflict_error(error: Exception) -> bool:
+    message = str(error).lower()
+    return "conditional request failed" in message or "conditionalcheckfailedexception" in message
