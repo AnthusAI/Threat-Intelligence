@@ -22,7 +22,16 @@ const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const MAX_GRAPH_EXPORT_ATTACHMENT_BYTES = 512 * 1024 * 1024;
 const UPLOAD_EXPIRES_SECONDS = 10 * 60;
 const DOWNLOAD_EXPIRES_SECONDS = 10 * 60;
-const ALLOWED_OWNER_KINDS = new Set(["assignment", "assignmentEvent", "knowledgeRawPayload", "message", "procedureVersion", "reference"]);
+const ALLOWED_OWNER_KINDS = new Set([
+  "assignment",
+  "assignmentEvent",
+  "knowledgeRawPayload",
+  "message",
+  "procedureVersion",
+  "reference",
+  "semanticNode",
+  "semanticRelation",
+]);
 const ALLOWED_ROLES = new Set([
   "assignment_brief",
   "assignment_instructions",
@@ -256,6 +265,8 @@ function ownerModelName(ownerKind: string): string {
   if (ownerKind === "message") return "Message";
   if (ownerKind === "procedureVersion") return "ProcedureVersion";
   if (ownerKind === "reference") return "Reference";
+  if (ownerKind === "semanticNode") return "SemanticNode";
+  if (ownerKind === "semanticRelation") return "SemanticRelation";
   throw new Error(`Unsupported ModelAttachment ownerKind ${ownerKind}.`);
 }
 

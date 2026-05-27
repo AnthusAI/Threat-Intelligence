@@ -50,6 +50,8 @@ def add_knowledge_vector_index_parser(subparsers: argparse._SubParsersAction[arg
     parser.add_argument("--batch-size", type=int, default=50)
     parser.add_argument("--no-source-vectors", action="store_true", help="Do not write one source-level vector per reference")
     parser.add_argument("--no-passage-vectors", action="store_true", help="Do not write extracted-text passage vectors")
+    parser.add_argument("--no-ontology-vectors", action="store_true", help="Do not write ontology relation/profile vectors")
+    parser.add_argument("--include-ontology-vectors", action="store_true", help="Explicitly include ontology relation/profile vectors")
     parser.add_argument("--force", action="store_true", help="Re-embed and upsert vectors even when deterministic keys already exist")
     parser.add_argument("--progress-every", type=int, default=25)
     parser.add_argument("--workers", type=int, default=8, help="Parallel workers for GraphQL attachment lookup and S3 text reads")
@@ -79,6 +81,7 @@ def run_knowledge_vector_index_cli(args: argparse.Namespace) -> dict[str, Any]:
         batch_size=max(1, min(args.batch_size, 500)),
         include_source_vectors=not bool(args.no_source_vectors),
         include_passage_vectors=not bool(args.no_passage_vectors),
+        include_ontology_vectors=not bool(args.no_ontology_vectors),
         force=bool(args.force),
         dry_run=bool(args.dry_run),
         progress_every=max(0, int(args.progress_every or 0)),

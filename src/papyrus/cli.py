@@ -112,6 +112,11 @@ def _map_references(command: str, flags: list[str]) -> int:
 
 
 def _map_knowledge(command: str, flags: list[str]) -> int:
+    if command == "ontology":
+        if not flags:
+            raise ValueError("papyrus knowledge ontology requires <command>.")
+        _delegate_content("ontology", flags[0], flags[1:])
+        return 0
     if command == "query":
         return _delegate_newsroom(["knowledge-query", *flags])
     if command == "vector-index":

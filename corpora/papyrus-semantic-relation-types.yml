@@ -165,6 +165,17 @@ relationTypes:
     isSymmetric: false
     isTransitive: false
     contextPackTags: [research, reference_graph, editing]
+  - key: explains_relation
+    label: explains relation
+    inverseLabel: relation explained by
+    description: Links a private ontology-enrichment Message to the SemanticRelation whose contextual meaning it explains.
+    domain: ontology
+    allowedSubjectKinds: [message]
+    allowedObjectKinds: [semanticRelation]
+    isDirectional: true
+    isSymmetric: false
+    isTransitive: false
+    contextPackTags: [reference_graph, research, ontology_enrichment]
   - key: about
     label: about
     inverseLabel: commentary
@@ -330,6 +341,39 @@ relationTypes:
     isSymmetric: true
     isTransitive: false
     contextPackTags: [reference_graph]
+  - key: same_as
+    label: same as
+    inverseLabel: same as
+    description: Symmetric ontology relation indicating two semantic concepts represent the same real-world or conceptual referent.
+    domain: ontology
+    allowedSubjectKinds: [semanticNode]
+    allowedObjectKinds: [semanticNode]
+    isDirectional: false
+    isSymmetric: true
+    isTransitive: true
+    contextPackTags: [reference_graph, research, ontology_enrichment]
+  - key: alias_of
+    label: alias of
+    inverseLabel: canonical concept for
+    description: Directional ontology relation indicating one semantic concept is an alias or alternate label for another concept.
+    domain: ontology
+    allowedSubjectKinds: [semanticNode]
+    allowedObjectKinds: [semanticNode]
+    isDirectional: true
+    isSymmetric: false
+    isTransitive: true
+    contextPackTags: [reference_graph, research, ontology_enrichment]
+  - key: disambiguates
+    label: disambiguates
+    inverseLabel: disambiguated by
+    description: Ontology relation indicating one concept or profile clarifies that similarly named concepts should remain distinct.
+    domain: ontology
+    allowedSubjectKinds: [semanticNode, message]
+    allowedObjectKinds: [semanticNode]
+    isDirectional: true
+    isSymmetric: false
+    isTransitive: false
+    contextPackTags: [reference_graph, research, ontology_enrichment]
   - key: broader_than
     label: broader than
     inverseLabel: narrower concept

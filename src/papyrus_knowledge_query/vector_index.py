@@ -59,6 +59,15 @@ query ListModelAttachmentsByOwner($ownerId: ID!, $limit: Int, $nextToken: String
 }}
 """
 
+LIST_MODEL_ATTACHMENTS_QUERY = f"""
+query ListModelAttachments($limit: Int, $nextToken: String) {{
+  listModelAttachments(limit: $limit, nextToken: $nextToken) {{
+    items {{ {MODEL_ATTACHMENT_FIELDS} }}
+    nextToken
+  }}
+}}
+"""
+
 
 @dataclass(frozen=True)
 class VectorIndexOptions:
@@ -72,6 +81,7 @@ class VectorIndexOptions:
     batch_size: int = 50
     include_source_vectors: bool = True
     include_passage_vectors: bool = True
+    include_ontology_vectors: bool = True
     force: bool = False
     dry_run: bool = False
     progress_every: int = 25
@@ -135,7 +145,11 @@ def index_reference_passages(services: KnowledgeQueryServices, options: VectorIn
         "excludedInsightMessages": 0,
         "insightMessagesMissingBody": 0,
         "insightSourceVectorsPrepared": 0,
+        "ontologyVectorsPrepared": 0,
+        "ontologyRelationExplanationVectorsPrepared": 0,
+        "ontologyConceptProfileVectorsPrepared": 0,
         "insightResults": [],
+        "ontologyResults": [],
         "failures": [],
         "warnings": [],
         "referenceResults": [],
@@ -187,6 +201,35 @@ def index_reference_passages(services: KnowledgeQueryServices, options: VectorIn
                 pending_vectors = _consume_prepared_reference(future.result(), stats, existing_keys, pending_vectors, vector_index_arn, options)
                 _maybe_report_progress(completed, len(references), stats, options)
 
+    if pending_vectors and not options.dry_run:
+        pending_vectors = _flush_pending_vectors(stats, vector_index_arn, pending_vectors)
+    if options.include_ontology_vectors:
+        for candidate in _prepare_ontology_vectors(services):
+            stats["vectorsPrepared"] += 1
+            stats["ontologyVectorsPrepared"] += 1
+            vector_kind = candidate["metadata"].get("vectorKind")
+            if vector_kind == "ontology_relation_explanation":
+                stats["ontologyRelationExplanationVectorsPrepared"] += 1
+            elif vector_kind == "ontology_concept_profile":
+                stats["ontologyConceptProfileVectorsPrepared"] += 1
+            result = {
+                "key": candidate["key"],
+                "ownerKind": candidate["metadata"].get("ownerKind"),
+                "ownerId": candidate["metadata"].get("ownerId"),
+                "vectorKind": vector_kind,
+                "status": "prepared" if options.dry_run else "indexed",
+            }
+            if not options.force and candidate["key"] in existing_keys:
+                stats["vectorsSkippedExisting"] += 1
+                result["status"] = "skipped_existing"
+                stats["ontologyResults"].append(result)
+                continue
+            stats["vectorsToWrite"] += 1
+            if not options.dry_run:
+                pending_vectors.append(candidate)
+                if len(pending_vectors) >= options.batch_size:
+                    pending_vectors = _flush_pending_vectors(stats, vector_index_arn, pending_vectors)
+            stats["ontologyResults"].append(result)
     if pending_vectors and not options.dry_run:
         pending_vectors = _flush_pending_vectors(stats, vector_index_arn, pending_vectors)
     for prepared in prepared_insights:
@@ -1088,6 +1131,109 @@ def _insight_message_key_set(prepared_insights: list[dict[str, Any]]) -> set[str
 def _insight_body_text(prepared_insight: dict[str, Any]) -> str:
     message = prepared_insight.get("message") if isinstance(prepared_insight.get("message"), dict) else {}
     return _clean_text(str(message.get("body") or ""))
+
+
+def _prepare_ontology_vectors(services: KnowledgeQueryServices) -> list[dict[str, Any]]:
+    graph = services.graph
+    corpus_text = services.corpus_text
+    if not graph or not hasattr(graph, "graphql") or corpus_text is None:
+        return []
+    attachments = _list_ontology_attachments(graph)
+    vectors: list[dict[str, Any]] = []
+    for attachment in attachments:
+        storage_path = str(attachment.get("storagePath") or "")
+        if not storage_path:
+            continue
+        try:
+            text = corpus_text.read_text(storage_path)  # type: ignore[union-attr]
+        except Exception:
+            continue
+        if not text:
+            continue
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        candidate = _ontology_vector_from_payload(attachment, payload)
+        if candidate:
+            vectors.append(candidate)
+    return vectors
+
+
+def _list_ontology_attachments(graph: Any) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    next_token = None
+    while True:
+        payload = graph.graphql(LIST_MODEL_ATTACHMENTS_QUERY, {"limit": 100, "nextToken": next_token})
+        connection = payload.get("listModelAttachments") or {}
+        for item in connection.get("items") or []:
+            if not item or item.get("status") in {"deleted", "aborted"}:
+                continue
+            role = str(item.get("role") or "")
+            owner_kind = str(item.get("ownerKind") or "")
+            if role == "ontology_relation_explanation" and owner_kind == "semanticRelation":
+                records.append(item)
+            elif role == "ontology_concept_profile" and owner_kind == "semanticNode":
+                records.append(item)
+        next_token = connection.get("nextToken")
+        if not next_token:
+            return records
+
+
+def _ontology_vector_from_payload(attachment: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any] | None:
+    output = payload.get("output") if isinstance(payload.get("output"), dict) else {}
+    meaning = _clean_text(str(output.get("meaning") or payload.get("meaning") or ""))
+    if len(meaning) < 30:
+        return None
+    role = str(attachment.get("role") or payload.get("artifactKind") or "")
+    vector_kind = (
+        "ontology_relation_explanation"
+        if role == "ontology_relation_explanation"
+        else "ontology_concept_profile"
+        if role == "ontology_concept_profile"
+        else ""
+    )
+    if not vector_kind:
+        return None
+    owner_kind = str(attachment.get("ownerKind") or "")
+    owner_id = str(attachment.get("ownerId") or "")
+    input_fingerprint = str(payload.get("inputFingerprint") or "")
+    digest = hashlib.sha256(f"{owner_kind}:{owner_id}:{role}:{input_fingerprint}".encode("utf-8")).hexdigest()[:20]
+    metadata = {
+        "kind": owner_kind,
+        "id": owner_id,
+        "lineageId": attachment.get("ownerLineageId") or owner_id,
+        "ownerKind": owner_kind,
+        "ownerId": owner_id,
+        "ownerLineageId": attachment.get("ownerLineageId") or owner_id,
+        "ownerVersionKey": attachment.get("ownerVersionKey"),
+        "vectorKind": vector_kind,
+        "artifactKind": payload.get("artifactKind"),
+        "inputFingerprint": input_fingerprint,
+        "generatedAt": payload.get("generatedAt"),
+        "confidence": output.get("confidence"),
+        "summary": _truncate_filterable_metadata(meaning, MAX_FILTERABLE_SUMMARY_CHARS),
+        "text": _truncate_filterable_metadata(meaning, MAX_FILTERABLE_METADATA_CHARS),
+    }
+    if vector_kind == "ontology_relation_explanation":
+        metadata.update(
+            {
+                "relationId": payload.get("relationId") or owner_id,
+                "relationTypeKey": payload.get("relationTypeKey"),
+                "subjectKind": payload.get("subjectKind"),
+                "objectKind": payload.get("objectKind"),
+            }
+        )
+    if vector_kind == "ontology_concept_profile":
+        metadata.update(
+            {
+                "conceptId": payload.get("conceptId") or owner_id,
+                "conceptLineageId": payload.get("conceptLineageId") or attachment.get("ownerLineageId") or owner_id,
+            }
+        )
+    return {"key": f"{vector_kind}-{digest}", "text": meaning, "metadata": metadata}
 
 
 def _list_index_vectors(index_arn: str) -> list[dict[str, Any]]:

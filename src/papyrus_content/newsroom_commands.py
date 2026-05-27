@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -78,8 +79,8 @@ def newsroom_recount_summary(flags: list[str]) -> None:
         if _is_message_status_null_error(error):
             raise ValueError(
                 "newsroom recount-summary failed because at least one Message has null status. "
-                "Run `poetry run papyrus newsroom repair-message-status` (dry-run) and then "
-                "`poetry run papyrus newsroom repair-message-status --apply`."
+                "Run `poetry run papyrus sections repair-message-status` (dry-run) and then "
+                "`poetry run papyrus sections repair-message-status --apply`."
             ) from error
         raise
     model_attachments = client.safe_list_records("ModelAttachment")
@@ -214,33 +215,100 @@ def newsroom_repair_message_status(flags: list[str]) -> None:
     scanned = 0
     truncated = False
     candidates: list[dict[str, Any]] = []
+    candidate_ids: set[str] = set()
     next_token: str | None = None
     while True:
-        rows, next_token = client.list_messages_safe(limit=100, next_token=next_token)
+        page_token = next_token
+        rows, next_token = client.list_messages_safe(limit=100, next_token=page_token)
         if max_scan is not None and scanned + len(rows) > max_scan:
             rows = rows[: max_scan - scanned]
             truncated = True
+        if not rows:
+            break
         scanned += len(rows)
-        for row in rows:
-            message_id = normalize_string(row.get("id"))
-            if not message_id:
-                continue
+        page_had_status_error = False
+        while True:
             try:
-                status_row = client.get_message_status(message_id)
-                if normalize_string((status_row or {}).get("status")):
-                    continue
+                status_rows, _ = client.list_messages_status_page(limit=len(rows), next_token=page_token)
             except RuntimeError as error:
-                if not _is_message_status_null_error(error):
+                status_error_index = _message_status_error_index(error) if _is_message_status_null_error(error) else None
+                if status_error_index is None:
                     raise
-            candidates.append(
-                {
-                    "id": message_id,
-                    "messageKind": row.get("messageKind"),
-                    "messageDomain": row.get("messageDomain"),
-                    "createdAt": row.get("createdAt"),
-                    "updatedAt": row.get("updatedAt"),
-                }
-            )
+                page_had_status_error = True
+                if status_error_index >= len(rows):
+                    raise ValueError(
+                        f"Could not resolve Message status failure index {status_error_index}; safe page returned {len(rows)} rows."
+                    ) from error
+                row = rows[status_error_index]
+                message_id = normalize_string(row.get("id"))
+                if not message_id or message_id in candidate_ids:
+                    break
+                candidate_ids.add(message_id)
+                candidates.append(
+                    {
+                        "id": message_id,
+                        "messageKind": row.get("messageKind"),
+                        "messageDomain": row.get("messageDomain"),
+                        "createdAt": row.get("createdAt"),
+                        "updatedAt": row.get("updatedAt"),
+                    }
+                )
+                if apply:
+                    now = _utc_now()
+                    client.update_record(
+                        "Message",
+                        {
+                            "id": message_id,
+                            "status": status_value,
+                            "updatedAt": row.get("updatedAt") or now,
+                        },
+                    )
+                    continue
+                break
+            status_by_id = {entry.get("id"): normalize_string(entry.get("status")) for entry in status_rows}
+            for row in rows:
+                message_id = normalize_string(row.get("id"))
+                if not message_id or message_id in candidate_ids:
+                    continue
+                if status_by_id.get(message_id):
+                    continue
+                candidate_ids.add(message_id)
+                candidates.append(
+                    {
+                        "id": message_id,
+                        "messageKind": row.get("messageKind"),
+                        "messageDomain": row.get("messageDomain"),
+                        "createdAt": row.get("createdAt"),
+                        "updatedAt": row.get("updatedAt"),
+                    }
+                )
+            break
+        if not apply and page_had_status_error:
+            # In dry-run, a failing status page can hide additional broken records on the same page.
+            # Fall back to targeted per-record checks only for pages that already surfaced one failure.
+            for row in rows:
+                message_id = normalize_string(row.get("id"))
+                if not message_id or message_id in candidate_ids:
+                    continue
+                try:
+                    status_row = client.get_message_status(message_id)
+                    if normalize_string((status_row or {}).get("status")):
+                        continue
+                except RuntimeError as error:
+                    if not _is_message_status_null_error(error):
+                        raise
+                candidate_ids.add(message_id)
+                candidates.append(
+                    {
+                        "id": message_id,
+                        "messageKind": row.get("messageKind"),
+                        "messageDomain": row.get("messageDomain"),
+                        "createdAt": row.get("createdAt"),
+                        "updatedAt": row.get("updatedAt"),
+                    }
+                )
+        if apply and candidates and len(candidates) % 100 == 0:
+            print(f"newsroom\trepair-message-status\tupdated\t{len(candidates)}", flush=True)
         if not options.get("json") and (scanned == len(rows) or scanned % 500 == 0):
             print(f"newsroom\trepair-message-status\tscan-progress\t{scanned}", flush=True)
         if max_scan is not None and scanned >= max_scan:
@@ -248,19 +316,6 @@ def newsroom_repair_message_status(flags: list[str]) -> None:
         if not next_token:
             break
     candidates.sort(key=lambda entry: (str(entry.get("createdAt") or ""), str(entry["id"])))
-    if apply:
-        now = _utc_now()
-        for index, entry in enumerate(candidates, start=1):
-            client.update_record(
-                "Message",
-                {
-                    "id": entry["id"],
-                    "status": status_value,
-                    "updatedAt": entry.get("updatedAt") or now,
-                },
-            )
-            if index == len(candidates) or index % 100 == 0:
-                print(f"newsroom\trepair-message-status\tprogress\t{index}/{len(candidates)}", flush=True)
     if options.get("json"):
         print(
             json.dumps(
@@ -924,6 +979,18 @@ def _is_message_status_null_error(error: Exception) -> bool:
         and "status" in text
         and "Cannot return null for non-nullable type" in text
     )
+
+
+def _message_status_error_index(error: Exception) -> int | None:
+    text = str(error)
+    match = re.search(r"/listMessages/items\[(\d+)\]/status", text)
+    if not match:
+        match = re.search(r"/getMessage/status", text)
+    if not match:
+        return None
+    if "/getMessage/status" in match.group(0):
+        return 0
+    return int(match.group(1))
 
 
 def _write_json_file(path: str, payload: Any) -> None:

@@ -131,6 +131,38 @@ const PROCEDURE_SEED_BY_KEY: Record<string, ProcedureSeed> = {
       context_profile: "reporting",
     },
   },
+  "ontology.relationship-explainer": {
+    key: "ontology.relationship-explainer",
+    title: "Ontology Relationship Explainer",
+    category: "ontology",
+    description: "Generates contextual explanations for SemanticRelation rows from resolved Papyrus graph context.",
+    versionLabel: "starter",
+    tactusSource: loadProcedureSeedSource("ontology_relationship_explainer.tac"),
+    parameterSchema: {
+      type: "object",
+      required: ["context_json"],
+      properties: {
+        context_json: { type: "object" },
+      },
+    },
+    defaults: {},
+  },
+  "ontology.concept-profiler": {
+    key: "ontology.concept-profiler",
+    title: "Ontology Concept Profiler",
+    category: "ontology",
+    description: "Synthesizes generated Concept profiles from fresh relation-specific explanations.",
+    versionLabel: "starter",
+    tactusSource: loadProcedureSeedSource("ontology_concept_profiler.tac"),
+    parameterSchema: {
+      type: "object",
+      required: ["context_json"],
+      properties: {
+        context_json: { type: "object" },
+      },
+    },
+    defaults: {},
+  },
 };
 
 const PROCEDURE_SEEDS: ProcedureSeed[] = [

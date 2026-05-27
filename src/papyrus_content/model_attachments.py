@@ -21,6 +21,8 @@ MODEL_ATTACHMENT_OWNER_MODELS = {
     "message": "Message",
     "procedureVersion": "ProcedureVersion",
     "reference": "Reference",
+    "semanticNode": "SemanticNode",
+    "semanticRelation": "SemanticRelation",
 }
 
 
@@ -127,7 +129,19 @@ def upload_attachment_body(
             f"Failed to upload ModelAttachment {attachment['id']} to {slot.get('storagePath')}: "
             f"{error.code} {error.reason} {detail[:240]}"
         ) from error
-    return client.complete_model_attachment_upload(slot["uploadId"], attachment)
+    completed = client.complete_model_attachment_upload(slot["uploadId"], attachment)
+    if isinstance(completed, dict):
+        return {
+            **attachment,
+            **completed,
+            "storagePath": slot.get("storagePath") or attachment.get("storagePath"),
+            "status": completed.get("status") or "active",
+        }
+    return {
+        **attachment,
+        "storagePath": slot.get("storagePath") or attachment.get("storagePath"),
+        "status": "active",
+    }
 
 
 def expand_private_payload_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:

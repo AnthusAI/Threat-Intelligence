@@ -239,6 +239,8 @@ DEFAULT_PROCEDURE_OUTPUT_MARKERS = (
     "reportingContextPacket",
     "draft_record_plan",
     "draftRecordPlan",
+    "relation_explanation",
+    "concept_profile",
     "work_product_kind",
     "assignment_item_id",
 )
