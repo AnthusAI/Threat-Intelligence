@@ -235,10 +235,19 @@ assignments. Agents do not own persistence mechanics; the CLI/procedure layer
 turns payloads into deterministic `Message`, `ModelAttachment`, and
 `SemanticRelation` writes.
 
+Live reporting runs use a strict path: one deterministic internal-orientation
+step (`assignment_context`, `assignment_agent_context`, then one broad scoped
+`knowledge_query`) before any optional follow-up lookup. Reporter tool flow does
+not rely on `done` short-circuit behavior in this path.
+
 Reporting runs are immutable packet history. Multiple packet Messages may exist
 for one Assignment, and downstream copywriting should treat the most recent
 successful `reporting_context_packet` Message as canonical unless an explicit
 editor workflow chooses a specific Message id.
+
+When orientation cannot complete, the default behavior is a valid `hold` packet
+with explicit `knowledge_blocked_reason` (plus orientation-attempt metadata),
+not a pipeline crash.
 
 When current external evidence is required, Tactus snippets should import the
 standard web module:

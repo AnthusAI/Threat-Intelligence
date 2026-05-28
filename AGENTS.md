@@ -165,7 +165,7 @@ rendering contracts.
   indexes, but new relation writes must also set `relationTypeId`,
   `relationTypeKey`, and `relationDomain` by resolving the seeded type. Use
   `poetry run papyrus knowledge concepts import-types --config corpora/papyrus-semantic-relation-types.yml`
-  after schema deploy, then `poetry run papyrus knowledge concepts backfill --config corpora/papyrus-semantic-relation-types.yml --apply`
+  after schema deploy, then `poetry run papyrus knowledge concepts backfill --config corpora/papyrus-semantic-relation-types.yml`
   to denormalize existing relation rows.
 - Assignment lifecycle changes use protected actions or the JWT authoring lane
   and append `AssignmentEvent` audit rows. The Newsroom `Assignments` tab
@@ -234,10 +234,6 @@ rendering contracts.
   `poetry run papyrus ops categories export-lexical-steering --output <lexical-steering.json>`.
   Do not assume Biblicus consumes that export until the Biblicus agent confirms
   the command contract.
-- Do not edit `/Users/ryan/Projects/Biblicus` source files. If Biblicus needs a
-  new full-corpus S3 sync or locking feature, relay that request to the Biblicus
-  agent instead of changing the library from Papyrus.
-
 ## Solver vs. Renderer Boundary
 
 The newspaper pages are not browser-flow layouts. They are solved layouts that

@@ -136,7 +136,7 @@ poetry run papyrus references register-catalog \
   --corpus-key <corpus-key> \
   --catalog .papyrus-runs/<run-id>/<corpus-key>-prepared-catalog.json \
   --status pending \
-  --apply
+
 ```
 
 Export accepted-only inputs:
@@ -167,7 +167,7 @@ poetry run papyrus analysis create-reindex-assignment \
   --profile global-topic-granularity \
   --corpus-key <corpus-key> \
   --override targetTopicRange=10:20 \
-  --apply
+
 ```
 
 Execute from claimed assignment metadata:
@@ -227,21 +227,21 @@ set instead of trying to tune BERTopic into the exact desired taxonomy:
 poetry run papyrus knowledge topics draft-create \
   --from-category-set <current-category-set-id> \
   --title "Initial topic sculpting pass" \
-  --apply
+
 
 poetry run papyrus knowledge topics draft-add-topic \
   --category-set <draft-category-set-id> \
   --display-name "<expected topic>" \
   --short-title "<one-or-two-word label>" \
   --subtitle "<short description>" \
-  --apply
+
 
 poetry run papyrus references label \
   --reference <accepted-reference-id-or-item-id> \
   --category <category-key-or-lineage-id> \
   --category-set <draft-category-set-id> \
   --note "Why this accepted reference is a good seed for the topic." \
-  --apply
+
 ```
 
 Export a classifier seed manifest from authoritative labels, not from mixed
@@ -301,7 +301,7 @@ first, then apply:
 
 ```bash
 poetry run papyrus sections prune-attachments
-poetry run papyrus sections prune-attachments --apply
+poetry run papyrus sections prune-attachments
 ```
 
 This cleanup is only for operational payload attachments. Do not use it for

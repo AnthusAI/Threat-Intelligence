@@ -185,7 +185,7 @@ Create live work only after the preview is acceptable:
 poetry run papyrus analysis create-reindex-assignment \
   --profile canonical-topic-classifier \
   --corpus-key AI-ML-research \
-  --apply
+
 ```
 
 Execute claimed analysis work from assignment metadata (worker/operator path):
@@ -251,23 +251,23 @@ Create and edit a draft:
 poetry run papyrus knowledge topics draft-create \
   --from-category-set <current-category-set-id> \
   --title "Topic sculpting draft" \
-  --apply
+
 
 poetry run papyrus knowledge topics draft-add-topic \
   --category-set <draft-category-set-id> \
   --display-name "Agent Tooling" \
   --short-title "Tools" \
   --subtitle "Tool use" \
-  --apply
+
 
 poetry run papyrus knowledge topics draft-update-topic \
   --category <category-id-or-key> \
   --display-name "Clearer topic name" \
-  --apply
+
 
 poetry run papyrus knowledge topics draft-archive-topic \
   --category <category-id-or-key> \
-  --apply
+
 ```
 
 Manual reference labels are immediate authoritative labels. They are allowed
@@ -279,7 +279,7 @@ poetry run papyrus references label \
   --category <category-key-or-lineage-id> \
   --category-set <draft-or-current-category-set-id> \
   --note "Why this reference is a good seed example." \
-  --apply
+
 
 poetry run papyrus references labels --reference <reference-id-or-item-id>
 ```
@@ -305,7 +305,7 @@ Promote only when the draft is ready to become the accepted publication basis:
 ```bash
 poetry run papyrus knowledge topics draft-promote \
   --category-set <draft-category-set-id> \
-  --apply
+
 ```
 
 ## Regular Curation Cycle

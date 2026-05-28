@@ -493,7 +493,7 @@ poetry run papyrus ops categories import-steering --bundle <steering-export.json
 poetry run papyrus knowledge topics export-category-set --category-set <id> --output <accepted-category-set.json>
 poetry run papyrus ops categories import-projection --config corpora/papyrus-steering.yml --target-corpus-key <key> --authority-corpus-key <key> --bundle <projection.json>
 poetry run papyrus knowledge concepts import-types --config corpora/papyrus-semantic-relation-types.yml
-poetry run papyrus knowledge concepts backfill --config corpora/papyrus-semantic-relation-types.yml --apply
+poetry run papyrus knowledge concepts backfill --config corpora/papyrus-semantic-relation-types.yml
 npm run test:bdd
 npm run test:bdd:backend
 npm run test:bdd:agent-live
@@ -602,8 +602,8 @@ poetry run papyrus assignments review-reporting-packet --assignment <assignment-
 poetry run papyrus assignments run-copywriting --assignment <copywriting-assignment-id> --dry-run --json
 poetry run papyrus assignments copywriting-output --run-id <story-cycle-run-id> --json
 poetry run papyrus references curate-recent --corpus-key <key> --since-hours 48 --max-count 25 --dry-run --json
-poetry run papyrus references curate-recent --corpus-key <key> --since-hours 48 --max-count 25 --apply --json
-poetry run papyrus references register-catalog --config corpora/papyrus-steering.yml --corpus-key <key> --catalog <metadata/catalog.json> --status pending --ingestion-rationale "<summary, research focus, editorial mission fit>" --apply
+poetry run papyrus references curate-recent --corpus-key <key> --since-hours 48 --max-count 25 --json
+poetry run papyrus references register-catalog --config corpora/papyrus-steering.yml --corpus-key <key> --catalog <metadata/catalog.json> --status pending --ingestion-rationale "<summary, research focus, editorial mission fit>"
 poetry run papyrus references export-analysis-manifest --config corpora/papyrus-steering.yml --corpus-key <key> --output accepted-reference-manifest.json
 poetry run papyrus references export-scope-training --config corpora/papyrus-steering.yml --corpus-key <key> --output reference-scope-training.json
 poetry run papyrus knowledge topics export-category-set --category-set <id> --output accepted-category-set.json
@@ -612,11 +612,11 @@ poetry run papyrus ops content delete all --yes
 ```
 
 `references curate-recent` is assignment-only for re-curation operations:
-`--apply` dispatches `curation.reference-refresh` assignments and returns queue
+Default apply mode dispatches `curation.reference-refresh` assignments and returns queue
 status; it does not execute inline curation stages.
 
 `references register-catalog` is the canonical bridge from corpus accession
-files into Papyrus workflow state. With `--apply`, it creates a
+files into Papyrus workflow state. In default apply mode, it creates a
 `KnowledgeImportRun`, sanitized `KnowledgeRawPayload`, `Reference` and
 `ReferenceAttachment` records, ingestion-rationale `Message` rows, workflow
 `SemanticRelation` links, and one open `curation.reference-intake` `Assignment`
@@ -627,7 +627,7 @@ For routine reference curation, use the operator runbook:
 
 1. `poetry run papyrus ops content inspect`
 2. `poetry run papyrus references curate-recent --corpus-key <key> --since-hours 48 --max-count 25 --dry-run --json`
-3. rerun with `--apply` once dry-run output looks correct.
+3. rerun without `--dry-run` once dry-run output looks correct.
 
 Common curation command recipes:
 
@@ -641,7 +641,7 @@ poetry run papyrus references curate-recent --corpus-key <key> --reference <refe
 # Curate a recent batch (dry-run)
 poetry run papyrus references curate-recent --corpus-key <key> --since-hours 48 --max-count 25 --dry-run --json
 
-# Curate all references in a corpus (dry-run; add --apply to dispatch)
+# Curate all references in a corpus (dry-run; add to dispatch)
 poetry run papyrus references curate-recent --corpus-key <key> --all --max-count 250 --dry-run --json
 ```
 

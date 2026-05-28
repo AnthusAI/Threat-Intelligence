@@ -74,11 +74,11 @@ after private research packets, and `--through reporting` to stop after private
 reporting packets. `--through reporting` is the default. Story-cycle runs do not
 auto-select packets or run copywriting.
 
-The command is dry-run unless `--apply` is supplied. Dry-run writes local output
+The command applies writes by default. Use `--dry-run` when you only want local output
 under `.papyrus-runs/story-cycle-<run-id>/` and should create no GraphQL
 records.
 
-Use `--apply` only when the plan is acceptable and the current
+Run without `--dry-run` when the plan is acceptable and the current
 `PAPYRUS_GRAPHQL_ENDPOINT` / `PAPYRUS_GRAPHQL_JWT` point at the intended
 environment. Apply mode may persist `Assignment`, `AssignmentEvent`, `Message`,
 `ModelAttachment`, and `SemanticRelation` records. It must not create `Item` or
@@ -183,7 +183,7 @@ poetry run papyrus assignments review-reporting-packet \
   --dry-run
 ```
 
-Use `--apply` only after reviewing the plan.
+Remove `--dry-run` only after reviewing the plan.
 
 - `select` creates a child `copywriting.article-draft` Assignment and
   `derived_from` relations to the reporting Assignment and packet Message.

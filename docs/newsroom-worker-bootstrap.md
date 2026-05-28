@@ -50,7 +50,7 @@ reference state agree, and accepted references have extracted text attachments.
    poetry run papyrus ops corpora sync-from-cloud \
      --config <steering.yml> \
      --corpus-key <corpus-key> \
-     --apply
+
    ```
 
 6. Recheck readiness before claiming analysis work:
@@ -79,7 +79,7 @@ poetry run papyrus ops corpora sync-to-cloud \
 poetry run papyrus ops corpora sync-to-cloud \
   --config <steering.yml> \
   --corpus-key <corpus-key> \
-  --apply
+
 ```
 
 Then register the catalog into GraphQL:
@@ -96,7 +96,7 @@ poetry run papyrus references register-catalog \
   --corpus-key <corpus-key> \
   --catalog .papyrus-runs/<run-id>/<corpus-key>-prepared-catalog.json \
   --status pending \
-  --apply
+
 ```
 
 After curation, run source readiness and extraction commands until accepted

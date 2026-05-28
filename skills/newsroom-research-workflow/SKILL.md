@@ -131,7 +131,7 @@ the worker must update the Newsroom aggregate snapshot in the same logical
 operation or run an explicit correction pass:
 
 ```bash
-poetry run papyrus sections recount-summary --apply
+poetry run papyrus sections recount-summary
 ```
 
 Use the shared summary delta helpers and `updateNewsroomSummary` integration
@@ -151,7 +151,7 @@ paths in `papyrus`; do not hand-edit
      --corpus-key <corpus-key> \
      --research-mode source_discovery \
      --topic-scope <optional-category-keys> \
-     --apply
+
    ```
 
    Omit `--section` only when the assignment is intentionally unsectioned.
@@ -213,7 +213,7 @@ paths in `papyrus`; do not hand-edit
    candidate references not already in the accepted evidence set.
 
 4. For normal source-discovery work, use the one-command handoff. It runs the
-   exploratory researcher, persists one `research_packet` when `--apply` is
+   exploratory researcher, persists one `research_packet` when `--dry-run` is not set
    present, converts `proposedReferences` into a run-local catalog, and registers
    those prospects as pending references with curation assignments. It does not
    accept evidence or publish anything.
@@ -225,11 +225,11 @@ paths in `papyrus`; do not hand-edit
      --corpus-key <corpus-key> \
      --research-mode source_discovery \
      --max-evidence-items 20 \
-     --apply \
+ \
      --json
    ```
 
-   Omit `--apply` first when testing. For automation, prefer
+   Use `--dry-run` first when testing. For automation, prefer
    `poetry run papyrus ... --json` so stdout is one compact JSON
    object. The JSON output includes the packet id, generated catalog path,
    import run id, registered reference count, skipped duplicate count, curation
@@ -272,10 +272,10 @@ paths in `papyrus`; do not hand-edit
    poetry run papyrus assignments apply-research-packet \
      --assignment <assignment-id> \
      --research-json <packet.json> \
-     --apply
+
    ```
 
-   Omit `--apply` first when testing. CLI output should say `dry-run` or
+   Use `--dry-run` first when testing. CLI output should say `dry-run` or
    `persisted`; do not infer persistence from a successful Tactus procedure run.
 
 7. If a packet has already been persisted and only the proposal intake step is
@@ -287,7 +287,7 @@ paths in `papyrus`; do not hand-edit
      --config corpora/papyrus-steering.yml \
      --corpus-key <corpus-key> \
      --status pending \
-     --apply \
+ \
      --json
    ```
 
@@ -352,7 +352,7 @@ It is not a draft article.
      --dry-run
    ```
 
-   Use `--apply` only after reviewing the dry run. `merge` requires
+   Remove `--dry-run` only after reviewing the dry run. `merge` requires
    `--target-item <id>`. `select` creates a `copywriting.article-draft`
    Assignment; `brief` creates a `copywriting.brief-draft` Assignment; `hold`
    and `kill` create no Items. No packet review creates `Item` or `EditionItem`.
@@ -366,7 +366,7 @@ It is not a draft article.
 
 ## After Proposal Intake
 
-`assignments research-intake-now --apply` is not the end of ingestion. It turns
+`assignments research-intake-now` is not the end of ingestion. It turns
 web discoveries into pending `Reference` prospects plus
 `curation.reference-intake` assignments. The normal next step is a
 conversation-backed screening loop with the user.
@@ -413,7 +413,7 @@ conversation-backed screening loop with the user.
      --config corpora/papyrus-steering.yml \
      --corpus-key <corpus-key> \
      --status accepted \
-     --apply
+
 
    poetry run papyrus references source-status \
      --config corpora/papyrus-steering.yml \
@@ -428,13 +428,13 @@ conversation-backed screening loop with the user.
    poetry run papyrus references summarize \
      --reference <reference-id> \
      --max-tokens 100 \
-     --apply
+
 
    poetry run papyrus references quality set \
      --reference <reference-id> \
      --rating 4 \
      --note "Strong evidence for the assignment focus." \
-     --apply
+
    ```
 
    Summaries and quality ratings are semantic graph signals. They improve
@@ -614,7 +614,7 @@ poetry run papyrus assignments intake-proposals \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
   --status pending \
-  --apply
+
 ```
 
 The manual fallback is direct catalog registration:
@@ -626,7 +626,7 @@ poetry run papyrus references register-catalog \
   --catalog <catalog.json> \
   --status pending \
   --ingestion-rationale "<summary, research focus, editorial mission fit>" \
-  --apply
+
 ```
 
 Rejected source material is still useful scope memory when it has a structured
@@ -640,7 +640,7 @@ poetry run papyrus references register-catalog \
   --status rejected \
   --reason-code out_of_scope \
   --note "Outside the current editorial scope." \
-  --apply
+
 ```
 
 `register-catalog` writes only `Reference`, `ReferenceAttachment`, curation
