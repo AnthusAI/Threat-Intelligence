@@ -8,7 +8,13 @@ from pathlib import Path
 from typing import Any
 
 from .catalog import catalog_items
-from .options import normalize_non_negative_integer, normalize_positive_integer, normalize_string, parse_options
+from .options import (
+    normalize_non_negative_integer,
+    normalize_positive_integer,
+    normalize_string,
+    parse_options,
+    resolve_mutation_apply,
+)
 from .steering import DEFAULT_STEERING_CONFIG, load_steering_config, require_corpus_config
 from .env import PAPYRUS_ROOT
 
@@ -19,6 +25,7 @@ DEFAULT_INGESTION_RATIONALE = (
 
 def register_catalog_batches(flags: list[str]) -> None:
     options = parse_options(flags)
+    apply = resolve_mutation_apply(options, "batch register-catalog")
     corpus_key = normalize_string(options.get("corpus-key"))
     if not corpus_key:
         raise ValueError("batch register-catalog requires --corpus-key <key>.")
@@ -35,7 +42,7 @@ def register_catalog_batches(flags: list[str]) -> None:
     batch_size = normalize_positive_integer(options.get("batch-size"), "--batch-size") or 75
     start_batch = normalize_non_negative_integer(options.get("start-batch"), "--start-batch") or 0
     max_batches = normalize_non_negative_integer(options.get("max-batches"), "--max-batches") or 0
-    dry_run = bool(options.get("dry-run"))
+    dry_run = not apply
     rationale = normalize_string(options.get("ingestion-rationale")) or DEFAULT_INGESTION_RATIONALE
 
     run_dir = _resolve_path(normalize_string(options.get("run-dir")) or _default_run_dir("catalog-registration-bulk", corpus_key))
@@ -93,8 +100,8 @@ def register_catalog_batches(flags: list[str]) -> None:
             "--title-subtitle-enrichment",
             "false",
         ]
-        if not dry_run:
-            args.append("--apply")
+        if dry_run:
+            args.append("--dry-run")
 
         started_at = _utc_now()
         result = subprocess.run(args, cwd=PAPYRUS_ROOT, capture_output=True, text=True, check=False)
@@ -125,6 +132,7 @@ def register_catalog_batches(flags: list[str]) -> None:
 
 def run_post_ingestion_enrichment_batches(flags: list[str]) -> None:
     options = parse_options(flags)
+    apply = resolve_mutation_apply(options, "batch enrich-references")
     corpus_key = normalize_string(options.get("corpus-key"))
     if not corpus_key:
         raise ValueError("batch enrich-references requires --corpus-key <key>.")
@@ -167,9 +175,10 @@ def run_post_ingestion_enrichment_batches(flags: list[str]) -> None:
             str(summary_max_tokens),
             "--model",
             model,
-            "--apply",
             "--json",
         ]
+        if not apply:
+            args.append("--dry-run")
         if curate_all:
             args.append("--all")
         else:

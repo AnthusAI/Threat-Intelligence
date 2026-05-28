@@ -14,6 +14,7 @@ import html
 import json
 import os
 import re
+import subprocess
 import sys
 import threading
 import urllib.error
@@ -80,6 +81,8 @@ TITLE_SUBTITLE_SUMMARY_PROMPT_VERSION = "reference-title-subtitle-summary-v2-sou
 TITLE_SUBTITLE_SUMMARY_TOKEN_BUDGET_DEFAULT = 1800
 TITLE_SUBTITLE_BATCH_WORKERS = 8
 SUMMARY_SOURCE_TEXT_MAX_CHARS = 12000
+REFERENCE_METADATA_MODEL_DEFAULT = "gpt-5.4-nano"
+BIBLICUS_SUMMARIZE_MAP_REDUCE_PROMPT_VERSION = "summarize-map-reduce-v2"
 BIBLICUS_CATALOG_ITEM_ROOT_FIELDS = frozenset(
     {
         "id",
@@ -141,6 +144,29 @@ query ListReferencesByCorpus($corpusId: ID!, $limit: Int, $nextToken: String) {{
     nextToken
   }}
 }}
+"""
+
+LIST_REFERENCE_ATTACHMENTS_BY_LINEAGE_QUERY = """
+query ListReferenceAttachmentsByLineage($referenceLineageId: ID!, $limit: Int, $nextToken: String) {
+  listReferenceAttachmentsByReferenceLineageAndSortKey(referenceLineageId: $referenceLineageId, limit: $limit, nextToken: $nextToken) {
+    items {
+      id
+      referenceId
+      referenceLineageId
+      role
+      sortKey
+      storagePath
+      sourceUri
+      filename
+      mediaType
+      importRunId
+      importedAt
+      status
+      metadata
+    }
+    nextToken
+  }
+}
 """
 
 CREATE_MODEL_ATTACHMENT_UPLOAD_MUTATION = """
@@ -3189,6 +3215,360 @@ def generate_summary(
     )
 
 
+def resolve_reference_text_generation_context(
+    *,
+    extracted_text: str,
+    original_title: str = "",
+    original_subtitle: str = "",
+) -> dict[str, Any]:
+    normalized_text = str(extracted_text or "").replace("\x00", "").strip()
+    errors: list[dict[str, str]] = []
+    if not normalized_text:
+        errors.append({
+            "code": "missing_extracted_text",
+            "message": "Extracted text is required before metadata generation.",
+        })
+    return {
+        "ok": not errors,
+        "errors": errors,
+        "extractedText": normalized_text,
+        "originalTitle": _clean_text(original_title),
+        "originalSubtitle": _clean_text(original_subtitle),
+    }
+
+
+def generate_title_from_reference_text(
+    *,
+    reference: dict[str, Any],
+    extracted_text: str,
+    original_title: str = "",
+    original_subtitle: str = "",
+    model: str = REFERENCE_METADATA_MODEL_DEFAULT,
+) -> dict[str, Any]:
+    context = resolve_reference_text_generation_context(
+        extracted_text=extracted_text,
+        original_title=original_title,
+        original_subtitle=original_subtitle,
+    )
+    if not context["ok"]:
+        raise RuntimeError("Cannot generate title without extracted text.")
+    result = _run_metadata_map_reduce(
+        output_kind="title",
+        reference=reference,
+        context=context,
+        model=model,
+    )
+    title = _normalize_reference_title_candidate(result.get("value"))
+    if not title:
+        raise RuntimeError("Title generation returned an empty value.")
+    return {
+        "title": title,
+        "model": model,
+        "promptVersion": result["promptVersion"],
+        "mapReduce": result["mapReduce"],
+    }
+
+
+def generate_subtitle_from_reference_text(
+    *,
+    reference: dict[str, Any],
+    extracted_text: str,
+    original_title: str = "",
+    original_subtitle: str = "",
+    model: str = REFERENCE_METADATA_MODEL_DEFAULT,
+) -> dict[str, Any]:
+    context = resolve_reference_text_generation_context(
+        extracted_text=extracted_text,
+        original_title=original_title,
+        original_subtitle=original_subtitle,
+    )
+    if not context["ok"]:
+        raise RuntimeError("Cannot generate subtitle without extracted text.")
+    result = _run_metadata_map_reduce(
+        output_kind="subtitle",
+        reference=reference,
+        context=context,
+        model=model,
+    )
+    subtitle = _normalize_subtitle_candidate(result.get("value"))
+    if not subtitle:
+        raise RuntimeError("Subtitle generation returned an empty value.")
+    issue = _generated_subtitle_quality_issue(subtitle, subtitle_mode="generated")
+    if issue:
+        raise RuntimeError(f"Generated subtitle failed quality checks: {issue}")
+    return {
+        "subtitle": subtitle,
+        "model": model,
+        "promptVersion": result["promptVersion"],
+        "mapReduce": result["mapReduce"],
+    }
+
+
+def generate_summary_from_reference_text(
+    *,
+    reference: dict[str, Any],
+    extracted_text: str,
+    original_title: str = "",
+    original_subtitle: str = "",
+    model: str = REFERENCE_METADATA_MODEL_DEFAULT,
+) -> dict[str, Any]:
+    context = resolve_reference_text_generation_context(
+        extracted_text=extracted_text,
+        original_title=original_title,
+        original_subtitle=original_subtitle,
+    )
+    if not context["ok"]:
+        raise RuntimeError("Cannot generate summary without extracted text.")
+    result = _run_metadata_map_reduce(
+        output_kind="summary",
+        reference=reference,
+        context=context,
+        model=model,
+    )
+    summary = _normalize_outcome_summary_candidate(result.get("value"))
+    if not summary:
+        raise RuntimeError("Summary generation returned an empty value.")
+    return {
+        "summary": summary,
+        "model": model,
+        "promptVersion": result["promptVersion"],
+        "mapReduce": result["mapReduce"],
+    }
+
+
+def reference_generate_metadata_from_extracted_text(
+    *,
+    reference_id: str,
+    extracted_text: str,
+    original_title: str = "",
+    original_subtitle: str = "",
+    model: str = REFERENCE_METADATA_MODEL_DEFAULT,
+    apply: bool = False,
+    refresh: bool = True,
+) -> dict[str, Any]:
+    semantic = _semantic_client()
+    reference = _resolve_reference(semantic, reference_id)
+    context = resolve_reference_text_generation_context(
+        extracted_text=extracted_text,
+        original_title=original_title or str(reference.get("title") or ""),
+        original_subtitle=original_subtitle,
+    )
+    if not context["ok"]:
+        return {
+            "kind": "reference.metadata.from-extracted-text",
+            "status": "skipped_missing_text",
+            "reference": _reference_summary(reference),
+            "errors": context["errors"],
+            "apply": False,
+            "action": "skipped_missing_text",
+            "records": [],
+        }
+
+    now = _now()
+    run_id = f"metadata-from-extracted-text-{_hash_short([reference.get('lineageId') or reference.get('id') or '', now])}"
+    title_result = generate_title_from_reference_text(
+        reference=reference,
+        extracted_text=context["extractedText"],
+        original_title=context["originalTitle"],
+        original_subtitle=context["originalSubtitle"],
+        model=model,
+    )
+    subtitle_result = generate_subtitle_from_reference_text(
+        reference=reference,
+        extracted_text=context["extractedText"],
+        original_title=context["originalTitle"],
+        original_subtitle=context["originalSubtitle"],
+        model=model,
+    )
+    summary_result = generate_summary_from_reference_text(
+        reference=reference,
+        extracted_text=context["extractedText"],
+        original_title=context["originalTitle"],
+        original_subtitle=context["originalSubtitle"],
+        model=model,
+    )
+
+    metadata_payload = _load_reference_metadata_payload(reference)
+    next_metadata = dict(metadata_payload) if isinstance(metadata_payload, dict) else {}
+    next_metadata["title"] = title_result["title"]
+    next_metadata["subtitle"] = subtitle_result["subtitle"]
+    next_metadata["summary"] = summary_result["summary"]
+    prompt_version = title_result["promptVersion"]
+    next_metadata["title_subtitle_resolution"] = {
+        "status": "resolved",
+        "title_mode": "generated_from_extracted_text",
+        "subtitle_mode": "generated_from_extracted_text",
+        "source": "biblicus_map_reduce",
+        "model": model,
+        "web_search_used": False,
+        "source_urls": [],
+        "rationale": "Generated from extracted text with Biblicus map-reduce.",
+        "run_id": run_id,
+        "resolved_at": now,
+        "prompt_version": prompt_version,
+        "context": {
+            "original_title": context["originalTitle"],
+            "original_subtitle": context["originalSubtitle"],
+            "extracted_text_chars": len(context["extractedText"]),
+            "refresh": bool(refresh),
+        },
+    }
+    next_metadata["summary_resolution"] = _summary_resolution(
+        summary=summary_result["summary"],
+        summary_token_budget=TITLE_SUBTITLE_SUMMARY_TOKEN_BUDGET_DEFAULT,
+        model=model,
+        source="biblicus_map_reduce",
+        source_urls=[],
+        run_id=run_id,
+        resolved_at=now,
+        rationale="Generated from extracted text with Biblicus map-reduce.",
+        prompt_version=prompt_version,
+    )
+    next_metadata["metadata_generation"] = {
+        "promptVersion": prompt_version,
+        "model": model,
+        "generatedAt": now,
+        "source": "biblicus_cli",
+        "webSearchUsed": False,
+        "title": title_result["mapReduce"],
+        "subtitle": subtitle_result["mapReduce"],
+        "summary": summary_result["mapReduce"],
+    }
+    next_metadata["updatedAt"] = now
+
+    metadata_attachment = _model_attachment(
+        owner_kind="reference",
+        owner_id=reference["id"],
+        role="metadata",
+        sort_key="metadata",
+        filename="metadata.json",
+        media_type="application/json",
+        content=next_metadata,
+        import_run_id=reference.get("importRunId"),
+        now=now,
+    )
+    plan = {
+        "kind": "reference.metadata.from-extracted-text",
+        "action": "update",
+        "status": "generated",
+        "reference": _reference_summary(reference),
+        "generated": {
+            "title": title_result["title"],
+            "subtitle": subtitle_result["subtitle"],
+            "summary": summary_result["summary"],
+        },
+        "records": [
+            {
+                "modelName": "ModelAttachment",
+                "action": "create",
+                "input": metadata_attachment["record"],
+                "body": metadata_attachment["body"],
+            }
+        ],
+        "warnings": [],
+    }
+    return _apply_plan_if_requested(
+        plan,
+        apply=apply,
+        actor_label=TITLE_SUBTITLE_SOURCE,
+        reason="references metadata from extracted text",
+    )
+
+
+def _run_metadata_map_reduce(
+    *,
+    output_kind: str,
+    reference: dict[str, Any],
+    context: dict[str, Any],
+    model: str,
+    max_output_tokens: int | None = None,
+) -> dict[str, Any]:
+    del max_output_tokens
+    payload = _run_biblicus_summarize_map_reduce(
+        output_kind=output_kind,
+        reference=reference,
+        context=context,
+        model=model,
+    )
+    value = _clean_text(payload.get("value"))
+    return {
+        "value": value,
+        "promptVersion": _clean_text(payload.get("prompt_version")) or BIBLICUS_SUMMARIZE_MAP_REDUCE_PROMPT_VERSION,
+        "mapReduce": payload.get("map_reduce") if isinstance(payload.get("map_reduce"), dict) else {},
+    }
+
+
+def _run_biblicus_summarize_map_reduce(
+    *,
+    output_kind: str,
+    reference: dict[str, Any],
+    context: dict[str, Any],
+    model: str,
+) -> dict[str, Any]:
+    if not BIBLICUS_ROOT.is_dir():
+        raise RuntimeError(f"Biblicus checkout not found at {BIBLICUS_ROOT}")
+    command = [
+        str(_biblicus_python_executable()),
+        "-m",
+        "biblicus",
+        "summarize",
+        "map-reduce",
+        "--task",
+        output_kind,
+        "--model",
+        model,
+        "--input-json",
+        "-",
+        "--format",
+        "json",
+    ]
+    input_payload = {
+        "extracted_text": context.get("extractedText") or "",
+        "original_title": context.get("originalTitle") or "",
+        "original_subtitle": context.get("originalSubtitle") or "",
+        "reference_title": reference.get("title") or "",
+        "source_uri": reference.get("sourceUri") or "",
+    }
+    env = dict(os.environ)
+    biblicus_src = str(BIBLICUS_ROOT / "src")
+    env["PYTHONPATH"] = (
+        f"{biblicus_src}{os.pathsep}{env['PYTHONPATH']}"
+        if env.get("PYTHONPATH")
+        else biblicus_src
+    )
+    completed = subprocess.run(
+        command,
+        cwd=BIBLICUS_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+        input=json.dumps(input_payload),
+        env=env,
+    )
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or "").strip()
+        raise RuntimeError(
+            "Biblicus summarize map-reduce command failed: "
+            f"{detail or f'exit status {completed.returncode}'}"
+        )
+    parsed = _jsonish((completed.stdout or "").strip())
+    if not isinstance(parsed, dict):
+        raise RuntimeError("Biblicus summarize map-reduce command returned invalid JSON output.")
+    if _clean_text(parsed.get("task")) != output_kind:
+        raise RuntimeError("Biblicus summarize map-reduce command returned an unexpected task payload.")
+    return parsed
+
+
+def _biblicus_python_executable() -> Path:
+    for candidate in (
+        BIBLICUS_ROOT / ".venv" / "bin" / "python",
+        BIBLICUS_ROOT / ".venv" / "bin" / "python3",
+    ):
+        if candidate.is_file():
+            return candidate
+    return Path(sys.executable)
+
+
 def estimate_tokens(text: str, *, model: str = "") -> int:
     if not text:
         return 0
@@ -3266,13 +3646,10 @@ def _resolve_source_text(reference: dict[str, Any], *, source_text: str = "", so
         for candidate in candidates:
             if candidate.exists() and candidate.is_file():
                 return candidate.read_text(encoding="utf-8", errors="replace")
-    metadata = _load_reference_metadata_payload(reference)
-    title = str((metadata.get("title") if isinstance(metadata, dict) else "") or reference.get("title") or "").strip()
-    source_uri = str(reference.get("sourceUri") or "").strip()
-    fallback = "\n".join(part for part in [title, source_uri] if part)
-    if fallback:
-        return fallback
-    raise RuntimeError("Could not resolve source text for reference; pass --source-text-file or --summary-text.")
+    raise RuntimeError(
+        "Could not resolve source text for reference. Metadata generation requires extracted text; "
+        "fetch extracted text first or pass --source-text-file."
+    )
 
 
 def _get_current_doctrine_item_by_slug(slug: str, graphql_func: Any) -> dict[str, Any] | None:

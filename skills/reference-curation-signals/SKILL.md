@@ -24,7 +24,7 @@ display copy:
 ```bash
 poetry run papyrus references title-subtitle resolve \
   --reference <reference-id> \
-  --apply
+
 ```
 
 Batch missing values:
@@ -35,7 +35,7 @@ poetry run papyrus references title-subtitle batch \
   --status all \
   --only-missing true \
   --max-count 25 \
-  --apply
+
 ```
 
 Reference intake also runs catalog enrichment by default. Disable it only for
@@ -93,7 +93,7 @@ poetry run papyrus references quality set \
   --rating 4 \
   --note "Strong source for context building." \
   --actor-label "<operator-or-agent>" \
-  --apply
+
 ```
 
 Inspect quality:
@@ -238,7 +238,7 @@ poetry run papyrus references summarize \
   --reference <reference-id> \
   --max-tokens 100 \
   --summary-text "Manual or externally generated summary." \
-  --apply
+
 ```
 
 If `--summary-text` is omitted, the command uses `OPENAI_API_KEY` and the
@@ -255,7 +255,7 @@ poetry run papyrus references summarize-batch \
   --max-count 25
 ```
 
-Add `--apply` only after reviewing the dry-run output.
+Remove `--dry-run` only after reviewing the dry-run output.
 
 Read summaries already linked to a reference:
 
@@ -296,7 +296,7 @@ available.
      --rating <1-5> \
      --note "<why this rating was chosen>" \
      --actor-label "<operator-or-agent>" \
-     --apply
+
    ```
 
 2. If the user wants the agent to classify quality from source text and the
@@ -305,7 +305,7 @@ available.
    ```bash
    poetry run papyrus references quality assess \
      --reference <reference-id> \
-     --apply
+
    ```
 
 3. Generate budgeted summaries. Use at least a short summary for indexing and
@@ -318,7 +318,7 @@ available.
      --budgets 100,200,500 \
      --only-missing true \
      --max-count 25 \
-     --apply
+
    ```
 
 4. Sync the derived vector index after summaries and extracted-text attachments
@@ -345,7 +345,7 @@ available.
   update fails or drift is suspected, run:
 
   ```bash
-  poetry run papyrus sections recount-summary --apply
+  poetry run papyrus sections recount-summary
   ```
 
 - Do not store raw source text in `Message.summary`, `Message` payloads, or

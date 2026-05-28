@@ -177,7 +177,7 @@ poetry run papyrus assignments intake-proposals \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
   --status pending \
-  --apply \
+ \
   --json
 ```
 
@@ -190,7 +190,7 @@ poetry run papyrus assignments research-intake-now \
   --corpus-key <corpus-key> \
   --research-mode source_discovery \
   --max-evidence-items 20 \
-  --apply \
+ \
   --json
 ```
 
@@ -248,7 +248,7 @@ poetry run papyrus references review-curation \
 ```
 
 `review-curation` mutates immediately through the protected GraphQL action. It
-does not use `--apply`.
+does not require an apply flag.
 
 The post-acceptance completion sequence is:
 
@@ -265,7 +265,7 @@ Use this standard curation sequence for recent references:
 
 1. `poetry run papyrus ops content inspect`
 2. `poetry run papyrus references curate-recent --corpus-key <key> --since-hours 48 --max-count 25 --dry-run --json`
-3. rerun with `--apply` after reviewing dry-run diagnostics.
+3. rerun without `--dry-run` after reviewing dry-run diagnostics.
 
 `references curate-recent` enforces identifier prepass before title/subtitle,
 summary, and quality updates. It writes a resumable manifest at
@@ -288,7 +288,7 @@ poetry run papyrus references register-catalog \
   --catalog <catalog.json> \
   --status pending \
   --ingestion-rationale "<summary, research focus, editorial mission fit>" \
-  --apply
+
 ```
 
 1. Put each source material in the correct configured Biblicus corpus. For the
@@ -399,7 +399,7 @@ poetry run papyrus references register-catalog \
   --corpus-key <corpus-key> \
   --catalog .papyrus-runs/<run-id>/<corpus-key>-prepared-catalog.json \
   --status pending \
-  --apply
+
 ```
 
 Use `prepare-catalog` for sandbox bootstrap rehearsals or legacy catalogs that
@@ -416,10 +416,10 @@ poetry run papyrus references register-catalog \
   --status rejected \
   --reason-code out_of_scope \
   --note "Outside the publication mission." \
-  --apply
+
 ```
 
-`register-catalog` is dry-run by default. With `--apply`, it writes a
+`register-catalog` applies by default. With `--dry-run`, it only previews a
 `KnowledgeImportRun`, sanitized `KnowledgeRawPayload`, `Reference`,
 `ReferenceAttachment`, curation `Message`, `curation.reference-intake`
 `Assignment`, and audit/workflow `SemanticRelation` rows. Pending references get
@@ -435,7 +435,7 @@ poetry run papyrus assignments intake-proposals \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
   --status pending \
-  --apply
+
 ```
 
 Use `assignments research-packets --assignment <assignment-id>` only when you
@@ -456,7 +456,7 @@ poetry run papyrus references create-accession-assignments \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
   --status pending \
-  --apply
+
 
 poetry run papyrus references accession-now \
   --reference <reference-id> \
@@ -471,7 +471,7 @@ poetry run papyrus references attach-extracted-text \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
   --max-count 10 \
-  --apply
+
 
 poetry run papyrus references export-analysis-manifest \
   --config corpora/papyrus-steering.yml \
@@ -498,7 +498,7 @@ or CLI users to have long-lived AWS credentials just to write `ModelAttachment`
 objects. The client reserves a slot through GraphQL, uploads to the short-lived
 signed URL, then completes the attachment through GraphQL.
 For sandbox rebuilds, use `content delete all --yes --delete-attachments` or
-`newsroom prune-attachments --apply` to clean those payloads. Never use those
+`newsroom prune-attachments` to clean those payloads. Never use those
 maintenance commands as a substitute for corpus accession cleanup under
 `corpora/`.
 

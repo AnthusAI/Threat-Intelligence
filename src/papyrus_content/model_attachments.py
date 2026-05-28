@@ -131,11 +131,13 @@ def upload_attachment_body(
         ) from error
     completed = client.complete_model_attachment_upload(slot["uploadId"], attachment)
     if isinstance(completed, dict):
+        completed_status = str(completed.get("status") or "").strip().lower()
+        normalized_status = "active" if completed_status in {"", "ready"} else completed_status
         return {
             **attachment,
             **completed,
             "storagePath": slot.get("storagePath") or attachment.get("storagePath"),
-            "status": completed.get("status") or "active",
+            "status": normalized_status,
         }
     return {
         **attachment,

@@ -29,7 +29,7 @@ from .env import PAPYRUS_ROOT
 from .graphql_authoring import create_authoring_client
 from .ids import hash_short, knowledge_corpus_id, safe_id
 from .model_attachments import attachment_record, build_model_payload_attachment, upload_attachment_body
-from .options import normalize_positive_integer, normalize_string, parse_boolean_option, parse_options
+from .options import normalize_positive_integer, normalize_string, parse_boolean_option, parse_options, resolve_mutation_apply
 from .records import apply_record_changes, build_record_changes_tolerating_optional_models
 from .newsroom_summary import update_newsroom_summary_after_analysis_import, update_newsroom_summary_after_assignment_creates
 from .relations_commands import print_category_import_summary
@@ -161,7 +161,7 @@ def analysis_entity_graph_preflight(flags: list[str]) -> None:
             None
             if len(blockers) == 0
             else (
-                f"poetry run papyrus analysis run-now --profile {profile_key} --override extractionSnapshot=<extractor:snapshot_id> --apply"
+                f"poetry run papyrus analysis run-now --profile {profile_key} --override extractionSnapshot=<extractor:snapshot_id>"
                 if "unresolved_extraction_snapshot" in blockers
                 else "poetry run papyrus analysis graph-artifacts --json"
             )
@@ -206,7 +206,7 @@ def analysis_publish_graph_snapshot(flags: list[str]) -> None:
         raise ValueError("analysis publish-graph-snapshot requires --corpus-key <key>.")
     if not snapshot_ref:
         raise ValueError("analysis publish-graph-snapshot requires --snapshot <extractor_id:snapshot_id>.")
-    apply = bool(options.get("apply"))
+    apply = resolve_mutation_apply(options, "analysis publish-graph-snapshot")
     result = _analysis_publish_graph_snapshot_internal(
         corpus_key=corpus_key,
         snapshot_ref=snapshot_ref,
@@ -259,8 +259,9 @@ def analysis_create_reindex_assignment(flags: list[str]) -> None:
     )
     for change in assignment_changes:
         print(f"{change['action']}\t{change['modelName']}\t{change['expected']['id']}")
-    if not options.get("apply"):
-        print("analysis\tcreate-reindex-assignment\tapply\tskipped\tpass --apply to write Assignment records")
+    apply = resolve_mutation_apply(options, "analysis create-reindex-assignment")
+    if not apply:
+        print("analysis\tcreate-reindex-assignment\tapply\tskipped\tuse --dry-run to preview without writes")
         return
     apply_record_changes(client, assignment_changes)
     update_newsroom_summary_after_assignment_creates(
@@ -455,7 +456,7 @@ def analysis_import_graph_artifact(flags: list[str]) -> None:
     import_run_id = normalize_string(options.get("import-run"))
     if not import_run_id:
         raise ValueError("analysis import-graph-artifact requires --import-run <id>.")
-    apply = bool(options.get("apply"))
+    apply = resolve_mutation_apply(options, "analysis import-graph-artifact")
     result_payload = _analysis_import_graph_artifact_internal(import_run_id, options=options, apply=apply)
     if options.get("json"):
         include_changes = parse_boolean_option(options.get("include-changes"), False, "--include-changes")
@@ -519,7 +520,7 @@ def _analysis_import_graph_artifact_internal(
         if "Graph export attachment was not found" in message:
             raise ValueError(
                 f"Graph import failed: missing graph-export attachment for {import_run_id}. "
-                "Re-run analysis publish-graph-snapshot --apply for the same snapshot."
+                "Re-run analysis publish-graph-snapshot for the same snapshot."
             ) from error
         raise
     changed_records = sum(1 for change in result["changes"] if change.get("action") != "noop")
@@ -569,7 +570,7 @@ def _analysis_import_graph_artifact_internal(
         "fastApply": fast_apply,
         "checkpointPath": str(checkpoint_path),
         "resumedFrom": start_index if start_index > 0 else None,
-        "next": f"poetry run papyrus analysis import-graph-artifact --import-run {import_run_id} --apply",
+        "next": f"poetry run papyrus analysis import-graph-artifact --import-run {import_run_id}",
     }
     action_counts, model_counts = _summarize_change_counts(result["changes"])
     payload["actionCounts"] = action_counts
@@ -767,10 +768,10 @@ def analysis_doctor_entity_graph(flags: list[str]) -> None:
         "unresolvedReferenceItemIds": unresolved_reference_item_ids[:100],
         "query": diagnostics,
         "next": (
-            "poetry run papyrus analysis run-now --profile reference-entity-graph --apply "
+            "poetry run papyrus analysis run-now --profile reference-entity-graph "
             if not rows
             else (
-                "poetry run papyrus analysis import-graph-artifact --import-run <id> --apply"
+                "poetry run papyrus analysis import-graph-artifact --import-run <id>"
                 if rows and not graph_semantic_relations
                 else None
             )
@@ -903,7 +904,7 @@ def _analysis_publish_graph_snapshot_internal(
         "next": (
             None
             if apply
-            else f"poetry run papyrus analysis publish-graph-snapshot --corpus-key {corpus_key} --snapshot {snapshot_ref} --apply"
+            else f"poetry run papyrus analysis publish-graph-snapshot --corpus-key {corpus_key} --snapshot {snapshot_ref}"
         ),
     }
 

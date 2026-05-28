@@ -158,7 +158,7 @@ duplicate extracted text into a second canonical location.
      --corpus-key <corpus-key> \
      --catalog .papyrus-runs/<run-id>/<corpus-key>-prepared-catalog.json \
      --status pending \
-     --apply
+
    ```
 
 6. Curate the initial evidence set. Pending and rejected references remain
@@ -186,7 +186,7 @@ duplicate extracted text into a second canonical location.
      --config <steering.yml> \
      --corpus-key <corpus-key> \
      --status pending \
-     --apply
+
 
    poetry run papyrus references accession-now \
      --reference <reference-id> \
@@ -201,7 +201,7 @@ duplicate extracted text into a second canonical location.
      --config <steering.yml> \
      --corpus-key <corpus-key> \
      --max-count 10 \
-     --apply
+
    ```
 
 8. Export the accepted-only analysis manifest for Biblicus.
@@ -267,7 +267,7 @@ poetry run papyrus analysis create-reindex-assignment \
   --profile global-topic-granularity \
   --corpus-key <corpus-key> \
   --override targetTopicRange=10:20 \
-  --apply
+
 ```
 
 Then execute from the claimed assignment metadata:
@@ -303,14 +303,14 @@ enough. Draft edits do not mutate the current accepted set until promotion:
 poetry run papyrus knowledge topics draft-create \
   --from-category-set <current-category-set-id> \
   --title "Initial topic sculpting pass" \
-  --apply
+
 
 poetry run papyrus knowledge topics draft-add-topic \
   --category-set <draft-category-set-id> \
   --display-name "<expected topic>" \
   --short-title "<one-or-two-word label>" \
   --subtitle "<short description>" \
-  --apply
+
 ```
 
 Manually label accepted references as authoritative examples for draft or
@@ -322,7 +322,7 @@ poetry run papyrus references label \
   --category <category-key-or-lineage-id> \
   --category-set <draft-or-current-category-set-id> \
   --note "Why this accepted reference is a good seed example." \
-  --apply
+
 ```
 
 Use authoritative labels to build the strict Biblicus seed manifest for
@@ -432,7 +432,7 @@ repair work. Dry-run is default:
 
 ```bash
 poetry run papyrus sections prune-attachments
-poetry run papyrus sections prune-attachments --apply
+poetry run papyrus sections prune-attachments
 ```
 
 `prune-attachments` removes two classes of maintenance garbage: attachment

@@ -51,8 +51,9 @@ def build_reference_analysis_manifest(
         )
         raise ValueError(
             f"Cannot export analysis manifest: {len(missing_text)} accepted current references in {corpus_id} "
-            f"lack snapshot-backed extracted_text attachments. Run references source-status, "
-            f"references extract-text-now, or references attach-extracted-text first. Examples: {examples}"
+            f"lack extracted_text attachments. Run references source-status and then "
+            f"references fetch-url-text, references extract-text-now, or references attach-extracted-text. "
+            f"Examples: {examples}"
         )
     return {
         "schema_version": 1,

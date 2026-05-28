@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 from .catalog import catalog_items
 from .env import PAPYRUS_ROOT, graphql_endpoint, storage_bucket_from_amplify_outputs
 from .ids import knowledge_corpus_id
+from .options import parse_boolean_option
 from .reference_policy import normalize_reference_curation_status
 from .source_readiness import SOURCE_READINESS_STATES, text_storage_path_for_reference
 
@@ -184,7 +185,7 @@ def build_corpus_sync_plan(corpus: dict[str, Any], *, direction: str, options: d
         args.extend(["--exclude", "analysis/*", "--exclude", "*/analysis/*"])
     if options.get("delete"):
         args.append("--delete")
-    dry_run = options.get("dry-run", True) and not options.get("apply")
+    dry_run = parse_boolean_option(options.get("dry-run"), default=False, label="--dry-run")
     if dry_run:
         args.append("--dryrun")
     return {
@@ -248,7 +249,7 @@ def next_corpus_bootstrap_command(status: dict[str, Any]) -> str:
     if status["graph"]["references"]["total"] != status["s3"]["items"]:
         return (
             f"poetry run papyrus references register-catalog --config <steering.yml> "
-            f"--corpus-key {status['key']} --catalog {status['local']['path']} --apply"
+            f"--corpus-key {status['key']} --catalog {status['local']['path']}"
         )
     if not status["readiness"]["readyForAcceptedAnalysis"]:
         return (
@@ -257,7 +258,7 @@ def next_corpus_bootstrap_command(status: dict[str, Any]) -> str:
         )
     return (
         "poetry run papyrus analysis create-reindex-assignment --config <steering.yml> "
-        f"--corpus-key {status['key']} --profile <profile> --apply"
+        f"--corpus-key {status['key']} --profile <profile>"
     )
 
 

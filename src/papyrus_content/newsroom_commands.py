@@ -36,7 +36,7 @@ from .newsroom_summary import (
     print_newsroom_summary_recount,
     read_json_model_payload,
 )
-from .options import normalize_non_negative_integer, normalize_string, parse_options
+from .options import normalize_non_negative_integer, normalize_string, parse_options, resolve_mutation_apply
 from .records import build_record_change_from_current, is_missing_graphql_model_error
 from .relations_commands import print_category_import_summary
 
@@ -67,6 +67,7 @@ mutation UpdateProcedureVersion($input: UpdateProcedureVersionInput!) {
 
 def newsroom_recount_summary(flags: list[str]) -> None:
     options = parse_options(flags)
+    apply = resolve_mutation_apply(options, "sections recount-summary")
     client, _ = create_authoring_client()
     now = _utc_now()
     corpora = client.list_records("KnowledgeCorpus")
@@ -85,7 +86,7 @@ def newsroom_recount_summary(flags: list[str]) -> None:
             raise ValueError(
                 "newsroom recount-summary failed because at least one Message has null status. "
                 "Run `poetry run papyrus sections repair-message-status` (dry-run) and then "
-                "`poetry run papyrus sections repair-message-status --apply`."
+                "`poetry run papyrus sections repair-message-status`."
             ) from error
         raise
     model_attachments = client.safe_list_records("ModelAttachment")
@@ -171,7 +172,7 @@ def newsroom_recount_summary(flags: list[str]) -> None:
                 "payload": payload,
             },
         )
-    if not options.get("apply"):
+    if not apply:
         if options.get("json"):
             print(
                 json.dumps(
@@ -187,7 +188,7 @@ def newsroom_recount_summary(flags: list[str]) -> None:
                 )
             )
         else:
-            print("newsroom\trecount-summary\tapply\tskipped\tpass --apply to write KnowledgeRawPayload snapshot")
+            print("newsroom\trecount-summary\tapply\tskipped\tuse --dry-run to preview without writes")
         return
     client.upsert("KnowledgeRawPayload", expected)
     upload_attachment_body(client, summary_attachment["attachment"], summary_attachment["body"])
@@ -212,7 +213,7 @@ def newsroom_recount_summary(flags: list[str]) -> None:
 
 def newsroom_repair_message_status(flags: list[str]) -> None:
     options = parse_options(flags)
-    apply = bool(options.get("apply"))
+    apply = resolve_mutation_apply(options, "sections repair-message-status")
     status_value = normalize_string(options.get("status")) or "active"
     max_scan_option = normalize_non_negative_integer(options.get("max-scan"), "--max-scan")
     max_scan = max_scan_option if max_scan_option is not None else (None if apply else 2000)
@@ -335,9 +336,7 @@ def newsroom_repair_message_status(flags: list[str]) -> None:
                     "truncated": truncated,
                     "maxScan": max_scan,
                     "sample": candidates[:20],
-                    "next": None
-                    if apply
-                    else f"poetry run papyrus sections repair-message-status --status {status_value} --apply",
+                    "next": None if apply else f"poetry run papyrus sections repair-message-status --status {status_value}",
                 },
                 indent=2,
             )
@@ -360,12 +359,13 @@ def newsroom_repair_message_status(flags: list[str]) -> None:
     if not apply:
         print(
             "newsroom\trepair-message-status\tnext\t"
-            f"poetry run papyrus sections repair-message-status --status {status_value} --apply"
+            f"poetry run papyrus sections repair-message-status --status {status_value}"
         )
 
 
 def newsroom_backfill_feed_fields(flags: list[str]) -> None:
     options = parse_options(flags)
+    apply = resolve_mutation_apply(options, "sections backfill-feed-fields")
     client, _ = create_authoring_client()
     models = ["Message", "Assignment", "Reference", "SemanticNode", "SemanticRelation"]
     changes: list[dict[str, Any]] = []
@@ -384,8 +384,8 @@ def newsroom_backfill_feed_fields(flags: list[str]) -> None:
         )
     if len(changes) > 20:
         print(f"newsroom\tbackfill-feed-fields\tpreview-truncated\t{len(changes) - 20} more")
-    if not options.get("apply"):
-        print("newsroom\tbackfill-feed-fields\tapply\tskipped\tpass --apply to write feed fields")
+    if not apply:
+        print("newsroom\tbackfill-feed-fields\tapply\tskipped\tuse --dry-run to preview without writes")
         return
     for change in changes:
         client.upsert(change["modelName"], change["expected"])
@@ -395,7 +395,7 @@ def newsroom_backfill_feed_fields(flags: list[str]) -> None:
 def newsroom_backfill_operational_indexes(flags: list[str]) -> None:
     options = parse_options(flags)
     started_at = datetime.now(timezone.utc)
-    apply = bool(options.get("apply"))
+    apply = resolve_mutation_apply(options, "sections backfill-operational-indexes")
     client, _ = create_authoring_client()
     _assert_operational_index_schema_ready(client)
     assignments = client.list_records("Assignment")
@@ -437,9 +437,9 @@ def newsroom_backfill_operational_indexes(flags: list[str]) -> None:
         "changedRecords": len(changes),
         "elapsedMs": elapsed_ms,
         "next": (
-            "poetry run papyrus sections recount-summary --apply"
+            "poetry run papyrus sections recount-summary"
             if apply
-            else "poetry run papyrus sections backfill-operational-indexes --apply"
+            else "poetry run papyrus sections backfill-operational-indexes"
         ),
     }
     if options.get("json"):
@@ -496,7 +496,7 @@ def newsroom_import_doctrine(flags: list[str]) -> None:
 
 def newsroom_seed_required_procedures(flags: list[str]) -> None:
     options = parse_options(flags)
-    apply = bool(options.get("apply"))
+    apply = resolve_mutation_apply(options, "procedures seed-required")
     seeds = _required_procedure_seed_specs()
     payload = {
         "ok": True,
@@ -525,7 +525,7 @@ def newsroom_seed_required_procedures(flags: list[str]) -> None:
                 )
             print(
                 "procedures\tseed-required\tapply\tskipped\t"
-                "pass --apply to write ProcedureDefinition/ProcedureVersion records"
+                "use --dry-run to preview without writes"
             )
         return
 
@@ -635,6 +635,8 @@ def _required_procedure_seed_specs() -> list[dict[str, Any]]:
         "newsroom.research.explorer": PAPYRUS_ROOT / "procedures" / "newsroom" / "research_explorer.tac",
         "newsroom.reporting.context": PAPYRUS_ROOT / "procedures" / "newsroom" / "reporter.tac",
         "newsroom.reference.summarization": PAPYRUS_ROOT / "procedures" / "newsroom" / "reference_summarization.tac",
+        "ontology.relationship-explainer": PAPYRUS_ROOT / "procedures" / "newsroom" / "ontology_relationship_explainer.tac",
+        "ontology.concept-profiler": PAPYRUS_ROOT / "procedures" / "newsroom" / "ontology_concept_profiler.tac",
     }
     details_by_key = {
         "newsroom.research.explorer": {
@@ -709,6 +711,46 @@ def _required_procedure_seed_specs() -> list[dict[str, Any]]:
                 "model": "gpt-5.4-mini",
             },
         },
+        "ontology.relationship-explainer": {
+            "title": "Ontology Relationship Explainer",
+            "category": "ontology",
+            "description": "Explains semantic relations using lineage context and evidence payloads.",
+            "versionLabel": "starter",
+            "parameterSchema": {
+                "type": "object",
+                "required": ["relation_json"],
+                "properties": {
+                    "relation_json": {"type": "object"},
+                    "relation_context_json": {"type": "object"},
+                    "model": {"type": "string"},
+                    "temperature": {"type": "number"},
+                },
+            },
+            "defaults": {
+                "model": "gpt-5.4-mini",
+                "temperature": 0,
+            },
+        },
+        "ontology.concept-profiler": {
+            "title": "Ontology Concept Profiler",
+            "category": "ontology",
+            "description": "Builds concept profiles from ontology context and relation explanations.",
+            "versionLabel": "starter",
+            "parameterSchema": {
+                "type": "object",
+                "required": ["concept_json"],
+                "properties": {
+                    "concept_json": {"type": "object"},
+                    "concept_context_json": {"type": "object"},
+                    "model": {"type": "string"},
+                    "temperature": {"type": "number"},
+                },
+            },
+            "defaults": {
+                "model": "gpt-5.4-mini",
+                "temperature": 0,
+            },
+        },
     }
     seeds: list[dict[str, Any]] = []
     for procedure_key in config["keys"]:
@@ -781,7 +823,7 @@ def _upload_model_attachment_to_s3(attachment: dict[str, Any], body: bytes) -> N
 
 def newsroom_prune_attachments(flags: list[str]) -> None:
     options = parse_options(flags)
-    apply = bool(options.get("apply"))
+    apply = resolve_mutation_apply(options, "sections prune-attachments")
     bucket = normalize_string(options.get("bucket"))
     prefix = normalize_string(options.get("prefix")) or "newsroom/payloads/"
     client, _ = create_authoring_client()
@@ -858,13 +900,13 @@ def newsroom_prune_attachments(flags: list[str]) -> None:
                         "orphanStorageObjects": len(orphan_storage_paths),
                     },
                     "deleted": deleted,
-                    "next": None if apply else "poetry run papyrus sections prune-attachments --apply",
+                    "next": None if apply else "poetry run papyrus sections prune-attachments",
                 },
                 indent=2,
             )
         )
     elif not apply:
-        print("attachment-prune\tnext\tpoetry run papyrus sections prune-attachments --apply")
+        print("attachment-prune\tnext\tpoetry run papyrus sections prune-attachments")
 
 
 def _newsroom_feed_patch_for(model_name: str, record: dict[str, Any]) -> dict[str, Any]:

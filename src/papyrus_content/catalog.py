@@ -347,7 +347,7 @@ def reference_attachment_records(item: dict[str, Any], reference: dict[str, Any]
             _record(
                 "ReferenceAttachment",
                 {
-                    "id": f"reference-attachment-{hash_short([f'reference#{reference['id']}', 'source', '001-source', reference.get('storagePath') or '', reference.get('sourceUri') or ''])}",
+                    "id": f"reference-attachment-{hash_short(['reference#' + str(reference['id']), 'source', '001-source', reference.get('storagePath') or '', reference.get('sourceUri') or ''])}",
                     "referenceId": reference["id"],
                     "referenceLineageId": reference["lineageId"],
                     "referenceVersionNumber": reference.get("versionNumber"),
