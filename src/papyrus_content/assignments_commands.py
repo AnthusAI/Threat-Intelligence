@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 
 from .assignments_workflow import (
+    apply_reporting_packet,
     apply_research_packet,
     backfill_section_indexes,
     build_assignment_context,
     copywriting_output,
+    create_reporting_assignment,
     create_research_assignment,
     intake_research_packet_proposals,
     list_assignment_events,
@@ -17,12 +19,13 @@ from .assignments_workflow import (
     process_assignment_queue,
     review_reporting_packet,
     run_copywriting_assignment,
+    run_reporting_assignment,
     run_research_assignment,
     run_story_cycle,
     story_cycle_output,
 )
 from .graphql_authoring import create_authoring_client
-from .options import parse_options
+from .options import parse_options, resolve_mutation_apply
 
 
 def assignments_list(flags: list[str]) -> None:
@@ -60,14 +63,34 @@ def assignments_create_research(flags: list[str]) -> None:
         print(json.dumps({"ok": True, **result}, indent=2))
 
 
+def assignments_create_reporting(flags: list[str]) -> None:
+    options = parse_options(flags)
+    client, _ = create_authoring_client()
+    result = create_reporting_assignment(client, options)
+    if options.get("json"):
+        print(json.dumps({"ok": True, **result}, indent=2))
+
+
 def assignments_run_research(flags: list[str]) -> None:
     run_research_assignment(flags)
+
+
+def assignments_run_reporting(flags: list[str]) -> None:
+    run_reporting_assignment(flags)
 
 
 def assignments_apply_research_packet(flags: list[str]) -> None:
     options = parse_options(flags)
     client, _ = create_authoring_client()
     result = apply_research_packet(client, options)
+    if options.get("json"):
+        print(json.dumps({"ok": True, **result}, indent=2))
+
+
+def assignments_apply_reporting_packet(flags: list[str]) -> None:
+    options = parse_options(flags)
+    client, _ = create_authoring_client()
+    result = apply_reporting_packet(client, options)
     if options.get("json"):
         print(json.dumps({"ok": True, **result}, indent=2))
 
@@ -86,6 +109,7 @@ def assignments_intake_proposals(flags: list[str]) -> None:
 
 def assignments_research_intake_now(flags: list[str]) -> None:
     options = parse_options(flags)
+    apply = resolve_mutation_apply(options, "assignments research-intake-now")
     if not options.get("assignment"):
         raise ValueError("assignments research-intake-now requires --assignment <id>.")
     if not options.get("config"):
@@ -105,8 +129,8 @@ def assignments_research_intake_now(flags: list[str]) -> None:
     run_research_assignment(research_flags)
     client, _ = create_authoring_client()
     apply_options = dict(options)
-    apply_options["apply"] = options.get("apply")
-    apply_result = apply_research_packet(client, apply_options) if options.get("apply") else None
+    apply_options["apply"] = apply
+    apply_result = apply_research_packet(client, apply_options) if apply else None
     intake_result = intake_research_packet_proposals(client, options)
     if options.get("json"):
         print(json.dumps({"ok": True, "applyResult": apply_result, **intake_result}, indent=2))

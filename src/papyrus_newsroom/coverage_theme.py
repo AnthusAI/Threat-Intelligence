@@ -380,9 +380,9 @@ def build_signal_report_records(report: dict[str, Any]) -> list[dict[str, Any]]:
         "messageDomain": "edition_planning",
         "status": "active",
         "summary": summary,
-        "source": "papyrus-newsroom signals trend-report",
+        "source": "papyrus knowledge signals trend-report",
         "importRunId": run_id,
-        "authorLabel": "papyrus-newsroom",
+        "authorLabel": "papyrus",
         "newsroomFeedKey": "message#edition_signal_report",
         "createdAt": now,
         "updatedAt": now,
@@ -568,7 +568,7 @@ def coverage_theme_run(
                         "code": "cloud_procedure_failed",
                         "message": str(error),
                         "alias": "story-cycle.research",
-                        "remediation": "Run npm run seed:amplify to preload standard procedures if the required cloud procedure is missing or stale.",
+                        "remediation": "Run poetry run papyrus procedures seed-required to preload standard procedures if the required cloud procedure is missing or stale.",
                     },
                 )
     if through in {"research", "reporting"}:
@@ -822,7 +822,7 @@ def build_cloud_research_packet_records(
     cloud_run = _start_cloud_procedure_run(
         client=client,
         alias="story-cycle.research",
-        actor_label="papyrus-newsroom coverage-themes run",
+        actor_label="papyrus coverage-themes run",
         title=f"Run story-cycle research for {metadata.get('sectionTitle') or assignment.get('sectionKey')}",
         summary=f"Coverage Theme research for {topic}.",
         input_payload={
@@ -844,7 +844,7 @@ def build_cloud_research_packet_records(
     if not isinstance(packet, dict):
         raise ValueError(
             f"Cloud procedure output for {assignment['id']} is missing research_packet. "
-            "Run npm run seed:amplify if procedure seeds are stale."
+            "Run poetry run papyrus procedures seed-required if procedure seeds are stale."
         )
     normalized_packet = normalize_story_cycle_research_packet(
         packet,
@@ -881,7 +881,7 @@ def build_cloud_reporting_packet_records(
     cloud_run = _start_cloud_procedure_run(
         client=client,
         alias="story-cycle.reporting",
-        actor_label="papyrus-newsroom coverage-themes run",
+        actor_label="papyrus coverage-themes run",
         title=f"Run story-cycle reporting for {metadata.get('sectionTitle') or assignment.get('sectionKey')}",
         summary=f"Coverage Theme reporting context for {topic}.",
         input_payload={
@@ -902,7 +902,7 @@ def build_cloud_reporting_packet_records(
     if not isinstance(packet, dict):
         raise ValueError(
             f"Cloud procedure output for {assignment['id']} is missing reporting_context_packet. "
-            "Run npm run seed:amplify if procedure seeds are stale."
+            "Run poetry run papyrus procedures seed-required if procedure seeds are stale."
         )
     normalized_packet = normalize_story_cycle_reporting_packet(
         packet,
@@ -928,7 +928,7 @@ def _cloud_procedure_error_payload(alias: str, assignment: dict[str, Any], error
         "message": str(error),
         "alias": alias,
         "assignmentId": assignment.get("id"),
-        "remediation": "Run npm run seed:amplify to preload standard procedures if the required cloud procedure is missing or stale.",
+        "remediation": "Run poetry run papyrus procedures seed-required to preload standard procedures if the required cloud procedure is missing or stale.",
     }
 
 
@@ -1125,7 +1125,7 @@ def build_research_packet_records(
         "degraded": degraded,
         "fallbackReason": "deterministic_python_planner" if degraded else None,
     }
-    message = packet_message(message_id, "research_packet", packet["summary"], "papyrus-newsroom coverage-themes run", assignment, now)
+    message = packet_message(message_id, "research_packet", packet["summary"], "papyrus coverage-themes run", assignment, now)
     records = [
         _record("Message", message),
         _attachment_record(message_id, "message_body", "message", "message.txt", "text/plain", _research_packet_body(packet), assignment.get("importRunId"), now),
@@ -1170,7 +1170,7 @@ def build_research_packet_records_from_packet(
     refresh_packets: bool,
 ) -> dict[str, Any]:
     message_id = story_cycle_packet_message_id(assignment, "research_packet")
-    message = packet_message(message_id, "research_packet", packet["summary"], "papyrus-newsroom coverage-themes run", assignment, now)
+    message = packet_message(message_id, "research_packet", packet["summary"], "papyrus coverage-themes run", assignment, now)
     records = [
         _record("Message", message),
         _attachment_record(message_id, "message_body", "message", "message.txt", "text/plain", _research_packet_body(packet), assignment.get("importRunId"), now),
@@ -1262,7 +1262,7 @@ def build_reporting_packet_records(
         "degraded": degraded,
         "fallbackReason": "deterministic_python_planner" if degraded else None,
     }
-    message = packet_message(message_id, "reporting_context_packet", packet["summary"], "papyrus-newsroom coverage-themes run", assignment, now)
+    message = packet_message(message_id, "reporting_context_packet", packet["summary"], "papyrus coverage-themes run", assignment, now)
     records = [
         _record("Message", message),
         _attachment_record(message_id, "message_body", "message", "message.txt", "text/plain", _reporting_packet_body(packet), assignment.get("importRunId"), now),
@@ -1323,7 +1323,7 @@ def build_reporting_packet_records_from_packet(
     refresh_packets: bool,
 ) -> dict[str, Any]:
     message_id = story_cycle_packet_message_id(assignment, "reporting_context_packet")
-    message = packet_message(message_id, "reporting_context_packet", packet["summary"], "papyrus-newsroom coverage-themes run", assignment, now)
+    message = packet_message(message_id, "reporting_context_packet", packet["summary"], "papyrus coverage-themes run", assignment, now)
     records = [
         _record("Message", message),
         _attachment_record(message_id, "message_body", "message", "message.txt", "text/plain", _reporting_packet_body(packet), assignment.get("importRunId"), now),
@@ -1701,7 +1701,7 @@ def edition_record(*, date: str, section_budgets: dict[str, int], run_id: str, n
         "generatedAt": now,
         "sectionBudgets": [{"sectionKey": key, "slots": value} for key, value in sorted(section_budgets.items())],
         "publicReaderVisible": False,
-        "createdBy": "papyrus-newsroom editions plan",
+        "createdBy": "papyrus editions plan",
     }
     record = {
         "id": f"{lineage_id}-v1",
@@ -1710,7 +1710,7 @@ def edition_record(*, date: str, section_budgets: dict[str, int], run_id: str, n
         "previousVersionId": None,
         "versionState": "current",
         "versionCreatedAt": now,
-        "versionCreatedBy": "papyrus-newsroom",
+        "versionCreatedBy": "papyrus",
         "changeReason": "edition-intelligence-planning",
         "slug": slug,
         "title": f"Edition Planning: {date}",
@@ -1743,7 +1743,7 @@ def coverage_node_record(
         "previousVersionId": None,
         "versionState": "current",
         "versionCreatedAt": now,
-        "versionCreatedBy": "papyrus-newsroom",
+        "versionCreatedBy": "papyrus",
         "changeReason": change_reason,
         "nodeKey": coverage_key,
         "nodeKind": "coverageQuestion",
@@ -1773,7 +1773,7 @@ def lane_node_record(node_key: str, display_name: str, alias: str, now: str) -> 
         "previousVersionId": None,
         "versionState": "current",
         "versionCreatedAt": now,
-        "versionCreatedBy": "papyrus-newsroom",
+        "versionCreatedBy": "papyrus",
         "changeReason": "coverage-theme-lane-seed",
         "nodeKey": node_key,
         "nodeKind": "editorialForm",
@@ -1845,7 +1845,7 @@ def research_assignment_record(**kwargs: Any) -> dict[str, Any]:
         "sectionQueueStatusKey": f"{section['id']}#{queue_key}#open",
         "primaryFocusCategoryKey": (category or {}).get("categoryKey") or category_key,
         "topicScopeCategoryKeys": [value for value in [(category or {}).get("categoryKey") or category_key] if value],
-        "createdBy": "papyrus-newsroom",
+        "createdBy": "papyrus",
         "createdAt": now,
         "updatedAt": now,
         "newsroomFeedKey": "assignment#open",
@@ -1922,7 +1922,7 @@ def reporting_assignment_record(**kwargs: Any) -> dict[str, Any]:
         "sectionQueueStatusKey": f"{section['id']}#{queue_key}#open",
         "primaryFocusCategoryKey": (category or {}).get("categoryKey") or category_key,
         "topicScopeCategoryKeys": [value for value in [(category or {}).get("categoryKey") or category_key] if value],
-        "createdBy": "papyrus-newsroom",
+        "createdBy": "papyrus",
         "createdAt": now,
         "updatedAt": now,
         "newsroomFeedKey": "assignment#open",
@@ -1979,7 +1979,7 @@ def assignment_metadata(**kwargs: Any) -> dict[str, Any]:
         "signalWhyNow": signal.get("whyNow"),
         "expectedOutput": kwargs["expected_output"],
         "publicReaderVisible": False,
-        "createdBy": "papyrus-newsroom coverage-themes run",
+        "createdBy": "papyrus coverage-themes run",
     }
 
 
@@ -2008,7 +2008,7 @@ def packet_message(message_id: str, kind: str, summary: str, source: str, assign
         "summary": summary,
         "source": source,
         "importRunId": assignment.get("importRunId"),
-        "authorLabel": "papyrus-newsroom",
+        "authorLabel": "papyrus",
         "newsroomFeedKey": f"message#{kind}",
         "createdAt": now,
         "updatedAt": now,
@@ -2786,12 +2786,14 @@ def _graphql(query: str, variables: dict[str, Any]) -> dict[str, Any]:
     if not token:
         raise RuntimeError("PAPYRUS_GRAPHQL_JWT is required")
     auth_prefix = os.environ.get("PAPYRUS_GRAPHQL_AUTH_PREFIX", "PapyrusJwt").strip()
+    sanitized_token = re.sub(r"^Bearer\s+", "", token, flags=re.IGNORECASE)
+    auth_header = f"{auth_prefix} {sanitized_token}" if auth_prefix else sanitized_token
     request = urllib.request.Request(
         endpoint,
         data=json.dumps({"query": query, "variables": variables}).encode("utf-8"),
         headers={
             "Content-Type": "application/json",
-            "Authorization": f"{auth_prefix} {re.sub(r'^Bearer\\s+', '', token, flags=re.IGNORECASE)}" if auth_prefix else token,
+            "Authorization": auth_header,
         },
         method="POST",
     )

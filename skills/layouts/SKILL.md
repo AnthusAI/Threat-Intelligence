@@ -69,22 +69,22 @@ npm run auth:refresh-jwt -- --write-env .env
 Basic CLI checks:
 
 ```bash
-npm run content -- content inspect
-npm run content -- content list articles
-npm run content -- content diff edition current
+poetry run papyrus ops content inspect
+poetry run papyrus ops content list articles
+poetry run papyrus ops content diff edition current
 ```
 
 Sync only after reviewing the diff:
 
 ```bash
-npm run content -- content sync edition current
+poetry run papyrus ops content sync edition current
 ```
 
 Use the CLI workflow this way:
 
-1. Run `npm run content -- content diff edition current`.
+1. Run `poetry run papyrus ops content diff edition current`.
 2. Confirm the diff changes only the intended records.
-3. Run `npm run content -- content sync edition current`.
+3. Run `poetry run papyrus ops content sync edition current`.
 4. Verify the deployed site or GraphQL-backed local app.
 
 If the task is only to inspect the live layout, do not sync. Query or diff
@@ -760,7 +760,7 @@ solver before trying to work around this in content. The expected rule is:
 - Do not infer lead typography from `index === 0`.
 
 For the current GraphQL edition, inspect the live `Edition.layoutPlan` before
-changing it. Use `npm run content -- content diff edition current` before
+changing it. Use `poetry run papyrus ops content diff edition current` before
 syncing.
 
 ### Shared Continuation Page

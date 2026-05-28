@@ -150,7 +150,7 @@ and `proposed_references`; do not put web `evidence_candidate_id` values in
 Coding agents can inspect live assignment packets with:
 
 ```bash
-npm run content -- assignments research-packets --assignment <assignment-id>
+poetry run papyrus assignments research-packets --assignment <assignment-id>
 ```
 
 ## Implementation Notes

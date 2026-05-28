@@ -12,7 +12,7 @@ from typing import Any
 
 from .env import PAPYRUS_ROOT, storage_bucket_from_amplify_outputs
 from .graphql_authoring import PapyrusGraphQLAuthoringClient, create_authoring_client
-from .options import normalize_string, parse_boolean_option, parse_options
+from .options import normalize_string, parse_boolean_option, parse_options, resolve_mutation_apply
 from .records import apply_record_changes, build_record_changes_targeted_by_id
 
 SEED_CONTENT_PATH = PAPYRUS_ROOT / "amplify" / "seed" / "seed-edition-content.json"
@@ -20,7 +20,7 @@ SEED_CONTENT_PATH = PAPYRUS_ROOT / "amplify" / "seed" / "seed-edition-content.js
 
 def seed_edition_content(flags: list[str]) -> None:
     options = parse_options(flags)
-    apply = parse_boolean_option(options.get("apply"), default=False, label="--apply")
+    apply = resolve_mutation_apply(options, "content seed-edition")
     seed_path = Path(normalize_string(options.get("seed")) or SEED_CONTENT_PATH)
     if not seed_path.is_absolute():
         seed_path = PAPYRUS_ROOT / seed_path
@@ -129,8 +129,39 @@ def seed_edition_config(payload: dict[str, Any]) -> dict[str, Any]:
             "suppressNewsDeskAppendix": payload.get("suppressNewsDeskAppendix") is True,
         },
         "articleOrder": item_ids,
-        "layoutPlan": create_seed_edition_layout_plan(item_ids),
+        "layoutPlan": apply_seed_house_ads(create_seed_edition_layout_plan(item_ids), payload.get("houseAds")),
     }
+
+
+def apply_seed_house_ads(layout_plan: dict[str, Any], house_ads: Any) -> dict[str, Any]:
+    if not isinstance(house_ads, list) or not house_ads:
+        return layout_plan
+    for ad in house_ads:
+        if not isinstance(ad, dict):
+            continue
+        page_number = ad.get("pageNumber")
+        label = normalize_string(ad.get("label"))
+        ad_id = normalize_string(ad.get("id"))
+        if page_number is None or not label or not ad_id:
+            continue
+        page = next((entry for entry in layout_plan.get("pages", []) if entry.get("pageNumber") == page_number), None)
+        regions = page.get("regions") if isinstance(page, dict) else None
+        if not isinstance(regions, list) or not regions:
+            continue
+        region = regions[0]
+        blocks = region.get("blocks")
+        if not isinstance(blocks, list):
+            continue
+        blocks.append(
+            {
+                "id": ad_id,
+                "type": "adBlock",
+                "presetId": normalize_string(ad.get("presetId")) or "ad.region",
+                "required": False,
+                "label": label,
+            }
+        )
+    return layout_plan
 
 
 def seed_article_records(article: dict[str, Any], index: int, edition_config: dict[str, Any]) -> list[dict[str, Any]]:

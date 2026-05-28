@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import json
-import urllib.error
-import urllib.request
+import http.client
+import urllib.parse
 from typing import Any
 
-from .env import graphql_endpoint, graphql_jwt, lambda_auth_header
+from .env import graphql_endpoint, graphql_jwt, graphql_timeout_seconds, lambda_auth_header
 
 VERSION_FIELDS = (
     "lineageId versionNumber previousVersionId versionState versionCreatedAt "
@@ -242,6 +242,43 @@ query ListPublishedItemsByTypeStatusAndPublishedAt($typeStatus: String!, $limit:
 }
 """
 
+LIST_MESSAGES_SAFE_QUERY = """
+query ListMessagesSafe($limit: Int, $nextToken: String) {
+  listMessages(limit: $limit, nextToken: $nextToken) {
+    items {
+      id
+      createdAt
+      updatedAt
+      messageKind
+      messageDomain
+    }
+    nextToken
+  }
+}
+"""
+
+LIST_MESSAGES_STATUS_PAGE_QUERY = """
+query ListMessagesStatusPage($limit: Int, $nextToken: String) {
+  listMessages(limit: $limit, nextToken: $nextToken) {
+    items {
+      id
+      status
+    }
+    nextToken
+  }
+}
+"""
+
+GET_MESSAGE_STATUS_QUERY = """
+query GetMessageStatus($id: ID!) {
+  getMessage(id: $id) {
+    id
+    status
+    updatedAt
+  }
+}
+"""
+
 SCHEMA_TYPE_FIELDS_QUERY = """
 query PapyrusSchemaCheck($type: String!) {
   __type(name: $type) {
@@ -365,6 +402,12 @@ INDEX_DEFINITIONS: dict[str, dict[str, str]] = {
         "fields": SEMANTIC_RELATION_FIELDS,
         "partitionType": "ID",
     },
+    "modelAttachmentsByOwnerRoleAndSortKey": {
+        "field": "listModelAttachmentsByOwnerRoleAndSortKey",
+        "partitionKey": "ownerId",
+        "fields": MODEL_ATTACHMENT_FIELDS,
+        "partitionType": "ID",
+    },
 }
 
 
@@ -428,24 +471,44 @@ class PapyrusGraphQLAuthoringClient:
     def __init__(self, endpoint: str | None = None, auth_token: str | None = None) -> None:
         self.endpoint = endpoint or graphql_endpoint()
         self.auth_token = auth_token or graphql_jwt()
+        self.timeout_seconds = graphql_timeout_seconds()
+        self._parsed_endpoint = urllib.parse.urlparse(self.endpoint)
+        if self._parsed_endpoint.scheme != "https":
+            raise ValueError(f"Unsupported GraphQL endpoint scheme: {self.endpoint}")
+        self._endpoint_path = self._parsed_endpoint.path or "/"
+        if self._parsed_endpoint.query:
+            self._endpoint_path = f"{self._endpoint_path}?{self._parsed_endpoint.query}"
+        self._connection: http.client.HTTPSConnection | None = None
 
     def graphql(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = json.dumps({"query": query, "variables": variables or {}}).encode("utf-8")
-        request = urllib.request.Request(
-            self.endpoint,
-            data=payload,
-            headers={
-                "content-type": "application/json",
-                "Authorization": lambda_auth_header(self.auth_token),
-            },
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(request) as response:
-                body = json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as error:
-            detail = error.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"GraphQL request failed: {error.code} {error.reason}: {detail}") from error
+        headers = {
+            "content-type": "application/json",
+            "Authorization": lambda_auth_header(self.auth_token),
+            "Connection": "keep-alive",
+        }
+        body: dict[str, Any] | None = None
+        last_error: Exception | None = None
+        for attempt in range(2):
+            try:
+                connection = self._connection or self._open_connection()
+                connection.request("POST", self._endpoint_path, body=payload, headers=headers)
+                response = connection.getresponse()
+                response_body = response.read().decode("utf-8", errors="replace")
+                if response.status >= 400:
+                    raise RuntimeError(
+                        f"GraphQL request failed: {response.status} {response.reason}: {response_body}"
+                    )
+                body = json.loads(response_body)
+                break
+            except (TimeoutError, OSError, http.client.HTTPException, json.JSONDecodeError, RuntimeError) as error:
+                last_error = error
+                self._reset_connection()
+                if attempt == 1:
+                    raise RuntimeError(f"GraphQL request failed: {error}") from error
+                continue
+        if body is None:
+            raise RuntimeError(f"GraphQL request failed: {last_error}")
 
         errors = body.get("errors") or []
         if errors:
@@ -455,6 +518,25 @@ class PapyrusGraphQLAuthoringClient:
         if not isinstance(data, dict):
             raise RuntimeError("GraphQL response did not include data.")
         return data
+
+    def _open_connection(self) -> http.client.HTTPSConnection:
+        connection = http.client.HTTPSConnection(
+            self._parsed_endpoint.hostname,
+            self._parsed_endpoint.port or 443,
+            timeout=self.timeout_seconds,
+        )
+        self._connection = connection
+        return connection
+
+    def _reset_connection(self) -> None:
+        connection = self._connection
+        self._connection = None
+        if connection is None:
+            return
+        try:
+            connection.close()
+        except Exception:
+            pass
 
     def inspect_reachability(self) -> dict[str, Any]:
         return self.graphql(LIST_EDITIONS_QUERY, {"status": "published", "limit": 1})
@@ -473,6 +555,36 @@ class PapyrusGraphQLAuthoringClient:
             if not next_token:
                 break
         return items
+
+    def list_messages_safe(
+        self,
+        *,
+        limit: int = 100,
+        next_token: str | None = None,
+    ) -> tuple[list[dict[str, Any]], str | None]:
+        result = self.graphql(
+            LIST_MESSAGES_SAFE_QUERY,
+            {"limit": limit, "nextToken": next_token},
+        )
+        connection = result.get("listMessages") or {}
+        return [entry for entry in connection.get("items") or [] if entry], connection.get("nextToken")
+
+    def get_message_status(self, message_id: str) -> dict[str, Any] | None:
+        result = self.graphql(GET_MESSAGE_STATUS_QUERY, {"id": message_id})
+        return result.get("getMessage")
+
+    def list_messages_status_page(
+        self,
+        *,
+        limit: int = 100,
+        next_token: str | None = None,
+    ) -> tuple[list[dict[str, Any]], str | None]:
+        result = self.graphql(
+            LIST_MESSAGES_STATUS_PAGE_QUERY,
+            {"limit": limit, "nextToken": next_token},
+        )
+        connection = result.get("listMessages") or {}
+        return [entry for entry in connection.get("items") or [] if entry], connection.get("nextToken")
 
     def graphql_type_field_names(self, type_name: str) -> list[str]:
         result = self.graphql(SCHEMA_TYPE_FIELDS_QUERY, {"type": type_name})
@@ -602,12 +714,24 @@ class PapyrusGraphQLAuthoringClient:
         )
         return result.get("updateNewsroomSummary") or {}
 
+    def create_record(self, model_name: str, input_payload: dict[str, Any]) -> None:
+        if model_name not in MUTATIONS:
+            raise ValueError(f"Unsupported model for create: {model_name}")
+        prepared = strip_unsupported_payload_fields(model_name, add_operational_index_fields(model_name, input_payload))
+        self.graphql(MUTATIONS[model_name]["create"], {"input": prepared})
+
     def upsert(self, model_name: str, input_payload: dict[str, Any]) -> str:
         prepared = strip_unsupported_payload_fields(model_name, add_operational_index_fields(model_name, input_payload))
         current = self.get_record(model_name, prepared["id"])
         mutation = MUTATIONS[model_name]["update" if current else "create"]
         self.graphql(mutation, {"input": prepared})
         return "updated" if current else "created"
+
+    def update_record(self, model_name: str, input_payload: dict[str, Any]) -> None:
+        if model_name not in MUTATIONS:
+            raise ValueError(f"Unsupported model for update: {model_name}")
+        prepared = strip_unsupported_payload_fields(model_name, add_operational_index_fields(model_name, input_payload))
+        self.graphql(MUTATIONS[model_name]["update"], {"input": prepared})
 
     def create_model_attachment_upload(self, attachment: dict[str, Any]) -> dict[str, Any]:
         result = self.graphql(
@@ -689,8 +813,6 @@ def strip_unsupported_payload_fields(model_name: str, input_payload: dict[str, A
     prepared = dict(input_payload)
     if model_name == "Message":
         prepared.pop("body", None)
-        prepared.pop("metadata", None)
-    elif model_name == "Reference":
         prepared.pop("metadata", None)
     elif model_name == "Assignment":
         prepared.pop("sectionTypeStatusKey", None)

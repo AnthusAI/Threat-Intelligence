@@ -1,9 +1,9 @@
 """
 Papyrus automated newsroom tools for Tactus procedures.
 
-The v1 tools are intentionally dry-run first. GraphQL helpers only read from
-Papyrus, while record builders return mutation plans that callers can inspect
-before any live authoring path is added.
+These helpers expose both live authoring and dry-run planning paths. GraphQL
+helpers can read and write Papyrus, while record builders still return
+inspectable mutation plans for explicit preview flows.
 """
 
 from __future__ import annotations
@@ -14,13 +14,16 @@ import json
 import os
 import re
 import subprocess
+import uuid
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
 
 from .semantic import PapyrusSemanticClient
 from .reference_policy import is_evidence_eligible_reference
+from . import reference_actions
 
 try:
     import yaml
@@ -190,6 +193,42 @@ query GetAssignment($id: ID!) {
 }
 """
 
+GET_NEWSROOM_SECTION_QUERY = """
+query GetNewsroomSection($id: ID!) {
+  getNewsroomSection(id: $id) {
+    id
+    title
+    shortTitle
+    type
+    editorialMission
+    editorialPolicy
+    assignmentGuidance
+    killCriteria
+    visualGuidance
+    enabled
+    sortOrder
+    updatedAt
+  }
+}
+"""
+
+GET_DOCTRINE_BY_SLUG_QUERY = """
+query DoctrineBySlug($slug: String!, $limit: Int) {
+  itemBySlug(slug: $slug, limit: $limit) {
+    items {
+      id
+      slug
+      title
+      type
+      status
+      body
+      updatedAt
+    }
+    nextToken
+  }
+}
+"""
+
 GET_ASSIGNMENT_CONTEXT_QUERY = """
 query GetAssignmentContext($assignmentId: ID!) {
   getAssignmentContext(assignmentId: $assignmentId) {
@@ -294,6 +333,94 @@ query ListAssignments($limit: Int, $nextToken: String) {
       updatedAt
     }
     nextToken
+  }
+}
+"""
+
+CREATE_ASSIGNMENT_MUTATION = """
+mutation CreateAssignment($input: CreateAssignmentInput!) {
+  createAssignment(input: $input) {
+    id
+    assignmentTypeKey
+    queueKey
+    queueStatusKey
+    status
+    priority
+    title
+    summary
+    assigneeType
+    assigneeId
+    assigneeKey
+    corpusId
+    categorySetId
+    classifierId
+    sectionId
+    sectionKey
+    sectionType
+    sectionStatusKey
+    sectionQueueStatusKey
+    primaryFocusCategoryKey
+    topicScopeCategoryKeys
+    sourceSnapshotId
+    importRunId
+    createdBy
+    createdAt
+    updatedAt
+  }
+}
+"""
+
+CREATE_ASSIGNMENT_EVENT_MUTATION = """
+mutation CreateAssignmentEvent($input: CreateAssignmentEventInput!) {
+  createAssignmentEvent(input: $input) {
+    id
+    assignmentId
+    assignmentTypeKey
+    queueKey
+    eventType
+    fromStatus
+    toStatus
+    actorSub
+    actorLabel
+    note
+    createdAt
+  }
+}
+"""
+
+UPDATE_ASSIGNMENT_MUTATION = """
+mutation UpdateAssignment($input: UpdateAssignmentInput!) {
+  updateAssignment(input: $input) {
+    id
+    assignmentTypeKey
+    queueKey
+    queueStatusKey
+    status
+    priority
+    title
+    summary
+    assigneeType
+    assigneeId
+    assigneeKey
+    claimedAt
+    claimExpiresAt
+    completedAt
+    canceledAt
+    corpusId
+    categorySetId
+    classifierId
+    sectionId
+    sectionKey
+    sectionType
+    sectionStatusKey
+    sectionQueueStatusKey
+    primaryFocusCategoryKey
+    topicScopeCategoryKeys
+    sourceSnapshotId
+    importRunId
+    createdBy
+    createdAt
+    updatedAt
   }
 }
 """
@@ -513,29 +640,380 @@ def papyrus_get_assignment(assignment_id: str) -> dict[str, Any]:
     return {"assignment": decoded}
 
 
+def papyrus_list_assignments(
+    *,
+    limit: int | str = 25,
+    status: str = "",
+    type: str = "",  # noqa: A002 - resource API uses `type`.
+    section_key: str = "",
+    import_run_id: str = "",
+) -> dict[str, Any]:
+    """
+    List live Papyrus Assignments with small client-side filters for agent discovery.
+    """
+    max_items = max(1, min(int(limit or 25), 100))
+    assignments = _list_assignments()
+    if status:
+        assignments = [item for item in assignments if str(item.get("status") or "") == status]
+    if type:
+        expected_type = _assignment_type_key_for_resource_type(type)
+        assignments = [item for item in assignments if str(item.get("assignmentTypeKey") or "") == expected_type]
+    if section_key:
+        assignments = [item for item in assignments if str(item.get("sectionKey") or "") == section_key]
+    if import_run_id:
+        assignments = [item for item in assignments if str(item.get("importRunId") or "") == import_run_id]
+    assignments.sort(key=lambda item: str(item.get("createdAt") or ""), reverse=True)
+    return {"assignments": assignments[:max_items], "count": len(assignments[:max_items])}
+
+
+def papyrus_assignment_create(args: dict[str, Any]) -> dict[str, Any]:
+    """
+    Resource-oriented Assignment.create implementation for execute_tactus.
+    """
+    payload = dict(args or {})
+    assignment_type = str(payload.get("type") or payload.get("assignmentType") or "").strip()
+    title = _required(payload.get("title"), "title")
+    if assignment_type != "research":
+        raise ValueError('Assignment.create currently supports type = "research" only')
+
+    plan = _build_research_assignment_resource_plan(payload, title)
+    result: dict[str, Any] = {
+        "ok": True,
+        "resource": "Assignment",
+        "verb": "create",
+        "applied": False,
+        "assignmentId": plan["assignment"]["id"],
+        "assignment": plan["assignment"],
+        "event": plan["event"],
+        "changes": [
+            {"model": "Assignment", "operation": "create", "id": plan["assignment"]["id"]},
+            {"model": "AssignmentEvent", "operation": "create", "id": plan["event"]["id"]},
+        ],
+        "api_calls": ["papyrus.Assignment.create"],
+        "error": None,
+    }
+    if not bool(payload.get("apply") or False):
+        return result
+
+    assignment_data = _graphql(CREATE_ASSIGNMENT_MUTATION, {"input": plan["assignment"]})
+    event_data = _graphql(CREATE_ASSIGNMENT_EVENT_MUTATION, {"input": plan["event"]})
+    result["applied"] = True
+    result["assignment"] = _decode_record_json(assignment_data.get("createAssignment") or plan["assignment"])
+    result["event"] = _decode_record_json(event_data.get("createAssignmentEvent") or plan["event"])
+    return result
+
+
+def papyrus_assignment_update(args: dict[str, Any]) -> dict[str, Any]:
+    """
+    Resource-oriented Assignment.update implementation for execute_tactus.
+    """
+    payload = dict(args or {})
+    assignment_id = _required(
+        payload.get("id") or payload.get("assignmentId") or payload.get("assignment_id"),
+        "id",
+    )
+    to_status = _required(
+        payload.get("status") or payload.get("toStatus") or payload.get("to_status"),
+        "status",
+    )
+    now = _now_iso()
+    actor_label = str(payload.get("actorLabel") or payload.get("actor_label") or "papyrus-console-agent").strip()
+    apply = bool(payload.get("apply", True))
+
+    assignment = papyrus_get_assignment(assignment_id).get("assignment") or {}
+    from_status = str(assignment.get("status") or "")
+    queue_key = str(assignment.get("queueKey") or "").strip()
+    section_key = str(assignment.get("sectionKey") or "").strip()
+    assignment_type_key = str(assignment.get("assignmentTypeKey") or "research.edition-candidate").strip()
+    note = str(payload.get("note") or f"Updated assignment status: {from_status} -> {to_status}").strip()
+
+    assignment_patch: dict[str, Any] = {
+        "id": assignment_id,
+        "assignmentTypeKey": assignment_type_key,
+        "status": to_status,
+        "priority": assignment.get("priority"),
+        "queueStatusKey": f"{queue_key}#{to_status}" if queue_key else to_status,
+        "createdAt": assignment.get("createdAt"),
+        "assigneeKey": assignment.get("assigneeKey"),
+        "updatedAt": now,
+        "newsroomFeedKey": f"assignment#{to_status}",
+    }
+    if section_key:
+        assignment_patch["sectionStatusKey"] = f"{section_key}#{to_status}"
+        assignment_patch["sectionQueueStatusKey"] = (
+            f"{section_key}#{queue_key}#{to_status}" if queue_key else f"{section_key}#{to_status}"
+        )
+    if to_status == "claimed":
+        assignment_patch["claimedAt"] = now
+    elif to_status == "completed":
+        assignment_patch["completedAt"] = now
+    elif to_status == "canceled":
+        assignment_patch["canceledAt"] = now
+
+    event = {
+        "id": f"assignment-event-{assignment_id}-status-{_safe_id(to_status)}-{uuid.uuid4().hex[:8]}",
+        "assignmentId": assignment_id,
+        "assignmentTypeKey": assignment_type_key,
+        "queueKey": queue_key or "research:unsectioned:exploratory",
+        "eventType": "status_changed",
+        "fromStatus": from_status or None,
+        "toStatus": to_status,
+        "actorSub": actor_label,
+        "actorLabel": actor_label,
+        "note": note,
+        "createdAt": now,
+    }
+    result: dict[str, Any] = {
+        "ok": True,
+        "resource": "Assignment",
+        "verb": "update",
+        "applied": False,
+        "assignmentId": assignment_id,
+        "assignment": {**assignment, **assignment_patch},
+        "event": event,
+        "changes": [
+            {"model": "Assignment", "operation": "update", "id": assignment_id},
+            {"model": "AssignmentEvent", "operation": "create", "id": event["id"]},
+        ],
+        "api_calls": ["papyrus.Assignment.update"],
+        "error": None,
+    }
+    if not apply:
+        return result
+
+    assignment_data = _graphql(UPDATE_ASSIGNMENT_MUTATION, {"input": assignment_patch})
+    event_data = _graphql(CREATE_ASSIGNMENT_EVENT_MUTATION, {"input": event})
+    result["applied"] = True
+    result["assignment"] = _decode_record_json(assignment_data.get("updateAssignment") or result["assignment"])
+    result["event"] = _decode_record_json(event_data.get("createAssignmentEvent") or event)
+    return result
+
+
+def _assignment_type_key_for_resource_type(resource_type: str) -> str:
+    if str(resource_type).strip() == "research":
+        return "research.edition-candidate"
+    raise ValueError(f"Unsupported Assignment type: {resource_type}")
+
+
+def _build_research_assignment_resource_plan(payload: dict[str, Any], title: str) -> dict[str, Any]:
+    now = _now_iso()
+    section_key = str(payload.get("sectionKey") or payload.get("section_key") or "").strip()
+    corpus_key = str(payload.get("corpusKey") or payload.get("corpus_key") or "AI-ML-research").strip()
+    research_mode = str(payload.get("researchMode") or payload.get("research_mode") or "source_discovery").strip()
+    status = str(payload.get("status") or "open").strip()
+    priority = int(payload.get("priority") or 50)
+    actor_label = str(payload.get("actorLabel") or payload.get("actor_label") or "papyrus-console-agent").strip()
+    import_run_id = str(payload.get("importRunId") or payload.get("import_run_id") or "").strip()
+    summary = str(payload.get("summary") or "").strip() or title
+    instructions = str(payload.get("instructions") or "").strip()
+    assignment_type_key = _assignment_type_key_for_resource_type("research")
+    queue_key = str(payload.get("queueKey") or payload.get("queue_key") or f"research:{section_key or 'unsectioned'}:exploratory").strip()
+    assignment_id = str(payload.get("id") or "").strip() or (
+        f"assignment-research-{_safe_id(title)}-{uuid.uuid4().hex[:12]}"
+    )
+
+    assignment: dict[str, Any] = {
+        "id": assignment_id,
+        "assignmentTypeKey": assignment_type_key,
+        "queueKey": queue_key,
+        "queueStatusKey": f"{queue_key}#{status}",
+        "status": status,
+        "priority": priority,
+        "title": title,
+        "summary": summary,
+        "corpusId": f"knowledge-corpus-{_safe_id(corpus_key)}",
+        "importRunId": import_run_id or None,
+        "createdBy": actor_label,
+        "createdAt": now,
+        "updatedAt": now,
+        "newsroomFeedKey": f"assignment#{status}",
+    }
+    if section_key:
+        assignment["sectionKey"] = section_key
+        assignment["sectionType"] = "newsroom_section"
+        assignment["sectionStatusKey"] = f"{section_key}#{status}"
+        assignment["sectionQueueStatusKey"] = f"{section_key}#{queue_key}#{status}"
+
+    event_note_parts = [f"Created research assignment: {title}"]
+    if research_mode:
+        event_note_parts.append(f"Research mode: {research_mode}")
+    if instructions:
+        event_note_parts.append(f"Instructions: {instructions}")
+    event: dict[str, Any] = {
+        "id": f"assignment-event-{assignment_id}-created",
+        "assignmentId": assignment_id,
+        "assignmentTypeKey": assignment_type_key,
+        "queueKey": queue_key,
+        "eventType": "created",
+        "toStatus": status,
+        "actorSub": actor_label,
+        "actorLabel": actor_label,
+        "note": "\n".join(event_note_parts),
+        "createdAt": now,
+    }
+    return {
+        "assignment": {key: value for key, value in assignment.items() if value is not None},
+        "event": {key: value for key, value in event.items() if value is not None},
+    }
+
+
 def papyrus_get_assignment_context(assignment_id: str) -> dict[str, Any]:
     """
     Read live Assignment context, including doctrine, targets, and events.
     """
     assignment_id = _required(assignment_id, "assignment_id")
+    assignment_data = _graphql(GET_ASSIGNMENT_QUERY, {"id": assignment_id})
+    assignment = _decode_record_json(assignment_data.get("getAssignment") or {})
+    if not assignment:
+        raise ValueError(f"Assignment context not found: {assignment_id}")
+    _hydrate_assignment_payloads(assignment)
+    relations = _assignment_relations_for_assignment(assignment_id)
+    targets = _assignment_targets_from_relations(relations)
+    doctrine = _assignment_doctrine_context(assignment)
+    events = _assignment_events_for_assignments([assignment_id])
+    for event in events:
+        if isinstance(event, dict):
+            _hydrate_assignment_event_metadata(event)
+    return {
+        "assignment_context": {
+            "assignment": assignment,
+            "doctrine": doctrine,
+            "targets": targets,
+            "events": events,
+        }
+    }
+
+
+def _assignment_relations_for_assignment(assignment_id: str) -> list[dict[str, Any]]:
     try:
-        data = _graphql(GET_ASSIGNMENT_CONTEXT_QUERY, {"assignmentId": assignment_id})
-        context = data.get("getAssignmentContext")
-        if not context:
-            raise ValueError(f"Assignment context not found: {assignment_id}")
-        decoded = _decode_record_json(context)
-        if isinstance(decoded.get("assignment"), dict):
-            _hydrate_assignment_payloads(decoded["assignment"])
-        for event in decoded.get("events") or []:
-            if isinstance(event, dict):
-                _hydrate_assignment_event_metadata(event)
-        return {"assignment_context": decoded}
-    except RuntimeError as error:
-        message = str(error)
-        if "data environment variables are malformed" not in message:
-            raise
-        # Fallback path when the assignment-action Lambda resolver is misconfigured.
-        return {"assignment_context": _fallback_assignment_context(assignment_id)}
+        semantic = _semantic_client()
+        response = semantic.list_outgoing("assignment", assignment_id)
+        relations = _normalize_jsonish(response.get("relations") or [])
+        if not isinstance(relations, list):
+            return []
+        normalized: list[dict[str, Any]] = []
+        for relation in relations:
+            if not isinstance(relation, dict):
+                continue
+            decoded = _decode_record_json(relation)
+            if (decoded.get("relationState") or "current") != "current":
+                continue
+            normalized.append(decoded)
+        return normalized
+    except Exception:
+        return []
+
+
+def _assignment_targets_from_relations(relations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    targets: list[dict[str, Any]] = []
+    for relation in relations:
+        metadata = _normalize_jsonish(relation.get("metadata") or {})
+        if not isinstance(metadata, dict):
+            metadata = {}
+        label = (
+            metadata.get("title")
+            or metadata.get("displayName")
+            or metadata.get("externalItemId")
+            or relation.get("objectLineageId")
+            or relation.get("objectId")
+        )
+        targets.append(
+            {
+                "kind": relation.get("objectKind"),
+                "id": relation.get("objectId"),
+                "lineageId": relation.get("objectLineageId"),
+                "label": label,
+                "detail": relation.get("relationTypeKey") or relation.get("predicate"),
+            }
+        )
+    return targets
+
+
+def _assignment_doctrine_context(assignment: dict[str, Any]) -> list[dict[str, Any]]:
+    doctrine: list[dict[str, Any]] = []
+    for kind, label, slug in (
+        ("mission", "Editorial Mission", "editorial-doctrine-mission"),
+        ("policy", "Editorial Policy", "editorial-doctrine-policy"),
+    ):
+        record = _doctrine_item_by_slug(slug)
+        if not record:
+            continue
+        doctrine.append(
+            {
+                "scope": "publication",
+                "kind": kind,
+                "label": label,
+                "slug": slug,
+                "body": _normalize_string_array(record.get("body") or []),
+                "categoryKey": None,
+                "categoryLineageId": None,
+            }
+        )
+    section_key = assignment.get("sectionKey") or assignment.get("sectionId")
+    section = _newsroom_section_by_id(section_key)
+    if section:
+        doctrine.append(
+            {
+                "scope": "desk",
+                "kind": "mission",
+                "label": "Desk Mission",
+                "slug": f"desk-section-{section.get('id')}-mission",
+                "body": _normalize_string_array([section.get("editorialMission")]),
+                "categoryKey": section.get("id"),
+                "categoryLineageId": section.get("id"),
+            }
+        )
+        doctrine.append(
+            {
+                "scope": "desk",
+                "kind": "policy",
+                "label": "Desk Policies",
+                "slug": f"desk-section-{section.get('id')}-policy",
+                "body": _normalize_string_array([section.get("editorialPolicy")]),
+                "categoryKey": section.get("id"),
+                "categoryLineageId": section.get("id"),
+            }
+        )
+    return doctrine
+
+
+def _newsroom_section_by_id(section_id: Any) -> dict[str, Any] | None:
+    key = str(section_id or "").strip()
+    if not key:
+        return None
+    try:
+        data = _graphql(GET_NEWSROOM_SECTION_QUERY, {"id": key})
+    except Exception:
+        return None
+    section = data.get("getNewsroomSection")
+    if not isinstance(section, dict):
+        return None
+    return _decode_record_json(section)
+
+
+def _doctrine_item_by_slug(slug: str) -> dict[str, Any] | None:
+    try:
+        data = _graphql(GET_DOCTRINE_BY_SLUG_QUERY, {"slug": slug, "limit": 10})
+    except Exception:
+        return None
+    connection = data.get("itemBySlug") or {}
+    items = connection.get("items") or []
+    for item in items:
+        decoded = _decode_record_json(item)
+        if decoded.get("type") == "doctrine" and decoded.get("status") in {"private", "published"}:
+            return decoded
+    return _decode_record_json(items[0]) if items else None
+
+
+def _normalize_string_array(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for entry in value:
+        text = str(entry or "").strip()
+        if text:
+            result.append(text)
+    return result
 
 
 def papyrus_build_assignment_agent_context(
@@ -819,6 +1297,125 @@ def papyrus_list_reference_messages(reference_lineage_id: str) -> dict[str, Any]
     return _semantic_client().list_reference_messages(reference_lineage_id)
 
 
+def papyrus_reference_curation_review(
+    *,
+    reference_id: str,
+    action: str,
+    actor_label: str = "",
+    note: str = "",
+    reason_code: str = "",
+) -> dict[str, Any]:
+    """
+    Canonical Reference editorial disposition action.
+    """
+    return reference_actions.review_reference_curation(
+        _graphql,
+        reference_id=reference_id,
+        action=action,
+        actor_label=actor_label,
+        note=note,
+        reason_code=reason_code,
+    )
+
+
+def papyrus_reference_quality_rate(
+    *,
+    reference_id: str,
+    rating: int,
+    actor_label: str = "",
+    note: str = "",
+) -> dict[str, Any]:
+    """
+    Canonical human quality rating action.
+    """
+    return reference_actions.set_reference_quality_rating(
+        _graphql,
+        reference_id=reference_id,
+        rating=rating,
+        actor_label=actor_label,
+        note=note,
+    )
+
+
+def papyrus_reference_insight_create(
+    *,
+    reference_id: str,
+    summary: str,
+    body: str,
+    actor_label: str = "",
+) -> dict[str, Any]:
+    """
+    Canonical insight creation action for a reference.
+    """
+    return reference_actions.create_reference_insight(
+        _graphql,
+        reference_id=reference_id,
+        summary=summary,
+        body=body,
+        actor_label=actor_label,
+    )
+
+
+def papyrus_reference_insight_list(reference_lineage_id: str) -> dict[str, Any]:
+    """
+    List insight messages for one reference lineage.
+    """
+    payload = papyrus_list_reference_messages(reference_lineage_id)
+    messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
+    insights = [message for message in messages if str(message.get("messageKind") or "") == "insight"]
+    return {
+        "referenceLineageId": reference_lineage_id,
+        "items": insights,
+        "count": len(insights),
+    }
+
+
+def papyrus_reference_move_corpus(
+    *,
+    reference_id: str,
+    corpus_id: str,
+    actor_label: str = "",
+    note: str = "",
+) -> dict[str, Any]:
+    """
+    Canonical explicit corpus-move action for a reference lineage.
+    """
+    return reference_actions.move_reference_corpus(
+        _graphql,
+        reference_id=reference_id,
+        corpus_id=corpus_id,
+        actor_label=actor_label,
+        note=note,
+    )
+
+
+def papyrus_reference_curation_start(
+    *,
+    reference_id: str,
+    actor_label: str = "",
+    curation_policy: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Canonical async curation start action (Assignment-backed).
+    """
+    return reference_actions.start_reference_curation(
+        _graphql,
+        reference_id=reference_id,
+        actor_label=actor_label,
+        curation_policy=curation_policy,
+    )
+
+
+def papyrus_reference_curation_status(*, assignment_id: str) -> dict[str, Any]:
+    """
+    Canonical curation run status lookup.
+    """
+    return reference_actions.get_reference_curation_status(
+        _graphql,
+        assignment_id=assignment_id,
+    )
+
+
 def papyrus_doi_backfill_plan(
     corpus_key: str = "AI-ML-research",
     max_count: int = 0,
@@ -841,7 +1438,6 @@ def papyrus_doi_backfill_plan(
             "create-doi-backfill-assignment",
             "--corpus-key",
             key,
-            "--apply",
         ],
         "run_now": [
             "npm",
@@ -943,7 +1539,7 @@ def papyrus_doi_backfill_run(
             "stdout": result.stdout,
             "stderr": result.stderr,
             "nextCommands": {
-                "inspectAssignmentQueue": "npm run content -- assignments list --type reference.doi-backfill --status open",
+                "inspectAssignmentQueue": "poetry run papyrus assignments list --type reference.doi-backfill --status open",
                 "inspectManifest": f"cat {manifest_path}" if manifest_path else None,
             },
         }
@@ -961,6 +1557,235 @@ def papyrus_doi_backfill_manifest(run_id: str = "", manifest_path: str = "") -> 
     return {
         "doi_backfill_manifest": payload,
         "manifest_path": str(resolved_path),
+    }
+
+
+def papyrus_reference_fetch_url_text(
+    *,
+    reference_id: str = "",
+    external_item_id: str = "",
+    corpus_key: str = "AI-ML-research",
+    apply: bool = True,
+    force: bool = False,
+    config_path: str = "",
+    max_count: int = 0,
+) -> dict[str, Any]:
+    """
+    Fetch extracted text for URL-backed references via MarkItDown and attach it on S3.
+    """
+    command = [
+        "npm",
+        "run",
+        "content",
+        "--",
+        "references",
+        "fetch-url-text",
+        "--corpus-key",
+        _required(corpus_key, "corpus_key"),
+        "--status",
+        "all",
+    ]
+    if reference_id:
+        command.extend(["--reference", reference_id.strip()])
+    if external_item_id:
+        command.extend(["--external-item-id", external_item_id.strip()])
+    if max_count and int(max_count) > 0:
+        command.extend(["--max-count", str(int(max_count))])
+    if force:
+        command.extend(["--force", "true"])
+    if config_path:
+        command.extend(["--config", config_path])
+    if not apply:
+        command.append("--dry-run")
+    result = subprocess.run(
+        command,
+        cwd=PAPYRUS_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    def _metric(name: str) -> int | None:
+        for line in (result.stdout or "").splitlines():
+            parts = line.strip().split("\t")
+            if len(parts) >= 4 and parts[0] == "references" and parts[1] == "fetch-url-text" and parts[2] == name:
+                try:
+                    return int(parts[3])
+                except ValueError:
+                    return None
+        return None
+
+    return {
+        "reference_url_text": {
+            "ok": result.returncode == 0,
+            "exitCode": result.returncode,
+            "command": command,
+            "eligible": _metric("eligible"),
+            "planned": _metric("planned"),
+            "changes": _metric("changes"),
+            "filtered": _metric("filtered"),
+            "fallbackRaw": _metric("fallback-raw"),
+            "failures": _metric("failures"),
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
+    }
+
+
+def papyrus_reference_filter_extracted_text(
+    *,
+    reference_id: str = "",
+    external_item_id: str = "",
+    corpus_key: str = "AI-ML-research",
+    apply: bool = True,
+    force: bool = True,
+    config_path: str = "",
+    max_count: int = 0,
+    model: str = "gpt-5.4-nano",
+    metadata_from_text: bool = True,
+    metadata_model: str = "gpt-5.4-nano",
+) -> dict[str, Any]:
+    """
+    Re-filter existing extracted text attachments and refresh canonical extracted_text.
+    """
+    command = [
+        "npm",
+        "run",
+        "content",
+        "--",
+        "references",
+        "filter-extracted-text",
+        "--corpus-key",
+        _required(corpus_key, "corpus_key"),
+        "--status",
+        "all",
+        "--model",
+        model,
+        "--metadata-model",
+        metadata_model,
+    ]
+    if reference_id:
+        command.extend(["--reference", reference_id.strip()])
+    if external_item_id:
+        command.extend(["--external-item-id", external_item_id.strip()])
+    if max_count and int(max_count) > 0:
+        command.extend(["--max-count", str(int(max_count))])
+    if force:
+        command.extend(["--force", "true"])
+    if not metadata_from_text:
+        command.extend(["--metadata-from-text", "false"])
+    if config_path:
+        command.extend(["--config", config_path])
+    if not apply:
+        command.append("--dry-run")
+    result = subprocess.run(
+        command,
+        cwd=PAPYRUS_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    def _metric(name: str, section: str = "references", command_name: str = "filter-extracted-text") -> int | None:
+        for line in (result.stdout or "").splitlines():
+            parts = line.strip().split("\t")
+            if len(parts) >= 4 and parts[0] == section and parts[1] == command_name and parts[2] == name:
+                try:
+                    return int(parts[3])
+                except ValueError:
+                    return None
+        return None
+
+    return {
+        "reference_text_filter": {
+            "ok": result.returncode == 0,
+            "exitCode": result.returncode,
+            "command": command,
+            "attempted": _metric("attempted"),
+            "planned": _metric("planned"),
+            "filtered": _metric("filtered"),
+            "fallbackRaw": _metric("fallback-raw"),
+            "skippedMissingSource": _metric("skipped-missing-source"),
+            "changes": _metric("changes"),
+            "failures": _metric("failures"),
+            "metadataGenerated": _metric("generated", section="references", command_name="generate-metadata-from-text"),
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
+    }
+
+
+def papyrus_reference_generate_metadata_from_text(
+    *,
+    reference_id: str = "",
+    external_item_id: str = "",
+    corpus_key: str = "AI-ML-research",
+    apply: bool = True,
+    config_path: str = "",
+    max_count: int = 0,
+    model: str = "gpt-5.4-nano",
+) -> dict[str, Any]:
+    """
+    Generate title/subtitle/summary from extracted reference text only.
+    """
+    command = [
+        "npm",
+        "run",
+        "content",
+        "--",
+        "references",
+        "generate-metadata-from-text",
+        "--corpus-key",
+        _required(corpus_key, "corpus_key"),
+        "--status",
+        "all",
+        "--model",
+        model,
+    ]
+    if reference_id:
+        command.extend(["--reference", reference_id.strip()])
+    if external_item_id:
+        command.extend(["--external-item-id", external_item_id.strip()])
+    if max_count and int(max_count) > 0:
+        command.extend(["--max-count", str(int(max_count))])
+    if config_path:
+        command.extend(["--config", config_path])
+    if not apply:
+        command.append("--dry-run")
+    result = subprocess.run(
+        command,
+        cwd=PAPYRUS_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    def _metric(name: str) -> int | None:
+        for line in (result.stdout or "").splitlines():
+            parts = line.strip().split("\t")
+            if (
+                len(parts) >= 4
+                and parts[0] == "references"
+                and parts[1] == "generate-metadata-from-text"
+                and parts[2] == name
+            ):
+                try:
+                    return int(parts[3])
+                except ValueError:
+                    return None
+        return None
+
+    return {
+        "reference_metadata_generation": {
+            "ok": result.returncode == 0,
+            "exitCode": result.returncode,
+            "command": command,
+            "attempted": _metric("attempted"),
+            "generated": _metric("generated"),
+            "skippedMissingText": _metric("skipped-missing-text"),
+            "generationFailures": _metric("generation-failures"),
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
     }
 
 
@@ -1063,7 +1888,7 @@ def biblicus_topic_context(
     topic_modeling_snapshot: str = "",
     max_topics: int = 20,
     examples_per_topic: int = 3,
-    summary_model: str = "gpt-5.4-mini",
+    summary_model: str = "gpt-5.4-nano",
     config_path: str = "",
 ) -> dict[str, Any]:
     """
@@ -2442,17 +3267,17 @@ def _graphql(query: str, variables: dict[str, Any]) -> dict[str, Any]:
     token = os.environ.get("PAPYRUS_GRAPHQL_JWT")
     if not endpoint:
         raise ValueError("Missing PAPYRUS_GRAPHQL_ENDPOINT for Papyrus GraphQL read tool.")
-    if not token:
-        raise ValueError("Missing PAPYRUS_GRAPHQL_JWT for Papyrus GraphQL read tool.")
 
     body = json.dumps({"query": query, "variables": variables}).encode("utf-8")
+    headers = {"content-type": "application/json"}
+    if token:
+        headers["Authorization"] = _lambda_auth_token(token)
+    else:
+        headers.update(_iam_signed_graphql_headers(endpoint, body))
     request = urllib.request.Request(
         endpoint,
         data=body,
-        headers={
-            "content-type": "application/json",
-            "Authorization": _lambda_auth_token(token),
-        },
+        headers=headers,
         method="POST",
     )
     try:
@@ -2465,6 +3290,39 @@ def _graphql(query: str, variables: dict[str, Any]) -> dict[str, Any]:
     if payload.get("errors"):
         raise RuntimeError("; ".join(error.get("message", str(error)) for error in payload["errors"]))
     return payload.get("data") or {}
+
+
+def _iam_signed_graphql_headers(endpoint: str, body: bytes) -> dict[str, str]:
+    try:
+        from botocore.auth import SigV4Auth
+        from botocore.awsrequest import AWSRequest
+        from botocore.session import Session
+    except Exception as exc:  # pragma: no cover - depends on Lambda/local deps
+        raise ValueError("Missing PAPYRUS_GRAPHQL_JWT and botocore is unavailable for IAM AppSync signing.") from exc
+
+    parsed = urllib.parse.urlparse(endpoint)
+    region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or _region_from_appsync_host(parsed.netloc)
+    session = Session()
+    credentials = session.get_credentials()
+    if credentials is None:
+        raise ValueError("Missing PAPYRUS_GRAPHQL_JWT and AWS credentials are unavailable for IAM AppSync signing.")
+    frozen = credentials.get_frozen_credentials()
+    request = AWSRequest(
+        method="POST",
+        url=endpoint,
+        data=body,
+        headers={
+            "content-type": "application/json",
+            "host": parsed.netloc,
+        },
+    )
+    SigV4Auth(frozen, "appsync", region).add_auth(request)
+    return {str(key): str(value) for key, value in request.headers.items()}
+
+
+def _region_from_appsync_host(host: str) -> str:
+    match = re.search(r"\.appsync-api\.([a-z0-9-]+)\.amazonaws\.com", host)
+    return match.group(1) if match else "us-east-1"
 
 
 def _hydrate_assignment_payloads(assignment: dict[str, Any]) -> None:
@@ -2549,7 +3407,8 @@ def _storage_bucket_name() -> str | None:
 
 
 def _lambda_auth_token(token: str) -> str:
-    return f"PapyrusJwt {re.sub(r'^Bearer\s+', '', token.strip(), flags=re.IGNORECASE)}"
+    sanitized = re.sub(r"^Bearer\s+", "", token.strip(), flags=re.IGNORECASE)
+    return f"PapyrusJwt {sanitized}"
 
 
 def _resolve_corpus(corpus_key: str, config_path: str = "") -> dict[str, Any]:
@@ -2766,52 +3625,6 @@ query ListAssignmentEventsByAssignment($assignmentId: ID!, $limit: Int, $nextTok
             _hydrate_assignment_event_metadata(event)
             events.append(event)
     return sorted(events, key=lambda item: item.get("createdAt") or "", reverse=True)
-
-
-def _fallback_assignment_context(assignment_id: str) -> dict[str, Any]:
-    assignment = papyrus_get_assignment(assignment_id).get("assignment") or {}
-    relations = _list_connection(
-        """
-query ListSemanticRelationsBySubjectState($subjectStateKey: String!, $limit: Int, $nextToken: String) {
-  listSemanticRelationsBySubjectState(subjectStateKey: $subjectStateKey, limit: $limit, nextToken: $nextToken) {
-    items {
-      id
-      relationState
-      predicate
-      relationTypeKey
-      subjectKind
-      subjectId
-      subjectLineageId
-      objectKind
-      objectId
-      objectLineageId
-      metadata
-    }
-    nextToken
-  }
-}
-""",
-        {"subjectStateKey": _semantic_state_key("assignment", assignment_id)},
-        "listSemanticRelationsBySubjectState",
-    )
-    targets = [
-        {
-            "kind": relation.get("objectKind"),
-            "id": relation.get("objectId"),
-            "lineageId": relation.get("objectLineageId"),
-            "label": relation.get("objectLineageId") or relation.get("objectId"),
-            "detail": relation.get("relationTypeKey") or relation.get("predicate"),
-        }
-        for relation in relations
-        if relation.get("relationState") == "current"
-    ]
-    events = _assignment_events_for_assignments([assignment_id])
-    return {
-        "assignment": assignment,
-        "doctrine": [],
-        "targets": targets,
-        "events": events,
-    }
 
 
 def _normalize_assignment_metadata(value: Any) -> dict[str, Any]:

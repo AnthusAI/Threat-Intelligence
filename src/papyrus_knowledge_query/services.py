@@ -14,6 +14,9 @@ from typing import Any, Protocol
 from .tokens import TokenCounter
 from .uris import normalize_anchor_uri
 
+_cached_openai_api_key: str | None = None
+_openai_api_key_lock = threading.Lock()
+
 
 SUPPORTED_ANCHOR_KINDS = {
     "assignment",
@@ -88,7 +91,7 @@ getItem(id: $id) {
     "message": f"getMessage(id: $id) {{ {MESSAGE_FIELDS} }}",
     "newsroomSection": """
 getNewsroomSection(id: $id) {
-  id title type editorialMission editorialPolicy enabled enabledStatus sortOrder shortDescription
+  id title shortTitle type editorialMission editorialPolicy enabled enabledStatus sortOrder
   defaultArticleTypes defaultPageBudget assignmentGuidance killCriteria visualGuidance createdAt updatedAt
 }
 """,
@@ -300,6 +303,7 @@ class S3VectorsProvider:
         if diversity == "broad":
             source_matches = (
                 self._query_vectors(vector, scope, query_limit, vector_kind="reference_summary")
+                + self._query_vectors(vector, scope, query_limit, vector_kind="reference_card")
                 + self._query_vectors(vector, scope, query_limit, vector_kind="insight_source")
                 + self._query_vectors(vector, scope, query_limit, vector_kind="insight_summary")
             )
@@ -354,7 +358,7 @@ class S3VectorsProvider:
         return matches
 
     def _embed(self, text: str) -> list[float]:
-        api_key = os.environ.get("OPENAI_API_KEY")
+        api_key = _resolve_openai_api_key()
         if not api_key:
             raise RuntimeError("OPENAI_API_KEY is required for S3VectorsProvider embeddings")
         body = json.dumps({"model": self.embedding_model, "input": text}).encode("utf-8")
@@ -405,6 +409,62 @@ class S3VectorsProvider:
         if len(clauses) == 1:
             return clauses[0]
         return {"$and": clauses}
+
+
+def _resolve_openai_api_key() -> str:
+    global _cached_openai_api_key
+    if _cached_openai_api_key:
+        return _cached_openai_api_key
+    with _openai_api_key_lock:
+        if _cached_openai_api_key:
+            return _cached_openai_api_key
+        direct_key = _normalize_optional_string(os.environ.get("OPENAI_API_KEY"))
+        if direct_key and not _is_amplify_secret_placeholder(direct_key):
+            _cached_openai_api_key = direct_key
+            return direct_key
+        parameter_name = _resolve_amplify_ssm_secret_path("OPENAI_API_KEY")
+        if not parameter_name:
+            return ""
+        try:
+            import boto3  # type: ignore
+        except ImportError as exc:  # pragma: no cover - deployment guard
+            raise RuntimeError("boto3 is required to load OPENAI_API_KEY from SSM") from exc
+        response = boto3.client("ssm", region_name=os.environ.get("AWS_REGION")).get_parameter(
+            Name=parameter_name,
+            WithDecryption=True,
+        )
+        key_value = _normalize_optional_string((response.get("Parameter") or {}).get("Value"))
+        if not key_value:
+            raise RuntimeError(f"SSM parameter {parameter_name} did not include a value.")
+        _cached_openai_api_key = key_value
+        return key_value
+
+
+def _is_amplify_secret_placeholder(value: str) -> bool:
+    return bool(re.match(r"^<.*will be resolved.*>$", value, re.IGNORECASE))
+
+
+def _resolve_amplify_ssm_secret_path(name: str) -> str:
+    raw_config = _normalize_optional_string(os.environ.get("AMPLIFY_SSM_ENV_CONFIG"))
+    if not raw_config:
+        return ""
+    try:
+        config = json.loads(raw_config)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("AMPLIFY_SSM_ENV_CONFIG contains invalid JSON.") from exc
+    if not isinstance(config, dict):
+        return ""
+    entry = config.get(name)
+    if not isinstance(entry, dict):
+        return ""
+    return _normalize_optional_string(entry.get("path")) or _normalize_optional_string(entry.get("sharedPath")) or ""
+
+
+def _normalize_optional_string(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    trimmed = value.strip()
+    return trimmed if trimmed else ""
 
 
 @dataclass

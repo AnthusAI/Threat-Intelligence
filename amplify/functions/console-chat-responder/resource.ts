@@ -1,7 +1,8 @@
 import { Duration, NestedStack, type NestedStackProps } from "aws-cdk-lib";
+import { Platform } from "aws-cdk-lib/aws-ecr-assets";
 import { Repository } from "aws-cdk-lib/aws-ecr";
 import { Effect, PolicyStatement } from "aws-cdk-lib/aws-iam";
-import { CfnEventSourceMapping, DockerImageCode, DockerImageFunction } from "aws-cdk-lib/aws-lambda";
+import { Architecture, CfnEventSourceMapping, DockerImageCode, DockerImageFunction } from "aws-cdk-lib/aws-lambda";
 import type { ITable } from "aws-cdk-lib/aws-dynamodb";
 import { Construct } from "constructs";
 
@@ -12,8 +13,6 @@ export type ConsoleChatResponderStackProps = NestedStackProps & {
   projectRoot: string;
   graphqlEndpoint: string;
   responseTarget?: string;
-  openaiApiKeySsmParam?: string;
-  jwtSecretSsmParam?: string;
   model?: string;
   prebuiltImageUri?: string;
 };
@@ -31,23 +30,31 @@ export class ConsoleChatResponderStack extends NestedStack {
       PAPYRUS_MESSAGE_THREAD_SEQUENCE_INDEX_NAME: "messagesByThreadSequence",
       PAPYRUS_GRAPHQL_ENDPOINT: props.graphqlEndpoint,
       PAPYRUS_CONSOLE_RESPONSE_TARGET: responseTarget,
-      PAPYRUS_CONSOLE_MODEL: props.model?.trim() || process.env.PAPYRUS_CONSOLE_MODEL || "gpt-4o-mini",
+      PAPYRUS_CONSOLE_MODEL: props.model?.trim() || process.env.PAPYRUS_CONSOLE_MODEL || "gpt-5-nano",
       PAPYRUS_CONSOLE_CONTEXT_CACHE_ROOT: "/tmp/papyrus-console/thread-context",
+      PAPYRUS_CONSOLE_STATIC_CONTEXT_TTL_SECONDS: process.env.PAPYRUS_CONSOLE_STATIC_CONTEXT_TTL_SECONDS || "900",
+      PAPYRUS_EXECUTE_TACTUS_RUNNER: process.env.PAPYRUS_EXECUTE_TACTUS_RUNNER || "/opt/papyrus/execute_tactus_runner.py",
+      PAPYRUS_EXECUTE_TACTUS_TIMEOUT_SECONDS: process.env.PAPYRUS_EXECUTE_TACTUS_TIMEOUT_SECONDS || "30",
     };
-    const openaiParam = props.openaiApiKeySsmParam?.trim() || process.env.PAPYRUS_CONSOLE_OPENAI_API_KEY_SSM_PARAM || "";
-    if (openaiParam) environment.PAPYRUS_CONSOLE_OPENAI_API_KEY_SSM_PARAM = openaiParam;
-    const jwtParam = props.jwtSecretSsmParam?.trim() || process.env.PAPYRUS_CONSOLE_JWT_SECRET_SSM_PARAM || process.env.PAPYRUS_JWT_SECRET_SSM_PARAM || "";
-    if (jwtParam) environment.PAPYRUS_CONSOLE_JWT_SECRET_SSM_PARAM = jwtParam;
 
     const imageUri = props.prebuiltImageUri?.trim() || process.env.PAPYRUS_CONSOLE_RESPONDER_IMAGE_URI?.trim() || "";
+    const allowLocalImageBuild = parseBooleanEnv(process.env.PAPYRUS_CONSOLE_RESPONDER_ALLOW_LOCAL_BUILD);
     let code: DockerImageCode;
     if (imageUri) {
       const { repositoryName, tagOrDigest } = parseEcrImageUri(imageUri);
+      assertArm64ImageUri(imageUri, tagOrDigest);
       const repository = Repository.fromRepositoryName(this, "ConsoleChatResponderRepository", repositoryName);
       code = DockerImageCode.fromEcr(repository, { tagOrDigest });
     } else {
+      if (!allowLocalImageBuild) {
+        throw new Error(
+          "ConsoleChatResponder requires PAPYRUS_CONSOLE_RESPONDER_IMAGE_URI (prebuilt ECR image). "
+          + "Set PAPYRUS_CONSOLE_RESPONDER_ALLOW_LOCAL_BUILD=true only when intentionally using local Docker image builds.",
+        );
+      }
       code = DockerImageCode.fromImageAsset(props.projectRoot, {
         file: "amplify/functions/console-chat-responder/Dockerfile",
+        platform: Platform.LINUX_ARM64,
         exclude: [
           ".git",
           ".env",
@@ -69,6 +76,7 @@ export class ConsoleChatResponderStack extends NestedStack {
 
     this.responderFunction = new DockerImageFunction(this, "ConsoleChatResponderFunction", {
       code,
+      architecture: Architecture.ARM_64,
       timeout: Duration.minutes(2),
       memorySize: 1024,
       environment,
@@ -101,6 +109,11 @@ export class ConsoleChatResponderStack extends NestedStack {
     }));
     this.responderFunction.addToRolePolicy(new PolicyStatement({
       effect: Effect.ALLOW,
+      actions: ["appsync:GraphQL"],
+      resources: ["*"],
+    }));
+    this.responderFunction.addToRolePolicy(new PolicyStatement({
+      effect: Effect.ALLOW,
       actions: [
         "dynamodb:DescribeStream",
         "dynamodb:GetRecords",
@@ -110,6 +123,11 @@ export class ConsoleChatResponderStack extends NestedStack {
       resources: [props.messageStreamArn],
     }));
   }
+}
+
+function parseBooleanEnv(value: string | undefined): boolean {
+  if (!value) return false;
+  return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
 }
 
 function parseEcrImageUri(imageUri: string): { repositoryName: string; tagOrDigest: string } {
@@ -134,4 +152,13 @@ function parseEcrImageUri(imageUri: string): { repositoryName: string; tagOrDige
     repositoryName: imagePath.slice(0, colonIndex),
     tagOrDigest: imagePath.slice(colonIndex + 1),
   };
+}
+
+function assertArm64ImageUri(imageUri: string, tagOrDigest: string): void {
+  const normalized = `${imageUri} ${tagOrDigest}`.toLowerCase();
+  if (normalized.includes("amd64") || normalized.includes("x86_64")) {
+    throw new Error(
+      `PAPYRUS_CONSOLE_RESPONDER_IMAGE_URI must reference an ARM64 image, but received: ${imageUri}`,
+    );
+  }
 }

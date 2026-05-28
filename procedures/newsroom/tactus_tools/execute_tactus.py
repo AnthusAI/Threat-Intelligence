@@ -22,6 +22,7 @@ def execute_tactus(
     corpus_key: str = "",
     max_evidence_items: int = 20,
     research_mode: str = "",
+    knowledge_query_scope: dict | None = None,
 ) -> dict:
     """Execute a Papyrus Tactus snippet through the newsroom runtime.
 
@@ -38,4 +39,5 @@ def execute_tactus(
         corpus_key=corpus_key,
         max_evidence_items=max_evidence_items,
         research_mode=research_mode,
+        knowledge_query_scope=knowledge_query_scope,
     )

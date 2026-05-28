@@ -36,6 +36,16 @@ def parse_boolean_option(value: Any, default: bool, label: str) -> bool:
     raise ValueError(f"{label} must be a boolean value.")
 
 
+def resolve_mutation_apply(options: dict[str, Any], command_label: str) -> bool:
+    if options.get("apply") is not None:
+        raise ValueError(
+            f"{command_label} no longer accepts --apply. "
+            "Writes now run by default; use --dry-run to preview."
+        )
+    dry_run = parse_boolean_option(options.get("dry-run"), default=False, label="--dry-run")
+    return not dry_run
+
+
 def normalize_string(value: Any) -> str | None:
     if value is None:
         return None

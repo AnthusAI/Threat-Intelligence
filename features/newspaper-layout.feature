@@ -52,6 +52,13 @@ Feature: Newspaper layout scenarios
       | 640   | 1200   | 5            | 3         |
       | 390   | 900    | 4            | 2         |
 
+  Scenario: Newsroom top shell responds to constrained container width
+    Given I open the newsroom at 1280 by 900
+    And I constrain the newsroom shell width to 760 pixels
+    Then the newsroom masthead should fit width and align to rhythm rows
+    And the newsroom tabs should use 3 columns
+    And no browser console errors should occur
+
   Scenario: Front page masthead uses the edition title
     Given I open the "current-edition" layout scenario at 1280 by 900
     Then the front page masthead edition label should say "Current Edition"
@@ -274,12 +281,26 @@ Feature: Newspaper layout scenarios
   Scenario: Newsroom reference detail renders the header curation cluster
     Given I open the references newsroom at 1280 by 900
     When I open reference "reference-knowledge-corpus-demo-source-history-001"
+    Then the selected reference deep link URL should be "reference-knowledge-corpus-demo-source-history-001"
     Then the reference detail should render the curation cluster
     And the reference detail curation controls should share one height
     And the reference detail curation cluster should align with the top toolbar
     And the reference detail should not show the lower curation selector
+    And the reference detail toolbar should show previous and next actions
+    And the reference detail toolbar previous action should be disabled
+    And the reference detail toolbar next action should be enabled
+    When I open the next reference from the detail toolbar
+    Then the selected reference detail should change
+    And the current URL should match the selected reference detail
+    And the reference detail toolbar previous action should be enabled
+    When I open the previous reference from the detail toolbar
+    Then the selected reference detail should return to the original selection
+    And the selected reference deep link URL should be "reference-knowledge-corpus-demo-source-history-001"
     When I open the reference detail curation actions
-    Then the reference detail actions menu should offer "Reopen" and "Archive"
+    Then the reference detail actions menu should offer "Research" and "Archive"
+    And the reference detail actions menu should not offer "Reopen"
+    And the reference detail actions menu should show an icon for "Research"
+    And semantic reference links should use canonical path URLs
     When I set the selected reference quality to 1 stars
     Then the reference detail curation status should be "rejected"
     And the reference detail should show 0 filled quality stars
@@ -287,8 +308,9 @@ Feature: Newspaper layout scenarios
     Then the reference detail should immediately show 4 filled quality stars
     And the reference detail curation status should be "accepted"
     And the reference detail should show 4 filled quality stars
+    And the reference detail should render topic workflow and corpus selector
     When I open the reference detail insight composer
-    Then the insight modal should be visible
+    Then the reference detail insight composer should be visible
     And no browser console errors should occur
 
   Scenario: Newsroom reference quality failure restores the confirmed header state
@@ -301,6 +323,57 @@ Feature: Newspaper layout scenarios
     And the reference detail curation status should be "accepted"
     And the reference detail should show 0 filled quality stars
     And the reference detail quality message should mention "not saved"
+    And no browser console errors should occur
+
+  Scenario: Newsroom reference detail removes duplicated source URI from summary body
+    Given I am a test editor reader
+    And the newsroom uses mocked reference summaries with leading source URI
+    And I open the references newsroom at 1280 by 900
+    When I open reference "reference-knowledge-corpus-demo-source-history-001"
+    Then the reference detail source URI should be clickable
+    And the reference detail should use link-standard value typography for source URI and attachments
+    And the reference detail should not show source URI above the summary
+    And the reference detail summary should not start with source URI
+    And the reference detail summary should be "Trimmed summary body for mock reference one."
+    When I open reference "reference-knowledge-corpus-demo-source-history-002"
+    Then the reference detail source URI should be clickable
+    And the reference detail should not show source URI above the summary
+    And the reference detail summary should be "Unchanged summary for mock reference two."
+    And no browser console errors should occur
+
+  Scenario: Newsroom reference detail renders extracted text
+    Given I am a test editor reader
+    And the newsroom uses mocked extracted text payload for reference detail
+    And I open the references newsroom at 1280 by 900
+    When I open reference "reference-knowledge-corpus-demo-source-history-001"
+    Then the reference detail should place extracted text below metadata
+    And the reference detail should render extracted text tabs
+    And the reference detail extracted text active tab should be "filtered"
+    And the reference detail extracted text should include "History 001 filtered text line one."
+    When I switch the reference detail extracted text tab to "original"
+    Then the reference detail extracted text should include "History 001 extracted text line one."
+    And no browser console errors should occur
+
+  Scenario: Newsroom reference detail hides missing extracted text tabs
+    Given I am a test editor reader
+    And the newsroom uses mocked filtered extracted text payload for reference detail
+    And I open the references newsroom at 1280 by 900
+    When I open reference "reference-knowledge-corpus-demo-source-history-002"
+    Then the reference detail extracted text tab "filtered" should be visible
+    And the reference detail extracted text tab "original" should be hidden
+    And the reference detail extracted text active tab should be "filtered"
+    And the reference detail extracted text should include "History 002 filtered text line one."
+    And no browser console errors should occur
+
+  Scenario: Newsroom reference detail shows missing extracted text state
+    Given I open the newsroom path "/newsroom/references/reference-knowledge-corpus-demo-source-history-002?demo=1" at 1280 by 900
+    Then the reference detail should show extracted text empty state when both tabs are missing
+    And no browser console errors should occur
+
+  Scenario: Newsroom reference detail loads from canonical deep links
+    Given I open the newsroom path "/newsroom/references/reference-knowledge-corpus-demo-source-history-002?demo=1" at 1280 by 900
+    Then the selected reference detail should be "reference-knowledge-corpus-demo-source-history-002"
+    And the selected reference deep link URL should be "reference-knowledge-corpus-demo-source-history-002"
     And no browser console errors should occur
 
   Scenario Outline: Newsroom operational desks use newspaper card grids
@@ -321,6 +394,8 @@ Feature: Newspaper layout scenarios
 
     Examples:
       | section     | width | height |
+      | topics      | 1280  | 900    |
+      | concepts    | 1280  | 900    |
       | messages    | 1280  | 900    |
       | references  | 1280  | 900    |
       | assignments | 1280  | 900    |
@@ -351,6 +426,8 @@ Feature: Newspaper layout scenarios
 
     Examples:
       | section     |
+      | topics      |
+      | concepts    |
       | messages    |
       | references  |
       | assignments |
@@ -406,6 +483,8 @@ Feature: Newspaper layout scenarios
     Then the reporting story budget should show section "news" with 1 slot and 1 candidate
     And story budget candidate "assignment-demo-reporting-news-001" should show packet recommendation "hold"
     And story budget candidate "assignment-demo-reporting-news-001" should show risk and gap context
+    When I open story budget candidate "assignment-demo-reporting-news-001"
+    Then assignment "assignment-demo-reporting-news-001" should show a private reporting packet
     When I review story budget candidate "assignment-demo-reporting-news-001" as "hold"
     Then story budget candidate "assignment-demo-reporting-news-001" should show reporting decision "hold"
     And assignment "assignment-demo-reporting-news-001" should not appear as an edition item

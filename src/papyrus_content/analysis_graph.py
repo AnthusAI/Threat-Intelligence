@@ -14,7 +14,7 @@ from .relation_types import load_semantic_relation_type_seeds, normalize_relatio
 
 
 def graph_export_summary_payload_id(import_run_id: str) -> str:
-    return f"raw-import-run-{safe_id(import_run_id)}-graph-export-summary"
+    return f"raw-importrun-{hash_short(import_run_id)}-graph-export-summary"
 
 
 def compact_graph_artifact_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -130,6 +130,84 @@ def hydrate_graph_reference_map_sync(client: PapyrusGraphQLAuthoringClient, corp
     }
 
 
+def build_graph_export_publish_records(
+    payload: dict[str, Any],
+    *,
+    corpus_id: str,
+    classifier_id: str | None,
+    imported_at: str,
+    reference_by_external_item_id: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    identity = _graph_export_identity(payload, corpus_id)
+    counts = _graph_export_publish_counts(payload, reference_by_external_item_id)
+    records = [
+        _record_knowledge_import_run(
+            identity["importRunId"],
+            corpus_id,
+            classifier_id,
+            identity["snapshotId"],
+            imported_at,
+            payload,
+            relation_count=counts["mentionEdgeCount"],
+        ),
+        {
+            "modelName": "KnowledgeArtifact",
+            "expected": {
+                "id": f"knowledge-artifact-{safe_id(corpus_id)}-{safe_id(identity['extractorId'])}-{safe_id(identity['snapshotId'])}",
+                "corpusId": corpus_id,
+                "artifactKind": "graph-export",
+                "artifactId": identity["snapshotRef"],
+                "snapshotId": identity["snapshotId"],
+                "displayName": f"Graph export {identity['snapshotRef']}",
+                "createdAt": imported_at,
+                "importRunId": identity["importRunId"],
+            },
+        },
+        {
+            "modelName": "KnowledgeRawPayload",
+            "expected": {
+                "id": graph_export_summary_payload_id(identity["importRunId"]),
+                "ownerType": "importRun",
+                "ownerId": identity["importRunId"],
+                "payloadKind": "graph-export-summary",
+                "importRunId": identity["importRunId"],
+                "payload": json.dumps(
+                    {
+                        "snapshot": identity["snapshotRef"],
+                        "graphId": identity["graphId"],
+                        "extractorId": identity["extractorId"],
+                        "extractionSnapshot": identity["extractionSnapshot"],
+                        "stats": payload.get("stats") or {},
+                        "nodeCount": counts["nodeCount"],
+                        "edgeCount": counts["edgeCount"],
+                        "semanticNodeCount": counts["semanticNodeCount"],
+                        "semanticRelationCount": None,
+                        "skippedItemNodes": counts["skippedItemNodes"],
+                        "unresolvedReferences": counts["unresolvedReferences"],
+                        "unresolvedReferenceItemIds": counts["unresolvedReferenceItemIds"],
+                    }
+                ),
+                "createdAt": imported_at,
+                "updatedAt": imported_at,
+            },
+        },
+    ]
+    return {
+        **identity,
+        "stats": payload.get("stats") or {},
+        "nodeCount": counts["nodeCount"],
+        "edgeCount": counts["edgeCount"],
+        "records": records,
+        "semanticNodeCount": counts["semanticNodeCount"],
+        "semanticRelationCount": None,
+        "skippedItemNodes": counts["skippedItemNodes"],
+        "unresolvedReferences": counts["unresolvedReferences"],
+        "unresolvedReferenceItemIds": counts["unresolvedReferenceItemIds"],
+        "mentionEdgeCount": counts["mentionEdgeCount"],
+        "mentionRelationCount": None,
+    }
+
+
 def build_graph_export_import_records(
     payload: dict[str, Any],
     *,
@@ -138,16 +216,7 @@ def build_graph_export_import_records(
     imported_at: str,
     reference_by_external_item_id: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
-    snapshot = payload.get("snapshot") or {}
-    manifest = payload.get("manifest") or {}
-    extractor_id = _clean_string(snapshot.get("extractor_id") or (manifest.get("configuration") or {}).get("extractor_id")) or "graph"
-    snapshot_id = _clean_string(snapshot.get("snapshot_id") or manifest.get("snapshot_id"))
-    if not snapshot_id:
-        raise ValueError("Graph export is missing snapshot.snapshot_id.")
-    snapshot_ref = f"{extractor_id}:{snapshot_id}"
-    graph_id = _clean_string(manifest.get("graph_id")) or _clean_string(payload.get("graph_id")) or snapshot_ref
-    extraction_snapshot = _clean_string(manifest.get("extraction_snapshot"))
-    import_run_id = f"knowledge-import-{safe_id(corpus_id)}-graph-{safe_id(extractor_id)}-{hash_short(snapshot_ref)}"
+    identity = _graph_export_identity(payload, corpus_id)
     nodes = payload.get("nodes") if isinstance(payload.get("nodes"), list) else []
     edges = payload.get("edges") if isinstance(payload.get("edges"), list) else []
     records: list[dict[str, Any]] = []
@@ -163,12 +232,15 @@ def build_graph_export_import_records(
             continue
         if node_id in materialized_node_by_graph_node_id:
             continue
-        lineage_id = f"semantic-node-graph-{safe_id(corpus_id)}-{safe_id(extractor_id)}-{safe_id(snapshot_id)}-{hash_short(node_id)}"
+        lineage_id = (
+            f"semantic-node-graph-{safe_id(corpus_id)}-{safe_id(identity['extractorId'])}-"
+            f"{safe_id(identity['snapshotId'])}-{hash_short(node_id)}"
+        )
         semantic_node = with_version_fields(
             {
                 "id": f"{lineage_id}-v1",
                 "lineageId": lineage_id,
-                "nodeKey": f"{extractor_id}:{snapshot_id}:{node_id}",
+                "nodeKey": f"{identity['extractorId']}:{identity['snapshotId']}:{node_id}",
                 "nodeKind": _normalize_graph_node_kind(node.get("node_type")),
                 "corpusId": corpus_id,
                 "categorySetId": None,
@@ -178,14 +250,14 @@ def build_graph_export_import_records(
                 "description": _graph_node_description(node),
                 "aliases": _graph_node_aliases(node),
                 "status": "generated",
-                "importRunId": import_run_id,
+                "importRunId": identity["importRunId"],
                 "createdAt": imported_at,
                 "newsroomFeedKey": "semanticNodes",
                 "updatedAt": imported_at,
             },
             now=imported_at,
             actor="biblicus-graph-export",
-            reason=f"graph-import:{snapshot_ref}",
+            reason=f"graph-import:{identity['snapshotRef']}",
         )
         materialized_node_by_graph_node_id[node_id] = semantic_node
         records.append({"modelName": "SemanticNode", "expected": semantic_node})
@@ -196,27 +268,37 @@ def build_graph_export_import_records(
         materialized_node_by_graph_node_id=materialized_node_by_graph_node_id,
         corpus_id=corpus_id,
         classifier_id=classifier_id,
-        import_run_id=import_run_id,
+        import_run_id=identity["importRunId"],
         imported_at=imported_at,
-        snapshot_ref=snapshot_ref,
-        graph_id=graph_id,
-        extractor_id=extractor_id,
-        extraction_snapshot=extraction_snapshot,
+        snapshot_ref=identity["snapshotRef"],
+        graph_id=identity["graphId"],
+        extractor_id=identity["extractorId"],
+        extraction_snapshot=identity["extractionSnapshot"],
         reference_by_external_item_id=reference_by_external_item_id,
     )
-    records.append(_record_knowledge_import_run(import_run_id, corpus_id, classifier_id, snapshot_id, imported_at, payload, relation_records))
+    records.append(
+        _record_knowledge_import_run(
+            identity["importRunId"],
+            corpus_id,
+            classifier_id,
+            identity["snapshotId"],
+            imported_at,
+            payload,
+            relation_count=len(relation_records["records"]),
+        )
+    )
     records.append(
         {
             "modelName": "KnowledgeArtifact",
             "expected": {
-                "id": f"knowledge-artifact-{safe_id(corpus_id)}-{safe_id(extractor_id)}-{safe_id(snapshot_id)}",
+                "id": f"knowledge-artifact-{safe_id(corpus_id)}-{safe_id(identity['extractorId'])}-{safe_id(identity['snapshotId'])}",
                 "corpusId": corpus_id,
                 "artifactKind": "graph-export",
-                "artifactId": snapshot_ref,
-                "snapshotId": snapshot_id,
-                "displayName": f"Graph export {snapshot_ref}",
+                "artifactId": identity["snapshotRef"],
+                "snapshotId": identity["snapshotId"],
+                "displayName": f"Graph export {identity['snapshotRef']}",
                 "createdAt": imported_at,
-                "importRunId": import_run_id,
+                "importRunId": identity["importRunId"],
             },
         }
     )
@@ -224,17 +306,17 @@ def build_graph_export_import_records(
         {
             "modelName": "KnowledgeRawPayload",
             "expected": {
-                "id": graph_export_summary_payload_id(import_run_id),
+                "id": graph_export_summary_payload_id(identity["importRunId"]),
                 "ownerType": "importRun",
-                "ownerId": import_run_id,
+                "ownerId": identity["importRunId"],
                 "payloadKind": "graph-export-summary",
-                "importRunId": import_run_id,
+                "importRunId": identity["importRunId"],
                 "payload": json.dumps(
                     {
-                        "snapshot": snapshot_ref,
-                        "graphId": graph_id,
-                        "extractorId": extractor_id,
-                        "extractionSnapshot": extraction_snapshot,
+                        "snapshot": identity["snapshotRef"],
+                        "graphId": identity["graphId"],
+                        "extractorId": identity["extractorId"],
+                        "extractionSnapshot": identity["extractionSnapshot"],
                         "stats": payload.get("stats") or {},
                         "nodeCount": len(nodes),
                         "edgeCount": len(edges),
@@ -242,6 +324,7 @@ def build_graph_export_import_records(
                         "semanticRelationCount": len(relation_records["records"]),
                         "skippedItemNodes": skipped_item_nodes,
                         "unresolvedReferences": relation_records["unresolvedReferences"],
+                        "unresolvedReferenceItemIds": relation_records["unresolvedReferenceItemIds"],
                     }
                 ),
                 "createdAt": imported_at,
@@ -251,12 +334,7 @@ def build_graph_export_import_records(
     )
     records.extend(relation_records["records"])
     return {
-        "importRunId": import_run_id,
-        "extractorId": extractor_id,
-        "snapshotId": snapshot_id,
-        "snapshotRef": snapshot_ref,
-        "graphId": graph_id,
-        "extractionSnapshot": extraction_snapshot,
+        **identity,
         "stats": payload.get("stats") or {},
         "nodeCount": len(nodes),
         "edgeCount": len(edges),
@@ -265,6 +343,7 @@ def build_graph_export_import_records(
         "semanticRelationCount": len(relation_records["records"]),
         "skippedItemNodes": skipped_item_nodes,
         "unresolvedReferences": relation_records["unresolvedReferences"],
+        "unresolvedReferenceItemIds": relation_records["unresolvedReferenceItemIds"],
         "mentionEdgeCount": relation_records["mentionEdgeCount"],
         "mentionRelationCount": relation_records["mentionRelationCount"],
     }
@@ -325,6 +404,8 @@ def build_generated_graph_supersession_changes(
 def plan_graph_artifact_import(
     client: PapyrusGraphQLAuthoringClient,
     import_run_id: str,
+    *,
+    resolve_existing: bool = True,
 ) -> dict[str, Any]:
     import_run = client.get_record("KnowledgeImportRun", import_run_id)
     if not import_run:
@@ -354,8 +435,12 @@ def plan_graph_artifact_import(
             f"Graph export artifact resolves to import run {plan['importRunId']}, not requested import run {import_run['id']}."
         )
     if plan["mentionEdgeCount"] > 0 and plan["mentionRelationCount"] == 0:
+        unresolved_ids = [str(value) for value in (plan.get("unresolvedReferenceItemIds") or []) if value]
+        unresolved_preview = ", ".join(unresolved_ids[:20])
+        unresolved_suffix = f" Unresolved item ids: {unresolved_preview}" if unresolved_preview else ""
         raise ValueError(
-            f"Graph import could not resolve any accepted References for {plan['mentionEdgeCount']} reference-to-entity edge(s)."
+            "Graph import could not resolve any accepted References for "
+            f"{plan['mentionEdgeCount']} reference-to-entity edge(s).{unresolved_suffix}"
         )
     now = _utc_now()
     supersession_changes = (
@@ -369,7 +454,18 @@ def plan_graph_artifact_import(
         if should_supersede_generated_graph(plan)
         else []
     )
-    import_changes = build_record_changes_tolerating_optional_models(client, plan["records"])
+    if resolve_existing:
+        import_changes = build_record_changes_tolerating_optional_models(client, plan["records"])
+    else:
+        import_changes = [
+            {
+                "modelName": record["modelName"],
+                "expected": record["expected"],
+                "current": None,
+                "action": "create",
+            }
+            for record in plan["records"]
+        ]
     return {
         "importRun": import_run,
         "attachment": attachment,
@@ -377,6 +473,86 @@ def plan_graph_artifact_import(
         "supersessionChanges": supersession_changes,
         "importChanges": import_changes,
         "changes": [*supersession_changes, *import_changes],
+    }
+
+
+def _graph_export_identity(payload: dict[str, Any], corpus_id: str) -> dict[str, Any]:
+    snapshot = payload.get("snapshot") if isinstance(payload.get("snapshot"), dict) else {}
+    manifest = payload.get("manifest") if isinstance(payload.get("manifest"), dict) else {}
+    configuration = manifest.get("configuration") if isinstance(manifest.get("configuration"), dict) else {}
+    extractor_id = _clean_string(snapshot.get("extractor_id") or configuration.get("extractor_id")) or "graph"
+    snapshot_id = _clean_string(snapshot.get("snapshot_id") or manifest.get("snapshot_id"))
+    if not snapshot_id:
+        raise ValueError("Graph export is missing snapshot.snapshot_id.")
+    snapshot_ref = f"{extractor_id}:{snapshot_id}"
+    graph_id = _clean_string(manifest.get("graph_id")) or _clean_string(payload.get("graph_id")) or snapshot_ref
+    extraction_snapshot = _clean_string(manifest.get("extraction_snapshot"))
+    import_run_id = f"knowledge-import-{safe_id(corpus_id)}-graph-{safe_id(extractor_id)}-{hash_short(snapshot_ref)}"
+    return {
+        "importRunId": import_run_id,
+        "extractorId": extractor_id,
+        "snapshotId": snapshot_id,
+        "snapshotRef": snapshot_ref,
+        "graphId": graph_id,
+        "extractionSnapshot": extraction_snapshot,
+    }
+
+
+def _graph_export_publish_counts(
+    payload: dict[str, Any],
+    reference_by_external_item_id: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    nodes = payload.get("nodes") if isinstance(payload.get("nodes"), list) else []
+    edges = payload.get("edges") if isinstance(payload.get("edges"), list) else []
+    node_ids: set[str] = set()
+    skipped_item_nodes = 0
+    graph_node_by_id = {_clean_string(node.get("node_id")): node for node in nodes if _clean_string(node.get("node_id"))}
+    for node in nodes:
+        node_id = _clean_string(node.get("node_id"))
+        if not node_id:
+            continue
+        if _is_graph_item_node(node):
+            skipped_item_nodes += 1
+            continue
+        node_ids.add(node_id)
+    unresolved_references = 0
+    unresolved_reference_item_ids_limit = 500
+    unresolved_reference_item_ids: list[str] = []
+    unresolved_reference_item_ids_seen: set[str] = set()
+    mention_edge_count = 0
+    for edge in edges:
+        src = _clean_string(edge.get("src"))
+        dst = _clean_string(edge.get("dst"))
+        if not src or not dst:
+            continue
+        src_node = graph_node_by_id.get(src) or {}
+        dst_node = graph_node_by_id.get(dst) or {}
+        if not (_is_graph_item_node(src_node) or _is_graph_item_node(dst_node)):
+            continue
+        mention_edge_count += 1
+        source_item_id = (
+            _clean_string(edge.get("item_id"))
+            or _graph_item_id_from_node(src_node)
+            or _graph_item_id_from_node(dst_node)
+        )
+        if source_item_id and reference_by_external_item_id.get(source_item_id):
+            continue
+        unresolved_references += 1
+        if (
+            source_item_id
+            and source_item_id not in unresolved_reference_item_ids_seen
+            and len(unresolved_reference_item_ids) < unresolved_reference_item_ids_limit
+        ):
+            unresolved_reference_item_ids_seen.add(source_item_id)
+            unresolved_reference_item_ids.append(source_item_id)
+    return {
+        "nodeCount": len(nodes),
+        "edgeCount": len(edges),
+        "semanticNodeCount": len(node_ids),
+        "skippedItemNodes": skipped_item_nodes,
+        "mentionEdgeCount": mention_edge_count,
+        "unresolvedReferences": unresolved_references,
+        "unresolvedReferenceItemIds": unresolved_reference_item_ids,
     }
 
 
@@ -400,6 +576,9 @@ def _build_graph_export_relation_records(
     records: list[dict[str, Any]] = []
     seen: set[str] = set()
     unresolved_references = 0
+    unresolved_reference_item_ids_limit = 500
+    unresolved_reference_item_ids: list[str] = []
+    unresolved_reference_item_ids_seen: set[str] = set()
     mention_edge_count = 0
     mention_relation_count = 0
 
@@ -434,6 +613,13 @@ def _build_graph_export_relation_records(
             reference = reference_by_external_item_id.get(source_item_id) if source_item_id else None
             if not reference:
                 unresolved_references += 1
+                if (
+                    source_item_id
+                    and source_item_id not in unresolved_reference_item_ids_seen
+                    and len(unresolved_reference_item_ids) < unresolved_reference_item_ids_limit
+                ):
+                    unresolved_reference_item_ids_seen.add(source_item_id)
+                    unresolved_reference_item_ids.append(source_item_id)
                 continue
             relation = _graph_semantic_relation_record(
                 id_parts=[snapshot_ref, source_item_id, edge_id, "mentions"],
@@ -486,6 +672,7 @@ def _build_graph_export_relation_records(
     return {
         "records": records,
         "unresolvedReferences": unresolved_references,
+        "unresolvedReferenceItemIds": unresolved_reference_item_ids,
         "mentionEdgeCount": mention_edge_count,
         "mentionRelationCount": mention_relation_count,
     }
@@ -498,7 +685,8 @@ def _record_knowledge_import_run(
     source_snapshot_id: str,
     imported_at: str,
     payload: dict[str, Any],
-    relation_records: dict[str, Any],
+    *,
+    relation_count: int,
 ) -> dict[str, Any]:
     stats = payload.get("stats") or {}
     item_count = int(stats.get("items_processed") or stats.get("items_total") or 0)
@@ -519,7 +707,7 @@ def _record_knowledge_import_run(
             "proposalCount": 0,
             "artifactCount": 1,
             "referenceCount": 0,
-            "relationCount": len(relation_records["records"]),
+            "relationCount": relation_count,
             "warningCount": 0,
         },
     }

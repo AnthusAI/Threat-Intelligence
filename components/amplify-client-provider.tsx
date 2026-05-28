@@ -8,6 +8,7 @@ let configured = false;
 
 export function configureAmplifyClient() {
   if (configured) return;
+  if (redirectLoopbackToLocalhost()) return;
   Amplify.configure(prioritizeCurrentOrigin(amplifyOutputs as ResourcesConfig), { ssr: true });
   configured = true;
 }
@@ -44,6 +45,27 @@ function prioritizeCurrentOrigin(config: ResourcesConfig): ResourcesConfig {
   } as ResourcesConfig;
 }
 
+function redirectLoopbackToLocalhost(): boolean {
+  if (typeof window === "undefined") return false;
+  const { protocol, hostname, port, pathname, search, hash } = window.location;
+  if (hostname !== "127.0.0.1" && hostname !== "::1") return false;
+  const target = `${protocol}//localhost${port ? `:${port}` : ""}${pathname}${search}${hash}`;
+  window.location.replace(target);
+  return true;
+}
+
 function normalizeUrlOrigin(value: string): string {
-  return value.replace(/\/+$/, "");
+  const trimmed = value.replace(/\/+$/, "");
+  try {
+    const parsed = new URL(trimmed);
+    const hostname = normalizeLoopbackHostname(parsed.hostname);
+    return `${parsed.protocol}//${hostname}${parsed.port ? `:${parsed.port}` : ""}`;
+  } catch {
+    return trimmed;
+  }
+}
+
+function normalizeLoopbackHostname(hostname: string): string {
+  if (hostname === "127.0.0.1" || hostname === "::1") return "localhost";
+  return hostname;
 }

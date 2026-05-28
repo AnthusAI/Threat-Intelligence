@@ -14,10 +14,10 @@ For multi-section Coverage Theme runs that dispatch research and parallel
 reporting agents together, also use
 [`skills/newsroom-story-cycle/SKILL.md`](/Users/ryan/Projects/Papyrus/skills/newsroom-story-cycle/SKILL.md).
 The Python operator surface for that loop is
-`poetry run papyrus-newsroom signals trend-report`,
-`poetry run papyrus-newsroom editions plan`,
-`poetry run papyrus-newsroom coverage-themes run`, and
-`poetry run papyrus-newsroom story-budget output`; Node `assignments
+`poetry run papyrus knowledge signals trend-report`,
+`poetry run papyrus editions plan`,
+`poetry run papyrus assignments run-story-cycle`, and
+`poetry run papyrus assignments story-cycle-output`; Node `assignments
 run-story-cycle` remains a compatibility alias.
 
 For reusable Reference summaries and quality ratings that feed ranking or
@@ -103,7 +103,7 @@ decides whether a claim is required:
 For agent or worker claims, prefer a run-scoped `assigneeKey` and a TTL:
 
 ```bash
-npm run content -- assignments claim \
+poetry run papyrus assignments claim \
   --assignment <assignment-id> \
   --assignee-key "procedure-run:<run-id>" \
   --claim-ttl-seconds 7200
@@ -131,11 +131,11 @@ the worker must update the Newsroom aggregate snapshot in the same logical
 operation or run an explicit correction pass:
 
 ```bash
-npm run content -- newsroom recount-summary --apply
+poetry run papyrus sections recount-summary
 ```
 
 Use the shared summary delta helpers and `updateNewsroomSummary` integration
-paths in `scripts/content-cli.cjs`; do not hand-edit
+paths in `papyrus`; do not hand-edit
 `knowledge-raw-payload-newsroom-summary-current`.
 
 ## Standard Research Flow
@@ -144,14 +144,14 @@ paths in `scripts/content-cli.cjs`; do not hand-edit
    no suitable assignment already exists:
 
    ```bash
-   npm run content -- assignments create-research \
+   poetry run papyrus assignments create-research \
      --title "<research assignment title>" \
      --summary "<brief operator-facing summary>" \
      --section <section-key> \
      --corpus-key <corpus-key> \
      --research-mode source_discovery \
      --topic-scope <optional-category-keys> \
-     --apply
+
    ```
 
    Omit `--section` only when the assignment is intentionally unsectioned.
@@ -162,10 +162,10 @@ paths in `scripts/content-cli.cjs`; do not hand-edit
 2. Inspect the live assignment and context:
 
    ```bash
-   npm run content -- assignments list --status open
-   npm run content -- assignments build-context --assignment <assignment-id> --context-profile reporting
-   npm run content -- assignments research-packets --assignment <assignment-id>
-   poetry run papyrus-newsroom search-semantic-nodes --query "taxonomy ontology knowledge graph" --limit 8
+   poetry run papyrus assignments list --status open
+   poetry run papyrus assignments build-context --assignment <assignment-id> --context-profile reporting
+   poetry run papyrus assignments research-packets --assignment <assignment-id>
+   poetry run papyrus search-semantic-nodes --query "taxonomy ontology knowledge graph" --limit 8
    ```
 
    Context assembly is additive and budgeted: include desk/focus category context
@@ -199,7 +199,7 @@ paths in `scripts/content-cli.cjs`; do not hand-edit
    ```bash
    AWS_PROFILE=Ryan AWS_REGION=us-east-1 \
      PYTHONPATH=../Tactus:src \
-     python -m papyrus_newsroom knowledge-query \
+     poetry run papyrus knowledge query \
        --query "<specific assignment research question>" \
        --profile researcher \
        --format both \
@@ -213,24 +213,24 @@ paths in `scripts/content-cli.cjs`; do not hand-edit
    candidate references not already in the accepted evidence set.
 
 4. For normal source-discovery work, use the one-command handoff. It runs the
-   exploratory researcher, persists one `research_packet` when `--apply` is
+   exploratory researcher, persists one `research_packet` when `--dry-run` is not set
    present, converts `proposedReferences` into a run-local catalog, and registers
    those prospects as pending references with curation assignments. It does not
    accept evidence or publish anything.
 
    ```bash
-   npm run content -- assignments research-intake-now \
+   poetry run papyrus assignments research-intake-now \
      --assignment <assignment-id> \
      --config corpora/papyrus-steering.yml \
      --corpus-key <corpus-key> \
      --research-mode source_discovery \
      --max-evidence-items 20 \
-     --apply \
+ \
      --json
    ```
 
-   Omit `--apply` first when testing. For automation, prefer
-   `npm --silent run content -- ... --json` so stdout is one compact JSON
+   Use `--dry-run` first when testing. For automation, prefer
+   `poetry run papyrus ... --json` so stdout is one compact JSON
    object. The JSON output includes the packet id, generated catalog path,
    import run id, registered reference count, skipped duplicate count, curation
    assignment count, a compact `references[]` list, and the next status command.
@@ -240,11 +240,11 @@ paths in `scripts/content-cli.cjs`; do not hand-edit
    entrypoint or the Tactus procedure, then persist the vetted packet explicitly.
 
    The default `max_evidence_items` is `20` across `assignments run-research`,
-   `research_explorer.tac`, and the `papyrus-newsroom execute-tactus --harness research`
+   `research_explorer.tac`, and the `papyrus procedures execute-tactus --harness research`
    path. Raise or lower it explicitly per run when needed.
 
    ```bash
-   poetry run papyrus-newsroom execute-tactus 'local api = api_list{}; return api'
+   poetry run papyrus procedures execute-tactus 'local api = api_list{}; return api'
 
    poetry run tactus run procedures/newsroom/researcher.tac \
      --no-sandbox \
@@ -257,7 +257,7 @@ paths in `scripts/content-cli.cjs`; do not hand-edit
 
    If the active Python environment imports an older global Tactus package,
    prefix local test runs with `PYTHONPATH=../Tactus:src` or use
-   `poetry run papyrus-newsroom` after installing the local Poetry environment.
+   `poetry run papyrus` after installing the local Poetry environment.
    The researcher harness requires the Tactus stdlib `tactus.web` module.
 
 6. Verify the returned `research_record_plan`. For live assignments it should
@@ -269,25 +269,25 @@ paths in `scripts/content-cli.cjs`; do not hand-edit
    Procedure output is dry-run by default. Persist a vetted packet explicitly:
 
    ```bash
-   npm run content -- assignments apply-research-packet \
+   poetry run papyrus assignments apply-research-packet \
      --assignment <assignment-id> \
      --research-json <packet.json> \
-     --apply
+
    ```
 
-   Omit `--apply` first when testing. CLI output should say `dry-run` or
+   Use `--dry-run` first when testing. CLI output should say `dry-run` or
    `persisted`; do not infer persistence from a successful Tactus procedure run.
 
 7. If a packet has already been persisted and only the proposal intake step is
    needed, use `intake-proposals` instead of manually building a catalog:
 
    ```bash
-   npm run content -- assignments intake-proposals \
+   poetry run papyrus assignments intake-proposals \
      --assignment <assignment-id> \
      --config corpora/papyrus-steering.yml \
      --corpus-key <corpus-key> \
      --status pending \
-     --apply \
+ \
      --json
    ```
 
@@ -344,7 +344,7 @@ It is not a draft article.
 4. Editors review packets from `/newsroom/assignments?view=budget` or with:
 
    ```bash
-   npm run content -- assignments review-reporting-packet \
+   poetry run papyrus assignments review-reporting-packet \
      --assignment <assignment-id> \
      --message <reporting-packet-message-id> \
      --decision select|merge|brief|hold|kill \
@@ -352,21 +352,21 @@ It is not a draft article.
      --dry-run
    ```
 
-   Use `--apply` only after reviewing the dry run. `merge` requires
+   Remove `--dry-run` only after reviewing the dry run. `merge` requires
    `--target-item <id>`. `select` creates a `copywriting.article-draft`
    Assignment; `brief` creates a `copywriting.brief-draft` Assignment; `hold`
    and `kill` create no Items. No packet review creates `Item` or `EditionItem`.
    Run selected copywriting work with:
 
    ```bash
-   npm run content -- assignments run-copywriting \
+   poetry run papyrus assignments run-copywriting \
      --assignment <copywriting-assignment-id> \
      --dry-run
    ```
 
 ## After Proposal Intake
 
-`assignments research-intake-now --apply` is not the end of ingestion. It turns
+`assignments research-intake-now` is not the end of ingestion. It turns
 web discoveries into pending `Reference` prospects plus
 `curation.reference-intake` assignments. The normal next step is a
 conversation-backed screening loop with the user.
@@ -374,7 +374,7 @@ conversation-backed screening loop with the user.
 1. List the pending source prospects and their source readiness:
 
    ```bash
-   npm run content -- references source-status \
+   poetry run papyrus references source-status \
      --config corpora/papyrus-steering.yml \
      --corpus-key <corpus-key> \
      --status pending
@@ -388,12 +388,12 @@ conversation-backed screening loop with the user.
 3. Record the curation decision:
 
    ```bash
-   npm run content -- references review-curation \
+   poetry run papyrus references review-curation \
      --reference <reference-id> \
      --action accept \
      --note "<why this source is in scope>"
 
-   npm run content -- references review-curation \
+   poetry run papyrus references review-curation \
      --reference <reference-id> \
      --action reject \
      --reason-code out_of_scope \
@@ -409,13 +409,13 @@ conversation-backed screening loop with the user.
    selected extracted-text snapshot:
 
    ```bash
-   npm run content -- references create-accession-assignments \
+   poetry run papyrus references create-accession-assignments \
      --config corpora/papyrus-steering.yml \
      --corpus-key <corpus-key> \
      --status accepted \
-     --apply
 
-   npm run content -- references source-status \
+
+   poetry run papyrus references source-status \
      --config corpora/papyrus-steering.yml \
      --corpus-key <corpus-key> \
      --status accepted
@@ -425,16 +425,16 @@ conversation-backed screening loop with the user.
    the accepted references when useful:
 
    ```bash
-   poetry run papyrus-newsroom references summarize \
+   poetry run papyrus references summarize \
      --reference <reference-id> \
      --max-tokens 100 \
-     --apply
 
-   poetry run papyrus-newsroom references quality set \
+
+   poetry run papyrus references quality set \
      --reference <reference-id> \
      --rating 4 \
      --note "Strong evidence for the assignment focus." \
-     --apply
+
    ```
 
    Summaries and quality ratings are semantic graph signals. They improve
@@ -452,10 +452,10 @@ conversation-backed screening loop with the user.
 
    ```bash
    AWS_PROFILE=<profile> AWS_REGION=<region> PYTHONPATH=src \
-     python -m papyrus_newsroom knowledge-vector-index --action audit
+     poetry run papyrus knowledge vector-index --action audit
 
    AWS_PROFILE=<profile> AWS_REGION=<region> PYTHONPATH=src \
-     python -m papyrus_newsroom knowledge-vector-index --action sync \
+     poetry run papyrus knowledge vector-index --action sync \
      --corpus-id <corpus-id> \
      --max-references 25 \
      --dry-run
@@ -469,7 +469,7 @@ conversation-backed screening loop with the user.
    planning:
 
    ```bash
-   npm run content -- references export-analysis-manifest \
+   poetry run papyrus references export-analysis-manifest \
      --config corpora/papyrus-steering.yml \
      --corpus-key <corpus-key> \
      --output .papyrus-runs/<run-id>/accepted-analysis-manifest.json
@@ -538,7 +538,7 @@ query. Use `evidence_item_ids_from_knowledge(knowledge)` when accepted Reference
 results should become packet evidence ids.
 
 ```bash
-poetry run papyrus-newsroom execute-tactus \
+poetry run papyrus procedures execute-tactus \
   --harness research \
   --assignment-id <assignment-id> \
   --corpus-key <corpus-key> \
@@ -609,38 +609,38 @@ Use `skills/reference-intake/SKILL.md` for the full intake rules. The shortest
 safe path from a persisted research packet to visible curation records is:
 
 ```bash
-npm run content -- assignments intake-proposals \
+poetry run papyrus assignments intake-proposals \
   --assignment <assignment-id> \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
   --status pending \
-  --apply
+
 ```
 
 The manual fallback is direct catalog registration:
 
 ```bash
-npm run content -- references register-catalog \
+poetry run papyrus references register-catalog \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
   --catalog <catalog.json> \
   --status pending \
   --ingestion-rationale "<summary, research focus, editorial mission fit>" \
-  --apply
+
 ```
 
 Rejected source material is still useful scope memory when it has a structured
 reason:
 
 ```bash
-npm run content -- references register-catalog \
+poetry run papyrus references register-catalog \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
   --catalog <catalog.json> \
   --status rejected \
   --reason-code out_of_scope \
   --note "Outside the current editorial scope." \
-  --apply
+
 ```
 
 `register-catalog` writes only `Reference`, `ReferenceAttachment`, curation
@@ -653,12 +653,12 @@ npm run content -- references register-catalog \
 Before running downstream analysis, export accepted-only manifests:
 
 ```bash
-npm run content -- references export-analysis-manifest \
+poetry run papyrus references export-analysis-manifest \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
   --output <accepted-manifest.json>
 
-npm run content -- references export-scope-training \
+poetry run papyrus references export-scope-training \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
   --output <scope-training.json>
@@ -675,7 +675,7 @@ Use these checks after changing research workflow code or docs:
 ```bash
 poetry run python procedures/newsroom/tests/test_newsroom_tools.py
 tactus validate procedures/newsroom/researcher.tac
-node scripts/test-category-mappers.cjs
+npm run test:categories
 npm run typecheck
 ```
 

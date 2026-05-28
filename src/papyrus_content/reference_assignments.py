@@ -329,7 +329,7 @@ def execute_reference_text_extraction_assignment(client, assignment: dict[str, A
     corpus_id = knowledge_corpus_id(corpus_config)
     corpus_path = Path(corpus_config["path"]).resolve()
     biblicus_workdir = resolve_biblicus_workdir(options)
-    actor_label = options.get("actor") or options.get("assignee-key") or "papyrus-content-cli"
+    actor_label = options.get("actor") or options.get("assignee-key") or "papyrus-cli"
     extraction_result = run_biblicus_text_extraction_for_corpus(
         corpus_path=corpus_path,
         biblicus_workdir=biblicus_workdir,

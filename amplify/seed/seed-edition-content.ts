@@ -1,6 +1,13 @@
 import type { Article } from "../../lib/articles";
 import seedEditionContent from "./seed-edition-content.json";
 
+type SeedHouseAd = {
+  id: string;
+  pageNumber: number;
+  label: string;
+  presetId?: "ad.region" | "ad.fullPage";
+};
+
 type SeedEditionContent = {
   id: string;
   slug: string;
@@ -8,6 +15,7 @@ type SeedEditionContent = {
   description: string;
   publishDate: string;
   suppressNewsDeskAppendix?: boolean;
+  houseAds?: SeedHouseAd[];
   articles: Article[];
 };
 
@@ -42,8 +50,25 @@ export function getSeedEditionConfig(): SeedEditionConfig {
       suppressNewsDeskAppendix: seedContent.suppressNewsDeskAppendix === true,
     },
     articleOrder: itemIds,
-    layoutPlan: createSeedEditionLayoutPlan(itemIds),
+    layoutPlan: applySeedHouseAds(createSeedEditionLayoutPlan(itemIds), seedContent.houseAds),
   };
+}
+
+function applySeedHouseAds(layoutPlan: ReturnType<typeof createSeedEditionLayoutPlan>, houseAds: SeedHouseAd[] | undefined) {
+  if (!houseAds?.length) return layoutPlan;
+  for (const ad of houseAds) {
+    const page = layoutPlan.pages.find((entry) => entry.pageNumber === ad.pageNumber);
+    const region = page?.regions?.[0];
+    if (!region) continue;
+    (region.blocks as Array<Record<string, unknown>>).push({
+      id: ad.id,
+      type: "adBlock",
+      presetId: ad.presetId ?? "ad.region",
+      required: false,
+      label: ad.label,
+    });
+  }
+  return layoutPlan;
 }
 
 function createSeedEditionLayoutPlan(itemIds: string[]) {

@@ -4,8 +4,8 @@ sections:
     title: News
     shortTitle: Trends & Analysis
     type: canonical
-    editorialMission: Cover recent developments that matter to readers.
-    editorialPolicy: Focus on product announcements, company announcements, model releases, funding, acquisitions, platform changes, standards, and other current developments. News pieces should explain what changed and why it matters.
+    editorialMission: Cover current developments that materially affect readers, institutions, and public life.
+    editorialPolicy: Prioritize journalistic and official sources for current reporting, including reputable newsroom coverage, regulatory notices, hospital or health-system announcements, and direct-source statements. Use academic papers mainly as background context unless the story is explicitly research-led. Explain what changed, what is verified, what remains uncertain, and why it matters now.
     enabled: true
     sortOrder: 1
 
@@ -134,3 +134,12 @@ sections:
     editorialPolicy: Focus on practical workplace changes rather than generic automation speculation. Suitable for pieces on call centers, knowledge work, management, training, and productivity systems.
     enabled: true
     sortOrder: 15
+
+  - id: gaming
+    title: Gaming
+    shortTitle: Play Systems
+    type: rotating
+    editorialMission: Cover AI in game development, game worlds, player experiences, and interactive media systems.
+    editorialPolicy: Commission reporting on AI-assisted game production, procedural generation, NPC behavior, moderation, creator tools, and platform policy changes affecting game ecosystems.
+    enabled: true
+    sortOrder: 16

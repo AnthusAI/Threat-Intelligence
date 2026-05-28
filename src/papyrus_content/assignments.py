@@ -115,7 +115,7 @@ def apply_assignment_action(
             "role": "metadata",
             "sortKey": "metadata",
             "content": {
-                "source": "papyrus-content-cli",
+                "source": "papyrus-cli",
                 "kind": f"assignment.action.{action}",
             },
             "now": now,
@@ -146,7 +146,7 @@ def resolve_cli_claim_identity(options: dict[str, Any], auth_claims: dict[str, A
         or normalize_string(options.get("actor"))
         or normalize_string(auth_claims.get("email"))
         or normalize_string(auth_claims.get("sub"))
-        or "papyrus-content-cli"
+        or "papyrus-cli"
     )
     return {
         "assigneeType": "agent",

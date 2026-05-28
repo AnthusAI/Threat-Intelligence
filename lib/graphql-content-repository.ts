@@ -5,7 +5,7 @@ import type { Article, ArticleImage, ArticleImageAsset, ArticleImageLayout } fro
 import { getAmplifyServerRuntime } from "./amplify-server-runtime";
 import type { ContentRepository, EditionContent, EditionRouteSummary, ListPublishedEditionsOptions, LoadEditionContentOptions } from "./content-types";
 import { createEditionSectionPlan } from "./edition-sections";
-import { normalizeEditionLayoutPlan } from "./layout-plan";
+import { normalizeEditionLayoutPlan, validateEditionLayoutPlanForItems, type EditionLayoutPlan } from "./layout-plan";
 import {
   articleToPublicationItem,
   publicationItemToArticle,
@@ -267,9 +267,11 @@ async function listPublishedEditionsForDate(editionDate: string): Promise<GraphQ
 }
 
 async function loadEditionContentFromEdition(edition: GraphQLEdition): Promise<EditionContent> {
+  const layoutPlan = normalizeEditionLayoutPlan(edition.layoutPlan, "Edition.layoutPlan");
   const editionItems = await listEditionItems(edition.id);
   const editionMetadata = parseObjectMetadata(edition.metadata);
-  const items = (
+  const itemsBySlug = new Map<string, PublicationItem>();
+  const normalizedEditionItems = (
     await Promise.all(
       editionItems.map(async (editionItem) => {
         const item = await getItemById(editionItem.publishedItemId);
@@ -278,6 +280,26 @@ async function loadEditionContentFromEdition(edition: GraphQLEdition): Promise<E
       }),
     )
   ).filter((item): item is PublicationItem => item !== null);
+  for (const item of normalizedEditionItems) itemsBySlug.set(item.slug, item);
+
+  const missingLayoutItems = [...collectLayoutPlanItemIds(layoutPlan)].filter((itemId) => !itemsBySlug.has(itemId));
+  if (missingLayoutItems.length > 0) {
+    const recoveredItems = (
+      await Promise.all(
+        missingLayoutItems.map(async (itemId) => {
+          const item = await getItemBySlug(itemId);
+          if (!item || item.status !== PUBLISHED_STATUS) return null;
+          return normalizePublicationItem(item, await listMediaAssets(item.id));
+        }),
+      )
+    ).filter((item): item is PublicationItem => item !== null);
+    for (const item of recoveredItems) itemsBySlug.set(item.slug, item);
+  }
+
+  const items = [...itemsBySlug.values()];
+  const availableItemSlugs = new Set(items.map((item) => item.slug));
+  const sanitizedLayoutPlan = pruneLayoutPlanUnavailableItems(layoutPlan, availableItemSlugs, edition.id);
+  validateEditionLayoutPlanForItems(sanitizedLayoutPlan, items, `PublishedEdition(${edition.id}).layoutPlan`);
 
   return {
     id: edition.id,
@@ -285,11 +307,65 @@ async function loadEditionContentFromEdition(edition: GraphQLEdition): Promise<E
     title: edition.title,
     editionDate: edition.editionDate,
     description: edition.description ?? "GraphQL content loaded from Amplify Data.",
-    layoutPlan: normalizeEditionLayoutPlan(edition.layoutPlan, "Edition.layoutPlan"),
+    layoutPlan: sanitizedLayoutPlan,
     items,
     sections: createEditionSectionPlan(items, edition.metadata),
     suppressNewsDeskAppendix: editionMetadata?.suppressNewsDeskAppendix === true,
   };
+}
+
+function pruneLayoutPlanUnavailableItems(
+  layoutPlan: EditionLayoutPlan,
+  availableItemSlugs: Set<string>,
+  editionId: string,
+): EditionLayoutPlan {
+  let removedBlocks = 0;
+  const pages = layoutPlan.pages.map((page) => ({
+    ...page,
+    regions: page.regions.map((region) => ({
+      ...region,
+      blocks: region.blocks.filter((block) => {
+        if ("itemId" in block && typeof block.itemId === "string" && block.itemId.trim()) {
+          if (!availableItemSlugs.has(block.itemId)) {
+            removedBlocks += 1;
+            return false;
+          }
+        }
+        if ("itemIds" in block && Array.isArray(block.itemIds)) {
+          for (const itemId of block.itemIds) {
+            if (typeof itemId === "string" && itemId.trim() && !availableItemSlugs.has(itemId)) {
+              removedBlocks += 1;
+              return false;
+            }
+          }
+        }
+        return true;
+      }),
+    })),
+  }));
+  if (removedBlocks > 0) {
+    console.warn(
+      `[graphql-content-repository] Pruned ${removedBlocks} layout block(s) that referenced unavailable published items in edition ${editionId}.`,
+    );
+  }
+  return { ...layoutPlan, pages };
+}
+
+function collectLayoutPlanItemIds(layoutPlan: EditionLayoutPlan): Set<string> {
+  const ids = new Set<string>();
+  for (const page of layoutPlan.pages) {
+    for (const region of page.regions) {
+      for (const block of region.blocks) {
+        if ("itemId" in block && typeof block.itemId === "string" && block.itemId.trim()) ids.add(block.itemId);
+        if ("itemIds" in block && Array.isArray(block.itemIds)) {
+          for (const itemId of block.itemIds) {
+            if (typeof itemId === "string" && itemId.trim()) ids.add(itemId);
+          }
+        }
+      }
+    }
+  }
+  return ids;
 }
 
 async function loadEditionItem(editionDate: string, itemSlug: string): Promise<PublicationItem | undefined> {

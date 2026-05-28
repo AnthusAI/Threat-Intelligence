@@ -36,18 +36,13 @@ class NewsroomToolTests(unittest.TestCase):
         )
 
         self.assertTrue(result["ok"])
-        self.assertIn("papyrus.assignment", result["value"]["api"])
-        self.assertIn("context", result["value"]["api"]["papyrus.assignment"])
-        self.assertIn("assignment_research_packet", result["value"]["api"]["papyrus.plan"])
-        self.assertIn("doi_backfill_plan", result["value"]["api"]["papyrus.reference"])
-        self.assertIn("quality_set", result["value"]["api"]["papyrus.reference"])
-        self.assertIn("quality_assess", result["value"]["api"]["papyrus.reference"])
-        self.assertIn("summarize", result["value"]["api"]["papyrus.reference"])
-        self.assertIn("list", result["value"]["api"]["papyrus.reference"])
-        self.assertIn("summaries", result["value"]["api"]["papyrus.reference"])
-        self.assertIn("web_search", result["value"]["api"]["papyrus.reference"])
-        self.assertIn("query", result["value"]["api"]["papyrus.knowledge"])
-        self.assertIn("resolve_uri", result["value"]["api"]["papyrus"])
+        resources = result["value"]["api"]["resources"]
+        self.assertIn("Assignment", resources)
+        self.assertIn("Reference", resources)
+        self.assertIn("NewsroomSection", resources)
+        self.assertIn("create", resources["Assignment"])
+        self.assertIn("update", resources["Assignment"])
+        self.assertIn("docs", result["value"]["api"])
         self.assertEqual(
             result["api_calls"],
             ["papyrus.api.list", "papyrus.docs.list"],
@@ -804,9 +799,16 @@ return plan_assignment_reporting_context_packet{ assignment = assignment, report
         self.assertIn("reporting_context_packet payload", source)
         self.assertIn("Do not generate Papyrus persistence snippets", source)
         self.assertIn("Do not call Papyrus persistence planners", source)
+        self.assertIn("run one broad knowledge_query", source)
+        self.assertIn("source_trail plus related metadata fields", source)
         self.assertIn('"work_product_kind":"reporting_context_packet"', source)
         self.assertIn("the outer CLI writes Message", source)
         self.assertIn("return a reporting_context_packet payload only", source)
+
+    def test_research_explorer_requires_broad_knowledge_query_orientation(self):
+        source = (REPO_ROOT / "procedures" / "newsroom" / "research_explorer.tac").read_text()
+        self.assertIn("Required policy sequence:", source)
+        self.assertIn("Run one broad knowledge_query", source)
 
     def test_execute_tactus_exposes_knowledge_query_helper(self):
         with mock.patch("papyrus_newsroom.tactus_runtime.build_environment_services", return_value=object()), \
@@ -843,6 +845,62 @@ return plan_assignment_reporting_context_packet{ assignment = assignment, report
         self.assertEqual(result["value"]["object"]["id"], "reference-1-v1")
         self.assertEqual(result["api_calls"], ["papyrus.resolve_uri"])
         resolve_uri.assert_called_once_with("papyrus://reference/reference-1")
+
+    def test_execute_tactus_exposes_reference_fetch_url_text_helper(self):
+        with mock.patch("papyrus_newsroom.tactus_runtime.newsroom.papyrus_reference_fetch_url_text") as fetch_url_text:
+            fetch_url_text.return_value = {"reference_url_text": {"ok": True, "changes": 1}}
+            result = tactus_runtime.execute_tactus(
+                'return reference_fetch_url_text{ reference_id = "reference-1", corpus_key = "AI-ML-research", apply = false }'
+            )
+
+        self.assertTrue(result["ok"], result.get("error"))
+        self.assertEqual(result["value"]["reference_url_text"]["ok"], True)
+        self.assertEqual(result["api_calls"], ["papyrus.reference.fetch_url_text"])
+        fetch_url_text.assert_called_once()
+
+    def test_execute_tactus_exposes_reference_generate_metadata_helper(self):
+        with mock.patch(
+            "papyrus_newsroom.tactus_runtime.newsroom.papyrus_reference_generate_metadata_from_text"
+        ) as generate_metadata:
+            generate_metadata.return_value = {"reference_metadata_generation": {"ok": True, "generated": 1}}
+            handler = tactus_runtime.API_METHODS[("reference", "generate_metadata_from_text")]
+            result = handler(
+                {
+                    "reference_id": "reference-1",
+                    "corpus_key": "AI-ML-research",
+                    "apply": False,
+                }
+            )
+
+        self.assertEqual(result["reference_metadata_generation"]["ok"], True)
+        helper_pairs = {(name, namespace, method) for name, namespace, method in tactus_runtime.HELPER_BINDINGS}
+        self.assertIn(
+            ("reference_generate_metadata_from_text", "reference", "generate_metadata_from_text"),
+            helper_pairs,
+        )
+        generate_metadata.assert_called_once()
+
+    def test_execute_tactus_exposes_reference_filter_extracted_text_helper(self):
+        with mock.patch(
+            "papyrus_newsroom.tactus_runtime.newsroom.papyrus_reference_filter_extracted_text"
+        ) as filter_text:
+            filter_text.return_value = {"reference_text_filter": {"ok": True, "filtered": 1}}
+            handler = tactus_runtime.API_METHODS[("reference", "filter_extracted_text")]
+            result = handler(
+                {
+                    "reference_id": "reference-1",
+                    "corpus_key": "AI-ML-research",
+                    "apply": False,
+                }
+            )
+
+        self.assertEqual(result["reference_text_filter"]["ok"], True)
+        helper_pairs = {(name, namespace, method) for name, namespace, method in tactus_runtime.HELPER_BINDINGS}
+        self.assertIn(
+            ("reference_filter_extracted_text", "reference", "filter_extracted_text"),
+            helper_pairs,
+        )
+        filter_text.assert_called_once()
 
     def test_knowledge_query_helper_accepts_uri_anchor(self):
         with mock.patch("papyrus_newsroom.tactus_runtime.build_environment_services", return_value=object()), \
@@ -914,6 +972,49 @@ return finish_research{
         self.assertEqual(result["value"]["research_packet"]["researchTrace"]["webSearches"], [])
         self.assertEqual(result["value"]["research_record_plan"]["records"][0]["modelName"], "Message")
         self.assertEqual(result["api_calls"], ["papyrus.knowledge.query", "papyrus.plan.assignment_research_packet"])
+
+    def test_research_harness_applies_assignment_and_insight_knowledge_scope_defaults(self):
+        assignment = {
+            "id": "assignment-live-456",
+            "assignmentTypeKey": "research.edition-candidate",
+            "queueKey": "research#open",
+            "status": "open",
+            "title": "Explore AI in gaming",
+        }
+        with mock.patch("papyrus_newsroom.tactus_runtime.build_environment_services", return_value=object()), \
+             mock.patch("papyrus_newsroom.tactus_runtime.run_knowledge_query") as run_query:
+            run_query.return_value = {
+                "structured": {"anchors": [], "semanticMatches": []},
+                "context": {"text": "Internal context."},
+                "warnings": [],
+            }
+            result = tactus_runtime.execute_tactus_harnessed(
+                """
+local knowledge = knowledge_search("ai in gaming")
+return finish_research{
+  summary = "Built packet.",
+  queries = {"ai in gaming"},
+  source_snapshots = {},
+  proposed_references = {},
+  evidence_item_ids = {},
+  recommended_angle = "Angle",
+  researchTrace = { knowledgeQueries = {"ai in gaming"}, webSearches = {}, acceptedEvidenceIds = {} },
+}
+""",
+                harness="research",
+                assignment_item_json=json.dumps(assignment),
+                corpus_key="AI-ML-research",
+                max_evidence_items=8,
+                research_mode="internal_brief",
+            )
+
+        self.assertTrue(result["ok"], result.get("error"))
+        query_input = run_query.call_args.args[0]
+        scope = query_input.get("scope") or {}
+        self.assertIn("assignment", scope.get("includeObjectKinds") or [])
+        self.assertIn("message", scope.get("includeObjectKinds") or [])
+        self.assertEqual(scope.get("includeMessageKinds"), ["insight"])
+        self.assertEqual(scope.get("includeAssignmentTypeKeys"), ["research.*", "reporting.*"])
 
     def test_research_harness_requires_discovery_for_source_discovery_mode(self):
         assignment = {
@@ -991,7 +1092,7 @@ return finish_research{
         self.assertEqual(packet["sourceDiscovery"]["webSearches"], ["agent catalog business process automation"])
         self.assertEqual(packet["sourceDiscovery"]["proposedReferences"][0]["title"], "Candidate")
 
-    def test_research_harness_web_search_falls_back_to_reference_web_search_api(self):
+    def test_research_harness_web_search_uses_reference_web_search_api(self):
         assignment = {
             "id": "assignment-live-123",
             "assignmentTypeKey": "research.edition-candidate",
@@ -1025,7 +1126,6 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
                 corpus_key="AI-ML-research",
                 max_evidence_items=8,
                 research_mode="source_discovery",
-                disable_tactus_web=True,
             )
 
         self.assertTrue(result["ok"], result.get("error"))
@@ -1035,6 +1135,180 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertEqual(packet["researchTrace"]["webSearches"], ["ancient language ai decipherment"])
         web_search.assert_called_once()
         self.assertEqual(web_search.call_args.kwargs["query"], "ancient language ai decipherment")
+
+    def test_research_harness_normalizes_malformed_search_metadata(self):
+        assignment = {
+            "id": "assignment-live-123",
+            "assignmentTypeKey": "research.edition-candidate",
+            "queueKey": "research#open",
+            "status": "open",
+            "title": "Explore source discovery",
+        }
+        with mock.patch(
+            "papyrus_newsroom.tactus_runtime.reference_curation_signals.reference_web_search",
+            return_value={
+                "query": "ancient language ai decipherment",
+                "results": [
+                    {
+                        "title": "Ithaca Nature paper",
+                        "url": "https://example.org/ithaca",
+                        "source_domain": "example.org",
+                        "evidence_candidate_id": "evidence-candidate-1",
+                        "rank": 1,
+                    }
+                ],
+                "metadata": "not-a-table",
+            },
+        ):
+            result = tactus_runtime.execute_tactus_harnessed(
+                """
+local search = web_search("ancient language ai decipherment")
+return finish_research_from_search(search, { research_mode = "source_discovery" })
+""",
+                harness="research",
+                assignment_item_json=json.dumps(assignment),
+                corpus_key="AI-ML-research",
+                max_evidence_items=8,
+                research_mode="source_discovery",
+            )
+
+        self.assertTrue(result["ok"], result.get("error"))
+        packet = result["value"]["research_packet"]
+        self.assertEqual(packet["source_snapshots"][0]["url"], "https://example.org/ithaca")
+        boundary = packet["researchTrace"]["discoveryBoundary"]
+        self.assertEqual(boundary["webSearchPath"], "papyrus.reference.web_search")
+        self.assertEqual(boundary["searchResultCount"], 1)
+        self.assertIsInstance(boundary["searchMetadataShapeOk"], bool)
+
+    def test_research_harness_sets_blocked_reason_when_reference_web_search_fails(self):
+        assignment = {
+            "id": "assignment-live-123",
+            "assignmentTypeKey": "research.edition-candidate",
+            "queueKey": "research#open",
+            "status": "open",
+            "title": "Explore source discovery",
+        }
+        with mock.patch(
+            "papyrus_newsroom.tactus_runtime.reference_curation_signals.reference_web_search",
+            side_effect=RuntimeError("boom"),
+        ):
+            result = tactus_runtime.execute_tactus_harnessed(
+                """
+local search = web_search("ancient language ai decipherment")
+return finish_research_from_search(search, { research_mode = "source_discovery" })
+""",
+                harness="research",
+                assignment_item_json=json.dumps(assignment),
+                corpus_key="AI-ML-research",
+                max_evidence_items=8,
+                research_mode="source_discovery",
+            )
+
+        self.assertTrue(result["ok"], result.get("error"))
+        packet = result["value"]["research_packet"]
+        self.assertEqual(packet["source_snapshots"], [])
+        self.assertEqual(packet["proposed_references"], [])
+        self.assertIn("papyrus.reference.web_search failed", packet["sourceDiscovery"]["blockedReason"])
+        boundary = packet["researchTrace"]["discoveryBoundary"]
+        self.assertEqual(boundary["webSearchPath"], "papyrus.reference.web_search")
+        self.assertEqual(boundary["searchResultCount"], 0)
+        self.assertTrue(boundary["searchMetadataShapeOk"])
+        self.assertIn("papyrus.reference.web_search failed", boundary["blockedReason"])
+
+    def test_research_harness_retries_zero_result_discovery_until_success(self):
+        assignment = {
+            "id": "assignment-live-123",
+            "assignmentTypeKey": "research.edition-candidate",
+            "queueKey": "research#open",
+            "status": "open",
+            "title": "Explore source discovery",
+        }
+        responses = [
+            {
+                "query": "agentic ai protocols survey",
+                "results": [],
+                "metadata": {"answer": ""},
+            },
+            {
+                "query": "agentic ai protocols survey review explainer",
+                "results": [
+                    {
+                        "title": "Survey hit",
+                        "url": "https://example.org/survey",
+                        "source_domain": "example.org",
+                        "evidence_candidate_id": "evidence-candidate-2",
+                        "rank": 1,
+                    }
+                ],
+                "metadata": {"answer": "survey source"},
+            },
+        ]
+        with mock.patch(
+            "papyrus_newsroom.tactus_runtime.reference_curation_signals.reference_web_search",
+            side_effect=responses,
+        ) as web_search:
+            result = tactus_runtime.execute_tactus_harnessed(
+                """
+local search = web_search("agentic ai protocols survey", { retry_budget = 4 })
+return finish_research_from_search(search, { research_mode = "source_discovery" })
+""",
+                harness="research",
+                assignment_item_json=json.dumps(assignment),
+                corpus_key="AI-ML-research",
+                max_evidence_items=8,
+                research_mode="source_discovery",
+            )
+
+        self.assertTrue(result["ok"], result.get("error"))
+        packet = result["value"]["research_packet"]
+        self.assertEqual(packet["source_snapshots"][0]["url"], "https://example.org/survey")
+        boundary = packet["researchTrace"]["discoveryBoundary"]
+        self.assertEqual(boundary["discoveryTerminalState"], "succeeded")
+        self.assertEqual(boundary["discoveryAttemptsTotal"], 2)
+        self.assertEqual(boundary["discoveryResultCounts"], [0, 1])
+        self.assertEqual(len(boundary["discoveryQueriesTried"]), 2)
+        web_search.assert_called()
+        self.assertEqual(web_search.call_count, 2)
+
+    def test_research_harness_exhausted_zero_results_sets_blocked_reason(self):
+        assignment = {
+            "id": "assignment-live-123",
+            "assignmentTypeKey": "research.edition-candidate",
+            "queueKey": "research#open",
+            "status": "open",
+            "title": "Explore source discovery",
+        }
+        with mock.patch(
+            "papyrus_newsroom.tactus_runtime.reference_curation_signals.reference_web_search",
+            return_value={
+                "query": "agentic ai protocols survey",
+                "results": [],
+                "metadata": {"answer": ""},
+            },
+        ) as web_search:
+            result = tactus_runtime.execute_tactus_harnessed(
+                """
+local search = web_search("agentic ai protocols survey", { retry_budget = 4 })
+return finish_research_from_search(search, { research_mode = "source_discovery" })
+""",
+                harness="research",
+                assignment_item_json=json.dumps(assignment),
+                corpus_key="AI-ML-research",
+                max_evidence_items=8,
+                research_mode="source_discovery",
+            )
+
+        self.assertTrue(result["ok"], result.get("error"))
+        packet = result["value"]["research_packet"]
+        self.assertEqual(packet["source_snapshots"], [])
+        self.assertEqual(packet["proposed_references"], [])
+        self.assertEqual(packet["sourceDiscovery"]["blockedReason"], "web_discovery_exhausted_zero_results")
+        boundary = packet["researchTrace"]["discoveryBoundary"]
+        self.assertEqual(boundary["discoveryTerminalState"], "exhausted")
+        self.assertEqual(boundary["discoveryAttemptsTotal"], 4)
+        self.assertEqual(boundary["discoveryResultCounts"], [0, 0, 0, 0])
+        self.assertEqual(len(boundary["discoveryQueriesTried"]), 4)
+        self.assertEqual(web_search.call_count, 4)
 
     def test_track_research_warns_when_doctrine_context_and_rubric_are_missing(self):
         plan = papyrus_newsroom.build_research_update_plan(
@@ -1241,7 +1515,7 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertEqual(create["input"]["objectLineageId"], "semantic-node-quality-rating-4-star")
         self.assertEqual(create["input"]["score"], 4)
 
-    def test_reference_summary_plan_is_budget_specific_message_relation(self):
+    def test_reference_summary_plan_writes_reference_metadata_attachment(self):
         reference = {
             "id": "reference-a-v1",
             "lineageId": "reference-a",
@@ -1267,12 +1541,10 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         )
 
         self.assertEqual(plan["action"], "create")
-        self.assertEqual(plan["message"]["messageKind"], "reference_summary")
-        relation = plan["records"][-1]["input"]
-        self.assertEqual(relation["relationTypeKey"], "reference_summary_100_tokens")
-        self.assertEqual(relation["subjectKind"], "message")
-        self.assertEqual(relation["objectKind"], "reference")
-        self.assertEqual(relation["metadata"]["maxTokens"], 100)
+        self.assertEqual(plan["records"][0]["modelName"], "ModelAttachment")
+        metadata = json.loads(plan["records"][0]["body"])
+        self.assertEqual(metadata["summary"], "A short summary.")
+        self.assertEqual(metadata["summary_resolution"]["summaryTokenBudget"], 100)
 
     def test_publication_doctrine_context_loads_mission_and_policy(self):
         def fake_graphql(_query, variables):
@@ -1309,30 +1581,69 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertEqual(context["slugs"], ["editorial-doctrine-mission", "editorial-doctrine-policy"])
         self.assertTrue(context["contentHash"])
 
-    def test_summary_prompt_includes_doctrine_and_policy_use_warning(self):
-        context = {
-            "status": "loaded",
-            "scope": "publication",
-            "policyUse": "context_only_not_reference_rubric",
-            "slugs": ["editorial-doctrine-mission", "editorial-doctrine-policy"],
-            "records": [
-                {"slug": "editorial-doctrine-mission", "label": "Editorial Mission", "body": ["Study operational publication systems."]},
-                {"slug": "editorial-doctrine-policy", "label": "Editorial Policy", "body": ["Published items should be evidence-backed."]},
-            ],
-            "contentHash": "hash-1",
-            "warnings": [],
-        }
-        prompt = reference_curation_signals.build_summary_prompt(
-            "Reference source text.",
-            max_tokens=100,
-            reference={"title": "Reference A", "sourceUri": "https://example.test/ref"},
-            doctrine_context=context,
-        )
+    def test_reference_summarization_procedure_contains_source_voice_guidance(self):
+        source = (REPO_ROOT / "procedures" / "newsroom" / "reference_summarization.tac").read_text()
+        self.assertIn("State what the source says directly", source)
+        self.assertIn('Do not use referential lead-ins such as:', source)
+        self.assertIn('"This paper..."', source)
+        self.assertIn("Publication Context:", source)
+        self.assertIn("should not be treated as rules that the Reference itself must satisfy", source)
 
-        self.assertIn("Publication Context:", prompt)
-        self.assertIn("Study operational publication systems.", prompt)
-        self.assertIn("Published items should be evidence-backed.", prompt)
-        self.assertIn("should not be treated as rules that the Reference itself must satisfy", prompt)
+    def test_generate_summary_dispatches_cloud_procedure_alias(self):
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_summarization_cloud_procedure",
+            return_value={
+                "mode": "reference_summary",
+                "summary_text": "Summarized source voice text.",
+                "prompt_version": "reference-summary-v3-source-voice",
+                "model": "gpt-5.4-mini",
+            },
+        ) as runner:
+            result = reference_curation_signals.generate_summary(
+                "Source text.",
+                max_tokens=100,
+                model="gpt-5.4-mini",
+                reference={"title": "Reference A", "sourceUri": "https://example.test/ref"},
+                doctrine_context={"records": []},
+            )
+        self.assertEqual(result["summary_text"], "Summarized source voice text.")
+        self.assertEqual(runner.call_args.kwargs["alias"], "references.summarize")
+
+    def test_generate_outcome_summary_dispatches_cloud_procedure_alias(self):
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_summarization_cloud_procedure",
+            return_value={
+                "mode": "outcome_summary",
+                "summary_text": "Outcome-focused source voice summary.",
+                "prompt_version": "reference-title-subtitle-summary-v2-source-voice",
+                "model": "gpt-5.4-mini",
+            },
+        ) as runner:
+            result = reference_curation_signals.generate_outcome_summary(
+                "Source text.",
+                reference={"title": "Reference A", "sourceUri": "https://example.test/ref", "mediaType": "application/pdf"},
+                title="Known title",
+                subtitle="Known subtitle",
+                model="gpt-5.4-mini",
+            )
+        self.assertEqual(result["summary_text"], "Outcome-focused source voice summary.")
+        self.assertEqual(runner.call_args.kwargs["alias"], "references.title-subtitle.resolve")
+
+    def test_generate_summary_surfaces_missing_procedure_remediation(self):
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_summarization_cloud_procedure",
+            side_effect=ValueError(
+                "Missing required cloud procedure 'newsroom.reference.summarization'. "
+                "Run poetry run papyrus procedures seed-required --apply to preload standard procedures."
+            ),
+        ):
+            with self.assertRaisesRegex(ValueError, "papyrus procedures seed-required --apply"):
+                reference_curation_signals.generate_summary(
+                    "Source text.",
+                    max_tokens=100,
+                    model="gpt-5.4-mini",
+                    reference={"title": "Reference A", "sourceUri": "https://example.test/ref"},
+                )
 
     def test_summary_metadata_records_doctrine_context(self):
         reference = {
@@ -1369,7 +1680,7 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
             semantic_client=FakeSemantic(),
         )
 
-        self.assertEqual(plan["metadata"]["promptVersion"], "reference-summary-v2-publication-doctrine")
+        self.assertEqual(plan["metadata"]["promptVersion"], "reference-summary-v3-source-voice")
         self.assertEqual(plan["metadata"]["doctrineContextStatus"], "loaded")
         self.assertEqual(plan["metadata"]["doctrineScope"], "publication")
         self.assertEqual(plan["metadata"]["policyUse"], "context_only_not_reference_rubric")
@@ -1479,30 +1790,35 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertIn("Do not use bullet points.", prompt)
         self.assertIn("Do not use numbered lists.", prompt)
         self.assertIn("Do not include line breaks.", prompt)
+        self.assertIn("typically 4 to 12 words.", prompt)
+        self.assertIn("Avoid self-referential document framing", prompt)
+        self.assertIn("concrete content signal", prompt)
+        self.assertIn("You MAY mention evidence/method terms such as survey", prompt)
+        self.assertIn("Good subtitle: 'Survey finds 72% of teens have used AI companions'", prompt)
+        self.assertIn("Bad subtitle: 'This article reports survey results'", prompt)
 
-    def test_subtitle_normalizer_rejects_list_shaped_values(self):
-        self.assertEqual(reference_curation_signals._normalize_subtitle_candidate("- First bullet"), "")
-        self.assertEqual(reference_curation_signals._normalize_subtitle_candidate("* First bullet"), "")
-        self.assertEqual(reference_curation_signals._normalize_subtitle_candidate("1. First bullet"), "")
-        self.assertEqual(reference_curation_signals._normalize_subtitle_candidate("• First bullet"), "")
-        self.assertEqual(reference_curation_signals._normalize_subtitle_candidate("Line one\nLine two"), "")
-        self.assertEqual(
-            reference_curation_signals._normalize_subtitle_candidate("Abstract page for arXiv paper 2506.01232"),
-            "",
-        )
-        self.assertEqual(
-            reference_curation_signals._normalize_subtitle_candidate("Join the discussion on this paper page"),
-            "",
-        )
-        self.assertEqual(
-            reference_curation_signals._normalize_subtitle_candidate(
-                "<< /Metadata 3 0 R /Names 4 0 R /OpenAction 5 0 R /Outlines 6 0 R /PageMode /UseOutlines /Pages 7 0 R /Type /Catalog >>"
-            ),
-            "",
-        )
+    def test_subtitle_normalizer_is_trim_only(self):
+        self.assertEqual(reference_curation_signals._normalize_subtitle_candidate("- First bullet"), "- First bullet")
+        self.assertEqual(reference_curation_signals._normalize_subtitle_candidate("1. First bullet"), "1. First bullet")
+        self.assertEqual(reference_curation_signals._normalize_subtitle_candidate("Line one\nLine two"), "Line one Line two")
         self.assertEqual(
             reference_curation_signals._normalize_subtitle_candidate("Concise prose subtitle"),
             "Concise prose subtitle",
+        )
+        self.assertEqual(
+            reference_curation_signals._normalize_subtitle_candidate("https://phys.org/news/2025-07-quarters-teens-ai-companions.html"),
+            "https://phys.org/news/2025-07-quarters-teens-ai-companions.html",
+        )
+        self.assertEqual(
+            reference_curation_signals._normalize_subtitle_candidate("phys.org/news/2025-07-quarters-teens-ai-companions.html"),
+            "phys.org/news/2025-07-quarters-teens-ai-companions.html",
+        )
+        self.assertEqual(reference_curation_signals._normalize_subtitle_candidate("Study"), "Study")
+
+    def test_title_normalizer_strips_trailing_colon_source_label(self):
+        self.assertEqual(
+            reference_curation_signals._normalize_reference_title_candidate("Three quarters of US teens use AI companions despite risks: Study"),
+            "Three quarters of US teens use AI companions despite risks",
         )
 
     def test_identifier_prepass_extracts_doi_and_arxiv_from_title_subtitle_without_uri(self):
@@ -1635,6 +1951,163 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertEqual(result["records"], [])
         self.assertEqual(result["failureReason"], "unit-test-prepass-failure")
 
+    def test_reference_generate_metadata_from_extracted_text_blocks_missing_text(self):
+        reference = {
+            "id": "reference-a-v1",
+            "lineageId": "reference-a",
+            "versionNumber": 1,
+            "title": "Original title",
+            "sourceUri": "https://example.test/ref",
+        }
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals._semantic_client",
+            return_value=mock.Mock(),
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._resolve_reference",
+            return_value=reference,
+        ):
+            result = reference_curation_signals.reference_generate_metadata_from_extracted_text(
+                reference_id="reference-a-v1",
+                extracted_text="",
+                apply=False,
+            )
+
+        self.assertEqual(result["status"], "skipped_missing_text")
+        self.assertEqual(result["action"], "skipped_missing_text")
+        self.assertEqual(result["records"], [])
+        self.assertFalse(result["apply"])
+
+    def test_reference_generate_metadata_from_extracted_text_passes_full_context(self):
+        reference = {
+            "id": "reference-a-v1",
+            "lineageId": "reference-a",
+            "versionNumber": 1,
+            "title": "Original title",
+            "sourceUri": "https://example.test/ref",
+        }
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals._semantic_client",
+            return_value=mock.Mock(),
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._resolve_reference",
+            return_value=reference,
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._load_reference_metadata_payload",
+            return_value={},
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._biblicus_python_executable",
+            return_value=pathlib.Path("/tmp/fake-biblicus-python"),
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals.subprocess.run",
+        ) as run_subprocess:
+            def fake_subprocess(command, **kwargs):
+                task = command[command.index("--task") + 1]
+                payload = json.loads(kwargs["input"])
+                self.assertEqual(payload["extracted_text"], "Full extracted text body")
+                self.assertEqual(payload["original_title"], "Catalog original title")
+                self.assertEqual(payload["original_subtitle"], "Catalog original subtitle")
+                self.assertEqual(payload["reference_title"], "Original title")
+                self.assertEqual(payload["source_uri"], "https://example.test/ref")
+                values = {
+                    "title": "Generated title",
+                    "subtitle": "Generated subtitle",
+                    "summary": "Generated summary",
+                }
+                value = values[task]
+                return mock.Mock(
+                    returncode=0,
+                    stdout=json.dumps(
+                        {
+                            "task": task,
+                            "value": value,
+                            "prompt_version": "summarize-map-reduce-v2",
+                            "model": "gpt-5.4-nano",
+                            "map_reduce": {
+                                "chunk_count": 1,
+                                "map": [{"chunk_index": 1, "candidate": value}],
+                                "reduce": {
+                                    "summary" if task == "summary" else task: value,
+                                    "rationale": "Reduced deterministically.",
+                                },
+                            },
+                        }
+                    ),
+                    stderr="",
+                )
+
+            run_subprocess.side_effect = fake_subprocess
+            result = reference_curation_signals.reference_generate_metadata_from_extracted_text(
+                reference_id="reference-a-v1",
+                extracted_text="Full extracted text body",
+                original_title="Catalog original title",
+                original_subtitle="Catalog original subtitle",
+                model="gpt-5.4-nano",
+                apply=False,
+            )
+
+        self.assertEqual(result["status"], "generated")
+        self.assertEqual(result["generated"]["title"], "Generated title")
+        self.assertEqual(result["generated"]["subtitle"], "Generated subtitle")
+        self.assertEqual(result["generated"]["summary"], "Generated summary")
+        self.assertEqual(run_subprocess.call_count, 3)
+        called_tasks = [
+            call.args[0][call.args[0].index("--task") + 1]
+            for call in run_subprocess.call_args_list
+        ]
+        self.assertEqual(called_tasks, ["title", "subtitle", "summary"])
+
+    def test_metadata_map_reduce_uses_biblicus_cli_output(self):
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_biblicus_summarize_map_reduce",
+            return_value={
+                "task": "title",
+                "value": "Reduced final title",
+                "prompt_version": "summarize-map-reduce-v2",
+                "map_reduce": {
+                    "chunk_count": 3,
+                    "map": [{"chunk_index": 1}, {"chunk_index": 2}, {"chunk_index": 3}],
+                    "reduce": {"title": "Reduced final title", "rationale": "Reduced all chunks."},
+                },
+            },
+        ):
+            result = reference_curation_signals._run_metadata_map_reduce(
+                output_kind="title",
+                reference={"id": "reference-1", "title": "Original"},
+                context={
+                    "extractedText": "Full extracted text body",
+                    "originalTitle": "Original",
+                    "originalSubtitle": "",
+                },
+                model="gpt-5.4-nano",
+            )
+
+        self.assertEqual(result["value"], "Reduced final title")
+        self.assertEqual(result["promptVersion"], "summarize-map-reduce-v2")
+        self.assertEqual(result["mapReduce"]["chunk_count"], 3)
+
+    def test_generate_summary_from_reference_text_does_not_use_web_search(self):
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals.reference_web_search",
+            side_effect=AssertionError("web search should not be used"),
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_metadata_map_reduce",
+            return_value={
+                "value": "Generated summary from extracted text.",
+                "promptVersion": "summarize-map-reduce-v2",
+                "mapReduce": {"chunk_count": 1},
+            },
+        ):
+            result = reference_curation_signals.generate_summary_from_reference_text(
+                reference={"id": "reference-1", "title": "Original"},
+                extracted_text="Extracted source text body.",
+                original_title="Original",
+                original_subtitle="",
+                model="gpt-5.4-mini",
+            )
+
+        self.assertEqual(result["summary"], "Generated summary from extracted text.")
+        self.assertEqual(result["mapReduce"]["chunk_count"], 1)
+
     def test_title_subtitle_resolver_preserves_local_metadata_verbatim(self):
         result = reference_curation_signals.resolve_reference_title_subtitle(
             reference={"id": "reference-1-v1", "title": ""},
@@ -1651,6 +2124,96 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertEqual(result["subtitle"], "Exact Source Subtitle")
         self.assertEqual(result["title_mode"], "original_metadata")
         self.assertEqual(result["subtitle_mode"], "original_metadata")
+
+    def test_title_subtitle_resolver_uses_toolless_llm_when_web_search_disabled(self):
+        result = reference_curation_signals.resolve_reference_title_subtitle(
+            reference={"id": "reference-1-v1", "title": "Known title"},
+            catalog_entry={},
+            sidecar={},
+            web_search_enabled=False,
+            llm_toolless_resolver=lambda **_: {
+                "title": "Known title",
+                "subtitle": "Survey finds routine AI companion use among U.S. teens",
+                "title_mode": "original_metadata",
+                "subtitle_mode": "generated",
+                "source_urls": [],
+                "rationale": "Generated from local source context.",
+            },
+            llm_resolver=lambda **_: (_ for _ in ()).throw(AssertionError("web resolver should not run")),
+            now="2026-05-20T12:00:00Z",
+        )
+
+        self.assertEqual(result["subtitle"], "Survey finds routine AI companion use among U.S. teens")
+        self.assertEqual(result["subtitle_mode"], "generated")
+        self.assertFalse(result["web_search_used"])
+
+    def test_generated_subtitle_quality_gate_rejects_generic_or_url_values(self):
+        generic = reference_curation_signals.resolve_reference_title_subtitle(
+            reference={"id": "reference-1-v1", "title": "Known title"},
+            catalog_entry={},
+            sidecar={},
+            web_search_enabled=False,
+            llm_toolless_resolver=lambda **_: {
+                "title": "Known title",
+                "subtitle": "Study",
+                "title_mode": "original_metadata",
+                "subtitle_mode": "generated",
+                "source_urls": [],
+                "rationale": "Generated from source.",
+            },
+            now="2026-05-20T12:00:00Z",
+        )
+        self.assertEqual(generic["subtitle"], "")
+        self.assertEqual(generic["subtitle_mode"], "unresolved")
+        self.assertTrue(any("generic one-word label" in warning for warning in generic.get("warnings", [])))
+
+        url_like = reference_curation_signals.resolve_reference_title_subtitle(
+            reference={"id": "reference-1-v1", "title": "Known title"},
+            catalog_entry={},
+            sidecar={},
+            web_search_enabled=False,
+            llm_toolless_resolver=lambda **_: {
+                "title": "Known title",
+                "subtitle": "https://phys.org/news/2025-07-quarters-teens-ai-companions.html",
+                "title_mode": "original_metadata",
+                "subtitle_mode": "generated",
+                "source_urls": [],
+                "rationale": "Generated from source.",
+            },
+            now="2026-05-20T12:00:00Z",
+        )
+        self.assertEqual(url_like["subtitle"], "")
+        self.assertEqual(url_like["subtitle_mode"], "unresolved")
+        self.assertTrue(any("looks like URL" in warning for warning in url_like.get("warnings", [])))
+
+    def test_generated_subtitle_allows_substantive_survey_wording(self):
+        result = reference_curation_signals.resolve_reference_title_subtitle(
+            reference={"id": "reference-1-v1", "title": "Known title"},
+            catalog_entry={},
+            sidecar={},
+            web_search_enabled=False,
+            llm_toolless_resolver=lambda **_: {
+                "title": "Known title",
+                "subtitle": "Survey finds frequent AI companion use among U.S. teens",
+                "title_mode": "original_metadata",
+                "subtitle_mode": "generated",
+                "source_urls": [],
+                "rationale": "Generated from source.",
+            },
+            now="2026-05-20T12:00:00Z",
+        )
+
+        self.assertEqual(result["subtitle"], "Survey finds frequent AI companion use among U.S. teens")
+        self.assertEqual(result["subtitle_mode"], "generated")
+
+    def test_non_generated_subtitle_quality_gate_rejects_generic_pilot_study(self):
+        self.assertEqual(
+            reference_curation_signals._non_generated_subtitle_quality_issue(
+                "a pilot study",
+                subtitle_mode="original_web_metadata",
+            ),
+            "generic pilot-study subtitle",
+        )
 
     def test_title_subtitle_plan_updates_title_and_metadata_attachment(self):
         reference = {
@@ -1684,7 +2247,7 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
                     "summaryTokenBudget": 500,
                     "actualTokenEstimate": 20,
                     "model": "gpt-5.4-mini",
-                    "promptVersion": "reference-title-subtitle-summary-v1-outcome",
+                    "promptVersion": "reference-title-subtitle-summary-v2-source-voice",
                     "source": "llm_outcome_summary",
                     "source_urls": ["https://example.test/ref"],
                     "run_id": "run-1",
@@ -1705,14 +2268,54 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
             )
 
         self.assertEqual(plan["action"], "update")
-        self.assertEqual(plan["records"][0]["modelName"], "Reference")
-        self.assertEqual(plan["records"][0]["input"]["title"], "Exact Source Title")
-        self.assertEqual(plan["records"][1]["modelName"], "ModelAttachment")
-        metadata = json.loads(plan["records"][1]["body"])
+        self.assertEqual(plan["records"][0]["modelName"], "ModelAttachment")
+        metadata = json.loads(plan["records"][0]["body"])
+        self.assertEqual(metadata["title"], "Exact Source Title")
         self.assertEqual(metadata["subtitle"], "Exact Source Subtitle")
-        self.assertEqual(metadata["summary"], "This work reports the main finding and why it matters.")
         self.assertEqual(metadata["title_subtitle_resolution"]["title_mode"], "original_web_metadata")
-        self.assertEqual(metadata["summary_resolution"]["summaryTokenBudget"], 500)
+        self.assertNotIn("summary", metadata)
+        self.assertNotIn("summary_resolution", metadata)
+
+    def test_title_subtitle_plan_does_not_noop_when_existing_subtitle_is_url(self):
+        reference = {
+            "id": "reference-a-v1",
+            "lineageId": "reference-a",
+            "versionNumber": 1,
+            "externalItemId": "item-a",
+            "title": "Reference title",
+            "sourceUri": "https://example.test/ref",
+            "metadata": {
+                "subtitle": "https://example.test/path/to/article",
+            },
+        }
+
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals.resolve_reference_title_subtitle",
+            return_value={
+                "status": "resolved",
+                "title": "Reference title",
+                "subtitle": "Concise informative subtitle for this reference",
+                "title_mode": "original_metadata",
+                "subtitle_mode": "generated",
+                "source": "llm_no_web_search",
+                "model": "gpt-5.4-mini",
+                "web_search_used": False,
+                "source_urls": ["https://example.test/ref"],
+                "rationale": "Generated replacement subtitle.",
+                "summary": "",
+                "summary_resolution": {},
+                "run_id": "run-1",
+                "resolved_at": "2026-05-20T12:00:00Z",
+                "warnings": [],
+            },
+        ):
+            plan = reference_curation_signals.build_reference_title_subtitle_plan(
+                reference=reference,
+                web_search_enabled=False,
+                now="2026-05-20T12:00:00Z",
+            )
+
+        self.assertEqual(plan["action"], "update")
 
     def test_title_subtitle_resolve_reports_vector_sync_surface_status(self):
         reference = {
@@ -1823,10 +2426,10 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertEqual(item["title"], "Verbatim Catalog Title")
         self.assertEqual(item["subtitle"], "Verbatim Catalog Subtitle")
         self.assertEqual(item["metadata"]["subtitle"], "Verbatim Catalog Subtitle")
-        self.assertEqual(item["summary"], "Existing metadata summary.")
-        self.assertEqual(item["metadata"]["summary"], item["summary"])
+        self.assertNotIn("summary", item)
+        self.assertEqual(item["metadata"]["summary"], "Existing metadata summary.")
         self.assertEqual(item["metadata"]["title_subtitle_resolution"]["title_mode"], "original_metadata")
-        self.assertIn("summary_resolution", item["metadata"])
+        self.assertNotIn("summary_resolution", item["metadata"])
 
     def test_biblicus_catalog_item_keeps_editorial_fields_in_metadata_only(self):
         enriched = reference_curation_signals.apply_title_subtitle_to_catalog_item(
@@ -1861,7 +2464,7 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertEqual(enriched["metadata"]["summary"], "Updated summary")
         self.assertIn("papyrus", enriched["metadata"])
 
-    def test_resolver_ignores_bullet_list_subtitle_from_local_metadata(self):
+    def test_resolver_preserves_local_subtitle_verbatim(self):
         result = reference_curation_signals.resolve_reference_title_subtitle(
             reference={"id": "reference-1-v1", "title": "Reliable Title"},
             catalog_entry={
@@ -1874,9 +2477,9 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
 
         self.assertEqual(result["status"], "resolved")
         self.assertEqual(result["title"], "Reliable Title")
-        self.assertEqual(result["subtitle"], "")
-        self.assertEqual(result["subtitle_mode"], "unresolved")
-        self.assertEqual(result["summary"], "A valid local summary.")
+        self.assertEqual(result["subtitle"], "- one - two")
+        self.assertEqual(result["subtitle_mode"], "original_metadata")
+        self.assertEqual(result["summary"], "")
 
     def test_catalog_title_subtitle_enrichment_prefers_newest_items(self):
         result = reference_curation_signals.enrich_reference_catalog_title_subtitle(
@@ -1926,10 +2529,7 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
                 only_missing=True,
             )
 
-        self.assertEqual(result["items"][0]["action"], "update")
-        enriched = result["catalog"]["items"][0]
-        self.assertTrue(enriched.get("summary"))
-        self.assertTrue(enriched.get("metadata", {}).get("summary"))
+        self.assertEqual(result["items"][0]["action"], "noop")
 
     def test_refresh_summary_updates_metadata_summary_even_with_existing_title_subtitle(self):
         reference = {
@@ -1967,7 +2567,7 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
                     "summaryTokenBudget": 500,
                     "actualTokenEstimate": 10,
                     "model": "gpt-5.4-mini",
-                    "promptVersion": "reference-title-subtitle-summary-v1-outcome",
+                    "promptVersion": "reference-title-subtitle-summary-v2-source-voice",
                     "source": "llm_outcome_summary",
                     "source_urls": [],
                     "run_id": "run-1",
@@ -1990,11 +2590,10 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
             )
 
         self.assertEqual(plan["action"], "update")
-        self.assertEqual(plan["records"][0]["modelName"], "Reference")
-        self.assertEqual(plan["records"][0]["input"]["title"], "Existing Title")
-        metadata = json.loads(plan["records"][1]["body"])
+        self.assertEqual(plan["records"][0]["modelName"], "ModelAttachment")
+        metadata = json.loads(plan["records"][0]["body"])
         self.assertEqual(metadata["subtitle"], "Existing Subtitle")
-        self.assertEqual(metadata["summary"], "New summary content.")
+        self.assertNotIn("summary", metadata)
 
     def test_local_title_normalization_strips_citation_wrappers(self):
         result = reference_curation_signals.resolve_reference_title_subtitle(
@@ -2011,10 +2610,7 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
             result["title"],
             "AutoGen Studio: A No-Code Developer Tool for Building and Debugging Multi-Agent Systems",
         )
-        self.assertEqual(
-            result["subtitle"],
-            "A No-Code Developer Tool for Building and Debugging Multi-Agent Systems",
-        )
+        self.assertEqual(result["subtitle"], "")
 
     def test_title_subtitle_plan_captures_arxiv_identifier_before_title_normalization(self):
         reference = {
@@ -2042,7 +2638,7 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         )
 
         self.assertEqual(plan["action"], "update")
-        metadata = json.loads(plan["records"][1]["body"])
+        metadata = json.loads(plan["records"][0]["body"])
         self.assertEqual(
             metadata["title"],
             "AutoGen Studio: A No-Code Developer Tool for Building and Debugging Multi-Agent Systems",
@@ -2486,7 +3082,7 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
 
         self.assertEqual(result["status"], "unresolved")
         self.assertEqual(result["title"], "")
-        self.assertEqual(result["subtitle"], "")
+        self.assertEqual(result["subtitle"], "ScienceDirect article metadata unavailable")
 
     def test_semantic_neighbors_and_walk_use_graph_indexes(self):
         calls = []

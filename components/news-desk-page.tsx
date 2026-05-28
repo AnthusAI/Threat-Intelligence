@@ -65,7 +65,7 @@ function parseRouteSelection(tab: NewsDeskTab, selectionPath: string[] | null | 
   if (!segments.length) return {};
   if (tab === "administration") return { panel: segments[0] ?? null };
   if (tab === "topics") return { category: segments[1] ?? segments[0] ?? null };
-  if (tab === "references") return segments[0]?.startsWith("reference-") ? { reference: segments[0] } : { category: segments[0] ?? null };
+  if (tab === "references") return { reference: segments[0] ?? null };
   if (tab === "concepts") return { category: segments[0] ?? null };
   if (tab === "messages") return { message: segments[0] ?? null };
   if (tab === "assignments") return { assignment: segments[0] ?? null };

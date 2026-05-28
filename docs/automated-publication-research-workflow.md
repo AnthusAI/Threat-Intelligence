@@ -66,6 +66,8 @@ include:
 - `proposed_references`
 - `recent_desk_memory_used`, `coverage_gaps`, `open_questions`
 - `risk_flags`, `verification_needs`, `source_diversity_notes`
+- knowledge-orientation trace: `source_trail`, `knowledge_queries`,
+  `papyrus_uris_inspected`, and optional `knowledge_blocked_reason`
 - `copywriter_brief`
 - `editor_recommendation`: `select`, `merge`, `brief`, `hold`, or `kill`
 
@@ -109,7 +111,7 @@ worked through multiple section lenses. The CLI command remains
 `assignments run-story-cycle` for compatibility.
 
 ```bash
-npm run content -- assignments run-story-cycle \
+poetry run papyrus assignments run-story-cycle \
   --date 2026-05-21 \
   --topic "AI in video games" \
   --category AI-ML-research \
@@ -133,6 +135,19 @@ Dry-run is the default. It creates local output under
 `.papyrus-runs/story-cycle-<run-id>/`: `manifest.json`, child research logs,
 child reporting logs, packet JSON files, and `story-cycle-output.json`.
 
+Cloud procedure runs also write structured per-call LLM context trace artifacts
+under each run directory:
+
+- `llm-context/summary.json`: indexed metadata and call list
+- `llm-context/calls.jsonl`: one record per LLM call with the exact message
+  array sent to the model (system prompt + history + user/tool messages)
+- `llm-context/execute_tactus_calls.jsonl`: one record per `execute_tactus`
+  call, including harness, args, and the exact `tactus` snippet passed to the
+  runtime
+
+Use these files as the canonical local audit trail for context engineering
+debugging and verification.
+
 Apply mode persists private work products only: `Assignment`, `AssignmentEvent`,
 `Message`, `ModelAttachment`, and `SemanticRelation`. It must not create
 `Item` or `EditionItem` records during packet generation. In live apply mode,
@@ -145,7 +160,7 @@ the intent is to regenerate already persisted packet payloads.
 Inspect output with:
 
 ```bash
-npm run content -- assignments story-cycle-output \
+poetry run papyrus assignments story-cycle-output \
   --run-id <story-cycle-run-id> \
   --json
 ```
@@ -162,7 +177,7 @@ Editors review `reporting_context_packet` rows from `/newsroom/assignments` or
 the CLI:
 
 ```bash
-npm run content -- assignments review-reporting-packet \
+poetry run papyrus assignments review-reporting-packet \
   --assignment <assignment-id> \
   --message <message-id> \
   --decision select|merge|brief|hold|kill \
@@ -186,7 +201,7 @@ Decision effects:
 Run the copywriting Assignment after selection:
 
 ```bash
-npm run content -- assignments run-copywriting \
+poetry run papyrus assignments run-copywriting \
   --assignment <copywriting-assignment-id> \
   --dry-run
 ```
@@ -219,6 +234,20 @@ Reporters use `procedures/newsroom/reporter.tac` to produce
 assignments. Agents do not own persistence mechanics; the CLI/procedure layer
 turns payloads into deterministic `Message`, `ModelAttachment`, and
 `SemanticRelation` writes.
+
+Live reporting runs use a strict path: one deterministic internal-orientation
+step (`assignment_context`, `assignment_agent_context`, then one broad scoped
+`knowledge_query`) before any optional follow-up lookup. Reporter tool flow does
+not rely on `done` short-circuit behavior in this path.
+
+Reporting runs are immutable packet history. Multiple packet Messages may exist
+for one Assignment, and downstream copywriting should treat the most recent
+successful `reporting_context_packet` Message as canonical unless an explicit
+editor workflow chooses a specific Message id.
+
+When orientation cannot complete, the default behavior is a valid `hold` packet
+with explicit `knowledge_blocked_reason` (plus orientation-attempt metadata),
+not a pipeline crash.
 
 When current external evidence is required, Tactus snippets should import the
 standard web module:

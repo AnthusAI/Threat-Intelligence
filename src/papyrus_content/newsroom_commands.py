@@ -1,21 +1,33 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .env import PAPYRUS_ROOT, storage_bucket_from_amplify_outputs
 from .graphql_authoring import create_authoring_client
+from .cloud_procedures import (
+    SEED_REQUIRED_PROCEDURES_COMMAND,
+    load_required_cli_procedure_config,
+)
 from .ids import safe_id
 from .model_attachments import (
     MODEL_ATTACHMENT_OWNER_MODELS,
+    build_text_model_payload_attachment,
     build_json_model_payload_attachment,
     delete_attachment_storage_paths,
     list_attachment_storage_paths,
     model_attachment_id,
-    upload_attachment_body,
 )
 from .newsroom_sections import DEFAULT_NEWSROOM_SECTIONS_PATH, build_newsroom_section_records, load_newsroom_section_seeds
+from .newsroom_doctrine import (
+    DEFAULT_PUBLICATION_DOCTRINE_PATH,
+    build_publication_doctrine_records,
+    load_publication_doctrine_seed,
+)
 from .newsroom_summary import (
     NEWSROOM_SUMMARY_PAYLOAD_ID,
     build_newsroom_summary_payload,
@@ -24,13 +36,38 @@ from .newsroom_summary import (
     print_newsroom_summary_recount,
     read_json_model_payload,
 )
-from .options import normalize_string, parse_options
+from .options import normalize_non_negative_integer, normalize_string, parse_options, resolve_mutation_apply
 from .records import build_record_change_from_current, is_missing_graphql_model_error
 from .relations_commands import print_category_import_summary
+
+CREATE_PROCEDURE_DEFINITION_MUTATION = """
+mutation CreateProcedureDefinition($input: CreateProcedureDefinitionInput!) {
+  createProcedureDefinition(input: $input) { id }
+}
+"""
+
+UPDATE_PROCEDURE_DEFINITION_MUTATION = """
+mutation UpdateProcedureDefinition($input: UpdateProcedureDefinitionInput!) {
+  updateProcedureDefinition(input: $input) { id }
+}
+"""
+
+CREATE_PROCEDURE_VERSION_MUTATION = """
+mutation CreateProcedureVersion($input: CreateProcedureVersionInput!) {
+  createProcedureVersion(input: $input) { id }
+}
+"""
+
+UPDATE_PROCEDURE_VERSION_MUTATION = """
+mutation UpdateProcedureVersion($input: UpdateProcedureVersionInput!) {
+  updateProcedureVersion(input: $input) { id }
+}
+"""
 
 
 def newsroom_recount_summary(flags: list[str]) -> None:
     options = parse_options(flags)
+    apply = resolve_mutation_apply(options, "sections recount-summary")
     client, _ = create_authoring_client()
     now = _utc_now()
     corpora = client.list_records("KnowledgeCorpus")
@@ -42,7 +79,16 @@ def newsroom_recount_summary(flags: list[str]) -> None:
     references = client.list_records("Reference")
     reference_attachments = client.list_records("ReferenceAttachment")
     semantic_nodes = client.list_records("SemanticNode")
-    messages = client.list_records("Message")
+    try:
+        messages = client.list_records("Message")
+    except RuntimeError as error:
+        if _is_message_status_null_error(error):
+            raise ValueError(
+                "newsroom recount-summary failed because at least one Message has null status. "
+                "Run `poetry run papyrus sections repair-message-status` (dry-run) and then "
+                "`poetry run papyrus sections repair-message-status`."
+            ) from error
+        raise
     model_attachments = client.safe_list_records("ModelAttachment")
     semantic_relations = client.list_records("SemanticRelation")
     assignments = client.list_records("Assignment")
@@ -126,7 +172,7 @@ def newsroom_recount_summary(flags: list[str]) -> None:
                 "payload": payload,
             },
         )
-    if not options.get("apply"):
+    if not apply:
         if options.get("json"):
             print(
                 json.dumps(
@@ -142,7 +188,7 @@ def newsroom_recount_summary(flags: list[str]) -> None:
                 )
             )
         else:
-            print("newsroom\trecount-summary\tapply\tskipped\tpass --apply to write KnowledgeRawPayload snapshot")
+            print("newsroom\trecount-summary\tapply\tskipped\tuse --dry-run to preview without writes")
         return
     client.upsert("KnowledgeRawPayload", expected)
     upload_attachment_body(client, summary_attachment["attachment"], summary_attachment["body"])
@@ -165,8 +211,161 @@ def newsroom_recount_summary(flags: list[str]) -> None:
         print(f"newsroom\trecount-summary\t{change['action']}\t{expected['id']}")
 
 
+def newsroom_repair_message_status(flags: list[str]) -> None:
+    options = parse_options(flags)
+    apply = resolve_mutation_apply(options, "sections repair-message-status")
+    status_value = normalize_string(options.get("status")) or "active"
+    max_scan_option = normalize_non_negative_integer(options.get("max-scan"), "--max-scan")
+    max_scan = max_scan_option if max_scan_option is not None else (None if apply else 2000)
+    client, _ = create_authoring_client()
+    scanned = 0
+    truncated = False
+    candidates: list[dict[str, Any]] = []
+    candidate_ids: set[str] = set()
+    next_token: str | None = None
+    while True:
+        page_token = next_token
+        rows, next_token = client.list_messages_safe(limit=100, next_token=page_token)
+        if max_scan is not None and scanned + len(rows) > max_scan:
+            rows = rows[: max_scan - scanned]
+            truncated = True
+        if not rows:
+            break
+        scanned += len(rows)
+        page_had_status_error = False
+        while True:
+            try:
+                status_rows, _ = client.list_messages_status_page(limit=len(rows), next_token=page_token)
+            except RuntimeError as error:
+                status_error_index = _message_status_error_index(error) if _is_message_status_null_error(error) else None
+                if status_error_index is None:
+                    raise
+                page_had_status_error = True
+                if status_error_index >= len(rows):
+                    raise ValueError(
+                        f"Could not resolve Message status failure index {status_error_index}; safe page returned {len(rows)} rows."
+                    ) from error
+                row = rows[status_error_index]
+                message_id = normalize_string(row.get("id"))
+                if not message_id or message_id in candidate_ids:
+                    break
+                candidate_ids.add(message_id)
+                candidates.append(
+                    {
+                        "id": message_id,
+                        "messageKind": row.get("messageKind"),
+                        "messageDomain": row.get("messageDomain"),
+                        "createdAt": row.get("createdAt"),
+                        "updatedAt": row.get("updatedAt"),
+                    }
+                )
+                if apply:
+                    now = _utc_now()
+                    client.update_record(
+                        "Message",
+                        {
+                            "id": message_id,
+                            "status": status_value,
+                            "updatedAt": row.get("updatedAt") or now,
+                        },
+                    )
+                    continue
+                break
+            status_by_id = {entry.get("id"): normalize_string(entry.get("status")) for entry in status_rows}
+            for row in rows:
+                message_id = normalize_string(row.get("id"))
+                if not message_id or message_id in candidate_ids:
+                    continue
+                if status_by_id.get(message_id):
+                    continue
+                candidate_ids.add(message_id)
+                candidates.append(
+                    {
+                        "id": message_id,
+                        "messageKind": row.get("messageKind"),
+                        "messageDomain": row.get("messageDomain"),
+                        "createdAt": row.get("createdAt"),
+                        "updatedAt": row.get("updatedAt"),
+                    }
+                )
+            break
+        if not apply and page_had_status_error:
+            # In dry-run, a failing status page can hide additional broken records on the same page.
+            # Fall back to targeted per-record checks only for pages that already surfaced one failure.
+            for row in rows:
+                message_id = normalize_string(row.get("id"))
+                if not message_id or message_id in candidate_ids:
+                    continue
+                try:
+                    status_row = client.get_message_status(message_id)
+                    if normalize_string((status_row or {}).get("status")):
+                        continue
+                except RuntimeError as error:
+                    if not _is_message_status_null_error(error):
+                        raise
+                candidate_ids.add(message_id)
+                candidates.append(
+                    {
+                        "id": message_id,
+                        "messageKind": row.get("messageKind"),
+                        "messageDomain": row.get("messageDomain"),
+                        "createdAt": row.get("createdAt"),
+                        "updatedAt": row.get("updatedAt"),
+                    }
+                )
+        if apply and candidates and len(candidates) % 100 == 0:
+            print(f"newsroom\trepair-message-status\tupdated\t{len(candidates)}", flush=True)
+        if not options.get("json") and (scanned == len(rows) or scanned % 500 == 0):
+            print(f"newsroom\trepair-message-status\tscan-progress\t{scanned}", flush=True)
+        if max_scan is not None and scanned >= max_scan:
+            break
+        if not next_token:
+            break
+    candidates.sort(key=lambda entry: (str(entry.get("createdAt") or ""), str(entry["id"])))
+    if options.get("json"):
+        print(
+            json.dumps(
+                {
+                    "ok": True,
+                    "command": "newsroom repair-message-status",
+                    "mode": "apply" if apply else "dry-run",
+                    "status": status_value,
+                    "scanned": scanned,
+                    "plannedUpdates": len(candidates),
+                    "updated": len(candidates) if apply else 0,
+                    "truncated": truncated,
+                    "maxScan": max_scan,
+                    "sample": candidates[:20],
+                    "next": None if apply else f"poetry run papyrus sections repair-message-status --status {status_value}",
+                },
+                indent=2,
+            )
+        )
+        return
+    print(f"newsroom\trepair-message-status\tmode\t{'apply' if apply else 'dry-run'}")
+    print(f"newsroom\trepair-message-status\tstatus\t{status_value}")
+    print(f"newsroom\trepair-message-status\tscanned\t{scanned}")
+    print(f"newsroom\trepair-message-status\tmax-scan\t{max_scan if max_scan is not None else 'none'}")
+    if truncated:
+        print("newsroom\trepair-message-status\ttruncated\ttrue")
+    print(f"newsroom\trepair-message-status\tplanned-updates\t{len(candidates)}")
+    for entry in candidates[:20]:
+        print(
+            "newsroom\trepair-message-status\tcandidate\t"
+            f"{entry['id']}\t{entry.get('messageKind') or '-'}\t{entry.get('messageDomain') or '-'}"
+        )
+    if len(candidates) > 20:
+        print(f"newsroom\trepair-message-status\tpreview-truncated\t{len(candidates) - 20}")
+    if not apply:
+        print(
+            "newsroom\trepair-message-status\tnext\t"
+            f"poetry run papyrus sections repair-message-status --status {status_value}"
+        )
+
+
 def newsroom_backfill_feed_fields(flags: list[str]) -> None:
     options = parse_options(flags)
+    apply = resolve_mutation_apply(options, "sections backfill-feed-fields")
     client, _ = create_authoring_client()
     models = ["Message", "Assignment", "Reference", "SemanticNode", "SemanticRelation"]
     changes: list[dict[str, Any]] = []
@@ -185,8 +384,8 @@ def newsroom_backfill_feed_fields(flags: list[str]) -> None:
         )
     if len(changes) > 20:
         print(f"newsroom\tbackfill-feed-fields\tpreview-truncated\t{len(changes) - 20} more")
-    if not options.get("apply"):
-        print("newsroom\tbackfill-feed-fields\tapply\tskipped\tpass --apply to write feed fields")
+    if not apply:
+        print("newsroom\tbackfill-feed-fields\tapply\tskipped\tuse --dry-run to preview without writes")
         return
     for change in changes:
         client.upsert(change["modelName"], change["expected"])
@@ -196,7 +395,7 @@ def newsroom_backfill_feed_fields(flags: list[str]) -> None:
 def newsroom_backfill_operational_indexes(flags: list[str]) -> None:
     options = parse_options(flags)
     started_at = datetime.now(timezone.utc)
-    apply = bool(options.get("apply"))
+    apply = resolve_mutation_apply(options, "sections backfill-operational-indexes")
     client, _ = create_authoring_client()
     _assert_operational_index_schema_ready(client)
     assignments = client.list_records("Assignment")
@@ -238,9 +437,9 @@ def newsroom_backfill_operational_indexes(flags: list[str]) -> None:
         "changedRecords": len(changes),
         "elapsedMs": elapsed_ms,
         "next": (
-            "poetry run papyrus-content newsroom recount-summary --apply"
+            "poetry run papyrus sections recount-summary"
             if apply
-            else "poetry run papyrus-content newsroom backfill-operational-indexes --apply"
+            else "poetry run papyrus sections backfill-operational-indexes"
         ),
     }
     if options.get("json"):
@@ -282,9 +481,349 @@ def newsroom_import_sections(flags: list[str]) -> None:
     print_category_import_summary("newsroom-sections", Path(config_path).name, changes)
 
 
+def newsroom_import_doctrine(flags: list[str]) -> None:
+    options = parse_options(flags)
+    config_path = options.get("config") or str(DEFAULT_PUBLICATION_DOCTRINE_PATH)
+    seed = load_publication_doctrine_seed(config_path)
+    records = build_publication_doctrine_records(seed["doctrine"])
+    client, _ = create_authoring_client()
+    changes: list[dict[str, Any]] = []
+    for record in records:
+        action = client.upsert(record["modelName"], record["expected"])
+        changes.append({**record, "action": action})
+    print_category_import_summary("publication-doctrine", Path(config_path).name, changes)
+
+
+def newsroom_seed_required_procedures(flags: list[str]) -> None:
+    options = parse_options(flags)
+    apply = resolve_mutation_apply(options, "procedures seed-required")
+    seeds = _required_procedure_seed_specs()
+    payload = {
+        "ok": True,
+        "command": "procedures seed-required",
+        "action": "apply" if apply else "dry-run",
+        "procedures": [
+            {
+                "procedureKey": seed["procedureKey"],
+                "procedureId": seed["procedureId"],
+                "versionId": seed["versionId"],
+                "sourcePath": str(seed["sourcePath"]),
+            }
+            for seed in seeds
+        ],
+        "next": None if apply else SEED_REQUIRED_PROCEDURES_COMMAND,
+    }
+    if not apply:
+        if options.get("json"):
+            print(json.dumps(payload, indent=2))
+        else:
+            print("procedures\tseed-required\taction\tdry-run")
+            for entry in payload["procedures"]:
+                print(
+                    "procedures\tseed-required\tplanned\t"
+                    f"{entry['procedureKey']}\t{entry['sourcePath']}"
+                )
+            print(
+                "procedures\tseed-required\tapply\tskipped\t"
+                "use --dry-run to preview without writes"
+            )
+        return
+
+    client, _ = create_authoring_client()
+    now = _utc_now()
+    results: list[dict[str, Any]] = []
+    for seed in seeds:
+        definition_payload = {
+            "id": seed["procedureId"],
+            "procedureKey": seed["procedureKey"],
+            "title": seed["title"],
+            "category": seed["category"],
+            "description": seed["description"],
+            "enabled": True,
+            "enabledStatus": "enabled",
+            "currentVersionId": seed["versionId"],
+            "createdBy": "papyrus-cli",
+            "createdAt": now,
+            "updatedBy": "papyrus-cli",
+            "updatedAt": now,
+            "newsroomFeedKey": "procedures",
+        }
+        version_payload = {
+            "id": seed["versionId"],
+            "procedureId": seed["procedureId"],
+            "procedureKey": seed["procedureKey"],
+            "versionNumber": 1,
+            "status": "published",
+            "isCurrent": True,
+            "label": seed["versionLabel"],
+            "tactusSource": "attachment://code.tac",
+            "parameterSchema": json.dumps(seed["parameterSchema"]),
+            "defaults": json.dumps(seed["defaults"]),
+            "changelog": "Seeded via papyrus procedures seed-required.",
+            "createdBy": "papyrus-cli",
+            "createdAt": now,
+            "updatedBy": "papyrus-cli",
+            "updatedAt": now,
+        }
+        definition_mode = _create_or_update_procedure_record(
+            client,
+            create_query=CREATE_PROCEDURE_DEFINITION_MUTATION,
+            update_query=UPDATE_PROCEDURE_DEFINITION_MUTATION,
+            payload=definition_payload,
+            kind=f"ProcedureDefinition {seed['procedureKey']}",
+        )
+        version_mode = _create_or_update_procedure_record(
+            client,
+            create_query=CREATE_PROCEDURE_VERSION_MUTATION,
+            update_query=UPDATE_PROCEDURE_VERSION_MUTATION,
+            payload=version_payload,
+            kind=f"ProcedureVersion {seed['versionId']}",
+        )
+        code_attachment = build_text_model_payload_attachment(
+            {
+                "ownerKind": "procedureVersion",
+                "ownerId": seed["versionId"],
+                "ownerLineageId": seed["versionId"],
+                "role": "code",
+                "sortKey": "code",
+                "filename": "code.tac",
+                "mediaType": "text/plain",
+                "content": seed["tactusSource"],
+                "status": "active",
+                "importRunId": None,
+                "now": now,
+            }
+        )
+        _upload_model_attachment_to_s3(code_attachment["attachment"], code_attachment["body"])
+        client.upsert("ModelAttachment", code_attachment["attachment"])
+        # Ensure the definition points at the seeded current version after updates.
+        client.graphql(
+            UPDATE_PROCEDURE_DEFINITION_MUTATION,
+            {
+                "input": {
+                    "id": seed["procedureId"],
+                    "currentVersionId": seed["versionId"],
+                    "enabled": True,
+                    "enabledStatus": "enabled",
+                    "updatedBy": "papyrus-cli",
+                    "updatedAt": now,
+                }
+            },
+        )
+        results.append(
+            {
+                "procedureKey": seed["procedureKey"],
+                "definition": definition_mode,
+                "version": version_mode,
+                "sourcePath": str(seed["sourcePath"]),
+            }
+        )
+    if options.get("json"):
+        print(json.dumps({**payload, "results": results}, indent=2))
+        return
+    print("procedures\tseed-required\taction\tapply")
+    for result in results:
+        print(
+            "procedures\tseed-required\tseeded\t"
+            f"{result['procedureKey']}\tdefinition={result['definition']}\tversion={result['version']}"
+        )
+
+
+def _required_procedure_seed_specs() -> list[dict[str, Any]]:
+    config = load_required_cli_procedure_config()
+    source_by_key = {
+        "newsroom.research.explorer": PAPYRUS_ROOT / "procedures" / "newsroom" / "research_explorer.tac",
+        "newsroom.reporting.context": PAPYRUS_ROOT / "procedures" / "newsroom" / "reporter.tac",
+        "newsroom.reference.summarization": PAPYRUS_ROOT / "procedures" / "newsroom" / "reference_summarization.tac",
+        "ontology.relationship-explainer": PAPYRUS_ROOT / "procedures" / "newsroom" / "ontology_relationship_explainer.tac",
+        "ontology.concept-profiler": PAPYRUS_ROOT / "procedures" / "newsroom" / "ontology_concept_profiler.tac",
+    }
+    details_by_key = {
+        "newsroom.research.explorer": {
+            "title": "Newsroom Research Explorer",
+            "category": "newsroom",
+            "description": "Builds structured research packets for assignment-backed newsroom workflows.",
+            "versionLabel": "starter",
+            "parameterSchema": {
+                "type": "object",
+                "required": ["corpus_key"],
+                "properties": {
+                    "assignment_item_id": {"type": "string"},
+                    "assignment_json": {"type": "object"},
+                    "corpus_key": {"type": "string"},
+                    "context_profile": {"type": "string"},
+                    "research_mode": {"type": "string"},
+                    "research_questions": {"type": "string"},
+                    "max_evidence_items": {"type": "number"},
+                },
+            },
+            "defaults": {
+                "context_profile": "researcher",
+                "research_mode": "source_discovery",
+                "max_evidence_items": 20,
+            },
+        },
+        "newsroom.reporting.context": {
+            "title": "Newsroom Reporting Context",
+            "category": "newsroom",
+            "description": "Builds structured reporting context packets from assignment-backed runs.",
+            "versionLabel": "starter",
+            "parameterSchema": {
+                "type": "object",
+                "required": ["corpus_key"],
+                "properties": {
+                    "assignment_item_id": {"type": "string"},
+                    "assignment_json": {"type": "object"},
+                    "corpus_key": {"type": "string"},
+                    "context_profile": {"type": "string"},
+                    "source_research_assignment_id": {"type": "string"},
+                    "source_research_packet_id": {"type": "string"},
+                    "source_research_packet_path": {"type": "string"},
+                },
+            },
+            "defaults": {"context_profile": "reporting"},
+        },
+        "newsroom.reference.summarization": {
+            "title": "Newsroom Reference Summarization",
+            "category": "newsroom",
+            "description": "Generates source-voice reference summaries for curation metadata and summary messages.",
+            "versionLabel": "starter",
+            "parameterSchema": {
+                "type": "object",
+                "required": ["mode", "source_text"],
+                "properties": {
+                    "mode": {"type": "string"},
+                    "source_text": {"type": "string"},
+                    "max_tokens": {"type": "number"},
+                    "reference_title": {"type": "string"},
+                    "source_uri": {"type": "string"},
+                    "known_title": {"type": "string"},
+                    "known_subtitle": {"type": "string"},
+                    "media_type": {"type": "string"},
+                    "doctrine_context_text": {"type": "string"},
+                    "model": {"type": "string"},
+                    "prompt_version": {"type": "string"},
+                },
+            },
+            "defaults": {
+                "mode": "reference_summary",
+                "max_tokens": 500,
+                "model": "gpt-5.4-mini",
+            },
+        },
+        "ontology.relationship-explainer": {
+            "title": "Ontology Relationship Explainer",
+            "category": "ontology",
+            "description": "Explains semantic relations using lineage context and evidence payloads.",
+            "versionLabel": "starter",
+            "parameterSchema": {
+                "type": "object",
+                "required": ["relation_json"],
+                "properties": {
+                    "relation_json": {"type": "object"},
+                    "relation_context_json": {"type": "object"},
+                    "model": {"type": "string"},
+                    "temperature": {"type": "number"},
+                },
+            },
+            "defaults": {
+                "model": "gpt-5.4-mini",
+                "temperature": 0,
+            },
+        },
+        "ontology.concept-profiler": {
+            "title": "Ontology Concept Profiler",
+            "category": "ontology",
+            "description": "Builds concept profiles from ontology context and relation explanations.",
+            "versionLabel": "starter",
+            "parameterSchema": {
+                "type": "object",
+                "required": ["concept_json"],
+                "properties": {
+                    "concept_json": {"type": "object"},
+                    "concept_context_json": {"type": "object"},
+                    "model": {"type": "string"},
+                    "temperature": {"type": "number"},
+                },
+            },
+            "defaults": {
+                "model": "gpt-5.4-mini",
+                "temperature": 0,
+            },
+        },
+    }
+    seeds: list[dict[str, Any]] = []
+    for procedure_key in config["keys"]:
+        source_path = source_by_key.get(procedure_key)
+        details = details_by_key.get(procedure_key)
+        if not source_path or not details:
+            raise ValueError(
+                f"Missing seed metadata for required procedure '{procedure_key}'. "
+                "Update newsroom_seed_required_procedures metadata."
+            )
+        if not source_path.exists():
+            raise ValueError(f"Missing procedure source file for {procedure_key}: {source_path}")
+        slug = safe_id(procedure_key)[:120]
+        seeds.append(
+            {
+                "procedureKey": procedure_key,
+                "procedureId": f"procedure-definition-{slug}",
+                "versionId": f"procedure-version-{slug}-1",
+                "sourcePath": source_path,
+                "tactusSource": source_path.read_text(encoding="utf-8").strip() + "\n",
+                **details,
+            }
+        )
+    return seeds
+
+
+def _create_or_update_procedure_record(
+    client,
+    *,
+    create_query: str,
+    update_query: str,
+    payload: dict[str, Any],
+    kind: str,
+) -> str:
+    try:
+        client.graphql(create_query, {"input": payload})
+        return "created"
+    except RuntimeError as create_error:
+        try:
+            client.graphql(update_query, {"input": payload})
+            return "updated"
+        except RuntimeError as update_error:
+            raise ValueError(
+                f"Failed to seed {kind}. create error={create_error}; update error={update_error}"
+            ) from update_error
+
+
+def _upload_model_attachment_to_s3(attachment: dict[str, Any], body: bytes) -> None:
+    try:
+        import boto3
+    except ModuleNotFoundError as error:
+        raise RuntimeError("boto3 is required to upload procedure code attachments.") from error
+    bucket = (
+        os.environ.get("papyrusMedia_BUCKET_NAME")
+        or os.environ.get("PAPYRUS_MEDIA_BUCKET_NAME")
+        or os.environ.get("STORAGE_BUCKET_NAME")
+        or os.environ.get("AMPLIFY_STORAGE_BUCKET_NAME")
+        or storage_bucket_from_amplify_outputs()
+    )
+    if not bucket:
+        raise RuntimeError("Could not resolve storage bucket for procedure code attachments.")
+    s3 = boto3.client("s3")
+    s3.put_object(
+        Bucket=bucket,
+        Key=str(attachment["storagePath"]),
+        Body=body,
+        ContentType=str(attachment.get("mediaType") or "text/plain"),
+    )
+
+
 def newsroom_prune_attachments(flags: list[str]) -> None:
     options = parse_options(flags)
-    apply = bool(options.get("apply"))
+    apply = resolve_mutation_apply(options, "sections prune-attachments")
     bucket = normalize_string(options.get("bucket"))
     prefix = normalize_string(options.get("prefix")) or "newsroom/payloads/"
     client, _ = create_authoring_client()
@@ -361,13 +900,13 @@ def newsroom_prune_attachments(flags: list[str]) -> None:
                         "orphanStorageObjects": len(orphan_storage_paths),
                     },
                     "deleted": deleted,
-                    "next": None if apply else "poetry run papyrus-content newsroom prune-attachments --apply",
+                    "next": None if apply else "poetry run papyrus sections prune-attachments",
                 },
                 indent=2,
             )
         )
     elif not apply:
-        print("attachment-prune\tnext\tpoetry run papyrus-content newsroom prune-attachments --apply")
+        print("attachment-prune\tnext\tpoetry run papyrus sections prune-attachments")
 
 
 def _newsroom_feed_patch_for(model_name: str, record: dict[str, Any]) -> dict[str, Any]:
@@ -491,6 +1030,27 @@ def _attachment_owner_exists(attachment: dict[str, Any], owner_ids_by_kind: dict
     if not owner_model:
         return False
     return attachment.get("ownerId") in owner_ids_by_kind.get(owner_kind, set())
+
+
+def _is_message_status_null_error(error: Exception) -> bool:
+    text = str(error)
+    return (
+        "Message" in text
+        and "status" in text
+        and "Cannot return null for non-nullable type" in text
+    )
+
+
+def _message_status_error_index(error: Exception) -> int | None:
+    text = str(error)
+    match = re.search(r"/listMessages/items\[(\d+)\]/status", text)
+    if not match:
+        match = re.search(r"/getMessage/status", text)
+    if not match:
+        return None
+    if "/getMessage/status" in match.group(0):
+        return 0
+    return int(match.group(1))
 
 
 def _write_json_file(path: str, payload: Any) -> None:

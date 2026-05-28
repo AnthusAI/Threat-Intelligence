@@ -19,7 +19,10 @@ MODEL_ATTACHMENT_OWNER_MODELS = {
     "assignmentEvent": "AssignmentEvent",
     "knowledgeRawPayload": "KnowledgeRawPayload",
     "message": "Message",
+    "procedureVersion": "ProcedureVersion",
     "reference": "Reference",
+    "semanticNode": "SemanticNode",
+    "semanticRelation": "SemanticRelation",
 }
 
 
@@ -126,7 +129,21 @@ def upload_attachment_body(
             f"Failed to upload ModelAttachment {attachment['id']} to {slot.get('storagePath')}: "
             f"{error.code} {error.reason} {detail[:240]}"
         ) from error
-    return client.complete_model_attachment_upload(slot["uploadId"], attachment)
+    completed = client.complete_model_attachment_upload(slot["uploadId"], attachment)
+    if isinstance(completed, dict):
+        completed_status = str(completed.get("status") or "").strip().lower()
+        normalized_status = "active" if completed_status in {"", "ready"} else completed_status
+        return {
+            **attachment,
+            **completed,
+            "storagePath": slot.get("storagePath") or attachment.get("storagePath"),
+            "status": normalized_status,
+        }
+    return {
+        **attachment,
+        "storagePath": slot.get("storagePath") or attachment.get("storagePath"),
+        "status": "active",
+    }
 
 
 def expand_private_payload_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -355,4 +372,3 @@ def delete_attachment_storage_paths(
         preview = ", ".join(f"{entry.get('storagePath') or 'unknown'}:{entry.get('code') or 'error'}" for entry in errors[:3])
         raise RuntimeError(f"Failed to delete {len(errors)} ModelAttachment S3 object(s): {preview}")
     return {"bucket": resolved_bucket, "attempted": len(paths), "deleted": deleted, "chunks": chunks, "errors": errors}
-

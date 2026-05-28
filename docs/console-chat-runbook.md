@@ -77,14 +77,14 @@ export AWS_PROFILE=Ryan
 export AWS_REGION=us-east-1
 export AWS_ACCOUNT_ID=335163751677
 export RESPONDER_REPO="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/cdk-hnb659fds-container-assets-$AWS_ACCOUNT_ID-$AWS_REGION"
-export RESPONDER_TAG="papyrus-console-responder-$(git rev-parse --short HEAD)-lambda-amd64"
+export RESPONDER_TAG="papyrus-console-responder-$(git rev-parse --short HEAD)-lambda-arm64"
 export RESPONDER_IMAGE="$RESPONDER_REPO:$RESPONDER_TAG"
 
 aws ecr get-login-password \
   | docker login --username AWS --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
 
 docker buildx build \
-  --platform linux/amd64 \
+  --platform linux/arm64 \
   --provenance=false \
   --sbom=false \
   -f amplify/functions/console-chat-responder/Dockerfile \

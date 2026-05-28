@@ -1745,7 +1745,7 @@ function solveStaticBlock(
           kind: "ad",
           id: `${blockSpec.id}-ad`,
           src: blockSpec.imageUrl,
-          label: "Advertisement",
+          label: blockSpec.label?.trim() || "Advertisement",
           x: 0,
           y: 0,
           width,

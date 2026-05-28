@@ -7,6 +7,7 @@ import { configureAmplifyClient } from "./amplify-client-provider";
 import { loadReaderSessionSnapshot, type ReaderAuthSnapshot } from "./reader-auth-state";
 import {
   DEFAULT_READER_SETTINGS,
+  MOTION_OPTIONS,
   PRESENTATION_OPTIONS,
   THEME_OPTIONS,
   applyReaderTheme,
@@ -191,6 +192,32 @@ export function SettingsPage() {
                   disabled={pending}
                   key={option.value}
                   onClick={() => void updateSettings({ ...settings, theme: option.value })}
+                  role="radio"
+                  type="button"
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="settings-section" aria-labelledby="settings-motion-title">
+          <div className="settings-section__heading">
+            <p id="settings-motion-title">Motion</p>
+            <span>Animation preference</span>
+          </div>
+          <div className="theme-control" role="radiogroup" aria-labelledby="settings-motion-title">
+            {MOTION_OPTIONS.map((option) => {
+              const selected = settings.motion === option.value;
+              return (
+                <button
+                  aria-checked={selected}
+                  className="theme-control__button"
+                  data-selected={selected ? "true" : "false"}
+                  disabled={pending}
+                  key={option.value}
+                  onClick={() => void updateSettings({ ...settings, motion: option.value })}
                   role="radio"
                   type="button"
                 >

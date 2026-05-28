@@ -28,7 +28,7 @@ publication slots.
   research plus parallel reporting agents for one topic.
 - `amplify/data/resource.ts`: `Assignment`, `AssignmentEvent`,
   `SemanticRelation`, `Edition`, `Item`, and related auth rules.
-- `scripts/content-cli.cjs`: current authoring commands. Do not invent CLI
+- `papyrus`: current authoring commands. Do not invent CLI
   commands that are not present.
 
 If the edition depends on fresh corpus evidence, run the reference-intake and
@@ -229,13 +229,13 @@ Theme: one shared topic or coverage question worked through several section
 lenses. The older `run-story-cycle` name remains as compatibility language.
 
 ```bash
-poetry run papyrus-newsroom signals trend-report \
+poetry run papyrus knowledge signals trend-report \
   --corpus-key <corpus-key> \
   --topic "<topic>" \
   --sections <section-key>,<section-key> \
   --json
 
-poetry run papyrus-newsroom coverage-themes run \
+poetry run papyrus assignments run-story-cycle \
   --date YYYY-MM-DD \
   --topic "<topic>" \
   --category <category-key> \
@@ -245,7 +245,7 @@ poetry run papyrus-newsroom coverage-themes run \
   --through reporting \
   --json
 
-poetry run papyrus-newsroom story-budget output \
+poetry run papyrus assignments story-cycle-output \
   --run-id <coverage-theme-run-id> \
   --json
 ```
@@ -257,7 +257,7 @@ default stop point is through Reporting. Do not auto-select reporting packets,
 run copywriting, create `Item` rows, or create `EditionItem` rows from this
 command.
 
-Use `poetry run papyrus-newsroom editions plan` when the edition budget should
+Use `poetry run papyrus editions plan` when the edition budget should
 be generated from a signal report plus section slots. Its target behavior:
 
 - create or update the dated private `Edition` planning record;
@@ -280,7 +280,7 @@ After planning or dispatching edition assignments:
 - list the expected queues with the current assignment CLI, for example:
 
   ```bash
-  npm run content -- assignments list \
+  poetry run papyrus assignments list \
     --queue edition:<editionSlug>:<sectionKey> \
     --status open
   ```

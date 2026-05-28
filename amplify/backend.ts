@@ -1,7 +1,11 @@
 import { defineBackend, secret } from "@aws-amplify/backend";
+import { Duration } from "aws-cdk-lib";
+import * as backup from "aws-cdk-lib/aws-backup";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
+import * as events from "aws-cdk-lib/aws-events";
 import { PolicyStatement } from "aws-cdk-lib/aws-iam";
 import { Function as LambdaFunction } from "aws-cdk-lib/aws-lambda";
+import * as s3 from "aws-cdk-lib/aws-s3";
 import { CfnIndex, CfnVectorBucket, CfnVectorBucketPolicy } from "aws-cdk-lib/aws-s3vectors";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -40,8 +44,8 @@ const backend = defineBackend({
 
 const amplifyBackendDir = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(amplifyBackendDir, "..");
-const enableConsoleResponder = ["1", "true", "yes", "on"].includes(
-  (process.env.PAPYRUS_ENABLE_CONSOLE_RESPONDER ?? "").trim().toLowerCase(),
+const enableConsoleResponder = !["0", "false", "no", "off"].includes(
+  (process.env.PAPYRUS_ENABLE_CONSOLE_RESPONDER ?? "true").trim().toLowerCase(),
 );
 
 if (enableConsoleResponder) {
@@ -75,12 +79,48 @@ if (enableConsoleResponder) {
     projectRoot,
     graphqlEndpoint: backend.data.resources.cfnResources.cfnGraphqlApi.attrGraphQlUrl,
     responseTarget: process.env.PAPYRUS_CONSOLE_RESPONSE_TARGET,
-    openaiApiKeySsmParam: process.env.PAPYRUS_CONSOLE_OPENAI_API_KEY_SSM_PARAM,
-    jwtSecretSsmParam: process.env.PAPYRUS_CONSOLE_JWT_SECRET_SSM_PARAM || process.env.PAPYRUS_JWT_SECRET_SSM_PARAM,
     model: process.env.PAPYRUS_CONSOLE_MODEL,
     prebuiltImageUri: process.env.PAPYRUS_CONSOLE_RESPONDER_IMAGE_URI,
   });
 }
+
+const storageBackupsStack = backend.createStack("storage-backups");
+const storageBucket = backend.storage.resources.bucket;
+
+const storageBucketCfn = storageBucket.node.defaultChild as s3.CfnBucket | undefined;
+if (storageBucketCfn) {
+  // S3 PITR in AWS Backup requires S3 event delivery through EventBridge.
+  storageBucketCfn.addPropertyOverride(
+    "NotificationConfiguration.EventBridgeConfiguration.EventBridgeEnabled",
+    true,
+  );
+}
+
+const storageBackupVault = new backup.BackupVault(storageBackupsStack, "PapyrusStorageBackupVault");
+const storageBackupPlan = new backup.BackupPlan(storageBackupsStack, "PapyrusStorageBackupPlan", {
+  backupVault: storageBackupVault,
+});
+
+storageBackupPlan.addRule(
+  new backup.BackupPlanRule({
+    ruleName: "papyrus-storage-pitr-35d",
+    enableContinuousBackup: true,
+    deleteAfter: Duration.days(35),
+  }),
+);
+
+storageBackupPlan.addRule(
+  new backup.BackupPlanRule({
+    ruleName: "papyrus-storage-daily-365d",
+    scheduleExpression: events.Schedule.cron({ minute: "0", hour: "5" }),
+    deleteAfter: Duration.days(365),
+  }),
+);
+
+storageBackupPlan.addSelection("PapyrusStorageBackupSelection", {
+  allowRestores: true,
+  resources: [backup.BackupResource.fromArn(storageBucket.bucketArn)],
+});
 
 const knowledgeVectorsStack = backend.createStack("knowledge-vectors");
 const knowledgeVectorBucket = new CfnVectorBucket(knowledgeVectorsStack, "PapyrusKnowledgeVectorBucket", {
@@ -149,6 +189,15 @@ knowledgeQueryLambda.addToRolePolicy(
     resources: [knowledgeVectorIndex.attrIndexArn],
   }),
 );
+knowledgeQueryLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ["ssm:GetParameter"],
+    resources: [
+      `arn:aws:ssm:${knowledgeVectorsStack.region}:${knowledgeVectorsStack.account}:parameter/amplify/papyrus/*/OPENAI_API_KEY`,
+      `arn:aws:ssm:${knowledgeVectorsStack.region}:${knowledgeVectorsStack.account}:parameter/amplify/shared/papyrus/OPENAI_API_KEY`,
+    ],
+  }),
+);
 
 backend.addOutput({
   custom: {
@@ -158,6 +207,13 @@ backend.addOutput({
       s3VectorIndexName: knowledgeVectorIndexName,
       embeddingModel: knowledgeEmbeddingModel,
       embeddingDimensions: knowledgeVectorDimension,
+    },
+    storageBackups: {
+      backupPlanId: storageBackupPlan.backupPlanId,
+      backupVaultArn: storageBackupVault.backupVaultArn,
+      backupVaultName: storageBackupVault.backupVaultName,
+      protectedBucketArn: storageBucket.bucketArn,
+      protectedBucketName: storageBucket.bucketName,
     },
   },
 });

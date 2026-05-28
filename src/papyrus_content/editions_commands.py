@@ -11,7 +11,7 @@ from .edition_planning import (
     write_edition_planning_report,
 )
 from .graphql_authoring import PapyrusGraphQLAuthoringClient, create_authoring_client
-from .options import normalize_string, parse_options
+from .options import normalize_string, parse_options, resolve_mutation_apply
 
 
 def editions_plan(flags: list[str]) -> None:
@@ -78,12 +78,16 @@ def _dispatch_edition_planning(flags: list[str], *, reporting: bool) -> None:
 
 
 def _dispatch_edition_planning_from_options(options: dict, *, reporting: bool) -> None:
+    apply = resolve_mutation_apply(
+        options,
+        "editions dispatch-reporting" if reporting else "editions dispatch-research",
+    )
     client, _ = create_authoring_client()
     plan, report = build_edition_planning_command_plan(client, options)
-    if not options.get("apply"):
+    if not apply:
         print_edition_planning_summary(plan, report, "dry-run")
         label = "reporting" if reporting else "research"
-        print(f"edition-planning\tapply\tskipped\tpass --apply to write {label} Assignment and SemanticRelation records")
+        print(f"edition-planning\tapply\tskipped\tuse --dry-run to preview {label} Assignment and SemanticRelation writes")
         return
     apply_result = apply_edition_planning_plan(client, plan)
     refreshed = load_edition_planning_state(client)

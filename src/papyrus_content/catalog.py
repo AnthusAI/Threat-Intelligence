@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .ids import hash_short, knowledge_corpus_id, reference_lineage_id_for, safe_id
+from .message_contract import build_canonical_message_expected
 from .reference_policy import (
     normalize_reference_curation_status,
     normalize_reference_rejection_reason_code,
@@ -346,7 +347,7 @@ def reference_attachment_records(item: dict[str, Any], reference: dict[str, Any]
             _record(
                 "ReferenceAttachment",
                 {
-                    "id": f"reference-attachment-{hash_short([f'reference#{reference['id']}', 'source', '001-source', reference.get('storagePath') or '', reference.get('sourceUri') or ''])}",
+                    "id": f"reference-attachment-{hash_short(['reference#' + str(reference['id']), 'source', '001-source', reference.get('storagePath') or '', reference.get('sourceUri') or ''])}",
                     "referenceId": reference["id"],
                     "referenceLineageId": reference["lineageId"],
                     "referenceVersionNumber": reference.get("versionNumber"),
@@ -543,27 +544,39 @@ def reference_curation_message_records(
 
 def message_record(input_payload: dict[str, Any]) -> dict[str, Any]:
     metadata = sanitize_reference_metadata(input_payload.get("metadata") or {})
-    source = _string_or_null(input_payload.get("source")) or "papyrus"
     body = str(input_payload.get("body") or "")
-    summary = _string_or_null(input_payload.get("summary")) or body[:200] or input_payload.get("messageKind") or "message"
+    source = _string_or_null(input_payload.get("source")) or "papyrus"
     record_id = input_payload.get("id") or f"message-{hash_short([input_payload.get('messageKind'), body, source, metadata])}"
     return _record(
         "Message",
-        {
-            "id": record_id,
-            "messageKind": input_payload.get("messageKind") or "comment",
-            "messageDomain": input_payload.get("messageDomain") or "commentary",
-            "status": input_payload.get("status") or "active",
-            "body": body,
-            "summary": summary,
-            "source": source,
-            "importRunId": input_payload.get("importRunId"),
-            "authorLabel": _string_or_null(input_payload.get("authorLabel")) or source,
-            "createdAt": input_payload.get("createdAt"),
-            "updatedAt": input_payload.get("updatedAt") or input_payload.get("createdAt"),
-            "newsroomFeedKey": "messages",
-            "metadata": json.dumps(metadata, sort_keys=True),
-        },
+        build_canonical_message_expected(
+            {
+                "id": record_id,
+                "messageKind": input_payload.get("messageKind") or "comment",
+                "messageDomain": input_payload.get("messageDomain") or "commentary",
+                "status": input_payload.get("status") or "active",
+                "body": body,
+                "summary": input_payload.get("summary"),
+                "source": source,
+                "importRunId": input_payload.get("importRunId"),
+                "authorSub": input_payload.get("authorSub"),
+                "authorUserProfileId": input_payload.get("authorUserProfileId"),
+                "authorLabel": _string_or_null(input_payload.get("authorLabel")) or source,
+                "createdAt": input_payload.get("createdAt"),
+                "updatedAt": input_payload.get("updatedAt") or input_payload.get("createdAt"),
+                "newsroomFeedKey": "messages",
+                "metadata": metadata,
+                "responseTarget": input_payload.get("responseTarget"),
+                "responseStatus": input_payload.get("responseStatus"),
+                "responseOwner": input_payload.get("responseOwner"),
+                "responseStartedAt": input_payload.get("responseStartedAt"),
+                "responseCompletedAt": input_payload.get("responseCompletedAt"),
+                "responseError": input_payload.get("responseError"),
+            },
+            default_source="papyrus",
+            default_author_label=source,
+            default_response_owner="papyrus-cli",
+        ),
     )
 
 

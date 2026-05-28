@@ -7,10 +7,12 @@ import { configureAmplifyClient } from "./amplify-client-provider";
 import { isUnauthenticatedError, loadReaderSessionSnapshot } from "./reader-auth-state";
 
 export type ReaderThemeSetting = "system" | "light" | "dark";
+export type ReaderMotionSetting = "standard" | "low";
 
 export type ReaderSettings = {
   presentation: EditionPresentationFormat;
   theme: ReaderThemeSetting;
+  motion: ReaderMotionSetting;
 };
 
 export type ReaderSettingsSource = "local" | "cloud";
@@ -19,16 +21,22 @@ export type ReaderSettingsResolution = {
   settings: ReaderSettings;
   source: ReaderSettingsSource;
   signedIn: boolean;
+  email?: string | null;
   userProfileId?: string | null;
+  avatarHash?: string | null;
 };
 
 type DataClientErrors = Array<{ message?: string | null } | string | null> | null | undefined;
 type ReaderSettingsResult = {
+  email?: string | null;
   userProfileId?: string | null;
+  avatarHash?: string | null;
   settings?: ReaderSettings | null;
 };
 type RawReaderSettingsResult = {
+  email?: string | null;
   userProfileId?: string | null;
+  avatarHash?: string | null;
   settings?: unknown;
 };
 
@@ -36,11 +44,13 @@ const USER_POOL_AUTH_MODE = "userPool";
 const SETTINGS_STORAGE_KEY = "papyrus:reader-settings";
 const LEGACY_PRESENTATION_STORAGE_KEY = "papyrus:presentation";
 const LEGACY_PRESENTATION_COOKIE = "papyrus-presentation";
+const LEGACY_COOKIE_CLEANUP_STORAGE_KEY = "papyrus:legacy-presentation-cookie-cleaned";
 const SETTINGS_EVENT = "papyrus:settings-changed";
 
 export const DEFAULT_READER_SETTINGS: ReaderSettings = {
   presentation: "newspaper",
   theme: "system",
+  motion: "standard",
 };
 
 export const PRESENTATION_OPTIONS: Array<{
@@ -74,11 +84,19 @@ export const THEME_OPTIONS: Array<{
   { value: "dark", label: "Dark" },
 ];
 
+export const MOTION_OPTIONS: Array<{
+  value: ReaderMotionSetting;
+  label: string;
+}> = [
+  { value: "standard", label: "Standard" },
+  { value: "low", label: "Low Motion" },
+];
+
 export function readLocalReaderSettings(): ReaderSettings {
   if (typeof window === "undefined") return DEFAULT_READER_SETTINGS;
+  cleanupLegacyPresentationCookie();
   const parsed = parseStoredSettings(window.localStorage.getItem(SETTINGS_STORAGE_KEY));
-  const legacyPresentation = readPresentationValue(window.localStorage.getItem(LEGACY_PRESENTATION_STORAGE_KEY))
-    ?? readPresentationValue(readCookie(LEGACY_PRESENTATION_COOKIE));
+  const legacyPresentation = readPresentationValue(window.localStorage.getItem(LEGACY_PRESENTATION_STORAGE_KEY));
   return normalizeReaderSettings({
     ...parsed,
     presentation: parsed?.presentation ?? legacyPresentation ?? DEFAULT_READER_SETTINGS.presentation,
@@ -87,10 +105,10 @@ export function readLocalReaderSettings(): ReaderSettings {
 
 export function writeLocalReaderSettings(settings: ReaderSettings) {
   if (typeof window === "undefined") return;
+  cleanupLegacyPresentationCookie();
   const normalized = normalizeReaderSettings(settings);
   window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(normalized));
   window.localStorage.setItem(LEGACY_PRESENTATION_STORAGE_KEY, normalized.presentation);
-  document.cookie = `${LEGACY_PRESENTATION_COOKIE}=${normalized.presentation}; path=/; max-age=31536000; samesite=lax`;
   applyReaderTheme(normalized.theme);
   window.dispatchEvent(new CustomEvent(SETTINGS_EVENT, { detail: normalized }));
 }
@@ -135,7 +153,9 @@ export async function resolveReaderSettings(): Promise<ReaderSettingsResolution>
         settings: remote.settings,
         source: "cloud",
         signedIn: true,
+        email: remote.email,
         userProfileId: remote.userProfileId,
+        avatarHash: remote.avatarHash,
       };
     }
     const saved = await saveRemoteReaderSettings(localSettings);
@@ -143,7 +163,9 @@ export async function resolveReaderSettings(): Promise<ReaderSettingsResolution>
       settings: saved.settings ?? localSettings,
       source: "cloud",
       signedIn: true,
+      email: saved.email,
       userProfileId: saved.userProfileId,
+      avatarHash: saved.avatarHash,
     };
   } catch (error) {
     if (isUnauthenticatedError(error)) {
@@ -167,7 +189,9 @@ export async function saveReaderSettings(settings: ReaderSettings): Promise<Read
     settings: savedSettings,
     source: "cloud",
     signedIn: true,
+    email: saved.email,
     userProfileId: saved.userProfileId,
+    avatarHash: saved.avatarHash,
   };
 }
 
@@ -207,7 +231,9 @@ async function saveRemoteReaderSettings(settings: ReaderSettings): Promise<Reade
 function normalizeReaderSettingsResult(value: RawReaderSettingsResult | null | undefined): ReaderSettingsResult {
   if (!value) return {};
   return {
+    email: typeof value.email === "string" && value.email.trim() ? value.email.trim() : null,
     userProfileId: value.userProfileId ?? null,
+    avatarHash: typeof value.avatarHash === "string" && value.avatarHash.trim() ? value.avatarHash.trim() : null,
     settings: value.settings ? normalizeReaderSettings(value.settings) : null,
   };
 }
@@ -217,6 +243,7 @@ export function normalizeReaderSettings(value: unknown): ReaderSettings {
   return {
     presentation: normalizePresentation(candidate.presentation),
     theme: normalizeTheme(candidate.theme),
+    motion: normalizeMotion(candidate.motion),
   };
 }
 
@@ -239,17 +266,19 @@ function normalizeTheme(value: unknown): ReaderThemeSetting {
   return value === "light" || value === "dark" || value === "system" ? value : DEFAULT_READER_SETTINGS.theme;
 }
 
+function normalizeMotion(value: unknown): ReaderMotionSetting {
+  return value === "low" || value === "standard" ? value : DEFAULT_READER_SETTINGS.motion;
+}
+
 function readPresentationValue(value: string | null | undefined): EditionPresentationFormat | null {
   return value === "newspaper" || value === "blog" || value === "magazine" ? value : null;
 }
 
-function readCookie(name: string): string | null {
-  const prefix = `${name}=`;
-  return document.cookie
-    .split(";")
-    .map((entry) => entry.trim())
-    .find((entry) => entry.startsWith(prefix))
-    ?.slice(prefix.length) ?? null;
+function cleanupLegacyPresentationCookie() {
+  if (typeof document === "undefined" || typeof window === "undefined") return;
+  if (window.localStorage.getItem(LEGACY_COOKIE_CLEANUP_STORAGE_KEY) === "true") return;
+  document.cookie = `${LEGACY_PRESENTATION_COOKIE}=; path=/; max-age=0; samesite=lax`;
+  window.localStorage.setItem(LEGACY_COOKIE_CLEANUP_STORAGE_KEY, "true");
 }
 
 function updateThemeMeta(theme: ReaderThemeSetting) {

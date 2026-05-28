@@ -85,14 +85,18 @@ def text_storage_path_for_reference(reference: dict[str, Any], attachments: list
     return attachment.get("storagePath") if attachment else None
 
 
-def select_extracted_text_attachment(reference: dict[str, Any], attachments: list[dict[str, Any]]) -> dict[str, Any] | None:
+def select_reference_attachment_by_role(
+    reference: dict[str, Any],
+    attachments: list[dict[str, Any]],
+    *,
+    role: str,
+) -> dict[str, Any] | None:
     candidates = [
         attachment
         for attachment in attachments
         if attachment.get("referenceLineageId") == reference.get("lineageId")
-        and attachment.get("role") == "extracted_text"
+        and attachment.get("role") == role
         and has_corpus_storage_path(attachment.get("storagePath"))
-        and is_biblicus_extraction_snapshot_text_path(attachment.get("storagePath"), reference.get("externalItemId"))
     ]
     candidates.sort(
         key=lambda entry: (
@@ -102,6 +106,22 @@ def select_extracted_text_attachment(reference: dict[str, Any], attachments: lis
         reverse=True,
     )
     return candidates[0] if candidates else None
+
+
+def select_extracted_text_attachment(reference: dict[str, Any], attachments: list[dict[str, Any]]) -> dict[str, Any] | None:
+    return select_reference_attachment_by_role(
+        reference,
+        attachments,
+        role="extracted_text",
+    )
+
+
+def select_extracted_text_raw_attachment(reference: dict[str, Any], attachments: list[dict[str, Any]]) -> dict[str, Any] | None:
+    return select_reference_attachment_by_role(
+        reference,
+        attachments,
+        role="extracted_text_raw",
+    )
 
 
 def is_biblicus_extraction_snapshot_text_path(storage_path: str | None, item_id: str | None = None) -> bool:
@@ -162,9 +182,14 @@ def reference_source_readiness(
         and reference["externalItemId"] in extraction_index.item_ids
     )
     text_attachment_exists = bool(text_storage_path)
+    text_attachment_is_snapshot = bool(
+        text_storage_path
+        and is_biblicus_extraction_snapshot_text_path(text_storage_path, reference.get("externalItemId"))
+    )
     text_attachment_present = (
         not text_storage_path
         or not extraction_index
+        or not text_attachment_is_snapshot
         or text_storage_path in extraction_index.text_by_storage_path
     )
     extracted = text_attachment_exists and text_attachment_present
@@ -180,7 +205,7 @@ def reference_source_readiness(
 
     if extracted:
         state = SOURCE_READINESS_STATES["EXTRACTED"]
-        reason = "extracted_text_snapshot_attachment_found"
+        reason = "extracted_text_attachment_found"
     elif storage_path and extractable:
         state = SOURCE_READINESS_STATES["EXTRACTABLE"]
         reason = "snapshot_extracted_missing_attachment" if has_extraction_snapshot else "corpus_source_available"

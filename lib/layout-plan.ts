@@ -386,6 +386,7 @@ const AdBlockSchema = z
     presetId: z.enum(AD_PRESETS),
     itemId: ItemIdSchema.optional(),
     imageUrl: z.string().url().optional(),
+    label: z.string().min(1).optional(),
     required: z.boolean().default(false),
   })
   .strict();
@@ -828,7 +829,9 @@ function validateBlock(
   }
   if (block.type === "adBlock") {
     if (block.itemId) requireKnownItem(block.itemId, itemsBySlug, label);
-    if (block.required && !block.itemId && !block.imageUrl) throw new Error(`${label}.${block.id} requires an ad item or imageUrl`);
+    if (block.required && !block.itemId && !block.imageUrl && !block.label) {
+      throw new Error(`${label}.${block.id} requires an ad item, imageUrl, or label`);
+    }
     return;
   }
 
