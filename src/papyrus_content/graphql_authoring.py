@@ -814,8 +814,6 @@ def strip_unsupported_payload_fields(model_name: str, input_payload: dict[str, A
     if model_name == "Message":
         prepared.pop("body", None)
         prepared.pop("metadata", None)
-    elif model_name == "Reference":
-        prepared.pop("metadata", None)
     elif model_name == "Assignment":
         prepared.pop("sectionTypeStatusKey", None)
         prepared.pop("brief", None)
