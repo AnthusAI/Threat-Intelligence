@@ -3172,8 +3172,11 @@ function OverviewDeskView({
     index,
     getNewsDeskTabHref(`/newsroom/assignments/${encodeURIComponent(assignment.id)}`, isDemo),
   ));
+  const referenceMetadataFields = useReferenceMetadataFields(recentState.references);
   const referenceCards = recentState.references.slice(0, 4).map((reference, index) => withNewsroomOverviewCardLayout(
-    referenceToNewsroomCard(reference, index),
+    referenceToNewsroomCard(reference, index, {
+      title: referenceMetadataFields.get(reference.id)?.title ?? null,
+    }),
     index,
     getNewsDeskTabHref(`/newsroom/references/${encodeURIComponent(reference.lineageId ?? reference.id)}`, isDemo),
   ));
@@ -6265,7 +6268,7 @@ function ReferencesDeskView({
   const selectedFilteredReferenceIndex = selectedLineageId
     ? filteredReferences.findIndex((reference) => (reference.lineageId ?? reference.id) === selectedLineageId)
     : -1;
-  const referenceSubtitles = useReferenceMetadataSubtitles(filteredReferences);
+  const referenceMetadataFields = useReferenceMetadataFields(filteredReferences);
   const detail = categoryFilter
     ? `${filteredReferences.length} references classified as ${categoryFilter.label}`
     : `${filteredReferences.length} private corpus items`;
@@ -6281,8 +6284,11 @@ function ReferencesDeskView({
   const cards = filteredReferences.map((reference, index) => referenceToNewsroomCard(
     reference,
     index,
-    referenceSubtitles.get(reference.id) ?? null,
-    referenceQualityForList(reference, graph),
+    {
+      title: referenceMetadataFields.get(reference.id)?.title ?? null,
+      subtitle: referenceMetadataFields.get(reference.id)?.subtitle ?? null,
+      qualityRating: referenceQualityForList(reference, graph),
+    },
   ));
   useEffect(() => {
     if (!selectedLineageId || typeof window === "undefined") return;
@@ -7824,12 +7830,8 @@ function modelPayloadByRole(payloads: HydratedModelPayload[], role: string): Hyd
   return ranked[0] ?? null;
 }
 
-function latestReferenceAttachmentByRole(
-  attachments: ReferenceAttachmentRecord[],
-  role: string,
-): ReferenceAttachmentRecord | null {
+function latestReferenceAttachment(attachments: ReferenceAttachmentRecord[]): ReferenceAttachmentRecord | null {
   const candidates = attachments
-    .filter((attachment) => attachment.role === role)
     .slice()
     .sort((left, right) => {
       const leftTs = Date.parse(left.importedAt || "");
@@ -7842,16 +7844,14 @@ function latestReferenceAttachmentByRole(
   return candidates[0] ?? null;
 }
 
-const EXTRACTED_TEXT_MISSING_SENTINELS = new Set([
-  "extracted text is missing for this reference.",
-  "extracted text is missing for this reference",
-]);
-
-function isMissingExtractedTextSentinel(text: string | null | undefined): boolean {
-  const normalized = (text ?? "").trim().toLowerCase();
-  if (!normalized) return false;
-  return EXTRACTED_TEXT_MISSING_SENTINELS.has(normalized);
+function isFilteredExtractedTextAttachment(attachment: ReferenceAttachmentRecord): boolean {
+  if (attachment.role !== "extracted_text") return false;
+  const metadata = parseMetadataObject(attachment.metadata);
+  const filterStatus = normalizeMetadataString(metadata?.filterStatus);
+  return filterStatus === "filtered";
 }
+
+type ReferenceExtractedTextTab = "filtered" | "original";
 
 function useNewsroomKnowledgeContext(target: KnowledgeQueryTarget | null) {
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -8700,10 +8700,10 @@ function SearchDeskView({
   );
 }
 
-function MarkdownContext({ text }: { text: string }) {
-  const blocks = useMemo(() => parseMarkdownBlocks(text), [text]);
+function MarkdownContext({ className, text }: { className?: string; text: string }) {
+  const blocks = useMemo(() => parseMarkdownBlocks(normalizeMarkdownForRendering(text)), [text]);
   return (
-    <div className="news-desk-markdown-context">
+    <div className={className ? `news-desk-markdown-context ${className}` : "news-desk-markdown-context"}>
       {blocks.map((block, index) => renderMarkdownBlock(block, index))}
     </div>
   );
@@ -8712,14 +8712,23 @@ function MarkdownContext({ text }: { text: string }) {
 type MarkdownBlock =
   | { type: "code"; text: string }
   | { type: "heading"; depth: number; text: string }
-  | { type: "list"; items: string[] }
+  | { type: "list"; items: string[]; ordered: boolean }
+  | { type: "table"; headers: string[]; rows: string[][] }
   | { type: "paragraph"; text: string };
+
+function normalizeMarkdownForRendering(text: string): string {
+  const trimmed = text.trim();
+  const fencedMarkdown = /^```(?:markdown|md|mdx)?\s*\n([\s\S]*?)\n```$/i.exec(trimmed);
+  const unwrapped = fencedMarkdown ? (fencedMarkdown[1] ?? "") : text;
+  return normalizeMultilineMarkdownLinks(unwrapped);
+}
 
 function parseMarkdownBlocks(text: string): MarkdownBlock[] {
   const blocks: MarkdownBlock[] = [];
   const lines = text.split(/\r?\n/);
   let paragraph: string[] = [];
   let list: string[] = [];
+  let listOrdered = false;
   let code: string[] = [];
   let inCode = false;
   const flushParagraph = () => {
@@ -8730,11 +8739,13 @@ function parseMarkdownBlocks(text: string): MarkdownBlock[] {
   };
   const flushList = () => {
     if (list.length) {
-      blocks.push({ type: "list", items: list });
+      blocks.push({ type: "list", items: list, ordered: listOrdered });
       list = [];
+      listOrdered = false;
     }
   };
-  for (const line of lines) {
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex];
     if (line.trim().startsWith("```")) {
       if (inCode) {
         blocks.push({ type: "code", text: code.join("\n") });
@@ -8757,6 +8768,32 @@ function parseMarkdownBlocks(text: string): MarkdownBlock[] {
       flushList();
       continue;
     }
+    if (
+      lineIndex + 1 < lines.length
+      && looksLikeMarkdownTableHeaderLine(line)
+      && isMarkdownTableDividerLine(lines[lineIndex + 1] ?? "")
+    ) {
+      flushParagraph();
+      flushList();
+      const headerCells = splitMarkdownTableCells(line);
+      const dividerCells = splitMarkdownTableCells(lines[lineIndex + 1] ?? "");
+      const columnCount = Math.max(headerCells.length, dividerCells.length, 1);
+      const headers = normalizeMarkdownTableCells(headerCells, columnCount);
+      const rows: string[][] = [];
+      lineIndex += 2;
+      while (lineIndex < lines.length) {
+        const rowLine = lines[lineIndex] ?? "";
+        if (!looksLikeMarkdownTableRowLine(rowLine)) {
+          lineIndex -= 1;
+          break;
+        }
+        rows.push(normalizeMarkdownTableCells(splitMarkdownTableCells(rowLine), columnCount));
+        lineIndex += 1;
+      }
+      if (lineIndex >= lines.length) lineIndex -= 1;
+      blocks.push({ type: "table", headers, rows });
+      continue;
+    }
     const heading = /^(#{1,4})\s+(.+)$/.exec(trimmed);
     if (heading) {
       flushParagraph();
@@ -8764,10 +8801,13 @@ function parseMarkdownBlocks(text: string): MarkdownBlock[] {
       blocks.push({ type: "heading", depth: heading[1].length, text: heading[2].trim() });
       continue;
     }
-    const bullet = /^(?:[-*+]\s+|\d+[.)]\s+)(.+)$/.exec(trimmed);
+    const bullet = /^(?:([-*+])\s+|(\d+)[.)]\s+)(.+)$/.exec(trimmed);
     if (bullet) {
       flushParagraph();
-      list.push(bullet[1].trim());
+      const ordered = Boolean(bullet[2]);
+      if (list.length && listOrdered !== ordered) flushList();
+      listOrdered = ordered;
+      list.push((bullet[3] ?? "").trim());
       continue;
     }
     flushList();
@@ -8783,10 +8823,11 @@ function renderMarkdownBlock(block: MarkdownBlock, index: number): ReactNode {
   const key = `${block.type}-${index}`;
   if (block.type === "code") return <pre className="news-desk-analysis-command" key={key}>{block.text}</pre>;
   if (block.type === "list") {
+    const ListTag = block.ordered ? "ol" : "ul";
     return (
-      <ul key={key}>
+      <ListTag key={key}>
         {block.items.map((item, itemIndex) => <li key={`${key}-${itemIndex}`}>{renderInlineMarkdown(item)}</li>)}
-      </ul>
+      </ListTag>
     );
   }
   if (block.type === "heading") {
@@ -8794,26 +8835,278 @@ function renderMarkdownBlock(block: MarkdownBlock, index: number): ReactNode {
     if (block.depth === 2) return <h4 key={key}>{block.text}</h4>;
     return <h5 key={key}>{block.text}</h5>;
   }
+  if (block.type === "table") {
+    return (
+      <table key={key}>
+        <thead>
+          <tr>
+            {block.headers.map((header, headerIndex) => (
+              <th key={`${key}-head-${headerIndex}`} scope="col">{renderInlineMarkdown(header)}</th>
+            ))}
+          </tr>
+        </thead>
+        {block.rows.length ? (
+          <tbody>
+            {block.rows.map((row, rowIndex) => (
+              <tr key={`${key}-row-${rowIndex}`}>
+                {row.map((cell, cellIndex) => (
+                  <td key={`${key}-row-${rowIndex}-cell-${cellIndex}`}>{renderInlineMarkdown(cell)}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        ) : null}
+      </table>
+    );
+  }
   return <p key={key}>{renderInlineMarkdown(block.text)}</p>;
 }
 
 function renderInlineMarkdown(text: string): ReactNode[] {
   const nodes: ReactNode[] = [];
-  const pattern = /(`[^`]+`|\*\*[^*]+\*\*)/g;
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-  while ((match = pattern.exec(text)) !== null) {
-    if (match.index > lastIndex) nodes.push(text.slice(lastIndex, match.index));
-    const token = match[0];
-    if (token.startsWith("`")) {
-      nodes.push(<code key={`${match.index}-code`}>{token.slice(1, -1)}</code>);
-    } else {
-      nodes.push(<strong key={`${match.index}-strong`}>{token.slice(2, -2)}</strong>);
+  let index = 0;
+  let plain = "";
+  const flushPlain = () => {
+    if (!plain) return;
+    nodes.push(plain);
+    plain = "";
+  };
+
+  while (index < text.length) {
+    const linkLike = parseMarkdownLinkLikeAt(text, index);
+    if (linkLike) {
+      flushPlain();
+      if (!linkLike.image) {
+        const href = normalizeInlineMarkdownHref(linkLike.hrefRaw);
+        const label = collapseMarkdownLinkLabel(linkLike.label);
+        if (href) {
+          nodes.push(
+            <a href={href} key={`${index}-link`} rel="noopener noreferrer" target="_blank">
+              {renderInlineMarkdown(label)}
+            </a>,
+          );
+        } else {
+          nodes.push(linkLike.raw);
+        }
+      }
+      index += linkLike.length;
+      continue;
     }
-    lastIndex = match.index + token.length;
+
+    if (text.startsWith("**", index) || text.startsWith("__", index)) {
+      const marker = text.slice(index, index + 2);
+      const end = text.indexOf(marker, index + 2);
+      if (end > index + 2) {
+        flushPlain();
+        nodes.push(<strong key={`${index}-strong`}>{renderInlineMarkdown(text.slice(index + 2, end))}</strong>);
+        index = end + 2;
+        continue;
+      }
+    }
+
+    if (text.startsWith("~~", index)) {
+      const end = text.indexOf("~~", index + 2);
+      if (end > index + 2) {
+        flushPlain();
+        nodes.push(<del key={`${index}-strike`}>{renderInlineMarkdown(text.slice(index + 2, end))}</del>);
+        index = end + 2;
+        continue;
+      }
+    }
+
+    if (text[index] === "*" || text[index] === "_") {
+      const marker = text[index];
+      const end = text.indexOf(marker, index + 1);
+      if (end > index + 1) {
+        flushPlain();
+        nodes.push(<em key={`${index}-em`}>{renderInlineMarkdown(text.slice(index + 1, end))}</em>);
+        index = end + 1;
+        continue;
+      }
+    }
+
+    if (text[index] === "`") {
+      const end = text.indexOf("`", index + 1);
+      if (end > index + 1) {
+        flushPlain();
+        nodes.push(<code key={`${index}-code`}>{text.slice(index + 1, end)}</code>);
+        index = end + 1;
+        continue;
+      }
+    }
+
+    const autolinkMatch = /^(<https?:\/\/[^>\s]+>|https?:\/\/[^\s<]+)/.exec(text.slice(index));
+    if (autolinkMatch) {
+      flushPlain();
+      const token = autolinkMatch[1];
+      const href = normalizeInlineMarkdownHref(token);
+      if (href) {
+        nodes.push(
+          <a href={href} key={`${index}-autolink`} rel="noopener noreferrer" target="_blank">
+            {href}
+          </a>,
+        );
+      } else {
+        nodes.push(token);
+      }
+      index += token.length;
+      continue;
+    }
+
+    plain += text[index];
+    index += 1;
   }
-  if (lastIndex < text.length) nodes.push(text.slice(lastIndex));
+
+  flushPlain();
   return nodes;
+}
+
+function normalizeInlineMarkdownHref(rawHref: string): string | null {
+  const href = extractMarkdownHrefDestination(rawHref);
+  if (!href) return null;
+  if (/^(https?:\/\/|mailto:)/i.test(href)) return href;
+  return null;
+}
+
+function normalizeMultilineMarkdownLinks(text: string): string {
+  let normalized = "";
+  let index = 0;
+  while (index < text.length) {
+    const linkLike = parseMarkdownLinkLikeAt(text, index);
+    if (!linkLike || linkLike.image || !linkLike.raw.includes("\n")) {
+      normalized += text[index];
+      index += 1;
+      continue;
+    }
+    const href = extractMarkdownHrefDestination(linkLike.hrefRaw);
+    const label = collapseMarkdownLinkLabel(linkLike.label);
+    if (!href || !label) {
+      normalized += linkLike.raw;
+      index += linkLike.length;
+      continue;
+    }
+    normalized += `[${label}](${href})`;
+    index += linkLike.length;
+  }
+  return normalized;
+}
+
+function collapseMarkdownLinkLabel(label: string): string {
+  const withoutImages = label.replace(/!\[[^\]]*\]\((?:[^)(]|\([^)(]*\))*\)/g, " ");
+  return withoutImages
+    .replace(/\r?\n+/g, " ")
+    .replace(/(^|\s)#{1,6}\s+/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractMarkdownHrefDestination(rawHref: string): string {
+  const trimmed = rawHref.trim();
+  if (!trimmed) return "";
+  if (trimmed.startsWith("<")) {
+    const closing = trimmed.indexOf(">");
+    if (closing > 1) return trimmed.slice(1, closing).trim();
+  }
+  const match = /^(\S+)/.exec(trimmed);
+  return match?.[1]?.trim() ?? "";
+}
+
+function parseMarkdownLinkLikeAt(
+  source: string,
+  startIndex: number,
+): { hrefRaw: string; image: boolean; label: string; length: number; raw: string } | null {
+  const image = source.startsWith("![", startIndex);
+  const link = source[startIndex] === "[";
+  if (!image && !link) return null;
+  const labelStart = startIndex + (image ? 2 : 1);
+  const labelEnd = findMatchingBracketIndex(source, labelStart, "[", "]");
+  if (labelEnd < 0) return null;
+  let next = labelEnd + 1;
+  while (next < source.length && /\s/.test(source[next])) next += 1;
+  if (source[next] !== "(") return null;
+  const hrefStart = next + 1;
+  const hrefEnd = findMatchingBracketIndex(source, hrefStart, "(", ")");
+  if (hrefEnd < 0) return null;
+  const raw = source.slice(startIndex, hrefEnd + 1);
+  return {
+    image,
+    label: source.slice(labelStart, labelEnd),
+    hrefRaw: source.slice(hrefStart, hrefEnd),
+    length: raw.length,
+    raw,
+  };
+}
+
+function findMatchingBracketIndex(source: string, contentStart: number, open: string, close: string): number {
+  let depth = 1;
+  for (let index = contentStart; index < source.length; index += 1) {
+    const ch = source[index];
+    if (ch === "\\") {
+      index += 1;
+      continue;
+    }
+    if (ch === open) {
+      depth += 1;
+      continue;
+    }
+    if (ch !== close) continue;
+    depth -= 1;
+    if (depth === 0) return index;
+  }
+  return -1;
+}
+
+function looksLikeMarkdownTableHeaderLine(line: string): boolean {
+  return /\|/.test(line.trim());
+}
+
+function looksLikeMarkdownTableRowLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  if (!/\|/.test(trimmed)) return false;
+  if (isMarkdownTableDividerLine(trimmed)) return false;
+  return true;
+}
+
+function isMarkdownTableDividerLine(line: string): boolean {
+  const cells = splitMarkdownTableCells(line);
+  if (!cells.length) return false;
+  return cells.every((cell) => /^:?-{3,}:?$/.test(cell.trim()));
+}
+
+function splitMarkdownTableCells(line: string): string[] {
+  const trimmed = line.trim().replace(/^\|/, "").replace(/\|$/, "");
+  if (!trimmed) return [];
+  const cells: string[] = [];
+  let current = "";
+  let escaping = false;
+  for (let index = 0; index < trimmed.length; index += 1) {
+    const ch = trimmed[index];
+    if (escaping) {
+      current += ch;
+      escaping = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escaping = true;
+      current += ch;
+      continue;
+    }
+    if (ch === "|") {
+      cells.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  cells.push(current.trim());
+  return cells;
+}
+
+function normalizeMarkdownTableCells(cells: string[], columnCount: number): string[] {
+  const normalized = cells.slice(0, columnCount);
+  while (normalized.length < columnCount) normalized.push("");
+  return normalized;
 }
 
 function PayloadDetailBlock({
@@ -8933,34 +9226,53 @@ function ReferenceDetailPanel({
     };
   }, [graphAttachments, referenceLineageId]);
 
-  const extractedTextAttachment = useMemo(
-    () => latestReferenceAttachmentByRole(attachments, "extracted_text"),
+  const extractedTextAttachments = useMemo(
+    () => attachments.filter((attachment) => attachment.role === "extracted_text"),
     [attachments],
   );
-  const [extractedTextState, setExtractedTextState] = useState<{
+  const extractedTextRawAttachments = useMemo(
+    () => attachments.filter((attachment) => attachment.role === "extracted_text_raw"),
+    [attachments],
+  );
+  const extractedTextFilteredAttachment = useMemo(
+    () => latestReferenceAttachment(extractedTextAttachments.filter(isFilteredExtractedTextAttachment)),
+    [extractedTextAttachments],
+  );
+  const extractedTextOriginalAttachment = useMemo(
+    () => latestReferenceAttachment(extractedTextRawAttachments)
+      ?? latestReferenceAttachment(extractedTextAttachments.filter((attachment) => !isFilteredExtractedTextAttachment(attachment))),
+    [extractedTextRawAttachments, extractedTextAttachments],
+  );
+  const [extractedTextFilteredState, setExtractedTextFilteredState] = useState<{
     error: string | null;
     loading: boolean;
     text: string | null;
   }>({ error: null, loading: false, text: null });
+  const [extractedTextOriginalState, setExtractedTextOriginalState] = useState<{
+    error: string | null;
+    loading: boolean;
+    text: string | null;
+  }>({ error: null, loading: false, text: null });
+  const [activeExtractedTextTab, setActiveExtractedTextTab] = useState<ReferenceExtractedTextTab>("filtered");
   const [attachmentLinksById, setAttachmentLinksById] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    const storagePath = extractedTextAttachment?.storagePath ?? null;
+    const storagePath = extractedTextFilteredAttachment?.storagePath ?? null;
     if (!storagePath) {
-      setExtractedTextState({ error: null, loading: false, text: null });
+      setExtractedTextFilteredState({ error: null, loading: false, text: null });
       return;
     }
     let active = true;
-    setExtractedTextState({ error: null, loading: true, text: null });
+    setExtractedTextFilteredState({ error: null, loading: true, text: null });
     void loadStoragePathText(storagePath)
       .then((result) => {
         if (!active) return;
-        setExtractedTextState({ error: result.error, loading: false, text: result.text });
+        setExtractedTextFilteredState({ error: result.error, loading: false, text: result.text });
       })
       .catch((error) => {
         if (!active) return;
-        setExtractedTextState({
-          error: error instanceof Error ? error.message : "Could not load extracted text.",
+        setExtractedTextFilteredState({
+          error: error instanceof Error ? error.message : "Could not load filtered extracted text.",
           loading: false,
           text: null,
         });
@@ -8968,7 +9280,33 @@ function ReferenceDetailPanel({
     return () => {
       active = false;
     };
-  }, [extractedTextAttachment?.storagePath]);
+  }, [extractedTextFilteredAttachment?.storagePath]);
+
+  useEffect(() => {
+    const storagePath = extractedTextOriginalAttachment?.storagePath ?? null;
+    if (!storagePath) {
+      setExtractedTextOriginalState({ error: null, loading: false, text: null });
+      return;
+    }
+    let active = true;
+    setExtractedTextOriginalState({ error: null, loading: true, text: null });
+    void loadStoragePathText(storagePath)
+      .then((result) => {
+        if (!active) return;
+        setExtractedTextOriginalState({ error: result.error, loading: false, text: result.text });
+      })
+      .catch((error) => {
+        if (!active) return;
+        setExtractedTextOriginalState({
+          error: error instanceof Error ? error.message : "Could not load original extracted text.",
+          loading: false,
+          text: null,
+        });
+      });
+    return () => {
+      active = false;
+    };
+  }, [extractedTextOriginalAttachment?.storagePath]);
 
   useEffect(() => {
     if (!attachments.length) {
@@ -9018,6 +9356,23 @@ function ReferenceDetailPanel({
     };
   }, [attachments]);
 
+  const extractedTextTabs = useMemo(() => {
+    const tabs: Array<{ attachment: ReferenceAttachmentRecord; label: string; mode: ReferenceExtractedTextTab }> = [];
+    if (extractedTextFilteredAttachment) {
+      tabs.push({ mode: "filtered", label: "Filtered", attachment: extractedTextFilteredAttachment });
+    }
+    if (extractedTextOriginalAttachment) {
+      tabs.push({ mode: "original", label: "Original", attachment: extractedTextOriginalAttachment });
+    }
+    return tabs;
+  }, [extractedTextFilteredAttachment, extractedTextOriginalAttachment]);
+
+  useEffect(() => {
+    if (!extractedTextTabs.length) return;
+    if (extractedTextTabs.some((tab) => tab.mode === activeExtractedTextTab)) return;
+    setActiveExtractedTextTab(extractedTextTabs[0].mode);
+  }, [activeExtractedTextTab, extractedTextTabs]);
+
   if (!reference) {
     return (
       <section className="category-steering-section" aria-label="Reference detail">
@@ -9042,9 +9397,10 @@ function ReferenceDetailPanel({
     reference.sourceUri,
   ) ?? "";
   const detailCuration = curation ?? resolveReferenceCurationDisplayState(reference, graph);
-  const extractedTextIsMissingSentinel = isMissingExtractedTextSentinel(extractedTextState.text);
-  const showMissingExtractedTextState = !extractedTextAttachment
-    || (!extractedTextState.loading && !extractedTextState.error && extractedTextIsMissingSentinel);
+  const activeExtractedTextEntry = extractedTextTabs.find((tab) => tab.mode === activeExtractedTextTab) ?? extractedTextTabs[0] ?? null;
+  const activeExtractedTextState = activeExtractedTextEntry?.mode === "original"
+    ? extractedTextOriginalState
+    : extractedTextFilteredState;
 
   return (
     <section className="category-steering-section" aria-label="Reference detail" data-news-desk-reference-detail={lineageId}>
@@ -9145,47 +9501,74 @@ function ReferenceDetailPanel({
                 />
               </NewsroomExpander>
             </div>
-            {!showMissingExtractedTextState ? (
-              <div data-news-desk-reference-extracted-text-state="available">
-                <NewsroomExpander
-                  className="news-desk-metadata-expander news-desk-extracted-text-expander"
-                  defaultExpanded
-                  label="Extracted Text"
-                  panelClassName="news-desk-metadata-expander__panel"
-                  panelInnerClassName="news-desk-metadata-expander__panel-inner"
-                  toggleClassName="newsroom-section-rail__rotating-toggle news-desk-metadata-expander__toggle news-desk-extracted-text-expander__toggle"
-                >
-                  <div className="news-desk-detail-block" data-news-desk-reference-extracted-text-panel>
-                    {extractedTextState.loading ? <p className="news-desk-detail-copy">Loading extracted text...</p> : null}
-                    {!extractedTextState.loading && extractedTextState.error ? (
-                      <p className="news-desk-detail-copy" data-news-desk-reference-extracted-text-error>{extractedTextState.error}</p>
+            <div className="news-desk-detail-block news-desk-reference-extracted-text" data-news-desk-reference-extracted-text-section>
+              <p className="story-label">Extracted Text</p>
+              {extractedTextTabs.length ? (
+                <>
+                  <div
+                    className="news-desk-reference-extracted-text__tabs"
+                    data-news-desk-reference-extracted-text-tabs
+                  >
+                    {extractedTextTabs.map((tab) => (
+                      <button
+                        aria-selected={tab.mode === activeExtractedTextEntry?.mode}
+                        className="news-desk-reference-extracted-text__tab"
+                        data-active={tab.mode === activeExtractedTextEntry?.mode ? "true" : "false"}
+                        data-news-desk-reference-extracted-text-tab={tab.mode}
+                        key={tab.mode}
+                        onClick={() => setActiveExtractedTextTab(tab.mode)}
+                        type="button"
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div
+                    className="news-desk-reference-extracted-text__content"
+                    data-news-desk-reference-extracted-text-content
+                    data-news-desk-reference-extracted-text-active-tab={activeExtractedTextEntry?.mode ?? ""}
+                  >
+                    {activeExtractedTextState.loading ? (
+                      <p
+                        className="news-desk-detail-copy"
+                        data-news-desk-reference-extracted-text-loading={activeExtractedTextEntry?.mode ?? ""}
+                      >
+                        Loading extracted text...
+                      </p>
                     ) : null}
-                    {!extractedTextState.loading && !extractedTextState.error && extractedTextState.text ? (
-                      <pre className="news-desk-analysis-command" data-news-desk-reference-extracted-text-content>{extractedTextState.text}</pre>
+                    {!activeExtractedTextState.loading && activeExtractedTextState.error ? (
+                      <p
+                        className="news-desk-detail-copy"
+                        data-news-desk-reference-extracted-text-error={activeExtractedTextEntry?.mode ?? ""}
+                      >
+                        {activeExtractedTextState.error}
+                      </p>
                     ) : null}
-                    {!extractedTextState.loading && !extractedTextState.error && !extractedTextState.text ? (
-                      <p className="news-desk-detail-copy" data-news-desk-reference-extracted-text-empty>Extracted text attachment is empty.</p>
+                    {!activeExtractedTextState.loading && !activeExtractedTextState.error && activeExtractedTextState.text ? (
+                      <MarkdownContext
+                        className="news-desk-reference-extracted-text__markdown"
+                        text={activeExtractedTextState.text}
+                      />
+                    ) : null}
+                    {!activeExtractedTextState.loading && !activeExtractedTextState.error && !activeExtractedTextState.text ? (
+                      <p
+                        className="news-desk-detail-copy"
+                        data-news-desk-reference-extracted-text-empty={activeExtractedTextEntry?.mode ?? ""}
+                      >
+                        Extracted text attachment is empty.
+                      </p>
                     ) : null}
                   </div>
-                </NewsroomExpander>
-              </div>
-            ) : (
-              <div
-                className="news-desk-metadata-expander news-desk-extracted-text-expander news-desk-extracted-text-expander--disabled"
-                data-news-desk-reference-extracted-text-state="missing"
-              >
-                <div
-                  className="newsroom-section-rail__rotating-toggle news-desk-metadata-expander__toggle news-desk-extracted-text-expander__toggle news-desk-extracted-text-expander__toggle--disabled"
-                  aria-disabled="true"
-                  data-news-desk-reference-extracted-text-toggle="disabled"
+                </>
+              ) : (
+                <p
+                  className="news-desk-detail-copy"
+                  data-news-desk-reference-extracted-text-empty-state="both-missing"
                 >
-                  <span className="newsroom-section-rail__rotating-toggle-label">Extracted Text</span>
-                  <RotatingSectionTriangleIcon expanded={false} />
-                </div>
-                <div className="news-desk-detail-block news-desk-extracted-text-expander__missing" data-news-desk-reference-extracted-text-missing>
-                </div>
-              </div>
-            )}
+                  No extracted text attachments.
+                </p>
+              )}
+            </div>
             {attachments.length ? (
               <div className="news-desk-detail-block">
                 <p className="story-label">Attachments</p>
@@ -11722,10 +12105,24 @@ function categoryToConceptNewsroomCard(category: CategorySteeringCategory, index
   };
 }
 
-function referenceToNewsroomCard(reference: ReferenceRecord, index: number, subtitle?: string | null, qualityRating?: number | null): NewsroomCardRecord {
+function resolveReferenceCardTitle(reference: ReferenceRecord, metadataTitle?: string | null): string {
+  return metadataTitle ?? reference.title ?? reference.externalItemId;
+}
+
+function referenceToNewsroomCard(
+  reference: ReferenceRecord,
+  index: number,
+  options: {
+    title?: string | null;
+    subtitle?: string | null;
+    qualityRating?: number | null;
+  } = {},
+): NewsroomCardRecord {
   const lineageId = reference.lineageId ?? reference.id;
   const status = reference.curationStatus ?? "pending";
-  const title = reference.title ?? reference.externalItemId;
+  const title = resolveReferenceCardTitle(reference, options.title ?? null);
+  const subtitle = options.subtitle ?? null;
+  const qualityRating = options.qualityRating ?? null;
   const template = resolveNewsroomCardTemplate({
     bodyLength: subtitle?.length ?? 0,
     index,
@@ -11963,19 +12360,27 @@ function messageCardSubtitle(message: MessageRecord): string | null {
   );
 }
 
-const REFERENCE_METADATA_SUBTITLE_CACHE_TTL_MS = 15_000;
-const referenceMetadataSubtitleCache = new Map<string, { subtitle: string | null; fetchedAt: number; revision: string }>();
+type ReferenceMetadataFields = {
+  title: string | null;
+  subtitle: string | null;
+};
 
-function mapsEqualStringNullable(a: Map<string, string | null>, b: Map<string, string | null>): boolean {
+const REFERENCE_METADATA_FIELDS_CACHE_TTL_MS = 15_000;
+const referenceMetadataFieldsCache = new Map<string, { fields: ReferenceMetadataFields; fetchedAt: number; revision: string }>();
+
+function mapsEqualReferenceMetadataFields(a: Map<string, ReferenceMetadataFields>, b: Map<string, ReferenceMetadataFields>): boolean {
   if (a.size !== b.size) return false;
   for (const [key, value] of a) {
-    if ((b.get(key) ?? null) !== (value ?? null)) return false;
+    const other = b.get(key);
+    if (!other) return false;
+    if ((other.title ?? null) !== (value.title ?? null)) return false;
+    if ((other.subtitle ?? null) !== (value.subtitle ?? null)) return false;
   }
   return true;
 }
 
-function useReferenceMetadataSubtitles(references: ReferenceRecord[]): Map<string, string | null> {
-  const [subtitles, setSubtitles] = useState<Map<string, string | null>>(() => new Map());
+function useReferenceMetadataFields(references: ReferenceRecord[]): Map<string, ReferenceMetadataFields> {
+  const [fieldsByReferenceId, setFieldsByReferenceId] = useState<Map<string, ReferenceMetadataFields>>(() => new Map());
   const [refreshTick, setRefreshTick] = useState(0);
   const referenceMeta = useMemo(
     () => references.map((reference) => ({
@@ -11991,7 +12396,7 @@ function useReferenceMetadataSubtitles(references: ReferenceRecord[]): Map<strin
 
   useEffect(() => {
     const onFocus = () => setRefreshTick((value) => value + 1);
-    const timer = setInterval(() => setRefreshTick((value) => value + 1), REFERENCE_METADATA_SUBTITLE_CACHE_TTL_MS);
+    const timer = setInterval(() => setRefreshTick((value) => value + 1), REFERENCE_METADATA_FIELDS_CACHE_TTL_MS);
     window.addEventListener("focus", onFocus);
     return () => {
       clearInterval(timer);
@@ -12001,28 +12406,28 @@ function useReferenceMetadataSubtitles(references: ReferenceRecord[]): Map<strin
 
   useEffect(() => {
     if (!referenceMeta.length) {
-      setSubtitles((current) => (current.size ? new Map() : current));
+      setFieldsByReferenceId((current) => (current.size ? new Map() : current));
       return;
     }
 
-    const cached = new Map<string, string | null>();
+    const cached = new Map<string, ReferenceMetadataFields>();
     const missing: Array<{ id: string; revision: string }> = [];
     const now = Date.now();
     for (const entry of referenceMeta) {
       const referenceId = entry.id;
-      const cachedEntry = referenceMetadataSubtitleCache.get(referenceId);
+      const cachedEntry = referenceMetadataFieldsCache.get(referenceId);
       if (
         cachedEntry
         && cachedEntry.revision === entry.revision
-        && now - cachedEntry.fetchedAt <= REFERENCE_METADATA_SUBTITLE_CACHE_TTL_MS
+        && now - cachedEntry.fetchedAt <= REFERENCE_METADATA_FIELDS_CACHE_TTL_MS
       ) {
-        cached.set(referenceId, cachedEntry.subtitle ?? null);
+        cached.set(referenceId, cachedEntry.fields);
       } else {
-        if (cachedEntry) referenceMetadataSubtitleCache.delete(referenceId);
+        if (cachedEntry) referenceMetadataFieldsCache.delete(referenceId);
         missing.push(entry);
       }
     }
-    setSubtitles((current) => (mapsEqualStringNullable(current, cached) ? current : cached));
+    setFieldsByReferenceId((current) => (mapsEqualReferenceMetadataFields(current, cached) ? current : cached));
     if (!missing.length) return;
 
     let active = true;
@@ -12030,18 +12435,22 @@ function useReferenceMetadataSubtitles(references: ReferenceRecord[]): Map<strin
       try {
         const payloads = await loadModelPayloadsForOwner("reference", referenceId, ["metadata"]);
         const metadataPayload = modelPayloadByRole(payloads, "metadata");
-        const subtitle = referenceMetadataSubtitle(metadataPayload);
-        referenceMetadataSubtitleCache.set(referenceId, { subtitle, fetchedAt: Date.now(), revision });
-        return [referenceId, subtitle] as const;
+        const fields = {
+          title: referenceMetadataTitle(metadataPayload),
+          subtitle: referenceMetadataSubtitle(metadataPayload),
+        };
+        referenceMetadataFieldsCache.set(referenceId, { fields, fetchedAt: Date.now(), revision });
+        return [referenceId, fields] as const;
       } catch {
-        referenceMetadataSubtitleCache.set(referenceId, { subtitle: null, fetchedAt: Date.now(), revision });
-        return [referenceId, null] as const;
+        const fields = { title: null, subtitle: null };
+        referenceMetadataFieldsCache.set(referenceId, { fields, fetchedAt: Date.now(), revision });
+        return [referenceId, fields] as const;
       }
     })).then((entries) => {
       if (!active) return;
-      setSubtitles((current) => {
+      setFieldsByReferenceId((current) => {
         const next = new Map(current);
-        for (const [referenceId, subtitle] of entries) next.set(referenceId, subtitle);
+        for (const [referenceId, fields] of entries) next.set(referenceId, fields);
         return next;
       });
     });
@@ -12051,7 +12460,7 @@ function useReferenceMetadataSubtitles(references: ReferenceRecord[]): Map<strin
     };
   }, [referenceKey, refreshTick, referenceMeta]);
 
-  return subtitles;
+  return fieldsByReferenceId;
 }
 
 function referenceMetadataSubtitle(payload: HydratedModelPayload | null): string | null {

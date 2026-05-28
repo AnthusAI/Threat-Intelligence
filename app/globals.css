@@ -5819,13 +5819,11 @@ img {
   opacity: 0.45;
 }
 
-.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-metadata-expander,
-.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-extracted-text-expander {
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-metadata-expander {
   gap: var(--paper-rhythm);
 }
 
-.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-metadata-expander__toggle,
-.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-extracted-text-expander__toggle {
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-metadata-expander__toggle {
   align-items: center;
   column-gap: calc(var(--paper-rhythm) * 0.5);
   grid-template-columns: minmax(0, 1fr) auto;
@@ -5834,26 +5832,86 @@ img {
   padding: 0 calc(var(--paper-rhythm) * 0.5);
 }
 
-.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-metadata-expander__toggle .newsroom-section-rail__rotating-toggle-label,
-.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-extracted-text-expander__toggle .newsroom-section-rail__rotating-toggle-label {
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-metadata-expander__toggle .newsroom-section-rail__rotating-toggle-label {
   line-height: var(--paper-rhythm);
   min-height: var(--paper-rhythm);
 }
 
-.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-metadata-expander__toggle .newsroom-section-rail__rotating-icon,
-.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-extracted-text-expander__toggle .newsroom-section-rail__rotating-icon {
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-metadata-expander__toggle .newsroom-section-rail__rotating-icon {
   height: calc(var(--paper-rhythm) * 0.75);
   width: calc(var(--paper-rhythm) * 0.75);
 }
 
-.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-extracted-text-expander--disabled .news-desk-extracted-text-expander__toggle--disabled {
-  opacity: 0.58;
-  pointer-events: none;
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-extracted-text {
+  gap: calc(var(--paper-rhythm) * 0.5);
 }
 
-.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-extracted-text-expander__missing {
-  opacity: 0.78;
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-extracted-text__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--paper-rhythm) * 0.35);
+}
+
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-extracted-text__tab {
+  background: transparent;
+  border: 1px solid rgb(var(--rule-rgb) / 0.4);
+  color: var(--muted-strong);
+  cursor: pointer;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: var(--paper-rhythm);
+  min-height: var(--news-desk-detail-control-height);
+  padding: 0 calc(var(--paper-rhythm) * 0.5);
+  text-transform: uppercase;
+}
+
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-extracted-text__tab[data-active="true"] {
+  background: rgb(var(--ink-solid-rgb) / 0.08);
+  border-color: rgb(var(--ink-solid-rgb) / 0.32);
+  color: rgb(var(--ink-solid-rgb) / 0.9);
+}
+
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-extracted-text__content {
+  min-width: 0;
+}
+
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-extracted-text__markdown,
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-extracted-text__markdown p,
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-extracted-text__markdown li,
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-extracted-text__markdown h3,
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-extracted-text__markdown h4,
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-extracted-text__markdown h5,
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-extracted-text__markdown th,
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-extracted-text__markdown td,
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-extracted-text__markdown .news-desk-analysis-command {
+  border: 0;
+  color: rgb(var(--ink-solid-rgb) / 0.72);
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 0.8rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: var(--paper-rhythm);
+  margin: 0;
+  max-width: none;
+  padding: 0;
+  text-transform: none;
+}
+
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-extracted-text__markdown .news-desk-markdown-context {
+  gap: calc(var(--paper-rhythm) * 0.5);
+}
+
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-extracted-text__markdown .news-desk-markdown-context h4 {
+  border-top: 0;
   padding-top: 0;
+}
+
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-extracted-text__markdown .news-desk-markdown-context code {
+  background: transparent;
+  font: inherit;
+  padding: 0;
 }
 
 .newsroom-list-detail-shell [data-news-desk-reference-detail] [data-news-desk-neighbors] > .story-label + * {
@@ -6360,6 +6418,40 @@ img {
   gap: calc(var(--paper-rhythm) * 0.5);
   margin: 0;
   padding-left: var(--paper-rhythm);
+}
+
+.news-desk-markdown-context ol {
+  display: grid;
+  gap: calc(var(--paper-rhythm) * 0.5);
+  margin: 0;
+  padding-left: calc(var(--paper-rhythm) * 1.25);
+}
+
+.news-desk-markdown-context a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 0.06em;
+  text-underline-offset: 0.08em;
+}
+
+.news-desk-markdown-context table {
+  border-collapse: collapse;
+  margin: 0;
+  width: 100%;
+}
+
+.news-desk-markdown-context th,
+.news-desk-markdown-context td {
+  border: 1px solid rgb(var(--rule-rgb) / 0.32);
+  line-height: var(--news-desk-text-leading, var(--paper-rhythm));
+  padding: calc(var(--paper-rhythm) * 0.25) calc(var(--paper-rhythm) * 0.4);
+  text-align: left;
+  vertical-align: top;
+}
+
+.news-desk-markdown-context th {
+  color: rgb(var(--ink-solid-rgb) / 0.82);
+  font-weight: 700;
 }
 
 .news-desk-markdown-context code {

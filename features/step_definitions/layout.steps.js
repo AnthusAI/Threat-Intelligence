@@ -99,7 +99,12 @@ Given("the newsroom uses mocked reference summaries with leading source URI", as
 
 Given("the newsroom uses mocked extracted text payload for reference detail", async function () {
   this.testEditorReader = true;
-  this.newsroomReferenceExtractedTextMock = "history-001";
+  this.newsroomReferenceExtractedTextMock = "history-001-filtered-and-original";
+});
+
+Given("the newsroom uses mocked filtered extracted text payload for reference detail", async function () {
+  this.testEditorReader = true;
+  this.newsroomReferenceExtractedTextMock = "history-002-filtered-only";
 });
 
 Given("the reference quality mutation fails", async function () {
@@ -838,16 +843,15 @@ When("I open the reference detail insight composer", async function () {
   await page.locator("[data-news-desk-reference-insight-trigger]").click();
 });
 
-When("I open the reference detail extracted text panel", async function () {
+When("I switch the reference detail extracted text tab to {string}", async function (tabName) {
+  const normalized = String(tabName).trim().toLowerCase();
+  assert.ok(["filtered", "original"].includes(normalized), `Unsupported extracted text tab: ${tabName}`);
   const page = requirePage(this);
-  const toggle = page
-    .locator("[data-news-desk-reference-extracted-text-state='available'] .news-desk-extracted-text-expander__toggle")
+  const tab = page
+    .locator(`[data-news-desk-reference-extracted-text-tab='${normalized}']`)
     .first();
-  await toggle.waitFor({ state: "visible", timeout: 10_000 });
-  const expanded = await toggle.getAttribute("aria-expanded");
-  if (expanded !== "true") {
-    await toggle.click();
-  }
+  await tab.waitFor({ state: "visible", timeout: 10_000 });
+  await tab.click();
 });
 
 Then("the reference detail should render topic workflow and corpus selector", async function () {
@@ -866,20 +870,49 @@ Then("the reference detail insight composer should be visible", async function (
 Then("the reference detail should place extracted text below metadata", async function () {
   const report = await requirePage(this).evaluate(() => {
     const metadata = document.querySelector("[data-news-desk-reference-metadata-expander]");
-    const extracted = document.querySelector("[data-news-desk-reference-extracted-text-state]");
+    const extracted = document.querySelector("[data-news-desk-reference-extracted-text-section]");
     if (!metadata || !extracted) return null;
     return {
       order: metadata.compareDocumentPosition(extracted),
-      state: extracted.getAttribute("data-news-desk-reference-extracted-text-state"),
     };
   });
   assert.ok(report, "Expected metadata and extracted text sections in reference detail");
-  assert.equal(report.state, "available", `Expected available extracted text state: ${JSON.stringify(report)}`);
   assert.equal(
     Boolean(report.order & 4),
     true,
     `Expected extracted text section to render after metadata: ${JSON.stringify(report)}`,
   );
+});
+
+Then("the reference detail should render extracted text tabs", async function () {
+  const page = requirePage(this);
+  const tabs = page.locator("[data-news-desk-reference-extracted-text-tabs]").first();
+  await tabs.waitFor({ state: "visible", timeout: 10_000 });
+});
+
+Then("the reference detail extracted text active tab should be {string}", async function (expectedTab) {
+  const expected = String(expectedTab).trim().toLowerCase();
+  const report = await requirePage(this).evaluate(() => {
+    const content = document.querySelector("[data-news-desk-reference-extracted-text-content]");
+    return {
+      activeTab: content?.getAttribute("data-news-desk-reference-extracted-text-active-tab") ?? null,
+      hasTabs: Boolean(document.querySelector("[data-news-desk-reference-extracted-text-tabs]")),
+    };
+  });
+  assert.equal(report.hasTabs, true, `Expected extracted text tabs to render: ${JSON.stringify(report)}`);
+  assert.equal(report.activeTab, expected, `Expected extracted text active tab to be "${expected}": ${JSON.stringify(report)}`);
+});
+
+Then("the reference detail extracted text tab {string} should be visible", async function (tabName) {
+  const normalized = String(tabName).trim().toLowerCase();
+  const page = requirePage(this);
+  await page.locator(`[data-news-desk-reference-extracted-text-tab='${normalized}']`).first().waitFor({ state: "visible", timeout: 10_000 });
+});
+
+Then("the reference detail extracted text tab {string} should be hidden", async function (tabName) {
+  const normalized = String(tabName).trim().toLowerCase();
+  const count = await requirePage(this).locator(`[data-news-desk-reference-extracted-text-tab='${normalized}']`).count();
+  assert.equal(count, 0, `Expected extracted text tab "${normalized}" to be hidden.`);
 });
 
 Then("the reference detail extracted text should include {string}", async function (expectedText) {
@@ -890,24 +923,19 @@ Then("the reference detail extracted text should include {string}", async functi
   assert.ok(text.includes(expectedText), `Expected extracted text content to include "${expectedText}", received: ${text}`);
 });
 
-Then("the reference detail should show a disabled missing extracted text state", async function () {
+Then("the reference detail should show extracted text empty state when both tabs are missing", async function () {
   const report = await requirePage(this).evaluate(() => {
-    const state = document.querySelector("[data-news-desk-reference-extracted-text-state='missing']");
-    const toggle = state?.querySelector("[data-news-desk-reference-extracted-text-toggle='disabled']");
-    const message = state?.querySelector("[data-news-desk-reference-extracted-text-missing]");
+    const state = document.querySelector("[data-news-desk-reference-extracted-text-empty-state='both-missing']");
+    const tabs = document.querySelector("[data-news-desk-reference-extracted-text-tabs]");
     return {
-      ariaDisabled: toggle?.getAttribute("aria-disabled") ?? null,
-      message: message?.textContent?.trim() ?? "",
+      message: state?.textContent?.trim() ?? "",
       stateExists: Boolean(state),
-      toggleExists: Boolean(toggle),
-      messageExists: Boolean(message),
+      tabsExist: Boolean(tabs),
     };
   });
-  assert.equal(report.stateExists, true, `Expected missing extracted text state block: ${JSON.stringify(report)}`);
-  assert.equal(report.toggleExists, true, `Expected disabled extracted text toggle: ${JSON.stringify(report)}`);
-  assert.equal(report.ariaDisabled, "true", `Expected extracted text toggle aria-disabled=true: ${JSON.stringify(report)}`);
-  assert.equal(report.messageExists, true, `Expected missing extracted text state container: ${JSON.stringify(report)}`);
-  assert.equal(report.message, "", `Expected no explicit missing extracted text copy: ${JSON.stringify(report)}`);
+  assert.equal(report.stateExists, true, `Expected extracted text both-missing state block: ${JSON.stringify(report)}`);
+  assert.equal(report.tabsExist, false, `Expected no extracted text tabs when both modes are missing: ${JSON.stringify(report)}`);
+  assert.ok(report.message.length > 0, `Expected concise empty-state copy when extracted text is unavailable: ${JSON.stringify(report)}`);
 });
 
 Then("the reference detail source URI should be clickable", async function () {

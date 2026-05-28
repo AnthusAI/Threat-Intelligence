@@ -198,9 +198,12 @@ const LIST_REFERENCE_ATTACHMENTS_BY_REFERENCE_LINEAGE_AND_SORT_KEY_QUERY = `
         sourceUri
         filename
         mediaType
+        byteSize
         sha256
+        etag
         importRunId
         importedAt
+        metadata
       }
       nextToken
     }

@@ -347,13 +347,27 @@ Feature: Newspaper layout scenarios
     And I open the references newsroom at 1280 by 900
     When I open reference "reference-knowledge-corpus-demo-source-history-001"
     Then the reference detail should place extracted text below metadata
-    When I open the reference detail extracted text panel
+    And the reference detail should render extracted text tabs
+    And the reference detail extracted text active tab should be "filtered"
+    And the reference detail extracted text should include "History 001 filtered text line one."
+    When I switch the reference detail extracted text tab to "original"
     Then the reference detail extracted text should include "History 001 extracted text line one."
+    And no browser console errors should occur
+
+  Scenario: Newsroom reference detail hides missing extracted text tabs
+    Given I am a test editor reader
+    And the newsroom uses mocked filtered extracted text payload for reference detail
+    And I open the references newsroom at 1280 by 900
+    When I open reference "reference-knowledge-corpus-demo-source-history-002"
+    Then the reference detail extracted text tab "filtered" should be visible
+    And the reference detail extracted text tab "original" should be hidden
+    And the reference detail extracted text active tab should be "filtered"
+    And the reference detail extracted text should include "History 002 filtered text line one."
     And no browser console errors should occur
 
   Scenario: Newsroom reference detail shows missing extracted text state
     Given I open the newsroom path "/newsroom/references/reference-knowledge-corpus-demo-source-history-002?demo=1" at 1280 by 900
-    Then the reference detail should show a disabled missing extracted text state
+    Then the reference detail should show extracted text empty state when both tabs are missing
     And no browser console errors should occur
 
   Scenario: Newsroom reference detail loads from canonical deep links
