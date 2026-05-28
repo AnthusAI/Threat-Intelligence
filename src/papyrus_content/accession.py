@@ -691,25 +691,25 @@ def print_reference_accession_assignment_summary(rows: list[dict[str, Any]], cha
     for change in changes:
         model_counts[change["modelName"]] = model_counts.get(change["modelName"], 0) + 1
         action_counts[change["action"]] = action_counts.get(change["action"], 0) + 1
-    print(f"references\tcreate-accession-assignments\tcandidates\t{len(rows)}")
+    print(f"references\tprocess-create-accession-assignments\tcandidates\t{len(rows)}")
     print(
-        "references\tcreate-accession-assignments\tmodels\t"
+        "references\tprocess-create-accession-assignments\tmodels\t"
         + " ".join(f"{model}={count}" for model, count in sorted(model_counts.items()))
     )
     print(
-        "references\tcreate-accession-assignments\tsummary\t"
+        "references\tprocess-create-accession-assignments\tsummary\t"
         f"create={action_counts.get('create', 0)}\tupdate={action_counts.get('update', 0)}\tnoop={action_counts.get('noop', 0)}"
     )
-    print(f"references\tcreate-accession-assignments\tapply\t{'yes' if apply else 'no'}")
+    print(f"references\tprocess-create-accession-assignments\tapply\t{'yes' if apply else 'no'}")
 
 
 def next_reference_source_command(row: dict[str, Any]) -> str:
     if row["state"] == SOURCE_READINESS_STATES["URL_ONLY"]:
-        return f"poetry run papyrus references accession-now --reference {row['reference']['id']}"
+        return f"poetry run papyrus references process-accession-now --reference {row['reference']['id']}"
     if row["readiness"].get("textState") == "snapshot_extracted":
-        return "run references attach-extracted-text for this corpus"
+        return "run references process-attach-extracted-text for this corpus"
     if row["state"] == SOURCE_READINESS_STATES["EXTRACTABLE"]:
-        return "run references extract-text-now for this corpus"
+        return "run references process-extract-text-now for this corpus"
     if row["state"] == SOURCE_READINESS_STATES["BLOCKED"]:
         return "add sourceUri or corpus storagePath before extraction"
     return "-"

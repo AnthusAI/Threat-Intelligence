@@ -1399,6 +1399,8 @@ const schema = a.schema({
       sourcePublishedAt: a.string(),
       sourceUpdatedAt: a.string(),
       retrievedAt: a.string(),
+      inboundCitationCount: a.integer(),
+      outboundCitationCount: a.integer(),
       importRunId: a.id(),
       importedAt: a.datetime(),
       createdAt: a.datetime(),

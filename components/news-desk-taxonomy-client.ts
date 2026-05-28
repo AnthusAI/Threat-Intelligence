@@ -66,7 +66,7 @@ const NEWSROOM_ASSIGNMENT_FEED_QUERY = `
 const NEWSROOM_REFERENCE_FEED_QUERY = `
   query ListReferencesByNewsroomFeedAndCreatedAt($newsroomFeedKey: String!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String, $filter: ModelReferenceFilterInput) {
     listReferencesByNewsroomFeedAndCreatedAt(newsroomFeedKey: $newsroomFeedKey, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken, filter: $filter) {
-      items { id lineageId versionNumber previousVersionId versionState versionCreatedAt versionCreatedBy changeReason contentHash corpusId externalItemId title authors sourceUri storagePath mediaType byteSize sha256 sourcePublishedAt sourceUpdatedAt retrievedAt importRunId importedAt createdAt curationStatus curationStatusKey curationStatusUpdatedAt curationStatusUpdatedBy curationStatusReason newsroomFeedKey updatedAt }
+      items { id lineageId versionNumber previousVersionId versionState versionCreatedAt versionCreatedBy changeReason contentHash corpusId externalItemId title authors sourceUri storagePath mediaType byteSize sha256 sourcePublishedAt sourceUpdatedAt retrievedAt inboundCitationCount outboundCitationCount importRunId importedAt createdAt curationStatus curationStatusKey curationStatusUpdatedAt curationStatusUpdatedBy curationStatusReason newsroomFeedKey updatedAt }
       nextToken
     }
   }
@@ -168,6 +168,8 @@ const GET_REFERENCE_QUERY = `
       sourcePublishedAt
       sourceUpdatedAt
       retrievedAt
+      inboundCitationCount
+      outboundCitationCount
       importRunId
       importedAt
       createdAt
@@ -911,8 +913,23 @@ export async function loadNewsroomReferencePage(options: NewsroomReferencePageOp
 export async function loadEditorSemanticRelationsData(): Promise<SemanticRelationRecord[]> {
   const testMock = getTestEditorNewsroomMock();
   if (testMock?.semanticRelations) return testMock.semanticRelations;
-  const page = await loadNewsroomSemanticRelationPage();
-  return page.items;
+  const rows: SemanticRelationRecord[] = [];
+  const seenIds = new Set<string>();
+  let nextToken: string | null | undefined = null;
+  let pageCount = 0;
+
+  do {
+    const page = await loadNewsroomSemanticRelationPage({ nextToken });
+    for (const relation of page.items) {
+      if (!relation?.id || seenIds.has(relation.id)) continue;
+      seenIds.add(relation.id);
+      rows.push(relation);
+    }
+    nextToken = page.nextToken;
+    pageCount += 1;
+  } while (nextToken && pageCount < 40);
+
+  return rows;
 }
 
 export async function loadNewsroomSemanticRelationPage(options: NewsroomSemanticRelationPageOptions = {}): Promise<NewsroomRecordPage<SemanticRelationRecord>> {

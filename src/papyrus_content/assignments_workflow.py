@@ -1105,15 +1105,15 @@ def intake_research_packet_proposals(client: PapyrusGraphQLAuthoringClient, opti
     from .ids import knowledge_corpus_id
     from .steering import load_steering_config, require_corpus_config, resolve_classifier_for_corpus
 
-    apply = resolve_mutation_apply(options, "assignments intake-proposals")
+    apply = resolve_mutation_apply(options, "assignments process-proposals")
     assignment_id = normalize_string(options.get("assignment"))
     if not assignment_id:
-        raise ValueError("assignments intake-proposals requires --assignment <id>.")
+        raise ValueError("assignments process-proposals requires --assignment <id>.")
     if not options.get("config"):
-        raise ValueError("assignments intake-proposals requires --config <steering.yml>.")
+        raise ValueError("assignments process-proposals requires --config <steering.yml>.")
     corpus_key = normalize_string(options.get("corpus-key"))
     if not corpus_key:
-        raise ValueError("assignments intake-proposals requires --corpus-key <key>.")
+        raise ValueError("assignments process-proposals requires --corpus-key <key>.")
     entries = load_assignment_research_packet_entries(client, assignment_id)
     message_id = normalize_string(options.get("message"))
     selected = next((entry for entry in entries if entry["message"]["id"] == message_id), None) if message_id else (
@@ -1194,6 +1194,7 @@ def intake_research_packet_proposals(client: PapyrusGraphQLAuthoringClient, opti
             if changed_reference_ids:
                 refreshed_references = client.list_records("Reference")
                 refreshed_attachments = client.list_records("ReferenceAttachment")
+                refreshed_semantic_relations = client.list_records("SemanticRelation")
                 max_count = normalize_non_negative_integer(options.get("url-text-max-count"), "--url-text-max-count")
                 force = parse_boolean_option(options.get("url-text-force"), False, "--url-text-force")
                 corpus_id = knowledge_corpus_id(corpus_config)
@@ -1201,6 +1202,7 @@ def intake_research_packet_proposals(client: PapyrusGraphQLAuthoringClient, opti
                     client=client,
                     references=refreshed_references,
                     attachments=refreshed_attachments,
+                    semantic_relations=refreshed_semantic_relations,
                     corpus_key_by_id={corpus_id: str(corpus_config.get("key") or "")},
                     corpus_id=corpus_id,
                     reference_ids=changed_reference_ids,
@@ -1214,7 +1216,7 @@ def intake_research_packet_proposals(client: PapyrusGraphQLAuthoringClient, opti
                     client,
                     url_text_result["changes"],
                     actor_label=options.get("actor") or "Papyrus content CLI",
-                    reason=f"assignments intake-proposals fetch-url-text {assignment_id}",
+                    reason=f"assignments process-proposals process-fetch-url-text {assignment_id}",
                 )
         if parse_boolean_option(options.get("metadata-from-text"), True, "--metadata-from-text"):
             if changed_reference_ids:
@@ -1255,7 +1257,7 @@ def intake_research_packet_proposals(client: PapyrusGraphQLAuthoringClient, opti
         "references": references,
         "blockedReason": blocked_reason,
         "next": (
-            f"poetry run papyrus references source-status --config {options.get('config')} "
+            f"poetry run papyrus references process-status --config {options.get('config')} "
             f"--corpus-key {corpus_key} --status "
             f"{normalize_reference_curation_status(options.get('status'), 'pending')}"
         ),

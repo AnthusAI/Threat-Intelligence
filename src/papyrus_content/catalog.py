@@ -636,7 +636,7 @@ def assert_reference_catalog_plan_safety(plan: dict[str, Any]) -> None:
         "ModelAttachment",
     }})
     if unsafe_models:
-        raise ValueError(f"references register-catalog produced unsupported models: {', '.join(unsafe_models)}.")
+        raise ValueError(f"references create-from-catalog produced unsupported models: {', '.join(unsafe_models)}.")
     unsafe_predicates = [
         entry["expected"].get("relationTypeKey") or entry["expected"].get("predicate")
         for entry in plan["records"]
@@ -645,7 +645,7 @@ def assert_reference_catalog_plan_safety(plan: dict[str, Any]) -> None:
     ]
     if unsafe_predicates:
         raise ValueError(
-            "references register-catalog cannot create evidence or classification relations: "
+            "references create-from-catalog cannot create evidence or classification relations: "
             + ", ".join(str(value) for value in unsafe_predicates)
         )
 

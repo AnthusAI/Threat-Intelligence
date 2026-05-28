@@ -21,11 +21,18 @@ from papyrus_content.steering import load_steering_config, require_corpus_config
 class PapyrusContentTests(unittest.TestCase):
     def test_is_ported_command(self) -> None:
         self.assertTrue(papyrus_content_cli.is_ported_command("corpora", "status"))
-        self.assertTrue(papyrus_content_cli.is_ported_command("references", "accession-now"))
+        self.assertTrue(papyrus_content_cli.is_ported_command("references", "create-from-catalog"))
+        self.assertTrue(papyrus_content_cli.is_ported_command("references", "process-status"))
+        self.assertTrue(papyrus_content_cli.is_ported_command("references", "process-accession-now"))
         self.assertTrue(papyrus_content_cli.is_ported_command("content", "inspect"))
         self.assertTrue(papyrus_content_cli.is_ported_command("content", "seed-edition"))
         self.assertTrue(papyrus_content_cli.is_ported_command("assignments", "list"))
-        self.assertFalse(papyrus_content_cli.is_ported_command("assignments", "orphan-research-packets"))
+        self.assertTrue(papyrus_content_cli.is_ported_command("assignments", "process-proposals"))
+        self.assertTrue(papyrus_content_cli.is_ported_command("assignments", "orphan-research-packets"))
+        self.assertFalse(papyrus_content_cli.is_ported_command("references", "register-catalog"))
+        self.assertFalse(papyrus_content_cli.is_ported_command("references", "source-status"))
+        self.assertFalse(papyrus_content_cli.is_ported_command("references", "accession-now"))
+        self.assertFalse(papyrus_content_cli.is_ported_command("assignments", "intake-proposals"))
 
     def test_seed_edition_payload_builds_current_edition_records(self) -> None:
         payload = load_seed_payload(REPO_ROOT / "amplify" / "seed" / "seed-edition-content.json")

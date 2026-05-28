@@ -1,6 +1,7 @@
 import json
 import io
 import pathlib
+import subprocess
 import sys
 import unittest
 from unittest import mock
@@ -22,9 +23,14 @@ from papyrus_content.reference_exports import (  # noqa: E402
     reference_manifest_item,
 )
 from papyrus_content.reference_url_text import (  # noqa: E402
+    ARTICLE_TEXT_SUBPROCESS_TIMEOUT_SECONDS,
     ReferenceUrlTextExtractionError,
     _extract_url_text,
     _filter_article_text,
+    _normalize_publication_date_token,
+    _run_biblicus_article_text,
+    build_reference_citation_count_records,
+    _plan_grobid_citation_graph_records,
     build_reference_url_text_attachment_plans,
     build_reference_extracted_text_filter_attachment_plans,
     resolve_storage_bucket_name,
@@ -38,7 +44,11 @@ from papyrus_content.reference_labels import (  # noqa: E402
     build_manual_authoritative_label_relation,
     build_classification_prediction_rows,
 )
-from papyrus_content.references_commands import extract_last_json_object  # noqa: E402
+from papyrus_content.references_commands import (  # noqa: E402
+    _ensure_cli_grobid_runtime,
+    _resolve_grobid_url,
+    extract_last_json_object,
+)
 
 
 class ReferenceCommandsTests(unittest.TestCase):
@@ -61,6 +71,15 @@ class ReferenceCommandsTests(unittest.TestCase):
 
     def test_timestamp_for_path_strips_punctuation(self):
         self.assertRegex(timestamp_for_path("2026-05-23T12:00:00.000Z"), r"^2026-05-23T12-00-00-000Z$")
+
+    def test_normalize_publication_date_token_accepts_full_month_and_year(self):
+        self.assertEqual(_normalize_publication_date_token("2025-07-09")["value"], "2025-07-09")
+        self.assertEqual(_normalize_publication_date_token("2025-07")["value"], "2025-07-01")
+        self.assertEqual(_normalize_publication_date_token("2025")["value"], "2025-01-01")
+
+    def test_normalize_publication_date_token_rejects_malformed_values(self):
+        self.assertIsNone(_normalize_publication_date_token("2025-13-09")["value"])
+        self.assertIsNone(_normalize_publication_date_token("Spring 2025")["value"])
 
     def test_build_reference_analysis_manifest_requires_text_attachments(self):
         corpus_config = {"key": "AI-ML-research", "name": "AI-ML-research", "path": "corpora/AI-ML-research"}
@@ -118,6 +137,7 @@ class ReferenceCommandsTests(unittest.TestCase):
             "retryFailureCount": 0,
             "retryRoundsUsed": 2,
             "retryLastCode": None,
+            "agenticLoop": {"version": "article-text-react-v1", "rounds_used": 1, "actions": [{"action": "done"}]},
             "error": None,
             "model": "gpt-5.4-nano",
         }
@@ -163,6 +183,570 @@ class ReferenceCommandsTests(unittest.TestCase):
         self.assertEqual(canonical_metadata["filterRetryFailureCount"], 0)
         self.assertEqual(canonical_metadata["filterRetryRoundsUsed"], 2)
         self.assertIsNone(canonical_metadata["filterRetryLastCode"])
+        self.assertEqual(canonical_metadata["filterAgenticLoop"]["version"], "article-text-react-v1")
+
+    @mock.patch("papyrus_content.reference_url_text._download_source_attachment_from_uri", return_value=b"%PDF-test")
+    @mock.patch("papyrus_content.reference_url_text._extract_url_text")
+    @mock.patch("papyrus_content.reference_url_text._filter_article_text")
+    def test_build_reference_url_text_attachment_plans_passthrough_for_pdf_sources(
+        self,
+        mock_filter,
+        mock_extract,
+        _mock_download,
+    ):
+        mock_extract.return_value = {
+            "text": "PDF full text body",
+            "markdown": "PDF full text body",
+            "title": "Paper title",
+            "contentType": "application/pdf",
+            "sourceKind": "pdf",
+            "structured": {
+                "authors": [],
+                "citations": [],
+                "summary": {"authors_count": 0, "citations_count": 0, "citations_with_identifiers": 0},
+                "warnings": [],
+            },
+        }
+        references = [
+            {
+                "id": "reference-1",
+                "lineageId": "lineage-1",
+                "versionNumber": 1,
+                "versionState": "current",
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "externalItemId": "item-1",
+                "sourceUri": "https://example.com/paper.pdf",
+            }
+        ]
+        result = build_reference_url_text_attachment_plans(
+            references=references,
+            attachments=[],
+            corpus_key_by_id={"knowledge-corpus-ai-ml-research": "AI-ML-research"},
+            corpus_id="knowledge-corpus-ai-ml-research",
+            curation_status="all",
+            force=False,
+        )
+        mock_filter.assert_not_called()
+        self.assertEqual(result["plannedAttachmentCount"], 3)
+        canonical_plan = next(
+            plan for plan in result["plans"] if plan["record"]["expected"]["role"] == "extracted_text"
+        )
+        source_plan = next(
+            plan for plan in result["plans"] if plan["record"]["expected"]["role"] == "source"
+        )
+        self.assertEqual(source_plan["record"]["expected"]["mediaType"], "application/pdf")
+        canonical_body = canonical_plan["body"].decode("utf-8")
+        self.assertEqual(canonical_body, "PDF full text body")
+        metadata = json.loads(canonical_plan["record"]["expected"]["metadata"])
+        self.assertEqual(metadata["filterStatus"], "filtered")
+        self.assertEqual(metadata["filterPromptVersion"], "pdf-pass-through-v1")
+        self.assertEqual(metadata["filterModel"], "passthrough")
+
+    @mock.patch("papyrus_content.reference_url_text._extract_url_text")
+    def test_build_reference_url_text_attachment_plans_pdf_only_skips_non_pdf_sources(
+        self,
+        mock_extract,
+    ):
+        references = [
+            {
+                "id": "reference-1",
+                "lineageId": "lineage-1",
+                "versionNumber": 1,
+                "versionState": "current",
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "externalItemId": "item-1",
+                "sourceUri": "https://example.com/article",
+            }
+        ]
+        result = build_reference_url_text_attachment_plans(
+            references=references,
+            attachments=[],
+            corpus_key_by_id={"knowledge-corpus-ai-ml-research": "AI-ML-research"},
+            corpus_id="knowledge-corpus-ai-ml-research",
+            curation_status="all",
+            force=False,
+            pdf_only=True,
+        )
+        mock_extract.assert_not_called()
+        self.assertEqual(result["plannedCount"], 0)
+        self.assertEqual(result["skippedNonPdfCount"], 1)
+
+    @mock.patch("papyrus_content.reference_url_text._download_source_attachment_from_uri", return_value=b"%PDF-test")
+    @mock.patch("papyrus_content.reference_url_text._filter_article_text")
+    @mock.patch("papyrus_content.reference_url_text._extract_url_text")
+    def test_build_reference_url_text_attachment_plans_records_grobid_metadata(
+        self,
+        mock_extract,
+        mock_filter,
+        _mock_download,
+    ):
+        mock_extract.return_value = {
+            "text": "PDF full text body",
+            "markdown": "PDF full text body",
+            "title": "Paper title",
+            "contentType": "application/pdf",
+            "sourceKind": "pdf",
+            "method": "grobid",
+            "grobid": {
+                "base_url": "http://127.0.0.1:8070",
+                "endpoint": "http://127.0.0.1:8070/api/processFulltextDocument",
+            },
+            "structured": {
+                "authors": [],
+                "citations": [],
+                "summary": {"authors_count": 0, "citations_count": 0, "citations_with_identifiers": 0},
+                "warnings": [],
+            },
+        }
+        mock_filter.return_value = {
+            "status": "ok",
+            "text": "PDF full text body",
+            "spanCount": 1,
+            "promptVersion": "pdf-pass-through-v1",
+            "model": "passthrough",
+            "warnings": [],
+            "retryTrace": [],
+            "retryFailureCount": 0,
+            "retryRoundsUsed": 0,
+            "retryLastCode": None,
+            "agenticLoop": {"version": "pdf-pass-through-v1", "rounds_used": 0, "actions": []},
+            "error": None,
+        }
+        references = [
+            {
+                "id": "reference-1",
+                "lineageId": "lineage-1",
+                "versionNumber": 1,
+                "versionState": "current",
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "externalItemId": "item-1",
+                "sourceUri": "https://example.com/paper.pdf",
+            }
+        ]
+        result = build_reference_url_text_attachment_plans(
+            references=references,
+            attachments=[],
+            corpus_key_by_id={"knowledge-corpus-ai-ml-research": "AI-ML-research"},
+            corpus_id="knowledge-corpus-ai-ml-research",
+            curation_status="all",
+            force=False,
+            grobid_url="http://127.0.0.1:8070",
+        )
+        mock_extract.assert_called_once_with(
+            "https://example.com/paper.pdf",
+            reference_title="",
+            grobid_url="http://127.0.0.1:8070",
+        )
+        raw_plan = next(plan for plan in result["plans"] if plan["record"]["expected"]["role"] == "extracted_text_raw")
+        raw_metadata = json.loads(raw_plan["record"]["expected"]["metadata"])
+        self.assertEqual(raw_metadata["method"], "grobid")
+        self.assertEqual(raw_metadata["grobid"]["base_url"], "http://127.0.0.1:8070")
+
+    @mock.patch("papyrus_content.reference_url_text._download_source_attachment_from_uri", return_value=b"%PDF-test")
+    @mock.patch("papyrus_content.reference_url_text._filter_article_text")
+    @mock.patch("papyrus_content.reference_url_text._extract_url_text")
+    def test_pdf_grobid_publication_date_overwrites_reference_source_published_at(
+        self,
+        mock_extract,
+        mock_filter,
+        _mock_download,
+    ):
+        mock_extract.return_value = {
+            "text": "PDF full text body",
+            "markdown": "PDF full text body",
+            "title": "Paper title",
+            "contentType": "application/pdf",
+            "sourceKind": "pdf",
+            "method": "grobid",
+            "grobid": {
+                "base_url": "http://127.0.0.1:8070",
+                "publication_date": "2024-03",
+            },
+            "structured": {
+                "summary": {"publication_date": "2024-03"},
+                "authors": [],
+                "citations": [],
+                "warnings": [],
+            },
+        }
+        mock_filter.return_value = {
+            "status": "ok",
+            "text": "PDF full text body",
+            "spanCount": 1,
+            "promptVersion": "pdf-pass-through-v1",
+            "model": "passthrough",
+            "warnings": [],
+            "retryTrace": [],
+            "retryFailureCount": 0,
+            "retryRoundsUsed": 0,
+            "retryLastCode": None,
+            "agenticLoop": {"version": "pdf-pass-through-v1", "rounds_used": 0, "actions": []},
+            "error": None,
+        }
+        references = [
+            {
+                "id": "reference-1",
+                "lineageId": "lineage-1",
+                "versionNumber": 1,
+                "versionState": "current",
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "externalItemId": "item-1",
+                "sourceUri": "https://example.com/paper.pdf",
+                "sourcePublishedAt": "2019-01-01",
+                "metadata": json.dumps({}),
+            }
+        ]
+        result = build_reference_url_text_attachment_plans(
+            references=references,
+            attachments=[],
+            corpus_key_by_id={"knowledge-corpus-ai-ml-research": "AI-ML-research"},
+            corpus_id="knowledge-corpus-ai-ml-research",
+            curation_status="all",
+            force=True,
+        )
+        reference_record = result["referenceRecords"][0]["expected"]
+        self.assertEqual(reference_record["sourcePublishedAt"], "2024-03-01")
+        metadata = json.loads(reference_record["metadata"])
+        resolution = metadata["papyrus"]["publication_date_resolution"]
+        self.assertEqual(resolution["source"], "grobid")
+        self.assertEqual(resolution["resolvedSourcePublishedAt"], "2024-03-01")
+        self.assertEqual(resolution["selectedRaw"], "2024-03")
+
+    @mock.patch("papyrus_content.reference_url_text._download_source_attachment_from_uri", return_value=b"%PDF-test")
+    @mock.patch("papyrus_content.reference_url_text._filter_article_text")
+    @mock.patch("papyrus_content.reference_url_text._extract_url_text")
+    def test_pdf_grobid_publication_date_invalid_preserves_existing_reference_source_published_at(
+        self,
+        mock_extract,
+        mock_filter,
+        _mock_download,
+    ):
+        mock_extract.return_value = {
+            "text": "PDF full text body",
+            "markdown": "PDF full text body",
+            "title": "Paper title",
+            "contentType": "application/pdf",
+            "sourceKind": "pdf",
+            "method": "grobid",
+            "grobid": {"base_url": "http://127.0.0.1:8070", "publication_date": "Spring 2024"},
+            "structured": {"summary": {"publication_date": "Spring 2024"}, "authors": [], "citations": [], "warnings": []},
+        }
+        mock_filter.return_value = {
+            "status": "ok",
+            "text": "PDF full text body",
+            "spanCount": 1,
+            "promptVersion": "pdf-pass-through-v1",
+            "model": "passthrough",
+            "warnings": [],
+            "retryTrace": [],
+            "retryFailureCount": 0,
+            "retryRoundsUsed": 0,
+            "retryLastCode": None,
+            "agenticLoop": {"version": "pdf-pass-through-v1", "rounds_used": 0, "actions": []},
+            "error": None,
+        }
+        references = [
+            {
+                "id": "reference-1",
+                "lineageId": "lineage-1",
+                "versionNumber": 1,
+                "versionState": "current",
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "externalItemId": "item-1",
+                "sourceUri": "https://example.com/paper.pdf",
+                "sourcePublishedAt": "2019-01-01",
+                "metadata": json.dumps({}),
+            }
+        ]
+        result = build_reference_url_text_attachment_plans(
+            references=references,
+            attachments=[],
+            corpus_key_by_id={"knowledge-corpus-ai-ml-research": "AI-ML-research"},
+            corpus_id="knowledge-corpus-ai-ml-research",
+            curation_status="all",
+            force=True,
+        )
+        reference_record = result["referenceRecords"][0]["expected"]
+        self.assertNotIn("sourcePublishedAt", reference_record)
+        metadata = json.loads(reference_record["metadata"])
+        resolution = metadata["papyrus"]["publication_date_resolution"]
+        self.assertEqual(resolution["source"], "fallback")
+        self.assertEqual(resolution["fallbackSourcePublishedAt"], "2019-01-01")
+        self.assertIn("grobid_date_parse_failed", resolution["warnings"])
+
+    @mock.patch("papyrus_content.reference_url_text._extract_url_text")
+    @mock.patch("papyrus_content.reference_url_text._filter_article_text")
+    def test_non_pdf_does_not_override_reference_source_published_at(self, mock_filter, mock_extract):
+        mock_extract.return_value = {
+            "text": "Example plain text",
+            "markdown": "Example plain text",
+            "title": "Example Title",
+            "contentType": "text/html",
+            "sourceKind": "web",
+            "structured": {"summary": {"publication_date": "2025-02-17"}, "authors": [], "citations": [], "warnings": []},
+        }
+        mock_filter.return_value = {
+            "status": "ok",
+            "text": "Filtered article text",
+            "spanCount": 1,
+            "promptVersion": "article-text-v1",
+            "warnings": [],
+            "retryTrace": [],
+            "retryFailureCount": 0,
+            "retryRoundsUsed": 0,
+            "retryLastCode": None,
+            "agenticLoop": {"version": "article-text-react-v1", "rounds_used": 0, "actions": [{"action": "done"}]},
+            "error": None,
+            "model": "gpt-5.4-mini",
+        }
+        references = [
+            {
+                "id": "reference-1",
+                "lineageId": "lineage-1",
+                "versionNumber": 1,
+                "versionState": "current",
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "externalItemId": "item-1",
+                "sourceUri": "https://example.com/article",
+                "sourcePublishedAt": "2018-11-20",
+                "metadata": json.dumps({}),
+            }
+        ]
+        result = build_reference_url_text_attachment_plans(
+            references=references,
+            attachments=[],
+            corpus_key_by_id={"knowledge-corpus-ai-ml-research": "AI-ML-research"},
+            corpus_id="knowledge-corpus-ai-ml-research",
+            curation_status="all",
+            force=True,
+        )
+        reference_record = result["referenceRecords"][0]["expected"]
+        self.assertNotIn("sourcePublishedAt", reference_record)
+
+    def test_plan_grobid_citation_graph_records_creates_author_and_citation_records(self):
+        source_reference = {
+            "id": "reference-source-v1",
+            "lineageId": "reference-source",
+            "versionNumber": 1,
+            "versionState": "current",
+            "corpusId": "knowledge-corpus-ai-ml-research",
+            "externalItemId": "source-item",
+        }
+        structured = {
+            "authors": [
+                {
+                    "name": "Ada Lovelace",
+                    "normalized_name": "ada lovelace",
+                    "orcid": "0000-0001-2345-6789",
+                }
+            ],
+            "citations": [
+                {
+                    "title": "Prior Work",
+                    "authors": ["Alan Turing"],
+                    "year": 2024,
+                    "doi": "10.1000/xyz",
+                    "venue": "Journal X",
+                }
+            ],
+            "summary": {"authors_count": 1, "citations_count": 1, "citations_with_identifiers": 1},
+            "warnings": [],
+        }
+        planned = _plan_grobid_citation_graph_records(
+            source_reference=source_reference,
+            all_references=[source_reference],
+            semantic_relations=[],
+            structured=structured,
+            now="2026-05-28T00:00:00Z",
+        )
+        self.assertEqual(planned["authorsParsed"], 1)
+        self.assertEqual(planned["authorsLinked"], 1)
+        self.assertEqual(planned["citationsParsed"], 1)
+        self.assertEqual(planned["citationsUpserted"], 1)
+        self.assertEqual(planned["citationRelationsCreated"], 1)
+        model_names = [record["modelName"] for record in planned["records"]]
+        self.assertIn("SemanticNode", model_names)
+        self.assertIn("Reference", model_names)
+        self.assertIn("SemanticRelation", model_names)
+        self.assertEqual(planned["referenceRecords"][0]["expected"]["outboundCitationCount"], 1)
+        self.assertEqual(json.loads(next(
+            record["expected"]["metadata"]
+            for record in planned["records"]
+            if record["modelName"] == "Reference"
+        ))["citation_auto_created"], True)
+        predicates = [
+            record["expected"].get("predicate")
+            for record in planned["records"]
+            if record["modelName"] == "SemanticRelation"
+        ]
+        self.assertIn("authored_by", predicates)
+        self.assertIn("cites", predicates)
+
+    def test_plan_grobid_citation_graph_records_skips_low_confidence_citations(self):
+        source_reference = {
+            "id": "reference-source-v1",
+            "lineageId": "reference-source",
+            "versionNumber": 1,
+            "versionState": "current",
+            "corpusId": "knowledge-corpus-ai-ml-research",
+            "externalItemId": "source-item",
+        }
+        structured = {
+            "authors": [],
+            "citations": [
+                {
+                    "title": "Tiny",
+                    "authors": [],
+                    "year": None,
+                }
+            ],
+            "summary": {"authors_count": 0, "citations_count": 1, "citations_with_identifiers": 0},
+            "warnings": [],
+        }
+        planned = _plan_grobid_citation_graph_records(
+            source_reference=source_reference,
+            all_references=[source_reference],
+            semantic_relations=[],
+            structured=structured,
+            now="2026-05-28T00:00:00Z",
+        )
+        self.assertEqual(planned["citationsParsed"], 1)
+        self.assertEqual(planned["citationsUpserted"], 0)
+        self.assertEqual(planned["citationsSkippedLowConfidence"], 1)
+        self.assertEqual(planned["citationRelationsCreated"], 0)
+        warnings = planned.get("warnings") or []
+        self.assertTrue(any(str(row.get("code") or "") == "citation_low_confidence" for row in warnings))
+
+    def test_plan_grobid_citation_graph_records_supersedes_stale_cites_and_recounts(self):
+        source_reference = {
+            "id": "reference-source-v1",
+            "lineageId": "reference-source",
+            "versionNumber": 1,
+            "versionState": "current",
+            "corpusId": "knowledge-corpus-ai-ml-research",
+            "externalItemId": "source-item",
+            "inboundCitationCount": 0,
+            "outboundCitationCount": 1,
+        }
+        existing_target = {
+            "id": "reference-existing-v1",
+            "lineageId": "reference-existing",
+            "versionNumber": 1,
+            "versionState": "current",
+            "corpusId": "knowledge-corpus-ai-ml-research",
+            "externalItemId": "doi:10.1000/existing",
+            "inboundCitationCount": 1,
+            "outboundCitationCount": 0,
+        }
+        stale_relation = {
+            "id": "semantic-relation-stale",
+            "relationState": "current",
+            "predicate": "cites",
+            "relationTypeKey": "cites",
+            "subjectKind": "reference",
+            "subjectId": source_reference["id"],
+            "subjectLineageId": source_reference["lineageId"],
+            "objectKind": "reference",
+            "objectId": existing_target["id"],
+            "objectLineageId": existing_target["lineageId"],
+        }
+        structured = {
+            "authors": [],
+            "citations": [
+                {
+                    "title": "Replacement Work",
+                    "authors": ["Grace Hopper"],
+                    "year": 2024,
+                    "doi": "10.1000/replacement",
+                }
+            ],
+            "summary": {"authors_count": 0, "citations_count": 1, "citations_with_identifiers": 1},
+            "warnings": [],
+        }
+        planned = _plan_grobid_citation_graph_records(
+            source_reference=source_reference,
+            all_references=[source_reference, existing_target],
+            semantic_relations=[stale_relation],
+            structured=structured,
+            now="2026-05-28T00:00:00Z",
+        )
+        superseded = [
+            record for record in planned["records"]
+            if record["modelName"] == "SemanticRelation"
+            and record["expected"].get("relationState") == "superseded"
+        ]
+        self.assertEqual(len(superseded), 1)
+        self.assertEqual(superseded[0]["expected"]["id"], "semantic-relation-stale")
+        count_updates = {
+            record["expected"]["id"]: record["expected"]
+            for record in planned["referenceRecords"]
+        }
+        self.assertEqual(count_updates["reference-source-v1"]["outboundCitationCount"], 1)
+        self.assertEqual(count_updates["reference-existing-v1"]["inboundCitationCount"], 0)
+        replacement_reference = next(
+            record["expected"]
+            for record in planned["records"]
+            if record["modelName"] == "Reference"
+        )
+        self.assertEqual(replacement_reference["inboundCitationCount"], 1)
+        self.assertEqual(replacement_reference["outboundCitationCount"], 0)
+
+    def test_build_reference_citation_count_records_recounts_current_cites_only(self):
+        references = [
+            {
+                "id": "reference-a-v1",
+                "lineageId": "reference-a",
+                "versionState": "current",
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "externalItemId": "a",
+                "curationStatus": "accepted",
+            },
+            {
+                "id": "reference-b-v1",
+                "lineageId": "reference-b",
+                "versionState": "current",
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "externalItemId": "b",
+                "curationStatus": "accepted",
+            },
+        ]
+        semantic_relations = [
+            {
+                "id": "semantic-relation-1",
+                "relationState": "current",
+                "predicate": "cites",
+                "relationTypeKey": "cites",
+                "subjectLineageId": "reference-a",
+                "objectLineageId": "reference-b",
+            },
+            {
+                "id": "semantic-relation-2",
+                "relationState": "superseded",
+                "predicate": "cites",
+                "relationTypeKey": "cites",
+                "subjectLineageId": "reference-a",
+                "objectLineageId": "reference-b",
+            },
+            {
+                "id": "semantic-relation-3",
+                "relationState": "current",
+                "predicate": "supports",
+                "relationTypeKey": "supports",
+                "subjectLineageId": "reference-b",
+                "objectLineageId": "reference-a",
+            },
+        ]
+        recount = build_reference_citation_count_records(
+            references=references,
+            semantic_relations=semantic_relations,
+            corpus_id="knowledge-corpus-ai-ml-research",
+            curation_status="all",
+        )
+        records_by_id = {record["expected"]["id"]: record["expected"] for record in recount["records"]}
+        self.assertEqual(records_by_id["reference-a-v1"]["outboundCitationCount"], 1)
+        self.assertEqual(records_by_id["reference-a-v1"]["inboundCitationCount"], 0)
+        self.assertEqual(records_by_id["reference-b-v1"]["inboundCitationCount"], 1)
+        self.assertEqual(records_by_id["reference-b-v1"]["outboundCitationCount"], 0)
 
     @mock.patch("papyrus_content.reference_url_text._extract_url_text")
     @mock.patch("papyrus_content.reference_url_text._filter_article_text")
@@ -195,6 +779,7 @@ class ReferenceCommandsTests(unittest.TestCase):
             "retryFailureCount": 1,
             "retryRoundsUsed": 3,
             "retryLastCode": "old_str_not_unique",
+            "agenticLoop": {"version": "article-text-react-v1", "rounds_used": 3, "actions": [{"action": "delete_pass"}]},
             "error": {
                 "code": "empty_spans",
                 "message": "No spans",
@@ -234,6 +819,7 @@ class ReferenceCommandsTests(unittest.TestCase):
         self.assertEqual(metadata["filterRetryFailureCount"], 1)
         self.assertEqual(metadata["filterRetryRoundsUsed"], 3)
         self.assertEqual(metadata["filterRetryLastCode"], "old_str_not_unique")
+        self.assertEqual(metadata["filterAgenticLoop"]["rounds_used"], 3)
         self.assertEqual(result["filterFallbacks"][0]["reason"]["details"]["retry_trace"][0]["failure_code"], "old_str_not_unique")
 
     @mock.patch("papyrus_content.reference_url_text.resolve_storage_bucket_name", return_value="test-bucket")
@@ -431,6 +1017,7 @@ class ReferenceCommandsTests(unittest.TestCase):
             "warnings": [],
             "retry_failure_count": 3,
             "retry_rounds_used": 8,
+            "agentic_loop": {"version": "article-text-react-v1", "rounds_used": 4, "actions": [{"action": "redo_extraction"}]},
             "retry_trace": [
                 {
                     "attempt": 1,
@@ -463,7 +1050,22 @@ class ReferenceCommandsTests(unittest.TestCase):
         self.assertEqual(result["retryFailureCount"], 3)
         self.assertEqual(result["retryRoundsUsed"], 8)
         self.assertEqual(result["retryLastCode"], "old_str_not_unique")
+        self.assertEqual(result["agenticLoop"]["rounds_used"], 4)
         self.assertEqual(result["error"]["details"]["retry_trace"][0]["failure_code"], "old_str_not_found")
+
+    @mock.patch("papyrus_content.reference_url_text._biblicus_python_executable", return_value="/usr/bin/python3")
+    @mock.patch("papyrus_content.reference_url_text.BIBLICUS_ROOT", pathlib.Path("/tmp"))
+    @mock.patch("papyrus_content.reference_url_text.subprocess.run")
+    def test_run_biblicus_article_text_times_out(self, mock_run, _mock_python):
+        mock_run.side_effect = subprocess.TimeoutExpired(
+            cmd=["python3", "-m", "biblicus", "extract", "article-text"],
+            timeout=ARTICLE_TEXT_SUBPROCESS_TIMEOUT_SECONDS,
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            f"timed out after {ARTICLE_TEXT_SUBPROCESS_TIMEOUT_SECONDS} seconds",
+        ):
+            _run_biblicus_article_text({"extracted_text": "hello"})
 
     @mock.patch("papyrus_content.reference_metadata_generation.resolve_storage_bucket_name", return_value="test-bucket")
     @mock.patch("papyrus_content.reference_metadata_generation.reference_curation_signals.reference_generate_metadata_from_extracted_text")
@@ -614,6 +1216,32 @@ class ReferenceCommandsTests(unittest.TestCase):
         self.assertEqual(extracted["strategy"], "markdown-then-html-then-direct")
         self.assertEqual(extracted["promptVersion"], "url-text-v1")
 
+    def test_resolve_grobid_url_prefers_option_then_env_then_default(self):
+        with mock.patch.dict("os.environ", {"BIBLICUS_GROBID_URL": "http://env:8070"}, clear=True):
+            self.assertEqual(_resolve_grobid_url({}), "http://env:8070")
+            self.assertEqual(_resolve_grobid_url({"grobid-url": "http://flag:8070"}), "http://flag:8070")
+        with mock.patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(_resolve_grobid_url({}), "http://127.0.0.1:8070")
+
+    @mock.patch("papyrus_content.references_commands._await_grobid_ready")
+    @mock.patch("papyrus_content.references_commands._start_or_reuse_local_grobid_container")
+    @mock.patch("papyrus_content.references_commands._grobid_is_alive")
+    def test_ensure_cli_grobid_runtime_starts_local_container_when_unavailable(
+        self,
+        mock_alive,
+        mock_start,
+        mock_await,
+    ):
+        mock_alive.return_value = False
+        _ensure_cli_grobid_runtime("http://127.0.0.1:8070")
+        mock_start.assert_called_once_with(port=8070)
+        mock_await.assert_called_once_with("http://127.0.0.1:8070")
+
+    @mock.patch("papyrus_content.references_commands._grobid_is_alive", return_value=False)
+    def test_ensure_cli_grobid_runtime_remote_endpoint_requires_live_service(self, _mock_alive):
+        with self.assertRaisesRegex(RuntimeError, "not reachable"):
+            _ensure_cli_grobid_runtime("http://grobid.internal:8070")
+
     @mock.patch("papyrus_content.reference_url_text._biblicus_python_executable", return_value="/usr/bin/python3")
     @mock.patch("papyrus_content.reference_url_text.BIBLICUS_ROOT", pathlib.Path("/tmp"))
     @mock.patch("papyrus_content.reference_url_text.subprocess.run")
@@ -626,6 +1254,34 @@ class ReferenceCommandsTests(unittest.TestCase):
         with self.assertRaises(ReferenceUrlTextExtractionError) as context:
             _extract_url_text("https://example.com/article")
         self.assertEqual(context.exception.reason["code"], "blocked")
+
+    @mock.patch("papyrus_content.reference_url_text._biblicus_python_executable", return_value="/usr/bin/python3")
+    @mock.patch("papyrus_content.reference_url_text.BIBLICUS_ROOT", pathlib.Path("/tmp"))
+    @mock.patch("papyrus_content.reference_url_text.subprocess.run")
+    def test_extract_url_text_passes_grobid_url_to_biblicus_env(self, mock_run, _mock_python):
+        mock_run.return_value = mock.Mock(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "status": "ok",
+                    "text": "Extracted from Biblicus",
+                    "markdown": "Extracted from Biblicus",
+                    "source_kind": "pdf",
+                    "strategy": "pdf-grobid-only",
+                    "content_type": "application/pdf",
+                    "method": "grobid",
+                    "grobid": {"base_url": "http://127.0.0.1:8070"},
+                }
+            ),
+            stderr="",
+        )
+        _extract_url_text(
+            "https://example.com/paper.pdf",
+            reference_title="Example",
+            grobid_url="http://127.0.0.1:8070",
+        )
+        call_kwargs = mock_run.call_args.kwargs
+        self.assertEqual(call_kwargs["env"]["BIBLICUS_GROBID_URL"], "http://127.0.0.1:8070")
 
     def test_source_site_enrichment_default_tracks_uri_identifiers(self):
         result = resolve_source_site_enrichment(
@@ -673,6 +1329,181 @@ class ReferenceCommandsTests(unittest.TestCase):
         self.assertEqual(result["identifiers"]["resolved"]["youtube_video_id"], "dQw4w9WgXcQ")
         warning_codes = {str(entry.get("code") or "") for entry in result["warnings"] if isinstance(entry, dict)}
         self.assertIn("youtube_enrichment_not_implemented", warning_codes)
+
+    def test_source_site_enrichment_acl_anthology_prefers_pdf(self):
+        result = resolve_source_site_enrichment(
+            reference={"id": "reference-acl"},
+            source_uri="https://aclanthology.org/2024.findings-acl.890/",
+        )
+        self.assertEqual(result["pluginKey"], "acl_anthology")
+        self.assertEqual(result["canonicalSourceUri"], "https://aclanthology.org/2024.findings-acl.890.pdf")
+        self.assertEqual(result["identifiers"]["resolved"]["acl_anthology_id"], "2024.findings-acl.890")
+        self.assertEqual(result["sourceVariants"]["canonicalLandingUrl"], "https://aclanthology.org/2024.findings-acl.890/")
+
+    @mock.patch("papyrus_content.source_site_plugins._metadata_pdf_candidates", return_value=[])
+    @mock.patch("papyrus_content.source_site_plugins._search_pdf_candidates", return_value=[])
+    @mock.patch("papyrus_content.source_site_plugins._pdf_links_from_landing_page", return_value=[])
+    @mock.patch("papyrus_content.source_site_plugins._pdf_candidates_from_final_url", return_value=[])
+    @mock.patch(
+        "papyrus_content.source_site_plugins._select_verified_pdf_candidate",
+        return_value=("https://aclanthology.org/2020.emnlp-main.550.pdf", "delegated_plugin", False),
+    )
+    @mock.patch(
+        "papyrus_content.source_site_plugins._resolve_redirect_chain",
+        return_value={
+            "chain": [{"url": "https://doi.org/10.18653/v1/2020.emnlp-main.550", "status": 302}],
+            "finalUrl": "https://aclanthology.org/2020.emnlp-main.550/",
+            "contentType": "text/html; charset=utf-8",
+        },
+    )
+    def test_source_site_enrichment_doi_resolves_to_acl_pdf(
+        self,
+        _mock_redirect,
+        _mock_select,
+        _mock_candidates,
+        _mock_landing,
+        _mock_search,
+        _mock_metadata,
+    ):
+        result = resolve_source_site_enrichment(
+            reference={"id": "reference-doi"},
+            source_uri="https://doi.org/10.18653/v1/2020.emnlp-main.550",
+        )
+        self.assertEqual(result["pluginKey"], "doi")
+        self.assertEqual(result["canonicalSourceUri"], "https://aclanthology.org/2020.emnlp-main.550.pdf")
+        resolution = result["metadata"]["doiResolution"]
+        self.assertEqual(resolution["outcome"], "pdf_selected")
+        self.assertFalse(resolution["searchUsed"])
+        self.assertFalse(resolution["apiFallbackUsed"])
+
+    @mock.patch("papyrus_content.source_site_plugins._metadata_pdf_candidates", return_value=[])
+    @mock.patch(
+        "papyrus_content.source_site_plugins._search_pdf_candidates",
+        return_value=["https://example.org/paper.pdf"],
+    )
+    @mock.patch("papyrus_content.source_site_plugins._pdf_links_from_landing_page", return_value=[])
+    @mock.patch("papyrus_content.source_site_plugins._pdf_candidates_from_final_url", return_value=[])
+    @mock.patch(
+        "papyrus_content.source_site_plugins._select_verified_pdf_candidate",
+        side_effect=[("", "", False), ("https://example.org/paper.pdf", "web_search", False)],
+    )
+    @mock.patch(
+        "papyrus_content.source_site_plugins._resolve_redirect_chain",
+        return_value={
+            "chain": [{"url": "https://doi.org/10.1234/example", "status": 302}],
+            "finalUrl": "https://publisher.example.com/article",
+            "contentType": "text/html; charset=utf-8",
+        },
+    )
+    def test_source_site_enrichment_doi_uses_search_fallback(
+        self,
+        _mock_redirect,
+        _mock_select,
+        _mock_candidates,
+        _mock_landing,
+        _mock_search,
+        _mock_metadata,
+    ):
+        result = resolve_source_site_enrichment(
+            reference={
+                "id": "reference-doi",
+                "title": "A useful paper",
+                "authors": ["Ada Lovelace", "Alan Turing"],
+                "metadata": json.dumps({"subtitle": "Practical retrieval systems"}),
+            },
+            source_uri="https://doi.org/10.1234/example",
+        )
+        self.assertEqual(result["pluginKey"], "doi")
+        resolution = result["metadata"]["doiResolution"]
+        self.assertEqual(resolution["outcome"], "pdf_selected")
+        self.assertTrue(resolution["searchUsed"])
+        self.assertTrue(resolution["searchHit"])
+        self.assertFalse(resolution["apiFallbackUsed"])
+        search_candidates = [row for row in (resolution.get("candidates") or []) if row.get("source") == "web_search"]
+        self.assertTrue(search_candidates)
+        self.assertIn("A useful paper", str(search_candidates[0].get("query") or ""))
+        self.assertIn("PDF", str(search_candidates[0].get("query") or ""))
+
+    @mock.patch(
+        "papyrus_content.source_site_plugins._metadata_pdf_candidates",
+        return_value=[{"url": "https://repo.example.org/paper.pdf", "source": "crossref"}],
+    )
+    @mock.patch("papyrus_content.source_site_plugins._search_pdf_candidates", return_value=[])
+    @mock.patch("papyrus_content.source_site_plugins._pdf_links_from_landing_page", return_value=[])
+    @mock.patch("papyrus_content.source_site_plugins._pdf_candidates_from_final_url", return_value=[])
+    @mock.patch(
+        "papyrus_content.source_site_plugins._select_verified_pdf_candidate",
+        side_effect=[("", "", False), ("", "", False), ("https://repo.example.org/paper.pdf", "crossref", False)],
+    )
+    @mock.patch(
+        "papyrus_content.source_site_plugins._resolve_redirect_chain",
+        return_value={
+            "chain": [{"url": "https://doi.org/10.5678/example", "status": 302}],
+            "finalUrl": "https://publisher.example.com/article",
+            "contentType": "text/html; charset=utf-8",
+        },
+    )
+    def test_source_site_enrichment_doi_uses_metadata_fallback(
+        self,
+        _mock_redirect,
+        _mock_select,
+        _mock_candidates,
+        _mock_landing,
+        _mock_search,
+        _mock_metadata,
+    ):
+        result = resolve_source_site_enrichment(
+            reference={"id": "reference-doi"},
+            source_uri="https://doi.org/10.5678/example",
+        )
+        resolution = result["metadata"]["doiResolution"]
+        self.assertEqual(resolution["outcome"], "pdf_selected")
+        self.assertTrue(resolution["searchUsed"])
+        self.assertFalse(resolution["searchHit"])
+        self.assertTrue(resolution["apiFallbackUsed"])
+
+    @mock.patch("papyrus_content.source_site_plugins._metadata_pdf_candidates", return_value=[])
+    @mock.patch("papyrus_content.source_site_plugins._pdf_links_from_landing_page", return_value=["https://example.org/from-page.pdf"])
+    @mock.patch("papyrus_content.source_site_plugins._pdf_candidates_from_final_url", return_value=[])
+    @mock.patch(
+        "papyrus_content.source_site_plugins._search_pdf_candidates",
+        return_value=["https://example.org/landing"],
+    )
+    @mock.patch(
+        "papyrus_content.source_site_plugins._select_verified_pdf_candidate",
+        side_effect=[("", "", False), ("https://example.org/from-page.pdf", "web_search_landing_page", False)],
+    )
+    @mock.patch(
+        "papyrus_content.source_site_plugins._resolve_redirect_chain",
+        return_value={
+            "chain": [{"url": "https://doi.org/10.4321/example", "status": 302}],
+            "finalUrl": "https://publisher.example.com/article",
+            "contentType": "text/html; charset=utf-8",
+        },
+    )
+    def test_source_site_enrichment_doi_search_checks_landing_pages(
+        self,
+        _mock_redirect,
+        _mock_select,
+        _mock_candidates,
+        _mock_landing,
+        _mock_search,
+        _mock_metadata,
+    ):
+        result = resolve_source_site_enrichment(
+            reference={
+                "id": "reference-doi",
+                "title": "A useful paper",
+                "authors": ["Ada Lovelace", "Alan Turing"],
+                "metadata": json.dumps({"subtitle": "Practical retrieval systems"}),
+            },
+            source_uri="https://doi.org/10.4321/example",
+        )
+        resolution = result["metadata"]["doiResolution"]
+        self.assertEqual(resolution["outcome"], "pdf_selected")
+        self.assertTrue(resolution["searchUsed"])
+        self.assertTrue(resolution["searchHit"])
+        self.assertEqual(resolution["selectedPdfSource"], "web_search_landing_page")
 
     @mock.patch("papyrus_content.reference_url_text.resolve_source_site_enrichment")
     @mock.patch("papyrus_content.reference_url_text._extract_url_text")
@@ -760,6 +1591,7 @@ class ReferenceCommandsTests(unittest.TestCase):
         mock_extract.assert_called_once_with(
             "https://arxiv.org/pdf/2504.16736v2",
             reference_title="",
+            grobid_url=None,
         )
         self.assertEqual(result["plannedReferenceMetadataCount"], 1)
         reference_record = result["referenceRecords"][0]["expected"]
@@ -772,6 +1604,67 @@ class ReferenceCommandsTests(unittest.TestCase):
         self.assertEqual(raw_metadata["sourceUri"], "https://arxiv.org/pdf/2504.16736v2")
         self.assertEqual(raw_metadata["sourceUriOriginal"], "https://arxiv.org/html/2504.16736v2")
         self.assertEqual(raw_metadata["sourcePlugin"], "arxiv")
+
+    @mock.patch("papyrus_content.reference_url_text._download_source_attachment_from_uri", return_value=b"%PDF-test")
+    @mock.patch("papyrus_content.reference_url_text.resolve_source_site_enrichment")
+    @mock.patch("papyrus_content.reference_url_text._extract_url_text")
+    @mock.patch("papyrus_content.reference_url_text._filter_article_text")
+    def test_build_reference_url_text_attachment_plans_tracks_doi_resolution_counters(
+        self,
+        mock_filter,
+        mock_extract,
+        mock_enrich,
+        _mock_download,
+    ):
+        mock_enrich.return_value = {
+            "pluginKey": "doi",
+            "canonicalSourceUri": "https://example.org/paper.pdf",
+            "sourceVariants": {"inputUrl": "https://doi.org/10.1111/example", "selectedPdfUrl": "https://example.org/paper.pdf"},
+            "identifiers": {"resolved": {"doi": "10.1111/example"}, "candidates": [], "primary": {"type": "doi", "value": "10.1111/example"}, "warnings": []},
+            "metadata": {"doi": "10.1111/example", "doiResolution": {"outcome": "pdf_selected", "searchUsed": True, "searchHit": True, "apiFallbackUsed": False, "paywalledOrBlocked": False}},
+            "attachmentMetadata": {"sitePlugin": "doi"},
+            "warnings": [],
+        }
+        mock_extract.return_value = {"text": "pdf text", "markdown": "pdf text", "sourceKind": "pdf", "contentType": "application/pdf"}
+        mock_filter.return_value = {
+            "status": "ok",
+            "text": "pdf text",
+            "spanCount": 1,
+            "promptVersion": "pdf-pass-through-v1",
+            "warnings": [],
+            "retryTrace": [],
+            "retryFailureCount": 0,
+            "retryRoundsUsed": 0,
+            "retryLastCode": None,
+            "error": None,
+            "model": "passthrough",
+        }
+        result = build_reference_url_text_attachment_plans(
+            references=[
+                {
+                    "id": "reference-1",
+                    "lineageId": "lineage-1",
+                    "versionNumber": 1,
+                    "versionState": "current",
+                    "corpusId": "knowledge-corpus-ai-ml-research",
+                    "externalItemId": "doi:10.1111/example",
+                    "sourceUri": "https://doi.org/10.1111/example",
+                    "metadata": json.dumps({}),
+                }
+            ],
+            attachments=[],
+            corpus_key_by_id={"knowledge-corpus-ai-ml-research": "AI-ML-research"},
+            corpus_id="knowledge-corpus-ai-ml-research",
+            curation_status="all",
+            force=True,
+        )
+        self.assertEqual(result["doiResolvedCount"], 1)
+        self.assertEqual(result["doiPdfSelectedCount"], 1)
+        self.assertEqual(result["doiPdfMissedCount"], 0)
+        self.assertEqual(result["doiSearchUsedCount"], 1)
+        self.assertEqual(result["doiSearchHitCount"], 1)
+        self.assertEqual(result["doiApiFallbackUsedCount"], 0)
+        self.assertEqual(result["doiPaywalledOrBlockedCount"], 0)
 
     def test_build_manual_authoritative_label_relation_shape(self):
         relation = build_manual_authoritative_label_relation(

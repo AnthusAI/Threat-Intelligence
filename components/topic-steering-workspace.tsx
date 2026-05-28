@@ -45,6 +45,7 @@ import { buildNewsroomKnowledgeQueryInput, type NewsroomKnowledgeQueryAnchor as 
 import { NewsroomConsoleProgressToggle, PapyrusConsoleChatIcon, usePapyrusConsole } from "./papyrus-console-shell";
 import { useOptionalNewsDeskClient } from "./news-desk-client-provider";
 import type { ReaderAuthSnapshot } from "./reader-auth-state";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import type {
   AssignmentEventRecord,
   AssignmentRecord,
@@ -153,6 +154,7 @@ type AdministrationPanel = "users" | "policies" | "sections" | "procedures";
 export type NewsDeskTab = "overview" | "desks" | "topics" | "concepts" | "references" | "messages" | "assignments" | "administration" | "search";
 type LexicalRuleScope = "publication" | "corpus" | "classifier" | "category";
 type AnalysisReindexMode = "online-update" | "classifier-retrain" | "scoped-topic-rebuild" | "entity-graph-rebuild" | "generated-analysis-rebuild";
+type ReferenceProcessingStatus = "created" | "processable" | "processed" | "blocked";
 type AnalysisReindexDraft = {
   corpusKey: string;
   mode: AnalysisReindexMode;
@@ -7720,6 +7722,7 @@ function SemanticDetailPanel({
             ) : null}
             {selectedReference && onReferenceReview ? (
               <ReferenceCurationPanel
+                attachments={attachments}
                 disabled={disabled}
                 onReasonCodeChange={setReferenceRejectionReasonCode}
                 reasonCode={referenceRejectionReasonCode}
@@ -7852,6 +7855,7 @@ function isFilteredExtractedTextAttachment(attachment: ReferenceAttachmentRecord
 }
 
 type ReferenceExtractedTextTab = "filtered" | "original";
+type ReferenceCitationTab = "references" | "cited-by";
 
 function useNewsroomKnowledgeContext(target: KnowledgeQueryTarget | null) {
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -9254,6 +9258,7 @@ function ReferenceDetailPanel({
     text: string | null;
   }>({ error: null, loading: false, text: null });
   const [activeExtractedTextTab, setActiveExtractedTextTab] = useState<ReferenceExtractedTextTab>("filtered");
+  const [activeCitationTab, setActiveCitationTab] = useState<ReferenceCitationTab>("references");
   const [attachmentLinksById, setAttachmentLinksById] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -9373,6 +9378,10 @@ function ReferenceDetailPanel({
     setActiveExtractedTextTab(extractedTextTabs[0].mode);
   }, [activeExtractedTextTab, extractedTextTabs]);
 
+  useEffect(() => {
+    setActiveCitationTab("references");
+  }, [referenceLineageId]);
+
   if (!reference) {
     return (
       <section className="category-steering-section" aria-label="Reference detail">
@@ -9385,6 +9394,9 @@ function ReferenceDetailPanel({
   const messages = graph.messagesFor("reference", lineageId);
   const insights = graph.insightsFor("reference", lineageId);
   const neighborGroups = graph.neighbors("reference", lineageId);
+  const outgoingCitationGroup = neighborGroups.find((group) => group.direction === "outgoing" && group.predicate === "cites") ?? null;
+  const incomingCitationGroup = neighborGroups.find((group) => group.direction === "incoming" && group.predicate === "cites") ?? null;
+  const nonCitationNeighborGroups = neighborGroups.filter((group) => group.predicate !== "cites");
   const authors = reference.authors?.filter(Boolean).join(", ");
   const metadataPayload = modelPayloadByRole(referencePayloadState.payloads, "metadata");
   const metadataTitle = referenceMetadataTitle(metadataPayload) ?? reference.title ?? reference.externalItemId;
@@ -9401,6 +9413,8 @@ function ReferenceDetailPanel({
   const activeExtractedTextState = activeExtractedTextEntry?.mode === "original"
     ? extractedTextOriginalState
     : extractedTextFilteredState;
+  const inboundCitationCount = resolveReferenceCitationCount(reference.inboundCitationCount, incomingCitationGroup?.relations.length);
+  const outboundCitationCount = resolveReferenceCitationCount(reference.outboundCitationCount, outgoingCitationGroup?.relations.length);
 
   return (
     <section className="category-steering-section" aria-label="Reference detail" data-news-desk-reference-detail={lineageId}>
@@ -9464,6 +9478,16 @@ function ReferenceDetailPanel({
                   </span>
                 </p>
               ) : null}
+              <div className="news-desk-reference-detail__citation-summary" data-news-desk-reference-citation-summary>
+                <div className="news-desk-reference-detail__citation-stat">
+                  <span>Cited by</span>
+                  <strong>{inboundCitationCount}</strong>
+                </div>
+                <div className="news-desk-reference-detail__citation-stat">
+                  <span>References</span>
+                  <strong>{outboundCitationCount}</strong>
+                </div>
+              </div>
               <ReferenceCorpusRow corpora={corpora} disabled={disabled} onMoveCorpus={onMoveCorpus} reference={reference} />
             </div>
             {curationRunStatus ? (
@@ -9482,6 +9506,14 @@ function ReferenceDetailPanel({
               insights={insights}
               onCreateInsight={onCreateInsight}
               reference={reference}
+            />
+            <ReferenceCitationPanel
+              activeTab={activeCitationTab}
+              inboundCitationCount={inboundCitationCount}
+              incomingGroup={incomingCitationGroup}
+              onTabChange={setActiveCitationTab}
+              outboundCitationCount={outboundCitationCount}
+              outgoingGroup={outgoingCitationGroup}
             />
             <div data-news-desk-reference-metadata-expander>
               <NewsroomExpander
@@ -9602,11 +9634,81 @@ function ReferenceDetailPanel({
                 ))}
               </div>
             ) : null}
-            <NeighborGroups groups={neighborGroups} />
+            <NeighborGroups groups={nonCitationNeighborGroups} />
           </>
         )}
       </article>
     </section>
+  );
+}
+
+function ReferenceCitationPanel({
+  activeTab,
+  inboundCitationCount,
+  incomingGroup,
+  onTabChange,
+  outboundCitationCount,
+  outgoingGroup,
+}: {
+  activeTab: ReferenceCitationTab;
+  inboundCitationCount: number;
+  incomingGroup: SemanticNeighborGroup | null;
+  onTabChange: (value: ReferenceCitationTab) => void;
+  outboundCitationCount: number;
+  outgoingGroup: SemanticNeighborGroup | null;
+}) {
+  const outgoingObjects = outgoingGroup?.objects ?? [];
+  const incomingObjects = incomingGroup?.objects ?? [];
+  return (
+    <div className="news-desk-detail-block news-desk-reference-citations" data-news-desk-reference-citations>
+      <p className="story-label">Citations</p>
+      <Tabs defaultValue="references" onValueChange={(value) => onTabChange(value as ReferenceCitationTab)} value={activeTab}>
+        <TabsList className="news-desk-reference-citations__tabs">
+          <TabsTrigger className="news-desk-reference-citations__tab" value="references">References</TabsTrigger>
+          <TabsTrigger className="news-desk-reference-citations__tab" value="cited-by">Cited by</TabsTrigger>
+        </TabsList>
+        <TabsContent className="news-desk-reference-citations__content" value="references">
+          <div className="news-desk-reference-citations__header">
+            <strong>References</strong>
+            <span>{outboundCitationCount}</span>
+          </div>
+          {outgoingObjects.length ? (
+            <div className="news-desk-reference-citations__list">
+              {outgoingObjects.map((object) => (
+                <a
+                  className="news-desk-reference-citations__item"
+                  href={object.href}
+                  key={`references-${object.kind}-${object.lineageId}`}
+                >
+                  <span>{object.kind}</span>
+                  <strong>{object.label}</strong>
+                </a>
+              ))}
+            </div>
+          ) : <EmptyRow label="No cited references." />}
+        </TabsContent>
+        <TabsContent className="news-desk-reference-citations__content" value="cited-by">
+          <div className="news-desk-reference-citations__header">
+            <strong>Cited by</strong>
+            <span>{inboundCitationCount}</span>
+          </div>
+          {incomingObjects.length ? (
+            <div className="news-desk-reference-citations__list">
+              {incomingObjects.map((object) => (
+                <a
+                  className="news-desk-reference-citations__item"
+                  href={object.href}
+                  key={`cited-by-${object.kind}-${object.lineageId}`}
+                >
+                  <span>{object.kind}</span>
+                  <strong>{object.label}</strong>
+                </a>
+              ))}
+            </div>
+          ) : <EmptyRow label="No inbound citations yet." />}
+        </TabsContent>
+      </Tabs>
+    </div>
   );
 }
 
@@ -9985,22 +10087,29 @@ function ReferenceCurationCluster({
 }
 
 function ReferenceCurationPanel({
+  attachments = [],
   disabled,
   onReasonCodeChange,
   reasonCode,
   reference,
 }: {
+  attachments?: ReferenceAttachmentRecord[];
   disabled: boolean;
   onReasonCodeChange: (reasonCode: ReferenceRejectionReasonCode) => void;
   reasonCode: ReferenceRejectionReasonCode;
   reference: ReferenceRecord;
 }) {
+  const processingStatus = resolveReferenceProcessingStatus(reference, attachments);
   const status = reference.curationStatus ?? "pending";
   return (
-    <div className="news-desk-detail-block" data-reference-curation-status={status}>
+    <div className="news-desk-detail-block" data-reference-curation-status={status} data-reference-processing-status={processingStatus}>
       <p className="story-label">Reference Curation</p>
       <div className="news-desk-detail-line">
-        <span>Status</span>
+        <span>Processing</span>
+        <strong>{processingStatus}</strong>
+      </div>
+      <div className="news-desk-detail-line">
+        <span>Curation</span>
         <strong>{status}</strong>
       </div>
       {reference.curationStatusReason ? (
@@ -12119,10 +12228,12 @@ function referenceToNewsroomCard(
   } = {},
 ): NewsroomCardRecord {
   const lineageId = reference.lineageId ?? reference.id;
+  const processingStatus = resolveReferenceProcessingStatus(reference);
   const status = reference.curationStatus ?? "pending";
   const title = resolveReferenceCardTitle(reference, options.title ?? null);
   const subtitle = options.subtitle ?? null;
   const qualityRating = options.qualityRating ?? null;
+  const inboundCitationCount = resolveReferenceCitationCount(reference.inboundCitationCount);
   const template = resolveNewsroomCardTemplate({
     bodyLength: subtitle?.length ?? 0,
     index,
@@ -12138,7 +12249,7 @@ function referenceToNewsroomCard(
     ariaLabel: `Open reference ${title}`,
     body: subtitle ? newsroomCardExcerpt(subtitle, 180) : null,
     kicker: null,
-    meta: [],
+    meta: [processingStatus, `Cited by ${inboundCitationCount}`],
     dataAttributes: {
       "data-newsroom-card-quality": isLowReferenceQualityRating(qualityRating) ? "low" : undefined,
     },
@@ -12147,6 +12258,19 @@ function referenceToNewsroomCard(
     templateRole: template.role,
     title,
   };
+}
+
+function resolveReferenceCitationCount(
+  value: number | null | undefined,
+  fallback = 0,
+): number {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return Math.trunc(value);
+  }
+  if (typeof fallback === "number" && Number.isFinite(fallback) && fallback >= 0) {
+    return Math.trunc(fallback);
+  }
+  return 0;
 }
 
 function resolveReferenceCurationDisplayState(reference: ReferenceRecord, graph: SemanticGraph): ReferenceCurationDisplayState {
@@ -14396,6 +14520,8 @@ function ReferencePager({
 function ReferenceRow({ active, reference }: { active?: boolean; reference: ReferenceRecord }) {
   const lineageId = reference.lineageId ?? reference.id;
   const date = formatReferenceDate(reference);
+  const processingStatus = resolveReferenceProcessingStatus(reference);
+  const curationStatus = reference.curationStatus ?? "pending";
   return (
     <a
       className={`news-desk-object-row${active ? " news-desk-object-row--active" : ""}`}
@@ -14403,9 +14529,32 @@ function ReferenceRow({ active, reference }: { active?: boolean; reference: Refe
       href={newsDeskHrefForSemanticObject("reference", lineageId)}
     >
       <strong>{reference.title ?? reference.externalItemId}</strong>
-      <span>{reference.curationStatus ?? "pending"} / {date} / {reference.mediaType ?? "metadata"} / {reference.storagePath ?? reference.sourceUri ?? "no file path"}</span>
+      <span>{processingStatus} / {curationStatus} / {date} / {reference.mediaType ?? "metadata"} / {reference.storagePath ?? reference.sourceUri ?? "no file path"}</span>
     </a>
   );
+}
+
+function resolveReferenceProcessingStatus(
+  reference: ReferenceRecord,
+  attachments: ReferenceAttachmentRecord[] = [],
+): ReferenceProcessingStatus {
+  const metadata = metadataRecord(reference.metadata);
+  const explicit = normalizeMetadataString(metadata?.processingStatus);
+  if (explicit === "created" || explicit === "processable" || explicit === "processed" || explicit === "blocked") {
+    return explicit;
+  }
+  const lineageId = reference.lineageId ?? reference.id;
+  const referenceAttachments = attachments.filter((attachment) => (
+    attachment.referenceId === reference.id || attachment.referenceLineageId === lineageId
+  ));
+  const hasExtractedText = referenceAttachments.some((attachment) => (
+    attachment.role === "extracted_text" && Boolean(attachment.storagePath || attachment.sourceUri)
+  ));
+  if (hasExtractedText) return "processed";
+  const hasSource = Boolean(reference.sourceUri || reference.storagePath)
+    || referenceAttachments.some((attachment) => attachment.role === "source" && Boolean(attachment.storagePath || attachment.sourceUri));
+  if (hasSource) return "processable";
+  return "created";
 }
 
 function formatGenericProposalSubject(proposal: CategorySteeringProposal): string {

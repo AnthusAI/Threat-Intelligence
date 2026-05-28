@@ -91,7 +91,7 @@ poetry run papyrus references prepare-catalog \
   --catalog corpora/<corpus-key>/metadata/catalog.json \
   --output .papyrus-runs/<run-id>/<corpus-key>-prepared-catalog.json
 
-poetry run papyrus references register-catalog \
+poetry run papyrus references create-from-catalog \
   --config <steering.yml> \
   --corpus-key <corpus-key> \
   --catalog .papyrus-runs/<run-id>/<corpus-key>-prepared-catalog.json \
@@ -139,6 +139,6 @@ An accepted-only analysis run requires:
 - an `analysis.reindex` assignment or immediate assignment-backed run.
 
 If `corpora status` reports `s3_not_registered_in_graphql`, run
-`references prepare-catalog` and `references register-catalog`. If it reports
-`missing_extracted_text`, run `references source-status`,
-`references extract-text-now`, and `references attach-extracted-text`.
+`references prepare-catalog` and `references create-from-catalog`. If it reports
+`missing_extracted_text`, run `references process-status`,
+`references process-extract-text-now`, and `references process-attach-extracted-text`.

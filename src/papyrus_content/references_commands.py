@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
+import socket
 import subprocess
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 from papyrus_newsroom import reference_actions as newsroom_reference_actions
 
@@ -41,7 +47,11 @@ from .reference_discovery import run_citation_led_discovery
 from .assignment_executors import execute_assignment_by_type
 from .reference_attachments import build_extracted_text_attachment_plans
 from .reference_exports import build_reference_analysis_manifest, build_reference_scope_training_export
-from .reference_url_text import run_reference_extracted_text_filtering, run_reference_url_text_extraction
+from .reference_url_text import (
+    build_reference_citation_count_records,
+    run_reference_extracted_text_filtering,
+    run_reference_url_text_extraction,
+)
 from .reference_metadata_generation import run_reference_metadata_generation_from_extracted_text
 from .reference_labels import (
     apply_label_relation,
@@ -60,6 +70,10 @@ from .reference_labels import (
 from .reference_policy import normalize_reference_rejection_reason_code
 from .source_readiness import build_extraction_index
 from .steering import load_steering_config, require_corpus_config, require_steering_config
+
+DEFAULT_GROBID_URL = "http://127.0.0.1:8070"
+DEFAULT_GROBID_DOCKER_IMAGE = "lfoppiano/grobid:0.8.0"
+DEFAULT_GROBID_CONTAINER_NAME = "papyrus-grobid"
 
 
 def references_review_curation(flags: list[str]) -> None:
@@ -445,8 +459,9 @@ def references_curate_recent(flags: list[str]) -> None:
 
 def references_extract_text_now(flags: list[str]) -> None:
     options = parse_options(flags)
+    _require_reference_process_runtime("references process-extract-text-now")
     if not options.get("corpus-key"):
-        raise ValueError("references extract-text-now requires --corpus-key <key>.")
+        raise ValueError("references process-extract-text-now requires --corpus-key <key>.")
     steering_config = load_steering_config(options.get("config")) or require_steering_config()
     corpus_config = require_corpus_config(steering_config, options["corpus-key"], "--corpus-key")
     corpus_id = knowledge_corpus_id(corpus_config)
@@ -471,7 +486,7 @@ def references_extract_text_now(flags: list[str]) -> None:
         client,
         changes,
         actor_label=actor_label,
-        reason=f"references extract-text-now create {corpus_id}",
+        reason=f"references process-extract-text-now create {corpus_id}",
     )
     assignment_id = records[0]["expected"]["id"]
     apply_assignment_action(
@@ -502,8 +517,9 @@ def references_extract_text_now(flags: list[str]) -> None:
 
 def references_attach_extracted_text(flags: list[str]) -> None:
     options = parse_options(flags)
+    _require_reference_process_runtime("references process-attach-extracted-text")
     if not options.get("corpus-key"):
-        raise ValueError("references attach-extracted-text requires --corpus-key <key>.")
+        raise ValueError("references process-attach-extracted-text requires --corpus-key <key>.")
     steering_config = load_steering_config(options.get("config")) or require_steering_config()
     corpus_config = require_corpus_config(steering_config, options["corpus-key"], "--corpus-key")
     corpus_id = knowledge_corpus_id(corpus_config)
@@ -523,28 +539,28 @@ def references_attach_extracted_text(flags: list[str]) -> None:
     plans = all_plans[:max_count] if max_count else all_plans
     records = [plan["record"] for plan in plans if plan.get("record")]
     changes = build_record_changes(client, records)
-    print(f"references\tattach-extracted-text\tcorpus\t{corpus_id}")
-    print(f"references\tattach-extracted-text\tsnapshots\t{len(extraction_index.snapshot_ids)}")
-    print(f"references\tattach-extracted-text\teligible\t{len(all_plans)}")
+    print(f"references\tprocess-attach-extracted-text\tcorpus\t{corpus_id}")
+    print(f"references\tprocess-attach-extracted-text\tsnapshots\t{len(extraction_index.snapshot_ids)}")
+    print(f"references\tprocess-attach-extracted-text\teligible\t{len(all_plans)}")
     if max_count:
-        print(f"references\tattach-extracted-text\tmax-count\t{max_count}")
-    print(f"references\tattach-extracted-text\tsnapshot_attachments\t{len(plans)}")
-    print(f"references\tattach-extracted-text\tplanned\t{len(records)}")
+        print(f"references\tprocess-attach-extracted-text\tmax-count\t{max_count}")
+    print(f"references\tprocess-attach-extracted-text\tsnapshot_attachments\t{len(plans)}")
+    print(f"references\tprocess-attach-extracted-text\tplanned\t{len(records)}")
     changed = [change for change in changes if change.get("action") != "noop"]
     print_limit = 25 if options.get("limit") is None else normalize_non_negative_integer(options.get("limit"), "--limit")
     print_limit = print_limit if print_limit is not None else 25
-    print(f"references\tattach-extracted-text\tchanges\t{len(changed)}")
+    print(f"references\tprocess-attach-extracted-text\tchanges\t{len(changed)}")
     for change in changed[:print_limit]:
         print(f"{change['action']}\t{change['modelName']}\t{change['expected']['id']}")
     if len(changed) > print_limit:
         print(
-            f"references\tattach-extracted-text\tomitted\t{len(changed) - print_limit}\t"
+            f"references\tprocess-attach-extracted-text\tomitted\t{len(changed) - print_limit}\t"
             f"pass --limit {len(changed)} to print every planned change"
         )
-    apply = resolve_mutation_apply(options, "references attach-extracted-text")
+    apply = resolve_mutation_apply(options, "references process-attach-extracted-text")
     if not apply:
         print(
-            "references\tattach-extracted-text\tapply\tskipped\tuse --dry-run to preview without writes"
+            "references\tprocess-attach-extracted-text\tapply\tskipped\tuse --dry-run to preview without writes"
         )
         return
     apply_record_changes(client, changes)
@@ -552,14 +568,15 @@ def references_attach_extracted_text(flags: list[str]) -> None:
         client,
         changes,
         actor_label=actor_label,
-        reason=f"references attach-extracted-text {corpus_id}",
+        reason=f"references process-attach-extracted-text {corpus_id}",
     )
     attached = len([change for change in changes if change.get("action") == "create"])
-    print(f"references\tattach-extracted-text\tattached\t{attached}")
+    print(f"references\tprocess-attach-extracted-text\tattached\t{attached}")
 
 
 def references_fetch_url_text(flags: list[str]) -> None:
     options = parse_options(flags)
+    _require_reference_process_runtime("references process-fetch-url-text")
     actor_label = options.get("actor") or "Papyrus content CLI"
     steering_config = load_steering_config(options.get("config")) or require_steering_config()
     corpus_key = normalize_string(options.get("corpus-key"))
@@ -579,17 +596,23 @@ def references_fetch_url_text(flags: list[str]) -> None:
     curation_status = _normalize_reference_status_filter(options.get("status"))
     max_count = normalize_positive_integer(options.get("max-count"), "--max-count")
     force = parse_boolean_option(options.get("force"), False, "--force")
-    apply = resolve_mutation_apply(options, "references fetch-url-text")
+    apply = resolve_mutation_apply(options, "references process-fetch-url-text")
     bucket = normalize_string(options.get("bucket"))
     model = normalize_string(options.get("model")) or "gpt-5.4-nano"
+    pdf_only = parse_boolean_option(options.get("pdf-only"), False, "--pdf-only")
+    grobid_url = _resolve_grobid_url(options)
+    if pdf_only:
+        _ensure_cli_grobid_runtime(grobid_url)
 
     client, _ = create_authoring_client()
     references = client.list_records("Reference")
     attachments = client.list_records("ReferenceAttachment")
+    semantic_relations = client.list_records("SemanticRelation")
     result = run_reference_url_text_extraction(
         client=client,
         references=references,
         attachments=attachments,
+        semantic_relations=semantic_relations,
         corpus_key_by_id=corpus_key_by_id,
         corpus_id=corpus_id,
         reference_ids=reference_ids or None,
@@ -600,29 +623,59 @@ def references_fetch_url_text(flags: list[str]) -> None:
         apply=apply,
         bucket=bucket,
         model=model,
+        pdf_only=pdf_only,
+        grobid_url=grobid_url,
     )
 
-    print(f"references\tfetch-url-text\tcorpus\t{corpus_id or 'all'}")
-    print(f"references\tfetch-url-text\tstatus\t{curation_status}")
+    print(f"references\tprocess-fetch-url-text\tcorpus\t{corpus_id or 'all'}")
+    print(f"references\tprocess-fetch-url-text\tstatus\t{curation_status}")
+    print(f"references\tprocess-fetch-url-text\tqueue-order\tnewest-first")
+    print(f"references\tprocess-fetch-url-text\tqueue-default\tmissing-only")
+    print(f"references\tprocess-fetch-url-text\tpdf-only\t{str(pdf_only).lower()}")
+    print(f"references\tprocess-fetch-url-text\tgrobid-url\t{grobid_url}")
     if reference_ids:
-        print(f"references\tfetch-url-text\treference-filter\t{len(reference_ids)}")
+        print(f"references\tprocess-fetch-url-text\treference-filter\t{len(reference_ids)}")
     if external_item_ids:
-        print(f"references\tfetch-url-text\texternal-item-filter\t{len(external_item_ids)}")
-    print(f"references\tfetch-url-text\teligible\t{result['eligibleCount']}")
-    print(f"references\tfetch-url-text\tskipped-existing\t{result['skippedExistingCount']}")
-    print(f"references\tfetch-url-text\tplanned\t{result['plannedCount']}")
-    print(f"references\tfetch-url-text\tplanned-attachments\t{result.get('plannedAttachmentCount', 0)}")
-    print(f"references\tfetch-url-text\tplanned-reference-metadata\t{result.get('plannedReferenceMetadataCount', 0)}")
-    print(f"references\tfetch-url-text\tfiltered\t{result.get('filteredCount', 0)}")
-    print(f"references\tfetch-url-text\tfallback-raw\t{result.get('fallbackRawCount', 0)}")
-    print(f"references\tfetch-url-text\tchanges\t{result['changeCount']}")
-    print(f"references\tfetch-url-text\treference-metadata-changes\t{result.get('referenceMetadataChangeCount', 0)}")
-    print(f"references\tfetch-url-text\tattachment-changes\t{result.get('attachmentChangeCount', 0)}")
-    print(f"references\tfetch-url-text\tfailures\t{len(result['failures'])}")
+        print(f"references\tprocess-fetch-url-text\texternal-item-filter\t{len(external_item_ids)}")
+    print(f"references\tprocess-fetch-url-text\teligible\t{result['eligibleCount']}")
+    print(f"references\tprocess-fetch-url-text\tskipped-existing\t{result['skippedExistingCount']}")
+    print(f"references\tprocess-fetch-url-text\tskipped-missing-source\t{result.get('skippedMissingSourceCount', 0)}")
+    print(f"references\tprocess-fetch-url-text\tskipped-non-pdf\t{result.get('skippedNonPdfCount', 0)}")
+    print(f"references\tprocess-fetch-url-text\tplanned\t{result['plannedCount']}")
+    print(f"references\tprocess-fetch-url-text\tplanned-attachments\t{result.get('plannedAttachmentCount', 0)}")
+    print(f"references\tprocess-fetch-url-text\tplanned-reference-metadata\t{result.get('plannedReferenceMetadataCount', 0)}")
+    print(f"references\tprocess-fetch-url-text\tauthors-parsed\t{result.get('authorsParsedCount', 0)}")
+    print(f"references\tprocess-fetch-url-text\tauthors-linked\t{result.get('authorsLinkedCount', 0)}")
+    print(f"references\tprocess-fetch-url-text\tcitations-parsed\t{result.get('citationsParsedCount', 0)}")
+    print(f"references\tprocess-fetch-url-text\tcitations-upserted\t{result.get('citationsUpsertedCount', 0)}")
+    print(
+        f"references\tprocess-fetch-url-text\tcitations-skipped-low-confidence\t"
+        f"{result.get('citationsSkippedLowConfidenceCount', 0)}"
+    )
+    print(
+        f"references\tprocess-fetch-url-text\tcitation-relations-created\t"
+        f"{result.get('citationRelationsCreatedCount', 0)}"
+    )
+    print(f"references\tprocess-fetch-url-text\tcitation-graph-warnings\t{len(result.get('citationGraphWarnings') or [])}")
+    print(f"references\tprocess-fetch-url-text\tfiltered\t{result.get('filteredCount', 0)}")
+    print(f"references\tprocess-fetch-url-text\tfallback-raw\t{result.get('fallbackRawCount', 0)}")
+    print(f"references\tprocess-fetch-url-text\tchanges\t{result['changeCount']}")
+    print(f"references\tprocess-fetch-url-text\tgraph-changes\t{result.get('graphChangeCount', 0)}")
+    print(f"references\tprocess-fetch-url-text\treference-metadata-changes\t{result.get('referenceMetadataChangeCount', 0)}")
+    print(f"references\tprocess-fetch-url-text\tattachment-changes\t{result.get('attachmentChangeCount', 0)}")
+    print(f"references\tprocess-fetch-url-text\tfailures\t{len(result['failures'])}")
+    print(f"references\tprocess-fetch-url-text\tfailed-grobid\t{result.get('failedGrobidCount', 0)}")
+    print(f"references\tprocess-fetch-url-text\tdoi-resolved\t{result.get('doiResolvedCount', 0)}")
+    print(f"references\tprocess-fetch-url-text\tdoi-pdf-selected\t{result.get('doiPdfSelectedCount', 0)}")
+    print(f"references\tprocess-fetch-url-text\tdoi-pdf-missed\t{result.get('doiPdfMissedCount', 0)}")
+    print(f"references\tprocess-fetch-url-text\tdoi-search-used\t{result.get('doiSearchUsedCount', 0)}")
+    print(f"references\tprocess-fetch-url-text\tdoi-search-hit\t{result.get('doiSearchHitCount', 0)}")
+    print(f"references\tprocess-fetch-url-text\tdoi-api-fallback-used\t{result.get('doiApiFallbackUsedCount', 0)}")
+    print(f"references\tprocess-fetch-url-text\tdoi-paywalled-or-blocked\t{result.get('doiPaywalledOrBlockedCount', 0)}")
     if max_count:
-        print(f"references\tfetch-url-text\tmax-count\t{max_count}")
+        print(f"references\tprocess-fetch-url-text\tmax-count\t{max_count}")
     if model:
-        print(f"references\tfetch-url-text\tmodel\t{model}")
+        print(f"references\tprocess-fetch-url-text\tmodel\t{model}")
     changed = [change for change in result["changes"] if change.get("action") != "noop"]
     print_limit = 25 if options.get("limit") is None else normalize_non_negative_integer(options.get("limit"), "--limit")
     print_limit = print_limit if print_limit is not None else 25
@@ -630,7 +683,7 @@ def references_fetch_url_text(flags: list[str]) -> None:
         print(f"{change['action']}\t{change['modelName']}\t{change['expected']['id']}")
     if len(changed) > print_limit:
         print(
-            f"references\tfetch-url-text\tomitted\t{len(changed) - print_limit}\t"
+            f"references\tprocess-fetch-url-text\tomitted\t{len(changed) - print_limit}\t"
             f"pass --limit {len(changed)} to print every planned change"
         )
     for failure in result["failures"][:print_limit]:
@@ -646,24 +699,99 @@ def references_fetch_url_text(flags: list[str]) -> None:
         )
     if len(result["failures"]) > print_limit:
         print(
-            f"references\tfetch-url-text\tomitted-failures\t{len(result['failures']) - print_limit}\t"
+            f"references\tprocess-fetch-url-text\tomitted-failures\t{len(result['failures']) - print_limit}\t"
             f"pass --limit {len(result['failures'])} to print every failure"
         )
     if not apply:
-        print("references\tfetch-url-text\tapply\tskipped\tuse --dry-run to preview without writes")
+        print("references\tprocess-fetch-url-text\tapply\tskipped\tuse --dry-run to preview without writes")
         return
     update_newsroom_summary_after_extracted_text_attachments(
         client,
         result["changes"],
         actor_label=actor_label,
-        reason=f"references fetch-url-text {corpus_id or 'all'}",
+        reason=f"references process-fetch-url-text {corpus_id or 'all'}",
     )
     created = len([change for change in result["changes"] if change.get("action") == "create"])
-    print(f"references\tfetch-url-text\tattached\t{created}")
+    print(f"references\tprocess-fetch-url-text\tattached\t{created}")
+
+
+def references_fetch_pdf_url_text_queue(flags: list[str]) -> None:
+    options = parse_options(flags)
+    if options.get("pdf-only") is None:
+        flags = [*flags, "--pdf-only", "true"]
+    references_fetch_url_text(flags)
+
+
+def references_recount_citation_counts(flags: list[str]) -> None:
+    options = parse_options(flags)
+    _require_reference_process_runtime("references process-recount-citation-counts")
+    steering_config = load_steering_config(options.get("config")) or require_steering_config()
+    corpus_key = normalize_string(options.get("corpus-key"))
+    corpus_config = require_corpus_config(steering_config, corpus_key, "--corpus-key") if corpus_key else None
+    corpus_id = knowledge_corpus_id(corpus_config) if corpus_config else None
+    reference_ids = set(parse_repeated_option(flags, "reference"))
+    if options.get("reference"):
+        reference_ids.add(str(options["reference"]))
+    external_item_ids = set(parse_repeated_option(flags, "external-item-id"))
+    if options.get("external-item-id"):
+        external_item_ids.add(str(options["external-item-id"]))
+    curation_status = _normalize_reference_status_filter(options.get("status"))
+    apply = resolve_mutation_apply(options, "references process-recount-citation-counts")
+    print_limit = 25 if options.get("limit") is None else normalize_non_negative_integer(options.get("limit"), "--limit")
+    print_limit = print_limit if print_limit is not None else 25
+
+    client, _ = create_authoring_client()
+    references = client.list_records("Reference")
+    semantic_relations = client.list_records("SemanticRelation")
+    recount = build_reference_citation_count_records(
+        references=references,
+        semantic_relations=semantic_relations,
+        corpus_id=corpus_id,
+        reference_ids=reference_ids or None,
+        external_item_ids=external_item_ids or None,
+        curation_status=curation_status,
+    )
+    changes = build_record_changes_targeted_by_id(client, recount["records"])
+    changed = [change for change in changes if change.get("action") != "noop"]
+
+    print(f"references\tprocess-recount-citation-counts\tcorpus\t{corpus_id or 'all'}")
+    print(f"references\tprocess-recount-citation-counts\tstatus\t{curation_status}")
+    if reference_ids:
+        print(f"references\tprocess-recount-citation-counts\treference-filter\t{len(reference_ids)}")
+    if external_item_ids:
+        print(f"references\tprocess-recount-citation-counts\texternal-item-filter\t{len(external_item_ids)}")
+    print(f"references\tprocess-recount-citation-counts\treferences\t{recount['referenceCount']}")
+    print(f"references\tprocess-recount-citation-counts\tchanges\t{len(changed)}")
+    for item in recount["items"][:print_limit]:
+        reference = item["reference"]
+        print(
+            "\t".join(
+                [
+                    "reference-citation-count",
+                    reference.get("id") or "-",
+                    reference.get("externalItemId") or "-",
+                    str(item.get("inboundCitationCount") or 0),
+                    str(item.get("outboundCitationCount") or 0),
+                ]
+            )
+        )
+    if len(recount["items"]) > print_limit:
+        print(
+            f"references\tprocess-recount-citation-counts\tomitted\t{len(recount['items']) - print_limit}\t"
+            f"pass --limit {len(recount['items'])} to print every row"
+        )
+    if not apply:
+        print(
+            "references\tprocess-recount-citation-counts\tapply\tskipped\t"
+            "use --dry-run to preview without writes"
+        )
+        return
+    apply_record_changes(client, changed)
 
 
 def references_filter_extracted_text(flags: list[str]) -> None:
     options = parse_options(flags)
+    _require_reference_process_runtime("references process-filter-text")
     steering_config = load_steering_config(options.get("config")) or require_steering_config()
     corpus_key = normalize_string(options.get("corpus-key"))
     corpus_config = require_corpus_config(steering_config, corpus_key, "--corpus-key") if corpus_key else None
@@ -677,7 +805,7 @@ def references_filter_extracted_text(flags: list[str]) -> None:
     curation_status = _normalize_reference_status_filter(options.get("status"))
     max_count = normalize_positive_integer(options.get("max-count"), "--max-count")
     force = parse_boolean_option(options.get("force"), True, "--force")
-    apply = resolve_mutation_apply(options, "references filter-extracted-text")
+    apply = resolve_mutation_apply(options, "references process-filter-text")
     bucket = normalize_string(options.get("bucket"))
     model = normalize_string(options.get("model")) or "gpt-5.4-nano"
     metadata_from_text = parse_boolean_option(options.get("metadata-from-text"), True, "--metadata-from-text")
@@ -701,23 +829,23 @@ def references_filter_extracted_text(flags: list[str]) -> None:
         bucket=bucket,
     )
 
-    print(f"references\tfilter-extracted-text\tcorpus\t{corpus_id or 'all'}")
-    print(f"references\tfilter-extracted-text\tstatus\t{curation_status}")
+    print(f"references\tprocess-filter-text\tcorpus\t{corpus_id or 'all'}")
+    print(f"references\tprocess-filter-text\tstatus\t{curation_status}")
     if reference_ids:
-        print(f"references\tfilter-extracted-text\treference-filter\t{len(reference_ids)}")
+        print(f"references\tprocess-filter-text\treference-filter\t{len(reference_ids)}")
     if external_item_ids:
-        print(f"references\tfilter-extracted-text\texternal-item-filter\t{len(external_item_ids)}")
+        print(f"references\tprocess-filter-text\texternal-item-filter\t{len(external_item_ids)}")
     if max_count:
-        print(f"references\tfilter-extracted-text\tmax-count\t{max_count}")
-    print(f"references\tfilter-extracted-text\tmodel\t{model}")
-    print(f"references\tfilter-extracted-text\tattempted\t{result['attemptedCount']}")
-    print(f"references\tfilter-extracted-text\tplanned\t{result['plannedCount']}")
-    print(f"references\tfilter-extracted-text\tplanned-attachments\t{result['plannedAttachmentCount']}")
-    print(f"references\tfilter-extracted-text\tfiltered\t{result['filteredCount']}")
-    print(f"references\tfilter-extracted-text\tfallback-raw\t{result['fallbackRawCount']}")
-    print(f"references\tfilter-extracted-text\tskipped-missing-source\t{result['skippedMissingSourceCount']}")
-    print(f"references\tfilter-extracted-text\tchanges\t{result['changeCount']}")
-    print(f"references\tfilter-extracted-text\tfailures\t{len(result['failures'])}")
+        print(f"references\tprocess-filter-text\tmax-count\t{max_count}")
+    print(f"references\tprocess-filter-text\tmodel\t{model}")
+    print(f"references\tprocess-filter-text\tattempted\t{result['attemptedCount']}")
+    print(f"references\tprocess-filter-text\tplanned\t{result['plannedCount']}")
+    print(f"references\tprocess-filter-text\tplanned-attachments\t{result['plannedAttachmentCount']}")
+    print(f"references\tprocess-filter-text\tfiltered\t{result['filteredCount']}")
+    print(f"references\tprocess-filter-text\tfallback-raw\t{result['fallbackRawCount']}")
+    print(f"references\tprocess-filter-text\tskipped-missing-source\t{result['skippedMissingSourceCount']}")
+    print(f"references\tprocess-filter-text\tchanges\t{result['changeCount']}")
+    print(f"references\tprocess-filter-text\tfailures\t{len(result['failures'])}")
 
     print_limit = 25 if options.get("limit") is None else normalize_non_negative_integer(options.get("limit"), "--limit")
     print_limit = print_limit if print_limit is not None else 25
@@ -739,7 +867,7 @@ def references_filter_extracted_text(flags: list[str]) -> None:
         )
     if len(result.get("items") or []) > print_limit:
         print(
-            f"references\tfilter-extracted-text\tomitted\t{len(result['items']) - print_limit}\t"
+            f"references\tprocess-filter-text\tomitted\t{len(result['items']) - print_limit}\t"
             f"pass --limit {len(result['items'])} to print every row"
         )
     for failure in result["failures"][:print_limit]:
@@ -754,11 +882,11 @@ def references_filter_extracted_text(flags: list[str]) -> None:
         )
     if len(result["failures"]) > print_limit:
         print(
-            f"references\tfilter-extracted-text\tomitted-failures\t{len(result['failures']) - print_limit}\t"
+            f"references\tprocess-filter-text\tomitted-failures\t{len(result['failures']) - print_limit}\t"
             f"pass --limit {len(result['failures'])} to print every failure"
         )
     if not apply:
-        print("references\tfilter-extracted-text\tapply\tskipped\tuse --dry-run to preview without writes")
+        print("references\tprocess-filter-text\tapply\tskipped\tuse --dry-run to preview without writes")
         return
 
     actor_label = options.get("actor") or "Papyrus content CLI"
@@ -766,16 +894,16 @@ def references_filter_extracted_text(flags: list[str]) -> None:
         client,
         result["changes"],
         actor_label=actor_label,
-        reason=f"references filter-extracted-text {corpus_id or 'all'}",
+        reason=f"references process-filter-text {corpus_id or 'all'}",
     )
 
     if not metadata_from_text:
-        print("references\tgenerate-metadata-from-text\tdisabled")
+        print("references\tprocess-generate-metadata\tdisabled")
         return
 
     processed_reference_ids = set(result.get("processedReferenceIds") or [])
     if not processed_reference_ids:
-        print("references\tgenerate-metadata-from-text\tskipped\tno references processed by filter step")
+        print("references\tprocess-generate-metadata\tskipped\tno references processed by filter step")
         return
     refreshed_attachments = client.list_records("ReferenceAttachment")
     generation = run_reference_metadata_generation_from_extracted_text(
@@ -788,15 +916,16 @@ def references_filter_extracted_text(flags: list[str]) -> None:
         apply=True,
         bucket=bucket,
     )
-    print(f"references\tgenerate-metadata-from-text\tmodel\t{metadata_model}")
-    print(f"references\tgenerate-metadata-from-text\tattempted\t{generation['attemptedCount']}")
-    print(f"references\tgenerate-metadata-from-text\tgenerated\t{generation['generatedCount']}")
-    print(f"references\tgenerate-metadata-from-text\tskipped-missing-text\t{generation['skippedMissingTextCount']}")
-    print(f"references\tgenerate-metadata-from-text\tgeneration-failures\t{generation['generationFailureCount']}")
+    print(f"references\tprocess-generate-metadata\tmodel\t{metadata_model}")
+    print(f"references\tprocess-generate-metadata\tattempted\t{generation['attemptedCount']}")
+    print(f"references\tprocess-generate-metadata\tgenerated\t{generation['generatedCount']}")
+    print(f"references\tprocess-generate-metadata\tskipped-missing-text\t{generation['skippedMissingTextCount']}")
+    print(f"references\tprocess-generate-metadata\tgeneration-failures\t{generation['generationFailureCount']}")
 
 
 def references_generate_metadata_from_text(flags: list[str]) -> None:
     options = parse_options(flags)
+    _require_reference_process_runtime("references process-generate-metadata")
     steering_config = load_steering_config(options.get("config")) or require_steering_config()
     corpus_key = normalize_string(options.get("corpus-key"))
     corpus_config = require_corpus_config(steering_config, corpus_key, "--corpus-key") if corpus_key else None
@@ -809,7 +938,7 @@ def references_generate_metadata_from_text(flags: list[str]) -> None:
         external_item_ids.add(str(options["external-item-id"]))
     curation_status = _normalize_reference_status_filter(options.get("status"))
     max_count = normalize_positive_integer(options.get("max-count"), "--max-count")
-    apply = resolve_mutation_apply(options, "references generate-metadata-from-text")
+    apply = resolve_mutation_apply(options, "references process-generate-metadata")
     model = normalize_string(options.get("model")) or "gpt-5.4-nano"
     bucket = normalize_string(options.get("bucket"))
 
@@ -829,18 +958,18 @@ def references_generate_metadata_from_text(flags: list[str]) -> None:
         bucket=bucket,
     )
 
-    print(f"references\tgenerate-metadata-from-text\tcorpus\t{corpus_id or 'all'}")
-    print(f"references\tgenerate-metadata-from-text\tstatus\t{curation_status}")
+    print(f"references\tprocess-generate-metadata\tcorpus\t{corpus_id or 'all'}")
+    print(f"references\tprocess-generate-metadata\tstatus\t{curation_status}")
     if reference_ids:
-        print(f"references\tgenerate-metadata-from-text\treference-filter\t{len(reference_ids)}")
+        print(f"references\tprocess-generate-metadata\treference-filter\t{len(reference_ids)}")
     if external_item_ids:
-        print(f"references\tgenerate-metadata-from-text\texternal-item-filter\t{len(external_item_ids)}")
+        print(f"references\tprocess-generate-metadata\texternal-item-filter\t{len(external_item_ids)}")
     if max_count:
-        print(f"references\tgenerate-metadata-from-text\tmax-count\t{max_count}")
-    print(f"references\tgenerate-metadata-from-text\tattempted\t{result['attemptedCount']}")
-    print(f"references\tgenerate-metadata-from-text\tgenerated\t{result['generatedCount']}")
-    print(f"references\tgenerate-metadata-from-text\tskipped-missing-text\t{result['skippedMissingTextCount']}")
-    print(f"references\tgenerate-metadata-from-text\tgeneration-failures\t{result['generationFailureCount']}")
+        print(f"references\tprocess-generate-metadata\tmax-count\t{max_count}")
+    print(f"references\tprocess-generate-metadata\tattempted\t{result['attemptedCount']}")
+    print(f"references\tprocess-generate-metadata\tgenerated\t{result['generatedCount']}")
+    print(f"references\tprocess-generate-metadata\tskipped-missing-text\t{result['skippedMissingTextCount']}")
+    print(f"references\tprocess-generate-metadata\tgeneration-failures\t{result['generationFailureCount']}")
 
     print_limit = 25 if options.get("limit") is None else normalize_non_negative_integer(options.get("limit"), "--limit")
     print_limit = print_limit if print_limit is not None else 25
@@ -859,12 +988,12 @@ def references_generate_metadata_from_text(flags: list[str]) -> None:
         )
     if len(result["items"]) > print_limit:
         print(
-            f"references\tgenerate-metadata-from-text\tomitted\t{len(result['items']) - print_limit}\t"
+            f"references\tprocess-generate-metadata\tomitted\t{len(result['items']) - print_limit}\t"
             f"pass --limit {len(result['items'])} to print every row"
         )
     if not apply:
         print(
-            "references\tgenerate-metadata-from-text\tapply\tskipped\t"
+            "references\tprocess-generate-metadata\tapply\tskipped\t"
             "use --dry-run to preview without writes"
         )
 
@@ -1050,6 +1179,158 @@ def references_export_scope_training(flags: list[str]) -> None:
         f"references\texport-scope-training\t{corpus_id}\t{options['output']}\t"
         f"{payload['counts']['positive']} positive\t{payload['counts']['negative']} negative"
     )
+
+
+def _resolve_grobid_url(options: dict[str, Any]) -> str:
+    return (
+        normalize_string(options.get("grobid-url"))
+        or str(os.environ.get("BIBLICUS_GROBID_URL") or "").strip()
+        or DEFAULT_GROBID_URL
+    )
+
+
+def _require_reference_process_runtime(command_name: str) -> None:
+    runtime_role = str(os.environ.get("PAPYRUS_RUNTIME_ROLE") or "").strip().lower()
+    if runtime_role and runtime_role not in {"cli", "worker"}:
+        raise RuntimeError(
+            f"{command_name} requires utility worker runtime with reachable GROBID service/container. "
+            f"Current PAPYRUS_RUNTIME_ROLE={runtime_role!r} is not supported."
+        )
+    if os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):
+        raise RuntimeError(
+            f"{command_name} requires utility worker runtime with reachable GROBID service/container. "
+            "API/Lambda runtime is not supported for process commands."
+        )
+
+
+def _ensure_cli_grobid_runtime(grobid_url: str) -> None:
+    parsed = urlparse(grobid_url)
+    host = (parsed.hostname or "").strip().lower()
+    port = int(parsed.port or (443 if parsed.scheme == "https" else 80))
+    if _grobid_is_alive(grobid_url):
+        return
+    if host not in {"127.0.0.1", "localhost"}:
+        raise RuntimeError(
+            f"GROBID is not reachable at {grobid_url}. For remote endpoints, start the service and retry."
+        )
+    _start_or_reuse_local_grobid_container(port=port)
+    _await_grobid_ready(grobid_url)
+
+
+def _grobid_is_alive(grobid_url: str) -> bool:
+    probe_url = f"{grobid_url.rstrip('/')}/api/isalive"
+    request = Request(probe_url, method="GET")
+    try:
+        with urlopen(request, timeout=2.0) as response:
+            status = int(getattr(response, "status", response.getcode()))
+            if status < 200 or status >= 300:
+                return False
+            payload = response.read().decode("utf-8", errors="replace").strip().lower()
+            return "true" in payload or payload == ""
+    except Exception:
+        return False
+
+
+def _port_is_open(host: str, port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(1.0)
+        return sock.connect_ex((host, port)) == 0
+
+
+def _start_or_reuse_local_grobid_container(*, port: int) -> None:
+    if not shutil.which("docker"):
+        raise RuntimeError(
+            "Docker is required to auto-start GROBID for CLI PDF extraction. "
+            "Install Docker or set BIBLICUS_GROBID_URL to a reachable service."
+        )
+
+    container_name = str(os.environ.get("PAPYRUS_GROBID_CONTAINER_NAME") or DEFAULT_GROBID_CONTAINER_NAME).strip()
+    image = str(os.environ.get("PAPYRUS_GROBID_DOCKER_IMAGE") or DEFAULT_GROBID_DOCKER_IMAGE).strip()
+    running = _docker_lines(
+        [
+            "docker",
+            "ps",
+            "--filter",
+            f"name=^/{container_name}$",
+            "--filter",
+            "status=running",
+            "--format",
+            "{{.ID}}",
+        ]
+    )
+    if running:
+        return
+
+    existing = _docker_lines(
+        [
+            "docker",
+            "ps",
+            "-a",
+            "--filter",
+            f"name=^/{container_name}$",
+            "--format",
+            "{{.ID}}",
+        ]
+    )
+    if existing:
+        completed = subprocess.run(
+            ["docker", "start", container_name],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if completed.returncode != 0:
+            stderr = (completed.stderr or completed.stdout or "").strip()
+            raise RuntimeError(f"Failed to start existing GROBID container {container_name}: {stderr}")
+        return
+
+    completed = subprocess.run(
+        [
+            "docker",
+            "run",
+            "-d",
+            "--name",
+            container_name,
+            "-p",
+            f"{port}:8070",
+            image,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        stderr = (completed.stderr or completed.stdout or "").strip()
+        raise RuntimeError(
+            f"Failed to launch GROBID container {container_name} using {image}: {stderr}"
+        )
+
+
+def _await_grobid_ready(grobid_url: str) -> None:
+    deadline = time.time() + 120.0
+    parsed = urlparse(grobid_url)
+    host = (parsed.hostname or "127.0.0.1").strip()
+    port = int(parsed.port or (443 if parsed.scheme == "https" else 80))
+    while time.time() < deadline:
+        if _port_is_open(host, port) and _grobid_is_alive(grobid_url):
+            return
+        time.sleep(1.5)
+    raise RuntimeError(
+        f"GROBID did not become ready at {grobid_url} after container start. "
+        "Check Docker container logs and retry."
+    )
+
+
+def _docker_lines(command: list[str]) -> list[str]:
+    completed = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return []
+    return [line.strip() for line in (completed.stdout or "").splitlines() if line.strip()]
 
 
 def extract_last_json_object(text: str) -> dict[str, Any] | None:

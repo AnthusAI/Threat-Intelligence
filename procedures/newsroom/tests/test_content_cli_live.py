@@ -38,7 +38,7 @@ GRAPHQL_PYTHON_COMMANDS: list[tuple[list[str], str]] = [
     (
         [
             "references",
-            "source-status",
+            "process-status",
             "--config",
             str(STEERING_CONFIG),
             "--corpus-key",

@@ -54,9 +54,9 @@ def _map_research(command: str, flags: list[str]) -> None:
         "create": "create-research",
         "run": "run-research",
         "apply": "apply-research-packet",
-        "intake": "research-intake-now",
+        "process": "process-research-now",
         "packets": "research-packets",
-        "intake-proposals": "intake-proposals",
+        "process-proposals": "process-proposals",
     }.get(command)
     if not mapped:
         raise ValueError(f"Unsupported papyrus research command: {command}")

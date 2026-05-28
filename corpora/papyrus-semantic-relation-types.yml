@@ -143,6 +143,28 @@ relationTypes:
     isSymmetric: false
     isTransitive: false
     contextPackTags: [reference_graph, research]
+  - key: authored_by
+    label: authored by
+    inverseLabel: author of
+    description: Links a reference to an author semantic concept extracted from structured source metadata.
+    domain: knowledge
+    allowedSubjectKinds: [reference]
+    allowedObjectKinds: [semanticNode]
+    isDirectional: true
+    isSymmetric: false
+    isTransitive: false
+    contextPackTags: [reference_graph, research, ontology_enrichment]
+  - key: cites
+    label: cites
+    inverseLabel: cited by
+    description: Links one reference to another reference it cites in a bibliography or citation list.
+    domain: evidence
+    allowedSubjectKinds: [reference]
+    allowedObjectKinds: [reference]
+    isDirectional: true
+    isSymmetric: false
+    isTransitive: false
+    contextPackTags: [reference_graph, research, ontology_enrichment]
   - key: has_editorial_form
     label: has editorial form
     inverseLabel: items by editorial form

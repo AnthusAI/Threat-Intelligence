@@ -124,7 +124,7 @@ poetry run papyrus ops corpora status \
 
 Use `corpora sync-from-cloud` to initialize a new Mac or EC2 worker from S3, and
 `corpora sync-to-cloud` after adding new local corpus material. S3 sync does not
-register references in GraphQL; `references register-catalog` is still required
+register references in GraphQL; `references create-from-catalog` is still required
 for Newsroom visibility and curation.
 
 Papyrus imports steering state, artifact refs, strict private `Reference`

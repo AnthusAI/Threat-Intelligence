@@ -267,6 +267,8 @@ export type ReferenceRecord = {
   sourcePublishedAt?: string | null;
   sourceUpdatedAt?: string | null;
   retrievedAt?: string | null;
+  inboundCitationCount?: number | null;
+  outboundCitationCount?: number | null;
   importRunId?: string | null;
   importedAt?: string | null;
   createdAt?: string | null;
