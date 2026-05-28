@@ -312,6 +312,36 @@ API_METHODS: dict[tuple[str, str], Callable[[dict[str, Any]], Any]] = {
         run_id=args.get("run_id") or args.get("runId") or "",
         manifest_path=args.get("manifest_path") or args.get("manifestPath") or "",
     ),
+    ("reference", "fetch_url_text"): lambda args: newsroom.papyrus_reference_fetch_url_text(
+        reference_id=args.get("reference_id") or args.get("referenceId") or args.get("id") or "",
+        external_item_id=args.get("external_item_id") or args.get("externalItemId") or "",
+        corpus_key=args.get("corpus_key") or args.get("corpusKey") or "AI-ML-research",
+        apply=not (args.get("apply") is False),
+        force=bool(args.get("force") or False),
+        config_path=args.get("config_path") or args.get("configPath") or "",
+        max_count=args.get("max_count") or args.get("maxCount") or 0,
+    ),
+    ("reference", "filter_extracted_text"): lambda args: newsroom.papyrus_reference_filter_extracted_text(
+        reference_id=args.get("reference_id") or args.get("referenceId") or args.get("id") or "",
+        external_item_id=args.get("external_item_id") or args.get("externalItemId") or "",
+        corpus_key=args.get("corpus_key") or args.get("corpusKey") or "AI-ML-research",
+        apply=not (args.get("apply") is False),
+        force=not (args.get("force") is False),
+        config_path=args.get("config_path") or args.get("configPath") or "",
+        max_count=args.get("max_count") or args.get("maxCount") or 0,
+        model=args.get("model") or "gpt-5.4-nano",
+        metadata_from_text=not (args.get("metadata_from_text") is False or args.get("metadataFromText") is False),
+        metadata_model=args.get("metadata_model") or args.get("metadataModel") or "gpt-5.4-nano",
+    ),
+    ("reference", "generate_metadata_from_text"): lambda args: newsroom.papyrus_reference_generate_metadata_from_text(
+        reference_id=args.get("reference_id") or args.get("referenceId") or args.get("id") or "",
+        external_item_id=args.get("external_item_id") or args.get("externalItemId") or "",
+        corpus_key=args.get("corpus_key") or args.get("corpusKey") or "AI-ML-research",
+        apply=not (args.get("apply") is False),
+        config_path=args.get("config_path") or args.get("configPath") or "",
+        max_count=args.get("max_count") or args.get("maxCount") or 0,
+        model=args.get("model") or "gpt-5.4-nano",
+    ),
     ("reference", "quality_get"): lambda args: reference_curation_signals.reference_quality_get(
         reference_id=args.get("reference") or args.get("reference_id") or args.get("referenceId") or args.get("id"),
     ),
@@ -658,6 +688,9 @@ HELPER_BINDINGS: tuple[tuple[str, str, str], ...] = (
     ("reference_doi_backfill_plan", "reference", "doi_backfill_plan"),
     ("reference_doi_backfill_run", "reference", "doi_backfill_run"),
     ("reference_doi_backfill_manifest", "reference", "doi_backfill_manifest"),
+    ("reference_fetch_url_text", "reference", "fetch_url_text"),
+    ("reference_filter_extracted_text", "reference", "filter_extracted_text"),
+    ("reference_generate_metadata_from_text", "reference", "generate_metadata_from_text"),
     ("reference_web_search", "reference", "web_search"),
     ("knowledge_query", "knowledge", "query"),
     ("resolve_papyrus_uri", "papyrus", "resolve_uri"),
@@ -866,6 +899,7 @@ def _research_harness(
     corpus_key: str,
     max_evidence_items: int,
     research_mode: str = "",
+    knowledge_query_scope: dict[str, Any] | None = None,
     disable_tactus_web: bool = False,
 ) -> str:
     assignment_json = assignment_item_json or "{}"
@@ -877,13 +911,11 @@ def _research_harness(
     )
     return f"""
 	local json = require("tactus.io.json")
-	local __web = nil
-
 	{assignment_loader}
 local corpus_key = {_lua_string(corpus_key or "")}
 local max_evidence_items = {evidence_limit}
 local requested_research_mode = {_lua_string(research_mode or "")}
-local disable_tactus_web = {"true" if disable_tactus_web else "false"}
+local requested_knowledge_query_scope_json = {_lua_string(json.dumps(knowledge_query_scope or {}, sort_keys=True))}
 
 if assignment_is_live and (assignment.queueKey == nil or assignment.queueKey == "") then
     error("live assignment research packets require assignment.queueKey")
@@ -892,10 +924,26 @@ end
 local function trim_results(results)
     local trimmed = {{}}
     if not results then return trimmed end
+    local function safe_index(list_like, idx)
+        local ok, value = pcall(function()
+            return list_like[idx]
+        end)
+        if not ok and idx > 0 then
+            ok, value = pcall(function()
+                return list_like[idx - 1]
+            end)
+        end
+        if ok then
+            return value
+        end
+        return nil
+    end
     local index = 1
-    while results[index] and index <= max_evidence_items do
-        trimmed[index] = results[index]
+    local value = safe_index(results, index)
+    while value and index <= max_evidence_items do
+        trimmed[index] = value
         index = index + 1
+        value = safe_index(results, index)
     end
     return trimmed
 end
@@ -910,7 +958,18 @@ local function normalize_research_mode(value)
 end
 
 local function assignment_metadata()
-    local metadata = assignment.metadata or {{}}
+    local metadata = nil
+    local ok, value = pcall(function()
+        return assignment.metadata
+    end)
+    if ok then
+        metadata = value
+    else
+        metadata = {{}}
+    end
+    if metadata == nil then
+        metadata = {{}}
+    end
     if type(metadata) == "string" then
         local ok, decoded = pcall(json.decode, metadata)
         if ok and type(decoded) == "table" then
@@ -930,78 +989,451 @@ local research_mode = normalize_research_mode(
     requested_research_mode ~= "" and requested_research_mode or (__metadata.researchMode or __metadata.research_mode)
 )
 local __web_searches = {{}}
-
-	local function web_search(query)
-    local result = nil
-	    if not disable_tactus_web then
-	    if __web == nil then
-        local ok, loaded = pcall(require, "tactus.web")
+local __default_discovery_retry_budget = tonumber(
+    __metadata.webDiscoveryRetryBudget
+    or __metadata.discoveryRetryBudget
+    or __metadata.web_discovery_retry_budget
+    or __metadata.discovery_retry_budget
+    or 4
+) or 4
+if __default_discovery_retry_budget < 1 then
+    __default_discovery_retry_budget = 1
+end
+if __default_discovery_retry_budget > 8 then
+    __default_discovery_retry_budget = 8
+end
+local function normalize_string_list(value)
+    local normalized = {{}}
+    local seen = {{}}
+    if type(value) ~= "table" and type(value) ~= "userdata" then
+        return normalized
+    end
+    local index = 1
+    local function safe_index(list_like, idx)
+        local ok, entry = pcall(function()
+            return list_like[idx]
+        end)
+        if not ok and idx > 0 then
+            ok, entry = pcall(function()
+                return list_like[idx - 1]
+            end)
+        end
         if ok then
-            __web = loaded
-        else
-            __web = false
+            return entry
         end
-	    end
-    if __web and __web.search then
-        local ok, fetched = pcall(__web.search, {{
-            provider = "openai",
-            query = query,
-            model = "gpt-5.4-mini",
-            return_token_budget = "default",
-            max_results = max_evidence_items,
-        }})
-        if ok and type(fetched) == "table" then
-            result = fetched
+        return nil
+    end
+    local entry = safe_index(value, index)
+    while entry do
+        local text = tostring(entry or "")
+        text = string.gsub(text, "^%s+", "")
+        text = string.gsub(text, "%s+$", "")
+        if text ~= "" and not seen[text] then
+            normalized[#normalized + 1] = text
+            seen[text] = true
         end
+        index = index + 1
+        entry = safe_index(value, index)
     end
-	    end
-    if result == nil then
-        result = papyrus.reference.web_search{{
-            query = query,
-            max_results = max_evidence_items,
-            model = "gpt-5.4-mini",
-            return_token_budget = "default",
-        }}
-    end
-    result = result or {{}}
-    result.query = result.query or query
-    result.results = trim_results(result.results)
-    __web_searches[#__web_searches + 1] = query
-    return result
+    return normalized
 end
 
-	local function knowledge_search(query, options)
-	    options = options or {{}}
-	    return knowledge_query{{
-	        query = query,
-        profile = options.profile or "researcher",
-        format = options.format or "both",
-        max_tokens = options.max_tokens or options.maxTokens or 1200,
-        top_k = options.top_k or options.topK or max_evidence_items,
-        depth = options.depth or 1,
-	        anchors = options.anchors or {{}},
-	    }}
-	end
+local function parse_requested_knowledge_scope()
+    local scope = {{}}
+    local ok, decoded = pcall(json.decode, requested_knowledge_query_scope_json)
+    if ok and (type(decoded) == "table" or type(decoded) == "userdata") then
+        scope = decoded
+    end
+    local include_default_kinds = {{
+        "reference",
+        "item",
+        "category",
+        "semanticNode",
+        "newsroomSection",
+        "assignment",
+        "message",
+    }}
+    local include_default_message_kinds = {{ "insight" }}
+    local include_default_assignment_types = {{ "research.*", "reporting.*" }}
+    local include_kinds = normalize_string_list(scope.includeObjectKinds or scope.include_object_kinds or include_default_kinds)
+    if include_kinds[1] == nil then include_kinds = include_default_kinds end
+    local include_message_kinds = normalize_string_list(
+        scope.includeMessageKinds or scope.include_message_kinds or include_default_message_kinds
+    )
+    if include_message_kinds[1] == nil then include_message_kinds = include_default_message_kinds end
+    local include_assignment_types = normalize_string_list(
+        scope.includeAssignmentTypeKeys or scope.include_assignment_type_keys or include_default_assignment_types
+    )
+    if include_assignment_types[1] == nil then include_assignment_types = include_default_assignment_types end
+    return {{
+        includeObjectKinds = include_kinds,
+        excludeObjectKinds = normalize_string_list(scope.excludeObjectKinds or scope.exclude_object_kinds or {{}}),
+        includeMessageKinds = include_message_kinds,
+        excludeMessageKinds = normalize_string_list(scope.excludeMessageKinds or scope.exclude_message_kinds or {{}}),
+        includeAssignmentTypeKeys = include_assignment_types,
+        excludeAssignmentTypeKeys = normalize_string_list(
+            scope.excludeAssignmentTypeKeys or scope.exclude_assignment_type_keys or {{}}
+        ),
+    }}
+end
+
+local __knowledge_query_scope_defaults = parse_requested_knowledge_scope()
+
+local function result_count(results)
+    local count = 0
+    if not results then return count end
+    local function safe_index(list_like, idx)
+        local ok, value = pcall(function()
+            return list_like[idx]
+        end)
+        if not ok and idx > 0 then
+            ok, value = pcall(function()
+                return list_like[idx - 1]
+            end)
+        end
+        if ok then
+            return value
+        end
+        return nil
+    end
+    while safe_index(results, count + 1) do
+        count = count + 1
+    end
+    return count
+end
+
+local function safe_lookup(map_like, key)
+    local ok, value = pcall(function()
+        return map_like[key]
+    end)
+    if ok then
+        return value, true
+    end
+    return nil, false
+end
+
+local function normalize_search_result(search, query)
+    local shape_ok = true
+    local normalized = {{}}
+    local search_type = type(search)
+    if search_type ~= "table" and search_type ~= "userdata" then
+        search = {{}}
+        shape_ok = false
+    end
+
+    local search_query = nil
+    if search_type == "userdata" then
+        local ok = false
+        search_query, ok = safe_lookup(search, "query")
+        if not ok then
+            shape_ok = false
+        end
+    else
+        search_query = search.query
+    end
+
+    local normalized_query = ""
+    if type(search_query) == "string" and search_query ~= "" then
+        normalized_query = search_query
+    else
+        normalized_query = tostring(query or "")
+        if search_query ~= nil then
+            shape_ok = false
+        end
+    end
+
+    local raw_results = nil
+    if search_type == "userdata" then
+        local ok = false
+        raw_results, ok = safe_lookup(search, "results")
+        if not ok then
+            shape_ok = false
+        end
+    else
+        raw_results = search.results
+    end
+    local raw_results_type = type(raw_results)
+    if raw_results_type ~= "table" and raw_results_type ~= "userdata" then
+        raw_results = {{}}
+        shape_ok = false
+    end
+    local function safe_index(list_like, idx)
+        local ok, value = pcall(function()
+            return list_like[idx]
+        end)
+        if not ok and idx > 0 then
+            ok, value = pcall(function()
+                return list_like[idx - 1]
+            end)
+        end
+        if ok then
+            return value
+        end
+        return nil
+    end
+    local normalized_results = {{}}
+    local index = 1
+    local source = safe_index(raw_results, index)
+    while source and index <= max_evidence_items do
+        local source_type = type(source)
+        if source_type ~= "table" and source_type ~= "userdata" then
+            source = {{}}
+            shape_ok = false
+        end
+        normalized_results[index] = source
+        index = index + 1
+        source = safe_index(raw_results, index)
+    end
+
+    local metadata = nil
+    if search_type == "userdata" then
+        local ok = false
+        metadata, ok = safe_lookup(search, "metadata")
+        if not ok then
+            shape_ok = false
+        end
+    else
+        metadata = search.metadata
+    end
+    local metadata_type = type(metadata)
+    if metadata_type ~= "table" and metadata_type ~= "userdata" then
+        metadata = {{}}
+        shape_ok = false
+    end
+    local metadata_answer = nil
+    if type(metadata) == "userdata" then
+        local ok = false
+        metadata_answer, ok = safe_lookup(metadata, "answer")
+        if not ok then
+            metadata = {{}}
+            shape_ok = false
+            metadata_answer = nil
+        end
+    else
+        metadata_answer = metadata.answer
+    end
+    local normalized_metadata = {{}}
+    if type(metadata_answer) ~= "string" then
+        if metadata_answer ~= nil then
+            shape_ok = false
+        end
+        normalized_metadata.answer = ""
+    else
+        normalized_metadata.answer = metadata_answer
+    end
+    if type(metadata) == "userdata" then
+        local value = select(1, safe_lookup(metadata, "blocked_reason"))
+        if type(value) == "string" and value ~= "" then
+            normalized_metadata.blocked_reason = value
+        end
+        local path = select(1, safe_lookup(metadata, "web_search_path"))
+        if type(path) == "string" and path ~= "" then
+            normalized_metadata.web_search_path = path
+        end
+        local count = select(1, safe_lookup(metadata, "search_result_count"))
+        if type(count) == "number" then
+            normalized_metadata.search_result_count = count
+        end
+        local attempts = select(1, safe_lookup(metadata, "discovery_attempts_total"))
+        if type(attempts) == "number" then
+            normalized_metadata.discovery_attempts_total = attempts
+        end
+        local queries_tried = select(1, safe_lookup(metadata, "discovery_queries_tried"))
+        if type(queries_tried) == "table" or type(queries_tried) == "userdata" then
+            normalized_metadata.discovery_queries_tried = normalize_string_list(queries_tried)
+        end
+        local counts = select(1, safe_lookup(metadata, "discovery_result_counts"))
+        if type(counts) == "table" or type(counts) == "userdata" then
+            normalized_metadata.discovery_result_counts = counts
+        end
+        local terminal_state = select(1, safe_lookup(metadata, "discovery_terminal_state"))
+        if type(terminal_state) == "string" and terminal_state ~= "" then
+            normalized_metadata.discovery_terminal_state = terminal_state
+        end
+    elseif type(metadata) == "table" then
+        if type(metadata.blocked_reason) == "string" and metadata.blocked_reason ~= "" then
+            normalized_metadata.blocked_reason = metadata.blocked_reason
+        end
+        if type(metadata.web_search_path) == "string" and metadata.web_search_path ~= "" then
+            normalized_metadata.web_search_path = metadata.web_search_path
+        end
+        if type(metadata.search_result_count) == "number" then
+            normalized_metadata.search_result_count = metadata.search_result_count
+        end
+        if type(metadata.discovery_attempts_total) == "number" then
+            normalized_metadata.discovery_attempts_total = metadata.discovery_attempts_total
+        end
+        if type(metadata.discovery_queries_tried) == "table" then
+            normalized_metadata.discovery_queries_tried = normalize_string_list(metadata.discovery_queries_tried)
+        end
+        if type(metadata.discovery_result_counts) == "table" then
+            normalized_metadata.discovery_result_counts = metadata.discovery_result_counts
+        end
+        if type(metadata.discovery_terminal_state) == "string" and metadata.discovery_terminal_state ~= "" then
+            normalized_metadata.discovery_terminal_state = metadata.discovery_terminal_state
+        end
+    end
+    normalized_metadata.search_metadata_shape_ok = shape_ok
+
+    normalized.query = normalized_query
+    normalized.results = trim_results(normalized_results)
+    normalized.metadata = normalized_metadata
+    return normalized
+end
+
+    local function build_discovery_query(query, attempt)
+        local base = tostring(query or "")
+        base = string.gsub(base, "^%s+", "")
+        base = string.gsub(base, "%s+$", "")
+        if attempt <= 1 then
+            return base
+        end
+        if attempt == 2 then
+            return base .. " survey review explainer standards specification interoperability"
+        end
+        if attempt == 3 then
+            return '"' .. base .. '" protocol taxonomy comparison'
+        end
+        local domain_queries = {{
+            "site:arxiv.org " .. base .. " survey",
+            "site:openai.com " .. base,
+            "site:anthropic.com " .. base,
+            "site:microsoft.com " .. base,
+            "site:ai.google.dev " .. base,
+        }}
+        local domain_index = ((attempt - 4) % #domain_queries) + 1
+        return domain_queries[domain_index]
+    end
+
+	local function web_search(query, options)
+    options = options or {{}}
+    local retry_budget = tonumber(options.retry_budget or options.retryBudget or __default_discovery_retry_budget) or __default_discovery_retry_budget
+    if retry_budget < 1 then retry_budget = 1 end
+    if retry_budget > 8 then retry_budget = 8 end
+    local attempts = {{}}
+    local queries_tried = {{}}
+    local result_counts = {{}}
+    local shape_ok = true
+    local terminal_state = "exhausted"
+    local selected = nil
+    local blocked_reason = nil
+    local first_error = nil
+
+    local attempt_index = 1
+    while attempt_index <= retry_budget do
+        local attempt_query = build_discovery_query(query, attempt_index)
+        queries_tried[attempt_index] = attempt_query
+        __web_searches[#__web_searches + 1] = attempt_query
+        local ok, fetched = pcall(function()
+            return papyrus.reference.web_search{{
+                query = attempt_query,
+                max_results = max_evidence_items,
+                model = "gpt-5.4-mini",
+                return_token_budget = "default",
+            }}
+        end)
+        local fetched_type = type(fetched)
+        local raw = {{}}
+        if ok and (fetched_type == "table" or fetched_type == "userdata") then
+            raw = fetched
+        else
+            local reason = "papyrus.reference.web_search failed: " .. tostring(fetched or "unknown error")
+            if type(first_error) ~= "string" or first_error == "" then
+                first_error = reason
+            end
+            blocked_reason = reason
+        end
+        local normalized_attempt = normalize_search_result(raw, attempt_query)
+        attempts[attempt_index] = normalized_attempt
+        local count = result_count(normalized_attempt.results)
+        result_counts[attempt_index] = count
+        if normalized_attempt.metadata.search_metadata_shape_ok ~= true then
+            shape_ok = false
+        end
+        if count > 0 then
+            selected = normalized_attempt
+            terminal_state = "succeeded"
+            blocked_reason = nil
+            break
+        end
+        attempt_index = attempt_index + 1
+    end
+
+    if selected == nil then
+        selected = normalize_search_result({{}}, tostring(query or ""))
+        selected.results = {{}}
+        selected.query = tostring(query or "")
+        selected.metadata.answer = ""
+        if type(first_error) == "string" and first_error ~= "" then
+            blocked_reason = first_error
+        else
+            blocked_reason = "web_discovery_exhausted_zero_results"
+        end
+    end
+
+    selected.metadata.web_search_path = "papyrus.reference.web_search"
+    selected.metadata.search_result_count = result_count(selected.results)
+    selected.metadata.search_metadata_shape_ok = shape_ok
+    selected.metadata.discovery_attempts_total = #queries_tried
+    selected.metadata.discovery_queries_tried = queries_tried
+    selected.metadata.discovery_result_counts = result_counts
+    selected.metadata.discovery_terminal_state = terminal_state
+    if type(blocked_reason) == "string" and blocked_reason ~= "" then
+        selected.metadata.blocked_reason = blocked_reason
+    end
+    return selected
+end
+
+		local function knowledge_search(query, options)
+		    options = options or {{}}
+            local scope = {{
+                depth = options.depth or 1,
+                topK = options.top_k or options.topK or max_evidence_items,
+                includeObjectKinds = options.includeObjectKinds or options.include_object_kinds or __knowledge_query_scope_defaults.includeObjectKinds,
+                excludeObjectKinds = options.excludeObjectKinds or options.exclude_object_kinds or __knowledge_query_scope_defaults.excludeObjectKinds,
+                includeMessageKinds = options.includeMessageKinds or options.include_message_kinds or __knowledge_query_scope_defaults.includeMessageKinds,
+                excludeMessageKinds = options.excludeMessageKinds or options.exclude_message_kinds or __knowledge_query_scope_defaults.excludeMessageKinds,
+                includeAssignmentTypeKeys = options.includeAssignmentTypeKeys or options.include_assignment_type_keys or __knowledge_query_scope_defaults.includeAssignmentTypeKeys,
+                excludeAssignmentTypeKeys = options.excludeAssignmentTypeKeys or options.exclude_assignment_type_keys or __knowledge_query_scope_defaults.excludeAssignmentTypeKeys,
+            }}
+		    return knowledge_query{{
+		        query = query,
+	        profile = options.profile or "researcher",
+	        format = options.format or "both",
+	        max_tokens = options.max_tokens or options.maxTokens or 1200,
+	        scope = scope,
+		        anchors = options.anchors or {{}},
+		    }}
+		end
 
 	local function resolve_papyrus_uri(uri)
 	    return papyrus.resolve_uri{{ uri = uri }}
 	end
 
-	local function knowledge_search_uri(uri, options)
-	    options = options or {{}}
-	    local anchors = options.anchors or {{ {{ uri = uri }} }}
-	    return knowledge_query{{
-	        query = options.query or options.semantic_query or options.semanticQuery or "",
-	        profile = options.profile or "researcher",
-	        format = options.format or "both",
-	        max_tokens = options.max_tokens or options.maxTokens or 1000,
-	        top_k = options.top_k or options.topK or max_evidence_items,
-	        depth = options.depth or 1,
-	        anchors = anchors,
-	    }}
-	end
+		local function knowledge_search_uri(uri, options)
+		    options = options or {{}}
+		    local anchors = options.anchors or {{ {{ uri = uri }} }}
+            local scope = {{
+                depth = options.depth or 1,
+                topK = options.top_k or options.topK or max_evidence_items,
+                includeObjectKinds = options.includeObjectKinds or options.include_object_kinds or __knowledge_query_scope_defaults.includeObjectKinds,
+                excludeObjectKinds = options.excludeObjectKinds or options.exclude_object_kinds or __knowledge_query_scope_defaults.excludeObjectKinds,
+                includeMessageKinds = options.includeMessageKinds or options.include_message_kinds or __knowledge_query_scope_defaults.includeMessageKinds,
+                excludeMessageKinds = options.excludeMessageKinds or options.exclude_message_kinds or __knowledge_query_scope_defaults.excludeMessageKinds,
+                includeAssignmentTypeKeys = options.includeAssignmentTypeKeys or options.include_assignment_type_keys or __knowledge_query_scope_defaults.includeAssignmentTypeKeys,
+                excludeAssignmentTypeKeys = options.excludeAssignmentTypeKeys or options.exclude_assignment_type_keys or __knowledge_query_scope_defaults.excludeAssignmentTypeKeys,
+            }}
+		    return knowledge_query{{
+		        query = options.query or options.semantic_query or options.semanticQuery or "",
+		        profile = options.profile or "researcher",
+		        format = options.format or "both",
+		        max_tokens = options.max_tokens or options.maxTokens or 1000,
+		        scope = scope,
+		        anchors = anchors,
+		    }}
+		end
 
-	local function evidence_item_ids_from_knowledge(knowledge)
+local function evidence_item_ids_from_knowledge(knowledge)
 	    local ids = {{}}
 	    local seen = {{}}
 	    local structured = knowledge and knowledge.structured or {{}}
@@ -1011,62 +1443,47 @@ end
 	        structured.expandedObjects or {{}},
 	        structured.anchors or {{}},
 	    }}
+	    local function safe_index(list_like, idx)
+	        local ok, value = pcall(function()
+	            return list_like[idx]
+	        end)
+	        if not ok and idx > 0 then
+	            ok, value = pcall(function()
+	                return list_like[idx - 1]
+	            end)
+	        end
+	        if ok then
+	            return value
+	        end
+	        return nil
+	    end
 	    local out_index = 1
 	    local collection_index = 1
-	    while collections[collection_index] and out_index <= max_evidence_items do
-	        local records = collections[collection_index]
+	    local records = safe_index(collections, collection_index)
+	    while records and out_index <= max_evidence_items do
 	        local index = 1
-	        while records[index] and out_index <= max_evidence_items do
-	            local record = records[index]
+	        local record = safe_index(records, index)
+	        while record and out_index <= max_evidence_items do
 	            if record.kind == "reference" and record.id and record.curationStatus == "accepted" and not seen[record.id] then
 	                ids[out_index] = record.id
 	                seen[record.id] = true
 	                out_index = out_index + 1
 	            end
 	            index = index + 1
+	            record = safe_index(records, index)
 	        end
 	        collection_index = collection_index + 1
+	        records = safe_index(collections, collection_index)
 	    end
 	    return ids
 	end
 
 local function compact_record_plan(plan)
-    local records = {{}}
-    local index = 1
-    while plan.records and plan.records[index] do
-        local record = plan.records[index]
-        local input = record.input or {{}}
-        records[index] = {{
-            modelName = record.modelName,
-            action = record.action,
-            input = {{
-                id = input.id,
-                messageKind = input.messageKind,
-                messageDomain = input.messageDomain,
-                relationTypeKey = input.relationTypeKey,
-                relationDomain = input.relationDomain,
-                subjectKind = input.subjectKind,
-                subjectId = input.subjectId,
-                objectKind = input.objectKind,
-                objectId = input.objectId,
-            }},
-        }}
-        index = index + 1
-    end
     return {{
-        dryRun = plan.dryRun,
-        lifecycle = plan.lifecycle,
-        assignmentId = plan.assignmentId,
-        item = plan.item and {{ id = plan.item.id, type = plan.item.type, status = plan.item.status }},
-        message = plan.message and {{
-            id = plan.message.id,
-            messageKind = plan.message.messageKind,
-            messageDomain = plan.message.messageDomain,
-            status = plan.message.status,
-            summary = plan.message.summary,
-        }},
-        records = records,
-        warnings = plan.warnings or {{}},
+        message_persistence = "outer_cli_layer",
+        attachment_persistence = "outer_cli_layer",
+        semantic_relation_persistence = "outer_cli_layer",
+        note = "Dry-run packet only; no persistence performed by this tool call.",
     }}
 end
 
@@ -1077,6 +1494,27 @@ local function finish_research(research)
     research.researchTrace = research.researchTrace or {{}}
     research.researchTrace.webSearches = research.researchTrace.webSearches or __web_searches
     research.researchTrace.acceptedEvidenceIds = research.researchTrace.acceptedEvidenceIds or research.evidence_item_ids
+    local blocked_reason = research.blocked_reason or research.blockedReason
+    local has_web_search_trace = research.researchTrace.webSearches and research.researchTrace.webSearches[1] ~= nil
+    if has_web_search_trace and type(research.researchTrace.discoveryBoundary) ~= "table" then
+        local discovery_sources = research.source_snapshots or research.sourceSnapshots
+        if type(discovery_sources) ~= "table" then
+            discovery_sources = {{}}
+        end
+        research.researchTrace.discoveryBoundary = {{
+            webSearchPath = "papyrus.reference.web_search",
+            searchResultCount = result_count(discovery_sources),
+            searchMetadataShapeOk = true,
+            discoveryAttemptsTotal = #(__web_searches or {{}}),
+            discoveryQueriesTried = __web_searches or {{}},
+            discoveryResultCounts = {{}},
+            discoveryTerminalState = result_count(discovery_sources) > 0 and "succeeded" or "exhausted",
+        }}
+    end
+    if blocked_reason and type(research.researchTrace.discoveryBoundary) == "table" then
+        research.researchTrace.discoveryBoundary.blockedReason =
+            research.researchTrace.discoveryBoundary.blockedReason or blocked_reason
+    end
     research.internalFindings = research.internalFindings or {{
         summary = research.internal_summary or research.summary or "",
         evidenceItemIds = research.evidence_item_ids,
@@ -1103,7 +1541,7 @@ local function finish_research(research)
         local has_proposed_reference = (research.proposed_references and research.proposed_references[1] ~= nil)
             or (research.proposedReferences and research.proposedReferences[1] ~= nil)
             or (research.sourceDiscovery and research.sourceDiscovery.proposedReferences and research.sourceDiscovery.proposedReferences[1] ~= nil)
-        local blocked_reason = research.blocked_reason or research.blockedReason
+        blocked_reason = blocked_reason
             or (research.sourceDiscovery and (research.sourceDiscovery.blockedReason or research.sourceDiscovery.blocked_reason))
         if not has_web_search and not has_source_snapshot and not has_proposed_reference and not blocked_reason then
             error("research mode " .. research.research_mode .. " requires web discovery or blockedReason")
@@ -1160,9 +1598,23 @@ local function proposed_references_from_search(search)
     if search.metadata and search.metadata.answer then
         answer = search.metadata.answer
     end
+    local function safe_index(list_like, idx)
+        local ok, value = pcall(function()
+            return list_like[idx]
+        end)
+        if not ok and idx > 0 then
+            ok, value = pcall(function()
+                return list_like[idx - 1]
+            end)
+        end
+        if ok then
+            return value
+        end
+        return nil
+    end
     local index = 1
-    while results[index] do
-        local source = results[index]
+    local source = safe_index(results, index)
+    while source do
         proposals[index] = {{
             title = source_title(source),
             url = source.url,
@@ -1171,21 +1623,21 @@ local function proposed_references_from_search(search)
             ingestion_rationale = default_ingestion_rationale(source, search.query, answer),
         }}
         index = index + 1
+        source = safe_index(results, index)
     end
     return proposals
 end
 
-local function result_count(results)
-    local count = 0
-    if not results then return count end
-    while results[count + 1] do
-        count = count + 1
-    end
-    return count
-end
-
 local function search_summary(search)
-    local first = search.results and search.results[1]
+    local first = nil
+    if search.results then
+        local ok, value = pcall(function()
+            return search.results[1]
+        end)
+        if ok then
+            first = value
+        end
+    end
     if first then
         return table.concat({{
             "Found ",
@@ -1202,6 +1654,41 @@ end
 
 local function finish_research_from_search(search, options)
     options = options or {{}}
+    search = normalize_search_result(search, options.query or "")
+    local metadata = search.metadata or {{}}
+    local metadata_blocked_reason = nil
+    if type(metadata) == "userdata" then
+        metadata_blocked_reason = select(1, safe_lookup(metadata, "blocked_reason"))
+    else
+        metadata_blocked_reason = metadata.blocked_reason
+    end
+    local blocked_reason = options.blocked_reason or options.blockedReason or metadata_blocked_reason
+    if type(blocked_reason) ~= "string" then
+        blocked_reason = ""
+    end
+    local discovery_trace = {{
+        webSearchPath = (type(metadata) == "userdata" and select(1, safe_lookup(metadata, "web_search_path")) or metadata.web_search_path)
+            or "papyrus.reference.web_search",
+        searchResultCount = (type(metadata) == "userdata" and select(1, safe_lookup(metadata, "search_result_count")) or metadata.search_result_count)
+            or result_count(search.results),
+        searchMetadataShapeOk = (
+            (type(metadata) == "userdata" and select(1, safe_lookup(metadata, "search_metadata_shape_ok")) or metadata.search_metadata_shape_ok)
+            == true
+        ),
+        discoveryAttemptsTotal = (type(metadata) == "userdata" and select(1, safe_lookup(metadata, "discovery_attempts_total")) or metadata.discovery_attempts_total) or 1,
+        discoveryQueriesTried = (type(metadata) == "userdata" and select(1, safe_lookup(metadata, "discovery_queries_tried")) or metadata.discovery_queries_tried) or {{ search.query }},
+        discoveryResultCounts = (type(metadata) == "userdata" and select(1, safe_lookup(metadata, "discovery_result_counts")) or metadata.discovery_result_counts) or {{ result_count(search.results) }},
+        discoveryTerminalState = (type(metadata) == "userdata" and select(1, safe_lookup(metadata, "discovery_terminal_state")) or metadata.discovery_terminal_state)
+            or (result_count(search.results) > 0 and "succeeded" or "exhausted"),
+    }}
+    if blocked_reason ~= "" then
+        discovery_trace.blockedReason = blocked_reason
+    end
+    local trace = options.researchTrace or options.research_trace or {{}}
+    if type(trace) ~= "table" then
+        trace = {{}}
+    end
+    trace.discoveryBoundary = discovery_trace
     return finish_research{{
         research_mode = options.research_mode or options.researchMode,
         summary = options.summary or search_summary(search),
@@ -1214,6 +1701,8 @@ local function finish_research_from_search(search, options)
         coverage_gaps = options.coverage_gaps or {{}},
         comparison_findings = options.comparison_findings or {{}},
         rubric_assessments = options.rubric_assessments or {{}},
+        blocked_reason = blocked_reason ~= "" and blocked_reason or nil,
+        researchTrace = trace,
     }}
 end
 
@@ -1230,6 +1719,7 @@ def execute_tactus_harnessed(
     corpus_key: str = "",
     max_evidence_items: int = 20,
     research_mode: str = "",
+    knowledge_query_scope: dict[str, Any] | None = None,
     disable_tactus_web: bool = False,
 ) -> dict[str, Any]:
     if harness == "raw":
@@ -1242,6 +1732,7 @@ def execute_tactus_harnessed(
             corpus_key=corpus_key,
             max_evidence_items=max_evidence_items,
             research_mode=research_mode,
+            knowledge_query_scope=knowledge_query_scope,
             disable_tactus_web=disable_tactus_web,
         )
         return execute_tactus(snippet)

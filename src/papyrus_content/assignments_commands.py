@@ -25,7 +25,7 @@ from .assignments_workflow import (
     story_cycle_output,
 )
 from .graphql_authoring import create_authoring_client
-from .options import parse_options
+from .options import parse_options, resolve_mutation_apply
 
 
 def assignments_list(flags: list[str]) -> None:
@@ -109,6 +109,7 @@ def assignments_intake_proposals(flags: list[str]) -> None:
 
 def assignments_research_intake_now(flags: list[str]) -> None:
     options = parse_options(flags)
+    apply = resolve_mutation_apply(options, "assignments research-intake-now")
     if not options.get("assignment"):
         raise ValueError("assignments research-intake-now requires --assignment <id>.")
     if not options.get("config"):
@@ -128,8 +129,8 @@ def assignments_research_intake_now(flags: list[str]) -> None:
     run_research_assignment(research_flags)
     client, _ = create_authoring_client()
     apply_options = dict(options)
-    apply_options["apply"] = options.get("apply")
-    apply_result = apply_research_packet(client, apply_options) if options.get("apply") else None
+    apply_options["apply"] = apply
+    apply_result = apply_research_packet(client, apply_options) if apply else None
     intake_result = intake_research_packet_proposals(client, options)
     if options.get("json"):
         print(json.dumps({"ok": True, "applyResult": apply_result, **intake_result}, indent=2))

@@ -35,7 +35,7 @@ from .curation_cycle import (
 from .env import PAPYRUS_ROOT, storage_bucket_from_amplify_outputs
 from .graphql_authoring import create_authoring_client
 from .ids import hash_short, hash_stable, knowledge_corpus_id
-from .options import parse_boolean_option, parse_comma_list, parse_options
+from .options import parse_boolean_option, parse_comma_list, parse_options, resolve_mutation_apply
 from .records import (
     apply_record_changes,
     build_record_changes_tolerating_optional_models,
@@ -423,9 +423,10 @@ def categories_draft_create(flags: list[str]) -> None:
                 reason=options.get("reason") or f"Draft clone from {source.get('id')}",
             )
         )
-    print_draft_plan("draft-create", category_sets=[draft_set], categories=draft_categories, apply=bool(options.get("apply")))
-    if not options.get("apply"):
-        print("categories\tdraft-create\tapply\tskipped\tpass --apply to create the draft CategorySet")
+    apply = resolve_mutation_apply(options, "categories draft-create")
+    print_draft_plan("draft-create", category_sets=[draft_set], categories=draft_categories, apply=apply)
+    if not apply:
+        print("categories\tdraft-create\tapply\tskipped\tuse --dry-run to preview without writes")
         return
     client.upsert("CategorySet", draft_set)
     for category in draft_categories:
@@ -484,9 +485,10 @@ def categories_draft_add_topic(flags: list[str]) -> None:
         actor=actor,
         reason=options.get("reason") or "Manual draft topic added",
     )
-    print_draft_plan("draft-add-topic", categories=[category], apply=bool(options.get("apply")))
-    if not options.get("apply"):
-        print("categories\tdraft-add-topic\tapply\tskipped\tpass --apply to create the draft topic")
+    apply = resolve_mutation_apply(options, "categories draft-add-topic")
+    print_draft_plan("draft-add-topic", categories=[category], apply=apply)
+    if not apply:
+        print("categories\tdraft-add-topic\tapply\tskipped\tuse --dry-run to preview without writes")
         return
     client.upsert("Category", category)
     client.upsert(
@@ -525,9 +527,10 @@ def categories_draft_update_topic(flags: list[str]) -> None:
         "changeReason": options.get("reason") or "Manual draft topic update",
     }
     updated["contentHash"] = hash_short(normalize_record(updated))
-    print_draft_plan("draft-update-topic", categories=[updated], apply=bool(options.get("apply")))
-    if not options.get("apply"):
-        print("categories\tdraft-update-topic\tapply\tskipped\tpass --apply to update the draft topic")
+    apply = resolve_mutation_apply(options, "categories draft-update-topic")
+    print_draft_plan("draft-update-topic", categories=[updated], apply=apply)
+    if not apply:
+        print("categories\tdraft-update-topic\tapply\tskipped\tuse --dry-run to preview without writes")
         return
     client.upsert("Category", updated)
     print(f"categories\tdraft-update-topic\t{updated['id']}\t{updated['categoryKey']}")
@@ -552,9 +555,10 @@ def categories_draft_archive_topic(flags: list[str]) -> None:
         "changeReason": options.get("reason") or "Manual draft topic archived",
     }
     archived["contentHash"] = hash_short(normalize_record(archived))
-    print_draft_plan("draft-archive-topic", categories=[archived], apply=bool(options.get("apply")))
-    if not options.get("apply"):
-        print("categories\tdraft-archive-topic\tapply\tskipped\tpass --apply to archive the draft topic")
+    apply = resolve_mutation_apply(options, "categories draft-archive-topic")
+    print_draft_plan("draft-archive-topic", categories=[archived], apply=apply)
+    if not apply:
+        print("categories\tdraft-archive-topic\tapply\tskipped\tuse --dry-run to preview without writes")
         return
     client.upsert("Category", archived)
     print(f"categories\tdraft-archive-topic\t{archived['id']}\t{archived['categoryKey']}\tdeprecated")
@@ -639,9 +643,10 @@ def categories_draft_promote(flags: list[str]) -> None:
         ],
         "categories": [*superseded_categories, *promoted_categories],
     }
-    print_draft_plan("draft-promote", category_sets=updates["categorySets"], categories=updates["categories"], apply=bool(options.get("apply")))
-    if not options.get("apply"):
-        print("categories\tdraft-promote\tapply\tskipped\tpass --apply to promote the draft CategorySet")
+    apply = resolve_mutation_apply(options, "categories draft-promote")
+    print_draft_plan("draft-promote", category_sets=updates["categorySets"], categories=updates["categories"], apply=apply)
+    if not apply:
+        print("categories\tdraft-promote\tapply\tskipped\tuse --dry-run to preview without writes")
         return
     for category_set in updates["categorySets"]:
         client.upsert("CategorySet", category_set)
@@ -804,7 +809,8 @@ def categories_review_proposal(flags: list[str]) -> None:
                 {"modelName": "CategorySet", "expected": category_set_update},
             ]
         )
-    print(f"categories\treview-proposal\tmode\t{'apply' if options.get('apply') else 'dry-run'}")
+    apply = resolve_mutation_apply(options, "categories review-proposal")
+    print(f"categories\treview-proposal\tmode\t{'apply' if apply else 'dry-run'}")
     print(
         f"categories\treview-proposal\tproposal\t{proposal['id']}\t{action}\t"
         f"{proposal.get('categoryKey') or ''}\t{proposal.get('targetCategoryKey') or ''}"
@@ -814,8 +820,8 @@ def categories_review_proposal(flags: list[str]) -> None:
             f"categories\treview-proposal\tcategory\t{category['id']}\t{category['categoryKey']}\t"
             f"{category.get('parentCategoryKey') or ''}\tdepth={category.get('depth')}"
         )
-    if not options.get("apply"):
-        print("categories\treview-proposal\tapply\tskipped\tpass --apply to write the proposal decision")
+    if not apply:
+        print("categories\treview-proposal\tapply\tskipped\tuse --dry-run to preview without writes")
         return
     for record in records:
         client.upsert(record["modelName"], record["expected"])

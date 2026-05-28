@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .graphql_authoring import create_authoring_client
-from .options import parse_options
+from .options import parse_options, resolve_mutation_apply
 from .records import apply_record_changes, build_record_changes
 from .relation_types import (
     DEFAULT_RELATION_TYPES_PATH,
@@ -29,6 +29,7 @@ def relations_import_types(flags: list[str]) -> None:
 
 def relations_backfill(flags: list[str]) -> None:
     options = parse_options(flags)
+    apply = resolve_mutation_apply(options, "knowledge concepts backfill")
     config_path = options.get("config") or str(DEFAULT_RELATION_TYPES_PATH)
     relation_types = load_semantic_relation_type_seeds(config_path)
     client, _ = create_authoring_client()
@@ -42,7 +43,7 @@ def relations_backfill(flags: list[str]) -> None:
         "generatedAt": _utc_now(),
         "configPath": config_path,
         "reportPath": str(report_path),
-        "apply": bool(options.get("apply")),
+        "apply": apply,
         "relationCount": len(relations),
         "changeCount": len(actionable),
         "unknownTypeCount": len(unknown),
@@ -58,7 +59,7 @@ def relations_backfill(flags: list[str]) -> None:
         ],
     }
     write_json_file(report_path, report)
-    if options.get("apply"):
+    if apply:
         apply_record_changes(client, changes)
     print_relation_backfill_summary(report)
 

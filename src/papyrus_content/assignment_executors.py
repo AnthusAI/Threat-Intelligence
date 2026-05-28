@@ -329,7 +329,6 @@ def execute_reference_identifier_backfill_assignment(
         str(scan_limit),
         "--model",
         model,
-        "--apply",
         "--json",
     ]
     completed = subprocess.run(args, cwd=PAPYRUS_ROOT, capture_output=True, text=True, check=False)

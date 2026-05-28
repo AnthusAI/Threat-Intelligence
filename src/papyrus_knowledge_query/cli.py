@@ -22,11 +22,51 @@ def add_knowledge_query_parser(subparsers: argparse._SubParsersAction[argparse.A
     parser.add_argument("--input", default="", help="JSON input file, or '-' for stdin")
     parser.add_argument("--query", default="", help="Semantic query text")
     parser.add_argument("--anchor", action="append", default=[], help="Anchor as kind:id or papyrus://kind/id")
-    parser.add_argument("--profile", default="researcher", choices=["researcher", "reporter", "editor", "reviewer", "chat"])
+    parser.add_argument(
+        "--profile",
+        default="researcher",
+        choices=["researcher", "reporter", "reporting", "editor", "reviewer", "chat"],
+    )
     parser.add_argument("--format", default="structured", choices=["structured", "markdown", "both"])
     parser.add_argument("--max-tokens", type=int, default=0)
     parser.add_argument("--depth", type=int, default=None)
     parser.add_argument("--top-k", type=int, default=None)
+    parser.add_argument(
+        "--include-kind",
+        action="append",
+        default=[],
+        help="Include related records of specific kinds (repeatable), e.g. reference,message,assignment,item",
+    )
+    parser.add_argument(
+        "--exclude-kind",
+        action="append",
+        default=[],
+        help="Exclude related records of specific kinds (repeatable)",
+    )
+    parser.add_argument(
+        "--include-message-kind",
+        action="append",
+        default=[],
+        help="Include message records only for these messageKind values (repeatable)",
+    )
+    parser.add_argument(
+        "--exclude-message-kind",
+        action="append",
+        default=[],
+        help="Exclude message records for these messageKind values (repeatable)",
+    )
+    parser.add_argument(
+        "--include-assignment-type",
+        action="append",
+        default=[],
+        help="Include assignment records only for these assignmentTypeKey values (repeatable)",
+    )
+    parser.add_argument(
+        "--exclude-assignment-type",
+        action="append",
+        default=[],
+        help="Exclude assignment records for these assignmentTypeKey values (repeatable)",
+    )
     parser.add_argument(
         "--execution",
         default="remote",
@@ -165,6 +205,18 @@ def _input_from_args(args: argparse.Namespace) -> dict[str, Any]:
         scope["depth"] = args.depth
     if args.top_k is not None:
         scope["topK"] = args.top_k
+    if args.include_kind:
+        scope["includeObjectKinds"] = [str(value) for value in args.include_kind if str(value).strip()]
+    if args.exclude_kind:
+        scope["excludeObjectKinds"] = [str(value) for value in args.exclude_kind if str(value).strip()]
+    if args.include_message_kind:
+        scope["includeMessageKinds"] = [str(value) for value in args.include_message_kind if str(value).strip()]
+    if args.exclude_message_kind:
+        scope["excludeMessageKinds"] = [str(value) for value in args.exclude_message_kind if str(value).strip()]
+    if args.include_assignment_type:
+        scope["includeAssignmentTypeKeys"] = [str(value) for value in args.include_assignment_type if str(value).strip()]
+    if args.exclude_assignment_type:
+        scope["excludeAssignmentTypeKeys"] = [str(value) for value in args.exclude_assignment_type if str(value).strip()]
     output: dict[str, Any] = {"format": args.format}
     if args.max_tokens:
         output["maxTokens"] = args.max_tokens

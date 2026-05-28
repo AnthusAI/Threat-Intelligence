@@ -303,6 +303,56 @@ class QualityTieSemanticProvider:
         ][:limit]
 
 
+class MixedObjectSemanticProvider:
+    name = "mixed-object-semantic"
+
+    def search(self, query, scope, limit):
+        return [
+            {
+                "rank": 1,
+                "distance": 0.08,
+                "kind": "message",
+                "id": "message-research-1",
+                "lineageId": "message-research-1",
+                "messageKind": "research_context_packet",
+                "messageDomain": "workflow",
+                "summary": "Research packet summary about AI agents in healthcare.",
+                "metadata": {
+                    "kind": "message",
+                    "id": "message-research-1",
+                    "lineageId": "message-research-1",
+                    "messageKind": "research_context_packet",
+                },
+            },
+            {
+                "rank": 2,
+                "distance": 0.1,
+                "kind": "assignment",
+                "id": "assignment-research-1",
+                "lineageId": "assignment-research-1",
+                "assignmentTypeKey": "research.source-discovery",
+                "title": "Research assignment: healthcare AI agents",
+                "summary": "Open research assignment linked to this topic.",
+                "metadata": {
+                    "kind": "assignment",
+                    "id": "assignment-research-1",
+                    "lineageId": "assignment-research-1",
+                    "assignmentTypeKey": "research.source-discovery",
+                },
+            },
+            {
+                "rank": 3,
+                "distance": 0.12,
+                "kind": "item",
+                "id": "item-healthcare-ai-v1",
+                "lineageId": "item-healthcare-ai",
+                "title": "Healthcare AI Agent Adoption",
+                "summary": "Item record covering patient-care use cases.",
+                "metadata": {"kind": "item", "id": "item-healthcare-ai-v1", "lineageId": "item-healthcare-ai"},
+            },
+        ][:limit]
+
+
 class FakeGraphProvider:
     name = "fake-graph"
 
@@ -991,6 +1041,18 @@ class KnowledgeQueryTests(unittest.TestCase):
         self.assertTrue(any(stage["name"] == "semantic_search" for stage in result["debug"]["stageTimings"]))
         self.assertIn("semanticUniqueSourceCount", result["debug"])
 
+    def test_reporting_profile_is_supported_without_fallback_warning(self):
+        result = run_knowledge_query(
+            {
+                "semanticQuery": "AI in video games reporting orientation",
+                "profile": "reporting",
+                "output": {"format": "structured", "maxTokens": 120},
+            },
+            fake_services(),
+        )
+        self.assertEqual(result["structured"]["request"]["profile"], "reporting")
+        self.assertFalse(any("Unknown profile" in warning for warning in result.get("warnings") or []))
+
     def test_uri_anchor_resolves_like_explicit_anchor(self):
         explicit = run_knowledge_query(
             {
@@ -1241,6 +1303,72 @@ class KnowledgeQueryTests(unittest.TestCase):
         self.assertIn("Full Source Text", result["context"]["text"])
         self.assertEqual(result["context"]["sourceTextMode"], "full")
         self.assertNotIn("message#", result["context"]["text"])
+
+    def test_related_records_default_excludes_message_and_assignment(self):
+        services = KnowledgeQueryServices(
+            graph=None,
+            semantic=MixedObjectSemanticProvider(),
+            corpus_text=None,
+        )
+        result = run_knowledge_query(
+            {
+                "semanticQuery": "healthcare ai agents patient care",
+                "scope": {"topK": 5, "relatedRecordLimit": 5},
+                "output": {"format": "structured"},
+            },
+            services,
+        )
+
+        related_kinds = {record.get("kind") for record in result["structured"]["relatedRecords"]}
+        self.assertEqual(related_kinds, {"item"})
+
+    def test_related_records_can_include_message_and_assignment(self):
+        services = KnowledgeQueryServices(
+            graph=None,
+            semantic=MixedObjectSemanticProvider(),
+            corpus_text=None,
+        )
+        result = run_knowledge_query(
+            {
+                "semanticQuery": "healthcare ai agents patient care",
+                "scope": {
+                    "topK": 5,
+                    "relatedRecordLimit": 5,
+                    "includeObjectKinds": ["item", "message", "assignment"],
+                    "includeMessageKinds": ["research_context_packet"],
+                    "includeAssignmentTypeKeys": ["research.*"],
+                },
+                "output": {"format": "structured"},
+            },
+            services,
+        )
+
+        related_kinds = {record.get("kind") for record in result["structured"]["relatedRecords"]}
+        self.assertEqual(related_kinds, {"item", "message", "assignment"})
+
+    def test_related_records_assignment_type_wildcard_exclude(self):
+        services = KnowledgeQueryServices(
+            graph=None,
+            semantic=MixedObjectSemanticProvider(),
+            corpus_text=None,
+        )
+        result = run_knowledge_query(
+            {
+                "semanticQuery": "healthcare ai agents patient care",
+                "scope": {
+                    "topK": 5,
+                    "relatedRecordLimit": 5,
+                    "includeObjectKinds": ["item", "assignment"],
+                    "includeAssignmentTypeKeys": ["research.*"],
+                    "excludeAssignmentTypeKeys": ["research.source-*"],
+                },
+                "output": {"format": "structured"},
+            },
+            services,
+        )
+
+        related_kinds = {record.get("kind") for record in result["structured"]["relatedRecords"]}
+        self.assertEqual(related_kinds, {"item"})
 
     def test_semantic_vector_passages_become_source_excerpts(self):
         services = KnowledgeQueryServices(

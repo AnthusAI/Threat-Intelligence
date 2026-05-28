@@ -982,7 +982,8 @@ def projection_relation_records(items: list[dict[str, Any]], context: dict[str, 
 
 
 def artifact_records(artifact: dict[str, Any], context: dict[str, Any]) -> list[dict[str, Any]]:
-    artifact_id = f"category-artifact-{safe_id(context['corpusId'])}-{hash_short(f'{artifact.get('kind')}:{artifact.get('artifact_id')}')}"
+    artifact_hash_input = f"{artifact.get('kind')}:{artifact.get('artifact_id')}"
+    artifact_id = f"category-artifact-{safe_id(context['corpusId'])}-{hash_short(artifact_hash_input)}"
     metadata = artifact.get("metadata") if isinstance(artifact.get("metadata"), dict) else {}
     return [
         record(

@@ -4,8 +4,6 @@
 -- packet payloads for editor selection. The CLI/procedure layer owns all record
 -- persistence plans.
 
-local done = require("tactus.tools.done")
-
 Toolset "papyrus" {
     type = "plugin",
     paths = {"./procedures/newsroom/tactus_tools"}
@@ -64,7 +62,7 @@ Rules:
   source support for reader-facing claims.
 - Return structured draft data and the dry-run update plan.
 ]],
-    tools = {"papyrus", done},
+    tools = {"papyrus"},
     output = {
         assignment_item_id = field.string{required = true},
         dry_run = field.boolean{required = true},
@@ -84,6 +82,7 @@ Procedure {
         corpus_key = field.string{default = "AI-ML-research", description = "Papyrus steering corpus key"},
         context_profile = field.string{default = "", description = "Optional live context profile override"},
         max_evidence_items = field.integer{default = 5, description = "Maximum Biblicus evidence items to use"},
+        knowledge_query_scope = field.object{required = false, description = "Optional knowledge-query scope filters for assignment and insight retrieval defaults"},
         source_research_assignment_id = field.string{default = "", description = "Optional source research Assignment.id for packet lineage"},
         source_research_packet_id = field.string{default = "", description = "Optional source research packet Message.id for packet lineage"},
         source_research_packet_path = field.string{default = "", description = "Optional dry-run source research packet path for operator traceability"}
@@ -114,6 +113,67 @@ Inline reporting Assignment JSON is available for fallback use:
 ]], inline_assignment_json)
         end
 
+        local function normalize_string_list(value, fallback)
+            local normalized = {}
+            local seen = {}
+            local function append(entry)
+                if type(entry) ~= "string" then return end
+                local trimmed = string.gsub(entry, "^%s+", "")
+                trimmed = string.gsub(trimmed, "%s+$", "")
+                if trimmed == "" or seen[trimmed] then return end
+                seen[trimmed] = true
+                table.insert(normalized, trimmed)
+            end
+            if type(value) == "table" then
+                for _, entry in pairs(value) do
+                    append(entry)
+                end
+            end
+            if #normalized == 0 and type(fallback) == "table" then
+                for _, entry in ipairs(fallback) do
+                    append(entry)
+                end
+            end
+            return normalized
+        end
+
+        local function lua_list_literal(values)
+            local parts = {}
+            for _, value in ipairs(values) do
+                table.insert(parts, string.format("%q", value))
+            end
+            return "{" .. table.concat(parts, ", ") .. "}"
+        end
+
+        local scope_defaults = {
+            includeObjectKinds = {"reference", "item", "category", "semanticNode", "newsroomSection", "assignment", "message"},
+            includeMessageKinds = {"insight"},
+            includeAssignmentTypeKeys = {"research.*", "reporting.*"},
+        }
+        local requested_scope = input.knowledge_query_scope
+        if type(requested_scope) ~= "table" then
+            requested_scope = {}
+        end
+        local include_object_kinds = normalize_string_list(
+            requested_scope.includeObjectKinds or requested_scope.include_object_kinds,
+            scope_defaults.includeObjectKinds
+        )
+        local include_message_kinds = normalize_string_list(
+            requested_scope.includeMessageKinds or requested_scope.include_message_kinds,
+            scope_defaults.includeMessageKinds
+        )
+        local include_assignment_type_keys = normalize_string_list(
+            requested_scope.includeAssignmentTypeKeys or requested_scope.include_assignment_type_keys,
+            scope_defaults.includeAssignmentTypeKeys
+        )
+        local knowledge_scope_snippet = string.format([[
+local knowledge_scope = {
+    includeObjectKinds = %s,
+    includeMessageKinds = %s,
+    includeAssignmentTypeKeys = %s,
+}
+]], lua_list_literal(include_object_kinds), lua_list_literal(include_message_kinds), lua_list_literal(include_assignment_type_keys))
+
         local message = string.format([[
 Create a reporting work-product plan for target reporting assignment %s using corpus %s.
 
@@ -132,30 +192,47 @@ Required tool flow:
    local ctx = assignment_context{ id = "%s" }
    local pack = assignment_agent_context{ id = "%s", context_profile = "reporting" }
    local item = assignment_context_to_item{ assignment_context = ctx.assignment_context }
+   %s
 4. For live Assignment queue work, run one broad knowledge_query seeded from
    assignment target/brief before deciding optional web checks. Include
    knowledge trace in source_trail and related metadata fields.
+   For assignment-oriented retrieval, include assignment + insight scope
+   filters in that broad knowledge_query call, for example:
+   local knowledge = knowledge_query{
+       query = "broad assignment-focused query",
+       profile = "reporting",
+       output = { format = "structured", maxTokens = 700, seeAlsoMaxTokens = 80 },
+       top_k = 10,
+       depth = 1,
+       includeObjectKinds = knowledge_scope.includeObjectKinds,
+       includeMessageKinds = knowledge_scope.includeMessageKinds,
+       includeAssignmentTypeKeys = knowledge_scope.includeAssignmentTypeKeys
+   }
 5. Optionally run anchored knowledge_query (uri/objectUri) or papyrus.resolve_uri
    follow-up when specific internal hits need inspection.
 6. Use item_get only when live Assignment context is unavailable.
 7. For live reporting.edition-candidate Assignments, return a reporting_context_packet payload only.
 8. When fresh source verification is needed, use local web = require("tactus.web") and call web.search or web.synthesize inside execute_tactus after internal orientation.
+   A zero-result first search is not terminal; continue through bounded diversified retries and only mark blocked when discovery is exhausted.
 9. Do not call Papyrus persistence planners. The outer CLI builds any record plan.
 10. When source research ids are provided, include source_research_assignment_id
    and source_research_packet_id in the reporting payload so the packet plan can
    write derived_from lineage.
 11. If live context helpers fail but assignment_json is present, return a packet
    from the assignment_json brief and mark the context gap in risk_flags and
-   open_questions. Do not call done without returning a packet payload.
+   open_questions.
 12. Use raw execute_tactus only. Do not set harness="research" in this reporter
    procedure.
+13. Strict path: use one deterministic execute_tactus snippet that performs
+    assignment_context + assignment_agent_context + one broad scoped
+    knowledge_query, then returns reporting_context_packet directly.
 
 For live reporting assignments, return assignment_item_id="%s", dry_run=true, work_product_kind="reporting_context_packet", item_status="reported", reporting_context_packet, and a concise summary.
 For legacy draft compatibility, return dry_run=true, work_product_kind="draft_article", item_status="draft", draft_record_plan, and a concise summary.
 Set reporting_context_packet.editor_recommendation to exactly one enum value:
 select, merge, brief, hold, or kill.
 Set reporting_context_packet.summary to a concise packet-level summary.
-]], assignment_source, input.corpus_key, input.source_research_assignment_id or "", input.source_research_packet_id or "", input.source_research_packet_path or "", inline_brief, input.assignment_item_id or "", input.assignment_item_id or "", input.assignment_item_id or "", input.assignment_item_id or "")
+]], assignment_source, input.corpus_key, input.source_research_assignment_id or "", input.source_research_packet_id or "", input.source_research_packet_path or "", inline_brief, input.assignment_item_id or "", input.assignment_item_id or "", input.assignment_item_id or "", knowledge_scope_snippet, input.assignment_item_id or "")
 
         local json = require("tactus.io.json")
 
@@ -175,43 +252,113 @@ Set reporting_context_packet.summary to a concise packet-level summary.
             return nil
         end
 
-        local result = newsroom_reporter({message = message})
-        local output = {}
-        if result ~= nil and result.output ~= nil then
-            output = result.output
-        end
-        if type(output) == "table" and type(output.value) == "table" then
-            output = output.value
-        end
-        if type(output) == "string" then
-            local ok, decoded = pcall(json.decode, output)
-            if ok and type(decoded) == "table" then
-                output = decoded
+        local function normalize_agent_output(result_payload)
+            local output = {}
+            if result_payload ~= nil and result_payload.output ~= nil then
+                output = result_payload.output
             else
-                local extracted = decode_last_json_object(output)
-                if type(extracted) == "table" then
-                    output = extracted
+                output = result_payload
+            end
+            if type(output) == "table" and type(output.value) == "table" then
+                output = output.value
+            end
+            if type(output) == "string" then
+                local ok, decoded = pcall(json.decode, output)
+                if ok and type(decoded) == "table" then
+                    output = decoded
                 else
-                    output = {
-                        assignment_item_id = input.assignment_item_id,
-                        dry_run = true,
-                        work_product_kind = "reporting_context_packet",
-                        item_status = "reported",
-                        summary = "Reporter returned unstructured text instead of a reporting context packet.",
-                        validation_failures = {"reporter_output_not_structured"},
-                    }
+                    local extracted = decode_last_json_object(output)
+                    if type(extracted) == "table" then
+                        output = extracted
+                    else
+                        output = {
+                            assignment_item_id = input.assignment_item_id,
+                            dry_run = true,
+                            work_product_kind = "reporting_context_packet",
+                            item_status = "reported",
+                            summary = "Reporter returned unstructured text instead of a reporting context packet.",
+                            validation_failures = {"reporter_output_not_structured"},
+                        }
+                    end
                 end
             end
+            if type(output) ~= "table" then
+                output = {
+                    assignment_item_id = input.assignment_item_id,
+                    dry_run = true,
+                    work_product_kind = "reporting_context_packet",
+                    item_status = "reported",
+                    summary = "Reporter returned no structured reporting context packet.",
+                    validation_failures = {"reporter_output_missing"},
+                }
+            end
+            return output
         end
-        if type(output) ~= "table" then
-            output = {
-                assignment_item_id = input.assignment_item_id,
-                dry_run = true,
-                work_product_kind = "reporting_context_packet",
-                item_status = "reported",
-                summary = "Reporter returned no structured reporting context packet.",
-                validation_failures = {"reporter_output_missing"},
-            }
+
+        local function has_required_reporting_output(output)
+            if type(output) ~= "table" then return false, "output_not_table" end
+            if type(output.work_product_kind) ~= "string" or output.work_product_kind == "" then
+                return false, "missing_work_product_kind"
+            end
+            if output.work_product_kind ~= "reporting_context_packet" then
+                return true, nil
+            end
+            local packet = output.reporting_context_packet
+            if type(packet) ~= "table" then return false, "missing_reporting_context_packet" end
+            if type(packet.summary) ~= "string" or packet.summary == "" then
+                return false, "missing_reporting_summary"
+            end
+            local recommendation = packet.editor_recommendation or packet.editorRecommendation
+            if type(recommendation) ~= "string" or recommendation == "" then
+                return false, "missing_editor_recommendation"
+            end
+            return true, nil
+        end
+
+        local max_attempts = 2
+        local attempt = 1
+        local validation_failures = {}
+        local output = {}
+        local retry_message = message
+        while attempt <= max_attempts do
+            local result = newsroom_reporter({message = retry_message})
+            output = normalize_agent_output(result)
+            local ok, failure = has_required_reporting_output(output)
+            if ok then
+                break
+            end
+            if failure ~= nil then
+                table.insert(validation_failures, tostring(failure))
+            else
+                table.insert(validation_failures, "unknown_reporting_validation_failure")
+            end
+            if attempt >= max_attempts then
+                break
+            end
+            retry_message = string.format([[
+The previous response failed strict reporting output validation.
+
+Validation failure:
+%s
+
+Return a single structured object only with:
+- assignment_item_id
+- dry_run=true
+- work_product_kind="reporting_context_packet"
+- item_status="reported"
+- reporting_context_packet
+- summary
+
+Do not return prose. Do not call done.
+
+Original instructions:
+%s
+]], tostring(validation_failures[#validation_failures]), message)
+            attempt = attempt + 1
+        end
+        if #validation_failures > 0 then
+            output.validation_failures = validation_failures
+            output.retry_count = math.max(0, attempt - 1)
         end
         if output.assignment_item_id == nil or output.assignment_item_id == "" then
             output.assignment_item_id = input.assignment_item_id
@@ -244,6 +391,40 @@ Set reporting_context_packet.summary to a concise packet-level summary.
                 output.summary = "No reporting payload was returned."
             end
         end
+        if output.work_product_kind == "reporting_context_packet" and type(output.reporting_context_packet) ~= "table" then
+            output.reporting_context_packet = {
+                summary = output.summary,
+                editor_recommendation = "hold",
+                recommended_angle = "Reporting packet could not be structured; rerun with refreshed context.",
+                risk_flags = {
+                    "reporting_payload_missing_or_unstructured",
+                },
+                coverage_gaps = {
+                    "No structured reporting context packet was returned by the reporter agent.",
+                },
+                open_questions = {
+                    "Rerun reporting with refreshed assignment context and verify tool outputs.",
+                },
+                accepted_reference_ids = {},
+                proposed_references = {},
+                verification_needs = {
+                    "Re-run reporting_context_packet generation; prior output was unstructured.",
+                },
+                source_trail = {
+                    {
+                        source_kind = "reporter_fallback",
+                        note = "No structured reporting_context_packet returned.",
+                    }
+                },
+                knowledge_queries = {},
+                papyrus_uris_inspected = {},
+                knowledge_blocked_reason = "reporting_payload_missing_or_unstructured",
+                knowledge_orientation_attempted = true,
+                knowledge_orientation_completed = false,
+                reporting_path_mode = "strict_single_path",
+                copywriter_brief = "Hold for editor review; regenerate reporting packet before copywriting intake.",
+            }
+        end
         if type(output.reporting_context_packet) == "table" then
             local packet = output.reporting_context_packet
             if type(packet.summary) ~= "string" or packet.summary == "" then
@@ -271,6 +452,28 @@ Set reporting_context_packet.summary to a concise packet-level summary.
                 end
             end
             packet.editor_recommendation = normalized
+            if packet.reporting_path_mode == nil or packet.reporting_path_mode == "" then
+                packet.reporting_path_mode = "strict_single_path"
+            end
+            local blocked_reason = packet.knowledge_blocked_reason or packet.knowledgeBlockedReason
+            if packet.knowledge_orientation_attempted == nil then
+                packet.knowledge_orientation_attempted =
+                    (type(packet.knowledge_queries) == "table" and next(packet.knowledge_queries) ~= nil)
+                    or (type(packet.source_trail) == "table" and next(packet.source_trail) ~= nil)
+                    or (type(blocked_reason) == "string" and blocked_reason ~= "")
+            end
+            if packet.knowledge_orientation_completed == nil then
+                packet.knowledge_orientation_completed =
+                    packet.knowledge_orientation_attempted == true
+                    and not (type(blocked_reason) == "string" and blocked_reason ~= "")
+            end
+            if type(packet.proposed_references) == "table" and next(packet.proposed_references) ~= nil then
+                if type(packet.verification_needs) ~= "table" or next(packet.verification_needs) == nil then
+                    packet.verification_needs = {
+                        "Verify each proposed reference before editor selection or copywriting intake.",
+                    }
+                end
+            end
             output.reporting_context_packet = packet
         end
         return output

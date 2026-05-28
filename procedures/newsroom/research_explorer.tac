@@ -35,13 +35,14 @@ Allowed tool strategy:
   proposed_references_from_search only exist inside execute_tactus calls that
   set harness="research". Never call those helpers in a raw execute_tactus
   snippet. Raw snippets may use assignment_context, assignment_agent_context,
-  knowledge_query, papyrus.resolve_uri, and direct tactus.web search only.
+  knowledge_query, papyrus.resolve_uri, and papyrus.reference.web_search only.
 
 Required policy sequence:
 1. Read assignment context and budgeted agent context when assignment_id is live.
 2. Run one broad knowledge_query using compact researcher context: higher top_k, low per-source detail, source diversity, and a small token budget.
 3. Optionally inspect promising papyrus:// URIs with papyrus.resolve_uri or anchored knowledge_query follow-ups.
 4. Use OpenAI web search only for freshness, gaps, or assignment requests for external evidence. In source_discovery and full_research modes, at least one web search is required unless the final packet includes blockedReason.
+   The research-harness web_search helper performs bounded deterministic retry diversification; do not stop discovery after a zero-result first attempt.
 5. Finalize a packet with researchTrace: queries run, Papyrus URIs inspected, web searches run, accepted evidence ids selected, proposed references, and unresolved gaps.
 
 Evidence rules:
@@ -82,7 +83,8 @@ Procedure {
         context_profile = field.string{default = "researcher", description = "Optional live context profile override"},
         research_mode = field.string{default = "source_discovery", description = "internal_brief, source_discovery, or full_research"},
         research_questions = field.string{default = "", description = "Optional editor/reporter research questions"},
-        max_evidence_items = field.integer{default = 20, description = "Maximum accepted Papyrus evidence ids to use"}
+        max_evidence_items = field.integer{default = 20, description = "Maximum accepted Papyrus evidence ids to use"},
+        knowledge_query_scope = field.object{required = false, description = "Optional knowledge-query scope filters for assignment and insight retrieval defaults"}
     },
     output = {
         assignment_item_id = field.string{required = true},
@@ -294,7 +296,8 @@ Corrective requirements:
 - If you use knowledge_search, web_search, finish_research,
   finish_research_from_search, evidence_item_ids_from_knowledge, or
   proposed_references_from_search, the execute_tactus call must set
-  harness="research". Those helpers are unavailable in raw execute_tactus.
+  harness="research" and include assignment-aware knowledge_query_scope
+  filters (assignment + insight). Those helpers are unavailable in raw execute_tactus.
 ]], base_message, attempt, max_attempts, error_text, output_text)
         end
 
@@ -328,17 +331,26 @@ Corrective requirements:
             local discovery = as_table(packet.sourceDiscovery or packet.source_discovery) or {}
             local source_snapshots = discovery.sourceSnapshots or discovery.source_snapshots or packet.source_snapshots or packet.sourceSnapshots
             local proposed_references = discovery.proposedReferences or discovery.proposed_references or packet.proposed_references or packet.proposedReferences
+            local web_searches = discovery.webSearches or discovery.web_searches
+            if (not has_entries(web_searches)) then
+                local trace = as_table(packet.researchTrace or packet.research_trace) or {}
+                web_searches = trace.webSearches or trace.web_searches
+            end
+            discovery.webSearches = web_searches or {}
             local blocked_reason = discovery.blockedReason or discovery.blocked_reason or packet.blockedReason or packet.blocked_reason
-            if (not has_entries(source_snapshots)) and (not has_entries(proposed_references)) then
+            if (not has_entries(web_searches)) and (not has_entries(source_snapshots)) and (not has_entries(proposed_references)) then
                 if type(blocked_reason) ~= "string" or blocked_reason == "" then
                     blocked_reason = "no_web_prospects_found"
                 end
             end
             if type(blocked_reason) == "string" and blocked_reason ~= "" then
                 discovery.blockedReason = blocked_reason
+                discovery.blocked_reason = blocked_reason
                 packet.blockedReason = blocked_reason
+                packet.blocked_reason = blocked_reason
             end
             packet.sourceDiscovery = discovery
+            packet.source_discovery = discovery
             payload.research_packet = packet
         end
 
@@ -361,7 +373,9 @@ Bounded exploration:
 - In internal_brief mode, do not use web_search unless specifically needed to explain a blocked gap.
 - In source_discovery mode, run at least one web_search after internal orientation, unless you return blockedReason.
 - In full_research mode, run at least one web_search and synthesize internal findings plus external prospects, unless you return blockedReason.
-- Finish with execute_tactus using harness="research", assignment_id=%s when no inline JSON is present, assignment_item_json when inline JSON is present, corpus_key=%s, research_mode=%s, and max_evidence_items=%d.
+- A zero-result first web_search is not terminal; rely on harness retry behavior and only treat discovery as exhausted when blockedReason is explicit.
+- Keep assignment-aware knowledge orientation enabled by default (assignment and insight retrieval) via the harness knowledge_search helpers.
+- Finish with execute_tactus using harness="research", assignment_id=%s when no inline JSON is present, assignment_item_json when inline JSON is present, corpus_key=%s, research_mode=%s, max_evidence_items=%d, and knowledge_query_scope = { includeObjectKinds = {"reference","item","category","semanticNode","newsroomSection","assignment","message"}, includeMessageKinds = {"insight"}, includeAssignmentTypeKeys = {"research.*","reporting.*"} }.
 - Do not call knowledge_search, web_search, finish_research,
   finish_research_from_search, evidence_item_ids_from_knowledge, or
   proposed_references_from_search in raw execute_tactus. Those helpers are
@@ -535,6 +549,7 @@ Call execute_tactus exactly once with:
 - corpus_key=%s
 - research_mode=%s
 - max_evidence_items=%d
+- knowledge_query_scope = { includeObjectKinds = {"reference","item","category","semanticNode","newsroomSection","assignment","message"}, includeMessageKinds = {"insight"}, includeAssignmentTypeKeys = {"research.*","reporting.*"} }
 - tactus snippet exactly:
 %s
 
@@ -584,7 +599,7 @@ Do not add prose.
                 max_attempts,
                 validation_failures
             )
-            return {
+            local fallback_response = {
                 assignment_item_id = assignment_id ~= "" and assignment_id or "assignment-unknown",
                 corpus_key = corpus_key,
                 dry_run = true,
@@ -608,6 +623,8 @@ Do not add prose.
                 retry_count = max_attempts,
                 validation_failures = validation_failures,
             }
+            ensure_discovery_block_reason(fallback_response, research_mode)
+            return fallback_response
         end
         append_recovery_trace(
             fallback_payload.research_packet,
@@ -672,7 +689,7 @@ Feature: Knowledge-aware exploratory researcher procedure
     And the agent "newsroom_research_explorer" calls tool "execute_tactus" with args {"tactus": "local context = assignment_context{ id = \"assignment-live-123\" }; local pack = assignment_agent_context{ id = \"assignment-live-123\", context_profile = \"researcher\", max_tokens = 6000 }; return { context = context, pack = pack }"}
     And the agent "newsroom_research_explorer" calls tool "execute_tactus" with args {"tactus": "return knowledge_query{ query = \"production agent evaluation\", profile = \"researcher\", format = \"both\", max_tokens = 1200, top_k = 12, depth = 1 }"}
     And the agent "newsroom_research_explorer" calls tool "execute_tactus" with args {"tactus": "return papyrus.resolve_uri{ uri = \"papyrus://reference/reference-1\" }"}
-    And the agent "newsroom_research_explorer" calls tool "execute_tactus" with args {"tactus": "local web = require(\"tactus.web\"); return web.search{ provider = \"openai\", query = \"production AI agent evaluation 2026\", model = \"gpt-5.4-mini\", max_results = 2 }"}
+    And the agent "newsroom_research_explorer" calls tool "execute_tactus" with args {"tactus": "return papyrus.reference.web_search{ query = \"production AI agent evaluation 2026\", model = \"gpt-5.4-mini\", max_results = 2 }"}
     And the agent "newsroom_research_explorer" calls tool "execute_tactus" with args {"harness":"research","assignment_id":"assignment-live-123","corpus_key":"AI-ML-research","research_mode":"source_discovery","max_evidence_items":2,"tactus":"local knowledge = knowledge_search(\"production agent evaluation\", { top_k = 12, max_tokens = 1200 }); local ids = evidence_item_ids_from_knowledge(knowledge); return finish_research{ research_mode = \"source_discovery\", summary = \"Internal evidence plus web prospects identified.\", queries = {\"production agent evaluation\"}, source_snapshots = {{ title = \"Production AI agent evaluation 2026\", url = \"https://example.com/report\" }}, proposed_references = {{ title = \"Production AI agent evaluation 2026\", url = \"https://example.com/report\", ingestion_rationale = \"Current external prospect for the assignment focus.\" }}, evidence_item_ids = ids, recommended_angle = \"Compare operational evaluation methods.\", researchTrace = { knowledgeQueries = {\"production agent evaluation\"}, papyrusUrisInspected = {\"papyrus://reference/reference-1\"}, webSearches = {\"production AI agent evaluation 2026\"}, acceptedEvidenceIds = ids, unresolvedGaps = {} } }"}
     And the agent "newsroom_research_explorer" returns data {"assignment_item_id":"assignment-live-123","corpus_key":"AI-ML-research","dry_run":True,"item_status":"researched","research_packet":{"research_mode":"source_discovery","summary":"Internal evidence plus web prospects identified.","sourceSnapshots":[{"title":"Production AI agent evaluation 2026","url":"https://example.com/report"}],"proposedReferences":[{"title":"Production AI agent evaluation 2026","url":"https://example.com/report","ingestion_rationale":"Current external prospect for the assignment focus."}],"researchTrace":{"knowledgeQueries":["production agent evaluation"],"papyrusUrisInspected":["papyrus://reference/reference-1"],"webSearches":["production AI agent evaluation 2026"],"acceptedEvidenceIds":["reference-1-v1"],"unresolvedGaps":[]}},"research_record_plan":{"dryRun":True,"lifecycle":"assignment-research-packet","records":[{"modelName":"Message","action":"create"}]},"summary":"Created dry-run exploratory research packet."}
     When the procedure runs

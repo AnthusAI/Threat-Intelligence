@@ -1,9 +1,9 @@
 """
 Papyrus automated newsroom tools for Tactus procedures.
 
-The v1 tools are intentionally dry-run first. GraphQL helpers only read from
-Papyrus, while record builders return mutation plans that callers can inspect
-before any live authoring path is added.
+These helpers expose both live authoring and dry-run planning paths. GraphQL
+helpers can read and write Papyrus, while record builders still return
+inspectable mutation plans for explicit preview flows.
 """
 
 from __future__ import annotations
@@ -1438,7 +1438,6 @@ def papyrus_doi_backfill_plan(
             "create-doi-backfill-assignment",
             "--corpus-key",
             key,
-            "--apply",
         ],
         "run_now": [
             "npm",
@@ -1561,6 +1560,235 @@ def papyrus_doi_backfill_manifest(run_id: str = "", manifest_path: str = "") -> 
     }
 
 
+def papyrus_reference_fetch_url_text(
+    *,
+    reference_id: str = "",
+    external_item_id: str = "",
+    corpus_key: str = "AI-ML-research",
+    apply: bool = True,
+    force: bool = False,
+    config_path: str = "",
+    max_count: int = 0,
+) -> dict[str, Any]:
+    """
+    Fetch extracted text for URL-backed references via MarkItDown and attach it on S3.
+    """
+    command = [
+        "npm",
+        "run",
+        "content",
+        "--",
+        "references",
+        "fetch-url-text",
+        "--corpus-key",
+        _required(corpus_key, "corpus_key"),
+        "--status",
+        "all",
+    ]
+    if reference_id:
+        command.extend(["--reference", reference_id.strip()])
+    if external_item_id:
+        command.extend(["--external-item-id", external_item_id.strip()])
+    if max_count and int(max_count) > 0:
+        command.extend(["--max-count", str(int(max_count))])
+    if force:
+        command.extend(["--force", "true"])
+    if config_path:
+        command.extend(["--config", config_path])
+    if not apply:
+        command.append("--dry-run")
+    result = subprocess.run(
+        command,
+        cwd=PAPYRUS_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    def _metric(name: str) -> int | None:
+        for line in (result.stdout or "").splitlines():
+            parts = line.strip().split("\t")
+            if len(parts) >= 4 and parts[0] == "references" and parts[1] == "fetch-url-text" and parts[2] == name:
+                try:
+                    return int(parts[3])
+                except ValueError:
+                    return None
+        return None
+
+    return {
+        "reference_url_text": {
+            "ok": result.returncode == 0,
+            "exitCode": result.returncode,
+            "command": command,
+            "eligible": _metric("eligible"),
+            "planned": _metric("planned"),
+            "changes": _metric("changes"),
+            "filtered": _metric("filtered"),
+            "fallbackRaw": _metric("fallback-raw"),
+            "failures": _metric("failures"),
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
+    }
+
+
+def papyrus_reference_filter_extracted_text(
+    *,
+    reference_id: str = "",
+    external_item_id: str = "",
+    corpus_key: str = "AI-ML-research",
+    apply: bool = True,
+    force: bool = True,
+    config_path: str = "",
+    max_count: int = 0,
+    model: str = "gpt-5.4-nano",
+    metadata_from_text: bool = True,
+    metadata_model: str = "gpt-5.4-nano",
+) -> dict[str, Any]:
+    """
+    Re-filter existing extracted text attachments and refresh canonical extracted_text.
+    """
+    command = [
+        "npm",
+        "run",
+        "content",
+        "--",
+        "references",
+        "filter-extracted-text",
+        "--corpus-key",
+        _required(corpus_key, "corpus_key"),
+        "--status",
+        "all",
+        "--model",
+        model,
+        "--metadata-model",
+        metadata_model,
+    ]
+    if reference_id:
+        command.extend(["--reference", reference_id.strip()])
+    if external_item_id:
+        command.extend(["--external-item-id", external_item_id.strip()])
+    if max_count and int(max_count) > 0:
+        command.extend(["--max-count", str(int(max_count))])
+    if force:
+        command.extend(["--force", "true"])
+    if not metadata_from_text:
+        command.extend(["--metadata-from-text", "false"])
+    if config_path:
+        command.extend(["--config", config_path])
+    if not apply:
+        command.append("--dry-run")
+    result = subprocess.run(
+        command,
+        cwd=PAPYRUS_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    def _metric(name: str, section: str = "references", command_name: str = "filter-extracted-text") -> int | None:
+        for line in (result.stdout or "").splitlines():
+            parts = line.strip().split("\t")
+            if len(parts) >= 4 and parts[0] == section and parts[1] == command_name and parts[2] == name:
+                try:
+                    return int(parts[3])
+                except ValueError:
+                    return None
+        return None
+
+    return {
+        "reference_text_filter": {
+            "ok": result.returncode == 0,
+            "exitCode": result.returncode,
+            "command": command,
+            "attempted": _metric("attempted"),
+            "planned": _metric("planned"),
+            "filtered": _metric("filtered"),
+            "fallbackRaw": _metric("fallback-raw"),
+            "skippedMissingSource": _metric("skipped-missing-source"),
+            "changes": _metric("changes"),
+            "failures": _metric("failures"),
+            "metadataGenerated": _metric("generated", section="references", command_name="generate-metadata-from-text"),
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
+    }
+
+
+def papyrus_reference_generate_metadata_from_text(
+    *,
+    reference_id: str = "",
+    external_item_id: str = "",
+    corpus_key: str = "AI-ML-research",
+    apply: bool = True,
+    config_path: str = "",
+    max_count: int = 0,
+    model: str = "gpt-5.4-nano",
+) -> dict[str, Any]:
+    """
+    Generate title/subtitle/summary from extracted reference text only.
+    """
+    command = [
+        "npm",
+        "run",
+        "content",
+        "--",
+        "references",
+        "generate-metadata-from-text",
+        "--corpus-key",
+        _required(corpus_key, "corpus_key"),
+        "--status",
+        "all",
+        "--model",
+        model,
+    ]
+    if reference_id:
+        command.extend(["--reference", reference_id.strip()])
+    if external_item_id:
+        command.extend(["--external-item-id", external_item_id.strip()])
+    if max_count and int(max_count) > 0:
+        command.extend(["--max-count", str(int(max_count))])
+    if config_path:
+        command.extend(["--config", config_path])
+    if not apply:
+        command.append("--dry-run")
+    result = subprocess.run(
+        command,
+        cwd=PAPYRUS_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    def _metric(name: str) -> int | None:
+        for line in (result.stdout or "").splitlines():
+            parts = line.strip().split("\t")
+            if (
+                len(parts) >= 4
+                and parts[0] == "references"
+                and parts[1] == "generate-metadata-from-text"
+                and parts[2] == name
+            ):
+                try:
+                    return int(parts[3])
+                except ValueError:
+                    return None
+        return None
+
+    return {
+        "reference_metadata_generation": {
+            "ok": result.returncode == 0,
+            "exitCode": result.returncode,
+            "command": command,
+            "attempted": _metric("attempted"),
+            "generated": _metric("generated"),
+            "skippedMissingText": _metric("skipped-missing-text"),
+            "generationFailures": _metric("generation-failures"),
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
+    }
+
+
 def papyrus_get_semantic_object(kind: str, object_id: str) -> dict[str, Any]:
     """
     Read a graph-addressable private object by kind and exact version id.
@@ -1660,7 +1888,7 @@ def biblicus_topic_context(
     topic_modeling_snapshot: str = "",
     max_topics: int = 20,
     examples_per_topic: int = 3,
-    summary_model: str = "gpt-5.4-mini",
+    summary_model: str = "gpt-5.4-nano",
     config_path: str = "",
 ) -> dict[str, Any]:
     """

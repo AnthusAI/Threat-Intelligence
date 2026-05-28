@@ -23,11 +23,12 @@ from .ranking import (
 
 
 VALID_OUTPUT_FORMATS = {"structured", "markdown", "both"}
-VALID_PROFILES = {"researcher", "reporter", "editor", "reviewer", "chat"}
+VALID_PROFILES = {"researcher", "reporter", "reporting", "editor", "reviewer", "chat"}
 
 PROFILE_DEFAULTS = {
     "researcher": {"depth": 2, "topK": 18, "insightBias": 1.25},
     "reporter": {"depth": 1, "topK": 12, "insightBias": 1.0},
+    "reporting": {"depth": 1, "topK": 10, "insightBias": 1.0},
     "editor": {"depth": 2, "topK": 20, "insightBias": 1.15},
     "reviewer": {"depth": 2, "topK": 20, "insightBias": 1.35},
     "chat": {"depth": 1, "topK": 10, "insightBias": 1.0},
@@ -338,6 +339,22 @@ def _normalize_request(input: dict[str, Any]) -> tuple[dict[str, Any], list[str]
     normalized_anchors = [normalize_anchor(anchor) for anchor in anchors if isinstance(anchor, dict)]
     output = input.get("output") if isinstance(input.get("output"), dict) else {}
     scope.setdefault("relationPolicy", "knowledge_only")
+    scope["includeObjectKinds"] = _normalize_scope_string_list(
+        scope.get("includeObjectKinds")
+        or scope.get("includeKinds")
+        or scope.get("objectKindsInclude"),
+    )
+    scope["excludeObjectKinds"] = _normalize_scope_string_list(
+        scope.get("excludeObjectKinds")
+        or scope.get("excludeKinds")
+        or scope.get("objectKindsExclude"),
+    )
+    scope["includeMessageKinds"] = _normalize_scope_string_list(scope.get("includeMessageKinds"))
+    scope["excludeMessageKinds"] = _normalize_scope_string_list(scope.get("excludeMessageKinds"))
+    scope["includeAssignmentTypeKeys"] = _normalize_scope_string_list(scope.get("includeAssignmentTypeKeys"))
+    scope["excludeAssignmentTypeKeys"] = _normalize_scope_string_list(scope.get("excludeAssignmentTypeKeys"))
+    if scope["includeObjectKinds"] and not scope.get("objectKinds"):
+        scope["objectKinds"] = list(scope["includeObjectKinds"])
     output_format = str(output.get("format") or input.get("format") or "structured").strip()
     if output_format not in VALID_OUTPUT_FORMATS:
         warnings.append(f"Unknown output format '{output_format}', using structured")
@@ -415,6 +432,26 @@ def _derive_semantic_query_from_anchors(anchors: list[dict[str, Any]], services:
     if not parts:
         return ""
     return services.token_counter.truncate(". ".join(parts), 96)
+
+
+def _normalize_scope_string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        entries = [part.strip() for part in value.split(",")]
+    elif isinstance(value, list):
+        entries = [str(part or "").strip() for part in value]
+    else:
+        return []
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for entry in entries:
+        if not entry:
+            continue
+        normalized = entry.lower()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append(normalized)
+    return deduped
 
 
 def _anchor_semantic_text_parts(anchor: dict[str, Any]) -> list[str]:
@@ -574,9 +611,9 @@ def _build_context_blocks(
     for obj in structured["expandedObjects"]:
         if _object_key(obj) in related_keys:
             continue
-        if obj.get("kind") in {"reference", "message", "assignment"}:
+        if obj.get("kind") == "reference":
             continue
-        if not _is_related_record_candidate(obj):
+        if not _is_related_record_candidate(obj, request):
             continue
         blocks.append(
             ContextBlock(
@@ -2274,6 +2311,8 @@ def _build_related_records(
         key = _object_key(match)
         if not key or key in anchor_keys:
             continue
+        if not _is_related_record_candidate(match, request):
+            continue
         ranking = match.get("ranking") if isinstance(match.get("ranking"), dict) else {}
         if anchors and float(ranking.get("relevanceScore", 0.0)) < float(request["ranking"].get("relevanceGate", 0.18)):
             continue
@@ -2286,7 +2325,7 @@ def _build_related_records(
         key = _object_key(obj)
         if not key or key in anchor_keys:
             continue
-        if not _is_related_record_candidate(obj):
+        if not _is_related_record_candidate(obj, request):
             continue
         records.append(_related_record(obj, rank, "graph context expansion", "graph_expansion", structured, services))
         rank += 1
@@ -2295,14 +2334,95 @@ def _build_related_records(
     return records
 
 
-def _is_related_record_candidate(obj: dict[str, Any]) -> bool:
-    if obj.get("kind") in {"message", "assignment"}:
+def _is_related_record_candidate(obj: dict[str, Any], request: dict[str, Any]) -> bool:
+    if not _record_included_by_scope_filters(obj, request):
+        return False
+    kind = str(obj.get("kind") or "").strip().lower()
+    include_kinds = {
+        str(value).strip().lower()
+        for value in (request.get("scope") or {}).get("includeObjectKinds") or []
+        if str(value).strip()
+    }
+    if kind in {"message", "assignment"} and kind not in include_kinds:
         return False
     if obj.get("kind") == "semanticNode" and obj.get("status") == "generated":
         return False
     if obj.get("kind") == "semanticNode" and not any(obj.get(key) for key in ("summary", "description", "categoryKey", "categoryLineageId")):
         return False
     return True
+
+
+def _record_included_by_scope_filters(obj: dict[str, Any], request: dict[str, Any]) -> bool:
+    scope = request.get("scope") if isinstance(request.get("scope"), dict) else {}
+    metadata = obj.get("metadata") if isinstance(obj.get("metadata"), dict) else {}
+    kind = str(obj.get("kind") or obj.get("objectKind") or obj.get("type") or "").strip().lower()
+    if not kind:
+        return False
+    include_kinds = {
+        str(value).strip().lower()
+        for value in scope.get("includeObjectKinds") or []
+        if str(value).strip()
+    }
+    exclude_kinds = {
+        str(value).strip().lower()
+        for value in scope.get("excludeObjectKinds") or []
+        if str(value).strip()
+    }
+    if include_kinds and kind not in include_kinds:
+        return False
+    if kind in exclude_kinds:
+        return False
+    if kind == "message":
+        message_kind = str(obj.get("messageKind") or metadata.get("messageKind") or "").strip().lower()
+        include_message_kinds = {
+            str(value).strip().lower()
+            for value in scope.get("includeMessageKinds") or []
+            if str(value).strip()
+        }
+        exclude_message_kinds = {
+            str(value).strip().lower()
+            for value in scope.get("excludeMessageKinds") or []
+            if str(value).strip()
+        }
+        if include_message_kinds and message_kind not in include_message_kinds:
+            return False
+        if message_kind and message_kind in exclude_message_kinds:
+            return False
+    if kind == "assignment":
+        assignment_type_key = str(
+            obj.get("assignmentTypeKey")
+            or metadata.get("assignmentTypeKey")
+            or ""
+        ).strip().lower()
+        include_assignment_types = {
+            str(value).strip().lower()
+            for value in scope.get("includeAssignmentTypeKeys") or []
+            if str(value).strip()
+        }
+        exclude_assignment_types = {
+            str(value).strip().lower()
+            for value in scope.get("excludeAssignmentTypeKeys") or []
+            if str(value).strip()
+        }
+        if include_assignment_types and not _matches_any_pattern(assignment_type_key, include_assignment_types):
+            return False
+        if assignment_type_key and _matches_any_pattern(assignment_type_key, exclude_assignment_types):
+            return False
+    return True
+
+
+def _matches_any_pattern(value: str, patterns: set[str]) -> bool:
+    if not value:
+        return False
+    for pattern in patterns:
+        if not pattern:
+            continue
+        if pattern.endswith("*"):
+            if value.startswith(pattern[:-1]):
+                return True
+        elif value == pattern:
+            return True
+    return False
 
 
 def _semantic_related_reason(match: dict[str, Any], anchors: list[dict[str, Any]], graph_keys: set[tuple[str, str]]) -> str:

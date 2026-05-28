@@ -23,7 +23,7 @@ from .model_attachments import (
     download_attachment_buffer,
     semantic_version_key,
 )
-from .options import parse_options
+from .options import parse_options, resolve_mutation_apply
 from .records import apply_record_changes, build_record_changes
 from .relation_types import semantic_relation_type_fields_for_predicate
 from .relations_commands import print_category_import_summary
@@ -180,7 +180,7 @@ def ontology_explain(flags: list[str]) -> None:
     if limit:
         targets = targets[:limit]
     use_llm = not bool(options.get("no-llm"))
-    apply = bool(options.get("apply"))
+    apply = resolve_mutation_apply(options, "knowledge ontology explain")
     records: list[dict[str, Any]] = []
     outputs: list[dict[str, Any]] = []
     for index, status in enumerate(targets, start=1):
@@ -196,8 +196,8 @@ def ontology_explain(flags: list[str]) -> None:
                 target_id=relation_id,
                 error=error,
                 next_commands=[
-                    f"poetry run papyrus knowledge ontology explain --relation-id {relation_id} --no-llm --apply",
-                    f"poetry run papyrus knowledge ontology explain --relation-id {relation_id} --apply",
+                    f"poetry run papyrus knowledge ontology explain --relation-id {relation_id} --no-llm",
+                    f"poetry run papyrus knowledge ontology explain --relation-id {relation_id}",
                 ],
             )
             raise
@@ -242,7 +242,7 @@ def ontology_profile(flags: list[str]) -> None:
     if limit:
         targets = targets[:limit]
     use_llm = not bool(options.get("no-llm"))
-    apply = bool(options.get("apply"))
+    apply = resolve_mutation_apply(options, "knowledge ontology profile")
     records: list[dict[str, Any]] = []
     outputs: list[dict[str, Any]] = []
     for index, status in enumerate(targets, start=1):
@@ -258,8 +258,8 @@ def ontology_profile(flags: list[str]) -> None:
                 target_id=concept_id,
                 error=error,
                 next_commands=[
-                    f"poetry run papyrus knowledge ontology profile --concept-id {concept_id} --no-llm --apply",
-                    f"poetry run papyrus knowledge ontology profile --concept-id {concept_id} --apply",
+                    f"poetry run papyrus knowledge ontology profile --concept-id {concept_id} --no-llm",
+                    f"poetry run papyrus knowledge ontology profile --concept-id {concept_id}",
                 ],
             )
             raise
@@ -297,7 +297,8 @@ def ontology_associate(flags: list[str]) -> None:
     ranked = rank_concepts(state, include_operational=bool(options.get("include-operational"))) if options.get("ranked") else []
     concepts = select_concept_scope(state, ranked, options, limit=_int_option(options, "limit", 50))
     records = build_association_relation_records(state, concepts, threshold=_float_option(options, "threshold", ASSOCIATION_CONFIDENCE_THRESHOLD))
-    result = apply_or_report(client, "ontology-associations", records, apply=bool(options.get("apply")))
+    apply = resolve_mutation_apply(options, "knowledge ontology associate")
+    result = apply_or_report(client, "ontology-associations", records, apply=apply)
     payload = {"ok": True, "plannedRelations": len(records), **result}
     if options.get("json"):
         print(json.dumps(payload, indent=2))
@@ -313,7 +314,8 @@ def ontology_dedupe(flags: list[str]) -> None:
     ranked = rank_concepts(state, include_operational=bool(options.get("include-operational"))) if options.get("ranked") else []
     concepts = select_concept_scope(state, ranked, options, limit=_int_option(options, "limit", 50))
     records = build_dedupe_relation_records(state, concepts, threshold=_float_option(options, "threshold", DEDUPE_CONFIDENCE_THRESHOLD))
-    result = apply_or_report(client, "ontology-dedupe", records, apply=bool(options.get("apply")))
+    apply = resolve_mutation_apply(options, "knowledge ontology dedupe")
+    result = apply_or_report(client, "ontology-dedupe", records, apply=apply)
     payload = {"ok": True, "plannedRelations": len(records), **result}
     if options.get("json"):
         print(json.dumps(payload, indent=2))
@@ -1453,9 +1455,9 @@ def next_recommended_command(payload: dict[str, Any]) -> str:
     relations = payload.get("relationExplanations") or {}
     concepts = payload.get("conceptProfiles") or {}
     if relations.get("missing") or relations.get("stale"):
-        return "poetry run papyrus knowledge ontology explain --ranked --limit 50 --apply"
+        return "poetry run papyrus knowledge ontology explain --ranked --limit 50"
     if concepts.get("missing") or concepts.get("stale"):
-        return "poetry run papyrus knowledge ontology profile --ranked --limit 50 --apply"
+        return "poetry run papyrus knowledge ontology profile --ranked --limit 50"
     return "poetry run papyrus knowledge vector-index --action sync --include-ontology-vectors --force"
 
 

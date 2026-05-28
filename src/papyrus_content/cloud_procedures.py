@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import urllib.parse
+import ast
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -14,7 +15,7 @@ from .graphql_authoring import PapyrusGraphQLAuthoringClient
 
 REQUIRED_PROCEDURES_CONFIG_PATH = PAPYRUS_ROOT / "corpora" / "papyrus-required-procedures.json"
 SEED_REQUIRED_PROCEDURES_COMMAND = (
-    "poetry run papyrus procedures seed-required --apply"
+    "poetry run papyrus procedures seed-required"
 )
 
 
@@ -266,7 +267,55 @@ def try_parse_json_lenient(text: str) -> Any:
         if char == '"':
             in_string = True
         repaired_chars.append(char)
-    return try_parse_json("".join(repaired_chars))
+    repaired = "".join(repaired_chars)
+    parsed = try_parse_json(repaired)
+    if parsed is not None:
+        return parsed
+
+    # Some runtime logs can truncate the final closing delimiter of a large JSON
+    # payload line. If delimiters are imbalanced, append the missing closers.
+    stack: list[str] = []
+    in_string = False
+    escaped = False
+    for char in repaired:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+            continue
+        if char == "{" or char == "[":
+            stack.append(char)
+            continue
+        if char == "}" and stack and stack[-1] == "{":
+            stack.pop()
+            continue
+        if char == "]" and stack and stack[-1] == "[":
+            stack.pop()
+            continue
+    if stack:
+        closers = "".join("}" if opener == "{" else "]" for opener in reversed(stack))
+        parsed = try_parse_json(repaired + closers)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def try_parse_python_literal(text: str) -> Any:
+    if not isinstance(text, str):
+        return None
+    candidate = text.strip()
+    if not candidate or candidate[0] not in "{[":
+        return None
+    try:
+        return ast.literal_eval(candidate)
+    except (ValueError, SyntaxError):
+        return None
 
 
 DEFAULT_PROCEDURE_OUTPUT_MARKERS = (
@@ -402,20 +451,39 @@ def extract_research_run_payload(stdout: str, *, markers: tuple[str, ...] = DEFA
     text = str(stdout or "").strip()
     if not text:
         return None
-    direct_payload = normalize_run_payload_candidate(try_parse_json(text), markers=markers)
+    result_marker = text.rfind("Result:")
+    if result_marker >= 0:
+        result_brace = text.find("{", result_marker)
+        if result_brace >= 0:
+            result_candidate = extract_balanced_json_object_at(text, result_brace)
+            if result_candidate:
+                result_payload = normalize_run_payload_candidate(try_parse_json_lenient(result_candidate), markers=markers)
+                if not result_payload:
+                    result_payload = normalize_run_payload_candidate(try_parse_python_literal(result_candidate), markers=markers)
+                if result_payload:
+                    return result_payload
+    direct_payload = normalize_run_payload_candidate(try_parse_json_lenient(text), markers=markers)
+    if not direct_payload:
+        direct_payload = normalize_run_payload_candidate(try_parse_python_literal(text), markers=markers)
     if direct_payload:
         return direct_payload
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     for line in reversed(lines):
-        payload = normalize_run_payload_candidate(try_parse_json(line), markers=markers)
+        payload = normalize_run_payload_candidate(try_parse_json_lenient(line), markers=markers)
+        if not payload:
+            payload = normalize_run_payload_candidate(try_parse_python_literal(line), markers=markers)
         if payload:
             return payload
     for candidate in reversed(extract_likely_json_payload_objects(text)):
-        payload = normalize_run_payload_candidate(try_parse_json(candidate), markers=markers)
+        payload = normalize_run_payload_candidate(try_parse_json_lenient(candidate), markers=markers)
+        if not payload:
+            payload = normalize_run_payload_candidate(try_parse_python_literal(candidate), markers=markers)
         if payload:
             return payload
     for candidate in reversed(extract_balanced_json_objects(text)):
-        payload = normalize_run_payload_candidate(try_parse_json(candidate), markers=markers)
+        payload = normalize_run_payload_candidate(try_parse_json_lenient(candidate), markers=markers)
+        if not payload:
+            payload = normalize_run_payload_candidate(try_parse_python_literal(candidate), markers=markers)
         if payload:
             return payload
     return None

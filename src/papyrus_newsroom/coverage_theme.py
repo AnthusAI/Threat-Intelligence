@@ -568,7 +568,7 @@ def coverage_theme_run(
                         "code": "cloud_procedure_failed",
                         "message": str(error),
                         "alias": "story-cycle.research",
-                        "remediation": "Run poetry run papyrus procedures seed-required --apply to preload standard procedures if the required cloud procedure is missing or stale.",
+                        "remediation": "Run poetry run papyrus procedures seed-required to preload standard procedures if the required cloud procedure is missing or stale.",
                     },
                 )
     if through in {"research", "reporting"}:
@@ -844,7 +844,7 @@ def build_cloud_research_packet_records(
     if not isinstance(packet, dict):
         raise ValueError(
             f"Cloud procedure output for {assignment['id']} is missing research_packet. "
-            "Run poetry run papyrus procedures seed-required --apply if procedure seeds are stale."
+            "Run poetry run papyrus procedures seed-required if procedure seeds are stale."
         )
     normalized_packet = normalize_story_cycle_research_packet(
         packet,
@@ -902,7 +902,7 @@ def build_cloud_reporting_packet_records(
     if not isinstance(packet, dict):
         raise ValueError(
             f"Cloud procedure output for {assignment['id']} is missing reporting_context_packet. "
-            "Run poetry run papyrus procedures seed-required --apply if procedure seeds are stale."
+            "Run poetry run papyrus procedures seed-required if procedure seeds are stale."
         )
     normalized_packet = normalize_story_cycle_reporting_packet(
         packet,
@@ -928,7 +928,7 @@ def _cloud_procedure_error_payload(alias: str, assignment: dict[str, Any], error
         "message": str(error),
         "alias": alias,
         "assignmentId": assignment.get("id"),
-        "remediation": "Run poetry run papyrus procedures seed-required --apply to preload standard procedures if the required cloud procedure is missing or stale.",
+        "remediation": "Run poetry run papyrus procedures seed-required to preload standard procedures if the required cloud procedure is missing or stale.",
     }
 
 
