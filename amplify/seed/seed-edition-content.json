@@ -37,14 +37,14 @@
       "slug": "papyrus-introduction",
       "shortSlug": "INTRO",
       "section": "Papyrus",
-      "headline": "Amplify Humans",
-      "deck": "You set the mission, standards, and boundaries. Papyrus runs the newsroom within them—autopilot, not copilot.",
+      "headline": "An Autonomous Newsroom",
+      "deck": "Amplify Humans. You set the mission, standards, and boundaries; Papyrus runs the newsroom within them—autopilot, not copilot.",
       "byline": "Papyrus Editorial Team",
       "dateline": "NEWSROOM",
       "image": {
         "src": "/papyrus-plant-placeholder.png",
         "alt": "A black papyrus plant silhouette",
-        "caption": "Papyrus is built to multiply editorial judgment, not replace it.",
+        "caption": "Amplify Humans: Papyrus is built to amplify editorial judgment, not replace it.",
         "credit": "Papyrus",
         "layout": {
           "minHeight": 120,
@@ -66,7 +66,7 @@
         "Teams begin with mission, policy, and coverage intent—not blank article forms. Those constraints become operating rails for a newsroom that can keep running while you sleep, attend meetings, conduct interviews, or work on the stories only a person can do.",
         "Each edition is periodic. It has a beginning and an end. Readers can skim it, read it, and be done. The publication is not optimized to trap attention or harvest engagement signals.",
         "The curated structured knowledge graph is the newsroom's working memory: source decisions, topic priorities, relationships, and policy-bounded context. Each edition starts from what the publication has already learned, not from scratch.",
-        "When the system succeeds, editors spend more time on meaningful work—research direction, source conversations, editorial judgment, shows, and creative calls—and less time filling empty slots. Papyrus multiplies your judgment; it does not substitute for it."
+        "When the system succeeds, editors spend more time on meaningful work—research direction, source conversations, editorial judgment, shows, and creative calls—and less time filling empty slots. Papyrus amplifies your judgment; it does not substitute for it."
       ]
     },
     {
