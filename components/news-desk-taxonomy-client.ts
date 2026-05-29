@@ -34,6 +34,7 @@ import type {
   SemanticRelationRecord,
   UserDirectoryEntry,
 } from "../lib/category-repository";
+import { relationTypeKey } from "../lib/semantic-graph";
 import { DOCTRINE_DEFINITIONS, getCategoryDoctrineDefinitions, type DoctrineCategory } from "../lib/doctrine";
 import { configureAmplifyClient } from "./amplify-client-provider";
 import { isUnauthenticatedError, loadReaderSessionSnapshot, type ReaderAuthSnapshot } from "./reader-auth-state";
@@ -66,7 +67,7 @@ const NEWSROOM_ASSIGNMENT_FEED_QUERY = `
 const NEWSROOM_REFERENCE_FEED_QUERY = `
   query ListReferencesByNewsroomFeedAndCreatedAt($newsroomFeedKey: String!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String, $filter: ModelReferenceFilterInput) {
     listReferencesByNewsroomFeedAndCreatedAt(newsroomFeedKey: $newsroomFeedKey, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken, filter: $filter) {
-      items { id lineageId versionNumber previousVersionId versionState versionCreatedAt versionCreatedBy changeReason contentHash corpusId externalItemId title authors sourceUri storagePath mediaType byteSize sha256 sourcePublishedAt sourceUpdatedAt retrievedAt importRunId importedAt createdAt curationStatus curationStatusKey curationStatusUpdatedAt curationStatusUpdatedBy curationStatusReason newsroomFeedKey updatedAt }
+      items { id lineageId versionNumber previousVersionId versionState versionCreatedAt versionCreatedBy changeReason contentHash corpusId externalItemId title authors sourceUri storagePath mediaType byteSize sha256 sourcePublishedAt sourceUpdatedAt retrievedAt inboundCitationCount outboundCitationCount importRunId importedAt createdAt curationStatus curationStatusKey curationStatusUpdatedAt curationStatusUpdatedBy curationStatusReason newsroomFeedKey updatedAt }
       nextToken
     }
   }
@@ -84,6 +85,24 @@ const NEWSROOM_SEMANTIC_NODE_FEED_QUERY = `
 const NEWSROOM_SEMANTIC_RELATION_FEED_QUERY = `
   query ListSemanticRelationsByNewsroomFeedAndCreatedAt($newsroomFeedKey: String!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String, $filter: ModelSemanticRelationFilterInput) {
     listSemanticRelationsByNewsroomFeedAndCreatedAt(newsroomFeedKey: $newsroomFeedKey, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken, filter: $filter) {
+      items { id relationState predicate relationTypeId relationTypeKey relationDomain subjectKind subjectId subjectLineageId subjectVersionNumber objectKind objectId objectLineageId objectVersionNumber subjectStateKey objectStateKey objectSubjectStateKey predicateObjectStateKey subjectVersionKey objectVersionKey score confidence rank classifierId modelVersion reviewRecommended sourceSnapshotId importRunId importedAt createdAt updatedAt newsroomFeedKey metadata }
+      nextToken
+    }
+  }
+`;
+
+const LIST_SEMANTIC_RELATIONS_BY_SUBJECT_STATE_QUERY = `
+  query ListSemanticRelationsBySubjectState($subjectStateKey: String!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String, $filter: ModelSemanticRelationFilterInput) {
+    listSemanticRelationsBySubjectState(subjectStateKey: $subjectStateKey, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken, filter: $filter) {
+      items { id relationState predicate relationTypeId relationTypeKey relationDomain subjectKind subjectId subjectLineageId subjectVersionNumber objectKind objectId objectLineageId objectVersionNumber subjectStateKey objectStateKey objectSubjectStateKey predicateObjectStateKey subjectVersionKey objectVersionKey score confidence rank classifierId modelVersion reviewRecommended sourceSnapshotId importRunId importedAt createdAt updatedAt newsroomFeedKey metadata }
+      nextToken
+    }
+  }
+`;
+
+const LIST_SEMANTIC_RELATIONS_BY_OBJECT_STATE_QUERY = `
+  query ListSemanticRelationsByObjectState($objectStateKey: String!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String, $filter: ModelSemanticRelationFilterInput) {
+    listSemanticRelationsByObjectState(objectStateKey: $objectStateKey, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken, filter: $filter) {
       items { id relationState predicate relationTypeId relationTypeKey relationDomain subjectKind subjectId subjectLineageId subjectVersionNumber objectKind objectId objectLineageId objectVersionNumber subjectStateKey objectStateKey objectSubjectStateKey predicateObjectStateKey subjectVersionKey objectVersionKey score confidence rank classifierId modelVersion reviewRecommended sourceSnapshotId importRunId importedAt createdAt updatedAt newsroomFeedKey metadata }
       nextToken
     }
@@ -168,6 +187,8 @@ const GET_REFERENCE_QUERY = `
       sourcePublishedAt
       sourceUpdatedAt
       retrievedAt
+      inboundCitationCount
+      outboundCitationCount
       importRunId
       importedAt
       createdAt
@@ -911,8 +932,23 @@ export async function loadNewsroomReferencePage(options: NewsroomReferencePageOp
 export async function loadEditorSemanticRelationsData(): Promise<SemanticRelationRecord[]> {
   const testMock = getTestEditorNewsroomMock();
   if (testMock?.semanticRelations) return testMock.semanticRelations;
-  const page = await loadNewsroomSemanticRelationPage();
-  return page.items;
+  const rows: SemanticRelationRecord[] = [];
+  const seenIds = new Set<string>();
+  let nextToken: string | null | undefined = null;
+  let pageCount = 0;
+
+  do {
+    const page = await loadNewsroomSemanticRelationPage({ nextToken });
+    for (const relation of page.items) {
+      if (!relation?.id || seenIds.has(relation.id)) continue;
+      seenIds.add(relation.id);
+      rows.push(relation);
+    }
+    nextToken = page.nextToken;
+    pageCount += 1;
+  } while (nextToken && pageCount < 40);
+
+  return rows;
 }
 
 export async function loadNewsroomSemanticRelationPage(options: NewsroomSemanticRelationPageOptions = {}): Promise<NewsroomRecordPage<SemanticRelationRecord>> {
@@ -927,6 +963,50 @@ export async function loadNewsroomSemanticRelationPage(options: NewsroomSemantic
       relationDomain: options.relationDomain,
     }),
   });
+}
+
+export async function loadReferenceCitationRelations(reference: {
+  id?: string | null;
+  lineageId?: string | null;
+}): Promise<{
+  incoming: SemanticRelationRecord[];
+  outgoing: SemanticRelationRecord[];
+}> {
+  const referenceKeys = Array.from(new Set([
+    String(reference.lineageId || "").trim(),
+    String(reference.id || "").trim(),
+  ].filter(Boolean)));
+  const stateKeys = referenceKeys.map((value) => `reference#${value}#current`);
+  const [outgoingPages, incomingPages] = await Promise.all([
+    Promise.all(stateKeys.map((stateKey) => loadSemanticRelationsByState({
+      field: "listSemanticRelationsBySubjectState",
+      keyName: "subjectStateKey",
+      keyValue: stateKey,
+      query: LIST_SEMANTIC_RELATIONS_BY_SUBJECT_STATE_QUERY,
+    }))),
+    Promise.all(stateKeys.map((stateKey) => loadSemanticRelationsByState({
+      field: "listSemanticRelationsByObjectState",
+      keyName: "objectStateKey",
+      keyValue: stateKey,
+      query: LIST_SEMANTIC_RELATIONS_BY_OBJECT_STATE_QUERY,
+    }))),
+  ]);
+  const outgoing = dedupeSemanticRelationsById(outgoingPages.flat());
+  const incoming = dedupeSemanticRelationsById(incomingPages.flat());
+  return {
+    outgoing: outgoing.filter((relation) => (
+      relation.subjectKind === "reference"
+      && relation.objectKind === "reference"
+      && relationTypeKey(relation) === "cites"
+      && relation.relationState === "current"
+    )),
+    incoming: incoming.filter((relation) => (
+      relation.subjectKind === "reference"
+      && relation.objectKind === "reference"
+      && relationTypeKey(relation) === "cites"
+      && relation.relationState === "current"
+    )),
+  };
 }
 
 export async function loadEditorAssignmentsData(): Promise<{
@@ -1574,19 +1654,31 @@ async function loadNewsroomFeedPage<T>({
 
   do {
     pageCount += 1;
-    const response = await client.graphql({
-      query,
-      variables: {
-        newsroomFeedKey,
-        sortDirection: "DESC",
-        limit,
-        nextToken: cursor,
-        filter: null,
-      },
-      authMode: USER_POOL_AUTH_MODE,
-    });
-    assertNoGraphQLErrors(response.errors);
+    let response: GraphQLConnectionResponse<T>;
+    try {
+      response = await client.graphql({
+        query,
+        variables: {
+          newsroomFeedKey,
+          sortDirection: "DESC",
+          limit,
+          nextToken: cursor,
+          filter: null,
+        },
+        authMode: USER_POOL_AUTH_MODE,
+      });
+    } catch (error) {
+      throw new Error(normalizeUnknownErrorMessage(error, `Failed to load ${field}`));
+    }
     const connection = response.data?.[field];
+    if (!connection) {
+      assertNoGraphQLErrors(response.errors);
+      throw new Error(`Missing GraphQL connection payload for ${field}.`);
+    }
+    if (response.errors?.length) {
+      // Preserve list rendering when AppSync returns partial data and per-row errors.
+      console.warn(`GraphQL returned partial data for ${field}.`, response.errors);
+    }
     connectionNextToken = connection?.nextToken ?? null;
     const pageItems = ((connection?.items ?? []).filter(Boolean) as T[])
       .filter((item) => matches ? matches(item) : true);
@@ -1599,6 +1691,61 @@ async function loadNewsroomFeedPage<T>({
     nextToken: connectionNextToken,
     hasMore: Boolean(connectionNextToken),
   };
+}
+
+async function loadSemanticRelationsByState({
+  field,
+  keyName,
+  keyValue,
+  query,
+}: {
+  field: "listSemanticRelationsByObjectState" | "listSemanticRelationsBySubjectState";
+  keyName: "objectStateKey" | "subjectStateKey";
+  keyValue: string;
+  query: string;
+}): Promise<SemanticRelationRecord[]> {
+  const client = generateClient<Schema>() as unknown as {
+    graphql: (options: Record<string, unknown>) => Promise<GraphQLConnectionResponse<SemanticRelationRecord>>;
+  };
+  const rows: SemanticRelationRecord[] = [];
+  const seenIds = new Set<string>();
+  let nextToken: string | null = null;
+  let pageCount = 0;
+  do {
+    pageCount += 1;
+    const response = await client.graphql({
+      query,
+      variables: {
+        [keyName]: keyValue,
+        sortDirection: "DESC",
+        limit: 200,
+        nextToken,
+        filter: null,
+      },
+      authMode: USER_POOL_AUTH_MODE,
+    });
+    assertNoGraphQLErrors(response.errors);
+    const connection = response.data?.[field];
+    if (!connection) break;
+    for (const item of (connection.items ?? []).filter(Boolean) as SemanticRelationRecord[]) {
+      if (!item.id || seenIds.has(item.id)) continue;
+      seenIds.add(item.id);
+      rows.push(item);
+    }
+    nextToken = connection.nextToken ?? null;
+  } while (nextToken && pageCount < 200);
+  return rows;
+}
+
+function dedupeSemanticRelationsById(relations: SemanticRelationRecord[]): SemanticRelationRecord[] {
+  const seen = new Set<string>();
+  const deduped: SemanticRelationRecord[] = [];
+  for (const relation of relations) {
+    if (!relation.id || seen.has(relation.id)) continue;
+    seen.add(relation.id);
+    deduped.push(relation);
+  }
+  return deduped;
 }
 
 async function listNewsroomSectionsViaGraphql(client: ReturnType<typeof generateClient<Schema>>): Promise<NewsroomSectionRecord[]> {
@@ -1993,4 +2140,27 @@ function assertNoGraphQLErrors(errors?: unknown[] | null) {
     })
     .join("; ");
   throw new Error(details);
+}
+
+function normalizeUnknownErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  if (typeof error === "string" && error.trim()) return error;
+  if (!error || typeof error !== "object") return fallback;
+  const record = error as Record<string, unknown>;
+  const directMessage = typeof record.message === "string" ? record.message.trim() : "";
+  if (directMessage) return directMessage;
+  const errors = Array.isArray(record.errors) ? record.errors : [];
+  const nestedMessages = errors
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") return "";
+      const message = (entry as { message?: unknown }).message;
+      return typeof message === "string" ? message.trim() : "";
+    })
+    .filter(Boolean);
+  if (nestedMessages.length) return nestedMessages.join("; ");
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return fallback;
+  }
 }

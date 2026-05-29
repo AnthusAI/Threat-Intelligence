@@ -20,6 +20,13 @@ SOURCE_TEXT_STATES = {
     "NOT_APPLICABLE": "not_applicable",
 }
 
+REFERENCE_PROCESSING_STATUS = {
+    "CREATED": "created",
+    "PROCESSABLE": "processable",
+    "PROCESSED": "processed",
+    "BLOCKED": "blocked",
+}
+
 EXTRACTABLE_MEDIA_TYPES = {
     "application/pdf",
     "text/html",
@@ -219,8 +226,10 @@ def reference_source_readiness(
         state = SOURCE_READINESS_STATES["BLOCKED"]
         reason = "missing_source_material"
 
+    processing_status = reference_processing_status_for_readiness(state)
     return {
         "state": state,
+        "processingStatus": processing_status,
         "reason": reason,
         "storagePath": storage_path,
         "textStoragePath": text_storage_path,
@@ -230,6 +239,17 @@ def reference_source_readiness(
         "hasExtractionSnapshot": has_extraction_snapshot,
         "textState": text_state,
     }
+
+
+def reference_processing_status_for_readiness(readiness_state: str | None) -> str:
+    normalized = str(readiness_state or "").strip().lower()
+    if normalized == SOURCE_READINESS_STATES["URL_ONLY"]:
+        return REFERENCE_PROCESSING_STATUS["CREATED"]
+    if normalized in {SOURCE_READINESS_STATES["ACCESSIONED"], SOURCE_READINESS_STATES["EXTRACTABLE"]}:
+        return REFERENCE_PROCESSING_STATUS["PROCESSABLE"]
+    if normalized == SOURCE_READINESS_STATES["EXTRACTED"]:
+        return REFERENCE_PROCESSING_STATUS["PROCESSED"]
+    return REFERENCE_PROCESSING_STATUS["BLOCKED"]
 
 
 def build_reference_source_status_rows(
@@ -254,6 +274,7 @@ def build_reference_source_status_rows(
                 "reference": reference,
                 "readiness": readiness,
                 "state": readiness["state"],
+                "processingStatus": readiness["processingStatus"],
                 "reason": readiness["reason"],
             }
         )

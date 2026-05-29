@@ -39,7 +39,8 @@ KNOWLEDGE_IMPORT_RUN_FIELDS = (
 KNOWLEDGE_RAW_PAYLOAD_FIELDS = "id ownerType ownerId payloadKind importRunId createdAt updatedAt"
 REFERENCE_FIELDS = (
     f"{VERSION_FIELDS} id corpusId externalItemId title authors sourceUri storagePath mediaType byteSize sha256 "
-    "sourcePublishedAt sourceUpdatedAt retrievedAt importRunId importedAt createdAt curationStatus "
+    "sourcePublishedAt sourceUpdatedAt retrievedAt inboundCitationCount outboundCitationCount "
+    "importRunId importedAt createdAt curationStatus "
     "curationStatusKey curationStatusUpdatedAt curationStatusUpdatedBy curationStatusReason newsroomFeedKey updatedAt"
 )
 REFERENCE_ATTACHMENT_FIELDS = (

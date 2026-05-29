@@ -40,7 +40,7 @@ def build_reference_analysis_manifest(
         )
         raise ValueError(
             f"Cannot export analysis manifest: {len(missing_source)} accepted current references in "
-            f"{corpus_id} lack corpus source material. Run references source-status and accession URL-only "
+            f"{corpus_id} lack corpus source material. Run references process-status and accession URL-only "
             f"references first. Examples: {examples}"
         )
     missing_text = [reference for reference in accepted if not text_storage_path_for_reference(reference, attachments)]
@@ -51,8 +51,8 @@ def build_reference_analysis_manifest(
         )
         raise ValueError(
             f"Cannot export analysis manifest: {len(missing_text)} accepted current references in {corpus_id} "
-            f"lack extracted_text attachments. Run references source-status and then "
-            f"references fetch-url-text, references extract-text-now, or references attach-extracted-text. "
+            f"lack extracted_text attachments. Run references process-status and then "
+            f"references process-fetch-url-text, references process-extract-text-now, or references process-attach-extracted-text. "
             f"Examples: {examples}"
         )
     return {

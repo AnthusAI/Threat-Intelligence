@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -101,6 +102,10 @@ from .references_commands import (
     references_export_analysis_manifest,
     references_export_scope_training,
     references_extract_text_now,
+    references_fetch_pdf_url_text_queue,
+    references_recount_citation_counts,
+    references_process_dedupe_identifiers,
+    references_process_resolve_citation_stubs,
     references_filter_extracted_text,
     references_fetch_url_text,
     references_generate_metadata_from_text,
@@ -182,11 +187,11 @@ PORTED_COMMANDS = frozenset(
         "corpora:sync-to-cloud",
         "references:make-catalog",
         "references:prepare-catalog",
-        "references:register-catalog",
-        "references:register-catalog-split",
-        "references:source-status",
-        "references:create-accession-assignments",
-        "references:accession-now",
+        "references:create-from-catalog",
+        "references:create-from-catalog-split",
+        "references:process-status",
+        "references:process-create-accession-assignments",
+        "references:process-accession-now",
         "references:review-curation",
         "references:list-predictions",
         "references:review-classification",
@@ -195,11 +200,15 @@ PORTED_COMMANDS = frozenset(
         "references:labels",
         "references:discover-citation-led",
         "references:curate-recent",
-        "references:extract-text-now",
-        "references:attach-extracted-text",
-        "references:fetch-url-text",
-        "references:filter-extracted-text",
-        "references:generate-metadata-from-text",
+        "references:process-extract-text-now",
+        "references:process-attach-extracted-text",
+        "references:process-fetch-url-text",
+        "references:process-fetch-pdf-queue",
+        "references:process-recount-citation-counts",
+        "references:process-dedupe-identifiers",
+        "references:process-resolve-citation-stubs",
+        "references:process-filter-text",
+        "references:process-generate-metadata",
         "references:create-doi-backfill-assignment",
         "references:doi-backfill-now",
         "references:execute-doi-backfill",
@@ -215,8 +224,8 @@ PORTED_COMMANDS = frozenset(
         "assignments:run-reporting",
         "assignments:apply-research-packet",
         "assignments:apply-reporting-packet",
-        "assignments:intake-proposals",
-        "assignments:research-intake-now",
+        "assignments:process-proposals",
+        "assignments:process-research-now",
         "assignments:run-story-cycle",
         "assignments:story-cycle-output",
         "assignments:orphan-research-packets",
@@ -343,15 +352,18 @@ def dispatch(group: str, command: str, flags: list[str]) -> None:
         references_make_catalog(flags)
     elif route == "references:prepare-catalog":
         references_prepare_catalog(flags)
-    elif route == "references:register-catalog":
+    elif route == "references:create-from-catalog":
         references_register_catalog(flags)
-    elif route == "references:register-catalog-split":
+    elif route == "references:create-from-catalog-split":
         references_register_catalog_split(flags)
-    elif route == "references:source-status":
+    elif route == "references:process-status":
+        require_reference_process_runtime("references process-status")
         references_source_status(flags)
-    elif route == "references:create-accession-assignments":
+    elif route == "references:process-create-accession-assignments":
+        require_reference_process_runtime("references process-create-accession-assignments")
         references_create_accession_assignments(flags)
-    elif route == "references:accession-now":
+    elif route == "references:process-accession-now":
+        require_reference_process_runtime("references process-accession-now")
         references_accession_now(flags)
     elif route == "references:review-curation":
         references_review_curation(flags)
@@ -369,15 +381,32 @@ def dispatch(group: str, command: str, flags: list[str]) -> None:
         references_discover_citation_led(flags)
     elif route == "references:curate-recent":
         references_curate_recent(flags)
-    elif route == "references:extract-text-now":
+    elif route == "references:process-extract-text-now":
+        require_reference_process_runtime("references process-extract-text-now")
         references_extract_text_now(flags)
-    elif route == "references:attach-extracted-text":
+    elif route == "references:process-attach-extracted-text":
+        require_reference_process_runtime("references process-attach-extracted-text")
         references_attach_extracted_text(flags)
-    elif route == "references:fetch-url-text":
+    elif route == "references:process-fetch-url-text":
+        require_reference_process_runtime("references process-fetch-url-text")
         references_fetch_url_text(flags)
-    elif route == "references:filter-extracted-text":
+    elif route == "references:process-fetch-pdf-queue":
+        require_reference_process_runtime("references process-fetch-pdf-queue")
+        references_fetch_pdf_url_text_queue(flags)
+    elif route == "references:process-recount-citation-counts":
+        require_reference_process_runtime("references process-recount-citation-counts")
+        references_recount_citation_counts(flags)
+    elif route == "references:process-dedupe-identifiers":
+        require_reference_process_runtime("references process-dedupe-identifiers")
+        references_process_dedupe_identifiers(flags)
+    elif route == "references:process-resolve-citation-stubs":
+        require_reference_process_runtime("references process-resolve-citation-stubs")
+        references_process_resolve_citation_stubs(flags)
+    elif route == "references:process-filter-text":
+        require_reference_process_runtime("references process-filter-text")
         references_filter_extracted_text(flags)
-    elif route == "references:generate-metadata-from-text":
+    elif route == "references:process-generate-metadata":
+        require_reference_process_runtime("references process-generate-metadata")
         references_generate_metadata_from_text(flags)
     elif route == "references:create-doi-backfill-assignment":
         references_create_doi_backfill_assignment(flags)
@@ -409,9 +438,9 @@ def dispatch(group: str, command: str, flags: list[str]) -> None:
         assignments_apply_research_packet(flags)
     elif route == "assignments:apply-reporting-packet":
         assignments_apply_reporting_packet(flags)
-    elif route == "assignments:intake-proposals":
+    elif route == "assignments:process-proposals":
         assignments_intake_proposals(flags)
-    elif route == "assignments:research-intake-now":
+    elif route == "assignments:process-research-now":
         assignments_research_intake_now(flags)
     elif route == "assignments:run-story-cycle":
         assignments_run_story_cycle(flags)
@@ -708,16 +737,16 @@ def references_prepare_catalog(flags: list[str]) -> None:
 
 def references_register_catalog(flags: list[str]) -> None:
     options = parse_options(flags)
-    apply = resolve_mutation_apply(options, "references register-catalog")
+    apply = resolve_mutation_apply(options, "references create-from-catalog")
     if not options.get("catalog"):
-        raise ValueError("references register-catalog requires --catalog <catalog.json>.")
+        raise ValueError("references create-from-catalog requires --catalog <catalog.json>.")
     if not options.get("corpus-key"):
-        raise ValueError("references register-catalog requires --corpus-key <key>.")
+        raise ValueError("references create-from-catalog requires --corpus-key <key>.")
     client, _ = create_authoring_client()
     result = plan_reference_catalog_registration(client, {**options, "__apply": apply})
     print_reference_registration_summary(result["plan"], result["changes"], apply=apply)
     if not apply:
-        print("references\tregister-catalog\tapply\tskipped\tuse --dry-run to preview without writes")
+        print("references\tcreate-from-catalog\tapply\tskipped\tuse --dry-run to preview without writes")
         return
     apply_record_changes(client, result["changes"])
     update_newsroom_summary_after_reference_registration(client, result["changes"], result["plan"])
@@ -731,9 +760,9 @@ def references_register_catalog(flags: list[str]) -> None:
 
 def references_register_catalog_split(flags: list[str]) -> None:
     options = parse_options(flags)
-    apply = resolve_mutation_apply(options, "references register-catalog-split")
+    apply = resolve_mutation_apply(options, "references create-from-catalog-split")
     if not options.get("catalog"):
-        raise ValueError("references register-catalog-split requires --catalog <catalog.json>.")
+        raise ValueError("references create-from-catalog-split requires --catalog <catalog.json>.")
     steering_config = require_steering_config(options.get("config"))
     research_key = options.get("research-corpus-key") or steering_config["canonicalTopicSet"]["corpusKey"]
     news_key = options.get("news-corpus-key") or "AI-ML-journalism"
@@ -765,7 +794,7 @@ def references_register_catalog_split(flags: list[str]) -> None:
             },
         )
         print(
-            f"references\tregister-catalog-split\tbucket\t{bucket_name}\tcorpus\t{corpus_key}\t"
+            f"references\tcreate-from-catalog-split\tbucket\t{bucket_name}\tcorpus\t{corpus_key}\t"
             f"items\t{result['plan']['itemCount']}\tapply\t{'yes' if apply else 'no'}"
         )
         print_reference_registration_summary(result["plan"], result["changes"], apply=apply)
@@ -783,7 +812,7 @@ def references_register_catalog_split(flags: list[str]) -> None:
 def references_source_status(flags: list[str]) -> None:
     options = parse_options(flags)
     if not options.get("corpus-key"):
-        raise ValueError("references source-status requires --corpus-key <key>.")
+        raise ValueError("references process-status requires --corpus-key <key>.")
     steering_config = load_steering_config(options.get("config")) or require_steering_config()
     corpus_config = require_corpus_config(steering_config, options["corpus-key"], "--corpus-key")
     corpus_id = knowledge_corpus_id(corpus_config)
@@ -800,29 +829,35 @@ def references_source_status(flags: list[str]) -> None:
         extraction_index=extraction_index,
     )
     counts: dict[str, int] = {}
+    processing_counts: dict[str, int] = {}
     text_counts: dict[str, int] = {}
     for row in rows:
         counts[row["state"]] = counts.get(row["state"], 0) + 1
+        process_status = row.get("processingStatus") or row["readiness"].get("processingStatus") or "blocked"
+        processing_counts[process_status] = processing_counts.get(process_status, 0) + 1
         text_state = row["readiness"].get("textState") or SOURCE_TEXT_STATES["NOT_APPLICABLE"]
         text_counts[text_state] = text_counts.get(text_state, 0) + 1
     limit = normalize_non_negative_integer(options.get("limit"), "--limit")
     if limit is None:
         limit = 50
     selected = rows if limit == 0 else rows[:limit]
-    print(f"references\tsource-status\tcorpus\t{corpus_id}")
-    print(f"references\tsource-status\tstatus\t{status}")
+    print(f"references\tprocess-status\tcorpus\t{corpus_id}")
+    print(f"references\tprocess-status\tstatus\t{status}")
+    for process_status in ("created", "processable", "processed", "blocked"):
+        print(f"references\tprocess-status\t{process_status}\t{processing_counts.get(process_status, 0)}")
     for state in SOURCE_READINESS_STATES.values():
-        print(f"references\tsource-status\t{state}\t{counts.get(state, 0)}")
+        print(f"references\tprocess-status\treadiness-{state}\t{counts.get(state, 0)}")
     for state in SOURCE_TEXT_STATES.values():
-        print(f"references\tsource-status\t{state}\t{text_counts.get(state, 0)}")
-    print(f"references\tsource-status\textraction-snapshots\t{len(extraction_index.snapshot_ids)}")
-    print(f"references\tsource-status\trows\t{len(rows)}")
+        print(f"references\tprocess-status\ttext-{state}\t{text_counts.get(state, 0)}")
+    print(f"references\tprocess-status\textraction-snapshots\t{len(extraction_index.snapshot_ids)}")
+    print(f"references\tprocess-status\trows\t{len(rows)}")
     for row in selected:
         reference = row["reference"]
         print(
             "\t".join(
                 [
-                    "reference-source",
+                    "reference-process",
+                    row.get("processingStatus") or row["readiness"].get("processingStatus") or "blocked",
                     row["state"],
                     row["readiness"].get("textState") or SOURCE_TEXT_STATES["NOT_APPLICABLE"],
                     reference.get("curationStatus") or "-",
@@ -837,21 +872,21 @@ def references_source_status(flags: list[str]) -> None:
             )
         )
     if len(rows) > len(selected):
-        print(f"references\tsource-status\tomitted\t{len(rows) - len(selected)}\tpass --limit {len(rows)} to print every row")
+        print(f"references\tprocess-status\tomitted\t{len(rows) - len(selected)}\tpass --limit {len(rows)} to print every row")
 
 
 def references_create_accession_assignments(flags: list[str]) -> None:
     options = parse_options(flags)
-    apply = resolve_mutation_apply(options, "references create-accession-assignments")
+    apply = resolve_mutation_apply(options, "references process-create-accession-assignments")
     if not options.get("corpus-key"):
-        raise ValueError("references create-accession-assignments requires --corpus-key <key>.")
+        raise ValueError("references process-create-accession-assignments requires --corpus-key <key>.")
     steering_config = load_steering_config(options.get("config")) or require_steering_config()
     corpus_config = require_corpus_config(steering_config, options["corpus-key"], "--corpus-key")
     corpus_id = knowledge_corpus_id(corpus_config)
     status = normalize_source_status_filter(options.get("status") or "pending")
     if status == "all":
         raise ValueError(
-            "references create-accession-assignments requires --status pending|accepted|rejected|archived, not all."
+            "references process-create-accession-assignments requires --status pending|accepted|rejected|archived, not all."
         )
     client, _ = create_authoring_client()
     references = client.list_records("Reference")
@@ -878,21 +913,21 @@ def references_create_accession_assignments(flags: list[str]) -> None:
     changes = build_record_changes(client, records)
     print_reference_accession_assignment_summary(rows, changes, apply=apply)
     if not apply:
-        print("references\tcreate-accession-assignments\tapply\tskipped\tuse --dry-run to preview without writes")
+        print("references\tprocess-create-accession-assignments\tapply\tskipped\tuse --dry-run to preview without writes")
         return
     apply_record_changes(client, changes)
     update_newsroom_summary_after_assignment_creates(
         client,
         changes,
         actor_label=actor_label,
-        reason=f"references create-accession-assignments {corpus_id}",
+        reason=f"references process-create-accession-assignments {corpus_id}",
     )
 
 
 def references_accession_now(flags: list[str]) -> None:
     options = parse_options(flags)
     if not options.get("reference"):
-        raise ValueError("references accession-now requires --reference <reference-id>.")
+        raise ValueError("references process-accession-now requires --reference <reference-id>.")
     client, auth = create_authoring_client()
     references = client.list_records("Reference")
     reference = find_reference_for_source_accession(references, options["reference"])
@@ -935,7 +970,7 @@ def references_accession_now(flags: list[str]) -> None:
             client,
             changes,
             actor_label=actor_label,
-            reason=f"references accession-now create {reference['id']}",
+            reason=f"references process-accession-now create {reference['id']}",
         )
     assignment_id = reference_accession_assignment_id(reference, corpus_id)
     apply_assignment_action(
@@ -958,10 +993,10 @@ def references_accession_now(flags: list[str]) -> None:
         options=options,
         actor_label=actor_label,
     )
-    print(f"reference-accession-now\tassignment\t{assignment_id}")
-    print(f"reference-accession-now\trun\t{execution['runId']}")
-    print(f"reference-accession-now\tmanifest\t{execution['manifestPath']}")
-    print(f"reference-accession-now\tstorage-path\t{execution.get('storagePath') or '-'}")
+    print(f"reference-process-accession-now\tassignment\t{assignment_id}")
+    print(f"reference-process-accession-now\trun\t{execution['runId']}")
+    print(f"reference-process-accession-now\tmanifest\t{execution['manifestPath']}")
+    print(f"reference-process-accession-now\tstorage-path\t{execution.get('storagePath') or '-'}")
 
 
 def plan_reference_catalog_registration(client, options: dict[str, Any]) -> dict[str, Any]:
@@ -988,7 +1023,7 @@ def plan_reference_catalog_registration(client, options: dict[str, Any]) -> dict
         ]
         skipped = len(catalog_items(catalog)) - len(filtered)
         if skipped:
-            print(f"references\tregister-catalog\tskip-existing\t{skipped} duplicates")
+            print(f"references\tcreate-from-catalog\tskip-existing\t{skipped} duplicates")
         catalog = {**catalog, "items": filtered}
     plan_options = {
         "corpusConfig": corpus_config,
@@ -1019,13 +1054,13 @@ def print_reference_registration_summary(plan: dict[str, Any], changes: list[dic
     action_counts = {"create": 0, "update": 0, "noop": 0}
     for change in changes:
         action_counts[change.get("action", "noop")] = action_counts.get(change.get("action", "noop"), 0) + 1
-    print(f"references\tregister-catalog\timport-run\t{plan['importRunId']}")
-    print(f"references\tregister-catalog\titems\t{plan['itemCount']}")
+    print(f"references\tcreate-from-catalog\timport-run\t{plan['importRunId']}")
+    print(f"references\tcreate-from-catalog\titems\t{plan['itemCount']}")
     print(
-        f"references\tregister-catalog\tsummary\tcreate={action_counts['create']}\t"
+        f"references\tcreate-from-catalog\tsummary\tcreate={action_counts['create']}\t"
         f"update={action_counts['update']}\tnoop={action_counts['noop']}"
     )
-    print(f"references\tregister-catalog\tapply\t{'yes' if apply else 'no'}")
+    print(f"references\tcreate-from-catalog\tapply\t{'yes' if apply else 'no'}")
 
 
 def sync_reference_vectors_after_registration(result: dict[str, Any], options: dict[str, Any]) -> dict[str, Any]:
@@ -1069,7 +1104,7 @@ def fetch_reference_url_text_after_registration(
     options: dict[str, Any],
 ) -> dict[str, Any]:
     if parse_boolean_option(options.get("url-text"), True, "--url-text") is False:
-        return {"lines": ["references\tfetch-url-text\tdisabled"]}
+        return {"lines": ["references\tprocess-fetch-url-text\tdisabled"]}
     reference_ids = sorted(
         {
             change["expected"].get("id")
@@ -1078,9 +1113,10 @@ def fetch_reference_url_text_after_registration(
         }
     )
     if not reference_ids:
-        return {"lines": ["references\tfetch-url-text\tskipped\tno GraphQL Reference changes"]}
+        return {"lines": ["references\tprocess-fetch-url-text\tskipped\tno GraphQL Reference changes"]}
     references = client.list_records("Reference")
     attachments = client.list_records("ReferenceAttachment")
+    semantic_relations = client.list_records("SemanticRelation")
     corpus_config = result.get("corpusConfig") or {}
     corpus_id = result.get("plan", {}).get("corpusId")
     max_count = normalize_non_negative_integer(options.get("url-text-max-count"), "--url-text-max-count")
@@ -1090,6 +1126,7 @@ def fetch_reference_url_text_after_registration(
         client=client,
         references=references,
         attachments=attachments,
+        semantic_relations=semantic_relations,
         corpus_key_by_id={str(corpus_id or ""): str(corpus_config.get("key") or "")},
         corpus_id=str(corpus_id or "") or None,
         reference_ids=set(reference_ids),
@@ -1104,24 +1141,24 @@ def fetch_reference_url_text_after_registration(
         client,
         extraction["changes"],
         actor_label=str(options.get("actor") or "Papyrus content CLI"),
-        reason=f"references register-catalog fetch-url-text {corpus_id or '-'}",
+        reason=f"references create-from-catalog process-fetch-url-text {corpus_id or '-'}",
     )
     lines = [
-        f"references\tfetch-url-text\teligible\t{extraction['eligibleCount']}",
-        f"references\tfetch-url-text\tskipped-existing\t{extraction['skippedExistingCount']}",
-        f"references\tfetch-url-text\tplanned\t{extraction['plannedCount']}",
-        f"references\tfetch-url-text\tplanned-attachments\t{extraction.get('plannedAttachmentCount', 0)}",
-        f"references\tfetch-url-text\tplanned-reference-metadata\t{extraction.get('plannedReferenceMetadataCount', 0)}",
-        f"references\tfetch-url-text\tfiltered\t{extraction.get('filteredCount', 0)}",
-        f"references\tfetch-url-text\tfallback-raw\t{extraction.get('fallbackRawCount', 0)}",
-        f"references\tfetch-url-text\tchanges\t{extraction['changeCount']}",
-        f"references\tfetch-url-text\treference-metadata-changes\t{extraction.get('referenceMetadataChangeCount', 0)}",
-        f"references\tfetch-url-text\tattachment-changes\t{extraction.get('attachmentChangeCount', 0)}",
-        f"references\tfetch-url-text\tfailures\t{len(extraction['failures'])}",
-        f"references\tfetch-url-text\tmodel\t{model}",
+        f"references\tprocess-fetch-url-text\teligible\t{extraction['eligibleCount']}",
+        f"references\tprocess-fetch-url-text\tskipped-existing\t{extraction['skippedExistingCount']}",
+        f"references\tprocess-fetch-url-text\tplanned\t{extraction['plannedCount']}",
+        f"references\tprocess-fetch-url-text\tplanned-attachments\t{extraction.get('plannedAttachmentCount', 0)}",
+        f"references\tprocess-fetch-url-text\tplanned-reference-metadata\t{extraction.get('plannedReferenceMetadataCount', 0)}",
+        f"references\tprocess-fetch-url-text\tfiltered\t{extraction.get('filteredCount', 0)}",
+        f"references\tprocess-fetch-url-text\tfallback-raw\t{extraction.get('fallbackRawCount', 0)}",
+        f"references\tprocess-fetch-url-text\tchanges\t{extraction['changeCount']}",
+        f"references\tprocess-fetch-url-text\treference-metadata-changes\t{extraction.get('referenceMetadataChangeCount', 0)}",
+        f"references\tprocess-fetch-url-text\tattachment-changes\t{extraction.get('attachmentChangeCount', 0)}",
+        f"references\tprocess-fetch-url-text\tfailures\t{len(extraction['failures'])}",
+        f"references\tprocess-fetch-url-text\tmodel\t{model}",
     ]
     if max_count:
-        lines.append(f"references\tfetch-url-text\tmax-count\t{max_count}")
+        lines.append(f"references\tprocess-fetch-url-text\tmax-count\t{max_count}")
     for failure in extraction["failures"][:10]:
         lines.append(
             f"reference-url-text\tfailed\t{failure.get('referenceId') or '-'}\t"
@@ -1134,7 +1171,7 @@ def fetch_reference_url_text_after_registration(
             f"{json.dumps(fallback.get('reason') or {}, sort_keys=True)}"
         )
     if len(extraction["failures"]) > 10:
-        lines.append(f"references\tfetch-url-text\tomitted-failures\t{len(extraction['failures']) - 10}")
+        lines.append(f"references\tprocess-fetch-url-text\tomitted-failures\t{len(extraction['failures']) - 10}")
     return {"lines": lines}
 
 
@@ -1144,7 +1181,7 @@ def generate_reference_metadata_after_registration(
     options: dict[str, Any],
 ) -> dict[str, Any]:
     if parse_boolean_option(options.get("metadata-from-text"), True, "--metadata-from-text") is False:
-        return {"lines": ["references\tgenerate-metadata-from-text\tdisabled"]}
+        return {"lines": ["references\tprocess-generate-metadata\tdisabled"]}
     reference_ids = sorted(
         {
             change["expected"].get("id")
@@ -1153,7 +1190,7 @@ def generate_reference_metadata_after_registration(
         }
     )
     if not reference_ids:
-        return {"lines": ["references\tgenerate-metadata-from-text\tskipped\tno GraphQL Reference changes"]}
+        return {"lines": ["references\tprocess-generate-metadata\tskipped\tno GraphQL Reference changes"]}
     references = client.list_records("Reference")
     attachments = client.list_records("ReferenceAttachment")
     corpus_id = result.get("plan", {}).get("corpusId")
@@ -1170,13 +1207,13 @@ def generate_reference_metadata_after_registration(
         bucket=normalize_string(options.get("bucket")),
     )
     lines = [
-        f"references\tgenerate-metadata-from-text\tattempted\t{generation['attemptedCount']}",
-        f"references\tgenerate-metadata-from-text\tgenerated\t{generation['generatedCount']}",
-        f"references\tgenerate-metadata-from-text\tskipped-missing-text\t{generation['skippedMissingTextCount']}",
-        f"references\tgenerate-metadata-from-text\tgeneration-failures\t{generation['generationFailureCount']}",
+        f"references\tprocess-generate-metadata\tattempted\t{generation['attemptedCount']}",
+        f"references\tprocess-generate-metadata\tgenerated\t{generation['generatedCount']}",
+        f"references\tprocess-generate-metadata\tskipped-missing-text\t{generation['skippedMissingTextCount']}",
+        f"references\tprocess-generate-metadata\tgeneration-failures\t{generation['generationFailureCount']}",
     ]
     if max_count:
-        lines.append(f"references\tgenerate-metadata-from-text\tmax-count\t{max_count}")
+        lines.append(f"references\tprocess-generate-metadata\tmax-count\t{max_count}")
     failure_rows = [
         item for item in generation.get("items") or []
         if str(item.get("status") or "") not in {"generated", "skipped_missing_text"}
@@ -1188,7 +1225,7 @@ def generate_reference_metadata_after_registration(
             f"{reference.get('externalItemId') or '-'}\t{failure.get('error') or 'generation failed'}"
         )
     if len(failure_rows) > 10:
-        lines.append(f"references\tgenerate-metadata-from-text\tomitted-failures\t{len(failure_rows) - 10}")
+        lines.append(f"references\tprocess-generate-metadata\tomitted-failures\t{len(failure_rows) - 10}")
     return {"lines": lines}
 
 
@@ -1203,7 +1240,7 @@ def maybe_enrich_reference_catalog_title_subtitle(
     raise ValueError(
         "Pre-registration title/subtitle enrichment is disabled. "
         "Register references first, fetch extracted text, then run "
-        "`references generate-metadata-from-text`."
+        "`references process-generate-metadata`."
     )
 
 
@@ -1276,10 +1313,24 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def require_reference_process_runtime(command_name: str) -> None:
+    runtime_role = str(os.environ.get("PAPYRUS_RUNTIME_ROLE") or "").strip().lower()
+    if runtime_role and runtime_role not in {"cli", "worker"}:
+        raise ValueError(
+            f"{command_name} requires utility worker runtime with reachable GROBID service/container. "
+            f"Current PAPYRUS_RUNTIME_ROLE={runtime_role!r} is not supported."
+        )
+    if os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):
+        raise ValueError(
+            f"{command_name} requires utility worker runtime with reachable GROBID service/container. "
+            "API/Lambda runtime is not supported for process commands."
+        )
+
+
 def print_usage() -> None:
     print("Usage: poetry run papyrus <group> <command> [options]")
     print("Python-native: content inspect, content schema-check, content list articles,")
-    print("  corpora status/worker-bootstrap/sync-*, references catalog/accession/curation/export commands,")
+    print("  corpora status/worker-bootstrap/sync-*, references create/process/curate/export commands,")
     print("  assignments list, analysis profiles/validate-profiles/reindex-plan/preview-reindex/")
     print("  create-reindex-assignment/run-now/execute-assignment/entity-graph-preflight/graph-artifacts/publish-graph-snapshot/import-graph-artifact/doctor-entity-graph,")
     print("  newsroom recount-summary/repair-message-status/prune-attachments/backfill-feed-fields/")

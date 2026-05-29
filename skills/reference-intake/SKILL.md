@@ -1,12 +1,12 @@
 ---
 name: reference-intake
-description: Use this skill when ingesting or registering new Papyrus knowledge-base references, source materials, corpus attachments, reference-intake assignments, or Biblicus handoffs.
+description: Use this skill when processing or registering new Papyrus knowledge-base references, source materials, corpus attachments, reference-intake assignments, or Biblicus handoffs.
 ---
 
 # Reference Intake Skill
 
 Use this skill when new source materials need to become visible in Papyrus as
-knowledge-base references, or when debugging why newly ingested corpus materials
+knowledge-base references, or when debugging why newly processed corpus materials
 are not visible in the Newsroom.
 
 After references exist and need budgeted summaries or quality ratings, use
@@ -14,8 +14,8 @@ After references exist and need budgeted summaries or quality ratings, use
 
 If the source material came from a research agent packet, first use
 [`skills/newsroom-research-workflow/SKILL.md`](/Users/ryan/Projects/Papyrus/skills/newsroom-research-workflow/SKILL.md)
-to inspect the assignment packet. Use `assignments intake-proposals` or
-`assignments research-intake-now` to turn `proposedReferences` into pending
+to inspect the assignment packet. Use `assignments process-proposals` or
+`assignments process-research-now` to turn `proposedReferences` into pending
 reference-intake work; manual catalog construction is now the fallback.
 
 Papyrus owns newsroom visibility, reference metadata, assignments, comments,
@@ -24,9 +24,23 @@ source files, extraction artifacts, classifier artifacts, graph artifacts, and
 reproducible worker commands. Do not edit `/Users/ryan/Projects/Biblicus`
 source from Papyrus.
 
+## Terminology Contract
+
+Use this language consistently in operator-facing guidance:
+
+- `reference processing`: full DOI/URL-to-usable-reference workflow.
+- `process reference`: verb for running that workflow.
+- `register reference`: create the initial sparse `Reference`.
+- `curate reference`: editor decision workflow only.
+- `ingest`: Biblicus corpus-storage term.
+- `import`: config/artifact transfer term.
+
+Legacy command and assignment names may still use `intake`; treat those as
+historical command ids, not the preferred operator verb.
+
 ## Completion Contract
 
-If the user asks to ingest, import, add, or research new references without
+If the user asks to process, register, add, or research new references without
 saying "local only," the task is not done until the new references are
 cloud-visible:
 
@@ -103,8 +117,8 @@ Biblicus snapshot metadata on the attachment so agents can see which extractor,
 configuration, and stage produced the selected text. Do not copy that text into
 `Reference.metadata`, `Message.body`, or a raw payload.
 
-Use `references source-status` to distinguish `snapshot_extracted` from
-`text_ready`. A snapshot-only reference still needs `attach-extracted-text` to
+Use `references process-status` to distinguish `snapshot_extracted` from
+`text_ready`. A snapshot-only reference still needs `process-attach-extracted-text` to
 register the selected snapshot path before it is eligible for analysis
 manifests.
 
@@ -140,15 +154,15 @@ Do not use pending, rejected, or archived references as publishable evidence or
 agent context. They may appear in the Reference Ledger, curation assignments,
 comments, votes, and scope-training exports.
 
-Every pending reference prospect registered through `references register-catalog`
+Every pending reference prospect registered through `references create-from-catalog`
 needs an ingestion rationale. Provide it in the catalog as
 `ingestion_rationale` or through `--ingestion-rationale`. The rationale should
 briefly summarize the source material, explain how it relates to the current
 research focus, and explain why it fits the publication mission.
 
 When a research packet supplies `proposedReferences`, each proposal is still
-only a reference prospect. Register it through `assignments intake-proposals`,
-`assignments research-intake-now`, `references register-catalog`, or the
+only a reference prospect. Register it through `assignments process-proposals`,
+`assignments process-research-now`, `references create-from-catalog`, or the
 repeatable Biblicus corpus path before any curation or evidence use. Do not copy
 web-search `evidence_candidate_id` values into `evidenceItemIds`; those are audit
 identifiers, not accepted reference ids.
@@ -172,7 +186,7 @@ latest linked `research_packet` for an assignment into pending references and
 curation assignments:
 
 ```bash
-poetry run papyrus assignments intake-proposals \
+poetry run papyrus assignments process-proposals \
   --assignment <assignment-id> \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
@@ -184,7 +198,7 @@ poetry run papyrus assignments intake-proposals \
 If the research run has not happened yet, use the one-command path:
 
 ```bash
-poetry run papyrus assignments research-intake-now \
+poetry run papyrus assignments process-research-now \
   --assignment <assignment-id> \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
@@ -206,7 +220,7 @@ For automation, prefer `poetry run papyrus ... --json`. The JSON
 result includes a compact `references[]` list with reference id, item id, title,
 URL, source domain, curation assignment id, source-readiness state, and the next
 source command. Re-running the same packet intake should report the same
-references as existing/no-op rows. Use low-level `references register-catalog`
+references as existing/no-op rows. Use low-level `references create-from-catalog`
 only for arbitrary manual catalogs, compatibility debugging, or fallback
 inspection.
 
@@ -220,7 +234,7 @@ then ask for or record the human decision.
 Useful inspection command:
 
 ```bash
-poetry run papyrus references source-status \
+poetry run papyrus references process-status \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
   --status pending \
@@ -282,7 +296,7 @@ Reference visibility is created either through direct catalog registration or
 through Biblicus corpus work, S3 sync, and curation import/projection outputs:
 
 ```bash
-poetry run papyrus references register-catalog \
+poetry run papyrus references create-from-catalog \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
   --catalog <catalog.json> \
@@ -394,7 +408,7 @@ poetry run papyrus references prepare-catalog \
   --catalog <metadata/catalog.json> \
   --output .papyrus-runs/<run-id>/<corpus-key>-prepared-catalog.json
 
-poetry run papyrus references register-catalog \
+poetry run papyrus references create-from-catalog \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
   --catalog .papyrus-runs/<run-id>/<corpus-key>-prepared-catalog.json \
@@ -409,7 +423,7 @@ and must not rewrite source corpus metadata unless the user explicitly asks.
 Rejected registrations require structured scope memory:
 
 ```bash
-poetry run papyrus references register-catalog \
+poetry run papyrus references create-from-catalog \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
   --catalog <metadata/catalog.json> \
@@ -419,7 +433,7 @@ poetry run papyrus references register-catalog \
 
 ```
 
-`register-catalog` applies by default. With `--dry-run`, it only previews a
+`create-from-catalog` applies by default. With `--dry-run`, it only previews a
 `KnowledgeImportRun`, sanitized `KnowledgeRawPayload`, `Reference`,
 `ReferenceAttachment`, curation `Message`, `curation.reference-intake`
 `Assignment`, and audit/workflow `SemanticRelation` rows. Pending references get
@@ -430,7 +444,7 @@ not create `Item`, `EditionItem`, `classified_as`, or `uses_evidence` records.
 To start from a live assignment research packet:
 
 ```bash
-poetry run papyrus assignments intake-proposals \
+poetry run papyrus assignments process-proposals \
   --assignment <assignment-id> \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
@@ -439,7 +453,7 @@ poetry run papyrus assignments intake-proposals \
 ```
 
 Use `assignments research-packets --assignment <assignment-id>` only when you
-need to inspect packets manually. If `intake-proposals` cannot handle a packet,
+need to inspect packets manually. If `process-proposals` cannot handle a packet,
 use the listed `proposedReferences` to build fallback catalog metadata,
 preserving each proposal's ingestion rationale. The catalog registration step is
 what makes the prospect visible as a pending or rejected `Reference`.
@@ -447,27 +461,27 @@ what makes the prospect visible as a pending or rejected `Reference`.
 Export accepted-only manifests before analysis runs:
 
 ```bash
-poetry run papyrus references source-status \
+poetry run papyrus references process-status \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
   --status all
 
-poetry run papyrus references create-accession-assignments \
+poetry run papyrus references process-create-accession-assignments \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
   --status pending \
 
 
-poetry run papyrus references accession-now \
+poetry run papyrus references process-accession-now \
   --reference <reference-id> \
   --assignee-key <worker-run-id>
 
-poetry run papyrus references extract-text-now \
+poetry run papyrus references process-extract-text-now \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
   --assignee-key <worker-run-id>
 
-poetry run papyrus references attach-extracted-text \
+poetry run papyrus references process-attach-extracted-text \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
   --max-count 10 \

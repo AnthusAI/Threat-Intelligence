@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from html import unescape
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -25,6 +26,226 @@ class SourceSitePlugin:
 
     def enrich(self, *, reference: dict[str, Any], source_uri: str, fetcher: Callable[[str], str]) -> dict[str, Any]:
         raise NotImplementedError
+
+
+class DoiSourcePlugin(SourceSitePlugin):
+    key = "doi"
+    _DOI_PATTERN = re.compile(r"10\.\d{4,9}/\S+", flags=re.IGNORECASE)
+
+    def match(self, source_uri: str) -> bool:
+        parsed = urllib.parse.urlparse(source_uri)
+        host = (parsed.hostname or "").lower().strip()
+        if host in {"doi.org", "dx.doi.org"}:
+            return True
+        return bool(self._doi_from_source(source_uri))
+
+    def enrich(self, *, reference: dict[str, Any], source_uri: str, fetcher: Callable[[str], str]) -> dict[str, Any]:
+        now = _utc_now()
+        doi = self._doi_from_source(source_uri)
+        if not doi:
+            return {
+                "pluginKey": self.key,
+                "canonicalSourceUri": source_uri,
+                "sourceVariants": {"inputUrl": source_uri},
+                "identifiers": {
+                    "resolved": {"source_uri": source_uri, "canonical_uri": source_uri},
+                    "candidates": [],
+                    "primary": None,
+                    "warnings": [{"code": "doi_unresolved", "message": "Could not parse DOI from source URI."}],
+                },
+                "metadata": {
+                    "doiResolution": {
+                        "outcome": "doi_unresolved",
+                        "doi": "",
+                        "resolvedAt": now,
+                        "searchUsed": False,
+                        "searchHit": False,
+                        "apiFallbackUsed": False,
+                        "candidateCount": 0,
+                    }
+                },
+                "attachmentMetadata": {
+                    "sitePlugin": self.key,
+                    "doiResolution": {
+                        "outcome": "doi_unresolved",
+                        "doi": "",
+                        "resolvedAt": now,
+                    },
+                },
+                "warnings": [{"code": "doi_unresolved", "message": "Could not parse DOI from source URI."}],
+            }
+
+        warnings: list[dict[str, Any]] = []
+        doi_url = f"https://doi.org/{doi}"
+        redirect_chain: list[dict[str, Any]] = []
+        final_url = doi_url
+        final_content_type = ""
+        resolution_outcome = "pdf_not_found"
+        selected_pdf_url = ""
+        selected_via = ""
+        paywalled_or_blocked = False
+
+        try:
+            redirect_result = _resolve_redirect_chain(doi_url, max_hops=8)
+            redirect_chain = redirect_result.get("chain") or []
+            final_url = str(redirect_result.get("finalUrl") or doi_url)
+            final_content_type = str(redirect_result.get("contentType") or "")
+        except Exception as error:
+            warnings.append({"code": "doi_redirect_failed", "message": str(error), "url": doi_url})
+            resolution_outcome = "doi_unresolved"
+
+        candidate_rows: list[dict[str, Any]] = []
+        for row in _pdf_candidates_from_final_url(final_url):
+            candidate_rows.append({"url": row, "source": "redirect_rules"})
+        for row in _pdf_links_from_landing_page(final_url, fetcher=fetcher):
+            candidate_rows.append({"url": row, "source": "landing_page"})
+
+        delegated = self._delegate_to_known_plugin(reference=reference, source_uri=final_url, fetcher=fetcher)
+        if delegated:
+            delegated_canonical = _normalize_http_url(delegated.get("canonicalSourceUri"))
+            if delegated_canonical:
+                candidate_rows.insert(0, {"url": delegated_canonical, "source": "delegated_plugin"})
+                if not selected_via:
+                    selected_via = "delegated_plugin"
+
+        selected_pdf_url, selected_via, blocked = _select_verified_pdf_candidate(candidate_rows)
+        paywalled_or_blocked = paywalled_or_blocked or blocked
+
+        search_used = False
+        search_hit = False
+        if not selected_pdf_url:
+            search_used = True
+            for query in _doi_search_queries(reference=reference, doi=doi, final_url=final_url):
+                for candidate in _search_pdf_candidates(query=query, max_results=6):
+                    candidate_rows.append({"url": candidate, "source": "web_search", "query": query})
+                    for linked_pdf in _pdf_links_from_landing_page(candidate, fetcher=fetcher):
+                        candidate_rows.append(
+                            {
+                                "url": linked_pdf,
+                                "source": "web_search_landing_page",
+                                "query": query,
+                                "parentUrl": candidate,
+                            }
+                        )
+            selected_pdf_url, selected_via, blocked = _select_verified_pdf_candidate(candidate_rows)
+            paywalled_or_blocked = paywalled_or_blocked or blocked
+            search_hit = bool(selected_pdf_url and selected_via == "web_search")
+            if selected_pdf_url and selected_via == "web_search_landing_page":
+                search_hit = True
+
+        api_fallback_used = False
+        if not selected_pdf_url:
+            api_fallback_used = True
+            for candidate in _metadata_pdf_candidates(doi=doi):
+                candidate_rows.append(candidate)
+            selected_pdf_url, selected_via, blocked = _select_verified_pdf_candidate(candidate_rows)
+            paywalled_or_blocked = paywalled_or_blocked or blocked
+
+        canonical_source_uri = selected_pdf_url or _normalize_http_url(final_url) or doi_url
+        if selected_pdf_url:
+            resolution_outcome = "pdf_selected"
+        elif resolution_outcome != "doi_unresolved" and paywalled_or_blocked:
+            resolution_outcome = "paywalled_or_blocked"
+        elif resolution_outcome != "doi_unresolved":
+            resolution_outcome = "pdf_not_found"
+
+        resolved = {
+            "doi": doi,
+            "source_uri": source_uri,
+            "canonical_uri": canonical_source_uri,
+            "doi_url": doi_url,
+            "redirect_final_url": final_url,
+        }
+        candidates = [
+            {"type": "doi", "value": doi, "source": "doi_source", "confidence": 1.0, "rank": 10},
+        ]
+        if selected_pdf_url:
+            candidates.append(
+                {
+                    "type": "canonical_uri",
+                    "value": selected_pdf_url,
+                    "source": selected_via or "pdf_probe",
+                    "confidence": 0.95,
+                    "rank": 20,
+                }
+            )
+
+        variants = {
+            "inputUrl": source_uri,
+            "doiUrl": doi_url,
+            "redirectFinalUrl": final_url,
+            "selectedPdfUrl": selected_pdf_url or None,
+            "selectedPdfSource": selected_via or None,
+            "redirectChain": redirect_chain,
+            "candidatePdfUrls": [row.get("url") for row in candidate_rows if _normalize_http_url(row.get("url"))][:30],
+        }
+        resolution_payload = {
+            "outcome": resolution_outcome,
+            "doi": doi,
+            "doiUrl": doi_url,
+            "redirectFinalUrl": final_url,
+            "redirectFinalContentType": final_content_type,
+            "selectedPdfUrl": selected_pdf_url or None,
+            "selectedPdfSource": selected_via or None,
+            "searchUsed": search_used,
+            "searchHit": search_hit,
+            "apiFallbackUsed": api_fallback_used,
+            "paywalledOrBlocked": paywalled_or_blocked,
+            "candidateCount": len(candidate_rows),
+            "resolvedAt": now,
+            "redirectChain": redirect_chain,
+            "candidates": candidate_rows[:40],
+        }
+
+        return {
+            "pluginKey": self.key,
+            "canonicalSourceUri": canonical_source_uri,
+            "sourceVariants": variants,
+            "identifiers": {
+                "resolved": resolved,
+                "candidates": candidates,
+                "primary": {"type": "doi", "value": doi},
+                "warnings": warnings,
+            },
+            "metadata": {
+                "doi": doi,
+                "doiResolution": resolution_payload,
+                "resolvedAt": now,
+            },
+            "attachmentMetadata": {
+                "sitePlugin": self.key,
+                "doi": doi,
+                "doiResolution": resolution_payload,
+                "resolvedAt": now,
+            },
+            "warnings": warnings,
+        }
+
+    def _delegate_to_known_plugin(
+        self,
+        *,
+        reference: dict[str, Any],
+        source_uri: str,
+        fetcher: Callable[[str], str],
+    ) -> dict[str, Any] | None:
+        normalized = _normalize_http_url(source_uri)
+        if not normalized:
+            return None
+        for plugin in _PLUGINS:
+            if plugin.key == self.key:
+                continue
+            if plugin.match(normalized):
+                return plugin.enrich(reference=reference, source_uri=normalized, fetcher=fetcher)
+        return None
+
+    def _doi_from_source(self, source_uri: str) -> str:
+        parsed = urllib.parse.urlparse(source_uri)
+        host = (parsed.hostname or "").lower().strip()
+        if host in {"doi.org", "dx.doi.org"}:
+            token = (parsed.path or "").strip("/").strip()
+            return _normalize_doi(token)
+        match = self._DOI_PATTERN.search(source_uri.strip())
+        return _normalize_doi(match.group(0)) if match else ""
 
 
 class ArxivSourcePlugin(SourceSitePlugin):
@@ -65,7 +286,7 @@ class ArxivSourcePlugin(SourceSitePlugin):
                 ],
             }
 
-        canonical_pdf_url = f"https://arxiv.org/pdf/{paper_id}"
+        canonical_pdf_url = f"https://arxiv.org/pdf/{paper_id}.pdf"
         canonical_abs_url = f"https://arxiv.org/abs/{paper_id}"
         canonical_html_url = f"https://arxiv.org/html/{paper_id}"
 
@@ -212,8 +433,80 @@ class YouTubeSourcePlugin(SourceSitePlugin):
         }
 
 
+class AclAnthologySourcePlugin(SourceSitePlugin):
+    key = "acl_anthology"
+
+    def match(self, source_uri: str) -> bool:
+        parsed = urllib.parse.urlparse(source_uri)
+        host = (parsed.hostname or "").lower()
+        if host != "aclanthology.org":
+            return False
+        path = (parsed.path or "").strip()
+        if not path:
+            return False
+        return bool(re.match(r"^/[A-Za-z0-9._-]+/?$", path))
+
+    def enrich(self, *, reference: dict[str, Any], source_uri: str, fetcher: Callable[[str], str]) -> dict[str, Any]:
+        parsed = urllib.parse.urlparse(source_uri)
+        slug = (parsed.path or "").strip().strip("/")
+        if not slug:
+            return {
+                "pluginKey": self.key,
+                "canonicalSourceUri": source_uri,
+                "sourceVariants": {"inputUrl": source_uri},
+                "identifiers": {"resolved": {}, "candidates": [], "primary": None, "warnings": []},
+                "metadata": {},
+                "attachmentMetadata": {"sitePlugin": self.key},
+                "warnings": [],
+            }
+        base_slug = re.sub(r"\.pdf$", "", slug, flags=re.IGNORECASE)
+        canonical_landing_url = f"https://aclanthology.org/{base_slug}/"
+        canonical_pdf_url = f"https://aclanthology.org/{base_slug}.pdf"
+        now = _utc_now()
+        resolved = {"acl_anthology_id": base_slug}
+        candidates = [
+            {
+                "type": "acl_anthology_id",
+                "value": base_slug,
+                "source": "acl_anthology_url",
+                "confidence": 1.0,
+                "rank": 10,
+            }
+        ]
+        return {
+            "pluginKey": self.key,
+            "canonicalSourceUri": canonical_pdf_url,
+            "sourceVariants": {
+                "inputUrl": source_uri,
+                "canonicalLandingUrl": canonical_landing_url,
+                "canonicalPdfUrl": canonical_pdf_url,
+            },
+            "identifiers": {
+                "resolved": resolved,
+                "candidates": candidates,
+                "primary": {"type": "acl_anthology_id", "value": base_slug},
+                "warnings": [],
+            },
+            "metadata": {
+                "paperId": base_slug,
+                "canonicalLandingUrl": canonical_landing_url,
+                "canonicalPdfUrl": canonical_pdf_url,
+                "resolvedAt": now,
+            },
+            "attachmentMetadata": {
+                "sitePlugin": self.key,
+                "canonicalLandingUrl": canonical_landing_url,
+                "canonicalPdfUrl": canonical_pdf_url,
+                "resolvedAt": now,
+            },
+            "warnings": [],
+        }
+
+
 _PLUGINS: tuple[SourceSitePlugin, ...] = (
+    DoiSourcePlugin(),
     ArxivSourcePlugin(),
+    AclAnthologySourcePlugin(),
     YouTubeSourcePlugin(),
 )
 
@@ -386,6 +679,301 @@ def _fetch_url_text(url: str, *, timeout: int = 20) -> str:
     with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec B310 - fixed web fetch URL
         raw = response.read()
     return raw.decode("utf-8", errors="replace")
+
+
+def _normalize_doi(value: str) -> str:
+    token = str(value or "").strip()
+    if not token:
+        return ""
+    token = re.sub(r"^\s*https?://(?:dx\.)?doi\.org/", "", token, flags=re.IGNORECASE)
+    token = token.strip().strip("/")
+    match = re.search(r"10\.\d{4,9}/\S+", token, flags=re.IGNORECASE)
+    if not match:
+        return ""
+    return match.group(0).rstrip(").,;")
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[override]
+        return None
+
+
+def _resolve_redirect_chain(url: str, *, max_hops: int = 8) -> dict[str, Any]:
+    chain: list[dict[str, Any]] = []
+    current = url
+    opener = urllib.request.build_opener(_NoRedirectHandler())
+    for _ in range(max_hops):
+        request = urllib.request.Request(current, headers={"User-Agent": "Papyrus DOI resolver"})
+        try:
+            response = opener.open(request, timeout=15)  # nosec B310 - fixed web fetch URL
+            status = int(getattr(response, "status", response.getcode()))
+            content_type = str(response.headers.get("Content-Type") or "")
+            chain.append({"url": current, "status": status, "location": "", "contentType": content_type})
+            return {"chain": chain, "finalUrl": current, "contentType": content_type}
+        except urllib.error.HTTPError as error:
+            status = int(getattr(error, "code", 0) or 0)
+            location = str(error.headers.get("Location") or "").strip()
+            content_type = str(error.headers.get("Content-Type") or "")
+            if status in {301, 302, 303, 307, 308} and location:
+                next_url = urllib.parse.urljoin(current, location)
+                chain.append({"url": current, "status": status, "location": next_url, "contentType": content_type})
+                current = next_url
+                continue
+            chain.append({"url": current, "status": status, "location": "", "contentType": content_type})
+            return {"chain": chain, "finalUrl": current, "contentType": content_type}
+        except Exception:
+            break
+    return {"chain": chain, "finalUrl": current, "contentType": ""}
+
+
+def _pdf_candidates_from_final_url(url: str) -> list[str]:
+    normalized = _normalize_http_url(url)
+    if not normalized:
+        return []
+    parsed = urllib.parse.urlparse(normalized)
+    host = (parsed.hostname or "").lower().strip()
+    path = (parsed.path or "").strip()
+    candidates: list[str] = []
+    if normalized.lower().endswith(".pdf"):
+        candidates.append(normalized)
+    if host == "aclanthology.org":
+        slug = path.strip("/").rstrip("/")
+        if slug and not slug.lower().endswith(".pdf"):
+            candidates.append(f"https://aclanthology.org/{slug}.pdf")
+    return _dedupe_urls(candidates)
+
+
+def _pdf_links_from_landing_page(url: str, *, fetcher: Callable[[str], str]) -> list[str]:
+    normalized = _normalize_http_url(url)
+    if not normalized or normalized.lower().endswith(".pdf"):
+        return []
+    try:
+        body = fetcher(normalized)
+    except Exception:
+        return []
+    links = re.findall(r'href=["\']([^"\']+)["\']', body, flags=re.IGNORECASE)
+    candidates: list[str] = []
+    for href in links:
+        resolved = urllib.parse.urljoin(normalized, unescape(href))
+        resolved_url = _normalize_http_url(resolved)
+        if not resolved_url:
+            continue
+        if ".pdf" in resolved_url.lower():
+            candidates.append(resolved_url)
+    return _dedupe_urls(candidates)
+
+
+def _select_verified_pdf_candidate(candidate_rows: list[dict[str, Any]]) -> tuple[str, str, bool]:
+    blocked_seen = False
+    for row in candidate_rows:
+        candidate_url = _normalize_http_url(row.get("url"))
+        if not candidate_url:
+            continue
+        probe = _probe_pdf_url(candidate_url)
+        row["probe"] = probe
+        if probe.get("blocked"):
+            blocked_seen = True
+        if probe.get("isPdf"):
+            return candidate_url, str(row.get("source") or "pdf_probe"), blocked_seen
+    return "", "", blocked_seen
+
+
+def _probe_pdf_url(url: str) -> dict[str, Any]:
+    request = urllib.request.Request(url, method="HEAD", headers={"User-Agent": "Papyrus DOI PDF probe"})
+    try:
+        with urllib.request.urlopen(request, timeout=12) as response:  # nosec B310 - fixed web fetch URL
+            content_type = str(response.headers.get("Content-Type") or "").lower()
+            status = int(getattr(response, "status", response.getcode()))
+            if "pdf" in content_type:
+                return {"ok": True, "isPdf": True, "status": status, "contentType": content_type, "blocked": False}
+    except Exception:
+        pass
+
+    request = urllib.request.Request(url, headers={"User-Agent": "Papyrus DOI PDF probe"})
+    try:
+        with urllib.request.urlopen(request, timeout=12) as response:  # nosec B310 - fixed web fetch URL
+            content_type = str(response.headers.get("Content-Type") or "").lower()
+            status = int(getattr(response, "status", response.getcode()))
+            is_pdf = "pdf" in content_type or url.lower().endswith(".pdf")
+            return {"ok": True, "isPdf": is_pdf, "status": status, "contentType": content_type, "blocked": False}
+    except urllib.error.HTTPError as error:
+        status = int(getattr(error, "code", 0) or 0)
+        return {
+            "ok": False,
+            "isPdf": False,
+            "status": status,
+            "contentType": str(error.headers.get("Content-Type") or "").lower(),
+            "blocked": status in {401, 403, 407, 451},
+        }
+    except Exception:
+        return {"ok": False, "isPdf": False, "status": 0, "contentType": "", "blocked": False}
+
+
+def _doi_search_queries(*, reference: dict[str, Any], doi: str, final_url: str) -> list[str]:
+    title = str(reference.get("title") or "").strip()
+    subtitle = _reference_subtitle(reference)
+    authors = _reference_authors(reference)
+    rich_parts = [part for part in [title, "PDF", subtitle, authors, doi] if part]
+    rich_query = " ".join(rich_parts).strip()
+
+    queries: list[str] = []
+    if rich_query:
+        queries.append(rich_query)
+    queries.extend([f'"{doi}" filetype:pdf', f'"{doi}" pdf'])
+    parsed = urllib.parse.urlparse(final_url or "")
+    host = (parsed.hostname or "").strip().lower()
+    if host:
+        queries.append(f'"{doi}" site:{host} pdf')
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for query in queries:
+        key = query.strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(query.strip())
+        if len(deduped) >= 3:
+            break
+    return deduped
+
+
+def _search_pdf_candidates(*, query: str, max_results: int = 6) -> list[str]:
+    if not query.strip():
+        return []
+    encoded = urllib.parse.quote_plus(query)
+    search_url = f"https://duckduckgo.com/html/?q={encoded}"
+    request = urllib.request.Request(search_url, headers={"User-Agent": "Papyrus DOI resolver"})
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:  # nosec B310 - fixed web fetch URL
+            body = response.read().decode("utf-8", errors="replace")
+    except Exception:
+        return []
+    links = re.findall(r'href=["\']([^"\']+)["\']', body, flags=re.IGNORECASE)
+    candidates: list[str] = []
+    for href in links:
+        link = unescape(href)
+        if "uddg=" in link:
+            parsed = urllib.parse.urlparse(link)
+            params = urllib.parse.parse_qs(parsed.query or "")
+            if params.get("uddg"):
+                link = params["uddg"][0]
+        normalized = _normalize_http_url(link)
+        if not normalized:
+            continue
+        if "duckduckgo.com" in normalized:
+            continue
+        candidates.append(normalized)
+        if len(candidates) >= max_results:
+            break
+    return _dedupe_urls(candidates)
+
+
+def _metadata_pdf_candidates(*, doi: str) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    rows.extend(_crossref_pdf_candidates(doi=doi))
+    rows.extend(_openalex_pdf_candidates(doi=doi))
+    return rows
+
+
+def _crossref_pdf_candidates(*, doi: str) -> list[dict[str, Any]]:
+    encoded = urllib.parse.quote(doi, safe="")
+    url = f"https://api.crossref.org/works/{encoded}"
+    payload = _json_get(url)
+    message = payload.get("message") if isinstance(payload.get("message"), dict) else {}
+    rows: list[dict[str, Any]] = []
+    links = message.get("link") if isinstance(message, dict) else None
+    if isinstance(links, list):
+        for entry in links:
+            if not isinstance(entry, dict):
+                continue
+            candidate_url = _normalize_http_url(entry.get("URL"))
+            if not candidate_url:
+                continue
+            rows.append({"url": candidate_url, "source": "crossref", "kind": "link"})
+    resource = message.get("resource") if isinstance(message, dict) else None
+    if isinstance(resource, dict):
+        primary = _normalize_http_url(resource.get("primary", {}).get("URL") if isinstance(resource.get("primary"), dict) else None)
+        if primary:
+            rows.append({"url": primary, "source": "crossref", "kind": "resource_primary"})
+    return _dedupe_candidate_rows(rows)
+
+
+def _openalex_pdf_candidates(*, doi: str) -> list[dict[str, Any]]:
+    encoded = urllib.parse.quote(f"https://doi.org/{doi}", safe="")
+    url = f"https://api.openalex.org/works/{encoded}"
+    payload = _json_get(url)
+    rows: list[dict[str, Any]] = []
+    open_access = payload.get("open_access") if isinstance(payload.get("open_access"), dict) else {}
+    for key in ("oa_url",):
+        candidate_url = _normalize_http_url(open_access.get(key))
+        if candidate_url:
+            rows.append({"url": candidate_url, "source": "openalex", "kind": key})
+    best = payload.get("best_oa_location") if isinstance(payload.get("best_oa_location"), dict) else {}
+    for key in ("pdf_url", "landing_page_url"):
+        candidate_url = _normalize_http_url(best.get(key))
+        if candidate_url:
+            rows.append({"url": candidate_url, "source": "openalex", "kind": key})
+    return _dedupe_candidate_rows(rows)
+
+
+def _json_get(url: str) -> dict[str, Any]:
+    request = urllib.request.Request(url, headers={"User-Agent": "Papyrus DOI resolver"})
+    with urllib.request.urlopen(request, timeout=15) as response:  # nosec B310 - fixed web fetch URL
+        payload = response.read().decode("utf-8", errors="replace")
+    parsed = json.loads(payload)
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _dedupe_urls(rows: list[str]) -> list[str]:
+    seen: set[str] = set()
+    output: list[str] = []
+    for row in rows:
+        url = _normalize_http_url(row)
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        output.append(url)
+    return output
+
+
+def _dedupe_candidate_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    output: list[dict[str, Any]] = []
+    for row in rows:
+        candidate_url = _normalize_http_url(row.get("url"))
+        if not candidate_url or candidate_url in seen:
+            continue
+        seen.add(candidate_url)
+        output.append({**row, "url": candidate_url})
+    return output
+
+
+def _reference_subtitle(reference: dict[str, Any]) -> str:
+    metadata = reference.get("metadata")
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except json.JSONDecodeError:
+            metadata = {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+    return str(
+        metadata.get("subtitle")
+        or metadata.get("original_subtitle")
+        or metadata.get("originalSubtitle")
+        or ""
+    ).strip()
+
+
+def _reference_authors(reference: dict[str, Any]) -> str:
+    authors = reference.get("authors")
+    if isinstance(authors, list):
+        parts = [str(value).strip() for value in authors if str(value or "").strip()]
+        if parts:
+            return ", ".join(parts[:6])
+    if isinstance(authors, str):
+        return authors.strip()
+    return ""
 
 
 def _arxiv_abstract_from_html(html: str) -> str:

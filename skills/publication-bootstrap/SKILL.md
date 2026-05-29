@@ -131,7 +131,7 @@ poetry run papyrus knowledge concepts import-types --config corpora/papyrus-sema
 Register source materials:
 
 ```bash
-poetry run papyrus references register-catalog \
+poetry run papyrus references create-from-catalog \
   --config <steering.yml> \
   --corpus-key <corpus-key> \
   --catalog .papyrus-runs/<run-id>/<corpus-key>-prepared-catalog.json \

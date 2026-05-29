@@ -102,20 +102,20 @@ def assignments_intake_proposals(flags: list[str]) -> None:
     if options.get("json"):
         print(json.dumps({"ok": True, **result}, indent=2))
         return
-    print(f"assignments\tintake-proposals\tassignment\t{result['assignmentId']}")
-    print(f"assignments\tintake-proposals\tcatalog\t{result.get('catalogPath')}")
-    print(f"assignments\tintake-proposals\tregistered\t{result.get('registeredReferenceCount')}")
+    print(f"assignments\tprocess-proposals\tassignment\t{result['assignmentId']}")
+    print(f"assignments\tprocess-proposals\tcatalog\t{result.get('catalogPath')}")
+    print(f"assignments\tprocess-proposals\tregistered\t{result.get('registeredReferenceCount')}")
 
 
 def assignments_research_intake_now(flags: list[str]) -> None:
     options = parse_options(flags)
-    apply = resolve_mutation_apply(options, "assignments research-intake-now")
+    apply = resolve_mutation_apply(options, "assignments process-research-now")
     if not options.get("assignment"):
-        raise ValueError("assignments research-intake-now requires --assignment <id>.")
+        raise ValueError("assignments process-research-now requires --assignment <id>.")
     if not options.get("config"):
-        raise ValueError("assignments research-intake-now requires --config <steering.yml>.")
+        raise ValueError("assignments process-research-now requires --config <steering.yml>.")
     if not options.get("corpus-key"):
-        raise ValueError("assignments research-intake-now requires --corpus-key <key>.")
+        raise ValueError("assignments process-research-now requires --corpus-key <key>.")
     research_flags = [
         "--assignment",
         str(options["assignment"]),
@@ -135,8 +135,8 @@ def assignments_research_intake_now(flags: list[str]) -> None:
     if options.get("json"):
         print(json.dumps({"ok": True, "applyResult": apply_result, **intake_result}, indent=2))
         return
-    print(f"assignments\tresearch-intake-now\tassignment\t{intake_result['assignmentId']}")
-    print(f"assignments\tresearch-intake-now\tregistered\t{intake_result.get('registeredReferenceCount')}")
+    print(f"assignments\tprocess-research-now\tassignment\t{intake_result['assignmentId']}")
+    print(f"assignments\tprocess-research-now\tregistered\t{intake_result.get('registeredReferenceCount')}")
 
 
 def assignments_run_story_cycle(flags: list[str]) -> None:

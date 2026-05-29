@@ -55,7 +55,7 @@ def update_newsroom_summary_after_reference_registration(
     client.update_newsroom_summary(
         delta,
         actor_label="Papyrus content CLI",
-        reason=f"references register-catalog {plan['importRunId']}",
+        reason=f"references create-from-catalog {plan['importRunId']}",
     )
 
 

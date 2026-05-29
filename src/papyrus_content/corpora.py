@@ -248,12 +248,12 @@ def next_corpus_bootstrap_command(status: dict[str, Any]) -> str:
         )
     if status["graph"]["references"]["total"] != status["s3"]["items"]:
         return (
-            f"poetry run papyrus references register-catalog --config <steering.yml> "
+            f"poetry run papyrus references create-from-catalog --config <steering.yml> "
             f"--corpus-key {status['key']} --catalog {status['local']['path']}"
         )
     if not status["readiness"]["readyForAcceptedAnalysis"]:
         return (
-            f"poetry run papyrus references source-status --config <steering.yml> "
+            f"poetry run papyrus references process-status --config <steering.yml> "
             f"--corpus-key {status['key']} --status accepted"
         )
     return (

@@ -8,6 +8,8 @@ Papyrus should treat this as a newsroom buildout, not a one-off import. The
 goal is to turn source material into visible `Reference` prospects, curate an
 accepted evidence set, use Biblicus to discover and tune taxonomy/graph
 artifacts, and then import the accepted steering state back into Papyrus.
+Use `reference processing` as the umbrella term for this end-to-end source
+workflow.
 
 For worker setup and cloud-to-local corpus synchronization, also read
 [`docs/newsroom-worker-bootstrap.md`](newsroom-worker-bootstrap.md). S3 corpus
@@ -18,6 +20,11 @@ sync, local Biblicus execution, and GraphQL registration are separate steps.
 Use these terms consistently:
 
 - `source material`: the original file or fetched page.
+- `reference processing`: the full workflow from sparse seed (`DOI`/URL/minimal
+  metadata) to usable knowledge reference.
+- `process reference`: run registration, source resolution/acquisition, text
+  extraction, and graph expansion.
+- `register reference`: create the initial sparse `Reference` row.
 - `corpus accession`: the durable local/S3 record of a source material plus
   sidecar metadata.
 - `reference prospect`: a GraphQL-visible `Reference` with
@@ -35,6 +42,12 @@ Use these terms consistently:
   topic.
 - `authoritative label`: an editor-approved topic label used as supervised
   steering.
+
+Reserved meanings:
+
+- `ingest`: Biblicus corpus-storage operation.
+- `import`: config/artifact/type/projection import into Papyrus.
+- `curate`: editorial decision workflow only.
 
 ## Canonical Corpus Accession
 
@@ -153,7 +166,7 @@ duplicate extracted text into a second canonical location.
      --catalog corpora/<corpus-key>/metadata/catalog.json \
      --output .papyrus-runs/<run-id>/<corpus-key>-prepared-catalog.json
 
-   poetry run papyrus references register-catalog \
+   poetry run papyrus references create-from-catalog \
      --config <steering.yml> \
      --corpus-key <corpus-key> \
      --catalog .papyrus-runs/<run-id>/<corpus-key>-prepared-catalog.json \
@@ -167,37 +180,37 @@ duplicate extracted text into a second canonical location.
    evidence, or edition planning.
 
 7. Ensure accepted references have source material and text artifacts. Use
-   `source-status` to find URL-only or unextracted references, accession the
+   `process-status` to find URL-only or unextracted references, accession the
    sources, run Biblicus extraction through `reference.text-extraction`, and
    register extracted text attachments. Accession and extraction are separate:
    the first creates or updates corpus source files, and the second creates
    Biblicus extraction snapshots that GraphQL references by path. In
-   `source-status`, `snapshot_extracted` means Biblicus text exists but no
+   `process-status`, `snapshot_extracted` means Biblicus text exists but no
    `extracted_text` attachment records the selected snapshot yet; `text_ready`
    means a snapshot-backed attachment exists.
 
    ```bash
-   poetry run papyrus references source-status \
+   poetry run papyrus references process-status \
      --config <steering.yml> \
      --corpus-key <corpus-key> \
      --status all
 
-   poetry run papyrus references create-accession-assignments \
+   poetry run papyrus references process-create-accession-assignments \
      --config <steering.yml> \
      --corpus-key <corpus-key> \
      --status pending \
 
 
-   poetry run papyrus references accession-now \
+   poetry run papyrus references process-accession-now \
      --reference <reference-id> \
      --assignee-key <worker-run-id>
 
-   poetry run papyrus references extract-text-now \
+   poetry run papyrus references process-extract-text-now \
      --config <steering.yml> \
      --corpus-key <corpus-key> \
      --assignee-key <worker-run-id>
 
-   poetry run papyrus references attach-extracted-text \
+   poetry run papyrus references process-attach-extracted-text \
      --config <steering.yml> \
      --corpus-key <corpus-key> \
      --max-count 10 \

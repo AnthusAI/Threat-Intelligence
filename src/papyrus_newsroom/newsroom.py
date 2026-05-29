@@ -1576,15 +1576,16 @@ def papyrus_reference_fetch_url_text(
     max_count: int = 0,
 ) -> dict[str, Any]:
     """
-    Fetch extracted text for URL-backed references via MarkItDown and attach it on S3.
+    Process URL/PDF extraction for references and attach extracted text artifacts.
     """
+    _require_reference_process_worker_runtime("references process-fetch-url-text")
     command = [
         "npm",
         "run",
         "content",
         "--",
         "references",
-        "fetch-url-text",
+        "process-fetch-url-text",
         "--corpus-key",
         _required(corpus_key, "corpus_key"),
         "--status",
@@ -1612,7 +1613,7 @@ def papyrus_reference_fetch_url_text(
     def _metric(name: str) -> int | None:
         for line in (result.stdout or "").splitlines():
             parts = line.strip().split("\t")
-            if len(parts) >= 4 and parts[0] == "references" and parts[1] == "fetch-url-text" and parts[2] == name:
+            if len(parts) >= 4 and parts[0] == "references" and parts[1] == "process-fetch-url-text" and parts[2] == name:
                 try:
                     return int(parts[3])
                 except ValueError:
@@ -1652,13 +1653,14 @@ def papyrus_reference_filter_extracted_text(
     """
     Re-filter existing extracted text attachments and refresh canonical extracted_text.
     """
+    _require_reference_process_worker_runtime("references process-filter-text")
     command = [
         "npm",
         "run",
         "content",
         "--",
         "references",
-        "filter-extracted-text",
+        "process-filter-text",
         "--corpus-key",
         _required(corpus_key, "corpus_key"),
         "--status",
@@ -1690,7 +1692,7 @@ def papyrus_reference_filter_extracted_text(
         text=True,
     )
 
-    def _metric(name: str, section: str = "references", command_name: str = "filter-extracted-text") -> int | None:
+    def _metric(name: str, section: str = "references", command_name: str = "process-filter-text") -> int | None:
         for line in (result.stdout or "").splitlines():
             parts = line.strip().split("\t")
             if len(parts) >= 4 and parts[0] == section and parts[1] == command_name and parts[2] == name:
@@ -1712,7 +1714,7 @@ def papyrus_reference_filter_extracted_text(
             "skippedMissingSource": _metric("skipped-missing-source"),
             "changes": _metric("changes"),
             "failures": _metric("failures"),
-            "metadataGenerated": _metric("generated", section="references", command_name="generate-metadata-from-text"),
+            "metadataGenerated": _metric("generated", section="references", command_name="process-generate-metadata"),
             "stdout": result.stdout,
             "stderr": result.stderr,
         }
@@ -1732,13 +1734,14 @@ def papyrus_reference_generate_metadata_from_text(
     """
     Generate title/subtitle/summary from extracted reference text only.
     """
+    _require_reference_process_worker_runtime("references process-generate-metadata")
     command = [
         "npm",
         "run",
         "content",
         "--",
         "references",
-        "generate-metadata-from-text",
+        "process-generate-metadata",
         "--corpus-key",
         _required(corpus_key, "corpus_key"),
         "--status",
@@ -1770,7 +1773,7 @@ def papyrus_reference_generate_metadata_from_text(
             if (
                 len(parts) >= 4
                 and parts[0] == "references"
-                and parts[1] == "generate-metadata-from-text"
+                and parts[1] == "process-generate-metadata"
                 and parts[2] == name
             ):
                 try:
@@ -1792,6 +1795,20 @@ def papyrus_reference_generate_metadata_from_text(
             "stderr": result.stderr,
         }
     }
+
+
+def _require_reference_process_worker_runtime(command_name: str) -> None:
+    runtime_role = str(os.environ.get("PAPYRUS_RUNTIME_ROLE") or "").strip().lower()
+    if runtime_role and runtime_role not in {"cli", "worker"}:
+        raise ValueError(
+            f"{command_name} requires utility worker runtime with reachable GROBID service/container. "
+            f"Current PAPYRUS_RUNTIME_ROLE={runtime_role!r} is not supported."
+        )
+    if os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):
+        raise ValueError(
+            f"{command_name} requires utility worker runtime with reachable GROBID service/container. "
+            "API/Lambda runtime is not supported for process commands."
+        )
 
 
 def papyrus_get_semantic_object(kind: str, object_id: str) -> dict[str, Any]:

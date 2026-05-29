@@ -219,7 +219,7 @@ paths in `papyrus`; do not hand-edit
    accept evidence or publish anything.
 
    ```bash
-   poetry run papyrus assignments research-intake-now \
+   poetry run papyrus assignments process-research-now \
      --assignment <assignment-id> \
      --config corpora/papyrus-steering.yml \
      --corpus-key <corpus-key> \
@@ -279,10 +279,10 @@ paths in `papyrus`; do not hand-edit
    `persisted`; do not infer persistence from a successful Tactus procedure run.
 
 7. If a packet has already been persisted and only the proposal intake step is
-   needed, use `intake-proposals` instead of manually building a catalog:
+   needed, use `process-proposals` instead of manually building a catalog:
 
    ```bash
-   poetry run papyrus assignments intake-proposals \
+   poetry run papyrus assignments process-proposals \
      --assignment <assignment-id> \
      --config corpora/papyrus-steering.yml \
      --corpus-key <corpus-key> \
@@ -297,7 +297,7 @@ paths in `papyrus`; do not hand-edit
    `.papyrus-runs/<run-id>/research-proposals-catalog.json`, and uses the
    targeted research-proposal registration path. Re-runs should return the same
    reference rows as existing/no-op records, not create duplicate curation work.
-   Use low-level `references register-catalog` only for arbitrary manual
+   Use low-level `references create-from-catalog` only for arbitrary manual
    catalogs, compatibility debugging, or fallback inspection.
 
 ## Reporting Packet Flow
@@ -366,7 +366,7 @@ It is not a draft article.
 
 ## After Proposal Intake
 
-`assignments research-intake-now` is not the end of ingestion. It turns
+`assignments process-research-now` is not the end of ingestion. It turns
 web discoveries into pending `Reference` prospects plus
 `curation.reference-intake` assignments. The normal next step is a
 conversation-backed screening loop with the user.
@@ -374,7 +374,7 @@ conversation-backed screening loop with the user.
 1. List the pending source prospects and their source readiness:
 
    ```bash
-   poetry run papyrus references source-status \
+   poetry run papyrus references process-status \
      --config corpora/papyrus-steering.yml \
      --corpus-key <corpus-key> \
      --status pending
@@ -409,13 +409,13 @@ conversation-backed screening loop with the user.
    selected extracted-text snapshot:
 
    ```bash
-   poetry run papyrus references create-accession-assignments \
+   poetry run papyrus references process-create-accession-assignments \
      --config corpora/papyrus-steering.yml \
      --corpus-key <corpus-key> \
      --status accepted \
 
 
-   poetry run papyrus references source-status \
+   poetry run papyrus references process-status \
      --config corpora/papyrus-steering.yml \
      --corpus-key <corpus-key> \
      --status accepted
@@ -609,7 +609,7 @@ Use `skills/reference-intake/SKILL.md` for the full intake rules. The shortest
 safe path from a persisted research packet to visible curation records is:
 
 ```bash
-poetry run papyrus assignments intake-proposals \
+poetry run papyrus assignments process-proposals \
   --assignment <assignment-id> \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
@@ -620,7 +620,7 @@ poetry run papyrus assignments intake-proposals \
 The manual fallback is direct catalog registration:
 
 ```bash
-poetry run papyrus references register-catalog \
+poetry run papyrus references create-from-catalog \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
   --catalog <catalog.json> \
@@ -633,7 +633,7 @@ Rejected source material is still useful scope memory when it has a structured
 reason:
 
 ```bash
-poetry run papyrus references register-catalog \
+poetry run papyrus references create-from-catalog \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
   --catalog <catalog.json> \
@@ -643,7 +643,7 @@ poetry run papyrus references register-catalog \
 
 ```
 
-`register-catalog` writes only `Reference`, `ReferenceAttachment`, curation
+`create-from-catalog` writes only `Reference`, `ReferenceAttachment`, curation
 `Message`, `curation.reference-intake` `Assignment`, and workflow/audit
 `SemanticRelation` rows. It must not create publication `Item`, `EditionItem`,
 `classified_as`, or `uses_evidence` records.
