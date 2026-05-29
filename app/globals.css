@@ -305,6 +305,12 @@ img {
   padding-inline: var(--news-desk-progress-padding-x, 16px);
 }
 
+.site-shell > .edition-progress {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background: rgb(var(--paper-rgb) / 1);
+}
+
 .edition-progress__button {
   align-items: center;
   appearance: none;
@@ -2406,6 +2412,18 @@ img {
   overflow-x: hidden;
   overflow-y: visible;
   width: 100%;
+}
+
+.site-shell > .scroll-edition > .paper-page--front > .paper-page-content {
+  --page-padding-top: 0;
+}
+
+.site-shell > .scroll-edition > .paper-page--front > .paper-page-content .masthead::before {
+  content: none;
+}
+
+.site-shell > .scroll-edition > .paper-page--front > .paper-page-content .masthead__rule {
+  border-top: 0;
 }
 
 .news-desk-page--gate {
