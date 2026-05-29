@@ -29,6 +29,11 @@ rendering contracts.
   read `AGENTS.local.md` and follow its local account/profile/env guidance.
   Treat `AGENTS.local.md` as required preflight context for cloud operations on
   this machine.
+- Papyrus is an Amplify Gen 2 project. Production backend/frontend deployment is
+  done by pushing commits to `main` through the configured DevOps/Amplify
+  pipeline. Do not run `ampx pipeline-deploy` (or other direct production
+  `ampx` deploy commands) from local agents unless the user explicitly asks for
+  that exact override. Use `ampx` locally for sandbox workflows only.
 - Do not commit unless the user explicitly asks.
 - Preserve unrelated uncommitted work. This project is often dirty because it is
   being iterated in conversation.
