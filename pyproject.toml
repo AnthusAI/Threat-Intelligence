@@ -16,6 +16,7 @@ dependencies = [
 papyrus = "papyrus.cli:main"
 
 [tool.poetry]
+package-mode = false
 packages = [
     { include = "papyrus", from = "src" },
     { include = "papyrus_newsroom", from = "src" },
@@ -28,9 +29,6 @@ pytest = "^8.4.2"
 behave = "^1.2.6"
 requests = "^2.32.3"
 
-
-[tool.poetry.dependencies]
-tactus = {develop = true}
 [build-system]
 requires = ["poetry-core>=1.9.0"]
 build-backend = "poetry.core.masonry.api"
