@@ -204,6 +204,11 @@ function createEmptyEditionLandingItem(slug: string): PublicationItem {
     dateline: "SANDBOX",
     image: {
       src: "/papyrus-plant-placeholder.png",
+      themeVariants: {
+        dark: {
+          src: "/papyrus-plant-placeholder-dark.png",
+        },
+      },
       alt: "A black papyrus plant silhouette",
       credit: "",
       layout: {

@@ -278,6 +278,7 @@ def seed_article_records(article: dict[str, Any], index: int, edition_config: di
         media_id = f"media-{article['slug']}-{asset_index}"
         media_sort_key = f"{asset_index + 1:03d}#{asset['id']}"
         uploaded = seed_image_upload_metadata(article, asset, asset_index)
+        theme_variants = seed_image_theme_variants_metadata(article, asset, asset_index)
         common = {
             "type": "image",
             "role": ",".join(asset.get("roles") or ["lead", "continuation", "continuationInset"]),
@@ -297,7 +298,7 @@ def seed_article_records(article: dict[str, Any], index: int, edition_config: di
             "maxHeight": nested_get(asset, "layout", "maxHeight"),
             "crop": nested_get(asset, "layout", "crop"),
             "wrapsText": nested_get(asset, "layout", "wrapsText"),
-            "metadata": to_aws_json(media_metadata(asset)),
+            "metadata": to_aws_json(media_metadata(asset, theme_variants)),
         }
         records.append(record("MediaAsset", {"id": media_id, "itemId": item_id, **common}))
         records.append(
@@ -332,8 +333,19 @@ def upload_seed_image(article: dict[str, Any], asset: dict[str, Any], index: int
                 tmp.write(response.read())
             tmp.flush()
             aws_s3_cp(tmp.name, bucket, metadata["storagePath"], content_type)
-        return
-    aws_s3_cp(str(source), bucket, metadata["storagePath"], content_type)
+    else:
+        aws_s3_cp(str(source), bucket, metadata["storagePath"], content_type)
+
+    for variant in iter_seed_image_variants(article, asset, index):
+        variant_source = seed_image_source_path(variant["src"])
+        if variant_source is None:
+            with tempfile.NamedTemporaryFile() as tmp:
+                with urllib.request.urlopen(variant["src"]) as response:
+                    tmp.write(response.read())
+                tmp.flush()
+                aws_s3_cp(tmp.name, bucket, variant["storagePath"], variant["contentType"])
+        else:
+            aws_s3_cp(str(variant_source), bucket, variant["storagePath"], variant["contentType"])
 
 
 def aws_s3_cp(source_path: str, bucket: str, storage_path: str, content_type: str) -> None:
@@ -370,6 +382,32 @@ def seed_image_upload_metadata(article: dict[str, Any], asset: dict[str, Any], i
         "width": round(aspect_ratio * preferred_height) if aspect_ratio and preferred_height else None,
         "height": preferred_height,
     }
+
+
+def iter_seed_image_variants(article: dict[str, Any], asset: dict[str, Any], index: int) -> list[dict[str, Any]]:
+    variants: list[dict[str, Any]] = []
+    dark = nested_get(asset, "themeVariants", "dark")
+    if isinstance(dark, dict) and isinstance(dark.get("src"), str) and dark["src"].strip():
+        src = dark["src"].strip()
+        content_type = content_type_for_source(src)
+        extension = image_extension(content_type, src)
+        variants.append(
+            {
+                "name": "dark",
+                "src": src,
+                "storagePath": f"media/articles/{article['slug']}/{index + 1:02d}-{asset['id']}-dark.{extension}",
+                "contentType": content_type,
+            }
+        )
+    return variants
+
+
+def seed_image_theme_variants_metadata(article: dict[str, Any], asset: dict[str, Any], index: int) -> dict[str, Any]:
+    metadata: dict[str, Any] = {}
+    for variant in iter_seed_image_variants(article, asset, index):
+        entry = {"sourceUrl": variant["src"], "storagePath": variant["storagePath"]}
+        metadata[variant["name"]] = entry
+    return metadata
 
 
 def article_image_assets(article: dict[str, Any]) -> list[dict[str, Any]]:
@@ -812,11 +850,13 @@ def published_item_id(item_id: str) -> str:
     return f"published-{item_id}"
 
 
-def media_metadata(asset: dict[str, Any]) -> dict[str, Any]:
+def media_metadata(asset: dict[str, Any], theme_variants: dict[str, Any] | None = None) -> dict[str, Any]:
     metadata = {"sourceUrl": asset.get("src")}
     inline_float = nested_get(asset, "layout", "inlineFloat")
     if inline_float:
         metadata["inlineFloat"] = inline_float
+    if theme_variants:
+        metadata["themeVariants"] = theme_variants
     return metadata
 
 

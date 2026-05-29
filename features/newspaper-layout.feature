@@ -723,6 +723,11 @@ Feature: Newspaper layout scenarios
     And no measured line should overlap solved furniture
     And no browser console errors should occur
 
+  Scenario: Theme-aware plant logo sources switch in dark mode
+    Given I open the "themed-plant-logo" layout scenario at 1280 by 900
+    Then the active page should swap plant logo image sources between light and dark theme
+    And no browser console errors should occur
+
   Scenario Outline: Article chrome does not overlap under responsive typography
     Given I open the "<scenario>" layout scenario at 1280 by 900
     Then no article chrome should overlap

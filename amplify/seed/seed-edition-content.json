@@ -43,6 +43,11 @@
       "dateline": "NEWSROOM",
       "image": {
         "src": "/papyrus-plant-placeholder.png",
+        "themeVariants": {
+          "dark": {
+            "src": "/papyrus-plant-placeholder-dark.png"
+          }
+        },
         "alt": "A black papyrus plant silhouette",
         "caption": "Amplify Humans: Papyrus is built to amplify editorial judgment, not replace it.",
         "credit": "Papyrus",
@@ -154,6 +159,11 @@
       "dateline": "NEWSROOM",
       "image": {
         "src": "/papyrus-plant-placeholder.png",
+        "themeVariants": {
+          "dark": {
+            "src": "/papyrus-plant-placeholder-dark.png"
+          }
+        },
         "alt": "A black papyrus plant silhouette",
         "caption": "Each stage has a narrow job; humans set the course and approve the edition.",
         "credit": "Papyrus",
@@ -227,6 +237,11 @@
       "dateline": "NEWSROOM",
       "image": {
         "src": "/papyrus-plant-placeholder.png",
+        "themeVariants": {
+          "dark": {
+            "src": "/papyrus-plant-placeholder-dark.png"
+          }
+        },
         "alt": "A black papyrus plant silhouette",
         "caption": "Steering intensity changes; the edition still begins and ends.",
         "credit": "Papyrus",
@@ -296,6 +311,11 @@
       "dateline": "NEWSROOM",
       "image": {
         "src": "/papyrus-plant-placeholder.png",
+        "themeVariants": {
+          "dark": {
+            "src": "/papyrus-plant-placeholder-dark.png"
+          }
+        },
         "alt": "A black papyrus plant silhouette",
         "caption": "First-install choices define the trajectory the newsroom will keep following.",
         "credit": "Papyrus",
@@ -354,6 +374,11 @@
       "dateline": "NEWSROOM",
       "image": {
         "src": "/papyrus-plant-placeholder.png",
+        "themeVariants": {
+          "dark": {
+            "src": "/papyrus-plant-placeholder-dark.png"
+          }
+        },
         "alt": "A black papyrus plant silhouette",
         "caption": "Reference curation is how editors steer what the autopilot may treat as evidence.",
         "credit": "Papyrus",
@@ -412,6 +437,11 @@
       "dateline": "NEWSROOM",
       "image": {
         "src": "/papyrus-plant-placeholder.png",
+        "themeVariants": {
+          "dark": {
+            "src": "/papyrus-plant-placeholder-dark.png"
+          }
+        },
         "alt": "A black papyrus plant silhouette",
         "caption": "A clean accepted graph is one of the highest-leverage steering tools.",
         "credit": "Papyrus",

@@ -19,12 +19,19 @@ export type ArticleImageLayout = {
   };
 };
 
+export type ArticleImageThemeVariants = {
+  dark?: {
+    src: string;
+  };
+};
+
 export type ArticleImage = {
   src: string;
   alt: string;
   caption?: string;
   credit: string;
   layout?: ArticleImageLayout;
+  themeVariants?: ArticleImageThemeVariants;
 };
 
 export type ArticleImageAsset = ArticleImage & {

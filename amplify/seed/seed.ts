@@ -22,6 +22,11 @@ const NEWSROOM_SECTIONS_CONFIG_PATH = path.join(process.cwd(), "corpora", "papyr
 const PUBLICATION_DOCTRINE_CONFIG_PATH = path.join(process.cwd(), "corpora", "papyrus-publication-doctrine.yml");
 const REQUIRED_PROCEDURES_CONFIG_PATH = path.join(process.cwd(), "corpora", "papyrus-required-procedures.json");
 const NEWSROOM_SECTION_TYPES = new Set(["canonical", "floating", "rotating"]);
+type UploadedImageThemeVariants = {
+  dark?: {
+    storagePath: string;
+  };
+};
 
 type DataClient = ReturnType<typeof generateClient<Schema>>;
 type NewsroomSectionSeed = {
@@ -439,7 +444,7 @@ async function seedArticle(article: Article, index: number, editionConfig: SeedE
       maxHeight: asset.layout?.maxHeight,
       crop: asset.layout?.crop,
       wrapsText: asset.layout?.wrapsText,
-      metadata: toAwsJson(getMediaMetadata(asset)),
+      metadata: toAwsJson(getMediaMetadata(asset, uploaded.themeVariants)),
     });
     await upsert("PublishedMediaAsset", {
       id: `published-${mediaId}`,
@@ -465,7 +470,7 @@ async function seedArticle(article: Article, index: number, editionConfig: SeedE
       maxHeight: asset.layout?.maxHeight,
       crop: asset.layout?.crop,
       wrapsText: asset.layout?.wrapsText,
-      metadata: toAwsJson(getMediaMetadata(asset)),
+      metadata: toAwsJson(getMediaMetadata(asset, uploaded.themeVariants)),
     });
   }
 }
@@ -705,11 +710,40 @@ async function uploadSeedImage(article: Article, asset: ArticleImageAsset, index
     },
   }).result;
 
+  const themeVariants: UploadedImageThemeVariants = {};
+  if (asset.themeVariants?.dark?.src) {
+    themeVariants.dark = {
+      storagePath: await uploadSeedImageVariant(article, asset, index, "dark", asset.themeVariants.dark.src),
+    };
+  }
+
   return {
     storagePath,
     width: asset.layout ? Math.round(asset.layout.aspectRatio * asset.layout.preferredHeight) : undefined,
     height: asset.layout?.preferredHeight,
+    themeVariants: Object.keys(themeVariants).length ? themeVariants : undefined,
   };
+}
+
+async function uploadSeedImageVariant(
+  article: Article,
+  asset: ArticleImageAsset,
+  index: number,
+  variant: "dark",
+  src: string,
+): Promise<string> {
+  const payload = await loadImagePayload(src);
+  const extension = getImageExtension(payload.contentType, src);
+  const storagePath = `media/articles/${article.slug}/${String(index + 1).padStart(2, "0")}-${asset.id}-${variant}.${extension}`;
+  await uploadData({
+    path: storagePath,
+    data: payload.data,
+    options: {
+      contentType: payload.contentType,
+      cacheControl: "public, max-age=31536000, immutable",
+    },
+  }).result;
+  return storagePath;
 }
 
 async function loadImagePayload(src: string): Promise<{ data: Uint8Array; contentType: string }> {
@@ -797,10 +831,20 @@ function toAwsJson(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function getMediaMetadata(asset: ArticleImageAsset): Record<string, unknown> {
+function getMediaMetadata(asset: ArticleImageAsset, uploadedThemeVariants?: UploadedImageThemeVariants): Record<string, unknown> {
+  const themeVariants =
+    asset.themeVariants?.dark?.src || uploadedThemeVariants?.dark?.storagePath
+      ? {
+          dark: {
+            ...(asset.themeVariants?.dark?.src ? { sourceUrl: asset.themeVariants.dark.src } : {}),
+            ...(uploadedThemeVariants?.dark?.storagePath ? { storagePath: uploadedThemeVariants.dark.storagePath } : {}),
+          },
+        }
+      : undefined;
   return {
     sourceUrl: asset.src,
     ...(asset.layout?.inlineFloat ? { inlineFloat: asset.layout.inlineFloat } : {}),
+    ...(themeVariants ? { themeVariants } : {}),
   };
 }
 

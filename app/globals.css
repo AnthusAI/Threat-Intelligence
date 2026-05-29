@@ -1014,15 +1014,6 @@ img {
   opacity: var(--ink-display-alpha);
 }
 
-@media (prefers-color-scheme: dark) {
-  .photo-frame img[src*="papyrus-plant-placeholder"],
-  .lead-photo img[src*="papyrus-plant-placeholder"],
-  .front-prelude-photo img[src*="papyrus-plant-placeholder"],
-  .news-desk-access-panel__mark img {
-    filter: invert(1);
-  }
-}
-
 .lead-photo figcaption,
 .front-prelude-photo figcaption,
 .continuation-photo figcaption,

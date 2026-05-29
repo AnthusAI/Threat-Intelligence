@@ -4203,3 +4203,59 @@ async function getActiveRhythmReport(page) {
     return { rhythm, errors };
   });
 }
+
+Then("the active page should swap plant logo image sources between light and dark theme", async function () {
+  const page = requirePage(this);
+  const report = await page.evaluate(async () => {
+    const waitForPaint = async () => {
+      await new Promise((resolve) => window.requestAnimationFrame(() => window.requestAnimationFrame(resolve)));
+      await new Promise((resolve) => window.setTimeout(resolve, 120));
+    };
+    const readPlantSources = () => {
+      const images = Array.from(
+        document.querySelectorAll(".paper-page--active .lead-photo img, .paper-page--active .front-prelude-photo img, .paper-page--active .continuation-photo img"),
+      );
+      return images
+        .map((image) => ({
+          src: image.getAttribute("src") ?? "",
+          srcSet: image.getAttribute("srcset") ?? "",
+          alt: image.getAttribute("alt") ?? "",
+        }))
+        .filter((entry) => (
+          entry.alt.includes("papyrus plant")
+          || entry.src.includes("papyrus-plant-placeholder")
+          || entry.srcSet.includes("papyrus-plant-placeholder")
+        ));
+    };
+
+    const applyTheme = (theme) => {
+      const next = JSON.stringify({ theme, presentation: "newspaper", motion: "standard" });
+      window.localStorage.setItem("papyrus:reader-settings", next);
+      window.dispatchEvent(new CustomEvent("papyrus:settings-changed"));
+    };
+
+    applyTheme("light");
+    await waitForPaint();
+    const light = readPlantSources();
+
+    applyTheme("dark");
+    await waitForPaint();
+    const dark = readPlantSources();
+
+    applyTheme("system");
+
+    return { light, dark };
+  });
+
+  assert.ok(report.light.length > 0, "Expected rendered plant-logo image sources in light mode");
+  assert.ok(report.dark.length > 0, "Expected rendered plant-logo image sources in dark mode");
+  if (JSON.stringify(report.light) === JSON.stringify(report.dark)) {
+    throw new Error(`Expected light and dark plant-logo image sources to differ; received ${JSON.stringify(report.dark)}`);
+  }
+  const darkSerialized = decodeURIComponent(JSON.stringify(report.dark));
+  assert.match(
+    darkSerialized,
+    /papyrus-plant-placeholder-dark\.png/,
+    `Expected dark source to target papyrus-plant-placeholder-dark.png; received ${JSON.stringify(report.dark)}`,
+  );
+});

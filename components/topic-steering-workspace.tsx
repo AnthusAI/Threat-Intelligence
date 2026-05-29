@@ -46,7 +46,9 @@ import { buildNewsroomKnowledgeQueryInput, type NewsroomKnowledgeQueryAnchor as 
 import { NewsroomConsoleProgressToggle, PapyrusConsoleChatIcon, usePapyrusConsole } from "./papyrus-console-shell";
 import { useOptionalNewsDeskClient } from "./news-desk-client-provider";
 import type { ReaderAuthSnapshot } from "./reader-auth-state";
+import { useResolvedPapyrusTheme } from "./use-resolved-papyrus-theme";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
+import { resolveThemedImageSrc } from "../lib/themed-image";
 import type {
   AssignmentEventRecord,
   AssignmentRecord,
@@ -9791,24 +9793,27 @@ function ReferenceDetailPanel({
               <p className="story-label">Extracted Text</p>
               {extractedTextTabs.length ? (
                 <>
-                  <div
-                    className="news-desk-reference-extracted-text__tabs"
-                    data-news-desk-reference-extracted-text-tabs
+                  <Tabs
+                    defaultValue={extractedTextTabs[0].mode}
+                    onValueChange={(value) => setActiveExtractedTextTab(value as ReferenceExtractedTextTab)}
+                    value={activeExtractedTextEntry?.mode ?? extractedTextTabs[0].mode}
                   >
-                    {extractedTextTabs.map((tab) => (
-                      <button
-                        aria-selected={tab.mode === activeExtractedTextEntry?.mode}
-                        className="news-desk-reference-extracted-text__tab"
-                        data-active={tab.mode === activeExtractedTextEntry?.mode ? "true" : "false"}
-                        data-news-desk-reference-extracted-text-tab={tab.mode}
-                        key={tab.mode}
-                        onClick={() => setActiveExtractedTextTab(tab.mode)}
-                        type="button"
-                      >
-                        {tab.label}
-                      </button>
-                    ))}
-                  </div>
+                    <TabsList
+                      className="news-desk-reference-extracted-text__tabs"
+                      data-news-desk-reference-extracted-text-tabs
+                    >
+                      {extractedTextTabs.map((tab) => (
+                        <TabsTrigger
+                          className="news-desk-reference-extracted-text__tab"
+                          data-news-desk-reference-extracted-text-tab={tab.mode}
+                          key={tab.mode}
+                          value={tab.mode}
+                        >
+                          {tab.label}
+                        </TabsTrigger>
+                      ))}
+                    </TabsList>
+                  </Tabs>
                   <div
                     className="news-desk-reference-extracted-text__content"
                     data-news-desk-reference-extracted-text-content
@@ -13988,7 +13993,13 @@ function NewsroomProgressBackLink({
 
 function NewsDeskAccessGate({ shell }: { shell: NewsDeskShellState | null }) {
   const showRhythmOverlay = useNewsroomRhythmOverlay();
+  const resolvedTheme = useResolvedPapyrusTheme();
   const accessPhase = shell?.phase ?? "checkingAccess";
+  const markSrc = resolveThemedImageSrc(
+    "/papyrus-plant-placeholder.png",
+    { dark: { src: "/papyrus-plant-placeholder-dark.png" } },
+    resolvedTheme,
+  );
 
   return (
     <main className="site-shell news-desk-shell" data-news-desk-access={accessPhase} data-rhythm-overlay={showRhythmOverlay ? "true" : "false"}>
@@ -14028,7 +14039,7 @@ function NewsDeskAccessGate({ shell }: { shell: NewsDeskShellState | null }) {
                 <p className="news-desk-access-panel__auth">{formatAccessActionDetail(shell)}</p>
               </div>
               <figure className="news-desk-access-panel__mark" aria-hidden="true" key={`mark-${accessPhase}`}>
-                <img alt="" src="/papyrus-plant-placeholder.png" />
+                <img alt="" src={markSrc} />
               </figure>
             </section>
           </article>

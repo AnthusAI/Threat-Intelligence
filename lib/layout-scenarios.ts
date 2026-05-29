@@ -104,6 +104,16 @@ const rawLayoutScenarios: RawLayoutScenario[] = [
     items: createLongImageCaptionArticles().map(articleToPublicationItem),
   },
   {
+    id: "themed-plant-logo",
+    source: "scenario",
+    title: "Themed Plant Logo",
+    editionDate,
+    scenarioId: "themed-plant-logo",
+    description: "A plant-logo fixture verifies dark-mode image variant switching in solved newspaper image furniture.",
+    layoutPlan: createDefaultEditionLayoutPlan(articles.map((article) => article.slug)),
+    items: createThemedPlantLogoArticles().map(articleToPublicationItem),
+  },
+  {
     id: "height-policy-fill-default",
     source: "scenario",
     title: "Height Policy Fill Default",
@@ -243,6 +253,59 @@ function createFurnitureSufficiencyArticles(): Article[] {
     }
 
     return article;
+  });
+}
+
+function createThemedPlantLogoArticles(): Article[] {
+  return cloneArticles(articles).map((article) => {
+    if (article.slug !== "agent-procedure-patterns") return article;
+    return {
+      ...article,
+      image: {
+        ...article.image,
+        src: "/papyrus-plant-placeholder.png",
+        themeVariants: {
+          dark: {
+            src: "/papyrus-plant-placeholder-dark.png",
+          },
+        },
+        alt: "A black papyrus plant silhouette",
+        credit: "Papyrus",
+        caption: "Theme-aware plant logo image fixture.",
+        layout: {
+          minHeight: 120,
+          preferredHeight: 220,
+          maxHeight: 420,
+          aspectRatio: 0.785,
+          crop: "contain",
+          wrapsText: true,
+        },
+      },
+      assets: [
+        {
+          id: `${article.slug}-primary-image`,
+          type: "image",
+          src: "/papyrus-plant-placeholder.png",
+          themeVariants: {
+            dark: {
+              src: "/papyrus-plant-placeholder-dark.png",
+            },
+          },
+          alt: "A black papyrus plant silhouette",
+          caption: "Theme-aware plant logo image fixture.",
+          credit: "Papyrus",
+          roles: ["lead", "continuation", "continuationInset"],
+          layout: {
+            minHeight: 120,
+            preferredHeight: 220,
+            maxHeight: 420,
+            aspectRatio: 0.785,
+            crop: "contain",
+            wrapsText: true,
+          },
+        },
+      ],
+    };
   });
 }
 

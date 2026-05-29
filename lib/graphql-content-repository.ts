@@ -1,7 +1,7 @@
 import { generateClient } from "aws-amplify/data";
 import { getUrl } from "aws-amplify/storage/server";
 import type { Schema } from "../amplify/data/resource";
-import type { Article, ArticleImage, ArticleImageAsset, ArticleImageLayout } from "./articles";
+import type { Article, ArticleImage, ArticleImageAsset, ArticleImageLayout, ArticleImageThemeVariants } from "./articles";
 import { getAmplifyServerRuntime } from "./amplify-server-runtime";
 import type { ContentRepository, EditionContent, EditionRouteSummary, ListPublishedEditionsOptions, LoadEditionContentOptions } from "./content-types";
 import { createEditionSectionPlan } from "./edition-sections";
@@ -586,6 +586,10 @@ function normalizePublicationItemType(value: string): Exclude<PublicationItemTyp
 async function normalizeImageAsset(item: GraphQLItem, asset: GraphQLMediaAsset): Promise<ArticleImageAsset | null> {
   const src = await getMediaUrl(asset);
   if (!src) return null;
+  const metadata = parseObjectMetadata(asset.metadata);
+  const sourceUrl = typeof metadata?.sourceUrl === "string" ? metadata.sourceUrl.trim() : "";
+  const themeVariants = await parseThemeVariantsMetadata(metadata?.themeVariants);
+  const effectiveThemeVariants = themeVariants ?? getPapyrusPlantThemeVariantsFallback(src, sourceUrl);
 
   return {
     id: asset.id,
@@ -595,7 +599,8 @@ async function normalizeImageAsset(item: GraphQLItem, asset: GraphQLMediaAsset):
     caption: asset.caption ?? undefined,
     credit: asset.credit ?? asset.caption ?? "Media asset",
     roles: parseImageRoles(asset.role),
-    layout: getImageLayout(asset),
+    layout: getImageLayout(asset, metadata),
+    themeVariants: effectiveThemeVariants,
   };
 }
 
@@ -619,10 +624,9 @@ async function getSignedStorageUrl(storagePath: string): Promise<string> {
   return result.url.toString();
 }
 
-function getImageLayout(asset: GraphQLMediaAsset): ArticleImageLayout | undefined {
+function getImageLayout(asset: GraphQLMediaAsset, metadata?: Record<string, unknown>): ArticleImageLayout | undefined {
   const aspectRatio = asset.aspectRatio ?? (asset.width && asset.height ? asset.width / asset.height : null);
   if (!aspectRatio) return undefined;
-  const metadata = parseObjectMetadata(asset.metadata);
 
   return {
     minHeight: asset.minHeight ?? 110,
@@ -640,6 +644,39 @@ function getImageLayout(asset: GraphQLMediaAsset): ArticleImageLayout | undefine
           }
         : undefined,
   };
+}
+
+async function parseThemeVariantsMetadata(value: unknown): Promise<ArticleImageThemeVariants | undefined> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const variants = value as Record<string, unknown>;
+  const dark = await resolveThemeVariantSource(variants.dark);
+  if (!dark) return undefined;
+  return { dark: { src: dark } };
+}
+
+async function resolveThemeVariantSource(value: unknown): Promise<string | undefined> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const entry = value as Record<string, unknown>;
+  const storagePath = typeof entry.storagePath === "string" && entry.storagePath.trim() ? entry.storagePath.trim() : null;
+  if (storagePath) return getSignedStorageUrl(storagePath);
+  const sourceUrl = typeof entry.sourceUrl === "string" && entry.sourceUrl.trim() ? entry.sourceUrl.trim() : null;
+  if (sourceUrl) return sourceUrl;
+  const src = typeof entry.src === "string" && entry.src.trim() ? entry.src.trim() : null;
+  return src ?? undefined;
+}
+
+function getPapyrusPlantThemeVariantsFallback(src: string, sourceUrl: string): ArticleImageThemeVariants | undefined {
+  if (
+    src.includes("papyrus-plant-placeholder.png")
+    || sourceUrl === "/papyrus-plant-placeholder.png"
+  ) {
+    return {
+      dark: {
+        src: "/papyrus-plant-placeholder-dark.png",
+      },
+    };
+  }
+  return undefined;
 }
 
 function parseObjectMetadata(value: unknown): Record<string, unknown> | undefined {

@@ -75,11 +75,13 @@ export function cloneArticle(article: Article): Article {
     image: {
       ...article.image,
       layout: cloneImageLayout(article.image.layout),
+      themeVariants: cloneImageThemeVariants(article.image.themeVariants),
     },
     assets: article.assets?.map((asset) => ({
       ...asset,
       layout: cloneImageLayout(asset.layout),
       roles: asset.roles ? [...asset.roles] : undefined,
+      themeVariants: cloneImageThemeVariants(asset.themeVariants),
     })),
     pullQuotes: article.pullQuotes ? [...article.pullQuotes] : undefined,
     body: [...article.body],
@@ -93,12 +95,14 @@ function cloneNonArticleItem(item: NonArticlePublicationItem): NonArticlePublica
       ? {
           ...item.image,
           layout: cloneImageLayout(item.image.layout),
+          themeVariants: cloneImageThemeVariants(item.image.themeVariants),
         }
       : undefined,
     assets: item.assets?.map((asset) => ({
       ...asset,
       layout: cloneImageLayout(asset.layout),
       roles: asset.roles ? [...asset.roles] : undefined,
+      themeVariants: cloneImageThemeVariants(asset.themeVariants),
     })),
     body: item.body ? [...item.body] : undefined,
     metadata: item.metadata ? { ...item.metadata } : undefined,
@@ -111,5 +115,13 @@ function cloneImageLayout<T extends Article["image"]["layout"]>(layout: T): T {
     ...layout,
     inlineFloat: layout.inlineFloat ? { ...layout.inlineFloat } : undefined,
     focalPoint: layout.focalPoint ? { ...layout.focalPoint } : undefined,
+  } as T;
+}
+
+function cloneImageThemeVariants<T extends Article["image"]["themeVariants"]>(themeVariants: T): T {
+  if (!themeVariants) return undefined as T;
+  return {
+    ...themeVariants,
+    dark: themeVariants.dark ? { ...themeVariants.dark } : undefined,
   } as T;
 }

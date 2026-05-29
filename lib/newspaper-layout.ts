@@ -1,4 +1,4 @@
-import type { ArticleImageAsset } from "./articles";
+import type { ArticleImageAsset, ArticleImageThemeVariants } from "./articles";
 import {
   type ArticleFrameBlockSpec,
   type ArticleFrameCompositionSlotSpec,
@@ -48,6 +48,7 @@ export type SolvedImageFurniture = {
   id: string;
   assetId: string;
   src: string;
+  themeVariants?: ArticleImageThemeVariants;
   alt: string;
   caption: string;
   credit: string;
@@ -1934,6 +1935,7 @@ function createImageFurniture(
     id: `${article.slug}-${variant.id}-image`,
     assetId: asset.id,
     src: asset.src,
+    themeVariants: asset.themeVariants,
     alt: asset.alt,
     caption,
     credit: asset.credit,
@@ -3013,6 +3015,7 @@ function createFrontPreludeImage(
     id: `${article.slug}-front-prelude-photo`,
     assetId: asset.id,
     src: asset.src,
+    themeVariants: asset.themeVariants,
     alt: asset.alt,
     caption,
     credit: asset.credit,
@@ -3056,6 +3059,7 @@ function leadImageToFurniture(article: ArticlePublicationItem, obstacle: TextObs
     id: `${article.slug}-lead-photo`,
     assetId: asset?.id ?? `${article.slug}-primary-image`,
     src: article.image.src,
+    themeVariants: article.image.themeVariants,
     alt: article.image.alt,
     caption,
     credit: article.image.credit,
