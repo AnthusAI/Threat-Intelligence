@@ -2448,14 +2448,6 @@ img {
   --page-padding-top: 0;
 }
 
-.site-shell > .scroll-edition > .paper-page--front > .paper-page-content .masthead::before {
-  content: none;
-}
-
-.site-shell > .scroll-edition > .paper-page--front > .paper-page-content .masthead__rule {
-  border-top: 0;
-}
-
 .news-desk-page--gate {
   max-width: none;
 }
