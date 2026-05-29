@@ -39,6 +39,10 @@ from papyrus_content.reference_url_text import (  # noqa: E402
 from papyrus_content.reference_metadata_generation import (  # noqa: E402
     run_reference_metadata_generation_from_extracted_text,
 )
+from papyrus_content.reference_citation_resolution import (  # noqa: E402
+    build_reference_citation_resolution_records,
+    resolve_citation_reference,
+)
 from papyrus_content.source_site_plugins import resolve_source_site_enrichment  # noqa: E402
 from papyrus_content.source_readiness import select_extracted_text_attachment  # noqa: E402
 from papyrus_content.reference_labels import (  # noqa: E402
@@ -69,6 +73,84 @@ class ReferenceCommandsTests(unittest.TestCase):
             ["pass-through-text", "pdf-text", "metadata-text"],
         )
         self.assertEqual(normalize_extraction_stages("pdf-text,metadata-text"), ["pdf-text", "metadata-text"])
+
+    @mock.patch("papyrus_content.reference_citation_resolution._fetch_json")
+    def test_resolve_citation_reference_prefers_strong_identifier_match(self, mock_fetch_json):
+        mock_fetch_json.side_effect = [
+            {
+                "message": {
+                    "items": [
+                        {
+                            "title": ["Building a Large Annotated Corpus of English: The Penn Treebank"],
+                            "DOI": "10.1162/coli.1993.19.2.313",
+                            "URL": "https://aclanthology.org/J93-2004.pdf",
+                            "author": [
+                                {"given": "Mitchell", "family": "Marcus"},
+                                {"given": "Beatrice", "family": "Santorini"},
+                            ],
+                            "issued": {"date-parts": [[1993]]},
+                        }
+                    ]
+                }
+            },
+            {"results": []},
+        ]
+        reference = {
+            "title": "Building a large annotated corpus of english: The Penn treebank",
+            "authors": ["MaryMitchell P Marcus", "BeatriceSantorini"],
+        }
+        result = resolve_citation_reference(reference)
+        self.assertEqual(result["status"], "resolved")
+        best = result["bestCandidate"]
+        self.assertEqual(best["source"], "crossref")
+        self.assertEqual(best["doi"], "10.1162/coli.1993.19.2.313")
+        self.assertGreaterEqual(float(best["score"]), 0.55)
+
+    @mock.patch("papyrus_content.reference_citation_resolution.resolve_citation_reference")
+    def test_build_reference_citation_resolution_records_updates_metadata_and_source(self, mock_resolve):
+        mock_resolve.return_value = {
+            "status": "resolved",
+            "bestCandidate": {
+                "doi": "10.1162/coli.1993.19.2.313",
+                "arxiv_id": None,
+                "isbn": None,
+                "source_uri": "https://aclanthology.org/J93-2004.pdf",
+                "score": 0.91,
+            },
+            "candidates": [],
+            "notes": [],
+        }
+        references = [
+            {
+                "id": "reference-citation-v1",
+                "lineageId": "reference-citation",
+                "versionState": "current",
+                "versionNumber": 1,
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "curationStatus": "pending",
+                "externalItemId": "citation:abc",
+                "title": "Building a Large Annotated Corpus of English: The Penn Treebank",
+                "authors": ["Mitchell Marcus"],
+                "sourceUri": None,
+                "metadata": "{}",
+            }
+        ]
+        result = build_reference_citation_resolution_records(
+            references=references,
+            corpus_id="knowledge-corpus-ai-ml-research",
+            curation_status="all",
+            force=True,
+            promote_external_id=True,
+        )
+        self.assertEqual(result["attemptedCount"], 1)
+        self.assertEqual(result["resolvedCount"], 1)
+        expected = result["records"][0]["expected"]
+        self.assertEqual(expected["id"], "reference-citation-v1")
+        self.assertEqual(expected["sourceUri"], "https://aclanthology.org/J93-2004.pdf")
+        self.assertEqual(expected["externalItemId"], "doi:10.1162/coli.1993.19.2.313")
+        metadata = json.loads(expected["metadata"])
+        self.assertEqual(metadata["citationResolution"]["status"], "resolved")
+        self.assertEqual(metadata["identifiers"]["resolved"]["doi"], "10.1162/coli.1993.19.2.313")
 
     def test_timestamp_for_path_strips_punctuation(self):
         self.assertRegex(timestamp_for_path("2026-05-23T12:00:00.000Z"), r"^2026-05-23T12-00-00-000Z$")

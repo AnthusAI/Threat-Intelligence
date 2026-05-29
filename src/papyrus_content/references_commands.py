@@ -47,6 +47,7 @@ from .reference_assignments import (
 from .reference_discovery import run_citation_led_discovery
 from .assignment_executors import execute_assignment_by_type
 from .reference_attachments import build_extracted_text_attachment_plans
+from .reference_citation_resolution import build_reference_citation_resolution_records
 from .reference_exports import build_reference_analysis_manifest, build_reference_scope_training_export
 from .reference_url_text import (
     build_reference_citation_count_records,
@@ -901,6 +902,86 @@ def references_process_dedupe_identifiers(flags: list[str]) -> None:
             "references\tprocess-dedupe-identifiers\tapply\tskipped\t"
             "use --dry-run to preview without writes"
         )
+
+
+def references_process_resolve_citation_stubs(flags: list[str]) -> None:
+    options = parse_options(flags)
+    _require_reference_process_runtime("references process-resolve-citation-stubs")
+    steering_config = load_steering_config(options.get("config")) or require_steering_config()
+    corpus_key = normalize_string(options.get("corpus-key"))
+    corpus_config = require_corpus_config(steering_config, corpus_key, "--corpus-key") if corpus_key else None
+    corpus_id = knowledge_corpus_id(corpus_config) if corpus_config else None
+    reference_ids = set(parse_repeated_option(flags, "reference"))
+    if options.get("reference"):
+        reference_ids.add(str(options["reference"]))
+    external_item_ids = set(parse_repeated_option(flags, "external-item-id"))
+    if options.get("external-item-id"):
+        external_item_ids.add(str(options["external-item-id"]))
+    curation_status = _normalize_reference_status_filter(options.get("status"))
+    max_count = normalize_positive_integer(options.get("max-count"), "--max-count")
+    force = parse_boolean_option(options.get("force"), False, "--force")
+    promote_external_id = parse_boolean_option(options.get("promote-external-id"), False, "--promote-external-id")
+    apply = resolve_mutation_apply(options, "references process-resolve-citation-stubs")
+    print_limit = 25 if options.get("limit") is None else normalize_non_negative_integer(options.get("limit"), "--limit")
+    print_limit = print_limit if print_limit is not None else 25
+
+    client, _ = create_authoring_client()
+    references = client.list_records("Reference")
+    resolved = build_reference_citation_resolution_records(
+        references=references,
+        corpus_id=corpus_id,
+        reference_ids=reference_ids or None,
+        external_item_ids=external_item_ids or None,
+        curation_status=curation_status,
+        max_count=max_count,
+        force=force,
+        promote_external_id=promote_external_id,
+    )
+    changes = build_record_changes_targeted_by_id(client, resolved["records"])
+    changed = [change for change in changes if change.get("action") != "noop"]
+
+    print(f"references\tprocess-resolve-citation-stubs\tcorpus\t{corpus_id or 'all'}")
+    print(f"references\tprocess-resolve-citation-stubs\tstatus\t{curation_status}")
+    if reference_ids:
+        print(f"references\tprocess-resolve-citation-stubs\treference-filter\t{len(reference_ids)}")
+    if external_item_ids:
+        print(f"references\tprocess-resolve-citation-stubs\texternal-item-filter\t{len(external_item_ids)}")
+    if max_count:
+        print(f"references\tprocess-resolve-citation-stubs\tmax-count\t{max_count}")
+    print(f"references\tprocess-resolve-citation-stubs\tattempted\t{resolved['attemptedCount']}")
+    print(f"references\tprocess-resolve-citation-stubs\tresolved\t{resolved['resolvedCount']}")
+    print(f"references\tprocess-resolve-citation-stubs\tskipped-existing\t{resolved['skippedExistingCount']}")
+    print(f"references\tprocess-resolve-citation-stubs\tskipped-non-citation\t{resolved['skippedNonCitationCount']}")
+    print(f"references\tprocess-resolve-citation-stubs\tfailures\t{resolved['failureCount']}")
+    print(f"references\tprocess-resolve-citation-stubs\tchanges\t{len(changed)}")
+
+    for item in resolved["items"][:print_limit]:
+        best = item.get("bestCandidate") if isinstance(item.get("bestCandidate"), dict) else {}
+        print(
+            "\t".join(
+                [
+                    "reference-citation-resolve",
+                    str(item.get("status") or ""),
+                    str(item.get("referenceId") or "-"),
+                    str(item.get("externalItemId") or "-"),
+                    str(best.get("doi") or best.get("arxiv_id") or best.get("isbn") or "-"),
+                    str(best.get("source_uri") or "-"),
+                    str(best.get("score") or "-"),
+                ]
+            )
+        )
+    if len(resolved["items"]) > print_limit:
+        print(
+            f"references\tprocess-resolve-citation-stubs\tomitted\t{len(resolved['items']) - print_limit}\t"
+            f"pass --limit {len(resolved['items'])} to print every row"
+        )
+    if not apply:
+        print(
+            "references\tprocess-resolve-citation-stubs\tapply\tskipped\t"
+            "use --dry-run to preview without writes"
+        )
+        return
+    apply_record_changes(client, changed)
 
 
 def references_filter_extracted_text(flags: list[str]) -> None:
