@@ -6767,6 +6767,103 @@ img {
   text-transform: uppercase;
 }
 
+.news-desk-topic-queue-toolbar {
+  align-items: end;
+  column-gap: calc(var(--paper-rhythm) * 0.9);
+  display: flex;
+  flex-wrap: wrap;
+  margin-block: calc(var(--paper-rhythm) * 0.8) calc(var(--paper-rhythm) * 0.55);
+  row-gap: calc(var(--paper-rhythm) * 0.45);
+}
+
+.news-desk-topic-queue-toolbar label {
+  display: grid;
+  gap: calc(var(--paper-rhythm) * 0.2);
+  min-width: 168px;
+}
+
+.news-desk-topic-queue-toolbar label span {
+  color: var(--muted);
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.news-desk-topic-queue-toolbar select {
+  appearance: none;
+  background: rgb(var(--paper-rgb) / 0.94);
+  border: 1px solid rgb(var(--rule-rgb) / 0.4);
+  color: inherit;
+  font-family: inherit;
+  font-size: 0.82rem;
+  line-height: var(--news-desk-text-leading, var(--paper-rhythm));
+  min-height: var(--news-desk-detail-control-height, 32px);
+  padding: calc(var(--paper-rhythm) * 0.35) calc(var(--paper-rhythm) * 0.55);
+}
+
+.category-steering-table-wrap {
+  border-top: 1px solid rgb(var(--rule-rgb) / 0.36);
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  width: 100%;
+}
+
+.category-steering-table {
+  border-collapse: collapse;
+  min-width: 760px;
+  table-layout: fixed;
+  width: 100%;
+}
+
+.category-steering-table th,
+.category-steering-table td {
+  border-bottom: 1px solid rgb(var(--rule-rgb) / 0.26);
+  padding: calc(var(--paper-rhythm) * 0.56) calc(var(--paper-rhythm) * 0.55) calc(var(--paper-rhythm) * 0.56) 0;
+  text-align: left;
+  vertical-align: top;
+}
+
+.category-steering-table th {
+  color: var(--muted);
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.category-steering-table tbody td strong {
+  display: block;
+  font-size: 0.95rem;
+  margin-bottom: calc(var(--paper-rhythm) * 0.18);
+}
+
+.category-steering-table tbody td p {
+  color: rgb(var(--ink-rgb) / 0.78);
+  margin: 0;
+}
+
+.news-desk-topic-link-button {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.news-desk-topic-link-button:disabled {
+  color: rgb(var(--ink-rgb) / 0.45);
+  cursor: default;
+  text-decoration: none;
+}
+
 .topic-steering-topic-grid {
   gap: calc(var(--paper-rhythm) * 1.25);
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
