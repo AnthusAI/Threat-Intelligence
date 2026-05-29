@@ -108,7 +108,8 @@ ITEM_TAG_FIELDS = "id itemId tagId"
 TAG_FIELDS = "id slug label"
 SEMANTIC_NODE_FIELDS = (
     f"{VERSION_FIELDS} id nodeKey nodeKind corpusId categorySetId categoryLineageId categoryKey displayName "
-    "description aliases status importRunId createdAt updatedAt newsroomFeedKey"
+    "description aliases authorityScore authorityRank acceptedReferenceMentionCount distinctSourceKindCount relationCount "
+    "status importRunId createdAt updatedAt newsroomFeedKey"
 )
 KNOWLEDGE_ARTIFACT_FIELDS = (
     "id corpusId artifactKind artifactId snapshotId displayName createdAt importRunId"

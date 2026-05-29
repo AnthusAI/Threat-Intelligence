@@ -99,6 +99,64 @@ class OntologyEnrichmentTests(unittest.TestCase):
         self.assertEqual(ranked[0]["id"], "node-a")
         self.assertGreater(ranked[0]["acceptedReferenceMentions"], ranked[1]["acceptedReferenceMentions"])
 
+    def test_rank_concepts_tie_breaks_by_node_key(self):
+        node_a = semantic_node("node-a", "entity.alpha", "Alpha")
+        node_b = semantic_node("node-b", "entity.beta", "Beta")
+        state = ontology.build_state_indexes(
+            {
+                "SemanticNode": [node_b, node_a],
+                "SemanticRelation": [],
+                "Reference": [],
+                "Message": [],
+                "Assignment": [],
+                "AssignmentEvent": [],
+                "Item": [],
+                "Category": [],
+                "CategorySet": [],
+                "SteeringProposal": [],
+                "NewsroomSection": [],
+                "ModelAttachment": [],
+                "SemanticRelationType": [],
+            }
+        )
+        ranked = ontology.rank_concepts(state, include_profile_status=False)
+        self.assertEqual([row["nodeKey"] for row in ranked], ["entity.alpha", "entity.beta"])
+
+    def test_rank_concepts_excludes_operational_relations_by_default(self):
+        state = self.build_state()
+        node_b = state["models"]["SemanticNode"][1]
+        state["models"]["SemanticRelation"].append(
+            relation(
+                "rel-operational",
+                "assignment",
+                "assign-1",
+                "assign-lineage-1",
+                "blocked_by",
+                node_b["id"],
+                node_b["lineageId"],
+            )
+        )
+        excluded = ontology.rank_concepts(state, include_profile_status=False)
+        included = ontology.rank_concepts(state, include_profile_status=False, include_operational=True)
+        excluded_b = next(row for row in excluded if row["id"] == node_b["id"])
+        included_b = next(row for row in included if row["id"] == node_b["id"])
+        self.assertEqual(excluded_b["relationCount"], 1)
+        self.assertEqual(included_b["relationCount"], 2)
+
+    def test_build_concept_authority_records_materializes_counts_and_rank(self):
+        state = self.build_state()
+        ranked = ontology.rank_concepts(state, include_profile_status=False)
+        scoped = ontology.scoped_ranked_concepts(state, ranked, options={})
+        records = ontology.build_concept_authority_records(state, scoped)
+        self.assertEqual(len(records), 2)
+        first = records[0]["expected"]
+        self.assertEqual(first["id"], "node-a")
+        self.assertEqual(first["authorityRank"], 1)
+        self.assertEqual(first["acceptedReferenceMentionCount"], 2)
+        self.assertIn("authorityScore", first)
+        self.assertIn("distinctSourceKindCount", first)
+        self.assertIn("relationCount", first)
+
     def test_relation_status_freshness_uses_fingerprint(self):
         state = self.build_state()
         rel = state["models"]["SemanticRelation"][0]

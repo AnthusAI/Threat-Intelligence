@@ -129,6 +129,51 @@ def ontology_rank(flags: list[str]) -> None:
         )
 
 
+def ontology_recompute_authority(flags: list[str]) -> None:
+    options = parse_options(flags)
+    client, _ = create_authoring_client()
+    state = load_ontology_state(
+        client,
+        include_attachment_payloads=False,
+        model_names=_ontology_model_scope(options),
+    )
+    ranked = rank_concepts(
+        state,
+        include_operational=bool(options.get("include-operational")),
+        include_profile_status=False,
+    )
+    scoped = scoped_ranked_concepts(state, ranked, options)
+    apply = resolve_mutation_apply(options, "knowledge ontology recompute-authority")
+    records = build_concept_authority_records(state, scoped)
+    result = apply_or_report(client, "ontology-recompute-authority", records, apply=apply)
+    limit = _int_option(options, "limit", 25)
+    top = scoped[:limit] if limit else scoped
+    payload = {
+        "ok": True,
+        "mode": "apply" if apply else "dry-run",
+        "plannedRecords": len(records),
+        "changedRecords": result["changedRecords"],
+        "totalConcepts": len(scoped),
+        "concepts": top,
+    }
+    if options.get("json"):
+        print(json.dumps(payload, indent=2))
+        return
+    print(f"ontology-recompute-authority\tmode\t{payload['mode']}")
+    print(f"ontology-recompute-authority\ttotal-concepts\t{payload['totalConcepts']}")
+    print(f"ontology-recompute-authority\tplanned-records\t{payload['plannedRecords']}")
+    print(f"ontology-recompute-authority\tchanged-records\t{payload['changedRecords']}")
+    for row in top:
+        print(
+            "ontology-recompute-authority\t"
+            f"rank={row.get('authorityRank')}\t"
+            f"score={float(row.get('score') or 0.0):.8f}\t"
+            f"{row.get('nodeKey') or row.get('id')}\t"
+            f"mentions={row.get('acceptedReferenceMentions', 0)}\t"
+            f"relations={row.get('relationCount', 0)}"
+        )
+
+
 def ontology_status(flags: list[str]) -> None:
     options = parse_options(flags)
     client, _ = create_authoring_client()
@@ -505,6 +550,59 @@ def rank_concepts(
             }
         )
     return sorted(ranked, key=lambda row: (-float(row["score"]), str(row.get("nodeKey") or row.get("id") or "")))
+
+
+def scoped_ranked_concepts(
+    state: dict[str, Any],
+    ranked: list[dict[str, Any]],
+    options: dict[str, Any],
+) -> list[dict[str, Any]]:
+    global_ranked = [dict(row, authorityRank=index) for index, row in enumerate(ranked, start=1)]
+    by_id = {str(row.get("id")): row for row in global_ranked if row.get("id")}
+    by_lineage = {str(row.get("lineageId")): row for row in global_ranked if row.get("lineageId")}
+    by_node_key = {str(row.get("nodeKey")): row for row in global_ranked if row.get("nodeKey")}
+    node_by_lineage = {
+        str(node.get("lineageId") or node.get("id") or ""): node
+        for node in current_semantic_nodes(state)
+        if node.get("lineageId") or node.get("id")
+    }
+    scoped: list[dict[str, Any]] = []
+    requested_ids = _list_option(options, "concept-id") or _list_option(options, "concept")
+    requested_lineages = _list_option(options, "lineage-id")
+    requested_keys = _list_option(options, "node-key")
+    requested_corpora = set(_list_option(options, "corpus-id"))
+    if requested_ids or requested_lineages or requested_keys:
+        for value in [*requested_ids, *requested_lineages, *requested_keys]:
+            row = by_id.get(value) or by_lineage.get(value) or by_node_key.get(value)
+            if row and row not in scoped:
+                scoped.append(row)
+    elif requested_corpora:
+        for row in global_ranked:
+            lineage_id = str(row.get("lineageId") or "")
+            node = node_by_lineage.get(lineage_id)
+            if node and str(node.get("corpusId") or "") in requested_corpora:
+                scoped.append(row)
+    else:
+        scoped = list(global_ranked)
+    return sorted(scoped, key=lambda row: int(row.get("authorityRank") or 0))
+
+
+def build_concept_authority_records(state: dict[str, Any], ranked: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    nodes_by_id = {str(node.get("id")): node for node in current_semantic_nodes(state) if node.get("id")}
+    records: list[dict[str, Any]] = []
+    for row in ranked:
+        node_id = str(row.get("id") or "")
+        node = nodes_by_id.get(node_id)
+        if not node:
+            continue
+        expected = dict(node)
+        expected["authorityScore"] = float(row.get("score") or 0.0)
+        expected["authorityRank"] = int(row.get("authorityRank") or 0)
+        expected["acceptedReferenceMentionCount"] = int(row.get("acceptedReferenceMentions") or 0)
+        expected["distinctSourceKindCount"] = int(row.get("distinctSourceKinds") or 0)
+        expected["relationCount"] = int(row.get("relationCount") or 0)
+        records.append({"modelName": "SemanticNode", "expected": expected})
+    return records
 
 
 def compute_pagerank(nodes: set[str], edges: dict[str, dict[str, float]], *, damping: float = 0.85, iterations: int = 32) -> dict[str, float]:

@@ -267,6 +267,7 @@ PORTED_COMMANDS = frozenset(
         "ontology:profile",
         "ontology:associate",
         "ontology:dedupe",
+        "ontology:recompute-authority",
         "ontology:doctor",
         "messages:export-legacy-comments",
         "messages:import-legacy-comments",
@@ -505,6 +506,7 @@ def dispatch(group: str, command: str, flags: list[str]) -> None:
             ontology_preflight,
             ontology_profile,
             ontology_rank,
+            ontology_recompute_authority,
             ontology_status,
         )
 
@@ -522,6 +524,8 @@ def dispatch(group: str, command: str, flags: list[str]) -> None:
             ontology_associate(flags)
         elif route == "ontology:dedupe":
             ontology_dedupe(flags)
+        elif route == "ontology:recompute-authority":
+            ontology_recompute_authority(flags)
         elif route == "ontology:doctor":
             ontology_doctor(flags)
         else:
@@ -1280,7 +1284,7 @@ def print_usage() -> None:
     print("  create-reindex-assignment/run-now/execute-assignment/entity-graph-preflight/graph-artifacts/publish-graph-snapshot/import-graph-artifact/doctor-entity-graph,")
     print("  newsroom recount-summary/repair-message-status/prune-attachments/backfill-feed-fields/")
     print("  backfill-operational-indexes/import-sections,")
-    print("  relations import-types/backfill, ontology preflight/rank/status/explain/profile/associate/dedupe/doctor,")
+    print("  relations import-types/backfill, ontology preflight/rank/status/explain/profile/associate/dedupe/recompute-authority/doctor,")
     print("  messages export/import-legacy-comments,")
     print("  categories import/export/draft/review/curation-cycle commands,")
     print("  auth refresh-jwt, batch register-catalog/enrich-references,")

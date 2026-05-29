@@ -7810,6 +7810,7 @@ function SemanticDetailPanel({
   const attachments = selected.kind === "reference" ? graph.attachmentsForReference(selected.lineageId) : [];
   const neighborGroups = graph.neighbors(selected.kind, selected.lineageId);
   const selectedReference = selected.kind === "reference" ? selected.record as ReferenceRecord : null;
+  const selectedConcept = selected.kind === "semanticNode" ? selected.record as SemanticNodeRecord : null;
 
   return (
     <section className="category-steering-section" aria-labelledby="semantic-detail-title" data-news-desk-semantic-detail={selected.lineageId}>
@@ -7842,6 +7843,41 @@ function SemanticDetailPanel({
                 reasonCode={referenceRejectionReasonCode}
                 reference={selectedReference}
               />
+            ) : null}
+            {selectedConcept ? (
+              <div className="news-desk-detail-block">
+                <p className="story-label">Authority</p>
+                <div className="news-desk-detail-line">
+                  <span>Authority</span>
+                  <strong>
+                    {selectedConcept.authorityRank != null
+                      ? `#${selectedConcept.authorityRank}`
+                      : "Unknown"}
+                  </strong>
+                </div>
+                <div className="news-desk-detail-line">
+                  <span>Mentioned by</span>
+                  <strong>
+                    {selectedConcept.acceptedReferenceMentionCount != null
+                      ? `${selectedConcept.acceptedReferenceMentionCount} references`
+                      : "Unknown"}
+                  </strong>
+                </div>
+                <div className="news-desk-detail-line">
+                  <span>Connected to</span>
+                  <strong>
+                    {selectedConcept.relationCount != null
+                      ? `${selectedConcept.relationCount} relations`
+                      : "Unknown"}
+                  </strong>
+                </div>
+                {selectedConcept.distinctSourceKindCount != null ? (
+                  <div className="news-desk-detail-line">
+                    <span>Source kinds</span>
+                    <strong>{selectedConcept.distinctSourceKindCount}</strong>
+                  </div>
+                ) : null}
+              </div>
             ) : null}
             {insights.length ? (
               <InsightMessageBlock insights={insights} />
@@ -12185,6 +12221,7 @@ function semanticNodeToNewsroomCard(node: SemanticNodeRecord, index: number): Ne
     },
     kicker: formatAssignmentTypeLabel(node.nodeKind),
     meta: [
+      node.authorityRank != null ? `Authority #${node.authorityRank}` : null,
       node.status,
       node.corpusId ?? null,
     ].filter(Boolean),

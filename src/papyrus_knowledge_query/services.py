@@ -99,7 +99,8 @@ getNewsroomSection(id: $id) {
     "semanticNode": """
 getSemanticNode(id: $id) {
   id lineageId versionNumber versionState contentHash nodeKey nodeKind corpusId categorySetId categoryLineageId categoryKey
-  displayName description aliases status importRunId createdAt updatedAt
+  displayName description aliases authorityScore authorityRank acceptedReferenceMentionCount distinctSourceKindCount relationCount
+  status importRunId createdAt updatedAt
 }
 """,
     "semanticRelation": f"getSemanticRelation(id: $id) {{ {RELATION_FIELDS} }}",
@@ -136,8 +137,9 @@ LINEAGE_OBJECT_FIELD_MAP = {
     "semanticNode": (
         "listSemanticNodesByLineageAndVersion",
         """
-  id lineageId versionNumber versionState contentHash nodeKey nodeKind corpusId categorySetId categoryLineageId categoryKey
-  displayName description aliases status importRunId createdAt updatedAt
+  id lineageId versionNumber versionState contentHash nodeKey nodeKind corpusId categorySetId categoryLineageId categoryKey displayName
+  description aliases authorityScore authorityRank acceptedReferenceMentionCount distinctSourceKindCount relationCount status importRunId
+  createdAt updatedAt
 """,
     ),
 }

@@ -522,6 +522,11 @@ query ListSemanticNodes($limit: Int, $nextToken: String) {
       displayName
       description
       aliases
+      authorityScore
+      authorityRank
+      acceptedReferenceMentionCount
+      distinctSourceKindCount
+      relationCount
       status
       updatedAt
     }

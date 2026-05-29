@@ -347,6 +347,11 @@ export type SemanticNodeRecord = {
   displayName?: string | null;
   description?: string | null;
   aliases?: Array<string | null> | null;
+  authorityScore?: number | null;
+  authorityRank?: number | null;
+  acceptedReferenceMentionCount?: number | null;
+  distinctSourceKindCount?: number | null;
+  relationCount?: number | null;
   status: string;
   importRunId?: string | null;
   createdAt?: string | null;

@@ -93,7 +93,8 @@ id messageKind messageDomain status summary source importRunId authorLabel newsr
 """
 SEMANTIC_NODE_FIELDS = """
 id lineageId versionNumber previousVersionId versionState versionCreatedAt versionCreatedBy changeReason contentHash
-nodeKey nodeKind corpusId categorySetId categoryLineageId categoryKey displayName description aliases status importRunId createdAt updatedAt
+nodeKey nodeKind corpusId categorySetId categoryLineageId categoryKey displayName description aliases authorityScore authorityRank
+acceptedReferenceMentionCount distinctSourceKindCount relationCount status importRunId createdAt updatedAt
 newsroomFeedKey
 """
 SEMANTIC_RELATION_FIELDS = """

@@ -96,7 +96,8 @@ getCategorySet(id: $id) {
     "semanticNode": """
 getSemanticNode(id: $id) {
   id lineageId versionNumber previousVersionId versionState versionCreatedAt versionCreatedBy changeReason contentHash
-  nodeKey nodeKind corpusId categorySetId categoryLineageId categoryKey displayName description aliases status importRunId updatedAt
+  nodeKey nodeKind corpusId categorySetId categoryLineageId categoryKey displayName description aliases authorityScore authorityRank
+  acceptedReferenceMentionCount distinctSourceKindCount relationCount status importRunId updatedAt
 }
 """,
     "category": """
