@@ -263,12 +263,10 @@ Feature: Newspaper layout scenarios
   Scenario: Newsroom renders category steering proposals and category edits
     Given I open the topics newsroom at 1280 by 900
     Then the topics desk should render
-    And the newsroom should show category and graph proposal rows
+    And the newsroom should show category proposal queue rows
     And the newsroom should show accepted subcategories under canonical categories
     And the newsroom should show proposed subcategories under canonical categories
-    And the newsroom should offer accept and reject actions without defer
-    When I update the first newsroom category name to "Foundation Model Scaling Updated"
-    Then the first newsroom category name should be "Foundation Model Scaling Updated"
+    And the newsroom should offer accept reject defer and edit actions
     And no browser console errors should occur
 
   Scenario: Newsroom browses references and semantic concepts

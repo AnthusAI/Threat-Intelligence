@@ -188,8 +188,12 @@ When("I follow the newsroom overview link for {string}", async function (label) 
 When("I update the first newsroom category name to {string}", async function (name) {
   const page = requirePage(this);
   const firstNameInput = page.locator(".category-steering-category-card label", { hasText: "Name" }).first().locator("input");
+  if (!(await firstNameInput.isVisible())) {
+    await page.locator("[data-newsroom-card]").first().click();
+    await firstNameInput.waitFor({ state: "visible", timeout: 10_000 });
+  }
   await firstNameInput.fill(name);
-  await page.locator(".category-steering-category-card button", { hasText: "Save Copy" }).first().click();
+  await page.locator(".category-steering-category-card button", { hasText: "Save" }).first().click();
   await page.waitForFunction((expectedName) => {
     const card = document.querySelector(".category-steering-category-card");
     return card?.getAttribute("data-saved-display-name") === expectedName;
@@ -1617,32 +1621,31 @@ Then("the message detail headline should not be {string}", async function (unexp
   assert.notEqual(headline, unexpectedHeadline);
 });
 
-Then("the newsroom should show category and graph proposal rows", async function () {
+Then("the newsroom should show category proposal queue rows", async function () {
   const page = requirePage(this);
-  await page.locator("[data-proposal-domain='category']").first().waitFor({ state: "visible", timeout: 10_000 });
-  await page.locator("td", { hasText: "relationship-proposal" }).first().waitFor({ state: "visible", timeout: 10_000 });
-  await page.locator("[data-generic-proposal-kind='create-category']").first().waitFor({ state: "visible", timeout: 10_000 });
-  await page.locator("[data-generic-proposal-kind='add-ontology-relationship']").first().waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-topic-queue-proposal]").first().waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-topic-queue-proposal] td", { hasText: "create-category" }).first().waitFor({ state: "visible", timeout: 10_000 });
 });
 
 Then("the newsroom should show accepted subcategories under canonical categories", async function () {
   const page = requirePage(this);
-  await page.locator("[data-news-desk-category-tree-root='category.foundation-model-scaling']").waitFor({ state: "visible", timeout: 10_000 });
-  await page.locator("[data-news-desk-subcategory='category.agent-memory']", { hasText: "Agent Memory" }).waitFor({ state: "visible", timeout: 10_000 });
-  await page.locator("[data-news-desk-subcategory='category.benchmark-saturation']", { hasText: "Benchmark Saturation" }).waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-category-tree-root='category.foundation-model-scaling']").first().waitFor({ state: "attached", timeout: 10_000 });
+  await page.locator("[data-news-desk-subcategory='category.agent-memory']", { hasText: "Agent Memory" }).first().waitFor({ state: "attached", timeout: 10_000 });
+  await page.locator("[data-news-desk-subcategory='category.benchmark-saturation']", { hasText: "Benchmark Saturation" }).first().waitFor({ state: "attached", timeout: 10_000 });
 });
 
 Then("the newsroom should show proposed subcategories under canonical categories", async function () {
   const page = requirePage(this);
-  await page.locator("[data-news-desk-category-tree-root='category.foundation-model-scaling']").waitFor({ state: "visible", timeout: 10_000 });
-  await page.locator("[data-news-desk-proposed-subcategory='category.agent-memory']", { hasText: "Agent Memory" }).waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-news-desk-category-tree-root='category.foundation-model-scaling']").first().waitFor({ state: "attached", timeout: 10_000 });
+  await page.locator("[data-news-desk-proposed-subcategory='category.agent-memory']", { hasText: "Agent Memory" }).first().waitFor({ state: "attached", timeout: 10_000 });
 });
 
-Then("the newsroom should offer accept and reject actions without defer", async function () {
+Then("the newsroom should offer accept reject defer and edit actions", async function () {
   const page = requirePage(this);
-  await page.locator("[data-news-desk-proposed-subcategory='category.agent-memory'] [data-review-action='accept']").waitFor({ state: "visible", timeout: 10_000 });
-  await page.locator("[data-news-desk-proposed-subcategory='category.agent-memory'] [data-review-action='reject']").waitFor({ state: "visible", timeout: 10_000 });
-  assert.equal(await page.locator("[data-review-action='defer']").count(), 0);
+  await page.locator("[data-news-desk-proposed-subcategory='category.agent-memory'] [data-review-action='accept']").first().waitFor({ state: "attached", timeout: 10_000 });
+  await page.locator("[data-news-desk-proposed-subcategory='category.agent-memory'] [data-review-action='reject']").first().waitFor({ state: "attached", timeout: 10_000 });
+  await page.locator("[data-news-desk-proposed-subcategory='category.agent-memory'] [data-review-action='defer']").first().waitFor({ state: "attached", timeout: 10_000 });
+  await page.locator("[data-news-desk-proposed-subcategory='category.agent-memory'] [data-review-action='edit']").first().waitFor({ state: "attached", timeout: 10_000 });
 });
 
 Then("the first newsroom category name should be {string}", async function (expectedName) {

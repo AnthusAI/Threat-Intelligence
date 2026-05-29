@@ -146,7 +146,17 @@ type ReferenceQualityActionState = {
   tone: ActionState["tone"];
 };
 
-type ReviewAction = "accept" | "reject";
+type ReviewAction = "accept" | "reject" | "defer" | "edit";
+type ProposalReviewInput = {
+  note?: string | null;
+  displayName?: string | null;
+  shortTitle?: string | null;
+  subtitle?: string | null;
+  description?: string | null;
+  aliases?: string[] | null;
+  seedItemIds?: string[] | null;
+  holdoutItemIds?: string[] | null;
+};
 type ReferenceCurationAction = "accept" | "reject" | "archive";
 type ReferenceRejectionReasonCode = typeof REFERENCE_REJECTION_REASON_CODES[number];
 type TopicLabelAction = "manual_label" | "accept_prediction" | "reject_prediction" | "unlabel";
@@ -174,6 +184,9 @@ type TopicDraftModalState =
   | { kind: "archive"; category: CategorySteeringCategory }
   | { kind: "promote" }
   | { kind: "discard" };
+type TopicProposalEditState = {
+  proposal: CategorySteeringProposal;
+};
 type AnalysisCommandPlanEntry = {
   label: string;
   cwd: string;
@@ -505,6 +518,13 @@ const TAXONOMY_PROPOSAL_KINDS = new Set([
   "archive-category",
   "merge-categories",
   "split-category",
+]);
+const TOPIC_PROPOSAL_BLOCKED_APPLY_KINDS = new Set([
+  "merge-category",
+  "merge-categories",
+  "split-category",
+  "archive-category",
+  "deprecate-category",
 ]);
 
 const USER_POOL_AUTH_MODE = "userPool";
@@ -1386,13 +1406,31 @@ function NewsDeskDashboard({
     };
   }, [applyReferenceRecord]);
 
-  function runProposalAction(proposal: CategorySteeringProposal, action: ReviewAction) {
+  function runProposalAction(proposal: CategorySteeringProposal, action: ReviewAction, input?: ProposalReviewInput) {
+    const blockedReason = proposalReviewActionBlockedReason(proposal, action);
+    if (blockedReason) {
+      setActionState({ id: proposal.id, message: blockedReason, tone: "error" });
+      return;
+    }
     setActionState({ id: proposal.id, message: `${action} pending`, tone: "pending" });
     if (dashboard.isDemo) {
+      const now = new Date().toISOString();
       setProposals((current) =>
         current.map((entry) =>
           entry.id === proposal.id
-            ? { ...entry, status: action === "accept" ? "accepted" : "rejected", reviewedAt: new Date().toISOString() }
+            ? {
+                ...entry,
+                status: action === "defer"
+                  ? "deferred"
+                  : action === "reject"
+                    ? "rejected"
+                    : "accepted",
+                reviewedAt: now,
+                displayName: input?.displayName ?? entry.displayName,
+                shortTitle: input?.shortTitle ?? entry.shortTitle,
+                subtitle: input?.subtitle ?? entry.subtitle,
+                description: input?.description ?? entry.description,
+              }
             : entry,
         ),
       );
@@ -1407,27 +1445,41 @@ function NewsDeskDashboard({
               proposalId: proposal.id,
               action,
               actorLabel: "Papyrus newsroom",
-              displayName: proposal.displayName ?? undefined,
-              shortTitle: proposal.shortTitle ?? undefined,
-              subtitle: proposal.subtitle ?? undefined,
-              description: proposal.description ?? undefined,
-              seedItemIds: compactArray(proposal.suggestedSeedItemIds),
-              holdoutItemIds: compactArray(proposal.suggestedHoldoutItemIds),
+              note: input?.note ?? undefined,
+              displayName: input?.displayName ?? proposal.displayName ?? undefined,
+              shortTitle: input?.shortTitle ?? proposal.shortTitle ?? undefined,
+              subtitle: input?.subtitle ?? proposal.subtitle ?? undefined,
+              description: input?.description ?? proposal.description ?? undefined,
+              aliases: input?.aliases ?? undefined,
+              seedItemIds: input?.seedItemIds ?? compactArray(proposal.suggestedSeedItemIds),
+              holdoutItemIds: input?.holdoutItemIds ?? compactArray(proposal.suggestedHoldoutItemIds),
             },
             { authMode: USER_POOL_AUTH_MODE },
           );
           const review = assertReviewMutationSucceeded(response, proposal.id);
-          const nextStatus = review.status === "accepted" || review.status === "rejected"
+          const nextStatus = review.status === "accepted" || review.status === "rejected" || review.status === "deferred"
             ? review.status
-            : action === "accept" ? "accepted" : "rejected";
+            : action === "defer"
+              ? "deferred"
+              : action === "reject"
+                ? "rejected"
+                : "accepted";
           setProposals((current) =>
             current.map((entry) =>
               entry.id === proposal.id
-                ? { ...entry, status: nextStatus, reviewedAt: new Date().toISOString() }
+                ? {
+                    ...entry,
+                    status: nextStatus,
+                    reviewedAt: new Date().toISOString(),
+                    displayName: input?.displayName ?? entry.displayName,
+                    shortTitle: input?.shortTitle ?? entry.shortTitle,
+                    subtitle: input?.subtitle ?? entry.subtitle,
+                    description: input?.description ?? entry.description,
+                  }
                 : entry,
             ),
           );
-          if (action === "accept" && TAXONOMY_PROPOSAL_KINDS.has(proposal.proposalKind)) {
+          if ((action === "accept" || action === "edit") && TAXONOMY_PROPOSAL_KINDS.has(proposal.proposalKind)) {
             await refreshEditorCategoryTreeState();
           }
           setActionState({ id: proposal.id, message: `${action} saved`, tone: "ok" });
@@ -5505,7 +5557,7 @@ function TopicsDeskView({
   onDiscardDraftSet: (categorySet: CategorySteeringCategorySet, note: string) => Promise<boolean> | boolean | void;
   onLexicalRuleCreate: (draft: LexicalRuleDraft) => void;
   onPromoteDraftSet: (categorySet: CategorySteeringCategorySet, note: string) => Promise<boolean> | boolean | void;
-  onProposalAction: (proposal: CategorySteeringProposal, action: ReviewAction) => void;
+  onProposalAction: (proposal: CategorySteeringProposal, action: ReviewAction, input?: ProposalReviewInput) => void;
   onReviewTopicLabel: (input: { action: TopicLabelAction; category: CategorySteeringCategory; note?: string | null; reference: ReferenceRecord; sourceRelationId?: string | null }) => void;
   onUpdateDraftCategory: (category: CategorySteeringCategory, input: DraftCategoryInput) => Promise<boolean> | boolean | void;
   proposals: CategorySteeringProposal[];
@@ -5518,6 +5570,7 @@ function TopicsDeskView({
   const [isCreatingTaxonomyDraft, setIsCreatingTaxonomyDraft] = useState(false);
   const [topicToolbarError, setTopicToolbarError] = useState<string | null>(null);
   const [topicDraftModal, setTopicDraftModal] = useState<TopicDraftModalState | null>(null);
+  const [topicProposalEdit, setTopicProposalEdit] = useState<TopicProposalEditState | null>(null);
   const [isTopicToolbarMenuOpen, setIsTopicToolbarMenuOpen] = useState(false);
   const topicToolbarMenuRef = useRef<HTMLDivElement | null>(null);
   const selectedCategorySet = resolveTopicWorkspace(validCategorySets, selectedCategorySetId, defaultCategorySetId);
@@ -5539,6 +5592,12 @@ function TopicsDeskView({
     for (const category of selectedCategorys) map.set(category.categoryKey, category);
     return map;
   }, [selectedCategorys]);
+  const categoryQueueProposals = useMemo(() => {
+    return proposals.filter((proposal) => (
+      proposal.steeringDomain === "category"
+      && (!selectedCategorySet || proposal.categorySetId === selectedCategorySet.id)
+    ));
+  }, [proposals, selectedCategorySet]);
   const roots = buildCanonicalTopicRoots(selectedCategorys, selectedCategoryNodes, proposals);
   const subcategoryCount = roots.reduce((count, root) => count + root.subcategorys.length, 0);
   const proposedSubcategoryCount = roots.reduce((count, root) => count + root.proposedSubcategorys.length, 0);
@@ -5845,6 +5904,13 @@ function TopicsDeskView({
               {categoryTreeLoadError}
             </div>
           ) : null}
+          <TopicProposalQueue
+            disabled={disabled}
+            proposals={categoryQueueProposals}
+            onAction={onProposalAction}
+            onEdit={(proposal) => setTopicProposalEdit({ proposal })}
+            onFocusTopic={selectTopic}
+          />
           <NewsroomCardGrid
             cards={visibleTopicCards}
             emptyLabel={categoryTreeLoadError ?? (validCategorySets.length ? "No active topics in selected topic set" : "No current or draft topic set available.")}
@@ -5878,6 +5944,7 @@ function TopicsDeskView({
             categoryKeywords={categoryKeywords}
             lexicalSteeringRules={lexicalSteeringRules}
             onAction={onProposalAction}
+            onEdit={(proposal) => setTopicProposalEdit({ proposal })}
             onFocusCategory={setFocusedCategoryKey}
             onLexicalRuleCreate={onLexicalRuleCreate}
             proposals={proposals}
@@ -5892,6 +5959,17 @@ function TopicsDeskView({
       )}
     />
     {topicKnowledgeQuery.dialog}
+    {topicProposalEdit ? (
+      <TopicProposalEditModal
+        disabled={disabled}
+        proposal={topicProposalEdit.proposal}
+        onClose={() => setTopicProposalEdit(null)}
+        onSave={(proposal, input) => {
+          onProposalAction(proposal, "edit", input);
+          setTopicProposalEdit(null);
+        }}
+      />
+    ) : null}
     {topicDraftModal && selectedCategorySet ? (
       <TopicDraftActionModal
         categorySet={selectedCategorySet}
@@ -6103,6 +6181,106 @@ function TopicDraftActionModal({
           <button type="button" disabled={isSubmitting} onClick={onClose}>Cancel</button>
           <button type="button" className="news-desk-assignment-create-button" disabled={disabled || isSubmitting || !valid} onClick={handleSubmit}>
             {isSubmitting ? "Saving" : isDiscard ? "Discard Draft" : isArchive ? "Deprecate Topic" : isPromote ? "Promote Draft" : isCreate ? "Create Topic" : "Save Topic"}
+          </button>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+function TopicProposalEditModal({
+  disabled,
+  proposal,
+  onClose,
+  onSave,
+}: {
+  disabled: boolean;
+  proposal: CategorySteeringProposal;
+  onClose: () => void;
+  onSave: (proposal: CategorySteeringProposal, input: ProposalReviewInput) => void;
+}) {
+  const [displayName, setDisplayName] = useState(proposal.displayName ?? proposal.title ?? "");
+  const [shortTitle, setShortTitle] = useState(proposal.shortTitle ?? deriveShortTitle(proposal.displayName ?? proposal.title));
+  const [subtitle, setSubtitle] = useState(proposal.subtitle ?? "");
+  const [description, setDescription] = useState(proposal.description ?? proposal.summary ?? "");
+  const [aliases, setAliases] = useState("");
+  const [note, setNote] = useState("");
+
+  useEffect(() => {
+    setDisplayName(proposal.displayName ?? proposal.title ?? "");
+    setShortTitle(proposal.shortTitle ?? deriveShortTitle(proposal.displayName ?? proposal.title));
+    setSubtitle(proposal.subtitle ?? "");
+    setDescription(proposal.description ?? proposal.summary ?? "");
+    setAliases("");
+    setNote("");
+  }, [proposal]);
+
+  const canSave = Boolean(displayName.trim());
+  return (
+    <div
+      className="news-desk-modal"
+      data-news-desk-topic-proposal-edit-modal
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className="news-desk-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="topic-proposal-edit-title">
+        <header className="news-desk-modal__header">
+          <div>
+            <p className="story-label">Topic Proposal Edit</p>
+            <h3 id="topic-proposal-edit-title">{proposal.title}</h3>
+            <span>Manually correct LLM labels, then accept this proposal.</span>
+          </div>
+          <button type="button" onClick={onClose}>Close</button>
+        </header>
+        <div className="news-desk-topic-draft-form">
+          <label>
+            <span>Name</span>
+            <input disabled={disabled} value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+          </label>
+          <label>
+            <span>Short title</span>
+            <input disabled={disabled} value={shortTitle} onChange={(event) => setShortTitle(event.target.value)} />
+          </label>
+          <label>
+            <span>Subtitle</span>
+            <input disabled={disabled} value={subtitle} onChange={(event) => setSubtitle(event.target.value)} />
+          </label>
+          <label>
+            <span>Description</span>
+            <textarea disabled={disabled} rows={4} value={description} onChange={(event) => setDescription(event.target.value)} />
+          </label>
+          <label>
+            <span>Aliases (comma-separated)</span>
+            <input disabled={disabled} value={aliases} onChange={(event) => setAliases(event.target.value)} placeholder="Optional aliases" />
+          </label>
+          <label>
+            <span>Review note</span>
+            <input disabled={disabled} value={note} onChange={(event) => setNote(event.target.value)} placeholder="Optional note" />
+          </label>
+        </div>
+        <footer className="news-desk-modal__actions">
+          <button type="button" onClick={onClose}>Cancel</button>
+          <button
+            type="button"
+            className="news-desk-assignment-create-button"
+            data-review-action="edit-save-accept"
+            disabled={disabled || !canSave}
+            onClick={() => onSave(proposal, {
+              displayName: displayName.trim(),
+              shortTitle: shortTitle.trim() || deriveShortTitle(displayName),
+              subtitle: subtitle.trim() || null,
+              description: description.trim() || null,
+              aliases: aliases
+                .split(",")
+                .map((entry) => entry.trim())
+                .filter(Boolean),
+              note: note.trim() || null,
+              seedItemIds: compactArray(proposal.suggestedSeedItemIds),
+              holdoutItemIds: compactArray(proposal.suggestedHoldoutItemIds),
+            })}
+          >
+            Save &amp; Accept
           </button>
         </footer>
       </div>
@@ -14083,14 +14261,173 @@ function SectionHeader({ title, detail }: { title: string; detail: string }) {
   );
 }
 
+function TopicProposalQueue({
+  disabled,
+  proposals,
+  onAction,
+  onEdit,
+  onFocusTopic,
+}: {
+  disabled: boolean;
+  proposals: CategorySteeringProposal[];
+  onAction: (proposal: CategorySteeringProposal, action: ReviewAction) => void;
+  onEdit: (proposal: CategorySteeringProposal) => void;
+  onFocusTopic: (categoryKey: string) => void;
+}) {
+  const [statusFilter, setStatusFilter] = useState<string>("proposed");
+  const [kindFilter, setKindFilter] = useState<string>("all");
+  const statusFiltered = useMemo(() => (
+    proposals.filter((proposal) => {
+      if (statusFilter === "all") return true;
+      if (statusFilter === "reviewed") return proposal.status === "accepted" || proposal.status === "rejected";
+      return proposal.status === statusFilter;
+    })
+  ), [proposals, statusFilter]);
+  const availableKinds = useMemo(() => (
+    Array.from(new Set(proposals.map((proposal) => proposal.proposalKind))).sort()
+  ), [proposals]);
+  const visible = useMemo(() => (
+    statusFiltered.filter((proposal) => kindFilter === "all" || proposal.proposalKind === kindFilter)
+  ), [kindFilter, statusFiltered]);
+
+  return (
+    <section className="category-steering-section" aria-label="Topic proposal review queue">
+      <SectionHeader title="Topic Review Queue" detail={`${visible.length} visible / ${proposals.length} total`} />
+      <div className="news-desk-topic-queue-toolbar">
+        <label>
+          <span>Status</span>
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+            <option value="proposed">Proposed</option>
+            <option value="deferred">Deferred</option>
+            <option value="reviewed">Reviewed</option>
+            <option value="all">All</option>
+          </select>
+        </label>
+        <label>
+          <span>Kind</span>
+          <select value={kindFilter} onChange={(event) => setKindFilter(event.target.value)}>
+            <option value="all">All kinds</option>
+            {availableKinds.map((kind) => <option key={kind} value={kind}>{kind}</option>)}
+          </select>
+        </label>
+      </div>
+      <div className="category-steering-table-wrap">
+        <table className="category-steering-table">
+          <thead>
+            <tr>
+              <th>Proposal</th>
+              <th>Kind</th>
+              <th>Target root</th>
+              <th>Status</th>
+              <th>Review</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visible.length ? visible.map((proposal) => {
+              const targetRoot = proposal.targetCategoryKey ?? proposal.categoryKey ?? "";
+              return (
+                <tr data-topic-queue-proposal={proposal.id} key={proposal.id}>
+                  <td>
+                    <strong>{proposal.displayName ?? proposal.title}</strong>
+                    <p>{proposal.summary ?? "No summary provided."}</p>
+                  </td>
+                  <td>{proposal.proposalKind}</td>
+                  <td>
+                    {targetRoot ? (
+                      <button
+                        type="button"
+                        className="news-desk-topic-link-button"
+                        disabled={disabled}
+                        onClick={() => onFocusTopic(targetRoot)}
+                      >
+                        {targetRoot}
+                      </button>
+                    ) : "n/a"}
+                  </td>
+                  <td><StatusPill status={proposal.status} /></td>
+                  <td>
+                    <ProposalReviewActions
+                      disabled={disabled}
+                      proposal={proposal}
+                      onAction={onAction}
+                      onEdit={onEdit}
+                    />
+                  </td>
+                </tr>
+              );
+            }) : (
+              <tr><td colSpan={5}>No proposals match the selected queue filters</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function ProposalReviewActions({
+  disabled,
+  proposal,
+  onAction,
+  onEdit,
+}: {
+  disabled: boolean;
+  proposal: CategorySteeringProposal;
+  onAction: (proposal: CategorySteeringProposal, action: ReviewAction) => void;
+  onEdit: (proposal: CategorySteeringProposal) => void;
+}) {
+  const acceptBlockedReason = proposalReviewActionBlockedReason(proposal, "accept");
+  const editBlockedReason = proposalReviewActionBlockedReason(proposal, "edit");
+  return (
+    <div className="category-steering-proposal__actions" aria-label={`${proposal.title} review actions`}>
+      <button
+        type="button"
+        data-review-action="accept"
+        disabled={disabled || proposal.status === "accepted" || Boolean(acceptBlockedReason)}
+        onClick={() => onAction(proposal, "accept")}
+        title={acceptBlockedReason ?? undefined}
+      >
+        Accept
+      </button>
+      <button
+        type="button"
+        data-review-action="reject"
+        disabled={disabled || proposal.status === "rejected"}
+        onClick={() => onAction(proposal, "reject")}
+      >
+        Reject
+      </button>
+      <button
+        type="button"
+        data-review-action="defer"
+        disabled={disabled || proposal.status === "deferred"}
+        onClick={() => onAction(proposal, "defer")}
+      >
+        Defer
+      </button>
+      <button
+        type="button"
+        data-review-action="edit"
+        disabled={disabled || proposal.status === "accepted" || Boolean(editBlockedReason)}
+        onClick={() => onEdit(proposal)}
+        title={editBlockedReason ?? undefined}
+      >
+        Edit
+      </button>
+    </div>
+  );
+}
+
 function GenericProposalQueue({
   proposals,
   disabled,
   onAction,
+  onEdit,
 }: {
   proposals: CategorySteeringProposal[];
   disabled: boolean;
   onAction: (proposal: CategorySteeringProposal, action: ReviewAction) => void;
+  onEdit: (proposal: CategorySteeringProposal) => void;
 }) {
   return (
     <section className="category-steering-section" aria-labelledby="ontology-and-graph-proposals-title">
@@ -14116,10 +14453,12 @@ function GenericProposalQueue({
                 <td>{proposal.relationshipType ?? "none"}</td>
                 <td><StatusPill status={proposal.status} /></td>
                 <td>
-                  <div className="category-steering-proposal__actions" aria-label={`${proposal.title} review actions`}>
-                    <button type="button" data-review-action="accept" disabled={disabled || proposal.status === "accepted"} onClick={() => onAction(proposal, "accept")}>Accept</button>
-                    <button type="button" data-review-action="reject" disabled={disabled || proposal.status === "rejected"} onClick={() => onAction(proposal, "reject")}>Reject</button>
-                  </div>
+                  <ProposalReviewActions
+                    disabled={disabled}
+                    proposal={proposal}
+                    onAction={onAction}
+                    onEdit={onEdit}
+                  />
                 </td>
               </tr>
             )) : (
@@ -14141,6 +14480,7 @@ function AcceptedCategoryTreeSection({
   graph,
   initialCategoryLineageId,
   onAction,
+  onEdit,
   onCategorySave,
   onLexicalRuleCreate,
   proposals,
@@ -14156,6 +14496,7 @@ function AcceptedCategoryTreeSection({
   graph: SemanticGraph;
   initialCategoryLineageId?: string | null;
   onAction: (proposal: CategorySteeringProposal, action: ReviewAction) => void;
+  onEdit: (proposal: CategorySteeringProposal) => void;
   onCategorySave: (category: CategorySteeringCategory, update: Pick<CategorySteeringCategory, "displayName" | "shortTitle" | "subtitle" | "description">) => void;
   onLexicalRuleCreate: (draft: LexicalRuleDraft) => void;
   proposals: CategorySteeringProposal[];
@@ -14257,6 +14598,7 @@ function AcceptedCategoryTreeSection({
                 categoryKeywords={categoryKeywords}
                 lexicalSteeringRules={lexicalSteeringRules}
                 onAction={onAction}
+                onEdit={onEdit}
                 onFocusCategory={setFocusedCategoryKey}
                 onLexicalRuleCreate={onLexicalRuleCreate}
                 proposals={proposals}
@@ -14330,6 +14672,7 @@ function CanonicalTopicDetail({
   knowledgeQuery,
   lexicalSteeringRules,
   onAction,
+  onEdit,
   onFocusCategory,
   onLexicalRuleCreate,
   proposals,
@@ -14344,6 +14687,7 @@ function CanonicalTopicDetail({
   knowledgeQuery?: KnowledgeQueryControl;
   lexicalSteeringRules: LexicalSteeringRuleRecord[];
   onAction: (proposal: CategorySteeringProposal, action: ReviewAction) => void;
+  onEdit: (proposal: CategorySteeringProposal) => void;
   onFocusCategory: (categoryKey: string) => void;
   onLexicalRuleCreate: (draft: LexicalRuleDraft) => void;
   proposals: CategorySteeringProposal[];
@@ -14450,10 +14794,12 @@ function CanonicalTopicDetail({
                         <span>{compactArray(proposal.evidenceItemIds).length} evidence refs</span>
                         <span>{proposal.categoryKey ?? "new category"}</span>
                       </div>
-                      <div className="category-steering-proposal__actions category-steering-subcategory__actions" aria-label={`${proposal.title} review actions`}>
-                        <button type="button" data-review-action="accept" disabled={disabled || proposal.status === "accepted"} onClick={() => onAction(proposal, "accept")}>Accept</button>
-                        <button type="button" data-review-action="reject" disabled={disabled || proposal.status === "rejected"} onClick={() => onAction(proposal, "reject")}>Reject</button>
-                      </div>
+                      <ProposalReviewActions
+                        disabled={disabled}
+                        proposal={proposal}
+                        onAction={onAction}
+                        onEdit={onEdit}
+                      />
                     </article>
                   ))}
                 </div>
@@ -14924,6 +15270,13 @@ function formatGenericProposalSubject(proposal: CategorySteeringProposal): strin
     proposal.displayName,
   ].filter(Boolean);
   return parts.join(" ") || "unmapped";
+}
+
+function proposalReviewActionBlockedReason(proposal: CategorySteeringProposal, action: ReviewAction): string | null {
+  if ((action === "accept" || action === "edit") && TOPIC_PROPOSAL_BLOCKED_APPLY_KINDS.has(proposal.proposalKind)) {
+    return `${proposal.proposalKind} apply is not implemented yet.`;
+  }
+  return null;
 }
 
 function assertReviewMutationSucceeded(response: CategoryReviewResponse, proposalId: string): NonNullable<CategoryReviewResponse["data"]> {
@@ -16129,11 +16482,13 @@ function CategoryProposalRow({
   category,
   disabled,
   onAction,
+  onEdit,
 }: {
   proposal: CategorySteeringProposal;
   category?: CategorySteeringCategory;
   disabled: boolean;
   onAction: (proposal: CategorySteeringProposal, action: ReviewAction) => void;
+  onEdit: (proposal: CategorySteeringProposal) => void;
 }) {
   const evidence = compactArray(proposal.evidenceItemIds).slice(0, 3);
 
@@ -16170,10 +16525,12 @@ function CategoryProposalRow({
           )) : <span>No evidence rows</span>}
         </div>
       </div>
-      <div className="category-steering-proposal__actions" aria-label={`${proposal.title} review actions`}>
-        <button type="button" data-review-action="accept" disabled={disabled || proposal.status === "accepted"} onClick={() => onAction(proposal, "accept")}>Accept</button>
-        <button type="button" data-review-action="reject" disabled={disabled || proposal.status === "rejected"} onClick={() => onAction(proposal, "reject")}>Reject</button>
-      </div>
+      <ProposalReviewActions
+        disabled={disabled}
+        proposal={proposal}
+        onAction={onAction}
+        onEdit={onEdit}
+      />
     </article>
   );
 }
@@ -16228,7 +16585,7 @@ function CategoryEditor({
       </label>
       <footer>
         <span>{compactArray(category.seedItemIds).length} seeds / {compactArray(category.holdoutItemIds).length} holdouts</span>
-        <button type="button" data-news-desk-command="save-copy" disabled={disabled || !displayName.trim() || !shortTitle.trim()} onClick={() => onSave(category, { displayName, shortTitle, subtitle, description })}>Save Copy</button>
+        <button type="button" data-news-desk-command="save-copy" disabled={disabled || !displayName.trim() || !shortTitle.trim()} onClick={() => onSave(category, { displayName, shortTitle, subtitle, description })}>Save</button>
       </footer>
     </article>
   );
