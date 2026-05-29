@@ -421,6 +421,7 @@ type NewsroomAssignmentPageOptions = NewsroomPageOptions & {
 
 type NewsroomReferencePageOptions = NewsroomPageOptions & {
   status?: string;
+  excludePending?: boolean;
   corpusId?: string;
 };
 
@@ -922,10 +923,13 @@ export async function loadNewsroomReferencePage(options: NewsroomReferencePageOp
     newsroomFeedKey: "references",
     limit: options.limit,
     nextToken: options.nextToken,
-    matches: equalityMatcher({
-      curationStatus: options.status,
-      corpusId: options.corpusId,
-    }),
+    matches: (item) => {
+      const status = String(item.curationStatus ?? "").trim() || "pending";
+      if (options.status && status !== options.status) return false;
+      if (options.excludePending && status === "pending") return false;
+      if (options.corpusId && item.corpusId !== options.corpusId) return false;
+      return true;
+    },
   });
 }
 

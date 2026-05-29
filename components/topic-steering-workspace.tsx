@@ -3111,6 +3111,7 @@ function NewsDeskDashboard({
             isDemo={Boolean(dashboard.isDemo)}
             qualityActionState={referenceQualityActionState}
             references={references}
+            referenceAttachments={referenceAttachments}
             realtimeError={referencesRealtimeError}
             realtimeStatus={referencesRealtimeStatus}
             semanticRelations={semanticRelations}
@@ -6272,6 +6273,7 @@ function ReferencesDeskView({
   realtimeError,
   realtimeStatus,
   references,
+  referenceAttachments,
   semanticRelations,
   summary,
 }: {
@@ -6294,20 +6296,24 @@ function ReferencesDeskView({
   realtimeError?: string | null;
   realtimeStatus?: RealtimeSubscriptionStatus;
   references: ReferenceRecord[];
+  referenceAttachments: ReferenceAttachmentRecord[];
   semanticRelations: SemanticRelationRecord[];
   summary?: NewsroomSummaryRecord | null;
 }) {
   const consoleContext = usePapyrusConsole();
-  const [statusFilter, setStatusFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("__exclude_pending");
+  const [processingFilter, setProcessingFilter] = useState("");
   const [selectedReferenceLineageId, setSelectedReferenceLineageId] = useState(initialReferenceLineageId ?? "");
   const [isReferenceDetailOpen, setIsReferenceDetailOpen] = useState(Boolean(initialReferenceLineageId));
   const categoryContext = useMemo(() => buildCategoryDrilldownContext(categories, initialCategoryLineageId), [categories, initialCategoryLineageId]);
+  const statusFilterValue = statusFilter === "__exclude_pending" ? "" : statusFilter;
   const feed = useNewsroomPagedRows({
     initialItems: references,
     enabled: !isDemo && !categoryContext.primary,
-    resetKey: `references:${statusFilter}`,
+    resetKey: `references:${statusFilter}:${processingFilter}`,
     loadPage: (nextToken) => loadNewsroomReferencePage({
-      status: statusFilter,
+      status: statusFilterValue,
+      excludePending: statusFilter === "__exclude_pending",
       nextToken,
     }),
   });
@@ -6326,8 +6332,19 @@ function ReferencesDeskView({
     () => selectCanonicalReferenceRecords(visibleReferences),
     [visibleReferences],
   );
-  const filteredReferences = canonicalVisibleReferences
-    .filter((reference) => !statusFilter || (reference.curationStatus ?? "pending") === statusFilter);
+  const statusFilteredReferences = canonicalVisibleReferences
+    .filter((reference) => {
+      const effectiveStatus = normalizeReferenceStatus(reference.curationStatus);
+      if (statusFilter === "__exclude_pending") return effectiveStatus !== "pending";
+      if (!statusFilter) return true;
+      return effectiveStatus === statusFilter;
+    });
+  const filteredReferences = statusFilteredReferences
+    .filter((reference) => {
+      if (!processingFilter) return true;
+      const processed = isReferenceProcessed(reference, referenceAttachments);
+      return processingFilter === "processed" ? processed : !processed;
+    });
   const requestedReferenceLineageId = selectedReferenceLineageId || initialReferenceLineageId || "";
   const selectedReference = requestedReferenceLineageId
     ? selectedReferenceRecordByLineage(filteredReferences, requestedReferenceLineageId)
@@ -6387,14 +6404,17 @@ function ReferencesDeskView({
     ? `${filteredReferences.length} references classified as ${categoryFilter.label}`
     : `${filteredReferences.length} private corpus items`;
   const statusCounts = categoryFilter ? countReferencesByStatus(canonicalVisibleReferences) : summary?.facets?.references?.byCurationStatus ?? summary?.referenceStatusCounts ?? countReferencesByStatus(canonicalVisibleReferences);
+  const nonPendingCount = (statusCounts.accepted ?? 0) + (statusCounts.rejected ?? 0) + (statusCounts.archived ?? 0);
   const totalReferenceCount = categoryFilter ? canonicalVisibleReferences.length : summaryCountFromRecord(summary, "references") || canonicalVisibleReferences.length;
   const statusFilterOptions = [
+    { key: "__exclude_pending", label: "Reviewed (non-pending)", count: nonPendingCount },
     { key: "", label: "All statuses", count: totalReferenceCount },
     { key: "pending", label: "Pending", count: statusCounts.pending ?? 0 },
     { key: "accepted", label: "Accepted", count: statusCounts.accepted ?? 0 },
     { key: "rejected", label: "Rejected", count: statusCounts.rejected ?? 0 },
     { key: "archived", label: "Archived", count: statusCounts.archived ?? 0 },
   ];
+  const processingCounts = countReferencesByProcessing(statusFilteredReferences, referenceAttachments);
   const cards = filteredReferences.map((reference, index) => referenceToNewsroomCard(
     reference,
     index,
@@ -6481,20 +6501,18 @@ function ReferencesDeskView({
               filterLabel="Curation status"
               filterOptions={statusFilterOptions}
               filterValue={statusFilter}
-              metricValue={statusFilter}
+              metricValue={processingFilter}
               metrics={[
-                { key: "", label: "All", count: totalReferenceCount },
-                { key: "pending", label: "Pending", count: statusCounts.pending ?? 0 },
-                { key: "accepted", label: "Accepted", count: statusCounts.accepted ?? 0 },
-                { key: "rejected", label: "Rejected", count: statusCounts.rejected ?? 0 },
-                { key: "archived", label: "Archived", count: statusCounts.archived ?? 0 },
+                { key: "", label: "All processing", count: statusFilteredReferences.length },
+                { key: "processed", label: "Processed", count: processingCounts.processed },
+                { key: "unprocessed", label: "Unprocessed", count: processingCounts.unprocessed },
               ]}
               footerLabel={feed.error ?? undefined}
               hasMore={!isDemo && !categoryFilter && feed.hasMore}
               isLoadingMore={feed.isLoadingMore}
               onFilterChange={setStatusFilter}
               onLoadMore={feed.loadMore}
-              onMetricChange={setStatusFilter}
+              onMetricChange={setProcessingFilter}
               onSelect={selectReference}
               selectedId={selectedLineageId}
             />
@@ -14879,6 +14897,14 @@ function resolveReferenceProcessingStatus(
   return "created";
 }
 
+function isReferenceProcessed(
+  reference: ReferenceRecord,
+  attachments: ReferenceAttachmentRecord[] = [],
+): boolean {
+  const status = resolveReferenceProcessingStatus(reference, attachments);
+  return status === "processed" || status === "blocked";
+}
+
 function formatGenericProposalSubject(proposal: CategorySteeringProposal): string {
   const parts = [
     proposal.categoryKey,
@@ -15020,6 +15046,7 @@ function referenceReasonLabel(code: ReferenceRejectionReasonCode): string {
 }
 
 function referenceLedgerLabel(status: string): string {
+  if (status === "__exclude_pending") return "reviewed references";
   if (status === "pending") return "reference prospects";
   if (status === "accepted") return "accepted references";
   if (status === "rejected") return "rejected references";
@@ -15030,10 +15057,26 @@ function referenceLedgerLabel(status: string): string {
 function countReferencesByStatus(references: ReferenceRecord[]): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const reference of references) {
-    const status = reference.curationStatus ?? "pending";
+    const status = normalizeReferenceStatus(reference.curationStatus);
     counts[status] = (counts[status] ?? 0) + 1;
   }
   return counts;
+}
+
+function countReferencesByProcessing(
+  references: ReferenceRecord[],
+  attachments: ReferenceAttachmentRecord[],
+): { processed: number; unprocessed: number } {
+  let processed = 0;
+  let unprocessed = 0;
+  for (const reference of references) {
+    if (isReferenceProcessed(reference, attachments)) {
+      processed += 1;
+    } else {
+      unprocessed += 1;
+    }
+  }
+  return { processed, unprocessed };
 }
 
 function countMessagesBy(messages: MessageRecord[], key: "messageKind" | "messageDomain" | "status"): Record<string, number> {
