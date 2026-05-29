@@ -34,6 +34,7 @@ import type {
   SemanticRelationRecord,
   UserDirectoryEntry,
 } from "../lib/category-repository";
+import { relationTypeKey } from "../lib/semantic-graph";
 import { DOCTRINE_DEFINITIONS, getCategoryDoctrineDefinitions, type DoctrineCategory } from "../lib/doctrine";
 import { configureAmplifyClient } from "./amplify-client-provider";
 import { isUnauthenticatedError, loadReaderSessionSnapshot, type ReaderAuthSnapshot } from "./reader-auth-state";
@@ -84,6 +85,24 @@ const NEWSROOM_SEMANTIC_NODE_FEED_QUERY = `
 const NEWSROOM_SEMANTIC_RELATION_FEED_QUERY = `
   query ListSemanticRelationsByNewsroomFeedAndCreatedAt($newsroomFeedKey: String!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String, $filter: ModelSemanticRelationFilterInput) {
     listSemanticRelationsByNewsroomFeedAndCreatedAt(newsroomFeedKey: $newsroomFeedKey, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken, filter: $filter) {
+      items { id relationState predicate relationTypeId relationTypeKey relationDomain subjectKind subjectId subjectLineageId subjectVersionNumber objectKind objectId objectLineageId objectVersionNumber subjectStateKey objectStateKey objectSubjectStateKey predicateObjectStateKey subjectVersionKey objectVersionKey score confidence rank classifierId modelVersion reviewRecommended sourceSnapshotId importRunId importedAt createdAt updatedAt newsroomFeedKey metadata }
+      nextToken
+    }
+  }
+`;
+
+const LIST_SEMANTIC_RELATIONS_BY_SUBJECT_STATE_QUERY = `
+  query ListSemanticRelationsBySubjectState($subjectStateKey: String!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String, $filter: ModelSemanticRelationFilterInput) {
+    listSemanticRelationsBySubjectState(subjectStateKey: $subjectStateKey, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken, filter: $filter) {
+      items { id relationState predicate relationTypeId relationTypeKey relationDomain subjectKind subjectId subjectLineageId subjectVersionNumber objectKind objectId objectLineageId objectVersionNumber subjectStateKey objectStateKey objectSubjectStateKey predicateObjectStateKey subjectVersionKey objectVersionKey score confidence rank classifierId modelVersion reviewRecommended sourceSnapshotId importRunId importedAt createdAt updatedAt newsroomFeedKey metadata }
+      nextToken
+    }
+  }
+`;
+
+const LIST_SEMANTIC_RELATIONS_BY_OBJECT_STATE_QUERY = `
+  query ListSemanticRelationsByObjectState($objectStateKey: String!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String, $filter: ModelSemanticRelationFilterInput) {
+    listSemanticRelationsByObjectState(objectStateKey: $objectStateKey, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken, filter: $filter) {
       items { id relationState predicate relationTypeId relationTypeKey relationDomain subjectKind subjectId subjectLineageId subjectVersionNumber objectKind objectId objectLineageId objectVersionNumber subjectStateKey objectStateKey objectSubjectStateKey predicateObjectStateKey subjectVersionKey objectVersionKey score confidence rank classifierId modelVersion reviewRecommended sourceSnapshotId importRunId importedAt createdAt updatedAt newsroomFeedKey metadata }
       nextToken
     }
@@ -946,6 +965,50 @@ export async function loadNewsroomSemanticRelationPage(options: NewsroomSemantic
   });
 }
 
+export async function loadReferenceCitationRelations(reference: {
+  id?: string | null;
+  lineageId?: string | null;
+}): Promise<{
+  incoming: SemanticRelationRecord[];
+  outgoing: SemanticRelationRecord[];
+}> {
+  const referenceKeys = Array.from(new Set([
+    String(reference.lineageId || "").trim(),
+    String(reference.id || "").trim(),
+  ].filter(Boolean)));
+  const stateKeys = referenceKeys.map((value) => `reference#${value}#current`);
+  const [outgoingPages, incomingPages] = await Promise.all([
+    Promise.all(stateKeys.map((stateKey) => loadSemanticRelationsByState({
+      field: "listSemanticRelationsBySubjectState",
+      keyName: "subjectStateKey",
+      keyValue: stateKey,
+      query: LIST_SEMANTIC_RELATIONS_BY_SUBJECT_STATE_QUERY,
+    }))),
+    Promise.all(stateKeys.map((stateKey) => loadSemanticRelationsByState({
+      field: "listSemanticRelationsByObjectState",
+      keyName: "objectStateKey",
+      keyValue: stateKey,
+      query: LIST_SEMANTIC_RELATIONS_BY_OBJECT_STATE_QUERY,
+    }))),
+  ]);
+  const outgoing = dedupeSemanticRelationsById(outgoingPages.flat());
+  const incoming = dedupeSemanticRelationsById(incomingPages.flat());
+  return {
+    outgoing: outgoing.filter((relation) => (
+      relation.subjectKind === "reference"
+      && relation.objectKind === "reference"
+      && relationTypeKey(relation) === "cites"
+      && relation.relationState === "current"
+    )),
+    incoming: incoming.filter((relation) => (
+      relation.subjectKind === "reference"
+      && relation.objectKind === "reference"
+      && relationTypeKey(relation) === "cites"
+      && relation.relationState === "current"
+    )),
+  };
+}
+
 export async function loadEditorAssignmentsData(): Promise<{
   assignments: AssignmentRecord[];
   assignmentEvents: AssignmentEventRecord[];
@@ -1628,6 +1691,61 @@ async function loadNewsroomFeedPage<T>({
     nextToken: connectionNextToken,
     hasMore: Boolean(connectionNextToken),
   };
+}
+
+async function loadSemanticRelationsByState({
+  field,
+  keyName,
+  keyValue,
+  query,
+}: {
+  field: "listSemanticRelationsByObjectState" | "listSemanticRelationsBySubjectState";
+  keyName: "objectStateKey" | "subjectStateKey";
+  keyValue: string;
+  query: string;
+}): Promise<SemanticRelationRecord[]> {
+  const client = generateClient<Schema>() as unknown as {
+    graphql: (options: Record<string, unknown>) => Promise<GraphQLConnectionResponse<SemanticRelationRecord>>;
+  };
+  const rows: SemanticRelationRecord[] = [];
+  const seenIds = new Set<string>();
+  let nextToken: string | null = null;
+  let pageCount = 0;
+  do {
+    pageCount += 1;
+    const response = await client.graphql({
+      query,
+      variables: {
+        [keyName]: keyValue,
+        sortDirection: "DESC",
+        limit: 200,
+        nextToken,
+        filter: null,
+      },
+      authMode: USER_POOL_AUTH_MODE,
+    });
+    assertNoGraphQLErrors(response.errors);
+    const connection = response.data?.[field];
+    if (!connection) break;
+    for (const item of (connection.items ?? []).filter(Boolean) as SemanticRelationRecord[]) {
+      if (!item.id || seenIds.has(item.id)) continue;
+      seenIds.add(item.id);
+      rows.push(item);
+    }
+    nextToken = connection.nextToken ?? null;
+  } while (nextToken && pageCount < 200);
+  return rows;
+}
+
+function dedupeSemanticRelationsById(relations: SemanticRelationRecord[]): SemanticRelationRecord[] {
+  const seen = new Set<string>();
+  const deduped: SemanticRelationRecord[] = [];
+  for (const relation of relations) {
+    if (!relation.id || seen.has(relation.id)) continue;
+    seen.add(relation.id);
+    deduped.push(relation);
+  }
+  return deduped;
 }
 
 async function listNewsroomSectionsViaGraphql(client: ReturnType<typeof generateClient<Schema>>): Promise<NewsroomSectionRecord[]> {

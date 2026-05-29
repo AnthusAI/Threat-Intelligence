@@ -18,6 +18,7 @@ import {
   loadEditorFullNewsDeskDashboard,
   loadEditorMessagesData,
   loadReferenceAttachmentsForLineageId,
+  loadReferenceCitationRelations,
   loadReferenceRecordById,
   loadStoragePathUrl,
   loadEditorUserDirectoryData,
@@ -9260,6 +9261,19 @@ function ReferenceDetailPanel({
   const [activeExtractedTextTab, setActiveExtractedTextTab] = useState<ReferenceExtractedTextTab>("filtered");
   const [activeCitationTab, setActiveCitationTab] = useState<ReferenceCitationTab>("references");
   const [attachmentLinksById, setAttachmentLinksById] = useState<Record<string, string>>({});
+  const [citationState, setCitationState] = useState<{
+    error: string | null;
+    incoming: SemanticRelationRecord[];
+    loaded: boolean;
+    loading: boolean;
+    outgoing: SemanticRelationRecord[];
+  }>({
+    error: null,
+    incoming: [],
+    loaded: false,
+    loading: false,
+    outgoing: [],
+  });
 
   useEffect(() => {
     const storagePath = extractedTextFilteredAttachment?.storagePath ?? null;
@@ -9380,6 +9394,54 @@ function ReferenceDetailPanel({
 
   useEffect(() => {
     setActiveCitationTab("references");
+  }, [reference?.id, referenceLineageId]);
+
+  useEffect(() => {
+    if (!referenceLineageId) {
+      setCitationState({
+        error: null,
+        incoming: [],
+        loaded: false,
+        loading: false,
+        outgoing: [],
+      });
+      return;
+    }
+    let active = true;
+    setCitationState({
+      error: null,
+      incoming: [],
+      loaded: false,
+      loading: true,
+      outgoing: [],
+    });
+    void loadReferenceCitationRelations({
+      id: reference?.id ?? null,
+      lineageId: referenceLineageId,
+    })
+      .then((result) => {
+        if (!active) return;
+        setCitationState({
+          error: null,
+          incoming: result.incoming,
+          loaded: true,
+          loading: false,
+          outgoing: result.outgoing,
+        });
+      })
+      .catch((error) => {
+        if (!active) return;
+        setCitationState({
+          error: error instanceof Error ? error.message : "Could not load citation relations.",
+          incoming: [],
+          loaded: false,
+          loading: false,
+          outgoing: [],
+        });
+      });
+    return () => {
+      active = false;
+    };
   }, [referenceLineageId]);
 
   if (!reference) {
@@ -9394,9 +9456,17 @@ function ReferenceDetailPanel({
   const messages = graph.messagesFor("reference", lineageId);
   const insights = graph.insightsFor("reference", lineageId);
   const neighborGroups = graph.neighbors("reference", lineageId);
-  const outgoingCitationGroup = neighborGroups.find((group) => group.direction === "outgoing" && group.predicate === "cites") ?? null;
-  const incomingCitationGroup = neighborGroups.find((group) => group.direction === "incoming" && group.predicate === "cites") ?? null;
+  const fallbackOutgoingCitationGroup = neighborGroups.find((group) => group.direction === "outgoing" && group.predicate === "cites") ?? null;
+  const fallbackIncomingCitationGroup = neighborGroups.find((group) => group.direction === "incoming" && group.predicate === "cites") ?? null;
   const nonCitationNeighborGroups = neighborGroups.filter((group) => group.predicate !== "cites");
+  const outgoingCitationRelations = citationState.loaded
+    ? citationState.outgoing
+    : (fallbackOutgoingCitationGroup?.relations ?? []);
+  const incomingCitationRelations = citationState.loaded
+    ? citationState.incoming
+    : (fallbackIncomingCitationGroup?.relations ?? []);
+  const outgoingCitationObjects = buildCitationReferenceObjects(graph, outgoingCitationRelations, "outgoing");
+  const incomingCitationObjects = buildCitationReferenceObjects(graph, incomingCitationRelations, "incoming");
   const authors = reference.authors?.filter(Boolean).join(", ");
   const metadataPayload = modelPayloadByRole(referencePayloadState.payloads, "metadata");
   const metadataTitle = referenceMetadataTitle(metadataPayload) ?? reference.title ?? reference.externalItemId;
@@ -9413,8 +9483,8 @@ function ReferenceDetailPanel({
   const activeExtractedTextState = activeExtractedTextEntry?.mode === "original"
     ? extractedTextOriginalState
     : extractedTextFilteredState;
-  const inboundCitationCount = resolveReferenceCitationCount(reference.inboundCitationCount, incomingCitationGroup?.relations.length);
-  const outboundCitationCount = resolveReferenceCitationCount(reference.outboundCitationCount, outgoingCitationGroup?.relations.length);
+  const inboundCitationCount = resolveReferenceCitationCount(reference.inboundCitationCount, incomingCitationRelations.length);
+  const outboundCitationCount = resolveReferenceCitationCount(reference.outboundCitationCount, outgoingCitationRelations.length);
 
   return (
     <section className="category-steering-section" aria-label="Reference detail" data-news-desk-reference-detail={lineageId}>
@@ -9509,11 +9579,13 @@ function ReferenceDetailPanel({
             />
             <ReferenceCitationPanel
               activeTab={activeCitationTab}
+              citationError={citationState.error}
+              citationsLoading={citationState.loading}
+              incomingObjects={incomingCitationObjects}
               inboundCitationCount={inboundCitationCount}
-              incomingGroup={incomingCitationGroup}
               onTabChange={setActiveCitationTab}
+              outgoingObjects={outgoingCitationObjects}
               outboundCitationCount={outboundCitationCount}
-              outgoingGroup={outgoingCitationGroup}
             />
             <div data-news-desk-reference-metadata-expander>
               <NewsroomExpander
@@ -9644,24 +9716,28 @@ function ReferenceDetailPanel({
 
 function ReferenceCitationPanel({
   activeTab,
+  citationError,
+  citationsLoading,
+  incomingObjects,
   inboundCitationCount,
-  incomingGroup,
   onTabChange,
+  outgoingObjects,
   outboundCitationCount,
-  outgoingGroup,
 }: {
   activeTab: ReferenceCitationTab;
+  citationError: string | null;
+  citationsLoading: boolean;
+  incomingObjects: SemanticObjectSummary[];
   inboundCitationCount: number;
-  incomingGroup: SemanticNeighborGroup | null;
   onTabChange: (value: ReferenceCitationTab) => void;
+  outgoingObjects: SemanticObjectSummary[];
   outboundCitationCount: number;
-  outgoingGroup: SemanticNeighborGroup | null;
 }) {
-  const outgoingObjects = outgoingGroup?.objects ?? [];
-  const incomingObjects = incomingGroup?.objects ?? [];
   return (
     <div className="news-desk-detail-block news-desk-reference-citations" data-news-desk-reference-citations>
       <p className="story-label">Citations</p>
+      {citationsLoading ? <p className="news-desk-detail-copy">Loading citation graph...</p> : null}
+      {citationError ? <p className="news-desk-detail-copy">{citationError}</p> : null}
       <Tabs defaultValue="references" onValueChange={(value) => onTabChange(value as ReferenceCitationTab)} value={activeTab}>
         <TabsList className="news-desk-reference-citations__tabs">
           <TabsTrigger className="news-desk-reference-citations__tab" value="references">References</TabsTrigger>
@@ -12271,6 +12347,41 @@ function resolveReferenceCitationCount(
     return Math.trunc(fallback);
   }
   return 0;
+}
+
+function buildCitationReferenceObjects(
+  graph: SemanticGraph,
+  relations: SemanticRelationRecord[],
+  direction: "incoming" | "outgoing",
+): SemanticObjectSummary[] {
+  const objects = new Map<string, SemanticObjectSummary>();
+  for (const relation of relations) {
+    const relationSummary = direction === "outgoing"
+      ? (
+        graph.resolve("reference", relation.objectLineageId)
+        ?? graph.resolve("reference", relation.objectId)
+        ?? fallbackReferenceSummary(relation.objectId, relation.objectLineageId)
+      )
+      : (
+        graph.resolve("reference", relation.subjectLineageId)
+        ?? graph.resolve("reference", relation.subjectId)
+        ?? fallbackReferenceSummary(relation.subjectId, relation.subjectLineageId)
+      );
+    const key = `${relationSummary.kind}#${relationSummary.lineageId}`;
+    if (!objects.has(key)) objects.set(key, relationSummary);
+  }
+  return Array.from(objects.values()).sort((left, right) => left.label.localeCompare(right.label));
+}
+
+function fallbackReferenceSummary(id: string, lineageId: string): SemanticObjectSummary {
+  const resolvedLineage = lineageId || id;
+  return {
+    kind: "reference",
+    href: newsDeskHrefForSemanticObject("reference", resolvedLineage),
+    id: id || resolvedLineage,
+    label: resolvedLineage,
+    lineageId: resolvedLineage,
+  };
 }
 
 function resolveReferenceCurationDisplayState(reference: ReferenceRecord, graph: SemanticGraph): ReferenceCurationDisplayState {
