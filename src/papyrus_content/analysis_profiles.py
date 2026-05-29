@@ -780,6 +780,10 @@ def _build_plan_warnings(profile: dict[str, Any], effective: dict[str, Any]) -> 
         warnings.append("Extraction snapshot is a placeholder and must be resolved before execution.")
     if profile["scope"] == "scoped-topic-model" and not normalize_string(effective.get("steeringFeedbackPath")):
         warnings.append("No steering feedback path is configured; Biblicus may re-emit previously rejected topic proposals.")
+    warnings.append(
+        "analysis run-now and execute-assignment sync corpora/<key>/ from S3 when the local catalog is missing or stale; "
+        "pass --skip-sync-from-cloud to skip or --sync-from-cloud to force a pull."
+    )
     return warnings
 
 

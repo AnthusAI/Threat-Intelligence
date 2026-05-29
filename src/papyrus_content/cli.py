@@ -89,6 +89,10 @@ from .categories_commands import (
 from .content_commands import content_inspect, content_list, content_schema_check
 from .dev_tests import run_category_mapper_tests, run_identifier_backfill_tests
 from .messages_commands import messages_export_legacy_comments, messages_import_legacy_comments
+from .model_defaults import (
+    DEFAULT_REFERENCE_FILTER_MODEL,
+    DEFAULT_REFERENCE_SUMMARY_MODEL,
+)
 from .relations_commands import relations_backfill, relations_import_types
 from .references_commands import (
     references_attach_extracted_text,
@@ -1121,7 +1125,7 @@ def fetch_reference_url_text_after_registration(
     corpus_id = result.get("plan", {}).get("corpusId")
     max_count = normalize_non_negative_integer(options.get("url-text-max-count"), "--url-text-max-count")
     force = parse_boolean_option(options.get("url-text-force"), False, "--url-text-force")
-    model = normalize_string(options.get("url-text-model")) or "gpt-5.4-nano"
+    model = normalize_string(options.get("url-text-model")) or DEFAULT_REFERENCE_FILTER_MODEL
     extraction = run_reference_url_text_extraction(
         client=client,
         references=references,
@@ -1202,7 +1206,7 @@ def generate_reference_metadata_after_registration(
         reference_ids=set(reference_ids),
         curation_status="all",
         max_count=max_count,
-        model=normalize_string(options.get("metadata-model")) or "gpt-5.4-nano",
+        model=normalize_string(options.get("metadata-model")) or DEFAULT_REFERENCE_SUMMARY_MODEL,
         apply=True,
         bucket=normalize_string(options.get("bucket")),
     )
@@ -1332,7 +1336,8 @@ def print_usage() -> None:
     print("Python-native: content inspect, content schema-check, content list articles,")
     print("  corpora status/worker-bootstrap/sync-*, references create/process/curate/export commands,")
     print("  assignments list, analysis profiles/validate-profiles/reindex-plan/preview-reindex/")
-    print("  create-reindex-assignment/run-now/execute-assignment/entity-graph-preflight/graph-artifacts/publish-graph-snapshot/import-graph-artifact/doctor-entity-graph,")
+    print("  create-reindex-assignment/run-now/execute-assignment (auto sync-from-cloud when local catalog is stale;")
+    print("  --skip-sync-from-cloud/--sync-from-cloud)/entity-graph-preflight/graph-artifacts/publish-graph-snapshot/import-graph-artifact/doctor-entity-graph,")
     print("  newsroom recount-summary/repair-message-status/prune-attachments/backfill-feed-fields/")
     print("  backfill-operational-indexes/import-sections,")
     print("  relations import-types/backfill, ontology preflight/rank/status/explain/profile/associate/dedupe/recompute-authority/doctor,")

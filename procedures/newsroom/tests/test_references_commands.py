@@ -49,14 +49,168 @@ from papyrus_content.reference_labels import (  # noqa: E402
     build_manual_authoritative_label_relation,
     build_classification_prediction_rows,
 )
+from papyrus_content.model_defaults import (  # noqa: E402
+    DEFAULT_REFERENCE_FILTER_MODEL,
+    DEFAULT_REFERENCE_SUMMARY_MODEL,
+)
 from papyrus_content.references_commands import (  # noqa: E402
     _ensure_cli_grobid_runtime,
     _resolve_grobid_url,
+    references_fetch_url_text,
+    references_filter_extracted_text,
+    references_generate_metadata_from_text,
     extract_last_json_object,
 )
 
 
 class ReferenceCommandsTests(unittest.TestCase):
+    @mock.patch("papyrus_content.references_commands._ensure_cli_grobid_runtime")
+    @mock.patch("papyrus_content.references_commands.run_reference_identifier_dedupe")
+    @mock.patch("papyrus_content.references_commands.run_reference_url_text_extraction")
+    @mock.patch("papyrus_content.references_commands.create_authoring_client")
+    @mock.patch("papyrus_content.references_commands.require_steering_config")
+    @mock.patch("papyrus_content.references_commands.load_steering_config")
+    @mock.patch("papyrus_content.references_commands._require_reference_process_runtime")
+    def test_references_fetch_url_text_defaults_to_filter_model(
+        self,
+        _mock_runtime,
+        mock_load_steering,
+        mock_require_steering,
+        mock_client_factory,
+        mock_run_extraction,
+        mock_run_dedupe,
+        _mock_grobid_runtime,
+    ):
+        mock_load_steering.return_value = None
+        mock_require_steering.return_value = {"corpora": []}
+        mock_client = mock.Mock()
+        mock_client.list_records.return_value = []
+        mock_client_factory.return_value = (mock_client, {})
+        mock_run_extraction.return_value = {
+            "eligibleCount": 0,
+            "skippedExistingCount": 0,
+            "skippedMissingSourceCount": 0,
+            "skippedNonPdfCount": 0,
+            "plannedCount": 0,
+            "plannedAttachmentCount": 0,
+            "plannedReferenceMetadataCount": 0,
+            "authorsParsedCount": 0,
+            "authorsLinkedCount": 0,
+            "citationsParsedCount": 0,
+            "citationsUpsertedCount": 0,
+            "citationsSkippedLowConfidenceCount": 0,
+            "citationRelationsCreatedCount": 0,
+            "citationGraphWarnings": [],
+            "filteredCount": 0,
+            "fallbackRawCount": 0,
+            "changeCount": 0,
+            "graphChangeCount": 0,
+            "referenceMetadataChangeCount": 0,
+            "attachmentChangeCount": 0,
+            "failures": [],
+            "failedGrobidCount": 0,
+            "doiResolvedCount": 0,
+            "doiPdfSelectedCount": 0,
+            "doiPdfMissedCount": 0,
+            "doiSearchUsedCount": 0,
+            "doiSearchHitCount": 0,
+            "doiApiFallbackUsedCount": 0,
+            "doiPaywalledOrBlockedCount": 0,
+            "changes": [],
+            "items": [],
+            "graphRecords": [],
+            "filterFallbacks": [],
+        }
+        mock_run_dedupe.return_value = {
+            "duplicateGroupCount": 0,
+            "referencesMergedCount": 0,
+            "relationsRewiredCount": 0,
+            "losersBlockedCount": 0,
+        }
+
+        references_fetch_url_text(["--dry-run"])
+
+        self.assertEqual(mock_run_extraction.call_args.kwargs["model"], DEFAULT_REFERENCE_FILTER_MODEL)
+
+    @mock.patch("papyrus_content.references_commands.run_reference_metadata_generation_from_extracted_text")
+    @mock.patch("papyrus_content.references_commands.update_newsroom_summary_after_extracted_text_attachments")
+    @mock.patch("papyrus_content.references_commands.run_reference_extracted_text_filtering")
+    @mock.patch("papyrus_content.references_commands.create_authoring_client")
+    @mock.patch("papyrus_content.references_commands.require_steering_config")
+    @mock.patch("papyrus_content.references_commands.load_steering_config")
+    @mock.patch("papyrus_content.references_commands._require_reference_process_runtime")
+    def test_references_filter_text_defaults_filter_and_metadata_models(
+        self,
+        _mock_runtime,
+        mock_load_steering,
+        mock_require_steering,
+        mock_client_factory,
+        mock_run_filtering,
+        _mock_summary_update,
+        mock_run_metadata,
+    ):
+        mock_load_steering.return_value = None
+        mock_require_steering.return_value = {"corpora": []}
+        mock_client = mock.Mock()
+        mock_client.list_records.return_value = []
+        mock_client_factory.return_value = (mock_client, {})
+        mock_run_filtering.return_value = {
+            "attemptedCount": 1,
+            "plannedCount": 1,
+            "plannedAttachmentCount": 1,
+            "filteredCount": 1,
+            "fallbackRawCount": 0,
+            "skippedMissingSourceCount": 0,
+            "changeCount": 1,
+            "failures": [],
+            "items": [],
+            "changes": [],
+            "processedReferenceIds": {"reference-1"},
+            "filterFallbacks": [],
+        }
+        mock_run_metadata.return_value = {
+            "attemptedCount": 1,
+            "generatedCount": 1,
+            "skippedMissingTextCount": 0,
+            "generationFailureCount": 0,
+            "items": [],
+        }
+
+        references_filter_extracted_text([])
+
+        self.assertEqual(mock_run_filtering.call_args.kwargs["model"], DEFAULT_REFERENCE_FILTER_MODEL)
+        self.assertEqual(mock_run_metadata.call_args.kwargs["model"], DEFAULT_REFERENCE_SUMMARY_MODEL)
+
+    @mock.patch("papyrus_content.references_commands.run_reference_metadata_generation_from_extracted_text")
+    @mock.patch("papyrus_content.references_commands.create_authoring_client")
+    @mock.patch("papyrus_content.references_commands.require_steering_config")
+    @mock.patch("papyrus_content.references_commands.load_steering_config")
+    @mock.patch("papyrus_content.references_commands._require_reference_process_runtime")
+    def test_references_generate_metadata_defaults_to_summary_model(
+        self,
+        _mock_runtime,
+        mock_load_steering,
+        mock_require_steering,
+        mock_client_factory,
+        mock_run_metadata,
+    ):
+        mock_load_steering.return_value = None
+        mock_require_steering.return_value = {"corpora": []}
+        mock_client = mock.Mock()
+        mock_client.list_records.return_value = []
+        mock_client_factory.return_value = (mock_client, {})
+        mock_run_metadata.return_value = {
+            "attemptedCount": 0,
+            "generatedCount": 0,
+            "skippedMissingTextCount": 0,
+            "generationFailureCount": 0,
+            "items": [],
+        }
+
+        references_generate_metadata_from_text(["--dry-run"])
+
+        self.assertEqual(mock_run_metadata.call_args.kwargs["model"], DEFAULT_REFERENCE_SUMMARY_MODEL)
+
     def test_normalize_identifier_types_accepts_aliases(self):
         self.assertEqual(normalize_identifier_types("doi, arxiv, isbn13"), ["doi", "arxiv_id", "isbn13"])
 

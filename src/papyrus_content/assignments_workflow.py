@@ -14,6 +14,7 @@ from .copywriting import COPYWRITING_ASSIGNMENT_TYPES, build_copywriting_run_pla
 from .env import PAPYRUS_ROOT
 from .graphql_authoring import PapyrusGraphQLAuthoringClient
 from .ids import hash_short, knowledge_corpus_id, safe_id
+from .model_defaults import DEFAULT_REFERENCE_SUMMARY_MODEL
 from .model_attachments import download_attachment_buffer, parse_jsonish
 from .newsroom_summary import (
     update_newsroom_summary_after_assignment_creates,
@@ -1230,7 +1231,7 @@ def intake_research_packet_proposals(client: PapyrusGraphQLAuthoringClient, opti
                     reference_ids=changed_reference_ids,
                     curation_status="all",
                     max_count=normalize_non_negative_integer(options.get("metadata-max-count"), "--metadata-max-count"),
-                    model=normalize_string(options.get("metadata-model")) or "gpt-5.4-nano",
+                    model=normalize_string(options.get("metadata-model")) or DEFAULT_REFERENCE_SUMMARY_MODEL,
                     apply=True,
                     bucket=normalize_string(options.get("bucket")),
                 )

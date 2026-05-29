@@ -15,6 +15,7 @@ from urllib.request import Request, urlopen
 
 from .env import BIBLICUS_ROOT, load_amplify_outputs, storage_bucket_from_amplify_outputs
 from .ids import hash_short, reference_lineage_id_for, semantic_node_lineage_id_for, safe_id
+from .model_defaults import DEFAULT_REFERENCE_FILTER_MODEL
 from .relation_types import semantic_relation_type_fields_for_predicate
 from .source_site_plugins import resolve_source_site_enrichment
 from .source_readiness import (
@@ -43,7 +44,7 @@ def build_reference_url_text_attachment_plans(
     curation_status: str = "all",
     max_count: int | None = None,
     force: bool = False,
-    model: str = "gpt-5.4-nano",
+    model: str = DEFAULT_REFERENCE_FILTER_MODEL,
     pdf_only: bool = False,
     grobid_url: str | None = None,
 ) -> dict[str, Any]:
@@ -295,13 +296,35 @@ def build_reference_url_text_attachment_plans(
                 "textLength": len(canonical_text),
             }
             canonical_metadata.update(_enrichment_attachment_metadata(enrichment))
-            graph_plan = _plan_grobid_citation_graph_records(
-                source_reference=reference,
-                all_references=references,
-                semantic_relations=semantic_relations,
-                structured=structured,
-                now=canonical_metadata["filteredAt"],
+            disable_citation_ingestion = (
+                str(os.environ.get("PAPYRUS_DISABLE_CITATION_INGESTION") or "").strip().lower()
+                in {"1", "true", "yes", "on"}
             )
+            if disable_citation_ingestion:
+                graph_plan = {
+                    "records": [],
+                    "referenceRecords": [],
+                    "authorsParsed": 0,
+                    "authorsLinked": 0,
+                    "citationsParsed": 0,
+                    "citationsUpserted": 0,
+                    "citationsSkippedLowConfidence": 0,
+                    "citationRelationsCreated": 0,
+                    "warnings": [
+                        {
+                            "code": "citation_ingestion_disabled",
+                            "message": "Skipped citation graph ingestion for this extraction run.",
+                        }
+                    ],
+                }
+            else:
+                graph_plan = _plan_grobid_citation_graph_records(
+                    source_reference=reference,
+                    all_references=references,
+                    semantic_relations=semantic_relations,
+                    structured=structured,
+                    now=canonical_metadata["filteredAt"],
+                )
             graph_plan_warnings = (
                 [entry for entry in (graph_plan.get("warnings") or []) if isinstance(entry, dict)]
                 if isinstance(graph_plan.get("warnings"), list)
@@ -456,7 +479,7 @@ def run_reference_url_text_extraction(
     force: bool = False,
     apply: bool = False,
     bucket: str | None = None,
-    model: str = "gpt-5.4-nano",
+    model: str = DEFAULT_REFERENCE_FILTER_MODEL,
     pdf_only: bool = False,
     grobid_url: str | None = None,
 ) -> dict[str, Any]:
@@ -1194,7 +1217,7 @@ def build_reference_extracted_text_filter_attachment_plans(
     curation_status: str = "all",
     max_count: int | None = None,
     force: bool = True,
-    model: str = "gpt-5.4-nano",
+    model: str = DEFAULT_REFERENCE_FILTER_MODEL,
     bucket: str | None = None,
 ) -> dict[str, Any]:
     selected_reference_ids = set(reference_ids or [])
@@ -1450,7 +1473,7 @@ def run_reference_extracted_text_filtering(
     curation_status: str = "all",
     max_count: int | None = None,
     force: bool = True,
-    model: str = "gpt-5.4-nano",
+    model: str = DEFAULT_REFERENCE_FILTER_MODEL,
     apply: bool = False,
     bucket: str | None = None,
 ) -> dict[str, Any]:

@@ -1652,7 +1652,48 @@ local function search_summary(search)
     return "No current web reference prospect was returned for " .. (search.query or "the research query") .. "."
 end
 
-local function finish_research_from_search(search, options)
+local function resolve_finish_research_from_search_args(search_or_options, options)
+    if options ~= nil then
+        return search_or_options, options
+    end
+    if type(search_or_options) ~= "table" then
+        return search_or_options, {{}}
+    end
+    local candidate = search_or_options
+    local has_research_mode = candidate.research_mode ~= nil or candidate.researchMode ~= nil
+    local looks_like_search = candidate.query ~= nil and candidate.results ~= nil
+    if has_research_mode and not looks_like_search then
+        local resolved_options = candidate
+        local query = ""
+        if resolved_options.queries then
+            local ok, first = pcall(function()
+                return resolved_options.queries[1]
+            end)
+            if ok and first ~= nil then
+                query = tostring(first)
+            end
+        end
+        if query == "" and __web_searches and __web_searches[#__web_searches] then
+            query = tostring(__web_searches[#__web_searches])
+        end
+        local resolved_search = resolved_options.search
+        if resolved_search == nil then
+            resolved_search = normalize_search_result({{
+                query = query,
+                results = resolved_options.source_snapshots or resolved_options.sourceSnapshots or {{}},
+                metadata = resolved_options.metadata or {{}},
+            }}, query)
+        else
+            resolved_search = normalize_search_result(resolved_search, query)
+        end
+        return resolved_search, resolved_options
+    end
+    return search_or_options, {{}}
+end
+
+local function finish_research_from_search(search_or_options, options)
+    local search
+    search, options = resolve_finish_research_from_search_args(search_or_options, options)
     options = options or {{}}
     search = normalize_search_result(search, options.query or "")
     local metadata = search.metadata or {{}}
