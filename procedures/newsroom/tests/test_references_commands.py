@@ -1313,7 +1313,7 @@ class ReferenceCommandsTests(unittest.TestCase):
             fetcher=lambda _url: abs_html,
         )
         self.assertEqual(result["pluginKey"], "arxiv")
-        self.assertEqual(result["canonicalSourceUri"], "https://arxiv.org/pdf/2504.16736v2")
+        self.assertEqual(result["canonicalSourceUri"], "https://arxiv.org/pdf/2504.16736v2.pdf")
         self.assertEqual(result["identifiers"]["resolved"]["arxiv_id"], "2504.16736v2")
         self.assertEqual(result["identifiers"]["resolved"]["doi"], "10.1234/example-doi")
         self.assertEqual(result["metadata"]["abstract"], "A structured abstract from JSON-LD.")
@@ -1516,10 +1516,10 @@ class ReferenceCommandsTests(unittest.TestCase):
     ):
         mock_enrich.return_value = {
             "pluginKey": "arxiv",
-            "canonicalSourceUri": "https://arxiv.org/pdf/2504.16736v2",
+            "canonicalSourceUri": "https://arxiv.org/pdf/2504.16736v2.pdf",
             "sourceVariants": {
                 "inputUrl": "https://arxiv.org/html/2504.16736v2",
-                "canonicalPdfUrl": "https://arxiv.org/pdf/2504.16736v2",
+                "canonicalPdfUrl": "https://arxiv.org/pdf/2504.16736v2.pdf",
                 "canonicalAbsUrl": "https://arxiv.org/abs/2504.16736v2",
                 "canonicalHtmlUrl": "https://arxiv.org/html/2504.16736v2",
             },
@@ -1527,7 +1527,7 @@ class ReferenceCommandsTests(unittest.TestCase):
                 "resolved": {
                     "arxiv_id": "2504.16736v2",
                     "source_uri": "https://arxiv.org/html/2504.16736v2",
-                    "canonical_uri": "https://arxiv.org/pdf/2504.16736v2",
+                    "canonical_uri": "https://arxiv.org/pdf/2504.16736v2.pdf",
                 },
                 "candidates": [
                     {
@@ -1554,6 +1554,14 @@ class ReferenceCommandsTests(unittest.TestCase):
             "text": "Example plain text",
             "markdown": "# Example plain text",
             "title": "Example Title",
+            "sourceKind": "pdf",
+            "contentType": "application/pdf",
+            "structured": {
+                "authors": [],
+                "citations": [],
+                "summary": {"authors_count": 0, "citations_count": 0, "citations_with_identifiers": 0},
+                "warnings": [],
+            },
         }
         mock_filter.return_value = {
             "status": "ok",
@@ -1589,7 +1597,7 @@ class ReferenceCommandsTests(unittest.TestCase):
             force=False,
         )
         mock_extract.assert_called_once_with(
-            "https://arxiv.org/pdf/2504.16736v2",
+            "https://arxiv.org/pdf/2504.16736v2.pdf",
             reference_title="",
             grobid_url=None,
         )
@@ -1598,10 +1606,10 @@ class ReferenceCommandsTests(unittest.TestCase):
         metadata = json.loads(reference_record["metadata"])
         self.assertEqual(metadata["papyrus"]["source_resolution"]["arxiv"]["paperId"], "2504.16736v2")
         self.assertEqual(metadata["identifiers"]["resolved"]["source_uri"], "https://arxiv.org/html/2504.16736v2")
-        self.assertEqual(metadata["identifiers"]["resolved"]["canonical_uri"], "https://arxiv.org/pdf/2504.16736v2")
+        self.assertEqual(metadata["identifiers"]["resolved"]["canonical_uri"], "https://arxiv.org/pdf/2504.16736v2.pdf")
         raw_plan = next(plan for plan in result["plans"] if plan["record"]["expected"]["role"] == "extracted_text_raw")
         raw_metadata = json.loads(raw_plan["record"]["expected"]["metadata"])
-        self.assertEqual(raw_metadata["sourceUri"], "https://arxiv.org/pdf/2504.16736v2")
+        self.assertEqual(raw_metadata["sourceUri"], "https://arxiv.org/pdf/2504.16736v2.pdf")
         self.assertEqual(raw_metadata["sourceUriOriginal"], "https://arxiv.org/html/2504.16736v2")
         self.assertEqual(raw_metadata["sourcePlugin"], "arxiv")
 

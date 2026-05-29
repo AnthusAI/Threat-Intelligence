@@ -6,6 +6,7 @@ import re
 import shutil
 import socket
 import subprocess
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -74,6 +75,11 @@ from .steering import load_steering_config, require_corpus_config, require_steer
 DEFAULT_GROBID_URL = "http://127.0.0.1:8070"
 DEFAULT_GROBID_DOCKER_IMAGE = "lfoppiano/grobid:0.8.0"
 DEFAULT_GROBID_CONTAINER_NAME = "papyrus-grobid"
+DOCKER_CANDIDATE_PATHS = (
+    "/usr/local/bin/docker",
+    "/opt/homebrew/bin/docker",
+    "/Applications/Docker.app/Contents/Resources/bin/docker",
+)
 
 
 def references_review_curation(flags: list[str]) -> None:
@@ -601,8 +607,13 @@ def references_fetch_url_text(flags: list[str]) -> None:
     model = normalize_string(options.get("model")) or "gpt-5.4-nano"
     pdf_only = parse_boolean_option(options.get("pdf-only"), False, "--pdf-only")
     grobid_url = _resolve_grobid_url(options)
-    if pdf_only:
+    try:
         _ensure_cli_grobid_runtime(grobid_url)
+    except RuntimeError as error:
+        raise RuntimeError(
+            "GROBID runtime preflight failed for references process-fetch-url-text. "
+            f"endpoint={grobid_url} details={error}"
+        ) from error
 
     client, _ = create_authoring_client()
     references = client.list_records("Reference")
@@ -1211,7 +1222,8 @@ def _ensure_cli_grobid_runtime(grobid_url: str) -> None:
         return
     if host not in {"127.0.0.1", "localhost"}:
         raise RuntimeError(
-            f"GROBID is not reachable at {grobid_url}. For remote endpoints, start the service and retry."
+            f"GROBID is not reachable at {grobid_url}. Auto-start is only supported for localhost endpoints. "
+            "For remote endpoints, start the service and retry."
         )
     _start_or_reuse_local_grobid_container(port=port)
     _await_grobid_ready(grobid_url)
@@ -1238,17 +1250,19 @@ def _port_is_open(host: str, port: int) -> bool:
 
 
 def _start_or_reuse_local_grobid_container(*, port: int) -> None:
-    if not shutil.which("docker"):
+    docker_command = _resolve_docker_command()
+    if not docker_command:
         raise RuntimeError(
-            "Docker is required to auto-start GROBID for CLI PDF extraction. "
-            "Install Docker or set BIBLICUS_GROBID_URL to a reachable service."
+            "Docker binary was not found. Cannot auto-start local GROBID container. "
+            "Install Docker Desktop/CLI or set BIBLICUS_GROBID_URL to a reachable service."
         )
+    _ensure_docker_daemon_ready(docker_command)
 
     container_name = str(os.environ.get("PAPYRUS_GROBID_CONTAINER_NAME") or DEFAULT_GROBID_CONTAINER_NAME).strip()
     image = str(os.environ.get("PAPYRUS_GROBID_DOCKER_IMAGE") or DEFAULT_GROBID_DOCKER_IMAGE).strip()
     running = _docker_lines(
+        docker_command,
         [
-            "docker",
             "ps",
             "--filter",
             f"name=^/{container_name}$",
@@ -1262,8 +1276,8 @@ def _start_or_reuse_local_grobid_container(*, port: int) -> None:
         return
 
     existing = _docker_lines(
+        docker_command,
         [
-            "docker",
             "ps",
             "-a",
             "--filter",
@@ -1274,7 +1288,7 @@ def _start_or_reuse_local_grobid_container(*, port: int) -> None:
     )
     if existing:
         completed = subprocess.run(
-            ["docker", "start", container_name],
+            [docker_command, "start", container_name],
             capture_output=True,
             text=True,
             check=False,
@@ -1286,7 +1300,7 @@ def _start_or_reuse_local_grobid_container(*, port: int) -> None:
 
     completed = subprocess.run(
         [
-            "docker",
+            docker_command,
             "run",
             "-d",
             "--name",
@@ -1321,9 +1335,50 @@ def _await_grobid_ready(grobid_url: str) -> None:
     )
 
 
-def _docker_lines(command: list[str]) -> list[str]:
+def _resolve_docker_command() -> str | None:
+    command = shutil.which("docker")
+    if command:
+        return command
+    for candidate in DOCKER_CANDIDATE_PATHS:
+        if Path(candidate).is_file():
+            return candidate
+    return None
+
+
+def _docker_daemon_ready(docker_command: str) -> bool:
     completed = subprocess.run(
-        command,
+        [docker_command, "info"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return completed.returncode == 0
+
+
+def _ensure_docker_daemon_ready(docker_command: str) -> None:
+    if _docker_daemon_ready(docker_command):
+        return
+    if sys.platform == "darwin" and Path("/Applications/Docker.app").exists():
+        subprocess.run(
+            ["open", "-a", "Docker"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        deadline = time.time() + 90.0
+        while time.time() < deadline:
+            if _docker_daemon_ready(docker_command):
+                return
+            time.sleep(1.5)
+    raise RuntimeError(
+        "Docker daemon is not ready for GROBID auto-start (attempted local startup). "
+        "Start Docker Desktop and retry, or set BIBLICUS_GROBID_URL to a reachable service."
+    )
+
+
+def _docker_lines(docker_command: str, command: list[str]) -> list[str]:
+    completed = subprocess.run(
+        [docker_command, *command],
         capture_output=True,
         text=True,
         check=False,

@@ -286,7 +286,7 @@ class ArxivSourcePlugin(SourceSitePlugin):
                 ],
             }
 
-        canonical_pdf_url = f"https://arxiv.org/pdf/{paper_id}"
+        canonical_pdf_url = f"https://arxiv.org/pdf/{paper_id}.pdf"
         canonical_abs_url = f"https://arxiv.org/abs/{paper_id}"
         canonical_html_url = f"https://arxiv.org/html/{paper_id}"
 
