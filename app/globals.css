@@ -2682,7 +2682,7 @@ img {
 .news-desk-drawer-backdrop {
   background: rgb(12 14 20 / 0.5);
   border: 0;
-  inset: 0;
+  inset: var(--edition-progress-height, 19px) 0 0;
   opacity: 0;
   pointer-events: none;
   position: fixed;
@@ -2700,7 +2700,7 @@ img {
   border-right: 1px solid rgb(var(--rule-rgb) / 0.32);
   box-shadow: 18px 0 34px -28px rgb(0 0 0 / 0.62);
   color: var(--ink);
-  inset: 0 auto 0 0;
+  inset: var(--edition-progress-height, 19px) auto 0 0;
   max-width: 100vw;
   position: fixed;
   transform: translateX(-100%);
