@@ -29,6 +29,7 @@ from papyrus_content.reference_url_text import (  # noqa: E402
     _filter_article_text,
     _normalize_publication_date_token,
     _run_biblicus_article_text,
+    build_reference_identifier_dedupe_records,
     build_reference_citation_count_records,
     _plan_grobid_citation_graph_records,
     build_reference_url_text_attachment_plans,
@@ -747,6 +748,108 @@ class ReferenceCommandsTests(unittest.TestCase):
         self.assertEqual(records_by_id["reference-a-v1"]["inboundCitationCount"], 0)
         self.assertEqual(records_by_id["reference-b-v1"]["inboundCitationCount"], 1)
         self.assertEqual(records_by_id["reference-b-v1"]["outboundCitationCount"], 0)
+
+    def test_build_reference_identifier_dedupe_records_merges_and_rewires_cites(self):
+        references = [
+            {
+                "id": "reference-winner-v1",
+                "lineageId": "reference-winner",
+                "versionNumber": 1,
+                "versionState": "current",
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "externalItemId": "doi:10.1000/example",
+                "curationStatus": "accepted",
+                "sourceUri": "https://doi.org/10.1000/example",
+                "metadata": json.dumps({"identifiers": {"resolved": {"doi": "10.1000/example"}}}),
+            },
+            {
+                "id": "reference-loser-v1",
+                "lineageId": "reference-loser",
+                "versionNumber": 1,
+                "versionState": "current",
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "externalItemId": "doi:10.1000/example",
+                "curationStatus": "pending",
+                "sourceUri": "https://doi.org/10.1000/example?utm_source=test",
+                "metadata": "{}",
+            },
+            {
+                "id": "reference-citing-v1",
+                "lineageId": "reference-citing",
+                "versionNumber": 1,
+                "versionState": "current",
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "externalItemId": "doi:10.1000/citing",
+                "curationStatus": "accepted",
+            },
+        ]
+        attachments = [
+            {
+                "id": "reference-attachment-winner",
+                "referenceLineageId": "reference-winner",
+                "role": "extracted_text",
+            }
+        ]
+        semantic_relations = [
+            {
+                "id": "semantic-relation-outgoing-loser",
+                "relationState": "current",
+                "predicate": "cites",
+                "relationTypeKey": "cites",
+                "subjectKind": "reference",
+                "subjectId": "reference-loser-v1",
+                "subjectLineageId": "reference-loser",
+                "objectKind": "reference",
+                "objectId": "reference-citing-v1",
+                "objectLineageId": "reference-citing",
+            },
+            {
+                "id": "semantic-relation-incoming-loser",
+                "relationState": "current",
+                "predicate": "cites",
+                "relationTypeKey": "cites",
+                "subjectKind": "reference",
+                "subjectId": "reference-citing-v1",
+                "subjectLineageId": "reference-citing",
+                "objectKind": "reference",
+                "objectId": "reference-loser-v1",
+                "objectLineageId": "reference-loser",
+            },
+        ]
+        dedupe = build_reference_identifier_dedupe_records(
+            references=references,
+            attachments=attachments,
+            semantic_relations=semantic_relations,
+            corpus_id="knowledge-corpus-ai-ml-research",
+            curation_status="all",
+            touched_reference_ids={"reference-loser-v1"},
+            force=False,
+        )
+        self.assertEqual(dedupe["duplicateGroupCount"], 1)
+        self.assertEqual(dedupe["referencesMergedCount"], 1)
+        self.assertEqual(dedupe["losersBlockedCount"], 1)
+        self.assertGreaterEqual(dedupe["relationsRewiredCount"], 2)
+
+        reference_updates = [
+            record["expected"]
+            for record in dedupe["records"]
+            if record["modelName"] == "Reference"
+        ]
+        loser_update = next(update for update in reference_updates if update["id"] == "reference-loser-v1")
+        loser_metadata = json.loads(loser_update["metadata"])
+        self.assertEqual(loser_metadata["mergedIntoReferenceId"], "reference-winner-v1")
+        self.assertEqual(loser_metadata["mergeReason"], "identifier_dedupe")
+        winner_count_update = next(update for update in reference_updates if update["id"] == "reference-winner-v1")
+        self.assertEqual(winner_count_update["inboundCitationCount"], 1)
+        self.assertEqual(winner_count_update["outboundCitationCount"], 1)
+
+        superseded = [
+            record["expected"]
+            for record in dedupe["records"]
+            if record["modelName"] == "SemanticRelation"
+            and record["expected"].get("relationState") == "superseded"
+        ]
+        self.assertEqual(len(superseded), 2)
 
     @mock.patch("papyrus_content.reference_url_text._extract_url_text")
     @mock.patch("papyrus_content.reference_url_text._filter_article_text")

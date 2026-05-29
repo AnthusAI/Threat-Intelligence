@@ -596,6 +596,594 @@ def build_reference_citation_count_records(
     }
 
 
+def run_reference_identifier_dedupe(
+    *,
+    client: Any,
+    references: list[dict[str, Any]],
+    attachments: list[dict[str, Any]],
+    semantic_relations: list[dict[str, Any]],
+    corpus_id: str | None = None,
+    reference_ids: set[str] | None = None,
+    external_item_ids: set[str] | None = None,
+    curation_status: str = "all",
+    touched_reference_ids: set[str] | None = None,
+    force: bool = False,
+    apply: bool = False,
+) -> dict[str, Any]:
+    from .records import apply_record_changes, build_record_changes, build_record_changes_targeted_by_id
+
+    planned = build_reference_identifier_dedupe_records(
+        references=references,
+        attachments=attachments,
+        semantic_relations=semantic_relations,
+        corpus_id=corpus_id,
+        reference_ids=reference_ids,
+        external_item_ids=external_item_ids,
+        curation_status=curation_status,
+        touched_reference_ids=touched_reference_ids,
+        force=force,
+    )
+    reference_records = [
+        record
+        for record in planned["records"]
+        if str(record.get("modelName") or "") == "Reference"
+    ]
+    relation_records = [
+        record
+        for record in planned["records"]
+        if str(record.get("modelName") or "") != "Reference"
+    ]
+    reference_changes = build_record_changes_targeted_by_id(client, reference_records)
+    relation_changes = build_record_changes(client, relation_records)
+    changes = [*reference_changes, *relation_changes]
+    changed = [change for change in changes if change.get("action") != "noop"]
+    summary = {
+        **planned,
+        "changes": changes,
+        "changeCount": len(changed),
+    }
+    if apply and changed:
+        apply_record_changes(client, changed)
+    return summary
+
+
+def build_reference_identifier_dedupe_records(
+    *,
+    references: list[dict[str, Any]],
+    attachments: list[dict[str, Any]],
+    semantic_relations: list[dict[str, Any]],
+    corpus_id: str | None = None,
+    reference_ids: set[str] | None = None,
+    external_item_ids: set[str] | None = None,
+    curation_status: str = "all",
+    touched_reference_ids: set[str] | None = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    now = _utc_now()
+    selected_reference_ids = set(reference_ids or [])
+    selected_external_item_ids = set(external_item_ids or [])
+    touched_reference_ids = set(touched_reference_ids or [])
+    current_references = [
+        reference
+        for reference in references
+        if str(reference.get("versionState") or "") == "current"
+        and (not corpus_id or str(reference.get("corpusId") or "") == str(corpus_id))
+        and (curation_status == "all" or str(reference.get("curationStatus") or "") == curation_status)
+    ]
+    by_lineage: dict[str, dict[str, Any]] = {}
+    for reference in current_references:
+        lineage_id = str(reference.get("lineageId") or "")
+        if lineage_id and lineage_id not in by_lineage:
+            by_lineage[lineage_id] = reference
+    if not by_lineage:
+        return _empty_reference_dedupe_result()
+
+    touched_lineages: set[str] = set()
+    if touched_reference_ids:
+        touched_lineages = {
+            str(reference.get("lineageId") or "")
+            for reference in current_references
+            if str(reference.get("id") or "") in touched_reference_ids
+        }
+
+    key_to_lineages: dict[str, set[str]] = {}
+    for lineage_id, reference in by_lineage.items():
+        if selected_reference_ids and str(reference.get("id") or "") not in selected_reference_ids:
+            continue
+        if selected_external_item_ids and str(reference.get("externalItemId") or "") not in selected_external_item_ids:
+            continue
+        for key in _reference_identifier_keys(reference):
+            key_to_lineages.setdefault(key, set()).add(lineage_id)
+
+    groups = _identifier_connected_components(key_to_lineages)
+    if touched_lineages:
+        groups = [group for group in groups if group.intersection(touched_lineages)]
+
+    if not groups:
+        return _empty_reference_dedupe_result()
+
+    has_extracted_text = _lineages_with_extracted_text(attachments)
+    citation_degree = _reference_citation_degree(semantic_relations)
+    references_by_id = {
+        str(reference.get("id") or ""): reference
+        for reference in current_references
+        if str(reference.get("id") or "")
+    }
+    losers_by_winner_lineage: dict[str, list[dict[str, Any]]] = {}
+    winner_by_loser_lineage: dict[str, dict[str, Any]] = {}
+
+    for group in groups:
+        members = [by_lineage[lineage_id] for lineage_id in sorted(group) if lineage_id in by_lineage]
+        if len(members) < 2:
+            continue
+        winner = _select_reference_dedupe_winner(
+            members=members,
+            has_extracted_text=has_extracted_text,
+            citation_degree=citation_degree,
+        )
+        winner_lineage = str(winner.get("lineageId") or "")
+        losers = [row for row in members if str(row.get("lineageId") or "") != winner_lineage]
+        if not losers:
+            continue
+        losers_by_winner_lineage[winner_lineage] = losers
+        for loser in losers:
+            winner_by_loser_lineage[str(loser.get("lineageId") or "")] = winner
+
+    if not winner_by_loser_lineage:
+        return _empty_reference_dedupe_result()
+
+    reference_expected_by_id: dict[str, dict[str, Any]] = {}
+    losers_blocked = 0
+    references_merged = 0
+    merged_pairs: list[dict[str, str]] = []
+    for loser_lineage, winner in winner_by_loser_lineage.items():
+        loser = by_lineage.get(loser_lineage)
+        if not isinstance(loser, dict):
+            continue
+        loser_id = str(loser.get("id") or "")
+        winner_id = str(winner.get("id") or "")
+        winner_lineage = str(winner.get("lineageId") or "")
+        if not loser_id or not winner_id or not winner_lineage:
+            continue
+        metadata = _reference_metadata_object(loser)
+        if not force and str(metadata.get("mergedIntoReferenceId") or "") == winner_id:
+            continue
+        papyrus = metadata.get("papyrus")
+        if not isinstance(papyrus, dict):
+            papyrus = {}
+        dedupe_payload = {
+            "status": "blocked",
+            "state": "superseded",
+            "mergedIntoReferenceId": winner_id,
+            "mergedIntoReferenceLineageId": winner_lineage,
+            "mergeReason": "identifier_dedupe",
+            "mergedAt": now,
+        }
+        papyrus["processing"] = dedupe_payload
+        metadata["papyrus"] = papyrus
+        metadata["mergedIntoReferenceId"] = winner_id
+        metadata["mergedIntoReferenceLineageId"] = winner_lineage
+        metadata["mergeReason"] = "identifier_dedupe"
+        metadata["mergedAt"] = now
+        reference_expected_by_id[loser_id] = {
+            "id": loser_id,
+            "metadata": json.dumps(metadata, sort_keys=True),
+            "updatedAt": now,
+        }
+        references_merged += 1
+        losers_blocked += 1
+        merged_pairs.append(
+            {
+                "loserId": loser_id,
+                "loserLineageId": loser_lineage,
+                "winnerId": winner_id,
+                "winnerLineageId": winner_lineage,
+            }
+        )
+
+    rewired_relation_records, relation_metrics, touched_lineages_from_relations = _plan_cites_relation_rewire(
+        semantic_relations=semantic_relations,
+        winner_by_loser_lineage=winner_by_loser_lineage,
+        references_by_lineage=by_lineage,
+        now=now,
+    )
+
+    impacted_lineages = set(touched_lineages_from_relations)
+    impacted_lineages.update(winner_by_loser_lineage.keys())
+    impacted_lineages.update(str(reference.get("lineageId") or "") for reference in winner_by_loser_lineage.values())
+
+    citation_counter_records = _plan_reference_counter_updates_from_relation_records(
+        references_by_lineage=by_lineage,
+        semantic_relations=semantic_relations,
+        relation_records=rewired_relation_records,
+        impacted_lineages=impacted_lineages,
+        now=now,
+    )
+    for expected in citation_counter_records:
+        record_id = str(expected.get("id") or "")
+        if not record_id:
+            continue
+        current = reference_expected_by_id.get(record_id, {"id": record_id})
+        current.update(expected)
+        reference_expected_by_id[record_id] = current
+
+    records = [{"modelName": "Reference", "expected": expected} for expected in reference_expected_by_id.values()]
+    records.extend(rewired_relation_records)
+    return {
+        "records": records,
+        "items": merged_pairs,
+        "duplicateGroupCount": len(losers_by_winner_lineage),
+        "referencesMergedCount": references_merged,
+        "relationsRewiredCount": relation_metrics["relationsRewiredCount"],
+        "losersBlockedCount": losers_blocked,
+    }
+
+
+def _empty_reference_dedupe_result() -> dict[str, Any]:
+    return {
+        "records": [],
+        "items": [],
+        "duplicateGroupCount": 0,
+        "referencesMergedCount": 0,
+        "relationsRewiredCount": 0,
+        "losersBlockedCount": 0,
+    }
+
+
+def _reference_identifier_keys(reference: dict[str, Any]) -> set[str]:
+    keys: set[str] = set()
+    external_item_id = str(reference.get("externalItemId") or "").strip()
+    external_lower = external_item_id.lower()
+    if external_lower.startswith("doi:"):
+        keys.add(f"doi:{external_lower.removeprefix('doi:')}")
+    elif external_lower.startswith("arxiv:"):
+        keys.add(f"arxiv:{external_lower.removeprefix('arxiv:')}")
+    elif external_lower.startswith("pmid:"):
+        keys.add(f"pmid:{external_lower.removeprefix('pmid:')}")
+    elif external_lower.startswith("isbn:"):
+        keys.add(f"isbn:{external_lower.removeprefix('isbn:')}")
+
+    metadata = _reference_metadata_object(reference)
+    identifiers = metadata.get("identifiers")
+    resolved = identifiers.get("resolved") if isinstance(identifiers, dict) else {}
+    resolved = resolved if isinstance(resolved, dict) else {}
+    doi = _normalize_doi(resolved.get("doi") or metadata.get("doi"))
+    arxiv_id = _normalize_arxiv_id(resolved.get("arxiv_id") or metadata.get("arxiv_id"))
+    pmid = _normalize_pmid(resolved.get("pmid") or metadata.get("pmid"))
+    isbn = _normalize_isbn(resolved.get("isbn") or metadata.get("isbn"))
+    if doi:
+        keys.add(f"doi:{doi.lower()}")
+    if arxiv_id:
+        keys.add(f"arxiv:{arxiv_id.lower()}")
+    if pmid:
+        keys.add(f"pmid:{pmid}")
+    if isbn:
+        keys.add(f"isbn:{isbn.lower()}")
+
+    for candidate_url in (
+        reference.get("sourceUri"),
+        resolved.get("canonical_uri"),
+        resolved.get("source_uri"),
+    ):
+        normalized_url = _normalize_canonical_url_key(candidate_url)
+        if normalized_url:
+            keys.add(f"url:{normalized_url}")
+    return keys
+
+
+def _normalize_pmid(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    digits = re.sub(r"[^0-9]+", "", text)
+    return digits
+
+
+def _normalize_canonical_url_key(value: Any) -> str:
+    raw = normalize_http_url(value)
+    if not raw:
+        return ""
+    try:
+        parsed = urlparse(raw)
+    except ValueError:
+        return ""
+    host = str(parsed.netloc or "").strip().lower()
+    if host.startswith("www."):
+        host = host[4:]
+    path = re.sub(r"/+", "/", str(parsed.path or "/").strip())
+    if not path:
+        path = "/"
+    path = path.rstrip("/")
+    if not path:
+        path = "/"
+    return f"{host}{path}"
+
+
+def _identifier_connected_components(key_to_lineages: dict[str, set[str]]) -> list[set[str]]:
+    adjacency: dict[str, set[str]] = {}
+    for members in key_to_lineages.values():
+        lineage_ids = sorted(str(lineage_id) for lineage_id in members if str(lineage_id))
+        if len(lineage_ids) < 2:
+            continue
+        for lineage_id in lineage_ids:
+            adjacency.setdefault(lineage_id, set()).update(other for other in lineage_ids if other != lineage_id)
+    visited: set[str] = set()
+    groups: list[set[str]] = []
+    for lineage_id in sorted(adjacency):
+        if lineage_id in visited:
+            continue
+        stack = [lineage_id]
+        component: set[str] = set()
+        while stack:
+            current = stack.pop()
+            if current in visited:
+                continue
+            visited.add(current)
+            component.add(current)
+            stack.extend(sorted(adjacency.get(current, set()) - visited))
+        if len(component) > 1:
+            groups.append(component)
+    return groups
+
+
+def _lineages_with_extracted_text(attachments: list[dict[str, Any]]) -> set[str]:
+    lineages: set[str] = set()
+    for attachment in attachments:
+        if str(attachment.get("role") or "") != "extracted_text":
+            continue
+        lineage_id = str(attachment.get("referenceLineageId") or "")
+        if lineage_id:
+            lineages.add(lineage_id)
+    return lineages
+
+
+def _reference_citation_degree(semantic_relations: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for relation in semantic_relations:
+        if str(relation.get("relationState") or "") != "current":
+            continue
+        if _relation_predicate_key(relation) != "cites":
+            continue
+        subject_lineage_id = str(relation.get("subjectLineageId") or "")
+        object_lineage_id = str(relation.get("objectLineageId") or "")
+        if subject_lineage_id:
+            counts[subject_lineage_id] = counts.get(subject_lineage_id, 0) + 1
+        if object_lineage_id:
+            counts[object_lineage_id] = counts.get(object_lineage_id, 0) + 1
+    return counts
+
+
+def _select_reference_dedupe_winner(
+    *,
+    members: list[dict[str, Any]],
+    has_extracted_text: set[str],
+    citation_degree: dict[str, int],
+) -> dict[str, Any]:
+    def rank(reference: dict[str, Any]) -> tuple[int, int, int, str]:
+        lineage_id = str(reference.get("lineageId") or "")
+        curation = _reference_curation_rank(reference.get("curationStatus"))
+        extracted = 1 if lineage_id in has_extracted_text else 0
+        degree = int(citation_degree.get(lineage_id, 0))
+        stable = str(reference.get("id") or "")
+        return (curation, extracted, degree, stable)
+
+    return sorted(members, key=rank, reverse=True)[0]
+
+
+def _reference_curation_rank(value: Any) -> int:
+    token = str(value or "").strip().lower()
+    if token == "accepted":
+        return 4
+    if token == "pending":
+        return 3
+    if token == "rejected":
+        return 2
+    if token == "archived":
+        return 1
+    return 0
+
+
+def _plan_cites_relation_rewire(
+    *,
+    semantic_relations: list[dict[str, Any]],
+    winner_by_loser_lineage: dict[str, dict[str, Any]],
+    references_by_lineage: dict[str, dict[str, Any]],
+    now: str,
+) -> tuple[list[dict[str, Any]], dict[str, int], set[str]]:
+    rewired_count = 0
+    touched_lineages: set[str] = set()
+    current_cites = [
+        relation
+        for relation in semantic_relations
+        if str(relation.get("relationState") or "") == "current" and _relation_predicate_key(relation) == "cites"
+    ]
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for relation in current_cites:
+        subject_lineage_id = str(relation.get("subjectLineageId") or "")
+        object_lineage_id = str(relation.get("objectLineageId") or "")
+        if (
+            subject_lineage_id not in winner_by_loser_lineage
+            and object_lineage_id not in winner_by_loser_lineage
+        ):
+            continue
+        mapped_subject = str(
+            (winner_by_loser_lineage.get(subject_lineage_id) or {}).get("lineageId") or subject_lineage_id
+        )
+        mapped_object = str(
+            (winner_by_loser_lineage.get(object_lineage_id) or {}).get("lineageId") or object_lineage_id
+        )
+        if not mapped_subject or not mapped_object:
+            continue
+        touched_lineages.update({subject_lineage_id, object_lineage_id, mapped_subject, mapped_object})
+        mapping_changed = mapped_subject != subject_lineage_id or mapped_object != object_lineage_id
+        if mapping_changed:
+            rewired_count += 1
+        grouped.setdefault((mapped_subject, mapped_object), []).append(
+            {
+                "source": relation,
+                "mappingChanged": mapping_changed,
+                "subjectLineageId": mapped_subject,
+                "objectLineageId": mapped_object,
+            }
+        )
+
+    records: list[dict[str, Any]] = []
+    for (subject_lineage_id, object_lineage_id), rows in grouped.items():
+        if subject_lineage_id == object_lineage_id:
+            for row in rows:
+                relation_id = str((row.get("source") or {}).get("id") or "")
+                if relation_id:
+                    records.append(
+                        {
+                            "modelName": "SemanticRelation",
+                            "expected": {
+                                "id": relation_id,
+                                "relationState": "superseded",
+                                "updatedAt": now,
+                            },
+                        }
+                    )
+            continue
+        subject_reference = references_by_lineage.get(subject_lineage_id)
+        object_reference = references_by_lineage.get(object_lineage_id)
+        if not isinstance(subject_reference, dict) or not isinstance(object_reference, dict):
+            continue
+        keeper = sorted(rows, key=lambda row: str((row.get("source") or {}).get("id") or ""))[0]
+        keeper_source = keeper.get("source") if isinstance(keeper.get("source"), dict) else {}
+        keeper_same = (
+            str(keeper_source.get("subjectLineageId") or "") == subject_lineage_id
+            and str(keeper_source.get("objectLineageId") or "") == object_lineage_id
+            and not keeper.get("mappingChanged")
+        )
+        if not keeper_same:
+            records.append(
+                {
+                    "modelName": "SemanticRelation",
+                    "expected": _semantic_relation_record(
+                        predicate="cites",
+                        subject_kind="reference",
+                        subject_id=str(subject_reference.get("id") or ""),
+                        subject_lineage_id=subject_lineage_id,
+                        subject_version_number=int(subject_reference.get("versionNumber") or 1),
+                        object_kind="reference",
+                        object_id=str(object_reference.get("id") or ""),
+                        object_lineage_id=object_lineage_id,
+                        object_version_number=int(object_reference.get("versionNumber") or 1),
+                        rank=1,
+                        score=1,
+                        confidence=float(keeper_source.get("confidence") or 0.75),
+                        now=now,
+                        metadata={
+                            "source": "identifier_dedupe_rewire",
+                            "dedupeMergedFromRelationIds": [
+                                str((row.get("source") or {}).get("id") or "")
+                                for row in rows
+                                if str((row.get("source") or {}).get("id") or "")
+                            ],
+                        },
+                    ),
+                }
+            )
+        for row in rows:
+            relation_id = str((row.get("source") or {}).get("id") or "")
+            if not relation_id:
+                continue
+            if keeper_same and relation_id == str(keeper_source.get("id") or ""):
+                continue
+            records.append(
+                {
+                    "modelName": "SemanticRelation",
+                    "expected": {
+                        "id": relation_id,
+                        "relationState": "superseded",
+                        "updatedAt": now,
+                    },
+                }
+            )
+    deduped = _dedupe_planned_semantic_relation_records(records)
+    return (
+        deduped,
+        {"relationsRewiredCount": rewired_count},
+        {lineage_id for lineage_id in touched_lineages if lineage_id},
+    )
+
+
+def _dedupe_planned_semantic_relation_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_id: dict[str, dict[str, Any]] = {}
+    for record in records:
+        if record.get("modelName") != "SemanticRelation":
+            continue
+        expected = record.get("expected")
+        if not isinstance(expected, dict):
+            continue
+        relation_id = str(expected.get("id") or "")
+        if not relation_id:
+            continue
+        merged = dict(by_id.get(relation_id, {}))
+        merged.update(expected)
+        by_id[relation_id] = merged
+    return [{"modelName": "SemanticRelation", "expected": expected} for _, expected in sorted(by_id.items())]
+
+
+def _plan_reference_counter_updates_from_relation_records(
+    *,
+    references_by_lineage: dict[str, dict[str, Any]],
+    semantic_relations: list[dict[str, Any]],
+    relation_records: list[dict[str, Any]],
+    impacted_lineages: set[str],
+    now: str,
+) -> list[dict[str, Any]]:
+    existing = {
+        str(relation.get("id") or ""): relation
+        for relation in semantic_relations
+        if _relation_predicate_key(relation) == "cites"
+    }
+    current = {
+        relation_id: relation
+        for relation_id, relation in existing.items()
+        if str(relation.get("relationState") or "") == "current"
+    }
+    for record in relation_records:
+        expected = record.get("expected") if isinstance(record.get("expected"), dict) else {}
+        relation_id = str(expected.get("id") or "")
+        if not relation_id:
+            continue
+        merged = dict(existing.get(relation_id, {}))
+        merged.update(expected)
+        if str(merged.get("relationState") or "") == "current":
+            current[relation_id] = merged
+        else:
+            current.pop(relation_id, None)
+    inbound_by_lineage: dict[str, int] = {}
+    outbound_by_lineage: dict[str, int] = {}
+    for relation in current.values():
+        if str(relation.get("relationState") or "") != "current":
+            continue
+        subject_lineage_id = str(relation.get("subjectLineageId") or "")
+        object_lineage_id = str(relation.get("objectLineageId") or "")
+        if subject_lineage_id:
+            outbound_by_lineage[subject_lineage_id] = outbound_by_lineage.get(subject_lineage_id, 0) + 1
+        if object_lineage_id:
+            inbound_by_lineage[object_lineage_id] = inbound_by_lineage.get(object_lineage_id, 0) + 1
+    records: list[dict[str, Any]] = []
+    for lineage_id in sorted(lineage_id for lineage_id in impacted_lineages if lineage_id):
+        reference = references_by_lineage.get(lineage_id)
+        if not isinstance(reference, dict):
+            continue
+        reference_id = str(reference.get("id") or "")
+        if not reference_id:
+            continue
+        records.append(
+            {
+                "id": reference_id,
+                "inboundCitationCount": inbound_by_lineage.get(lineage_id, 0),
+                "outboundCitationCount": outbound_by_lineage.get(lineage_id, 0),
+                "updatedAt": now,
+            }
+        )
+    return records
+
+
 def build_reference_extracted_text_filter_attachment_plans(
     *,
     references: list[dict[str, Any]],

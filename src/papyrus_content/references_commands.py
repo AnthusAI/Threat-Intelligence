@@ -50,6 +50,7 @@ from .reference_attachments import build_extracted_text_attachment_plans
 from .reference_exports import build_reference_analysis_manifest, build_reference_scope_training_export
 from .reference_url_text import (
     build_reference_citation_count_records,
+    run_reference_identifier_dedupe,
     run_reference_extracted_text_filtering,
     run_reference_url_text_extraction,
 )
@@ -637,6 +638,32 @@ def references_fetch_url_text(flags: list[str]) -> None:
         pdf_only=pdf_only,
         grobid_url=grobid_url,
     )
+    touched_reference_ids = {
+        str((item.get("reference") or {}).get("id") or "")
+        for item in (result.get("items") or [])
+        if isinstance(item, dict) and isinstance(item.get("reference"), dict)
+    }
+    touched_reference_ids.update(
+        {
+            str((record.get("expected") or {}).get("id") or "")
+            for record in (result.get("graphRecords") or [])
+            if str(record.get("modelName") or "") == "Reference" and isinstance(record.get("expected"), dict)
+        }
+    )
+    touched_reference_ids = {reference_id for reference_id in touched_reference_ids if reference_id}
+    dedupe = run_reference_identifier_dedupe(
+        client=client,
+        references=client.list_records("Reference"),
+        attachments=attachments,
+        semantic_relations=client.list_records("SemanticRelation"),
+        corpus_id=corpus_id,
+        reference_ids=reference_ids or None,
+        external_item_ids=external_item_ids or None,
+        curation_status=curation_status,
+        touched_reference_ids=touched_reference_ids or None,
+        force=force,
+        apply=apply,
+    )
 
     print(f"references\tprocess-fetch-url-text\tcorpus\t{corpus_id or 'all'}")
     print(f"references\tprocess-fetch-url-text\tstatus\t{curation_status}")
@@ -683,6 +710,10 @@ def references_fetch_url_text(flags: list[str]) -> None:
     print(f"references\tprocess-fetch-url-text\tdoi-search-hit\t{result.get('doiSearchHitCount', 0)}")
     print(f"references\tprocess-fetch-url-text\tdoi-api-fallback-used\t{result.get('doiApiFallbackUsedCount', 0)}")
     print(f"references\tprocess-fetch-url-text\tdoi-paywalled-or-blocked\t{result.get('doiPaywalledOrBlockedCount', 0)}")
+    print(f"references\tprocess-fetch-url-text\tduplicate-groups-found\t{dedupe.get('duplicateGroupCount', 0)}")
+    print(f"references\tprocess-fetch-url-text\treferences-merged\t{dedupe.get('referencesMergedCount', 0)}")
+    print(f"references\tprocess-fetch-url-text\trelations-rewired\t{dedupe.get('relationsRewiredCount', 0)}")
+    print(f"references\tprocess-fetch-url-text\tlosers-blocked\t{dedupe.get('losersBlockedCount', 0)}")
     if max_count:
         print(f"references\tprocess-fetch-url-text\tmax-count\t{max_count}")
     if model:
@@ -798,6 +829,78 @@ def references_recount_citation_counts(flags: list[str]) -> None:
         )
         return
     apply_record_changes(client, changed)
+
+
+def references_process_dedupe_identifiers(flags: list[str]) -> None:
+    options = parse_options(flags)
+    _require_reference_process_runtime("references process-dedupe-identifiers")
+    steering_config = load_steering_config(options.get("config")) or require_steering_config()
+    corpus_key = normalize_string(options.get("corpus-key"))
+    corpus_config = require_corpus_config(steering_config, corpus_key, "--corpus-key") if corpus_key else None
+    corpus_id = knowledge_corpus_id(corpus_config) if corpus_config else None
+    reference_ids = set(parse_repeated_option(flags, "reference"))
+    if options.get("reference"):
+        reference_ids.add(str(options["reference"]))
+    external_item_ids = set(parse_repeated_option(flags, "external-item-id"))
+    if options.get("external-item-id"):
+        external_item_ids.add(str(options["external-item-id"]))
+    curation_status = _normalize_reference_status_filter(options.get("status"))
+    force = parse_boolean_option(options.get("force"), False, "--force")
+    apply = resolve_mutation_apply(options, "references process-dedupe-identifiers")
+    print_limit = 25 if options.get("limit") is None else normalize_non_negative_integer(options.get("limit"), "--limit")
+    print_limit = print_limit if print_limit is not None else 25
+
+    client, _ = create_authoring_client()
+    references = client.list_records("Reference")
+    attachments = client.list_records("ReferenceAttachment")
+    semantic_relations = client.list_records("SemanticRelation")
+    dedupe = run_reference_identifier_dedupe(
+        client=client,
+        references=references,
+        attachments=attachments,
+        semantic_relations=semantic_relations,
+        corpus_id=corpus_id,
+        reference_ids=reference_ids or None,
+        external_item_ids=external_item_ids or None,
+        curation_status=curation_status,
+        touched_reference_ids=None,
+        force=force,
+        apply=apply,
+    )
+
+    print(f"references\tprocess-dedupe-identifiers\tcorpus\t{corpus_id or 'all'}")
+    print(f"references\tprocess-dedupe-identifiers\tstatus\t{curation_status}")
+    if reference_ids:
+        print(f"references\tprocess-dedupe-identifiers\treference-filter\t{len(reference_ids)}")
+    if external_item_ids:
+        print(f"references\tprocess-dedupe-identifiers\texternal-item-filter\t{len(external_item_ids)}")
+    print(f"references\tprocess-dedupe-identifiers\tduplicate-groups-found\t{dedupe.get('duplicateGroupCount', 0)}")
+    print(f"references\tprocess-dedupe-identifiers\treferences-merged\t{dedupe.get('referencesMergedCount', 0)}")
+    print(f"references\tprocess-dedupe-identifiers\trelations-rewired\t{dedupe.get('relationsRewiredCount', 0)}")
+    print(f"references\tprocess-dedupe-identifiers\tlosers-blocked\t{dedupe.get('losersBlockedCount', 0)}")
+    print(f"references\tprocess-dedupe-identifiers\tchanges\t{dedupe.get('changeCount', 0)}")
+    for item in (dedupe.get("items") or [])[:print_limit]:
+        print(
+            "\t".join(
+                [
+                    "reference-dedupe",
+                    str(item.get("loserId") or "-"),
+                    str(item.get("loserLineageId") or "-"),
+                    str(item.get("winnerId") or "-"),
+                    str(item.get("winnerLineageId") or "-"),
+                ]
+            )
+        )
+    if len(dedupe.get("items") or []) > print_limit:
+        print(
+            f"references\tprocess-dedupe-identifiers\tomitted\t{len(dedupe['items']) - print_limit}\t"
+            f"pass --limit {len(dedupe['items'])} to print every row"
+        )
+    if not apply:
+        print(
+            "references\tprocess-dedupe-identifiers\tapply\tskipped\t"
+            "use --dry-run to preview without writes"
+        )
 
 
 def references_filter_extracted_text(flags: list[str]) -> None:

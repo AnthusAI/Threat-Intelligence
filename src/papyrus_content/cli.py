@@ -104,6 +104,7 @@ from .references_commands import (
     references_extract_text_now,
     references_fetch_pdf_url_text_queue,
     references_recount_citation_counts,
+    references_process_dedupe_identifiers,
     references_filter_extracted_text,
     references_fetch_url_text,
     references_generate_metadata_from_text,
@@ -203,6 +204,7 @@ PORTED_COMMANDS = frozenset(
         "references:process-fetch-url-text",
         "references:process-fetch-pdf-queue",
         "references:process-recount-citation-counts",
+        "references:process-dedupe-identifiers",
         "references:process-filter-text",
         "references:process-generate-metadata",
         "references:create-doi-backfill-assignment",
@@ -391,6 +393,9 @@ def dispatch(group: str, command: str, flags: list[str]) -> None:
     elif route == "references:process-recount-citation-counts":
         require_reference_process_runtime("references process-recount-citation-counts")
         references_recount_citation_counts(flags)
+    elif route == "references:process-dedupe-identifiers":
+        require_reference_process_runtime("references process-dedupe-identifiers")
+        references_process_dedupe_identifiers(flags)
     elif route == "references:process-filter-text":
         require_reference_process_runtime("references process-filter-text")
         references_filter_extracted_text(flags)
