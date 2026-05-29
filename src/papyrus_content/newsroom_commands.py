@@ -21,6 +21,7 @@ from .model_attachments import (
     delete_attachment_storage_paths,
     list_attachment_storage_paths,
     model_attachment_id,
+    upload_attachment_body,
 )
 from .newsroom_sections import DEFAULT_NEWSROOM_SECTIONS_PATH, build_newsroom_section_records, load_newsroom_section_seeds
 from .newsroom_doctrine import (
