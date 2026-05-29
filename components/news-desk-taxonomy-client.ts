@@ -1591,19 +1591,31 @@ async function loadNewsroomFeedPage<T>({
 
   do {
     pageCount += 1;
-    const response = await client.graphql({
-      query,
-      variables: {
-        newsroomFeedKey,
-        sortDirection: "DESC",
-        limit,
-        nextToken: cursor,
-        filter: null,
-      },
-      authMode: USER_POOL_AUTH_MODE,
-    });
-    assertNoGraphQLErrors(response.errors);
+    let response: GraphQLConnectionResponse<T>;
+    try {
+      response = await client.graphql({
+        query,
+        variables: {
+          newsroomFeedKey,
+          sortDirection: "DESC",
+          limit,
+          nextToken: cursor,
+          filter: null,
+        },
+        authMode: USER_POOL_AUTH_MODE,
+      });
+    } catch (error) {
+      throw new Error(normalizeUnknownErrorMessage(error, `Failed to load ${field}`));
+    }
     const connection = response.data?.[field];
+    if (!connection) {
+      assertNoGraphQLErrors(response.errors);
+      throw new Error(`Missing GraphQL connection payload for ${field}.`);
+    }
+    if (response.errors?.length) {
+      // Preserve list rendering when AppSync returns partial data and per-row errors.
+      console.warn(`GraphQL returned partial data for ${field}.`, response.errors);
+    }
     connectionNextToken = connection?.nextToken ?? null;
     const pageItems = ((connection?.items ?? []).filter(Boolean) as T[])
       .filter((item) => matches ? matches(item) : true);
@@ -2010,4 +2022,27 @@ function assertNoGraphQLErrors(errors?: unknown[] | null) {
     })
     .join("; ");
   throw new Error(details);
+}
+
+function normalizeUnknownErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  if (typeof error === "string" && error.trim()) return error;
+  if (!error || typeof error !== "object") return fallback;
+  const record = error as Record<string, unknown>;
+  const directMessage = typeof record.message === "string" ? record.message.trim() : "";
+  if (directMessage) return directMessage;
+  const errors = Array.isArray(record.errors) ? record.errors : [];
+  const nestedMessages = errors
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") return "";
+      const message = (entry as { message?: unknown }).message;
+      return typeof message === "string" ? message.trim() : "";
+    })
+    .filter(Boolean);
+  if (nestedMessages.length) return nestedMessages.join("; ");
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return fallback;
+  }
 }
