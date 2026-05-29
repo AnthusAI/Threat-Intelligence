@@ -81,6 +81,52 @@ _JS_SHAPE_API_CALL_RE = re.compile(
 _EXECUTE_TACTUS_CONTRACT_VERSION = "execute_tactus_snippet_contract_v1"
 
 
+def _normalize_tactus_whitespace(value: str) -> str:
+    return " ".join(str(value or "").split())
+
+
+def _normalize_tactus_identifier(value: str) -> str:
+    return re.sub(r"\s+", "", str(value or ""))
+
+
+def _collapse_newlines_in_lua_double_quoted_strings(snippet: str) -> str:
+    out: list[str] = []
+    index = 0
+    length = len(snippet)
+    while index < length:
+        char = snippet[index]
+        if char != '"':
+            out.append(char)
+            index += 1
+            continue
+        out.append('"')
+        index += 1
+        while index < length:
+            current = snippet[index]
+            if current == "\\" and index + 1 < length:
+                out.append(current)
+                out.append(snippet[index + 1])
+                index += 2
+                continue
+            if current == '"':
+                out.append('"')
+                index += 1
+                break
+            if current in "\r\n":
+                out.append(" ")
+                while index < length and snippet[index] in "\r\n":
+                    index += 1
+                continue
+            out.append(current)
+            index += 1
+    return "".join(out)
+
+
+def _normalize_tactus_snippet(tactus: str) -> str:
+    normalized = tactus.replace("\r\n", "\n").replace("\r", "\n")
+    return _collapse_newlines_in_lua_double_quoted_strings(normalized)
+
+
 def _unsupported_snippet_error(tactus: str) -> dict[str, Any] | None:
     snippet = tactus.strip()
     if not snippet:
@@ -1443,6 +1489,24 @@ local function evidence_item_ids_from_knowledge(knowledge)
 	        structured.expandedObjects or {{}},
 	        structured.anchors or {{}},
 	    }}
+	    local function record_field(record, key)
+	        if record == nil then
+	            return nil
+	        end
+	        if type(record) == "userdata" then
+	            return select(1, safe_lookup(record, key))
+	        end
+	        if type(record) == "table" then
+	            return record[key]
+	        end
+	        local ok, value = pcall(function()
+	            return record[key]
+	        end)
+	        if ok then
+	            return value
+	        end
+	        return nil
+	    end
 	    local function safe_index(list_like, idx)
 	        local ok, value = pcall(function()
 	            return list_like[idx]
@@ -1464,9 +1528,13 @@ local function evidence_item_ids_from_knowledge(knowledge)
 	        local index = 1
 	        local record = safe_index(records, index)
 	        while record and out_index <= max_evidence_items do
-	            if record.kind == "reference" and record.id and record.curationStatus == "accepted" and not seen[record.id] then
-	                ids[out_index] = record.id
-	                seen[record.id] = true
+	            local record_id = record_field(record, "id")
+	            if record_field(record, "kind") == "reference"
+	                and record_id
+	                and record_field(record, "curationStatus") == "accepted"
+	                and not seen[record_id] then
+	                ids[out_index] = record_id
+	                seen[record_id] = true
 	                out_index = out_index + 1
 	            end
 	            index = index + 1
@@ -1763,6 +1831,8 @@ def execute_tactus_harnessed(
     knowledge_query_scope: dict[str, Any] | None = None,
     disable_tactus_web: bool = False,
 ) -> dict[str, Any]:
+    tactus = _normalize_tactus_snippet(tactus)
+    assignment_id = _normalize_tactus_identifier(assignment_id)
     if harness == "raw":
         return execute_tactus(tactus)
     if harness == "research":
@@ -1799,6 +1869,16 @@ def execute_tactus(tactus: str) -> dict[str, Any]:
     started = time.monotonic()
     trace_id = str(uuid.uuid4())
     if not isinstance(tactus, str) or not tactus.strip():
+        return _response_envelope(
+            ok=False,
+            value=None,
+            trace_id=trace_id,
+            started_at=started,
+            api_calls=[],
+            error=_structured_error("invalid_request", "tactus must be a non-empty string"),
+        )
+    tactus = _normalize_tactus_snippet(tactus)
+    if not tactus.strip():
         return _response_envelope(
             ok=False,
             value=None,

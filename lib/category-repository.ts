@@ -735,7 +735,85 @@ function knowledgeCorpusIdFromKey(corpusKey: string): string {
 }
 
 export async function loadCategorySteeringDashboard(): Promise<CategorySteeringDashboard> {
-  return createEmptyCategorySteeringDashboard();
+  const proposals = await loadServerSteeringProposals();
+  if (proposals.length === 0) return createEmptyCategorySteeringDashboard();
+  return {
+    ...createEmptyCategorySteeringDashboard(),
+    isPublicSkeleton: false,
+    proposals: sortProposals(proposals),
+    loadError: null,
+  };
+}
+
+const SERVER_STEERING_PROPOSALS_QUERY = `
+  query ListSteeringProposals($limit: Int, $nextToken: String) {
+    listSteeringProposals(limit: $limit, nextToken: $nextToken) {
+      items {
+        id
+        categorySetId
+        corpusId
+        proposalKind
+        steeringDomain
+        status
+        title
+        summary
+        categoryKey
+        targetCategoryKey
+        graphEntityId
+        relationshipType
+        displayName
+        shortTitle
+        subtitle
+        description
+        evidenceItemIds
+        suggestedSeedItemIds
+        suggestedHoldoutItemIds
+        sourceSnapshotId
+        proposedAt
+        reviewedAt
+        reviewedBy
+        updatedAt
+      }
+      nextToken
+    }
+  }
+`;
+
+async function loadServerSteeringProposals(): Promise<CategorySteeringProposal[]> {
+  const endpoint = process.env.PAPYRUS_GRAPHQL_ENDPOINT;
+  const jwt = process.env.PAPYRUS_GRAPHQL_JWT;
+  if (!endpoint || !jwt) return [];
+
+  const items: CategorySteeringProposal[] = [];
+  let nextToken: string | null = null;
+
+  for (let page = 0; page < 20; page += 1) {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        Authorization: `Bearer ${jwt}`,
+      },
+      body: JSON.stringify({
+        query: SERVER_STEERING_PROPOSALS_QUERY,
+        variables: { limit: 500, nextToken },
+      }),
+      cache: "no-store",
+    });
+    if (!response.ok) return [];
+    const payload = await response.json() as {
+      data?: { listSteeringProposals?: { items?: Array<CategorySteeringProposal | null> | null; nextToken?: string | null } | null } | null;
+      errors?: Array<{ message?: string }> | null;
+    };
+    if (payload.errors?.length) return [];
+    const connection = payload.data?.listSteeringProposals;
+    if (!connection) return [];
+    items.push(...(connection.items ?? []).filter(Boolean) as CategorySteeringProposal[]);
+    nextToken = connection.nextToken ?? null;
+    if (!nextToken) break;
+  }
+
+  return items;
 }
 
 function sortCategorySets(categorySets: CategorySteeringCategorySet[], importRuns: CategorySteeringImportRun[]): CategorySteeringCategorySet[] {

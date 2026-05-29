@@ -676,14 +676,17 @@ export function NewsDeskWorkspace({
   const sessionDashboard = useMemo(() => {
     if (!session?.shell.dashboard) return null;
     const fallbackSections = dashboard?.newsroomSections ?? [];
-    if (session.shell.dashboard.newsroomSections.length > 0 || fallbackSections.length === 0) {
-      return session.shell.dashboard;
-    }
+    const fallbackProposals = dashboard?.proposals ?? [];
+    const needsSectionFallback = session.shell.dashboard.newsroomSections.length === 0 && fallbackSections.length > 0;
+    const needsProposalFallback = session.shell.dashboard.proposals.length === 0 && fallbackProposals.length > 0;
+    if (!needsSectionFallback && !needsProposalFallback) return session.shell.dashboard;
     return {
       ...session.shell.dashboard,
-      newsroomSections: fallbackSections,
+      newsroomSections: needsSectionFallback ? fallbackSections : session.shell.dashboard.newsroomSections,
+      proposals: needsProposalFallback ? fallbackProposals : session.shell.dashboard.proposals,
     };
-  }, [dashboard?.newsroomSections, session?.shell.dashboard]);
+  }, [dashboard?.newsroomSections, dashboard?.proposals, session?.shell.dashboard]);
+  const showSectionTabs = initialTab === "overview" && !sectionPageId;
 
   if (dashboard?.isDemo) {
     return (
@@ -725,7 +728,7 @@ export function NewsDeskWorkspace({
   }
 
   if (dashboard?.isPublicSkeleton && session?.shell.phase !== "ready") {
-    return <NewsDeskAccessGate shell={session?.shell ?? null} />;
+    return <NewsDeskAccessGate shell={session?.shell ?? null} showSectionTabs={showSectionTabs} />;
   }
 
   if (dashboard) {
@@ -746,7 +749,7 @@ export function NewsDeskWorkspace({
     );
   }
 
-  return <NewsDeskAccessGate shell={session?.shell ?? null} />;
+  return <NewsDeskAccessGate shell={session?.shell ?? null} showSectionTabs={showSectionTabs} />;
 }
 
 function NewsDeskDashboard({
@@ -1011,7 +1014,9 @@ function NewsDeskDashboard({
   }, [dashboard.lexicalSteeringRules]);
 
   useEffect(() => {
-    setProposals(dashboard.proposals);
+    setProposals((current) => (
+      dashboard.proposals.length === 0 && current.length > 0 ? current : dashboard.proposals
+    ));
   }, [dashboard.proposals]);
 
   useEffect(() => {
@@ -3021,7 +3026,7 @@ function NewsDeskDashboard({
 	          </div>
 	        </header>
 
-        {!isSectionPage ? (
+        {!isSectionPage && activeTab === "overview" ? (
           <nav className="news-desk-tabs" aria-label="Newsroom sections">
             {NEWS_DESK_TABS.map((tab) => (
               <NewsDeskTabLink
@@ -5593,10 +5598,12 @@ function TopicsDeskView({
     return map;
   }, [selectedCategorys]);
   const categoryQueueProposals = useMemo(() => {
-    return proposals.filter((proposal) => (
+    const scoped = proposals.filter((proposal) => (
       proposal.steeringDomain === "category"
       && (!selectedCategorySet || proposal.categorySetId === selectedCategorySet.id)
     ));
+    if (scoped.length > 0 || !selectedCategorySet) return scoped;
+    return proposals.filter((proposal) => proposal.steeringDomain === "category");
   }, [proposals, selectedCategorySet]);
   const roots = buildCanonicalTopicRoots(selectedCategorys, selectedCategoryNodes, proposals);
   const subcategoryCount = roots.reduce((count, root) => count + root.subcategorys.length, 0);
@@ -14169,7 +14176,7 @@ function NewsroomProgressBackLink({
   );
 }
 
-function NewsDeskAccessGate({ shell }: { shell: NewsDeskShellState | null }) {
+function NewsDeskAccessGate({ shell, showSectionTabs = false }: { shell: NewsDeskShellState | null; showSectionTabs?: boolean }) {
   const showRhythmOverlay = useNewsroomRhythmOverlay();
   const resolvedTheme = useResolvedPapyrusTheme();
   const accessPhase = shell?.phase ?? "checkingAccess";
@@ -14196,18 +14203,20 @@ function NewsDeskAccessGate({ shell }: { shell: NewsDeskShellState | null }) {
 	              <span><Link className="news-desk-auth-control-link" href="/settings">Settings</Link></span>
 	            </div>
 	            </header>
-            <nav className="news-desk-tabs" aria-label="Newsroom sections">
-              {NEWS_DESK_TABS.map((tab) => (
-                <NewsDeskTabLink
-                  key={tab.id}
-                  active={false}
-                  count={0}
-                  countSlot={tab.id !== "administration"}
-                  countVisible={false}
-                  tab={tab}
-                />
-              ))}
-            </nav>
+            {showSectionTabs ? (
+              <nav className="news-desk-tabs" aria-label="Newsroom sections">
+                {NEWS_DESK_TABS.map((tab) => (
+                  <NewsDeskTabLink
+                    key={tab.id}
+                    active={false}
+                    count={0}
+                    countSlot={tab.id !== "administration"}
+                    countVisible={false}
+                    tab={tab}
+                  />
+                ))}
+              </nav>
+            ) : null}
             <section className="news-desk-access-panel" aria-live="polite" data-news-desk-access-phase={accessPhase}>
               <div className="news-desk-access-panel__copy" key={`copy-${accessPhase}`}>
                 <p className="story-label">Access</p>

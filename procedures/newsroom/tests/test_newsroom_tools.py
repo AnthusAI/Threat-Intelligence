@@ -1187,6 +1187,54 @@ return finish_research_from_search{
         self.assertEqual(boundary["searchResultCount"], 1)
         self.assertEqual(boundary["discoveryTerminalState"], "succeeded")
 
+    def test_research_harness_normalizes_newlines_inside_quoted_strings(self):
+        assignment = {
+            "id": "assignment-live-123",
+            "assignmentTypeKey": "research.edition-candidate",
+            "queueKey": "research#open",
+            "status": "open",
+            "title": "Explore source discovery",
+        }
+        with mock.patch(
+            "papyrus_newsroom.tactus_runtime.reference_curation_signals.reference_web_search",
+            return_value={
+                "query": "erdos unit distance conjecture",
+                "results": [
+                    {
+                        "title": "OpenAI announcement",
+                        "url": "https://openai.com/index/model-disproves-discrete-geometry-conjecture/",
+                        "source_domain": "openai.com",
+                        "evidence_candidate_id": "evidence-candidate-1",
+                        "rank": 1,
+                    }
+                ],
+                "metadata": {"answer": "OpenAI disproved the conjecture."},
+            },
+        ):
+            result = tactus_runtime.execute_tactus_harnessed(
+                """
+local search = web_search("OpenAI Erdos
+planar unit distance conjecture")
+return finish_research_from_search{
+  research_mode = "full_research",
+  summary = "Agent-style table call with wrapped query",
+  queries = {"erdos unit distance conjecture"},
+  source_snapshots = search and search.results or {},
+  proposed_references = search and proposed_references_from_search(search) or {},
+  evidence_item_ids = {},
+}
+""",
+                harness="research",
+                assignment_item_json=json.dumps(assignment),
+                corpus_key="AI-ML-research",
+                max_evidence_items=8,
+                research_mode="full_research",
+            )
+
+        self.assertTrue(result["ok"], result.get("error"))
+        packet = result["value"]["research_packet"]
+        self.assertEqual(packet["proposed_references"][0]["url"], "https://openai.com/index/model-disproves-discrete-geometry-conjecture/")
+
     def test_research_harness_normalizes_malformed_search_metadata(self):
         assignment = {
             "id": "assignment-live-123",

@@ -405,7 +405,9 @@ def run_research_assignment(flags: list[str]) -> None:
         raise ValueError(
             f"Cloud procedure output for assignment {assignment_id} did not return a JSON object payload."
         )
-    research = parsed.get("research_packet") or parsed.get("researchPacket")
+    research = research_packet_from_procedure_output(parsed)
+    if not research:
+        research = parsed.get("research_packet") or parsed.get("researchPacket")
     if not research:
         raise ValueError(
             f"Cloud procedure output for assignment {assignment_id} is missing research_packet. "
@@ -1358,6 +1360,36 @@ def load_message_metadata_payload(
     return {}
 
 
+def research_packet_from_procedure_output(parsed: dict[str, Any]) -> dict[str, Any]:
+    value = parsed.get("value") or parsed
+    packet = value.get("research_packet") or value.get("researchPacket") or value.get("research") or value
+    if not isinstance(packet, dict):
+        return {}
+    packet = dict(packet)
+    if not normalize_string(packet.get("summary")):
+        top_level_summary = normalize_string(
+            value.get("summary") or value.get("research_summary") or value.get("researchSummary")
+        )
+        if top_level_summary:
+            packet["summary"] = top_level_summary
+    synthesis = packet.get("synthesis")
+    if not normalize_string(packet.get("summary")) and isinstance(synthesis, dict):
+        synthesis_summary = normalize_string(synthesis.get("summary"))
+        if synthesis_summary:
+            packet["summary"] = synthesis_summary
+    source_discovery = packet.get("sourceDiscovery") or packet.get("source_discovery")
+    if isinstance(source_discovery, dict):
+        if not _parse_array(packet.get("proposed_references") or packet.get("proposedReferences")):
+            discovered_refs = source_discovery.get("proposedReferences") or source_discovery.get("proposed_references")
+            if discovered_refs:
+                packet["proposed_references"] = discovered_refs
+        if not _parse_array(packet.get("source_snapshots") or packet.get("sourceSnapshots")):
+            discovered_snapshots = source_discovery.get("sourceSnapshots") or source_discovery.get("source_snapshots")
+            if discovered_snapshots:
+                packet["source_snapshots"] = discovered_snapshots
+    return packet
+
+
 def read_research_packet_input(options: dict[str, Any]) -> dict[str, Any]:
     raw = options.get("research-json")
     if not raw:
@@ -1373,15 +1405,7 @@ def read_research_packet_input(options: dict[str, Any]) -> dict[str, Any]:
         except OSError:
             text = raw_text
     parsed = json.loads(text)
-    value = parsed.get("value") or parsed
-    packet = value.get("research_packet") or value.get("researchPacket") or value.get("research") or value
-    if isinstance(packet, dict):
-        packet = dict(packet)
-        if not normalize_string(packet.get("summary")):
-            top_level_summary = normalize_string(value.get("summary") or value.get("research_summary") or value.get("researchSummary"))
-            if top_level_summary:
-                packet["summary"] = top_level_summary
-    return packet
+    return research_packet_from_procedure_output(parsed)
 
 
 def read_reporting_packet_input(options: dict[str, Any]) -> dict[str, Any]:
