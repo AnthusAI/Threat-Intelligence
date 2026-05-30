@@ -3512,6 +3512,8 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
                         "3",
                         "--trend-window-days",
                         "7",
+                        "--now",
+                        "2026-05-21T12:00:00Z",
                         "--input",
                         handle.name,
                     ]

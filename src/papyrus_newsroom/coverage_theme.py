@@ -345,6 +345,13 @@ def signals_concept_report(
         for concept in report.get("rankedConcepts") or []
         if concept.get("conceptId")
     }
+    reports_by_type = {
+        str(section.get("reportType") or ""): list(section.get("rankedConcepts") or [])
+        for section in reports
+    }
+    popularity = reports_by_type.get("popularity", [])
+    trending = reports_by_type.get("trending", [])
+    pagerank = reports_by_type.get("pagerank", [])
     report = {
         "ok": True,
         "command": "signals concept-report",
@@ -353,9 +360,15 @@ def signals_concept_report(
         "reportType": report_type,
         "generatedAt": now,
         "reports": reports,
+        "popularity": popularity,
+        "trending": trending,
+        "pagerank": pagerank,
         "summary": {
             "reportCount": len(reports),
             "rankedConceptCount": len(ranked_concept_ids),
+            "popularityCount": len(popularity),
+            "trendingCount": len(trending),
+            "pagerankCount": len(pagerank),
             "acceptedReferenceCount": len(_accepted_references(references, corpus_key)),
             "mentionRelationCount": mention_relation_count,
             "createsItemOrEditionItem": False,
@@ -587,13 +600,14 @@ def build_concept_report_records(report: dict[str, Any]) -> list[dict[str, Any]]
         _attachment_record(message_id, "message_body", "message", "message.txt", "text/plain", _concept_report_body(report), run_id, now),
         _attachment_record(message_id, "metadata", "metadata", "metadata.json", "application/json", {"kind": "analytics.concept_report", **report}, run_id, now),
     ]
-    linked_concepts: set[str] = set()
+    linked_concept_reports: set[str] = set()
     linked_references: set[str] = set()
     for report_section in report.get("reports") or []:
         for concept in report_section.get("rankedConcepts") or []:
             concept_id = str(concept.get("conceptId") or "")
-            if concept_id and concept_id not in linked_concepts:
-                linked_concepts.add(concept_id)
+            report_key = f"{concept_id}:{report_section.get('reportType')}"
+            if concept_id and report_key not in linked_concept_reports:
+                linked_concept_reports.add(report_key)
                 records.append(_record("SemanticRelation", semantic_relation(
                     predicate="uses_signal",
                     subject_kind="message",
@@ -4567,7 +4581,7 @@ def _concept_report_context(
             "referenceId": reference_id,
             "referenceLineageId": reference_lineage_id,
             "weight": _relation_weight(relation),
-            "datetime": _parse_datetime(relation.get("importedAt") or relation.get("createdAt") or relation.get("updatedAt")) or _reference_datetime(reference) or now_dt,
+            "datetime": _reference_datetime(reference) or _parse_datetime(relation.get("importedAt") or relation.get("createdAt") or relation.get("updatedAt")) or now_dt,
         }
         concepts_by_id[concept_id] = node
         mentions.append(mention)

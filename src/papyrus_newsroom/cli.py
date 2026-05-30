@@ -9,7 +9,6 @@ from typing import Any
 from .coverage_theme import (
     coverage_theme_run,
     editions_plan,
-    signals_concept_report,
     load_json_file,
     parse_csv,
     parse_section_budgets,
@@ -382,6 +381,7 @@ def _add_signals_parser(subparsers: argparse._SubParsersAction[argparse.Argument
     concept_parser.add_argument("--node-kinds", default="entity", help="Comma-separated semantic node kinds to include")
     concept_parser.add_argument("--max-nodes-per-reference", type=int, default=30)
     concept_parser.add_argument("--run-id", default="")
+    concept_parser.add_argument("--now", default="", help="Optional ISO timestamp for deterministic report generation")
     concept_parser.add_argument("--input", default="", help="Optional fixture JSON with references, semanticNodes, and semanticRelations")
     concept_parser.add_argument("--apply", action="store_true")
     concept_parser.add_argument("--json", action="store_true")
@@ -401,22 +401,6 @@ def _add_signals_parser(subparsers: argparse._SubParsersAction[argparse.Argument
     trend_parser.add_argument("--input", default="", help="Optional fixture JSON with references and semanticNodes")
     trend_parser.add_argument("--dry-run", action="store_true")
     trend_parser.add_argument("--json", action="store_true")
-    concept_parser = signal_subparsers.add_parser(
-        "concept-report",
-        help="Build a private analytics report ranking knowledge-base concepts",
-    )
-    concept_parser.add_argument("--corpus-key", required=True)
-    concept_parser.add_argument("--report-type", choices=["all", "popularity", "trending", "pagerank"], default="all")
-    concept_parser.add_argument("--limit", type=int, default=25)
-    concept_parser.add_argument("--trend-window-days", type=int, default=30)
-    concept_parser.add_argument("--pagerank-iterations", type=int, default=30)
-    concept_parser.add_argument("--pagerank-damping", type=float, default=0.85)
-    concept_parser.add_argument("--node-kinds", default="")
-    concept_parser.add_argument("--max-nodes-per-reference", type=int, default=50)
-    concept_parser.add_argument("--run-id", default="")
-    concept_parser.add_argument("--input", default="", help="Optional fixture JSON with references, semanticNodes, and semanticRelations")
-    concept_parser.add_argument("--apply", action="store_true")
-    concept_parser.add_argument("--json", action="store_true")
 
 
 def _add_editions_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -532,6 +516,7 @@ def _run_signals_command(args: argparse.Namespace) -> dict:
             semantic_nodes=(fixture.get("semanticNodes") or fixture.get("semantic_nodes")) if fixture else None,
             semantic_relations=(fixture.get("semanticRelations") or fixture.get("semantic_relations")) if fixture else None,
             apply=args.apply,
+            now=args.now,
         )
     if args.signals_command == "trend-report":
         fixture = load_json_file(args.input) if args.input else {}
@@ -548,23 +533,6 @@ def _run_signals_command(args: argparse.Namespace) -> dict:
             references=fixture.get("references") if fixture else None,
             semantic_nodes=(fixture.get("semanticNodes") or fixture.get("semantic_nodes")) if fixture else None,
             apply=not args.dry_run,
-        )
-    if args.signals_command == "concept-report":
-        fixture = load_json_file(args.input) if args.input else {}
-        return signals_concept_report(
-            corpus_key=args.corpus_key,
-            report_type=args.report_type,
-            limit=args.limit,
-            trend_window_days=args.trend_window_days,
-            pagerank_iterations=args.pagerank_iterations,
-            pagerank_damping=args.pagerank_damping,
-            node_kinds=parse_csv(args.node_kinds),
-            max_nodes_per_reference=args.max_nodes_per_reference,
-            run_id=args.run_id,
-            references=fixture.get("references") if fixture else None,
-            semantic_nodes=(fixture.get("semanticNodes") or fixture.get("semantic_nodes")) if fixture else None,
-            semantic_relations=(fixture.get("semanticRelations") or fixture.get("semantic_relations")) if fixture else None,
-            apply=args.apply,
         )
     raise SystemExit("Missing or unsupported signals subcommand.")
 
