@@ -2237,22 +2237,28 @@ def _concept_snapshot_from_semantic_nodes(
             continue
         if corpus_key and node.get("corpusId") not in {None, "", corpus_id, corpus_key}:
             continue
+        node_kind = str(node.get("nodeKind") or "")
+        if node_kind.startswith(("coverage.", "editorial.form.")):
+            continue
         display_name = str(node.get("displayName") or node.get("nodeKey") or "").strip()
         if not display_name or not _is_usable_theme_label(display_name):
+            continue
+        if display_name.lower() == str(topic or "").strip().lower():
             continue
         haystack = " ".join([display_name, str(node.get("nodeKey") or ""), str(node.get("description") or "")]).lower()
         topic_relevance = sum(1 for term in topic_terms if term in haystack)
         mention_count = int(node.get("acceptedReferenceMentionCount") or 0)
-        if mention_count <= 0 and topic_relevance <= 0:
+        relation_count = int(node.get("relationCount") or 0)
+        if mention_count <= 0 and relation_count <= 0 and topic_relevance <= 0:
             continue
         rows.append({
             "conceptId": str(node.get("id") or ""),
             "conceptLineageId": str(node.get("lineageId") or node.get("id") or ""),
             "displayName": display_name,
             "metric": "acceptedReferenceMentionCount",
-            "score": mention_count,
+            "score": max(mention_count, relation_count),
             "mentionCount": mention_count,
-            "distinctReferenceCount": mention_count,
+            "distinctReferenceCount": max(mention_count, relation_count),
             "topicRelevance": topic_relevance,
             "authorityScore": float(node.get("authorityScore") or 0),
             "source": "semantic_node",
