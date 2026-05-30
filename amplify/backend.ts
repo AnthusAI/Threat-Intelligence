@@ -1,5 +1,5 @@
 import { defineBackend, secret } from "@aws-amplify/backend";
-import { Duration } from "aws-cdk-lib";
+import { Duration, Stack } from "aws-cdk-lib";
 import * as backup from "aws-cdk-lib/aws-backup";
 import { AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId } from "aws-cdk-lib/custom-resources";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
@@ -192,7 +192,8 @@ if (enableInboundEmail) {
     sourceAccount: backend.stack.account,
   });
 
-  const inboundRuleSet = new ses.ReceiptRuleSet(storageBackupsStack, "PapyrusInboundEmailRuleSet", {
+  const storageStack = Stack.of(storageBucket);
+  const inboundRuleSet = new ses.ReceiptRuleSet(storageStack, "PapyrusInboundEmailRuleSet", {
     receiptRuleSetName: `papyrus-inbound-${inboundEmailDomain.replace(/\./g, "-")}`,
   });
   inboundRuleSet.addRule("PapyrusInboundSubmissions", {
@@ -212,7 +213,7 @@ if (enableInboundEmail) {
     ],
   });
 
-  new AwsCustomResource(storageBackupsStack, "ActivateInboundEmailRuleSet", {
+  new AwsCustomResource(storageStack, "ActivateInboundEmailRuleSet", {
     onCreate: {
       service: "SES",
       action: "setActiveReceiptRuleSet",
