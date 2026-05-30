@@ -1956,16 +1956,17 @@ def _looks_like_domain_label(text: str) -> bool:
 
 def _is_usable_theme_label(text: str) -> bool:
     label = re.sub(r"\s+", " ", str(text or "").strip())
-    if len(label) < 5:
+    if len(label) < 8:
         return False
     if _looks_like_domain_label(label):
         return False
     terms = _terms(label)
     if not terms:
         return False
-    if all(term in TREND_TOPIC_STOP_TERMS for term in terms):
+    significant = [term for term in terms if term not in TREND_TOPIC_STOP_TERMS]
+    if len(significant) < 2:
         return False
-    if len(terms) == 1 and terms[0] in TREND_TOPIC_STOP_TERMS:
+    if all(term in TREND_TOPIC_STOP_TERMS for term in terms):
         return False
     return True
 
@@ -2015,8 +2016,6 @@ def _editorial_title_hook(
     ]
     if len(section_names) >= 2:
         return " · ".join(section_names[:3])
-    if len(section_names) == 1:
-        return section_names[0]
     lowered = str(why_now or "").lower()
     blocked = (
         "desk proposed",
@@ -2079,9 +2078,6 @@ def derive_edition_forum_thread_title(
     if hook and not _looks_like_domain_label(hook) and hook.lower() != headline.lower():
         candidate = f"{headline} — {hook}"
         headline = candidate if len(candidate) <= 80 else headline
-    evidence_count = int((signal or {}).get("acceptedEvidenceCount") or 0)
-    if evidence_count > 0 and len(headline) < 56 and "source" not in headline.lower():
-        headline = f"{headline} ({evidence_count} sources)"
     if len(headline) <= 80:
         return headline
     shortened = headline[:77].rsplit(" ", 1)[0].strip()

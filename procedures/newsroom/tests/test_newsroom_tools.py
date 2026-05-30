@@ -3869,6 +3869,7 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
     def test_is_usable_theme_label_rejects_url_tokens(self):
         self.assertFalse(papyrus_coverage_theme._is_usable_theme_label("Https"))
         self.assertFalse(papyrus_coverage_theme._is_usable_theme_label("arxiv.org"))
+        self.assertFalse(papyrus_coverage_theme._is_usable_theme_label("Language"))
         self.assertTrue(papyrus_coverage_theme._is_usable_theme_label("Generative game worlds"))
 
     def test_derive_edition_forum_thread_title_prefers_themes_over_domains(self):
