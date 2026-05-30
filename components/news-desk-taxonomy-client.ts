@@ -339,6 +339,41 @@ const NEWSROOM_SECTION_LIST_QUERY = `
   }
 `;
 
+const LIST_STEERING_PROPOSALS_QUERY = `
+  query ListSteeringProposals($limit: Int, $nextToken: String) {
+    listSteeringProposals(limit: $limit, nextToken: $nextToken) {
+      items {
+        id
+        categorySetId
+        corpusId
+        importRunId
+        proposalKind
+        steeringDomain
+        status
+        title
+        summary
+        categoryKey
+        targetCategoryKey
+        graphEntityId
+        relationshipType
+        displayName
+        shortTitle
+        subtitle
+        description
+        evidenceItemIds
+        suggestedSeedItemIds
+        suggestedHoldoutItemIds
+        sourceSnapshotId
+        proposedAt
+        reviewedAt
+        reviewedBy
+        updatedAt
+      }
+      nextToken
+    }
+  }
+`;
+
 const MODEL_ATTACHMENTS_BY_OWNER_QUERY = `
   query ListModelAttachmentsByOwnerRoleAndSortKey($ownerId: ID!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String) {
     listModelAttachmentsByOwnerRoleAndSortKey(ownerId: $ownerId, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken) {
@@ -586,7 +621,7 @@ type GraphQLListResponse<T> = {
 };
 
 type ListableModel<T> = {
-  list: (options: Record<string, unknown>) => Promise<GraphQLListResponse<T>>;
+  list: (input?: Record<string, unknown>, options?: Record<string, unknown>) => Promise<GraphQLListResponse<T>>;
 };
 
 export type NewsroomRecordPage<T> = {
@@ -875,24 +910,24 @@ export async function loadEditorFullNewsDeskDashboard({ isAdmin }: { isAdmin: bo
     procedureData,
     userDirectory,
   ] = await Promise.all([
-    listUserPoolModel<CategorySteeringCorpus>("KnowledgeCorpus"),
-    listUserPoolModel<CategorySteeringImportRun>("KnowledgeImportRun"),
-    listUserPoolModel<CategorySteeringCategorySet>("CategorySet"),
-    listUserPoolModel<CategorySteeringCategory>("Category"),
-    listOptionalUserPoolModel<CategoryKeywordRecord>("CategoryKeyword"),
-    listOptionalUserPoolModel<LexicalSteeringRuleRecord>("LexicalSteeringRule"),
-    listUserPoolModel<CategorySteeringProposal>("SteeringProposal"),
-    listUserPoolModel<CategorySteeringArtifact>("KnowledgeArtifact"),
-    listUserPoolModel<ReferenceRecord>("Reference"),
-    listUserPoolModel<ReferenceAttachmentRecord>("ReferenceAttachment"),
-    listUserPoolModel<SemanticNodeRecord>("SemanticNode"),
-    listUserPoolModel<MessageRecord>("Message"),
-    listUserPoolModel<SemanticRelationRecord>("SemanticRelation"),
-    loadEditorAssignmentsData(),
-    listOptionalUserPoolModel<EditionSlotRecord>("EditionSlot"),
-    listOptionalUserPoolModel<NewsroomSectionRecord>("NewsroomSection"),
+    loadDashboardSlice("KnowledgeCorpus", () => listUserPoolModel<CategorySteeringCorpus>("KnowledgeCorpus"), [] as CategorySteeringCorpus[]),
+    loadDashboardSlice("KnowledgeImportRun", () => listUserPoolModel<CategorySteeringImportRun>("KnowledgeImportRun"), [] as CategorySteeringImportRun[]),
+    loadDashboardSlice("CategorySet", () => listUserPoolModel<CategorySteeringCategorySet>("CategorySet"), [] as CategorySteeringCategorySet[]),
+    loadDashboardSlice("Category", () => listUserPoolModel<CategorySteeringCategory>("Category"), [] as CategorySteeringCategory[]),
+    loadDashboardSlice("CategoryKeyword", () => listOptionalUserPoolModel<CategoryKeywordRecord>("CategoryKeyword"), [] as CategoryKeywordRecord[]),
+    loadDashboardSlice("LexicalSteeringRule", () => listOptionalUserPoolModel<LexicalSteeringRuleRecord>("LexicalSteeringRule"), [] as LexicalSteeringRuleRecord[]),
+    loadDashboardSlice("SteeringProposal", () => listSteeringProposalsViaGraphql(), [] as CategorySteeringProposal[]),
+    loadDashboardSlice("KnowledgeArtifact", () => listUserPoolModel<CategorySteeringArtifact>("KnowledgeArtifact"), [] as CategorySteeringArtifact[]),
+    loadDashboardSlice("Reference", () => listUserPoolModel<ReferenceRecord>("Reference"), [] as ReferenceRecord[]),
+    loadDashboardSlice("ReferenceAttachment", () => listUserPoolModel<ReferenceAttachmentRecord>("ReferenceAttachment"), [] as ReferenceAttachmentRecord[]),
+    loadDashboardSlice("SemanticNode", () => listUserPoolModel<SemanticNodeRecord>("SemanticNode"), [] as SemanticNodeRecord[]),
+    loadDashboardSlice("Message", () => listUserPoolModel<MessageRecord>("Message"), [] as MessageRecord[]),
+    loadDashboardSlice("SemanticRelation", () => listUserPoolModel<SemanticRelationRecord>("SemanticRelation"), [] as SemanticRelationRecord[]),
+    loadDashboardSlice("Assignments", () => loadEditorAssignmentsData(), { assignments: [], assignmentEvents: [] }),
+    loadDashboardSlice("EditionSlot", () => listOptionalUserPoolModel<EditionSlotRecord>("EditionSlot"), [] as EditionSlotRecord[]),
+    loadDashboardSlice("NewsroomSection", () => listOptionalUserPoolModel<NewsroomSectionRecord>("NewsroomSection"), [] as NewsroomSectionRecord[]),
     procedureDataPromise,
-    isAdmin ? loadUserDirectory() : Promise.resolve([]),
+    loadDashboardSlice("UserDirectory", () => (isAdmin ? loadUserDirectory() : Promise.resolve([])), [] as UserDirectoryEntry[]),
   ]);
 
   const sortedCorpora = corpora.sort((left, right) => left.name.localeCompare(right.name));
@@ -945,6 +980,15 @@ export async function loadEditorFullNewsDeskDashboard({ isAdmin }: { isAdmin: bo
     procedureRuns: procedureData.runs,
     loadError: null,
   };
+}
+
+async function loadDashboardSlice<T>(label: string, loader: () => Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await loader();
+  } catch (error) {
+    console.warn(`Newsroom dashboard slice failed: ${label}`, error);
+    return fallback;
+  }
 }
 
 export async function loadEditorProcedureData(): Promise<{
@@ -2355,14 +2399,16 @@ async function listUserPoolModel<T>(modelName: string): Promise<T[]> {
   const client = generateClient<Schema>();
   const model = (client.models as Record<string, ListableModel<T>>)[modelName];
   if (!model) throw new Error(`GraphQL model ${modelName} is not available in the deployed schema.`);
+  const list = model.list as (input?: Record<string, unknown>, options?: Record<string, unknown>) => Promise<GraphQLListResponse<T>>;
 
   const items: T[] = [];
   let nextToken: string | null | undefined;
   do {
-    const response = await model.list({
-      authMode: USER_POOL_AUTH_MODE,
+    const response = await list({
       limit: USER_POOL_LIST_LIMIT,
       nextToken,
+    }, {
+      authMode: USER_POOL_AUTH_MODE,
     });
     assertNoGraphQLErrors(response.errors);
     items.push(...((response.data ?? []).filter(Boolean) as T[]));
@@ -2387,9 +2433,11 @@ async function listUserPoolModelPage<T>(modelName: string, limit: number): Promi
   const client = generateClient<Schema>();
   const model = (client.models as Record<string, ListableModel<T>>)[modelName];
   if (!model) throw new Error(`GraphQL model ${modelName} is not available in the deployed schema.`);
-  const response = await model.list({
-    authMode: USER_POOL_AUTH_MODE,
+  const list = model.list as (input?: Record<string, unknown>, options?: Record<string, unknown>) => Promise<GraphQLListResponse<T>>;
+  const response = await list({
     limit,
+  }, {
+    authMode: USER_POOL_AUTH_MODE,
   });
   assertNoGraphQLErrors(response.errors);
   return (response.data ?? []).filter(Boolean) as T[];
@@ -2788,6 +2836,26 @@ async function listNewsroomSectionsViaGraphql(client: ReturnType<typeof generate
     assertNoGraphQLErrors(response.errors);
     const connection = response.data?.listNewsroomSections;
     rows.push(...((connection?.items ?? []).filter(Boolean) as NewsroomSectionRecord[]));
+    nextToken = connection?.nextToken ?? null;
+  } while (nextToken);
+  return rows;
+}
+
+async function listSteeringProposalsViaGraphql(): Promise<CategorySteeringProposal[]> {
+  const client = generateClient<Schema>() as unknown as {
+    graphql: (options: Record<string, unknown>) => Promise<GraphQLConnectionResponse<CategorySteeringProposal>>;
+  };
+  const rows: CategorySteeringProposal[] = [];
+  let nextToken: string | null | undefined = null;
+  do {
+    const response = await client.graphql({
+      query: LIST_STEERING_PROPOSALS_QUERY,
+      variables: { limit: USER_POOL_LIST_LIMIT, nextToken },
+      authMode: USER_POOL_AUTH_MODE,
+    });
+    assertNoGraphQLErrors(response.errors);
+    const connection = response.data?.listSteeringProposals;
+    rows.push(...((connection?.items ?? []).filter(Boolean) as CategorySteeringProposal[]));
     nextToken = connection?.nextToken ?? null;
   } while (nextToken);
   return rows;

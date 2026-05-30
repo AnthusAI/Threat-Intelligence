@@ -5,6 +5,7 @@ from typing import Any
 
 from papyrus_newsroom import reference_curation_signals
 
+from .model_defaults import DEFAULT_REFERENCE_SUMMARY_MODEL
 from .reference_url_text import resolve_storage_bucket_name
 from .source_readiness import select_extracted_text_attachment
 
@@ -28,7 +29,7 @@ def run_reference_metadata_generation_from_extracted_text(
     external_item_ids: set[str] | None = None,
     curation_status: str = "all",
     max_count: int | None = None,
-    model: str = "gpt-5.4-nano",
+    model: str = DEFAULT_REFERENCE_SUMMARY_MODEL,
     apply: bool = False,
     bucket: str | None = None,
 ) -> dict[str, Any]:

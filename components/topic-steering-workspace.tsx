@@ -4,10 +4,10 @@ import { Hub } from "aws-amplify/utils";
 import { fetchAuthSession } from "aws-amplify/auth";
 import { gsap } from "gsap";
 import { Flip } from "gsap/Flip";
-import { ArchiveIcon, MoreHorizontalIcon, RefreshCwIcon } from "lucide-react";
+import { ArchiveIcon, MenuIcon, MoreHorizontalIcon, RefreshCwIcon, XIcon } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import type { ReactNode, RefObject } from "react";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
 import { generateClient } from "aws-amplify/data";
@@ -514,6 +514,98 @@ function isEditableEventTarget(target: EventTarget | null) {
   return target.isContentEditable || target.closest("[contenteditable='true']") !== null;
 }
 
+type NewsDeskDrawerController = {
+  close: () => void;
+  drawerId: string;
+  firstLinkRef: RefObject<HTMLAnchorElement | null>;
+  isDocked: boolean;
+  isModal: boolean;
+  open: boolean;
+  setOpen: (value: boolean) => void;
+  triggerRef: RefObject<HTMLButtonElement | null>;
+};
+
+function useNewsDeskDrawerController(): NewsDeskDrawerController {
+  const pathname = usePathname();
+  const isDocked = useMediaQuery("(min-width: 1100px)");
+  const isModal = !isDocked;
+  const drawerId = useId();
+  const lastPathnameRef = useRef(pathname);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const firstLinkRef = useRef<HTMLAnchorElement | null>(null);
+  const [open, setOpen] = useState(false);
+  const shouldRestoreFocusRef = useRef(false);
+
+  const close = useCallback(() => {
+    if (!open) return;
+    shouldRestoreFocusRef.current = true;
+    setOpen(false);
+  }, [open]);
+
+  useEffect(() => {
+    if (lastPathnameRef.current === pathname) return;
+    lastPathnameRef.current = pathname;
+    setOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!open || !isModal) return;
+    requestAnimationFrame(() => {
+      firstLinkRef.current?.focus();
+    });
+  }, [isModal, open]);
+
+  useEffect(() => {
+    if (open || !shouldRestoreFocusRef.current) return;
+    shouldRestoreFocusRef.current = false;
+    triggerRef.current?.focus();
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      close();
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [close, open]);
+
+  useEffect(() => {
+    if (!open || !isModal) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isModal, open]);
+
+  return {
+    close,
+    drawerId,
+    firstLinkRef,
+    isDocked,
+    isModal,
+    open,
+    setOpen,
+    triggerRef,
+  };
+}
+
+function inferNewsDeskTabFromPathname(pathname: string | null): NewsDeskTab | null {
+  if (!pathname || !pathname.startsWith("/newsroom")) return null;
+  if (pathname === "/newsroom" || pathname === "/newsroom/") return "overview";
+  if (pathname.startsWith("/newsroom/messages")) return "messages";
+  if (pathname.startsWith("/newsroom/assignments")) return "assignments";
+  if (pathname.startsWith("/newsroom/references")) return "references";
+  if (pathname.startsWith("/newsroom/topics")) return "topics";
+  if (pathname.startsWith("/newsroom/concepts")) return "concepts";
+  if (pathname.startsWith("/newsroom/administration")) return "administration";
+  if (pathname.startsWith("/newsroom/search")) return "search";
+  return null;
+}
+
 const TAILORED_TOPIC_PROPOSAL_KINDS = new Set([
   "new-category",
   "rename-category",
@@ -680,6 +772,84 @@ function NewsDeskTabLink({
   );
 }
 
+function NewsDeskDrawerTrigger({ controller }: { controller: NewsDeskDrawerController }) {
+  return (
+    <button
+      aria-controls={controller.drawerId}
+      aria-expanded={controller.open}
+      aria-label="Open newsroom sections navigation"
+      className="news-desk-hamburger"
+      onClick={() => controller.setOpen(!controller.open)}
+      ref={controller.triggerRef}
+      type="button"
+    >
+      <MenuIcon aria-hidden="true" className="news-desk-hamburger__icon news-desk-search-mark__icon" size={16} />
+      <span>Sections</span>
+    </button>
+  );
+}
+
+function NewsDeskDrawerPanel({
+  activeTab,
+  controller,
+  demo = false,
+}: {
+  activeTab: NewsDeskTab | null;
+  controller: NewsDeskDrawerController;
+  demo?: boolean;
+}) {
+  const closeLabel = controller.isModal ? "Close sections menu" : "Hide sections menu";
+
+  return (
+    <>
+      <button
+        aria-hidden={!controller.isModal || !controller.open}
+        className="news-desk-drawer-backdrop"
+        data-open={controller.open ? "true" : "false"}
+        data-visible={controller.isModal ? "true" : "false"}
+        onClick={controller.close}
+        tabIndex={controller.open && controller.isModal ? 0 : -1}
+        type="button"
+      />
+      <aside
+        aria-label="Newsroom sections"
+        aria-modal={controller.isModal ? true : undefined}
+        className="news-desk-drawer"
+        data-mode={controller.isDocked ? "docked" : "modal"}
+        data-open={controller.open ? "true" : "false"}
+        id={controller.drawerId}
+        role={controller.isModal ? "dialog" : "navigation"}
+      >
+        <div className="news-desk-drawer__header">
+          <p className="news-desk-drawer__title">Sections</p>
+          <button aria-label={closeLabel} className="news-desk-drawer__close" onClick={controller.close} type="button">
+            <XIcon aria-hidden="true" className="news-desk-search-mark__icon" size={16} />
+          </button>
+        </div>
+        <nav className="news-desk-drawer__nav" aria-label="Newsroom section links">
+          {NEWS_DESK_TABS.map((tab, index) => {
+            const isActive = activeTab === tab.id || (activeTab === "desks" && tab.id === "topics");
+            return (
+              <Link
+                aria-current={isActive ? "page" : undefined}
+                className="news-desk-drawer__link"
+                data-active={isActive ? "true" : "false"}
+                href={getNewsDeskTabHref(tab.href, demo)}
+                key={tab.id}
+                onClick={controller.close}
+                ref={index === 0 ? controller.firstLinkRef : undefined}
+              >
+                <span className="news-desk-drawer__link-label">{tab.label}</span>
+                <span className="news-desk-drawer__link-detail">{tab.detail}</span>
+              </Link>
+            );
+          })}
+        </nav>
+      </aside>
+    </>
+  );
+}
+
 export function NewsDeskWorkspace({
   analysisProfiles = [],
   configuredCorpora = [],
@@ -699,14 +869,17 @@ export function NewsDeskWorkspace({
   const sessionDashboard = useMemo(() => {
     if (!session?.shell.dashboard) return null;
     const fallbackSections = dashboard?.newsroomSections ?? [];
-    if (session.shell.dashboard.newsroomSections.length > 0 || fallbackSections.length === 0) {
-      return session.shell.dashboard;
-    }
+    const fallbackProposals = dashboard?.proposals ?? [];
+    const needsSectionFallback = session.shell.dashboard.newsroomSections.length === 0 && fallbackSections.length > 0;
+    const needsProposalFallback = session.shell.dashboard.proposals.length === 0 && fallbackProposals.length > 0;
+    if (!needsSectionFallback && !needsProposalFallback) return session.shell.dashboard;
     return {
       ...session.shell.dashboard,
-      newsroomSections: fallbackSections,
+      newsroomSections: needsSectionFallback ? fallbackSections : session.shell.dashboard.newsroomSections,
+      proposals: needsProposalFallback ? fallbackProposals : session.shell.dashboard.proposals,
     };
-  }, [dashboard?.newsroomSections, session?.shell.dashboard]);
+  }, [dashboard?.newsroomSections, dashboard?.proposals, session?.shell.dashboard]);
+  const showSectionTabs = initialTab === "overview" && !sectionPageId;
 
   if (dashboard?.isDemo) {
     return (
@@ -748,7 +921,7 @@ export function NewsDeskWorkspace({
   }
 
   if (dashboard?.isPublicSkeleton && session?.shell.phase !== "ready") {
-    return <NewsDeskAccessGate shell={session?.shell ?? null} />;
+    return <NewsDeskAccessGate shell={session?.shell ?? null} showSectionTabs={showSectionTabs} />;
   }
 
   if (dashboard) {
@@ -769,7 +942,7 @@ export function NewsDeskWorkspace({
     );
   }
 
-  return <NewsDeskAccessGate shell={session?.shell ?? null} />;
+  return <NewsDeskAccessGate shell={session?.shell ?? null} showSectionTabs={showSectionTabs} />;
 }
 
 function NewsDeskDashboard({
@@ -810,6 +983,7 @@ function NewsDeskDashboard({
   );
   const activeTab = initialTab;
   const isSectionPage = Boolean(sectionPageId);
+  const drawerController = useNewsDeskDrawerController();
   const [corpora, setCorpora] = useState(dashboard.corpora);
   const [importRuns, setImportRuns] = useState(dashboard.importRuns);
   const [categorySets, setCategorySets] = useState(dashboard.categorySets);
@@ -1034,7 +1208,9 @@ function NewsDeskDashboard({
   }, [dashboard.lexicalSteeringRules]);
 
   useEffect(() => {
-    setProposals(dashboard.proposals);
+    setProposals((current) => (
+      dashboard.proposals.length === 0 && current.length > 0 ? current : dashboard.proposals
+    ));
   }, [dashboard.proposals]);
 
   useEffect(() => {
@@ -3020,6 +3196,8 @@ function NewsDeskDashboard({
       data-category-steering
       data-category-steering-demo={dashboard.isDemo ? "true" : "false"}
       data-news-desk-refreshing={isRefreshing ? "true" : "false"}
+      data-news-desk-drawer-docked={drawerController.isDocked ? "true" : "false"}
+      data-news-desk-drawer-open={drawerController.open ? "true" : "false"}
       data-rhythm-overlay={showRhythmOverlay ? "true" : "false"}
     >
       <NewsroomProgressBackLink
@@ -3039,13 +3217,14 @@ function NewsDeskDashboard({
 	            {isSectionPage ? mastheadTitle : <Link href={getNewsDeskTabHref("/newsroom", dashboard.isDemo)}>NEWSROOM</Link>}
 	          </h1>
 		          <div className="masthead__meta" aria-label="Newsroom edition status">
-	            <span>{isSectionPage ? "Section" : "Knowledge Curation"}</span>
+	            <span><NewsDeskDrawerTrigger controller={drawerController} /></span>
 	            <span aria-hidden="true" className="masthead__meta-placeholder">&nbsp;</span>
 	            <span>{dashboard.isDemo ? "Demo Desk" : <Link className="news-desk-auth-control-link" href="/settings">Settings</Link>}</span>
 	          </div>
 	        </header>
+        <NewsDeskDrawerPanel activeTab={activeTab} controller={drawerController} demo={dashboard.isDemo} />
 
-        {!isSectionPage ? (
+        {!isSectionPage && activeTab === "overview" ? (
           <nav className="news-desk-tabs" aria-label="Newsroom sections">
             {NEWS_DESK_TABS.map((tab) => (
               <NewsDeskTabLink
@@ -6088,10 +6267,12 @@ function TopicsDeskView({
   }, [selectedCategorys]);
   const referenceByAnyId = useMemo(() => buildReferenceLookupByAnyId(references), [references]);
   const categoryQueueProposals = useMemo(() => {
-    return proposals.filter((proposal) => (
+    const scoped = proposals.filter((proposal) => (
       proposal.steeringDomain === "category"
       && (!selectedCategorySet || proposal.categorySetId === selectedCategorySet.id)
     ));
+    if (scoped.length > 0 || !selectedCategorySet) return scoped;
+    return proposals.filter((proposal) => proposal.steeringDomain === "category");
   }, [proposals, selectedCategorySet]);
   const roots = buildCanonicalTopicRoots(selectedCategorys, selectedCategoryNodes, proposals);
   const subcategoryCount = roots.reduce((count, root) => count + root.subcategorys.length, 0);
@@ -15529,12 +15710,22 @@ function NewsroomProgressBackLink({
   );
 }
 
-function NewsDeskAccessGate({ shell }: { shell: NewsDeskShellState | null }) {
+function NewsDeskAccessGate({ shell, showSectionTabs = false }: { shell: NewsDeskShellState | null; showSectionTabs?: boolean }) {
+  const pathname = usePathname();
   const showRhythmOverlay = useNewsroomRhythmOverlay();
+  const resolvedTheme = useResolvedPapyrusTheme();
+  const drawerController = useNewsDeskDrawerController();
+  const activeTab = inferNewsDeskTabFromPathname(pathname);
   const accessPhase = shell?.phase ?? "checkingAccess";
 
   return (
-    <main className="site-shell news-desk-shell" data-news-desk-access={accessPhase} data-rhythm-overlay={showRhythmOverlay ? "true" : "false"}>
+    <main
+      className="site-shell news-desk-shell"
+      data-news-desk-access={accessPhase}
+      data-news-desk-drawer-docked={drawerController.isDocked ? "true" : "false"}
+      data-news-desk-drawer-open={drawerController.open ? "true" : "false"}
+      data-rhythm-overlay={showRhythmOverlay ? "true" : "false"}
+    >
       <NewsroomProgressBackLink />
       <section className="scroll-edition news-desk-edition">
         <div className="paper-page paper-page--front paper-page--active">
@@ -15545,23 +15736,26 @@ function NewsDeskAccessGate({ shell }: { shell: NewsDeskShellState | null }) {
 	                <span>NEWSROOM</span>
 	              </h1>
 		            <div className="masthead__meta" aria-label="Newsroom edition status">
-	              <span>Knowledge Curation</span>
+	              <span><NewsDeskDrawerTrigger controller={drawerController} /></span>
 	              <span aria-hidden="true" className="masthead__meta-placeholder">&nbsp;</span>
 	              <span><Link className="news-desk-auth-control-link" href="/settings">Settings</Link></span>
 	            </div>
 	            </header>
-            <nav className="news-desk-tabs" aria-label="Newsroom sections">
-              {NEWS_DESK_TABS.map((tab) => (
-                <NewsDeskTabLink
-                  key={tab.id}
-                  active={false}
-                  count={0}
-                  countSlot={tab.id !== "administration"}
-                  countVisible={false}
-                  tab={tab}
-                />
-              ))}
-            </nav>
+            <NewsDeskDrawerPanel activeTab={activeTab} controller={drawerController} />
+            {showSectionTabs ? (
+              <nav className="news-desk-tabs" aria-label="Newsroom sections">
+                {NEWS_DESK_TABS.map((tab) => (
+                  <NewsDeskTabLink
+                    key={tab.id}
+                    active={false}
+                    count={0}
+                    countSlot={tab.id !== "administration"}
+                    countVisible={false}
+                    tab={tab}
+                  />
+                ))}
+              </nav>
+            ) : null}
             <section className="news-desk-access-panel" aria-live="polite" data-news-desk-access-phase={accessPhase}>
               <div className="news-desk-access-panel__copy" key={`copy-${accessPhase}`}>
                 <p className="story-label">Access</p>

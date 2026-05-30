@@ -326,6 +326,11 @@ The cycle does not sync S3. If local corpus files or Biblicus artifacts changed,
 sync the configured corpus working copy to its private S3 prefix first, with
 `aws s3 sync --dryrun` reviewed before the real sync.
 
+`analysis run-now` and `analysis execute-assignment` pull from S3 automatically
+when the local catalog is missing or stale (`corpora sync-from-cloud`
+semantics). Pass `--skip-sync-from-cloud` to skip or `--sync-from-cloud` to
+force a pull before Biblicus runs.
+
 The cycle uses the steering config to discover the canonical corpus and source
 corpora. It stores output under `.papyrus-runs/<timestamp>/`, including
 accepted category JSON, accepted category-tree JSON, steering feedback, lexical

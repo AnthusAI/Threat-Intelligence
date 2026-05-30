@@ -25,6 +25,7 @@ from .analysis_profiles import (
     parse_analysis_overrides,
     print_analysis_reindex_plan,
 )
+from .corpora import maybe_sync_corpus_from_cloud_before_analysis
 from .env import PAPYRUS_ROOT
 from .graphql_authoring import create_authoring_client
 from .ids import hash_short, knowledge_corpus_id, safe_id
@@ -279,6 +280,13 @@ def analysis_run_now(flags: list[str]) -> None:
     plan = _build_analysis_reindex_plan_from_options(options, flags)
     if _is_entity_graph_profile(plan):
         _assert_entity_graph_run_ready(plan)
+    steering_config = require_steering_config(options.get("config") or plan.get("steeringConfigPath"))
+    maybe_sync_corpus_from_cloud_before_analysis(
+        steering_config=steering_config,
+        corpus_key=str(plan["corpus"]["key"]),
+        options=options,
+        log_prefix="analysis-run-now",
+    )
     client, auth = create_authoring_client()
     category_sets = client.list_records("CategorySet")
     newsroom_sections = client.safe_list_records("NewsroomSection")

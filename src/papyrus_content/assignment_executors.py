@@ -13,7 +13,10 @@ from typing import Any
 
 from .accession import execute_reference_accession_assignment
 from .assignments import assignment_metadata
+from .corpora import maybe_sync_corpus_from_cloud_before_analysis
 from .env import PAPYRUS_ROOT
+from .options import normalize_string
+from .steering import require_steering_config
 from .graphql_authoring import PapyrusGraphQLAuthoringClient
 from .ids import hash_short
 from .model_attachments import build_json_model_payload_attachment, upload_attachment_body
@@ -52,6 +55,17 @@ def execute_analysis_reindex_assignment(
     options: dict[str, Any],
 ) -> dict[str, Any]:
     metadata = assignment_metadata(client, assignment)
+    corpus_key = normalize_string(metadata.get("corpusKey"))
+    if corpus_key:
+        steering_config = require_steering_config(
+            normalize_string(options.get("config")) or normalize_string(metadata.get("steeringConfigPath"))
+        )
+        maybe_sync_corpus_from_cloud_before_analysis(
+            steering_config=steering_config,
+            corpus_key=corpus_key,
+            options=options,
+            log_prefix="analysis-execute",
+        )
     command_plan = metadata.get("commandPlan") if isinstance(metadata.get("commandPlan"), list) else []
     if not command_plan and isinstance(options.get("__commandPlan"), list):
         command_plan = options.get("__commandPlan") or []

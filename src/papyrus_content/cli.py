@@ -92,6 +92,10 @@ from .categories_commands import (
 from .content_commands import content_inspect, content_list, content_schema_check
 from .dev_tests import run_category_mapper_tests, run_identifier_backfill_tests
 from .messages_commands import messages_export_legacy_comments, messages_import_legacy_comments
+from .model_defaults import (
+    DEFAULT_REFERENCE_FILTER_MODEL,
+    DEFAULT_REFERENCE_SUMMARY_MODEL,
+)
 from .relations_commands import relations_backfill, relations_import_types
 from .references_commands import (
     references_attach_extracted_text,
@@ -1079,6 +1083,172 @@ def print_reference_registration_summary(plan: dict[str, Any], changes: list[dic
     print(f"references\tcreate-from-catalog\tapply\t{'yes' if apply else 'no'}")
 
 
+def sync_reference_vectors_after_registration(result: dict[str, Any], options: dict[str, Any]) -> dict[str, Any]:
+    if parse_boolean_option(options.get("vector-sync"), True, "--vector-sync") is False:
+        return {"lines": ["references\tvector-sync\tdisabled"]}
+    reference_ids = sorted(
+        {
+            change["expected"].get("lineageId") or change["expected"].get("id")
+            for change in result["changes"]
+            if change.get("modelName") == "Reference" and change.get("action") in {"create", "update"}
+        }
+    )
+    if not reference_ids:
+        return {"lines": ["references\tvector-sync\tskipped\tno GraphQL Reference changes"]}
+    lines = []
+    for index in range(0, len(reference_ids), 100):
+        batch = reference_ids[index : index + 100]
+        args = [
+            "run",
+            "papyrus",
+            "knowledge-vector-index",
+            "--action",
+            "sync",
+            "--force",
+            "--progress-every",
+            "0",
+            *sum([["--reference-id", reference_id] for reference_id in batch], []),
+        ]
+        completed = subprocess.run(["poetry", *args], cwd=PAPYRUS_ROOT, capture_output=True, text=True, check=False)
+        if completed.returncode != 0:
+            message = completed.stderr.strip() or completed.stdout.strip() or "vector sync failed"
+            lines.append(f"references\tvector-sync\tfailed\t{len(batch)}\t{message}")
+            raise RuntimeError(f"Reference registration updated GraphQL state but vector sync failed: {message}")
+        lines.append(f"references\tvector-sync\tsynced\t{len(batch)}")
+    return {"lines": lines}
+
+
+def fetch_reference_url_text_after_registration(
+    client,
+    result: dict[str, Any],
+    options: dict[str, Any],
+) -> dict[str, Any]:
+    if parse_boolean_option(options.get("url-text"), True, "--url-text") is False:
+        return {"lines": ["references\tprocess-fetch-url-text\tdisabled"]}
+    reference_ids = sorted(
+        {
+            change["expected"].get("id")
+            for change in result["changes"]
+            if change.get("modelName") == "Reference" and change.get("action") in {"create", "update"}
+        }
+    )
+    if not reference_ids:
+        return {"lines": ["references\tprocess-fetch-url-text\tskipped\tno GraphQL Reference changes"]}
+    references = client.list_records("Reference")
+    attachments = client.list_records("ReferenceAttachment")
+    semantic_relations = client.list_records("SemanticRelation")
+    corpus_config = result.get("corpusConfig") or {}
+    corpus_id = result.get("plan", {}).get("corpusId")
+    max_count = normalize_non_negative_integer(options.get("url-text-max-count"), "--url-text-max-count")
+    force = parse_boolean_option(options.get("url-text-force"), False, "--url-text-force")
+    model = normalize_string(options.get("url-text-model")) or DEFAULT_REFERENCE_FILTER_MODEL
+    extraction = run_reference_url_text_extraction(
+        client=client,
+        references=references,
+        attachments=attachments,
+        semantic_relations=semantic_relations,
+        corpus_key_by_id={str(corpus_id or ""): str(corpus_config.get("key") or "")},
+        corpus_id=str(corpus_id or "") or None,
+        reference_ids=set(reference_ids),
+        curation_status="all",
+        max_count=max_count,
+        force=force,
+        apply=True,
+        bucket=normalize_string(options.get("bucket")),
+        model=model,
+    )
+    update_newsroom_summary_after_extracted_text_attachments(
+        client,
+        extraction["changes"],
+        actor_label=str(options.get("actor") or "Papyrus content CLI"),
+        reason=f"references create-from-catalog process-fetch-url-text {corpus_id or '-'}",
+    )
+    lines = [
+        f"references\tprocess-fetch-url-text\teligible\t{extraction['eligibleCount']}",
+        f"references\tprocess-fetch-url-text\tskipped-existing\t{extraction['skippedExistingCount']}",
+        f"references\tprocess-fetch-url-text\tplanned\t{extraction['plannedCount']}",
+        f"references\tprocess-fetch-url-text\tplanned-attachments\t{extraction.get('plannedAttachmentCount', 0)}",
+        f"references\tprocess-fetch-url-text\tplanned-reference-metadata\t{extraction.get('plannedReferenceMetadataCount', 0)}",
+        f"references\tprocess-fetch-url-text\tfiltered\t{extraction.get('filteredCount', 0)}",
+        f"references\tprocess-fetch-url-text\tfallback-raw\t{extraction.get('fallbackRawCount', 0)}",
+        f"references\tprocess-fetch-url-text\tchanges\t{extraction['changeCount']}",
+        f"references\tprocess-fetch-url-text\treference-metadata-changes\t{extraction.get('referenceMetadataChangeCount', 0)}",
+        f"references\tprocess-fetch-url-text\tattachment-changes\t{extraction.get('attachmentChangeCount', 0)}",
+        f"references\tprocess-fetch-url-text\tfailures\t{len(extraction['failures'])}",
+        f"references\tprocess-fetch-url-text\tmodel\t{model}",
+    ]
+    if max_count:
+        lines.append(f"references\tprocess-fetch-url-text\tmax-count\t{max_count}")
+    for failure in extraction["failures"][:10]:
+        lines.append(
+            f"reference-url-text\tfailed\t{failure.get('referenceId') or '-'}\t"
+            f"{failure.get('sourceUri') or '-'}\t{failure.get('error') or 'unknown error'}"
+        )
+    for fallback in (extraction.get("filterFallbacks") or [])[:10]:
+        lines.append(
+            f"reference-url-text\tfilter-fallback\t{fallback.get('referenceId') or '-'}\t"
+            f"{fallback.get('sourceUri') or '-'}\t"
+            f"{json.dumps(fallback.get('reason') or {}, sort_keys=True)}"
+        )
+    if len(extraction["failures"]) > 10:
+        lines.append(f"references\tprocess-fetch-url-text\tomitted-failures\t{len(extraction['failures']) - 10}")
+    return {"lines": lines}
+
+
+def generate_reference_metadata_after_registration(
+    client,
+    result: dict[str, Any],
+    options: dict[str, Any],
+) -> dict[str, Any]:
+    if parse_boolean_option(options.get("metadata-from-text"), True, "--metadata-from-text") is False:
+        return {"lines": ["references\tprocess-generate-metadata\tdisabled"]}
+    reference_ids = sorted(
+        {
+            change["expected"].get("id")
+            for change in result["changes"]
+            if change.get("modelName") == "Reference" and change.get("action") in {"create", "update"}
+        }
+    )
+    if not reference_ids:
+        return {"lines": ["references\tprocess-generate-metadata\tskipped\tno GraphQL Reference changes"]}
+    references = client.list_records("Reference")
+    attachments = client.list_records("ReferenceAttachment")
+    corpus_id = result.get("plan", {}).get("corpusId")
+    max_count = normalize_non_negative_integer(options.get("metadata-max-count"), "--metadata-max-count")
+    generation = run_reference_metadata_generation_from_extracted_text(
+        references=references,
+        attachments=attachments,
+        corpus_id=str(corpus_id or "") or None,
+        reference_ids=set(reference_ids),
+        curation_status="all",
+        max_count=max_count,
+        model=normalize_string(options.get("metadata-model")) or DEFAULT_REFERENCE_SUMMARY_MODEL,
+        apply=True,
+        bucket=normalize_string(options.get("bucket")),
+    )
+    lines = [
+        f"references\tprocess-generate-metadata\tattempted\t{generation['attemptedCount']}",
+        f"references\tprocess-generate-metadata\tgenerated\t{generation['generatedCount']}",
+        f"references\tprocess-generate-metadata\tskipped-missing-text\t{generation['skippedMissingTextCount']}",
+        f"references\tprocess-generate-metadata\tgeneration-failures\t{generation['generationFailureCount']}",
+    ]
+    if max_count:
+        lines.append(f"references\tprocess-generate-metadata\tmax-count\t{max_count}")
+    failure_rows = [
+        item for item in generation.get("items") or []
+        if str(item.get("status") or "") not in {"generated", "skipped_missing_text"}
+    ]
+    for failure in failure_rows[:10]:
+        reference = failure.get("reference") if isinstance(failure.get("reference"), dict) else {}
+        lines.append(
+            f"reference-metadata\tfailed\t{reference.get('id') or '-'}\t"
+            f"{reference.get('externalItemId') or '-'}\t{failure.get('error') or 'generation failed'}"
+        )
+    if len(failure_rows) > 10:
+        lines.append(f"references\tprocess-generate-metadata\tomitted-failures\t{len(failure_rows) - 10}")
+    return {"lines": lines}
+
+
 def maybe_enrich_reference_catalog_title_subtitle(
     catalog: dict[str, Any],
     options: dict[str, Any],
@@ -1182,7 +1352,8 @@ def print_usage() -> None:
     print("Python-native: content inspect, content schema-check, content list articles,")
     print("  corpora status/worker-bootstrap/sync-*, references create/process/curate/export commands,")
     print("  assignments list, analysis profiles/validate-profiles/reindex-plan/preview-reindex/")
-    print("  create-reindex-assignment/run-now/execute-assignment/entity-graph-preflight/graph-artifacts/publish-graph-snapshot/import-graph-artifact/doctor-entity-graph,")
+    print("  create-reindex-assignment/run-now/execute-assignment (auto sync-from-cloud when local catalog is stale;")
+    print("  --skip-sync-from-cloud/--sync-from-cloud)/entity-graph-preflight/graph-artifacts/publish-graph-snapshot/import-graph-artifact/doctor-entity-graph,")
     print("  newsroom recount-summary/repair-message-status/prune-attachments/backfill-feed-fields/")
     print("  backfill-operational-indexes/import-sections,")
     print("  relations import-types/backfill, ontology preflight/rank/status/explain/profile/associate/dedupe/recompute-authority/doctor,")

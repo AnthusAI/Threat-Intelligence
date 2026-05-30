@@ -20,6 +20,10 @@ from .assignments import apply_assignment_action
 from .env import PAPYRUS_ROOT
 from .graphql_authoring import create_authoring_client
 from .ids import hash_short, knowledge_corpus_id
+from .model_defaults import (
+    DEFAULT_REFERENCE_FILTER_MODEL,
+    DEFAULT_REFERENCE_SUMMARY_MODEL,
+)
 from .newsroom_summary import (
     semantic_relation_count_delta,
     update_newsroom_summary_after_assignment_creates,
@@ -381,7 +385,7 @@ def references_curate_recent(flags: list[str]) -> None:
         "--corpus-key",
         options["corpus-key"],
         "--model",
-        normalize_string(options.get("model")) or "gpt-5.4-mini",
+        normalize_string(options.get("model")) or DEFAULT_REFERENCE_FILTER_MODEL,
         "--summary-max-tokens",
         str(normalize_non_negative_integer(options.get("summary-max-tokens"), "--summary-max-tokens") or 500),
         "--max-count",
@@ -736,7 +740,7 @@ def references_fetch_url_text(flags: list[str]) -> None:
     force = parse_boolean_option(options.get("force"), False, "--force")
     apply = resolve_mutation_apply(options, "references process-fetch-url-text")
     bucket = normalize_string(options.get("bucket"))
-    model = normalize_string(options.get("model")) or "gpt-5.4-nano"
+    model = normalize_string(options.get("model")) or DEFAULT_REFERENCE_FILTER_MODEL
     pdf_only = parse_boolean_option(options.get("pdf-only"), False, "--pdf-only")
     grobid_url = _resolve_grobid_url(options)
     try:
@@ -1151,9 +1155,9 @@ def references_filter_extracted_text(flags: list[str]) -> None:
     force = parse_boolean_option(options.get("force"), True, "--force")
     apply = resolve_mutation_apply(options, "references process-filter-text")
     bucket = normalize_string(options.get("bucket"))
-    model = normalize_string(options.get("model")) or "gpt-5.4-nano"
+    model = normalize_string(options.get("model")) or DEFAULT_REFERENCE_FILTER_MODEL
     metadata_from_text = parse_boolean_option(options.get("metadata-from-text"), True, "--metadata-from-text")
-    metadata_model = normalize_string(options.get("metadata-model")) or "gpt-5.4-nano"
+    metadata_model = normalize_string(options.get("metadata-model")) or DEFAULT_REFERENCE_SUMMARY_MODEL
 
     client, _ = create_authoring_client()
     references = client.list_records("Reference")
@@ -1283,7 +1287,7 @@ def references_generate_metadata_from_text(flags: list[str]) -> None:
     curation_status = _normalize_reference_status_filter(options.get("status"))
     max_count = normalize_positive_integer(options.get("max-count"), "--max-count")
     apply = resolve_mutation_apply(options, "references process-generate-metadata")
-    model = normalize_string(options.get("model")) or "gpt-5.4-nano"
+    model = normalize_string(options.get("model")) or DEFAULT_REFERENCE_SUMMARY_MODEL
     bucket = normalize_string(options.get("bucket"))
 
     client, _ = create_authoring_client()

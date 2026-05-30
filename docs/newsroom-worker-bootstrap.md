@@ -65,6 +65,13 @@ reference state agree, and accepted references have extracted text attachments.
 Only after this should the worker claim or execute `analysis.reindex`
 assignments.
 
+`analysis run-now` and `analysis execute-assignment` also pull from S3
+automatically when the local `metadata/catalog.json` is missing or does not
+match the configured `s3Prefix` catalog. That step uses the same semantics as
+`corpora sync-from-cloud` (no `--delete`, `analysis/` excluded unless
+`--include-analysis` is passed). Use `--skip-sync-from-cloud` to disable the
+pull or `--sync-from-cloud` to force it even when catalogs already match.
+
 ## Uploading New Local Corpus Material
 
 When new source material is added locally, push the corpus accession to S3

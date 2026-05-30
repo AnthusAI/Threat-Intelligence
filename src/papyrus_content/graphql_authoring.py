@@ -20,6 +20,10 @@ CATEGORY_FIELDS = (
     "displayName shortTitle subtitle description aliases status seedItemIds holdoutItemIds rank depth "
     "isPinned importRunId updatedAt"
 )
+CATEGORY_KEYWORD_FIELDS = (
+    "id categorySetId corpusId categoryKey categoryLineageId categoryId keyword normalizedKeyword weight rank "
+    "source sourceTopicId importRunId metadata createdAt updatedAt"
+)
 PROPOSAL_FIELDS = (
     "id categorySetId corpusId importRunId proposalKind steeringDomain status title summary categoryKey "
     "targetCategoryKey graphEntityId relationshipType displayName shortTitle subtitle description "
@@ -149,6 +153,7 @@ LIST_DEFINITIONS: dict[str, dict[str, str]] = {
     "AssignmentEvent": {"field": "listAssignmentEvents", "fields": ASSIGNMENT_EVENT_FIELDS},
     "CategorySet": {"field": "listCategorySets", "fields": CATEGORY_SET_FIELDS},
     "Category": {"field": "listCategories", "fields": CATEGORY_FIELDS},
+    "CategoryKeyword": {"field": "listCategoryKeywords", "fields": CATEGORY_KEYWORD_FIELDS},
     "SteeringProposal": {"field": "listSteeringProposals", "fields": PROPOSAL_FIELDS},
     "SteeringDecision": {"field": "listSteeringDecisions", "fields": DECISION_FIELDS},
     "SemanticRelationType": {"field": "listSemanticRelationTypes", "fields": SEMANTIC_RELATION_TYPE_FIELDS},

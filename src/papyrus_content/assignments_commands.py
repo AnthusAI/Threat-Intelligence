@@ -109,7 +109,7 @@ def assignments_intake_proposals(flags: list[str]) -> None:
 
 def assignments_research_intake_now(flags: list[str]) -> None:
     options = parse_options(flags)
-    apply = resolve_mutation_apply(options, "assignments process-research-now")
+    resolve_mutation_apply(options, "assignments process-research-now")
     if not options.get("assignment"):
         raise ValueError("assignments process-research-now requires --assignment <id>.")
     if not options.get("config"):
@@ -128,12 +128,9 @@ def assignments_research_intake_now(flags: list[str]) -> None:
         research_flags.extend(["--run-id", f"{options['run-id']}-research"])
     run_research_assignment(research_flags)
     client, _ = create_authoring_client()
-    apply_options = dict(options)
-    apply_options["apply"] = apply
-    apply_result = apply_research_packet(client, apply_options) if apply else None
     intake_result = intake_research_packet_proposals(client, options)
     if options.get("json"):
-        print(json.dumps({"ok": True, "applyResult": apply_result, **intake_result}, indent=2))
+        print(json.dumps({"ok": True, **intake_result}, indent=2))
         return
     print(f"assignments\tprocess-research-now\tassignment\t{intake_result['assignmentId']}")
     print(f"assignments\tprocess-research-now\tregistered\t{intake_result.get('registeredReferenceCount')}")
