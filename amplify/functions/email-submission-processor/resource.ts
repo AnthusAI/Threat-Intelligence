@@ -54,5 +54,5 @@ export const emailSubmissionProcessor = defineFunction(
       }),
     });
   },
-  { resourceGroupName: "data" },
+  { resourceGroupName: "storage" },
 );

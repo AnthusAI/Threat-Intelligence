@@ -33,12 +33,15 @@ const knowledgeVectorIndexName = "papyrus-knowledge";
 const knowledgeVectorDimension = 1536;
 const knowledgeEmbeddingModel = "text-embedding-3-small";
 
+const enableInboundEmail = !["0", "false", "no", "off"].includes(
+  (process.env.PAPYRUS_ENABLE_INBOUND_EMAIL ?? "true").trim().toLowerCase(),
+);
+
 const backend = defineBackend({
   assignmentAction,
   auth,
   categoryAction,
   data,
-  emailSubmissionProcessor,
   graphqlJwtAuthorizer,
   knowledgeQuery,
   manageUserRole,
@@ -46,17 +49,14 @@ const backend = defineBackend({
   newsroomSummary,
   procedureAction,
   readerSettings,
-  sesInboundReceive,
   storage,
+  ...(enableInboundEmail ? { emailSubmissionProcessor, sesInboundReceive } : {}),
 });
 
 const amplifyBackendDir = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(amplifyBackendDir, "..");
 const enableConsoleResponder = !["0", "false", "no", "off"].includes(
   (process.env.PAPYRUS_ENABLE_CONSOLE_RESPONDER ?? "true").trim().toLowerCase(),
-);
-const enableInboundEmail = !["0", "false", "no", "off"].includes(
-  (process.env.PAPYRUS_ENABLE_INBOUND_EMAIL ?? "true").trim().toLowerCase(),
 );
 const inboundEmailDomain = (process.env.PAPYRUS_INBOUND_EMAIL_DOMAIN ?? "p.apyr.us").trim().toLowerCase();
 const inboundEmailLocalParts = (process.env.PAPYRUS_INBOUND_EMAIL_LOCAL_PARTS ?? "submissions,suggestions")
@@ -186,8 +186,8 @@ if (enableInboundEmail) {
     }),
   );
 
-  const dataStack = Stack.of(receiveLambda);
-  new events.Rule(dataStack, "PapyrusInboundEmailObjectCreated", {
+  const storageStack = Stack.of(storageBucket);
+  new events.Rule(storageStack, "PapyrusInboundEmailObjectCreated", {
     description: "Process inbound SES MIME objects stored under inbound-email/",
     eventPattern: {
       source: ["aws.s3"],
@@ -200,7 +200,6 @@ if (enableInboundEmail) {
     targets: [new eventTargets.LambdaFunction(receiveLambda)],
   });
 
-  const storageStack = Stack.of(storageBucket);
   const inboundRuleSet = new ses.ReceiptRuleSet(storageStack, "PapyrusInboundEmailRuleSet", {
     receiptRuleSetName: `papyrus-inbound-${inboundEmailDomain.replace(/\./g, "-")}`,
   });
