@@ -4,7 +4,8 @@ import * as backup from "aws-cdk-lib/aws-backup";
 import { AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId } from "aws-cdk-lib/custom-resources";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as events from "aws-cdk-lib/aws-events";
-import { PolicyStatement, ServicePrincipal } from "aws-cdk-lib/aws-iam";
+import * as eventTargets from "aws-cdk-lib/aws-events-targets";
+import { PolicyStatement } from "aws-cdk-lib/aws-iam";
 import { Function as LambdaFunction } from "aws-cdk-lib/aws-lambda";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import { CfnIndex, CfnVectorBucket, CfnVectorBucketPolicy } from "aws-cdk-lib/aws-s3vectors";
@@ -185,11 +186,18 @@ if (enableInboundEmail) {
     }),
   );
 
-  processorLambda.grantInvoke(receiveLambda);
-  receiveLambda.addPermission("AllowSesInvoke", {
-    principal: new ServicePrincipal("ses.amazonaws.com"),
-    action: "lambda:InvokeFunction",
-    sourceAccount: backend.stack.account,
+  const dataStack = Stack.of(receiveLambda);
+  new events.Rule(dataStack, "PapyrusInboundEmailObjectCreated", {
+    description: "Process inbound SES MIME objects stored under inbound-email/",
+    eventPattern: {
+      source: ["aws.s3"],
+      detailType: ["Object Created"],
+      detail: {
+        bucket: { name: [storageBucket.bucketName] },
+        object: { key: [{ prefix: "inbound-email/" }] },
+      },
+    },
+    targets: [new eventTargets.LambdaFunction(receiveLambda)],
   });
 
   const storageStack = Stack.of(storageBucket);
@@ -205,10 +213,6 @@ if (enableInboundEmail) {
       new sesActions.S3({
         bucket: storageBucket,
         objectKeyPrefix: "inbound-email/",
-      }),
-      new sesActions.Lambda({
-        function: receiveLambda,
-        invocationType: sesActions.LambdaInvocationType.EVENT,
       }),
     ],
   });

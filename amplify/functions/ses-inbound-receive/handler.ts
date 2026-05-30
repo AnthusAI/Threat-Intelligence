@@ -8,7 +8,9 @@ import type { Schema } from "../../data/resource";
 import {
   buildEmailSubmissionMessageInput,
   extractDirectCitations,
+  extractRecipientsFromRawMime,
   extractRecipientsFromSesMail,
+  extractSenderFromRawMime,
   extractSenderFromSesMail,
   looksLikeResearchAssignmentRequest,
   lookupRegisteredUserProfileId,
@@ -18,10 +20,6 @@ import {
 
 type DataClient = ReturnType<typeof generateClient<Schema>>;
 type DataClientErrors = Array<{ message?: string | null } | string | null> | null | undefined;
-type DataClientResult<T = unknown> = {
-  data?: T | null;
-  errors?: DataClientErrors;
-};
 
 const LAMBDA_DATA_AUTH_MODE = "iam";
 const PROCESSOR_FUNCTION_NAME = process.env.PAPYRUS_EMAIL_SUBMISSION_PROCESSOR_FUNCTION_NAME ?? "";
@@ -32,45 +30,29 @@ let clientPromise: Promise<DataClient> | null = null;
 const s3Client = new S3Client({});
 const lambdaClient = new LambdaClient({});
 
-export const handler = async (event: Record<string, unknown>) => {
-  const record = Array.isArray(event.Records) ? event.Records[0] : null;
-  const ses = record && typeof record === "object" ? (record as { ses?: Record<string, unknown> }).ses : null;
-  const mail = ses && typeof ses.mail === "object" ? (ses.mail as Record<string, unknown>) : null;
-  if (!mail) throw new Error("SES event did not include mail metadata.");
+type InboundPayload = {
+  senderEmail: string;
+  recipients: string[];
+  subject: string;
+  bodyText: string;
+  s3Bucket: string | null;
+  s3Key: string | null;
+  sesMessageId: string | null;
+};
 
-  const senderEmail = extractSenderFromSesMail(mail);
-  const recipients = extractRecipientsFromSesMail(mail);
-  const recipientEmail = recipients.find((entry) => isConfiguredInboundAddress(entry)) ?? recipients[0] ?? "";
+export const handler = async (event: Record<string, unknown>) => {
+  const inbound = await resolveInboundPayload(event);
+  const recipientEmail = inbound.recipients.find((entry) => isConfiguredInboundAddress(entry)) ?? inbound.recipients[0] ?? "";
   if (!isConfiguredInboundAddress(recipientEmail)) {
     throw new Error(`Inbound email recipient ${recipientEmail || "(missing)"} is not configured for this environment.`);
-  }
-
-  const receipt = ses && typeof ses.receipt === "object" ? (ses.receipt as Record<string, unknown>) : {};
-  const action = receipt.action && typeof receipt.action === "object" ? (receipt.action as Record<string, unknown>) : {};
-  const s3Bucket = normalizeOptionalString(action.bucketName);
-  const s3Key = normalizeOptionalString(action.objectKey);
-  const sesMessageId = normalizeOptionalString(mail.messageId);
-
-  const headers = mail.commonHeaders && typeof mail.commonHeaders === "object"
-    ? (mail.commonHeaders as Record<string, unknown>)
-    : {};
-  const subject = normalizeOptionalString(
-    Array.isArray(headers.subject) ? headers.subject[0] : headers.subject,
-  ) ?? "(no subject)";
-
-  let bodyText = "";
-  if (s3Bucket && s3Key) {
-    const rawObject = await s3Client.send(new GetObjectCommand({ Bucket: s3Bucket, Key: s3Key }));
-    const rawBytes = await streamToBuffer(rawObject.Body);
-    bodyText = parseInboundEmailBody(rawBytes).text;
   }
 
   const client = await getDataClient();
   const now = new Date().toISOString();
   const messageId = `message-email-submission-${randomUUID().replace(/-/g, "").slice(0, 20)}`;
-  const profileId = await lookupRegisteredUserProfileId(client, senderEmail);
+  const profileId = await lookupRegisteredUserProfileId(client, inbound.senderEmail);
   const authorized = Boolean(profileId);
-  const citations = authorized ? extractDirectCitations(bodyText) : [];
+  const citations = authorized ? extractDirectCitations(inbound.bodyText) : [];
 
   let status = authorized ? "received" : "rejected";
   let responseStatus = authorized ? "PENDING" : "REJECTED";
@@ -78,7 +60,7 @@ export const handler = async (event: Record<string, unknown>) => {
     ? null
     : "Sender email is not registered to an active Papyrus user.";
 
-  if (authorized && looksLikeResearchAssignmentRequest(bodyText, citations.length)) {
+  if (authorized && looksLikeResearchAssignmentRequest(inbound.bodyText, citations.length)) {
     status = "rejected";
     responseStatus = "REJECTED";
     responseError = "Submission looks like a research assignment request. Send direct citations (URLs or DOIs), not open-ended research tasks.";
@@ -91,16 +73,16 @@ export const handler = async (event: Record<string, unknown>) => {
   const messageInput = buildEmailSubmissionMessageInput({
     id: messageId,
     now,
-    subject,
-    bodyText,
-    senderEmail,
+    subject: inbound.subject,
+    bodyText: inbound.bodyText,
+    senderEmail: inbound.senderEmail,
     recipientEmail,
-    sesMessageId,
-    s3Bucket,
-    s3Key,
+    sesMessageId: inbound.sesMessageId,
+    s3Bucket: inbound.s3Bucket,
+    s3Key: inbound.s3Key,
     authorized,
     authorUserProfileId: profileId,
-    authorLabel: senderEmail || "unknown-sender",
+    authorLabel: inbound.senderEmail || "unknown-sender",
     citations,
     status,
     responseStatus,
@@ -129,9 +111,109 @@ export const handler = async (event: Record<string, unknown>) => {
     responseStatus,
     directCitationCount: citations.length,
     recipientEmail,
-    senderEmail,
+    senderEmail: inbound.senderEmail,
   };
 };
+
+async function resolveInboundPayload(event: Record<string, unknown>): Promise<InboundPayload> {
+  if (event.source === "aws.s3" && event.detail && typeof event.detail === "object") {
+    return resolveFromS3ObjectCreated(event.detail as Record<string, unknown>);
+  }
+
+  const record = Array.isArray(event.Records) ? event.Records[0] : null;
+  if (record && typeof record === "object") {
+    const s3Record = record as { s3?: { bucket?: { name?: string }; object?: { key?: string } }; ses?: { mail?: Record<string, unknown>; receipt?: Record<string, unknown> } };
+    if (s3Record.s3) {
+      const bucket = normalizeOptionalString(s3Record.s3.bucket?.name);
+      const key = normalizeOptionalString(s3Record.s3.object?.key);
+      if (bucket && key) {
+        return loadInboundFromS3Object(bucket, key, null);
+      }
+    }
+
+    const mail = s3Record.ses?.mail;
+    if (mail && typeof mail === "object") {
+      return resolveFromSesMail(mail, s3Record.ses?.receipt);
+    }
+  }
+
+  throw new Error("Unsupported inbound email event payload.");
+}
+
+async function resolveFromS3ObjectCreated(detail: Record<string, unknown>): Promise<InboundPayload> {
+  const bucketInfo = detail.bucket && typeof detail.bucket === "object" ? detail.bucket as Record<string, unknown> : {};
+  const objectInfo = detail.object && typeof detail.object === "object" ? detail.object as Record<string, unknown> : {};
+  const bucket = normalizeOptionalString(bucketInfo.name);
+  const key = normalizeOptionalString(objectInfo.key);
+  if (!bucket || !key) throw new Error("S3 Object Created event did not include bucket and object key.");
+  return loadInboundFromS3Object(bucket, key, sesMessageIdFromObjectKey(key));
+}
+
+async function resolveFromSesMail(
+  mail: Record<string, unknown>,
+  receipt: Record<string, unknown> | undefined,
+): Promise<InboundPayload> {
+  const senderEmail = extractSenderFromSesMail(mail);
+  const recipients = extractRecipientsFromSesMail(mail);
+  const receiptData = receipt && typeof receipt === "object" ? receipt : {};
+  const action = receiptData.action && typeof receiptData.action === "object" ? receiptData.action as Record<string, unknown> : {};
+  const s3Bucket = normalizeOptionalString(action.bucketName);
+  const s3Key = normalizeOptionalString(action.objectKey);
+  const sesMessageId = normalizeOptionalString(mail.messageId);
+
+  const headers = mail.commonHeaders && typeof mail.commonHeaders === "object"
+    ? (mail.commonHeaders as Record<string, unknown>)
+    : {};
+  const subject = normalizeOptionalString(
+    Array.isArray(headers.subject) ? headers.subject[0] : headers.subject,
+  ) ?? "(no subject)";
+
+  let bodyText = "";
+  if (s3Bucket && s3Key) {
+    const loaded = await loadInboundFromS3Object(s3Bucket, s3Key, sesMessageId);
+    return {
+      ...loaded,
+      senderEmail: loaded.senderEmail || senderEmail,
+      recipients: loaded.recipients.length > 0 ? loaded.recipients : recipients,
+      subject: loaded.subject !== "(no subject)" ? loaded.subject : subject,
+    };
+  }
+
+  return {
+    senderEmail,
+    recipients,
+    subject,
+    bodyText,
+    s3Bucket,
+    s3Key,
+    sesMessageId,
+  };
+}
+
+async function loadInboundFromS3Object(
+  bucket: string,
+  key: string,
+  sesMessageId: string | null,
+): Promise<InboundPayload> {
+  const rawObject = await s3Client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+  const rawBytes = await streamToBuffer(rawObject.Body);
+  const parsed = parseInboundEmailBody(rawBytes);
+  return {
+    senderEmail: extractSenderFromRawMime(rawBytes),
+    recipients: extractRecipientsFromRawMime(rawBytes),
+    subject: parsed.subject || "(no subject)",
+    bodyText: parsed.text,
+    s3Bucket: bucket,
+    s3Key: key,
+    sesMessageId,
+  };
+}
+
+function sesMessageIdFromObjectKey(key: string): string | null {
+  const basename = key.split("/").pop() ?? "";
+  const match = basename.match(/^[A-Za-z0-9_-]+$/);
+  return match ? basename : null;
+}
 
 function isConfiguredInboundAddress(address: string): boolean {
   const normalized = normalizeEmailAddress(address);

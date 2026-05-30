@@ -38,8 +38,8 @@ citations) are rejected.
 
 Amplify provisions:
 
-1. SES receipt rules storing raw MIME under `inbound-email/` in the media bucket
-2. `papyrus-ses-inbound-receive` Lambda — creates the `Message`
+1. SES receipt rules storing raw MIME under `inbound-email/` in the media bucket (S3 action only)
+2. EventBridge `Object Created` events on that prefix invoke `papyrus-ses-inbound-receive`, which creates the `Message`
 3. `papyrus-email-submission-processor` Lambda — runs create/find/process
 
 Disable the stack with `PAPYRUS_ENABLE_INBOUND_EMAIL=false`.

@@ -34,6 +34,29 @@ export function extractSenderFromSesMail(mail: Record<string, unknown>): string 
   return normalizeEmailAddress(String(mail.source ?? ""));
 }
 
+export function extractSenderFromRawMime(rawBytes: Uint8Array): string {
+  const raw = Buffer.from(rawBytes).toString("utf8");
+  const fromMatch = raw.match(/^From:\s*(.*)$/im);
+  return normalizeEmailAddress(fromMatch?.[1] ?? "");
+}
+
+export function extractRecipientsFromRawMime(rawBytes: Uint8Array): string[] {
+  const raw = Buffer.from(rawBytes).toString("utf8");
+  const recipients: string[] = [];
+  for (const header of ["To", "Cc", "Delivered-To", "X-Original-To"]) {
+    const regex = new RegExp(`^${header}:\\s*(.*)$`, "gim");
+    let match: RegExpExecArray | null = regex.exec(raw);
+    while (match) {
+      for (const part of String(match[1]).split(",")) {
+        const normalized = normalizeEmailAddress(part);
+        if (normalized && !recipients.includes(normalized)) recipients.push(normalized);
+      }
+      match = regex.exec(raw);
+    }
+  }
+  return recipients;
+}
+
 export function extractRecipientsFromSesMail(mail: Record<string, unknown>): string[] {
   const headers = mail.commonHeaders && typeof mail.commonHeaders === "object"
     ? (mail.commonHeaders as Record<string, unknown>)
