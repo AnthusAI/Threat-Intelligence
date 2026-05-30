@@ -1686,7 +1686,7 @@ def _edition_theme_forum_body(
         "",
         f"- Proposed edition theme: {topic}",
         f"- Proposed coverage concept: {coverage_key}",
-        f"- Steering window: {steering_window_hours} hours for replies in this thread.",
+        f"- Steering window: {steering_window_hours}h (working default if no blocking input).",
         "",
         "## What Comes Next On This Thread",
         "- **Phase 2** proposes one optional / rotating desk informed by this theme.",
@@ -1702,12 +1702,6 @@ def _edition_theme_forum_body(
             lines.append(
                 f"- {entry.get('editionDate') or 'unknown date'}: {entry.get('sectionTitle') or entry.get('sectionKey')}"
             )
-    lines.extend([
-        "",
-        "## How To Steer",
-        "- Reply with a narrower theme, a different coverage concept, or constraints for desk selection.",
-        "- If there is no blocking input after the steering window, agents may treat this theme as the working default.",
-    ])
     return "\n".join(lines).strip() + "\n"
 
 
@@ -1793,9 +1787,7 @@ def _reporting_dispatch_forum_body(
             )
     lines.extend([
         "",
-        "## How To Steer",
-        "- Reply to reprioritize, drop, or add candidate angles before packets are reviewed for slot selection.",
-        "- Cross-desk substitutions need explicit editor override; default culling is section-first.",
+        "Default culling is section-first; cross-desk substitutions need explicit editor override.",
     ])
     return "\n".join(lines).strip() + "\n"
 
@@ -1967,12 +1959,7 @@ def _section_forum_kickoff_body(
         f"- Proposed coverage concept: {coverage_key}",
         f"- Suggested slot target: {section['slots']}",
         f"- Suggested reporting dispatch target: {section['dispatchCount']} (1.5x overassignment) once this desk is confirmed.",
-        f"- Suggested steering window: {steering_window_hours} hours for human replies in this thread.",
-        "",
-        "## How To Steer This Desk",
-        "- Propose a narrower desk angle, different emphasis, or explicit kill criteria.",
-        "- Flag must-verify claims, source-quality concerns, or priority candidate ranks.",
-        "- Reply in the edition forum if this desk should be removed or substituted.",
+        f"- Steering window: {steering_window_hours}h (working default if no blocking input).",
     ]).strip() + "\n"
 
 
@@ -2483,12 +2470,6 @@ def _rotating_desk_recommendation_body(*, topic: str, selection: dict[str, Any])
         ]])
     if avoided and recent:
         lines.extend(["", "## Rotate Away From", *[f"- {key}" for key in avoided]])
-    lines.extend([
-        "",
-        "## How To Steer",
-        "- Reply here to accept, reject, or name a different optional desk.",
-        "- If there is no blocking human input, agents may treat this desk as the working default for optional-desk dispatch.",
-    ])
     return "\n".join(lines).strip() + "\n"
 
 

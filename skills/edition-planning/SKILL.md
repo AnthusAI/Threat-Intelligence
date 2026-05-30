@@ -76,6 +76,42 @@ reference/category/graph state, not guess from stale local files.
   should use configured categories, desks, corpora, doctrine, and references,
   not hard-coded pilot subject matter.
 
+## How Edition Planning Should Work
+
+Edition planning is **not** “pick one desk name and stop.” It is a stacked set
+of decisions:
+
+1. **Edition theme (phase 1, one per edition):** A coverage concept and headline
+   theme for the whole issue, grounded in knowledge-base signals (reference
+   velocity, concept ranking movement, coverage gaps, prior edition themes).
+   `poetry run papyrus knowledge signals trend-report` is the first-pass signal
+   feed; `poetry run papyrus editions plan` can materialize multiple ranked
+   theme candidates from that report.
+2. **Optional / rotating desk (phase 2, at most one):** Which floating desk
+   (Arts, Gaming, Health, …) complements the theme without repeating recent
+   optional-desk history. This is **not** the edition theme. A phase-2 post that
+   says “Arts” is proposing the optional desk, not replacing the phase-1 topic.
+3. **Slot fill (phase 3, per desk):** For each confirmed canonical desk plus the
+   optional desk when selected, create `EditionSlot` rows from section budgets,
+   then dispatch `ceil(slots × 1.5)` **reporting** candidates per desk. Each
+   candidate is a distinct story angle bound to a slot rank (`candidateRank`,
+   `slotRank`, angle lens). Editors later cull section-first and select winners
+   into slots.
+
+What exists today vs what is still thin:
+
+| Layer | Intended | Current automation |
+| --- | --- | --- |
+| Theme ranking | KB trends + prior editions | `signals trend-report` + optional `editions plan`; CLI `run-story-cycle` still takes an explicit `--topic` |
+| Per-slot stories | Ranked candidates per slot from references/concepts | Phase 3 lists assignments; titles are template `Report {topic} for {desk}: {angle}` until richer ranking lands |
+| Prior editions | Avoid repeating themes/desks | Phase 2 uses confirmed optional-desk metadata only; full edition-theme memory is not wired yet |
+| Research execution | Private packets per assignment | `--through research` / `--through reporting` after dispatch |
+
+Agents should run **plan → rotating-desk → (automatic phase 3 on apply)** for a
+new edition, then research/reporting. An empty forum on the nearest upcoming
+edition usually means planning has not been re-run after a purge, not that the
+UI picked the wrong default edition.
+
 ## Edition Slot Plan + Dispatch Checklist
 
 1. Create or update the dated private `Edition`.

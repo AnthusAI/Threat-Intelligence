@@ -42,8 +42,20 @@ def editions_purge(flags: list[str]) -> None:
         raise ValueError("editions purge accepts either --all or --edition, not both.")
     if not purge_all and not edition_selector:
         raise ValueError("editions purge requires --edition <id|slug|date> or --all.")
+    apply = resolve_mutation_apply(options, "editions purge")
     client, _ = create_authoring_client()
     plan = build_edition_purge_plan(client, mode=mode, purge_all=purge_all, edition_selector=edition_selector)
+    if not apply:
+        targeted = sorted(plan.get("targetEditionLineageIds") or [])
+        counts = {model: len(plan.get("ids", {}).get(model) or []) for model in ("Edition", "EditionItem", "PublishedEdition", "PublishedEditionItem")}
+        print(f"editions-purge\tmode\t{mode}")
+        print(f"editions-purge\tselector\t{'all' if purge_all else edition_selector}")
+        print(f"editions-purge\ttargeted-lineages\t{len(targeted)}")
+        for model_name, count in counts.items():
+            if count:
+                print(f"editions-purge\twould-delete\t{model_name}\t{count}")
+        print("editions-purge\tapply\tskipped\tuse without --dry-run to delete")
+        return
     result = apply_edition_purge_plan(client, plan)
     if options.get("json"):
         print(

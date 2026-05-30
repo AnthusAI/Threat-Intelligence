@@ -3537,7 +3537,7 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertEqual(plan["summary"]["forumMessageCount"], 1)
         body = message_records[0]["input"]["content"]
         self.assertIn("Edition Theme (Phase 1)", body)
-        self.assertIn("How To Steer", body)
+        self.assertNotIn("How To Steer", body)
         self.assertIn("Phase 2", body)
         self.assertIn("Phase 3", body)
         self.assertIn("edition", plan["forumKickoff"])
