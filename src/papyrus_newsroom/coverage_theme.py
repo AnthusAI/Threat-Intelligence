@@ -2384,12 +2384,13 @@ def summarize_concepts_for_planning(
                 "source": "trend_signals",
             }
         phrase_rows: list[dict[str, Any]] = []
+        topic_terms = _terms(topic)
         topic_matched_titles = [
             str(ref.get("title") or "")
             for ref in accepted
-            if any(term in str(ref.get("title") or "").lower() for term in _terms(topic))
+            if not topic_terms or any(term in str(ref.get("title") or "").lower() for term in topic_terms)
         ]
-        for label in _theme_phrases_from_reference_titles(topic_matched_titles, limit=limit):
+        for label in _theme_phrases_from_reference_titles(topic_matched_titles[:400], limit=limit):
             phrase_rows.append({
                 "conceptId": f"phrase-{_hash_short([label])}",
                 "displayName": label,
@@ -3345,6 +3346,23 @@ def optional_desk_dispatch_exists(
     return False
 
 
+def _edition_theme_kickoff_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Phase-1 theme kickoff posts only — never optional-desk or reporting-dispatch messages."""
+    result: list[dict[str, Any]] = []
+    for message in _active_forum_thread_messages(messages):
+        if _message_planning_phase(message) == "edition_theme_kickoff":
+            result.append(message)
+            continue
+        content = str(message.get("content") or "")
+        summary = str(message.get("summary") or "").lower()
+        if "edition theme (phase 1)" in summary:
+            result.append(message)
+            continue
+        if content.startswith("# ") and "## Why this edition" in content:
+            result.append(message)
+    return result
+
+
 def _plan_forum_kickoff_supersede_records(
     existing_messages_by_thread: dict[str, list[dict[str, Any]]],
     *,
@@ -3352,7 +3370,7 @@ def _plan_forum_kickoff_supersede_records(
 ) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for messages in existing_messages_by_thread.values():
-        for message in _forum_kickoff_messages(messages):
+        for message in _edition_theme_kickoff_messages(messages):
             update_payload = _prepare_input(
                 "Message",
                 {**message, "status": "deleted", "updatedAt": now},
