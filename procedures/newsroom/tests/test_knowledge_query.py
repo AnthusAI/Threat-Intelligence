@@ -23,7 +23,11 @@ from papyrus_knowledge_query.ranking import (
 )
 from papyrus_knowledge_query.services import KnowledgeQueryServices, S3VectorsProvider, diversify_vector_matches, relation_allowed_for_scope
 from papyrus_knowledge_query.tokens import TokenCounter
-from papyrus_knowledge_query.vector_index import VectorIndexOptions, index_reference_passages
+from papyrus_knowledge_query.vector_index import (
+    VectorIndexOptions,
+    _sanitize_vector_metadata,
+    index_reference_passages,
+)
 
 
 class FakeSemanticProvider:
@@ -2037,6 +2041,26 @@ class KnowledgeQueryTests(unittest.TestCase):
         self.assertLessEqual(len(source_vector["metadata"]["text"]), 480)
         self.assertLessEqual(len(source_vector["metadata"]["summary"]), 320)
         self.assertLessEqual(len(source_vector["metadata"]["referenceSummary"]), 320)
+
+    def test_sanitize_vector_metadata_drops_none_and_stringifies_objects(self):
+        sanitized = _sanitize_vector_metadata(
+            {
+                "title": "ReAct",
+                "referenceSummaryMaxTokens": None,
+                "referenceSummaryMessageId": None,
+                "chunkIndex": 2,
+                "ready": True,
+                "tags": ["agent", None, "loop"],
+                "nested": {"corpusId": "knowledge-corpus-ai-ml-research"},
+            }
+        )
+        self.assertEqual(sanitized["title"], "ReAct")
+        self.assertNotIn("referenceSummaryMaxTokens", sanitized)
+        self.assertNotIn("referenceSummaryMessageId", sanitized)
+        self.assertEqual(sanitized["chunkIndex"], 2)
+        self.assertTrue(sanitized["ready"])
+        self.assertEqual(sanitized["tags"], ["agent", "loop"])
+        self.assertEqual(sanitized["nested"], "{'corpusId': 'knowledge-corpus-ai-ml-research'}")
 
 
 if __name__ == "__main__":

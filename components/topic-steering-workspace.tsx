@@ -119,6 +119,11 @@ import {
   referenceCurationStatusForAction,
 } from "../lib/reference-policy";
 import {
+  referenceDisplaySummary,
+  referenceMetadataField,
+  resolveCanonicalReferenceLineage,
+} from "../lib/reference-display";
+import {
   buildCategoryDrilldownContext,
   buildTopicDrilldownContext,
   categoryDrilldownHref,
@@ -7289,10 +7294,19 @@ function ReferencesDeskView({
   }, [isDemo, selectedLineageId]);
 
   const selectReference = (lineageId: string) => {
-    setSelectedReferenceLineageId(lineageId);
+    const canonicalLineageId = resolveCanonicalReferenceLineage(references, lineageId);
+    setSelectedReferenceLineageId(canonicalLineageId);
     setIsReferenceDetailOpen(true);
-    pushNewsroomDetailUrl("references", lineageId, isDemo);
+    pushNewsroomDetailUrl("references", canonicalLineageId, isDemo);
   };
+  useEffect(() => {
+    if (!initialReferenceLineageId || isDemo) return;
+    const canonicalLineageId = resolveCanonicalReferenceLineage(references, initialReferenceLineageId);
+    if (canonicalLineageId === initialReferenceLineageId) return;
+    setSelectedReferenceLineageId(canonicalLineageId);
+    setIsReferenceDetailOpen(true);
+    pushNewsroomDetailUrl("references", canonicalLineageId, isDemo);
+  }, [initialReferenceLineageId, isDemo, references]);
   const previousReference = selectedFilteredReferenceIndex > 0 ? filteredReferences[selectedFilteredReferenceIndex - 1] : null;
   const nextReference = selectedFilteredReferenceIndex >= 0 && selectedFilteredReferenceIndex < filteredReferences.length - 1
     ? filteredReferences[selectedFilteredReferenceIndex + 1]
@@ -11326,11 +11340,12 @@ function ReferenceDetailPanel({
   const metadataPayload = modelPayloadByRole(referencePayloadState.payloads, "metadata");
   const metadataTitle = referenceMetadataTitle(metadataPayload) ?? reference.title ?? reference.externalItemId;
   const metadataSubtitle = normalizeReferenceDetailSubtitleForDisplay(
-    referenceMetadataSubtitle(metadataPayload),
+    referenceMetadataField(metadataPayload, reference.metadata, "subtitle"),
     reference.sourceUri,
   ) ?? "";
   const metadataSummary = normalizeReferenceDetailSummaryForDisplay(
-    referenceSummaryFromPayload(metadataPayload),
+    referenceDisplaySummary(graph, lineageId, metadataPayload, reference.metadata)
+      ?? referenceMetadataField(metadataPayload, reference.metadata, "summary"),
     reference.sourceUri,
   ) ?? "";
   const detailCuration = curation ?? resolveReferenceCurationDisplayState(reference, graph);
@@ -11664,8 +11679,15 @@ function MessageDetailPanel({
   const linkedReference = useReferenceCurationMessageReference(graph, message, messageMetadata);
   const referencePayloadState = useModelPayloads("reference", linkedReference?.id, ["metadata"]);
   const referenceMetadataPayload = modelPayloadByRole(referencePayloadState.payloads, "metadata");
-  const referenceSubtitle = referenceMetadataSubtitle(referenceMetadataPayload);
-  const referenceSummary = referenceSummaryFromPayload(referenceMetadataPayload);
+  const referenceSubtitle = referenceMetadataSubtitle(referenceMetadataPayload, linkedReference?.metadata);
+  const referenceSummary = linkedReference
+    ? referenceDisplaySummary(
+      graph,
+      linkedReference.lineageId ?? linkedReference.id,
+      referenceMetadataPayload,
+      linkedReference.metadata,
+    )
+    : null;
   const headerLabel = humanizeNewsroomLabel(message.messageKind ?? "message");
   const headerTitle = message.messageKind === "reference_curation"
     ? linkedReference?.title ?? linkedReference?.externalItemId ?? "Reference curation"
@@ -14651,33 +14673,12 @@ function useReferenceMetadataFields(references: ReferenceRecord[]): Map<string, 
   return fieldsByReferenceId;
 }
 
-function referenceMetadataSubtitle(payload: HydratedModelPayload | null): string | null {
-  return referenceMetadataField(payload, "subtitle");
+function referenceMetadataSubtitle(payload: HydratedModelPayload | null, fallback?: unknown): string | null {
+  return referenceMetadataField(payload, fallback, "subtitle");
 }
 
-function referenceMetadataTitle(payload: HydratedModelPayload | null): string | null {
-  return referenceMetadataField(payload, "title");
-}
-
-function referenceMetadataField(
-  payload: HydratedModelPayload | null,
-  key: "title" | "subtitle",
-): string | null {
-  const payloadRecord = metadataRecord(payload?.json);
-  if (payloadRecord) {
-    const value = normalizeMetadataString(payloadRecord[key]);
-    if (value) return value;
-  }
-  return null;
-}
-
-function referenceSummaryFromPayload(payload: HydratedModelPayload | null): string | null {
-  const payloadRecord = metadataRecord(payload?.json);
-  if (payloadRecord) {
-    const summary = normalizeMetadataString(payloadRecord.summary);
-    if (summary) return summary;
-  }
-  return null;
+function referenceMetadataTitle(payload: HydratedModelPayload | null, fallback?: unknown): string | null {
+  return referenceMetadataField(payload, fallback, "title");
 }
 
 function normalizeReferenceDetailSummaryForDisplay(summary: string | null, sourceUri?: string | null): string | null {

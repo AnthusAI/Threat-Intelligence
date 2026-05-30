@@ -24,6 +24,12 @@ For reusable Reference summaries and quality ratings that feed ranking or
 context packs, use
 [`skills/reference-curation-signals/SKILL.md`](/Users/ryan/Projects/Papyrus/skills/reference-curation-signals/SKILL.md).
 
+For **internal knowledge base search** before web search, use
+[`docs/internal-knowledge-research.md`](../../docs/internal-knowledge-research.md)
+and [`skills/knowledge-query/SKILL.md`](knowledge-query/SKILL.md). For bounded
+multi-step researcher loops (`research_explorer.tac`), see
+[`docs/agent-loop-patterns.md`](../../docs/agent-loop-patterns.md).
+
 ## Core Model
 
 The `Assignment` is the workflow spine. Agents and humans append private work

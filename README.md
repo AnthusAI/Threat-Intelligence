@@ -499,6 +499,30 @@ npm run test:bdd:backend
 npm run test:bdd:agent-live
 ```
 
+## Internal knowledge base search
+
+Accepted references, ontology, and graph neighbors are queried through one
+shared engine (`knowledgeQuery`). Coding agents and newsroom procedures should
+use it for **internal research** before web search or new reference intake.
+
+Quick start (requires `PAPYRUS_GRAPHQL_ENDPOINT` and `PAPYRUS_GRAPHQL_JWT` in
+`.env`; see `.env.example`):
+
+```bash
+PYTHONPATH=src python -m papyrus_newsroom knowledge-query \
+  --query "specific question about accepted corpus knowledge" \
+  --profile researcher \
+  --format both \
+  --max-tokens 1200
+```
+
+Full workflow, troubleshooting, and vector-index maintenance:
+[`docs/internal-knowledge-research.md`](docs/internal-knowledge-research.md).
+Query tuning and output shape:
+[`skills/knowledge-query/SKILL.md`](skills/knowledge-query/SKILL.md).
+Bounded multi-step researcher loops (ReAct-style) vs one-shot researchers:
+[`docs/agent-loop-patterns.md`](docs/agent-loop-patterns.md).
+
 ## Python Newsroom Package
 
 Papyrus now packages its Python newsroom tooling as the Poetry-managed

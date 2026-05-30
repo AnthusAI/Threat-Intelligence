@@ -1272,6 +1272,34 @@ def _embed(texts: list[str]) -> list[list[float]]:
     return [item["embedding"] for item in sorted(payload["data"], key=lambda entry: entry["index"])]
 
 
+def _sanitize_vector_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    """S3 Vectors metadata must be strings, numbers, booleans, or arrays of scalars."""
+    sanitized: dict[str, Any] = {}
+    for key, value in metadata.items():
+        if value is None:
+            continue
+        if isinstance(value, bool):
+            sanitized[key] = value
+        elif isinstance(value, (int, float)):
+            sanitized[key] = value
+        elif isinstance(value, str):
+            sanitized[key] = value
+        elif isinstance(value, list):
+            items: list[Any] = []
+            for item in value:
+                if item is None:
+                    continue
+                if isinstance(item, (str, bool, int, float)):
+                    items.append(item)
+                else:
+                    items.append(str(item))
+            if items:
+                sanitized[key] = items
+        else:
+            sanitized[key] = str(value)
+    return sanitized
+
+
 def _embed_and_put_vectors(index_arn: str, candidates: list[dict[str, Any]]) -> int:
     embeddings = _embed([candidate["text"] for candidate in candidates])
     vectors = []
@@ -1279,7 +1307,7 @@ def _embed_and_put_vectors(index_arn: str, candidates: list[dict[str, Any]]) -> 
         vectors.append({
             "key": candidate["key"],
             "data": {"float32": embedding},
-            "metadata": candidate["metadata"],
+            "metadata": _sanitize_vector_metadata(candidate["metadata"]),
         })
     _put_vectors(index_arn, vectors)
     return len(vectors)
