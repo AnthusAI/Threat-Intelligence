@@ -21,6 +21,7 @@ from .categories_steering import (
     load_json_file,
     load_lexical_steering_config,
     load_steering_bundle_from_biblicus,
+    normalize_lexical_term,
     write_json_file,
 )
 from .curation_cycle import (
@@ -30,9 +31,10 @@ from .curation_cycle import (
     resolve_biblicus_corpus_path,
     run_biblicus,
     run_biblicus_json,
+    timestamp_run_id,
     validate_cycle_corpus_paths,
 )
-from .env import PAPYRUS_ROOT, storage_bucket_from_amplify_outputs
+from .env import BIBLICUS_ROOT, PAPYRUS_ROOT, storage_bucket_from_amplify_outputs
 from .graphql_authoring import create_authoring_client
 from .ids import hash_short, hash_stable, knowledge_corpus_id
 from .options import parse_boolean_option, parse_comma_list, parse_options, resolve_mutation_apply
@@ -43,6 +45,7 @@ from .records import (
     is_missing_graphql_model_error,
 )
 from .reference_policy import normalize_reference_curation_status
+from .papyrus_config import resolve_topics_steering_config_path
 from .steering import (
     load_steering_config,
     require_corpus_config,
@@ -56,6 +59,7 @@ from .steering import (
 def categories_import_steering(flags: list[str]) -> None:
     options = parse_options(flags)
     steering_config = load_steering_config(options.get("config"))
+    lexical_config = load_lexical_steering_config(options.get("lexical-config"))
     resolved = resolve_steering_import_corpus(steering_config, options)
     bundle = (
         load_json_file(options["bundle"])
@@ -73,6 +77,7 @@ def categories_import_steering(flags: list[str]) -> None:
             "classifierId": resolved["classifierId"],
             "corpusConfig": resolved["corpusConfig"],
             "corpusPath": resolved["corpusPath"],
+            "ignoredTerms": [rule.get("term") for rule in lexical_config.get("ignoredTerms") or []],
         },
     )
     changes = build_record_changes_tolerating_optional_models(client, plan["records"])
@@ -93,7 +98,7 @@ def categories_import_config(flags: list[str]) -> None:
 
 def categories_sandbox_steering_config(flags: list[str]) -> None:
     options = parse_options(flags)
-    config_path = options.get("config") or "corpora/papyrus-steering.yml"
+    config_path = options.get("config") or resolve_topics_steering_config_path()
     if not options.get("output"):
         raise ValueError("categories sandbox-steering-config requires --output <sandbox-steering.yml>.")
     bucket = options.get("bucket") or storage_bucket_from_amplify_outputs(options.get("amplify-outputs") or "amplify_outputs.json")
@@ -871,6 +876,7 @@ def categories_run_curation_cycle(flags: list[str]) -> None:
             "classifierId": plan["canonical"]["classifierId"],
             "corpusConfig": plan["canonical"]["corpus"],
             "corpusPath": str(resolve_biblicus_corpus_path(plan, plan["canonical"]["corpus"])),
+            "ignoredTerms": [rule.get("term") for rule in lexical_config.get("ignoredTerms") or []],
         },
     )
     steering_changes = build_record_changes_tolerating_optional_models(client, steering_import_plan["records"])
@@ -1026,6 +1032,7 @@ def categories_run_curation_cycle(flags: list[str]) -> None:
             "classifierId": plan["canonical"]["classifierId"],
             "corpusConfig": plan["canonical"]["corpus"],
             "corpusPath": str(resolve_biblicus_corpus_path(plan, plan["canonical"]["corpus"])),
+            "ignoredTerms": [rule.get("term") for rule in lexical_config.get("ignoredTerms") or []],
         },
     )
     refreshed_changes = build_record_changes_tolerating_optional_models(client, refreshed_plan["records"])
@@ -1038,15 +1045,423 @@ def categories_run_curation_cycle(flags: list[str]) -> None:
         raise RuntimeError(f"Curation cycle verification failed: {'; '.join(verification['failures'])}")
 
 
+def categories_rebuild_roots(flags: list[str]) -> None:
+    options = parse_options(flags)
+    if not parse_boolean_option(options.get("yes"), default=False, label="--yes"):
+        raise ValueError("categories rebuild-roots is mutating and requires --yes.")
+    apply = resolve_mutation_apply(options, "categories rebuild-roots")
+    steering_config = require_steering_config(options.get("config"))
+    corpus_key = options.get("corpus-key") or steering_config["canonicalTopicSet"]["corpusKey"]
+    corpus_config = require_corpus_config(steering_config, corpus_key, "--corpus-key")
+    classifier_id = resolve_classifier_for_corpus(steering_config, corpus_config, options.get("classifier"))
+    root_min, root_max = parse_root_range_option(options.get("root-range"))
+    lexical_config = load_lexical_steering_config(options.get("lexical-config"))
+    ignored_terms = [rule.get("term") for rule in lexical_config.get("ignoredTerms") or [] if rule.get("term")]
+
+    run_id = options.get("run-id") or f"root-rebuild-{timestamp_run_id()}-{slugify(corpus_key)}-{slugify(classifier_id)}"
+    run_dir = Path(options.get("output-dir") or Path(".papyrus-runs") / run_id).resolve()
+    run_dir.mkdir(parents=True, exist_ok=True)
+    plan = {
+        "runId": run_id,
+        "runDir": str(run_dir),
+        "biblicusWorkdir": str(Path(options.get("biblicus-workdir") or BIBLICUS_ROOT).resolve()),
+    }
+    corpus_path = str(resolve_biblicus_corpus_path(plan, corpus_config))
+    if not Path(corpus_path).exists():
+        raise ValueError(f"Corpus path was not found: {corpus_path}")
+
+    client, _ = create_authoring_client()
+    category_set = resolve_accepted_category_set(
+        client,
+        {
+            "categorySetId": options.get("category-set"),
+            "corpusId": knowledge_corpus_id(corpus_config),
+            "classifierId": classifier_id,
+        },
+    )
+    if not category_set:
+        raise ValueError(f"No accepted category set found for corpus={corpus_key} classifier={classifier_id}.")
+    categories = [
+        entry
+        for entry in client.list_records("Category")
+        if entry.get("categorySetId") == category_set.get("id") and entry.get("status") != "archived"
+    ]
+    proposals = [proposal for proposal in client.list_records("SteeringProposal") if proposal.get("categorySetId") == category_set.get("id")]
+    proposal_ids = {proposal["id"] for proposal in proposals if proposal.get("id")}
+    decisions = [
+        decision
+        for decision in client.list_records("SteeringDecision")
+        if decision.get("categorySetId") == category_set.get("id") or decision.get("proposalId") in proposal_ids
+    ]
+    write_json_file(run_dir / "accepted-category-set.json", build_accepted_category_set_payload(category_set, categories))
+    write_json_file(run_dir / "accepted-category-tree.json", build_accepted_category_tree_payload(category_set, categories))
+    write_json_file(run_dir / "steering-feedback.json", build_steering_feedback_payload(category_set, proposals, decisions))
+    write_json_file(run_dir / "lexical-steering.json", build_lexical_steering_payload([], {"config": lexical_config}))
+
+    steering_bundle = load_steering_bundle_from_biblicus(
+        corpus=corpus_path,
+        classifier=classifier_id,
+        biblicus_workdir=plan["biblicusWorkdir"],
+    )
+    extraction_snapshot = options.get("extraction-snapshot") or latest_pipeline_snapshot(steering_bundle)
+    if not extraction_snapshot:
+        raise ValueError("Could not resolve extraction snapshot for root rebuild.")
+
+    discovery_stdout = run_biblicus(
+        plan,
+        [
+            "analyze",
+            "topics",
+            "--corpus",
+            corpus_path,
+            "--configuration",
+            "configurations/topic-modeling/base.yml",
+            "--configuration-name",
+            f"root-rebuild:{classifier_id}",
+            "--extraction-snapshot",
+            extraction_snapshot,
+            "--override",
+            "bertopic_analysis.parameters.nr_topics=null",
+            "--override",
+            "bertopic_analysis.parameters.min_topic_size=2",
+        ],
+        "root-discovery",
+    )
+    root_discovery = json.loads(discovery_stdout or "{}")
+    write_json_file(run_dir / "root-discovery-output.json", root_discovery)
+
+    discovery_report = (root_discovery.get("report") or {}) if isinstance(root_discovery, dict) else {}
+    topics = discovery_report.get("topics") if isinstance(discovery_report.get("topics"), list) else []
+    selection = select_root_topic_candidates(
+        topics=topics,
+        ignored_terms=ignored_terms,
+        root_min=root_min,
+        root_max=root_max,
+    )
+    write_json_file(run_dir / "root-selection.json", selection)
+    selected = selection.get("selected") or []
+    if len(selected) < root_min:
+        raise ValueError(
+            f"Root rebuild selected {len(selected)} topics, below minimum {root_min}. "
+            f"See {run_dir / 'root-selection.json'}."
+        )
+
+    draft_set, draft_categories = build_root_rebuild_draft_records(
+        category_sets=client.list_records("CategorySet"),
+        categories=client.list_records("Category"),
+        accepted_category_set=category_set,
+        selected_roots=selected,
+        now=_utc_now(),
+        actor=options.get("actor") or "Papyrus content CLI",
+        reason=options.get("reason") or "Root taxonomy rebuild draft",
+        draft_id=options.get("draft-id"),
+    )
+    draft_summary = {
+        "runId": run_id,
+        "categorySetId": draft_set.get("id"),
+        "lineageId": draft_set.get("lineageId"),
+        "selectedRootCount": len(selected),
+        "selectedRoots": selected,
+        "snapshotPaths": {
+            "rootDiscovery": str(run_dir / "root-discovery-output.json"),
+            "rootSelection": str(run_dir / "root-selection.json"),
+            "acceptedCategorySet": str(run_dir / "accepted-category-set.json"),
+            "acceptedCategoryTree": str(run_dir / "accepted-category-tree.json"),
+            "steeringFeedback": str(run_dir / "steering-feedback.json"),
+            "lexicalSteering": str(run_dir / "lexical-steering.json"),
+        },
+    }
+    write_json_file(run_dir / "root-rebuild-draft-summary.json", draft_summary)
+    print_draft_plan("rebuild-roots", category_sets=[draft_set], categories=draft_categories, apply=apply)
+    print(f"categories\trebuild-roots\trun\t{run_id}")
+    print(f"categories\trebuild-roots\troot-range\t{root_min}:{root_max}")
+    print(f"categories\trebuild-roots\tselected-roots\t{len(selected)}")
+    print(f"categories\trebuild-roots\tsummary\t{run_dir / 'root-rebuild-draft-summary.json'}")
+    if not apply:
+        print("categories\trebuild-roots\tapply\tskipped\tuse --dry-run to preview without writes")
+        return
+    client.upsert("CategorySet", draft_set)
+    for category in draft_categories:
+        client.upsert("Category", category)
+    print(f"categories\trebuild-roots\tdraft\t{draft_set['id']}\t{len(draft_categories)} roots")
+    print(
+        "categories\trebuild-roots\tnext\t"
+        f"poetry run papyrus categories rebuild-roots-promote --category-set {draft_set['id']} --yes"
+    )
+
+
+def categories_rebuild_roots_promote(flags: list[str]) -> None:
+    options = parse_options(flags)
+    draft_id = options.get("category-set")
+    if not draft_id:
+        raise ValueError("categories rebuild-roots-promote requires --category-set <draft-id>.")
+    if not parse_boolean_option(options.get("yes"), default=False, label="--yes"):
+        raise ValueError("categories rebuild-roots-promote is mutating and requires --yes.")
+    apply = resolve_mutation_apply(options, "categories rebuild-roots-promote")
+    promote_flags = ["--category-set", draft_id]
+    if not apply:
+        promote_flags.append("--dry-run")
+    if options.get("reason"):
+        promote_flags.extend(["--reason", str(options.get("reason"))])
+    categories_draft_promote(promote_flags)
+    if not apply:
+        return
+
+    steering_config = require_steering_config(options.get("config"))
+    lexical_config = load_lexical_steering_config(options.get("lexical-config"))
+    ignored_terms = [rule.get("term") for rule in lexical_config.get("ignoredTerms") or [] if rule.get("term")]
+    client, _ = create_authoring_client()
+    promoted_set = client.get_record("CategorySet", draft_id)
+    if not promoted_set:
+        raise ValueError(f"Promoted CategorySet {draft_id} was not found.")
+    corpus_id = promoted_set.get("corpusId")
+    classifier_id = promoted_set.get("classifierId")
+    corpus_config = next(
+        (entry for entry in steering_config.get("corpora") or [] if knowledge_corpus_id(entry) == corpus_id),
+        None,
+    )
+    if not corpus_config:
+        raise ValueError(f"Could not resolve corpus config for promoted CategorySet {draft_id} ({corpus_id}).")
+
+    run_id = options.get("run-id") or f"root-promote-{timestamp_run_id()}-{slugify(corpus_config.get('key') or corpus_id)}"
+    run_dir = Path(options.get("output-dir") or Path(".papyrus-runs") / run_id).resolve()
+    run_dir.mkdir(parents=True, exist_ok=True)
+    plan = {
+        "runId": run_id,
+        "runDir": str(run_dir),
+        "biblicusWorkdir": str(Path(options.get("biblicus-workdir") or BIBLICUS_ROOT).resolve()),
+    }
+    corpus_path = str(resolve_biblicus_corpus_path(plan, corpus_config))
+    if not Path(corpus_path).exists():
+        raise ValueError(f"Corpus path was not found: {corpus_path}")
+
+    categories = [
+        entry
+        for entry in client.list_records("Category")
+        if entry.get("categorySetId") == promoted_set.get("id") and entry.get("status") != "archived"
+    ]
+    proposals = [proposal for proposal in client.list_records("SteeringProposal") if proposal.get("categorySetId") == promoted_set.get("id")]
+    proposal_ids = {proposal["id"] for proposal in proposals if proposal.get("id")}
+    decisions = [
+        decision
+        for decision in client.list_records("SteeringDecision")
+        if decision.get("categorySetId") == promoted_set.get("id") or decision.get("proposalId") in proposal_ids
+    ]
+    write_json_file(run_dir / "accepted-category-set.json", build_accepted_category_set_payload(promoted_set, categories))
+    write_json_file(run_dir / "accepted-category-tree.json", build_accepted_category_tree_payload(promoted_set, categories))
+    write_json_file(run_dir / "steering-feedback.json", build_steering_feedback_payload(promoted_set, proposals, decisions))
+    write_json_file(run_dir / "lexical-steering.json", build_lexical_steering_payload([], {"config": lexical_config}))
+
+    steering_bundle = load_steering_bundle_from_biblicus(
+        corpus=corpus_path,
+        classifier=classifier_id,
+        biblicus_workdir=plan["biblicusWorkdir"],
+    )
+    extraction_snapshot = options.get("extraction-snapshot") or latest_pipeline_snapshot(steering_bundle)
+    if not extraction_snapshot:
+        raise ValueError("Could not resolve extraction snapshot for post-promote child discovery.")
+    run_biblicus(
+        plan,
+        [
+            "taxonomy",
+            "record",
+            "--corpus",
+            corpus_path,
+            "--input",
+            str(run_dir / "accepted-category-tree.json"),
+        ],
+        "taxonomy-record-post-promote",
+    )
+    run_biblicus_json(
+        plan,
+        [
+            "taxonomy",
+            "discover",
+            "--corpus",
+            corpus_path,
+            "--classifier",
+            classifier_id,
+            "--extraction-snapshot",
+            extraction_snapshot,
+            "--steering-feedback",
+            str(run_dir / "steering-feedback.json"),
+        ],
+        "taxonomy-discover-post-promote",
+        str(run_dir / "post-promote-child-discovery.json"),
+    )
+    discovery_bundle = load_json_file(run_dir / "post-promote-child-discovery.json")
+    import_bundle = {
+        "schema_version": 1,
+        "generated_at": discovery_bundle.get("generated_at"),
+        "corpus": {
+            "name": corpus_config.get("name"),
+            "role": corpus_config.get("role"),
+            "corpus_uri": corpus_config.get("s3Prefix") or corpus_config.get("path"),
+        },
+        "proposals": discovery_bundle.get("proposals") or [],
+        "artifacts": [],
+        "warnings": discovery_bundle.get("warnings") or [],
+    }
+    import_plan = build_steering_import_records(
+        import_bundle,
+        {
+            "classifierId": classifier_id,
+            "corpusConfig": corpus_config,
+            "corpusPath": corpus_path,
+            "categorySetId": promoted_set.get("id"),
+            "ignoredTerms": ignored_terms,
+        },
+    )
+    changes = build_record_changes_tolerating_optional_models(client, import_plan["records"])
+    apply_record_changes(client, changes)
+    print_category_import_summary("post-promote-child-discovery", import_plan["importRunId"], changes)
+    summary = {
+        "runId": run_id,
+        "categorySetId": promoted_set.get("id"),
+        "importRunId": import_plan.get("importRunId"),
+        "proposalCount": len(import_bundle.get("proposals") or []),
+        "outputPath": str(run_dir / "post-promote-child-discovery.json"),
+    }
+    write_json_file(run_dir / "post-promote-summary.json", summary)
+    print(f"categories\trebuild-roots-promote\trun\t{run_id}")
+    print(f"categories\trebuild-roots-promote\tsummary\t{run_dir / 'post-promote-summary.json'}")
+
+
+def categories_reset(flags: list[str]) -> None:
+    options = parse_options(flags)
+    if not parse_boolean_option(options.get("yes"), default=False, label="--yes"):
+        raise ValueError("categories reset is destructive and requires --yes.")
+    apply = resolve_mutation_apply(options, "categories reset")
+    steering_config = require_steering_config(options.get("config"))
+    client, _ = create_authoring_client()
+
+    category_sets = client.list_records("CategorySet")
+    if options.get("category-set"):
+        selected = next((entry for entry in category_sets if entry.get("id") == options["category-set"]), None)
+        if not selected:
+            raise ValueError(f"CategorySet {options['category-set']} was not found.")
+        selected_category_sets = [selected]
+        corpus_id = selected.get("corpusId")
+        classifier_id = selected.get("classifierId")
+        corpus_key = options.get("corpus-key") or steering_config["canonicalTopicSet"]["corpusKey"]
+    else:
+        corpus_key = options.get("corpus-key") or steering_config["canonicalTopicSet"]["corpusKey"]
+        corpus_config = require_corpus_config(steering_config, corpus_key, "--corpus-key")
+        corpus_id = knowledge_corpus_id(corpus_config)
+        classifier_id = resolve_classifier_for_corpus(steering_config, corpus_config, options.get("classifier"))
+        selected_category_sets = [
+            entry
+            for entry in category_sets
+            if entry.get("corpusId") == corpus_id and entry.get("classifierId") == classifier_id
+        ]
+    if not selected_category_sets:
+        raise ValueError("No CategorySet rows matched the reset scope.")
+
+    category_set_ids = {entry["id"] for entry in selected_category_sets if entry.get("id")}
+    categories = [entry for entry in client.list_records("Category") if entry.get("categorySetId") in category_set_ids]
+    category_ids = {entry["id"] for entry in categories if entry.get("id")}
+    proposals = [
+        entry
+        for entry in client.list_records("SteeringProposal")
+        if entry.get("categorySetId") in category_set_ids
+        or (
+            corpus_id
+            and entry.get("corpusId") == corpus_id
+            and (not classifier_id or entry.get("classifierId") == classifier_id)
+        )
+    ]
+    proposal_ids = {entry["id"] for entry in proposals if entry.get("id")}
+    decisions = [
+        entry
+        for entry in client.list_records("SteeringDecision")
+        if entry.get("categorySetId") in category_set_ids or entry.get("proposalId") in proposal_ids
+    ]
+    try:
+        category_keywords = [entry for entry in client.list_records("CategoryKeyword") if entry.get("categorySetId") in category_set_ids]
+    except (RuntimeError, KeyError, ValueError) as error:
+        if not is_missing_graphql_model_error(error, "CategoryKeyword"):
+            if not isinstance(error, KeyError):
+                raise
+        category_keywords = []
+    raw_payload_targets = category_set_ids.union(category_ids).union(proposal_ids)
+    knowledge_raw_payloads = [
+        entry
+        for entry in client.list_records("KnowledgeRawPayload")
+        if entry.get("ownerId") in raw_payload_targets
+        and entry.get("ownerType") in {"categorySet", "category", "proposal", "categoryTree"}
+    ]
+    snapshot = {
+        "generatedAt": _utc_now(),
+        "scope": {
+            "corpusKey": corpus_key,
+            "corpusId": corpus_id,
+            "classifierId": classifier_id,
+            "categorySetId": options.get("category-set"),
+        },
+        "counts": {
+            "categorySets": len(selected_category_sets),
+            "categories": len(categories),
+            "categoryKeywords": len(category_keywords),
+            "proposals": len(proposals),
+            "decisions": len(decisions),
+            "knowledgeRawPayloads": len(knowledge_raw_payloads),
+        },
+        "categorySets": selected_category_sets,
+        "categories": categories,
+        "categoryKeywords": category_keywords,
+        "proposals": proposals,
+        "decisions": decisions,
+        "knowledgeRawPayloads": knowledge_raw_payloads,
+    }
+    suffix = f"{slugify(corpus_key or corpus_id or 'corpus')}-{slugify(classifier_id or 'classifier')}"
+    output_dir = options.get("output-dir") or str(Path(".papyrus-runs") / "topic-reset" / f"{timestamp_for_path()}-{suffix}")
+    snapshot_path = Path(output_dir) / "pre-reset-snapshot.json"
+    write_json_file(snapshot_path, snapshot)
+
+    print(f"categories\treset\tmode\t{'apply' if apply else 'dry-run'}")
+    print(f"categories\treset\tsnapshot\t{snapshot_path}")
+    for key, value in snapshot["counts"].items():
+        print(f"categories\treset\tcount\t{key}\t{value}")
+    if not apply:
+        print("categories\treset\tapply\tskipped\tuse --dry-run to preview without writes")
+        return
+
+    delete_groups = [
+        ("SteeringDecision", decisions),
+        ("SteeringProposal", proposals),
+        ("CategoryKeyword", category_keywords),
+        ("Category", categories),
+        ("CategorySet", selected_category_sets),
+        ("KnowledgeRawPayload", knowledge_raw_payloads),
+    ]
+    for model_name, rows in delete_groups:
+        if not rows:
+            continue
+        try:
+            for row in rows:
+                if row.get("id"):
+                    client.delete_record(model_name, row["id"])
+        except (RuntimeError, KeyError, ValueError) as error:
+            if not is_missing_graphql_model_error(error, model_name):
+                if not isinstance(error, (KeyError, ValueError)):
+                    raise
+            print(f"categories\treset\tskip\t{model_name}\tmodel-not-deployed")
+            continue
+        print(f"categories\treset\tdeleted\t{model_name}\t{len(rows)}")
+
+    print("categories\treset\tnext\tpoetry run papyrus newsroom recount-summary")
+
+
 def apply_lexical_steering_config_if_available(client, options: dict[str, Any]) -> dict[str, Any]:
     lexical_config = load_lexical_steering_config(options.get("lexical-config"))
     try:
         lexical_changes = build_record_changes_tolerating_optional_models(client, build_lexical_steering_config_records(lexical_config))
         apply_record_changes(client, lexical_changes)
         print_category_import_summary("lexical-config", "papyrus-lexical-steering", lexical_changes)
-    except RuntimeError as error:
+    except (RuntimeError, KeyError, ValueError) as error:
         if not is_missing_graphql_model_error(error, "LexicalSteeringRule"):
-            raise
+            if not isinstance(error, (KeyError, ValueError)):
+                raise
         print("skip\tlexical-config\tLexicalSteeringRule model is not deployed in AppSync yet.")
     return lexical_config
 
@@ -1056,9 +1471,10 @@ def write_lexical_steering_export_if_available(client, output_path: str, lexical
         lexical_rules = client.list_records("LexicalSteeringRule")
         write_json_file(output_path, build_lexical_steering_payload(lexical_rules, {"config": lexical_config}))
         print(f"export\tlexical-steering\t{output_path}\t{len(lexical_rules)} rules")
-    except RuntimeError as error:
+    except (RuntimeError, KeyError, ValueError) as error:
         if not is_missing_graphql_model_error(error, "LexicalSteeringRule"):
-            raise
+            if not isinstance(error, (KeyError, ValueError)):
+                raise
         write_json_file(output_path, build_lexical_steering_payload([], {"config": lexical_config}))
         print("skip\tlexical-export\tLexicalSteeringRule model is not deployed in AppSync yet; wrote empty lexical export.")
 
@@ -1255,6 +1671,207 @@ def slugify(value: Any) -> str:
 
 def timestamp_for_path(value: str | None = None) -> str:
     return re.sub(r"(^-|-$)", "", re.sub(r"[^0-9A-Za-z]+", "-", str(value or _utc_now())))
+
+
+def parse_root_range_option(value: Any) -> tuple[int, int]:
+    raw = str(value or "12:20").strip()
+    match = re.fullmatch(r"(\d+)\s*:\s*(\d+)", raw)
+    if not match:
+        raise ValueError("--root-range must be formatted as min:max (for example 12:20).")
+    minimum = int(match.group(1))
+    maximum = int(match.group(2))
+    if minimum < 1 or maximum < 1:
+        raise ValueError("--root-range values must be positive integers.")
+    if minimum > maximum:
+        raise ValueError("--root-range minimum must be less than or equal to maximum.")
+    return minimum, maximum
+
+
+def select_root_topic_candidates(
+    *,
+    topics: list[dict[str, Any]],
+    ignored_terms: list[str],
+    root_min: int,
+    root_max: int,
+) -> dict[str, Any]:
+    normalized_ignored = {normalize_lexical_term(value) for value in ignored_terms if normalize_lexical_term(value)}
+    merged: dict[str, dict[str, Any]] = {}
+    skipped: list[dict[str, Any]] = []
+    for topic in topics:
+        topic_id = int(topic.get("topic_id") or -1)
+        if topic_id == -1:
+            continue
+        label = str(topic.get("label") or "").strip()
+        if not label:
+            continue
+        normalized_label = normalize_lexical_term(label)
+        keywords = [
+            normalize_lexical_term(entry.get("keyword"))
+            for entry in (topic.get("keywords") or [])
+            if isinstance(entry, dict) and normalize_lexical_term(entry.get("keyword"))
+        ]
+        if normalized_label in normalized_ignored:
+            skipped.append({"label": label, "reason": "ignored-label", "topicId": topic_id})
+            continue
+        non_ignored_keywords = [keyword for keyword in keywords if keyword not in normalized_ignored]
+        if not non_ignored_keywords:
+            skipped.append({"label": label, "reason": "ignored-keywords", "topicId": topic_id})
+            continue
+        category_key = derive_category_key_from_text(non_ignored_keywords[0] if non_ignored_keywords else label)
+        entry = merged.get(category_key)
+        document_ids = sorted({str(item_id) for item_id in topic.get("document_ids") or [] if str(item_id).strip()})
+        if entry is None:
+            merged[category_key] = {
+                "topicId": topic_id,
+                "displayName": title_case_label(non_ignored_keywords[0] if non_ignored_keywords else label),
+                "categoryKey": category_key,
+                "description": build_root_description(label, non_ignored_keywords),
+                "keywords": non_ignored_keywords[:12],
+                "documentIds": document_ids,
+                "documentCount": int(topic.get("document_count") or len(document_ids) or 0),
+                "confidence": float(((topic.get("keywords") or [{}])[0] or {}).get("score") or 0),
+            }
+        else:
+            entry["documentIds"] = sorted({*entry.get("documentIds", []), *document_ids})
+            entry["documentCount"] = max(int(entry.get("documentCount") or 0), int(topic.get("document_count") or 0), len(entry["documentIds"]))
+            entry["confidence"] = max(float(entry.get("confidence") or 0), float(((topic.get("keywords") or [{}])[0] or {}).get("score") or 0))
+            entry["keywords"] = list(dict.fromkeys([*entry.get("keywords", []), *non_ignored_keywords]))[:12]
+    candidates = sorted(
+        merged.values(),
+        key=lambda entry: (
+            -(int(entry.get("documentCount") or 0)),
+            -(float(entry.get("confidence") or 0)),
+            str(entry.get("categoryKey") or ""),
+        ),
+    )
+    selected = candidates[:root_max]
+    return {
+        "requestedRange": {"min": root_min, "max": root_max},
+        "candidateCount": len(candidates),
+        "selectedCount": len(selected),
+        "ignoredTermCount": len(normalized_ignored),
+        "ignoredTerms": sorted(normalized_ignored),
+        "skipped": skipped,
+        "candidates": candidates,
+        "selected": selected,
+    }
+
+
+def build_root_rebuild_draft_records(
+    *,
+    category_sets: list[dict[str, Any]],
+    categories: list[dict[str, Any]],
+    accepted_category_set: dict[str, Any],
+    selected_roots: list[dict[str, Any]],
+    now: str,
+    actor: str,
+    reason: str,
+    draft_id: str | None = None,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    lineage_id = accepted_category_set.get("lineageId") or accepted_category_set.get("id")
+    next_version = max(
+        [
+            0,
+            *[
+                int(entry.get("versionNumber") or 0)
+                for entry in category_sets
+                if (entry.get("lineageId") or entry.get("id")) == lineage_id
+            ],
+        ]
+    ) + 1
+    resolved_draft_id = draft_id or f"{slugify(lineage_id)}-root-rebuild-v{next_version}"
+    if any(entry.get("id") == resolved_draft_id for entry in category_sets):
+        raise ValueError(f"Draft CategorySet {resolved_draft_id} already exists.")
+    accepted_categories = [entry for entry in categories if entry.get("categorySetId") == accepted_category_set.get("id")]
+    max_category_version_by_lineage: dict[str, int] = {}
+    for category in categories:
+        category_lineage = category.get("lineageId") or category.get("id")
+        max_category_version_by_lineage[category_lineage] = max(
+            max_category_version_by_lineage.get(category_lineage, 0),
+            int(category.get("versionNumber") or 0),
+        )
+    lineage_by_category_key = {
+        str(category.get("categoryKey") or ""): category.get("lineageId") or category.get("id")
+        for category in accepted_categories
+        if category.get("categoryKey")
+    }
+    current_by_lineage = {
+        category.get("lineageId") or category.get("id"): category
+        for category in accepted_categories
+        if category.get("versionState") == "current"
+    }
+    draft_set = with_version_fields(
+        {
+            "id": resolved_draft_id,
+            "lineageId": lineage_id,
+            "versionNumber": next_version,
+            "previousVersionId": accepted_category_set.get("id"),
+            "versionState": "draft",
+            "corpusId": accepted_category_set.get("corpusId"),
+            "classifierId": accepted_category_set.get("classifierId"),
+            "displayName": f"{accepted_category_set.get('displayName') or 'Category Set'} Root Rebuild Draft",
+            "description": accepted_category_set.get("description") or "Draft root taxonomy rebuilt from BERTopic full-corpus discovery.",
+            "status": "draft",
+            "generatedAt": now,
+            "categoryCount": len(selected_roots),
+            "importRunId": accepted_category_set.get("importRunId"),
+        },
+        now=now,
+        actor=actor,
+        reason=reason,
+    )
+    draft_categories: list[dict[str, Any]] = []
+    for index, root in enumerate(selected_roots):
+        category_key = str(root.get("categoryKey") or derive_category_key_from_text(root.get("displayName") or f"root-{index+1}"))
+        lineage = lineage_by_category_key.get(category_key) or f"category-{slugify(lineage_id)}-{slugify(category_key)}"
+        previous_current = current_by_lineage.get(lineage)
+        draft_categories.append(
+            with_version_fields(
+                {
+                    "id": f"{slugify(lineage)}-root-rebuild-v{next_version}",
+                    "lineageId": lineage,
+                    "versionNumber": max_category_version_by_lineage.get(lineage, 0) + 1,
+                    "previousVersionId": previous_current.get("id") if previous_current else None,
+                    "versionState": "draft",
+                    "categorySetId": draft_set["id"],
+                    "corpusId": draft_set.get("corpusId"),
+                    "categoryKey": category_key,
+                    "parentCategoryId": None,
+                    "parentCategoryKey": None,
+                    "displayName": str(root.get("displayName") or title_case_label(category_key)).strip(),
+                    "shortTitle": derive_short_title_from_text(root.get("displayName") or category_key),
+                    "subtitle": None,
+                    "description": root.get("description") or build_root_description(str(root.get("displayName") or category_key), []),
+                    "aliases": [],
+                    "status": "accepted",
+                    "seedItemIds": sorted({str(item_id) for item_id in root.get("documentIds") or [] if str(item_id).strip()})[:250],
+                    "holdoutItemIds": [],
+                    "rank": index + 1,
+                    "depth": 0,
+                    "isPinned": False,
+                    "importRunId": draft_set.get("importRunId"),
+                    "updatedAt": now,
+                },
+                now=now,
+                actor=actor,
+                reason=reason,
+            )
+        )
+    return draft_set, draft_categories
+
+
+def build_root_description(label: str, keywords: list[str]) -> str:
+    keyword_text = ", ".join(keywords[:5])
+    if keyword_text:
+        return f"Keywords: {keyword_text}."
+    return f"Root topic: {label}."
+
+
+def title_case_label(value: str) -> str:
+    parts = [part for part in re.split(r"[\s._:/-]+", str(value or "").strip()) if part]
+    if not parts:
+        return "Topic"
+    return " ".join(part.capitalize() for part in parts[:6])
 
 
 def _utc_now() -> str:

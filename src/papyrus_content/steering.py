@@ -7,13 +7,14 @@ from typing import Any
 import yaml
 
 from .env import PAPYRUS_ROOT
+from .papyrus_config import DEFAULT_STEERING_CONFIG_PATH, resolve_topics_steering_config_path
 
-DEFAULT_STEERING_CONFIG = "corpora/papyrus-steering.yml"
+DEFAULT_STEERING_CONFIG = DEFAULT_STEERING_CONFIG_PATH
 VALID_CORPUS_ROLES = frozenset({"canonical", "source", "supporting", "archive"})
 
 
 def resolve_steering_config_path(config_path: str | None = None) -> Path | None:
-    configured = config_path or os.environ.get("PAPYRUS_STEERING_CONFIG") or DEFAULT_STEERING_CONFIG
+    configured = config_path or os.environ.get("PAPYRUS_STEERING_CONFIG") or resolve_topics_steering_config_path()
     resolved = Path(configured)
     if not resolved.is_absolute():
         resolved = PAPYRUS_ROOT / resolved

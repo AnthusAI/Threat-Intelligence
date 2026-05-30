@@ -32,7 +32,14 @@ def build_record_changes_tolerating_optional_models(
         try:
             filtered = [record for record in pending if record["modelName"] not in skipped_models]
             return build_record_changes(client, filtered)
-        except RuntimeError as error:
+        except (RuntimeError, KeyError, ValueError) as error:
+            if isinstance(error, KeyError):
+                missing_model = str(error).strip("'\"")
+                if missing_model in OPTIONAL_SCHEMA_MODELS and missing_model not in skipped_models:
+                    skipped_models.add(missing_model)
+                    pending = [record for record in pending if record["modelName"] != missing_model]
+                    print(f"skip\t{missing_model}\tmodel is not deployed in AppSync yet; skipped optional records.")
+                    continue
             missing_model = next(
                 (
                     model_name

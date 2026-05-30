@@ -15,6 +15,14 @@ Use this skill when a coding agent needs a repeatable operator path for:
 The story-cycle is a newsroom budget loop, not an article generator. It creates
 private context for editors and copywriters.
 
+## Which Doc/Skill To Use First
+
+| Need | Start here |
+| --- | --- |
+| Planning run | [`skills/edition-planning/SKILL.md`](/Users/ryan/Projects/Papyrus/skills/edition-planning/SKILL.md) |
+| Run/review cycle | This skill |
+| Data contract truth | [`docs/automated-publication-research-workflow.md`](/Users/ryan/Projects/Papyrus/docs/automated-publication-research-workflow.md) |
+
 ## Domain Model
 
 Keep these concepts separate:
@@ -172,6 +180,9 @@ inside the story-cycle run.
 
 ## Editor Selection
 
+Use this phase as the review-and-selection surface. Reporting packet review can
+mutate slot status but still must not place edition content.
+
 Review a reporting packet with:
 
 ```bash
@@ -186,11 +197,18 @@ poetry run papyrus assignments review-reporting-packet \
 Remove `--dry-run` only after reviewing the plan.
 
 - `select` creates a child `copywriting.article-draft` Assignment and
-  `derived_from` relations to the reporting Assignment and packet Message.
+  `derived_from` relations to the reporting Assignment and packet Message. It
+  sets the linked slot status to `selected`, sets `selectedAssignmentId`, and
+  writes `EditionSlot --selected_by--> Assignment`.
 - `brief` creates a child `copywriting.brief-draft` Assignment and
-  `derived_from` relations to the reporting Assignment and packet Message.
-- `merge` requires `--target-item <id>` and links to that Item.
-- `hold` and `kill` write only the review event and metadata attachment.
+  `derived_from` relations to the reporting Assignment and packet Message. It
+  sets the linked slot status to `briefed`, sets `selectedAssignmentId`, and
+  writes `EditionSlot --selected_by--> Assignment`.
+- `hold` and `kill` write the review event, reset the linked slot to `open`,
+  and clear `selectedAssignmentId`.
+- `merge` requires `--target-item <id>` and links to that Item. It does not
+  fill or mutate a slot unless an explicit slot mutation is performed
+  separately.
 
 No packet review creates `Item` or `EditionItem` placement. Run copywriting
 after selection with:
@@ -200,6 +218,16 @@ poetry run papyrus assignments run-copywriting \
   --assignment <copywriting-assignment-id> \
   --dry-run
 ```
+
+Decision table:
+
+| Decision | Slot mutation | Copywriting assignment | Edition placement |
+| --- | --- | --- | --- |
+| `select` | `selected` + winner set | `copywriting.article-draft` | none |
+| `brief` | `briefed` + winner set | `copywriting.brief-draft` | none |
+| `hold` | `open` + winner cleared | none | none |
+| `kill` | `open` + winner cleared | none | none |
+| `merge` | none by default | none | none |
 
 ## Verification
 

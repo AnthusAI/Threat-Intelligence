@@ -13,6 +13,14 @@ The goal is not to publish every assignment. The goal is to over-dispatch
 well-scoped lane work so editors can choose the best outputs for the available
 publication slots.
 
+## Which Doc/Skill To Use First
+
+| Need | Start here |
+| --- | --- |
+| Planning run | This skill |
+| Run/review cycle | [`skills/newsroom-story-cycle/SKILL.md`](/Users/ryan/Projects/Papyrus/skills/newsroom-story-cycle/SKILL.md) |
+| Data contract truth | [`docs/automated-publication-research-workflow.md`](/Users/ryan/Projects/Papyrus/docs/automated-publication-research-workflow.md) |
+
 ## Read First
 
 - `AGENTS.md`: project rules, data boundaries, auth lanes, and layout
@@ -67,6 +75,20 @@ reference/category/graph state, not guess from stale local files.
 - Keep Papyrus publication-neutral. Edition plans, queues, and assignments
   should use configured categories, desks, corpora, doctrine, and references,
   not hard-coded pilot subject matter.
+
+## Edition Slot Plan + Dispatch Checklist
+
+1. Create or update the dated private `Edition`.
+2. Materialize `EditionSlot` rows from section budgets before dispatch.
+3. Compute section dispatch as `ceil(sectionSlots * 1.5)` by default.
+4. Dispatch reporting candidates with deterministic `candidateRank`.
+5. Bind each reporting assignment to a concrete slot at creation time:
+   - `Assignment.metadata.slotTarget` must include `slotId`, `slotLineageId`,
+     `sectionKey`, `slotRank`, `candidateRank`, and `dispatchCount`.
+   - write `Assignment --targets_slot--> EditionSlot`.
+6. Keep culling section-first by default; cross-section substitution requires
+   explicit editor override.
+7. Do not create `Item` or `EditionItem` during plan/dispatch.
 
 ## Current Safe Workflow
 
@@ -210,6 +232,8 @@ Use `SemanticRelation` rows to make assignment context navigable:
 - `targets_lane`: assignment to the editorial-form `SemanticNode`, such as
   `editorial.form.reporting`, `editorial.form.analysis`, or
   `editorial.form.briefs`.
+- `targets_slot`: reporting assignment to its concrete `EditionSlot` at
+  dispatch time. Keep `slotTarget` metadata aligned with this relation.
 - `uses_evidence`: assignment to references or comments that support the task.
 - `uses_signal`: assignment to graph concepts or relations that influenced the
   opportunity score.

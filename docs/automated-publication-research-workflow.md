@@ -11,6 +11,14 @@ the workflow is publication-neutral: change the corpus config, accepted
 taxonomy, ontology, sections, doctrine, and edition plan, and the same machinery
 should work for another publication.
 
+## Which Doc/Skill To Use First
+
+| Need | Start here |
+| --- | --- |
+| Planning run | [`skills/edition-planning/SKILL.md`](/Users/ryan/Projects/Papyrus/skills/edition-planning/SKILL.md) |
+| Run/review cycle | [`skills/newsroom-story-cycle/SKILL.md`](/Users/ryan/Projects/Papyrus/skills/newsroom-story-cycle/SKILL.md) |
+| Data contract truth | This file |
+
 ## Mental Model
 
 Use these objects as distinct editorial concepts:
@@ -48,6 +56,59 @@ Assignment
 
 New packet writes use `Assignment --produces--> Message`. Existing
 `Message --comment--> Assignment` packet links remain readable for compatibility.
+
+## Edition Slot Orchestration
+
+`EditionSlot` is the planning unit for section-first culling and final packet
+selection. Story-cycle dispatch binds reporting candidates to concrete slots
+before review starts.
+
+Field contract:
+
+- `id`, `editionId`, `sectionKey`, `slotRank`
+- `targetType` (`article|brief`)
+- `targetLengthBand`
+- `minImageAssets`
+- `status` (`open|assigned|selected|briefed|filled|killed`)
+- `selectedAssignmentId`
+- `createdAt`, `updatedAt`
+
+Current flow:
+
+- Slot creation starts in `assigned` status during planning.
+- Reporting dispatch must set assignment metadata `slotTarget` and write
+  `Assignment --targets_slot--> EditionSlot`.
+- Review `select|brief` writes `EditionSlot --selected_by--> Assignment` and
+  sets slot status to `selected` or `briefed` with `selectedAssignmentId`.
+- Review `hold|kill` keeps the slot available by resetting slot state to
+  `open` and clearing `selectedAssignmentId`.
+- Review `merge` does not mutate slot state unless an explicit slot mutation is
+  requested separately.
+- `filled` and `killed` remain later editorial/layout lifecycle states, not
+  reporting-packet review outcomes.
+
+Decision matrix:
+
+| Decision | Slot status mutation | Slot relation mutation | Copywriting child | Notes |
+| --- | --- | --- | --- | --- |
+| `select` | `selected` + set `selectedAssignmentId` | add `selected_by` | `copywriting.article-draft` | Marks slot winner candidate. |
+| `brief` | `briefed` + set `selectedAssignmentId` | add `selected_by` | `copywriting.brief-draft` | Marks slot winner candidate for brief lane. |
+| `hold` | `open` + clear `selectedAssignmentId` | none | none | Candidate kept private; slot stays available. |
+| `kill` | `open` + clear `selectedAssignmentId` | none | none | Candidate rejected; slot stays available. |
+| `merge` | none by default | none by default | none | Does not fill a slot unless explicitly attached. |
+
+Section-first culling rule:
+
+- Compare and cull candidates within each section slot budget first.
+- Cross-section substitution is an explicit editor override, not a default.
+
+Story Budget should be read as a slot-centric board:
+
+- per-slot pipeline state;
+- candidate stack mapped to each slot;
+- selected winner per slot;
+- fill delta and unresolved slots;
+- section rollups as derived aggregates.
 
 ## Packet Types
 

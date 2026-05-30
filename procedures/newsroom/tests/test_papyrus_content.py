@@ -13,6 +13,7 @@ from papyrus_content import cli as papyrus_content_cli
 from papyrus_content.catalog import build_prepared_reference_catalog, build_reference_catalog_registration_records, catalog_items
 from papyrus_content.ids import hash_short, knowledge_corpus_id, reference_lineage_id_for
 from papyrus_content.model_attachments import build_text_model_payload_attachment
+from papyrus_content.papyrus_config import resolve_topics_ignore_terms
 from papyrus_content.seed_edition import build_seed_edition_records, load_seed_payload, seed_edition_config
 from papyrus_content.source_readiness import reference_source_readiness
 from papyrus_content.steering import load_steering_config, require_corpus_config
@@ -124,6 +125,11 @@ class PapyrusContentTests(unittest.TestCase):
 
     def test_hash_short_is_stable(self) -> None:
         self.assertEqual(hash_short(["a", "b"]), hash_short(["a", "b"]))
+
+    def test_topics_ignore_terms_include_paper_and_url(self) -> None:
+        terms = set(resolve_topics_ignore_terms())
+        self.assertIn("paper", terms)
+        self.assertIn("url", terms)
 
 
 if __name__ == "__main__":

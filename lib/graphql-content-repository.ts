@@ -587,9 +587,7 @@ async function normalizeImageAsset(item: GraphQLItem, asset: GraphQLMediaAsset):
   const src = await getMediaUrl(asset);
   if (!src) return null;
   const metadata = parseObjectMetadata(asset.metadata);
-  const sourceUrl = typeof metadata?.sourceUrl === "string" ? metadata.sourceUrl.trim() : "";
   const themeVariants = await parseThemeVariantsMetadata(metadata?.themeVariants);
-  const effectiveThemeVariants = themeVariants ?? getPapyrusPlantThemeVariantsFallback(src, sourceUrl);
 
   return {
     id: asset.id,
@@ -600,7 +598,7 @@ async function normalizeImageAsset(item: GraphQLItem, asset: GraphQLMediaAsset):
     credit: asset.credit ?? asset.caption ?? "Media asset",
     roles: parseImageRoles(asset.role),
     layout: getImageLayout(asset, metadata),
-    themeVariants: effectiveThemeVariants,
+    themeVariants,
   };
 }
 
@@ -663,20 +661,6 @@ async function resolveThemeVariantSource(value: unknown): Promise<string | undef
   if (sourceUrl) return sourceUrl;
   const src = typeof entry.src === "string" && entry.src.trim() ? entry.src.trim() : null;
   return src ?? undefined;
-}
-
-function getPapyrusPlantThemeVariantsFallback(src: string, sourceUrl: string): ArticleImageThemeVariants | undefined {
-  if (
-    src.includes("papyrus-plant-placeholder.png")
-    || sourceUrl === "/papyrus-plant-placeholder.png"
-  ) {
-    return {
-      dark: {
-        src: "/papyrus-plant-placeholder-dark.png",
-      },
-    };
-  }
-  return undefined;
 }
 
 function parseObjectMetadata(value: unknown): Record<string, unknown> | undefined {

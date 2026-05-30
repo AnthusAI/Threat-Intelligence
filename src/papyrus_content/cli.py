@@ -82,7 +82,10 @@ from .categories_commands import (
     categories_import_config,
     categories_import_projection,
     categories_import_steering,
+    categories_rebuild_roots,
+    categories_rebuild_roots_promote,
     categories_review_proposal,
+    categories_reset,
     categories_run_curation_cycle,
     categories_sandbox_steering_config,
 )
@@ -102,6 +105,8 @@ from .references_commands import (
     references_export_analysis_manifest,
     references_export_scope_training,
     references_extract_text_now,
+    references_find_pdf_url_text_queue,
+    references_find_url_text,
     references_fetch_pdf_url_text_queue,
     references_recount_citation_counts,
     references_process_dedupe_identifiers,
@@ -163,8 +168,6 @@ from .source_readiness import (
     build_reference_source_status_rows,
     reference_source_readiness,
 )
-from .reference_url_text import run_reference_url_text_extraction
-from .reference_metadata_generation import run_reference_metadata_generation_from_extracted_text
 from .seed_edition import seed_edition_content
 from .steering import (
     load_steering_config,
@@ -198,7 +201,9 @@ PORTED_COMMANDS = frozenset(
         "references:label",
         "references:unlabel",
         "references:labels",
-        "references:discover-citation-led",
+        "references:find-fetch-url-text",
+        "references:find-fetch-pdf-queue",
+        "references:find-discover-citation-led",
         "references:curate-recent",
         "references:process-extract-text-now",
         "references:process-attach-extracted-text",
@@ -206,7 +211,7 @@ PORTED_COMMANDS = frozenset(
         "references:process-fetch-pdf-queue",
         "references:process-recount-citation-counts",
         "references:process-dedupe-identifiers",
-        "references:process-resolve-citation-stubs",
+        "references:find-resolve-citation-stubs",
         "references:process-filter-text",
         "references:process-generate-metadata",
         "references:create-doi-backfill-assignment",
@@ -294,7 +299,10 @@ PORTED_COMMANDS = frozenset(
         "categories:draft-update-topic",
         "categories:draft-archive-topic",
         "categories:draft-promote",
+        "categories:rebuild-roots",
+        "categories:rebuild-roots-promote",
         "categories:review-proposal",
+        "categories:reset",
         "categories:run-curation-cycle",
         "auth:refresh-jwt",
         "batch:register-catalog",
@@ -377,7 +385,13 @@ def dispatch(group: str, command: str, flags: list[str]) -> None:
         references_unlabel(flags)
     elif route == "references:labels":
         references_labels(flags)
-    elif route == "references:discover-citation-led":
+    elif route == "references:find-fetch-url-text":
+        require_reference_process_runtime("references find-fetch-url-text")
+        references_find_url_text(flags)
+    elif route == "references:find-fetch-pdf-queue":
+        require_reference_process_runtime("references find-fetch-pdf-queue")
+        references_find_pdf_url_text_queue(flags)
+    elif route == "references:find-discover-citation-led":
         references_discover_citation_led(flags)
     elif route == "references:curate-recent":
         references_curate_recent(flags)
@@ -399,8 +413,8 @@ def dispatch(group: str, command: str, flags: list[str]) -> None:
     elif route == "references:process-dedupe-identifiers":
         require_reference_process_runtime("references process-dedupe-identifiers")
         references_process_dedupe_identifiers(flags)
-    elif route == "references:process-resolve-citation-stubs":
-        require_reference_process_runtime("references process-resolve-citation-stubs")
+    elif route == "references:find-resolve-citation-stubs":
+        require_reference_process_runtime("references find-resolve-citation-stubs")
         references_process_resolve_citation_stubs(flags)
     elif route == "references:process-filter-text":
         require_reference_process_runtime("references process-filter-text")
@@ -591,8 +605,14 @@ def dispatch(group: str, command: str, flags: list[str]) -> None:
         categories_draft_archive_topic(flags)
     elif route == "categories:draft-promote":
         categories_draft_promote(flags)
+    elif route == "categories:rebuild-roots":
+        categories_rebuild_roots(flags)
+    elif route == "categories:rebuild-roots-promote":
+        categories_rebuild_roots_promote(flags)
     elif route == "categories:review-proposal":
         categories_review_proposal(flags)
+    elif route == "categories:reset":
+        categories_reset(flags)
     elif route == "categories:run-curation-cycle":
         categories_run_curation_cycle(flags)
     elif route == "auth:refresh-jwt":
@@ -750,12 +770,6 @@ def references_register_catalog(flags: list[str]) -> None:
         return
     apply_record_changes(client, result["changes"])
     update_newsroom_summary_after_reference_registration(client, result["changes"], result["plan"])
-    for line in fetch_reference_url_text_after_registration(client, result, options).get("lines", []):
-        print(line)
-    for line in generate_reference_metadata_after_registration(client, result, options).get("lines", []):
-        print(line)
-    for line in sync_reference_vectors_after_registration(result, options).get("lines", []):
-        print(line)
 
 
 def references_register_catalog_split(flags: list[str]) -> None:
@@ -801,12 +815,6 @@ def references_register_catalog_split(flags: list[str]) -> None:
         if apply:
             apply_record_changes(client, result["changes"])
             update_newsroom_summary_after_reference_registration(client, result["changes"], result["plan"])
-            for line in fetch_reference_url_text_after_registration(client, result, options).get("lines", []):
-                print(line)
-            for line in generate_reference_metadata_after_registration(client, result, options).get("lines", []):
-                print(line)
-            for line in sync_reference_vectors_after_registration(result, options).get("lines", []):
-                print(line)
 
 
 def references_source_status(flags: list[str]) -> None:
@@ -1063,172 +1071,6 @@ def print_reference_registration_summary(plan: dict[str, Any], changes: list[dic
     print(f"references\tcreate-from-catalog\tapply\t{'yes' if apply else 'no'}")
 
 
-def sync_reference_vectors_after_registration(result: dict[str, Any], options: dict[str, Any]) -> dict[str, Any]:
-    if parse_boolean_option(options.get("vector-sync"), True, "--vector-sync") is False:
-        return {"lines": ["references\tvector-sync\tdisabled"]}
-    reference_ids = sorted(
-        {
-            change["expected"].get("lineageId") or change["expected"].get("id")
-            for change in result["changes"]
-            if change.get("modelName") == "Reference" and change.get("action") in {"create", "update"}
-        }
-    )
-    if not reference_ids:
-        return {"lines": ["references\tvector-sync\tskipped\tno GraphQL Reference changes"]}
-    lines = []
-    for index in range(0, len(reference_ids), 100):
-        batch = reference_ids[index : index + 100]
-        args = [
-            "run",
-            "papyrus",
-            "knowledge-vector-index",
-            "--action",
-            "sync",
-            "--force",
-            "--progress-every",
-            "0",
-            *sum([["--reference-id", reference_id] for reference_id in batch], []),
-        ]
-        completed = subprocess.run(["poetry", *args], cwd=PAPYRUS_ROOT, capture_output=True, text=True, check=False)
-        if completed.returncode != 0:
-            message = completed.stderr.strip() or completed.stdout.strip() or "vector sync failed"
-            lines.append(f"references\tvector-sync\tfailed\t{len(batch)}\t{message}")
-            raise RuntimeError(f"Reference registration updated GraphQL state but vector sync failed: {message}")
-        lines.append(f"references\tvector-sync\tsynced\t{len(batch)}")
-    return {"lines": lines}
-
-
-def fetch_reference_url_text_after_registration(
-    client,
-    result: dict[str, Any],
-    options: dict[str, Any],
-) -> dict[str, Any]:
-    if parse_boolean_option(options.get("url-text"), True, "--url-text") is False:
-        return {"lines": ["references\tprocess-fetch-url-text\tdisabled"]}
-    reference_ids = sorted(
-        {
-            change["expected"].get("id")
-            for change in result["changes"]
-            if change.get("modelName") == "Reference" and change.get("action") in {"create", "update"}
-        }
-    )
-    if not reference_ids:
-        return {"lines": ["references\tprocess-fetch-url-text\tskipped\tno GraphQL Reference changes"]}
-    references = client.list_records("Reference")
-    attachments = client.list_records("ReferenceAttachment")
-    semantic_relations = client.list_records("SemanticRelation")
-    corpus_config = result.get("corpusConfig") or {}
-    corpus_id = result.get("plan", {}).get("corpusId")
-    max_count = normalize_non_negative_integer(options.get("url-text-max-count"), "--url-text-max-count")
-    force = parse_boolean_option(options.get("url-text-force"), False, "--url-text-force")
-    model = normalize_string(options.get("url-text-model")) or "gpt-5.4-nano"
-    extraction = run_reference_url_text_extraction(
-        client=client,
-        references=references,
-        attachments=attachments,
-        semantic_relations=semantic_relations,
-        corpus_key_by_id={str(corpus_id or ""): str(corpus_config.get("key") or "")},
-        corpus_id=str(corpus_id or "") or None,
-        reference_ids=set(reference_ids),
-        curation_status="all",
-        max_count=max_count,
-        force=force,
-        apply=True,
-        bucket=normalize_string(options.get("bucket")),
-        model=model,
-    )
-    update_newsroom_summary_after_extracted_text_attachments(
-        client,
-        extraction["changes"],
-        actor_label=str(options.get("actor") or "Papyrus content CLI"),
-        reason=f"references create-from-catalog process-fetch-url-text {corpus_id or '-'}",
-    )
-    lines = [
-        f"references\tprocess-fetch-url-text\teligible\t{extraction['eligibleCount']}",
-        f"references\tprocess-fetch-url-text\tskipped-existing\t{extraction['skippedExistingCount']}",
-        f"references\tprocess-fetch-url-text\tplanned\t{extraction['plannedCount']}",
-        f"references\tprocess-fetch-url-text\tplanned-attachments\t{extraction.get('plannedAttachmentCount', 0)}",
-        f"references\tprocess-fetch-url-text\tplanned-reference-metadata\t{extraction.get('plannedReferenceMetadataCount', 0)}",
-        f"references\tprocess-fetch-url-text\tfiltered\t{extraction.get('filteredCount', 0)}",
-        f"references\tprocess-fetch-url-text\tfallback-raw\t{extraction.get('fallbackRawCount', 0)}",
-        f"references\tprocess-fetch-url-text\tchanges\t{extraction['changeCount']}",
-        f"references\tprocess-fetch-url-text\treference-metadata-changes\t{extraction.get('referenceMetadataChangeCount', 0)}",
-        f"references\tprocess-fetch-url-text\tattachment-changes\t{extraction.get('attachmentChangeCount', 0)}",
-        f"references\tprocess-fetch-url-text\tfailures\t{len(extraction['failures'])}",
-        f"references\tprocess-fetch-url-text\tmodel\t{model}",
-    ]
-    if max_count:
-        lines.append(f"references\tprocess-fetch-url-text\tmax-count\t{max_count}")
-    for failure in extraction["failures"][:10]:
-        lines.append(
-            f"reference-url-text\tfailed\t{failure.get('referenceId') or '-'}\t"
-            f"{failure.get('sourceUri') or '-'}\t{failure.get('error') or 'unknown error'}"
-        )
-    for fallback in (extraction.get("filterFallbacks") or [])[:10]:
-        lines.append(
-            f"reference-url-text\tfilter-fallback\t{fallback.get('referenceId') or '-'}\t"
-            f"{fallback.get('sourceUri') or '-'}\t"
-            f"{json.dumps(fallback.get('reason') or {}, sort_keys=True)}"
-        )
-    if len(extraction["failures"]) > 10:
-        lines.append(f"references\tprocess-fetch-url-text\tomitted-failures\t{len(extraction['failures']) - 10}")
-    return {"lines": lines}
-
-
-def generate_reference_metadata_after_registration(
-    client,
-    result: dict[str, Any],
-    options: dict[str, Any],
-) -> dict[str, Any]:
-    if parse_boolean_option(options.get("metadata-from-text"), True, "--metadata-from-text") is False:
-        return {"lines": ["references\tprocess-generate-metadata\tdisabled"]}
-    reference_ids = sorted(
-        {
-            change["expected"].get("id")
-            for change in result["changes"]
-            if change.get("modelName") == "Reference" and change.get("action") in {"create", "update"}
-        }
-    )
-    if not reference_ids:
-        return {"lines": ["references\tprocess-generate-metadata\tskipped\tno GraphQL Reference changes"]}
-    references = client.list_records("Reference")
-    attachments = client.list_records("ReferenceAttachment")
-    corpus_id = result.get("plan", {}).get("corpusId")
-    max_count = normalize_non_negative_integer(options.get("metadata-max-count"), "--metadata-max-count")
-    generation = run_reference_metadata_generation_from_extracted_text(
-        references=references,
-        attachments=attachments,
-        corpus_id=str(corpus_id or "") or None,
-        reference_ids=set(reference_ids),
-        curation_status="all",
-        max_count=max_count,
-        model=normalize_string(options.get("metadata-model")) or "gpt-5.4-nano",
-        apply=True,
-        bucket=normalize_string(options.get("bucket")),
-    )
-    lines = [
-        f"references\tprocess-generate-metadata\tattempted\t{generation['attemptedCount']}",
-        f"references\tprocess-generate-metadata\tgenerated\t{generation['generatedCount']}",
-        f"references\tprocess-generate-metadata\tskipped-missing-text\t{generation['skippedMissingTextCount']}",
-        f"references\tprocess-generate-metadata\tgeneration-failures\t{generation['generationFailureCount']}",
-    ]
-    if max_count:
-        lines.append(f"references\tprocess-generate-metadata\tmax-count\t{max_count}")
-    failure_rows = [
-        item for item in generation.get("items") or []
-        if str(item.get("status") or "") not in {"generated", "skipped_missing_text"}
-    ]
-    for failure in failure_rows[:10]:
-        reference = failure.get("reference") if isinstance(failure.get("reference"), dict) else {}
-        lines.append(
-            f"reference-metadata\tfailed\t{reference.get('id') or '-'}\t"
-            f"{reference.get('externalItemId') or '-'}\t{failure.get('error') or 'generation failed'}"
-        )
-    if len(failure_rows) > 10:
-        lines.append(f"references\tprocess-generate-metadata\tomitted-failures\t{len(failure_rows) - 10}")
-    return {"lines": lines}
-
-
 def maybe_enrich_reference_catalog_title_subtitle(
     catalog: dict[str, Any],
     options: dict[str, Any],
@@ -1337,6 +1179,8 @@ def print_usage() -> None:
     print("  backfill-operational-indexes/import-sections,")
     print("  relations import-types/backfill, ontology preflight/rank/status/explain/profile/associate/dedupe/recompute-authority/doctor,")
     print("  messages export/import-legacy-comments,")
-    print("  categories import/export/draft/review/curation-cycle commands,")
+    print("  categories import/export/draft/review/curation-cycle/rebuild-roots commands,")
+    print("    note: rebuild-roots + taxonomy discovery run BERTopic clustering;")
+    print("    semi-supervised classifier behavior lives in Biblicus topic-classifier train/project,")
     print("  auth refresh-jwt, batch register-catalog/enrich-references,")
     print("  and test category-mappers/doi-backfill/identifier-backfill")

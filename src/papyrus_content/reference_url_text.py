@@ -46,6 +46,8 @@ def build_reference_url_text_attachment_plans(
     model: str = "gpt-5.4-nano",
     pdf_only: bool = False,
     grobid_url: str | None = None,
+    allow_discovery: bool = False,
+    find_only: bool = False,
 ) -> dict[str, Any]:
     corpus_key_by_id = corpus_key_by_id or {}
     semantic_relations = semantic_relations or []
@@ -63,6 +65,7 @@ def build_reference_url_text_attachment_plans(
     filtered_count = 0
     fallback_raw_count = 0
     skipped_missing_source = 0
+    skipped_needs_find = 0
     skipped_non_pdf = 0
     failed_grobid = 0
     authors_parsed = 0
@@ -93,30 +96,105 @@ def build_reference_url_text_attachment_plans(
         seen_lineages.add(lineage_id)
         source_uri = normalize_http_url(reference.get("sourceUri"))
         if not source_uri:
+            source_uri = _reference_find_seed_uri(reference) if allow_discovery else None
+        if not source_uri:
             skipped_missing_source += 1
             continue
-        eligible += 1
         existing_canonical = select_extracted_text_attachment(reference, attachments)
         existing_raw = select_extracted_text_raw_attachment(reference, attachments)
         try:
-            enrichment = resolve_source_site_enrichment(
-                reference=reference,
-                source_uri=source_uri,
-            )
-            doi_metrics = _doi_resolution_metrics(enrichment)
-            doi_resolved += doi_metrics.get("doiResolved", 0)
-            doi_pdf_selected += doi_metrics.get("doiPdfSelected", 0)
-            doi_pdf_missed += doi_metrics.get("doiPdfMissed", 0)
-            doi_search_used += doi_metrics.get("doiSearchUsed", 0)
-            doi_search_hit += doi_metrics.get("doiSearchHit", 0)
-            doi_api_fallback_used += doi_metrics.get("doiApiFallbackUsed", 0)
-            doi_paywalled_or_blocked += doi_metrics.get("doiPaywalledOrBlocked", 0)
-            extraction_source_uri = normalize_http_url(enrichment.get("canonicalSourceUri")) or source_uri
+            enrichment: dict[str, Any] = {}
+            extraction_source_uri = ""
+            if allow_discovery:
+                enrichment = resolve_source_site_enrichment(
+                    reference=reference,
+                    source_uri=source_uri,
+                )
+                doi_metrics = _doi_resolution_metrics(enrichment)
+                doi_resolved += doi_metrics.get("doiResolved", 0)
+                doi_pdf_selected += doi_metrics.get("doiPdfSelected", 0)
+                doi_pdf_missed += doi_metrics.get("doiPdfMissed", 0)
+                doi_search_used += doi_metrics.get("doiSearchUsed", 0)
+                doi_search_hit += doi_metrics.get("doiSearchHit", 0)
+                doi_api_fallback_used += doi_metrics.get("doiApiFallbackUsed", 0)
+                doi_paywalled_or_blocked += doi_metrics.get("doiPaywalledOrBlocked", 0)
+                extraction_source_uri = normalize_http_url(enrichment.get("canonicalSourceUri")) or source_uri
+            else:
+                extraction_source_uri, needs_find_reason = _resolve_process_source_uri(reference, attachments)
+                if not extraction_source_uri:
+                    skipped_needs_find += 1
+                    items.append(
+                        {
+                            "reference": _reference_row(reference),
+                            "status": "needs_find",
+                            "error": needs_find_reason
+                            or {
+                                "code": "needs_find",
+                                "message": "Reference must complete find stage before processing.",
+                            },
+                        }
+                    )
+                    continue
             if pdf_only and not _looks_like_pdf_uri(extraction_source_uri):
                 skipped_non_pdf += 1
                 continue
+            eligible += 1
             if existing_canonical and not force:
                 skipped_existing += 1
+                continue
+            if find_only:
+                if allow_discovery:
+                    reference_record = _reference_metadata_update_record(
+                        reference=reference,
+                        enrichment=enrichment,
+                        source_uri=source_uri,
+                        canonical_uri=extraction_source_uri,
+                        publication_date_resolution={
+                            "resolvedSourcePublishedAt": reference.get("sourcePublishedAt"),
+                            "strategy": "find-stage",
+                            "source": "reference.sourcePublishedAt",
+                        },
+                    )
+                    if reference_record is not None:
+                        reference_records.append(reference_record)
+                    if _looks_like_pdf_uri(extraction_source_uri):
+                        corpus_key = (
+                            corpus_key_by_id.get(str(reference.get("corpusId") or ""))
+                            or _corpus_key_from_reference(reference)
+                        )
+                        existing_source = select_reference_attachment_by_role(reference, attachments, role="source")
+                        source_attachment = _reference_source_attachment_record(
+                            reference=reference,
+                            corpus_key=corpus_key,
+                            source_uri=extraction_source_uri,
+                            metadata={
+                                "source": "reference-find-stage",
+                                "sourcePlugin": enrichment.get("pluginKey"),
+                                "doiResolution": _doi_resolution_for_metadata(enrichment),
+                                "downloadedAt": _utc_now(),
+                            },
+                            content=_download_source_attachment_from_uri(extraction_source_uri),
+                            media_type="application/pdf",
+                            existing_attachment=existing_source,
+                        )
+                        plans.append(
+                            {
+                                "reference": reference,
+                                "record": {"modelName": "ReferenceAttachment", "expected": source_attachment},
+                                "body": source_attachment.pop("__attachmentBody"),
+                            }
+                        )
+                planned_references += 1
+                items.append(
+                    {
+                        "reference": _reference_row(reference),
+                        "status": "found",
+                        "sourcePlugin": enrichment.get("pluginKey") if allow_discovery else "none",
+                        "sourceUri": extraction_source_uri,
+                    }
+                )
+                if max_count and planned_references >= max_count:
+                    break
                 continue
             extracted = _extract_url_text(
                 extraction_source_uri,
@@ -142,15 +220,16 @@ def build_reference_url_text_attachment_plans(
                         "details": {"sourceUri": extraction_source_uri},
                     }
                 )
-            reference_record = _reference_metadata_update_record(
-                reference=reference,
-                enrichment=enrichment,
-                source_uri=source_uri,
-                canonical_uri=extraction_source_uri,
-                publication_date_resolution=publication_date_resolution,
-            )
-            if reference_record is not None:
-                reference_records.append(reference_record)
+            if allow_discovery:
+                reference_record = _reference_metadata_update_record(
+                    reference=reference,
+                    enrichment=enrichment,
+                    source_uri=source_uri,
+                    canonical_uri=extraction_source_uri,
+                    publication_date_resolution=publication_date_resolution,
+                )
+                if reference_record is not None:
+                    reference_records.append(reference_record)
             raw_text = str(extracted.get("text") or "").strip()
             raw_markdown = str(extracted.get("markdown") or raw_text)
             if not raw_text:
@@ -160,29 +239,30 @@ def build_reference_url_text_attachment_plans(
                 or _corpus_key_from_reference(reference)
             )
 
-            existing_source = select_reference_attachment_by_role(reference, attachments, role="source")
-            if is_pdf_source:
-                source_attachment = _reference_source_attachment_record(
-                    reference=reference,
-                    corpus_key=corpus_key,
-                    source_uri=extraction_source_uri,
-                    metadata={
-                        "source": "biblicus-url-text",
-                        "sourcePlugin": enrichment.get("pluginKey"),
-                        "doiResolution": _doi_resolution_for_metadata(enrichment),
-                        "downloadedAt": _utc_now(),
-                    },
-                    content=_download_source_attachment_from_uri(extraction_source_uri),
-                    media_type=str(extracted.get("contentType") or "application/pdf"),
-                    existing_attachment=existing_source,
-                )
-                plans.append(
-                    {
-                        "reference": reference,
-                        "record": {"modelName": "ReferenceAttachment", "expected": source_attachment},
-                        "body": source_attachment.pop("__attachmentBody"),
-                    }
-                )
+            if allow_discovery:
+                existing_source = select_reference_attachment_by_role(reference, attachments, role="source")
+                if is_pdf_source:
+                    source_attachment = _reference_source_attachment_record(
+                        reference=reference,
+                        corpus_key=corpus_key,
+                        source_uri=extraction_source_uri,
+                        metadata={
+                            "source": "biblicus-url-text",
+                            "sourcePlugin": enrichment.get("pluginKey"),
+                            "doiResolution": _doi_resolution_for_metadata(enrichment),
+                            "downloadedAt": _utc_now(),
+                        },
+                        content=_download_source_attachment_from_uri(extraction_source_uri),
+                        media_type=str(extracted.get("contentType") or "application/pdf"),
+                        existing_attachment=existing_source,
+                    )
+                    plans.append(
+                        {
+                            "reference": reference,
+                            "record": {"modelName": "ReferenceAttachment", "expected": source_attachment},
+                            "body": source_attachment.pop("__attachmentBody"),
+                        }
+                    )
 
             if is_pdf_source:
                 filter_result = {
@@ -218,7 +298,7 @@ def build_reference_url_text_attachment_plans(
                 "source": "biblicus-url-text",
                 "extractorId": "biblicus.extract.url-text",
                 "sourceUri": extraction_source_uri,
-                "sourceUriOriginal": source_uri,
+                "sourceUriOriginal": source_uri if allow_discovery else None,
                 "extractedAt": _utc_now(),
                 "externalItemId": str(reference.get("externalItemId") or reference.get("id") or "") or None,
                 "title": extracted.get("title"),
@@ -233,7 +313,8 @@ def build_reference_url_text_attachment_plans(
                 "structured": _structured_summary_for_metadata(structured),
                 "publicationDateResolution": publication_date_resolution,
             }
-            raw_metadata.update(_enrichment_attachment_metadata(enrichment))
+            if allow_discovery:
+                raw_metadata.update(_enrichment_attachment_metadata(enrichment))
             raw_expected = _reference_attachment_record(
                 reference=reference,
                 role="extracted_text_raw",
@@ -260,7 +341,7 @@ def build_reference_url_text_attachment_plans(
                 filter_fallback = {
                     "referenceId": reference.get("id"),
                     "externalItemId": reference.get("externalItemId"),
-                    "sourceUri": source_uri,
+                    "sourceUri": extraction_source_uri,
                     "reason": filter_result.get("error")
                     or {"code": "article_filter_failed", "message": "Article-text filter failed."},
                 }
@@ -270,7 +351,7 @@ def build_reference_url_text_attachment_plans(
                 "source": "biblicus-article-text-filter",
                 "extractorId": "biblicus.extract.article-text",
                 "sourceUri": extraction_source_uri,
-                "sourceUriOriginal": source_uri,
+                "sourceUriOriginal": source_uri if allow_discovery else None,
                 "filteredAt": _utc_now(),
                 "filterStatus": canonical_status,
                 "filterPromptVersion": filter_result.get("promptVersion"),
@@ -294,7 +375,8 @@ def build_reference_url_text_attachment_plans(
                 },
                 "textLength": len(canonical_text),
             }
-            canonical_metadata.update(_enrichment_attachment_metadata(enrichment))
+            if allow_discovery:
+                canonical_metadata.update(_enrichment_attachment_metadata(enrichment))
             graph_plan = _plan_grobid_citation_graph_records(
                 source_reference=reference,
                 all_references=references,
@@ -365,7 +447,7 @@ def build_reference_url_text_attachment_plans(
                 {
                     "reference": _reference_row(reference),
                     "status": canonical_status,
-                    "sourcePlugin": enrichment.get("pluginKey"),
+                    "sourcePlugin": enrichment.get("pluginKey") if allow_discovery else "find_stage",
                     "filter": {
                         "status": filter_result.get("status"),
                         "spanCount": filter_result.get("spanCount"),
@@ -393,7 +475,7 @@ def build_reference_url_text_attachment_plans(
                 {
                     "referenceId": reference.get("id"),
                     "externalItemId": reference.get("externalItemId"),
-                    "sourceUri": source_uri,
+                    "sourceUri": extraction_source_uri or source_uri,
                     "reason": reason,
                     "error": json.dumps(reason, sort_keys=True),
                 }
@@ -422,6 +504,7 @@ def build_reference_url_text_attachment_plans(
         "fallbackRawCount": fallback_raw_count,
         "skippedExistingCount": skipped_existing,
         "skippedMissingSourceCount": skipped_missing_source,
+        "skippedNeedsFindCount": skipped_needs_find,
         "skippedNonPdfCount": skipped_non_pdf,
         "failedGrobidCount": failed_grobid,
         "authorsParsedCount": authors_parsed,
@@ -498,6 +581,7 @@ def run_reference_url_text_extraction(
         "fallbackRawCount": planned["fallbackRawCount"],
         "skippedExistingCount": planned["skippedExistingCount"],
         "skippedMissingSourceCount": planned.get("skippedMissingSourceCount", 0),
+        "skippedNeedsFindCount": planned.get("skippedNeedsFindCount", 0),
         "skippedNonPdfCount": planned.get("skippedNonPdfCount", 0),
         "failedGrobidCount": planned.get("failedGrobidCount", 0),
         "authorsParsedCount": planned.get("authorsParsedCount", 0),
@@ -516,6 +600,91 @@ def run_reference_url_text_extraction(
         "doiPaywalledOrBlockedCount": planned.get("doiPaywalledOrBlockedCount", 0),
         "changes": changes,
         "graphChangeCount": len([change for change in graph_changes if change.get("action") != "noop"]),
+        "attachmentChangeCount": len([change for change in attachment_changes if change.get("action") != "noop"]),
+        "referenceMetadataChangeCount": len([change for change in reference_changes if change.get("action") != "noop"]),
+        "changeCount": len([change for change in changes if change.get("action") != "noop"]),
+    }
+    if apply:
+        summary["applySummary"] = apply_reference_url_text_attachment_changes(
+            client=client,
+            changes=changes,
+            plans=planned["plans"],
+            bucket=bucket,
+        )
+    return summary
+
+
+def run_reference_source_find(
+    *,
+    client: Any,
+    references: list[dict[str, Any]],
+    attachments: list[dict[str, Any]],
+    corpus_key_by_id: dict[str, str] | None = None,
+    corpus_id: str | None = None,
+    reference_ids: set[str] | None = None,
+    external_item_ids: set[str] | None = None,
+    curation_status: str = "all",
+    max_count: int | None = None,
+    force: bool = False,
+    apply: bool = False,
+    bucket: str | None = None,
+    pdf_only: bool = False,
+) -> dict[str, Any]:
+    from .records import build_record_changes, build_record_changes_targeted_by_id
+
+    planned = build_reference_url_text_attachment_plans(
+        references=references,
+        attachments=attachments,
+        semantic_relations=[],
+        corpus_key_by_id=corpus_key_by_id,
+        corpus_id=corpus_id,
+        reference_ids=reference_ids,
+        external_item_ids=external_item_ids,
+        curation_status=curation_status,
+        max_count=max_count,
+        force=force,
+        pdf_only=pdf_only,
+        allow_discovery=True,
+        find_only=True,
+    )
+    attachment_records = [plan["record"] for plan in planned["plans"]]
+    reference_changes = build_record_changes_targeted_by_id(client, planned.get("referenceRecords") or [])
+    attachment_changes = build_record_changes(client, attachment_records)
+    changes = [*reference_changes, *attachment_changes]
+    summary = {
+        "plans": planned["plans"],
+        "referenceRecords": planned.get("referenceRecords") or [],
+        "graphRecords": [],
+        "failures": planned["failures"],
+        "items": planned["items"],
+        "filterFallbacks": [],
+        "eligibleCount": planned["eligibleCount"],
+        "plannedCount": planned["plannedCount"],
+        "plannedAttachmentCount": planned["plannedAttachmentCount"],
+        "plannedReferenceMetadataCount": planned.get("plannedReferenceMetadataCount", 0),
+        "filteredCount": 0,
+        "fallbackRawCount": 0,
+        "skippedExistingCount": planned["skippedExistingCount"],
+        "skippedMissingSourceCount": planned.get("skippedMissingSourceCount", 0),
+        "skippedNeedsFindCount": 0,
+        "skippedNonPdfCount": planned.get("skippedNonPdfCount", 0),
+        "failedGrobidCount": 0,
+        "authorsParsedCount": 0,
+        "authorsLinkedCount": 0,
+        "citationsParsedCount": 0,
+        "citationsUpsertedCount": 0,
+        "citationsSkippedLowConfidenceCount": 0,
+        "citationRelationsCreatedCount": 0,
+        "citationGraphWarnings": [],
+        "doiResolvedCount": planned.get("doiResolvedCount", 0),
+        "doiPdfSelectedCount": planned.get("doiPdfSelectedCount", 0),
+        "doiPdfMissedCount": planned.get("doiPdfMissedCount", 0),
+        "doiSearchUsedCount": planned.get("doiSearchUsedCount", 0),
+        "doiSearchHitCount": planned.get("doiSearchHitCount", 0),
+        "doiApiFallbackUsedCount": planned.get("doiApiFallbackUsedCount", 0),
+        "doiPaywalledOrBlockedCount": planned.get("doiPaywalledOrBlockedCount", 0),
+        "changes": changes,
+        "graphChangeCount": 0,
         "attachmentChangeCount": len([change for change in attachment_changes if change.get("action") != "noop"]),
         "referenceMetadataChangeCount": len([change for change in reference_changes if change.get("action") != "noop"]),
         "changeCount": len([change for change in changes if change.get("action") != "noop"]),
@@ -3293,6 +3462,57 @@ def _reference_metadata_object(reference: dict[str, Any]) -> dict[str, Any]:
             return {}
         return parsed if isinstance(parsed, dict) else {}
     return {}
+
+
+def _resolve_existing_canonical_uri(reference: dict[str, Any]) -> str | None:
+    metadata = _reference_metadata_object(reference)
+    identifiers = metadata.get("identifiers") if isinstance(metadata.get("identifiers"), dict) else {}
+    resolved = identifiers.get("resolved") if isinstance(identifiers.get("resolved"), dict) else {}
+    canonical_uri = normalize_http_url(resolved.get("canonical_uri"))
+    if canonical_uri:
+        return canonical_uri
+    source_uri = normalize_http_url(resolved.get("source_uri"))
+    if source_uri:
+        return source_uri
+    papyrus = metadata.get("papyrus") if isinstance(metadata.get("papyrus"), dict) else {}
+    source_resolution = papyrus.get("source_resolution") if isinstance(papyrus.get("source_resolution"), dict) else {}
+    for payload in source_resolution.values():
+        if not isinstance(payload, dict):
+            continue
+        candidate = normalize_http_url(payload.get("canonicalUri")) or normalize_http_url(payload.get("sourceUri"))
+        if candidate:
+            return candidate
+    return None
+
+
+def _resolve_process_source_uri(
+    reference: dict[str, Any],
+    attachments: list[dict[str, Any]],
+) -> tuple[str | None, dict[str, Any] | None]:
+    source_attachment = select_reference_attachment_by_role(reference, attachments, role="source")
+    if isinstance(source_attachment, dict):
+        source_uri = normalize_http_url(source_attachment.get("sourceUri"))
+        if source_uri:
+            return source_uri, None
+    canonical_uri = _resolve_existing_canonical_uri(reference)
+    if canonical_uri:
+        return canonical_uri, None
+    return None, {
+        "code": "needs_find_missing_canonical_source",
+        "message": "Reference processing requires find-stage canonical source resolution first.",
+    }
+
+
+def _reference_find_seed_uri(reference: dict[str, Any]) -> str | None:
+    direct_source_uri = normalize_http_url(reference.get("sourceUri"))
+    if direct_source_uri:
+        return direct_source_uri
+    external_item_id = str(reference.get("externalItemId") or "").strip()
+    if external_item_id.lower().startswith("doi:"):
+        doi_value = external_item_id[4:].strip()
+        if doi_value:
+            return normalize_http_url(f"https://doi.org/{doi_value}")
+    return None
 
 
 def _merge_reference_metadata_with_enrichment(

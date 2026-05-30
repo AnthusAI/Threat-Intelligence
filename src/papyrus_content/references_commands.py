@@ -53,6 +53,7 @@ from .reference_url_text import (
     build_reference_citation_count_records,
     run_reference_identifier_dedupe,
     run_reference_extracted_text_filtering,
+    run_reference_source_find,
     run_reference_url_text_extraction,
 )
 from .reference_metadata_generation import run_reference_metadata_generation_from_extracted_text
@@ -582,6 +583,100 @@ def references_attach_extracted_text(flags: list[str]) -> None:
     print(f"references\tprocess-attach-extracted-text\tattached\t{attached}")
 
 
+def references_find_url_text(flags: list[str]) -> None:
+    options = parse_options(flags)
+    _require_reference_process_runtime("references find-fetch-url-text")
+    actor_label = options.get("actor") or "Papyrus content CLI"
+    steering_config = load_steering_config(options.get("config")) or require_steering_config()
+    corpus_key = normalize_string(options.get("corpus-key"))
+    corpus_config = require_corpus_config(steering_config, corpus_key, "--corpus-key") if corpus_key else None
+    corpus_id = knowledge_corpus_id(corpus_config) if corpus_config else None
+    corpus_key_by_id = {
+        knowledge_corpus_id(entry): str(entry.get("key") or "")
+        for entry in steering_config.get("corpora") or []
+        if isinstance(entry, dict)
+    }
+    reference_ids = set(parse_repeated_option(flags, "reference"))
+    if options.get("reference"):
+        reference_ids.add(str(options["reference"]))
+    external_item_ids = set(parse_repeated_option(flags, "external-item-id"))
+    if options.get("external-item-id"):
+        external_item_ids.add(str(options["external-item-id"]))
+    curation_status = _normalize_reference_status_filter(options.get("status"))
+    max_count = normalize_positive_integer(options.get("max-count"), "--max-count")
+    force = parse_boolean_option(options.get("force"), False, "--force")
+    apply = resolve_mutation_apply(options, "references find-fetch-url-text")
+    pdf_only = parse_boolean_option(options.get("pdf-only"), False, "--pdf-only")
+
+    client, _ = create_authoring_client()
+    references = client.list_records("Reference")
+    attachments = client.list_records("ReferenceAttachment")
+    result = run_reference_source_find(
+        client=client,
+        references=references,
+        attachments=attachments,
+        corpus_key_by_id=corpus_key_by_id,
+        corpus_id=corpus_id,
+        reference_ids=reference_ids or None,
+        external_item_ids=external_item_ids or None,
+        curation_status=curation_status,
+        max_count=max_count,
+        force=force,
+        apply=apply,
+        bucket=normalize_string(options.get("bucket")),
+        pdf_only=pdf_only,
+    )
+
+    print(f"references\tfind-fetch-url-text\tcorpus\t{corpus_id or 'all'}")
+    print(f"references\tfind-fetch-url-text\tstatus\t{curation_status}")
+    print(f"references\tfind-fetch-url-text\tqueue-order\tnewest-first")
+    print(f"references\tfind-fetch-url-text\tqueue-default\tmissing-only")
+    print(f"references\tfind-fetch-url-text\tpdf-only\t{str(pdf_only).lower()}")
+    if reference_ids:
+        print(f"references\tfind-fetch-url-text\treference-filter\t{len(reference_ids)}")
+    if external_item_ids:
+        print(f"references\tfind-fetch-url-text\texternal-item-filter\t{len(external_item_ids)}")
+    print(f"references\tfind-fetch-url-text\teligible\t{result['eligibleCount']}")
+    print(f"references\tfind-fetch-url-text\tskipped-existing\t{result['skippedExistingCount']}")
+    print(f"references\tfind-fetch-url-text\tskipped-missing-source\t{result.get('skippedMissingSourceCount', 0)}")
+    print(f"references\tfind-fetch-url-text\tskipped-non-pdf\t{result.get('skippedNonPdfCount', 0)}")
+    print(f"references\tfind-fetch-url-text\tplanned\t{result['plannedCount']}")
+    print(f"references\tfind-fetch-url-text\tplanned-attachments\t{result.get('plannedAttachmentCount', 0)}")
+    print(f"references\tfind-fetch-url-text\tplanned-reference-metadata\t{result.get('plannedReferenceMetadataCount', 0)}")
+    print(f"references\tfind-fetch-url-text\tchanges\t{result['changeCount']}")
+    print(f"references\tfind-fetch-url-text\treference-metadata-changes\t{result.get('referenceMetadataChangeCount', 0)}")
+    print(f"references\tfind-fetch-url-text\tattachment-changes\t{result.get('attachmentChangeCount', 0)}")
+    print(f"references\tfind-fetch-url-text\tfailures\t{len(result['failures'])}")
+    print(f"references\tfind-fetch-url-text\tdoi-resolved\t{result.get('doiResolvedCount', 0)}")
+    print(f"references\tfind-fetch-url-text\tdoi-pdf-selected\t{result.get('doiPdfSelectedCount', 0)}")
+    print(f"references\tfind-fetch-url-text\tdoi-pdf-missed\t{result.get('doiPdfMissedCount', 0)}")
+    print(f"references\tfind-fetch-url-text\tdoi-search-used\t{result.get('doiSearchUsedCount', 0)}")
+    print(f"references\tfind-fetch-url-text\tdoi-search-hit\t{result.get('doiSearchHitCount', 0)}")
+    print(f"references\tfind-fetch-url-text\tdoi-api-fallback-used\t{result.get('doiApiFallbackUsedCount', 0)}")
+    print(f"references\tfind-fetch-url-text\tdoi-paywalled-or-blocked\t{result.get('doiPaywalledOrBlockedCount', 0)}")
+    if max_count:
+        print(f"references\tfind-fetch-url-text\tmax-count\t{max_count}")
+    changed = [change for change in result["changes"] if change.get("action") != "noop"]
+    print_limit = 25 if options.get("limit") is None else normalize_non_negative_integer(options.get("limit"), "--limit")
+    print_limit = print_limit if print_limit is not None else 25
+    for change in changed[:print_limit]:
+        print(f"{change['action']}\t{change['modelName']}\t{change['expected']['id']}")
+    for failure in result["failures"][:print_limit]:
+        print(
+            f"reference-find\tfailed\t{failure.get('referenceId') or '-'}\t"
+            f"{failure.get('sourceUri') or '-'}\t{failure.get('error') or 'unknown error'}"
+        )
+    if not apply:
+        print("references\tfind-fetch-url-text\tapply\tskipped\tuse --dry-run to preview without writes")
+        return
+    update_newsroom_summary_after_extracted_text_attachments(
+        client,
+        result["changes"],
+        actor_label=actor_label,
+        reason=f"references find-fetch-url-text {corpus_id or 'all'}",
+    )
+
+
 def references_fetch_url_text(flags: list[str]) -> None:
     options = parse_options(flags)
     _require_reference_process_runtime("references process-fetch-url-text")
@@ -669,7 +764,7 @@ def references_fetch_url_text(flags: list[str]) -> None:
     print(f"references\tprocess-fetch-url-text\tcorpus\t{corpus_id or 'all'}")
     print(f"references\tprocess-fetch-url-text\tstatus\t{curation_status}")
     print(f"references\tprocess-fetch-url-text\tqueue-order\tnewest-first")
-    print(f"references\tprocess-fetch-url-text\tqueue-default\tmissing-only")
+    print(f"references\tprocess-fetch-url-text\tqueue-default\tprocessable-only")
     print(f"references\tprocess-fetch-url-text\tpdf-only\t{str(pdf_only).lower()}")
     print(f"references\tprocess-fetch-url-text\tgrobid-url\t{grobid_url}")
     if reference_ids:
@@ -679,6 +774,7 @@ def references_fetch_url_text(flags: list[str]) -> None:
     print(f"references\tprocess-fetch-url-text\teligible\t{result['eligibleCount']}")
     print(f"references\tprocess-fetch-url-text\tskipped-existing\t{result['skippedExistingCount']}")
     print(f"references\tprocess-fetch-url-text\tskipped-missing-source\t{result.get('skippedMissingSourceCount', 0)}")
+    print(f"references\tprocess-fetch-url-text\tskipped-needs-find\t{result.get('skippedNeedsFindCount', 0)}")
     print(f"references\tprocess-fetch-url-text\tskipped-non-pdf\t{result.get('skippedNonPdfCount', 0)}")
     print(f"references\tprocess-fetch-url-text\tplanned\t{result['plannedCount']}")
     print(f"references\tprocess-fetch-url-text\tplanned-attachments\t{result.get('plannedAttachmentCount', 0)}")
@@ -740,6 +836,17 @@ def references_fetch_url_text(flags: list[str]) -> None:
             f"{fallback.get('sourceUri') or '-'}\t"
             f"{json.dumps(fallback.get('reason') or {}, sort_keys=True)}"
         )
+    needs_find_rows = [
+        item for item in (result.get("items") or [])
+        if str(item.get("status") or "") == "needs_find"
+    ]
+    for row in needs_find_rows[:print_limit]:
+        reference = row.get("reference") if isinstance(row.get("reference"), dict) else {}
+        reason = row.get("error") if isinstance(row.get("error"), dict) else {"code": "needs_find", "message": "requires find"}
+        print(
+            f"reference-url-text\tneeds-find\t{reference.get('id') or '-'}\t"
+            f"{reference.get('sourceUri') or '-'}\t{json.dumps(reason, sort_keys=True)}"
+        )
     if len(result["failures"]) > print_limit:
         print(
             f"references\tprocess-fetch-url-text\tomitted-failures\t{len(result['failures']) - print_limit}\t"
@@ -763,6 +870,13 @@ def references_fetch_pdf_url_text_queue(flags: list[str]) -> None:
     if options.get("pdf-only") is None:
         flags = [*flags, "--pdf-only", "true"]
     references_fetch_url_text(flags)
+
+
+def references_find_pdf_url_text_queue(flags: list[str]) -> None:
+    options = parse_options(flags)
+    if options.get("pdf-only") is None:
+        flags = [*flags, "--pdf-only", "true"]
+    references_find_url_text(flags)
 
 
 def references_recount_citation_counts(flags: list[str]) -> None:
@@ -906,7 +1020,7 @@ def references_process_dedupe_identifiers(flags: list[str]) -> None:
 
 def references_process_resolve_citation_stubs(flags: list[str]) -> None:
     options = parse_options(flags)
-    _require_reference_process_runtime("references process-resolve-citation-stubs")
+    _require_reference_process_runtime("references find-resolve-citation-stubs")
     steering_config = load_steering_config(options.get("config")) or require_steering_config()
     corpus_key = normalize_string(options.get("corpus-key"))
     corpus_config = require_corpus_config(steering_config, corpus_key, "--corpus-key") if corpus_key else None
@@ -921,7 +1035,7 @@ def references_process_resolve_citation_stubs(flags: list[str]) -> None:
     max_count = normalize_positive_integer(options.get("max-count"), "--max-count")
     force = parse_boolean_option(options.get("force"), False, "--force")
     promote_external_id = parse_boolean_option(options.get("promote-external-id"), False, "--promote-external-id")
-    apply = resolve_mutation_apply(options, "references process-resolve-citation-stubs")
+    apply = resolve_mutation_apply(options, "references find-resolve-citation-stubs")
     print_limit = 25 if options.get("limit") is None else normalize_non_negative_integer(options.get("limit"), "--limit")
     print_limit = print_limit if print_limit is not None else 25
 
@@ -940,20 +1054,20 @@ def references_process_resolve_citation_stubs(flags: list[str]) -> None:
     changes = build_record_changes_targeted_by_id(client, resolved["records"])
     changed = [change for change in changes if change.get("action") != "noop"]
 
-    print(f"references\tprocess-resolve-citation-stubs\tcorpus\t{corpus_id or 'all'}")
-    print(f"references\tprocess-resolve-citation-stubs\tstatus\t{curation_status}")
+    print(f"references\tfind-resolve-citation-stubs\tcorpus\t{corpus_id or 'all'}")
+    print(f"references\tfind-resolve-citation-stubs\tstatus\t{curation_status}")
     if reference_ids:
-        print(f"references\tprocess-resolve-citation-stubs\treference-filter\t{len(reference_ids)}")
+        print(f"references\tfind-resolve-citation-stubs\treference-filter\t{len(reference_ids)}")
     if external_item_ids:
-        print(f"references\tprocess-resolve-citation-stubs\texternal-item-filter\t{len(external_item_ids)}")
+        print(f"references\tfind-resolve-citation-stubs\texternal-item-filter\t{len(external_item_ids)}")
     if max_count:
-        print(f"references\tprocess-resolve-citation-stubs\tmax-count\t{max_count}")
-    print(f"references\tprocess-resolve-citation-stubs\tattempted\t{resolved['attemptedCount']}")
-    print(f"references\tprocess-resolve-citation-stubs\tresolved\t{resolved['resolvedCount']}")
-    print(f"references\tprocess-resolve-citation-stubs\tskipped-existing\t{resolved['skippedExistingCount']}")
-    print(f"references\tprocess-resolve-citation-stubs\tskipped-non-citation\t{resolved['skippedNonCitationCount']}")
-    print(f"references\tprocess-resolve-citation-stubs\tfailures\t{resolved['failureCount']}")
-    print(f"references\tprocess-resolve-citation-stubs\tchanges\t{len(changed)}")
+        print(f"references\tfind-resolve-citation-stubs\tmax-count\t{max_count}")
+    print(f"references\tfind-resolve-citation-stubs\tattempted\t{resolved['attemptedCount']}")
+    print(f"references\tfind-resolve-citation-stubs\tresolved\t{resolved['resolvedCount']}")
+    print(f"references\tfind-resolve-citation-stubs\tskipped-existing\t{resolved['skippedExistingCount']}")
+    print(f"references\tfind-resolve-citation-stubs\tskipped-non-citation\t{resolved['skippedNonCitationCount']}")
+    print(f"references\tfind-resolve-citation-stubs\tfailures\t{resolved['failureCount']}")
+    print(f"references\tfind-resolve-citation-stubs\tchanges\t{len(changed)}")
 
     for item in resolved["items"][:print_limit]:
         best = item.get("bestCandidate") if isinstance(item.get("bestCandidate"), dict) else {}
@@ -972,12 +1086,12 @@ def references_process_resolve_citation_stubs(flags: list[str]) -> None:
         )
     if len(resolved["items"]) > print_limit:
         print(
-            f"references\tprocess-resolve-citation-stubs\tomitted\t{len(resolved['items']) - print_limit}\t"
+            f"references\tfind-resolve-citation-stubs\tomitted\t{len(resolved['items']) - print_limit}\t"
             f"pass --limit {len(resolved['items'])} to print every row"
         )
     if not apply:
         print(
-            "references\tprocess-resolve-citation-stubs\tapply\tskipped\t"
+            "references\tfind-resolve-citation-stubs\tapply\tskipped\t"
             "use --dry-run to preview without writes"
         )
         return

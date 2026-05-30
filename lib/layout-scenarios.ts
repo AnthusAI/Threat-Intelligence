@@ -104,14 +104,14 @@ const rawLayoutScenarios: RawLayoutScenario[] = [
     items: createLongImageCaptionArticles().map(articleToPublicationItem),
   },
   {
-    id: "themed-plant-logo",
+    id: "themed-ink-study",
     source: "scenario",
-    title: "Themed Plant Logo",
+    title: "Themed Ink Study",
     editionDate,
-    scenarioId: "themed-plant-logo",
-    description: "A plant-logo fixture verifies dark-mode image variant switching in solved newspaper image furniture.",
+    scenarioId: "themed-ink-study",
+    description: "A raster fixture verifies dark-mode image variant switching in solved newspaper image furniture.",
     layoutPlan: createDefaultEditionLayoutPlan(articles.map((article) => article.slug)),
-    items: createThemedPlantLogoArticles().map(articleToPublicationItem),
+    items: createThemedInkStudyArticles().map(articleToPublicationItem),
   },
   {
     id: "height-policy-fill-default",
@@ -256,27 +256,27 @@ function createFurnitureSufficiencyArticles(): Article[] {
   });
 }
 
-function createThemedPlantLogoArticles(): Article[] {
+function createThemedInkStudyArticles(): Article[] {
   return cloneArticles(articles).map((article) => {
     if (article.slug !== "agent-procedure-patterns") return article;
     return {
       ...article,
       image: {
         ...article.image,
-        src: "/papyrus-plant-placeholder.png",
+        src: "/seed-art/theme-ink-study-light.png",
         themeVariants: {
           dark: {
-            src: "/papyrus-plant-placeholder-dark.png",
+            src: "/seed-art/theme-ink-study-dark.png",
           },
         },
-        alt: "A black papyrus plant silhouette",
-        credit: "Papyrus",
-        caption: "Theme-aware plant logo image fixture.",
+        alt: "An abstract newspaper study with theme-specific light and dark rendering",
+        credit: "Papyrus seed art",
+        caption: "Theme-aware raster image fixture.",
         layout: {
           minHeight: 120,
           preferredHeight: 220,
           maxHeight: 420,
-          aspectRatio: 0.785,
+          aspectRatio: 1.5009,
           crop: "contain",
           wrapsText: true,
         },
@@ -285,21 +285,21 @@ function createThemedPlantLogoArticles(): Article[] {
         {
           id: `${article.slug}-primary-image`,
           type: "image",
-          src: "/papyrus-plant-placeholder.png",
+          src: "/seed-art/theme-ink-study-light.png",
           themeVariants: {
             dark: {
-              src: "/papyrus-plant-placeholder-dark.png",
+              src: "/seed-art/theme-ink-study-dark.png",
             },
           },
-          alt: "A black papyrus plant silhouette",
-          caption: "Theme-aware plant logo image fixture.",
-          credit: "Papyrus",
+          alt: "An abstract newspaper study with theme-specific light and dark rendering",
+          caption: "Theme-aware raster image fixture.",
+          credit: "Papyrus seed art",
           roles: ["lead", "continuation", "continuationInset"],
           layout: {
             minHeight: 120,
             preferredHeight: 220,
             maxHeight: 420,
-            aspectRatio: 0.785,
+            aspectRatio: 1.5009,
             crop: "contain",
             wrapsText: true,
           },

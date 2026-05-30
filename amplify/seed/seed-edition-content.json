@@ -38,24 +38,19 @@
       "shortSlug": "INTRO",
       "section": "Papyrus",
       "headline": "An Autonomous Newsroom",
-      "deck": "Amplify Humans. You set the mission, standards, and boundaries; Papyrus runs the newsroom within them—autopilot, not copilot.",
+      "deck": "Amplify human judgment: define the mission, standards, and guardrails, and let Papyrus operate the newsroom within them on autopilot.",
       "byline": "Papyrus Editorial Team",
       "dateline": "NEWSROOM",
       "image": {
-        "src": "/papyrus-plant-placeholder.png",
-        "themeVariants": {
-          "dark": {
-            "src": "/papyrus-plant-placeholder-dark.png"
-          }
-        },
-        "alt": "A black papyrus plant silhouette",
-        "caption": "Amplify Humans: Papyrus is built to amplify editorial judgment, not replace it.",
-        "credit": "Papyrus",
+        "src": "/seed-art/autonomous-newsroom.png",
+        "alt": "An abstract editorial layout showing a lead story and connected newsroom modules",
+        "caption": "The first edition uses editorial diagram art instead of product-logo placeholders.",
+        "credit": "Papyrus seed art",
         "layout": {
           "minHeight": 120,
           "preferredHeight": 230,
           "maxHeight": 420,
-          "aspectRatio": 0.785,
+          "aspectRatio": 1.5009,
           "crop": "contain",
           "wrapsText": true
         }
@@ -83,15 +78,15 @@
       "byline": "Papyrus Editorial Team",
       "dateline": "NEWSROOM",
       "image": {
-        "src": "/agent-procedure-continuum.svg",
-        "alt": "A continuum from scripts to bounded agents",
+        "src": "/seed-art/finite-edition.png",
+        "alt": "An abstract newspaper grid framing a finite edition",
         "caption": "A Papyrus edition is a finite editorial object—not an engagement loop.",
-        "credit": "Papyrus chart",
+        "credit": "Papyrus seed art",
         "layout": {
           "minHeight": 120,
           "preferredHeight": 220,
           "maxHeight": 380,
-          "aspectRatio": 1.5,
+          "aspectRatio": 1.5009,
           "crop": "contain",
           "wrapsText": true
         }
@@ -122,15 +117,15 @@
       "byline": "Papyrus Editorial Team",
       "dateline": "NEWSROOM",
       "image": {
-        "src": "/agent-procedure-continuum.svg",
-        "alt": "A continuum from scripts to bounded agents",
+        "src": "/seed-art/human-steering.png",
+        "alt": "An abstract rising course line with editorial checkpoints",
         "caption": "Policy, section doctrine, and curation feedback bound what the newsroom may do.",
-        "credit": "Papyrus chart",
+        "credit": "Papyrus seed art",
         "layout": {
           "minHeight": 120,
           "preferredHeight": 220,
           "maxHeight": 380,
-          "aspectRatio": 1.5,
+          "aspectRatio": 1.5009,
           "crop": "contain",
           "wrapsText": true
         }
@@ -158,20 +153,15 @@
       "byline": "Papyrus Editorial Team",
       "dateline": "NEWSROOM",
       "image": {
-        "src": "/papyrus-plant-placeholder.png",
-        "themeVariants": {
-          "dark": {
-            "src": "/papyrus-plant-placeholder-dark.png"
-          }
-        },
-        "alt": "A black papyrus plant silhouette",
+        "src": "/seed-art/workflow-lanes.png",
+        "alt": "An abstract four-stage editorial workflow with handoff arrows",
         "caption": "Each stage has a narrow job; humans set the course and approve the edition.",
-        "credit": "Papyrus",
+        "credit": "Papyrus seed art",
         "layout": {
           "minHeight": 120,
           "preferredHeight": 230,
           "maxHeight": 420,
-          "aspectRatio": 0.785,
+          "aspectRatio": 1.5009,
           "crop": "contain",
           "wrapsText": true
         }
@@ -200,15 +190,15 @@
       "byline": "Papyrus Editorial Team",
       "dateline": "NEWSROOM",
       "image": {
-        "src": "/agent-procedure-continuum.svg",
-        "alt": "A continuum from scripts to bounded agents",
+        "src": "/seed-art/data-ledger.png",
+        "alt": "An abstract ledger with durable reference rows and status marks",
         "caption": "Source material and operating code should remain under owner control.",
-        "credit": "Papyrus chart",
+        "credit": "Papyrus seed art",
         "layout": {
           "minHeight": 100,
           "preferredHeight": 210,
           "maxHeight": 360,
-          "aspectRatio": 1.5,
+          "aspectRatio": 1.5009,
           "crop": "contain",
           "wrapsText": true
         }
@@ -236,20 +226,15 @@
       "byline": "Papyrus Editorial Team",
       "dateline": "NEWSROOM",
       "image": {
-        "src": "/papyrus-plant-placeholder.png",
-        "themeVariants": {
-          "dark": {
-            "src": "/papyrus-plant-placeholder-dark.png"
-          }
-        },
-        "alt": "A black papyrus plant silhouette",
+        "src": "/seed-art/operating-modes.png",
+        "alt": "An abstract steering dial spanning light-touch and active operation",
         "caption": "Steering intensity changes; the edition still begins and ends.",
-        "credit": "Papyrus",
+        "credit": "Papyrus seed art",
         "layout": {
           "minHeight": 100,
           "preferredHeight": 210,
           "maxHeight": 360,
-          "aspectRatio": 0.785,
+          "aspectRatio": 1.5009,
           "crop": "contain",
           "wrapsText": true
         }
@@ -275,15 +260,15 @@
       "byline": "Papyrus Editorial Team",
       "dateline": "NEWSROOM",
       "image": {
-        "src": "/agent-procedure-continuum.svg",
-        "alt": "A continuum from scripts to bounded agents",
+        "src": "/seed-art/source-graph.png",
+        "alt": "An abstract evidence graph with connected editorial nodes",
         "caption": "Accepted references are the evidence layer the newsroom is willing to stand behind.",
-        "credit": "Papyrus chart",
+        "credit": "Papyrus seed art",
         "layout": {
           "minHeight": 100,
           "preferredHeight": 210,
           "maxHeight": 360,
-          "aspectRatio": 1.5,
+          "aspectRatio": 1.5009,
           "crop": "contain",
           "wrapsText": true
         }
@@ -310,20 +295,15 @@
       "byline": "Papyrus Editorial Team",
       "dateline": "NEWSROOM",
       "image": {
-        "src": "/papyrus-plant-placeholder.png",
-        "themeVariants": {
-          "dark": {
-            "src": "/papyrus-plant-placeholder-dark.png"
-          }
-        },
-        "alt": "A black papyrus plant silhouette",
+        "src": "/seed-art/launch-briefing.png",
+        "alt": "An abstract launch chart showing a newsroom ramping into publication",
         "caption": "First-install choices define the trajectory the newsroom will keep following.",
-        "credit": "Papyrus",
+        "credit": "Papyrus seed art",
         "layout": {
           "minHeight": 100,
           "preferredHeight": 210,
           "maxHeight": 360,
-          "aspectRatio": 0.785,
+          "aspectRatio": 1.5009,
           "crop": "contain",
           "wrapsText": true
         }
@@ -344,15 +324,15 @@
       "byline": "Papyrus Editorial Team",
       "dateline": "NEWSROOM",
       "image": {
-        "src": "/agent-procedure-continuum.svg",
-        "alt": "A continuum from scripts to bounded agents",
+        "src": "/seed-art/research-packet.png",
+        "alt": "An abstract research packet board with linked findings",
         "caption": "Research assignments produce private packets; editors decide what moves forward.",
-        "credit": "Papyrus chart",
+        "credit": "Papyrus seed art",
         "layout": {
           "minHeight": 100,
           "preferredHeight": 210,
           "maxHeight": 360,
-          "aspectRatio": 1.5,
+          "aspectRatio": 1.5009,
           "crop": "contain",
           "wrapsText": true
         }
@@ -373,20 +353,15 @@
       "byline": "Papyrus Editorial Team",
       "dateline": "NEWSROOM",
       "image": {
-        "src": "/papyrus-plant-placeholder.png",
-        "themeVariants": {
-          "dark": {
-            "src": "/papyrus-plant-placeholder-dark.png"
-          }
-        },
-        "alt": "A black papyrus plant silhouette",
+        "src": "/seed-art/curation-desk.png",
+        "alt": "An abstract curation grid with checks and editor notes",
         "caption": "Reference curation is how editors steer what the autopilot may treat as evidence.",
-        "credit": "Papyrus",
+        "credit": "Papyrus seed art",
         "layout": {
           "minHeight": 100,
           "preferredHeight": 210,
           "maxHeight": 360,
-          "aspectRatio": 0.785,
+          "aspectRatio": 1.5009,
           "crop": "contain",
           "wrapsText": true
         }
@@ -407,15 +382,15 @@
       "byline": "Papyrus Editorial Team",
       "dateline": "NEWSROOM",
       "image": {
-        "src": "/agent-procedure-continuum.svg",
-        "alt": "A continuum from scripts to bounded agents",
+        "src": "/seed-art/source-intake.png",
+        "alt": "An abstract intake pipeline moving source records into newsroom tracking",
         "caption": "Registration creates reference records while files stay in S3-backed storage.",
-        "credit": "Papyrus chart",
+        "credit": "Papyrus seed art",
         "layout": {
           "minHeight": 100,
           "preferredHeight": 210,
           "maxHeight": 360,
-          "aspectRatio": 1.5,
+          "aspectRatio": 1.5009,
           "crop": "contain",
           "wrapsText": true
         }
@@ -436,20 +411,15 @@
       "byline": "Papyrus Editorial Team",
       "dateline": "NEWSROOM",
       "image": {
-        "src": "/papyrus-plant-placeholder.png",
-        "themeVariants": {
-          "dark": {
-            "src": "/papyrus-plant-placeholder-dark.png"
-          }
-        },
-        "alt": "A black papyrus plant silhouette",
+        "src": "/seed-art/quality-loop.png",
+        "alt": "An abstract quality loop around an editorial checklist",
         "caption": "A clean accepted graph is one of the highest-leverage steering tools.",
-        "credit": "Papyrus",
+        "credit": "Papyrus seed art",
         "layout": {
           "minHeight": 100,
           "preferredHeight": 210,
           "maxHeight": 360,
-          "aspectRatio": 0.785,
+          "aspectRatio": 1.5009,
           "crop": "contain",
           "wrapsText": true
         }

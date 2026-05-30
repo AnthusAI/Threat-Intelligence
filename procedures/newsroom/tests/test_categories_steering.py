@@ -43,6 +43,36 @@ class CategoriesSteeringTests(unittest.TestCase):
         self.assertEqual(category_set["expected"]["classifierId"], "ai-ml-v1")
         self.assertEqual(category_set["expected"]["categoryCount"], 2)
 
+    def test_build_steering_import_records_respects_category_set_override(self):
+        bundle = {
+            "generated_at": "2026-01-01T00:00:00Z",
+            "corpus": {"name": "AI-ML-research", "role": "canonical"},
+            "proposals": [
+                {
+                    "proposal_id": "proposal-1",
+                    "proposal_kind": "create-taxonomy-node",
+                    "status": "proposed",
+                    "title": "Create taxonomy node",
+                    "display_name": "Reasoning",
+                    "category_key": "reasoning",
+                    "payload": {"display_name": "Reasoning", "category_key": "reasoning"},
+                }
+            ],
+            "artifacts": [],
+            "warnings": [],
+        }
+        plan = build_steering_import_records(
+            bundle,
+            {
+                "classifierId": "ai-ml-v1",
+                "corpusConfig": {"key": "AI-ML-research", "name": "AI-ML-research", "role": "canonical"},
+                "categorySetId": "category-set-override",
+            },
+        )
+        proposal_record = next(record for record in plan["records"] if record["modelName"] == "SteeringProposal")
+        self.assertEqual(plan["categorySetId"], "category-set-override")
+        self.assertEqual(proposal_record["expected"]["categorySetId"], "category-set-override")
+
     def test_build_accepted_category_set_payload_sorts_topics(self):
         category_set = {
             "id": "category-set-test",
@@ -56,6 +86,38 @@ class CategoriesSteeringTests(unittest.TestCase):
         ]
         payload = build_accepted_category_set_payload(category_set, topics)
         self.assertEqual([topic["topic_uid"] for topic in payload["topics"]], ["category.ml", "category.nlp"])
+
+    def test_build_steering_import_records_derives_suggested_seed_samples_from_evidence(self):
+        evidence_ids = [f"item-{index}" for index in range(1, 31)]
+        bundle = {
+            "generated_at": "2026-01-01T00:00:00Z",
+            "corpus": {"name": "AI-ML-research", "role": "canonical"},
+            "proposals": [
+                {
+                    "proposal_id": "proposal-evidence",
+                    "proposal_kind": "create-taxonomy-node",
+                    "status": "proposed",
+                    "title": "Evidence proposal",
+                    "display_name": "Reasoning",
+                    "category_key": "reasoning",
+                    "evidence": {"item_ids": evidence_ids},
+                    "payload": {"display_name": "Reasoning", "category_key": "reasoning", "document_ids": evidence_ids},
+                }
+            ],
+            "artifacts": [],
+            "warnings": [],
+        }
+        plan = build_steering_import_records(
+            bundle,
+            {
+                "classifierId": "ai-ml-v1",
+                "corpusConfig": {"key": "AI-ML-research", "name": "AI-ML-research", "role": "canonical"},
+                "categorySetId": "category-set-override",
+            },
+        )
+        proposal_record = next(record for record in plan["records"] if record["modelName"] == "SteeringProposal")
+        self.assertEqual(proposal_record["expected"]["evidenceItemIds"], evidence_ids)
+        self.assertEqual(proposal_record["expected"]["suggestedSeedItemIds"], evidence_ids[:20])
 
     @mock.patch("papyrus_content.categories_steering.subprocess.run")
     def test_load_steering_bundle_from_biblicus_invokes_uv(self, mock_run):

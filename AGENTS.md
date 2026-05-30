@@ -197,6 +197,17 @@ rendering contracts.
   decisions queue copywriting Assignments; copywriting is the first stage allowed
   to create draft reader-facing `Item` records. Edition placement remains a
   later copyediting/layout step.
+- EditionSlot orchestration guardrails:
+  - planning/dispatch agents should start with
+    `skills/edition-planning/SKILL.md`;
+  - run/review agents should start with
+    `skills/newsroom-story-cycle/SKILL.md`;
+  - the canonical slot data contract and decision matrix lives in
+    `docs/automated-publication-research-workflow.md`;
+  - reporting assignment dispatch must bind slots via `slotTarget` metadata and
+    `Assignment --targets_slot--> EditionSlot`;
+  - reporting review must not create `EditionItem`; `select`/`brief` may set
+    slot winner state and queue copywriting assignments only.
 - Treat multi-section story-cycle runs as Coverage Themes in editor-facing UX
   and docs. The Python `papyrus assignments run-story-cycle` command is the
   primary operator surface. The default stop point is `--through reporting`, after private
