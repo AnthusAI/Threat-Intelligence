@@ -967,7 +967,7 @@ def papyrus_ensure_edition_forum_thread(
         "id": f"message-thread-edition-forum-{_safe_id(resolved_edition_id)}",
         "threadKind": "edition_forum",
         "status": "active",
-        "title": title or "Edition Forum",
+        "title": title or "Upcoming edition",
         "summary": summary or "Cross-section editor and human coordination for this edition.",
         "primaryAnchorKind": "edition",
         "primaryAnchorId": resolved_edition_id,

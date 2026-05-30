@@ -3864,10 +3864,15 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertEqual(plan["summary"]["forumThreadCount"], 1)
         self.assertEqual(plan["summary"]["forumMessageCount"], 1)
         body = message_records[0]["input"]["content"]
-        self.assertIn("Edition Theme (Phase 1)", body)
+        thread_title = edition_thread["title"]
+        self.assertNotEqual(thread_title, "Edition Forum")
+        self.assertIn("AI in video games", thread_title)
+        self.assertIn("## Why this edition", body)
+        self.assertIn("## Desk-shaped story seeds", body)
         self.assertNotIn("How To Steer", body)
-        self.assertIn("Phase 2", body)
-        self.assertIn("Phase 3", body)
+        self.assertNotIn("Phase 1", body)
+        self.assertNotIn("Phase 2", body)
+        self.assertNotIn("Phase 3", body)
         self.assertIn("edition", plan["forumKickoff"])
         self.assertEqual(plan["forumKickoff"]["sections"], [])
 
@@ -3915,10 +3920,11 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
                     "threadId": edition_thread_id,
                     "messageKind": "forum_post",
                     "status": "active",
-                    "summary": "Edition theme (phase 1): AI in video games",
+                    "summary": "AI in video games",
                     "content": edition_body,
                     "sequenceNumber": 1,
                     "importRunId": "coverage-theme-forum-rerun",
+                    "metadata": {"planningPhase": "edition_theme_kickoff"},
                 },
             ],
         }
@@ -4098,7 +4104,7 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         ]
         self.assertEqual(section_threads, [])
         self.assertEqual(len(edition_forum_posts), 1)
-        self.assertIn("Edition Theme (Phase 1)", edition_forum_posts[0]["content"])
+        self.assertIn("## Why this edition", edition_forum_posts[0]["content"])
         self.assertTrue(
             papyrus_coverage_theme.should_defer_reporting_dispatch_forum(
                 plan,
@@ -4139,8 +4145,9 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
             now="2026-06-01T12:00:00Z",
         )
         self.assertEqual(dispatch_forum["action"], "create")
-        self.assertIn("Reporting Dispatch (Phase 3)", dispatch_forum["message"]["content"])
+        self.assertIn("# Reporting candidates", dispatch_forum["message"]["content"])
         self.assertIn("1.5", dispatch_forum["message"]["content"])
+        self.assertNotIn("Phase 3", dispatch_forum["message"]["content"])
         self.assertGreaterEqual(len(plan["reportingAssignments"]), 2)
 
     def test_coverage_theme_plan_forks_forum_thread_on_material_replan(self):
@@ -4202,7 +4209,9 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
             and record["input"].get("messageKind") == "forum_post"
             and record["input"]["threadId"] == edition_threads[0]["id"]
         )
-        self.assertIn("Edition Re-plan Update", replan_message["content"])
+        self.assertIn("Edition replan", replan_message["content"])
+        self.assertIn("## Why this edition", replan_message["content"])
+        self.assertNotIn("planning pass", replan_message["content"].lower())
 
 
 if __name__ == "__main__":

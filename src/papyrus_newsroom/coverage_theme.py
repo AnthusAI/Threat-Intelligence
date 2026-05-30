@@ -1559,11 +1559,15 @@ def build_coverage_theme_plan(
         reporting_assignments=reporting_assignments,
         topic=topic,
         coverage_key=coverage_key,
+        corpus_key=corpus_key,
+        category_key=category_key,
         run_id=run_id,
         now=now,
         existing_threads=state.get("messageThreads") or [],
         existing_messages=state.get("messages") or [],
         existing_editions=state.get("editions") or [],
+        signal=signal,
+        state=state,
         refresh_forum_kickoff=refresh_forum_kickoff,
     )
     records.extend(forum_kickoff["records"])
@@ -1618,11 +1622,15 @@ def build_edition_forum_kickoff_records(
     reporting_assignments: list[dict[str, Any]],
     topic: str,
     coverage_key: str,
+    corpus_key: str = "",
+    category_key: str = "",
     run_id: str,
     now: str,
     existing_threads: list[dict[str, Any]] | None = None,
     existing_messages: list[dict[str, Any]] | None = None,
     existing_editions: list[dict[str, Any]] | None = None,
+    signal: dict[str, Any] | None = None,
+    state: dict[str, list[dict[str, Any]]] | None = None,
     steering_window_hours: int = DEFAULT_STEERING_WINDOW_HOURS,
     refresh_forum_kickoff: bool = False,
 ) -> dict[str, Any]:
@@ -1661,6 +1669,31 @@ def build_edition_forum_kickoff_records(
         existing_editions or [],
         exclude_edition_id=edition_id,
     )
+    section_keys = [str(section.get("id") or "") for section in sections if section.get("id")]
+    resolved_signal = resolve_edition_theme_signal(
+        signal=signal,
+        topic=topic,
+        coverage_key=coverage_key,
+        corpus_key=corpus_key,
+        category_key=category_key,
+        sections=section_keys,
+        state=state or {},
+    )
+    recent_edition_themes = collect_recent_edition_themes(
+        existing_editions or [],
+        existing_messages or [],
+        exclude_edition_id=edition_id,
+    )
+    kickoff_draft = build_edition_theme_kickoff_draft(
+        topic=topic,
+        coverage_key=coverage_key,
+        signal=resolved_signal,
+        core_sections=core_sections,
+        optional_desk_sections=optional_desk_sections,
+        recent_optional_desk_usage=recent_optional_desk_usage,
+        recent_edition_themes=recent_edition_themes,
+        edition_date=str(edition.get("editionDate") or ""),
+    )
 
     canonical_edition_thread_id = f"message-thread-edition-forum-{_safe_id(edition_id)}"
     existing_edition_thread = next(
@@ -1676,18 +1709,11 @@ def build_edition_forum_kickoff_records(
     )
     edition_kickoff_plan = _plan_forum_kickoff_scope(
         canonical_thread_id=canonical_edition_thread_id,
-        summary=f"Edition theme (phase 1): {topic}",
-        content=_edition_theme_forum_body(
-            topic=topic,
-            coverage_key=coverage_key,
-            core_sections=core_sections,
-            optional_desk_sections=optional_desk_sections,
-            recent_optional_desk_usage=recent_optional_desk_usage,
-            steering_window_hours=steering_window_hours,
-        ),
+        summary=kickoff_draft["message_summary"],
+        content=kickoff_draft["body"],
         run_id=run_id,
         now=now,
-        replan_heading="Edition Re-plan Update",
+        replan_heading="Edition replan",
         existing_threads=existing_threads,
         existing_messages_by_thread=existing_messages_by_thread,
         refresh_existing=refresh_forum_kickoff,
@@ -1696,15 +1722,30 @@ def build_edition_forum_kickoff_records(
             run_id=run_id,
             now=now,
             thread_id=thread_id,
+            title=kickoff_draft["thread_title"],
+            summary=kickoff_draft["thread_summary"],
             existing=existing_edition_thread if thread_id == canonical_edition_thread_id else None,
             message_count=int((existing_edition_thread or {}).get("messageCount") or 0),
             last_message_id=str((existing_edition_thread or {}).get("lastMessageId") or ""),
         ),
+        message_metadata={"planningPhase": "edition_theme_kickoff"},
     )
     edition_thread = edition_kickoff_plan["thread"]
     edition_message = edition_kickoff_plan["message"]
     records.extend(edition_kickoff_plan["records"])
     if edition_kickoff_plan["action"] != "skip":
+        edition_metadata = dict(_metadata(edition))
+        edition_metadata.update({
+            "proposedEditionTheme": kickoff_draft["primary_theme"],
+            "proposedCoverageKey": coverage_key,
+            "kickoffThreadTitle": kickoff_draft["thread_title"],
+            "signalId": resolved_signal.get("signalId"),
+            "signalRank": resolved_signal.get("rank"),
+        })
+        records.append(_record("Edition", {
+            **edition,
+            "metadata": edition_metadata,
+        }))
         records.append(_record("SemanticRelation", semantic_relation(
             predicate="planned_for_edition",
             subject_kind="message",
@@ -1754,6 +1795,8 @@ def edition_forum_thread_record(
     run_id: str,
     now: str,
     thread_id: str = "",
+    title: str = "",
+    summary: str = "",
     existing: dict[str, Any] | None = None,
     message_count: int = 1,
     last_message_id: str = "",
@@ -1764,8 +1807,8 @@ def edition_forum_thread_record(
         "id": thread_id,
         "threadKind": "edition_forum",
         "status": "active",
-        "title": "Edition Forum",
-        "summary": "Cross-section coordination and human steering for this edition.",
+        "title": title or (existing or {}).get("title") or "Upcoming edition",
+        "summary": summary or (existing or {}).get("summary") or "Edition planning thread.",
         "primaryAnchorKind": "edition",
         "primaryAnchorId": edition_id,
         "primaryAnchorLineageId": edition_id,
@@ -1834,6 +1877,7 @@ def forum_kickoff_message_record(
     content: str,
     now: str,
     sequence_number: int = 1,
+    message_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     sequence_number = max(1, int(sequence_number or 1))
     return {
@@ -1856,10 +1900,252 @@ def forum_kickoff_message_record(
             "anchorKind": thread.get("primaryAnchorKind"),
             "anchorId": thread.get("primaryAnchorId"),
             "anchorLineageId": thread.get("primaryAnchorLineageId"),
+            **(message_metadata or {}),
         },
         "newsroomFeedKey": "messages",
         "createdAt": now,
         "updatedAt": now,
+    }
+
+
+def _first_editorial_phrase(text: str, *, max_len: int = 44) -> str:
+    cleaned = re.sub(r"[*`_]", "", str(text or "")).strip()
+    if not cleaned:
+        return ""
+    clause = re.split(r"[.!?\n]", cleaned, maxsplit=1)[0].strip()
+    if len(clause) <= max_len:
+        return clause
+    shortened = clause[: max_len - 1].rsplit(" ", 1)[0].strip()
+    return shortened or clause[: max_len - 1].strip()
+
+
+def derive_edition_forum_thread_title(
+    *,
+    theme_line: str,
+    signal: dict[str, Any] | None = None,
+    why_fragment: str = "",
+) -> str:
+    headline = re.sub(r"\s+", " ", str(theme_line or "").strip())
+    if not headline:
+        return "Upcoming edition"
+    hook = _first_editorial_phrase(why_fragment or str((signal or {}).get("whyNow") or ""))
+    if hook and hook.lower() != headline.lower() and len(headline) + len(hook) + 2 <= 72:
+        headline = f"{headline}: {hook}"
+    evidence_count = int((signal or {}).get("acceptedEvidenceCount") or 0)
+    if evidence_count > 0 and len(headline) < 52:
+        headline = f"{headline} ({evidence_count} sources)"
+    if len(headline) <= 80:
+        return headline
+    shortened = headline[:77].rsplit(" ", 1)[0].strip()
+    return f"{shortened}…" if shortened else f"{headline[:77]}…"
+
+
+def resolve_edition_theme_signal(
+    *,
+    signal: dict[str, Any] | None,
+    topic: str,
+    coverage_key: str,
+    corpus_key: str,
+    category_key: str,
+    sections: list[str],
+    state: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any]:
+    if signal:
+        return signal
+    references = state.get("references") or []
+    semantic_nodes = state.get("semanticNodes") or []
+    if references and corpus_key:
+        ranked = build_trend_signals(
+            references=references,
+            semantic_nodes=semantic_nodes,
+            corpus_key=corpus_key,
+            category_key=category_key,
+            topic=topic,
+            coverage_key=coverage_key,
+            sections=sections,
+        )
+        if ranked:
+            return ranked[0]
+    return {
+        "signalId": f"signal-{_hash_short([corpus_key, topic, coverage_key])}",
+        "rank": 1,
+        "topic": topic,
+        "coverageKey": coverage_key,
+        "categoryKey": category_key,
+        "score": 0.0,
+        "scoreBreakdown": {},
+        "whyNow": (
+            f"The desk proposed **{topic}** as the edition spine because the current planning run "
+            f"targets coverage concept `{coverage_key}`."
+        ),
+        "sourceReferenceIds": [],
+        "acceptedEvidenceCount": 0,
+        "sourceDomains": [],
+        "sectionFit": {},
+        "proposedSections": sections,
+        "coverageGaps": [
+            f"Limited accepted references in-window for **{topic}**; prioritize primary sources before filing.",
+        ],
+        "openQuestions": [],
+        "suggestedAngles": _suggested_angles(topic, sections),
+    }
+
+
+def collect_recent_edition_themes(
+    editions: list[dict[str, Any]],
+    messages: list[dict[str, Any]],
+    *,
+    exclude_edition_id: str,
+    limit: int = 6,
+) -> list[dict[str, str]]:
+    themes: list[dict[str, str]] = []
+    messages_by_thread: dict[str, list[dict[str, Any]]] = {}
+    for message in messages:
+        thread_id = str(message.get("threadId") or "").strip()
+        if thread_id:
+            messages_by_thread.setdefault(thread_id, []).append(message)
+    for edition in sorted(editions, key=lambda row: str(row.get("editionDate") or ""), reverse=True):
+        edition_id = str(edition.get("id") or "")
+        if not edition_id or edition_id == exclude_edition_id:
+            continue
+        metadata = _metadata(edition)
+        theme = str(metadata.get("proposedEditionTheme") or metadata.get("kickoffThreadTitle") or "").strip()
+        if not theme:
+            thread_id = f"message-thread-edition-forum-{_safe_id(edition_id)}"
+            kickoff_messages = sorted(
+                messages_by_thread.get(thread_id, []),
+                key=lambda row: int(row.get("sequenceNumber") or 0),
+            )
+            for message in kickoff_messages:
+                if _message_planning_phase(message) == "edition_theme_kickoff":
+                    theme = str(message.get("summary") or "").strip()
+                    break
+                if "edition theme (phase 1)" in str(message.get("summary") or "").lower():
+                    theme = str(message.get("summary") or "").split(":", 1)[-1].strip()
+                    break
+        if not theme:
+            continue
+        themes.append({
+            "editionDate": str(edition.get("editionDate") or ""),
+            "theme": theme,
+        })
+        if len(themes) >= limit:
+            break
+    return themes
+
+
+def build_edition_theme_kickoff_draft(
+    *,
+    topic: str,
+    coverage_key: str,
+    signal: dict[str, Any],
+    core_sections: list[dict[str, Any]],
+    optional_desk_sections: list[dict[str, Any]],
+    recent_optional_desk_usage: list[dict[str, Any]],
+    recent_edition_themes: list[dict[str, str]],
+    edition_date: str = "",
+) -> dict[str, str]:
+    primary_theme = str(signal.get("topic") or topic).strip() or topic
+    resolved_coverage = str(signal.get("coverageKey") or coverage_key).strip() or coverage_key
+    why_now = str(signal.get("whyNow") or "").strip()
+    score_breakdown = signal.get("scoreBreakdown") if isinstance(signal.get("scoreBreakdown"), dict) else {}
+    lines = [
+        f"# {primary_theme}",
+        "",
+        "## Why this edition",
+        why_now or f"Accepted knowledge-base activity supports treating **{primary_theme}** as the edition spine.",
+        f"Coverage concept: `{resolved_coverage}`.",
+    ]
+    if edition_date:
+        lines.append(f"Edition date: {edition_date}.")
+    if score_breakdown:
+        lines.append("")
+        lines.append("Signal mix (from trend report):")
+        for key, value in score_breakdown.items():
+            lines.append(f"- {key}: {value}")
+    evidence_count = int(signal.get("acceptedEvidenceCount") or 0)
+    domains = list(signal.get("sourceDomains") or [])[:6]
+    if evidence_count:
+        domain_text = ", ".join(domains) if domains else "mixed domains"
+        lines.append(f"- {evidence_count} accepted reference(s) in the signal window; domains include {domain_text}.")
+    if recent_edition_themes:
+        lines.append("")
+        lines.append("Recent edition spines (avoid repeating without a reason):")
+        for entry in recent_edition_themes:
+            date_label = entry.get("editionDate") or "unknown date"
+            lines.append(f"- {date_label}: {entry.get('theme')}")
+    lines.extend([
+        "",
+        "## Proposed spine",
+        (
+            f"Lead with **{primary_theme}** as the shared coverage question, not as the headline for every desk. "
+            "Each section should pursue distinct story seeds below."
+        ),
+        "",
+        "## Desk-shaped story seeds",
+    ])
+    angles_by_section: dict[str, str] = {}
+    for entry in signal.get("suggestedAngles") or []:
+        if isinstance(entry, dict):
+            key = str(entry.get("sectionKey") or "").strip()
+            angle = str(entry.get("angle") or "").strip()
+            if key and angle:
+                angles_by_section[key] = angle
+    section_fit = signal.get("sectionFit") if isinstance(signal.get("sectionFit"), dict) else {}
+    if core_sections:
+        for section in core_sections:
+            section_title = section.get("sectionTitle") or section.get("sectionKey")
+            section_key = str(section.get("sectionKey") or section.get("sectionId") or "")
+            slots = int(section.get("slots") or 1)
+            fit_score = section_fit.get(section_key)
+            lines.append("")
+            lines.append(f"### {section_title}")
+            desk_lens = section_research_lens(section_key)
+            fit_note = f" KB fit {fit_score:.2f}." if isinstance(fit_score, (int, float)) else ""
+            lines.append(f"Target: {slots} slot(s). Desk lens: {desk_lens}.{fit_note}")
+            section_angle = angles_by_section.get(section_key) or f"{desk_lens} applied to {primary_theme}"
+            angle_lenses = list(REPORTING_ANGLE_LENSES)
+            for index in range(max(slots, min(3, len(angle_lenses)))):
+                angle = angle_lenses[index % len(angle_lenses)]
+                seed = section_angle if index == 0 else f"{primary_theme} — {angle['label']}: {angle['prompt']}"
+                lines.append(f"- **{angle['label']}**: {seed}")
+    else:
+        lines.append("- No canonical desks were slotted in this pass.")
+    gaps = list(signal.get("coverageGaps") or [])
+    questions = list(signal.get("openQuestions") or [])
+    if gaps or questions:
+        lines.append("")
+        lines.append("Open editorial questions")
+        for item in [*gaps, *questions][:8]:
+            lines.append(f"- {item}")
+    if optional_desk_sections or recent_optional_desk_usage:
+        lines.append("")
+        lines.append("Optional desk rotation")
+        if recent_optional_desk_usage:
+            for entry in recent_optional_desk_usage:
+                lines.append(
+                    f"- {entry.get('editionDate') or 'unknown date'} used optional desk "
+                    f"{entry.get('sectionTitle') or entry.get('sectionKey')}"
+                )
+        if optional_desk_sections:
+            optional_names = ", ".join(
+                str(section.get("sectionTitle") or section.get("sectionKey") or "")
+                for section in optional_desk_sections
+            )
+            if optional_names:
+                lines.append(f"- Candidate optional desks this cycle: {optional_names}.")
+    body = "\n".join(lines).strip() + "\n"
+    thread_title = derive_edition_forum_thread_title(
+        theme_line=primary_theme,
+        signal=signal,
+        why_fragment=why_now,
+    )
+    return {
+        "primary_theme": primary_theme,
+        "body": body,
+        "thread_title": thread_title,
+        "thread_summary": thread_title,
+        "message_summary": thread_title,
     }
 
 
@@ -1871,37 +2157,40 @@ def _edition_theme_forum_body(
     optional_desk_sections: list[dict[str, Any]],
     recent_optional_desk_usage: list[dict[str, Any]],
     steering_window_hours: int = DEFAULT_STEERING_WINDOW_HOURS,
+    signal: dict[str, Any] | None = None,
+    recent_edition_themes: list[dict[str, str]] | None = None,
+    edition_date: str = "",
 ) -> str:
-    _ = core_sections
-    lines = [
-        "# Edition Theme (Phase 1)",
-        "",
-        "Proposed theme and coverage concept for the upcoming edition. Nothing here is locked until steering closes.",
-        "",
-        f"- Proposed edition theme: {topic}",
-        f"- Proposed coverage concept: {coverage_key}",
-        f"- Steering window: {steering_window_hours}h (working default if no blocking input).",
-        "",
-        "## What Comes Next On This Thread",
-        "- **Phase 2** proposes one optional / rotating desk informed by this theme.",
-        "- **Phase 3** proposes reporting assignments for edition slots (1.5× overassignment per confirmed desk).",
-    ]
-    if optional_desk_sections:
-        lines.append("")
-        lines.append("This planning run includes provisional optional desks; phase 2 will confirm one before optional-desk dispatch.")
-    if recent_optional_desk_usage:
-        lines.append("")
-        lines.append("Optional desks confirmed in prior editions (rotation context for phase 2 only):")
-        for entry in recent_optional_desk_usage:
-            lines.append(
-                f"- {entry.get('editionDate') or 'unknown date'}: {entry.get('sectionTitle') or entry.get('sectionKey')}"
-            )
-    return "\n".join(lines).strip() + "\n"
+    _ = steering_window_hours
+    draft = build_edition_theme_kickoff_draft(
+        topic=topic,
+        coverage_key=coverage_key,
+        signal=signal or resolve_edition_theme_signal(
+            signal=None,
+            topic=topic,
+            coverage_key=coverage_key,
+            corpus_key="",
+            category_key="",
+            sections=[str(section.get("sectionKey") or "") for section in core_sections],
+            state={},
+        ),
+        core_sections=core_sections,
+        optional_desk_sections=optional_desk_sections,
+        recent_optional_desk_usage=recent_optional_desk_usage,
+        recent_edition_themes=recent_edition_themes or [],
+        edition_date=edition_date,
+    )
+    return draft["body"]
 
 
 def _edition_forum_kickoff_body(**kwargs: Any) -> str:
     """Backward-compatible alias for tests and replan helpers."""
     return _edition_theme_forum_body(**kwargs)
+
+
+def _message_planning_phase(message: dict[str, Any]) -> str:
+    metadata = _metadata(message)
+    return str(metadata.get("planningPhase") or "").strip()
 
 
 def should_defer_reporting_dispatch_forum(
@@ -1938,15 +2227,15 @@ def _reporting_dispatch_forum_body(
         assignments_by_section.setdefault(section_key, []).append(assignment)
     section_keys = sorted(set(slots_by_section) | set(assignments_by_section))
     lines = [
-        "# Reporting Dispatch (Phase 3)",
+        "# Reporting candidates",
         "",
-        "Proposed reporting assignments for this edition's slots. Dispatch uses **1.5× overassignment**:",
-        "`ceil(publication_slots * 1.5)` reporting candidates per desk so editors can select into fixed slots.",
+        "Proposed reporting assignments for this edition. Each desk receives **1.5×** candidates",
+        "(`ceil(publication_slots × 1.5)`) so editors can select into fixed slots.",
         "",
-        f"- Edition theme: {topic}",
-        f"- Coverage concept: {coverage_key}",
+        f"- Edition spine: {topic}",
+        f"- Coverage concept: `{coverage_key}`",
         "",
-        "## Proposed Reporting Candidates By Desk",
+        "## By desk",
     ]
     if not section_keys:
         lines.append("- No reporting assignments were materialized for this pass.")
@@ -1979,17 +2268,16 @@ def _reporting_dispatch_forum_body(
             lines.append(
                 f"- Candidate {candidate_rank} → slot {slot_rank} ({angle_label}): {assignment.get('title')}"
             )
-    lines.extend([
-        "",
-        "Default culling is section-first; cross-desk substitutions need explicit editor override.",
-    ])
     return "\n".join(lines).strip() + "\n"
 
 
 def _existing_reporting_dispatch_message(messages: list[dict[str, Any]]) -> dict[str, Any] | None:
     for message in _active_forum_thread_messages(messages):
+        if _message_planning_phase(message) == "reporting_dispatch":
+            return message
         summary = str(message.get("summary") or "").lower()
-        if "reporting dispatch (phase 3)" in summary:
+        content = str(message.get("content") or "").lower()
+        if "reporting dispatch (phase 3)" in summary or content.startswith("# reporting candidates"):
             return message
     return None
 
@@ -2056,10 +2344,11 @@ def build_reporting_dispatch_forum_records(
         thread=thread,
         role="editor",
         author_label="papyrus-editor",
-        summary=f"Reporting dispatch (phase 3): {topic}",
+        summary=f"Reporting candidates: {topic}",
         content=content,
         now=now,
         sequence_number=sequence_number,
+        message_metadata={"planningPhase": "reporting_dispatch"},
     )
     thread["messageCount"] = max(int(thread.get("messageCount") or 0), sequence_number)
     thread["lastMessageId"] = message["id"]
@@ -2605,14 +2894,16 @@ def build_rotating_desk_forum_records(
     )
     sequence_number = _next_forum_sequence(existing_messages_by_thread.get(canonical_thread_id, []))
     content = _rotating_desk_recommendation_body(topic=topic, selection=selection)
+    desk_label = selection.get("recommendedSectionTitle") or selection.get("recommendedSectionKey")
     message = forum_kickoff_message_record(
         thread=thread,
         role="editor",
         author_label="papyrus-editor",
-        summary=f"Optional desk (phase 2): {selection.get('recommendedSectionTitle') or selection.get('recommendedSectionKey')}",
+        summary=f"Optional desk: {desk_label}",
         content=content,
         now=now,
         sequence_number=sequence_number,
+        message_metadata={"planningPhase": "rotating_desk_selection"},
     )
     thread["messageCount"] = max(int(thread.get("messageCount") or 0), sequence_number)
     thread["lastMessageId"] = message["id"]
@@ -2647,23 +2938,26 @@ def build_rotating_desk_forum_records(
 def _rotating_desk_recommendation_body(*, topic: str, selection: dict[str, Any]) -> str:
     avoided = selection.get("avoidedSections") or []
     recent = selection.get("recentUsage") or []
+    desk_title = selection.get("recommendedSectionTitle") or selection.get("recommendedSectionKey")
+    desk_key = selection.get("recommendedSectionKey") or ""
+    summary_line = str(
+        selection.get("recommendationSummary") or selection.get("rationale") or ""
+    ).strip()
     lines = [
-        "# Optional Desk (Phase 2)",
+        f"# Optional desk: {desk_title}",
         "",
-        f"- Edition theme: {topic}",
-        f"- Proposed optional desk: {selection.get('recommendedSectionTitle')} (`{selection.get('recommendedSectionKey')}`)",
-        f"- Note: {selection.get('recommendationSummary') or 'See rationale below.'}",
-        "",
-        "## Rationale",
-        selection.get("rationale") or "No rationale provided.",
+        f"Edition spine: **{topic}**",
+        f"Suggested optional desk: **{desk_title}** (`{desk_key}`)",
     ]
+    if summary_line:
+        lines.extend(["", summary_line])
     if recent:
-        lines.extend(["", "## Prior Editions (confirmed optional desks)", *[
+        lines.extend(["", "## Recent optional desks", *[
             f"- {entry.get('editionDate') or 'unknown'}: {entry.get('sectionTitle') or entry.get('sectionKey')}"
             for entry in recent[:8]
         ]])
     if avoided and recent:
-        lines.extend(["", "## Rotate Away From", *[f"- {key}" for key in avoided]])
+        lines.extend(["", "## Deprioritize", *[f"- {key}" for key in avoided]])
     return "\n".join(lines).strip() + "\n"
 
 
@@ -2873,19 +3167,22 @@ def _existing_optional_desk_recommendation(
     markers = (
         f"optional desk (phase 2): {section_title}".lower(),
         f"optional desk suggestion: {section_title}".lower(),
+        f"optional desk: {section_title}".lower(),
     )
     for message in _active_forum_thread_messages(messages):
+        if _message_planning_phase(message) == "rotating_desk_selection":
+            return message
         summary = str(message.get("summary") or "").lower()
         if any(marker in summary for marker in markers) or (
             str(message.get("importRunId") or "") == run_id
-            and ("optional desk (phase 2)" in summary or "optional desk suggestion" in summary)
+            and ("optional desk (phase 2)" in summary or "optional desk suggestion" in summary or summary.startswith("optional desk:"))
         ):
             return message
     return None
 
 
 def _forum_kickoff_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    markers = (
+    summary_markers = (
         "kickoff",
         "planning suggestions",
         "edition theme (phase 1)",
@@ -2893,12 +3190,23 @@ def _forum_kickoff_messages(messages: list[dict[str, Any]]) -> list[dict[str, An
         "optional desk (phase 2)",
         "optional desk suggestion",
         "reporting dispatch (phase 3)",
+        "reporting candidates:",
+        "optional desk:",
     )
-    return [
-        message
-        for message in _active_forum_thread_messages(messages)
-        if any(marker in str(message.get("summary") or "").lower() for marker in markers)
-    ]
+    result: list[dict[str, Any]] = []
+    for message in _active_forum_thread_messages(messages):
+        summary = str(message.get("summary") or "").lower()
+        if any(marker in summary for marker in summary_markers):
+            result.append(message)
+            continue
+        phase = _message_planning_phase(message)
+        if phase in {"edition_theme_kickoff", "theme_proposal"}:
+            result.append(message)
+            continue
+        content = str(message.get("content") or "")
+        if content.startswith("# ") and "## Why this edition" in content:
+            result.append(message)
+    return result
 
 
 def _resolve_forum_kickoff_action(
@@ -2931,13 +3239,14 @@ def _replan_forum_thread_id(canonical_thread_id: str, run_id: str) -> str:
 
 
 def _wrap_replan_forum_body(*, heading: str, prior_summary: str, run_id: str, body: str) -> str:
-    return "\n".join([
-        f"# {heading}",
-        "",
-        f"This thread records a new planning pass (`{run_id}`) after an earlier kickoff (`{prior_summary}`).",
-        "",
-        body.strip(),
-    ]).strip() + "\n"
+    _ = run_id
+    prior = str(prior_summary or "").strip()
+    lines = [f"# {heading}", ""]
+    if prior:
+        lines.append(f"Updated edition spine (previous thread title: {prior}).")
+        lines.append("")
+    lines.append(body.strip())
+    return "\n".join(lines).strip() + "\n"
 
 
 def _plan_forum_kickoff_scope(
@@ -2952,6 +3261,7 @@ def _plan_forum_kickoff_scope(
     existing_messages_by_thread: dict[str, list[dict[str, Any]]],
     build_thread: Any,
     refresh_existing: bool = False,
+    message_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     thread_messages = [] if refresh_existing else existing_messages_by_thread.get(canonical_thread_id, [])
     action, prior_message = _resolve_forum_kickoff_action(
@@ -3004,6 +3314,7 @@ def _plan_forum_kickoff_scope(
         content=message_content,
         now=now,
         sequence_number=sequence_number,
+        message_metadata=message_metadata,
     )
     thread["messageCount"] = max(int(thread.get("messageCount") or 0), sequence_number)
     thread["lastMessageId"] = message["id"]

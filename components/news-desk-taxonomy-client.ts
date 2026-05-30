@@ -1270,7 +1270,7 @@ export async function ensureEditionForumThreadRecord(input: {
     id: `message-thread-edition-forum-${safeForumId(editionId)}`,
     threadKind: "edition_forum",
     status: "active",
-    title: input.title?.trim() || "Edition Forum",
+    title: input.title?.trim() || "Upcoming edition",
     summary: input.summary?.trim() || "Cross-section editor and human coordination for this edition.",
     primaryAnchorKind: "edition",
     primaryAnchorId: editionId,
