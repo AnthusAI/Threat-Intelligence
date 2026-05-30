@@ -517,6 +517,12 @@ const CONTINUED_TITLE_BORDER_BOTTOM = 0;
 const CONTINUED_TITLE_MARGIN_BOTTOM = 0;
 const FURNITURE_COLLISION_GUTTER = 14;
 const PULL_QUOTE_VERTICAL_PADDING = 24;
+const KICKER_BASE_FONT_SIZE = 11.5;
+const KICKER_BASE_ROW_HEIGHT = 19;
+
+function getKickerFontSize(rhythmRowHeight: number): number {
+  return Math.round((KICKER_BASE_FONT_SIZE * rhythmRowHeight / KICKER_BASE_ROW_HEIGHT) * 10) / 10;
+}
 
 function createVerticalRhythm(rowHeight: number): VerticalRhythm {
   const paintHeight = rowHeight + 4;
@@ -2169,8 +2175,8 @@ function pageIdFor(pageNumber: number): string {
 function getLayoutConfig(pageWidth: number, viewportHeight: number): LayoutConfig {
   const narrow = pageWidth < 560;
   const medium = pageWidth >= 560 && pageWidth < 1040;
-  const bodyFontSize = narrow ? 15 : 16;
-  const bodyLineHeight = Math.round(bodyFontSize * 1.25);
+  const bodyFontSize = narrow ? 14 : 15;
+  const bodyLineHeight = Math.ceil(bodyFontSize * 1.4);
   const rhythm = createVerticalRhythm(bodyLineHeight);
   const gap = narrow ? 14 : 18;
   const rowGap = rhythm.rowHeight;
@@ -2514,12 +2520,13 @@ function getCompositionSlotStyle(
   slotWidth: number,
 ): ChromeTextStyle {
   if (slot === "label") {
+    const labelFontSize = getKickerFontSize(config.rhythm.rowHeight);
     return {
-      fontSize: 11.5,
+      fontSize: labelFontSize,
       fontFamily: SANS_TEXT_FONT,
       fontWeight: 800,
-      lineHeightEm: 1.22,
-      paintHeightEm: 1.22,
+      lineHeightEm: config.rhythm.rowHeight / labelFontSize,
+      paintHeightEm: config.rhythm.rowHeight / labelFontSize,
     };
   }
   if (slot === "headline") {
@@ -2659,12 +2666,13 @@ function getStoryChromeMetrics(
   const feature = storyRole === "feature";
   const displayHeadline = isDisplayHeadlineScale(headlineScale);
   const headlineFontSize = getHeadlineFontSize(config, headlineScale, blockWidth);
+  const labelFontSize = getKickerFontSize(config.rhythm.rowHeight);
   const label = solveChromeTextBox(article.section, blockWidth, {
-    fontSize: 11.5,
+    fontSize: labelFontSize,
     fontFamily: SANS_TEXT_FONT,
     fontWeight: 800,
-    lineHeightEm: 1.22,
-    paintHeightEm: 1.22,
+    lineHeightEm: config.rhythm.rowHeight / labelFontSize,
+    paintHeightEm: config.rhythm.rowHeight / labelFontSize,
   }, config.rhythm, overrides?.label);
   const headline = solveChromeTextBox(article.headline, blockWidth, {
     fontSize: headlineFontSize,
@@ -2694,8 +2702,8 @@ function getStoryChromeMetrics(
     fontSize: 12.2,
     fontFamily: SANS_TEXT_FONT,
     fontWeight: 800,
-    lineHeightEm: 16 / 12.2,
-    paintHeightEm: 16 / 12.2,
+    lineHeightEm: config.rhythm.rowHeight / 12.2,
+    paintHeightEm: config.rhythm.rowHeight / 12.2,
   }, config.rhythm, overrides?.jumpLine);
 
   return {
@@ -2878,12 +2886,13 @@ function getContinuationTitleMetrics(
   explicitHeadlineScale: boolean,
   overrides?: ArticleFrameChromeSpec,
 ): ContinuationTitleMetrics {
+  const labelFontSize = getKickerFontSize(config.rhythm.rowHeight);
   const label = solveChromeTextBox(labelText, blockWidth, {
-    fontSize: 11.5,
+    fontSize: labelFontSize,
     fontFamily: SANS_TEXT_FONT,
     fontWeight: 800,
-    lineHeightEm: CONTINUED_TITLE_KICKER_LINE_HEIGHT / 11.5,
-    paintHeightEm: CONTINUED_TITLE_KICKER_LINE_HEIGHT / 11.5,
+    lineHeightEm: config.rhythm.rowHeight / labelFontSize,
+    paintHeightEm: config.rhythm.rowHeight / labelFontSize,
   }, config.rhythm, overrides?.label);
   const headingWidth = Math.min(blockWidth, 980);
   const headingFontSize = explicitHeadlineScale
