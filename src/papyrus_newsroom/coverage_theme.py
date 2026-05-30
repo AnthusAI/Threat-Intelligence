@@ -27,6 +27,7 @@ SECTION_ALIASES = {
     "law": "law-policy",
 }
 OPTIONAL_DESK_SECTION_TYPES = frozenset({"floating", "rotating"})
+GENERIC_EDITION_FORUM_TITLES = frozenset({"", "edition forum", "upcoming edition"})
 DEFAULT_STEERING_WINDOW_HOURS = 48
 SECTION_RESEARCH_LENSES = {
     "culture": "creative workflows, game design, player experience, generative media",
@@ -1733,6 +1734,26 @@ def build_edition_forum_kickoff_records(
     edition_thread = edition_kickoff_plan["thread"]
     edition_message = edition_kickoff_plan["message"]
     records.extend(edition_kickoff_plan["records"])
+    existing_title = str((existing_edition_thread or {}).get("title") or "").strip()
+    if (
+        edition_kickoff_plan["action"] == "skip"
+        and existing_edition_thread
+        and _is_generic_edition_forum_title(existing_title)
+        and kickoff_draft["thread_title"].lower() not in GENERIC_EDITION_FORUM_TITLES
+    ):
+        patched_thread = edition_forum_thread_record(
+            edition_id=edition_id,
+            run_id=run_id,
+            now=now,
+            thread_id=canonical_edition_thread_id,
+            title=kickoff_draft["thread_title"],
+            summary=kickoff_draft["thread_summary"],
+            existing=existing_edition_thread,
+            message_count=int(existing_edition_thread.get("messageCount") or 1),
+            last_message_id=str(existing_edition_thread.get("lastMessageId") or ""),
+        )
+        edition_thread = patched_thread
+        records.append(_record("MessageThread", patched_thread))
     if edition_kickoff_plan["action"] != "skip":
         edition_metadata = dict(_metadata(edition))
         edition_metadata.update({
@@ -1908,6 +1929,42 @@ def forum_kickoff_message_record(
     }
 
 
+def _is_generic_edition_forum_title(title: str) -> bool:
+    return str(title or "").strip().lower() in GENERIC_EDITION_FORUM_TITLES
+
+
+def _editorial_title_hook(
+    *,
+    why_now: str,
+    signal: dict[str, Any] | None,
+    core_sections: list[dict[str, Any]] | None,
+    primary_theme: str,
+) -> str:
+    lowered = str(why_now or "").lower()
+    blocked = ("desk proposed", "planning run", "coverage concept", "targets coverage")
+    if why_now and not any(fragment in lowered for fragment in blocked):
+        hook = _first_editorial_phrase(why_now, max_len=48)
+        if hook and hook.lower() != str(primary_theme or "").strip().lower():
+            return hook
+    domains = [domain for domain in list((signal or {}).get("sourceDomains") or [])[:2] if domain]
+    if domains:
+        return ", ".join(domains)
+    section_names = [
+        str(section.get("sectionTitle") or section.get("sectionKey") or "").strip()
+        for section in (core_sections or [])
+        if str(section.get("sectionTitle") or section.get("sectionKey") or "").strip()
+    ]
+    if len(section_names) >= 2:
+        return " · ".join(section_names[:3])
+    gaps = list((signal or {}).get("coverageGaps") or [])
+    if gaps:
+        return _first_editorial_phrase(str(gaps[0]), max_len=48)
+    questions = list((signal or {}).get("openQuestions") or [])
+    if questions:
+        return _first_editorial_phrase(str(questions[0]), max_len=48)
+    return ""
+
+
 def _first_editorial_phrase(text: str, *, max_len: int = 44) -> str:
     cleaned = re.sub(r"[*`_]", "", str(text or "")).strip()
     if not cleaned:
@@ -1924,15 +1981,21 @@ def derive_edition_forum_thread_title(
     theme_line: str,
     signal: dict[str, Any] | None = None,
     why_fragment: str = "",
+    core_sections: list[dict[str, Any]] | None = None,
 ) -> str:
     headline = re.sub(r"\s+", " ", str(theme_line or "").strip())
     if not headline:
         return "Upcoming edition"
-    hook = _first_editorial_phrase(why_fragment or str((signal or {}).get("whyNow") or ""))
-    if hook and hook.lower() != headline.lower() and len(headline) + len(hook) + 2 <= 72:
-        headline = f"{headline}: {hook}"
+    hook = _editorial_title_hook(
+        why_now=why_fragment or str((signal or {}).get("whyNow") or ""),
+        signal=signal,
+        core_sections=core_sections,
+        primary_theme=headline,
+    )
+    if hook and hook.lower() != headline.lower() and len(headline) + len(hook) + 3 <= 76:
+        headline = f"{headline} — {hook}"
     evidence_count = int((signal or {}).get("acceptedEvidenceCount") or 0)
-    if evidence_count > 0 and len(headline) < 52:
+    if evidence_count > 0 and len(headline) < 56 and "source" not in headline.lower():
         headline = f"{headline} ({evidence_count} sources)"
     if len(headline) <= 80:
         return headline
@@ -1975,8 +2038,8 @@ def resolve_edition_theme_signal(
         "score": 0.0,
         "scoreBreakdown": {},
         "whyNow": (
-            f"The desk proposed **{topic}** as the edition spine because the current planning run "
-            f"targets coverage concept `{coverage_key}`."
+            f"**{topic}** is the proposed edition spine; accepted references in-window are thin, "
+            f"so desk seeds below should be validated against primary sources before filing."
         ),
         "sourceReferenceIds": [],
         "acceptedEvidenceCount": 0,
@@ -2139,6 +2202,7 @@ def build_edition_theme_kickoff_draft(
         theme_line=primary_theme,
         signal=signal,
         why_fragment=why_now,
+        core_sections=core_sections,
     )
     return {
         "primary_theme": primary_theme,
