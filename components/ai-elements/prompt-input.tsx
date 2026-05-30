@@ -414,23 +414,17 @@ export type PromptInputActionAddAttachmentsProps = ComponentProps<
   label?: string;
 };
 
-type DropdownMenuItemSelectEvent = Parameters<
-  NonNullable<ComponentProps<typeof DropdownMenuItem>["onSelect"]>
->[0];
-
-type InputGroupButtonClickEvent = Parameters<
-  NonNullable<ComponentProps<typeof InputGroupButton>["onClick"]>
->[0];
-
 export const PromptInputActionAddAttachments = ({
   label = "Add photos or files",
   ...props
 }: PromptInputActionAddAttachmentsProps) => {
   const attachments = usePromptInputAttachments();
 
-  const handleSelect = useCallback(
-    (e: DropdownMenuItemSelectEvent) => {
-      e.preventDefault();
+  const handleSelect = useCallback<
+    NonNullable<ComponentProps<typeof DropdownMenuItem>["onSelect"]>
+  >(
+    (event) => {
+      event.preventDefault();
       attachments.openFileDialog();
     },
     [attachments]
@@ -456,8 +450,10 @@ export const PromptInputActionAddScreenshot = ({
 }: PromptInputActionAddScreenshotProps) => {
   const attachments = usePromptInputAttachments();
 
-  const handleSelect = useCallback(
-    async (event: DropdownMenuItemSelectEvent) => {
+  const handleSelect = useCallback<
+    NonNullable<ComponentProps<typeof DropdownMenuItem>["onSelect"]>
+  >(
+    async (event) => {
       onSelect?.(event);
       if (event.defaultPrevented) {
         return;
@@ -1239,14 +1235,16 @@ export const PromptInputSubmit = ({
     Icon = <XIcon className="size-4" />;
   }
 
-  const handleClick = useCallback(
-    (e: InputGroupButtonClickEvent) => {
+  const handleClick = useCallback<
+    NonNullable<ComponentProps<typeof InputGroupButton>["onClick"]>
+  >(
+    (event) => {
       if (isGenerating && onStop) {
-        e.preventDefault();
+        event.preventDefault();
         onStop();
         return;
       }
-      onClick?.(e);
+      onClick?.(event as Parameters<NonNullable<typeof onClick>>[0]);
     },
     [isGenerating, onStop, onClick]
   );
@@ -1319,16 +1317,11 @@ export const PromptInputSelectValue = ({
   <SelectValue className={cn(className)} {...props} />
 );
 
-export type PromptInputHoverCardProps = ComponentProps<typeof HoverCard> & {
-  openDelay?: number;
-  closeDelay?: number;
-};
+export type PromptInputHoverCardProps = ComponentProps<typeof HoverCard>;
 
-export const PromptInputHoverCard = ({
-  openDelay: _openDelay = 0,
-  closeDelay: _closeDelay = 0,
-  ...props
-}: PromptInputHoverCardProps) => <HoverCard {...props} />;
+export const PromptInputHoverCard = (props: PromptInputHoverCardProps) => (
+  <HoverCard {...props} />
+);
 
 export type PromptInputHoverCardTriggerProps = ComponentProps<
   typeof HoverCardTrigger

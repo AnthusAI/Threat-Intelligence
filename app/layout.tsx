@@ -3,6 +3,8 @@ import { Playfair_Display } from "next/font/google";
 import Script from "next/script";
 import { AmplifyClientProvider } from "../components/amplify-client-provider";
 import { PapyrusConsoleShell } from "../components/papyrus-console-shell";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import "./tailwind.css";
 import "./globals.css";
 
 const playfairDisplay = Playfair_Display({
@@ -90,7 +92,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
 })();`}
         </Script>
         <AmplifyClientProvider>
-          <PapyrusConsoleShell>{children}</PapyrusConsoleShell>
+          <TooltipProvider>
+            <PapyrusConsoleShell>{children}</PapyrusConsoleShell>
+          </TooltipProvider>
         </AmplifyClientProvider>
       </body>
     </html>
