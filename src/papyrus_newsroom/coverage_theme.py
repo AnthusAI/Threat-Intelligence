@@ -2009,40 +2009,7 @@ def _editorial_title_hook(
     ]
     if related:
         return " · ".join(related[:3])
-    section_names = [
-        str(section.get("sectionTitle") or section.get("sectionKey") or "").strip()
-        for section in (core_sections or [])
-        if str(section.get("sectionTitle") or section.get("sectionKey") or "").strip()
-    ]
-    if len(section_names) >= 2:
-        return " · ".join(section_names[:3])
-    lowered = str(why_now or "").lower()
-    blocked = (
-        "desk proposed",
-        "planning run",
-        "coverage concept",
-        "targets coverage",
-        "proposed edition spine",
-        "references in-window are thin",
-        "no accepted references were found",
-    )
-    if why_now and not any(fragment in lowered for fragment in blocked):
-        stripped = re.sub(r"[*`_]", "", why_now).strip()
-        if theme and stripped.lower().startswith(theme.lower()):
-            stripped = stripped[len(theme) :].lstrip(" —:-")
-        hook = _first_editorial_phrase(stripped, max_len=48)
-        if hook and theme.lower() not in hook.lower():
-            return hook
-    gaps = list((signal or {}).get("coverageGaps") or [])
-    if gaps:
-        hook = _first_editorial_phrase(str(gaps[0]), max_len=48)
-        if hook and theme.lower() not in hook.lower():
-            return hook
-    questions = list((signal or {}).get("openQuestions") or [])
-    if questions:
-        hook = _first_editorial_phrase(str(questions[0]), max_len=48)
-        if hook and theme.lower() not in hook.lower():
-            return hook
+    _ = (why_now, core_sections)
     return ""
 
 
