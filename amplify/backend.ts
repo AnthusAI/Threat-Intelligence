@@ -3,7 +3,7 @@ import { Duration } from "aws-cdk-lib";
 import * as backup from "aws-cdk-lib/aws-backup";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as events from "aws-cdk-lib/aws-events";
-import { PolicyStatement } from "aws-cdk-lib/aws-iam";
+import { PolicyStatement, ServicePrincipal } from "aws-cdk-lib/aws-iam";
 import { Function as LambdaFunction } from "aws-cdk-lib/aws-lambda";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import { CfnIndex, CfnVectorBucket, CfnVectorBucketPolicy } from "aws-cdk-lib/aws-s3vectors";
@@ -65,6 +65,18 @@ const inboundEmailCorpusKey = (process.env.PAPYRUS_INBOUND_EMAIL_CORPUS_KEY ?? "
 if (enableInboundEmail) {
   const receiveLambda = backend.sesInboundReceive.resources.lambda as LambdaFunction;
   const processorLambda = backend.emailSubmissionProcessor.resources.lambda as LambdaFunction;
+  const graphqlEndpoint = backend.data.resources.cfnResources.cfnGraphqlApi.attrGraphQlUrl;
+  const storageBucket = backend.storage.resources.bucket;
+
+  receiveLambda.addEnvironment("PAPYRUS_EMAIL_SUBMISSION_PROCESSOR_FUNCTION_NAME", processorLambda.functionName);
+  receiveLambda.addEnvironment("PAPYRUS_INBOUND_EMAIL_DOMAIN", inboundEmailDomain);
+  receiveLambda.addEnvironment("PAPYRUS_INBOUND_EMAIL_LOCAL_PARTS", inboundEmailLocalParts.join(","));
+  receiveLambda.addEnvironment("PAPYRUS_INBOUND_EMAIL_CORPUS_KEY", inboundEmailCorpusKey);
+  receiveLambda.addEnvironment("PAPYRUS_GRAPHQL_ENDPOINT", graphqlEndpoint);
+
+  processorLambda.addEnvironment("PAPYRUS_INBOUND_EMAIL_CORPUS_KEY", inboundEmailCorpusKey);
+  processorLambda.addEnvironment("PAPYRUS_GRAPHQL_ENDPOINT", graphqlEndpoint);
+
   receiveLambda.addToRolePolicy(
     new PolicyStatement({
       actions: ["lambda:InvokeFunction"],
@@ -86,15 +98,20 @@ if (enableInboundEmail) {
       ],
     }),
   );
-  processorLambda.addEnvironment("PAPYRUS_JWT_SECRET", secret("PAPYRUS_JWT_SECRET"));
+
+  storageBucket.grantRead(receiveLambda, "inbound-email/*");
+  processorLambda.grantInvoke(receiveLambda);
+  receiveLambda.addPermission("AllowSesInvoke", {
+    principal: new ServicePrincipal("ses.amazonaws.com"),
+    action: "lambda:InvokeFunction",
+    sourceAccount: backend.stack.account,
+  });
+
   new InboundEmailStack(backend.createStack("inbound-email"), "InboundEmail", {
-    storageBucket: backend.storage.resources.bucket,
+    storageBucket,
     receiveFunction: receiveLambda,
-    processorFunction: processorLambda,
     domain: inboundEmailDomain,
     localParts: inboundEmailLocalParts,
-    corpusKey: inboundEmailCorpusKey,
-    graphqlEndpoint: backend.data.resources.cfnResources.cfnGraphqlApi.attrGraphQlUrl,
   });
 }
 

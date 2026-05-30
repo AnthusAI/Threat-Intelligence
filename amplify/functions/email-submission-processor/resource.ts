@@ -1,4 +1,4 @@
-import { defineFunction } from "@aws-amplify/backend";
+import { defineFunction, secret } from "@aws-amplify/backend";
 import { Duration } from "aws-cdk-lib";
 import { Architecture, Code, Function, Runtime } from "aws-cdk-lib/aws-lambda";
 import { Construct } from "constructs";
@@ -30,6 +30,12 @@ export const emailSubmissionProcessor = defineFunction(
       handler: "handler.handler",
       timeout: Duration.minutes(5),
       memorySize: 1024,
+      environment: {
+        PAPYRUS_JWT_SECRET: secret("PAPYRUS_JWT_SECRET"),
+        PAPYRUS_JWT_ISSUER: "papyrus-cli",
+        PAPYRUS_JWT_AUDIENCE: "papyrus-authoring",
+        PAPYRUS_JWT_REQUIRED_SCOPE: "papyrus:write",
+      },
       code: Code.fromAsset(projectRoot, {
         bundling: {
           image: Runtime.PYTHON_3_12.bundlingImage,
