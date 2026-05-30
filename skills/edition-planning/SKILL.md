@@ -340,9 +340,9 @@ After a full planning kickoff, the canonical `edition_forum` thread should have
 
 | Seq | Phase | Message summary prefix | CLI step |
 | --- | --- | --- | --- |
-| 1 | Theme | `Edition theme (phase 1):` | `--through plan` |
-| 2 | Optional desk | `Optional desk (phase 2):` | `--through rotating-desk` |
-| 3 | Reporting dispatch | `Reporting dispatch (phase 3):` | End of `rotating-desk` apply, or end of `plan` when no optional desk is pending |
+| 1 | Theme | Thread title = derived spine headline; kickoff body has `## Why this edition` | `--through plan` |
+| 2 | Optional desk | `Optional desk: {desk}` | `--through rotating-desk` |
+| 3 | Reporting dispatch | `Reporting candidates: {spine}` | End of `rotating-desk` apply, or end of `plan` when no optional desk is pending |
 
 Phase 3 lists reporting assignment candidates per desk with the default
 `ceil(slots * 1.5)` overassignment. Do not post phase 3 until phase 2 confirms
