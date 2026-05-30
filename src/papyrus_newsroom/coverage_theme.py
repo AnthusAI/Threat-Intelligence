@@ -1971,6 +1971,31 @@ def _is_usable_theme_label(text: str) -> bool:
     return True
 
 
+def _theme_phrases_from_reference_titles(titles: list[str], *, limit: int = 3) -> list[str]:
+    counts: dict[str, int] = {}
+    for raw_title in titles:
+        words = [
+            word
+            for word in re.findall(r"[A-Za-z][A-Za-z0-9-]+", str(raw_title or ""))
+            if word.lower() not in TREND_TOPIC_STOP_TERMS and len(word) >= 3
+        ]
+        for index in range(len(words) - 1):
+            phrase = f"{words[index]} {words[index + 1]}"
+            if not _is_usable_theme_label(phrase):
+                continue
+            key = phrase.lower()
+            counts[key] = counts.get(key, 0) + 1
+    ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    labels: list[str] = []
+    for key, _count in ranked:
+        label = " ".join(part.capitalize() if part.islower() else part for part in key.split())
+        if label not in labels:
+            labels.append(label)
+        if len(labels) >= limit:
+            break
+    return labels
+
+
 def _related_theme_labels_for_title(
     *,
     signal: dict[str, Any] | None,
@@ -1990,6 +2015,12 @@ def _related_theme_labels_for_title(
                 labels.append(label)
             if len(labels) >= 3:
                 return labels
+        for label in _theme_phrases_from_reference_titles(list(kb_snapshot.get("sampleTitles") or [])):
+            if label.lower() == theme.lower() or label in labels:
+                continue
+            labels.append(label)
+            if len(labels) >= 3:
+                break
     return labels
 
 

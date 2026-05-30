@@ -3872,6 +3872,13 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertFalse(papyrus_coverage_theme._is_usable_theme_label("Language"))
         self.assertTrue(papyrus_coverage_theme._is_usable_theme_label("Generative game worlds"))
 
+    def test_theme_phrases_from_reference_titles_extracts_bigrams(self):
+        phrases = papyrus_coverage_theme._theme_phrases_from_reference_titles([
+            "Video-LLaMA: An Instruction-tuned Audio-Visual Language Model for Video Understanding",
+            "Streaming Video Question-Answering with In-context Video KV-Cache Retrieval",
+        ])
+        self.assertTrue(any("video" in phrase.lower() for phrase in phrases))
+
     def test_derive_edition_forum_thread_title_prefers_themes_over_domains(self):
         title = papyrus_coverage_theme.derive_edition_forum_thread_title(
             theme_line="AI in video games",
