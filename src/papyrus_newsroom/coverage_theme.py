@@ -2292,6 +2292,7 @@ def summarize_concepts_for_planning(
 ) -> dict[str, Any]:
     if not references or not semantic_nodes:
         return {"popularity": [], "trending": [], "rankedForDispatch": []}
+    accepted = _accepted_references(references, corpus_key)
     if not semantic_relations:
         return _concept_snapshot_from_semantic_nodes(
             semantic_nodes=semantic_nodes,
@@ -2381,6 +2382,29 @@ def summarize_concepts_for_planning(
                 "trending": trend_rows,
                 "rankedForDispatch": trend_rows,
                 "source": "trend_signals",
+            }
+        phrase_rows: list[dict[str, Any]] = []
+        topic_matched_titles = [
+            str(ref.get("title") or "")
+            for ref in accepted
+            if any(term in str(ref.get("title") or "").lower() for term in _terms(topic))
+        ]
+        for label in _theme_phrases_from_reference_titles(topic_matched_titles, limit=limit):
+            phrase_rows.append({
+                "conceptId": f"phrase-{_hash_short([label])}",
+                "displayName": label,
+                "metric": "titlePhrase",
+                "score": 1,
+                "distinctReferenceCount": 1,
+                "topicRelevance": 1,
+                "source": "reference_title_phrase",
+            })
+        if phrase_rows:
+            return {
+                "popularity": phrase_rows,
+                "trending": phrase_rows,
+                "rankedForDispatch": phrase_rows,
+                "source": "reference_title_phrases",
             }
         return _concept_snapshot_from_semantic_nodes(
             semantic_nodes=semantic_nodes,
