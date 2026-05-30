@@ -3381,25 +3381,15 @@ function OverviewDeskView({
   }, [availableSections, selectedSectionId]);
 
   useEffect(() => {
-    let active = true;
     if (!overviewEditions.length) {
       setSelectedEditionId("");
-      return () => {
-        active = false;
-      };
+      return;
     }
     if (selectedEditionId && overviewEditions.some((edition) => edition.editionId === selectedEditionId)) {
-      return () => {
-        active = false;
-      };
+      return;
     }
-    void resolveDefaultForumEditionId(overviewEditions).then((editionId) => {
-      if (!active || !editionId) return;
-      setSelectedEditionId(editionId);
-    });
-    return () => {
-      active = false;
-    };
+    const preferred = overviewEditions.find((edition) => edition.isNearestUpcoming) ?? overviewEditions[0];
+    setSelectedEditionId(preferred.editionId);
   }, [overviewEditions, selectedEditionId]);
 
   const refreshThreads = useCallback(async () => {
@@ -3827,43 +3817,6 @@ function dayDeltaFromToday(dateText: string | null, today: Date): number | null 
   const parsed = new Date(`${dateText}T00:00:00.000Z`);
   if (Number.isNaN(parsed.valueOf())) return null;
   return Math.round((parsed.valueOf() - today.valueOf()) / 86400000);
-}
-
-async function resolveDefaultForumEditionId(
-  overviewEditions: ResolvedOverviewEdition[],
-): Promise<string | null> {
-  if (!overviewEditions.length) return null;
-  const editionIds = overviewEditions.map((edition) => edition.editionId);
-  const latestActive = await resolveLatestActiveForumEdition(editionIds);
-  if (latestActive) return latestActive;
-  const nearestUpcoming = overviewEditions.find((edition) => edition.isNearestUpcoming)?.editionId;
-  return nearestUpcoming ?? overviewEditions[0].editionId;
-}
-
-async function resolveLatestActiveForumEdition(editionIds: string[]): Promise<string | null> {
-  const uniqueIds = Array.from(new Set(editionIds.filter(Boolean)));
-  if (!uniqueIds.length) return null;
-  const resolved = await Promise.all(uniqueIds.map(async (editionId) => {
-    try {
-      const result = await loadEditionForumThreads({
-        editionId,
-        includeMessages: false,
-        status: "active",
-      });
-      const latestThread = [...result.editionThreads, ...result.sectionThreads]
-        .sort((left, right) => String(right.lastMessageAt ?? right.updatedAt ?? "").localeCompare(String(left.lastMessageAt ?? left.updatedAt ?? "")))[0];
-      return {
-        editionId,
-        latestAt: latestThread ? String(latestThread.lastMessageAt ?? latestThread.updatedAt ?? latestThread.createdAt ?? "") : "",
-      };
-    } catch {
-      return { editionId, latestAt: "" };
-    }
-  }));
-  const winner = resolved
-    .filter((entry) => entry.latestAt)
-    .sort((left, right) => right.latestAt.localeCompare(left.latestAt))[0];
-  return winner?.editionId ?? null;
 }
 
 function NewsroomSectionRail({
@@ -7339,25 +7292,15 @@ function MessagesDeskView({
     [newsroomSections],
   );
   useEffect(() => {
-    let active = true;
     if (!messageOverviewEditions.length) {
       setSelectedForumEditionId("");
-      return () => {
-        active = false;
-      };
+      return;
     }
     if (selectedForumEditionId && messageOverviewEditions.some((edition) => edition.editionId === selectedForumEditionId)) {
-      return () => {
-        active = false;
-      };
+      return;
     }
-    void resolveDefaultForumEditionId(messageOverviewEditions).then((editionId) => {
-      if (!active || !editionId) return;
-      setSelectedForumEditionId(editionId);
-    });
-    return () => {
-      active = false;
-    };
+    const preferred = messageOverviewEditions.find((edition) => edition.isNearestUpcoming) ?? messageOverviewEditions[0];
+    setSelectedForumEditionId(preferred.editionId);
   }, [messageOverviewEditions, selectedForumEditionId]);
   useEffect(() => {
     if (!availableSections.length) {
