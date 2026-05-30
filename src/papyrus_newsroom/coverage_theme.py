@@ -296,6 +296,82 @@ def signals_trend_report(
     return output
 
 
+def signals_concept_report(
+    *,
+    corpus_key: str,
+    report_type: str = "all",
+    limit: int = 25,
+    trend_window_days: int = 30,
+    pagerank_iterations: int = 30,
+    pagerank_damping: float = 0.85,
+    node_kinds: list[str] | None = None,
+    max_nodes_per_reference: int = 50,
+    run_id: str = "",
+    references: list[dict[str, Any]] | None = None,
+    semantic_nodes: list[dict[str, Any]] | None = None,
+    semantic_relations: list[dict[str, Any]] | None = None,
+    apply: bool = False,
+    now: str = "",
+) -> dict[str, Any]:
+    now = now or _now_iso()
+    report_type = _normalize_concept_report_type(report_type)
+    if references is None or semantic_nodes is None or semantic_relations is None:
+        state = load_live_state(models=["Reference", "SemanticNode", "SemanticRelation"])
+        references = state.get("references", []) if references is None else references
+        semantic_nodes = state.get("semanticNodes", []) if semantic_nodes is None else semantic_nodes
+        semantic_relations = state.get("semanticRelations", []) if semantic_relations is None else semantic_relations
+    references = references or []
+    semantic_nodes = semantic_nodes or []
+    semantic_relations = semantic_relations or []
+    run_id = run_id or f"concept-report-{_safe_id(corpus_key)}-{_timestamp_for_path(now)}"
+    reports = build_concept_reports(
+        references=references,
+        semantic_nodes=semantic_nodes,
+        semantic_relations=semantic_relations,
+        corpus_key=corpus_key,
+        report_type=report_type,
+        limit=limit,
+        trend_window_days=trend_window_days,
+        pagerank_iterations=pagerank_iterations,
+        pagerank_damping=pagerank_damping,
+        node_kinds=node_kinds or [],
+        max_nodes_per_reference=max_nodes_per_reference,
+        now=now,
+    )
+    mention_relation_count = sum(len(report.get("mentionRelationIds") or []) for report in reports)
+    ranked_concept_ids = {
+        concept.get("conceptId")
+        for report in reports
+        for concept in report.get("rankedConcepts") or []
+        if concept.get("conceptId")
+    }
+    report = {
+        "ok": True,
+        "command": "signals concept-report",
+        "runId": run_id,
+        "corpusKey": corpus_key,
+        "reportType": report_type,
+        "generatedAt": now,
+        "reports": reports,
+        "summary": {
+            "reportCount": len(reports),
+            "rankedConceptCount": len(ranked_concept_ids),
+            "acceptedReferenceCount": len(_accepted_references(references, corpus_key)),
+            "mentionRelationCount": mention_relation_count,
+            "createsItemOrEditionItem": False,
+        },
+    }
+    records = build_concept_report_records(report)
+    output = {
+        **report,
+        "records": records,
+        "apply": False,
+    }
+    if apply:
+        output = {**output, **apply_records(records)}
+    return output
+
+
 def build_trend_signals(
     *,
     references: list[dict[str, Any]],
@@ -387,6 +463,43 @@ def build_trend_signals(
     return sorted(signals, key=lambda item: (-float(item["score"]), item["topic"]))[:limit]
 
 
+def build_concept_reports(
+    *,
+    references: list[dict[str, Any]],
+    semantic_nodes: list[dict[str, Any]],
+    semantic_relations: list[dict[str, Any]],
+    corpus_key: str,
+    report_type: str,
+    limit: int,
+    trend_window_days: int,
+    pagerank_iterations: int,
+    pagerank_damping: float,
+    node_kinds: list[str],
+    max_nodes_per_reference: int,
+    now: str,
+) -> list[dict[str, Any]]:
+    report_type = _normalize_concept_report_type(report_type)
+    limit = max(1, int(limit or 1))
+    context = _concept_report_context(
+        references=references,
+        semantic_nodes=semantic_nodes,
+        semantic_relations=semantic_relations,
+        corpus_key=corpus_key,
+        node_kinds=node_kinds,
+        now=now,
+    )
+    requested = ["popularity", "trending", "pagerank"] if report_type == "all" else [report_type]
+    reports: list[dict[str, Any]] = []
+    for current_type in requested:
+        if current_type == "popularity":
+            reports.append(_build_concept_popularity_report(context, limit))
+        elif current_type == "trending":
+            reports.append(_build_concept_trending_report(context, limit, trend_window_days))
+        elif current_type == "pagerank":
+            reports.append(_build_concept_pagerank_report(context, limit, pagerank_iterations, pagerank_damping, max_nodes_per_reference))
+    return reports
+
+
 def build_signal_report_records(report: dict[str, Any]) -> list[dict[str, Any]]:
     now = str(report.get("generatedAt") or _now_iso())
     run_id = str(report["runId"])
@@ -448,6 +561,73 @@ def build_signal_report_records(report: dict[str, Any]) -> list[dict[str, Any]]:
                 now=now,
                 metadata={"signalId": signal["signalId"], "coverageKey": signal["coverageKey"]},
             )))
+    return _dedupe_records(records)
+
+
+def build_concept_report_records(report: dict[str, Any]) -> list[dict[str, Any]]:
+    now = str(report.get("generatedAt") or _now_iso())
+    run_id = str(report["runId"])
+    message_id = f"message-concept-report-{_safe_id(run_id)}"
+    summary = f"Concept analytics report: {len(report.get('reports') or [])} report section(s)."
+    message = {
+        "id": message_id,
+        "messageKind": "concept_report",
+        "messageDomain": "analytics",
+        "status": "active",
+        "summary": summary,
+        "source": "papyrus-newsroom signals concept-report",
+        "importRunId": run_id,
+        "authorLabel": "papyrus-newsroom",
+        "newsroomFeedKey": "message#concept_report",
+        "createdAt": now,
+        "updatedAt": now,
+    }
+    records = [
+        _record("Message", message),
+        _attachment_record(message_id, "message_body", "message", "message.txt", "text/plain", _concept_report_body(report), run_id, now),
+        _attachment_record(message_id, "metadata", "metadata", "metadata.json", "application/json", {"kind": "analytics.concept_report", **report}, run_id, now),
+    ]
+    linked_concepts: set[str] = set()
+    linked_references: set[str] = set()
+    for report_section in report.get("reports") or []:
+        for concept in report_section.get("rankedConcepts") or []:
+            concept_id = str(concept.get("conceptId") or "")
+            if concept_id and concept_id not in linked_concepts:
+                linked_concepts.add(concept_id)
+                records.append(_record("SemanticRelation", semantic_relation(
+                    predicate="uses_signal",
+                    subject_kind="message",
+                    subject_id=message_id,
+                    object_kind="semanticNode",
+                    object_id=concept_id,
+                    object_lineage_id=str(concept.get("conceptLineageId") or concept_id),
+                    rank=concept.get("rank"),
+                    score=concept.get("score"),
+                    import_run_id=run_id,
+                    now=now,
+                    metadata={
+                        "reportType": report_section.get("reportType"),
+                        "displayName": concept.get("displayName"),
+                        "metric": concept.get("metric"),
+                    },
+                )))
+            for reference_id in concept.get("sourceReferenceIds") or []:
+                reference_id = str(reference_id or "")
+                if not reference_id or reference_id in linked_references:
+                    continue
+                linked_references.add(reference_id)
+                records.append(_record("SemanticRelation", semantic_relation(
+                    predicate="uses_evidence",
+                    subject_kind="message",
+                    subject_id=message_id,
+                    object_kind="reference",
+                    object_id=reference_id,
+                    object_lineage_id=reference_id,
+                    rank=len(linked_references),
+                    import_run_id=run_id,
+                    now=now,
+                    metadata={"reportType": report_section.get("reportType")},
+                )))
     return _dedupe_records(records)
 
 
@@ -4222,6 +4402,29 @@ def _signal_report_body(report: dict[str, Any]) -> str:
     return "\n".join(lines).strip() + "\n"
 
 
+def _concept_report_body(report: dict[str, Any]) -> str:
+    lines = [
+        "Concept Analytics Report",
+        f"Corpus: {report.get('corpusKey')}",
+        f"Generated: {report.get('generatedAt')}",
+        "",
+    ]
+    for report_section in report.get("reports") or []:
+        lines.extend([
+            str(report_section.get("title") or report_section.get("reportType") or "Report"),
+            f"Metric: {report_section.get('primaryMetric')}",
+            "",
+        ])
+        for concept in report_section.get("rankedConcepts") or []:
+            lines.append(
+                f"{concept.get('rank')}. {concept.get('displayName')} "
+                f"({concept.get('conceptLineageId') or concept.get('conceptId')}) - "
+                f"{concept.get('metric')}: {concept.get('score')}"
+            )
+        lines.append("")
+    return "\n".join(lines).strip() + "\n"
+
+
 def _research_packet_body(packet: dict[str, Any]) -> str:
     return "\n".join([
         packet["summary"],
@@ -4284,6 +4487,308 @@ def _packet_summary(messages: list[dict[str, Any]], attachments: list[dict[str, 
         "degraded": bool(packet.get("degraded")),
         "fallbackReason": packet.get("fallbackReason") or packet.get("fallback_reason"),
     }
+
+
+def _normalize_concept_report_type(value: str) -> str:
+    normalized = str(value or "all").strip().lower().replace("-", "_")
+    aliases = {
+        "frequency": "popularity",
+        "popular": "popularity",
+        "trend": "trending",
+        "page_rank": "pagerank",
+        "centrality": "pagerank",
+    }
+    normalized = aliases.get(normalized, normalized)
+    if normalized not in {"all", "popularity", "trending", "pagerank"}:
+        raise ValueError("report_type must be one of all, popularity, trending, or pagerank")
+    return normalized
+
+
+def _concept_report_context(
+    *,
+    references: list[dict[str, Any]],
+    semantic_nodes: list[dict[str, Any]],
+    semantic_relations: list[dict[str, Any]],
+    corpus_key: str,
+    node_kinds: list[str],
+    now: str,
+) -> dict[str, Any]:
+    now_dt = _parse_datetime(now) or dt.datetime.now(dt.UTC)
+    corpus_id = f"knowledge-corpus-{_safe_id(corpus_key)}"
+    accepted = _accepted_references(references, corpus_key)
+    references_by_key: dict[str, dict[str, Any]] = {}
+    for ref in accepted:
+        for key in (ref.get("id"), ref.get("lineageId")):
+            if key:
+                references_by_key[str(key)] = ref
+    allowed_node_kinds = {str(kind).strip() for kind in node_kinds if str(kind).strip()}
+    nodes_by_key: dict[str, dict[str, Any]] = {}
+    for raw_node in semantic_nodes:
+        node = _decode_record(raw_node)
+        if node.get("versionState") not in {None, "current"}:
+            continue
+        if node.get("status") not in {None, "", "active", "accepted", "current"}:
+            continue
+        if allowed_node_kinds and str(node.get("nodeKind") or "") not in allowed_node_kinds:
+            continue
+        if corpus_key and node.get("corpusId") not in {None, "", corpus_id, corpus_key}:
+            continue
+        for key in (node.get("id"), node.get("lineageId")):
+            if key:
+                nodes_by_key[str(key)] = node
+    mentions: list[dict[str, Any]] = []
+    mentions_by_concept: dict[str, list[dict[str, Any]]] = {}
+    concepts_by_id: dict[str, dict[str, Any]] = {}
+    for raw_relation in semantic_relations:
+        relation = _decode_record(raw_relation)
+        relation_type = relation.get("relationTypeKey") or relation.get("predicate")
+        if _normalize_relation_key(relation_type) != "mentions":
+            continue
+        if relation.get("relationState") not in {None, "current"}:
+            continue
+        if str(relation.get("subjectKind") or "") != "reference":
+            continue
+        if str(relation.get("objectKind") or "") != "semanticNode":
+            continue
+        reference = references_by_key.get(str(relation.get("subjectLineageId") or "")) or references_by_key.get(str(relation.get("subjectId") or ""))
+        node = nodes_by_key.get(str(relation.get("objectLineageId") or "")) or nodes_by_key.get(str(relation.get("objectId") or ""))
+        if not reference or not node:
+            continue
+        concept_id = str(node.get("id") or relation.get("objectId"))
+        if not concept_id:
+            continue
+        concept_lineage_id = str(node.get("lineageId") or concept_id)
+        reference_id = str(reference.get("id") or relation.get("subjectId"))
+        reference_lineage_id = str(reference.get("lineageId") or reference_id)
+        mention = {
+            "id": relation.get("id") or _hash_short(relation),
+            "conceptId": concept_id,
+            "conceptLineageId": concept_lineage_id,
+            "referenceId": reference_id,
+            "referenceLineageId": reference_lineage_id,
+            "weight": _relation_weight(relation),
+            "datetime": _parse_datetime(relation.get("importedAt") or relation.get("createdAt") or relation.get("updatedAt")) or _reference_datetime(reference) or now_dt,
+        }
+        concepts_by_id[concept_id] = node
+        mentions.append(mention)
+        mentions_by_concept.setdefault(concept_id, []).append(mention)
+    return {
+        "now": now_dt,
+        "references": accepted,
+        "referencesByKey": references_by_key,
+        "conceptsById": concepts_by_id,
+        "mentions": mentions,
+        "mentionsByConcept": mentions_by_concept,
+    }
+
+
+def _build_concept_popularity_report(context: dict[str, Any], limit: int) -> dict[str, Any]:
+    ranked = []
+    for concept_id, mentions in context["mentionsByConcept"].items():
+        ranked.append(_concept_report_row(
+            context=context,
+            concept_id=concept_id,
+            mentions=mentions,
+            metric="distinctReferenceCount",
+            score=len({mention["referenceLineageId"] for mention in mentions}),
+        ))
+    ranked.sort(key=lambda item: (-int(item["distinctReferenceCount"]), -float(item["weightedMentionScore"]), item["displayName"]))
+    return _concept_report_section(
+        report_type="popularity",
+        title="Most Referenced Concepts",
+        primary_metric="distinctReferenceCount",
+        ranked=ranked[:limit],
+    )
+
+
+def _build_concept_trending_report(context: dict[str, Any], limit: int, trend_window_days: int) -> dict[str, Any]:
+    window_days = max(1, int(trend_window_days or 1))
+    now_dt = context["now"]
+    recent_cutoff = now_dt - dt.timedelta(days=window_days)
+    prior_cutoff = now_dt - dt.timedelta(days=window_days * 2)
+    ranked = []
+    for concept_id, mentions in context["mentionsByConcept"].items():
+        recent_refs = {
+            mention["referenceLineageId"]
+            for mention in mentions
+            if mention["datetime"] >= recent_cutoff
+        }
+        prior_refs = {
+            mention["referenceLineageId"]
+            for mention in mentions
+            if prior_cutoff <= mention["datetime"] < recent_cutoff
+        }
+        recent_count = len(recent_refs)
+        prior_count = len(prior_refs)
+        delta = recent_count - prior_count
+        growth = round(delta / max(prior_count, 1), 3)
+        velocity_score = round(recent_count + max(delta, 0) + max(growth, 0), 3)
+        if recent_count <= 0:
+            continue
+        row = _concept_report_row(
+            context=context,
+            concept_id=concept_id,
+            mentions=mentions,
+            metric="velocityScore",
+            score=velocity_score,
+        )
+        row.update({
+            "recentWindowDays": window_days,
+            "recentDistinctReferenceCount": recent_count,
+            "priorDistinctReferenceCount": prior_count,
+            "delta": delta,
+            "growthRate": growth,
+        })
+        ranked.append(row)
+    ranked.sort(key=lambda item: (-float(item["score"]), -int(item["recentDistinctReferenceCount"]), item["displayName"]))
+    return _concept_report_section(
+        report_type="trending",
+        title=f"Trending Concepts ({window_days}d)",
+        primary_metric="velocityScore",
+        ranked=ranked[:limit],
+    )
+
+
+def _build_concept_pagerank_report(
+    context: dict[str, Any],
+    limit: int,
+    iterations: int,
+    damping: float,
+    max_nodes_per_reference: int,
+) -> dict[str, Any]:
+    graph = _concept_comention_graph(context, max_nodes_per_reference=max_nodes_per_reference)
+    scores = _weighted_pagerank(graph, iterations=max(1, int(iterations or 1)), damping=float(damping or 0.85))
+    if not scores:
+        total_mentions = max(1, len(context["mentions"]))
+        scores = {
+            concept_id: len(mentions) / total_mentions
+            for concept_id, mentions in context["mentionsByConcept"].items()
+        }
+    ranked = []
+    for concept_id, score in scores.items():
+        mentions = context["mentionsByConcept"].get(concept_id) or []
+        if not mentions:
+            continue
+        ranked.append(_concept_report_row(
+            context=context,
+            concept_id=concept_id,
+            mentions=mentions,
+            metric="pagerankScore",
+            score=round(float(score), 8),
+        ))
+    ranked.sort(key=lambda item: (-float(item["score"]), -int(item["distinctReferenceCount"]), item["displayName"]))
+    return _concept_report_section(
+        report_type="pagerank",
+        title="Concept Graph Importance",
+        primary_metric="pagerankScore",
+        ranked=ranked[:limit],
+    )
+
+
+def _concept_report_row(
+    *,
+    context: dict[str, Any],
+    concept_id: str,
+    mentions: list[dict[str, Any]],
+    metric: str,
+    score: float | int,
+) -> dict[str, Any]:
+    node = context["conceptsById"].get(concept_id) or {}
+    reference_lineage_ids = sorted({mention["referenceLineageId"] for mention in mentions})
+    source_reference_ids = sorted({mention["referenceId"] for mention in mentions})
+    source_domains = sorted({
+        _domain((context["referencesByKey"].get(reference_id) or {}).get("sourceUri"))
+        for reference_id in reference_lineage_ids
+        if _domain((context["referencesByKey"].get(reference_id) or {}).get("sourceUri"))
+    })
+    return {
+        "conceptId": concept_id,
+        "conceptLineageId": str(node.get("lineageId") or concept_id),
+        "nodeKind": node.get("nodeKind"),
+        "displayName": str(node.get("displayName") or node.get("nodeKey") or concept_id),
+        "metric": metric,
+        "score": score,
+        "mentionCount": len(mentions),
+        "distinctReferenceCount": len(reference_lineage_ids),
+        "weightedMentionScore": round(sum(float(mention.get("weight") or 0) for mention in mentions), 3),
+        "sourceReferenceIds": source_reference_ids,
+        "sourceReferenceLineageIds": reference_lineage_ids,
+        "sourceDomains": source_domains,
+        "mentionRelationIds": [str(mention["id"]) for mention in mentions if mention.get("id")],
+    }
+
+
+def _concept_report_section(report_type: str, title: str, primary_metric: str, ranked: list[dict[str, Any]]) -> dict[str, Any]:
+    ranked_with_rank = []
+    for rank, concept in enumerate(ranked, start=1):
+        ranked_with_rank.append({"rank": rank, **concept})
+    return {
+        "reportType": report_type,
+        "title": title,
+        "primaryMetric": primary_metric,
+        "rankedConcepts": ranked_with_rank,
+        "mentionRelationIds": sorted({
+            relation_id
+            for concept in ranked_with_rank
+            for relation_id in concept.get("mentionRelationIds") or []
+        }),
+    }
+
+
+def _concept_comention_graph(context: dict[str, Any], *, max_nodes_per_reference: int) -> dict[str, dict[str, float]]:
+    concepts_by_reference: dict[str, dict[str, float]] = {}
+    for mention in context["mentions"]:
+        concepts_by_reference.setdefault(mention["referenceLineageId"], {})
+        concept_weights = concepts_by_reference[mention["referenceLineageId"]]
+        concept_weights[mention["conceptId"]] = concept_weights.get(mention["conceptId"], 0.0) + float(mention.get("weight") or 1.0)
+    graph: dict[str, dict[str, float]] = {concept_id: {} for concept_id in context["mentionsByConcept"]}
+    max_nodes = max(2, int(max_nodes_per_reference or 2))
+    for concept_weights in concepts_by_reference.values():
+        ordered = sorted(concept_weights.items(), key=lambda item: (-item[1], item[0]))[:max_nodes]
+        if len(ordered) < 2:
+            continue
+        for index, (left, left_weight) in enumerate(ordered):
+            for right, right_weight in ordered[index + 1:]:
+                weight = math.sqrt(max(left_weight, 0.0) * max(right_weight, 0.0)) or 1.0
+                graph.setdefault(left, {})[right] = graph.setdefault(left, {}).get(right, 0.0) + weight
+                graph.setdefault(right, {})[left] = graph.setdefault(right, {}).get(left, 0.0) + weight
+    return graph
+
+
+def _weighted_pagerank(graph: dict[str, dict[str, float]], *, iterations: int, damping: float) -> dict[str, float]:
+    nodes = sorted(graph)
+    if not nodes:
+        return {}
+    damping = min(max(damping, 0.0), 1.0)
+    count = len(nodes)
+    scores = {node: 1.0 / count for node in nodes}
+    base = (1.0 - damping) / count
+    for _ in range(iterations):
+        next_scores = {node: base for node in nodes}
+        dangling = sum(scores[node] for node in nodes if not graph.get(node))
+        dangling_share = damping * dangling / count
+        for node in nodes:
+            next_scores[node] += dangling_share
+            neighbors = graph.get(node) or {}
+            total_weight = sum(max(weight, 0.0) for weight in neighbors.values())
+            if total_weight <= 0:
+                continue
+            for neighbor, weight in neighbors.items():
+                next_scores[neighbor] += damping * scores[node] * (max(weight, 0.0) / total_weight)
+        scores = next_scores
+    return scores
+
+
+def _relation_weight(relation: dict[str, Any]) -> float:
+    for key in ("score", "confidence"):
+        value = relation.get(key)
+        if value is None:
+            continue
+        try:
+            return max(float(value), 0.0)
+        except (TypeError, ValueError):
+            continue
+    return 1.0
 
 
 def _record(model_name: str, input_payload: dict[str, Any], action: str = "upsert") -> dict[str, Any]:
