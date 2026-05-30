@@ -862,6 +862,7 @@ def coverage_theme_run(
             if plan.get("edition") and isinstance(plan["edition"].get("metadata"), dict):
                 plan["edition"]["metadata"]["rotatingDeskStatus"] = "selected"
                 plan["edition"]["metadata"]["selectedOptionalDeskKey"] = rotating_desk_step.get("selectedOptionalDeskKey")
+        _merge_forum_messages_from_records_into_state(state, records)
     if through == "rotating_desk":
         reporting_dispatch_forum: dict[str, Any] | None = None
         if apply and rotating_desk_step and rotating_desk_step.get("ok") is not False:
@@ -1611,6 +1612,11 @@ def build_coverage_theme_plan(
         ],
         "editionSlots": edition_slots,
         "forumKickoff": forum_kickoff["kickoff"],
+        "forumPlanningNextStep": (
+            "run-story-cycle --through rotating-desk"
+            if provisional_optional_sections
+            else "reporting dispatch posts with plan apply when no optional desk is pending"
+        ),
         "researchAssignments": research_assignments,
         "reportingAssignments": reporting_assignments,
         "records": _dedupe_records(records),
@@ -1710,7 +1716,7 @@ def build_edition_forum_kickoff_records(
         edition_date=str(edition.get("editionDate") or ""),
     )
 
-    canonical_edition_thread_id = f"message-thread-edition-forum-{_safe_id(edition_id)}"
+    canonical_edition_thread_id = _canonical_edition_forum_thread_id(edition_id)
     existing_edition_thread = next(
         (
             thread
@@ -2629,12 +2635,12 @@ def build_reporting_dispatch_forum_records(
     edition_id = str(edition.get("id") or "")
     existing_threads = existing_threads or []
     existing_messages = existing_messages or []
+    canonical_thread_id = _canonical_edition_forum_thread_id(edition_id)
     existing_messages_by_thread: dict[str, list[dict[str, Any]]] = {}
     for message in existing_messages:
         thread_id = str(message.get("threadId") or "").strip()
         if thread_id:
             existing_messages_by_thread.setdefault(thread_id, []).append(message)
-    canonical_thread_id = f"message-thread-edition-forum-{_safe_id(edition_id)}"
     thread_messages = existing_messages_by_thread.get(canonical_thread_id, [])
     existing_dispatch = _existing_reporting_dispatch_message(thread_messages)
     if existing_dispatch:
@@ -2727,6 +2733,41 @@ def _section_titles_for_dispatch(plan: dict[str, Any]) -> dict[str, str]:
     return titles
 
 
+def _reporting_assignments_for_edition_from_state(
+    state: dict[str, list[dict[str, Any]]],
+    *,
+    edition_id: str,
+    fallback: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    assignments = []
+    for assignment in state.get("assignments") or []:
+        if str(assignment.get("assignmentTypeKey") or "") != "reporting.edition-candidate":
+            continue
+        metadata = _metadata(assignment)
+        if str(metadata.get("editionId") or "") != edition_id:
+            continue
+        assignments.append(assignment)
+    if assignments:
+        return assignments
+    return list(fallback or [])
+
+
+def _edition_slots_for_edition_from_state(
+    state: dict[str, list[dict[str, Any]]],
+    *,
+    edition_id: str,
+    fallback: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    slots = [
+        slot
+        for slot in (state.get("editionSlots") or [])
+        if str(slot.get("editionId") or "") == edition_id
+    ]
+    if slots:
+        return slots
+    return list(fallback or [])
+
+
 def append_reporting_dispatch_forum_records(
     records: list[dict[str, Any]],
     *,
@@ -2738,18 +2779,33 @@ def append_reporting_dispatch_forum_records(
     now: str,
     state: dict[str, list[dict[str, Any]]],
 ) -> dict[str, Any]:
+    edition = plan["edition"]
+    edition_id = str(edition.get("id") or "")
+    thread_messages = _canonical_edition_forum_thread_messages(
+        edition_id=edition_id,
+        state=state,
+        pending_records=records,
+    )
     dispatch_forum = build_reporting_dispatch_forum_records(
-        edition=plan["edition"],
+        edition=edition,
         topic=topic,
         coverage_key=coverage_key or plan.get("coverageKey") or "",
-        reporting_assignments=list(plan.get("reportingAssignments") or []),
-        edition_slots=list(plan.get("editionSlots") or []),
+        reporting_assignments=_reporting_assignments_for_edition_from_state(
+            state,
+            edition_id=edition_id,
+            fallback=list(plan.get("reportingAssignments") or []),
+        ),
+        edition_slots=_edition_slots_for_edition_from_state(
+            state,
+            edition_id=edition_id,
+            fallback=list(plan.get("editionSlots") or []),
+        ),
         section_budgets=section_budgets,
         section_titles=_section_titles_for_dispatch(plan),
         run_id=run_id,
         now=now,
         existing_threads=state.get("messageThreads") or [],
-        existing_messages=state.get("messages") or [],
+        existing_messages=thread_messages,
     )
     if dispatch_forum.get("records"):
         records.extend(dispatch_forum["records"])
@@ -3488,6 +3544,56 @@ def _forum_kickoff_content_hash(content: str) -> str:
     return hashlib.sha256(str(content or "").encode("utf-8")).hexdigest()
 
 
+def _canonical_edition_forum_thread_id(edition_id: str) -> str:
+    return f"message-thread-edition-forum-{_safe_id(edition_id)}"
+
+
+def _canonical_edition_forum_thread_messages(
+    *,
+    edition_id: str,
+    state: dict[str, list[dict[str, Any]]],
+    pending_records: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    thread_id = _canonical_edition_forum_thread_id(edition_id)
+    messages = [
+        message
+        for message in (state.get("messages") or [])
+        if str(message.get("threadId") or "") == thread_id
+    ]
+    seen_ids = {str(message.get("id") or "") for message in messages}
+    for record in pending_records or []:
+        if record.get("modelName") != "Message":
+            continue
+        message = record.get("input") or {}
+        if str(message.get("threadId") or "") != thread_id:
+            continue
+        message_id = str(message.get("id") or "")
+        if message_id and message_id in seen_ids:
+            continue
+        messages.append(message)
+        if message_id:
+            seen_ids.add(message_id)
+    return sorted(messages, key=lambda row: int(row.get("sequenceNumber") or 0))
+
+
+def _merge_forum_messages_from_records_into_state(
+    state: dict[str, list[dict[str, Any]]],
+    records: list[dict[str, Any]],
+) -> None:
+    bucket = state.setdefault("messages", [])
+    seen_ids = {str(message.get("id") or "") for message in bucket}
+    for record in records:
+        if record.get("modelName") != "Message":
+            continue
+        message = record.get("input") or {}
+        message_id = str(message.get("id") or "")
+        if message_id and message_id in seen_ids:
+            continue
+        bucket.append(message)
+        if message_id:
+            seen_ids.add(message_id)
+
+
 def _existing_optional_desk_recommendation(
     messages: list[dict[str, Any]],
     *,
@@ -3503,6 +3609,8 @@ def _existing_optional_desk_recommendation(
         if _message_planning_phase(message) == "rotating_desk_selection":
             return message
         summary = str(message.get("summary") or "").lower()
+        if summary.startswith("optional desk:"):
+            return message
         if any(marker in summary for marker in markers) or (
             str(message.get("importRunId") or "") == run_id
             and ("optional desk (phase 2)" in summary or "optional desk suggestion" in summary or summary.startswith("optional desk:"))

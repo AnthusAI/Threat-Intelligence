@@ -3826,6 +3826,35 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertEqual(section["slots"][0]["candidateCount"], 1)
         self.assertTrue(section["reportingCandidates"][0]["packetAvailable"])
 
+    def test_canonical_edition_forum_thread_messages_includes_pending_records(self):
+        edition_id = "edition-edition-2026-06-05-v1"
+        thread_id = papyrus_coverage_theme._canonical_edition_forum_thread_id(edition_id)
+        state = {
+            "messages": [{
+                "id": "message-1",
+                "threadId": thread_id,
+                "sequenceNumber": 1,
+                "messageKind": "forum_post",
+                "status": "active",
+            }],
+        }
+        pending = [{
+            "modelName": "Message",
+            "input": {
+                "id": "message-2",
+                "threadId": thread_id,
+                "sequenceNumber": 2,
+                "messageKind": "forum_post",
+                "status": "active",
+            },
+        }]
+        messages = papyrus_coverage_theme._canonical_edition_forum_thread_messages(
+            edition_id=edition_id,
+            state=state,
+            pending_records=pending,
+        )
+        self.assertEqual([int(message["sequenceNumber"]) for message in messages], [1, 2])
+
     def test_resolve_edition_theme_signal_uses_knowledge_base_references(self):
         now = "2026-06-01T12:00:00Z"
         references = [
