@@ -3866,6 +3866,11 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertNotIn("thin", str(signal.get("whyNow") or "").lower())
         self.assertIn("accepted reference", str(signal.get("whyNow") or "").lower())
 
+    def test_is_usable_theme_label_rejects_url_tokens(self):
+        self.assertFalse(papyrus_coverage_theme._is_usable_theme_label("Https"))
+        self.assertFalse(papyrus_coverage_theme._is_usable_theme_label("arxiv.org"))
+        self.assertTrue(papyrus_coverage_theme._is_usable_theme_label("Generative game worlds"))
+
     def test_derive_edition_forum_thread_title_prefers_themes_over_domains(self):
         title = papyrus_coverage_theme.derive_edition_forum_thread_title(
             theme_line="AI in video games",

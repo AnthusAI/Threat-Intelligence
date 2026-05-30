@@ -52,6 +52,9 @@ STOPWORDS = {
     "have", "into", "more", "over", "than", "that", "their", "there", "these", "this", "through", "with",
     "would", "using", "research", "study", "paper", "report", "analysis", "system", "systems",
 }
+TREND_TOPIC_STOP_TERMS = STOPWORDS | {
+    "abs", "arxiv", "doi", "http", "https", "org", "www", "com", "edu", "net", "io", "pdf", "html",
+}
 RELATION_DOMAINS = {
     "classified_as": "classification",
     "uses_evidence": "evidence",
@@ -1951,6 +1954,22 @@ def _looks_like_domain_label(text: str) -> bool:
     return bool(re.fullmatch(r"[\w.-]+\.(org|com|edu|net|io|gov|uk|de|ai)", cleaned))
 
 
+def _is_usable_theme_label(text: str) -> bool:
+    label = re.sub(r"\s+", " ", str(text or "").strip())
+    if len(label) < 5:
+        return False
+    if _looks_like_domain_label(label):
+        return False
+    terms = _terms(label)
+    if not terms:
+        return False
+    if all(term in TREND_TOPIC_STOP_TERMS for term in terms):
+        return False
+    if len(terms) == 1 and terms[0] in TREND_TOPIC_STOP_TERMS:
+        return False
+    return True
+
+
 def _related_theme_labels_for_title(
     *,
     signal: dict[str, Any] | None,
@@ -1964,7 +1983,7 @@ def _related_theme_labels_for_title(
             if not isinstance(entry, dict):
                 continue
             label = re.sub(r"\s+", " ", str(entry.get("topic") or "").strip())
-            if not label or label.lower() == theme.lower():
+            if not label or label.lower() == theme.lower() or not _is_usable_theme_label(label):
                 continue
             if label not in labels:
                 labels.append(label)
@@ -2126,6 +2145,8 @@ def summarize_knowledge_base_for_planning(
         for entry in ranked:
             label = str(entry.get("topic") or "").strip()
             if not label or label.lower() == str(topic or "").strip().lower():
+                continue
+            if not _is_usable_theme_label(label):
                 continue
             alternate_topics.append({
                 "topic": label,
