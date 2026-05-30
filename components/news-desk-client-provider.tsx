@@ -79,6 +79,10 @@ export function NewsDeskClientProvider({ children }: Readonly<{ children: React.
       setShell((current) => resolveDashboardReady(current, dashboard, access.auth, new Date().toISOString()));
     } catch (error) {
       if (bootstrapSequenceRef.current !== sequence) return;
+      if (isAuthorizationError(error)) {
+        setShell((current) => resolveForbidden(current, access.auth));
+        return;
+      }
       setShell((current) => resolveDashboardFailure(
         current,
         access.auth,
@@ -183,6 +187,11 @@ export function NewsDeskClientProvider({ children }: Readonly<{ children: React.
   }), [refreshAssignments, refreshDashboard, refreshDoctrineRecords, refreshUserDirectory, searchTransition, shell]);
 
   return <NewsDeskClientContext.Provider value={value}>{children}</NewsDeskClientContext.Provider>;
+}
+
+function isAuthorizationError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /not authorized|unauthorized|access denied|forbidden/i.test(message);
 }
 
 export function useOptionalNewsDeskClient() {

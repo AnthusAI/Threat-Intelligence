@@ -1,3 +1,5 @@
+import contextlib
+import io
 import json
 import pathlib
 import sys
@@ -3297,6 +3299,231 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
             if record["modelName"] == "SemanticRelation" and record["input"]["relationTypeKey"] == "uses_evidence"
         ]
         self.assertEqual(len(evidence_relations), 2)
+
+    def _concept_report_fixture(self):
+        references = [
+            {
+                "id": "reference-1-v1",
+                "lineageId": "reference-1",
+                "versionState": "current",
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "title": "AI agents in simulation pipelines",
+                "sourceUri": "https://example.com/agents-sim",
+                "sourcePublishedAt": "2026-05-20T12:00:00Z",
+                "curationStatus": "accepted",
+            },
+            {
+                "id": "reference-2-v1",
+                "lineageId": "reference-2",
+                "versionState": "current",
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "title": "Agent orchestration in production",
+                "sourceUri": "https://studio.example/orchestration",
+                "sourcePublishedAt": "2026-05-19T12:00:00Z",
+                "curationStatus": "accepted",
+            },
+            {
+                "id": "reference-3-v1",
+                "lineageId": "reference-3",
+                "versionState": "current",
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "title": "Reinforcement learning in game simulation",
+                "sourceUri": "https://research.example/rl-sim",
+                "sourcePublishedAt": "2026-05-18T12:00:00Z",
+                "curationStatus": "accepted",
+            },
+            {
+                "id": "reference-4-v1",
+                "lineageId": "reference-4",
+                "versionState": "current",
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "title": "Early signal on agent tooling",
+                "sourceUri": "https://archive.example/agent-tooling",
+                "sourcePublishedAt": "2026-05-08T12:00:00Z",
+                "curationStatus": "accepted",
+            },
+        ]
+        semantic_nodes = [
+            {
+                "id": "semantic-node-ai-agents-v1",
+                "lineageId": "semantic-node-ai-agents",
+                "versionState": "current",
+                "status": "accepted",
+                "nodeKind": "entity",
+                "nodeKey": "entity.ai-agents",
+                "displayName": "AI Agents",
+                "corpusId": "knowledge-corpus-ai-ml-research",
+            },
+            {
+                "id": "semantic-node-rl-v1",
+                "lineageId": "semantic-node-rl",
+                "versionState": "current",
+                "status": "accepted",
+                "nodeKind": "entity",
+                "nodeKey": "entity.reinforcement-learning",
+                "displayName": "Reinforcement Learning",
+                "corpusId": "knowledge-corpus-ai-ml-research",
+            },
+            {
+                "id": "semantic-node-simulation-v1",
+                "lineageId": "semantic-node-simulation",
+                "versionState": "current",
+                "status": "accepted",
+                "nodeKind": "entity",
+                "nodeKey": "entity.simulation",
+                "displayName": "Simulation",
+                "corpusId": "knowledge-corpus-ai-ml-research",
+            },
+        ]
+        node_by_lineage = {node["lineageId"]: node for node in semantic_nodes}
+
+        def mention(reference_id: str, reference_lineage_id: str, concept_lineage_id: str, score: float = 1.0):
+            node = node_by_lineage[concept_lineage_id]
+            return papyrus_coverage_theme.semantic_relation(
+                predicate="mentions",
+                subject_kind="reference",
+                subject_id=reference_id,
+                subject_lineage_id=reference_lineage_id,
+                object_kind="semanticNode",
+                object_id=node["id"],
+                object_lineage_id=concept_lineage_id,
+                score=score,
+                now="2026-05-21T12:00:00Z",
+            )
+
+        semantic_relations = [
+            mention("reference-1-v1", "reference-1", "semantic-node-ai-agents", score=0.9),
+            mention("reference-1-v1", "reference-1", "semantic-node-rl", score=0.8),
+            mention("reference-2-v1", "reference-2", "semantic-node-ai-agents", score=0.95),
+            mention("reference-3-v1", "reference-3", "semantic-node-rl", score=0.92),
+            mention("reference-3-v1", "reference-3", "semantic-node-simulation", score=0.88),
+            mention("reference-4-v1", "reference-4", "semantic-node-ai-agents", score=0.5),
+            papyrus_coverage_theme.semantic_relation(
+                predicate="broader_than",
+                subject_kind="semanticNode",
+                subject_id="semantic-node-rl-v1",
+                subject_lineage_id="semantic-node-rl",
+                object_kind="semanticNode",
+                object_id="semantic-node-ai-agents-v1",
+                object_lineage_id="semantic-node-ai-agents",
+                score=1.0,
+                now="2026-05-21T12:00:00Z",
+            ),
+            papyrus_coverage_theme.semantic_relation(
+                predicate="broader_than",
+                subject_kind="semanticNode",
+                subject_id="semantic-node-rl-v1",
+                subject_lineage_id="semantic-node-rl",
+                object_kind="semanticNode",
+                object_id="semantic-node-simulation-v1",
+                object_lineage_id="semantic-node-simulation",
+                score=1.0,
+                now="2026-05-21T12:00:00Z",
+            ),
+        ]
+        return {
+            "references": references,
+            "semantic_nodes": semantic_nodes,
+            "semantic_relations": semantic_relations,
+        }
+
+    def test_concept_report_all_builds_popularity_trending_and_pagerank(self):
+        fixture = self._concept_report_fixture()
+        result = papyrus_coverage_theme.signals_concept_report(
+            corpus_key="AI-ML-research",
+            report_type="all",
+            limit=3,
+            trend_window_days=7,
+            references=fixture["references"],
+            semantic_nodes=fixture["semantic_nodes"],
+            semantic_relations=fixture["semantic_relations"],
+            now="2026-05-21T12:00:00Z",
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["command"], "signals concept-report")
+        self.assertEqual(result["reportType"], "all")
+        self.assertEqual(result["popularity"][0]["conceptLineageId"], "semantic-node-ai-agents")
+        self.assertEqual(result["popularity"][0]["distinctReferenceCount"], 3)
+        self.assertEqual(result["trending"][0]["conceptLineageId"], "semantic-node-rl")
+        self.assertEqual(result["pagerank"][0]["conceptLineageId"], "semantic-node-rl")
+        self.assertFalse(any(record["modelName"] in {"Item", "EditionItem"} for record in result["records"]))
+        self.assertEqual(result["records"][0]["input"]["messageKind"], "concept_report")
+        self.assertEqual(result["records"][0]["input"]["messageDomain"], "analytics")
+        signal_report_types = {
+            str((record["input"].get("metadata") or {}).get("reportType"))
+            for record in result["records"]
+            if record["modelName"] == "SemanticRelation"
+            and record["input"].get("relationTypeKey") == "uses_signal"
+        }
+        self.assertEqual(signal_report_types, {"popularity", "trending", "pagerank"})
+
+    def test_concept_report_respects_single_report_type_selection(self):
+        fixture = self._concept_report_fixture()
+        result = papyrus_coverage_theme.signals_concept_report(
+            corpus_key="AI-ML-research",
+            report_type="popularity",
+            limit=2,
+            trend_window_days=7,
+            references=fixture["references"],
+            semantic_nodes=fixture["semantic_nodes"],
+            semantic_relations=fixture["semantic_relations"],
+            now="2026-05-21T12:00:00Z",
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["reportType"], "popularity")
+        self.assertGreaterEqual(len(result["popularity"]), 1)
+        self.assertEqual(result["trending"], [])
+        self.assertEqual(result["pagerank"], [])
+        signal_report_types = {
+            str((record["input"].get("metadata") or {}).get("reportType"))
+            for record in result["records"]
+            if record["modelName"] == "SemanticRelation"
+            and record["input"].get("relationTypeKey") == "uses_signal"
+        }
+        self.assertEqual(signal_report_types, {"popularity"})
+
+    def test_newsroom_cli_concept_report_command_outputs_all_three_reports(self):
+        from papyrus_newsroom import cli as newsroom_cli
+
+        fixture = self._concept_report_fixture()
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json") as handle:
+            json.dump(
+                {
+                    "references": fixture["references"],
+                    "semanticNodes": fixture["semantic_nodes"],
+                    "semanticRelations": fixture["semantic_relations"],
+                },
+                handle,
+            )
+            handle.flush()
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = newsroom_cli.main(
+                    [
+                        "signals",
+                        "concept-report",
+                        "--corpus-key",
+                        "AI-ML-research",
+                        "--report-type",
+                        "all",
+                        "--limit",
+                        "3",
+                        "--trend-window-days",
+                        "7",
+                        "--input",
+                        handle.name,
+                    ]
+                )
+
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["command"], "signals concept-report")
+        self.assertEqual(payload["reportType"], "all")
+        self.assertGreaterEqual(payload["summary"]["popularityCount"], 1)
+        self.assertGreaterEqual(payload["summary"]["trendingCount"], 1)
+        self.assertGreaterEqual(payload["summary"]["pagerankCount"], 1)
 
     def test_coverage_theme_plan_counts_assignments_and_avoids_items(self):
         plan = papyrus_coverage_theme.build_coverage_theme_plan(

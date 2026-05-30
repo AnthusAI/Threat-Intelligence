@@ -785,11 +785,17 @@ export async function loadEditorResolvedAccessState(): Promise<EditorAccessState
     if (!snapshot.hasSession || snapshot.auth.status === "signedOut") {
       return { status: "signedOut", isEditor: false, isAdmin: false, auth: snapshot.auth, error: null };
     }
-    const groups = snapshot.groups;
-    if (!groups.includes("editor") && !groups.includes("admin")) {
-      return { status: "forbidden", isEditor: false, isAdmin: false, auth: snapshot.auth, error: null };
+    const refreshed = await loadReaderSessionSnapshot({ forceRefresh: true });
+    if (!refreshed.hasSession || refreshed.auth.status === "signedOut") {
+      return { status: "signedOut", isEditor: false, isAdmin: false, auth: refreshed.auth, error: null };
     }
-    return { status: "ready", isEditor: true, isAdmin: groups.includes("admin"), auth: snapshot.auth, error: null };
+    return {
+      status: "ready",
+      isEditor: true,
+      isAdmin: refreshed.groups.includes("admin"),
+      auth: refreshed.auth,
+      error: null,
+    };
   } catch (error) {
     return {
       status: "error",

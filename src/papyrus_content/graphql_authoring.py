@@ -108,8 +108,8 @@ PUBLISHED_MEDIA_ASSET_FIELDS = (
     "id sourceMediaAssetId publishedItemId sourceItemId itemLineageId type role sortKey storagePath externalUrl alt "
     "caption credit width height aspectRatio focalX focalY minHeight preferredHeight maxHeight crop wrapsText metadata"
 )
-ITEM_TAG_FIELDS = "id itemId tagId"
-TAG_FIELDS = "id slug label"
+ITEM_TAG_FIELDS = "id itemId tagId itemType itemStatus tagSlug publishedAt"
+TAG_FIELDS = "id slug label type description"
 SEMANTIC_NODE_FIELDS = (
     f"{VERSION_FIELDS} id nodeKey nodeKind corpusId categorySetId categoryLineageId categoryKey displayName "
     "description aliases authorityScore authorityRank acceptedReferenceMentionCount distinctSourceKindCount relationCount "
