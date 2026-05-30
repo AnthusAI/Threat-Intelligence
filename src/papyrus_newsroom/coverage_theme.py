@@ -2219,6 +2219,61 @@ def _coverage_gaps_from_knowledge_base_snapshot(
     return _coverage_gaps(topic, [])
 
 
+def _concept_snapshot_from_semantic_nodes(
+    *,
+    semantic_nodes: list[dict[str, Any]],
+    corpus_key: str,
+    topic: str,
+    limit: int,
+) -> dict[str, Any]:
+    corpus_id = f"knowledge-corpus-{_safe_id(corpus_key)}"
+    topic_terms = _terms(topic)
+    rows: list[dict[str, Any]] = []
+    for raw_node in semantic_nodes:
+        node = _decode_record(raw_node)
+        if node.get("versionState") not in {None, "current"}:
+            continue
+        if node.get("status") not in {None, "", "active", "accepted", "current"}:
+            continue
+        if corpus_key and node.get("corpusId") not in {None, "", corpus_id, corpus_key}:
+            continue
+        display_name = str(node.get("displayName") or node.get("nodeKey") or "").strip()
+        if not display_name or not _is_usable_theme_label(display_name):
+            continue
+        haystack = " ".join([display_name, str(node.get("nodeKey") or ""), str(node.get("description") or "")]).lower()
+        topic_relevance = sum(1 for term in topic_terms if term in haystack)
+        mention_count = int(node.get("acceptedReferenceMentionCount") or 0)
+        if mention_count <= 0 and topic_relevance <= 0:
+            continue
+        rows.append({
+            "conceptId": str(node.get("id") or ""),
+            "conceptLineageId": str(node.get("lineageId") or node.get("id") or ""),
+            "displayName": display_name,
+            "metric": "acceptedReferenceMentionCount",
+            "score": mention_count,
+            "mentionCount": mention_count,
+            "distinctReferenceCount": mention_count,
+            "topicRelevance": topic_relevance,
+            "authorityScore": float(node.get("authorityScore") or 0),
+            "source": "semantic_node",
+        })
+    rows.sort(
+        key=lambda row: (
+            -int(row.get("topicRelevance") or 0),
+            -int(row.get("mentionCount") or 0),
+            -float(row.get("authorityScore") or 0),
+            str(row.get("displayName") or ""),
+        ),
+    )
+    capped = rows[:limit]
+    return {
+        "popularity": capped,
+        "trending": [row for row in capped if int(row.get("topicRelevance") or 0) > 0][:limit],
+        "rankedForDispatch": capped,
+        "source": "semantic_nodes_fallback",
+    }
+
+
 def summarize_concepts_for_planning(
     *,
     references: list[dict[str, Any]],
@@ -2229,8 +2284,15 @@ def summarize_concepts_for_planning(
     limit: int = DEFAULT_CONCEPT_REPORT_LIMIT,
     now: str = "",
 ) -> dict[str, Any]:
-    if not references or not semantic_nodes or not semantic_relations:
+    if not references or not semantic_nodes:
         return {"popularity": [], "trending": [], "rankedForDispatch": []}
+    if not semantic_relations:
+        return _concept_snapshot_from_semantic_nodes(
+            semantic_nodes=semantic_nodes,
+            corpus_key=corpus_key,
+            topic=topic,
+            limit=limit,
+        )
     reports = build_concept_reports(
         references=references,
         semantic_nodes=semantic_nodes,
@@ -2279,10 +2341,18 @@ def summarize_concepts_for_planning(
             str(row.get("displayName") or ""),
         ),
     )
+    if not ranked_for_dispatch:
+        return _concept_snapshot_from_semantic_nodes(
+            semantic_nodes=semantic_nodes,
+            corpus_key=corpus_key,
+            topic=topic,
+            limit=limit,
+        )
     return {
         "popularity": popularity[:limit],
         "trending": trending[:limit],
         "rankedForDispatch": ranked_for_dispatch[:limit],
+        "source": "concept_mentions",
     }
 
 
