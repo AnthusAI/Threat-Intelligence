@@ -203,14 +203,19 @@ function createEmptyEditionLandingItem(slug: string): PublicationItem {
     byline: "Papyrus",
     dateline: "SANDBOX",
     image: {
-      src: "/seed-art/newsroom-gate.png",
-      alt: "An abstract newsroom layout with editorial modules",
+      src: "/papyrus-plant-placeholder.png",
+      themeVariants: {
+        dark: {
+          src: "/papyrus-plant-placeholder-dark.png",
+        },
+      },
+      alt: "A black papyrus plant silhouette",
       credit: "",
       layout: {
         minHeight: 120,
         preferredHeight: 320,
         maxHeight: 440,
-        aspectRatio: 1.5009,
+        aspectRatio: 0.785,
         crop: "contain",
         wrapsText: true,
         inlineFloat: {

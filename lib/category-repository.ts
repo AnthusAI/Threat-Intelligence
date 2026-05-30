@@ -523,6 +523,19 @@ export type EditionSlotRecord = {
   updatedAt: string;
 };
 
+export type EditionRecord = {
+  id: string;
+  lineageId?: string | null;
+  versionNumber?: number | null;
+  versionState?: string | null;
+  slug?: string | null;
+  title?: string | null;
+  status?: string | null;
+  editionDate?: string | null;
+  publishedAt?: string | null;
+  updatedAt?: string | null;
+};
+
 export type UserIdentityRecord = {
   id: string;
   userProfileId: string;

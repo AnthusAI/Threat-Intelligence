@@ -3533,6 +3533,85 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertEqual(plan["summary"]["forumMessageCount"], 2)
         body = message_records[0]["input"]["content"]
         self.assertIn("Human Steering Opportunities", body)
+        self.assertIn("edition", plan["forumKickoff"])
+        self.assertEqual(len(plan["forumKickoff"]["sections"]), 1)
+        self.assertTrue(plan["forumKickoff"]["sections"][0]["threadId"].startswith("message-thread-section-forum-"))
+
+    def test_coverage_theme_plan_reuses_forum_threads_and_appends_messages(self):
+        edition_id = "edition-edition-2026-06-05-v1"
+        existing_state = {
+            "newsroomSections": [{"id": "arts", "title": "Arts", "type": "canonical", "enabled": True, "sortOrder": 1}],
+            "categories": [],
+            "categorySets": [],
+            "messageThreads": [
+                {
+                    "id": f"message-thread-edition-forum-{papyrus_coverage_theme._safe_id(edition_id)}",
+                    "threadKind": "edition_forum",
+                    "primaryAnchorKind": "edition",
+                    "primaryAnchorId": edition_id,
+                    "primaryAnchorLineageId": edition_id,
+                    "messageCount": 1,
+                    "createdByLabel": "papyrus-editor",
+                    "createdAt": "2026-06-01T09:00:00Z",
+                    "metadata": {"editionId": edition_id},
+                },
+                {
+                    "id": f"message-thread-section-forum-{papyrus_coverage_theme._safe_id(edition_id)}-arts",
+                    "threadKind": "section_forum",
+                    "primaryAnchorKind": "newsroom_section",
+                    "primaryAnchorId": "arts",
+                    "primaryAnchorLineageId": edition_id,
+                    "messageCount": 2,
+                    "createdByLabel": "papyrus-editor",
+                    "createdAt": "2026-06-01T09:00:00Z",
+                    "metadata": {"editionId": edition_id, "sectionId": "arts", "sectionKey": "arts", "sectionTitle": "Arts"},
+                },
+            ],
+            "messages": [
+                {
+                    "id": f"message-forum-{papyrus_coverage_theme._safe_id(f'message-thread-edition-forum-{papyrus_coverage_theme._safe_id(edition_id)}')}-0001",
+                    "threadId": f"message-thread-edition-forum-{papyrus_coverage_theme._safe_id(edition_id)}",
+                    "sequenceNumber": 1,
+                },
+                {
+                    "id": f"message-forum-{papyrus_coverage_theme._safe_id(f'message-thread-section-forum-{papyrus_coverage_theme._safe_id(edition_id)}-arts')}-0001",
+                    "threadId": f"message-thread-section-forum-{papyrus_coverage_theme._safe_id(edition_id)}-arts",
+                    "sequenceNumber": 1,
+                },
+                {
+                    "id": f"message-forum-{papyrus_coverage_theme._safe_id(f'message-thread-section-forum-{papyrus_coverage_theme._safe_id(edition_id)}-arts')}-0002",
+                    "threadId": f"message-thread-section-forum-{papyrus_coverage_theme._safe_id(edition_id)}-arts",
+                    "sequenceNumber": 2,
+                },
+            ],
+        }
+
+        plan = papyrus_coverage_theme.build_coverage_theme_plan(
+            date="2026-06-05",
+            topic="AI in video games",
+            corpus_key="AI-ML-research",
+            category_key="AI-ML-research",
+            coverage_key="coverage.ai-in-video-games",
+            sections=["culture"],
+            section_budgets={"arts": 2},
+            run_id="coverage-theme-forum-rerun",
+            now="2026-06-01T12:00:00Z",
+            state=existing_state,
+        )
+
+        thread_records = [record for record in plan["records"] if record["modelName"] == "MessageThread"]
+        message_records = [record for record in plan["records"] if record["modelName"] == "Message" and record["input"].get("messageKind") == "forum_post"]
+        edition_thread = next(record["input"] for record in thread_records if record["input"]["threadKind"] == "edition_forum")
+        section_thread = next(record["input"] for record in thread_records if record["input"]["threadKind"] == "section_forum")
+        edition_message = next(record["input"] for record in message_records if record["input"]["threadId"] == edition_thread["id"])
+        section_message = next(record["input"] for record in message_records if record["input"]["threadId"] == section_thread["id"])
+
+        self.assertEqual(edition_thread["messageCount"], 2)
+        self.assertEqual(section_thread["messageCount"], 3)
+        self.assertEqual(edition_message["sequenceNumber"], 2)
+        self.assertEqual(section_message["sequenceNumber"], 3)
+        self.assertEqual(plan["forumKickoff"]["edition"]["messageId"], edition_message["id"])
+        self.assertEqual(plan["forumKickoff"]["sections"][0]["messageId"], section_message["id"])
 
 
 if __name__ == "__main__":

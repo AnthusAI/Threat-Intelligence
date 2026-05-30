@@ -42,15 +42,20 @@
       "byline": "Papyrus Editorial Team",
       "dateline": "NEWSROOM",
       "image": {
-        "src": "/seed-art/autonomous-newsroom.png",
-        "alt": "An abstract editorial layout showing a lead story and connected newsroom modules",
-        "caption": "The first edition uses editorial diagram art instead of product-logo placeholders.",
-        "credit": "Papyrus seed art",
+        "src": "/papyrus-plant-placeholder.png",
+        "themeVariants": {
+          "dark": {
+            "src": "/papyrus-plant-placeholder-dark.png"
+          }
+        },
+        "alt": "A black papyrus plant silhouette",
+        "caption": "Amplify Humans: Papyrus is built to amplify editorial judgment, not replace it.",
+        "credit": "Papyrus",
         "layout": {
           "minHeight": 120,
           "preferredHeight": 230,
           "maxHeight": 420,
-          "aspectRatio": 1.5009,
+          "aspectRatio": 0.785,
           "crop": "contain",
           "wrapsText": true
         }

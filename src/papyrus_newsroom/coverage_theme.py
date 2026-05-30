@@ -91,7 +91,9 @@ ASSIGNMENT_EVENT_FIELDS = """
 id assignmentId assignmentTypeKey queueKey eventType fromStatus toStatus actorSub actorLabel note createdAt
 """
 MESSAGE_FIELDS = """
-id messageKind messageDomain status summary source importRunId authorLabel newsroomFeedKey createdAt updatedAt
+id messageKind messageDomain status summary source importRunId authorLabel threadId parentMessageId sequenceNumber role
+messageType content metadata responseTarget responseStatus responseOwner responseStartedAt responseCompletedAt responseError
+newsroomFeedKey createdAt updatedAt
 """
 MESSAGE_THREAD_FIELDS = """
 id threadKind status title summary primaryAnchorKind primaryAnchorId primaryAnchorLineageId primaryAnchorKey createdBySub
@@ -486,7 +488,7 @@ def editions_plan(
             "openQuestions": [],
             "suggestedAngles": [],
         }]
-    state = load_live_state(models=["NewsroomSection", "Category", "CategorySet"]) if apply else {}
+    state = load_live_state(models=["NewsroomSection", "Category", "CategorySet", "MessageThread", "Message"]) if apply else {}
     records: list[dict[str, Any]] = []
     plans = []
     for index, signal in enumerate(signals, start=1):
@@ -549,7 +551,7 @@ def coverage_theme_run(
 ) -> dict[str, Any]:
     now = now or _now_iso()
     through = normalize_through(through)
-    state_models = ["NewsroomSection", "Category", "CategorySet"]
+    state_models = ["NewsroomSection", "Category", "CategorySet", "MessageThread", "Message"]
     state = load_live_state(models=state_models) if apply else {}
     plan = build_coverage_theme_plan(
         date=date,
@@ -1101,6 +1103,8 @@ def build_coverage_theme_plan(
         coverage_key=coverage_key,
         run_id=run_id,
         now=now,
+        existing_threads=state.get("messageThreads") or [],
+        existing_messages=state.get("messages") or [],
     )
     records.extend(forum_kickoff["records"])
     return {
@@ -1146,8 +1150,19 @@ def build_edition_forum_kickoff_records(
     coverage_key: str,
     run_id: str,
     now: str,
+    existing_threads: list[dict[str, Any]] | None = None,
+    existing_messages: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     edition_id = str(edition.get("id") or "")
+    existing_threads = existing_threads or []
+    existing_messages = existing_messages or []
+    existing_messages_by_thread: dict[str, list[dict[str, Any]]] = {}
+    for message in existing_messages:
+        thread_id = str(message.get("threadId") or "").strip()
+        if not thread_id:
+            continue
+        existing_messages_by_thread.setdefault(thread_id, []).append(message)
+
     section_summary: list[dict[str, Any]] = []
     for section in sections:
         section_key = str(section.get("id") or "")
@@ -1162,10 +1177,26 @@ def build_edition_forum_kickoff_records(
             "pursuedTopics": [topic],
         })
 
+    existing_edition_thread = next(
+        (
+            thread
+            for thread in existing_threads
+            if str(thread.get("threadKind") or "") == "edition_forum"
+            and str(thread.get("primaryAnchorKind") or "") == "edition"
+            and str(thread.get("primaryAnchorId") or "") == edition_id
+        ),
+        None,
+    )
+    edition_sequence = _next_forum_sequence(
+        existing_messages_by_thread.get(f"message-thread-edition-forum-{_safe_id(edition_id)}", []),
+    )
     edition_thread = edition_forum_thread_record(
         edition_id=edition_id,
         run_id=run_id,
         now=now,
+        existing=existing_edition_thread,
+        message_count=int((existing_edition_thread or {}).get("messageCount") or 0) + 1,
+        last_message_id=f"message-forum-{_safe_id(f'message-thread-edition-forum-{_safe_id(edition_id)}')}-{edition_sequence:04d}",
     )
     edition_message = forum_kickoff_message_record(
         thread=edition_thread,
@@ -1174,6 +1205,7 @@ def build_edition_forum_kickoff_records(
         summary=f"Edition kickoff: {topic}",
         content=_edition_forum_kickoff_body(topic=topic, coverage_key=coverage_key, section_summary=section_summary),
         now=now,
+        sequence_number=edition_sequence,
     )
     records: list[dict[str, Any]] = [
         _record("MessageThread", edition_thread),
@@ -1194,7 +1226,21 @@ def build_edition_forum_kickoff_records(
 
     section_threads: list[dict[str, Any]] = []
     section_messages: list[dict[str, Any]] = []
+    section_kickoff: list[dict[str, Any]] = []
     for section in section_summary:
+        section_thread_id = f"message-thread-section-forum-{_safe_id(edition_id)}-{_safe_id(section['sectionId'])}"
+        existing_section_thread = next(
+            (
+                thread
+                for thread in existing_threads
+                if str(thread.get("threadKind") or "") == "section_forum"
+                and str(thread.get("primaryAnchorKind") or "") == "newsroom_section"
+                and str(thread.get("primaryAnchorId") or "") == str(section["sectionId"])
+                and str(thread.get("primaryAnchorLineageId") or "") == edition_id
+            ),
+            None,
+        )
+        section_sequence = _next_forum_sequence(existing_messages_by_thread.get(section_thread_id, []))
         section_thread = section_forum_thread_record(
             edition_id=edition_id,
             section_id=section["sectionId"],
@@ -1202,6 +1248,9 @@ def build_edition_forum_kickoff_records(
             section_title=section["sectionTitle"],
             run_id=run_id,
             now=now,
+            existing=existing_section_thread,
+            message_count=int((existing_section_thread or {}).get("messageCount") or 0) + 1,
+            last_message_id=f"message-forum-{_safe_id(section_thread_id)}-{section_sequence:04d}",
         )
         section_message = forum_kickoff_message_record(
             thread=section_thread,
@@ -1210,9 +1259,19 @@ def build_edition_forum_kickoff_records(
             summary=f"Section kickoff: {section['sectionTitle']}",
             content=_section_forum_kickoff_body(topic=topic, section=section, coverage_key=coverage_key),
             now=now,
+            sequence_number=section_sequence,
         )
         section_threads.append(section_thread)
         section_messages.append(section_message)
+        section_kickoff.append({
+            "sectionId": section["sectionId"],
+            "sectionKey": section["sectionKey"],
+            "sectionTitle": section["sectionTitle"],
+            "threadId": section_thread["id"],
+            "messageId": section_message["id"],
+            "summary": section_message["summary"],
+            "content": section_message["content"],
+        })
         records.extend([
             _record("MessageThread", section_thread),
             _record("Message", section_message),
@@ -1254,6 +1313,13 @@ def build_edition_forum_kickoff_records(
             "editionMessageId": edition_message["id"],
             "sectionThreadIds": [thread["id"] for thread in section_threads],
             "sectionMessageIds": [message["id"] for message in section_messages],
+            "edition": {
+                "threadId": edition_thread["id"],
+                "messageId": edition_message["id"],
+                "summary": edition_message["summary"],
+                "content": edition_message["content"],
+            },
+            "sections": section_kickoff,
         },
         "summary": {
             "threadCount": 1 + len(section_threads),
@@ -1262,8 +1328,17 @@ def build_edition_forum_kickoff_records(
     }
 
 
-def edition_forum_thread_record(*, edition_id: str, run_id: str, now: str) -> dict[str, Any]:
+def edition_forum_thread_record(
+    *,
+    edition_id: str,
+    run_id: str,
+    now: str,
+    existing: dict[str, Any] | None = None,
+    message_count: int = 1,
+    last_message_id: str = "",
+) -> dict[str, Any]:
     thread_id = f"message-thread-edition-forum-{_safe_id(edition_id)}"
+    existing_metadata = _metadata(existing or {})
     return {
         "id": thread_id,
         "threadKind": "edition_forum",
@@ -1274,12 +1349,12 @@ def edition_forum_thread_record(*, edition_id: str, run_id: str, now: str) -> di
         "primaryAnchorId": edition_id,
         "primaryAnchorLineageId": edition_id,
         "primaryAnchorKey": f"edition#{edition_id}",
-        "createdByLabel": "papyrus-editor",
-        "messageCount": 1,
-        "lastMessageId": f"message-forum-{_safe_id(thread_id)}-0001",
+        "createdByLabel": (existing or {}).get("createdByLabel") or "papyrus-editor",
+        "messageCount": max(message_count, 1),
+        "lastMessageId": last_message_id or f"message-forum-{_safe_id(thread_id)}-0001",
         "lastMessageAt": now,
-        "metadata": {"editionId": edition_id, "runId": run_id},
-        "createdAt": now,
+        "metadata": {**existing_metadata, "editionId": edition_id, "runId": run_id, "lastKickoffRunId": run_id},
+        "createdAt": (existing or {}).get("createdAt") or now,
         "updatedAt": now,
         "newsroomFeedKey": "messages",
     }
@@ -1293,8 +1368,12 @@ def section_forum_thread_record(
     section_title: str,
     run_id: str,
     now: str,
+    existing: dict[str, Any] | None = None,
+    message_count: int = 1,
+    last_message_id: str = "",
 ) -> dict[str, Any]:
-    thread_id = f"message-thread-section-forum-{_safe_id(edition_id)}-{_safe_id(section_id)}-{_safe_id(run_id)}"
+    thread_id = f"message-thread-section-forum-{_safe_id(edition_id)}-{_safe_id(section_id)}"
+    existing_metadata = _metadata(existing or {})
     return {
         "id": thread_id,
         "threadKind": "section_forum",
@@ -1305,18 +1384,20 @@ def section_forum_thread_record(
         "primaryAnchorId": section_id,
         "primaryAnchorLineageId": edition_id,
         "primaryAnchorKey": f"edition#{edition_id}#section#{section_id}",
-        "createdByLabel": "papyrus-editor",
-        "messageCount": 1,
-        "lastMessageId": f"message-forum-{_safe_id(thread_id)}-0001",
+        "createdByLabel": (existing or {}).get("createdByLabel") or "papyrus-editor",
+        "messageCount": max(message_count, 1),
+        "lastMessageId": last_message_id or f"message-forum-{_safe_id(thread_id)}-0001",
         "lastMessageAt": now,
         "metadata": {
+            **existing_metadata,
             "editionId": edition_id,
             "sectionId": section_id,
             "sectionKey": section_key,
             "sectionTitle": section_title,
             "runId": run_id,
+            "lastKickoffRunId": run_id,
         },
-        "createdAt": now,
+        "createdAt": (existing or {}).get("createdAt") or now,
         "updatedAt": now,
         "newsroomFeedKey": "messages",
     }
@@ -1330,9 +1411,11 @@ def forum_kickoff_message_record(
     summary: str,
     content: str,
     now: str,
+    sequence_number: int = 1,
 ) -> dict[str, Any]:
+    sequence_number = max(1, int(sequence_number or 1))
     return {
-        "id": f"message-forum-{_safe_id(thread.get('id'))}-0001",
+        "id": f"message-forum-{_safe_id(thread.get('id'))}-{sequence_number:04d}",
         "messageKind": "forum_post",
         "messageDomain": "edition_coordination",
         "status": "active",
@@ -1342,7 +1425,7 @@ def forum_kickoff_message_record(
         "authorLabel": author_label,
         "threadId": thread.get("id"),
         "parentMessageId": None,
-        "sequenceNumber": 1,
+        "sequenceNumber": sequence_number,
         "role": role,
         "messageType": "forum_message",
         "content": content,
@@ -1403,6 +1486,16 @@ def _section_forum_kickoff_body(*, topic: str, section: dict[str, Any], coverage
         "- Call out risks, must-verify claims, and source-quality concerns.",
         "- Prioritize candidate ranks to favor in select/brief decisions.",
     ]).strip() + "\n"
+
+
+def _next_forum_sequence(messages: list[dict[str, Any]]) -> int:
+    max_sequence = 0
+    for message in messages:
+        try:
+            max_sequence = max(max_sequence, int(message.get("sequenceNumber") or 0))
+        except (TypeError, ValueError):
+            continue
+    return max_sequence + 1
 
 
 def build_research_packet_records(
@@ -3099,6 +3192,9 @@ def _prepare_input(model_name: str, input_payload: dict[str, Any]) -> dict[str, 
     if model_name == "Assignment":
         for key in ("brief", "instructions", "metadata"):
             prepared.pop(key, None)
+    if model_name == "Message":
+        prepared.setdefault("responseTarget", "none")
+        prepared.setdefault("responseStatus", "COMPLETED")
     for key in ("metadata", "layoutPlan", "editorial"):
         if key in prepared and not isinstance(prepared[key], str):
             prepared[key] = json.dumps(prepared[key], sort_keys=True)
