@@ -3866,6 +3866,29 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertNotIn("thin", str(signal.get("whyNow") or "").lower())
         self.assertIn("accepted reference", str(signal.get("whyNow") or "").lower())
 
+    def test_derive_edition_forum_thread_title_prefers_themes_over_domains(self):
+        title = papyrus_coverage_theme.derive_edition_forum_thread_title(
+            theme_line="AI in video games",
+            signal={
+                "whyNow": "25 accepted references mention AI in video games; domains include arxiv.org.",
+                "sourceDomains": ["arxiv.org"],
+                "acceptedEvidenceCount": 25,
+                "knowledgeBaseSnapshot": {
+                    "alternateTrendTopics": [
+                        {"topic": "Generative game worlds", "acceptedEvidenceCount": 18},
+                        {"topic": "Video understanding", "acceptedEvidenceCount": 12},
+                    ],
+                },
+            },
+            core_sections=[{"sectionKey": "methods", "sectionTitle": "Methods"}],
+        )
+        self.assertIn("AI in video games", title)
+        self.assertNotIn("arxiv.org", title.lower())
+        self.assertTrue(
+            "generative game worlds" in title.lower() or "video understanding" in title.lower(),
+            title,
+        )
+
     def test_coverage_theme_plan_creates_forum_kickoff_threads_and_messages(self):
         plan = papyrus_coverage_theme.build_coverage_theme_plan(
             date="2026-06-05",

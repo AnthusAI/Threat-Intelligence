@@ -1944,14 +1944,51 @@ def _is_generic_edition_forum_title(title: str) -> bool:
     return str(title or "").strip().lower() in GENERIC_EDITION_FORUM_TITLES
 
 
+def _looks_like_domain_label(text: str) -> bool:
+    cleaned = str(text or "").strip().lower()
+    if not cleaned or " " in cleaned:
+        return False
+    return bool(re.fullmatch(r"[\w.-]+\.(org|com|edu|net|io|gov|uk|de|ai)", cleaned))
+
+
+def _related_theme_labels_for_title(
+    *,
+    signal: dict[str, Any] | None,
+    primary_theme: str,
+) -> list[str]:
+    theme = re.sub(r"\s+", " ", str(primary_theme or "").strip())
+    labels: list[str] = []
+    kb_snapshot = (signal or {}).get("knowledgeBaseSnapshot")
+    if isinstance(kb_snapshot, dict):
+        for entry in kb_snapshot.get("alternateTrendTopics") or []:
+            if not isinstance(entry, dict):
+                continue
+            label = re.sub(r"\s+", " ", str(entry.get("topic") or "").strip())
+            if not label or label.lower() == theme.lower():
+                continue
+            if label not in labels:
+                labels.append(label)
+            if len(labels) >= 3:
+                return labels
+    return labels
+
+
 def _editorial_title_hook(
     *,
     why_now: str,
     signal: dict[str, Any] | None,
     core_sections: list[dict[str, Any]] | None,
     primary_theme: str,
+    related_themes: list[str] | None = None,
 ) -> str:
     theme = re.sub(r"\s+", " ", str(primary_theme or "").strip())
+    related = [
+        label
+        for label in (related_themes or _related_theme_labels_for_title(signal=signal, primary_theme=theme))
+        if label and label.lower() != theme.lower() and not _looks_like_domain_label(label)
+    ]
+    if related:
+        return " · ".join(related[:3])
     section_names = [
         str(section.get("sectionTitle") or section.get("sectionKey") or "").strip()
         for section in (core_sections or [])
@@ -1959,9 +1996,6 @@ def _editorial_title_hook(
     ]
     if len(section_names) >= 2:
         return " · ".join(section_names[:3])
-    domains = [domain for domain in list((signal or {}).get("sourceDomains") or [])[:2] if domain]
-    if domains:
-        return ", ".join(domains)
     if len(section_names) == 1:
         return section_names[0]
     lowered = str(why_now or "").lower()
@@ -2011,6 +2045,7 @@ def derive_edition_forum_thread_title(
     signal: dict[str, Any] | None = None,
     why_fragment: str = "",
     core_sections: list[dict[str, Any]] | None = None,
+    related_themes: list[str] | None = None,
 ) -> str:
     headline = re.sub(r"\s+", " ", str(theme_line or "").strip())
     if not headline:
@@ -2020,9 +2055,11 @@ def derive_edition_forum_thread_title(
         signal=signal,
         core_sections=core_sections,
         primary_theme=headline,
+        related_themes=related_themes,
     )
-    if hook and hook.lower() != headline.lower() and len(headline) + len(hook) + 3 <= 76:
-        headline = f"{headline} — {hook}"
+    if hook and not _looks_like_domain_label(hook) and hook.lower() != headline.lower():
+        candidate = f"{headline} — {hook}"
+        headline = candidate if len(candidate) <= 80 else headline
     evidence_count = int((signal or {}).get("acceptedEvidenceCount") or 0)
     if evidence_count > 0 and len(headline) < 56 and "source" not in headline.lower():
         headline = f"{headline} ({evidence_count} sources)"
@@ -2410,11 +2447,13 @@ def build_edition_theme_kickoff_draft(
             if optional_names:
                 lines.append(f"- Candidate optional desks this cycle: {optional_names}.")
     body = "\n".join(lines).strip() + "\n"
+    related_themes = _related_theme_labels_for_title(signal=signal, primary_theme=primary_theme)
     thread_title = derive_edition_forum_thread_title(
         theme_line=primary_theme,
         signal=signal,
         why_fragment=why_now,
         core_sections=core_sections,
+        related_themes=related_themes,
     )
     return {
         "primary_theme": primary_theme,
