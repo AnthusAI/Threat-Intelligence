@@ -1940,15 +1940,7 @@ def _editorial_title_hook(
     core_sections: list[dict[str, Any]] | None,
     primary_theme: str,
 ) -> str:
-    lowered = str(why_now or "").lower()
-    blocked = ("desk proposed", "planning run", "coverage concept", "targets coverage")
-    if why_now and not any(fragment in lowered for fragment in blocked):
-        hook = _first_editorial_phrase(why_now, max_len=48)
-        if hook and hook.lower() != str(primary_theme or "").strip().lower():
-            return hook
-    domains = [domain for domain in list((signal or {}).get("sourceDomains") or [])[:2] if domain]
-    if domains:
-        return ", ".join(domains)
+    theme = re.sub(r"\s+", " ", str(primary_theme or "").strip())
     section_names = [
         str(section.get("sectionTitle") or section.get("sectionKey") or "").strip()
         for section in (core_sections or [])
@@ -1956,12 +1948,37 @@ def _editorial_title_hook(
     ]
     if len(section_names) >= 2:
         return " · ".join(section_names[:3])
+    domains = [domain for domain in list((signal or {}).get("sourceDomains") or [])[:2] if domain]
+    if domains:
+        return ", ".join(domains)
+    if len(section_names) == 1:
+        return section_names[0]
+    lowered = str(why_now or "").lower()
+    blocked = (
+        "desk proposed",
+        "planning run",
+        "coverage concept",
+        "targets coverage",
+        "proposed edition spine",
+        "references in-window are thin",
+    )
+    if why_now and not any(fragment in lowered for fragment in blocked):
+        stripped = re.sub(r"[*`_]", "", why_now).strip()
+        if theme and stripped.lower().startswith(theme.lower()):
+            stripped = stripped[len(theme) :].lstrip(" —:-")
+        hook = _first_editorial_phrase(stripped, max_len=48)
+        if hook and theme.lower() not in hook.lower():
+            return hook
     gaps = list((signal or {}).get("coverageGaps") or [])
     if gaps:
-        return _first_editorial_phrase(str(gaps[0]), max_len=48)
+        hook = _first_editorial_phrase(str(gaps[0]), max_len=48)
+        if hook and theme.lower() not in hook.lower():
+            return hook
     questions = list((signal or {}).get("openQuestions") or [])
     if questions:
-        return _first_editorial_phrase(str(questions[0]), max_len=48)
+        hook = _first_editorial_phrase(str(questions[0]), max_len=48)
+        if hook and theme.lower() not in hook.lower():
+            return hook
     return ""
 
 
