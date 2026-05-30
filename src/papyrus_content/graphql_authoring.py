@@ -51,7 +51,7 @@ ASSIGNMENT_FIELDS = (
     "id assignmentTypeKey queueKey queueStatusKey status priority title assigneeType assigneeId assigneeKey "
     "claimedAt claimExpiresAt completedAt canceledAt corpusId categorySetId classifierId sourceSnapshotId "
     "importRunId sectionId sectionKey sectionType sectionStatusKey sectionQueueStatusKey primaryFocusCategoryKey "
-    "topicScopeCategoryKeys createdBy createdAt updatedAt"
+    "topicScopeCategoryKeys createdBy createdAt updatedAt summary newsroomFeedKey"
 )
 ASSIGNMENT_EVENT_FIELDS = (
     "id assignmentId assignmentTypeKey queueKey eventType fromStatus toStatus actorSub actorLabel note createdAt"
@@ -65,8 +65,28 @@ SEMANTIC_RELATION_FIELDS = (
 )
 MESSAGE_FIELDS = (
     "id messageKind messageDomain status summary source importRunId authorSub authorUserProfileId authorLabel "
-    "responseTarget responseStatus responseOwner responseStartedAt responseCompletedAt responseError "
-    "newsroomFeedKey createdAt updatedAt"
+    "threadId parentMessageId sequenceNumber role messageType content semanticLayer searchVisibility responseTarget "
+    "responseStatus responseOwner responseStartedAt responseCompletedAt responseError metadata newsroomFeedKey createdAt updatedAt"
+)
+MESSAGE_THREAD_FIELDS = (
+    "id threadKind status title summary primaryAnchorKind primaryAnchorId primaryAnchorLineageId primaryAnchorKey "
+    "createdBySub createdByUserProfileId createdByLabel messageCount lastMessageId lastMessageAt contextDigest "
+    "activeResponseMessageId responseLockOwner responseLockExpiresAt metadata createdAt updatedAt newsroomFeedKey"
+)
+PROCEDURE_DEFINITION_FIELDS = (
+    "id procedureKey title category description enabled enabledStatus currentVersionId createdBy createdAt "
+    "updatedBy updatedAt newsroomFeedKey"
+)
+PROCEDURE_VERSION_FIELDS = (
+    "id procedureId procedureKey versionNumber status isCurrent label tactusSource parameterSchema defaults "
+    "changelog createdBy createdAt updatedBy updatedAt"
+)
+PROCEDURE_RUN_FIELDS = (
+    "id procedureId procedureKey procedureVersionId procedureVersionNumber assignmentId runStatus requestedBy "
+    "requestedAt startedAt finishedAt input normalizedInput resultSummary errorSummary output error attempt newsroomFeedKey"
+)
+USER_ROLE_ASSIGNMENT_FIELDS = (
+    "id userProfileId userSub email role status grantedBy grantedAt revokedAt notes"
 )
 MODEL_ATTACHMENT_FIELDS = (
     "id ownerKind ownerId ownerLineageId ownerVersionNumber ownerVersionKey role sortKey storagePath filename "
@@ -134,6 +154,11 @@ LIST_DEFINITIONS: dict[str, dict[str, str]] = {
     "SemanticRelationType": {"field": "listSemanticRelationTypes", "fields": SEMANTIC_RELATION_TYPE_FIELDS},
     "SemanticRelation": {"field": "listSemanticRelations", "fields": SEMANTIC_RELATION_FIELDS},
     "Message": {"field": "listMessages", "fields": MESSAGE_FIELDS},
+    "MessageThread": {"field": "listMessageThreads", "fields": MESSAGE_THREAD_FIELDS},
+    "ProcedureDefinition": {"field": "listProcedureDefinitions", "fields": PROCEDURE_DEFINITION_FIELDS},
+    "ProcedureVersion": {"field": "listProcedureVersions", "fields": PROCEDURE_VERSION_FIELDS},
+    "ProcedureRun": {"field": "listProcedureRuns", "fields": PROCEDURE_RUN_FIELDS},
+    "UserRoleAssignment": {"field": "listUserRoleAssignments", "fields": USER_ROLE_ASSIGNMENT_FIELDS},
     "ModelAttachment": {"field": "listModelAttachments", "fields": MODEL_ATTACHMENT_FIELDS},
     "NewsroomSection": {"field": "listNewsroomSections", "fields": NEWSROOM_SECTION_FIELDS},
     "Edition": {"field": "listEditions", "fields": EDITION_FIELDS},
