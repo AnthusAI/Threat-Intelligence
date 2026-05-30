@@ -4,6 +4,7 @@ import { categoryAction } from "../functions/category-action/resource";
 import { knowledgeQuery } from "../functions/knowledge-query/resource";
 import { modelAttachmentUpload } from "../functions/model-attachment-upload/resource";
 import { newsroomSummary } from "../functions/newsroom-summary/resource";
+import { sesInboundReceive } from "../functions/ses-inbound-receive/resource";
 
 export const storage = defineStorage({
   name: "papyrusMedia",
@@ -24,6 +25,9 @@ export const storage = defineStorage({
       allow.resource(categoryAction).to(["read", "write"]),
       allow.resource(modelAttachmentUpload).to(["read", "write", "delete"]),
       allow.resource(newsroomSummary).to(["read", "write"]),
+    ],
+    "inbound-email/*": [
+      allow.resource(sesInboundReceive).to(["read", "write"]),
     ],
   }),
 });

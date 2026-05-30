@@ -1768,6 +1768,30 @@ def papyrus_find_reference(corpus_id: str, external_item_id: str) -> dict[str, A
     return _semantic_client().find_reference(corpus_id, external_item_id)
 
 
+def papyrus_email_submission_process(
+    *,
+    message_id: str,
+    corpus_key: str = "AI-ML-research",
+    apply: bool = True,
+) -> dict[str, Any]:
+    """
+    Create, find, and process direct citations from an inbound email submission Message.
+    """
+    from papyrus_content.graphql_authoring import PapyrusGraphQLAuthoringClient
+
+    from .email_submissions import process_email_submission_message
+
+    if not str(message_id or "").strip():
+        raise ValueError("message_id is required.")
+    client = PapyrusGraphQLAuthoringClient()
+    return process_email_submission_message(
+        client,
+        message_id=str(message_id).strip(),
+        corpus_key=corpus_key or "AI-ML-research",
+        apply=apply,
+    )
+
+
 def papyrus_list_reference_attachments(
     reference_lineage_id: str | None = None,
     reference_version_key: str | None = None,

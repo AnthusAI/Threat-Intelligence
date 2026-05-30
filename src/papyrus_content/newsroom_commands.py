@@ -643,6 +643,7 @@ def _required_procedure_seed_specs() -> list[dict[str, Any]]:
         "newsroom.reference.summarization": PAPYRUS_ROOT / "procedures" / "newsroom" / "reference_summarization.tac",
         "ontology.relationship-explainer": PAPYRUS_ROOT / "procedures" / "newsroom" / "ontology_relationship_explainer.tac",
         "ontology.concept-profiler": PAPYRUS_ROOT / "procedures" / "newsroom" / "ontology_concept_profiler.tac",
+        "submissions.email.process": PAPYRUS_ROOT / "procedures" / "newsroom" / "email_submission_processor.tac",
     }
     details_by_key = {
         "newsroom.research.explorer": {
@@ -774,6 +775,25 @@ def _required_procedure_seed_specs() -> list[dict[str, Any]]:
             "defaults": {
                 "model": "gpt-5.4-mini",
                 "temperature": 0,
+            },
+        },
+        "submissions.email.process": {
+            "title": "Email Submission Processor",
+            "category": "ingestion",
+            "description": "Processes inbound submission emails into reference create/find/process intake for direct citations.",
+            "versionLabel": "starter",
+            "parameterSchema": {
+                "type": "object",
+                "required": ["message_id"],
+                "properties": {
+                    "message_id": {"type": "string"},
+                    "corpus_key": {"type": "string"},
+                    "apply": {"type": "boolean"},
+                },
+            },
+            "defaults": {
+                "corpus_key": "AI-ML-research",
+                "apply": True,
             },
         },
     }

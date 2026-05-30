@@ -457,6 +457,11 @@ API_METHODS: dict[tuple[str, str], Callable[[dict[str, Any]], Any]] = {
     ("plan", "assignment_research_packet"): lambda args: newsroom.build_assignment_research_packet_plan(**args),
     ("plan", "assignment_reporting_context_packet"): lambda args: newsroom.build_assignment_reporting_context_packet_plan(**args),
     ("plan", "draft_update"): lambda args: newsroom.build_draft_update_plan(**args),
+    ("email_submission", "process"): lambda args: newsroom.papyrus_email_submission_process(
+        message_id=args.get("message_id") or args.get("messageId") or args.get("id") or "",
+        corpus_key=args.get("corpus_key") or args.get("corpusKey") or "AI-ML-research",
+        apply=bool(args.get("apply", True)),
+    ),
 }
 
 
@@ -817,6 +822,7 @@ HELPER_BINDINGS: tuple[tuple[str, str, str], ...] = (
     ("plan_assignment_research_packet", "plan", "assignment_research_packet"),
     ("plan_assignment_reporting_context_packet", "plan", "assignment_reporting_context_packet"),
     ("plan_draft_update", "plan", "draft_update"),
+    ("papyrus_email_submission_process", "email_submission", "process"),
     ("docs_list", "docs", "list"),
     ("docs_get", "docs", "get"),
     ("api_list", "api", "list"),

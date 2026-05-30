@@ -21,6 +21,9 @@ import { modelAttachmentUpload } from "./functions/model-attachment-upload/resou
 import { newsroomSummary } from "./functions/newsroom-summary/resource";
 import { procedureAction } from "./functions/procedure-action/resource";
 import { readerSettings } from "./functions/reader-settings/resource";
+import { emailSubmissionProcessor } from "./functions/email-submission-processor/resource";
+import { sesInboundReceive } from "./functions/ses-inbound-receive/resource";
+import { InboundEmailStack } from "./inbound-email/stack";
 import { storage } from "./storage/resource";
 
 const knowledgeVectorIndexName = "papyrus-knowledge";
@@ -32,6 +35,7 @@ const backend = defineBackend({
   auth,
   categoryAction,
   data,
+  emailSubmissionProcessor,
   graphqlJwtAuthorizer,
   knowledgeQuery,
   manageUserRole,
@@ -39,6 +43,7 @@ const backend = defineBackend({
   newsroomSummary,
   procedureAction,
   readerSettings,
+  sesInboundReceive,
   storage,
 });
 
@@ -47,6 +52,51 @@ const projectRoot = resolve(amplifyBackendDir, "..");
 const enableConsoleResponder = !["0", "false", "no", "off"].includes(
   (process.env.PAPYRUS_ENABLE_CONSOLE_RESPONDER ?? "true").trim().toLowerCase(),
 );
+const enableInboundEmail = !["0", "false", "no", "off"].includes(
+  (process.env.PAPYRUS_ENABLE_INBOUND_EMAIL ?? "true").trim().toLowerCase(),
+);
+const inboundEmailDomain = (process.env.PAPYRUS_INBOUND_EMAIL_DOMAIN ?? "p.apyr.us").trim().toLowerCase();
+const inboundEmailLocalParts = (process.env.PAPYRUS_INBOUND_EMAIL_LOCAL_PARTS ?? "submissions,suggestions")
+  .split(",")
+  .map((entry) => entry.trim().toLowerCase())
+  .filter(Boolean);
+const inboundEmailCorpusKey = (process.env.PAPYRUS_INBOUND_EMAIL_CORPUS_KEY ?? "AI-ML-research").trim();
+
+if (enableInboundEmail) {
+  const receiveLambda = backend.sesInboundReceive.resources.lambda as LambdaFunction;
+  const processorLambda = backend.emailSubmissionProcessor.resources.lambda as LambdaFunction;
+  receiveLambda.addToRolePolicy(
+    new PolicyStatement({
+      actions: ["lambda:InvokeFunction"],
+      resources: [processorLambda.functionArn],
+    }),
+  );
+  processorLambda.addToRolePolicy(
+    new PolicyStatement({
+      actions: ["appsync:GraphQL"],
+      resources: ["*"],
+    }),
+  );
+  processorLambda.addToRolePolicy(
+    new PolicyStatement({
+      actions: ["ssm:GetParameter"],
+      resources: [
+        `arn:aws:ssm:${backend.stack.region}:${backend.stack.account}:parameter/amplify/*`,
+        `arn:aws:ssm:${backend.stack.region}:${backend.stack.account}:parameter/amplify/shared/*`,
+      ],
+    }),
+  );
+  processorLambda.addEnvironment("PAPYRUS_JWT_SECRET", secret("PAPYRUS_JWT_SECRET"));
+  new InboundEmailStack(backend.createStack("inbound-email"), "InboundEmail", {
+    storageBucket: backend.storage.resources.bucket,
+    receiveFunction: receiveLambda,
+    processorFunction: processorLambda,
+    domain: inboundEmailDomain,
+    localParts: inboundEmailLocalParts,
+    corpusKey: inboundEmailCorpusKey,
+    graphqlEndpoint: backend.data.resources.cfnResources.cfnGraphqlApi.attrGraphQlUrl,
+  });
+}
 
 if (enableConsoleResponder) {
   const messageTable = backend.data.resources.tables.Message;
@@ -201,6 +251,14 @@ knowledgeQueryLambda.addToRolePolicy(
 
 backend.addOutput({
   custom: {
+    inboundEmail: enableInboundEmail
+      ? {
+          domain: inboundEmailDomain,
+          localParts: inboundEmailLocalParts,
+          addresses: inboundEmailLocalParts.map((localPart) => `${localPart}@${inboundEmailDomain}`),
+          corpusKey: inboundEmailCorpusKey,
+        }
+      : null,
     knowledgeQuery: {
       s3VectorBucketArn: knowledgeVectorBucket.attrVectorBucketArn,
       s3VectorIndexArn: knowledgeVectorIndex.attrIndexArn,
