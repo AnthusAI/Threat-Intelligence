@@ -325,6 +325,7 @@ def reference_record(item: dict[str, Any], context: dict[str, Any]) -> dict[str,
             else _string_or_null(item.get("curation_note") or item.get("ingestion_rationale"))
         ),
         "newsroomFeedKey": "references",
+        "reviewedFeedKey": None if curation_status == "pending" else "references#reviewed",
         "metadata": json.dumps(metadata, sort_keys=True),
         "updatedAt": context["now"],
     }

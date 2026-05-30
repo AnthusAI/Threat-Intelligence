@@ -925,10 +925,12 @@ def _newsroom_feed_patch_for(model_name: str, record: dict[str, Any]) -> dict[st
         }
     if model_name == "Reference":
         created_at = record.get("createdAt") or record.get("importedAt") or record.get("versionCreatedAt") or record.get("updatedAt") or now
+        curation_status = str(record.get("curationStatus") or "pending").strip().lower() or "pending"
         return {
             "createdAt": created_at,
             "updatedAt": record.get("updatedAt") or record.get("curationStatusUpdatedAt") or record.get("importedAt") or created_at,
             "newsroomFeedKey": "references",
+            "reviewedFeedKey": None if curation_status == "pending" else "references#reviewed",
         }
     if model_name == "SemanticNode":
         created_at = record.get("createdAt") or record.get("versionCreatedAt") or record.get("updatedAt") or now

@@ -1467,9 +1467,9 @@ export async function loadNewsroomReferencePage(options: NewsroomReferencePageOp
       nextToken: options.nextToken,
       corpusId: options.corpusId,
     });
-    if (indexedPage.items.length > 0 || indexedPage.nextToken || options.nextToken) return indexedPage;
+    if (indexedPage.items.length > 0 || options.nextToken) return indexedPage;
     const legacyPage = await loadReferencePageByLegacyFeed(options);
-    if (legacyPage.items.length > 0 || legacyPage.nextToken || options.nextToken) return legacyPage;
+    if (legacyPage.items.length > 0 || options.nextToken) return legacyPage;
     return loadReferencePageByFallbackList(options);
   }
   if (options.excludePending) {
@@ -1478,7 +1478,7 @@ export async function loadNewsroomReferencePage(options: NewsroomReferencePageOp
       nextToken: options.nextToken,
       corpusId: options.corpusId,
     });
-    if (reviewedPage.items.length > 0 || reviewedPage.nextToken) return reviewedPage;
+    if (reviewedPage.items.length > 0 || options.nextToken) return reviewedPage;
     // Backfill may still be pending in an environment; fall back to status-index merge.
     const mergedReviewedPage = await loadMergedReferenceStatusPage({
       statuses: ["accepted", "rejected", "archived"],
@@ -1486,9 +1486,9 @@ export async function loadNewsroomReferencePage(options: NewsroomReferencePageOp
       nextToken: options.nextToken,
       corpusId: options.corpusId,
     });
-    if (mergedReviewedPage.items.length > 0 || mergedReviewedPage.nextToken || options.nextToken) return mergedReviewedPage;
+    if (mergedReviewedPage.items.length > 0 || options.nextToken) return mergedReviewedPage;
     const legacyPage = await loadReferencePageByLegacyFeed(options);
-    if (legacyPage.items.length > 0 || legacyPage.nextToken || options.nextToken) return legacyPage;
+    if (legacyPage.items.length > 0 || options.nextToken) return legacyPage;
     return loadReferencePageByFallbackList(options);
   }
   const mergedPage = await loadMergedReferenceStatusPage({
@@ -1497,9 +1497,9 @@ export async function loadNewsroomReferencePage(options: NewsroomReferencePageOp
     nextToken: options.nextToken,
     corpusId: options.corpusId,
   });
-  if (mergedPage.items.length > 0 || mergedPage.nextToken || options.nextToken) return mergedPage;
+  if (mergedPage.items.length > 0 || options.nextToken) return mergedPage;
   const legacyPage = await loadReferencePageByLegacyFeed(options);
-  if (legacyPage.items.length > 0 || legacyPage.nextToken || options.nextToken) return legacyPage;
+  if (legacyPage.items.length > 0 || options.nextToken) return legacyPage;
   return loadReferencePageByFallbackList(options);
 }
 

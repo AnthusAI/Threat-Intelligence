@@ -278,6 +278,7 @@ export type ReferenceRecord = {
   curationStatusUpdatedBy?: string | null;
   curationStatusReason?: string | null;
   newsroomFeedKey?: string | null;
+  reviewedFeedKey?: string | null;
   metadata?: unknown;
   updatedAt?: string | null;
 };

@@ -2835,6 +2835,7 @@ def _resolve_or_build_cited_reference_record(
         "curationStatusUpdatedBy": "papyrus-reference-url-text",
         "curationStatusReason": "auto-created from GROBID citation graph",
         "newsroomFeedKey": "references",
+        "reviewedFeedKey": None,
         "metadata": json.dumps(metadata, sort_keys=True),
         "updatedAt": now,
     }

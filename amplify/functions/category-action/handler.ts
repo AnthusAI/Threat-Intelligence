@@ -76,6 +76,7 @@ const DEFAULT_REFERENCE_CURATION_POLICY = {
   recomputeQuality: false,
   recomputeCorpus: false,
 };
+const REFERENCE_REVIEWED_FEED_KEY = "references#reviewed";
 
 let clientPromise: Promise<DataClient> | null = null;
 
@@ -192,6 +193,7 @@ async function reviewReferenceCuration(event: Parameters<ReferenceCurationHandle
       curationStatusUpdatedBy: actor,
       curationStatusReason: note,
       newsroomFeedKey: reference.newsroomFeedKey ?? "references",
+      reviewedFeedKey: reviewedFeedKeyForStatus(nextStatus),
       updatedAt: now,
     }),
     "update Reference curation status",
@@ -375,6 +377,7 @@ async function setReferenceQualityRating(event: Parameters<ReferenceQualityHandl
       curationStatusUpdatedBy: actor,
       curationStatusReason: note,
       newsroomFeedKey: reference.newsroomFeedKey ?? "references",
+      reviewedFeedKey: reviewedFeedKeyForStatus(nextStatus),
       updatedAt: now,
     }),
     "update Reference quality status",
@@ -585,6 +588,7 @@ async function moveReferenceCorpus(event: Parameters<MoveReferenceCorpusHandler>
       curationStatusUpdatedBy: normalizeOptionalString(current.curationStatusUpdatedBy) ?? actor,
       curationStatusReason: normalizeOptionalString(current.curationStatusReason),
       newsroomFeedKey: normalizeOptionalString(current.newsroomFeedKey) ?? "references",
+      reviewedFeedKey: normalizeOptionalString(current.reviewedFeedKey) ?? reviewedFeedKeyForStatus(curationStatus),
       updatedAt: now,
     }),
     "create moved Reference version",
@@ -1809,6 +1813,10 @@ function normalizeReferenceCurationAction(value: unknown): "accept" | "reject" |
   const action = normalizeRequiredString(value, "action").toLowerCase();
   if (action === "accept" || action === "reject" || action === "reopen" || action === "archive") return action;
   throw new Error(`Unsupported reference curation action ${action}.`);
+}
+
+function reviewedFeedKeyForStatus(status: string): string | null {
+  return status === "pending" ? null : REFERENCE_REVIEWED_FEED_KEY;
 }
 
 function referenceCurationStatusForAction(action: "accept" | "reject" | "reopen" | "archive"): "accepted" | "rejected" | "pending" | "archived" {

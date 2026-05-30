@@ -611,6 +611,11 @@ def new_reference_for_accession_replacement(
         "sha256": accession["sha256"],
         "curationStatus": reference.get("curationStatus") or "pending",
         "curationStatusKey": f"{corpus_id}#{reference.get('curationStatus') or 'pending'}",
+        "reviewedFeedKey": (
+            None
+            if (reference.get("curationStatus") or "pending") == "pending"
+            else "references#reviewed"
+        ),
         "metadata": json.dumps(metadata, sort_keys=True),
         "updatedAt": now,
     }

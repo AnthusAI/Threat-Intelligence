@@ -95,6 +95,7 @@ from .messages_commands import messages_export_legacy_comments, messages_import_
 from .relations_commands import relations_backfill, relations_import_types
 from .references_commands import (
     references_attach_extracted_text,
+    references_backfill_reviewed_feed_key,
     references_create_doi_backfill_assignment,
     references_create_identifier_backfill_assignment,
     references_curate_recent,
@@ -222,6 +223,7 @@ PORTED_COMMANDS = frozenset(
         "references:execute-identifier-backfill",
         "references:export-analysis-manifest",
         "references:export-scope-training",
+        "references:backfill-reviewed-feed-key",
         "assignments:list",
         "assignments:create-research",
         "assignments:create-reporting",
@@ -438,6 +440,8 @@ def dispatch(group: str, command: str, flags: list[str]) -> None:
         references_export_analysis_manifest(flags)
     elif route == "references:export-scope-training":
         references_export_scope_training(flags)
+    elif route == "references:backfill-reviewed-feed-key":
+        references_backfill_reviewed_feed_key(flags)
     elif route == "assignments:list":
         assignments_list(flags)
     elif route == "assignments:create-research":

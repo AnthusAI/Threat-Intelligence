@@ -155,6 +155,41 @@ def references_list_predictions(flags: list[str]) -> None:
         print("references\tlist-predictions\t0")
 
 
+def references_backfill_reviewed_feed_key(flags: list[str]) -> None:
+    options = parse_options(flags)
+    apply = resolve_mutation_apply(options, "references backfill-reviewed-feed-key")
+    client, _ = create_authoring_client()
+    references = client.list_records("Reference")
+    changes: list[dict[str, Any]] = []
+    for reference in references:
+        curation_status = str(reference.get("curationStatus") or "pending").strip().lower() or "pending"
+        expected_reviewed_feed_key = None if curation_status == "pending" else "references#reviewed"
+        if (reference.get("reviewedFeedKey") or None) == expected_reviewed_feed_key:
+            continue
+        expected = {**reference, "reviewedFeedKey": expected_reviewed_feed_key}
+        changes.append({"current": reference, "expected": expected})
+    print(f"references\tbackfill-reviewed-feed-key\tmode\t{'apply' if apply else 'dry-run'}")
+    print(f"references\tbackfill-reviewed-feed-key\tscanned\t{len(references)}")
+    print(f"references\tbackfill-reviewed-feed-key\tplanned\t{len(changes)}")
+    for change in changes[:20]:
+        current = change["current"]
+        expected = change["expected"]
+        print(
+            "references\tbackfill-reviewed-feed-key\tcandidate\t"
+            f"{current.get('id')}\t{current.get('curationStatus') or 'pending'}\t{expected.get('reviewedFeedKey') or '-'}"
+        )
+    if len(changes) > 20:
+        print(f"references\tbackfill-reviewed-feed-key\tpreview-truncated\t{len(changes) - 20}")
+    if not apply:
+        print("references\tbackfill-reviewed-feed-key\tapply\tskipped\tuse --dry-run to preview without writes")
+        return
+    for index, change in enumerate(changes, start=1):
+        client.upsert("Reference", change["expected"])
+        if index == len(changes) or index % 100 == 0:
+            print(f"references\tbackfill-reviewed-feed-key\tprogress\t{index}/{len(changes)}")
+    print(f"references\tbackfill-reviewed-feed-key\tupdated\t{len(changes)}")
+
+
 def references_review_classification(flags: list[str]) -> None:
     options = parse_options(flags)
     relation_id = options.get("relation") or options.get("relation-id")
