@@ -147,6 +147,7 @@ from .newsroom_commands import (
     newsroom_import_sections,
     newsroom_prune_attachments,
     newsroom_repair_message_status,
+    newsroom_purge_planning,
     newsroom_recount_summary,
     newsroom_seed_required_procedures,
 )
@@ -274,6 +275,7 @@ PORTED_COMMANDS = frozenset(
         "newsroom:import-sections",
         "newsroom:import-doctrine",
         "newsroom:seed-required-procedures",
+        "newsroom:purge-planning",
         "relations:import-types",
         "relations:backfill",
         "ontology:preflight",
@@ -540,6 +542,8 @@ def dispatch(group: str, command: str, flags: list[str]) -> None:
         newsroom_import_doctrine(flags)
     elif route == "newsroom:seed-required-procedures":
         newsroom_seed_required_procedures(flags)
+    elif route == "newsroom:purge-planning":
+        newsroom_purge_planning(flags)
     elif route == "relations:import-types":
         relations_import_types(flags)
     elif route == "relations:backfill":

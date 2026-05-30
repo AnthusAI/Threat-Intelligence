@@ -72,6 +72,7 @@ def _map_sections(command: str, flags: list[str]) -> None:
         "backfill-feed-fields": "backfill-feed-fields",
         "backfill-operational-indexes": "backfill-operational-indexes",
         "prune-attachments": "prune-attachments",
+        "purge-planning": "purge-planning",
     }.get(command)
     if not mapped:
         raise ValueError(f"Unsupported papyrus sections command: {command}")
