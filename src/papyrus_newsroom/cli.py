@@ -482,6 +482,7 @@ def _add_coverage_theme_run_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--refresh-packets", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--refresh-forum-kickoff", action="store_true", help="Replace phase-1 forum kickoff messages with the current suggestion template.")
+    parser.add_argument("--refresh-forum", action="store_true", help="Soft-delete all edition-forum planning messages (theme, optional desk, reporting) before re-posting.")
     parser.add_argument("--skip-rotating-desk", action="store_true", help="Skip phase-2 optional/rotating desk selection.")
     parser.add_argument("--select-rotating-desk", action="store_true", help="Run phase-2 optional desk selection during plan apply.")
     parser.add_argument("--selected-optional-desk", default="", help="Human override for the optional desk section key (for example arts or gaming).")
@@ -605,6 +606,7 @@ def _run_coverage_theme_run(args: argparse.Namespace) -> dict:
         skip_rotating_desk=bool(args.skip_rotating_desk),
         select_rotating_desk=select_rotating_desk,
         refresh_forum_kickoff=bool(args.refresh_forum_kickoff),
+        refresh_forum=bool(args.refresh_forum),
         rotating_desk_steering_notes=str(args.rotating_desk_steering_notes or "").strip(),
     )
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import http.client
+import os
 import urllib.parse
 from typing import Any
 
@@ -503,10 +504,20 @@ mutation Delete{model_name}($input: Delete{model_name}Input!) {{
 MUTATIONS = {model: _model_mutations(model) for model in LIST_DEFINITIONS}
 
 
+def graphql_use_iam() -> bool:
+    return os.environ.get("PAPYRUS_GRAPHQL_USE_IAM", "").strip().lower() in {"1", "true", "yes"}
+
+
 class PapyrusGraphQLAuthoringClient:
     def __init__(self, endpoint: str | None = None, auth_token: str | None = None) -> None:
         self.endpoint = endpoint or graphql_endpoint()
-        self.auth_token = auth_token or graphql_jwt()
+        self.use_iam = graphql_use_iam()
+        if self.use_iam:
+            self.auth_token = auth_token or ""
+        elif auth_token is not None:
+            self.auth_token = auth_token
+        else:
+            self.auth_token = graphql_jwt()
         self.timeout_seconds = graphql_timeout_seconds()
         self._parsed_endpoint = urllib.parse.urlparse(self.endpoint)
         if self._parsed_endpoint.scheme != "https":
@@ -516,13 +527,23 @@ class PapyrusGraphQLAuthoringClient:
             self._endpoint_path = f"{self._endpoint_path}?{self._parsed_endpoint.query}"
         self._connection: http.client.HTTPSConnection | None = None
 
-    def graphql(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
-        payload = json.dumps({"query": query, "variables": variables or {}}).encode("utf-8")
-        headers = {
+    def _request_headers(self, payload: bytes) -> dict[str, str]:
+        if self.use_iam:
+            from papyrus_newsroom.newsroom import _iam_signed_graphql_headers
+
+            return _iam_signed_graphql_headers(self.endpoint, payload)
+        return {
             "content-type": "application/json",
             "Authorization": lambda_auth_header(self.auth_token),
+            # AppSync default mode is userPool; CLI JWT uses the Lambda authorizer lane.
+            "x-amz-appsync-authtype": os.environ.get("PAPYRUS_GRAPHQL_AUTH_TYPE", "AWS_LAMBDA").strip()
+            or "AWS_LAMBDA",
             "Connection": "keep-alive",
         }
+
+    def graphql(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
+        payload = json.dumps({"query": query, "variables": variables or {}}).encode("utf-8")
+        headers = self._request_headers(payload)
         body: dict[str, Any] | None = None
         last_error: Exception | None = None
         for attempt in range(2):
@@ -803,6 +824,8 @@ class PapyrusGraphQLAuthoringClient:
 def create_authoring_client() -> tuple[PapyrusGraphQLAuthoringClient, dict[str, Any]]:
     from .env import decode_jwt_claims
 
+    if graphql_use_iam():
+        return PapyrusGraphQLAuthoringClient(auth_token=""), {}
     token = graphql_jwt()
     return PapyrusGraphQLAuthoringClient(auth_token=token), decode_jwt_claims(token)
 

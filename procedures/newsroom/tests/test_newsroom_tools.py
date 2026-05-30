@@ -3865,6 +3865,44 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertEqual(records[0]["input"]["id"], "message-1")
         self.assertEqual(records[0]["input"]["status"], "deleted")
 
+    def test_plan_forum_refresh_supersede_includes_all_planning_phases(self):
+        edition_id = "edition-edition-2026-06-05-v1"
+        thread_id = papyrus_coverage_theme._canonical_edition_forum_thread_id(edition_id)
+        messages = [
+            {
+                "id": "message-1",
+                "threadId": thread_id,
+                "messageKind": "forum_post",
+                "status": "active",
+                "summary": "AI in video games",
+                "content": "# AI in video games\n\n## Why this edition\n",
+                "metadata": {"planningPhase": "edition_theme_kickoff"},
+            },
+            {
+                "id": "message-2",
+                "threadId": thread_id,
+                "messageKind": "forum_post",
+                "status": "active",
+                "summary": "Optional desk: Arts",
+                "metadata": {"planningPhase": "rotating_desk_selection"},
+            },
+            {
+                "id": "message-3",
+                "threadId": thread_id,
+                "messageKind": "forum_post",
+                "status": "active",
+                "summary": "Reporting candidates: AI in video games",
+                "content": "# Reporting candidates\n",
+                "metadata": {"planningPhase": "reporting_dispatch"},
+            },
+        ]
+        records = papyrus_coverage_theme._plan_forum_refresh_supersede_records(
+            {thread_id: messages},
+            now="2026-06-01T12:00:00Z",
+        )
+        deleted_ids = {record["input"]["id"] for record in records}
+        self.assertEqual(deleted_ids, {"message-1", "message-2", "message-3"})
+
     def test_canonical_edition_forum_thread_messages_includes_pending_records(self):
         edition_id = "edition-edition-2026-06-05-v1"
         thread_id = papyrus_coverage_theme._canonical_edition_forum_thread_id(edition_id)
@@ -4291,7 +4329,11 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         )
         self.assertEqual(dispatch_forum["action"], "create")
         self.assertIn("# Reporting candidates", dispatch_forum["message"]["content"])
-        self.assertIn("1.5", dispatch_forum["message"]["content"])
+        self.assertIn("### Methods", dispatch_forum["message"]["content"])
+        self.assertIn("Candidate ", dispatch_forum["message"]["content"])
+        self.assertNotIn("1.5", dispatch_forum["message"]["content"])
+        self.assertNotIn("Publication slots", dispatch_forum["message"]["content"])
+        self.assertNotIn("Proposed reporting assignments", dispatch_forum["message"]["content"])
         self.assertNotIn("Phase 3", dispatch_forum["message"]["content"])
         self.assertGreaterEqual(len(plan["reportingAssignments"]), 2)
 

@@ -757,6 +757,7 @@ def coverage_theme_run(
     skip_rotating_desk: bool = False,
     select_rotating_desk: bool | None = None,
     refresh_forum_kickoff: bool = False,
+    refresh_forum: bool = False,
     rotating_desk_steering_notes: str = "",
 ) -> dict[str, Any]:
     now = now or _now_iso()
@@ -788,8 +789,11 @@ def coverage_theme_run(
         selected_optional_desk_key=selected_optional_desk_key if include_optional_desks else "",
         include_optional_desks=include_optional_desks,
         refresh_forum_kickoff=refresh_forum_kickoff,
+        refresh_forum=refresh_forum,
     )
     records = list(plan["records"])
+    if apply and (refresh_forum or refresh_forum_kickoff):
+        _mark_forum_supersede_records_in_state(state, records)
     rotating_desk_step: dict[str, Any] | None = None
     cloud_client = None
     if select_rotating_desk is None:
@@ -1016,7 +1020,7 @@ def coverage_theme_run(
     }
     if apply:
         apply_records_list = list(output["records"])
-        if refresh_forum_kickoff and through == "plan":
+        if (refresh_forum_kickoff or refresh_forum) and through == "plan":
             apply_records_list = [
                 record
                 for record in apply_records_list
@@ -1486,6 +1490,7 @@ def build_coverage_theme_plan(
     selected_optional_desk_key: str = "",
     include_optional_desks: bool = False,
     refresh_forum_kickoff: bool = False,
+    refresh_forum: bool = False,
 ) -> dict[str, Any]:
     now = now or _now_iso()
     state = state or {}
@@ -1588,6 +1593,7 @@ def build_coverage_theme_plan(
         signal=signal,
         state=state,
         refresh_forum_kickoff=refresh_forum_kickoff,
+        refresh_forum=refresh_forum,
     )
     records.extend(forum_kickoff["records"])
     return {
@@ -1657,6 +1663,7 @@ def build_edition_forum_kickoff_records(
     state: dict[str, list[dict[str, Any]]] | None = None,
     steering_window_hours: int = DEFAULT_STEERING_WINDOW_HOURS,
     refresh_forum_kickoff: bool = False,
+    refresh_forum: bool = False,
 ) -> dict[str, Any]:
     edition_id = str(edition.get("id") or "")
     existing_threads = existing_threads or []
@@ -1668,7 +1675,9 @@ def build_edition_forum_kickoff_records(
             continue
         existing_messages_by_thread.setdefault(thread_id, []).append(message)
     records: list[dict[str, Any]] = []
-    if refresh_forum_kickoff:
+    if refresh_forum:
+        records.extend(_plan_forum_refresh_supersede_records(existing_messages_by_thread, now=now))
+    elif refresh_forum_kickoff:
         records.extend(_plan_forum_kickoff_supersede_records(existing_messages_by_thread, now=now))
 
     section_summary: list[dict[str, Any]] = []
@@ -1741,7 +1750,7 @@ def build_edition_forum_kickoff_records(
         replan_heading="Edition replan",
         existing_threads=existing_threads,
         existing_messages_by_thread=existing_messages_by_thread,
-        refresh_existing=refresh_forum_kickoff,
+        refresh_existing=refresh_forum or refresh_forum_kickoff,
         build_thread=lambda thread_id, _sequence_number: edition_forum_thread_record(
             edition_id=edition_id,
             run_id=run_id,
@@ -2834,14 +2843,9 @@ def _reporting_dispatch_forum_body(
         section_key = str(assignment.get("sectionKey") or "")
         assignments_by_section.setdefault(section_key, []).append(assignment)
     section_keys = sorted(set(slots_by_section) | set(assignments_by_section))
+    _ = section_budgets
     lines = [
         "# Reporting candidates",
-        "",
-        "Proposed reporting assignments for this edition. Each desk receives **1.5×** candidates",
-        "(`ceil(publication_slots × 1.5)`) so editors can select into fixed slots.",
-        "",
-        f"- Edition spine: {topic}",
-        f"- Coverage concept: `{coverage_key}`",
         "",
     ]
     if isinstance(concept_snapshot, dict) and concept_snapshot.get("rankedForDispatch"):
@@ -2853,14 +2857,9 @@ def _reporting_dispatch_forum_body(
     if not section_keys:
         lines.append("- No reporting assignments were materialized for this pass.")
     for section_key in section_keys:
-        slots = slots_by_section.get(section_key, [])
-        slot_count = max(1, int(section_budgets.get(section_key, len(slots) or DEFAULT_SECTION_BUDGETS.get(section_key, 1))))
-        dispatch_count = math.ceil(slot_count * 1.5)
         section_title = section_titles.get(section_key) or section_key
         lines.append("")
         lines.append(f"### {section_title} (`{section_key}`)")
-        lines.append(f"- Publication slots: {slot_count}")
-        lines.append(f"- Reporting candidates dispatched: {dispatch_count}")
         candidates = sorted(
             assignments_by_section.get(section_key, []),
             key=lambda row: (
@@ -3111,16 +3110,12 @@ def _section_forum_kickoff_body(
     coverage_key: str,
     steering_window_hours: int = DEFAULT_STEERING_WINDOW_HOURS,
 ) -> str:
+    _ = steering_window_hours, section.get("slots"), section.get("dispatchCount")
     return "\n".join([
-        f"# Section Planning Suggestions: {section['sectionTitle']}",
+        f"# {section['sectionTitle']}",
         "",
-        "These are **proposals** for this canonical desk, not locked decisions.",
-        "",
-        f"- Suggested shared edition theme: {topic}",
-        f"- Proposed coverage concept: {coverage_key}",
-        f"- Suggested slot target: {section['slots']}",
-        f"- Suggested reporting dispatch target: {section['dispatchCount']} (1.5x overassignment) once this desk is confirmed.",
-        f"- Steering window: {steering_window_hours}h (working default if no blocking input).",
+        f"Edition theme: **{topic}**",
+        f"Coverage: `{coverage_key}`",
     ]).strip() + "\n"
 
 
@@ -3377,6 +3372,72 @@ def _plan_forum_kickoff_supersede_records(
             )
             records.append(_record("Message", update_payload, action="update"))
     return records
+
+
+def _edition_forum_planning_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """All automated edition-forum planning posts (theme, optional desk, reporting)."""
+    result: list[dict[str, Any]] = []
+    for message in _active_forum_thread_messages(messages):
+        phase = _message_planning_phase(message)
+        if phase in {
+            "edition_theme_kickoff",
+            "theme_proposal",
+            "rotating_desk_selection",
+            "reporting_dispatch",
+        }:
+            result.append(message)
+            continue
+        summary = str(message.get("summary") or "").lower()
+        content = str(message.get("content") or "")
+        if "edition theme (phase 1)" in summary:
+            result.append(message)
+            continue
+        if content.startswith("# ") and "## Why this edition" in content:
+            result.append(message)
+            continue
+        if (
+            summary.startswith("optional desk:")
+            or "optional desk (phase 2)" in summary
+            or "optional desk suggestion" in summary
+        ):
+            result.append(message)
+            continue
+        if content.startswith("# reporting candidates") or summary.startswith("reporting candidates:"):
+            result.append(message)
+    return result
+
+
+def _plan_forum_refresh_supersede_records(
+    existing_messages_by_thread: dict[str, list[dict[str, Any]]],
+    *,
+    now: str,
+) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for messages in existing_messages_by_thread.values():
+        for message in _edition_forum_planning_messages(messages):
+            update_payload = _prepare_input(
+                "Message",
+                {**message, "status": "deleted", "updatedAt": now},
+            )
+            records.append(_record("Message", update_payload, action="update"))
+    return records
+
+
+def _mark_forum_supersede_records_in_state(
+    state: dict[str, list[dict[str, Any]]],
+    records: list[dict[str, Any]],
+) -> None:
+    updates = {
+        str(record.get("input", {}).get("id") or ""): record.get("input") or {}
+        for record in records
+        if record.get("modelName") == "Message" and record.get("action") == "update"
+    }
+    if not updates:
+        return
+    for message in state.get("messages") or []:
+        message_id = str(message.get("id") or "")
+        if message_id in updates:
+            message.update(updates[message_id])
 
 
 def fallback_rotating_section_selection(
@@ -6316,21 +6377,29 @@ def _download_attachment_json(attachment_id: str) -> dict[str, Any]:
 
 def _graphql(query: str, variables: dict[str, Any]) -> dict[str, Any]:
     endpoint = os.environ.get("PAPYRUS_GRAPHQL_ENDPOINT", "").strip()
-    token = os.environ.get("PAPYRUS_GRAPHQL_JWT", "").strip() or os.environ.get("PAPYRUS_KNOWLEDGE_QUERY_JWT", "").strip()
     if not endpoint:
         raise RuntimeError("PAPYRUS_GRAPHQL_ENDPOINT is required")
-    if not token:
-        raise RuntimeError("PAPYRUS_GRAPHQL_JWT is required")
-    auth_prefix = os.environ.get("PAPYRUS_GRAPHQL_AUTH_PREFIX", "PapyrusJwt").strip()
-    sanitized_token = re.sub(r"^Bearer\s+", "", token, flags=re.IGNORECASE)
-    auth_header = f"{auth_prefix} {sanitized_token}" if auth_prefix else sanitized_token
-    request = urllib.request.Request(
-        endpoint,
-        data=json.dumps({"query": query, "variables": variables}).encode("utf-8"),
-        headers={
+    body = json.dumps({"query": query, "variables": variables}).encode("utf-8")
+    use_iam = os.environ.get("PAPYRUS_GRAPHQL_USE_IAM", "").strip().lower() in {"1", "true", "yes"}
+    token = os.environ.get("PAPYRUS_GRAPHQL_JWT", "").strip() or os.environ.get("PAPYRUS_KNOWLEDGE_QUERY_JWT", "").strip()
+    if use_iam or not token:
+        from papyrus_newsroom.newsroom import _iam_signed_graphql_headers
+
+        headers = _iam_signed_graphql_headers(endpoint, body)
+    else:
+        auth_prefix = os.environ.get("PAPYRUS_GRAPHQL_AUTH_PREFIX", "PapyrusJwt").strip()
+        sanitized_token = re.sub(r"^Bearer\s+", "", token, flags=re.IGNORECASE)
+        auth_header = f"{auth_prefix} {sanitized_token}" if auth_prefix else sanitized_token
+        headers = {
             "Content-Type": "application/json",
             "Authorization": auth_header,
-        },
+            "x-amz-appsync-authtype": os.environ.get("PAPYRUS_GRAPHQL_AUTH_TYPE", "AWS_LAMBDA").strip()
+            or "AWS_LAMBDA",
+        }
+    request = urllib.request.Request(
+        endpoint,
+        data=body,
+        headers=headers,
         method="POST",
     )
     try:

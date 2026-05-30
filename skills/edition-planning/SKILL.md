@@ -344,8 +344,10 @@ After a full planning kickoff, the canonical `edition_forum` thread should have
 | 2 | Optional desk | `Optional desk: {desk}` | `--through rotating-desk` |
 | 3 | Reporting dispatch | `Reporting candidates: {spine}` | End of `rotating-desk` apply, or end of `plan` when no optional desk is pending |
 
-Phase 3 lists reporting assignment candidates per desk with the default
-`ceil(slots * 1.5)` overassignment. Do not post phase 3 until phase 2 confirms
+Phase 3 message bodies list reporting assignment candidates per desk only (no
+process copy about slot math or overassignment in the forum post). The pipeline
+still uses `ceil(slots * 1.5)` overassignment when materializing assignments.
+Do not post phase 3 until phase 2 confirms
 the optional desk when `culture`/Arts-style provisional desks are in the plan.
 
 Typical new edition (e.g. `--sections culture,methods`):
@@ -359,6 +361,7 @@ poetry run papyrus assignments run-story-cycle ... --through rotating-desk --all
 Phase-specific flags:
 
 - `--through plan --refresh-forum-kickoff` replaces phase-1 theme posts only.
+- `--through plan --refresh-forum` soft-deletes all three planning forum posts, then re-posts message 1; run `--through rotating-desk` next for messages 2–3.
 - `--through rotating-desk` runs phase-2 optional desk selection and posts message 2; posts message 3 when apply is on.
 - `--selected-optional-desk arts` skips the selector agent and uses a human desk choice.
 - `--skip-rotating-desk` leaves optional desks pending (no phase-2/3 optional dispatch).
