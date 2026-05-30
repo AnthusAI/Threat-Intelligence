@@ -44,6 +44,8 @@ REPORTING_ANGLE_LENSES = [
     {"key": "evidence-check", "label": "evidence check", "prompt": "what is confirmed, contested, or still needs verification"},
 ]
 THROUGH_PHASES = {"plan", "rotating_desk", "research", "reporting"}
+PLANNING_KNOWLEDGE_STATE_MODELS = ["Reference", "SemanticNode"]
+DEFAULT_TREND_WINDOW_DAYS = 30
 ROTATING_DESK_PROCEDURE_ALIAS = "edition-plan.rotating-desk"
 STOPWORDS = {
     "about", "after", "against", "also", "among", "because", "before", "being", "between", "could", "from",
@@ -755,7 +757,15 @@ def coverage_theme_run(
 ) -> dict[str, Any]:
     now = now or _now_iso()
     through = normalize_through(through)
-    state_models = ["NewsroomSection", "Category", "CategorySet", "MessageThread", "Message", "Edition"]
+    state_models = [
+        *PLANNING_KNOWLEDGE_STATE_MODELS,
+        "NewsroomSection",
+        "Category",
+        "CategorySet",
+        "MessageThread",
+        "Message",
+        "Edition",
+    ]
     if apply:
         state_models.extend(["Assignment", "EditionSlot"])
     state = load_live_state(models=state_models) if apply else {}
@@ -1679,6 +1689,7 @@ def build_edition_forum_kickoff_records(
         category_key=category_key,
         sections=section_keys,
         state=state or {},
+        now=now,
     )
     recent_edition_themes = collect_recent_edition_themes(
         existing_editions or [],
@@ -1961,6 +1972,7 @@ def _editorial_title_hook(
         "targets coverage",
         "proposed edition spine",
         "references in-window are thin",
+        "no accepted references were found",
     )
     if why_now and not any(fragment in lowered for fragment in blocked):
         stripped = re.sub(r"[*`_]", "", why_now).strip()
@@ -2020,6 +2032,173 @@ def derive_edition_forum_thread_title(
     return f"{shortened}…" if shortened else f"{headline[:77]}…"
 
 
+def summarize_knowledge_base_for_planning(
+    *,
+    references: list[dict[str, Any]],
+    semantic_nodes: list[dict[str, Any]],
+    corpus_key: str,
+    topic: str,
+    category_key: str = "",
+    sections: list[str] | None = None,
+    since_days: int = DEFAULT_TREND_WINDOW_DAYS,
+    now: str = "",
+) -> dict[str, Any]:
+    now_dt = _parse_datetime(now) or dt.datetime.now(dt.UTC)
+    cutoff = now_dt - dt.timedelta(days=since_days) if since_days > 0 else None
+    accepted = _accepted_references(references, corpus_key)
+    recent_accepted: list[dict[str, Any]] = []
+    for ref in accepted:
+        ref_dt = _reference_datetime(ref)
+        if cutoff and ref_dt and ref_dt < cutoff:
+            continue
+        recent_accepted.append(ref)
+    topic_terms = _terms(topic)
+    topic_matched: list[dict[str, Any]] = []
+    for ref in recent_accepted:
+        haystack = " ".join([str(ref.get("title") or ""), str(ref.get("sourceUri") or "")]).lower()
+        if not topic_terms or any(term in haystack for term in topic_terms):
+            topic_matched.append(ref)
+    domains = sorted({
+        _domain(ref.get("sourceUri"))
+        for ref in topic_matched
+        if _domain(ref.get("sourceUri"))
+    })
+    sample_titles = [
+        str(ref.get("title") or "").strip()
+        for ref in sorted(
+            topic_matched,
+            key=lambda row: _reference_datetime(row) or now_dt,
+            reverse=True,
+        )[:5]
+        if str(ref.get("title") or "").strip()
+    ]
+    alternate_topics: list[dict[str, Any]] = []
+    if accepted:
+        ranked = build_trend_signals(
+            references=references,
+            semantic_nodes=semantic_nodes,
+            corpus_key=corpus_key,
+            category_key=category_key,
+            topic="",
+            coverage_key="",
+            sections=sections or [],
+            since_days=since_days,
+            limit=6,
+            now=now,
+        )
+        for entry in ranked:
+            label = str(entry.get("topic") or "").strip()
+            if not label or label.lower() == str(topic or "").strip().lower():
+                continue
+            alternate_topics.append({
+                "topic": label,
+                "score": entry.get("score"),
+                "acceptedEvidenceCount": entry.get("acceptedEvidenceCount"),
+            })
+            if len(alternate_topics) >= 4:
+                break
+    return {
+        "corpusKey": corpus_key,
+        "totalReferencesLoaded": len(references),
+        "acceptedCorpusCount": len(accepted),
+        "recentAcceptedInWindow": len(recent_accepted),
+        "topicMatchedInWindow": len(topic_matched),
+        "windowDays": since_days,
+        "sourceDomains": domains[:6],
+        "sampleTitles": sample_titles,
+        "alternateTrendTopics": alternate_topics,
+    }
+
+
+def _why_now_from_knowledge_base_snapshot(
+    *,
+    topic: str,
+    corpus_key: str,
+    snapshot: dict[str, Any],
+) -> str:
+    accepted = int(snapshot.get("acceptedCorpusCount") or 0)
+    recent = int(snapshot.get("recentAcceptedInWindow") or 0)
+    matched = int(snapshot.get("topicMatchedInWindow") or 0)
+    window_days = int(snapshot.get("windowDays") or DEFAULT_TREND_WINDOW_DAYS)
+    if accepted <= 0:
+        loaded = int(snapshot.get("totalReferencesLoaded") or 0)
+        return (
+            f"No **accepted** references were found for corpus `{corpus_key}` "
+            f"(loaded {loaded} reference record(s) from the knowledge base)."
+        )
+    if matched > 0:
+        domains = ", ".join(list(snapshot.get("sourceDomains") or [])[:3]) or "mixed domains"
+        return (
+            f"**{topic}** matches {matched} accepted reference(s) in the last {window_days} days "
+            f"out of {accepted} accepted in `{corpus_key}` ({recent} recent in-window overall); "
+            f"domains include {domains}."
+        )
+    return (
+        f"The `{corpus_key}` corpus has **{accepted}** accepted references ({recent} with activity in the "
+        f"last {window_days} days), but **{matched}** clearly mention **{topic}** in that window — "
+        f"the spine is editorially proposed; validate against primary sources before filing."
+    )
+
+
+def _coverage_gaps_from_knowledge_base_snapshot(
+    *,
+    topic: str,
+    snapshot: dict[str, Any],
+) -> list[str]:
+    accepted = int(snapshot.get("acceptedCorpusCount") or 0)
+    matched = int(snapshot.get("topicMatchedInWindow") or 0)
+    if accepted <= 0:
+        return [f"No accepted references are indexed for this corpus yet."]
+    if matched <= 0:
+        return [
+            f"The knowledge base is active ({accepted} accepted references), but **{topic}** "
+            f"has no strong in-window keyword matches — confirm the spine against desk sources.",
+        ]
+    return _coverage_gaps(topic, [])
+
+
+def _format_knowledge_base_kickoff_section(snapshot: dict[str, Any]) -> list[str]:
+    if not snapshot:
+        return []
+    lines = [
+        "",
+        "## Knowledge base",
+        (
+            f"- Corpus `{snapshot.get('corpusKey') or 'unknown'}`: "
+            f"**{int(snapshot.get('acceptedCorpusCount') or 0):,}** accepted references "
+            f"({int(snapshot.get('recentAcceptedInWindow') or 0):,} with dates in the last "
+            f"{int(snapshot.get('windowDays') or DEFAULT_TREND_WINDOW_DAYS)} days)."
+        ),
+        (
+            f"- Topic match for this spine: **{int(snapshot.get('topicMatchedInWindow') or 0):,}** "
+            f"accepted reference(s) in-window."
+        ),
+    ]
+    loaded = int(snapshot.get("totalReferencesLoaded") or 0)
+    accepted = int(snapshot.get("acceptedCorpusCount") or 0)
+    if loaded > accepted:
+        lines.append(f"- Loaded **{loaded:,}** reference record(s) from GraphQL; **{accepted:,}** pass accepted + corpus filters.")
+    domains = list(snapshot.get("sourceDomains") or [])
+    if domains:
+        lines.append(f"- Matching source domains: {', '.join(domains)}.")
+    sample_titles = list(snapshot.get("sampleTitles") or [])
+    if sample_titles:
+        lines.append("- Recent matching headlines:")
+        for title in sample_titles:
+            lines.append(f"  - {title}")
+    alternates = list(snapshot.get("alternateTrendTopics") or [])
+    if alternates:
+        lines.append("- Other trending clusters in-window:")
+        for entry in alternates:
+            if not isinstance(entry, dict):
+                continue
+            label = entry.get("topic")
+            count = entry.get("acceptedEvidenceCount")
+            score = entry.get("score")
+            lines.append(f"  - {label} ({count} refs, score {score})")
+    return lines
+
+
 def resolve_edition_theme_signal(
     *,
     signal: dict[str, Any] | None,
@@ -2029,11 +2208,21 @@ def resolve_edition_theme_signal(
     category_key: str,
     sections: list[str],
     state: dict[str, list[dict[str, Any]]],
+    now: str = "",
 ) -> dict[str, Any]:
     if signal:
         return signal
     references = state.get("references") or []
     semantic_nodes = state.get("semanticNodes") or []
+    kb_snapshot = summarize_knowledge_base_for_planning(
+        references=references,
+        semantic_nodes=semantic_nodes,
+        corpus_key=corpus_key,
+        topic=topic,
+        category_key=category_key,
+        sections=sections,
+        now=now,
+    )
     if references and corpus_key:
         ranked = build_trend_signals(
             references=references,
@@ -2043,9 +2232,12 @@ def resolve_edition_theme_signal(
             topic=topic,
             coverage_key=coverage_key,
             sections=sections,
+            now=now,
         )
         if ranked:
-            return ranked[0]
+            resolved = dict(ranked[0])
+            resolved["knowledgeBaseSnapshot"] = kb_snapshot
+            return resolved
     return {
         "signalId": f"signal-{_hash_short([corpus_key, topic, coverage_key])}",
         "rank": 1,
@@ -2054,20 +2246,20 @@ def resolve_edition_theme_signal(
         "categoryKey": category_key,
         "score": 0.0,
         "scoreBreakdown": {},
-        "whyNow": (
-            f"**{topic}** is the proposed edition spine; accepted references in-window are thin, "
-            f"so desk seeds below should be validated against primary sources before filing."
+        "whyNow": _why_now_from_knowledge_base_snapshot(
+            topic=topic,
+            corpus_key=corpus_key,
+            snapshot=kb_snapshot,
         ),
         "sourceReferenceIds": [],
-        "acceptedEvidenceCount": 0,
-        "sourceDomains": [],
+        "acceptedEvidenceCount": int(kb_snapshot.get("topicMatchedInWindow") or 0),
+        "sourceDomains": list(kb_snapshot.get("sourceDomains") or []),
         "sectionFit": {},
         "proposedSections": sections,
-        "coverageGaps": [
-            f"Limited accepted references in-window for **{topic}**; prioritize primary sources before filing.",
-        ],
-        "openQuestions": [],
+        "coverageGaps": _coverage_gaps_from_knowledge_base_snapshot(topic=topic, snapshot=kb_snapshot),
+        "openQuestions": _open_questions(topic, sections),
         "suggestedAngles": _suggested_angles(topic, sections),
+        "knowledgeBaseSnapshot": kb_snapshot,
     }
 
 
@@ -2138,6 +2330,9 @@ def build_edition_theme_kickoff_draft(
     ]
     if edition_date:
         lines.append(f"Edition date: {edition_date}.")
+    kb_snapshot = signal.get("knowledgeBaseSnapshot")
+    if isinstance(kb_snapshot, dict):
+        lines.extend(_format_knowledge_base_kickoff_section(kb_snapshot))
     if score_breakdown:
         lines.append("")
         lines.append("Signal mix (from trend report):")

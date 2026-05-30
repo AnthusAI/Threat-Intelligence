@@ -3826,6 +3826,46 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertEqual(section["slots"][0]["candidateCount"], 1)
         self.assertTrue(section["reportingCandidates"][0]["packetAvailable"])
 
+    def test_resolve_edition_theme_signal_uses_knowledge_base_references(self):
+        now = "2026-06-01T12:00:00Z"
+        references = [
+            {
+                "id": f"reference-ai-games-{index}",
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "curationStatus": "accepted",
+                "versionState": "current",
+                "title": f"Generative agents for game worlds {index}",
+                "sourceUri": "https://arxiv.org/abs/2605.12345",
+                "sourcePublishedAt": "2026-05-20T00:00:00Z",
+            }
+            for index in range(12)
+        ] + [
+            {
+                "id": "reference-unrelated-1",
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "curationStatus": "accepted",
+                "versionState": "current",
+                "title": "Unrelated protein folding benchmark",
+                "sourceUri": "https://example.org/paper",
+                "sourcePublishedAt": "2026-05-21T00:00:00Z",
+            },
+        ]
+        signal = papyrus_coverage_theme.resolve_edition_theme_signal(
+            signal=None,
+            topic="AI in video games",
+            coverage_key="coverage.ai-in-video-games",
+            corpus_key="AI-ML-research",
+            category_key="AI-ML-research",
+            sections=["methods", "arts"],
+            state={"references": references, "semanticNodes": []},
+            now=now,
+        )
+        snapshot = signal.get("knowledgeBaseSnapshot") or {}
+        self.assertGreaterEqual(snapshot.get("acceptedCorpusCount"), 13)
+        self.assertGreater(signal.get("acceptedEvidenceCount"), 0)
+        self.assertNotIn("thin", str(signal.get("whyNow") or "").lower())
+        self.assertIn("accepted reference", str(signal.get("whyNow") or "").lower())
+
     def test_coverage_theme_plan_creates_forum_kickoff_threads_and_messages(self):
         plan = papyrus_coverage_theme.build_coverage_theme_plan(
             date="2026-06-05",
@@ -3868,6 +3908,7 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertNotEqual(thread_title, "Edition Forum")
         self.assertIn("AI in video games", thread_title)
         self.assertIn("## Why this edition", body)
+        self.assertNotIn("in-window are thin", body)
         self.assertIn("## Desk-shaped story seeds", body)
         self.assertNotIn("How To Steer", body)
         self.assertNotIn("Phase 1", body)
