@@ -51,6 +51,19 @@ def refresh_jwt(flags: list[str]) -> None:
     print(token)
 
 
+def _read_ssm_secret(parameter_name: str) -> str:
+    command = ["aws", "ssm", "get-parameter", "--name", parameter_name, "--with-decryption", "--output", "json"]
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        stderr = (result.stderr or "").strip()
+        raise RuntimeError(f"Failed to read JWT secret from SSM parameter {parameter_name}: {stderr}")
+    payload = json.loads(result.stdout or "{}")
+    secret = normalize_string(((payload.get("Parameter") or {}).get("Value")))
+    if not secret:
+        raise RuntimeError(f"SSM parameter {parameter_name} returned no value.")
+    return secret
+
+
 def _resolve_secret(options: dict[str, Any]) -> str:
     explicit = normalize_string(options.get("secret"))
     if explicit:
@@ -60,25 +73,16 @@ def _resolve_secret(options: dict[str, Any]) -> str:
         value = normalize_string(os.environ.get(secret_env))
         if value:
             return value
+    ssm_param = normalize_string(options.get("ssm-param")) or normalize_string(
+        os.environ.get("PAPYRUS_JWT_SECRET_SSM_PARAM")
+    )
+    if ssm_param:
+        return _read_ssm_secret(ssm_param)
     for env_name in ("PAPYRUS_SANDBOX_JWT_SECRET", "PAPYRUS_JWT_SECRET"):
         value = normalize_string(os.environ.get(env_name))
         if value:
             return value
-    ssm_param = (
-        normalize_string(options.get("ssm-param"))
-        or normalize_string(os.environ.get("PAPYRUS_JWT_SECRET_SSM_PARAM"))
-        or "/amplify/shared/PAPYRUS_JWT_SECRET"
-    )
-    command = ["aws", "ssm", "get-parameter", "--name", ssm_param, "--with-decryption", "--output", "json"]
-    result = subprocess.run(command, capture_output=True, text=True, check=False)
-    if result.returncode != 0:
-        stderr = (result.stderr or "").strip()
-        raise RuntimeError(f"Failed to read JWT secret from SSM parameter {ssm_param}: {stderr}")
-    payload = json.loads(result.stdout or "{}")
-    secret = normalize_string(((payload.get("Parameter") or {}).get("Value")))
-    if not secret:
-        raise RuntimeError(f"SSM parameter {ssm_param} returned no value.")
-    return secret
+    return _read_ssm_secret("/amplify/shared/PAPYRUS_JWT_SECRET")
 
 
 def _mint_jwt(
