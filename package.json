@@ -13,7 +13,7 @@
     "content:register-catalog-bulk": "poetry run papyrus batch register-catalog",
     "content:enrich-references-bulk": "poetry run papyrus batch enrich-references",
     "lint": "eslint .",
-    "test:newsroom": "node scripts/test-newsroom-session.cjs",
+    "test:newsroom": "node scripts/test-newsroom-session.cjs && node scripts/test-newsroom-forum-routes.cjs",
     "test:newsroom-card-layout": "node scripts/test-newsroom-card-layout.cjs",
     "typecheck": "tsc --noEmit",
     "sandbox": "ampx sandbox",

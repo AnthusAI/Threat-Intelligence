@@ -142,6 +142,14 @@ import {
   type ReportingStoryBudgetSlot,
   type ReportingStoryBudgetSection,
 } from "../lib/reporting-story-budget";
+import {
+  buildForumThreadUrl,
+  getForumMessageAnchorId,
+  isForumThreadId,
+  parseForumMessageAnchorFromHash,
+  pushForumThreadUrl,
+  readCurrentForumRoute,
+} from "../lib/newsroom-forum-routes";
 
 gsap.registerPlugin(Flip);
 
@@ -356,6 +364,7 @@ export type NewsDeskSelection = {
   searchMaxTokens?: string | null;
   searchFrom?: string | null;
   assignmentView?: string | null;
+  forumThread?: string | null;
 };
 
 type CategoryReviewResponse = {
@@ -3092,6 +3101,8 @@ function NewsDeskDashboard({
           <OverviewDeskView
             assignments={assignments}
             dashboard={dashboard}
+            initialForumThreadId={initialSelection.forumThread}
+            isDemo={Boolean(dashboard.isDemo)}
             newsroomSections={newsroomSections}
           />
         ) : null}
@@ -3198,6 +3209,7 @@ function NewsDeskDashboard({
           <MessagesDeskView
             assignments={assignments}
             graph={graph}
+            initialForumThreadId={initialSelection.forumThread}
             initialMessageId={initialSelection.message}
             isDemo={Boolean(dashboard.isDemo)}
             messages={messages}
@@ -3272,13 +3284,18 @@ function NewsDeskDashboard({
 function OverviewDeskView({
   assignments,
   dashboard,
+  initialForumThreadId = null,
+  isDemo: isDemoProp = false,
   newsroomSections,
 }: {
   assignments: AssignmentRecord[];
   dashboard: CategorySteeringDashboard;
+  initialForumThreadId?: string | null;
+  isDemo?: boolean;
   newsroomSections: NewsroomSectionRecord[];
 }) {
-  const isDemo = Boolean(dashboard.isDemo);
+  const isDemo = Boolean(dashboard.isDemo || isDemoProp);
+  const forumMessageAnchorId = useForumMessageAnchorId();
   const [overviewEditionInputs, setOverviewEditionInputs] = useState<{
     editions: EditionRecord[];
     editionSlots: EditionSlotRecord[];
@@ -3434,9 +3451,44 @@ function OverviewDeskView({
   }, [threads, viewFilter]);
   const selectedThread = filteredThreads.find((thread) => thread.id === selectedThreadId) ?? null;
 
-  const openThread = useCallback((threadId: string) => {
+  const openThread = useCallback((threadId: string, options?: { messageId?: string | null; replace?: boolean }) => {
     setSelectedThreadId(threadId);
     setForumView({ mode: "thread", threadId });
+    pushForumThreadUrl(threadId, {
+      demo: isDemo,
+      messageId: options?.messageId,
+      replace: options?.replace,
+    });
+  }, [isDemo]);
+
+  const closeThread = useCallback(() => {
+    setSelectedThreadId("");
+    setForumView({ mode: "index" });
+    pushForumThreadUrl(null, { demo: isDemo, replace: true });
+  }, [isDemo]);
+
+  useEffect(() => {
+    const threadId = initialForumThreadId ?? readCurrentForumRoute().threadId;
+    if (!threadId || threadsLoading) return;
+    if (!threads.some((thread) => thread.id === threadId)) return;
+    if (selectedThreadId === threadId && forumView.mode === "thread") return;
+    setSelectedThreadId(threadId);
+    setForumView({ mode: "thread", threadId });
+  }, [forumView.mode, initialForumThreadId, selectedThreadId, threads, threadsLoading]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const route = readCurrentForumRoute();
+      if (route.threadId) {
+        setSelectedThreadId(route.threadId);
+        setForumView({ mode: "thread", threadId: route.threadId });
+        return;
+      }
+      setSelectedThreadId("");
+      setForumView({ mode: "index" });
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
   const submitNewThread = useCallback(async () => {
@@ -3484,15 +3536,14 @@ function OverviewDeskView({
         authorLabel: "human-editor",
       });
       await refreshThreads();
-      setSelectedThreadId(threadId);
-      setForumView({ mode: "thread", threadId });
+      openThread(threadId, { replace: true });
       setNewThreadDraft(createDefaultForumNewThreadDraft(selectedSectionId || availableSections[0]?.id || ""));
       setNewThreadOpen(false);
       setNewThreadError(null);
     } catch (error) {
       setNewThreadError(error instanceof Error ? error.message : "Could not create thread.");
     }
-  }, [availableSections, newThreadDraft, refreshThreads, selectedEditionId, selectedSectionId]);
+  }, [availableSections, newThreadDraft, openThread, refreshThreads, selectedEditionId, selectedSectionId]);
 
   const postThreadMessage = useCallback(async () => {
     if (!selectedThread) return;
@@ -3640,9 +3691,17 @@ function OverviewDeskView({
               composeSummary={composeSummary}
               composeContent={composeContent}
               composeError={composeError}
-              onBack={() => setForumView({ mode: "index" })}
-              onReplyTarget={setReplyParentId}
-              onClearReplyTarget={() => setReplyParentId("")}
+              focusMessageId={forumMessageAnchorId}
+              isDemo={isDemo}
+              onBack={closeThread}
+              onReplyTarget={(messageId) => {
+                setReplyParentId(messageId);
+                pushForumThreadUrl(selectedThread.id, { demo: isDemo, messageId, replace: true });
+              }}
+              onClearReplyTarget={() => {
+                setReplyParentId("");
+                pushForumThreadUrl(selectedThread.id, { demo: isDemo, replace: true });
+              }}
               onSummaryChange={setComposeSummary}
               onContentChange={setComposeContent}
               onSubmit={() => void postThreadMessage()}
@@ -3656,7 +3715,7 @@ function OverviewDeskView({
             <section className="category-steering-section">
               <SectionHeader title="Thread Unavailable" detail="Forum" />
               <EmptyRow label="That thread is not available under the current filters. Return to Threads and adjust filters." />
-              <button type="button" onClick={() => setForumView({ mode: "index" })}>Back to Threads</button>
+              <button type="button" onClick={closeThread}>Back to Threads</button>
             </section>
           ) : (
             <section className="category-steering-section">
@@ -7193,21 +7252,26 @@ function NewsroomDeskSectionLede({
 function MessagesDeskView({
   assignments,
   graph,
+  initialForumThreadId = null,
   initialMessageId,
-  isDemo,
+  isDemo = false,
   messages,
   newsroomSections,
   summary,
 }: {
   assignments: AssignmentRecord[];
   graph: SemanticGraph;
+  initialForumThreadId?: string | null;
   initialMessageId?: string | null;
   isDemo?: boolean;
   messages: MessageRecord[];
   newsroomSections: NewsroomSectionRecord[];
   summary?: NewsroomSummaryRecord | null;
 }) {
-  const [kindFilter, setKindFilter] = useState("");
+  const resolvedInitialForumThreadId = initialForumThreadId
+    ?? (isForumThreadId(initialMessageId) ? initialMessageId : null);
+  const forumMessageAnchorId = useForumMessageAnchorId();
+  const [kindFilter, setKindFilter] = useState(resolvedInitialForumThreadId ? "__forum" : "");
   const [domainFilter, setDomainFilter] = useState("");
   const [selectedMessageId, setSelectedMessageId] = useState(initialMessageId ?? "");
   const [isMessageDetailOpen, setIsMessageDetailOpen] = useState(Boolean(initialMessageId));
@@ -7352,11 +7416,36 @@ function MessagesDeskView({
   }, [isDemo, isForumMode, refreshForumThreads]);
   useEffect(() => {
     if (!isForumMode) return;
-    if (!initialMessageId) return;
-    if (selectedForumThreadId) return;
-    setSelectedForumThreadId(initialMessageId);
-    setForumView({ mode: "thread", threadId: initialMessageId });
-  }, [initialMessageId, isForumMode, selectedForumThreadId]);
+    const threadId = resolvedInitialForumThreadId ?? readCurrentForumRoute().threadId;
+    if (!threadId || forumThreadsLoading) return;
+    if (!forumThreads.some((thread) => thread.id === threadId)) return;
+    if (selectedForumThreadId === threadId && forumView.mode === "thread") return;
+    setSelectedForumThreadId(threadId);
+    setForumView({ mode: "thread", threadId });
+  }, [
+    forumThreads,
+    forumThreadsLoading,
+    forumView.mode,
+    isForumMode,
+    resolvedInitialForumThreadId,
+    selectedForumThreadId,
+  ]);
+
+  useEffect(() => {
+    if (!isForumMode) return;
+    const handlePopState = () => {
+      const route = readCurrentForumRoute();
+      if (route.threadId) {
+        setSelectedForumThreadId(route.threadId);
+        setForumView({ mode: "thread", threadId: route.threadId });
+        return;
+      }
+      setSelectedForumThreadId("");
+      setForumView({ mode: "index" });
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [isForumMode]);
   const feedMessages = isDemo ? messages : feed.items;
   const messageKindCounts = summary?.facets?.messages?.byKind ?? summary?.messageKindCounts ?? countMessagesBy(messages, "messageKind");
   const messageDomainCounts = summary?.facets?.messages?.byDomain ?? summary?.messageDomainCounts ?? countMessagesBy(messages, "messageDomain");
@@ -7426,11 +7515,21 @@ function MessagesDeskView({
     setIsMessageDetailOpen(true);
     pushNewsroomDetailUrl("messages", id, isDemo);
   };
-  const openForumThread = (threadId: string) => {
+  const openForumThread = (threadId: string, options?: { messageId?: string | null; replace?: boolean }) => {
     setSelectedForumThreadId(threadId);
     setForumView({ mode: "thread", threadId });
     setIsMessageDetailOpen(true);
-    pushNewsroomDetailUrl("messages", threadId, isDemo);
+    pushForumThreadUrl(threadId, {
+      demo: isDemo,
+      messageId: options?.messageId,
+      replace: options?.replace,
+    });
+  };
+
+  const closeForumThread = () => {
+    setSelectedForumThreadId("");
+    setForumView({ mode: "index" });
+    pushForumThreadUrl(null, { demo: isDemo, replace: true });
   };
   const submitNewForumThread = async () => {
     if (!selectedForumEditionId) return;
@@ -7480,7 +7579,7 @@ function MessagesDeskView({
       setNewForumThreadDraft(createDefaultForumNewThreadDraft(selectedForumSectionId || availableSections[0]?.id || ""));
       setNewForumThreadError(null);
       setNewForumThreadOpen(false);
-      openForumThread(threadId);
+      openForumThread(threadId, { replace: true });
     } catch (error) {
       setNewForumThreadError(error instanceof Error ? error.message : "Could not create thread.");
     }
@@ -7642,7 +7741,7 @@ function MessagesDeskView({
         )}
         onCloseDetail={() => {
           if (isForumMode) {
-            setForumView({ mode: "index" });
+            closeForumThread();
             return;
           }
           setIsMessageDetailOpen(false);
@@ -7656,13 +7755,21 @@ function MessagesDeskView({
               composeSummary={forumComposeSummary}
               composeContent={forumComposeContent}
               composeError={forumComposeError}
-              onBack={() => setForumView({ mode: "index" })}
-              onReplyTarget={setForumReplyParentId}
+              focusMessageId={forumMessageAnchorId}
+              isDemo={isDemo}
+              onBack={closeForumThread}
+              onReplyTarget={(messageId) => {
+                setForumReplyParentId(messageId);
+                pushForumThreadUrl(selectedForumThread.id, { demo: isDemo, messageId, replace: true });
+              }}
               onDeleteMessage={(messageId) => {
                 if (!selectedForumThread || deletingForumMessageId === messageId) return;
                 void deleteForumMessage(selectedForumThread.id, messageId);
               }}
-              onClearReplyTarget={() => setForumReplyParentId("")}
+              onClearReplyTarget={() => {
+                setForumReplyParentId("");
+                pushForumThreadUrl(selectedForumThread.id, { demo: isDemo, replace: true });
+              }}
               onSummaryChange={setForumComposeSummary}
               onContentChange={setForumComposeContent}
               onSubmit={() => void submitForumMessage()}
@@ -7672,7 +7779,7 @@ function MessagesDeskView({
             <section className="category-steering-section">
               <SectionHeader title="Thread Unavailable" detail="Forum" />
               <EmptyRow label="That thread is not available under the current filters. Return to Threads and adjust filters." />
-              <button type="button" onClick={() => setForumView({ mode: "index" })}>Back to Threads</button>
+              <button type="button" onClick={closeForumThread}>Back to Threads</button>
             </section>
           ) : <SemanticDetailPanel graph={graph} selected={selectedEntity} knowledgeQuery={forumKnowledgeQuery} />)
         ) : (selectedMessage
@@ -7682,6 +7789,18 @@ function MessagesDeskView({
       {isForumMode ? forumKnowledgeQuery.dialog : messageKnowledgeQuery.dialog}
     </>
   );
+}
+
+function useForumMessageAnchorId(): string | null {
+  const [messageId, setMessageId] = useState<string | null>(null);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const sync = () => setMessageId(parseForumMessageAnchorFromHash(window.location.hash));
+    sync();
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, []);
+  return messageId;
 }
 
 type ForumViewState = { mode: "index" } | { mode: "thread"; threadId: string };
@@ -7857,6 +7976,8 @@ function ForumThreadView({
   composeContent,
   composeError,
   deletingMessageId,
+  focusMessageId = null,
+  isDemo = false,
   onBack,
   onReplyTarget,
   onDeleteMessage,
@@ -7872,6 +7993,8 @@ function ForumThreadView({
   composeContent: string;
   composeError?: string | null;
   deletingMessageId?: string;
+  focusMessageId?: string | null;
+  isDemo?: boolean;
   onBack: () => void;
   onReplyTarget: (messageId: string) => void;
   onDeleteMessage: (messageId: string) => void;
@@ -7884,6 +8007,27 @@ function ForumThreadView({
     (left, right) => Number(left.sequenceNumber ?? 0) - Number(right.sequenceNumber ?? 0),
   );
   const visibleCount = messages.length;
+  const threadShareUrl = buildForumThreadUrl(thread.id, { demo: isDemo });
+
+  useEffect(() => {
+    if (!focusMessageId || typeof window === "undefined") return;
+    const anchorId = getForumMessageAnchorId(focusMessageId);
+    const target = document.getElementById(anchorId);
+    if (!target) return;
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    if (!target.hasAttribute("tabindex")) target.setAttribute("tabindex", "-1");
+    target.focus({ preventScroll: true });
+  }, [focusMessageId, messages.length, thread.id]);
+
+  const copyShareLink = async (url: string) => {
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(url);
+      return;
+    }
+    if (typeof window === "undefined") return;
+    window.prompt("Copy this forum link:", url);
+  };
+
   return (
     <section className="category-steering-section news-desk-forum-thread-detail" aria-label="Forum thread detail">
       <header className="news-desk-overview-forum__thread-header">
@@ -7899,11 +8043,23 @@ function ForumThreadView({
         <div className="news-desk-chip-row">
           <span>{visibleCount} messages</span>
           <span>Last activity {formatDateTime(thread.lastMessageAt ?? thread.updatedAt ?? thread.createdAt)}</span>
+          <button
+            type="button"
+            onClick={() => {
+              void copyShareLink(threadShareUrl);
+            }}
+          >
+            Copy thread link
+          </button>
         </div>
       </header>
       <div className="news-desk-forum-thread-messages">
         {messages.length ? messages.map((message) => (
-          <article className="news-desk-forum-thread-message" key={message.id}>
+          <article
+            className="news-desk-forum-thread-message"
+            id={getForumMessageAnchorId(message.id)}
+            key={message.id}
+          >
             <header>
               <strong>{message.authorLabel ?? message.role ?? "author"}</strong>
               <span>{formatDateTime(message.createdAt)}</span>
@@ -7917,6 +8073,13 @@ function ForumThreadView({
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem onSelect={() => onReplyTarget(message.id)}>
                     Reply
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      void copyShareLink(buildForumThreadUrl(thread.id, { messageId: message.id, demo: isDemo }));
+                    }}
+                  >
+                    Copy message link
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     variant="destructive"

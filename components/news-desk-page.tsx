@@ -52,6 +52,7 @@ export async function NewsDeskPage({ section: routeSection, sectionPageId, selec
     searchMaxTokens: getFirstSearchParam(resolvedSearchParams, "maxTokens"),
     searchFrom: getFirstSearchParam(resolvedSearchParams, "from"),
     assignmentView: getFirstSearchParam(resolvedSearchParams, "view"),
+    forumThread: routeSelection.forumThread,
   };
   const useDemoDashboard = getFirstSearchParam(resolvedSearchParams, "demo") === "1";
   const analysisProfiles = await loadAnalysisProfileSummaries();
@@ -60,15 +61,20 @@ export async function NewsDeskPage({ section: routeSection, sectionPageId, selec
   return <NewsDeskWorkspace analysisProfiles={analysisProfiles} configuredCorpora={configuredCorpora} dashboard={dashboard} initialSelection={initialSelection} initialTab={initialTab} sectionPageId={sectionPageId ?? null} />;
 }
 
-function parseRouteSelection(tab: NewsDeskTab, selectionPath: string[] | null | undefined): { assignment?: string | null; category?: string | null; message?: string | null; panel?: string | null; reference?: string | null } {
+function parseRouteSelection(tab: NewsDeskTab, selectionPath: string[] | null | undefined): { assignment?: string | null; category?: string | null; message?: string | null; panel?: string | null; reference?: string | null; forumThread?: string | null } {
   const segments = (selectionPath ?? []).map((segment) => decodeURIComponent(segment)).filter(Boolean);
   if (!segments.length) return {};
+  if (segments[0] === "forum" && segments[1]) return { forumThread: segments[1] };
   if (tab === "administration") return { panel: segments[0] ?? null };
   if (tab === "topics") return { category: segments[1] ?? segments[0] ?? null };
   if (tab === "references") return { reference: segments[0] ?? null };
   if (tab === "concepts") return { category: segments[0] ?? null };
-  if (tab === "messages") return { message: segments[0] ?? null };
+  if (tab === "messages") {
+    if (segments[0] === "forum" && segments[1]) return { forumThread: segments[1] };
+    return { message: segments[0] ?? null };
+  }
   if (tab === "assignments") return { assignment: segments[0] ?? null };
+  if (tab === "overview" && segments[0] === "forum" && segments[1]) return { forumThread: segments[1] };
   return {};
 }
 
