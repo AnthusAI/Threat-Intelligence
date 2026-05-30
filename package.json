@@ -19,6 +19,7 @@
     "sandbox": "ampx sandbox",
     "seed:amplify": "ampx sandbox seed",
     "auth:refresh-jwt": "poetry run papyrus auth refresh-jwt",
+    "dispatch:ai-ml-research-papers": "node scripts/dispatch-immediate-ai-ml-academic-research.cjs",
     "test:assignments": "poetry run papyrus analysis test category-mappers",
     "test:categories": "poetry run papyrus analysis test category-mappers",
     "test:doi-backfill": "poetry run papyrus analysis test doi-backfill",
