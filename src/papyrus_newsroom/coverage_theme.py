@@ -2342,6 +2342,40 @@ def summarize_concepts_for_planning(
         ),
     )
     if not ranked_for_dispatch:
+        trend_rows: list[dict[str, Any]] = []
+        for signal in build_trend_signals(
+            references=references,
+            semantic_nodes=semantic_nodes,
+            corpus_key=corpus_key,
+            topic="",
+            sections=[],
+            since_days=DEFAULT_TREND_WINDOW_DAYS,
+            limit=max(limit * 2, 8),
+            now=now,
+        ):
+            label = str(signal.get("topic") or "").strip()
+            if not label or label.lower() == str(topic or "").strip().lower():
+                continue
+            if not _is_usable_theme_label(label):
+                continue
+            trend_rows.append({
+                "conceptId": str(signal.get("signalId") or ""),
+                "displayName": label,
+                "metric": "trendSignalScore",
+                "score": signal.get("score"),
+                "distinctReferenceCount": signal.get("acceptedEvidenceCount"),
+                "topicRelevance": 0,
+                "source": "trend_signal",
+            })
+            if len(trend_rows) >= limit:
+                break
+        if trend_rows:
+            return {
+                "popularity": trend_rows,
+                "trending": trend_rows,
+                "rankedForDispatch": trend_rows,
+                "source": "trend_signals",
+            }
         return _concept_snapshot_from_semantic_nodes(
             semantic_nodes=semantic_nodes,
             corpus_key=corpus_key,
