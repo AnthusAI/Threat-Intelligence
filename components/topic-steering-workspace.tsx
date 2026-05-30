@@ -5,6 +5,7 @@ import { fetchAuthSession } from "aws-amplify/auth";
 import { gsap } from "gsap";
 import { Flip } from "gsap/Flip";
 import { ArchiveIcon, RefreshCwIcon } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ReactNode, RefObject } from "react";
@@ -46,12 +47,11 @@ import { buildNewsroomKnowledgeQueryInput, type NewsroomKnowledgeQueryAnchor as 
 import { NewsroomConsoleProgressToggle, PapyrusConsoleChatIcon, usePapyrusConsole } from "./papyrus-console-shell";
 import { useOptionalNewsDeskClient } from "./news-desk-client-provider";
 import type { ReaderAuthSnapshot } from "./reader-auth-state";
-import { useResolvedPapyrusTheme } from "./use-resolved-papyrus-theme";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
-import { resolveThemedImageSrc } from "../lib/themed-image";
 import type {
   AssignmentEventRecord,
   AssignmentRecord,
+  EditionSlotRecord,
   AnalysisProfileSummary,
   CategorySteeringArtifact,
   CategorySteeringCorpus,
@@ -125,6 +125,7 @@ import {
   buildReportingStoryBudget,
   type ReportingStoryBudgetCandidate,
   type ReportingStoryBudgetPhase,
+  type ReportingStoryBudgetSlot,
   type ReportingStoryBudgetSection,
 } from "../lib/reporting-story-budget";
 
@@ -808,6 +809,7 @@ function NewsDeskDashboard({
   const [semanticNodes, setSemanticNodes] = useState(dashboard.semanticNodes);
   const [assignments, setAssignments] = useState(dashboard.assignments);
   const [assignmentEvents, setAssignmentEvents] = useState(dashboard.assignmentEvents);
+  const [editionSlots, setEditionSlots] = useState(dashboard.editionSlots ?? []);
   const [doctrineRecords, setDoctrineRecords] = useState(dashboard.doctrineRecords);
   const fallbackNewsroomSections = useMemo(
     () => normalizeNewsroomSectionsWithFallback(dashboard.newsroomSections),
@@ -2311,6 +2313,7 @@ function NewsDeskDashboard({
     setSemanticNodes(nextDashboard.semanticNodes);
     setAssignments(nextDashboard.assignments);
     setAssignmentEvents(nextDashboard.assignmentEvents);
+    setEditionSlots(nextDashboard.editionSlots ?? []);
     setDoctrineRecords(nextDashboard.doctrineRecords);
     setNewsroomSections(sortNewsroomSections(nextDashboard.newsroomSections));
     setUserDirectory(nextDashboard.userDirectory);
@@ -3194,6 +3197,7 @@ function NewsDeskDashboard({
             analysisProfiles={analysisProfiles}
             assignmentEvents={assignmentEvents}
             assignments={assignments}
+            editionSlots={editionSlots}
             corpora={mergeAnalysisCorpora(configuredCorpora, corpora)}
             messages={messages}
             graph={graph}
@@ -5592,6 +5596,7 @@ function TopicsDeskView({
     for (const category of selectedCategorys) map.set(category.categoryKey, category);
     return map;
   }, [selectedCategorys]);
+  const referenceByAnyId = useMemo(() => buildReferenceLookupByAnyId(references), [references]);
   const categoryQueueProposals = useMemo(() => {
     return proposals.filter((proposal) => (
       proposal.steeringDomain === "category"
@@ -5907,6 +5912,7 @@ function TopicsDeskView({
           <TopicProposalQueue
             disabled={disabled}
             proposals={categoryQueueProposals}
+            referenceByAnyId={referenceByAnyId}
             onAction={onProposalAction}
             onEdit={(proposal) => setTopicProposalEdit({ proposal })}
             onFocusTopic={selectTopic}
@@ -5948,6 +5954,7 @@ function TopicsDeskView({
             onFocusCategory={setFocusedCategoryKey}
             onLexicalRuleCreate={onLexicalRuleCreate}
             proposals={proposals}
+            referenceByAnyId={referenceByAnyId}
             root={selectedRoot}
             knowledgeQuery={topicKnowledgeQuery}
           />
@@ -9939,16 +9946,6 @@ function ReferenceDetailPanel({
               onCreateInsight={onCreateInsight}
               reference={reference}
             />
-            <ReferenceCitationPanel
-              activeTab={activeCitationTab}
-              citationError={citationState.error}
-              citationsLoading={citationState.loading}
-              incomingObjects={incomingCitationObjects}
-              inboundCitationCount={inboundCitationCount}
-              onTabChange={setActiveCitationTab}
-              outgoingObjects={outgoingCitationObjects}
-              outboundCitationCount={outboundCitationCount}
-            />
             <div data-news-desk-reference-metadata-expander>
               <NewsroomExpander
                 className="news-desk-metadata-expander"
@@ -9977,12 +9974,12 @@ function ReferenceDetailPanel({
                     value={activeExtractedTextEntry?.mode ?? extractedTextTabs[0].mode}
                   >
                     <TabsList
-                      className="news-desk-reference-extracted-text__tabs"
+                      className="news-desk-reference-toggle__tabs"
                       data-news-desk-reference-extracted-text-tabs
                     >
                       {extractedTextTabs.map((tab) => (
                         <TabsTrigger
-                          className="news-desk-reference-extracted-text__tab"
+                          className="news-desk-reference-toggle__tab"
                           data-news-desk-reference-extracted-text-tab={tab.mode}
                           key={tab.mode}
                           value={tab.mode}
@@ -10038,6 +10035,16 @@ function ReferenceDetailPanel({
                 </p>
               )}
             </div>
+            <ReferenceCitationPanel
+              activeTab={activeCitationTab}
+              citationError={citationState.error}
+              citationsLoading={citationState.loading}
+              incomingObjects={incomingCitationObjects}
+              inboundCitationCount={inboundCitationCount}
+              onTabChange={setActiveCitationTab}
+              outgoingObjects={outgoingCitationObjects}
+              outboundCitationCount={outboundCitationCount}
+            />
             {attachments.length ? (
               <div className="news-desk-detail-block">
                 <p className="story-label">Attachments</p>
@@ -10104,9 +10111,9 @@ function ReferenceCitationPanel({
       {citationsLoading ? <p className="news-desk-detail-copy">Loading citation graph...</p> : null}
       {citationError ? <p className="news-desk-detail-copy">{citationError}</p> : null}
       <Tabs defaultValue="references" onValueChange={(value) => onTabChange(value as ReferenceCitationTab)} value={activeTab}>
-        <TabsList className="news-desk-reference-citations__tabs">
-          <TabsTrigger className="news-desk-reference-citations__tab" value="references">References</TabsTrigger>
-          <TabsTrigger className="news-desk-reference-citations__tab" value="cited-by">Cited by</TabsTrigger>
+        <TabsList className="news-desk-reference-toggle__tabs">
+          <TabsTrigger className="news-desk-reference-toggle__tab" value="references">References</TabsTrigger>
+          <TabsTrigger className="news-desk-reference-toggle__tab" value="cited-by">Cited by</TabsTrigger>
         </TabsList>
         <TabsContent className="news-desk-reference-citations__content" value="references">
           <div className="news-desk-reference-citations__header">
@@ -10991,6 +10998,7 @@ function AssignmentDeskView({
   analysisProfiles,
   assignmentEvents,
   assignments,
+  editionSlots,
   corpora,
   messages,
   graph,
@@ -11009,6 +11017,7 @@ function AssignmentDeskView({
   analysisProfiles: AnalysisProfileSummary[];
   assignmentEvents: AssignmentEventRecord[];
   assignments: AssignmentRecord[];
+  editionSlots: EditionSlotRecord[];
   corpora: CategorySteeringCorpus[];
   messages: MessageRecord[];
   graph: SemanticGraph;
@@ -11083,8 +11092,9 @@ function AssignmentDeskView({
     messages,
     assignmentEvents,
     semanticRelations,
+    editionSlots,
     newsroomSections,
-  }), [assignmentEvents, assignments, messages, newsroomSections, semanticRelations]);
+  }), [assignmentEvents, assignments, editionSlots, messages, newsroomSections, semanticRelations]);
   const runAssignmentDetailAction = (action: AssignmentAction) => {
     if (!selectedAssignment) return;
     onAction(selectedAssignment, action, assignmentActionNote);
@@ -11443,6 +11453,8 @@ function ReportingStoryBudgetBoard({
         </div>
         <div className="news-desk-story-budget__metrics" aria-label="Reporting story budget totals">
           <span data-story-budget-total="phase">{formatCoverageThemePhase(totals.phase)}</span>
+          <span data-story-budget-total="filled-slots">{totals.filledSlotCount} filled slots</span>
+          <span data-story-budget-total="unresolved-slots">{totals.unresolvedSlotCount} unresolved slots</span>
           <span data-story-budget-total="research-packets">{totals.researchPacketCount} research packets</span>
           <span data-story-budget-total="reporting-packets">{totals.reportingPacketCount} reporting packets</span>
           <span data-story-budget-total="selected">{totals.selectedCount} selected</span>
@@ -11499,6 +11511,8 @@ function ReportingStoryBudgetSectionView({
         <div className="news-desk-story-budget__metrics">
           <span data-story-budget-metric="phase">{formatCoverageThemePhase(section.phase)}</span>
           <span data-story-budget-metric="slots">{section.slotCount} slots</span>
+          <span data-story-budget-metric="filled-slots">{section.filledSlotCount} filled slots</span>
+          <span data-story-budget-metric="unresolved-slots">{section.unresolvedSlotCount} unresolved slots</span>
           <span data-story-budget-metric="dispatched">{section.dispatchedCount} dispatched</span>
           <span data-story-budget-metric="research-packets">{section.researchPacketCount} research packets</span>
           <span data-story-budget-metric="reporting-packets">{section.reportingPacketCount} reporting packets</span>
@@ -11511,17 +11525,58 @@ function ReportingStoryBudgetSectionView({
         </div>
       </header>
       <div className="news-desk-story-budget-candidates">
-        {section.candidates.map((candidate) => (
-          <ReportingStoryBudgetCandidateRow
-            candidate={candidate}
+        {section.slots.map((slot) => (
+          <ReportingStoryBudgetSlotView
             disabled={disabled}
-            key={candidate.assignmentId}
+            key={slot.slotId}
             onReview={onReview}
             onSelect={onSelect}
-            selected={selectedAssignmentId === candidate.assignmentId}
+            selectedAssignmentId={selectedAssignmentId}
+            slot={slot}
           />
         ))}
       </div>
+    </section>
+  );
+}
+
+function ReportingStoryBudgetSlotView({
+  disabled,
+  onReview,
+  onSelect,
+  selectedAssignmentId,
+  slot,
+}: {
+  disabled: boolean;
+  onReview: (candidate: ReportingStoryBudgetCandidate, decision: ReportingPacketReviewDecision) => void;
+  onSelect: (assignmentId: string) => void;
+  selectedAssignmentId?: string | null;
+  slot: ReportingStoryBudgetSlot;
+}) {
+  return (
+    <section
+      className="news-desk-story-budget-slot"
+      data-story-budget-slot={slot.slotId}
+      data-story-budget-slot-status={slot.status}
+    >
+      <header className="news-desk-story-budget-slot__header">
+        <strong>Slot {slot.slotRank ?? "?"}</strong>
+        <span>{slot.targetType}{slot.targetLengthBand ? ` / ${slot.targetLengthBand}` : ""}</span>
+        <span>{slot.candidateCount} candidates</span>
+        <span>{slot.filled ? "filled" : "open"}</span>
+      </header>
+      {slot.candidates.length ? slot.candidates.map((candidate) => (
+        <ReportingStoryBudgetCandidateRow
+          candidate={candidate}
+          disabled={disabled}
+          key={candidate.assignmentId}
+          onReview={onReview}
+          onSelect={onSelect}
+          selected={selectedAssignmentId === candidate.assignmentId}
+        />
+      )) : (
+        <p className="news-desk-story-budget-slot__empty">No reporting candidates assigned to this slot yet.</p>
+      )}
     </section>
   );
 }
@@ -14171,13 +14226,8 @@ function NewsroomProgressBackLink({
 
 function NewsDeskAccessGate({ shell }: { shell: NewsDeskShellState | null }) {
   const showRhythmOverlay = useNewsroomRhythmOverlay();
-  const resolvedTheme = useResolvedPapyrusTheme();
   const accessPhase = shell?.phase ?? "checkingAccess";
-  const markSrc = resolveThemedImageSrc(
-    "/papyrus-plant-placeholder.png",
-    { dark: { src: "/papyrus-plant-placeholder-dark.png" } },
-    resolvedTheme,
-  );
+  const markSrc = "/seed-art/newsroom-gate.png";
 
   return (
     <main className="site-shell news-desk-shell" data-news-desk-access={accessPhase} data-rhythm-overlay={showRhythmOverlay ? "true" : "false"}>
@@ -14217,7 +14267,7 @@ function NewsDeskAccessGate({ shell }: { shell: NewsDeskShellState | null }) {
                 <p className="news-desk-access-panel__auth">{formatAccessActionDetail(shell)}</p>
               </div>
               <figure className="news-desk-access-panel__mark" aria-hidden="true" key={`mark-${accessPhase}`}>
-                <img alt="" src={markSrc} />
+                <Image alt="" height={1066} src={markSrc} width={1600} />
               </figure>
             </section>
           </article>
@@ -14264,12 +14314,14 @@ function SectionHeader({ title, detail }: { title: string; detail: string }) {
 function TopicProposalQueue({
   disabled,
   proposals,
+  referenceByAnyId,
   onAction,
   onEdit,
   onFocusTopic,
 }: {
   disabled: boolean;
   proposals: CategorySteeringProposal[];
+  referenceByAnyId: Map<string, ReferenceRecord>;
   onAction: (proposal: CategorySteeringProposal, action: ReviewAction) => void;
   onEdit: (proposal: CategorySteeringProposal) => void;
   onFocusTopic: (categoryKey: string) => void;
@@ -14293,6 +14345,9 @@ function TopicProposalQueue({
   return (
     <section className="category-steering-section" aria-label="Topic proposal review queue">
       <SectionHeader title="Topic Review Queue" detail={`${visible.length} visible / ${proposals.length} total`} />
+      <p className="news-desk-topic-queue-note">
+        Reject suppresses repeated proposals in future discovery for the same classifier/root scope. Merge consolidates topic intent under an accepted node. Delete/archive removes a node from active taxonomy scope for future child discovery.
+      </p>
       <div className="news-desk-topic-queue-toolbar">
         <label>
           <span>Status</span>
@@ -14330,6 +14385,10 @@ function TopicProposalQueue({
                   <td>
                     <strong>{proposal.displayName ?? proposal.title}</strong>
                     <p>{proposal.summary ?? "No summary provided."}</p>
+                    <ProposalEvidencePreview
+                      proposal={proposal}
+                      referenceByAnyId={referenceByAnyId}
+                    />
                   </td>
                   <td>{proposal.proposalKind}</td>
                   <td>
@@ -14362,6 +14421,43 @@ function TopicProposalQueue({
         </table>
       </div>
     </section>
+  );
+}
+
+type ProposalEvidenceEntry = {
+  id: string;
+  title: string;
+  href: string | null;
+};
+
+function ProposalEvidencePreview({
+  proposal,
+  referenceByAnyId,
+}: {
+  proposal: CategorySteeringProposal;
+  referenceByAnyId: Map<string, ReferenceRecord>;
+}) {
+  const evidence = proposalEvidenceExamples(proposal, referenceByAnyId, 20);
+  const count = proposalEvidenceCount(proposal);
+  const targetTopic = proposal.targetCategoryKey ?? proposal.categoryKey ?? null;
+  const referencesHref = targetTopic ? categoryDrilldownHref("references", targetTopic) : null;
+  if (!count && !evidence.length && !referencesHref) return null;
+  return (
+    <div className="category-steering-evidence-preview">
+      <div className="category-steering-evidence-preview__header">
+        <strong>{count} evidence refs</strong>
+        {referencesHref ? <Link href={referencesHref}>Open topic references</Link> : null}
+      </div>
+      {evidence.length ? (
+        <div className="category-steering-evidence-chips">
+          {evidence.map((entry) => (
+            entry.href
+              ? <Link href={entry.href} key={`${proposal.id}-${entry.id}`}>{entry.title}</Link>
+              : <span key={`${proposal.id}-${entry.id}`}>{entry.title}</span>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -14676,6 +14772,7 @@ function CanonicalTopicDetail({
   onFocusCategory,
   onLexicalRuleCreate,
   proposals,
+  referenceByAnyId = new Map<string, ReferenceRecord>(),
   root,
 }: {
   categoryByUid: Map<string, CategorySteeringCategory>;
@@ -14691,12 +14788,14 @@ function CanonicalTopicDetail({
   onFocusCategory: (categoryKey: string) => void;
   onLexicalRuleCreate: (draft: LexicalRuleDraft) => void;
   proposals: CategorySteeringProposal[];
+  referenceByAnyId?: Map<string, ReferenceRecord>;
   root: CanonicalTopicRoot;
 }) {
   const rootNode = root.node ?? categoryToCategoryTreeNode(root.category);
   const relatedProposalCount = countRelatedCategoryTreeProposals(rootNode.categoryKey, root.subcategorys, proposals);
   const rootContext = buildTopicDrilldownContext(root, rootNode, categoryByUid);
   const rootReferenceCount = referencesForCategoryContext(graph, rootContext).length;
+  const rootSeedExamples = evidenceExamplesForIds(compactArray(rootNode.seedItemIds), referenceByAnyId, 20);
 
   return (
     <article className="news-desk-topic-detail" data-news-desk-category-tree-root={rootNode.categoryKey}>
@@ -14736,6 +14835,21 @@ function CanonicalTopicDetail({
             <span>{compactArray(rootNode.holdoutItemIds).length} holdout refs</span>
             <span>{rootNode.categoryKey}</span>
           </div>
+          {rootSeedExamples.length ? (
+            <div className="category-steering-evidence-preview">
+              <div className="category-steering-evidence-preview__header">
+                <strong>Top seed examples</strong>
+                <Link href={categoryDrilldownHref("references", rootNode.categoryKey)}>View all references</Link>
+              </div>
+              <div className="category-steering-evidence-chips">
+                {rootSeedExamples.map((entry) => (
+                  entry.href
+                    ? <Link href={entry.href} key={`${rootNode.categoryKey}-${entry.id}`}>{entry.title}</Link>
+                    : <span key={`${rootNode.categoryKey}-${entry.id}`}>{entry.title}</span>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           <div className="news-desk-topic-detail__body">
             <div className="news-desk-topic-detail__subtopics">
@@ -14791,9 +14905,13 @@ function CanonicalTopicDetail({
                       <div className="category-steering-categoryTree-evidence">
                         <span>{proposal.proposalKind}</span>
                         <span>{proposal.status}</span>
-                        <span>{compactArray(proposal.evidenceItemIds).length} evidence refs</span>
+                        <span>{proposalEvidenceCount(proposal)} evidence refs</span>
                         <span>{proposal.categoryKey ?? "new category"}</span>
                       </div>
+                      <ProposalEvidencePreview
+                        proposal={proposal}
+                        referenceByAnyId={referenceByAnyId}
+                      />
                       <ProposalReviewActions
                         disabled={disabled}
                         proposal={proposal}
@@ -16477,6 +16595,61 @@ function deriveShortTitle(value: string | null | undefined): string {
   return words.length ? words.slice(0, 3).join(" ") : "Topic";
 }
 
+function buildReferenceLookupByAnyId(references: ReferenceRecord[]): Map<string, ReferenceRecord> {
+  const map = new Map<string, ReferenceRecord>();
+  for (const reference of references) {
+    const keys = [
+      reference.id,
+      reference.lineageId ?? undefined,
+      reference.externalItemId,
+    ].filter((value): value is string => Boolean(value));
+    for (const key of keys) {
+      map.set(key, reference);
+    }
+  }
+  return map;
+}
+
+function proposalEvidenceIds(proposal: CategorySteeringProposal, limit = 20): string[] {
+  return Array.from(new Set([
+    ...compactArray(proposal.suggestedSeedItemIds),
+    ...compactArray(proposal.evidenceItemIds),
+  ])).slice(0, limit);
+}
+
+function proposalEvidenceCount(proposal: CategorySteeringProposal): number {
+  const ids = compactArray(proposal.evidenceItemIds);
+  if (ids.length) return ids.length;
+  return proposalEvidenceIds(proposal, 20).length;
+}
+
+function evidenceExamplesForIds(
+  evidenceIds: string[],
+  referenceByAnyId: Map<string, ReferenceRecord>,
+  limit = 20,
+): ProposalEvidenceEntry[] {
+  return evidenceIds.slice(0, limit).map((evidenceId) => {
+    const reference = referenceByAnyId.get(evidenceId);
+    if (!reference) {
+      return { id: evidenceId, title: evidenceId, href: null };
+    }
+    const lineageId = reference.lineageId ?? reference.id;
+    return {
+      id: evidenceId,
+      title: reference.title ?? reference.externalItemId ?? evidenceId,
+      href: lineageId ? newsDeskHrefForSemanticObject("reference", lineageId) : null,
+    };
+  });
+}
+
+function proposalEvidenceExamples(
+  proposal: CategorySteeringProposal,
+  referenceByAnyId: Map<string, ReferenceRecord>,
+  limit = 20,
+): ProposalEvidenceEntry[] {
+  return evidenceExamplesForIds(proposalEvidenceIds(proposal, limit), referenceByAnyId, limit);
+}
+
 function CategoryProposalRow({
   proposal,
   category,
@@ -16491,6 +16664,10 @@ function CategoryProposalRow({
   onEdit: (proposal: CategorySteeringProposal) => void;
 }) {
   const evidence = compactArray(proposal.evidenceItemIds).slice(0, 3);
+  const normalizedKind = normalizeProposalKind(proposal.proposalKind);
+  const hierarchyLabel = proposal.targetCategoryKey
+    ? `Subtopic under ${proposal.targetCategoryKey}`
+    : "Top-level topic";
 
   return (
     <article className="category-steering-proposal" data-proposal-domain={proposal.steeringDomain}>
@@ -16503,8 +16680,20 @@ function CategoryProposalRow({
         <p>{proposal.summary ?? "No summary provided."}</p>
         <dl>
           <div>
+            <dt>Proposal Type</dt>
+            <dd>{normalizedKind}</dd>
+          </div>
+          <div>
+            <dt>Hierarchy</dt>
+            <dd>{hierarchyLabel}</dd>
+          </div>
+          <div>
             <dt>Category UID</dt>
             <dd>{proposal.categoryKey ?? category?.categoryKey ?? "new category"}</dd>
+          </div>
+          <div>
+            <dt>Parent / Target UID</dt>
+            <dd>{proposal.targetCategoryKey ?? "none"}</dd>
           </div>
           <div>
             <dt>Display</dt>
@@ -16533,6 +16722,13 @@ function CategoryProposalRow({
       />
     </article>
   );
+}
+
+function normalizeProposalKind(proposalKind: string): "create" | "merge" | "delete" {
+  const normalized = proposalKind.toLowerCase();
+  if (normalized.includes("merge")) return "merge";
+  if (normalized.includes("archive") || normalized.includes("deprecate") || normalized.includes("delete")) return "delete";
+  return "create";
 }
 
 function CategoryEditor({

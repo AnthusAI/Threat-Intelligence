@@ -507,6 +507,21 @@ export type AssignmentEventRecord = {
   metadata?: unknown;
 };
 
+export type EditionSlotRecord = {
+  id: string;
+  editionId: string;
+  sectionKey: string;
+  slotRank: number;
+  targetType: "article" | "brief" | string;
+  targetLengthBand?: string | null;
+  minImageAssets?: number | null;
+  status: "open" | "assigned" | "selected" | "briefed" | "filled" | "killed" | string;
+  selectedAssignmentId?: string | null;
+  metadata?: unknown;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type UserIdentityRecord = {
   id: string;
   userProfileId: string;
@@ -647,6 +662,7 @@ export type CategorySteeringDashboard = {
   semanticRelations: SemanticRelationRecord[];
   assignments: AssignmentRecord[];
   assignmentEvents: AssignmentEventRecord[];
+  editionSlots: EditionSlotRecord[];
   doctrineRecords: DoctrineRecord[];
   newsroomSections: NewsroomSectionRecord[];
   procedureDefinitions: ProcedureDefinitionRecord[];
@@ -1557,6 +1573,22 @@ export function createDemoCategorySteeringDashboard(): CategorySteeringDashboard
         toStatus: "claimed",
         actorLabel: "archivist-demo",
         createdAt: importedAt,
+      },
+    ],
+    editionSlots: [
+      {
+        id: "edition-slot-demo-news-01",
+        editionId: "edition-demo-weekly-v1",
+        sectionKey: "news",
+        slotRank: 1,
+        targetType: "article",
+        targetLengthBand: "standard",
+        minImageAssets: 1,
+        status: "open",
+        selectedAssignmentId: null,
+        metadata: { source: "demo" },
+        createdAt: importedAt,
+        updatedAt: importedAt,
       },
     ],
     newsroomSections: defaultNewsroomSections(importedAt),

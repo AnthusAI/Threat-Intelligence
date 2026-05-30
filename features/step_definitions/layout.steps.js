@@ -1691,6 +1691,21 @@ Then("the reporting story budget should show section {string} with {int} slot an
   await section.locator(`[data-story-budget-metric="dispatched"]`, { hasText: `${candidateCount} dispatched` }).waitFor({ state: "visible", timeout: 10_000 });
 });
 
+Then("the reporting story budget should map candidate {string} to slot rank {int}", async function (assignmentId, slotRank) {
+  const page = requirePage(this);
+  const slot = page.locator(`[data-story-budget-slot]`, { has: page.locator(`[data-story-budget-candidate="${assignmentId}"]`) });
+  await slot.waitFor({ state: "visible", timeout: 10_000 });
+  await slot.locator(`text=Slot ${slotRank}`).waitFor({ state: "visible", timeout: 10_000 });
+});
+
+Then("the reporting story budget should show section {string} with {int} filled slot and {int} unresolved slot", async function (sectionKey, filledSlotCount, unresolvedSlotCount) {
+  const page = requirePage(this);
+  const section = page.locator(`[data-story-budget-section="${sectionKey}"]`);
+  await section.waitFor({ state: "visible", timeout: 10_000 });
+  await section.locator(`[data-story-budget-metric="filled-slots"]`, { hasText: `${filledSlotCount} filled slots` }).waitFor({ state: "visible", timeout: 10_000 });
+  await section.locator(`[data-story-budget-metric="unresolved-slots"]`, { hasText: `${unresolvedSlotCount} unresolved slots` }).waitFor({ state: "visible", timeout: 10_000 });
+});
+
 Then("story budget candidate {string} should show packet recommendation {string}", async function (assignmentId, recommendation) {
   const page = requirePage(this);
   const candidate = page.locator(`[data-story-budget-candidate="${assignmentId}"]`);
@@ -4207,14 +4222,14 @@ async function getActiveRhythmReport(page) {
   });
 }
 
-Then("the active page should swap plant logo image sources between light and dark theme", async function () {
+Then("the active page should swap raster image sources between light and dark theme", async function () {
   const page = requirePage(this);
   const report = await page.evaluate(async () => {
     const waitForPaint = async () => {
       await new Promise((resolve) => window.requestAnimationFrame(() => window.requestAnimationFrame(resolve)));
       await new Promise((resolve) => window.setTimeout(resolve, 120));
     };
-    const readPlantSources = () => {
+    const readFixtureSources = () => {
       const images = Array.from(
         document.querySelectorAll(".paper-page--active .lead-photo img, .paper-page--active .front-prelude-photo img, .paper-page--active .continuation-photo img"),
       );
@@ -4225,9 +4240,9 @@ Then("the active page should swap plant logo image sources between light and dar
           alt: image.getAttribute("alt") ?? "",
         }))
         .filter((entry) => (
-          entry.alt.includes("papyrus plant")
-          || entry.src.includes("papyrus-plant-placeholder")
-          || entry.srcSet.includes("papyrus-plant-placeholder")
+          entry.alt.includes("theme-specific")
+          || entry.src.includes("theme-ink-study")
+          || entry.srcSet.includes("theme-ink-study")
         ));
     };
 
@@ -4239,26 +4254,26 @@ Then("the active page should swap plant logo image sources between light and dar
 
     applyTheme("light");
     await waitForPaint();
-    const light = readPlantSources();
+    const light = readFixtureSources();
 
     applyTheme("dark");
     await waitForPaint();
-    const dark = readPlantSources();
+    const dark = readFixtureSources();
 
     applyTheme("system");
 
     return { light, dark };
   });
 
-  assert.ok(report.light.length > 0, "Expected rendered plant-logo image sources in light mode");
-  assert.ok(report.dark.length > 0, "Expected rendered plant-logo image sources in dark mode");
+  assert.ok(report.light.length > 0, "Expected rendered raster fixture image sources in light mode");
+  assert.ok(report.dark.length > 0, "Expected rendered raster fixture image sources in dark mode");
   if (JSON.stringify(report.light) === JSON.stringify(report.dark)) {
-    throw new Error(`Expected light and dark plant-logo image sources to differ; received ${JSON.stringify(report.dark)}`);
+    throw new Error(`Expected light and dark raster image sources to differ; received ${JSON.stringify(report.dark)}`);
   }
   const darkSerialized = decodeURIComponent(JSON.stringify(report.dark));
   assert.match(
     darkSerialized,
-    /papyrus-plant-placeholder-dark\.png/,
-    `Expected dark source to target papyrus-plant-placeholder-dark.png; received ${JSON.stringify(report.dark)}`,
+    /theme-ink-study-dark\.png/,
+    `Expected dark source to target theme-ink-study-dark.png; received ${JSON.stringify(report.dark)}`,
   );
 });

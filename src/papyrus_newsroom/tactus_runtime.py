@@ -226,6 +226,19 @@ API_METHODS: dict[tuple[str, str], Callable[[dict[str, Any]], Any]] = {
         args.get("id") or args.get("edition_id"),
         limit=args.get("limit", 100),
     ),
+    ("edition_slot", "get"): lambda args: newsroom.papyrus_get_edition_slot(args.get("id") or args.get("slot_id")),
+    ("edition_slot", "list"): lambda args: newsroom.papyrus_list_edition_slots(
+        args.get("edition_id") or args.get("editionId"),
+        section_key=args.get("section_key") or args.get("sectionKey") or "",
+        limit=args.get("limit", 250),
+    ),
+    ("edition_slot", "update_status"): lambda args: newsroom.papyrus_update_edition_slot_status(
+        slot_id=args.get("slot_id") or args.get("slotId") or args.get("id"),
+        status=args.get("status") or "",
+        selected_assignment_id=args.get("selected_assignment_id") or args.get("selectedAssignmentId") or "",
+        actor_label=args.get("actor_label") or args.get("actorLabel") or "",
+        note=args.get("note") or "",
+    ),
     ("item", "get"): lambda args: newsroom.papyrus_get_item(args.get("id") or args.get("item_id")),
     ("item", "info"): lambda args: newsroom.papyrus_get_item(args.get("id") or args.get("item_id")),
     ("article", "recent_published"): lambda args: newsroom.papyrus_list_recent_published_articles(
@@ -445,6 +458,19 @@ RESOURCE_METHODS: dict[tuple[str, str], Callable[[dict[str, Any]], Any]] = {
         import_run_id=args.get("importRunId") or args.get("import_run_id") or "",
     ),
     ("Assignment", "update"): lambda args: newsroom.papyrus_assignment_update(args),
+    ("EditionSlot", "get"): lambda args: newsroom.papyrus_get_edition_slot(args.get("id") or args.get("slotId") or args.get("slot_id")),
+    ("EditionSlot", "list"): lambda args: newsroom.papyrus_list_edition_slots(
+        args.get("editionId") or args.get("edition_id"),
+        section_key=args.get("sectionKey") or args.get("section_key") or "",
+        limit=args.get("limit", 250),
+    ),
+    ("EditionSlot", "update"): lambda args: newsroom.papyrus_update_edition_slot_status(
+        slot_id=args.get("id") or args.get("slotId") or args.get("slot_id"),
+        status=args.get("status") or "",
+        selected_assignment_id=args.get("selectedAssignmentId") or args.get("selected_assignment_id") or "",
+        actor_label=args.get("actorLabel") or args.get("actor_label") or "",
+        note=args.get("note") or "",
+    ),
     ("Reference", "get"): lambda args: newsroom.papyrus_get_reference(args.get("id") or args.get("referenceId") or args.get("reference_id")),
     ("Reference", "list"): _reference_list_resource,
 }
@@ -487,6 +513,7 @@ RESOURCE_API_SCHEMA: dict[str, Any] = {
         "Reference": {"verbs": ["get", "list"], "description": "Knowledge-base source material prospects and accepted references."},
         "Item": {"verbs": ["get", "list"], "description": "Reader-facing publication items. Assignments are not Items."},
         "Edition": {"verbs": ["get", "list"], "description": "Dated private or published edition records."},
+        "EditionSlot": {"verbs": ["get", "list", "update"], "description": "Edition planning slots that bind reporting candidates and selected outcomes."},
         "NewsroomSection": {"verbs": ["get", "list"], "description": "Operational desk sections with mission, policies, guidance, and budgets."},
     },
     "docs": {"verbs": ["list", "get"], "namespaces": ["mcp", "resources", "newsroom"]},
@@ -1437,11 +1464,20 @@ local function evidence_item_ids_from_knowledge(knowledge)
 	    local ids = {{}}
 	    local seen = {{}}
 	    local structured = knowledge and knowledge.structured or {{}}
+	    local function safe_field(record, key)
+	        local ok, value = pcall(function()
+	            return record[key]
+	        end)
+	        if ok then
+	            return value
+	        end
+	        return nil
+	    end
 	    local collections = {{
-	        structured.semanticMatches or {{}},
-	        structured.relatedRecords or {{}},
-	        structured.expandedObjects or {{}},
-	        structured.anchors or {{}},
+	        safe_field(structured, "semanticMatches") or {{}},
+	        safe_field(structured, "relatedRecords") or {{}},
+	        safe_field(structured, "expandedObjects") or {{}},
+	        safe_field(structured, "anchors") or {{}},
 	    }}
 	    local function safe_index(list_like, idx)
 	        local ok, value = pcall(function()

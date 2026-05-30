@@ -1,6 +1,7 @@
 import type {
   AssignmentEventRecord,
   AssignmentRecord,
+  EditionSlotRecord,
   MessageRecord,
   NewsroomSectionRecord,
   SemanticRelationRecord,
@@ -22,6 +23,8 @@ export type ReportingStoryBudgetCandidate = {
   phase: ReportingStoryBudgetPhase;
   coverageConceptId: string | null;
   coverageConceptTitle: string | null;
+  slotId: string | null;
+  slotRank: number | null;
   candidateRank: number | null;
   slotCount: number | null;
   hasReportingPacket: boolean;
@@ -47,6 +50,19 @@ export type ReportingStoryBudgetCandidate = {
   targetItemId: string | null;
 };
 
+export type ReportingStoryBudgetSlot = {
+  slotId: string;
+  slotRank: number | null;
+  targetType: string;
+  targetLengthBand: string | null;
+  minImageAssets: number | null;
+  status: string;
+  selectedAssignmentId: string | null;
+  candidateCount: number;
+  filled: boolean;
+  candidates: ReportingStoryBudgetCandidate[];
+};
+
 export type ReportingStoryBudgetSection = {
   key: string;
   title: string;
@@ -63,6 +79,9 @@ export type ReportingStoryBudgetSection = {
   filledCount: number;
   delta: number;
   state: "needs" | "full" | "over";
+  filledSlotCount: number;
+  unresolvedSlotCount: number;
+  slots: ReportingStoryBudgetSlot[];
   candidates: ReportingStoryBudgetCandidate[];
   phase: ReportingStoryBudgetPhase;
   researchPacketCount: number;
@@ -74,7 +93,7 @@ export type ReportingStoryBudgetSection = {
 
 export type ReportingStoryBudget = {
   sections: ReportingStoryBudgetSection[];
-  totals: Omit<ReportingStoryBudgetSection, "key" | "title" | "editionId" | "editionLabel" | "candidates">;
+  totals: Omit<ReportingStoryBudgetSection, "key" | "title" | "editionId" | "editionLabel" | "candidates" | "slots">;
 };
 
 export type ReportingStoryBudgetInput = {
@@ -82,6 +101,7 @@ export type ReportingStoryBudgetInput = {
   messages: MessageRecord[];
   assignmentEvents: AssignmentEventRecord[];
   semanticRelations: SemanticRelationRecord[];
+  editionSlots?: EditionSlotRecord[];
   newsroomSections?: NewsroomSectionRecord[];
   messagePayloads?: Record<string, unknown>;
 };
@@ -92,6 +112,8 @@ const RESEARCH_PACKET_KIND = "research_packet";
 
 export function buildReportingStoryBudget(input: ReportingStoryBudgetInput): ReportingStoryBudget {
   const sectionsByKey = new Map((input.newsroomSections ?? []).map((section) => [section.id, section]));
+  const editionSlots = input.editionSlots ?? [];
+  const editionSlotById = new Map(editionSlots.map((slot) => [slot.id, slot]));
   const linkedMessageIdsByAssignment = buildLinkedMessageIdsByAssignment(input.semanticRelations ?? []);
   const relationsByAssignment = groupRelationsByAssignment(input.semanticRelations ?? []);
   const researchPacketIdsByReportingAssignment = buildResearchPacketIdsByReportingAssignment(input.assignments ?? [], input.messages ?? [], input.semanticRelations ?? []);
@@ -119,6 +141,11 @@ export function buildReportingStoryBudget(input: ReportingStoryBudgetInput): Rep
         ?? normalizeString(assignmentMetadata.storyCycleRunId);
       const slotTarget = parseObject(packet.slotTarget ?? assignmentMetadata.slotTarget);
       const relations = relationsByAssignment.get(assignment.id) ?? [];
+      const slotRelation = relationByType(relations, "targets_slot", "editionSlot");
+      const slotId = normalizeString(slotTarget.slotId)
+        ?? normalizeString(slotRelation?.objectId)
+        ?? normalizeString(slotRelation?.objectLineageId);
+      const slot = slotId ? editionSlotById.get(slotId) : undefined;
       const topicRelation = relationByType(relations, "targets_topic", "category");
       const topicMetadata = parseObject(topicRelation?.metadata);
       const conceptRelation = relationByType(relations, "requests_work_on", "semanticNode")
@@ -178,6 +205,8 @@ export function buildReportingStoryBudget(input: ReportingStoryBudgetInput): Rep
           ?? normalizeString(conceptMetadata.coverageConceptTitle)
           ?? normalizeString(conceptMetadata.nodeKey)
           ?? normalizeString(conceptRelation?.objectId),
+        slotId: slotId ?? null,
+        slotRank: normalizeNumber(slotTarget.slotRank ?? slot?.slotRank),
         candidateRank: normalizeNumber(packet.candidateRank ?? assignmentMetadata.candidateRank ?? slotTarget.candidateRank),
         slotCount: normalizeNumber(slotTarget.slots ?? assignmentMetadata.publicationSlots ?? section?.defaultPageBudget),
         hasReportingPacket: Boolean(reportingMessage),
@@ -212,7 +241,14 @@ export function buildReportingStoryBudget(input: ReportingStoryBudgetInput): Rep
   }
 
   const sections = Array.from(grouped.values())
-    .map((sectionCandidates) => buildSectionBudget(sectionCandidates))
+    .map((sectionCandidates) => {
+      const first = sectionCandidates[0];
+      const sectionSlots = editionSlots.filter((slot) => (
+        slot.sectionKey === first.sectionKey
+        && slot.editionId === first.editionId
+      ));
+      return buildSectionBudget(sectionCandidates, sectionSlots);
+    })
     .sort((left, right) => (
       left.editionLabel.localeCompare(right.editionLabel)
       || left.title.localeCompare(right.title)
@@ -337,16 +373,60 @@ function relationByType(relations: SemanticRelationRecord[], predicate: string, 
   )) ?? null;
 }
 
-function buildSectionBudget(candidates: ReportingStoryBudgetCandidate[]): ReportingStoryBudgetSection {
+function buildSectionBudget(candidates: ReportingStoryBudgetCandidate[], sectionSlots: EditionSlotRecord[]): ReportingStoryBudgetSection {
   const first = candidates[0];
-  const slotCount = Math.max(1, ...candidates.map((candidate) => candidate.slotCount ?? 0));
+  const inferredSlotCount = Math.max(1, ...candidates.map((candidate) => candidate.slotCount ?? 0));
+  const normalizedSlots = sectionSlots.length
+    ? sectionSlots
+    : Array.from({ length: inferredSlotCount }, (_, index) => ({
+      id: `synthetic-slot-${first.editionId}-${first.sectionKey}-${index + 1}`,
+      editionId: first.editionId,
+      sectionKey: first.sectionKey,
+      slotRank: index + 1,
+      targetType: "article",
+      targetLengthBand: "standard",
+      minImageAssets: null,
+      status: "assigned",
+      selectedAssignmentId: null,
+      createdAt: first.assignment.createdAt,
+      updatedAt: first.assignment.updatedAt,
+    } as EditionSlotRecord));
+  const candidateBySlotId = new Map<string, ReportingStoryBudgetCandidate[]>();
+  for (const candidate of candidates) {
+    const key = candidate.slotId ?? `synthetic-slot-${first.editionId}-${first.sectionKey}-${candidate.slotRank ?? 0}`;
+    candidateBySlotId.set(key, [...(candidateBySlotId.get(key) ?? []), candidate]);
+  }
+  const slots: ReportingStoryBudgetSlot[] = normalizedSlots
+    .map((slot) => {
+      const slotCandidates = [...(candidateBySlotId.get(slot.id) ?? [])].sort(compareCandidates);
+      let selectedAssignmentId = normalizeString(slot.selectedAssignmentId);
+      if (!selectedAssignmentId) {
+        selectedAssignmentId = slotCandidates.find((candidate) => candidate.decision === "select" || candidate.decision === "brief")?.assignmentId ?? null;
+      }
+      const status = String(slot.status || "open").trim().toLowerCase();
+      const filled = status === "filled" || status === "selected" || status === "briefed" || Boolean(selectedAssignmentId);
+      return {
+        slotId: slot.id,
+        slotRank: slot.slotRank ?? null,
+        targetType: slot.targetType ?? "article",
+        targetLengthBand: normalizeString(slot.targetLengthBand) ?? null,
+        minImageAssets: typeof slot.minImageAssets === "number" ? slot.minImageAssets : null,
+        status: status || "open",
+        selectedAssignmentId,
+        candidateCount: slotCandidates.length,
+        filled,
+        candidates: slotCandidates,
+      };
+    })
+    .sort((left, right) => (left.slotRank ?? 9999) - (right.slotRank ?? 9999) || left.slotId.localeCompare(right.slotId));
+  const slotCount = slots.length || inferredSlotCount;
   const selectedCount = candidates.filter((candidate) => candidate.decision === "select").length;
   const briefedCount = candidates.filter((candidate) => candidate.decision === "brief").length;
   const mergedCount = candidates.filter((candidate) => candidate.decision === "merge").length;
   const heldCount = candidates.filter((candidate) => candidate.decision === "hold").length;
   const killedCount = candidates.filter((candidate) => candidate.decision === "kill").length;
   const undecidedCount = candidates.filter((candidate) => !candidate.decision).length;
-  const filledCount = selectedCount + briefedCount;
+  const filledCount = slots.length ? slots.filter((slot) => slot.filled).length : selectedCount + briefedCount;
   const delta = filledCount - slotCount;
   const researchPacketCount = candidates.reduce((sum, candidate) => sum + candidate.researchPacketCount, 0);
   const reportingPacketCount = candidates.filter((candidate) => candidate.hasReportingPacket).length;
@@ -369,6 +449,9 @@ function buildSectionBudget(candidates: ReportingStoryBudgetCandidate[]): Report
     filledCount,
     delta,
     state: delta > 0 ? "over" : delta === 0 ? "full" : "needs",
+    filledSlotCount: filledCount,
+    unresolvedSlotCount: Math.max(slotCount - filledCount, 0),
+    slots,
     candidates,
     phase: highestReportingBudgetPhase(candidates.map((candidate) => candidate.phase)),
     researchPacketCount,
@@ -390,6 +473,8 @@ function totalBudget(sections: ReportingStoryBudgetSection[]): ReportingStoryBud
     killedCount: memo.killedCount + section.killedCount,
     undecidedCount: memo.undecidedCount + section.undecidedCount,
     filledCount: memo.filledCount + section.filledCount,
+    filledSlotCount: memo.filledSlotCount + section.filledSlotCount,
+    unresolvedSlotCount: memo.unresolvedSlotCount + section.unresolvedSlotCount,
     delta: memo.delta + section.delta,
     researchPacketCount: memo.researchPacketCount + section.researchPacketCount,
     reportingPacketCount: memo.reportingPacketCount + section.reportingPacketCount,
@@ -406,6 +491,8 @@ function totalBudget(sections: ReportingStoryBudgetSection[]): ReportingStoryBud
     killedCount: 0,
     undecidedCount: 0,
     filledCount: 0,
+    filledSlotCount: 0,
+    unresolvedSlotCount: 0,
     delta: 0,
     researchPacketCount: 0,
     reportingPacketCount: 0,
@@ -488,6 +575,7 @@ function compareCandidates(left: ReportingStoryBudgetCandidate, right: Reporting
   return (
     left.editionLabel.localeCompare(right.editionLabel)
     || left.sectionTitle.localeCompare(right.sectionTitle)
+    || (left.slotRank ?? 9999) - (right.slotRank ?? 9999)
     || (left.candidateRank ?? 9999) - (right.candidateRank ?? 9999)
     || left.title.localeCompare(right.title)
   );

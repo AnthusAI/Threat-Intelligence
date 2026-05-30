@@ -121,6 +121,66 @@ query ListEditionItemsByEdition($editionId: ID!, $limit: Int, $nextToken: String
 }
 """
 
+GET_EDITION_SLOT_QUERY = """
+query GetEditionSlot($id: ID!) {
+  getEditionSlot(id: $id) {
+    id
+    editionId
+    sectionKey
+    slotRank
+    targetType
+    targetLengthBand
+    minImageAssets
+    status
+    selectedAssignmentId
+    metadata
+    createdAt
+    updatedAt
+  }
+}
+"""
+
+LIST_EDITION_SLOTS_BY_EDITION_QUERY = """
+query ListEditionSlotsByEditionSectionAndRank($editionId: ID!, $limit: Int, $nextToken: String) {
+  listEditionSlotsByEditionSectionAndRank(editionId: $editionId, limit: $limit, nextToken: $nextToken) {
+    items {
+      id
+      editionId
+      sectionKey
+      slotRank
+      targetType
+      targetLengthBand
+      minImageAssets
+      status
+      selectedAssignmentId
+      metadata
+      createdAt
+      updatedAt
+    }
+    nextToken
+  }
+}
+"""
+
+UPDATE_EDITION_SLOT_MUTATION = """
+mutation UpdateEditionSlot($input: UpdateEditionSlotInput!) {
+  updateEditionSlot(input: $input) {
+    id
+    editionId
+    sectionKey
+    slotRank
+    targetType
+    targetLengthBand
+    minImageAssets
+    status
+    selectedAssignmentId
+    metadata
+    createdAt
+    updatedAt
+  }
+}
+"""
+
 GET_ITEM_QUERY = """
 query GetItem($id: ID!) {
   getItem(id: $id) {
@@ -619,6 +679,67 @@ def papyrus_list_edition_items(edition_id: str, limit: int = 100) -> dict[str, A
         if not next_token:
             break
     return {"edition_id": edition_id, "items": items}
+
+
+def papyrus_get_edition_slot(slot_id: str) -> dict[str, Any]:
+    """
+    Read one EditionSlot by id.
+    """
+    data = _graphql(GET_EDITION_SLOT_QUERY, {"id": _required(slot_id, "slot_id")})
+    slot = data.get("getEditionSlot")
+    if not slot:
+        raise ValueError(f"EditionSlot not found: {slot_id}")
+    return {"slot": _decode_record_json(slot)}
+
+
+def papyrus_list_edition_slots(edition_id: str, *, section_key: str = "", limit: int = 250) -> dict[str, Any]:
+    """
+    Read EditionSlot rows for one edition, optionally filtered by section key.
+    """
+    rows: list[dict[str, Any]] = []
+    next_token = None
+    while True:
+        data = _graphql(
+            LIST_EDITION_SLOTS_BY_EDITION_QUERY,
+            {"editionId": _required(edition_id, "edition_id"), "limit": limit, "nextToken": next_token},
+        )
+        connection = data.get("listEditionSlotsByEditionSectionAndRank") or {}
+        rows.extend(_decode_record_json(item) for item in connection.get("items") or [])
+        next_token = connection.get("nextToken")
+        if not next_token:
+            break
+    if section_key:
+        rows = [row for row in rows if str(row.get("sectionKey") or "") == section_key]
+    rows.sort(key=lambda row: (str(row.get("sectionKey") or ""), int(row.get("slotRank") or 0), str(row.get("id") or "")))
+    return {"edition_id": edition_id, "section_key": section_key or None, "slots": rows}
+
+
+def papyrus_update_edition_slot_status(
+    *,
+    slot_id: str,
+    status: str,
+    selected_assignment_id: str = "",
+    actor_label: str = "",
+    note: str = "",
+) -> dict[str, Any]:
+    """
+    Update an EditionSlot status/selected assignment for editor orchestration workflows.
+    """
+    now = _now_iso()
+    patch = {
+        "id": _required(slot_id, "slot_id"),
+        "status": _required(status, "status"),
+        "selectedAssignmentId": selected_assignment_id or None,
+        "updatedAt": now,
+    }
+    data = _graphql(UPDATE_EDITION_SLOT_MUTATION, {"input": patch})
+    updated = _decode_record_json(data.get("updateEditionSlot") or patch)
+    return {
+        "slot": updated,
+        "updatedAt": now,
+        "actorLabel": actor_label or None,
+        "note": note or None,
+    }
 
 
 def papyrus_get_item(item_id: str) -> dict[str, Any]:

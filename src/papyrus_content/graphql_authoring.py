@@ -85,6 +85,9 @@ PUBLISHED_EDITION_FIELDS = (
 EDITION_ITEM_FIELDS = (
     "id editionId editionLineageId itemId itemLineageId placementKey sortKey pageNumber priority metadata"
 )
+EDITION_SLOT_FIELDS = (
+    "id editionId sectionKey slotRank targetType targetLengthBand minImageAssets status selectedAssignmentId metadata createdAt updatedAt"
+)
 PUBLISHED_EDITION_ITEM_FIELDS = (
     "id publishedEditionId publishedItemId sourceEditionItemId sourceEditionId sourceItemId editionLineageId "
     "itemLineageId placementKey sortKey pageNumber priority metadata"
@@ -136,6 +139,7 @@ LIST_DEFINITIONS: dict[str, dict[str, str]] = {
     "Edition": {"field": "listEditions", "fields": EDITION_FIELDS},
     "PublishedEdition": {"field": "listPublishedEditions", "fields": PUBLISHED_EDITION_FIELDS},
     "EditionItem": {"field": "listEditionItems", "fields": EDITION_ITEM_FIELDS},
+    "EditionSlot": {"field": "listEditionSlots", "fields": EDITION_SLOT_FIELDS},
     "PublishedEditionItem": {"field": "listPublishedEditionItems", "fields": PUBLISHED_EDITION_ITEM_FIELDS},
     "Item": {"field": "listItems", "fields": ITEM_FIELDS},
     "PublishedItem": {"field": "listPublishedItems", "fields": PUBLISHED_ITEM_FIELDS},

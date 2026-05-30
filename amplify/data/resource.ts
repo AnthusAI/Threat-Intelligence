@@ -1844,6 +1844,7 @@ const schema = a.schema({
       layoutPlan: a.json(),
       metadata: a.json(),
       items: a.hasMany("EditionItem", "editionId"),
+      slots: a.hasMany("EditionSlot", "editionId"),
     })
     .secondaryIndexes((index) => [
       index("lineageId").sortKeys(["versionNumber"]).queryField("listEditionsByLineageAndVersion"),
@@ -1854,6 +1855,33 @@ const schema = a.schema({
     ])
     .authorization((allow) => [
       allow.groups(contentWriteGroups),
+      allow.custom().to(authoringOperations),
+    ]),
+
+  EditionSlot: a
+    .model({
+      id: a.id().required(),
+      editionId: a.id().required(),
+      sectionKey: a.string().required(),
+      slotRank: a.integer().required(),
+      targetType: a.string().required(),
+      targetLengthBand: a.string(),
+      minImageAssets: a.integer(),
+      status: a.string().required(),
+      selectedAssignmentId: a.id(),
+      metadata: a.json(),
+      createdAt: a.datetime().required(),
+      updatedAt: a.datetime().required(),
+      edition: a.belongsTo("Edition", "editionId"),
+    })
+    .secondaryIndexes((index) => [
+      index("editionId").sortKeys(["sectionKey", "slotRank"]).queryField("listEditionSlotsByEditionSectionAndRank"),
+      index("sectionKey").sortKeys(["editionId", "slotRank"]).queryField("listEditionSlotsBySectionEditionAndRank"),
+      index("status").sortKeys(["updatedAt"]).queryField("listEditionSlotsByStatusAndUpdatedAt"),
+      index("selectedAssignmentId").sortKeys(["updatedAt"]).queryField("listEditionSlotsBySelectedAssignmentAndUpdatedAt"),
+    ])
+    .authorization((allow) => [
+      allow.groups(categoryWriteGroups).to(categoryAppendOnlyOperations),
       allow.custom().to(authoringOperations),
     ]),
 

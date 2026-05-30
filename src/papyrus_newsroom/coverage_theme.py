@@ -53,6 +53,8 @@ RELATION_DOMAINS = {
     "requests_work_on": "workflow",
     "planned_for_edition": "publication",
     "targets_lane": "editorial",
+    "targets_slot": "editorial",
+    "selected_by": "workflow",
     "targets_section": "editorial",
     "targets_topic": "editorial",
     "scoped_to_topic": "ontology",
@@ -115,6 +117,9 @@ EDITION_ITEM_FIELDS = """
 id editionId itemId publishedEditionId publishedItemId sourceEditionId sourceItemId editionLineageId itemLineageId placementKey sortKey
 pageNumber priority metadata
 """
+EDITION_SLOT_FIELDS = """
+id editionId sectionKey slotRank targetType targetLengthBand minImageAssets status selectedAssignmentId metadata createdAt updatedAt
+"""
 
 LIST_FIELDS = {
     "Reference": ("listReferences", REFERENCE_FIELDS),
@@ -130,6 +135,7 @@ LIST_FIELDS = {
     "ModelAttachment": ("listModelAttachments", MODEL_ATTACHMENT_FIELDS),
     "Item": ("listItems", ITEM_FIELDS),
     "EditionItem": ("listEditionItems", EDITION_ITEM_FIELDS),
+    "EditionSlot": ("listEditionSlots", EDITION_SLOT_FIELDS),
 }
 GET_FIELDS = {
     model: (f"get{model}", fields)
@@ -956,6 +962,16 @@ def build_coverage_theme_plan(
     category = find_category(category_key, state.get("categories") or [])
     category_set = find_category_set(category, state.get("categorySets") or [])
     edition = edition_record(date=date, section_budgets=section_budgets, run_id=run_id, now=now)
+    edition_slots = build_edition_slots(
+        edition=edition,
+        resolved_sections=resolved_sections,
+        section_budgets=section_budgets,
+        run_id=run_id,
+        now=now,
+    )
+    slots_by_section: dict[str, list[dict[str, Any]]] = {}
+    for slot in edition_slots:
+        slots_by_section.setdefault(slot["sectionKey"], []).append(slot)
     coverage_node = coverage_node_record(
         coverage_key=coverage_key,
         topic=topic,
@@ -967,6 +983,7 @@ def build_coverage_theme_plan(
     reporting_lane = lane_node_record("editorial.form.reporting", "Reporting", "reported story", now)
     records = [
         _record("Edition", edition),
+        *[_record("EditionSlot", slot) for slot in edition_slots],
         _record("SemanticNode", coverage_node),
         _record("SemanticNode", reporting_lane),
     ]
@@ -1007,9 +1024,12 @@ def build_coverage_theme_plan(
         research_assignments.append(research_assignment)
         records.extend(assignment_records(research_assignment, edition, coverage_node, section, category, category_set, now, signal=signal))
         slots = max(1, int(section_budgets.get(section["id"], DEFAULT_SECTION_BUDGETS.get(section["id"], 1))))
+        section_slots = slots_by_section.get(section["id"], [])
         dispatch_count = math.ceil(slots * 1.5)
         for rank in range(1, dispatch_count + 1):
             angle = REPORTING_ANGLE_LENSES[(rank - 1) % len(REPORTING_ANGLE_LENSES)]
+            slot_rank = ((rank - 1) % slots) + 1 if slots > 0 else 1
+            assigned_slot = next((slot for slot in section_slots if slot.get("slotRank") == slot_rank), None)
             reporting_assignment = reporting_assignment_record(
                 run_id=run_id,
                 date=date,
@@ -1025,6 +1045,7 @@ def build_coverage_theme_plan(
                 dispatch_count=dispatch_count,
                 angle=angle,
                 candidate_rank=rank,
+                assigned_slot=assigned_slot,
                 source_research_assignment=research_assignment,
                 signal=signal,
                 now=now,
@@ -1081,11 +1102,13 @@ def build_coverage_theme_plan(
             {"key": section["id"], "title": section["title"], "researchLens": section_research_lens(section["id"]), "slots": section_budgets.get(section["id"], DEFAULT_SECTION_BUDGETS.get(section["id"], 1))}
             for section in resolved_sections
         ],
+        "editionSlots": edition_slots,
         "researchAssignments": research_assignments,
         "reportingAssignments": reporting_assignments,
         "records": _dedupe_records(records),
         "summary": {
             "sectionCount": len(resolved_sections),
+            "slotCount": len(edition_slots),
             "researchAssignmentCount": len(research_assignments),
             "reportingAssignmentCount": len(reporting_assignments),
             "createsItemOrEditionItem": False,
@@ -1490,6 +1513,7 @@ def story_budget_output(
     events = [_decode_record(record) for record in state.get("assignmentEvents", [])]
     items = {_decode_record(record).get("id"): _decode_record(record) for record in state.get("items", [])}
     edition_items = state.get("editionItems", [])
+    edition_slots = [_decode_record(record) for record in state.get("editionSlots", [])]
     subject_relations = _relations_by_assignment(relations)
     filtered = []
     for assignment in assignments:
@@ -1512,15 +1536,25 @@ def story_budget_output(
         events_by_assignment.setdefault(event.get("assignmentId"), []).append(event)
     sections: dict[str, dict[str, Any]] = {}
     for assignment in sorted(filtered, key=lambda item: (item.get("sectionKey") or "", item.get("priority") or 0, item.get("id") or "")):
-        metadata = {**_assignment_graph_metadata(assignment, subject_relations), **_metadata(assignment)}
+        graph_metadata = _assignment_graph_metadata(assignment, subject_relations)
+        assignment_metadata = _metadata(assignment)
+        metadata = {**assignment_metadata, **graph_metadata}
+        assignment_slot_target = assignment_metadata.get("slotTarget") if isinstance(assignment_metadata.get("slotTarget"), dict) else {}
+        graph_slot_target = graph_metadata.get("slotTarget") if isinstance(graph_metadata.get("slotTarget"), dict) else {}
+        if assignment_slot_target or graph_slot_target:
+            metadata["slotTarget"] = {**assignment_slot_target, **graph_slot_target}
         section_key = assignment.get("sectionKey") or metadata.get("sectionKey") or "unsectioned"
         section_entry = sections.setdefault(section_key, {
             "sectionKey": section_key,
             "sectionTitle": metadata.get("sectionTitle") or section_key,
+            "editionId": metadata.get("editionId"),
+            "editionLabel": metadata.get("editionDate") or metadata.get("editionId"),
             "researchAssignments": [],
             "reportingCandidates": [],
             "copywritingAssignments": [],
+            "slots": [],
             "counts": {
+                "slots": 0,
                 "research": 0,
                 "reporting": 0,
                 "copywriting": 0,
@@ -1530,6 +1564,8 @@ def story_budget_output(
                 "killed": 0,
                 "merged": 0,
                 "undecided": 0,
+                "filledSlots": 0,
+                "unresolvedSlots": 0,
                 "draftItems": 0,
                 "editionItems": 0,
             },
@@ -1589,6 +1625,82 @@ def story_budget_output(
             for item_id in assignment.get("draftItemIds") or []
             if item_id in placed_item_ids
         )
+        reporting_by_slot: dict[str, list[dict[str, Any]]] = {}
+        synthetic_slot_by_id: dict[str, dict[str, Any]] = {}
+        for candidate in section_entry["reportingCandidates"]:
+            slot_target = ((candidate.get("metadata") or {}).get("slotTarget") or {}) if isinstance(candidate.get("metadata"), dict) else {}
+            slot_id = slot_target.get("slotId")
+            if not slot_id:
+                rank = slot_target.get("slotRank")
+                slot_id = f"synthetic-slot-{section_entry['sectionKey']}-{rank or '00'}"
+                synthetic_slot_by_id.setdefault(
+                    slot_id,
+                    {
+                        "id": slot_id,
+                        "editionId": section_entry.get("editionId"),
+                        "sectionKey": section_entry["sectionKey"],
+                        "slotRank": rank or 0,
+                        "targetType": "article",
+                        "targetLengthBand": "standard",
+                        "minImageAssets": None,
+                        "status": "assigned",
+                        "selectedAssignmentId": None,
+                        "metadata": {"synthetic": True},
+                    },
+                )
+            reporting_by_slot.setdefault(slot_id, []).append(candidate)
+
+        section_slot_records = [
+            slot for slot in edition_slots
+            if slot.get("sectionKey") == section_entry["sectionKey"]
+            and (not section_entry.get("editionId") or slot.get("editionId") == section_entry.get("editionId"))
+        ]
+        if not section_slot_records:
+            section_slot_records = list(synthetic_slot_by_id.values())
+        section_slot_records.sort(key=lambda slot: (int(slot.get("slotRank") or 0), str(slot.get("id") or "")))
+
+        slot_rows: list[dict[str, Any]] = []
+        filled_slots = 0
+        for slot in section_slot_records:
+            slot_id = slot.get("id")
+            candidates = sorted(
+                reporting_by_slot.get(slot_id, []),
+                key=lambda row: (
+                    int((((row.get("metadata") or {}).get("slotTarget") or {}).get("candidateRank") or 0)),
+                    str(row.get("assignmentId") or ""),
+                ),
+            )
+            status = str(slot.get("status") or "open")
+            selected_assignment_id = slot.get("selectedAssignmentId")
+            if not selected_assignment_id:
+                for candidate in candidates:
+                    decision = ((candidate.get("latestDecision") or {}).get("decision") or "").lower()
+                    if decision in {"select", "brief"}:
+                        selected_assignment_id = candidate.get("assignmentId")
+                        break
+            if selected_assignment_id and status in {"open", "assigned"}:
+                status = "selected"
+            filled = status in {"selected", "briefed", "filled"}
+            if filled:
+                filled_slots += 1
+            slot_rows.append(
+                {
+                    "slotId": slot_id,
+                    "slotRank": slot.get("slotRank"),
+                    "targetType": slot.get("targetType"),
+                    "targetLengthBand": slot.get("targetLengthBand"),
+                    "minImageAssets": slot.get("minImageAssets"),
+                    "status": status,
+                    "selectedAssignmentId": selected_assignment_id,
+                    "candidateCount": len(candidates),
+                    "candidates": candidates,
+                }
+            )
+        section_entry["slots"] = slot_rows
+        section_entry["counts"]["slots"] = len(slot_rows)
+        section_entry["counts"]["filledSlots"] = filled_slots
+        section_entry["counts"]["unresolvedSlots"] = max(len(slot_rows) - filled_slots, 0)
+    all_slots = [slot for section_entry in sections.values() for slot in section_entry.get("slots", [])]
     return {
         "ok": True,
         "command": "story-budget output",
@@ -1596,8 +1708,10 @@ def story_budget_output(
         "editionId": edition_id or None,
         "coverageKey": coverage_key or None,
         "sections": list(sections.values()),
+        "slots": all_slots,
         "summary": {
             "sectionCount": len(sections),
+            "slotCount": len(all_slots),
             "assignmentCount": len(filtered),
             "createsItemOrEditionItem": False,
         },
@@ -1690,7 +1804,68 @@ def assignment_records(
                 now=now,
                 metadata={"signalId": signal.get("signalId"), "coverageKey": signal.get("coverageKey")},
             )))
+    slot_target = (_metadata(assignment) or {}).get("slotTarget") or {}
+    slot_id = slot_target.get("slotId")
+    slot_lineage_id = slot_target.get("slotLineageId") or slot_id
+    if slot_id:
+        records.append(_record("SemanticRelation", semantic_relation(
+            predicate="targets_slot",
+            subject_kind="assignment",
+            subject_id=assignment["id"],
+            object_kind="editionSlot",
+            object_id=slot_id,
+            object_lineage_id=slot_lineage_id,
+            rank=1,
+            classifier_id=assignment.get("classifierId"),
+            import_run_id=assignment.get("importRunId"),
+            now=now,
+            metadata={
+                "slotId": slot_id,
+                "slotRank": slot_target.get("slotRank"),
+                "sectionKey": slot_target.get("sectionKey"),
+                "candidateRank": slot_target.get("candidateRank"),
+                "dispatchCount": slot_target.get("dispatchCount"),
+            },
+        )))
     return records
+
+
+def build_edition_slots(
+    *,
+    edition: dict[str, Any],
+    resolved_sections: list[dict[str, Any]],
+    section_budgets: dict[str, int],
+    run_id: str,
+    now: str,
+) -> list[dict[str, Any]]:
+    slots: list[dict[str, Any]] = []
+    for section in resolved_sections:
+        section_key = section["id"]
+        slot_count = max(1, int(section_budgets.get(section_key, DEFAULT_SECTION_BUDGETS.get(section_key, 1))))
+        for rank in range(1, slot_count + 1):
+            slot_lineage_id = f"edition-slot-{_safe_id(edition['id'])}-{_safe_id(section_key)}-{rank:02d}"
+            slots.append(
+                {
+                    "id": f"{slot_lineage_id}-v1",
+                    "editionId": edition["id"],
+                    "sectionKey": section_key,
+                    "slotRank": rank,
+                    "targetType": "article",
+                    "targetLengthBand": "standard",
+                    "minImageAssets": 1,
+                    "status": "assigned",
+                    "selectedAssignmentId": None,
+                    "metadata": {
+                        "slotLineageId": slot_lineage_id,
+                        "editionLineageId": edition.get("lineageId"),
+                        "sectionTitle": section.get("title"),
+                        "runId": run_id,
+                    },
+                    "createdAt": now,
+                    "updatedAt": now,
+                }
+            )
+    return slots
 
 
 def edition_record(*, date: str, section_budgets: dict[str, int], run_id: str, now: str) -> dict[str, Any]:
@@ -1884,6 +2059,9 @@ def reporting_assignment_record(**kwargs: Any) -> dict[str, Any]:
         research_lens=section_research_lens(section["id"]),
         source_research_assignment_id=(kwargs.get("source_research_assignment") or {}).get("id"),
         slot_target={
+            "slotId": (kwargs.get("assigned_slot") or {}).get("id"),
+            "slotLineageId": ((kwargs.get("assigned_slot") or {}).get("metadata") or {}).get("slotLineageId"),
+            "slotRank": ((kwargs.get("assigned_slot") or {}).get("slotRank") or ((kwargs["candidate_rank"] - 1) % max(kwargs["slots"], 1)) + 1),
             "sectionKey": section["id"],
             "slots": kwargs["slots"],
             "candidateRank": kwargs["candidate_rank"],
@@ -2134,13 +2312,14 @@ def load_live_state(*, models: list[str] | None = None) -> dict[str, list[dict[s
 
 def load_story_budget_state(*, run_id: str = "") -> dict[str, list[dict[str, Any]]]:
     if not run_id:
-        return load_live_state(models=["Edition", "Assignment", "AssignmentEvent", "Message", "SemanticRelation", "ModelAttachment", "Item", "EditionItem", "NewsroomSection"])
+        return load_live_state(models=["Edition", "Assignment", "AssignmentEvent", "Message", "SemanticRelation", "ModelAttachment", "Item", "EditionItem", "EditionSlot", "NewsroomSection"])
     assignments = _list_assignments_by_import_run(run_id)
     relations: list[dict[str, Any]] = []
     events: list[dict[str, Any]] = []
     messages_by_id: dict[str, dict[str, Any]] = {}
     attachments: list[dict[str, Any]] = []
     items_by_id: dict[str, dict[str, Any]] = {}
+    slots_by_id: dict[str, dict[str, Any]] = {}
     for assignment in assignments:
         assignment_id = assignment.get("id")
         if not assignment_id:
@@ -2151,6 +2330,10 @@ def load_story_budget_state(*, run_id: str = "") -> dict[str, list[dict[str, Any
         for relation in assignment_relations:
             relation_type = relation.get("relationTypeKey") or relation.get("predicate")
             if relation_type != "produces":
+                if relation_type == "targets_slot" and relation.get("objectKind") == "editionSlot":
+                    slot = _get_record("EditionSlot", relation.get("objectId"))
+                    if slot:
+                        slots_by_id[slot["id"]] = slot
                 continue
             if relation.get("objectKind") == "message":
                 message = _get_record("Message", relation.get("objectId"))
@@ -2169,6 +2352,7 @@ def load_story_budget_state(*, run_id: str = "") -> dict[str, list[dict[str, Any
         "modelAttachments": _dedupe_by_id(attachments),
         "items": list(items_by_id.values()),
         "editionItems": [],
+        "editionSlots": list(slots_by_id.values()),
         "newsroomSections": [],
     }
 
@@ -2579,6 +2763,17 @@ def _assignment_graph_metadata(assignment: dict[str, Any], relations_by_assignme
                 metadata["slotTarget"] = relation_metadata.get("slotTarget")
             if relation_metadata.get("angleDiversity"):
                 metadata["angleDiversity"] = relation_metadata.get("angleDiversity")
+        elif relation_type == "targets_slot":
+            slot_target = metadata.get("slotTarget") if isinstance(metadata.get("slotTarget"), dict) else {}
+            metadata["slotTarget"] = {
+                **slot_target,
+                "slotId": relation.get("objectId"),
+                "slotLineageId": relation.get("objectLineageId") or relation.get("objectId"),
+                "slotRank": relation_metadata.get("slotRank"),
+                "sectionKey": relation_metadata.get("sectionKey") or metadata.get("sectionKey"),
+                "candidateRank": relation_metadata.get("candidateRank"),
+                "dispatchCount": relation_metadata.get("dispatchCount"),
+            }
         elif relation_type == "derived_from" and relation.get("objectKind") == "assignment":
             metadata["sourceResearchAssignmentId"] = relation.get("objectId")
     return metadata
@@ -2889,6 +3084,7 @@ def _state_key(model_name: str) -> str:
         "SemanticRelation": "semanticRelations",
         "ModelAttachment": "modelAttachments",
         "EditionItem": "editionItems",
+        "EditionSlot": "editionSlots",
     }
     if model_name in irregular:
         return irregular[model_name]

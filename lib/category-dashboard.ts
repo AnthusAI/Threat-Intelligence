@@ -26,6 +26,7 @@ export function createEmptyCategorySteeringDashboard(): CategorySteeringDashboar
     semanticRelations: [],
     assignments: [],
     assignmentEvents: [],
+    editionSlots: [],
     doctrineRecords: [],
     newsroomSections: [],
     procedureDefinitions: [],

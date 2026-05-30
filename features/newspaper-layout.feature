@@ -479,6 +479,8 @@ Feature: Newspaper layout scenarios
     And I open the assignments newsroom at 1280 by 900
     When I switch assignments to Story Budget view
     Then the reporting story budget should show section "news" with 1 slot and 1 candidate
+    And the reporting story budget should map candidate "assignment-demo-reporting-news-001" to slot rank 1
+    And the reporting story budget should show section "news" with 0 filled slot and 1 unresolved slot
     And story budget candidate "assignment-demo-reporting-news-001" should show packet recommendation "hold"
     And story budget candidate "assignment-demo-reporting-news-001" should show risk and gap context
     When I open story budget candidate "assignment-demo-reporting-news-001"
@@ -488,6 +490,7 @@ Feature: Newspaper layout scenarios
     And assignment "assignment-demo-reporting-news-001" should not appear as an edition item
     When I review story budget candidate "assignment-demo-reporting-news-001" as "select"
     Then story budget candidate "assignment-demo-reporting-news-001" should show reporting decision "select"
+    And the reporting story budget should show section "news" with 1 filled slot and 0 unresolved slot
     And story budget candidate "assignment-demo-reporting-news-001" should show a copywriting assignment
     And no browser console errors should occur
 
@@ -721,9 +724,9 @@ Feature: Newspaper layout scenarios
     And no measured line should overlap solved furniture
     And no browser console errors should occur
 
-  Scenario: Theme-aware plant logo sources switch in dark mode
-    Given I open the "themed-plant-logo" layout scenario at 1280 by 900
-    Then the active page should swap plant logo image sources between light and dark theme
+  Scenario: Theme-aware raster image sources switch in dark mode
+    Given I open the "themed-ink-study" layout scenario at 1280 by 900
+    Then the active page should swap raster image sources between light and dark theme
     And no browser console errors should occur
 
   Scenario Outline: Article chrome does not overlap under responsive typography

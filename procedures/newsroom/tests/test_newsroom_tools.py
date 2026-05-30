@@ -970,7 +970,7 @@ return finish_research{
         self.assertEqual(result["value"]["research_packet"]["evidence_item_ids"], ["reference-1-v1"])
         self.assertEqual(result["value"]["research_packet"]["research_mode"], "internal_brief")
         self.assertEqual(result["value"]["research_packet"]["researchTrace"]["webSearches"], [])
-        self.assertEqual(result["value"]["research_record_plan"]["records"][0]["modelName"], "Message")
+        self.assertEqual(result["value"]["research_record_plan"]["message_persistence"], "outer_cli_layer")
         self.assertEqual(result["api_calls"], ["papyrus.knowledge.query", "papyrus.plan.assignment_research_packet"])
 
     def test_research_harness_applies_assignment_and_insight_knowledge_scope_defaults(self):
@@ -3180,8 +3180,13 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         )
 
         self.assertEqual(plan["summary"]["researchAssignmentCount"], 2)
+        self.assertEqual(plan["summary"]["slotCount"], 3)
         self.assertEqual(plan["summary"]["reportingAssignmentCount"], 5)
         self.assertFalse(any(record["modelName"] in {"Message", "Item", "EditionItem"} for record in plan["records"]))
+        self.assertEqual(
+            len([record for record in plan["records"] if record["modelName"] == "EditionSlot"]),
+            3,
+        )
         relation_types = {
             record["input"]["relationTypeKey"]
             for record in plan["records"]
@@ -3189,6 +3194,7 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         }
         self.assertIn("planned_for_edition", relation_types)
         self.assertIn("targets_section", relation_types)
+        self.assertIn("targets_slot", relation_types)
         self.assertIn("requests_work_on", relation_types)
         self.assertIn("targets_lane", relation_types)
         self.assertIn("derived_from", relation_types)
@@ -3297,12 +3303,22 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
             now="2026-05-21T12:00:00Z",
             metadata={},
         )
+        slot_relation = papyrus_coverage_theme.semantic_relation(
+            predicate="targets_slot",
+            subject_kind="assignment",
+            subject_id=assignment["id"],
+            object_kind="editionSlot",
+            object_id="edition-slot-edition-edition-2026-05-21-v1-arts-01-v1",
+            object_lineage_id="edition-slot-edition-edition-2026-05-21-v1-arts-01",
+            now="2026-05-21T12:00:00Z",
+            metadata={"slotRank": 1, "sectionKey": "arts", "candidateRank": 1},
+        )
         result = papyrus_coverage_theme.story_budget_output(
             run_id="coverage-theme-test",
             state={
                 "assignments": [assignment],
                 "messages": [message],
-                "semanticRelations": [relation],
+                "semanticRelations": [relation, slot_relation],
                 "assignmentEvents": [
                     {
                         "id": "assignment-event-review",
@@ -3315,14 +3331,34 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
                 "modelAttachments": [],
                 "items": [],
                 "editionItems": [],
+                "editionSlots": [
+                    {
+                        "id": "edition-slot-edition-edition-2026-05-21-v1-arts-01-v1",
+                        "editionId": "edition-edition-2026-05-21-v1",
+                        "sectionKey": "arts",
+                        "slotRank": 1,
+                        "targetType": "article",
+                        "targetLengthBand": "standard",
+                        "minImageAssets": 1,
+                        "status": "assigned",
+                        "selectedAssignmentId": None,
+                        "metadata": {},
+                        "createdAt": "2026-05-21T12:00:00Z",
+                        "updatedAt": "2026-05-21T12:00:00Z",
+                    }
+                ],
             },
         )
 
         self.assertEqual(result["summary"]["sectionCount"], 1)
+        self.assertEqual(result["summary"]["slotCount"], 1)
         section = result["sections"][0]
         self.assertEqual(section["sectionKey"], "arts")
         self.assertEqual(section["counts"]["reporting"], 1)
+        self.assertEqual(section["counts"]["slots"], 1)
         self.assertEqual(section["counts"]["held"], 1)
+        self.assertEqual(len(section["slots"]), 1)
+        self.assertEqual(section["slots"][0]["candidateCount"], 1)
         self.assertTrue(section["reportingCandidates"][0]["packetAvailable"])
 
 

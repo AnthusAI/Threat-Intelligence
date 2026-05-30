@@ -20,6 +20,7 @@ def load_edition_planning_state(client: PapyrusGraphQLAuthoringClient) -> dict[s
         "editions": client.safe_list_records("Edition"),
         "publishedEditions": client.safe_list_records("PublishedEdition"),
         "editionItems": client.safe_list_records("EditionItem"),
+        "editionSlots": client.safe_list_records("EditionSlot"),
         "categorySets": client.safe_list_records("CategorySet"),
         "categories": client.safe_list_records("Category"),
         "references": client.safe_list_records("Reference"),

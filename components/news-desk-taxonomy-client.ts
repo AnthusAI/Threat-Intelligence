@@ -23,6 +23,7 @@ import type {
   LexicalSteeringRuleRecord,
   AssignmentEventRecord,
   AssignmentRecord,
+  EditionSlotRecord,
   DoctrineRecord,
   NewsroomSectionRecord,
   ProcedureDefinitionRecord,
@@ -645,6 +646,7 @@ export async function loadEditorFullNewsDeskDashboard({ isAdmin }: { isAdmin: bo
     messages,
     semanticRelations,
     assignmentState,
+    editionSlots,
     newsroomSections,
     procedureData,
     userDirectory,
@@ -663,6 +665,7 @@ export async function loadEditorFullNewsDeskDashboard({ isAdmin }: { isAdmin: bo
     listUserPoolModel<MessageRecord>("Message"),
     listUserPoolModel<SemanticRelationRecord>("SemanticRelation"),
     loadEditorAssignmentsData(),
+    listOptionalUserPoolModel<EditionSlotRecord>("EditionSlot"),
     listOptionalUserPoolModel<NewsroomSectionRecord>("NewsroomSection"),
     procedureDataPromise,
     isAdmin ? loadUserDirectory() : Promise.resolve([]),
@@ -681,6 +684,12 @@ export async function loadEditorFullNewsDeskDashboard({ isAdmin }: { isAdmin: bo
   });
   const doctrineRecords = await loadDoctrineRecords(acceptedDoctrineCategories);
   const sortedNewsroomSections = sortNewsroomSections(newsroomSections);
+  const sortedEditionSlots = [...editionSlots].sort((left, right) => (
+    (left.editionId ?? "").localeCompare(right.editionId ?? "")
+    || (left.sectionKey ?? "").localeCompare(right.sectionKey ?? "")
+    || Number(left.slotRank ?? 0) - Number(right.slotRank ?? 0)
+    || (left.id ?? "").localeCompare(right.id ?? "")
+  ));
 
   return {
     canonicalCorpusId: canonicalCategorySet?.corpusId ?? selectCanonicalCorpus(sortedCorpora)?.id ?? null,
@@ -704,6 +713,7 @@ export async function loadEditorFullNewsDeskDashboard({ isAdmin }: { isAdmin: bo
     semanticRelations: semanticRelations.sort((left, right) => (right.score ?? 0) - (left.score ?? 0)),
     assignments: assignmentState.assignments,
     assignmentEvents: assignmentState.assignmentEvents,
+    editionSlots: sortedEditionSlots,
     doctrineRecords,
     newsroomSections: sortedNewsroomSections,
     procedureDefinitions: procedureData.definitions,
@@ -2076,6 +2086,7 @@ function sortProposals(proposals: CategorySteeringProposal[]): CategorySteeringP
     return (right.proposedAt ?? right.updatedAt ?? "").localeCompare(left.proposedAt ?? left.updatedAt ?? "");
   });
 }
+
 
 function keywordSortKey(keyword: CategoryKeywordRecord): string {
   return `${keyword.categorySetId}#${keyword.categoryKey}#${String(keyword.rank ?? 999999).padStart(6, "0")}#${keyword.normalizedKeyword}`;

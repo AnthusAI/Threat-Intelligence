@@ -297,6 +297,28 @@ relationTypes:
     isSymmetric: false
     isTransitive: false
     contextPackTags: [assignment_context, editing, publication]
+  - key: targets_slot
+    label: targets slot
+    inverseLabel: slot candidates
+    description: Links a reporting assignment to the edition slot it is competing to fill.
+    domain: editorial
+    allowedSubjectKinds: [assignment]
+    allowedObjectKinds: [editionSlot]
+    isDirectional: true
+    isSymmetric: false
+    isTransitive: false
+    contextPackTags: [assignment_context, editing, publication]
+  - key: selected_by
+    label: selected by
+    inverseLabel: selected slot
+    description: Links an edition slot to the reporting assignment selected for copywriting.
+    domain: workflow
+    allowedSubjectKinds: [editionSlot]
+    allowedObjectKinds: [assignment]
+    isDirectional: true
+    isSymmetric: false
+    isTransitive: false
+    contextPackTags: [assignment_context, editing, publication]
   - key: targets_topic
     label: targets topic
     inverseLabel: topic assignments
