@@ -44,7 +44,8 @@ REPORTING_ANGLE_LENSES = [
     {"key": "evidence-check", "label": "evidence check", "prompt": "what is confirmed, contested, or still needs verification"},
 ]
 THROUGH_PHASES = {"plan", "rotating_desk", "research", "reporting"}
-PLANNING_KNOWLEDGE_STATE_MODELS = ["Reference", "SemanticNode"]
+PLANNING_KNOWLEDGE_STATE_MODELS = ["Reference", "SemanticNode", "SemanticRelation"]
+DEFAULT_CONCEPT_REPORT_LIMIT = 12
 DEFAULT_TREND_WINDOW_DAYS = 30
 ROTATING_DESK_PROCEDURE_ALIAS = "edition-plan.rotating-desk"
 STOPWORDS = {
@@ -1364,10 +1365,12 @@ def _build_sections_dispatch_bundle(
         slots = max(1, int(section_budgets.get(section["id"], DEFAULT_SECTION_BUDGETS.get(section["id"], 1))))
         section_slots = slots_by_section.get(section["id"], [])
         dispatch_count = math.ceil(slots * 1.5)
+        concept_pool = list((signal or {}).get("conceptSnapshot", {}).get("rankedForDispatch") or [])
         for rank in range(1, dispatch_count + 1):
             angle = REPORTING_ANGLE_LENSES[(rank - 1) % len(REPORTING_ANGLE_LENSES)]
             slot_rank = ((rank - 1) % slots) + 1 if slots > 0 else 1
             assigned_slot = next((slot for slot in section_slots if slot.get("slotRank") == slot_rank), None)
+            concept = concept_pool[(rank - 1) % len(concept_pool)] if concept_pool else None
             reporting_assignment = reporting_assignment_record(
                 run_id=run_id,
                 date=date,
@@ -1386,6 +1389,7 @@ def _build_sections_dispatch_bundle(
                 assigned_slot=assigned_slot,
                 source_research_assignment=research_assignment,
                 signal=signal,
+                concept=concept,
                 now=now,
                 priority=priority_base + rank,
             )
@@ -2215,6 +2219,124 @@ def _coverage_gaps_from_knowledge_base_snapshot(
     return _coverage_gaps(topic, [])
 
 
+def summarize_concepts_for_planning(
+    *,
+    references: list[dict[str, Any]],
+    semantic_nodes: list[dict[str, Any]],
+    semantic_relations: list[dict[str, Any]],
+    corpus_key: str,
+    topic: str,
+    limit: int = DEFAULT_CONCEPT_REPORT_LIMIT,
+    now: str = "",
+) -> dict[str, Any]:
+    if not references or not semantic_nodes or not semantic_relations:
+        return {"popularity": [], "trending": [], "rankedForDispatch": []}
+    reports = build_concept_reports(
+        references=references,
+        semantic_nodes=semantic_nodes,
+        semantic_relations=semantic_relations,
+        corpus_key=corpus_key,
+        report_type="all",
+        limit=max(limit, 1),
+        trend_window_days=DEFAULT_TREND_WINDOW_DAYS,
+        pagerank_iterations=20,
+        pagerank_damping=0.85,
+        node_kinds=[],
+        max_nodes_per_reference=12,
+        now=now,
+    )
+    reports_by_type = {
+        str(report.get("reportType") or ""): report
+        for report in reports
+    }
+    popularity = list((reports_by_type.get("popularity") or {}).get("rankedConcepts") or [])
+    trending = list((reports_by_type.get("trending") or {}).get("rankedConcepts") or [])
+    topic_terms = _terms(topic)
+
+    def topic_relevance(concept: dict[str, Any]) -> int:
+        haystack = " ".join([
+            str(concept.get("displayName") or ""),
+            str(concept.get("nodeKey") or ""),
+        ]).lower()
+        return sum(1 for term in topic_terms if term in haystack)
+
+    ranked_for_dispatch: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for pool in (trending, popularity):
+        for concept in pool:
+            concept_id = str(concept.get("conceptId") or "")
+            if not concept_id or concept_id in seen:
+                continue
+            seen.add(concept_id)
+            ranked_for_dispatch.append({
+                **concept,
+                "topicRelevance": topic_relevance(concept),
+            })
+    ranked_for_dispatch.sort(
+        key=lambda row: (
+            -int(row.get("topicRelevance") or 0),
+            -float(row.get("score") or 0),
+            str(row.get("displayName") or ""),
+        ),
+    )
+    return {
+        "popularity": popularity[:limit],
+        "trending": trending[:limit],
+        "rankedForDispatch": ranked_for_dispatch[:limit],
+    }
+
+
+def _format_concept_planning_section(concept_snapshot: dict[str, Any], *, topic: str) -> list[str]:
+    if not concept_snapshot:
+        return []
+    popularity = list(concept_snapshot.get("popularity") or [])
+    trending = list(concept_snapshot.get("trending") or [])
+    if not popularity and not trending:
+        return []
+    lines = [
+        "",
+        "## Ranked concepts in corpus",
+        (
+            f"Knowledge-graph concepts most cited in accepted references "
+            f"(topic filter: **{topic}** where noted)."
+        ),
+    ]
+    if trending:
+        lines.append("")
+        lines.append("### Trending (30-day velocity)")
+        topic_terms = _terms(topic)
+        for concept in trending[:8]:
+            name = concept.get("displayName") or concept.get("conceptId")
+            recent = concept.get("recentDistinctReferenceCount")
+            score = concept.get("score")
+            haystack = f"{name} {concept.get('nodeKey') or ''}".lower()
+            rel = " · spine-related" if any(term in haystack for term in topic_terms) else ""
+            lines.append(
+                f"- **{name}** (velocity {score}, {recent} recent sources){rel}"
+            )
+    if popularity:
+        lines.append("")
+        lines.append("### Most referenced (corpus-wide)")
+        topic_terms = _terms(topic)
+        for concept in popularity[:8]:
+            name = concept.get("displayName") or concept.get("conceptId")
+            refs = concept.get("distinctReferenceCount")
+            score = concept.get("score")
+            haystack = f"{name} {concept.get('nodeKey') or ''}".lower()
+            rel = " · spine-related" if any(term in haystack for term in topic_terms) else ""
+            lines.append(f"- **{name}** ({refs} sources, score {score}){rel}")
+    dispatch_ranked = list(concept_snapshot.get("rankedForDispatch") or [])
+    if dispatch_ranked:
+        lines.append("")
+        lines.append("### Suggested concept hooks for reporting candidates")
+        for concept in dispatch_ranked[:10]:
+            name = concept.get("displayName") or concept.get("conceptId")
+            lines.append(
+                f"- {name} — use for a {topic} story with accountability, reader impact, or evidence-check angles"
+            )
+    return lines
+
+
 def _format_knowledge_base_kickoff_section(snapshot: dict[str, Any]) -> list[str]:
     if not snapshot:
         return []
@@ -2272,6 +2394,7 @@ def resolve_edition_theme_signal(
         return signal
     references = state.get("references") or []
     semantic_nodes = state.get("semanticNodes") or []
+    semantic_relations = state.get("semanticRelations") or []
     kb_snapshot = summarize_knowledge_base_for_planning(
         references=references,
         semantic_nodes=semantic_nodes,
@@ -2279,6 +2402,14 @@ def resolve_edition_theme_signal(
         topic=topic,
         category_key=category_key,
         sections=sections,
+        now=now,
+    )
+    concept_snapshot = summarize_concepts_for_planning(
+        references=references,
+        semantic_nodes=semantic_nodes,
+        semantic_relations=semantic_relations,
+        corpus_key=corpus_key,
+        topic=topic,
         now=now,
     )
     if references and corpus_key:
@@ -2295,6 +2426,7 @@ def resolve_edition_theme_signal(
         if ranked:
             resolved = dict(ranked[0])
             resolved["knowledgeBaseSnapshot"] = kb_snapshot
+            resolved["conceptSnapshot"] = concept_snapshot
             return resolved
     return {
         "signalId": f"signal-{_hash_short([corpus_key, topic, coverage_key])}",
@@ -2318,6 +2450,7 @@ def resolve_edition_theme_signal(
         "openQuestions": _open_questions(topic, sections),
         "suggestedAngles": _suggested_angles(topic, sections),
         "knowledgeBaseSnapshot": kb_snapshot,
+        "conceptSnapshot": concept_snapshot,
     }
 
 
@@ -2391,6 +2524,9 @@ def build_edition_theme_kickoff_draft(
     kb_snapshot = signal.get("knowledgeBaseSnapshot")
     if isinstance(kb_snapshot, dict):
         lines.extend(_format_knowledge_base_kickoff_section(kb_snapshot))
+    concept_snapshot = signal.get("conceptSnapshot")
+    if isinstance(concept_snapshot, dict):
+        lines.extend(_format_concept_planning_section(concept_snapshot, topic=primary_theme))
     if score_breakdown:
         lines.append("")
         lines.append("Signal mix (from trend report):")
@@ -2552,6 +2688,7 @@ def _reporting_dispatch_forum_body(
     edition_slots: list[dict[str, Any]],
     section_budgets: dict[str, int],
     section_titles: dict[str, str],
+    concept_snapshot: dict[str, Any] | None = None,
 ) -> str:
     slots_by_section: dict[str, list[dict[str, Any]]] = {}
     for slot in edition_slots:
@@ -2571,8 +2708,13 @@ def _reporting_dispatch_forum_body(
         f"- Edition spine: {topic}",
         f"- Coverage concept: `{coverage_key}`",
         "",
-        "## By desk",
     ]
+    if isinstance(concept_snapshot, dict) and concept_snapshot.get("rankedForDispatch"):
+        lines.extend(_format_concept_planning_section(concept_snapshot, topic=topic))
+        lines.append("")
+    lines.extend([
+        "## By desk",
+    ])
     if not section_keys:
         lines.append("- No reporting assignments were materialized for this pass.")
     for section_key in section_keys:
@@ -2601,8 +2743,10 @@ def _reporting_dispatch_forum_body(
             candidate_rank = slot_target.get("candidateRank") or "?"
             slot_rank = slot_target.get("slotRank") or "?"
             angle_label = angle.get("lensLabel") or angle.get("lensKey") or "angle"
+            concept_hook = (meta.get("conceptHook") or {}).get("displayName")
+            concept_suffix = f" · concept: {concept_hook}" if concept_hook else ""
             lines.append(
-                f"- Candidate {candidate_rank} → slot {slot_rank} ({angle_label}): {assignment.get('title')}"
+                f"- Candidate {candidate_rank} → slot {slot_rank} ({angle_label}){concept_suffix}: {assignment.get('title')}"
             )
     return "\n".join(lines).strip() + "\n"
 
@@ -2631,6 +2775,7 @@ def build_reporting_dispatch_forum_records(
     now: str,
     existing_threads: list[dict[str, Any]] | None = None,
     existing_messages: list[dict[str, Any]] | None = None,
+    concept_snapshot: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     edition_id = str(edition.get("id") or "")
     existing_threads = existing_threads or []
@@ -2668,6 +2813,8 @@ def build_reporting_dispatch_forum_records(
         last_message_id=str((existing_edition_thread or {}).get("lastMessageId") or ""),
     )
     sequence_number = _next_forum_sequence(thread_messages)
+    if concept_snapshot is None:
+        concept_snapshot = {}
     content = _reporting_dispatch_forum_body(
         topic=topic,
         coverage_key=coverage_key,
@@ -2675,6 +2822,7 @@ def build_reporting_dispatch_forum_records(
         edition_slots=edition_slots,
         section_budgets=section_budgets,
         section_titles=section_titles,
+        concept_snapshot=concept_snapshot,
     )
     message = forum_kickoff_message_record(
         thread=thread,
@@ -2786,6 +2934,14 @@ def append_reporting_dispatch_forum_records(
         state=state,
         pending_records=records,
     )
+    concept_snapshot = summarize_concepts_for_planning(
+        references=state.get("references") or [],
+        semantic_nodes=state.get("semanticNodes") or [],
+        semantic_relations=state.get("semanticRelations") or [],
+        corpus_key=str(plan.get("corpusKey") or ""),
+        topic=topic,
+        now=now,
+    )
     dispatch_forum = build_reporting_dispatch_forum_records(
         edition=edition,
         topic=topic,
@@ -2806,6 +2962,7 @@ def append_reporting_dispatch_forum_records(
         now=now,
         existing_threads=state.get("messageThreads") or [],
         existing_messages=thread_messages,
+        concept_snapshot=concept_snapshot,
     )
     if dispatch_forum.get("records"):
         records.extend(dispatch_forum["records"])
@@ -4696,6 +4853,8 @@ def reporting_assignment_record(**kwargs: Any) -> dict[str, Any]:
     category_key = kwargs["category_key"]
     now = kwargs["now"]
     angle = kwargs["angle"]
+    concept = kwargs.get("concept") if isinstance(kwargs.get("concept"), dict) else None
+    concept_name = str((concept or {}).get("displayName") or "").strip()
     metadata = assignment_metadata(
         kind="coverage_theme.reporting_assignment",
         run_id=run_id,
@@ -4730,7 +4889,24 @@ def reporting_assignment_record(**kwargs: Any) -> dict[str, Any]:
             "duplicateAnglePenalty": 0,
         },
         signal=kwargs.get("signal"),
+        concept_hook={
+            "conceptId": (concept or {}).get("conceptId"),
+            "displayName": concept_name,
+            "score": (concept or {}).get("score"),
+            "metric": (concept or {}).get("metric"),
+        } if concept_name else None,
     )
+    if concept_name:
+        title = f"{concept_name}: {topic} ({angle['label']})"
+        summary = f"Reporting candidate on **{concept_name}** in the {topic} edition spine ({section['title']}, {angle['label']})."
+        brief = (
+            f"Build a private reporting context packet anchored on concept **{concept_name}**. "
+            f"Edition spine: {topic}. Angle: {angle['prompt']}."
+        )
+    else:
+        title = f"Report {topic} for {section['title']}: {angle['label']}"
+        summary = f"Reporting candidate on {topic} for {section['title']}, angle: {angle['label']}."
+        brief = f"Build a private reporting context packet. Angle: {angle['prompt']}."
     queue_key = f"coverage-theme:{date}:section:{section['id']}:lane:reporting"
     return {
         "id": f"assignment-coverage-theme-reporting-{_safe_id(run_id)}-{_safe_id(section['id'])}-{kwargs['candidate_rank']:02d}-{_safe_id(angle['key'])}",
@@ -4739,9 +4915,9 @@ def reporting_assignment_record(**kwargs: Any) -> dict[str, Any]:
         "queueStatusKey": f"{queue_key}#open",
         "status": "open",
         "priority": kwargs["priority"],
-        "title": f"Report {topic} for {section['title']}: {angle['label']}",
-        "summary": f"Reporting candidate on {topic} for {section['title']}, angle: {angle['label']}.",
-        "brief": f"Build a private reporting context packet. Angle: {angle['prompt']}.",
+        "title": title,
+        "summary": summary,
+        "brief": brief,
         "instructions": f"Use the {section['title']} doctrine and section research packet. Produce reporting_context_packet only.",
         "metadata": metadata,
         "corpusId": (category_set or {}).get("corpusId") or f"knowledge-corpus-{_safe_id(corpus_key)}",
@@ -4811,6 +4987,7 @@ def assignment_metadata(**kwargs: Any) -> dict[str, Any]:
         "signalId": signal.get("signalId"),
         "signalRank": signal.get("rank"),
         "signalWhyNow": signal.get("whyNow"),
+        "conceptHook": kwargs.get("concept_hook"),
         "expectedOutput": kwargs["expected_output"],
         "publicReaderVisible": False,
         "createdBy": "papyrus coverage-themes run",
