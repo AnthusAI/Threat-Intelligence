@@ -140,23 +140,28 @@ storageBackupPlan.addSelection("PapyrusStorageBackupSelection", {
 });
 
 if (enableInboundEmail) {
-  const receiveLambda = backend.sesInboundReceive.resources.lambda as LambdaFunction;
-  const processorLambda = backend.emailSubmissionProcessor.resources.lambda as LambdaFunction;
+  if (!backend.sesInboundReceive || !backend.emailSubmissionProcessor) {
+    throw new Error("Inbound email is enabled but sesInboundReceive/emailSubmissionProcessor were not registered.");
+  }
+  const inboundReceive = backend.sesInboundReceive;
+  const inboundProcessor = backend.emailSubmissionProcessor;
+  const receiveLambda = inboundReceive.resources.lambda as LambdaFunction;
+  const processorLambda = inboundProcessor.resources.lambda as LambdaFunction;
   const graphqlEndpoint = backend.data.resources.cfnResources.cfnGraphqlApi.attrGraphQlUrl;
   const inboundRecipients = inboundEmailLocalParts.map((localPart) => `${localPart}@${inboundEmailDomain}`);
 
-  backend.sesInboundReceive.addEnvironment(
+  inboundReceive.addEnvironment(
     "PAPYRUS_EMAIL_SUBMISSION_PROCESSOR_FUNCTION_NAME",
     processorLambda.functionName,
   );
-  backend.sesInboundReceive.addEnvironment("PAPYRUS_INBOUND_EMAIL_DOMAIN", inboundEmailDomain);
-  backend.sesInboundReceive.addEnvironment("PAPYRUS_INBOUND_EMAIL_LOCAL_PARTS", inboundEmailLocalParts.join(","));
-  backend.sesInboundReceive.addEnvironment("PAPYRUS_INBOUND_EMAIL_CORPUS_KEY", inboundEmailCorpusKey);
-  backend.sesInboundReceive.addEnvironment("PAPYRUS_GRAPHQL_ENDPOINT", graphqlEndpoint);
+  inboundReceive.addEnvironment("PAPYRUS_INBOUND_EMAIL_DOMAIN", inboundEmailDomain);
+  inboundReceive.addEnvironment("PAPYRUS_INBOUND_EMAIL_LOCAL_PARTS", inboundEmailLocalParts.join(","));
+  inboundReceive.addEnvironment("PAPYRUS_INBOUND_EMAIL_CORPUS_KEY", inboundEmailCorpusKey);
+  inboundReceive.addEnvironment("PAPYRUS_GRAPHQL_ENDPOINT", graphqlEndpoint);
 
-  backend.emailSubmissionProcessor.addEnvironment("PAPYRUS_JWT_SECRET", secret("PAPYRUS_JWT_SECRET"));
-  backend.emailSubmissionProcessor.addEnvironment("PAPYRUS_INBOUND_EMAIL_CORPUS_KEY", inboundEmailCorpusKey);
-  backend.emailSubmissionProcessor.addEnvironment("PAPYRUS_GRAPHQL_ENDPOINT", graphqlEndpoint);
+  inboundProcessor.addEnvironment("PAPYRUS_JWT_SECRET", secret("PAPYRUS_JWT_SECRET"));
+  inboundProcessor.addEnvironment("PAPYRUS_INBOUND_EMAIL_CORPUS_KEY", inboundEmailCorpusKey);
+  inboundProcessor.addEnvironment("PAPYRUS_GRAPHQL_ENDPOINT", graphqlEndpoint);
 
   receiveLambda.addToRolePolicy(
     new PolicyStatement({

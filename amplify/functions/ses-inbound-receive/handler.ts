@@ -232,13 +232,7 @@ function parseLocalParts(value: string): string[] {
 async function getDataClient(): Promise<DataClient> {
   if (!clientPromise) {
     clientPromise = (async () => {
-      const { resourceConfig, libraryOptions } = await getAmplifyDataClientConfig({
-        AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID,
-        AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY,
-        AWS_SESSION_TOKEN: process.env.AWS_SESSION_TOKEN,
-        AWS_REGION: process.env.AWS_REGION,
-        AMPLIFY_DATA_DEFAULT_NAME: process.env.AMPLIFY_DATA_DEFAULT_NAME,
-      } as NodeJS.ProcessEnv);
+      const { resourceConfig, libraryOptions } = await getAmplifyDataClientConfig(process.env as never);
       Amplify.configure(resourceConfig, libraryOptions);
       return generateClient<Schema>();
     })();

@@ -27,20 +27,8 @@ import {
   type ReaderMotionSetting,
 } from "./reader-settings";
 import { Conversation, ConversationContent, ConversationScrollButton } from "./ai-elements/conversation";
-import {
-  ModelSelector,
-  ModelSelectorContent,
-  ModelSelectorEmpty,
-  ModelSelectorGroup,
-  ModelSelectorInput,
-  ModelSelectorItem,
-  ModelSelectorList,
-  ModelSelectorLogo,
-  ModelSelectorLogoGroup,
-  ModelSelectorName,
-  ModelSelectorTrigger,
-} from "./ai-elements/model-selector";
-import { PromptInput, PromptInputBody, PromptInputButton, PromptInputFooter, type PromptInputMessage, PromptInputSubmit, PromptInputTextarea, PromptInputTools } from "./ai-elements/prompt-input";
+import { ModelSelector } from "./ai-elements/model-selector";
+import { PromptInput, PromptInputBody, PromptInputFooter, type PromptInputMessage, PromptInputSubmit, PromptInputTextarea, PromptInputTools } from "./ai-elements/prompt-input";
 import { Shimmer } from "./ai-elements/shimmer";
 import { Suggestion, Suggestions } from "./ai-elements/suggestion";
 import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from "./ai-elements/tool";
@@ -425,7 +413,6 @@ function ConsolePanel({ actorEmail, actorLabel, onClose }: { actorEmail: string 
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState(DEFAULT_CONSOLE_MODEL);
-  const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
   const [motionSetting, setMotionSetting] = useState<ReaderMotionSetting>("standard");
   const [authorIdentity, setAuthorIdentity] = useState<ConsoleAuthorIdentity>({ avatarHash: null, email: null, userProfileId: null });
   const [fallbackAvatarHash, setFallbackAvatarHash] = useState<string | null>(null);
@@ -925,7 +912,6 @@ function ConsolePanel({ actorEmail, actorLabel, onClose }: { actorEmail: string 
       activeStreamingAssistant.updatedAt ?? activeStreamingAssistant.createdAt,
     ].join(":");
   }, [displayMessages]);
-  const selectedModelOption = CONSOLE_MODEL_OPTIONS.find((option) => option.value === selectedModel) ?? CONSOLE_MODEL_OPTIONS[0];
 
   return (
     <div className="papyrus-console__panel">
@@ -1070,34 +1056,15 @@ function ConsolePanel({ actorEmail, actorLabel, onClose }: { actorEmail: string 
         <PromptInputFooter>
           <PromptInputTools>
             <ModelSelector
-              onOpenChange={setModelSelectorOpen}
-              open={modelSelectorOpen}
-            >
-              <ModelSelectorTrigger
-                render={<PromptInputButton disabled={sending} />}
-              >
-                <ModelSelectorLogo provider={selectedModelOption.provider} />
-                <ModelSelectorName>{selectedModelOption.label}</ModelSelectorName>
-              </ModelSelectorTrigger>
-              <ModelSelectorContent title="Choose Model">
-                <ModelSelectorInput placeholder="Search models..." />
-                <ModelSelectorList>
-                  <ModelSelectorEmpty>No models found.</ModelSelectorEmpty>
-                  <ModelSelectorGroup heading="OpenAI">
-                    {CONSOLE_MODEL_OPTIONS.map((option) => (
-                      <ModelSelectorItem key={option.value} onSelect={() => handleModelChange(option.value)} value={option.value}>
-                        <ModelSelectorLogo provider={option.provider} />
-                        <ModelSelectorName>{option.label}</ModelSelectorName>
-                        <ModelSelectorLogoGroup>
-                          <ModelSelectorLogo provider={option.provider} />
-                        </ModelSelectorLogoGroup>
-                        {selectedModel === option.value ? <CheckIcon className="ml-auto size-4" /> : <span className="ml-auto size-4" />}
-                      </ModelSelectorItem>
-                    ))}
-                  </ModelSelectorGroup>
-                </ModelSelectorList>
-              </ModelSelectorContent>
-            </ModelSelector>
+              aria-label="Console model"
+              disabled={sending}
+              onValueChange={handleModelChange}
+              options={CONSOLE_MODEL_OPTIONS.map((option) => ({
+                value: option.value,
+                label: option.label,
+              }))}
+              value={selectedModel}
+            />
           </PromptInputTools>
           <PromptInputSubmit
             disabled={!draft.trim() || sending}

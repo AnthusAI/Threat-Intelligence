@@ -162,18 +162,18 @@ export async function lookupRegisteredUserProfileId(client: DataClient, senderEm
 
   const profiles = await listAllRecords(client.models.UserProfile);
   for (const profile of profiles) {
-    if (normalizeEmailAddress(profile.email) === normalized) {
+    if (normalizeEmailAddress(String(profile.email ?? "")) === normalized) {
       return String(profile.id ?? "").trim() || null;
     }
   }
   return null;
 }
 
-async function listAllRecords(model: { list?: (options?: { limit?: number; nextToken?: string | null }) => Promise<{ data?: Array<Record<string, unknown>> | null; nextToken?: string | null }> }): Promise<Array<Record<string, unknown>>> {
+async function listAllRecords(model: { list?: (options?: { limit?: number; nextToken?: string | null | undefined }) => Promise<{ data?: Array<Record<string, unknown>> | null; nextToken?: string | null }> }): Promise<Array<Record<string, unknown>>> {
   const items: Array<Record<string, unknown>> = [];
-  let nextToken: string | null | undefined = undefined;
+  let nextToken: string | null | undefined;
   do {
-    const response = await model.list?.({ limit: 200, nextToken });
+    const response = await model.list?.({ limit: 200, nextToken: nextToken ?? undefined });
     items.push(...(response?.data ?? []));
     nextToken = response?.nextToken;
   } while (nextToken);

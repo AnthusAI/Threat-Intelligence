@@ -52,6 +52,7 @@ import {
 import { listConsoleThreads } from "../lib/console-chat-client";
 import { buildNewsroomKnowledgeQueryInput, type NewsroomKnowledgeQueryAnchor as KnowledgeQueryAnchor, type NewsroomKnowledgeQueryTarget as KnowledgeQueryTarget } from "../lib/newsroom-knowledge-query-request";
 import { NewsroomConsoleProgressToggle, PapyrusConsoleChatIcon, usePapyrusConsole } from "./papyrus-console-shell";
+import { useResolvedPapyrusTheme } from "./use-resolved-papyrus-theme";
 import { useOptionalNewsDeskClient } from "./news-desk-client-provider";
 import type { ReaderAuthSnapshot } from "./reader-auth-state";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";

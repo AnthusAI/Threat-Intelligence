@@ -1,6 +1,6 @@
-import type { HydratedModelPayload } from "./model-payloads";
+import type { HydratedModelPayload } from "./category-repository";
 import type { ReferenceRecord } from "./category-repository";
-import type { SemanticGraph } from "./semantic-graph";
+import type { SemanticGraphSnapshot } from "./semantic-graph";
 
 function metadataRecord(value: unknown): Record<string, unknown> | null {
   if (typeof value === "string") {
@@ -23,7 +23,7 @@ function normalizeDisplayText(value: unknown): string | null {
 export function referenceMetadataField(
   payload: HydratedModelPayload | null,
   fallback: unknown,
-  key: "subtitle" | "summary",
+  key: "title" | "subtitle" | "summary",
 ): string | null {
   const payloadRecord = metadataRecord(payload?.json);
   if (payloadRecord) {
@@ -34,7 +34,7 @@ export function referenceMetadataField(
   return fallbackRecord ? normalizeDisplayText(fallbackRecord[key]) : null;
 }
 
-export function referenceSummaryFromGraph(graph: SemanticGraph | null | undefined, lineageId: string): string | null {
+export function referenceSummaryFromGraph(graph: SemanticGraphSnapshot | null | undefined, lineageId: string): string | null {
   if (!graph || !lineageId) return null;
   for (const message of graph.summariesFor("reference", lineageId)) {
     const summary = normalizeDisplayText(message.summary);
@@ -46,7 +46,7 @@ export function referenceSummaryFromGraph(graph: SemanticGraph | null | undefine
 }
 
 export function referenceDisplaySummary(
-  graph: SemanticGraph | null | undefined,
+  graph: SemanticGraphSnapshot | null | undefined,
   lineageId: string,
   payload: HydratedModelPayload | null,
   fallback?: unknown,
