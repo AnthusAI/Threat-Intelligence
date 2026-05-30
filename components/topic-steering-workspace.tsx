@@ -518,7 +518,7 @@ const TAILORED_TOPIC_PROPOSAL_KINDS = new Set([
 ]);
 
 const NEWS_DESK_TABS: Array<{ id: NewsDeskTab; label: string; detail: string; href: string }> = [
-  { id: "messages", label: "Forum", detail: "Forum", href: "/newsroom/messages" },
+  { id: "messages", label: "Messages", detail: "Commentary", href: "/newsroom/messages" },
   { id: "assignments", label: "Assignments", detail: "Work Desk", href: "/newsroom/assignments" },
   { id: "references", label: "References", detail: "Knowledge Base", href: "/newsroom/references" },
   { id: "topics", label: "Topics", detail: "Taxonomy", href: "/newsroom/topics" },
@@ -3382,15 +3382,6 @@ function OverviewDeskView({
 
   useEffect(() => {
     let active = true;
-    const preferred = overviewEditions.find((edition) => edition.isNearestUpcoming) ?? null;
-    if (preferred) {
-      if (!selectedEditionId || !overviewEditions.some((edition) => edition.editionId === selectedEditionId)) {
-        setSelectedEditionId(preferred.editionId);
-      }
-      return () => {
-        active = false;
-      };
-    }
     if (!overviewEditions.length) {
       setSelectedEditionId("");
       return () => {
@@ -3402,11 +3393,10 @@ function OverviewDeskView({
         active = false;
       };
     }
-    void (async () => {
-      const fallback = await resolveLatestActiveForumEdition(overviewEditions.map((edition) => edition.editionId));
-      if (!active) return;
-      setSelectedEditionId(fallback ?? overviewEditions[0].editionId);
-    })();
+    void resolveDefaultForumEditionId(overviewEditions).then((editionId) => {
+      if (!active || !editionId) return;
+      setSelectedEditionId(editionId);
+    });
     return () => {
       active = false;
     };
@@ -3567,6 +3557,8 @@ function OverviewDeskView({
             <NewsroomDeskSectionLede
               headingId="overview-edition-forum-title"
               section="messages"
+              headline="Forum"
+              lede="Edition and section threads for coordinating the upcoming issue."
               controls={null}
             />
           )}
@@ -3835,6 +3827,17 @@ function dayDeltaFromToday(dateText: string | null, today: Date): number | null 
   const parsed = new Date(`${dateText}T00:00:00.000Z`);
   if (Number.isNaN(parsed.valueOf())) return null;
   return Math.round((parsed.valueOf() - today.valueOf()) / 86400000);
+}
+
+async function resolveDefaultForumEditionId(
+  overviewEditions: ResolvedOverviewEdition[],
+): Promise<string | null> {
+  if (!overviewEditions.length) return null;
+  const editionIds = overviewEditions.map((edition) => edition.editionId);
+  const latestActive = await resolveLatestActiveForumEdition(editionIds);
+  if (latestActive) return latestActive;
+  const nearestUpcoming = overviewEditions.find((edition) => edition.isNearestUpcoming)?.editionId;
+  return nearestUpcoming ?? overviewEditions[0].editionId;
 }
 
 async function resolveLatestActiveForumEdition(editionIds: string[]): Promise<string | null> {
@@ -7213,17 +7216,21 @@ function ReferencesDeskView({
 function NewsroomDeskSectionLede({
   controls,
   headingId,
+  headline,
+  lede,
   section,
 }: {
   controls?: ReactNode;
   headingId: string;
+  headline?: string;
+  lede?: string;
   section: NewsDeskTab;
 }) {
   return (
     <section className="news-desk-lede news-desk-assignment-lede" aria-labelledby={headingId}>
       <div>
-        <h2 id={headingId}>{formatDeskSectionHeadline(section)}</h2>
-        <p>{formatDeskSectionLede(section)}</p>
+        <h2 id={headingId}>{headline ?? formatDeskSectionHeadline(section)}</h2>
+        <p>{lede ?? formatDeskSectionLede(section)}</p>
       </div>
       {controls ?? null}
     </section>
@@ -7299,28 +7306,59 @@ function MessagesDeskView({
       active = false;
     };
   }, [isDemo, kindFilter]);
-  const forumEditionIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const assignment of assignments) {
-      const metadata = metadataRecord(assignment.metadata);
-      const editionId = normalizeEditionIdFromAssignment(assignment, metadata);
-      if (editionId) ids.add(editionId);
+  const [messageOverviewEditions, setMessageOverviewEditions] = useState<ResolvedOverviewEdition[]>([]);
+  useEffect(() => {
+    if (isDemo) {
+      setMessageOverviewEditions([]);
+      return;
     }
-    return Array.from(ids).sort((left, right) => right.localeCompare(left));
-  }, [assignments]);
+    let active = true;
+    void loadEditorOverviewEditionData()
+      .then((data) => {
+        if (!active) return;
+        setMessageOverviewEditions(resolveOverviewEditions({
+          editions: data.editions,
+          editionSlots: data.editionSlots,
+          assignments: data.assignments,
+        }));
+      })
+      .catch(() => {
+        if (!active) return;
+        setMessageOverviewEditions(resolveOverviewEditions({
+          editions: [],
+          editionSlots: [],
+          assignments,
+        }));
+      });
+    return () => {
+      active = false;
+    };
+  }, [assignments, isDemo]);
   const availableSections = useMemo(
     () => sortNewsroomSections(newsroomSections).filter((section) => section.enabled !== false),
     [newsroomSections],
   );
   useEffect(() => {
-    if (!forumEditionIds.length) {
+    let active = true;
+    if (!messageOverviewEditions.length) {
       setSelectedForumEditionId("");
-      return;
+      return () => {
+        active = false;
+      };
     }
-    if (!selectedForumEditionId || !forumEditionIds.includes(selectedForumEditionId)) {
-      setSelectedForumEditionId(forumEditionIds[0]);
+    if (selectedForumEditionId && messageOverviewEditions.some((edition) => edition.editionId === selectedForumEditionId)) {
+      return () => {
+        active = false;
+      };
     }
-  }, [forumEditionIds, selectedForumEditionId]);
+    void resolveDefaultForumEditionId(messageOverviewEditions).then((editionId) => {
+      if (!active || !editionId) return;
+      setSelectedForumEditionId(editionId);
+    });
+    return () => {
+      active = false;
+    };
+  }, [messageOverviewEditions, selectedForumEditionId]);
   useEffect(() => {
     if (!availableSections.length) {
       setSelectedForumSectionId("");
@@ -7577,9 +7615,9 @@ function MessagesDeskView({
                       value={selectedForumEditionId}
                       onChange={(event) => setSelectedForumEditionId(event.target.value)}
                     >
-                      {forumEditionIds.length ? forumEditionIds.map((editionId) => (
-                        <option key={editionId} value={editionId}>{editionId}</option>
-                      )) : <option value="">No edition in assignment context</option>}
+                      {messageOverviewEditions.length ? messageOverviewEditions.map((edition) => (
+                        <option key={edition.editionId} value={edition.editionId}>{edition.label}</option>
+                      )) : <option value="">No editions found</option>}
                     </select>
                     <select
                       aria-label="Forum scope"
@@ -13726,7 +13764,7 @@ function formatDeskSectionHeadline(section: NewsDeskTab): string {
   if (section === "topics") return "Topics";
   if (section === "concepts") return "Concepts";
   if (section === "references") return "References";
-  if (section === "messages") return "Forum";
+  if (section === "messages") return "Messages";
   if (section === "assignments") return "Assignments";
   if (section === "administration") return "Administration";
   return "Newsroom";
@@ -13737,7 +13775,7 @@ function formatDeskSectionLede(section: NewsDeskTab): string {
   if (section === "topics") return "Review and shape the subject areas the newsroom covers.";
   if (section === "concepts") return "Browse people, organizations, places, and ideas found in the source material.";
   if (section === "references") return "Review source materials before they become usable evidence.";
-  if (section === "messages") return "";
+  if (section === "messages") return "Read notes, rationales, forum threads, curation decisions, and other work products from people and agents.";
   if (section === "assignments") return "Create, filter, claim, and complete newsroom work.";
   if (section === "administration") return "Manage users, roles, doctrine, configurable newspaper sections, and newsroom procedures.";
   return "";

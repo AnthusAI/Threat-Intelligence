@@ -374,7 +374,7 @@ Then("the newsroom should show the knowledge overview", async function () {
   await page.locator("[data-newsroom-overview-section='messages']").waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("[data-newsroom-overview-section='assignments']").waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("[data-newsroom-overview-section='references']").waitFor({ state: "visible", timeout: 10_000 });
-  await page.locator("[data-newsroom-overview-section='messages'] h2", { hasText: "Messages" }).waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator("[data-newsroom-overview-section='messages'] h2", { hasText: "Forum" }).waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("[data-newsroom-overview-section='assignments'] h2", { hasText: "Assignments" }).waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("[data-newsroom-overview-section='references'] h2", { hasText: "References" }).waitFor({ state: "visible", timeout: 10_000 });
 });
