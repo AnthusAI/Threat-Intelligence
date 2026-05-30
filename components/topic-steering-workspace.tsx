@@ -4,7 +4,7 @@ import { Hub } from "aws-amplify/utils";
 import { fetchAuthSession } from "aws-amplify/auth";
 import { gsap } from "gsap";
 import { Flip } from "gsap/Flip";
-import { ArchiveIcon, RefreshCwIcon } from "lucide-react";
+import { ArchiveIcon, MoreHorizontalIcon, RefreshCwIcon } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -17,6 +17,7 @@ import {
   loadEditorCategoryTreeState,
   loadEditorDoctrineRecordsData,
   loadEditorFullNewsDeskDashboard,
+  loadEditorOverviewEditionData,
   loadEditorMessagesData,
   loadReferenceAttachmentsForLineageId,
   loadReferenceCitationRelations,
@@ -35,6 +36,7 @@ import {
   loadNewsroomSemanticNodePage,
   appendForumThreadMessageRecord,
   createSectionForumThreadRecord,
+  deleteForumThreadMessageRecord,
   ensureEditionForumThreadRecord,
   publishProcedureVersionRecord,
   runNewsroomKnowledgeQuery,
@@ -53,9 +55,16 @@ import { NewsroomConsoleProgressToggle, PapyrusConsoleChatIcon, usePapyrusConsol
 import { useOptionalNewsDeskClient } from "./news-desk-client-provider";
 import type { ReaderAuthSnapshot } from "./reader-auth-state";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
 import type {
   AssignmentEventRecord,
   AssignmentRecord,
+  EditionRecord,
   EditionSlotRecord,
   AnalysisProfileSummary,
   CategorySteeringArtifact,
@@ -509,7 +518,7 @@ const TAILORED_TOPIC_PROPOSAL_KINDS = new Set([
 ]);
 
 const NEWS_DESK_TABS: Array<{ id: NewsDeskTab; label: string; detail: string; href: string }> = [
-  { id: "messages", label: "Messages", detail: "Commentary", href: "/newsroom/messages" },
+  { id: "messages", label: "Forum", detail: "Forum", href: "/newsroom/messages" },
   { id: "assignments", label: "Assignments", detail: "Work Desk", href: "/newsroom/assignments" },
   { id: "references", label: "References", detail: "Knowledge Base", href: "/newsroom/references" },
   { id: "topics", label: "Topics", detail: "Taxonomy", href: "/newsroom/topics" },
@@ -3270,13 +3279,72 @@ function OverviewDeskView({
   newsroomSections: NewsroomSectionRecord[];
 }) {
   const isDemo = Boolean(dashboard.isDemo);
+  const [overviewEditionInputs, setOverviewEditionInputs] = useState<{
+    editions: EditionRecord[];
+    editionSlots: EditionSlotRecord[];
+    assignments: AssignmentRecord[];
+    loaded: boolean;
+    error: string | null;
+  }>({
+    editions: [],
+    editionSlots: dashboard.editionSlots,
+    assignments,
+    loaded: false,
+    error: null,
+  });
   const availableSections = useMemo(
     () => sortNewsroomSections(newsroomSections).filter(isEnabledNewsroomSection),
     [newsroomSections],
   );
+
+  useEffect(() => {
+    let active = true;
+    if (isDemo) {
+      setOverviewEditionInputs({
+        editions: [],
+        editionSlots: dashboard.editionSlots,
+        assignments,
+        loaded: true,
+        error: null,
+      });
+      return () => {
+        active = false;
+      };
+    }
+    setOverviewEditionInputs((current) => ({ ...current, loaded: false, error: null }));
+    void loadEditorOverviewEditionData()
+      .then((data) => {
+        if (!active) return;
+        setOverviewEditionInputs({
+          editions: data.editions,
+          editionSlots: data.editionSlots,
+          assignments: data.assignments,
+          loaded: true,
+          error: null,
+        });
+      })
+      .catch((error) => {
+        if (!active) return;
+        setOverviewEditionInputs({
+          editions: [],
+          editionSlots: dashboard.editionSlots,
+          assignments,
+          loaded: true,
+          error: error instanceof Error ? error.message : "Could not load overview edition data.",
+        });
+      });
+    return () => {
+      active = false;
+    };
+  }, [assignments, dashboard.editionSlots, isDemo]);
+
   const overviewEditions = useMemo(
-    () => resolveOverviewEditions({ assignments, dashboard }),
-    [assignments, dashboard],
+    () => resolveOverviewEditions({
+      editions: overviewEditionInputs.editions,
+      editionSlots: overviewEditionInputs.editionSlots,
+      assignments: overviewEditionInputs.assignments,
+    }),
+    [overviewEditionInputs.assignments, overviewEditionInputs.editionSlots, overviewEditionInputs.editions],
   );
   const [selectedEditionId, setSelectedEditionId] = useState("");
   const [selectedSectionId, setSelectedSectionId] = useState("");
@@ -3285,21 +3353,31 @@ function OverviewDeskView({
   const [threadsLoading, setThreadsLoading] = useState(false);
   const [threadsError, setThreadsError] = useState<string | null>(null);
   const [selectedThreadId, setSelectedThreadId] = useState("");
+  const [forumView, setForumView] = useState<ForumViewState>({ mode: "index" });
   const [replyParentId, setReplyParentId] = useState("");
   const [composeSummary, setComposeSummary] = useState("");
   const [composeContent, setComposeContent] = useState("");
   const [composeError, setComposeError] = useState<string | null>(null);
-  const [newSectionThreadTitle, setNewSectionThreadTitle] = useState("");
+  const [newThreadDraft, setNewThreadDraft] = useState<ForumNewThreadDraft>(createDefaultForumNewThreadDraft(""));
+  const [newThreadOpen, setNewThreadOpen] = useState(false);
+  const [newThreadError, setNewThreadError] = useState<string | null>(null);
+  const [deletingMessageId, setDeletingMessageId] = useState("");
   const [viewFilter, setViewFilter] = useState<"all" | "edition" | "section">("all");
 
   useEffect(() => {
     if (!availableSections.length) {
       setSelectedSectionId("");
+      setNewThreadDraft((current) => ({ ...current, sectionId: "" }));
       return;
     }
     if (!selectedSectionId || !availableSections.some((section) => section.id === selectedSectionId)) {
       setSelectedSectionId(availableSections[0].id);
     }
+    setNewThreadDraft((current) => (
+      current.sectionId
+        ? current
+        : { ...current, sectionId: availableSections[0].id }
+    ));
   }, [availableSections, selectedSectionId]);
 
   useEffect(() => {
@@ -3355,7 +3433,7 @@ function OverviewDeskView({
       );
       setThreads(merged);
       setThreadsError(null);
-      setSelectedThreadId((current) => (current && merged.some((thread) => thread.id === current) ? current : (merged[0]?.id ?? "")));
+      setSelectedThreadId((current) => (current && merged.some((thread) => thread.id === current) ? current : ""));
     } catch (error) {
       setThreads([]);
       setThreadsError(error instanceof Error ? error.message : "Could not load edition forum threads.");
@@ -3374,78 +3452,67 @@ function OverviewDeskView({
     if (viewFilter === "section") return threads.filter((thread) => thread.scope === "section");
     return threads;
   }, [threads, viewFilter]);
-  const selectedThread = filteredThreads.find((thread) => thread.id === selectedThreadId) ?? filteredThreads[0] ?? null;
-  const selectedThreadMessages = useMemo(
-    () => [...(selectedThread?.messages ?? [])].sort((left, right) => Number(left.sequenceNumber ?? 0) - Number(right.sequenceNumber ?? 0)),
-    [selectedThread?.messages],
-  );
-  const threadCards = useMemo(
-    () => filteredThreads.map((thread, index) => {
-      const sectionKey = normalizeForumThreadSectionKey(thread);
-      const sectionLabel = thread.scope === "section"
-        ? normalizeForumThreadSectionLabel(thread, availableSections)
-        : null;
-      const subtitle = distinctNewsroomCardSubtitle(
-        thread.summary ?? null,
-        thread.scope === "section" ? `Section scope: ${sectionLabel ?? sectionKey ?? "unknown"}` : "Edition-wide coordination",
-      );
-      const template = resolveNewsroomCardTemplate({
-        bodyLength: subtitle?.length ?? 0,
-        index,
-        isUrgent: thread.status === "active",
-        mode: "desk",
-        sectionKey: "messages",
-        title: thread.title,
-        updatedAt: thread.lastMessageAt ?? thread.updatedAt ?? null,
-      });
-      return {
-        id: thread.id,
-        ariaLabel: `Open thread ${thread.title}`,
-        body: subtitle ? newsroomCardExcerpt(subtitle, 180) : null,
-        kicker: thread.scope === "edition" ? "Edition" : `Section:${sectionLabel ?? sectionKey ?? "unknown"}`,
-        meta: [
-          `${thread.messageCount ?? thread.messages.length ?? 0} message${(thread.messageCount ?? thread.messages.length ?? 0) === 1 ? "" : "s"}`,
-          `Last activity ${formatDateTime(thread.lastMessageAt ?? thread.updatedAt ?? thread.createdAt)}`,
-        ],
-        span: template.span,
-        stamp: thread.status,
-        templateRole: template.role,
-        title: thread.title,
-      } satisfies NewsroomCardRecord;
-    }),
-    [availableSections, filteredThreads],
-  );
+  const selectedThread = filteredThreads.find((thread) => thread.id === selectedThreadId) ?? null;
 
-  const ensureEditionThread = useCallback(async () => {
+  const openThread = useCallback((threadId: string) => {
+    setSelectedThreadId(threadId);
+    setForumView({ mode: "thread", threadId });
+  }, []);
+
+  const submitNewThread = useCallback(async () => {
     if (!selectedEditionId) return;
-    try {
-      await ensureEditionForumThreadRecord({ editionId: selectedEditionId, actorLabel: "editor" });
-      await refreshThreads();
-    } catch (error) {
-      setThreadsError(error instanceof Error ? error.message : "Could not ensure edition forum thread.");
+    const title = newThreadDraft.title.trim();
+    const content = newThreadDraft.content.trim();
+    if (!title) {
+      setNewThreadError("Thread title is required.");
+      return;
     }
-  }, [refreshThreads, selectedEditionId]);
-
-  const createSectionThread = useCallback(async () => {
-    if (!selectedEditionId || !selectedSectionId) return;
-    const section = availableSections.find((entry) => entry.id === selectedSectionId) ?? null;
-    if (!section) return;
+    if (!content) {
+      setNewThreadError("Thread body is required.");
+      return;
+    }
     try {
-      const created = await createSectionForumThreadRecord({
-        editionId: selectedEditionId,
-        sectionId: section.id,
-        sectionKey: section.id,
-        sectionTitle: section.title,
-        title: newSectionThreadTitle.trim() || `Section Forum: ${section.title}`,
-        actorLabel: "editor",
+      let threadId = "";
+      if (newThreadDraft.scope === "section") {
+        const sectionId = String(newThreadDraft.sectionId || selectedSectionId || "").trim();
+        const section = availableSections.find((entry) => entry.id === sectionId) ?? null;
+        if (!section) {
+          setNewThreadError("Section is required for section threads.");
+          return;
+        }
+        const created = await createSectionForumThreadRecord({
+          editionId: selectedEditionId,
+          sectionId: section.id,
+          sectionKey: section.id,
+          sectionTitle: section.title,
+          title,
+          actorLabel: "human-editor",
+        });
+        threadId = created.thread.id;
+      } else {
+        const ensured = await ensureEditionForumThreadRecord({
+          editionId: selectedEditionId,
+          actorLabel: "human-editor",
+        });
+        threadId = ensured.thread.id;
+      }
+      await appendForumThreadMessageRecord({
+        threadId,
+        summary: title,
+        content,
+        role: "human",
+        authorLabel: "human-editor",
       });
-      setNewSectionThreadTitle("");
       await refreshThreads();
-      setSelectedThreadId(created.thread.id);
+      setSelectedThreadId(threadId);
+      setForumView({ mode: "thread", threadId });
+      setNewThreadDraft(createDefaultForumNewThreadDraft(selectedSectionId || availableSections[0]?.id || ""));
+      setNewThreadOpen(false);
+      setNewThreadError(null);
     } catch (error) {
-      setThreadsError(error instanceof Error ? error.message : "Could not create section forum thread.");
+      setNewThreadError(error instanceof Error ? error.message : "Could not create thread.");
     }
-  }, [availableSections, newSectionThreadTitle, refreshThreads, selectedEditionId, selectedSectionId]);
+  }, [availableSections, newThreadDraft, refreshThreads, selectedEditionId, selectedSectionId]);
 
   const postThreadMessage = useCallback(async () => {
     if (!selectedThread) return;
@@ -3469,30 +3536,52 @@ function OverviewDeskView({
       setComposeContent("");
       setReplyParentId("");
       await refreshThreads();
-      setSelectedThreadId(selectedThread.id);
+      setForumView({ mode: "thread", threadId: selectedThread.id });
     } catch (error) {
       setComposeError(error instanceof Error ? error.message : "Could not post thread message.");
     }
   }, [composeContent, composeSummary, refreshThreads, replyParentId, selectedThread]);
 
-  const sectionForCreate = availableSections.find((section) => section.id === selectedSectionId) ?? null;
+  const deleteThreadMessage = useCallback(async (threadId: string, messageId: string) => {
+    setDeletingMessageId(messageId);
+    try {
+      await deleteForumThreadMessageRecord({ threadId, messageId });
+      if (replyParentId === messageId) setReplyParentId("");
+      await refreshThreads();
+      setComposeError(null);
+    } catch (error) {
+      setComposeError(error instanceof Error ? error.message : "Could not delete message.");
+    } finally {
+      setDeletingMessageId("");
+    }
+  }, [refreshThreads, replyParentId]);
   return (
     <div className="news-desk-overview" data-news-desk-section="overview">
       <div className="news-desk-overview-feeds news-desk-overview-forum" data-newsroom-overview-feeds>
         <NewsroomListDetailShell
           sectionKey="messages"
-          canExpandDetail={Boolean(selectedThread)}
-          detailOpen={Boolean(selectedThread)}
-          selectionScrollKey={selectedThread?.id ?? null}
+          canExpandDetail={forumView.mode === "thread" && Boolean(forumView.threadId)}
+          detailOpen={forumView.mode === "thread" && Boolean(forumView.threadId)}
+          selectionScrollKey={forumView.mode === "thread" ? forumView.threadId : null}
           lede={(
             <NewsroomDeskSectionLede
               headingId="overview-edition-forum-title"
               section="messages"
-              controls={(
-                <div className="news-desk-overview-forum__controls">
-                  <label>
-                    <span>Edition</span>
+              controls={null}
+            />
+          )}
+          list={(
+            <section className="category-steering-section category-steering-section--lead" aria-label="Edition forum threads">
+              <ForumThreadIndex
+                threads={filteredThreads}
+                sections={availableSections}
+                isLoading={threadsLoading}
+                error={threadsError}
+                emptyLabel={overviewEditions.length ? "No forum threads for this edition/filter." : "No edition candidates found in assignments or slots."}
+                toolbar={(
+                  <div className="news-desk-forum-toolbar">
                     <select
+                      aria-label="Forum edition"
                       value={selectedEditionId}
                       onChange={(event) => setSelectedEditionId(event.target.value)}
                     >
@@ -3502,140 +3591,95 @@ function OverviewDeskView({
                         </option>
                       )) : <option value="">No upcoming edition candidates</option>}
                     </select>
-                  </label>
-                  <label>
-                    <span>Section</span>
-                    <select value={selectedSectionId} onChange={(event) => setSelectedSectionId(event.target.value)}>
+                    <select
+                      aria-label="Forum scope"
+                      value={viewFilter}
+                      onChange={(event) => setViewFilter(event.target.value === "edition" ? "edition" : event.target.value === "section" ? "section" : "all")}
+                    >
+                      <option value="all">All scopes</option>
+                      <option value="edition">Edition</option>
+                      <option value="section">Section</option>
+                    </select>
+                    <select
+                      aria-label="Forum section"
+                      value={selectedSectionId}
+                      onChange={(event) => {
+                        setSelectedSectionId(event.target.value);
+                        setNewThreadDraft((current) => ({ ...current, sectionId: event.target.value }));
+                      }}
+                    >
                       <option value="">All sections</option>
                       {availableSections.map((section) => (
                         <option key={section.id} value={section.id}>{section.title}</option>
                       ))}
                     </select>
-                  </label>
-                  <label>
-                    <span>Status</span>
-                    <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value === "all" ? "all" : "active")}>
-                      <option value="active">Unread/Active</option>
+                    <select
+                      aria-label="Forum status"
+                      value={statusFilter}
+                      onChange={(event) => setStatusFilter(event.target.value === "all" ? "all" : "active")}
+                    >
+                      <option value="active">Active</option>
                       <option value="all">All</option>
                     </select>
-                  </label>
-                  <label>
-                    <span>Scope</span>
-                    <select value={viewFilter} onChange={(event) => setViewFilter(event.target.value === "edition" ? "edition" : event.target.value === "section" ? "section" : "all")}>
-                      <option value="all">Edition + Section</option>
-                      <option value="edition">Edition only</option>
-                      <option value="section">Section only</option>
-                    </select>
-                  </label>
-                  <button type="button" disabled={!selectedEditionId} onClick={() => void ensureEditionThread()}>
-                    Ensure Edition Thread
-                  </button>
-                </div>
-              )}
-            />
-          )}
-          list={(
-            <section className="category-steering-section category-steering-section--lead" aria-label="Edition forum threads">
-              <div className="news-desk-overview-forum__create">
-                <label>
-                  <span>New section thread title</span>
-                  <input
-                    placeholder={sectionForCreate ? `Section Forum: ${sectionForCreate.title}` : "Section forum title"}
-                    value={newSectionThreadTitle}
-                    onChange={(event) => setNewSectionThreadTitle(event.target.value)}
+                    <button
+                      type="button"
+                      disabled={!selectedEditionId}
+                      onClick={() => {
+                        setNewThreadOpen((value) => !value);
+                        setForumView({ mode: "index" });
+                      }}
+                    >
+                      {newThreadOpen ? "Close New Thread" : "New Thread"}
+                    </button>
+                  </div>
+                )}
+                composer={newThreadOpen ? (
+                  <ForumThreadComposer
+                    draft={newThreadDraft}
+                    sections={availableSections}
+                    error={newThreadError}
+                    onChange={setNewThreadDraft}
+                    onCancel={() => {
+                      setNewThreadOpen(false);
+                      setNewThreadError(null);
+                    }}
+                    onSubmit={() => void submitNewThread()}
                   />
-                </label>
-                <button
-                  type="button"
-                  disabled={!selectedEditionId || !sectionForCreate}
-                  onClick={() => void createSectionThread()}
-                >
-                  Create Section Thread
-                </button>
-              </div>
-              <NewsroomCardGrid
-                cards={threadCards}
-                emptyLabel={overviewEditions.length ? "No forum threads for this edition/filter." : "No edition candidates found in assignments or slots."}
-                filterLabel="Forum view"
-                filterOptions={[
-                  { key: "all", label: "Edition + Section", count: threads.length || undefined },
-                  { key: "edition", label: "Edition only", count: threads.filter((thread) => thread.scope === "edition").length || undefined },
-                  { key: "section", label: "Section only", count: threads.filter((thread) => thread.scope === "section").length || undefined },
-                ]}
-                filterValue={viewFilter}
-                metrics={[
-                  { key: "active", label: "active", count: threads.filter((thread) => thread.status === "active").length },
-                  { key: "all", label: "all", count: threads.length },
-                ]}
-                metricValue={statusFilter}
-                isLoading={threadsLoading}
-                footerLabel={threadsError}
-                onFilterChange={(value) => setViewFilter(value === "edition" ? "edition" : value === "section" ? "section" : "all")}
-                onMetricChange={(value) => setStatusFilter(value === "all" ? "all" : "active")}
-                onSelect={(threadId) => setSelectedThreadId(threadId)}
-                selectedId={selectedThread?.id ?? null}
+                ) : null}
+                onOpenThread={(threadId) => openThread(threadId)}
               />
             </section>
           )}
-          detail={selectedThread ? (
-            <section className="category-steering-section news-desk-forum-thread-detail" aria-label="Edition forum thread">
-              <header className="news-desk-overview-forum__thread-header">
-                <div>
-                  <p className="story-label">
-                    {selectedThread.scope === "edition"
-                      ? "Edition Thread"
-                      : `Section Thread: ${normalizeForumThreadSectionLabel(selectedThread, availableSections)}`}
-                  </p>
-                  <h3>{selectedThread.title}</h3>
-                </div>
-                <div className="news-desk-chip-row">
-                  <span>{selectedThread.messageCount ?? selectedThread.messages.length ?? 0} messages</span>
-                  <span>Last activity {formatDateTime(selectedThread.lastMessageAt ?? selectedThread.updatedAt ?? selectedThread.createdAt)}</span>
-                </div>
-              </header>
-              <div className="news-desk-forum-thread-messages">
-                {selectedThreadMessages.length ? selectedThreadMessages.map((message) => (
-                  <article className="news-desk-forum-thread-message" key={message.id}>
-                    <header>
-                      <strong>{message.authorLabel ?? message.role ?? "author"}</strong>
-                      <span>{formatDateTime(message.createdAt)}</span>
-                      <button type="button" onClick={() => setReplyParentId(message.id)}>Reply</button>
-                    </header>
-                    <h4>{message.summary ?? "Message"}</h4>
-                    <p>{message.content ?? ""}</p>
-                  </article>
-                )) : <EmptyRow label="No messages in this thread yet." />}
-              </div>
-              <div className="news-desk-forum-compose">
-                <label>
-                  <span>Summary</span>
-                  <input
-                    value={composeSummary}
-                    onChange={(event) => setComposeSummary(event.target.value)}
-                    placeholder="Short summary"
-                  />
-                </label>
-                <label>
-                  <span>Reply</span>
-                  <textarea
-                    rows={5}
-                    value={composeContent}
-                    onChange={(event) => setComposeContent(event.target.value)}
-                    placeholder="Add steering context for editor and reporter agents."
-                  />
-                </label>
-                {replyParentId ? <p className="story-label">Replying to: {replyParentId}</p> : null}
-                {composeError ? <div className="category-steering-alert" data-tone="error">{composeError}</div> : null}
-                <div className="news-desk-forum-compose__actions">
-                  <button type="button" onClick={() => void postThreadMessage()}>Post message</button>
-                  {replyParentId ? <button type="button" onClick={() => setReplyParentId("")}>Clear reply target</button> : null}
-                </div>
-              </div>
+          detail={forumView.mode === "thread" && selectedThread ? (
+            <ForumThreadView
+              thread={selectedThread}
+              sections={availableSections}
+              replyParentId={replyParentId}
+              composeSummary={composeSummary}
+              composeContent={composeContent}
+              composeError={composeError}
+              onBack={() => setForumView({ mode: "index" })}
+              onReplyTarget={setReplyParentId}
+              onClearReplyTarget={() => setReplyParentId("")}
+              onSummaryChange={setComposeSummary}
+              onContentChange={setComposeContent}
+              onSubmit={() => void postThreadMessage()}
+              onDeleteMessage={(messageId) => {
+                if (!selectedThread || deletingMessageId === messageId) return;
+                void deleteThreadMessage(selectedThread.id, messageId);
+              }}
+              deletingMessageId={deletingMessageId}
+            />
+          ) : forumView.mode === "thread" ? (
+            <section className="category-steering-section">
+              <SectionHeader title="Thread Unavailable" detail="Forum" />
+              <EmptyRow label="That thread is not available under the current filters. Return to Threads and adjust filters." />
+              <button type="button" onClick={() => setForumView({ mode: "index" })}>Back to Threads</button>
             </section>
           ) : (
             <section className="category-steering-section">
-              <SectionHeader title="Edition Forum" detail="Upcoming edition coordination" />
-              <EmptyRow label="Select an edition and thread to view and post coordination messages." />
+              <SectionHeader title="Forum Threads" detail="Thread index" />
+              <EmptyRow label="Select a topic from the index to open the thread." />
             </section>
           )}
         />
@@ -3644,9 +3688,19 @@ function OverviewDeskView({
             Selecting default edition...
           </div>
         ) : null}
-        {!overviewEditions.length ? (
+        {overviewEditionInputs.loaded && !overviewEditionInputs.editions.length ? (
           <div className="category-steering-alert">
-            No upcoming edition candidates found in current assignments or edition slots. Run edition planning first.
+            No upcoming edition found yet. Create or update a dated Edition first.
+          </div>
+        ) : null}
+        {overviewEditionInputs.loaded && overviewEditionInputs.editions.length > 0 && !threadsLoading && !threads.length ? (
+          <div className="category-steering-alert">
+            Edition found, but no forum threads are active yet. Use New Thread to start one.
+          </div>
+        ) : null}
+        {overviewEditionInputs.error ? (
+          <div className="category-steering-alert" data-tone="error">
+            {overviewEditionInputs.error}
           </div>
         ) : null}
       </div>
@@ -3655,7 +3709,7 @@ function OverviewDeskView({
   );
 }
 
-type EditionResolutionSource = "edition_slot" | "assignment" | "thread_activity";
+type EditionResolutionSource = "edition_record" | "edition_slot" | "assignment" | "thread_activity";
 
 type ResolvedOverviewEdition = {
   editionId: string;
@@ -3666,11 +3720,13 @@ type ResolvedOverviewEdition = {
 };
 
 function resolveOverviewEditions({
+  editions,
+  editionSlots,
   assignments,
-  dashboard,
 }: {
+  editions: EditionRecord[];
+  editionSlots: EditionSlotRecord[];
   assignments: AssignmentRecord[];
-  dashboard: CategorySteeringDashboard;
 }): ResolvedOverviewEdition[] {
   const candidates = new Map<string, { editionDate: string | null; sources: Set<EditionResolutionSource> }>();
   const upsertCandidate = (editionId: string | null, editionDate: string | null, source: EditionResolutionSource) => {
@@ -3686,7 +3742,15 @@ function resolveOverviewEditions({
     current.sources.add(source);
   };
 
-  for (const slot of dashboard.editionSlots) {
+  for (const edition of editions) {
+    upsertCandidate(
+      normalizeMetadataString(edition.id),
+      normalizeMetadataString(edition.editionDate),
+      "edition_record",
+    );
+  }
+
+  for (const slot of editionSlots) {
     const slotMetadata = metadataRecord(slot.metadata);
     upsertCandidate(
       normalizeMetadataString(slot.editionId),
@@ -3695,8 +3759,7 @@ function resolveOverviewEditions({
     );
   }
 
-  const assignmentRows = [...assignments, ...dashboard.assignments.filter((assignment) => !assignments.some((entry) => entry.id === assignment.id))];
-  for (const assignment of assignmentRows) {
+  for (const assignment of assignments) {
     const metadata = metadataRecord(assignment.metadata);
     const editionId = normalizeEditionIdFromAssignment(assignment, metadata);
     const slotTarget = metadataRecord(metadata?.slotTarget);
@@ -3749,6 +3812,7 @@ function resolveOverviewEditions({
 }
 
 function resolveEditionResolutionSource(sources: Set<EditionResolutionSource>): EditionResolutionSource {
+  if (sources.has("edition_record")) return "edition_record";
   if (sources.has("edition_slot")) return "edition_slot";
   if (sources.has("assignment")) return "assignment";
   return "thread_activity";
@@ -7197,11 +7261,15 @@ function MessagesDeskView({
   const [forumThreadsLoading, setForumThreadsLoading] = useState(false);
   const [forumThreadsError, setForumThreadsError] = useState<string | null>(null);
   const [selectedForumThreadId, setSelectedForumThreadId] = useState("");
+  const [forumView, setForumView] = useState<ForumViewState>({ mode: "index" });
   const [forumComposeSummary, setForumComposeSummary] = useState("");
   const [forumComposeContent, setForumComposeContent] = useState("");
   const [forumReplyParentId, setForumReplyParentId] = useState("");
   const [forumComposeError, setForumComposeError] = useState<string | null>(null);
-  const [newSectionThreadTitle, setNewSectionThreadTitle] = useState("");
+  const [newForumThreadDraft, setNewForumThreadDraft] = useState<ForumNewThreadDraft>(createDefaultForumNewThreadDraft(""));
+  const [newForumThreadOpen, setNewForumThreadOpen] = useState(false);
+  const [newForumThreadError, setNewForumThreadError] = useState<string | null>(null);
+  const [deletingForumMessageId, setDeletingForumMessageId] = useState("");
   const messageKind = kindFilter === "__chat_detail" ? "console_chat_turn" : kindFilter;
   const isForumMode = kindFilter === "__forum";
   const feed = useNewsroomPagedRows({
@@ -7256,11 +7324,17 @@ function MessagesDeskView({
   useEffect(() => {
     if (!availableSections.length) {
       setSelectedForumSectionId("");
+      setNewForumThreadDraft((current) => ({ ...current, sectionId: "" }));
       return;
     }
     if (!selectedForumSectionId || !availableSections.some((section) => section.id === selectedForumSectionId)) {
       setSelectedForumSectionId(availableSections[0].id);
     }
+    setNewForumThreadDraft((current) => (
+      current.sectionId
+        ? current
+        : { ...current, sectionId: availableSections[0].id }
+    ));
   }, [availableSections, selectedForumSectionId]);
   const refreshForumThreads = useCallback(async () => {
     if (!selectedForumEditionId) {
@@ -7283,7 +7357,7 @@ function MessagesDeskView({
         .sort((left, right) => String(right.updatedAt ?? "").localeCompare(String(left.updatedAt ?? "")));
       setForumThreads(merged);
       setForumThreadsError(null);
-      setSelectedForumThreadId((current) => (current && merged.some((thread) => thread.id === current) ? current : (merged[0]?.id ?? "")));
+      setSelectedForumThreadId((current) => (current && merged.some((thread) => thread.id === current) ? current : ""));
     } catch (error) {
       setForumThreads([]);
       setForumThreadsError(error instanceof Error ? error.message : "Could not load edition forum threads.");
@@ -7295,6 +7369,13 @@ function MessagesDeskView({
     if (!isForumMode || isDemo) return;
     void refreshForumThreads();
   }, [isDemo, isForumMode, refreshForumThreads]);
+  useEffect(() => {
+    if (!isForumMode) return;
+    if (!initialMessageId) return;
+    if (selectedForumThreadId) return;
+    setSelectedForumThreadId(initialMessageId);
+    setForumView({ mode: "thread", threadId: initialMessageId });
+  }, [initialMessageId, isForumMode, selectedForumThreadId]);
   const feedMessages = isDemo ? messages : feed.items;
   const messageKindCounts = summary?.facets?.messages?.byKind ?? summary?.messageKindCounts ?? countMessagesBy(messages, "messageKind");
   const messageDomainCounts = summary?.facets?.messages?.byDomain ?? summary?.messageDomainCounts ?? countMessagesBy(messages, "messageDomain");
@@ -7322,43 +7403,7 @@ function MessagesDeskView({
     if (forumActivityFilter === "active" && thread.status !== "active") return false;
     return true;
   }), [availableSections, forumActivityFilter, forumScopeFilter, forumSectionKeyByThreadId, forumThreads, selectedForumSectionId]);
-  const selectedForumThread = filteredForumThreads.find((thread) => thread.id === selectedForumThreadId) ?? filteredForumThreads[0] ?? null;
-  const selectedForumThreadMessages = useMemo(
-    () => [...(selectedForumThread?.messages ?? [])].sort((left, right) => Number(left.sequenceNumber ?? 0) - Number(right.sequenceNumber ?? 0)),
-    [selectedForumThread?.messages],
-  );
-  const forumThreadCards = useMemo(() => filteredForumThreads.map((thread, index) => {
-    const sectionKey = normalizeForumThreadSectionKey(thread);
-    const sectionLabel = sectionKey && availableSections.find((entry) => entry.id === sectionKey)?.title;
-    const scopeLabel = thread.scope === "edition" ? "Edition" : `Section:${sectionLabel ?? sectionKey ?? thread.primaryAnchorId ?? "unknown"}`;
-    const subtitle = distinctNewsroomCardSubtitle(
-      thread.summary ?? null,
-      thread.scope === "section" ? `Section scope: ${sectionLabel ?? sectionKey ?? "unknown"}` : "Cross-section coordination",
-    );
-    const template = resolveNewsroomCardTemplate({
-      bodyLength: subtitle?.length ?? 0,
-      index,
-      isUrgent: thread.status === "active",
-      mode: "desk",
-      sectionKey: "messages",
-      title: thread.title,
-      updatedAt: thread.updatedAt ?? thread.lastMessageAt ?? thread.createdAt ?? null,
-    });
-    return {
-      id: thread.id,
-      ariaLabel: `Open forum thread ${thread.title}`,
-      body: subtitle ? newsroomCardExcerpt(subtitle, 180) : null,
-      kicker: scopeLabel,
-      meta: [
-        `${thread.messageCount ?? thread.messages.length ?? 0} message${(thread.messageCount ?? thread.messages.length ?? 0) === 1 ? "" : "s"}`,
-        thread.status,
-      ],
-      span: template.span,
-      stamp: formatDateTime(thread.lastMessageAt ?? thread.updatedAt ?? thread.createdAt ?? ""),
-      templateRole: template.role,
-      title: thread.title,
-    } satisfies NewsroomCardRecord;
-  }), [availableSections, filteredForumThreads]);
+  const selectedForumThread = filteredForumThreads.find((thread) => thread.id === selectedForumThreadId) ?? null;
   const visibleMessages = useMemo(() => {
     if (kindFilter === "__chat_sessions") return chatSessionMessages;
     return feedMessages
@@ -7371,7 +7416,11 @@ function MessagesDeskView({
     ?? visibleMessages[0]
     ?? null;
   const selected = selectedMessage ? graph.resolve("message", selectedMessage.id) : null;
-  const selectedForumMessage = selectedForumThreadMessages.at(-1) ?? null;
+  const selectedForumMessage = selectedForumThread
+    ? [...(selectedForumThread.messages ?? [])]
+      .sort((left, right) => Number(left.sequenceNumber ?? 0) - Number(right.sequenceNumber ?? 0))
+      .at(-1) ?? null
+    : null;
   const selectedEntity = isForumMode
     ? (selectedForumMessage ? graph.resolve("message", selectedForumMessage.id) : null)
     : selected;
@@ -7396,38 +7445,63 @@ function MessagesDeskView({
     setIsMessageDetailOpen(true);
     pushNewsroomDetailUrl("messages", id, isDemo);
   };
-  const selectedForumSection = availableSections.find((section) => section.id === selectedForumSectionId) ?? null;
-  const canCreateSectionThread = Boolean(selectedForumEditionId && selectedForumSection);
-  const ensureEditionThread = async () => {
-    if (!selectedForumEditionId) return;
-    try {
-      await ensureEditionForumThreadRecord({
-        editionId: selectedForumEditionId,
-        actorLabel: "editor",
-      });
-      await refreshForumThreads();
-      setForumThreadsError(null);
-    } catch (error) {
-      setForumThreadsError(error instanceof Error ? error.message : "Could not create edition thread.");
-    }
+  const openForumThread = (threadId: string) => {
+    setSelectedForumThreadId(threadId);
+    setForumView({ mode: "thread", threadId });
+    setIsMessageDetailOpen(true);
+    pushNewsroomDetailUrl("messages", threadId, isDemo);
   };
-  const createSectionThread = async () => {
-    if (!selectedForumEditionId || !selectedForumSection) return;
+  const submitNewForumThread = async () => {
+    if (!selectedForumEditionId) return;
+    const title = newForumThreadDraft.title.trim();
+    const content = newForumThreadDraft.content.trim();
+    if (!title) {
+      setNewForumThreadError("Thread title is required.");
+      return;
+    }
+    if (!content) {
+      setNewForumThreadError("Thread body is required.");
+      return;
+    }
     try {
-      const created = await createSectionForumThreadRecord({
-        editionId: selectedForumEditionId,
-        sectionId: selectedForumSection.id,
-        sectionKey: selectedForumSection.id,
-        sectionTitle: selectedForumSection.title,
-        title: newSectionThreadTitle.trim() || `Section Forum: ${selectedForumSection.title}`,
-        actorLabel: "editor",
+      let threadId = "";
+      if (newForumThreadDraft.scope === "section") {
+        const sectionId = String(newForumThreadDraft.sectionId || selectedForumSectionId || "").trim();
+        const section = availableSections.find((entry) => entry.id === sectionId) ?? null;
+        if (!section) {
+          setNewForumThreadError("Section is required for section threads.");
+          return;
+        }
+        const created = await createSectionForumThreadRecord({
+          editionId: selectedForumEditionId,
+          sectionId: section.id,
+          sectionKey: section.id,
+          sectionTitle: section.title,
+          title,
+          actorLabel: "human-editor",
+        });
+        threadId = created.thread.id;
+      } else {
+        const ensured = await ensureEditionForumThreadRecord({
+          editionId: selectedForumEditionId,
+          actorLabel: "human-editor",
+        });
+        threadId = ensured.thread.id;
+      }
+      await appendForumThreadMessageRecord({
+        threadId,
+        summary: title,
+        content,
+        role: "human",
+        authorLabel: "human-editor",
       });
-      setNewSectionThreadTitle("");
       await refreshForumThreads();
-      setSelectedForumThreadId(created.thread.id);
-      setForumThreadsError(null);
+      setNewForumThreadDraft(createDefaultForumNewThreadDraft(selectedForumSectionId || availableSections[0]?.id || ""));
+      setNewForumThreadError(null);
+      setNewForumThreadOpen(false);
+      openForumThread(threadId);
     } catch (error) {
-      setForumThreadsError(error instanceof Error ? error.message : "Could not create section thread.");
+      setNewForumThreadError(error instanceof Error ? error.message : "Could not create thread.");
     }
   };
   const submitForumMessage = async () => {
@@ -7452,9 +7526,22 @@ function MessagesDeskView({
       setForumComposeContent("");
       setForumReplyParentId("");
       await refreshForumThreads();
-      setSelectedForumThreadId(selectedForumThread.id);
+      setForumView({ mode: "thread", threadId: selectedForumThread.id });
     } catch (error) {
       setForumComposeError(error instanceof Error ? error.message : "Could not append message.");
+    }
+  };
+  const deleteForumMessage = async (threadId: string, messageId: string) => {
+    setDeletingForumMessageId(messageId);
+    try {
+      await deleteForumThreadMessageRecord({ threadId, messageId });
+      if (forumReplyParentId === messageId) setForumReplyParentId("");
+      await refreshForumThreads();
+      setForumComposeError(null);
+    } catch (error) {
+      setForumComposeError(error instanceof Error ? error.message : "Could not delete message.");
+    } finally {
+      setDeletingForumMessageId("");
     }
   };
   return (
@@ -7462,9 +7549,9 @@ function MessagesDeskView({
       <NewsroomListDetailShell
         animatedDetail
         sectionKey="messages"
-        canExpandDetail={Boolean(isForumMode ? selectedForumThread : selectedMessage)}
-        detailOpen={isMessageDetailOpen}
-        selectionScrollKey={(isForumMode ? selectedForumThread?.id : selectedMessage?.id) ?? null}
+        canExpandDetail={Boolean(isForumMode ? (forumView.mode === "thread" && forumView.threadId) : selectedMessage)}
+        detailOpen={isForumMode ? (forumView.mode === "thread" && Boolean(forumView.threadId)) : isMessageDetailOpen}
+        selectionScrollKey={(isForumMode ? (forumView.mode === "thread" ? forumView.threadId : null) : selectedMessage?.id) ?? null}
         utilityActions={[isForumMode ? forumKnowledgeQuery.action : messageKnowledgeQuery.action]}
         lede={(
           <section className="news-desk-lede news-desk-assignment-lede" aria-labelledby="message-management-title">
@@ -7477,77 +7564,74 @@ function MessagesDeskView({
         list={(
           <section className="category-steering-section category-steering-section--lead" aria-label="Messages">
             {isForumMode ? (
-              <div className="news-desk-forum-layout" data-news-desk-forum>
-                <div className="news-desk-forum-toolbar">
-                  <label>
-                    <span>Edition</span>
-                    <select value={selectedForumEditionId} onChange={(event) => setSelectedForumEditionId(event.target.value)}>
+              <ForumThreadIndex
+                threads={filteredForumThreads}
+                sections={availableSections}
+                isLoading={forumThreadsLoading}
+                error={forumThreadsError}
+                emptyLabel="No forum threads for this edition/filter."
+                toolbar={(
+                  <div className="news-desk-forum-toolbar">
+                    <select
+                      aria-label="Forum edition"
+                      value={selectedForumEditionId}
+                      onChange={(event) => setSelectedForumEditionId(event.target.value)}
+                    >
                       {forumEditionIds.length ? forumEditionIds.map((editionId) => (
                         <option key={editionId} value={editionId}>{editionId}</option>
                       )) : <option value="">No edition in assignment context</option>}
                     </select>
-                  </label>
-                  <label>
-                    <span>Scope</span>
-                    <select value={forumScopeFilter} onChange={(event) => setForumScopeFilter((event.target.value as "all" | "edition" | "section"))}>
-                      <option value="all">Edition + Section</option>
-                      <option value="edition">Edition-only</option>
-                      <option value="section">Current section</option>
+                    <select
+                      aria-label="Forum scope"
+                      value={forumScopeFilter}
+                      onChange={(event) => setForumScopeFilter((event.target.value as "all" | "edition" | "section"))}
+                    >
+                      <option value="all">All scopes</option>
+                      <option value="edition">Edition</option>
+                      <option value="section">Section</option>
                     </select>
-                  </label>
-                  <label>
-                    <span>Section</span>
-                    <select value={selectedForumSectionId} onChange={(event) => setSelectedForumSectionId(event.target.value)} disabled={!availableSections.length}>
+                    <select
+                      aria-label="Forum section"
+                      value={selectedForumSectionId}
+                      onChange={(event) => {
+                        setSelectedForumSectionId(event.target.value);
+                        setNewForumThreadDraft((current) => ({ ...current, sectionId: event.target.value }));
+                      }}
+                      disabled={!availableSections.length}
+                    >
                       {availableSections.length ? availableSections.map((section) => (
                         <option key={section.id} value={section.id}>{section.title}</option>
                       )) : <option value="">No sections</option>}
                     </select>
-                  </label>
-                  <label>
-                    <span>Status</span>
-                    <select value={forumActivityFilter} onChange={(event) => setForumActivityFilter((event.target.value as "active" | "all"))}>
-                      <option value="active">Unread/Active</option>
-                      <option value="all">All statuses</option>
+                    <select
+                      aria-label="Forum status"
+                      value={forumActivityFilter}
+                      onChange={(event) => setForumActivityFilter((event.target.value as "active" | "all"))}
+                    >
+                      <option value="active">Active</option>
+                      <option value="all">All</option>
                     </select>
-                  </label>
-                  <button type="button" disabled={!selectedForumEditionId} onClick={() => void ensureEditionThread()}>Ensure Edition Thread</button>
-                </div>
-                <div className="news-desk-forum-toolbar">
-                  <label className="news-desk-forum-toolbar__stretch">
-                    <span>New section thread title</span>
-                    <input
-                      placeholder="Section thread title"
-                      value={newSectionThreadTitle}
-                      onChange={(event) => setNewSectionThreadTitle(event.target.value)}
-                    />
-                  </label>
-                  <button type="button" disabled={!canCreateSectionThread} onClick={() => void createSectionThread()}>Create Section Thread</button>
-                </div>
-                <NewsroomCardGrid
-                  cards={forumThreadCards}
-                  emptyLabel={forumThreadsLoading ? "Loading forum threads..." : "No forum threads for this edition/filter."}
-                  filterLabel="Messages view"
-                  filterOptions={[
-                    { key: "__forum", label: "Forum threads", count: forumThreadCards.length || undefined },
-                    { key: "", label: "All kinds", count: totalMessageCount },
-                    { key: "__chat_sessions", label: "Chat sessions", count: consoleThreads.length || undefined },
-                    { key: "__chat_detail", label: "Chat detail", count: messageKindCounts.console_chat_turn ?? 0 },
-                    ...messageKinds.map((kind) => ({ key: kind, label: kind, count: messageKindCounts[kind] ?? 0 })),
-                  ]}
-                  filterValue={kindFilter}
-                  metricValue={domainFilter}
-                  metrics={metrics}
-                  footerLabel={forumThreadsError ?? undefined}
-                  onFilterChange={setKindFilter}
-                  onMetricChange={setDomainFilter}
-                  onSelect={(id) => {
-                    setSelectedForumThreadId(id);
-                    setIsMessageDetailOpen(true);
-                    pushNewsroomDetailUrl("messages", id, isDemo);
-                  }}
-                  selectedId={selectedForumThread?.id ?? null}
-                />
-              </div>
+                    <button type="button" disabled={!selectedForumEditionId} onClick={() => setNewForumThreadOpen((value) => !value)}>
+                      {newForumThreadOpen ? "Close New Thread" : "New Thread"}
+                    </button>
+                    <button type="button" onClick={() => setKindFilter("")}>Back to Messages</button>
+                  </div>
+                )}
+                composer={newForumThreadOpen ? (
+                  <ForumThreadComposer
+                    draft={newForumThreadDraft}
+                    sections={availableSections}
+                    error={newForumThreadError}
+                    onChange={setNewForumThreadDraft}
+                    onCancel={() => {
+                      setNewForumThreadOpen(false);
+                      setNewForumThreadError(null);
+                    }}
+                    onSubmit={() => void submitNewForumThread()}
+                  />
+                ) : null}
+                onOpenThread={openForumThread}
+              />
             ) : (
               <NewsroomCardGrid
                 cards={cards}
@@ -7575,48 +7659,41 @@ function MessagesDeskView({
             )}
           </section>
         )}
-        onCloseDetail={() => setIsMessageDetailOpen(false)}
+        onCloseDetail={() => {
+          if (isForumMode) {
+            setForumView({ mode: "index" });
+            return;
+          }
+          setIsMessageDetailOpen(false);
+        }}
         detail={isForumMode ? (
-          selectedForumThread ? (
-            <section className="category-steering-section news-desk-forum-thread-detail" aria-label="Forum thread detail">
-              <SectionHeader title={selectedForumThread.title} detail={selectedForumThread.scope === "edition" ? "Edition" : `Section: ${normalizeForumThreadSectionLabel(selectedForumThread, availableSections)}`} />
-              <div className="news-desk-chip-row">
-                <span>Scope: {selectedForumThread.scope === "edition" ? "Edition" : "Section"}</span>
-                <span>Status: {selectedForumThread.status}</span>
-                <span>{selectedForumThread.messageCount ?? selectedForumThread.messages.length ?? 0} message(s)</span>
-                <span>Last activity: {formatDateTime(selectedForumThread.lastMessageAt ?? selectedForumThread.updatedAt ?? selectedForumThread.createdAt)}</span>
-              </div>
-              <div className="news-desk-forum-thread-messages">
-                {selectedForumThreadMessages.length ? selectedForumThreadMessages.map((message) => (
-                  <article key={message.id} className="news-desk-forum-thread-message">
-                    <header>
-                      <strong>{message.authorLabel ?? message.role ?? "author"}</strong>
-                      <span>{formatDateTime(message.createdAt)}</span>
-                      <button type="button" onClick={() => setForumReplyParentId(message.id)}>Reply</button>
-                    </header>
-                    <h4>{message.summary ?? "Forum message"}</h4>
-                    <p>{message.content ?? ""}</p>
-                  </article>
-                )) : <EmptyRow label="No messages in this thread yet." />}
-              </div>
-              <div className="news-desk-forum-compose">
-                <label>
-                  <span>Summary</span>
-                  <input value={forumComposeSummary} onChange={(event) => setForumComposeSummary(event.target.value)} placeholder="Short summary" />
-                </label>
-                <label>
-                  <span>Reply message</span>
-                  <textarea rows={5} value={forumComposeContent} onChange={(event) => setForumComposeContent(event.target.value)} placeholder="Add steering notes for editor/reporter context." />
-                </label>
-                {forumReplyParentId ? <p className="story-label">Replying to: {forumReplyParentId}</p> : null}
-                {forumComposeError ? <div className="category-steering-alert" data-tone="error">{forumComposeError}</div> : null}
-                <div className="news-desk-forum-compose__actions">
-                  <button type="button" onClick={() => void submitForumMessage()}>Post message</button>
-                  {forumReplyParentId ? <button type="button" onClick={() => setForumReplyParentId("")}>Clear reply target</button> : null}
-                </div>
-              </div>
+          (forumView.mode === "thread" && selectedForumThread ? (
+            <ForumThreadView
+              thread={selectedForumThread}
+              sections={availableSections}
+              replyParentId={forumReplyParentId}
+              composeSummary={forumComposeSummary}
+              composeContent={forumComposeContent}
+              composeError={forumComposeError}
+              onBack={() => setForumView({ mode: "index" })}
+              onReplyTarget={setForumReplyParentId}
+              onDeleteMessage={(messageId) => {
+                if (!selectedForumThread || deletingForumMessageId === messageId) return;
+                void deleteForumMessage(selectedForumThread.id, messageId);
+              }}
+              onClearReplyTarget={() => setForumReplyParentId("")}
+              onSummaryChange={setForumComposeSummary}
+              onContentChange={setForumComposeContent}
+              onSubmit={() => void submitForumMessage()}
+              deletingMessageId={deletingForumMessageId}
+            />
+          ) : forumView.mode === "thread" ? (
+            <section className="category-steering-section">
+              <SectionHeader title="Thread Unavailable" detail="Forum" />
+              <EmptyRow label="That thread is not available under the current filters. Return to Threads and adjust filters." />
+              <button type="button" onClick={() => setForumView({ mode: "index" })}>Back to Threads</button>
             </section>
-          ) : <SemanticDetailPanel graph={graph} selected={selectedEntity} knowledgeQuery={forumKnowledgeQuery} />
+          ) : <SemanticDetailPanel graph={graph} selected={selectedEntity} knowledgeQuery={forumKnowledgeQuery} />)
         ) : (selectedMessage
           ? <MessageDetailPanel graph={graph} message={selectedMessage} selected={selected} knowledgeQuery={messageKnowledgeQuery} />
           : <SemanticDetailPanel graph={graph} selected={selected} knowledgeQuery={messageKnowledgeQuery} />)}
@@ -7624,6 +7701,288 @@ function MessagesDeskView({
       {isForumMode ? forumKnowledgeQuery.dialog : messageKnowledgeQuery.dialog}
     </>
   );
+}
+
+type ForumViewState = { mode: "index" } | { mode: "thread"; threadId: string };
+
+type ForumNewThreadDraft = {
+  title: string;
+  content: string;
+  scope: "edition" | "section";
+  sectionId: string;
+};
+
+function createDefaultForumNewThreadDraft(sectionId = ""): ForumNewThreadDraft {
+  return {
+    title: "",
+    content: "",
+    scope: "edition",
+    sectionId,
+  };
+}
+
+function ForumThreadIndex({
+  threads,
+  sections,
+  isLoading,
+  error,
+  emptyLabel,
+  toolbar,
+  composer,
+  onOpenThread,
+}: {
+  threads: ForumThreadWithMessages[];
+  sections: NewsroomSectionRecord[];
+  isLoading?: boolean;
+  error?: string | null;
+  emptyLabel: string;
+  toolbar?: ReactNode;
+  composer?: ReactNode;
+  onOpenThread: (threadId: string) => void;
+}) {
+  return (
+    <div className="news-desk-forum-layout" data-news-desk-forum>
+      {toolbar ?? null}
+      {composer ?? null}
+      <div className="news-desk-forum-index">
+        <table className="news-desk-forum-index__table">
+          <thead>
+            <tr>
+              <th>Topic</th>
+              <th>Scope</th>
+              <th>Replies</th>
+              <th>Last Post</th>
+            </tr>
+          </thead>
+          <tbody>
+            {threads.length ? threads.map((thread) => {
+              const activeMessages = getActiveForumMessages(thread);
+              const sortedMessages = [...activeMessages].sort(
+                (left, right) => Number(left.sequenceNumber ?? 0) - Number(right.sequenceNumber ?? 0),
+              );
+              const lastMessage = sortedMessages.at(-1) ?? null;
+              const replies = Math.max(activeMessages.length - 1, 0);
+              const scopeLabel = thread.scope === "edition"
+                ? "Edition"
+                : `Section: ${normalizeForumThreadSectionLabel(thread, sections)}`;
+              return (
+                <tr key={thread.id}>
+                  <td>
+                    <button
+                      className="news-desk-forum-index__topic"
+                      type="button"
+                      onClick={() => onOpenThread(thread.id)}
+                    >
+                      <strong>{thread.title}</strong>
+                      {thread.summary ? <span>{thread.summary}</span> : null}
+                    </button>
+                  </td>
+                  <td>{scopeLabel}</td>
+                  <td>{replies}</td>
+                  <td>
+                    <div className="news-desk-forum-index__last-post">
+                      <span>{formatDateTime(lastMessage?.createdAt ?? thread.lastMessageAt ?? thread.updatedAt ?? thread.createdAt)}</span>
+                      <span>{lastMessage?.authorLabel ?? lastMessage?.role ?? "author"}</span>
+                    </div>
+                  </td>
+                </tr>
+              );
+            }) : (
+              <tr>
+                <td colSpan={4}>
+                  {isLoading ? "Loading forum threads..." : emptyLabel}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      {error ? <div className="category-steering-alert" data-tone="error">{error}</div> : null}
+    </div>
+  );
+}
+
+function ForumThreadComposer({
+  draft,
+  sections,
+  error,
+  onChange,
+  onCancel,
+  onSubmit,
+}: {
+  draft: ForumNewThreadDraft;
+  sections: NewsroomSectionRecord[];
+  error?: string | null;
+  onChange: (next: ForumNewThreadDraft) => void;
+  onCancel: () => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <div className="news-desk-forum-compose news-desk-forum-compose--new-thread">
+      <label>
+        <span>Title</span>
+        <input
+          value={draft.title}
+          onChange={(event) => onChange({ ...draft, title: event.target.value })}
+          placeholder="Thread title"
+        />
+      </label>
+      <label>
+        <span>Scope</span>
+        <select
+          value={draft.scope}
+          onChange={(event) => onChange({ ...draft, scope: event.target.value === "section" ? "section" : "edition" })}
+        >
+          <option value="edition">Edition</option>
+          <option value="section">Section</option>
+        </select>
+      </label>
+      {draft.scope === "section" ? (
+        <label>
+          <span>Section</span>
+          <select
+            value={draft.sectionId}
+            onChange={(event) => onChange({ ...draft, sectionId: event.target.value })}
+          >
+            {sections.map((section) => (
+              <option key={section.id} value={section.id}>{section.title}</option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+      <label>
+        <span>Body</span>
+        <textarea
+          rows={6}
+          value={draft.content}
+          onChange={(event) => onChange({ ...draft, content: event.target.value })}
+          placeholder="Write the opening post."
+        />
+      </label>
+      {error ? <div className="category-steering-alert" data-tone="error">{error}</div> : null}
+      <div className="news-desk-forum-compose__actions">
+        <button type="button" onClick={onSubmit}>Post Thread</button>
+        <button type="button" onClick={onCancel}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+function ForumThreadView({
+  thread,
+  sections,
+  replyParentId,
+  composeSummary,
+  composeContent,
+  composeError,
+  deletingMessageId,
+  onBack,
+  onReplyTarget,
+  onDeleteMessage,
+  onClearReplyTarget,
+  onSummaryChange,
+  onContentChange,
+  onSubmit,
+}: {
+  thread: ForumThreadWithMessages;
+  sections: NewsroomSectionRecord[];
+  replyParentId: string;
+  composeSummary: string;
+  composeContent: string;
+  composeError?: string | null;
+  deletingMessageId?: string;
+  onBack: () => void;
+  onReplyTarget: (messageId: string) => void;
+  onDeleteMessage: (messageId: string) => void;
+  onClearReplyTarget: () => void;
+  onSummaryChange: (value: string) => void;
+  onContentChange: (value: string) => void;
+  onSubmit: () => void;
+}) {
+  const messages = [...getActiveForumMessages(thread)].sort(
+    (left, right) => Number(left.sequenceNumber ?? 0) - Number(right.sequenceNumber ?? 0),
+  );
+  const visibleCount = messages.length;
+  return (
+    <section className="category-steering-section news-desk-forum-thread-detail" aria-label="Forum thread detail">
+      <header className="news-desk-overview-forum__thread-header">
+        <div>
+          <button className="news-desk-forum-thread-detail__back" type="button" onClick={onBack}>
+            Back to Threads
+          </button>
+          <p className="story-label">
+            {thread.scope === "edition" ? "Edition Thread" : `Section Thread: ${normalizeForumThreadSectionLabel(thread, sections)}`}
+          </p>
+          <h3>{thread.title}</h3>
+        </div>
+        <div className="news-desk-chip-row">
+          <span>{visibleCount} messages</span>
+          <span>Last activity {formatDateTime(thread.lastMessageAt ?? thread.updatedAt ?? thread.createdAt)}</span>
+        </div>
+      </header>
+      <div className="news-desk-forum-thread-messages">
+        {messages.length ? messages.map((message) => (
+          <article className="news-desk-forum-thread-message" key={message.id}>
+            <header>
+              <strong>{message.authorLabel ?? message.role ?? "author"}</strong>
+              <span>{formatDateTime(message.createdAt)}</span>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  aria-label={`Thread message actions for ${message.summary ?? message.id}`}
+                  className="news-desk-forum-thread-message__menu"
+                >
+                  <MoreHorizontalIcon />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onSelect={() => onReplyTarget(message.id)}>
+                    Reply
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    variant="destructive"
+                    disabled={deletingMessageId === message.id}
+                    onSelect={() => onDeleteMessage(message.id)}
+                  >
+                    {deletingMessageId === message.id ? "Deleting..." : "Delete"}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </header>
+            <h4>{message.summary ?? "Message"}</h4>
+            <MarkdownContext className="news-desk-forum-thread-message__markdown" text={message.content ?? ""} />
+          </article>
+        )) : <EmptyRow label="No messages in this thread yet." />}
+      </div>
+      <div className="news-desk-forum-compose">
+        <label>
+          <span>Summary (optional)</span>
+          <input
+            value={composeSummary}
+            onChange={(event) => onSummaryChange(event.target.value)}
+            placeholder="Short summary"
+          />
+        </label>
+        <label>
+          <span>Reply</span>
+          <textarea
+            rows={5}
+            value={composeContent}
+            onChange={(event) => onContentChange(event.target.value)}
+            placeholder="Write your reply."
+          />
+        </label>
+        {replyParentId ? <p className="story-label">Replying to: {replyParentId}</p> : null}
+        {composeError ? <div className="category-steering-alert" data-tone="error">{composeError}</div> : null}
+        <div className="news-desk-forum-compose__actions">
+          <button type="button" onClick={onSubmit}>Post Reply</button>
+          {replyParentId ? <button type="button" onClick={onClearReplyTarget}>Clear reply target</button> : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function getActiveForumMessages(thread: ForumThreadWithMessages): MessageRecord[] {
+  return (thread.messages ?? []).filter((message) => String(message.status || "active") === "active");
 }
 
 function normalizeEditionIdFromAssignment(
@@ -13367,7 +13726,7 @@ function formatDeskSectionHeadline(section: NewsDeskTab): string {
   if (section === "topics") return "Topics";
   if (section === "concepts") return "Concepts";
   if (section === "references") return "References";
-  if (section === "messages") return "Messages";
+  if (section === "messages") return "Forum";
   if (section === "assignments") return "Assignments";
   if (section === "administration") return "Administration";
   return "Newsroom";
@@ -13378,7 +13737,7 @@ function formatDeskSectionLede(section: NewsDeskTab): string {
   if (section === "topics") return "Review and shape the subject areas the newsroom covers.";
   if (section === "concepts") return "Browse people, organizations, places, and ideas found in the source material.";
   if (section === "references") return "Review source materials before they become usable evidence.";
-  if (section === "messages") return "Read notes, rationales, and work products from people and agents.";
+  if (section === "messages") return "";
   if (section === "assignments") return "Create, filter, claim, and complete newsroom work.";
   if (section === "administration") return "Manage users, roles, doctrine, configurable newspaper sections, and newsroom procedures.";
   return "";

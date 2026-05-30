@@ -23,6 +23,7 @@ import type {
   LexicalSteeringRuleRecord,
   AssignmentEventRecord,
   AssignmentRecord,
+  EditionRecord,
   EditionSlotRecord,
   MessageThreadRecord,
   DoctrineRecord,
@@ -164,6 +165,41 @@ const UPDATE_MESSAGE_THREAD_MUTATION = `
 const CREATE_MESSAGE_MUTATION = `
   mutation CreateMessage($input: CreateMessageInput!) {
     createMessage(input: $input) {
+      id
+      messageKind
+      messageDomain
+      status
+      summary
+      source
+      importRunId
+      authorSub
+      authorUserProfileId
+      authorLabel
+      threadId
+      parentMessageId
+      sequenceNumber
+      role
+      messageType
+      content
+      semanticLayer
+      searchVisibility
+      responseTarget
+      responseStatus
+      responseOwner
+      responseStartedAt
+      responseCompletedAt
+      responseError
+      metadata
+      createdAt
+      updatedAt
+      newsroomFeedKey
+    }
+  }
+`;
+
+const UPDATE_MESSAGE_MUTATION = `
+  mutation UpdateMessage($input: UpdateMessageInput!) {
+    updateMessage(input: $input) {
       id
       messageKind
       messageDomain
@@ -1317,6 +1353,56 @@ export async function appendForumThreadMessageRecord(input: {
   };
 }
 
+export async function deleteForumThreadMessageRecord(input: {
+  threadId: string;
+  messageId: string;
+}): Promise<{ thread: MessageThreadRecord; message: MessageRecord }> {
+  const threadId = String(input.threadId || "").trim();
+  const messageId = String(input.messageId || "").trim();
+  if (!threadId) throw new Error("threadId is required");
+  if (!messageId) throw new Error("messageId is required");
+  const now = new Date().toISOString();
+  const thread = await getMessageThreadRecord(threadId);
+  const existing = await listMessagesByThreadId(threadId, 1000);
+  const target = existing.find((message) => message.id === messageId);
+  if (!target) throw new Error(`Message not found in thread: ${messageId}`);
+  const updatedMessage = await runGraphql<{ updateMessage?: MessageRecord | null }>(
+    UPDATE_MESSAGE_MUTATION,
+    {
+      input: {
+        id: target.id,
+        status: "deleted",
+        updatedAt: now,
+      },
+    },
+  );
+  const materialized = existing.map((message) => (
+    message.id === messageId
+      ? { ...message, status: "deleted", updatedAt: now }
+      : message
+  ));
+  const activeMessages = materialized
+    .filter((message) => String(message.status || "active") === "active")
+    .sort((left, right) => Number(left.sequenceNumber ?? 0) - Number(right.sequenceNumber ?? 0));
+  const lastActive = activeMessages.at(-1) ?? null;
+  const updatedThread = await runGraphql<{ updateMessageThread?: MessageThreadRecord | null }>(
+    UPDATE_MESSAGE_THREAD_MUTATION,
+    {
+      input: {
+        id: threadId,
+        messageCount: activeMessages.length,
+        lastMessageId: lastActive?.id ?? null,
+        lastMessageAt: lastActive?.createdAt ?? null,
+        updatedAt: now,
+      },
+    },
+  );
+  return {
+    thread: normalizeThreadRecord(updatedThread.updateMessageThread ?? { ...thread, updatedAt: now }),
+    message: normalizeMessageRecord(updatedMessage.updateMessage ?? { ...target, status: "deleted", updatedAt: now }),
+  };
+}
+
 async function getMessageThreadRecord(threadId: string): Promise<MessageThreadRecord> {
   const rows = await Promise.all([
     listMessageThreadsByKind("edition_forum", 500),
@@ -1672,6 +1758,34 @@ export async function loadEditorAssignmentsData(): Promise<{
   return {
     assignments: assignmentPage.items,
     assignmentEvents: assignmentEvents.sort((left, right) => right.createdAt.localeCompare(left.createdAt)),
+  };
+}
+
+export async function loadEditorOverviewEditionData(): Promise<{
+  editions: EditionRecord[];
+  editionSlots: EditionSlotRecord[];
+  assignments: AssignmentRecord[];
+}> {
+  const [editions, editionSlots, assignmentState] = await Promise.all([
+    listOptionalUserPoolModel<EditionRecord>("Edition"),
+    listOptionalUserPoolModel<EditionSlotRecord>("EditionSlot"),
+    loadEditorAssignmentsData(),
+  ]);
+  const sortedEditions = [...editions].sort((left, right) => (
+    String(right.editionDate ?? "").localeCompare(String(left.editionDate ?? ""))
+    || String(right.updatedAt ?? "").localeCompare(String(left.updatedAt ?? ""))
+    || String(left.id ?? "").localeCompare(String(right.id ?? ""))
+  ));
+  const sortedEditionSlots = [...editionSlots].sort((left, right) => (
+    String(left.editionId ?? "").localeCompare(String(right.editionId ?? ""))
+    || String(left.sectionKey ?? "").localeCompare(String(right.sectionKey ?? ""))
+    || Number(left.slotRank ?? 0) - Number(right.slotRank ?? 0)
+    || String(left.id ?? "").localeCompare(String(right.id ?? ""))
+  ));
+  return {
+    editions: sortedEditions,
+    editionSlots: sortedEditionSlots,
+    assignments: assignmentState.assignments,
   };
 }
 
