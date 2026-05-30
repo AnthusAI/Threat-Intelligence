@@ -208,6 +208,14 @@ rendering contracts.
     `Assignment --targets_slot--> EditionSlot`;
   - reporting review must not create `EditionItem`; `select`/`brief` may set
     slot winner state and queue copywriting assignments only.
+- Edition forum-thread guardrails:
+  - use `MessageThread` forum kinds `edition_forum` and `section_forum`;
+  - anchor edition threads to `Edition` and section threads to
+    `(NewsroomSection, edition lineage)`;
+  - assignment context should include edition forum first, then same-section
+    forum threads only;
+  - do not leak other sections' forum threads into assignment context;
+  - reporting/review still must not create `EditionItem`.
 - Treat multi-section story-cycle runs as Coverage Themes in editor-facing UX
   and docs. The Python `papyrus assignments run-story-cycle` command is the
   primary operator surface. The default stop point is `--through reporting`, after private

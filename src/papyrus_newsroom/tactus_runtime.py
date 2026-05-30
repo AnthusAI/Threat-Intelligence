@@ -471,6 +471,44 @@ RESOURCE_METHODS: dict[tuple[str, str], Callable[[dict[str, Any]], Any]] = {
         actor_label=args.get("actorLabel") or args.get("actor_label") or "",
         note=args.get("note") or "",
     ),
+    ("MessageThread", "get"): lambda args: newsroom.papyrus_get_message_thread(args.get("id") or args.get("threadId") or args.get("thread_id")),
+    ("MessageThread", "list"): lambda args: newsroom.papyrus_list_forum_threads(
+        edition_id=args.get("editionId") or args.get("edition_id"),
+        section_id=args.get("sectionId") or args.get("section_id") or "",
+        section_key=args.get("sectionKey") or args.get("section_key") or "",
+        include_messages=bool(args.get("includeMessages") or args.get("include_messages")),
+        status=args.get("status") or "active",
+        limit=args.get("limit", 200),
+    ),
+    ("MessageThread", "create"): lambda args: (
+        newsroom.papyrus_create_section_forum_thread(
+            edition_id=args.get("editionId") or args.get("edition_id"),
+            section_id=args.get("sectionId") or args.get("section_id") or args.get("sectionKey") or args.get("section_key"),
+            section_key=args.get("sectionKey") or args.get("section_key") or "",
+            section_title=args.get("sectionTitle") or args.get("section_title") or "",
+            title=args.get("title") or "",
+            summary=args.get("summary") or "",
+            actor_label=args.get("actorLabel") or args.get("actor_label") or "",
+            metadata=args.get("metadata") if isinstance(args.get("metadata"), dict) else None,
+        )
+        if (args.get("sectionId") or args.get("section_id") or args.get("sectionKey") or args.get("section_key"))
+        else newsroom.papyrus_ensure_edition_forum_thread(
+            edition_id=args.get("editionId") or args.get("edition_id"),
+            title=args.get("title") or "",
+            summary=args.get("summary") or "",
+            actor_label=args.get("actorLabel") or args.get("actor_label") or "",
+            metadata=args.get("metadata") if isinstance(args.get("metadata"), dict) else None,
+        )
+    ),
+    ("MessageThread", "append"): lambda args: newsroom.papyrus_append_forum_message(
+        thread_id=args.get("id") or args.get("threadId") or args.get("thread_id"),
+        summary=args.get("summary") or "",
+        content=args.get("content") or "",
+        role=args.get("role") or "editor",
+        actor_label=args.get("actorLabel") or args.get("actor_label") or "",
+        parent_message_id=args.get("parentMessageId") or args.get("parent_message_id") or "",
+        metadata=args.get("metadata") if isinstance(args.get("metadata"), dict) else None,
+    ),
     ("Reference", "get"): lambda args: newsroom.papyrus_get_reference(args.get("id") or args.get("referenceId") or args.get("reference_id")),
     ("Reference", "list"): _reference_list_resource,
 }
@@ -510,6 +548,7 @@ RESOURCE_API_SCHEMA: dict[str, Any] = {
         },
         "AssignmentEvent": {"verbs": ["get", "list"], "description": "Audit events for Assignment lifecycle changes. Writes happen through Assignment verbs in v1."},
         "Message": {"verbs": ["get", "list"], "description": "Private work-product and console-message records."},
+        "MessageThread": {"verbs": ["get", "list", "create", "append"], "description": "Edition/section forum coordination threads and replies."},
         "Reference": {"verbs": ["get", "list"], "description": "Knowledge-base source material prospects and accepted references."},
         "Item": {"verbs": ["get", "list"], "description": "Reader-facing publication items. Assignments are not Items."},
         "Edition": {"verbs": ["get", "list"], "description": "Dated private or published edition records."},

@@ -110,6 +110,49 @@ Story Budget should be read as a slot-centric board:
 - fill delta and unresolved slots;
 - section rollups as derived aggregates.
 
+## Edition And Section Forum Threads
+
+Upcoming edition coordination uses first-class `MessageThread` rows with forum
+thread kinds:
+
+- `edition_forum`: `primaryAnchorKind = "edition"` and
+  `primaryAnchorId = <editionId>`.
+- `section_forum`: `primaryAnchorKind = "newsroom_section"`,
+  `primaryAnchorId = <sectionId>`, and
+  `primaryAnchorLineageId = <editionId>`.
+
+Section forums are many-to-one: multiple threads are allowed for the same
+`(edition, section)` lineage.
+
+Message threading contract is unchanged:
+
+- `Message.threadId` links to the parent thread.
+- `Message.parentMessageId` links replies.
+- `Message.sequenceNumber` preserves chronology.
+
+### Kickoff + Human Steering
+
+Coverage Theme planning should create kickoff forum messages that summarize:
+
+- pursued topics by section;
+- slot targets and 1.5x overassignment posture;
+- explicit human steering opportunities.
+
+Humans append replies in the same thread(s). The chronology becomes shared
+editorial memory for the edition run.
+
+### Assignment Context Inclusion Defaults
+
+Assignment context assembly must include forum threads by default:
+
+1. If an assignment has `editionId`, include edition-forum thread history first.
+2. If an assignment is section-bound, include only section-forum thread history
+   for that same `(edition, section)` lineage.
+3. Never include forum threads from other sections.
+
+Current policy is full-history inclusion (no compaction) in chronological order
+within each thread.
+
 ## Packet Types
 
 `research_packet` is the exploratory evidence product. It can summarize accepted

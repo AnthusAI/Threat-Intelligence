@@ -617,6 +617,168 @@ query ListMessages($limit: Int, $nextToken: String) {
 }
 """
 
+LIST_MESSAGE_THREADS_BY_KIND_QUERY = """
+query ListMessageThreadsByKindAndUpdatedAt($threadKind: String!, $limit: Int, $nextToken: String) {
+  listMessageThreadsByKindAndUpdatedAt(threadKind: $threadKind, limit: $limit, nextToken: $nextToken) {
+    items {
+      id
+      threadKind
+      status
+      title
+      summary
+      primaryAnchorKind
+      primaryAnchorId
+      primaryAnchorLineageId
+      primaryAnchorKey
+      createdBySub
+      createdByUserProfileId
+      createdByLabel
+      messageCount
+      lastMessageId
+      lastMessageAt
+      contextDigest
+      metadata
+      createdAt
+      updatedAt
+      newsroomFeedKey
+    }
+    nextToken
+  }
+}
+"""
+
+GET_MESSAGE_THREAD_QUERY = """
+query GetMessageThread($id: ID!) {
+  getMessageThread(id: $id) {
+    id
+    threadKind
+    status
+    title
+    summary
+    primaryAnchorKind
+    primaryAnchorId
+    primaryAnchorLineageId
+    primaryAnchorKey
+    createdBySub
+    createdByUserProfileId
+    createdByLabel
+    messageCount
+    lastMessageId
+    lastMessageAt
+    contextDigest
+    metadata
+    createdAt
+    updatedAt
+    newsroomFeedKey
+  }
+}
+"""
+
+LIST_MESSAGES_BY_THREAD_QUERY = """
+query ListMessagesByThreadAndSequence($threadId: ID!, $limit: Int, $nextToken: String) {
+  listMessagesByThreadAndSequence(threadId: $threadId, sortDirection: ASC, limit: $limit, nextToken: $nextToken) {
+    items {
+      id
+      messageKind
+      messageDomain
+      status
+      summary
+      source
+      importRunId
+      authorSub
+      authorUserProfileId
+      authorLabel
+      threadId
+      parentMessageId
+      sequenceNumber
+      role
+      messageType
+      content
+      metadata
+      createdAt
+      updatedAt
+      newsroomFeedKey
+    }
+    nextToken
+  }
+}
+"""
+
+CREATE_MESSAGE_THREAD_MUTATION = """
+mutation CreateMessageThread($input: CreateMessageThreadInput!) {
+  createMessageThread(input: $input) {
+    id
+    threadKind
+    status
+    title
+    summary
+    primaryAnchorKind
+    primaryAnchorId
+    primaryAnchorLineageId
+    primaryAnchorKey
+    createdByLabel
+    messageCount
+    lastMessageId
+    lastMessageAt
+    metadata
+    createdAt
+    updatedAt
+    newsroomFeedKey
+  }
+}
+"""
+
+UPDATE_MESSAGE_THREAD_MUTATION = """
+mutation UpdateMessageThread($input: UpdateMessageThreadInput!) {
+  updateMessageThread(input: $input) {
+    id
+    threadKind
+    status
+    title
+    summary
+    primaryAnchorKind
+    primaryAnchorId
+    primaryAnchorLineageId
+    primaryAnchorKey
+    createdByLabel
+    messageCount
+    lastMessageId
+    lastMessageAt
+    metadata
+    createdAt
+    updatedAt
+    newsroomFeedKey
+  }
+}
+"""
+
+CREATE_MESSAGE_MUTATION = """
+mutation CreateMessage($input: CreateMessageInput!) {
+  createMessage(input: $input) {
+    id
+    messageKind
+    messageDomain
+    status
+    summary
+    source
+    importRunId
+    authorSub
+    authorUserProfileId
+    authorLabel
+    threadId
+    parentMessageId
+    sequenceNumber
+    role
+    messageType
+    content
+    metadata
+    createdAt
+    updatedAt
+    newsroomFeedKey
+  }
+}
+"""
+
 LIST_ARTICLES_QUERY = """
 query ListPublishedItemsByTypeStatusAndPublishedAt(
   $typeStatus: String!
@@ -740,6 +902,201 @@ def papyrus_update_edition_slot_status(
         "actorLabel": actor_label or None,
         "note": note or None,
     }
+
+
+def papyrus_list_forum_threads(
+    edition_id: str,
+    *,
+    section_id: str = "",
+    section_key: str = "",
+    include_messages: bool = False,
+    status: str = "active",
+    limit: int = 200,
+) -> dict[str, Any]:
+    """
+    List edition and section forum MessageThread rows for one edition.
+    """
+    resolved_edition_id = _required(edition_id, "edition_id")
+    resolved_section_id = str(section_id or "").strip()
+    resolved_section_key = str(section_key or "").strip()
+
+    edition_threads = _forum_threads_by_kind_and_edition("edition_forum", resolved_edition_id, status=status, limit=limit)
+    section_threads = _forum_threads_by_kind_and_edition("section_forum", resolved_edition_id, status=status, limit=limit)
+    if resolved_section_id:
+        section_threads = [thread for thread in section_threads if str(thread.get("primaryAnchorId") or "") == resolved_section_id]
+    elif resolved_section_key:
+        section_threads = [
+            thread
+            for thread in section_threads
+            if _slugify(thread.get("primaryAnchorId") or "") == _slugify(resolved_section_key)
+            or _slugify(((thread.get("metadata") or {}) if isinstance(thread.get("metadata"), dict) else {}).get("sectionKey") or "") == _slugify(resolved_section_key)
+        ]
+
+    if include_messages:
+        for thread in [*edition_threads, *section_threads]:
+            thread["messages"] = _list_messages_by_thread_id(thread.get("id"), limit=400)
+
+    return {
+        "editionId": resolved_edition_id,
+        "sectionId": resolved_section_id or None,
+        "sectionKey": resolved_section_key or None,
+        "editionThreads": edition_threads,
+        "sectionThreads": section_threads,
+        "threadCount": len(edition_threads) + len(section_threads),
+    }
+
+
+def papyrus_ensure_edition_forum_thread(
+    *,
+    edition_id: str,
+    title: str = "",
+    summary: str = "",
+    actor_label: str = "",
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Ensure one edition-level forum thread exists for an Edition.
+    """
+    resolved_edition_id = _required(edition_id, "edition_id")
+    existing = _forum_threads_by_kind_and_edition("edition_forum", resolved_edition_id, status="", limit=20)
+    if existing:
+        return {"created": False, "thread": existing[0]}
+    now = _now_iso()
+    anchor_key = _edition_forum_anchor_key(resolved_edition_id)
+    thread = {
+        "id": f"message-thread-edition-forum-{_safe_id(resolved_edition_id)}",
+        "threadKind": "edition_forum",
+        "status": "active",
+        "title": title or "Edition Forum",
+        "summary": summary or "Cross-section editor and human coordination for this edition.",
+        "primaryAnchorKind": "edition",
+        "primaryAnchorId": resolved_edition_id,
+        "primaryAnchorLineageId": resolved_edition_id,
+        "primaryAnchorKey": anchor_key,
+        "createdByLabel": actor_label or "papyrus-editor",
+        "messageCount": 0,
+        "lastMessageId": None,
+        "lastMessageAt": None,
+        "metadata": metadata or {},
+        "createdAt": now,
+        "updatedAt": now,
+        "newsroomFeedKey": "messages",
+    }
+    created = _graphql(CREATE_MESSAGE_THREAD_MUTATION, {"input": thread}).get("createMessageThread") or thread
+    return {"created": True, "thread": _decode_record_json(created)}
+
+
+def papyrus_create_section_forum_thread(
+    *,
+    edition_id: str,
+    section_id: str,
+    section_key: str = "",
+    section_title: str = "",
+    title: str = "",
+    summary: str = "",
+    actor_label: str = "",
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Create one section forum thread scoped to (edition, section).
+    """
+    resolved_edition_id = _required(edition_id, "edition_id")
+    resolved_section_id = _required(section_id, "section_id")
+    resolved_section_key = str(section_key or "").strip()
+    resolved_section_title = str(section_title or "").strip()
+    now = _now_iso()
+    anchor_key = _section_forum_anchor_key(resolved_edition_id, resolved_section_id)
+    base_metadata = metadata if isinstance(metadata, dict) else {}
+    thread_metadata = {
+        "editionId": resolved_edition_id,
+        "sectionId": resolved_section_id,
+        "sectionKey": resolved_section_key or base_metadata.get("sectionKey") or resolved_section_id,
+        "sectionTitle": resolved_section_title or base_metadata.get("sectionTitle") or None,
+        **base_metadata,
+    }
+    thread = {
+        "id": f"message-thread-section-forum-{_safe_id(resolved_edition_id)}-{_safe_id(resolved_section_id)}-{_safe_id(_hash_short([now, title, actor_label]))}",
+        "threadKind": "section_forum",
+        "status": "active",
+        "title": title or f"Section Forum: {resolved_section_title or resolved_section_key or resolved_section_id}",
+        "summary": summary or "Section-scoped editorial steering thread for this edition.",
+        "primaryAnchorKind": "newsroom_section",
+        "primaryAnchorId": resolved_section_id,
+        "primaryAnchorLineageId": resolved_edition_id,
+        "primaryAnchorKey": anchor_key,
+        "createdByLabel": actor_label or "papyrus-editor",
+        "messageCount": 0,
+        "lastMessageId": None,
+        "lastMessageAt": None,
+        "metadata": thread_metadata,
+        "createdAt": now,
+        "updatedAt": now,
+        "newsroomFeedKey": "messages",
+    }
+    created = _graphql(CREATE_MESSAGE_THREAD_MUTATION, {"input": thread}).get("createMessageThread") or thread
+    return {"created": True, "thread": _decode_record_json(created)}
+
+
+def papyrus_append_forum_message(
+    *,
+    thread_id: str,
+    summary: str,
+    content: str,
+    role: str = "editor",
+    actor_label: str = "",
+    parent_message_id: str = "",
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Append one Message row into a forum thread and update thread counters.
+    """
+    resolved_thread_id = _required(thread_id, "thread_id")
+    clean_summary = _required(summary, "summary")
+    clean_content = _required(content, "content")
+    thread = papyrus_get_message_thread(resolved_thread_id)["thread"]
+    existing_messages = _list_messages_by_thread_id(resolved_thread_id, limit=1000)
+    next_sequence = max([int(message.get("sequenceNumber") or 0) for message in existing_messages] + [0]) + 1
+    now = _now_iso()
+    message = {
+        "id": f"message-forum-{_safe_id(resolved_thread_id)}-{next_sequence:04d}",
+        "messageKind": "forum_post",
+        "messageDomain": "edition_coordination",
+        "status": "active",
+        "summary": clean_summary,
+        "source": "newsroom.forum",
+        "authorLabel": actor_label or "papyrus-editor",
+        "threadId": resolved_thread_id,
+        "parentMessageId": str(parent_message_id or "").strip() or None,
+        "sequenceNumber": next_sequence,
+        "role": role or "editor",
+        "messageType": "forum_message",
+        "content": clean_content,
+        "metadata": metadata or {},
+        "createdAt": now,
+        "updatedAt": now,
+        "newsroomFeedKey": "messages",
+    }
+    created = _graphql(CREATE_MESSAGE_MUTATION, {"input": message}).get("createMessage") or message
+    update_input = {
+        "id": resolved_thread_id,
+        "messageCount": int(thread.get("messageCount") or 0) + 1,
+        "lastMessageId": created.get("id"),
+        "lastMessageAt": created.get("createdAt") or now,
+        "updatedAt": now,
+    }
+    updated_thread = _graphql(UPDATE_MESSAGE_THREAD_MUTATION, {"input": update_input}).get("updateMessageThread") or {**thread, **update_input}
+    return {"thread": _decode_record_json(updated_thread), "message": _decode_record_json(created)}
+
+
+def papyrus_get_message_thread(thread_id: str) -> dict[str, Any]:
+    """
+    Read one MessageThread by id.
+    """
+    data = _graphql(GET_MESSAGE_THREAD_QUERY, {"id": _required(thread_id, "thread_id")})
+    thread = data.get("getMessageThread")
+    if not thread:
+        raise ValueError(f"MessageThread not found: {thread_id}")
+    return {"thread": _decode_record_json(thread)}
 
 
 def papyrus_get_item(item_id: str) -> dict[str, Any]:
@@ -1224,6 +1581,7 @@ def papyrus_build_assignment_agent_context(
     desk_published_items = _published_items_for_desk(recent_published_items, desk_category, focus_category)
     reference_summaries = _desk_reference_summaries(semantic, desk_category, focus_category)
     comment_summaries = _desk_comment_summaries(semantic, reference_summaries)
+    forum_context = _assignment_forum_context(assignment, metadata)
     coverage_gaps: list[str] = []
     if focus_resolution == "none":
         coverage_gaps.append("No accepted focus category or semantic node match was found.")
@@ -1244,6 +1602,7 @@ def papyrus_build_assignment_agent_context(
         published_items=desk_published_items,
         references=reference_summaries,
         comments=comment_summaries,
+        forum_context=forum_context,
         lane_key=lane_key,
         profile_key=profile_key,
     )
@@ -1285,6 +1644,12 @@ def papyrus_build_assignment_agent_context(
             "semanticNodeMatches": semantic_node_matches,
             "semanticQueryTerms": semantic_query_terms,
             "coverageGaps": coverage_gaps,
+            "editionForumMessages": [
+                message
+                for thread in forum_context.get("editionThreads") or []
+                for message in (thread.get("messages") or [])
+            ],
+            "sectionForumThreads": forum_context.get("sectionThreads") or [],
             "contextCoverage": {
                 "deskFocusCategory": bool(desk_category or focus_category),
                 "semanticNodeEntity": bool(semantic_node_matches),
@@ -3734,6 +4099,115 @@ def _list_messages() -> list[dict[str, Any]]:
     return _list_connection(LIST_MESSAGES_QUERY, {}, "listMessages")
 
 
+def _list_message_threads_by_kind(thread_kind: str, *, limit: int = 200) -> list[dict[str, Any]]:
+    if not thread_kind:
+        return []
+    rows: list[dict[str, Any]] = []
+    next_token = None
+    while True:
+        data = _graphql(
+            LIST_MESSAGE_THREADS_BY_KIND_QUERY,
+            {"threadKind": thread_kind, "limit": limit, "nextToken": next_token},
+        )
+        connection = data.get("listMessageThreadsByKindAndUpdatedAt") or {}
+        rows.extend(_decode_record_json(item) for item in connection.get("items") or [])
+        next_token = connection.get("nextToken")
+        if not next_token:
+            break
+    return rows
+
+
+def _list_messages_by_thread_id(thread_id: Any, *, limit: int = 400) -> list[dict[str, Any]]:
+    resolved_thread_id = str(thread_id or "").strip()
+    if not resolved_thread_id:
+        return []
+    rows: list[dict[str, Any]] = []
+    next_token = None
+    while True:
+        data = _graphql(
+            LIST_MESSAGES_BY_THREAD_QUERY,
+            {"threadId": resolved_thread_id, "limit": limit, "nextToken": next_token},
+        )
+        connection = data.get("listMessagesByThreadAndSequence") or {}
+        rows.extend(_decode_record_json(item) for item in connection.get("items") or [])
+        next_token = connection.get("nextToken")
+        if not next_token:
+            break
+    rows.sort(key=lambda entry: (int(entry.get("sequenceNumber") or 0), str(entry.get("createdAt") or "")))
+    return rows
+
+
+def _edition_forum_anchor_key(edition_id: str) -> str:
+    return f"edition#{_required(edition_id, 'edition_id')}"
+
+
+def _section_forum_anchor_key(edition_id: str, section_id: str) -> str:
+    return f"edition#{_required(edition_id, 'edition_id')}#section#{_required(section_id, 'section_id')}"
+
+
+def _forum_threads_by_kind_and_edition(thread_kind: str, edition_id: str, *, status: str = "", limit: int = 200) -> list[dict[str, Any]]:
+    rows = _list_message_threads_by_kind(thread_kind, limit=limit)
+    filtered: list[dict[str, Any]] = []
+    for thread in rows:
+        if status and str(thread.get("status") or "") != status:
+            continue
+        if thread_kind == "edition_forum":
+            if str(thread.get("primaryAnchorKind") or "") != "edition":
+                continue
+            if str(thread.get("primaryAnchorId") or "") != edition_id:
+                continue
+            filtered.append(thread)
+            continue
+        if thread_kind == "section_forum":
+            if str(thread.get("primaryAnchorKind") or "") != "newsroom_section":
+                continue
+            if str(thread.get("primaryAnchorLineageId") or "") != edition_id:
+                continue
+            filtered.append(thread)
+            continue
+    filtered.sort(key=lambda entry: str(entry.get("updatedAt") or ""), reverse=True)
+    return filtered
+
+
+def _assignment_forum_context(assignment: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any]:
+    edition_id = (
+        assignment.get("editionId")
+        or metadata.get("editionId")
+        or metadata.get("edition_id")
+        or ((metadata.get("slotTarget") or {}) if isinstance(metadata.get("slotTarget"), dict) else {}).get("editionId")
+        or ((metadata.get("slotTarget") or {}) if isinstance(metadata.get("slotTarget"), dict) else {}).get("edition_id")
+    )
+    if not edition_id:
+        return {"editionId": None, "editionThreads": [], "sectionThreads": []}
+    edition_threads = _forum_threads_by_kind_and_edition("edition_forum", str(edition_id), status="active", limit=100)
+    section_id = assignment.get("sectionId") or metadata.get("sectionId") or metadata.get("section_id")
+    section_key = assignment.get("sectionKey") or metadata.get("sectionKey") or metadata.get("section_key")
+    section_id_slug = _slugify(section_id or "")
+    section_key_slug = _slugify(section_key or "")
+    section_threads = _forum_threads_by_kind_and_edition("section_forum", str(edition_id), status="active", limit=200)
+    if section_id_slug or section_key_slug:
+        section_threads = [
+            thread for thread in section_threads
+            if (
+                section_id_slug
+                and _slugify(thread.get("primaryAnchorId") or "") == section_id_slug
+            )
+            or (
+                section_key_slug
+                and _slugify(((thread.get("metadata") or {}) if isinstance(thread.get("metadata"), dict) else {}).get("sectionKey") or "") == section_key_slug
+            )
+        ]
+
+    def _with_messages(thread: dict[str, Any]) -> dict[str, Any]:
+        messages = _list_messages_by_thread_id(thread.get("id"), limit=400)
+        return {**thread, "messages": messages}
+
+    return {
+        "editionId": str(edition_id),
+        "editionThreads": [_with_messages(thread) for thread in edition_threads],
+        "sectionThreads": [_with_messages(thread) for thread in section_threads],
+    }
+
 def _assignment_events_for_assignments(assignment_ids: list[str]) -> list[dict[str, Any]]:
     if not assignment_ids:
         return []
@@ -4080,6 +4554,7 @@ def _build_assignment_context_blocks(
     published_items: list[dict[str, Any]],
     references: list[dict[str, Any]],
     comments: list[dict[str, Any]],
+    forum_context: dict[str, Any] | None,
     lane_key: str,
     profile_key: str,
 ) -> list[dict[str, Any]]:
@@ -4204,6 +4679,46 @@ def _build_assignment_context_blocks(
         )
     linked_reference_ids = _string_list(metadata.get("referenceLineageIds") or [])
     linked_signal_ids = _string_list(metadata.get("semanticNodeLineageIds") or [])
+    forum = forum_context or {}
+    edition_threads = forum.get("editionThreads") if isinstance(forum.get("editionThreads"), list) else []
+    section_threads = forum.get("sectionThreads") if isinstance(forum.get("sectionThreads"), list) else []
+    for thread in edition_threads:
+        messages = thread.get("messages") if isinstance(thread.get("messages"), list) else []
+        lines = [f"Edition Forum: {thread.get('title') or thread.get('id')}"]
+        for message in messages:
+            author = message.get("authorLabel") or message.get("role") or "author"
+            created = message.get("createdAt") or "unknown"
+            summary = message.get("summary") or message.get("content") or message.get("id")
+            lines.append(f"- [{created}] {author}: {summary}")
+        blocks.append(
+            _context_block(
+                f"edition-forum-{thread.get('id')}",
+                "desk_memory",
+                "\n".join(lines),
+                metadata={"sourceKind": "edition_forum", "threadId": thread.get("id"), "scope": "edition"},
+            )
+        )
+    for thread in section_threads:
+        messages = thread.get("messages") if isinstance(thread.get("messages"), list) else []
+        section_label = (
+            ((thread.get("metadata") or {}) if isinstance(thread.get("metadata"), dict) else {}).get("sectionKey")
+            or thread.get("primaryAnchorId")
+            or "section"
+        )
+        lines = [f"Section Forum: {section_label} / {thread.get('title') or thread.get('id')}"]
+        for message in messages:
+            author = message.get("authorLabel") or message.get("role") or "author"
+            created = message.get("createdAt") or "unknown"
+            summary = message.get("summary") or message.get("content") or message.get("id")
+            lines.append(f"- [{created}] {author}: {summary}")
+        blocks.append(
+            _context_block(
+                f"section-forum-{thread.get('id')}",
+                "desk_memory",
+                "\n".join(lines),
+                metadata={"sourceKind": "section_forum", "threadId": thread.get("id"), "scope": "section"},
+            )
+        )
     if linked_reference_ids or linked_signal_ids:
         lines = ["Assignment-linked context"]
         if linked_reference_ids:

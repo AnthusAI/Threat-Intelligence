@@ -2453,7 +2453,7 @@ img {
 
 .news-desk-access-panel__copy {
   animation: newsroom-loading-copy 620ms cubic-bezier(0.2, 0.72, 0.18, 1) both;
-  grid-column: span 4;
+  grid-column: 1 / -1;
   max-width: 760px;
 }
 
@@ -4240,6 +4240,10 @@ img {
   will-change: transform;
 }
 
+.newsroom-card-grid__skeleton {
+  display: contents;
+}
+
 .newsroom-card {
   appearance: none;
   background: transparent;
@@ -4256,6 +4260,43 @@ img {
   text-align: left;
   text-decoration: none;
   width: 100%;
+}
+
+.newsroom-card--skeleton {
+  cursor: default;
+  pointer-events: none;
+}
+
+.newsroom-card--skeleton .newsroom-card__skeleton-line {
+  animation: newsroom-card-skeleton-shimmer 1.2s ease-in-out infinite;
+  background: linear-gradient(
+    90deg,
+    rgb(var(--rule-rgb) / 0.16) 0%,
+    rgb(var(--rule-rgb) / 0.3) 50%,
+    rgb(var(--rule-rgb) / 0.16) 100%
+  );
+  border-radius: 999px;
+  display: block;
+}
+
+.newsroom-card__skeleton-line--kicker {
+  height: 9px;
+  width: 36%;
+}
+
+.newsroom-card__skeleton-line--title {
+  height: 17px;
+  width: 82%;
+}
+
+.newsroom-card__skeleton-line--body {
+  height: 14px;
+  width: 94%;
+}
+
+.newsroom-card__skeleton-line--meta {
+  height: 10px;
+  width: 58%;
 }
 
 .newsroom-card--span-2x1,
@@ -4510,6 +4551,20 @@ img {
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+@keyframes newsroom-card-skeleton-shimmer {
+  0% {
+    opacity: 0.5;
+  }
+
+  50% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0.5;
+  }
 }
 
 .news-desk-assignment-grid__row button {
@@ -9115,4 +9170,100 @@ img {
   .papyrus-console-page--open {
     padding-right: 0;
   }
+}
+
+.news-desk-forum-layout {
+  display: grid;
+  gap: calc(var(--paper-rhythm) * 0.6);
+}
+
+.news-desk-forum-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--paper-rhythm) * 0.4);
+  align-items: end;
+}
+
+.news-desk-forum-toolbar label {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 12rem;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.news-desk-forum-toolbar__stretch {
+  flex: 1 1 18rem;
+}
+
+.news-desk-forum-toolbar input,
+.news-desk-forum-toolbar select {
+  border: 1px solid color-mix(in srgb, var(--ink) 22%, transparent);
+  background: var(--paper);
+  color: var(--ink);
+  padding: 0.45rem 0.55rem;
+}
+
+.news-desk-forum-thread-detail {
+  display: grid;
+  gap: calc(var(--paper-rhythm) * 0.6);
+}
+
+.news-desk-forum-thread-messages {
+  display: grid;
+  gap: calc(var(--paper-rhythm) * 0.45);
+}
+
+.news-desk-forum-thread-message {
+  border: 1px solid color-mix(in srgb, var(--ink) 15%, transparent);
+  padding: calc(var(--paper-rhythm) * 0.45);
+  display: grid;
+  gap: 0.35rem;
+}
+
+.news-desk-forum-thread-message header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  align-items: center;
+  font-size: 0.82rem;
+}
+
+.news-desk-forum-thread-message header button {
+  margin-left: auto;
+}
+
+.news-desk-forum-thread-message h4 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.news-desk-forum-thread-message p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.news-desk-forum-compose {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.news-desk-forum-compose label {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.news-desk-forum-compose input,
+.news-desk-forum-compose textarea {
+  border: 1px solid color-mix(in srgb, var(--ink) 22%, transparent);
+  background: var(--paper);
+  color: var(--ink);
+  padding: 0.5rem 0.6rem;
+}
+
+.news-desk-forum-compose__actions {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
 }

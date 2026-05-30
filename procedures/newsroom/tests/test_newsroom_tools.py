@@ -287,6 +287,138 @@ return plan_research_update{ assignment_item = assignment, research = research }
         self.assertNotIn("Rejected Scope Memo", "\n".join(block["text"] for block in context["blocks"]))
         self.assertNotIn("Foreign Desk", context["text"])
 
+    def test_assignment_context_includes_edition_and_same_section_forum_only(self):
+        assignment_context = {
+            "assignment": {
+                "id": "assignment-reporting-001",
+                "assignmentTypeKey": "reporting.edition-candidate",
+                "status": "open",
+                "title": "Reporting candidate",
+                "sectionKey": "culture",
+                "metadata": {
+                    "editionId": "edition-2026-06-05-v1",
+                    "sectionKey": "culture",
+                    "contextProfile": "reporting",
+                },
+            },
+            "doctrine": [],
+            "targets": [],
+            "events": [],
+        }
+        edition_thread = {
+            "id": "message-thread-edition-forum-edition-2026-06-05-v1",
+            "threadKind": "edition_forum",
+            "title": "Edition Forum",
+            "status": "active",
+            "messages": [{"id": "message-edition-1", "summary": "Edition kickoff", "authorLabel": "editor", "createdAt": "2026-06-01T10:00:00Z"}],
+        }
+        culture_thread = {
+            "id": "message-thread-section-forum-culture",
+            "threadKind": "section_forum",
+            "title": "Section Forum: Culture",
+            "status": "active",
+            "primaryAnchorId": "culture",
+            "metadata": {"sectionKey": "culture"},
+            "messages": [{"id": "message-culture-1", "summary": "Culture steering note", "authorLabel": "human", "createdAt": "2026-06-01T10:10:00Z"}],
+        }
+        business_thread = {
+            "id": "message-thread-section-forum-business",
+            "threadKind": "section_forum",
+            "title": "Section Forum: Business",
+            "status": "active",
+            "primaryAnchorId": "business",
+            "metadata": {"sectionKey": "business"},
+            "messages": [{"id": "message-business-1", "summary": "Business note", "authorLabel": "human", "createdAt": "2026-06-01T10:20:00Z"}],
+        }
+
+        class FakeSemanticClient:
+            def references_for_category(self, category_lineage_id):
+                return {"relations": []}
+
+            def get_reference(self, reference_id):
+                return {"reference": {}}
+
+            def list_reference_messages(self, reference_lineage_id):
+                return {"messages": []}
+
+        def fake_forum_threads(kind, edition_id, *, status="", limit=200):
+            if kind == "edition_forum":
+                return [edition_thread]
+            if kind == "section_forum":
+                return [culture_thread, business_thread]
+            return []
+
+        def fake_messages(thread_id, *, limit=400):
+            mapping = {
+                edition_thread["id"]: edition_thread["messages"],
+                culture_thread["id"]: culture_thread["messages"],
+                business_thread["id"]: business_thread["messages"],
+            }
+            return mapping.get(thread_id, [])
+
+        def fake_compaction(*, blocks, profile_key, max_tokens):
+            return {
+                "included_blocks": blocks,
+                "dropped_blocks": [],
+                "section_token_counts": {},
+                "text": "\n\n".join(block["text"] for block in blocks),
+                "total_tokens": 100,
+                "total_characters": 500,
+            }
+
+        with mock.patch.object(papyrus_newsroom, "papyrus_get_assignment_context", return_value={"assignment_context": assignment_context}), \
+             mock.patch.object(papyrus_newsroom, "_list_categories", return_value=[]), \
+             mock.patch.object(papyrus_newsroom, "_list_category_keywords", return_value=[]), \
+             mock.patch.object(papyrus_newsroom, "_list_assignments", return_value=[]), \
+             mock.patch.object(papyrus_newsroom, "_assignment_events_for_assignments", return_value=[]), \
+             mock.patch.object(papyrus_newsroom, "_recent_published_items", return_value=[]), \
+             mock.patch.object(papyrus_newsroom, "_semantic_client", return_value=FakeSemanticClient()), \
+             mock.patch.object(papyrus_newsroom, "_forum_threads_by_kind_and_edition", side_effect=fake_forum_threads), \
+             mock.patch.object(papyrus_newsroom, "_list_messages_by_thread_id", side_effect=fake_messages), \
+             mock.patch.object(papyrus_newsroom, "_build_biblicus_block_context_pack", side_effect=fake_compaction):
+            result = papyrus_newsroom.papyrus_build_assignment_agent_context("assignment-reporting-001")
+
+        context = result["assignment_agent_context"]
+        self.assertEqual([message["id"] for message in context["editionForumMessages"]], ["message-edition-1"])
+        self.assertEqual(len(context["sectionForumThreads"]), 1)
+        self.assertEqual(context["sectionForumThreads"][0]["id"], "message-thread-section-forum-culture")
+        combined = "\n".join(block["text"] for block in context["blocks"])
+        self.assertIn("Edition Forum: Edition Forum", combined)
+        self.assertIn("Section Forum: culture", combined)
+        self.assertNotIn("Business note", combined)
+
+    def test_create_section_forum_thread_includes_section_lineage_metadata(self):
+        captured: dict[str, dict[str, object]] = {}
+
+        def fake_graphql(query: str, variables: dict[str, object]):
+            if "createMessageThread" in query:
+                captured["input"] = variables["input"]  # type: ignore[index]
+                return {"createMessageThread": variables["input"]}
+            return {}
+
+        with mock.patch.object(papyrus_newsroom, "_graphql", side_effect=fake_graphql):
+            result = papyrus_newsroom.papyrus_create_section_forum_thread(
+                edition_id="edition-2026-06-05-v1",
+                section_id="culture",
+                section_key="culture",
+                section_title="Culture",
+                title="Culture planning notes",
+                actor_label="editor",
+            )
+
+        thread = result["thread"]
+        self.assertEqual(thread["threadKind"], "section_forum")
+        self.assertEqual(thread["primaryAnchorKind"], "newsroom_section")
+        self.assertEqual(thread["primaryAnchorId"], "culture")
+        self.assertEqual(thread["primaryAnchorLineageId"], "edition-2026-06-05-v1")
+        metadata = thread["metadata"]
+        self.assertEqual(metadata["editionId"], "edition-2026-06-05-v1")
+        self.assertEqual(metadata["sectionId"], "culture")
+        self.assertEqual(metadata["sectionKey"], "culture")
+        self.assertEqual(metadata["sectionTitle"], "Culture")
+        self.assertIn("input", captured)
+        self.assertEqual(captured["input"]["primaryAnchorKind"], "newsroom_section")
+
     def test_assignment_plan_uses_assignment_type(self):
         plan = papyrus_newsroom.build_assignment_record_plan(
             edition_id="edition-1",
@@ -3182,7 +3314,12 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertEqual(plan["summary"]["researchAssignmentCount"], 2)
         self.assertEqual(plan["summary"]["slotCount"], 3)
         self.assertEqual(plan["summary"]["reportingAssignmentCount"], 5)
-        self.assertFalse(any(record["modelName"] in {"Message", "Item", "EditionItem"} for record in plan["records"]))
+        self.assertFalse(any(record["modelName"] in {"Item", "EditionItem"} for record in plan["records"]))
+        forum_messages = [
+            record for record in plan["records"]
+            if record["modelName"] == "Message" and record["input"].get("messageKind") == "forum_post"
+        ]
+        self.assertGreaterEqual(len(forum_messages), 1)
         self.assertEqual(
             len([record for record in plan["records"] if record["modelName"] == "EditionSlot"]),
             3,
@@ -3360,6 +3497,42 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertEqual(len(section["slots"]), 1)
         self.assertEqual(section["slots"][0]["candidateCount"], 1)
         self.assertTrue(section["reportingCandidates"][0]["packetAvailable"])
+
+    def test_coverage_theme_plan_creates_forum_kickoff_threads_and_messages(self):
+        plan = papyrus_coverage_theme.build_coverage_theme_plan(
+            date="2026-06-05",
+            topic="AI in video games",
+            corpus_key="AI-ML-research",
+            category_key="AI-ML-research",
+            coverage_key="coverage.ai-in-video-games",
+            sections=["culture"],
+            section_budgets={"arts": 2},
+            run_id="coverage-theme-forum-test",
+            now="2026-06-01T12:00:00Z",
+            state={
+                "newsroomSections": [{"id": "arts", "title": "Arts", "type": "canonical", "enabled": True, "sortOrder": 1}],
+                "categories": [],
+                "categorySets": [],
+            },
+        )
+
+        thread_records = [record for record in plan["records"] if record["modelName"] == "MessageThread"]
+        message_records = [
+            record for record in plan["records"]
+            if record["modelName"] == "Message" and record["input"].get("messageKind") == "forum_post"
+        ]
+        self.assertEqual(len(thread_records), 2)
+        self.assertEqual(len(message_records), 2)
+        edition_thread = next(record["input"] for record in thread_records if record["input"]["threadKind"] == "edition_forum")
+        section_thread = next(record["input"] for record in thread_records if record["input"]["threadKind"] == "section_forum")
+        self.assertEqual(edition_thread["primaryAnchorKind"], "edition")
+        self.assertEqual(section_thread["primaryAnchorKind"], "newsroom_section")
+        self.assertEqual(section_thread["primaryAnchorLineageId"], plan["edition"]["id"])
+        self.assertTrue(plan["forumKickoff"]["editionThreadId"].startswith("message-thread-edition-forum-"))
+        self.assertEqual(plan["summary"]["forumThreadCount"], 2)
+        self.assertEqual(plan["summary"]["forumMessageCount"], 2)
+        body = message_records[0]["input"]["content"]
+        self.assertIn("Human Steering Opportunities", body)
 
 
 if __name__ == "__main__":

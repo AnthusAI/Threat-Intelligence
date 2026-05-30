@@ -44,6 +44,12 @@ Keep these concepts separate:
 New packet writes use `Assignment --produces--> Message`. Legacy
 `Message --comment--> Assignment` packet links may still be read.
 
+Forum context defaults for assignment execution:
+
+- include edition forum threads first when `assignment.editionId` is present;
+- include only same-section forum threads for `(edition, section)` lineage;
+- never leak other sections' threads into the assignment context.
+
 ## Default Smoke Command
 
 Run dry-run first. Treat the run as a Coverage Theme in editor-facing language:
@@ -228,6 +234,16 @@ Decision table:
 | `hold` | `open` + winner cleared | none | none |
 | `kill` | `open` + winner cleared | none | none |
 | `merge` | none by default | none | none |
+
+## Forum Operator Loop
+
+For collaborative edition dogfood runs, operate forum threads from
+`/newsroom/messages` in forum mode:
+
+- keep one `edition_forum` thread for cross-section coordination;
+- add section-specific `section_forum` thread(s) as needed;
+- append human replies directly in the relevant thread;
+- treat those messages as default context for editor/reporter assignment runs.
 
 ## Verification
 

@@ -93,6 +93,11 @@ id assignmentId assignmentTypeKey queueKey eventType fromStatus toStatus actorSu
 MESSAGE_FIELDS = """
 id messageKind messageDomain status summary source importRunId authorLabel newsroomFeedKey createdAt updatedAt
 """
+MESSAGE_THREAD_FIELDS = """
+id threadKind status title summary primaryAnchorKind primaryAnchorId primaryAnchorLineageId primaryAnchorKey createdBySub
+createdByUserProfileId createdByLabel messageCount lastMessageId lastMessageAt contextDigest activeResponseMessageId
+responseLockOwner responseLockExpiresAt metadata createdAt updatedAt newsroomFeedKey
+"""
 SEMANTIC_NODE_FIELDS = """
 id lineageId versionNumber previousVersionId versionState versionCreatedAt versionCreatedBy changeReason contentHash
 nodeKey nodeKind corpusId categorySetId categoryLineageId categoryKey displayName description aliases authorityScore authorityRank
@@ -130,6 +135,7 @@ LIST_FIELDS = {
     "Assignment": ("listAssignments", ASSIGNMENT_FIELDS),
     "AssignmentEvent": ("listAssignmentEvents", ASSIGNMENT_EVENT_FIELDS),
     "Message": ("listMessages", MESSAGE_FIELDS),
+    "MessageThread": ("listMessageThreads", MESSAGE_THREAD_FIELDS),
     "SemanticNode": ("listSemanticNodes", SEMANTIC_NODE_FIELDS),
     "SemanticRelation": ("listSemanticRelations", SEMANTIC_RELATION_FIELDS),
     "ModelAttachment": ("listModelAttachments", MODEL_ATTACHMENT_FIELDS),
@@ -1086,6 +1092,17 @@ def build_coverage_theme_plan(
                 now=now,
                 metadata={"runId": run_id, "sourceKind": "section_research_assignment", "coverageKey": coverage_key},
             )))
+    forum_kickoff = build_edition_forum_kickoff_records(
+        edition=edition,
+        sections=resolved_sections,
+        section_budgets=section_budgets,
+        reporting_assignments=reporting_assignments,
+        topic=topic,
+        coverage_key=coverage_key,
+        run_id=run_id,
+        now=now,
+    )
+    records.extend(forum_kickoff["records"])
     return {
         "ok": True,
         "command": "coverage-themes plan",
@@ -1103,17 +1120,289 @@ def build_coverage_theme_plan(
             for section in resolved_sections
         ],
         "editionSlots": edition_slots,
+        "forumKickoff": forum_kickoff["kickoff"],
         "researchAssignments": research_assignments,
         "reportingAssignments": reporting_assignments,
         "records": _dedupe_records(records),
         "summary": {
             "sectionCount": len(resolved_sections),
             "slotCount": len(edition_slots),
+            "forumThreadCount": forum_kickoff["summary"]["threadCount"],
+            "forumMessageCount": forum_kickoff["summary"]["messageCount"],
             "researchAssignmentCount": len(research_assignments),
             "reportingAssignmentCount": len(reporting_assignments),
             "createsItemOrEditionItem": False,
         },
     }
+
+
+def build_edition_forum_kickoff_records(
+    *,
+    edition: dict[str, Any],
+    sections: list[dict[str, Any]],
+    section_budgets: dict[str, int],
+    reporting_assignments: list[dict[str, Any]],
+    topic: str,
+    coverage_key: str,
+    run_id: str,
+    now: str,
+) -> dict[str, Any]:
+    edition_id = str(edition.get("id") or "")
+    section_summary: list[dict[str, Any]] = []
+    for section in sections:
+        section_key = str(section.get("id") or "")
+        slots = max(1, int(section_budgets.get(section_key, DEFAULT_SECTION_BUDGETS.get(section_key, 1))))
+        dispatch_count = math.ceil(slots * 1.5)
+        section_summary.append({
+            "sectionId": section_key,
+            "sectionKey": section_key,
+            "sectionTitle": section.get("title") or section_key,
+            "slots": slots,
+            "dispatchCount": dispatch_count,
+            "pursuedTopics": [topic],
+        })
+
+    edition_thread = edition_forum_thread_record(
+        edition_id=edition_id,
+        run_id=run_id,
+        now=now,
+    )
+    edition_message = forum_kickoff_message_record(
+        thread=edition_thread,
+        role="editor",
+        author_label="papyrus-editor",
+        summary=f"Edition kickoff: {topic}",
+        content=_edition_forum_kickoff_body(topic=topic, coverage_key=coverage_key, section_summary=section_summary),
+        now=now,
+    )
+    records: list[dict[str, Any]] = [
+        _record("MessageThread", edition_thread),
+        _record("Message", edition_message),
+        _record("SemanticRelation", semantic_relation(
+            predicate="planned_for_edition",
+            subject_kind="message",
+            subject_id=edition_message["id"],
+            object_kind="edition",
+            object_id=edition_id,
+            object_lineage_id=edition.get("lineageId") or edition_id,
+            object_version_number=edition.get("versionNumber") or 1,
+            import_run_id=run_id,
+            now=now,
+            metadata={"runId": run_id, "threadId": edition_thread["id"], "forumScope": "edition"},
+        )),
+    ]
+
+    section_threads: list[dict[str, Any]] = []
+    section_messages: list[dict[str, Any]] = []
+    for section in section_summary:
+        section_thread = section_forum_thread_record(
+            edition_id=edition_id,
+            section_id=section["sectionId"],
+            section_key=section["sectionKey"],
+            section_title=section["sectionTitle"],
+            run_id=run_id,
+            now=now,
+        )
+        section_message = forum_kickoff_message_record(
+            thread=section_thread,
+            role="editor",
+            author_label="papyrus-editor",
+            summary=f"Section kickoff: {section['sectionTitle']}",
+            content=_section_forum_kickoff_body(topic=topic, section=section, coverage_key=coverage_key),
+            now=now,
+        )
+        section_threads.append(section_thread)
+        section_messages.append(section_message)
+        records.extend([
+            _record("MessageThread", section_thread),
+            _record("Message", section_message),
+            _record("SemanticRelation", semantic_relation(
+                predicate="planned_for_edition",
+                subject_kind="message",
+                subject_id=section_message["id"],
+                object_kind="edition",
+                object_id=edition_id,
+                object_lineage_id=edition.get("lineageId") or edition_id,
+                object_version_number=edition.get("versionNumber") or 1,
+                import_run_id=run_id,
+                now=now,
+                metadata={
+                    "runId": run_id,
+                    "threadId": section_thread["id"],
+                    "forumScope": "section",
+                    "sectionKey": section["sectionKey"],
+                },
+            )),
+            _record("SemanticRelation", semantic_relation(
+                predicate="targets_section",
+                subject_kind="message",
+                subject_id=section_message["id"],
+                object_kind="newsroomSection",
+                object_id=section["sectionId"],
+                object_lineage_id=section["sectionId"],
+                rank=1,
+                import_run_id=run_id,
+                now=now,
+                metadata={"runId": run_id, "threadId": section_thread["id"], "sectionKey": section["sectionKey"]},
+            )),
+        ])
+
+    return {
+        "records": records,
+        "kickoff": {
+            "editionThreadId": edition_thread["id"],
+            "editionMessageId": edition_message["id"],
+            "sectionThreadIds": [thread["id"] for thread in section_threads],
+            "sectionMessageIds": [message["id"] for message in section_messages],
+        },
+        "summary": {
+            "threadCount": 1 + len(section_threads),
+            "messageCount": 1 + len(section_messages),
+        },
+    }
+
+
+def edition_forum_thread_record(*, edition_id: str, run_id: str, now: str) -> dict[str, Any]:
+    thread_id = f"message-thread-edition-forum-{_safe_id(edition_id)}"
+    return {
+        "id": thread_id,
+        "threadKind": "edition_forum",
+        "status": "active",
+        "title": "Edition Forum",
+        "summary": "Cross-section coordination and human steering for this edition.",
+        "primaryAnchorKind": "edition",
+        "primaryAnchorId": edition_id,
+        "primaryAnchorLineageId": edition_id,
+        "primaryAnchorKey": f"edition#{edition_id}",
+        "createdByLabel": "papyrus-editor",
+        "messageCount": 1,
+        "lastMessageId": f"message-forum-{_safe_id(thread_id)}-0001",
+        "lastMessageAt": now,
+        "metadata": {"editionId": edition_id, "runId": run_id},
+        "createdAt": now,
+        "updatedAt": now,
+        "newsroomFeedKey": "messages",
+    }
+
+
+def section_forum_thread_record(
+    *,
+    edition_id: str,
+    section_id: str,
+    section_key: str,
+    section_title: str,
+    run_id: str,
+    now: str,
+) -> dict[str, Any]:
+    thread_id = f"message-thread-section-forum-{_safe_id(edition_id)}-{_safe_id(section_id)}-{_safe_id(run_id)}"
+    return {
+        "id": thread_id,
+        "threadKind": "section_forum",
+        "status": "active",
+        "title": f"Section Forum: {section_title}",
+        "summary": "Section-scoped coordination and steering for this edition.",
+        "primaryAnchorKind": "newsroom_section",
+        "primaryAnchorId": section_id,
+        "primaryAnchorLineageId": edition_id,
+        "primaryAnchorKey": f"edition#{edition_id}#section#{section_id}",
+        "createdByLabel": "papyrus-editor",
+        "messageCount": 1,
+        "lastMessageId": f"message-forum-{_safe_id(thread_id)}-0001",
+        "lastMessageAt": now,
+        "metadata": {
+            "editionId": edition_id,
+            "sectionId": section_id,
+            "sectionKey": section_key,
+            "sectionTitle": section_title,
+            "runId": run_id,
+        },
+        "createdAt": now,
+        "updatedAt": now,
+        "newsroomFeedKey": "messages",
+    }
+
+
+def forum_kickoff_message_record(
+    *,
+    thread: dict[str, Any],
+    role: str,
+    author_label: str,
+    summary: str,
+    content: str,
+    now: str,
+) -> dict[str, Any]:
+    return {
+        "id": f"message-forum-{_safe_id(thread.get('id'))}-0001",
+        "messageKind": "forum_post",
+        "messageDomain": "edition_coordination",
+        "status": "active",
+        "summary": summary,
+        "source": "papyrus assignments run-story-cycle",
+        "importRunId": ((thread.get("metadata") or {}) if isinstance(thread.get("metadata"), dict) else {}).get("runId"),
+        "authorLabel": author_label,
+        "threadId": thread.get("id"),
+        "parentMessageId": None,
+        "sequenceNumber": 1,
+        "role": role,
+        "messageType": "forum_message",
+        "content": content,
+        "metadata": {
+            "threadKind": thread.get("threadKind"),
+            "anchorKind": thread.get("primaryAnchorKind"),
+            "anchorId": thread.get("primaryAnchorId"),
+            "anchorLineageId": thread.get("primaryAnchorLineageId"),
+        },
+        "newsroomFeedKey": "messages",
+        "createdAt": now,
+        "updatedAt": now,
+    }
+
+
+def _edition_forum_kickoff_body(*, topic: str, coverage_key: str, section_summary: list[dict[str, Any]]) -> str:
+    lines = [
+        "# Edition Kickoff",
+        "",
+        f"- Topic focus: {topic}",
+        f"- Coverage concept: {coverage_key}",
+        "- Overassignment posture: section-first at 1.5x (ceil(slots * 1.5)).",
+        "",
+        "## Topics Pursued By Section",
+    ]
+    for section in section_summary:
+        lines.append(f"- {section['sectionTitle']} ({section['sectionKey']}): {', '.join(section['pursuedTopics'])}")
+    lines.extend([
+        "",
+        "## Slot + Dispatch Plan",
+    ])
+    for section in section_summary:
+        lines.append(
+            f"- {section['sectionTitle']}: {section['slots']} slot(s), {section['dispatchCount']} reporting candidate(s) dispatched."
+        )
+    lines.extend([
+        "",
+        "## Human Steering Opportunities",
+        "- Refine or replace section topic angles before copywriting selection.",
+        "- Add or tighten kill criteria for weak candidate packets.",
+        "- Flag must-have sources or concerns to prioritize during reporting review.",
+        "- Request explicit cross-section substitution only when section-first culling is insufficient.",
+    ])
+    return "\n".join(lines).strip() + "\n"
+
+
+def _section_forum_kickoff_body(*, topic: str, section: dict[str, Any], coverage_key: str) -> str:
+    return "\n".join([
+        f"# Section Kickoff: {section['sectionTitle']}",
+        "",
+        f"- Topic focus: {topic}",
+        f"- Coverage concept: {coverage_key}",
+        f"- Slot target: {section['slots']}",
+        f"- Reporting dispatch target: {section['dispatchCount']} (1.5x overassignment).",
+        "",
+        "## Human Steering Opportunities",
+        "- Suggest narrower section angle(s) for this desk.",
+        "- Call out risks, must-verify claims, and source-quality concerns.",
+        "- Prioritize candidate ranks to favor in select/brief decisions.",
+    ]).strip() + "\n"
 
 
 def build_research_packet_records(

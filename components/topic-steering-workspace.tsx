@@ -28,10 +28,14 @@ import {
   loadEditorReferencesData,
   loadEditorProcedureData,
   loadEditorSemanticRelationsData,
+  loadEditionForumThreads,
   loadNewsroomAssignmentPage,
   loadNewsroomMessagePage,
   loadNewsroomReferencePage,
   loadNewsroomSemanticNodePage,
+  appendForumThreadMessageRecord,
+  createSectionForumThreadRecord,
+  ensureEditionForumThreadRecord,
   publishProcedureVersionRecord,
   runNewsroomKnowledgeQuery,
   saveProcedureDefinitionRecord,
@@ -39,6 +43,7 @@ import {
   selectRootDeskCategoriesForDoctrine,
   startProcedureRunRecord,
   uploadModelPayloadForOwner,
+  type ForumThreadWithMessages,
   type KnowledgeQueryResponse,
   type NewsroomRecordPage,
 } from "./news-desk-taxonomy-client";
@@ -3184,10 +3189,12 @@ function NewsDeskDashboard({
         ) : null}
         {!isSectionPage && activeTab === "messages" ? (
           <MessagesDeskView
+            assignments={assignments}
             graph={graph}
             initialMessageId={initialSelection.message}
             isDemo={Boolean(dashboard.isDemo)}
             messages={messages}
+            newsroomSections={newsroomSections}
             summary={summary}
           />
         ) : null}
@@ -6593,6 +6600,7 @@ function ReferencesDeskView({
   const statusCounts = categoryFilter ? countReferencesByStatus(canonicalVisibleReferences) : summary?.facets?.references?.byCurationStatus ?? summary?.referenceStatusCounts ?? countReferencesByStatus(canonicalVisibleReferences);
   const nonPendingCount = (statusCounts.accepted ?? 0) + (statusCounts.rejected ?? 0) + (statusCounts.archived ?? 0);
   const totalReferenceCount = categoryFilter ? canonicalVisibleReferences.length : summaryCountFromRecord(summary, "references") || canonicalVisibleReferences.length;
+  const hasAnyReferences = totalReferenceCount > 0 || references.length > 0;
   const statusFilterOptions = [
     { key: "__exclude_pending", label: "Reviewed (non-pending)", count: nonPendingCount },
     { key: "", label: "All statuses", count: totalReferenceCount },
@@ -6684,7 +6692,7 @@ function ReferencesDeskView({
           <section className="category-steering-section category-steering-section--lead" aria-label={detail}>
             <NewsroomCardGrid
               cards={cards}
-              emptyLabel={references.length ? "No references match this filter" : "No private references imported"}
+              emptyLabel={hasAnyReferences ? "No references match this filter" : "No private references imported"}
               filterLabel="Curation status"
               filterOptions={statusFilterOptions}
               filterValue={statusFilter}
@@ -6696,6 +6704,7 @@ function ReferencesDeskView({
               ]}
               footerLabel={feed.error ?? undefined}
               hasMore={!isDemo && !categoryFilter && feed.hasMore}
+              isLoading={!isDemo && !categoryFilter && feed.isLoading}
               isLoadingMore={feed.isLoadingMore}
               onFilterChange={setStatusFilter}
               onLoadMore={feed.loadMore}
@@ -6754,16 +6763,20 @@ function NewsroomDeskSectionLede({
 }
 
 function MessagesDeskView({
+  assignments,
   graph,
   initialMessageId,
   isDemo,
   messages,
+  newsroomSections,
   summary,
 }: {
+  assignments: AssignmentRecord[];
   graph: SemanticGraph;
   initialMessageId?: string | null;
   isDemo?: boolean;
   messages: MessageRecord[];
+  newsroomSections: NewsroomSectionRecord[];
   summary?: NewsroomSummaryRecord | null;
 }) {
   const [kindFilter, setKindFilter] = useState("");
@@ -6772,10 +6785,24 @@ function MessagesDeskView({
   const [isMessageDetailOpen, setIsMessageDetailOpen] = useState(Boolean(initialMessageId));
   const [consoleThreads, setConsoleThreads] = useState<ConsoleThreadSummary[]>([]);
   const [consoleThreadsError, setConsoleThreadsError] = useState<string | null>(null);
+  const [selectedForumEditionId, setSelectedForumEditionId] = useState("");
+  const [selectedForumSectionId, setSelectedForumSectionId] = useState("");
+  const [forumScopeFilter, setForumScopeFilter] = useState<"all" | "edition" | "section">("all");
+  const [forumActivityFilter, setForumActivityFilter] = useState<"active" | "all">("active");
+  const [forumThreads, setForumThreads] = useState<ForumThreadWithMessages[]>([]);
+  const [forumThreadsLoading, setForumThreadsLoading] = useState(false);
+  const [forumThreadsError, setForumThreadsError] = useState<string | null>(null);
+  const [selectedForumThreadId, setSelectedForumThreadId] = useState("");
+  const [forumComposeSummary, setForumComposeSummary] = useState("");
+  const [forumComposeContent, setForumComposeContent] = useState("");
+  const [forumReplyParentId, setForumReplyParentId] = useState("");
+  const [forumComposeError, setForumComposeError] = useState<string | null>(null);
+  const [newSectionThreadTitle, setNewSectionThreadTitle] = useState("");
   const messageKind = kindFilter === "__chat_detail" ? "console_chat_turn" : kindFilter;
+  const isForumMode = kindFilter === "__forum";
   const feed = useNewsroomPagedRows({
     initialItems: messages,
-    enabled: !isDemo && kindFilter !== "__chat_sessions",
+    enabled: !isDemo && kindFilter !== "__chat_sessions" && !isForumMode,
     resetKey: `messages:${kindFilter}:${domainFilter}`,
     loadPage: (nextToken) => loadNewsroomMessagePage({
       kind: messageKind,
@@ -6800,12 +6827,134 @@ function MessagesDeskView({
       active = false;
     };
   }, [isDemo, kindFilter]);
+  const forumEditionIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const assignment of assignments) {
+      const metadata = metadataRecord(assignment.metadata);
+      const editionId = normalizeEditionIdFromAssignment(assignment, metadata);
+      if (editionId) ids.add(editionId);
+    }
+    return Array.from(ids).sort((left, right) => right.localeCompare(left));
+  }, [assignments]);
+  const availableSections = useMemo(
+    () => sortNewsroomSections(newsroomSections).filter((section) => section.enabled !== false),
+    [newsroomSections],
+  );
+  useEffect(() => {
+    if (!forumEditionIds.length) {
+      setSelectedForumEditionId("");
+      return;
+    }
+    if (!selectedForumEditionId || !forumEditionIds.includes(selectedForumEditionId)) {
+      setSelectedForumEditionId(forumEditionIds[0]);
+    }
+  }, [forumEditionIds, selectedForumEditionId]);
+  useEffect(() => {
+    if (!availableSections.length) {
+      setSelectedForumSectionId("");
+      return;
+    }
+    if (!selectedForumSectionId || !availableSections.some((section) => section.id === selectedForumSectionId)) {
+      setSelectedForumSectionId(availableSections[0].id);
+    }
+  }, [availableSections, selectedForumSectionId]);
+  const refreshForumThreads = useCallback(async () => {
+    if (!selectedForumEditionId) {
+      setForumThreads([]);
+      setForumThreadsError(null);
+      return;
+    }
+    setForumThreadsLoading(true);
+    try {
+      const sectionIdForQuery = forumScopeFilter === "section" ? selectedForumSectionId : "";
+      const sectionForQuery = availableSections.find((section) => section.id === sectionIdForQuery) ?? null;
+      const result = await loadEditionForumThreads({
+        editionId: selectedForumEditionId,
+        sectionId: sectionIdForQuery || undefined,
+        sectionKey: sectionForQuery?.id ?? undefined,
+        includeMessages: true,
+        status: forumActivityFilter === "active" ? "active" : "",
+      });
+      const merged = [...result.editionThreads, ...result.sectionThreads]
+        .sort((left, right) => String(right.updatedAt ?? "").localeCompare(String(left.updatedAt ?? "")));
+      setForumThreads(merged);
+      setForumThreadsError(null);
+      setSelectedForumThreadId((current) => (current && merged.some((thread) => thread.id === current) ? current : (merged[0]?.id ?? "")));
+    } catch (error) {
+      setForumThreads([]);
+      setForumThreadsError(error instanceof Error ? error.message : "Could not load edition forum threads.");
+    } finally {
+      setForumThreadsLoading(false);
+    }
+  }, [availableSections, forumActivityFilter, forumScopeFilter, selectedForumEditionId, selectedForumSectionId]);
+  useEffect(() => {
+    if (!isForumMode || isDemo) return;
+    void refreshForumThreads();
+  }, [isDemo, isForumMode, refreshForumThreads]);
   const feedMessages = isDemo ? messages : feed.items;
   const messageKindCounts = summary?.facets?.messages?.byKind ?? summary?.messageKindCounts ?? countMessagesBy(messages, "messageKind");
   const messageDomainCounts = summary?.facets?.messages?.byDomain ?? summary?.messageDomainCounts ?? countMessagesBy(messages, "messageDomain");
   const messageKinds = useMemo(() => sortedCountOptions(messageKindCounts).map((option) => option.key), [messageKindCounts]);
   const messageDomains = useMemo(() => sortedCountOptions(messageDomainCounts).map((option) => option.key), [messageDomainCounts]);
   const chatSessionMessages = useMemo(() => consoleThreads.map(consoleThreadToMessageRecord), [consoleThreads]);
+  const forumSectionKeyByThreadId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const thread of forumThreads) {
+      const sectionKey = normalizeForumThreadSectionKey(thread);
+      if (sectionKey) map.set(thread.id, sectionKey);
+    }
+    return map;
+  }, [forumThreads]);
+  const filteredForumThreads = useMemo(() => forumThreads.filter((thread) => {
+    if (forumScopeFilter === "edition" && thread.scope !== "edition") return false;
+    if (forumScopeFilter === "section" && thread.scope !== "section") return false;
+    if (forumScopeFilter === "section" && selectedForumSectionId) {
+      const selectedSection = availableSections.find((section) => section.id === selectedForumSectionId) ?? null;
+      if (selectedSection) {
+        const threadSectionKey = forumSectionKeyByThreadId.get(thread.id) ?? "";
+        if (threadSectionKey && threadSectionKey !== selectedSection.id) return false;
+      }
+    }
+    if (forumActivityFilter === "active" && thread.status !== "active") return false;
+    return true;
+  }), [availableSections, forumActivityFilter, forumScopeFilter, forumSectionKeyByThreadId, forumThreads, selectedForumSectionId]);
+  const selectedForumThread = filteredForumThreads.find((thread) => thread.id === selectedForumThreadId) ?? filteredForumThreads[0] ?? null;
+  const selectedForumThreadMessages = useMemo(
+    () => [...(selectedForumThread?.messages ?? [])].sort((left, right) => Number(left.sequenceNumber ?? 0) - Number(right.sequenceNumber ?? 0)),
+    [selectedForumThread?.messages],
+  );
+  const forumThreadCards = useMemo(() => filteredForumThreads.map((thread, index) => {
+    const sectionKey = normalizeForumThreadSectionKey(thread);
+    const sectionLabel = sectionKey && availableSections.find((entry) => entry.id === sectionKey)?.title;
+    const scopeLabel = thread.scope === "edition" ? "Edition" : `Section:${sectionLabel ?? sectionKey ?? thread.primaryAnchorId ?? "unknown"}`;
+    const subtitle = distinctNewsroomCardSubtitle(
+      thread.summary ?? null,
+      thread.scope === "section" ? `Section scope: ${sectionLabel ?? sectionKey ?? "unknown"}` : "Cross-section coordination",
+    );
+    const template = resolveNewsroomCardTemplate({
+      bodyLength: subtitle?.length ?? 0,
+      index,
+      isUrgent: thread.status === "active",
+      mode: "desk",
+      sectionKey: "messages",
+      title: thread.title,
+      updatedAt: thread.updatedAt ?? thread.lastMessageAt ?? thread.createdAt ?? null,
+    });
+    return {
+      id: thread.id,
+      ariaLabel: `Open forum thread ${thread.title}`,
+      body: subtitle ? newsroomCardExcerpt(subtitle, 180) : null,
+      kicker: scopeLabel,
+      meta: [
+        `${thread.messageCount ?? thread.messages.length ?? 0} message${(thread.messageCount ?? thread.messages.length ?? 0) === 1 ? "" : "s"}`,
+        thread.status,
+      ],
+      span: template.span,
+      stamp: formatDateTime(thread.lastMessageAt ?? thread.updatedAt ?? thread.createdAt ?? ""),
+      templateRole: template.role,
+      title: thread.title,
+    } satisfies NewsroomCardRecord;
+  }), [availableSections, filteredForumThreads]);
   const visibleMessages = useMemo(() => {
     if (kindFilter === "__chat_sessions") return chatSessionMessages;
     return feedMessages
@@ -6818,10 +6967,19 @@ function MessagesDeskView({
     ?? visibleMessages[0]
     ?? null;
   const selected = selectedMessage ? graph.resolve("message", selectedMessage.id) : null;
+  const selectedForumMessage = selectedForumThreadMessages.at(-1) ?? null;
+  const selectedEntity = isForumMode
+    ? (selectedForumMessage ? graph.resolve("message", selectedForumMessage.id) : null)
+    : selected;
   const messageKnowledgeQuery = useNewsroomKnowledgeContext(selectedMessage ? {
     anchor: { kind: "message", id: selectedMessage.id },
     title: selectedMessage.summary ?? "Stored message payload",
     subtitle: selectedMessage.messageKind,
+  } : null);
+  const forumKnowledgeQuery = useNewsroomKnowledgeContext(selectedForumMessage ? {
+    anchor: { kind: "message", id: selectedForumMessage.id },
+    title: selectedForumThread?.title ?? selectedForumMessage.summary ?? "Forum thread",
+    subtitle: selectedForumMessage.messageKind,
   } : null);
   const cards = visibleMessages.map((message, index) => messageToNewsroomCard(message, index));
   const totalMessageCount = summaryCountFromRecord(summary, "messages") || messages.length;
@@ -6834,15 +6992,76 @@ function MessagesDeskView({
     setIsMessageDetailOpen(true);
     pushNewsroomDetailUrl("messages", id, isDemo);
   };
+  const selectedForumSection = availableSections.find((section) => section.id === selectedForumSectionId) ?? null;
+  const canCreateSectionThread = Boolean(selectedForumEditionId && selectedForumSection);
+  const ensureEditionThread = async () => {
+    if (!selectedForumEditionId) return;
+    try {
+      await ensureEditionForumThreadRecord({
+        editionId: selectedForumEditionId,
+        actorLabel: "editor",
+      });
+      await refreshForumThreads();
+      setForumThreadsError(null);
+    } catch (error) {
+      setForumThreadsError(error instanceof Error ? error.message : "Could not create edition thread.");
+    }
+  };
+  const createSectionThread = async () => {
+    if (!selectedForumEditionId || !selectedForumSection) return;
+    try {
+      const created = await createSectionForumThreadRecord({
+        editionId: selectedForumEditionId,
+        sectionId: selectedForumSection.id,
+        sectionKey: selectedForumSection.id,
+        sectionTitle: selectedForumSection.title,
+        title: newSectionThreadTitle.trim() || `Section Forum: ${selectedForumSection.title}`,
+        actorLabel: "editor",
+      });
+      setNewSectionThreadTitle("");
+      await refreshForumThreads();
+      setSelectedForumThreadId(created.thread.id);
+      setForumThreadsError(null);
+    } catch (error) {
+      setForumThreadsError(error instanceof Error ? error.message : "Could not create section thread.");
+    }
+  };
+  const submitForumMessage = async () => {
+    if (!selectedForumThread) return;
+    const summary = forumComposeSummary.trim() || forumComposeContent.trim().slice(0, 120) || "Forum reply";
+    const content = forumComposeContent.trim();
+    if (!content) {
+      setForumComposeError("Message content is required.");
+      return;
+    }
+    setForumComposeError(null);
+    try {
+      await appendForumThreadMessageRecord({
+        threadId: selectedForumThread.id,
+        summary,
+        content,
+        role: "human",
+        authorLabel: "human-editor",
+        parentMessageId: forumReplyParentId || undefined,
+      });
+      setForumComposeSummary("");
+      setForumComposeContent("");
+      setForumReplyParentId("");
+      await refreshForumThreads();
+      setSelectedForumThreadId(selectedForumThread.id);
+    } catch (error) {
+      setForumComposeError(error instanceof Error ? error.message : "Could not append message.");
+    }
+  };
   return (
     <>
       <NewsroomListDetailShell
         animatedDetail
         sectionKey="messages"
-        canExpandDetail={Boolean(selectedMessage)}
+        canExpandDetail={Boolean(isForumMode ? selectedForumThread : selectedMessage)}
         detailOpen={isMessageDetailOpen}
-        selectionScrollKey={selectedMessage?.id ?? null}
-        utilityActions={[messageKnowledgeQuery.action]}
+        selectionScrollKey={(isForumMode ? selectedForumThread?.id : selectedMessage?.id) ?? null}
+        utilityActions={[isForumMode ? forumKnowledgeQuery.action : messageKnowledgeQuery.action]}
         lede={(
           <section className="news-desk-lede news-desk-assignment-lede" aria-labelledby="message-management-title">
             <div>
@@ -6853,38 +7072,185 @@ function MessagesDeskView({
         )}
         list={(
           <section className="category-steering-section category-steering-section--lead" aria-label="Messages">
-            <NewsroomCardGrid
-              cards={cards}
-              emptyLabel="No private messages recorded"
-              filterLabel="Message kind"
-              filterOptions={[
-                { key: "", label: "All kinds", count: totalMessageCount },
-                { key: "__chat_sessions", label: "Chat sessions", count: consoleThreads.length || undefined },
-                { key: "__chat_detail", label: "Chat detail", count: messageKindCounts.console_chat_turn ?? 0 },
-                ...messageKinds.map((kind) => ({ key: kind, label: kind, count: messageKindCounts[kind] ?? 0 })),
-              ]}
-              filterValue={kindFilter}
-              metricValue={domainFilter}
-              metrics={metrics}
-              footerLabel={consoleThreadsError ?? feed.error ?? undefined}
-              hasMore={!isDemo && kindFilter !== "__chat_sessions" && feed.hasMore}
-              isLoadingMore={feed.isLoadingMore}
-              onFilterChange={setKindFilter}
-              onLoadMore={feed.loadMore}
-              onMetricChange={setDomainFilter}
-              onSelect={selectMessage}
-              selectedId={selectedMessage?.id ?? null}
-            />
+            {isForumMode ? (
+              <div className="news-desk-forum-layout" data-news-desk-forum>
+                <div className="news-desk-forum-toolbar">
+                  <label>
+                    <span>Edition</span>
+                    <select value={selectedForumEditionId} onChange={(event) => setSelectedForumEditionId(event.target.value)}>
+                      {forumEditionIds.length ? forumEditionIds.map((editionId) => (
+                        <option key={editionId} value={editionId}>{editionId}</option>
+                      )) : <option value="">No edition in assignment context</option>}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Scope</span>
+                    <select value={forumScopeFilter} onChange={(event) => setForumScopeFilter((event.target.value as "all" | "edition" | "section"))}>
+                      <option value="all">Edition + Section</option>
+                      <option value="edition">Edition-only</option>
+                      <option value="section">Current section</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Section</span>
+                    <select value={selectedForumSectionId} onChange={(event) => setSelectedForumSectionId(event.target.value)} disabled={!availableSections.length}>
+                      {availableSections.length ? availableSections.map((section) => (
+                        <option key={section.id} value={section.id}>{section.title}</option>
+                      )) : <option value="">No sections</option>}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Status</span>
+                    <select value={forumActivityFilter} onChange={(event) => setForumActivityFilter((event.target.value as "active" | "all"))}>
+                      <option value="active">Unread/Active</option>
+                      <option value="all">All statuses</option>
+                    </select>
+                  </label>
+                  <button type="button" disabled={!selectedForumEditionId} onClick={() => void ensureEditionThread()}>Ensure Edition Thread</button>
+                </div>
+                <div className="news-desk-forum-toolbar">
+                  <label className="news-desk-forum-toolbar__stretch">
+                    <span>New section thread title</span>
+                    <input
+                      placeholder="Section thread title"
+                      value={newSectionThreadTitle}
+                      onChange={(event) => setNewSectionThreadTitle(event.target.value)}
+                    />
+                  </label>
+                  <button type="button" disabled={!canCreateSectionThread} onClick={() => void createSectionThread()}>Create Section Thread</button>
+                </div>
+                <NewsroomCardGrid
+                  cards={forumThreadCards}
+                  emptyLabel={forumThreadsLoading ? "Loading forum threads..." : "No forum threads for this edition/filter."}
+                  filterLabel="Messages view"
+                  filterOptions={[
+                    { key: "__forum", label: "Forum threads", count: forumThreadCards.length || undefined },
+                    { key: "", label: "All kinds", count: totalMessageCount },
+                    { key: "__chat_sessions", label: "Chat sessions", count: consoleThreads.length || undefined },
+                    { key: "__chat_detail", label: "Chat detail", count: messageKindCounts.console_chat_turn ?? 0 },
+                    ...messageKinds.map((kind) => ({ key: kind, label: kind, count: messageKindCounts[kind] ?? 0 })),
+                  ]}
+                  filterValue={kindFilter}
+                  metricValue={domainFilter}
+                  metrics={metrics}
+                  footerLabel={forumThreadsError ?? undefined}
+                  onFilterChange={setKindFilter}
+                  onMetricChange={setDomainFilter}
+                  onSelect={(id) => {
+                    setSelectedForumThreadId(id);
+                    setIsMessageDetailOpen(true);
+                    pushNewsroomDetailUrl("messages", id, isDemo);
+                  }}
+                  selectedId={selectedForumThread?.id ?? null}
+                />
+              </div>
+            ) : (
+              <NewsroomCardGrid
+                cards={cards}
+                emptyLabel="No private messages recorded"
+                filterLabel="Message kind"
+                filterOptions={[
+                  { key: "__forum", label: "Forum threads", count: forumThreads.length || undefined },
+                  { key: "", label: "All kinds", count: totalMessageCount },
+                  { key: "__chat_sessions", label: "Chat sessions", count: consoleThreads.length || undefined },
+                  { key: "__chat_detail", label: "Chat detail", count: messageKindCounts.console_chat_turn ?? 0 },
+                  ...messageKinds.map((kind) => ({ key: kind, label: kind, count: messageKindCounts[kind] ?? 0 })),
+                ]}
+                filterValue={kindFilter}
+                metricValue={domainFilter}
+                metrics={metrics}
+                footerLabel={consoleThreadsError ?? feed.error ?? undefined}
+                hasMore={!isDemo && kindFilter !== "__chat_sessions" && feed.hasMore}
+                isLoadingMore={feed.isLoadingMore}
+                onFilterChange={setKindFilter}
+                onLoadMore={feed.loadMore}
+                onMetricChange={setDomainFilter}
+                onSelect={selectMessage}
+                selectedId={selectedMessage?.id ?? null}
+              />
+            )}
           </section>
         )}
         onCloseDetail={() => setIsMessageDetailOpen(false)}
-        detail={selectedMessage
+        detail={isForumMode ? (
+          selectedForumThread ? (
+            <section className="category-steering-section news-desk-forum-thread-detail" aria-label="Forum thread detail">
+              <SectionHeader title={selectedForumThread.title} detail={selectedForumThread.scope === "edition" ? "Edition" : `Section: ${normalizeForumThreadSectionLabel(selectedForumThread, availableSections)}`} />
+              <div className="news-desk-chip-row">
+                <span>Scope: {selectedForumThread.scope === "edition" ? "Edition" : "Section"}</span>
+                <span>Status: {selectedForumThread.status}</span>
+                <span>{selectedForumThread.messageCount ?? selectedForumThread.messages.length ?? 0} message(s)</span>
+                <span>Last activity: {formatDateTime(selectedForumThread.lastMessageAt ?? selectedForumThread.updatedAt ?? selectedForumThread.createdAt)}</span>
+              </div>
+              <div className="news-desk-forum-thread-messages">
+                {selectedForumThreadMessages.length ? selectedForumThreadMessages.map((message) => (
+                  <article key={message.id} className="news-desk-forum-thread-message">
+                    <header>
+                      <strong>{message.authorLabel ?? message.role ?? "author"}</strong>
+                      <span>{formatDateTime(message.createdAt)}</span>
+                      <button type="button" onClick={() => setForumReplyParentId(message.id)}>Reply</button>
+                    </header>
+                    <h4>{message.summary ?? "Forum message"}</h4>
+                    <p>{message.content ?? ""}</p>
+                  </article>
+                )) : <EmptyRow label="No messages in this thread yet." />}
+              </div>
+              <div className="news-desk-forum-compose">
+                <label>
+                  <span>Summary</span>
+                  <input value={forumComposeSummary} onChange={(event) => setForumComposeSummary(event.target.value)} placeholder="Short summary" />
+                </label>
+                <label>
+                  <span>Reply message</span>
+                  <textarea rows={5} value={forumComposeContent} onChange={(event) => setForumComposeContent(event.target.value)} placeholder="Add steering notes for editor/reporter context." />
+                </label>
+                {forumReplyParentId ? <p className="story-label">Replying to: {forumReplyParentId}</p> : null}
+                {forumComposeError ? <div className="category-steering-alert" data-tone="error">{forumComposeError}</div> : null}
+                <div className="news-desk-forum-compose__actions">
+                  <button type="button" onClick={() => void submitForumMessage()}>Post message</button>
+                  {forumReplyParentId ? <button type="button" onClick={() => setForumReplyParentId("")}>Clear reply target</button> : null}
+                </div>
+              </div>
+            </section>
+          ) : <SemanticDetailPanel graph={graph} selected={selectedEntity} knowledgeQuery={forumKnowledgeQuery} />
+        ) : (selectedMessage
           ? <MessageDetailPanel graph={graph} message={selectedMessage} selected={selected} knowledgeQuery={messageKnowledgeQuery} />
-          : <SemanticDetailPanel graph={graph} selected={selected} knowledgeQuery={messageKnowledgeQuery} />}
+          : <SemanticDetailPanel graph={graph} selected={selected} knowledgeQuery={messageKnowledgeQuery} />)}
       />
-      {messageKnowledgeQuery.dialog}
+      {isForumMode ? forumKnowledgeQuery.dialog : messageKnowledgeQuery.dialog}
     </>
   );
+}
+
+function normalizeEditionIdFromAssignment(
+  assignment: AssignmentRecord,
+  metadata: Record<string, unknown> | null,
+): string | null {
+  const direct = normalizeMetadataString(metadata?.editionId);
+  if (direct) return direct;
+  const slotTarget = metadataRecord(metadata?.slotTarget);
+  const fromSlot = normalizeMetadataString(slotTarget?.editionId) ?? normalizeMetadataString(slotTarget?.edition_id);
+  if (fromSlot) return fromSlot;
+  const queue = String(assignment.queueKey ?? "");
+  const match = queue.match(/edition:([^:]+)/);
+  return match?.[1] ?? null;
+}
+
+function normalizeForumThreadSectionKey(thread: ForumThreadWithMessages): string | null {
+  const metadata = metadataRecord(thread.metadata);
+  return normalizeMetadataString(metadata?.sectionKey)
+    ?? normalizeMetadataString(metadata?.sectionId)
+    ?? normalizeMetadataString(thread.primaryAnchorId)
+    ?? null;
+}
+
+function normalizeForumThreadSectionLabel(
+  thread: ForumThreadWithMessages,
+  sections: NewsroomSectionRecord[],
+): string {
+  const sectionKey = normalizeForumThreadSectionKey(thread);
+  if (!sectionKey) return "Unknown section";
+  return sections.find((section) => section.id === sectionKey)?.title ?? sectionKey;
 }
 
 function ReferenceLedger({ references, selectedLineageId }: { references: ReferenceRecord[]; selectedLineageId?: string | null }) {
@@ -6946,11 +7312,12 @@ function useNewsroomPagedRows<T>({
   loadPage: (nextToken?: string | null) => Promise<NewsroomRecordPage<T>>;
   resetKey: string;
 }): NewsroomPagedRows<T> & { loadMore: () => void } {
+  const shouldShowInitialLoading = enabled && initialItems.length === 0;
   const [state, setState] = useState<NewsroomPagedRows<T>>({
     items: initialItems,
     nextToken: null,
     hasMore: false,
-    isLoading: false,
+    isLoading: shouldShowInitialLoading,
     isLoadingMore: false,
     error: null,
   });
@@ -7768,6 +8135,7 @@ function NewsroomCardGrid({
   filterValue,
   metrics,
   metricValue,
+  isLoading = false,
   onFilterChange,
   onMetricChange,
   onSelect,
@@ -7784,6 +8152,7 @@ function NewsroomCardGrid({
   filterValue: string;
   metrics: NewsroomDataGridMetric[];
   metricValue: string;
+  isLoading?: boolean;
   onFilterChange: (value: string) => void;
   onMetricChange: (value: string) => void;
   onSelect: (id: string) => void;
@@ -7873,7 +8242,9 @@ function NewsroomCardGrid({
               <NewsroomCardContents card={card} />
             </button>
           );
-        }) : (
+        }) : isLoading ? (
+          <NewsroomCardGridSkeleton sectionKey="references" />
+        ) : (
           <div className="newsroom-card-grid__empty">
             <EmptyRow label={emptyLabel} />
           </div>
@@ -7881,9 +8252,36 @@ function NewsroomCardGrid({
       </div>
       {onLoadMore ? (
         <div className="news-desk-data-grid__footer newsroom-card-grid__footer" ref={sentinelRef}>
-          {isLoadingMore ? "Loading more..." : hasMore ? footerLabel ?? "Scroll for more" : footerLabel ?? "End of feed"}
+          {isLoading && !cards.length
+            ? "Loading..."
+            : (!cards.length && !hasMore && !isLoadingMore && !footerLabel)
+              ? null
+              : isLoadingMore ? "Loading more..." : hasMore ? footerLabel ?? "Scroll for more" : footerLabel ?? "End of feed"}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function NewsroomCardGridSkeleton({ sectionKey }: { sectionKey?: "references" | "messages" | "assignments" | "topics" | "concepts" }) {
+  const skeletonCards: Array<{ id: string; span: NewsroomCardSpan }> = [
+    { id: "s1", span: "2x1" },
+    { id: "s2", span: "1x1" },
+    { id: "s3", span: "1x1" },
+    { id: "s4", span: "1x1" },
+    { id: "s5", span: "1x1" },
+    { id: "s6", span: "2x1" },
+  ];
+  return (
+    <div className="newsroom-card-grid__skeleton" data-newsroom-card-grid-skeleton data-newsroom-card-grid-skeleton-section={sectionKey ?? "default"}>
+      {skeletonCards.map((card) => (
+        <article className={`newsroom-card newsroom-card--skeleton newsroom-card--span-${card.span}`} key={card.id} aria-hidden="true">
+          <span className="newsroom-card__skeleton-line newsroom-card__skeleton-line--kicker" />
+          <span className="newsroom-card__skeleton-line newsroom-card__skeleton-line--title" />
+          <span className="newsroom-card__skeleton-line newsroom-card__skeleton-line--body" />
+          <span className="newsroom-card__skeleton-line newsroom-card__skeleton-line--meta" />
+        </article>
+      ))}
     </div>
   );
 }
@@ -14227,7 +14625,6 @@ function NewsroomProgressBackLink({
 function NewsDeskAccessGate({ shell }: { shell: NewsDeskShellState | null }) {
   const showRhythmOverlay = useNewsroomRhythmOverlay();
   const accessPhase = shell?.phase ?? "checkingAccess";
-  const markSrc = "/seed-art/newsroom-gate.png";
 
   return (
     <main className="site-shell news-desk-shell" data-news-desk-access={accessPhase} data-rhythm-overlay={showRhythmOverlay ? "true" : "false"}>
@@ -14266,9 +14663,6 @@ function NewsDeskAccessGate({ shell }: { shell: NewsDeskShellState | null }) {
                 {shell?.error ? <p className="news-desk-access-panel__error">{shell.error}</p> : null}
                 <p className="news-desk-access-panel__auth">{formatAccessActionDetail(shell)}</p>
               </div>
-              <figure className="news-desk-access-panel__mark" aria-hidden="true" key={`mark-${accessPhase}`}>
-                <Image alt="" height={1066} src={markSrc} width={1600} />
-              </figure>
             </section>
           </article>
         </div>

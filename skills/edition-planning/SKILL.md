@@ -88,7 +88,14 @@ reference/category/graph state, not guess from stale local files.
    - write `Assignment --targets_slot--> EditionSlot`.
 6. Keep culling section-first by default; cross-section substitution requires
    explicit editor override.
-7. Do not create `Item` or `EditionItem` during plan/dispatch.
+7. Create/ensure forum kickoff threads:
+   - one `edition_forum` thread for cross-section coordination;
+   - optional/multiple `section_forum` threads per `(edition, section)`.
+8. Post kickoff messages with:
+   - pursued topics by section;
+   - slot + overassignment posture;
+   - explicit human steering opportunities.
+9. Do not create `Item` or `EditionItem` during plan/dispatch.
 
 ## Current Safe Workflow
 
@@ -234,6 +241,10 @@ Use `SemanticRelation` rows to make assignment context navigable:
   `editorial.form.briefs`.
 - `targets_slot`: reporting assignment to its concrete `EditionSlot` at
   dispatch time. Keep `slotTarget` metadata aligned with this relation.
+- Forum anchors (thread model, not relation-only):
+  - `edition_forum`: `primaryAnchorKind = "edition"`, `primaryAnchorId = editionId`.
+  - `section_forum`: `primaryAnchorKind = "newsroom_section"`,
+    `primaryAnchorId = sectionId`, `primaryAnchorLineageId = editionId`.
 - `uses_evidence`: assignment to references or comments that support the task.
 - `uses_signal`: assignment to graph concepts or relations that influenced the
   opportunity score.
