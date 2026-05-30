@@ -88,13 +88,30 @@ reference/category/graph state, not guess from stale local files.
    - write `Assignment --targets_slot--> EditionSlot`.
 6. Keep culling section-first by default; cross-section substitution requires
    explicit editor override.
-7. Create/ensure forum kickoff threads:
-   - one `edition_forum` thread for cross-section coordination;
-   - optional/multiple `section_forum` threads per `(edition, section)`.
-8. Post kickoff messages with:
-   - pursued topics by section;
-   - slot + overassignment posture;
-   - explicit human steering opportunities.
+7. Run edition planning as **three sequential messages** on the canonical
+   `edition_forum` thread (same thread, increasing sequence numbers):
+   - **Phase 1 — edition theme:** proposed theme and coverage concept only.
+     Do not treat floating/rotating desks (Arts, Gaming, Health, etc.) as the
+     edition theme in this message.
+   - **Phase 2 — optional / rotating desk:** after the theme is accepted, run
+     `procedures/newsroom/rotating_section_selector.tac` with grounded prior
+     optional-desk confirmations only, then post the proposed desk on the same
+     edition thread.
+   - **Phase 3 — reporting dispatch:** after desks are confirmed (canonical plus
+     selected optional desk when applicable), post reporting assignment
+     candidates for each slot using the default `ceil(slots * 1.5)` overassignment.
+     Defer phase 3 until phase 2 completes when optional desks are still provisional.
+   - Re-running the same Coverage Theme plan for the same edition must not post
+     duplicate phase-1 kickoff messages when the kickoff body, summary, or
+     `importRunId` already exists on the canonical thread.
+   - When a later planning pass materially changes the edition topic or posture,
+     fork a new forum thread (suffix `-run-<run-id>`) and post a re-plan update
+     that links back to the prior kickoff thread in thread metadata
+     (`parentThreadId`, `kickoffKind: replan`).
+8. Post phase-1 as **proposals**, not decisions:
+   - proposed edition theme and coverage concept;
+   - explicit steering window for human forum replies (default 48 hours);
+   - pointers that phases 2 and 3 will follow on the same thread.
 9. Do not create `Item` or `EditionItem` during plan/dispatch.
 
 ## Current Safe Workflow
@@ -279,6 +296,43 @@ poetry run papyrus assignments run-story-cycle \
   --section-budgets <section-key>:<slots> \
   --through reporting \
   --json
+
+### Edition forum messages (agent contract)
+
+After a full planning kickoff, the canonical `edition_forum` thread should have
+**up to three posts in order** (same thread, increasing `sequenceNumber`):
+
+| Seq | Phase | Message summary prefix | CLI step |
+| --- | --- | --- | --- |
+| 1 | Theme | `Edition theme (phase 1):` | `--through plan` |
+| 2 | Optional desk | `Optional desk (phase 2):` | `--through rotating-desk` |
+| 3 | Reporting dispatch | `Reporting dispatch (phase 3):` | End of `rotating-desk` apply, or end of `plan` when no optional desk is pending |
+
+Phase 3 lists reporting assignment candidates per desk with the default
+`ceil(slots * 1.5)` overassignment. Do not post phase 3 until phase 2 confirms
+the optional desk when `culture`/Arts-style provisional desks are in the plan.
+
+Typical new edition (e.g. `--sections culture,methods`):
+
+```bash
+poetry run papyrus assignments run-story-cycle ... --through plan
+poetry run papyrus assignments run-story-cycle ... --through rotating-desk --allow-fallback
+# Message 3 is posted automatically on the second command when --dry-run is not set.
+```
+
+Phase-specific flags:
+
+- `--through plan --refresh-forum-kickoff` replaces phase-1 theme posts only.
+- `--through rotating-desk` runs phase-2 optional desk selection and posts message 2; posts message 3 when apply is on.
+- `--selected-optional-desk arts` skips the selector agent and uses a human desk choice.
+- `--skip-rotating-desk` leaves optional desks pending (no phase-2/3 optional dispatch).
+- `--include-optional-desks` restores legacy behavior (dispatch every requested optional desk immediately, no phase-2 gate).
+
+Seed the rotating-desk procedure before cloud runs:
+
+```bash
+poetry run papyrus procedures seed-required
+```
 
 poetry run papyrus assignments story-cycle-output \
   --run-id <coverage-theme-run-id> \

@@ -118,6 +118,27 @@ const PROCEDURE_SEED_BY_KEY: Record<string, ProcedureSeed> = {
       max_evidence_items: 20,
     },
   },
+  "newsroom.rotating.section.selector": {
+    key: "newsroom.rotating.section.selector",
+    title: "Newsroom Rotating Desk Selector",
+    category: "newsroom",
+    description: "Recommends one optional floating/rotating desk for an edition using recent desk usage.",
+    versionLabel: "starter",
+    tactusSource: loadProcedureSeedSource("rotating_section_selector.tac"),
+    parameterSchema: {
+      type: "object",
+      required: ["edition_id", "accepted_theme"],
+      properties: {
+        edition_id: { type: "string" },
+        accepted_theme: { type: "string" },
+        coverage_key: { type: "string" },
+        candidate_sections_json: { type: "string" },
+        recent_usage_json: { type: "string" },
+        steering_notes: { type: "string" },
+      },
+    },
+    defaults: {},
+  },
   "newsroom.reporting.context": {
     key: "newsroom.reporting.context",
     title: "Newsroom Reporting Context",

@@ -617,6 +617,11 @@ def resolve_reference_title_subtitle(
         )
     summary_budget = normalize_title_subtitle_summary_budget(summary_max_tokens)
     local = _title_subtitle_from_local(reference=reference, catalog_entry=catalog_entry, sidecar=sidecar)
+    local_catalog_title_without_subtitle = bool(
+        local.get("title")
+        and not _normalize_subtitle_candidate(local.get("subtitle"))
+        and local.get("source") == "catalog"
+    )
     existing_reference_title = _normalize_reference_title_candidate(reference.get("title"))
     title = local.get("title") if refresh or not existing_reference_title else existing_reference_title
     subtitle = "" if refresh else _normalize_subtitle_candidate(local.get("subtitle"))
@@ -722,7 +727,7 @@ def resolve_reference_title_subtitle(
             identifier_prepass=identifier_prepass,
         )
 
-    if not subtitle:
+    if not subtitle and not web_search_enabled and not (local_catalog_title_without_subtitle and title):
         try:
             llm = llm_toolless_resolver(
                 reference=reference,
@@ -748,7 +753,7 @@ def resolve_reference_title_subtitle(
         except Exception as exc:
             warnings.append(f"title/subtitle tool-less LLM resolution failed: {exc}")
 
-    if web_search_enabled and not subtitle:
+    if web_search_enabled and not subtitle and not (local_catalog_title_without_subtitle and title):
         try:
             llm = llm_resolver(
                 reference=reference,
@@ -775,10 +780,13 @@ def resolve_reference_title_subtitle(
             warnings.append(f"title/subtitle web+LLM resolution failed: {exc}")
 
     title = _normalize_reference_title_candidate(title)
-    if _placeholder_title_or_subtitle(title):
+    if _placeholder_title(title):
         title = ""
         title_mode = "unresolved"
     subtitle = _clean_text(subtitle)
+    if _placeholder_title(subtitle) and _title_subtitle_mode(subtitle_mode or "", default="") != "generated_fallback":
+        subtitle = ""
+        subtitle_mode = "unresolved"
     subtitle_quality_issue = _generated_subtitle_quality_issue(
         subtitle,
         subtitle_mode=subtitle_mode or "",
@@ -5223,7 +5231,16 @@ def _summary_resolution_provenance(resolution: dict[str, Any]) -> dict[str, Any]
 
 
 def _title_subtitle_mode(value: Any, *, default: str) -> str:
-    allowed = {"original_metadata", "original_web_metadata", "original_source_heading", "generated", "existing_reference", "existing_reference_metadata", "unresolved"}
+    allowed = {
+        "original_metadata",
+        "original_web_metadata",
+        "original_source_heading",
+        "generated",
+        "generated_fallback",
+        "existing_reference",
+        "existing_reference_metadata",
+        "unresolved",
+    }
     text = _clean_text(value)
     return text if text in allowed else default
 
@@ -5261,7 +5278,8 @@ def _normalize_subtitle_candidate(value: Any) -> str:
 
 
 def _generated_subtitle_quality_issue(value: Any, *, subtitle_mode: str) -> str:
-    if _title_subtitle_mode(subtitle_mode, default="") != "generated":
+    mode = _title_subtitle_mode(subtitle_mode, default="")
+    if mode not in {"generated", "generated_fallback"}:
         return ""
     text = _normalize_subtitle_candidate(value)
     if not text:
@@ -5372,7 +5390,7 @@ def _normalize_reference_title_candidate(value: Any) -> str:
     return _clean_text(text.rstrip(" ,;:-|"))
 
 
-def _placeholder_title_or_subtitle(value: Any) -> bool:
+def _placeholder_title(value: Any) -> bool:
     text = _clean_text(value).lower()
     return text in {
         "",
@@ -5380,12 +5398,11 @@ def _placeholder_title_or_subtitle(value: Any) -> bool:
         "no title found",
         "unknown",
         "title unavailable",
-        "subtitle unavailable",
-        "generated fallback subtitle",
-        "no subtitle available",
-        "science direct article metadata unavailable",
-        "sciencedirect article metadata unavailable",
     }
+
+
+def _placeholder_title_or_subtitle(value: Any) -> bool:
+    return _placeholder_title(value)
 
 
 def _catalog_entries(items_value: Any) -> list[tuple[str, dict[str, Any]]]:

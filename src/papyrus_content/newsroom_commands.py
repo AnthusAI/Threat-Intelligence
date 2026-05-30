@@ -634,6 +634,7 @@ def _required_procedure_seed_specs() -> list[dict[str, Any]]:
     source_by_key = {
         "newsroom.research.explorer": PAPYRUS_ROOT / "procedures" / "newsroom" / "research_explorer.tac",
         "newsroom.reporting.context": PAPYRUS_ROOT / "procedures" / "newsroom" / "reporter.tac",
+        "newsroom.rotating.section.selector": PAPYRUS_ROOT / "procedures" / "newsroom" / "rotating_section_selector.tac",
         "newsroom.reference.summarization": PAPYRUS_ROOT / "procedures" / "newsroom" / "reference_summarization.tac",
         "ontology.relationship-explainer": PAPYRUS_ROOT / "procedures" / "newsroom" / "ontology_relationship_explainer.tac",
         "ontology.concept-profiler": PAPYRUS_ROOT / "procedures" / "newsroom" / "ontology_concept_profiler.tac",
@@ -662,6 +663,25 @@ def _required_procedure_seed_specs() -> list[dict[str, Any]]:
                 "research_mode": "source_discovery",
                 "max_evidence_items": 20,
             },
+        },
+        "newsroom.rotating.section.selector": {
+            "title": "Newsroom Rotating Desk Selector",
+            "category": "newsroom",
+            "description": "Recommends one optional floating/rotating desk for an edition using recent desk usage.",
+            "versionLabel": "starter",
+            "parameterSchema": {
+                "type": "object",
+                "required": ["edition_id", "accepted_theme"],
+                "properties": {
+                    "edition_id": {"type": "string"},
+                    "accepted_theme": {"type": "string"},
+                    "coverage_key": {"type": "string"},
+                    "candidate_sections_json": {"type": "string"},
+                    "recent_usage_json": {"type": "string"},
+                    "steering_notes": {"type": "string"},
+                },
+            },
+            "defaults": {},
         },
         "newsroom.reporting.context": {
             "title": "Newsroom Reporting Context",

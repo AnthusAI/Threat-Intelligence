@@ -455,7 +455,7 @@ def _add_coverage_theme_run_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--sections", default="culture,methods,business,law")
     parser.add_argument("--section-budgets", default="")
     parser.add_argument("--run-id", default="")
-    parser.add_argument("--through", choices=["plan", "research", "reporting"], default="reporting")
+    parser.add_argument("--through", choices=["plan", "rotating-desk", "research", "reporting"], default="reporting")
     parser.add_argument("--research-mode", default="source_discovery")
     parser.add_argument("--max-parallel-research", type=int, default=1)
     parser.add_argument("--max-parallel-reporting", type=int, default=1)
@@ -463,6 +463,12 @@ def _add_coverage_theme_run_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--require-agent-success", action="store_true")
     parser.add_argument("--refresh-packets", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--refresh-forum-kickoff", action="store_true", help="Replace phase-1 forum kickoff messages with the current suggestion template.")
+    parser.add_argument("--skip-rotating-desk", action="store_true", help="Skip phase-2 optional/rotating desk selection.")
+    parser.add_argument("--select-rotating-desk", action="store_true", help="Run phase-2 optional desk selection during plan apply.")
+    parser.add_argument("--selected-optional-desk", default="", help="Human override for the optional desk section key (for example arts or gaming).")
+    parser.add_argument("--include-optional-desks", action="store_true", help="Dispatch all requested optional desks immediately without phase-2 selection.")
+    parser.add_argument("--rotating-desk-steering-notes", default="", help="Optional human steering notes passed to the rotating-desk selector.")
     parser.add_argument("--json", action="store_true")
 
 
@@ -541,6 +547,8 @@ def _run_assignments_command(args: argparse.Namespace) -> dict:
 def _run_coverage_theme_run(args: argparse.Namespace) -> dict:
     sections = parse_csv(args.sections)
     corpus_key = args.corpus_key or args.category_key
+    through = str(args.through or "reporting").replace("-", "_")
+    select_rotating_desk = True if args.select_rotating_desk else None
     return coverage_theme_run(
         date=args.date,
         topic=args.topic,
@@ -550,12 +558,18 @@ def _run_coverage_theme_run(args: argparse.Namespace) -> dict:
         sections=sections,
         section_budgets=parse_section_budgets(args.section_budgets, sections),
         run_id=args.run_id,
-        through=args.through,
+        through=through,
         research_mode=args.research_mode,
         allow_fallback=args.allow_fallback,
         require_agent_success=args.require_agent_success,
         refresh_packets=args.refresh_packets,
         apply=not args.dry_run,
+        selected_optional_desk_key=str(args.selected_optional_desk or "").strip(),
+        include_optional_desks=bool(args.include_optional_desks),
+        skip_rotating_desk=bool(args.skip_rotating_desk),
+        select_rotating_desk=select_rotating_desk,
+        refresh_forum_kickoff=bool(args.refresh_forum_kickoff),
+        rotating_desk_steering_notes=str(args.rotating_desk_steering_notes or "").strip(),
     )
 
 

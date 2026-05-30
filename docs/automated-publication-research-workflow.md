@@ -132,14 +132,34 @@ Message threading contract is unchanged:
 
 ### Kickoff + Human Steering
 
-Coverage Theme planning should create kickoff forum messages that summarize:
+Coverage Theme planning posts **three sequential messages** on the canonical
+`edition_forum` thread (increasing `sequenceNumber` on the same thread):
 
-- pursued topics by section;
-- slot targets and 1.5x overassignment posture;
-- explicit human steering opportunities.
+| Phase | Summary prefix | Content |
+| --- | --- | --- |
+| 1 | `Edition theme (phase 1):` | Proposed edition theme and coverage concept; pointers to phases 2–3. Floating/rotating desks are **not** the edition theme. |
+| 2 | `Optional desk (phase 2):` | One proposed optional desk after `rotating_section_selector.tac` (informed by the accepted theme). |
+| 3 | `Reporting dispatch (phase 3):` | Reporting assignment candidates per confirmed desk, with default `ceil(slots * 1.5)` overassignment. |
 
-Humans append replies in the same thread(s). The chronology becomes shared
-editorial memory for the edition run.
+Phase 3 is deferred until phase 2 completes when optional desks are still
+provisional (e.g. `culture` CLI alias → floating `arts`). Recent optional-desk
+history in phase 2 uses **confirmed** prior selections only (`selectedOptionalDeskKey`
+on past editions)—not provisional `sectionBudgets` rows.
+
+Planning no longer posts default `section_forum` kickoffs; desk-specific steering
+for dispatch lives in message 3 and in assignment briefs. Legacy `section_forum`
+threads may still exist and remain readable in assignment context.
+
+CLI: `--through plan` (message 1), then `--through rotating-desk` (messages 2–3
+on apply). See `skills/edition-planning/SKILL.md` for flags.
+
+The planner is idempotent on the canonical edition forum thread: an accidental
+re-run with the same kickoff body or `importRunId` must not append a duplicate
+phase post. A materially new planning pass should fork a new thread and post a
+re-plan update there so the original chronology stays intact.
+
+Humans append replies in the edition thread. That chronology is shared editorial
+memory for the edition run.
 
 ### Assignment Context Inclusion Defaults
 

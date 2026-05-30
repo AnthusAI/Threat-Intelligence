@@ -209,11 +209,15 @@ rendering contracts.
   - reporting review must not create `EditionItem`; `select`/`brief` may set
     slot winner state and queue copywriting assignments only.
 - Edition forum-thread guardrails:
+  - Coverage Theme planning posts **three messages** on `edition_forum` in order:
+    theme (phase 1), optional desk (phase 2), reporting dispatch (phase 3);
+    see `skills/edition-planning/SKILL.md` and
+    `docs/automated-publication-research-workflow.md`;
   - use `MessageThread` forum kinds `edition_forum` and `section_forum`;
   - anchor edition threads to `Edition` and section threads to
     `(NewsroomSection, edition lineage)`;
   - assignment context should include edition forum first, then same-section
-    forum threads only;
+    forum threads only when present;
   - do not leak other sections' forum threads into assignment context;
   - reporting/review still must not create `EditionItem`.
 - Treat multi-section story-cycle runs as Coverage Themes in editor-facing UX

@@ -3510,7 +3510,10 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
             run_id="coverage-theme-forum-test",
             now="2026-06-01T12:00:00Z",
             state={
-                "newsroomSections": [{"id": "arts", "title": "Arts", "type": "canonical", "enabled": True, "sortOrder": 1}],
+                "newsroomSections": [
+                {"id": "arts", "title": "Arts", "type": "floating", "enabled": True, "sortOrder": 1},
+                {"id": "methods", "title": "Methods", "type": "canonical", "enabled": True, "sortOrder": 2},
+            ],
                 "categories": [],
                 "categorySets": [],
             },
@@ -3521,31 +3524,53 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
             record for record in plan["records"]
             if record["modelName"] == "Message" and record["input"].get("messageKind") == "forum_post"
         ]
-        self.assertEqual(len(thread_records), 2)
-        self.assertEqual(len(message_records), 2)
         edition_thread = next(record["input"] for record in thread_records if record["input"]["threadKind"] == "edition_forum")
-        section_thread = next(record["input"] for record in thread_records if record["input"]["threadKind"] == "section_forum")
+        section_threads = [record["input"] for record in thread_records if record["input"]["threadKind"] == "section_forum"]
+        self.assertEqual(len(thread_records), 1)
+        self.assertEqual(len(message_records), 1)
+        self.assertEqual(section_threads, [])
         self.assertEqual(edition_thread["primaryAnchorKind"], "edition")
-        self.assertEqual(section_thread["primaryAnchorKind"], "newsroom_section")
-        self.assertEqual(section_thread["primaryAnchorLineageId"], plan["edition"]["id"])
         self.assertTrue(plan["forumKickoff"]["editionThreadId"].startswith("message-thread-edition-forum-"))
-        self.assertEqual(plan["summary"]["forumThreadCount"], 2)
-        self.assertEqual(plan["summary"]["forumMessageCount"], 2)
+        self.assertEqual(plan["forumKickoff"]["rotatingDeskStatus"], "pending_selection")
+        self.assertIn("arts", plan["forumKickoff"]["optionalDeskSectionKeys"])
+        self.assertEqual(plan["summary"]["forumThreadCount"], 1)
+        self.assertEqual(plan["summary"]["forumMessageCount"], 1)
         body = message_records[0]["input"]["content"]
-        self.assertIn("Human Steering Opportunities", body)
+        self.assertIn("Edition Theme (Phase 1)", body)
+        self.assertIn("How To Steer", body)
+        self.assertIn("Phase 2", body)
+        self.assertIn("Phase 3", body)
         self.assertIn("edition", plan["forumKickoff"])
-        self.assertEqual(len(plan["forumKickoff"]["sections"]), 1)
-        self.assertTrue(plan["forumKickoff"]["sections"][0]["threadId"].startswith("message-thread-section-forum-"))
+        self.assertEqual(plan["forumKickoff"]["sections"], [])
 
-    def test_coverage_theme_plan_reuses_forum_threads_and_appends_messages(self):
+    def test_coverage_theme_plan_skips_duplicate_forum_kickoff_on_identical_rerun(self):
         edition_id = "edition-edition-2026-06-05-v1"
+        edition_thread_id = f"message-thread-edition-forum-{papyrus_coverage_theme._safe_id(edition_id)}"
+        edition_body = papyrus_coverage_theme._edition_forum_kickoff_body(
+            topic="AI in video games",
+            coverage_key="coverage.ai-in-video-games",
+            core_sections=[],
+            optional_desk_sections=[{
+                "sectionId": "arts",
+                "sectionKey": "arts",
+                "sectionTitle": "Arts",
+                "sectionType": "floating",
+                "slots": 2,
+                "dispatchCount": 3,
+                "suggestedTopics": ["AI in video games"],
+            }],
+            recent_optional_desk_usage=[],
+        )
         existing_state = {
-            "newsroomSections": [{"id": "arts", "title": "Arts", "type": "canonical", "enabled": True, "sortOrder": 1}],
+            "newsroomSections": [
+                {"id": "arts", "title": "Arts", "type": "floating", "enabled": True, "sortOrder": 1},
+                {"id": "methods", "title": "Methods", "type": "canonical", "enabled": True, "sortOrder": 2},
+            ],
             "categories": [],
             "categorySets": [],
             "messageThreads": [
                 {
-                    "id": f"message-thread-edition-forum-{papyrus_coverage_theme._safe_id(edition_id)}",
+                    "id": edition_thread_id,
                     "threadKind": "edition_forum",
                     "primaryAnchorKind": "edition",
                     "primaryAnchorId": edition_id,
@@ -3555,33 +3580,17 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
                     "createdAt": "2026-06-01T09:00:00Z",
                     "metadata": {"editionId": edition_id},
                 },
-                {
-                    "id": f"message-thread-section-forum-{papyrus_coverage_theme._safe_id(edition_id)}-arts",
-                    "threadKind": "section_forum",
-                    "primaryAnchorKind": "newsroom_section",
-                    "primaryAnchorId": "arts",
-                    "primaryAnchorLineageId": edition_id,
-                    "messageCount": 2,
-                    "createdByLabel": "papyrus-editor",
-                    "createdAt": "2026-06-01T09:00:00Z",
-                    "metadata": {"editionId": edition_id, "sectionId": "arts", "sectionKey": "arts", "sectionTitle": "Arts"},
-                },
             ],
             "messages": [
                 {
-                    "id": f"message-forum-{papyrus_coverage_theme._safe_id(f'message-thread-edition-forum-{papyrus_coverage_theme._safe_id(edition_id)}')}-0001",
-                    "threadId": f"message-thread-edition-forum-{papyrus_coverage_theme._safe_id(edition_id)}",
+                    "id": f"message-forum-{papyrus_coverage_theme._safe_id(edition_thread_id)}-0001",
+                    "threadId": edition_thread_id,
+                    "messageKind": "forum_post",
+                    "status": "active",
+                    "summary": "Edition theme (phase 1): AI in video games",
+                    "content": edition_body,
                     "sequenceNumber": 1,
-                },
-                {
-                    "id": f"message-forum-{papyrus_coverage_theme._safe_id(f'message-thread-section-forum-{papyrus_coverage_theme._safe_id(edition_id)}-arts')}-0001",
-                    "threadId": f"message-thread-section-forum-{papyrus_coverage_theme._safe_id(edition_id)}-arts",
-                    "sequenceNumber": 1,
-                },
-                {
-                    "id": f"message-forum-{papyrus_coverage_theme._safe_id(f'message-thread-section-forum-{papyrus_coverage_theme._safe_id(edition_id)}-arts')}-0002",
-                    "threadId": f"message-thread-section-forum-{papyrus_coverage_theme._safe_id(edition_id)}-arts",
-                    "sequenceNumber": 2,
+                    "importRunId": "coverage-theme-forum-rerun",
                 },
             ],
         }
@@ -3599,19 +3608,273 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
             state=existing_state,
         )
 
-        thread_records = [record for record in plan["records"] if record["modelName"] == "MessageThread"]
-        message_records = [record for record in plan["records"] if record["modelName"] == "Message" and record["input"].get("messageKind") == "forum_post"]
-        edition_thread = next(record["input"] for record in thread_records if record["input"]["threadKind"] == "edition_forum")
-        section_thread = next(record["input"] for record in thread_records if record["input"]["threadKind"] == "section_forum")
-        edition_message = next(record["input"] for record in message_records if record["input"]["threadId"] == edition_thread["id"])
-        section_message = next(record["input"] for record in message_records if record["input"]["threadId"] == section_thread["id"])
+        forum_posts = [
+            record for record in plan["records"]
+            if record["modelName"] == "Message" and record["input"].get("messageKind") == "forum_post"
+        ]
+        self.assertEqual(forum_posts, [])
+        self.assertEqual(plan["forumKickoff"]["editionKickoffAction"], "skip")
+        self.assertEqual(plan["forumKickoff"]["sections"], [])
+        self.assertEqual(plan["summary"]["forumMessageCount"], 0)
 
-        self.assertEqual(edition_thread["messageCount"], 2)
-        self.assertEqual(section_thread["messageCount"], 3)
-        self.assertEqual(edition_message["sequenceNumber"], 2)
-        self.assertEqual(section_message["sequenceNumber"], 3)
-        self.assertEqual(plan["forumKickoff"]["edition"]["messageId"], edition_message["id"])
-        self.assertEqual(plan["forumKickoff"]["sections"][0]["messageId"], section_message["id"])
+    def test_partition_sections_for_dispatch_defers_optional_desks(self):
+        sections = [
+            {"id": "methods", "title": "Methods", "type": "canonical"},
+            {"id": "arts", "title": "Arts", "type": "floating"},
+        ]
+        dispatch, provisional = papyrus_coverage_theme.partition_sections_for_dispatch(sections)
+        self.assertEqual([section["id"] for section in dispatch], ["methods"])
+        self.assertEqual([section["id"] for section in provisional], ["arts"])
+
+    def test_collect_recent_optional_desk_usage_ignores_unconfirmed_budgets(self):
+        editions = [{
+            "id": "edition-edition-2026-06-05-v1",
+            "editionDate": "2026-06-05",
+            "metadata": {
+                "sectionBudgets": [{"sectionKey": "arts", "slots": 2}],
+            },
+        }]
+        self.assertEqual(papyrus_coverage_theme.collect_recent_optional_desk_usage(editions), [])
+        editions[0]["metadata"]["selectedOptionalDeskKey"] = "arts"
+        usage = papyrus_coverage_theme.collect_recent_optional_desk_usage(editions)
+        self.assertEqual(len(usage), 1)
+        self.assertEqual(usage[0]["sectionKey"], "arts")
+        self.assertEqual(usage[0].get("selectionSource"), "confirmed")
+
+    def test_fallback_rotating_section_selection_avoids_recent_usage(self):
+        context = {
+            "editionId": "edition-edition-2026-06-06-v1",
+            "acceptedTheme": "AI in video games",
+            "candidateSections": [
+                {"sectionKey": "arts", "sectionTitle": "Arts", "sectionType": "floating"},
+                {"sectionKey": "gaming", "sectionTitle": "Gaming", "sectionType": "rotating"},
+            ],
+            "recentOptionalDeskUsage": [{"sectionKey": "arts", "editionDate": "2026-06-05"}],
+        }
+        selection = papyrus_coverage_theme.fallback_rotating_section_selection(context=context)
+        self.assertEqual(selection["recommendedSectionKey"], "gaming")
+
+    def test_optional_desk_dispatch_exists_detects_prior_dispatch(self):
+        run_id = "coverage-theme-dispatch-test"
+        section_key = "arts"
+        edition_id = "edition-edition-2026-06-05-v1"
+        state = {
+            "assignments": [
+                {"id": papyrus_coverage_theme.optional_desk_research_assignment_id(run_id=run_id, section_key=section_key)},
+            ],
+            "editionSlots": [
+                {"id": papyrus_coverage_theme.optional_desk_slot_ids(edition_id=edition_id, section_key=section_key, slots=2)[0]},
+            ],
+        }
+        self.assertTrue(
+            papyrus_coverage_theme.optional_desk_dispatch_exists(
+                state,
+                run_id=run_id,
+                section_key=section_key,
+                edition_id=edition_id,
+                section_budgets={"arts": 2},
+            )
+        )
+
+    def test_optional_desk_dispatch_exists_ignores_stale_run_id(self):
+        section_key = "arts"
+        edition_id = "edition-edition-2026-06-05-v1"
+        prior_run_id = "coverage-theme-2026-06-05-coverage.ai-in-video-games"
+        state = {
+            "assignments": [
+                {
+                    "id": papyrus_coverage_theme.optional_desk_research_assignment_id(
+                        run_id=prior_run_id,
+                        section_key=section_key,
+                    ),
+                    "sectionKey": section_key,
+                    "metadata": {"editionId": edition_id},
+                },
+            ],
+            "editionSlots": [
+                {"id": papyrus_coverage_theme.optional_desk_slot_ids(edition_id=edition_id, section_key=section_key, slots=2)[0]},
+            ],
+        }
+        self.assertTrue(
+            papyrus_coverage_theme.optional_desk_dispatch_exists(
+                state,
+                run_id="coverage-theme-new-timestamp-run",
+                section_key=section_key,
+                edition_id=edition_id,
+                section_budgets={"arts": 2},
+            )
+        )
+
+    def test_resolve_coverage_theme_run_id_reuses_edition_metadata(self):
+        state = {
+            "editions": [{
+                "id": "edition-edition-2026-06-05-v1",
+                "editionDate": "2026-06-05",
+                "slug": "edition-2026-06-05",
+                "metadata": {"coverageThemeRunId": "coverage-theme-2026-06-05-coverage.ai-in-video-games"},
+            }],
+        }
+        run_id = papyrus_coverage_theme.resolve_coverage_theme_run_id(
+            date="2026-06-05",
+            topic="AI in video games",
+            coverage_key="coverage.ai-in-video-games",
+            run_id="",
+            state=state,
+        )
+        self.assertEqual(run_id, "coverage-theme-2026-06-05-coverage.ai-in-video-games")
+
+    def test_build_edition_metadata_update_record_uses_valid_fields_only(self):
+        edition = {
+            "id": "edition-edition-2026-06-05-v1",
+            "slug": "edition-2026-06-05",
+            "editionDate": "2026-06-05",
+            "metadata": {"planningPhase": "theme_proposal"},
+        }
+        record = papyrus_coverage_theme.build_edition_metadata_update_record(
+            edition,
+            {"rotatingDeskStatus": "selected", "selectedOptionalDeskKey": "gaming"},
+        )
+        self.assertEqual(record["action"], "update")
+        self.assertNotIn("updatedAt", record["input"])
+        self.assertEqual(record["input"]["id"], edition["id"])
+
+    def test_coverage_theme_plan_posts_only_theme_message_when_optional_desk_pending(self):
+        plan = papyrus_coverage_theme.build_coverage_theme_plan(
+            date="2026-06-05",
+            topic="AI in video games",
+            corpus_key="AI-ML-research",
+            category_key="AI-ML-research",
+            coverage_key="coverage.ai-in-video-games",
+            sections=["methods", "culture"],
+            section_budgets={"methods": 1, "arts": 2},
+            run_id="coverage-theme-canonical-forum-test",
+            now="2026-06-01T12:00:00Z",
+            state={
+                "newsroomSections": [
+                    {"id": "arts", "title": "Arts", "type": "floating", "enabled": True, "sortOrder": 1},
+                    {"id": "methods", "title": "Methods", "type": "canonical", "enabled": True, "sortOrder": 2},
+                ],
+                "categories": [],
+                "categorySets": [],
+            },
+        )
+        section_threads = [
+            record["input"]
+            for record in plan["records"]
+            if record["modelName"] == "MessageThread" and record["input"]["threadKind"] == "section_forum"
+        ]
+        edition_forum_posts = [
+            record["input"]
+            for record in plan["records"]
+            if record["modelName"] == "Message" and record["input"].get("messageKind") == "forum_post"
+        ]
+        self.assertEqual(section_threads, [])
+        self.assertEqual(len(edition_forum_posts), 1)
+        self.assertIn("Edition Theme (Phase 1)", edition_forum_posts[0]["content"])
+        self.assertTrue(
+            papyrus_coverage_theme.should_defer_reporting_dispatch_forum(
+                plan,
+                skip_rotating_desk=False,
+                include_optional_desks=False,
+                selected_optional_desk_key="",
+            )
+        )
+
+    def test_reporting_dispatch_forum_lists_overassigned_candidates(self):
+        plan = papyrus_coverage_theme.build_coverage_theme_plan(
+            date="2026-06-05",
+            topic="AI in video games",
+            corpus_key="AI-ML-research",
+            category_key="AI-ML-research",
+            coverage_key="coverage.ai-in-video-games",
+            sections=["methods"],
+            section_budgets={"methods": 1},
+            run_id="coverage-theme-dispatch-forum-test",
+            now="2026-06-01T12:00:00Z",
+            state={
+                "newsroomSections": [
+                    {"id": "methods", "title": "Methods", "type": "canonical", "enabled": True, "sortOrder": 1},
+                ],
+                "categories": [],
+                "categorySets": [],
+            },
+        )
+        dispatch_forum = papyrus_coverage_theme.build_reporting_dispatch_forum_records(
+            edition=plan["edition"],
+            topic="AI in video games",
+            coverage_key="coverage.ai-in-video-games",
+            reporting_assignments=plan["reportingAssignments"],
+            edition_slots=plan["editionSlots"],
+            section_budgets={"methods": 1},
+            section_titles={"methods": "Methods"},
+            run_id=plan["runId"],
+            now="2026-06-01T12:00:00Z",
+        )
+        self.assertEqual(dispatch_forum["action"], "create")
+        self.assertIn("Reporting Dispatch (Phase 3)", dispatch_forum["message"]["content"])
+        self.assertIn("1.5", dispatch_forum["message"]["content"])
+        self.assertGreaterEqual(len(plan["reportingAssignments"]), 2)
+
+    def test_coverage_theme_plan_forks_forum_thread_on_material_replan(self):
+        edition_id = "edition-edition-2026-06-05-v1"
+        edition_thread_id = f"message-thread-edition-forum-{papyrus_coverage_theme._safe_id(edition_id)}"
+        existing_state = {
+            "newsroomSections": [
+                {"id": "arts", "title": "Arts", "type": "floating", "enabled": True, "sortOrder": 1},
+                {"id": "methods", "title": "Methods", "type": "canonical", "enabled": True, "sortOrder": 2},
+            ],
+            "categories": [],
+            "categorySets": [],
+            "messageThreads": [{
+                "id": edition_thread_id,
+                "threadKind": "edition_forum",
+                "primaryAnchorKind": "edition",
+                "primaryAnchorId": edition_id,
+                "primaryAnchorLineageId": edition_id,
+                "messageCount": 1,
+                "createdByLabel": "papyrus-editor",
+                "createdAt": "2026-06-01T09:00:00Z",
+                "metadata": {"editionId": edition_id},
+            }],
+            "messages": [{
+                "id": f"message-forum-{papyrus_coverage_theme._safe_id(edition_thread_id)}-0001",
+                "threadId": edition_thread_id,
+                "messageKind": "forum_post",
+                "status": "active",
+                "summary": "Edition planning suggestions: AI in video games",
+                "content": "# Edition Planning Suggestions (Phase 1)\n\n- Suggested edition theme: AI in video games\n",
+                "sequenceNumber": 1,
+                "importRunId": "coverage-theme-forum-initial",
+            }],
+        }
+
+        plan = papyrus_coverage_theme.build_coverage_theme_plan(
+            date="2026-06-05",
+            topic="AI safety in game moderation",
+            corpus_key="AI-ML-research",
+            category_key="AI-ML-research",
+            coverage_key="coverage.ai-safety-in-game-moderation",
+            sections=["culture"],
+            section_budgets={"arts": 2},
+            run_id="coverage-theme-forum-replan",
+            now="2026-06-01T12:00:00Z",
+            state=existing_state,
+        )
+
+        thread_records = [record for record in plan["records"] if record["modelName"] == "MessageThread"]
+        edition_threads = [record["input"] for record in thread_records if record["input"]["threadKind"] == "edition_forum"]
+        self.assertEqual(len(edition_threads), 1)
+        self.assertNotEqual(edition_threads[0]["id"], edition_thread_id)
+        self.assertEqual(edition_threads[0]["metadata"].get("parentThreadId"), edition_thread_id)
+        self.assertEqual(plan["forumKickoff"]["editionKickoffAction"], "replan")
+        replan_message = next(
+            record["input"]
+            for record in plan["records"]
+            if record["modelName"] == "Message"
+            and record["input"].get("messageKind") == "forum_post"
+            and record["input"]["threadId"] == edition_threads[0]["id"]
+        )
+        self.assertIn("Edition Re-plan Update", replan_message["content"])
 
 
 if __name__ == "__main__":

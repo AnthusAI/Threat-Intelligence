@@ -47,8 +47,25 @@ New packet writes use `Assignment --produces--> Message`. Legacy
 Forum context defaults for assignment execution:
 
 - include edition forum threads first when `assignment.editionId` is present;
-- include only same-section forum threads for `(edition, section)` lineage;
+- include only same-section forum threads for `(edition, section)` lineage when
+  those threads exist (planning no longer creates section-forum kickoffs by
+  default—see [`skills/edition-planning/SKILL.md`](/Users/ryan/Projects/Papyrus/skills/edition-planning/SKILL.md));
 - never leak other sections' threads into the assignment context.
+
+## Edition forum planning messages
+
+Coverage Theme planning posts **three sequential messages** on the edition
+forum thread when optional desks are deferred to phase 2:
+
+1. `Edition theme (phase 1):` — theme and coverage concept only (not Arts/culture
+   as the edition theme).
+2. `Optional desk (phase 2):` — one proposed floating/rotating desk after
+   `rotating_section_selector.tac` (or `--selected-optional-desk`).
+3. `Reporting dispatch (phase 3):` — reporting assignment candidates per slot with
+   1.5× overassignment.
+
+Use `--through plan` then `--through rotating-desk` for the full sequence. See
+edition-planning skill for flags and idempotency rules.
 
 ## Default Smoke Command
 
@@ -135,10 +152,15 @@ copywriting, or draft, with reporting candidates grouped by edition and section.
 
 ## Section Lenses
 
+The `culture` CLI alias maps to the configured `arts` desk, which is a
+**floating** optional desk in `corpora/papyrus-newsroom-sections.yml`. Use it for
+story-cycle smoke tests, but treat it as step-2 optional-desk material in
+edition forum kickoff messages—not as the edition theme decision in phase 1.
+
 The canonical smoke uses:
 
 - `culture`: creative workflows, game design, player experience, generative
-  media.
+  media (alias for optional `arts` desk).
 - `methods`: implementation patterns, NPC behavior, procedural generation,
   evaluation.
 - `business`: studios, tooling markets, labor, production economics.
@@ -240,8 +262,9 @@ Decision table:
 For collaborative edition dogfood runs, operate forum threads from
 `/newsroom/messages` in forum mode:
 
-- keep one `edition_forum` thread for cross-section coordination;
-- add section-specific `section_forum` thread(s) as needed;
+- keep one `edition_forum` thread for cross-section coordination (three planning
+  messages: theme → optional desk → reporting dispatch);
+- use `section_forum` only for ad-hoc desk threads if editors create them;
 - append human replies directly in the relevant thread;
 - treat those messages as default context for editor/reporter assignment runs.
 
