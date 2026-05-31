@@ -1600,7 +1600,8 @@ async fn run_agent_turn(
     let required_tool_call_counts =
         metadata_string_usize_map_field(&trigger.metadata, "requiredToolCallCounts");
     let expected_final_response = metadata_string_field(&trigger.metadata, "expectedFinalResponse");
-    let mut messages = build_openai_messages(context, static_prompt);
+    let web_ui = resolve_trigger_web_ui(&trigger.metadata);
+    let mut messages = build_openai_messages(context, static_prompt, web_ui.as_ref());
     let mut model_context_attempts: Vec<Value> = Vec::new();
     let mut saw_tool_calls = false;
     let mut saw_tool_errors = false;
@@ -1750,7 +1751,8 @@ async fn run_agent_turn(
             create_message_graphql(state, &call_record, &call_now).await?;
             *next_sequence += 1;
 
-            let tool_result = execute_tactus_tool(state, trigger, context, name, arguments).await;
+            let tool_result =
+                execute_tactus_tool(state, trigger, context, name, arguments, web_ui.as_ref()).await;
             let tool_result_markdown = render_tool_result_markdown(&tool_result);
             collect_assignment_ids(&tool_result, &mut assignment_ids);
             collect_tool_api_call_counts(&tool_result, &mut observed_tool_counts);
@@ -2181,6 +2183,7 @@ fn collect_tool_api_call_counts(value: &Value, observed_tool_counts: &mut HashMa
 fn build_openai_messages(
     context: &ThreadContextCache,
     static_prompt: &StaticPromptContext,
+    web_ui: Option<&Value>,
 ) -> Vec<Value> {
     let mut messages = vec![json!({
         "role": "system",
@@ -2225,6 +2228,52 @@ fn build_openai_messages(
             "role": "system",
             "content": format!("Thread rolling summary:\n{}", context.rolling_summary)
         }));
+    }
+    if let Some(web_ui) = web_ui {
+        let location_uri = web_ui
+            .get("papyrusLocationUri")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim();
+        let web_path = web_ui
+            .get("webPath")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim();
+        if !location_uri.is_empty() || !web_path.is_empty() {
+            let mut lines = vec![
+                "Current web UI state for this turn (pedantic Papyrus location URIs):".to_string(),
+            ];
+            if !location_uri.is_empty() {
+                lines.push(format!("- papyrus_location_uri: {location_uri}"));
+            }
+            if !web_path.is_empty() {
+                lines.push(format!("- web_path: {web_path}"));
+            }
+            if let Some(object_uri) = web_ui
+                .get("papyrusObjectUri")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|entry| !entry.is_empty())
+            {
+                lines.push(format!("- focused_object_uri: {object_uri}"));
+            }
+            if let Some(label) = web_ui
+                .get("label")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|entry| !entry.is_empty())
+            {
+                lines.push(format!("- label: {label}"));
+            }
+            lines.push(
+                "Use execute_tactus with papyrus.web.current_location{} to re-read this snapshot and papyrus.web.navigate{ uri = \"papyrus://...\" } to move the editor's browser to another Papyrus location.".to_string(),
+            );
+            messages.push(json!({
+                "role": "system",
+                "content": lines.join("\n"),
+            }));
+        }
     }
     let mut emitted_tool_call_ids = HashSet::new();
     for cached in &context.recent_messages {
@@ -2502,12 +2551,13 @@ async fn execute_tactus_tool(
     context: &ThreadContextCache,
     name: &str,
     arguments: &str,
+    web_ui: Option<&Value>,
 ) -> Value {
     if name != "execute_tactus" {
         return json!({ "ok": false, "error": format!("Unsupported tool {name}") });
     }
     let parsed_args: Value = serde_json::from_str(arguments).unwrap_or_else(|_| json!({}));
-    let tool_input = json!({
+    let mut tool_input = json!({
         "mode": "execute_tactus",
         "arguments": parsed_args,
         "thread_context": {
@@ -2519,6 +2569,11 @@ async fn execute_tactus_tool(
             "lastCachedSequenceNumber": context.last_sequence_number,
         }
     });
+    if let Some(web_ui) = web_ui {
+        if let Some(object) = tool_input.as_object_mut() {
+            object.insert("webUi".to_string(), web_ui.clone());
+        }
+    }
     match call_execute_tactus_runner(state, &tool_input).await {
         Ok(value) => normalize_execute_tactus_result(value),
         Err(error) => json!({
@@ -2730,6 +2785,23 @@ fn metadata_value_field(metadata: &Value, key: &str) -> Option<Value> {
     let text = metadata.as_str()?;
     let parsed: Value = serde_json::from_str(text).ok()?;
     parsed.get(key).cloned()
+}
+
+fn metadata_nested_value_field(metadata: &Value, path: &[&str]) -> Option<Value> {
+    if path.is_empty() {
+        return None;
+    }
+    let mut current = metadata_value_field(metadata, path[0])?;
+    for key in path.iter().skip(1) {
+        current = current.get(*key)?.clone();
+    }
+    Some(current)
+}
+
+fn resolve_trigger_web_ui(metadata: &Value) -> Option<Value> {
+    metadata_nested_value_field(metadata, &["console", "webUi"]).or_else(|| {
+        metadata_nested_value_field(metadata, &["webUi"])
+    })
 }
 
 fn dynamodb_json_to_value(value: &Value) -> Value {

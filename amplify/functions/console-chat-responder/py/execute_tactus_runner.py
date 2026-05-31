@@ -46,7 +46,24 @@ def _docs_index() -> dict[str, Any]:
     return {"entries": entries}
 
 
-def _execute_tactus(arguments: dict[str, Any]) -> dict[str, Any]:
+def _coerce_web_ui_context(payload: Any) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+    web_path = str(payload.get("webPath") or payload.get("web_path") or "").strip()
+    papyrus_location_uri = str(
+        payload.get("papyrusLocationUri") or payload.get("papyrus_location_uri") or ""
+    ).strip()
+    if not web_path and not papyrus_location_uri:
+        return None
+    context = dict(payload)
+    if web_path:
+        context["webPath"] = web_path
+    if papyrus_location_uri:
+        context["papyrusLocationUri"] = papyrus_location_uri
+    return context
+
+
+def _execute_tactus(arguments: dict[str, Any], web_ui_context: dict[str, Any] | None = None) -> dict[str, Any]:
     try:
         from papyrus_newsroom.tactus_runtime import execute_tactus_harnessed  # type: ignore
     except Exception as exc:
@@ -61,6 +78,7 @@ def _execute_tactus(arguments: dict[str, Any]) -> dict[str, Any]:
             corpus_key=str(arguments.get("corpus_key") or arguments.get("corpusKey") or ""),
             max_evidence_items=int(arguments.get("max_evidence_items") or arguments.get("maxEvidenceItems") or 20),
             research_mode=str(arguments.get("research_mode") or arguments.get("researchMode") or ""),
+            web_ui_context=web_ui_context,
         )
     except Exception as exc:
         return _error("tactus_execution_failed", f"Unexpected error: {exc}")
@@ -77,7 +95,8 @@ def main() -> None:
 
     if mode == "execute_tactus":
         args = payload.get("arguments") if isinstance(payload.get("arguments"), dict) else {}
-        print(json.dumps(_execute_tactus(args)))
+        web_ui_context = _coerce_web_ui_context(payload.get("webUi") or payload.get("web_ui"))
+        print(json.dumps(_execute_tactus(args, web_ui_context=web_ui_context)))
         return
 
     print(json.dumps(_error("invalid_mode", f"Unsupported mode: {mode}")))
