@@ -112,6 +112,60 @@ class PapyrusContentTests(unittest.TestCase):
         item = catalog_items(prepared)[0]
         self.assertIn("ingestion_rationale", item)
 
+    def test_prepare_catalog_assigns_youtube_item_id_and_media_type(self) -> None:
+        prepared = build_prepared_reference_catalog(
+            {
+                "items": [
+                    {
+                        "title": "Neural networks",
+                        "source_uri": "https://www.youtube.com/watch?v=aircAruvnKk",
+                    }
+                ]
+            },
+            {"corpusKey": "demo", "publicationName": "Demo Publication"},
+        )
+        item = catalog_items(prepared)[0]
+        self.assertEqual(item["item_id"], "yt-aircaruvnkk")
+        self.assertEqual(item["media_type"], "video/youtube")
+
+    def test_catalog_external_item_id_for_url_only_source(self) -> None:
+        from papyrus_content.catalog import catalog_external_item_id_for
+        from papyrus_content.ids import hash_short
+
+        source_uri = "https://example.com/paper.pdf"
+        self.assertEqual(
+            catalog_external_item_id_for({"source_uri": source_uri}),
+            f"url-ref-{hash_short(source_uri)}",
+        )
+
+    def test_resolve_process_source_uri_uses_youtube_source_uri_without_find_metadata(self) -> None:
+        from papyrus_content.reference_url_text import _resolve_process_source_uri
+
+        uri, error = _resolve_process_source_uri(
+            {
+                "sourceUri": "https://youtu.be/jGwO_UgTS7I",
+                "mediaType": "video/youtube",
+            },
+            [],
+        )
+        self.assertIsNone(error)
+        self.assertEqual(uri, "https://www.youtube.com/watch?v=jGwO_UgTS7I")
+
+    def test_source_download_uri_for_reference_uses_acm_pdf_url(self) -> None:
+        from papyrus_content.accession import source_download_uri_for_reference
+
+        download_uri = source_download_uri_for_reference(
+            {
+                "id": "reference-acm",
+                "title": "ACM test paper",
+                "sourceUri": "https://dl.acm.org/doi/10.1145/122344.122377",
+            }
+        )
+        self.assertEqual(
+            download_uri,
+            "https://dl.acm.org/doi/pdf/10.1145/122344.122377?download=true",
+        )
+
     def test_reference_source_readiness_url_only(self) -> None:
         reference = {
             "id": "reference-1-v1",

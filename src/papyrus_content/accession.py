@@ -22,7 +22,9 @@ from .graphql_authoring import PapyrusGraphQLAuthoringClient
 from .ids import deterministic_uuid, hash_short, is_uuid_string, knowledge_corpus_id, reference_lineage_id_for, safe_id
 from .model_attachments import parse_jsonish
 from .records import apply_record_changes, build_record_change_from_current, build_record_changes
+from .reference_url_text import _resolve_existing_canonical_uri
 from .source_readiness import SOURCE_READINESS_STATES, is_extractable_media_type, reference_source_readiness
+from .source_site_plugins import resolve_source_site_enrichment
 from .steering import find_corpus_config, load_steering_config, require_corpus_config, require_steering_config
 
 
@@ -660,7 +662,50 @@ def reference_attachment_for_accession(reference: dict[str, Any], accession: dic
 
 
 def source_download_uri_for_reference(reference: dict[str, Any]) -> str:
-    return reference.get("sourceUri") or ""
+    source_uri = str(reference.get("sourceUri") or "").strip()
+    if not source_uri:
+        return ""
+    if _uri_likely_direct_pdf(source_uri):
+        return source_uri
+
+    existing_canonical = _resolve_existing_canonical_uri(reference)
+    if existing_canonical and _uri_likely_direct_pdf(existing_canonical):
+        return existing_canonical
+
+    enrichment = resolve_source_site_enrichment(
+        reference={
+            "id": reference.get("id"),
+            "title": reference.get("title"),
+            "metadata": reference.get("metadata"),
+        },
+        source_uri=source_uri,
+    )
+    variants = enrichment.get("sourceVariants") if isinstance(enrichment.get("sourceVariants"), dict) else {}
+    canonical_pdf_url = str(variants.get("canonicalPdfUrl") or "").strip()
+    if canonical_pdf_url:
+        return canonical_pdf_url
+
+    canonical_source_uri = str(enrichment.get("canonicalSourceUri") or "").strip()
+    plugin_key = str(enrichment.get("pluginKey") or "").strip().lower()
+    if canonical_source_uri and (
+        _uri_likely_direct_pdf(canonical_source_uri)
+        or plugin_key in {"acm", "arxiv", "acl_anthology"}
+    ):
+        return canonical_source_uri
+
+    return source_uri
+
+
+def _uri_likely_direct_pdf(url: str) -> bool:
+    lowered = str(url or "").strip().lower()
+    if not lowered:
+        return False
+    if lowered.endswith(".pdf"):
+        return True
+    parsed = urlparse(lowered)
+    if (parsed.hostname or "").lower() == "dl.acm.org" and "/doi/pdf/" in (parsed.path or "").lower():
+        return True
+    return False
 
 
 def media_type_from_url(url: str) -> str | None:
