@@ -8,6 +8,7 @@ import { modelAttachmentUpload } from "../functions/model-attachment-upload/reso
 import { newsroomSummary } from "../functions/newsroom-summary/resource";
 import { procedureAction } from "../functions/procedure-action/resource";
 import { readerSettings } from "../functions/reader-settings/resource";
+import { sesInboundReceive } from "../functions/ses-inbound-receive/resource";
 
 const authoringOperations: ("read" | "create" | "update" | "delete")[] = [
   "read",
@@ -40,6 +41,7 @@ const schema = a.schema({
     .authorization((allow) => [
       allow.owner(),
       allow.group(adminGroup),
+      allow.resource(sesInboundReceive).to(["read"]),
     ]),
 
   UserIdentity: a
@@ -60,9 +62,8 @@ const schema = a.schema({
     ])
     .authorization((allow) => [
       allow.group(adminGroup),
+      allow.resource(sesInboundReceive).to(["read"]),
     ]),
-
-  UserRoleAssignment: a
     .model({
       id: a.id().required(),
       userProfileId: a.id().required(),
@@ -1551,9 +1552,8 @@ const schema = a.schema({
     .authorization((allow) => [
       allow.groups(categoryWriteGroups).to(categoryAppendOnlyOperations),
       allow.custom().to(authoringOperations),
+      allow.resource(sesInboundReceive).to(["read", "create", "update"]),
     ]),
-
-  MessageThread: a
     .model({
       id: a.id().required(),
       threadKind: a.string().required(),
@@ -2108,6 +2108,7 @@ const schema = a.schema({
   allow.resource(modelAttachmentUpload),
   allow.resource(newsroomSummary),
   allow.resource(procedureAction),
+  allow.resource(sesInboundReceive),
 ]);
 
 export type Schema = ClientSchema<typeof schema>;
