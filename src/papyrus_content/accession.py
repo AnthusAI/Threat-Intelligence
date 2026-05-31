@@ -401,12 +401,15 @@ def write_reference_source_accession(
 def run_biblicus_reindex_for_accession(*, corpus_path: Path, biblicus_workdir: Path, run_dir: Path) -> dict[str, Any]:
     stdout_log = run_dir / "biblicus-reindex.stdout.log"
     stderr_log = run_dir / "biblicus-reindex.stderr.log"
+    env = os.environ.copy()
+    env.pop("VIRTUAL_ENV", None)
     result = subprocess.run(
         ["uv", "run", "biblicus", "reindex", "--corpus", str(corpus_path)],
         cwd=biblicus_workdir,
         capture_output=True,
         text=True,
         check=False,
+        env=env,
     )
     stdout_log.write_text(result.stdout or "", encoding="utf-8")
     stderr_log.write_text(result.stderr or "", encoding="utf-8")
