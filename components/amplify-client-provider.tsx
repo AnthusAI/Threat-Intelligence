@@ -1,7 +1,11 @@
 "use client";
 
 import "aws-amplify/auth/enable-oauth-listener";
+import { fetchAuthSession } from "aws-amplify/auth";
+import { cognitoUserPoolsTokenProvider } from "aws-amplify/auth/cognito";
 import { Amplify, type ResourcesConfig } from "aws-amplify";
+import { CookieStorage, Hub } from "aws-amplify/utils";
+import { useEffect } from "react";
 import amplifyOutputs from "../amplify_outputs.json";
 
 let configured = false;
@@ -10,12 +14,55 @@ export function configureAmplifyClient() {
   if (configured) return;
   if (redirectLoopbackToLocalhost()) return;
   Amplify.configure(prioritizeCurrentOrigin(amplifyOutputs as ResourcesConfig), { ssr: true });
+  applyClientTokenStorageForCurrentProtocol();
   configured = true;
 }
 
 export function AmplifyClientProvider({ children }: Readonly<{ children: React.ReactNode }>) {
+  useEffect(() => {
+    configureAmplifyClient();
+    const unsubscribe = Hub.listen("auth", ({ payload }) => {
+      if (payload.event !== "signInWithRedirect_failure") return;
+      const detail = extractAuthFailureDetail(payload.data);
+      if (detail) {
+        console.error("[PapyrusAuth] Google sign-in failed:", detail);
+      }
+    });
+
+    const params = new URLSearchParams(window.location.search);
+    const hasOAuthCallback = params.has("code") && params.has("state");
+    const hasOAuthError = params.has("error");
+    if (!hasOAuthCallback && !hasOAuthError) {
+      return unsubscribe;
+    }
+
+    let cancelled = false;
+    const syncSession = async () => {
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        if (cancelled) return;
+        try {
+          const session = await fetchAuthSession({ forceRefresh: attempt > 0 });
+          if (session.tokens?.accessToken) return;
+        } catch {
+          // OAuth listener may still be completing the code exchange.
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 250));
+      }
+    };
+    void syncSession();
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, []);
+
   configureAmplifyClient();
   return children;
+}
+
+if (typeof window !== "undefined") {
+  configureAmplifyClient();
 }
 
 function prioritizeCurrentOrigin(config: ResourcesConfig): ResourcesConfig {
@@ -45,6 +92,15 @@ function prioritizeCurrentOrigin(config: ResourcesConfig): ResourcesConfig {
   } as ResourcesConfig;
 }
 
+function applyClientTokenStorageForCurrentProtocol(): void {
+  if (typeof window === "undefined") return;
+  if (window.location.protocol !== "http:") return;
+  // Amplify's default SSR cookie store sets secure cookies, which browsers reject on http://localhost.
+  cognitoUserPoolsTokenProvider.setKeyValueStorage(
+    new CookieStorage({ sameSite: "lax", secure: false }),
+  );
+}
+
 function redirectLoopbackToLocalhost(): boolean {
   if (typeof window === "undefined") return false;
   const { protocol, hostname, port, pathname, search, hash } = window.location;
@@ -68,4 +124,16 @@ function normalizeUrlOrigin(value: string): string {
 function normalizeLoopbackHostname(hostname: string): string {
   if (hostname === "127.0.0.1" || hostname === "::1") return "localhost";
   return hostname;
+}
+
+function extractAuthFailureDetail(error: unknown): string | null {
+  if (!error) return null;
+  if (typeof error === "string") return error;
+  if (typeof error !== "object") return null;
+  const record = error as Record<string, unknown>;
+  const message = record.message;
+  if (typeof message === "string" && message.trim()) return message;
+  const nested = record.error;
+  if (nested && nested !== error) return extractAuthFailureDetail(nested);
+  return null;
 }
