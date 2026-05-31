@@ -152,6 +152,40 @@ storageBackupPlan.addSelection("PapyrusStorageBackupSelection", {
   resources: [backup.BackupResource.fromArn(storageBucket.bucketArn)],
 });
 
+// Grant S3 access on Lambda roles only (not storage bucket policies) to avoid
+// storage ↔ data nested-stack circular dependencies from allow.resource().
+const corporaObjectArn = `${storageBucket.bucketArn}/corpora/*`;
+const newsroomObjectArn = `${storageBucket.bucketArn}/newsroom/*`;
+const grantCorporaRead = (lambda: LambdaFunction) => {
+  lambda.addToRolePolicy(
+    new PolicyStatement({
+      actions: ["s3:GetObject"],
+      resources: [corporaObjectArn],
+    }),
+  );
+};
+const grantNewsroomReadWrite = (lambda: LambdaFunction) => {
+  lambda.addToRolePolicy(
+    new PolicyStatement({
+      actions: ["s3:GetObject", "s3:PutObject"],
+      resources: [newsroomObjectArn],
+    }),
+  );
+};
+const grantNewsroomReadWriteDelete = (lambda: LambdaFunction) => {
+  lambda.addToRolePolicy(
+    new PolicyStatement({
+      actions: ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+      resources: [newsroomObjectArn],
+    }),
+  );
+};
+grantCorporaRead(backend.knowledgeQuery.resources.lambda as LambdaFunction);
+grantNewsroomReadWrite(backend.assignmentAction.resources.lambda as LambdaFunction);
+grantNewsroomReadWrite(backend.categoryAction.resources.lambda as LambdaFunction);
+grantNewsroomReadWrite(backend.newsroomSummary.resources.lambda as LambdaFunction);
+grantNewsroomReadWriteDelete(backend.modelAttachmentUpload.resources.lambda as LambdaFunction);
+
 if (enableInboundEmail) {
   if (!backend.sesInboundReceive || !backend.emailSubmissionProcessor) {
     throw new Error("Inbound email is enabled but sesInboundReceive/emailSubmissionProcessor were not registered.");
@@ -213,6 +247,7 @@ if (enableInboundEmail) {
     }),
   );
 
+  const inboundEventStack = Stack.of(receiveLambda);
   const inboundDnsZone = route53.HostedZone.fromHostedZoneAttributes(storageStack, "PapyrusInboundDnsZone", {
     hostedZoneId: inboundDnsZoneId,
     zoneName: inboundDnsZoneName,
@@ -292,7 +327,7 @@ if (enableInboundEmail) {
     timeout: Duration.minutes(2),
   });
 
-  new InboundEmailStack(backend.createStack("inbound-email"), "InboundEmail", {
+  new InboundEmailStack(inboundEventStack, "InboundEmail", {
     storageBucket,
     receiveFunctionArn: receiveLambda.functionArn,
   });
@@ -346,6 +381,7 @@ knowledgeVectorBucketPolicy.node.addDependency(knowledgeVectorIndex);
 
 const knowledgeQueryLambda = backend.knowledgeQuery.resources.lambda as LambdaFunction;
 backend.knowledgeQuery.addEnvironment("OPENAI_API_KEY", secret("OPENAI_API_KEY"));
+knowledgeQueryLambda.addEnvironment("PAPYRUS_STORAGE_BUCKET_NAME", storageBucket.bucketName);
 knowledgeQueryLambda.addEnvironment(
   "PAPYRUS_GRAPHQL_ENDPOINT",
   backend.data.resources.cfnResources.cfnGraphqlApi.attrGraphQlUrl,

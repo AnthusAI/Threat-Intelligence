@@ -11,7 +11,7 @@ export type InboundEmailStackProps = StackProps & {
   receiveFunctionArn: string;
 };
 
-/** EventBridge trigger in its own nested stack to avoid storage/data circular dependencies. */
+/** EventBridge triggers live in the data stack with the receive Lambda. */
 export class InboundEmailStack extends Construct {
   constructor(scope: Construct, id: string, props: InboundEmailStackProps) {
     super(scope, id);

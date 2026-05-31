@@ -5,4 +5,5 @@ export const assignmentAction = defineFunction({
   entry: "./handler.ts",
   timeoutSeconds: 120,
   memoryMB: 256,
+  resourceGroupName: "data",
 });

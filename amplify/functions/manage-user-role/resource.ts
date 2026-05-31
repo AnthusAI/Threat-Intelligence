@@ -5,4 +5,5 @@ export const manageUserRole = defineFunction({
   entry: "./handler.ts",
   timeoutSeconds: 10,
   memoryMB: 256,
+  resourceGroupName: "auth",
 });
