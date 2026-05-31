@@ -1,16 +1,12 @@
 import { defineBackend, secret } from "@aws-amplify/backend";
 import { Duration, RemovalPolicy, Stack } from "aws-cdk-lib";
 import * as backup from "aws-cdk-lib/aws-backup";
-import { AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId } from "aws-cdk-lib/custom-resources";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as events from "aws-cdk-lib/aws-events";
 import { PolicyStatement } from "aws-cdk-lib/aws-iam";
 import { Function as LambdaFunction } from "aws-cdk-lib/aws-lambda";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import { CfnIndex, CfnVectorBucket, CfnVectorBucketPolicy } from "aws-cdk-lib/aws-s3vectors";
-import * as route53 from "aws-cdk-lib/aws-route53";
-import * as ses from "aws-cdk-lib/aws-ses";
-import * as sesActions from "aws-cdk-lib/aws-ses-actions";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { auth } from "./auth/resource";
@@ -96,7 +92,8 @@ if (enableConsoleResponder) {
 
   const messageThreadTable = backend.data.resources.tables.MessageThread;
 
-  new ConsoleChatResponderStack(backend.createStack("console-chat-responder"), "ConsoleChatResponder", {
+  const dataStack = Stack.of(messageTable);
+  new ConsoleChatResponderStack(dataStack, "ConsoleChatResponder", {
     messageTable,
     messageStreamArn,
     threadTable: messageThreadTable,
@@ -108,9 +105,9 @@ if (enableConsoleResponder) {
   });
 }
 
-const storageBackupsStack = backend.createStack("storage-backups");
 const storageBackupVaultName = "papyrus-dbsyytcm9drqa-main-media-backup-vault";
 const storageBucket = backend.storage.resources.bucket;
+const storageStack = Stack.of(storageBucket);
 
 const storageBucketCfn = storageBucket.node.defaultChild as s3.CfnBucket | undefined;
 if (storageBucketCfn) {
@@ -121,11 +118,11 @@ if (storageBucketCfn) {
   );
 }
 
-const storageBackupVault = new backup.BackupVault(storageBackupsStack, "PapyrusStorageBackupVault", {
+const storageBackupVault = new backup.BackupVault(storageStack, "PapyrusStorageBackupVault", {
   backupVaultName: storageBackupVaultName,
   removalPolicy: RemovalPolicy.RETAIN,
 });
-const storageBackupPlan = new backup.BackupPlan(storageBackupsStack, "PapyrusStorageBackupPlan", {
+const storageBackupPlan = new backup.BackupPlan(storageStack, "PapyrusStorageBackupPlan", {
   backupVault: storageBackupVault,
 });
 
@@ -225,7 +222,8 @@ if (enableInboundEmail) {
     }),
   );
 
-  const storageStack = Stack.of(storageBucket);
+  storageBucket.grantRead(receiveLambda, "inbound-email/*");
+
   const inboundDnsZone = route53.HostedZone.fromHostedZoneAttributes(storageStack, "PapyrusInboundDnsZone", {
     hostedZoneId: inboundDnsZoneId,
     zoneName: inboundDnsZoneName,
