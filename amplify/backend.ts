@@ -4,7 +4,6 @@ import * as backup from "aws-cdk-lib/aws-backup";
 import { AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId } from "aws-cdk-lib/custom-resources";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as events from "aws-cdk-lib/aws-events";
-import * as eventTargets from "aws-cdk-lib/aws-events-targets";
 import { PolicyStatement } from "aws-cdk-lib/aws-iam";
 import { Function as LambdaFunction } from "aws-cdk-lib/aws-lambda";
 import * as s3 from "aws-cdk-lib/aws-s3";
@@ -28,6 +27,7 @@ import { procedureAction } from "./functions/procedure-action/resource";
 import { readerSettings } from "./functions/reader-settings/resource";
 import { emailSubmissionProcessor } from "./functions/email-submission-processor/resource";
 import { sesInboundReceive } from "./functions/ses-inbound-receive/resource";
+import { InboundEmailStack } from "./inbound-email/stack";
 import { storage } from "./storage/resource";
 
 const knowledgeVectorIndexName = "papyrus-knowledge";
@@ -164,6 +164,7 @@ if (enableInboundEmail) {
   inboundReceive.addEnvironment("PAPYRUS_INBOUND_EMAIL_DOMAIN", inboundEmailDomain);
   inboundReceive.addEnvironment("PAPYRUS_INBOUND_EMAIL_LOCAL_PARTS", inboundEmailLocalParts.join(","));
   inboundReceive.addEnvironment("PAPYRUS_INBOUND_EMAIL_CORPUS_KEY", inboundEmailCorpusKey);
+  inboundReceive.addEnvironment("PAPYRUS_JWT_SECRET", secret("PAPYRUS_JWT_SECRET"));
   inboundReceive.addEnvironment("PAPYRUS_GRAPHQL_ENDPOINT", graphqlEndpoint);
 
   inboundProcessor.addEnvironment("PAPYRUS_JWT_SECRET", secret("PAPYRUS_JWT_SECRET"));
@@ -184,8 +185,11 @@ if (enableInboundEmail) {
   );
   receiveLambda.addToRolePolicy(
     new PolicyStatement({
-      actions: ["appsync:GraphQL"],
-      resources: ["*"],
+      actions: ["ssm:GetParameter"],
+      resources: [
+        `arn:aws:ssm:${backend.stack.region}:${backend.stack.account}:parameter/amplify/*`,
+        `arn:aws:ssm:${backend.stack.region}:${backend.stack.account}:parameter/amplify/shared/*`,
+      ],
     }),
   );
   processorLambda.addToRolePolicy(
@@ -238,19 +242,6 @@ if (enableInboundEmail) {
     values: [verifyInboundEmailDomain.getResponseField("VerificationToken")],
   });
 
-  new events.Rule(storageStack, "PapyrusInboundEmailObjectCreated", {
-    description: "Process inbound SES MIME objects stored under inbound-email/",
-    eventPattern: {
-      source: ["aws.s3"],
-      detailType: ["Object Created"],
-      detail: {
-        bucket: { name: [storageBucket.bucketName] },
-        object: { key: [{ prefix: "inbound-email/" }] },
-      },
-    },
-    targets: [new eventTargets.LambdaFunction(receiveLambda)],
-  });
-
   const inboundRuleSet = new ses.ReceiptRuleSet(storageStack, "PapyrusInboundEmailRuleSet", {
     receiptRuleSetName: `papyrus-inbound-${inboundEmailDomain.replace(/\./g, "-")}`,
   });
@@ -295,6 +286,11 @@ if (enableInboundEmail) {
       resources: AwsCustomResourcePolicy.ANY_RESOURCE,
     }),
     timeout: Duration.minutes(2),
+  });
+
+  new InboundEmailStack(backend.createStack("inbound-email"), "InboundEmail", {
+    storageBucket,
+    receiveFunctionArn: receiveLambda.functionArn,
   });
 }
 

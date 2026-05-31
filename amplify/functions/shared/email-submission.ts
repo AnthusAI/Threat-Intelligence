@@ -142,6 +142,60 @@ export function looksLikeResearchAssignmentRequest(text: string, citationCount: 
   return RESEARCH_ASSIGNMENT_PHRASES.some((phrase) => lowered.includes(phrase));
 }
 
+export async function lookupRegisteredUserProfileIdWithGraphql(senderEmail: string): Promise<string | null> {
+  const { graphqlWithInboundJwt } = await import("./inbound-authoring-client");
+  const normalized = normalizeEmailAddress(senderEmail);
+  if (!normalized) return null;
+
+  const identityData = await graphqlWithInboundJwt<{
+    listUserIdentitiesByEmailAndStatus?: {
+      items?: Array<{ userProfileId?: string | null }> | null;
+    } | null;
+  }>(
+    `query ListUserIdentitiesByEmailAndStatus($email: AWSEmail!, $limit: Int) {
+      listUserIdentitiesByEmailAndStatus(email: $email, status: { eq: "active" }, limit: $limit) {
+        items {
+          userProfileId
+        }
+      }
+    }`,
+    { email: normalized, limit: 10 },
+  );
+  for (const identity of identityData.listUserIdentitiesByEmailAndStatus?.items ?? []) {
+    const profileId = String(identity.userProfileId ?? "").trim();
+    if (profileId) return profileId;
+  }
+
+  let nextToken: string | null | undefined;
+  do {
+    const profileData = await graphqlWithInboundJwt<{
+      listUserProfiles?: {
+        items?: Array<{ id?: string | null; email?: string | null }> | null;
+        nextToken?: string | null;
+      } | null;
+    }>(
+      `query ListUserProfiles($limit: Int, $nextToken: String) {
+        listUserProfiles(limit: $limit, nextToken: $nextToken) {
+          items {
+            id
+            email
+          }
+          nextToken
+        }
+      }`,
+      { limit: 200, nextToken: nextToken ?? null },
+    );
+    for (const profile of profileData.listUserProfiles?.items ?? []) {
+      if (normalizeEmailAddress(String(profile.email ?? "")) === normalized) {
+        return String(profile.id ?? "").trim() || null;
+      }
+    }
+    nextToken = profileData.listUserProfiles?.nextToken;
+  } while (nextToken);
+
+  return null;
+}
+
 export async function lookupRegisteredUserProfileId(client: DataClient, senderEmail: string): Promise<string | null> {
   const normalized = normalizeEmailAddress(senderEmail);
   if (!normalized) return null;

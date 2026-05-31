@@ -1,10 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { getAmplifyDataClientConfig } from "@aws-amplify/backend/function/runtime";
-import { Amplify } from "aws-amplify";
-import { generateClient } from "aws-amplify/data";
-import type { Schema } from "../../data/resource";
 import {
   buildEmailSubmissionMessageInput,
   extractDirectCitations,
@@ -13,20 +9,16 @@ import {
   extractSenderFromRawMime,
   extractSenderFromSesMail,
   looksLikeResearchAssignmentRequest,
-  lookupRegisteredUserProfileId,
+  lookupRegisteredUserProfileIdWithGraphql,
   normalizeEmailAddress,
   parseInboundEmailBody,
 } from "../shared/email-submission";
+import { graphqlWithInboundJwt } from "../shared/inbound-authoring-client";
 
-type DataClient = ReturnType<typeof generateClient<Schema>>;
-type DataClientErrors = Array<{ message?: string | null } | string | null> | null | undefined;
-
-const LAMBDA_DATA_AUTH_MODE = "iam";
 const PROCESSOR_FUNCTION_NAME = process.env.PAPYRUS_EMAIL_SUBMISSION_PROCESSOR_FUNCTION_NAME ?? "";
 const INBOUND_LOCAL_PARTS = parseLocalParts(process.env.PAPYRUS_INBOUND_EMAIL_LOCAL_PARTS ?? "submissions,suggestions");
 const INBOUND_DOMAIN = (process.env.PAPYRUS_INBOUND_EMAIL_DOMAIN ?? "p.apyr.us").trim().toLowerCase();
 
-let clientPromise: Promise<DataClient> | null = null;
 const s3Client = new S3Client({});
 const lambdaClient = new LambdaClient({});
 
@@ -47,10 +39,9 @@ export const handler = async (event: Record<string, unknown>) => {
     throw new Error(`Inbound email recipient ${recipientEmail || "(missing)"} is not configured for this environment.`);
   }
 
-  const client = await getDataClient();
   const now = new Date().toISOString();
   const messageId = `message-email-submission-${randomUUID().replace(/-/g, "").slice(0, 20)}`;
-  const profileId = await lookupRegisteredUserProfileId(client, inbound.senderEmail);
+  const profileId = await lookupRegisteredUserProfileIdWithGraphql(inbound.senderEmail);
   const authorized = Boolean(profileId);
   const citations = authorized ? extractDirectCitations(inbound.bodyText) : [];
 
@@ -89,8 +80,14 @@ export const handler = async (event: Record<string, unknown>) => {
     responseError,
   });
 
-  const createResponse = await client.models.Message.create(messageInput as never, { authMode: LAMBDA_DATA_AUTH_MODE });
-  assertNoDataErrors(createResponse.errors, "create inbound email Message");
+  await graphqlWithInboundJwt(
+    `mutation CreateInboundEmailMessage($input: CreateMessageInput!) {
+      createMessage(input: $input) {
+        id
+      }
+    }`,
+    { input: messageInput },
+  );
 
   if (authorized && responseStatus === "PENDING" && PROCESSOR_FUNCTION_NAME) {
     await lambdaClient.send(new InvokeCommand({
@@ -168,7 +165,6 @@ async function resolveFromSesMail(
     Array.isArray(headers.subject) ? headers.subject[0] : headers.subject,
   ) ?? "(no subject)";
 
-  let bodyText = "";
   if (s3Bucket && s3Key) {
     const loaded = await loadInboundFromS3Object(s3Bucket, s3Key, sesMessageId);
     return {
@@ -183,7 +179,7 @@ async function resolveFromSesMail(
     senderEmail,
     recipients,
     subject,
-    bodyText,
+    bodyText: "",
     s3Bucket,
     s3Key,
     sesMessageId,
@@ -227,27 +223,6 @@ function parseLocalParts(value: string): string[] {
     .split(",")
     .map((entry) => entry.trim().toLowerCase())
     .filter(Boolean);
-}
-
-async function getDataClient(): Promise<DataClient> {
-  if (!clientPromise) {
-    clientPromise = (async () => {
-      const { resourceConfig, libraryOptions } = await getAmplifyDataClientConfig(process.env as never);
-      Amplify.configure(resourceConfig, libraryOptions);
-      return generateClient<Schema>();
-    })();
-  }
-  return clientPromise;
-}
-
-function assertNoDataErrors(errors: DataClientErrors, context: string): void {
-  if (!errors || errors.length === 0) return;
-  const messages = errors.map((entry) => {
-    if (!entry) return "unknown GraphQL error";
-    if (typeof entry === "string") return entry;
-    return entry.message ?? "unknown GraphQL error";
-  });
-  throw new Error(`${context}: ${messages.join("; ")}`);
 }
 
 function normalizeOptionalString(value: unknown): string | null {
