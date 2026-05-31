@@ -1556,6 +1556,8 @@ const schema = a.schema({
       allow.custom().to(authoringOperations),
       allow.resource(sesInboundReceive).to(["read", "create", "update"]),
     ]),
+
+  MessageThread: a
     .model({
       id: a.id().required(),
       threadKind: a.string().required(),
