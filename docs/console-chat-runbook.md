@@ -178,6 +178,31 @@ Expected Lambda response for a successful manual smoke:
 {"batchItemFailures":[],"processed":1,"skipped":0}
 ```
 
+## Web UI location context (`console.webUi`)
+
+Each user console turn should persist `metadata.console.webUi` from the Newsroom
+route (path + query) so the Rust responder can inject the current page into the
+system prompt and pass the same snapshot to `execute_tactus` / `papyrus.web.*`.
+
+Verify a fresh user message in DynamoDB:
+
+```bash
+AWS_PROFILE=Ryan AWS_REGION=us-east-1 \
+aws dynamodb query \
+  --table-name Message-s4sclnevjjbzpmj4vhallzvw3e-NONE \
+  --index-name messagesByMessageKindAndCreatedAt \
+  --key-condition-expression 'messageKind = :kind' \
+  --expression-attribute-values '{":kind":{"S":"console_chat_turn"}}' \
+  --no-scan-index-forward \
+  --limit 3
+```
+
+A healthy row includes `metadata.console.webUi.webPath` and
+`metadata.console.webUi.papyrusLocationUri`. If you only see
+`metadata.console.author` and the assistant says it cannot see the current
+page, production is still running an older frontend bundle. Check the latest
+Amplify `main` build: failed backend deploys skip the Next.js phase entirely.
+
 ## Troubleshooting
 
 - `OPENAI_API_KEY or PAPYRUS_CONSOLE_OPENAI_API_KEY_SSM_PARAM is required`:
@@ -189,3 +214,12 @@ Expected Lambda response for a successful manual smoke:
 - repeated `missing DynamoDB stream string field threadId`: the stream is
   delivering non-console `Message` rows. The responder should skip these before
   requiring `threadId`; rebuild/push the image if that skip logic is not live.
+- `CloudformationStackCircularDependencyError` involving
+  `consolechatresponder`, `storage`, `storagebackups`, and `data`: keep the
+  console responder nested stack on the data stack (`Stack.of(messageTable)`)
+  and storage backups on the storage stack (`Stack.of(storageBucket)`), then
+  rerun the Amplify `main` pipeline.
+- Assistant cannot answer “what page are we on?” while `console.author` exists
+  but `console.webUi` is missing: redeploy the frontend from a green Amplify
+  `main` build; the responder is already running but never received location
+  metadata on the trigger message.

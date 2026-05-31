@@ -1601,6 +1601,31 @@ async fn run_agent_turn(
         metadata_string_usize_map_field(&trigger.metadata, "requiredToolCallCounts");
     let expected_final_response = metadata_string_field(&trigger.metadata, "expectedFinalResponse");
     let web_ui = resolve_trigger_web_ui(&trigger.metadata);
+    if web_ui.is_none() {
+        if metadata_nested_value_field(&trigger.metadata, &["console"]).is_some() {
+            warn!(
+                message_id = trigger.id,
+                thread_id = trigger.thread_id,
+                "console metadata present but console.webUi missing; deploy the latest Newsroom frontend"
+            );
+        }
+    } else {
+        info!(
+            message_id = trigger.id,
+            thread_id = trigger.thread_id,
+            web_path = web_ui
+                .as_ref()
+                .and_then(|entry| entry.get("webPath"))
+                .and_then(|entry| entry.as_str())
+                .unwrap_or(""),
+            papyrus_location_uri = web_ui
+                .as_ref()
+                .and_then(|entry| entry.get("papyrusLocationUri"))
+                .and_then(|entry| entry.as_str())
+                .unwrap_or(""),
+            "resolved console webUi metadata for trigger message"
+        );
+    }
     let mut messages = build_openai_messages(context, static_prompt, web_ui.as_ref());
     let mut model_context_attempts: Vec<Value> = Vec::new();
     let mut saw_tool_calls = false;
@@ -2807,21 +2832,46 @@ fn metadata_value_field(metadata: &Value, key: &str) -> Option<Value> {
     parsed.get(key).cloned()
 }
 
+fn coerce_metadata_object(value: Value) -> Option<Value> {
+    match value {
+        Value::Object(_) => Some(value),
+        Value::String(text) => serde_json::from_str(text.trim()).ok(),
+        _ => None,
+    }
+}
+
 fn metadata_nested_value_field(metadata: &Value, path: &[&str]) -> Option<Value> {
     if path.is_empty() {
         return None;
     }
-    let mut current = metadata_value_field(metadata, path[0])?;
+    let mut current = coerce_metadata_object(metadata_value_field(metadata, path[0])?)?;
     for key in path.iter().skip(1) {
-        current = current.get(*key)?.clone();
+        let entry = current.get(*key)?.clone();
+        current = coerce_metadata_object(entry)?;
     }
     Some(current)
 }
 
 fn resolve_trigger_web_ui(metadata: &Value) -> Option<Value> {
-    metadata_nested_value_field(metadata, &["console", "webUi"]).or_else(|| {
-        metadata_nested_value_field(metadata, &["webUi"])
-    })
+    metadata_nested_value_field(metadata, &["console", "webUi"])
+        .or_else(|| metadata_nested_value_field(metadata, &["webUi"]))
+        .and_then(|value| {
+            let web_path = value
+                .get("webPath")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|entry| !entry.is_empty());
+            let location_uri = value
+                .get("papyrusLocationUri")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|entry| !entry.is_empty());
+            if web_path.is_some() || location_uri.is_some() {
+                Some(value)
+            } else {
+                None
+            }
+        })
 }
 
 fn dynamodb_json_to_value(value: &Value) -> Value {
@@ -2995,6 +3045,57 @@ mod tests {
             metadata: json!({ "previousSequenceNumber": 2, "previousContextDigest": "digest" }),
         };
         assert!(cache_is_valid_for_message(&cache, &message));
+    }
+
+    #[test]
+    fn resolve_trigger_web_ui_reads_nested_console_metadata() {
+        let metadata = json!({
+            "console": {
+                "author": { "email": "editor@example.com" },
+                "webUi": {
+                    "webPath": "/newsroom/references?status=pending",
+                    "papyrusLocationUri": "papyrus://newsroom/references/index/status/pending",
+                    "viewMode": "index"
+                }
+            }
+        });
+        let web_ui = resolve_trigger_web_ui(&metadata).expect("webUi");
+        assert_eq!(
+            web_ui.get("webPath").and_then(Value::as_str),
+            Some("/newsroom/references?status=pending")
+        );
+    }
+
+    #[test]
+    fn resolve_trigger_web_ui_parses_stringified_console_metadata() {
+        let metadata = json!({
+            "console": serde_json::to_string(&json!({
+                "author": { "email": "editor@example.com" },
+                "webUi": {
+                    "webPath": "/newsroom/messages",
+                    "papyrusLocationUri": "papyrus://newsroom/messages/index"
+                }
+            }))
+            .expect("console json")
+        });
+        let web_ui = resolve_trigger_web_ui(&metadata).expect("webUi");
+        assert_eq!(
+            web_ui.get("papyrusLocationUri").and_then(Value::as_str),
+            Some("papyrus://newsroom/messages/index")
+        );
+    }
+
+    #[test]
+    fn resolve_trigger_web_ui_rejects_empty_location_snapshot() {
+        let metadata = json!({
+            "console": {
+                "webUi": {
+                    "webPath": "",
+                    "papyrusLocationUri": ""
+                }
+            }
+        });
+        assert!(resolve_trigger_web_ui(&metadata).is_none());
     }
 
     #[test]
