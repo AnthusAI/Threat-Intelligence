@@ -525,7 +525,8 @@ def _create_find_process_direct_citations(
     from papyrus_content.catalog import assert_reference_catalog_plan_safety, build_reference_catalog_registration_records
     from papyrus_content.ids import knowledge_corpus_id
     from papyrus_content.newsroom_summary import update_newsroom_summary_after_reference_registration
-    from papyrus_content.reference_url_text import run_reference_metadata_generation_from_extracted_text, run_reference_url_text_extraction
+    from papyrus_content.reference_metadata_generation import run_reference_metadata_generation_from_extracted_text
+    from papyrus_content.reference_url_text import run_reference_url_text_extraction
     from papyrus_content.steering import resolve_classifier_for_corpus
 
     corpus_config = require_corpus_config(steering_config, corpus_key, "--corpus-key")
