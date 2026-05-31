@@ -61,7 +61,6 @@ const schema = a.schema({
     ])
     .authorization((allow) => [
       allow.group(adminGroup),
-      allow.resource(sesInboundReceive).to(["read"]),
     ]),
 
   UserRoleAssignment: a
@@ -1553,7 +1552,7 @@ const schema = a.schema({
     .authorization((allow) => [
       allow.groups(categoryWriteGroups).to(categoryAppendOnlyOperations),
       allow.custom().to(authoringOperations),
-      allow.resource(sesInboundReceive).to(["read", "create", "update"]),
+      allow.authenticated("identityPool").to(["read", "create", "update"]),
     ]),
 
   MessageThread: a
