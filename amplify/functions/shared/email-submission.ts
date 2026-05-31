@@ -145,7 +145,10 @@ export async function lookupRegisteredUserProfileId(client: LambdaDataClient, se
   if (!normalized) return null;
 
   const identityModel = client.models.UserIdentity as {
-    listUserIdentitiesByEmailAndStatus?: (input: { email: string; status?: { eq?: string } }, options?: { limit?: number }) => Promise<{ data?: Array<{ userProfileId?: string | null; status?: string | null }> | null; errors?: unknown }>;
+    listUserIdentitiesByEmailAndStatus?: (
+      input: { email: string; status?: { eq?: string } },
+      options?: { limit?: number; authMode?: typeof LAMBDA_DATA_AUTH_MODE },
+    ) => Promise<{ data?: Array<{ userProfileId?: string | null; status?: string | null }> | null; errors?: unknown }>;
   };
   if (typeof identityModel.listUserIdentitiesByEmailAndStatus === "function") {
     const response = await identityModel.listUserIdentitiesByEmailAndStatus(
