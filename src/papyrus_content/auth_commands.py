@@ -51,17 +51,54 @@ def refresh_jwt(flags: list[str]) -> None:
     print(token)
 
 
-def _read_ssm_secret(parameter_name: str) -> str:
-    command = ["aws", "ssm", "get-parameter", "--name", parameter_name, "--with-decryption", "--output", "json"]
-    result = subprocess.run(command, capture_output=True, text=True, check=False)
-    if result.returncode != 0:
-        stderr = (result.stderr or "").strip()
-        raise RuntimeError(f"Failed to read JWT secret from SSM parameter {parameter_name}: {stderr}")
-    payload = json.loads(result.stdout or "{}")
-    secret = normalize_string(((payload.get("Parameter") or {}).get("Value")))
+def _is_amplify_secret_placeholder(value: str) -> bool:
+    return bool(value) and value.startswith("<") and "will be resolved" in value
+
+
+def _read_ssm_secret_boto(parameter_name: str) -> str:
+    try:
+        import boto3
+    except ModuleNotFoundError as error:
+        raise RuntimeError("boto3 is required to read JWT secrets from SSM in Lambda.") from error
+    client = boto3.client("ssm")
+    response = client.get_parameter(Name=parameter_name, WithDecryption=True)
+    secret = normalize_string((response.get("Parameter") or {}).get("Value"))
     if not secret:
         raise RuntimeError(f"SSM parameter {parameter_name} returned no value.")
     return secret
+
+
+def _read_ssm_secret(parameter_name: str) -> str:
+    try:
+        return _read_ssm_secret_boto(parameter_name)
+    except Exception:
+        command = ["aws", "ssm", "get-parameter", "--name", parameter_name, "--with-decryption", "--output", "json"]
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        if result.returncode != 0:
+            stderr = (result.stderr or "").strip()
+            raise RuntimeError(f"Failed to read JWT secret from SSM parameter {parameter_name}: {stderr}")
+        payload = json.loads(result.stdout or "{}")
+        secret = normalize_string(((payload.get("Parameter") or {}).get("Value")))
+        if not secret:
+            raise RuntimeError(f"SSM parameter {parameter_name} returned no value.")
+        return secret
+
+
+def _resolve_amplify_ssm_secret(name: str) -> str | None:
+    raw_config = normalize_string(os.environ.get("AMPLIFY_SSM_ENV_CONFIG"))
+    if not raw_config:
+        return None
+    try:
+        config = json.loads(raw_config)
+    except json.JSONDecodeError:
+        return None
+    entry = config.get(name) if isinstance(config, dict) else None
+    if not isinstance(entry, dict):
+        return None
+    parameter_name = normalize_string(entry.get("path")) or normalize_string(entry.get("sharedPath"))
+    if not parameter_name:
+        return None
+    return _read_ssm_secret(parameter_name)
 
 
 def _resolve_secret(options: dict[str, Any]) -> str:
@@ -80,8 +117,11 @@ def _resolve_secret(options: dict[str, Any]) -> str:
         return _read_ssm_secret(ssm_param)
     for env_name in ("PAPYRUS_SANDBOX_JWT_SECRET", "PAPYRUS_JWT_SECRET"):
         value = normalize_string(os.environ.get(env_name))
-        if value:
+        if value and not _is_amplify_secret_placeholder(value):
             return value
+    amplify_secret = _resolve_amplify_ssm_secret("PAPYRUS_JWT_SECRET")
+    if amplify_secret:
+        return amplify_secret
     return _read_ssm_secret("/amplify/shared/PAPYRUS_JWT_SECRET")
 
 
