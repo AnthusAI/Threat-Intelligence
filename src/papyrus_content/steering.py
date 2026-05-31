@@ -244,3 +244,151 @@ def resolve_projection_import_corpora(config: dict[str, Any] | None, options: di
         or (knowledge_corpus_id(authority_corpus) if authority_corpus else None),
         "classifierId": options.get("classifier"),
     }
+
+
+def resolve_corpus_local_path(
+    corpus: dict[str, Any],
+    steering_config: dict[str, Any],
+    *,
+    fallback_workdir: Path | str | None = None,
+) -> Path:
+    """
+    Resolve a corpus directory from steering config.
+
+    Relative corpus paths are resolved against the steering repo root first
+    (when steering lives at ``corpora/papyrus-steering.yml``), then the
+    steering file directory, then optional fallback workdir, then Papyrus root.
+    """
+    path_value = corpus.get("path") or f"corpora/{corpus['key']}"
+    path = Path(path_value)
+    if path.is_absolute():
+        return path.resolve()
+
+    candidates: list[Path] = []
+    config_path = steering_config.get("configPath")
+    if config_path:
+        config_dir = Path(config_path).parent
+        candidates.append(config_dir / path)
+        if Path(config_path).name == "papyrus-steering.yml" and config_dir.name == "corpora":
+            candidates.append(config_dir.parent / path)
+    if fallback_workdir:
+        candidates.append(Path(fallback_workdir) / path)
+    candidates.append(PAPYRUS_ROOT / path)
+
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved.exists():
+            return resolved
+    return candidates[0].resolve() if candidates else path.resolve()
+
+
+def resolve_biblicus_runtime_dir(options: dict[str, Any] | None = None) -> Path:
+    """
+    Resolve the Biblicus project directory used to run ``uv run biblicus``.
+
+    ``--biblicus-workdir`` must point at the Biblicus repo, not a corpus checkout.
+    """
+    options = options or {}
+    configured = options.get("biblicus-workdir") or options.get("biblicusWorkdir")
+    if configured:
+        configured_path = Path(configured).resolve()
+        if looks_like_biblicus_project(configured_path):
+            return configured_path
+    sibling = PAPYRUS_ROOT.parent / "Biblicus"
+    if looks_like_biblicus_project(sibling):
+        return sibling.resolve()
+    default = Path("/Users/ryan/Projects/Biblicus")
+    if looks_like_biblicus_project(default):
+        return default.resolve()
+    raise ValueError(
+        "Could not resolve the Biblicus project directory for graph export. "
+        "Pass --biblicus-workdir <path-to-Biblicus-repo>."
+    )
+
+
+def looks_like_biblicus_project(path: Path) -> bool:
+    if not path.exists():
+        return False
+    if (path / "src" / "biblicus").is_dir():
+        return True
+    pyproject = path / "pyproject.toml"
+    if not pyproject.exists():
+        return False
+    try:
+        return "biblicus" in pyproject.read_text(encoding="utf-8", errors="ignore").lower()
+    except OSError:
+        return False
+
+
+def resolve_corpus_local_path(
+    corpus: dict[str, Any],
+    steering_config: dict[str, Any],
+    *,
+    fallback_workdir: Path | str | None = None,
+) -> Path:
+    """
+    Resolve a corpus directory from steering config.
+
+    Relative corpus paths are resolved against the steering repo root first
+    (when steering lives at ``corpora/papyrus-steering.yml``), then the
+    steering file directory, then optional fallback workdir, then Papyrus root.
+    """
+    path_value = corpus.get("path") or f"corpora/{corpus['key']}"
+    path = Path(path_value)
+    if path.is_absolute():
+        return path.resolve()
+
+    candidates: list[Path] = []
+    config_path = steering_config.get("configPath")
+    if config_path:
+        config_dir = Path(config_path).parent
+        candidates.append(config_dir / path)
+        if Path(config_path).name == "papyrus-steering.yml" and config_dir.name == "corpora":
+            candidates.append(config_dir.parent / path)
+    if fallback_workdir:
+        candidates.append(Path(fallback_workdir) / path)
+    candidates.append(PAPYRUS_ROOT / path)
+
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved.exists():
+            return resolved
+    return candidates[0].resolve() if candidates else path.resolve()
+
+
+def resolve_biblicus_runtime_dir(options: dict[str, Any] | None = None) -> Path:
+    """
+    Resolve the Biblicus project directory used to run ``uv run biblicus``.
+
+    ``--biblicus-workdir`` must point at the Biblicus repo, not a corpus checkout.
+    """
+    options = options or {}
+    configured = options.get("biblicus-workdir") or options.get("biblicusWorkdir")
+    if configured:
+        configured_path = Path(configured).resolve()
+        if looks_like_biblicus_project(configured_path):
+            return configured_path
+    sibling = PAPYRUS_ROOT.parent / "Biblicus"
+    if looks_like_biblicus_project(sibling):
+        return sibling.resolve()
+    default = Path("/Users/ryan/Projects/Biblicus")
+    if looks_like_biblicus_project(default):
+        return default.resolve()
+    raise ValueError(
+        "Could not resolve the Biblicus project directory for graph export. "
+        "Pass --biblicus-workdir <path-to-Biblicus-repo>."
+    )
+
+
+def looks_like_biblicus_project(path: Path) -> bool:
+    if not path.exists():
+        return False
+    if (path / "src" / "biblicus").is_dir():
+        return True
+    pyproject = path / "pyproject.toml"
+    if not pyproject.exists():
+        return False
+    try:
+        return "biblicus" in pyproject.read_text(encoding="utf-8", errors="ignore").lower()
+    except OSError:
+        return False
