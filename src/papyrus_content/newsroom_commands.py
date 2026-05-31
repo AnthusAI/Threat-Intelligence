@@ -1362,3 +1362,7 @@ def _print_planning_purge_plan(plan: dict[str, Any], *, mode: str) -> None:
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def now_iso() -> str:
+    return _utc_now()
