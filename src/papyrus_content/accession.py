@@ -19,6 +19,7 @@ from .catalog import semantic_relation_record
 from .corpora import build_corpus_sync_plan, run_or_print_corpus_sync_plan
 from .env import PAPYRUS_ROOT
 from .graphql_authoring import PapyrusGraphQLAuthoringClient
+from .options import normalize_string
 from .ids import deterministic_uuid, hash_short, is_uuid_string, knowledge_corpus_id, reference_lineage_id_for, safe_id
 from .model_attachments import parse_jsonish
 from .records import apply_record_changes, build_record_change_from_current, build_record_changes
@@ -217,9 +218,7 @@ def execute_reference_accession_assignment(
         raise ValueError(
             f"Assignment {assignment['id']} must be claimed before execution (current={assignment.get('status')})."
         )
-    metadata = assignment_metadata(client, assignment)
-    if metadata.get("kind") != "reference.corpus-accession.requested":
-        raise ValueError(f"Assignment {assignment['id']} metadata is not reference.corpus-accession.requested.")
+    metadata = resolve_accession_assignment_metadata(client, assignment, options)
     actor_label = options.get("actor") or options.get("assignee-key") or "papyrus-cli"
     run_id = options.get("run-id") or f"reference-accession-{hash_short([assignment['id'], _utc_now()])}"
     run_dir = Path.cwd() / ".papyrus-runs" / run_id
@@ -659,6 +658,62 @@ def reference_attachment_for_accession(reference: dict[str, Any], accession: dic
             }
         ),
     }
+
+
+def _assignment_semantic_state_key(assignment_id: str) -> str:
+    return f"assignment#{assignment_id}#current"
+
+
+def resolve_accession_assignment_metadata(
+    client: PapyrusGraphQLAuthoringClient,
+    assignment: dict[str, Any],
+    options: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    metadata = assignment_metadata(client, assignment)
+    if metadata.get("kind") == "reference.corpus-accession.requested":
+        return metadata
+
+    reference_id = normalize_string(metadata.get("referenceId"))
+    if not reference_id:
+        relations = client.list_semantic_relations_by_subject_state(_assignment_semantic_state_key(assignment["id"]))
+        for relation in relations:
+            if str(relation.get("predicate") or "") != "requests_work_on":
+                continue
+            if str(relation.get("objectKind") or "") != "reference":
+                continue
+            reference_id = normalize_string(relation.get("objectId"))
+            if reference_id:
+                break
+    if not reference_id:
+        raise ValueError(
+            f"Assignment {assignment['id']} is missing reference.corpus-accession.requested metadata and no linked Reference was found."
+        )
+
+    reference = client.get_record("Reference", reference_id)
+    if not reference:
+        raise ReferenceAccessionError(f"Reference {reference_id} was not found.", kind="missing_reference")
+
+    steering_config = load_steering_config(options.get("config") if options else None) or require_steering_config()
+    corpus_config = require_corpus_config_by_id_or_key(
+        steering_config,
+        reference["corpusId"],
+        (options or {}).get("corpus-key"),
+    )
+    corpus_id = knowledge_corpus_id(corpus_config)
+    attachments = client.list_records("ReferenceAttachment")
+    readiness = reference_source_readiness(reference, attachments, None)
+    rebuilt = reference_accession_assignment_record(
+        reference,
+        readiness,
+        corpus_config=corpus_config,
+        corpus_id=corpus_id,
+        actor_label=str((options or {}).get("assignee-key") or (options or {}).get("actor") or "papyrus-cli"),
+        now=_utc_now(),
+    )
+    rebuilt_metadata = parse_jsonish(rebuilt.get("metadata"))
+    if not isinstance(rebuilt_metadata, dict):
+        raise ValueError(f"Assignment {assignment['id']} metadata could not be reconstructed.")
+    return rebuilt_metadata
 
 
 def source_download_uri_for_reference(reference: dict[str, Any]) -> str:

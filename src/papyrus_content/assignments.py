@@ -5,17 +5,47 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .graphql_authoring import PapyrusGraphQLAuthoringClient
-from .model_attachments import build_json_model_payload_attachment, upload_attachment_body
+from .model_attachments import (
+    build_json_model_payload_attachment,
+    download_attachment_buffer,
+    parse_jsonish,
+    upload_attachment_body,
+)
 from .options import normalize_string
 
 
 def assignment_metadata(client: PapyrusGraphQLAuthoringClient, assignment: dict[str, Any]) -> dict[str, Any]:
     if isinstance(assignment.get("metadata"), str):
         try:
-            return json.loads(assignment["metadata"])
+            parsed = json.loads(assignment["metadata"])
+            if isinstance(parsed, dict) and parsed:
+                return parsed
         except json.JSONDecodeError:
-            return {}
-    return assignment.get("metadata") if isinstance(assignment.get("metadata"), dict) else {}
+            pass
+    elif isinstance(assignment.get("metadata"), dict) and assignment.get("metadata"):
+        return assignment["metadata"]
+
+    assignment_id = normalize_string(assignment.get("id"))
+    if not assignment_id:
+        return {}
+
+    attachments = client.list_by_index("modelAttachmentsByOwnerRoleAndSortKey", assignment_id, limit=20)
+    metadata_attachments = [
+        entry
+        for entry in attachments
+        if normalize_string(entry.get("role")) == "metadata"
+        and normalize_string(entry.get("status")) != "deleted"
+    ]
+    metadata_attachments.sort(key=lambda entry: str(entry.get("updatedAt") or ""), reverse=True)
+    metadata_attachments.sort(key=lambda entry: 0 if normalize_string(entry.get("sortKey")) == "metadata" else 1)
+    for attachment in metadata_attachments:
+        try:
+            payload = parse_jsonish(download_attachment_buffer(client, attachment).decode("utf-8", errors="replace"))
+        except Exception:
+            continue
+        if isinstance(payload, dict) and payload:
+            return payload
+    return {}
 
 
 def apply_assignment_action(

@@ -210,6 +210,24 @@ def expand_private_payload_records(records: list[dict[str, Any]]) -> list[dict[s
                     )
                 )
             )
+        elif record["modelName"] == "Assignment" and "metadata" in expected:
+            metadata = parse_jsonish(expected.pop("metadata"))
+            expanded.append(
+                attachment_record(
+                    build_json_model_payload_attachment(
+                        {
+                            "ownerKind": "assignment",
+                            "ownerId": expected["id"],
+                            "ownerLineageId": expected["id"],
+                            "role": "metadata",
+                            "sortKey": "metadata",
+                            "content": metadata,
+                            "importRunId": expected.get("importRunId"),
+                            "now": now,
+                        }
+                    )
+                )
+            )
         elif record["modelName"] == "KnowledgeRawPayload" and "payload" in expected:
             payload = parse_jsonish(expected.pop("payload"))
             expanded.append(
