@@ -49,15 +49,14 @@ GRAPHQL_PYTHON_COMMANDS: list[tuple[list[str], str]] = [
         ],
         "Accepted reference source readiness",
     ),
-]
-
-NODE_FALLBACK_COMMANDS: list[tuple[list[str], str]] = [
     (["assignments", "orphan-research-packets", "--json"], "Orphan research packet scan"),
     (
         ["analysis", "reindex-plan", "--profile", "canonical-topic-classifier", "--corpus-key", "AI-ML-research"],
         "Analysis reindex dry plan",
     ),
 ]
+
+NODE_FALLBACK_COMMANDS: list[tuple[list[str], str]] = []
 
 
 def _run_papyrus_content(argv: list[str]) -> subprocess.CompletedProcess[str]:
@@ -112,6 +111,8 @@ class ContentCliGraphQLLiveTests(unittest.TestCase):
                     )
 
     def test_node_fallback_commands(self) -> None:
+        if not NODE_FALLBACK_COMMANDS:
+            self.skipTest("No Node fallback commands are configured for this branch.")
         for command_argv, label in NODE_FALLBACK_COMMANDS:
             with self.subTest(label=label, command=" ".join(command_argv)):
                 result = _run_papyrus_content(command_argv)
