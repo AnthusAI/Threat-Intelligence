@@ -1,8 +1,10 @@
 import json
+import os
 import pathlib
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 SRC_ROOT = REPO_ROOT / "src"
@@ -16,7 +18,7 @@ from papyrus_content.model_attachments import build_text_model_payload_attachmen
 from papyrus_content.papyrus_config import resolve_topics_ignore_terms
 from papyrus_content.seed_edition import build_seed_edition_records, load_seed_payload, seed_edition_config
 from papyrus_content.source_readiness import reference_source_readiness
-from papyrus_content.steering import load_steering_config, require_corpus_config
+from papyrus_content.steering import load_steering_config, require_corpus_config, resolve_corpus_local_path
 
 
 class PapyrusContentTests(unittest.TestCase):
@@ -150,6 +152,51 @@ class PapyrusContentTests(unittest.TestCase):
         )
         self.assertIsNone(error)
         self.assertEqual(uri, "https://www.youtube.com/watch?v=jGwO_UgTS7I")
+
+    def test_resolve_corpus_local_path_ignores_process_cwd(self) -> None:
+        steering_config = load_steering_config("corpora/papyrus-steering.yml")
+        self.assertIsNotNone(steering_config)
+        corpus_config = require_corpus_config(steering_config, "AI-ML-research", "--corpus-key")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            previous_cwd = pathlib.Path.cwd()
+            try:
+                os.chdir(temp_dir)
+                resolved = resolve_corpus_local_path(corpus_config, steering_config)
+            finally:
+                os.chdir(previous_cwd)
+        self.assertTrue(resolved.exists())
+        self.assertIn("AI-ML-research", resolved.as_posix())
+        self.assertNotIn(temp_dir, resolved.as_posix())
+
+    @mock.patch("papyrus_content.accession.subprocess.Popen")
+    def test_run_biblicus_reindex_for_accession_streams_logs_and_raises_on_failure(self, mock_popen) -> None:
+        from papyrus_content.accession import ReferenceAccessionError, run_biblicus_reindex_for_accession
+
+        process = mock.MagicMock()
+        process.wait.return_value = 2
+        mock_popen.return_value = process
+
+        def _write_failure_logs(*_args, **_kwargs) -> mock.MagicMock:
+            stderr_log = run_dir / "biblicus-reindex.stderr.log"
+            stdout_log = run_dir / "biblicus-reindex.stdout.log"
+            stderr_log.write_text("Not a Biblicus corpus\n", encoding="utf-8")
+            stdout_log.write_text("", encoding="utf-8")
+            process = mock.MagicMock()
+            process.wait.return_value = 2
+            return process
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run_dir = pathlib.Path(temp_dir)
+            mock_popen.side_effect = _write_failure_logs
+            with self.assertRaises(ReferenceAccessionError) as error:
+                run_biblicus_reindex_for_accession(
+                    corpus_path=pathlib.Path("/tmp/example-corpus"),
+                    biblicus_workdir=pathlib.Path("/tmp/Biblicus"),
+                    run_dir=run_dir,
+                )
+        self.assertIn("exit 2", str(error.exception))
+        self.assertIn("Not a Biblicus corpus", str(error.exception))
+        mock_popen.assert_called_once()
 
     def test_source_download_uri_for_reference_uses_acm_pdf_url(self) -> None:
         from papyrus_content.accession import source_download_uri_for_reference

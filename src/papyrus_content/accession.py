@@ -5,6 +5,7 @@ import mimetypes
 import os
 import re
 import shutil
+import signal
 import subprocess
 import urllib.error
 import urllib.request
@@ -18,7 +19,6 @@ import yaml
 from .assignments import apply_assignment_action, assignment_metadata
 from .catalog import semantic_relation_record
 from .corpora import build_corpus_sync_plan, run_or_print_corpus_sync_plan
-from .env import PAPYRUS_ROOT
 from .graphql_authoring import PapyrusGraphQLAuthoringClient
 from .options import normalize_string
 from .ids import deterministic_uuid, hash_short, is_uuid_string, knowledge_corpus_id, reference_lineage_id_for, safe_id
@@ -27,7 +27,14 @@ from .records import apply_record_changes, build_record_change_from_current, bui
 from .reference_url_text import _resolve_existing_canonical_uri
 from .source_readiness import SOURCE_READINESS_STATES, is_extractable_media_type, reference_source_readiness
 from .source_site_plugins import resolve_source_site_enrichment
-from .steering import find_corpus_config, load_steering_config, require_corpus_config, require_steering_config
+from .steering import (
+    find_corpus_config,
+    load_steering_config,
+    require_corpus_config,
+    require_steering_config,
+    resolve_biblicus_runtime_dir,
+    resolve_corpus_local_path,
+)
 
 
 ASSIGNMENT_TYPE_POLICY = {
@@ -238,8 +245,8 @@ def execute_reference_accession_assignment(
     steering_config = load_steering_config(options.get("config") or metadata.get("steeringConfigPath")) or require_steering_config()
     corpus_config = require_corpus_config(steering_config, metadata["corpusKey"], "assignment.metadata.corpusKey")
     corpus_id = knowledge_corpus_id(corpus_config)
-    corpus_path = Path(corpus_config["path"]).resolve()
-    biblicus_workdir = resolve_biblicus_workdir(options)
+    corpus_path = resolve_corpus_local_path(corpus_config, steering_config)
+    biblicus_workdir = resolve_biblicus_runtime_dir(options)
 
     source_material = download_reference_source_material(
         reference,
@@ -401,24 +408,74 @@ def write_reference_source_accession(
 def run_biblicus_reindex_for_accession(*, corpus_path: Path, biblicus_workdir: Path, run_dir: Path) -> dict[str, Any]:
     stdout_log = run_dir / "biblicus-reindex.stdout.log"
     stderr_log = run_dir / "biblicus-reindex.stderr.log"
-    env = os.environ.copy()
-    env.pop("VIRTUAL_ENV", None)
-    result = subprocess.run(
-        ["uv", "run", "biblicus", "reindex", "--corpus", str(corpus_path)],
-        cwd=biblicus_workdir,
-        capture_output=True,
-        text=True,
-        check=False,
-        env=env,
-    )
-    stdout_log.write_text(result.stdout or "", encoding="utf-8")
-    stderr_log.write_text(result.stderr or "", encoding="utf-8")
-    if result.returncode != 0:
+    uv_path = shutil.which("uv")
+    if not uv_path:
         raise ReferenceAccessionError(
-            f"Biblicus reindex failed for {corpus_path}. See {stderr_log}.",
+            "Biblicus reindex requires the uv executable on PATH.",
+            kind="biblicus_reindex_failed",
+        )
+
+    resolved_corpus_path = corpus_path.resolve()
+    command = [uv_path, "run", "biblicus", "reindex", "--corpus", str(resolved_corpus_path)]
+    run_dir.mkdir(parents=True, exist_ok=True)
+    with stdout_log.open("w", encoding="utf-8") as stdout_handle, stderr_log.open("w", encoding="utf-8") as stderr_handle:
+        process = subprocess.Popen(
+            command,
+            cwd=biblicus_workdir,
+            stdout=stdout_handle,
+            stderr=stderr_handle,
+            env=_biblicus_subprocess_env(),
+            start_new_session=True,
+        )
+        returncode = process.wait()
+
+    if returncode != 0:
+        detail = _subprocess_failure_detail(stdout_log, stderr_log)
+        raise ReferenceAccessionError(
+            (
+                f"Biblicus reindex failed for {resolved_corpus_path} "
+                f"(exit {_format_subprocess_exit(returncode)}). {detail} "
+                f"See {stderr_log} and {stdout_log}."
+            ),
             kind="biblicus_reindex_failed",
         )
     return {"label": "biblicus-reindex", "stdoutLogPath": str(stdout_log), "stderrLogPath": str(stderr_log)}
+
+
+def _biblicus_subprocess_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env.pop("VIRTUAL_ENV", None)
+    path_entries = [entry for entry in str(env.get("PATH") or "").split(os.pathsep) if entry]
+    for extra in ("/opt/homebrew/bin", "/usr/local/bin"):
+        if extra not in path_entries:
+            path_entries.append(extra)
+    env["PATH"] = os.pathsep.join(path_entries)
+    return env
+
+
+def _format_subprocess_exit(returncode: int) -> str:
+    if returncode < 0:
+        signal_number = -returncode
+        signal_name = ""
+        try:
+            signal_name = signal.Signals(signal_number).name
+        except (ValueError, AttributeError):
+            signal_name = str(signal_number)
+        return f"signal {signal_name}"
+    return str(returncode)
+
+
+def _subprocess_failure_detail(stdout_log: Path, stderr_log: Path, *, max_chars: int = 400) -> str:
+    chunks: list[str] = []
+    for path in (stderr_log, stdout_log):
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace").strip()
+        if text:
+            chunks.append(text[-max_chars:])
+    if not chunks:
+        return "No subprocess output was captured."
+    return " ".join(chunk.replace("\n", " ").strip() for chunk in chunks)
 
 
 def maybe_sync_accession_to_s3(
@@ -785,13 +842,7 @@ def reference_accession_filename(*, item_id: str, source_uri: str, title: str | 
 
 
 def resolve_biblicus_workdir(options: dict[str, Any]) -> Path:
-    configured = options.get("biblicus-workdir") or options.get("biblicusWorkdir")
-    if configured:
-        return Path(configured).resolve()
-    sibling = PAPYRUS_ROOT.parent / "Biblicus"
-    if sibling.exists():
-        return sibling.resolve()
-    raise ValueError("Could not resolve Biblicus workdir. Pass --biblicus-workdir <path>.")
+    return resolve_biblicus_runtime_dir(options)
 
 
 class ReferenceAccessionError(RuntimeError):
