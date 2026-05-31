@@ -831,6 +831,7 @@ HELPER_BINDINGS: tuple[tuple[str, str, str], ...] = (
     ("resolve_papyrus_uri", "papyrus", "resolve_uri"),
     ("web_current_location", "web", "current_location"),
     ("web_navigate", "web", "navigate"),
+    ("web_set_index_filters", "web", "set_index_filters"),
     ("recent_published_articles", "article", "recent_published"),
     ("biblicus_steering_artifacts", "biblicus", "steering_artifacts"),
     ("biblicus_topic_context", "biblicus", "topic_context"),
@@ -858,7 +859,7 @@ class PapyrusRuntimeModule:
         methods_by_namespace: dict[str, set[str]] = {}
         for namespace, method in API_METHODS:
             methods_by_namespace.setdefault(namespace, set()).add(method)
-        methods_by_namespace.setdefault("web", set()).update({"current_location", "navigate"})
+        methods_by_namespace.setdefault("web", set()).update({"current_location", "navigate", "set_index_filters"})
         for namespace, methods in methods_by_namespace.items():
             if namespace != "papyrus":
                 setattr(self, namespace, _Namespace(self._call, namespace, methods))
@@ -913,6 +914,37 @@ class PapyrusRuntimeModule:
                     "webPath": mapped["webPath"],
                     "replace": replace,
                 },
+                "previousLocation": dict(self._web_ui_context),
+                "requestedUri": uri,
+            }
+        if method == "set_index_filters":
+            from papyrus_web.locations import _build_index_location_uri, _effective_index_filters
+
+            tab = str(args.get("tab") or args.get("desk") or "").strip()
+            if tab not in {"references", "messages", "assignments"}:
+                raise ValueError("papyrus.web.set_index_filters requires tab = references|messages|assignments")
+            filters = _effective_index_filters(
+                tab,
+                {
+                    "status": str(args.get("status") or ""),
+                    "processing": str(args.get("processing") or ""),
+                    "kind": str(args.get("kind") or ""),
+                    "domain": str(args.get("domain") or ""),
+                    "type": str(args.get("type") or ""),
+                    "view": str(args.get("view") or ""),
+                },
+            )
+            uri = _build_index_location_uri(tab, filters)
+            mapped = papyrus_uri_to_web_path(uri)
+            replace = bool(args.get("replace") or args.get("replaceHistory") or False)
+            return {
+                "ok": True,
+                "navigation": {
+                    "papyrusLocationUri": mapped["papyrusLocationUri"],
+                    "webPath": mapped["webPath"],
+                    "replace": replace,
+                },
+                "indexFilters": filters,
                 "previousLocation": dict(self._web_ui_context),
                 "requestedUri": uri,
             }

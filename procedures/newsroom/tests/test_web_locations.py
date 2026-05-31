@@ -15,13 +15,13 @@ class WebLocationTests(unittest.TestCase):
     def test_web_path_maps_newsroom_tabs_and_object_details(self):
         cases = [
             ("/newsroom", "papyrus://newsroom/overview"),
-            ("/newsroom/references", "papyrus://newsroom/references"),
+            ("/newsroom/references", "papyrus://newsroom/references/index"),
             ("/newsroom/references/reference-1", "papyrus://reference/reference-1"),
             ("/newsroom/messages/message-1", "papyrus://message/message-1"),
             ("/newsroom/assignments/assignment-1", "papyrus://assignment/assignment-1"),
             ("/newsroom/topics?category=category-1", "papyrus://category/category-1"),
             ("/newsroom/concepts?node=node-1", "papyrus://semanticNode/node-1"),
-            ("/newsroom/assignments?view=budget", "papyrus://newsroom/assignments/budget"),
+            ("/newsroom/assignments?view=budget", "papyrus://newsroom/assignments/index/view/budget"),
             ("/newsroom/administration/users", "papyrus://newsroom/administration/users"),
         ]
         for web_path, expected_uri in cases:
@@ -37,6 +37,7 @@ class WebLocationTests(unittest.TestCase):
             ("papyrus://category/category-1", "/newsroom/topics?category=category-1"),
             ("papyrus://semanticNode/node-1", "/newsroom/concepts?node=node-1"),
             ("papyrus://newsroom/assignments/budget", "/newsroom/assignments?view=budget"),
+            ("papyrus://newsroom/references/index/status/pending", "/newsroom/references?status=pending"),
         ]
         for uri, expected_path in cases:
             with self.subTest(uri=uri):
@@ -60,6 +61,27 @@ class WebLocationTests(unittest.TestCase):
         self.assertEqual(navigation["papyrusLocationUri"], "papyrus://reference/reference-2")
         self.assertEqual(navigation["webPath"], "/newsroom/references/reference-2")
         self.assertIn("papyrus.web.navigate", result["api_calls"])
+
+    def test_index_page_maps_filters_in_uri_and_web_path(self):
+        location = web_path_to_papyrus_location("/newsroom/references?status=pending&processing=processed")
+        self.assertEqual(location["viewMode"], "index")
+        self.assertEqual(location["indexFilters"]["status"], "pending")
+        self.assertEqual(location["indexFilters"]["processing"], "processed")
+        self.assertIn("/index/", location["papyrusLocationUri"])
+
+        mapped = papyrus_uri_to_web_path("papyrus://newsroom/messages/index/kind/insight")
+        self.assertEqual(mapped["webPath"], "/newsroom/messages?kind=insight")
+        self.assertEqual(mapped["viewMode"], "index")
+        self.assertEqual(mapped["indexFilters"]["kind"], "insight")
+
+    def test_execute_tactus_set_index_filters_navigates_to_filtered_index(self):
+        result = tactus_runtime.execute_tactus(
+            'return papyrus.web.set_index_filters{ tab = "references", status = "pending" }'
+        )
+        self.assertTrue(result["ok"], result.get("error"))
+        navigation = result["value"]["navigation"]
+        self.assertEqual(navigation["webPath"], "/newsroom/references?status=pending")
+        self.assertIn("papyrus://newsroom/references/index/status/pending", navigation["papyrusLocationUri"])
 
     def test_execute_tactus_web_current_location_reads_harness_snapshot(self):
         web_ui = build_web_ui_context("/newsroom/assignments/assignment-9")

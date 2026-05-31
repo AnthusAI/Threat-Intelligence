@@ -2266,8 +2266,28 @@ fn build_openai_messages(
             {
                 lines.push(format!("- label: {label}"));
             }
+            if let Some(view_mode) = web_ui
+                .get("viewMode")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|entry| !entry.is_empty())
+            {
+                lines.push(format!("- view_mode: {view_mode}"));
+            }
+            if let Some(index_filters) = web_ui.get("indexFilters").and_then(Value::as_object) {
+                if !index_filters.is_empty() {
+                    lines.push("- index_filters:".to_string());
+                    for (key, value) in index_filters {
+                        if let Some(text) = value.as_str() {
+                            if !text.trim().is_empty() {
+                                lines.push(format!("  - {key}: {text}"));
+                            }
+                        }
+                    }
+                }
+            }
             lines.push(
-                "Use execute_tactus with papyrus.web.current_location{} to re-read this snapshot and papyrus.web.navigate{ uri = \"papyrus://...\" } to move the editor's browser to another Papyrus location.".to_string(),
+                "Use execute_tactus with papyrus.web.current_location{} to re-read this snapshot, papyrus.web.navigate{ uri = \"papyrus://...\" } to move the browser, and papyrus.web.set_index_filters{ tab = \"references\", status = \"pending\" } (or kind/domain/type) to open a filtered index view.".to_string(),
             );
             messages.push(json!({
                 "role": "system",

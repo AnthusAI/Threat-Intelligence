@@ -1,10 +1,22 @@
 import { PAPYRUS_OBJECT_KINDS, type PapyrusObjectKind } from "./papyrus-object-kinds";
+import {
+  buildNewsroomIndexWebPath,
+  effectiveAssignmentsIndexFilters,
+  effectiveMessagesIndexFilters,
+  effectiveReferencesIndexFilters,
+  type AssignmentsIndexFilters,
+  type MessagesIndexFilters,
+  type NewsroomIndexTab,
+  type ReferencesIndexFilters,
+} from "./newsroom-index-filters";
 
 export type PapyrusWebUiContext = {
   webPath: string;
   papyrusLocationUri: string;
   papyrusObjectUri?: string | null;
   newsroomTab?: string | null;
+  viewMode?: "index" | "detail" | null;
+  indexFilters?: Record<string, string> | null;
   label?: string | null;
 };
 
@@ -27,6 +39,8 @@ export function buildWebUiContext(webPath: string): PapyrusWebUiContext {
     papyrusLocationUri: location.papyrusLocationUri,
     papyrusObjectUri: location.papyrusObjectUri ?? null,
     newsroomTab: location.newsroomTab ?? null,
+    viewMode: location.viewMode ?? null,
+    indexFilters: location.indexFilters ?? null,
     label: location.label ?? null,
   };
 }
@@ -104,11 +118,8 @@ export function webPathToPapyrusLocation(webPath: string): PapyrusWebUiContext {
     });
   }
 
-  if (tab === "assignments" && url.searchParams.get("view") === "budget") {
-    return location("papyrus://newsroom/assignments/budget", normalized, {
-      newsroomTab: "assignments",
-      label: "Newsroom assignments budget view",
-    });
+  if ((tab === "references" || tab === "messages" || tab === "assignments") && segments.length === 2) {
+    return newsroomIndexLocation(tab as NewsroomIndexTab, normalized, url.searchParams);
   }
 
   if ((tab === "references" || tab === "messages" || tab === "assignments") && segments[2]) {
@@ -118,6 +129,7 @@ export function webPathToPapyrusLocation(webPath: string): PapyrusWebUiContext {
     return location(objectUri, normalized, {
       papyrusObjectUri: objectUri,
       newsroomTab: tab,
+      viewMode: "detail",
       label: `${kind} ${objectId}`,
     });
   }
@@ -198,7 +210,19 @@ export function papyrusUriToWebPath(uri: string): { ok: true; webPath: string; p
   }
 
   if (id === "overview") return { ok: true, papyrusLocationUri: raw, webPath: "/newsroom" };
-  if (id === "assignments/budget") return { ok: true, papyrusLocationUri: raw, webPath: "/newsroom/assignments?view=budget" };
+  if (id === "assignments/budget") {
+    return {
+      ok: true,
+      papyrusLocationUri: raw,
+      webPath: "/newsroom/assignments?view=budget",
+      viewMode: "index",
+      indexFilters: { view: "budget" },
+    };
+  }
+
+  const indexMapped = newsroomIndexUriToWebPath(raw, id);
+  if (indexMapped) return indexMapped;
+
   if (id === "search") return { ok: true, papyrusLocationUri: raw, webPath: "/newsroom/search" };
 
   if (id.startsWith("search/")) {
@@ -228,6 +252,10 @@ export function papyrusUriToWebPath(uri: string): { ok: true; webPath: string; p
   }
 
   if (NEWSROOM_TAB_IDS.has(id)) {
+    if (id === "references" || id === "messages" || id === "assignments") {
+      const mapped = newsroomIndexUriToWebPath(raw, `${id}/index`);
+      if (mapped) return mapped;
+    }
     return { ok: true, papyrusLocationUri: raw, webPath: id === "overview" ? "/newsroom" : `/newsroom/${id}` };
   }
 
@@ -263,8 +291,94 @@ function location(
     papyrusLocationUri,
     papyrusObjectUri: extras?.papyrusObjectUri ?? null,
     newsroomTab: extras?.newsroomTab ?? null,
+    viewMode: extras?.viewMode ?? null,
+    indexFilters: extras?.indexFilters ?? null,
     label: extras?.label ?? null,
   };
+}
+
+function newsroomIndexLocation(tab: NewsroomIndexTab, webPath: string, searchParams: URLSearchParams): PapyrusWebUiContext {
+  const filters = readIndexFiltersFromSearchParams(tab, searchParams);
+  const locationUri = buildNewsroomIndexLocationUri(tab, filters);
+  const label = [`Newsroom ${tab} index`, ...Object.entries(filters).filter(([, value]) => value).map(([key, value]) => `${key}=${value}`)].join(" ");
+  return location(locationUri, webPath, {
+    newsroomTab: tab,
+    viewMode: "index",
+    indexFilters: filters,
+    label,
+  });
+}
+
+function readIndexFiltersFromSearchParams(tab: NewsroomIndexTab, searchParams: URLSearchParams): Record<string, string> {
+  if (tab === "references") return effectiveReferencesIndexFilters({
+    status: searchParams.get("status")?.trim() || undefined,
+    processing: searchParams.get("processing")?.trim() ?? undefined,
+  });
+  if (tab === "messages") return effectiveMessagesIndexFilters({
+    kind: searchParams.get("kind")?.trim() ?? undefined,
+    domain: searchParams.get("domain")?.trim() ?? undefined,
+  });
+  return effectiveAssignmentsIndexFilters({
+    status: searchParams.get("status")?.trim() ?? undefined,
+    type: searchParams.get("type")?.trim() ?? undefined,
+    view: searchParams.get("view")?.trim() ?? undefined,
+  });
+}
+
+function buildNewsroomIndexLocationUri(tab: NewsroomIndexTab, filters: Record<string, string>): string {
+  const segments = [tab, "index"];
+  if (tab === "references") {
+    const normalized = filters as ReferencesIndexFilters;
+    if (normalized.status && normalized.status !== "exclude-pending") segments.push("status", normalized.status);
+    if (normalized.processing?.trim()) segments.push("processing", normalized.processing.trim());
+  } else if (tab === "messages") {
+    const normalized = filters as MessagesIndexFilters;
+    if (normalized.kind?.trim()) segments.push("kind", normalized.kind.trim());
+    if (normalized.domain?.trim()) segments.push("domain", normalized.domain.trim());
+  } else {
+    const normalized = filters as AssignmentsIndexFilters;
+    if (normalized.status?.trim()) segments.push("status", normalized.status.trim());
+    if (normalized.type?.trim()) segments.push("type", normalized.type.trim());
+    if (normalized.view === "budget") segments.push("view", "budget");
+  }
+  return `papyrus://newsroom/${segments.map((segment) => encodeURIComponent(segment)).join("/")}`;
+}
+
+function newsroomIndexUriToWebPath(
+  papyrusLocationUri: string,
+  objectId: string,
+): { ok: true; webPath: string; papyrusLocationUri: string; viewMode: "index"; indexFilters: Record<string, string> } | null {
+  const parsed = parseIndexUriTail(objectId);
+  if (!parsed) return null;
+  const { tab, filters } = parsed;
+  return {
+    ok: true,
+    papyrusLocationUri,
+    webPath: buildNewsroomIndexWebPath(tab, filters as ReferencesIndexFilters & MessagesIndexFilters & AssignmentsIndexFilters),
+    viewMode: "index",
+    indexFilters: filters,
+  };
+}
+
+function parseIndexUriTail(objectId: string): { tab: NewsroomIndexTab; filters: Record<string, string> } | null {
+  const segments = objectId.split("/").filter(Boolean);
+  if (!segments.length) return null;
+  const tab = segments[0];
+  if (tab !== "references" && tab !== "messages" && tab !== "assignments") return null;
+  if (segments.length === 1) {
+    return { tab, filters: readIndexFiltersFromSearchParams(tab, new URLSearchParams()) };
+  }
+  if (segments[1] === "budget" && tab === "assignments") {
+    return { tab, filters: effectiveAssignmentsIndexFilters({ view: "budget" }) };
+  }
+  if (segments[1] !== "index") return null;
+  const filters: Record<string, string> = {};
+  for (let index = 2; index + 1 < segments.length; index += 2) {
+    filters[segments[index]] = decodeURIComponent(segments[index + 1]);
+  }
+  if (tab === "references") return { tab, filters: effectiveReferencesIndexFilters(filters) };
+  if (tab === "messages") return { tab, filters: effectiveMessagesIndexFilters(filters) };
+  return { tab, filters: effectiveAssignmentsIndexFilters(filters) };
 }
 
 function normalizeWebPath(webPath: string): string {

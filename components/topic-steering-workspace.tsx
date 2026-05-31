@@ -50,6 +50,17 @@ import {
   type NewsroomRecordPage,
 } from "./news-desk-taxonomy-client";
 import { listConsoleThreads } from "../lib/console-chat-client";
+import {
+  effectiveAssignmentsIndexFilters,
+  effectiveMessagesIndexFilters,
+  effectiveReferencesIndexFilters,
+  readAssignmentsIndexFilters,
+  readMessagesIndexFilters,
+  readReferencesIndexFilters,
+  referencesStatusFromUrl,
+  referencesStatusToUrl,
+  syncBrowserNewsroomIndexUrl,
+} from "../lib/newsroom-index-filters";
 import { buildNewsroomKnowledgeQueryInput, type NewsroomKnowledgeQueryAnchor as KnowledgeQueryAnchor, type NewsroomKnowledgeQueryTarget as KnowledgeQueryTarget } from "../lib/newsroom-knowledge-query-request";
 import { NewsroomConsoleProgressToggle, PapyrusConsoleChatIcon, usePapyrusConsole } from "./papyrus-console-shell";
 import { useResolvedPapyrusTheme } from "./use-resolved-papyrus-theme";
@@ -7165,12 +7176,33 @@ function ReferencesDeskView({
   summary?: NewsroomSummaryRecord | null;
 }) {
   const consoleContext = usePapyrusConsole();
-  const [statusFilter, setStatusFilter] = useState("__exclude_pending");
-  const [processingFilter, setProcessingFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState(() => {
+    if (typeof window === "undefined") return "__exclude_pending";
+    return referencesStatusFromUrl(readReferencesIndexFilters(new URLSearchParams(window.location.search)).status);
+  });
+  const [processingFilter, setProcessingFilter] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return readReferencesIndexFilters(new URLSearchParams(window.location.search)).processing;
+  });
   const [selectedReferenceLineageId, setSelectedReferenceLineageId] = useState(initialReferenceLineageId ?? "");
   const [isReferenceDetailOpen, setIsReferenceDetailOpen] = useState(Boolean(initialReferenceLineageId));
   const categoryContext = useMemo(() => buildCategoryDrilldownContext(categories, initialCategoryLineageId), [categories, initialCategoryLineageId]);
   const statusFilterValue = statusFilter === "__exclude_pending" ? "" : statusFilter;
+  const syncReferencesIndexUrl = useCallback((nextStatus: string, nextProcessing: string, replace = true) => {
+    if (categoryContext.primary || isDemo) return;
+    syncBrowserNewsroomIndexUrl(
+      "references",
+      effectiveReferencesIndexFilters({
+        status: referencesStatusToUrl(nextStatus),
+        processing: nextProcessing,
+      }),
+      { replace },
+    );
+  }, [categoryContext.primary, isDemo]);
+  useEffect(() => {
+    if (categoryContext.primary || isDemo || isReferenceDetailOpen) return;
+    syncReferencesIndexUrl(statusFilter, processingFilter, true);
+  }, [categoryContext.primary, isDemo, isReferenceDetailOpen, processingFilter, statusFilter, syncReferencesIndexUrl]);
   const feed = useNewsroomPagedRows({
     initialItems: references,
     enabled: !isDemo && !categoryContext.primary,
@@ -7385,15 +7417,24 @@ function ReferencesDeskView({
               hasMore={!isDemo && !categoryFilter && feed.hasMore}
               isLoading={!isDemo && !categoryFilter && feed.isLoading}
               isLoadingMore={feed.isLoadingMore}
-              onFilterChange={setStatusFilter}
+              onFilterChange={(value) => {
+                setStatusFilter(value);
+                syncReferencesIndexUrl(value, processingFilter, true);
+              }}
               onLoadMore={feed.loadMore}
-              onMetricChange={setProcessingFilter}
+              onMetricChange={(value) => {
+                setProcessingFilter(value);
+                syncReferencesIndexUrl(statusFilter, value, true);
+              }}
               onSelect={selectReference}
               selectedId={selectedLineageId}
             />
           </section>
         )}
-        onCloseDetail={() => setIsReferenceDetailOpen(false)}
+        onCloseDetail={() => {
+          setIsReferenceDetailOpen(false);
+          syncReferencesIndexUrl(statusFilter, processingFilter, true);
+        }}
         detail={(
           <ReferenceDetailPanel
             categories={categories}
@@ -7467,8 +7508,15 @@ function MessagesDeskView({
   const resolvedInitialForumThreadId = initialForumThreadId
     ?? (isForumThreadId(initialMessageId) ? initialMessageId : null);
   const forumMessageAnchorId = useForumMessageAnchorId();
-  const [kindFilter, setKindFilter] = useState(resolvedInitialForumThreadId ? "__forum" : "");
-  const [domainFilter, setDomainFilter] = useState("");
+  const [kindFilter, setKindFilter] = useState(() => {
+    if (resolvedInitialForumThreadId) return "__forum";
+    if (typeof window === "undefined") return "";
+    return readMessagesIndexFilters(new URLSearchParams(window.location.search)).kind;
+  });
+  const [domainFilter, setDomainFilter] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return readMessagesIndexFilters(new URLSearchParams(window.location.search)).domain;
+  });
   const [selectedMessageId, setSelectedMessageId] = useState(initialMessageId ?? "");
   const [isMessageDetailOpen, setIsMessageDetailOpen] = useState(Boolean(initialMessageId));
   const [consoleThreads, setConsoleThreads] = useState<ConsoleThreadSummary[]>([]);
@@ -7492,6 +7540,18 @@ function MessagesDeskView({
   const [deletingForumMessageId, setDeletingForumMessageId] = useState("");
   const messageKind = kindFilter === "__chat_detail" ? "console_chat_turn" : kindFilter;
   const isForumMode = kindFilter === "__forum";
+  const syncMessagesIndexUrl = useCallback((nextKind: string, nextDomain: string, replace = true) => {
+    if (isDemo || isForumMode || isMessageDetailOpen) return;
+    syncBrowserNewsroomIndexUrl(
+      "messages",
+      effectiveMessagesIndexFilters({ kind: nextKind, domain: nextDomain }),
+      { replace },
+    );
+  }, [isDemo, isForumMode, isMessageDetailOpen]);
+  useEffect(() => {
+    if (isDemo || isForumMode || isMessageDetailOpen) return;
+    syncMessagesIndexUrl(kindFilter, domainFilter, true);
+  }, [domainFilter, isDemo, isForumMode, isMessageDetailOpen, kindFilter, syncMessagesIndexUrl]);
   const feed = useNewsroomPagedRows({
     initialItems: messages,
     enabled: !isDemo && kindFilter !== "__chat_sessions" && !isForumMode,
@@ -7926,9 +7986,15 @@ function MessagesDeskView({
                 footerLabel={consoleThreadsError ?? feed.error ?? undefined}
                 hasMore={!isDemo && kindFilter !== "__chat_sessions" && feed.hasMore}
                 isLoadingMore={feed.isLoadingMore}
-                onFilterChange={setKindFilter}
+                onFilterChange={(value) => {
+                  setKindFilter(value);
+                  syncMessagesIndexUrl(value, domainFilter, true);
+                }}
                 onLoadMore={feed.loadMore}
-                onMetricChange={setDomainFilter}
+                onMetricChange={(value) => {
+                  setDomainFilter(value);
+                  syncMessagesIndexUrl(kindFilter, value, true);
+                }}
                 onSelect={selectMessage}
                 selectedId={selectedMessage?.id ?? null}
               />
@@ -7941,6 +8007,7 @@ function MessagesDeskView({
             return;
           }
           setIsMessageDetailOpen(false);
+          syncMessagesIndexUrl(kindFilter, domainFilter, true);
         }}
         detail={isForumMode ? (
           (forumView.mode === "thread" && selectedForumThread ? (
@@ -12541,14 +12608,53 @@ function AssignmentDeskView({
   onCreateAnalysisReindexAssignment: (profile: AnalysisProfileSummary, draft: AnalysisReindexDraft) => void;
   onReviewReportingPacket: (assignment: AssignmentRecord, packet: AssignmentResearchPacketSummary, decision: ReportingPacketReviewDecision, note?: string, targetItemId?: string) => void;
 }) {
-  const [assignmentTypeFilter, setAssignmentTypeFilter] = useState("");
-  const [assignmentStatusFilter, setAssignmentStatusFilter] = useState("");
+  const [assignmentTypeFilter, setAssignmentTypeFilter] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return readAssignmentsIndexFilters(new URLSearchParams(window.location.search)).type;
+  });
+  const [assignmentStatusFilter, setAssignmentStatusFilter] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return readAssignmentsIndexFilters(new URLSearchParams(window.location.search)).status;
+  });
   const [isCreateAssignmentOpen, setIsCreateAssignmentOpen] = useState(false);
   const [selectedAssignmentId, setSelectedAssignmentId] = useState(initialAssignmentId ?? "");
   const [isAssignmentDetailOpen, setIsAssignmentDetailOpen] = useState(Boolean(initialAssignmentId));
-  const [assignmentDeskView, setAssignmentDeskView] = useState<AssignmentDeskViewMode>(initialView === "budget" ? "budget" : "queue");
+  const [assignmentDeskView, setAssignmentDeskView] = useState<AssignmentDeskViewMode>(() => {
+    if (initialView === "budget") return "budget";
+    if (typeof window === "undefined") return "queue";
+    const view = readAssignmentsIndexFilters(new URLSearchParams(window.location.search)).view;
+    return view === "budget" ? "budget" : "queue";
+  });
   const [assignmentActionNote, setAssignmentActionNote] = useState("");
   const [reportingMergeTargetItemId, setReportingMergeTargetItemId] = useState("");
+  const syncAssignmentsIndexUrl = useCallback((
+    nextStatus: string,
+    nextType: string,
+    nextView: AssignmentDeskViewMode,
+    replace = true,
+  ) => {
+    if (isDemo || isAssignmentDetailOpen) return;
+    syncBrowserNewsroomIndexUrl(
+      "assignments",
+      effectiveAssignmentsIndexFilters({
+        status: nextStatus,
+        type: nextType,
+        view: nextView,
+      }),
+      { replace },
+    );
+  }, [isAssignmentDetailOpen, isDemo]);
+  useEffect(() => {
+    if (isDemo || isAssignmentDetailOpen || assignmentDeskView === "budget") return;
+    syncAssignmentsIndexUrl(assignmentStatusFilter, assignmentTypeFilter, assignmentDeskView, true);
+  }, [
+    assignmentDeskView,
+    assignmentStatusFilter,
+    assignmentTypeFilter,
+    isAssignmentDetailOpen,
+    isDemo,
+    syncAssignmentsIndexUrl,
+  ]);
   const feed = useNewsroomPagedRows({
     initialItems: assignments,
     enabled: !isDemo,
@@ -12616,10 +12722,16 @@ function AssignmentDeskView({
   };
   const selectAssignmentDeskView = (view: AssignmentDeskViewMode) => {
     setAssignmentDeskView(view);
-    if (typeof window !== "undefined") {
-      const url = view === "budget" ? "/newsroom/assignments?view=budget" : "/newsroom/assignments";
-      if (`${window.location.pathname}${window.location.search}` !== url) window.history.pushState(null, "", url);
-    }
+    if (typeof window === "undefined" || isDemo) return;
+    syncBrowserNewsroomIndexUrl(
+      "assignments",
+      effectiveAssignmentsIndexFilters({
+        status: assignmentStatusFilter,
+        type: assignmentTypeFilter,
+        view,
+      }),
+      { replace: true },
+    );
   };
   const runStoryBudgetReviewAction = (candidate: ReportingStoryBudgetCandidate, decision: ReportingPacketReviewDecision) => {
     const assignment = assignments.find((entry) => entry.id === candidate.assignmentId);
@@ -12812,13 +12924,22 @@ function AssignmentDeskView({
                 hasMore={!isDemo && feed.hasMore}
                 isLoadingMore={feed.isLoadingMore}
                 onLoadMore={feed.loadMore}
-                onStatusChange={setAssignmentStatusFilter}
-                onTypeChange={setAssignmentTypeFilter}
+                onStatusChange={(value) => {
+                  setAssignmentStatusFilter(value);
+                  syncAssignmentsIndexUrl(value, assignmentTypeFilter, assignmentDeskView, true);
+                }}
+                onTypeChange={(value) => {
+                  setAssignmentTypeFilter(value);
+                  syncAssignmentsIndexUrl(assignmentStatusFilter, value, assignmentDeskView, true);
+                }}
               />
             )}
           </section>
         )}
-        onCloseDetail={() => setIsAssignmentDetailOpen(false)}
+        onCloseDetail={() => {
+          setIsAssignmentDetailOpen(false);
+          syncAssignmentsIndexUrl(assignmentStatusFilter, assignmentTypeFilter, assignmentDeskView, true);
+        }}
         detail={selectedAssignment ? (
           <AssignmentRow
             assignment={selectedAssignment}
