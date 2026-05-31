@@ -43,6 +43,7 @@ EXTRACTABLE_MEDIA_TYPES = {
     "audio/webm",
     "video/mp4",
     "video/webm",
+    "video/youtube",
 }
 
 

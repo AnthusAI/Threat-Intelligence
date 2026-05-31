@@ -179,6 +179,18 @@ extraction for accessioned sources and registers snapshot-backed text artifacts 
 `ReferenceAttachment` rows. Neither workflow stores raw source bytes or
 extracted text in DynamoDB.
 
+YouTube references (`video/youtube`, `youtu.be`, `watch?v=`) skip PDF accession.
+Use `references process-fetch-url-text` to pull transcript markdown via
+Biblicus/MarkItDown. Caption fetches can hit YouTube rate limits; Biblicus retries
+with long exponential backoff (default up to one hour). Tune with:
+
+- `BIBLICUS_YOUTUBE_TRANSCRIPT_MAX_WAIT_SECONDS` (default `3600`)
+- `BIBLICUS_YOUTUBE_TRANSCRIPT_INITIAL_BACKOFF_SECONDS` (default `30`)
+- `BIBLICUS_YOUTUBE_TRANSCRIPT_MAX_BACKOFF_SECONDS` (default `300`)
+
+After the first failed attempt, retries call `youtube-transcript-api` directly
+instead of re-running MarkItDown, to reduce duplicate caption requests.
+
 ## Research Packet Intake Path
 
 For normal agent-discovered sources, do not hand-build a catalog. Convert the

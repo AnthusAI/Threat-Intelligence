@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .ids import hash_short, knowledge_corpus_id, reference_lineage_id_for, safe_id
+from .source_site_plugins import youtube_video_id_from_uri
 from .message_contract import build_canonical_message_expected
 from .reference_policy import (
     normalize_reference_curation_status,
@@ -22,6 +23,48 @@ def catalog_items(catalog: dict[str, Any]) -> list[dict[str, Any]]:
     return []
 
 
+def catalog_external_item_id_for(item: dict[str, Any]) -> str | None:
+    existing = _string_or_null(item.get("item_id") or item.get("externalItemId") or item.get("id"))
+    if existing:
+        return existing
+    metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    source_uri = _string_or_null(
+        item.get("source_uri")
+        or item.get("sourceUri")
+        or metadata.get("source_uri")
+        or metadata.get("sourceUri")
+        or item.get("url")
+        or item.get("uri")
+    )
+    if not source_uri:
+        return None
+    video_id = youtube_video_id_from_uri(source_uri)
+    if video_id:
+        return f"yt-{safe_id(video_id)}"
+    return f"url-ref-{hash_short(source_uri)}"
+
+
+def catalog_item_with_external_item_id(item: dict[str, Any]) -> dict[str, Any]:
+    item_id = catalog_external_item_id_for(item)
+    if not item_id:
+        return item
+    enriched = {**item, "item_id": item_id}
+    if not enriched.get("id"):
+        enriched["id"] = item_id
+    metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    source_uri = _string_or_null(
+        item.get("source_uri")
+        or item.get("sourceUri")
+        or metadata.get("source_uri")
+        or metadata.get("sourceUri")
+    )
+    if source_uri and youtube_video_id_from_uri(source_uri):
+        media_type = _string_or_null(item.get("media_type") or item.get("mediaType"))
+        if not media_type:
+            enriched["media_type"] = "video/youtube"
+    return enriched
+
+
 def build_prepared_reference_catalog(catalog: dict[str, Any], options: dict[str, Any]) -> dict[str, Any]:
     corpus_key = options.get("corpusKey") or (options.get("corpusConfig") or {}).get("key") or (catalog.get("corpus") or {}).get("key")
     publication_name = options.get("publicationName") or "the publication"
@@ -29,6 +72,7 @@ def build_prepared_reference_catalog(catalog: dict[str, Any], options: dict[str,
     prepared_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
     def prepare_item(item: dict[str, Any]) -> dict[str, Any]:
+        item = catalog_item_with_external_item_id(item)
         if ingestion_rationale_from(item):
             return item
         metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}

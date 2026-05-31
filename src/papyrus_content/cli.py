@@ -733,7 +733,9 @@ def references_make_catalog(flags: list[str]) -> None:
                 continue
             seen.add(url)
             before = line.split(url, 1)[0].strip(" \t>-*0123456789.:—")
-            items.append({"source_uri": url, "title": before or None})
+            items.append(
+                catalog_item_with_external_item_id({"source_uri": url, "title": before or None})
+            )
     catalog = {"schema_version": 1, "items": items}
     Path(options["output"]).write_text(json.dumps(catalog, indent=2) + "\n", encoding="utf-8")
     print(f"references\tmake-catalog\t{len(items)}\t{options['output']}")

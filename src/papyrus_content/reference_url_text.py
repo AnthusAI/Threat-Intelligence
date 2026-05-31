@@ -17,7 +17,11 @@ from .env import BIBLICUS_ROOT, load_amplify_outputs, storage_bucket_from_amplif
 from .ids import hash_short, reference_lineage_id_for, semantic_node_lineage_id_for, safe_id
 from .model_defaults import DEFAULT_REFERENCE_FILTER_MODEL
 from .relation_types import semantic_relation_type_fields_for_predicate
-from .source_site_plugins import resolve_accessible_pdf_url_for_reference, resolve_source_site_enrichment
+from .source_site_plugins import (
+    resolve_accessible_pdf_url_for_reference,
+    resolve_source_site_enrichment,
+    youtube_video_id_from_uri,
+)
 from .source_readiness import (
     select_reference_attachment_by_role,
     select_extracted_text_attachment,
@@ -210,6 +214,10 @@ def build_reference_url_text_attachment_plans(
                 source_uri=extraction_source_uri,
                 extracted=extracted,
             )
+            is_youtube_source = _should_passthrough_youtube_content(
+                source_uri=extraction_source_uri,
+                extracted=extracted,
+            )
             publication_date_resolution = _resolve_pdf_publication_date_resolution(
                 reference=reference,
                 extracted=extracted,
@@ -285,6 +293,27 @@ def build_reference_url_text_attachment_plans(
                     "retryLastCode": None,
                     "agenticLoop": {
                         "version": "pdf-pass-through-v1",
+                        "rounds_used": 0,
+                        "actions": [],
+                    },
+                    "error": None,
+                }
+            elif is_youtube_source:
+                filter_result = {
+                    "status": "ok",
+                    "text": raw_text,
+                    "spanCount": 1,
+                    "promptVersion": "youtube-pass-through-v1",
+                    "model": "passthrough",
+                    "warnings": [
+                        "YouTube source detected; skipped article-style filtering and kept MarkItDown transcript markdown."
+                    ],
+                    "retryTrace": [],
+                    "retryFailureCount": 0,
+                    "retryRoundsUsed": 0,
+                    "retryLastCode": None,
+                    "agenticLoop": {
+                        "version": "youtube-pass-through-v1",
                         "rounds_used": 0,
                         "actions": [],
                     },
@@ -2287,6 +2316,16 @@ def _should_passthrough_pdf_content(*, source_uri: str, extracted: dict[str, Any
     return False
 
 
+def _should_passthrough_youtube_content(*, source_uri: str, extracted: dict[str, Any]) -> bool:
+    if _is_youtube_source_uri(source_uri):
+        return True
+    source_kind = str(extracted.get("sourceKind") or "").strip().lower()
+    if source_kind == "youtube":
+        return True
+    strategy = str(extracted.get("strategy") or "").strip().lower()
+    return strategy == "youtube-direct-markitdown"
+
+
 def _is_missing_dspy_error(payload: dict[str, Any] | None) -> bool:
     if not isinstance(payload, dict):
         return False
@@ -3533,10 +3572,36 @@ def _resolve_existing_canonical_uri(reference: dict[str, Any]) -> str | None:
     return None
 
 
+def _canonical_youtube_watch_url(source_uri: str) -> str | None:
+    video_id = youtube_video_id_from_uri(source_uri)
+    if not video_id:
+        return None
+    return f"https://www.youtube.com/watch?v={video_id}"
+
+
+def _is_youtube_source_uri(source_uri: str | None) -> bool:
+    normalized = normalize_http_url(source_uri)
+    if not normalized:
+        return False
+    host = (urlparse(normalized).hostname or "").lower()
+    return host in {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"}
+
+
+def _is_youtube_reference(reference: dict[str, Any], source_uri: str | None = None) -> bool:
+    media_type = str(reference.get("mediaType") or "").strip().lower()
+    if media_type == "video/youtube":
+        return True
+    return _is_youtube_source_uri(source_uri or normalize_http_url(reference.get("sourceUri")))
+
+
 def _resolve_process_source_uri(
     reference: dict[str, Any],
     attachments: list[dict[str, Any]],
 ) -> tuple[str | None, dict[str, Any] | None]:
+    if _is_youtube_reference(reference):
+        direct_source_uri = normalize_http_url(reference.get("sourceUri"))
+        if direct_source_uri:
+            return _canonical_youtube_watch_url(direct_source_uri) or direct_source_uri, None
     source_attachment = select_reference_attachment_by_role(reference, attachments, role="source")
     if isinstance(source_attachment, dict):
         source_uri = normalize_http_url(source_attachment.get("sourceUri"))
