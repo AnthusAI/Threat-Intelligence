@@ -8,7 +8,7 @@ import * as route53 from "aws-cdk-lib/aws-route53";
 import * as ses from "aws-cdk-lib/aws-ses";
 import * as sesActions from "aws-cdk-lib/aws-ses-actions";
 import { PolicyStatement } from "aws-cdk-lib/aws-iam";
-import { Function as LambdaFunction } from "aws-cdk-lib/aws-lambda";
+import { CfnFunction, Function as LambdaFunction } from "aws-cdk-lib/aws-lambda";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import { CfnIndex, CfnVectorBucket, CfnVectorBucketPolicy } from "aws-cdk-lib/aws-s3vectors";
 import { dirname, resolve } from "node:path";
@@ -97,12 +97,19 @@ if (enableConsoleResponder) {
   const messageThreadTable = backend.data.resources.tables.MessageThread;
 
   const dataStack = Stack.of(messageTable);
+  const jwtAuthorizerCfn = backend.graphqlJwtAuthorizer.resources.lambda.node.defaultChild as CfnFunction | undefined;
+  const jwtSsmEnvConfig =
+    process.env.AMPLIFY_SSM_ENV_CONFIG?.trim()
+    || jwtAuthorizerCfn?.environment?.variables?.AMPLIFY_SSM_ENV_CONFIG
+    || "";
+
   new ConsoleChatResponderStack(dataStack, "ConsoleChatResponder", {
     messageTable,
     messageStreamArn,
     threadTable: messageThreadTable,
     projectRoot,
     graphqlEndpoint: backend.data.resources.cfnResources.cfnGraphqlApi.attrGraphQlUrl,
+    amplifySsmEnvConfig: jwtSsmEnvConfig || undefined,
     responseTarget: process.env.PAPYRUS_CONSOLE_RESPONSE_TARGET,
     model: process.env.PAPYRUS_CONSOLE_MODEL,
     prebuiltImageUri: process.env.PAPYRUS_CONSOLE_RESPONDER_IMAGE_URI,

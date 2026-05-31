@@ -27,6 +27,8 @@ def running_in_aws_lambda() -> bool:
 
 
 def graphql_use_iam() -> bool:
+    if os.environ.get("PAPYRUS_GRAPHQL_JWT", "").strip():
+        return False
     if running_in_aws_lambda():
         return True
     return os.environ.get("PAPYRUS_GRAPHQL_USE_IAM", "").strip().lower() in {"1", "true", "yes"}

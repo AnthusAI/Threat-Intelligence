@@ -122,6 +122,45 @@ def is_jwt_expired(claims: dict) -> bool:
     return float(exp) <= time.time()
 
 
+def running_in_aws_lambda() -> bool:
+    return bool(os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "").strip())
+
+
+def ensure_graphql_authoring_jwt(*, ttl_seconds: int | None = None) -> str:
+    """Mint or refresh ``PAPYRUS_GRAPHQL_JWT`` for AppSync custom authoring auth in Lambda."""
+    existing = os.environ.get("PAPYRUS_GRAPHQL_JWT", "").strip()
+    if existing:
+        normalized = normalize_jwt(existing)
+        claims = decode_jwt_claims(normalized)
+        if claims and not is_jwt_expired(claims):
+            return normalized
+
+    from .auth_commands import _mint_jwt, _resolve_secret
+
+    resolved_ttl = ttl_seconds if ttl_seconds is not None else graphql_jwt_ttl_seconds()
+    issuer = os.environ.get("PAPYRUS_JWT_ISSUER", "").strip() or "papyrus-cli"
+    subject = os.environ.get("PAPYRUS_JWT_SUBJECT", "").strip() or "papyrus-cli"
+    audience = os.environ.get("PAPYRUS_JWT_AUDIENCE", "").strip() or "papyrus-authoring"
+    scope = (
+        os.environ.get("PAPYRUS_JWT_REQUIRED_SCOPE", "").strip()
+        or os.environ.get("PAPYRUS_JWT_AUTHORING_VALUE", "").strip()
+        or "papyrus:write"
+    )
+    groups_raw = os.environ.get("PAPYRUS_JWT_GROUPS", "").strip() or "editor"
+    groups = [entry.strip() for entry in groups_raw.split(",") if entry.strip()] or ["editor"]
+    token = _mint_jwt(
+        secret=_resolve_secret({}),
+        issuer=issuer,
+        subject=subject,
+        audience=audience,
+        scope=scope,
+        groups=groups,
+        ttl_seconds=max(int(resolved_ttl), 60),
+    )
+    os.environ["PAPYRUS_GRAPHQL_JWT"] = token
+    return token
+
+
 def decode_jwt_claims(token: str) -> dict:
     normalized = normalize_jwt(token)
     parts = normalized.split(".")

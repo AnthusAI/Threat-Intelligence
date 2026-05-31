@@ -12,7 +12,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from papyrus_content import graphql_http  # noqa: E402
-from papyrus_content.env import lambda_auth_header  # noqa: E402
+from papyrus_content.env import decode_jwt_claims, ensure_graphql_authoring_jwt, lambda_auth_header  # noqa: E402
 
 
 class GraphQLHttpTests(unittest.TestCase):
@@ -30,6 +30,30 @@ class GraphQLHttpTests(unittest.TestCase):
             )
         self.assertEqual(headers["Authorization"], lambda_auth_header("abc.def.ghi"))
         self.assertEqual(headers["x-amz-appsync-authtype"], "AWS_LAMBDA")
+
+    def test_graphql_use_iam_prefers_jwt_in_lambda(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "AWS_LAMBDA_FUNCTION_NAME": "test-fn",
+                "PAPYRUS_GRAPHQL_JWT": "abc.def.ghi",
+            },
+            clear=False,
+        ):
+            self.assertFalse(graphql_http.graphql_use_iam())
+
+    def test_ensure_graphql_authoring_jwt_mints_when_missing(self) -> None:
+        with patch("papyrus_content.auth_commands._resolve_secret", return_value="test-secret"), patch.dict(
+            os.environ,
+            {},
+            clear=True,
+        ):
+            os.environ.pop("PAPYRUS_GRAPHQL_JWT", None)
+            token = ensure_graphql_authoring_jwt(ttl_seconds=120)
+            claims = decode_jwt_claims(token)
+            self.assertEqual(claims.get("aud"), "papyrus-authoring")
+            self.assertIn("editor", claims.get("groups") or [])
+            self.assertEqual(os.environ.get("PAPYRUS_GRAPHQL_JWT"), token)
 
     def test_newsroom_graphql_uses_shared_client(self) -> None:
         from papyrus_newsroom import newsroom

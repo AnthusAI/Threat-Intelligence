@@ -2302,7 +2302,7 @@ fn build_openai_messages(
                     let reference_id = object_uri.trim_start_matches("papyrus://reference/").trim();
                     if !reference_id.is_empty() {
                         lines.push(format!(
-                            "The user is viewing reference detail in the web UI. For requests about \"this reference\", the open page, or what they are looking at, do not ask them to paste the reference. Immediately call execute_tactus with Reference.get{{ id = \"{reference_id}\" }} (lineage ids from the URL resolve to the current version) and summarize that record."
+                            "The user is viewing reference detail in the web UI. For requests about \"this reference\", the open page, or what they are looking at, do not ask them to paste the reference. First call execute_tactus with: return papyrus.Reference.get{{ id = \"{reference_id}\" }} (lineage ids resolve to the current version). Then call: return papyrus.knowledge.query{{ semanticQuery = \"Summarize the main claims, methods, and results.\", anchors = {{ {{ uri = \"papyrus://reference/{reference_id}\" }} }} }}. Use double-quoted Lua strings only."
                         ));
                     }
                 }
@@ -2649,12 +2649,15 @@ fn normalize_execute_tactus_result(value: Value) -> Value {
         .get("message")
         .and_then(Value::as_str)
         .unwrap_or("");
-    let parse_like = message.contains("Failed to parse DSL")
-        || message.contains("error loading code")
-        || message.contains("unfinished string")
-        || message.contains("'end' expected")
-        || message.contains("unexpected symbol near")
-        || message.contains("tactus must be a non-empty string");
+    let reference_lookup_failure = message.contains("Reference not found")
+        || message.contains("Sandbox error: Reference not found");
+    let parse_like = !reference_lookup_failure
+        && (message.contains("Failed to parse DSL")
+            || message.contains("error loading code")
+            || message.contains("unfinished string")
+            || message.contains("'end' expected")
+            || message.contains("unexpected symbol near")
+            || message.contains("tactus must be a non-empty string"));
     if !parse_like || (code != "tactus_execution_failed" && code != "invalid_request") {
         return value;
     }
