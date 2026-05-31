@@ -71,7 +71,7 @@ export const emailSubmissionProcessor = defineFunction(
               "cp -R src/papyrus_newsroom/. /asset-output/papyrus_newsroom/",
               "cp -R src/papyrus_content/. /asset-output/papyrus_content/",
               "cp -R src/papyrus_knowledge_query/. /asset-output/papyrus_knowledge_query/",
-              "cp corpora/papyrus-steering.yml /asset-output/corpora/papyrus-steering.yml",
+              "cp corpora/*.yml /asset-output/corpora/",
               "python3 -m pip install -r amplify/functions/email-submission-processor/requirements.txt -t /asset-output --no-cache-dir",
             ].join(" && "),
           ],
