@@ -606,6 +606,18 @@ def _message_metadata(message: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
+def _message_response_index_fields(message: dict[str, Any]) -> dict[str, Any]:
+    """GSI sort-key fields required when mutating Message.responseStatus."""
+    fields: dict[str, Any] = {}
+    created_at = str(message.get("createdAt") or "").strip()
+    if created_at:
+        fields["createdAt"] = created_at
+    response_target = str(message.get("responseTarget") or "").strip()
+    if response_target:
+        fields["responseTarget"] = response_target
+    return fields
+
+
 def _mark_message_processing(client: PapyrusGraphQLAuthoringClient, *, message_id: str, started_at: str) -> None:
     current = client.get_record("Message", message_id) or {}
     metadata = _message_metadata(current)
@@ -625,6 +637,7 @@ def _mark_message_processing(client: PapyrusGraphQLAuthoringClient, *, message_i
                 "responseOwner": "papyrus-email-submission-processor",
                 "metadata": json.dumps(metadata, sort_keys=True),
                 "updatedAt": started_at,
+                **_message_response_index_fields(current),
             }
         },
     )
@@ -656,6 +669,7 @@ def _mark_message_completed(
                 "responseError": None,
                 "metadata": json.dumps(metadata, sort_keys=True),
                 "updatedAt": finished_at,
+                **_message_response_index_fields(current),
             }
         },
     )
@@ -687,6 +701,7 @@ def _mark_message_failed(
                 "responseError": error_message,
                 "metadata": json.dumps(metadata, sort_keys=True),
                 "updatedAt": finished_at,
+                **_message_response_index_fields(current),
             }
         },
     )

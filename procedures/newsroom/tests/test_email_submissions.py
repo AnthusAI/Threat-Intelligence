@@ -52,6 +52,16 @@ class EmailSubmissionTests(unittest.TestCase):
             email_submissions.inbound_message_id_for_s3("media-bucket", "inbound-email/example"),
         )
 
+    def test_message_response_index_fields_includes_gsi_sort_keys(self):
+        fields = email_submissions._message_response_index_fields(
+            {
+                "createdAt": "2026-05-31T10:00:00.000Z",
+                "responseTarget": "email_submission_processor",
+            },
+        )
+        self.assertEqual(fields["createdAt"], "2026-05-31T10:00:00.000Z")
+        self.assertEqual(fields["responseTarget"], "email_submission_processor")
+
 
 if __name__ == "__main__":
     unittest.main()
