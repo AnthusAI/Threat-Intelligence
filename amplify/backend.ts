@@ -1,17 +1,12 @@
 import { defineBackend, secret } from "@aws-amplify/backend";
 import { Duration, Stack } from "aws-cdk-lib";
 import * as backup from "aws-cdk-lib/aws-backup";
-import { AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId } from "aws-cdk-lib/custom-resources";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as events from "aws-cdk-lib/aws-events";
-import * as eventTargets from "aws-cdk-lib/aws-events-targets";
 import { PolicyStatement } from "aws-cdk-lib/aws-iam";
 import { Function as LambdaFunction } from "aws-cdk-lib/aws-lambda";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import { CfnIndex, CfnVectorBucket, CfnVectorBucketPolicy } from "aws-cdk-lib/aws-s3vectors";
-import * as route53 from "aws-cdk-lib/aws-route53";
-import * as ses from "aws-cdk-lib/aws-ses";
-import * as sesActions from "aws-cdk-lib/aws-ses-actions";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { auth } from "./auth/resource";
@@ -28,6 +23,7 @@ import { procedureAction } from "./functions/procedure-action/resource";
 import { readerSettings } from "./functions/reader-settings/resource";
 import { emailSubmissionProcessor } from "./functions/email-submission-processor/resource";
 import { sesInboundReceive } from "./functions/ses-inbound-receive/resource";
+import { InboundEmailStack } from "./inbound-email/stack";
 import { storage } from "./storage/resource";
 
 const knowledgeVectorIndexName = "papyrus-knowledge";
@@ -96,7 +92,8 @@ if (enableConsoleResponder) {
 
   const messageThreadTable = backend.data.resources.tables.MessageThread;
 
-  new ConsoleChatResponderStack(backend.createStack("console-chat-responder"), "ConsoleChatResponder", {
+  const dataStack = Stack.of(messageTable);
+  new ConsoleChatResponderStack(dataStack, "ConsoleChatResponder", {
     messageTable,
     messageStreamArn,
     threadTable: messageThreadTable,
@@ -108,8 +105,8 @@ if (enableConsoleResponder) {
   });
 }
 
-const storageBackupsStack = backend.createStack("storage-backups");
 const storageBucket = backend.storage.resources.bucket;
+const storageStack = Stack.of(storageBucket);
 
 const storageBucketCfn = storageBucket.node.defaultChild as s3.CfnBucket | undefined;
 if (storageBucketCfn) {
@@ -120,8 +117,8 @@ if (storageBucketCfn) {
   );
 }
 
-const storageBackupVault = new backup.BackupVault(storageBackupsStack, "PapyrusStorageBackupVault");
-const storageBackupPlan = new backup.BackupPlan(storageBackupsStack, "PapyrusStorageBackupPlan", {
+const storageBackupVault = new backup.BackupVault(storageStack, "PapyrusStorageBackupVault");
+const storageBackupPlan = new backup.BackupPlan(storageStack, "PapyrusStorageBackupPlan", {
   backupVault: storageBackupVault,
 });
 
@@ -150,25 +147,23 @@ if (enableInboundEmail) {
   if (!backend.sesInboundReceive || !backend.emailSubmissionProcessor) {
     throw new Error("Inbound email is enabled but sesInboundReceive/emailSubmissionProcessor were not registered.");
   }
-  const inboundReceive = backend.sesInboundReceive;
-  const inboundProcessor = backend.emailSubmissionProcessor;
-  const receiveLambda = inboundReceive.resources.lambda as LambdaFunction;
-  const processorLambda = inboundProcessor.resources.lambda as LambdaFunction;
+  const receiveLambda = backend.sesInboundReceive.resources.lambda as LambdaFunction;
+  const processorLambda = backend.emailSubmissionProcessor.resources.lambda as LambdaFunction;
   const graphqlEndpoint = backend.data.resources.cfnResources.cfnGraphqlApi.attrGraphQlUrl;
-  const inboundRecipients = inboundEmailLocalParts.map((localPart) => `${localPart}@${inboundEmailDomain}`);
 
-  inboundReceive.addEnvironment(
+  backend.sesInboundReceive.addEnvironment(
     "PAPYRUS_EMAIL_SUBMISSION_PROCESSOR_FUNCTION_NAME",
     processorLambda.functionName,
   );
-  inboundReceive.addEnvironment("PAPYRUS_INBOUND_EMAIL_DOMAIN", inboundEmailDomain);
-  inboundReceive.addEnvironment("PAPYRUS_INBOUND_EMAIL_LOCAL_PARTS", inboundEmailLocalParts.join(","));
-  inboundReceive.addEnvironment("PAPYRUS_INBOUND_EMAIL_CORPUS_KEY", inboundEmailCorpusKey);
-  inboundReceive.addEnvironment("PAPYRUS_GRAPHQL_ENDPOINT", graphqlEndpoint);
+  backend.sesInboundReceive.addEnvironment("PAPYRUS_INBOUND_EMAIL_DOMAIN", inboundEmailDomain);
+  backend.sesInboundReceive.addEnvironment("PAPYRUS_INBOUND_EMAIL_LOCAL_PARTS", inboundEmailLocalParts.join(","));
+  backend.sesInboundReceive.addEnvironment("PAPYRUS_INBOUND_EMAIL_CORPUS_KEY", inboundEmailCorpusKey);
+  backend.sesInboundReceive.addEnvironment("PAPYRUS_JWT_SECRET", secret("PAPYRUS_JWT_SECRET"));
+  backend.sesInboundReceive.addEnvironment("PAPYRUS_GRAPHQL_ENDPOINT", graphqlEndpoint);
 
-  inboundProcessor.addEnvironment("PAPYRUS_JWT_SECRET", secret("PAPYRUS_JWT_SECRET"));
-  inboundProcessor.addEnvironment("PAPYRUS_INBOUND_EMAIL_CORPUS_KEY", inboundEmailCorpusKey);
-  inboundProcessor.addEnvironment("PAPYRUS_GRAPHQL_ENDPOINT", graphqlEndpoint);
+  backend.emailSubmissionProcessor.addEnvironment("PAPYRUS_JWT_SECRET", secret("PAPYRUS_JWT_SECRET"));
+  backend.emailSubmissionProcessor.addEnvironment("PAPYRUS_INBOUND_EMAIL_CORPUS_KEY", inboundEmailCorpusKey);
+  backend.emailSubmissionProcessor.addEnvironment("PAPYRUS_GRAPHQL_ENDPOINT", graphqlEndpoint);
 
   receiveLambda.addToRolePolicy(
     new PolicyStatement({
@@ -184,8 +179,11 @@ if (enableInboundEmail) {
   );
   receiveLambda.addToRolePolicy(
     new PolicyStatement({
-      actions: ["appsync:GraphQL"],
-      resources: ["*"],
+      actions: ["ssm:GetParameter"],
+      resources: [
+        `arn:aws:ssm:${backend.stack.region}:${backend.stack.account}:parameter/amplify/*`,
+        `arn:aws:ssm:${backend.stack.region}:${backend.stack.account}:parameter/amplify/shared/*`,
+      ],
     }),
   );
   processorLambda.addToRolePolicy(
@@ -204,97 +202,16 @@ if (enableInboundEmail) {
     }),
   );
 
-  const storageStack = Stack.of(storageBucket);
-  const inboundDnsZone = route53.HostedZone.fromHostedZoneAttributes(storageStack, "PapyrusInboundDnsZone", {
-    hostedZoneId: inboundDnsZoneId,
-    zoneName: inboundDnsZoneName,
-  });
-  const verifyInboundEmailDomain = new AwsCustomResource(storageStack, "VerifyInboundEmailDomain", {
-    onCreate: {
-      service: "SES",
-      action: "verifyDomainIdentity",
-      parameters: {
-        Domain: inboundEmailDomain,
-      },
-      physicalResourceId: PhysicalResourceId.of(`ses-domain-verify-${inboundEmailDomain}`),
-    },
-    onUpdate: {
-      service: "SES",
-      action: "verifyDomainIdentity",
-      parameters: {
-        Domain: inboundEmailDomain,
-      },
-      physicalResourceId: PhysicalResourceId.of(`ses-domain-verify-${inboundEmailDomain}`),
-    },
-    policy: AwsCustomResourcePolicy.fromSdkCalls({
-      resources: AwsCustomResourcePolicy.ANY_RESOURCE,
-    }),
-    timeout: Duration.minutes(2),
-  });
-  new route53.TxtRecord(storageStack, "PapyrusInboundEmailDomainVerification", {
-    zone: inboundDnsZone,
-    recordName: `_amazonses.${inboundDnsRecordName}`,
-    ttl: Duration.minutes(5),
-    values: [verifyInboundEmailDomain.getResponseField("VerificationToken")],
-  });
+  storageBucket.grantRead(receiveLambda, "inbound-email/*");
 
-  new events.Rule(storageStack, "PapyrusInboundEmailObjectCreated", {
-    description: "Process inbound SES MIME objects stored under inbound-email/",
-    eventPattern: {
-      source: ["aws.s3"],
-      detailType: ["Object Created"],
-      detail: {
-        bucket: { name: [storageBucket.bucketName] },
-        object: { key: [{ prefix: "inbound-email/" }] },
-      },
-    },
-    targets: [new eventTargets.LambdaFunction(receiveLambda)],
-  });
-
-  const inboundRuleSet = new ses.ReceiptRuleSet(storageStack, "PapyrusInboundEmailRuleSet", {
-    receiptRuleSetName: `papyrus-inbound-${inboundEmailDomain.replace(/\./g, "-")}`,
-  });
-  inboundRuleSet.addRule("PapyrusInboundSubmissions", {
-    recipients: inboundRecipients,
-    enabled: true,
-    scanEnabled: true,
-    tlsPolicy: ses.TlsPolicy.REQUIRE,
-    actions: [
-      new sesActions.S3({
-        bucket: storageBucket,
-        objectKeyPrefix: "inbound-email/",
-      }),
-    ],
-  });
-
-  new AwsCustomResource(storageStack, "ActivateInboundEmailRuleSet", {
-    onCreate: {
-      service: "SES",
-      action: "setActiveReceiptRuleSet",
-      parameters: {
-        RuleSetName: inboundRuleSet.receiptRuleSetName,
-      },
-      physicalResourceId: PhysicalResourceId.of(`activate-${inboundRuleSet.receiptRuleSetName}`),
-    },
-    onUpdate: {
-      service: "SES",
-      action: "setActiveReceiptRuleSet",
-      parameters: {
-        RuleSetName: inboundRuleSet.receiptRuleSetName,
-      },
-      physicalResourceId: PhysicalResourceId.of(`activate-${inboundRuleSet.receiptRuleSetName}`),
-    },
-    onDelete: {
-      service: "SES",
-      action: "setActiveReceiptRuleSet",
-      parameters: {
-        RuleSetName: null,
-      },
-    },
-    policy: AwsCustomResourcePolicy.fromSdkCalls({
-      resources: AwsCustomResourcePolicy.ANY_RESOURCE,
-    }),
-    timeout: Duration.minutes(2),
+  new InboundEmailStack(backend.createStack("inbound-email"), "InboundEmail", {
+    storageBucket,
+    receiveFunctionArn: receiveLambda.functionArn,
+    domain: inboundEmailDomain,
+    localParts: inboundEmailLocalParts,
+    dnsZoneId: inboundDnsZoneId,
+    dnsZoneName: inboundDnsZoneName,
+    dnsRecordName: inboundDnsRecordName,
   });
 }
 
