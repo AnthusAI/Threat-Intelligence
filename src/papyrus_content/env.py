@@ -21,6 +21,11 @@ def resolve_papyrus_root() -> Path:
 
 PAPYRUS_ROOT = resolve_papyrus_root()
 BIBLICUS_ROOT = Path(os.environ.get("BIBLICUS_WORKDIR", str(PAPYRUS_ROOT.parent / "Biblicus")))
+_DOTENV_OVERRIDE_KEYS = frozenset({
+    "PAPYRUS_GRAPHQL_JWT",
+    "PAPYRUS_GRAPHQL_ENDPOINT",
+    "PAPYRUS_JWT_TTL_SECONDS",
+})
 
 
 def load_dotenv() -> None:
@@ -34,7 +39,9 @@ def load_dotenv() -> None:
                 continue
             key, value = line.split("=", 1)
             key = key.strip()
-            if not key or key in os.environ:
+            if not key:
+                continue
+            if key in os.environ and key not in _DOTENV_OVERRIDE_KEYS:
                 continue
             value = value.strip()
             if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
@@ -75,6 +82,16 @@ def graphql_jwt() -> str:
     if is_jwt_expired(claims):
         raise ValueError("PAPYRUS_GRAPHQL_JWT is expired. Run: poetry run papyrus auth refresh-jwt --write-env .env")
     return normalized
+
+
+def graphql_jwt_ttl_seconds(default: int = 43_200) -> int:
+    raw = os.environ.get("PAPYRUS_JWT_TTL_SECONDS", "").strip()
+    if not raw:
+        return default
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return default
 
 
 def graphql_timeout_seconds(default: float = 30.0) -> float:

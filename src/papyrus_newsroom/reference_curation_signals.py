@@ -36,6 +36,7 @@ except ModuleNotFoundError:  # pragma: no cover - PyYAML is a project dependency
     yaml = None
 
 from .semantic import PapyrusSemanticClient, semantic_state_key, semantic_version_key
+from . import web_search_providers
 
 
 PAPYRUS_ROOT = Path(__file__).resolve().parents[2]
@@ -2946,75 +2947,15 @@ def reference_web_search(
     max_results: int = 20,
     model: str = "gpt-5.4-mini",
     return_token_budget: str = "default",
+    provider: str | None = None,
 ) -> dict[str, Any]:
-    query = _required(query, "query")
-    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is required for web search.")
-    try:
-        limit = int(max_results)
-    except (TypeError, ValueError):
-        limit = 20
-    limit = max(1, min(limit, 50))
-    payload = {
-        "model": model,
-        "input": query,
-        "tools": [{"type": "web_search", "return_token_budget": return_token_budget or "default"}],
-        "tool_choice": "required",
-        "include": ["web_search_call.action.sources"],
-    }
-    request = urllib.request.Request(
-        "https://api.openai.com/v1/responses",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        method="POST",
+    return web_search_providers.reference_web_search(
+        query=query,
+        max_results=max_results,
+        model=model,
+        return_token_budget=return_token_budget,
+        provider=provider,
     )
-    try:
-        with urllib.request.urlopen(request, timeout=180) as response:
-            parsed = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as error:
-        body = error.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"OpenAI web search request failed: {error.code} {body[:400]}") from error
-    answer = _extract_response_text(parsed).strip()
-    urls = []
-    seen: set[str] = set()
-    for url in _web_search_source_urls(parsed):
-        normalized = str(url).strip()
-        if not normalized or normalized in seen:
-            continue
-        seen.add(normalized)
-        urls.append(normalized)
-    results: list[dict[str, Any]] = []
-    for rank, url in enumerate(urls[:limit], start=1):
-        parsed_url = urllib.parse.urlparse(url)
-        source_domain = parsed_url.netloc.lower()
-        results.append({
-            "rank": rank,
-            "url": url,
-            "source_domain": source_domain,
-            "title": url,
-            "evidence_candidate_id": f"evidence-candidate-{_hash_short([query, url, rank])}",
-        })
-    usage = parsed.get("usage") if isinstance(parsed.get("usage"), dict) else {}
-    return {
-        "query": query,
-        "results": results,
-        "metadata": {
-            "answer": answer,
-            "result_count": len(results),
-            "untruncated_result_count": len(urls),
-            "request": {
-                "model": model,
-                "input": query,
-                "tool_choice": "required",
-                "tools": [{"type": "web_search", "return_token_budget": return_token_budget or "default"}],
-                "include": ["web_search_call.action.sources"],
-            },
-            "model": parsed.get("model"),
-            "id": parsed.get("id"),
-            "usage": usage,
-        },
-    }
 
 
 def _generate_title_subtitle_llm(
@@ -3064,7 +3005,26 @@ def _generate_title_subtitle_llm(
             },
         },
     }
-    if web_search_enabled:
+    web_provider = web_search_providers.normalize_web_search_provider(None)
+    supplemental_urls: list[str] = []
+    supplemental_answer = ""
+    if web_search_enabled and web_provider == "tavily":
+        supplemental_urls, supplemental_answer = web_search_providers.web_search_urls_for_title_subtitle(
+            reference=reference,
+            catalog_entry=catalog_entry,
+            known_title=known_title,
+        )
+        if supplemental_urls or supplemental_answer:
+            prompt = "\n".join([
+                prompt,
+                "",
+                "Web search context (Tavily):",
+                supplemental_answer or "(no synthesized answer)",
+                "Source URLs:",
+                "\n".join(f"- {url}" for url in supplemental_urls[:12]) or "(none)",
+            ])
+            payload["input"][1]["content"] = prompt
+    elif web_search_enabled:
         payload["tools"] = [{"type": "web_search"}]
         payload["tool_choice"] = "auto"
         payload["include"] = ["web_search_call.action.sources"]
@@ -3089,8 +3049,10 @@ def _generate_title_subtitle_llm(
     except json.JSONDecodeError as exc:
         raise RuntimeError("OpenAI title/subtitle request did not return JSON.") from exc
     urls = _string_list(result.get("source_urls") or [])
-    if web_search_enabled:
+    if web_search_enabled and web_provider == "openai":
         urls.extend(_web_search_source_urls(parsed))
+    elif web_search_enabled:
+        urls.extend(supplemental_urls)
     return {
         "title": _clean_text(result.get("title")),
         "subtitle": _clean_text(result.get("subtitle")),
@@ -4269,7 +4231,12 @@ def _graphql(query: str, variables: dict[str, Any]) -> dict[str, Any]:
         "Content-Type": "application/json",
     }
     if token:
-        headers["Authorization"] = _lambda_auth_token(token)
+        from papyrus_content.env import lambda_auth_header
+
+        headers["Authorization"] = lambda_auth_header(token)
+        headers["x-amz-appsync-authtype"] = (
+            os.environ.get("PAPYRUS_GRAPHQL_AUTH_TYPE", "").strip() or "AWS_LAMBDA"
+        )
     else:
         headers.update(_iam_signed_graphql_headers(endpoint, body))
     request = urllib.request.Request(

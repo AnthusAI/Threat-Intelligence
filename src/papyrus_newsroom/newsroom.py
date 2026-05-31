@@ -3804,6 +3804,9 @@ def _graphql(query: str, variables: dict[str, Any]) -> dict[str, Any]:
     headers = {"content-type": "application/json"}
     if token:
         headers["Authorization"] = _lambda_auth_token(token)
+        headers["x-amz-appsync-authtype"] = (
+            os.environ.get("PAPYRUS_GRAPHQL_AUTH_TYPE", "").strip() or "AWS_LAMBDA"
+        )
     else:
         headers.update(_iam_signed_graphql_headers(endpoint, body))
     request = urllib.request.Request(

@@ -10,12 +10,17 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .env import graphql_jwt_ttl_seconds, load_dotenv
 from .options import normalize_non_negative_integer, normalize_string, parse_options
 
 
 def refresh_jwt(flags: list[str]) -> None:
+    load_dotenv()
     options = parse_options(flags)
-    ttl_seconds = normalize_non_negative_integer(options.get("ttl-seconds"), "--ttl-seconds") or 3600
+    ttl_seconds = (
+        normalize_non_negative_integer(options.get("ttl-seconds"), "--ttl-seconds")
+        or graphql_jwt_ttl_seconds()
+    )
     issuer = normalize_string(options.get("issuer")) or normalize_string(os.environ.get("PAPYRUS_JWT_ISSUER")) or "papyrus-cli"
     subject = normalize_string(options.get("subject")) or "papyrus-cli"
     audience = normalize_string(options.get("audience")) or normalize_string(os.environ.get("PAPYRUS_JWT_AUDIENCE")) or "papyrus-authoring"
@@ -114,7 +119,10 @@ def _resolve_secret(options: dict[str, Any]) -> str:
         os.environ.get("PAPYRUS_JWT_SECRET_SSM_PARAM")
     )
     if ssm_param:
-        return _read_ssm_secret(ssm_param)
+        try:
+            return _read_ssm_secret(ssm_param)
+        except Exception:
+            pass
     for env_name in ("PAPYRUS_SANDBOX_JWT_SECRET", "PAPYRUS_JWT_SECRET"):
         value = normalize_string(os.environ.get(env_name))
         if value and not _is_amplify_secret_placeholder(value):
@@ -122,7 +130,18 @@ def _resolve_secret(options: dict[str, Any]) -> str:
     amplify_secret = _resolve_amplify_ssm_secret("PAPYRUS_JWT_SECRET")
     if amplify_secret:
         return amplify_secret
-    return _read_ssm_secret("/amplify/shared/PAPYRUS_JWT_SECRET")
+    for fallback_param in (
+        "/amplify/papyrus/ryan-sandbox-adcd88a186/PAPYRUS_JWT_SECRET",
+        "/amplify/shared/papyrus/PAPYRUS_JWT_SECRET",
+        "/amplify/shared/PAPYRUS_JWT_SECRET",
+    ):
+        try:
+            return _read_ssm_secret(fallback_param)
+        except Exception:
+            continue
+    raise RuntimeError(
+        "Could not resolve JWT signing secret. Pass --ssm-param or set PAPYRUS_SANDBOX_JWT_SECRET in .env."
+    )
 
 
 def _mint_jwt(

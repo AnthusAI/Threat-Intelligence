@@ -48,26 +48,10 @@ from papyrus_knowledge_query.cli import (
 )
 
 
-def _load_repo_dotenv() -> None:
-    dotenv_path = PAPYRUS_ROOT / ".env"
-    if not dotenv_path.exists():
-        return
-    for raw_line in dotenv_path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        if not key or key in os.environ:
-            continue
-        value = value.strip()
-        if len(value) >= 2 and ((value[0] == value[-1]) and value[0] in {"'", '"'}):
-            value = value[1:-1]
-        os.environ[key] = value
-
-
 def main(argv: list[str] | None = None) -> int:
-    _load_repo_dotenv()
+    from papyrus_content.env import load_dotenv
+
+    load_dotenv()
     parser = argparse.ArgumentParser(description="Papyrus newsroom helper entrypoint")
     subparsers = parser.add_subparsers(dest="command")
 
