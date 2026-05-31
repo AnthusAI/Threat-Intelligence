@@ -1,5 +1,6 @@
 "use client";
 
+import { UnfoldHorizontalIcon, XIcon } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 import type { ReferenceAttachmentRecord } from "../lib/category-repository";
 import {
@@ -9,22 +10,22 @@ import {
 } from "../lib/reference-source-preview";
 
 function PdfSourcePreview({ preview }: { preview: Extract<ReferenceSourcePreview, { kind: "pdf" }> }) {
-  const [fullViewport, setFullViewport] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const viewportTitleId = useId();
 
   useEffect(() => {
-    if (!fullViewport) return undefined;
+    if (!expanded) return undefined;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setFullViewport(false);
+      if (event.key === "Escape") setExpanded(false);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [fullViewport]);
+  }, [expanded]);
 
   return (
     <>
@@ -32,28 +33,27 @@ function PdfSourcePreview({ preview }: { preview: Extract<ReferenceSourcePreview
         className="news-desk-reference-source-preview news-desk-reference-source-preview--pdf"
         data-news-desk-reference-source-preview="pdf"
       >
-        <div className="news-desk-reference-source-preview__frame news-desk-reference-source-preview__frame--pdf">
-          <iframe
-            loading="lazy"
-            referrerPolicy="strict-origin-when-cross-origin"
-            src={preview.embedUrl}
-            title={preview.label}
-          />
-        </div>
-        <p className="news-desk-reference-source-preview__actions">
+        <div className="news-desk-reference-source-preview__pdf-card">
           <button
-            className="news-desk-reference-source-preview__viewport-toggle"
-            onClick={() => setFullViewport(true)}
+            aria-label="Expand PDF preview"
+            className="news-desk-reference-source-preview__pdf-expand"
+            onClick={() => setExpanded(true)}
             type="button"
           >
-            Full viewport
+            <UnfoldHorizontalIcon aria-hidden size={16} strokeWidth={2} />
           </button>
-          <a href={preview.href} rel="noopener noreferrer" target="_blank">
-            {preview.label}
-          </a>
-        </p>
+          <div className="news-desk-reference-source-preview__frame news-desk-reference-source-preview__frame--pdf">
+            <iframe
+              loading="lazy"
+              referrerPolicy="strict-origin-when-cross-origin"
+              src={preview.embedUrl}
+              tabIndex={-1}
+              title={preview.label}
+            />
+          </div>
+        </div>
       </div>
-      {fullViewport ? (
+      {expanded ? (
         <div
           aria-labelledby={viewportTitleId}
           aria-modal="true"
@@ -61,28 +61,24 @@ function PdfSourcePreview({ preview }: { preview: Extract<ReferenceSourcePreview
           data-news-desk-reference-source-preview-viewport="open"
           role="dialog"
         >
-          <header className="news-desk-reference-source-preview__viewport-toolbar">
-            <p className="news-desk-reference-source-preview__viewport-title" id={viewportTitleId}>
+          <header className="news-desk-reference-source-preview__viewport-strip">
+            <span className="sr-only" id={viewportTitleId}>
               {preview.label}
-            </p>
-            <div className="news-desk-reference-source-preview__viewport-toolbar-actions">
-              <a href={preview.href} rel="noopener noreferrer" target="_blank">
-                Open PDF
-              </a>
-              <button
-                className="news-desk-reference-source-preview__viewport-close"
-                onClick={() => setFullViewport(false)}
-                type="button"
-              >
-                Close
-              </button>
-            </div>
+            </span>
+            <button
+              aria-label="Close expanded PDF preview"
+              className="news-desk-reference-source-preview__viewport-close"
+              onClick={() => setExpanded(false)}
+              type="button"
+            >
+              <XIcon aria-hidden size={18} strokeWidth={2} />
+            </button>
           </header>
           <div className="news-desk-reference-source-preview__viewport-frame">
             <iframe
               referrerPolicy="strict-origin-when-cross-origin"
               src={preview.embedUrl}
-              title={`${preview.label} (full viewport)`}
+              title={`${preview.label} (expanded)`}
             />
           </div>
         </div>
@@ -105,7 +101,10 @@ export function ReferenceSourcePreview({
   if (!preview) {
     if (!pendingPdfPreview) return null;
     return (
-      <p className="news-desk-reference-source-preview__hint" data-news-desk-reference-source-preview="pdf-loading">
+      <p
+        className="news-desk-reference-source-preview__hint news-desk-reference-source-preview__hint--pdf-loading"
+        data-news-desk-reference-source-preview="pdf-loading"
+      >
         Loading PDF preview…
       </p>
     );
