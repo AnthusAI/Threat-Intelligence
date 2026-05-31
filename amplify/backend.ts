@@ -257,6 +257,12 @@ if (enableInboundEmail) {
   );
   processorLambda.addToRolePolicy(
     new PolicyStatement({
+      actions: ["s3:ListBucket"],
+      resources: [storageBucket.bucketArn],
+    }),
+  );
+  processorLambda.addToRolePolicy(
+    new PolicyStatement({
       actions: ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
       resources: [
         `${storageBucket.bucketArn}/inbound-email/*`,
