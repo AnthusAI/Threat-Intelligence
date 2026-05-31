@@ -252,7 +252,7 @@ export function buildEmailSubmissionMessageInput(input: {
   responseStatus: string;
   responseError: string | null;
 }) {
-  return {
+  const record: Record<string, unknown> = {
     id: input.id,
     messageKind: MESSAGE_KIND_EMAIL_SUBMISSION,
     messageDomain: MESSAGE_DOMAIN_REFERENCE_INTAKE,
@@ -260,13 +260,7 @@ export function buildEmailSubmissionMessageInput(input: {
     status: input.status,
     summary: input.subject || "Email submission",
     source: "inbound-email",
-    importRunId: null,
-    authorSub: null,
-    authorUserProfileId: input.authorUserProfileId,
     authorLabel: input.authorLabel,
-    threadId: null,
-    parentMessageId: null,
-    sequenceNumber: null,
     role: "submitter",
     content: input.bodyText,
     semanticLayer: "private",
@@ -292,6 +286,10 @@ export function buildEmailSubmissionMessageInput(input: {
     updatedAt: input.now,
     newsroomFeedKey: "submissions",
   };
+  if (input.authorUserProfileId) {
+    record.authorUserProfileId = input.authorUserProfileId;
+  }
+  return record;
 }
 
 function titleFromUrl(url: string): string {
