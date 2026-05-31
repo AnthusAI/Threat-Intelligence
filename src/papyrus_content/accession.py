@@ -240,7 +240,12 @@ def execute_reference_accession_assignment(
     corpus_path = Path(corpus_config["path"]).resolve()
     biblicus_workdir = resolve_biblicus_workdir(options)
 
-    source_material = download_reference_source_material(reference, biblicus_item_id=metadata["biblicusItemId"], run_dir=run_dir)
+    source_material = download_reference_source_material(
+        reference,
+        biblicus_item_id=metadata["biblicusItemId"],
+        run_dir=run_dir,
+        download_uri=normalize_string((options or {}).get("download-uri") or (options or {}).get("downloadUri")),
+    )
     if not is_extractable_media_type(source_material["mediaType"]):
         raise ReferenceAccessionError(
             f"Unsupported media type for extraction: {source_material['mediaType']}.",
@@ -307,8 +312,9 @@ def download_reference_source_material(
     *,
     biblicus_item_id: str,
     run_dir: Path,
+    download_uri: str | None = None,
 ) -> dict[str, Any]:
-    download_uri = source_download_uri_for_reference(reference)
+    download_uri = str(download_uri or "").strip() or source_download_uri_for_reference(reference)
     request = urllib.request.Request(
         download_uri,
         headers={"user-agent": "papyrus-reference-accession/1"},
