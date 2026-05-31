@@ -64,6 +64,8 @@ const schema = a.schema({
       allow.group(adminGroup),
       allow.resource(sesInboundReceive).to(["read"]),
     ]),
+
+  UserRoleAssignment: a
     .model({
       id: a.id().required(),
       userProfileId: a.id().required(),
