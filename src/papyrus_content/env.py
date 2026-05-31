@@ -5,7 +5,21 @@ import json
 import os
 from pathlib import Path
 
-PAPYRUS_ROOT = Path(__file__).resolve().parents[2]
+_STEERING_CONFIG_RELATIVE = Path("corpora") / "papyrus-steering.yml"
+
+
+def resolve_papyrus_root() -> Path:
+    """Repo root in dev; Lambda task root when corpora/ is bundled beside papyrus_content/."""
+    explicit = os.environ.get("PAPYRUS_ROOT", "").strip()
+    if explicit:
+        return Path(explicit)
+    module_parent = Path(__file__).resolve().parent.parent
+    if (module_parent / _STEERING_CONFIG_RELATIVE).exists():
+        return module_parent
+    return Path(__file__).resolve().parents[2]
+
+
+PAPYRUS_ROOT = resolve_papyrus_root()
 BIBLICUS_ROOT = Path(os.environ.get("BIBLICUS_WORKDIR", str(PAPYRUS_ROOT.parent / "Biblicus")))
 
 
