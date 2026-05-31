@@ -39,6 +39,7 @@ const schema = a.schema({
     .authorization((allow) => [
       allow.owner(),
       allow.group(adminGroup),
+      allow.custom().to(["read"]),
     ]),
 
   UserIdentity: a
@@ -59,6 +60,7 @@ const schema = a.schema({
     ])
     .authorization((allow) => [
       allow.group(adminGroup),
+      allow.custom().to(["read"]),
     ]),
 
   UserRoleAssignment: a

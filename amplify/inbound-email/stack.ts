@@ -1,6 +1,7 @@
 import { type StackProps } from "aws-cdk-lib";
 import * as events from "aws-cdk-lib/aws-events";
 import * as eventTargets from "aws-cdk-lib/aws-events-targets";
+import * as iam from "aws-cdk-lib/aws-iam";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import { Construct } from "constructs";
@@ -21,7 +22,7 @@ export class InboundEmailStack extends Construct {
       props.receiveFunctionArn,
     );
 
-    new events.Rule(this, "PapyrusInboundEmailObjectCreated", {
+    const objectCreatedRule = new events.Rule(this, "PapyrusInboundEmailObjectCreated", {
       description: "Process inbound SES MIME objects stored under inbound-email/",
       eventPattern: {
         source: ["aws.s3"],
@@ -32,6 +33,12 @@ export class InboundEmailStack extends Construct {
         },
       },
       targets: [new eventTargets.LambdaFunction(receiveFunction)],
+    });
+
+    // fromFunctionArn does not create invoke permissions; EventBridge needs an explicit grant.
+    receiveFunction.addPermission("AllowInboundEmailEventBridgeInvoke", {
+      principal: new iam.ServicePrincipal("events.amazonaws.com"),
+      sourceArn: objectCreatedRule.ruleArn,
     });
   }
 }
