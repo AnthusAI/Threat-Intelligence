@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Any
 
 from papyrus_newsroom import reference_curation_signals
 
+from .graphql_authoring import create_authoring_client
 from .model_defaults import DEFAULT_REFERENCE_SUMMARY_MODEL
 from .reference_url_text import resolve_storage_bucket_name
 from .source_readiness import select_extracted_text_attachment
@@ -43,6 +45,7 @@ def run_reference_metadata_generation_from_extracted_text(
 
     active_bucket = bucket
     s3_client = None
+    authoring_client = None
 
     for reference in _iter_candidate_references(
         references=references,
@@ -80,15 +83,56 @@ def run_reference_metadata_generation_from_extracted_text(
             continue
 
         try:
-            result = reference_curation_signals.reference_generate_metadata_from_extracted_text(
-                reference_id=str(reference.get("id") or ""),
+            generation_context = reference_curation_signals.resolve_reference_text_generation_context(
                 extracted_text=str(context.get("extractedText") or ""),
                 original_title=str(context.get("originalTitle") or ""),
                 original_subtitle=str(context.get("originalSubtitle") or ""),
-                model=model,
-                apply=apply,
-                refresh=True,
             )
+            if not generation_context["ok"]:
+                skipped_missing_text += 1
+                items.append(
+                    {
+                        "reference": _reference_row(reference),
+                        "status": "skipped_missing_text",
+                        "error": generation_context.get("errors"),
+                        "attachment": context.get("attachment"),
+                    }
+                )
+                continue
+            title_result = reference_curation_signals.generate_title_from_reference_text(
+                reference=reference,
+                extracted_text=generation_context["extractedText"],
+                original_title=generation_context["originalTitle"],
+                original_subtitle=generation_context["originalSubtitle"],
+                model=model,
+            )
+            subtitle_result = reference_curation_signals.generate_subtitle_from_reference_text(
+                reference=reference,
+                extracted_text=generation_context["extractedText"],
+                original_title=generation_context["originalTitle"],
+                original_subtitle=generation_context["originalSubtitle"],
+                model=model,
+            )
+            summary_result = reference_curation_signals.generate_summary_from_reference_text(
+                reference=reference,
+                extracted_text=generation_context["extractedText"],
+                original_title=generation_context["originalTitle"],
+                original_subtitle=generation_context["originalSubtitle"],
+                model=model,
+            )
+            result = {
+                "status": "generated",
+                "generated": {
+                    "title": title_result["title"],
+                    "subtitle": subtitle_result["subtitle"],
+                    "summary": summary_result["summary"],
+                },
+            }
+            if apply:
+                if authoring_client is None:
+                    authoring_client, _ = create_authoring_client()
+                _apply_generated_reference_metadata(authoring_client, reference, result)
+                result = {**result, "apply": True}
         except Exception as error:
             generation_failures += 1
             items.append(
@@ -145,8 +189,9 @@ def _iter_candidate_references(
         if normalized_status != "all" and str(reference.get("curationStatus") or "").lower() != normalized_status:
             continue
         reference_id = str(reference.get("id") or "")
+        lineage_id = str(reference.get("lineageId") or "")
         external_item_id = str(reference.get("externalItemId") or "")
-        if reference_ids and reference_id not in reference_ids:
+        if reference_ids and reference_id not in reference_ids and lineage_id not in reference_ids:
             continue
         if external_item_ids and external_item_id not in external_item_ids:
             continue
@@ -289,6 +334,26 @@ def _original_subtitle(reference: dict[str, Any]) -> str:
         or reference.get("subtitle")
         or ""
     ).strip()
+
+
+def _apply_generated_reference_metadata(
+    client: Any,
+    reference: dict[str, Any],
+    result: dict[str, Any],
+) -> None:
+    generated = result.get("generated") if isinstance(result.get("generated"), dict) else {}
+    title = str(generated.get("title") or "").strip()
+    if not title:
+        return
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    client.upsert(
+        "Reference",
+        {
+            "id": reference.get("id"),
+            "title": title,
+            "updatedAt": now,
+        },
+    )
 
 
 def _reference_row(reference: dict[str, Any]) -> dict[str, Any]:

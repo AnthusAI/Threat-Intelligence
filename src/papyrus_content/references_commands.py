@@ -194,6 +194,137 @@ def references_backfill_reviewed_feed_key(flags: list[str]) -> None:
     print(f"references\tbackfill-reviewed-feed-key\tupdated\t{len(changes)}")
 
 
+def references_backfill_corpus_storage_paths(flags: list[str]) -> None:
+    from .corpus_storage_paths import rewrite_corpus_storage_path
+    from .env import storage_bucket_from_amplify_outputs
+
+    options = parse_options(flags)
+    apply = resolve_mutation_apply(options, "references backfill-corpus-storage-paths")
+    mirror_s3 = parse_boolean_option(options.get("mirror-s3"), False, "--mirror-s3")
+    reference_ids = set(parse_repeated_option(flags, "reference"))
+    if options.get("reference"):
+        reference_ids.add(str(options["reference"]))
+    steering_config = load_steering_config(options.get("config")) or require_steering_config()
+    corpus_key = normalize_string(options.get("corpus-key"))
+    corpus_config = require_corpus_config(steering_config, corpus_key, "--corpus-key") if corpus_key else None
+    corpus_id = knowledge_corpus_id(corpus_config) if corpus_config else None
+    corpus_key_by_id = {
+        knowledge_corpus_id(entry): str(entry.get("key") or "")
+        for entry in steering_config.get("corpora") or []
+        if isinstance(entry, dict)
+    }
+
+    client, _ = create_authoring_client()
+    references = client.list_records("Reference")
+    attachments = client.list_records("ReferenceAttachment")
+    if reference_ids:
+        reference_id_set = reference_ids
+        lineage_ids = {
+            str(reference.get("lineageId") or "")
+            for reference in references
+            if str(reference.get("id") or "") in reference_id_set
+        }
+        references = [
+            reference
+            for reference in references
+            if str(reference.get("id") or "") in reference_id_set
+            or str(reference.get("lineageId") or "") in lineage_ids
+        ]
+        attachments = [
+            attachment
+            for attachment in attachments
+            if str(attachment.get("referenceId") or "") in reference_id_set
+            or str(attachment.get("referenceLineageId") or "") in lineage_ids
+        ]
+
+    changes: list[dict[str, Any]] = []
+    s3_pairs: list[tuple[str, str]] = []
+
+    def plan_storage_path_update(model_name: str, record: dict[str, Any], field: str) -> None:
+        current_path = normalize_string(record.get(field))
+        if not current_path or not current_path.startswith("corpora/"):
+            return
+        record_corpus_id = normalize_string(record.get("corpusId"))
+        if corpus_id and record_corpus_id and record_corpus_id != corpus_id:
+            return
+        record_corpus_key = corpus_key or corpus_key_by_id.get(record_corpus_id or "", "")
+        rewritten = rewrite_corpus_storage_path(current_path, corpus_key=record_corpus_key or None)
+        if not rewritten or rewritten == current_path:
+            return
+        expected = {**record, field: rewritten}
+        changes.append({"modelName": model_name, "current": record, "expected": expected})
+        s3_pairs.append((current_path, rewritten))
+
+    for reference in references:
+        plan_storage_path_update("Reference", reference, "storagePath")
+    for attachment in attachments:
+        plan_storage_path_update("ReferenceAttachment", attachment, "storagePath")
+
+    print(f"references\tbackfill-corpus-storage-paths\tmode\t{'apply' if apply else 'dry-run'}")
+    print(f"references\tbackfill-corpus-storage-paths\tcorpus\t{corpus_id or 'all'}")
+    if reference_ids:
+        print(f"references\tbackfill-corpus-storage-paths\treference-filter\t{len(reference_ids)}")
+    print(f"references\tbackfill-corpus-storage-paths\tplanned\t{len(changes)}")
+    print(f"references\tbackfill-corpus-storage-paths\tmirror-s3\t{str(mirror_s3).lower()}")
+    for change in changes[:25]:
+        current_path = change["current"].get("storagePath") or "-"
+        expected_path = change["expected"].get("storagePath") or "-"
+        print(
+            "references\tbackfill-corpus-storage-paths\tcandidate\t"
+            f"{change['modelName']}\t{change['current'].get('id')}\t{current_path}\t=>\t{expected_path}"
+        )
+    if len(changes) > 25:
+        print(f"references\tbackfill-corpus-storage-paths\tpreview-truncated\t{len(changes) - 25}")
+    if not apply:
+        print("references\tbackfill-corpus-storage-paths\tapply\tskipped\tuse --dry-run to preview without writes")
+        return
+
+    bucket = storage_bucket_from_amplify_outputs()
+    s3_client = None
+    if mirror_s3 and bucket:
+        try:
+            import boto3  # type: ignore
+
+            s3_client = boto3.client("s3")
+        except ImportError:
+            print("references\tbackfill-corpus-storage-paths\tmirror-s3\tskipped\tboto3 unavailable")
+            mirror_s3 = False
+
+    mirrored = 0
+    mirror_skipped = 0
+    mirror_failed = 0
+    if mirror_s3 and s3_client and bucket:
+        for old_key, new_key in dict.fromkeys(s3_pairs).items():
+            try:
+                s3_client.head_object(Bucket=bucket, Key=new_key)
+                mirror_skipped += 1
+                continue
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                s3_client.copy_object(
+                    Bucket=bucket,
+                    Key=new_key,
+                    CopySource={"Bucket": bucket, "Key": old_key},
+                )
+                mirrored += 1
+            except Exception as error:  # noqa: BLE001
+                mirror_failed += 1
+                print(
+                    "references\tbackfill-corpus-storage-paths\tmirror-failed\t"
+                    f"{old_key}\t{new_key}\t{error}"
+                )
+        print(f"references\tbackfill-corpus-storage-paths\tmirrored\t{mirrored}")
+        print(f"references\tbackfill-corpus-storage-paths\tmirror-skipped-existing\t{mirror_skipped}")
+        print(f"references\tbackfill-corpus-storage-paths\tmirror-failed\t{mirror_failed}")
+
+    for index, change in enumerate(changes, start=1):
+        client.upsert(change["modelName"], change["expected"])
+        if index == len(changes) or index % 100 == 0:
+            print(f"references\tbackfill-corpus-storage-paths\tprogress\t{index}/{len(changes)}")
+    print(f"references\tbackfill-corpus-storage-paths\tupdated\t{len(changes)}")
+
+
 def references_review_classification(flags: list[str]) -> None:
     options = parse_options(flags)
     relation_id = options.get("relation") or options.get("relation-id")

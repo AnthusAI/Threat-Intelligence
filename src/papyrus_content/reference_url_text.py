@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from .env import BIBLICUS_ROOT, load_amplify_outputs, storage_bucket_from_amplify_outputs
+from .corpus_storage_paths import corpus_storage_path_prefix
 from .ids import hash_short, reference_lineage_id_for, semantic_node_lineage_id_for, safe_id
 from .model_defaults import DEFAULT_REFERENCE_FILTER_MODEL
 from .relation_types import semantic_relation_type_fields_for_predicate
@@ -3343,7 +3344,7 @@ def _reference_attachment_record(
     filename = _attachment_filename_for_role(role)
     reference_folder = _attachment_reference_folder(reference)
     storage_path = (
-        f"corpora/{_safe_token(corpus_key)}/extracted/markitdown/{_safe_token(storage_namespace)}/{reference_folder}/{filename}"
+        f"{corpus_storage_path_prefix(corpus_key)}/extracted/markitdown/{_safe_token(storage_namespace)}/{reference_folder}/{filename}"
         if corpus_key
         else f"corpora/reference-extracted/markitdown/{_safe_token(storage_namespace)}/{reference_folder}/{filename}"
     )
@@ -3388,7 +3389,7 @@ def _reference_source_attachment_record(
     reference_folder = _attachment_reference_folder(reference)
     filename = _source_filename_for_uri(source_uri=source_uri, media_type=media_type)
     storage_path = (
-        f"corpora/{_safe_token(corpus_key)}/source/{reference_folder}/{filename}"
+        f"{corpus_storage_path_prefix(corpus_key)}/source/{reference_folder}/{filename}"
         if corpus_key
         else f"corpora/reference-source/{reference_folder}/{filename}"
     )
@@ -3481,7 +3482,11 @@ def _iter_candidate_references(
         if reference.get("versionState") == "current"
         and (not corpus_id or reference.get("corpusId") == corpus_id)
         and (curation_status == "all" or reference.get("curationStatus") == curation_status)
-        and (not reference_ids or str(reference.get("id") or "") in reference_ids)
+        and (
+            not reference_ids
+            or str(reference.get("id") or "") in reference_ids
+            or str(reference.get("lineageId") or "") in reference_ids
+        )
         and (
             not external_item_ids
             or str(reference.get("externalItemId") or "") in external_item_ids

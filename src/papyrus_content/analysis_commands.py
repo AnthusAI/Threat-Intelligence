@@ -73,7 +73,9 @@ def analysis_entity_graph_preflight(flags: list[str]) -> None:
         blockers.append("unresolved_extraction_snapshot")
     steering_config = require_steering_config(options.get("config"))
     corpus = require_corpus_config(steering_config, plan["corpus"]["key"], "--corpus-key")
-    corpus_path = Path(corpus.get("path") or f"corpora/{plan['corpus']['key']}")
+    from .corpus_storage_paths import default_corpus_path
+
+    corpus_path = Path(default_corpus_path(corpus))
     biblicus_workdir = Path(options.get("biblicus-workdir") or plan.get("biblicusWorkdir") or DEFAULT_BIBLICUS_WORKDIR).resolve()
     try:
         _preflight_biblicus_catalog_compatibility(biblicus_workdir, corpus_path)
@@ -824,7 +826,9 @@ def _analysis_publish_graph_snapshot_internal(
     corpus = require_corpus_config(steering_config, corpus_key, "--corpus-key")
     corpus_id = knowledge_corpus_id(corpus)
     biblicus_workdir = Path(options.get("biblicus-workdir") or DEFAULT_BIBLICUS_WORKDIR).resolve()
-    corpus_path = Path(corpus.get("path") or f"corpora/{corpus_key}")
+    from .corpus_storage_paths import default_corpus_path
+
+    corpus_path = Path(default_corpus_path(corpus))
     snapshot_manifest = _resolve_snapshot_manifest_path(biblicus_workdir, corpus_path, snapshot_ref)
     if not snapshot_manifest.exists():
         raise ValueError(

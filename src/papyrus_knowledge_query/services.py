@@ -32,6 +32,15 @@ SUPPORTED_ANCHOR_KINDS = {
 }
 
 
+def _is_s3_missing_key_error(error: Exception) -> bool:
+    response = getattr(error, "response", None)
+    if isinstance(response, dict):
+        code = str((response.get("Error") or {}).get("Code") or "")
+        return code in {"NoSuchKey", "404", "NotFound"}
+    name = error.__class__.__name__
+    return name in {"NoSuchKey", "ResourceNotFound", "404"} or "NoSuchKey" in str(error)
+
+
 REFERENCE_FIELDS = """
 id lineageId versionNumber versionState contentHash corpusId externalItemId title authors sourceUri storagePath mediaType
 sourcePublishedAt sourceUpdatedAt retrievedAt importRunId importedAt curationStatus curationStatusKey updatedAt
@@ -239,16 +248,19 @@ class LocalCorpusTextProvider:
     def read_text(self, storage_path: str) -> str | None:
         if not storage_path:
             return None
-        candidates = [
-            Path(storage_path),
-            Path(self.root) / storage_path,
-        ]
-        for candidate in candidates:
-            try:
-                if candidate.exists() and candidate.is_file():
-                    return candidate.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                continue
+        from papyrus_content.corpus_storage_paths import corpus_storage_path_read_candidates
+
+        for storage_candidate in corpus_storage_path_read_candidates(storage_path):
+            candidates = [
+                Path(storage_candidate),
+                Path(self.root) / storage_candidate,
+            ]
+            for candidate in candidates:
+                try:
+                    if candidate.exists() and candidate.is_file():
+                        return candidate.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
         return None
 
 
@@ -264,10 +276,18 @@ class S3CorpusTextProvider:
     def read_text(self, storage_path: str) -> str | None:
         if not storage_path:
             return None
+        from papyrus_content.corpus_storage_paths import corpus_storage_path_read_candidates
+
         client = self._s3_client()
-        response = client.get_object(Bucket=self.bucket_name, Key=storage_path)
-        body = response["Body"].read(self.max_bytes + 1)
-        return body[: self.max_bytes].decode("utf-8", errors="replace")
+        for candidate in corpus_storage_path_read_candidates(storage_path):
+            try:
+                response = client.get_object(Bucket=self.bucket_name, Key=candidate)
+                body = response["Body"].read(self.max_bytes + 1)
+                return body[: self.max_bytes].decode("utf-8", errors="replace")
+            except Exception as error:  # noqa: BLE001
+                if not _is_s3_missing_key_error(error):
+                    raise
+        return None
 
     def _s3_client(self) -> Any:
         if self._client is not None:

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .catalog import catalog_items
+from .corpus_storage_paths import default_corpus_path
 from .options import (
     normalize_non_negative_integer,
     normalize_positive_integer,
@@ -34,7 +35,7 @@ def register_catalog_batches(flags: list[str]) -> None:
     corpus_config = require_corpus_config(steering_config, corpus_key)
     catalog_path = _resolve_path(
         normalize_string(options.get("catalog"))
-        or str(Path(corpus_config.get("path") or f"corpora/{corpus_key}") / "metadata" / "catalog.json")
+        or str(Path(default_corpus_path(corpus_config)) / "metadata" / "catalog.json")
     )
     if not catalog_path.exists():
         raise ValueError(f"Catalog not found at {catalog_path}.")

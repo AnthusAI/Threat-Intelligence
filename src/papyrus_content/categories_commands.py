@@ -24,6 +24,7 @@ from .categories_steering import (
     normalize_lexical_term,
     write_json_file,
 )
+from .corpus_storage_paths import corpus_storage_path_prefix
 from .curation_cycle import (
     build_curation_cycle_plan,
     latest_pipeline_snapshot,
@@ -110,7 +111,7 @@ def categories_sandbox_steering_config(flags: list[str]) -> None:
     output = {
         **source,
         "corpora": [
-            {**corpus, "s3Prefix": f"s3://{bucket}/corpora/{corpus['key']}/"}
+            {**corpus, "s3Prefix": f"s3://{bucket}/{corpus_storage_path_prefix(corpus['key'])}/"}
             for corpus in source["corpora"]
         ],
     }

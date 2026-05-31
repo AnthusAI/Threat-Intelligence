@@ -7,16 +7,16 @@ canonicalTopicSet:
 corpora:
   - key: "AI-ML-research"
     name: "AI-ML-research"
-    path: "corpora/AI-ML-research"
-    s3Prefix: "s3://amplify-dbsyytcm9drqa-mai-papyrusmediabucket0dab24-4hstaautjdqo/corpora/AI-ML-research/"
+    path: "corpora/ai-ml-research"
+    s3Prefix: "s3://amplify-dbsyytcm9drqa-mai-papyrusmediabucket0dab24-4hstaautjdqo/corpora/ai-ml-research/"
     role: "canonical"
     localClassifiers:
       - classifierId: "ai-ml-research"
         label: "AI/ML Research Topics"
   - key: "AI-ML-history"
     name: "AI-ML-history"
-    path: "corpora/AI-ML-history"
-    s3Prefix: "s3://amplify-dbsyytcm9drqa-mai-papyrusmediabucket0dab24-4hstaautjdqo/corpora/AI-ML-history/"
+    path: "corpora/ai-ml-history"
+    s3Prefix: "s3://amplify-dbsyytcm9drqa-mai-papyrusmediabucket0dab24-4hstaautjdqo/corpora/ai-ml-history/"
     role: "source"
     canonicalProjection:
       authorityCorpusKey: "AI-ML-research"
@@ -26,8 +26,8 @@ corpora:
         label: "AI/ML History Topics"
   - key: "AI-ML-journalism"
     name: "AI-ML-journalism"
-    path: "corpora/AI-ML-journalism"
-    s3Prefix: "s3://amplify-dbsyytcm9drqa-mai-papyrusmediabucket0dab24-4hstaautjdqo/corpora/AI-ML-journalism/"
+    path: "corpora/ai-ml-journalism"
+    s3Prefix: "s3://amplify-dbsyytcm9drqa-mai-papyrusmediabucket0dab24-4hstaautjdqo/corpora/ai-ml-journalism/"
     role: "source"
     canonicalProjection:
       authorityCorpusKey: "AI-ML-research"

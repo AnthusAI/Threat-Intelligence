@@ -115,7 +115,9 @@ def graph_corpus_summary(corpus: dict[str, Any], corpus_id: str, graph_state: di
 
 
 def read_local_corpus_catalog_summary(corpus: dict[str, Any]) -> dict[str, Any]:
-    catalog_path = Path(corpus.get("path") or f"corpora/{corpus['key']}") / "metadata" / "catalog.json"
+    from .corpus_storage_paths import default_corpus_path
+
+    catalog_path = Path(default_corpus_path(corpus)) / "metadata" / "catalog.json"
     if not catalog_path.exists():
         return {
             "exists": False,
@@ -167,7 +169,9 @@ def build_corpus_sync_plan(corpus: dict[str, Any], *, direction: str, options: d
     parsed_prefix = parse_s3_uri(corpus.get("s3Prefix"))
     if not parsed_prefix:
         raise ValueError(f"Corpus {corpus['key']} does not define a valid s3Prefix.")
-    local_path = corpus.get("path") or f"corpora/{corpus['key']}"
+    from .corpus_storage_paths import default_corpus_path
+
+    local_path = default_corpus_path(corpus)
     s3_uri = normalized_s3_uri(corpus["s3Prefix"])
     expected_bucket = storage_bucket_from_amplify_outputs()
     if not options.get("force") and expected_bucket and parsed_prefix["bucket"] != expected_bucket:

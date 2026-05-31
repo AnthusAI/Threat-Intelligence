@@ -580,7 +580,9 @@ def _build_command_plan(
     steering_config: dict[str, Any],
     biblicus_workdir: Path,
 ) -> list[dict[str, Any]]:
-    corpus_path = corpus.get("path") or f"corpora/{corpus['key']}"
+    from .corpus_storage_paths import default_corpus_path
+
+    corpus_path = default_corpus_path(corpus)
     extraction_snapshot = normalize_string(effective.get("extractionSnapshot")) or "<extraction-snapshot>"
     configuration_name = normalize_string(effective.get("graph.configurationName")) or profile["configurationName"]
     configurations = profile.get("biblicus", {}).get("configurations") or []
@@ -661,7 +663,7 @@ def _build_command_plan(
             if authority_corpus_key
             else corpus
         )
-        authority_path = authority_corpus.get("path") or f"corpora/{authority_corpus['key']}"
+        authority_path = default_corpus_path(authority_corpus)
         return [
             _command(
                 "topic-classifier-project",

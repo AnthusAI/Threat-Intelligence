@@ -270,8 +270,10 @@ def normalize_catalog_reference_item(
 ) -> dict[str, Any]:
     metadata = sanitize_reference_metadata(item.get("metadata") if isinstance(item.get("metadata"), dict) else {})
     relpath = _string_or_null(item.get("relpath") or item.get("relative_path") or item.get("relativePath"))
+    from .corpus_storage_paths import corpus_storage_path_prefix
+
     configured_path = _string_or_null(corpus_config.get("path")) or (
-        f"corpora/{corpus_config['key']}" if corpus_config.get("key") else None
+        corpus_storage_path_prefix(str(corpus_config["key"])) if corpus_config.get("key") else None
     )
     storage_path = _string_or_null(item.get("storage_path") or item.get("storagePath"))
     if not storage_path and relpath and configured_path:
