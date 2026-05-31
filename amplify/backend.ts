@@ -230,15 +230,6 @@ if (enableInboundEmail) {
     ttl: Duration.minutes(5),
     values: [verifyInboundEmailDomain.getResponseField("VerificationToken")],
   });
-  new route53.MxRecord(storageStack, "PapyrusInboundEmailMx", {
-    zone: inboundDnsZone,
-    recordName: inboundDnsRecordName,
-    values: [{ priority: 10, hostName: `inbound-smtp.${storageStack.region}.amazonaws.com` }],
-  });
-  new ses.EmailIdentity(storageStack, "PapyrusInboundEmailDomainIdentity", {
-    identity: ses.Identity.domain(inboundEmailDomain),
-    dkimSigning: true,
-  });
 
   new events.Rule(storageStack, "PapyrusInboundEmailObjectCreated", {
     description: "Process inbound SES MIME objects stored under inbound-email/",
