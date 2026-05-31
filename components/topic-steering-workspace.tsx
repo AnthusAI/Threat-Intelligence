@@ -11501,14 +11501,6 @@ function ReferenceDetailPanel({
     [attachmentLinksById, attachments],
   );
 
-  const previewAttachments = useMemo(
-    () => attachments.map((attachment) => ({
-      ...attachment,
-      sourceUri: attachmentLinksById[attachment.id] ?? attachment.sourceUri,
-    })),
-    [attachmentLinksById, attachments],
-  );
-
   if (!reference) {
     return (
       <section className="category-steering-section" aria-label="Reference detail">
