@@ -774,6 +774,24 @@ DOCS: dict[str, dict[str, Any]] = {
             "digital_object_identifier_is relations, and persists DOI metadata."
         ),
     },
+    "newsroom.web-ui": {
+        "id": "newsroom.web-ui",
+        "title": "Web UI Locations",
+        "summary": "Read the editor's current page and navigate the web app via papyrus:// URIs.",
+        "namespace": "newsroom",
+        "status": "stable",
+        "tags": ["web", "console", "navigation"],
+        "content": (
+            "Console chat agents receive the user's current web UI state as pedantic "
+            "papyrus:// location URIs. Object detail pages use object URIs such as "
+            "papyrus://reference/<lineage-id>. Newsroom desk tabs use "
+            "papyrus://newsroom/<tab>, for example papyrus://newsroom/references.\n\n"
+            "Use papyrus.web.current_location{} to read the latest UI snapshot injected "
+            "by the web chat harness. Use papyrus.web.navigate{ uri = "
+            "\"papyrus://reference/<lineage-id>\" } to request in-browser navigation; "
+            "the web client maps the URI back to the concrete Next.js route."
+        ),
+    },
     "newsroom.web-research": {
         "id": "newsroom.web-research",
         "title": "Web Research",
@@ -811,6 +829,8 @@ HELPER_BINDINGS: tuple[tuple[str, str, str], ...] = (
     ("reference_web_search", "reference", "web_search"),
     ("knowledge_query", "knowledge", "query"),
     ("resolve_papyrus_uri", "papyrus", "resolve_uri"),
+    ("web_current_location", "web", "current_location"),
+    ("web_navigate", "web", "navigate"),
     ("recent_published_articles", "article", "recent_published"),
     ("biblicus_steering_artifacts", "biblicus", "steering_artifacts"),
     ("biblicus_topic_context", "biblicus", "topic_context"),
@@ -832,11 +852,13 @@ HELPER_BINDINGS: tuple[tuple[str, str, str], ...] = (
 class PapyrusRuntimeModule:
     """Tactus host module exposing curated Papyrus newsroom namespaces."""
 
-    def __init__(self) -> None:
+    def __init__(self, web_ui_context: dict[str, Any] | None = None) -> None:
         self._api_calls: list[str] = []
+        self._web_ui_context = dict(web_ui_context or {})
         methods_by_namespace: dict[str, set[str]] = {}
         for namespace, method in API_METHODS:
             methods_by_namespace.setdefault(namespace, set()).add(method)
+        methods_by_namespace.setdefault("web", set()).update({"current_location", "navigate"})
         for namespace, methods in methods_by_namespace.items():
             if namespace != "papyrus":
                 setattr(self, namespace, _Namespace(self._call, namespace, methods))
@@ -860,12 +882,41 @@ class PapyrusRuntimeModule:
             self._api_calls.append(f"papyrus.{namespace}.{method}")
 
     def _call(self, namespace: str, method: str, args: Any = None) -> Any:
+        parsed = _args(args)
+        if namespace == "web":
+            self._record_api_call(namespace, method)
+            return self._call_web(method, parsed)
         handler = API_METHODS.get((namespace, method))
         if handler is None:
             raise ValueError(f"Unsupported Papyrus runtime API: papyrus.{namespace}.{method}")
-        parsed = _args(args)
         self._record_api_call(namespace, method)
         return handler(parsed)
+
+    def _call_web(self, method: str, args: dict[str, Any]) -> Any:
+        from papyrus_web.locations import papyrus_uri_to_web_path
+
+        if method == "current_location":
+            location = dict(self._web_ui_context)
+            if not location:
+                return {"location": {}, "available": False}
+            return {"location": location, "available": True}
+        if method == "navigate":
+            uri = str(args.get("uri") or args.get("papyrusUri") or args.get("papyrus_uri") or "").strip()
+            if not uri:
+                raise ValueError("papyrus.web.navigate requires uri")
+            mapped = papyrus_uri_to_web_path(uri)
+            replace = bool(args.get("replace") or args.get("replaceHistory") or False)
+            return {
+                "ok": True,
+                "navigation": {
+                    "papyrusLocationUri": mapped["papyrusLocationUri"],
+                    "webPath": mapped["webPath"],
+                    "replace": replace,
+                },
+                "previousLocation": dict(self._web_ui_context),
+                "requestedUri": uri,
+            }
+        raise ValueError(f"Unsupported Papyrus runtime API: papyrus.web.{method}")
 
     def _call_resource(self, resource: str, method: str, args: Any = None) -> Any:
         handler = RESOURCE_METHODS.get((resource, method))
@@ -1911,11 +1962,12 @@ def execute_tactus_harnessed(
     research_mode: str = "",
     knowledge_query_scope: dict[str, Any] | None = None,
     disable_tactus_web: bool = False,
+    web_ui_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     tactus = _normalize_tactus_snippet(tactus)
     assignment_id = _normalize_tactus_identifier(assignment_id)
     if harness == "raw":
-        return execute_tactus(tactus)
+        return execute_tactus(tactus, web_ui_context=web_ui_context)
     if harness == "research":
         snippet = _research_harness(
             body=tactus,
@@ -1927,7 +1979,7 @@ def execute_tactus_harnessed(
             knowledge_query_scope=knowledge_query_scope,
             disable_tactus_web=disable_tactus_web,
         )
-        return execute_tactus(snippet)
+        return execute_tactus(snippet, web_ui_context=web_ui_context)
     return _response_envelope(
         ok=False,
         value=None,
@@ -1938,7 +1990,7 @@ def execute_tactus_harnessed(
     )
 
 
-def execute_tactus(tactus: str) -> dict[str, Any]:
+def execute_tactus(tactus: str, *, web_ui_context: dict[str, Any] | None = None) -> dict[str, Any]:
     """Execute a short Papyrus Tactus snippet and return a structured envelope.
 
     This is the single Papyrus newsroom agent tool. The snippet receives a
@@ -1980,7 +2032,7 @@ def execute_tactus(tactus: str) -> dict[str, Any]:
             error=unsupported_error,
         )
 
-    papyrus = PapyrusRuntimeModule()
+    papyrus = PapyrusRuntimeModule(web_ui_context=web_ui_context)
     try:
         from tactus.adapters.memory import MemoryStorage
         from tactus.core import TactusRuntime

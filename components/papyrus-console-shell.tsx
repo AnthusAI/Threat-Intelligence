@@ -2,7 +2,7 @@
 
 import type { BotAvatarState } from "anthus-vultus";
 import dynamic from "next/dynamic";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CheckIcon, UserIcon } from "lucide-react";
 import { Md5 } from "@smithy/md5-js";
 import { gsap } from "gsap";
@@ -18,6 +18,7 @@ import {
   type ConsoleChatThread,
 } from "../lib/console-chat-client";
 import { buildNewsroomKnowledgeQueryInput, type NewsroomKnowledgeQueryTarget } from "../lib/newsroom-knowledge-query-request";
+import { buildWebUiContext, extractNavigationIntent } from "../lib/papyrus-web-locations";
 import { runNewsroomKnowledgeQuery } from "./news-desk-taxonomy-client";
 import { loadReaderSessionSnapshot, type ReaderSessionSnapshot } from "./reader-auth-state";
 import {
@@ -405,6 +406,9 @@ function ConsoleAccessPanel({ onClose, session }: { onClose: () => void; session
 }
 
 function ConsolePanel({ actorEmail, actorLabel, onClose }: { actorEmail: string | null; actorLabel: string; onClose: () => void }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [thread, setThread] = useState<ConsoleChatThread | null>(null);
   const [threads, setThreads] = useState<ConsoleChatThread[]>([]);
   const [messages, setMessages] = useState<ConsoleChatMessage[]>([]);
@@ -419,10 +423,33 @@ function ConsolePanel({ actorEmail, actorLabel, onClose }: { actorEmail: string 
   const hasLoadedRef = useRef(false);
   const activeThreadIdRef = useRef<string | null>(null);
   const threadRef = useRef<ConsoleChatThread | null>(null);
+  const handledNavigationMessageIdsRef = useRef<Set<string>>(new Set());
+
+  const currentWebPath = useMemo(() => {
+    const path = pathname ?? "/newsroom";
+    const query = searchParams.toString();
+    return query ? `${path}?${query}` : path;
+  }, [pathname, searchParams]);
+
+  const currentWebUi = useMemo(() => buildWebUiContext(currentWebPath), [currentWebPath]);
 
   useEffect(() => {
     threadRef.current = thread;
   }, [thread]);
+
+  useEffect(() => {
+    for (const message of messages) {
+      if (message.messageKind !== CONSOLE_TOOL_RESULT_KIND) continue;
+      if (handledNavigationMessageIdsRef.current.has(message.id)) continue;
+      const metadata = readAwsJsonObject(message.metadata);
+      const navigation = extractNavigationIntent(readNestedValue(metadata, ["toolResultJson"]));
+      if (!navigation) continue;
+      handledNavigationMessageIdsRef.current.add(message.id);
+      if (currentWebPath !== navigation.webPath) {
+        router.push(navigation.webPath);
+      }
+    }
+  }, [currentWebPath, messages, router]);
 
   useEffect(() => {
     setMotionSetting(readLocalReaderSettings().motion);
@@ -663,6 +690,7 @@ function ConsolePanel({ actorEmail, actorLabel, onClose }: { actorEmail: string 
             email: effectiveAuthorIdentity.email,
             userProfileId: effectiveAuthorIdentity.userProfileId,
           },
+          webUi: currentWebUi,
         },
       };
       const message: ConsoleChatMessage = {

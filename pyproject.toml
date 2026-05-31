@@ -22,6 +22,7 @@ packages = [
     { include = "papyrus_newsroom", from = "src" },
     { include = "papyrus_knowledge_query", from = "src" },
     { include = "papyrus_content", from = "src" },
+    { include = "papyrus_web", from = "src" },
 ]
 
 [tool.poetry.group.dev.dependencies]
