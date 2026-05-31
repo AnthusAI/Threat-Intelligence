@@ -5582,18 +5582,6 @@ img {
   z-index: 80;
 }
 
-.news-desk-reference-source-preview__viewport-title-hidden {
-  border: 0;
-  clip: rect(0 0 0 0);
-  height: 1px;
-  margin: -1px;
-  overflow: hidden;
-  padding: 0;
-  position: absolute;
-  white-space: nowrap;
-  width: 1px;
-}
-
 .news-desk-reference-source-preview__viewport-strip {
   align-items: center;
   background: var(--paper);
