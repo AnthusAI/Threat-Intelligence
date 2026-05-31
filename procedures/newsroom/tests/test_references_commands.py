@@ -1667,7 +1667,7 @@ class ReferenceCommandsTests(unittest.TestCase):
         self.assertEqual(result["canonicalSourceUri"], "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
         self.assertEqual(result["identifiers"]["resolved"]["youtube_video_id"], "dQw4w9WgXcQ")
         warning_codes = {str(entry.get("code") or "") for entry in result["warnings"] if isinstance(entry, dict)}
-        self.assertIn("youtube_enrichment_not_implemented", warning_codes)
+        self.assertIn("youtube_transcript_via_markitdown", warning_codes)
 
     def test_source_site_enrichment_acl_anthology_prefers_pdf(self):
         result = resolve_source_site_enrichment(
@@ -1678,6 +1678,48 @@ class ReferenceCommandsTests(unittest.TestCase):
         self.assertEqual(result["canonicalSourceUri"], "https://aclanthology.org/2024.findings-acl.890.pdf")
         self.assertEqual(result["identifiers"]["resolved"]["acl_anthology_id"], "2024.findings-acl.890")
         self.assertEqual(result["sourceVariants"]["canonicalLandingUrl"], "https://aclanthology.org/2024.findings-acl.890/")
+
+    def test_source_site_enrichment_acm_resolves_urls_abstract_and_identifiers(self):
+        landing_html = """
+            <html><head>
+            <script type=\"application/ld+json\">
+            {
+              \"@context\": \"https://schema.org\",
+              \"@type\": \"ScholarlyArticle\",
+              \"description\": \"An ACM abstract from JSON-LD.\"
+            }
+            </script>
+            </head>
+            <body>
+            <div class=\"article__abstract\"><p>Fallback abstract paragraph.</p></div>
+            </body></html>
+        """
+        result = resolve_source_site_enrichment(
+            reference={"id": "reference-acm"},
+            source_uri="https://dl.acm.org/doi/10.1145/122344.122377",
+            fetcher=lambda _url: landing_html,
+        )
+        self.assertEqual(result["pluginKey"], "acm")
+        self.assertEqual(
+            result["canonicalSourceUri"],
+            "https://dl.acm.org/doi/pdf/10.1145/122344.122377?download=true",
+        )
+        self.assertEqual(result["identifiers"]["resolved"]["doi"], "10.1145/122344.122377")
+        self.assertEqual(result["metadata"]["abstract"], "An ACM abstract from JSON-LD.")
+        self.assertEqual(result["identifiers"]["primary"], {"type": "doi", "value": "10.1145/122344.122377"})
+        self.assertEqual(
+            result["sourceVariants"]["canonicalLandingUrl"],
+            "https://dl.acm.org/doi/10.1145/122344.122377",
+        )
+
+    def test_source_site_enrichment_acm_beats_generic_doi_plugin(self):
+        result = resolve_source_site_enrichment(
+            reference={"id": "reference-acm-doi"},
+            source_uri="https://dl.acm.org/doi/abs/10.1145/122344.122377",
+            fetcher=lambda _url: "<html></html>",
+        )
+        self.assertEqual(result["pluginKey"], "acm")
+        self.assertEqual(result["identifiers"]["resolved"]["doi"], "10.1145/122344.122377")
 
     @mock.patch("papyrus_content.source_site_plugins._metadata_pdf_candidates", return_value=[])
     @mock.patch("papyrus_content.source_site_plugins._search_pdf_candidates", return_value=[])

@@ -248,6 +248,120 @@ class DoiSourcePlugin(SourceSitePlugin):
         return _normalize_doi(match.group(0)) if match else ""
 
 
+class AcmSourcePlugin(SourceSitePlugin):
+    key = "acm"
+
+    _DOI_PATH_PATTERN = re.compile(
+        r"^/doi/(?:(?:abs|pdf|epdf|fullHtml)/)?(10\.\d{4,9}/[^/?#]+)",
+        flags=re.IGNORECASE,
+    )
+
+    def match(self, source_uri: str) -> bool:
+        parsed = urllib.parse.urlparse(source_uri)
+        host = (parsed.hostname or "").lower().strip()
+        if host != "dl.acm.org":
+            return False
+        return bool(self._doi_from_uri(source_uri))
+
+    def enrich(self, *, reference: dict[str, Any], source_uri: str, fetcher: Callable[[str], str]) -> dict[str, Any]:
+        doi = self._doi_from_uri(source_uri)
+        if not doi:
+            return {
+                "pluginKey": self.key,
+                "canonicalSourceUri": source_uri,
+                "sourceVariants": {"inputUrl": source_uri},
+                "identifiers": {
+                    "resolved": {},
+                    "candidates": [],
+                    "primary": None,
+                    "warnings": [
+                        {
+                            "code": "acm_doi_unresolved",
+                            "message": "Could not parse DOI from ACM Digital Library source URI.",
+                        }
+                    ],
+                },
+                "metadata": {},
+                "attachmentMetadata": {},
+                "warnings": [
+                    {
+                        "code": "acm_doi_unresolved",
+                        "message": "Could not parse DOI from ACM Digital Library source URI.",
+                    }
+                ],
+            }
+
+        canonical_landing_url = f"https://dl.acm.org/doi/{doi}"
+        canonical_pdf_url = f"https://dl.acm.org/doi/pdf/{doi}?download=true"
+
+        abstract = ""
+        warnings: list[dict[str, Any]] = []
+        try:
+            landing_body = fetcher(canonical_landing_url)
+            abstract = _acm_abstract_from_html(landing_body)
+        except Exception as error:  # pragma: no cover - network errors are mocked in tests
+            warnings.append(
+                {
+                    "code": "acm_landing_fetch_failed",
+                    "message": str(error),
+                    "url": canonical_landing_url,
+                }
+            )
+
+        resolved: dict[str, str] = {"doi": doi}
+        candidates = [
+            {
+                "type": "doi",
+                "value": doi,
+                "source": "acm_url",
+                "confidence": 1.0,
+                "rank": 10,
+            }
+        ]
+        now = _utc_now()
+        return {
+            "pluginKey": self.key,
+            "canonicalSourceUri": canonical_pdf_url,
+            "sourceVariants": {
+                "inputUrl": source_uri,
+                "canonicalLandingUrl": canonical_landing_url,
+                "canonicalPdfUrl": canonical_pdf_url,
+            },
+            "identifiers": {
+                "resolved": resolved,
+                "candidates": candidates,
+                "primary": {"type": "doi", "value": doi},
+                "warnings": list(warnings),
+            },
+            "metadata": {
+                "doi": doi,
+                "canonicalLandingUrl": canonical_landing_url,
+                "canonicalPdfUrl": canonical_pdf_url,
+                "abstract": abstract,
+                "abstractSource": "acm_landing_structured" if abstract else "",
+                "resolvedAt": now,
+            },
+            "attachmentMetadata": {
+                "sitePlugin": self.key,
+                "doi": doi,
+                "canonicalLandingUrl": canonical_landing_url,
+                "canonicalPdfUrl": canonical_pdf_url,
+                "resolvedAt": now,
+            },
+            "warnings": warnings,
+        }
+
+    def _doi_from_uri(self, source_uri: str) -> str:
+        parsed = urllib.parse.urlparse(source_uri)
+        match = self._DOI_PATH_PATTERN.match(parsed.path or "")
+        if not match:
+            fallback = re.search(r"(10\.\d{4,9}/[^/?#]+)", parsed.path or "", flags=re.IGNORECASE)
+            if not fallback:
+                return ""
+            return _normalize_doi(fallback.group(1))
+        return _normalize_doi(match.group(1))
+
+
 class ArxivSourcePlugin(SourceSitePlugin):
     key = "arxiv"
 
@@ -388,8 +502,11 @@ class YouTubeSourcePlugin(SourceSitePlugin):
         canonical_uri = f"https://www.youtube.com/watch?v={video_id}" if video_id else source_uri
         warnings = [
             {
-                "code": "youtube_enrichment_not_implemented",
-                "message": "YouTube plugin currently resolves URI + video id only; deeper metadata extraction is not implemented.",
+                "code": "youtube_transcript_via_markitdown",
+                "message": (
+                    "YouTube references resolve video id here; transcript text is extracted via "
+                    "Biblicus/MarkItDown during references process-fetch-url-text."
+                ),
             }
         ]
         resolved = {"youtube_video_id": video_id} if video_id else {}
@@ -504,6 +621,7 @@ class AclAnthologySourcePlugin(SourceSitePlugin):
 
 
 _PLUGINS: tuple[SourceSitePlugin, ...] = (
+    AcmSourcePlugin(),
     DoiSourcePlugin(),
     ArxivSourcePlugin(),
     AclAnthologySourcePlugin(),
@@ -657,6 +775,10 @@ def _select_primary_identifier(*, resolved: dict[str, str], candidates: list[dic
     return None
 
 
+def youtube_video_id_from_uri(source_uri: str) -> str:
+    return _youtube_video_id_from_uri(source_uri)
+
+
 def _youtube_video_id_from_uri(source_uri: str) -> str:
     parsed = urllib.parse.urlparse(source_uri)
     host = (parsed.hostname or "").lower()
@@ -740,6 +862,16 @@ def _pdf_candidates_from_final_url(url: str) -> list[str]:
         slug = path.strip("/").rstrip("/")
         if slug and not slug.lower().endswith(".pdf"):
             candidates.append(f"https://aclanthology.org/{slug}.pdf")
+    if host == "dl.acm.org":
+        doi_match = re.search(
+            r"/doi/(?:(?:abs|pdf|epdf|fullHtml)/)?(10\.\d{4,9}/[^/?#]+)",
+            path,
+            flags=re.IGNORECASE,
+        )
+        if doi_match:
+            doi = _normalize_doi(doi_match.group(1))
+            if doi:
+                candidates.append(f"https://dl.acm.org/doi/pdf/{doi}?download=true")
     return _dedupe_urls(candidates)
 
 
@@ -973,6 +1105,36 @@ def _reference_authors(reference: dict[str, Any]) -> str:
             return ", ".join(parts[:6])
     if isinstance(authors, str):
         return authors.strip()
+    return ""
+
+
+def _acm_abstract_from_html(html: str) -> str:
+    for payload in _extract_json_ld_payloads(html):
+        abstract = _json_ld_lookup(payload, keys=("description", "abstract"))
+        if abstract:
+            return _clean_text(abstract)
+
+    meta_match = re.search(
+        r'<meta[^>]+name=["\'](?:description|citation_abstract)["\'][^>]+content=["\']([^"\']+)["\']',
+        html,
+        flags=re.IGNORECASE,
+    )
+    if meta_match:
+        return _clean_text(meta_match.group(1))
+
+    paragraph_matches = re.findall(
+        r'<div[^>]+class=["\'][^"\']*(?:article__abstract|abstractSection)[^"\']*["\'][^>]*>(.*?)</div>',
+        html,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    paragraphs: list[str] = []
+    for block in paragraph_matches:
+        for paragraph in re.findall(r"<p[^>]*>(.*?)</p>", block, flags=re.IGNORECASE | re.DOTALL):
+            text = _clean_text(re.sub(r"<[^>]+>", " ", paragraph))
+            if text and text.lower() != "no abstract available.":
+                paragraphs.append(text)
+    if paragraphs:
+        return "\n\n".join(paragraphs)
     return ""
 
 
