@@ -109,6 +109,7 @@ if (enableConsoleResponder) {
   });
 }
 
+const storageBackupsStack = backend.createStack("storage-backups");
 const storageBackupVaultName = "papyrus-dbsyytcm9drqa-main-media-backup-vault";
 const storageBucket = backend.storage.resources.bucket;
 const storageStack = Stack.of(storageBucket);
@@ -122,11 +123,11 @@ if (storageBucketCfn) {
   );
 }
 
-const storageBackupVault = new backup.BackupVault(storageStack, "PapyrusStorageBackupVault", {
+const storageBackupVault = new backup.BackupVault(storageBackupsStack, "PapyrusStorageBackupVault", {
   backupVaultName: storageBackupVaultName,
   removalPolicy: RemovalPolicy.RETAIN,
 });
-const storageBackupPlan = new backup.BackupPlan(storageStack, "PapyrusStorageBackupPlan", {
+const storageBackupPlan = new backup.BackupPlan(storageBackupsStack, "PapyrusStorageBackupPlan", {
   backupVault: storageBackupVault,
 });
 
