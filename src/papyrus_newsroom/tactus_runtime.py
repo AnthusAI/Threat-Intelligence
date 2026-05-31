@@ -350,6 +350,7 @@ API_METHODS: dict[tuple[str, str], Callable[[dict[str, Any]], Any]] = {
         max_results=args.get("max_results") or args.get("maxResults") or args.get("limit") or 20,
         model=args.get("model") or "gpt-5.4-mini",
         return_token_budget=args.get("return_token_budget") or args.get("returnTokenBudget") or "default",
+        provider=args.get("provider") or args.get("web_search_provider") or args.get("webSearchProvider"),
     ),
     ("reference", "doi_backfill_plan"): lambda args: newsroom.papyrus_doi_backfill_plan(
         corpus_key=args.get("corpus_key") or args.get("corpusKey") or "AI-ML-research",
@@ -795,14 +796,16 @@ DOCS: dict[str, dict[str, Any]] = {
     "newsroom.web-research": {
         "id": "newsroom.web-research",
         "title": "Web Research",
-        "summary": "Use web_search helper or papyrus.reference.web_search for fresh external evidence.",
+        "summary": "Use web_search helper or papyrus.reference.web_search for fresh external evidence (Tavily by default).",
         "namespace": "newsroom",
         "status": "stable",
         "tags": ["web", "evidence", "tactus"],
         "content": (
             "Inside research harness snippets, use web_search(query) directly. "
             "Outside that harness, call papyrus.reference.web_search{ query = ..., "
-            "max_results = ..., model = ... }. The harness first tries Tactus "
+            "max_results = ..., provider = ... }. Tavily is the default provider "
+            "(WEB_SEARCH_PROVIDER=tavily); set provider=\"openai\" to use OpenAI web search. "
+            "The harness first tries Tactus "
             "stdlib web.search and falls back to papyrus.reference.web_search when "
             "tactus.web is unavailable. Keep web discoveries as reference prospects "
             "until intake accepts them; do not write GraphQL records from search "
@@ -1815,7 +1818,7 @@ local function default_ingestion_rationale(source, query, answer)
     focus = string.gsub(focus, "[%.%s]+$", "")
     return table.concat({{
         title,
-        " was returned by OpenAI web search for ",
+        " was returned by web search for ",
         query or "the research query",
         ". The source should be reviewed as a reference prospect because it may provide current context for ",
         focus,
