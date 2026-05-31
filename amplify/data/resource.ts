@@ -41,7 +41,6 @@ const schema = a.schema({
     .authorization((allow) => [
       allow.owner(),
       allow.group(adminGroup),
-      allow.resource(sesInboundReceive).to(["read"]),
     ]),
 
   UserIdentity: a
