@@ -11451,6 +11451,14 @@ function ReferenceDetailPanel({
     };
   }, [referenceLineageId]);
 
+  const previewAttachments = useMemo(
+    () => attachments.map((attachment) => ({
+      ...attachment,
+      sourceUri: attachmentLinksById[attachment.id] ?? attachment.sourceUri,
+    })),
+    [attachmentLinksById, attachments],
+  );
+
   if (!reference) {
     return (
       <section className="category-steering-section" aria-label="Reference detail">
@@ -11491,13 +11499,6 @@ function ReferenceDetailPanel({
   const activeExtractedTextState = activeExtractedTextEntry?.mode === "original"
     ? extractedTextOriginalState
     : extractedTextFilteredState;
-  const previewAttachments = useMemo(
-    () => attachments.map((attachment) => ({
-      ...attachment,
-      sourceUri: attachmentLinksById[attachment.id] ?? attachment.sourceUri,
-    })),
-    [attachmentLinksById, attachments],
-  );
   const inboundCitationCount = resolveReferenceCitationCount(reference.inboundCitationCount, incomingCitationRelations.length);
   const outboundCitationCount = resolveReferenceCitationCount(reference.outboundCitationCount, outgoingCitationRelations.length);
 
