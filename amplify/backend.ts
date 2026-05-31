@@ -50,8 +50,9 @@ const backend = defineBackend({
   newsroomSummary,
   procedureAction,
   readerSettings,
+  emailSubmissionProcessor,
+  sesInboundReceive,
   storage,
-  ...(enableInboundEmail ? { emailSubmissionProcessor, sesInboundReceive } : {}),
 });
 
 const amplifyBackendDir = dirname(fileURLToPath(import.meta.url));
@@ -179,6 +180,12 @@ if (enableInboundEmail) {
     new PolicyStatement({
       actions: ["s3:GetObject"],
       resources: [`${storageBucket.bucketArn}/inbound-email/*`],
+    }),
+  );
+  receiveLambda.addToRolePolicy(
+    new PolicyStatement({
+      actions: ["appsync:GraphQL"],
+      resources: ["*"],
     }),
   );
   processorLambda.addToRolePolicy(
