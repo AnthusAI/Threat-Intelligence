@@ -1,9 +1,9 @@
 """
 Papyrus automated newsroom tools for Tactus procedures.
 
-The v1 tools are intentionally dry-run first. GraphQL helpers only read from
-Papyrus, while record builders return mutation plans that callers can inspect
-before any live authoring path is added.
+These helpers expose both live authoring and dry-run planning paths. GraphQL
+helpers can read and write Papyrus, while record builders still return
+inspectable mutation plans for explicit preview flows.
 """
 
 from __future__ import annotations
@@ -14,13 +14,16 @@ import json
 import os
 import re
 import subprocess
+import uuid
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
 
 from .semantic import PapyrusSemanticClient
 from .reference_policy import is_evidence_eligible_reference
+from . import reference_actions
 
 try:
     import yaml
@@ -118,6 +121,66 @@ query ListEditionItemsByEdition($editionId: ID!, $limit: Int, $nextToken: String
 }
 """
 
+GET_EDITION_SLOT_QUERY = """
+query GetEditionSlot($id: ID!) {
+  getEditionSlot(id: $id) {
+    id
+    editionId
+    sectionKey
+    slotRank
+    targetType
+    targetLengthBand
+    minImageAssets
+    status
+    selectedAssignmentId
+    metadata
+    createdAt
+    updatedAt
+  }
+}
+"""
+
+LIST_EDITION_SLOTS_BY_EDITION_QUERY = """
+query ListEditionSlotsByEditionSectionAndRank($editionId: ID!, $limit: Int, $nextToken: String) {
+  listEditionSlotsByEditionSectionAndRank(editionId: $editionId, limit: $limit, nextToken: $nextToken) {
+    items {
+      id
+      editionId
+      sectionKey
+      slotRank
+      targetType
+      targetLengthBand
+      minImageAssets
+      status
+      selectedAssignmentId
+      metadata
+      createdAt
+      updatedAt
+    }
+    nextToken
+  }
+}
+"""
+
+UPDATE_EDITION_SLOT_MUTATION = """
+mutation UpdateEditionSlot($input: UpdateEditionSlotInput!) {
+  updateEditionSlot(input: $input) {
+    id
+    editionId
+    sectionKey
+    slotRank
+    targetType
+    targetLengthBand
+    minImageAssets
+    status
+    selectedAssignmentId
+    metadata
+    createdAt
+    updatedAt
+  }
+}
+"""
+
 GET_ITEM_QUERY = """
 query GetItem($id: ID!) {
   getItem(id: $id) {
@@ -186,6 +249,42 @@ query GetAssignment($id: ID!) {
     createdBy
     createdAt
     updatedAt
+  }
+}
+"""
+
+GET_NEWSROOM_SECTION_QUERY = """
+query GetNewsroomSection($id: ID!) {
+  getNewsroomSection(id: $id) {
+    id
+    title
+    shortTitle
+    type
+    editorialMission
+    editorialPolicy
+    assignmentGuidance
+    killCriteria
+    visualGuidance
+    enabled
+    sortOrder
+    updatedAt
+  }
+}
+"""
+
+GET_DOCTRINE_BY_SLUG_QUERY = """
+query DoctrineBySlug($slug: String!, $limit: Int) {
+  itemBySlug(slug: $slug, limit: $limit) {
+    items {
+      id
+      slug
+      title
+      type
+      status
+      body
+      updatedAt
+    }
+    nextToken
   }
 }
 """
@@ -298,6 +397,94 @@ query ListAssignments($limit: Int, $nextToken: String) {
 }
 """
 
+CREATE_ASSIGNMENT_MUTATION = """
+mutation CreateAssignment($input: CreateAssignmentInput!) {
+  createAssignment(input: $input) {
+    id
+    assignmentTypeKey
+    queueKey
+    queueStatusKey
+    status
+    priority
+    title
+    summary
+    assigneeType
+    assigneeId
+    assigneeKey
+    corpusId
+    categorySetId
+    classifierId
+    sectionId
+    sectionKey
+    sectionType
+    sectionStatusKey
+    sectionQueueStatusKey
+    primaryFocusCategoryKey
+    topicScopeCategoryKeys
+    sourceSnapshotId
+    importRunId
+    createdBy
+    createdAt
+    updatedAt
+  }
+}
+"""
+
+CREATE_ASSIGNMENT_EVENT_MUTATION = """
+mutation CreateAssignmentEvent($input: CreateAssignmentEventInput!) {
+  createAssignmentEvent(input: $input) {
+    id
+    assignmentId
+    assignmentTypeKey
+    queueKey
+    eventType
+    fromStatus
+    toStatus
+    actorSub
+    actorLabel
+    note
+    createdAt
+  }
+}
+"""
+
+UPDATE_ASSIGNMENT_MUTATION = """
+mutation UpdateAssignment($input: UpdateAssignmentInput!) {
+  updateAssignment(input: $input) {
+    id
+    assignmentTypeKey
+    queueKey
+    queueStatusKey
+    status
+    priority
+    title
+    summary
+    assigneeType
+    assigneeId
+    assigneeKey
+    claimedAt
+    claimExpiresAt
+    completedAt
+    canceledAt
+    corpusId
+    categorySetId
+    classifierId
+    sectionId
+    sectionKey
+    sectionType
+    sectionStatusKey
+    sectionQueueStatusKey
+    primaryFocusCategoryKey
+    topicScopeCategoryKeys
+    sourceSnapshotId
+    importRunId
+    createdBy
+    createdAt
+    updatedAt
+  }
+}
+"""
+
 LIST_PUBLISHED_ITEMS_QUERY = """
 query ListPublishedItems($limit: Int, $nextToken: String) {
   listPublishedItems(limit: $limit, nextToken: $nextToken) {
@@ -395,6 +582,11 @@ query ListSemanticNodes($limit: Int, $nextToken: String) {
       displayName
       description
       aliases
+      authorityScore
+      authorityRank
+      acceptedReferenceMentionCount
+      distinctSourceKindCount
+      relationCount
       status
       updatedAt
     }
@@ -421,6 +613,168 @@ query ListMessages($limit: Int, $nextToken: String) {
       updatedAt
     }
     nextToken
+  }
+}
+"""
+
+LIST_MESSAGE_THREADS_BY_KIND_QUERY = """
+query ListMessageThreadsByKindAndUpdatedAt($threadKind: String!, $limit: Int, $nextToken: String) {
+  listMessageThreadsByKindAndUpdatedAt(threadKind: $threadKind, limit: $limit, nextToken: $nextToken) {
+    items {
+      id
+      threadKind
+      status
+      title
+      summary
+      primaryAnchorKind
+      primaryAnchorId
+      primaryAnchorLineageId
+      primaryAnchorKey
+      createdBySub
+      createdByUserProfileId
+      createdByLabel
+      messageCount
+      lastMessageId
+      lastMessageAt
+      contextDigest
+      metadata
+      createdAt
+      updatedAt
+      newsroomFeedKey
+    }
+    nextToken
+  }
+}
+"""
+
+GET_MESSAGE_THREAD_QUERY = """
+query GetMessageThread($id: ID!) {
+  getMessageThread(id: $id) {
+    id
+    threadKind
+    status
+    title
+    summary
+    primaryAnchorKind
+    primaryAnchorId
+    primaryAnchorLineageId
+    primaryAnchorKey
+    createdBySub
+    createdByUserProfileId
+    createdByLabel
+    messageCount
+    lastMessageId
+    lastMessageAt
+    contextDigest
+    metadata
+    createdAt
+    updatedAt
+    newsroomFeedKey
+  }
+}
+"""
+
+LIST_MESSAGES_BY_THREAD_QUERY = """
+query ListMessagesByThreadAndSequence($threadId: ID!, $limit: Int, $nextToken: String) {
+  listMessagesByThreadAndSequence(threadId: $threadId, sortDirection: ASC, limit: $limit, nextToken: $nextToken) {
+    items {
+      id
+      messageKind
+      messageDomain
+      status
+      summary
+      source
+      importRunId
+      authorSub
+      authorUserProfileId
+      authorLabel
+      threadId
+      parentMessageId
+      sequenceNumber
+      role
+      messageType
+      content
+      metadata
+      createdAt
+      updatedAt
+      newsroomFeedKey
+    }
+    nextToken
+  }
+}
+"""
+
+CREATE_MESSAGE_THREAD_MUTATION = """
+mutation CreateMessageThread($input: CreateMessageThreadInput!) {
+  createMessageThread(input: $input) {
+    id
+    threadKind
+    status
+    title
+    summary
+    primaryAnchorKind
+    primaryAnchorId
+    primaryAnchorLineageId
+    primaryAnchorKey
+    createdByLabel
+    messageCount
+    lastMessageId
+    lastMessageAt
+    metadata
+    createdAt
+    updatedAt
+    newsroomFeedKey
+  }
+}
+"""
+
+UPDATE_MESSAGE_THREAD_MUTATION = """
+mutation UpdateMessageThread($input: UpdateMessageThreadInput!) {
+  updateMessageThread(input: $input) {
+    id
+    threadKind
+    status
+    title
+    summary
+    primaryAnchorKind
+    primaryAnchorId
+    primaryAnchorLineageId
+    primaryAnchorKey
+    createdByLabel
+    messageCount
+    lastMessageId
+    lastMessageAt
+    metadata
+    createdAt
+    updatedAt
+    newsroomFeedKey
+  }
+}
+"""
+
+CREATE_MESSAGE_MUTATION = """
+mutation CreateMessage($input: CreateMessageInput!) {
+  createMessage(input: $input) {
+    id
+    messageKind
+    messageDomain
+    status
+    summary
+    source
+    importRunId
+    authorSub
+    authorUserProfileId
+    authorLabel
+    threadId
+    parentMessageId
+    sequenceNumber
+    role
+    messageType
+    content
+    metadata
+    createdAt
+    updatedAt
+    newsroomFeedKey
   }
 }
 """
@@ -489,6 +843,262 @@ def papyrus_list_edition_items(edition_id: str, limit: int = 100) -> dict[str, A
     return {"edition_id": edition_id, "items": items}
 
 
+def papyrus_get_edition_slot(slot_id: str) -> dict[str, Any]:
+    """
+    Read one EditionSlot by id.
+    """
+    data = _graphql(GET_EDITION_SLOT_QUERY, {"id": _required(slot_id, "slot_id")})
+    slot = data.get("getEditionSlot")
+    if not slot:
+        raise ValueError(f"EditionSlot not found: {slot_id}")
+    return {"slot": _decode_record_json(slot)}
+
+
+def papyrus_list_edition_slots(edition_id: str, *, section_key: str = "", limit: int = 250) -> dict[str, Any]:
+    """
+    Read EditionSlot rows for one edition, optionally filtered by section key.
+    """
+    rows: list[dict[str, Any]] = []
+    next_token = None
+    while True:
+        data = _graphql(
+            LIST_EDITION_SLOTS_BY_EDITION_QUERY,
+            {"editionId": _required(edition_id, "edition_id"), "limit": limit, "nextToken": next_token},
+        )
+        connection = data.get("listEditionSlotsByEditionSectionAndRank") or {}
+        rows.extend(_decode_record_json(item) for item in connection.get("items") or [])
+        next_token = connection.get("nextToken")
+        if not next_token:
+            break
+    if section_key:
+        rows = [row for row in rows if str(row.get("sectionKey") or "") == section_key]
+    rows.sort(key=lambda row: (str(row.get("sectionKey") or ""), int(row.get("slotRank") or 0), str(row.get("id") or "")))
+    return {"edition_id": edition_id, "section_key": section_key or None, "slots": rows}
+
+
+def papyrus_update_edition_slot_status(
+    *,
+    slot_id: str,
+    status: str,
+    selected_assignment_id: str = "",
+    actor_label: str = "",
+    note: str = "",
+) -> dict[str, Any]:
+    """
+    Update an EditionSlot status/selected assignment for editor orchestration workflows.
+    """
+    now = _now_iso()
+    patch = {
+        "id": _required(slot_id, "slot_id"),
+        "status": _required(status, "status"),
+        "selectedAssignmentId": selected_assignment_id or None,
+        "updatedAt": now,
+    }
+    data = _graphql(UPDATE_EDITION_SLOT_MUTATION, {"input": patch})
+    updated = _decode_record_json(data.get("updateEditionSlot") or patch)
+    return {
+        "slot": updated,
+        "updatedAt": now,
+        "actorLabel": actor_label or None,
+        "note": note or None,
+    }
+
+
+def papyrus_list_forum_threads(
+    edition_id: str,
+    *,
+    section_id: str = "",
+    section_key: str = "",
+    include_messages: bool = False,
+    status: str = "active",
+    limit: int = 200,
+) -> dict[str, Any]:
+    """
+    List edition and section forum MessageThread rows for one edition.
+    """
+    resolved_edition_id = _required(edition_id, "edition_id")
+    resolved_section_id = str(section_id or "").strip()
+    resolved_section_key = str(section_key or "").strip()
+
+    edition_threads = _forum_threads_by_kind_and_edition("edition_forum", resolved_edition_id, status=status, limit=limit)
+    section_threads = _forum_threads_by_kind_and_edition("section_forum", resolved_edition_id, status=status, limit=limit)
+    if resolved_section_id:
+        section_threads = [thread for thread in section_threads if str(thread.get("primaryAnchorId") or "") == resolved_section_id]
+    elif resolved_section_key:
+        section_threads = [
+            thread
+            for thread in section_threads
+            if _slugify(thread.get("primaryAnchorId") or "") == _slugify(resolved_section_key)
+            or _slugify(((thread.get("metadata") or {}) if isinstance(thread.get("metadata"), dict) else {}).get("sectionKey") or "") == _slugify(resolved_section_key)
+        ]
+
+    if include_messages:
+        for thread in [*edition_threads, *section_threads]:
+            thread["messages"] = _list_messages_by_thread_id(thread.get("id"), limit=400)
+
+    return {
+        "editionId": resolved_edition_id,
+        "sectionId": resolved_section_id or None,
+        "sectionKey": resolved_section_key or None,
+        "editionThreads": edition_threads,
+        "sectionThreads": section_threads,
+        "threadCount": len(edition_threads) + len(section_threads),
+    }
+
+
+def papyrus_ensure_edition_forum_thread(
+    *,
+    edition_id: str,
+    title: str = "",
+    summary: str = "",
+    actor_label: str = "",
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Ensure one edition-level forum thread exists for an Edition.
+    """
+    resolved_edition_id = _required(edition_id, "edition_id")
+    existing = _forum_threads_by_kind_and_edition("edition_forum", resolved_edition_id, status="", limit=20)
+    if existing:
+        return {"created": False, "thread": existing[0]}
+    now = _now_iso()
+    anchor_key = _edition_forum_anchor_key(resolved_edition_id)
+    thread = {
+        "id": f"message-thread-edition-forum-{_safe_id(resolved_edition_id)}",
+        "threadKind": "edition_forum",
+        "status": "active",
+        "title": title or "Upcoming edition",
+        "summary": summary or "Cross-section editor and human coordination for this edition.",
+        "primaryAnchorKind": "edition",
+        "primaryAnchorId": resolved_edition_id,
+        "primaryAnchorLineageId": resolved_edition_id,
+        "primaryAnchorKey": anchor_key,
+        "createdByLabel": actor_label or "papyrus-editor",
+        "messageCount": 0,
+        "lastMessageId": None,
+        "lastMessageAt": None,
+        "metadata": metadata or {},
+        "createdAt": now,
+        "updatedAt": now,
+        "newsroomFeedKey": "messages",
+    }
+    created = _graphql(CREATE_MESSAGE_THREAD_MUTATION, {"input": thread}).get("createMessageThread") or thread
+    return {"created": True, "thread": _decode_record_json(created)}
+
+
+def papyrus_create_section_forum_thread(
+    *,
+    edition_id: str,
+    section_id: str,
+    section_key: str = "",
+    section_title: str = "",
+    title: str = "",
+    summary: str = "",
+    actor_label: str = "",
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Create one section forum thread scoped to (edition, section).
+    """
+    resolved_edition_id = _required(edition_id, "edition_id")
+    resolved_section_id = _required(section_id, "section_id")
+    resolved_section_key = str(section_key or "").strip()
+    resolved_section_title = str(section_title or "").strip()
+    now = _now_iso()
+    anchor_key = _section_forum_anchor_key(resolved_edition_id, resolved_section_id)
+    base_metadata = metadata if isinstance(metadata, dict) else {}
+    thread_metadata = {
+        "editionId": resolved_edition_id,
+        "sectionId": resolved_section_id,
+        "sectionKey": resolved_section_key or base_metadata.get("sectionKey") or resolved_section_id,
+        "sectionTitle": resolved_section_title or base_metadata.get("sectionTitle") or None,
+        **base_metadata,
+    }
+    thread = {
+        "id": f"message-thread-section-forum-{_safe_id(resolved_edition_id)}-{_safe_id(resolved_section_id)}-{_safe_id(_hash_short([now, title, actor_label]))}",
+        "threadKind": "section_forum",
+        "status": "active",
+        "title": title or f"Section Forum: {resolved_section_title or resolved_section_key or resolved_section_id}",
+        "summary": summary or "Section-scoped editorial steering thread for this edition.",
+        "primaryAnchorKind": "newsroom_section",
+        "primaryAnchorId": resolved_section_id,
+        "primaryAnchorLineageId": resolved_edition_id,
+        "primaryAnchorKey": anchor_key,
+        "createdByLabel": actor_label or "papyrus-editor",
+        "messageCount": 0,
+        "lastMessageId": None,
+        "lastMessageAt": None,
+        "metadata": thread_metadata,
+        "createdAt": now,
+        "updatedAt": now,
+        "newsroomFeedKey": "messages",
+    }
+    created = _graphql(CREATE_MESSAGE_THREAD_MUTATION, {"input": thread}).get("createMessageThread") or thread
+    return {"created": True, "thread": _decode_record_json(created)}
+
+
+def papyrus_append_forum_message(
+    *,
+    thread_id: str,
+    summary: str,
+    content: str,
+    role: str = "editor",
+    actor_label: str = "",
+    parent_message_id: str = "",
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Append one Message row into a forum thread and update thread counters.
+    """
+    resolved_thread_id = _required(thread_id, "thread_id")
+    clean_summary = _required(summary, "summary")
+    clean_content = _required(content, "content")
+    thread = papyrus_get_message_thread(resolved_thread_id)["thread"]
+    existing_messages = _list_messages_by_thread_id(resolved_thread_id, limit=1000)
+    next_sequence = max([int(message.get("sequenceNumber") or 0) for message in existing_messages] + [0]) + 1
+    now = _now_iso()
+    message = {
+        "id": f"message-forum-{_safe_id(resolved_thread_id)}-{next_sequence:04d}",
+        "messageKind": "forum_post",
+        "messageDomain": "edition_coordination",
+        "status": "active",
+        "summary": clean_summary,
+        "source": "newsroom.forum",
+        "authorLabel": actor_label or "papyrus-editor",
+        "threadId": resolved_thread_id,
+        "parentMessageId": str(parent_message_id or "").strip() or None,
+        "sequenceNumber": next_sequence,
+        "role": role or "editor",
+        "messageType": "forum_message",
+        "content": clean_content,
+        "metadata": metadata or {},
+        "createdAt": now,
+        "updatedAt": now,
+        "newsroomFeedKey": "messages",
+    }
+    created = _graphql(CREATE_MESSAGE_MUTATION, {"input": message}).get("createMessage") or message
+    update_input = {
+        "id": resolved_thread_id,
+        "messageCount": int(thread.get("messageCount") or 0) + 1,
+        "lastMessageId": created.get("id"),
+        "lastMessageAt": created.get("createdAt") or now,
+        "updatedAt": now,
+    }
+    updated_thread = _graphql(UPDATE_MESSAGE_THREAD_MUTATION, {"input": update_input}).get("updateMessageThread") or {**thread, **update_input}
+    return {"thread": _decode_record_json(updated_thread), "message": _decode_record_json(created)}
+
+
+def papyrus_get_message_thread(thread_id: str) -> dict[str, Any]:
+    """
+    Read one MessageThread by id.
+    """
+    data = _graphql(GET_MESSAGE_THREAD_QUERY, {"id": _required(thread_id, "thread_id")})
+    thread = data.get("getMessageThread")
+    if not thread:
+        raise ValueError(f"MessageThread not found: {thread_id}")
+    return {"thread": _decode_record_json(thread)}
+
+
 def papyrus_get_item(item_id: str) -> dict[str, Any]:
     """
     Read one Papyrus Item by id through the authoring GraphQL endpoint.
@@ -513,29 +1123,380 @@ def papyrus_get_assignment(assignment_id: str) -> dict[str, Any]:
     return {"assignment": decoded}
 
 
+def papyrus_list_assignments(
+    *,
+    limit: int | str = 25,
+    status: str = "",
+    type: str = "",  # noqa: A002 - resource API uses `type`.
+    section_key: str = "",
+    import_run_id: str = "",
+) -> dict[str, Any]:
+    """
+    List live Papyrus Assignments with small client-side filters for agent discovery.
+    """
+    max_items = max(1, min(int(limit or 25), 100))
+    assignments = _list_assignments()
+    if status:
+        assignments = [item for item in assignments if str(item.get("status") or "") == status]
+    if type:
+        expected_type = _assignment_type_key_for_resource_type(type)
+        assignments = [item for item in assignments if str(item.get("assignmentTypeKey") or "") == expected_type]
+    if section_key:
+        assignments = [item for item in assignments if str(item.get("sectionKey") or "") == section_key]
+    if import_run_id:
+        assignments = [item for item in assignments if str(item.get("importRunId") or "") == import_run_id]
+    assignments.sort(key=lambda item: str(item.get("createdAt") or ""), reverse=True)
+    return {"assignments": assignments[:max_items], "count": len(assignments[:max_items])}
+
+
+def papyrus_assignment_create(args: dict[str, Any]) -> dict[str, Any]:
+    """
+    Resource-oriented Assignment.create implementation for execute_tactus.
+    """
+    payload = dict(args or {})
+    assignment_type = str(payload.get("type") or payload.get("assignmentType") or "").strip()
+    title = _required(payload.get("title"), "title")
+    if assignment_type != "research":
+        raise ValueError('Assignment.create currently supports type = "research" only')
+
+    plan = _build_research_assignment_resource_plan(payload, title)
+    result: dict[str, Any] = {
+        "ok": True,
+        "resource": "Assignment",
+        "verb": "create",
+        "applied": False,
+        "assignmentId": plan["assignment"]["id"],
+        "assignment": plan["assignment"],
+        "event": plan["event"],
+        "changes": [
+            {"model": "Assignment", "operation": "create", "id": plan["assignment"]["id"]},
+            {"model": "AssignmentEvent", "operation": "create", "id": plan["event"]["id"]},
+        ],
+        "api_calls": ["papyrus.Assignment.create"],
+        "error": None,
+    }
+    if not bool(payload.get("apply") or False):
+        return result
+
+    assignment_data = _graphql(CREATE_ASSIGNMENT_MUTATION, {"input": plan["assignment"]})
+    event_data = _graphql(CREATE_ASSIGNMENT_EVENT_MUTATION, {"input": plan["event"]})
+    result["applied"] = True
+    result["assignment"] = _decode_record_json(assignment_data.get("createAssignment") or plan["assignment"])
+    result["event"] = _decode_record_json(event_data.get("createAssignmentEvent") or plan["event"])
+    return result
+
+
+def papyrus_assignment_update(args: dict[str, Any]) -> dict[str, Any]:
+    """
+    Resource-oriented Assignment.update implementation for execute_tactus.
+    """
+    payload = dict(args or {})
+    assignment_id = _required(
+        payload.get("id") or payload.get("assignmentId") or payload.get("assignment_id"),
+        "id",
+    )
+    to_status = _required(
+        payload.get("status") or payload.get("toStatus") or payload.get("to_status"),
+        "status",
+    )
+    now = _now_iso()
+    actor_label = str(payload.get("actorLabel") or payload.get("actor_label") or "papyrus-console-agent").strip()
+    apply = bool(payload.get("apply", True))
+
+    assignment = papyrus_get_assignment(assignment_id).get("assignment") or {}
+    from_status = str(assignment.get("status") or "")
+    queue_key = str(assignment.get("queueKey") or "").strip()
+    section_key = str(assignment.get("sectionKey") or "").strip()
+    assignment_type_key = str(assignment.get("assignmentTypeKey") or "research.edition-candidate").strip()
+    note = str(payload.get("note") or f"Updated assignment status: {from_status} -> {to_status}").strip()
+
+    assignment_patch: dict[str, Any] = {
+        "id": assignment_id,
+        "assignmentTypeKey": assignment_type_key,
+        "status": to_status,
+        "priority": assignment.get("priority"),
+        "queueStatusKey": f"{queue_key}#{to_status}" if queue_key else to_status,
+        "createdAt": assignment.get("createdAt"),
+        "assigneeKey": assignment.get("assigneeKey"),
+        "updatedAt": now,
+        "newsroomFeedKey": f"assignment#{to_status}",
+    }
+    if section_key:
+        assignment_patch["sectionStatusKey"] = f"{section_key}#{to_status}"
+        assignment_patch["sectionQueueStatusKey"] = (
+            f"{section_key}#{queue_key}#{to_status}" if queue_key else f"{section_key}#{to_status}"
+        )
+    if to_status == "claimed":
+        assignment_patch["claimedAt"] = now
+    elif to_status == "completed":
+        assignment_patch["completedAt"] = now
+    elif to_status == "canceled":
+        assignment_patch["canceledAt"] = now
+
+    event = {
+        "id": f"assignment-event-{assignment_id}-status-{_safe_id(to_status)}-{uuid.uuid4().hex[:8]}",
+        "assignmentId": assignment_id,
+        "assignmentTypeKey": assignment_type_key,
+        "queueKey": queue_key or "research:unsectioned:exploratory",
+        "eventType": "status_changed",
+        "fromStatus": from_status or None,
+        "toStatus": to_status,
+        "actorSub": actor_label,
+        "actorLabel": actor_label,
+        "note": note,
+        "createdAt": now,
+    }
+    result: dict[str, Any] = {
+        "ok": True,
+        "resource": "Assignment",
+        "verb": "update",
+        "applied": False,
+        "assignmentId": assignment_id,
+        "assignment": {**assignment, **assignment_patch},
+        "event": event,
+        "changes": [
+            {"model": "Assignment", "operation": "update", "id": assignment_id},
+            {"model": "AssignmentEvent", "operation": "create", "id": event["id"]},
+        ],
+        "api_calls": ["papyrus.Assignment.update"],
+        "error": None,
+    }
+    if not apply:
+        return result
+
+    assignment_data = _graphql(UPDATE_ASSIGNMENT_MUTATION, {"input": assignment_patch})
+    event_data = _graphql(CREATE_ASSIGNMENT_EVENT_MUTATION, {"input": event})
+    result["applied"] = True
+    result["assignment"] = _decode_record_json(assignment_data.get("updateAssignment") or result["assignment"])
+    result["event"] = _decode_record_json(event_data.get("createAssignmentEvent") or event)
+    return result
+
+
+def _assignment_type_key_for_resource_type(resource_type: str) -> str:
+    if str(resource_type).strip() == "research":
+        return "research.edition-candidate"
+    raise ValueError(f"Unsupported Assignment type: {resource_type}")
+
+
+def _build_research_assignment_resource_plan(payload: dict[str, Any], title: str) -> dict[str, Any]:
+    now = _now_iso()
+    section_key = str(payload.get("sectionKey") or payload.get("section_key") or "").strip()
+    corpus_key = str(payload.get("corpusKey") or payload.get("corpus_key") or "AI-ML-research").strip()
+    research_mode = str(payload.get("researchMode") or payload.get("research_mode") or "source_discovery").strip()
+    status = str(payload.get("status") or "open").strip()
+    priority = int(payload.get("priority") or 50)
+    actor_label = str(payload.get("actorLabel") or payload.get("actor_label") or "papyrus-console-agent").strip()
+    import_run_id = str(payload.get("importRunId") or payload.get("import_run_id") or "").strip()
+    summary = str(payload.get("summary") or "").strip() or title
+    instructions = str(payload.get("instructions") or "").strip()
+    assignment_type_key = _assignment_type_key_for_resource_type("research")
+    queue_key = str(payload.get("queueKey") or payload.get("queue_key") or f"research:{section_key or 'unsectioned'}:exploratory").strip()
+    assignment_id = str(payload.get("id") or "").strip() or (
+        f"assignment-research-{_safe_id(title)}-{uuid.uuid4().hex[:12]}"
+    )
+
+    assignment: dict[str, Any] = {
+        "id": assignment_id,
+        "assignmentTypeKey": assignment_type_key,
+        "queueKey": queue_key,
+        "queueStatusKey": f"{queue_key}#{status}",
+        "status": status,
+        "priority": priority,
+        "title": title,
+        "summary": summary,
+        "corpusId": f"knowledge-corpus-{_safe_id(corpus_key)}",
+        "importRunId": import_run_id or None,
+        "createdBy": actor_label,
+        "createdAt": now,
+        "updatedAt": now,
+        "newsroomFeedKey": f"assignment#{status}",
+    }
+    if section_key:
+        assignment["sectionKey"] = section_key
+        assignment["sectionType"] = "newsroom_section"
+        assignment["sectionStatusKey"] = f"{section_key}#{status}"
+        assignment["sectionQueueStatusKey"] = f"{section_key}#{queue_key}#{status}"
+
+    event_note_parts = [f"Created research assignment: {title}"]
+    if research_mode:
+        event_note_parts.append(f"Research mode: {research_mode}")
+    if instructions:
+        event_note_parts.append(f"Instructions: {instructions}")
+    event: dict[str, Any] = {
+        "id": f"assignment-event-{assignment_id}-created",
+        "assignmentId": assignment_id,
+        "assignmentTypeKey": assignment_type_key,
+        "queueKey": queue_key,
+        "eventType": "created",
+        "toStatus": status,
+        "actorSub": actor_label,
+        "actorLabel": actor_label,
+        "note": "\n".join(event_note_parts),
+        "createdAt": now,
+    }
+    return {
+        "assignment": {key: value for key, value in assignment.items() if value is not None},
+        "event": {key: value for key, value in event.items() if value is not None},
+    }
+
+
 def papyrus_get_assignment_context(assignment_id: str) -> dict[str, Any]:
     """
     Read live Assignment context, including doctrine, targets, and events.
     """
     assignment_id = _required(assignment_id, "assignment_id")
+    assignment_data = _graphql(GET_ASSIGNMENT_QUERY, {"id": assignment_id})
+    assignment = _decode_record_json(assignment_data.get("getAssignment") or {})
+    if not assignment:
+        raise ValueError(f"Assignment context not found: {assignment_id}")
+    _hydrate_assignment_payloads(assignment)
+    relations = _assignment_relations_for_assignment(assignment_id)
+    targets = _assignment_targets_from_relations(relations)
+    doctrine = _assignment_doctrine_context(assignment)
+    events = _assignment_events_for_assignments([assignment_id])
+    for event in events:
+        if isinstance(event, dict):
+            _hydrate_assignment_event_metadata(event)
+    return {
+        "assignment_context": {
+            "assignment": assignment,
+            "doctrine": doctrine,
+            "targets": targets,
+            "events": events,
+        }
+    }
+
+
+def _assignment_relations_for_assignment(assignment_id: str) -> list[dict[str, Any]]:
     try:
-        data = _graphql(GET_ASSIGNMENT_CONTEXT_QUERY, {"assignmentId": assignment_id})
-        context = data.get("getAssignmentContext")
-        if not context:
-            raise ValueError(f"Assignment context not found: {assignment_id}")
-        decoded = _decode_record_json(context)
-        if isinstance(decoded.get("assignment"), dict):
-            _hydrate_assignment_payloads(decoded["assignment"])
-        for event in decoded.get("events") or []:
-            if isinstance(event, dict):
-                _hydrate_assignment_event_metadata(event)
-        return {"assignment_context": decoded}
-    except RuntimeError as error:
-        message = str(error)
-        if "data environment variables are malformed" not in message:
-            raise
-        # Fallback path when the assignment-action Lambda resolver is misconfigured.
-        return {"assignment_context": _fallback_assignment_context(assignment_id)}
+        semantic = _semantic_client()
+        response = semantic.list_outgoing("assignment", assignment_id)
+        relations = _normalize_jsonish(response.get("relations") or [])
+        if not isinstance(relations, list):
+            return []
+        normalized: list[dict[str, Any]] = []
+        for relation in relations:
+            if not isinstance(relation, dict):
+                continue
+            decoded = _decode_record_json(relation)
+            if (decoded.get("relationState") or "current") != "current":
+                continue
+            normalized.append(decoded)
+        return normalized
+    except Exception:
+        return []
+
+
+def _assignment_targets_from_relations(relations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    targets: list[dict[str, Any]] = []
+    for relation in relations:
+        metadata = _normalize_jsonish(relation.get("metadata") or {})
+        if not isinstance(metadata, dict):
+            metadata = {}
+        label = (
+            metadata.get("title")
+            or metadata.get("displayName")
+            or metadata.get("externalItemId")
+            or relation.get("objectLineageId")
+            or relation.get("objectId")
+        )
+        targets.append(
+            {
+                "kind": relation.get("objectKind"),
+                "id": relation.get("objectId"),
+                "lineageId": relation.get("objectLineageId"),
+                "label": label,
+                "detail": relation.get("relationTypeKey") or relation.get("predicate"),
+            }
+        )
+    return targets
+
+
+def _assignment_doctrine_context(assignment: dict[str, Any]) -> list[dict[str, Any]]:
+    doctrine: list[dict[str, Any]] = []
+    for kind, label, slug in (
+        ("mission", "Editorial Mission", "editorial-doctrine-mission"),
+        ("policy", "Editorial Policy", "editorial-doctrine-policy"),
+    ):
+        record = _doctrine_item_by_slug(slug)
+        if not record:
+            continue
+        doctrine.append(
+            {
+                "scope": "publication",
+                "kind": kind,
+                "label": label,
+                "slug": slug,
+                "body": _normalize_string_array(record.get("body") or []),
+                "categoryKey": None,
+                "categoryLineageId": None,
+            }
+        )
+    section_key = assignment.get("sectionKey") or assignment.get("sectionId")
+    section = _newsroom_section_by_id(section_key)
+    if section:
+        doctrine.append(
+            {
+                "scope": "desk",
+                "kind": "mission",
+                "label": "Desk Mission",
+                "slug": f"desk-section-{section.get('id')}-mission",
+                "body": _normalize_string_array([section.get("editorialMission")]),
+                "categoryKey": section.get("id"),
+                "categoryLineageId": section.get("id"),
+            }
+        )
+        doctrine.append(
+            {
+                "scope": "desk",
+                "kind": "policy",
+                "label": "Desk Policies",
+                "slug": f"desk-section-{section.get('id')}-policy",
+                "body": _normalize_string_array([section.get("editorialPolicy")]),
+                "categoryKey": section.get("id"),
+                "categoryLineageId": section.get("id"),
+            }
+        )
+    return doctrine
+
+
+def _newsroom_section_by_id(section_id: Any) -> dict[str, Any] | None:
+    key = str(section_id or "").strip()
+    if not key:
+        return None
+    try:
+        data = _graphql(GET_NEWSROOM_SECTION_QUERY, {"id": key})
+    except Exception:
+        return None
+    section = data.get("getNewsroomSection")
+    if not isinstance(section, dict):
+        return None
+    return _decode_record_json(section)
+
+
+def _doctrine_item_by_slug(slug: str) -> dict[str, Any] | None:
+    try:
+        data = _graphql(GET_DOCTRINE_BY_SLUG_QUERY, {"slug": slug, "limit": 10})
+    except Exception:
+        return None
+    connection = data.get("itemBySlug") or {}
+    items = connection.get("items") or []
+    for item in items:
+        decoded = _decode_record_json(item)
+        if decoded.get("type") == "doctrine" and decoded.get("status") in {"private", "published"}:
+            return decoded
+    return _decode_record_json(items[0]) if items else None
+
+
+def _normalize_string_array(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for entry in value:
+        text = str(entry or "").strip()
+        if text:
+            result.append(text)
+    return result
 
 
 def papyrus_build_assignment_agent_context(
@@ -620,6 +1581,7 @@ def papyrus_build_assignment_agent_context(
     desk_published_items = _published_items_for_desk(recent_published_items, desk_category, focus_category)
     reference_summaries = _desk_reference_summaries(semantic, desk_category, focus_category)
     comment_summaries = _desk_comment_summaries(semantic, reference_summaries)
+    forum_context = _assignment_forum_context(assignment, metadata)
     coverage_gaps: list[str] = []
     if focus_resolution == "none":
         coverage_gaps.append("No accepted focus category or semantic node match was found.")
@@ -640,6 +1602,7 @@ def papyrus_build_assignment_agent_context(
         published_items=desk_published_items,
         references=reference_summaries,
         comments=comment_summaries,
+        forum_context=forum_context,
         lane_key=lane_key,
         profile_key=profile_key,
     )
@@ -681,6 +1644,12 @@ def papyrus_build_assignment_agent_context(
             "semanticNodeMatches": semantic_node_matches,
             "semanticQueryTerms": semantic_query_terms,
             "coverageGaps": coverage_gaps,
+            "editionForumMessages": [
+                message
+                for thread in forum_context.get("editionThreads") or []
+                for message in (thread.get("messages") or [])
+            ],
+            "sectionForumThreads": forum_context.get("sectionThreads") or [],
             "contextCoverage": {
                 "deskFocusCategory": bool(desk_category or focus_category),
                 "semanticNodeEntity": bool(semantic_node_matches),
@@ -799,6 +1768,30 @@ def papyrus_find_reference(corpus_id: str, external_item_id: str) -> dict[str, A
     return _semantic_client().find_reference(corpus_id, external_item_id)
 
 
+def papyrus_email_submission_process(
+    *,
+    message_id: str,
+    corpus_key: str = "AI-ML-research",
+    apply: bool = True,
+) -> dict[str, Any]:
+    """
+    Create, find, and process direct citations from an inbound email submission Message.
+    """
+    from papyrus_content.graphql_authoring import PapyrusGraphQLAuthoringClient
+
+    from .email_submissions import process_email_submission_message
+
+    if not str(message_id or "").strip():
+        raise ValueError("message_id is required.")
+    client = PapyrusGraphQLAuthoringClient()
+    return process_email_submission_message(
+        client,
+        message_id=str(message_id).strip(),
+        corpus_key=corpus_key or "AI-ML-research",
+        apply=apply,
+    )
+
+
 def papyrus_list_reference_attachments(
     reference_lineage_id: str | None = None,
     reference_version_key: str | None = None,
@@ -817,6 +1810,125 @@ def papyrus_list_reference_messages(reference_lineage_id: str) -> dict[str, Any]
     List private messages attached to one Reference lineage.
     """
     return _semantic_client().list_reference_messages(reference_lineage_id)
+
+
+def papyrus_reference_curation_review(
+    *,
+    reference_id: str,
+    action: str,
+    actor_label: str = "",
+    note: str = "",
+    reason_code: str = "",
+) -> dict[str, Any]:
+    """
+    Canonical Reference editorial disposition action.
+    """
+    return reference_actions.review_reference_curation(
+        _graphql,
+        reference_id=reference_id,
+        action=action,
+        actor_label=actor_label,
+        note=note,
+        reason_code=reason_code,
+    )
+
+
+def papyrus_reference_quality_rate(
+    *,
+    reference_id: str,
+    rating: int,
+    actor_label: str = "",
+    note: str = "",
+) -> dict[str, Any]:
+    """
+    Canonical human quality rating action.
+    """
+    return reference_actions.set_reference_quality_rating(
+        _graphql,
+        reference_id=reference_id,
+        rating=rating,
+        actor_label=actor_label,
+        note=note,
+    )
+
+
+def papyrus_reference_insight_create(
+    *,
+    reference_id: str,
+    summary: str,
+    body: str,
+    actor_label: str = "",
+) -> dict[str, Any]:
+    """
+    Canonical insight creation action for a reference.
+    """
+    return reference_actions.create_reference_insight(
+        _graphql,
+        reference_id=reference_id,
+        summary=summary,
+        body=body,
+        actor_label=actor_label,
+    )
+
+
+def papyrus_reference_insight_list(reference_lineage_id: str) -> dict[str, Any]:
+    """
+    List insight messages for one reference lineage.
+    """
+    payload = papyrus_list_reference_messages(reference_lineage_id)
+    messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
+    insights = [message for message in messages if str(message.get("messageKind") or "") == "insight"]
+    return {
+        "referenceLineageId": reference_lineage_id,
+        "items": insights,
+        "count": len(insights),
+    }
+
+
+def papyrus_reference_move_corpus(
+    *,
+    reference_id: str,
+    corpus_id: str,
+    actor_label: str = "",
+    note: str = "",
+) -> dict[str, Any]:
+    """
+    Canonical explicit corpus-move action for a reference lineage.
+    """
+    return reference_actions.move_reference_corpus(
+        _graphql,
+        reference_id=reference_id,
+        corpus_id=corpus_id,
+        actor_label=actor_label,
+        note=note,
+    )
+
+
+def papyrus_reference_curation_start(
+    *,
+    reference_id: str,
+    actor_label: str = "",
+    curation_policy: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Canonical async curation start action (Assignment-backed).
+    """
+    return reference_actions.start_reference_curation(
+        _graphql,
+        reference_id=reference_id,
+        actor_label=actor_label,
+        curation_policy=curation_policy,
+    )
+
+
+def papyrus_reference_curation_status(*, assignment_id: str) -> dict[str, Any]:
+    """
+    Canonical curation run status lookup.
+    """
+    return reference_actions.get_reference_curation_status(
+        _graphql,
+        assignment_id=assignment_id,
+    )
 
 
 def papyrus_doi_backfill_plan(
@@ -841,7 +1953,6 @@ def papyrus_doi_backfill_plan(
             "create-doi-backfill-assignment",
             "--corpus-key",
             key,
-            "--apply",
         ],
         "run_now": [
             "npm",
@@ -943,7 +2054,7 @@ def papyrus_doi_backfill_run(
             "stdout": result.stdout,
             "stderr": result.stderr,
             "nextCommands": {
-                "inspectAssignmentQueue": "npm run content -- assignments list --type reference.doi-backfill --status open",
+                "inspectAssignmentQueue": "poetry run papyrus assignments list --type reference.doi-backfill --status open",
                 "inspectManifest": f"cat {manifest_path}" if manifest_path else None,
             },
         }
@@ -962,6 +2073,252 @@ def papyrus_doi_backfill_manifest(run_id: str = "", manifest_path: str = "") -> 
         "doi_backfill_manifest": payload,
         "manifest_path": str(resolved_path),
     }
+
+
+def papyrus_reference_fetch_url_text(
+    *,
+    reference_id: str = "",
+    external_item_id: str = "",
+    corpus_key: str = "AI-ML-research",
+    apply: bool = True,
+    force: bool = False,
+    config_path: str = "",
+    max_count: int = 0,
+) -> dict[str, Any]:
+    """
+    Process URL/PDF extraction for references and attach extracted text artifacts.
+    """
+    _require_reference_process_worker_runtime("references process-fetch-url-text")
+    command = [
+        "npm",
+        "run",
+        "content",
+        "--",
+        "references",
+        "process-fetch-url-text",
+        "--corpus-key",
+        _required(corpus_key, "corpus_key"),
+        "--status",
+        "all",
+    ]
+    if reference_id:
+        command.extend(["--reference", reference_id.strip()])
+    if external_item_id:
+        command.extend(["--external-item-id", external_item_id.strip()])
+    if max_count and int(max_count) > 0:
+        command.extend(["--max-count", str(int(max_count))])
+    if force:
+        command.extend(["--force", "true"])
+    if config_path:
+        command.extend(["--config", config_path])
+    if not apply:
+        command.append("--dry-run")
+    result = subprocess.run(
+        command,
+        cwd=PAPYRUS_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    def _metric(name: str) -> int | None:
+        for line in (result.stdout or "").splitlines():
+            parts = line.strip().split("\t")
+            if len(parts) >= 4 and parts[0] == "references" and parts[1] == "process-fetch-url-text" and parts[2] == name:
+                try:
+                    return int(parts[3])
+                except ValueError:
+                    return None
+        return None
+
+    return {
+        "reference_url_text": {
+            "ok": result.returncode == 0,
+            "exitCode": result.returncode,
+            "command": command,
+            "eligible": _metric("eligible"),
+            "planned": _metric("planned"),
+            "changes": _metric("changes"),
+            "filtered": _metric("filtered"),
+            "fallbackRaw": _metric("fallback-raw"),
+            "failures": _metric("failures"),
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
+    }
+
+
+def papyrus_reference_filter_extracted_text(
+    *,
+    reference_id: str = "",
+    external_item_id: str = "",
+    corpus_key: str = "AI-ML-research",
+    apply: bool = True,
+    force: bool = True,
+    config_path: str = "",
+    max_count: int = 0,
+    model: str = "gpt-5.4-nano",
+    metadata_from_text: bool = True,
+    metadata_model: str = "gpt-5.4-nano",
+) -> dict[str, Any]:
+    """
+    Re-filter existing extracted text attachments and refresh canonical extracted_text.
+    """
+    _require_reference_process_worker_runtime("references process-filter-text")
+    command = [
+        "npm",
+        "run",
+        "content",
+        "--",
+        "references",
+        "process-filter-text",
+        "--corpus-key",
+        _required(corpus_key, "corpus_key"),
+        "--status",
+        "all",
+        "--model",
+        model,
+        "--metadata-model",
+        metadata_model,
+    ]
+    if reference_id:
+        command.extend(["--reference", reference_id.strip()])
+    if external_item_id:
+        command.extend(["--external-item-id", external_item_id.strip()])
+    if max_count and int(max_count) > 0:
+        command.extend(["--max-count", str(int(max_count))])
+    if force:
+        command.extend(["--force", "true"])
+    if not metadata_from_text:
+        command.extend(["--metadata-from-text", "false"])
+    if config_path:
+        command.extend(["--config", config_path])
+    if not apply:
+        command.append("--dry-run")
+    result = subprocess.run(
+        command,
+        cwd=PAPYRUS_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    def _metric(name: str, section: str = "references", command_name: str = "process-filter-text") -> int | None:
+        for line in (result.stdout or "").splitlines():
+            parts = line.strip().split("\t")
+            if len(parts) >= 4 and parts[0] == section and parts[1] == command_name and parts[2] == name:
+                try:
+                    return int(parts[3])
+                except ValueError:
+                    return None
+        return None
+
+    return {
+        "reference_text_filter": {
+            "ok": result.returncode == 0,
+            "exitCode": result.returncode,
+            "command": command,
+            "attempted": _metric("attempted"),
+            "planned": _metric("planned"),
+            "filtered": _metric("filtered"),
+            "fallbackRaw": _metric("fallback-raw"),
+            "skippedMissingSource": _metric("skipped-missing-source"),
+            "changes": _metric("changes"),
+            "failures": _metric("failures"),
+            "metadataGenerated": _metric("generated", section="references", command_name="process-generate-metadata"),
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
+    }
+
+
+def papyrus_reference_generate_metadata_from_text(
+    *,
+    reference_id: str = "",
+    external_item_id: str = "",
+    corpus_key: str = "AI-ML-research",
+    apply: bool = True,
+    config_path: str = "",
+    max_count: int = 0,
+    model: str = "gpt-5.4-nano",
+) -> dict[str, Any]:
+    """
+    Generate title/subtitle/summary from extracted reference text only.
+    """
+    _require_reference_process_worker_runtime("references process-generate-metadata")
+    command = [
+        "npm",
+        "run",
+        "content",
+        "--",
+        "references",
+        "process-generate-metadata",
+        "--corpus-key",
+        _required(corpus_key, "corpus_key"),
+        "--status",
+        "all",
+        "--model",
+        model,
+    ]
+    if reference_id:
+        command.extend(["--reference", reference_id.strip()])
+    if external_item_id:
+        command.extend(["--external-item-id", external_item_id.strip()])
+    if max_count and int(max_count) > 0:
+        command.extend(["--max-count", str(int(max_count))])
+    if config_path:
+        command.extend(["--config", config_path])
+    if not apply:
+        command.append("--dry-run")
+    result = subprocess.run(
+        command,
+        cwd=PAPYRUS_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    def _metric(name: str) -> int | None:
+        for line in (result.stdout or "").splitlines():
+            parts = line.strip().split("\t")
+            if (
+                len(parts) >= 4
+                and parts[0] == "references"
+                and parts[1] == "process-generate-metadata"
+                and parts[2] == name
+            ):
+                try:
+                    return int(parts[3])
+                except ValueError:
+                    return None
+        return None
+
+    return {
+        "reference_metadata_generation": {
+            "ok": result.returncode == 0,
+            "exitCode": result.returncode,
+            "command": command,
+            "attempted": _metric("attempted"),
+            "generated": _metric("generated"),
+            "skippedMissingText": _metric("skipped-missing-text"),
+            "generationFailures": _metric("generation-failures"),
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
+    }
+
+
+def _require_reference_process_worker_runtime(command_name: str) -> None:
+    runtime_role = str(os.environ.get("PAPYRUS_RUNTIME_ROLE") or "").strip().lower()
+    if runtime_role and runtime_role not in {"cli", "worker"}:
+        raise ValueError(
+            f"{command_name} requires utility worker runtime with reachable GROBID service/container. "
+            f"Current PAPYRUS_RUNTIME_ROLE={runtime_role!r} is not supported."
+        )
+    if os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):
+        raise ValueError(
+            f"{command_name} requires utility worker runtime with reachable GROBID service/container. "
+            "API/Lambda runtime is not supported for process commands."
+        )
 
 
 def papyrus_get_semantic_object(kind: str, object_id: str) -> dict[str, Any]:
@@ -1063,7 +2420,7 @@ def biblicus_topic_context(
     topic_modeling_snapshot: str = "",
     max_topics: int = 20,
     examples_per_topic: int = 3,
-    summary_model: str = "gpt-5.4-mini",
+    summary_model: str = "gpt-5.4-nano",
     config_path: str = "",
 ) -> dict[str, Any]:
     """
@@ -2442,17 +3799,17 @@ def _graphql(query: str, variables: dict[str, Any]) -> dict[str, Any]:
     token = os.environ.get("PAPYRUS_GRAPHQL_JWT")
     if not endpoint:
         raise ValueError("Missing PAPYRUS_GRAPHQL_ENDPOINT for Papyrus GraphQL read tool.")
-    if not token:
-        raise ValueError("Missing PAPYRUS_GRAPHQL_JWT for Papyrus GraphQL read tool.")
 
     body = json.dumps({"query": query, "variables": variables}).encode("utf-8")
+    headers = {"content-type": "application/json"}
+    if token:
+        headers["Authorization"] = _lambda_auth_token(token)
+    else:
+        headers.update(_iam_signed_graphql_headers(endpoint, body))
     request = urllib.request.Request(
         endpoint,
         data=body,
-        headers={
-            "content-type": "application/json",
-            "Authorization": _lambda_auth_token(token),
-        },
+        headers=headers,
         method="POST",
     )
     try:
@@ -2465,6 +3822,39 @@ def _graphql(query: str, variables: dict[str, Any]) -> dict[str, Any]:
     if payload.get("errors"):
         raise RuntimeError("; ".join(error.get("message", str(error)) for error in payload["errors"]))
     return payload.get("data") or {}
+
+
+def _iam_signed_graphql_headers(endpoint: str, body: bytes) -> dict[str, str]:
+    try:
+        from botocore.auth import SigV4Auth
+        from botocore.awsrequest import AWSRequest
+        from botocore.session import Session
+    except Exception as exc:  # pragma: no cover - depends on Lambda/local deps
+        raise ValueError("Missing PAPYRUS_GRAPHQL_JWT and botocore is unavailable for IAM AppSync signing.") from exc
+
+    parsed = urllib.parse.urlparse(endpoint)
+    region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or _region_from_appsync_host(parsed.netloc)
+    session = Session()
+    credentials = session.get_credentials()
+    if credentials is None:
+        raise ValueError("Missing PAPYRUS_GRAPHQL_JWT and AWS credentials are unavailable for IAM AppSync signing.")
+    frozen = credentials.get_frozen_credentials()
+    request = AWSRequest(
+        method="POST",
+        url=endpoint,
+        data=body,
+        headers={
+            "content-type": "application/json",
+            "host": parsed.netloc,
+        },
+    )
+    SigV4Auth(frozen, "appsync", region).add_auth(request)
+    return {str(key): str(value) for key, value in request.headers.items()}
+
+
+def _region_from_appsync_host(host: str) -> str:
+    match = re.search(r"\.appsync-api\.([a-z0-9-]+)\.amazonaws\.com", host)
+    return match.group(1) if match else "us-east-1"
 
 
 def _hydrate_assignment_payloads(assignment: dict[str, Any]) -> None:
@@ -2549,7 +3939,8 @@ def _storage_bucket_name() -> str | None:
 
 
 def _lambda_auth_token(token: str) -> str:
-    return f"PapyrusJwt {re.sub(r'^Bearer\s+', '', token.strip(), flags=re.IGNORECASE)}"
+    sanitized = re.sub(r"^Bearer\s+", "", token.strip(), flags=re.IGNORECASE)
+    return f"PapyrusJwt {sanitized}"
 
 
 def _resolve_corpus(corpus_key: str, config_path: str = "") -> dict[str, Any]:
@@ -2732,6 +4123,115 @@ def _list_messages() -> list[dict[str, Any]]:
     return _list_connection(LIST_MESSAGES_QUERY, {}, "listMessages")
 
 
+def _list_message_threads_by_kind(thread_kind: str, *, limit: int = 200) -> list[dict[str, Any]]:
+    if not thread_kind:
+        return []
+    rows: list[dict[str, Any]] = []
+    next_token = None
+    while True:
+        data = _graphql(
+            LIST_MESSAGE_THREADS_BY_KIND_QUERY,
+            {"threadKind": thread_kind, "limit": limit, "nextToken": next_token},
+        )
+        connection = data.get("listMessageThreadsByKindAndUpdatedAt") or {}
+        rows.extend(_decode_record_json(item) for item in connection.get("items") or [])
+        next_token = connection.get("nextToken")
+        if not next_token:
+            break
+    return rows
+
+
+def _list_messages_by_thread_id(thread_id: Any, *, limit: int = 400) -> list[dict[str, Any]]:
+    resolved_thread_id = str(thread_id or "").strip()
+    if not resolved_thread_id:
+        return []
+    rows: list[dict[str, Any]] = []
+    next_token = None
+    while True:
+        data = _graphql(
+            LIST_MESSAGES_BY_THREAD_QUERY,
+            {"threadId": resolved_thread_id, "limit": limit, "nextToken": next_token},
+        )
+        connection = data.get("listMessagesByThreadAndSequence") or {}
+        rows.extend(_decode_record_json(item) for item in connection.get("items") or [])
+        next_token = connection.get("nextToken")
+        if not next_token:
+            break
+    rows.sort(key=lambda entry: (int(entry.get("sequenceNumber") or 0), str(entry.get("createdAt") or "")))
+    return rows
+
+
+def _edition_forum_anchor_key(edition_id: str) -> str:
+    return f"edition#{_required(edition_id, 'edition_id')}"
+
+
+def _section_forum_anchor_key(edition_id: str, section_id: str) -> str:
+    return f"edition#{_required(edition_id, 'edition_id')}#section#{_required(section_id, 'section_id')}"
+
+
+def _forum_threads_by_kind_and_edition(thread_kind: str, edition_id: str, *, status: str = "", limit: int = 200) -> list[dict[str, Any]]:
+    rows = _list_message_threads_by_kind(thread_kind, limit=limit)
+    filtered: list[dict[str, Any]] = []
+    for thread in rows:
+        if status and str(thread.get("status") or "") != status:
+            continue
+        if thread_kind == "edition_forum":
+            if str(thread.get("primaryAnchorKind") or "") != "edition":
+                continue
+            if str(thread.get("primaryAnchorId") or "") != edition_id:
+                continue
+            filtered.append(thread)
+            continue
+        if thread_kind == "section_forum":
+            if str(thread.get("primaryAnchorKind") or "") != "newsroom_section":
+                continue
+            if str(thread.get("primaryAnchorLineageId") or "") != edition_id:
+                continue
+            filtered.append(thread)
+            continue
+    filtered.sort(key=lambda entry: str(entry.get("updatedAt") or ""), reverse=True)
+    return filtered
+
+
+def _assignment_forum_context(assignment: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any]:
+    edition_id = (
+        assignment.get("editionId")
+        or metadata.get("editionId")
+        or metadata.get("edition_id")
+        or ((metadata.get("slotTarget") or {}) if isinstance(metadata.get("slotTarget"), dict) else {}).get("editionId")
+        or ((metadata.get("slotTarget") or {}) if isinstance(metadata.get("slotTarget"), dict) else {}).get("edition_id")
+    )
+    if not edition_id:
+        return {"editionId": None, "editionThreads": [], "sectionThreads": []}
+    edition_threads = _forum_threads_by_kind_and_edition("edition_forum", str(edition_id), status="active", limit=100)
+    section_id = assignment.get("sectionId") or metadata.get("sectionId") or metadata.get("section_id")
+    section_key = assignment.get("sectionKey") or metadata.get("sectionKey") or metadata.get("section_key")
+    section_id_slug = _slugify(section_id or "")
+    section_key_slug = _slugify(section_key or "")
+    section_threads = _forum_threads_by_kind_and_edition("section_forum", str(edition_id), status="active", limit=200)
+    if section_id_slug or section_key_slug:
+        section_threads = [
+            thread for thread in section_threads
+            if (
+                section_id_slug
+                and _slugify(thread.get("primaryAnchorId") or "") == section_id_slug
+            )
+            or (
+                section_key_slug
+                and _slugify(((thread.get("metadata") or {}) if isinstance(thread.get("metadata"), dict) else {}).get("sectionKey") or "") == section_key_slug
+            )
+        ]
+
+    def _with_messages(thread: dict[str, Any]) -> dict[str, Any]:
+        messages = _list_messages_by_thread_id(thread.get("id"), limit=400)
+        return {**thread, "messages": messages}
+
+    return {
+        "editionId": str(edition_id),
+        "editionThreads": [_with_messages(thread) for thread in edition_threads],
+        "sectionThreads": [_with_messages(thread) for thread in section_threads],
+    }
+
 def _assignment_events_for_assignments(assignment_ids: list[str]) -> list[dict[str, Any]]:
     if not assignment_ids:
         return []
@@ -2766,52 +4266,6 @@ query ListAssignmentEventsByAssignment($assignmentId: ID!, $limit: Int, $nextTok
             _hydrate_assignment_event_metadata(event)
             events.append(event)
     return sorted(events, key=lambda item: item.get("createdAt") or "", reverse=True)
-
-
-def _fallback_assignment_context(assignment_id: str) -> dict[str, Any]:
-    assignment = papyrus_get_assignment(assignment_id).get("assignment") or {}
-    relations = _list_connection(
-        """
-query ListSemanticRelationsBySubjectState($subjectStateKey: String!, $limit: Int, $nextToken: String) {
-  listSemanticRelationsBySubjectState(subjectStateKey: $subjectStateKey, limit: $limit, nextToken: $nextToken) {
-    items {
-      id
-      relationState
-      predicate
-      relationTypeKey
-      subjectKind
-      subjectId
-      subjectLineageId
-      objectKind
-      objectId
-      objectLineageId
-      metadata
-    }
-    nextToken
-  }
-}
-""",
-        {"subjectStateKey": _semantic_state_key("assignment", assignment_id)},
-        "listSemanticRelationsBySubjectState",
-    )
-    targets = [
-        {
-            "kind": relation.get("objectKind"),
-            "id": relation.get("objectId"),
-            "lineageId": relation.get("objectLineageId"),
-            "label": relation.get("objectLineageId") or relation.get("objectId"),
-            "detail": relation.get("relationTypeKey") or relation.get("predicate"),
-        }
-        for relation in relations
-        if relation.get("relationState") == "current"
-    ]
-    events = _assignment_events_for_assignments([assignment_id])
-    return {
-        "assignment": assignment,
-        "doctrine": [],
-        "targets": targets,
-        "events": events,
-    }
 
 
 def _normalize_assignment_metadata(value: Any) -> dict[str, Any]:
@@ -3124,6 +4578,7 @@ def _build_assignment_context_blocks(
     published_items: list[dict[str, Any]],
     references: list[dict[str, Any]],
     comments: list[dict[str, Any]],
+    forum_context: dict[str, Any] | None,
     lane_key: str,
     profile_key: str,
 ) -> list[dict[str, Any]]:
@@ -3248,6 +4703,46 @@ def _build_assignment_context_blocks(
         )
     linked_reference_ids = _string_list(metadata.get("referenceLineageIds") or [])
     linked_signal_ids = _string_list(metadata.get("semanticNodeLineageIds") or [])
+    forum = forum_context or {}
+    edition_threads = forum.get("editionThreads") if isinstance(forum.get("editionThreads"), list) else []
+    section_threads = forum.get("sectionThreads") if isinstance(forum.get("sectionThreads"), list) else []
+    for thread in edition_threads:
+        messages = thread.get("messages") if isinstance(thread.get("messages"), list) else []
+        lines = [f"Edition Forum: {thread.get('title') or thread.get('id')}"]
+        for message in messages:
+            author = message.get("authorLabel") or message.get("role") or "author"
+            created = message.get("createdAt") or "unknown"
+            summary = message.get("summary") or message.get("content") or message.get("id")
+            lines.append(f"- [{created}] {author}: {summary}")
+        blocks.append(
+            _context_block(
+                f"edition-forum-{thread.get('id')}",
+                "desk_memory",
+                "\n".join(lines),
+                metadata={"sourceKind": "edition_forum", "threadId": thread.get("id"), "scope": "edition"},
+            )
+        )
+    for thread in section_threads:
+        messages = thread.get("messages") if isinstance(thread.get("messages"), list) else []
+        section_label = (
+            ((thread.get("metadata") or {}) if isinstance(thread.get("metadata"), dict) else {}).get("sectionKey")
+            or thread.get("primaryAnchorId")
+            or "section"
+        )
+        lines = [f"Section Forum: {section_label} / {thread.get('title') or thread.get('id')}"]
+        for message in messages:
+            author = message.get("authorLabel") or message.get("role") or "author"
+            created = message.get("createdAt") or "unknown"
+            summary = message.get("summary") or message.get("content") or message.get("id")
+            lines.append(f"- [{created}] {author}: {summary}")
+        blocks.append(
+            _context_block(
+                f"section-forum-{thread.get('id')}",
+                "desk_memory",
+                "\n".join(lines),
+                metadata={"sourceKind": "section_forum", "threadId": thread.get("id"), "scope": "section"},
+            )
+        )
     if linked_reference_ids or linked_signal_ids:
         lines = ["Assignment-linked context"]
         if linked_reference_ids:

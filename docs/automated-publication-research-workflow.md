@@ -11,6 +11,14 @@ the workflow is publication-neutral: change the corpus config, accepted
 taxonomy, ontology, sections, doctrine, and edition plan, and the same machinery
 should work for another publication.
 
+## Which Doc/Skill To Use First
+
+| Need | Start here |
+| --- | --- |
+| Planning run | [`skills/edition-planning/SKILL.md`](/Users/ryan/Projects/Papyrus/skills/edition-planning/SKILL.md) |
+| Run/review cycle | [`skills/newsroom-story-cycle/SKILL.md`](/Users/ryan/Projects/Papyrus/skills/newsroom-story-cycle/SKILL.md) |
+| Data contract truth | This file |
+
 ## Mental Model
 
 Use these objects as distinct editorial concepts:
@@ -49,6 +57,122 @@ Assignment
 New packet writes use `Assignment --produces--> Message`. Existing
 `Message --comment--> Assignment` packet links remain readable for compatibility.
 
+## Edition Slot Orchestration
+
+`EditionSlot` is the planning unit for section-first culling and final packet
+selection. Story-cycle dispatch binds reporting candidates to concrete slots
+before review starts.
+
+Field contract:
+
+- `id`, `editionId`, `sectionKey`, `slotRank`
+- `targetType` (`article|brief`)
+- `targetLengthBand`
+- `minImageAssets`
+- `status` (`open|assigned|selected|briefed|filled|killed`)
+- `selectedAssignmentId`
+- `createdAt`, `updatedAt`
+
+Current flow:
+
+- Slot creation starts in `assigned` status during planning.
+- Reporting dispatch must set assignment metadata `slotTarget` and write
+  `Assignment --targets_slot--> EditionSlot`.
+- Review `select|brief` writes `EditionSlot --selected_by--> Assignment` and
+  sets slot status to `selected` or `briefed` with `selectedAssignmentId`.
+- Review `hold|kill` keeps the slot available by resetting slot state to
+  `open` and clearing `selectedAssignmentId`.
+- Review `merge` does not mutate slot state unless an explicit slot mutation is
+  requested separately.
+- `filled` and `killed` remain later editorial/layout lifecycle states, not
+  reporting-packet review outcomes.
+
+Decision matrix:
+
+| Decision | Slot status mutation | Slot relation mutation | Copywriting child | Notes |
+| --- | --- | --- | --- | --- |
+| `select` | `selected` + set `selectedAssignmentId` | add `selected_by` | `copywriting.article-draft` | Marks slot winner candidate. |
+| `brief` | `briefed` + set `selectedAssignmentId` | add `selected_by` | `copywriting.brief-draft` | Marks slot winner candidate for brief lane. |
+| `hold` | `open` + clear `selectedAssignmentId` | none | none | Candidate kept private; slot stays available. |
+| `kill` | `open` + clear `selectedAssignmentId` | none | none | Candidate rejected; slot stays available. |
+| `merge` | none by default | none by default | none | Does not fill a slot unless explicitly attached. |
+
+Section-first culling rule:
+
+- Compare and cull candidates within each section slot budget first.
+- Cross-section substitution is an explicit editor override, not a default.
+
+Story Budget should be read as a slot-centric board:
+
+- per-slot pipeline state;
+- candidate stack mapped to each slot;
+- selected winner per slot;
+- fill delta and unresolved slots;
+- section rollups as derived aggregates.
+
+## Edition And Section Forum Threads
+
+Upcoming edition coordination uses first-class `MessageThread` rows with forum
+thread kinds:
+
+- `edition_forum`: `primaryAnchorKind = "edition"` and
+  `primaryAnchorId = <editionId>`.
+- `section_forum`: `primaryAnchorKind = "newsroom_section"`,
+  `primaryAnchorId = <sectionId>`, and
+  `primaryAnchorLineageId = <editionId>`.
+
+Section forums are many-to-one: multiple threads are allowed for the same
+`(edition, section)` lineage.
+
+Message threading contract is unchanged:
+
+- `Message.threadId` links to the parent thread.
+- `Message.parentMessageId` links replies.
+- `Message.sequenceNumber` preserves chronology.
+
+### Kickoff + Human Steering
+
+Coverage Theme planning posts **three sequential messages** on the canonical
+`edition_forum` thread (increasing `sequenceNumber` on the same thread):
+
+| Phase | Summary prefix | Content |
+| --- | --- | --- |
+| 1 | `Edition theme (phase 1):` | Proposed edition theme and coverage concept; pointers to phases 2–3. Floating/rotating desks are **not** the edition theme. |
+| 2 | `Optional desk (phase 2):` | One proposed optional desk after `rotating_section_selector.tac` (informed by the accepted theme). |
+| 3 | `Reporting dispatch (phase 3):` | Reporting assignment candidates per confirmed desk, with default `ceil(slots * 1.5)` overassignment. |
+
+Phase 3 is deferred until phase 2 completes when optional desks are still
+provisional (e.g. `culture` CLI alias → floating `arts`). Recent optional-desk
+history in phase 2 uses **confirmed** prior selections only (`selectedOptionalDeskKey`
+on past editions)—not provisional `sectionBudgets` rows.
+
+Planning no longer posts default `section_forum` kickoffs; desk-specific steering
+for dispatch lives in message 3 and in assignment briefs. Legacy `section_forum`
+threads may still exist and remain readable in assignment context.
+
+CLI: `--through plan` (message 1), then `--through rotating-desk` (messages 2–3
+on apply). See `skills/edition-planning/SKILL.md` for flags.
+
+The planner is idempotent on the canonical edition forum thread: an accidental
+re-run with the same kickoff body or `importRunId` must not append a duplicate
+phase post. A materially new planning pass should fork a new thread and post a
+re-plan update there so the original chronology stays intact.
+
+Humans append replies in the edition thread. That chronology is shared editorial
+memory for the edition run.
+
+### Assignment Context Inclusion Defaults
+
+Assignment context assembly must include forum threads by default:
+
+1. If an assignment has `editionId`, include edition-forum thread history first.
+2. If an assignment is section-bound, include only section-forum thread history
+   for that same `(edition, section)` lineage.
+3. Never include forum threads from other sections.
+
+Current policy is full-history inclusion (no compaction) in chronological order
+within each thread.
+
 ## Packet Types
 
 `research_packet` is the exploratory evidence product. It can summarize accepted
@@ -66,6 +190,8 @@ include:
 - `proposed_references`
 - `recent_desk_memory_used`, `coverage_gaps`, `open_questions`
 - `risk_flags`, `verification_needs`, `source_diversity_notes`
+- knowledge-orientation trace: `source_trail`, `knowledge_queries`,
+  `papyrus_uris_inspected`, and optional `knowledge_blocked_reason`
 - `copywriter_brief`
 - `editor_recommendation`: `select`, `merge`, `brief`, `hold`, or `kill`
 
@@ -109,7 +235,7 @@ worked through multiple section lenses. The CLI command remains
 `assignments run-story-cycle` for compatibility.
 
 ```bash
-npm run content -- assignments run-story-cycle \
+poetry run papyrus assignments run-story-cycle \
   --date 2026-05-21 \
   --topic "AI in video games" \
   --category AI-ML-research \
@@ -133,6 +259,19 @@ Dry-run is the default. It creates local output under
 `.papyrus-runs/story-cycle-<run-id>/`: `manifest.json`, child research logs,
 child reporting logs, packet JSON files, and `story-cycle-output.json`.
 
+Cloud procedure runs also write structured per-call LLM context trace artifacts
+under each run directory:
+
+- `llm-context/summary.json`: indexed metadata and call list
+- `llm-context/calls.jsonl`: one record per LLM call with the exact message
+  array sent to the model (system prompt + history + user/tool messages)
+- `llm-context/execute_tactus_calls.jsonl`: one record per `execute_tactus`
+  call, including harness, args, and the exact `tactus` snippet passed to the
+  runtime
+
+Use these files as the canonical local audit trail for context engineering
+debugging and verification.
+
 Apply mode persists private work products only: `Assignment`, `AssignmentEvent`,
 `Message`, `ModelAttachment`, and `SemanticRelation`. It must not create
 `Item` or `EditionItem` records during packet generation. In live apply mode,
@@ -145,7 +284,7 @@ the intent is to regenerate already persisted packet payloads.
 Inspect output with:
 
 ```bash
-npm run content -- assignments story-cycle-output \
+poetry run papyrus assignments story-cycle-output \
   --run-id <story-cycle-run-id> \
   --json
 ```
@@ -162,7 +301,7 @@ Editors review `reporting_context_packet` rows from `/newsroom/assignments` or
 the CLI:
 
 ```bash
-npm run content -- assignments review-reporting-packet \
+poetry run papyrus assignments review-reporting-packet \
   --assignment <assignment-id> \
   --message <message-id> \
   --decision select|merge|brief|hold|kill \
@@ -186,7 +325,7 @@ Decision effects:
 Run the copywriting Assignment after selection:
 
 ```bash
-npm run content -- assignments run-copywriting \
+poetry run papyrus assignments run-copywriting \
   --assignment <copywriting-assignment-id> \
   --dry-run
 ```
@@ -219,6 +358,20 @@ Reporters use `procedures/newsroom/reporter.tac` to produce
 assignments. Agents do not own persistence mechanics; the CLI/procedure layer
 turns payloads into deterministic `Message`, `ModelAttachment`, and
 `SemanticRelation` writes.
+
+Live reporting runs use a strict path: one deterministic internal-orientation
+step (`assignment_context`, `assignment_agent_context`, then one broad scoped
+`knowledge_query`) before any optional follow-up lookup. Reporter tool flow does
+not rely on `done` short-circuit behavior in this path.
+
+Reporting runs are immutable packet history. Multiple packet Messages may exist
+for one Assignment, and downstream copywriting should treat the most recent
+successful `reporting_context_packet` Message as canonical unless an explicit
+editor workflow chooses a specific Message id.
+
+When orientation cannot complete, the default behavior is a valid `hold` packet
+with explicit `knowledge_blocked_reason` (plus orientation-attempt metadata),
+not a pipeline crash.
 
 When current external evidence is required, Tactus snippets should import the
 standard web module:

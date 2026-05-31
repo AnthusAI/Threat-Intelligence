@@ -1,7 +1,7 @@
 "use client";
 
 import { generateClient } from "aws-amplify/data";
-import { downloadData } from "aws-amplify/storage";
+import { downloadData, getUrl } from "aws-amplify/storage";
 import type { Schema } from "../amplify/data/resource";
 import type { NewsDeskAppendix, NewsDeskCategoryTreeNode } from "../lib/content-types";
 import { createEmptyCategorySteeringDashboard } from "../lib/category-dashboard";
@@ -23,6 +23,9 @@ import type {
   LexicalSteeringRuleRecord,
   AssignmentEventRecord,
   AssignmentRecord,
+  EditionRecord,
+  EditionSlotRecord,
+  MessageThreadRecord,
   DoctrineRecord,
   NewsroomSectionRecord,
   ProcedureDefinitionRecord,
@@ -34,6 +37,7 @@ import type {
   SemanticRelationRecord,
   UserDirectoryEntry,
 } from "../lib/category-repository";
+import { relationTypeKey } from "../lib/semantic-graph";
 import { DOCTRINE_DEFINITIONS, getCategoryDoctrineDefinitions, type DoctrineCategory } from "../lib/doctrine";
 import { configureAmplifyClient } from "./amplify-client-provider";
 import { isUnauthenticatedError, loadReaderSessionSnapshot, type ReaderAuthSnapshot } from "./reader-auth-state";
@@ -44,12 +48,186 @@ const USER_POOL_PAGE_LIMIT = 50;
 const TEST_EDITOR_STORAGE_KEY = "papyrus:test-editor";
 const TEST_EDITOR_NEWSROOM_MOCK_STORAGE_KEY = "papyrus:test-newsroom-mock";
 const NEWSROOM_PAGE_LIMIT = 50;
+const REFERENCE_REVIEWED_FEED_KEY = "references#reviewed";
+const REFERENCE_STATUS_KEYS = ["pending", "accepted", "rejected", "archived"] as const;
 
 const NEWSROOM_MESSAGE_FEED_QUERY = `
   query ListMessagesByNewsroomFeedAndCreatedAt($newsroomFeedKey: String!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String, $filter: ModelMessageFilterInput) {
     listMessagesByNewsroomFeedAndCreatedAt(newsroomFeedKey: $newsroomFeedKey, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken, filter: $filter) {
-      items { id messageKind messageDomain status summary source importRunId authorSub authorUserProfileId authorLabel createdAt updatedAt newsroomFeedKey }
+      items { id messageKind messageDomain status summary source importRunId authorSub authorUserProfileId authorLabel threadId parentMessageId sequenceNumber role messageType content semanticLayer searchVisibility responseTarget responseStatus responseOwner responseStartedAt responseCompletedAt responseError metadata createdAt updatedAt newsroomFeedKey }
       nextToken
+    }
+  }
+`;
+
+const LIST_MESSAGE_THREADS_BY_KIND_AND_UPDATED_AT_QUERY = `
+  query ListMessageThreadsByKindAndUpdatedAt($threadKind: String!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String) {
+    listMessageThreadsByKindAndUpdatedAt(threadKind: $threadKind, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken) {
+      items {
+        id
+        threadKind
+        status
+        title
+        summary
+        primaryAnchorKind
+        primaryAnchorId
+        primaryAnchorLineageId
+        primaryAnchorKey
+        createdBySub
+        createdByUserProfileId
+        createdByLabel
+        messageCount
+        lastMessageId
+        lastMessageAt
+        contextDigest
+        activeResponseMessageId
+        responseLockOwner
+        responseLockExpiresAt
+        metadata
+        createdAt
+        updatedAt
+        newsroomFeedKey
+      }
+      nextToken
+    }
+  }
+`;
+
+const LIST_MESSAGES_BY_THREAD_AND_SEQUENCE_QUERY = `
+  query ListMessagesByThreadAndSequence($threadId: ID!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String) {
+    listMessagesByThreadAndSequence(threadId: $threadId, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken) {
+      items { id messageKind messageDomain status summary source importRunId authorSub authorUserProfileId authorLabel threadId parentMessageId sequenceNumber role messageType content semanticLayer searchVisibility responseTarget responseStatus responseOwner responseStartedAt responseCompletedAt responseError metadata createdAt updatedAt newsroomFeedKey }
+      nextToken
+    }
+  }
+`;
+
+const CREATE_MESSAGE_THREAD_MUTATION = `
+  mutation CreateMessageThread($input: CreateMessageThreadInput!) {
+    createMessageThread(input: $input) {
+      id
+      threadKind
+      status
+      title
+      summary
+      primaryAnchorKind
+      primaryAnchorId
+      primaryAnchorLineageId
+      primaryAnchorKey
+      createdBySub
+      createdByUserProfileId
+      createdByLabel
+      messageCount
+      lastMessageId
+      lastMessageAt
+      contextDigest
+      activeResponseMessageId
+      responseLockOwner
+      responseLockExpiresAt
+      metadata
+      createdAt
+      updatedAt
+      newsroomFeedKey
+    }
+  }
+`;
+
+const UPDATE_MESSAGE_THREAD_MUTATION = `
+  mutation UpdateMessageThread($input: UpdateMessageThreadInput!) {
+    updateMessageThread(input: $input) {
+      id
+      threadKind
+      status
+      title
+      summary
+      primaryAnchorKind
+      primaryAnchorId
+      primaryAnchorLineageId
+      primaryAnchorKey
+      createdBySub
+      createdByUserProfileId
+      createdByLabel
+      messageCount
+      lastMessageId
+      lastMessageAt
+      contextDigest
+      activeResponseMessageId
+      responseLockOwner
+      responseLockExpiresAt
+      metadata
+      createdAt
+      updatedAt
+      newsroomFeedKey
+    }
+  }
+`;
+
+const CREATE_MESSAGE_MUTATION = `
+  mutation CreateMessage($input: CreateMessageInput!) {
+    createMessage(input: $input) {
+      id
+      messageKind
+      messageDomain
+      status
+      summary
+      source
+      importRunId
+      authorSub
+      authorUserProfileId
+      authorLabel
+      threadId
+      parentMessageId
+      sequenceNumber
+      role
+      messageType
+      content
+      semanticLayer
+      searchVisibility
+      responseTarget
+      responseStatus
+      responseOwner
+      responseStartedAt
+      responseCompletedAt
+      responseError
+      metadata
+      createdAt
+      updatedAt
+      newsroomFeedKey
+    }
+  }
+`;
+
+const UPDATE_MESSAGE_MUTATION = `
+  mutation UpdateMessage($input: UpdateMessageInput!) {
+    updateMessage(input: $input) {
+      id
+      messageKind
+      messageDomain
+      status
+      summary
+      source
+      importRunId
+      authorSub
+      authorUserProfileId
+      authorLabel
+      threadId
+      parentMessageId
+      sequenceNumber
+      role
+      messageType
+      content
+      semanticLayer
+      searchVisibility
+      responseTarget
+      responseStatus
+      responseOwner
+      responseStartedAt
+      responseCompletedAt
+      responseError
+      metadata
+      createdAt
+      updatedAt
+      newsroomFeedKey
     }
   }
 `;
@@ -66,7 +244,34 @@ const NEWSROOM_ASSIGNMENT_FEED_QUERY = `
 const NEWSROOM_REFERENCE_FEED_QUERY = `
   query ListReferencesByNewsroomFeedAndCreatedAt($newsroomFeedKey: String!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String, $filter: ModelReferenceFilterInput) {
     listReferencesByNewsroomFeedAndCreatedAt(newsroomFeedKey: $newsroomFeedKey, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken, filter: $filter) {
-      items { id lineageId versionNumber previousVersionId versionState versionCreatedAt versionCreatedBy changeReason contentHash corpusId externalItemId title authors sourceUri storagePath mediaType byteSize sha256 sourcePublishedAt sourceUpdatedAt retrievedAt importRunId importedAt createdAt curationStatus curationStatusKey curationStatusUpdatedAt curationStatusUpdatedBy curationStatusReason newsroomFeedKey updatedAt }
+      items { id lineageId versionNumber previousVersionId versionState versionCreatedAt versionCreatedBy changeReason contentHash corpusId externalItemId title authors sourceUri storagePath mediaType byteSize sha256 sourcePublishedAt sourceUpdatedAt retrievedAt inboundCitationCount outboundCitationCount importRunId importedAt createdAt curationStatus curationStatusKey curationStatusUpdatedAt curationStatusUpdatedBy curationStatusReason newsroomFeedKey reviewedFeedKey updatedAt }
+      nextToken
+    }
+  }
+`;
+
+const LIST_REFERENCES_BY_CURATION_STATUS_AND_UPDATED_AT_QUERY = `
+  query ListReferencesByCurationStatusAndUpdatedAt($curationStatus: String!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String, $filter: ModelReferenceFilterInput) {
+    listReferencesByCurationStatusAndUpdatedAt(curationStatus: $curationStatus, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken, filter: $filter) {
+      items { id lineageId versionNumber previousVersionId versionState versionCreatedAt versionCreatedBy changeReason contentHash corpusId externalItemId title authors sourceUri storagePath mediaType byteSize sha256 sourcePublishedAt sourceUpdatedAt retrievedAt inboundCitationCount outboundCitationCount importRunId importedAt createdAt curationStatus curationStatusKey curationStatusUpdatedAt curationStatusUpdatedBy curationStatusReason newsroomFeedKey reviewedFeedKey updatedAt }
+      nextToken
+    }
+  }
+`;
+
+const LIST_REFERENCES_BY_REVIEWED_FEED_AND_UPDATED_AT_QUERY = `
+  query ListReferencesByReviewedFeedAndUpdatedAt($reviewedFeedKey: String!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String, $filter: ModelReferenceFilterInput) {
+    listReferencesByReviewedFeedAndUpdatedAt(reviewedFeedKey: $reviewedFeedKey, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken, filter: $filter) {
+      items { id lineageId versionNumber previousVersionId versionState versionCreatedAt versionCreatedBy changeReason contentHash corpusId externalItemId title authors sourceUri storagePath mediaType byteSize sha256 sourcePublishedAt sourceUpdatedAt retrievedAt inboundCitationCount outboundCitationCount importRunId importedAt createdAt curationStatus curationStatusKey curationStatusUpdatedAt curationStatusUpdatedBy curationStatusReason newsroomFeedKey reviewedFeedKey updatedAt }
+      nextToken
+    }
+  }
+`;
+
+const LIST_REFERENCES_FALLBACK_QUERY = `
+  query ListReferencesFallback($limit: Int, $nextToken: String) {
+    listReferences(limit: $limit, nextToken: $nextToken) {
+      items { id lineageId versionNumber previousVersionId versionState versionCreatedAt versionCreatedBy changeReason contentHash corpusId externalItemId title authors sourceUri storagePath mediaType byteSize sha256 sourcePublishedAt sourceUpdatedAt retrievedAt inboundCitationCount outboundCitationCount importRunId importedAt createdAt curationStatus curationStatusKey curationStatusUpdatedAt curationStatusUpdatedBy curationStatusReason newsroomFeedKey reviewedFeedKey updatedAt }
       nextToken
     }
   }
@@ -75,7 +280,7 @@ const NEWSROOM_REFERENCE_FEED_QUERY = `
 const NEWSROOM_SEMANTIC_NODE_FEED_QUERY = `
   query ListSemanticNodesByNewsroomFeedAndCreatedAt($newsroomFeedKey: String!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String, $filter: ModelSemanticNodeFilterInput) {
     listSemanticNodesByNewsroomFeedAndCreatedAt(newsroomFeedKey: $newsroomFeedKey, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken, filter: $filter) {
-      items { id lineageId versionNumber previousVersionId versionState versionCreatedAt versionCreatedBy changeReason contentHash nodeKey nodeKind corpusId categorySetId categoryLineageId categoryKey displayName description aliases status importRunId createdAt newsroomFeedKey updatedAt }
+      items { id lineageId versionNumber previousVersionId versionState versionCreatedAt versionCreatedBy changeReason contentHash nodeKey nodeKind corpusId categorySetId categoryLineageId categoryKey displayName description aliases authorityScore authorityRank acceptedReferenceMentionCount distinctSourceKindCount relationCount status importRunId createdAt newsroomFeedKey updatedAt }
       nextToken
     }
   }
@@ -84,6 +289,24 @@ const NEWSROOM_SEMANTIC_NODE_FEED_QUERY = `
 const NEWSROOM_SEMANTIC_RELATION_FEED_QUERY = `
   query ListSemanticRelationsByNewsroomFeedAndCreatedAt($newsroomFeedKey: String!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String, $filter: ModelSemanticRelationFilterInput) {
     listSemanticRelationsByNewsroomFeedAndCreatedAt(newsroomFeedKey: $newsroomFeedKey, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken, filter: $filter) {
+      items { id relationState predicate relationTypeId relationTypeKey relationDomain subjectKind subjectId subjectLineageId subjectVersionNumber objectKind objectId objectLineageId objectVersionNumber subjectStateKey objectStateKey objectSubjectStateKey predicateObjectStateKey subjectVersionKey objectVersionKey score confidence rank classifierId modelVersion reviewRecommended sourceSnapshotId importRunId importedAt createdAt updatedAt newsroomFeedKey metadata }
+      nextToken
+    }
+  }
+`;
+
+const LIST_SEMANTIC_RELATIONS_BY_SUBJECT_STATE_QUERY = `
+  query ListSemanticRelationsBySubjectState($subjectStateKey: String!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String, $filter: ModelSemanticRelationFilterInput) {
+    listSemanticRelationsBySubjectState(subjectStateKey: $subjectStateKey, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken, filter: $filter) {
+      items { id relationState predicate relationTypeId relationTypeKey relationDomain subjectKind subjectId subjectLineageId subjectVersionNumber objectKind objectId objectLineageId objectVersionNumber subjectStateKey objectStateKey objectSubjectStateKey predicateObjectStateKey subjectVersionKey objectVersionKey score confidence rank classifierId modelVersion reviewRecommended sourceSnapshotId importRunId importedAt createdAt updatedAt newsroomFeedKey metadata }
+      nextToken
+    }
+  }
+`;
+
+const LIST_SEMANTIC_RELATIONS_BY_OBJECT_STATE_QUERY = `
+  query ListSemanticRelationsByObjectState($objectStateKey: String!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String, $filter: ModelSemanticRelationFilterInput) {
+    listSemanticRelationsByObjectState(objectStateKey: $objectStateKey, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken, filter: $filter) {
       items { id relationState predicate relationTypeId relationTypeKey relationDomain subjectKind subjectId subjectLineageId subjectVersionNumber objectKind objectId objectLineageId objectVersionNumber subjectStateKey objectStateKey objectSubjectStateKey predicateObjectStateKey subjectVersionKey objectVersionKey score confidence rank classifierId modelVersion reviewRecommended sourceSnapshotId importRunId importedAt createdAt updatedAt newsroomFeedKey metadata }
       nextToken
     }
@@ -109,6 +332,41 @@ const NEWSROOM_SECTION_LIST_QUERY = `
         killCriteria
         visualGuidance
         createdAt
+        updatedAt
+      }
+      nextToken
+    }
+  }
+`;
+
+const LIST_STEERING_PROPOSALS_QUERY = `
+  query ListSteeringProposals($limit: Int, $nextToken: String) {
+    listSteeringProposals(limit: $limit, nextToken: $nextToken) {
+      items {
+        id
+        categorySetId
+        corpusId
+        importRunId
+        proposalKind
+        steeringDomain
+        status
+        title
+        summary
+        categoryKey
+        targetCategoryKey
+        graphEntityId
+        relationshipType
+        displayName
+        shortTitle
+        subtitle
+        description
+        evidenceItemIds
+        suggestedSeedItemIds
+        suggestedHoldoutItemIds
+        sourceSnapshotId
+        proposedAt
+        reviewedAt
+        reviewedBy
         updatedAt
       }
       nextToken
@@ -168,6 +426,8 @@ const GET_REFERENCE_QUERY = `
       sourcePublishedAt
       sourceUpdatedAt
       retrievedAt
+      inboundCitationCount
+      outboundCitationCount
       importRunId
       importedAt
       createdAt
@@ -177,8 +437,36 @@ const GET_REFERENCE_QUERY = `
       curationStatusUpdatedBy
       curationStatusReason
       newsroomFeedKey
+      reviewedFeedKey
       metadata
       updatedAt
+    }
+  }
+`;
+
+const LIST_REFERENCE_ATTACHMENTS_BY_REFERENCE_LINEAGE_AND_SORT_KEY_QUERY = `
+  query ListReferenceAttachmentsByReferenceLineageAndSortKey($referenceLineageId: ID!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String) {
+    listReferenceAttachmentsByReferenceLineageAndSortKey(referenceLineageId: $referenceLineageId, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken) {
+      items {
+        id
+        referenceId
+        referenceLineageId
+        referenceVersionNumber
+        referenceVersionKey
+        role
+        sortKey
+        storagePath
+        sourceUri
+        filename
+        mediaType
+        byteSize
+        sha256
+        etag
+        importRunId
+        importedAt
+        metadata
+      }
+      nextToken
     }
   }
 `;
@@ -215,6 +503,23 @@ const CREATE_MODEL_ATTACHMENT_UPLOAD_MUTATION = `
       status: $status
     ) {
       ok uploadId attachmentId ownerKind ownerId role sortKey method uploadUrl storagePath mediaType byteSize sha256 expiresAt requiredHeaders
+    }
+  }
+`;
+
+const CREATE_MODEL_ATTACHMENT_DOWNLOAD_MUTATION = `
+  mutation CreateModelAttachmentDownload($attachmentId: ID!) {
+    createModelAttachmentDownload(attachmentId: $attachmentId) {
+      ok
+      attachmentId
+      method
+      downloadUrl
+      storagePath
+      mediaType
+      byteSize
+      sha256
+      expiresAt
+      requiredHeaders
     }
   }
 `;
@@ -316,7 +621,7 @@ type GraphQLListResponse<T> = {
 };
 
 type ListableModel<T> = {
-  list: (options: Record<string, unknown>) => Promise<GraphQLListResponse<T>>;
+  list: (input?: Record<string, unknown>, options?: Record<string, unknown>) => Promise<GraphQLListResponse<T>>;
 };
 
 export type NewsroomRecordPage<T> = {
@@ -356,6 +661,7 @@ type NewsroomAssignmentPageOptions = NewsroomPageOptions & {
 
 type NewsroomReferencePageOptions = NewsroomPageOptions & {
   status?: string;
+  excludePending?: boolean;
   corpusId?: string;
 };
 
@@ -367,6 +673,20 @@ type NewsroomSemanticNodePageOptions = NewsroomPageOptions & {
 type NewsroomSemanticRelationPageOptions = NewsroomPageOptions & {
   relationTypeKey?: string;
   relationDomain?: string;
+};
+
+export type ForumThreadWithMessages = MessageThreadRecord & {
+  messages: MessageRecord[];
+  scope: "edition" | "section";
+  sectionKey?: string | null;
+  sectionTitle?: string | null;
+};
+
+export type EditionForumThreadsResult = {
+  editionId: string;
+  editionThreads: ForumThreadWithMessages[];
+  sectionThreads: ForumThreadWithMessages[];
+  threadCount: number;
 };
 
 type SlugQueryableModel<T> = {
@@ -500,11 +820,17 @@ export async function loadEditorResolvedAccessState(): Promise<EditorAccessState
     if (!snapshot.hasSession || snapshot.auth.status === "signedOut") {
       return { status: "signedOut", isEditor: false, isAdmin: false, auth: snapshot.auth, error: null };
     }
-    const groups = snapshot.groups;
-    if (!groups.includes("editor") && !groups.includes("admin")) {
-      return { status: "forbidden", isEditor: false, isAdmin: false, auth: snapshot.auth, error: null };
+    const refreshed = await loadReaderSessionSnapshot({ forceRefresh: true });
+    if (!refreshed.hasSession || refreshed.auth.status === "signedOut") {
+      return { status: "signedOut", isEditor: false, isAdmin: false, auth: refreshed.auth, error: null };
     }
-    return { status: "ready", isEditor: true, isAdmin: groups.includes("admin"), auth: snapshot.auth, error: null };
+    return {
+      status: "ready",
+      isEditor: true,
+      isAdmin: refreshed.groups.includes("admin"),
+      auth: refreshed.auth,
+      error: null,
+    };
   } catch (error) {
     return {
       status: "error",
@@ -579,27 +905,29 @@ export async function loadEditorFullNewsDeskDashboard({ isAdmin }: { isAdmin: bo
     messages,
     semanticRelations,
     assignmentState,
+    editionSlots,
     newsroomSections,
     procedureData,
     userDirectory,
   ] = await Promise.all([
-    listUserPoolModel<CategorySteeringCorpus>("KnowledgeCorpus"),
-    listUserPoolModel<CategorySteeringImportRun>("KnowledgeImportRun"),
-    listUserPoolModel<CategorySteeringCategorySet>("CategorySet"),
-    listUserPoolModel<CategorySteeringCategory>("Category"),
-    listOptionalUserPoolModel<CategoryKeywordRecord>("CategoryKeyword"),
-    listOptionalUserPoolModel<LexicalSteeringRuleRecord>("LexicalSteeringRule"),
-    listUserPoolModel<CategorySteeringProposal>("SteeringProposal"),
-    listUserPoolModel<CategorySteeringArtifact>("KnowledgeArtifact"),
-    listUserPoolModel<ReferenceRecord>("Reference"),
-    listUserPoolModel<ReferenceAttachmentRecord>("ReferenceAttachment"),
-    listUserPoolModel<SemanticNodeRecord>("SemanticNode"),
-    listUserPoolModel<MessageRecord>("Message"),
-    listUserPoolModel<SemanticRelationRecord>("SemanticRelation"),
-    loadEditorAssignmentsData(),
-    listOptionalUserPoolModel<NewsroomSectionRecord>("NewsroomSection"),
+    loadDashboardSlice("KnowledgeCorpus", () => listUserPoolModel<CategorySteeringCorpus>("KnowledgeCorpus"), [] as CategorySteeringCorpus[]),
+    loadDashboardSlice("KnowledgeImportRun", () => listUserPoolModel<CategorySteeringImportRun>("KnowledgeImportRun"), [] as CategorySteeringImportRun[]),
+    loadDashboardSlice("CategorySet", () => listUserPoolModel<CategorySteeringCategorySet>("CategorySet"), [] as CategorySteeringCategorySet[]),
+    loadDashboardSlice("Category", () => listUserPoolModel<CategorySteeringCategory>("Category"), [] as CategorySteeringCategory[]),
+    loadDashboardSlice("CategoryKeyword", () => listOptionalUserPoolModel<CategoryKeywordRecord>("CategoryKeyword"), [] as CategoryKeywordRecord[]),
+    loadDashboardSlice("LexicalSteeringRule", () => listOptionalUserPoolModel<LexicalSteeringRuleRecord>("LexicalSteeringRule"), [] as LexicalSteeringRuleRecord[]),
+    loadDashboardSlice("SteeringProposal", () => listSteeringProposalsViaGraphql(), [] as CategorySteeringProposal[]),
+    loadDashboardSlice("KnowledgeArtifact", () => listUserPoolModel<CategorySteeringArtifact>("KnowledgeArtifact"), [] as CategorySteeringArtifact[]),
+    loadDashboardSlice("Reference", () => listUserPoolModel<ReferenceRecord>("Reference"), [] as ReferenceRecord[]),
+    loadDashboardSlice("ReferenceAttachment", () => listUserPoolModel<ReferenceAttachmentRecord>("ReferenceAttachment"), [] as ReferenceAttachmentRecord[]),
+    loadDashboardSlice("SemanticNode", () => listUserPoolModel<SemanticNodeRecord>("SemanticNode"), [] as SemanticNodeRecord[]),
+    loadDashboardSlice("Message", () => listUserPoolModel<MessageRecord>("Message"), [] as MessageRecord[]),
+    loadDashboardSlice("SemanticRelation", () => listUserPoolModel<SemanticRelationRecord>("SemanticRelation"), [] as SemanticRelationRecord[]),
+    loadDashboardSlice("Assignments", () => loadEditorAssignmentsData(), { assignments: [], assignmentEvents: [] }),
+    loadDashboardSlice("EditionSlot", () => listOptionalUserPoolModel<EditionSlotRecord>("EditionSlot"), [] as EditionSlotRecord[]),
+    loadDashboardSlice("NewsroomSection", () => listOptionalUserPoolModel<NewsroomSectionRecord>("NewsroomSection"), [] as NewsroomSectionRecord[]),
     procedureDataPromise,
-    isAdmin ? loadUserDirectory() : Promise.resolve([]),
+    loadDashboardSlice("UserDirectory", () => (isAdmin ? loadUserDirectory() : Promise.resolve([])), [] as UserDirectoryEntry[]),
   ]);
 
   const sortedCorpora = corpora.sort((left, right) => left.name.localeCompare(right.name));
@@ -615,6 +943,12 @@ export async function loadEditorFullNewsDeskDashboard({ isAdmin }: { isAdmin: bo
   });
   const doctrineRecords = await loadDoctrineRecords(acceptedDoctrineCategories);
   const sortedNewsroomSections = sortNewsroomSections(newsroomSections);
+  const sortedEditionSlots = [...editionSlots].sort((left, right) => (
+    (left.editionId ?? "").localeCompare(right.editionId ?? "")
+    || (left.sectionKey ?? "").localeCompare(right.sectionKey ?? "")
+    || Number(left.slotRank ?? 0) - Number(right.slotRank ?? 0)
+    || (left.id ?? "").localeCompare(right.id ?? "")
+  ));
 
   return {
     canonicalCorpusId: canonicalCategorySet?.corpusId ?? selectCanonicalCorpus(sortedCorpora)?.id ?? null,
@@ -638,6 +972,7 @@ export async function loadEditorFullNewsDeskDashboard({ isAdmin }: { isAdmin: bo
     semanticRelations: semanticRelations.sort((left, right) => (right.score ?? 0) - (left.score ?? 0)),
     assignments: assignmentState.assignments,
     assignmentEvents: assignmentState.assignmentEvents,
+    editionSlots: sortedEditionSlots,
     doctrineRecords,
     newsroomSections: sortedNewsroomSections,
     procedureDefinitions: procedureData.definitions,
@@ -645,6 +980,15 @@ export async function loadEditorFullNewsDeskDashboard({ isAdmin }: { isAdmin: bo
     procedureRuns: procedureData.runs,
     loadError: null,
   };
+}
+
+async function loadDashboardSlice<T>(label: string, loader: () => Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await loader();
+  } catch (error) {
+    console.warn(`Newsroom dashboard slice failed: ${label}`, error);
+    return fallback;
+  }
 }
 
 export async function loadEditorProcedureData(): Promise<{
@@ -819,20 +1163,430 @@ export async function loadNewsroomMessagePage(options: NewsroomMessagePageOption
   });
 }
 
+export async function loadEditionForumThreads(options: {
+  editionId: string;
+  sectionId?: string | null;
+  sectionKey?: string | null;
+  includeMessages?: boolean;
+  status?: string;
+  limit?: number;
+}): Promise<EditionForumThreadsResult> {
+  const editionId = String(options.editionId || "").trim();
+  if (!editionId) {
+    return { editionId: "", editionThreads: [], sectionThreads: [], threadCount: 0 };
+  }
+  const testMock = getTestEditorNewsroomMock();
+  if (testMock?.forumThreadsByEdition?.[editionId]) {
+    const allThreads = testMock.forumThreadsByEdition[editionId] ?? [];
+    const sectionId = String(options.sectionId || "").trim();
+    const sectionKey = slugifyKey(options.sectionKey);
+    const editionThreads = allThreads.filter((thread) => thread.scope === "edition");
+    let sectionThreads = allThreads.filter((thread) => thread.scope === "section");
+    if (sectionId) sectionThreads = sectionThreads.filter((thread) => thread.primaryAnchorId === sectionId);
+    if (sectionKey) {
+      sectionThreads = sectionThreads.filter((thread) => (
+        slugifyKey(thread.sectionKey)
+        || slugifyKey(metadataString(thread.metadata, "sectionKey"))
+      ) === sectionKey);
+    }
+    return {
+      editionId,
+      editionThreads: editionThreads.sort((left, right) => String(right.updatedAt ?? "").localeCompare(String(left.updatedAt ?? ""))),
+      sectionThreads: sectionThreads.sort((left, right) => String(right.updatedAt ?? "").localeCompare(String(left.updatedAt ?? ""))),
+      threadCount: editionThreads.length + sectionThreads.length,
+    };
+  }
+
+  const status = String(options.status || "active").trim();
+  const limit = Math.max(1, Math.min(options.limit ?? 200, 500));
+  const includeMessages = options.includeMessages !== false;
+  const [editionThreadsRaw, sectionThreadsRaw] = await Promise.all([
+    listMessageThreadsByKind("edition_forum", limit),
+    listMessageThreadsByKind("section_forum", limit),
+  ]);
+  const sectionId = String(options.sectionId || "").trim();
+  const sectionKey = slugifyKey(options.sectionKey);
+  const editionThreads = editionThreadsRaw.filter((thread) => (
+    (!status || thread.status === status)
+    && thread.primaryAnchorKind === "edition"
+    && thread.primaryAnchorId === editionId
+  ));
+  let sectionThreads = sectionThreadsRaw.filter((thread) => (
+    (!status || thread.status === status)
+    && thread.primaryAnchorKind === "newsroom_section"
+    && thread.primaryAnchorLineageId === editionId
+  ));
+  if (sectionId) sectionThreads = sectionThreads.filter((thread) => thread.primaryAnchorId === sectionId);
+  if (sectionKey) {
+    sectionThreads = sectionThreads.filter((thread) => (
+      slugifyKey(metadataString(thread.metadata, "sectionKey"))
+      || slugifyKey(thread.primaryAnchorId)
+    ) === sectionKey);
+  }
+
+  async function hydrateThread(thread: MessageThreadRecord, scope: "edition" | "section"): Promise<ForumThreadWithMessages> {
+    const messages = includeMessages ? await listMessagesByThreadId(thread.id, 500) : [];
+    return {
+      ...thread,
+      scope,
+      sectionKey: metadataString(thread.metadata, "sectionKey"),
+      sectionTitle: metadataString(thread.metadata, "sectionTitle"),
+      messages,
+    };
+  }
+
+  const [editionHydrated, sectionHydrated] = await Promise.all([
+    Promise.all(editionThreads.map((thread) => hydrateThread(thread, "edition"))),
+    Promise.all(sectionThreads.map((thread) => hydrateThread(thread, "section"))),
+  ]);
+  editionHydrated.sort((left, right) => String(right.updatedAt ?? "").localeCompare(String(left.updatedAt ?? "")));
+  sectionHydrated.sort((left, right) => String(right.updatedAt ?? "").localeCompare(String(left.updatedAt ?? "")));
+  return {
+    editionId,
+    editionThreads: editionHydrated,
+    sectionThreads: sectionHydrated,
+    threadCount: editionHydrated.length + sectionHydrated.length,
+  };
+}
+
+export async function ensureEditionForumThreadRecord(input: {
+  editionId: string;
+  title?: string;
+  summary?: string;
+  actorLabel?: string;
+  metadata?: Record<string, unknown>;
+}): Promise<{ created: boolean; thread: MessageThreadRecord }> {
+  const editionId = String(input.editionId || "").trim();
+  if (!editionId) throw new Error("editionId is required");
+  const existing = await loadEditionForumThreads({
+    editionId,
+    includeMessages: false,
+    status: "",
+    limit: 40,
+  });
+  if (existing.editionThreads.length) return { created: false, thread: existing.editionThreads[0] };
+  const now = new Date().toISOString();
+  const thread: MessageThreadRecord = {
+    id: `message-thread-edition-forum-${safeForumId(editionId)}`,
+    threadKind: "edition_forum",
+    status: "active",
+    title: input.title?.trim() || "Upcoming edition",
+    summary: input.summary?.trim() || "Cross-section editor and human coordination for this edition.",
+    primaryAnchorKind: "edition",
+    primaryAnchorId: editionId,
+    primaryAnchorLineageId: editionId,
+    primaryAnchorKey: `edition#${editionId}`,
+    createdByLabel: input.actorLabel?.trim() || "editor",
+    messageCount: 0,
+    lastMessageId: null,
+    lastMessageAt: null,
+    metadata: {
+      editionId,
+      ...(input.metadata ?? {}),
+    },
+    createdAt: now,
+    updatedAt: now,
+    newsroomFeedKey: "messages",
+  };
+  const response = await runGraphql<{ createMessageThread?: MessageThreadRecord | null }>(
+    CREATE_MESSAGE_THREAD_MUTATION,
+    { input: thread },
+  );
+  return { created: true, thread: normalizeThreadRecord(response.createMessageThread ?? thread) };
+}
+
+export async function createSectionForumThreadRecord(input: {
+  editionId: string;
+  sectionId: string;
+  sectionKey?: string | null;
+  sectionTitle?: string | null;
+  title?: string;
+  summary?: string;
+  actorLabel?: string;
+  metadata?: Record<string, unknown>;
+}): Promise<{ created: boolean; thread: MessageThreadRecord }> {
+  const editionId = String(input.editionId || "").trim();
+  const sectionId = String(input.sectionId || "").trim();
+  if (!editionId) throw new Error("editionId is required");
+  if (!sectionId) throw new Error("sectionId is required");
+  const now = new Date().toISOString();
+  const thread: MessageThreadRecord = {
+    id: `message-thread-section-forum-${safeForumId(editionId)}-${safeForumId(sectionId)}-${safeForumId(now)}`,
+    threadKind: "section_forum",
+    status: "active",
+    title: input.title?.trim() || `Section Forum: ${input.sectionTitle || input.sectionKey || sectionId}`,
+    summary: input.summary?.trim() || "Section-scoped editorial steering thread for this edition.",
+    primaryAnchorKind: "newsroom_section",
+    primaryAnchorId: sectionId,
+    primaryAnchorLineageId: editionId,
+    primaryAnchorKey: `edition#${editionId}#section#${sectionId}`,
+    createdByLabel: input.actorLabel?.trim() || "editor",
+    messageCount: 0,
+    lastMessageId: null,
+    lastMessageAt: null,
+    metadata: {
+      editionId,
+      sectionId,
+      sectionKey: input.sectionKey || sectionId,
+      sectionTitle: input.sectionTitle || null,
+      ...(input.metadata ?? {}),
+    },
+    createdAt: now,
+    updatedAt: now,
+    newsroomFeedKey: "messages",
+  };
+  const response = await runGraphql<{ createMessageThread?: MessageThreadRecord | null }>(
+    CREATE_MESSAGE_THREAD_MUTATION,
+    { input: thread },
+  );
+  return { created: true, thread: normalizeThreadRecord(response.createMessageThread ?? thread) };
+}
+
+export async function appendForumThreadMessageRecord(input: {
+  threadId: string;
+  summary: string;
+  content: string;
+  role?: string;
+  authorLabel?: string;
+  parentMessageId?: string | null;
+  metadata?: Record<string, unknown>;
+}): Promise<{ thread: MessageThreadRecord; message: MessageRecord }> {
+  const threadId = String(input.threadId || "").trim();
+  const summary = String(input.summary || "").trim();
+  const content = String(input.content || "").trim();
+  if (!threadId) throw new Error("threadId is required");
+  if (!summary) throw new Error("summary is required");
+  if (!content) throw new Error("content is required");
+  const thread = await getMessageThreadRecord(threadId);
+  const existing = await listMessagesByThreadId(threadId, 1000);
+  const nextSequence = Math.max(0, ...existing.map((message) => Number(message.sequenceNumber || 0))) + 1;
+  const now = new Date().toISOString();
+  const message: MessageRecord = {
+    id: `message-forum-${safeForumId(threadId)}-${String(nextSequence).padStart(4, "0")}`,
+    messageKind: "forum_post",
+    messageDomain: "edition_coordination",
+    status: "active",
+    summary,
+    source: "newsroom.forum",
+    authorLabel: input.authorLabel?.trim() || "editor",
+    threadId,
+    parentMessageId: input.parentMessageId?.trim() || null,
+    sequenceNumber: nextSequence,
+    role: input.role || "human",
+    messageType: "forum_message",
+    content,
+    metadata: input.metadata ?? {},
+    createdAt: now,
+    updatedAt: now,
+    newsroomFeedKey: "messages",
+  };
+  const created = await runGraphql<{ createMessage?: MessageRecord | null }>(
+    CREATE_MESSAGE_MUTATION,
+    { input: message },
+  );
+  const createdMessage = normalizeMessageRecord(created.createMessage ?? message);
+  const updated = await runGraphql<{ updateMessageThread?: MessageThreadRecord | null }>(
+    UPDATE_MESSAGE_THREAD_MUTATION,
+    {
+      input: {
+        id: threadId,
+        messageCount: (thread.messageCount ?? 0) + 1,
+        lastMessageId: createdMessage.id,
+        lastMessageAt: createdMessage.createdAt,
+        updatedAt: now,
+      },
+    },
+  );
+  return {
+    thread: normalizeThreadRecord(updated.updateMessageThread ?? { ...thread, updatedAt: now }),
+    message: createdMessage,
+  };
+}
+
+export async function deleteForumThreadMessageRecord(input: {
+  threadId: string;
+  messageId: string;
+}): Promise<{ thread: MessageThreadRecord; message: MessageRecord }> {
+  const threadId = String(input.threadId || "").trim();
+  const messageId = String(input.messageId || "").trim();
+  if (!threadId) throw new Error("threadId is required");
+  if (!messageId) throw new Error("messageId is required");
+  const now = new Date().toISOString();
+  const thread = await getMessageThreadRecord(threadId);
+  const existing = await listMessagesByThreadId(threadId, 1000);
+  const target = existing.find((message) => message.id === messageId);
+  if (!target) throw new Error(`Message not found in thread: ${messageId}`);
+  const updatedMessage = await runGraphql<{ updateMessage?: MessageRecord | null }>(
+    UPDATE_MESSAGE_MUTATION,
+    {
+      input: {
+        id: target.id,
+        status: "deleted",
+        updatedAt: now,
+      },
+    },
+  );
+  const materialized = existing.map((message) => (
+    message.id === messageId
+      ? { ...message, status: "deleted", updatedAt: now }
+      : message
+  ));
+  const activeMessages = materialized
+    .filter((message) => String(message.status || "active") === "active")
+    .sort((left, right) => Number(left.sequenceNumber ?? 0) - Number(right.sequenceNumber ?? 0));
+  const lastActive = activeMessages.at(-1) ?? null;
+  const updatedThread = await runGraphql<{ updateMessageThread?: MessageThreadRecord | null }>(
+    UPDATE_MESSAGE_THREAD_MUTATION,
+    {
+      input: {
+        id: threadId,
+        messageCount: activeMessages.length,
+        lastMessageId: lastActive?.id ?? null,
+        lastMessageAt: lastActive?.createdAt ?? null,
+        updatedAt: now,
+      },
+    },
+  );
+  return {
+    thread: normalizeThreadRecord(updatedThread.updateMessageThread ?? { ...thread, updatedAt: now }),
+    message: normalizeMessageRecord(updatedMessage.updateMessage ?? { ...target, status: "deleted", updatedAt: now }),
+  };
+}
+
+async function getMessageThreadRecord(threadId: string): Promise<MessageThreadRecord> {
+  const rows = await Promise.all([
+    listMessageThreadsByKind("edition_forum", 500),
+    listMessageThreadsByKind("section_forum", 500),
+  ]);
+  const thread = [...rows[0], ...rows[1]].find((entry) => entry.id === threadId) ?? null;
+  if (!thread) throw new Error(`Thread not found: ${threadId}`);
+  return thread;
+}
+
+async function listMessageThreadsByKind(threadKind: string, limit = 200): Promise<MessageThreadRecord[]> {
+  type ThreadConnectionResponse = {
+    listMessageThreadsByKindAndUpdatedAt?: {
+      items?: Array<MessageThreadRecord | null> | null;
+      nextToken?: string | null;
+    } | null;
+  };
+  const records: MessageThreadRecord[] = [];
+  let nextToken: string | null | undefined = null;
+  do {
+    const response: ThreadConnectionResponse = await runGraphql<ThreadConnectionResponse>(LIST_MESSAGE_THREADS_BY_KIND_AND_UPDATED_AT_QUERY, {
+      threadKind,
+      sortDirection: "DESC",
+      limit: Math.max(1, Math.min(limit, 500)),
+      nextToken,
+    });
+    const connection: ThreadConnectionResponse["listMessageThreadsByKindAndUpdatedAt"] = response.listMessageThreadsByKindAndUpdatedAt;
+    const items = (connection?.items ?? []).filter(Boolean) as MessageThreadRecord[];
+    for (const item of items) records.push(normalizeThreadRecord(item));
+    nextToken = connection?.nextToken ?? null;
+  } while (nextToken);
+  return records;
+}
+
+async function listMessagesByThreadId(threadId: string, limit = 400): Promise<MessageRecord[]> {
+  type MessageConnectionResponse = {
+    listMessagesByThreadAndSequence?: {
+      items?: Array<MessageRecord | null> | null;
+      nextToken?: string | null;
+    } | null;
+  };
+  const records: MessageRecord[] = [];
+  let nextToken: string | null | undefined = null;
+  do {
+    const response: MessageConnectionResponse = await runGraphql<MessageConnectionResponse>(LIST_MESSAGES_BY_THREAD_AND_SEQUENCE_QUERY, {
+      threadId,
+      sortDirection: "ASC",
+      limit: Math.max(1, Math.min(limit, 500)),
+      nextToken,
+    });
+    const connection: MessageConnectionResponse["listMessagesByThreadAndSequence"] = response.listMessagesByThreadAndSequence;
+    const items = (connection?.items ?? []).filter(Boolean) as MessageRecord[];
+    for (const item of items) records.push(normalizeMessageRecord(item));
+    nextToken = connection?.nextToken ?? null;
+  } while (nextToken);
+  records.sort((left, right) => Number(left.sequenceNumber ?? 0) - Number(right.sequenceNumber ?? 0));
+  return records;
+}
+
+function normalizeMessageRecord(message: MessageRecord): MessageRecord {
+  return {
+    ...message,
+    metadata: normalizeJsonValue(message.metadata),
+  };
+}
+
+function normalizeThreadRecord(thread: MessageThreadRecord): MessageThreadRecord {
+  return {
+    ...thread,
+    metadata: normalizeJsonValue(thread.metadata),
+  };
+}
+
+function metadataString(metadata: unknown, key: string): string | null {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
+  const value = (metadata as Record<string, unknown>)[key];
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
+function slugifyKey(value: unknown): string {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function safeForumId(value: string): string {
+  return slugifyKey(value).slice(0, 120) || "thread";
+}
+
+async function runGraphql<T extends Record<string, unknown>>(
+  query: string,
+  variables: Record<string, unknown>,
+): Promise<T> {
+  configureAmplifyClient();
+  const client = generateClient<Schema>() as unknown as {
+    graphql: (options: Record<string, unknown>) => Promise<{ data?: T | null; errors?: unknown[] | null }>;
+  };
+  const response = await client.graphql({
+    query,
+    variables,
+    authMode: USER_POOL_AUTH_MODE,
+  });
+  assertNoGraphQLErrors(response.errors);
+  return (response.data ?? {}) as T;
+}
+
 export async function loadEditorReferencesData(): Promise<{
   references: ReferenceRecord[];
   referenceAttachments: ReferenceAttachmentRecord[];
 }> {
   const testMock = getTestEditorNewsroomMock();
-  if (testMock?.references) {
+  if (testMock?.references || testMock?.referenceAttachments) {
+    const referenceAttachments = (testMock.referenceAttachments ?? [])
+      .slice()
+      .sort((left, right) => left.sortKey.localeCompare(right.sortKey));
+    if (testMock.references) {
+      return {
+        references: testMock.references,
+        referenceAttachments,
+      };
+    }
+    const referencePage = await loadNewsroomReferencePage();
     return {
-      references: testMock.references,
-      referenceAttachments: [],
+      references: referencePage.items,
+      referenceAttachments,
     };
   }
   const [referencePage, referenceAttachments] = await Promise.all([
     loadNewsroomReferencePage(),
-    listUserPoolModelPage<ReferenceAttachmentRecord>("ReferenceAttachment", USER_POOL_PAGE_LIMIT),
+    listUserPoolModel<ReferenceAttachmentRecord>("ReferenceAttachment"),
   ]);
   return {
     references: referencePage.items,
@@ -841,24 +1595,148 @@ export async function loadEditorReferencesData(): Promise<{
 }
 
 export async function loadNewsroomReferencePage(options: NewsroomReferencePageOptions = {}): Promise<NewsroomRecordPage<ReferenceRecord>> {
+  const normalizedStatus = normalizeReferenceStatusKey(options.status);
+  if (normalizedStatus) {
+    const indexedPage = await loadReferencePageByStatus({
+      status: normalizedStatus,
+      limit: options.limit,
+      nextToken: options.nextToken,
+      corpusId: options.corpusId,
+    });
+    if (indexedPage.items.length > 0 || options.nextToken) return indexedPage;
+    const legacyPage = await loadReferencePageByLegacyFeed(options);
+    if (legacyPage.items.length > 0 || options.nextToken) return legacyPage;
+    return loadReferencePageByFallbackList(options);
+  }
+  if (options.excludePending) {
+    const reviewedPage = await loadReferencePageByReviewedFeed({
+      limit: options.limit,
+      nextToken: options.nextToken,
+      corpusId: options.corpusId,
+    });
+    if (reviewedPage.items.length > 0 || options.nextToken) return reviewedPage;
+    // Backfill may still be pending in an environment; fall back to status-index merge.
+    const mergedReviewedPage = await loadMergedReferenceStatusPage({
+      statuses: ["accepted", "rejected", "archived"],
+      limit: options.limit,
+      nextToken: options.nextToken,
+      corpusId: options.corpusId,
+    });
+    if (mergedReviewedPage.items.length > 0 || options.nextToken) return mergedReviewedPage;
+    const legacyPage = await loadReferencePageByLegacyFeed(options);
+    if (legacyPage.items.length > 0 || options.nextToken) return legacyPage;
+    return loadReferencePageByFallbackList(options);
+  }
+  const mergedPage = await loadMergedReferenceStatusPage({
+    statuses: REFERENCE_STATUS_KEYS,
+    limit: options.limit,
+    nextToken: options.nextToken,
+    corpusId: options.corpusId,
+  });
+  if (mergedPage.items.length > 0 || options.nextToken) return mergedPage;
+  const legacyPage = await loadReferencePageByLegacyFeed(options);
+  if (legacyPage.items.length > 0 || options.nextToken) return legacyPage;
+  return loadReferencePageByFallbackList(options);
+}
+
+async function loadReferencePageByLegacyFeed(options: NewsroomReferencePageOptions): Promise<NewsroomRecordPage<ReferenceRecord>> {
+  const normalizedStatus = normalizeReferenceStatusKey(options.status);
   return loadNewsroomFeedPage<ReferenceRecord>({
     query: NEWSROOM_REFERENCE_FEED_QUERY,
     field: "listReferencesByNewsroomFeedAndCreatedAt",
     newsroomFeedKey: "references",
     limit: options.limit,
     nextToken: options.nextToken,
-    matches: equalityMatcher({
-      curationStatus: options.status,
-      corpusId: options.corpusId,
-    }),
+    matches: (reference) => {
+      if (reference.versionState && reference.versionState !== "current") return false;
+      if (options.corpusId && reference.corpusId !== options.corpusId) return false;
+      const status = normalizeReferenceStatusKey(reference.curationStatus) ?? "pending";
+      if (normalizedStatus) return status === normalizedStatus;
+      if (options.excludePending) return status !== "pending";
+      return true;
+    },
   });
+}
+
+async function loadReferencePageByFallbackList(options: NewsroomReferencePageOptions): Promise<NewsroomRecordPage<ReferenceRecord>> {
+  const client = generateClient<Schema>() as unknown as {
+    graphql: (options: Record<string, unknown>) => Promise<GraphQLConnectionResponse<ReferenceRecord>>;
+  };
+  const limit = Math.max(1, Math.min(options.limit ?? NEWSROOM_PAGE_LIMIT, 200));
+  const normalizedStatus = normalizeReferenceStatusKey(options.status);
+  const items: ReferenceRecord[] = [];
+  let cursor = options.nextToken ?? null;
+  let connectionNextToken: string | null = null;
+  let pageCount = 0;
+
+  do {
+    pageCount += 1;
+    let response: GraphQLConnectionResponse<ReferenceRecord>;
+    try {
+      response = await client.graphql({
+        query: LIST_REFERENCES_FALLBACK_QUERY,
+        variables: {
+          limit,
+          nextToken: cursor,
+        },
+        authMode: USER_POOL_AUTH_MODE,
+      });
+    } catch (error) {
+      throw new Error(normalizeUnknownErrorMessage(error, "Failed to load listReferences fallback"));
+    }
+
+    const connection = response.data?.listReferences;
+    if (!connection) {
+      assertNoGraphQLErrors(response.errors);
+      throw new Error("Missing GraphQL connection payload for listReferences fallback.");
+    }
+    if (response.errors?.length) {
+      console.warn("GraphQL returned partial data for listReferences fallback.", response.errors);
+    }
+
+    connectionNextToken = connection.nextToken ?? null;
+    const pageItems = ((connection.items ?? []).filter(Boolean) as ReferenceRecord[])
+      .filter((reference) => {
+        if (reference.versionState && reference.versionState !== "current") return false;
+        if (options.corpusId && reference.corpusId !== options.corpusId) return false;
+        const status = normalizeReferenceStatusKey(reference.curationStatus) ?? "pending";
+        if (normalizedStatus) return status === normalizedStatus;
+        if (options.excludePending) return status !== "pending";
+        return true;
+      });
+    items.push(...pageItems);
+    cursor = connectionNextToken;
+  } while (items.length < limit && cursor && pageCount < 40);
+
+  return {
+    items: items
+      .sort(compareReferencesByRecency)
+      .slice(0, limit),
+    nextToken: connectionNextToken,
+    hasMore: Boolean(connectionNextToken),
+  };
 }
 
 export async function loadEditorSemanticRelationsData(): Promise<SemanticRelationRecord[]> {
   const testMock = getTestEditorNewsroomMock();
   if (testMock?.semanticRelations) return testMock.semanticRelations;
-  const page = await loadNewsroomSemanticRelationPage();
-  return page.items;
+  const rows: SemanticRelationRecord[] = [];
+  const seenIds = new Set<string>();
+  let nextToken: string | null | undefined = null;
+  let pageCount = 0;
+
+  do {
+    const page = await loadNewsroomSemanticRelationPage({ nextToken });
+    for (const relation of page.items) {
+      if (!relation?.id || seenIds.has(relation.id)) continue;
+      seenIds.add(relation.id);
+      rows.push(relation);
+    }
+    nextToken = page.nextToken;
+    pageCount += 1;
+  } while (nextToken && pageCount < 40);
+
+  return rows;
 }
 
 export async function loadNewsroomSemanticRelationPage(options: NewsroomSemanticRelationPageOptions = {}): Promise<NewsroomRecordPage<SemanticRelationRecord>> {
@@ -875,6 +1753,50 @@ export async function loadNewsroomSemanticRelationPage(options: NewsroomSemantic
   });
 }
 
+export async function loadReferenceCitationRelations(reference: {
+  id?: string | null;
+  lineageId?: string | null;
+}): Promise<{
+  incoming: SemanticRelationRecord[];
+  outgoing: SemanticRelationRecord[];
+}> {
+  const referenceKeys = Array.from(new Set([
+    String(reference.lineageId || "").trim(),
+    String(reference.id || "").trim(),
+  ].filter(Boolean)));
+  const stateKeys = referenceKeys.map((value) => `reference#${value}#current`);
+  const [outgoingPages, incomingPages] = await Promise.all([
+    Promise.all(stateKeys.map((stateKey) => loadSemanticRelationsByState({
+      field: "listSemanticRelationsBySubjectState",
+      keyName: "subjectStateKey",
+      keyValue: stateKey,
+      query: LIST_SEMANTIC_RELATIONS_BY_SUBJECT_STATE_QUERY,
+    }))),
+    Promise.all(stateKeys.map((stateKey) => loadSemanticRelationsByState({
+      field: "listSemanticRelationsByObjectState",
+      keyName: "objectStateKey",
+      keyValue: stateKey,
+      query: LIST_SEMANTIC_RELATIONS_BY_OBJECT_STATE_QUERY,
+    }))),
+  ]);
+  const outgoing = dedupeSemanticRelationsById(outgoingPages.flat());
+  const incoming = dedupeSemanticRelationsById(incomingPages.flat());
+  return {
+    outgoing: outgoing.filter((relation) => (
+      relation.subjectKind === "reference"
+      && relation.objectKind === "reference"
+      && relationTypeKey(relation) === "cites"
+      && relation.relationState === "current"
+    )),
+    incoming: incoming.filter((relation) => (
+      relation.subjectKind === "reference"
+      && relation.objectKind === "reference"
+      && relationTypeKey(relation) === "cites"
+      && relation.relationState === "current"
+    )),
+  };
+}
+
 export async function loadEditorAssignmentsData(): Promise<{
   assignments: AssignmentRecord[];
   assignmentEvents: AssignmentEventRecord[];
@@ -886,6 +1808,34 @@ export async function loadEditorAssignmentsData(): Promise<{
   return {
     assignments: assignmentPage.items,
     assignmentEvents: assignmentEvents.sort((left, right) => right.createdAt.localeCompare(left.createdAt)),
+  };
+}
+
+export async function loadEditorOverviewEditionData(): Promise<{
+  editions: EditionRecord[];
+  editionSlots: EditionSlotRecord[];
+  assignments: AssignmentRecord[];
+}> {
+  const [editions, editionSlots, assignmentState] = await Promise.all([
+    listOptionalUserPoolModel<EditionRecord>("Edition"),
+    listOptionalUserPoolModel<EditionSlotRecord>("EditionSlot"),
+    loadEditorAssignmentsData(),
+  ]);
+  const sortedEditions = [...editions].sort((left, right) => (
+    String(right.editionDate ?? "").localeCompare(String(left.editionDate ?? ""))
+    || String(right.updatedAt ?? "").localeCompare(String(left.updatedAt ?? ""))
+    || String(left.id ?? "").localeCompare(String(right.id ?? ""))
+  ));
+  const sortedEditionSlots = [...editionSlots].sort((left, right) => (
+    String(left.editionId ?? "").localeCompare(String(right.editionId ?? ""))
+    || String(left.sectionKey ?? "").localeCompare(String(right.sectionKey ?? ""))
+    || Number(left.slotRank ?? 0) - Number(right.slotRank ?? 0)
+    || String(left.id ?? "").localeCompare(String(right.id ?? ""))
+  ));
+  return {
+    editions: sortedEditions,
+    editionSlots: sortedEditionSlots,
+    assignments: assignmentState.assignments,
   };
 }
 
@@ -965,6 +1915,48 @@ export async function loadReferenceRecordById(id: string): Promise<ReferenceReco
   return response.data?.getReference ?? null;
 }
 
+export async function loadReferenceAttachmentsForLineageId(referenceLineageId: string): Promise<ReferenceAttachmentRecord[]> {
+  if (!referenceLineageId) return [];
+  const testMock = getTestEditorNewsroomMock();
+  if (testMock?.referenceAttachments) {
+    return testMock.referenceAttachments
+      .filter((attachment) => attachment.referenceLineageId === referenceLineageId)
+      .slice()
+      .sort((left, right) => left.sortKey.localeCompare(right.sortKey));
+  }
+  configureAmplifyClient();
+  const client = generateClient<Schema>() as unknown as {
+    graphql: (options: Record<string, unknown>) => Promise<{
+      data?: {
+        listReferenceAttachmentsByReferenceLineageAndSortKey?: {
+          items?: ReferenceAttachmentRecord[] | null;
+          nextToken?: string | null;
+        } | null;
+      } | null;
+      errors?: unknown[] | null;
+    }>;
+  };
+  const attachments: ReferenceAttachmentRecord[] = [];
+  let nextToken: string | null | undefined = null;
+  do {
+    const response = await client.graphql({
+      query: LIST_REFERENCE_ATTACHMENTS_BY_REFERENCE_LINEAGE_AND_SORT_KEY_QUERY,
+      variables: {
+        referenceLineageId,
+        sortDirection: "ASC",
+        limit: USER_POOL_PAGE_LIMIT,
+        nextToken,
+      },
+      authMode: USER_POOL_AUTH_MODE,
+    });
+    assertNoGraphQLErrors(response.errors);
+    const connection = response.data?.listReferenceAttachmentsByReferenceLineageAndSortKey;
+    attachments.push(...((connection?.items ?? []).filter(Boolean) as ReferenceAttachmentRecord[]));
+    nextToken = connection?.nextToken ?? null;
+  } while (nextToken);
+  return attachments.sort((left, right) => left.sortKey.localeCompare(right.sortKey));
+}
+
 export async function uploadModelPayloadForOwner(input: {
   ownerKind: string;
   ownerId: string;
@@ -1034,9 +2026,9 @@ export async function uploadModelPayloadForOwner(input: {
 
 async function hydrateModelAttachment(attachment: ModelAttachmentRecord): Promise<HydratedModelPayload> {
   try {
-    const downloaded = await downloadData({ path: attachment.storagePath }).result;
-    const body = downloaded.body as { text?: () => Promise<string> };
-    const text = typeof body.text === "function" ? await body.text() : null;
+    const text = attachment.storagePath?.startsWith("newsroom/payloads/")
+      ? await downloadModelAttachmentText(attachment)
+      : await downloadStoragePathTextRaw(attachment.storagePath);
     const json = text && isJsonMediaType(attachment.mediaType) ? parseAttachmentJson(text) : null;
     return { attachment, text, json, error: null };
   } catch (error) {
@@ -1047,6 +2039,96 @@ async function hydrateModelAttachment(attachment: ModelAttachmentRecord): Promis
       error: error instanceof Error ? error.message : "Could not hydrate attachment payload.",
     };
   }
+}
+
+export async function loadStoragePathText(path: string | null | undefined): Promise<{ error: string | null; text: string | null }> {
+  if (!path) {
+    return { error: "Extracted text attachment is missing a storage path.", text: null };
+  }
+  const testMock = getTestEditorNewsroomMock();
+  const mockText = testMock?.storageTextByPath?.[path];
+  if (typeof mockText === "string") {
+    return { error: null, text: mockText };
+  }
+  try {
+    const text = await downloadStoragePathTextRaw(path);
+    return { error: null, text };
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : "Could not load extracted text.",
+      text: null,
+    };
+  }
+}
+
+export async function loadStoragePathUrl(path: string | null | undefined): Promise<{ error: string | null; url: string | null }> {
+  if (!path) {
+    return { error: "Attachment is missing a storage path.", url: null };
+  }
+  const testMock = getTestEditorNewsroomMock();
+  const mockUrl = testMock?.storageUrlByPath?.[path];
+  if (typeof mockUrl === "string" && mockUrl.trim().length > 0) {
+    return { error: null, url: mockUrl };
+  }
+  try {
+    configureAmplifyClient();
+    const signed = await getUrl({
+      path,
+      options: { validateObjectExistence: true },
+    });
+    const url = signed?.url ? signed.url.toString() : null;
+    if (!url) {
+      return { error: "Could not resolve attachment URL.", url: null };
+    }
+    return { error: null, url };
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : "Could not resolve attachment URL.",
+      url: null,
+    };
+  }
+}
+
+async function downloadStoragePathTextRaw(path: string | null | undefined): Promise<string | null> {
+  if (!path) return null;
+  const downloaded = await downloadData({ path }).result;
+  const body = downloaded.body as { text?: () => Promise<string> };
+  return typeof body.text === "function" ? await body.text() : null;
+}
+
+async function downloadModelAttachmentText(attachment: ModelAttachmentRecord): Promise<string | null> {
+  if (!attachment.id) return null;
+  configureAmplifyClient();
+  const client = generateClient<Schema>() as unknown as {
+    graphql: (options: Record<string, unknown>) => Promise<{
+      data?: {
+        createModelAttachmentDownload?: {
+          downloadUrl?: string | null;
+          method?: string | null;
+          requiredHeaders?: Record<string, string> | string | null;
+        } | null;
+      } | null;
+      errors?: unknown[] | null;
+    }>;
+  };
+  const response = await client.graphql({
+    query: CREATE_MODEL_ATTACHMENT_DOWNLOAD_MUTATION,
+    variables: { attachmentId: attachment.id },
+    authMode: USER_POOL_AUTH_MODE,
+  });
+  assertNoGraphQLErrors(response.errors);
+  const slot = response.data?.createModelAttachmentDownload;
+  const downloadUrl = slot?.downloadUrl;
+  if (!downloadUrl) return downloadStoragePathTextRaw(attachment.storagePath);
+  const fetchResponse = await fetch(downloadUrl, {
+    method: slot?.method ?? "GET",
+    headers: normalizeUploadHeaders(slot?.requiredHeaders),
+    cache: "no-store",
+  });
+  if (!fetchResponse.ok) {
+    throw new Error(`Attachment download failed: ${fetchResponse.status} ${fetchResponse.statusText}`);
+  }
+  return fetchResponse.text();
 }
 
 async function normalizeUploadBody(content: string | Blob | ArrayBuffer | Uint8Array): Promise<{ body: Blob; byteSize: number }> {
@@ -1134,14 +2216,21 @@ export async function runNewsroomKnowledgeQuery(input: Record<string, unknown>):
 
 export function hasTestEditorOverride(): boolean {
   if (typeof window === "undefined") return false;
+  const allowOverride = process.env.NODE_ENV === "test"
+    || process.env.NEXT_PUBLIC_ENABLE_TEST_EDITOR_OVERRIDE === "true";
+  if (!allowOverride) return false;
   return window.localStorage.getItem(TEST_EDITOR_STORAGE_KEY) === "true";
 }
 
 type TestEditorNewsroomMock = {
+  forumThreadsByEdition?: Record<string, ForumThreadWithMessages[]>;
   messages?: MessageRecord[];
   payloads?: Record<string, HydratedModelPayload[]>;
+  referenceAttachments?: ReferenceAttachmentRecord[];
   references?: ReferenceRecord[];
   semanticRelations?: SemanticRelationRecord[];
+  storageTextByPath?: Record<string, string>;
+  storageUrlByPath?: Record<string, string>;
   summary?: unknown;
 };
 
@@ -1310,14 +2399,16 @@ async function listUserPoolModel<T>(modelName: string): Promise<T[]> {
   const client = generateClient<Schema>();
   const model = (client.models as Record<string, ListableModel<T>>)[modelName];
   if (!model) throw new Error(`GraphQL model ${modelName} is not available in the deployed schema.`);
+  const list = model.list as (input?: Record<string, unknown>, options?: Record<string, unknown>) => Promise<GraphQLListResponse<T>>;
 
   const items: T[] = [];
   let nextToken: string | null | undefined;
   do {
-    const response = await model.list({
-      authMode: USER_POOL_AUTH_MODE,
+    const response = await list({
       limit: USER_POOL_LIST_LIMIT,
       nextToken,
+    }, {
+      authMode: USER_POOL_AUTH_MODE,
     });
     assertNoGraphQLErrors(response.errors);
     items.push(...((response.data ?? []).filter(Boolean) as T[]));
@@ -1342,9 +2433,11 @@ async function listUserPoolModelPage<T>(modelName: string, limit: number): Promi
   const client = generateClient<Schema>();
   const model = (client.models as Record<string, ListableModel<T>>)[modelName];
   if (!model) throw new Error(`GraphQL model ${modelName} is not available in the deployed schema.`);
-  const response = await model.list({
-    authMode: USER_POOL_AUTH_MODE,
+  const list = model.list as (input?: Record<string, unknown>, options?: Record<string, unknown>) => Promise<GraphQLListResponse<T>>;
+  const response = await list({
     limit,
+  }, {
+    authMode: USER_POOL_AUTH_MODE,
   });
   assertNoGraphQLErrors(response.errors);
   return (response.data ?? []).filter(Boolean) as T[];
@@ -1355,6 +2448,258 @@ async function listOptionalUserPoolModelPage<T>(modelName: string, limit: number
   const model = (client.models as Record<string, ListableModel<T>>)[modelName];
   if (!model) return [];
   return listUserPoolModelPage<T>(modelName, limit);
+}
+
+type ReferenceStatus = (typeof REFERENCE_STATUS_KEYS)[number];
+
+function normalizeReferenceStatusKey(status: unknown): ReferenceStatus | null {
+  const normalized = typeof status === "string" ? status.trim().toLowerCase() : "";
+  if (!normalized) return null;
+  if (normalized === "pending" || normalized === "accepted" || normalized === "rejected" || normalized === "archived") {
+    return normalized;
+  }
+  return null;
+}
+
+type MergedReferenceStatusCursor = {
+  cursors: Record<ReferenceStatus, string | null | undefined>;
+  pendingByStatus: Record<ReferenceStatus, ReferenceRecord[]>;
+};
+
+async function loadReferencePageByStatus({
+  status,
+  limit = NEWSROOM_PAGE_LIMIT,
+  nextToken,
+  corpusId,
+}: {
+  status: ReferenceStatus;
+  limit?: number;
+  nextToken?: string | null;
+  corpusId?: string;
+}): Promise<NewsroomRecordPage<ReferenceRecord>> {
+  const filter = buildReferenceServerFilter(corpusId);
+  return runReferenceIndexedQuery({
+    query: LIST_REFERENCES_BY_CURATION_STATUS_AND_UPDATED_AT_QUERY,
+    field: "listReferencesByCurationStatusAndUpdatedAt",
+    keyName: "curationStatus",
+    keyValue: status,
+    limit,
+    nextToken,
+    filter,
+  });
+}
+
+async function loadReferencePageByReviewedFeed({
+  limit = NEWSROOM_PAGE_LIMIT,
+  nextToken,
+  corpusId,
+}: {
+  limit?: number;
+  nextToken?: string | null;
+  corpusId?: string;
+}): Promise<NewsroomRecordPage<ReferenceRecord>> {
+  const filter = buildReferenceServerFilter(corpusId);
+  return runReferenceIndexedQuery({
+    query: LIST_REFERENCES_BY_REVIEWED_FEED_AND_UPDATED_AT_QUERY,
+    field: "listReferencesByReviewedFeedAndUpdatedAt",
+    keyName: "reviewedFeedKey",
+    keyValue: REFERENCE_REVIEWED_FEED_KEY,
+    limit,
+    nextToken,
+    filter,
+  });
+}
+
+async function loadMergedReferenceStatusPage({
+  statuses,
+  limit = NEWSROOM_PAGE_LIMIT,
+  nextToken,
+  corpusId,
+}: {
+  statuses: readonly ReferenceStatus[];
+  limit?: number;
+  nextToken?: string | null;
+  corpusId?: string;
+}): Promise<NewsroomRecordPage<ReferenceRecord>> {
+  const cursor = decodeMergedReferenceStatusCursor(nextToken, statuses);
+  const output: ReferenceRecord[] = [];
+  const emitted = new Set<string>();
+  const maxIterations = Math.max(200, limit * 8);
+  let iterations = 0;
+
+  while (output.length < limit && iterations < maxIterations) {
+    iterations += 1;
+    for (const status of statuses) {
+      const pending = cursor.pendingByStatus[status];
+      if (pending.length > 0) continue;
+      const token = cursor.cursors[status];
+      if (token === null) continue;
+      const page = await loadReferencePageByStatus({
+        status,
+        limit: Math.max(8, Math.ceil(limit / statuses.length)),
+        nextToken: token,
+        corpusId,
+      });
+      pending.push(...page.items);
+      cursor.cursors[status] = page.nextToken ?? null;
+    }
+
+    const nextStatus = selectNextReferenceStatus(cursor.pendingByStatus, statuses);
+    if (!nextStatus) break;
+    const nextReference = cursor.pendingByStatus[nextStatus].shift();
+    if (!nextReference?.id || emitted.has(nextReference.id)) continue;
+    emitted.add(nextReference.id);
+    output.push(nextReference);
+  }
+
+  const hasMore = statuses.some((status) => (
+    cursor.pendingByStatus[status].length > 0 || cursor.cursors[status] !== null
+  ));
+  return {
+    items: output,
+    nextToken: hasMore ? encodeMergedReferenceStatusCursor(cursor) : null,
+    hasMore,
+  };
+}
+
+function buildReferenceServerFilter(corpusId?: string): Record<string, unknown> {
+  const filter: Record<string, unknown> = {
+    versionState: { eq: "current" },
+    newsroomFeedKey: { eq: "references" },
+  };
+  if (corpusId) filter.corpusId = { eq: corpusId };
+  return filter;
+}
+
+async function runReferenceIndexedQuery({
+  query,
+  field,
+  keyName,
+  keyValue,
+  limit,
+  nextToken,
+  filter,
+}: {
+  query: string;
+  field: "listReferencesByCurationStatusAndUpdatedAt" | "listReferencesByReviewedFeedAndUpdatedAt";
+  keyName: "curationStatus" | "reviewedFeedKey";
+  keyValue: string;
+  limit: number;
+  nextToken?: string | null;
+  filter: Record<string, unknown>;
+}): Promise<NewsroomRecordPage<ReferenceRecord>> {
+  const client = generateClient<Schema>() as unknown as {
+    graphql: (options: Record<string, unknown>) => Promise<GraphQLConnectionResponse<ReferenceRecord>>;
+  };
+  let response: GraphQLConnectionResponse<ReferenceRecord>;
+  try {
+    response = await client.graphql({
+      query,
+      variables: {
+        [keyName]: keyValue,
+        sortDirection: "DESC",
+        limit,
+        nextToken: nextToken ?? null,
+        filter,
+      },
+      authMode: USER_POOL_AUTH_MODE,
+    });
+  } catch (error) {
+    throw new Error(normalizeUnknownErrorMessage(error, `Failed to load ${field}`));
+  }
+  const connection = response.data?.[field];
+  if (!connection) {
+    assertNoGraphQLErrors(response.errors);
+    throw new Error(`Missing GraphQL connection payload for ${field}.`);
+  }
+  if (response.errors?.length) {
+    console.warn(`GraphQL returned partial data for ${field}.`, response.errors);
+  }
+  return {
+    items: ((connection.items ?? []).filter(Boolean) as ReferenceRecord[]),
+    nextToken: connection.nextToken ?? null,
+    hasMore: Boolean(connection.nextToken),
+  };
+}
+
+function selectNextReferenceStatus(
+  pendingByStatus: Record<ReferenceStatus, ReferenceRecord[]>,
+  statuses: readonly ReferenceStatus[],
+): ReferenceStatus | null {
+  let selected: ReferenceStatus | null = null;
+  for (const status of statuses) {
+    const queue = pendingByStatus[status];
+    const candidate = queue[0];
+    if (!candidate) continue;
+    if (!selected) {
+      selected = status;
+      continue;
+    }
+    const current = pendingByStatus[selected][0];
+    if (!current || compareReferencesByRecency(candidate, current) < 0) selected = status;
+  }
+  return selected;
+}
+
+function compareReferencesByRecency(left: ReferenceRecord, right: ReferenceRecord): number {
+  const leftTs = Date.parse(referenceRecencyTimestamp(left));
+  const rightTs = Date.parse(referenceRecencyTimestamp(right));
+  const leftRank = Number.isFinite(leftTs) ? leftTs : 0;
+  const rightRank = Number.isFinite(rightTs) ? rightTs : 0;
+  if (leftRank !== rightRank) return rightRank - leftRank;
+  return String(right.id).localeCompare(String(left.id));
+}
+
+function referenceRecencyTimestamp(reference: ReferenceRecord): string {
+  return reference.updatedAt
+    || reference.curationStatusUpdatedAt
+    || reference.importedAt
+    || reference.createdAt
+    || "";
+}
+
+function encodeMergedReferenceStatusCursor(cursor: MergedReferenceStatusCursor): string {
+  const payload = JSON.stringify({ v: 1, ...cursor });
+  return `ref-status-merge:${encodeURIComponent(payload)}`;
+}
+
+function decodeMergedReferenceStatusCursor(
+  token: string | null | undefined,
+  statuses: readonly ReferenceStatus[],
+): MergedReferenceStatusCursor {
+  const empty = buildEmptyMergedReferenceStatusCursor(statuses);
+  if (!token) return empty;
+  if (!token.startsWith("ref-status-merge:")) return empty;
+  try {
+    const parsed = JSON.parse(decodeURIComponent(token.slice("ref-status-merge:".length))) as {
+      v?: number;
+      cursors?: Record<string, unknown>;
+      pendingByStatus?: Record<string, unknown>;
+    };
+    if (parsed.v !== 1) return empty;
+    const next: MergedReferenceStatusCursor = buildEmptyMergedReferenceStatusCursor(statuses);
+    for (const status of statuses) {
+      const rawCursor = parsed.cursors?.[status];
+      next.cursors[status] = typeof rawCursor === "string" ? rawCursor : rawCursor === null ? null : undefined;
+      const rawRows = parsed.pendingByStatus?.[status];
+      next.pendingByStatus[status] = Array.isArray(rawRows)
+        ? (rawRows.filter((row): row is ReferenceRecord => Boolean(row && typeof row === "object")) as ReferenceRecord[])
+        : [];
+    }
+    return next;
+  } catch {
+    return empty;
+  }
+}
+
+function buildEmptyMergedReferenceStatusCursor(statuses: readonly ReferenceStatus[]): MergedReferenceStatusCursor {
+  const cursors = {} as Record<ReferenceStatus, string | null | undefined>;
+  const pendingByStatus = {} as Record<ReferenceStatus, ReferenceRecord[]>;
+  for (const status of statuses) {
+    cursors[status] = undefined;
+    pendingByStatus[status] = [];
+  }
+  return { cursors, pendingByStatus };
 }
 
 async function loadNewsroomFeedPage<T>({
@@ -1382,19 +2727,31 @@ async function loadNewsroomFeedPage<T>({
 
   do {
     pageCount += 1;
-    const response = await client.graphql({
-      query,
-      variables: {
-        newsroomFeedKey,
-        sortDirection: "DESC",
-        limit,
-        nextToken: cursor,
-        filter: null,
-      },
-      authMode: USER_POOL_AUTH_MODE,
-    });
-    assertNoGraphQLErrors(response.errors);
+    let response: GraphQLConnectionResponse<T>;
+    try {
+      response = await client.graphql({
+        query,
+        variables: {
+          newsroomFeedKey,
+          sortDirection: "DESC",
+          limit,
+          nextToken: cursor,
+          filter: null,
+        },
+        authMode: USER_POOL_AUTH_MODE,
+      });
+    } catch (error) {
+      throw new Error(normalizeUnknownErrorMessage(error, `Failed to load ${field}`));
+    }
     const connection = response.data?.[field];
+    if (!connection) {
+      assertNoGraphQLErrors(response.errors);
+      throw new Error(`Missing GraphQL connection payload for ${field}.`);
+    }
+    if (response.errors?.length) {
+      // Preserve list rendering when AppSync returns partial data and per-row errors.
+      console.warn(`GraphQL returned partial data for ${field}.`, response.errors);
+    }
     connectionNextToken = connection?.nextToken ?? null;
     const pageItems = ((connection?.items ?? []).filter(Boolean) as T[])
       .filter((item) => matches ? matches(item) : true);
@@ -1407,6 +2764,61 @@ async function loadNewsroomFeedPage<T>({
     nextToken: connectionNextToken,
     hasMore: Boolean(connectionNextToken),
   };
+}
+
+async function loadSemanticRelationsByState({
+  field,
+  keyName,
+  keyValue,
+  query,
+}: {
+  field: "listSemanticRelationsByObjectState" | "listSemanticRelationsBySubjectState";
+  keyName: "objectStateKey" | "subjectStateKey";
+  keyValue: string;
+  query: string;
+}): Promise<SemanticRelationRecord[]> {
+  const client = generateClient<Schema>() as unknown as {
+    graphql: (options: Record<string, unknown>) => Promise<GraphQLConnectionResponse<SemanticRelationRecord>>;
+  };
+  const rows: SemanticRelationRecord[] = [];
+  const seenIds = new Set<string>();
+  let nextToken: string | null = null;
+  let pageCount = 0;
+  do {
+    pageCount += 1;
+    const response = await client.graphql({
+      query,
+      variables: {
+        [keyName]: keyValue,
+        sortDirection: "DESC",
+        limit: 200,
+        nextToken,
+        filter: null,
+      },
+      authMode: USER_POOL_AUTH_MODE,
+    });
+    assertNoGraphQLErrors(response.errors);
+    const connection = response.data?.[field];
+    if (!connection) break;
+    for (const item of (connection.items ?? []).filter(Boolean) as SemanticRelationRecord[]) {
+      if (!item.id || seenIds.has(item.id)) continue;
+      seenIds.add(item.id);
+      rows.push(item);
+    }
+    nextToken = connection.nextToken ?? null;
+  } while (nextToken && pageCount < 200);
+  return rows;
+}
+
+function dedupeSemanticRelationsById(relations: SemanticRelationRecord[]): SemanticRelationRecord[] {
+  const seen = new Set<string>();
+  const deduped: SemanticRelationRecord[] = [];
+  for (const relation of relations) {
+    if (!relation.id || seen.has(relation.id)) continue;
+    seen.add(relation.id);
+    deduped.push(relation);
+  }
+  return deduped;
 }
 
 async function listNewsroomSectionsViaGraphql(client: ReturnType<typeof generateClient<Schema>>): Promise<NewsroomSectionRecord[]> {
@@ -1424,6 +2836,26 @@ async function listNewsroomSectionsViaGraphql(client: ReturnType<typeof generate
     assertNoGraphQLErrors(response.errors);
     const connection = response.data?.listNewsroomSections;
     rows.push(...((connection?.items ?? []).filter(Boolean) as NewsroomSectionRecord[]));
+    nextToken = connection?.nextToken ?? null;
+  } while (nextToken);
+  return rows;
+}
+
+async function listSteeringProposalsViaGraphql(): Promise<CategorySteeringProposal[]> {
+  const client = generateClient<Schema>() as unknown as {
+    graphql: (options: Record<string, unknown>) => Promise<GraphQLConnectionResponse<CategorySteeringProposal>>;
+  };
+  const rows: CategorySteeringProposal[] = [];
+  let nextToken: string | null | undefined = null;
+  do {
+    const response = await client.graphql({
+      query: LIST_STEERING_PROPOSALS_QUERY,
+      variables: { limit: USER_POOL_LIST_LIMIT, nextToken },
+      authMode: USER_POOL_AUTH_MODE,
+    });
+    assertNoGraphQLErrors(response.errors);
+    const connection = response.data?.listSteeringProposals;
+    rows.push(...((connection?.items ?? []).filter(Boolean) as CategorySteeringProposal[]));
     nextToken = connection?.nextToken ?? null;
   } while (nextToken);
   return rows;
@@ -1734,6 +3166,7 @@ function sortProposals(proposals: CategorySteeringProposal[]): CategorySteeringP
   });
 }
 
+
 function keywordSortKey(keyword: CategoryKeywordRecord): string {
   return `${keyword.categorySetId}#${keyword.categoryKey}#${String(keyword.rank ?? 999999).padStart(6, "0")}#${keyword.normalizedKeyword}`;
 }
@@ -1801,4 +3234,27 @@ function assertNoGraphQLErrors(errors?: unknown[] | null) {
     })
     .join("; ");
   throw new Error(details);
+}
+
+function normalizeUnknownErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  if (typeof error === "string" && error.trim()) return error;
+  if (!error || typeof error !== "object") return fallback;
+  const record = error as Record<string, unknown>;
+  const directMessage = typeof record.message === "string" ? record.message.trim() : "";
+  if (directMessage) return directMessage;
+  const errors = Array.isArray(record.errors) ? record.errors : [];
+  const nestedMessages = errors
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") return "";
+      const message = (entry as { message?: unknown }).message;
+      return typeof message === "string" ? message.trim() : "";
+    })
+    .filter(Boolean);
+  if (nestedMessages.length) return nestedMessages.join("; ");
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return fallback;
+  }
 }

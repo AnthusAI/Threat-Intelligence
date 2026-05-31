@@ -8,6 +8,8 @@ Papyrus should treat this as a newsroom buildout, not a one-off import. The
 goal is to turn source material into visible `Reference` prospects, curate an
 accepted evidence set, use Biblicus to discover and tune taxonomy/graph
 artifacts, and then import the accepted steering state back into Papyrus.
+Use `reference processing` as the umbrella term for this end-to-end source
+workflow.
 
 For worker setup and cloud-to-local corpus synchronization, also read
 [`docs/newsroom-worker-bootstrap.md`](newsroom-worker-bootstrap.md). S3 corpus
@@ -18,6 +20,11 @@ sync, local Biblicus execution, and GraphQL registration are separate steps.
 Use these terms consistently:
 
 - `source material`: the original file or fetched page.
+- `reference processing`: the full workflow from sparse seed (`DOI`/URL/minimal
+  metadata) to usable knowledge reference.
+- `process reference`: run registration, source resolution/acquisition, text
+  extraction, and graph expansion.
+- `register reference`: create the initial sparse `Reference` row.
 - `corpus accession`: the durable local/S3 record of a source material plus
   sidecar metadata.
 - `reference prospect`: a GraphQL-visible `Reference` with
@@ -35,6 +42,12 @@ Use these terms consistently:
   topic.
 - `authoritative label`: an editor-approved topic label used as supervised
   steering.
+
+Reserved meanings:
+
+- `ingest`: Biblicus corpus-storage operation.
+- `import`: config/artifact/type/projection import into Papyrus.
+- `curate`: editorial decision workflow only.
 
 ## Canonical Corpus Accession
 
@@ -123,7 +136,7 @@ duplicate extracted text into a second canonical location.
    generated `analysis/` output unless the test is specifically import-only.
 
    ```bash
-   npm run content -- corpora sync-to-cloud \
+   poetry run papyrus ops corpora sync-to-cloud \
      --config <steering.yml> \
      --corpus-key <corpus-key> \
      --dryrun
@@ -132,13 +145,13 @@ duplicate extracted text into a second canonical location.
 4. Materialize configured corpora and semantic relation types in Papyrus.
 
    ```bash
-   npm run content -- categories sandbox-steering-config \
+   poetry run papyrus ops categories sandbox-steering-config \
      --config corpora/papyrus-steering.yml \
      --output .papyrus-runs/<run-id>/sandbox-steering.yml
 
-   npm run content -- categories import-config --config <steering.yml>
-   npm run content -- newsroom import-sections --config corpora/papyrus-newsroom-sections.yml
-   npm run content -- relations import-types --config corpora/papyrus-semantic-relation-types.yml
+   poetry run papyrus ops categories import-config --config <steering.yml>
+   poetry run papyrus sections import --config corpora/papyrus-newsroom-sections.yml
+   poetry run papyrus knowledge concepts import-types --config corpora/papyrus-semantic-relation-types.yml
    ```
 
 5. Register source materials into the GraphQL workflow. This creates a
@@ -147,18 +160,18 @@ duplicate extracted text into a second canonical location.
    `curation.reference-intake` assignment linked by `requests_work_on`.
 
    ```bash
-   npm run content -- references prepare-catalog \
+   poetry run papyrus references prepare-catalog \
      --config <steering.yml> \
      --corpus-key <corpus-key> \
      --catalog corpora/<corpus-key>/metadata/catalog.json \
      --output .papyrus-runs/<run-id>/<corpus-key>-prepared-catalog.json
 
-   npm run content -- references register-catalog \
+   poetry run papyrus references create-from-catalog \
      --config <steering.yml> \
      --corpus-key <corpus-key> \
      --catalog .papyrus-runs/<run-id>/<corpus-key>-prepared-catalog.json \
      --status pending \
-     --apply
+
    ```
 
 6. Curate the initial evidence set. Pending and rejected references remain
@@ -167,47 +180,47 @@ duplicate extracted text into a second canonical location.
    evidence, or edition planning.
 
 7. Ensure accepted references have source material and text artifacts. Use
-   `source-status` to find URL-only or unextracted references, accession the
+   `process-status` to find URL-only or unextracted references, accession the
    sources, run Biblicus extraction through `reference.text-extraction`, and
    register extracted text attachments. Accession and extraction are separate:
    the first creates or updates corpus source files, and the second creates
    Biblicus extraction snapshots that GraphQL references by path. In
-   `source-status`, `snapshot_extracted` means Biblicus text exists but no
+   `process-status`, `snapshot_extracted` means Biblicus text exists but no
    `extracted_text` attachment records the selected snapshot yet; `text_ready`
    means a snapshot-backed attachment exists.
 
    ```bash
-   npm run content -- references source-status \
+   poetry run papyrus references process-status \
      --config <steering.yml> \
      --corpus-key <corpus-key> \
      --status all
 
-   npm run content -- references create-accession-assignments \
+   poetry run papyrus references process-create-accession-assignments \
      --config <steering.yml> \
      --corpus-key <corpus-key> \
      --status pending \
-     --apply
 
-   npm run content -- references accession-now \
+
+   poetry run papyrus references process-accession-now \
      --reference <reference-id> \
      --assignee-key <worker-run-id>
 
-   npm run content -- references extract-text-now \
+   poetry run papyrus references process-extract-text-now \
      --config <steering.yml> \
      --corpus-key <corpus-key> \
      --assignee-key <worker-run-id>
 
-   npm run content -- references attach-extracted-text \
+   poetry run papyrus references process-attach-extracted-text \
      --config <steering.yml> \
      --corpus-key <corpus-key> \
      --max-count 10 \
-     --apply
+
    ```
 
 8. Export the accepted-only analysis manifest for Biblicus.
 
    ```bash
-   npm run content -- references export-analysis-manifest \
+   poetry run papyrus references export-analysis-manifest \
      --config <steering.yml> \
      --corpus-key <corpus-key> \
      --output .papyrus-runs/<run-id>/accepted-reference-manifest.json
@@ -234,7 +247,7 @@ Use a global topic granularity sweep before treating a discovered topic list as
 the publication section map:
 
 ```bash
-npm run content -- analysis reindex-plan \
+poetry run papyrus analysis reindex-plan \
   --profiles corpora/papyrus-analysis-profiles.yml \
   --profile global-topic-granularity \
   --corpus-key <corpus-key> \
@@ -262,23 +275,23 @@ merge/exclusion controls are a separate management layer.
 Create a live assignment when the plan is ready:
 
 ```bash
-npm run content -- analysis create-reindex-assignment \
+poetry run papyrus analysis create-reindex-assignment \
   --profiles corpora/papyrus-analysis-profiles.yml \
   --profile global-topic-granularity \
   --corpus-key <corpus-key> \
   --override targetTopicRange=10:20 \
-  --apply
+
 ```
 
 Then execute from the claimed assignment metadata:
 
 ```bash
-npm run content -- assignments claim \
+poetry run papyrus assignments claim \
   --assignment <analysis-assignment-id> \
   --assignee-key "procedure-run:<run-id>" \
   --claim-ttl-seconds 21600
 
-npm run content -- analysis execute-assignment \
+poetry run papyrus analysis execute-assignment \
   --assignment <analysis-assignment-id>
 ```
 
@@ -300,36 +313,36 @@ Use a draft category set when the generated topic set is close but not useful
 enough. Draft edits do not mutate the current accepted set until promotion:
 
 ```bash
-npm run content -- categories draft-create \
+poetry run papyrus knowledge topics draft-create \
   --from-category-set <current-category-set-id> \
   --title "Initial topic sculpting pass" \
-  --apply
 
-npm run content -- categories draft-add-topic \
+
+poetry run papyrus knowledge topics draft-add-topic \
   --category-set <draft-category-set-id> \
   --display-name "<expected topic>" \
   --short-title "<one-or-two-word label>" \
   --subtitle "<short description>" \
-  --apply
+
 ```
 
 Manually label accepted references as authoritative examples for draft or
 current topics:
 
 ```bash
-npm run content -- references label \
+poetry run papyrus references label \
   --reference <accepted-reference-id-or-external-item-id> \
   --category <category-key-or-lineage-id> \
   --category-set <draft-or-current-category-set-id> \
   --note "Why this accepted reference is a good seed example." \
-  --apply
+
 ```
 
 Use authoritative labels to build the strict Biblicus seed manifest for
 semi-supervised topic classifier training:
 
 ```bash
-npm run content -- categories export-classifier-seed-manifest \
+poetry run papyrus knowledge topics export-classifier-seed-manifest \
   --config <steering.yml> \
   --category-set <draft-or-current-category-set-id> \
   --corpus-key <corpus-key> \
@@ -339,7 +352,7 @@ npm run content -- categories export-classifier-seed-manifest \
 Then preview classifier retraining:
 
 ```bash
-npm run content -- analysis reindex-plan \
+poetry run papyrus analysis reindex-plan \
   --profiles corpora/papyrus-analysis-profiles.yml \
   --profile canonical-topic-classifier \
   --corpus-key <corpus-key> \
@@ -378,7 +391,7 @@ profile:
 Preview before creating work:
 
 ```bash
-npm run content -- analysis reindex-plan \
+poetry run papyrus analysis reindex-plan \
   --profiles corpora/papyrus-analysis-profiles.yml \
   --profile reference-entity-graph \
   --corpus-key <corpus-key> \
@@ -424,15 +437,15 @@ Use a smart purge when intentionally resetting a sandbox so attachment objects
 are deleted with their index rows:
 
 ```bash
-npm run content -- content delete all --yes --delete-attachments
+poetry run papyrus ops content delete all --yes --delete-attachments
 ```
 
 Use attachment pruning after hard resets, failed clone experiments, or manual
 repair work. Dry-run is default:
 
 ```bash
-npm run content -- newsroom prune-attachments
-npm run content -- newsroom prune-attachments --apply
+poetry run papyrus sections prune-attachments
+poetry run papyrus sections prune-attachments
 ```
 
 `prune-attachments` removes two classes of maintenance garbage: attachment

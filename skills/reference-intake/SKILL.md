@@ -1,12 +1,12 @@
 ---
 name: reference-intake
-description: Use this skill when ingesting or registering new Papyrus knowledge-base references, source materials, corpus attachments, reference-intake assignments, or Biblicus handoffs.
+description: Use this skill when processing or registering new Papyrus knowledge-base references, source materials, corpus attachments, reference-intake assignments, or Biblicus handoffs.
 ---
 
 # Reference Intake Skill
 
 Use this skill when new source materials need to become visible in Papyrus as
-knowledge-base references, or when debugging why newly ingested corpus materials
+knowledge-base references, or when debugging why newly processed corpus materials
 are not visible in the Newsroom.
 
 After references exist and need budgeted summaries or quality ratings, use
@@ -14,8 +14,8 @@ After references exist and need budgeted summaries or quality ratings, use
 
 If the source material came from a research agent packet, first use
 [`skills/newsroom-research-workflow/SKILL.md`](/Users/ryan/Projects/Papyrus/skills/newsroom-research-workflow/SKILL.md)
-to inspect the assignment packet. Use `assignments intake-proposals` or
-`assignments research-intake-now` to turn `proposedReferences` into pending
+to inspect the assignment packet. Use `assignments process-proposals` or
+`assignments process-research-now` to turn `proposedReferences` into pending
 reference-intake work; manual catalog construction is now the fallback.
 
 Papyrus owns newsroom visibility, reference metadata, assignments, comments,
@@ -24,9 +24,23 @@ source files, extraction artifacts, classifier artifacts, graph artifacts, and
 reproducible worker commands. Do not edit `/Users/ryan/Projects/Biblicus`
 source from Papyrus.
 
+## Terminology Contract
+
+Use this language consistently in operator-facing guidance:
+
+- `reference processing`: full DOI/URL-to-usable-reference workflow.
+- `process reference`: verb for running that workflow.
+- `register reference`: create the initial sparse `Reference`.
+- `curate reference`: editor decision workflow only.
+- `ingest`: Biblicus corpus-storage term.
+- `import`: config/artifact transfer term.
+
+Legacy command and assignment names may still use `intake`; treat those as
+historical command ids, not the preferred operator verb.
+
 ## Completion Contract
 
-If the user asks to ingest, import, add, or research new references without
+If the user asks to process, register, add, or research new references without
 saying "local only," the task is not done until the new references are
 cloud-visible:
 
@@ -54,7 +68,7 @@ verification have succeeded.
   S3 prefixes, roles, and classifier ids.
 - `skills/category-steering/SKILL.md`: production JWT setup, curation-cycle
   commands, S3 corpus rules, and Biblicus escalation rules.
-- `scripts/lib/papyrus-categories.cjs`: current reference, attachment, message,
+- `src/papyrus_content/categories_steering.py`: current reference, attachment, message,
   assignment, and semantic-relation import mappers.
 - `amplify/data/resource.ts`: `Reference`, `ReferenceAttachment`,
   `Message`, `Assignment`, and `SemanticRelation` schema/auth rules.
@@ -103,8 +117,8 @@ Biblicus snapshot metadata on the attachment so agents can see which extractor,
 configuration, and stage produced the selected text. Do not copy that text into
 `Reference.metadata`, `Message.body`, or a raw payload.
 
-Use `references source-status` to distinguish `snapshot_extracted` from
-`text_ready`. A snapshot-only reference still needs `attach-extracted-text` to
+Use `references process-status` to distinguish `snapshot_extracted` from
+`text_ready`. A snapshot-only reference still needs `process-attach-extracted-text` to
 register the selected snapshot path before it is eligible for analysis
 manifests.
 
@@ -140,15 +154,15 @@ Do not use pending, rejected, or archived references as publishable evidence or
 agent context. They may appear in the Reference Ledger, curation assignments,
 comments, votes, and scope-training exports.
 
-Every pending reference prospect registered through `references register-catalog`
+Every pending reference prospect registered through `references create-from-catalog`
 needs an ingestion rationale. Provide it in the catalog as
 `ingestion_rationale` or through `--ingestion-rationale`. The rationale should
 briefly summarize the source material, explain how it relates to the current
 research focus, and explain why it fits the publication mission.
 
 When a research packet supplies `proposedReferences`, each proposal is still
-only a reference prospect. Register it through `assignments intake-proposals`,
-`assignments research-intake-now`, `references register-catalog`, or the
+only a reference prospect. Register it through `assignments process-proposals`,
+`assignments process-research-now`, `references create-from-catalog`, or the
 repeatable Biblicus corpus path before any curation or evidence use. Do not copy
 web-search `evidence_candidate_id` values into `evidenceItemIds`; those are audit
 identifiers, not accepted reference ids.
@@ -172,25 +186,25 @@ latest linked `research_packet` for an assignment into pending references and
 curation assignments:
 
 ```bash
-npm run content -- assignments intake-proposals \
+poetry run papyrus assignments process-proposals \
   --assignment <assignment-id> \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
   --status pending \
-  --apply \
+ \
   --json
 ```
 
 If the research run has not happened yet, use the one-command path:
 
 ```bash
-npm run content -- assignments research-intake-now \
+poetry run papyrus assignments process-research-now \
   --assignment <assignment-id> \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
   --research-mode source_discovery \
   --max-evidence-items 20 \
-  --apply \
+ \
   --json
 ```
 
@@ -202,11 +216,11 @@ model scans. They create pending `Reference` rows and
 `curation.reference-intake` assignments only; they do not accept references,
 create evidence relations, create publication items, or run analysis.
 
-For automation, prefer `npm --silent run content -- ... --json`. The JSON
+For automation, prefer `poetry run papyrus ... --json`. The JSON
 result includes a compact `references[]` list with reference id, item id, title,
 URL, source domain, curation assignment id, source-readiness state, and the next
 source command. Re-running the same packet intake should report the same
-references as existing/no-op rows. Use low-level `references register-catalog`
+references as existing/no-op rows. Use low-level `references create-from-catalog`
 only for arbitrary manual catalogs, compatibility debugging, or fallback
 inspection.
 
@@ -220,7 +234,7 @@ then ask for or record the human decision.
 Useful inspection command:
 
 ```bash
-npm run content -- references source-status \
+poetry run papyrus references process-status \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
   --status pending \
@@ -235,12 +249,12 @@ be part of active curation.
 Decision commands:
 
 ```bash
-npm run content -- references review-curation \
+poetry run papyrus references review-curation \
   --reference <reference-id> \
   --action accept \
   --note "<why accepted>"
 
-npm run content -- references review-curation \
+poetry run papyrus references review-curation \
   --reference <reference-id> \
   --action reject \
   --reason-code out_of_scope \
@@ -248,7 +262,7 @@ npm run content -- references review-curation \
 ```
 
 `review-curation` mutates immediately through the protected GraphQL action. It
-does not use `--apply`.
+does not require an apply flag.
 
 The post-acceptance completion sequence is:
 
@@ -263,9 +277,9 @@ The post-acceptance completion sequence is:
 
 Use this standard curation sequence for recent references:
 
-1. `npm run content -- content inspect`
-2. `npm run content -- references curate-recent --corpus-key <key> --since-hours 48 --max-count 25 --dry-run --json`
-3. rerun with `--apply` after reviewing dry-run diagnostics.
+1. `poetry run papyrus ops content inspect`
+2. `poetry run papyrus references curate-recent --corpus-key <key> --since-hours 48 --max-count 25 --dry-run --json`
+3. rerun without `--dry-run` after reviewing dry-run diagnostics.
 
 `references curate-recent` enforces identifier prepass before title/subtitle,
 summary, and quality updates. It writes a resumable manifest at
@@ -282,13 +296,13 @@ Reference visibility is created either through direct catalog registration or
 through Biblicus corpus work, S3 sync, and curation import/projection outputs:
 
 ```bash
-npm run content -- references register-catalog \
+poetry run papyrus references create-from-catalog \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
   --catalog <catalog.json> \
   --status pending \
   --ingestion-rationale "<summary, research focus, editorial mission fit>" \
-  --apply
+
 ```
 
 1. Put each source material in the correct configured Biblicus corpus. For the
@@ -303,7 +317,7 @@ npm run content -- references register-catalog \
    caught before the AWS command runs:
 
    ```bash
-   npm run content -- corpora sync-to-cloud \
+   poetry run papyrus ops corpora sync-to-cloud \
      --config <steering.yml> \
      --corpus-key <corpus-key> \
      --dryrun
@@ -313,7 +327,7 @@ npm run content -- references register-catalog \
    Biblicus:
 
    ```bash
-   npm run content -- corpora sync-from-cloud \
+   poetry run papyrus ops corpora sync-from-cloud \
      --config <steering.yml> \
      --corpus-key <corpus-key> \
      --dryrun
@@ -323,11 +337,11 @@ npm run content -- references register-catalog \
 4. Papyrus imports Biblicus artifacts through the JWT authoring lane:
 
    ```bash
-   npm run content -- categories import-steering \
+   poetry run papyrus ops categories import-steering \
      --config corpora/papyrus-steering.yml \
      --corpus-key <corpus-key>
 
-   npm run content -- categories import-projection \
+   poetry run papyrus ops categories import-projection \
      --config corpora/papyrus-steering.yml \
      --target-corpus-key <source-corpus-key> \
      --authority-corpus-key <canonical-corpus-key> \
@@ -346,7 +360,7 @@ after new corpus work:
 
 ```bash
 export BIBLICUS_WORKDIR="/Users/ryan/Projects/Biblicus"
-npm run content -- categories run-curation-cycle --config corpora/papyrus-steering.yml
+poetry run papyrus ops categories run-curation-cycle --config corpora/papyrus-steering.yml
 ```
 
 Use `skills/category-steering/SKILL.md` for the full cycle and JWT setup. The
@@ -368,11 +382,11 @@ After import, verify from the editor/private side:
 CLI checks:
 
 ```bash
-npm run content -- content inspect
-npm run content -- categories run-curation-cycle --config corpora/papyrus-steering.yml
+poetry run papyrus ops content inspect
+poetry run papyrus ops categories run-curation-cycle --config corpora/papyrus-steering.yml
 ```
 
-`npm run content -- content inspect` is the hard auth preflight before any live
+`poetry run papyrus ops content inspect` is the hard auth preflight before any live
 CLI smoke run. If it fails, stop and refresh JWT auth before running additional
 reference commands.
 
@@ -388,18 +402,18 @@ Papyrus has a direct registration command for making Biblicus catalog/accession
 metadata visible in GraphQL without turning the material into evidence:
 
 ```bash
-npm run content -- references prepare-catalog \
+poetry run papyrus references prepare-catalog \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
   --catalog <metadata/catalog.json> \
   --output .papyrus-runs/<run-id>/<corpus-key>-prepared-catalog.json
 
-npm run content -- references register-catalog \
+poetry run papyrus references create-from-catalog \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
   --catalog .papyrus-runs/<run-id>/<corpus-key>-prepared-catalog.json \
   --status pending \
-  --apply
+
 ```
 
 Use `prepare-catalog` for sandbox bootstrap rehearsals or legacy catalogs that
@@ -409,17 +423,17 @@ and must not rewrite source corpus metadata unless the user explicitly asks.
 Rejected registrations require structured scope memory:
 
 ```bash
-npm run content -- references register-catalog \
+poetry run papyrus references create-from-catalog \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
   --catalog <metadata/catalog.json> \
   --status rejected \
   --reason-code out_of_scope \
   --note "Outside the publication mission." \
-  --apply
+
 ```
 
-`register-catalog` is dry-run by default. With `--apply`, it writes a
+`create-from-catalog` applies by default. With `--dry-run`, it only previews a
 `KnowledgeImportRun`, sanitized `KnowledgeRawPayload`, `Reference`,
 `ReferenceAttachment`, curation `Message`, `curation.reference-intake`
 `Assignment`, and audit/workflow `SemanticRelation` rows. Pending references get
@@ -430,16 +444,16 @@ not create `Item`, `EditionItem`, `classified_as`, or `uses_evidence` records.
 To start from a live assignment research packet:
 
 ```bash
-npm run content -- assignments intake-proposals \
+poetry run papyrus assignments process-proposals \
   --assignment <assignment-id> \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
   --status pending \
-  --apply
+
 ```
 
 Use `assignments research-packets --assignment <assignment-id>` only when you
-need to inspect packets manually. If `intake-proposals` cannot handle a packet,
+need to inspect packets manually. If `process-proposals` cannot handle a packet,
 use the listed `proposedReferences` to build fallback catalog metadata,
 preserving each proposal's ingestion rationale. The catalog registration step is
 what makes the prospect visible as a pending or rejected `Reference`.
@@ -447,38 +461,38 @@ what makes the prospect visible as a pending or rejected `Reference`.
 Export accepted-only manifests before analysis runs:
 
 ```bash
-npm run content -- references source-status \
+poetry run papyrus references process-status \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
   --status all
 
-npm run content -- references create-accession-assignments \
+poetry run papyrus references process-create-accession-assignments \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
   --status pending \
-  --apply
 
-npm run content -- references accession-now \
+
+poetry run papyrus references process-accession-now \
   --reference <reference-id> \
   --assignee-key <worker-run-id>
 
-npm run content -- references extract-text-now \
+poetry run papyrus references process-extract-text-now \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
   --assignee-key <worker-run-id>
 
-npm run content -- references attach-extracted-text \
+poetry run papyrus references process-attach-extracted-text \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
   --max-count 10 \
-  --apply
 
-npm run content -- references export-analysis-manifest \
+
+poetry run papyrus references export-analysis-manifest \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
   --output /tmp/accepted-reference-manifest.json
 
-npm run content -- references export-scope-training \
+poetry run papyrus references export-scope-training \
   --config corpora/papyrus-steering.yml \
   --corpus-key <corpus-key> \
   --output /tmp/reference-scope-training.json
@@ -498,7 +512,7 @@ or CLI users to have long-lived AWS credentials just to write `ModelAttachment`
 objects. The client reserves a slot through GraphQL, uploads to the short-lived
 signed URL, then completes the attachment through GraphQL.
 For sandbox rebuilds, use `content delete all --yes --delete-attachments` or
-`newsroom prune-attachments --apply` to clean those payloads. Never use those
+`newsroom prune-attachments` to clean those payloads. Never use those
 maintenance commands as a substitute for corpus accession cleanup under
 `corpora/`.
 

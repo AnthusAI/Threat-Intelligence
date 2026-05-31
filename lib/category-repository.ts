@@ -267,6 +267,8 @@ export type ReferenceRecord = {
   sourcePublishedAt?: string | null;
   sourceUpdatedAt?: string | null;
   retrievedAt?: string | null;
+  inboundCitationCount?: number | null;
+  outboundCitationCount?: number | null;
   importRunId?: string | null;
   importedAt?: string | null;
   createdAt?: string | null;
@@ -276,6 +278,7 @@ export type ReferenceRecord = {
   curationStatusUpdatedBy?: string | null;
   curationStatusReason?: string | null;
   newsroomFeedKey?: string | null;
+  reviewedFeedKey?: string | null;
   metadata?: unknown;
   updatedAt?: string | null;
 };
@@ -347,6 +350,11 @@ export type SemanticNodeRecord = {
   displayName?: string | null;
   description?: string | null;
   aliases?: Array<string | null> | null;
+  authorityScore?: number | null;
+  authorityRank?: number | null;
+  acceptedReferenceMentionCount?: number | null;
+  distinctSourceKindCount?: number | null;
+  relationCount?: number | null;
   status: string;
   importRunId?: string | null;
   createdAt?: string | null;
@@ -401,11 +409,51 @@ export type MessageRecord = {
   authorSub?: string | null;
   authorUserProfileId?: string | null;
   authorLabel?: string | null;
+  threadId?: string | null;
+  parentMessageId?: string | null;
+  sequenceNumber?: number | null;
+  role?: string | null;
+  messageType?: string | null;
+  content?: string | null;
+  semanticLayer?: string | null;
+  searchVisibility?: string | null;
+  responseTarget?: string | null;
+  responseStatus?: string | null;
+  responseOwner?: string | null;
+  responseStartedAt?: string | null;
+  responseCompletedAt?: string | null;
+  responseError?: string | null;
   createdAt: string;
   updatedAt: string;
   newsroomFeedKey?: string | null;
   body?: string | null;
   metadata?: unknown;
+};
+
+export type MessageThreadRecord = {
+  id: string;
+  threadKind: string;
+  status: string;
+  title: string;
+  summary?: string | null;
+  primaryAnchorKind?: string | null;
+  primaryAnchorId?: string | null;
+  primaryAnchorLineageId?: string | null;
+  primaryAnchorKey?: string | null;
+  createdBySub?: string | null;
+  createdByUserProfileId?: string | null;
+  createdByLabel?: string | null;
+  messageCount?: number | null;
+  lastMessageId?: string | null;
+  lastMessageAt?: string | null;
+  contextDigest?: string | null;
+  activeResponseMessageId?: string | null;
+  responseLockOwner?: string | null;
+  responseLockExpiresAt?: string | null;
+  metadata?: unknown;
+  createdAt: string;
+  updatedAt: string;
+  newsroomFeedKey?: string | null;
 };
 
 export type AssignmentRecord = {
@@ -458,6 +506,34 @@ export type AssignmentEventRecord = {
   note?: string | null;
   createdAt: string;
   metadata?: unknown;
+};
+
+export type EditionSlotRecord = {
+  id: string;
+  editionId: string;
+  sectionKey: string;
+  slotRank: number;
+  targetType: "article" | "brief" | string;
+  targetLengthBand?: string | null;
+  minImageAssets?: number | null;
+  status: "open" | "assigned" | "selected" | "briefed" | "filled" | "killed" | string;
+  selectedAssignmentId?: string | null;
+  metadata?: unknown;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type EditionRecord = {
+  id: string;
+  lineageId?: string | null;
+  versionNumber?: number | null;
+  versionState?: string | null;
+  slug?: string | null;
+  title?: string | null;
+  status?: string | null;
+  editionDate?: string | null;
+  publishedAt?: string | null;
+  updatedAt?: string | null;
 };
 
 export type UserIdentityRecord = {
@@ -600,6 +676,7 @@ export type CategorySteeringDashboard = {
   semanticRelations: SemanticRelationRecord[];
   assignments: AssignmentRecord[];
   assignmentEvents: AssignmentEventRecord[];
+  editionSlots: EditionSlotRecord[];
   doctrineRecords: DoctrineRecord[];
   newsroomSections: NewsroomSectionRecord[];
   procedureDefinitions: ProcedureDefinitionRecord[];
@@ -688,7 +765,85 @@ function knowledgeCorpusIdFromKey(corpusKey: string): string {
 }
 
 export async function loadCategorySteeringDashboard(): Promise<CategorySteeringDashboard> {
-  return createEmptyCategorySteeringDashboard();
+  const proposals = await loadServerSteeringProposals();
+  if (proposals.length === 0) return createEmptyCategorySteeringDashboard();
+  return {
+    ...createEmptyCategorySteeringDashboard(),
+    isPublicSkeleton: false,
+    proposals: sortProposals(proposals),
+    loadError: null,
+  };
+}
+
+const SERVER_STEERING_PROPOSALS_QUERY = `
+  query ListSteeringProposals($limit: Int, $nextToken: String) {
+    listSteeringProposals(limit: $limit, nextToken: $nextToken) {
+      items {
+        id
+        categorySetId
+        corpusId
+        proposalKind
+        steeringDomain
+        status
+        title
+        summary
+        categoryKey
+        targetCategoryKey
+        graphEntityId
+        relationshipType
+        displayName
+        shortTitle
+        subtitle
+        description
+        evidenceItemIds
+        suggestedSeedItemIds
+        suggestedHoldoutItemIds
+        sourceSnapshotId
+        proposedAt
+        reviewedAt
+        reviewedBy
+        updatedAt
+      }
+      nextToken
+    }
+  }
+`;
+
+async function loadServerSteeringProposals(): Promise<CategorySteeringProposal[]> {
+  const endpoint = process.env.PAPYRUS_GRAPHQL_ENDPOINT;
+  const jwt = process.env.PAPYRUS_GRAPHQL_JWT;
+  if (!endpoint || !jwt) return [];
+
+  const items: CategorySteeringProposal[] = [];
+  let nextToken: string | null = null;
+
+  for (let page = 0; page < 20; page += 1) {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        Authorization: `Bearer ${jwt}`,
+      },
+      body: JSON.stringify({
+        query: SERVER_STEERING_PROPOSALS_QUERY,
+        variables: { limit: 500, nextToken },
+      }),
+      cache: "no-store",
+    });
+    if (!response.ok) return [];
+    const payload = await response.json() as {
+      data?: { listSteeringProposals?: { items?: Array<CategorySteeringProposal | null> | null; nextToken?: string | null } | null } | null;
+      errors?: Array<{ message?: string }> | null;
+    };
+    if (payload.errors?.length) return [];
+    const connection = payload.data?.listSteeringProposals;
+    if (!connection) return [];
+    items.push(...(connection.items ?? []).filter(Boolean) as CategorySteeringProposal[]);
+    nextToken = connection.nextToken ?? null;
+    if (!nextToken) break;
+  }
+
+  return items;
 }
 
 function sortCategorySets(categorySets: CategorySteeringCategorySet[], importRuns: CategorySteeringImportRun[]): CategorySteeringCategorySet[] {
@@ -1319,6 +1474,21 @@ export function createDemoCategorySteeringDashboard(): CategorySteeringDashboard
         importedAt,
       },
       {
+        id: "reference-attachment-demo-history-001-extracted-text",
+        referenceId: referenceHistoryOneId,
+        referenceLineageId: referenceHistoryOneLineageId,
+        referenceVersionNumber: 1,
+        referenceVersionKey: `reference#${referenceHistoryOneId}`,
+        role: "extracted_text",
+        sortKey: "900-extracted-text",
+        storagePath: "corpora/history/extracted/pipeline/snapshot-demo-history/text/history-001.txt",
+        filename: "history-001.txt",
+        mediaType: "text/plain",
+        sha256: "demo-history-001-extracted-text",
+        importRunId: "knowledge-import-demo-projection",
+        importedAt,
+      },
+      {
         id: "reference-attachment-demo-history-002-deepgram",
         referenceId: referenceHistoryTwoId,
         referenceLineageId: referenceHistoryTwoLineageId,
@@ -1497,6 +1667,22 @@ export function createDemoCategorySteeringDashboard(): CategorySteeringDashboard
         createdAt: importedAt,
       },
     ],
+    editionSlots: [
+      {
+        id: "edition-slot-demo-news-01",
+        editionId: "edition-demo-weekly-v1",
+        sectionKey: "news",
+        slotRank: 1,
+        targetType: "article",
+        targetLengthBand: "standard",
+        minImageAssets: 1,
+        status: "open",
+        selectedAssignmentId: null,
+        metadata: { source: "demo" },
+        createdAt: importedAt,
+        updatedAt: importedAt,
+      },
+    ],
     newsroomSections: defaultNewsroomSections(importedAt),
     procedureDefinitions: [],
     procedureVersions: [],
@@ -1515,8 +1701,8 @@ export function createDemoCategorySteeringDashboard(): CategorySteeringDashboard
         slug: "editorial-doctrine-mission",
         title: "Editorial Mission",
         body: [
-          "Papyrus exists to help editors define a publication with a clear civic and intellectual purpose.",
-          "The newsroom should make its coverage priorities legible to its staff before those priorities ever become layout or publishing decisions.",
+          "Papyrus publishes bounded editions that help readers understand what changed, why it matters, and what remains uncertain.",
+          "Coverage should be accurate, source-disciplined, and legible about evidence quality and editorial judgment.",
         ],
         editorial: { kind: "mission" },
         updatedAt: importedAt,
@@ -1534,7 +1720,9 @@ export function createDemoCategorySteeringDashboard(): CategorySteeringDashboard
         slug: "editorial-doctrine-policy",
         title: "Editorial Policy",
         body: [
-          "Editorial policy stays private to the newsroom and records the standards that govern sourcing, review, and publication decisions.",
+          "Publication doctrine is the global inclusion standard; desk doctrine sets local source priorities and framing.",
+          "News reporting should prioritize current, journalistic, and official sources; desk workflows may use academic research as background unless a desk policy explicitly makes research the primary evidence class.",
+          "High-risk domains, including health-related claims, require stricter sourcing, explicit uncertainty handling, and clear separation between verified facts and interpretation.",
         ],
         editorial: { kind: "policy" },
         updatedAt: importedAt,

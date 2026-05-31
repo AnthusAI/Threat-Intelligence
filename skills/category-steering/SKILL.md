@@ -29,12 +29,12 @@ from configuration and steering state, not application logic.
 - `corpora/papyrus-analysis-profiles.yml`: YAML-backed Biblicus analysis and
   re-index profiles for topic modeling, classifier retraining, projection, and
   entity-graph work.
-- `scripts/content-cli.cjs`: CLI command registration.
-- `scripts/lib/papyrus-steering-config.cjs`: steering config parsing and corpus
+- `papyrus`: CLI command registration.
+- `src/papyrus_content/steering.py`: steering config parsing and corpus
   resolution.
-- `scripts/lib/papyrus-categories.cjs`: category/reference/proposal import and
+- `src/papyrus_content/categories_steering.py`: category/reference/proposal import and
   export logic.
-- `scripts/lib/papyrus-curation-cycle.cjs`: repeatable curation-cycle
+- `src/papyrus_content/curation_cycle.py`: repeatable curation-cycle
   orchestration.
 - `amplify/data/resource.ts`: GraphQL data model and auth rules.
 - `AGENTS.md`: current Papyrus operating constraints.
@@ -77,7 +77,7 @@ eval "$(npm run -s auth:refresh-jwt -- --format shell)"
 Smoke-check the authoring lane before mutating data:
 
 ```bash
-npm run content -- content inspect
+poetry run papyrus ops content inspect
 ```
 
 ## Steering Config And S3 Corpus Rules
@@ -92,7 +92,7 @@ should be mirrored to S3 beside corpus data. CLI config resolution order is:
 Materialize configured corpora into GraphQL after changing config:
 
 ```bash
-npm run content -- categories import-config --config corpora/papyrus-steering.yml
+poetry run papyrus ops categories import-config --config corpora/papyrus-steering.yml
 ```
 
 The production Amplify Storage bucket owns private corpus prefixes:
@@ -112,11 +112,11 @@ Before a worker claims analysis work, verify that local corpus, S3 corpus, and
 GraphQL reference state agree:
 
 ```bash
-npm run content -- corpora worker-bootstrap \
+poetry run papyrus ops corpora worker-bootstrap \
   --config <steering.yml> \
   --json
 
-npm run content -- corpora status \
+poetry run papyrus ops corpora status \
   --config <steering.yml> \
   --corpus-key <corpus-key> \
   --json
@@ -124,7 +124,7 @@ npm run content -- corpora status \
 
 Use `corpora sync-from-cloud` to initialize a new Mac or EC2 worker from S3, and
 `corpora sync-to-cloud` after adding new local corpus material. S3 sync does not
-register references in GraphQL; `references register-catalog` is still required
+register references in GraphQL; `references create-from-catalog` is still required
 for Newsroom visibility and curation.
 
 Papyrus imports steering state, artifact refs, strict private `Reference`
@@ -145,7 +145,7 @@ can add more ignored terms from `/newsroom/topics`; export active rules before a
 new analysis cycle with:
 
 ```bash
-npm run content -- categories export-lexical-steering \
+poetry run papyrus ops categories export-lexical-steering \
   --output /tmp/papyrus-lexical-steering.json
 ```
 
@@ -163,17 +163,17 @@ created.
 Validate and inspect the YAML-backed profiles:
 
 ```bash
-npm run content -- analysis validate-profiles \
+poetry run papyrus analysis validate-profiles \
   --profiles corpora/papyrus-analysis-profiles.yml
 
-npm run content -- analysis profiles \
+poetry run papyrus analysis profiles \
   --profiles corpora/papyrus-analysis-profiles.yml
 ```
 
 Preview the exact Biblicus command plan before creating work:
 
 ```bash
-npm run content -- analysis reindex-plan \
+poetry run papyrus analysis reindex-plan \
   --profile canonical-topic-classifier \
   --corpus-key AI-ML-research \
   --override bertopic_analysis.parameters.nr_topics=14
@@ -182,23 +182,23 @@ npm run content -- analysis reindex-plan \
 Create live work only after the preview is acceptable:
 
 ```bash
-npm run content -- analysis create-reindex-assignment \
+poetry run papyrus analysis create-reindex-assignment \
   --profile canonical-topic-classifier \
   --corpus-key AI-ML-research \
-  --apply
+
 ```
 
 Execute claimed analysis work from assignment metadata (worker/operator path):
 
 ```bash
-npm run content -- analysis execute-assignment \
+poetry run papyrus analysis execute-assignment \
   --assignment <analysis-assignment-id>
 ```
 
 Run immediate assignment-backed execution in one step:
 
 ```bash
-npm run content -- analysis run-now \
+poetry run papyrus analysis run-now \
   --profile canonical-topic-classifier \
   --corpus-key AI-ML-research \
   --override bertopic_analysis.parameters.nr_topics=14
@@ -207,7 +207,7 @@ npm run content -- analysis run-now \
 Process queued assignments in deterministic batches (priority desc, createdAt asc):
 
 ```bash
-npm run content -- assignments process-queue \
+poetry run papyrus assignments process-queue \
   --type analysis.reindex \
   --status open \
   --max-count 10 \
@@ -227,7 +227,7 @@ string that is unique within the competing worker pool. `assigneeType` and
 Use a TTL for worker claims so crashed agents do not hold work forever:
 
 ```bash
-npm run content -- assignments claim \
+poetry run papyrus assignments claim \
   --assignment <assignment-id> \
   --assignee-key "procedure-run:<run-id>" \
   --claim-ttl-seconds 21600
@@ -248,53 +248,53 @@ promotion supersedes the previous current version.
 Create and edit a draft:
 
 ```bash
-npm run content -- categories draft-create \
+poetry run papyrus knowledge topics draft-create \
   --from-category-set <current-category-set-id> \
   --title "Topic sculpting draft" \
-  --apply
 
-npm run content -- categories draft-add-topic \
+
+poetry run papyrus knowledge topics draft-add-topic \
   --category-set <draft-category-set-id> \
   --display-name "Agent Tooling" \
   --short-title "Tools" \
   --subtitle "Tool use" \
-  --apply
 
-npm run content -- categories draft-update-topic \
+
+poetry run papyrus knowledge topics draft-update-topic \
   --category <category-id-or-key> \
   --display-name "Clearer topic name" \
-  --apply
 
-npm run content -- categories draft-archive-topic \
+
+poetry run papyrus knowledge topics draft-archive-topic \
   --category <category-id-or-key> \
-  --apply
+
 ```
 
 Manual reference labels are immediate authoritative labels. They are allowed
 only for current accepted `Reference` rows:
 
 ```bash
-npm run content -- references label \
+poetry run papyrus references label \
   --reference <reference-id-or-external-item-id> \
   --category <category-key-or-lineage-id> \
   --category-set <draft-or-current-category-set-id> \
   --note "Why this reference is a good seed example." \
-  --apply
 
-npm run content -- references labels --reference <reference-id-or-item-id>
+
+poetry run papyrus references labels --reference <reference-id-or-item-id>
 ```
 
 Export the strict Biblicus seed manifest from authoritative labels, then pass it
 to classifier retraining as the `seedManifestPath` override:
 
 ```bash
-npm run content -- categories export-classifier-seed-manifest \
+poetry run papyrus knowledge topics export-classifier-seed-manifest \
   --config corpora/papyrus-steering.yml \
   --category-set <draft-or-current-category-set-id> \
   --corpus-key <corpus-key> \
   --output .papyrus-runs/<run-id>/seed-manifest.json
 
-npm run content -- analysis preview-reindex \
+poetry run papyrus analysis preview-reindex \
   --profile canonical-topic-classifier \
   --corpus-key <corpus-key> \
   --override seedManifestPath=.papyrus-runs/<run-id>/seed-manifest.json
@@ -303,9 +303,9 @@ npm run content -- analysis preview-reindex \
 Promote only when the draft is ready to become the accepted publication basis:
 
 ```bash
-npm run content -- categories draft-promote \
+poetry run papyrus knowledge topics draft-promote \
   --category-set <draft-category-set-id> \
-  --apply
+
 ```
 
 ## Regular Curation Cycle
@@ -314,7 +314,7 @@ Prefer the repeatable cycle command over hand-running every step:
 
 ```bash
 export BIBLICUS_WORKDIR="/Users/ryan/Projects/Biblicus"
-npm run content -- categories run-curation-cycle --config corpora/papyrus-steering.yml
+poetry run papyrus ops categories run-curation-cycle --config corpora/papyrus-steering.yml
 ```
 
 For a reference-ingest task, this cycle is the normal production GraphQL import
@@ -325,6 +325,11 @@ if the user asked for cloud import, run it deliberately and verify the result.
 The cycle does not sync S3. If local corpus files or Biblicus artifacts changed,
 sync the configured corpus working copy to its private S3 prefix first, with
 `aws s3 sync --dryrun` reviewed before the real sync.
+
+`analysis run-now` and `analysis execute-assignment` pull from S3 automatically
+when the local catalog is missing or stale (`corpora sync-from-cloud`
+semantics). Pass `--skip-sync-from-cloud` to skip or `--sync-from-cloud` to
+force a pull before Biblicus runs.
 
 The cycle uses the steering config to discover the canonical corpus and source
 corpora. It stores output under `.papyrus-runs/<timestamp>/`, including
@@ -356,13 +361,13 @@ work around missing optional dependencies.
 Import the configured corpus records:
 
 ```bash
-npm run content -- categories import-config --config corpora/papyrus-steering.yml
+poetry run papyrus ops categories import-config --config corpora/papyrus-steering.yml
 ```
 
 Import steering artifacts for one configured corpus:
 
 ```bash
-npm run content -- categories import-steering \
+poetry run papyrus ops categories import-steering \
   --config corpora/papyrus-steering.yml \
   --corpus-key AI-ML-research
 ```
@@ -370,15 +375,15 @@ npm run content -- categories import-steering \
 Export accepted category state and review memory:
 
 ```bash
-npm run content -- categories export-category-set \
+poetry run papyrus knowledge topics export-category-set \
   --category-set <category-set-id> \
   --output /tmp/accepted-category-set.json
 
-npm run content -- categories export-category-tree \
+poetry run papyrus ops categories export-category-tree \
   --category-set <category-set-id> \
   --output /tmp/accepted-category-tree.json
 
-npm run content -- categories export-steering-feedback \
+poetry run papyrus ops categories export-steering-feedback \
   --category-set <category-set-id> \
   --output /tmp/papyrus-steering-feedback.json
 ```
@@ -427,7 +432,7 @@ Import a projection with config-derived corpus ids:
 
 ```bash
 cd /Users/ryan/Projects/Papyrus
-npm run content -- categories import-projection \
+poetry run papyrus ops categories import-projection \
   --config corpora/papyrus-steering.yml \
   --target-corpus-key AI-ML-history \
   --authority-corpus-key AI-ML-research \

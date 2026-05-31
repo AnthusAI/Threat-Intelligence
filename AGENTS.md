@@ -25,9 +25,22 @@ rendering contracts.
 
 ## Core Rules
 
+- Before running any AWS-, Amplify-, sandbox-, or deployment-related command,
+  read `AGENTS.local.md` and follow its local account/profile/env guidance.
+  Treat `AGENTS.local.md` as required preflight context for cloud operations on
+  this machine.
+- Papyrus is an Amplify Gen 2 project. Production backend/frontend deployment is
+  done by pushing commits to `main` through the configured DevOps/Amplify
+  pipeline. Do not run `ampx pipeline-deploy` (or other direct production
+  `ampx` deploy commands) from local agents unless the user explicitly asks for
+  that exact override. Use `ampx` locally for sandbox workflows only.
 - Do not commit unless the user explicitly asks.
 - Preserve unrelated uncommitted work. This project is often dirty because it is
   being iterated in conversation.
+- Papyrus is Python-first for backend workflows. Create new backend utilities,
+  CLIs, automation, API tests, and backend BDD harnesses in Python by default.
+  Use JavaScript/TypeScript only for the Next.js/React frontend and
+  frontend-specific test harnesses.
 - Do not add backward-compatibility fallbacks for old schema, GraphQL, content,
   layout-plan, or CLI shapes. Fallback read queries, dual-shape normalizers,
   silent compatibility branches, and long-lived migration shims are technical
@@ -38,6 +51,8 @@ rendering contracts.
   it to restore production immediately. Keep it narrow, document exactly why it
   exists, and remove it from normal read, authoring, repository, and solver
   paths as soon as the data or deployment is corrected.
+- Default to clean breaks. Do not add fallback behavior, compatibility shims, or
+  multi-path read/write logic unless the user explicitly requests that fallback.
 - Keep the current one-page React flipper. Do not reintroduce Turn.js, jQuery,
   or DOM-mutating layout loops.
 - Do not make React measure rendered DOM to decide layout. The solver should
@@ -72,7 +87,7 @@ rendering contracts.
 - `corpora/papyrus-steering.yml` is the tracked steering config contract. It
   defines publication corpus keys, roles, classifier ids, local paths, and S3
   prefixes. Do not hard-code the AI/ML pilot corpus names in Papyrus logic.
-  Materialize config changes with `npm run content -- categories import-config`.
+  Materialize config changes with `poetry run papyrus ops categories import-config`.
 - Research agents should be driven by editable publication doctrine, section
   doctrine, publication/corpus config, accepted category state, and assignment
   context, not by hard-coded subject assumptions. Follow
@@ -88,7 +103,7 @@ rendering contracts.
   use `Assignment --produces--> Message`; legacy
   `Message --comment--> Assignment` packet links remain readable. Inspect
   research packets with
-  `npm run content -- assignments research-packets --assignment <id>`, and use
+  `poetry run papyrus assignments research-packets --assignment <id>`, and use
   `assignments story-cycle-output` for run-level research/reporting output.
 - Use an AWS profile for local Amplify/AWS access.
 - `.env` is for Papyrus runtime settings and the seed editor credentials used by
@@ -118,11 +133,18 @@ rendering contracts.
   curation or evidence use. Only current accepted `Reference` rows may be used
   for evidence sets, topic modeling, graph analysis, desk memory, context
   packs, assignment evidence, or edition planning.
-- Agents that generate, test, debug, or design knowledge context packs should
-  follow `skills/knowledge-query/SKILL.md`. `knowledgeQuery` is the shared
-  CLI/Lambda query path for model-ready context; prefer local CLI iteration for
-  context-pack content changes and deploy only when the shared logic is ready
-  for AppSync validation.
+- For **internal knowledge base search** (accepted references, semantic + graph
+  context packs), read `docs/internal-knowledge-research.md` first, then
+  `skills/knowledge-query/SKILL.md`. Run queries with
+  `PYTHONPATH=src python -m papyrus_newsroom knowledge-query` or
+  `poetry run papyrus-newsroom knowledge-query` (not ad-hoc GraphQL). Use
+  `--execution local` only when developing engine behavior; default remote
+  execution needs `PAPYRUS_GRAPHQL_ENDPOINT` and `PAPYRUS_GRAPHQL_JWT`.
+  `knowledgeQuery` is the shared CLI/Lambda path; prefer local CLI iteration
+  for context-pack content changes and deploy only when ready for AppSync.
+- Bounded exploratory researcher loops vs one-shot researchers are documented in
+  `docs/agent-loop-patterns.md` (`research_explorer.tac` vs `researcher.tac`).
+  “Ralph loop” is an external host-loop pattern; this repo does not implement it.
 - When bootstrapping a new publication from a file pile, follow
   `skills/publication-bootstrap/SKILL.md` and
   `docs/new-publication-from-corpus.md`. Convert loose files into a corpus
@@ -154,8 +176,8 @@ rendering contracts.
   `SemanticRelation.predicate` remains required for v1 compatibility and
   indexes, but new relation writes must also set `relationTypeId`,
   `relationTypeKey`, and `relationDomain` by resolving the seeded type. Use
-  `npm run content -- relations import-types --config corpora/papyrus-semantic-relation-types.yml`
-  after schema deploy, then `npm run content -- relations backfill --config corpora/papyrus-semantic-relation-types.yml --apply`
+  `poetry run papyrus knowledge concepts import-types --config corpora/papyrus-semantic-relation-types.yml`
+  after schema deploy, then `poetry run papyrus knowledge concepts backfill --config corpora/papyrus-semantic-relation-types.yml`
   to denormalize existing relation rows.
 - Assignment lifecycle changes use protected actions or the JWT authoring lane
   and append `AssignmentEvent` audit rows. The Newsroom `Assignments` tab
@@ -182,10 +204,32 @@ rendering contracts.
   decisions queue copywriting Assignments; copywriting is the first stage allowed
   to create draft reader-facing `Item` records. Edition placement remains a
   later copyediting/layout step.
+- EditionSlot orchestration guardrails:
+  - planning/dispatch agents should start with
+    `skills/edition-planning/SKILL.md`;
+  - run/review agents should start with
+    `skills/newsroom-story-cycle/SKILL.md`;
+  - the canonical slot data contract and decision matrix lives in
+    `docs/automated-publication-research-workflow.md`;
+  - reporting assignment dispatch must bind slots via `slotTarget` metadata and
+    `Assignment --targets_slot--> EditionSlot`;
+  - reporting review must not create `EditionItem`; `select`/`brief` may set
+    slot winner state and queue copywriting assignments only.
+- Edition forum-thread guardrails:
+  - Coverage Theme planning posts **three messages** on `edition_forum` in order:
+    theme (phase 1), optional desk (phase 2), reporting dispatch (phase 3);
+    see `skills/edition-planning/SKILL.md` and
+    `docs/automated-publication-research-workflow.md`;
+  - use `MessageThread` forum kinds `edition_forum` and `section_forum`;
+  - anchor edition threads to `Edition` and section threads to
+    `(NewsroomSection, edition lineage)`;
+  - assignment context should include edition forum first, then same-section
+    forum threads only when present;
+  - do not leak other sections' forum threads into assignment context;
+  - reporting/review still must not create `EditionItem`.
 - Treat multi-section story-cycle runs as Coverage Themes in editor-facing UX
-  and docs. The Python `papyrus-newsroom coverage-themes run` command is the
-  primary operator surface; `assignments run-story-cycle` is the compatibility
-  CLI name. The default stop point is `--through reporting`, after private
+  and docs. The Python `papyrus assignments run-story-cycle` command is the
+  primary operator surface. The default stop point is `--through reporting`, after private
   research and reporting packets but before editor selection or copywriting. Use
   `--through plan` or `--through research` when intentionally stopping earlier.
   Applied reruns reuse existing packet Messages by default; use
@@ -193,7 +237,7 @@ rendering contracts.
   packet payloads.
   In live apply smoke tests, require agent success unless fallback/degraded
   packets are explicitly being tested.
-- Use `papyrus-newsroom signals trend-report` and `papyrus-newsroom editions
+- Use `papyrus knowledge signals trend-report` and `papyrus editions
   plan` as the Python assignment-desk layer when an edition should be planned
   from recent accepted knowledge-base trends, section slots, and Coverage Theme
   candidates.
@@ -211,7 +255,7 @@ rendering contracts.
   Biblicus recommendation labels such as `recommend`, `do_not_recommend`, and
   `needs_clarification` are agent labels, not Papyrus review actions.
 - Rejected steering proposals are not cosmetic. Export Papyrus review memory
-  with `npm run content -- categories export-steering-feedback --category-set <id> --output <feedback.json>`
+  with `poetry run papyrus ops categories export-steering-feedback --category-set <id> --output <feedback.json>`
   before new taxonomy, ontology, or graph proposal cycles. Accepted category-tree
   exports say what is accepted; steering-feedback exports say what editors
   accepted or rejected and include suppressions. Pass that file to
@@ -222,13 +266,9 @@ rendering contracts.
   keyword evidence for categories in the Newsroom, and `LexicalSteeringRule`
   rows capture ignored terms such as citation/header noise. Seed defaults live
   in `corpora/papyrus-lexical-steering.yml`; export active rules with
-  `npm run content -- categories export-lexical-steering --output <lexical-steering.json>`.
+  `poetry run papyrus ops categories export-lexical-steering --output <lexical-steering.json>`.
   Do not assume Biblicus consumes that export until the Biblicus agent confirms
   the command contract.
-- Do not edit `/Users/ryan/Projects/Biblicus` source files. If Biblicus needs a
-  new full-corpus S3 sync or locking feature, relay that request to the Biblicus
-  agent instead of changing the library from Papyrus.
-
 ## Solver vs. Renderer Boundary
 
 The newspaper pages are not browser-flow layouts. They are solved layouts that
@@ -352,11 +392,12 @@ GraphQL (or `?scenario=<id>` fixture overrides for tests/debug only).
   `PAPYRUS_JWT_SECRET`. The model rules allow public reads, Cognito `editor`
   group writes, and custom JWT-authorizer writes.
 
-`scripts/` owns the content authoring CLI:
+`src/papyrus_content` owns the content authoring CLI:
 
-- `scripts/content-cli.cjs` is the entrypoint exposed by `npm run content --`.
+- `poetry run papyrus` is the canonical backend CLI surfaced by
+  the `papyrus` command groups.
 - The CLI is GraphQL authoring and inspection.
-- `scripts/lib/papyrus-graphql-authoring.cjs` owns JWT-authenticated GraphQL
+- `src/papyrus_content/graphql_authoring.py` owns JWT-authenticated GraphQL
   authoring calls.
 - `content inspect`, `content list`, and `content delete all --yes` are the
   stable deployed-API operations. `content diff` and `content sync` are
@@ -603,6 +644,7 @@ npm run lint
 npm run typecheck
 npm run build
 npm run test:bdd
+npm run test:bdd:agent-live
 ```
 
 Amplify checks when cloud content changes:
@@ -650,3 +692,6 @@ do not stop or restart it unless asked.
 `npm run test:bdd` expects a running app and defaults to `http://localhost:3001`.
 Use `PAPYRUS_BASE_URL` for another server. Use `PAPYRUS_HEADLESS=false` or
 `npm run test:bdd:headed` when debugging geometry visually.
+
+`npm run test:bdd:agent-live` runs backend live-agent BDD (Behave/Python),
+not frontend browser geometry checks.

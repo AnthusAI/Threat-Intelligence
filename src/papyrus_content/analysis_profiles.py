@@ -81,6 +81,9 @@ SAFE_OVERRIDE_KEYS = frozenset(
         "graph.max_relation_entities_per_sentence",
         "graph.min_relation_weight",
         "graph.max_items",
+        "graph.item_timeout_seconds",
+        "graph.item_retry_attempts",
+        "graph.heartbeat_interval_seconds",
     }
 )
 
@@ -289,7 +292,7 @@ def build_analysis_reindex_assignment_records(
     section_target: dict[str, Any] | None = None,
     existing: dict[str, dict[str, dict[str, Any]]] | None = None,
     now: str | None = None,
-    actor_label: str = "papyrus-content-cli",
+    actor_label: str = "papyrus-cli",
 ) -> dict[str, Any]:
     existing = existing or {}
     assignment_type_key = "analysis.reindex"
@@ -777,6 +780,10 @@ def _build_plan_warnings(profile: dict[str, Any], effective: dict[str, Any]) -> 
         warnings.append("Extraction snapshot is a placeholder and must be resolved before execution.")
     if profile["scope"] == "scoped-topic-model" and not normalize_string(effective.get("steeringFeedbackPath")):
         warnings.append("No steering feedback path is configured; Biblicus may re-emit previously rejected topic proposals.")
+    warnings.append(
+        "analysis run-now and execute-assignment sync corpora/<key>/ from S3 when the local catalog is missing or stale; "
+        "pass --skip-sync-from-cloud to skip or --sync-from-cloud to force a pull."
+    )
     return warnings
 
 
@@ -842,6 +849,12 @@ def _graph_override_args(effective: dict[str, Any], profile: dict[str, Any]) -> 
     for key, mapped in graph_key_map.items():
         if key in profile.get("allowedOverrides", []) and key in effective:
             args.extend(["--override", f"{mapped}={_format_override_value(effective[key])}"])
+    if "graph.item_timeout_seconds" in profile.get("allowedOverrides", []) and effective.get("graph.item_timeout_seconds") is not None:
+        args.extend(["--item-timeout-seconds", str(effective["graph.item_timeout_seconds"])])
+    if "graph.item_retry_attempts" in profile.get("allowedOverrides", []) and effective.get("graph.item_retry_attempts") is not None:
+        args.extend(["--item-retry-attempts", str(effective["graph.item_retry_attempts"])])
+    if "graph.heartbeat_interval_seconds" in profile.get("allowedOverrides", []) and effective.get("graph.heartbeat_interval_seconds") is not None:
+        args.extend(["--heartbeat-interval-seconds", str(effective["graph.heartbeat_interval_seconds"])])
     if "graph.max_items" in profile.get("allowedOverrides", []) and effective.get("graph.max_items") is not None:
         args.extend(["--max-items", str(effective["graph.max_items"])])
     return args

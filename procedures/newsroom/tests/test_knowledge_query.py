@@ -23,7 +23,11 @@ from papyrus_knowledge_query.ranking import (
 )
 from papyrus_knowledge_query.services import KnowledgeQueryServices, S3VectorsProvider, diversify_vector_matches, relation_allowed_for_scope
 from papyrus_knowledge_query.tokens import TokenCounter
-from papyrus_knowledge_query.vector_index import VectorIndexOptions, index_reference_passages
+from papyrus_knowledge_query.vector_index import (
+    VectorIndexOptions,
+    _sanitize_vector_metadata,
+    index_reference_passages,
+)
 
 
 class FakeSemanticProvider:
@@ -299,6 +303,56 @@ class QualityTieSemanticProvider:
                 "title": "Excellent But Irrelevant",
                 "summary": "Unrelated visual design note.",
                 "metadata": {"corpusId": "other-corpus", "categorySetId": "other-category-set"},
+            },
+        ][:limit]
+
+
+class MixedObjectSemanticProvider:
+    name = "mixed-object-semantic"
+
+    def search(self, query, scope, limit):
+        return [
+            {
+                "rank": 1,
+                "distance": 0.08,
+                "kind": "message",
+                "id": "message-research-1",
+                "lineageId": "message-research-1",
+                "messageKind": "research_context_packet",
+                "messageDomain": "workflow",
+                "summary": "Research packet summary about AI agents in healthcare.",
+                "metadata": {
+                    "kind": "message",
+                    "id": "message-research-1",
+                    "lineageId": "message-research-1",
+                    "messageKind": "research_context_packet",
+                },
+            },
+            {
+                "rank": 2,
+                "distance": 0.1,
+                "kind": "assignment",
+                "id": "assignment-research-1",
+                "lineageId": "assignment-research-1",
+                "assignmentTypeKey": "research.source-discovery",
+                "title": "Research assignment: healthcare AI agents",
+                "summary": "Open research assignment linked to this topic.",
+                "metadata": {
+                    "kind": "assignment",
+                    "id": "assignment-research-1",
+                    "lineageId": "assignment-research-1",
+                    "assignmentTypeKey": "research.source-discovery",
+                },
+            },
+            {
+                "rank": 3,
+                "distance": 0.12,
+                "kind": "item",
+                "id": "item-healthcare-ai-v1",
+                "lineageId": "item-healthcare-ai",
+                "title": "Healthcare AI Agent Adoption",
+                "summary": "Item record covering patient-care use cases.",
+                "metadata": {"kind": "item", "id": "item-healthcare-ai-v1", "lineageId": "item-healthcare-ai"},
             },
         ][:limit]
 
@@ -742,6 +796,13 @@ class FakeVectorIndexTextProvider:
             )
         ) * 8
 
+
+class ShortFakeVectorIndexTextProvider(FakeVectorIndexTextProvider):
+    def read_text(self, storage_path):
+        if "message-insight-1" in storage_path:
+            return super().read_text(storage_path)
+        return "Tiny source text."
+
     def list_incoming_relations(self, obj):
         if obj.get("kind") != "reference":
             return []
@@ -849,6 +910,23 @@ class KnowledgeQueryTests(unittest.TestCase):
         self.assertIn("insight_source", queried_kinds)
         self.assertIn("insight_summary", queried_kinds)
         self.assertIn("insight_passage", queried_kinds)
+
+    def test_s3_vector_filter_can_target_explicit_chat_detail(self):
+        provider = S3VectorsProvider(vector_index_arn="arn:test:index")
+
+        metadata_filter = provider._metadata_filter({
+            "semanticLayer": "chat_detail",
+            "searchVisibility": "explicit",
+            "objectKind": "message",
+        })
+
+        self.assertEqual(metadata_filter, {
+            "$and": [
+                {"semanticLayer": {"$eq": "chat_detail"}},
+                {"searchVisibility": {"$eq": "explicit"}},
+                {"kind": {"$eq": "message"}},
+            ]
+        })
 
     def test_quality_signal_reads_current_relation_score(self):
         signal, warning = quality_signal_from_relations([
@@ -966,6 +1044,18 @@ class KnowledgeQueryTests(unittest.TestCase):
         self.assertEqual(result["debug"]["vectorDiversification"], "source_round_robin")
         self.assertTrue(any(stage["name"] == "semantic_search" for stage in result["debug"]["stageTimings"]))
         self.assertIn("semanticUniqueSourceCount", result["debug"])
+
+    def test_reporting_profile_is_supported_without_fallback_warning(self):
+        result = run_knowledge_query(
+            {
+                "semanticQuery": "AI in video games reporting orientation",
+                "profile": "reporting",
+                "output": {"format": "structured", "maxTokens": 120},
+            },
+            fake_services(),
+        )
+        self.assertEqual(result["structured"]["request"]["profile"], "reporting")
+        self.assertFalse(any("Unknown profile" in warning for warning in result.get("warnings") or []))
 
     def test_uri_anchor_resolves_like_explicit_anchor(self):
         explicit = run_knowledge_query(
@@ -1217,6 +1307,72 @@ class KnowledgeQueryTests(unittest.TestCase):
         self.assertIn("Full Source Text", result["context"]["text"])
         self.assertEqual(result["context"]["sourceTextMode"], "full")
         self.assertNotIn("message#", result["context"]["text"])
+
+    def test_related_records_default_excludes_message_and_assignment(self):
+        services = KnowledgeQueryServices(
+            graph=None,
+            semantic=MixedObjectSemanticProvider(),
+            corpus_text=None,
+        )
+        result = run_knowledge_query(
+            {
+                "semanticQuery": "healthcare ai agents patient care",
+                "scope": {"topK": 5, "relatedRecordLimit": 5},
+                "output": {"format": "structured"},
+            },
+            services,
+        )
+
+        related_kinds = {record.get("kind") for record in result["structured"]["relatedRecords"]}
+        self.assertEqual(related_kinds, {"item"})
+
+    def test_related_records_can_include_message_and_assignment(self):
+        services = KnowledgeQueryServices(
+            graph=None,
+            semantic=MixedObjectSemanticProvider(),
+            corpus_text=None,
+        )
+        result = run_knowledge_query(
+            {
+                "semanticQuery": "healthcare ai agents patient care",
+                "scope": {
+                    "topK": 5,
+                    "relatedRecordLimit": 5,
+                    "includeObjectKinds": ["item", "message", "assignment"],
+                    "includeMessageKinds": ["research_context_packet"],
+                    "includeAssignmentTypeKeys": ["research.*"],
+                },
+                "output": {"format": "structured"},
+            },
+            services,
+        )
+
+        related_kinds = {record.get("kind") for record in result["structured"]["relatedRecords"]}
+        self.assertEqual(related_kinds, {"item", "message", "assignment"})
+
+    def test_related_records_assignment_type_wildcard_exclude(self):
+        services = KnowledgeQueryServices(
+            graph=None,
+            semantic=MixedObjectSemanticProvider(),
+            corpus_text=None,
+        )
+        result = run_knowledge_query(
+            {
+                "semanticQuery": "healthcare ai agents patient care",
+                "scope": {
+                    "topK": 5,
+                    "relatedRecordLimit": 5,
+                    "includeObjectKinds": ["item", "assignment"],
+                    "includeAssignmentTypeKeys": ["research.*"],
+                    "excludeAssignmentTypeKeys": ["research.source-*"],
+                },
+                "output": {"format": "structured"},
+            },
+            services,
+        )
+
+        related_kinds = {record.get("kind") for record in result["structured"]["relatedRecords"]}
+        self.assertEqual(related_kinds, {"item"})
 
     def test_semantic_vector_passages_become_source_excerpts(self):
         services = KnowledgeQueryServices(
@@ -1858,6 +2014,53 @@ class KnowledgeQueryTests(unittest.TestCase):
         self.assertEqual(second["vectorsWritten"], 0)
         embed_mock.assert_not_called()
         put_mock.assert_not_called()
+
+    def test_vector_index_uses_summary_when_extracted_text_is_short(self):
+        services = KnowledgeQueryServices(
+            graph=FakeVectorIndexGraphProvider(),
+            corpus_text=ShortFakeVectorIndexTextProvider(),
+        )
+        written_batches = []
+        with mock.patch.dict(os.environ, {"PAPYRUS_S3_VECTOR_INDEX_ARN": "arn:test:index"}), \
+             mock.patch("papyrus_knowledge_query.vector_index._list_index_vectors", return_value=[]), \
+             mock.patch("papyrus_knowledge_query.vector_index._embed", return_value=[[0.1, 0.2, 0.3]] * 2), \
+             mock.patch("papyrus_knowledge_query.vector_index._put_vectors", side_effect=lambda index_arn, vectors: written_batches.append(vectors)):
+            result = index_reference_passages(
+                services,
+                VectorIndexOptions(action="sync", max_chunks_per_reference=0, progress_every=0),
+            )
+
+        written = [vector for batch in written_batches for vector in batch]
+        source_vector = next(
+            vector
+            for vector in written
+            if vector["metadata"]["referenceLineageId"] == "reference-1" and vector["metadata"]["vectorKind"] == "reference_summary"
+        )
+        self.assertEqual(result["sourceVectorsPrepared"], 2)
+        self.assertIn("Long summary: production readiness", source_vector["metadata"]["text"])
+        self.assertLessEqual(len(source_vector["metadata"]["text"]), 480)
+        self.assertLessEqual(len(source_vector["metadata"]["summary"]), 320)
+        self.assertLessEqual(len(source_vector["metadata"]["referenceSummary"]), 320)
+
+    def test_sanitize_vector_metadata_drops_none_and_stringifies_objects(self):
+        sanitized = _sanitize_vector_metadata(
+            {
+                "title": "ReAct",
+                "referenceSummaryMaxTokens": None,
+                "referenceSummaryMessageId": None,
+                "chunkIndex": 2,
+                "ready": True,
+                "tags": ["agent", None, "loop"],
+                "nested": {"corpusId": "knowledge-corpus-ai-ml-research"},
+            }
+        )
+        self.assertEqual(sanitized["title"], "ReAct")
+        self.assertNotIn("referenceSummaryMaxTokens", sanitized)
+        self.assertNotIn("referenceSummaryMessageId", sanitized)
+        self.assertEqual(sanitized["chunkIndex"], 2)
+        self.assertTrue(sanitized["ready"])
+        self.assertEqual(sanitized["tags"], ["agent", "loop"])
+        self.assertEqual(sanitized["nested"], "{'corpusId': 'knowledge-corpus-ai-ml-research'}")
 
 
 if __name__ == "__main__":

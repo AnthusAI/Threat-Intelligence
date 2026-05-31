@@ -1,3 +1,5 @@
+import contextlib
+import io
 import json
 import pathlib
 import sys
@@ -36,18 +38,13 @@ class NewsroomToolTests(unittest.TestCase):
         )
 
         self.assertTrue(result["ok"])
-        self.assertIn("papyrus.assignment", result["value"]["api"])
-        self.assertIn("context", result["value"]["api"]["papyrus.assignment"])
-        self.assertIn("assignment_research_packet", result["value"]["api"]["papyrus.plan"])
-        self.assertIn("doi_backfill_plan", result["value"]["api"]["papyrus.reference"])
-        self.assertIn("quality_set", result["value"]["api"]["papyrus.reference"])
-        self.assertIn("quality_assess", result["value"]["api"]["papyrus.reference"])
-        self.assertIn("summarize", result["value"]["api"]["papyrus.reference"])
-        self.assertIn("list", result["value"]["api"]["papyrus.reference"])
-        self.assertIn("summaries", result["value"]["api"]["papyrus.reference"])
-        self.assertIn("web_search", result["value"]["api"]["papyrus.reference"])
-        self.assertIn("query", result["value"]["api"]["papyrus.knowledge"])
-        self.assertIn("resolve_uri", result["value"]["api"]["papyrus"])
+        resources = result["value"]["api"]["resources"]
+        self.assertIn("Assignment", resources)
+        self.assertIn("Reference", resources)
+        self.assertIn("NewsroomSection", resources)
+        self.assertIn("create", resources["Assignment"])
+        self.assertIn("update", resources["Assignment"])
+        self.assertIn("docs", result["value"]["api"])
         self.assertEqual(
             result["api_calls"],
             ["papyrus.api.list", "papyrus.docs.list"],
@@ -291,6 +288,138 @@ return plan_research_update{ assignment_item = assignment, research = research }
         self.assertIn("Scaling Agent Memo", "\n".join(block["text"] for block in context["blocks"]))
         self.assertNotIn("Rejected Scope Memo", "\n".join(block["text"] for block in context["blocks"]))
         self.assertNotIn("Foreign Desk", context["text"])
+
+    def test_assignment_context_includes_edition_and_same_section_forum_only(self):
+        assignment_context = {
+            "assignment": {
+                "id": "assignment-reporting-001",
+                "assignmentTypeKey": "reporting.edition-candidate",
+                "status": "open",
+                "title": "Reporting candidate",
+                "sectionKey": "culture",
+                "metadata": {
+                    "editionId": "edition-2026-06-05-v1",
+                    "sectionKey": "culture",
+                    "contextProfile": "reporting",
+                },
+            },
+            "doctrine": [],
+            "targets": [],
+            "events": [],
+        }
+        edition_thread = {
+            "id": "message-thread-edition-forum-edition-2026-06-05-v1",
+            "threadKind": "edition_forum",
+            "title": "Edition Forum",
+            "status": "active",
+            "messages": [{"id": "message-edition-1", "summary": "Edition kickoff", "authorLabel": "editor", "createdAt": "2026-06-01T10:00:00Z"}],
+        }
+        culture_thread = {
+            "id": "message-thread-section-forum-culture",
+            "threadKind": "section_forum",
+            "title": "Section Forum: Culture",
+            "status": "active",
+            "primaryAnchorId": "culture",
+            "metadata": {"sectionKey": "culture"},
+            "messages": [{"id": "message-culture-1", "summary": "Culture steering note", "authorLabel": "human", "createdAt": "2026-06-01T10:10:00Z"}],
+        }
+        business_thread = {
+            "id": "message-thread-section-forum-business",
+            "threadKind": "section_forum",
+            "title": "Section Forum: Business",
+            "status": "active",
+            "primaryAnchorId": "business",
+            "metadata": {"sectionKey": "business"},
+            "messages": [{"id": "message-business-1", "summary": "Business note", "authorLabel": "human", "createdAt": "2026-06-01T10:20:00Z"}],
+        }
+
+        class FakeSemanticClient:
+            def references_for_category(self, category_lineage_id):
+                return {"relations": []}
+
+            def get_reference(self, reference_id):
+                return {"reference": {}}
+
+            def list_reference_messages(self, reference_lineage_id):
+                return {"messages": []}
+
+        def fake_forum_threads(kind, edition_id, *, status="", limit=200):
+            if kind == "edition_forum":
+                return [edition_thread]
+            if kind == "section_forum":
+                return [culture_thread, business_thread]
+            return []
+
+        def fake_messages(thread_id, *, limit=400):
+            mapping = {
+                edition_thread["id"]: edition_thread["messages"],
+                culture_thread["id"]: culture_thread["messages"],
+                business_thread["id"]: business_thread["messages"],
+            }
+            return mapping.get(thread_id, [])
+
+        def fake_compaction(*, blocks, profile_key, max_tokens):
+            return {
+                "included_blocks": blocks,
+                "dropped_blocks": [],
+                "section_token_counts": {},
+                "text": "\n\n".join(block["text"] for block in blocks),
+                "total_tokens": 100,
+                "total_characters": 500,
+            }
+
+        with mock.patch.object(papyrus_newsroom, "papyrus_get_assignment_context", return_value={"assignment_context": assignment_context}), \
+             mock.patch.object(papyrus_newsroom, "_list_categories", return_value=[]), \
+             mock.patch.object(papyrus_newsroom, "_list_category_keywords", return_value=[]), \
+             mock.patch.object(papyrus_newsroom, "_list_assignments", return_value=[]), \
+             mock.patch.object(papyrus_newsroom, "_assignment_events_for_assignments", return_value=[]), \
+             mock.patch.object(papyrus_newsroom, "_recent_published_items", return_value=[]), \
+             mock.patch.object(papyrus_newsroom, "_semantic_client", return_value=FakeSemanticClient()), \
+             mock.patch.object(papyrus_newsroom, "_forum_threads_by_kind_and_edition", side_effect=fake_forum_threads), \
+             mock.patch.object(papyrus_newsroom, "_list_messages_by_thread_id", side_effect=fake_messages), \
+             mock.patch.object(papyrus_newsroom, "_build_biblicus_block_context_pack", side_effect=fake_compaction):
+            result = papyrus_newsroom.papyrus_build_assignment_agent_context("assignment-reporting-001")
+
+        context = result["assignment_agent_context"]
+        self.assertEqual([message["id"] for message in context["editionForumMessages"]], ["message-edition-1"])
+        self.assertEqual(len(context["sectionForumThreads"]), 1)
+        self.assertEqual(context["sectionForumThreads"][0]["id"], "message-thread-section-forum-culture")
+        combined = "\n".join(block["text"] for block in context["blocks"])
+        self.assertIn("Edition Forum: Edition Forum", combined)
+        self.assertIn("Section Forum: culture", combined)
+        self.assertNotIn("Business note", combined)
+
+    def test_create_section_forum_thread_includes_section_lineage_metadata(self):
+        captured: dict[str, dict[str, object]] = {}
+
+        def fake_graphql(query: str, variables: dict[str, object]):
+            if "createMessageThread" in query:
+                captured["input"] = variables["input"]  # type: ignore[index]
+                return {"createMessageThread": variables["input"]}
+            return {}
+
+        with mock.patch.object(papyrus_newsroom, "_graphql", side_effect=fake_graphql):
+            result = papyrus_newsroom.papyrus_create_section_forum_thread(
+                edition_id="edition-2026-06-05-v1",
+                section_id="culture",
+                section_key="culture",
+                section_title="Culture",
+                title="Culture planning notes",
+                actor_label="editor",
+            )
+
+        thread = result["thread"]
+        self.assertEqual(thread["threadKind"], "section_forum")
+        self.assertEqual(thread["primaryAnchorKind"], "newsroom_section")
+        self.assertEqual(thread["primaryAnchorId"], "culture")
+        self.assertEqual(thread["primaryAnchorLineageId"], "edition-2026-06-05-v1")
+        metadata = thread["metadata"]
+        self.assertEqual(metadata["editionId"], "edition-2026-06-05-v1")
+        self.assertEqual(metadata["sectionId"], "culture")
+        self.assertEqual(metadata["sectionKey"], "culture")
+        self.assertEqual(metadata["sectionTitle"], "Culture")
+        self.assertIn("input", captured)
+        self.assertEqual(captured["input"]["primaryAnchorKind"], "newsroom_section")
 
     def test_assignment_plan_uses_assignment_type(self):
         plan = papyrus_newsroom.build_assignment_record_plan(
@@ -804,9 +933,16 @@ return plan_assignment_reporting_context_packet{ assignment = assignment, report
         self.assertIn("reporting_context_packet payload", source)
         self.assertIn("Do not generate Papyrus persistence snippets", source)
         self.assertIn("Do not call Papyrus persistence planners", source)
+        self.assertIn("run one broad knowledge_query", source)
+        self.assertIn("source_trail plus related metadata fields", source)
         self.assertIn('"work_product_kind":"reporting_context_packet"', source)
         self.assertIn("the outer CLI writes Message", source)
         self.assertIn("return a reporting_context_packet payload only", source)
+
+    def test_research_explorer_requires_broad_knowledge_query_orientation(self):
+        source = (REPO_ROOT / "procedures" / "newsroom" / "research_explorer.tac").read_text()
+        self.assertIn("Required policy sequence:", source)
+        self.assertIn("Run one broad knowledge_query", source)
 
     def test_execute_tactus_exposes_knowledge_query_helper(self):
         with mock.patch("papyrus_newsroom.tactus_runtime.build_environment_services", return_value=object()), \
@@ -843,6 +979,62 @@ return plan_assignment_reporting_context_packet{ assignment = assignment, report
         self.assertEqual(result["value"]["object"]["id"], "reference-1-v1")
         self.assertEqual(result["api_calls"], ["papyrus.resolve_uri"])
         resolve_uri.assert_called_once_with("papyrus://reference/reference-1")
+
+    def test_execute_tactus_exposes_reference_fetch_url_text_helper(self):
+        with mock.patch("papyrus_newsroom.tactus_runtime.newsroom.papyrus_reference_fetch_url_text") as fetch_url_text:
+            fetch_url_text.return_value = {"reference_url_text": {"ok": True, "changes": 1}}
+            result = tactus_runtime.execute_tactus(
+                'return reference_fetch_url_text{ reference_id = "reference-1", corpus_key = "AI-ML-research", apply = false }'
+            )
+
+        self.assertTrue(result["ok"], result.get("error"))
+        self.assertEqual(result["value"]["reference_url_text"]["ok"], True)
+        self.assertEqual(result["api_calls"], ["papyrus.reference.fetch_url_text"])
+        fetch_url_text.assert_called_once()
+
+    def test_execute_tactus_exposes_reference_generate_metadata_helper(self):
+        with mock.patch(
+            "papyrus_newsroom.tactus_runtime.newsroom.papyrus_reference_generate_metadata_from_text"
+        ) as generate_metadata:
+            generate_metadata.return_value = {"reference_metadata_generation": {"ok": True, "generated": 1}}
+            handler = tactus_runtime.API_METHODS[("reference", "generate_metadata_from_text")]
+            result = handler(
+                {
+                    "reference_id": "reference-1",
+                    "corpus_key": "AI-ML-research",
+                    "apply": False,
+                }
+            )
+
+        self.assertEqual(result["reference_metadata_generation"]["ok"], True)
+        helper_pairs = {(name, namespace, method) for name, namespace, method in tactus_runtime.HELPER_BINDINGS}
+        self.assertIn(
+            ("reference_generate_metadata_from_text", "reference", "generate_metadata_from_text"),
+            helper_pairs,
+        )
+        generate_metadata.assert_called_once()
+
+    def test_execute_tactus_exposes_reference_filter_extracted_text_helper(self):
+        with mock.patch(
+            "papyrus_newsroom.tactus_runtime.newsroom.papyrus_reference_filter_extracted_text"
+        ) as filter_text:
+            filter_text.return_value = {"reference_text_filter": {"ok": True, "filtered": 1}}
+            handler = tactus_runtime.API_METHODS[("reference", "filter_extracted_text")]
+            result = handler(
+                {
+                    "reference_id": "reference-1",
+                    "corpus_key": "AI-ML-research",
+                    "apply": False,
+                }
+            )
+
+        self.assertEqual(result["reference_text_filter"]["ok"], True)
+        helper_pairs = {(name, namespace, method) for name, namespace, method in tactus_runtime.HELPER_BINDINGS}
+        self.assertIn(
+            ("reference_filter_extracted_text", "reference", "filter_extracted_text"),
+            helper_pairs,
+        )
+        filter_text.assert_called_once()
 
     def test_knowledge_query_helper_accepts_uri_anchor(self):
         with mock.patch("papyrus_newsroom.tactus_runtime.build_environment_services", return_value=object()), \
@@ -912,8 +1104,51 @@ return finish_research{
         self.assertEqual(result["value"]["research_packet"]["evidence_item_ids"], ["reference-1-v1"])
         self.assertEqual(result["value"]["research_packet"]["research_mode"], "internal_brief")
         self.assertEqual(result["value"]["research_packet"]["researchTrace"]["webSearches"], [])
-        self.assertEqual(result["value"]["research_record_plan"]["records"][0]["modelName"], "Message")
+        self.assertEqual(result["value"]["research_record_plan"]["message_persistence"], "outer_cli_layer")
         self.assertEqual(result["api_calls"], ["papyrus.knowledge.query", "papyrus.plan.assignment_research_packet"])
+
+    def test_research_harness_applies_assignment_and_insight_knowledge_scope_defaults(self):
+        assignment = {
+            "id": "assignment-live-456",
+            "assignmentTypeKey": "research.edition-candidate",
+            "queueKey": "research#open",
+            "status": "open",
+            "title": "Explore AI in gaming",
+        }
+        with mock.patch("papyrus_newsroom.tactus_runtime.build_environment_services", return_value=object()), \
+             mock.patch("papyrus_newsroom.tactus_runtime.run_knowledge_query") as run_query:
+            run_query.return_value = {
+                "structured": {"anchors": [], "semanticMatches": []},
+                "context": {"text": "Internal context."},
+                "warnings": [],
+            }
+            result = tactus_runtime.execute_tactus_harnessed(
+                """
+local knowledge = knowledge_search("ai in gaming")
+return finish_research{
+  summary = "Built packet.",
+  queries = {"ai in gaming"},
+  source_snapshots = {},
+  proposed_references = {},
+  evidence_item_ids = {},
+  recommended_angle = "Angle",
+  researchTrace = { knowledgeQueries = {"ai in gaming"}, webSearches = {}, acceptedEvidenceIds = {} },
+}
+""",
+                harness="research",
+                assignment_item_json=json.dumps(assignment),
+                corpus_key="AI-ML-research",
+                max_evidence_items=8,
+                research_mode="internal_brief",
+            )
+
+        self.assertTrue(result["ok"], result.get("error"))
+        query_input = run_query.call_args.args[0]
+        scope = query_input.get("scope") or {}
+        self.assertIn("assignment", scope.get("includeObjectKinds") or [])
+        self.assertIn("message", scope.get("includeObjectKinds") or [])
+        self.assertEqual(scope.get("includeMessageKinds"), ["insight"])
+        self.assertEqual(scope.get("includeAssignmentTypeKeys"), ["research.*", "reporting.*"])
 
     def test_research_harness_requires_discovery_for_source_discovery_mode(self):
         assignment = {
@@ -991,7 +1226,7 @@ return finish_research{
         self.assertEqual(packet["sourceDiscovery"]["webSearches"], ["agent catalog business process automation"])
         self.assertEqual(packet["sourceDiscovery"]["proposedReferences"][0]["title"], "Candidate")
 
-    def test_research_harness_web_search_falls_back_to_reference_web_search_api(self):
+    def test_research_harness_web_search_uses_reference_web_search_api(self):
         assignment = {
             "id": "assignment-live-123",
             "assignmentTypeKey": "research.edition-candidate",
@@ -1025,7 +1260,6 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
                 corpus_key="AI-ML-research",
                 max_evidence_items=8,
                 research_mode="source_discovery",
-                disable_tactus_web=True,
             )
 
         self.assertTrue(result["ok"], result.get("error"))
@@ -1035,6 +1269,279 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertEqual(packet["researchTrace"]["webSearches"], ["ancient language ai decipherment"])
         web_search.assert_called_once()
         self.assertEqual(web_search.call_args.kwargs["query"], "ancient language ai decipherment")
+
+    def test_research_harness_finish_research_from_search_accepts_table_call_syntax(self):
+        assignment = {
+            "id": "assignment-live-123",
+            "assignmentTypeKey": "research.edition-candidate",
+            "queueKey": "research#open",
+            "status": "open",
+            "title": "Explore source discovery",
+        }
+        with mock.patch(
+            "papyrus_newsroom.tactus_runtime.reference_curation_signals.reference_web_search",
+            return_value={
+                "query": "erdos unit distance conjecture",
+                "results": [
+                    {
+                        "title": "OpenAI announcement",
+                        "url": "https://openai.com/index/model-disproves-discrete-geometry-conjecture/",
+                        "source_domain": "openai.com",
+                        "evidence_candidate_id": "evidence-candidate-1",
+                        "rank": 1,
+                    }
+                ],
+                "metadata": {"answer": "OpenAI disproved the conjecture."},
+            },
+        ):
+            result = tactus_runtime.execute_tactus_harnessed(
+                """
+local search = web_search("erdos unit distance conjecture")
+return finish_research_from_search{
+  research_mode = "full_research",
+  summary = "Agent-style table call",
+  queries = {"erdos unit distance conjecture"},
+  source_snapshots = search and search.results or {},
+  proposed_references = search and proposed_references_from_search(search) or {},
+  evidence_item_ids = {},
+}
+""",
+                harness="research",
+                assignment_item_json=json.dumps(assignment),
+                corpus_key="AI-ML-research",
+                max_evidence_items=8,
+                research_mode="full_research",
+            )
+
+        self.assertTrue(result["ok"], result.get("error"))
+        packet = result["value"]["research_packet"]
+        self.assertEqual(packet["proposed_references"][0]["url"], "https://openai.com/index/model-disproves-discrete-geometry-conjecture/")
+        self.assertEqual(packet["source_snapshots"][0]["url"], "https://openai.com/index/model-disproves-discrete-geometry-conjecture/")
+        boundary = packet["researchTrace"]["discoveryBoundary"]
+        self.assertEqual(boundary["searchResultCount"], 1)
+        self.assertEqual(boundary["discoveryTerminalState"], "succeeded")
+
+    def test_research_harness_normalizes_newlines_inside_quoted_strings(self):
+        assignment = {
+            "id": "assignment-live-123",
+            "assignmentTypeKey": "research.edition-candidate",
+            "queueKey": "research#open",
+            "status": "open",
+            "title": "Explore source discovery",
+        }
+        with mock.patch(
+            "papyrus_newsroom.tactus_runtime.reference_curation_signals.reference_web_search",
+            return_value={
+                "query": "erdos unit distance conjecture",
+                "results": [
+                    {
+                        "title": "OpenAI announcement",
+                        "url": "https://openai.com/index/model-disproves-discrete-geometry-conjecture/",
+                        "source_domain": "openai.com",
+                        "evidence_candidate_id": "evidence-candidate-1",
+                        "rank": 1,
+                    }
+                ],
+                "metadata": {"answer": "OpenAI disproved the conjecture."},
+            },
+        ):
+            result = tactus_runtime.execute_tactus_harnessed(
+                """
+local search = web_search("OpenAI Erdos
+planar unit distance conjecture")
+return finish_research_from_search{
+  research_mode = "full_research",
+  summary = "Agent-style table call with wrapped query",
+  queries = {"erdos unit distance conjecture"},
+  source_snapshots = search and search.results or {},
+  proposed_references = search and proposed_references_from_search(search) or {},
+  evidence_item_ids = {},
+}
+""",
+                harness="research",
+                assignment_item_json=json.dumps(assignment),
+                corpus_key="AI-ML-research",
+                max_evidence_items=8,
+                research_mode="full_research",
+            )
+
+        self.assertTrue(result["ok"], result.get("error"))
+        packet = result["value"]["research_packet"]
+        self.assertEqual(packet["proposed_references"][0]["url"], "https://openai.com/index/model-disproves-discrete-geometry-conjecture/")
+
+    def test_research_harness_normalizes_malformed_search_metadata(self):
+        assignment = {
+            "id": "assignment-live-123",
+            "assignmentTypeKey": "research.edition-candidate",
+            "queueKey": "research#open",
+            "status": "open",
+            "title": "Explore source discovery",
+        }
+        with mock.patch(
+            "papyrus_newsroom.tactus_runtime.reference_curation_signals.reference_web_search",
+            return_value={
+                "query": "ancient language ai decipherment",
+                "results": [
+                    {
+                        "title": "Ithaca Nature paper",
+                        "url": "https://example.org/ithaca",
+                        "source_domain": "example.org",
+                        "evidence_candidate_id": "evidence-candidate-1",
+                        "rank": 1,
+                    }
+                ],
+                "metadata": "not-a-table",
+            },
+        ):
+            result = tactus_runtime.execute_tactus_harnessed(
+                """
+local search = web_search("ancient language ai decipherment")
+return finish_research_from_search(search, { research_mode = "source_discovery" })
+""",
+                harness="research",
+                assignment_item_json=json.dumps(assignment),
+                corpus_key="AI-ML-research",
+                max_evidence_items=8,
+                research_mode="source_discovery",
+            )
+
+        self.assertTrue(result["ok"], result.get("error"))
+        packet = result["value"]["research_packet"]
+        self.assertEqual(packet["source_snapshots"][0]["url"], "https://example.org/ithaca")
+        boundary = packet["researchTrace"]["discoveryBoundary"]
+        self.assertEqual(boundary["webSearchPath"], "papyrus.reference.web_search")
+        self.assertEqual(boundary["searchResultCount"], 1)
+        self.assertIsInstance(boundary["searchMetadataShapeOk"], bool)
+
+    def test_research_harness_sets_blocked_reason_when_reference_web_search_fails(self):
+        assignment = {
+            "id": "assignment-live-123",
+            "assignmentTypeKey": "research.edition-candidate",
+            "queueKey": "research#open",
+            "status": "open",
+            "title": "Explore source discovery",
+        }
+        with mock.patch(
+            "papyrus_newsroom.tactus_runtime.reference_curation_signals.reference_web_search",
+            side_effect=RuntimeError("boom"),
+        ):
+            result = tactus_runtime.execute_tactus_harnessed(
+                """
+local search = web_search("ancient language ai decipherment")
+return finish_research_from_search(search, { research_mode = "source_discovery" })
+""",
+                harness="research",
+                assignment_item_json=json.dumps(assignment),
+                corpus_key="AI-ML-research",
+                max_evidence_items=8,
+                research_mode="source_discovery",
+            )
+
+        self.assertTrue(result["ok"], result.get("error"))
+        packet = result["value"]["research_packet"]
+        self.assertEqual(packet["source_snapshots"], [])
+        self.assertEqual(packet["proposed_references"], [])
+        self.assertIn("papyrus.reference.web_search failed", packet["sourceDiscovery"]["blockedReason"])
+        boundary = packet["researchTrace"]["discoveryBoundary"]
+        self.assertEqual(boundary["webSearchPath"], "papyrus.reference.web_search")
+        self.assertEqual(boundary["searchResultCount"], 0)
+        self.assertTrue(boundary["searchMetadataShapeOk"])
+        self.assertIn("papyrus.reference.web_search failed", boundary["blockedReason"])
+
+    def test_research_harness_retries_zero_result_discovery_until_success(self):
+        assignment = {
+            "id": "assignment-live-123",
+            "assignmentTypeKey": "research.edition-candidate",
+            "queueKey": "research#open",
+            "status": "open",
+            "title": "Explore source discovery",
+        }
+        responses = [
+            {
+                "query": "agentic ai protocols survey",
+                "results": [],
+                "metadata": {"answer": ""},
+            },
+            {
+                "query": "agentic ai protocols survey review explainer",
+                "results": [
+                    {
+                        "title": "Survey hit",
+                        "url": "https://example.org/survey",
+                        "source_domain": "example.org",
+                        "evidence_candidate_id": "evidence-candidate-2",
+                        "rank": 1,
+                    }
+                ],
+                "metadata": {"answer": "survey source"},
+            },
+        ]
+        with mock.patch(
+            "papyrus_newsroom.tactus_runtime.reference_curation_signals.reference_web_search",
+            side_effect=responses,
+        ) as web_search:
+            result = tactus_runtime.execute_tactus_harnessed(
+                """
+local search = web_search("agentic ai protocols survey", { retry_budget = 4 })
+return finish_research_from_search(search, { research_mode = "source_discovery" })
+""",
+                harness="research",
+                assignment_item_json=json.dumps(assignment),
+                corpus_key="AI-ML-research",
+                max_evidence_items=8,
+                research_mode="source_discovery",
+            )
+
+        self.assertTrue(result["ok"], result.get("error"))
+        packet = result["value"]["research_packet"]
+        self.assertEqual(packet["source_snapshots"][0]["url"], "https://example.org/survey")
+        boundary = packet["researchTrace"]["discoveryBoundary"]
+        self.assertEqual(boundary["discoveryTerminalState"], "succeeded")
+        self.assertEqual(boundary["discoveryAttemptsTotal"], 2)
+        self.assertEqual(boundary["discoveryResultCounts"], [0, 1])
+        self.assertEqual(len(boundary["discoveryQueriesTried"]), 2)
+        web_search.assert_called()
+        self.assertEqual(web_search.call_count, 2)
+
+    def test_research_harness_exhausted_zero_results_sets_blocked_reason(self):
+        assignment = {
+            "id": "assignment-live-123",
+            "assignmentTypeKey": "research.edition-candidate",
+            "queueKey": "research#open",
+            "status": "open",
+            "title": "Explore source discovery",
+        }
+        with mock.patch(
+            "papyrus_newsroom.tactus_runtime.reference_curation_signals.reference_web_search",
+            return_value={
+                "query": "agentic ai protocols survey",
+                "results": [],
+                "metadata": {"answer": ""},
+            },
+        ) as web_search:
+            result = tactus_runtime.execute_tactus_harnessed(
+                """
+local search = web_search("agentic ai protocols survey", { retry_budget = 4 })
+return finish_research_from_search(search, { research_mode = "source_discovery" })
+""",
+                harness="research",
+                assignment_item_json=json.dumps(assignment),
+                corpus_key="AI-ML-research",
+                max_evidence_items=8,
+                research_mode="source_discovery",
+            )
+
+        self.assertTrue(result["ok"], result.get("error"))
+        packet = result["value"]["research_packet"]
+        self.assertEqual(packet["source_snapshots"], [])
+        self.assertEqual(packet["proposed_references"], [])
+        self.assertEqual(packet["sourceDiscovery"]["blockedReason"], "web_discovery_exhausted_zero_results")
+        boundary = packet["researchTrace"]["discoveryBoundary"]
+        self.assertEqual(boundary["discoveryTerminalState"], "exhausted")
+        self.assertEqual(boundary["discoveryAttemptsTotal"], 4)
+        self.assertEqual(boundary["discoveryResultCounts"], [0, 0, 0, 0])
+        self.assertEqual(len(boundary["discoveryQueriesTried"]), 4)
+        self.assertEqual(web_search.call_count, 4)
 
     def test_track_research_warns_when_doctrine_context_and_rubric_are_missing(self):
         plan = papyrus_newsroom.build_research_update_plan(
@@ -1241,7 +1748,7 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertEqual(create["input"]["objectLineageId"], "semantic-node-quality-rating-4-star")
         self.assertEqual(create["input"]["score"], 4)
 
-    def test_reference_summary_plan_is_budget_specific_message_relation(self):
+    def test_reference_summary_plan_writes_reference_metadata_attachment(self):
         reference = {
             "id": "reference-a-v1",
             "lineageId": "reference-a",
@@ -1267,12 +1774,10 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         )
 
         self.assertEqual(plan["action"], "create")
-        self.assertEqual(plan["message"]["messageKind"], "reference_summary")
-        relation = plan["records"][-1]["input"]
-        self.assertEqual(relation["relationTypeKey"], "reference_summary_100_tokens")
-        self.assertEqual(relation["subjectKind"], "message")
-        self.assertEqual(relation["objectKind"], "reference")
-        self.assertEqual(relation["metadata"]["maxTokens"], 100)
+        self.assertEqual(plan["records"][0]["modelName"], "ModelAttachment")
+        metadata = json.loads(plan["records"][0]["body"])
+        self.assertEqual(metadata["summary"], "A short summary.")
+        self.assertEqual(metadata["summary_resolution"]["summaryTokenBudget"], 100)
 
     def test_publication_doctrine_context_loads_mission_and_policy(self):
         def fake_graphql(_query, variables):
@@ -1309,30 +1814,69 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertEqual(context["slugs"], ["editorial-doctrine-mission", "editorial-doctrine-policy"])
         self.assertTrue(context["contentHash"])
 
-    def test_summary_prompt_includes_doctrine_and_policy_use_warning(self):
-        context = {
-            "status": "loaded",
-            "scope": "publication",
-            "policyUse": "context_only_not_reference_rubric",
-            "slugs": ["editorial-doctrine-mission", "editorial-doctrine-policy"],
-            "records": [
-                {"slug": "editorial-doctrine-mission", "label": "Editorial Mission", "body": ["Study operational publication systems."]},
-                {"slug": "editorial-doctrine-policy", "label": "Editorial Policy", "body": ["Published items should be evidence-backed."]},
-            ],
-            "contentHash": "hash-1",
-            "warnings": [],
-        }
-        prompt = reference_curation_signals.build_summary_prompt(
-            "Reference source text.",
-            max_tokens=100,
-            reference={"title": "Reference A", "sourceUri": "https://example.test/ref"},
-            doctrine_context=context,
-        )
+    def test_reference_summarization_procedure_contains_source_voice_guidance(self):
+        source = (REPO_ROOT / "procedures" / "newsroom" / "reference_summarization.tac").read_text()
+        self.assertIn("State what the source says directly", source)
+        self.assertIn('Do not use referential lead-ins such as:', source)
+        self.assertIn('"This paper..."', source)
+        self.assertIn("Publication Context:", source)
+        self.assertIn("should not be treated as rules that the Reference itself must satisfy", source)
 
-        self.assertIn("Publication Context:", prompt)
-        self.assertIn("Study operational publication systems.", prompt)
-        self.assertIn("Published items should be evidence-backed.", prompt)
-        self.assertIn("should not be treated as rules that the Reference itself must satisfy", prompt)
+    def test_generate_summary_dispatches_cloud_procedure_alias(self):
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_summarization_cloud_procedure",
+            return_value={
+                "mode": "reference_summary",
+                "summary_text": "Summarized source voice text.",
+                "prompt_version": "reference-summary-v3-source-voice",
+                "model": "gpt-5.4-mini",
+            },
+        ) as runner:
+            result = reference_curation_signals.generate_summary(
+                "Source text.",
+                max_tokens=100,
+                model="gpt-5.4-mini",
+                reference={"title": "Reference A", "sourceUri": "https://example.test/ref"},
+                doctrine_context={"records": []},
+            )
+        self.assertEqual(result["summary_text"], "Summarized source voice text.")
+        self.assertEqual(runner.call_args.kwargs["alias"], "references.summarize")
+
+    def test_generate_outcome_summary_dispatches_cloud_procedure_alias(self):
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_summarization_cloud_procedure",
+            return_value={
+                "mode": "outcome_summary",
+                "summary_text": "Outcome-focused source voice summary.",
+                "prompt_version": "reference-title-subtitle-summary-v2-source-voice",
+                "model": "gpt-5.4-mini",
+            },
+        ) as runner:
+            result = reference_curation_signals.generate_outcome_summary(
+                "Source text.",
+                reference={"title": "Reference A", "sourceUri": "https://example.test/ref", "mediaType": "application/pdf"},
+                title="Known title",
+                subtitle="Known subtitle",
+                model="gpt-5.4-mini",
+            )
+        self.assertEqual(result["summary_text"], "Outcome-focused source voice summary.")
+        self.assertEqual(runner.call_args.kwargs["alias"], "references.title-subtitle.resolve")
+
+    def test_generate_summary_surfaces_missing_procedure_remediation(self):
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_reference_summarization_cloud_procedure",
+            side_effect=ValueError(
+                "Missing required cloud procedure 'newsroom.reference.summarization'. "
+                "Run poetry run papyrus procedures seed-required --apply to preload standard procedures."
+            ),
+        ):
+            with self.assertRaisesRegex(ValueError, "papyrus procedures seed-required --apply"):
+                reference_curation_signals.generate_summary(
+                    "Source text.",
+                    max_tokens=100,
+                    model="gpt-5.4-mini",
+                    reference={"title": "Reference A", "sourceUri": "https://example.test/ref"},
+                )
 
     def test_summary_metadata_records_doctrine_context(self):
         reference = {
@@ -1369,7 +1913,7 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
             semantic_client=FakeSemantic(),
         )
 
-        self.assertEqual(plan["metadata"]["promptVersion"], "reference-summary-v2-publication-doctrine")
+        self.assertEqual(plan["metadata"]["promptVersion"], "reference-summary-v3-source-voice")
         self.assertEqual(plan["metadata"]["doctrineContextStatus"], "loaded")
         self.assertEqual(plan["metadata"]["doctrineScope"], "publication")
         self.assertEqual(plan["metadata"]["policyUse"], "context_only_not_reference_rubric")
@@ -1479,30 +2023,35 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertIn("Do not use bullet points.", prompt)
         self.assertIn("Do not use numbered lists.", prompt)
         self.assertIn("Do not include line breaks.", prompt)
+        self.assertIn("typically 4 to 12 words.", prompt)
+        self.assertIn("Avoid self-referential document framing", prompt)
+        self.assertIn("concrete content signal", prompt)
+        self.assertIn("You MAY mention evidence/method terms such as survey", prompt)
+        self.assertIn("Good subtitle: 'Survey finds 72% of teens have used AI companions'", prompt)
+        self.assertIn("Bad subtitle: 'This article reports survey results'", prompt)
 
-    def test_subtitle_normalizer_rejects_list_shaped_values(self):
-        self.assertEqual(reference_curation_signals._normalize_subtitle_candidate("- First bullet"), "")
-        self.assertEqual(reference_curation_signals._normalize_subtitle_candidate("* First bullet"), "")
-        self.assertEqual(reference_curation_signals._normalize_subtitle_candidate("1. First bullet"), "")
-        self.assertEqual(reference_curation_signals._normalize_subtitle_candidate("• First bullet"), "")
-        self.assertEqual(reference_curation_signals._normalize_subtitle_candidate("Line one\nLine two"), "")
-        self.assertEqual(
-            reference_curation_signals._normalize_subtitle_candidate("Abstract page for arXiv paper 2506.01232"),
-            "",
-        )
-        self.assertEqual(
-            reference_curation_signals._normalize_subtitle_candidate("Join the discussion on this paper page"),
-            "",
-        )
-        self.assertEqual(
-            reference_curation_signals._normalize_subtitle_candidate(
-                "<< /Metadata 3 0 R /Names 4 0 R /OpenAction 5 0 R /Outlines 6 0 R /PageMode /UseOutlines /Pages 7 0 R /Type /Catalog >>"
-            ),
-            "",
-        )
+    def test_subtitle_normalizer_is_trim_only(self):
+        self.assertEqual(reference_curation_signals._normalize_subtitle_candidate("- First bullet"), "- First bullet")
+        self.assertEqual(reference_curation_signals._normalize_subtitle_candidate("1. First bullet"), "1. First bullet")
+        self.assertEqual(reference_curation_signals._normalize_subtitle_candidate("Line one\nLine two"), "Line one Line two")
         self.assertEqual(
             reference_curation_signals._normalize_subtitle_candidate("Concise prose subtitle"),
             "Concise prose subtitle",
+        )
+        self.assertEqual(
+            reference_curation_signals._normalize_subtitle_candidate("https://phys.org/news/2025-07-quarters-teens-ai-companions.html"),
+            "https://phys.org/news/2025-07-quarters-teens-ai-companions.html",
+        )
+        self.assertEqual(
+            reference_curation_signals._normalize_subtitle_candidate("phys.org/news/2025-07-quarters-teens-ai-companions.html"),
+            "phys.org/news/2025-07-quarters-teens-ai-companions.html",
+        )
+        self.assertEqual(reference_curation_signals._normalize_subtitle_candidate("Study"), "Study")
+
+    def test_title_normalizer_strips_trailing_colon_source_label(self):
+        self.assertEqual(
+            reference_curation_signals._normalize_reference_title_candidate("Three quarters of US teens use AI companions despite risks: Study"),
+            "Three quarters of US teens use AI companions despite risks",
         )
 
     def test_identifier_prepass_extracts_doi_and_arxiv_from_title_subtitle_without_uri(self):
@@ -1635,6 +2184,163 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertEqual(result["records"], [])
         self.assertEqual(result["failureReason"], "unit-test-prepass-failure")
 
+    def test_reference_generate_metadata_from_extracted_text_blocks_missing_text(self):
+        reference = {
+            "id": "reference-a-v1",
+            "lineageId": "reference-a",
+            "versionNumber": 1,
+            "title": "Original title",
+            "sourceUri": "https://example.test/ref",
+        }
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals._semantic_client",
+            return_value=mock.Mock(),
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._resolve_reference",
+            return_value=reference,
+        ):
+            result = reference_curation_signals.reference_generate_metadata_from_extracted_text(
+                reference_id="reference-a-v1",
+                extracted_text="",
+                apply=False,
+            )
+
+        self.assertEqual(result["status"], "skipped_missing_text")
+        self.assertEqual(result["action"], "skipped_missing_text")
+        self.assertEqual(result["records"], [])
+        self.assertFalse(result["apply"])
+
+    def test_reference_generate_metadata_from_extracted_text_passes_full_context(self):
+        reference = {
+            "id": "reference-a-v1",
+            "lineageId": "reference-a",
+            "versionNumber": 1,
+            "title": "Original title",
+            "sourceUri": "https://example.test/ref",
+        }
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals._semantic_client",
+            return_value=mock.Mock(),
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._resolve_reference",
+            return_value=reference,
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._load_reference_metadata_payload",
+            return_value={},
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._biblicus_python_executable",
+            return_value=pathlib.Path("/tmp/fake-biblicus-python"),
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals.subprocess.run",
+        ) as run_subprocess:
+            def fake_subprocess(command, **kwargs):
+                task = command[command.index("--task") + 1]
+                payload = json.loads(kwargs["input"])
+                self.assertEqual(payload["extracted_text"], "Full extracted text body")
+                self.assertEqual(payload["original_title"], "Catalog original title")
+                self.assertEqual(payload["original_subtitle"], "Catalog original subtitle")
+                self.assertEqual(payload["reference_title"], "Original title")
+                self.assertEqual(payload["source_uri"], "https://example.test/ref")
+                values = {
+                    "title": "Generated title",
+                    "subtitle": "Generated subtitle",
+                    "summary": "Generated summary",
+                }
+                value = values[task]
+                return mock.Mock(
+                    returncode=0,
+                    stdout=json.dumps(
+                        {
+                            "task": task,
+                            "value": value,
+                            "prompt_version": "summarize-map-reduce-v2",
+                            "model": "gpt-5.4-nano",
+                            "map_reduce": {
+                                "chunk_count": 1,
+                                "map": [{"chunk_index": 1, "candidate": value}],
+                                "reduce": {
+                                    "summary" if task == "summary" else task: value,
+                                    "rationale": "Reduced deterministically.",
+                                },
+                            },
+                        }
+                    ),
+                    stderr="",
+                )
+
+            run_subprocess.side_effect = fake_subprocess
+            result = reference_curation_signals.reference_generate_metadata_from_extracted_text(
+                reference_id="reference-a-v1",
+                extracted_text="Full extracted text body",
+                original_title="Catalog original title",
+                original_subtitle="Catalog original subtitle",
+                model="gpt-5.4-nano",
+                apply=False,
+            )
+
+        self.assertEqual(result["status"], "generated")
+        self.assertEqual(result["generated"]["title"], "Generated title")
+        self.assertEqual(result["generated"]["subtitle"], "Generated subtitle")
+        self.assertEqual(result["generated"]["summary"], "Generated summary")
+        self.assertEqual(run_subprocess.call_count, 3)
+        called_tasks = [
+            call.args[0][call.args[0].index("--task") + 1]
+            for call in run_subprocess.call_args_list
+        ]
+        self.assertEqual(called_tasks, ["title", "subtitle", "summary"])
+
+    def test_metadata_map_reduce_uses_biblicus_cli_output(self):
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_biblicus_summarize_map_reduce",
+            return_value={
+                "task": "title",
+                "value": "Reduced final title",
+                "prompt_version": "summarize-map-reduce-v2",
+                "map_reduce": {
+                    "chunk_count": 3,
+                    "map": [{"chunk_index": 1}, {"chunk_index": 2}, {"chunk_index": 3}],
+                    "reduce": {"title": "Reduced final title", "rationale": "Reduced all chunks."},
+                },
+            },
+        ):
+            result = reference_curation_signals._run_metadata_map_reduce(
+                output_kind="title",
+                reference={"id": "reference-1", "title": "Original"},
+                context={
+                    "extractedText": "Full extracted text body",
+                    "originalTitle": "Original",
+                    "originalSubtitle": "",
+                },
+                model="gpt-5.4-nano",
+            )
+
+        self.assertEqual(result["value"], "Reduced final title")
+        self.assertEqual(result["promptVersion"], "summarize-map-reduce-v2")
+        self.assertEqual(result["mapReduce"]["chunk_count"], 3)
+
+    def test_generate_summary_from_reference_text_does_not_use_web_search(self):
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals.reference_web_search",
+            side_effect=AssertionError("web search should not be used"),
+        ), mock.patch(
+            "papyrus_newsroom.reference_curation_signals._run_metadata_map_reduce",
+            return_value={
+                "value": "Generated summary from extracted text.",
+                "promptVersion": "summarize-map-reduce-v2",
+                "mapReduce": {"chunk_count": 1},
+            },
+        ):
+            result = reference_curation_signals.generate_summary_from_reference_text(
+                reference={"id": "reference-1", "title": "Original"},
+                extracted_text="Extracted source text body.",
+                original_title="Original",
+                original_subtitle="",
+                model="gpt-5.4-mini",
+            )
+
+        self.assertEqual(result["summary"], "Generated summary from extracted text.")
+        self.assertEqual(result["mapReduce"]["chunk_count"], 1)
+
     def test_title_subtitle_resolver_preserves_local_metadata_verbatim(self):
         result = reference_curation_signals.resolve_reference_title_subtitle(
             reference={"id": "reference-1-v1", "title": ""},
@@ -1651,6 +2357,96 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertEqual(result["subtitle"], "Exact Source Subtitle")
         self.assertEqual(result["title_mode"], "original_metadata")
         self.assertEqual(result["subtitle_mode"], "original_metadata")
+
+    def test_title_subtitle_resolver_uses_toolless_llm_when_web_search_disabled(self):
+        result = reference_curation_signals.resolve_reference_title_subtitle(
+            reference={"id": "reference-1-v1", "title": "Known title"},
+            catalog_entry={},
+            sidecar={},
+            web_search_enabled=False,
+            llm_toolless_resolver=lambda **_: {
+                "title": "Known title",
+                "subtitle": "Survey finds routine AI companion use among U.S. teens",
+                "title_mode": "original_metadata",
+                "subtitle_mode": "generated",
+                "source_urls": [],
+                "rationale": "Generated from local source context.",
+            },
+            llm_resolver=lambda **_: (_ for _ in ()).throw(AssertionError("web resolver should not run")),
+            now="2026-05-20T12:00:00Z",
+        )
+
+        self.assertEqual(result["subtitle"], "Survey finds routine AI companion use among U.S. teens")
+        self.assertEqual(result["subtitle_mode"], "generated")
+        self.assertFalse(result["web_search_used"])
+
+    def test_generated_subtitle_quality_gate_rejects_generic_or_url_values(self):
+        generic = reference_curation_signals.resolve_reference_title_subtitle(
+            reference={"id": "reference-1-v1", "title": "Known title"},
+            catalog_entry={},
+            sidecar={},
+            web_search_enabled=False,
+            llm_toolless_resolver=lambda **_: {
+                "title": "Known title",
+                "subtitle": "Study",
+                "title_mode": "original_metadata",
+                "subtitle_mode": "generated",
+                "source_urls": [],
+                "rationale": "Generated from source.",
+            },
+            now="2026-05-20T12:00:00Z",
+        )
+        self.assertEqual(generic["subtitle"], "")
+        self.assertEqual(generic["subtitle_mode"], "unresolved")
+        self.assertTrue(any("generic one-word label" in warning for warning in generic.get("warnings", [])))
+
+        url_like = reference_curation_signals.resolve_reference_title_subtitle(
+            reference={"id": "reference-1-v1", "title": "Known title"},
+            catalog_entry={},
+            sidecar={},
+            web_search_enabled=False,
+            llm_toolless_resolver=lambda **_: {
+                "title": "Known title",
+                "subtitle": "https://phys.org/news/2025-07-quarters-teens-ai-companions.html",
+                "title_mode": "original_metadata",
+                "subtitle_mode": "generated",
+                "source_urls": [],
+                "rationale": "Generated from source.",
+            },
+            now="2026-05-20T12:00:00Z",
+        )
+        self.assertEqual(url_like["subtitle"], "")
+        self.assertEqual(url_like["subtitle_mode"], "unresolved")
+        self.assertTrue(any("looks like URL" in warning for warning in url_like.get("warnings", [])))
+
+    def test_generated_subtitle_allows_substantive_survey_wording(self):
+        result = reference_curation_signals.resolve_reference_title_subtitle(
+            reference={"id": "reference-1-v1", "title": "Known title"},
+            catalog_entry={},
+            sidecar={},
+            web_search_enabled=False,
+            llm_toolless_resolver=lambda **_: {
+                "title": "Known title",
+                "subtitle": "Survey finds frequent AI companion use among U.S. teens",
+                "title_mode": "original_metadata",
+                "subtitle_mode": "generated",
+                "source_urls": [],
+                "rationale": "Generated from source.",
+            },
+            now="2026-05-20T12:00:00Z",
+        )
+
+        self.assertEqual(result["subtitle"], "Survey finds frequent AI companion use among U.S. teens")
+        self.assertEqual(result["subtitle_mode"], "generated")
+
+    def test_non_generated_subtitle_quality_gate_rejects_generic_pilot_study(self):
+        self.assertEqual(
+            reference_curation_signals._non_generated_subtitle_quality_issue(
+                "a pilot study",
+                subtitle_mode="original_web_metadata",
+            ),
+            "generic pilot-study subtitle",
+        )
 
     def test_title_subtitle_plan_updates_title_and_metadata_attachment(self):
         reference = {
@@ -1684,7 +2480,7 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
                     "summaryTokenBudget": 500,
                     "actualTokenEstimate": 20,
                     "model": "gpt-5.4-mini",
-                    "promptVersion": "reference-title-subtitle-summary-v1-outcome",
+                    "promptVersion": "reference-title-subtitle-summary-v2-source-voice",
                     "source": "llm_outcome_summary",
                     "source_urls": ["https://example.test/ref"],
                     "run_id": "run-1",
@@ -1705,14 +2501,54 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
             )
 
         self.assertEqual(plan["action"], "update")
-        self.assertEqual(plan["records"][0]["modelName"], "Reference")
-        self.assertEqual(plan["records"][0]["input"]["title"], "Exact Source Title")
-        self.assertEqual(plan["records"][1]["modelName"], "ModelAttachment")
-        metadata = json.loads(plan["records"][1]["body"])
+        self.assertEqual(plan["records"][0]["modelName"], "ModelAttachment")
+        metadata = json.loads(plan["records"][0]["body"])
+        self.assertEqual(metadata["title"], "Exact Source Title")
         self.assertEqual(metadata["subtitle"], "Exact Source Subtitle")
-        self.assertEqual(metadata["summary"], "This work reports the main finding and why it matters.")
         self.assertEqual(metadata["title_subtitle_resolution"]["title_mode"], "original_web_metadata")
-        self.assertEqual(metadata["summary_resolution"]["summaryTokenBudget"], 500)
+        self.assertNotIn("summary", metadata)
+        self.assertNotIn("summary_resolution", metadata)
+
+    def test_title_subtitle_plan_does_not_noop_when_existing_subtitle_is_url(self):
+        reference = {
+            "id": "reference-a-v1",
+            "lineageId": "reference-a",
+            "versionNumber": 1,
+            "externalItemId": "item-a",
+            "title": "Reference title",
+            "sourceUri": "https://example.test/ref",
+            "metadata": {
+                "subtitle": "https://example.test/path/to/article",
+            },
+        }
+
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals.resolve_reference_title_subtitle",
+            return_value={
+                "status": "resolved",
+                "title": "Reference title",
+                "subtitle": "Concise informative subtitle for this reference",
+                "title_mode": "original_metadata",
+                "subtitle_mode": "generated",
+                "source": "llm_no_web_search",
+                "model": "gpt-5.4-mini",
+                "web_search_used": False,
+                "source_urls": ["https://example.test/ref"],
+                "rationale": "Generated replacement subtitle.",
+                "summary": "",
+                "summary_resolution": {},
+                "run_id": "run-1",
+                "resolved_at": "2026-05-20T12:00:00Z",
+                "warnings": [],
+            },
+        ):
+            plan = reference_curation_signals.build_reference_title_subtitle_plan(
+                reference=reference,
+                web_search_enabled=False,
+                now="2026-05-20T12:00:00Z",
+            )
+
+        self.assertEqual(plan["action"], "update")
 
     def test_title_subtitle_resolve_reports_vector_sync_surface_status(self):
         reference = {
@@ -1823,10 +2659,10 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertEqual(item["title"], "Verbatim Catalog Title")
         self.assertEqual(item["subtitle"], "Verbatim Catalog Subtitle")
         self.assertEqual(item["metadata"]["subtitle"], "Verbatim Catalog Subtitle")
-        self.assertEqual(item["summary"], "Existing metadata summary.")
-        self.assertEqual(item["metadata"]["summary"], item["summary"])
+        self.assertNotIn("summary", item)
+        self.assertEqual(item["metadata"]["summary"], "Existing metadata summary.")
         self.assertEqual(item["metadata"]["title_subtitle_resolution"]["title_mode"], "original_metadata")
-        self.assertIn("summary_resolution", item["metadata"])
+        self.assertNotIn("summary_resolution", item["metadata"])
 
     def test_biblicus_catalog_item_keeps_editorial_fields_in_metadata_only(self):
         enriched = reference_curation_signals.apply_title_subtitle_to_catalog_item(
@@ -1861,7 +2697,7 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertEqual(enriched["metadata"]["summary"], "Updated summary")
         self.assertIn("papyrus", enriched["metadata"])
 
-    def test_resolver_ignores_bullet_list_subtitle_from_local_metadata(self):
+    def test_resolver_preserves_local_subtitle_verbatim(self):
         result = reference_curation_signals.resolve_reference_title_subtitle(
             reference={"id": "reference-1-v1", "title": "Reliable Title"},
             catalog_entry={
@@ -1874,9 +2710,9 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
 
         self.assertEqual(result["status"], "resolved")
         self.assertEqual(result["title"], "Reliable Title")
-        self.assertEqual(result["subtitle"], "")
-        self.assertEqual(result["subtitle_mode"], "unresolved")
-        self.assertEqual(result["summary"], "A valid local summary.")
+        self.assertEqual(result["subtitle"], "- one - two")
+        self.assertEqual(result["subtitle_mode"], "original_metadata")
+        self.assertEqual(result["summary"], "")
 
     def test_catalog_title_subtitle_enrichment_prefers_newest_items(self):
         result = reference_curation_signals.enrich_reference_catalog_title_subtitle(
@@ -1926,10 +2762,7 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
                 only_missing=True,
             )
 
-        self.assertEqual(result["items"][0]["action"], "update")
-        enriched = result["catalog"]["items"][0]
-        self.assertTrue(enriched.get("summary"))
-        self.assertTrue(enriched.get("metadata", {}).get("summary"))
+        self.assertEqual(result["items"][0]["action"], "noop")
 
     def test_refresh_summary_updates_metadata_summary_even_with_existing_title_subtitle(self):
         reference = {
@@ -1967,7 +2800,7 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
                     "summaryTokenBudget": 500,
                     "actualTokenEstimate": 10,
                     "model": "gpt-5.4-mini",
-                    "promptVersion": "reference-title-subtitle-summary-v1-outcome",
+                    "promptVersion": "reference-title-subtitle-summary-v2-source-voice",
                     "source": "llm_outcome_summary",
                     "source_urls": [],
                     "run_id": "run-1",
@@ -1990,11 +2823,10 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
             )
 
         self.assertEqual(plan["action"], "update")
-        self.assertEqual(plan["records"][0]["modelName"], "Reference")
-        self.assertEqual(plan["records"][0]["input"]["title"], "Existing Title")
-        metadata = json.loads(plan["records"][1]["body"])
+        self.assertEqual(plan["records"][0]["modelName"], "ModelAttachment")
+        metadata = json.loads(plan["records"][0]["body"])
         self.assertEqual(metadata["subtitle"], "Existing Subtitle")
-        self.assertEqual(metadata["summary"], "New summary content.")
+        self.assertNotIn("summary", metadata)
 
     def test_local_title_normalization_strips_citation_wrappers(self):
         result = reference_curation_signals.resolve_reference_title_subtitle(
@@ -2011,10 +2843,7 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
             result["title"],
             "AutoGen Studio: A No-Code Developer Tool for Building and Debugging Multi-Agent Systems",
         )
-        self.assertEqual(
-            result["subtitle"],
-            "A No-Code Developer Tool for Building and Debugging Multi-Agent Systems",
-        )
+        self.assertEqual(result["subtitle"], "")
 
     def test_title_subtitle_plan_captures_arxiv_identifier_before_title_normalization(self):
         reference = {
@@ -2042,7 +2871,7 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         )
 
         self.assertEqual(plan["action"], "update")
-        metadata = json.loads(plan["records"][1]["body"])
+        metadata = json.loads(plan["records"][0]["body"])
         self.assertEqual(
             metadata["title"],
             "AutoGen Studio: A No-Code Developer Tool for Building and Debugging Multi-Agent Systems",
@@ -2486,7 +3315,7 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
 
         self.assertEqual(result["status"], "unresolved")
         self.assertEqual(result["title"], "")
-        self.assertEqual(result["subtitle"], "")
+        self.assertEqual(result["subtitle"], "ScienceDirect article metadata unavailable")
 
     def test_semantic_neighbors_and_walk_use_graph_indexes(self):
         calls = []
@@ -2570,6 +3399,233 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         ]
         self.assertEqual(len(evidence_relations), 2)
 
+    def _concept_report_fixture(self):
+        references = [
+            {
+                "id": "reference-1-v1",
+                "lineageId": "reference-1",
+                "versionState": "current",
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "title": "AI agents in simulation pipelines",
+                "sourceUri": "https://example.com/agents-sim",
+                "sourcePublishedAt": "2026-05-20T12:00:00Z",
+                "curationStatus": "accepted",
+            },
+            {
+                "id": "reference-2-v1",
+                "lineageId": "reference-2",
+                "versionState": "current",
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "title": "Agent orchestration in production",
+                "sourceUri": "https://studio.example/orchestration",
+                "sourcePublishedAt": "2026-05-19T12:00:00Z",
+                "curationStatus": "accepted",
+            },
+            {
+                "id": "reference-3-v1",
+                "lineageId": "reference-3",
+                "versionState": "current",
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "title": "Reinforcement learning in game simulation",
+                "sourceUri": "https://research.example/rl-sim",
+                "sourcePublishedAt": "2026-05-18T12:00:00Z",
+                "curationStatus": "accepted",
+            },
+            {
+                "id": "reference-4-v1",
+                "lineageId": "reference-4",
+                "versionState": "current",
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "title": "Early signal on agent tooling",
+                "sourceUri": "https://archive.example/agent-tooling",
+                "sourcePublishedAt": "2026-05-08T12:00:00Z",
+                "curationStatus": "accepted",
+            },
+        ]
+        semantic_nodes = [
+            {
+                "id": "semantic-node-ai-agents-v1",
+                "lineageId": "semantic-node-ai-agents",
+                "versionState": "current",
+                "status": "accepted",
+                "nodeKind": "entity",
+                "nodeKey": "entity.ai-agents",
+                "displayName": "AI Agents",
+                "corpusId": "knowledge-corpus-ai-ml-research",
+            },
+            {
+                "id": "semantic-node-rl-v1",
+                "lineageId": "semantic-node-rl",
+                "versionState": "current",
+                "status": "accepted",
+                "nodeKind": "entity",
+                "nodeKey": "entity.reinforcement-learning",
+                "displayName": "Reinforcement Learning",
+                "corpusId": "knowledge-corpus-ai-ml-research",
+            },
+            {
+                "id": "semantic-node-simulation-v1",
+                "lineageId": "semantic-node-simulation",
+                "versionState": "current",
+                "status": "accepted",
+                "nodeKind": "entity",
+                "nodeKey": "entity.simulation",
+                "displayName": "Simulation",
+                "corpusId": "knowledge-corpus-ai-ml-research",
+            },
+        ]
+        node_by_lineage = {node["lineageId"]: node for node in semantic_nodes}
+
+        def mention(reference_id: str, reference_lineage_id: str, concept_lineage_id: str, score: float = 1.0):
+            node = node_by_lineage[concept_lineage_id]
+            return papyrus_coverage_theme.semantic_relation(
+                predicate="mentions",
+                subject_kind="reference",
+                subject_id=reference_id,
+                subject_lineage_id=reference_lineage_id,
+                object_kind="semanticNode",
+                object_id=node["id"],
+                object_lineage_id=concept_lineage_id,
+                score=score,
+                now="2026-05-21T12:00:00Z",
+            )
+
+        semantic_relations = [
+            mention("reference-1-v1", "reference-1", "semantic-node-ai-agents", score=0.9),
+            mention("reference-1-v1", "reference-1", "semantic-node-rl", score=0.8),
+            mention("reference-2-v1", "reference-2", "semantic-node-ai-agents", score=0.95),
+            mention("reference-3-v1", "reference-3", "semantic-node-rl", score=0.92),
+            mention("reference-3-v1", "reference-3", "semantic-node-simulation", score=0.88),
+            mention("reference-4-v1", "reference-4", "semantic-node-ai-agents", score=0.5),
+            papyrus_coverage_theme.semantic_relation(
+                predicate="broader_than",
+                subject_kind="semanticNode",
+                subject_id="semantic-node-rl-v1",
+                subject_lineage_id="semantic-node-rl",
+                object_kind="semanticNode",
+                object_id="semantic-node-ai-agents-v1",
+                object_lineage_id="semantic-node-ai-agents",
+                score=1.0,
+                now="2026-05-21T12:00:00Z",
+            ),
+            papyrus_coverage_theme.semantic_relation(
+                predicate="broader_than",
+                subject_kind="semanticNode",
+                subject_id="semantic-node-rl-v1",
+                subject_lineage_id="semantic-node-rl",
+                object_kind="semanticNode",
+                object_id="semantic-node-simulation-v1",
+                object_lineage_id="semantic-node-simulation",
+                score=1.0,
+                now="2026-05-21T12:00:00Z",
+            ),
+        ]
+        return {
+            "references": references,
+            "semantic_nodes": semantic_nodes,
+            "semantic_relations": semantic_relations,
+        }
+
+    def test_concept_report_all_builds_popularity_trending_and_pagerank(self):
+        fixture = self._concept_report_fixture()
+        result = papyrus_coverage_theme.signals_concept_report(
+            corpus_key="AI-ML-research",
+            report_type="all",
+            limit=3,
+            trend_window_days=7,
+            references=fixture["references"],
+            semantic_nodes=fixture["semantic_nodes"],
+            semantic_relations=fixture["semantic_relations"],
+            now="2026-05-21T12:00:00Z",
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["command"], "signals concept-report")
+        self.assertEqual(result["reportType"], "all")
+        self.assertEqual(result["popularity"][0]["conceptLineageId"], "semantic-node-ai-agents")
+        self.assertEqual(result["popularity"][0]["distinctReferenceCount"], 3)
+        self.assertEqual(result["trending"][0]["conceptLineageId"], "semantic-node-rl")
+        self.assertEqual(result["pagerank"][0]["conceptLineageId"], "semantic-node-rl")
+        self.assertFalse(any(record["modelName"] in {"Item", "EditionItem"} for record in result["records"]))
+        self.assertEqual(result["records"][0]["input"]["messageKind"], "concept_report")
+        self.assertEqual(result["records"][0]["input"]["messageDomain"], "analytics")
+        signal_report_types = {
+            str((record["input"].get("metadata") or {}).get("reportType"))
+            for record in result["records"]
+            if record["modelName"] == "SemanticRelation"
+            and record["input"].get("relationTypeKey") == "uses_signal"
+        }
+        self.assertEqual(signal_report_types, {"popularity", "trending", "pagerank"})
+
+    def test_concept_report_respects_single_report_type_selection(self):
+        fixture = self._concept_report_fixture()
+        result = papyrus_coverage_theme.signals_concept_report(
+            corpus_key="AI-ML-research",
+            report_type="popularity",
+            limit=2,
+            trend_window_days=7,
+            references=fixture["references"],
+            semantic_nodes=fixture["semantic_nodes"],
+            semantic_relations=fixture["semantic_relations"],
+            now="2026-05-21T12:00:00Z",
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["reportType"], "popularity")
+        self.assertGreaterEqual(len(result["popularity"]), 1)
+        self.assertEqual(result["trending"], [])
+        self.assertEqual(result["pagerank"], [])
+        signal_report_types = {
+            str((record["input"].get("metadata") or {}).get("reportType"))
+            for record in result["records"]
+            if record["modelName"] == "SemanticRelation"
+            and record["input"].get("relationTypeKey") == "uses_signal"
+        }
+        self.assertEqual(signal_report_types, {"popularity"})
+
+    def test_newsroom_cli_concept_report_command_outputs_all_three_reports(self):
+        from papyrus_newsroom import cli as newsroom_cli
+
+        fixture = self._concept_report_fixture()
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json") as handle:
+            json.dump(
+                {
+                    "references": fixture["references"],
+                    "semanticNodes": fixture["semantic_nodes"],
+                    "semanticRelations": fixture["semantic_relations"],
+                },
+                handle,
+            )
+            handle.flush()
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = newsroom_cli.main(
+                    [
+                        "signals",
+                        "concept-report",
+                        "--corpus-key",
+                        "AI-ML-research",
+                        "--report-type",
+                        "all",
+                        "--limit",
+                        "3",
+                        "--trend-window-days",
+                        "7",
+                        "--now",
+                        "2026-05-21T12:00:00Z",
+                        "--input",
+                        handle.name,
+                    ]
+                )
+
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["command"], "signals concept-report")
+        self.assertEqual(payload["reportType"], "all")
+        self.assertGreaterEqual(payload["summary"]["popularityCount"], 1)
+        self.assertGreaterEqual(payload["summary"]["trendingCount"], 1)
+        self.assertGreaterEqual(payload["summary"]["pagerankCount"], 1)
+
     def test_coverage_theme_plan_counts_assignments_and_avoids_items(self):
         plan = papyrus_coverage_theme.build_coverage_theme_plan(
             date="2026-05-21",
@@ -2584,8 +3640,18 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         )
 
         self.assertEqual(plan["summary"]["researchAssignmentCount"], 2)
+        self.assertEqual(plan["summary"]["slotCount"], 3)
         self.assertEqual(plan["summary"]["reportingAssignmentCount"], 5)
-        self.assertFalse(any(record["modelName"] in {"Message", "Item", "EditionItem"} for record in plan["records"]))
+        self.assertFalse(any(record["modelName"] in {"Item", "EditionItem"} for record in plan["records"]))
+        forum_messages = [
+            record for record in plan["records"]
+            if record["modelName"] == "Message" and record["input"].get("messageKind") == "forum_post"
+        ]
+        self.assertGreaterEqual(len(forum_messages), 1)
+        self.assertEqual(
+            len([record for record in plan["records"] if record["modelName"] == "EditionSlot"]),
+            3,
+        )
         relation_types = {
             record["input"]["relationTypeKey"]
             for record in plan["records"]
@@ -2593,6 +3659,7 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         }
         self.assertIn("planned_for_edition", relation_types)
         self.assertIn("targets_section", relation_types)
+        self.assertIn("targets_slot", relation_types)
         self.assertIn("requests_work_on", relation_types)
         self.assertIn("targets_lane", relation_types)
         self.assertIn("derived_from", relation_types)
@@ -2701,12 +3768,22 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
             now="2026-05-21T12:00:00Z",
             metadata={},
         )
+        slot_relation = papyrus_coverage_theme.semantic_relation(
+            predicate="targets_slot",
+            subject_kind="assignment",
+            subject_id=assignment["id"],
+            object_kind="editionSlot",
+            object_id="edition-slot-edition-edition-2026-05-21-v1-arts-01-v1",
+            object_lineage_id="edition-slot-edition-edition-2026-05-21-v1-arts-01",
+            now="2026-05-21T12:00:00Z",
+            metadata={"slotRank": 1, "sectionKey": "arts", "candidateRank": 1},
+        )
         result = papyrus_coverage_theme.story_budget_output(
             run_id="coverage-theme-test",
             state={
                 "assignments": [assignment],
                 "messages": [message],
-                "semanticRelations": [relation],
+                "semanticRelations": [relation, slot_relation],
                 "assignmentEvents": [
                     {
                         "id": "assignment-event-review",
@@ -2719,15 +3796,609 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
                 "modelAttachments": [],
                 "items": [],
                 "editionItems": [],
+                "editionSlots": [
+                    {
+                        "id": "edition-slot-edition-edition-2026-05-21-v1-arts-01-v1",
+                        "editionId": "edition-edition-2026-05-21-v1",
+                        "sectionKey": "arts",
+                        "slotRank": 1,
+                        "targetType": "article",
+                        "targetLengthBand": "standard",
+                        "minImageAssets": 1,
+                        "status": "assigned",
+                        "selectedAssignmentId": None,
+                        "metadata": {},
+                        "createdAt": "2026-05-21T12:00:00Z",
+                        "updatedAt": "2026-05-21T12:00:00Z",
+                    }
+                ],
             },
         )
 
         self.assertEqual(result["summary"]["sectionCount"], 1)
+        self.assertEqual(result["summary"]["slotCount"], 1)
         section = result["sections"][0]
         self.assertEqual(section["sectionKey"], "arts")
         self.assertEqual(section["counts"]["reporting"], 1)
+        self.assertEqual(section["counts"]["slots"], 1)
         self.assertEqual(section["counts"]["held"], 1)
+        self.assertEqual(len(section["slots"]), 1)
+        self.assertEqual(section["slots"][0]["candidateCount"], 1)
         self.assertTrue(section["reportingCandidates"][0]["packetAvailable"])
+
+    def test_plan_forum_kickoff_supersede_skips_optional_desk_and_dispatch(self):
+        edition_id = "edition-edition-2026-06-05-v1"
+        thread_id = papyrus_coverage_theme._canonical_edition_forum_thread_id(edition_id)
+        messages = [
+            {
+                "id": "message-1",
+                "threadId": thread_id,
+                "messageKind": "forum_post",
+                "status": "active",
+                "summary": "AI in video games",
+                "content": "# AI in video games\n\n## Why this edition\n",
+                "metadata": {"planningPhase": "edition_theme_kickoff"},
+            },
+            {
+                "id": "message-2",
+                "threadId": thread_id,
+                "messageKind": "forum_post",
+                "status": "active",
+                "summary": "Optional desk: Arts",
+                "metadata": {"planningPhase": "rotating_desk_selection"},
+            },
+            {
+                "id": "message-3",
+                "threadId": thread_id,
+                "messageKind": "forum_post",
+                "status": "active",
+                "summary": "Reporting candidates: AI in video games",
+                "content": "# Reporting candidates\n",
+                "metadata": {"planningPhase": "reporting_dispatch"},
+            },
+        ]
+        records = papyrus_coverage_theme._plan_forum_kickoff_supersede_records(
+            {thread_id: messages},
+            now="2026-06-01T12:00:00Z",
+        )
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["input"]["id"], "message-1")
+        self.assertEqual(records[0]["input"]["status"], "deleted")
+
+    def test_plan_forum_refresh_supersede_includes_all_planning_phases(self):
+        edition_id = "edition-edition-2026-06-05-v1"
+        thread_id = papyrus_coverage_theme._canonical_edition_forum_thread_id(edition_id)
+        messages = [
+            {
+                "id": "message-1",
+                "threadId": thread_id,
+                "messageKind": "forum_post",
+                "status": "active",
+                "summary": "AI in video games",
+                "content": "# AI in video games\n\n## Why this edition\n",
+                "metadata": {"planningPhase": "edition_theme_kickoff"},
+            },
+            {
+                "id": "message-2",
+                "threadId": thread_id,
+                "messageKind": "forum_post",
+                "status": "active",
+                "summary": "Optional desk: Arts",
+                "metadata": {"planningPhase": "rotating_desk_selection"},
+            },
+            {
+                "id": "message-3",
+                "threadId": thread_id,
+                "messageKind": "forum_post",
+                "status": "active",
+                "summary": "Reporting candidates: AI in video games",
+                "content": "# Reporting candidates\n",
+                "metadata": {"planningPhase": "reporting_dispatch"},
+            },
+        ]
+        records = papyrus_coverage_theme._plan_forum_refresh_supersede_records(
+            {thread_id: messages},
+            now="2026-06-01T12:00:00Z",
+        )
+        deleted_ids = {record["input"]["id"] for record in records}
+        self.assertEqual(deleted_ids, {"message-1", "message-2", "message-3"})
+
+    def test_canonical_edition_forum_thread_messages_includes_pending_records(self):
+        edition_id = "edition-edition-2026-06-05-v1"
+        thread_id = papyrus_coverage_theme._canonical_edition_forum_thread_id(edition_id)
+        state = {
+            "messages": [{
+                "id": "message-1",
+                "threadId": thread_id,
+                "sequenceNumber": 1,
+                "messageKind": "forum_post",
+                "status": "active",
+            }],
+        }
+        pending = [{
+            "modelName": "Message",
+            "input": {
+                "id": "message-2",
+                "threadId": thread_id,
+                "sequenceNumber": 2,
+                "messageKind": "forum_post",
+                "status": "active",
+            },
+        }]
+        messages = papyrus_coverage_theme._canonical_edition_forum_thread_messages(
+            edition_id=edition_id,
+            state=state,
+            pending_records=pending,
+        )
+        self.assertEqual([int(message["sequenceNumber"]) for message in messages], [1, 2])
+
+    def test_resolve_edition_theme_signal_uses_knowledge_base_references(self):
+        now = "2026-06-01T12:00:00Z"
+        references = [
+            {
+                "id": f"reference-ai-games-{index}",
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "curationStatus": "accepted",
+                "versionState": "current",
+                "title": f"Generative agents for game worlds {index}",
+                "sourceUri": "https://arxiv.org/abs/2605.12345",
+                "sourcePublishedAt": "2026-05-20T00:00:00Z",
+            }
+            for index in range(12)
+        ] + [
+            {
+                "id": "reference-unrelated-1",
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "curationStatus": "accepted",
+                "versionState": "current",
+                "title": "Unrelated protein folding benchmark",
+                "sourceUri": "https://example.org/paper",
+                "sourcePublishedAt": "2026-05-21T00:00:00Z",
+            },
+        ]
+        signal = papyrus_coverage_theme.resolve_edition_theme_signal(
+            signal=None,
+            topic="AI in video games",
+            coverage_key="coverage.ai-in-video-games",
+            corpus_key="AI-ML-research",
+            category_key="AI-ML-research",
+            sections=["methods", "arts"],
+            state={"references": references, "semanticNodes": []},
+            now=now,
+        )
+        snapshot = signal.get("knowledgeBaseSnapshot") or {}
+        self.assertGreaterEqual(snapshot.get("acceptedCorpusCount"), 13)
+        self.assertGreater(signal.get("acceptedEvidenceCount"), 0)
+        self.assertNotIn("thin", str(signal.get("whyNow") or "").lower())
+        self.assertIn("accepted reference", str(signal.get("whyNow") or "").lower())
+
+    def test_is_usable_theme_label_rejects_url_tokens(self):
+        self.assertFalse(papyrus_coverage_theme._is_usable_theme_label("Https"))
+        self.assertFalse(papyrus_coverage_theme._is_usable_theme_label("arxiv.org"))
+        self.assertFalse(papyrus_coverage_theme._is_usable_theme_label("Language"))
+        self.assertTrue(papyrus_coverage_theme._is_usable_theme_label("Generative game worlds"))
+
+    def test_theme_phrases_from_reference_titles_extracts_bigrams(self):
+        phrases = papyrus_coverage_theme._theme_phrases_from_reference_titles([
+            "Video-LLaMA: An Instruction-tuned Audio-Visual Language Model for Video Understanding",
+            "Streaming Video Question-Answering with In-context Video KV-Cache Retrieval",
+        ])
+        self.assertTrue(any("video" in phrase.lower() for phrase in phrases))
+
+    def test_derive_edition_forum_thread_title_prefers_themes_over_domains(self):
+        title = papyrus_coverage_theme.derive_edition_forum_thread_title(
+            theme_line="AI in video games",
+            signal={
+                "whyNow": "25 accepted references mention AI in video games; domains include arxiv.org.",
+                "sourceDomains": ["arxiv.org"],
+                "acceptedEvidenceCount": 25,
+                "knowledgeBaseSnapshot": {
+                    "alternateTrendTopics": [
+                        {"topic": "Generative game worlds", "acceptedEvidenceCount": 18},
+                        {"topic": "Video understanding", "acceptedEvidenceCount": 12},
+                    ],
+                },
+            },
+            core_sections=[{"sectionKey": "methods", "sectionTitle": "Methods"}],
+        )
+        self.assertIn("AI in video games", title)
+        self.assertNotIn("arxiv.org", title.lower())
+        self.assertTrue(
+            "generative game worlds" in title.lower() or "video understanding" in title.lower(),
+            title,
+        )
+
+    def test_coverage_theme_plan_creates_forum_kickoff_threads_and_messages(self):
+        plan = papyrus_coverage_theme.build_coverage_theme_plan(
+            date="2026-06-05",
+            topic="AI in video games",
+            corpus_key="AI-ML-research",
+            category_key="AI-ML-research",
+            coverage_key="coverage.ai-in-video-games",
+            sections=["culture"],
+            section_budgets={"arts": 2},
+            run_id="coverage-theme-forum-test",
+            now="2026-06-01T12:00:00Z",
+            state={
+                "newsroomSections": [
+                {"id": "arts", "title": "Arts", "type": "floating", "enabled": True, "sortOrder": 1},
+                {"id": "methods", "title": "Methods", "type": "canonical", "enabled": True, "sortOrder": 2},
+            ],
+                "categories": [],
+                "categorySets": [],
+            },
+        )
+
+        thread_records = [record for record in plan["records"] if record["modelName"] == "MessageThread"]
+        message_records = [
+            record for record in plan["records"]
+            if record["modelName"] == "Message" and record["input"].get("messageKind") == "forum_post"
+        ]
+        edition_thread = next(record["input"] for record in thread_records if record["input"]["threadKind"] == "edition_forum")
+        section_threads = [record["input"] for record in thread_records if record["input"]["threadKind"] == "section_forum"]
+        self.assertEqual(len(thread_records), 1)
+        self.assertEqual(len(message_records), 1)
+        self.assertEqual(section_threads, [])
+        self.assertEqual(edition_thread["primaryAnchorKind"], "edition")
+        self.assertTrue(plan["forumKickoff"]["editionThreadId"].startswith("message-thread-edition-forum-"))
+        self.assertEqual(plan["forumKickoff"]["rotatingDeskStatus"], "pending_selection")
+        self.assertIn("arts", plan["forumKickoff"]["optionalDeskSectionKeys"])
+        self.assertEqual(plan["summary"]["forumThreadCount"], 1)
+        self.assertEqual(plan["summary"]["forumMessageCount"], 1)
+        body = message_records[0]["input"]["content"]
+        thread_title = edition_thread["title"]
+        self.assertNotEqual(thread_title, "Edition Forum")
+        self.assertIn("AI in video games", thread_title)
+        self.assertIn("## Why this edition", body)
+        self.assertNotIn("in-window are thin", body)
+        self.assertIn("## Desk-shaped story seeds", body)
+        self.assertNotIn("How To Steer", body)
+        self.assertNotIn("Phase 1", body)
+        self.assertNotIn("Phase 2", body)
+        self.assertNotIn("Phase 3", body)
+        self.assertIn("edition", plan["forumKickoff"])
+        self.assertEqual(plan["forumKickoff"]["sections"], [])
+
+    def test_coverage_theme_plan_skips_duplicate_forum_kickoff_on_identical_rerun(self):
+        edition_id = "edition-edition-2026-06-05-v1"
+        edition_thread_id = f"message-thread-edition-forum-{papyrus_coverage_theme._safe_id(edition_id)}"
+        edition_body = papyrus_coverage_theme._edition_forum_kickoff_body(
+            topic="AI in video games",
+            coverage_key="coverage.ai-in-video-games",
+            core_sections=[],
+            optional_desk_sections=[{
+                "sectionId": "arts",
+                "sectionKey": "arts",
+                "sectionTitle": "Arts",
+                "sectionType": "floating",
+                "slots": 2,
+                "dispatchCount": 3,
+                "suggestedTopics": ["AI in video games"],
+            }],
+            recent_optional_desk_usage=[],
+        )
+        existing_state = {
+            "newsroomSections": [
+                {"id": "arts", "title": "Arts", "type": "floating", "enabled": True, "sortOrder": 1},
+                {"id": "methods", "title": "Methods", "type": "canonical", "enabled": True, "sortOrder": 2},
+            ],
+            "categories": [],
+            "categorySets": [],
+            "messageThreads": [
+                {
+                    "id": edition_thread_id,
+                    "threadKind": "edition_forum",
+                    "primaryAnchorKind": "edition",
+                    "primaryAnchorId": edition_id,
+                    "primaryAnchorLineageId": edition_id,
+                    "messageCount": 1,
+                    "createdByLabel": "papyrus-editor",
+                    "createdAt": "2026-06-01T09:00:00Z",
+                    "metadata": {"editionId": edition_id},
+                },
+            ],
+            "messages": [
+                {
+                    "id": f"message-forum-{papyrus_coverage_theme._safe_id(edition_thread_id)}-0001",
+                    "threadId": edition_thread_id,
+                    "messageKind": "forum_post",
+                    "status": "active",
+                    "summary": "AI in video games",
+                    "content": edition_body,
+                    "sequenceNumber": 1,
+                    "importRunId": "coverage-theme-forum-rerun",
+                    "metadata": {"planningPhase": "edition_theme_kickoff"},
+                },
+            ],
+        }
+
+        plan = papyrus_coverage_theme.build_coverage_theme_plan(
+            date="2026-06-05",
+            topic="AI in video games",
+            corpus_key="AI-ML-research",
+            category_key="AI-ML-research",
+            coverage_key="coverage.ai-in-video-games",
+            sections=["culture"],
+            section_budgets={"arts": 2},
+            run_id="coverage-theme-forum-rerun",
+            now="2026-06-01T12:00:00Z",
+            state=existing_state,
+        )
+
+        forum_posts = [
+            record for record in plan["records"]
+            if record["modelName"] == "Message" and record["input"].get("messageKind") == "forum_post"
+        ]
+        self.assertEqual(forum_posts, [])
+        self.assertEqual(plan["forumKickoff"]["editionKickoffAction"], "skip")
+        self.assertEqual(plan["forumKickoff"]["sections"], [])
+        self.assertEqual(plan["summary"]["forumMessageCount"], 0)
+
+    def test_partition_sections_for_dispatch_defers_optional_desks(self):
+        sections = [
+            {"id": "methods", "title": "Methods", "type": "canonical"},
+            {"id": "arts", "title": "Arts", "type": "floating"},
+        ]
+        dispatch, provisional = papyrus_coverage_theme.partition_sections_for_dispatch(sections)
+        self.assertEqual([section["id"] for section in dispatch], ["methods"])
+        self.assertEqual([section["id"] for section in provisional], ["arts"])
+
+    def test_collect_recent_optional_desk_usage_ignores_unconfirmed_budgets(self):
+        editions = [{
+            "id": "edition-edition-2026-06-05-v1",
+            "editionDate": "2026-06-05",
+            "metadata": {
+                "sectionBudgets": [{"sectionKey": "arts", "slots": 2}],
+            },
+        }]
+        self.assertEqual(papyrus_coverage_theme.collect_recent_optional_desk_usage(editions), [])
+        editions[0]["metadata"]["selectedOptionalDeskKey"] = "arts"
+        usage = papyrus_coverage_theme.collect_recent_optional_desk_usage(editions)
+        self.assertEqual(len(usage), 1)
+        self.assertEqual(usage[0]["sectionKey"], "arts")
+        self.assertEqual(usage[0].get("selectionSource"), "confirmed")
+
+    def test_fallback_rotating_section_selection_avoids_recent_usage(self):
+        context = {
+            "editionId": "edition-edition-2026-06-06-v1",
+            "acceptedTheme": "AI in video games",
+            "candidateSections": [
+                {"sectionKey": "arts", "sectionTitle": "Arts", "sectionType": "floating"},
+                {"sectionKey": "gaming", "sectionTitle": "Gaming", "sectionType": "rotating"},
+            ],
+            "recentOptionalDeskUsage": [{"sectionKey": "arts", "editionDate": "2026-06-05"}],
+        }
+        selection = papyrus_coverage_theme.fallback_rotating_section_selection(context=context)
+        self.assertEqual(selection["recommendedSectionKey"], "gaming")
+
+    def test_optional_desk_dispatch_exists_detects_prior_dispatch(self):
+        run_id = "coverage-theme-dispatch-test"
+        section_key = "arts"
+        edition_id = "edition-edition-2026-06-05-v1"
+        state = {
+            "assignments": [
+                {"id": papyrus_coverage_theme.optional_desk_research_assignment_id(run_id=run_id, section_key=section_key)},
+            ],
+            "editionSlots": [
+                {"id": papyrus_coverage_theme.optional_desk_slot_ids(edition_id=edition_id, section_key=section_key, slots=2)[0]},
+            ],
+        }
+        self.assertTrue(
+            papyrus_coverage_theme.optional_desk_dispatch_exists(
+                state,
+                run_id=run_id,
+                section_key=section_key,
+                edition_id=edition_id,
+                section_budgets={"arts": 2},
+            )
+        )
+
+    def test_optional_desk_dispatch_exists_ignores_stale_run_id(self):
+        section_key = "arts"
+        edition_id = "edition-edition-2026-06-05-v1"
+        prior_run_id = "coverage-theme-2026-06-05-coverage.ai-in-video-games"
+        state = {
+            "assignments": [
+                {
+                    "id": papyrus_coverage_theme.optional_desk_research_assignment_id(
+                        run_id=prior_run_id,
+                        section_key=section_key,
+                    ),
+                    "sectionKey": section_key,
+                    "metadata": {"editionId": edition_id},
+                },
+            ],
+            "editionSlots": [
+                {"id": papyrus_coverage_theme.optional_desk_slot_ids(edition_id=edition_id, section_key=section_key, slots=2)[0]},
+            ],
+        }
+        self.assertTrue(
+            papyrus_coverage_theme.optional_desk_dispatch_exists(
+                state,
+                run_id="coverage-theme-new-timestamp-run",
+                section_key=section_key,
+                edition_id=edition_id,
+                section_budgets={"arts": 2},
+            )
+        )
+
+    def test_resolve_coverage_theme_run_id_reuses_edition_metadata(self):
+        state = {
+            "editions": [{
+                "id": "edition-edition-2026-06-05-v1",
+                "editionDate": "2026-06-05",
+                "slug": "edition-2026-06-05",
+                "metadata": {"coverageThemeRunId": "coverage-theme-2026-06-05-coverage.ai-in-video-games"},
+            }],
+        }
+        run_id = papyrus_coverage_theme.resolve_coverage_theme_run_id(
+            date="2026-06-05",
+            topic="AI in video games",
+            coverage_key="coverage.ai-in-video-games",
+            run_id="",
+            state=state,
+        )
+        self.assertEqual(run_id, "coverage-theme-2026-06-05-coverage.ai-in-video-games")
+
+    def test_build_edition_metadata_update_record_uses_valid_fields_only(self):
+        edition = {
+            "id": "edition-edition-2026-06-05-v1",
+            "slug": "edition-2026-06-05",
+            "editionDate": "2026-06-05",
+            "metadata": {"planningPhase": "theme_proposal"},
+        }
+        record = papyrus_coverage_theme.build_edition_metadata_update_record(
+            edition,
+            {"rotatingDeskStatus": "selected", "selectedOptionalDeskKey": "gaming"},
+        )
+        self.assertEqual(record["action"], "update")
+        self.assertNotIn("updatedAt", record["input"])
+        self.assertEqual(record["input"]["id"], edition["id"])
+
+    def test_coverage_theme_plan_posts_only_theme_message_when_optional_desk_pending(self):
+        plan = papyrus_coverage_theme.build_coverage_theme_plan(
+            date="2026-06-05",
+            topic="AI in video games",
+            corpus_key="AI-ML-research",
+            category_key="AI-ML-research",
+            coverage_key="coverage.ai-in-video-games",
+            sections=["methods", "culture"],
+            section_budgets={"methods": 1, "arts": 2},
+            run_id="coverage-theme-canonical-forum-test",
+            now="2026-06-01T12:00:00Z",
+            state={
+                "newsroomSections": [
+                    {"id": "arts", "title": "Arts", "type": "floating", "enabled": True, "sortOrder": 1},
+                    {"id": "methods", "title": "Methods", "type": "canonical", "enabled": True, "sortOrder": 2},
+                ],
+                "categories": [],
+                "categorySets": [],
+            },
+        )
+        section_threads = [
+            record["input"]
+            for record in plan["records"]
+            if record["modelName"] == "MessageThread" and record["input"]["threadKind"] == "section_forum"
+        ]
+        edition_forum_posts = [
+            record["input"]
+            for record in plan["records"]
+            if record["modelName"] == "Message" and record["input"].get("messageKind") == "forum_post"
+        ]
+        self.assertEqual(section_threads, [])
+        self.assertEqual(len(edition_forum_posts), 1)
+        self.assertIn("## Why this edition", edition_forum_posts[0]["content"])
+        self.assertTrue(
+            papyrus_coverage_theme.should_defer_reporting_dispatch_forum(
+                plan,
+                skip_rotating_desk=False,
+                include_optional_desks=False,
+                selected_optional_desk_key="",
+            )
+        )
+
+    def test_reporting_dispatch_forum_lists_overassigned_candidates(self):
+        plan = papyrus_coverage_theme.build_coverage_theme_plan(
+            date="2026-06-05",
+            topic="AI in video games",
+            corpus_key="AI-ML-research",
+            category_key="AI-ML-research",
+            coverage_key="coverage.ai-in-video-games",
+            sections=["methods"],
+            section_budgets={"methods": 1},
+            run_id="coverage-theme-dispatch-forum-test",
+            now="2026-06-01T12:00:00Z",
+            state={
+                "newsroomSections": [
+                    {"id": "methods", "title": "Methods", "type": "canonical", "enabled": True, "sortOrder": 1},
+                ],
+                "categories": [],
+                "categorySets": [],
+            },
+        )
+        dispatch_forum = papyrus_coverage_theme.build_reporting_dispatch_forum_records(
+            edition=plan["edition"],
+            topic="AI in video games",
+            coverage_key="coverage.ai-in-video-games",
+            reporting_assignments=plan["reportingAssignments"],
+            edition_slots=plan["editionSlots"],
+            section_budgets={"methods": 1},
+            section_titles={"methods": "Methods"},
+            run_id=plan["runId"],
+            now="2026-06-01T12:00:00Z",
+        )
+        self.assertEqual(dispatch_forum["action"], "create")
+        self.assertIn("# Reporting candidates", dispatch_forum["message"]["content"])
+        self.assertIn("### Methods", dispatch_forum["message"]["content"])
+        self.assertIn("Candidate ", dispatch_forum["message"]["content"])
+        self.assertNotIn("1.5", dispatch_forum["message"]["content"])
+        self.assertNotIn("Publication slots", dispatch_forum["message"]["content"])
+        self.assertNotIn("Proposed reporting assignments", dispatch_forum["message"]["content"])
+        self.assertNotIn("Phase 3", dispatch_forum["message"]["content"])
+        self.assertGreaterEqual(len(plan["reportingAssignments"]), 2)
+
+    def test_coverage_theme_plan_forks_forum_thread_on_material_replan(self):
+        edition_id = "edition-edition-2026-06-05-v1"
+        edition_thread_id = f"message-thread-edition-forum-{papyrus_coverage_theme._safe_id(edition_id)}"
+        existing_state = {
+            "newsroomSections": [
+                {"id": "arts", "title": "Arts", "type": "floating", "enabled": True, "sortOrder": 1},
+                {"id": "methods", "title": "Methods", "type": "canonical", "enabled": True, "sortOrder": 2},
+            ],
+            "categories": [],
+            "categorySets": [],
+            "messageThreads": [{
+                "id": edition_thread_id,
+                "threadKind": "edition_forum",
+                "primaryAnchorKind": "edition",
+                "primaryAnchorId": edition_id,
+                "primaryAnchorLineageId": edition_id,
+                "messageCount": 1,
+                "createdByLabel": "papyrus-editor",
+                "createdAt": "2026-06-01T09:00:00Z",
+                "metadata": {"editionId": edition_id},
+            }],
+            "messages": [{
+                "id": f"message-forum-{papyrus_coverage_theme._safe_id(edition_thread_id)}-0001",
+                "threadId": edition_thread_id,
+                "messageKind": "forum_post",
+                "status": "active",
+                "summary": "Edition planning suggestions: AI in video games",
+                "content": "# Edition Planning Suggestions (Phase 1)\n\n- Suggested edition theme: AI in video games\n",
+                "sequenceNumber": 1,
+                "importRunId": "coverage-theme-forum-initial",
+            }],
+        }
+
+        plan = papyrus_coverage_theme.build_coverage_theme_plan(
+            date="2026-06-05",
+            topic="AI safety in game moderation",
+            corpus_key="AI-ML-research",
+            category_key="AI-ML-research",
+            coverage_key="coverage.ai-safety-in-game-moderation",
+            sections=["culture"],
+            section_budgets={"arts": 2},
+            run_id="coverage-theme-forum-replan",
+            now="2026-06-01T12:00:00Z",
+            state=existing_state,
+        )
+
+        thread_records = [record for record in plan["records"] if record["modelName"] == "MessageThread"]
+        edition_threads = [record["input"] for record in thread_records if record["input"]["threadKind"] == "edition_forum"]
+        self.assertEqual(len(edition_threads), 1)
+        self.assertNotEqual(edition_threads[0]["id"], edition_thread_id)
+        self.assertEqual(edition_threads[0]["metadata"].get("parentThreadId"), edition_thread_id)
+        self.assertEqual(plan["forumKickoff"]["editionKickoffAction"], "replan")
+        replan_message = next(
+            record["input"]
+            for record in plan["records"]
+            if record["modelName"] == "Message"
+            and record["input"].get("messageKind") == "forum_post"
+            and record["input"]["threadId"] == edition_threads[0]["id"]
+        )
+        self.assertIn("Edition replan", replan_message["content"])
+        self.assertIn("## Why this edition", replan_message["content"])
+        self.assertNotIn("planning pass", replan_message["content"].lower())
 
 
 if __name__ == "__main__":

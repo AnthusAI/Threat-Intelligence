@@ -7,6 +7,7 @@ from typing import Any
 
 from .graphql_authoring import create_authoring_client
 from .ids import hash_short
+from .message_contract import build_canonical_message_expected
 from .model_attachments import parse_jsonish, semantic_version_key
 from .options import parse_options
 from .records import apply_record_changes, build_record_changes
@@ -77,28 +78,34 @@ def legacy_knowledge_comment_records(comment: dict[str, Any] | None) -> list[dic
     message_id = f"message-legacy-{hash_short([comment.get('id'), message_kind, created_at])}"
     body = comment.get("body") or ""
     metadata = parse_jsonish(comment.get("metadata"))
-    message = {
-        "id": message_id,
-        "messageKind": message_kind,
-        "messageDomain": "commentary",
-        "status": comment.get("status") or "active",
-        "body": body,
-        "summary": body if len(body) <= 140 else f"{body[:137]}...",
-        "source": comment.get("source") or "legacy-knowledge-comment",
-        "importRunId": comment.get("importRunId"),
-        "authorSub": comment.get("authorSub"),
-        "authorUserProfileId": comment.get("authorUserProfileId"),
-        "authorLabel": comment.get("authorLabel"),
-        "createdAt": created_at,
-        "updatedAt": created_at,
-        "metadata": json.dumps(
-            {
+    message = build_canonical_message_expected(
+        {
+            "id": message_id,
+            "messageKind": message_kind,
+            "messageDomain": "commentary",
+            "status": comment.get("status") or "active",
+            "body": body,
+            "summary": body if len(body) <= 140 else f"{body[:137]}...",
+            "source": comment.get("source") or "legacy-knowledge-comment",
+            "importRunId": comment.get("importRunId"),
+            "authorSub": comment.get("authorSub"),
+            "authorUserProfileId": comment.get("authorUserProfileId"),
+            "authorLabel": comment.get("authorLabel"),
+            "createdAt": created_at,
+            "updatedAt": created_at,
+            "metadata": {
                 "legacyModel": "KnowledgeComment",
                 "legacyId": comment.get("id"),
                 **(metadata if isinstance(metadata, dict) else {}),
-            }
-        ),
-    }
+            },
+            "responseTarget": "none",
+            "responseStatus": "COMPLETED",
+            "responseOwner": "legacy-import",
+        },
+        default_source="legacy-knowledge-comment",
+        default_author_label="legacy-knowledge-comment",
+        default_response_owner="legacy-import",
+    )
     target_kind = comment.get("subjectKind")
     target_id = comment.get("subjectId")
     target_lineage_id = comment.get("subjectLineageId")

@@ -23,11 +23,12 @@ from .ranking import (
 
 
 VALID_OUTPUT_FORMATS = {"structured", "markdown", "both"}
-VALID_PROFILES = {"researcher", "reporter", "editor", "reviewer", "chat"}
+VALID_PROFILES = {"researcher", "reporter", "reporting", "editor", "reviewer", "chat"}
 
 PROFILE_DEFAULTS = {
     "researcher": {"depth": 2, "topK": 18, "insightBias": 1.25},
     "reporter": {"depth": 1, "topK": 12, "insightBias": 1.0},
+    "reporting": {"depth": 1, "topK": 10, "insightBias": 1.0},
     "editor": {"depth": 2, "topK": 20, "insightBias": 1.15},
     "reviewer": {"depth": 2, "topK": 20, "insightBias": 1.35},
     "chat": {"depth": 1, "topK": 10, "insightBias": 1.0},
@@ -52,6 +53,19 @@ PASSAGE_STOPWORDS = {
     "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "how", "in", "into", "is", "it", "of", "on",
     "or", "our", "that", "the", "their", "this", "to", "we", "what", "with",
 }
+
+MODEL_ATTACHMENT_FIELDS = """
+id ownerKind ownerId role sortKey storagePath status createdAt updatedAt
+"""
+
+LIST_MODEL_ATTACHMENTS_BY_OWNER_QUERY = f"""
+query ListModelAttachmentsByOwner($ownerId: ID!, $limit: Int, $nextToken: String) {{
+  listModelAttachmentsByOwnerRoleAndSortKey(ownerId: $ownerId, limit: $limit, nextToken: $nextToken) {{
+    items {{ {MODEL_ATTACHMENT_FIELDS} }}
+    nextToken
+  }}
+}}
+"""
 
 
 def _default_see_also_max_tokens(max_tokens: int | None) -> int:
@@ -166,7 +180,9 @@ def run_knowledge_query(input: dict[str, Any], services: KnowledgeQueryServices 
                 warnings.extend(str(item) for item in expansion.get("warnings") or [])
     mark_stage("resolve_and_expand_anchors", anchorCount=len(structured["anchors"]))
 
-    if not request["semanticQuery"] and structured["anchors"]:
+    semantic_search_enabled = bool(request["scope"].get("semanticSearch", True))
+
+    if semantic_search_enabled and not request["semanticQuery"] and structured["anchors"]:
         derived_query = _derive_semantic_query_from_anchors(structured["anchors"], services)
         if derived_query:
             request["semanticQuery"] = derived_query
@@ -175,7 +191,7 @@ def run_knowledge_query(input: dict[str, Any], services: KnowledgeQueryServices 
             structured["request"]["semanticQuerySource"] = "anchor_derived"
     mark_stage("derive_semantic_query")
 
-    if request["semanticQuery"]:
+    if semantic_search_enabled and request["semanticQuery"]:
         try:
             semantic_scope = {
                 **request["scope"],
@@ -265,7 +281,7 @@ def run_knowledge_query(input: dict[str, Any], services: KnowledgeQueryServices 
             "semanticUniqueSourceCount": _unique_semantic_match_source_count(public_structured),
             "semanticSourceTarget": _semantic_source_target(request),
             "sourceBudgetCount": len(public_structured.get("referenceTokenBudgets") or {}),
-            "vectorDiversification": "source_round_robin" if request["semanticQuery"] else "not_applied",
+            "vectorDiversification": "source_round_robin" if semantic_search_enabled and request["semanticQuery"] else "not_applied",
             "relationPolicy": request["relationPolicy"],
             "sourceTextMode": source_text_mode,
             "extractMode": request["extractMode"],
@@ -310,6 +326,10 @@ def _normalize_request(input: dict[str, Any]) -> tuple[dict[str, Any], list[str]
         if isinstance(value, str):
             value = value.lower() in {"1", "true", "yes"}
         scope[key] = bool(value)
+    semantic_search = scope.get("semanticSearch", True)
+    if isinstance(semantic_search, str):
+        semantic_search = semantic_search.lower() in {"1", "true", "yes"}
+    scope["semanticSearch"] = bool(semantic_search)
     anchors = input.get("anchors") or []
     if isinstance(anchors, dict):
         anchors = [anchors]
@@ -319,6 +339,22 @@ def _normalize_request(input: dict[str, Any]) -> tuple[dict[str, Any], list[str]
     normalized_anchors = [normalize_anchor(anchor) for anchor in anchors if isinstance(anchor, dict)]
     output = input.get("output") if isinstance(input.get("output"), dict) else {}
     scope.setdefault("relationPolicy", "knowledge_only")
+    scope["includeObjectKinds"] = _normalize_scope_string_list(
+        scope.get("includeObjectKinds")
+        or scope.get("includeKinds")
+        or scope.get("objectKindsInclude"),
+    )
+    scope["excludeObjectKinds"] = _normalize_scope_string_list(
+        scope.get("excludeObjectKinds")
+        or scope.get("excludeKinds")
+        or scope.get("objectKindsExclude"),
+    )
+    scope["includeMessageKinds"] = _normalize_scope_string_list(scope.get("includeMessageKinds"))
+    scope["excludeMessageKinds"] = _normalize_scope_string_list(scope.get("excludeMessageKinds"))
+    scope["includeAssignmentTypeKeys"] = _normalize_scope_string_list(scope.get("includeAssignmentTypeKeys"))
+    scope["excludeAssignmentTypeKeys"] = _normalize_scope_string_list(scope.get("excludeAssignmentTypeKeys"))
+    if scope["includeObjectKinds"] and not scope.get("objectKinds"):
+        scope["objectKinds"] = list(scope["includeObjectKinds"])
     output_format = str(output.get("format") or input.get("format") or "structured").strip()
     if output_format not in VALID_OUTPUT_FORMATS:
         warnings.append(f"Unknown output format '{output_format}', using structured")
@@ -396,6 +432,26 @@ def _derive_semantic_query_from_anchors(anchors: list[dict[str, Any]], services:
     if not parts:
         return ""
     return services.token_counter.truncate(". ".join(parts), 96)
+
+
+def _normalize_scope_string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        entries = [part.strip() for part in value.split(",")]
+    elif isinstance(value, list):
+        entries = [str(part or "").strip() for part in value]
+    else:
+        return []
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for entry in entries:
+        if not entry:
+            continue
+        normalized = entry.lower()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append(normalized)
+    return deduped
 
 
 def _anchor_semantic_text_parts(anchor: dict[str, Any]) -> list[str]:
@@ -555,9 +611,9 @@ def _build_context_blocks(
     for obj in structured["expandedObjects"]:
         if _object_key(obj) in related_keys:
             continue
-        if obj.get("kind") in {"reference", "message", "assignment"}:
+        if obj.get("kind") == "reference":
             continue
-        if not _is_related_record_candidate(obj):
+        if not _is_related_record_candidate(obj, request):
             continue
         blocks.append(
             ContextBlock(
@@ -1730,51 +1786,98 @@ def _collect_reference_summaries(
     warnings: list[str],
 ) -> None:
     graph = services.graph
-    if not graph or not hasattr(graph, "list_incoming_relations"):
+    if not graph:
         return
     summaries: list[dict[str, Any]] = []
     references = _reference_objects(structured)
 
-    def load_summaries(reference: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
-        local_summaries: list[dict[str, Any]] = []
+    def load_summary(reference: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
         local_warnings: list[str] = []
-        lineage_id = str(reference.get("lineageId") or reference.get("id") or "")
-        if not lineage_id:
-            return local_summaries, local_warnings
-        try:
-            incoming = graph.list_incoming_relations(reference)  # type: ignore[attr-defined]
-        except Exception as exc:  # pragma: no cover - defensive runtime note
-            local_warnings.append(f"Could not load reference summaries for {object_title(reference) or anchor_ref(reference)}: {exc}")
-            return local_summaries, local_warnings
-        for relation in incoming:
-            summary = _reference_summary_from_relation(reference, relation, graph, services)
-            if summary:
-                local_summaries.append(summary)
-        return local_summaries, local_warnings
+        attachment_summary = None
+        if hasattr(graph, "graphql") and services.corpus_text is not None:
+            try:
+                attachment_summary = _reference_summary_from_metadata_attachment(reference, graph, services)
+            except Exception as exc:  # pragma: no cover - defensive runtime note
+                local_warnings.append(f"Could not load reference summaries for {object_title(reference) or anchor_ref(reference)}: {exc}")
+        if attachment_summary:
+            return [attachment_summary], local_warnings
+        if hasattr(graph, "list_incoming_relations"):
+            try:
+                incoming = graph.list_incoming_relations(reference)  # type: ignore[attr-defined]
+            except Exception as exc:  # pragma: no cover - defensive runtime note
+                local_warnings.append(f"Could not load legacy reference summaries for {object_title(reference) or anchor_ref(reference)}: {exc}")
+                return [], local_warnings
+            return [
+                summary
+                for relation in incoming or []
+                for summary in [_reference_summary_from_relation(reference, relation, graph, services)]
+                if summary
+            ], local_warnings
+        return [], local_warnings
 
-    if hasattr(graph, "list_incoming_relations_batch"):
-        incoming_by_reference = graph.list_incoming_relations_batch(references)  # type: ignore[attr-defined]
-        results = []
-        for reference in references:
-            lineage_id = str(reference.get("lineageId") or reference.get("id") or "")
-            local_summaries = []
-            for relation in incoming_by_reference.get(lineage_id, []):
-                summary = _reference_summary_from_relation(reference, relation, graph, services)
-                if summary:
-                    local_summaries.append(summary)
-            results.append((local_summaries, []))
+    worker_count = _graph_fetch_worker_count(request, len(references))
+    if worker_count <= 1:
+        results = [load_summary(reference) for reference in references]
     else:
-        worker_count = _graph_fetch_worker_count(request, len(references))
-        if worker_count <= 1:
-            results = [load_summaries(reference) for reference in references]
-        else:
-            with ThreadPoolExecutor(max_workers=worker_count) as executor:
-                futures = [executor.submit(load_summaries, reference) for reference in references]
-                results = [future.result() for future in as_completed(futures)]
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            futures = [executor.submit(load_summary, reference) for reference in references]
+            results = [future.result() for future in as_completed(futures)]
     for local_summaries, local_warnings in results:
         summaries.extend(local_summaries)
         warnings.extend(local_warnings)
     structured["referenceSummaries"] = _dedupe_reference_summaries([*(structured.get("referenceSummaries") or []), *summaries])
+
+
+def _reference_summary_from_metadata_attachment(
+    reference: dict[str, Any],
+    graph: Any,
+    services: KnowledgeQueryServices,
+) -> dict[str, Any] | None:
+    attachment = _reference_metadata_attachment(graph, reference)
+    if not attachment:
+        return None
+    storage_path = str(attachment.get("storagePath") or "").strip()
+    if not storage_path:
+        return None
+    text_payload = services.corpus_text.read_text(storage_path)
+    if not text_payload:
+        return None
+    try:
+        metadata_payload = json.loads(text_payload)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(metadata_payload, dict):
+        return None
+    text = str(metadata_payload.get("summary") or "").strip()
+    if not text:
+        return None
+    summary_resolution = metadata_payload.get("summary_resolution") if isinstance(metadata_payload.get("summary_resolution"), dict) else {}
+    max_tokens = summary_resolution.get("summaryTokenBudget")
+    try:
+        max_tokens = int(max_tokens)
+    except (TypeError, ValueError):
+        max_tokens = services.token_counter.count(text)
+    reference_lineage_id = str(reference.get("lineageId") or reference.get("id") or "")
+    actual_tokens = services.token_counter.count(text)
+    return {
+        "id": f"{reference_lineage_id}:summary:{max_tokens}",
+        "referenceId": reference.get("id"),
+        "referenceLineageId": reference_lineage_id,
+        "referenceTitle": object_title(reference),
+        "objectUri": object_uri(reference),
+        "messageId": None,
+        "messageLineageId": None,
+        "relationId": None,
+        "relationTypeKey": "reference_summary_metadata_attachment",
+        "maxTokens": max_tokens,
+        "actualTokens": actual_tokens,
+        "createdAt": attachment.get("updatedAt") or attachment.get("createdAt"),
+        "model": summary_resolution.get("model"),
+        "tokenizer": None,
+        "summary": text,
+        "text": text,
+        "tokens": actual_tokens,
+    }
 
 
 def _reference_summary_from_relation(
@@ -1833,6 +1936,38 @@ def _reference_summary_from_relation(
         "text": text,
         "tokens": services.token_counter.count(text),
     }
+
+
+def _reference_metadata_attachment(graph: Any, reference: dict[str, Any]) -> dict[str, Any] | None:
+    if not hasattr(graph, "graphql"):
+        return None
+    reference_id = str(reference.get("id") or "")
+    if not reference_id:
+        return None
+    next_token = None
+    while True:
+        payload = graph.graphql(
+            LIST_MODEL_ATTACHMENTS_BY_OWNER_QUERY,
+            {"ownerId": reference_id, "limit": 50, "nextToken": next_token},
+        )
+        connection = payload.get("listModelAttachmentsByOwnerRoleAndSortKey") or {}
+        items = connection.get("items") or []
+        candidates = [
+            item
+            for item in items
+            if item
+            and item.get("ownerKind") == "reference"
+            and item.get("ownerId") == reference_id
+            and item.get("role") == "metadata"
+            and item.get("sortKey") == "metadata"
+            and item.get("status") != "deleted"
+            and item.get("storagePath")
+        ]
+        if candidates:
+            return sorted(candidates, key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""), reverse=True)[0]
+        next_token = connection.get("nextToken")
+        if not next_token:
+            return None
 
 
 def _seed_evidence_from_reference_summaries(
@@ -2176,6 +2311,8 @@ def _build_related_records(
         key = _object_key(match)
         if not key or key in anchor_keys:
             continue
+        if not _is_related_record_candidate(match, request):
+            continue
         ranking = match.get("ranking") if isinstance(match.get("ranking"), dict) else {}
         if anchors and float(ranking.get("relevanceScore", 0.0)) < float(request["ranking"].get("relevanceGate", 0.18)):
             continue
@@ -2188,7 +2325,7 @@ def _build_related_records(
         key = _object_key(obj)
         if not key or key in anchor_keys:
             continue
-        if not _is_related_record_candidate(obj):
+        if not _is_related_record_candidate(obj, request):
             continue
         records.append(_related_record(obj, rank, "graph context expansion", "graph_expansion", structured, services))
         rank += 1
@@ -2197,14 +2334,95 @@ def _build_related_records(
     return records
 
 
-def _is_related_record_candidate(obj: dict[str, Any]) -> bool:
-    if obj.get("kind") in {"message", "assignment"}:
+def _is_related_record_candidate(obj: dict[str, Any], request: dict[str, Any]) -> bool:
+    if not _record_included_by_scope_filters(obj, request):
+        return False
+    kind = str(obj.get("kind") or "").strip().lower()
+    include_kinds = {
+        str(value).strip().lower()
+        for value in (request.get("scope") or {}).get("includeObjectKinds") or []
+        if str(value).strip()
+    }
+    if kind in {"message", "assignment"} and kind not in include_kinds:
         return False
     if obj.get("kind") == "semanticNode" and obj.get("status") == "generated":
         return False
     if obj.get("kind") == "semanticNode" and not any(obj.get(key) for key in ("summary", "description", "categoryKey", "categoryLineageId")):
         return False
     return True
+
+
+def _record_included_by_scope_filters(obj: dict[str, Any], request: dict[str, Any]) -> bool:
+    scope = request.get("scope") if isinstance(request.get("scope"), dict) else {}
+    metadata = obj.get("metadata") if isinstance(obj.get("metadata"), dict) else {}
+    kind = str(obj.get("kind") or obj.get("objectKind") or obj.get("type") or "").strip().lower()
+    if not kind:
+        return False
+    include_kinds = {
+        str(value).strip().lower()
+        for value in scope.get("includeObjectKinds") or []
+        if str(value).strip()
+    }
+    exclude_kinds = {
+        str(value).strip().lower()
+        for value in scope.get("excludeObjectKinds") or []
+        if str(value).strip()
+    }
+    if include_kinds and kind not in include_kinds:
+        return False
+    if kind in exclude_kinds:
+        return False
+    if kind == "message":
+        message_kind = str(obj.get("messageKind") or metadata.get("messageKind") or "").strip().lower()
+        include_message_kinds = {
+            str(value).strip().lower()
+            for value in scope.get("includeMessageKinds") or []
+            if str(value).strip()
+        }
+        exclude_message_kinds = {
+            str(value).strip().lower()
+            for value in scope.get("excludeMessageKinds") or []
+            if str(value).strip()
+        }
+        if include_message_kinds and message_kind not in include_message_kinds:
+            return False
+        if message_kind and message_kind in exclude_message_kinds:
+            return False
+    if kind == "assignment":
+        assignment_type_key = str(
+            obj.get("assignmentTypeKey")
+            or metadata.get("assignmentTypeKey")
+            or ""
+        ).strip().lower()
+        include_assignment_types = {
+            str(value).strip().lower()
+            for value in scope.get("includeAssignmentTypeKeys") or []
+            if str(value).strip()
+        }
+        exclude_assignment_types = {
+            str(value).strip().lower()
+            for value in scope.get("excludeAssignmentTypeKeys") or []
+            if str(value).strip()
+        }
+        if include_assignment_types and not _matches_any_pattern(assignment_type_key, include_assignment_types):
+            return False
+        if assignment_type_key and _matches_any_pattern(assignment_type_key, exclude_assignment_types):
+            return False
+    return True
+
+
+def _matches_any_pattern(value: str, patterns: set[str]) -> bool:
+    if not value:
+        return False
+    for pattern in patterns:
+        if not pattern:
+            continue
+        if pattern.endswith("*"):
+            if value.startswith(pattern[:-1]):
+                return True
+        elif value == pattern:
+            return True
+    return False
 
 
 def _semantic_related_reason(match: dict[str, Any], anchors: list[dict[str, Any]], graph_keys: set[tuple[str, str]]) -> str:

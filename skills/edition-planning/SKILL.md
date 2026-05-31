@@ -13,6 +13,14 @@ The goal is not to publish every assignment. The goal is to over-dispatch
 well-scoped lane work so editors can choose the best outputs for the available
 publication slots.
 
+## Which Doc/Skill To Use First
+
+| Need | Start here |
+| --- | --- |
+| Planning run | This skill |
+| Run/review cycle | [`skills/newsroom-story-cycle/SKILL.md`](/Users/ryan/Projects/Papyrus/skills/newsroom-story-cycle/SKILL.md) |
+| Data contract truth | [`docs/automated-publication-research-workflow.md`](/Users/ryan/Projects/Papyrus/docs/automated-publication-research-workflow.md) |
+
 ## Read First
 
 - `AGENTS.md`: project rules, data boundaries, auth lanes, and layout
@@ -28,7 +36,7 @@ publication slots.
   research plus parallel reporting agents for one topic.
 - `amplify/data/resource.ts`: `Assignment`, `AssignmentEvent`,
   `SemanticRelation`, `Edition`, `Item`, and related auth rules.
-- `scripts/content-cli.cjs`: current authoring commands. Do not invent CLI
+- `papyrus`: current authoring commands. Do not invent CLI
   commands that are not present.
 
 If the edition depends on fresh corpus evidence, run the reference-intake and
@@ -67,6 +75,80 @@ reference/category/graph state, not guess from stale local files.
 - Keep Papyrus publication-neutral. Edition plans, queues, and assignments
   should use configured categories, desks, corpora, doctrine, and references,
   not hard-coded pilot subject matter.
+
+## How Edition Planning Should Work
+
+Edition planning is **not** “pick one desk name and stop.” It is a stacked set
+of decisions:
+
+1. **Edition theme (phase 1, one per edition):** A coverage concept and headline
+   theme for the whole issue, grounded in knowledge-base signals (reference
+   velocity, concept ranking movement, coverage gaps, prior edition themes).
+   `poetry run papyrus knowledge signals trend-report` is the first-pass signal
+   feed; `poetry run papyrus editions plan` can materialize multiple ranked
+   theme candidates from that report.
+2. **Optional / rotating desk (phase 2, at most one):** Which floating desk
+   (Arts, Gaming, Health, …) complements the theme without repeating recent
+   optional-desk history. This is **not** the edition theme. A phase-2 post that
+   says “Arts” is proposing the optional desk, not replacing the phase-1 topic.
+3. **Slot fill (phase 3, per desk):** For each confirmed canonical desk plus the
+   optional desk when selected, create `EditionSlot` rows from section budgets,
+   then dispatch `ceil(slots × 1.5)` **reporting** candidates per desk. Each
+   candidate is a distinct story angle bound to a slot rank (`candidateRank`,
+   `slotRank`, angle lens). Editors later cull section-first and select winners
+   into slots.
+
+What exists today vs what is still thin:
+
+| Layer | Intended | Current automation |
+| --- | --- | --- |
+| Theme ranking | KB trends + prior editions | `signals trend-report` + optional `editions plan`; CLI `run-story-cycle` still takes an explicit `--topic` |
+| Per-slot stories | Ranked candidates per slot from references/concepts | Phase 3 lists assignments; titles are template `Report {topic} for {desk}: {angle}` until richer ranking lands |
+| Prior editions | Avoid repeating themes/desks | Phase 2 uses confirmed optional-desk metadata only; full edition-theme memory is not wired yet |
+| Research execution | Private packets per assignment | `--through research` / `--through reporting` after dispatch |
+
+Agents should run **plan → rotating-desk → (automatic phase 3 on apply)** for a
+new edition, then research/reporting. An empty forum on the nearest upcoming
+edition usually means planning has not been re-run after a purge, not that the
+UI picked the wrong default edition.
+
+## Edition Slot Plan + Dispatch Checklist
+
+1. Create or update the dated private `Edition`.
+2. Materialize `EditionSlot` rows from section budgets before dispatch.
+3. Compute section dispatch as `ceil(sectionSlots * 1.5)` by default.
+4. Dispatch reporting candidates with deterministic `candidateRank`.
+5. Bind each reporting assignment to a concrete slot at creation time:
+   - `Assignment.metadata.slotTarget` must include `slotId`, `slotLineageId`,
+     `sectionKey`, `slotRank`, `candidateRank`, and `dispatchCount`.
+   - write `Assignment --targets_slot--> EditionSlot`.
+6. Keep culling section-first by default; cross-section substitution requires
+   explicit editor override.
+7. Run edition planning as **three sequential messages** on the canonical
+   `edition_forum` thread (same thread, increasing sequence numbers):
+   - **Phase 1 — edition theme:** proposed theme and coverage concept only.
+     Do not treat floating/rotating desks (Arts, Gaming, Health, etc.) as the
+     edition theme in this message.
+   - **Phase 2 — optional / rotating desk:** after the theme is accepted, run
+     `procedures/newsroom/rotating_section_selector.tac` with grounded prior
+     optional-desk confirmations only, then post the proposed desk on the same
+     edition thread.
+   - **Phase 3 — reporting dispatch:** after desks are confirmed (canonical plus
+     selected optional desk when applicable), post reporting assignment
+     candidates for each slot using the default `ceil(slots * 1.5)` overassignment.
+     Defer phase 3 until phase 2 completes when optional desks are still provisional.
+   - Re-running the same Coverage Theme plan for the same edition must not post
+     duplicate phase-1 kickoff messages when the kickoff body, summary, or
+     `importRunId` already exists on the canonical thread.
+   - When a later planning pass materially changes the edition topic or posture,
+     fork a new forum thread (suffix `-run-<run-id>`) and post a re-plan update
+     that links back to the prior kickoff thread in thread metadata
+     (`parentThreadId`, `kickoffKind: replan`).
+8. Post phase-1 as **proposals**, not decisions:
+   - proposed edition theme and coverage concept;
+   - explicit steering window for human forum replies (default 48 hours);
+   - pointers that phases 2 and 3 will follow on the same thread.
+9. Do not create `Item` or `EditionItem` during plan/dispatch.
 
 ## Current Safe Workflow
 
@@ -210,6 +292,12 @@ Use `SemanticRelation` rows to make assignment context navigable:
 - `targets_lane`: assignment to the editorial-form `SemanticNode`, such as
   `editorial.form.reporting`, `editorial.form.analysis`, or
   `editorial.form.briefs`.
+- `targets_slot`: reporting assignment to its concrete `EditionSlot` at
+  dispatch time. Keep `slotTarget` metadata aligned with this relation.
+- Forum anchors (thread model, not relation-only):
+  - `edition_forum`: `primaryAnchorKind = "edition"`, `primaryAnchorId = editionId`.
+  - `section_forum`: `primaryAnchorKind = "newsroom_section"`,
+    `primaryAnchorId = sectionId`, `primaryAnchorLineageId = editionId`.
 - `uses_evidence`: assignment to references or comments that support the task.
 - `uses_signal`: assignment to graph concepts or relations that influenced the
   opportunity score.
@@ -229,13 +317,13 @@ Theme: one shared topic or coverage question worked through several section
 lenses. The older `run-story-cycle` name remains as compatibility language.
 
 ```bash
-poetry run papyrus-newsroom signals trend-report \
+poetry run papyrus knowledge signals trend-report \
   --corpus-key <corpus-key> \
   --topic "<topic>" \
   --sections <section-key>,<section-key> \
   --json
 
-poetry run papyrus-newsroom coverage-themes run \
+poetry run papyrus assignments run-story-cycle \
   --date YYYY-MM-DD \
   --topic "<topic>" \
   --category <category-key> \
@@ -245,7 +333,47 @@ poetry run papyrus-newsroom coverage-themes run \
   --through reporting \
   --json
 
-poetry run papyrus-newsroom story-budget output \
+### Edition forum messages (agent contract)
+
+After a full planning kickoff, the canonical `edition_forum` thread should have
+**up to three posts in order** (same thread, increasing `sequenceNumber`):
+
+| Seq | Phase | Message summary prefix | CLI step |
+| --- | --- | --- | --- |
+| 1 | Theme | Thread title = derived spine headline; kickoff body has `## Why this edition` | `--through plan` |
+| 2 | Optional desk | `Optional desk: {desk}` | `--through rotating-desk` |
+| 3 | Reporting dispatch | `Reporting candidates: {spine}` | End of `rotating-desk` apply, or end of `plan` when no optional desk is pending |
+
+Phase 3 message bodies list reporting assignment candidates per desk only (no
+process copy about slot math or overassignment in the forum post). The pipeline
+still uses `ceil(slots * 1.5)` overassignment when materializing assignments.
+Do not post phase 3 until phase 2 confirms
+the optional desk when `culture`/Arts-style provisional desks are in the plan.
+
+Typical new edition (e.g. `--sections culture,methods`):
+
+```bash
+poetry run papyrus assignments run-story-cycle ... --through plan
+poetry run papyrus assignments run-story-cycle ... --through rotating-desk --allow-fallback
+# Message 3 is posted automatically on the second command when --dry-run is not set.
+```
+
+Phase-specific flags:
+
+- `--through plan --refresh-forum-kickoff` replaces phase-1 theme posts only.
+- `--through plan --refresh-forum` soft-deletes all three planning forum posts, then re-posts message 1; run `--through rotating-desk` next for messages 2–3.
+- `--through rotating-desk` runs phase-2 optional desk selection and posts message 2; posts message 3 when apply is on.
+- `--selected-optional-desk arts` skips the selector agent and uses a human desk choice.
+- `--skip-rotating-desk` leaves optional desks pending (no phase-2/3 optional dispatch).
+- `--include-optional-desks` restores legacy behavior (dispatch every requested optional desk immediately, no phase-2 gate).
+
+Seed the rotating-desk procedure before cloud runs:
+
+```bash
+poetry run papyrus procedures seed-required
+```
+
+poetry run papyrus assignments story-cycle-output \
   --run-id <coverage-theme-run-id> \
   --json
 ```
@@ -257,7 +385,7 @@ default stop point is through Reporting. Do not auto-select reporting packets,
 run copywriting, create `Item` rows, or create `EditionItem` rows from this
 command.
 
-Use `poetry run papyrus-newsroom editions plan` when the edition budget should
+Use `poetry run papyrus editions plan` when the edition budget should
 be generated from a signal report plus section slots. Its target behavior:
 
 - create or update the dated private `Edition` planning record;
@@ -280,7 +408,7 @@ After planning or dispatching edition assignments:
 - list the expected queues with the current assignment CLI, for example:
 
   ```bash
-  npm run content -- assignments list \
+  poetry run papyrus assignments list \
     --queue edition:<editionSlug>:<sectionKey> \
     --status open
   ```

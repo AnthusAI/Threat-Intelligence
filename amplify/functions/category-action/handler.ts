@@ -8,6 +8,10 @@ import { putJsonModelPayload, putTextModelPayload, readJsonModelPayload } from "
 type ReviewHandler = Schema["reviewSteeringProposal"]["functionHandler"];
 type ReferenceCurationHandler = Schema["reviewReferenceCuration"]["functionHandler"];
 type ReferenceQualityHandler = Schema["setReferenceQualityRating"]["functionHandler"];
+type ReferenceInsightHandler = Schema["createReferenceInsight"]["functionHandler"];
+type MoveReferenceCorpusHandler = Schema["moveReferenceCorpus"]["functionHandler"];
+type StartReferenceCurationHandler = Schema["startReferenceCuration"]["functionHandler"];
+type GetReferenceCurationStatusHandler = Schema["getReferenceCurationStatus"]["functionHandler"];
 type CreateCategorySetDraftHandler = Schema["createCategorySetDraft"]["functionHandler"];
 type PromoteCategorySetDraftHandler = Schema["promoteCategorySetDraft"]["functionHandler"];
 type DiscardCategorySetDraftHandler = Schema["discardCategorySetDraft"]["functionHandler"];
@@ -19,6 +23,10 @@ type CategoryActionEvent =
   | Parameters<ReviewHandler>[0]
   | Parameters<ReferenceCurationHandler>[0]
   | Parameters<ReferenceQualityHandler>[0]
+  | Parameters<ReferenceInsightHandler>[0]
+  | Parameters<MoveReferenceCorpusHandler>[0]
+  | Parameters<StartReferenceCurationHandler>[0]
+  | Parameters<GetReferenceCurationStatusHandler>[0]
   | Parameters<CreateCategorySetDraftHandler>[0]
   | Parameters<PromoteCategorySetDraftHandler>[0]
   | Parameters<DiscardCategorySetDraftHandler>[0]
@@ -50,17 +58,40 @@ const CATEGORY_PROPOSAL_KINDS = new Set([
 const NEWSROOM_SUMMARY_PAYLOAD_ID = "knowledge-raw-payload-newsroom-summary-current";
 const NEWSROOM_SUMMARY_PAYLOAD_OWNER_KIND = "knowledgeRawPayload";
 const SUMMARY_STALE_AFTER_MS = 15 * 60 * 1000;
+const REFERENCE_CURATION_ASSIGNMENT_TYPE = "curation.reference-refresh";
+const REFERENCE_CURATION_STAGE_KEYS = [
+  "identifier",
+  "publicationDate",
+  "titleSubtitle",
+  "summary",
+  "topicPredictions",
+] as const;
+const DEFAULT_REFERENCE_CURATION_POLICY = {
+  recomputeIdentifier: true,
+  recomputePublicationDate: true,
+  recomputeTitle: true,
+  recomputeSubtitle: true,
+  recomputeSummary: true,
+  recomputeTopicPredictions: true,
+  recomputeQuality: false,
+  recomputeCorpus: false,
+};
+const REFERENCE_REVIEWED_FEED_KEY = "references#reviewed";
 
 let clientPromise: Promise<DataClient> | null = null;
 
 export const handler = async (event: CategoryActionEvent) => {
   const fieldName = normalizeOptionalString(event.info?.fieldName) ?? normalizeOptionalString((event as { fieldName?: string | null }).fieldName);
-  if (fieldName === "reviewReferenceCuration") {
-    return reviewReferenceCuration(event as Parameters<ReferenceCurationHandler>[0]);
+  if (!fieldName) {
+    throw new Error("Unsupported steering action: missing GraphQL field name.");
   }
-  if (fieldName === "setReferenceQualityRating") {
-    return setReferenceQualityRating(event as Parameters<ReferenceQualityHandler>[0]);
-  }
+  if (fieldName === "reviewSteeringProposal") return reviewSteeringProposal(event as Parameters<ReviewHandler>[0]);
+  if (fieldName === "reviewReferenceCuration") return reviewReferenceCuration(event as Parameters<ReferenceCurationHandler>[0]);
+  if (fieldName === "setReferenceQualityRating") return setReferenceQualityRating(event as Parameters<ReferenceQualityHandler>[0]);
+  if (fieldName === "createReferenceInsight") return createReferenceInsight(event as Parameters<ReferenceInsightHandler>[0]);
+  if (fieldName === "moveReferenceCorpus") return moveReferenceCorpus(event as Parameters<MoveReferenceCorpusHandler>[0]);
+  if (fieldName === "startReferenceCuration") return startReferenceCuration(event as Parameters<StartReferenceCurationHandler>[0]);
+  if (fieldName === "getReferenceCurationStatus") return getReferenceCurationStatus(event as Parameters<GetReferenceCurationStatusHandler>[0]);
   if (fieldName === "createCategorySetDraft") return createCategorySetDraft(event as Parameters<CreateCategorySetDraftHandler>[0]);
   if (fieldName === "promoteCategorySetDraft") return promoteCategorySetDraft(event as Parameters<PromoteCategorySetDraftHandler>[0]);
   if (fieldName === "discardCategorySetDraft") return discardCategorySetDraft(event as Parameters<DiscardCategorySetDraftHandler>[0]);
@@ -68,24 +99,7 @@ export const handler = async (event: CategoryActionEvent) => {
   if (fieldName === "updateDraftCategory") return updateDraftCategory(event as Parameters<UpdateDraftCategoryHandler>[0]);
   if (fieldName === "archiveDraftCategory") return archiveDraftCategory(event as Parameters<ArchiveDraftCategoryHandler>[0]);
   if (fieldName === "reviewReferenceTopicLabel") return reviewReferenceTopicLabel(event as Parameters<ReviewReferenceTopicLabelHandler>[0]);
-  if (fieldName && fieldName !== "reviewSteeringProposal") {
-    throw new Error(`Unsupported steering action ${fieldName}.`);
-  }
-  if ("sourceCategorySetId" in event.arguments) return createCategorySetDraft(event as Parameters<CreateCategorySetDraftHandler>[0]);
-  if ("categorySetId" in event.arguments && !("proposalId" in event.arguments)) {
-    if ("displayName" in event.arguments) return createDraftCategory(event as Parameters<CreateDraftCategoryHandler>[0]);
-    return promoteCategorySetDraft(event as Parameters<PromoteCategorySetDraftHandler>[0]);
-  }
-  if ("categoryId" in event.arguments && "referenceId" in event.arguments) return reviewReferenceTopicLabel(event as Parameters<ReviewReferenceTopicLabelHandler>[0]);
-  if ("categoryId" in event.arguments) {
-    if ("displayName" in event.arguments || "parentCategoryKey" in event.arguments) return updateDraftCategory(event as Parameters<UpdateDraftCategoryHandler>[0]);
-    return archiveDraftCategory(event as Parameters<ArchiveDraftCategoryHandler>[0]);
-  }
-  if ("referenceId" in event.arguments && "rating" in event.arguments) {
-    return setReferenceQualityRating(event as Parameters<ReferenceQualityHandler>[0]);
-  }
-  if ("referenceId" in event.arguments) return reviewReferenceCuration(event as Parameters<ReferenceCurationHandler>[0]);
-  return reviewSteeringProposal(event as Parameters<ReviewHandler>[0]);
+  throw new Error(`Unsupported steering action ${fieldName}.`);
 };
 
 async function reviewSteeringProposal(event: Parameters<ReviewHandler>[0]) {
@@ -179,27 +193,23 @@ async function reviewReferenceCuration(event: Parameters<ReferenceCurationHandle
       curationStatusUpdatedBy: actor,
       curationStatusReason: note,
       newsroomFeedKey: reference.newsroomFeedKey ?? "references",
+      reviewedFeedKey: reviewedFeedKeyForStatus(nextStatus),
       updatedAt: now,
     }),
     "update Reference curation status",
   );
 
   await requireDataResult(
-    client.models.Message.create({
+    client.models.Message.create(buildCanonicalMessageInput({
       id: messageId,
       messageKind: "reference_curation",
       messageDomain: "commentary",
-      status: "active",
       summary: `${referenceTitle}: ${nextStatus}`,
       source: "newsroom",
-      importRunId: null,
       authorSub: actorSub,
-      authorUserProfileId: null,
       authorLabel: actor,
-      createdAt: now,
-      updatedAt: now,
-      newsroomFeedKey: "messages",
-    }),
+      now,
+    })),
     "create Message",
   );
   await putTextModelPayload(
@@ -367,6 +377,7 @@ async function setReferenceQualityRating(event: Parameters<ReferenceQualityHandl
       curationStatusUpdatedBy: actor,
       curationStatusReason: note,
       newsroomFeedKey: reference.newsroomFeedKey ?? "references",
+      reviewedFeedKey: reviewedFeedKeyForStatus(nextStatus),
       updatedAt: now,
     }),
     "update Reference quality status",
@@ -387,6 +398,400 @@ async function setReferenceQualityRating(event: Parameters<ReferenceQualityHandl
     rating,
     status: nextStatus,
     relationId,
+  };
+}
+
+async function createReferenceInsight(event: Parameters<ReferenceInsightHandler>[0]) {
+  const client = await getDataClient();
+  const referenceId = normalizeRequiredString(event.arguments.referenceId, "referenceId");
+  const summary = normalizeRequiredString(event.arguments.summary, "summary");
+  const body = normalizeRequiredString(event.arguments.body, "body");
+  const reference = await getRequiredRecord(client.models.Reference, referenceId, "Reference");
+  const now = new Date().toISOString();
+  const actorSub = normalizeOptionalString(event.arguments.actorSub) ?? getIdentitySub(event);
+  const actorLabel = normalizeOptionalString(event.arguments.actorLabel) ?? getIdentityLabel(event);
+  const actor = actorLabel ?? actorSub ?? "Papyrus newsroom";
+  const referenceLineageId = normalizeOptionalString(reference.lineageId) ?? referenceId;
+  const messageId = `message-reference-insight-${safeId(referenceLineageId)}-${now.replace(/[^0-9TZ]/g, "")}-${randomUUID().slice(0, 8)}`;
+  const relationId = `semantic-relation-${hashStable([
+    `message#${messageId}`,
+    "insight_about",
+    `reference#${referenceId}`,
+  ]).slice(0, 24)}`;
+
+  await requireDataResult(
+    client.models.Message.create(buildCanonicalMessageInput({
+      id: messageId,
+      messageKind: "insight",
+      messageDomain: "knowledge",
+      summary,
+      source: "newsroom",
+      authorSub: actorSub,
+      authorLabel: actor,
+      now,
+    })),
+    "create insight Message",
+  );
+  await putTextModelPayload(
+    client as any,
+    { ownerKind: "message", ownerId: messageId, ownerLineageId: messageId },
+    "message_body",
+    "message",
+    body,
+    { filename: "message.md", mediaType: "text/markdown", now },
+  );
+  await putJsonModelPayload(
+    client as any,
+    { ownerKind: "message", ownerId: messageId, ownerLineageId: messageId },
+    "metadata",
+    "metadata",
+    {
+      kind: "reference.insight.created",
+      targetKind: "reference",
+      targetId: referenceId,
+      targetLineageId: referenceLineageId,
+    },
+    { filename: "metadata.json", now },
+  );
+  await requireDataResult(
+    client.models.SemanticRelation.create({
+      id: relationId,
+      relationState: "current",
+      predicate: "insight_about",
+      ...semanticRelationTypeFieldsForPredicate("insight_about"),
+      subjectKind: "message",
+      subjectId: messageId,
+      subjectLineageId: messageId,
+      subjectVersionNumber: 1,
+      objectKind: "reference",
+      objectId: referenceId,
+      objectLineageId: referenceLineageId,
+      objectVersionNumber: typeof reference.versionNumber === "number" ? reference.versionNumber : null,
+      subjectStateKey: semanticStateKey("message", messageId),
+      objectStateKey: semanticStateKey("reference", referenceLineageId),
+      objectSubjectStateKey: `${semanticStateKey("reference", referenceLineageId)}#message`,
+      predicateObjectStateKey: `insight_about#${semanticStateKey("reference", referenceLineageId)}`,
+      subjectVersionKey: semanticVersionKey("message", messageId),
+      objectVersionKey: semanticVersionKey("reference", referenceId),
+      score: 1,
+      confidence: null,
+      rank: 1,
+      classifierId: null,
+      modelVersion: null,
+      reviewRecommended: false,
+      sourceSnapshotId: null,
+      importRunId: null,
+      importedAt: now,
+      createdAt: now,
+      updatedAt: now,
+      newsroomFeedKey: "semanticRelations",
+      metadata: JSON.stringify({
+        kind: "reference.insight",
+        summary,
+        actor,
+      }),
+    }),
+    "create insight_about relation",
+  );
+  await updateNewsroomSummaryForSemanticRelationDelta(
+    client,
+    {
+      relationTypeKey: "insight_about",
+      relationDomain: "commentary",
+      subjectKind: "message",
+      objectKind: "reference",
+    },
+    1,
+    now,
+  );
+  return {
+    ok: true,
+    referenceId,
+    messageId,
+    relationId,
+    status: "created",
+  };
+}
+
+async function moveReferenceCorpus(event: Parameters<MoveReferenceCorpusHandler>[0]) {
+  const client = await getDataClient();
+  const referenceId = normalizeRequiredString(event.arguments.referenceId, "referenceId");
+  const targetCorpusId = normalizeRequiredString(event.arguments.corpusId, "corpusId");
+  const requested = await getRequiredRecord(client.models.Reference, referenceId, "Reference");
+  const referenceLineageId = normalizeOptionalString(requested.lineageId) ?? referenceId;
+  const lineageVersions = await listReferenceVersionsByLineage(client, referenceLineageId);
+  const current = selectCurrentReferenceVersion(lineageVersions) ?? requested;
+  const previousCorpusId = normalizeRequiredString(current.corpusId, "reference.corpusId");
+  if (previousCorpusId === targetCorpusId) {
+    return {
+      ok: true,
+      referenceId: normalizeRequiredString(current.id, "reference.id"),
+      referenceLineageId,
+      previousReferenceId: normalizeRequiredString(current.id, "reference.id"),
+      previousCorpusId,
+      corpusId: targetCorpusId,
+      status: "unchanged",
+    };
+  }
+
+  const now = new Date().toISOString();
+  const actorSub = normalizeOptionalString(event.arguments.actorSub) ?? getIdentitySub(event);
+  const actorLabel = normalizeOptionalString(event.arguments.actorLabel) ?? getIdentityLabel(event);
+  const actor = actorLabel ?? actorSub ?? "Papyrus newsroom";
+  const nextVersionNumber = Math.max(
+    ...lineageVersions.map((entry) => normalizeOptionalPositiveInteger(entry.versionNumber) ?? 0),
+    normalizeOptionalPositiveInteger(current.versionNumber) ?? 0,
+  ) + 1;
+  const nextReferenceId = `reference-${safeId(referenceLineageId)}-v${nextVersionNumber}-${randomUUID().slice(0, 8)}`;
+  const curationStatus = normalizeOptionalString(current.curationStatus) ?? "pending";
+
+  if (normalizeOptionalString(current.versionState) === "current") {
+    await requireDataResult(
+      client.models.Reference.update({
+        id: normalizeRequiredString(current.id, "reference.id"),
+        versionState: "superseded",
+        updatedAt: now,
+      }),
+      "supersede current Reference version",
+    );
+  }
+
+  await requireDataResult(
+    client.models.Reference.create({
+      id: nextReferenceId,
+      lineageId: referenceLineageId,
+      versionNumber: nextVersionNumber,
+      previousVersionId: normalizeRequiredString(current.id, "reference.id"),
+      versionState: "current",
+      versionCreatedAt: now,
+      versionCreatedBy: actor,
+      changeReason: normalizeOptionalString(event.arguments.note) ?? `move-corpus:${previousCorpusId}->${targetCorpusId}`,
+      contentHash: normalizeOptionalString(current.contentHash),
+      corpusId: targetCorpusId,
+      externalItemId: normalizeRequiredString(current.externalItemId, "reference.externalItemId"),
+      title: normalizeOptionalString(current.title),
+      authors: compactStringArray(current.authors) ?? [],
+      sourceUri: normalizeOptionalString(current.sourceUri),
+      storagePath: normalizeOptionalString(current.storagePath),
+      mediaType: normalizeOptionalString(current.mediaType),
+      byteSize: normalizeOptionalPositiveInteger(current.byteSize),
+      sha256: normalizeOptionalString(current.sha256),
+      sourcePublishedAt: normalizeOptionalString(current.sourcePublishedAt),
+      sourceUpdatedAt: normalizeOptionalString(current.sourceUpdatedAt),
+      retrievedAt: normalizeOptionalString(current.retrievedAt),
+      importRunId: normalizeOptionalString(current.importRunId),
+      importedAt: normalizeOptionalString(current.importedAt),
+      createdAt: normalizeOptionalString(current.createdAt) ?? now,
+      curationStatus,
+      curationStatusKey: `${targetCorpusId}#${curationStatus}`,
+      curationStatusUpdatedAt: normalizeOptionalString(current.curationStatusUpdatedAt) ?? now,
+      curationStatusUpdatedBy: normalizeOptionalString(current.curationStatusUpdatedBy) ?? actor,
+      curationStatusReason: normalizeOptionalString(current.curationStatusReason),
+      newsroomFeedKey: normalizeOptionalString(current.newsroomFeedKey) ?? "references",
+      reviewedFeedKey: normalizeOptionalString(current.reviewedFeedKey) ?? reviewedFeedKeyForStatus(curationStatus),
+      updatedAt: now,
+    }),
+    "create moved Reference version",
+  );
+
+  return {
+    ok: true,
+    referenceId: nextReferenceId,
+    referenceLineageId,
+    previousReferenceId: normalizeRequiredString(current.id, "reference.id"),
+    previousCorpusId,
+    corpusId: targetCorpusId,
+    status: "moved",
+  };
+}
+
+async function startReferenceCuration(event: Parameters<StartReferenceCurationHandler>[0]) {
+  const client = await getDataClient();
+  const referenceId = normalizeRequiredString(event.arguments.referenceId, "referenceId");
+  const reference = await getRequiredRecord(client.models.Reference, referenceId, "Reference");
+  const referenceLineageId = normalizeOptionalString(reference.lineageId) ?? referenceId;
+  const queueKey = `curation:reference-refresh:${referenceLineageId}`;
+  const existing = [
+    ...(await listAssignmentsByQueueStatus(client, `${queueKey}#open`)),
+    ...(await listAssignmentsByQueueStatus(client, `${queueKey}#claimed`)),
+  ].sort((left, right) => assignmentSortKey(left).localeCompare(assignmentSortKey(right)))[0];
+  if (existing?.id) {
+    return {
+      ok: true,
+      referenceId: normalizeRequiredString(reference.id, "reference.id"),
+      assignmentId: normalizeRequiredString(existing.id, "assignment.id"),
+      status: assignmentLifecycleStatusFromAssignmentStatus(normalizeOptionalString(existing.status) ?? "open"),
+      runId: normalizeRequiredString(existing.id, "assignment.id"),
+    };
+  }
+
+  const now = new Date().toISOString();
+  const actorSub = normalizeOptionalString(event.arguments.actorSub) ?? getIdentitySub(event);
+  const actorLabel = normalizeOptionalString(event.arguments.actorLabel) ?? getIdentityLabel(event);
+  const actor = actorLabel ?? actorSub ?? "Papyrus newsroom";
+  const policy = normalizeReferenceCurationPolicy(event.arguments.curationPolicy);
+  const assignmentId = `assignment-reference-curation-${safeId(referenceLineageId)}-${now.replace(/[^0-9TZ]/g, "")}-${randomUUID().slice(0, 8)}`;
+  const runId = assignmentId;
+  const assignmentTypeKey = REFERENCE_CURATION_ASSIGNMENT_TYPE;
+  const relationId = `semantic-relation-${hashStable([
+    `assignment#${assignmentId}`,
+    "requests_work_on",
+    `reference#${reference.id}`,
+  ]).slice(0, 24)}`;
+
+  await requireDataResult(
+    client.models.Assignment.create({
+      id: assignmentId,
+      assignmentTypeKey,
+      queueKey,
+      queueStatusKey: `${queueKey}#open`,
+      status: "open",
+      priority: 50,
+      title: `Re-curate reference: ${normalizeOptionalString(reference.title) ?? normalizeOptionalString(reference.externalItemId) ?? referenceId}`,
+      summary: "Recompute identifier, publication date, title/subtitle, summary, and topic predictions.",
+      assigneeType: null,
+      assigneeId: null,
+      assigneeKey: null,
+      claimedAt: null,
+      claimExpiresAt: null,
+      completedAt: null,
+      canceledAt: null,
+      corpusId: normalizeRequiredString(reference.corpusId, "reference.corpusId"),
+      categorySetId: null,
+      classifierId: null,
+      sectionId: null,
+      sectionKey: null,
+      sectionType: null,
+      sectionStatusKey: null,
+      sectionQueueStatusKey: null,
+      primaryFocusCategoryKey: null,
+      topicScopeCategoryKeys: [],
+      sourceSnapshotId: null,
+      importRunId: null,
+      createdBy: actor,
+      createdAt: now,
+      updatedAt: now,
+      newsroomFeedKey: "assignments",
+    }),
+    "create curation Assignment",
+  );
+  await requireDataResult(
+    client.models.AssignmentEvent.create({
+      id: `assignment-event-${assignmentId}-created`,
+      assignmentId,
+      assignmentTypeKey,
+      queueKey,
+      eventType: "created",
+      fromStatus: null,
+      toStatus: "open",
+      actorSub,
+      actorLabel: actor,
+      note: "Queued reference re-curation assignment.",
+      createdAt: now,
+    }),
+    "create curation AssignmentEvent",
+  );
+  await requireDataResult(
+    client.models.SemanticRelation.create({
+      id: relationId,
+      relationState: "current",
+      predicate: "requests_work_on",
+      ...semanticRelationTypeFieldsForPredicate("requests_work_on"),
+      subjectKind: "assignment",
+      subjectId: assignmentId,
+      subjectLineageId: assignmentId,
+      subjectVersionNumber: 1,
+      objectKind: "reference",
+      objectId: normalizeRequiredString(reference.id, "reference.id"),
+      objectLineageId: referenceLineageId,
+      objectVersionNumber: typeof reference.versionNumber === "number" ? reference.versionNumber : null,
+      subjectStateKey: semanticStateKey("assignment", assignmentId),
+      objectStateKey: semanticStateKey("reference", referenceLineageId),
+      objectSubjectStateKey: `${semanticStateKey("reference", referenceLineageId)}#assignment`,
+      predicateObjectStateKey: `requests_work_on#${semanticStateKey("reference", referenceLineageId)}`,
+      subjectVersionKey: semanticVersionKey("assignment", assignmentId),
+      objectVersionKey: semanticVersionKey("reference", normalizeRequiredString(reference.id, "reference.id")),
+      score: 1,
+      confidence: null,
+      rank: 1,
+      classifierId: null,
+      modelVersion: null,
+      reviewRecommended: false,
+      sourceSnapshotId: null,
+      importRunId: null,
+      importedAt: now,
+      createdAt: now,
+      updatedAt: now,
+      newsroomFeedKey: "semanticRelations",
+      metadata: JSON.stringify({
+        kind: "reference.curation.assignment",
+        runId,
+        curationPolicy: policy,
+      }),
+    }),
+    "create requests_work_on relation",
+  );
+  await putJsonModelPayload(
+    client as any,
+    { ownerKind: "assignment", ownerId: assignmentId, ownerLineageId: assignmentId },
+    "metadata",
+    "reference_curation_status",
+    {
+      kind: "reference.curation.status",
+      runId,
+      assignmentId,
+      referenceId: normalizeRequiredString(reference.id, "reference.id"),
+      referenceLineageId,
+      corpusId: normalizeRequiredString(reference.corpusId, "reference.corpusId"),
+      curationPolicy: policy,
+      lifecycleStatus: "queued",
+      status: "queued",
+      stageStatuses: defaultReferenceCurationStageStatuses("queued"),
+      changedOutputs: {},
+      error: null,
+      updatedAt: now,
+    },
+    { filename: "reference-curation-status.json", now },
+  );
+  return {
+    ok: true,
+    referenceId: normalizeRequiredString(reference.id, "reference.id"),
+    assignmentId,
+    status: "queued",
+    runId,
+  };
+}
+
+async function getReferenceCurationStatus(event: Parameters<GetReferenceCurationStatusHandler>[0]) {
+  const client = await getDataClient();
+  const assignmentId = normalizeRequiredString(event.arguments.assignmentId, "assignmentId");
+  const assignment = await getRequiredRecord(client.models.Assignment, assignmentId, "Assignment");
+  const payload = await readJsonModelPayload(
+    client as any,
+    "assignment",
+    assignmentId,
+    "metadata",
+    "reference_curation_status",
+  );
+  const assignmentStatus = normalizeOptionalString(assignment.status) ?? "open";
+  const lifecycleStatus = normalizeOptionalString(payload?.lifecycleStatus)
+    ?? assignmentLifecycleStatusFromAssignmentStatus(assignmentStatus);
+  const stageStatuses = (payload?.stageStatuses && typeof payload.stageStatuses === "object" && !Array.isArray(payload.stageStatuses))
+    ? payload.stageStatuses
+    : defaultReferenceCurationStageStatuses(lifecycleStatus);
+
+  return {
+    ok: true,
+    referenceId: normalizeOptionalString(payload?.referenceId),
+    assignmentId,
+    status: lifecycleStatus,
+    runId: normalizeOptionalString(payload?.runId) ?? assignmentId,
+    lifecycleStatus,
+    stageStatuses,
+    changedOutputs: (payload?.changedOutputs && typeof payload.changedOutputs === "object" && !Array.isArray(payload.changedOutputs))
+      ? payload.changedOutputs
+      : {},
+    error: payload?.error ?? null,
   };
 }
 
@@ -1086,10 +1491,126 @@ function semanticRelationTypeFieldsForPredicate(predicate: string): {
       relationDomain: "curation",
     };
   }
+  if (predicate === "insight_about") {
+    return {
+      relationTypeId: "semantic-relation-type-insight-about",
+      relationTypeKey: "insight_about",
+      relationDomain: "knowledge",
+    };
+  }
+  if (predicate === "requests_work_on") {
+    return {
+      relationTypeId: "semantic-relation-type-requests-work-on",
+      relationTypeKey: "requests_work_on",
+      relationDomain: "workflow",
+    };
+  }
   return {
     relationTypeId: `semantic-relation-type-${safeId(predicate)}`,
     relationTypeKey: predicate,
     relationDomain: "semantic",
+  };
+}
+
+async function listAssignmentsByQueueStatus(client: DataClient, queueStatusKey: string): Promise<any[]> {
+  const model = client.models.Assignment as any;
+  let nextToken: string | null | undefined;
+  const rows: any[] = [];
+  do {
+    const page = await model.listAssignmentsByQueueStatusAndPriority(
+      { queueStatusKey },
+      { limit: 100, nextToken },
+    );
+    assertNoDataErrors(page.errors, "list Assignment by queue status");
+    rows.push(...(page.data ?? []));
+    nextToken = page.nextToken;
+  } while (nextToken);
+  return rows;
+}
+
+function assignmentSortKey(assignment: any): string {
+  const priority = typeof assignment?.priority === "number"
+    ? assignment.priority
+    : Number.parseInt(String(assignment?.priority ?? "50"), 10) || 50;
+  const createdAt = normalizeOptionalString(assignment?.createdAt) ?? "";
+  const id = normalizeOptionalString(assignment?.id) ?? "";
+  return `${String(priority).padStart(6, "0")}#${createdAt}#${id}`;
+}
+
+async function listReferenceVersionsByLineage(client: DataClient, lineageId: string): Promise<any[]> {
+  const model = client.models.Reference as any;
+  let nextToken: string | null | undefined;
+  const rows: any[] = [];
+  do {
+    const page = await model.listReferencesByLineageAndVersion(
+      { lineageId },
+      { limit: 100, nextToken },
+    );
+    assertNoDataErrors(page.errors, "list Reference by lineage");
+    rows.push(...(page.data ?? []));
+    nextToken = page.nextToken;
+  } while (nextToken);
+  return rows;
+}
+
+function selectCurrentReferenceVersion(versions: any[]): any | null {
+  if (!versions.length) return null;
+  const sorted = [...versions].sort((left, right) => {
+    const leftCurrent = normalizeOptionalString(left.versionState) === "current" ? 1 : 0;
+    const rightCurrent = normalizeOptionalString(right.versionState) === "current" ? 1 : 0;
+    if (leftCurrent !== rightCurrent) return rightCurrent - leftCurrent;
+    const leftVersion = normalizeOptionalPositiveInteger(left.versionNumber) ?? 0;
+    const rightVersion = normalizeOptionalPositiveInteger(right.versionNumber) ?? 0;
+    if (leftVersion !== rightVersion) return rightVersion - leftVersion;
+    const leftTime = normalizeOptionalString(left.versionCreatedAt)
+      ?? normalizeOptionalString(left.updatedAt)
+      ?? "";
+    const rightTime = normalizeOptionalString(right.versionCreatedAt)
+      ?? normalizeOptionalString(right.updatedAt)
+      ?? "";
+    if (leftTime !== rightTime) return rightTime.localeCompare(leftTime);
+    const leftId = normalizeOptionalString(left.id) ?? "";
+    const rightId = normalizeOptionalString(right.id) ?? "";
+    return rightId.localeCompare(leftId);
+  });
+  return sorted[0] ?? null;
+}
+
+function normalizeReferenceCurationPolicy(value: unknown): typeof DEFAULT_REFERENCE_CURATION_POLICY {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { ...DEFAULT_REFERENCE_CURATION_POLICY };
+  }
+  const record = value as Record<string, unknown>;
+  return {
+    recomputeIdentifier: normalizeOptionalBoolean(record.recomputeIdentifier) ?? DEFAULT_REFERENCE_CURATION_POLICY.recomputeIdentifier,
+    recomputePublicationDate: normalizeOptionalBoolean(record.recomputePublicationDate) ?? DEFAULT_REFERENCE_CURATION_POLICY.recomputePublicationDate,
+    recomputeTitle: normalizeOptionalBoolean(record.recomputeTitle) ?? DEFAULT_REFERENCE_CURATION_POLICY.recomputeTitle,
+    recomputeSubtitle: normalizeOptionalBoolean(record.recomputeSubtitle) ?? DEFAULT_REFERENCE_CURATION_POLICY.recomputeSubtitle,
+    recomputeSummary: normalizeOptionalBoolean(record.recomputeSummary) ?? DEFAULT_REFERENCE_CURATION_POLICY.recomputeSummary,
+    recomputeTopicPredictions: normalizeOptionalBoolean(record.recomputeTopicPredictions) ?? DEFAULT_REFERENCE_CURATION_POLICY.recomputeTopicPredictions,
+    recomputeQuality: normalizeOptionalBoolean(record.recomputeQuality) ?? DEFAULT_REFERENCE_CURATION_POLICY.recomputeQuality,
+    recomputeCorpus: normalizeOptionalBoolean(record.recomputeCorpus) ?? DEFAULT_REFERENCE_CURATION_POLICY.recomputeCorpus,
+  };
+}
+
+function assignmentLifecycleStatusFromAssignmentStatus(status: string): "queued" | "running" | "completed" | "failed" | "degraded" {
+  const normalized = status.trim().toLowerCase();
+  if (normalized === "open") return "queued";
+  if (normalized === "claimed") return "running";
+  if (normalized === "completed") return "completed";
+  if (normalized === "degraded") return "degraded";
+  return "failed";
+}
+
+function defaultReferenceCurationStageStatuses(status: string): Record<(typeof REFERENCE_CURATION_STAGE_KEYS)[number], { status: string }> {
+  const normalized = status.trim().toLowerCase();
+  const next = normalized === "running" ? "running" : normalized === "queued" ? "queued" : "pending";
+  return {
+    identifier: { status: next },
+    publicationDate: { status: next },
+    titleSubtitle: { status: next },
+    summary: { status: next },
+    topicPredictions: { status: next },
   };
 }
 
@@ -1292,6 +1813,10 @@ function normalizeReferenceCurationAction(value: unknown): "accept" | "reject" |
   const action = normalizeRequiredString(value, "action").toLowerCase();
   if (action === "accept" || action === "reject" || action === "reopen" || action === "archive") return action;
   throw new Error(`Unsupported reference curation action ${action}.`);
+}
+
+function reviewedFeedKeyForStatus(status: string): string | null {
+  return status === "pending" ? null : REFERENCE_REVIEWED_FEED_KEY;
 }
 
 function referenceCurationStatusForAction(action: "accept" | "reject" | "reopen" | "archive"): "accepted" | "rejected" | "pending" | "archived" {
@@ -1602,6 +2127,39 @@ function increment(target: Record<string, number>, key: string, delta: number): 
   target[key] = Math.max(0, (target[key] ?? 0) + delta);
 }
 
+function buildCanonicalMessageInput(input: {
+  id: string;
+  messageKind: string;
+  messageDomain: string;
+  summary?: string | null;
+  source?: string | null;
+  authorSub?: string | null;
+  authorLabel?: string | null;
+  now: string;
+}) {
+  return {
+    id: input.id,
+    messageKind: input.messageKind,
+    messageDomain: input.messageDomain,
+    status: "active",
+    summary: input.summary ?? null,
+    source: input.source ?? "newsroom",
+    importRunId: null,
+    authorSub: input.authorSub ?? null,
+    authorUserProfileId: null,
+    authorLabel: input.authorLabel ?? null,
+    responseTarget: "none",
+    responseStatus: "COMPLETED",
+    responseOwner: "papyrus-category-action",
+    responseStartedAt: input.now,
+    responseCompletedAt: input.now,
+    responseError: null,
+    createdAt: input.now,
+    updatedAt: input.now,
+    newsroomFeedKey: "messages",
+  };
+}
+
 function normalizeRequiredString(value: unknown, fieldName: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new Error(`${fieldName} is required.`);
@@ -1613,6 +2171,23 @@ function normalizeOptionalString(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
+}
+
+function normalizeOptionalBoolean(value: unknown): boolean | null {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true") return true;
+    if (normalized === "false") return false;
+  }
+  return null;
+}
+
+function normalizeOptionalPositiveInteger(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const numeric = typeof value === "number" ? value : Number(value);
+  if (Number.isInteger(numeric) && numeric > 0) return numeric;
+  return null;
 }
 
 function normalizeStringArray(value: unknown): string[] | null {

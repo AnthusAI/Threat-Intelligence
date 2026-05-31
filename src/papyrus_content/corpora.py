@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 from .catalog import catalog_items
 from .env import PAPYRUS_ROOT, graphql_endpoint, storage_bucket_from_amplify_outputs
 from .ids import knowledge_corpus_id
+from .options import parse_boolean_option
 from .reference_policy import normalize_reference_curation_status
 from .source_readiness import SOURCE_READINESS_STATES, text_storage_path_for_reference
 
@@ -184,7 +185,7 @@ def build_corpus_sync_plan(corpus: dict[str, Any], *, direction: str, options: d
         args.extend(["--exclude", "analysis/*", "--exclude", "*/analysis/*"])
     if options.get("delete"):
         args.append("--delete")
-    dry_run = options.get("dry-run", True) and not options.get("apply")
+    dry_run = parse_boolean_option(options.get("dry-run"), default=False, label="--dry-run")
     if dry_run:
         args.append("--dryrun")
     return {
@@ -196,6 +197,78 @@ def build_corpus_sync_plan(corpus: dict[str, Any], *, direction: str, options: d
         "configuredBucket": parsed_prefix["bucket"],
         "mode": "dry-run" if dry_run else "apply",
         "args": args,
+    }
+
+
+def corpus_sync_from_cloud_decision(
+    corpus: dict[str, Any],
+    *,
+    force: bool = False,
+) -> tuple[bool, str, dict[str, Any]]:
+    local = read_local_corpus_catalog_summary(corpus)
+    s3 = read_s3_corpus_catalog_summary(corpus)
+    snapshot = {"local": local, "s3": s3}
+    if force:
+        if not s3["exists"]:
+            return False, "missing_s3_catalog", snapshot
+        return True, "forced", snapshot
+    if not local["exists"]:
+        if not s3["exists"]:
+            return False, "missing_s3_catalog", snapshot
+        return True, "missing_local_catalog", snapshot
+    if not s3["exists"]:
+        return False, "missing_s3_catalog", snapshot
+    if local["sha256"] != s3["sha256"]:
+        return True, "local_not_synced_to_s3", snapshot
+    return False, "already_synced", snapshot
+
+
+def maybe_sync_corpus_from_cloud_before_analysis(
+    *,
+    steering_config: dict[str, Any],
+    corpus_key: str,
+    options: dict[str, Any],
+    log_prefix: str = "analysis",
+) -> dict[str, Any]:
+    from .steering import require_corpus_config
+
+    corpus = require_corpus_config(steering_config, corpus_key, "--corpus-key")
+    force = parse_boolean_option(options.get("sync-from-cloud"), default=False, label="--sync-from-cloud")
+    skip = parse_boolean_option(options.get("skip-sync-from-cloud"), default=False, label="--skip-sync-from-cloud")
+    if skip:
+        print(f"{log_prefix}\tsync-from-cloud\tskipped\t--skip-sync-from-cloud", flush=True)
+        return {"skipped": True, "reason": "skip-sync-from-cloud", "corpusKey": corpus_key}
+
+    needed, reason, catalogs = corpus_sync_from_cloud_decision(corpus, force=force)
+    if not needed:
+        print(f"{log_prefix}\tsync-from-cloud\tskipped\t{reason}", flush=True)
+        return {
+            "skipped": True,
+            "reason": reason,
+            "corpusKey": corpus_key,
+            "localItems": catalogs["local"].get("items"),
+            "s3Items": catalogs["s3"].get("items"),
+        }
+
+    sync_options = dict(options)
+    if parse_boolean_option(options.get("dry-run"), default=False, label="--dry-run"):
+        sync_options["dry-run"] = True
+    plan = build_corpus_sync_plan(corpus, direction="from-cloud", options=sync_options)
+    print(
+        f"{log_prefix}\tsync-from-cloud\tstart\treason={reason}\t"
+        f"corpus={corpus_key}\tlocalItems={catalogs['local'].get('items')}\t"
+        f"s3Items={catalogs['s3'].get('items')}",
+        flush=True,
+    )
+    run_or_print_corpus_sync_plan(plan, sync_options)
+    print(f"{log_prefix}\tsync-from-cloud\tcomplete\tcorpus={corpus_key}\tmode={plan['mode']}", flush=True)
+    return {
+        "skipped": False,
+        "reason": reason,
+        "corpusKey": corpus_key,
+        "plan": plan,
+        "localItems": catalogs["local"].get("items"),
+        "s3Items": catalogs["s3"].get("items"),
     }
 
 
@@ -242,22 +315,22 @@ def next_corpus_bootstrap_command(status: dict[str, Any]) -> str:
         return "generate a sandbox steering config or pass the correct --config for this endpoint"
     if not status["local"]["exists"] or status["local"]["sha256"] != status["s3"]["sha256"]:
         return (
-            f"poetry run papyrus-content corpora sync-from-cloud --config <steering.yml> "
+            f"poetry run papyrus ops corpora sync-from-cloud --config <steering.yml> "
             f"--corpus-key {status['key']} --dry-run"
         )
     if status["graph"]["references"]["total"] != status["s3"]["items"]:
         return (
-            f"poetry run papyrus-content references register-catalog --config <steering.yml> "
-            f"--corpus-key {status['key']} --catalog {status['local']['path']} --apply"
+            f"poetry run papyrus references create-from-catalog --config <steering.yml> "
+            f"--corpus-key {status['key']} --catalog {status['local']['path']}"
         )
     if not status["readiness"]["readyForAcceptedAnalysis"]:
         return (
-            f"poetry run papyrus-content references source-status --config <steering.yml> "
+            f"poetry run papyrus references process-status --config <steering.yml> "
             f"--corpus-key {status['key']} --status accepted"
         )
     return (
-        "poetry run papyrus-content analysis create-reindex-assignment --config <steering.yml> "
-        f"--corpus-key {status['key']} --profile <profile> --apply"
+        "poetry run papyrus analysis create-reindex-assignment --config <steering.yml> "
+        f"--corpus-key {status['key']} --profile <profile>"
     )
 
 

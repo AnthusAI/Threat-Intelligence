@@ -59,8 +59,19 @@ def graphql_jwt() -> str:
     normalized = normalize_jwt(token)
     claims = decode_jwt_claims(normalized)
     if is_jwt_expired(claims):
-        raise ValueError("PAPYRUS_GRAPHQL_JWT is expired. Run: npm run auth:refresh-jwt -- --write-env .env")
+        raise ValueError("PAPYRUS_GRAPHQL_JWT is expired. Run: poetry run papyrus auth refresh-jwt --write-env .env")
     return normalized
+
+
+def graphql_timeout_seconds(default: float = 30.0) -> float:
+    raw = os.environ.get("PAPYRUS_GRAPHQL_TIMEOUT_SECONDS", "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
 
 
 def normalize_jwt(token: str) -> str:

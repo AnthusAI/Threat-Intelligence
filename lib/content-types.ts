@@ -47,6 +47,7 @@ export type EditionContent = {
   sections: EditionSection[];
   layoutPlan: EditionLayoutPlan;
   placeholderMode?: "emptyEdition";
+  suppressNewsDeskAppendix?: boolean;
   defaultPresentation?: EditionPresentationFormat;
   presentationPlans?: Partial<Record<EditionPresentationFormat, unknown>>;
   newsDeskAppendix?: NewsDeskAppendix | null;

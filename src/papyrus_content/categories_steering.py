@@ -26,9 +26,10 @@ from .ids import (
     semantic_node_lineage_id_for,
 )
 from .relation_types import semantic_relation_type_fields_for_predicate
+from .papyrus_config import resolve_topics_ignore_terms, resolve_topics_lexical_config_path
 
 DEFAULT_SEMANTIC_CONCEPTS_PATH = PAPYRUS_ROOT / "corpora" / "papyrus-semantic-concepts.yml"
-DEFAULT_LEXICAL_STEERING_PATH = PAPYRUS_ROOT / "corpora" / "papyrus-lexical-steering.yml"
+DEFAULT_LEXICAL_STEERING_PATH = PAPYRUS_ROOT / resolve_topics_lexical_config_path()
 GRAPH_PROPOSAL_KINDS = frozenset(
     {
         "topic-becomes-graph-entity",
@@ -91,11 +92,25 @@ def build_steering_import_records(bundle: dict[str, Any], options: dict[str, Any
     corpus_id = options.get("corpusId") or knowledge_corpus_id(corpus_context)
     classifier_id = (bundle.get("topic_set") or {}).get("classifier_id") or options.get("classifierId") or "unknown-classifier"
     source_snapshot_id = latest_snapshot_id(bundle.get("artifacts"), "topic-governance")
+    filtered_proposals, skipped_proposals = filter_ignored_proposals(
+        bundle.get("proposals") or [],
+        options.get("ignoredTerms"),
+    )
+    warning_payload = list(bundle.get("warnings") or [])
+    if skipped_proposals:
+        warning_payload.append(
+            {
+                "type": "lexical-ignore-filter",
+                "message": "Skipped steering proposals that matched configured ignored terms.",
+                "skippedCount": len(skipped_proposals),
+                "proposalIds": [proposal.get("proposal_id") for proposal in skipped_proposals if proposal.get("proposal_id")],
+            }
+        )
     import_run_id = (
         f"knowledge-import-{safe_id(corpus_id)}-{safe_id(classifier_id)}-"
-        f"{hash_short([bundle.get('generated_at'), len(bundle.get('proposals') or []), len(bundle.get('artifacts') or [])])}"
+        f"{hash_short([bundle.get('generated_at'), len(filtered_proposals), len(bundle.get('artifacts') or [])])}"
     )
-    category_set_id = category_set_id_for(classifier_id, corpus_id)
+    category_set_id = options.get("categorySetId") or category_set_id_for(classifier_id, corpus_id)
     records: list[dict[str, Any]] = []
 
     records.append(
@@ -128,16 +143,16 @@ def build_steering_import_records(bundle: dict[str, Any], options: dict[str, Any
                 "importedAt": now,
                 "itemCount": len(bundle.get("items") or []),
                 "categoryCount": len((bundle.get("topic_set") or {}).get("topics") or []),
-                "proposalCount": len(bundle.get("proposals") or []),
+                "proposalCount": len(filtered_proposals),
                 "artifactCount": len(bundle.get("artifacts") or []),
                 "referenceCount": 0,
                 "relationCount": 0,
-                "warningCount": len(bundle.get("warnings") or []),
+                "warningCount": len(warning_payload),
             },
         )
     )
     records.append(
-        raw_payload_record("importRun", import_run_id, "warnings", {"warnings": bundle.get("warnings") or []}, import_run_id, now)
+        raw_payload_record("importRun", import_run_id, "warnings", {"warnings": warning_payload}, import_run_id, now)
     )
     records.extend(seeded_semantic_concept_node_records({"corpusId": corpus_id, "importRunId": import_run_id, "now": now}))
 
@@ -172,7 +187,7 @@ def build_steering_import_records(bundle: dict[str, Any], options: dict[str, Any
     for artifact in bundle.get("artifacts") or []:
         records.extend(artifact_records(artifact, {"corpusId": corpus_id, "importRunId": import_run_id, "now": now}))
 
-    for proposal in bundle.get("proposals") or []:
+    for proposal in filtered_proposals:
         records.extend(
             proposal_records(
                 proposal,
@@ -527,17 +542,42 @@ def load_semantic_concept_seeds(filepath: str | None = None) -> tuple[dict[str, 
 @lru_cache(maxsize=4)
 def load_lexical_steering_config(filepath: str | None = None) -> dict[str, Any]:
     path = Path(filepath) if filepath else DEFAULT_LEXICAL_STEERING_PATH
-    parsed = yaml.safe_load(path.read_text(encoding="utf-8"))
-    if not isinstance(parsed, dict) or parsed.get("schemaVersion") != 1:
+    parsed: dict[str, Any] = {"schemaVersion": 1}
+    if path.exists():
+        parsed_value = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if not isinstance(parsed_value, dict) or parsed_value.get("schemaVersion") != 1:
+            raise ValueError(f"Invalid lexical steering config file: {path}")
+        parsed = parsed_value
+    elif filepath:
         raise ValueError(f"Invalid lexical steering config file: {path}")
     keyword_display = normalize_keyword_display(parsed.get("keywordDisplay") or {}, str(path))
     ignored_terms = [
-        normalize_lexical_rule_seed(rule, index, str(path)) for index, rule in enumerate(parsed.get("ignoredTerms") or [])
+        normalize_lexical_rule_seed(rule, index, str(path))
+        for index, rule in enumerate(parsed.get("ignoredTerms") or [])
     ]
+    ignored_terms.extend(
+        normalize_lexical_rule_seed({"term": term, "scope": "publication", "source": ".papyrus/config.yaml"}, index, ".papyrus/config.yaml")
+        for index, term in enumerate(resolve_topics_ignore_terms())
+    )
+    merged_terms: list[dict[str, Any]] = []
+    seen_terms: set[tuple[str, str, str, str, str, str]] = set()
+    for rule in ignored_terms:
+        key = (
+            str(rule.get("scope") or "publication"),
+            str(rule.get("normalizedTerm") or ""),
+            str(rule.get("corpusId") or ""),
+            str(rule.get("classifierId") or ""),
+            str(rule.get("categorySetId") or ""),
+            str(rule.get("categoryKey") or ""),
+        )
+        if key in seen_terms:
+            continue
+        seen_terms.add(key)
+        merged_terms.append(rule)
     return {
         "schemaVersion": 1,
         "keywordDisplay": keyword_display,
-        "ignoredTerms": ignored_terms,
+        "ignoredTerms": merged_terms,
         "configPath": str(path),
     }
 
@@ -546,6 +586,51 @@ def normalize_lexical_term(value: Any) -> str:
     text = unicodedata.normalize("NFKD", str(value or "").strip().lower())
     text = re.sub(r"[^\w\s-]+", " ", text, flags=re.UNICODE)
     return re.sub(r"\s+", " ", text).strip()
+
+
+def filter_ignored_proposals(
+    proposals: list[dict[str, Any]],
+    ignored_terms: list[str] | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    normalized_ignored_terms = {
+        normalize_lexical_term(term)
+        for term in (ignored_terms or [rule.get("term") for rule in load_lexical_steering_config().get("ignoredTerms") or []])
+        if normalize_lexical_term(term)
+    }
+    if not normalized_ignored_terms:
+        return proposals, []
+    filtered: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    for proposal in proposals:
+        if should_ignore_proposal(proposal, normalized_ignored_terms):
+            skipped.append(proposal)
+        else:
+            filtered.append(proposal)
+    return filtered, skipped
+
+
+def should_ignore_proposal(proposal: dict[str, Any], normalized_ignored_terms: set[str]) -> bool:
+    payload = proposal.get("payload") if isinstance(proposal.get("payload"), dict) else {}
+    candidates = [
+        proposal.get("display_name"),
+        proposal.get("title"),
+        proposal.get("category_key"),
+        proposal.get("topic_uid"),
+        payload.get("display_name"),
+        payload.get("name"),
+        payload.get("category_key"),
+        payload.get("topic_uid"),
+    ]
+    for candidate in candidates:
+        normalized = normalize_lexical_term(candidate)
+        if not normalized:
+            continue
+        if normalized in normalized_ignored_terms:
+            return True
+        words = {part for part in re.split(r"[\s._:/-]+", normalized) if part}
+        if words.intersection(normalized_ignored_terms):
+            return True
+    return False
 
 
 def record(model_name: str, expected: dict[str, Any]) -> dict[str, Any]:
@@ -786,6 +871,20 @@ def proposal_records(proposal: dict[str, Any], context: dict[str, Any]) -> list[
         or proposal_payload.get("subtitle")
     )
     description = proposal.get("description") or proposal_payload.get("description")
+    evidence_item_ids = compact_array(
+        evidence.get("item_ids")
+        or evidence.get("evidence_item_ids")
+        or proposal.get("evidence_item_ids")
+        or proposal_payload.get("evidence_item_ids")
+        or proposal_payload.get("document_ids")
+    )
+    suggested_seed_item_ids = ordered_unique(
+        [
+            *compact_array(proposal.get("suggested_seed_item_ids")),
+            *evidence_item_ids,
+            *compact_array(proposal_payload.get("document_ids")),
+        ]
+    )[:20]
     records = [
         record(
             "SteeringProposal",
@@ -807,14 +906,8 @@ def proposal_records(proposal: dict[str, Any], context: dict[str, Any]) -> list[
                 "shortTitle": short_title,
                 "subtitle": subtitle,
                 "description": description,
-                "evidenceItemIds": compact_array(
-                    evidence.get("item_ids")
-                    or evidence.get("evidence_item_ids")
-                    or proposal.get("evidence_item_ids")
-                    or proposal_payload.get("evidence_item_ids")
-                    or proposal_payload.get("document_ids")
-                ),
-                "suggestedSeedItemIds": compact_array(proposal.get("suggested_seed_item_ids")),
+                "evidenceItemIds": evidence_item_ids,
+                "suggestedSeedItemIds": suggested_seed_item_ids,
                 "suggestedHoldoutItemIds": compact_array(proposal.get("suggested_holdout_item_ids")),
                 "sourceSnapshotId": proposal.get("snapshot_id") or proposal_payload.get("graph_snapshot"),
                 "proposedAt": date_or_null(proposal.get("proposed_at") or proposal.get("generated_at")) or context["now"],
@@ -982,7 +1075,8 @@ def projection_relation_records(items: list[dict[str, Any]], context: dict[str, 
 
 
 def artifact_records(artifact: dict[str, Any], context: dict[str, Any]) -> list[dict[str, Any]]:
-    artifact_id = f"category-artifact-{safe_id(context['corpusId'])}-{hash_short(f'{artifact.get('kind')}:{artifact.get('artifact_id')}')}"
+    artifact_hash_input = f"{artifact.get('kind')}:{artifact.get('artifact_id')}"
+    artifact_id = f"category-artifact-{safe_id(context['corpusId'])}-{hash_short(artifact_hash_input)}"
     metadata = artifact.get("metadata") if isinstance(artifact.get("metadata"), dict) else {}
     return [
         record(
@@ -1633,6 +1727,18 @@ def compact_array(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     return [entry.strip() for entry in value if isinstance(entry, str) and entry.strip()]
+
+
+def ordered_unique(values: list[str]) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        normalized = value.strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append(normalized)
+    return deduped
 
 
 def string_array_from(value: Any) -> list[str]:

@@ -19,8 +19,14 @@ const { getAmplifyServerRuntime } = amplifyServerRuntime as typeof import("../..
 const EDITOR_GROUP = "editor";
 const ADMIN_GROUP = "admin";
 const NEWSROOM_SECTIONS_CONFIG_PATH = path.join(process.cwd(), "corpora", "papyrus-newsroom-sections.yml");
+const PUBLICATION_DOCTRINE_CONFIG_PATH = path.join(process.cwd(), "corpora", "papyrus-publication-doctrine.yml");
 const REQUIRED_PROCEDURES_CONFIG_PATH = path.join(process.cwd(), "corpora", "papyrus-required-procedures.json");
 const NEWSROOM_SECTION_TYPES = new Set(["canonical", "floating", "rotating"]);
+type UploadedImageThemeVariants = {
+  dark?: {
+    storagePath: string;
+  };
+};
 
 type DataClient = ReturnType<typeof generateClient<Schema>>;
 type NewsroomSectionSeed = {
@@ -37,6 +43,11 @@ type NewsroomSectionSeed = {
   assignmentGuidance: string | null;
   killCriteria: string | null;
   visualGuidance: string | null;
+};
+
+type PublicationDoctrineSeed = {
+  kind: "mission" | "policy";
+  body: string[];
 };
 
 type ProcedureSeed = {
@@ -107,6 +118,27 @@ const PROCEDURE_SEED_BY_KEY: Record<string, ProcedureSeed> = {
       max_evidence_items: 20,
     },
   },
+  "newsroom.rotating.section.selector": {
+    key: "newsroom.rotating.section.selector",
+    title: "Newsroom Rotating Desk Selector",
+    category: "newsroom",
+    description: "Recommends one optional floating/rotating desk for an edition using recent desk usage.",
+    versionLabel: "starter",
+    tactusSource: loadProcedureSeedSource("rotating_section_selector.tac"),
+    parameterSchema: {
+      type: "object",
+      required: ["edition_id", "accepted_theme"],
+      properties: {
+        edition_id: { type: "string" },
+        accepted_theme: { type: "string" },
+        coverage_key: { type: "string" },
+        candidate_sections_json: { type: "string" },
+        recent_usage_json: { type: "string" },
+        steering_notes: { type: "string" },
+      },
+    },
+    defaults: {},
+  },
   "newsroom.reporting.context": {
     key: "newsroom.reporting.context",
     title: "Newsroom Reporting Context",
@@ -130,6 +162,68 @@ const PROCEDURE_SEED_BY_KEY: Record<string, ProcedureSeed> = {
     defaults: {
       context_profile: "reporting",
     },
+  },
+  "newsroom.reference.summarization": {
+    key: "newsroom.reference.summarization",
+    title: "Newsroom Reference Summarization",
+    category: "newsroom",
+    description: "Generates source-voice reference summaries for curation metadata and summary messages.",
+    versionLabel: "starter",
+    tactusSource: loadProcedureSeedSource("reference_summarization.tac"),
+    parameterSchema: {
+      type: "object",
+      required: ["mode", "source_text"],
+      properties: {
+        mode: { type: "string" },
+        source_text: { type: "string" },
+        max_tokens: { type: "number" },
+        reference_title: { type: "string" },
+        source_uri: { type: "string" },
+        known_title: { type: "string" },
+        known_subtitle: { type: "string" },
+        media_type: { type: "string" },
+        doctrine_context_text: { type: "string" },
+        model: { type: "string" },
+        prompt_version: { type: "string" },
+      },
+    },
+    defaults: {
+      mode: "reference_summary",
+      max_tokens: 500,
+      model: "gpt-5.4-mini",
+    },
+  },
+  "ontology.relationship-explainer": {
+    key: "ontology.relationship-explainer",
+    title: "Ontology Relationship Explainer",
+    category: "ontology",
+    description: "Generates contextual explanations for SemanticRelation rows from resolved Papyrus graph context.",
+    versionLabel: "starter",
+    tactusSource: loadProcedureSeedSource("ontology_relationship_explainer.tac"),
+    parameterSchema: {
+      type: "object",
+      required: ["context_json"],
+      properties: {
+        context_json: { type: "object" },
+      },
+    },
+    defaults: {},
+  },
+  "ontology.concept-profiler": {
+    key: "ontology.concept-profiler",
+    title: "Ontology Concept Profiler",
+    category: "ontology",
+    description: "Synthesizes generated Concept profiles from fresh relation-specific explanations.",
+    versionLabel: "starter",
+    tactusSource: loadProcedureSeedSource("ontology_concept_profiler.tac"),
+    parameterSchema: {
+      type: "object",
+      required: ["context_json"],
+      properties: {
+        context_json: { type: "object" },
+      },
+    },
+    defaults: {},
   },
 };
 
@@ -170,7 +264,7 @@ async function main() {
       publishedAt: editionConfig.publishedAt,
       description: editionConfig.description,
       layoutPlan: toAwsJson(editionConfig.layoutPlan),
-      metadata: toAwsJson({ source: "fixture-seed" }),
+      metadata: toAwsJson(editionConfig.metadata),
     }, {
       lineageId: editionConfig.id,
       versionCreatedAt: editionConfig.publishedAt,
@@ -190,9 +284,10 @@ async function main() {
       publishedAt: editionConfig.publishedAt,
       description: editionConfig.description,
       layoutPlan: toAwsJson(editionConfig.layoutPlan),
-      metadata: toAwsJson({ source: "fixture-seed" }),
+      metadata: toAwsJson(editionConfig.metadata),
     });
     await seedNewsroomSections(editionConfig.publishedAt);
+    await seedPublicationDoctrine(editionConfig.publishedAt);
     await seedProcedureDefinitions(editionConfig.publishedAt);
 
     for (const [index, article] of orderedArticles.entries()) {
@@ -370,7 +465,7 @@ async function seedArticle(article: Article, index: number, editionConfig: SeedE
       maxHeight: asset.layout?.maxHeight,
       crop: asset.layout?.crop,
       wrapsText: asset.layout?.wrapsText,
-      metadata: toAwsJson(getMediaMetadata(asset)),
+      metadata: toAwsJson(getMediaMetadata(asset, uploaded.themeVariants)),
     });
     await upsert("PublishedMediaAsset", {
       id: `published-${mediaId}`,
@@ -396,7 +491,7 @@ async function seedArticle(article: Article, index: number, editionConfig: SeedE
       maxHeight: asset.layout?.maxHeight,
       crop: asset.layout?.crop,
       wrapsText: asset.layout?.wrapsText,
-      metadata: toAwsJson(getMediaMetadata(asset)),
+      metadata: toAwsJson(getMediaMetadata(asset, uploaded.themeVariants)),
     });
   }
 }
@@ -420,6 +515,41 @@ async function seedNewsroomSections(importedAt: string) {
       killCriteria: section.killCriteria,
       visualGuidance: section.visualGuidance,
       createdAt: importedAt,
+      updatedAt: importedAt,
+    });
+  }
+}
+
+async function seedPublicationDoctrine(importedAt: string) {
+  const doctrine = loadPublicationDoctrineSeeds();
+  for (const entry of doctrine) {
+    const details =
+      entry.kind === "mission"
+        ? {
+            id: "item-editorial-doctrine-mission-v1",
+            lineageId: "item-editorial-doctrine-mission",
+            slug: "editorial-doctrine-mission",
+            title: "Editorial Mission",
+          }
+        : {
+            id: "item-editorial-doctrine-policy-v1",
+            lineageId: "item-editorial-doctrine-policy",
+            slug: "editorial-doctrine-policy",
+            title: "Editorial Policy",
+          };
+    await upsert("Item", {
+      id: details.id,
+      lineageId: details.lineageId,
+      versionNumber: 1,
+      versionState: "current",
+      versionCreatedAt: importedAt,
+      versionCreatedBy: "amplify-seed",
+      type: "doctrine",
+      status: "private",
+      typeStatus: "doctrine#private",
+      slug: details.slug,
+      title: details.title,
+      body: entry.body,
       updatedAt: importedAt,
     });
   }
@@ -494,6 +624,24 @@ function loadNewsroomSectionSeeds(configPath = NEWSROOM_SECTIONS_CONFIG_PATH): N
   return parsed.sections.map((entry, index) => normalizeNewsroomSectionSeed(entry, index, configPath));
 }
 
+function loadPublicationDoctrineSeeds(configPath = PUBLICATION_DOCTRINE_CONFIG_PATH): PublicationDoctrineSeed[] {
+  const parsed = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
+    schemaVersion?: number;
+    doctrine?: Array<Record<string, unknown>>;
+  };
+  if (!parsed || parsed.schemaVersion !== 1 || !Array.isArray(parsed.doctrine)) {
+    throw new Error(`Invalid publication doctrine seed file: ${configPath}`);
+  }
+  const entries = parsed.doctrine.map((entry, index) => normalizePublicationDoctrineSeed(entry, index, configPath));
+  const byKind = new Map(entries.map((entry) => [entry.kind, entry]));
+  for (const kind of ["mission", "policy"] as const) {
+    if (!byKind.has(kind)) {
+      throw new Error(`Publication doctrine seed file ${configPath} is missing kind '${kind}'.`);
+    }
+  }
+  return [byKind.get("mission")!, byKind.get("policy")!];
+}
+
 function normalizeNewsroomSectionSeed(entry: Record<string, unknown>, index: number, configPath: string): NewsroomSectionSeed {
   const id = String(entry.id ?? "").trim();
   if (!id) throw new Error(`Newsroom section at index ${index} in ${configPath} is missing id.`);
@@ -517,6 +665,27 @@ function normalizeNewsroomSectionSeed(entry: Record<string, unknown>, index: num
     assignmentGuidance: optionalText(entry.assignmentGuidance),
     killCriteria: optionalText(entry.killCriteria),
     visualGuidance: optionalText(entry.visualGuidance),
+  };
+}
+
+function normalizePublicationDoctrineSeed(
+  entry: Record<string, unknown>,
+  index: number,
+  configPath: string,
+): PublicationDoctrineSeed {
+  const kindValue = String(entry.kind ?? "").trim().toLowerCase();
+  if (kindValue !== "mission" && kindValue !== "policy") {
+    throw new Error(
+      `Publication doctrine entry at index ${index} in ${configPath} has unsupported kind '${String(entry.kind ?? "")}'.`,
+    );
+  }
+  const body = normalizeStringList(entry.body);
+  if (!body.length) {
+    throw new Error(`Publication doctrine entry '${kindValue}' in ${configPath} requires non-empty body.`);
+  }
+  return {
+    kind: kindValue,
+    body,
   };
 }
 
@@ -562,11 +731,40 @@ async function uploadSeedImage(article: Article, asset: ArticleImageAsset, index
     },
   }).result;
 
+  const themeVariants: UploadedImageThemeVariants = {};
+  if (asset.themeVariants?.dark?.src) {
+    themeVariants.dark = {
+      storagePath: await uploadSeedImageVariant(article, asset, index, "dark", asset.themeVariants.dark.src),
+    };
+  }
+
   return {
     storagePath,
     width: asset.layout ? Math.round(asset.layout.aspectRatio * asset.layout.preferredHeight) : undefined,
     height: asset.layout?.preferredHeight,
+    themeVariants: Object.keys(themeVariants).length ? themeVariants : undefined,
   };
+}
+
+async function uploadSeedImageVariant(
+  article: Article,
+  asset: ArticleImageAsset,
+  index: number,
+  variant: "dark",
+  src: string,
+): Promise<string> {
+  const payload = await loadImagePayload(src);
+  const extension = getImageExtension(payload.contentType, src);
+  const storagePath = `media/articles/${article.slug}/${String(index + 1).padStart(2, "0")}-${asset.id}-${variant}.${extension}`;
+  await uploadData({
+    path: storagePath,
+    data: payload.data,
+    options: {
+      contentType: payload.contentType,
+      cacheControl: "public, max-age=31536000, immutable",
+    },
+  }).result;
+  return storagePath;
 }
 
 async function loadImagePayload(src: string): Promise<{ data: Uint8Array; contentType: string }> {
@@ -654,10 +852,20 @@ function toAwsJson(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function getMediaMetadata(asset: ArticleImageAsset): Record<string, unknown> {
+function getMediaMetadata(asset: ArticleImageAsset, uploadedThemeVariants?: UploadedImageThemeVariants): Record<string, unknown> {
+  const themeVariants =
+    asset.themeVariants?.dark?.src || uploadedThemeVariants?.dark?.storagePath
+      ? {
+          dark: {
+            ...(asset.themeVariants?.dark?.src ? { sourceUrl: asset.themeVariants.dark.src } : {}),
+            ...(uploadedThemeVariants?.dark?.storagePath ? { storagePath: uploadedThemeVariants.dark.storagePath } : {}),
+          },
+        }
+      : undefined;
   return {
     sourceUrl: asset.src,
     ...(asset.layout?.inlineFloat ? { inlineFloat: asset.layout.inlineFloat } : {}),
+    ...(themeVariants ? { themeVariants } : {}),
   };
 }
 

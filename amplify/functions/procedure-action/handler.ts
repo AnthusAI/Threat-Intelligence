@@ -71,14 +71,32 @@ async function getProcedureDefinition(args: Record<string, unknown>) {
     : await getProcedureDefinitionByKey(client, procedureKey);
   if (!definition) throw new Error("ProcedureDefinition not found.");
   const versions = await listProcedureVersionsByProcedure(client, definition.id);
-  const runs = await listProcedureRunsByProcedureId(client, definition.id);
+  const currentVersion = normalizeOptionalString(definition.currentVersionId)
+    ? versions.find((entry) => entry.id === definition.currentVersionId) ?? null
+    : null;
   return {
     ...definition,
-    currentVersion: normalizeOptionalString(definition.currentVersionId)
-      ? versions.find((entry) => entry.id === definition.currentVersionId) ?? null
+    currentVersion: currentVersion
+      ? {
+        id: currentVersion.id,
+        procedureId: currentVersion.procedureId,
+        procedureKey: currentVersion.procedureKey,
+        versionNumber: currentVersion.versionNumber,
+        status: currentVersion.status,
+        isCurrent: currentVersion.isCurrent,
+        label: currentVersion.label,
+        tactusSource: currentVersion.tactusSource,
+        parameterSchema: currentVersion.parameterSchema,
+        defaults: currentVersion.defaults,
+        changelog: currentVersion.changelog,
+        createdBy: currentVersion.createdBy,
+        createdAt: currentVersion.createdAt,
+        updatedBy: currentVersion.updatedBy,
+        updatedAt: currentVersion.updatedAt,
+      }
       : null,
-    versions: versions.sort((left, right) => (right.versionNumber ?? 0) - (left.versionNumber ?? 0)),
-    recentRuns: runs.sort((left, right) => String(right.requestedAt ?? "").localeCompare(String(left.requestedAt ?? ""))).slice(0, 25),
+    versions: [],
+    recentRuns: [],
   };
 }
 
@@ -239,8 +257,8 @@ async function startProcedureRun(event: ProcedureEvent) {
     requestedAt: now,
     startedAt: isExternalCliRun ? now : null,
     finishedAt: null,
-    input,
-    normalizedInput,
+    input: toAwsJson(input),
+    normalizedInput: toAwsJson(normalizedInput),
     resultSummary: null,
     errorSummary: null,
     output: null,
@@ -563,6 +581,11 @@ function normalizeJson(value: unknown): Record<string, unknown> {
 function normalizeOptionalJson(value: unknown): Record<string, unknown> | null {
   if (value === null || value === undefined || value === "") return null;
   return normalizeJson(value);
+}
+
+function toAwsJson(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  return JSON.stringify(value);
 }
 
 function arrayOfStrings(value: unknown): string[] {

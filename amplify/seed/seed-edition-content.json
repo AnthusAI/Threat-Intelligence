@@ -1,0 +1,440 @@
+{
+  "schemaVersion": 1,
+  "id": "edition-current",
+  "slug": "current",
+  "title": "Weekly Edition",
+  "description": "Launch edition: an autonomous, human-steered publication that amplifies editorial judgment and respects reader attention.",
+  "publishDate": "2026-05-22",
+  "suppressNewsDeskAppendix": true,
+  "houseAds": [
+    {
+      "id": "house-ad-no-strings",
+      "pageNumber": 2,
+      "label": "No infinite feed. No dark patterns. No strings.",
+      "presetId": "ad.region"
+    },
+    {
+      "id": "house-ad-autopilot",
+      "pageNumber": 3,
+      "label": "Autopilot, not copilot.",
+      "presetId": "ad.region"
+    },
+    {
+      "id": "house-ad-amplify",
+      "pageNumber": 6,
+      "label": "Amplify Humans",
+      "presetId": "ad.region"
+    },
+    {
+      "id": "house-ad-beyond",
+      "pageNumber": 7,
+      "label": "Beyond Copilot",
+      "presetId": "ad.region"
+    }
+  ],
+  "articles": [
+    {
+      "slug": "papyrus-introduction",
+      "shortSlug": "INTRO",
+      "section": "Papyrus",
+      "headline": "An Autonomous Newsroom",
+      "deck": "Amplify human judgment: define the mission, standards, and guardrails, and let Papyrus operate the newsroom within them on autopilot.",
+      "byline": "Papyrus Editorial Team",
+      "dateline": "NEWSROOM",
+      "image": {
+        "src": "/papyrus-plant-placeholder.png",
+        "themeVariants": {
+          "dark": {
+            "src": "/papyrus-plant-placeholder-dark.png"
+          }
+        },
+        "alt": "A black papyrus plant silhouette",
+        "caption": "Amplify Humans: Papyrus is built to amplify editorial judgment, not replace it.",
+        "credit": "Papyrus",
+        "layout": {
+          "minHeight": 120,
+          "preferredHeight": 230,
+          "maxHeight": 420,
+          "aspectRatio": 0.785,
+          "crop": "contain",
+          "wrapsText": true
+        }
+      },
+      "pullQuotes": [
+        "Autopilot, not copilot.",
+        "Beyond copilot."
+      ],
+      "body": [
+        "Papyrus is an autonomous publication system. Editors define the mission, the values, the voice, and the limits. The system handles the repetitive work of researching, assembling, drafting, checking, formatting, and publishing an edition—continuously, within that guidance.",
+        "This is not a copilot that waits for the next prompt. A copilot needs constant direction. An autopilot follows a course humans have already set, adjusts inside known boundaries, and hands control back when judgment is required.",
+        "The goal is to amplify humans, not replace them. You remain the executive editor: you decide what deserves attention, what standards apply, and when the newsroom needs a stronger intervention. The system does the legwork.",
+        "Teams begin with mission, policy, and coverage intent—not blank article forms. Those constraints become operating rails for a newsroom that can keep running while you sleep, attend meetings, conduct interviews, or work on the stories only a person can do.",
+        "Each edition is periodic. It has a beginning and an end. Readers can skim it, read it, and be done. The publication is not optimized to trap attention or harvest engagement signals.",
+        "The curated structured knowledge graph is the newsroom's working memory: source decisions, topic priorities, relationships, and policy-bounded context. Each edition starts from what the publication has already learned, not from scratch.",
+        "When the system succeeds, editors spend more time on meaningful work—research direction, source conversations, editorial judgment, shows, and creative calls—and less time filling empty slots. Papyrus amplifies your judgment; it does not substitute for it."
+      ]
+    },
+    {
+      "slug": "papyrus-reader-contract",
+      "shortSlug": "READER",
+      "section": "Papyrus",
+      "headline": "A Publication, Not a Trap",
+      "deck": "No infinite feed. No dark patterns. No strings. Read it, finish it, walk away.",
+      "byline": "Papyrus Editorial Team",
+      "dateline": "NEWSROOM",
+      "image": {
+        "src": "/seed-art/finite-edition.png",
+        "alt": "An abstract newspaper grid framing a finite edition",
+        "caption": "A Papyrus edition is a finite editorial object—not an engagement loop.",
+        "credit": "Papyrus seed art",
+        "layout": {
+          "minHeight": 120,
+          "preferredHeight": 220,
+          "maxHeight": 380,
+          "aspectRatio": 1.5009,
+          "crop": "contain",
+          "wrapsText": true
+        }
+      },
+      "pullQuotes": [
+        "Read it, finish it, walk away.",
+        "We respect your attention."
+      ],
+      "body": [
+        "We respect your attention. Papyrus is not an infinite feed. It is not designed to trap you, gamify you, or learn how to keep you scrolling. It is a publication: you can open it, read it, finish it, and leave.",
+        "A published edition is a bounded editorial object. It has a beginning, an end, and a point of view about what deserves attention now. Readers should know the commitment they are making—something to skim over breakfast, between meetings, or as part of a daily or weekly routine.",
+        "The newspaper form makes the editorial shape visible. Hierarchy, proximity, continuation, images, pull quotes, and endings show how stories relate without surrendering to a bottomless timeline.",
+        "This is not nostalgia for print. It is a rejection of interfaces that treat attention as something to capture indefinitely.",
+        "An edition should feel like a useful briefing: here is what matters, here is why, and then you are allowed to be done.",
+        "That contract changes the newsroom's incentives. The goal is not to maximize clicks or session length. The goal is to publish a finite package that earns trust by making judgment, context, and limits visible.",
+        "Readers can survey the whole shape first, choose what deserves depth, and trust that the package will end. Closure is part of the promise: this is today's or this week's issue, this is the hierarchy, and this is the attention we are asking for.",
+        "When it works, the publication becomes a routine—not a trap. People return because the edition respects their time, not because the interface dangles one more reward.",
+        "Advertising, when it appears, is clearly marked as advertising. Editorial pages and sponsor messages do not blur together.",
+        "Steering comes from editors—mission, policy, section doctrine, and curation—not from surveillance of individual reader behavior. The publication improves when editors give feedback, set preferences, tighten policy, and exercise judgment."
+      ]
+    },
+    {
+      "slug": "papyrus-steering-and-curation",
+      "shortSlug": "STEER",
+      "section": "Papyrus",
+      "headline": "Humans Steer. Machines Operate.",
+      "deck": "Editors set mission, policy, topics, and taste. The system runs continuously inside that guidance—not off reader surveillance.",
+      "byline": "Papyrus Editorial Team",
+      "dateline": "NEWSROOM",
+      "image": {
+        "src": "/seed-art/human-steering.png",
+        "alt": "An abstract rising course line with editorial checkpoints",
+        "caption": "Policy, section doctrine, and curation feedback bound what the newsroom may do.",
+        "credit": "Papyrus seed art",
+        "layout": {
+          "minHeight": 120,
+          "preferredHeight": 220,
+          "maxHeight": 380,
+          "aspectRatio": 1.5009,
+          "crop": "contain",
+          "wrapsText": true
+        }
+      },
+      "pullQuotes": [
+        "Beyond copilot.",
+        "Steering is durable newsroom memory."
+      ],
+      "body": [
+        "Papyrus is built around a different bargain: humans steer, machines operate. Publication doctrine—mission, policies, and section priorities—tells the newsroom what outcomes matter and what standards cannot be crossed.",
+        "Editors guide discovery with explicit questions, themes, and trend lines. That guidance can be broad strategic direction or a specific assignment. It is editorial intent, not a stream of chat prompts.",
+        "As sources arrive, human reviewers rate, vote on, and comment on references. Those decisions shape the curated structured knowledge graph that future planning and drafting rely on. They are not cosmetic feedback.",
+        "The system does not tune itself to individual reader behavior. It does not personalize headlines to maximize engagement. It improves when editors accept or reject proposals, adjust policy, refine section doctrine, and record why a source is trusted or excluded.",
+        "Papyrus supports high-touch and low-touch operation. Set stable policy and let the autopilot continue on course, or steer each cycle with assignments, curation calls, and coverage pivots.",
+        "When needed, humans issue direct reporting assignments or write a piece by hand. The default remains automated execution inside human-defined boundaries.",
+        "Steering becomes a durable asset. Your mission and taste persist across editions instead of disappearing after a single session."
+      ]
+    },
+    {
+      "slug": "papyrus-agent-workflow",
+      "shortSlug": "FLOW",
+      "section": "Papyrus",
+      "headline": "Autopilot, Not Copilot",
+      "deck": "Research, curation, planning, reporting, drafting, and layout run as one pipeline—with human proofing before anything ships.",
+      "byline": "Papyrus Editorial Team",
+      "dateline": "NEWSROOM",
+      "image": {
+        "src": "/seed-art/workflow-lanes.png",
+        "alt": "An abstract four-stage editorial workflow with handoff arrows",
+        "caption": "Each stage has a narrow job; humans set the course and approve the edition.",
+        "credit": "Papyrus seed art",
+        "layout": {
+          "minHeight": 120,
+          "preferredHeight": 230,
+          "maxHeight": 420,
+          "aspectRatio": 1.5009,
+          "crop": "contain",
+          "wrapsText": true
+        }
+      },
+      "pullQuotes": [
+        "Automation with visible editorial seams.",
+        "A copilot waits. An autopilot follows the course you set."
+      ],
+      "body": [
+        "A copilot waits for the next command. An autopilot follows a course that humans have set, adjusting within known boundaries and returning control when judgment is required. Papyrus is built on the second model.",
+        "Research agents gather source material and produce candidate evidence. Human curation decides what enters the trusted graph and what stays out of scope.",
+        "Editor agents use that graph plus policy to prioritize coverage, spot movement in signals, and assign reporting where the newsroom should invest attention.",
+        "Reporter agents collect context and structured findings. Copywriting agents turn reporting into draft stories aligned with style and policy. Layout agents package approved copy into edition pages.",
+        "Human review remains the final gate before publication. People can inspect references, redirect assignments, tighten policy, reject weak drafts, and approve only after the newsroom has shown its work.",
+        "Because the output is an edition—not a feed—each stage must choose. What belongs in this issue? What can wait? What context does a reader need before moving on?",
+        "The pipeline is deliberately specialized. Research agents do not publish directly. Editor agents do not pretend to be reporters. Layout agents do not invent coverage priorities. Each handoff passes structured context to the next.",
+        "The result is repeatable production with traceability from source curation to final approval—and automation that leaves room for interviews, field reporting, and editorial calls only humans should make."
+      ]
+    },
+    {
+      "slug": "papyrus-data-ownership",
+      "shortSlug": "DATA",
+      "section": "Papyrus",
+      "headline": "Your Newsroom, Your Data",
+      "deck": "Portable S3-backed sources, open code, and an installation you control—so the publication's memory stays yours.",
+      "byline": "Papyrus Editorial Team",
+      "dateline": "NEWSROOM",
+      "image": {
+        "src": "/seed-art/data-ledger.png",
+        "alt": "An abstract ledger with durable reference rows and status marks",
+        "caption": "Source material and operating code should remain under owner control.",
+        "credit": "Papyrus seed art",
+        "layout": {
+          "minHeight": 100,
+          "preferredHeight": 210,
+          "maxHeight": 360,
+          "aspectRatio": 1.5009,
+          "crop": "contain",
+          "wrapsText": true
+        }
+      },
+      "pullQuotes": [
+        "Your sources are institutional memory—not a rented silo.",
+        "Plain storage, visible procedures."
+      ],
+      "body": [
+        "A publication's sources, curation record, and policies are institutional memory. Papyrus stores source material through ordinary S3-backed corpus patterns, with metadata that describes provenance and how the newsroom should treat each reference.",
+        "That memory should stay portable. References, attachments, extracted text, catalogs, relationships, and curation decisions can be inspected, backed up, processed, or moved without negotiating with a proprietary format.",
+        "S3 is a durable, boring boundary. You can run enrichment next to it, export manifests, audit material, or connect another analysis system without asking permission to reach your own files.",
+        "The application code is open. A publication can host its own installation, adapt workflows, customize layouts, and add policies that match its mission.",
+        "Operators can trace what happens, replace pieces, or extend them. Newsroom procedures, the content CLI, layout plans, and data models are code and configuration—not hidden product magic.",
+        "Self-hosting remains an option when an organization wants full operational leverage. Managed deployment can be convenient; ownership of the memory should not be forfeited.",
+        "The practical test is simple: if you leave, you should still have your sources, your catalog, your curation record, your policies, and the means to understand how the system worked. Papyrus should help you build a newsroom you control."
+      ]
+    },
+    {
+      "slug": "papyrus-operating-modes",
+      "shortSlug": "MODES",
+      "section": "Papyrus",
+      "headline": "Light Touch or Hands on the Wheel",
+      "deck": "The same autopilot can run on standing policy or under close direction—without changing the reader promise.",
+      "byline": "Papyrus Editorial Team",
+      "dateline": "NEWSROOM",
+      "image": {
+        "src": "/seed-art/operating-modes.png",
+        "alt": "An abstract steering dial spanning light-touch and active operation",
+        "caption": "Steering intensity changes; the edition still begins and ends.",
+        "credit": "Papyrus seed art",
+        "layout": {
+          "minHeight": 100,
+          "preferredHeight": 210,
+          "maxHeight": 360,
+          "aspectRatio": 1.5009,
+          "crop": "contain",
+          "wrapsText": true
+        }
+      },
+      "pullQuotes": [
+        "Same system contract at every touch level.",
+        "Finite editions either way."
+      ],
+      "body": [
+        "In light-touch mode, editors set mission, policy, sections, and topic priorities, then let the newsroom continue on that course.",
+        "In active mode, editors steer each cycle with explicit assignments, curation interventions, and coverage pivots when context changes.",
+        "Both modes share one contract: agent work is policy-bounded, source-aware, and traceable through curation and approval history. Neither mode optimizes for clicks or tunes copy to individual reader surveillance.",
+        "Small teams can keep publishing velocity with standing autopilot settings. Larger teams can intervene at any stage without breaking the pipeline.",
+        "The reader promise does not change with the steering dial. Whether the newsroom runs lightly or under close direction, the output remains a shaped edition with a finite scope—something readers can finish."
+      ]
+    },
+    {
+      "slug": "papyrus-reference-governance",
+      "shortSlug": "SOURCES",
+      "section": "Papyrus",
+      "headline": "The Graph Editors Build",
+      "deck": "Quality follows the curated source graph humans maintain—not prompt cleverness or whatever links are easiest to fetch.",
+      "byline": "Papyrus Editorial Team",
+      "dateline": "NEWSROOM",
+      "image": {
+        "src": "/seed-art/source-graph.png",
+        "alt": "An abstract evidence graph with connected editorial nodes",
+        "caption": "Accepted references are the evidence layer the newsroom is willing to stand behind.",
+        "credit": "Papyrus seed art",
+        "layout": {
+          "minHeight": 100,
+          "preferredHeight": 210,
+          "maxHeight": 360,
+          "aspectRatio": 1.5009,
+          "crop": "contain",
+          "wrapsText": true
+        }
+      },
+      "pullQuotes": [
+        "Evidence is curated, not assumed.",
+        "Standards stay explicit and enforceable."
+      ],
+      "body": [
+        "Papyrus treats references as first-class editorial artifacts. Reliability depends on what evidence enters the curated structured knowledge graph and how humans evaluate it.",
+        "Reviewers assess relevance, reliability, and topical fit. Ratings and comments become steering memory for future research and planning. They are not votes for engagement—they are judgments about what the publication is willing to reuse.",
+        "This prevents drift toward sources that are merely easy for agents to retrieve. Editorial standards stay explicit.",
+        "Over time, curated reference history becomes institutional memory: what the newsroom knows, why it considers that knowledge credible, and how sources relate to one another.",
+        "That memory lets later editions explain trends instead of summarizing isolated links. New material connects to accepted context the editors have already defended.",
+        "Models are neither neutral nor magically trustworthy. The publication's discipline is human governance of evidence—accept, reject, annotate, and revisit as mission or facts change."
+      ]
+    },
+    {
+      "slug": "papyrus-first-install",
+      "shortSlug": "START",
+      "section": "Newsroom How-To",
+      "headline": "Chart the Course, Then Publish",
+      "deck": "Set doctrine and sections, seed the reference graph, and ship the first edition so the autopilot has a direction to follow.",
+      "byline": "Papyrus Editorial Team",
+      "dateline": "NEWSROOM",
+      "image": {
+        "src": "/seed-art/launch-briefing.png",
+        "alt": "An abstract launch chart showing a newsroom ramping into publication",
+        "caption": "First-install choices define the trajectory the newsroom will keep following.",
+        "credit": "Papyrus seed art",
+        "layout": {
+          "minHeight": 100,
+          "preferredHeight": 210,
+          "maxHeight": 360,
+          "aspectRatio": 1.5009,
+          "crop": "contain",
+          "wrapsText": true
+        }
+      },
+      "body": [
+        "Start with mission and policy so the newsroom has editorial direction before autonomous cycles begin.",
+        "Configure sections and topic priorities that match the publication you want readers to experience.",
+        "Curate initial references so the structured knowledge graph reflects your quality bar from day one.",
+        "Publish the first edition. From there the system can operate on the course you set, with ongoing human steering when judgment is required."
+      ]
+    },
+    {
+      "slug": "howto-dispatch-research-agents",
+      "shortSlug": "RESEARCH",
+      "section": "Newsroom How-To",
+      "headline": "Dispatch Research Agents",
+      "deck": "Turn an editorial question into a private research packet—review it before anything becomes reader-facing.",
+      "byline": "Papyrus Editorial Team",
+      "dateline": "NEWSROOM",
+      "image": {
+        "src": "/seed-art/research-packet.png",
+        "alt": "An abstract research packet board with linked findings",
+        "caption": "Research assignments produce private packets; editors decide what moves forward.",
+        "credit": "Papyrus seed art",
+        "layout": {
+          "minHeight": 100,
+          "preferredHeight": 210,
+          "maxHeight": 360,
+          "aspectRatio": 1.5009,
+          "crop": "contain",
+          "wrapsText": true
+        }
+      },
+      "body": [
+        "Start with a question the newsroom should investigate—not a headline the system should already believe. Research assignments collect source material, surface context, and show what was found before editors decide what belongs in an edition.",
+        "In the Newsroom, use the assignments desk when it is available to create or inspect research work. The command-line path is the same workflow in operator form: `npm run content -- assignments create-research --title <text> --section <section-key> --corpus-key <key> --research-mode source_discovery --apply`.",
+        "Run the assignment with `npm run content -- assignments run-research --assignment <id> --corpus-key <key> --research-mode source_discovery --apply --json`. The run produces a research packet, not a published article.",
+        "Inspect the packet with `npm run content -- assignments research-packets --assignment <id>`. Use it to register proposed references, request more research, brief reporting work, or leave the finding out of the publication."
+      ]
+    },
+    {
+      "slug": "howto-curate-references",
+      "shortSlug": "CURATE",
+      "section": "Newsroom How-To",
+      "headline": "Curate References by Hand",
+      "deck": "Use `/newsroom/references` to judge sources and keep the curated graph aligned with editorial standards.",
+      "byline": "Papyrus Editorial Team",
+      "dateline": "NEWSROOM",
+      "image": {
+        "src": "/seed-art/curation-desk.png",
+        "alt": "An abstract curation grid with checks and editor notes",
+        "caption": "Reference curation is how editors steer what the autopilot may treat as evidence.",
+        "credit": "Papyrus seed art",
+        "layout": {
+          "minHeight": 100,
+          "preferredHeight": 210,
+          "maxHeight": 360,
+          "aspectRatio": 1.5009,
+          "crop": "contain",
+          "wrapsText": true
+        }
+      },
+      "body": [
+        "The References desk is where source material becomes newsroom memory. Open `/newsroom/references` to inspect a reference, review its status, and decide whether it belongs in the accepted structured knowledge graph.",
+        "Accept references that are in scope, relevant, and reliable enough to inform future planning. Reject or archive references that are off mission, weakly sourced, duplicative, stale, or outside coverage boundaries.",
+        "Ratings and comments are steering memory—they tell future research and reporting which sources deserve attention and which patterns should be treated cautiously.",
+        "Reopen older references when mission changes or better context arrives. Updating the graph is maintenance, not an admission of failure."
+      ]
+    },
+    {
+      "slug": "howto-register-source-material",
+      "shortSlug": "REGISTER",
+      "section": "Newsroom How-To",
+      "headline": "Register Source Material",
+      "deck": "Bring corpus files and catalogs into Papyrus as references—intake work, not published copy.",
+      "byline": "Papyrus Editorial Team",
+      "dateline": "NEWSROOM",
+      "image": {
+        "src": "/seed-art/source-intake.png",
+        "alt": "An abstract intake pipeline moving source records into newsroom tracking",
+        "caption": "Registration creates reference records while files stay in S3-backed storage.",
+        "credit": "Papyrus seed art",
+        "layout": {
+          "minHeight": 100,
+          "preferredHeight": 210,
+          "maxHeight": 360,
+          "aspectRatio": 1.5009,
+          "crop": "contain",
+          "wrapsText": true
+        }
+      },
+      "body": [
+        "Registration bridges source material and newsroom curation. It does not publish anything; it creates reference records, attachment metadata, and intake work so humans and agents can decide what the graph should trust.",
+        "For catalog-backed imports, use `npm run content -- references register-catalog --config corpora/papyrus-steering.yml --corpus-key <key> --catalog <metadata/catalog.json> --status pending --ingestion-rationale <summary> --apply`.",
+        "Files remain in the corpus/S3 pattern. Papyrus records the editorial layer: what the reference is, where it lives, how it entered, and its curation status.",
+        "Research packets can propose references. Treat proposals as prospects until they are registered and curated—proposed links are not accepted evidence because an agent found them."
+      ]
+    },
+    {
+      "slug": "howto-maintain-reference-quality",
+      "shortSlug": "QUALITY",
+      "section": "Newsroom How-To",
+      "headline": "Maintain Reference Quality",
+      "deck": "Run routine curation passes and keep accepted references fit for planning and analysis.",
+      "byline": "Papyrus Editorial Team",
+      "dateline": "NEWSROOM",
+      "image": {
+        "src": "/seed-art/quality-loop.png",
+        "alt": "An abstract quality loop around an editorial checklist",
+        "caption": "A clean accepted graph is one of the highest-leverage steering tools.",
+        "credit": "Papyrus seed art",
+        "layout": {
+          "minHeight": 100,
+          "preferredHeight": 210,
+          "maxHeight": 360,
+          "aspectRatio": 1.5009,
+          "crop": "contain",
+          "wrapsText": true
+        }
+      },
+      "body": [
+        "Reference quality is ongoing work. Material ages, identifiers change, and metadata may need enrichment before a source is useful.",
+        "Use `npm run content -- references curate-recent --corpus-key <key> --since-hours 48 --max-count 25 --dry-run --json` to preview a routine pass. Add `--apply` when the plan is correct.",
+        "A pass can refresh summaries, check identifiers, enrich titles, and produce a manifest of successes and failures. Treat failures as operator signals.",
+        "Accepted references are the safe input for analysis, topic work, graph operations, and edition planning. Keeping that set clean improves everything downstream."
+      ]
+    }
+  ]
+}

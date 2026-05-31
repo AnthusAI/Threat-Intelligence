@@ -149,6 +149,9 @@ profiles:
       - graph.max_relation_entities_per_sentence
       - graph.min_relation_weight
       - graph.max_items
+      - graph.item_timeout_seconds
+      - graph.item_retry_attempts
+      - graph.heartbeat_interval_seconds
       - extractionSnapshot
     expectedOutputs:
       - graph-snapshot

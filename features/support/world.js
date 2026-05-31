@@ -5,7 +5,7 @@ setDefaultTimeout(60_000);
 
 class PapyrusWorld {
   constructor() {
-    this.baseUrl = process.env.PAPYRUS_BASE_URL ?? "http://localhost:3001";
+    this.baseUrl = process.env.PAPYRUS_BASE_URL ?? "http://127.0.0.1:3001";
     this.browser = null;
     this.page = null;
     this.consoleErrors = [];
@@ -14,6 +14,8 @@ class PapyrusWorld {
     this.newsroomSummaryDelayMs = 0;
     this.newsroomSummaryMock = null;
     this.newsroomMessageDetailMock = null;
+    this.newsroomReferenceSummaryPayloadMock = null;
+    this.newsroomReferenceExtractedTextMock = null;
     this.newsroomQualityMutationMock = null;
   }
 
@@ -177,6 +179,163 @@ class PapyrusWorld {
             ],
           },
         }));
+      });
+    }
+    if (this.newsroomReferenceSummaryPayloadMock === "dedup") {
+      await this.page.addInitScript(() => {
+        window.localStorage.setItem("papyrus:test-newsroom-mock", JSON.stringify({
+          payloads: {
+            "reference:reference-knowledge-corpus-demo-source-history-001-v1": [
+              {
+                attachment: {
+                  id: "model-attachment-reference-history-001-metadata",
+                  ownerKind: "reference",
+                  ownerId: "reference-knowledge-corpus-demo-source-history-001-v1",
+                  ownerLineageId: "reference-knowledge-corpus-demo-source-history-001",
+                  role: "metadata",
+                  sortKey: "metadata",
+                  storagePath: "newsroom/payloads/reference/reference-knowledge-corpus-demo-source-history-001/metadata/metadata.json",
+                  filename: "metadata.json",
+                  mediaType: "application/json",
+                  status: "active",
+                },
+                text: null,
+                json: {
+                  title: "Symbolic And Connectionist History Reader",
+                  subtitle: "s3://papyrus-demo/corpora/history/history-001.md",
+                  summary: "s3://papyrus-demo/corpora/history/history-001.md\n\nTrimmed summary body for mock reference one.",
+                },
+                error: null,
+              },
+            ],
+            "reference:reference-knowledge-corpus-demo-source-history-002-v1": [
+              {
+                attachment: {
+                  id: "model-attachment-reference-history-002-metadata",
+                  ownerKind: "reference",
+                  ownerId: "reference-knowledge-corpus-demo-source-history-002-v1",
+                  ownerLineageId: "reference-knowledge-corpus-demo-source-history-002",
+                  role: "metadata",
+                  sortKey: "metadata",
+                  storagePath: "newsroom/payloads/reference/reference-knowledge-corpus-demo-source-history-002/metadata/metadata.json",
+                  filename: "metadata.json",
+                  mediaType: "application/json",
+                  status: "active",
+                },
+                text: null,
+                json: {
+                  title: "Foundation Model Scaling Retrospective",
+                  summary: "Unchanged summary for mock reference two.",
+                },
+                error: null,
+              },
+            ],
+          },
+        }));
+      });
+    }
+    if (this.newsroomReferenceExtractedTextMock === "history-001-filtered-and-original") {
+      await this.page.addInitScript(() => {
+        const key = "papyrus:test-newsroom-mock";
+        let existing = {};
+        try {
+          const raw = window.localStorage.getItem(key);
+          existing = raw ? JSON.parse(raw) : {};
+        } catch {
+          existing = {};
+        }
+        const attachmentById = new Map(Array.isArray(existing.referenceAttachments)
+          ? existing.referenceAttachments.map((attachment) => [attachment.id, attachment])
+          : []);
+        attachmentById.set("reference-attachment-demo-history-001-extracted-text-filtered", {
+          id: "reference-attachment-demo-history-001-extracted-text-filtered",
+          referenceId: "reference-knowledge-corpus-demo-source-history-001-v1",
+          referenceLineageId: "reference-knowledge-corpus-demo-source-history-001",
+          referenceVersionNumber: 1,
+          referenceVersionKey: "reference#reference-knowledge-corpus-demo-source-history-001-v1",
+          role: "extracted_text",
+          sortKey: "901-extracted-text-filtered",
+          storagePath: "corpora/history/extracted/pipeline/snapshot-demo-history/text/filtered.txt",
+          sourceUri: null,
+          filename: "filtered.txt",
+          mediaType: "text/plain",
+          sha256: "demo-history-001-filtered-text",
+          importRunId: "knowledge-import-demo-projection",
+          importedAt: "2026-04-15T09:30:00.000Z",
+          metadata: JSON.stringify({
+            filterStatus: "filtered",
+            source: "biblicus-article-text-filter",
+          }),
+        });
+        const storageTextByPath = {
+          ...(existing.storageTextByPath ?? {}),
+          "corpora/history/extracted/pipeline/snapshot-demo-history/text/history-001.txt": [
+            "History 001 extracted text line one.",
+            "History 001 extracted text line two.",
+          ].join("\n"),
+          "corpora/history/extracted/pipeline/snapshot-demo-history/text/filtered.txt": [
+            "History 001 filtered text line one.",
+            "History 001 filtered text line two.",
+          ].join("\n"),
+        };
+        window.localStorage.setItem(
+          key,
+          JSON.stringify({
+            ...existing,
+            referenceAttachments: Array.from(attachmentById.values()),
+            storageTextByPath,
+          }),
+        );
+      });
+    }
+    if (this.newsroomReferenceExtractedTextMock === "history-002-filtered-only") {
+      await this.page.addInitScript(() => {
+        const key = "papyrus:test-newsroom-mock";
+        let existing = {};
+        try {
+          const raw = window.localStorage.getItem(key);
+          existing = raw ? JSON.parse(raw) : {};
+        } catch {
+          existing = {};
+        }
+        const attachmentById = new Map(Array.isArray(existing.referenceAttachments)
+          ? existing.referenceAttachments.map((attachment) => [attachment.id, attachment])
+          : []);
+        attachmentById.set("reference-attachment-demo-history-002-extracted-text-filtered", {
+          id: "reference-attachment-demo-history-002-extracted-text-filtered",
+          referenceId: "reference-knowledge-corpus-demo-source-history-002-v1",
+          referenceLineageId: "reference-knowledge-corpus-demo-source-history-002",
+          referenceVersionNumber: 1,
+          referenceVersionKey: "reference#reference-knowledge-corpus-demo-source-history-002-v1",
+          role: "extracted_text",
+          sortKey: "901-extracted-text-filtered",
+          storagePath: "corpora/history/extracted/pipeline/snapshot-demo-history/text/history-002.filtered.txt",
+          sourceUri: null,
+          filename: "filtered.txt",
+          mediaType: "text/plain",
+          sha256: "demo-history-002-filtered-text",
+          importRunId: "knowledge-import-demo-projection",
+          importedAt: "2026-04-16T09:30:00.000Z",
+          metadata: JSON.stringify({
+            filterStatus: "filtered",
+            source: "biblicus-article-text-filter",
+          }),
+        });
+        const storageTextByPath = {
+          ...(existing.storageTextByPath ?? {}),
+          "corpora/history/extracted/pipeline/snapshot-demo-history/text/history-002.filtered.txt": [
+            "History 002 filtered text line one.",
+            "History 002 filtered text line two.",
+          ].join("\n"),
+        };
+        window.localStorage.setItem(
+          key,
+          JSON.stringify({
+            ...existing,
+            referenceAttachments: Array.from(attachmentById.values()),
+            storageTextByPath,
+          }),
+        );
       });
     }
     if (this.newsroomQualityMutationMock === "fail") {

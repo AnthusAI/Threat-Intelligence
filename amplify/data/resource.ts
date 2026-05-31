@@ -8,7 +8,6 @@ import { modelAttachmentUpload } from "../functions/model-attachment-upload/reso
 import { newsroomSummary } from "../functions/newsroom-summary/resource";
 import { procedureAction } from "../functions/procedure-action/resource";
 import { readerSettings } from "../functions/reader-settings/resource";
-
 const authoringOperations: ("read" | "create" | "update" | "delete")[] = [
   "read",
   "create",
@@ -40,6 +39,7 @@ const schema = a.schema({
     .authorization((allow) => [
       allow.owner(),
       allow.group(adminGroup),
+      allow.custom().to(["read"]),
     ]),
 
   UserIdentity: a
@@ -60,6 +60,7 @@ const schema = a.schema({
     ])
     .authorization((allow) => [
       allow.group(adminGroup),
+      allow.custom().to(["read"]),
     ]),
 
   UserRoleAssignment: a
@@ -131,7 +132,9 @@ const schema = a.schema({
 
   ReaderSettingsResult: a.customType({
     userProfileId: a.id().required(),
+    email: a.email(),
     settings: a.json(),
+    avatarHash: a.string(),
   }),
 
   listUserDirectory: a
@@ -240,6 +243,44 @@ const schema = a.schema({
     relationId: a.id(),
   }),
 
+  ReferenceInsightActionResult: a.customType({
+    ok: a.boolean().required(),
+    referenceId: a.id().required(),
+    messageId: a.id().required(),
+    relationId: a.id().required(),
+    status: a.string().required(),
+  }),
+
+  ReferenceCorpusMoveActionResult: a.customType({
+    ok: a.boolean().required(),
+    referenceId: a.id().required(),
+    referenceLineageId: a.id().required(),
+    previousReferenceId: a.id(),
+    previousCorpusId: a.id(),
+    corpusId: a.id().required(),
+    status: a.string().required(),
+  }),
+
+  ReferenceCurationStartResult: a.customType({
+    ok: a.boolean().required(),
+    referenceId: a.id().required(),
+    assignmentId: a.id().required(),
+    status: a.string().required(),
+    runId: a.string(),
+  }),
+
+  ReferenceCurationStatusResult: a.customType({
+    ok: a.boolean().required(),
+    referenceId: a.id(),
+    assignmentId: a.id().required(),
+    status: a.string().required(),
+    runId: a.string(),
+    lifecycleStatus: a.string(),
+    stageStatuses: a.json(),
+    changedOutputs: a.json(),
+    error: a.json(),
+  }),
+
   CategorySetDraftActionResult: a.customType({
     ok: a.boolean().required(),
     action: a.string().required(),
@@ -286,6 +327,65 @@ const schema = a.schema({
       note: a.string(),
     })
     .returns(a.ref("ReferenceQualityActionResult"))
+    .authorization((allow) => [
+      allow.groups(categoryWriteGroups),
+      allow.custom(),
+    ])
+    .handler(a.handler.function(categoryAction)),
+
+  createReferenceInsight: a
+    .mutation()
+    .arguments({
+      referenceId: a.id().required(),
+      summary: a.string().required(),
+      body: a.string().required(),
+      actorSub: a.string(),
+      actorLabel: a.string(),
+    })
+    .returns(a.ref("ReferenceInsightActionResult"))
+    .authorization((allow) => [
+      allow.groups(categoryWriteGroups),
+      allow.custom(),
+    ])
+    .handler(a.handler.function(categoryAction)),
+
+  moveReferenceCorpus: a
+    .mutation()
+    .arguments({
+      referenceId: a.id().required(),
+      corpusId: a.id().required(),
+      actorSub: a.string(),
+      actorLabel: a.string(),
+      note: a.string(),
+    })
+    .returns(a.ref("ReferenceCorpusMoveActionResult"))
+    .authorization((allow) => [
+      allow.groups(categoryWriteGroups),
+      allow.custom(),
+    ])
+    .handler(a.handler.function(categoryAction)),
+
+  startReferenceCuration: a
+    .mutation()
+    .arguments({
+      referenceId: a.id().required(),
+      actorSub: a.string(),
+      actorLabel: a.string(),
+      curationPolicy: a.json(),
+    })
+    .returns(a.ref("ReferenceCurationStartResult"))
+    .authorization((allow) => [
+      allow.groups(categoryWriteGroups),
+      allow.custom(),
+    ])
+    .handler(a.handler.function(categoryAction)),
+
+  getReferenceCurationStatus: a
+    .query()
+    .arguments({
+      assignmentId: a.id().required(),
+    })
+    .returns(a.ref("ReferenceCurationStatusResult"))
     .authorization((allow) => [
       allow.groups(categoryWriteGroups),
       allow.custom(),
@@ -850,6 +950,7 @@ const schema = a.schema({
     ])
     .authorization((allow) => [
       allow.groups(categoryWriteGroups).to(categoryAppendOnlyOperations),
+      allow.authenticated("identityPool").to(authoringOperations),
       allow.custom().to(authoringOperations),
     ]),
 
@@ -1299,6 +1400,8 @@ const schema = a.schema({
       sourcePublishedAt: a.string(),
       sourceUpdatedAt: a.string(),
       retrievedAt: a.string(),
+      inboundCitationCount: a.integer(),
+      outboundCitationCount: a.integer(),
       importRunId: a.id(),
       importedAt: a.datetime(),
       createdAt: a.datetime(),
@@ -1308,6 +1411,7 @@ const schema = a.schema({
       curationStatusUpdatedBy: a.string(),
       curationStatusReason: a.string(),
       newsroomFeedKey: a.string(),
+      reviewedFeedKey: a.string(),
       updatedAt: a.datetime(),
     })
     .secondaryIndexes((index) => [
@@ -1318,6 +1422,7 @@ const schema = a.schema({
       index("importRunId").sortKeys(["externalItemId"]).queryField("listReferencesByImportRunAndExternalItem"),
       index("curationStatus").sortKeys(["curationStatusUpdatedAt"]).queryField("listReferencesByCurationStatusAndUpdatedAt"),
       index("curationStatusKey").sortKeys(["curationStatusUpdatedAt"]).queryField("listReferencesByCurationStatusKeyAndUpdatedAt"),
+      index("reviewedFeedKey").sortKeys(["updatedAt"]).queryField("listReferencesByReviewedFeedAndUpdatedAt"),
     ])
     .authorization((allow) => [
       allow.groups(categoryWriteGroups).to(["read"]),
@@ -1375,6 +1480,11 @@ const schema = a.schema({
       displayName: a.string(),
       description: a.string(),
       aliases: a.string().array(),
+      authorityScore: a.float(),
+      authorityRank: a.integer(),
+      acceptedReferenceMentionCount: a.integer(),
+      distinctSourceKindCount: a.integer(),
+      relationCount: a.integer(),
       status: a.string().required(),
       importRunId: a.id(),
       createdAt: a.datetime(),
@@ -1406,6 +1516,21 @@ const schema = a.schema({
       authorSub: a.string(),
       authorUserProfileId: a.id(),
       authorLabel: a.string(),
+      threadId: a.id(),
+      parentMessageId: a.id(),
+      sequenceNumber: a.integer(),
+      role: a.string(),
+      messageType: a.string(),
+      content: a.string(),
+      semanticLayer: a.string(),
+      searchVisibility: a.string(),
+      responseTarget: a.string(),
+      responseStatus: a.string(),
+      responseOwner: a.string(),
+      responseStartedAt: a.datetime(),
+      responseCompletedAt: a.datetime(),
+      responseError: a.string(),
+      metadata: a.json(),
       createdAt: a.datetime().required(),
       updatedAt: a.datetime().required(),
       newsroomFeedKey: a.string(),
@@ -1418,9 +1543,54 @@ const schema = a.schema({
       index("authorSub").sortKeys(["createdAt"]).queryField("listMessagesByAuthorSubAndCreatedAt"),
       index("authorUserProfileId").sortKeys(["createdAt"]).queryField("listMessagesByAuthorProfileAndCreatedAt"),
       index("importRunId").sortKeys(["createdAt"]).queryField("listMessagesByImportRunAndCreatedAt"),
+      index("threadId").sortKeys(["sequenceNumber"]).name("messagesByThreadSequence").queryField("listMessagesByThreadAndSequence"),
+      index("threadId").sortKeys(["createdAt"]).name("messagesByThreadCreatedAt").queryField("listMessagesByThreadAndCreatedAt"),
+      index("responseTarget").sortKeys(["responseStatus", "createdAt"]).name("messagesByResponseTargetStatusCreatedAt").queryField("listMessagesByResponseTargetStatusAndCreatedAt"),
+      index("semanticLayer").sortKeys(["createdAt"]).name("messagesBySemanticLayerCreatedAt").queryField("listMessagesBySemanticLayerAndCreatedAt"),
+      index("searchVisibility").sortKeys(["createdAt"]).name("messagesBySearchVisibilityCreatedAt").queryField("listMessagesBySearchVisibilityAndCreatedAt"),
     ])
     .authorization((allow) => [
       allow.groups(categoryWriteGroups).to(categoryAppendOnlyOperations),
+      allow.custom().to(authoringOperations),
+      allow.authenticated("identityPool").to(["read", "create", "update"]),
+    ]),
+
+  MessageThread: a
+    .model({
+      id: a.id().required(),
+      threadKind: a.string().required(),
+      status: a.string().required(),
+      title: a.string().required(),
+      summary: a.string(),
+      primaryAnchorKind: a.string(),
+      primaryAnchorId: a.id(),
+      primaryAnchorLineageId: a.id(),
+      primaryAnchorKey: a.string(),
+      createdBySub: a.string(),
+      createdByUserProfileId: a.id(),
+      createdByLabel: a.string(),
+      messageCount: a.integer(),
+      lastMessageId: a.id(),
+      lastMessageAt: a.datetime(),
+      contextDigest: a.string(),
+      activeResponseMessageId: a.id(),
+      responseLockOwner: a.string(),
+      responseLockExpiresAt: a.datetime(),
+      metadata: a.json(),
+      createdAt: a.datetime().required(),
+      updatedAt: a.datetime().required(),
+      newsroomFeedKey: a.string(),
+    })
+    .secondaryIndexes((index) => [
+      index("newsroomFeedKey").sortKeys(["updatedAt"]).queryField("listMessageThreadsByNewsroomFeedAndUpdatedAt"),
+      index("threadKind").sortKeys(["updatedAt"]).queryField("listMessageThreadsByKindAndUpdatedAt"),
+      index("status").sortKeys(["updatedAt"]).queryField("listMessageThreadsByStatusAndUpdatedAt"),
+      index("primaryAnchorKey").sortKeys(["updatedAt"]).name("messageThreadsByAnchorUpdatedAt").queryField("listMessageThreadsByAnchorAndUpdatedAt"),
+      index("createdBySub").sortKeys(["updatedAt"]).queryField("listMessageThreadsByCreatorAndUpdatedAt"),
+    ])
+    .authorization((allow) => [
+      allow.groups(categoryWriteGroups).to(["read", "create", "update"]),
+      allow.authenticated("identityPool").to(authoringOperations),
       allow.custom().to(authoringOperations),
     ]),
 
@@ -1678,6 +1848,7 @@ const schema = a.schema({
       layoutPlan: a.json(),
       metadata: a.json(),
       items: a.hasMany("EditionItem", "editionId"),
+      slots: a.hasMany("EditionSlot", "editionId"),
     })
     .secondaryIndexes((index) => [
       index("lineageId").sortKeys(["versionNumber"]).queryField("listEditionsByLineageAndVersion"),
@@ -1688,6 +1859,33 @@ const schema = a.schema({
     ])
     .authorization((allow) => [
       allow.groups(contentWriteGroups),
+      allow.custom().to(authoringOperations),
+    ]),
+
+  EditionSlot: a
+    .model({
+      id: a.id().required(),
+      editionId: a.id().required(),
+      sectionKey: a.string().required(),
+      slotRank: a.integer().required(),
+      targetType: a.string().required(),
+      targetLengthBand: a.string(),
+      minImageAssets: a.integer(),
+      status: a.string().required(),
+      selectedAssignmentId: a.id(),
+      metadata: a.json(),
+      createdAt: a.datetime().required(),
+      updatedAt: a.datetime().required(),
+      edition: a.belongsTo("Edition", "editionId"),
+    })
+    .secondaryIndexes((index) => [
+      index("editionId").sortKeys(["sectionKey", "slotRank"]).queryField("listEditionSlotsByEditionSectionAndRank"),
+      index("sectionKey").sortKeys(["editionId", "slotRank"]).queryField("listEditionSlotsBySectionEditionAndRank"),
+      index("status").sortKeys(["updatedAt"]).queryField("listEditionSlotsByStatusAndUpdatedAt"),
+      index("selectedAssignmentId").sortKeys(["updatedAt"]).queryField("listEditionSlotsBySelectedAssignmentAndUpdatedAt"),
+    ])
+    .authorization((allow) => [
+      allow.groups(categoryWriteGroups).to(categoryAppendOnlyOperations),
       allow.custom().to(authoringOperations),
     ]),
 

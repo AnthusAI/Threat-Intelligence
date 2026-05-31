@@ -15,6 +15,14 @@ Use this skill when a coding agent needs a repeatable operator path for:
 The story-cycle is a newsroom budget loop, not an article generator. It creates
 private context for editors and copywriters.
 
+## Which Doc/Skill To Use First
+
+| Need | Start here |
+| --- | --- |
+| Planning run | [`skills/edition-planning/SKILL.md`](/Users/ryan/Projects/Papyrus/skills/edition-planning/SKILL.md) |
+| Run/review cycle | This skill |
+| Data contract truth | [`docs/automated-publication-research-workflow.md`](/Users/ryan/Projects/Papyrus/docs/automated-publication-research-workflow.md) |
+
 ## Domain Model
 
 Keep these concepts separate:
@@ -36,6 +44,29 @@ Keep these concepts separate:
 New packet writes use `Assignment --produces--> Message`. Legacy
 `Message --comment--> Assignment` packet links may still be read.
 
+Forum context defaults for assignment execution:
+
+- include edition forum threads first when `assignment.editionId` is present;
+- include only same-section forum threads for `(edition, section)` lineage when
+  those threads exist (planning no longer creates section-forum kickoffs by
+  default—see [`skills/edition-planning/SKILL.md`](/Users/ryan/Projects/Papyrus/skills/edition-planning/SKILL.md));
+- never leak other sections' threads into the assignment context.
+
+## Edition forum planning messages
+
+Coverage Theme planning posts **three sequential messages** on the edition
+forum thread when optional desks are deferred to phase 2:
+
+1. `Edition theme (phase 1):` — theme and coverage concept only (not Arts/culture
+   as the edition theme).
+2. `Optional desk (phase 2):` — one proposed floating/rotating desk after
+   `rotating_section_selector.tac` (or `--selected-optional-desk`).
+3. `Reporting dispatch (phase 3):` — reporting assignment candidates per slot with
+   1.5× overassignment.
+
+Use `--through plan` then `--through rotating-desk` for the full sequence. See
+edition-planning skill for flags and idempotency rules.
+
 ## Default Smoke Command
 
 Run dry-run first. Treat the run as a Coverage Theme in editor-facing language:
@@ -44,7 +75,7 @@ one shared topic worked through multiple section lenses. The Python
 `assignments run-story-cycle` name remains a compatibility alias.
 
 ```bash
-poetry run papyrus-newsroom coverage-themes run \
+poetry run papyrus assignments run-story-cycle \
   --date 2026-05-21 \
   --topic "AI in video games" \
   --category AI-ML-research \
@@ -62,7 +93,7 @@ Use the assignment-desk signal feed before edition planning when the topic is
 not already chosen:
 
 ```bash
-poetry run papyrus-newsroom signals trend-report \
+poetry run papyrus knowledge signals trend-report \
   --corpus-key AI-ML-research \
   --topic "AI in video games" \
   --sections culture,methods,business,law \
@@ -74,11 +105,11 @@ after private research packets, and `--through reporting` to stop after private
 reporting packets. `--through reporting` is the default. Story-cycle runs do not
 auto-select packets or run copywriting.
 
-The command is dry-run unless `--apply` is supplied. Dry-run writes local output
+The command applies writes by default. Use `--dry-run` when you only want local output
 under `.papyrus-runs/story-cycle-<run-id>/` and should create no GraphQL
 records.
 
-Use `--apply` only when the plan is acceptable and the current
+Run without `--dry-run` when the plan is acceptable and the current
 `PAPYRUS_GRAPHQL_ENDPOINT` / `PAPYRUS_GRAPHQL_JWT` point at the intended
 environment. Apply mode may persist `Assignment`, `AssignmentEvent`, `Message`,
 `ModelAttachment`, and `SemanticRelation` records. It must not create `Item` or
@@ -97,7 +128,7 @@ output fails instead of being masked by deterministic fallback packets. Pass
 After a run, inspect the grouped private output:
 
 ```bash
-poetry run papyrus-newsroom story-budget output \
+poetry run papyrus assignments story-cycle-output \
   --run-id <coverage-theme-run-id> \
   --json
 ```
@@ -121,10 +152,15 @@ copywriting, or draft, with reporting candidates grouped by edition and section.
 
 ## Section Lenses
 
+The `culture` CLI alias maps to the configured `arts` desk, which is a
+**floating** optional desk in `corpora/papyrus-newsroom-sections.yml`. Use it for
+story-cycle smoke tests, but treat it as step-2 optional-desk material in
+edition forum kickoff messages—not as the edition theme decision in phase 1.
+
 The canonical smoke uses:
 
 - `culture`: creative workflows, game design, player experience, generative
-  media.
+  media (alias for optional `arts` desk).
 - `methods`: implementation patterns, NPC behavior, procedural generation,
   evaluation.
 - `business`: studios, tooling markets, labor, production economics.
@@ -172,10 +208,13 @@ inside the story-cycle run.
 
 ## Editor Selection
 
+Use this phase as the review-and-selection surface. Reporting packet review can
+mutate slot status but still must not place edition content.
+
 Review a reporting packet with:
 
 ```bash
-npm run content -- assignments review-reporting-packet \
+poetry run papyrus assignments review-reporting-packet \
   --assignment <assignment-id> \
   --message <message-id> \
   --decision select|merge|brief|hold|kill \
@@ -183,30 +222,58 @@ npm run content -- assignments review-reporting-packet \
   --dry-run
 ```
 
-Use `--apply` only after reviewing the plan.
+Remove `--dry-run` only after reviewing the plan.
 
 - `select` creates a child `copywriting.article-draft` Assignment and
-  `derived_from` relations to the reporting Assignment and packet Message.
+  `derived_from` relations to the reporting Assignment and packet Message. It
+  sets the linked slot status to `selected`, sets `selectedAssignmentId`, and
+  writes `EditionSlot --selected_by--> Assignment`.
 - `brief` creates a child `copywriting.brief-draft` Assignment and
-  `derived_from` relations to the reporting Assignment and packet Message.
-- `merge` requires `--target-item <id>` and links to that Item.
-- `hold` and `kill` write only the review event and metadata attachment.
+  `derived_from` relations to the reporting Assignment and packet Message. It
+  sets the linked slot status to `briefed`, sets `selectedAssignmentId`, and
+  writes `EditionSlot --selected_by--> Assignment`.
+- `hold` and `kill` write the review event, reset the linked slot to `open`,
+  and clear `selectedAssignmentId`.
+- `merge` requires `--target-item <id>` and links to that Item. It does not
+  fill or mutate a slot unless an explicit slot mutation is performed
+  separately.
 
 No packet review creates `Item` or `EditionItem` placement. Run copywriting
 after selection with:
 
 ```bash
-npm run content -- assignments run-copywriting \
+poetry run papyrus assignments run-copywriting \
   --assignment <copywriting-assignment-id> \
   --dry-run
 ```
+
+Decision table:
+
+| Decision | Slot mutation | Copywriting assignment | Edition placement |
+| --- | --- | --- | --- |
+| `select` | `selected` + winner set | `copywriting.article-draft` | none |
+| `brief` | `briefed` + winner set | `copywriting.brief-draft` | none |
+| `hold` | `open` + winner cleared | none | none |
+| `kill` | `open` + winner cleared | none | none |
+| `merge` | none by default | none | none |
+
+## Forum Operator Loop
+
+For collaborative edition dogfood runs, operate forum threads from
+`/newsroom/messages` in forum mode:
+
+- keep one `edition_forum` thread for cross-section coordination (three planning
+  messages: theme → optional desk → reporting dispatch);
+- use `section_forum` only for ad-hoc desk threads if editors create them;
+- append human replies directly in the relevant thread;
+- treat those messages as default context for editor/reporter assignment runs.
 
 ## Verification
 
 For story-cycle or packet-review changes, run:
 
 ```bash
-node scripts/test-category-mappers.cjs
+npm run test:categories
 python procedures/newsroom/tests/test_newsroom_tools.py
 ```
 

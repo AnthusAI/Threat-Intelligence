@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
-import urllib.error
-import urllib.request
+import http.client
+import os
+import urllib.parse
 from typing import Any
 
-from .env import graphql_endpoint, graphql_jwt, lambda_auth_header
+from .env import graphql_endpoint, graphql_jwt, graphql_timeout_seconds, lambda_auth_header
 
 VERSION_FIELDS = (
     "lineageId versionNumber previousVersionId versionState versionCreatedAt "
@@ -19,6 +20,10 @@ CATEGORY_FIELDS = (
     f"{VERSION_FIELDS} id categorySetId corpusId categoryKey parentCategoryId parentCategoryKey "
     "displayName shortTitle subtitle description aliases status seedItemIds holdoutItemIds rank depth "
     "isPinned importRunId updatedAt"
+)
+CATEGORY_KEYWORD_FIELDS = (
+    "id categorySetId corpusId categoryKey categoryLineageId categoryId keyword normalizedKeyword weight rank "
+    "source sourceTopicId importRunId metadata createdAt updatedAt"
 )
 PROPOSAL_FIELDS = (
     "id categorySetId corpusId importRunId proposalKind steeringDomain status title summary categoryKey "
@@ -39,8 +44,9 @@ KNOWLEDGE_IMPORT_RUN_FIELDS = (
 KNOWLEDGE_RAW_PAYLOAD_FIELDS = "id ownerType ownerId payloadKind importRunId createdAt updatedAt"
 REFERENCE_FIELDS = (
     f"{VERSION_FIELDS} id corpusId externalItemId title authors sourceUri storagePath mediaType byteSize sha256 "
-    "sourcePublishedAt sourceUpdatedAt retrievedAt importRunId importedAt createdAt curationStatus "
-    "curationStatusKey curationStatusUpdatedAt curationStatusUpdatedBy curationStatusReason newsroomFeedKey updatedAt"
+    "sourcePublishedAt sourceUpdatedAt retrievedAt inboundCitationCount outboundCitationCount "
+    "importRunId importedAt createdAt curationStatus "
+    "curationStatusKey curationStatusUpdatedAt curationStatusUpdatedBy curationStatusReason newsroomFeedKey reviewedFeedKey updatedAt"
 )
 REFERENCE_ATTACHMENT_FIELDS = (
     "id referenceId referenceLineageId referenceVersionNumber referenceVersionKey role sortKey storagePath "
@@ -50,7 +56,7 @@ ASSIGNMENT_FIELDS = (
     "id assignmentTypeKey queueKey queueStatusKey status priority title assigneeType assigneeId assigneeKey "
     "claimedAt claimExpiresAt completedAt canceledAt corpusId categorySetId classifierId sourceSnapshotId "
     "importRunId sectionId sectionKey sectionType sectionStatusKey sectionQueueStatusKey primaryFocusCategoryKey "
-    "topicScopeCategoryKeys createdBy createdAt updatedAt"
+    "topicScopeCategoryKeys createdBy createdAt updatedAt summary newsroomFeedKey"
 )
 ASSIGNMENT_EVENT_FIELDS = (
     "id assignmentId assignmentTypeKey queueKey eventType fromStatus toStatus actorSub actorLabel note createdAt"
@@ -64,7 +70,28 @@ SEMANTIC_RELATION_FIELDS = (
 )
 MESSAGE_FIELDS = (
     "id messageKind messageDomain status summary source importRunId authorSub authorUserProfileId authorLabel "
-    "newsroomFeedKey createdAt updatedAt"
+    "threadId parentMessageId sequenceNumber role messageType content semanticLayer searchVisibility responseTarget "
+    "responseStatus responseOwner responseStartedAt responseCompletedAt responseError metadata newsroomFeedKey createdAt updatedAt"
+)
+MESSAGE_THREAD_FIELDS = (
+    "id threadKind status title summary primaryAnchorKind primaryAnchorId primaryAnchorLineageId primaryAnchorKey "
+    "createdBySub createdByUserProfileId createdByLabel messageCount lastMessageId lastMessageAt contextDigest "
+    "activeResponseMessageId responseLockOwner responseLockExpiresAt metadata createdAt updatedAt newsroomFeedKey"
+)
+PROCEDURE_DEFINITION_FIELDS = (
+    "id procedureKey title category description enabled enabledStatus currentVersionId createdBy createdAt "
+    "updatedBy updatedAt newsroomFeedKey"
+)
+PROCEDURE_VERSION_FIELDS = (
+    "id procedureId procedureKey versionNumber status isCurrent label tactusSource parameterSchema defaults "
+    "changelog createdBy createdAt updatedBy updatedAt"
+)
+PROCEDURE_RUN_FIELDS = (
+    "id procedureId procedureKey procedureVersionId procedureVersionNumber assignmentId runStatus requestedBy "
+    "requestedAt startedAt finishedAt input normalizedInput resultSummary errorSummary output error attempt newsroomFeedKey"
+)
+USER_ROLE_ASSIGNMENT_FIELDS = (
+    "id userProfileId userSub email role status grantedBy grantedAt revokedAt notes"
 )
 MODEL_ATTACHMENT_FIELDS = (
     "id ownerKind ownerId ownerLineageId ownerVersionNumber ownerVersionKey role sortKey storagePath filename "
@@ -82,6 +109,9 @@ PUBLISHED_EDITION_FIELDS = (
 )
 EDITION_ITEM_FIELDS = (
     "id editionId editionLineageId itemId itemLineageId placementKey sortKey pageNumber priority metadata"
+)
+EDITION_SLOT_FIELDS = (
+    "id editionId sectionKey slotRank targetType targetLengthBand minImageAssets status selectedAssignmentId metadata createdAt updatedAt"
 )
 PUBLISHED_EDITION_ITEM_FIELDS = (
     "id publishedEditionId publishedItemId sourceEditionItemId sourceEditionId sourceItemId editionLineageId "
@@ -103,11 +133,12 @@ PUBLISHED_MEDIA_ASSET_FIELDS = (
     "id sourceMediaAssetId publishedItemId sourceItemId itemLineageId type role sortKey storagePath externalUrl alt "
     "caption credit width height aspectRatio focalX focalY minHeight preferredHeight maxHeight crop wrapsText metadata"
 )
-ITEM_TAG_FIELDS = "id itemId tagId"
-TAG_FIELDS = "id slug label"
+ITEM_TAG_FIELDS = "id itemId tagId itemType itemStatus tagSlug publishedAt"
+TAG_FIELDS = "id slug label type description"
 SEMANTIC_NODE_FIELDS = (
     f"{VERSION_FIELDS} id nodeKey nodeKind corpusId categorySetId categoryLineageId categoryKey displayName "
-    "description aliases status importRunId createdAt updatedAt newsroomFeedKey"
+    "description aliases authorityScore authorityRank acceptedReferenceMentionCount distinctSourceKindCount relationCount "
+    "status importRunId createdAt updatedAt newsroomFeedKey"
 )
 KNOWLEDGE_ARTIFACT_FIELDS = (
     "id corpusId artifactKind artifactId snapshotId displayName createdAt importRunId"
@@ -123,16 +154,23 @@ LIST_DEFINITIONS: dict[str, dict[str, str]] = {
     "AssignmentEvent": {"field": "listAssignmentEvents", "fields": ASSIGNMENT_EVENT_FIELDS},
     "CategorySet": {"field": "listCategorySets", "fields": CATEGORY_SET_FIELDS},
     "Category": {"field": "listCategories", "fields": CATEGORY_FIELDS},
+    "CategoryKeyword": {"field": "listCategoryKeywords", "fields": CATEGORY_KEYWORD_FIELDS},
     "SteeringProposal": {"field": "listSteeringProposals", "fields": PROPOSAL_FIELDS},
     "SteeringDecision": {"field": "listSteeringDecisions", "fields": DECISION_FIELDS},
     "SemanticRelationType": {"field": "listSemanticRelationTypes", "fields": SEMANTIC_RELATION_TYPE_FIELDS},
     "SemanticRelation": {"field": "listSemanticRelations", "fields": SEMANTIC_RELATION_FIELDS},
     "Message": {"field": "listMessages", "fields": MESSAGE_FIELDS},
+    "MessageThread": {"field": "listMessageThreads", "fields": MESSAGE_THREAD_FIELDS},
+    "ProcedureDefinition": {"field": "listProcedureDefinitions", "fields": PROCEDURE_DEFINITION_FIELDS},
+    "ProcedureVersion": {"field": "listProcedureVersions", "fields": PROCEDURE_VERSION_FIELDS},
+    "ProcedureRun": {"field": "listProcedureRuns", "fields": PROCEDURE_RUN_FIELDS},
+    "UserRoleAssignment": {"field": "listUserRoleAssignments", "fields": USER_ROLE_ASSIGNMENT_FIELDS},
     "ModelAttachment": {"field": "listModelAttachments", "fields": MODEL_ATTACHMENT_FIELDS},
     "NewsroomSection": {"field": "listNewsroomSections", "fields": NEWSROOM_SECTION_FIELDS},
     "Edition": {"field": "listEditions", "fields": EDITION_FIELDS},
     "PublishedEdition": {"field": "listPublishedEditions", "fields": PUBLISHED_EDITION_FIELDS},
     "EditionItem": {"field": "listEditionItems", "fields": EDITION_ITEM_FIELDS},
+    "EditionSlot": {"field": "listEditionSlots", "fields": EDITION_SLOT_FIELDS},
     "PublishedEditionItem": {"field": "listPublishedEditionItems", "fields": PUBLISHED_EDITION_ITEM_FIELDS},
     "Item": {"field": "listItems", "fields": ITEM_FIELDS},
     "PublishedItem": {"field": "listPublishedItems", "fields": PUBLISHED_ITEM_FIELDS},
@@ -237,6 +275,43 @@ query ListPublishedItemsByTypeStatusAndPublishedAt($typeStatus: String!, $limit:
   listPublishedItemsByTypeStatusAndPublishedAt(typeStatus: $typeStatus, limit: $limit, nextToken: $nextToken) {
     items { id slug shortSlug headline title publishedAt }
     nextToken
+  }
+}
+"""
+
+LIST_MESSAGES_SAFE_QUERY = """
+query ListMessagesSafe($limit: Int, $nextToken: String) {
+  listMessages(limit: $limit, nextToken: $nextToken) {
+    items {
+      id
+      createdAt
+      updatedAt
+      messageKind
+      messageDomain
+    }
+    nextToken
+  }
+}
+"""
+
+LIST_MESSAGES_STATUS_PAGE_QUERY = """
+query ListMessagesStatusPage($limit: Int, $nextToken: String) {
+  listMessages(limit: $limit, nextToken: $nextToken) {
+    items {
+      id
+      status
+    }
+    nextToken
+  }
+}
+"""
+
+GET_MESSAGE_STATUS_QUERY = """
+query GetMessageStatus($id: ID!) {
+  getMessage(id: $id) {
+    id
+    status
+    updatedAt
   }
 }
 """
@@ -364,6 +439,12 @@ INDEX_DEFINITIONS: dict[str, dict[str, str]] = {
         "fields": SEMANTIC_RELATION_FIELDS,
         "partitionType": "ID",
     },
+    "modelAttachmentsByOwnerRoleAndSortKey": {
+        "field": "listModelAttachmentsByOwnerRoleAndSortKey",
+        "partitionKey": "ownerId",
+        "fields": MODEL_ATTACHMENT_FIELDS,
+        "partitionType": "ID",
+    },
 }
 
 
@@ -423,28 +504,68 @@ mutation Delete{model_name}($input: Delete{model_name}Input!) {{
 MUTATIONS = {model: _model_mutations(model) for model in LIST_DEFINITIONS}
 
 
+def graphql_use_iam() -> bool:
+    return os.environ.get("PAPYRUS_GRAPHQL_USE_IAM", "").strip().lower() in {"1", "true", "yes"}
+
+
 class PapyrusGraphQLAuthoringClient:
     def __init__(self, endpoint: str | None = None, auth_token: str | None = None) -> None:
         self.endpoint = endpoint or graphql_endpoint()
-        self.auth_token = auth_token or graphql_jwt()
+        self.use_iam = graphql_use_iam()
+        if self.use_iam:
+            self.auth_token = auth_token or ""
+        elif auth_token is not None:
+            self.auth_token = auth_token
+        else:
+            self.auth_token = graphql_jwt()
+        self.timeout_seconds = graphql_timeout_seconds()
+        self._parsed_endpoint = urllib.parse.urlparse(self.endpoint)
+        if self._parsed_endpoint.scheme != "https":
+            raise ValueError(f"Unsupported GraphQL endpoint scheme: {self.endpoint}")
+        self._endpoint_path = self._parsed_endpoint.path or "/"
+        if self._parsed_endpoint.query:
+            self._endpoint_path = f"{self._endpoint_path}?{self._parsed_endpoint.query}"
+        self._connection: http.client.HTTPSConnection | None = None
+
+    def _request_headers(self, payload: bytes) -> dict[str, str]:
+        if self.use_iam:
+            from papyrus_newsroom.newsroom import _iam_signed_graphql_headers
+
+            return _iam_signed_graphql_headers(self.endpoint, payload)
+        return {
+            "content-type": "application/json",
+            "Authorization": lambda_auth_header(self.auth_token),
+            # AppSync default mode is userPool; CLI JWT uses the Lambda authorizer lane.
+            "x-amz-appsync-authtype": os.environ.get("PAPYRUS_GRAPHQL_AUTH_TYPE", "AWS_LAMBDA").strip()
+            or "AWS_LAMBDA",
+            "Connection": "keep-alive",
+        }
 
     def graphql(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = json.dumps({"query": query, "variables": variables or {}}).encode("utf-8")
-        request = urllib.request.Request(
-            self.endpoint,
-            data=payload,
-            headers={
-                "content-type": "application/json",
-                "Authorization": lambda_auth_header(self.auth_token),
-            },
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(request) as response:
-                body = json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as error:
-            detail = error.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"GraphQL request failed: {error.code} {error.reason}: {detail}") from error
+        headers = self._request_headers(payload)
+        body: dict[str, Any] | None = None
+        last_error: Exception | None = None
+        for attempt in range(2):
+            try:
+                connection = self._connection or self._open_connection()
+                connection.request("POST", self._endpoint_path, body=payload, headers=headers)
+                response = connection.getresponse()
+                response_body = response.read().decode("utf-8", errors="replace")
+                if response.status >= 400:
+                    raise RuntimeError(
+                        f"GraphQL request failed: {response.status} {response.reason}: {response_body}"
+                    )
+                body = json.loads(response_body)
+                break
+            except (TimeoutError, OSError, http.client.HTTPException, json.JSONDecodeError, RuntimeError) as error:
+                last_error = error
+                self._reset_connection()
+                if attempt == 1:
+                    raise RuntimeError(f"GraphQL request failed: {error}") from error
+                continue
+        if body is None:
+            raise RuntimeError(f"GraphQL request failed: {last_error}")
 
         errors = body.get("errors") or []
         if errors:
@@ -454,6 +575,25 @@ class PapyrusGraphQLAuthoringClient:
         if not isinstance(data, dict):
             raise RuntimeError("GraphQL response did not include data.")
         return data
+
+    def _open_connection(self) -> http.client.HTTPSConnection:
+        connection = http.client.HTTPSConnection(
+            self._parsed_endpoint.hostname,
+            self._parsed_endpoint.port or 443,
+            timeout=self.timeout_seconds,
+        )
+        self._connection = connection
+        return connection
+
+    def _reset_connection(self) -> None:
+        connection = self._connection
+        self._connection = None
+        if connection is None:
+            return
+        try:
+            connection.close()
+        except Exception:
+            pass
 
     def inspect_reachability(self) -> dict[str, Any]:
         return self.graphql(LIST_EDITIONS_QUERY, {"status": "published", "limit": 1})
@@ -472,6 +612,36 @@ class PapyrusGraphQLAuthoringClient:
             if not next_token:
                 break
         return items
+
+    def list_messages_safe(
+        self,
+        *,
+        limit: int = 100,
+        next_token: str | None = None,
+    ) -> tuple[list[dict[str, Any]], str | None]:
+        result = self.graphql(
+            LIST_MESSAGES_SAFE_QUERY,
+            {"limit": limit, "nextToken": next_token},
+        )
+        connection = result.get("listMessages") or {}
+        return [entry for entry in connection.get("items") or [] if entry], connection.get("nextToken")
+
+    def get_message_status(self, message_id: str) -> dict[str, Any] | None:
+        result = self.graphql(GET_MESSAGE_STATUS_QUERY, {"id": message_id})
+        return result.get("getMessage")
+
+    def list_messages_status_page(
+        self,
+        *,
+        limit: int = 100,
+        next_token: str | None = None,
+    ) -> tuple[list[dict[str, Any]], str | None]:
+        result = self.graphql(
+            LIST_MESSAGES_STATUS_PAGE_QUERY,
+            {"limit": limit, "nextToken": next_token},
+        )
+        connection = result.get("listMessages") or {}
+        return [entry for entry in connection.get("items") or [] if entry], connection.get("nextToken")
 
     def graphql_type_field_names(self, type_name: str) -> list[str]:
         result = self.graphql(SCHEMA_TYPE_FIELDS_QUERY, {"type": type_name})
@@ -601,12 +771,24 @@ class PapyrusGraphQLAuthoringClient:
         )
         return result.get("updateNewsroomSummary") or {}
 
+    def create_record(self, model_name: str, input_payload: dict[str, Any]) -> None:
+        if model_name not in MUTATIONS:
+            raise ValueError(f"Unsupported model for create: {model_name}")
+        prepared = strip_unsupported_payload_fields(model_name, add_operational_index_fields(model_name, input_payload))
+        self.graphql(MUTATIONS[model_name]["create"], {"input": prepared})
+
     def upsert(self, model_name: str, input_payload: dict[str, Any]) -> str:
         prepared = strip_unsupported_payload_fields(model_name, add_operational_index_fields(model_name, input_payload))
         current = self.get_record(model_name, prepared["id"])
         mutation = MUTATIONS[model_name]["update" if current else "create"]
         self.graphql(mutation, {"input": prepared})
         return "updated" if current else "created"
+
+    def update_record(self, model_name: str, input_payload: dict[str, Any]) -> None:
+        if model_name not in MUTATIONS:
+            raise ValueError(f"Unsupported model for update: {model_name}")
+        prepared = strip_unsupported_payload_fields(model_name, add_operational_index_fields(model_name, input_payload))
+        self.graphql(MUTATIONS[model_name]["update"], {"input": prepared})
 
     def create_model_attachment_upload(self, attachment: dict[str, Any]) -> dict[str, Any]:
         result = self.graphql(
@@ -642,6 +824,8 @@ class PapyrusGraphQLAuthoringClient:
 def create_authoring_client() -> tuple[PapyrusGraphQLAuthoringClient, dict[str, Any]]:
     from .env import decode_jwt_claims
 
+    if graphql_use_iam():
+        return PapyrusGraphQLAuthoringClient(auth_token=""), {}
     token = graphql_jwt()
     return PapyrusGraphQLAuthoringClient(auth_token=token), decode_jwt_claims(token)
 
@@ -688,8 +872,6 @@ def strip_unsupported_payload_fields(model_name: str, input_payload: dict[str, A
     prepared = dict(input_payload)
     if model_name == "Message":
         prepared.pop("body", None)
-        prepared.pop("metadata", None)
-    elif model_name == "Reference":
         prepared.pop("metadata", None)
     elif model_name == "Assignment":
         prepared.pop("sectionTypeStatusKey", None)

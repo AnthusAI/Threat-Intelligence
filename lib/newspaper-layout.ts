@@ -1,4 +1,4 @@
-import type { ArticleImageAsset } from "./articles";
+import type { ArticleImageAsset, ArticleImageThemeVariants } from "./articles";
 import {
   type ArticleFrameBlockSpec,
   type ArticleFrameCompositionSlotSpec,
@@ -48,6 +48,7 @@ export type SolvedImageFurniture = {
   id: string;
   assetId: string;
   src: string;
+  themeVariants?: ArticleImageThemeVariants;
   alt: string;
   caption: string;
   credit: string;
@@ -422,10 +423,8 @@ type LayoutConfig = {
   pageChrome: PageChromeMetrics;
   lineHeight: number;
   linePaintHeight: number;
-  frontBodyFontSize: number;
-  continuationBodyFontSize: number;
-  frontBodyFont: string;
-  continuationBodyFont: string;
+  bodyFontSize: number;
+  bodyFont: string;
   frontRows: FrontRow[];
   continuationHeight: number;
 };
@@ -518,9 +517,14 @@ const CONTINUED_TITLE_BORDER_BOTTOM = 0;
 const CONTINUED_TITLE_MARGIN_BOTTOM = 0;
 const FURNITURE_COLLISION_GUTTER = 14;
 const PULL_QUOTE_VERTICAL_PADDING = 24;
+const KICKER_BASE_FONT_SIZE = 11.5;
+const KICKER_BASE_ROW_HEIGHT = 19;
 
-function createVerticalRhythm(narrow: boolean): VerticalRhythm {
-  const rowHeight = narrow ? 18 : 19;
+function getKickerFontSize(rhythmRowHeight: number): number {
+  return Math.round((KICKER_BASE_FONT_SIZE * rhythmRowHeight / KICKER_BASE_ROW_HEIGHT) * 10) / 10;
+}
+
+function createVerticalRhythm(rowHeight: number): VerticalRhythm {
   const paintHeight = rowHeight + 4;
   return {
     rowHeight,
@@ -968,7 +972,7 @@ function solveFrontArticleFrame(
     bodySlotHeight = Math.max(bodySlotHeight, textLimit.height);
   }
   const startCursor = { ...flow.currentCursor };
-  const text = getPrepared(prepared, item, config.frontBodyFont);
+  const text = getPrepared(prepared, item, config.bodyFont);
   let maxHeight = getFrontTeaserMeasureHeight(textLimit, bodySlotHeight);
   let result = layoutTextLines({
     prepared: text,
@@ -977,7 +981,7 @@ function solveFrontArticleFrame(
     maxWidth: blockWidth,
     lineHeight: config.lineHeight,
     linePaintHeight: config.linePaintHeight,
-    fontSize: config.frontBodyFontSize,
+    fontSize: config.bodyFontSize,
     fontFamily: SERIF_TEXT_FONT,
     obstacles: imageWrap ? [imageWrap] : [],
   });
@@ -991,7 +995,7 @@ function solveFrontArticleFrame(
       maxWidth: blockWidth,
       lineHeight: config.lineHeight,
       linePaintHeight: config.linePaintHeight,
-      fontSize: config.frontBodyFontSize,
+      fontSize: config.bodyFontSize,
       fontFamily: SERIF_TEXT_FONT,
       obstacles: imageWrap ? [imageWrap] : [],
     });
@@ -1745,7 +1749,7 @@ function solveStaticBlock(
           kind: "ad",
           id: `${blockSpec.id}-ad`,
           src: blockSpec.imageUrl,
-          label: "Advertisement",
+          label: blockSpec.label?.trim() || "Advertisement",
           x: 0,
           y: 0,
           width,
@@ -1801,7 +1805,7 @@ function layoutTextColumns({
   minimumLineStartYByColumn?: number[];
 }): { columns: TextLine[][]; cursor: LayoutCursor; hasMore: boolean } {
   const columns: TextLine[][] = [];
-  const preparedText = getPrepared(prepared, item, localConfig.continuationBodyFont);
+  const preparedText = getPrepared(prepared, item, localConfig.bodyFont);
   const columnWidth = getSpanWidth(localConfig, 1);
   let current = { ...cursor };
   let hasMore = true;
@@ -1814,7 +1818,7 @@ function layoutTextColumns({
       maxWidth: columnWidth,
       lineHeight: localConfig.lineHeight,
       linePaintHeight: localConfig.linePaintHeight,
-      fontSize: localConfig.continuationBodyFontSize,
+      fontSize: localConfig.bodyFontSize,
       fontFamily: SERIF_TEXT_FONT,
       obstacles: getColumnTextObstacles(
         furniture,
@@ -1934,6 +1938,7 @@ function createImageFurniture(
     id: `${article.slug}-${variant.id}-image`,
     assetId: asset.id,
     src: asset.src,
+    themeVariants: asset.themeVariants,
     alt: asset.alt,
     caption,
     credit: asset.credit,
@@ -2170,7 +2175,9 @@ function pageIdFor(pageNumber: number): string {
 function getLayoutConfig(pageWidth: number, viewportHeight: number): LayoutConfig {
   const narrow = pageWidth < 560;
   const medium = pageWidth >= 560 && pageWidth < 1040;
-  const rhythm = createVerticalRhythm(narrow);
+  const bodyFontSize = narrow ? 14 : 15;
+  const bodyLineHeight = Math.ceil(bodyFontSize * 1.4);
+  const rhythm = createVerticalRhythm(bodyLineHeight);
   const gap = narrow ? 14 : 18;
   const rowGap = rhythm.rowHeight;
   const sideMargin = narrow ? 18 : 30;
@@ -2180,8 +2187,6 @@ function getLayoutConfig(pageWidth: number, viewportHeight: number): LayoutConfi
   const targetPageHeight = reserveRhythmRows(getTargetPageHeight(pageWidth, viewportHeight), rhythm);
   const frontGridHeight = snapDownToRhythm(getFrontGridHeight(targetPageHeight, narrow, medium), rhythm);
   const frontRowMaxHeight = snapDownToRhythm(narrow ? 520 : medium ? 560 : 620, rhythm);
-  const frontBodyFontSize = narrow ? 15 : 16;
-  const continuationBodyFontSize = narrow ? 16 : 17;
   const continuationChrome =
     pageChrome.pagePaddingTop +
     pageChrome.insideHeaderHeight +
@@ -2198,10 +2203,8 @@ function getLayoutConfig(pageWidth: number, viewportHeight: number): LayoutConfi
     pageChrome,
     lineHeight: rhythm.rowHeight,
     linePaintHeight: rhythm.paintHeight,
-    frontBodyFontSize,
-    continuationBodyFontSize,
-    frontBodyFont: `${frontBodyFontSize}px ${SERIF_TEXT_FONT}`,
-    continuationBodyFont: `${continuationBodyFontSize}px ${SERIF_TEXT_FONT}`,
+    bodyFontSize,
+    bodyFont: `${bodyFontSize}px ${SERIF_TEXT_FONT}`,
     frontRows: getFrontRows(columnCount, rowGap, frontGridHeight, frontRowMaxHeight, rhythm),
     continuationHeight,
   };
@@ -2517,12 +2520,13 @@ function getCompositionSlotStyle(
   slotWidth: number,
 ): ChromeTextStyle {
   if (slot === "label") {
+    const labelFontSize = getKickerFontSize(config.rhythm.rowHeight);
     return {
-      fontSize: 11.5,
+      fontSize: labelFontSize,
       fontFamily: SANS_TEXT_FONT,
       fontWeight: 800,
-      lineHeightEm: 1.22,
-      paintHeightEm: 1.22,
+      lineHeightEm: config.rhythm.rowHeight / labelFontSize,
+      paintHeightEm: config.rhythm.rowHeight / labelFontSize,
     };
   }
   if (slot === "headline") {
@@ -2662,12 +2666,13 @@ function getStoryChromeMetrics(
   const feature = storyRole === "feature";
   const displayHeadline = isDisplayHeadlineScale(headlineScale);
   const headlineFontSize = getHeadlineFontSize(config, headlineScale, blockWidth);
+  const labelFontSize = getKickerFontSize(config.rhythm.rowHeight);
   const label = solveChromeTextBox(article.section, blockWidth, {
-    fontSize: 11.5,
+    fontSize: labelFontSize,
     fontFamily: SANS_TEXT_FONT,
     fontWeight: 800,
-    lineHeightEm: 1.22,
-    paintHeightEm: 1.22,
+    lineHeightEm: config.rhythm.rowHeight / labelFontSize,
+    paintHeightEm: config.rhythm.rowHeight / labelFontSize,
   }, config.rhythm, overrides?.label);
   const headline = solveChromeTextBox(article.headline, blockWidth, {
     fontSize: headlineFontSize,
@@ -2697,8 +2702,8 @@ function getStoryChromeMetrics(
     fontSize: 12.2,
     fontFamily: SANS_TEXT_FONT,
     fontWeight: 800,
-    lineHeightEm: 16 / 12.2,
-    paintHeightEm: 16 / 12.2,
+    lineHeightEm: config.rhythm.rowHeight / 12.2,
+    paintHeightEm: config.rhythm.rowHeight / 12.2,
   }, config.rhythm, overrides?.jumpLine);
 
   return {
@@ -2881,12 +2886,13 @@ function getContinuationTitleMetrics(
   explicitHeadlineScale: boolean,
   overrides?: ArticleFrameChromeSpec,
 ): ContinuationTitleMetrics {
+  const labelFontSize = getKickerFontSize(config.rhythm.rowHeight);
   const label = solveChromeTextBox(labelText, blockWidth, {
-    fontSize: 11.5,
+    fontSize: labelFontSize,
     fontFamily: SANS_TEXT_FONT,
     fontWeight: 800,
-    lineHeightEm: CONTINUED_TITLE_KICKER_LINE_HEIGHT / 11.5,
-    paintHeightEm: CONTINUED_TITLE_KICKER_LINE_HEIGHT / 11.5,
+    lineHeightEm: config.rhythm.rowHeight / labelFontSize,
+    paintHeightEm: config.rhythm.rowHeight / labelFontSize,
   }, config.rhythm, overrides?.label);
   const headingWidth = Math.min(blockWidth, 980);
   const headingFontSize = explicitHeadlineScale
@@ -3013,6 +3019,7 @@ function createFrontPreludeImage(
     id: `${article.slug}-front-prelude-photo`,
     assetId: asset.id,
     src: asset.src,
+    themeVariants: asset.themeVariants,
     alt: asset.alt,
     caption,
     credit: asset.credit,
@@ -3056,6 +3063,7 @@ function leadImageToFurniture(article: ArticlePublicationItem, obstacle: TextObs
     id: `${article.slug}-lead-photo`,
     assetId: asset?.id ?? `${article.slug}-primary-image`,
     src: article.image.src,
+    themeVariants: article.image.themeVariants,
     alt: article.image.alt,
     caption,
     credit: article.image.credit,

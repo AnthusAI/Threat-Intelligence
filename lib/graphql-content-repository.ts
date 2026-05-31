@@ -1,11 +1,11 @@
 import { generateClient } from "aws-amplify/data";
 import { getUrl } from "aws-amplify/storage/server";
 import type { Schema } from "../amplify/data/resource";
-import type { Article, ArticleImage, ArticleImageAsset, ArticleImageLayout } from "./articles";
+import type { Article, ArticleImage, ArticleImageAsset, ArticleImageLayout, ArticleImageThemeVariants } from "./articles";
 import { getAmplifyServerRuntime } from "./amplify-server-runtime";
 import type { ContentRepository, EditionContent, EditionRouteSummary, ListPublishedEditionsOptions, LoadEditionContentOptions } from "./content-types";
 import { createEditionSectionPlan } from "./edition-sections";
-import { normalizeEditionLayoutPlan } from "./layout-plan";
+import { normalizeEditionLayoutPlan, validateEditionLayoutPlanForItems, type EditionLayoutPlan } from "./layout-plan";
 import {
   articleToPublicationItem,
   publicationItemToArticle,
@@ -267,8 +267,11 @@ async function listPublishedEditionsForDate(editionDate: string): Promise<GraphQ
 }
 
 async function loadEditionContentFromEdition(edition: GraphQLEdition): Promise<EditionContent> {
+  const layoutPlan = normalizeEditionLayoutPlan(edition.layoutPlan, "Edition.layoutPlan");
   const editionItems = await listEditionItems(edition.id);
-  const items = (
+  const editionMetadata = parseObjectMetadata(edition.metadata);
+  const itemsBySlug = new Map<string, PublicationItem>();
+  const normalizedEditionItems = (
     await Promise.all(
       editionItems.map(async (editionItem) => {
         const item = await getItemById(editionItem.publishedItemId);
@@ -277,6 +280,26 @@ async function loadEditionContentFromEdition(edition: GraphQLEdition): Promise<E
       }),
     )
   ).filter((item): item is PublicationItem => item !== null);
+  for (const item of normalizedEditionItems) itemsBySlug.set(item.slug, item);
+
+  const missingLayoutItems = [...collectLayoutPlanItemIds(layoutPlan)].filter((itemId) => !itemsBySlug.has(itemId));
+  if (missingLayoutItems.length > 0) {
+    const recoveredItems = (
+      await Promise.all(
+        missingLayoutItems.map(async (itemId) => {
+          const item = await getItemBySlug(itemId);
+          if (!item || item.status !== PUBLISHED_STATUS) return null;
+          return normalizePublicationItem(item, await listMediaAssets(item.id));
+        }),
+      )
+    ).filter((item): item is PublicationItem => item !== null);
+    for (const item of recoveredItems) itemsBySlug.set(item.slug, item);
+  }
+
+  const items = [...itemsBySlug.values()];
+  const availableItemSlugs = new Set(items.map((item) => item.slug));
+  const sanitizedLayoutPlan = pruneLayoutPlanUnavailableItems(layoutPlan, availableItemSlugs, edition.id);
+  validateEditionLayoutPlanForItems(sanitizedLayoutPlan, items, `PublishedEdition(${edition.id}).layoutPlan`);
 
   return {
     id: edition.id,
@@ -284,10 +307,65 @@ async function loadEditionContentFromEdition(edition: GraphQLEdition): Promise<E
     title: edition.title,
     editionDate: edition.editionDate,
     description: edition.description ?? "GraphQL content loaded from Amplify Data.",
-    layoutPlan: normalizeEditionLayoutPlan(edition.layoutPlan, "Edition.layoutPlan"),
+    layoutPlan: sanitizedLayoutPlan,
     items,
     sections: createEditionSectionPlan(items, edition.metadata),
+    suppressNewsDeskAppendix: editionMetadata?.suppressNewsDeskAppendix === true,
   };
+}
+
+function pruneLayoutPlanUnavailableItems(
+  layoutPlan: EditionLayoutPlan,
+  availableItemSlugs: Set<string>,
+  editionId: string,
+): EditionLayoutPlan {
+  let removedBlocks = 0;
+  const pages = layoutPlan.pages.map((page) => ({
+    ...page,
+    regions: page.regions.map((region) => ({
+      ...region,
+      blocks: region.blocks.filter((block) => {
+        if ("itemId" in block && typeof block.itemId === "string" && block.itemId.trim()) {
+          if (!availableItemSlugs.has(block.itemId)) {
+            removedBlocks += 1;
+            return false;
+          }
+        }
+        if ("itemIds" in block && Array.isArray(block.itemIds)) {
+          for (const itemId of block.itemIds) {
+            if (typeof itemId === "string" && itemId.trim() && !availableItemSlugs.has(itemId)) {
+              removedBlocks += 1;
+              return false;
+            }
+          }
+        }
+        return true;
+      }),
+    })),
+  }));
+  if (removedBlocks > 0) {
+    console.warn(
+      `[graphql-content-repository] Pruned ${removedBlocks} layout block(s) that referenced unavailable published items in edition ${editionId}.`,
+    );
+  }
+  return { ...layoutPlan, pages };
+}
+
+function collectLayoutPlanItemIds(layoutPlan: EditionLayoutPlan): Set<string> {
+  const ids = new Set<string>();
+  for (const page of layoutPlan.pages) {
+    for (const region of page.regions) {
+      for (const block of region.blocks) {
+        if ("itemId" in block && typeof block.itemId === "string" && block.itemId.trim()) ids.add(block.itemId);
+        if ("itemIds" in block && Array.isArray(block.itemIds)) {
+          for (const itemId of block.itemIds) {
+            if (typeof itemId === "string" && itemId.trim()) ids.add(itemId);
+          }
+        }
+      }
+    }
+  }
+  return ids;
 }
 
 async function loadEditionItem(editionDate: string, itemSlug: string): Promise<PublicationItem | undefined> {
@@ -508,6 +586,8 @@ function normalizePublicationItemType(value: string): Exclude<PublicationItemTyp
 async function normalizeImageAsset(item: GraphQLItem, asset: GraphQLMediaAsset): Promise<ArticleImageAsset | null> {
   const src = await getMediaUrl(asset);
   if (!src) return null;
+  const metadata = parseObjectMetadata(asset.metadata);
+  const themeVariants = await parseThemeVariantsMetadata(metadata?.themeVariants);
 
   return {
     id: asset.id,
@@ -517,7 +597,8 @@ async function normalizeImageAsset(item: GraphQLItem, asset: GraphQLMediaAsset):
     caption: asset.caption ?? undefined,
     credit: asset.credit ?? asset.caption ?? "Media asset",
     roles: parseImageRoles(asset.role),
-    layout: getImageLayout(asset),
+    layout: getImageLayout(asset, metadata),
+    themeVariants,
   };
 }
 
@@ -541,10 +622,9 @@ async function getSignedStorageUrl(storagePath: string): Promise<string> {
   return result.url.toString();
 }
 
-function getImageLayout(asset: GraphQLMediaAsset): ArticleImageLayout | undefined {
+function getImageLayout(asset: GraphQLMediaAsset, metadata?: Record<string, unknown>): ArticleImageLayout | undefined {
   const aspectRatio = asset.aspectRatio ?? (asset.width && asset.height ? asset.width / asset.height : null);
   if (!aspectRatio) return undefined;
-  const metadata = parseObjectMetadata(asset.metadata);
 
   return {
     minHeight: asset.minHeight ?? 110,
@@ -562,6 +642,25 @@ function getImageLayout(asset: GraphQLMediaAsset): ArticleImageLayout | undefine
           }
         : undefined,
   };
+}
+
+async function parseThemeVariantsMetadata(value: unknown): Promise<ArticleImageThemeVariants | undefined> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const variants = value as Record<string, unknown>;
+  const dark = await resolveThemeVariantSource(variants.dark);
+  if (!dark) return undefined;
+  return { dark: { src: dark } };
+}
+
+async function resolveThemeVariantSource(value: unknown): Promise<string | undefined> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const entry = value as Record<string, unknown>;
+  const storagePath = typeof entry.storagePath === "string" && entry.storagePath.trim() ? entry.storagePath.trim() : null;
+  if (storagePath) return getSignedStorageUrl(storagePath);
+  const sourceUrl = typeof entry.sourceUrl === "string" && entry.sourceUrl.trim() ? entry.sourceUrl.trim() : null;
+  if (sourceUrl) return sourceUrl;
+  const src = typeof entry.src === "string" && entry.src.trim() ? entry.src.trim() : null;
+  return src ?? undefined;
 }
 
 function parseObjectMetadata(value: unknown): Record<string, unknown> | undefined {

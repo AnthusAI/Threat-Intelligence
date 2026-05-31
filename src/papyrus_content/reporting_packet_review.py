@@ -31,7 +31,7 @@ def build_reporting_packet_review_plan(
     decision: str,
     note: str = "",
     target_item: dict[str, Any] | None = None,
-    actor_label: str = "papyrus-content-cli",
+    actor_label: str = "papyrus-cli",
     actor_sub: str | None = None,
     now: str | None = None,
     semantic_relations: list[dict[str, Any]] | None = None,
@@ -91,6 +91,7 @@ def build_reporting_packet_review_plan(
         decision=normalized_decision,
         copywriting_assignment=copywriting_assignment,
         target_item=target_item,
+        semantic_relations=semantic_relations or [],
     )
     event = _assignment_event_for_reporting_review(
         assignment=assignment,
@@ -118,6 +119,23 @@ def build_reporting_packet_review_plan(
         {"modelName": "AssignmentEvent", "expected": event},
         metadata_attachment,
     ]
+    slot_binding = _reporting_assignment_slot_binding(assignment=assignment, semantic_relations=semantic_relations or [])
+    slot_update = _edition_slot_update_for_decision(
+        slot_binding=slot_binding,
+        decision=normalized_decision,
+        assignment_id=assignment["id"],
+        now=now,
+    )
+    if slot_update:
+        records.append({"modelName": "EditionSlot", "expected": slot_update})
+    slot_selection_relation = _slot_selection_relation(
+        slot_binding=slot_binding,
+        decision=normalized_decision,
+        assignment=assignment,
+        now=now,
+    )
+    if slot_selection_relation:
+        records.append(slot_selection_relation)
     if copywriting_assignment:
         records.append({"modelName": "Assignment", "expected": copywriting_assignment})
         records.append(copywriting_metadata_attachment)
@@ -207,6 +225,9 @@ def build_reporting_packet_review_plan(
         "copywritingAssignment": copywriting_assignment,
         "copywritingAssignmentMetadataAttachment": copywriting_metadata_attachment,
         "targetItemId": target_item.get("id") if target_item else None,
+        "slotId": slot_binding.get("slotId"),
+        "slotRank": slot_binding.get("slotRank"),
+        "slotStatus": slot_update.get("status") if slot_update else None,
         "records": records,
         "summary": {
             "assignmentId": assignment["id"],
@@ -217,6 +238,9 @@ def build_reporting_packet_review_plan(
             "copywritingAssignmentId": copywriting_assignment.get("id") if copywriting_assignment else None,
             "draftItemId": None,
             "targetItemId": target_item.get("id") if target_item else None,
+            "slotId": slot_binding.get("slotId"),
+            "slotRank": slot_binding.get("slotRank"),
+            "slotStatus": slot_update.get("status") if slot_update else None,
             "createsCopywritingAssignment": bool(copywriting_assignment),
             "createsDraftItem": False,
             "createsEditionItem": False,
@@ -256,7 +280,9 @@ def _reporting_review_metadata(
     decision: str,
     copywriting_assignment: dict[str, Any] | None,
     target_item: dict[str, Any] | None,
+    semantic_relations: list[dict[str, Any]],
 ) -> dict[str, Any]:
+    slot_binding = _reporting_assignment_slot_binding(assignment=assignment, semantic_relations=semantic_relations)
     return {
         "kind": "reporting.packet_review",
         "source": "content-cli",
@@ -265,6 +291,9 @@ def _reporting_review_metadata(
         "decision": decision,
         "targetItemId": target_item.get("id") if target_item else None,
         "copywritingAssignmentId": copywriting_assignment.get("id") if copywriting_assignment else None,
+        "slotId": slot_binding.get("slotId"),
+        "slotRank": slot_binding.get("slotRank"),
+        "slotLineageId": slot_binding.get("slotLineageId"),
         "targetItemType": _copywriting_target_item_type(copywriting_assignment["assignmentTypeKey"])
         if copywriting_assignment
         else None,
@@ -273,6 +302,96 @@ def _reporting_review_metadata(
         "privatePacketMessageKind": REPORTING_PACKET_KIND,
         "createsEditionItem": False,
     }
+
+
+def _reporting_assignment_slot_binding(
+    *,
+    assignment: dict[str, Any],
+    semantic_relations: list[dict[str, Any]],
+) -> dict[str, Any]:
+    assignment_meta = _assignment_metadata(assignment)
+    slot_target = assignment_meta.get("slotTarget") if isinstance(assignment_meta.get("slotTarget"), dict) else {}
+    relation = next(
+        (
+            row for row in semantic_relations
+            if row.get("subjectKind") == "assignment"
+            and row.get("subjectId") == assignment.get("id")
+            and row.get("objectKind") == "editionSlot"
+            and (row.get("relationTypeKey") or row.get("predicate")) == "targets_slot"
+            and row.get("relationState") != "superseded"
+        ),
+        None,
+    )
+    relation_metadata = _assignment_metadata({"metadata": relation.get("metadata") if relation else {}})
+    slot_id = (
+        _clean_string(slot_target.get("slotId"))
+        or _clean_string((relation or {}).get("objectId"))
+        or _clean_string((relation or {}).get("objectLineageId"))
+    )
+    slot_lineage_id = (
+        _clean_string(slot_target.get("slotLineageId"))
+        or _clean_string((relation or {}).get("objectLineageId"))
+        or slot_id
+    )
+    slot_rank = slot_target.get("slotRank") if slot_target.get("slotRank") is not None else relation_metadata.get("slotRank")
+    return {
+        "slotId": slot_id,
+        "slotLineageId": slot_lineage_id,
+        "slotRank": slot_rank,
+        "sectionKey": _clean_string(slot_target.get("sectionKey")) or _clean_string(relation_metadata.get("sectionKey")) or assignment.get("sectionKey"),
+    }
+
+
+def _edition_slot_update_for_decision(
+    *,
+    slot_binding: dict[str, Any],
+    decision: str,
+    assignment_id: str,
+    now: str,
+) -> dict[str, Any] | None:
+    slot_id = _clean_string(slot_binding.get("slotId"))
+    if not slot_id:
+        return None
+    if decision == "select":
+        return {"id": slot_id, "status": "selected", "selectedAssignmentId": assignment_id, "updatedAt": now}
+    if decision == "brief":
+        return {"id": slot_id, "status": "briefed", "selectedAssignmentId": assignment_id, "updatedAt": now}
+    if decision in {"hold", "kill"}:
+        return {"id": slot_id, "status": "open", "selectedAssignmentId": None, "updatedAt": now}
+    return None
+
+
+def _slot_selection_relation(
+    *,
+    slot_binding: dict[str, Any],
+    decision: str,
+    assignment: dict[str, Any],
+    now: str,
+) -> dict[str, Any] | None:
+    slot_id = _clean_string(slot_binding.get("slotId"))
+    if not slot_id or decision not in {"select", "brief"}:
+        return None
+    return semantic_relation_record(
+        {
+            "predicate": "selected_by",
+            "subjectKind": "editionSlot",
+            "subjectId": slot_id,
+            "subjectLineageId": slot_binding.get("slotLineageId") or slot_id,
+            "objectKind": "assignment",
+            "objectId": assignment["id"],
+            "objectLineageId": assignment["id"],
+            "rank": 1,
+            "classifierId": assignment.get("classifierId"),
+            "importedAt": now,
+            "metadata": {
+                "lifecycle": "reporting-packet-review",
+                "decision": decision,
+                "slotId": slot_id,
+                "slotRank": slot_binding.get("slotRank"),
+                "sectionKey": slot_binding.get("sectionKey"),
+            },
+        }
+    )
 
 
 def _assignment_event_for_reporting_review(

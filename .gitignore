@@ -17,6 +17,7 @@ corpora/*
 !corpora/papyrus-newsroom-sections.yml
 !corpora/papyrus-public-topics.yml
 .papyrus-runs/
+.papyrus/
 AGENTS.local.md
 .amplify/
 amplify_outputs.json

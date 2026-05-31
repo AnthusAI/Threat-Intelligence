@@ -82,7 +82,7 @@ class RelationsCommandsTests(unittest.TestCase):
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0]["modelName"], "Message")
         self.assertTrue(records[0]["expected"]["id"].startswith("message-legacy-"))
-        self.assertEqual(records[0]["expected"]["body"], "Needs review.")
+        self.assertEqual(records[0]["expected"]["content"], "Needs review.")
 
     def test_legacy_knowledge_comment_records_with_subject_creates_relation(self):
         records = messages_commands.legacy_knowledge_comment_records(

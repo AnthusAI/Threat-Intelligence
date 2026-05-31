@@ -1,4 +1,8 @@
 import { randomUUID } from "node:crypto";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { getAmplifyDataClientConfig } from "@aws-amplify/backend/function/runtime";
 import { Amplify } from "aws-amplify";
 import { generateClient } from "aws-amplify/data";
@@ -210,8 +214,8 @@ async function cloneProcedureRunForRetry(client: DataClient, assignment: any, no
     requestedAt: now,
     startedAt: null,
     finishedAt: null,
-    input: priorRun.input ?? {},
-    normalizedInput: priorRun.normalizedInput ?? priorRun.input ?? {},
+    input: toAwsJson(priorRun.input ?? {}),
+    normalizedInput: toAwsJson(priorRun.normalizedInput ?? priorRun.input ?? {}),
     resultSummary: null,
     errorSummary: null,
     output: null,
@@ -791,7 +795,7 @@ async function executeImmediateProcedureRun(client: DataClient, assignment: any,
       finishedAt,
       resultSummary: `Completed immediate run for ${definition.procedureKey} v${version.versionNumber}.`,
       errorSummary: null,
-      output: executionOutput,
+      output: toAwsJson(executionOutput),
       error: null,
       attempt,
     }), `update ProcedureRun ${run.id}`);
@@ -811,11 +815,11 @@ async function executeImmediateProcedureRun(client: DataClient, assignment: any,
       resultSummary: null,
       errorSummary: errorMessage,
       output: null,
-      error: {
+      error: toAwsJson({
         message: errorMessage,
         procedureKey: normalizeOptionalString(definition.procedureKey),
         procedureVersionId: normalizeOptionalString(version.id),
-      },
+      }),
       attempt,
     }), `update failed ProcedureRun ${run.id}`);
     throw error;
@@ -851,16 +855,161 @@ function executeSeededProcedurePayload(input: {
     };
   }
   if (input.procedureKind === "ingestion.reference.register") {
+    const registerResult = runIngestionReferenceRegisterViaCli(input);
     return {
       result: {
         ok: true,
         kind: "ingestion.reference.register",
         assignmentId: input.assignmentId,
         runId: input.runId,
+        register: registerResult,
       },
     };
   }
   throw new Error(`Unsupported seeded procedure kind '${input.procedureKind}' for ${input.procedureKey}.`);
+}
+
+function runIngestionReferenceRegisterViaCli(input: {
+  procedureKind: string;
+  input: Record<string, unknown>;
+}): Record<string, unknown> {
+  const externalItemId = normalizeRequiredString(
+    input.input.externalItemId ?? input.input.external_item_id,
+    "input.externalItemId",
+  );
+  const sourceUri = normalizeRequiredString(
+    input.input.sourceUri ?? input.input.source_uri,
+    "input.sourceUri",
+  );
+  const title = normalizeOptionalString(input.input.title) ?? "Untitled source";
+  const corpusKey = normalizeOptionalString(input.input.corpusKey ?? input.input.corpus_key) ?? "AI-ML-research";
+  const ingestionRationale = normalizeOptionalString(input.input.ingestionRationale ?? input.input.ingestion_rationale)
+    ?? `Registered from procedure ingestion.reference.register for ${externalItemId}.`;
+  const tempDir = mkdtempSync(path.join(tmpdir(), "papyrus-ingestion-reference-register-"));
+  const catalogPath = path.join(tempDir, "catalog.json");
+  writeFileSync(
+    catalogPath,
+    JSON.stringify({
+      schema_version: 1,
+      items: [
+        {
+          id: externalItemId,
+          item_id: externalItemId,
+          external_item_id: externalItemId,
+          title,
+          source_uri: sourceUri,
+          ingestion_rationale: ingestionRationale,
+        },
+      ],
+    }, null, 2),
+    "utf8",
+  );
+  try {
+    const register = spawnSync(
+      "npm",
+      [
+        "run",
+        "content",
+        "--",
+        "references",
+        "register-catalog",
+        "--catalog",
+        catalogPath,
+        "--corpus-key",
+        corpusKey,
+        "--status",
+        "pending",
+        "--vector-sync",
+        "false",
+        "--url-text",
+        "false",
+        "--metadata-from-text",
+        "false",
+        "--apply",
+      ],
+      { encoding: "utf8" },
+    );
+    if (register.status !== 0) {
+      throw new Error((register.stderr || register.stdout || "register-catalog failed").trim());
+    }
+    const fetch = spawnSync(
+      "npm",
+      [
+        "run",
+        "content",
+        "--",
+        "references",
+        "fetch-url-text",
+        "--corpus-key",
+        corpusKey,
+        "--external-item-id",
+        externalItemId,
+        "--status",
+        "all",
+        "--max-count",
+        "1",
+        "--apply",
+      ],
+      { encoding: "utf8" },
+    );
+    if (fetch.status !== 0) {
+      throw new Error((fetch.stderr || fetch.stdout || "fetch-url-text failed").trim());
+    }
+    const generate = spawnSync(
+      "npm",
+      [
+        "run",
+        "content",
+        "--",
+        "references",
+        "generate-metadata-from-text",
+        "--corpus-key",
+        corpusKey,
+        "--external-item-id",
+        externalItemId,
+        "--status",
+        "all",
+        "--model",
+        "gpt-5.4-nano",
+        "--max-count",
+        "1",
+        "--apply",
+      ],
+      { encoding: "utf8" },
+    );
+    if (generate.status !== 0) {
+      throw new Error((generate.stderr || generate.stdout || "generate-metadata-from-text failed").trim());
+    }
+    return {
+      externalItemId,
+      sourceUri,
+      corpusKey,
+      registerExitCode: register.status ?? 0,
+      fetchExitCode: fetch.status ?? 0,
+      generateExitCode: generate.status ?? 0,
+      fetchedTextChanges: parseTsvMetric(fetch.stdout, "references", "fetch-url-text", "changes"),
+      fetchedTextFailures: parseTsvMetric(fetch.stdout, "references", "fetch-url-text", "failures"),
+      metadataAttempted: parseTsvMetric(generate.stdout, "references", "generate-metadata-from-text", "attempted"),
+      metadataGenerated: parseTsvMetric(generate.stdout, "references", "generate-metadata-from-text", "generated"),
+      metadataSkippedMissingText: parseTsvMetric(generate.stdout, "references", "generate-metadata-from-text", "skipped-missing-text"),
+      metadataGenerationFailures: parseTsvMetric(generate.stdout, "references", "generate-metadata-from-text", "generation-failures"),
+    };
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+function parseTsvMetric(output: string, section: string, command: string, field: string): number | null {
+  const lines = (output || "").split(/\r?\n/);
+  for (const line of lines) {
+    const parts = line.trim().split("\t");
+    if (parts.length < 4) continue;
+    if (parts[0] === section && parts[1] === command && parts[2] === field) {
+      const value = Number(parts[3]);
+      return Number.isFinite(value) ? value : null;
+    }
+  }
+  return null;
 }
 
 function buildLambdaResearchPacket(input: {
@@ -1258,4 +1407,10 @@ function getIdentityLabel(event: any): string | null {
     ?? normalizeOptionalString(identity?.claims?.name)
     ?? normalizeOptionalString(identity?.username)
     ?? getIdentitySub(event);
+}
+
+function toAwsJson(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string") return value;
+  return JSON.stringify(value);
 }

@@ -12,8 +12,10 @@ import { ARCHIVE_PREVIEW_HEIGHT, ARCHIVE_PREVIEW_WIDTH } from "../lib/archive-ty
 import type { EditionContent, NewsDeskAppendix, NewsDeskCategoryTreeNode } from "../lib/content-types";
 import { shouldBypassImageOptimization } from "../lib/image-url";
 import type { PublicationItem } from "../lib/publication-items";
+import { resolveThemedImageSrc, type ResolvedTheme } from "../lib/themed-image";
 import { loadEditorCategoryTreeState } from "./news-desk-taxonomy-client";
 import { ReaderAuthControl } from "./reader-auth-control";
+import { useResolvedPapyrusTheme } from "./use-resolved-papyrus-theme";
 import {
   buildNewspaperLayout,
   type NewspaperLayout,
@@ -77,6 +79,7 @@ export function Newspaper({
   initialSectionKey,
   preserveContentLocation = false,
 }: NewspaperProps) {
+  const resolvedTheme = useResolvedPapyrusTheme();
   const pathname = usePathname();
   const normalizedInitialPage = Math.max(1, Math.floor(initialPageNumber));
   const shellRef = useRef<HTMLDivElement | null>(null);
@@ -146,7 +149,7 @@ export function Newspaper({
   useEffect(() => {
     let active = true;
     setEditorAppendixReady(false);
-    if (content.placeholderMode === "emptyEdition") {
+    if (content.placeholderMode === "emptyEdition" || content.suppressNewsDeskAppendix) {
       setEditorAppendix(null);
       setEditorAppendixReady(true);
       return () => {
@@ -178,7 +181,7 @@ export function Newspaper({
       active = false;
       unsubscribe();
     };
-  }, [content.newsDeskAppendix, content.placeholderMode, content.source]);
+  }, [content.newsDeskAppendix, content.placeholderMode, content.source, content.suppressNewsDeskAppendix]);
 
   const appendixPages = useMemo(() => buildNewsDeskAppendixPages(editorAppendix, layout?.pages.length ?? 0), [editorAppendix, layout?.pages.length]);
   const totalPages = (layout?.pages.length ?? 0) + appendixPages.length;
@@ -448,6 +451,7 @@ export function Newspaper({
                     layout={layout}
                     mastheadHref={mastheadHref}
                     page={page}
+                    resolvedTheme={resolvedTheme}
                     scrollToItemAnchor={scrollToItemAnchor}
                     scrollToPage={scrollToPage}
                   />
@@ -495,6 +499,7 @@ export function Newspaper({
 }
 
 export function NewspaperFrontPreview({ content }: { content: EditionContent }) {
+  const resolvedTheme = useResolvedPapyrusTheme();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [layout, setLayout] = useState<NewspaperLayout | null>(null);
   const [scale, setScale] = useState(0.24);
@@ -548,6 +553,7 @@ export function NewspaperFrontPreview({ content }: { content: EditionContent }) 
             layout={layout}
             mastheadHref="/"
             page={page}
+            resolvedTheme={resolvedTheme}
             scrollToItemAnchor={scrollToItemAnchor}
             scrollToPage={scrollToPage}
           />
@@ -624,6 +630,7 @@ function AppendixPagePlaceholder({ pageNumber }: { pageNumber: number }) {
 }
 
 function LoadingPage({ content, mastheadHref }: { content: EditionContent; mastheadHref: string }) {
+  const frontEditionLabel = getFrontEditionLabel(content.title);
   return (
     <section className="paper-page-content paper-page-content--front paper-page-content--loading" aria-label="Loading edition">
       <header className="masthead">
@@ -634,7 +641,7 @@ function LoadingPage({ content, mastheadHref }: { content: EditionContent; masth
         <div className="masthead__meta">
           <span>{formatShortDate(content.editionDate)}</span>
           <span>INFORMATION ABOUT INFORMATION SYSTEMS</span>
-          <span>Measuring type</span>
+          <span>{frontEditionLabel}</span>
         </div>
       </header>
     </section>
@@ -650,6 +657,7 @@ function SolvedPageView({
   layout,
   mastheadHref,
   page,
+  resolvedTheme,
   scrollToItemAnchor,
   scrollToPage,
 }: {
@@ -661,10 +669,12 @@ function SolvedPageView({
   layout: NewspaperLayout;
   mastheadHref: string;
   page: SolvedPage;
+  resolvedTheme: ResolvedTheme;
   scrollToItemAnchor: (articleSlug: string, options?: ScrollToPageOptions) => boolean;
   scrollToPage: (pageNumber: number, options?: ScrollToPageOptions) => void;
 }) {
   const front = page.kind === "front";
+  const frontEditionLabel = getFrontEditionLabel(content.title);
   const editionTitleId = front ? rawEditionTitleId ?? "edition-title" : undefined;
   const frontRegion = front ? page.regions[0] : undefined;
   return (
@@ -684,7 +694,7 @@ function SolvedPageView({
           <div className="masthead__meta">
             <span>{formatShortDate(content.editionDate)}</span>
             <span>INFORMATION ABOUT INFORMATION SYSTEMS</span>
-            <span>Cybernetic Edition</span>
+            <span>{frontEditionLabel}</span>
           </div>
         </header>
       ) : (
@@ -716,6 +726,7 @@ function SolvedPageView({
                 editionBasePath={editionBasePath}
                 index={index}
                 key={block.id}
+                resolvedTheme={resolvedTheme}
                 scrollToPage={scrollToPage}
                 suppressDirectArticleLink={content.placeholderMode === "emptyEdition"}
               />
@@ -733,7 +744,14 @@ function SolvedPageView({
       ) : (
         <div className={`solved-regions solved-regions--${page.kind}`}>
           {page.regions.map((region) => (
-            <SolvedRegionView articleAnchorBlockIds={articleAnchorBlockIds} editionBasePath={editionBasePath} key={region.id} layout={layout} region={region} />
+            <SolvedRegionView
+              articleAnchorBlockIds={articleAnchorBlockIds}
+              editionBasePath={editionBasePath}
+              key={region.id}
+              layout={layout}
+              region={region}
+              resolvedTheme={resolvedTheme}
+            />
           ))}
         </div>
       )}
@@ -988,11 +1006,13 @@ function SolvedRegionView({
   editionBasePath,
   layout,
   region,
+  resolvedTheme,
 }: {
   articleAnchorBlockIds: Set<string>;
   editionBasePath?: string;
   layout: NewspaperLayout;
   region: SolvedRegion;
+  resolvedTheme: ResolvedTheme;
 }) {
   return (
     <section
@@ -1008,6 +1028,7 @@ function SolvedRegionView({
           editionBasePath={editionBasePath}
           key={block.id}
           layout={layout}
+          resolvedTheme={resolvedTheme}
         />
       ))}
     </section>
@@ -1019,6 +1040,7 @@ function FrontStoryBlock({
   block,
   disableLinks = false,
   editionBasePath,
+  resolvedTheme,
   scrollToPage,
   suppressDirectArticleLink = false,
 }: {
@@ -1027,6 +1049,7 @@ function FrontStoryBlock({
   disableLinks?: boolean;
   editionBasePath?: string;
   index: number;
+  resolvedTheme: ResolvedTheme;
   scrollToPage: (pageNumber: number, options?: ScrollToPageOptions) => void;
   suppressDirectArticleLink?: boolean;
 }) {
@@ -1065,6 +1088,7 @@ function FrontStoryBlock({
           <LeadPhotoFigure
             furniture={{ ...furniture, y: furniture.y - (block.front?.chrome.borderTopHeight ?? 0) }}
             key={furniture.id}
+            resolvedTheme={resolvedTheme}
           />
         ))}
         <div
@@ -1117,7 +1141,7 @@ function FrontStoryBlock({
       id={anchorId}
       style={getFrontStoryStyle(block)}
     >
-      {preludeImages.map((furniture) => <LeadPhotoFigure furniture={furniture} key={furniture.id} />)}
+      {preludeImages.map((furniture) => <LeadPhotoFigure furniture={furniture} key={furniture.id} resolvedTheme={resolvedTheme} />)}
       <div className="story-label">{article.section}</div>
       <h2>
         {disableArticleLinks ? <span>{article.headline}</span> : <Link href={articleHref}>{article.headline}</Link>}
@@ -1125,7 +1149,7 @@ function FrontStoryBlock({
       <p className="story-deck">{article.deck}</p>
       <div className="story-byline">{`${article.byline} / ${article.dateline}`}</div>
       <div className="story-measure" style={{ height: block.front.bodySlotHeight + block.front.chrome.measureChromeHeight }}>
-        {measureFurniture.map((furniture) => <LeadPhotoFigure furniture={furniture} key={furniture.id} />)}
+        {measureFurniture.map((furniture) => <LeadPhotoFigure furniture={furniture} key={furniture.id} resolvedTheme={resolvedTheme} />)}
         <MeasuredLines lines={block.columns[0] ?? []} />
       </div>
       {block.jumpTargetPage || !suppressDirectArticleLink ? (
@@ -1190,20 +1214,22 @@ function SolvedBlockView({
   block,
   editionBasePath,
   layout,
+  resolvedTheme,
 }: {
   anchorId?: string;
   block: SolvedBlock;
   editionBasePath?: string;
   layout: NewspaperLayout;
+  resolvedTheme: ResolvedTheme;
 }) {
   if (block.type === "articleFrame" && block.article) {
-    return <ArticleFrameBlock anchorId={anchorId} block={block} editionBasePath={editionBasePath} layout={layout} />;
+    return <ArticleFrameBlock anchorId={anchorId} block={block} editionBasePath={editionBasePath} layout={layout} resolvedTheme={resolvedTheme} />;
   }
   if (block.type === "itemStack" && block.items?.length) {
     return <ItemStackBlock block={block} />;
   }
   if (block.type === "adBlock") {
-    return <AdBlock block={block} />;
+    return <AdBlock block={block} resolvedTheme={resolvedTheme} />;
   }
   return (
     <article className={`solved-block solved-block--${block.type}`} data-block-id={block.id} data-block-type={block.type} style={{ height: block.height }}>
@@ -1334,7 +1360,19 @@ function toClassSuffix(value: string): string {
   return suffix || "item";
 }
 
-function ArticleFrameBlock({ anchorId, block, editionBasePath, layout }: { anchorId?: string; block: SolvedBlock; editionBasePath?: string; layout: NewspaperLayout }) {
+function ArticleFrameBlock({
+  anchorId,
+  block,
+  editionBasePath,
+  layout,
+  resolvedTheme,
+}: {
+  anchorId?: string;
+  block: SolvedBlock;
+  editionBasePath?: string;
+  layout: NewspaperLayout;
+  resolvedTheme: ResolvedTheme;
+}) {
   const article = block.article;
   if (!article) return null;
   return (
@@ -1370,15 +1408,15 @@ function ArticleFrameBlock({ anchorId, block, editionBasePath, layout }: { ancho
           ))}
         </div>
         {block.furniture.map((furniture) => (
-          <SolvedFurnitureView furniture={furniture} key={furniture.id} />
+          <SolvedFurnitureView furniture={furniture} key={furniture.id} resolvedTheme={resolvedTheme} />
         ))}
       </div>
     </article>
   );
 }
 
-function SolvedFurnitureView({ furniture }: { furniture: SolvedFurniture }) {
-  if (furniture.kind === "image") return <ContinuationPhotoFigure furniture={furniture} />;
+function SolvedFurnitureView({ furniture, resolvedTheme }: { furniture: SolvedFurniture; resolvedTheme: ResolvedTheme }) {
+  if (furniture.kind === "image") return <ContinuationPhotoFigure furniture={furniture} resolvedTheme={resolvedTheme} />;
   if (furniture.kind === "pullQuote") return <ContinuationPullQuoteAside furniture={furniture} />;
   if (furniture.kind === "ad") {
     return (
@@ -1391,8 +1429,9 @@ function SolvedFurnitureView({ furniture }: { furniture: SolvedFurniture }) {
   return null;
 }
 
-function LeadPhotoFigure({ furniture }: { furniture: SolvedImageFurniture }) {
+function LeadPhotoFigure({ furniture, resolvedTheme }: { furniture: SolvedImageFurniture; resolvedTheme: ResolvedTheme }) {
   const prelude = furniture.templateId === "front-prelude";
+  const imageSrc = resolveThemedImageSrc(furniture.src, furniture.themeVariants, resolvedTheme);
   return (
     <figure
       className={prelude ? "front-prelude-photo" : "lead-photo"}
@@ -1401,13 +1440,13 @@ function LeadPhotoFigure({ furniture }: { furniture: SolvedImageFurniture }) {
     >
       <div className="photo-frame">
         <Image
-          src={furniture.src}
+          src={imageSrc}
           alt={furniture.alt}
           fill
           sizes="(max-width: 719px) 100vw, 40vw"
           priority
           style={{ objectFit: furniture.objectFit, objectPosition: furniture.objectPosition }}
-          unoptimized={shouldBypassImageOptimization(furniture.src)}
+          unoptimized={shouldBypassImageOptimization(imageSrc)}
         />
       </div>
       {furniture.caption ? <figcaption>{furniture.caption}</figcaption> : null}
@@ -1415,7 +1454,8 @@ function LeadPhotoFigure({ furniture }: { furniture: SolvedImageFurniture }) {
   );
 }
 
-function ContinuationPhotoFigure({ furniture }: { furniture: SolvedImageFurniture }) {
+function ContinuationPhotoFigure({ furniture, resolvedTheme }: { furniture: SolvedImageFurniture; resolvedTheme: ResolvedTheme }) {
+  const imageSrc = resolveThemedImageSrc(furniture.src, furniture.themeVariants, resolvedTheme);
   return (
     <figure
       className={`continuation-photo continuation-photo--${furniture.templateId}`}
@@ -1424,12 +1464,12 @@ function ContinuationPhotoFigure({ furniture }: { furniture: SolvedImageFurnitur
     >
       <div className="photo-frame">
         <Image
-          src={furniture.src}
+          src={imageSrc}
           alt={furniture.alt}
           fill
           sizes={furniture.columnSpan > 1 ? "(max-width: 719px) 100vw, 48vw" : "(max-width: 1039px) 50vw, 24vw"}
           style={{ objectFit: furniture.objectFit, objectPosition: furniture.objectPosition }}
-          unoptimized={shouldBypassImageOptimization(furniture.src)}
+          unoptimized={shouldBypassImageOptimization(imageSrc)}
         />
       </div>
       {furniture.caption ? <figcaption>{furniture.caption}</figcaption> : null}
@@ -1467,10 +1507,10 @@ function ContinuationPullQuoteAside({ furniture }: { furniture: SolvedPullQuoteF
   );
 }
 
-function AdBlock({ block }: { block: SolvedBlock }) {
+function AdBlock({ block, resolvedTheme }: { block: SolvedBlock; resolvedTheme: ResolvedTheme }) {
   return (
     <article className="solved-block solved-block--adBlock" data-block-id={block.id} data-block-type={block.type} style={{ height: block.height }}>
-      {block.furniture.map((furniture) => <SolvedFurnitureView furniture={furniture} key={furniture.id} />)}
+      {block.furniture.map((furniture) => <SolvedFurnitureView furniture={furniture} key={furniture.id} resolvedTheme={resolvedTheme} />)}
     </article>
   );
 }
@@ -1841,6 +1881,11 @@ function formatShortDate(value: string): string {
     year: "numeric",
     timeZone: "UTC",
   }).format(new Date(timestamp));
+}
+
+function getFrontEditionLabel(title: string): string {
+  const trimmedTitle = title.trim();
+  return trimmedTitle.length > 0 ? trimmedTitle : "WEEKLY EDITION";
 }
 
 function normalizePath(pathname: string): string {

@@ -38,7 +38,7 @@ GRAPHQL_PYTHON_COMMANDS: list[tuple[list[str], str]] = [
     (
         [
             "references",
-            "source-status",
+            "process-status",
             "--config",
             str(STEERING_CONFIG),
             "--corpus-key",
@@ -61,7 +61,7 @@ NODE_FALLBACK_COMMANDS: list[tuple[list[str], str]] = []
 
 def _run_papyrus_content(argv: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["poetry", "run", "papyrus-content", *argv],
+        ["poetry", "run", "papyrus", *argv],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,

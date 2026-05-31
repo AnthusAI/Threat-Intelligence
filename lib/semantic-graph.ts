@@ -34,6 +34,7 @@ export type SemanticPredicateId =
   | "reference_summary_100_tokens"
   | "reference_summary_200_tokens"
   | "reference_summary_500_tokens"
+  | "reference_summary_1000_tokens"
   | "mentions"
   | "has_editorial_form"
   | "about"
@@ -71,6 +72,7 @@ export const SEMANTIC_PREDICATES: SemanticPredicateDefinition[] = [
   { id: "reference_summary_100_tokens", label: "100-token reference summary", group: "summarization", inverseLabel: "100-token summary for", contextPackTags: ["reference_curation", "research", "context_ranking"] },
   { id: "reference_summary_200_tokens", label: "200-token reference summary", group: "summarization", inverseLabel: "200-token summary for", contextPackTags: ["reference_curation", "research", "context_ranking"] },
   { id: "reference_summary_500_tokens", label: "500-token reference summary", group: "summarization", inverseLabel: "500-token summary for", contextPackTags: ["reference_curation", "research", "context_ranking"] },
+  { id: "reference_summary_1000_tokens", label: "1000-token reference summary", group: "summarization", inverseLabel: "1000-token summary for", contextPackTags: ["reference_curation", "research", "context_ranking"] },
   { id: "mentions", label: "mentions", group: "ontology", inverseLabel: "mentioned by" },
   { id: "has_editorial_form", label: "has editorial form", group: "editorial", inverseLabel: "items by editorial form", contextPackTags: ["editing", "publication", "assignment_context"] },
   { id: "insight_about", label: "insight about", group: "knowledge", inverseLabel: "insights", contextPackTags: ["research", "reference_graph", "editing"] },
@@ -174,7 +176,7 @@ export function predicateLabel(predicate: string, direction: "outgoing" | "incom
 
 export function newsDeskHrefForSemanticObject(kind: string, lineageId: string): string {
   const encoded = encodeURIComponent(lineageId);
-  if (kind === "reference") return `/newsroom/references?reference=${encoded}`;
+  if (kind === "reference") return `/newsroom/references/${encoded}`;
   if (kind === "category") return `/newsroom/topics?category=${encoded}`;
   if (kind === "semanticNode") return `/newsroom/concepts?node=${encoded}`;
   if (kind === "assignment") return `/newsroom/assignments?assignment=${encoded}`;
@@ -293,6 +295,19 @@ export class SemanticGraphSnapshot {
       .filter((message): message is MessageRecord => Boolean(message));
     return uniqueBy([...incomingCommentMessages, ...producedMessages], (message) => message.id)
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  }
+
+  summariesFor(kind: string, lineageId: string): MessageRecord[] {
+    const ranked = this.incoming(kind, lineageId)
+      .filter((relation) => relation.subjectKind === "message")
+      .filter((relation) => isReferenceSummaryPredicate(relationTypeKey(relation)) || isReferenceSummaryPredicate(relation.predicate))
+      .map((relation) => ({
+        rank: summaryPredicateRank(relationTypeKey(relation)),
+        message: this.messagesById.get(relation.subjectId),
+      }))
+      .filter((entry): entry is { rank: number; message: MessageRecord } => Boolean(entry.message && entry.message.messageKind === "reference_summary"));
+    ranked.sort((left, right) => left.rank - right.rank || right.message.createdAt.localeCompare(left.message.createdAt));
+    return ranked.map((entry) => entry.message);
   }
 
   insightsFor(kind: string, lineageId: string): MessageRecord[] {
@@ -508,6 +523,24 @@ function pushMap<K, V>(map: Map<K, V[]>, key: K, value: V) {
   const values = map.get(key) ?? [];
   values.push(value);
   map.set(key, values);
+}
+
+export const REFERENCE_SUMMARY_PREDICATES = [
+  "reference_summary_100_tokens",
+  "reference_summary_200_tokens",
+  "reference_summary_500_tokens",
+] as const;
+
+function isReferenceSummaryPredicate(predicate: string): boolean {
+  return REFERENCE_SUMMARY_PREDICATES.includes(predicate as typeof REFERENCE_SUMMARY_PREDICATES[number])
+    || predicate.startsWith("reference_summary_");
+}
+
+function summaryPredicateRank(predicate: string): number {
+  if (predicate === "reference_summary_100_tokens") return 0;
+  if (predicate === "reference_summary_200_tokens") return 1;
+  if (predicate === "reference_summary_500_tokens") return 2;
+  return 3;
 }
 
 function uniqueBy<T>(values: T[], key: (value: T) => string): T[] {

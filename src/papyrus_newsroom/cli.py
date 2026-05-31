@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import sys
+from typing import Any
 
 from .coverage_theme import (
     coverage_theme_run,
@@ -11,6 +12,7 @@ from .coverage_theme import (
     load_json_file,
     parse_csv,
     parse_section_budgets,
+    signals_concept_report,
     signals_trend_report,
     story_budget_output,
 )
@@ -18,6 +20,7 @@ from .newsroom import (
     BIBLICUS_ROOT,
     PAPYRUS_ROOT,
     papyrus_build_assignment_agent_context,
+    papyrus_reference_curation_start,
     papyrus_search_semantic_nodes,
 )
 from .reference_curation_signals import (
@@ -32,6 +35,7 @@ from .reference_curation_signals import (
     reference_quality_set,
     reference_summarize,
     reference_summarize_batch,
+    reference_summary_cleanup_legacy,
     reference_list,
     reference_summaries,
 )
@@ -115,7 +119,7 @@ def main(argv: list[str] | None = None) -> int:
 
     curate_recent_parser = references_subparsers.add_parser(
         "curate-recent",
-        help="Curate recent references end-to-end (identifier prepass, title/subtitle, summary, quality)",
+        help="Select recent references and dispatch assignment-backed curation refresh jobs",
     )
     curate_recent_parser.add_argument("--corpus-key", required=True)
     curate_recent_parser.add_argument("--reference", action="append", default=[])
@@ -130,47 +134,53 @@ def main(argv: list[str] | None = None) -> int:
     curate_recent_parser.add_argument("--scan-limit", type=int, default=1000)
     curate_recent_parser.add_argument("--max-parallel", type=int, default=1)
     curate_recent_parser.add_argument("--model", default="gpt-5.4-mini")
-    curate_recent_parser.add_argument("--summary-max-tokens", type=int, default=500)
+    curate_recent_parser.add_argument("--summary-max-tokens", type=int, default=1800)
     curate_recent_parser.add_argument("--refresh-summary", action="store_true")
-    curate_recent_parser.add_argument("--refresh-quality", action="store_true")
+    curate_recent_parser.add_argument("--actor-label", default="papyrus")
     curate_recent_parser.add_argument("--resume", default="")
-    curate_recent_parser.add_argument("--apply", action="store_true")
     curate_recent_parser.add_argument("--dry-run", action="store_true")
     curate_recent_parser.add_argument("--json", action="store_true")
 
     summaries_parser = references_subparsers.add_parser(
         "summaries",
-        help="List budgeted summary Messages linked to one Reference",
+        help="Show canonical summary from the Reference metadata attachment",
     )
     summaries_parser.add_argument("--reference", required=True)
     summaries_parser.add_argument("--max-tokens", type=int)
 
     summarize_parser = references_subparsers.add_parser(
         "summarize",
-        help="Create or refresh one budgeted Reference summary Message",
+        help="Create or refresh canonical Reference summary metadata attachment",
     )
     summarize_parser.add_argument("--reference", required=True)
-    summarize_parser.add_argument("--max-tokens", type=int, required=True)
+    summarize_parser.add_argument("--max-tokens", type=int, default=1800)
     summarize_parser.add_argument("--summary-text", default="")
     summarize_parser.add_argument("--source-text", default="")
     summarize_parser.add_argument("--source-text-file", default="")
     summarize_parser.add_argument("--model", default="gpt-5.4-mini")
-    summarize_parser.add_argument("--apply", action="store_true")
+    summarize_parser.add_argument("--dry-run", action="store_true")
     summarize_parser.add_argument("--refresh", action="store_true")
 
     summarize_batch_parser = references_subparsers.add_parser(
         "summarize-batch",
-        help="Create budgeted summaries for references in a corpus",
+        help="Create canonical summaries for references in a corpus",
     )
     summarize_batch_parser.add_argument("--corpus-key", required=True)
-    summarize_batch_parser.add_argument("--budgets", default="100,200,500")
+    summarize_batch_parser.add_argument("--budgets", default="1800")
     summarize_batch_parser.add_argument("--only-missing", default="true")
     summarize_batch_parser.add_argument("--max-count", type=int, default=0)
     summarize_batch_parser.add_argument("--max-parallel", type=int, default=4)
     summarize_batch_parser.add_argument("--scan-limit", type=int, default=5000)
     summarize_batch_parser.add_argument("--model", default="gpt-5.4-mini")
-    summarize_batch_parser.add_argument("--apply", action="store_true")
+    summarize_batch_parser.add_argument("--dry-run", action="store_true")
     summarize_batch_parser.add_argument("--refresh", action="store_true")
+
+    summary_cleanup_parser = references_subparsers.add_parser(
+        "summary-cleanup-legacy",
+        help="Delete legacy summary Message/SemanticRelation history for one Reference",
+    )
+    summary_cleanup_parser.add_argument("--reference", required=True)
+    summary_cleanup_parser.add_argument("--dry-run", action="store_true")
 
     quality_parser = references_subparsers.add_parser(
         "quality",
@@ -185,8 +195,8 @@ def main(argv: list[str] | None = None) -> int:
     quality_set_parser.add_argument("--reference", required=True)
     quality_set_parser.add_argument("--rating", type=int, required=True)
     quality_set_parser.add_argument("--note", default="")
-    quality_set_parser.add_argument("--actor-label", default="papyrus-newsroom")
-    quality_set_parser.add_argument("--apply", action="store_true")
+    quality_set_parser.add_argument("--actor-label", default="papyrus")
+    quality_set_parser.add_argument("--dry-run", action="store_true")
     quality_set_parser.add_argument("--refresh", action="store_true")
     quality_set_parser.add_argument("--persist-local-metadata", default="true")
 
@@ -198,7 +208,7 @@ def main(argv: list[str] | None = None) -> int:
     quality_assess_parser.add_argument("--model", default="gpt-5.4-mini")
     quality_assess_parser.add_argument("--source-text", default="")
     quality_assess_parser.add_argument("--source-text-file", default="")
-    quality_assess_parser.add_argument("--apply", action="store_true")
+    quality_assess_parser.add_argument("--dry-run", action="store_true")
     quality_assess_parser.add_argument("--refresh", action="store_true")
     quality_assess_parser.add_argument("--persist-local-metadata", default="true")
 
@@ -212,7 +222,7 @@ def main(argv: list[str] | None = None) -> int:
     quality_assess_batch_parser.add_argument("--model", default="gpt-5.4-mini")
     quality_assess_batch_parser.add_argument("--only-missing", default="true")
     quality_assess_batch_parser.add_argument("--scan-limit", type=int, default=1000)
-    quality_assess_batch_parser.add_argument("--apply", action="store_true")
+    quality_assess_batch_parser.add_argument("--dry-run", action="store_true")
     quality_assess_batch_parser.add_argument("--refresh", action="store_true")
     quality_assess_batch_parser.add_argument("--persist-local-metadata", default="true")
 
@@ -233,30 +243,30 @@ def main(argv: list[str] | None = None) -> int:
 
     title_subtitle_parser = references_subparsers.add_parser(
         "title-subtitle",
-        help="Resolve and persist missing Reference titles/subtitles",
+        help="Resolve and persist Reference titles/subtitles (subtitle is stored and shown verbatim from metadata attachment)",
     )
     title_subtitle_subparsers = title_subtitle_parser.add_subparsers(dest="title_subtitle_command")
 
     title_subtitle_resolve_parser = title_subtitle_subparsers.add_parser(
         "resolve",
-        help="Resolve title/subtitle for one Reference",
+        help="Resolve title/subtitle for one Reference; subtitle quality is prompt-driven",
     )
     title_subtitle_resolve_parser.add_argument("--reference", required=True)
     title_subtitle_resolve_parser.add_argument("--model", default="gpt-5.4-mini")
     title_subtitle_resolve_parser.add_argument("--web-search", default="true")
     title_subtitle_resolve_parser.add_argument("--source-text", default="")
     title_subtitle_resolve_parser.add_argument("--source-text-file", default="")
-    title_subtitle_resolve_parser.add_argument("--apply", action="store_true")
+    title_subtitle_resolve_parser.add_argument("--dry-run", action="store_true")
     title_subtitle_resolve_parser.add_argument("--refresh", action="store_true")
-    title_subtitle_resolve_parser.add_argument("--summary", default="true")
-    title_subtitle_resolve_parser.add_argument("--summary-max-tokens", type=int, default=500)
+    title_subtitle_resolve_parser.add_argument("--summary", default="false")
+    title_subtitle_resolve_parser.add_argument("--summary-max-tokens", type=int, default=1800)
     title_subtitle_resolve_parser.add_argument("--refresh-summary", action="store_true")
     title_subtitle_resolve_parser.add_argument("--persist-local-metadata", default="true")
     title_subtitle_resolve_parser.add_argument("--vector-sync", default="true")
 
     title_subtitle_batch_parser = title_subtitle_subparsers.add_parser(
         "batch",
-        help="Resolve title/subtitle for a batch of References",
+        help="Resolve title/subtitle for a batch of References; subtitle quality is prompt-driven",
     )
     title_subtitle_batch_parser.add_argument("--corpus-key", required=True)
     title_subtitle_batch_parser.add_argument("--status", default="all")
@@ -265,24 +275,24 @@ def main(argv: list[str] | None = None) -> int:
     title_subtitle_batch_parser.add_argument("--web-search", default="true")
     title_subtitle_batch_parser.add_argument("--only-missing", default="true")
     title_subtitle_batch_parser.add_argument("--scan-limit", type=int, default=1000)
-    title_subtitle_batch_parser.add_argument("--apply", action="store_true")
+    title_subtitle_batch_parser.add_argument("--dry-run", action="store_true")
     title_subtitle_batch_parser.add_argument("--refresh", action="store_true")
-    title_subtitle_batch_parser.add_argument("--summary", default="true")
-    title_subtitle_batch_parser.add_argument("--summary-max-tokens", type=int, default=500)
+    title_subtitle_batch_parser.add_argument("--summary", default="false")
+    title_subtitle_batch_parser.add_argument("--summary-max-tokens", type=int, default=1800)
     title_subtitle_batch_parser.add_argument("--refresh-summary", action="store_true")
     title_subtitle_batch_parser.add_argument("--persist-local-metadata", default="true")
     title_subtitle_batch_parser.add_argument("--vector-sync", default="true")
 
     title_subtitle_catalog_parser = title_subtitle_subparsers.add_parser(
         "enrich-catalog",
-        help="Enrich a reference intake catalog with title/subtitle fields",
+        help="Enrich a reference intake catalog with title/subtitle fields; subtitle quality is prompt-driven",
     )
     title_subtitle_catalog_parser.add_argument("--catalog", required=True)
     title_subtitle_catalog_parser.add_argument("--output", required=True)
     title_subtitle_catalog_parser.add_argument("--model", default="gpt-5.4-mini")
     title_subtitle_catalog_parser.add_argument("--web-search", default="true")
-    title_subtitle_catalog_parser.add_argument("--summary", default="true")
-    title_subtitle_catalog_parser.add_argument("--summary-max-tokens", type=int, default=500)
+    title_subtitle_catalog_parser.add_argument("--summary", default="false")
+    title_subtitle_catalog_parser.add_argument("--summary-max-tokens", type=int, default=1800)
     title_subtitle_catalog_parser.add_argument("--refresh-summary", action="store_true")
     title_subtitle_catalog_parser.add_argument("--only-missing", default="true")
     title_subtitle_catalog_parser.add_argument("--max-count", type=int, default=0)
@@ -358,6 +368,23 @@ def main(argv: list[str] | None = None) -> int:
 def _add_signals_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     parser = subparsers.add_parser("signals", help="Knowledge-base signal and trend utilities")
     signal_subparsers = parser.add_subparsers(dest="signals_command")
+    concept_parser = signal_subparsers.add_parser(
+        "concept-report",
+        help="Build concept analytics reports (popularity, trending, pagerank) from current knowledge graph mentions",
+    )
+    concept_parser.add_argument("--corpus-key", required=True)
+    concept_parser.add_argument("--report-type", choices=["all", "popularity", "trending", "pagerank"], default="all")
+    concept_parser.add_argument("--limit", type=int, default=25)
+    concept_parser.add_argument("--trend-window-days", type=int, default=30)
+    concept_parser.add_argument("--pagerank-iterations", type=int, default=24)
+    concept_parser.add_argument("--pagerank-damping", type=float, default=0.85)
+    concept_parser.add_argument("--node-kinds", default="entity", help="Comma-separated semantic node kinds to include")
+    concept_parser.add_argument("--max-nodes-per-reference", type=int, default=30)
+    concept_parser.add_argument("--run-id", default="")
+    concept_parser.add_argument("--now", default="", help="Optional ISO timestamp for deterministic report generation")
+    concept_parser.add_argument("--input", default="", help="Optional fixture JSON with references, semanticNodes, and semanticRelations")
+    concept_parser.add_argument("--apply", action="store_true")
+    concept_parser.add_argument("--json", action="store_true")
     trend_parser = signal_subparsers.add_parser(
         "trend-report",
         help="Build a private edition signal report from recent accepted knowledge-base references",
@@ -372,7 +399,7 @@ def _add_signals_parser(subparsers: argparse._SubParsersAction[argparse.Argument
     trend_parser.add_argument("--limit", type=int, default=10)
     trend_parser.add_argument("--run-id", default="")
     trend_parser.add_argument("--input", default="", help="Optional fixture JSON with references and semanticNodes")
-    trend_parser.add_argument("--apply", action="store_true")
+    trend_parser.add_argument("--dry-run", action="store_true")
     trend_parser.add_argument("--json", action="store_true")
 
 
@@ -393,7 +420,7 @@ def _add_editions_parser(subparsers: argparse._SubParsersAction[argparse.Argumen
     plan_parser.add_argument("--signal-report", default="", help="Optional signal report JSON path")
     plan_parser.add_argument("--theme-limit", type=int, default=3)
     plan_parser.add_argument("--run-id", default="")
-    plan_parser.add_argument("--apply", action="store_true")
+    plan_parser.add_argument("--dry-run", action="store_true")
     plan_parser.add_argument("--json", action="store_true")
 
 
@@ -446,14 +473,21 @@ def _add_coverage_theme_run_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--sections", default="culture,methods,business,law")
     parser.add_argument("--section-budgets", default="")
     parser.add_argument("--run-id", default="")
-    parser.add_argument("--through", choices=["plan", "research", "reporting"], default="reporting")
+    parser.add_argument("--through", choices=["plan", "rotating-desk", "research", "reporting"], default="reporting")
     parser.add_argument("--research-mode", default="source_discovery")
     parser.add_argument("--max-parallel-research", type=int, default=1)
     parser.add_argument("--max-parallel-reporting", type=int, default=1)
     parser.add_argument("--allow-fallback", action="store_true")
     parser.add_argument("--require-agent-success", action="store_true")
     parser.add_argument("--refresh-packets", action="store_true")
-    parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--refresh-forum-kickoff", action="store_true", help="Replace phase-1 forum kickoff messages with the current suggestion template.")
+    parser.add_argument("--refresh-forum", action="store_true", help="Soft-delete all edition-forum planning messages (theme, optional desk, reporting) before re-posting.")
+    parser.add_argument("--skip-rotating-desk", action="store_true", help="Skip phase-2 optional/rotating desk selection.")
+    parser.add_argument("--select-rotating-desk", action="store_true", help="Run phase-2 optional desk selection during plan apply.")
+    parser.add_argument("--selected-optional-desk", default="", help="Human override for the optional desk section key (for example arts or gaming).")
+    parser.add_argument("--include-optional-desks", action="store_true", help="Dispatch all requested optional desks immediately without phase-2 selection.")
+    parser.add_argument("--rotating-desk-steering-notes", default="", help="Optional human steering notes passed to the rotating-desk selector.")
     parser.add_argument("--json", action="store_true")
 
 
@@ -467,6 +501,24 @@ def _add_story_budget_output_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def _run_signals_command(args: argparse.Namespace) -> dict:
+    if args.signals_command == "concept-report":
+        fixture = load_json_file(args.input) if args.input else {}
+        return signals_concept_report(
+            corpus_key=args.corpus_key,
+            report_type=args.report_type,
+            limit=args.limit,
+            trend_window_days=args.trend_window_days,
+            pagerank_iterations=args.pagerank_iterations,
+            pagerank_damping=args.pagerank_damping,
+            node_kinds=parse_csv(args.node_kinds),
+            max_nodes_per_reference=args.max_nodes_per_reference,
+            run_id=args.run_id,
+            references=fixture.get("references") if fixture else None,
+            semantic_nodes=(fixture.get("semanticNodes") or fixture.get("semantic_nodes")) if fixture else None,
+            semantic_relations=(fixture.get("semanticRelations") or fixture.get("semantic_relations")) if fixture else None,
+            apply=args.apply,
+            now=args.now,
+        )
     if args.signals_command == "trend-report":
         fixture = load_json_file(args.input) if args.input else {}
         return signals_trend_report(
@@ -481,7 +533,7 @@ def _run_signals_command(args: argparse.Namespace) -> dict:
             run_id=args.run_id,
             references=fixture.get("references") if fixture else None,
             semantic_nodes=(fixture.get("semanticNodes") or fixture.get("semantic_nodes")) if fixture else None,
-            apply=args.apply,
+            apply=not args.dry_run,
         )
     raise SystemExit("Missing or unsupported signals subcommand.")
 
@@ -500,7 +552,7 @@ def _run_editions_command(args: argparse.Namespace) -> dict:
             signal_report=load_json_file(args.signal_report) if args.signal_report else None,
             theme_limit=args.theme_limit,
             run_id=args.run_id,
-            apply=args.apply,
+            apply=not args.dry_run,
         )
     raise SystemExit("Missing or unsupported editions subcommand.")
 
@@ -532,6 +584,8 @@ def _run_assignments_command(args: argparse.Namespace) -> dict:
 def _run_coverage_theme_run(args: argparse.Namespace) -> dict:
     sections = parse_csv(args.sections)
     corpus_key = args.corpus_key or args.category_key
+    through = str(args.through or "reporting").replace("-", "_")
+    select_rotating_desk = True if args.select_rotating_desk else None
     return coverage_theme_run(
         date=args.date,
         topic=args.topic,
@@ -541,12 +595,19 @@ def _run_coverage_theme_run(args: argparse.Namespace) -> dict:
         sections=sections,
         section_budgets=parse_section_budgets(args.section_budgets, sections),
         run_id=args.run_id,
-        through=args.through,
+        through=through,
         research_mode=args.research_mode,
         allow_fallback=args.allow_fallback,
         require_agent_success=args.require_agent_success,
         refresh_packets=args.refresh_packets,
-        apply=args.apply,
+        apply=not args.dry_run,
+        selected_optional_desk_key=str(args.selected_optional_desk or "").strip(),
+        include_optional_desks=bool(args.include_optional_desks),
+        skip_rotating_desk=bool(args.skip_rotating_desk),
+        select_rotating_desk=select_rotating_desk,
+        refresh_forum_kickoff=bool(args.refresh_forum_kickoff),
+        refresh_forum=bool(args.refresh_forum),
+        rotating_desk_steering_notes=str(args.rotating_desk_steering_notes or "").strip(),
     )
 
 
@@ -565,11 +626,9 @@ def _run_story_budget_output(args: argparse.Namespace, *, command: str = "story-
 
 def _run_references_command(args: argparse.Namespace) -> dict:
     if args.references_command == "curate-recent":
-        if args.apply and args.dry_run:
-            raise ValueError("--apply and --dry-run cannot be used together.")
         if args.all and (args.since or args.reference):
             raise ValueError("--all cannot be combined with --since or --reference.")
-        return reference_curate_recent(
+        selection = reference_curate_recent(
             corpus_key=args.corpus_key,
             reference_ids=args.reference,
             since_hours=args.since_hours,
@@ -581,10 +640,57 @@ def _run_references_command(args: argparse.Namespace) -> dict:
             model=args.model,
             summary_max_tokens=args.summary_max_tokens,
             refresh_summary=args.refresh_summary,
-            refresh_quality=args.refresh_quality,
-            apply=(args.apply and not args.dry_run),
+            refresh_quality=False,
+            apply=False,
             resume=args.resume,
         )
+        selected_reference_ids: list[str] = []
+        for item in selection.get("items") or []:
+            if not isinstance(item, dict) or item.get("failed"):
+                continue
+            reference = item.get("reference") if isinstance(item.get("reference"), dict) else {}
+            reference_id = (
+                (reference.get("id") if isinstance(reference, dict) else None)
+                or item.get("referenceId")
+            )
+            if reference_id:
+                selected_reference_ids.append(str(reference_id))
+        selected_reference_ids = sorted(set(selected_reference_ids))
+        dispatches: list[dict[str, Any]] = []
+        if not args.dry_run:
+            for reference_id in selected_reference_ids:
+                dispatched = papyrus_reference_curation_start(
+                    reference_id=reference_id,
+                    actor_label=args.actor_label or "papyrus",
+                    curation_policy=None,
+                )
+                dispatches.append(
+                    {
+                        "referenceId": dispatched.get("referenceId") or reference_id,
+                        "assignmentId": dispatched.get("assignmentId"),
+                        "status": dispatched.get("status") or "queued",
+                        "runId": dispatched.get("runId"),
+                    }
+                )
+        return {
+            "kind": "reference.curate-recent",
+            "command": "references curate-recent",
+            "mode": "assignment_dispatch",
+            "ok": bool(selection.get("ok", True)),
+            "degraded": bool(selection.get("degraded", False)),
+            "apply": bool(not args.dry_run),
+            "runId": selection.get("runId"),
+            "manifestPath": selection.get("manifestPath"),
+            "corpusKey": args.corpus_key,
+            "selection": selection.get("selection") or {},
+            "selectionSummary": selection.get("summary") or {},
+            "selectionFailures": selection.get("selectionFailures") or [],
+            "warnings": selection.get("warnings") or [],
+            "selectedReferenceIds": selected_reference_ids,
+            "selectedCount": len(selected_reference_ids),
+            "dispatches": dispatches,
+            "dispatchCount": len(dispatches),
+        }
     if args.references_command == "summarize":
         return reference_summarize(
             reference_id=args.reference,
@@ -593,7 +699,7 @@ def _run_references_command(args: argparse.Namespace) -> dict:
             source_text=args.source_text,
             source_text_file=args.source_text_file,
             model=args.model,
-            apply=args.apply,
+            apply=not args.dry_run,
             refresh=args.refresh,
         )
     if args.references_command == "list":
@@ -618,8 +724,13 @@ def _run_references_command(args: argparse.Namespace) -> dict:
             max_parallel=args.max_parallel,
             scan_limit=args.scan_limit,
             model=args.model,
-            apply=args.apply,
+            apply=not args.dry_run,
             refresh=args.refresh,
+        )
+    if args.references_command == "summary-cleanup-legacy":
+        return reference_summary_cleanup_legacy(
+            reference_id=args.reference,
+            apply=not args.dry_run,
         )
     if args.references_command == "quality":
         if args.quality_command == "set":
@@ -628,7 +739,7 @@ def _run_references_command(args: argparse.Namespace) -> dict:
                 rating=args.rating,
                 note=args.note,
                 actor_label=args.actor_label,
-                apply=args.apply,
+                apply=not args.dry_run,
                 refresh=args.refresh,
                 persist_local_metadata=_parse_bool(args.persist_local_metadata),
             )
@@ -638,7 +749,7 @@ def _run_references_command(args: argparse.Namespace) -> dict:
                 model=args.model,
                 source_text=args.source_text,
                 source_text_file=args.source_text_file,
-                apply=args.apply,
+                apply=not args.dry_run,
                 refresh=args.refresh,
                 persist_local_metadata=_parse_bool(args.persist_local_metadata),
             )
@@ -648,7 +759,7 @@ def _run_references_command(args: argparse.Namespace) -> dict:
                 max_count=args.max_count,
                 status=args.status,
                 model=args.model,
-                apply=args.apply,
+                apply=not args.dry_run,
                 refresh=args.refresh,
                 only_missing=_parse_bool(args.only_missing),
                 persist_local_metadata=_parse_bool(args.persist_local_metadata),
@@ -668,7 +779,7 @@ def _run_references_command(args: argparse.Namespace) -> dict:
             return reference_title_subtitle_resolve(
                 reference_id=args.reference,
                 model=args.model,
-                apply=args.apply,
+                apply=not args.dry_run,
                 refresh=args.refresh,
                 summary=_parse_bool(args.summary),
                 summary_max_tokens=args.summary_max_tokens,
@@ -685,7 +796,7 @@ def _run_references_command(args: argparse.Namespace) -> dict:
                 max_count=args.max_count,
                 status=args.status,
                 model=args.model,
-                apply=args.apply,
+                apply=not args.dry_run,
                 refresh=args.refresh,
                 summary=_parse_bool(args.summary),
                 summary_max_tokens=args.summary_max_tokens,

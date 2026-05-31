@@ -14,6 +14,7 @@ import html
 import json
 import os
 import re
+import subprocess
 import sys
 import threading
 import urllib.error
@@ -39,11 +40,17 @@ from .semantic import PapyrusSemanticClient, semantic_state_key, semantic_versio
 
 PAPYRUS_ROOT = Path(__file__).resolve().parents[2]
 BIBLICUS_ROOT = PAPYRUS_ROOT.parent / "Biblicus"
-SUMMARY_TOKEN_BUDGETS = (100, 200, 500)
+SUMMARY_TOKEN_BUDGETS = (100, 200, 500, 1000, 1800)
 SUMMARY_MESSAGE_KIND = "reference_summary"
 SUMMARY_MESSAGE_DOMAIN = "summarization"
 SUMMARY_SOURCE = "papyrus-summary-generator"
-SUMMARY_PROMPT_VERSION = "reference-summary-v2-publication-doctrine"
+SUMMARY_PROMPT_VERSION = "reference-summary-v3-source-voice"
+SUMMARY_PROCEDURE_ALIAS_SUMMARIZE = "references.summarize"
+SUMMARY_PROCEDURE_ALIAS_SUMMARIZE_BATCH = "references.summarize-batch"
+SUMMARY_PROCEDURE_ALIAS_TITLE_SUBTITLE_RESOLVE = "references.title-subtitle.resolve"
+SUMMARY_PROCEDURE_ALIAS_TITLE_SUBTITLE_BATCH = "references.title-subtitle.batch"
+SUMMARY_PROCEDURE_ALIAS_TITLE_SUBTITLE_ENRICH_CATALOG = "references.title-subtitle.enrich-catalog"
+SUMMARY_PROCEDURE_OUTPUT_MARKERS = ("mode", "summary_text", "prompt_version")
 PUBLICATION_DOCTRINE_SLUGS = ("editorial-doctrine-mission", "editorial-doctrine-policy")
 DOCTRINE_POLICY_USE = "context_only_not_reference_rubric"
 QUALITY_RELATION_TYPE_KEY = "quality_rating_is"
@@ -70,8 +77,12 @@ QUALITY_NODE_KEYS = {
 }
 TITLE_SUBTITLE_SOURCE = "papyrus-title-subtitle-enricher"
 TITLE_SUBTITLE_PROMPT_VERSION = "reference-title-subtitle-v1-verbatim-source"
-TITLE_SUBTITLE_SUMMARY_PROMPT_VERSION = "reference-title-subtitle-summary-v1-outcome"
-TITLE_SUBTITLE_SUMMARY_TOKEN_BUDGET_DEFAULT = 500
+TITLE_SUBTITLE_SUMMARY_PROMPT_VERSION = "reference-title-subtitle-summary-v2-source-voice"
+TITLE_SUBTITLE_SUMMARY_TOKEN_BUDGET_DEFAULT = 1800
+TITLE_SUBTITLE_BATCH_WORKERS = 8
+SUMMARY_SOURCE_TEXT_MAX_CHARS = 12000
+REFERENCE_METADATA_MODEL_DEFAULT = "gpt-5.4-nano"
+BIBLICUS_SUMMARIZE_MAP_REDUCE_PROMPT_VERSION = "summarize-map-reduce-v2"
 BIBLICUS_CATALOG_ITEM_ROOT_FIELDS = frozenset(
     {
         "id",
@@ -133,6 +144,29 @@ query ListReferencesByCorpus($corpusId: ID!, $limit: Int, $nextToken: String) {{
     nextToken
   }}
 }}
+"""
+
+LIST_REFERENCE_ATTACHMENTS_BY_LINEAGE_QUERY = """
+query ListReferenceAttachmentsByLineage($referenceLineageId: ID!, $limit: Int, $nextToken: String) {
+  listReferenceAttachmentsByReferenceLineageAndSortKey(referenceLineageId: $referenceLineageId, limit: $limit, nextToken: $nextToken) {
+    items {
+      id
+      referenceId
+      referenceLineageId
+      role
+      sortKey
+      storagePath
+      sourceUri
+      filename
+      mediaType
+      importRunId
+      importedAt
+      status
+      metadata
+    }
+    nextToken
+  }
+}
 """
 
 CREATE_MODEL_ATTACHMENT_UPLOAD_MUTATION = """
@@ -253,9 +287,9 @@ def normalize_summary_budget(value: Any) -> int:
     try:
         budget = int(value)
     except (TypeError, ValueError):
-        raise ValueError("summary max tokens must be one of 100, 200, or 500") from None
+        raise ValueError("summary max tokens must be one of 100, 200, 500, 1000, or 1800") from None
     if budget not in SUMMARY_TOKEN_BUDGETS:
-        raise ValueError("summary max tokens must be one of 100, 200, or 500")
+        raise ValueError("summary max tokens must be one of 100, 200, 500, 1000, or 1800")
     return budget
 
 
@@ -296,7 +330,7 @@ def build_reference_quality_plan(
     reference: dict[str, Any],
     rating: int,
     note: str = "",
-    actor_label: str = "papyrus-newsroom",
+    actor_label: str = "papyrus",
     source: str = "manual",
     refresh: bool = False,
     run_id: str = "",
@@ -415,19 +449,15 @@ def build_reference_summary_plan(
     max_tokens = normalize_summary_budget(max_tokens)
     summary_text = _required(summary_text, "summary_text")
     reference = _require_reference(reference)
-    semantic = semantic_client or _semantic_client()
-    relation_key = summary_relation_type_key(max_tokens)
-    existing = _current_relations(
-        semantic.list_incoming("reference", reference["lineageId"])["relations"],
-        relation_key,
-    )
-    if existing and not refresh:
+    metadata_payload = _load_reference_metadata_payload(reference)
+    existing_summary = _normalize_outcome_summary_candidate(metadata_payload.get("summary") if isinstance(metadata_payload, dict) else "")
+    if existing_summary == summary_text and not refresh:
         return {
             "kind": "reference.summary.plan",
             "action": "noop",
             "reference": _reference_summary(reference),
             "maxTokens": max_tokens,
-            "existingRelationId": existing[0].get("id"),
+            "existingSummary": existing_summary,
             "records": [],
             "warnings": [],
         }
@@ -458,75 +488,57 @@ def build_reference_summary_plan(
             "resolution": identifier_prepass.get("resolution") or {},
         }
     metadata.update(doctrine_metadata)
-    message_id = f"message-reference-summary-{_safe_id(reference['lineageId'])}-{max_tokens}-{_hash_short([summary_text, now, run_id])}"
-    message = {
-        "id": message_id,
-        "messageKind": SUMMARY_MESSAGE_KIND,
-        "messageDomain": SUMMARY_MESSAGE_DOMAIN,
-        "status": "active",
-        "summary": summary_text,
-        "source": SUMMARY_SOURCE,
-        "importRunId": reference.get("importRunId"),
-        "authorLabel": actor_label,
-        "createdAt": now,
-        "updatedAt": now,
-        "newsroomFeedKey": "messages",
-    }
+    summary_resolution = _summary_resolution(
+        summary=summary_text,
+        summary_token_budget=max_tokens,
+        model=model or "gpt-5.4-mini",
+        source="llm_reference_summary" if model and model != "manual" else "manual_override",
+        source_urls=[],
+        run_id=run_id,
+        resolved_at=now,
+        rationale=rationale or "Generated canonical reference summary.",
+        prompt_version=prompt_version,
+    )
+    next_metadata = dict(metadata_payload) if isinstance(metadata_payload, dict) else {}
+    next_metadata["summary"] = summary_text
+    next_metadata["summary_resolution"] = summary_resolution
+    if identifier_prepass:
+        next_metadata.update(
+            _identifier_metadata_update(
+                metadata=next_metadata,
+                identifier_prepass=identifier_prepass,
+            )
+        )
     metadata_attachment = _model_attachment(
-        owner_kind="message",
-        owner_id=message_id,
+        owner_kind="reference",
+        owner_id=reference["id"],
         role="metadata",
         sort_key="metadata",
         filename="metadata.json",
         media_type="application/json",
-        content=metadata,
+        content=next_metadata,
         import_run_id=reference.get("importRunId"),
         now=now,
-    )
-    stale_updates = [
-        _supersede_relation_record(relation, now, {"supersededByMessageId": message_id, "supersededAt": now})
-        for relation in existing
-    ]
-    relation = _semantic_relation(
-        predicate=relation_key,
-        subject_kind="message",
-        subject_id=message_id,
-        subject_lineage_id=message_id,
-        subject_version_number=1,
-        object_kind="reference",
-        object_id=reference["id"],
-        object_lineage_id=reference["lineageId"],
-        object_version_number=reference.get("versionNumber"),
-        score=float(actual_tokens),
-        confidence=None,
-        rank=1,
-        classifier_id=None,
-        model_version=model or None,
-        import_run_id=reference.get("importRunId"),
-        imported_at=now,
-        metadata=metadata,
     )
     return {
         "kind": "reference.summary.plan",
         "action": "create",
         "reference": _reference_summary(reference),
         "maxTokens": max_tokens,
-        "message": message,
         "metadata": metadata,
+        "summary": summary_text,
+        "summaryResolution": summary_resolution,
         "records": [
-            {"modelName": "Message", "action": "create", "input": message},
             {"modelName": "ModelAttachment", "action": "create", "input": metadata_attachment["record"], "body": metadata_attachment["body"]},
-            {"modelName": "SemanticRelation", "action": "create", "input": relation},
-            *stale_updates,
         ],
         "summaryDelta": _summary_delta_for_plan(
-            messages=1,
+            messages=0,
             model_attachments=1,
-            created_relations=1,
-            superseded_relations=len(stale_updates),
-            relation_type_key=relation_key,
+            created_relations=0,
+            superseded_relations=0,
+            relation_type_key="",
             relation_domain="summarization",
-            subject_kind="message",
+            subject_kind="reference",
             object_kind="reference",
         ),
         "warnings": [],
@@ -541,25 +553,27 @@ def resolve_reference_title_subtitle(
     web_search_enabled: bool = True,
     model: str = "gpt-5.4-mini",
     refresh: bool = False,
-    include_summary: bool = True,
+    include_summary: bool = False,
     summary_max_tokens: int = TITLE_SUBTITLE_SUMMARY_TOKEN_BUDGET_DEFAULT,
     refresh_summary: bool = False,
     run_id: str = "",
     now: str | None = None,
     fetcher: Any | None = None,
     llm_resolver: Any | None = None,
+    llm_toolless_resolver: Any | None = None,
     summary_resolver: Any | None = None,
+    summary_procedure_alias: str = SUMMARY_PROCEDURE_ALIAS_TITLE_SUBTITLE_RESOLVE,
     identifier_prepass: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Resolve original title/subtitle metadata for a Reference-like record.
 
-    The resolver is intentionally conservative: local/catalog/sidecar metadata
-    wins, web/LLM evidence is provenance-marked, and generated subtitles are
-    never represented as original source copy.
+    Keep title/subtitle resolution straightforward and provenance-marked without
+    hidden subtitle rewrite/suppression branches.
     """
     now = now or _now()
     fetcher = fetcher or _fetch_url_text
     llm_resolver = llm_resolver or generate_title_subtitle_with_web_search
+    llm_toolless_resolver = llm_toolless_resolver or generate_title_subtitle_without_web_search
     summary_resolver = summary_resolver or generate_outcome_summary
     reference = reference or {}
     catalog_entry = catalog_entry or {}
@@ -603,9 +617,14 @@ def resolve_reference_title_subtitle(
         )
     summary_budget = normalize_title_subtitle_summary_budget(summary_max_tokens)
     local = _title_subtitle_from_local(reference=reference, catalog_entry=catalog_entry, sidecar=sidecar)
+    local_catalog_title_without_subtitle = bool(
+        local.get("title")
+        and not _normalize_subtitle_candidate(local.get("subtitle"))
+        and local.get("source") == "catalog"
+    )
     existing_reference_title = _normalize_reference_title_candidate(reference.get("title"))
     title = local.get("title") if refresh or not existing_reference_title else existing_reference_title
-    subtitle = _normalize_subtitle_candidate(local.get("subtitle"))
+    subtitle = "" if refresh else _normalize_subtitle_candidate(local.get("subtitle"))
     local_summary = _normalize_outcome_summary_candidate(local.get("summary"))
     summary = "" if (refresh or refresh_summary) else local_summary
     title_mode = local.get("titleMode") if title else None
@@ -615,6 +634,7 @@ def resolve_reference_title_subtitle(
     rationale = local.get("rationale") or ""
     summary_source = local.get("summarySource") or source
     summary_rationale = local.get("summaryRationale") or ("Resolved from local metadata summary." if summary else "")
+    summary_prompt_version = ""
 
     if title and subtitle and (summary if include_summary else True) and not refresh and not refresh_summary:
         return _title_subtitle_resolution(
@@ -628,7 +648,7 @@ def resolve_reference_title_subtitle(
             web_search_used=False,
             source_urls=source_urls,
             rationale=rationale or "Title and subtitle were available from local metadata.",
-            summary=summary,
+            summary=summary if include_summary else "",
             summary_resolution=_summary_resolution(
                 summary=summary,
                 summary_token_budget=summary_budget,
@@ -658,7 +678,7 @@ def resolve_reference_title_subtitle(
         title = deterministic["title"]
         title_mode = deterministic.get("titleMode") or "original_web_metadata"
     if not subtitle and deterministic.get("subtitle"):
-        subtitle = _normalize_subtitle_candidate(deterministic["subtitle"])
+        subtitle = _clean_text(deterministic["subtitle"])
         subtitle_mode = deterministic.get("subtitleMode") or "original_web_metadata"
     if include_summary and not summary and deterministic.get("summary"):
         summary = _normalize_outcome_summary_candidate(deterministic.get("summary"))
@@ -667,6 +687,15 @@ def resolve_reference_title_subtitle(
     if deterministic.get("rationale"):
         rationale = deterministic["rationale"]
         source = deterministic.get("source") or source
+
+    deterministic_subtitle_issue = _non_generated_subtitle_quality_issue(
+        subtitle,
+        subtitle_mode=subtitle_mode or "",
+    )
+    if deterministic_subtitle_issue:
+        warnings.append(f"subtitle candidate rejected: {deterministic_subtitle_issue}")
+        subtitle = ""
+        subtitle_mode = "unresolved"
 
     if title and subtitle and (summary if include_summary else True):
         return _title_subtitle_resolution(
@@ -680,7 +709,7 @@ def resolve_reference_title_subtitle(
             web_search_used=False,
             source_urls=source_urls,
             rationale=rationale or "Title and subtitle were resolved deterministically.",
-            summary=summary,
+            summary=summary if include_summary else "",
             summary_resolution=_summary_resolution(
                 summary=summary,
                 summary_token_budget=summary_budget,
@@ -698,7 +727,33 @@ def resolve_reference_title_subtitle(
             identifier_prepass=identifier_prepass,
         )
 
-    if web_search_enabled:
+    if not subtitle and not web_search_enabled and not (local_catalog_title_without_subtitle and title):
+        try:
+            llm = llm_toolless_resolver(
+                reference=reference,
+                catalog_entry=catalog_entry,
+                source_text=source_text,
+                known_title=title or "",
+                known_subtitle=subtitle or "",
+                model=model,
+            )
+            if llm.get("source_urls"):
+                source_urls.extend(str(url) for url in llm.get("source_urls") or [] if str(url or "").strip())
+            if not title and llm.get("title"):
+                title = _clean_text(llm.get("title"))
+                title_mode = _title_subtitle_mode(llm.get("title_mode"), default="original_web_metadata")
+            if not subtitle and llm.get("subtitle"):
+                candidate_subtitle = _clean_text(llm.get("subtitle"))
+                candidate_subtitle_mode = _title_subtitle_mode(llm.get("subtitle_mode"), default="generated")
+                if candidate_subtitle:
+                    subtitle = candidate_subtitle
+                    subtitle_mode = candidate_subtitle_mode
+            rationale = _clean_text(llm.get("rationale")) or rationale
+            source = "llm_no_web_search"
+        except Exception as exc:
+            warnings.append(f"title/subtitle tool-less LLM resolution failed: {exc}")
+
+    if web_search_enabled and not subtitle and not (local_catalog_title_without_subtitle and title):
         try:
             llm = llm_resolver(
                 reference=reference,
@@ -714,36 +769,55 @@ def resolve_reference_title_subtitle(
                 title = _clean_text(llm.get("title"))
                 title_mode = _title_subtitle_mode(llm.get("title_mode"), default="original_web_metadata")
             if not subtitle and llm.get("subtitle"):
-                subtitle = _normalize_subtitle_candidate(llm.get("subtitle"))
-                subtitle_mode = _title_subtitle_mode(llm.get("subtitle_mode"), default="generated_fallback")
+                candidate_subtitle = _clean_text(llm.get("subtitle"))
+                candidate_subtitle_mode = _title_subtitle_mode(llm.get("subtitle_mode"), default="generated")
+                if candidate_subtitle:
+                    subtitle = candidate_subtitle
+                    subtitle_mode = candidate_subtitle_mode
             rationale = _clean_text(llm.get("rationale")) or rationale
             source = "llm_web_search"
         except Exception as exc:
             warnings.append(f"title/subtitle web+LLM resolution failed: {exc}")
 
     title = _normalize_reference_title_candidate(title)
-    if _placeholder_title_or_subtitle(title):
+    if _placeholder_title(title):
         title = ""
         title_mode = "unresolved"
-    colon_subtitle = _title_colon_subtitle_candidate(title)
-    if colon_subtitle and (not subtitle or subtitle_mode == "generated_fallback"):
-        subtitle = colon_subtitle
-        subtitle_mode = title_mode or "original_metadata"
-    subtitle = _normalize_subtitle_candidate(subtitle)
+    subtitle = _clean_text(subtitle)
+    if _placeholder_title(subtitle) and _title_subtitle_mode(subtitle_mode or "", default="") != "generated_fallback":
+        subtitle = ""
+        subtitle_mode = "unresolved"
+    subtitle_quality_issue = _generated_subtitle_quality_issue(
+        subtitle,
+        subtitle_mode=subtitle_mode or "",
+    )
+    if subtitle_quality_issue:
+        warnings.append(f"generated subtitle rejected: {subtitle_quality_issue}")
+        subtitle = ""
+        subtitle_mode = "unresolved"
 
     if include_summary and not summary:
         try:
-            summary = _normalize_outcome_summary_candidate(summary_resolver(
+            summary_result = summary_resolver(
                 source_text,
                 reference=reference,
                 title=title,
                 subtitle=subtitle,
                 max_tokens=summary_budget,
                 model=model,
-            ))
+                procedure_alias=summary_procedure_alias,
+            )
+            if isinstance(summary_result, str):
+                summary_text = summary_result
+                summary_prompt = TITLE_SUBTITLE_SUMMARY_PROMPT_VERSION
+            else:
+                summary_text = (summary_result or {}).get("summary_text")
+                summary_prompt = _clean_text((summary_result or {}).get("prompt_version")) or TITLE_SUBTITLE_SUMMARY_PROMPT_VERSION
+            summary = _normalize_outcome_summary_candidate(summary_text)
             if summary:
                 summary_source = "llm_outcome_summary"
                 summary_rationale = "Generated outcome-focused summary from source text."
+                summary_prompt_version = summary_prompt
         except Exception as exc:
             warnings.append(f"summary generation failed: {exc}")
 
@@ -756,7 +830,7 @@ def resolve_reference_title_subtitle(
         run_id=run_id,
         resolved_at=now,
         rationale=summary_rationale if summary else "No reliable summary was produced.",
-        prompt_version=TITLE_SUBTITLE_SUMMARY_PROMPT_VERSION if summary_source == "llm_outcome_summary" else "",
+        prompt_version=summary_prompt_version if summary_source == "llm_outcome_summary" else "",
     ) if include_summary else {}
 
     status = "resolved" if title else "unresolved"
@@ -765,10 +839,10 @@ def resolve_reference_title_subtitle(
         title=title or "",
         subtitle=subtitle or "",
         title_mode=title_mode or ("original_web_metadata" if title else "unresolved"),
-        subtitle_mode=subtitle_mode or ("unresolved" if not subtitle else "generated_fallback"),
+        subtitle_mode=subtitle_mode or ("unresolved" if not subtitle else "generated"),
         source=source if status == "resolved" else "unresolved",
         model=model,
-        web_search_used=web_search_enabled,
+        web_search_used=bool(web_search_enabled and source == "llm_web_search"),
         source_urls=source_urls,
         rationale=rationale or ("Resolved title/subtitle." if status == "resolved" else "No reliable title candidate was found."),
         summary=summary if include_summary else "",
@@ -789,9 +863,10 @@ def build_reference_title_subtitle_plan(
     web_search_enabled: bool = True,
     model: str = "gpt-5.4-mini",
     refresh: bool = False,
-    include_summary: bool = True,
+    include_summary: bool = False,
     summary_max_tokens: int = TITLE_SUBTITLE_SUMMARY_TOKEN_BUDGET_DEFAULT,
     refresh_summary: bool = False,
+    summary_procedure_alias: str = SUMMARY_PROCEDURE_ALIAS_TITLE_SUBTITLE_RESOLVE,
     run_id: str = "",
     now: str | None = None,
     semantic_client: PapyrusSemanticClient | None = None,
@@ -799,7 +874,7 @@ def build_reference_title_subtitle_plan(
     now = now or _now()
     reference = _require_reference(reference)
     run_id = run_id or f"title-subtitle-{_hash_short([reference.get('id'), now])}"
-    metadata = _jsonish(reference.get("metadata")) or {}
+    metadata = _load_reference_metadata_payload(reference)
     identifier_prepass = _run_identifier_prepass(reference=reference, catalog_entry=catalog_entry or {})
     if identifier_prepass.get("status") == "failed":
         return {
@@ -811,8 +886,15 @@ def build_reference_title_subtitle_plan(
             "records": [],
             "warnings": [f"identifier prepass failed: {identifier_prepass.get('failureReason') or 'unknown error'}"],
         }
-    existing_title = _clean_text(reference.get("title"))
-    existing_subtitle = _normalize_subtitle_candidate(metadata.get("subtitle") or reference.get("subtitle"))
+    existing_title = _normalize_reference_title_candidate(metadata.get("title") or reference.get("title"))
+    existing_subtitle_raw = _normalize_subtitle_candidate(metadata.get("subtitle") or reference.get("subtitle"))
+    existing_resolution = metadata.get("title_subtitle_resolution") if isinstance(metadata.get("title_subtitle_resolution"), dict) else {}
+    existing_subtitle_mode = _clean_text(existing_resolution.get("subtitle_mode")) or "existing_reference_metadata"
+    existing_subtitle_issue = _subtitle_candidate_quality_issue(
+        existing_subtitle_raw,
+        subtitle_mode=existing_subtitle_mode,
+    )
+    existing_subtitle = "" if existing_subtitle_issue else existing_subtitle_raw
     existing_summary = _normalize_outcome_summary_candidate(metadata.get("summary"))
     if existing_title and existing_subtitle and ((existing_summary and include_summary) or not include_summary) and not refresh and not refresh_summary:
         return {
@@ -829,7 +911,7 @@ def build_reference_title_subtitle_plan(
                 subtitle=existing_subtitle,
                 title_mode="existing_reference",
                 subtitle_mode="existing_reference_metadata",
-                source="existing_reference",
+                source="existing_reference_metadata",
                 model=model,
                 web_search_used=False,
                 source_urls=[],
@@ -865,6 +947,7 @@ def build_reference_title_subtitle_plan(
         include_summary=include_summary,
         summary_max_tokens=summary_max_tokens,
         refresh_summary=refresh_summary,
+        summary_procedure_alias=summary_procedure_alias,
         run_id=run_id,
         now=now,
         identifier_prepass=identifier_prepass,
@@ -881,20 +964,19 @@ def build_reference_title_subtitle_plan(
             "warnings": resolution.get("warnings") or [],
         }
     identifier_metadata = _identifier_metadata_update(
-        metadata=_jsonish(reference.get("metadata")) or {},
+        metadata=metadata,
         identifier_prepass=resolution.get("identifierPrepass") or identifier_prepass,
     )
     next_metadata = {
         **metadata,
         "title": resolution["title"],
-        "subtitle": resolution.get("subtitle") or existing_subtitle or "",
+        "subtitle": resolution.get("subtitle") or "",
         "title_subtitle_resolution": _title_subtitle_provenance(resolution),
         **identifier_metadata,
     }
     if include_summary:
         next_metadata["summary"] = resolution.get("summary") or existing_summary or ""
         next_metadata["summary_resolution"] = _summary_resolution_provenance(resolution)
-    records = []
     summary_changed = (
         include_summary
         and (
@@ -904,23 +986,18 @@ def build_reference_title_subtitle_plan(
             or metadata.get("summary_resolution") != next_metadata.get("summary_resolution")
         )
     )
-    if (
+    metadata_changed = (
         refresh
         or not existing_title
         or existing_title != resolution["title"]
         or existing_subtitle != (resolution.get("subtitle") or "")
         or metadata.get("title_subtitle_resolution") != next_metadata.get("title_subtitle_resolution")
         or summary_changed
-    ):
-        records.append({
-            "modelName": "Reference",
-            "action": "update",
-            "input": {
-                "id": reference["id"],
-                "title": resolution["title"],
-                "updatedAt": now,
-            },
-        })
+        or metadata != next_metadata
+    )
+    records = []
+    if metadata_changed:
+        next_metadata["updatedAt"] = now
     metadata_attachment = _model_attachment(
         owner_kind="reference",
         owner_id=reference["id"],
@@ -932,7 +1009,8 @@ def build_reference_title_subtitle_plan(
         import_run_id=reference.get("importRunId"),
         now=now,
     )
-    records.append({"modelName": "ModelAttachment", "action": "create", "input": metadata_attachment["record"], "body": metadata_attachment["body"]})
+    if metadata_changed:
+        records.append({"modelName": "ModelAttachment", "action": "create", "input": metadata_attachment["record"], "body": metadata_attachment["body"]})
     return {
         "kind": "reference.title-subtitle.plan",
         "action": "update" if records else "noop",
@@ -953,10 +1031,11 @@ def reference_title_subtitle_resolve(
     model: str = "gpt-5.4-mini",
     apply: bool = False,
     refresh: bool = False,
-    summary: bool = True,
+    summary: bool = False,
     summary_max_tokens: int = TITLE_SUBTITLE_SUMMARY_TOKEN_BUDGET_DEFAULT,
     refresh_summary: bool = False,
     web_search: bool = True,
+    summary_procedure_alias: str = SUMMARY_PROCEDURE_ALIAS_TITLE_SUBTITLE_RESOLVE,
     persist_local_metadata: bool = True,
     vector_sync: bool = True,
     source_text: str = "",
@@ -978,6 +1057,7 @@ def reference_title_subtitle_resolve(
         include_summary=summary,
         summary_max_tokens=summary_max_tokens,
         refresh_summary=refresh_summary,
+        summary_procedure_alias=summary_procedure_alias,
         semantic_client=semantic,
     )
     result = _apply_plan_if_requested(plan, apply=apply, actor_label=TITLE_SUBTITLE_SOURCE, reason="references title-subtitle resolve")
@@ -1002,7 +1082,7 @@ def reference_title_subtitle_batch(
     model: str = "gpt-5.4-mini",
     apply: bool = False,
     refresh: bool = False,
-    summary: bool = True,
+    summary: bool = False,
     summary_max_tokens: int = TITLE_SUBTITLE_SUMMARY_TOKEN_BUDGET_DEFAULT,
     refresh_summary: bool = False,
     only_missing: bool = True,
@@ -1017,25 +1097,31 @@ def reference_title_subtitle_batch(
         max_count=max_count,
         scan_limit=scan_limit,
     )
-    items = []
-    for reference in references:
+    worker_count = TITLE_SUBTITLE_BATCH_WORKERS
+
+    def _process_reference(reference: dict[str, Any]) -> dict[str, Any]:
         identifier_prepass = _run_identifier_prepass(reference=reference, catalog_entry={})
         if identifier_prepass.get("status") == "failed":
-            items.append({
+            return {
                 "kind": "reference.title-subtitle.resolve",
                 "action": "blocked",
                 "reference": _reference_summary(reference),
                 "identifierPrepass": identifier_prepass,
                 "failureReason": identifier_prepass.get("failureReason") or "identifier prepass failed",
                 "apply": False,
-            })
-            continue
-        metadata = _jsonish(reference.get("metadata")) or {}
-        has_title = bool(_normalize_reference_title_candidate(reference.get("title")))
-        has_subtitle = bool(_normalize_subtitle_candidate(metadata.get("subtitle") or reference.get("subtitle")))
+            }
+        metadata = _load_reference_metadata_payload(reference)
+        has_title = bool(_normalize_reference_title_candidate(metadata.get("title") or reference.get("title")))
+        subtitle_candidate = _normalize_subtitle_candidate(metadata.get("subtitle") or reference.get("subtitle"))
+        subtitle_resolution = metadata.get("title_subtitle_resolution") if isinstance(metadata.get("title_subtitle_resolution"), dict) else {}
+        subtitle_mode = _clean_text(subtitle_resolution.get("subtitle_mode")) or "existing_reference_metadata"
+        has_subtitle = bool(subtitle_candidate) and not _subtitle_candidate_quality_issue(
+            subtitle_candidate,
+            subtitle_mode=subtitle_mode,
+        )
         has_summary = bool(_normalize_outcome_summary_candidate(metadata.get("summary")))
         if only_missing and has_title and has_subtitle and (has_summary if summary else True) and not refresh and not refresh_summary:
-            items.append({
+            return {
                 "kind": "reference.title-subtitle.resolve",
                 "action": "noop",
                 "reference": _reference_summary(reference),
@@ -1044,8 +1130,7 @@ def reference_title_subtitle_batch(
                 "summary": _normalize_outcome_summary_candidate(metadata.get("summary")),
                 "identifierPrepass": identifier_prepass,
                 "apply": False,
-            })
-            continue
+            }
         try:
             item = reference_title_subtitle_resolve(
                 reference_id=reference["id"],
@@ -1056,20 +1141,47 @@ def reference_title_subtitle_batch(
                 summary_max_tokens=summary_max_tokens,
                 refresh_summary=refresh_summary,
                 web_search=web_search,
+                summary_procedure_alias=SUMMARY_PROCEDURE_ALIAS_TITLE_SUBTITLE_BATCH,
                 persist_local_metadata=persist_local_metadata,
                 vector_sync=False,
             )
             item["identifierPrepass"] = item.get("identifierPrepass") or identifier_prepass
-            items.append(item)
+            return item
         except Exception as exc:
-            items.append({
+            return {
                 "kind": "reference.title-subtitle.resolve",
                 "action": "error",
                 "reference": _reference_summary(reference),
                 "identifierPrepass": identifier_prepass,
                 "error": str(exc),
                 "apply": False,
-            })
+            }
+
+    items_by_index: dict[int, dict[str, Any]] = {}
+    if worker_count == 1 or len(references) <= 1:
+        for index, reference in enumerate(references):
+            items_by_index[index] = _process_reference(reference)
+    else:
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            futures = {
+                executor.submit(_process_reference, reference): index
+                for index, reference in enumerate(references)
+            }
+            for future in as_completed(futures):
+                index = futures[future]
+                try:
+                    items_by_index[index] = future.result()
+                except Exception as exc:  # pragma: no cover - defensive worker guard
+                    reference = references[index]
+                    items_by_index[index] = {
+                        "kind": "reference.title-subtitle.resolve",
+                        "action": "error",
+                        "reference": _reference_summary(reference),
+                        "identifierPrepass": {"status": "failed", "failureReason": "worker execution failed"},
+                        "error": str(exc),
+                        "apply": False,
+                    }
+    items = [items_by_index[index] for index in range(len(references))]
     result = _title_subtitle_batch_result(
         kind="reference.title-subtitle.batch",
         corpus_key=corpus_key,
@@ -1136,7 +1248,7 @@ def enrich_reference_catalog_title_subtitle(
     catalog: dict[str, Any],
     web_search: bool = True,
     model: str = "gpt-5.4-mini",
-    summary: bool = True,
+    summary: bool = False,
     summary_max_tokens: int = TITLE_SUBTITLE_SUMMARY_TOKEN_BUDGET_DEFAULT,
     refresh_summary: bool = False,
     only_missing: bool = True,
@@ -1189,6 +1301,7 @@ def enrich_reference_catalog_title_subtitle(
             include_summary=summary,
             summary_max_tokens=summary_max_tokens,
             refresh_summary=refresh_summary,
+            summary_procedure_alias=SUMMARY_PROCEDURE_ALIAS_TITLE_SUBTITLE_ENRICH_CATALOG,
             identifier_prepass=identifier_prepass,
         )
         if resolution["status"] != "resolved":
@@ -1231,7 +1344,7 @@ def reference_title_subtitle_enrich_catalog_file(
     output_path: str,
     web_search: bool = True,
     model: str = "gpt-5.4-mini",
-    summary: bool = True,
+    summary: bool = False,
     summary_max_tokens: int = TITLE_SUBTITLE_SUMMARY_TOKEN_BUDGET_DEFAULT,
     refresh_summary: bool = False,
     only_missing: bool = True,
@@ -1260,7 +1373,7 @@ def reference_quality_set(
     reference_id: str,
     rating: int,
     note: str = "",
-    actor_label: str = "papyrus-newsroom",
+    actor_label: str = "papyrus",
     apply: bool = False,
     refresh: bool = False,
     persist_local_metadata: bool = True,
@@ -1502,7 +1615,7 @@ def build_quality_local_metadata_plan(
     reference: dict[str, Any],
     rating: int,
     note: str = "",
-    actor_label: str = "papyrus-newsroom",
+    actor_label: str = "papyrus",
 ) -> dict[str, Any]:
     reference = _require_reference(reference)
     sidecar_path = _sidecar_path_for_reference(reference)
@@ -1526,7 +1639,7 @@ def apply_quality_local_metadata(
     reference: dict[str, Any],
     rating: int,
     note: str = "",
-    actor_label: str = "papyrus-newsroom",
+    actor_label: str = "papyrus",
 ) -> dict[str, Any]:
     now = _now()
     rating = normalize_quality_rating(rating)
@@ -1665,7 +1778,7 @@ def reference_curate_recent(
     scan_limit: int = 1000,
     max_parallel: int = 1,
     model: str = "gpt-5.4-mini",
-    summary_max_tokens: int = 500,
+    summary_max_tokens: int = TITLE_SUBTITLE_SUMMARY_TOKEN_BUDGET_DEFAULT,
     refresh_summary: bool = False,
     refresh_quality: bool = False,
     apply: bool = False,
@@ -2324,14 +2437,70 @@ def _select_references_for_curation_batch(
 def reference_summaries(*, reference_id: str, max_tokens: int | None = None) -> dict[str, Any]:
     semantic = _semantic_client()
     reference = _resolve_reference(semantic, reference_id)
-    result = semantic.list_reference_summaries(reference["lineageId"], max_tokens=max_tokens)
+    metadata_payload = _load_reference_metadata_payload(reference)
+    summary_text = _normalize_outcome_summary_candidate(metadata_payload.get("summary"))
+    summary_resolution = metadata_payload.get("summary_resolution") if isinstance(metadata_payload.get("summary_resolution"), dict) else {}
+    budget = _number_or_none(summary_resolution.get("summaryTokenBudget"))
+    if max_tokens is not None and budget is not None and int(budget) != int(max_tokens):
+        summaries: list[dict[str, Any]] = []
+    elif summary_text:
+        summaries = [
+            {
+                "summary": summary_text,
+                "summaryResolution": summary_resolution,
+                "maxTokens": int(budget) if budget is not None else None,
+                "source": "reference_metadata_attachment",
+            }
+        ]
+    else:
+        summaries = []
     return {
         "kind": "reference.summaries",
         "reference": _reference_summary(reference),
         "maxTokens": max_tokens,
-        "count": len(result["summaries"]),
-        "summaries": result["summaries"],
+        "count": len(summaries),
+        "summaries": summaries,
     }
+
+
+def reference_summary_cleanup_legacy(
+    *,
+    reference_id: str,
+    apply: bool = False,
+) -> dict[str, Any]:
+    semantic = _semantic_client()
+    reference = _resolve_reference(semantic, reference_id)
+    legacy = semantic.list_reference_summaries(reference.get("lineageId") or reference.get("id"), None).get("summaries") or []
+    records: list[dict[str, Any]] = []
+    deleted_relations: list[str] = []
+    deleted_messages: list[str] = []
+    for entry in legacy:
+        relation = entry.get("relation") if isinstance(entry.get("relation"), dict) else {}
+        message = entry.get("message") if isinstance(entry.get("message"), dict) else {}
+        relation_id = str(relation.get("id") or "")
+        message_id = str(message.get("id") or "")
+        if relation_id:
+            records.append({"modelName": "SemanticRelation", "action": "delete", "input": {"id": relation_id}})
+            deleted_relations.append(relation_id)
+        if message_id:
+            records.append({"modelName": "Message", "action": "delete", "input": {"id": message_id}})
+            deleted_messages.append(message_id)
+    plan = {
+        "kind": "reference.summary.cleanup-legacy",
+        "action": "delete" if records else "noop",
+        "reference": _reference_summary(reference),
+        "legacySummaryCount": len(legacy),
+        "legacyRelationIds": deleted_relations,
+        "legacyMessageIds": deleted_messages,
+        "records": records,
+        "warnings": [],
+    }
+    return _apply_plan_if_requested(
+        plan,
+        apply=apply,
+        actor_label=SUMMARY_SOURCE,
+        reason="references summary-cleanup-legacy",
+    )
 
 
 def reference_summarize(
@@ -2360,33 +2529,35 @@ def reference_summarize(
             "records": [],
             "apply": False,
         }
-    relation_key = summary_relation_type_key(max_tokens)
-    existing = _current_relations(semantic.list_incoming("reference", reference["lineageId"])["relations"], relation_key)
-    if existing and not refresh:
-        return {
-            "kind": "reference.summary.plan",
-            "action": "noop",
-            "reference": _reference_summary(reference),
-            "maxTokens": normalize_summary_budget(max_tokens),
-            "existingRelationId": existing[0].get("id"),
-            "identifierPrepass": identifier_prepass,
-            "records": [],
-            "warnings": [],
-            "apply": False,
-        }
     source = (
         _resolve_source_text(reference, source_text=source_text, source_text_file=source_text_file)
         if (not summary_text or source_text or source_text_file)
         else ""
     )
     doctrine_context = manual_summary_doctrine_context() if summary_text else load_publication_doctrine_context()
-    generated = summary_text or generate_summary(source, max_tokens=max_tokens, model=model, reference=reference, doctrine_context=doctrine_context)
+    generated_result = (
+        {
+            "summary_text": summary_text,
+            "prompt_version": SUMMARY_PROMPT_VERSION,
+            "model": "manual",
+        }
+        if summary_text
+        else generate_summary(
+            source,
+            max_tokens=max_tokens,
+            model=model,
+            reference=reference,
+            doctrine_context=doctrine_context,
+        )
+    )
+    generated = generated_result.get("summary_text") or ""
     plan = build_reference_summary_plan(
         reference=reference,
         max_tokens=max_tokens,
         summary_text=generated,
         source_text=source,
-        model=model if not summary_text else "manual",
+        model=generated_result.get("model") or (model if not summary_text else "manual"),
+        prompt_version=generated_result.get("prompt_version") or SUMMARY_PROMPT_VERSION,
         doctrine_context=doctrine_context,
         refresh=refresh,
         identifier_prepass=identifier_prepass,
@@ -2410,7 +2581,7 @@ def reference_summarize_batch(
     refresh: bool = False,
 ) -> dict[str, Any]:
     if not budgets:
-        budgets = [100]
+        budgets = [TITLE_SUBTITLE_SUMMARY_TOKEN_BUDGET_DEFAULT]
     budget = normalize_summary_budget(budgets[0])
     relation_key = summary_relation_type_key(budget)
     max_parallel = max(1, min(int(max_parallel or 1), 12))
@@ -2425,11 +2596,9 @@ def reference_summarize_batch(
     for reference in references:
         if reference.get("curationStatus") not in {None, "accepted"}:
             continue
-        existing = _current_relations(
-            semantic.list_incoming("reference", reference["lineageId"])["relations"],
-            relation_key,
-        )
-        if existing and only_missing and not refresh:
+        existing_metadata = _load_reference_metadata_payload(reference)
+        existing_summary = _normalize_outcome_summary_candidate(existing_metadata.get("summary"))
+        if existing_summary and only_missing and not refresh:
             skipped_existing += 1
             continue
         candidates.append(reference)
@@ -2452,19 +2621,22 @@ def reference_summarize_batch(
                 "records": [],
             }
         source = _resolve_source_text(reference)
-        generated = generate_summary(
+        generated_result = generate_summary(
             source,
             max_tokens=budget,
             model=model,
             reference=reference,
             doctrine_context=doctrine_context,
+            procedure_alias=SUMMARY_PROCEDURE_ALIAS_SUMMARIZE_BATCH,
         )
+        generated = generated_result.get("summary_text") or ""
         plan = build_reference_summary_plan(
             reference=reference,
             max_tokens=budget,
             summary_text=generated,
             source_text=source,
-            model=model,
+            model=generated_result.get("model") or model,
+            prompt_version=generated_result.get("prompt_version") or SUMMARY_PROMPT_VERSION,
             doctrine_context=doctrine_context,
             refresh=refresh,
             identifier_prepass=identifier_prepass,
@@ -2583,33 +2755,6 @@ def doctrine_summary_metadata(doctrine_context: dict[str, Any] | None) -> dict[s
     }
 
 
-def build_summary_prompt(
-    source_text: str,
-    *,
-    max_tokens: int,
-    reference: dict[str, Any],
-    doctrine_context: dict[str, Any] | None = None,
-) -> str:
-    budget = normalize_summary_budget(max_tokens)
-    context = doctrine_context or load_publication_doctrine_context()
-    doctrine_block = _format_publication_doctrine_prompt_block(context)
-    return "\n".join([
-        f"Write a concise summary of this reference in no more than {budget} tokens.",
-        "Preserve the central contribution, method, evidence type, and relevance to the knowledge base.",
-        "Do not add citations or claims that are not supported by the provided text.",
-        "",
-        "Publication Context:",
-        doctrine_block,
-        "",
-        "Important policy-use rule: Editorial policies describe standards for downstream published Papyrus content. They are included only as publication context for this Reference summary and should not be treated as rules that the Reference itself must satisfy.",
-        "",
-        f"Title: {reference.get('title') or ''}",
-        f"Source URI: {reference.get('sourceUri') or ''}",
-        "",
-        source_text[:50000],
-    ])
-
-
 def build_quality_assessment_prompt(
     source_text: str,
     *,
@@ -2650,12 +2795,22 @@ def build_title_subtitle_prompt(
         "Resolve the original title and subtitle for this Reference.",
         "Use the original title verbatim if available. Use the original subtitle verbatim if available. Do not paraphrase original titles or subtitles.",
         "If the known title includes citation wrappers or source labels like leading arXiv ids, trailing '- arXiv', trailing publisher branding, or 'accessed <date>', remove that noise and recover the original work title.",
-        "If no original subtitle exists, you may write a concise generated fallback subtitle, but set subtitle_mode to generated_fallback.",
-        "A generated fallback subtitle must be informative, grounded in the source, and usually 4 to 12 words.",
+        "If no original subtitle exists, generate one concise, informative subtitle and set subtitle_mode to generated.",
+        "Generated subtitles must be specific and meaningful, not generic labels, and typically 4 to 12 words.",
+        "Avoid self-referential document framing such as 'This article', 'This paper', 'This report', or 'This release'.",
+        "You MAY mention evidence/method terms such as survey, poll, trial, study, or experiment when they are substantive to the finding.",
+        "Generated subtitle must include at least one concrete content signal (who, what, result, or population).",
+        "Do not return URLs, domains, source labels, or placeholder subtitles.",
         "Subtitle must be one short prose line. Do not use Markdown. Do not use bullet points. Do not use numbered lists. Do not include line breaks.",
         "Do not return placeholder subtitles like 'No subtitle available', 'generated fallback subtitle', 'arXiv preprint', or source-brand labels.",
+        "Examples:",
+        "Good subtitle: 'Survey finds 72% of teens have used AI companions'",
+        "Good subtitle: 'U.S. teens report routine AI companion use'",
+        "Bad subtitle: 'This article reports survey results'",
+        "Bad subtitle: 'https://phys.org/news/...'",
+        "Bad subtitle: 'Study'",
         "Return strict JSON with keys: title, subtitle, title_mode, subtitle_mode, source_urls, rationale.",
-        "Allowed modes: original_metadata, original_web_metadata, original_source_heading, generated_fallback, unresolved.",
+        "Allowed modes: original_metadata, original_web_metadata, original_source_heading, generated, unresolved.",
         "",
         f"Known title: {known_title}",
         f"Known subtitle: {known_subtitle}",
@@ -2670,35 +2825,94 @@ def build_title_subtitle_prompt(
     ])
 
 
-def build_outcome_summary_prompt(
+def _reference_summarization_cloud_input(
     *,
-    reference: dict[str, Any],
+    mode: str,
     source_text: str,
-    title: str,
-    subtitle: str,
-    max_tokens: int = TITLE_SUBTITLE_SUMMARY_TOKEN_BUDGET_DEFAULT,
-) -> str:
-    budget = normalize_title_subtitle_summary_budget(max_tokens)
-    media_type = _clean_text(reference.get("mediaType"))
-    source_uri = _clean_text(reference.get("sourceUri"))
-    return "\n".join([
-        f"Write an outcome-focused summary of this reference in no more than {budget} tokens.",
-        "This is not a teaser and not a topical overview. Explain what the reference is actually saying.",
-        "Focus on findings, conclusions, outcomes, recommendations, or the central message.",
-        "If this is a research paper, emphasize method-backed findings, evidence, and conclusions.",
-        "If this is an institutional report, emphasize main claims, recommendations, and operational implications.",
-        "If this is a news/article/blog/document source, begin with a concise explanatory paragraph about the point being made.",
-        "Bullet points are allowed only after that opening explanatory paragraph.",
-        "If you include bullets, put them on separate lines after a blank line following the opening paragraph.",
-        "Do not start with bullets. Do not add unsupported claims.",
-        "",
-        f"Known title: {title}",
-        f"Known subtitle: {subtitle}",
-        f"Reference media type: {media_type}",
-        f"Source URI: {source_uri}",
-        "",
-        source_text[:50000],
-    ])
+    max_tokens: int,
+    model: str,
+    reference: dict[str, Any],
+    title: str = "",
+    subtitle: str = "",
+    doctrine_context: dict[str, Any] | None = None,
+    prompt_version: str = "",
+) -> dict[str, Any]:
+    sanitized_source_text = str(source_text or "").replace("\x00", "")
+    return _compact_dict({
+        "mode": mode,
+        "source_text": sanitized_source_text[:SUMMARY_SOURCE_TEXT_MAX_CHARS],
+        "max_tokens": int(max_tokens),
+        "reference_title": _clean_text(reference.get("title")),
+        "source_uri": _clean_text(reference.get("sourceUri")),
+        "known_title": _clean_text(title),
+        "known_subtitle": _clean_text(subtitle),
+        "media_type": _clean_text(reference.get("mediaType")),
+        "doctrine_context_text": _format_publication_doctrine_prompt_block(doctrine_context or {}),
+        "model": model,
+        "prompt_version": prompt_version,
+    })
+
+
+def _run_reference_summarization_cloud_procedure(
+    *,
+    alias: str,
+    mode: str,
+    source_text: str,
+    max_tokens: int,
+    model: str,
+    reference: dict[str, Any],
+    title: str = "",
+    subtitle: str = "",
+    doctrine_context: dict[str, Any] | None = None,
+    prompt_version: str = "",
+) -> dict[str, str]:
+    from papyrus_content.cloud_procedures import start_cloud_procedure_run
+    from papyrus_content.graphql_authoring import create_authoring_client
+    from papyrus_content.ids import safe_id
+    from papyrus_content.reference_assignments import timestamp_for_path
+
+    run_id = f"reference-summarization-{safe_id(mode)}-{safe_id(reference.get('lineageId') or reference.get('id') or 'reference')[:80]}-{timestamp_for_path()}"
+    run_dir = PAPYRUS_ROOT / ".papyrus-runs" / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    source_path = run_dir / "reference-summarization.cloud.tac"
+    stdout_path = run_dir / "reference-summarization.stdout.log"
+    stderr_path = run_dir / "reference-summarization.stderr.log"
+    client, _ = create_authoring_client()
+    run = start_cloud_procedure_run(
+        client=client,
+        alias=alias,
+        actor_label=SUMMARY_SOURCE,
+        title=f"Run reference summarization ({mode}) for {reference.get('id') or reference.get('lineageId') or 'reference'}",
+        summary="Triggered by reference summarization workflow via cloud procedure dispatch.",
+        input_payload=_reference_summarization_cloud_input(
+            mode=mode,
+            source_text=source_text,
+            max_tokens=max_tokens,
+            model=model,
+            reference=reference,
+            title=title,
+            subtitle=subtitle,
+            doctrine_context=doctrine_context,
+            prompt_version=prompt_version,
+        ),
+        run_dir=run_dir,
+        source_path=source_path,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+        output_markers=SUMMARY_PROCEDURE_OUTPUT_MARKERS,
+    )
+    output = run.get("output")
+    if not isinstance(output, dict):
+        raise RuntimeError("Cloud summarization procedure did not return a JSON object payload.")
+    summary_text = _clean_text(output.get("summary_text"))
+    if not summary_text:
+        raise RuntimeError("Cloud summarization procedure output is missing summary_text.")
+    return {
+        "mode": _clean_text(output.get("mode")) or mode,
+        "summary_text": summary_text,
+        "prompt_version": _clean_text(output.get("prompt_version")) or _clean_text(prompt_version),
+        "model": _clean_text(output.get("model")) or _clean_text(model),
+    }
 
 
 def generate_outcome_summary(
@@ -2709,43 +2923,21 @@ def generate_outcome_summary(
     subtitle: str,
     max_tokens: int = TITLE_SUBTITLE_SUMMARY_TOKEN_BUDGET_DEFAULT,
     model: str = "gpt-5.4-mini",
-) -> str:
-    source_text = _required(source_text, "source_text")
-    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is required to generate metadata summary.")
+    procedure_alias: str = SUMMARY_PROCEDURE_ALIAS_TITLE_SUBTITLE_RESOLVE,
+) -> dict[str, str]:
+    source_text = _required(source_text, "source_text").replace("\x00", "")
     budget = normalize_title_subtitle_summary_budget(max_tokens)
-    prompt = build_outcome_summary_prompt(
-        reference=reference,
+    return _run_reference_summarization_cloud_procedure(
+        alias=procedure_alias,
+        mode="outcome_summary",
         source_text=source_text,
+        max_tokens=budget,
+        model=model,
+        reference=reference,
         title=title,
         subtitle=subtitle,
-        max_tokens=budget,
+        prompt_version=TITLE_SUBTITLE_SUMMARY_PROMPT_VERSION,
     )
-    payload = {
-        "model": model,
-        "input": [
-            {"role": "system", "content": "You write concise outcome summaries for editorial curation metadata."},
-            {"role": "user", "content": prompt},
-        ],
-        "max_output_tokens": budget + 120,
-    }
-    request = urllib.request.Request(
-        "https://api.openai.com/v1/responses",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=120) as response:
-            parsed = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as error:
-        body = error.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"OpenAI outcome summary request failed: {error.code} {body[:400]}") from error
-    text = _extract_response_text(parsed)
-    if not text:
-        raise RuntimeError("OpenAI outcome summary request returned no text.")
-    return text.strip()
 
 
 def reference_web_search(
@@ -2825,7 +3017,7 @@ def reference_web_search(
     }
 
 
-def generate_title_subtitle_with_web_search(
+def _generate_title_subtitle_llm(
     *,
     reference: dict[str, Any],
     catalog_entry: dict[str, Any] | None = None,
@@ -2833,10 +3025,11 @@ def generate_title_subtitle_with_web_search(
     known_title: str = "",
     known_subtitle: str = "",
     model: str = "gpt-5.4-mini",
+    web_search_enabled: bool,
 ) -> dict[str, Any]:
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is required for title/subtitle web+LLM enrichment.")
+        raise RuntimeError("OPENAI_API_KEY is required for title/subtitle LLM enrichment.")
     catalog_entry = catalog_entry or {}
     prompt = build_title_subtitle_prompt(
         reference=reference,
@@ -2851,9 +3044,6 @@ def generate_title_subtitle_with_web_search(
             {"role": "system", "content": "You resolve bibliographic title metadata for a private editorial knowledge base. Return strict JSON only."},
             {"role": "user", "content": prompt},
         ],
-        "tools": [{"type": "web_search"}],
-        "tool_choice": "auto",
-        "include": ["web_search_call.action.sources"],
         "text": {
             "format": {
                 "type": "json_schema",
@@ -2874,6 +3064,10 @@ def generate_title_subtitle_with_web_search(
             },
         },
     }
+    if web_search_enabled:
+        payload["tools"] = [{"type": "web_search"}]
+        payload["tool_choice"] = "auto"
+        payload["include"] = ["web_search_call.action.sources"]
     request = urllib.request.Request(
         "https://api.openai.com/v1/responses",
         data=json.dumps(payload).encode("utf-8"),
@@ -2885,7 +3079,8 @@ def generate_title_subtitle_with_web_search(
             parsed = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as error:
         body = error.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"OpenAI title/subtitle request failed: {error.code} {body[:400]}") from error
+        lane = "web+LLM" if web_search_enabled else "tool-less"
+        raise RuntimeError(f"OpenAI title/subtitle {lane} request failed: {error.code} {body[:400]}") from error
     text = _extract_response_text(parsed)
     if not text:
         raise RuntimeError("OpenAI title/subtitle request returned no text.")
@@ -2894,17 +3089,58 @@ def generate_title_subtitle_with_web_search(
     except json.JSONDecodeError as exc:
         raise RuntimeError("OpenAI title/subtitle request did not return JSON.") from exc
     urls = _string_list(result.get("source_urls") or [])
-    urls.extend(_web_search_source_urls(parsed))
+    if web_search_enabled:
+        urls.extend(_web_search_source_urls(parsed))
     return {
         "title": _clean_text(result.get("title")),
         "subtitle": _clean_text(result.get("subtitle")),
         "title_mode": _title_subtitle_mode(result.get("title_mode"), default="original_web_metadata"),
-        "subtitle_mode": _title_subtitle_mode(result.get("subtitle_mode"), default="generated_fallback"),
+        "subtitle_mode": _title_subtitle_mode(result.get("subtitle_mode"), default="generated"),
         "source_urls": sorted(set(urls)),
         "rationale": _clean_text(result.get("rationale")),
         "promptVersion": TITLE_SUBTITLE_PROMPT_VERSION,
         "model": model,
     }
+
+
+def generate_title_subtitle_without_web_search(
+    *,
+    reference: dict[str, Any],
+    catalog_entry: dict[str, Any] | None = None,
+    source_text: str = "",
+    known_title: str = "",
+    known_subtitle: str = "",
+    model: str = "gpt-5.4-mini",
+) -> dict[str, Any]:
+    return _generate_title_subtitle_llm(
+        reference=reference,
+        catalog_entry=catalog_entry,
+        source_text=source_text,
+        known_title=known_title,
+        known_subtitle=known_subtitle,
+        model=model,
+        web_search_enabled=False,
+    )
+
+
+def generate_title_subtitle_with_web_search(
+    *,
+    reference: dict[str, Any],
+    catalog_entry: dict[str, Any] | None = None,
+    source_text: str = "",
+    known_title: str = "",
+    known_subtitle: str = "",
+    model: str = "gpt-5.4-mini",
+) -> dict[str, Any]:
+    return _generate_title_subtitle_llm(
+        reference=reference,
+        catalog_entry=catalog_entry,
+        source_text=source_text,
+        known_title=known_title,
+        known_subtitle=known_subtitle,
+        model=model,
+        web_search_enabled=True,
+    )
 
 
 def generate_quality_assessment(
@@ -2971,37 +3207,374 @@ def generate_summary(
     model: str,
     reference: dict[str, Any],
     doctrine_context: dict[str, Any] | None = None,
-) -> str:
-    source_text = _required(source_text, "source_text")
-    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is required unless --summary-text is provided.")
+    procedure_alias: str = SUMMARY_PROCEDURE_ALIAS_SUMMARIZE,
+) -> dict[str, str]:
+    source_text = _required(source_text, "source_text").replace("\x00", "")
     budget = normalize_summary_budget(max_tokens)
-    prompt = build_summary_prompt(source_text, max_tokens=budget, reference=reference, doctrine_context=doctrine_context)
-    payload = {
-        "model": model,
-        "input": [
-            {"role": "system", "content": "You summarize research and source material for a private editorial knowledge base."},
-            {"role": "user", "content": prompt},
-        ],
-        "max_output_tokens": budget + 80,
-    }
-    request = urllib.request.Request(
-        "https://api.openai.com/v1/responses",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        method="POST",
+    return _run_reference_summarization_cloud_procedure(
+        alias=procedure_alias,
+        mode="reference_summary",
+        source_text=source_text,
+        max_tokens=budget,
+        model=model,
+        reference=reference,
+        doctrine_context=doctrine_context,
+        prompt_version=SUMMARY_PROMPT_VERSION,
     )
-    try:
-        with urllib.request.urlopen(request, timeout=120) as response:
-            parsed = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as error:
-        body = error.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"OpenAI summary request failed: {error.code} {body[:400]}") from error
-    text = _extract_response_text(parsed)
-    if not text:
-        raise RuntimeError("OpenAI summary request returned no text.")
-    return text.strip()
+
+
+def resolve_reference_text_generation_context(
+    *,
+    extracted_text: str,
+    original_title: str = "",
+    original_subtitle: str = "",
+) -> dict[str, Any]:
+    normalized_text = str(extracted_text or "").replace("\x00", "").strip()
+    errors: list[dict[str, str]] = []
+    if not normalized_text:
+        errors.append({
+            "code": "missing_extracted_text",
+            "message": "Extracted text is required before metadata generation.",
+        })
+    return {
+        "ok": not errors,
+        "errors": errors,
+        "extractedText": normalized_text,
+        "originalTitle": _clean_text(original_title),
+        "originalSubtitle": _clean_text(original_subtitle),
+    }
+
+
+def generate_title_from_reference_text(
+    *,
+    reference: dict[str, Any],
+    extracted_text: str,
+    original_title: str = "",
+    original_subtitle: str = "",
+    model: str = REFERENCE_METADATA_MODEL_DEFAULT,
+) -> dict[str, Any]:
+    context = resolve_reference_text_generation_context(
+        extracted_text=extracted_text,
+        original_title=original_title,
+        original_subtitle=original_subtitle,
+    )
+    if not context["ok"]:
+        raise RuntimeError("Cannot generate title without extracted text.")
+    result = _run_metadata_map_reduce(
+        output_kind="title",
+        reference=reference,
+        context=context,
+        model=model,
+    )
+    title = _normalize_reference_title_candidate(result.get("value"))
+    if not title:
+        raise RuntimeError("Title generation returned an empty value.")
+    return {
+        "title": title,
+        "model": model,
+        "promptVersion": result["promptVersion"],
+        "mapReduce": result["mapReduce"],
+    }
+
+
+def generate_subtitle_from_reference_text(
+    *,
+    reference: dict[str, Any],
+    extracted_text: str,
+    original_title: str = "",
+    original_subtitle: str = "",
+    model: str = REFERENCE_METADATA_MODEL_DEFAULT,
+) -> dict[str, Any]:
+    context = resolve_reference_text_generation_context(
+        extracted_text=extracted_text,
+        original_title=original_title,
+        original_subtitle=original_subtitle,
+    )
+    if not context["ok"]:
+        raise RuntimeError("Cannot generate subtitle without extracted text.")
+    result = _run_metadata_map_reduce(
+        output_kind="subtitle",
+        reference=reference,
+        context=context,
+        model=model,
+    )
+    subtitle = _normalize_subtitle_candidate(result.get("value"))
+    if not subtitle:
+        raise RuntimeError("Subtitle generation returned an empty value.")
+    issue = _generated_subtitle_quality_issue(subtitle, subtitle_mode="generated")
+    if issue:
+        raise RuntimeError(f"Generated subtitle failed quality checks: {issue}")
+    return {
+        "subtitle": subtitle,
+        "model": model,
+        "promptVersion": result["promptVersion"],
+        "mapReduce": result["mapReduce"],
+    }
+
+
+def generate_summary_from_reference_text(
+    *,
+    reference: dict[str, Any],
+    extracted_text: str,
+    original_title: str = "",
+    original_subtitle: str = "",
+    model: str = REFERENCE_METADATA_MODEL_DEFAULT,
+) -> dict[str, Any]:
+    context = resolve_reference_text_generation_context(
+        extracted_text=extracted_text,
+        original_title=original_title,
+        original_subtitle=original_subtitle,
+    )
+    if not context["ok"]:
+        raise RuntimeError("Cannot generate summary without extracted text.")
+    result = _run_metadata_map_reduce(
+        output_kind="summary",
+        reference=reference,
+        context=context,
+        model=model,
+    )
+    summary = _normalize_outcome_summary_candidate(result.get("value"))
+    if not summary:
+        raise RuntimeError("Summary generation returned an empty value.")
+    return {
+        "summary": summary,
+        "model": model,
+        "promptVersion": result["promptVersion"],
+        "mapReduce": result["mapReduce"],
+    }
+
+
+def reference_generate_metadata_from_extracted_text(
+    *,
+    reference_id: str,
+    extracted_text: str,
+    original_title: str = "",
+    original_subtitle: str = "",
+    model: str = REFERENCE_METADATA_MODEL_DEFAULT,
+    apply: bool = False,
+    refresh: bool = True,
+) -> dict[str, Any]:
+    semantic = _semantic_client()
+    reference = _resolve_reference(semantic, reference_id)
+    context = resolve_reference_text_generation_context(
+        extracted_text=extracted_text,
+        original_title=original_title or str(reference.get("title") or ""),
+        original_subtitle=original_subtitle,
+    )
+    if not context["ok"]:
+        return {
+            "kind": "reference.metadata.from-extracted-text",
+            "status": "skipped_missing_text",
+            "reference": _reference_summary(reference),
+            "errors": context["errors"],
+            "apply": False,
+            "action": "skipped_missing_text",
+            "records": [],
+        }
+
+    now = _now()
+    run_id = f"metadata-from-extracted-text-{_hash_short([reference.get('lineageId') or reference.get('id') or '', now])}"
+    title_result = generate_title_from_reference_text(
+        reference=reference,
+        extracted_text=context["extractedText"],
+        original_title=context["originalTitle"],
+        original_subtitle=context["originalSubtitle"],
+        model=model,
+    )
+    subtitle_result = generate_subtitle_from_reference_text(
+        reference=reference,
+        extracted_text=context["extractedText"],
+        original_title=context["originalTitle"],
+        original_subtitle=context["originalSubtitle"],
+        model=model,
+    )
+    summary_result = generate_summary_from_reference_text(
+        reference=reference,
+        extracted_text=context["extractedText"],
+        original_title=context["originalTitle"],
+        original_subtitle=context["originalSubtitle"],
+        model=model,
+    )
+
+    metadata_payload = _load_reference_metadata_payload(reference)
+    next_metadata = dict(metadata_payload) if isinstance(metadata_payload, dict) else {}
+    next_metadata["title"] = title_result["title"]
+    next_metadata["subtitle"] = subtitle_result["subtitle"]
+    next_metadata["summary"] = summary_result["summary"]
+    prompt_version = title_result["promptVersion"]
+    next_metadata["title_subtitle_resolution"] = {
+        "status": "resolved",
+        "title_mode": "generated_from_extracted_text",
+        "subtitle_mode": "generated_from_extracted_text",
+        "source": "biblicus_map_reduce",
+        "model": model,
+        "web_search_used": False,
+        "source_urls": [],
+        "rationale": "Generated from extracted text with Biblicus map-reduce.",
+        "run_id": run_id,
+        "resolved_at": now,
+        "prompt_version": prompt_version,
+        "context": {
+            "original_title": context["originalTitle"],
+            "original_subtitle": context["originalSubtitle"],
+            "extracted_text_chars": len(context["extractedText"]),
+            "refresh": bool(refresh),
+        },
+    }
+    next_metadata["summary_resolution"] = _summary_resolution(
+        summary=summary_result["summary"],
+        summary_token_budget=TITLE_SUBTITLE_SUMMARY_TOKEN_BUDGET_DEFAULT,
+        model=model,
+        source="biblicus_map_reduce",
+        source_urls=[],
+        run_id=run_id,
+        resolved_at=now,
+        rationale="Generated from extracted text with Biblicus map-reduce.",
+        prompt_version=prompt_version,
+    )
+    next_metadata["metadata_generation"] = {
+        "promptVersion": prompt_version,
+        "model": model,
+        "generatedAt": now,
+        "source": "biblicus_cli",
+        "webSearchUsed": False,
+        "title": title_result["mapReduce"],
+        "subtitle": subtitle_result["mapReduce"],
+        "summary": summary_result["mapReduce"],
+    }
+    next_metadata["updatedAt"] = now
+
+    metadata_attachment = _model_attachment(
+        owner_kind="reference",
+        owner_id=reference["id"],
+        role="metadata",
+        sort_key="metadata",
+        filename="metadata.json",
+        media_type="application/json",
+        content=next_metadata,
+        import_run_id=reference.get("importRunId"),
+        now=now,
+    )
+    plan = {
+        "kind": "reference.metadata.from-extracted-text",
+        "action": "update",
+        "status": "generated",
+        "reference": _reference_summary(reference),
+        "generated": {
+            "title": title_result["title"],
+            "subtitle": subtitle_result["subtitle"],
+            "summary": summary_result["summary"],
+        },
+        "records": [
+            {
+                "modelName": "ModelAttachment",
+                "action": "create",
+                "input": metadata_attachment["record"],
+                "body": metadata_attachment["body"],
+            }
+        ],
+        "warnings": [],
+    }
+    return _apply_plan_if_requested(
+        plan,
+        apply=apply,
+        actor_label=TITLE_SUBTITLE_SOURCE,
+        reason="references metadata from extracted text",
+    )
+
+
+def _run_metadata_map_reduce(
+    *,
+    output_kind: str,
+    reference: dict[str, Any],
+    context: dict[str, Any],
+    model: str,
+    max_output_tokens: int | None = None,
+) -> dict[str, Any]:
+    del max_output_tokens
+    payload = _run_biblicus_summarize_map_reduce(
+        output_kind=output_kind,
+        reference=reference,
+        context=context,
+        model=model,
+    )
+    value = _clean_text(payload.get("value"))
+    return {
+        "value": value,
+        "promptVersion": _clean_text(payload.get("prompt_version")) or BIBLICUS_SUMMARIZE_MAP_REDUCE_PROMPT_VERSION,
+        "mapReduce": payload.get("map_reduce") if isinstance(payload.get("map_reduce"), dict) else {},
+    }
+
+
+def _run_biblicus_summarize_map_reduce(
+    *,
+    output_kind: str,
+    reference: dict[str, Any],
+    context: dict[str, Any],
+    model: str,
+) -> dict[str, Any]:
+    if not BIBLICUS_ROOT.is_dir():
+        raise RuntimeError(f"Biblicus checkout not found at {BIBLICUS_ROOT}")
+    command = [
+        str(_biblicus_python_executable()),
+        "-m",
+        "biblicus",
+        "summarize",
+        "map-reduce",
+        "--task",
+        output_kind,
+        "--model",
+        model,
+        "--input-json",
+        "-",
+        "--format",
+        "json",
+    ]
+    input_payload = {
+        "extracted_text": context.get("extractedText") or "",
+        "original_title": context.get("originalTitle") or "",
+        "original_subtitle": context.get("originalSubtitle") or "",
+        "reference_title": reference.get("title") or "",
+        "source_uri": reference.get("sourceUri") or "",
+    }
+    env = dict(os.environ)
+    biblicus_src = str(BIBLICUS_ROOT / "src")
+    env["PYTHONPATH"] = (
+        f"{biblicus_src}{os.pathsep}{env['PYTHONPATH']}"
+        if env.get("PYTHONPATH")
+        else biblicus_src
+    )
+    completed = subprocess.run(
+        command,
+        cwd=BIBLICUS_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+        input=json.dumps(input_payload),
+        env=env,
+    )
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or "").strip()
+        raise RuntimeError(
+            "Biblicus summarize map-reduce command failed: "
+            f"{detail or f'exit status {completed.returncode}'}"
+        )
+    parsed = _jsonish((completed.stdout or "").strip())
+    if not isinstance(parsed, dict):
+        raise RuntimeError("Biblicus summarize map-reduce command returned invalid JSON output.")
+    if _clean_text(parsed.get("task")) != output_kind:
+        raise RuntimeError("Biblicus summarize map-reduce command returned an unexpected task payload.")
+    return parsed
+
+
+def _biblicus_python_executable() -> Path:
+    for candidate in (
+        BIBLICUS_ROOT / ".venv" / "bin" / "python",
+        BIBLICUS_ROOT / ".venv" / "bin" / "python3",
+    ):
+        if candidate.is_file():
+            return candidate
+    return Path(sys.executable)
 
 
 def estimate_tokens(text: str, *, model: str = "") -> int:
@@ -3031,6 +3604,41 @@ def _resolve_reference(semantic: PapyrusSemanticClient, reference_id: str) -> di
         raise
 
 
+def _reference_metadata_attachment_id(reference_id: str) -> str:
+    return f"model-attachment-{_safe_id('reference')}-{_safe_id(reference_id)}-{_safe_id('metadata')}-{_safe_id('metadata')}"
+
+
+def _load_reference_metadata_payload(reference: dict[str, Any]) -> dict[str, Any]:
+    reference_id = str(reference.get("id") or "").strip()
+    if not reference_id:
+        return {}
+    try:
+        from papyrus_content.graphql_authoring import create_authoring_client
+        from papyrus_content.model_attachments import download_attachment_buffer
+
+        client, _ = create_authoring_client()
+        attachments = client.list_by_index("modelAttachmentsByOwnerRoleAndSortKey", reference_id, limit=20)
+        metadata_candidates = [
+            entry
+            for entry in attachments
+            if str(entry.get("role") or "").strip() == "metadata"
+            and str(entry.get("status") or "").strip() != "deleted"
+        ]
+        if not metadata_candidates:
+            return {}
+        attachment = next(
+            (entry for entry in metadata_candidates if str(entry.get("status") or "").strip() == "active"),
+            metadata_candidates[0],
+        )
+        payload = download_attachment_buffer(client, attachment)
+        if not payload:
+            return {}
+        parsed = _jsonish(payload.decode("utf-8", errors="replace"))
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
 def _resolve_source_text(reference: dict[str, Any], *, source_text: str = "", source_text_file: str = "") -> str:
     if source_text:
         return source_text
@@ -3046,12 +3654,10 @@ def _resolve_source_text(reference: dict[str, Any], *, source_text: str = "", so
         for candidate in candidates:
             if candidate.exists() and candidate.is_file():
                 return candidate.read_text(encoding="utf-8", errors="replace")
-    title = str(reference.get("title") or "").strip()
-    source_uri = str(reference.get("sourceUri") or "").strip()
-    fallback = "\n".join(part for part in [title, source_uri] if part)
-    if fallback:
-        return fallback
-    raise RuntimeError("Could not resolve source text for reference; pass --source-text-file or --summary-text.")
+    raise RuntimeError(
+        "Could not resolve source text for reference. Metadata generation requires extracted text; "
+        "fetch extracted text first or pass --source-text-file."
+    )
 
 
 def _get_current_doctrine_item_by_slug(slug: str, graphql_func: Any) -> dict[str, Any] | None:
@@ -3157,6 +3763,8 @@ def _apply_plan_if_requested(plan: dict[str, Any], *, apply: bool, actor_label: 
         model_name = record.get("modelName")
         if model_name == "ModelAttachment":
             _upload_model_attachment(record["input"], record.get("body") or "")
+        elif action == "delete":
+            _delete_record(model_name, record["input"])
         elif action == "create":
             _create_record(model_name, record["input"])
         elif action == "update":
@@ -3335,7 +3943,7 @@ def _sync_reference_vectors(references: list[dict[str, Any]]) -> dict[str, Any]:
 
 def _reference_vector_sync_command(reference_ids: tuple[str, ...]) -> str:
     flags = " ".join(f"--reference-id {reference_id}" for reference_id in reference_ids)
-    return f"poetry run papyrus-newsroom knowledge-vector-index --action sync --force --progress-every 0 {flags}".strip()
+    return f"poetry run papyrus knowledge-vector-index --action sync --force --progress-every 0 {flags}".strip()
 
 
 def _reference_is_vector_eligible(reference: dict[str, Any]) -> bool:
@@ -3358,6 +3966,15 @@ def _update_record(model_name: str, input_payload: dict[str, Any]) -> dict[str, 
     query = f"""
 mutation Update{model_name}($input: Update{model_name}Input!) {{
   update{model_name}(input: $input) {{ id }}
+}}
+"""
+    return _graphql(query, {"input": _prepare_graphql_input(input_payload)})
+
+
+def _delete_record(model_name: str, input_payload: dict[str, Any]) -> dict[str, Any]:
+    query = f"""
+mutation Delete{model_name}($input: Delete{model_name}Input!) {{
+  delete{model_name}(input: $input) {{ id }}
 }}
 """
     return _graphql(query, {"input": _prepare_graphql_input(input_payload)})
@@ -3515,7 +4132,7 @@ def _quality_semantic_node_record(rating: int, now: str) -> dict[str, Any]:
         "previousVersionId": None,
         "versionState": "current",
         "versionCreatedAt": now,
-        "versionCreatedBy": "papyrus-newsroom",
+        "versionCreatedBy": "papyrus",
         "changeReason": "qualityRating-seed",
         "contentHash": _hash_short([node_key, QUALITY_NODE_KIND, display_name, description]),
         "nodeKey": node_key,
@@ -3647,15 +4264,18 @@ def _graphql(query: str, variables: dict[str, Any]) -> dict[str, Any]:
     token = os.environ.get("PAPYRUS_GRAPHQL_JWT", "").strip()
     if not endpoint:
         raise RuntimeError("PAPYRUS_GRAPHQL_ENDPOINT is required")
-    if not token:
-        raise RuntimeError("PAPYRUS_GRAPHQL_JWT is required")
+    body = json.dumps({"query": query, "variables": variables}).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+    }
+    if token:
+        headers["Authorization"] = _lambda_auth_token(token)
+    else:
+        headers.update(_iam_signed_graphql_headers(endpoint, body))
     request = urllib.request.Request(
         endpoint,
-        data=json.dumps({"query": query, "variables": variables}).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": _lambda_auth_token(token),
-        },
+        data=body,
+        headers=headers,
         method="POST",
     )
     try:
@@ -3671,7 +4291,41 @@ def _graphql(query: str, variables: dict[str, Any]) -> dict[str, Any]:
 
 
 def _lambda_auth_token(token: str) -> str:
-    return f"PapyrusJwt {re.sub(r'^Bearer\\s+', '', token.strip(), flags=re.IGNORECASE)}"
+    sanitized = re.sub(r"^Bearer\\s+", "", token.strip(), flags=re.IGNORECASE)
+    return f"PapyrusJwt {sanitized}"
+
+
+def _iam_signed_graphql_headers(endpoint: str, body: bytes) -> dict[str, str]:
+    try:
+        from botocore.auth import SigV4Auth
+        from botocore.awsrequest import AWSRequest
+        from botocore.session import Session
+    except Exception as exc:  # pragma: no cover
+        raise RuntimeError("PAPYRUS_GRAPHQL_JWT is missing and botocore is unavailable for IAM AppSync signing.") from exc
+
+    parsed = urllib.parse.urlparse(endpoint)
+    region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or _region_from_appsync_host(parsed.netloc)
+    session = Session()
+    credentials = session.get_credentials()
+    if credentials is None:
+        raise RuntimeError("PAPYRUS_GRAPHQL_JWT is missing and AWS credentials are unavailable for IAM AppSync signing.")
+    frozen = credentials.get_frozen_credentials()
+    request = AWSRequest(
+        method="POST",
+        url=endpoint,
+        data=body,
+        headers={
+            "content-type": "application/json",
+            "host": parsed.netloc,
+        },
+    )
+    SigV4Auth(frozen, "appsync", region).add_auth(request)
+    return {str(key): str(value) for key, value in request.headers.items()}
+
+
+def _region_from_appsync_host(host: str) -> str:
+    match = re.search(r"\.appsync-api\.([a-z0-9-]+)\.amazonaws\.com", host)
+    return match.group(1) if match else "us-east-1"
 
 
 def _extract_response_text(payload: dict[str, Any]) -> str:
@@ -3902,18 +4556,13 @@ def _title_subtitle_from_local(*, reference: dict[str, Any], catalog_entry: dict
             if title:
                 title_source = label
         if not subtitle:
-            subtitle = _normalize_subtitle_candidate(value.get("subtitle") or value.get("sub_title") or value.get("subTitle") or value.get("deck"))
+            subtitle = _clean_text(value.get("subtitle") or value.get("sub_title") or value.get("subTitle") or value.get("deck"))
             if subtitle:
                 subtitle_source = label
         if not summary:
             summary = _normalize_outcome_summary_candidate(value.get("summary"))
             if summary:
                 summary_source = label
-    if title and not subtitle:
-        colon_subtitle = _title_colon_subtitle_candidate(title)
-        if colon_subtitle:
-            subtitle = colon_subtitle
-            subtitle_source = subtitle_source or title_source
     return {
         "title": title,
         "subtitle": subtitle,
@@ -4191,7 +4840,7 @@ def _title_subtitle_from_source_heading(source_text: str) -> dict[str, Any]:
     if not lines:
         return {}
     title = lines[0]
-    subtitle = _normalize_subtitle_candidate(lines[1] if len(lines) > 1 and len(lines[1]) <= 180 else "")
+    subtitle = ""
     return {
         "title": title,
         "subtitle": subtitle,
@@ -4214,7 +4863,7 @@ def _title_subtitle_from_local_html(source_text: str) -> dict[str, Any]:
         or _clean_html_title(_html_title_from_text(text))
     )
     title = _normalize_reference_title_candidate(title)
-    subtitle = _normalize_subtitle_candidate(_title_colon_subtitle_candidate(title))
+    subtitle = ""
     if not title:
         return {}
     return {
@@ -4268,7 +4917,7 @@ def _title_subtitle_from_crossref(source_uri: str, *, fetcher: Any) -> dict[str,
         payload = json.loads(fetcher(api, timeout=20))
         message = payload.get("message") or {}
         title = _clean_text((message.get("title") or [""])[0])
-        subtitle = _normalize_subtitle_candidate((message.get("subtitle") or [""])[0])
+        subtitle = _clean_text((message.get("subtitle") or [""])[0])
         return {
             "title": title,
             "subtitle": subtitle,
@@ -4292,7 +4941,7 @@ def _title_subtitle_from_html(source_uri: str, *, fetcher: Any) -> dict[str, Any
     title = _html_meta_content(body, "citation_title") or _html_meta_content(body, "og:title") or _html_title(body)
     subtitle = _html_meta_content(body, "description") or _html_meta_content(body, "og:description")
     title = _clean_html_title(title)
-    subtitle = _normalize_subtitle_candidate(subtitle)
+    subtitle = _clean_text(subtitle)
     if subtitle and subtitle == title:
         subtitle = ""
     return {
@@ -4517,7 +5166,7 @@ def _title_subtitle_resolution(
     return {
         "status": status,
         "title": _clean_text(title),
-        "subtitle": _normalize_subtitle_candidate(subtitle),
+        "subtitle": _clean_text(subtitle),
         "title_mode": _title_subtitle_mode(title_mode, default="unresolved"),
         "subtitle_mode": _title_subtitle_mode(subtitle_mode, default="unresolved"),
         "summary": _normalize_outcome_summary_candidate(summary),
@@ -4529,7 +5178,7 @@ def _title_subtitle_resolution(
         "rationale": rationale,
         "run_id": run_id,
         "resolved_at": resolved_at,
-        "prompt_version": TITLE_SUBTITLE_PROMPT_VERSION if source == "llm_web_search" else "",
+        "prompt_version": TITLE_SUBTITLE_PROMPT_VERSION if source in {"llm_web_search", "llm_no_web_search"} else "",
         "warnings": warnings,
         "identifierPrepass": identifier_prepass or {},
     }
@@ -4582,7 +5231,16 @@ def _summary_resolution_provenance(resolution: dict[str, Any]) -> dict[str, Any]
 
 
 def _title_subtitle_mode(value: Any, *, default: str) -> str:
-    allowed = {"original_metadata", "original_web_metadata", "original_source_heading", "generated_fallback", "existing_reference", "existing_reference_metadata", "unresolved"}
+    allowed = {
+        "original_metadata",
+        "original_web_metadata",
+        "original_source_heading",
+        "generated",
+        "generated_fallback",
+        "existing_reference",
+        "existing_reference_metadata",
+        "unresolved",
+    }
     text = _clean_text(value)
     return text if text in allowed else default
 
@@ -4608,48 +5266,78 @@ def _source_excerpt(value: str, *, max_chars: int) -> str:
 
 
 def _clean_text(value: Any) -> str:
-    return re.sub(r"\s+", " ", str(value or "")).strip()
+    return re.sub(r"\s+", " ", str(value or "").replace("\x00", " ")).strip()
 
 
 def _looks_like_list_line(value: str) -> bool:
     return bool(re.match(r"^(?:[-*•]\s+|\d+[.)]\s+)", _clean_text(value)))
 
 
-def _subtitle_has_list_shape(value: Any) -> bool:
-    raw = str(value or "")
-    if _looks_like_pdf_catalog_fragment(raw):
-        return True
-    lines = [line.strip() for line in re.split(r"[\r\n]+", raw) if line.strip()]
-    if len(lines) > 1:
-        return True
-    text = _clean_text(_strip_html_fragments(lines[0] if lines else raw))
-    if not text:
-        return False
-    if _looks_like_list_line(text):
-        return True
-    if re.search(r"(?:^|\s)[•▪◦‣](?:\s|$)", text):
-        return True
-    return bool(re.search(r"(?:^|\s)[-*]\s+\S+.*(?:\s[-*]\s+\S+)", text))
-
-
 def _normalize_subtitle_candidate(value: Any) -> str:
-    if _subtitle_has_list_shape(value):
-        return ""
-    text = _clean_text(_strip_html_fragments(value))
-    if text in {"<", ">", "<<", ">>"}:
-        return ""
-    if len(text) > 220:
-        return ""
-    if _subtitle_is_boilerplate(text):
-        return ""
-    return "" if _placeholder_title_or_subtitle(text) else text
+    return _clean_text(_strip_html_fragments(value))
 
 
-def _looks_like_pdf_catalog_fragment(value: str) -> bool:
-    text = str(value or "").strip()
-    if not (text.startswith("<<") and text.endswith(">>")):
-        return False
-    return bool(re.search(r"/(?:Metadata|Names|OpenAction|Outlines|PageMode|Pages|Type|Catalog)\b", text))
+def _generated_subtitle_quality_issue(value: Any, *, subtitle_mode: str) -> str:
+    mode = _title_subtitle_mode(subtitle_mode, default="")
+    if mode not in {"generated", "generated_fallback"}:
+        return ""
+    text = _normalize_subtitle_candidate(value)
+    if not text:
+        return ""
+    lowered = text.lower()
+    if re.match(r"^https?://", text, flags=re.IGNORECASE):
+        return "looks like URL"
+    if re.match(r"^[a-z0-9.-]+\.[a-z]{2,}(?:/|$)", lowered):
+        return "looks like domain or URL path"
+    if re.match(r"^(?:www\.)?[a-z0-9.-]+\.[a-z]{2,}$", lowered):
+        return "looks like domain"
+    words = re.findall(r"[A-Za-z0-9]+", text)
+    if len(words) == 1 and words[0].lower() in {"study", "survey", "report", "paper", "article", "review", "preprint"}:
+        return "generic one-word label"
+    if len(words) < 2:
+        return "must be informative multi-word phrase"
+    return ""
+
+
+def _subtitle_candidate_quality_issue(value: Any, *, subtitle_mode: str) -> str:
+    text = _normalize_subtitle_candidate(value)
+    if not text:
+        return ""
+    lowered = text.lower()
+    if re.match(r"^https?://", text, flags=re.IGNORECASE):
+        return "looks like URL"
+    if re.match(r"^[a-z0-9.-]+\.[a-z]{2,}(?:/|$)", lowered):
+        return "looks like domain or URL path"
+    if re.match(r"^(?:www\.)?[a-z0-9.-]+\.[a-z]{2,}$", lowered):
+        return "looks like domain"
+    generated_issue = _generated_subtitle_quality_issue(value, subtitle_mode=subtitle_mode)
+    if generated_issue:
+        return generated_issue
+    return _non_generated_subtitle_quality_issue(value, subtitle_mode=subtitle_mode)
+
+
+def _non_generated_subtitle_quality_issue(value: Any, *, subtitle_mode: str) -> str:
+    mode = _title_subtitle_mode(subtitle_mode, default="")
+    if mode in {"", "generated", "original_metadata", "existing_reference_metadata", "existing_reference"}:
+        return ""
+    text = _normalize_subtitle_candidate(value)
+    if not text:
+        return ""
+    lowered = text.lower()
+    if re.match(r"^\s*(?:this|the)\s+(?:pilot\s+)?(?:study|survey|report|paper|article|review|work)\b", lowered):
+        return "self-referential subtitle framing"
+    if re.match(r"^\s*(?:an?\s+|the\s+)?pilot study\s*$", lowered):
+        return "generic pilot-study subtitle"
+    if re.match(r"^\s*abstract page for arxiv paper\b", lowered):
+        return "source-page boilerplate subtitle"
+    if re.match(r"^\s*(?:an?\s+|the\s+)?(?:study|survey|report|paper|article|review|preprint)\s*$", lowered):
+        return "generic non-informative subtitle"
+    words = re.findall(r"[A-Za-z0-9]+", text)
+    if len(words) > 20 or len(text) > 180:
+        return "subtitle looks like an abstract/description instead of a subtitle"
+    if len(words) < 4:
+        return "subtitle is too short to be informative"
+    return ""
 
 
 def _strip_html_fragments(value: Any) -> str:
@@ -4667,22 +5355,6 @@ def _normalize_outcome_summary_candidate(value: Any) -> str:
     if lines and _looks_like_list_line(lines[0]):
         return ""
     return _clean_text(raw)
-
-
-def _subtitle_is_boilerplate(value: str) -> bool:
-    text = _clean_text(value).lower()
-    if not text:
-        return False
-    if text.startswith("<<") and text.endswith(">>") and len(re.findall(r"/[a-z]+", text)) >= 3:
-        return True
-    patterns = (
-        r"^abstract page for arxiv paper\b",
-        r"^join the discussion on this paper page\b",
-        r"^this paper page\b",
-        r"^paper page\b",
-        r"^<<\s*/metadata\b",
-    )
-    return any(re.match(pattern, text) for pattern in patterns)
 
 
 def _normalize_reference_title_candidate(value: Any) -> str:
@@ -4707,23 +5379,18 @@ def _normalize_reference_title_candidate(value: Any) -> str:
         if updated == text:
             break
         text = updated.strip()
+    text = re.sub(
+        r":\s*(?:study|report|review|analysis|survey|paper|article|preprint)\s*$",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    ).strip()
     if re.match(r"^\[[^\]]+\]\s+\d{1,2}\s+\w+\s+\d{4}$", text):
         return ""
     return _clean_text(text.rstrip(" ,;:-|"))
 
 
-def _title_colon_subtitle_candidate(title: str) -> str:
-    text = _clean_text(title)
-    if ":" not in text:
-        return ""
-    _, right = text.split(":", 1)
-    candidate = _clean_text(right)
-    return candidate if len(candidate.split()) >= 2 else ""
-
-
-def _placeholder_title_or_subtitle(value: Any) -> bool:
-    if _subtitle_has_list_shape(value):
-        return True
+def _placeholder_title(value: Any) -> bool:
     text = _clean_text(value).lower()
     return text in {
         "",
@@ -4731,12 +5398,11 @@ def _placeholder_title_or_subtitle(value: Any) -> bool:
         "no title found",
         "unknown",
         "title unavailable",
-        "subtitle unavailable",
-        "generated fallback subtitle",
-        "no subtitle available",
-        "science direct article metadata unavailable",
-        "sciencedirect article metadata unavailable",
     }
+
+
+def _placeholder_title_or_subtitle(value: Any) -> bool:
+    return _placeholder_title(value)
 
 
 def _catalog_entries(items_value: Any) -> list[tuple[str, dict[str, Any]]]:

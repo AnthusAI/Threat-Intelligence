@@ -28,6 +28,16 @@ const rawLayoutScenarios: RawLayoutScenario[] = [
     newsDeskAppendix: createDemoNewsDeskAppendix(),
   },
   {
+    id: "blank-edition-title",
+    source: "scenario",
+    title: "   ",
+    editionDate,
+    scenarioId: "blank-edition-title",
+    description: "A fixture edition with a blank title used to verify masthead fallback labeling.",
+    layoutPlan: createDefaultEditionLayoutPlan(articles.map((article) => article.slug)),
+    items: cloneArticles(articles).map(articleToPublicationItem),
+  },
+  {
     id: "shared-blank-column-pressure",
     source: "scenario",
     title: "Shared Continuation Blank Column Pressure",
@@ -92,6 +102,16 @@ const rawLayoutScenarios: RawLayoutScenario[] = [
       "A continuation image with a long caption proves image furniture reserves enough rhythm rows for complete caption text.",
     layoutPlan: createDefaultEditionLayoutPlan(articles.map((article) => article.slug)),
     items: createLongImageCaptionArticles().map(articleToPublicationItem),
+  },
+  {
+    id: "themed-ink-study",
+    source: "scenario",
+    title: "Themed Ink Study",
+    editionDate,
+    scenarioId: "themed-ink-study",
+    description: "A raster fixture verifies dark-mode image variant switching in solved newspaper image furniture.",
+    layoutPlan: createDefaultEditionLayoutPlan(articles.map((article) => article.slug)),
+    items: createThemedInkStudyArticles().map(articleToPublicationItem),
   },
   {
     id: "height-policy-fill-default",
@@ -233,6 +253,59 @@ function createFurnitureSufficiencyArticles(): Article[] {
     }
 
     return article;
+  });
+}
+
+function createThemedInkStudyArticles(): Article[] {
+  return cloneArticles(articles).map((article) => {
+    if (article.slug !== "agent-procedure-patterns") return article;
+    return {
+      ...article,
+      image: {
+        ...article.image,
+        src: "/seed-art/theme-ink-study-light.png",
+        themeVariants: {
+          dark: {
+            src: "/seed-art/theme-ink-study-dark.png",
+          },
+        },
+        alt: "An abstract newspaper study with theme-specific light and dark rendering",
+        credit: "Papyrus seed art",
+        caption: "Theme-aware raster image fixture.",
+        layout: {
+          minHeight: 120,
+          preferredHeight: 220,
+          maxHeight: 420,
+          aspectRatio: 1.5009,
+          crop: "contain",
+          wrapsText: true,
+        },
+      },
+      assets: [
+        {
+          id: `${article.slug}-primary-image`,
+          type: "image",
+          src: "/seed-art/theme-ink-study-light.png",
+          themeVariants: {
+            dark: {
+              src: "/seed-art/theme-ink-study-dark.png",
+            },
+          },
+          alt: "An abstract newspaper study with theme-specific light and dark rendering",
+          caption: "Theme-aware raster image fixture.",
+          credit: "Papyrus seed art",
+          roles: ["lead", "continuation", "continuationInset"],
+          layout: {
+            minHeight: 120,
+            preferredHeight: 220,
+            maxHeight: 420,
+            aspectRatio: 1.5009,
+            crop: "contain",
+            wrapsText: true,
+          },
+        },
+      ],
+    };
   });
 }
 

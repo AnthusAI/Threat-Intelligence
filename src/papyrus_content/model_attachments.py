@@ -5,7 +5,6 @@ import json
 import os
 import subprocess
 import tempfile
-import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -13,14 +12,17 @@ from typing import Any
 
 from .env import PAPYRUS_ROOT, storage_bucket_from_amplify_outputs
 from .graphql_authoring import PapyrusGraphQLAuthoringClient, strip_unsupported_payload_fields
-from .ids import safe_id
+from .ids import hash_short, safe_id
 
 MODEL_ATTACHMENT_OWNER_MODELS = {
     "assignment": "Assignment",
     "assignmentEvent": "AssignmentEvent",
     "knowledgeRawPayload": "KnowledgeRawPayload",
     "message": "Message",
+    "procedureVersion": "ProcedureVersion",
     "reference": "Reference",
+    "semanticNode": "SemanticNode",
+    "semanticRelation": "SemanticRelation",
 }
 
 
@@ -103,24 +105,6 @@ def attachment_record(entry: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _upload_error_is_transient(error: BaseException) -> bool:
-    if isinstance(error, urllib.error.HTTPError):
-        return error.code in {502, 503, 504}
-    message = str(error)
-    return any(
-        token in message
-        for token in (
-            "Connection reset",
-            "timed out",
-            "Temporary failure",
-            "ECONNRESET",
-            "503",
-            "502",
-            "504",
-        )
-    )
-
-
 def upload_attachment_body(
     client: PapyrusGraphQLAuthoringClient,
     attachment: dict[str, Any],
@@ -129,34 +113,37 @@ def upload_attachment_body(
     buffer = body if isinstance(body, (bytes, bytearray)) else str(body).encode("utf-8")
     slot = client.create_model_attachment_upload(attachment)
     headers = {str(key): str(value) for key, value in (slot.get("requiredHeaders") or {}).items()}
-    last_error: BaseException | None = None
-    for attempt in range(1, 4):
-        request = urllib.request.Request(
-            slot["uploadUrl"],
-            data=buffer,
-            headers=headers,
-            method=slot.get("method") or "PUT",
-        )
-        try:
-            with urllib.request.urlopen(request) as response:
-                if response.status >= 400:
-                    raise RuntimeError(f"Upload failed with status {response.status}")
-            return client.complete_model_attachment_upload(slot["uploadId"], attachment)
-        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, RuntimeError) as error:
-            last_error = error
-            if not _upload_error_is_transient(error) or attempt == 3:
-                break
-            time.sleep(attempt * 2)
-    assert last_error is not None
-    if isinstance(last_error, urllib.error.HTTPError):
-        detail = last_error.read().decode("utf-8", errors="replace")
+    request = urllib.request.Request(
+        slot["uploadUrl"],
+        data=buffer,
+        headers=headers,
+        method=slot.get("method") or "PUT",
+    )
+    try:
+        with urllib.request.urlopen(request) as response:
+            if response.status >= 400:
+                raise RuntimeError(f"Upload failed with status {response.status}")
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode("utf-8", errors="replace")
         raise RuntimeError(
             f"Failed to upload ModelAttachment {attachment['id']} to {slot.get('storagePath')}: "
-            f"{last_error.code} {last_error.reason} {detail[:240]}"
-        ) from last_error
-    raise RuntimeError(
-        f"Failed to upload ModelAttachment {attachment['id']} to {slot.get('storagePath')}: {last_error}"
-    ) from last_error
+            f"{error.code} {error.reason} {detail[:240]}"
+        ) from error
+    completed = client.complete_model_attachment_upload(slot["uploadId"], attachment)
+    if isinstance(completed, dict):
+        completed_status = str(completed.get("status") or "").strip().lower()
+        normalized_status = "active" if completed_status in {"", "ready"} else completed_status
+        return {
+            **attachment,
+            **completed,
+            "storagePath": slot.get("storagePath") or attachment.get("storagePath"),
+            "status": normalized_status,
+        }
+    return {
+        **attachment,
+        "storagePath": slot.get("storagePath") or attachment.get("storagePath"),
+        "status": "active",
+    }
 
 
 def expand_private_payload_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -214,6 +201,24 @@ def expand_private_payload_records(records: list[dict[str, Any]]) -> list[dict[s
                             "ownerLineageId": expected.get("lineageId") or expected["id"],
                             "ownerVersionNumber": expected.get("versionNumber"),
                             "ownerVersionKey": semantic_version_key("reference", expected["id"]),
+                            "role": "metadata",
+                            "sortKey": "metadata",
+                            "content": metadata,
+                            "importRunId": expected.get("importRunId"),
+                            "now": now,
+                        }
+                    )
+                )
+            )
+        elif record["modelName"] == "Assignment" and "metadata" in expected:
+            metadata = parse_jsonish(expected.pop("metadata"))
+            expanded.append(
+                attachment_record(
+                    build_json_model_payload_attachment(
+                        {
+                            "ownerKind": "assignment",
+                            "ownerId": expected["id"],
+                            "ownerLineageId": expected["id"],
                             "role": "metadata",
                             "sortKey": "metadata",
                             "content": metadata,
@@ -385,4 +390,3 @@ def delete_attachment_storage_paths(
         preview = ", ".join(f"{entry.get('storagePath') or 'unknown'}:{entry.get('code') or 'error'}" for entry in errors[:3])
         raise RuntimeError(f"Failed to delete {len(errors)} ModelAttachment S3 object(s): {preview}")
     return {"bucket": resolved_bucket, "attempted": len(paths), "deleted": deleted, "chunks": chunks, "errors": errors}
-

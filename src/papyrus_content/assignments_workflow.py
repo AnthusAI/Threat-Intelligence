@@ -5,18 +5,20 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 from .accession import execute_reference_accession_assignment
 from .assignments import apply_assignment_action, assignment_metadata
-from .catalog import semantic_relation_record
+from .catalog import message_record, semantic_relation_record
 from .copywriting import COPYWRITING_ASSIGNMENT_TYPES, build_copywriting_run_plan
 from .env import PAPYRUS_ROOT
 from .graphql_authoring import PapyrusGraphQLAuthoringClient
 from .ids import hash_short, knowledge_corpus_id, safe_id
-from .model_attachments import parse_jsonish
+from .model_defaults import DEFAULT_REFERENCE_SUMMARY_MODEL
+from .model_attachments import download_attachment_buffer, parse_jsonish
 from .newsroom_summary import (
     update_newsroom_summary_after_assignment_creates,
+    update_newsroom_summary_after_extracted_text_attachments,
     update_newsroom_summary_after_reference_registration,
 )
 from .options import (
@@ -26,12 +28,27 @@ from .options import (
     parse_boolean_option,
     parse_comma_list,
     parse_options,
+    resolve_mutation_apply,
 )
 from .records import apply_record_changes, build_record_changes, build_record_changes_tolerating_optional_models
 from .reference_policy import normalize_reference_curation_status
+from .reference_url_text import run_reference_url_text_extraction
+from .reference_metadata_generation import run_reference_metadata_generation_from_extracted_text
 from .reporting_packet_review import build_reporting_packet_review_plan
 
 RESEARCH_MODES = frozenset({"internal_brief", "source_discovery", "full_research"})
+REPORTING_RECOMMENDATIONS = frozenset({"select", "merge", "brief", "hold", "kill"})
+ASSIGNMENT_RUN_DEFAULT_KNOWLEDGE_INCLUDE_KINDS = (
+    "reference",
+    "item",
+    "category",
+    "semanticNode",
+    "newsroomSection",
+    "assignment",
+    "message",
+)
+ASSIGNMENT_RUN_DEFAULT_KNOWLEDGE_INCLUDE_MESSAGE_KINDS = ("insight",)
+ASSIGNMENT_RUN_DEFAULT_KNOWLEDGE_INCLUDE_ASSIGNMENT_TYPES = ("research.*", "reporting.*")
 
 
 def normalize_research_mode(value: Any) -> str:
@@ -41,6 +58,29 @@ def normalize_research_mode(value: Any) -> str:
             f"Invalid --research-mode {value}. Expected one of: internal_brief, source_discovery, full_research."
         )
     return normalized
+
+
+def assignment_run_knowledge_scope(options: dict[str, Any]) -> dict[str, Any]:
+    include_kinds = parse_comma_list(options.get("knowledge-include-kinds")) or list(
+        ASSIGNMENT_RUN_DEFAULT_KNOWLEDGE_INCLUDE_KINDS
+    )
+    exclude_kinds = parse_comma_list(options.get("knowledge-exclude-kinds")) or []
+    include_message_kinds = parse_comma_list(options.get("knowledge-include-message-kinds")) or list(
+        ASSIGNMENT_RUN_DEFAULT_KNOWLEDGE_INCLUDE_MESSAGE_KINDS
+    )
+    exclude_message_kinds = parse_comma_list(options.get("knowledge-exclude-message-kinds")) or []
+    include_assignment_types = parse_comma_list(options.get("knowledge-include-assignment-types")) or list(
+        ASSIGNMENT_RUN_DEFAULT_KNOWLEDGE_INCLUDE_ASSIGNMENT_TYPES
+    )
+    exclude_assignment_types = parse_comma_list(options.get("knowledge-exclude-assignment-types")) or []
+    return {
+        "includeObjectKinds": include_kinds,
+        "excludeObjectKinds": exclude_kinds,
+        "includeMessageKinds": include_message_kinds,
+        "excludeMessageKinds": exclude_message_kinds,
+        "includeAssignmentTypeKeys": include_assignment_types,
+        "excludeAssignmentTypeKeys": exclude_assignment_types,
+    }
 
 
 def semantic_state_key(kind: str, lineage_id: str) -> str:
@@ -58,20 +98,21 @@ def assignment_sort_key(assignment: dict[str, Any]) -> str:
     return f"{priority}#{created_at}#{record_id}"
 
 
-def run_papyrus_newsroom(args: list[str]) -> dict[str, Any]:
+def run_papyrus_cli_json(args: list[str]) -> dict[str, Any]:
     completed = subprocess.run(
-        ["poetry", "run", "papyrus-newsroom", *args],
+        ["poetry", "run", "papyrus", *args],
         cwd=PAPYRUS_ROOT,
         capture_output=True,
         text=True,
         check=False,
     )
     if completed.returncode != 0:
-        raise RuntimeError(completed.stderr.strip() or completed.stdout.strip() or "papyrus-newsroom failed")
+        raise RuntimeError(completed.stderr.strip() or completed.stdout.strip() or "papyrus command failed")
     return json.loads(completed.stdout)
 
 
 def create_research_assignment(client: PapyrusGraphQLAuthoringClient, options: dict[str, Any]) -> dict[str, Any]:
+    apply = resolve_mutation_apply(options, "assignments create-research")
     title = normalize_string(options.get("title"))
     if not title:
         raise ValueError("assignments create-research requires --title <text>.")
@@ -94,7 +135,7 @@ def create_research_assignment(client: PapyrusGraphQLAuthoringClient, options: d
     if section_key and not section:
         raise ValueError(
             f"Unknown NewsroomSection for --section {section_key}. "
-            "Run: poetry run papyrus-content newsroom import-sections --config corpora/papyrus-newsroom-sections.yml"
+            "Run: poetry run papyrus sections import --config corpora/papyrus-newsroom-sections.yml"
         )
     assignment_id = normalize_string(options.get("id")) or (
         f"assignment-research-{safe_id(title)[:80]}-{timestamp_for_path(now)}"
@@ -133,7 +174,7 @@ def create_research_assignment(client: PapyrusGraphQLAuthoringClient, options: d
         "sectionQueueStatusKey": f"{section_key}#{queue_key}#{status}" if section_key else None,
         "primaryFocusCategoryKey": primary_focus,
         "topicScopeCategoryKeys": topic_scope,
-        "createdBy": normalize_string(options.get("actor-label")) or "papyrus-content-cli",
+        "createdBy": normalize_string(options.get("actor-label")) or "papyrus-cli",
         "createdAt": now,
         "updatedAt": now,
         "newsroomFeedKey": f"assignment#{status}",
@@ -165,17 +206,17 @@ def create_research_assignment(client: PapyrusGraphQLAuthoringClient, options: d
         "researchMode": research_mode,
         "changes": _count_delta(changes, "action"),
         "next": (
-            f"poetry run papyrus-content assignments run-research --assignment {assignment_id} "
+            f"poetry run papyrus assignments run-research --assignment {assignment_id} "
             f"--corpus-key {corpus_key} --research-mode {research_mode}"
-            if options.get("apply")
-            else f"poetry run papyrus-content assignments create-research --title {json.dumps(title)} "
+            if apply
+            else f"poetry run papyrus assignments create-research --title {json.dumps(title)} "
             f"--section {section_key or '<section-key>'} --corpus-key {corpus_key} "
-            f"--research-mode {research_mode} --apply"
+            f"--research-mode {research_mode}"
         ),
     }
-    if not options.get("apply"):
+    if not apply:
         _print_create_research_summary("dry-run", result, changes)
-        print("assignments\tcreate-research\tapply\tskipped\tpass --apply to write Assignment records")
+        print("assignments\tcreate-research\tapply\tskipped\tuse --dry-run to preview without writes")
         print(f"assignments\tcreate-research\tnext\t{result['next']}")
         return result
     apply_record_changes(client, changes)
@@ -190,12 +231,132 @@ def create_research_assignment(client: PapyrusGraphQLAuthoringClient, options: d
     return result
 
 
+def create_reporting_assignment(client: PapyrusGraphQLAuthoringClient, options: dict[str, Any]) -> dict[str, Any]:
+    apply = resolve_mutation_apply(options, "assignments create-reporting")
+    title = normalize_string(options.get("title"))
+    if not title:
+        raise ValueError("assignments create-reporting requires --title <text>.")
+    section_key = normalize_string(options.get("section"))
+    corpus_key = normalize_string(options.get("corpus-key")) or "AI-ML-research"
+    now = _utc_now()
+    assignment_type_key = normalize_string(options.get("type")) or "reporting.edition-candidate"
+    if assignment_type_key != "reporting.edition-candidate":
+        raise ValueError("assignments create-reporting only supports --type reporting.edition-candidate.")
+    status = normalize_string(options.get("status")) or "open"
+    priority = normalize_non_negative_integer(options.get("priority"), "--priority") or 50
+    queue_key = normalize_string(options.get("queue")) or f"reporting:{section_key or 'unsectioned'}:exploratory"
+    summary = normalize_string(options.get("summary")) or normalize_string(options.get("brief")) or title
+    brief = normalize_string(options.get("brief")) or summary
+    instructions = normalize_string(options.get("instructions")) or "Build a private reporting_context_packet only."
+    topic_scope = parse_comma_list(options.get("topic-scope") or options.get("topic-scope-category-keys")) or []
+    primary_focus = normalize_string(options.get("primary-focus-category-key")) or normalize_string(
+        options.get("primary-focus")
+    )
+    section = client.get_record("NewsroomSection", section_key) if section_key else None
+    if section_key and not section:
+        raise ValueError(
+            f"Unknown NewsroomSection for --section {section_key}. "
+            "Run: poetry run papyrus sections import --config corpora/papyrus-newsroom-sections.yml"
+        )
+    assignment_id = normalize_string(options.get("id")) or (
+        f"assignment-reporting-{safe_id(title)[:80]}-{timestamp_for_path(now)}"
+    )
+    assignment = {
+        "id": assignment_id,
+        "assignmentTypeKey": assignment_type_key,
+        "queueKey": queue_key,
+        "queueStatusKey": f"{queue_key}#{status}",
+        "status": status,
+        "priority": priority,
+        "title": title,
+        "summary": summary,
+        "brief": brief,
+        "instructions": instructions,
+        "metadata": json.dumps(
+            {
+                "kind": "reporting.assignment.created",
+                "corpusKey": corpus_key,
+                "sectionKey": section_key,
+                "sectionTitle": (section or {}).get("title") or (section or {}).get("displayName") or section_key,
+                "sectionType": _normalize_section_type((section or {}).get("type") or options.get("section-type")),
+                "topicScopeCategoryKeys": topic_scope,
+                "primaryFocusCategoryKey": primary_focus,
+                "contextProfile": "reporting",
+                "createdBy": "assignments create-reporting",
+            }
+        ),
+        "corpusId": normalize_string(options.get("corpus-id")) or knowledge_corpus_id({"key": corpus_key}),
+        "categorySetId": normalize_string(options.get("category-set")),
+        "sectionId": (section or {}).get("id") or section_key,
+        "sectionKey": section_key,
+        "sectionType": _normalize_section_type((section or {}).get("type") or options.get("section-type")),
+        "sectionStatusKey": f"{section_key}#{status}" if section_key else None,
+        "sectionQueueStatusKey": f"{section_key}#{queue_key}#{status}" if section_key else None,
+        "primaryFocusCategoryKey": primary_focus,
+        "topicScopeCategoryKeys": topic_scope,
+        "createdBy": normalize_string(options.get("actor-label")) or "papyrus-cli",
+        "createdAt": now,
+        "updatedAt": now,
+        "newsroomFeedKey": f"assignment#{status}",
+    }
+    event = {
+        "id": f"assignment-event-{assignment_id}-created",
+        "assignmentId": assignment_id,
+        "assignmentTypeKey": assignment_type_key,
+        "queueKey": queue_key,
+        "eventType": "created",
+        "fromStatus": None,
+        "toStatus": status,
+        "actorSub": normalize_string(options.get("actor-sub")),
+        "actorLabel": normalize_string(options.get("actor-label")) or "Papyrus content CLI",
+        "note": normalize_string(options.get("note")) or f"Created reporting assignment: {title}",
+        "createdAt": now,
+    }
+    records = [
+        {"modelName": "Assignment", "expected": assignment},
+        {"modelName": "AssignmentEvent", "expected": event},
+    ]
+    changes = build_record_changes(client, records)
+    result = {
+        "assignmentId": assignment_id,
+        "assignmentTypeKey": assignment_type_key,
+        "status": status,
+        "sectionKey": section_key,
+        "queueKey": queue_key,
+        "corpusKey": corpus_key,
+        "changes": _count_delta(changes, "action"),
+        "next": (
+            f"poetry run papyrus assignments run-reporting --assignment {assignment_id} "
+            f"--corpus-key {corpus_key}"
+            if apply
+            else f"poetry run papyrus assignments create-reporting --title {json.dumps(title)} "
+            f"--section {section_key or '<section-key>'} --corpus-key {corpus_key}"
+        ),
+    }
+    if not apply:
+        _print_create_reporting_summary("dry-run", result, changes)
+        print("assignments\tcreate-reporting\tapply\tskipped\tuse --dry-run to preview without writes")
+        print(f"assignments\tcreate-reporting\tnext\t{result['next']}")
+        return result
+    apply_record_changes(client, changes)
+    update_newsroom_summary_after_assignment_creates(
+        client,
+        changes,
+        actor_label=event["actorLabel"],
+        reason=f"assignments create-reporting {assignment_id}",
+    )
+    _print_create_reporting_summary("apply", result, changes)
+    print(f"assignments\tcreate-reporting\tnext\t{result['next']}")
+    return result
+
+
 def run_research_assignment(flags: list[str]) -> None:
     from .cloud_procedures import start_cloud_procedure_run
     from .graphql_authoring import create_authoring_client
     from .ids import safe_id
 
     options = parse_options(flags)
+    apply = resolve_mutation_apply(options, "assignments run-research")
     assignment_id = normalize_string(options.get("assignment"))
     if not assignment_id:
         raise ValueError("assignments run-research requires --assignment <id>.")
@@ -215,12 +376,13 @@ def run_research_assignment(flags: list[str]) -> None:
     question = normalize_string(options.get("research-questions") or options.get("question")) or ""
     context_profile = normalize_string(options.get("context-profile")) or "researcher"
     max_evidence_items = normalize_non_negative_integer(options.get("max-evidence-items"), "--max-evidence-items") or 20
+    knowledge_query_scope = assignment_run_knowledge_scope(options)
     started_at = _utc_now()
     client, _ = create_authoring_client()
     run = start_cloud_procedure_run(
         client=client,
         alias="assignments.run-research",
-        actor_label=normalize_string(options.get("actor")) or "papyrus-content-cli",
+        actor_label=normalize_string(options.get("actor")) or "papyrus-cli",
         title=f"Run research assignment {assignment_id}",
         summary="Triggered by assignments run-research via cloud procedure dispatch.",
         input_payload={
@@ -230,6 +392,7 @@ def run_research_assignment(flags: list[str]) -> None:
             "research_mode": research_mode,
             "research_questions": question,
             "max_evidence_items": max_evidence_items,
+            "knowledge_query_scope": knowledge_query_scope,
         },
         run_dir=run_dir,
         source_path=source_path,
@@ -242,11 +405,13 @@ def run_research_assignment(flags: list[str]) -> None:
         raise ValueError(
             f"Cloud procedure output for assignment {assignment_id} did not return a JSON object payload."
         )
-    research = parsed.get("research_packet") or parsed.get("researchPacket")
+    research = research_packet_from_procedure_output(parsed)
+    if not research:
+        research = parsed.get("research_packet") or parsed.get("researchPacket")
     if not research:
         raise ValueError(
             f"Cloud procedure output for assignment {assignment_id} is missing research_packet. "
-            "Run npm run seed:amplify if procedure seeds are stale."
+            "Run poetry run papyrus procedures seed-required if procedure seeds are stale."
         )
     packet = normalize_research_packet_bundle(
         research,
@@ -260,6 +425,7 @@ def run_research_assignment(flags: list[str]) -> None:
     )
     validate_research_packet_mode(packet)
     trace = packet.get("researchTrace") or {}
+    discovery_boundary = _parse_object(trace.get("discoveryBoundary") or trace.get("discovery_boundary"))
     retry_count_raw = parsed.get("retry_count") or parsed.get("retryCount") or trace.get("retryCount") or trace.get("retry_count") or 0
     try:
         retry_count = max(0, int(retry_count_raw))
@@ -279,7 +445,7 @@ def run_research_assignment(flags: list[str]) -> None:
     result = {
         "ok": True,
         "command": "assignments run-research",
-        "action": "apply" if options.get("apply") else "dry-run",
+        "action": "apply" if apply else "dry-run",
         "runId": run_id,
         "assignmentId": assignment_id,
         "researchMode": research_mode,
@@ -292,6 +458,11 @@ def run_research_assignment(flags: list[str]) -> None:
         "stderrPath": str(stderr_path),
         "fallback": None,
         "resultPath": str(result_path),
+        "llmContextSummaryPath": run.get("llmContextSummaryPath"),
+        "llmContextCallsPath": run.get("llmContextCallsPath"),
+        "llmContextCallCount": run.get("llmContextCallCount"),
+        "llmContextLlmCallsPath": run.get("llmContextLlmCallsPath"),
+        "llmContextLlmCallCount": run.get("llmContextLlmCallCount"),
         "parsed": True,
         "packet": {
             "summary": packet.get("summary"),
@@ -299,8 +470,27 @@ def run_research_assignment(flags: list[str]) -> None:
             "sourceSnapshotCount": len(packet.get("sourceSnapshots") or []),
             "evidenceItemCount": len(packet.get("evidenceItemIds") or []),
             "blockedReason": (packet.get("sourceDiscovery") or {}).get("blockedReason"),
+            "webSearchPath": normalize_string(discovery_boundary.get("webSearchPath") or discovery_boundary.get("web_search_path")),
+            "searchResultCount": discovery_boundary.get("searchResultCount"),
+            "searchMetadataShapeOk": discovery_boundary.get("searchMetadataShapeOk"),
+            "discoveryAttemptsTotal": discovery_boundary.get("discoveryAttemptsTotal"),
+            "discoveryQueriesTried": _parse_array(
+                discovery_boundary.get("discoveryQueriesTried") or discovery_boundary.get("discovery_queries_tried")
+            ),
+            "discoveryResultCounts": _parse_array(
+                discovery_boundary.get("discoveryResultCounts") or discovery_boundary.get("discovery_result_counts")
+            ),
+            "discoveryTerminalState": normalize_string(
+                discovery_boundary.get("discoveryTerminalState") or discovery_boundary.get("discovery_terminal_state")
+            ),
+            "discoveryBlockedReason": normalize_string(
+                discovery_boundary.get("blockedReason") or discovery_boundary.get("blocked_reason")
+            ),
             "firstProposalUrl": ((packet.get("proposedReferences") or [{}])[0] or {}).get("url"),
             "attempts": retry_count + 1,
+            "knowledgeScopeIncludeKinds": knowledge_query_scope.get("includeObjectKinds") or [],
+            "knowledgeScopeIncludeMessageKinds": knowledge_query_scope.get("includeMessageKinds") or [],
+            "knowledgeScopeIncludeAssignmentTypes": knowledge_query_scope.get("includeAssignmentTypeKeys") or [],
             "recoveryPath": normalize_string(
                 parsed.get("recovery_path") or parsed.get("recoveryPath") or trace.get("recoveryPath") or trace.get("recovery_path")
             ),
@@ -309,10 +499,10 @@ def run_research_assignment(flags: list[str]) -> None:
         },
         "next": None,
     }
-    if not options.get("apply"):
+    if not apply:
         result["next"] = (
-            f"poetry run papyrus-content assignments apply-research-packet "
-            f"--assignment {assignment_id} --research-json {result_path} --apply"
+            f"poetry run papyrus assignments apply-research-packet "
+            f"--assignment {assignment_id} --research-json {result_path}"
         )
     result_path.write_text(
         json.dumps(
@@ -334,14 +524,13 @@ def run_research_assignment(flags: list[str]) -> None:
         + "\n",
         encoding="utf-8",
     )
-    if options.get("apply"):
+    if apply:
         apply_research_packet(
             client,
             {
                 "assignment": assignment_id,
                 "research-json": json.dumps(research),
                 "research-mode": research_mode,
-                "apply": True,
                 **({"json": True} if options.get("json") else {}),
             },
         )
@@ -350,6 +539,164 @@ def run_research_assignment(flags: list[str]) -> None:
         print(json.dumps(result, indent=2))
         return
     _print_research_run_summary(result)
+
+
+def run_reporting_assignment(flags: list[str]) -> None:
+    from .cloud_procedures import start_cloud_procedure_run
+    from .graphql_authoring import create_authoring_client
+    from .ids import safe_id
+
+    options = parse_options(flags)
+    apply = resolve_mutation_apply(options, "assignments run-reporting")
+    assignment_id = normalize_string(options.get("assignment"))
+    if not assignment_id:
+        raise ValueError("assignments run-reporting requires --assignment <id>.")
+    corpus_key = normalize_string(options.get("corpus-key")) or "AI-ML-research"
+    run_id = normalize_string(options.get("run-id")) or (
+        f"reporting-{safe_id(assignment_id)[:60]}-{timestamp_for_path()}"
+    )
+    run_dir = PAPYRUS_ROOT / ".papyrus-runs" / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    result_path = run_dir / "reporting-result.json"
+    source_path = run_dir / "reporting.cloud.tac"
+    stdout_path = run_dir / "reporting.stdout.log"
+    stderr_path = run_dir / "reporting.stderr.log"
+    context_profile = normalize_string(options.get("context-profile")) or "reporting"
+    knowledge_query_scope = assignment_run_knowledge_scope(options)
+    started_at = _utc_now()
+    client, _ = create_authoring_client()
+    assignment = client.get_record("Assignment", assignment_id)
+    if not assignment:
+        raise ValueError(f"Assignment not found: {assignment_id}.")
+    assignment_meta = assignment_metadata(client, assignment)
+    run = start_cloud_procedure_run(
+        client=client,
+        alias="assignments.run-reporting",
+        actor_label=normalize_string(options.get("actor")) or "papyrus-cli",
+        title=f"Run reporting assignment {assignment_id}",
+        summary="Triggered by assignments run-reporting via cloud procedure dispatch.",
+        input_payload={
+            "assignment_item_id": assignment_id,
+            "corpus_key": corpus_key,
+            "context_profile": context_profile,
+            "knowledge_query_scope": knowledge_query_scope,
+            "source_research_assignment_id": normalize_string(options.get("source-research-assignment-id"))
+            or normalize_string(assignment_meta.get("sourceResearchAssignmentId"))
+            or None,
+            "source_research_packet_id": normalize_string(options.get("source-research-packet-id"))
+            or normalize_string(assignment_meta.get("sourceResearchPacketId"))
+            or None,
+        },
+        run_dir=run_dir,
+        source_path=source_path,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+    )
+    finished_at = _utc_now()
+    parsed = run.get("output")
+    if not isinstance(parsed, dict):
+        raise ValueError(
+            f"Cloud procedure output for assignment {assignment_id} did not return a JSON object payload."
+        )
+    reporting = parsed.get("reporting_context_packet") or parsed.get("reportingContextPacket")
+    if not reporting:
+        raise ValueError(
+            f"Cloud procedure output for assignment {assignment_id} is missing reporting_context_packet. "
+            "Run poetry run papyrus procedures seed-required if procedure seeds are stale."
+        )
+    packet = normalize_reporting_packet_bundle(
+        reporting,
+        assignment=assignment,
+        assignment_meta=assignment_meta,
+    )
+    validate_reporting_packet(packet)
+    retry_count_raw = parsed.get("retry_count") or parsed.get("retryCount") or 0
+    try:
+        retry_count = max(0, int(retry_count_raw))
+    except (TypeError, ValueError):
+        retry_count = 0
+    validation_failures_raw = parsed.get("validation_failures") or parsed.get("validationFailures")
+    validation_failures = [str(entry) for entry in validation_failures_raw] if isinstance(validation_failures_raw, list) else []
+    result = {
+        "ok": True,
+        "command": "assignments run-reporting",
+        "action": "apply" if apply else "dry-run",
+        "runId": run_id,
+        "assignmentId": assignment_id,
+        "corpusKey": corpus_key,
+        "startedAt": started_at,
+        "finishedAt": finished_at,
+        "exitStatus": 0,
+        "stdoutPath": str(stdout_path),
+        "stderrPath": str(stderr_path),
+        "resultPath": str(result_path),
+        "llmContextSummaryPath": run.get("llmContextSummaryPath"),
+        "llmContextCallsPath": run.get("llmContextCallsPath"),
+        "llmContextCallCount": run.get("llmContextCallCount"),
+        "llmContextLlmCallsPath": run.get("llmContextLlmCallsPath"),
+        "llmContextLlmCallCount": run.get("llmContextLlmCallCount"),
+        "parsed": True,
+        "packet": {
+            "summary": packet.get("summary"),
+            "editorRecommendation": packet.get("editorRecommendation"),
+            "acceptedReferenceCount": len(packet.get("acceptedReferenceIds") or []),
+            "proposedReferenceCount": len(packet.get("proposedReferences") or []),
+            "sourceTrailCount": len(packet.get("sourceTrail") or []),
+            "knowledgeQueryCount": len(packet.get("knowledgeQueries") or []),
+            "papyrusUriCount": len(packet.get("papyrusUrisInspected") or []),
+            "knowledgeBlockedReason": packet.get("knowledgeBlockedReason"),
+            "knowledgeOrientationAttempted": packet.get("knowledgeOrientationAttempted"),
+            "knowledgeOrientationCompleted": packet.get("knowledgeOrientationCompleted"),
+            "reportingPathMode": packet.get("reportingPathMode"),
+            "verificationNeedCount": len(packet.get("verificationNeeds") or []),
+            "firstProposalUrl": ((packet.get("proposedReferences") or [{}])[0] or {}).get("url"),
+            "attempts": retry_count + 1,
+            "knowledgeScopeIncludeKinds": knowledge_query_scope.get("includeObjectKinds") or [],
+            "knowledgeScopeIncludeMessageKinds": knowledge_query_scope.get("includeMessageKinds") or [],
+            "knowledgeScopeIncludeAssignmentTypes": knowledge_query_scope.get("includeAssignmentTypeKeys") or [],
+            "firstValidationError": validation_failures[0] if validation_failures else None,
+            "lastValidationError": validation_failures[-1] if validation_failures else None,
+        },
+        "next": None,
+    }
+    if not apply:
+        result["next"] = (
+            f"poetry run papyrus assignments apply-reporting-packet "
+            f"--assignment {assignment_id} --reporting-json {result_path}"
+        )
+    result_path.write_text(
+        json.dumps(
+            {
+                **result,
+                "cloudProcedure": {
+                    "runId": run.get("id"),
+                    "procedureKey": run.get("procedureKey"),
+                    "procedureVersionId": run.get("procedureVersionId"),
+                    "procedureVersionNumber": run.get("procedureVersionNumber"),
+                    "runStatus": run.get("runStatus"),
+                    "sourcePath": run.get("sourcePath"),
+                },
+                "commandLine": run.get("commandLine"),
+                "value": parsed,
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    if apply:
+        apply_reporting_packet(
+            client,
+            {
+                "assignment": assignment_id,
+                "reporting-json": json.dumps(reporting),
+            },
+        )
+        return
+    if options.get("json"):
+        print(json.dumps(result, indent=2))
+        return
+    _print_reporting_run_summary(result)
 
 
 def _print_research_run_summary(result: dict[str, Any]) -> None:
@@ -375,21 +722,137 @@ def _print_research_run_summary(result: dict[str, Any]) -> None:
             print(f"assignments\trun-research\tfirst-proposal\t{packet.get('firstProposalUrl')}")
         if packet.get("blockedReason"):
             print(f"assignments\trun-research\tblocked\t{packet.get('blockedReason')}")
+        if packet.get("webSearchPath"):
+            print(f"assignments\trun-research\tweb-search-path\t{packet.get('webSearchPath')}")
+        if packet.get("searchResultCount") is not None:
+            print(f"assignments\trun-research\tsearch-result-count\t{packet.get('searchResultCount')}")
+        if packet.get("searchMetadataShapeOk") is not None:
+            print(f"assignments\trun-research\tsearch-metadata-shape-ok\t{packet.get('searchMetadataShapeOk')}")
+        if packet.get("discoveryAttemptsTotal") is not None:
+            print(f"assignments\trun-research\tdiscovery-attempts-total\t{packet.get('discoveryAttemptsTotal')}")
+        if packet.get("discoveryQueriesTried"):
+            print(
+                "assignments\trun-research\tdiscovery-queries-tried\t"
+                + ",".join(str(value) for value in packet.get("discoveryQueriesTried") or [])
+            )
+        if packet.get("discoveryResultCounts"):
+            print(
+                "assignments\trun-research\tdiscovery-result-counts\t"
+                + ",".join(str(value) for value in packet.get("discoveryResultCounts") or [])
+            )
+        if packet.get("discoveryTerminalState"):
+            print(f"assignments\trun-research\tdiscovery-terminal-state\t{packet.get('discoveryTerminalState')}")
+        if packet.get("discoveryBlockedReason"):
+            print(f"assignments\trun-research\tdiscovery-blocked\t{packet.get('discoveryBlockedReason')}")
+        if packet.get("knowledgeScopeIncludeKinds"):
+            print(
+                "assignments\trun-research\tknowledge-scope-kinds\t"
+                + ",".join(str(value) for value in packet.get("knowledgeScopeIncludeKinds") or [])
+            )
+        if packet.get("knowledgeScopeIncludeMessageKinds"):
+            print(
+                "assignments\trun-research\tknowledge-scope-message-kinds\t"
+                + ",".join(str(value) for value in packet.get("knowledgeScopeIncludeMessageKinds") or [])
+            )
+        if packet.get("knowledgeScopeIncludeAssignmentTypes"):
+            print(
+                "assignments\trun-research\tknowledge-scope-assignment-types\t"
+                + ",".join(str(value) for value in packet.get("knowledgeScopeIncludeAssignmentTypes") or [])
+            )
     print(f"assignments\trun-research\tresult\t{result.get('resultPath')}")
     print(f"assignments\trun-research\tstdout\t{result.get('stdoutPath')}")
     print(f"assignments\trun-research\tstderr\t{result.get('stderrPath')}")
+    if result.get("llmContextSummaryPath"):
+        print(f"assignments\trun-research\tllm-context-summary\t{result.get('llmContextSummaryPath')}")
+    if result.get("llmContextCallsPath"):
+        print(f"assignments\trun-research\tllm-context-calls\t{result.get('llmContextCallsPath')}")
+    if result.get("llmContextCallCount") is not None:
+        print(f"assignments\trun-research\tllm-context-call-count\t{result.get('llmContextCallCount')}")
+    if result.get("llmContextLlmCallsPath"):
+        print(f"assignments\trun-research\tllm-context-llm-calls\t{result.get('llmContextLlmCallsPath')}")
+    if result.get("llmContextLlmCallCount") is not None:
+        print(f"assignments\trun-research\tllm-context-llm-call-count\t{result.get('llmContextLlmCallCount')}")
     if result.get("next"):
         print(f"assignments\trun-research\tnext\t{result.get('next')}")
 
 
+def _print_reporting_run_summary(result: dict[str, Any]) -> None:
+    print(f"assignments\trun-reporting\taction\t{result.get('action')}")
+    print(f"assignments\trun-reporting\trun\t{result.get('runId')}")
+    print(f"assignments\trun-reporting\tassignment\t{result.get('assignmentId')}")
+    print(f"assignments\trun-reporting\tstatus\t{result.get('exitStatus') or ''}")
+    print(f"assignments\trun-reporting\tparsed\t{result.get('parsed')}")
+    packet = result.get("packet") or {}
+    if packet:
+        print(
+            f"assignments\trun-reporting\tcounts\taccepted={packet.get('acceptedReferenceCount')}\t"
+            f"sources={packet.get('sourceTrailCount')}\tproposals={packet.get('proposedReferenceCount')}\t"
+            f"verification={packet.get('verificationNeedCount')}"
+        )
+        print(
+            f"assignments\trun-reporting\tknowledge\tqueries={packet.get('knowledgeQueryCount')}\t"
+            f"uris={packet.get('papyrusUriCount')}"
+        )
+        print(f"assignments\trun-reporting\trecommendation\t{packet.get('editorRecommendation')}")
+        print(f"assignments\trun-reporting\tattempts\t{packet.get('attempts')}")
+        if packet.get("reportingPathMode"):
+            print(f"assignments\trun-reporting\treporting-path-mode\t{packet.get('reportingPathMode')}")
+        if packet.get("knowledgeOrientationAttempted") is not None:
+            print(
+                "assignments\trun-reporting\tknowledge-orientation-attempted\t"
+                f"{packet.get('knowledgeOrientationAttempted')}"
+            )
+        if packet.get("knowledgeOrientationCompleted") is not None:
+            print(
+                "assignments\trun-reporting\tknowledge-orientation-completed\t"
+                f"{packet.get('knowledgeOrientationCompleted')}"
+            )
+        if packet.get("knowledgeBlockedReason"):
+            print(f"assignments\trun-reporting\tknowledge-blocked\t{packet.get('knowledgeBlockedReason')}")
+        if packet.get("firstValidationError"):
+            print(f"assignments\trun-reporting\tfirst-validation-error\t{packet.get('firstValidationError')}")
+        if packet.get("lastValidationError"):
+            print(f"assignments\trun-reporting\tlast-validation-error\t{packet.get('lastValidationError')}")
+        if packet.get("firstProposalUrl"):
+            print(f"assignments\trun-reporting\tfirst-proposal\t{packet.get('firstProposalUrl')}")
+        if packet.get("knowledgeScopeIncludeKinds"):
+            print(
+                "assignments\trun-reporting\tknowledge-scope-kinds\t"
+                + ",".join(str(value) for value in packet.get("knowledgeScopeIncludeKinds") or [])
+            )
+        if packet.get("knowledgeScopeIncludeMessageKinds"):
+            print(
+                "assignments\trun-reporting\tknowledge-scope-message-kinds\t"
+                + ",".join(str(value) for value in packet.get("knowledgeScopeIncludeMessageKinds") or [])
+            )
+        if packet.get("knowledgeScopeIncludeAssignmentTypes"):
+            print(
+                "assignments\trun-reporting\tknowledge-scope-assignment-types\t"
+                + ",".join(str(value) for value in packet.get("knowledgeScopeIncludeAssignmentTypes") or [])
+            )
+    print(f"assignments\trun-reporting\tresult\t{result.get('resultPath')}")
+    print(f"assignments\trun-reporting\tstdout\t{result.get('stdoutPath')}")
+    print(f"assignments\trun-reporting\tstderr\t{result.get('stderrPath')}")
+    if result.get("llmContextSummaryPath"):
+        print(f"assignments\trun-reporting\tllm-context-summary\t{result.get('llmContextSummaryPath')}")
+    if result.get("llmContextCallsPath"):
+        print(f"assignments\trun-reporting\tllm-context-calls\t{result.get('llmContextCallsPath')}")
+    if result.get("llmContextCallCount") is not None:
+        print(f"assignments\trun-reporting\tllm-context-call-count\t{result.get('llmContextCallCount')}")
+    if result.get("llmContextLlmCallsPath"):
+        print(f"assignments\trun-reporting\tllm-context-llm-calls\t{result.get('llmContextLlmCallsPath')}")
+    if result.get("llmContextLlmCallCount") is not None:
+        print(f"assignments\trun-reporting\tllm-context-llm-call-count\t{result.get('llmContextLlmCallCount')}")
+    if result.get("next"):
+        print(f"assignments\trun-reporting\tnext\t{result.get('next')}")
+
+
 def apply_research_packet(client: PapyrusGraphQLAuthoringClient, options: dict[str, Any]) -> dict[str, Any]:
+    apply = resolve_mutation_apply(options, "assignments apply-research-packet")
     assignment_id = normalize_string(options.get("assignment"))
     if not assignment_id:
         raise ValueError("assignments apply-research-packet requires --assignment <id>.")
     research = read_research_packet_input(options)
-    summary = normalize_string(research.get("summary") or (research.get("synthesis") or {}).get("summary"))
-    if not summary:
-        raise ValueError("assignments apply-research-packet requires research.summary.")
     assignment = client.get_record("Assignment", assignment_id)
     if not assignment:
         raise ValueError(f"Assignment not found: {assignment_id}.")
@@ -407,31 +870,34 @@ def apply_research_packet(client: PapyrusGraphQLAuthoringClient, options: dict[s
         assignment_meta=assignment_meta,
         research_mode=research_mode,
     )
+    summary = normalize_string(packet.get("summary") or (packet.get("synthesis") or {}).get("summary"))
+    if not summary:
+        raise ValueError("assignments apply-research-packet requires research.summary.")
     validate_research_packet_mode(packet)
     packet_hash = research_packet_hash(assignment_id=assignment_id, research_mode=research_mode, packet=packet)
     message_id = normalize_string(options.get("id")) or f"message-research-packet-{packet_hash}"
-    message = {
-        "id": message_id,
-        "messageKind": "research_packet",
-        "messageDomain": "assignment_work",
-        "status": "active",
-        "summary": summary,
-        "body": research_packet_body(packet),
-        "metadata": json.dumps(
-            {
+    message = message_record(
+        {
+            "id": message_id,
+            "messageKind": "research_packet",
+            "messageDomain": "assignment_work",
+            "status": "active",
+            "summary": summary,
+            "body": research_packet_body(packet),
+            "metadata": {
                 "kind": "research.packet.created",
                 "assignmentId": assignment_id,
                 "assignmentTypeKey": assignment["assignmentTypeKey"],
                 "queueKey": assignment["queueKey"],
                 "research": packet,
-            }
-        ),
-        "source": "assignments apply-research-packet",
-        "importRunId": assignment.get("importRunId"),
-        "authorLabel": normalize_string(options.get("actor-label")) or "Papyrus content CLI",
-        "createdAt": now,
-        "updatedAt": now,
-    }
+            },
+            "source": "assignments apply-research-packet",
+            "importRunId": assignment.get("importRunId"),
+            "authorLabel": normalize_string(options.get("actor-label")) or "Papyrus content CLI",
+            "createdAt": now,
+            "updatedAt": now,
+        }
+    )["expected"]
     relation = semantic_relation_record(
         {
             "predicate": "produces",
@@ -466,9 +932,9 @@ def apply_research_packet(client: PapyrusGraphQLAuthoringClient, options: dict[s
         "sourceSnapshotCount": len(packet.get("sourceSnapshots") or []),
         "evidenceItemCount": len(packet.get("evidenceItemIds") or []),
     }
-    if not options.get("apply"):
+    if not apply:
         _print_apply_research_packet_summary("dry-run", result)
-        print("assignments\tapply-research-packet\tapply\tskipped\tpass --apply to write Message records")
+        print("assignments\tapply-research-packet\tapply\tskipped\tuse --dry-run to preview without writes")
         return result
     apply_record_changes(client, changes)
     update_newsroom_summary_after_research_packet_creates(
@@ -481,19 +947,176 @@ def apply_research_packet(client: PapyrusGraphQLAuthoringClient, options: dict[s
     return result
 
 
+def apply_reporting_packet(client: PapyrusGraphQLAuthoringClient, options: dict[str, Any]) -> dict[str, Any]:
+    apply = resolve_mutation_apply(options, "assignments apply-reporting-packet")
+    assignment_id = normalize_string(options.get("assignment"))
+    if not assignment_id:
+        raise ValueError("assignments apply-reporting-packet requires --assignment <id>.")
+    reporting = read_reporting_packet_input(options)
+    summary = normalize_string(reporting.get("summary"))
+    if not summary:
+        raise ValueError("assignments apply-reporting-packet requires reporting.summary.")
+    assignment = client.get_record("Assignment", assignment_id)
+    if not assignment:
+        raise ValueError(f"Assignment not found: {assignment_id}.")
+    assignment_meta = assignment_metadata(client, assignment)
+    now = _utc_now()
+    packet = normalize_reporting_packet_bundle(
+        reporting,
+        assignment=assignment,
+        assignment_meta=assignment_meta,
+    )
+    validate_reporting_packet(packet)
+    message_id = normalize_string(options.get("id")) or reporting_packet_message_id(
+        assignment_id,
+        created_at=now,
+        summary=packet.get("summary"),
+    )
+    message = message_record(
+        {
+            "id": message_id,
+            "messageKind": "reporting_context_packet",
+            "messageDomain": "assignment_work",
+            "status": "active",
+            "summary": packet.get("summary"),
+            "body": reporting_packet_body(packet),
+            "metadata": {
+                "kind": "reporting.context_packet.created",
+                "assignmentId": assignment_id,
+                "assignmentTypeKey": assignment["assignmentTypeKey"],
+                "queueKey": assignment["queueKey"],
+                "reporting": packet,
+            },
+            "source": "assignments apply-reporting-packet",
+            "importRunId": assignment.get("importRunId"),
+            "authorLabel": normalize_string(options.get("actor-label")) or "Papyrus content CLI",
+            "createdAt": now,
+            "updatedAt": now,
+        }
+    )["expected"]
+    records: list[dict[str, Any]] = [
+        {"modelName": "Message", "expected": message},
+        semantic_relation_record(
+            {
+                "predicate": "produces",
+                "subjectKind": "assignment",
+                "subjectId": assignment_id,
+                "subjectLineageId": assignment_id,
+                "objectKind": "message",
+                "objectId": message_id,
+                "objectLineageId": message_id,
+                "rank": 1,
+                "confidence": 1,
+                "reviewRecommended": False,
+                "importRunId": assignment.get("importRunId"),
+                "importedAt": now,
+                "metadata": {
+                    "lifecycle": "assignment-reporting-context-packet",
+                    "messageKind": "reporting_context_packet",
+                    "metadataKind": "reporting.context_packet.created",
+                    "assignmentTypeKey": assignment["assignmentTypeKey"],
+                    "queueKey": assignment["queueKey"],
+                    "editorRecommendation": packet.get("editorRecommendation"),
+                    "workProductKind": "reporting_context_packet",
+                },
+            }
+        ),
+    ]
+    if packet.get("sourceResearchPacketId"):
+        records.append(
+            semantic_relation_record(
+                {
+                    "predicate": "derived_from",
+                    "subjectKind": "assignment",
+                    "subjectId": assignment_id,
+                    "subjectLineageId": assignment_id,
+                    "objectKind": "message",
+                    "objectId": packet["sourceResearchPacketId"],
+                    "objectLineageId": packet["sourceResearchPacketId"],
+                    "rank": 1,
+                    "confidence": 1,
+                    "reviewRecommended": False,
+                    "importRunId": assignment.get("importRunId"),
+                    "importedAt": now,
+                    "metadata": {
+                        "lifecycle": "assignment-reporting-context-packet",
+                        "sourceKind": "source_research_packet",
+                        "assignmentTypeKey": assignment["assignmentTypeKey"],
+                        "queueKey": assignment["queueKey"],
+                        "workProductKind": "reporting_context_packet",
+                    },
+                }
+            )
+        )
+    if packet.get("sourceResearchAssignmentId"):
+        records.append(
+            semantic_relation_record(
+                {
+                    "predicate": "derived_from",
+                    "subjectKind": "assignment",
+                    "subjectId": assignment_id,
+                    "subjectLineageId": assignment_id,
+                    "objectKind": "assignment",
+                    "objectId": packet["sourceResearchAssignmentId"],
+                    "objectLineageId": packet["sourceResearchAssignmentId"],
+                    "rank": 2,
+                    "confidence": 1,
+                    "reviewRecommended": False,
+                    "importRunId": assignment.get("importRunId"),
+                    "importedAt": now,
+                    "metadata": {
+                        "lifecycle": "assignment-reporting-context-packet",
+                        "sourceKind": "source_research_assignment",
+                        "assignmentTypeKey": assignment["assignmentTypeKey"],
+                        "queueKey": assignment["queueKey"],
+                        "workProductKind": "reporting_context_packet",
+                    },
+                }
+            )
+        )
+    changes = build_record_changes(client, records)
+    result = {
+        "assignmentId": assignment_id,
+        "messageId": message_id,
+        "canonicalPolicy": "latest_successful_packet",
+        "editorRecommendation": packet.get("editorRecommendation"),
+        "acceptedReferenceCount": len(packet.get("acceptedReferenceIds") or []),
+        "proposedReferenceCount": len(packet.get("proposedReferences") or []),
+        "sourceTrailCount": len(packet.get("sourceTrail") or []),
+        "knowledgeQueryCount": len(packet.get("knowledgeQueries") or []),
+        "papyrusUriCount": len(packet.get("papyrusUrisInspected") or []),
+        "knowledgeBlockedReason": packet.get("knowledgeBlockedReason"),
+        "verificationNeedCount": len(packet.get("verificationNeeds") or []),
+    }
+    if not apply:
+        _print_apply_reporting_packet_summary("dry-run", result)
+        print("assignments\tapply-reporting-packet\tapply\tskipped\tuse --dry-run to preview without writes")
+        return result
+    apply_record_changes(client, changes)
+    update_newsroom_summary_after_research_packet_creates(
+        client,
+        changes,
+        actor_label=message["authorLabel"],
+        reason=f"assignments apply-reporting-packet {assignment_id}",
+    )
+    _print_apply_reporting_packet_summary("apply", result)
+    return result
+
+
 def intake_research_packet_proposals(client: PapyrusGraphQLAuthoringClient, options: dict[str, Any]) -> dict[str, Any]:
     from .catalog import assert_reference_catalog_plan_safety, build_reference_catalog_registration_records
     from .ids import knowledge_corpus_id
     from .steering import load_steering_config, require_corpus_config, resolve_classifier_for_corpus
 
+    apply = resolve_mutation_apply(options, "assignments process-proposals")
     assignment_id = normalize_string(options.get("assignment"))
     if not assignment_id:
-        raise ValueError("assignments intake-proposals requires --assignment <id>.")
+        raise ValueError("assignments process-proposals requires --assignment <id>.")
     if not options.get("config"):
-        raise ValueError("assignments intake-proposals requires --config <steering.yml>.")
+        raise ValueError("assignments process-proposals requires --config <steering.yml>.")
     corpus_key = normalize_string(options.get("corpus-key"))
     if not corpus_key:
-        raise ValueError("assignments intake-proposals requires --corpus-key <key>.")
+        raise ValueError("assignments process-proposals requires --corpus-key <key>.")
     entries = load_assignment_research_packet_entries(client, assignment_id)
     message_id = normalize_string(options.get("message"))
     selected = next((entry for entry in entries if entry["message"]["id"] == message_id), None) if message_id else (
@@ -542,7 +1165,7 @@ def intake_research_packet_proposals(client: PapyrusGraphQLAuthoringClient, opti
             "blockedReason": blocked_reason,
             "next": f"Review blocked reason on research packet {selected['message']['id']}"
             if blocked_reason
-            else f"poetry run papyrus-content assignments run-research --assignment {assignment_id} --research-mode source_discovery --max-evidence-items 20",
+            else f"poetry run papyrus assignments run-research --assignment {assignment_id} --research-mode source_discovery --max-evidence-items 20",
         }
     steering_config = load_steering_config(options.get("config")) or require_steering_config()
     corpus_config = require_corpus_config(steering_config, corpus_key, "--corpus-key")
@@ -560,9 +1183,60 @@ def intake_research_packet_proposals(client: PapyrusGraphQLAuthoringClient, opti
     assert_reference_catalog_plan_safety(plan)
     changes = build_record_changes(client, plan["records"])
     registration = {"plan": plan, "changes": changes}
-    if options.get("apply"):
+    url_text_result: dict[str, Any] | None = None
+    metadata_generation_result: dict[str, Any] | None = None
+    if apply:
         apply_record_changes(client, registration["changes"])
         update_newsroom_summary_after_reference_registration(client, registration["changes"], registration["plan"])
+        changed_reference_ids = {
+            str(change["expected"].get("id") or "")
+            for change in registration["changes"]
+            if change.get("modelName") == "Reference" and change.get("action") in {"create", "update"}
+        }
+        if parse_boolean_option(options.get("url-text"), True, "--url-text"):
+            if changed_reference_ids:
+                refreshed_references = client.list_records("Reference")
+                refreshed_attachments = client.list_records("ReferenceAttachment")
+                refreshed_semantic_relations = client.list_records("SemanticRelation")
+                max_count = normalize_non_negative_integer(options.get("url-text-max-count"), "--url-text-max-count")
+                force = parse_boolean_option(options.get("url-text-force"), False, "--url-text-force")
+                corpus_id = knowledge_corpus_id(corpus_config)
+                url_text_result = run_reference_url_text_extraction(
+                    client=client,
+                    references=refreshed_references,
+                    attachments=refreshed_attachments,
+                    semantic_relations=refreshed_semantic_relations,
+                    corpus_key_by_id={corpus_id: str(corpus_config.get("key") or "")},
+                    corpus_id=corpus_id,
+                    reference_ids=changed_reference_ids,
+                    curation_status="all",
+                    max_count=max_count,
+                    force=force,
+                    apply=True,
+                    bucket=normalize_string(options.get("bucket")),
+                )
+                update_newsroom_summary_after_extracted_text_attachments(
+                    client,
+                    url_text_result["changes"],
+                    actor_label=options.get("actor") or "Papyrus content CLI",
+                    reason=f"assignments process-proposals process-fetch-url-text {assignment_id}",
+                )
+        if parse_boolean_option(options.get("metadata-from-text"), True, "--metadata-from-text"):
+            if changed_reference_ids:
+                refreshed_references = client.list_records("Reference")
+                refreshed_attachments = client.list_records("ReferenceAttachment")
+                corpus_id = knowledge_corpus_id(corpus_config)
+                metadata_generation_result = run_reference_metadata_generation_from_extracted_text(
+                    references=refreshed_references,
+                    attachments=refreshed_attachments,
+                    corpus_id=corpus_id,
+                    reference_ids=changed_reference_ids,
+                    curation_status="all",
+                    max_count=normalize_non_negative_integer(options.get("metadata-max-count"), "--metadata-max-count"),
+                    model=normalize_string(options.get("metadata-model")) or DEFAULT_REFERENCE_SUMMARY_MODEL,
+                    apply=True,
+                    bucket=normalize_string(options.get("bucket")),
+                )
     references = _research_proposal_intake_reference_rows(registration["changes"])
     changed_refs = sum(
         1 for change in registration["changes"] if change.get("modelName") == "Reference" and change.get("action") != "noop"
@@ -586,10 +1260,26 @@ def intake_research_packet_proposals(client: PapyrusGraphQLAuthoringClient, opti
         "references": references,
         "blockedReason": blocked_reason,
         "next": (
-            f"poetry run papyrus-content references source-status --config {options.get('config')} "
+            f"poetry run papyrus references process-status --config {options.get('config')} "
             f"--corpus-key {corpus_key} --status "
             f"{normalize_reference_curation_status(options.get('status'), 'pending')}"
         ),
+        "urlText": {
+            "eligible": url_text_result.get("eligibleCount", 0),
+            "planned": url_text_result.get("plannedCount", 0),
+            "changes": url_text_result.get("changeCount", 0),
+            "failures": len(url_text_result.get("failures", [])),
+        }
+        if url_text_result
+        else None,
+        "metadataGeneration": {
+            "attempted": metadata_generation_result.get("attemptedCount", 0),
+            "generated": metadata_generation_result.get("generatedCount", 0),
+            "skippedMissingText": metadata_generation_result.get("skippedMissingTextCount", 0),
+            "generationFailures": metadata_generation_result.get("generationFailureCount", 0),
+        }
+        if metadata_generation_result
+        else None,
     }
 
 
@@ -620,7 +1310,7 @@ def load_assignment_research_packet_entries(
         message = message_by_id.get(message_id)
         if not message or message.get("messageKind") != "research_packet":
             continue
-        metadata = parse_jsonish(message.get("metadata")) or {}
+        metadata = load_message_metadata_payload(client, message)
         research = parse_jsonish(metadata.get("research")) or metadata
         research_mode = normalize_research_mode(
             research.get("researchMode")
@@ -639,15 +1329,102 @@ def load_assignment_research_packet_entries(
     return entries
 
 
+def load_message_metadata_payload(
+    client: PapyrusGraphQLAuthoringClient,
+    message: dict[str, Any],
+) -> dict[str, Any]:
+    metadata = parse_jsonish(message.get("metadata"))
+    if isinstance(metadata, dict) and metadata:
+        return metadata
+    message_id = normalize_string(message.get("id"))
+    if not message_id:
+        return {}
+    attachments = client.list_by_index("modelAttachmentsByOwnerRoleAndSortKey", message_id, limit=20)
+    if not attachments:
+        return {}
+    metadata_attachments = [
+        entry
+        for entry in attachments
+        if normalize_string(entry.get("role")) == "metadata"
+        and normalize_string(entry.get("status")) != "deleted"
+    ]
+    metadata_attachments.sort(key=lambda entry: str(entry.get("updatedAt") or ""), reverse=True)
+    metadata_attachments.sort(key=lambda entry: 0 if normalize_string(entry.get("status")) == "active" else 1)
+    for attachment in metadata_attachments:
+        try:
+            payload = parse_jsonish(download_attachment_buffer(client, attachment).decode("utf-8", errors="replace"))
+        except Exception:
+            continue
+        if isinstance(payload, dict):
+            return payload
+    return {}
+
+
+def research_packet_from_procedure_output(parsed: dict[str, Any]) -> dict[str, Any]:
+    value = parsed.get("value") or parsed
+    packet = value.get("research_packet") or value.get("researchPacket") or value.get("research") or value
+    if not isinstance(packet, dict):
+        return {}
+    packet = dict(packet)
+    if not normalize_string(packet.get("summary")):
+        top_level_summary = normalize_string(
+            value.get("summary") or value.get("research_summary") or value.get("researchSummary")
+        )
+        if top_level_summary:
+            packet["summary"] = top_level_summary
+    synthesis = packet.get("synthesis")
+    if not normalize_string(packet.get("summary")) and isinstance(synthesis, dict):
+        synthesis_summary = normalize_string(synthesis.get("summary"))
+        if synthesis_summary:
+            packet["summary"] = synthesis_summary
+    source_discovery = packet.get("sourceDiscovery") or packet.get("source_discovery")
+    if isinstance(source_discovery, dict):
+        if not _parse_array(packet.get("proposed_references") or packet.get("proposedReferences")):
+            discovered_refs = source_discovery.get("proposedReferences") or source_discovery.get("proposed_references")
+            if discovered_refs:
+                packet["proposed_references"] = discovered_refs
+        if not _parse_array(packet.get("source_snapshots") or packet.get("sourceSnapshots")):
+            discovered_snapshots = source_discovery.get("sourceSnapshots") or source_discovery.get("source_snapshots")
+            if discovered_snapshots:
+                packet["source_snapshots"] = discovered_snapshots
+    return packet
+
+
 def read_research_packet_input(options: dict[str, Any]) -> dict[str, Any]:
     raw = options.get("research-json")
     if not raw:
         raise ValueError("assignments apply-research-packet requires --research-json <path-or-json>.")
-    path = Path(str(raw))
-    text = path.read_text(encoding="utf-8") if path.exists() else str(raw)
+    raw_text = str(raw)
+    candidate = raw_text.lstrip()
+    if candidate.startswith("{") or candidate.startswith("["):
+        text = raw_text
+    else:
+        path = Path(raw_text)
+        try:
+            text = path.read_text(encoding="utf-8") if path.exists() else raw_text
+        except OSError:
+            text = raw_text
+    parsed = json.loads(text)
+    return research_packet_from_procedure_output(parsed)
+
+
+def read_reporting_packet_input(options: dict[str, Any]) -> dict[str, Any]:
+    raw = options.get("reporting-json")
+    if not raw:
+        raise ValueError("assignments apply-reporting-packet requires --reporting-json <path-or-json>.")
+    raw_text = str(raw)
+    candidate = raw_text.lstrip()
+    if candidate.startswith("{") or candidate.startswith("["):
+        text = raw_text
+    else:
+        path = Path(raw_text)
+        try:
+            text = path.read_text(encoding="utf-8") if path.exists() else raw_text
+        except OSError:
+            text = raw_text
     parsed = json.loads(text)
     value = parsed.get("value") or parsed
-    return value.get("research_packet") or value.get("researchPacket") or value.get("research") or value
+    return value.get("reporting_context_packet") or value.get("reportingContextPacket") or value.get("reporting") or value
 
 
 def normalize_research_packet_bundle(
@@ -678,6 +1455,54 @@ def normalize_research_packet_bundle(
     coverage_gaps = _parse_array(
         research.get("coverage_gaps") or research.get("coverageGaps") or synthesis.get("coverageGaps")
     )
+    source_discovery_web_searches = _parse_array(source_discovery.get("webSearches") or source_discovery.get("web_searches"))
+    trace_web_searches = _parse_array(trace.get("webSearches") or trace.get("web_searches"))
+    blocked_reason = normalize_string(
+        source_discovery.get("blockedReason")
+        or source_discovery.get("blocked_reason")
+        or research.get("blockedReason")
+        or research.get("blocked_reason")
+    )
+    if (
+        not blocked_reason
+        and research_mode != "internal_brief"
+        and not source_snapshots
+        and not proposed_references
+    ):
+        blocked_reason = "web_discovery_exhausted_zero_results"
+    discovery_boundary = _parse_object(trace.get("discoveryBoundary") or trace.get("discovery_boundary"))
+    if (
+        not discovery_boundary
+        and (trace_web_searches or source_discovery_web_searches)
+        and research_mode != "internal_brief"
+    ):
+        local_attempts = len(trace_web_searches) if trace_web_searches else len(source_discovery_web_searches)
+        if local_attempts <= 0:
+            local_attempts = 1
+        discovery_boundary = {
+            "webSearchPath": "papyrus.reference.web_search",
+            "searchResultCount": len(source_snapshots),
+            "searchMetadataShapeOk": True,
+            "discoveryAttemptsTotal": local_attempts,
+            "discoveryQueriesTried": trace_web_searches or source_discovery_web_searches,
+            "discoveryResultCounts": [len(source_snapshots)],
+            "discoveryTerminalState": "succeeded" if source_snapshots else "exhausted",
+        }
+        if blocked_reason:
+            discovery_boundary["blockedReason"] = blocked_reason
+    if discovery_boundary:
+        if discovery_boundary.get("discoveryAttemptsTotal") is None:
+            attempts = len(_parse_array(trace_web_searches or source_discovery_web_searches))
+            discovery_boundary["discoveryAttemptsTotal"] = attempts if attempts > 0 else 1
+        if not _parse_array(discovery_boundary.get("discoveryQueriesTried") or discovery_boundary.get("discovery_queries_tried")):
+            discovery_boundary["discoveryQueriesTried"] = trace_web_searches or source_discovery_web_searches
+        if not _parse_array(discovery_boundary.get("discoveryResultCounts") or discovery_boundary.get("discovery_result_counts")):
+            discovery_boundary["discoveryResultCounts"] = [len(source_snapshots)]
+        if not normalize_string(discovery_boundary.get("discoveryTerminalState") or discovery_boundary.get("discovery_terminal_state")):
+            discovery_boundary["discoveryTerminalState"] = "succeeded" if source_snapshots else "exhausted"
+        if blocked_reason and not normalize_string(discovery_boundary.get("blockedReason") or discovery_boundary.get("blocked_reason")):
+            discovery_boundary["blockedReason"] = blocked_reason
+        trace["discoveryBoundary"] = discovery_boundary
     return {
         "researchMode": research_mode,
         "status": "researched",
@@ -705,7 +1530,7 @@ def normalize_research_packet_bundle(
             ),
         },
         "sourceDiscovery": {
-            "webSearches": _parse_array(source_discovery.get("webSearches") or source_discovery.get("web_searches")),
+            "webSearches": source_discovery_web_searches,
             "sourceSnapshots": _parse_array(
                 source_discovery.get("sourceSnapshots") or source_discovery.get("source_snapshots") or source_snapshots
             ),
@@ -714,7 +1539,7 @@ def normalize_research_packet_bundle(
                 or source_discovery.get("proposed_references")
                 or proposed_references
             ),
-            "blockedReason": source_discovery.get("blockedReason") or source_discovery.get("blocked_reason"),
+            "blockedReason": blocked_reason or None,
         },
         "synthesis": {
             "summary": summary,
@@ -729,18 +1554,181 @@ def normalize_research_packet_bundle(
     }
 
 
+def normalize_reporting_packet_bundle(
+    reporting: dict[str, Any],
+    *,
+    assignment: dict[str, Any],
+    assignment_meta: dict[str, Any],
+) -> dict[str, Any]:
+    packet = reporting.get("reporting") if isinstance(reporting.get("reporting"), dict) else reporting
+    section_key = normalize_string(
+        packet.get("section_key")
+        or packet.get("sectionKey")
+        or assignment.get("sectionKey")
+        or assignment.get("sectionId")
+        or assignment_meta.get("sectionKey")
+        or assignment_meta.get("sectionId")
+    )
+    edition_id = normalize_string(
+        packet.get("edition_id")
+        or packet.get("editionId")
+        or assignment_meta.get("editionId")
+    )
+    recommendation = normalize_reporting_recommendation(
+        packet.get("editor_recommendation")
+        or packet.get("editorRecommendation")
+        or assignment_meta.get("editorRecommendation")
+    )
+    knowledge_queries = _parse_array(
+        packet.get("knowledge_queries")
+        or packet.get("knowledgeQueries")
+    )
+    papyrus_uris_inspected = _parse_array(
+        packet.get("papyrus_uris_inspected")
+        or packet.get("papyrusUrisInspected")
+    )
+    knowledge_blocked_reason = normalize_string(
+        packet.get("knowledge_blocked_reason")
+        or packet.get("knowledgeBlockedReason")
+        or packet.get("knowledge_orientation_blocked_reason")
+        or packet.get("knowledgeOrientationBlockedReason")
+    )
+    knowledge_orientation_attempted = packet.get("knowledge_orientation_attempted")
+    if knowledge_orientation_attempted is None:
+        knowledge_orientation_attempted = packet.get("knowledgeOrientationAttempted")
+    if knowledge_orientation_attempted is None:
+        knowledge_orientation_attempted = bool(
+            knowledge_queries
+            or papyrus_uris_inspected
+            or _parse_array(packet.get("source_trail") or packet.get("sourceTrail"))
+            or knowledge_blocked_reason
+        )
+    knowledge_orientation_completed = packet.get("knowledge_orientation_completed")
+    if knowledge_orientation_completed is None:
+        knowledge_orientation_completed = packet.get("knowledgeOrientationCompleted")
+    if knowledge_orientation_completed is None:
+        knowledge_orientation_completed = bool(knowledge_orientation_attempted and not knowledge_blocked_reason)
+    reporting_path_mode = normalize_string(packet.get("reporting_path_mode") or packet.get("reportingPathMode")) or "strict_single_path"
+    proposed_references = _parse_array(packet.get("proposed_references") or packet.get("proposedReferences"))
+    verification_needs = _parse_array(packet.get("verification_needs") or packet.get("verificationNeeds"))
+    if proposed_references and not verification_needs:
+        verification_needs = [
+            "Verify each proposed reference before editor selection or copywriting intake.",
+        ]
+    recommended_angle = normalize_string(packet.get("recommended_angle") or packet.get("recommendedAngle"))
+    copywriter_brief = normalize_string(packet.get("copywriter_brief") or packet.get("copywriterBrief"))
+    if not recommended_angle:
+        recommended_angle = (
+            "Hold for additional reporting context and verification before selecting a publishable angle."
+        )
+    if not copywriter_brief:
+        copywriter_brief = (
+            "Hold for editor review; refresh reporting context and verification evidence before copywriting intake."
+        )
+    return {
+        "status": "reported",
+        "summary": normalize_string(packet.get("summary")),
+        "sectionKey": section_key,
+        "editionId": edition_id,
+        "candidateRank": packet.get("candidate_rank")
+        or packet.get("candidateRank")
+        or assignment_meta.get("candidateRank"),
+        "slotTarget": _parse_object(packet.get("slot_target") or packet.get("slotTarget") or assignment_meta.get("slotTarget")),
+        "whyNow": normalize_string(packet.get("why_now") or packet.get("whyNow")),
+        "nutGrafCandidate": normalize_string(packet.get("nut_graf_candidate") or packet.get("nutGrafCandidate")),
+        "recommendedAngle": recommended_angle,
+        "confirmedFacts": _parse_array(packet.get("confirmed_facts") or packet.get("confirmedFacts")),
+        "sourceTrail": _parse_array(packet.get("source_trail") or packet.get("sourceTrail")),
+        "knowledgeQueries": knowledge_queries,
+        "papyrusUrisInspected": papyrus_uris_inspected,
+        "knowledgeBlockedReason": knowledge_blocked_reason,
+        "knowledgeOrientationAttempted": bool(knowledge_orientation_attempted),
+        "knowledgeOrientationCompleted": bool(knowledge_orientation_completed),
+        "reportingPathMode": reporting_path_mode,
+        "acceptedReferenceIds": _parse_string_array(packet.get("accepted_reference_ids") or packet.get("acceptedReferenceIds")),
+        "proposedReferences": proposed_references,
+        "recentDeskMemoryUsed": _parse_array(packet.get("recent_desk_memory_used") or packet.get("recentDeskMemoryUsed")),
+        "coverageConceptId": packet.get("coverage_concept_id") or packet.get("coverageConceptId") or assignment_meta.get("coverageConceptId"),
+        "coverageConceptLineageId": packet.get("coverage_concept_lineage_id") or packet.get("coverageConceptLineageId") or assignment_meta.get("coverageConceptLineageId"),
+        "coverageConceptKey": packet.get("coverage_concept_key") or packet.get("coverageConceptKey") or assignment_meta.get("coverageConceptKey"),
+        "coverageConceptTitle": packet.get("coverage_concept_title") or packet.get("coverageConceptTitle") or assignment_meta.get("coverageConceptTitle"),
+        "sourceResearchPacketId": normalize_string(
+            packet.get("source_research_packet_id")
+            or packet.get("sourceResearchPacketId")
+            or assignment_meta.get("sourceResearchPacketId")
+        ),
+        "sourceResearchAssignmentId": normalize_string(
+            packet.get("source_research_assignment_id")
+            or packet.get("sourceResearchAssignmentId")
+            or assignment_meta.get("sourceResearchAssignmentId")
+        ),
+        "coverageGaps": _parse_array(packet.get("coverage_gaps") or packet.get("coverageGaps")),
+        "openQuestions": _parse_array(packet.get("open_questions") or packet.get("openQuestions")),
+        "riskFlags": _parse_array(packet.get("risk_flags") or packet.get("riskFlags")),
+        "verificationNeeds": verification_needs,
+        "sourceDiversityNotes": _parse_array(packet.get("source_diversity_notes") or packet.get("sourceDiversityNotes")),
+        "copywriterBrief": copywriter_brief,
+        "editorRecommendation": recommendation,
+        "doctrineContext": _parse_object(packet.get("doctrine_context") or packet.get("doctrineContext")),
+        "contextOrder": _parse_array(assignment_meta.get("reportingContextOrder")),
+        "privateUseOnly": True,
+    }
+
+
 def validate_research_packet_mode(packet: dict[str, Any]) -> None:
     if packet.get("researchMode") == "internal_brief":
         return
     source_discovery = packet.get("sourceDiscovery") or {}
+    research_trace = packet.get("researchTrace") or {}
     has_web = bool(_parse_array(source_discovery.get("webSearches")))
+    if not has_web:
+        has_web = bool(_parse_array(research_trace.get("webSearches") or research_trace.get("web_searches")))
     has_snapshots = bool(_parse_array(source_discovery.get("sourceSnapshots")) or packet.get("sourceSnapshots"))
     has_proposals = bool(_parse_array(source_discovery.get("proposedReferences")) or packet.get("proposedReferences"))
-    blocked = normalize_string(source_discovery.get("blockedReason"))
+    blocked = normalize_string(source_discovery.get("blockedReason") or packet.get("blockedReason"))
     if not has_web and not has_snapshots and not has_proposals and not blocked:
         raise ValueError(
             f"research mode {packet.get('researchMode')} requires web discovery fields or blockedReason before persistence."
         )
+
+
+def validate_reporting_packet(packet: dict[str, Any]) -> None:
+    required_strings = {
+        "reporting.summary": packet.get("summary"),
+        "reporting.section_key": packet.get("sectionKey"),
+        "reporting.recommended_angle": packet.get("recommendedAngle"),
+        "reporting.copywriter_brief": packet.get("copywriterBrief"),
+        "reporting.editor_recommendation": packet.get("editorRecommendation"),
+    }
+    for field_name, value in required_strings.items():
+        if not normalize_string(value):
+            raise ValueError(f"{field_name} is required before persistence.")
+    recommendation = normalize_reporting_recommendation(packet.get("editorRecommendation"))
+    accepted = _parse_string_array(packet.get("acceptedReferenceIds"))
+    verification_needs = _parse_array(packet.get("verificationNeeds"))
+    if recommendation in {"select", "brief"} and not accepted and not verification_needs:
+        raise ValueError(
+            "reporting editor_recommendation select/brief requires accepted_reference_ids or verification_needs."
+        )
+    if packet.get("proposedReferences") and not verification_needs:
+        raise ValueError("reporting proposed_references require verification_needs before persistence.")
+    if not _has_reporting_knowledge_orientation_trace(packet):
+        blocked_reason = normalize_string(packet.get("knowledgeBlockedReason"))
+        if blocked_reason:
+            return
+        raise ValueError(
+            "reporting packets require knowledge-orientation trace in source_trail or related metadata "
+            "(knowledge_queries/papyrus_uris_inspected), unless knowledge_blocked_reason is provided."
+        )
+
+
+def normalize_reporting_recommendation(value: Any) -> str:
+    recommendation = normalize_string(value).replace("-", "_").lower() or "hold"
+    if recommendation not in REPORTING_RECOMMENDATIONS:
+        raise ValueError(
+            f"Invalid reporting editor recommendation {value}. Expected one of: select, merge, brief, hold, kill."
+        )
+    return recommendation
 
 
 def research_packet_hash(*, assignment_id: str, research_mode: str, packet: dict[str, Any]) -> str:
@@ -756,6 +1744,64 @@ def research_packet_body(packet: dict[str, Any]) -> str:
         if value:
             lines.append(f"{label}: {value}")
     return "\n".join(line for line in lines if line)
+
+
+def reporting_packet_body(packet: dict[str, Any]) -> str:
+    lines = [
+        packet.get("summary") or "",
+        "",
+        f"Section: {packet.get('sectionKey') or 'unknown'}",
+        f"Editor recommendation: {packet.get('editorRecommendation') or 'hold'}",
+        f"Why now: {packet.get('whyNow') or ''}",
+        f"Recommended angle: {packet.get('recommendedAngle') or ''}",
+        f"Nut graf candidate: {packet.get('nutGrafCandidate') or ''}",
+        "",
+        "Copywriter brief:",
+        packet.get("copywriterBrief") or "",
+    ]
+    for label, values in (
+        ("Confirmed facts", packet.get("confirmedFacts")),
+        ("Accepted references", packet.get("acceptedReferenceIds")),
+        ("Verification needs", packet.get("verificationNeeds")),
+        ("Open questions", packet.get("openQuestions")),
+        ("Coverage gaps", packet.get("coverageGaps")),
+    ):
+        entries = _parse_array(values)
+        if not entries:
+            continue
+        lines.append("")
+        lines.append(f"{label}:")
+        for entry in entries:
+            lines.append(f"- {entry if isinstance(entry, str) else json.dumps(entry, sort_keys=True)}")
+    return "\n".join(line for line in lines if line is not None)
+
+
+def reporting_packet_message_id(assignment_id: str, *, created_at: str, summary: str = "") -> str:
+    timestamp = timestamp_for_path(created_at)
+    suffix = hash_short([assignment_id, summary, created_at, "reporting_context_packet"])
+    return f"message-reporting-context-packet-{safe_id(assignment_id)[:48]}-{timestamp}-{suffix}"
+
+
+def _has_reporting_knowledge_orientation_trace(packet: dict[str, Any]) -> bool:
+    if _parse_array(packet.get("knowledgeQueries")):
+        return True
+    if _parse_array(packet.get("papyrusUrisInspected")):
+        return True
+    if _parse_string_array(packet.get("acceptedReferenceIds")):
+        return True
+    for entry in _parse_array(packet.get("sourceTrail")):
+        if not isinstance(entry, dict):
+            continue
+        source_kind = normalize_string(entry.get("source_kind") or entry.get("sourceKind") or entry.get("kind") or entry.get("type")).lower()
+        source_uri = normalize_string(entry.get("uri") or entry.get("source_uri") or entry.get("sourceUri")).lower()
+        reference_id = normalize_string(entry.get("reference_id") or entry.get("referenceId"))
+        if reference_id:
+            return True
+        if source_uri.startswith("papyrus://"):
+            return True
+        if any(token in source_kind for token in ("knowledge", "papyrus", "accepted_reference", "desk_memory")):
+            return True
+    return False
 
 
 def is_assignment_packet_relation(relation: dict[str, Any], assignment_id: str, message_id: str | None = None) -> bool:
@@ -837,8 +1883,14 @@ def normalize_proposal_url(value: Any) -> str | None:
         return None
     try:
         parsed = urlparse(text)
-        parsed = parsed._replace(fragment="", hostname=(parsed.hostname or "").lower())
-        return parsed.geturl().rstrip("/") if parsed.path != "/" else parsed.geturl()
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            return None
+        netloc = (parsed.netloc or "").lower()
+        path = parsed.path or ""
+        if path and path != "/":
+            path = path.rstrip("/")
+        normalized = urlunparse((parsed.scheme.lower(), netloc, path, parsed.params, parsed.query, ""))
+        return normalized
     except ValueError:
         return None
 
@@ -936,6 +1988,20 @@ def _print_create_research_summary(action: str, result: dict[str, Any], changes:
     )
 
 
+def _print_create_reporting_summary(action: str, result: dict[str, Any], changes: list[dict[str, Any]]) -> None:
+    print(f"assignments\tcreate-reporting\taction\t{action}")
+    print(f"assignments\tcreate-reporting\tassignment\t{result['assignmentId']}")
+    print(f"assignments\tcreate-reporting\tstatus\t{result['status']}")
+    print(f"assignments\tcreate-reporting\ttype\t{result['assignmentTypeKey']}")
+    print(f"assignments\tcreate-reporting\tsection\t{result.get('sectionKey') or ''}")
+    print(f"assignments\tcreate-reporting\tqueue\t{result['queueKey']}")
+    action_counts = _count_delta(changes, "action")
+    print(
+        f"assignments\tcreate-reporting\tchanges\tcreate={action_counts.get('create', 0)}\t"
+        f"update={action_counts.get('update', 0)}\tnoop={action_counts.get('noop', 0)}"
+    )
+
+
 def _print_apply_research_packet_summary(action: str, result: dict[str, Any]) -> None:
     print(f"assignments\tapply-research-packet\taction\t{action}")
     print(f"assignments\tapply-research-packet\tassignment\t{result['assignmentId']}")
@@ -945,6 +2011,25 @@ def _print_apply_research_packet_summary(action: str, result: dict[str, Any]) ->
         f"assignments\tapply-research-packet\tcounts\tevidence={result['evidenceItemCount']}\t"
         f"sources={result['sourceSnapshotCount']}\tproposals={result['proposedReferenceCount']}"
     )
+
+
+def _print_apply_reporting_packet_summary(action: str, result: dict[str, Any]) -> None:
+    print(f"assignments\tapply-reporting-packet\taction\t{action}")
+    print(f"assignments\tapply-reporting-packet\tassignment\t{result['assignmentId']}")
+    print(f"assignments\tapply-reporting-packet\tmessage\t{result['messageId']}")
+    print(f"assignments\tapply-reporting-packet\tcanonical-policy\t{result['canonicalPolicy']}")
+    print(f"assignments\tapply-reporting-packet\trecommendation\t{result['editorRecommendation']}")
+    print(
+        f"assignments\tapply-reporting-packet\tcounts\taccepted={result['acceptedReferenceCount']}\t"
+        f"sources={result['sourceTrailCount']}\tproposals={result['proposedReferenceCount']}\t"
+        f"verification={result['verificationNeedCount']}"
+    )
+    print(
+        f"assignments\tapply-reporting-packet\tknowledge\tqueries={result['knowledgeQueryCount']}\t"
+        f"uris={result['papyrusUriCount']}"
+    )
+    if result.get("knowledgeBlockedReason"):
+        print(f"assignments\tapply-reporting-packet\tknowledge-blocked\t{result.get('knowledgeBlockedReason')}")
 
 
 def _research_proposal_intake_reference_rows(changes: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -969,7 +2054,7 @@ def _research_proposal_intake_reference_rows(changes: list[dict[str, Any]]) -> l
 def run_story_cycle(flags: list[str]) -> None:
     options = parse_options(flags)
     args = _coverage_theme_run_args(options)
-    payload = run_papyrus_newsroom(["assignments", "run-story-cycle", *args])
+    payload = run_papyrus_cli_json(["assignments", "run-story-cycle", *args])
     payload["command"] = "assignments run-story-cycle"
     if options.get("json"):
         print(json.dumps(payload, indent=2))
@@ -989,7 +2074,7 @@ def story_cycle_output(flags: list[str]) -> None:
             args.extend([f"--{key}", str(options[key])])
     if options.get("json"):
         args.append("--json")
-    payload = run_papyrus_newsroom(["assignments", "story-cycle-output", *args])
+    payload = run_papyrus_cli_json(["assignments", "story-cycle-output", *args])
     if options.get("json"):
         print(json.dumps(payload, indent=2))
         return
@@ -1027,6 +2112,7 @@ def orphan_research_packets(client: PapyrusGraphQLAuthoringClient, options: dict
 
 
 def backfill_section_indexes(client: PapyrusGraphQLAuthoringClient, options: dict[str, Any]) -> None:
+    apply = resolve_mutation_apply(options, "assignments backfill-section-indexes")
     target_section = normalize_string(options.get("section"))
     valid_sections = {
         key
@@ -1069,16 +2155,16 @@ def backfill_section_indexes(client: PapyrusGraphQLAuthoringClient, options: dic
         )
     if len(changes) > 25:
         print(f"assignments\tbackfill-section-indexes\tpreview-truncated\t{len(changes) - 25} more")
-    if not options.get("apply"):
-        print("assignments\tbackfill-section-indexes\tapply\tskipped\tpass --apply to write Assignment index fields")
-        print("assignments\tbackfill-section-indexes\tnext\tpoetry run papyrus-content newsroom recount-summary --apply")
+    if not apply:
+        print("assignments\tbackfill-section-indexes\tapply\tskipped\tuse --dry-run to preview without writes")
+        print("assignments\tbackfill-section-indexes\tnext\tpoetry run papyrus sections recount-summary")
         return
     for index, change in enumerate(changes, start=1):
         client.upsert("Assignment", change["expected"])
         if index == len(changes) or index % 100 == 0:
             print(f"assignments\tbackfill-section-indexes\tprogress\t{index}/{len(changes)}", flush=True)
     print(f"assignments\tbackfill-section-indexes\tupdated\t{len(changes)}")
-    print("assignments\tbackfill-section-indexes\tnext\tpoetry run papyrus-content newsroom recount-summary --apply")
+    print("assignments\tbackfill-section-indexes\tnext\tpoetry run papyrus sections recount-summary")
 
 
 def list_assignments_for_object(client: PapyrusGraphQLAuthoringClient, options: dict[str, Any]) -> None:
@@ -1111,8 +2197,9 @@ def build_assignment_context(flags: list[str]) -> None:
         PAPYRUS_ROOT / ".papyrus-runs" / timestamp_for_path() / f"assignment-context-{assignment_id}.json"
     )
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    payload = run_papyrus_newsroom(
+    payload = run_papyrus_cli_json(
         [
+            "assignments",
             "build-assignment-agent-context",
             "--assignment-id",
             assignment_id,
@@ -1204,11 +2291,11 @@ def review_reporting_packet(
         normalize_string(options.get("actor-label"))
         or normalize_string(auth_claims.get("email"))
         or normalize_string(auth_claims.get("sub"))
-        or "papyrus-content-cli"
+        or "papyrus-cli"
     )
     plan = build_reporting_packet_review_plan(
         assignment=assignment,
-        message={**message, "metadata": parse_jsonish(message.get("metadata"))},
+        message={**message, "metadata": load_message_metadata_payload(client, message)},
         decision=str(options.get("decision") or ""),
         note=str(options.get("note") or ""),
         target_item=target_item,
@@ -1217,7 +2304,7 @@ def review_reporting_packet(
         semantic_relations=relations,
     )
     changes = build_record_changes_tolerating_optional_models(client, plan["records"])
-    apply = bool(options.get("apply"))
+    apply = resolve_mutation_apply(options, "assignments review-reporting-packet")
     if apply:
         apply_record_changes(client, changes)
         update_newsroom_summary_after_assignment_creates(
@@ -1231,7 +2318,7 @@ def review_reporting_packet(
     print(f"reporting-packet-review\tmessage\t{message_id}")
     print(f"reporting-packet-review\tdecision\t{plan['decision']}")
     if not apply:
-        print("reporting-packet-review\tapply\tskipped\tpass --apply to write review records")
+        print("reporting-packet-review\tapply\tskipped\tuse --dry-run to preview without writes")
 
 
 def run_copywriting_assignment(
@@ -1263,27 +2350,27 @@ def run_copywriting_assignment(
         normalize_string(options.get("actor-label"))
         or normalize_string(auth_claims.get("email"))
         or normalize_string(auth_claims.get("sub"))
-        or "papyrus-content-cli"
+        or "papyrus-cli"
     )
     plan = build_copywriting_run_plan(
         assignment=assignment,
         assignment_metadata=meta,
         reporting_packet_message=reporting_message,
-        reporting_packet_payload=parse_jsonish(reporting_message.get("metadata")),
+        reporting_packet_payload=load_message_metadata_payload(client, reporting_message),
         semantic_relations=relations,
         existing_items=items,
         actor_label=actor_label,
         actor_sub=auth_claims.get("sub"),
     )
     changes = build_record_changes_tolerating_optional_models(client, plan["records"])
-    apply = bool(options.get("apply"))
+    apply = resolve_mutation_apply(options, "assignments run-copywriting")
     if apply:
         apply_record_changes(client, changes)
     print(f"copywriting\tmode\t{'apply' if apply else 'dry-run'}")
     print(f"copywriting\tassignment\t{assignment_id}")
     print(f"copywriting\tdraft-item\t{plan['summary']['draftItemId']}")
     if not apply:
-        print("copywriting\tapply\tskipped\tpass --apply to write draft Item records")
+        print("copywriting\tapply\tskipped\tuse --dry-run to preview without writes")
 
 
 def copywriting_output(client: PapyrusGraphQLAuthoringClient, options: dict[str, Any]) -> None:
@@ -1360,7 +2447,7 @@ def process_assignment_queue(
         or normalize_string(options.get("actor"))
         or normalize_string(auth_claims.get("email"))
         or normalize_string(auth_claims.get("sub"))
-        or "papyrus-content-cli"
+        or "papyrus-cli"
     )
     query_plan = _assignment_queue_query_plan(
         assignment_type_key=assignment_type_key,
@@ -1463,8 +2550,8 @@ def _coverage_theme_run_args(options: dict[str, Any]) -> list[str]:
     for key, flag in mapping.items():
         if options.get(key) not in (None, True):
             args.extend([flag, str(options[key])])
-    if options.get("apply"):
-        args.append("--apply")
+    if parse_boolean_option(options.get("dry-run"), False, "--dry-run"):
+        args.append("--dry-run")
     if options.get("json"):
         args.append("--json")
     if options.get("allow-fallback"):
@@ -1600,4 +2687,3 @@ def _execute_assignment_by_type(
     from .assignment_executors import execute_assignment_by_type
 
     return execute_assignment_by_type(client, assignment_id, options)
-

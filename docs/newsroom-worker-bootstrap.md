@@ -26,7 +26,7 @@ reference state agree, and accepted references have extracted text attachments.
    values point at the sandbox bucket from `amplify_outputs.json`:
 
    ```bash
-   npm run content -- categories sandbox-steering-config \
+   poetry run papyrus ops categories sandbox-steering-config \
      --config corpora/papyrus-steering.yml \
      --output .papyrus-runs/<run-id>/sandbox-steering.yml
    ```
@@ -34,7 +34,7 @@ reference state agree, and accepted references have extracted text attachments.
 4. Inspect worker readiness:
 
    ```bash
-   npm run content -- corpora worker-bootstrap \
+   poetry run papyrus ops corpora worker-bootstrap \
      --config <steering.yml> \
      --json
    ```
@@ -42,21 +42,21 @@ reference state agree, and accepted references have extracted text attachments.
 5. Pull corpus files from S3 into the local Biblicus working copy:
 
    ```bash
-   npm run content -- corpora sync-from-cloud \
+   poetry run papyrus ops corpora sync-from-cloud \
      --config <steering.yml> \
      --corpus-key <corpus-key> \
      --dry-run
 
-   npm run content -- corpora sync-from-cloud \
+   poetry run papyrus ops corpora sync-from-cloud \
      --config <steering.yml> \
      --corpus-key <corpus-key> \
-     --apply
+
    ```
 
 6. Recheck readiness before claiming analysis work:
 
    ```bash
-   npm run content -- corpora status \
+   poetry run papyrus ops corpora status \
      --config <steering.yml> \
      --corpus-key <corpus-key> \
      --json
@@ -65,38 +65,45 @@ reference state agree, and accepted references have extracted text attachments.
 Only after this should the worker claim or execute `analysis.reindex`
 assignments.
 
+`analysis run-now` and `analysis execute-assignment` also pull from S3
+automatically when the local `metadata/catalog.json` is missing or does not
+match the configured `s3Prefix` catalog. That step uses the same semantics as
+`corpora sync-from-cloud` (no `--delete`, `analysis/` excluded unless
+`--include-analysis` is passed). Use `--skip-sync-from-cloud` to disable the
+pull or `--sync-from-cloud` to force it even when catalogs already match.
+
 ## Uploading New Local Corpus Material
 
 When new source material is added locally, push the corpus accession to S3
 before registering or analyzing it:
 
 ```bash
-npm run content -- corpora sync-to-cloud \
+poetry run papyrus ops corpora sync-to-cloud \
   --config <steering.yml> \
   --corpus-key <corpus-key> \
   --dry-run
 
-npm run content -- corpora sync-to-cloud \
+poetry run papyrus ops corpora sync-to-cloud \
   --config <steering.yml> \
   --corpus-key <corpus-key> \
-  --apply
+
 ```
 
 Then register the catalog into GraphQL:
 
 ```bash
-npm run content -- references prepare-catalog \
+poetry run papyrus references prepare-catalog \
   --config <steering.yml> \
   --corpus-key <corpus-key> \
   --catalog corpora/<corpus-key>/metadata/catalog.json \
   --output .papyrus-runs/<run-id>/<corpus-key>-prepared-catalog.json
 
-npm run content -- references register-catalog \
+poetry run papyrus references create-from-catalog \
   --config <steering.yml> \
   --corpus-key <corpus-key> \
   --catalog .papyrus-runs/<run-id>/<corpus-key>-prepared-catalog.json \
   --status pending \
-  --apply
+
 ```
 
 After curation, run source readiness and extraction commands until accepted
@@ -139,6 +146,6 @@ An accepted-only analysis run requires:
 - an `analysis.reindex` assignment or immediate assignment-backed run.
 
 If `corpora status` reports `s3_not_registered_in_graphql`, run
-`references prepare-catalog` and `references register-catalog`. If it reports
-`missing_extracted_text`, run `references source-status`,
-`references extract-text-now`, and `references attach-extracted-text`.
+`references prepare-catalog` and `references create-from-catalog`. If it reports
+`missing_extracted_text`, run `references process-status`,
+`references process-extract-text-now`, and `references process-attach-extracted-text`.

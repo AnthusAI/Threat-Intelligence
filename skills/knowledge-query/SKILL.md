@@ -9,10 +9,15 @@ Use this skill when an agent needs model-ready context from the Papyrus
 knowledge base. `knowledgeQuery` is the shared query path for research,
 reporting, editing, reviewing, chat grounding, and context-pack experiments.
 
+**Coding agents:** start with [`docs/internal-knowledge-research.md`](../../docs/internal-knowledge-research.md)
+for prerequisites, CLI smoke commands, assignment-shaped queries, and
+troubleshooting. For multi-step `knowledge_search` inside Tactus research harnesses,
+see [`docs/agent-loop-patterns.md`](../../docs/agent-loop-patterns.md).
+
 The same Python engine powers both entrypoints:
 
 - AppSync custom query: `knowledgeQuery(input: AWSJSON!): AWSJSON`
-- CLI: `PYTHONPATH=src python -m papyrus_newsroom knowledge-query`
+- CLI: `poetry run papyrus knowledge query`
 
 Keep behavior changes in `src/papyrus_knowledge_query/` so Lambda and CLI stay
 identical.
@@ -338,19 +343,33 @@ Check `structured.request.semanticQuerySource`:
 
 ## CLI Usage
 
+Requires `PAPYRUS_GRAPHQL_ENDPOINT` and `PAPYRUS_GRAPHQL_JWT` for default
+remote execution. Use `--execution local` when changing engine code under
+`src/papyrus_knowledge_query/`.
+
 Semantic-only smoke:
 
 ```bash
-PYTHONPATH=src python -m papyrus_newsroom knowledge-query \
+poetry run papyrus knowledge query \
   --query "agent memory systems" \
   --format both \
   --max-tokens 600
 ```
 
-Input-file smoke:
+Anchored smoke:
 
 ```bash
 PYTHONPATH=src python -m papyrus_newsroom knowledge-query \
+  --anchor papyrus://reference/<lineage-id> \
+  --profile researcher \
+  --format both \
+  --max-tokens 800
+```
+
+Input-file smoke:
+
+```bash
+poetry run papyrus knowledge query \
   --input .papyrus-runs/knowledge-query/input.json |
   jq
 ```
@@ -358,13 +377,33 @@ PYTHONPATH=src python -m papyrus_newsroom knowledge-query \
 Write markdown for review:
 
 ```bash
-PYTHONPATH=src python -m papyrus_newsroom knowledge-query \
+poetry run papyrus knowledge query \
   --input .papyrus-runs/knowledge-query/input.json \
   > .papyrus-runs/knowledge-query/result.json
 
 jq -r '.context.text // ""' \
   .papyrus-runs/knowledge-query/result.json \
   > .papyrus-runs/knowledge-query/context.md
+```
+
+Desk-anchored smoke (operational section / news desk):
+
+```bash
+poetry run papyrus knowledge query \
+  --query "AI in games" \
+  --anchor newsroomSection:technology \
+  --max-tokens 600 \
+  --format structured
+```
+
+When debugging local code changes before Lambda deploy, force local engine execution:
+
+```bash
+poetry run papyrus knowledge query \
+  --query "AI in games" \
+  --anchor newsroomSection:technology \
+  --execution local \
+  --format structured
 ```
 
 The CLI uses local environment configuration:
@@ -404,14 +443,14 @@ Audit coverage before writing vectors:
 
 ```bash
 AWS_PROFILE=<profile> AWS_REGION=<region> PYTHONPATH=src \
-  python -m papyrus_newsroom knowledge-vector-index --action audit
+  poetry run papyrus knowledge vector-index --action audit
 ```
 
 Sync missing vectors with a dry run first:
 
 ```bash
 AWS_PROFILE=<profile> AWS_REGION=<region> PYTHONPATH=src \
-  python -m papyrus_newsroom knowledge-vector-index --action sync \
+  poetry run papyrus knowledge vector-index --action sync \
   --corpus-id <corpus-id> \
   --max-references 25 \
   --dry-run

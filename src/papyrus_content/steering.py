@@ -7,13 +7,14 @@ from typing import Any
 import yaml
 
 from .env import PAPYRUS_ROOT
+from .papyrus_config import DEFAULT_STEERING_CONFIG_PATH, resolve_topics_steering_config_path
 
-DEFAULT_STEERING_CONFIG = "corpora/papyrus-steering.yml"
+DEFAULT_STEERING_CONFIG = DEFAULT_STEERING_CONFIG_PATH
 VALID_CORPUS_ROLES = frozenset({"canonical", "source", "supporting", "archive"})
 
 
 def resolve_steering_config_path(config_path: str | None = None) -> Path | None:
-    configured = config_path or os.environ.get("PAPYRUS_STEERING_CONFIG") or DEFAULT_STEERING_CONFIG
+    configured = config_path or os.environ.get("PAPYRUS_STEERING_CONFIG") or resolve_topics_steering_config_path()
     resolved = Path(configured)
     if not resolved.is_absolute():
         resolved = PAPYRUS_ROOT / resolved
@@ -165,6 +166,47 @@ def _optional_string(value: Any) -> str | None:
     if not isinstance(value, str) or not value.strip():
         return None
     return value.strip()
+
+
+def looks_like_biblicus_project(path: Path) -> bool:
+    return (path / "src" / "biblicus").is_dir()
+
+
+def resolve_corpus_local_path(corpus: dict[str, Any], steering_config: dict[str, Any]) -> Path:
+    config_path = steering_config.get("configPath")
+    if not isinstance(config_path, str) or not config_path.strip():
+        raise ValueError("steering_config.configPath is required to resolve corpus local path.")
+    steering_dir = Path(config_path).resolve().parent
+    corpus_path_value = corpus.get("path")
+    if not isinstance(corpus_path_value, str) or not corpus_path_value.strip():
+        raise ValueError(f"Corpus {corpus.get('key')} has no path in steering config.")
+    configured = Path(corpus_path_value.strip())
+    if configured.is_absolute():
+        resolved = configured.resolve()
+    elif configured.parts and configured.parts[0] == "corpora" and steering_dir.name == "corpora":
+        resolved = (steering_dir.parent / configured).resolve()
+    else:
+        resolved = (steering_dir / configured).resolve()
+    if not resolved.exists():
+        raise ValueError(f"Corpus path does not exist: {resolved}")
+    return resolved
+
+
+def resolve_biblicus_runtime_dir(options: dict[str, Any]) -> Path:
+    from .env import BIBLICUS_ROOT
+
+    raw = _optional_string(options.get("biblicus-workdir")) or _optional_string(options.get("biblicusWorkdir"))
+    candidate = Path(raw) if raw else BIBLICUS_ROOT
+    resolved = candidate.expanduser().resolve()
+    if looks_like_biblicus_project(resolved):
+        return resolved
+    sibling = (PAPYRUS_ROOT.parent / "Biblicus").resolve()
+    if looks_like_biblicus_project(sibling):
+        return sibling
+    raise ValueError(
+        f"Biblicus project directory was not found at {resolved}. "
+        "Set --biblicus-workdir to a Biblicus checkout (with src/biblicus/)."
+    )
 
 
 def find_corpus_config_by_path(config: dict[str, Any] | None, corpus_path: str | None) -> dict[str, Any] | None:

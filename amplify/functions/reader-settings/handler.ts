@@ -59,7 +59,9 @@ export const handler = async (event: ReaderSettingsEvent) => {
   if (operation === "getReaderSettings") {
     return {
       userProfileId: profile.id,
+      email: profile.email ?? null,
       settings: hasStoredReaderSettings(profile.settings) ? normalizeReaderSettings(profile.settings) : null,
+      avatarHash: computeAvatarHash(profile.email),
     };
   }
 
@@ -77,7 +79,9 @@ export const handler = async (event: ReaderSettingsEvent) => {
     );
     return {
       userProfileId: profile.id,
+      email: profile.email ?? null,
       settings: nextSettings,
+      avatarHash: computeAvatarHash(profile.email),
     };
   }
 
@@ -113,28 +117,42 @@ async function resolveReaderProfile(
       }),
       "update UserIdentity lastSeenAt",
     );
-    const profile = await getDataRecord<UserProfileRecord>(client.models.UserProfile, existingIdentity.userProfileId, "get UserProfile");
+    let profile = await getDataRecord<UserProfileRecord>(client.models.UserProfile, existingIdentity.userProfileId, "get UserProfile");
     if (!profile) throw new Error(`UserProfile ${existingIdentity.userProfileId} was not found.`);
     if (profile.mergedIntoProfileId) {
       const mergedTarget = await getDataRecord<UserProfileRecord>(client.models.UserProfile, profile.mergedIntoProfileId, "get merged UserProfile");
       if (mergedTarget) return mergedTarget;
+    }
+    const nextEmail = identity.email ?? null;
+    const currentEmail = normalizeOptionalString(profile.email);
+    if (nextEmail && nextEmail !== currentEmail) {
+      profile = await requireDataResult(
+        client.models.UserProfile.update({
+          id: profile.id,
+          email: nextEmail,
+          updatedAt: now,
+        }),
+        "update UserProfile email",
+      );
     }
     return profile;
   }
 
   const profileId = `user-profile-${safeId(identity.sub)}`;
   const existingProfile = await getDataRecord<UserProfileRecord>(client.models.UserProfile, profileId, "get UserProfile");
-  const profile = existingProfile ?? await requireDataResult(
-    client.models.UserProfile.create({
-      id: profileId,
-      email: identity.email ?? null,
-      displayName: identity.displayName ?? identity.email ?? "Papyrus reader",
-      status: ACTIVE_IDENTITY_STATUS,
-      createdAt: now,
-      updatedAt: now,
-    }),
-    "create UserProfile",
-  );
+  const profile = existingProfile
+    ? await maybeRefreshProfileFromIdentity(client, existingProfile, identity, now)
+    : await requireDataResult(
+      client.models.UserProfile.create({
+        id: profileId,
+        email: identity.email ?? null,
+        displayName: identity.displayName ?? identity.email ?? "Papyrus reader",
+        status: ACTIVE_IDENTITY_STATUS,
+        createdAt: now,
+        updatedAt: now,
+      }),
+      "create UserProfile",
+    );
 
   await requireDataResult(
     client.models.UserIdentity.create({
@@ -151,6 +169,45 @@ async function resolveReaderProfile(
   );
 
   return profile;
+}
+
+async function maybeRefreshProfileFromIdentity(
+  client: DataClient,
+  profile: UserProfileRecord,
+  identity: {
+    sub: string;
+    email?: string | null;
+    displayName?: string | null;
+    provider?: string | null;
+  },
+  now: string,
+): Promise<UserProfileRecord> {
+  const currentEmail = normalizeOptionalString(profile.email);
+  const nextEmail = normalizeOptionalString(identity.email);
+  const nextDisplayName = normalizeOptionalString(identity.displayName);
+  const patch: {
+    id: string;
+    email?: string | null;
+    displayName?: string | null;
+    updatedAt: string;
+  } = {
+    id: profile.id,
+    updatedAt: now,
+  };
+  let changed = false;
+  if (nextEmail && nextEmail !== currentEmail) {
+    patch.email = nextEmail;
+    changed = true;
+  }
+  if (nextDisplayName && nextDisplayName !== normalizeOptionalString(profile.displayName)) {
+    patch.displayName = nextDisplayName;
+    changed = true;
+  }
+  if (!changed) return profile;
+  return requireDataResult(
+    client.models.UserProfile.update(patch),
+    "refresh UserProfile identity fields",
+  );
 }
 
 function normalizeReaderSettings(value: unknown): ReaderSettings {
@@ -171,6 +228,12 @@ function normalizePresentation(value: unknown): ReaderSettings["presentation"] {
 
 function normalizeTheme(value: unknown): ReaderSettings["theme"] {
   return value === "light" || value === "dark" || value === "system" ? value : DEFAULT_SETTINGS.theme;
+}
+
+function computeAvatarHash(email: string | null | undefined): string | null {
+  const normalized = normalizeOptionalString(email)?.toLowerCase();
+  if (!normalized) return null;
+  return createHash("md5").update(normalized).digest("hex");
 }
 
 function readRequiredIdentity(event: ReaderSettingsEvent): {

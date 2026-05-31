@@ -14,17 +14,19 @@ export type ReaderSessionSnapshot = {
   hasSession: boolean;
 };
 
-export async function loadReaderSessionSnapshot(): Promise<ReaderSessionSnapshot> {
+export async function loadReaderSessionSnapshot(options?: { forceRefresh?: boolean }): Promise<ReaderSessionSnapshot> {
   configureAmplifyClient();
   try {
-    const session = await fetchAuthSession();
+    const session = await fetchAuthSession({ forceRefresh: options?.forceRefresh === true });
     const accessPayload = session.tokens?.accessToken?.payload ?? {};
     const idPayload = session.tokens?.idToken?.payload ?? {};
     const email = readTextClaim(idPayload.email ?? accessPayload.email);
-    const groups = [
+    const groups = dedupeGroups([
       ...readGroups(accessPayload["cognito:groups"]),
+      ...readGroups(accessPayload.groups),
       ...readGroups(idPayload["cognito:groups"]),
-    ];
+      ...readGroups(idPayload.groups),
+    ]);
     const label = readIdentityLabel({
       email,
       name: idPayload.name ?? accessPayload.name,
@@ -80,7 +82,41 @@ function readTextClaim(value: unknown): string | null {
 }
 
 function readGroups(value: unknown): string[] {
-  if (Array.isArray(value)) return value.map(String);
-  if (typeof value === "string") return value.split(/[,\s]+/).map((entry) => entry.trim()).filter(Boolean);
+  if (Array.isArray(value)) return value.map((entry) => normalizeGroupName(String(entry))).filter(Boolean) as string[];
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+    if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          return parsed
+            .map((entry) => normalizeGroupName(String(entry)))
+            .filter(Boolean) as string[];
+        }
+      } catch {
+      }
+    }
+    return trimmed
+      .split(/[,\s]+/)
+      .map((entry) => normalizeGroupName(entry))
+      .filter(Boolean) as string[];
+  }
   return [];
+}
+
+function dedupeGroups(groups: string[]): string[] {
+  const seen = new Set<string>();
+  const values: string[] = [];
+  for (const group of groups) {
+    const normalized = normalizeGroupName(group);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    values.push(normalized);
+  }
+  return values;
+}
+
+function normalizeGroupName(value: string): string {
+  return value.trim().replace(/^["'[\](){}]+|["'[\](){}]+$/g, "").toLowerCase();
 }

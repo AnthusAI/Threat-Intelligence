@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import os
 import re
 import shutil
+import signal
 import subprocess
 import urllib.error
 import urllib.request
@@ -17,13 +19,22 @@ import yaml
 from .assignments import apply_assignment_action, assignment_metadata
 from .catalog import semantic_relation_record
 from .corpora import build_corpus_sync_plan, run_or_print_corpus_sync_plan
-from .env import PAPYRUS_ROOT
 from .graphql_authoring import PapyrusGraphQLAuthoringClient
+from .options import normalize_string
 from .ids import deterministic_uuid, hash_short, is_uuid_string, knowledge_corpus_id, reference_lineage_id_for, safe_id
 from .model_attachments import parse_jsonish
 from .records import apply_record_changes, build_record_change_from_current, build_record_changes
+from .reference_url_text import _resolve_existing_canonical_uri
 from .source_readiness import SOURCE_READINESS_STATES, is_extractable_media_type, reference_source_readiness
-from .steering import find_corpus_config, load_steering_config, require_corpus_config, require_steering_config
+from .source_site_plugins import resolve_accessible_pdf_url_for_reference, resolve_source_site_enrichment
+from .steering import (
+    find_corpus_config,
+    load_steering_config,
+    require_corpus_config,
+    require_steering_config,
+    resolve_biblicus_runtime_dir,
+    resolve_corpus_local_path,
+)
 
 
 ASSIGNMENT_TYPE_POLICY = {
@@ -168,7 +179,7 @@ def assignment_created_event_record(assignment: dict[str, Any], actor_label: str
         "actorLabel": actor_label,
         "note": assignment.get("brief"),
         "createdAt": now,
-        "metadata": json.dumps({"kind": f"{assignment['assignmentTypeKey']}.created", "source": "papyrus-content-cli"}),
+        "metadata": json.dumps({"kind": f"{assignment['assignmentTypeKey']}.created", "source": "papyrus-cli"}),
     }
 
 
@@ -215,10 +226,8 @@ def execute_reference_accession_assignment(
         raise ValueError(
             f"Assignment {assignment['id']} must be claimed before execution (current={assignment.get('status')})."
         )
-    metadata = assignment_metadata(client, assignment)
-    if metadata.get("kind") != "reference.corpus-accession.requested":
-        raise ValueError(f"Assignment {assignment['id']} metadata is not reference.corpus-accession.requested.")
-    actor_label = options.get("actor") or options.get("assignee-key") or "papyrus-content-cli"
+    metadata = resolve_accession_assignment_metadata(client, assignment, options)
+    actor_label = options.get("actor") or options.get("assignee-key") or "papyrus-cli"
     run_id = options.get("run-id") or f"reference-accession-{hash_short([assignment['id'], _utc_now()])}"
     run_dir = Path.cwd() / ".papyrus-runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -236,10 +245,15 @@ def execute_reference_accession_assignment(
     steering_config = load_steering_config(options.get("config") or metadata.get("steeringConfigPath")) or require_steering_config()
     corpus_config = require_corpus_config(steering_config, metadata["corpusKey"], "assignment.metadata.corpusKey")
     corpus_id = knowledge_corpus_id(corpus_config)
-    corpus_path = Path(corpus_config["path"]).resolve()
-    biblicus_workdir = resolve_biblicus_workdir(options)
+    corpus_path = resolve_corpus_local_path(corpus_config, steering_config)
+    biblicus_workdir = resolve_biblicus_runtime_dir(options)
 
-    source_material = download_reference_source_material(reference, biblicus_item_id=metadata["biblicusItemId"], run_dir=run_dir)
+    source_material = download_reference_source_material(
+        reference,
+        biblicus_item_id=metadata["biblicusItemId"],
+        run_dir=run_dir,
+        download_uri=normalize_string((options or {}).get("download-uri") or (options or {}).get("downloadUri")),
+    )
     if not is_extractable_media_type(source_material["mediaType"]):
         raise ReferenceAccessionError(
             f"Unsupported media type for extraction: {source_material['mediaType']}.",
@@ -306,21 +320,23 @@ def download_reference_source_material(
     *,
     biblicus_item_id: str,
     run_dir: Path,
+    download_uri: str | None = None,
 ) -> dict[str, Any]:
-    download_uri = source_download_uri_for_reference(reference)
-    request = urllib.request.Request(
-        download_uri,
-        headers={"user-agent": "papyrus-reference-accession/1"},
-    )
+    download_uri = str(download_uri or "").strip() or source_download_uri_for_reference(reference)
     try:
-        with urllib.request.urlopen(request) as response:
-            content_type = response.headers.get_content_type() or media_type_from_url(download_uri) or "application/octet-stream"
-            buffer = response.read()
-    except urllib.error.HTTPError as error:
-        raise ReferenceAccessionError(
-            f"Failed to download {download_uri}: {error.code} {error.reason}.",
-            kind="download_failed",
-        ) from error
+        buffer, content_type, download_uri = _download_reference_payload(download_uri)
+    except ReferenceAccessionError as error:
+        if error.kind != "download_failed":
+            raise
+        fallback = resolve_accessible_pdf_url_for_reference(
+            reference,
+            source_uri=str(reference.get("sourceUri") or ""),
+            failed_uri=download_uri,
+        )
+        fallback_uri = str(fallback.get("selectedPdfUrl") or "").strip()
+        if not fallback_uri or fallback_uri == download_uri:
+            raise
+        buffer, content_type, download_uri = _download_reference_payload(fallback_uri)
     if not buffer:
         raise ReferenceAccessionError(f"Downloaded source for {reference['id']} was empty.", kind="download_empty")
     filename = reference_accession_filename(
@@ -393,21 +409,74 @@ def write_reference_source_accession(
 def run_biblicus_reindex_for_accession(*, corpus_path: Path, biblicus_workdir: Path, run_dir: Path) -> dict[str, Any]:
     stdout_log = run_dir / "biblicus-reindex.stdout.log"
     stderr_log = run_dir / "biblicus-reindex.stderr.log"
-    result = subprocess.run(
-        ["uv", "run", "biblicus", "reindex", "--corpus", str(corpus_path)],
-        cwd=biblicus_workdir,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    stdout_log.write_text(result.stdout or "", encoding="utf-8")
-    stderr_log.write_text(result.stderr or "", encoding="utf-8")
-    if result.returncode != 0:
+    uv_path = shutil.which("uv")
+    if not uv_path:
         raise ReferenceAccessionError(
-            f"Biblicus reindex failed for {corpus_path}. See {stderr_log}.",
+            "Biblicus reindex requires the uv executable on PATH.",
+            kind="biblicus_reindex_failed",
+        )
+
+    resolved_corpus_path = corpus_path.resolve()
+    command = [uv_path, "run", "biblicus", "reindex", "--corpus", str(resolved_corpus_path)]
+    run_dir.mkdir(parents=True, exist_ok=True)
+    with stdout_log.open("w", encoding="utf-8") as stdout_handle, stderr_log.open("w", encoding="utf-8") as stderr_handle:
+        process = subprocess.Popen(
+            command,
+            cwd=biblicus_workdir,
+            stdout=stdout_handle,
+            stderr=stderr_handle,
+            env=_biblicus_subprocess_env(),
+            start_new_session=True,
+        )
+        returncode = process.wait()
+
+    if returncode != 0:
+        detail = _subprocess_failure_detail(stdout_log, stderr_log)
+        raise ReferenceAccessionError(
+            (
+                f"Biblicus reindex failed for {resolved_corpus_path} "
+                f"(exit {_format_subprocess_exit(returncode)}). {detail} "
+                f"See {stderr_log} and {stdout_log}."
+            ),
             kind="biblicus_reindex_failed",
         )
     return {"label": "biblicus-reindex", "stdoutLogPath": str(stdout_log), "stderrLogPath": str(stderr_log)}
+
+
+def _biblicus_subprocess_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env.pop("VIRTUAL_ENV", None)
+    path_entries = [entry for entry in str(env.get("PATH") or "").split(os.pathsep) if entry]
+    for extra in ("/opt/homebrew/bin", "/usr/local/bin"):
+        if extra not in path_entries:
+            path_entries.append(extra)
+    env["PATH"] = os.pathsep.join(path_entries)
+    return env
+
+
+def _format_subprocess_exit(returncode: int) -> str:
+    if returncode < 0:
+        signal_number = -returncode
+        signal_name = ""
+        try:
+            signal_name = signal.Signals(signal_number).name
+        except (ValueError, AttributeError):
+            signal_name = str(signal_number)
+        return f"signal {signal_name}"
+    return str(returncode)
+
+
+def _subprocess_failure_detail(stdout_log: Path, stderr_log: Path, *, max_chars: int = 400) -> str:
+    chunks: list[str] = []
+    for path in (stderr_log, stdout_log):
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace").strip()
+        if text:
+            chunks.append(text[-max_chars:])
+    if not chunks:
+        return "No subprocess output was captured."
+    return " ".join(chunk.replace("\n", " ").strip() for chunk in chunks)
 
 
 def maybe_sync_accession_to_s3(
@@ -611,6 +680,11 @@ def new_reference_for_accession_replacement(
         "sha256": accession["sha256"],
         "curationStatus": reference.get("curationStatus") or "pending",
         "curationStatusKey": f"{corpus_id}#{reference.get('curationStatus') or 'pending'}",
+        "reviewedFeedKey": (
+            None
+            if (reference.get("curationStatus") or "pending") == "pending"
+            else "references#reviewed"
+        ),
         "metadata": json.dumps(metadata, sort_keys=True),
         "updatedAt": now,
     }
@@ -654,8 +728,126 @@ def reference_attachment_for_accession(reference: dict[str, Any], accession: dic
     }
 
 
+def _assignment_semantic_state_key(assignment_id: str) -> str:
+    return f"assignment#{assignment_id}#current"
+
+
+def resolve_accession_assignment_metadata(
+    client: PapyrusGraphQLAuthoringClient,
+    assignment: dict[str, Any],
+    options: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    metadata = assignment_metadata(client, assignment)
+    if metadata.get("kind") == "reference.corpus-accession.requested":
+        return metadata
+
+    reference_id = normalize_string(metadata.get("referenceId"))
+    if not reference_id:
+        relations = client.list_semantic_relations_by_subject_state(_assignment_semantic_state_key(assignment["id"]))
+        for relation in relations:
+            if str(relation.get("predicate") or "") != "requests_work_on":
+                continue
+            if str(relation.get("objectKind") or "") != "reference":
+                continue
+            reference_id = normalize_string(relation.get("objectId"))
+            if reference_id:
+                break
+    if not reference_id:
+        raise ValueError(
+            f"Assignment {assignment['id']} is missing reference.corpus-accession.requested metadata and no linked Reference was found."
+        )
+
+    reference = client.get_record("Reference", reference_id)
+    if not reference:
+        raise ReferenceAccessionError(f"Reference {reference_id} was not found.", kind="missing_reference")
+
+    steering_config = load_steering_config(options.get("config") if options else None) or require_steering_config()
+    corpus_config = require_corpus_config_by_id_or_key(
+        steering_config,
+        reference["corpusId"],
+        (options or {}).get("corpus-key"),
+    )
+    corpus_id = knowledge_corpus_id(corpus_config)
+    attachments = client.list_records("ReferenceAttachment")
+    readiness = reference_source_readiness(reference, attachments, None)
+    rebuilt = reference_accession_assignment_record(
+        reference,
+        readiness,
+        corpus_config=corpus_config,
+        corpus_id=corpus_id,
+        actor_label=str((options or {}).get("assignee-key") or (options or {}).get("actor") or "papyrus-cli"),
+        now=_utc_now(),
+    )
+    rebuilt_metadata = parse_jsonish(rebuilt.get("metadata"))
+    if not isinstance(rebuilt_metadata, dict):
+        raise ValueError(f"Assignment {assignment['id']} metadata could not be reconstructed.")
+    return rebuilt_metadata
+
+
+def _download_reference_payload(download_uri: str) -> tuple[bytes, str, str]:
+    request = urllib.request.Request(
+        download_uri,
+        headers={"user-agent": "papyrus-reference-accession/1"},
+    )
+    try:
+        with urllib.request.urlopen(request) as response:
+            content_type = response.headers.get_content_type() or media_type_from_url(download_uri) or "application/octet-stream"
+            buffer = response.read()
+    except urllib.error.HTTPError as error:
+        raise ReferenceAccessionError(
+            f"Failed to download {download_uri}: {error.code} {error.reason}.",
+            kind="download_failed",
+        ) from error
+    if not buffer:
+        raise ReferenceAccessionError(f"Downloaded source from {download_uri} was empty.", kind="download_empty")
+    return buffer, content_type, download_uri
+
+
 def source_download_uri_for_reference(reference: dict[str, Any]) -> str:
-    return reference.get("sourceUri") or ""
+    source_uri = str(reference.get("sourceUri") or "").strip()
+    if not source_uri:
+        return ""
+    if _uri_likely_direct_pdf(source_uri):
+        return source_uri
+
+    existing_canonical = _resolve_existing_canonical_uri(reference)
+    if existing_canonical and _uri_likely_direct_pdf(existing_canonical):
+        return existing_canonical
+
+    enrichment = resolve_source_site_enrichment(
+        reference={
+            "id": reference.get("id"),
+            "title": reference.get("title"),
+            "metadata": reference.get("metadata"),
+        },
+        source_uri=source_uri,
+    )
+    variants = enrichment.get("sourceVariants") if isinstance(enrichment.get("sourceVariants"), dict) else {}
+    canonical_pdf_url = str(variants.get("canonicalPdfUrl") or "").strip()
+    if canonical_pdf_url:
+        return canonical_pdf_url
+
+    canonical_source_uri = str(enrichment.get("canonicalSourceUri") or "").strip()
+    plugin_key = str(enrichment.get("pluginKey") or "").strip().lower()
+    if canonical_source_uri and (
+        _uri_likely_direct_pdf(canonical_source_uri)
+        or plugin_key in {"acm", "arxiv", "acl_anthology"}
+    ):
+        return canonical_source_uri
+
+    return source_uri
+
+
+def _uri_likely_direct_pdf(url: str) -> bool:
+    lowered = str(url or "").strip().lower()
+    if not lowered:
+        return False
+    if lowered.endswith(".pdf"):
+        return True
+    parsed = urlparse(lowered)
+    if (parsed.hostname or "").lower() == "dl.acm.org" and "/doi/pdf/" in (parsed.path or "").lower():
+        return True
+    return False
 
 
 def media_type_from_url(url: str) -> str | None:
@@ -670,13 +862,7 @@ def reference_accession_filename(*, item_id: str, source_uri: str, title: str | 
 
 
 def resolve_biblicus_workdir(options: dict[str, Any]) -> Path:
-    configured = options.get("biblicus-workdir") or options.get("biblicusWorkdir")
-    if configured:
-        return Path(configured).resolve()
-    sibling = PAPYRUS_ROOT.parent / "Biblicus"
-    if sibling.exists():
-        return sibling.resolve()
-    raise ValueError("Could not resolve Biblicus workdir. Pass --biblicus-workdir <path>.")
+    return resolve_biblicus_runtime_dir(options)
 
 
 class ReferenceAccessionError(RuntimeError):
@@ -691,25 +877,25 @@ def print_reference_accession_assignment_summary(rows: list[dict[str, Any]], cha
     for change in changes:
         model_counts[change["modelName"]] = model_counts.get(change["modelName"], 0) + 1
         action_counts[change["action"]] = action_counts.get(change["action"], 0) + 1
-    print(f"references\tcreate-accession-assignments\tcandidates\t{len(rows)}")
+    print(f"references\tprocess-create-accession-assignments\tcandidates\t{len(rows)}")
     print(
-        "references\tcreate-accession-assignments\tmodels\t"
+        "references\tprocess-create-accession-assignments\tmodels\t"
         + " ".join(f"{model}={count}" for model, count in sorted(model_counts.items()))
     )
     print(
-        "references\tcreate-accession-assignments\tsummary\t"
+        "references\tprocess-create-accession-assignments\tsummary\t"
         f"create={action_counts.get('create', 0)}\tupdate={action_counts.get('update', 0)}\tnoop={action_counts.get('noop', 0)}"
     )
-    print(f"references\tcreate-accession-assignments\tapply\t{'yes' if apply else 'no'}")
+    print(f"references\tprocess-create-accession-assignments\tapply\t{'yes' if apply else 'no'}")
 
 
 def next_reference_source_command(row: dict[str, Any]) -> str:
     if row["state"] == SOURCE_READINESS_STATES["URL_ONLY"]:
-        return f"poetry run papyrus-content references accession-now --reference {row['reference']['id']}"
+        return f"poetry run papyrus references process-accession-now --reference {row['reference']['id']}"
     if row["readiness"].get("textState") == "snapshot_extracted":
-        return "run references attach-extracted-text for this corpus"
+        return "run references process-attach-extracted-text for this corpus"
     if row["state"] == SOURCE_READINESS_STATES["EXTRACTABLE"]:
-        return "run references extract-text-now for this corpus"
+        return "run references process-extract-text-now for this corpus"
     if row["state"] == SOURCE_READINESS_STATES["BLOCKED"]:
         return "add sourceUri or corpus storagePath before extraction"
     return "-"

@@ -11,7 +11,7 @@ from .edition_planning import (
     write_edition_planning_report,
 )
 from .graphql_authoring import PapyrusGraphQLAuthoringClient, create_authoring_client
-from .options import normalize_string, parse_options
+from .options import normalize_string, parse_options, resolve_mutation_apply
 
 
 def editions_plan(flags: list[str]) -> None:
@@ -42,8 +42,20 @@ def editions_purge(flags: list[str]) -> None:
         raise ValueError("editions purge accepts either --all or --edition, not both.")
     if not purge_all and not edition_selector:
         raise ValueError("editions purge requires --edition <id|slug|date> or --all.")
+    apply = resolve_mutation_apply(options, "editions purge")
     client, _ = create_authoring_client()
     plan = build_edition_purge_plan(client, mode=mode, purge_all=purge_all, edition_selector=edition_selector)
+    if not apply:
+        targeted = sorted(plan.get("targetEditionLineageIds") or [])
+        counts = {model: len(plan.get("ids", {}).get(model) or []) for model in ("Edition", "EditionItem", "PublishedEdition", "PublishedEditionItem")}
+        print(f"editions-purge\tmode\t{mode}")
+        print(f"editions-purge\tselector\t{'all' if purge_all else edition_selector}")
+        print(f"editions-purge\ttargeted-lineages\t{len(targeted)}")
+        for model_name, count in counts.items():
+            if count:
+                print(f"editions-purge\twould-delete\t{model_name}\t{count}")
+        print("editions-purge\tapply\tskipped\tuse without --dry-run to delete")
+        return
     result = apply_edition_purge_plan(client, plan)
     if options.get("json"):
         print(
@@ -78,12 +90,16 @@ def _dispatch_edition_planning(flags: list[str], *, reporting: bool) -> None:
 
 
 def _dispatch_edition_planning_from_options(options: dict, *, reporting: bool) -> None:
+    apply = resolve_mutation_apply(
+        options,
+        "editions dispatch-reporting" if reporting else "editions dispatch-research",
+    )
     client, _ = create_authoring_client()
     plan, report = build_edition_planning_command_plan(client, options)
-    if not options.get("apply"):
+    if not apply:
         print_edition_planning_summary(plan, report, "dry-run")
         label = "reporting" if reporting else "research"
-        print(f"edition-planning\tapply\tskipped\tpass --apply to write {label} Assignment and SemanticRelation records")
+        print(f"edition-planning\tapply\tskipped\tuse --dry-run to preview {label} Assignment and SemanticRelation writes")
         return
     apply_result = apply_edition_planning_plan(client, plan)
     refreshed = load_edition_planning_state(client)
