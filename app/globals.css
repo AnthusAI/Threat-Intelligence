@@ -5522,7 +5522,7 @@ img {
   background: var(--paper-deep, #e8e8e4);
   border: 0;
   max-width: min(100%, 31.5rem);
-  padding: calc(var(--paper-rhythm) * 0.35);
+  padding: calc(var(--paper-rhythm) * 0.7);
   position: relative;
   width: 31.5rem;
 }
@@ -5538,8 +5538,8 @@ img {
   line-height: 0;
   padding: 0.2rem;
   position: absolute;
-  right: calc(var(--paper-rhythm) * 0.2);
-  top: calc(var(--paper-rhythm) * 0.2);
+  right: calc(var(--paper-rhythm) * 0.35);
+  top: calc(var(--paper-rhythm) * 0.35);
   z-index: 1;
 }
 
