@@ -215,6 +215,7 @@ if (enableInboundEmail) {
   inboundReceive.addEnvironment("PAPYRUS_GRAPHQL_ENDPOINT", graphqlEndpoint);
 
   inboundProcessor.addEnvironment("PAPYRUS_INBOUND_EMAIL_CORPUS_KEY", inboundEmailCorpusKey);
+  inboundProcessor.addEnvironment("PAPYRUS_MEDIA_BUCKET_NAME", storageBucket.bucketName);
   inboundProcessor.addEnvironment("PAPYRUS_GRAPHQL_ENDPOINT", graphqlEndpoint);
 
   receiveLambda.addToRolePolicy(
