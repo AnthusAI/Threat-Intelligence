@@ -22,6 +22,7 @@ import {
   loadReferenceAttachmentsForLineageId,
   loadReferenceCitationRelations,
   loadReferenceRecordById,
+  loadReferenceRecordByLineageId,
   loadStoragePathUrl,
   loadEditorUserDirectoryData,
   loadModelPayloadsForOwner,
@@ -65,6 +66,7 @@ import { buildNewsroomKnowledgeQueryInput, type NewsroomKnowledgeQueryAnchor as 
 import { NewsroomConsoleProgressToggle, PapyrusConsoleChatIcon, usePapyrusConsole } from "./papyrus-console-shell";
 import { useResolvedPapyrusTheme } from "./use-resolved-papyrus-theme";
 import { useOptionalNewsDeskClient } from "./news-desk-client-provider";
+import { ReferenceSourcePreview } from "./reference-source-preview";
 import type { ReaderAuthSnapshot } from "./reader-auth-state";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import {
@@ -1483,6 +1485,23 @@ function NewsDeskDashboard({
     setSummary((current) => patchReferenceSummary(current, previousRecord, nextRecord));
     return { nextRecords, previousRecord };
   }, []);
+
+  const hydrateReferenceFromRoute = useCallback((reference: ReferenceRecord) => {
+    applyReferenceRecord(reference);
+    const lineageId = reference.lineageId ?? reference.id;
+    void loadReferenceAttachmentsForLineageId(lineageId)
+      .then((attachments) => {
+        if (!attachments.length) return;
+        setReferenceAttachments((current) => {
+          const next = current.filter((attachment) => attachment.referenceLineageId !== lineageId);
+          next.push(...attachments);
+          return next.sort((left, right) => left.sortKey.localeCompare(right.sortKey));
+        });
+      })
+      .catch((error) => {
+        console.error("[ReferencesDesk] Unable to load reference attachments for deep link", error);
+      });
+  }, [applyReferenceRecord]);
 
   useEffect(() => {
     if (dashboard.isDemo || activeTab !== "references" || authState.status !== "signedIn" || !hasHydratedReferences) {
@@ -3385,6 +3404,7 @@ function NewsDeskDashboard({
             initialCategoryLineageId={initialSelection.category}
             initialReferenceLineageId={initialSelection.reference}
             isDemo={Boolean(dashboard.isDemo)}
+            deepLinkFetchEnabled={authState.status === "signedIn" && hasHydratedReferences}
             qualityActionState={referenceQualityActionState}
             references={references}
             referenceAttachments={referenceAttachments}
@@ -3399,6 +3419,7 @@ function NewsDeskDashboard({
             onSetQualityRating={runReferenceQualityRating}
             onCreateInsight={createInsight}
             onReviewTopicLabel={runReferenceTopicLabelAction}
+            onHydrateReference={hydrateReferenceFromRoute}
           />
         ) : null}
         {!isSectionPage && activeTab === "messages" ? (
@@ -7138,7 +7159,9 @@ function ReferencesDeskView({
   initialCategoryLineageId,
   initialReferenceLineageId,
   isDemo,
+  deepLinkFetchEnabled = true,
   onCreateInsight,
+  onHydrateReference,
   onMoveCorpus,
   onReview,
   onStartCuration,
@@ -7161,7 +7184,9 @@ function ReferencesDeskView({
   initialCategoryLineageId?: string | null;
   initialReferenceLineageId?: string | null;
   isDemo?: boolean;
+  deepLinkFetchEnabled?: boolean;
   onCreateInsight: (target: InsightTarget, summary: string, body: string) => Promise<void>;
+  onHydrateReference?: (reference: ReferenceRecord) => void;
   onMoveCorpus: (reference: ReferenceRecord, corpusId: string) => void;
   onReview: (reference: ReferenceRecord, action: ReferenceCurationAction, note?: string, reasonCode?: ReferenceRejectionReasonCode | null) => void;
   onStartCuration: (reference: ReferenceRecord) => void;
@@ -7248,6 +7273,41 @@ function ReferencesDeskView({
       ?? selectedReferenceRecordByLineage(references, requestedReferenceLineageId)
       ?? null
     : null;
+  const [deepLinkReferenceLoading, setDeepLinkReferenceLoading] = useState(false);
+  const [deepLinkReferenceError, setDeepLinkReferenceError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!requestedReferenceLineageId || isDemo || !deepLinkFetchEnabled || selectedReference) {
+      setDeepLinkReferenceLoading(false);
+      setDeepLinkReferenceError(null);
+      return;
+    }
+    let active = true;
+    setDeepLinkReferenceLoading(true);
+    setDeepLinkReferenceError(null);
+    void loadReferenceRecordByLineageId(requestedReferenceLineageId)
+      .then((reference) => {
+        if (!active) return;
+        if (!reference) {
+          setDeepLinkReferenceError(`Reference not found: ${requestedReferenceLineageId}`);
+          setDeepLinkReferenceLoading(false);
+          return;
+        }
+        onHydrateReference?.(reference);
+        setSelectedReferenceLineageId(reference.lineageId ?? reference.id);
+        setIsReferenceDetailOpen(true);
+        setDeepLinkReferenceLoading(false);
+      })
+      .catch((error) => {
+        if (!active) return;
+        setDeepLinkReferenceError(error instanceof Error ? error.message : "Could not load reference.");
+        setDeepLinkReferenceLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [deepLinkFetchEnabled, isDemo, onHydrateReference, requestedReferenceLineageId, selectedReference]);
+
   const referenceKnowledgeQuery = useNewsroomKnowledgeContext(selectedReference ? {
     anchor: { kind: "reference", id: selectedReference.id, lineageId: selectedReference.lineageId ?? selectedReference.id },
     title: selectedReference.title ?? selectedReference.externalItemId,
@@ -7386,6 +7446,16 @@ function ReferencesDeskView({
       {realtimeStatusMessage ? (
         <div className="category-steering-alert" role="status" aria-live="polite">
           {realtimeStatusMessage}
+        </div>
+      ) : null}
+      {deepLinkReferenceError ? (
+        <div className="category-steering-alert" role="alert">
+          {deepLinkReferenceError}
+        </div>
+      ) : null}
+      {deepLinkReferenceLoading ? (
+        <div className="category-steering-alert" role="status" aria-live="polite">
+          Loading reference…
         </div>
       ) : null}
       <NewsroomListDetailShell
@@ -11421,6 +11491,13 @@ function ReferenceDetailPanel({
   const activeExtractedTextState = activeExtractedTextEntry?.mode === "original"
     ? extractedTextOriginalState
     : extractedTextFilteredState;
+  const previewAttachments = useMemo(
+    () => attachments.map((attachment) => ({
+      ...attachment,
+      sourceUri: attachmentLinksById[attachment.id] ?? attachment.sourceUri,
+    })),
+    [attachmentLinksById, attachments],
+  );
   const inboundCitationCount = resolveReferenceCitationCount(reference.inboundCitationCount, incomingCitationRelations.length);
   const outboundCitationCount = resolveReferenceCitationCount(reference.outboundCitationCount, outgoingCitationRelations.length);
 
@@ -11486,6 +11563,7 @@ function ReferenceDetailPanel({
                   </span>
                 </p>
               ) : null}
+              <ReferenceSourcePreview attachments={previewAttachments} sourceUri={reference.sourceUri} />
               <div className="news-desk-reference-detail__citation-summary" data-news-desk-reference-citation-summary>
                 <div className="news-desk-reference-detail__citation-stat">
                   <span>Cited by</span>

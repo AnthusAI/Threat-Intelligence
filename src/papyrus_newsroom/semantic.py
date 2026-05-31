@@ -240,8 +240,11 @@ class PapyrusSemanticClient:
     page_limit: int = 100
 
     def get_reference(self, reference_id: str) -> dict[str, Any]:
-        data = self.graphql(GET_REFERENCE_QUERY, {"id": _required(reference_id, "reference_id")})
+        reference_key = _required(reference_id, "reference_id")
+        data = self.graphql(GET_REFERENCE_QUERY, {"id": reference_key})
         reference = data.get("getReference")
+        if not reference:
+            reference = self._resolve_current_by_lineage("reference", reference_key)
         if not reference:
             raise ValueError(f"Reference not found: {reference_id}")
         return {"reference": self.decode_record(reference)}

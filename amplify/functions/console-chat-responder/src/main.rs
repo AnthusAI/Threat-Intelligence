@@ -2314,6 +2314,21 @@ fn build_openai_messages(
             lines.push(
                 "Use execute_tactus with papyrus.web.current_location{} to re-read this snapshot, papyrus.web.navigate{ uri = \"papyrus://...\" } to move the browser, and papyrus.web.set_index_filters{ tab = \"references\", status = \"pending\" } (or kind/domain/type) to open a filtered index view.".to_string(),
             );
+            if let Some(object_uri) = web_ui
+                .get("papyrusObjectUri")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|entry| !entry.is_empty())
+            {
+                if object_uri.starts_with("papyrus://reference/") {
+                    let reference_id = object_uri.trim_start_matches("papyrus://reference/").trim();
+                    if !reference_id.is_empty() {
+                        lines.push(format!(
+                            "The user is viewing reference detail in the web UI. For requests about \"this reference\", the open page, or what they are looking at, do not ask them to paste the reference. Immediately call execute_tactus with Reference.get{{ id = \"{reference_id}\" }} (lineage ids from the URL resolve to the current version) and summarize that record."
+                        ));
+                    }
+                }
+            }
             messages.push(json!({
                 "role": "system",
                 "content": lines.join("\n"),

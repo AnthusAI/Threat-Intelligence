@@ -6,6 +6,7 @@ import { cognitoUserPoolsTokenProvider } from "aws-amplify/auth/cognito";
 import { Amplify, type ResourcesConfig } from "aws-amplify";
 import { CookieStorage, Hub } from "aws-amplify/utils";
 import { useEffect } from "react";
+import { assertSandboxAmplifyOutputsForDev } from "../lib/amplify-outputs-guard";
 import amplifyOutputs from "../amplify_outputs.json";
 
 let configured = false;
@@ -13,6 +14,7 @@ let configured = false;
 export function configureAmplifyClient() {
   if (configured) return;
   if (redirectLoopbackToLocalhost()) return;
+  assertSandboxAmplifyOutputsForDev(amplifyOutputs as Record<string, unknown>);
   Amplify.configure(prioritizeCurrentOrigin(amplifyOutputs as ResourcesConfig), { ssr: true });
   applyClientTokenStorageForCurrentProtocol();
   configured = true;

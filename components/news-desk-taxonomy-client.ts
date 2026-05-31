@@ -402,44 +402,23 @@ const MODEL_ATTACHMENTS_BY_OWNER_QUERY = `
   }
 `;
 
+/** Matches Reference model fields in amplify/data/resource.ts (no metadata on Reference). */
+const REFERENCE_RECORD_GRAPHQL_FIELDS =
+  "id lineageId versionNumber previousVersionId versionState versionCreatedAt versionCreatedBy changeReason contentHash corpusId externalItemId title authors sourceUri storagePath mediaType byteSize sha256 sourcePublishedAt sourceUpdatedAt retrievedAt inboundCitationCount outboundCitationCount importRunId importedAt createdAt curationStatus curationStatusKey curationStatusUpdatedAt curationStatusUpdatedBy curationStatusReason newsroomFeedKey reviewedFeedKey updatedAt";
+
+const LIST_REFERENCES_BY_LINEAGE_AND_VERSION_QUERY = `
+  query ListReferencesByLineageAndVersion($lineageId: ID!, $limit: Int, $nextToken: String) {
+    listReferencesByLineageAndVersion(lineageId: $lineageId, limit: $limit, nextToken: $nextToken) {
+      items { ${REFERENCE_RECORD_GRAPHQL_FIELDS} }
+      nextToken
+    }
+  }
+`;
+
 const GET_REFERENCE_QUERY = `
   query GetReference($id: ID!) {
     getReference(id: $id) {
-      id
-      lineageId
-      versionNumber
-      previousVersionId
-      versionState
-      versionCreatedAt
-      versionCreatedBy
-      changeReason
-      contentHash
-      corpusId
-      externalItemId
-      title
-      authors
-      sourceUri
-      storagePath
-      mediaType
-      byteSize
-      sha256
-      sourcePublishedAt
-      sourceUpdatedAt
-      retrievedAt
-      inboundCitationCount
-      outboundCitationCount
-      importRunId
-      importedAt
-      createdAt
-      curationStatus
-      curationStatusKey
-      curationStatusUpdatedAt
-      curationStatusUpdatedBy
-      curationStatusReason
-      newsroomFeedKey
-      reviewedFeedKey
-      metadata
-      updatedAt
+      ${REFERENCE_RECORD_GRAPHQL_FIELDS}
     }
   }
 `;
@@ -1913,6 +1892,56 @@ export async function loadReferenceRecordById(id: string): Promise<ReferenceReco
   });
   assertNoGraphQLErrors(response.errors);
   return response.data?.getReference ?? null;
+}
+
+function pickPreferredReferenceRecord(references: ReferenceRecord[]): ReferenceRecord | null {
+  if (!references.length) return null;
+  return references.reduce((best, current) => {
+    const currentCurrent = current.versionState === "current" ? 1 : 0;
+    const bestCurrent = best.versionState === "current" ? 1 : 0;
+    if (currentCurrent !== bestCurrent) return currentCurrent > bestCurrent ? current : best;
+    const currentVersion = current.versionNumber ?? 0;
+    const bestVersion = best.versionNumber ?? 0;
+    if (currentVersion !== bestVersion) return currentVersion > bestVersion ? current : best;
+    return (current.updatedAt ?? "").localeCompare(best.updatedAt ?? "") > 0 ? current : best;
+  });
+}
+
+export async function loadReferenceRecordByLineageId(lineageId: string): Promise<ReferenceRecord | null> {
+  const normalized = lineageId.trim();
+  if (!normalized) return null;
+
+  const direct = await loadReferenceRecordById(normalized);
+  if (direct) return direct;
+
+  if (!/-v\d+$/i.test(normalized)) {
+    const versioned = await loadReferenceRecordById(`${normalized}-v1`);
+    if (versioned) return versioned;
+  }
+
+  const testMock = getTestEditorNewsroomMock();
+  if (testMock?.references) {
+    const matches = testMock.references.filter(
+      (reference) => reference.id === normalized || reference.lineageId === normalized,
+    );
+    return pickPreferredReferenceRecord(matches);
+  }
+
+  configureAmplifyClient();
+  const client = generateClient<Schema>() as unknown as {
+    graphql: (options: Record<string, unknown>) => Promise<{
+      data?: { listReferencesByLineageAndVersion?: { items?: ReferenceRecord[] | null; nextToken?: string | null } | null } | null;
+      errors?: unknown[] | null;
+    }>;
+  };
+  const response = await client.graphql({
+    query: LIST_REFERENCES_BY_LINEAGE_AND_VERSION_QUERY,
+    variables: { lineageId: normalized, limit: 20 },
+    authMode: USER_POOL_AUTH_MODE,
+  });
+  assertNoGraphQLErrors(response.errors);
+  const items = (response.data?.listReferencesByLineageAndVersion?.items ?? []).filter(Boolean) as ReferenceRecord[];
+  return pickPreferredReferenceRecord(items);
 }
 
 export async function loadReferenceAttachmentsForLineageId(referenceLineageId: string): Promise<ReferenceAttachmentRecord[]> {

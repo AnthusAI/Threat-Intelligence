@@ -4,8 +4,9 @@
   "private": true,
   "description": "A Pretext-powered responsive newspaper layout lab.",
   "scripts": {
-    "dev": "next dev",
-    "dev:127": "next dev --hostname 127.0.0.1",
+    "dev": "node scripts/ensure-sandbox-amplify-outputs.mjs && next dev -p 3001",
+    "dev:127": "node scripts/ensure-sandbox-amplify-outputs.mjs && next dev --hostname 127.0.0.1 -p 3001",
+    "outputs:sandbox": "node scripts/ensure-sandbox-amplify-outputs.mjs",
     "build": "next build",
     "start": "next start",
     "favicon:generate": "node scripts/favicon/generate-favicon.mjs",

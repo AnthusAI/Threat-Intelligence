@@ -8,6 +8,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from papyrus_newsroom import tactus_runtime
+from papyrus_newsroom.semantic import PapyrusSemanticClient
 from papyrus_web.locations import build_web_ui_context, papyrus_uri_to_web_path, web_path_to_papyrus_location
 
 
@@ -95,6 +96,33 @@ class WebLocationTests(unittest.TestCase):
             result["value"]["location"]["papyrusLocationUri"],
             "papyrus://assignment/assignment-9",
         )
+
+    def test_get_reference_resolves_lineage_id_from_newsroom_url(self):
+        lineage_id = "reference-knowledge-corpus-ai-ml-research-context-rot-4"
+        version_id = f"{lineage_id}-v1"
+        current = {
+            "id": version_id,
+            "lineageId": lineage_id,
+            "versionState": "current",
+            "title": "Contextual Drag",
+        }
+
+        def fake_graphql(query, variables):
+            if "getReference" in query:
+                self.assertEqual(variables["id"], lineage_id)
+                return {"getReference": None}
+            self.assertEqual(variables["lineageId"], lineage_id)
+            return {
+                "listReferencesByLineageAndVersion": {
+                    "items": [current],
+                    "nextToken": None,
+                }
+            }
+
+        client = PapyrusSemanticClient(fake_graphql)
+        result = client.get_reference(lineage_id)
+        self.assertEqual(result["reference"]["id"], version_id)
+        self.assertEqual(result["reference"]["lineageId"], lineage_id)
 
 
 if __name__ == "__main__":
