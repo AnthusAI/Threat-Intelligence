@@ -77,3 +77,69 @@ subject and body that include at least one URL or DOI. Confirm a
 `email_submission` message appears in GraphQL and new pending `Reference` rows
 are created for the configured corpus (`PAPYRUS_INBOUND_EMAIL_CORPUS_KEY`,
 default `AI-ML-research`).
+
+## Harder testing
+
+### Unit tests (fast, no AWS)
+
+```bash
+poetry run python -m unittest procedures.newsroom.tests.test_email_submissions -v
+```
+
+Covers citation parsing, S3 key filters, stable message ids, GSI fields on status
+updates, and MIME archive copy/delete behavior.
+
+### Production smoke script
+
+After deploy, from the repo (with `amplify_outputs.json` or `PAPYRUS_MEDIA_BUCKET_NAME`):
+
+```bash
+chmod +x scripts/test-inbound-email-production.sh
+AWS_PROFILE=Ryan ./scripts/test-inbound-email-production.sh
+```
+
+Optional: re-run the processor for one message (slow; corpus find/process can take minutes):
+
+```bash
+MESSAGE_ID=message-email-submission-XXXXXXXX \
+  AWS_PROFILE=Ryan ./scripts/test-inbound-email-production.sh
+```
+
+**Pass criteria:**
+
+| Check | Expected |
+|-------|----------|
+| Receive + processor Lambdas | `PAPYRUS_MEDIA_BUCKET_NAME` set |
+| `model-attachment-upload` Lambda | `PAPYRUS_MEDIA_BUCKET_NAME` / `papyrusMedia_BUCKET_NAME` set |
+| After successful processing | MIME under `inbound-email-archived/`, not under `inbound-email/` (except `AMAZON_SES_SETUP_NOTIFICATION`) |
+| Retry sweep | `processedCount: 0` when nothing pending; otherwise `responseStatus: COMPLETED` |
+
+### Replay without resending mail
+
+1. Leave (or restore) a MIME object under `inbound-email/<key>`.
+2. Invoke retry sweep:
+
+   ```bash
+   aws lambda invoke --function-name <receive-fn> \
+     --payload '{"source":"papyrus.inbound-email","action":"retry-pending"}' \
+     --cli-binary-format raw-in-base64-out /tmp/out.json
+   ```
+
+3. Or invoke the processor directly:
+
+   ```bash
+   aws lambda invoke --function-name <processor-fn> \
+     --payload '{"messageId":"message-email-submission-..."}' \
+     --cli-binary-format raw-in-base64-out /tmp/out.json \
+     --cli-read-timeout 600
+   ```
+
+### Common failures
+
+| Symptom | Likely cause |
+|---------|----------------|
+| `Missing Papyrus storage bucket environment variable` | Resolver Lambdas missing `PAPYRUS_MEDIA_BUCKET_NAME` (deploy `backend.ts` media env block) |
+| `cannot import name 'run_reference_metadata_generation_from_extracted_text'` | Wrong import in `email_submissions.py` (use `reference_metadata_generation`) |
+| `papyrus-semantic-relation-types.yml` not found | Processor bundle missing `corpora/*.yml` |
+| `s3:ListBucket` on archive | Processor role needs bucket-level `ListBucket` (not only object ARNs) |
+| Deploy `CloudformationStackCircularDependencyError` | GraphQL Lambdas must use `resourceGroupName: "data"` **inside** `defineFunction({...})`; avoid `allow.resource()` on storage for data-stack functions |

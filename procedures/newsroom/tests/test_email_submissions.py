@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
 from papyrus_newsroom import email_submissions
 
@@ -61,6 +62,33 @@ class EmailSubmissionTests(unittest.TestCase):
         )
         self.assertEqual(fields["createdAt"], "2026-05-31T10:00:00.000Z")
         self.assertEqual(fields["responseTarget"], "email_submission_processor")
+
+    def test_archive_inbound_mime_object_copies_then_deletes(self):
+        s3 = mock.Mock()
+        key = "inbound-email/ses-object-id"
+        result = email_submissions.archive_inbound_mime_object(
+            bucket="media-bucket",
+            key=key,
+            s3_client=s3,
+        )
+        self.assertTrue(result["archived"])
+        self.assertEqual(result["archiveKey"], "inbound-email-archived/ses-object-id")
+        s3.copy_object.assert_called_once_with(
+            Bucket="media-bucket",
+            Key="inbound-email-archived/ses-object-id",
+            CopySource={"Bucket": "media-bucket", "Key": key},
+        )
+        s3.delete_object.assert_called_once_with(Bucket="media-bucket", Key=key)
+
+    def test_archive_inbound_mime_object_skips_ineligible_keys(self):
+        s3 = mock.Mock()
+        result = email_submissions.archive_inbound_mime_object(
+            bucket="media-bucket",
+            key="inbound-email/AMAZON_SES_SETUP_NOTIFICATION",
+            s3_client=s3,
+        )
+        self.assertFalse(result["archived"])
+        s3.copy_object.assert_not_called()
 
 
 if __name__ == "__main__":
