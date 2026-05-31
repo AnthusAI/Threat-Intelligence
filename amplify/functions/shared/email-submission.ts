@@ -277,7 +277,7 @@ export function buildEmailSubmissionMessageInput(input: {
     responseStartedAt: input.responseStatus === "IN_PROGRESS" ? input.now : null,
     responseCompletedAt: ["COMPLETED", "FAILED", "REJECTED"].includes(input.responseStatus) ? input.now : null,
     responseError: input.responseError,
-    metadata: {
+    metadata: JSON.stringify({
       channel: "email",
       senderEmail: input.senderEmail,
       recipientEmail: input.recipientEmail,
@@ -287,7 +287,7 @@ export function buildEmailSubmissionMessageInput(input: {
       authorized: input.authorized,
       directCitationCount: input.citations.length,
       directCitations: input.citations,
-    },
+    }),
     createdAt: input.now,
     updatedAt: input.now,
     newsroomFeedKey: "submissions",
