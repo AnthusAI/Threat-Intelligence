@@ -5586,10 +5586,12 @@ img {
   align-items: center;
   background: var(--paper);
   border-bottom: 1px solid rgb(var(--rule-rgb) / 0.35);
+  box-sizing: border-box;
   display: flex;
   justify-content: flex-end;
   min-height: calc(var(--paper-rhythm) * 1.15);
   padding: 0 var(--page-padding-x);
+  width: 100%;
 }
 
 .news-desk-reference-source-preview__viewport-close {
@@ -5599,8 +5601,10 @@ img {
   color: var(--ink);
   cursor: pointer;
   display: inline-flex;
+  flex-shrink: 0;
   justify-content: center;
   line-height: 0;
+  margin-left: auto;
   padding: 0.15rem;
 }
 

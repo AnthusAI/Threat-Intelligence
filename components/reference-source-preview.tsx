@@ -11,7 +11,6 @@ import {
 
 function PdfSourcePreview({ preview }: { preview: Extract<ReferenceSourcePreview, { kind: "pdf" }> }) {
   const [expanded, setExpanded] = useState(false);
-  const viewportTitleId = useId();
 
   useEffect(() => {
     if (!expanded) return undefined;
@@ -40,7 +39,7 @@ function PdfSourcePreview({ preview }: { preview: Extract<ReferenceSourcePreview
             onClick={() => setExpanded(true)}
             type="button"
           >
-            <UnfoldHorizontalIcon aria-hidden size={16} strokeWidth={2} />
+            <FullscreenIcon aria-hidden size={18} strokeWidth={2} />
           </button>
           <div className="news-desk-reference-source-preview__frame news-desk-reference-source-preview__frame--pdf">
             <iframe
