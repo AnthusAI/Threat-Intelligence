@@ -171,10 +171,8 @@ if (enableInboundEmail) {
   inboundReceive.addEnvironment("PAPYRUS_INBOUND_EMAIL_LOCAL_PARTS", inboundEmailLocalParts.join(","));
   inboundReceive.addEnvironment("PAPYRUS_INBOUND_EMAIL_CORPUS_KEY", inboundEmailCorpusKey);
   inboundReceive.addEnvironment("PAPYRUS_MEDIA_BUCKET_NAME", storageBucket.bucketName);
-  inboundReceive.addEnvironment("PAPYRUS_JWT_SECRET", secret("PAPYRUS_JWT_SECRET"));
   inboundReceive.addEnvironment("PAPYRUS_GRAPHQL_ENDPOINT", graphqlEndpoint);
 
-  inboundProcessor.addEnvironment("PAPYRUS_JWT_SECRET", secret("PAPYRUS_JWT_SECRET"));
   inboundProcessor.addEnvironment("PAPYRUS_INBOUND_EMAIL_CORPUS_KEY", inboundEmailCorpusKey);
   inboundProcessor.addEnvironment("PAPYRUS_GRAPHQL_ENDPOINT", graphqlEndpoint);
 
@@ -204,26 +202,14 @@ if (enableInboundEmail) {
   );
   receiveLambda.addToRolePolicy(
     new PolicyStatement({
-      actions: ["ssm:GetParameter"],
-      resources: [
-        `arn:aws:ssm:${backend.stack.region}:${backend.stack.account}:parameter/amplify/*`,
-        `arn:aws:ssm:${backend.stack.region}:${backend.stack.account}:parameter/amplify/shared/*`,
-      ],
-    }),
-  );
-  processorLambda.addToRolePolicy(
-    new PolicyStatement({
       actions: ["appsync:GraphQL"],
       resources: ["*"],
     }),
   );
   processorLambda.addToRolePolicy(
     new PolicyStatement({
-      actions: ["ssm:GetParameter"],
-      resources: [
-        `arn:aws:ssm:${backend.stack.region}:${backend.stack.account}:parameter/amplify/*`,
-        `arn:aws:ssm:${backend.stack.region}:${backend.stack.account}:parameter/amplify/shared/*`,
-      ],
+      actions: ["appsync:GraphQL"],
+      resources: ["*"],
     }),
   );
 

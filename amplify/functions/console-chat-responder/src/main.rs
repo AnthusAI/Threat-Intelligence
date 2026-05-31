@@ -98,7 +98,6 @@ struct AppConfig {
     response_target: String,
     model: String,
     graphql_endpoint: String,
-    graphql_jwt: Option<String>,
     cache_root: PathBuf,
     execute_tactus_runner: PathBuf,
     execute_tactus_timeout_seconds: u64,
@@ -125,7 +124,6 @@ impl AppConfig {
             response_target: env_or("PAPYRUS_CONSOLE_RESPONSE_TARGET", DEFAULT_RESPONSE_TARGET),
             model: env_or("PAPYRUS_CONSOLE_MODEL", DEFAULT_MODEL),
             graphql_endpoint: required_env("PAPYRUS_GRAPHQL_ENDPOINT"),
-            graphql_jwt: optional_env("PAPYRUS_GRAPHQL_JWT").map(normalize_jwt),
             cache_root: PathBuf::from(env_or(
                 "PAPYRUS_CONSOLE_CONTEXT_CACHE_ROOT",
                 "/tmp/papyrus-console/thread-context",
@@ -1491,29 +1489,6 @@ async fn update_thread_graphql(
 async fn graphql(state: &AppState, query: &str, variables: Value) -> Result<Value> {
     let body = serde_json::to_vec(&json!({ "query": query, "variables": variables }))
         .context("serialize AppSync GraphQL request body")?;
-    if let Some(jwt) = state.config.graphql_jwt.as_deref() {
-        let response = state
-            .http
-            .post(&state.config.graphql_endpoint)
-            .header("content-type", "application/json")
-            .header("authorization", format!("PapyrusJwt {jwt}"))
-            .body(body.clone())
-            .send()
-            .await
-            .context("send AppSync GraphQL mutation (PapyrusJwt auth)")?;
-        let status = response.status();
-        let payload: Value = response
-            .json()
-            .await
-            .context("parse AppSync GraphQL response")?;
-        if !status.is_success() || payload.get("errors").is_some() {
-            return Err(anyhow!(
-                "AppSync GraphQL mutation failed with {status}: {payload}"
-            ));
-        }
-        return Ok(payload.get("data").cloned().unwrap_or(Value::Null));
-    }
-
     let credentials = state
         .credentials_provider
         .provide_credentials()

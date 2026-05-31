@@ -8,7 +8,7 @@ import {
   extractSenderFromRawMime,
   extractSenderFromSesMail,
   looksLikeResearchAssignmentRequest,
-  lookupRegisteredUserProfileIdWithGraphql,
+  lookupRegisteredUserProfileId,
   normalizeEmailAddress,
   parseInboundEmailBody,
 } from "../shared/email-submission";
@@ -17,7 +17,7 @@ import {
   parseMessageMetadata,
   shouldProcessInboundS3Key,
 } from "../shared/inbound-email-intake";
-import { graphqlWithInboundJwt } from "../shared/inbound-authoring-client";
+import { getLambdaDataClient, LAMBDA_DATA_AUTH_MODE } from "../shared/lambda-data-client";
 
 const PROCESSOR_FUNCTION_NAME = process.env.PAPYRUS_EMAIL_SUBMISSION_PROCESSOR_FUNCTION_NAME ?? "";
 const INBOUND_LOCAL_PARTS = parseLocalParts(process.env.PAPYRUS_INBOUND_EMAIL_LOCAL_PARTS ?? "submissions,suggestions");
@@ -107,7 +107,8 @@ async function processInboundSubmission(inbound: InboundPayload): Promise<Record
 
   const now = new Date().toISOString();
   const resolvedMessageId = messageId ?? `message-email-submission-${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
-  const profileId = await lookupRegisteredUserProfileIdWithGraphql(inbound.senderEmail);
+  const dataClient = await getLambdaDataClient();
+  const profileId = await lookupRegisteredUserProfileId(dataClient, inbound.senderEmail);
   const authorized = Boolean(profileId);
   const citations = authorized ? extractDirectCitations(inbound.bodyText) : [];
 
@@ -146,14 +147,14 @@ async function processInboundSubmission(inbound: InboundPayload): Promise<Record
     responseError,
   });
 
-  await graphqlWithInboundJwt(
-    `mutation CreateInboundEmailMessage($input: CreateMessageInput!) {
-      createMessage(input: $input) {
-        id
-      }
-    }`,
-    { input: messageInput },
+  const createResponse = await dataClient.models.Message.create(
+    messageInput as never,
+    { authMode: LAMBDA_DATA_AUTH_MODE },
   );
+  if (createResponse.errors?.length) {
+    const messages = createResponse.errors.map((entry) => entry?.message ?? String(entry)).join("; ");
+    throw new Error(`Failed to create inbound email submission message: ${messages}`);
+  }
 
   if (authorized && responseStatus === "PENDING" && PROCESSOR_FUNCTION_NAME) {
     await invokeEmailProcessor(resolvedMessageId);
@@ -219,20 +220,16 @@ async function resumeExistingInboundSubmission(
 }
 
 async function getExistingInboundMessage(messageId: string): Promise<ExistingMessage | null> {
-  const data = await graphqlWithInboundJwt<{
-    getMessage?: ExistingMessage | null;
-  }>(
-    `query GetInboundEmailMessage($id: ID!) {
-      getMessage(id: $id) {
-        id
-        status
-        responseStatus
-        metadata
-      }
-    }`,
+  const client = await getLambdaDataClient();
+  const response = await client.models.Message.get(
     { id: messageId },
+    { authMode: LAMBDA_DATA_AUTH_MODE },
   );
-  return data.getMessage ?? null;
+  if (response.errors?.length) {
+    const messages = response.errors.map((entry) => entry?.message ?? String(entry)).join("; ");
+    throw new Error(`Failed to load inbound email submission message: ${messages}`);
+  }
+  return (response.data as ExistingMessage | null) ?? null;
 }
 
 async function invokeEmailProcessor(messageId: string): Promise<void> {

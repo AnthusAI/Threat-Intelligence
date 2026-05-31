@@ -109,11 +109,16 @@ rendering contracts.
 - `.env` is for Papyrus runtime settings and the seed editor credentials used by
   `npm run seed:amplify`. `.env*` must stay ignored, and `.env.example` is the
   committed template.
-- The CLI authoring flow uses `PAPYRUS_GRAPHQL_ENDPOINT` plus
-  `PAPYRUS_GRAPHQL_JWT` from the process environment; local non-production
-  workflows may load those from `.env`. That JWT is sent directly to AppSync
-  through the Lambda authorizer lane. Do not add a Papyrus editor login flow or local
-  auth-session cache for CLI publishing.
+- **GraphQL auth split (do not mix):**
+  - **CLI and other non-Lambda tools** use `PAPYRUS_GRAPHQL_ENDPOINT` plus
+    `PAPYRUS_GRAPHQL_JWT` (minted via `poetry run papyrus auth refresh-jwt`).
+    That JWT is sent to AppSync through the **Lambda JWT authorizer** lane only.
+    Do not add a Papyrus editor login flow or local auth-session cache for CLI publishing.
+  - **Deployed Lambda functions** call AppSync with **IAM only** (SigV4 /
+    `authMode: "iam"` on the Amplify data client). Do not mint JWTs, do not set
+    `PAPYRUS_JWT_SECRET` on Lambdas, and do not add alternate GraphQL auth paths
+    inside Lambda code. Grant access with `allow.resource(<function>)` on the
+    data schema and `appsync:GraphQL` on the function role.
 - Production authoring uses the deployed production AppSync endpoint, not the
   sandbox. Mint short-lived production JWTs from the Amplify SSM
   `PAPYRUS_JWT_SECRET`; do not write production secrets or freshly minted
@@ -383,22 +388,22 @@ GraphQL (or `?scenario=<id>` fixture overrides for tests/debug only).
 - `amplify/seed/seed.ts` signs into Cognito as the seed editor using
   `PAPYRUS_SEED_USERNAME`, `PAPYRUS_SEED_PASSWORD`, and
   `PAPYRUS_SEED_EMAIL`. Those belong in `.env`, not in source control.
-- The data API supports public API-key reads, Cognito user-pool auth, and a
-  separate Lambda JWT authorizer lane. Match the intended `../Plexus/dashboard` shape:
-  public API-key access stays available, Cognito remains available, and utility
-  clients can send a direct JWT through the AppSync Lambda-authorizer auth
-  scheme.
-- Lambda-authorizer auth deployment requires an Amplify secret named
-  `PAPYRUS_JWT_SECRET`. The model rules allow public reads, Cognito `editor`
-  group writes, and custom JWT-authorizer writes.
+- The data API supports public API-key reads, Cognito user-pool auth, **IAM for
+  registered Lambda functions** (`allow.resource(...)`), and a separate **JWT
+  authorizer lane for CLI/tools only**. Match the intended `../Plexus/dashboard` shape:
+  public API-key access stays available, Cognito remains available, and CLI clients
+  send a direct JWT through the AppSync Lambda-authorizer auth scheme.
+- The JWT authorizer (`graphql-jwt-authorizer`) and Amplify secret
+  `PAPYRUS_JWT_SECRET` are for **CLI authoring only**, not for inbound email,
+  console chat, knowledge query, or other Lambdas.
 
 `src/papyrus_content` owns the content authoring CLI:
 
 - `poetry run papyrus` is the canonical backend CLI surfaced by
   the `papyrus` command groups.
 - The CLI is GraphQL authoring and inspection.
-- `src/papyrus_content/graphql_authoring.py` owns JWT-authenticated GraphQL
-  authoring calls.
+- `src/papyrus_content/graphql_authoring.py` owns GraphQL authoring calls: JWT
+  when run from the CLI; IAM automatically when `AWS_LAMBDA_FUNCTION_NAME` is set.
 - `content inspect`, `content list`, and `content delete all --yes` are the
   stable deployed-API operations. `content diff` and `content sync` are
   source-driven publishing commands; do not use them as a production runbook

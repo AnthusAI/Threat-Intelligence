@@ -1,6 +1,4 @@
-import type { Schema } from "../../data/resource";
-
-type DataClient = ReturnType<typeof import("aws-amplify/data").generateClient<Schema>>;
+import { LAMBDA_DATA_AUTH_MODE, type LambdaDataClient } from "./lambda-data-client";
 
 export const MESSAGE_KIND_EMAIL_SUBMISSION = "email_submission";
 export const MESSAGE_DOMAIN_REFERENCE_INTAKE = "reference_intake";
@@ -142,61 +140,7 @@ export function looksLikeResearchAssignmentRequest(text: string, citationCount: 
   return RESEARCH_ASSIGNMENT_PHRASES.some((phrase) => lowered.includes(phrase));
 }
 
-export async function lookupRegisteredUserProfileIdWithGraphql(senderEmail: string): Promise<string | null> {
-  const { graphqlWithInboundJwt } = await import("./inbound-authoring-client");
-  const normalized = normalizeEmailAddress(senderEmail);
-  if (!normalized) return null;
-
-  const identityData = await graphqlWithInboundJwt<{
-    listUserIdentitiesByEmailAndStatus?: {
-      items?: Array<{ userProfileId?: string | null }> | null;
-    } | null;
-  }>(
-    `query ListUserIdentitiesByEmailAndStatus($email: AWSEmail!, $limit: Int) {
-      listUserIdentitiesByEmailAndStatus(email: $email, status: { eq: "active" }, limit: $limit) {
-        items {
-          userProfileId
-        }
-      }
-    }`,
-    { email: normalized, limit: 10 },
-  );
-  for (const identity of identityData.listUserIdentitiesByEmailAndStatus?.items ?? []) {
-    const profileId = String(identity.userProfileId ?? "").trim();
-    if (profileId) return profileId;
-  }
-
-  let nextToken: string | null | undefined;
-  do {
-    const profileData = await graphqlWithInboundJwt<{
-      listUserProfiles?: {
-        items?: Array<{ id?: string | null; email?: string | null }> | null;
-        nextToken?: string | null;
-      } | null;
-    }>(
-      `query ListUserProfiles($limit: Int, $nextToken: String) {
-        listUserProfiles(limit: $limit, nextToken: $nextToken) {
-          items {
-            id
-            email
-          }
-          nextToken
-        }
-      }`,
-      { limit: 200, nextToken: nextToken ?? null },
-    );
-    for (const profile of profileData.listUserProfiles?.items ?? []) {
-      if (normalizeEmailAddress(String(profile.email ?? "")) === normalized) {
-        return String(profile.id ?? "").trim() || null;
-      }
-    }
-    nextToken = profileData.listUserProfiles?.nextToken;
-  } while (nextToken);
-
-  return null;
-}
-
-export async function lookupRegisteredUserProfileId(client: DataClient, senderEmail: string): Promise<string | null> {
+export async function lookupRegisteredUserProfileId(client: LambdaDataClient, senderEmail: string): Promise<string | null> {
   const normalized = normalizeEmailAddress(senderEmail);
   if (!normalized) return null;
 
@@ -206,7 +150,7 @@ export async function lookupRegisteredUserProfileId(client: DataClient, senderEm
   if (typeof identityModel.listUserIdentitiesByEmailAndStatus === "function") {
     const response = await identityModel.listUserIdentitiesByEmailAndStatus(
       { email: normalized, status: { eq: "active" } },
-      { limit: 10 },
+      { limit: 10, authMode: LAMBDA_DATA_AUTH_MODE },
     );
     for (const identity of response.data ?? []) {
       const profileId = String(identity.userProfileId ?? "").trim();
@@ -223,11 +167,15 @@ export async function lookupRegisteredUserProfileId(client: DataClient, senderEm
   return null;
 }
 
-async function listAllRecords(model: { list?: (options?: { limit?: number; nextToken?: string | null | undefined }) => Promise<{ data?: Array<Record<string, unknown>> | null; nextToken?: string | null }> }): Promise<Array<Record<string, unknown>>> {
+async function listAllRecords(model: { list?: (options?: { limit?: number; nextToken?: string | null | undefined; authMode?: typeof LAMBDA_DATA_AUTH_MODE }) => Promise<{ data?: Array<Record<string, unknown>> | null; nextToken?: string | null }> }): Promise<Array<Record<string, unknown>>> {
   const items: Array<Record<string, unknown>> = [];
   let nextToken: string | null | undefined;
   do {
-    const response = await model.list?.({ limit: 200, nextToken: nextToken ?? undefined });
+    const response = await model.list?.({
+      limit: 200,
+      nextToken: nextToken ?? undefined,
+      authMode: LAMBDA_DATA_AUTH_MODE,
+    });
     items.push(...(response?.data ?? []));
     nextToken = response?.nextToken;
   } while (nextToken);
