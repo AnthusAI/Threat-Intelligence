@@ -5512,9 +5512,15 @@ img {
   width: 100%;
 }
 
+.newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-source-preview--pdf {
+  width: 100%;
+}
+
 .newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-source-preview__frame--pdf {
   aspect-ratio: auto;
   height: min(32rem, 70vh);
+  max-width: none;
+  width: 100%;
 }
 
 .newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-source-preview__frame iframe {
