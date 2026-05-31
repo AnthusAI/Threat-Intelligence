@@ -98,9 +98,16 @@ if (enableConsoleResponder) {
 
   const dataStack = Stack.of(messageTable);
   const jwtAuthorizerCfn = backend.graphqlJwtAuthorizer.resources.lambda.node.defaultChild as CfnFunction | undefined;
+  const jwtAuthorizerEnvironment = jwtAuthorizerCfn?.environment;
+  const jwtAuthorizerVariables =
+    jwtAuthorizerEnvironment
+    && typeof jwtAuthorizerEnvironment === "object"
+    && "variables" in jwtAuthorizerEnvironment
+      ? (jwtAuthorizerEnvironment as { variables?: Record<string, string> }).variables
+      : undefined;
   const jwtSsmEnvConfig =
     process.env.AMPLIFY_SSM_ENV_CONFIG?.trim()
-    || jwtAuthorizerCfn?.environment?.variables?.AMPLIFY_SSM_ENV_CONFIG
+    || jwtAuthorizerVariables?.AMPLIFY_SSM_ENV_CONFIG?.trim()
     || "";
 
   new ConsoleChatResponderStack(dataStack, "ConsoleChatResponder", {
