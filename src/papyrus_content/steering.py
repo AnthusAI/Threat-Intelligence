@@ -169,7 +169,17 @@ def _optional_string(value: Any) -> str | None:
 
 
 def looks_like_biblicus_project(path: Path) -> bool:
-    return (path / "src" / "biblicus").is_dir()
+    if not path.exists():
+        return False
+    if (path / "src" / "biblicus").is_dir():
+        return True
+    pyproject = path / "pyproject.toml"
+    if not pyproject.exists():
+        return False
+    try:
+        return "biblicus" in pyproject.read_text(encoding="utf-8", errors="ignore").lower()
+    except OSError:
+        return False
 
 
 def resolve_corpus_local_path(corpus: dict[str, Any], steering_config: dict[str, Any]) -> Path:
