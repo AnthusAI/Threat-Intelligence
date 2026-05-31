@@ -1,5 +1,5 @@
 import { defineBackend, secret } from "@aws-amplify/backend";
-import { Duration, Stack } from "aws-cdk-lib";
+import { Duration, RemovalPolicy, Stack } from "aws-cdk-lib";
 import * as backup from "aws-cdk-lib/aws-backup";
 import { AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId } from "aws-cdk-lib/custom-resources";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
@@ -109,6 +109,7 @@ if (enableConsoleResponder) {
 }
 
 const storageBackupsStack = backend.createStack("storage-backups");
+const storageBackupVaultName = "papyrus-dbsyytcm9drqa-main-media-backup-vault";
 const storageBucket = backend.storage.resources.bucket;
 
 const storageBucketCfn = storageBucket.node.defaultChild as s3.CfnBucket | undefined;
@@ -120,7 +121,10 @@ if (storageBucketCfn) {
   );
 }
 
-const storageBackupVault = new backup.BackupVault(storageBackupsStack, "PapyrusStorageBackupVault");
+const storageBackupVault = new backup.BackupVault(storageBackupsStack, "PapyrusStorageBackupVault", {
+  backupVaultName: storageBackupVaultName,
+  removalPolicy: RemovalPolicy.RETAIN,
+});
 const storageBackupPlan = new backup.BackupPlan(storageBackupsStack, "PapyrusStorageBackupPlan", {
   backupVault: storageBackupVault,
 });
