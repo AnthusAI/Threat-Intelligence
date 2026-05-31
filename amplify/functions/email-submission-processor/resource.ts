@@ -79,5 +79,5 @@ export const emailSubmissionProcessor = defineFunction(
       }),
     });
   },
-  { resourceGroupName: "storage" },
+  { resourceGroupName: "data" },
 );

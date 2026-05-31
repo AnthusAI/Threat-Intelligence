@@ -213,8 +213,6 @@ if (enableInboundEmail) {
     }),
   );
 
-  storageBucket.grantRead(receiveLambda, "inbound-email/*");
-
   const inboundDnsZone = route53.HostedZone.fromHostedZoneAttributes(storageStack, "PapyrusInboundDnsZone", {
     hostedZoneId: inboundDnsZoneId,
     zoneName: inboundDnsZoneName,
