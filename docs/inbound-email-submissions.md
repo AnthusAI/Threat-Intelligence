@@ -48,9 +48,9 @@ Disable the stack with `PAPYRUS_ENABLE_INBOUND_EMAIL=false`.
 
 Before mail flows end-to-end:
 
-1. Verify `p.apyr.us` (or your domain) in Amazon SES.
-2. Add the MX record SES provides for inbound mail.
-3. Deploy the Amplify backend so the receipt rule set is active.
+1. `p.apyr.us` must have an **MX** record pointing at `inbound-smtp.us-east-1.amazonaws.com` (priority 10). The site hostname should use a Route 53 **A alias** to CloudFront (not a CNAME), so MX can coexist with web traffic.
+2. Amplify provisions SES domain verification (`_amazonses.p.apyr.us` TXT) and activates the receipt rule set on deploy.
+3. Deploy the Amplify backend so receipt rules and DNS verification run in CI.
 
 ## Procedure seed
 

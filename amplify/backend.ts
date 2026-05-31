@@ -9,6 +9,7 @@ import { PolicyStatement } from "aws-cdk-lib/aws-iam";
 import { Function as LambdaFunction } from "aws-cdk-lib/aws-lambda";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import { CfnIndex, CfnVectorBucket, CfnVectorBucketPolicy } from "aws-cdk-lib/aws-s3vectors";
+import * as route53 from "aws-cdk-lib/aws-route53";
 import * as ses from "aws-cdk-lib/aws-ses";
 import * as sesActions from "aws-cdk-lib/aws-ses-actions";
 import { dirname, resolve } from "node:path";
@@ -64,6 +65,11 @@ const inboundEmailLocalParts = (process.env.PAPYRUS_INBOUND_EMAIL_LOCAL_PARTS ??
   .map((entry) => entry.trim().toLowerCase())
   .filter(Boolean);
 const inboundEmailCorpusKey = (process.env.PAPYRUS_INBOUND_EMAIL_CORPUS_KEY ?? "AI-ML-research").trim();
+const inboundDnsZoneId = (process.env.PAPYRUS_ROUTE53_HOSTED_ZONE_ID ?? "Z10285921B1G7MVRV06W9").trim();
+const inboundDnsZoneName = (process.env.PAPYRUS_ROUTE53_HOSTED_ZONE_NAME ?? "apyr.us").trim().replace(/\.$/, "");
+const inboundDnsRecordName = inboundEmailDomain.endsWith(`.${inboundDnsZoneName}`)
+  ? inboundEmailDomain.slice(0, -(inboundDnsZoneName.length + 1))
+  : inboundEmailDomain;
 
 if (enableConsoleResponder) {
   const messageTable = backend.data.resources.tables.Message;
@@ -192,6 +198,48 @@ if (enableInboundEmail) {
   );
 
   const storageStack = Stack.of(storageBucket);
+  const inboundDnsZone = route53.HostedZone.fromHostedZoneAttributes(storageStack, "PapyrusInboundDnsZone", {
+    hostedZoneId: inboundDnsZoneId,
+    zoneName: inboundDnsZoneName,
+  });
+  const verifyInboundEmailDomain = new AwsCustomResource(storageStack, "VerifyInboundEmailDomain", {
+    onCreate: {
+      service: "SES",
+      action: "verifyDomainIdentity",
+      parameters: {
+        Domain: inboundEmailDomain,
+      },
+      physicalResourceId: PhysicalResourceId.of(`ses-domain-verify-${inboundEmailDomain}`),
+    },
+    onUpdate: {
+      service: "SES",
+      action: "verifyDomainIdentity",
+      parameters: {
+        Domain: inboundEmailDomain,
+      },
+      physicalResourceId: PhysicalResourceId.of(`ses-domain-verify-${inboundEmailDomain}`),
+    },
+    policy: AwsCustomResourcePolicy.fromSdkCalls({
+      resources: AwsCustomResourcePolicy.ANY_RESOURCE,
+    }),
+    timeout: Duration.minutes(2),
+  });
+  new route53.TxtRecord(storageStack, "PapyrusInboundEmailDomainVerification", {
+    zone: inboundDnsZone,
+    recordName: `_amazonses.${inboundDnsRecordName}`,
+    ttl: Duration.minutes(5),
+    values: [verifyInboundEmailDomain.getResponseField("VerificationToken")],
+  });
+  new route53.MxRecord(storageStack, "PapyrusInboundEmailMx", {
+    zone: inboundDnsZone,
+    recordName: inboundDnsRecordName,
+    values: [{ priority: 10, hostName: `inbound-smtp.${storageStack.region}.amazonaws.com` }],
+  });
+  new ses.EmailIdentity(storageStack, "PapyrusInboundEmailDomainIdentity", {
+    identity: ses.Identity.domain(inboundEmailDomain),
+    dkimSigning: true,
+  });
+
   new events.Rule(storageStack, "PapyrusInboundEmailObjectCreated", {
     description: "Process inbound SES MIME objects stored under inbound-email/",
     eventPattern: {
