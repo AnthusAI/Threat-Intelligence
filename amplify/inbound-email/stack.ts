@@ -1,4 +1,4 @@
-import { type StackProps } from "aws-cdk-lib";
+import { Duration, type StackProps } from "aws-cdk-lib";
 import * as events from "aws-cdk-lib/aws-events";
 import * as eventTargets from "aws-cdk-lib/aws-events-targets";
 import * as iam from "aws-cdk-lib/aws-iam";
@@ -39,6 +39,23 @@ export class InboundEmailStack extends Construct {
     receiveFunction.addPermission("AllowInboundEmailEventBridgeInvoke", {
       principal: new iam.ServicePrincipal("events.amazonaws.com"),
       sourceArn: objectCreatedRule.ruleArn,
+    });
+
+    const retrySweepRule = new events.Rule(this, "PapyrusInboundEmailRetrySweep", {
+      description: "Re-process inbound MIME objects left in inbound-email/ after failures",
+      schedule: events.Schedule.rate(Duration.minutes(15)),
+      targets: [
+        new eventTargets.LambdaFunction(receiveFunction, {
+          event: events.RuleTargetInput.fromObject({
+            source: "papyrus.inbound-email",
+            action: "retry-pending",
+          }),
+        }),
+      ],
+    });
+    receiveFunction.addPermission("AllowInboundEmailRetrySweepInvoke", {
+      principal: new iam.ServicePrincipal("events.amazonaws.com"),
+      sourceArn: retrySweepRule.ruleArn,
     });
   }
 }

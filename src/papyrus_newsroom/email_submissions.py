@@ -23,6 +23,89 @@ MESSAGE_TYPE_INBOUND_EMAIL = "INBOUND_EMAIL"
 RESPONSE_TARGET_EMAIL_PROCESSOR = "email_submission_processor"
 
 DEFAULT_INBOUND_CORPUS_KEY = "AI-ML-research"
+INBOUND_EMAIL_INTAKE_PREFIX = "inbound-email/"
+INBOUND_EMAIL_ARCHIVE_PREFIX = "inbound-email-archived/"
+
+
+def should_process_inbound_s3_key(key: str | None) -> bool:
+    normalized = str(key or "").strip()
+    if not normalized.startswith(INBOUND_EMAIL_INTAKE_PREFIX):
+        return False
+    if normalized.startswith(INBOUND_EMAIL_ARCHIVE_PREFIX):
+        return False
+    basename = normalized.split("/")[-1]
+    if not basename or basename == "AMAZON_SES_SETUP_NOTIFICATION":
+        return False
+    remainder = normalized[len(INBOUND_EMAIL_INTAKE_PREFIX) :]
+    return "/" not in remainder
+
+
+def inbound_message_id_for_s3(bucket: str, key: str) -> str:
+    import hashlib
+
+    digest = hashlib.sha256(f"{bucket}/{key}".encode("utf-8")).hexdigest()[:20]
+    return f"message-email-submission-{digest}"
+
+
+def archive_inbound_mime_object(*, bucket: str, key: str, s3_client: Any | None = None) -> dict[str, Any]:
+    if not should_process_inbound_s3_key(key):
+        return {"archived": False, "reason": "skip"}
+    import boto3
+
+    client = s3_client or boto3.client("s3")
+    relative = key[len(INBOUND_EMAIL_INTAKE_PREFIX) :] if key.startswith(INBOUND_EMAIL_INTAKE_PREFIX) else key
+    archive_key = f"{INBOUND_EMAIL_ARCHIVE_PREFIX}{relative}"
+    client.copy_object(Bucket=bucket, Key=archive_key, CopySource={"Bucket": bucket, "Key": key})
+    client.delete_object(Bucket=bucket, Key=key)
+    return {"archived": True, "archiveKey": archive_key}
+
+
+def release_inbound_mime_after_success(client: PapyrusGraphQLAuthoringClient, *, message_id: str) -> dict[str, Any]:
+    from papyrus_content.newsroom_commands import now_iso
+
+    message = client.get_record("Message", message_id) or {}
+    metadata = _message_metadata(message)
+    bucket = str(metadata.get("s3Bucket") or "").strip()
+    key = str(metadata.get("s3Key") or "").strip()
+    if not bucket or not key:
+        return {"released": False, "reason": "no-s3-pointer"}
+    try:
+        result = archive_inbound_mime_object(bucket=bucket, key=key)
+        metadata["inboundMimeArchivedAt"] = now_iso()
+        if result.get("archiveKey"):
+            metadata["inboundMimeArchiveKey"] = result["archiveKey"]
+        client.graphql(
+            """
+            mutation UpdateEmailSubmissionInboundMimeArchive($input: UpdateMessageInput!) {
+              updateMessage(input: $input) { id }
+            }
+            """,
+            {
+                "input": {
+                    "id": message_id,
+                    "metadata": json.dumps(metadata, sort_keys=True),
+                    "updatedAt": now_iso(),
+                }
+            },
+        )
+        return {"released": True, **result}
+    except Exception as error:
+        metadata["inboundMimeArchiveError"] = str(error)
+        client.graphql(
+            """
+            mutation UpdateEmailSubmissionInboundMimeArchiveError($input: UpdateMessageInput!) {
+              updateMessage(input: $input) { id }
+            }
+            """,
+            {
+                "input": {
+                    "id": message_id,
+                    "metadata": json.dumps(metadata, sort_keys=True),
+                    "updatedAt": now_iso(),
+                }
+            },
+        )
+        return {"released": False, "error": str(error)}
 DEFAULT_STEERING_CONFIG = PAPYRUS_ROOT / "corpora" / "papyrus-steering.yml"
 
 _URL_PATTERN = re.compile(
@@ -263,7 +346,13 @@ def register_inbound_email_message(
     from papyrus_content.newsroom_commands import now_iso
 
     timestamp = now or now_iso()
-    message_id = f"message-email-submission-{uuid.uuid4().hex[:20]}"
+    bucket_name = str(s3_bucket or "").strip()
+    key_name = str(s3_key or "").strip()
+    message_id = (
+        inbound_message_id_for_s3(bucket_name, key_name)
+        if bucket_name and key_name
+        else f"message-email-submission-{uuid.uuid4().hex[:20]}"
+    )
     normalized_sender = normalize_email_address(sender_email)
     profile_id = lookup_registered_user_profile_id(client, normalized_sender)
     authorized = bool(profile_id)
@@ -364,7 +453,8 @@ def process_email_submission_message(
             finished_at=finished_at,
             result=result,
         )
-        return {"ok": True, "messageId": message_id, "status": "completed", **result}
+        mime_release = release_inbound_mime_after_success(client, message_id=message_id)
+        return {"ok": True, "messageId": message_id, "status": "completed", "mimeRelease": mime_release, **result}
     except Exception as error:
         finished_at = now_iso()
         error_message = str(error)

@@ -1,6 +1,5 @@
-import { randomUUID } from "node:crypto";
 import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
-import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
 import {
   buildEmailSubmissionMessageInput,
   extractDirectCitations,
@@ -13,11 +12,17 @@ import {
   normalizeEmailAddress,
   parseInboundEmailBody,
 } from "../shared/email-submission";
+import {
+  inboundMessageIdFromS3,
+  parseMessageMetadata,
+  shouldProcessInboundS3Key,
+} from "../shared/inbound-email-intake";
 import { graphqlWithInboundJwt } from "../shared/inbound-authoring-client";
 
 const PROCESSOR_FUNCTION_NAME = process.env.PAPYRUS_EMAIL_SUBMISSION_PROCESSOR_FUNCTION_NAME ?? "";
 const INBOUND_LOCAL_PARTS = parseLocalParts(process.env.PAPYRUS_INBOUND_EMAIL_LOCAL_PARTS ?? "submissions,suggestions");
 const INBOUND_DOMAIN = (process.env.PAPYRUS_INBOUND_EMAIL_DOMAIN ?? "p.apyr.us").trim().toLowerCase();
+const MEDIA_BUCKET_NAME = (process.env.PAPYRUS_MEDIA_BUCKET_NAME ?? "").trim();
 
 const s3Client = new S3Client({});
 const lambdaClient = new LambdaClient({});
@@ -32,15 +37,76 @@ type InboundPayload = {
   sesMessageId: string | null;
 };
 
+type ExistingMessage = {
+  id: string;
+  status?: string | null;
+  responseStatus?: string | null;
+  metadata?: unknown;
+};
+
 export const handler = async (event: Record<string, unknown>) => {
+  if (event.source === "papyrus.inbound-email" && event.action === "retry-pending") {
+    return retryPendingInboundMime();
+  }
+
   const inbound = await resolveInboundPayload(event);
+  if (inbound.s3Key && !shouldProcessInboundS3Key(inbound.s3Key)) {
+    return { ok: true, skipped: true, reason: "inbound-s3-key-not-eligible", s3Key: inbound.s3Key };
+  }
+
+  return processInboundSubmission(inbound);
+};
+
+async function retryPendingInboundMime(): Promise<Record<string, unknown>> {
+  if (!MEDIA_BUCKET_NAME) {
+    throw new Error("PAPYRUS_MEDIA_BUCKET_NAME is not configured for inbound email retry.");
+  }
+
+  const results: Array<Record<string, unknown>> = [];
+  let continuationToken: string | undefined;
+  do {
+    const listing = await s3Client.send(new ListObjectsV2Command({
+      Bucket: MEDIA_BUCKET_NAME,
+      Prefix: "inbound-email/",
+      ContinuationToken: continuationToken,
+      MaxKeys: 100,
+    }));
+    for (const entry of listing.Contents ?? []) {
+      const key = entry.Key ?? "";
+      if (!shouldProcessInboundS3Key(key)) continue;
+      try {
+        const inbound = await loadInboundFromS3Object(MEDIA_BUCKET_NAME, key, sesMessageIdFromObjectKey(key));
+        results.push(await processInboundSubmission(inbound));
+      } catch (error) {
+        results.push({
+          ok: false,
+          s3Key: key,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    continuationToken = listing.IsTruncated ? listing.NextContinuationToken : undefined;
+  } while (continuationToken);
+
+  return { ok: true, action: "retry-pending", processedCount: results.length, results };
+}
+
+async function processInboundSubmission(inbound: InboundPayload): Promise<Record<string, unknown>> {
   const recipientEmail = inbound.recipients.find((entry) => isConfiguredInboundAddress(entry)) ?? inbound.recipients[0] ?? "";
   if (!isConfiguredInboundAddress(recipientEmail)) {
     throw new Error(`Inbound email recipient ${recipientEmail || "(missing)"} is not configured for this environment.`);
   }
 
+  const messageId = inbound.s3Bucket && inbound.s3Key
+    ? inboundMessageIdFromS3(inbound.s3Bucket, inbound.s3Key)
+    : null;
+  const existing = messageId ? await getExistingInboundMessage(messageId) : null;
+  if (existing) {
+    return resumeExistingInboundSubmission(existing, inbound, recipientEmail);
+  }
+
   const now = new Date().toISOString();
-  const messageId = `message-email-submission-${randomUUID().replace(/-/g, "").slice(0, 20)}`;
+  const resolvedMessageId = messageId ?? `message-email-submission-${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
   const profileId = await lookupRegisteredUserProfileIdWithGraphql(inbound.senderEmail);
   const authorized = Boolean(profileId);
   const citations = authorized ? extractDirectCitations(inbound.bodyText) : [];
@@ -62,7 +128,7 @@ export const handler = async (event: Record<string, unknown>) => {
   }
 
   const messageInput = buildEmailSubmissionMessageInput({
-    id: messageId,
+    id: resolvedMessageId,
     now,
     subject: inbound.subject,
     bodyText: inbound.bodyText,
@@ -90,27 +156,95 @@ export const handler = async (event: Record<string, unknown>) => {
   );
 
   if (authorized && responseStatus === "PENDING" && PROCESSOR_FUNCTION_NAME) {
-    await lambdaClient.send(new InvokeCommand({
-      FunctionName: PROCESSOR_FUNCTION_NAME,
-      InvocationType: "Event",
-      Payload: Buffer.from(JSON.stringify({
-        messageId,
-        corpusKey: process.env.PAPYRUS_INBOUND_EMAIL_CORPUS_KEY ?? "AI-ML-research",
-      })),
-    }));
+    await invokeEmailProcessor(resolvedMessageId);
   }
 
   return {
     ok: true,
-    messageId,
+    messageId: resolvedMessageId,
     authorized,
     status,
     responseStatus,
     directCitationCount: citations.length,
     recipientEmail,
     senderEmail: inbound.senderEmail,
+    idempotent: false,
   };
-};
+}
+
+async function resumeExistingInboundSubmission(
+  existing: ExistingMessage,
+  inbound: InboundPayload,
+  recipientEmail: string,
+): Promise<Record<string, unknown>> {
+  const metadata = parseMessageMetadata(existing.metadata);
+  const authorized = metadata.authorized === true;
+  const responseStatus = String(existing.responseStatus ?? metadata.responseStatus ?? "").toUpperCase();
+
+  if (responseStatus === "COMPLETED") {
+    return {
+      ok: true,
+      messageId: existing.id,
+      idempotent: true,
+      alreadyProcessed: true,
+      recipientEmail,
+      senderEmail: inbound.senderEmail,
+    };
+  }
+
+  if (authorized && (responseStatus === "PENDING" || responseStatus === "FAILED" || responseStatus === "IN_PROGRESS")) {
+    if (PROCESSOR_FUNCTION_NAME) {
+      await invokeEmailProcessor(existing.id);
+    }
+    return {
+      ok: true,
+      messageId: existing.id,
+      idempotent: true,
+      reprocessed: true,
+      responseStatus,
+      recipientEmail,
+      senderEmail: inbound.senderEmail,
+    };
+  }
+
+  return {
+    ok: true,
+    messageId: existing.id,
+    idempotent: true,
+    skipped: true,
+    responseStatus,
+    recipientEmail,
+    senderEmail: inbound.senderEmail,
+  };
+}
+
+async function getExistingInboundMessage(messageId: string): Promise<ExistingMessage | null> {
+  const data = await graphqlWithInboundJwt<{
+    getMessage?: ExistingMessage | null;
+  }>(
+    `query GetInboundEmailMessage($id: ID!) {
+      getMessage(id: $id) {
+        id
+        status
+        responseStatus
+        metadata
+      }
+    }`,
+    { id: messageId },
+  );
+  return data.getMessage ?? null;
+}
+
+async function invokeEmailProcessor(messageId: string): Promise<void> {
+  await lambdaClient.send(new InvokeCommand({
+    FunctionName: PROCESSOR_FUNCTION_NAME,
+    InvocationType: "Event",
+    Payload: Buffer.from(JSON.stringify({
+      messageId,
+      corpusKey: process.env.PAPYRUS_INBOUND_EMAIL_CORPUS_KEY ?? "AI-ML-research",
+    })),
+  }));
+}
 
 async function resolveInboundPayload(event: Record<string, unknown>): Promise<InboundPayload> {
   if (event.source === "aws.s3" && event.detail && typeof event.detail === "object") {

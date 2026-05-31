@@ -41,6 +41,11 @@ Amplify provisions:
 1. SES receipt rules storing raw MIME under `inbound-email/` in the media bucket (S3 action only)
 2. EventBridge `Object Created` events on that prefix invoke `papyrus-ses-inbound-receive`, which creates the `Message`
 3. `papyrus-email-submission-processor` Lambda — runs create/find/process
+4. A scheduled retry sweep (every 15 minutes) re-invokes intake for MIME objects still under `inbound-email/`
+
+Raw MIME is **retained until processing completes successfully**. On success the processor moves the object to `inbound-email-archived/` (outside the intake prefix) so it is not retried. Failed or pending intake leaves the MIME in place so the same test email can be replayed without resending.
+
+Intake is **idempotent per S3 object**: the `Message` id is derived from the bucket/key, and re-running intake for the same MIME re-invokes the processor instead of creating duplicates.
 
 Disable the stack with `PAPYRUS_ENABLE_INBOUND_EMAIL=false`.
 
