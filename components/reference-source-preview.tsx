@@ -1,6 +1,6 @@
 "use client";
 
-import { UnfoldHorizontalIcon, XIcon } from "lucide-react";
+import { FullscreenIcon, XIcon } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 import type { ReferenceAttachmentRecord } from "../lib/category-repository";
 import {

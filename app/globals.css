@@ -5521,10 +5521,10 @@ img {
 .newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-source-preview__pdf-card {
   background: var(--paper-deep, #e8e8e4);
   border: 0;
-  max-width: min(100%, 10.5rem);
+  max-width: min(100%, 31.5rem);
   padding: calc(var(--paper-rhythm) * 0.35);
   position: relative;
-  width: 10.5rem;
+  width: 31.5rem;
 }
 
 .newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-source-preview__pdf-expand {
