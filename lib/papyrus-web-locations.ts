@@ -183,7 +183,16 @@ export function webPathToPapyrusLocation(webPath: string): PapyrusWebUiContext {
   });
 }
 
-export function papyrusUriToWebPath(uri: string): { ok: true; webPath: string; papyrusLocationUri: string; papyrusObjectUri?: string } {
+export type PapyrusUriToWebPathResult = {
+  ok: true;
+  webPath: string;
+  papyrusLocationUri: string;
+  papyrusObjectUri?: string;
+  viewMode?: "index" | "detail";
+  indexFilters?: Record<string, string>;
+};
+
+export function papyrusUriToWebPath(uri: string): PapyrusUriToWebPathResult {
   const raw = uri.trim();
   if (!raw) throw new Error("Papyrus location URI is required");
 
