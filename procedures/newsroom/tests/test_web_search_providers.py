@@ -43,6 +43,7 @@ class WebSearchProvidersTests(unittest.TestCase):
         self.assertEqual(payload["results"][0]["title"], "Ithaca Nature paper")
         self.assertEqual(payload["metadata"]["answer"], "Recent work on AI-assisted decipherment.")
         self.assertEqual(payload["metadata"]["web_search_provider"], "tavily")
+        self.assertEqual(payload["provider"], "tavily")
         request = urlopen.call_args.args[0]
         self.assertEqual(request.get_full_url(), "https://api.tavily.com/search")
         sent = json.loads(request.data.decode("utf-8"))
@@ -105,6 +106,18 @@ class WebSearchProvidersTests(unittest.TestCase):
         self.assertEqual(urls, ["https://example.org/paper"])
         self.assertEqual(answer, "A paper about decipherment.")
         reference_web_search.assert_called_once()
+
+    @unittest.skipUnless(os.environ.get("TAVILY_LIVE_TEST") == "1", "set TAVILY_LIVE_TEST=1 to hit api.tavily.com")
+    def test_tavily_live_search(self):
+        with mock.patch.dict(os.environ, {"WEB_SEARCH_PROVIDER": "tavily"}, clear=False):
+            payload = web_search_providers.reference_web_search(
+                query="mechatronics artificial intelligence robotics",
+                max_results=3,
+            )
+        self.assertGreaterEqual(len(payload.get("results") or []), 1)
+        self.assertEqual(payload.get("provider"), "tavily")
+        metadata = payload.get("metadata") or {}
+        self.assertTrue(metadata.get("request_id"))
 
 
 if __name__ == "__main__":

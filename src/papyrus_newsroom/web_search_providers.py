@@ -62,6 +62,7 @@ def reference_web_search(
         payload["metadata"] = metadata
     metadata["web_search_provider"] = provider_name
     metadata["web_search_path"] = WEB_SEARCH_PATH
+    payload["provider"] = provider_name
     return payload
 
 

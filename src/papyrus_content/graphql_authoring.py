@@ -669,6 +669,14 @@ class PapyrusGraphQLAuthoringClient:
             return {}
         if model_name not in LIST_DEFINITIONS:
             raise ValueError(f"Unsupported model for get_records_by_id: {model_name}")
+        # Point lookups avoid scanning entire tables (e.g. thousands of References).
+        if len(unique_ids) <= 100 and model_name in GET_DEFINITIONS:
+            resolved: dict[str, dict[str, Any]] = {}
+            for record_id in unique_ids:
+                row = self.get_record(model_name, record_id)
+                if row:
+                    resolved[record_id] = row
+            return resolved
         rows = self.list_records(model_name)
         by_id = {row["id"]: row for row in rows if row.get("id")}
         return {record_id: by_id[record_id] for record_id in unique_ids if record_id in by_id}
