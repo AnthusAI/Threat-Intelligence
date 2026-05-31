@@ -6376,42 +6376,9 @@ def _download_attachment_json(attachment_id: str) -> dict[str, Any]:
 
 
 def _graphql(query: str, variables: dict[str, Any]) -> dict[str, Any]:
-    endpoint = os.environ.get("PAPYRUS_GRAPHQL_ENDPOINT", "").strip()
-    if not endpoint:
-        raise RuntimeError("PAPYRUS_GRAPHQL_ENDPOINT is required")
-    body = json.dumps({"query": query, "variables": variables}).encode("utf-8")
-    use_iam = os.environ.get("PAPYRUS_GRAPHQL_USE_IAM", "").strip().lower() in {"1", "true", "yes"}
-    token = os.environ.get("PAPYRUS_GRAPHQL_JWT", "").strip() or os.environ.get("PAPYRUS_KNOWLEDGE_QUERY_JWT", "").strip()
-    if use_iam or not token:
-        from papyrus_newsroom.newsroom import _iam_signed_graphql_headers
+    from papyrus_content.graphql_http import execute_graphql
 
-        headers = _iam_signed_graphql_headers(endpoint, body)
-    else:
-        auth_prefix = os.environ.get("PAPYRUS_GRAPHQL_AUTH_PREFIX", "PapyrusJwt").strip()
-        sanitized_token = re.sub(r"^Bearer\s+", "", token, flags=re.IGNORECASE)
-        auth_header = f"{auth_prefix} {sanitized_token}" if auth_prefix else sanitized_token
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": auth_header,
-            "x-amz-appsync-authtype": os.environ.get("PAPYRUS_GRAPHQL_AUTH_TYPE", "AWS_LAMBDA").strip()
-            or "AWS_LAMBDA",
-        }
-    request = urllib.request.Request(
-        endpoint,
-        data=body,
-        headers=headers,
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=90) as response:  # nosec B310 - configured AppSync endpoint
-            payload = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"GraphQL request failed with HTTP {exc.code}: {detail[:500]}") from exc
-    if payload.get("errors"):
-        messages = "; ".join(str(error.get("message") or error) for error in payload["errors"])
-        raise RuntimeError(f"GraphQL request failed: {messages}")
-    return payload.get("data") or {}
+    return execute_graphql(query, variables, timeout=90, allow_knowledge_fallback=True)
 
 
 def _resolve_section_keys(sections: list[str]) -> list[str]:

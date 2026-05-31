@@ -4222,39 +4222,9 @@ def _prepare_graphql_input(input_payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _graphql(query: str, variables: dict[str, Any]) -> dict[str, Any]:
-    endpoint = os.environ.get("PAPYRUS_GRAPHQL_ENDPOINT", "").strip()
-    token = os.environ.get("PAPYRUS_GRAPHQL_JWT", "").strip()
-    if not endpoint:
-        raise RuntimeError("PAPYRUS_GRAPHQL_ENDPOINT is required")
-    body = json.dumps({"query": query, "variables": variables}).encode("utf-8")
-    headers = {
-        "Content-Type": "application/json",
-    }
-    if token:
-        from papyrus_content.env import lambda_auth_header
+    from papyrus_content.graphql_http import execute_graphql
 
-        headers["Authorization"] = lambda_auth_header(token)
-        headers["x-amz-appsync-authtype"] = (
-            os.environ.get("PAPYRUS_GRAPHQL_AUTH_TYPE", "").strip() or "AWS_LAMBDA"
-        )
-    else:
-        headers.update(_iam_signed_graphql_headers(endpoint, body))
-    request = urllib.request.Request(
-        endpoint,
-        data=body,
-        headers=headers,
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=60) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as error:
-        body = error.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"GraphQL request failed: {error.code} {body[:500]}") from error
-    if payload.get("errors"):
-        messages = "; ".join(str(entry.get("message") or entry) for entry in payload["errors"])
-        raise RuntimeError(f"GraphQL request failed: {messages}")
-    return payload.get("data") or {}
+    return execute_graphql(query, variables, timeout=60)
 
 
 def _lambda_auth_token(token: str) -> str:

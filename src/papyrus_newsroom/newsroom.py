@@ -3795,69 +3795,21 @@ def _content_hash(record: dict[str, Any]) -> str:
 
 
 def _graphql(query: str, variables: dict[str, Any]) -> dict[str, Any]:
-    endpoint = os.environ.get("PAPYRUS_GRAPHQL_ENDPOINT")
-    token = os.environ.get("PAPYRUS_GRAPHQL_JWT")
-    if not endpoint:
-        raise ValueError("Missing PAPYRUS_GRAPHQL_ENDPOINT for Papyrus GraphQL read tool.")
+    from papyrus_content.graphql_http import execute_graphql
 
-    body = json.dumps({"query": query, "variables": variables}).encode("utf-8")
-    headers = {"content-type": "application/json"}
-    if token:
-        headers["Authorization"] = _lambda_auth_token(token)
-        headers["x-amz-appsync-authtype"] = (
-            os.environ.get("PAPYRUS_GRAPHQL_AUTH_TYPE", "").strip() or "AWS_LAMBDA"
-        )
-    else:
-        headers.update(_iam_signed_graphql_headers(endpoint, body))
-    request = urllib.request.Request(
-        endpoint,
-        data=body,
-        headers=headers,
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as error:
-        detail = error.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"GraphQL request failed: {error.code} {error.reason}: {detail}") from error
-
-    if payload.get("errors"):
-        raise RuntimeError("; ".join(error.get("message", str(error)) for error in payload["errors"]))
-    return payload.get("data") or {}
+    return execute_graphql(query, variables)
 
 
 def _iam_signed_graphql_headers(endpoint: str, body: bytes) -> dict[str, str]:
-    try:
-        from botocore.auth import SigV4Auth
-        from botocore.awsrequest import AWSRequest
-        from botocore.session import Session
-    except Exception as exc:  # pragma: no cover - depends on Lambda/local deps
-        raise ValueError("Missing PAPYRUS_GRAPHQL_JWT and botocore is unavailable for IAM AppSync signing.") from exc
+    from papyrus_content.graphql_http import iam_signed_graphql_headers
 
-    parsed = urllib.parse.urlparse(endpoint)
-    region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or _region_from_appsync_host(parsed.netloc)
-    session = Session()
-    credentials = session.get_credentials()
-    if credentials is None:
-        raise ValueError("Missing PAPYRUS_GRAPHQL_JWT and AWS credentials are unavailable for IAM AppSync signing.")
-    frozen = credentials.get_frozen_credentials()
-    request = AWSRequest(
-        method="POST",
-        url=endpoint,
-        data=body,
-        headers={
-            "content-type": "application/json",
-            "host": parsed.netloc,
-        },
-    )
-    SigV4Auth(frozen, "appsync", region).add_auth(request)
-    return {str(key): str(value) for key, value in request.headers.items()}
+    return iam_signed_graphql_headers(endpoint, body)
 
 
 def _region_from_appsync_host(host: str) -> str:
-    match = re.search(r"\.appsync-api\.([a-z0-9-]+)\.amazonaws\.com", host)
-    return match.group(1) if match else "us-east-1"
+    from papyrus_content.graphql_http import region_from_appsync_host
+
+    return region_from_appsync_host(host)
 
 
 def _hydrate_assignment_payloads(assignment: dict[str, Any]) -> None:
