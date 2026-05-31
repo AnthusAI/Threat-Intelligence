@@ -2,6 +2,7 @@ import { defineFunction } from "@aws-amplify/backend";
 import { Duration } from "aws-cdk-lib";
 import { Architecture, Code, Function, Runtime } from "aws-cdk-lib/aws-lambda";
 import { Construct } from "constructs";
+import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,6 +30,18 @@ function bundleEmailSubmissionProcessor(outputDir: string): void {
     path.join(projectRoot, "corpora/papyrus-steering.yml"),
     path.join(corporaDir, "papyrus-steering.yml"),
   );
+  installPythonRequirements(outputDir);
+}
+
+function installPythonRequirements(outputDir: string): void {
+  const requirementsPath = path.join(
+    projectRoot,
+    "amplify/functions/email-submission-processor/requirements.txt",
+  );
+  execSync(`python3 -m pip install -r "${requirementsPath}" -t "${outputDir}" --no-cache-dir`, {
+    cwd: projectRoot,
+    stdio: "inherit",
+  });
 }
 
 export const emailSubmissionProcessor = defineFunction(
@@ -59,7 +72,7 @@ export const emailSubmissionProcessor = defineFunction(
               "cp -R src/papyrus_content/. /asset-output/papyrus_content/",
               "cp -R src/papyrus_knowledge_query/. /asset-output/papyrus_knowledge_query/",
               "cp corpora/papyrus-steering.yml /asset-output/corpora/papyrus-steering.yml",
-              "python -m pip install -r amplify/functions/email-submission-processor/requirements.txt -t /asset-output --no-cache-dir",
+              "python3 -m pip install -r amplify/functions/email-submission-processor/requirements.txt -t /asset-output --no-cache-dir",
             ].join(" && "),
           ],
         },
