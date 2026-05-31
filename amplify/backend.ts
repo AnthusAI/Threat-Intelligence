@@ -194,6 +194,21 @@ const grantNewsroomReadWriteDelete = (lambda: LambdaFunction) => {
     }),
   );
 };
+const mediaBucketName = storageBucket.bucketName;
+const withMediaBucketEnv = (resource: { addEnvironment: (key: string, value: string) => void }) => {
+  resource.addEnvironment("PAPYRUS_MEDIA_BUCKET_NAME", mediaBucketName);
+  resource.addEnvironment("papyrusMedia_BUCKET_NAME", mediaBucketName);
+};
+for (const resource of [
+  backend.assignmentAction,
+  backend.categoryAction,
+  backend.knowledgeQuery,
+  backend.modelAttachmentUpload,
+  backend.newsroomSummary,
+  backend.procedureAction,
+]) {
+  withMediaBucketEnv(resource);
+}
 grantCorporaRead(backend.knowledgeQuery.resources.lambda as LambdaFunction);
 grantNewsroomReadWrite(backend.assignmentAction.resources.lambda as LambdaFunction);
 grantNewsroomReadWrite(backend.categoryAction.resources.lambda as LambdaFunction);
