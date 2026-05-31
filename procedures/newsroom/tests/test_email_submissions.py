@@ -27,6 +27,31 @@ class EmailSubmissionTests(unittest.TestCase):
             "editor@example.com",
         )
 
+    def test_should_process_inbound_s3_key_filters_setup_and_archive(self):
+        self.assertTrue(
+            email_submissions.should_process_inbound_s3_key(
+                "inbound-email/fefi1oj53eir1crt5gl02aep0fh41c9kc0c8ld01",
+            ),
+        )
+        self.assertFalse(email_submissions.should_process_inbound_s3_key("inbound-email/AMAZON_SES_SETUP_NOTIFICATION"))
+        self.assertFalse(
+            email_submissions.should_process_inbound_s3_key(
+                "inbound-email-archived/fefi1oj53eir1crt5gl02aep0fh41c9kc0c8ld01",
+            ),
+        )
+        self.assertFalse(email_submissions.should_process_inbound_s3_key("inbound-email/processed/example"))
+
+    def test_inbound_message_id_for_s3_is_stable(self):
+        message_id = email_submissions.inbound_message_id_for_s3(
+            "media-bucket",
+            "inbound-email/example",
+        )
+        self.assertTrue(message_id.startswith("message-email-submission-"))
+        self.assertEqual(
+            message_id,
+            email_submissions.inbound_message_id_for_s3("media-bucket", "inbound-email/example"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
