@@ -13,9 +13,11 @@ function bundleEmailSubmissionProcessor(outputDir: string): void {
   const packageDir = path.join(outputDir, "papyrus_newsroom");
   const contentDir = path.join(outputDir, "papyrus_content");
   const knowledgeDir = path.join(outputDir, "papyrus_knowledge_query");
+  const corporaDir = path.join(outputDir, "corpora");
   fs.mkdirSync(packageDir, { recursive: true });
   fs.mkdirSync(contentDir, { recursive: true });
   fs.mkdirSync(knowledgeDir, { recursive: true });
+  fs.mkdirSync(corporaDir, { recursive: true });
   fs.copyFileSync(
     path.join(projectRoot, "amplify/functions/email-submission-processor/handler.py"),
     path.join(outputDir, "handler.py"),
@@ -23,6 +25,10 @@ function bundleEmailSubmissionProcessor(outputDir: string): void {
   fs.cpSync(path.join(projectRoot, "src/papyrus_newsroom"), packageDir, { recursive: true });
   fs.cpSync(path.join(projectRoot, "src/papyrus_content"), contentDir, { recursive: true });
   fs.cpSync(path.join(projectRoot, "src/papyrus_knowledge_query"), knowledgeDir, { recursive: true });
+  fs.copyFileSync(
+    path.join(projectRoot, "corpora/papyrus-steering.yml"),
+    path.join(corporaDir, "papyrus-steering.yml"),
+  );
 }
 
 export const emailSubmissionProcessor = defineFunction(
@@ -47,11 +53,13 @@ export const emailSubmissionProcessor = defineFunction(
             "-c",
             [
               "set -euo pipefail",
-              "mkdir -p /asset-output/papyrus_newsroom /asset-output/papyrus_content /asset-output/papyrus_knowledge_query",
+              "mkdir -p /asset-output/papyrus_newsroom /asset-output/papyrus_content /asset-output/papyrus_knowledge_query /asset-output/corpora",
               "cp amplify/functions/email-submission-processor/handler.py /asset-output/handler.py",
               "cp -R src/papyrus_newsroom/. /asset-output/papyrus_newsroom/",
               "cp -R src/papyrus_content/. /asset-output/papyrus_content/",
               "cp -R src/papyrus_knowledge_query/. /asset-output/papyrus_knowledge_query/",
+              "cp corpora/papyrus-steering.yml /asset-output/corpora/papyrus-steering.yml",
+              "python -m pip install -r amplify/functions/email-submission-processor/requirements.txt -t /asset-output --no-cache-dir",
             ].join(" && "),
           ],
         },
