@@ -37,6 +37,15 @@ Set sandbox or pipeline env vars:
 Deploy; `amplify/backend.ts` adds a custom output `slackEventsUrl` (Lambda function URL).
 Point the Slack app **Event Subscriptions** request URL at that URL.
 
+### Production (`main` branch)
+
+1. Merge or deploy `main` via Amplify Gen 2 (push to `main` triggers the pipeline).
+2. In the Amplify console for the **main** backend, set branch env vars and secrets above.
+   Slack Lambdas are created only when `PAPYRUS_ENABLE_SLACK=true`.
+3. After a successful deploy, open **Backend deployments → Outputs** (or `amplify_outputs`)
+   and copy `slackEventsUrl` into the Slack app Event Subscriptions request URL.
+4. Reinstall the Slack app to the workspace if you changed bot scopes.
+
 ### Slack app scopes (minimum)
 
 - `app_mentions:read`
