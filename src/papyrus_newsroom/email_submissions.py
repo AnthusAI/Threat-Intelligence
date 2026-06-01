@@ -106,6 +106,8 @@ def release_inbound_mime_after_success(client: PapyrusGraphQLAuthoringClient, *,
                 }
             },
         )
+        if result.get("alreadyArchived"):
+            return {"released": True, "alreadyArchived": True, **result}
         return {"released": True, **result}
     except Exception as error:
         metadata["inboundMimeArchiveError"] = str(error)
@@ -588,17 +590,25 @@ def _create_find_process_direct_citations(
     }
     plan = build_reference_catalog_registration_records(catalog, plan_options)
     assert_reference_catalog_plan_safety(plan)
+    planned_reference_ids = {
+        str(record["expected"].get("id") or "")
+        for record in plan["records"]
+        if record.get("modelName") == "Reference"
+    }
+    planned_reference_ids.discard("")
     changes = build_record_changes(client, plan["records"])
-    registered_reference_ids: set[str] = set()
+    registered_reference_ids: set[str] = set(planned_reference_ids)
     if apply:
         apply_record_changes(client, changes)
         update_newsroom_summary_after_reference_registration(client, changes, plan)
-        registered_reference_ids = {
+        applied_reference_ids = {
             str(change["expected"].get("id") or "")
             for change in changes
             if change.get("modelName") == "Reference" and change.get("action") in {"create", "update"}
         }
-        registered_reference_ids.discard("")
+        applied_reference_ids.discard("")
+        if applied_reference_ids:
+            registered_reference_ids = applied_reference_ids
         import_run_id = str(plan.get("importRunId") or "").strip() or None
         scoped_references, scoped_attachments, scoped_relations = _load_registered_reference_processing_records(
             client,

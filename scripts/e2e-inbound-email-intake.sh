@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fresh inbound-email E2E against production: upload synthetic MIME, receive, process, verify archive.
+# Fresh inbound-email E2E against production: upload synthetic MIME, receive, wait for processor, verify archive.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -8,9 +8,9 @@ cd "$ROOT"
 PROFILE="${AWS_PROFILE:-Ryan}"
 REGION="${AWS_REGION:-us-east-1}"
 RECEIVE_FN="${PAPYRUS_INBOUND_RECEIVE_FUNCTION:-amplify-dbsyytcm9drqa-mai-papyrussesinboundreceive-vneS3Lzu34l2}"
-PROCESSOR_FN="${PAPYRUS_EMAIL_PROCESSOR_FUNCTION:-amplify-dbsyytcm9drqa-mai-papyrusemailsubmissionpr-TP0Pll3fvbHs}"
 SENDER="${PAPYRUS_INBOUND_TEST_SENDER:-ryan@anth.us}"
 RECIPIENT="${PAPYRUS_INBOUND_TEST_RECIPIENT:-submissions@p.apyr.us}"
+WAIT_SECONDS="${PAPYRUS_INBOUND_E2E_WAIT_SECONDS:-240}"
 
 aws_cli() { aws --profile "$PROFILE" --region "$REGION" "$@"; }
 
@@ -25,8 +25,9 @@ fi
 
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 RAND="$(python3 -c 'import secrets; print(secrets.token_hex(8))')"
-S3_KEY="inbound-email/e2e-${STAMP}-${RAND}"
-# Unique DOI per run so catalog registration creates a new Reference.
+REL_KEY="e2e-${STAMP}-${RAND}"
+S3_KEY="inbound-email/${REL_KEY}"
+ARCHIVE_KEY="inbound-email-archived/${REL_KEY}"
 TEST_URL="https://doi.org/10.5555/papyrus.e2e.${STAMP}.${RAND}"
 MIME_FILE="$(mktemp)"
 trap 'rm -f "$MIME_FILE"' EXIT
@@ -44,7 +45,7 @@ echo "Uploading s3://${BUCKET}/${S3_KEY}"
 aws_cli s3 cp "$MIME_FILE" "s3://${BUCKET}/${S3_KEY}"
 
 EVENT_FILE="$(mktemp)"
-trap 'rm -f "$MIME_FILE" "$EVENT_FILE" "$RECEIVE_OUT" "$PROC_OUT"' EXIT
+trap 'rm -f "$MIME_FILE" "$EVENT_FILE"' EXIT
 cat >"$EVENT_FILE" <<EOF
 {
   "source": "aws.s3",
@@ -55,8 +56,9 @@ cat >"$EVENT_FILE" <<EOF
 }
 EOF
 
-echo "Invoking receive Lambda..."
+echo "Invoking receive Lambda (starts async processor)..."
 RECEIVE_OUT="$(mktemp)"
+trap 'rm -f "$MIME_FILE" "$EVENT_FILE" "$RECEIVE_OUT"' EXIT
 aws_cli lambda invoke \
   --function-name "$RECEIVE_FN" \
   --payload "file://${EVENT_FILE}" \
@@ -69,35 +71,26 @@ if [[ -z "$MESSAGE_ID" ]]; then
   exit 1
 fi
 
-echo "Invoking processor for ${MESSAGE_ID} (may take 1-3 minutes)..."
-PROC_OUT="$(mktemp)"
-aws_cli lambda invoke \
-  --function-name "$PROCESSOR_FN" \
-  --payload "{\"messageId\":\"${MESSAGE_ID}\"}" \
-  --cli-binary-format raw-in-base64-out \
-  "$PROC_OUT" \
-  --cli-read-timeout 600 >/dev/null
-python3 -m json.tool "$PROC_OUT"
+echo "Waiting up to ${WAIT_SECONDS}s for MIME archive (processor runs asynchronously)..."
+deadline=$(( $(date +%s) + WAIT_SECONDS ))
+archived=0
+while [[ $(date +%s) -lt $deadline ]]; do
+  if aws_cli s3api head-object --bucket "$BUCKET" --key "$ARCHIVE_KEY" >/dev/null 2>&1; then
+    archived=1
+    break
+  fi
+  sleep 10
+done
 
-python3 <<PY
-import json, sys
-proc = json.load(open("$PROC_OUT"))
-ok = proc.get("ok") is True and proc.get("status") == "completed"
-mime = proc.get("mimeRelease") or {}
-released = mime.get("released") is True or mime.get("alreadyArchived") is True
-refs = int(proc.get("registeredReferenceCount") or 0)
-if not ok:
-    sys.exit("processor did not complete: " + json.dumps(proc))
-if not released:
-    sys.exit("MIME was not archived: " + json.dumps(mime))
-if refs < 1:
-    sys.exit(f"expected at least one registered reference, got {refs}")
-print("E2E PASS", proc.get("messageId"), "refs=", refs, "url=", "$TEST_URL")
-PY
-
-echo "Checking S3 archive prefix..."
-if aws_cli s3 ls "s3://${BUCKET}/inbound-email-archived/" | grep -q "${S3_KEY#inbound-email/}"; then
-  echo "Archived object present."
-else
-  echo "WARN: archived object not listed (may use different listing timing)" >&2
+if [[ "$archived" -ne 1 ]]; then
+  echo "ERROR: timed out waiting for s3://${BUCKET}/${ARCHIVE_KEY}" >&2
+  echo "Intake prefix listing:" >&2
+  aws_cli s3 ls "s3://${BUCKET}/inbound-email/" | tail -5 >&2 || true
+  exit 1
 fi
+
+if aws_cli s3api head-object --bucket "$BUCKET" --key "$S3_KEY" >/dev/null 2>&1; then
+  echo "WARN: intake copy still present (delete may be delayed)" >&2
+fi
+
+echo "E2E PASS messageId=${MESSAGE_ID} archived=${ARCHIVE_KEY} url=${TEST_URL}"
