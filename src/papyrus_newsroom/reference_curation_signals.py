@@ -23,7 +23,7 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 try:
     import tiktoken
@@ -141,6 +141,15 @@ retrievedAt importRunId importedAt curationStatus curationStatusKey curationStat
 LIST_REFERENCES_BY_CORPUS_QUERY = f"""
 query ListReferencesByCorpus($corpusId: ID!, $limit: Int, $nextToken: String) {{
   listReferencesByCorpusAndExternalItem(corpusId: $corpusId, limit: $limit, nextToken: $nextToken) {{
+    items {{ {REFERENCE_FIELDS} }}
+    nextToken
+  }}
+}}
+"""
+
+LIST_REFERENCES_BY_NEWSROOM_FEED_IMPORTED_QUERY = f"""
+query ListReferencesByNewsroomFeedAndImportedAt($newsroomFeedKey: String!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String, $filter: ModelReferenceFilterInput) {{
+  listReferencesByNewsroomFeedAndImportedAt(newsroomFeedKey: $newsroomFeedKey, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken, filter: $filter) {{
     items {{ {REFERENCE_FIELDS} }}
     nextToken
   }}
@@ -1745,18 +1754,24 @@ def reference_list(
     order: str = "newest",
     scan_limit: int = 1000,
 ) -> dict[str, Any]:
-    references = list_references_by_corpus(_knowledge_corpus_id(corpus_key), limit=max(scan_limit, limit))
+    corpus_id = _knowledge_corpus_id(corpus_key)
     normalized_status = str(status or "").strip().lower()
+    normalized_order = _normalize_reference_list_order(order)
+    reverse = normalized_order.endswith("-oldest") is False
+    if normalized_order.startswith("imported"):
+        references = list_references_by_newsroom_feed_imported(limit=max(scan_limit, limit), corpus_id=corpus_id)
+    else:
+        references = list_references_by_corpus(corpus_id, limit=max(scan_limit, limit))
     if normalized_status and normalized_status not in {"all", "*"}:
         references = [reference for reference in references if str(reference.get("curationStatus") or "").lower() == normalized_status]
-    reverse = order != "oldest"
-    references.sort(key=_reference_chrono_key, reverse=reverse)
+    sort_key = _reference_list_sort_key(normalized_order)
+    references.sort(key=sort_key, reverse=reverse)
     selected = references[:max(int(limit or 25), 1)]
     return {
         "kind": "reference.list",
         "corpusKey": corpus_key,
         "status": status or "all",
-        "order": "newest" if reverse else "oldest",
+        "order": normalized_order,
         "count": len(selected),
         "scanned": len(references),
         "items": [_reference_summary(reference) | {
@@ -1764,6 +1779,7 @@ def reference_list(
             "storagePath": reference.get("storagePath"),
             "importedAt": reference.get("importedAt"),
             "updatedAt": reference.get("updatedAt"),
+            "sourcePublishedAt": reference.get("sourcePublishedAt"),
         } for reference in selected],
     }
 
@@ -2693,6 +2709,38 @@ def list_references_by_corpus(corpus_id: str, limit: int = 1000) -> list[dict[st
     while True:
         data = _graphql(LIST_REFERENCES_BY_CORPUS_QUERY, {"corpusId": corpus_id, "limit": min(max(limit - len(records), 1), 100), "nextToken": next_token})
         connection = data.get("listReferencesByCorpusAndExternalItem") or {}
+        records.extend(connection.get("items") or [])
+        next_token = connection.get("nextToken")
+        if not next_token or len(records) >= limit:
+            break
+    return [record for record in records if record.get("versionState") == "current"]
+
+
+def list_references_by_newsroom_feed_imported(
+    *,
+    limit: int = 1000,
+    corpus_id: str | None = None,
+) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    next_token = None
+    filter_input: dict[str, Any] = {
+        "versionState": {"eq": "current"},
+        "newsroomFeedKey": {"eq": "references"},
+    }
+    if corpus_id:
+        filter_input["corpusId"] = {"eq": corpus_id}
+    while True:
+        data = _graphql(
+            LIST_REFERENCES_BY_NEWSROOM_FEED_IMPORTED_QUERY,
+            {
+                "newsroomFeedKey": "references",
+                "sortDirection": "DESC",
+                "limit": min(max(limit - len(records), 1), 100),
+                "nextToken": next_token,
+                "filter": filter_input,
+            },
+        )
+        connection = data.get("listReferencesByNewsroomFeedAndImportedAt") or {}
         records.extend(connection.get("items") or [])
         next_token = connection.get("nextToken")
         if not next_token or len(records) >= limit:
@@ -4291,6 +4339,46 @@ def _reference_summary(reference: dict[str, Any]) -> dict[str, Any]:
         "title": reference.get("title"),
         "curationStatus": reference.get("curationStatus"),
     }
+
+
+def _normalize_reference_list_order(order: str) -> str:
+    normalized = str(order or "").strip().lower().replace("_", "-")
+    if normalized in {"imported", "import", "import-date", "imported-newest"}:
+        return "imported"
+    if normalized in {"imported-oldest", "import-oldest"}:
+        return "imported-oldest"
+    if normalized in {"published", "publication", "publication-date", "published-newest"}:
+        return "published"
+    if normalized in {"published-oldest", "publication-oldest"}:
+        return "published-oldest"
+    if normalized == "oldest":
+        return "oldest"
+    return "newest"
+
+
+def _reference_list_sort_key(order: str) -> Callable[[dict[str, Any]], str]:
+    normalized = _normalize_reference_list_order(order)
+    if normalized.startswith("imported"):
+        return _reference_imported_key
+    if normalized.startswith("published"):
+        return _reference_publication_key
+    return _reference_chrono_key
+
+
+def _reference_imported_key(reference: dict[str, Any]) -> str:
+    return str(reference.get("importedAt") or reference.get("createdAt") or reference.get("id") or "")
+
+
+def _reference_publication_key(reference: dict[str, Any]) -> str:
+    return str(
+        reference.get("sourcePublishedAt")
+        or reference.get("sourceUpdatedAt")
+        or reference.get("retrievedAt")
+        or reference.get("importedAt")
+        or reference.get("updatedAt")
+        or reference.get("id")
+        or ""
+    )
 
 
 def _reference_chrono_key(reference: dict[str, Any]) -> str:

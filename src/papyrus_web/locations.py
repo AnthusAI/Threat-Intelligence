@@ -347,7 +347,7 @@ def _references_status_from_segment(value: str) -> str:
 
 def _default_index_filters(tab: str) -> dict[str, str]:
     if tab == "references":
-        return {"status": DEFAULT_REFERENCE_STATUS, "processing": ""}
+        return {"status": DEFAULT_REFERENCE_STATUS, "processing": "", "order": "published"}
     if tab == "messages":
         return {"kind": "", "domain": ""}
     if tab == "assignments":
@@ -363,6 +363,9 @@ def _effective_index_filters(tab: str, partial: dict[str, str]) -> dict[str, str
             merged[key] = text
     if tab == "references" and partial.get("status"):
         merged["status"] = _references_status_to_segment(_references_status_from_segment(str(partial["status"])))
+    if tab == "references":
+        order = str(partial.get("order") or merged.get("order") or "published").strip()
+        merged["order"] = "imported" if order == "imported" else "published"
     return merged
 
 
@@ -374,6 +377,7 @@ def _index_filters_from_query(tab: str, query: dict[str, list[str]]) -> dict[str
             {
                 "status": status_raw or DEFAULT_REFERENCE_STATUS,
                 "processing": (query.get("processing") or [""])[0].strip(),
+                "order": (query.get("order") or [""])[0].strip(),
             },
         )
     if tab == "messages":
@@ -404,6 +408,9 @@ def _build_index_location_uri(tab: str, filters: dict[str, str]) -> str:
         processing = filters.get("processing", "").strip()
         if processing:
             segments.extend(["processing", processing])
+        order = filters.get("order", "").strip()
+        if order == "imported":
+            segments.extend(["order", "imported"])
     elif tab == "messages":
         if filters.get("kind", "").strip():
             segments.extend(["kind", filters["kind"].strip()])
@@ -428,6 +435,9 @@ def _build_index_web_path(tab: str, filters: dict[str, str]) -> str:
         processing = filters.get("processing", "").strip()
         if processing:
             params.append(("processing", processing))
+        order = filters.get("order", "").strip()
+        if order == "imported":
+            params.append(("order", "imported"))
     elif tab == "messages":
         if filters.get("kind", "").strip():
             params.append(("kind", filters["kind"].strip()))

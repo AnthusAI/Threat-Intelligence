@@ -322,6 +322,7 @@ function readIndexFiltersFromSearchParams(tab: NewsroomIndexTab, searchParams: U
   if (tab === "references") return effectiveReferencesIndexFilters({
     status: searchParams.get("status")?.trim() || undefined,
     processing: searchParams.get("processing")?.trim() ?? undefined,
+    order: searchParams.get("order")?.trim() ?? undefined,
   });
   if (tab === "messages") return effectiveMessagesIndexFilters({
     kind: searchParams.get("kind")?.trim() ?? undefined,
@@ -340,6 +341,7 @@ function buildNewsroomIndexLocationUri(tab: NewsroomIndexTab, filters: Record<st
     const normalized = filters as ReferencesIndexFilters;
     if (normalized.status && normalized.status !== "exclude-pending") segments.push("status", normalized.status);
     if (normalized.processing?.trim()) segments.push("processing", normalized.processing.trim());
+    if (normalized.order === "imported") segments.push("order", "imported");
   } else if (tab === "messages") {
     const normalized = filters as MessagesIndexFilters;
     if (normalized.kind?.trim()) segments.push("kind", normalized.kind.trim());

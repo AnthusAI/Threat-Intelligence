@@ -1,12 +1,15 @@
 export type NewsroomIndexTab = "references" | "messages" | "assignments";
 
-export type ReferencesIndexFilters = { status: string; processing: string };
+export type ReferenceIndexOrder = "published" | "imported";
+
+export type ReferencesIndexFilters = { status: string; processing: string; order: ReferenceIndexOrder };
 export type MessagesIndexFilters = { kind: string; domain: string };
 export type AssignmentsIndexFilters = { status: string; type: string; view: string };
 
 export const DEFAULT_REFERENCES_INDEX_FILTERS: ReferencesIndexFilters = {
   status: "exclude-pending",
   processing: "",
+  order: "published",
 };
 
 export const DEFAULT_MESSAGES_INDEX_FILTERS: MessagesIndexFilters = {
@@ -28,10 +31,15 @@ export function referencesStatusToUrl(value: string): string {
   return value === "__exclude_pending" ? "exclude-pending" : value;
 }
 
+export function normalizeReferenceIndexOrder(value: string | null | undefined): ReferenceIndexOrder {
+  return value?.trim() === "imported" ? "imported" : "published";
+}
+
 export function effectiveReferencesIndexFilters(partial?: Partial<ReferencesIndexFilters>): ReferencesIndexFilters {
   return {
     status: partial?.status?.trim() || DEFAULT_REFERENCES_INDEX_FILTERS.status,
     processing: partial?.processing?.trim() ?? DEFAULT_REFERENCES_INDEX_FILTERS.processing,
+    order: normalizeReferenceIndexOrder(partial?.order),
   };
 }
 
@@ -55,6 +63,7 @@ export function readReferencesIndexFilters(searchParams: URLSearchParams): Refer
   return effectiveReferencesIndexFilters({
     status: status ? referencesStatusFromUrl(status) : undefined,
     processing: searchParams.get("processing")?.trim() ?? undefined,
+    order: searchParams.get("order")?.trim() ?? undefined,
   });
 }
 
@@ -79,6 +88,7 @@ export function buildReferencesIndexQuery(filters: ReferencesIndexFilters): stri
     params.set("status", referencesStatusToUrl(filters.status));
   }
   if (filters.processing.trim()) params.set("processing", filters.processing.trim());
+  if (filters.order === "imported") params.set("order", "imported");
   const query = params.toString();
   return query ? `?${query}` : "";
 }

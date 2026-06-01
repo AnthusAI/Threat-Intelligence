@@ -2967,6 +2967,57 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
         self.assertEqual(result["count"], 1)
         self.assertEqual(result["items"][0]["id"], "reference-a-v1")
 
+    def test_reference_list_imported_order_uses_import_timestamp(self):
+        references = [
+            {
+                "id": "reference-new-v1",
+                "lineageId": "reference-new",
+                "versionNumber": 1,
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "externalItemId": "new",
+                "title": "Recently imported",
+                "curationStatus": "accepted",
+                "importedAt": "2026-05-30T00:00:00Z",
+                "sourcePublishedAt": "2020-01-01T00:00:00Z",
+            },
+            {
+                "id": "reference-old-import-v1",
+                "lineageId": "reference-old-import",
+                "versionNumber": 1,
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "externalItemId": "old-import",
+                "title": "Older import, newer publication",
+                "curationStatus": "accepted",
+                "importedAt": "2026-05-01T00:00:00Z",
+                "sourcePublishedAt": "2026-05-29T00:00:00Z",
+            },
+        ]
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals.list_references_by_newsroom_feed_imported",
+            return_value=references,
+        ):
+            imported_result = reference_curation_signals.reference_list(
+                corpus_key="AI-ML-research",
+                limit=10,
+                status="all",
+                order="imported",
+                scan_limit=1000,
+            )
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals.list_references_by_corpus",
+            return_value=references,
+        ):
+            published_result = reference_curation_signals.reference_list(
+                corpus_key="AI-ML-research",
+                limit=10,
+                status="all",
+                order="published",
+                scan_limit=1000,
+            )
+
+        self.assertEqual(imported_result["items"][0]["id"], "reference-new-v1")
+        self.assertEqual(published_result["items"][0]["id"], "reference-old-import-v1")
+
     def test_reference_curate_recent_all_includes_undated_and_old_references(self):
         references = [
             {

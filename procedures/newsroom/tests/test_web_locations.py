@@ -70,6 +70,11 @@ class WebLocationTests(unittest.TestCase):
         self.assertEqual(location["indexFilters"]["processing"], "processed")
         self.assertIn("/index/", location["papyrusLocationUri"])
 
+        imported_location = web_path_to_papyrus_location("/newsroom/references?order=imported")
+        self.assertEqual(imported_location["indexFilters"]["order"], "imported")
+        imported_mapped = papyrus_uri_to_web_path("papyrus://newsroom/references/index/order/imported")
+        self.assertEqual(imported_mapped["webPath"], "/newsroom/references?order=imported")
+
         mapped = papyrus_uri_to_web_path("papyrus://newsroom/messages/index/kind/insight")
         self.assertEqual(mapped["webPath"], "/newsroom/messages?kind=insight")
         self.assertEqual(mapped["viewMode"], "index")

@@ -55,11 +55,13 @@ import {
   effectiveAssignmentsIndexFilters,
   effectiveMessagesIndexFilters,
   effectiveReferencesIndexFilters,
+  normalizeReferenceIndexOrder,
   readAssignmentsIndexFilters,
   readMessagesIndexFilters,
   readReferencesIndexFilters,
   referencesStatusFromUrl,
   referencesStatusToUrl,
+  type ReferenceIndexOrder,
   parseReferenceLineageIdFromNewsroomPathname,
   syncBrowserNewsroomIndexUrl,
 } from "../lib/newsroom-index-filters";
@@ -7228,13 +7230,22 @@ function ReferencesDeskView({
     if (typeof window === "undefined") return "";
     return readReferencesIndexFilters(new URLSearchParams(window.location.search)).processing;
   });
+  const [orderFilter, setOrderFilter] = useState<ReferenceIndexOrder>(() => {
+    if (typeof window === "undefined") return "published";
+    return readReferencesIndexFilters(new URLSearchParams(window.location.search)).order;
+  });
   const [selectedReferenceLineageId, setSelectedReferenceLineageId] = useState(routeReferenceLineageId);
   const [isReferenceDetailOpen, setIsReferenceDetailOpen] = useState(Boolean(routeReferenceLineageId));
   const [deepLinkReferenceLoading, setDeepLinkReferenceLoading] = useState(false);
   const [deepLinkReferenceError, setDeepLinkReferenceError] = useState<string | null>(null);
   const categoryContext = useMemo(() => buildCategoryDrilldownContext(categories, initialCategoryLineageId), [categories, initialCategoryLineageId]);
   const statusFilterValue = statusFilter === "__exclude_pending" ? "" : statusFilter;
-  const syncReferencesIndexUrl = useCallback((nextStatus: string, nextProcessing: string, replace = true) => {
+  const syncReferencesIndexUrl = useCallback((
+    nextStatus: string,
+    nextProcessing: string,
+    nextOrder: ReferenceIndexOrder,
+    replace = true,
+  ) => {
     if (categoryContext.primary || isDemo) return;
     if (parseReferenceLineageIdFromNewsroomPathname(typeof window !== "undefined" ? window.location.pathname : null)) {
       return;
@@ -7244,6 +7255,7 @@ function ReferencesDeskView({
       effectiveReferencesIndexFilters({
         status: referencesStatusToUrl(nextStatus),
         processing: nextProcessing,
+        order: nextOrder,
       }),
       { replace },
     );
@@ -7256,15 +7268,16 @@ function ReferencesDeskView({
 
   useEffect(() => {
     if (categoryContext.primary || isDemo || isReferenceDetailOpen || pathnameReferenceLineageId) return;
-    syncReferencesIndexUrl(statusFilter, processingFilter, true);
-  }, [categoryContext.primary, isDemo, isReferenceDetailOpen, pathnameReferenceLineageId, processingFilter, statusFilter, syncReferencesIndexUrl]);
+    syncReferencesIndexUrl(statusFilter, processingFilter, orderFilter, true);
+  }, [categoryContext.primary, isDemo, isReferenceDetailOpen, orderFilter, pathnameReferenceLineageId, processingFilter, statusFilter, syncReferencesIndexUrl]);
   const feed = useNewsroomPagedRows({
     initialItems: references,
     enabled: !isDemo && !categoryContext.primary,
-    resetKey: `references:${statusFilter}:${processingFilter}`,
+    resetKey: `references:${statusFilter}:${processingFilter}:${orderFilter}`,
     loadPage: (nextToken) => loadNewsroomReferencePage({
       status: statusFilterValue,
       excludePending: statusFilter === "__exclude_pending",
+      order: orderFilter,
       nextToken,
     }),
   });
@@ -7500,7 +7513,35 @@ function ReferencesDeskView({
         actions={[]}
         utilityActions={referenceNavigationActions}
         lede={(
-          <NewsroomDeskSectionLede headingId="reference-management-title" section="references" />
+          <NewsroomDeskSectionLede
+            headingId="reference-management-title"
+            section="references"
+            controls={(
+              <div className="news-desk-reference-sort-controls" role="group" aria-label="Reference sort order">
+                <span className="news-desk-reference-sort-controls__label">Sort</span>
+                <button
+                  type="button"
+                  data-active={orderFilter === "published" || undefined}
+                  onClick={() => {
+                    setOrderFilter("published");
+                    syncReferencesIndexUrl(statusFilter, processingFilter, "published", true);
+                  }}
+                >
+                  Publication date
+                </button>
+                <button
+                  type="button"
+                  data-active={orderFilter === "imported" || undefined}
+                  onClick={() => {
+                    setOrderFilter("imported");
+                    syncReferencesIndexUrl(statusFilter, processingFilter, "imported", true);
+                  }}
+                >
+                  Date imported
+                </button>
+              </div>
+            )}
+          />
         )}
         list={(
           <section className="category-steering-section category-steering-section--lead" aria-label={detail}>
@@ -7522,12 +7563,23 @@ function ReferencesDeskView({
               isLoadingMore={feed.isLoadingMore}
               onFilterChange={(value) => {
                 setStatusFilter(value);
-                syncReferencesIndexUrl(value, processingFilter, true);
+                syncReferencesIndexUrl(value, processingFilter, orderFilter, true);
               }}
               onLoadMore={feed.loadMore}
               onMetricChange={(value) => {
                 setProcessingFilter(value);
-                syncReferencesIndexUrl(statusFilter, value, true);
+                syncReferencesIndexUrl(statusFilter, value, orderFilter, true);
+              }}
+              sortLabel="Sort"
+              sortOptions={[
+                { key: "published", label: "Publication date" },
+                { key: "imported", label: "Date imported" },
+              ]}
+              sortValue={orderFilter}
+              onSortChange={(value) => {
+                const nextOrder = normalizeReferenceIndexOrder(value);
+                setOrderFilter(nextOrder);
+                syncReferencesIndexUrl(statusFilter, processingFilter, nextOrder, true);
               }}
               onSelect={selectReference}
               selectedId={selectedLineageId}
@@ -7537,7 +7589,7 @@ function ReferencesDeskView({
         onCloseDetail={() => {
           setIsReferenceDetailOpen(false);
           setSelectedReferenceLineageId("");
-          syncReferencesIndexUrl(statusFilter, processingFilter, true);
+          syncReferencesIndexUrl(statusFilter, processingFilter, orderFilter, true);
         }}
         detail={selectedReference ? (
           <ReferenceDetailPanel
@@ -9417,9 +9469,13 @@ function NewsroomCardGrid({
   filterValue,
   metrics,
   metricValue,
+  sortLabel,
+  sortOptions,
+  sortValue,
   isLoading = false,
   onFilterChange,
   onMetricChange,
+  onSortChange,
   onSelect,
   selectedId,
   footerLabel,
@@ -9434,9 +9490,13 @@ function NewsroomCardGrid({
   filterValue: string;
   metrics: NewsroomDataGridMetric[];
   metricValue: string;
+  sortLabel?: string;
+  sortOptions?: Array<{ key: string; label: string }>;
+  sortValue?: string;
   isLoading?: boolean;
   onFilterChange: (value: string) => void;
   onMetricChange: (value: string) => void;
+  onSortChange?: (value: string) => void;
   onSelect: (id: string) => void;
   selectedId?: string | null;
   footerLabel?: string | null;
@@ -9449,6 +9509,7 @@ function NewsroomCardGrid({
     cards,
     filterValue,
     metricValue,
+    sortValue,
     selectedId,
   });
   useEffect(() => {
@@ -9467,7 +9528,12 @@ function NewsroomCardGrid({
   return (
     <div className="newsroom-card-grid-shell" data-newsroom-card-grid-shell>
       <div
-        className={`news-desk-data-grid-filter newsroom-card-grid-filter${filterOptions.length ? "" : " news-desk-data-grid-filter--metrics-only"}`}
+        className={[
+          "news-desk-data-grid-filter",
+          "newsroom-card-grid-filter",
+          filterOptions.length ? "" : "news-desk-data-grid-filter--metrics-only",
+          sortOptions?.length && onSortChange ? "news-desk-data-grid-filter--with-sort" : "",
+        ].filter(Boolean).join(" ")}
         data-news-desk-data-grid-filter
       >
         {filterOptions.length ? (
@@ -9480,6 +9546,21 @@ function NewsroomCardGrid({
               {filterOptions.map((option) => (
                 <option key={option.key || "all"} value={option.key}>
                   {option.count === undefined ? option.label : `${option.label} (${option.count})`}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+        {sortOptions?.length && onSortChange ? (
+          <label>
+            <span>{sortLabel ?? "Sort"}</span>
+            <select value={sortValue ?? ""} onChange={(event) => {
+              captureLayout();
+              onSortChange(event.target.value);
+            }}>
+              {sortOptions.map((option) => (
+                <option key={option.key} value={option.key}>
+                  {option.label}
                 </option>
               ))}
             </select>
@@ -9572,11 +9653,13 @@ function useNewsroomCardGridFlip({
   cards,
   filterValue,
   metricValue,
+  sortValue,
   selectedId,
 }: {
   cards: NewsroomCardRecord[];
   filterValue: string;
   metricValue: string;
+  sortValue?: string;
   selectedId?: string | null;
 }) {
   const gridRef = useRef<HTMLDivElement | null>(null);
@@ -9589,10 +9672,11 @@ function useNewsroomCardGridFlip({
       selectedId ?? "",
       filterValue,
       metricValue,
+      sortValue ?? "",
       cards.length,
       ...cards.map((card) => `${card.id}:${card.span ?? "1x1"}`),
     ].join("|")
-  ), [cards, filterValue, metricValue, selectedId]);
+  ), [cards, filterValue, metricValue, selectedId, sortValue]);
 
   const captureLayout = useCallback(() => {
     if (prefersReducedMotion) return;

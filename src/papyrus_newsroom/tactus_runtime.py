@@ -484,10 +484,16 @@ def _reference_list_resource(args: dict[str, Any]) -> Any:
             reference_id = str(item.get("id") or "").strip()
             corpus_id = str(item.get("corpusId") or "").strip()
             status = str(item.get("curationStatus") or "").strip()
+            imported_at = str(item.get("importedAt") or "").strip()
             updated_at = str(item.get("updatedAt") or item.get("createdAt") or "").strip()
+            published_at = str(item.get("sourcePublishedAt") or "").strip()
             lines.append(f"{index}. **{title}**")
             if reference_id:
                 lines.append(f"   - id: `{reference_id}`")
+            if imported_at:
+                lines.append(f"   - imported: `{imported_at}`")
+            if published_at:
+                lines.append(f"   - published: `{published_at}`")
             if updated_at:
                 lines.append(f"   - updated: `{updated_at}`")
             if corpus_id:
@@ -931,6 +937,7 @@ class PapyrusRuntimeModule:
                 {
                     "status": str(args.get("status") or ""),
                     "processing": str(args.get("processing") or ""),
+                    "order": str(args.get("order") or ""),
                     "kind": str(args.get("kind") or ""),
                     "domain": str(args.get("domain") or ""),
                     "type": str(args.get("type") or ""),

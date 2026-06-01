@@ -98,7 +98,12 @@ def main(argv: list[str] | None = None) -> int:
     list_parser.add_argument("--corpus-key", required=True)
     list_parser.add_argument("--limit", type=int, default=25)
     list_parser.add_argument("--status", default="")
-    list_parser.add_argument("--order", choices=["newest", "oldest"], default="newest")
+    list_parser.add_argument(
+        "--order",
+        choices=["newest", "oldest", "imported", "imported-oldest", "published", "published-oldest"],
+        default="newest",
+        help="Sort order: newest/oldest (import-aware chrono), imported (import date), or published (source publication date).",
+    )
     list_parser.add_argument("--scan-limit", type=int, default=1000)
 
     curate_recent_parser = references_subparsers.add_parser(

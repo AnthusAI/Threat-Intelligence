@@ -250,6 +250,15 @@ const NEWSROOM_REFERENCE_FEED_QUERY = `
   }
 `;
 
+const NEWSROOM_REFERENCE_IMPORTED_FEED_QUERY = `
+  query ListReferencesByNewsroomFeedAndImportedAt($newsroomFeedKey: String!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String, $filter: ModelReferenceFilterInput) {
+    listReferencesByNewsroomFeedAndImportedAt(newsroomFeedKey: $newsroomFeedKey, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken, filter: $filter) {
+      items { id lineageId versionNumber previousVersionId versionState versionCreatedAt versionCreatedBy changeReason contentHash corpusId externalItemId title authors sourceUri storagePath mediaType byteSize sha256 sourcePublishedAt sourceUpdatedAt retrievedAt inboundCitationCount outboundCitationCount importRunId importedAt createdAt curationStatus curationStatusKey curationStatusUpdatedAt curationStatusUpdatedBy curationStatusReason newsroomFeedKey reviewedFeedKey updatedAt }
+      nextToken
+    }
+  }
+`;
+
 const LIST_REFERENCES_BY_CURATION_STATUS_AND_UPDATED_AT_QUERY = `
   query ListReferencesByCurationStatusAndUpdatedAt($curationStatus: String!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String, $filter: ModelReferenceFilterInput) {
     listReferencesByCurationStatusAndUpdatedAt(curationStatus: $curationStatus, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken, filter: $filter) {
@@ -638,10 +647,13 @@ type NewsroomAssignmentPageOptions = NewsroomPageOptions & {
   status?: string;
 };
 
+export type NewsroomReferencePageOrder = "published" | "imported";
+
 type NewsroomReferencePageOptions = NewsroomPageOptions & {
   status?: string;
   excludePending?: boolean;
   corpusId?: string;
+  order?: NewsroomReferencePageOrder | string;
 };
 
 type NewsroomSemanticNodePageOptions = NewsroomPageOptions & {
@@ -1573,7 +1585,18 @@ export async function loadEditorReferencesData(): Promise<{
   };
 }
 
+export function normalizeNewsroomReferencePageOrder(value?: string | null): NewsroomReferencePageOrder {
+  return value?.trim() === "imported" ? "imported" : "published";
+}
+
 export async function loadNewsroomReferencePage(options: NewsroomReferencePageOptions = {}): Promise<NewsroomRecordPage<ReferenceRecord>> {
+  const order = normalizeNewsroomReferencePageOrder(options.order);
+  if (order === "imported") {
+    const importedPage = await loadReferencePageByImportedFeed(options);
+    if (importedPage.items.length > 0 || options.nextToken) return importedPage;
+    const fallbackPage = await loadReferencePageByFallbackList(options);
+    return sortReferencePageByOrder(fallbackPage, order);
+  }
   const normalizedStatus = normalizeReferenceStatusKey(options.status);
   if (normalizedStatus) {
     const indexedPage = await loadReferencePageByStatus({
@@ -1582,9 +1605,9 @@ export async function loadNewsroomReferencePage(options: NewsroomReferencePageOp
       nextToken: options.nextToken,
       corpusId: options.corpusId,
     });
-    if (indexedPage.items.length > 0 || options.nextToken) return indexedPage;
+    if (indexedPage.items.length > 0 || options.nextToken) return sortReferencePageByOrder(indexedPage, order);
     const legacyPage = await loadReferencePageByLegacyFeed(options);
-    if (legacyPage.items.length > 0 || options.nextToken) return legacyPage;
+    if (legacyPage.items.length > 0 || options.nextToken) return sortReferencePageByOrder(legacyPage, order);
     return loadReferencePageByFallbackList(options);
   }
   if (options.excludePending) {
@@ -1593,17 +1616,18 @@ export async function loadNewsroomReferencePage(options: NewsroomReferencePageOp
       nextToken: options.nextToken,
       corpusId: options.corpusId,
     });
-    if (reviewedPage.items.length > 0 || options.nextToken) return reviewedPage;
+    if (reviewedPage.items.length > 0 || options.nextToken) return sortReferencePageByOrder(reviewedPage, order);
     // Backfill may still be pending in an environment; fall back to status-index merge.
     const mergedReviewedPage = await loadMergedReferenceStatusPage({
       statuses: ["accepted", "rejected", "archived"],
       limit: options.limit,
       nextToken: options.nextToken,
       corpusId: options.corpusId,
+      order,
     });
     if (mergedReviewedPage.items.length > 0 || options.nextToken) return mergedReviewedPage;
     const legacyPage = await loadReferencePageByLegacyFeed(options);
-    if (legacyPage.items.length > 0 || options.nextToken) return legacyPage;
+    if (legacyPage.items.length > 0 || options.nextToken) return sortReferencePageByOrder(legacyPage, order);
     return loadReferencePageByFallbackList(options);
   }
   const mergedPage = await loadMergedReferenceStatusPage({
@@ -1611,11 +1635,25 @@ export async function loadNewsroomReferencePage(options: NewsroomReferencePageOp
     limit: options.limit,
     nextToken: options.nextToken,
     corpusId: options.corpusId,
+    order,
   });
   if (mergedPage.items.length > 0 || options.nextToken) return mergedPage;
   const legacyPage = await loadReferencePageByLegacyFeed(options);
-  if (legacyPage.items.length > 0 || options.nextToken) return legacyPage;
+  if (legacyPage.items.length > 0 || options.nextToken) return sortReferencePageByOrder(legacyPage, order);
   return loadReferencePageByFallbackList(options);
+}
+
+function referencePageMatchesFilters(
+  reference: ReferenceRecord,
+  options: NewsroomReferencePageOptions,
+  normalizedStatus: ReferenceStatus | null,
+): boolean {
+  if (reference.versionState && reference.versionState !== "current") return false;
+  if (options.corpusId && reference.corpusId !== options.corpusId) return false;
+  const status = normalizeReferenceStatusKey(reference.curationStatus) ?? "pending";
+  if (normalizedStatus) return status === normalizedStatus;
+  if (options.excludePending) return status !== "pending";
+  return true;
 }
 
 async function loadReferencePageByLegacyFeed(options: NewsroomReferencePageOptions): Promise<NewsroomRecordPage<ReferenceRecord>> {
@@ -1626,14 +1664,19 @@ async function loadReferencePageByLegacyFeed(options: NewsroomReferencePageOptio
     newsroomFeedKey: "references",
     limit: options.limit,
     nextToken: options.nextToken,
-    matches: (reference) => {
-      if (reference.versionState && reference.versionState !== "current") return false;
-      if (options.corpusId && reference.corpusId !== options.corpusId) return false;
-      const status = normalizeReferenceStatusKey(reference.curationStatus) ?? "pending";
-      if (normalizedStatus) return status === normalizedStatus;
-      if (options.excludePending) return status !== "pending";
-      return true;
-    },
+    matches: (reference) => referencePageMatchesFilters(reference, options, normalizedStatus),
+  });
+}
+
+async function loadReferencePageByImportedFeed(options: NewsroomReferencePageOptions): Promise<NewsroomRecordPage<ReferenceRecord>> {
+  const normalizedStatus = normalizeReferenceStatusKey(options.status);
+  return loadNewsroomFeedPage<ReferenceRecord>({
+    query: NEWSROOM_REFERENCE_IMPORTED_FEED_QUERY,
+    field: "listReferencesByNewsroomFeedAndImportedAt",
+    newsroomFeedKey: "references",
+    limit: options.limit,
+    nextToken: options.nextToken,
+    matches: (reference) => referencePageMatchesFilters(reference, options, normalizedStatus),
   });
 }
 
@@ -1687,12 +1730,15 @@ async function loadReferencePageByFallbackList(options: NewsroomReferencePageOpt
     cursor = connectionNextToken;
   } while (items.length < limit && cursor && pageCount < 40);
 
-  return {
-    items: items
-      .sort(compareReferencesByRecency)
-      .slice(0, limit),
+  const order = normalizeNewsroomReferencePageOrder(options.order);
+  const sorted = sortReferencePageByOrder({
+    items,
     nextToken: connectionNextToken,
     hasMore: Boolean(connectionNextToken),
+  }, order);
+  return {
+    ...sorted,
+    items: sorted.items.slice(0, limit),
   };
 }
 
@@ -2544,11 +2590,13 @@ async function loadMergedReferenceStatusPage({
   limit = NEWSROOM_PAGE_LIMIT,
   nextToken,
   corpusId,
+  order = "published",
 }: {
   statuses: readonly ReferenceStatus[];
   limit?: number;
   nextToken?: string | null;
   corpusId?: string;
+  order?: NewsroomReferencePageOrder;
 }): Promise<NewsroomRecordPage<ReferenceRecord>> {
   const cursor = decodeMergedReferenceStatusCursor(nextToken, statuses);
   const output: ReferenceRecord[] = [];
@@ -2573,7 +2621,7 @@ async function loadMergedReferenceStatusPage({
       cursor.cursors[status] = page.nextToken ?? null;
     }
 
-    const nextStatus = selectNextReferenceStatus(cursor.pendingByStatus, statuses);
+    const nextStatus = selectNextReferenceStatus(cursor.pendingByStatus, statuses, order);
     if (!nextStatus) break;
     const nextReference = cursor.pendingByStatus[nextStatus].shift();
     if (!nextReference?.id || emitted.has(nextReference.id)) continue;
@@ -2654,6 +2702,7 @@ async function runReferenceIndexedQuery({
 function selectNextReferenceStatus(
   pendingByStatus: Record<ReferenceStatus, ReferenceRecord[]>,
   statuses: readonly ReferenceStatus[],
+  order: NewsroomReferencePageOrder = "published",
 ): ReferenceStatus | null {
   let selected: ReferenceStatus | null = null;
   for (const status of statuses) {
@@ -2665,9 +2714,18 @@ function selectNextReferenceStatus(
       continue;
     }
     const current = pendingByStatus[selected][0];
-    if (!current || compareReferencesByRecency(candidate, current) < 0) selected = status;
+    if (!current || compareReferencesForPageOrder(candidate, current, order) < 0) selected = status;
   }
   return selected;
+}
+
+function compareReferencesForPageOrder(
+  left: ReferenceRecord,
+  right: ReferenceRecord,
+  order: NewsroomReferencePageOrder,
+): number {
+  if (order === "imported") return compareReferencesByImportedAt(left, right);
+  return compareReferencesByPublicationDate(left, right);
 }
 
 function compareReferencesByRecency(left: ReferenceRecord, right: ReferenceRecord): number {
@@ -2679,11 +2737,55 @@ function compareReferencesByRecency(left: ReferenceRecord, right: ReferenceRecor
   return String(right.id).localeCompare(String(left.id));
 }
 
+function compareReferencesByImportedAt(left: ReferenceRecord, right: ReferenceRecord): number {
+  const leftTs = Date.parse(referenceImportedTimestamp(left));
+  const rightTs = Date.parse(referenceImportedTimestamp(right));
+  const leftRank = Number.isFinite(leftTs) ? leftTs : 0;
+  const rightRank = Number.isFinite(rightTs) ? rightTs : 0;
+  if (leftRank !== rightRank) return rightRank - leftRank;
+  return String(right.id).localeCompare(String(left.id));
+}
+
+function compareReferencesByPublicationDate(left: ReferenceRecord, right: ReferenceRecord): number {
+  const leftTs = Date.parse(referencePublicationTimestamp(left));
+  const rightTs = Date.parse(referencePublicationTimestamp(right));
+  const leftRank = Number.isFinite(leftTs) ? leftTs : 0;
+  const rightRank = Number.isFinite(rightTs) ? rightTs : 0;
+  if (leftRank !== rightRank) return rightRank - leftRank;
+  return String(right.id).localeCompare(String(left.id));
+}
+
+function sortReferencePageByOrder(
+  page: NewsroomRecordPage<ReferenceRecord>,
+  order: NewsroomReferencePageOrder,
+): NewsroomRecordPage<ReferenceRecord> {
+  const compare = order === "imported" ? compareReferencesByImportedAt : compareReferencesByPublicationDate;
+  return {
+    ...page,
+    items: [...page.items].sort(compare),
+  };
+}
+
 function referenceRecencyTimestamp(reference: ReferenceRecord): string {
   return reference.updatedAt
     || reference.curationStatusUpdatedAt
     || reference.importedAt
     || reference.createdAt
+    || "";
+}
+
+function referenceImportedTimestamp(reference: ReferenceRecord): string {
+  return reference.importedAt
+    || reference.createdAt
+    || "";
+}
+
+function referencePublicationTimestamp(reference: ReferenceRecord): string {
+  return reference.sourcePublishedAt
+    || reference.sourceUpdatedAt
+    || reference.retrievedAt
+    || reference.importedAt
+    || reference.updatedAt
     || "";
 }
 
