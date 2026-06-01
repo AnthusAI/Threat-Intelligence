@@ -2729,23 +2729,32 @@ def list_references_by_newsroom_feed_imported(
     }
     if corpus_id:
         filter_input["corpusId"] = {"eq": corpus_id}
-    while True:
-        data = _graphql(
-            LIST_REFERENCES_BY_NEWSROOM_FEED_IMPORTED_QUERY,
-            {
-                "newsroomFeedKey": "references",
-                "sortDirection": "DESC",
-                "limit": min(max(limit - len(records), 1), 100),
-                "nextToken": next_token,
-                "filter": filter_input,
-            },
-        )
-        connection = data.get("listReferencesByNewsroomFeedAndImportedAt") or {}
-        records.extend(connection.get("items") or [])
-        next_token = connection.get("nextToken")
-        if not next_token or len(records) >= limit:
-            break
-    return [record for record in records if record.get("versionState") == "current"]
+    try:
+        while True:
+            data = _graphql(
+                LIST_REFERENCES_BY_NEWSROOM_FEED_IMPORTED_QUERY,
+                {
+                    "newsroomFeedKey": "references",
+                    "sortDirection": "DESC",
+                    "limit": min(max(limit - len(records), 1), 100),
+                    "nextToken": next_token,
+                    "filter": filter_input,
+                },
+            )
+            connection = data.get("listReferencesByNewsroomFeedAndImportedAt") or {}
+            records.extend(connection.get("items") or [])
+            next_token = connection.get("nextToken")
+            if not next_token or len(records) >= limit:
+                break
+    except Exception as exc:
+        message = str(exc)
+        if "FieldUndefined" not in message or "listReferencesByNewsroomFeedAndImportedAt" not in message:
+            raise
+    if records:
+        return [record for record in records if record.get("versionState") == "current"]
+    if not corpus_id:
+        return []
+    return list_references_by_corpus(corpus_id, limit=limit)
 
 
 def load_publication_doctrine_context(*, graphql_func: Any | None = None) -> dict[str, Any]:

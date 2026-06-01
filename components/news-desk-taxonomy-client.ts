@@ -1592,10 +1592,21 @@ export function normalizeNewsroomReferencePageOrder(value?: string | null): News
 export async function loadNewsroomReferencePage(options: NewsroomReferencePageOptions = {}): Promise<NewsroomRecordPage<ReferenceRecord>> {
   const order = normalizeNewsroomReferencePageOrder(options.order);
   if (order === "imported") {
-    const importedPage = await loadReferencePageByImportedFeed(options);
-    if (importedPage.items.length > 0 || options.nextToken) return importedPage;
+    try {
+      const importedPage = await loadReferencePageByImportedFeed(options);
+      if (importedPage.items.length > 0 || options.nextToken) return importedPage;
+    } catch (error) {
+      if (!isMissingGraphQLQueryFieldError(error, "listReferencesByNewsroomFeedAndImportedAt")) {
+        throw error;
+      }
+      console.warn(
+        "listReferencesByNewsroomFeedAndImportedAt is not deployed in this environment; "
+        + "falling back to legacy reference queries with client-side import-date sort.",
+      );
+    }
     const fallbackPage = await loadReferencePageByFallbackList(options);
-    return sortReferencePageByOrder(fallbackPage, order);
+    if (fallbackPage.items.length > 0 || options.nextToken) return fallbackPage;
+    // Continue into status-index loaders below when the table scan is empty.
   }
   const normalizedStatus = normalizeReferenceStatusKey(options.status);
   if (normalizedStatus) {
@@ -2876,6 +2887,11 @@ async function loadNewsroomFeedPage<T>({
     }
     const connection = response.data?.[field];
     if (!connection) {
+      if (isMissingGraphQLQueryFieldError(response.errors, field)) {
+        throw new Error(
+          `Validation error of type FieldUndefined: Field '${field}' in type 'Query' is undefined @ '${field}'`,
+        );
+      }
       assertNoGraphQLErrors(response.errors);
       throw new Error(`Missing GraphQL connection payload for ${field}.`);
     }
@@ -3365,6 +3381,14 @@ function assertNoGraphQLErrors(errors?: unknown[] | null) {
     })
     .join("; ");
   throw new Error(details);
+}
+
+function isMissingGraphQLQueryFieldError(error: unknown, fieldName: string): boolean {
+  if (Array.isArray(error)) {
+    return error.some((entry) => isMissingGraphQLQueryFieldError(entry, fieldName));
+  }
+  const message = normalizeUnknownErrorMessage(error, "");
+  return message.includes("FieldUndefined") && message.includes(fieldName);
 }
 
 function normalizeUnknownErrorMessage(error: unknown, fallback: string): string {
