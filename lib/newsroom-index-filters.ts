@@ -60,10 +60,11 @@ export function effectiveAssignmentsIndexFilters(partial?: Partial<AssignmentsIn
 
 export function readReferencesIndexFilters(searchParams: URLSearchParams): ReferencesIndexFilters {
   const status = searchParams.get("status")?.trim() ?? "";
+  const orderParam = searchParams.get("order")?.trim();
   return effectiveReferencesIndexFilters({
     status: status ? referencesStatusFromUrl(status) : undefined,
     processing: searchParams.get("processing")?.trim() ?? undefined,
-    order: searchParams.get("order")?.trim() ?? undefined,
+    order: orderParam ? normalizeReferenceIndexOrder(orderParam) : undefined,
   });
 }
 

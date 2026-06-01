@@ -53,7 +53,10 @@ Raw MIME is **retained until processing completes successfully**. On success the
 
 Intake is **idempotent per S3 object**: the `Message` id is derived from the bucket/key, and re-running intake for the same MIME re-invokes the processor instead of creating duplicates.
 
-Disable the stack with `PAPYRUS_ENABLE_INBOUND_EMAIL=false`.
+Inbound email is enabled automatically only on the production Amplify `main` pipeline
+(`AWS_APP_ID=dbsyytcm9drqa`). For sandboxes, leave it off (default) or set
+`PAPYRUS_ENABLE_INBOUND_EMAIL=true` only when you intend to manage SES receipt rules.
+Disable explicitly with `PAPYRUS_ENABLE_INBOUND_EMAIL=false`.
 
 ## DNS and SES setup
 

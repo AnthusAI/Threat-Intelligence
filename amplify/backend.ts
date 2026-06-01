@@ -34,9 +34,31 @@ const knowledgeVectorIndexName = "papyrus-knowledge";
 const knowledgeVectorDimension = 1536;
 const knowledgeEmbeddingModel = "text-embedding-3-small";
 
-const enableInboundEmail = !["0", "false", "no", "off"].includes(
-  (process.env.PAPYRUS_ENABLE_INBOUND_EMAIL ?? "true").trim().toLowerCase(),
-);
+const amplifyBranch = (process.env.AWS_BRANCH ?? "").trim();
+const amplifyAppId = (process.env.AWS_APP_ID ?? "").trim();
+const isAmplifyProductionPipeline =
+  amplifyBranch === "main" && amplifyAppId === "dbsyytcm9drqa";
+
+function readEnvFlag(name: string, defaultValue: boolean): boolean {
+  const raw = (process.env[name] ?? "").trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(raw)) return true;
+  if (["0", "false", "no", "off"].includes(raw)) return false;
+  return defaultValue;
+}
+
+function sanitizeAwsName(value: string, maxLength = 50): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, maxLength);
+}
+
+// SES active receipt rule sets and shared backup vault names are account-global.
+// Keep them on the production pipeline only unless explicitly opted in.
+const enableInboundEmail = readEnvFlag("PAPYRUS_ENABLE_INBOUND_EMAIL", isAmplifyProductionPipeline);
+const enableStorageBackups = readEnvFlag("PAPYRUS_ENABLE_STORAGE_BACKUPS", isAmplifyProductionPipeline);
 
 const backend = defineBackend({
   assignmentAction,
@@ -57,9 +79,16 @@ const backend = defineBackend({
 
 const amplifyBackendDir = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(amplifyBackendDir, "..");
-const enableConsoleResponder = !["0", "false", "no", "off"].includes(
-  (process.env.PAPYRUS_ENABLE_CONSOLE_RESPONDER ?? "true").trim().toLowerCase(),
-);
+const enableConsoleResponder = readEnvFlag("PAPYRUS_ENABLE_CONSOLE_RESPONDER", true);
+
+if (
+  enableConsoleResponder
+  && !process.env.PAPYRUS_CONSOLE_RESPONDER_IMAGE_URI?.trim()
+  && !process.env.PAPYRUS_CONSOLE_RESPONDER_ALLOW_LOCAL_BUILD?.trim()
+  && !isAmplifyProductionPipeline
+) {
+  process.env.PAPYRUS_CONSOLE_RESPONDER_ALLOW_LOCAL_BUILD = "true";
+}
 const inboundEmailDomain = (process.env.PAPYRUS_INBOUND_EMAIL_DOMAIN ?? "p.apyr.us").trim().toLowerCase();
 const inboundEmailLocalParts = (process.env.PAPYRUS_INBOUND_EMAIL_LOCAL_PARTS ?? "submissions,suggestions")
   .split(",")
@@ -123,48 +152,59 @@ if (enableConsoleResponder) {
   });
 }
 
-const storageBackupsStack = backend.createStack("storage-backups");
-const storageBackupVaultName = "papyrus-dbsyytcm9drqa-main-media-backup-vault";
 const storageBucket = backend.storage.resources.bucket;
 const storageStack = Stack.of(storageBucket);
 
-const storageBucketCfn = storageBucket.node.defaultChild as s3.CfnBucket | undefined;
-if (storageBucketCfn) {
-  // S3 PITR in AWS Backup requires S3 event delivery through EventBridge.
-  storageBucketCfn.addPropertyOverride(
-    "NotificationConfiguration.EventBridgeConfiguration.EventBridgeEnabled",
-    true,
+let storageBackupPlan: backup.BackupPlan | undefined;
+let storageBackupVault: backup.BackupVault | undefined;
+
+if (enableStorageBackups) {
+  const storageBackupsStack = backend.createStack("storage-backups");
+  const storageBackupVaultName = sanitizeAwsName(
+    process.env.PAPYRUS_STORAGE_BACKUP_VAULT_NAME?.trim()
+    || (isAmplifyProductionPipeline
+      ? "papyrus-dbsyytcm9drqa-main-media-backup-vault"
+      : `papyrus-${sanitizeAwsName(storageBackupsStack.stackName, 32)}-media-vault`),
   );
+
+  const storageBucketCfn = storageBucket.node.defaultChild as s3.CfnBucket | undefined;
+  if (storageBucketCfn) {
+    // S3 PITR in AWS Backup requires S3 event delivery through EventBridge.
+    storageBucketCfn.addPropertyOverride(
+      "NotificationConfiguration.EventBridgeConfiguration.EventBridgeEnabled",
+      true,
+    );
+  }
+
+  storageBackupVault = new backup.BackupVault(storageBackupsStack, "PapyrusStorageBackupVault", {
+    backupVaultName: storageBackupVaultName,
+    removalPolicy: RemovalPolicy.RETAIN,
+  });
+  storageBackupPlan = new backup.BackupPlan(storageBackupsStack, "PapyrusStorageBackupPlan", {
+    backupVault: storageBackupVault,
+  });
+
+  storageBackupPlan.addRule(
+    new backup.BackupPlanRule({
+      ruleName: "papyrus-storage-pitr-35d",
+      enableContinuousBackup: true,
+      deleteAfter: Duration.days(35),
+    }),
+  );
+
+  storageBackupPlan.addRule(
+    new backup.BackupPlanRule({
+      ruleName: "papyrus-storage-daily-365d",
+      scheduleExpression: events.Schedule.cron({ minute: "0", hour: "5" }),
+      deleteAfter: Duration.days(365),
+    }),
+  );
+
+  storageBackupPlan.addSelection("PapyrusStorageBackupSelection", {
+    allowRestores: true,
+    resources: [backup.BackupResource.fromArn(storageBucket.bucketArn)],
+  });
 }
-
-const storageBackupVault = new backup.BackupVault(storageBackupsStack, "PapyrusStorageBackupVault", {
-  backupVaultName: storageBackupVaultName,
-  removalPolicy: RemovalPolicy.RETAIN,
-});
-const storageBackupPlan = new backup.BackupPlan(storageBackupsStack, "PapyrusStorageBackupPlan", {
-  backupVault: storageBackupVault,
-});
-
-storageBackupPlan.addRule(
-  new backup.BackupPlanRule({
-    ruleName: "papyrus-storage-pitr-35d",
-    enableContinuousBackup: true,
-    deleteAfter: Duration.days(35),
-  }),
-);
-
-storageBackupPlan.addRule(
-  new backup.BackupPlanRule({
-    ruleName: "papyrus-storage-daily-365d",
-    scheduleExpression: events.Schedule.cron({ minute: "0", hour: "5" }),
-    deleteAfter: Duration.days(365),
-  }),
-);
-
-storageBackupPlan.addSelection("PapyrusStorageBackupSelection", {
-  allowRestores: true,
-  resources: [backup.BackupResource.fromArn(storageBucket.bucketArn)],
-});
 
 // Grant S3 access on Lambda roles only (not storage bucket policies) to avoid
 // storage ↔ data nested-stack circular dependencies from allow.resource().
@@ -477,12 +517,14 @@ backend.addOutput({
       embeddingModel: knowledgeEmbeddingModel,
       embeddingDimensions: knowledgeVectorDimension,
     },
-    storageBackups: {
-      backupPlanId: storageBackupPlan.backupPlanId,
-      backupVaultArn: storageBackupVault.backupVaultArn,
-      backupVaultName: storageBackupVault.backupVaultName,
-      protectedBucketArn: storageBucket.bucketArn,
-      protectedBucketName: storageBucket.bucketName,
-    },
+    storageBackups: storageBackupPlan && storageBackupVault
+      ? {
+          backupPlanId: storageBackupPlan.backupPlanId,
+          backupVaultArn: storageBackupVault.backupVaultArn,
+          backupVaultName: storageBackupVault.backupVaultName,
+          protectedBucketArn: storageBucket.bucketArn,
+          protectedBucketName: storageBucket.bucketName,
+        }
+      : null,
   },
 });

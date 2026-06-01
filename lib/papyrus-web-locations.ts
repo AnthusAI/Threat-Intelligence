@@ -4,6 +4,7 @@ import {
   effectiveAssignmentsIndexFilters,
   effectiveMessagesIndexFilters,
   effectiveReferencesIndexFilters,
+  normalizeReferenceIndexOrder,
   type AssignmentsIndexFilters,
   type MessagesIndexFilters,
   type NewsroomIndexTab,
@@ -319,11 +320,14 @@ function newsroomIndexLocation(tab: NewsroomIndexTab, webPath: string, searchPar
 }
 
 function readIndexFiltersFromSearchParams(tab: NewsroomIndexTab, searchParams: URLSearchParams): Record<string, string> {
-  if (tab === "references") return effectiveReferencesIndexFilters({
-    status: searchParams.get("status")?.trim() || undefined,
-    processing: searchParams.get("processing")?.trim() ?? undefined,
-    order: searchParams.get("order")?.trim() ?? undefined,
-  });
+  if (tab === "references") {
+    const orderParam = searchParams.get("order")?.trim();
+    return effectiveReferencesIndexFilters({
+      status: searchParams.get("status")?.trim() || undefined,
+      processing: searchParams.get("processing")?.trim() ?? undefined,
+      order: orderParam ? normalizeReferenceIndexOrder(orderParam) : undefined,
+    });
+  }
   if (tab === "messages") return effectiveMessagesIndexFilters({
     kind: searchParams.get("kind")?.trim() ?? undefined,
     domain: searchParams.get("domain")?.trim() ?? undefined,
