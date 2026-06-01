@@ -15,7 +15,13 @@ from papyrus_content import cli as papyrus_content_cli
 from papyrus_content.catalog import build_prepared_reference_catalog, build_reference_catalog_registration_records, catalog_items
 from papyrus_content.ids import hash_short, knowledge_corpus_id, reference_lineage_id_for
 from papyrus_content.model_attachments import build_text_model_payload_attachment
-from papyrus_content.papyrus_config import resolve_topics_ignore_terms
+from papyrus_content.papyrus_config import (
+    build_newsroom_reference_public_url,
+    load_papyrus_config,
+    normalize_papyrus_config,
+    resolve_public_site_base_url,
+    resolve_topics_ignore_terms,
+)
 from papyrus_content.seed_edition import build_seed_edition_records, load_seed_payload, seed_edition_config
 from papyrus_content.source_readiness import reference_source_readiness
 from papyrus_content.steering import load_steering_config, require_corpus_config, resolve_corpus_local_path
@@ -231,6 +237,46 @@ class PapyrusContentTests(unittest.TestCase):
         terms = set(resolve_topics_ignore_terms())
         self.assertIn("paper", terms)
         self.assertIn("url", terms)
+
+    def test_normalize_papyrus_config_public_site(self) -> None:
+        config = normalize_papyrus_config(
+            {
+                "schemaVersion": 1,
+                "topics": {},
+                "publicSite": {"baseUrl": "https://p.apyr.us/"},
+            },
+            "/tmp/config.yaml",
+        )
+        self.assertEqual(config["publicSite"]["baseUrl"], "https://p.apyr.us")
+
+    def test_build_newsroom_reference_public_url(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {"PAPYRUS_PUBLIC_SITE_BASE_URL": "https://staging.example.com"},
+            clear=False,
+        ):
+            url = build_newsroom_reference_public_url("reference-lineage-1")
+        self.assertEqual(url, "https://staging.example.com/newsroom/references/reference-lineage-1")
+
+    def test_resolve_public_site_base_url_from_config_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_dir = pathlib.Path(tmp) / ".papyrus"
+            config_dir.mkdir()
+            config_path = config_dir / "config.yaml"
+            config_path.write_text(
+                "schemaVersion: 1\npublicSite:\n  baseUrl: https://from-config.example.com\n",
+                encoding="utf-8",
+            )
+            with mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("PAPYRUS_PUBLIC_SITE_BASE_URL", None)
+                os.environ["PAPYRUS_CONFIG"] = str(config_path)
+                try:
+                    loaded = load_papyrus_config()
+                    assert loaded is not None
+                    self.assertEqual(loaded["publicSite"]["baseUrl"], "https://from-config.example.com")
+                    self.assertEqual(resolve_public_site_base_url(), "https://from-config.example.com")
+                finally:
+                    os.environ.pop("PAPYRUS_CONFIG", None)
 
 
 if __name__ == "__main__":

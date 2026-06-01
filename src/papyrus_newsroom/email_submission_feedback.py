@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import json
 import os
 import re
@@ -9,6 +10,7 @@ from email.utils import parseaddr
 from typing import Any
 from urllib.parse import urlparse
 
+from papyrus_content.papyrus_config import build_newsroom_reference_public_url
 from papyrus_content.source_readiness import (
     select_extracted_text_attachment,
     select_reference_attachment_by_role,
@@ -225,9 +227,13 @@ def build_reference_feedback_entries(
         has_extracted_text = select_extracted_text_attachment(reference, attachments) is not None
         pdf_info = pdf_status_for_reference(reference, attachments)
         academic = is_academic_paper_reference(reference, source_plugin=source_plugin)
+        lineage_id = str(reference.get("lineageId") or reference.get("referenceLineageId") or "").strip()
+        newsroom_url = build_newsroom_reference_public_url(lineage_id) if lineage_id else None
         entries.append(
             {
                 "referenceId": reference_id,
+                "referenceLineageId": lineage_id or None,
+                "newsroomUrl": newsroom_url,
                 "sourceUri": str(reference.get("sourceUri") or ""),
                 "title": title,
                 "subtitle": subtitle,
@@ -286,7 +292,7 @@ def build_submission_feedback_report(
     }
 
 
-def format_submission_feedback_email(report: dict[str, Any]) -> tuple[str, str]:
+def _feedback_email_subject(report: dict[str, Any]) -> tuple[str, str]:
     subject_line = str(report.get("subject") or "your submission")
     status = str(report.get("responseStatus") or "").upper()
     if status == "COMPLETED":
@@ -297,6 +303,146 @@ def format_submission_feedback_email(report: dict[str, Any]) -> tuple[str, str]:
         subject = f"Re: {subject_line} — not accepted"
     else:
         subject = f"Re: {subject_line} — update"
+    return subject, status
+
+
+def _status_label_html(status: str) -> str:
+    normalized = status or "UNKNOWN"
+    palette = {
+        "COMPLETED": ("#0f5132", "#d1e7dd"),
+        "FAILED": ("#842029", "#f8d7da"),
+        "REJECTED": ("#664d03", "#fff3cd"),
+        "IN_PROGRESS": ("#055160", "#cff4fc"),
+    }
+    fg, bg = palette.get(normalized, ("#41464b", "#e2e3e5"))
+    return (
+        f'<span style="display:inline-block;padding:4px 10px;border-radius:4px;'
+        f'font-size:12px;font-weight:600;color:{fg};background:{bg};">{html.escape(normalized)}</span>'
+    )
+
+
+def _append_reference_feedback_plain(lines: list[str], entry: dict[str, Any], index: int) -> None:
+    lines.append("")
+    lines.append(f"{index}. {entry.get('title') or '(untitled)'}")
+    newsroom_url = str(entry.get("newsroomUrl") or "").strip()
+    if newsroom_url:
+        lines.append(f"   View in Papyrus: {newsroom_url}")
+    if entry.get("subtitle"):
+        lines.append(f"   Subtitle: {entry.get('subtitle')}")
+    if entry.get("summary"):
+        lines.append(f"   Summary: {entry.get('summary')}")
+    if entry.get("sourceUri"):
+        lines.append(f"   Source: {entry.get('sourceUri')}")
+    plugin = entry.get("sourcePlugin")
+    if plugin:
+        lines.append(f"   Fetch plugin: {plugin}")
+    find_status = entry.get("findStatus")
+    summarize_status = entry.get("summarizeStatus")
+    if find_status:
+        lines.append(f"   Find: {find_status}")
+    if summarize_status:
+        lines.append(f"   Summarize: {summarize_status}")
+    if entry.get("pdfConfirmationRequired"):
+        located = entry.get("pdfLocated")
+        if located is True:
+            pdf_name = entry.get("pdfFilename") or entry.get("pdfAttachmentId") or "source PDF"
+            lines.append(f"   PDF: located ({pdf_name})")
+        elif located is False:
+            lines.append("   PDF: not located")
+        else:
+            lines.append("   PDF: unknown")
+    attachments = entry.get("attachments") if isinstance(entry.get("attachments"), list) else []
+    if attachments:
+        lines.append("   Attachments recorded:")
+        for attachment in attachments:
+            if not isinstance(attachment, dict):
+                continue
+            role = attachment.get("role") or "attachment"
+            name = attachment.get("filename") or attachment.get("id") or "file"
+            media_type = attachment.get("mediaType") or ""
+            suffix = f" ({media_type})" if media_type else ""
+            lines.append(f"     - {role}: {name}{suffix}")
+
+
+def _reference_feedback_html_block(entry: dict[str, Any], index: int) -> str:
+    title = html.escape(str(entry.get("title") or "(untitled)"))
+    newsroom_url = str(entry.get("newsroomUrl") or "").strip()
+    parts = [
+        '<div style="margin:0 0 20px;padding:16px 18px;border:1px solid #e5e7eb;border-radius:8px;background:#fafafa;">',
+        f'<div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.04em;">Reference {index}</div>',
+        f'<h2 style="margin:8px 0 6px;font-size:18px;line-height:1.35;color:#111827;">{title}</h2>',
+    ]
+    if newsroom_url:
+        escaped_url = html.escape(newsroom_url, quote=True)
+        parts.append(
+            '<p style="margin:0 0 12px;">'
+            f'<a href="{escaped_url}" style="display:inline-block;padding:10px 16px;background:#1d4ed8;color:#ffffff;'
+            'text-decoration:none;border-radius:6px;font-size:14px;font-weight:600;">Open in Papyrus</a>'
+            f'<span style="display:block;margin-top:8px;font-size:12px;color:#6b7280;word-break:break-all;">{html.escape(newsroom_url)}</span>'
+            "</p>"
+        )
+    subtitle = str(entry.get("subtitle") or "").strip()
+    if subtitle:
+        parts.append(
+            f'<p style="margin:0 0 8px;font-size:14px;color:#374151;"><strong style="color:#111827;">Subtitle</strong> — {html.escape(subtitle)}</p>'
+        )
+    summary = str(entry.get("summary") or "").strip()
+    if summary:
+        parts.append(
+            f'<p style="margin:0 0 8px;font-size:14px;line-height:1.5;color:#374151;"><strong style="color:#111827;">Summary</strong> — {html.escape(summary)}</p>'
+        )
+    source_uri = str(entry.get("sourceUri") or "").strip()
+    if source_uri:
+        escaped_source = html.escape(source_uri, quote=True)
+        parts.append(
+            f'<p style="margin:0 0 8px;font-size:13px;color:#4b5563;"><strong>Source</strong> — '
+            f'<a href="{escaped_source}" style="color:#1d4ed8;">{html.escape(source_uri)}</a></p>'
+        )
+    meta_rows: list[str] = []
+    plugin = entry.get("sourcePlugin")
+    if plugin:
+        meta_rows.append(f"Fetch: {html.escape(str(plugin))}")
+    find_status = entry.get("findStatus")
+    if find_status:
+        meta_rows.append(f"Find: {html.escape(str(find_status))}")
+    summarize_status = entry.get("summarizeStatus")
+    if summarize_status:
+        meta_rows.append(f"Summarize: {html.escape(str(summarize_status))}")
+    if entry.get("pdfConfirmationRequired"):
+        located = entry.get("pdfLocated")
+        if located is True:
+            pdf_name = entry.get("pdfFilename") or entry.get("pdfAttachmentId") or "source PDF"
+            meta_rows.append(f"PDF: located ({html.escape(str(pdf_name))})")
+        elif located is False:
+            meta_rows.append("PDF: not located")
+        else:
+            meta_rows.append("PDF: unknown")
+    if meta_rows:
+        parts.append(
+            f'<p style="margin:0 0 8px;font-size:12px;color:#6b7280;">{" · ".join(meta_rows)}</p>'
+        )
+    attachments = entry.get("attachments") if isinstance(entry.get("attachments"), list) else []
+    if attachments:
+        attachment_items: list[str] = []
+        for attachment in attachments:
+            if not isinstance(attachment, dict):
+                continue
+            role = html.escape(str(attachment.get("role") or "attachment"))
+            name = html.escape(str(attachment.get("filename") or attachment.get("id") or "file"))
+            media_type = str(attachment.get("mediaType") or "").strip()
+            suffix = f" <span style=\"color:#9ca3af;\">({html.escape(media_type)})</span>" if media_type else ""
+            attachment_items.append(f"<li>{role}: {name}{suffix}</li>")
+        if attachment_items:
+            parts.append(
+                '<p style="margin:8px 0 4px;font-size:12px;font-weight:600;color:#374151;">Attachments</p>'
+                f'<ul style="margin:0;padding-left:18px;font-size:12px;color:#4b5563;">{"".join(attachment_items)}</ul>'
+            )
+    parts.append("</div>")
+    return "".join(parts)
+
+
+def format_submission_feedback_email(report: dict[str, Any]) -> tuple[str, str, str]:
+    subject, status = _feedback_email_subject(report)
 
     lines = [
         "Papyrus received your reference submission.",
@@ -330,48 +476,16 @@ def format_submission_feedback_email(report: dict[str, Any]) -> tuple[str, str]:
         )
 
     references = report.get("references") if isinstance(report.get("references"), list) else []
+    reference_blocks_html: list[str] = []
     if references:
         lines.extend(["", "References:"])
-        for index, entry in enumerate(references, start=1):
+        index = 0
+        for entry in references:
             if not isinstance(entry, dict):
                 continue
-            lines.append("")
-            lines.append(f"{index}. {entry.get('title') or '(untitled)'}")
-            if entry.get("subtitle"):
-                lines.append(f"   Subtitle: {entry.get('subtitle')}")
-            if entry.get("summary"):
-                lines.append(f"   Summary: {entry.get('summary')}")
-            if entry.get("sourceUri"):
-                lines.append(f"   Source: {entry.get('sourceUri')}")
-            plugin = entry.get("sourcePlugin")
-            if plugin:
-                lines.append(f"   Fetch plugin: {plugin}")
-            find_status = entry.get("findStatus")
-            summarize_status = entry.get("summarizeStatus")
-            if find_status:
-                lines.append(f"   Find: {find_status}")
-            if summarize_status:
-                lines.append(f"   Summarize: {summarize_status}")
-            if entry.get("pdfConfirmationRequired"):
-                located = entry.get("pdfLocated")
-                if located is True:
-                    pdf_name = entry.get("pdfFilename") or entry.get("pdfAttachmentId") or "source PDF"
-                    lines.append(f"   PDF: located ({pdf_name})")
-                elif located is False:
-                    lines.append("   PDF: not located")
-                else:
-                    lines.append("   PDF: unknown")
-            attachments = entry.get("attachments") if isinstance(entry.get("attachments"), list) else []
-            if attachments:
-                lines.append("   Attachments recorded:")
-                for attachment in attachments:
-                    if not isinstance(attachment, dict):
-                        continue
-                    role = attachment.get("role") or "attachment"
-                    name = attachment.get("filename") or attachment.get("id") or "file"
-                    media_type = attachment.get("mediaType") or ""
-                    suffix = f" ({media_type})" if media_type else ""
-                    lines.append(f"     - {role}: {name}{suffix}")
+            index += 1
+            _append_reference_feedback_plain(lines, entry, index)
+            reference_blocks_html.append(_reference_feedback_html_block(entry, index))
 
     lines.extend(
         [
@@ -381,7 +495,49 @@ def format_submission_feedback_email(report: dict[str, Any]) -> tuple[str, str]:
             "— Papyrus",
         ]
     )
-    return subject, "\n".join(lines)
+    body_text = "\n".join(lines)
+
+    message_id = html.escape(str(report.get("messageId") or "(unknown)"))
+    error_html = ""
+    if error:
+        error_html = (
+            f'<p style="margin:12px 0;padding:12px 14px;background:#fff3cd;border-left:4px solid #ffc107;'
+            f'font-size:14px;line-height:1.45;color:#664d03;">{html.escape(error)}</p>'
+        )
+    pipeline_html = ""
+    if status in {"COMPLETED", "FAILED", "IN_PROGRESS"}:
+        pipeline_html = (
+            '<table style="width:100%;margin:16px 0;border-collapse:collapse;font-size:14px;">'
+            "<tbody>"
+            f'<tr><td style="padding:6px 0;color:#6b7280;">Find changes</td><td style="padding:6px 0;text-align:right;font-weight:600;">{find_summary.get("changes", 0)}</td></tr>'
+            f'<tr><td style="padding:6px 0;color:#6b7280;">Find failures</td><td style="padding:6px 0;text-align:right;font-weight:600;">{find_summary.get("failures", 0)}</td></tr>'
+            f'<tr><td style="padding:6px 0;color:#6b7280;">Summaries generated</td><td style="padding:6px 0;text-align:right;font-weight:600;">{process_summary.get("generated", 0)} / {process_summary.get("attempted", 0)}</td></tr>'
+            f'<tr><td style="padding:6px 0;color:#6b7280;">References registered</td><td style="padding:6px 0;text-align:right;font-weight:600;">{report.get("registeredReferenceCount", 0)}</td></tr>'
+            "</tbody></table>"
+        )
+    references_html = "".join(reference_blocks_html)
+    if references_html:
+        references_html = f'<h3 style="margin:24px 0 12px;font-size:15px;color:#111827;">References</h3>{references_html}'
+
+    body_html = (
+        '<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f3f4f6;">'
+        '<div style="max-width:640px;margin:0 auto;padding:24px 16px;font-family:Georgia,\'Times New Roman\',serif;">'
+        '<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;padding:28px 32px;">'
+        '<p style="margin:0 0 4px;font-size:12px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#6b7280;">Papyrus</p>'
+        '<h1 style="margin:0 0 16px;font-size:22px;line-height:1.3;color:#111827;">Your reference submission</h1>'
+        f'<p style="margin:0 0 8px;font-size:14px;color:#4b5563;">Message <code style="font-size:12px;background:#f3f4f6;padding:2px 6px;border-radius:4px;">{message_id}</code></p>'
+        f'<p style="margin:0 0 16px;">{_status_label_html(status)}</p>'
+        f"{error_html}"
+        f"{pipeline_html}"
+        f"{references_html}"
+        '<p style="margin:28px 0 0;padding-top:20px;border-top:1px solid #e5e7eb;font-size:13px;color:#6b7280;">'
+        "Reply to this message if something looks wrong."
+        "</p>"
+        "</div>"
+        '<p style="margin:16px 0 0;text-align:center;font-size:12px;color:#9ca3af;">— Papyrus</p>'
+        "</div></body></html>"
+    )
+    return subject, body_text, body_html
 
 
 def send_submission_feedback_email(
@@ -389,6 +545,7 @@ def send_submission_feedback_email(
     to_address: str,
     subject: str,
     body_text: str,
+    body_html: str | None = None,
     from_address: str | None = None,
     reply_to: str | None = None,
     ses_client: Any | None = None,
@@ -406,9 +563,12 @@ def send_submission_feedback_email(
 
     client = ses_client or boto3.client("ses")
     destination: dict[str, Any] = {"ToAddresses": [recipient]}
+    body: dict[str, Any] = {"Text": {"Data": body_text, "Charset": "UTF-8"}}
+    if body_html:
+        body["Html"] = {"Data": body_html, "Charset": "UTF-8"}
     message = {
         "Subject": {"Data": subject, "Charset": "UTF-8"},
-        "Body": {"Text": {"Data": body_text, "Charset": "UTF-8"}},
+        "Body": body,
     }
     request: dict[str, Any] = {
         "Source": sender,
@@ -468,11 +628,12 @@ def maybe_send_submission_feedback_email(
         processing_error=processing_error,
         reference_entries=reference_entries,
     )
-    subject, body_text = format_submission_feedback_email(report)
+    subject, body_text, body_html = format_submission_feedback_email(report)
     send_result = send_submission_feedback_email(
         to_address=sender_email,
         subject=subject,
         body_text=body_text,
+        body_html=body_html,
         ses_client=ses_client,
     )
 

@@ -1,0 +1,11 @@
+# Copy to .papyrus/config.yaml (that path is gitignored) and adjust for your deployment.
+schemaVersion: 1
+
+topics:
+  steeringConfigPath: corpora/papyrus-steering.yml
+  lexicalConfigPath: corpora/papyrus-lexical-steering.yml
+
+# Public web UI used in outbound emails (submission feedback links to references).
+# Override in Lambda with PAPYRUS_PUBLIC_SITE_BASE_URL when config file is absent.
+publicSite:
+  baseUrl: https://p.apyr.us

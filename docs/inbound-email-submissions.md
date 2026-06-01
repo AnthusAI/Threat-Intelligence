@@ -74,14 +74,34 @@ poetry run papyrus procedures seed-required --apply
 ## Submission feedback email
 
 After intake or processing finishes, Papyrus sends an acknowledgment email to
-the submitter (`metadata.senderEmail`) via SES. The reply includes:
+the submitter (`metadata.senderEmail`) via SES. The message is **multipart**
+(HTML plus plain text). The reply includes:
 
 - Overall status (`COMPLETED`, `FAILED`, `REJECTED`)
 - Find / summarize pipeline counts
 - Per-reference title, subtitle, summary (when generated)
+- **Newsroom link** for each reference (`/newsroom/references/{lineageId}` on the public site)
 - Source fetch plugin (for example `arxiv`, `acm`, `youtube`)
 - PDF located or not for academic papers
 - Attachments recorded on the reference (role, filename, media type)
+
+### Public reference URLs
+
+Feedback emails build a public URL per reference, for example:
+
+`https://p.apyr.us/newsroom/references/reference-knowledge-corpus-ai-ml-research-…`
+
+Configure the site base URL in `.papyrus/config.yaml` (see `papyrus-config.example.yaml`):
+
+```yaml
+schemaVersion: 1
+publicSite:
+  baseUrl: https://p.apyr.us
+```
+
+Lambda deployments set `PAPYRUS_PUBLIC_SITE_BASE_URL` on the inbound processor
+(which overrides the config file when the repo checkout is not present). If
+neither is set, the default base URL is `https://p.apyr.us`.
 
 Feedback is idempotent: `metadata.feedbackEmailSentAt` prevents duplicate sends.
 Disable with `PAPYRUS_INBOUND_FEEDBACK_EMAIL_ENABLED=false`. Override the From
@@ -90,6 +110,69 @@ address with `PAPYRUS_INBOUND_FEEDBACK_FROM_EMAIL`.
 Rejected intake (unauthorized sender, no citations, research-assignment wording)
 invokes the processor with `sendFeedbackOnly: true` so the submitter still gets
 an explanation without running find/process.
+
+## SES sandbox and feedback recipients
+
+Inbound mail to `submissions@p.apyr.us` does **not** require verifying each
+sender. **Outbound** feedback replies are subject to SES account mode:
+
+| Account mode | Who can receive feedback |
+|--------------|---------------------------|
+| **Sandbox** | Only [verified identities](https://docs.aws.amazon.com/ses/latest/dg/verify-addresses-and-domains.html) (individual emails or whole domains) |
+| **Production** | Any deliverable address (normal bounce/complaint rules) |
+
+The **From** address uses your verified domain (`submissions@p.apyr.us` on
+`p.apyr.us`). Each **To** address (`metadata.senderEmail`) must be verified in
+sandbox before SES will deliver the acknowledgment.
+
+### Verify submitter mailboxes (CLI)
+
+Use credentials with `ses:CreateEmailIdentity` and `ses:GetEmailIdentity` (admin
+or a role with SES full access). Region must match deployment (`us-east-1`).
+
+```bash
+chmod +x scripts/verify-ses-feedback-recipients.sh
+
+# Request verification and show status for each address:
+AWS_PROFILE=YourProfile ./scripts/verify-ses-feedback-recipients.sh \
+  rap@endymion.com \
+  ryan@anth.us
+```
+
+Or per address:
+
+```bash
+aws sesv2 create-email-identity --email-identity rap@endymion.com --region us-east-1
+aws sesv2 get-email-identity --email-identity rap@endymion.com --region us-east-1 \
+  --query VerificationStatus
+```
+
+### Confirmation email (required)
+
+`create-email-identity` triggers an email from AWS (subject along the lines of
+“Amazon Web Services – Email Address Verification Request”). **Someone with access
+to that inbox must click the link.** Until `VerificationStatus` is `SUCCESS`,
+feedback sends to that address will fail in sandbox.
+
+- Check spam/junk if it does not arrive within a few minutes.
+- To resend: delete the identity and create it again, or use the SES console
+  **Resend** action on the pending identity.
+
+```bash
+aws sesv2 delete-email-identity --email-identity rap@endymion.com --region us-east-1
+aws sesv2 create-email-identity --email-identity rap@endymion.com --region us-east-1
+```
+
+### Verify a whole domain (optional)
+
+If all submitters share one domain (for example `@anth.us`), verify the **domain**
+in SES instead of every mailbox. Add the DNS records SES provides; then any
+address on that domain can receive feedback without per-user verification.
+
+### Leave sandbox (recommended for production)
+
+SES console → **Account dashboard** → **Request production access**. Describe
+transactional replies to registered users who submitted citations by email.
 
 ## Manual test
 

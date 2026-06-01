@@ -54,6 +54,11 @@ class EmailSubmissionFeedbackTests(unittest.TestCase):
         self.assertEqual(len(entries), 1)
         entry = entries[0]
         self.assertEqual(entry["sourcePlugin"], "arxiv")
+        self.assertEqual(entry["referenceLineageId"], "lineage-1")
+        self.assertEqual(
+            entry["newsroomUrl"],
+            "https://p.apyr.us/newsroom/references/lineage-1",
+        )
         self.assertTrue(entry["pdfLocated"])
         self.assertEqual(entry["subtitle"], "Transformer architecture")
         self.assertEqual(entry["summarizeStatus"], "generated")
@@ -75,6 +80,7 @@ class EmailSubmissionFeedbackTests(unittest.TestCase):
                     "subtitle": "Sub",
                     "summary": "Sum",
                     "sourceUri": "https://example.com",
+                    "newsroomUrl": "https://p.apyr.us/newsroom/references/lineage-example",
                     "sourcePlugin": "default",
                     "findStatus": "planned",
                     "summarizeStatus": "generated",
@@ -83,10 +89,13 @@ class EmailSubmissionFeedbackTests(unittest.TestCase):
                 }
             ],
         }
-        subject, body = email_submission_feedback.format_submission_feedback_email(report)
+        subject, body, html_body = email_submission_feedback.format_submission_feedback_email(report)
         self.assertIn("processed", subject)
         self.assertIn("Example", body)
+        self.assertIn("View in Papyrus: https://p.apyr.us/newsroom/references/lineage-example", body)
         self.assertIn("Fetch plugin: default", body)
+        self.assertIn("Open in Papyrus", html_body)
+        self.assertIn("https://p.apyr.us/newsroom/references/lineage-example", html_body)
 
     def test_maybe_send_skips_when_already_sent(self):
         client = mock.Mock()
@@ -128,6 +137,9 @@ class EmailSubmissionFeedbackTests(unittest.TestCase):
             )
         self.assertTrue(result["sent"])
         ses.send_email.assert_called_once()
+        email_body = ses.send_email.call_args.kwargs["Message"]["Body"]
+        self.assertIn("Html", email_body)
+        self.assertIn("Text", email_body)
         client.graphql.assert_called_once()
 
 

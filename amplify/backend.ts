@@ -244,6 +244,7 @@ if (enableInboundEmail) {
     "PAPYRUS_INBOUND_FEEDBACK_FROM_EMAIL",
     `Papyrus Submissions <submissions@${inboundEmailDomain}>`,
   );
+  inboundProcessor.addEnvironment("PAPYRUS_PUBLIC_SITE_BASE_URL", "https://p.apyr.us");
   inboundProcessor.addEnvironment("PAPYRUS_GRAPHQL_ENDPOINT", graphqlEndpoint);
 
   receiveLambda.addToRolePolicy(
