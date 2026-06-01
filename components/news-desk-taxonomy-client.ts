@@ -1622,13 +1622,9 @@ export async function loadNewsroomReferencePage(options: NewsroomReferencePageOp
     return loadReferencePageByFallbackList(options);
   }
   if (options.excludePending) {
-    const reviewedPage = await loadReferencePageByReviewedFeed({
-      limit: options.limit,
-      nextToken: options.nextToken,
-      corpusId: options.corpusId,
-    });
-    if (reviewedPage.items.length > 0 || options.nextToken) return sortReferencePageByOrder(reviewedPage, order);
-    // Backfill may still be pending in an environment; fall back to status-index merge.
+    // Use the curation-status merge, not reviewedFeedKey. The reviewed-feed GSI is only
+    // populated for references that went through backfill; treating it as authoritative
+    // capped production at ~100 rows while thousands exist in the status indexes.
     const mergedReviewedPage = await loadMergedReferenceStatusPage({
       statuses: ["accepted", "rejected", "archived"],
       limit: options.limit,

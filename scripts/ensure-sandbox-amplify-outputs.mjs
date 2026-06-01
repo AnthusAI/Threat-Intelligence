@@ -2,6 +2,9 @@
 /**
  * Keep ~/Projects/Papyrus local dev on the Ryan sandbox backend, not production.
  * Run before `next dev` so amplify_outputs.json targets sandbox AppSync/Cognito.
+ *
+ * ~/Projects/Papyrus-production (or PAPYRUS_USE_PRODUCTION_AMPLIFY=1) keeps production
+ * outputs so local Next.js can debug against the live GraphQL API.
  */
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -37,6 +40,17 @@ function classifyOutputs(outputs) {
   const isSandbox =
     graphqlUrl.includes(SANDBOX_GRAPHQL_HOST) || userPoolId === SANDBOX_USER_POOL_ID;
   return { graphqlUrl, userPoolId, isProduction, isSandbox };
+}
+
+function shouldKeepProductionAmplifyOutputs() {
+  const flag = process.env.PAPYRUS_USE_PRODUCTION_AMPLIFY?.trim().toLowerCase();
+  if (flag === "1" || flag === "true" || flag === "yes") return true;
+  const target = process.env.PAPYRUS_AMPLIFY_TARGET?.trim().toLowerCase();
+  if (target === "production" || target === "prod") return true;
+  const repoName = path.basename(repoRoot).toLowerCase();
+  if (repoName === "papyrus-production") return true;
+  if (fs.existsSync(path.join(repoRoot, ".papyrus-production-workspace"))) return true;
+  return false;
 }
 
 function generateSandboxOutputs() {
@@ -88,18 +102,37 @@ function syncEnvGraphqlEndpoint() {
   });
   if (!replaced) next.push(`PAPYRUS_GRAPHQL_ENDPOINT=${endpoint}`);
   fs.writeFileSync(envPath, `${next.join("\n").replace(/\n*$/, "")}\n`, "utf8");
-  console.log(`[papyrus] Updated .env PAPYRUS_GRAPHQL_ENDPOINT for sandbox CLI commands.`);
+  console.log(`[papyrus] Updated .env PAPYRUS_GRAPHQL_ENDPOINT.`);
 }
 
 function main() {
   const outputs = readOutputs();
   if (!outputs) {
+    if (shouldKeepProductionAmplifyOutputs()) {
+      console.error(
+        "[papyrus] amplify_outputs.json is missing but production local dev was requested.",
+      );
+      console.error(
+        "  Copy production outputs into this repo or run: npm run outputs:production",
+      );
+      process.exit(1);
+    }
     console.log("[papyrus] amplify_outputs.json is missing.");
     generateSandboxOutputs();
     return;
   }
 
   const { graphqlUrl, userPoolId, isProduction, isSandbox } = classifyOutputs(outputs);
+
+  if (isProduction && shouldKeepProductionAmplifyOutputs()) {
+    console.log("[papyrus] Keeping production amplify_outputs.json for local dev.");
+    console.log(
+      `  graphql: ${graphqlUrl || "(missing)"}\n  user pool: ${userPoolId || "(missing)"}`,
+    );
+    syncEnvGraphqlEndpoint();
+    return;
+  }
+
   if (isSandbox && !isProduction) {
     console.log(
       `[papyrus] amplify_outputs.json already targets sandbox (${graphqlUrl || "no graphql url"}).`,
