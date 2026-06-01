@@ -27,7 +27,10 @@ import { procedureAction } from "./functions/procedure-action/resource";
 import { readerSettings } from "./functions/reader-settings/resource";
 import { emailSubmissionProcessor } from "./functions/email-submission-processor/resource";
 import { sesInboundReceive } from "./functions/ses-inbound-receive/resource";
+import { slackDelivery } from "./functions/slack-delivery/resource";
+import { slackEvents } from "./functions/slack-events/resource";
 import { InboundEmailStack } from "./inbound-email/stack";
+import { SlackAgentStack } from "./slack/stack";
 import { storage } from "./storage/resource";
 
 const knowledgeVectorIndexName = "papyrus-knowledge";
@@ -58,6 +61,7 @@ function sanitizeAwsName(value: string, maxLength = 50): string {
 // SES active receipt rule sets and shared backup vault names are account-global.
 // Keep them on the production pipeline only unless explicitly opted in.
 const enableInboundEmail = readEnvFlag("PAPYRUS_ENABLE_INBOUND_EMAIL", isAmplifyProductionPipeline);
+const enableSlackAgent = readEnvFlag("PAPYRUS_ENABLE_SLACK", false);
 const enableStorageBackups = readEnvFlag("PAPYRUS_ENABLE_STORAGE_BACKUPS", isAmplifyProductionPipeline);
 
 const backend = defineBackend({
@@ -74,6 +78,8 @@ const backend = defineBackend({
   readerSettings,
   emailSubmissionProcessor,
   sesInboundReceive,
+  slackEvents,
+  slackDelivery,
   storage,
 });
 
@@ -101,7 +107,7 @@ const inboundDnsRecordName = inboundEmailDomain.endsWith(`.${inboundDnsZoneName}
   ? inboundEmailDomain.slice(0, -(inboundDnsZoneName.length + 1))
   : inboundEmailDomain;
 
-if (enableConsoleResponder) {
+if (enableConsoleResponder || enableSlackAgent) {
   const messageTable = backend.data.resources.tables.Message;
   const cfnTables = backend.data.resources.cfnResources.cfnTables;
   const messageCfnTable =
@@ -120,12 +126,12 @@ if (enableConsoleResponder) {
 
   const messageStreamArn = messageTable.tableStreamArn ?? messageCfnTable?.attrStreamArn;
   if (!messageStreamArn) {
-    throw new Error(`ConsoleChatResponder requires Message table stream ARN. cfnTables=${Object.keys(cfnTables).join(",")}`);
+    throw new Error(`Message agents require Message table stream ARN. cfnTables=${Object.keys(cfnTables).join(",")}`);
   }
 
   const messageThreadTable = backend.data.resources.tables.MessageThread;
-
   const dataStack = Stack.of(messageTable);
+  const graphqlEndpoint = backend.data.resources.cfnResources.cfnGraphqlApi.attrGraphQlUrl;
   const jwtAuthorizerCfn = backend.graphqlJwtAuthorizer.resources.lambda.node.defaultChild as CfnFunction | undefined;
   const jwtAuthorizerEnvironment = jwtAuthorizerCfn?.environment;
   const jwtAuthorizerVariables =
@@ -139,17 +145,58 @@ if (enableConsoleResponder) {
     || jwtAuthorizerVariables?.AMPLIFY_SSM_ENV_CONFIG?.trim()
     || "";
 
-  new ConsoleChatResponderStack(dataStack, "ConsoleChatResponder", {
-    messageTable,
-    messageStreamArn,
-    threadTable: messageThreadTable,
-    projectRoot,
-    graphqlEndpoint: backend.data.resources.cfnResources.cfnGraphqlApi.attrGraphQlUrl,
-    amplifySsmEnvConfig: jwtSsmEnvConfig || undefined,
-    responseTarget: process.env.PAPYRUS_CONSOLE_RESPONSE_TARGET,
-    model: process.env.PAPYRUS_CONSOLE_MODEL,
-    prebuiltImageUri: process.env.PAPYRUS_CONSOLE_RESPONDER_IMAGE_URI,
-  });
+  if (enableConsoleResponder) {
+    new ConsoleChatResponderStack(dataStack, "ConsoleChatResponder", {
+      messageTable,
+      messageStreamArn,
+      threadTable: messageThreadTable,
+      projectRoot,
+      graphqlEndpoint,
+      amplifySsmEnvConfig: jwtSsmEnvConfig || undefined,
+      responseTarget: process.env.PAPYRUS_CONSOLE_RESPONSE_TARGET,
+      model: process.env.PAPYRUS_CONSOLE_MODEL,
+      prebuiltImageUri: process.env.PAPYRUS_CONSOLE_RESPONDER_IMAGE_URI,
+    });
+  }
+
+  if (enableSlackAgent) {
+    const slackEventsLambda = backend.slackEvents.resources.lambda as LambdaFunction;
+    const slackDeliveryLambda = backend.slackDelivery.resources.lambda as LambdaFunction;
+    slackEventsLambda.addToRolePolicy(
+      new PolicyStatement({
+        actions: ["appsync:GraphQL"],
+        resources: ["*"],
+      }),
+    );
+    backend.slackEvents.addEnvironment("PAPYRUS_GRAPHQL_ENDPOINT", graphqlEndpoint);
+    backend.slackEvents.addEnvironment(
+      "PAPYRUS_CONSOLE_RESPONSE_TARGET",
+      (process.env.PAPYRUS_CONSOLE_RESPONSE_TARGET ?? "cloud").trim() || "cloud",
+    );
+    backend.slackEvents.addEnvironment(
+      "PAPYRUS_SLACK_ALLOWED_USER_IDS",
+      (process.env.PAPYRUS_SLACK_ALLOWED_USER_IDS ?? "").trim(),
+    );
+    backend.slackDelivery.addEnvironment(
+      "PAPYRUS_CONSOLE_RESPONSE_TARGET",
+      (process.env.PAPYRUS_CONSOLE_RESPONSE_TARGET ?? "cloud").trim() || "cloud",
+    );
+    const slackSigningSecretName = (process.env.PAPYRUS_SLACK_SIGNING_SECRET_NAME ?? "PAPYRUS_SLACK_SIGNING_SECRET").trim();
+    const slackBotTokenName = (process.env.PAPYRUS_SLACK_BOT_TOKEN_NAME ?? "PAPYRUS_SLACK_BOT_TOKEN").trim();
+    backend.slackEvents.addEnvironment("PAPYRUS_SLACK_SIGNING_SECRET", secret(slackSigningSecretName));
+    backend.slackDelivery.addEnvironment("PAPYRUS_SLACK_BOT_TOKEN", secret(slackBotTokenName));
+
+    const slackStack = new SlackAgentStack(dataStack, "SlackAgent", {
+      slackEventsFunction: slackEventsLambda,
+      slackDeliveryFunction: slackDeliveryLambda,
+      messageTable,
+      messageStreamArn,
+      graphqlEndpoint,
+    });
+    backend.addOutput({
+      slackEventsUrl: slackStack.eventsFunctionUrl,
+    });
+  }
 }
 
 const storageBucket = backend.storage.resources.bucket;
@@ -315,6 +362,12 @@ if (enableInboundEmail) {
         `${storageBucket.bucketArn}/inbound-email/*`,
         `${storageBucket.bucketArn}/inbound-email-archived/*`,
       ],
+    }),
+  );
+  processorLambda.addToRolePolicy(
+    new PolicyStatement({
+      actions: ["s3:GetObject", "s3:PutObject"],
+      resources: [corporaObjectArn],
     }),
   );
   receiveLambda.addToRolePolicy(

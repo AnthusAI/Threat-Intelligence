@@ -1,0 +1,9 @@
+import { defineFunction } from "@aws-amplify/backend";
+
+export const slackEvents = defineFunction({
+  name: "papyrus-slack-events",
+  entry: "./handler.ts",
+  timeoutSeconds: 30,
+  memoryMB: 512,
+  resourceGroupName: "data",
+});
