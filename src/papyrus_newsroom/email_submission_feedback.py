@@ -560,9 +560,10 @@ def format_submission_feedback_email(report: dict[str, Any]) -> tuple[str, str, 
         [
             "",
             (
+                "Send a single PDF with no URL in the body to register or update a paper from the file. "
                 "Reply with only PDF attachments (no message text) to file a missing source on a single-reference submission. "
                 "Include a message in your reply, or questions, and the Papyrus agent will help. "
-                f"New citations: email {default_feedback_reply_to_address()} with a URL or DOI."
+                f"New citations with a URL or DOI: email {default_feedback_reply_to_address()}."
             ),
         ]
     )
@@ -605,9 +606,10 @@ def format_submission_feedback_email(report: dict[str, Any]) -> tuple[str, str, 
         f"{references_html}"
         f'<p style="margin:calc({_EMAIL_RHYTHM_PX}px * 1.5) 0 0;padding-top:{_EMAIL_RHYTHM_PX}px;'
         f'border-top:1px solid {_EMAIL_RULE};color:{_EMAIL_MUTED};font-family:{_EMAIL_SANS};'
-        f'font-size:12px;line-height:1.45;">Reply with only PDF attachments (no message text) to file a missing source on a single-reference submission. '
+        f'font-size:12px;line-height:1.45;">Send a single PDF with no URL in the body to register or update a paper from the file. '
+        f"Reply with only PDF attachments (no message text) to file a missing source on a single-reference submission. "
         f"Include a message in your reply, or questions, and the Papyrus agent will help. "
-        f"New citations: email {html.escape(default_feedback_reply_to_address())} with a URL or DOI.</p>"
+        f"New citations with a URL or DOI: email {html.escape(default_feedback_reply_to_address())}.</p>"
         "</div>"
         "</div></body></html>"
     )

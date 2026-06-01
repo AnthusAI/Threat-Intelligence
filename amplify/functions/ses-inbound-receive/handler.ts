@@ -131,6 +131,7 @@ async function processInboundSubmission(inbound: InboundPayload): Promise<Record
   const attachmentOnlyReply = intakeClassification === "attachment_only_reply";
   const conversationalReply = intakeClassification === "conversational_reply";
   const agentIntake = intakeClassification === "agent_intake";
+  const pdfOnlyIntake = intakeClassification === "pdf_only_intake";
 
   let status = authorized ? "received" : "rejected";
   let responseStatus = authorized ? "PENDING" : "REJECTED";
@@ -142,7 +143,14 @@ async function processInboundSubmission(inbound: InboundPayload): Promise<Record
     status = "rejected";
     responseStatus = "REJECTED";
     responseError = "Submission looks like a research assignment request. Send direct citations (URLs or DOIs), not open-ended research tasks.";
-  } else if (authorized && citations.length === 0 && !attachmentOnlyReply && !conversationalReply && !agentIntake) {
+  } else if (
+    authorized
+    && citations.length === 0
+    && !attachmentOnlyReply
+    && !conversationalReply
+    && !agentIntake
+    && !pdfOnlyIntake
+  ) {
     status = "rejected";
     responseStatus = "REJECTED";
     responseError = "No direct citations (URL or DOI) were found in the email body.";

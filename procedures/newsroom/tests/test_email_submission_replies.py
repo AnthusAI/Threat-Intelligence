@@ -70,6 +70,33 @@ class EmailSubmissionReplyTests(unittest.TestCase):
             "direct_citation_intake",
         )
 
+    def test_classify_single_pdf_only_as_pdf_only_intake(self):
+        pdf = email_submission_replies.InboundMimeAttachment(
+            filename="paper.pdf",
+            media_type="application/pdf",
+            payload=b"%PDF-1.4",
+        )
+        self.assertEqual(
+            email_submission_replies.classify_new_submission_intake("", [], [pdf]),
+            "pdf_only_intake",
+        )
+
+    def test_classify_pdf_plus_url_as_agent_intake(self):
+        pdf = email_submission_replies.InboundMimeAttachment(
+            filename="paper.pdf",
+            media_type="application/pdf",
+            payload=b"%PDF-1.4",
+        )
+        citations = [{"url": "https://arxiv.org/abs/1706.03762"}]
+        self.assertEqual(
+            email_submission_replies.classify_new_submission_intake(
+                "https://arxiv.org/abs/1706.03762",
+                citations,
+                [pdf],
+            ),
+            "agent_intake",
+        )
+
     def test_feedback_rfc_message_id(self):
         with unittest.mock.patch.dict(
             "os.environ",

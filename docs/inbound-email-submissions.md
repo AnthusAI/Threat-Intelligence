@@ -31,13 +31,14 @@ They are granted access via `allow.resource(...)` on the data schema and
 
 ## Submission contract
 
-Emails must include at least one **direct citation**:
+Authorized email must include at least one intake signal:
 
-- `https://…` URL, or
-- `10.xxxx/...` DOI (normalized to `https://doi.org/...`)
+- `https://…` URL or `10.xxxx/...` DOI in the body, **or**
+- A single PDF attachment (identifiers extracted from the file), **or**
+- A reply in an existing submission feedback thread (see table below)
 
 Open-ended research requests (for example, “research the topic of …” with no
-citations) are rejected.
+citations or attachments) are rejected.
 
 ## Infrastructure
 
@@ -125,9 +126,11 @@ original submission `Message`.
 | **Single URL/DOI, minimal prose** | Deterministic pipeline: create / find / process direct citations |
 | **Multiple URLs** (e.g. forwarded newsletter) | **Console agent** — file relevant references, create **insight** Messages where prose discusses a paper (`papyrus.reference.insight_create`), skip footer/nav links |
 | **URL + substantial message** | **Console agent** — decide filing vs editorial insight vs question vs command (knowledge search, list references, etc.) |
+| **PDF only** (one attachment, no body URL/DOI) | Deterministic: extract DOI/arXiv from PDF (GROBID header when `BIBLICUS_GROBID_URL` is reachable, else PDF-byte heuristics), attach to existing corpus reference or create from identifier, then find/process |
+| **PDF + URL/DOI or multiple PDFs or PDF + long prose** | **Console agent** |
 | **Reply: attachments only** (no new prose) | Deterministic PDF filing when parent submission had exactly one reference |
 | **Reply: attachments + message**, or filing failed | **Console agent** with parent submission context |
-| **No citations, not a reply** | Rejected |
+| **No citations, not a reply, no PDF** | Rejected |
 
 Reply-To on feedback mail is `submissions@p.apyr.us`. Intake stores
 `metadata.parentSubmissionMessageId`, `metadata.intakeClassification`, and MIME
@@ -195,6 +198,24 @@ address on that domain can receive feedback without per-user verification.
 
 SES console → **Account dashboard** → **Request production access**. Describe
 transactional replies to registered users who submitted citations by email.
+
+## Dogfooding checklist
+
+Before relying on email for knowledge-base building:
+
+1. **Deploy** inbound receive, email processor, and console-chat-responder; set
+   `PAPYRUS_PUBLIC_SITE_BASE_URL` and `PAPYRUS_INBOUND_EMAIL_CORPUS_KEY`.
+2. **SES sandbox:** verify each submitter mailbox (or the whole sender domain) so
+   feedback replies deliver — see [SES sandbox](#ses-sandbox-and-feedback-recipients).
+3. **PDF-only intake:** set `BIBLICUS_GROBID_URL` on the email processor (or a
+   reachable GROBID service in the same VPC) for reliable header metadata; without
+   it, DOI/arXiv heuristics on PDF bytes still run but are less complete.
+4. **Console agent:** ensure `PAPYRUS_CONSOLE_RESPONSE_TARGET=cloud` and the
+   responder can reach Tactus / GraphQL for newsletter, commands, and fallbacks.
+5. **Seed procedures:** `poetry run papyrus procedures seed-required --apply`.
+
+Exercise each row in the [reply routing table](#replying-to-submission-feedback)
+plus a **PDF-only** first message and a **newsletter forward** with several links.
 
 ## Manual test
 

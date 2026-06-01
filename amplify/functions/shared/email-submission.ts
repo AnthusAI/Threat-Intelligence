@@ -144,7 +144,15 @@ export function hasSubstantialComposedProse(
 export function classifyNewSubmissionIntake(
   bodyText: string,
   citations: Array<Record<string, unknown>>,
+  attachmentCount = 0,
 ): string {
+  const hasPdfAttachments = attachmentCount > 0;
+  if (citations.length > 0 && hasPdfAttachments) return "agent_intake";
+  if (citations.length === 0 && hasPdfAttachments) {
+    if (attachmentCount > 1) return "agent_intake";
+    if (hasSubstantialComposedProse(bodyText, [])) return "agent_intake";
+    return "pdf_only_intake";
+  }
   if (citations.length === 0) return "new_submission";
   if (citations.length > 1) return "agent_intake";
   if (hasSubstantialComposedProse(bodyText, citations as Array<{ url?: string }>)) return "agent_intake";
@@ -163,7 +171,7 @@ export function classifyInboundEmailIntake(input: {
     if (input.userComposedText || input.attachmentCount > 0) return "conversational_reply";
     return "empty_reply";
   }
-  return classifyNewSubmissionIntake(input.bodyText, input.citations);
+  return classifyNewSubmissionIntake(input.bodyText, input.citations, input.attachmentCount);
 }
 
 export function extractUserComposedReplyText(bodyText: string): string {

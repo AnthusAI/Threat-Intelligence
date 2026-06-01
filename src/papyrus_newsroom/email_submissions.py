@@ -409,6 +409,7 @@ def register_inbound_email_message(
     attachment_only_reply = intake_classification == "attachment_only_reply"
     conversational_reply = intake_classification == "conversational_reply"
     agent_intake = intake_classification == "agent_intake"
+    pdf_only_intake = intake_classification == "pdf_only_intake"
     status = "received" if authorized else "rejected"
     response_status = "PENDING" if authorized else "REJECTED"
     response_error = None if authorized else "Sender email is not registered to an active Papyrus user."
@@ -419,7 +420,14 @@ def register_inbound_email_message(
             "Submission looks like a research assignment request. "
             "Send direct citations (URLs or DOIs), not open-ended research tasks."
         )
-    elif authorized and not citations and not attachment_only_reply and not conversational_reply and not agent_intake:
+    elif (
+        authorized
+        and not citations
+        and not attachment_only_reply
+        and not conversational_reply
+        and not agent_intake
+        and not pdf_only_intake
+    ):
         status = "rejected"
         response_status = "REJECTED"
         response_error = "No direct citations (URL or DOI) were found in the email body."

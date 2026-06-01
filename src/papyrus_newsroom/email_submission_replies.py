@@ -11,8 +11,6 @@ from email import policy
 from email.parser import BytesParser
 from typing import Any
 
-from papyrus_content.source_readiness import select_reference_attachment_by_role
-
 _SUBMISSION_MESSAGE_ID_PATTERN = re.compile(
     r"^(message-email-submission-[a-f0-9]{20})(?:@|$)",
     re.IGNORECASE,
@@ -209,7 +207,20 @@ def has_substantial_composed_prose(body_text: str, citations: list[dict[str, Any
     return len(clauses) >= 2
 
 
-def classify_new_submission_intake(body_text: str, citations: list[dict[str, Any]]) -> str:
+def classify_new_submission_intake(
+    body_text: str,
+    citations: list[dict[str, Any]],
+    attachments: list[InboundMimeAttachment] | None = None,
+) -> str:
+    pdf_attachments = _pdf_attachments(attachments or [])
+    if citations and pdf_attachments:
+        return "agent_intake"
+    if not citations and pdf_attachments:
+        if len(pdf_attachments) > 1:
+            return "agent_intake"
+        if has_substantial_composed_prose(body_text, []):
+            return "agent_intake"
+        return "pdf_only_intake"
     if not citations:
         return "new_submission"
     if len(citations) > 1:
@@ -248,7 +259,7 @@ def classify_inbound_email_intake(
             parent_message_id=parent_message_id,
             attachments=attachments,
         )
-    return classify_new_submission_intake(body_text, citations)
+    return classify_new_submission_intake(body_text, citations, attachments)
 
 
 def _email_agent_instructions() -> str:
@@ -308,12 +319,7 @@ def try_file_attachment_only_reply(
     envelope: InboundMimeEnvelope,
     corpus_key: str,
 ) -> dict[str, Any]:
-    from papyrus_content.reference_url_text import (
-        apply_reference_url_text_attachment_changes,
-        run_reference_source_find,
-        _reference_source_attachment_record,
-    )
-    from papyrus_content.records import build_record_changes
+    from papyrus_newsroom.email_pdf_intake import file_pdf_payloads_against_reference
     from papyrus_newsroom.email_submissions import _load_registered_reference_processing_records, _message_metadata
 
     parent_message = client.get_record("Message", parent_message_id) or {}
@@ -332,75 +338,22 @@ def try_file_attachment_only_reply(
     if not pdf_attachments:
         return {"ok": False, "reason": "no-pdf-attachments"}
 
-    references, attachments, _relations = _load_registered_reference_processing_records(
+    references, _attachments, _relations = _load_registered_reference_processing_records(
         client,
         registered_reference_ids=set(reference_ids),
         import_run_id=str((parent_metadata.get("processingResult") or {}).get("importRunId") or "").strip() or None,
     )
     if not references:
         return {"ok": False, "reason": "reference-not-found"}
-    reference = references[0]
-    lineage_id = str(reference.get("lineageId") or "")
-    existing_source = select_reference_attachment_by_role(reference, attachments, role="source")
-
-    uploaded: list[dict[str, str]] = []
-    plans: list[dict[str, Any]] = []
-    attachment_records: list[dict[str, Any]] = []
-    current_source = existing_source
-    for index, attachment in enumerate(pdf_attachments):
-        media_type = "application/pdf"
-        source_uri = str(reference.get("sourceUri") or "").strip() or f"email-reply://{attachment.filename}"
-        record = _reference_source_attachment_record(
-            reference=reference,
-            corpus_key=corpus_key,
-            source_uri=source_uri,
-            metadata={
-                "channel": "email_reply",
-                "replyMessageId": reply_message_id,
-                "parentSubmissionMessageId": parent_message_id,
-                "attachmentIndex": index,
-            },
-            content=attachment.payload,
-            media_type=media_type,
-            existing_attachment=current_source if index == 0 else None,
-        )
-        body = record.pop("__attachmentBody", None)
-        if not isinstance(body, (bytes, bytearray)):
-            return {"ok": False, "reason": "attachment-body-missing"}
-        plans.append({"record": {"expected": record}, "body": bytes(body)})
-        attachment_records.append({"modelName": "ReferenceAttachment", "expected": record})
-        uploaded.append({"filename": attachment.filename, "attachmentId": str(record.get("id") or "")})
-        if index == 0:
-            current_source = record
-
-    attachment_changes = build_record_changes(client, attachment_records)
-    apply_summary = apply_reference_url_text_attachment_changes(
-        client=client,
-        changes=attachment_changes,
-        plans=plans,
+    return file_pdf_payloads_against_reference(
+        client,
+        reference=references[0],
+        pdf_attachments=pdf_attachments,
+        corpus_key=corpus_key,
+        channel="email_reply",
+        submission_message_id=reply_message_id,
+        parent_submission_message_id=parent_message_id,
     )
-    find_summary = run_reference_source_find(
-        client=client,
-        references=references,
-        attachments=attachments + [change["expected"] for change in attachment_changes if change.get("expected")],
-        reference_ids={str(reference.get("id") or "")},
-        apply=True,
-        force=True,
-        pdf_only=True,
-    )
-    return {
-        "ok": True,
-        "reason": "filed",
-        "referenceId": str(reference.get("id") or ""),
-        "referenceLineageId": lineage_id,
-        "uploadedAttachments": uploaded,
-        "applySummary": apply_summary,
-        "findSummary": {
-            "changes": find_summary.get("changes"),
-            "eligibleCount": find_summary.get("eligibleCount"),
-            "plannedCount": find_summary.get("plannedCount"),
-        },
-    }
 
 
 def enqueue_console_chat_for_email_reply(
@@ -453,7 +406,7 @@ def enqueue_console_chat_for_email_reply(
         "primaryAnchorKind": "message",
         "primaryAnchorId": parent_message_id,
         "primaryAnchorLineageId": parent_message_id,
-        "primaryAnchorKey": f"message#{parent_message_id}",
+        "primaryAnchorKey": _CONSOLE_THREAD_ANCHOR_KEY,
         "createdByLabel": str(parent_metadata.get("senderEmail") or parent_message.get("authorLabel") or "email-reply"),
         "messageCount": 0,
         "metadata": json.dumps(
@@ -575,7 +528,7 @@ def enqueue_console_chat_for_email_intake(
         "primaryAnchorKind": "message",
         "primaryAnchorId": submission_message_id,
         "primaryAnchorLineageId": submission_message_id,
-        "primaryAnchorKey": f"message#{submission_message_id}",
+        "primaryAnchorKey": _CONSOLE_THREAD_ANCHOR_KEY,
         "createdByLabel": str(metadata.get("senderEmail") or message.get("authorLabel") or "email-intake"),
         "messageCount": 0,
         "metadata": json.dumps(
@@ -661,6 +614,7 @@ def process_inbound_email_submission(
     apply: bool = True,
 ) -> dict[str, Any]:
     from papyrus_content.newsroom_commands import now_iso
+    from papyrus_newsroom.email_pdf_intake import process_pdf_only_intake
     from papyrus_newsroom.email_submissions import (
         DEFAULT_STEERING_CONFIG,
         _create_find_process_direct_citations,
@@ -719,7 +673,8 @@ def process_inbound_email_submission(
         metadata["inboundReferences"] = envelope.references_header
         metadata["inboundAttachmentCount"] = len(envelope.attachments)
 
-    if classification == "agent_intake" and citations:
+    has_agent_attachments = bool(envelope and envelope.attachments)
+    if classification == "agent_intake" and (citations or has_agent_attachments):
         started_at = now_iso()
         _mark_message_processing(client, message_id=message_id, started_at=started_at)
         chat = enqueue_console_chat_for_email_intake(
@@ -828,6 +783,110 @@ def process_inbound_email_submission(
             "status": "completed",
             "mode": "chat_fallback",
             "filing": filing,
+            "chat": chat,
+        }
+
+    if classification == "pdf_only_intake" and envelope:
+        started_at = now_iso()
+        _mark_message_processing(client, message_id=message_id, started_at=started_at)
+        pdf_result = process_pdf_only_intake(
+            client,
+            message_id=message_id,
+            message=message,
+            envelope=envelope,
+            corpus_key=corpus_key,
+            steering_config_path=steering_config_path or str(DEFAULT_STEERING_CONFIG),
+            apply=apply,
+        )
+        if pdf_result.get("ok"):
+            finished_at = now_iso()
+            metadata["pdfOnlyIntake"] = pdf_result
+            result = {"mode": "pdf_only_intake", "pdfOnly": pdf_result}
+            _mark_message_completed(client, message_id=message_id, finished_at=finished_at, result=result)
+            release_inbound_mime_after_success(client, message_id=message_id)
+            create_result = pdf_result.get("createResult") if isinstance(pdf_result.get("createResult"), dict) else None
+            reference_entries = (
+                create_result.get("referenceFeedback")
+                if isinstance(create_result, dict) and isinstance(create_result.get("referenceFeedback"), list)
+                else None
+            )
+            if reference_entries is None and str((pdf_result.get("filing") or {}).get("referenceId") or "").strip():
+                from papyrus_newsroom.email_submission_feedback import build_reference_feedback_entries
+                from papyrus_newsroom.email_submissions import _load_registered_reference_processing_records
+
+                ref_id = str((pdf_result.get("filing") or {}).get("referenceId") or "").strip()
+                refs, atts, _rels = _load_registered_reference_processing_records(
+                    client,
+                    registered_reference_ids={ref_id},
+                    import_run_id=(
+                        str((create_result or {}).get("importRunId") or "").strip() if create_result else None
+                    ),
+                )
+                reference_entries = build_reference_feedback_entries(
+                    references=refs,
+                    attachments=atts,
+                    find_result={},
+                    process_result={},
+                )
+            feedback = _try_send_submission_feedback(
+                client,
+                message_id=message_id,
+                processing_result=create_result or pdf_result,
+                reference_entries=reference_entries,
+            )
+            client.graphql(
+                """
+                mutation UpdateEmailPdfOnlyMetadata($input: UpdateMessageInput!) {
+                  updateMessage(input: $input) { id }
+                }
+                """,
+                {"input": {"id": message_id, "metadata": json.dumps(metadata, sort_keys=True), "updatedAt": finished_at}},
+            )
+            return {
+                "ok": True,
+                "messageId": message_id,
+                "status": "completed",
+                "mode": "pdf_only_intake",
+                "pdfOnly": pdf_result,
+                "feedbackEmail": feedback,
+            }
+
+        chat = enqueue_console_chat_for_email_intake(
+            client,
+            submission_message_id=message_id,
+            envelope=envelope,
+            message=message,
+            metadata=metadata,
+            citations=[],
+            corpus_key=corpus_key,
+        )
+        metadata["pdfOnlyIntake"] = pdf_result
+        metadata["chatFallback"] = chat
+        finished_at = now_iso()
+        _mark_message_completed(
+            client,
+            message_id=message_id,
+            finished_at=finished_at,
+            result={
+                "mode": "pdf_only_agent_fallback",
+                "pdfOnly": pdf_result,
+                "chat": chat,
+            },
+        )
+        client.graphql(
+            """
+            mutation UpdateEmailPdfOnlyFallbackMetadata($input: UpdateMessageInput!) {
+              updateMessage(input: $input) { id }
+            }
+            """,
+            {"input": {"id": message_id, "metadata": json.dumps(metadata, sort_keys=True), "updatedAt": finished_at}},
+        )
+        return {
+            "ok": True,
+            "messageId": message_id,
+            "status": "completed",
+            "mode": "pdf_only_agent_fallback",
+            "pdfOnly": pdf_result,
             "chat": chat,
         }
 
