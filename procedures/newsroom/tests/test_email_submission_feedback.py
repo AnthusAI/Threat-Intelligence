@@ -92,9 +92,14 @@ class EmailSubmissionFeedbackTests(unittest.TestCase):
         subject, body, html_body = email_submission_feedback.format_submission_feedback_email(report)
         self.assertIn("processed", subject)
         self.assertIn("Example", body)
-        self.assertIn("View in Papyrus: https://p.apyr.us/newsroom/references/lineage-example", body)
+        self.assertIn("https://p.apyr.us/newsroom/references/lineage-example", body)
+        self.assertNotIn("Subtitle:", body)
+        self.assertNotIn("Summary:", body)
         self.assertIn("Fetch plugin: default", body)
         self.assertIn("Open in Papyrus", html_body)
+        self.assertNotIn(">Subtitle<", html_body)
+        self.assertNotIn(">Summary<", html_body)
+        self.assertIn("#f7f7f4", html_body)
         self.assertIn("https://p.apyr.us/newsroom/references/lineage-example", html_body)
 
     def test_maybe_send_skips_when_already_sent(self):

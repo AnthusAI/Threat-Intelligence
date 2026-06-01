@@ -29,6 +29,45 @@ _ACADEMIC_SOURCE_PLUGINS = frozenset(
 )
 _NON_PDF_SOURCE_PLUGINS = frozenset({"youtube"})
 
+# Inline styles aligned with app/globals.css (paper, ink, news-desk-semantic-detail).
+_EMAIL_PAPER = "#f7f7f4"
+_EMAIL_INK = "rgba(0, 0, 0, 0.9)"
+_EMAIL_INK_DISPLAY = "rgba(0, 0, 0, 0.86)"
+_EMAIL_MUTED = "rgba(0, 0, 0, 0.62)"
+_EMAIL_MUTED_STRONG = "rgba(0, 0, 0, 0.74)"
+_EMAIL_RULE = "rgba(0, 0, 0, 0.28)"
+_EMAIL_SERIF = "Georgia, 'Times New Roman', Times, serif"
+_EMAIL_SANS = "Arial, Helvetica, sans-serif"
+_EMAIL_RHYTHM_PX = 19
+
+
+def _email_story_label_style(*, margin: str = "0 0 8px") -> str:
+    return (
+        f"margin:{margin};color:{_EMAIL_MUTED};font-family:{_EMAIL_SANS};font-size:11px;"
+        f"font-weight:800;letter-spacing:0.08em;line-height:1.28;text-transform:uppercase;"
+    )
+
+
+def _email_reference_title_style() -> str:
+    return (
+        f"margin:0 0 8px;color:{_EMAIL_INK_DISPLAY};font-family:{_EMAIL_SERIF};"
+        f"font-size:20px;font-weight:900;line-height:1.08;letter-spacing:0;"
+    )
+
+
+def _email_reference_subtitle_style() -> str:
+    return (
+        f"margin:0 0 {_EMAIL_RHYTHM_PX}px;color:rgba(0, 0, 0, 0.72);font-family:{_EMAIL_SANS};"
+        f"font-size:14px;font-weight:500;line-height:1.38;max-width:34em;"
+    )
+
+
+def _email_reference_summary_style() -> str:
+    return (
+        f"margin:0 0 {_EMAIL_RHYTHM_PX}px;color:rgba(0, 0, 0, 0.72);font-family:{_EMAIL_SANS};"
+        f"font-size:13px;font-weight:500;line-height:1.34;max-width:36em;"
+    )
+
 
 def feedback_email_enabled() -> bool:
     raw = str(os.environ.get("PAPYRUS_INBOUND_FEEDBACK_EMAIL_ENABLED", "true")).strip().lower()
@@ -308,31 +347,28 @@ def _feedback_email_subject(report: dict[str, Any]) -> tuple[str, str]:
 
 def _status_label_html(status: str) -> str:
     normalized = status or "UNKNOWN"
-    palette = {
-        "COMPLETED": ("#0f5132", "#d1e7dd"),
-        "FAILED": ("#842029", "#f8d7da"),
-        "REJECTED": ("#664d03", "#fff3cd"),
-        "IN_PROGRESS": ("#055160", "#cff4fc"),
-    }
-    fg, bg = palette.get(normalized, ("#41464b", "#e2e3e5"))
     return (
-        f'<span style="display:inline-block;padding:4px 10px;border-radius:4px;'
-        f'font-size:12px;font-weight:600;color:{fg};background:{bg};">{html.escape(normalized)}</span>'
+        f'<span style="display:inline-block;padding:4px 10px;border:1px solid {_EMAIL_RULE};'
+        f"background:rgba(0, 0, 0, 0.06);color:{_EMAIL_INK_DISPLAY};font-family:{_EMAIL_SANS};"
+        f'font-size:11px;font-weight:800;letter-spacing:0.08em;line-height:1;text-transform:uppercase;">'
+        f"{html.escape(normalized)}</span>"
     )
 
 
 def _append_reference_feedback_plain(lines: list[str], entry: dict[str, Any], index: int) -> None:
     lines.append("")
     lines.append(f"{index}. {entry.get('title') or '(untitled)'}")
+    if entry.get("subtitle"):
+        lines.append(f"   {entry.get('subtitle')}")
+    if entry.get("summary"):
+        lines.append("")
+        lines.append(f"   {entry.get('summary')}")
     newsroom_url = str(entry.get("newsroomUrl") or "").strip()
     if newsroom_url:
-        lines.append(f"   View in Papyrus: {newsroom_url}")
-    if entry.get("subtitle"):
-        lines.append(f"   Subtitle: {entry.get('subtitle')}")
-    if entry.get("summary"):
-        lines.append(f"   Summary: {entry.get('summary')}")
+        lines.append("")
+        lines.append(f"   {newsroom_url}")
     if entry.get("sourceUri"):
-        lines.append(f"   Source: {entry.get('sourceUri')}")
+        lines.append(f"   {entry.get('sourceUri')}")
     plugin = entry.get("sourcePlugin")
     if plugin:
         lines.append(f"   Fetch plugin: {plugin}")
@@ -368,58 +404,56 @@ def _reference_feedback_html_block(entry: dict[str, Any], index: int) -> str:
     title = html.escape(str(entry.get("title") or "(untitled)"))
     newsroom_url = str(entry.get("newsroomUrl") or "").strip()
     parts = [
-        '<div style="margin:0 0 20px;padding:16px 18px;border:1px solid #e5e7eb;border-radius:8px;background:#fafafa;">',
-        f'<div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.04em;">Reference {index}</div>',
-        f'<h2 style="margin:8px 0 6px;font-size:18px;line-height:1.35;color:#111827;">{title}</h2>',
+        f'<article style="margin:0 0 {_EMAIL_RHYTHM_PX}px;padding:{_EMAIL_RHYTHM_PX}px 0 0;'
+        f"border-top:2px solid {_EMAIL_RULE};min-width:0;\">",
+        f'<p style="{_email_story_label_style(margin="0 0 10px")}">Reference {index}</p>',
+        f'<p style="{_email_reference_title_style()}">{title}</p>',
     ]
+    subtitle = str(entry.get("subtitle") or "").strip()
+    if subtitle:
+        parts.append(f'<p style="{_email_reference_subtitle_style()}">{html.escape(subtitle)}</p>')
+    summary = str(entry.get("summary") or "").strip()
+    if summary:
+        parts.append(f'<p style="{_email_reference_summary_style()}">{html.escape(summary)}</p>')
     if newsroom_url:
         escaped_url = html.escape(newsroom_url, quote=True)
         parts.append(
             '<p style="margin:0 0 12px;">'
-            f'<a href="{escaped_url}" style="display:inline-block;padding:10px 16px;background:#1d4ed8;color:#ffffff;'
-            'text-decoration:none;border-radius:6px;font-size:14px;font-weight:600;">Open in Papyrus</a>'
-            f'<span style="display:block;margin-top:8px;font-size:12px;color:#6b7280;word-break:break-all;">{html.escape(newsroom_url)}</span>'
-            "</p>"
-        )
-    subtitle = str(entry.get("subtitle") or "").strip()
-    if subtitle:
-        parts.append(
-            f'<p style="margin:0 0 8px;font-size:14px;color:#374151;"><strong style="color:#111827;">Subtitle</strong> — {html.escape(subtitle)}</p>'
-        )
-    summary = str(entry.get("summary") or "").strip()
-    if summary:
-        parts.append(
-            f'<p style="margin:0 0 8px;font-size:14px;line-height:1.5;color:#374151;"><strong style="color:#111827;">Summary</strong> — {html.escape(summary)}</p>'
+            f'<a href="{escaped_url}" style="display:inline-block;padding:0 12px;border:1px solid {_EMAIL_RULE};'
+            f"background:transparent;color:{_EMAIL_MUTED_STRONG};font-family:{_EMAIL_SANS};"
+            f'font-size:11px;font-weight:900;letter-spacing:0.08em;line-height:32px;text-decoration:none;'
+            f'text-transform:uppercase;">Open in Papyrus</a></p>'
         )
     source_uri = str(entry.get("sourceUri") or "").strip()
     if source_uri:
         escaped_source = html.escape(source_uri, quote=True)
         parts.append(
-            f'<p style="margin:0 0 8px;font-size:13px;color:#4b5563;"><strong>Source</strong> — '
-            f'<a href="{escaped_source}" style="color:#1d4ed8;">{html.escape(source_uri)}</a></p>'
+            f'<p style="margin:0 0 12px;font-family:{_EMAIL_SANS};font-size:12px;line-height:1.34;">'
+            f'<a href="{escaped_source}" style="color:{_EMAIL_INK};text-decoration:underline;'
+            f'text-underline-offset:2px;word-break:break-all;">{html.escape(source_uri)}</a></p>'
         )
-    meta_rows: list[str] = []
+    meta_tokens: list[str] = []
     plugin = entry.get("sourcePlugin")
     if plugin:
-        meta_rows.append(f"Fetch: {html.escape(str(plugin))}")
+        meta_tokens.append(html.escape(str(plugin).upper()))
     find_status = entry.get("findStatus")
     if find_status:
-        meta_rows.append(f"Find: {html.escape(str(find_status))}")
+        meta_tokens.append(html.escape(str(find_status).upper()))
     summarize_status = entry.get("summarizeStatus")
     if summarize_status:
-        meta_rows.append(f"Summarize: {html.escape(str(summarize_status))}")
+        meta_tokens.append(html.escape(str(summarize_status).upper()))
     if entry.get("pdfConfirmationRequired"):
         located = entry.get("pdfLocated")
         if located is True:
             pdf_name = entry.get("pdfFilename") or entry.get("pdfAttachmentId") or "source PDF"
-            meta_rows.append(f"PDF: located ({html.escape(str(pdf_name))})")
+            meta_tokens.append(f"PDF {html.escape(str(pdf_name).upper())}")
         elif located is False:
-            meta_rows.append("PDF: not located")
+            meta_tokens.append("PDF MISSING")
         else:
-            meta_rows.append("PDF: unknown")
-    if meta_rows:
+            meta_tokens.append("PDF UNKNOWN")
+    if meta_tokens:
         parts.append(
-            f'<p style="margin:0 0 8px;font-size:12px;color:#6b7280;">{" · ".join(meta_rows)}</p>'
+            f'<p style="{_email_story_label_style(margin="0")}">{" · ".join(meta_tokens)}</p>'
         )
     attachments = entry.get("attachments") if isinstance(entry.get("attachments"), list) else []
     if attachments:
@@ -427,18 +461,41 @@ def _reference_feedback_html_block(entry: dict[str, Any], index: int) -> str:
         for attachment in attachments:
             if not isinstance(attachment, dict):
                 continue
-            role = html.escape(str(attachment.get("role") or "attachment"))
+            role = html.escape(str(attachment.get("role") or "attachment").upper())
             name = html.escape(str(attachment.get("filename") or attachment.get("id") or "file"))
-            media_type = str(attachment.get("mediaType") or "").strip()
-            suffix = f" <span style=\"color:#9ca3af;\">({html.escape(media_type)})</span>" if media_type else ""
-            attachment_items.append(f"<li>{role}: {name}{suffix}</li>")
+            attachment_items.append(
+                f'<li style="margin:0 0 6px;{_email_story_label_style(margin="0")}">{role} · {name}</li>'
+            )
         if attachment_items:
             parts.append(
-                '<p style="margin:8px 0 4px;font-size:12px;font-weight:600;color:#374151;">Attachments</p>'
-                f'<ul style="margin:0;padding-left:18px;font-size:12px;color:#4b5563;">{"".join(attachment_items)}</ul>'
+                f'<ul style="margin:12px 0 0;padding:0;list-style:none;">{"".join(attachment_items)}</ul>'
             )
-    parts.append("</div>")
+    parts.append("</article>")
     return "".join(parts)
+
+
+def _pipeline_stats_html(
+    *,
+    find_summary: dict[str, Any],
+    process_summary: dict[str, Any],
+    registered_reference_count: int,
+) -> str:
+    rows = [
+        ("Find", f"{find_summary.get('changes', 0)} applied · {find_summary.get('failures', 0)} failed"),
+        ("Summarize", f"{process_summary.get('generated', 0)} / {process_summary.get('attempted', 0)}"),
+        ("Registered", str(registered_reference_count)),
+    ]
+    row_html: list[str] = []
+    for label, value in rows:
+        row_html.append(
+            f'<tr><td style="padding:5px 0;{_email_story_label_style(margin="0")}">{html.escape(label)}</td>'
+            f'<td style="padding:5px 0;text-align:right;color:{_EMAIL_INK_DISPLAY};font-family:{_EMAIL_SANS};'
+            f'font-size:13px;font-weight:600;line-height:1.34;">{html.escape(value)}</td></tr>'
+        )
+    return (
+        f'<table style="width:100%;margin:{_EMAIL_RHYTHM_PX}px 0;border-collapse:collapse;" role="presentation">'
+        f"<tbody>{''.join(row_html)}</tbody></table>"
+    )
 
 
 def format_submission_feedback_email(report: dict[str, Any]) -> tuple[str, str, str]:
@@ -501,40 +558,45 @@ def format_submission_feedback_email(report: dict[str, Any]) -> tuple[str, str, 
     error_html = ""
     if error:
         error_html = (
-            f'<p style="margin:12px 0;padding:12px 14px;background:#fff3cd;border-left:4px solid #ffc107;'
-            f'font-size:14px;line-height:1.45;color:#664d03;">{html.escape(error)}</p>'
+            f'<p style="margin:{_EMAIL_RHYTHM_PX}px 0;padding:12px 14px;border-left:3px solid {_EMAIL_RULE};'
+            f"background:rgba(0, 0, 0, 0.04);color:{_EMAIL_INK};font-family:{_EMAIL_SANS};"
+            f'font-size:13px;line-height:1.45;">{html.escape(error)}</p>'
         )
     pipeline_html = ""
     if status in {"COMPLETED", "FAILED", "IN_PROGRESS"}:
-        pipeline_html = (
-            '<table style="width:100%;margin:16px 0;border-collapse:collapse;font-size:14px;">'
-            "<tbody>"
-            f'<tr><td style="padding:6px 0;color:#6b7280;">Find changes</td><td style="padding:6px 0;text-align:right;font-weight:600;">{find_summary.get("changes", 0)}</td></tr>'
-            f'<tr><td style="padding:6px 0;color:#6b7280;">Find failures</td><td style="padding:6px 0;text-align:right;font-weight:600;">{find_summary.get("failures", 0)}</td></tr>'
-            f'<tr><td style="padding:6px 0;color:#6b7280;">Summaries generated</td><td style="padding:6px 0;text-align:right;font-weight:600;">{process_summary.get("generated", 0)} / {process_summary.get("attempted", 0)}</td></tr>'
-            f'<tr><td style="padding:6px 0;color:#6b7280;">References registered</td><td style="padding:6px 0;text-align:right;font-weight:600;">{report.get("registeredReferenceCount", 0)}</td></tr>'
-            "</tbody></table>"
+        pipeline_html = _pipeline_stats_html(
+            find_summary=find_summary,
+            process_summary=process_summary,
+            registered_reference_count=int(report.get("registeredReferenceCount") or 0),
         )
     references_html = "".join(reference_blocks_html)
     if references_html:
-        references_html = f'<h3 style="margin:24px 0 12px;font-size:15px;color:#111827;">References</h3>{references_html}'
+        references_html = (
+            f'<p style="{_email_story_label_style(margin=f"{_EMAIL_RHYTHM_PX}px 0 12px")}">References</p>'
+            f"{references_html}"
+        )
 
     body_html = (
-        '<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f3f4f6;">'
-        '<div style="max-width:640px;margin:0 auto;padding:24px 16px;font-family:Georgia,\'Times New Roman\',serif;">'
-        '<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;padding:28px 32px;">'
-        '<p style="margin:0 0 4px;font-size:12px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#6b7280;">Papyrus</p>'
-        '<h1 style="margin:0 0 16px;font-size:22px;line-height:1.3;color:#111827;">Your reference submission</h1>'
-        f'<p style="margin:0 0 8px;font-size:14px;color:#4b5563;">Message <code style="font-size:12px;background:#f3f4f6;padding:2px 6px;border-radius:4px;">{message_id}</code></p>'
-        f'<p style="margin:0 0 16px;">{_status_label_html(status)}</p>'
+        f'<!DOCTYPE html><html><body style="margin:0;padding:0;background:{_EMAIL_PAPER};color:{_EMAIL_INK};">'
+        f'<div style="max-width:640px;margin:0 auto;padding:calc({_EMAIL_RHYTHM_PX}px * 1.5) 16px;'
+        f'font-family:{_EMAIL_SERIF};">'
+        f'<div style="background:{_EMAIL_PAPER};border:1px solid {_EMAIL_RULE};border-radius:14px;'
+        f'padding:calc({_EMAIL_RHYTHM_PX}px * 1.5);">'
+        f'<p style="{_email_story_label_style(margin="0 0 10px")}">Papyrus</p>'
+        f'<p style="margin:0 0 {_EMAIL_RHYTHM_PX}px;color:{_EMAIL_INK_DISPLAY};font-family:{_EMAIL_SERIF};'
+        f'font-size:22px;font-weight:900;line-height:1.08;">Your reference submission</p>'
+        f'<p style="{_email_story_label_style(margin="0 0 8px")}">Message {message_id}</p>'
+        f'<p style="margin:0 0 {_EMAIL_RHYTHM_PX}px;">{_status_label_html(status)}</p>'
         f"{error_html}"
         f"{pipeline_html}"
         f"{references_html}"
-        '<p style="margin:28px 0 0;padding-top:20px;border-top:1px solid #e5e7eb;font-size:13px;color:#6b7280;">'
-        "Reply to this message if something looks wrong."
-        "</p>"
+        f'<p style="margin:calc({_EMAIL_RHYTHM_PX}px * 1.5) 0 0;padding-top:{_EMAIL_RHYTHM_PX}px;'
+        f'border-top:1px solid {_EMAIL_RULE};color:{_EMAIL_MUTED};font-family:{_EMAIL_SANS};'
+        f'font-size:12px;line-height:1.45;">Reply to this message if something looks wrong.</p>'
         "</div>"
-        '<p style="margin:16px 0 0;text-align:center;font-size:12px;color:#9ca3af;">— Papyrus</p>'
+        f'<p style="margin:{_EMAIL_RHYTHM_PX}px 0 0;text-align:center;color:{_EMAIL_MUTED};'
+        f'font-family:{_EMAIL_SANS};font-size:11px;font-weight:800;letter-spacing:0.08em;'
+        f'text-transform:uppercase;">Papyrus</p>'
         "</div></body></html>"
     )
     return subject, body_text, body_html
