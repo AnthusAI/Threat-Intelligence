@@ -440,19 +440,31 @@ def process_email_submission_message(
         raise ValueError(f"Message {message_id} is not an email submission.")
     metadata = _message_metadata(message)
     if not metadata.get("authorized"):
+        feedback = _try_send_submission_feedback(
+            client,
+            message_id=message_id,
+            processing_error=metadata.get("responseError") or "Unauthorized sender.",
+        )
         return {
             "ok": False,
             "messageId": message_id,
             "status": "rejected",
             "error": metadata.get("responseError") or "Unauthorized sender.",
+            "feedbackEmail": feedback,
         }
     citations = metadata.get("directCitations") if isinstance(metadata.get("directCitations"), list) else []
     if not citations:
+        feedback = _try_send_submission_feedback(
+            client,
+            message_id=message_id,
+            processing_error="No direct citations to process.",
+        )
         return {
             "ok": False,
             "messageId": message_id,
             "status": "rejected",
             "error": "No direct citations to process.",
+            "feedbackEmail": feedback,
         }
 
     started_at = now_iso()
@@ -474,12 +486,36 @@ def process_email_submission_message(
             result=result,
         )
         mime_release = release_inbound_mime_after_success(client, message_id=message_id)
-        return {"ok": True, "messageId": message_id, "status": "completed", "mimeRelease": mime_release, **result}
+        feedback = _try_send_submission_feedback(
+            client,
+            message_id=message_id,
+            processing_result=result,
+            reference_entries=result.get("referenceFeedback") if isinstance(result.get("referenceFeedback"), list) else None,
+        )
+        return {
+            "ok": True,
+            "messageId": message_id,
+            "status": "completed",
+            "mimeRelease": mime_release,
+            "feedbackEmail": feedback,
+            **result,
+        }
     except Exception as error:
         finished_at = now_iso()
         error_message = str(error)
         _mark_message_failed(client, message_id=message_id, finished_at=finished_at, error_message=error_message)
-        return {"ok": False, "messageId": message_id, "status": "failed", "error": error_message}
+        feedback = _try_send_submission_feedback(
+            client,
+            message_id=message_id,
+            processing_error=error_message,
+        )
+        return {
+            "ok": False,
+            "messageId": message_id,
+            "status": "failed",
+            "error": error_message,
+            "feedbackEmail": feedback,
+        }
 
 
 def run_email_submission_cloud_procedure(
@@ -635,13 +671,30 @@ def _create_find_process_direct_citations(
             curation_status="pending",
             apply=True,
         )
+        scoped_references, scoped_attachments, _scoped_relations = _load_registered_reference_processing_records(
+            client,
+            registered_reference_ids=registered_reference_ids,
+            import_run_id=import_run_id,
+        )
     else:
-        find_result = {"eligibleCount": 0, "plannedCount": 0, "changeCount": 0, "failures": []}
-        process_result = {"attemptedCount": 0, "generatedCount": 0}
+        scoped_references = []
+        scoped_attachments = []
+        find_result = {"eligibleCount": 0, "plannedCount": 0, "changeCount": 0, "failures": [], "items": []}
+        process_result = {"attemptedCount": 0, "generatedCount": 0, "items": []}
+
+    from papyrus_newsroom.email_submission_feedback import build_reference_feedback_entries
+
+    reference_feedback = build_reference_feedback_entries(
+        references=scoped_references,
+        attachments=scoped_attachments,
+        find_result=find_result,
+        process_result=process_result,
+    )
 
     return {
         "importRunId": plan.get("importRunId"),
         "registeredReferenceCount": len(registered_reference_ids),
+        "registeredReferenceIds": sorted(registered_reference_ids),
         "directCitationCount": len(citations),
         "find": {
             "eligible": find_result.get("eligibleCount", 0),
@@ -653,6 +706,7 @@ def _create_find_process_direct_citations(
             "attempted": process_result.get("attemptedCount", 0),
             "generated": process_result.get("generatedCount", 0),
         },
+        "referenceFeedback": reference_feedback,
     }
 
 
@@ -679,6 +733,38 @@ def _message_response_index_fields(message: dict[str, Any]) -> dict[str, Any]:
     if response_target:
         fields["responseTarget"] = response_target
     return fields
+
+
+def _try_send_submission_feedback(
+    client: PapyrusGraphQLAuthoringClient,
+    *,
+    message_id: str,
+    processing_result: dict[str, Any] | None = None,
+    processing_error: str | None = None,
+    reference_entries: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    try:
+        from papyrus_newsroom.email_submission_feedback import maybe_send_submission_feedback_email
+
+        return maybe_send_submission_feedback_email(
+            client,
+            message_id=message_id,
+            processing_result=processing_result,
+            processing_error=processing_error,
+            reference_entries=reference_entries,
+        )
+    except Exception as error:
+        return {"sent": False, "error": str(error)}
+
+
+def send_submission_feedback_for_message(
+    client: PapyrusGraphQLAuthoringClient,
+    *,
+    message_id: str,
+) -> dict[str, Any]:
+    from papyrus_newsroom.email_submission_feedback import send_feedback_only_for_message
+
+    return send_feedback_only_for_message(client, message_id=message_id)
 
 
 def _mark_message_processing(client: PapyrusGraphQLAuthoringClient, *, message_id: str, started_at: str) -> None:

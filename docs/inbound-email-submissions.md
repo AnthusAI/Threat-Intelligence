@@ -71,13 +71,34 @@ Seed the cloud procedure after deploy:
 poetry run papyrus procedures seed-required --apply
 ```
 
+## Submission feedback email
+
+After intake or processing finishes, Papyrus sends an acknowledgment email to
+the submitter (`metadata.senderEmail`) via SES. The reply includes:
+
+- Overall status (`COMPLETED`, `FAILED`, `REJECTED`)
+- Find / summarize pipeline counts
+- Per-reference title, subtitle, summary (when generated)
+- Source fetch plugin (for example `arxiv`, `acm`, `youtube`)
+- PDF located or not for academic papers
+- Attachments recorded on the reference (role, filename, media type)
+
+Feedback is idempotent: `metadata.feedbackEmailSentAt` prevents duplicate sends.
+Disable with `PAPYRUS_INBOUND_FEEDBACK_EMAIL_ENABLED=false`. Override the From
+address with `PAPYRUS_INBOUND_FEEDBACK_FROM_EMAIL`.
+
+Rejected intake (unauthorized sender, no citations, research-assignment wording)
+invokes the processor with `sendFeedbackOnly: true` so the submitter still gets
+an explanation without running find/process.
+
 ## Manual test
 
 From a registered user mailbox, send email to `suggestions@p.apyr.us` with a
 subject and body that include at least one URL or DOI. Confirm a
 `email_submission` message appears in GraphQL and new pending `Reference` rows
 are created for the configured corpus (`PAPYRUS_INBOUND_EMAIL_CORPUS_KEY`,
-default `AI-ML-research`).
+default `AI-ML-research`). You should receive a feedback email at the sender
+address when processing completes.
 
 ## Harder testing
 

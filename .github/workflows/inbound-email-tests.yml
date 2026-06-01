@@ -5,8 +5,10 @@ on:
     branches: [main]
     paths:
       - "src/papyrus_newsroom/email_submissions.py"
+      - "src/papyrus_newsroom/email_submission_feedback.py"
       - "src/papyrus_content/graphql_authoring.py"
       - "procedures/newsroom/tests/test_email_submissions.py"
+      - "procedures/newsroom/tests/test_email_submission_feedback.py"
       - "amplify/functions/**/email*"
       - "amplify/functions/**/ses-inbound*"
       - "amplify/backend.ts"
@@ -15,8 +17,10 @@ on:
   pull_request:
     paths:
       - "src/papyrus_newsroom/email_submissions.py"
+      - "src/papyrus_newsroom/email_submission_feedback.py"
       - "src/papyrus_content/graphql_authoring.py"
       - "procedures/newsroom/tests/test_email_submissions.py"
+      - "procedures/newsroom/tests/test_email_submission_feedback.py"
       - "amplify/functions/**/email*"
       - "amplify/functions/**/ses-inbound*"
       - "amplify/backend.ts"
@@ -36,4 +40,8 @@ jobs:
       - name: Install dependencies
         run: poetry install --no-interaction
       - name: Email submission unit tests
-        run: poetry run python -m unittest procedures.newsroom.tests.test_email_submissions -v
+        run: |
+          poetry run python -m unittest \
+            procedures.newsroom.tests.test_email_submissions \
+            procedures.newsroom.tests.test_email_submission_feedback \
+            -v

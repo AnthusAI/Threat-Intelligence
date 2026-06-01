@@ -18,6 +18,14 @@ def handler(event: dict[str, Any], _context: Any = None) -> dict[str, Any]:
     if not message_id:
         raise ValueError("messageId is required.")
 
+    if event.get("sendFeedbackOnly") or event.get("send_feedback_only"):
+        from papyrus_content.graphql_authoring import PapyrusGraphQLAuthoringClient
+        from papyrus_newsroom.email_submissions import send_submission_feedback_for_message
+
+        endpoint = os.environ.get("PAPYRUS_GRAPHQL_ENDPOINT", "").strip()
+        client = PapyrusGraphQLAuthoringClient(endpoint=endpoint or None)
+        return send_submission_feedback_for_message(client, message_id=message_id)
+
     corpus_key = str(
         event.get("corpusKey")
         or event.get("corpus_key")

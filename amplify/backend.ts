@@ -238,6 +238,12 @@ if (enableInboundEmail) {
   inboundReceive.addEnvironment("PAPYRUS_GRAPHQL_ENDPOINT", graphqlEndpoint);
 
   inboundProcessor.addEnvironment("PAPYRUS_INBOUND_EMAIL_CORPUS_KEY", inboundEmailCorpusKey);
+  inboundProcessor.addEnvironment("PAPYRUS_INBOUND_EMAIL_DOMAIN", inboundEmailDomain);
+  inboundProcessor.addEnvironment("PAPYRUS_INBOUND_FEEDBACK_EMAIL_ENABLED", "true");
+  inboundProcessor.addEnvironment(
+    "PAPYRUS_INBOUND_FEEDBACK_FROM_EMAIL",
+    `Papyrus Submissions <submissions@${inboundEmailDomain}>`,
+  );
   inboundProcessor.addEnvironment("PAPYRUS_GRAPHQL_ENDPOINT", graphqlEndpoint);
 
   receiveLambda.addToRolePolicy(
@@ -279,6 +285,12 @@ if (enableInboundEmail) {
   processorLambda.addToRolePolicy(
     new PolicyStatement({
       actions: ["appsync:GraphQL"],
+      resources: ["*"],
+    }),
+  );
+  processorLambda.addToRolePolicy(
+    new PolicyStatement({
+      actions: ["ses:SendEmail", "ses:SendRawEmail"],
       resources: ["*"],
     }),
   );

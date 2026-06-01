@@ -158,6 +158,8 @@ async function processInboundSubmission(inbound: InboundPayload): Promise<Record
 
   if (authorized && responseStatus === "PENDING" && PROCESSOR_FUNCTION_NAME) {
     await invokeEmailProcessor(resolvedMessageId);
+  } else if (responseStatus === "REJECTED" && PROCESSOR_FUNCTION_NAME) {
+    await invokeEmailProcessor(resolvedMessageId, { sendFeedbackOnly: true });
   }
 
   return {
@@ -232,13 +234,17 @@ async function getExistingInboundMessage(messageId: string): Promise<ExistingMes
   return (response.data as ExistingMessage | null) ?? null;
 }
 
-async function invokeEmailProcessor(messageId: string): Promise<void> {
+async function invokeEmailProcessor(
+  messageId: string,
+  options: { sendFeedbackOnly?: boolean } = {},
+): Promise<void> {
   await lambdaClient.send(new InvokeCommand({
     FunctionName: PROCESSOR_FUNCTION_NAME,
     InvocationType: "Event",
     Payload: Buffer.from(JSON.stringify({
       messageId,
       corpusKey: process.env.PAPYRUS_INBOUND_EMAIL_CORPUS_KEY ?? "AI-ML-research",
+      ...(options.sendFeedbackOnly ? { sendFeedbackOnly: true } : {}),
     })),
   }));
 }
