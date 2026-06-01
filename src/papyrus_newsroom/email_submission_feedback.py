@@ -176,6 +176,22 @@ def _find_item_by_reference_id(find_result: dict[str, Any] | None) -> dict[str, 
     return indexed
 
 
+def _stored_title_subtitle_summary(reference: dict[str, Any]) -> dict[str, str]:
+    try:
+        from papyrus_newsroom.reference_curation_signals import _load_reference_metadata_payload
+
+        payload = _load_reference_metadata_payload(reference)
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    return {
+        "title": str(payload.get("title") or "").strip(),
+        "subtitle": str(payload.get("subtitle") or "").strip(),
+        "summary": str(payload.get("summary") or "").strip(),
+    }
+
+
 def build_reference_feedback_entries(
     *,
     references: list[dict[str, Any]],
@@ -196,9 +212,14 @@ def build_reference_feedback_entries(
         generated_subtitle = str(process_item.get("subtitle") or "").strip()
         generated_summary = str(process_item.get("summary") or "").strip()
         generated_title = str(process_item.get("title") or "").strip()
-        title = generated_title or str(reference.get("title") or "").strip()
-        subtitle = generated_subtitle
-        summary = generated_summary
+        stored = _stored_title_subtitle_summary(reference) if not (generated_title and generated_subtitle and generated_summary) else {
+            "title": "",
+            "subtitle": "",
+            "summary": "",
+        }
+        title = generated_title or stored["title"] or str(reference.get("title") or "").strip()
+        subtitle = generated_subtitle or stored["subtitle"]
+        summary = generated_summary or stored["summary"]
         find_status = str(find_item.get("status") or "").strip()
         summarize_status = str(process_item.get("status") or "").strip()
         has_extracted_text = select_extracted_text_attachment(reference, attachments) is not None

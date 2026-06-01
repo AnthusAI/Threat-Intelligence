@@ -1408,14 +1408,18 @@ class ReferenceCommandsTests(unittest.TestCase):
             _run_biblicus_article_text({"extracted_text": "hello"})
 
     @mock.patch("papyrus_content.reference_metadata_generation.resolve_storage_bucket_name", return_value="test-bucket")
+    @mock.patch("papyrus_content.reference_metadata_generation.create_authoring_client")
     @mock.patch("papyrus_content.reference_metadata_generation.reference_curation_signals.reference_generate_metadata_from_extracted_text")
     @mock.patch("papyrus_content.reference_metadata_generation.boto3.client")
     def test_run_reference_metadata_generation_from_extracted_text_skips_missing_and_generates(
         self,
         mock_boto_client,
         mock_generate,
+        mock_create_client,
         _mock_bucket,
     ):
+        mock_client = mock.Mock()
+        mock_create_client.return_value = (mock_client, None)
         mock_s3 = mock.Mock()
         mock_s3.get_object.return_value = {"Body": io.BytesIO(b"Full extracted text from attachment")}
         mock_boto_client.return_value = mock_s3
@@ -1467,7 +1471,9 @@ class ReferenceCommandsTests(unittest.TestCase):
         call_kwargs = mock_generate.call_args.kwargs
         self.assertEqual(call_kwargs["reference_id"], "reference-1")
         self.assertEqual(call_kwargs["original_title"], "Original title")
+        self.assertTrue(call_kwargs["apply"])
         self.assertIn("Full extracted text", call_kwargs["extracted_text"])
+        mock_client.upsert.assert_called_once()
         statuses = [item["status"] for item in result["items"]]
         self.assertIn("generated", statuses)
         self.assertIn("skipped_missing_text", statuses)

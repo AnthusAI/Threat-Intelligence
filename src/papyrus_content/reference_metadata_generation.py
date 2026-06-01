@@ -83,56 +83,46 @@ def run_reference_metadata_generation_from_extracted_text(
             continue
 
         try:
-            generation_context = reference_curation_signals.resolve_reference_text_generation_context(
+            result = reference_curation_signals.reference_generate_metadata_from_extracted_text(
+                reference_id=str(reference.get("id") or ""),
                 extracted_text=str(context.get("extractedText") or ""),
                 original_title=str(context.get("originalTitle") or ""),
                 original_subtitle=str(context.get("originalSubtitle") or ""),
+                model=model,
+                apply=apply,
             )
-            if not generation_context["ok"]:
+            status = str(result.get("status") or result.get("action") or "").strip()
+            if status in {"skipped_missing_text"}:
                 skipped_missing_text += 1
                 items.append(
                     {
                         "reference": _reference_row(reference),
                         "status": "skipped_missing_text",
-                        "error": generation_context.get("errors"),
+                        "error": result.get("errors") or result.get("error"),
                         "attachment": context.get("attachment"),
                     }
                 )
                 continue
-            title_result = reference_curation_signals.generate_title_from_reference_text(
-                reference=reference,
-                extracted_text=generation_context["extractedText"],
-                original_title=generation_context["originalTitle"],
-                original_subtitle=generation_context["originalSubtitle"],
-                model=model,
-            )
-            subtitle_result = reference_curation_signals.generate_subtitle_from_reference_text(
-                reference=reference,
-                extracted_text=generation_context["extractedText"],
-                original_title=generation_context["originalTitle"],
-                original_subtitle=generation_context["originalSubtitle"],
-                model=model,
-            )
-            summary_result = reference_curation_signals.generate_summary_from_reference_text(
-                reference=reference,
-                extracted_text=generation_context["extractedText"],
-                original_title=generation_context["originalTitle"],
-                original_subtitle=generation_context["originalSubtitle"],
-                model=model,
-            )
-            result = {
-                "status": "generated",
-                "generated": {
-                    "title": title_result["title"],
-                    "subtitle": subtitle_result["subtitle"],
-                    "summary": summary_result["summary"],
-                },
-            }
-            if apply:
+            if status != "generated":
+                generation_failures += 1
+                items.append(
+                    {
+                        "reference": _reference_row(reference),
+                        "status": status or "generation_failed",
+                        "error": result.get("warnings") or result.get("error") or status,
+                        "attachment": context.get("attachment"),
+                    }
+                )
+                continue
+            generated_payload = result.get("generated") if isinstance(result.get("generated"), dict) else {}
+            if apply and generated_payload.get("title"):
                 if authoring_client is None:
                     authoring_client, _ = create_authoring_client()
-                _apply_generated_reference_metadata(authoring_client, reference, result)
-                result = {**result, "apply": True}
+                _upsert_reference_title_from_generation(
+                    authoring_client,
+                    reference,
+                    str(generated_payload["title"]),
+                )
         except Exception as error:
             generation_failures += 1
             items.append(
@@ -145,21 +135,18 @@ def run_reference_metadata_generation_from_extracted_text(
             )
             continue
 
-        if result.get("status") == "generated":
-            generated += 1
-        elif result.get("status") == "skipped_missing_text":
-            skipped_missing_text += 1
-        else:
-            generation_failures += 1
+        generated += 1
+        generated_payload = result.get("generated") if isinstance(result.get("generated"), dict) else {}
         items.append(
             {
                 "reference": _reference_row(reference),
-                "status": result.get("status") or "generation_failed",
-                "error": result.get("error") or "",
+                "status": "generated",
+                "error": "",
                 "attachment": context.get("attachment"),
-                "title": (result.get("generated") or {}).get("title"),
-                "subtitle": (result.get("generated") or {}).get("subtitle"),
-                "summary": (result.get("generated") or {}).get("summary"),
+                "title": generated_payload.get("title"),
+                "subtitle": generated_payload.get("subtitle"),
+                "summary": generated_payload.get("summary"),
+                "apply": bool(result.get("apply")),
             }
         )
 
@@ -336,21 +323,17 @@ def _original_subtitle(reference: dict[str, Any]) -> str:
     ).strip()
 
 
-def _apply_generated_reference_metadata(
-    client: Any,
-    reference: dict[str, Any],
-    result: dict[str, Any],
-) -> None:
-    generated = result.get("generated") if isinstance(result.get("generated"), dict) else {}
-    title = str(generated.get("title") or "").strip()
-    if not title:
+def _upsert_reference_title_from_generation(client: Any, reference: dict[str, Any], title: str) -> None:
+    """Keep the GraphQL Reference.title field aligned with generated metadata."""
+    normalized = str(title or "").strip()
+    if not normalized:
         return
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     client.upsert(
         "Reference",
         {
             "id": reference.get("id"),
-            "title": title,
+            "title": normalized,
             "updatedAt": now,
         },
     )
