@@ -83,6 +83,15 @@ def default_feedback_from_address() -> str:
     return f"Papyrus Submissions <{local_part}@{domain}>"
 
 
+def default_feedback_reply_to_address() -> str:
+    explicit = str(os.environ.get("PAPYRUS_INBOUND_FEEDBACK_REPLY_TO_EMAIL") or "").strip()
+    if explicit:
+        return explicit
+    domain = str(os.environ.get("PAPYRUS_INBOUND_EMAIL_DOMAIN") or "p.apyr.us").strip().lower()
+    local_part = str(os.environ.get("PAPYRUS_INBOUND_EMAIL_LOCAL_PARTS") or "submissions").split(",")[0].strip()
+    return f"{local_part or 'submissions'}@{domain}"
+
+
 def parse_attachment_metadata(raw: Any) -> dict[str, Any]:
     if isinstance(raw, dict):
         return raw
@@ -547,9 +556,10 @@ def format_submission_feedback_email(report: dict[str, Any]) -> tuple[str, str, 
     lines.extend(
         [
             "",
-            "Reply to this message if something looks wrong.",
-            "",
-            "— Papyrus",
+            (
+                "Corrections and PDF attachments by reply are not applied automatically yet. "
+                f"For a new citation, email {default_feedback_reply_to_address()} with a URL or DOI."
+            ),
         ]
     )
     body_text = "\n".join(lines)
@@ -580,9 +590,8 @@ def format_submission_feedback_email(report: dict[str, Any]) -> tuple[str, str, 
         f'<!DOCTYPE html><html><body style="margin:0;padding:0;background:{_EMAIL_PAPER};color:{_EMAIL_INK};">'
         f'<div style="max-width:640px;margin:0 auto;padding:calc({_EMAIL_RHYTHM_PX}px * 1.5) 16px;'
         f'font-family:{_EMAIL_SERIF};">'
-        f'<div style="background:{_EMAIL_PAPER};border:1px solid {_EMAIL_RULE};border-radius:14px;'
+        f'<div style="background:{_EMAIL_PAPER};border:1px solid {_EMAIL_RULE};'
         f'padding:calc({_EMAIL_RHYTHM_PX}px * 1.5);">'
-        f'<p style="{_email_story_label_style(margin="0 0 10px")}">Papyrus</p>'
         f'<p style="margin:0 0 {_EMAIL_RHYTHM_PX}px;color:{_EMAIL_INK_DISPLAY};font-family:{_EMAIL_SERIF};'
         f'font-size:22px;font-weight:900;line-height:1.08;">Your reference submission</p>'
         f'<p style="{_email_story_label_style(margin="0 0 8px")}">Message {message_id}</p>'
@@ -592,11 +601,9 @@ def format_submission_feedback_email(report: dict[str, Any]) -> tuple[str, str, 
         f"{references_html}"
         f'<p style="margin:calc({_EMAIL_RHYTHM_PX}px * 1.5) 0 0;padding-top:{_EMAIL_RHYTHM_PX}px;'
         f'border-top:1px solid {_EMAIL_RULE};color:{_EMAIL_MUTED};font-family:{_EMAIL_SANS};'
-        f'font-size:12px;line-height:1.45;">Reply to this message if something looks wrong.</p>'
+        f'font-size:12px;line-height:1.45;">Corrections and PDF attachments by reply are not applied automatically yet. '
+        f"For a new citation, email {html.escape(default_feedback_reply_to_address())} with a URL or DOI.</p>"
         "</div>"
-        f'<p style="margin:{_EMAIL_RHYTHM_PX}px 0 0;text-align:center;color:{_EMAIL_MUTED};'
-        f'font-family:{_EMAIL_SANS};font-size:11px;font-weight:800;letter-spacing:0.08em;'
-        f'text-transform:uppercase;">Papyrus</p>'
         "</div></body></html>"
     )
     return subject, body_text, body_html
@@ -637,7 +644,7 @@ def send_submission_feedback_email(
         "Destination": destination,
         "Message": message,
     }
-    reply_target = str(reply_to or sender_email).strip()
+    reply_target = str(reply_to or default_feedback_reply_to_address()).strip()
     if reply_target:
         request["ReplyToAddresses"] = [reply_target]
 
@@ -696,6 +703,7 @@ def maybe_send_submission_feedback_email(
         subject=subject,
         body_text=body_text,
         body_html=body_html,
+        reply_to=default_feedback_reply_to_address(),
         ses_client=ses_client,
     )
 
