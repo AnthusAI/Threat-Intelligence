@@ -51,11 +51,29 @@ def archive_inbound_mime_object(*, bucket: str, key: str, s3_client: Any | None 
     if not should_process_inbound_s3_key(key):
         return {"archived": False, "reason": "skip"}
     import boto3
+    from botocore.exceptions import ClientError
 
     client = s3_client or boto3.client("s3")
     relative = key[len(INBOUND_EMAIL_INTAKE_PREFIX) :] if key.startswith(INBOUND_EMAIL_INTAKE_PREFIX) else key
     archive_key = f"{INBOUND_EMAIL_ARCHIVE_PREFIX}{relative}"
-    client.copy_object(Bucket=bucket, Key=archive_key, CopySource={"Bucket": bucket, "Key": key})
+
+    def _object_exists(object_key: str) -> bool:
+        try:
+            client.head_object(Bucket=bucket, Key=object_key)
+            return True
+        except ClientError as error:
+            code = str(error.response.get("Error", {}).get("Code", ""))
+            if code in {"404", "NoSuchKey", "NotFound"}:
+                return False
+            raise
+
+    if not _object_exists(key):
+        if _object_exists(archive_key):
+            return {"archived": True, "archiveKey": archive_key, "alreadyArchived": True}
+        return {"archived": False, "reason": "source-missing"}
+
+    if not _object_exists(archive_key):
+        client.copy_object(Bucket=bucket, Key=archive_key, CopySource={"Bucket": bucket, "Key": key})
     client.delete_object(Bucket=bucket, Key=key)
     return {"archived": True, "archiveKey": archive_key}
 

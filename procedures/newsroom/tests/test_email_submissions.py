@@ -64,7 +64,11 @@ class EmailSubmissionTests(unittest.TestCase):
         self.assertEqual(fields["responseTarget"], "email_submission_processor")
 
     def test_archive_inbound_mime_object_copies_then_deletes(self):
+        from botocore.exceptions import ClientError
+
         s3 = mock.Mock()
+        missing = ClientError({"Error": {"Code": "404"}}, "HeadObject")
+        s3.head_object.side_effect = [{}, missing]
         key = "inbound-email/ses-object-id"
         result = email_submissions.archive_inbound_mime_object(
             bucket="media-bucket",
@@ -79,6 +83,21 @@ class EmailSubmissionTests(unittest.TestCase):
             CopySource={"Bucket": "media-bucket", "Key": key},
         )
         s3.delete_object.assert_called_once_with(Bucket="media-bucket", Key=key)
+
+    def test_archive_inbound_mime_object_treats_missing_source_as_already_archived(self):
+        from botocore.exceptions import ClientError
+
+        s3 = mock.Mock()
+        missing = ClientError({"Error": {"Code": "404"}}, "HeadObject")
+        s3.head_object.side_effect = [missing, {}]
+        result = email_submissions.archive_inbound_mime_object(
+            bucket="media-bucket",
+            key="inbound-email/ses-object-id",
+            s3_client=s3,
+        )
+        self.assertTrue(result["archived"])
+        self.assertTrue(result.get("alreadyArchived"))
+        s3.copy_object.assert_not_called()
 
     def test_archive_inbound_mime_object_skips_ineligible_keys(self):
         s3 = mock.Mock()
