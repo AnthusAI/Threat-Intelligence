@@ -202,10 +202,12 @@ const withMediaBucketEnv = (resource: { addEnvironment: (key: string, value: str
 for (const resource of [
   backend.assignmentAction,
   backend.categoryAction,
+  backend.emailSubmissionProcessor,
   backend.knowledgeQuery,
   backend.modelAttachmentUpload,
   backend.newsroomSummary,
   backend.procedureAction,
+  backend.sesInboundReceive,
 ]) {
   withMediaBucketEnv(resource);
 }
@@ -233,11 +235,9 @@ if (enableInboundEmail) {
   inboundReceive.addEnvironment("PAPYRUS_INBOUND_EMAIL_DOMAIN", inboundEmailDomain);
   inboundReceive.addEnvironment("PAPYRUS_INBOUND_EMAIL_LOCAL_PARTS", inboundEmailLocalParts.join(","));
   inboundReceive.addEnvironment("PAPYRUS_INBOUND_EMAIL_CORPUS_KEY", inboundEmailCorpusKey);
-  inboundReceive.addEnvironment("PAPYRUS_MEDIA_BUCKET_NAME", storageBucket.bucketName);
   inboundReceive.addEnvironment("PAPYRUS_GRAPHQL_ENDPOINT", graphqlEndpoint);
 
   inboundProcessor.addEnvironment("PAPYRUS_INBOUND_EMAIL_CORPUS_KEY", inboundEmailCorpusKey);
-  inboundProcessor.addEnvironment("PAPYRUS_MEDIA_BUCKET_NAME", storageBucket.bucketName);
   inboundProcessor.addEnvironment("PAPYRUS_GRAPHQL_ENDPOINT", graphqlEndpoint);
 
   receiveLambda.addToRolePolicy(

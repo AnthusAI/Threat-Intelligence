@@ -446,6 +446,12 @@ INDEX_DEFINITIONS: dict[str, dict[str, str]] = {
         "fields": MODEL_ATTACHMENT_FIELDS,
         "partitionType": "ID",
     },
+    "referenceAttachmentsByReferenceLineageAndSortKey": {
+        "field": "listReferenceAttachmentsByReferenceLineageAndSortKey",
+        "partitionKey": "referenceLineageId",
+        "fields": REFERENCE_ATTACHMENT_FIELDS,
+        "partitionType": "ID",
+    },
 }
 
 
@@ -739,6 +745,9 @@ class PapyrusGraphQLAuthoringClient:
 
     def list_semantic_relations_by_import_run_and_imported_at(self, import_run_id: str) -> list[dict[str, Any]]:
         return self.list_by_index("semanticRelationsByImportRunAndImportedAt", import_run_id)
+
+    def list_reference_attachments_by_lineage(self, reference_lineage_id: str) -> list[dict[str, Any]]:
+        return self.list_by_index("referenceAttachmentsByReferenceLineageAndSortKey", reference_lineage_id)
 
     def delete_record(self, model_name: str, record_id: str) -> None:
         if model_name not in MUTATIONS:

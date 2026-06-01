@@ -45,7 +45,8 @@ Amplify provisions:
 
 1. SES receipt rules storing raw MIME under `inbound-email/` in the media bucket (S3 action only)
 2. EventBridge `Object Created` events on that prefix invoke `papyrus-ses-inbound-receive`, which creates the `Message`
-3. `papyrus-email-submission-processor` Lambda — runs create/find/process
+3. `papyrus-email-submission-processor` Lambda — runs create/find/process (scoped to
+   references registered from that email, not the full corpus table)
 4. A scheduled retry sweep (every 15 minutes) re-invokes intake for MIME objects still under `inbound-email/`
 
 Raw MIME is **retained until processing completes successfully**. On success the processor moves the object to `inbound-email-archived/` (outside the intake prefix) so it is not retried. Failed or pending intake leaves the MIME in place so the same test email can be replayed without resending.
@@ -87,7 +88,11 @@ poetry run python -m unittest procedures.newsroom.tests.test_email_submissions -
 ```
 
 Covers citation parsing, S3 key filters, stable message ids, GSI fields on status
-updates, and MIME archive copy/delete behavior.
+updates, MIME archive copy/delete behavior, and scoped GraphQL loads (no full-table
+`listReferences` scans during processing).
+
+GitHub Actions workflow `.github/workflows/inbound-email-tests.yml` runs the same
+suite on pushes/PRs that touch inbound email code.
 
 ### Production smoke script
 

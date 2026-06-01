@@ -90,6 +90,30 @@ class EmailSubmissionTests(unittest.TestCase):
         self.assertFalse(result["archived"])
         s3.copy_object.assert_not_called()
 
+    def test_load_registered_reference_processing_records_uses_scoped_queries(self):
+        client = mock.Mock()
+        client.get_records_by_id.return_value = {
+            "ref-1": {"id": "ref-1", "referenceLineageId": "lineage-1"},
+        }
+        client.list_reference_attachments_by_lineage.return_value = [
+            {"id": "att-1", "referenceLineageId": "lineage-1"},
+        ]
+        client.list_semantic_relations_by_import_run_and_imported_at.return_value = [
+            {"id": "rel-1", "importRunId": "import-1"},
+        ]
+        references, attachments, relations = email_submissions._load_registered_reference_processing_records(
+            client,
+            registered_reference_ids={"ref-1"},
+            import_run_id="import-1",
+        )
+        client.get_records_by_id.assert_called_once_with("Reference", ["ref-1"])
+        client.list_reference_attachments_by_lineage.assert_called_once_with("lineage-1")
+        client.list_semantic_relations_by_import_run_and_imported_at.assert_called_once_with("import-1")
+        client.list_records.assert_not_called()
+        self.assertEqual(len(references), 1)
+        self.assertEqual(len(attachments), 1)
+        self.assertEqual(len(relations), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

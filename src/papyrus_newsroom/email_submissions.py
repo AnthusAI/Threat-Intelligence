@@ -485,6 +485,36 @@ def run_email_submission_cloud_procedure(
     )
 
 
+def _load_registered_reference_processing_records(
+    client: Any,
+    *,
+    registered_reference_ids: set[str],
+    import_run_id: str | None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Point lookups for inbound email processing — avoid scanning entire Reference tables."""
+    if not registered_reference_ids:
+        return [], [], []
+    references_by_id = client.get_records_by_id("Reference", sorted(registered_reference_ids))
+    references = list(references_by_id.values())
+    attachments: list[dict[str, Any]] = []
+    seen_attachment_ids: set[str] = set()
+    for reference in references:
+        lineage_id = str(reference.get("referenceLineageId") or reference.get("id") or "").strip()
+        if not lineage_id:
+            continue
+        for attachment in client.list_reference_attachments_by_lineage(lineage_id):
+            attachment_id = str(attachment.get("id") or "")
+            if attachment_id and attachment_id in seen_attachment_ids:
+                continue
+            if attachment_id:
+                seen_attachment_ids.add(attachment_id)
+            attachments.append(attachment)
+    relations: list[dict[str, Any]] = []
+    if import_run_id:
+        relations = client.list_semantic_relations_by_import_run_and_imported_at(import_run_id)
+    return references, attachments, relations
+
+
 def _create_find_process_direct_citations(
     client: PapyrusGraphQLAuthoringClient,
     *,
@@ -550,27 +580,31 @@ def _create_find_process_direct_citations(
             for change in changes
             if change.get("modelName") == "Reference" and change.get("action") in {"create", "update"}
         }
-        refreshed_references = client.list_records("Reference")
-        refreshed_attachments = client.list_records("ReferenceAttachment")
-        refreshed_relations = client.list_records("SemanticRelation")
+        registered_reference_ids.discard("")
+        import_run_id = str(plan.get("importRunId") or "").strip() or None
+        scoped_references, scoped_attachments, scoped_relations = _load_registered_reference_processing_records(
+            client,
+            registered_reference_ids=registered_reference_ids,
+            import_run_id=import_run_id,
+        )
         corpus_id = knowledge_corpus_id(corpus_config)
         find_result = run_reference_url_text_extraction(
             client=client,
-            references=refreshed_references,
-            attachments=refreshed_attachments,
-            semantic_relations=refreshed_relations,
+            references=scoped_references,
+            attachments=scoped_attachments,
+            semantic_relations=scoped_relations,
             corpus_key_by_id={corpus_id: str(corpus_config.get("key") or "")},
             corpus_id=corpus_id,
             reference_ids=registered_reference_ids,
-            curation_status="all",
+            curation_status="pending",
             apply=True,
         )
         process_result = run_reference_metadata_generation_from_extracted_text(
-            references=refreshed_references,
-            attachments=refreshed_attachments,
+            references=scoped_references,
+            attachments=scoped_attachments,
             corpus_id=corpus_id,
             reference_ids=registered_reference_ids,
-            curation_status="all",
+            curation_status="pending",
             apply=True,
         )
     else:
