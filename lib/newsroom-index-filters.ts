@@ -36,10 +36,18 @@ export function normalizeReferenceIndexOrder(value: string | null | undefined): 
 }
 
 export function effectiveReferencesIndexFilters(partial?: Partial<ReferencesIndexFilters>): ReferencesIndexFilters {
+  const order = normalizeReferenceIndexOrder(partial?.order);
+  const explicitStatus = partial?.status?.trim();
+  let status = explicitStatus || DEFAULT_REFERENCES_INDEX_FILTERS.status;
+  // Import-date sort is for intake triage; the default "reviewed only" filter hides
+  // pending references created by inbound email and other intake paths.
+  if (order === "imported" && !explicitStatus) {
+    status = "";
+  }
   return {
-    status: partial?.status?.trim() || DEFAULT_REFERENCES_INDEX_FILTERS.status,
+    status,
     processing: partial?.processing?.trim() ?? DEFAULT_REFERENCES_INDEX_FILTERS.processing,
-    order: normalizeReferenceIndexOrder(partial?.order),
+    order,
   };
 }
 
@@ -59,10 +67,10 @@ export function effectiveAssignmentsIndexFilters(partial?: Partial<AssignmentsIn
 }
 
 export function readReferencesIndexFilters(searchParams: URLSearchParams): ReferencesIndexFilters {
-  const status = searchParams.get("status")?.trim() ?? "";
+  const statusParam = searchParams.get("status")?.trim() ?? "";
   const orderParam = searchParams.get("order")?.trim();
   return effectiveReferencesIndexFilters({
-    status: status ? referencesStatusFromUrl(status) : undefined,
+    status: statusParam ? referencesStatusFromUrl(statusParam) : undefined,
     processing: searchParams.get("processing")?.trim() ?? undefined,
     order: orderParam ? normalizeReferenceIndexOrder(orderParam) : undefined,
   });

@@ -7533,8 +7533,10 @@ function ReferencesDeskView({
                   type="button"
                   data-active={orderFilter === "imported" || undefined}
                   onClick={() => {
+                    const nextStatus = statusFilter === "__exclude_pending" ? "" : statusFilter;
                     setOrderFilter("imported");
-                    syncReferencesIndexUrl(statusFilter, processingFilter, "imported", true);
+                    if (nextStatus !== statusFilter) setStatusFilter(nextStatus);
+                    syncReferencesIndexUrl(nextStatus, processingFilter, "imported", true);
                   }}
                 >
                   Date imported
@@ -7578,8 +7580,12 @@ function ReferencesDeskView({
               sortValue={orderFilter}
               onSortChange={(value) => {
                 const nextOrder = normalizeReferenceIndexOrder(value);
+                const nextStatus = nextOrder === "imported" && statusFilter === "__exclude_pending"
+                  ? ""
+                  : statusFilter;
                 setOrderFilter(nextOrder);
-                syncReferencesIndexUrl(statusFilter, processingFilter, nextOrder, true);
+                if (nextStatus !== statusFilter) setStatusFilter(nextStatus);
+                syncReferencesIndexUrl(nextStatus, processingFilter, nextOrder, true);
               }}
               onSelect={selectReference}
               selectedId={selectedLineageId}

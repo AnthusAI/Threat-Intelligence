@@ -361,8 +361,8 @@ def _effective_index_filters(tab: str, partial: dict[str, str]) -> dict[str, str
         text = str(value or "").strip()
         if text:
             merged[key] = text
-    if tab == "references" and partial.get("status"):
-        merged["status"] = _references_status_to_segment(_references_status_from_segment(str(partial["status"])))
+    if tab == "references" and "status" in partial:
+        merged["status"] = _references_status_to_segment(_references_status_from_segment(str(partial.get("status") or "")))
     if tab == "references":
         order = str(partial.get("order") or merged.get("order") or "published").strip()
         merged["order"] = "imported" if order == "imported" else "published"
@@ -372,12 +372,16 @@ def _effective_index_filters(tab: str, partial: dict[str, str]) -> dict[str, str
 def _index_filters_from_query(tab: str, query: dict[str, list[str]]) -> dict[str, str]:
     if tab == "references":
         status_raw = (query.get("status") or [""])[0].strip()
+        order_raw = (query.get("order") or [""])[0].strip()
+        status_value = status_raw or DEFAULT_REFERENCE_STATUS
+        if order_raw == "imported" and not status_raw:
+            status_value = ""
         return _effective_index_filters(
             tab,
             {
-                "status": status_raw or DEFAULT_REFERENCE_STATUS,
+                "status": status_value,
                 "processing": (query.get("processing") or [""])[0].strip(),
-                "order": (query.get("order") or [""])[0].strip(),
+                "order": order_raw,
             },
         )
     if tab == "messages":

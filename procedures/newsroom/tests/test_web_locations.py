@@ -72,8 +72,12 @@ class WebLocationTests(unittest.TestCase):
 
         imported_location = web_path_to_papyrus_location("/newsroom/references?order=imported")
         self.assertEqual(imported_location["indexFilters"]["order"], "imported")
+        self.assertEqual(imported_location["indexFilters"]["status"], "")
         imported_mapped = papyrus_uri_to_web_path("papyrus://newsroom/references/index/order/imported")
         self.assertEqual(imported_mapped["webPath"], "/newsroom/references?order=imported")
+
+        reviewed_imported = web_path_to_papyrus_location("/newsroom/references?order=imported&status=exclude-pending")
+        self.assertEqual(reviewed_imported["indexFilters"]["status"], "exclude-pending")
 
         mapped = papyrus_uri_to_web_path("papyrus://newsroom/messages/index/kind/insight")
         self.assertEqual(mapped["webPath"], "/newsroom/messages?kind=insight")
