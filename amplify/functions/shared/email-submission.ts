@@ -116,6 +116,56 @@ export function countInboundAttachments(rawBytes: Uint8Array): number {
   return matches?.length ?? 0;
 }
 
+const MIN_COMPOSED_PROSE_CHARS_FOR_AGENT = 120;
+
+export function proseAfterStrippingCitations(
+  bodyText: string,
+  citations: Array<{ url?: string }>,
+): string {
+  let text = String(bodyText ?? "");
+  for (const citation of citations) {
+    const url = String(citation.url ?? "").trim();
+    if (url) text = text.split(url).join(" ");
+  }
+  text = text.replace(/https?:\/\/\S+/gi, " ");
+  return text.replace(/\s+/g, " ").trim();
+}
+
+export function hasSubstantialComposedProse(
+  bodyText: string,
+  citations: Array<{ url?: string }>,
+): boolean {
+  const prose = proseAfterStrippingCitations(bodyText, citations);
+  if (prose.length >= MIN_COMPOSED_PROSE_CHARS_FOR_AGENT) return true;
+  const clauses = prose.split(/[.!?\n]+/).map((entry) => entry.trim()).filter((entry) => entry.length >= 24);
+  return clauses.length >= 2;
+}
+
+export function classifyNewSubmissionIntake(
+  bodyText: string,
+  citations: Array<Record<string, unknown>>,
+): string {
+  if (citations.length === 0) return "new_submission";
+  if (citations.length > 1) return "agent_intake";
+  if (hasSubstantialComposedProse(bodyText, citations as Array<{ url?: string }>)) return "agent_intake";
+  return "direct_citation_intake";
+}
+
+export function classifyInboundEmailIntake(input: {
+  bodyText: string;
+  citations: Array<Record<string, unknown>>;
+  parentSubmissionMessageId: string | null;
+  attachmentCount: number;
+  userComposedText: string;
+}): string {
+  if (input.parentSubmissionMessageId) {
+    if (input.attachmentCount > 0 && !input.userComposedText) return "attachment_only_reply";
+    if (input.userComposedText || input.attachmentCount > 0) return "conversational_reply";
+    return "empty_reply";
+  }
+  return classifyNewSubmissionIntake(input.bodyText, input.citations);
+}
+
 export function extractUserComposedReplyText(bodyText: string): string {
   let text = String(bodyText ?? "").replace(/\r\n/g, "\n");
   const markers = [

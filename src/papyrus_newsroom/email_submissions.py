@@ -382,9 +382,9 @@ def register_inbound_email_message(
     inbound_attachment_count = 0
     inbound_in_reply_to: str | None = None
     inbound_references: str | None = None
+    envelope = None
     if bucket_name and key_name:
         from papyrus_newsroom.email_submission_replies import (
-            classify_inbound_reply,
             load_inbound_mime_envelope_from_metadata,
             resolve_parent_submission_message_id,
         )
@@ -398,13 +398,17 @@ def register_inbound_email_message(
                 in_reply_to=envelope.in_reply_to,
                 references_header=envelope.references_header,
             )
-            intake_classification = classify_inbound_reply(
-                body_text=envelope.body_text,
-                parent_message_id=parent_submission_message_id,
-                attachments=envelope.attachments,
-            )
+    from papyrus_newsroom.email_submission_replies import classify_inbound_email_intake
+
+    intake_classification = classify_inbound_email_intake(
+        body_text=envelope.body_text if envelope else body_text,
+        citations=citations,
+        parent_message_id=parent_submission_message_id,
+        attachments=envelope.attachments if envelope else [],
+    )
     attachment_only_reply = intake_classification == "attachment_only_reply"
     conversational_reply = intake_classification == "conversational_reply"
+    agent_intake = intake_classification == "agent_intake"
     status = "received" if authorized else "rejected"
     response_status = "PENDING" if authorized else "REJECTED"
     response_error = None if authorized else "Sender email is not registered to an active Papyrus user."
@@ -415,7 +419,7 @@ def register_inbound_email_message(
             "Submission looks like a research assignment request. "
             "Send direct citations (URLs or DOIs), not open-ended research tasks."
         )
-    elif authorized and not citations and not attachment_only_reply and not conversational_reply:
+    elif authorized and not citations and not attachment_only_reply and not conversational_reply and not agent_intake:
         status = "rejected"
         response_status = "REJECTED"
         response_error = "No direct citations (URL or DOI) were found in the email body."

@@ -2,6 +2,7 @@ import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
 import { GetObjectCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
 import {
   buildEmailSubmissionMessageInput,
+  classifyInboundEmailIntake,
   countInboundAttachments,
   extractDirectCitations,
   extractRecipientsFromRawMime,
@@ -120,22 +121,16 @@ async function processInboundSubmission(inbound: InboundPayload): Promise<Record
   const profileId = await lookupRegisteredUserProfileId(dataClient, inbound.senderEmail);
   const authorized = Boolean(profileId);
   const citations = authorized ? extractDirectCitations(inbound.bodyText) : [];
-  const attachmentOnlyReply = Boolean(
-    authorized
-    && inbound.parentSubmissionMessageId
-    && inbound.attachmentCount > 0
-    && !inbound.userComposedText,
-  );
-  const conversationalReply = Boolean(
-    authorized
-    && inbound.parentSubmissionMessageId
-    && (inbound.userComposedText || inbound.attachmentCount > 0),
-  );
-  const intakeClassification = attachmentOnlyReply
-    ? "attachment_only_reply"
-    : conversationalReply
-      ? "conversational_reply"
-      : "new_submission";
+  const intakeClassification = classifyInboundEmailIntake({
+    bodyText: inbound.bodyText,
+    citations,
+    parentSubmissionMessageId: inbound.parentSubmissionMessageId,
+    attachmentCount: inbound.attachmentCount,
+    userComposedText: inbound.userComposedText,
+  });
+  const attachmentOnlyReply = intakeClassification === "attachment_only_reply";
+  const conversationalReply = intakeClassification === "conversational_reply";
+  const agentIntake = intakeClassification === "agent_intake";
 
   let status = authorized ? "received" : "rejected";
   let responseStatus = authorized ? "PENDING" : "REJECTED";
@@ -147,7 +142,7 @@ async function processInboundSubmission(inbound: InboundPayload): Promise<Record
     status = "rejected";
     responseStatus = "REJECTED";
     responseError = "Submission looks like a research assignment request. Send direct citations (URLs or DOIs), not open-ended research tasks.";
-  } else if (authorized && citations.length === 0 && !attachmentOnlyReply && !conversationalReply) {
+  } else if (authorized && citations.length === 0 && !attachmentOnlyReply && !conversationalReply && !agentIntake) {
     status = "rejected";
     responseStatus = "REJECTED";
     responseError = "No direct citations (URL or DOI) were found in the email body.";

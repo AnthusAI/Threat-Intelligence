@@ -38,6 +38,38 @@ class EmailSubmissionReplyTests(unittest.TestCase):
         )
         self.assertEqual(classification, "conversational_reply")
 
+    def test_classify_newsletter_forward_as_agent_intake(self):
+        citations = [
+            {"url": "https://arxiv.org/abs/1"},
+            {"url": "https://arxiv.org/abs/2"},
+        ]
+        body = "Intro paragraph about both papers.\n\n" + "\n".join(row["url"] for row in citations)
+        self.assertEqual(
+            email_submission_replies.classify_new_submission_intake(body, citations),
+            "agent_intake",
+        )
+
+    def test_classify_message_plus_single_url_as_agent_intake(self):
+        citations = [{"url": "https://arxiv.org/abs/1706.03762"}]
+        body = (
+            "Please file this transformer paper. The authors argue attention is all you need, "
+            "and I think we should track follow-up work on sparse attention variants too."
+        )
+        self.assertEqual(
+            email_submission_replies.classify_new_submission_intake(body, citations),
+            "agent_intake",
+        )
+
+    def test_classify_single_url_only_as_direct_intake(self):
+        citations = [{"url": "https://arxiv.org/abs/1706.03762"}]
+        self.assertEqual(
+            email_submission_replies.classify_new_submission_intake(
+                "https://arxiv.org/abs/1706.03762",
+                citations,
+            ),
+            "direct_citation_intake",
+        )
+
     def test_feedback_rfc_message_id(self):
         with unittest.mock.patch.dict(
             "os.environ",

@@ -120,11 +120,14 @@ Acknowledgment emails set a stable RFC `Message-ID` of the form
 `<message-email-submission-…@p.apyr.us>` so replies can be correlated to the
 original submission `Message`.
 
-| Reply shape | Handling |
-|-------------|----------|
-| **Attachments only** (no new prose after stripping quoted acknowledgment text) | Deterministic filing: PDF(s) uploaded as `source` on the reference when the parent submission registered **exactly one** reference; find re-run on that reference |
-| **Attachments + message**, or heuristic filing failed | A `console_chat_turn` is queued for the cloud console responder with parent submission context (feedback report, reference ids, attachment list) |
-| **New URL/DOI, not a thread reply** | Standard citation intake (create / find / process) |
+| Intake shape | Handling |
+|--------------|----------|
+| **Single URL/DOI, minimal prose** | Deterministic pipeline: create / find / process direct citations |
+| **Multiple URLs** (e.g. forwarded newsletter) | **Console agent** — file relevant references, create **insight** Messages where prose discusses a paper (`papyrus.reference.insight_create`), skip footer/nav links |
+| **URL + substantial message** | **Console agent** — decide filing vs editorial insight vs question vs command (knowledge search, list references, etc.) |
+| **Reply: attachments only** (no new prose) | Deterministic PDF filing when parent submission had exactly one reference |
+| **Reply: attachments + message**, or filing failed | **Console agent** with parent submission context |
+| **No citations, not a reply** | Rejected |
 
 Reply-To on feedback mail is `submissions@p.apyr.us`. Intake stores
 `metadata.parentSubmissionMessageId`, `metadata.intakeClassification`, and MIME

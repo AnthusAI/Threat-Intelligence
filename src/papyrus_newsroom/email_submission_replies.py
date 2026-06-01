@@ -27,6 +27,8 @@ _CONSOLE_MESSAGE_KIND = "console_chat_turn"
 _CONSOLE_MESSAGE_DOMAIN = "conversation"
 _CONSOLE_NEWSROOM_FEED_KEY = "consoleChat"
 _CONSOLE_THREAD_ANCHOR_KEY = "site#papyrus"
+_MIN_COMPOSED_PROSE_CHARS_FOR_AGENT = 120
+_URL_IN_PROSE_PATTERN = re.compile(r"https?://\S+", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -180,6 +182,43 @@ def load_inbound_mime_envelope_from_metadata(metadata: dict[str, Any]) -> Inboun
     return parse_inbound_mime_envelope(raw_bytes)
 
 
+def _citation_urls(citations: list[dict[str, Any]]) -> list[str]:
+    urls: list[str] = []
+    for citation in citations:
+        if not isinstance(citation, dict):
+            continue
+        url = str(citation.get("url") or "").strip()
+        if url:
+            urls.append(url)
+    return urls
+
+
+def prose_after_stripping_citations(body_text: str, citations: list[dict[str, Any]]) -> str:
+    text = str(body_text or "")
+    for url in _citation_urls(citations):
+        text = text.replace(url, " ")
+    text = _URL_IN_PROSE_PATTERN.sub(" ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def has_substantial_composed_prose(body_text: str, citations: list[dict[str, Any]]) -> bool:
+    prose = prose_after_stripping_citations(body_text, citations)
+    if len(prose) >= _MIN_COMPOSED_PROSE_CHARS_FOR_AGENT:
+        return True
+    clauses = [segment.strip() for segment in re.split(r"[.!?\n]+", prose) if len(segment.strip()) >= 24]
+    return len(clauses) >= 2
+
+
+def classify_new_submission_intake(body_text: str, citations: list[dict[str, Any]]) -> str:
+    if not citations:
+        return "new_submission"
+    if len(citations) > 1:
+        return "agent_intake"
+    if has_substantial_composed_prose(body_text, citations):
+        return "agent_intake"
+    return "direct_citation_intake"
+
+
 def classify_inbound_reply(
     *,
     body_text: str,
@@ -194,6 +233,39 @@ def classify_inbound_reply(
     if user_text or attachments:
         return "conversational_reply"
     return "empty_reply"
+
+
+def classify_inbound_email_intake(
+    *,
+    body_text: str,
+    citations: list[dict[str, Any]],
+    parent_message_id: str | None,
+    attachments: list[InboundMimeAttachment],
+) -> str:
+    if parent_message_id:
+        return classify_inbound_reply(
+            body_text=body_text,
+            parent_message_id=parent_message_id,
+            attachments=attachments,
+        )
+    return classify_new_submission_intake(body_text, citations)
+
+
+def _email_agent_instructions() -> str:
+    return (
+        "You are handling authorized inbound email for Papyrus reference intake.\n"
+        "Use execute_tactus with the papyrus.* tool surface.\n\n"
+        "Goals:\n"
+        "1. Register scholarly references for each relevant URL/DOI the submitter cited "
+        "(newsletter forwards may contain many links — file the real references, skip "
+        "unsubscribe/footer/nav links).\n"
+        "2. When prose discusses a specific reference (commentary, summary, critique), "
+        "create an insight Message on that reference lineage via papyrus.reference.insight_create.\n"
+        "3. When the submitter asks a question or gives a command (knowledge search, list "
+        "recent references, curation review), use the appropriate tools — do not treat "
+        "commands as insights.\n"
+        "4. Decide per paragraph: filing-only, editorial insight, question, or follow-up command.\n"
+    )
 
 
 def _pdf_attachments(attachments: list[InboundMimeAttachment]) -> list[InboundMimeAttachment]:
@@ -349,6 +421,8 @@ def enqueue_console_chat_for_email_reply(
     response_target = str(os.environ.get("PAPYRUS_CONSOLE_RESPONSE_TARGET") or "cloud").strip() or "cloud"
     feedback_report = parent_metadata.get("feedbackReport") if isinstance(parent_metadata.get("feedbackReport"), dict) else {}
     prompt_lines = [
+        _email_agent_instructions(),
+        "",
         "You are handling a reply to a Papyrus inbound reference submission acknowledgment email.",
         f"Parent submission message id: {parent_message_id}",
         f"Inbound reply message id: {reply_message_id}",
@@ -455,6 +529,129 @@ def enqueue_console_chat_for_email_reply(
     }
 
 
+def enqueue_console_chat_for_email_intake(
+    client: Any,
+    *,
+    submission_message_id: str,
+    envelope: InboundMimeEnvelope | None,
+    message: dict[str, Any],
+    metadata: dict[str, Any],
+    citations: list[dict[str, Any]],
+    corpus_key: str,
+) -> dict[str, Any]:
+    from papyrus_content.newsroom_commands import now_iso
+
+    now = now_iso()
+    thread_id = f"thread-email-intake-{submission_message_id}"
+    response_target = str(os.environ.get("PAPYRUS_CONSOLE_RESPONSE_TARGET") or "cloud").strip() or "cloud"
+    body_text = envelope.body_text if envelope else str(message.get("content") or "")
+    subject = (envelope.subject if envelope else None) or str(message.get("summary") or "(no subject)")
+    prompt_lines = [
+        _email_agent_instructions(),
+        "",
+        f"Submission message id: {submission_message_id}",
+        f"Corpus key: {corpus_key}",
+        f"Subject: {subject}",
+        f"Detected citation count: {len(citations)}",
+        "",
+        "Detected citations JSON:",
+        json.dumps(citations, indent=2, sort_keys=True),
+        "",
+        "Full email body:",
+        body_text,
+    ]
+    if envelope and envelope.attachments:
+        prompt_lines.extend(["", "MIME attachments present:"])
+        for attachment in envelope.attachments:
+            prompt_lines.append(f"- {attachment.filename} ({attachment.media_type}, {len(attachment.payload)} bytes)")
+    prompt = "\n".join(prompt_lines).strip()
+
+    thread_input = {
+        "id": thread_id,
+        "threadKind": "console",
+        "status": "active",
+        "title": f"Email intake {submission_message_id}",
+        "summary": "Inbound email agent intake",
+        "primaryAnchorKind": "message",
+        "primaryAnchorId": submission_message_id,
+        "primaryAnchorLineageId": submission_message_id,
+        "primaryAnchorKey": f"message#{submission_message_id}",
+        "createdByLabel": str(metadata.get("senderEmail") or message.get("authorLabel") or "email-intake"),
+        "messageCount": 0,
+        "metadata": json.dumps(
+            {
+                "channel": "email_intake",
+                "submissionMessageId": submission_message_id,
+                "corpusKey": corpus_key,
+            },
+            sort_keys=True,
+        ),
+        "createdAt": now,
+        "updatedAt": now,
+        "newsroomFeedKey": _CONSOLE_NEWSROOM_FEED_KEY,
+    }
+    existing_thread = client.get_record("MessageThread", thread_id)
+    if not existing_thread:
+        client.graphql(
+            """
+            mutation CreateEmailIntakeThread($input: CreateMessageThreadInput!) {
+              createMessageThread(input: $input) { id }
+            }
+            """,
+            {"input": thread_input},
+        )
+
+    sequence_number = int(existing_thread.get("messageCount") or 0) + 1 if existing_thread else 1
+    chat_message_id = f"message-console-email-intake-{uuid.uuid4().hex[:20]}"
+    message_input = {
+        "id": chat_message_id,
+        "threadId": thread_id,
+        "parentMessageId": None,
+        "sequenceNumber": sequence_number,
+        "role": "USER",
+        "messageKind": _CONSOLE_MESSAGE_KIND,
+        "messageDomain": _CONSOLE_MESSAGE_DOMAIN,
+        "messageType": "MESSAGE",
+        "content": prompt,
+        "body": prompt,
+        "status": "active",
+        "summary": subject[:180],
+        "source": "email-intake",
+        "authorLabel": str(metadata.get("senderEmail") or message.get("authorLabel") or "email-intake"),
+        "semanticLayer": "working_memory",
+        "searchVisibility": "private",
+        "responseTarget": response_target,
+        "responseStatus": "PENDING",
+        "metadata": json.dumps(
+            {
+                "channel": "email_intake",
+                "submissionMessageId": submission_message_id,
+                "corpusKey": corpus_key,
+                "citationCount": len(citations),
+                "captureModelContext": True,
+            },
+            sort_keys=True,
+        ),
+        "createdAt": now,
+        "updatedAt": now,
+        "newsroomFeedKey": _CONSOLE_NEWSROOM_FEED_KEY,
+    }
+    client.graphql(
+        """
+        mutation CreateEmailIntakeConsoleTurn($input: CreateMessageInput!) {
+          createMessage(input: $input) { id }
+        }
+        """,
+        {"input": message_input},
+    )
+    return {
+        "queued": True,
+        "threadId": thread_id,
+        "chatMessageId": chat_message_id,
+        "responseTarget": response_target,
+    }
+
+
 def process_inbound_email_submission(
     client: Any,
     *,
@@ -503,16 +700,16 @@ def process_inbound_email_submission(
             else None
         )
     )
+    body_for_classification = envelope.body_text if envelope else str(message.get("content") or "")
+    attachments_for_classification = envelope.attachments if envelope else []
+    citations = metadata.get("directCitations") if isinstance(metadata.get("directCitations"), list) else []
     classification = (
         str(metadata.get("intakeClassification") or "").strip()
-        or (
-            classify_inbound_reply(
-                body_text=envelope.body_text if envelope else str(message.get("content") or ""),
-                parent_message_id=parent_message_id,
-                attachments=envelope.attachments if envelope else [],
-            )
-            if envelope
-            else "new_submission"
+        or classify_inbound_email_intake(
+            body_text=body_for_classification,
+            citations=[row for row in citations if isinstance(row, dict)],
+            parent_message_id=parent_message_id,
+            attachments=attachments_for_classification,
         )
     )
     metadata["parentSubmissionMessageId"] = parent_message_id
@@ -522,7 +719,38 @@ def process_inbound_email_submission(
         metadata["inboundReferences"] = envelope.references_header
         metadata["inboundAttachmentCount"] = len(envelope.attachments)
 
-    citations = metadata.get("directCitations") if isinstance(metadata.get("directCitations"), list) else []
+    if classification == "agent_intake" and citations:
+        started_at = now_iso()
+        _mark_message_processing(client, message_id=message_id, started_at=started_at)
+        chat = enqueue_console_chat_for_email_intake(
+            client,
+            submission_message_id=message_id,
+            envelope=envelope,
+            message=message,
+            metadata=metadata,
+            citations=[row for row in citations if isinstance(row, dict)],
+            corpus_key=corpus_key,
+        )
+        metadata["chatAgent"] = chat
+        finished_at = now_iso()
+        result = {"mode": "agent_intake", "chat": chat, "citationCount": len(citations)}
+        _mark_message_completed(client, message_id=message_id, finished_at=finished_at, result=result)
+        release_inbound_mime_after_success(client, message_id=message_id)
+        client.graphql(
+            """
+            mutation UpdateEmailIntakeAgentMetadata($input: UpdateMessageInput!) {
+              updateMessage(input: $input) { id }
+            }
+            """,
+            {"input": {"id": message_id, "metadata": json.dumps(metadata, sort_keys=True), "updatedAt": finished_at}},
+        )
+        return {
+            "ok": True,
+            "messageId": message_id,
+            "status": "completed",
+            "mode": "agent_intake",
+            "chat": chat,
+        }
 
     if classification == "attachment_only_reply" and parent_message_id and envelope:
         started_at = now_iso()
