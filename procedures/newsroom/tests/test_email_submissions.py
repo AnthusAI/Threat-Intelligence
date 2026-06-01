@@ -112,7 +112,7 @@ class EmailSubmissionTests(unittest.TestCase):
     def test_load_registered_reference_processing_records_uses_scoped_queries(self):
         client = mock.Mock()
         client.get_records_by_id.return_value = {
-            "ref-1": {"id": "ref-1", "referenceLineageId": "lineage-1"},
+            "ref-1": {"id": "ref-1", "lineageId": "lineage-1"},
         }
         client.list_reference_attachments_by_lineage.return_value = [
             {"id": "att-1", "referenceLineageId": "lineage-1"},
@@ -132,6 +132,22 @@ class EmailSubmissionTests(unittest.TestCase):
         self.assertEqual(len(references), 1)
         self.assertEqual(len(attachments), 1)
         self.assertEqual(len(relations), 1)
+
+    def test_load_registered_reference_processing_records_uses_lineage_id_field(self):
+        client = mock.Mock()
+        client.get_records_by_id.return_value = {
+            "ref-1": {"id": "ref-1", "lineageId": "lineage-1"},
+        }
+        client.list_reference_attachments_by_lineage.return_value = [{"id": "att-1"}]
+        _references, attachments, relations = email_submissions._load_registered_reference_processing_records(
+            client,
+            registered_reference_ids={"ref-1"},
+            import_run_id=None,
+        )
+        client.list_reference_attachments_by_lineage.assert_called_once_with("lineage-1")
+        self.assertEqual(len(attachments), 1)
+        client.list_semantic_relations_by_import_run_and_imported_at.assert_not_called()
+        self.assertEqual(relations, [])
 
 
 if __name__ == "__main__":

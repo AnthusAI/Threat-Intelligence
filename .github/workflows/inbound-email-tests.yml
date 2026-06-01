@@ -6,6 +6,7 @@ on:
     paths:
       - "src/papyrus_newsroom/email_submissions.py"
       - "src/papyrus_newsroom/email_submission_feedback.py"
+      - "src/papyrus_content/reference_metadata_generation.py"
       - "src/papyrus_content/graphql_authoring.py"
       - "procedures/newsroom/tests/test_email_submissions.py"
       - "procedures/newsroom/tests/test_email_submission_feedback.py"
@@ -18,6 +19,7 @@ on:
     paths:
       - "src/papyrus_newsroom/email_submissions.py"
       - "src/papyrus_newsroom/email_submission_feedback.py"
+      - "src/papyrus_content/reference_metadata_generation.py"
       - "src/papyrus_content/graphql_authoring.py"
       - "procedures/newsroom/tests/test_email_submissions.py"
       - "procedures/newsroom/tests/test_email_submission_feedback.py"

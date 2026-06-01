@@ -3315,9 +3315,14 @@ def reference_generate_metadata_from_extracted_text(
     model: str = REFERENCE_METADATA_MODEL_DEFAULT,
     apply: bool = False,
     refresh: bool = True,
+    reference: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    semantic = _semantic_client()
-    reference = _resolve_reference(semantic, reference_id)
+    if isinstance(reference, dict) and str(reference.get("id") or "").strip():
+        resolved_reference = reference
+    else:
+        semantic = _semantic_client()
+        resolved_reference = _resolve_reference(semantic, reference_id)
+    reference = resolved_reference
     context = resolve_reference_text_generation_context(
         extracted_text=extracted_text,
         original_title=original_title or str(reference.get("title") or ""),

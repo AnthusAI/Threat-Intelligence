@@ -85,12 +85,18 @@ def run_reference_metadata_generation_from_extracted_text(
         try:
             result = reference_curation_signals.reference_generate_metadata_from_extracted_text(
                 reference_id=str(reference.get("id") or ""),
+                reference=reference,
                 extracted_text=str(context.get("extractedText") or ""),
                 original_title=str(context.get("originalTitle") or ""),
                 original_subtitle=str(context.get("originalSubtitle") or ""),
                 model=model,
-                apply=apply,
+                apply=False,
             )
+            if apply and str(result.get("status") or "") == "generated":
+                if authoring_client is None:
+                    authoring_client, _ = create_authoring_client()
+                _apply_metadata_attachment_records(authoring_client, result.get("records") or [], reference=reference)
+                result = {**result, "apply": True}
             status = str(result.get("status") or result.get("action") or "").strip()
             if status in {"skipped_missing_text"}:
                 skipped_missing_text += 1
@@ -321,6 +327,28 @@ def _original_subtitle(reference: dict[str, Any]) -> str:
         or reference.get("subtitle")
         or ""
     ).strip()
+
+
+def _apply_metadata_attachment_records(
+    client: Any,
+    records: list[dict[str, Any]],
+    *,
+    reference: dict[str, Any] | None = None,
+) -> None:
+    from .model_attachments import upload_attachment_body
+
+    lineage_id = str((reference or {}).get("lineageId") or "").strip()
+    version_number = (reference or {}).get("versionNumber")
+    for record in records:
+        if str(record.get("modelName") or "") != "ModelAttachment":
+            continue
+        attachment = dict(record.get("input") or {})
+        if lineage_id:
+            attachment["ownerLineageId"] = lineage_id
+        if version_number is not None:
+            attachment["ownerVersionNumber"] = version_number
+        body = record.get("body") or ""
+        upload_attachment_body(client, attachment, body)
 
 
 def _upsert_reference_title_from_generation(client: Any, reference: dict[str, Any], title: str) -> None:

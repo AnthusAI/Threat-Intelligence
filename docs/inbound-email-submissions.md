@@ -100,6 +100,24 @@ are created for the configured corpus (`PAPYRUS_INBOUND_EMAIL_CORPUS_KEY`,
 default `AI-ML-research`). You should receive a feedback email at the sender
 address when processing completes.
 
+## Replay an archived submission (local, pre-deploy)
+
+Use a production archived MIME key to inspect or re-run find/process with the code
+in your checkout (IAM credentials required):
+
+```bash
+chmod +x scripts/verify-archived-email-submission.sh
+AWS_PROFILE=Ryan ./scripts/verify-archived-email-submission.sh \
+  --archive-key 07an4t5f11qb4pd82kv15dv5kh2ufqfnt9vepkg1
+
+# Re-run find + summarize with local fixes (mutates production references):
+AWS_PROFILE=Ryan ./scripts/verify-archived-email-submission.sh \
+  --archive-key 07an4t5f11qb4pd82kv15dv5kh2ufqfnt9vepkg1 --rerun
+```
+
+Example archive key from `rap@endymion.com` batch (2026-06-01): `07an4t5f11qb4pd82kv15dv5kh2ufqfnt9vepkg1`
+→ message `message-email-submission-40ca4b073ca02d75f724` (arXiv `2605.23071`).
+
 ## Harder testing
 
 ### Unit tests (fast, no AWS)

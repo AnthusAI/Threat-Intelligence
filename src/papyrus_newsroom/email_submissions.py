@@ -555,7 +555,9 @@ def _load_registered_reference_processing_records(
     attachments: list[dict[str, Any]] = []
     seen_attachment_ids: set[str] = set()
     for reference in references:
-        lineage_id = str(reference.get("referenceLineageId") or reference.get("id") or "").strip()
+        lineage_id = str(
+            reference.get("lineageId") or reference.get("referenceLineageId") or reference.get("id") or ""
+        ).strip()
         if not lineage_id:
             continue
         for attachment in client.list_reference_attachments_by_lineage(lineage_id):
@@ -612,7 +614,7 @@ def _create_find_process_direct_citations(
     from papyrus_content.ids import knowledge_corpus_id
     from papyrus_content.newsroom_summary import update_newsroom_summary_after_reference_registration
     from papyrus_content.reference_metadata_generation import run_reference_metadata_generation_from_extracted_text
-    from papyrus_content.reference_url_text import run_reference_url_text_extraction
+    from papyrus_content.reference_url_text import run_reference_source_find, run_reference_url_text_extraction
     from papyrus_content.steering import resolve_classifier_for_corpus
 
     corpus_config = require_corpus_config(steering_config, corpus_key, "--corpus-key")
@@ -652,12 +654,28 @@ def _create_find_process_direct_citations(
             import_run_id=import_run_id,
         )
         corpus_id = knowledge_corpus_id(corpus_config)
+        corpus_key_by_id = {corpus_id: str(corpus_config.get("key") or "")}
+        source_find_result = run_reference_source_find(
+            client=client,
+            references=scoped_references,
+            attachments=scoped_attachments,
+            corpus_key_by_id=corpus_key_by_id,
+            corpus_id=corpus_id,
+            reference_ids=registered_reference_ids,
+            curation_status="pending",
+            apply=True,
+        )
+        scoped_references, scoped_attachments, scoped_relations = _load_registered_reference_processing_records(
+            client,
+            registered_reference_ids=registered_reference_ids,
+            import_run_id=import_run_id,
+        )
         find_result = run_reference_url_text_extraction(
             client=client,
             references=scoped_references,
             attachments=scoped_attachments,
             semantic_relations=scoped_relations,
-            corpus_key_by_id={corpus_id: str(corpus_config.get("key") or "")},
+            corpus_key_by_id=corpus_key_by_id,
             corpus_id=corpus_id,
             reference_ids=registered_reference_ids,
             curation_status="pending",
@@ -679,6 +697,7 @@ def _create_find_process_direct_citations(
     else:
         scoped_references = []
         scoped_attachments = []
+        source_find_result = {"eligibleCount": 0, "plannedCount": 0, "changeCount": 0, "failures": [], "items": []}
         find_result = {"eligibleCount": 0, "plannedCount": 0, "changeCount": 0, "failures": [], "items": []}
         process_result = {"attemptedCount": 0, "generatedCount": 0, "items": []}
 
@@ -697,10 +716,22 @@ def _create_find_process_direct_citations(
         "registeredReferenceIds": sorted(registered_reference_ids),
         "directCitationCount": len(citations),
         "find": {
+            "sourceDiscovery": {
+                "eligible": source_find_result.get("eligibleCount", 0),
+                "planned": source_find_result.get("plannedCount", 0),
+                "changes": source_find_result.get("changeCount", 0),
+                "failures": len(source_find_result.get("failures", [])),
+            },
+            "extractedText": {
+                "eligible": find_result.get("eligibleCount", 0),
+                "planned": find_result.get("plannedCount", 0),
+                "changes": find_result.get("changeCount", 0),
+                "failures": len(find_result.get("failures", [])),
+            },
             "eligible": find_result.get("eligibleCount", 0),
             "planned": find_result.get("plannedCount", 0),
-            "changes": find_result.get("changeCount", 0),
-            "failures": len(find_result.get("failures", [])),
+            "changes": int(source_find_result.get("changeCount", 0)) + int(find_result.get("changeCount", 0)),
+            "failures": len(source_find_result.get("failures", [])) + len(find_result.get("failures", [])),
         },
         "process": {
             "attempted": process_result.get("attemptedCount", 0),
