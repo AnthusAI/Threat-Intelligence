@@ -114,6 +114,22 @@ Rejected intake (unauthorized sender, no citations, research-assignment wording)
 invokes the processor with `sendFeedbackOnly: true` so the submitter still gets
 an explanation without running find/process.
 
+## Replying to submission feedback
+
+Acknowledgment emails set a stable RFC `Message-ID` of the form
+`<message-email-submission-…@p.apyr.us>` so replies can be correlated to the
+original submission `Message`.
+
+| Reply shape | Handling |
+|-------------|----------|
+| **Attachments only** (no new prose after stripping quoted acknowledgment text) | Deterministic filing: PDF(s) uploaded as `source` on the reference when the parent submission registered **exactly one** reference; find re-run on that reference |
+| **Attachments + message**, or heuristic filing failed | A `console_chat_turn` is queued for the cloud console responder with parent submission context (feedback report, reference ids, attachment list) |
+| **New URL/DOI, not a thread reply** | Standard citation intake (create / find / process) |
+
+Reply-To on feedback mail is `submissions@p.apyr.us`. Intake stores
+`metadata.parentSubmissionMessageId`, `metadata.intakeClassification`, and MIME
+thread headers on the new inbound `Message`.
+
 ## SES sandbox and feedback recipients
 
 Inbound mail to `submissions@p.apyr.us` does **not** require verifying each

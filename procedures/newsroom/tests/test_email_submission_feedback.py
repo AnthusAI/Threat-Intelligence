@@ -125,7 +125,7 @@ class EmailSubmissionFeedbackTests(unittest.TestCase):
             "metadata": '{"senderEmail":"editor@example.com","authorized":true}',
         }
         ses = mock.Mock()
-        ses.send_email.return_value = {"MessageId": "ses-123"}
+        ses.send_raw_email.return_value = {"MessageId": "ses-123"}
         with mock.patch.dict(
             "os.environ",
             {
@@ -141,10 +141,11 @@ class EmailSubmissionFeedbackTests(unittest.TestCase):
                 ses_client=ses,
             )
         self.assertTrue(result["sent"])
-        ses.send_email.assert_called_once()
-        email_body = ses.send_email.call_args.kwargs["Message"]["Body"]
-        self.assertIn("Html", email_body)
-        self.assertIn("Text", email_body)
+        ses.send_raw_email.assert_called_once()
+        raw_message = ses.send_raw_email.call_args.kwargs["RawMessage"]["Data"]
+        self.assertIn(b"Message-ID:", raw_message)
+        email_body = b""
+        self.assertIn(b"multipart/alternative", raw_message)
         client.graphql.assert_called_once()
 
 

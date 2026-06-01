@@ -6,11 +6,14 @@ import html
 import json
 import os
 import re
-from email.utils import parseaddr
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.utils import formatdate, parseaddr
 from typing import Any
 from urllib.parse import urlparse
 
 from papyrus_content.papyrus_config import build_newsroom_reference_public_url
+from papyrus_newsroom.email_submission_replies import feedback_rfc_message_id
 from papyrus_content.source_readiness import (
     select_extracted_text_attachment,
     select_reference_attachment_by_role,
@@ -557,8 +560,9 @@ def format_submission_feedback_email(report: dict[str, Any]) -> tuple[str, str, 
         [
             "",
             (
-                "Corrections and PDF attachments by reply are not applied automatically yet. "
-                f"For a new citation, email {default_feedback_reply_to_address()} with a URL or DOI."
+                "Reply with only PDF attachments (no message text) to file a missing source on a single-reference submission. "
+                "Include a message in your reply, or questions, and the Papyrus agent will help. "
+                f"New citations: email {default_feedback_reply_to_address()} with a URL or DOI."
             ),
         ]
     )
@@ -601,8 +605,9 @@ def format_submission_feedback_email(report: dict[str, Any]) -> tuple[str, str, 
         f"{references_html}"
         f'<p style="margin:calc({_EMAIL_RHYTHM_PX}px * 1.5) 0 0;padding-top:{_EMAIL_RHYTHM_PX}px;'
         f'border-top:1px solid {_EMAIL_RULE};color:{_EMAIL_MUTED};font-family:{_EMAIL_SANS};'
-        f'font-size:12px;line-height:1.45;">Corrections and PDF attachments by reply are not applied automatically yet. '
-        f"For a new citation, email {html.escape(default_feedback_reply_to_address())} with a URL or DOI.</p>"
+        f'font-size:12px;line-height:1.45;">Reply with only PDF attachments (no message text) to file a missing source on a single-reference submission. '
+        f"Include a message in your reply, or questions, and the Papyrus agent will help. "
+        f"New citations: email {html.escape(default_feedback_reply_to_address())} with a URL or DOI.</p>"
         "</div>"
         "</div></body></html>"
     )
@@ -617,6 +622,7 @@ def send_submission_feedback_email(
     body_html: str | None = None,
     from_address: str | None = None,
     reply_to: str | None = None,
+    submission_message_id: str | None = None,
     ses_client: Any | None = None,
 ) -> dict[str, Any]:
     recipient = parseaddr(str(to_address or "").strip())[1]
@@ -631,27 +637,34 @@ def send_submission_feedback_email(
     import boto3
 
     client = ses_client or boto3.client("ses")
-    destination: dict[str, Any] = {"ToAddresses": [recipient]}
-    body: dict[str, Any] = {"Text": {"Data": body_text, "Charset": "UTF-8"}}
-    if body_html:
-        body["Html"] = {"Data": body_html, "Charset": "UTF-8"}
-    message = {
-        "Subject": {"Data": subject, "Charset": "UTF-8"},
-        "Body": body,
-    }
-    request: dict[str, Any] = {
-        "Source": sender,
-        "Destination": destination,
-        "Message": message,
-    }
     reply_target = str(reply_to or default_feedback_reply_to_address()).strip()
+    rfc_message_id = (
+        feedback_rfc_message_id(submission_message_id) if str(submission_message_id or "").strip() else None
+    )
+    if body_html:
+        mime_message: MIMEMultipart | MIMEText = MIMEMultipart("alternative")
+        mime_message.attach(MIMEText(body_text, "plain", "utf-8"))
+        mime_message.attach(MIMEText(body_html, "html", "utf-8"))
+    else:
+        mime_message = MIMEText(body_text, "plain", "utf-8")
+    mime_message["Subject"] = subject
+    mime_message["From"] = sender
+    mime_message["To"] = recipient
+    mime_message["Date"] = formatdate(localtime=True)
     if reply_target:
-        request["ReplyToAddresses"] = [reply_target]
+        mime_message["Reply-To"] = reply_target
+    if rfc_message_id:
+        mime_message["Message-ID"] = rfc_message_id
 
-    response = client.send_email(**request)
+    response = client.send_raw_email(
+        Source=sender_email,
+        Destinations=[recipient],
+        RawMessage={"Data": mime_message.as_bytes()},
+    )
     return {
         "sent": True,
         "messageId": response.get("MessageId"),
+        "rfcMessageId": rfc_message_id,
         "to": recipient,
         "from": sender,
     }
@@ -704,11 +717,13 @@ def maybe_send_submission_feedback_email(
         body_text=body_text,
         body_html=body_html,
         reply_to=default_feedback_reply_to_address(),
+        submission_message_id=message_id,
         ses_client=ses_client,
     )
 
     metadata["feedbackEmailSentAt"] = now_iso()
     metadata["feedbackEmailMessageId"] = send_result.get("messageId")
+    metadata["feedbackRfcMessageId"] = send_result.get("rfcMessageId")
     metadata["feedbackEmailTo"] = send_result.get("to")
     metadata["feedbackEmailFrom"] = send_result.get("from")
     metadata["feedbackReport"] = report

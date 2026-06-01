@@ -5,11 +5,13 @@ on:
     branches: [main]
     paths:
       - "src/papyrus_newsroom/email_submissions.py"
+      - "src/papyrus_newsroom/email_submission_replies.py"
       - "src/papyrus_newsroom/email_submission_feedback.py"
       - "src/papyrus_content/reference_metadata_generation.py"
       - "src/papyrus_content/graphql_authoring.py"
       - "procedures/newsroom/tests/test_email_submissions.py"
       - "procedures/newsroom/tests/test_email_submission_feedback.py"
+      - "procedures/newsroom/tests/test_email_submission_replies.py"
       - "amplify/functions/**/email*"
       - "amplify/functions/**/ses-inbound*"
       - "amplify/backend.ts"
@@ -18,11 +20,13 @@ on:
   pull_request:
     paths:
       - "src/papyrus_newsroom/email_submissions.py"
+      - "src/papyrus_newsroom/email_submission_replies.py"
       - "src/papyrus_newsroom/email_submission_feedback.py"
       - "src/papyrus_content/reference_metadata_generation.py"
       - "src/papyrus_content/graphql_authoring.py"
       - "procedures/newsroom/tests/test_email_submissions.py"
       - "procedures/newsroom/tests/test_email_submission_feedback.py"
+      - "procedures/newsroom/tests/test_email_submission_replies.py"
       - "amplify/functions/**/email*"
       - "amplify/functions/**/ses-inbound*"
       - "amplify/backend.ts"
@@ -46,4 +50,5 @@ jobs:
           poetry run python -m unittest \
             procedures.newsroom.tests.test_email_submissions \
             procedures.newsroom.tests.test_email_submission_feedback \
+            procedures.newsroom.tests.test_email_submission_replies \
             -v

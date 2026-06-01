@@ -377,6 +377,34 @@ def register_inbound_email_message(
     profile_id = lookup_registered_user_profile_id(client, normalized_sender)
     authorized = bool(profile_id)
     citations = extract_direct_citations(body_text) if authorized else []
+    parent_submission_message_id: str | None = None
+    intake_classification = "new_submission"
+    inbound_attachment_count = 0
+    inbound_in_reply_to: str | None = None
+    inbound_references: str | None = None
+    if bucket_name and key_name:
+        from papyrus_newsroom.email_submission_replies import (
+            classify_inbound_reply,
+            load_inbound_mime_envelope_from_metadata,
+            resolve_parent_submission_message_id,
+        )
+
+        envelope = load_inbound_mime_envelope_from_metadata({"s3Bucket": bucket_name, "s3Key": key_name})
+        if envelope:
+            inbound_in_reply_to = envelope.in_reply_to
+            inbound_references = envelope.references_header
+            inbound_attachment_count = len(envelope.attachments)
+            parent_submission_message_id = resolve_parent_submission_message_id(
+                in_reply_to=envelope.in_reply_to,
+                references_header=envelope.references_header,
+            )
+            intake_classification = classify_inbound_reply(
+                body_text=envelope.body_text,
+                parent_message_id=parent_submission_message_id,
+                attachments=envelope.attachments,
+            )
+    attachment_only_reply = intake_classification == "attachment_only_reply"
+    conversational_reply = intake_classification == "conversational_reply"
     status = "received" if authorized else "rejected"
     response_status = "PENDING" if authorized else "REJECTED"
     response_error = None if authorized else "Sender email is not registered to an active Papyrus user."
@@ -387,7 +415,7 @@ def register_inbound_email_message(
             "Submission looks like a research assignment request. "
             "Send direct citations (URLs or DOIs), not open-ended research tasks."
         )
-    elif authorized and not citations:
+    elif authorized and not citations and not attachment_only_reply and not conversational_reply:
         status = "rejected"
         response_status = "REJECTED"
         response_error = "No direct citations (URL or DOI) were found in the email body."
@@ -410,6 +438,15 @@ def register_inbound_email_message(
         response_status=response_status,
         response_error=response_error,
     )
+    metadata = record.get("metadata")
+    if isinstance(metadata, str) and metadata:
+        metadata_payload = json.loads(metadata)
+        metadata_payload["parentSubmissionMessageId"] = parent_submission_message_id
+        metadata_payload["intakeClassification"] = intake_classification
+        metadata_payload["inboundInReplyTo"] = inbound_in_reply_to
+        metadata_payload["inboundReferences"] = inbound_references
+        metadata_payload["inboundAttachmentCount"] = inbound_attachment_count
+        record["metadata"] = json.dumps(metadata_payload, sort_keys=True)
     changes = build_record_changes(client, [{"modelName": "Message", "expected": record}])
     apply_record_changes(client, changes)
     return {
@@ -431,91 +468,20 @@ def process_email_submission_message(
     steering_config_path: str | None = None,
     apply: bool = True,
 ) -> dict[str, Any]:
-    from papyrus_content.newsroom_commands import now_iso
+    from papyrus_newsroom.email_submission_replies import process_inbound_email_submission
 
     message = client.get_record("Message", message_id)
     if not message:
         raise ValueError(f"Message not found: {message_id}")
     if str(message.get("messageKind") or "") != MESSAGE_KIND_EMAIL_SUBMISSION:
         raise ValueError(f"Message {message_id} is not an email submission.")
-    metadata = _message_metadata(message)
-    if not metadata.get("authorized"):
-        feedback = _try_send_submission_feedback(
-            client,
-            message_id=message_id,
-            processing_error=metadata.get("responseError") or "Unauthorized sender.",
-        )
-        return {
-            "ok": False,
-            "messageId": message_id,
-            "status": "rejected",
-            "error": metadata.get("responseError") or "Unauthorized sender.",
-            "feedbackEmail": feedback,
-        }
-    citations = metadata.get("directCitations") if isinstance(metadata.get("directCitations"), list) else []
-    if not citations:
-        feedback = _try_send_submission_feedback(
-            client,
-            message_id=message_id,
-            processing_error="No direct citations to process.",
-        )
-        return {
-            "ok": False,
-            "messageId": message_id,
-            "status": "rejected",
-            "error": "No direct citations to process.",
-            "feedbackEmail": feedback,
-        }
-
-    started_at = now_iso()
-    _mark_message_processing(client, message_id=message_id, started_at=started_at)
-    try:
-        result = _create_find_process_direct_citations(
-            client,
-            message=message,
-            citations=citations,
-            corpus_key=corpus_key,
-            steering_config_path=steering_config_path or str(DEFAULT_STEERING_CONFIG),
-            apply=apply,
-        )
-        finished_at = now_iso()
-        _mark_message_completed(
-            client,
-            message_id=message_id,
-            finished_at=finished_at,
-            result=result,
-        )
-        mime_release = release_inbound_mime_after_success(client, message_id=message_id)
-        feedback = _try_send_submission_feedback(
-            client,
-            message_id=message_id,
-            processing_result=result,
-            reference_entries=result.get("referenceFeedback") if isinstance(result.get("referenceFeedback"), list) else None,
-        )
-        return {
-            "ok": True,
-            "messageId": message_id,
-            "status": "completed",
-            "mimeRelease": mime_release,
-            "feedbackEmail": feedback,
-            **result,
-        }
-    except Exception as error:
-        finished_at = now_iso()
-        error_message = str(error)
-        _mark_message_failed(client, message_id=message_id, finished_at=finished_at, error_message=error_message)
-        feedback = _try_send_submission_feedback(
-            client,
-            message_id=message_id,
-            processing_error=error_message,
-        )
-        return {
-            "ok": False,
-            "messageId": message_id,
-            "status": "failed",
-            "error": error_message,
-            "feedbackEmail": feedback,
-        }
+    return process_inbound_email_submission(
+        client,
+        message_id=message_id,
+        corpus_key=corpus_key,
+        steering_config_path=steering_config_path,
+        apply=apply,
+    )
 
 
 def run_email_submission_cloud_procedure(

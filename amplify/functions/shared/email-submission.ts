@@ -78,6 +78,65 @@ export function extractRecipientsFromSesMail(mail: Record<string, unknown>): str
   return recipients;
 }
 
+const SUBMISSION_MESSAGE_ID_PATTERN = /^(message-email-submission-[a-f0-9]{20})(?:@|$)/i;
+
+export function parseInboundMimeThreading(rawBytes: Uint8Array): { inReplyTo: string | null; references: string | null } {
+  const raw = Buffer.from(rawBytes).toString("utf8");
+  const inReplyTo = raw.match(/^In-Reply-To:\s*(.+)$/im)?.[1]?.trim() ?? null;
+  const references = raw.match(/^References:\s*(.+)$/im)?.[1]?.trim() ?? null;
+  return { inReplyTo, references };
+}
+
+export function parseSubmissionMessageIdFromRfcMessageId(value: string | null | undefined): string | null {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  const tokens = raw.match(/<([^>]+)>/g)?.map((entry) => entry.slice(1, -1)) ?? [raw.replace(/^<|>$/g, "")];
+  for (const token of tokens) {
+    const match = SUBMISSION_MESSAGE_ID_PATTERN.exec(token.trim());
+    if (match) return match[1];
+    if (token.startsWith("message-email-submission-")) return token.split("@")[0];
+  }
+  return null;
+}
+
+export function resolveParentSubmissionMessageId(
+  inReplyTo: string | null,
+  references: string | null,
+): string | null {
+  for (const header of [inReplyTo, references]) {
+    const resolved = parseSubmissionMessageIdFromRfcMessageId(header);
+    if (resolved) return resolved;
+  }
+  return null;
+}
+
+export function countInboundAttachments(rawBytes: Uint8Array): number {
+  const raw = Buffer.from(rawBytes).toString("utf8");
+  const matches = raw.match(/Content-Disposition:\s*attachment/gi);
+  return matches?.length ?? 0;
+}
+
+export function extractUserComposedReplyText(bodyText: string): string {
+  let text = String(bodyText ?? "").replace(/\r\n/g, "\n");
+  const markers = [
+    /\nOn .+ wrote:\s*\n/i,
+    /\n-{2,}\s*Original Message\s*-{2,}\s*\n/i,
+    /\nFrom:\s*.+\n/i,
+  ];
+  let earliest: number | null = null;
+  for (const marker of markers) {
+    const match = marker.exec(text);
+    if (match && (earliest === null || match.index < earliest)) earliest = match.index;
+  }
+  if (earliest !== null && earliest > 0) text = text.slice(0, earliest);
+  const lines: string[] = [];
+  for (const line of text.split("\n")) {
+    if (line.startsWith(">")) break;
+    lines.push(line);
+  }
+  return lines.join("\n").trim();
+}
+
 export function parseInboundEmailBody(rawBytes: Uint8Array): { subject: string; text: string } {
   const raw = Buffer.from(rawBytes).toString("utf8");
   const subjectMatch = raw.match(/^Subject:\s*(.*)$/im);
@@ -202,6 +261,11 @@ export function buildEmailSubmissionMessageInput(input: {
   status: string;
   responseStatus: string;
   responseError: string | null;
+  parentSubmissionMessageId?: string | null;
+  intakeClassification?: string | null;
+  inboundInReplyTo?: string | null;
+  inboundReferences?: string | null;
+  inboundAttachmentCount?: number;
 }) {
   const record: Record<string, unknown> = {
     id: input.id,
@@ -232,6 +296,11 @@ export function buildEmailSubmissionMessageInput(input: {
       authorized: input.authorized,
       directCitationCount: input.citations.length,
       directCitations: input.citations,
+      parentSubmissionMessageId: input.parentSubmissionMessageId ?? null,
+      intakeClassification: input.intakeClassification ?? null,
+      inboundInReplyTo: input.inboundInReplyTo ?? null,
+      inboundReferences: input.inboundReferences ?? null,
+      inboundAttachmentCount: input.inboundAttachmentCount ?? 0,
     }),
     createdAt: input.now,
     updatedAt: input.now,

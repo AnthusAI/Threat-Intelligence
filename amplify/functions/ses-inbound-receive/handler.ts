@@ -2,15 +2,19 @@ import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
 import { GetObjectCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
 import {
   buildEmailSubmissionMessageInput,
+  countInboundAttachments,
   extractDirectCitations,
   extractRecipientsFromRawMime,
   extractRecipientsFromSesMail,
   extractSenderFromRawMime,
   extractSenderFromSesMail,
+  extractUserComposedReplyText,
   looksLikeResearchAssignmentRequest,
   lookupRegisteredUserProfileId,
   normalizeEmailAddress,
   parseInboundEmailBody,
+  parseInboundMimeThreading,
+  resolveParentSubmissionMessageId,
 } from "../shared/email-submission";
 import {
   inboundMessageIdFromS3,
@@ -35,6 +39,11 @@ type InboundPayload = {
   s3Bucket: string | null;
   s3Key: string | null;
   sesMessageId: string | null;
+  inReplyTo: string | null;
+  references: string | null;
+  attachmentCount: number;
+  userComposedText: string;
+  parentSubmissionMessageId: string | null;
 };
 
 type ExistingMessage = {
@@ -111,6 +120,22 @@ async function processInboundSubmission(inbound: InboundPayload): Promise<Record
   const profileId = await lookupRegisteredUserProfileId(dataClient, inbound.senderEmail);
   const authorized = Boolean(profileId);
   const citations = authorized ? extractDirectCitations(inbound.bodyText) : [];
+  const attachmentOnlyReply = Boolean(
+    authorized
+    && inbound.parentSubmissionMessageId
+    && inbound.attachmentCount > 0
+    && !inbound.userComposedText,
+  );
+  const conversationalReply = Boolean(
+    authorized
+    && inbound.parentSubmissionMessageId
+    && (inbound.userComposedText || inbound.attachmentCount > 0),
+  );
+  const intakeClassification = attachmentOnlyReply
+    ? "attachment_only_reply"
+    : conversationalReply
+      ? "conversational_reply"
+      : "new_submission";
 
   let status = authorized ? "received" : "rejected";
   let responseStatus = authorized ? "PENDING" : "REJECTED";
@@ -122,7 +147,7 @@ async function processInboundSubmission(inbound: InboundPayload): Promise<Record
     status = "rejected";
     responseStatus = "REJECTED";
     responseError = "Submission looks like a research assignment request. Send direct citations (URLs or DOIs), not open-ended research tasks.";
-  } else if (authorized && citations.length === 0) {
+  } else if (authorized && citations.length === 0 && !attachmentOnlyReply && !conversationalReply) {
     status = "rejected";
     responseStatus = "REJECTED";
     responseError = "No direct citations (URL or DOI) were found in the email body.";
@@ -145,6 +170,11 @@ async function processInboundSubmission(inbound: InboundPayload): Promise<Record
     status,
     responseStatus,
     responseError,
+    parentSubmissionMessageId: inbound.parentSubmissionMessageId,
+    intakeClassification,
+    inboundInReplyTo: inbound.inReplyTo,
+    inboundReferences: inbound.references,
+    inboundAttachmentCount: inbound.attachmentCount,
   });
 
   const createResponse = await dataClient.models.Message.create(
@@ -312,7 +342,7 @@ async function resolveFromSesMail(
     };
   }
 
-  return {
+  return enrichInboundPayload({
     senderEmail,
     recipients,
     subject,
@@ -320,7 +350,12 @@ async function resolveFromSesMail(
     s3Bucket,
     s3Key,
     sesMessageId,
-  };
+    inReplyTo: null,
+    references: null,
+    attachmentCount: 0,
+    userComposedText: "",
+    parentSubmissionMessageId: null,
+  });
 }
 
 async function loadInboundFromS3Object(
@@ -331,7 +366,8 @@ async function loadInboundFromS3Object(
   const rawObject = await s3Client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
   const rawBytes = await streamToBuffer(rawObject.Body);
   const parsed = parseInboundEmailBody(rawBytes);
-  return {
+  const threading = parseInboundMimeThreading(rawBytes);
+  return enrichInboundPayload({
     senderEmail: extractSenderFromRawMime(rawBytes),
     recipients: extractRecipientsFromRawMime(rawBytes),
     subject: parsed.subject || "(no subject)",
@@ -339,6 +375,21 @@ async function loadInboundFromS3Object(
     s3Bucket: bucket,
     s3Key: key,
     sesMessageId,
+    inReplyTo: threading.inReplyTo,
+    references: threading.references,
+    attachmentCount: countInboundAttachments(rawBytes),
+    userComposedText: extractUserComposedReplyText(parsed.text),
+    parentSubmissionMessageId: null,
+  });
+}
+
+function enrichInboundPayload(payload: InboundPayload): InboundPayload {
+  const parentSubmissionMessageId = payload.parentSubmissionMessageId
+    ?? resolveParentSubmissionMessageId(payload.inReplyTo, payload.references);
+  return {
+    ...payload,
+    parentSubmissionMessageId,
+    userComposedText: payload.userComposedText || extractUserComposedReplyText(payload.bodyText),
   };
 }
 
