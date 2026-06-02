@@ -41,6 +41,27 @@ class EmailMimeIntakeTests(unittest.TestCase):
             "agent_intake",
         )
 
+    def test_parse_iphone_plain_single_part_mime(self):
+        """iPhone Mail puts Content-Type before From/Subject; TS partPattern used to yield empty body."""
+        raw = "\r\n".join(
+            [
+                "Return-Path: <rap@endymion.com>",
+                "Content-Type: text/plain; charset=us-ascii",
+                "Content-Transfer-Encoding: 7bit",
+                "From: Ryan Porter <rap@endymion.com>",
+                "Subject: arXiv test",
+                "To: submissions@p.apyr.us",
+                "",
+                "https://arxiv.org/abs/2605.27882",
+                "",
+                "Sent from my iPhone",
+            ]
+        ).encode("utf-8")
+        parsed = parse_inbound_mime_for_intake(raw)
+        self.assertIn("arxiv.org/abs/2605.27882", parsed["bodyText"])
+        self.assertEqual(len(parsed["citations"]), 1)
+        self.assertEqual(parsed["citations"][0]["url"], "https://arxiv.org/abs/2605.27882")
+
     def test_parse_newsletter_fixture_mime(self):
         raw = b"\r\n".join(
             [

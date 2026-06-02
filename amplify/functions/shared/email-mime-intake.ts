@@ -1,6 +1,7 @@
 import {
   directCitationRationale,
   extractDirectCitations,
+  parseInboundEmailBody,
   titleFromUrl,
 } from "./email-submission";
 
@@ -152,10 +153,25 @@ export function parseInboundMimeForIntake(rawBytes: Uint8Array): {
   citations: Array<{ kind: string; url: string; title: string; ingestion_rationale: string; doi?: string }>;
 } {
   const raw = Buffer.from(rawBytes).toString("utf8");
-  const { plain, html, subject } = collectMimeBodies(raw);
+  let { plain, html, subject } = collectMimeBodies(raw);
   let bodyText = plain.join("\n\n").trim();
   if (!bodyText && html.length > 0) {
     bodyText = htmlToText(html.join("\n\n"));
+  }
+  // Single-part messages (e.g. iPhone Mail) place Content-Type before other headers; the
+  // multipart-oriented partPattern can capture an empty or signature-only body. Prefer the
+  // robust parser when it finds URLs the part scanner missed.
+  const fallback = parseInboundEmailBody(rawBytes);
+  const primaryHasUrl = /https?:\/\//i.test(bodyText);
+  const fallbackHasUrl = /https?:\/\//i.test(fallback.text);
+  if (
+    fallback.text
+    && (!bodyText || (!primaryHasUrl && fallbackHasUrl))
+  ) {
+    bodyText = fallback.text;
+  }
+  if (!subject.trim() && fallback.subject) {
+    subject = fallback.subject;
   }
   const citations = extractDirectCitationsFromIntake({ bodyText, htmlParts: html });
   if (citations.length === 0) {

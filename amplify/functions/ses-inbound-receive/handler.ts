@@ -248,6 +248,27 @@ async function resumeExistingInboundSubmission(
     };
   }
 
+  const responseError = String(metadata.responseError ?? "").toLowerCase();
+  const falseNoCitationRejection = responseStatus === "REJECTED"
+    && responseError.includes("no direct citations")
+    && inbound.citations.length > 0;
+  if (authorized && falseNoCitationRejection) {
+    if (PROCESSOR_FUNCTION_NAME) {
+      await invokeEmailProcessor(existing.id);
+    }
+    return {
+      ok: true,
+      messageId: existing.id,
+      idempotent: true,
+      reprocessed: true,
+      correctedCitations: true,
+      directCitationCount: inbound.citations.length,
+      responseStatus,
+      recipientEmail,
+      senderEmail: inbound.senderEmail,
+    };
+  }
+
   return {
     ok: true,
     messageId: existing.id,
