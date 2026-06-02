@@ -14,6 +14,10 @@ from urllib.parse import urlparse
 
 from papyrus_content.papyrus_config import build_newsroom_reference_public_url
 from papyrus_newsroom.email_submission_replies import feedback_rfc_message_id
+from papyrus_newsroom.email_submissions import (
+    REJECTION_KIND_UNREGISTERED_SENDER,
+    UNREGISTERED_SENDER_RESPONSE_ERROR,
+)
 from papyrus_content.source_readiness import (
     select_extracted_text_attachment,
     select_reference_attachment_by_role,
@@ -325,6 +329,7 @@ def build_submission_feedback_report(
         "responseStatus": response_status,
         "responseError": str(message.get("responseError") or metadata.get("responseError") or processing_error or ""),
         "authorized": metadata.get("authorized") is True,
+        "rejectionKind": str(metadata.get("rejectionKind") or "").strip() or None,
         "directCitationCount": len(citations),
         "registeredReferenceCount": int(result.get("registeredReferenceCount") or 0),
         "pipeline": {
@@ -343,9 +348,83 @@ def build_submission_feedback_report(
     }
 
 
+def _public_site_base_url() -> str:
+    explicit = str(os.environ.get("PAPYRUS_PUBLIC_SITE_BASE_URL") or "").strip().rstrip("/")
+    if explicit:
+        return explicit
+    return "https://p.apyr.us"
+
+
+def is_unregistered_sender_rejection(report: dict[str, Any]) -> bool:
+    if report.get("authorized") is True:
+        return False
+    if str(report.get("rejectionKind") or "").strip() == REJECTION_KIND_UNREGISTERED_SENDER:
+        return True
+    status = str(report.get("responseStatus") or "").upper()
+    if status != "REJECTED":
+        return False
+    error = str(report.get("responseError") or "").lower()
+    return "only registered papyrus users" in error or "not registered" in error
+
+
+def format_unregistered_sender_feedback_email(report: dict[str, Any]) -> tuple[str, str, str]:
+    subject_line = str(report.get("subject") or "your submission")
+    subject = f"Re: {subject_line} — submission not accepted"
+    message_id = str(report.get("messageId") or "(unknown)")
+    recipient = str(report.get("recipientEmail") or default_feedback_reply_to_address()).strip()
+    site_url = _public_site_base_url()
+    explanation = UNREGISTERED_SENDER_RESPONSE_ERROR
+    body_text = "\n".join(
+        [
+            "Papyrus could not accept your email submission.",
+            "",
+            explanation,
+            "",
+            "Reference submissions by email are limited to registered Papyrus users. "
+            "Sign in with the same email address you use for your account, then send citations to "
+            f"{recipient}.",
+            "",
+            f"Sign in: {site_url}",
+            "",
+            f"Message ID: {message_id}",
+        ]
+    )
+    escaped_explanation = html.escape(explanation)
+    escaped_recipient = html.escape(recipient)
+    escaped_site = html.escape(site_url, quote=True)
+    message_id_html = html.escape(message_id)
+    body_html = (
+        f'<!DOCTYPE html><html><body style="margin:0;padding:0;background:{_EMAIL_PAPER};color:{_EMAIL_INK};">'
+        f'<div style="max-width:640px;margin:0 auto;padding:calc({_EMAIL_RHYTHM_PX}px * 1.5) 16px;'
+        f'font-family:{_EMAIL_SERIF};">'
+        f'<div style="background:{_EMAIL_PAPER};border:1px solid {_EMAIL_RULE};'
+        f'padding:calc({_EMAIL_RHYTHM_PX}px * 1.5);">'
+        f'<p style="margin:0 0 {_EMAIL_RHYTHM_PX}px;color:{_EMAIL_INK_DISPLAY};font-family:{_EMAIL_SERIF};'
+        f'font-size:22px;font-weight:900;line-height:1.08;">Submission not accepted</p>'
+        f'<p style="{_email_story_label_style(margin="0 0 8px")}">Message {message_id_html}</p>'
+        f'<p style="margin:0 0 {_EMAIL_RHYTHM_PX}px;">{_status_label_html("REJECTED")}</p>'
+        f'<p style="margin:{_EMAIL_RHYTHM_PX}px 0;padding:12px 14px;border-left:3px solid {_EMAIL_RULE};'
+        f"background:rgba(0, 0, 0, 0.04);color:{_EMAIL_INK};font-family:{_EMAIL_SANS};"
+        f'font-size:14px;line-height:1.5;">{escaped_explanation}</p>'
+        f'<p style="margin:0 0 {_EMAIL_RHYTHM_PX}px;color:{_EMAIL_INK};font-family:{_EMAIL_SANS};'
+        f'font-size:14px;line-height:1.5;">Reference submissions by email are limited to registered '
+        f"Papyrus users. Sign in with the same email address you use for your account, then send citations "
+        f"to <strong>{escaped_recipient}</strong>.</p>"
+        f'<p style="margin:0 0 {_EMAIL_RHYTHM_PX}px;">'
+        f'<a href="{escaped_site}" style="display:inline-block;padding:0 12px;border:1px solid {_EMAIL_RULE};'
+        f"background:transparent;color:{_EMAIL_MUTED_STRONG};font-family:{_EMAIL_SANS};"
+        f'font-size:11px;font-weight:900;letter-spacing:0.08em;line-height:32px;text-decoration:none;'
+        f'text-transform:uppercase;">Sign in to Papyrus</a></p>'
+        "</div></div></body></html>"
+    )
+    return subject, body_text, body_html
+
+
 def _feedback_email_subject(report: dict[str, Any]) -> tuple[str, str]:
     subject_line = str(report.get("subject") or "your submission")
     status = str(report.get("responseStatus") or "").upper()
+    if is_unregistered_sender_rejection(report):
+        return f"Re: {subject_line} — submission not accepted", status
     if status == "COMPLETED":
         subject = f"Re: {subject_line} — processed"
     elif status == "FAILED":
@@ -511,6 +590,9 @@ def _pipeline_stats_html(
 
 
 def format_submission_feedback_email(report: dict[str, Any]) -> tuple[str, str, str]:
+    if is_unregistered_sender_rejection(report):
+        return format_unregistered_sender_feedback_email(report)
+
     subject, status = _feedback_email_subject(report)
 
     lines = [

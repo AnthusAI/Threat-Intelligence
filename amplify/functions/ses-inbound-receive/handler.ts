@@ -16,6 +16,7 @@ import {
   parseInboundEmailBody,
   parseInboundMimeThreading,
   resolveParentSubmissionMessageId,
+  UNREGISTERED_SENDER_RESPONSE_ERROR,
 } from "../shared/email-submission";
 import {
   inboundMessageIdFromS3,
@@ -135,9 +136,7 @@ async function processInboundSubmission(inbound: InboundPayload): Promise<Record
 
   let status = authorized ? "received" : "rejected";
   let responseStatus = authorized ? "PENDING" : "REJECTED";
-  let responseError: string | null = authorized
-    ? null
-    : "Sender email is not registered to an active Papyrus user.";
+  let responseError: string | null = authorized ? null : UNREGISTERED_SENDER_RESPONSE_ERROR;
 
   if (authorized && looksLikeResearchAssignmentRequest(inbound.bodyText, citations.length)) {
     status = "rejected";

@@ -4,6 +4,10 @@ import unittest
 from unittest import mock
 
 from papyrus_newsroom import email_submission_feedback
+from papyrus_newsroom.email_submissions import (
+    REJECTION_KIND_UNREGISTERED_SENDER,
+    UNREGISTERED_SENDER_RESPONSE_ERROR,
+)
 
 
 class EmailSubmissionFeedbackTests(unittest.TestCase):
@@ -63,6 +67,60 @@ class EmailSubmissionFeedbackTests(unittest.TestCase):
         self.assertEqual(entry["subtitle"], "Transformer architecture")
         self.assertEqual(entry["summarizeStatus"], "generated")
         self.assertEqual(len(entry["attachments"]), 2)
+
+    def test_format_unregistered_sender_rejection_email(self):
+        report = {
+            "messageId": "message-email-submission-unauth",
+            "subject": "Fwd: Newsletter",
+            "responseStatus": "REJECTED",
+            "responseError": UNREGISTERED_SENDER_RESPONSE_ERROR,
+            "authorized": False,
+            "rejectionKind": REJECTION_KIND_UNREGISTERED_SENDER,
+            "recipientEmail": "submissions@p.apyr.us",
+        }
+        subject, body, html_body = email_submission_feedback.format_submission_feedback_email(report)
+        self.assertIn("submission not accepted", subject)
+        self.assertIn("only registered Papyrus users", body)
+        self.assertIn("submissions@p.apyr.us", body)
+        self.assertIn("https://p.apyr.us", body)
+        self.assertNotIn("Pipeline:", body)
+        self.assertIn("Submission not accepted", html_body)
+        self.assertIn("Sign in to Papyrus", html_body)
+
+    def test_maybe_send_unregistered_sender_rejection(self):
+        client = mock.Mock()
+        client.get_record.return_value = {
+            "id": "message-email-submission-unauth",
+            "summary": "Paper",
+            "responseStatus": "REJECTED",
+            "responseError": UNREGISTERED_SENDER_RESPONSE_ERROR,
+            "metadata": (
+                '{"senderEmail":"stranger@example.com","authorized":false,'
+                f'"rejectionKind":"{REJECTION_KIND_UNREGISTERED_SENDER}",'
+                '"recipientEmail":"submissions@p.apyr.us"}'
+            ),
+        }
+        ses = mock.Mock()
+        ses.send_raw_email.return_value = {"MessageId": "ses-unauth"}
+        with mock.patch.dict(
+            "os.environ",
+            {
+                "PAPYRUS_INBOUND_FEEDBACK_EMAIL_ENABLED": "true",
+                "PAPYRUS_INBOUND_FEEDBACK_FROM_EMAIL": "submissions@p.apyr.us",
+            },
+            clear=False,
+        ):
+            result = email_submission_feedback.maybe_send_submission_feedback_email(
+                client,
+                message_id="message-email-submission-unauth",
+                processing_error=UNREGISTERED_SENDER_RESPONSE_ERROR,
+                ses_client=ses,
+            )
+        self.assertTrue(result["sent"])
+        self.assertEqual(result["to"], "stranger@example.com")
+        raw_message = ses.send_raw_email.call_args.kwargs["RawMessage"]["Data"]
+        self.assertIn(b"stranger@example.com", raw_message)
+        self.assertIn(b"submission_not_accepted", raw_message.lower())
 
     def test_format_submission_feedback_email_completed(self):
         report = {

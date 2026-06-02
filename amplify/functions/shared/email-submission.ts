@@ -5,6 +5,12 @@ export const MESSAGE_DOMAIN_REFERENCE_INTAKE = "reference_intake";
 export const MESSAGE_TYPE_INBOUND_EMAIL = "INBOUND_EMAIL";
 export const RESPONSE_TARGET_EMAIL_PROCESSOR = "email_submission_processor";
 
+/** Stored on rejected intake when the sender is not a registered Papyrus user. */
+export const REJECTION_KIND_UNREGISTERED_SENDER = "unregistered_sender";
+
+export const UNREGISTERED_SENDER_RESPONSE_ERROR =
+  "This submission was not accepted because only registered Papyrus users may send reference submissions by email.";
+
 const URL_PATTERN = /https?:\/\/[^\s<>"')\]]+/gi;
 const DOI_PATTERN = /\b10\.\d{4,9}\/[-._;()/:A-Z0-9]+/gi;
 const RESEARCH_ASSIGNMENT_PHRASES = [
@@ -370,6 +376,11 @@ export function buildEmailSubmissionMessageInput(input: {
       s3Bucket: input.s3Bucket,
       s3Key: input.s3Key,
       authorized: input.authorized,
+      ...(input.authorized
+        ? {}
+        : {
+            rejectionKind: REJECTION_KIND_UNREGISTERED_SENDER,
+          }),
       directCitationCount: input.citations.length,
       directCitations: input.citations,
       parentSubmissionMessageId: input.parentSubmissionMessageId ?? null,

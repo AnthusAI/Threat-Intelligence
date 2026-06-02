@@ -18,6 +18,12 @@ from papyrus_content.records import apply_record_changes, build_record_changes
 from papyrus_content.steering import load_steering_config, require_corpus_config
 
 MESSAGE_KIND_EMAIL_SUBMISSION = "email_submission"
+
+REJECTION_KIND_UNREGISTERED_SENDER = "unregistered_sender"
+UNREGISTERED_SENDER_RESPONSE_ERROR = (
+    "This submission was not accepted because only registered Papyrus users "
+    "may send reference submissions by email."
+)
 MESSAGE_DOMAIN_REFERENCE_INTAKE = "reference_intake"
 MESSAGE_TYPE_INBOUND_EMAIL = "INBOUND_EMAIL"
 RESPONSE_TARGET_EMAIL_PROCESSOR = "email_submission_processor"
@@ -311,7 +317,7 @@ def build_email_submission_message_record(
     response_status: str,
     response_error: str | None = None,
 ) -> dict[str, Any]:
-    metadata = {
+    metadata: dict[str, Any] = {
         "channel": "email",
         "senderEmail": sender_email,
         "recipientEmail": recipient_email,
@@ -322,6 +328,8 @@ def build_email_submission_message_record(
         "directCitationCount": len(citations),
         "directCitations": citations,
     }
+    if not authorized:
+        metadata["rejectionKind"] = REJECTION_KIND_UNREGISTERED_SENDER
     return build_canonical_message_expected(
         {
             "id": message_id,
@@ -412,7 +420,7 @@ def register_inbound_email_message(
     pdf_only_intake = intake_classification == "pdf_only_intake"
     status = "received" if authorized else "rejected"
     response_status = "PENDING" if authorized else "REJECTED"
-    response_error = None if authorized else "Sender email is not registered to an active Papyrus user."
+    response_error = None if authorized else UNREGISTERED_SENDER_RESPONSE_ERROR
     if authorized and looks_like_research_assignment_request(body_text, citation_count=len(citations)):
         status = "rejected"
         response_status = "REJECTED"

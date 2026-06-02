@@ -627,16 +627,21 @@ def process_inbound_email_submission(
     message = client.get_record("Message", message_id) or {}
     metadata = _message_metadata(message)
     if not metadata.get("authorized"):
+        from papyrus_newsroom.email_submissions import UNREGISTERED_SENDER_RESPONSE_ERROR
+
+        rejection_error = str(
+            metadata.get("responseError") or message.get("responseError") or UNREGISTERED_SENDER_RESPONSE_ERROR
+        ).strip()
         feedback = _try_send_submission_feedback(
             client,
             message_id=message_id,
-            processing_error=metadata.get("responseError") or "Unauthorized sender.",
+            processing_error=rejection_error,
         )
         return {
             "ok": False,
             "messageId": message_id,
             "status": "rejected",
-            "error": metadata.get("responseError") or "Unauthorized sender.",
+            "error": rejection_error,
             "feedbackEmail": feedback,
         }
 

@@ -115,6 +115,12 @@ Rejected intake (unauthorized sender, no citations, research-assignment wording)
 invokes the processor with `sendFeedbackOnly: true` so the submitter still gets
 an explanation without running find/process.
 
+**Unregistered senders** (`metadata.authorized = false`,
+`metadata.rejectionKind = unregistered_sender`) receive a dedicated rejection
+receipt explaining that only registered Papyrus users may submit by email, with
+a link to sign in. The same address must be registered on your account before
+resubmitting.
+
 ## Replying to submission feedback
 
 Acknowledgment emails set a stable RFC `Message-ID` of the form
