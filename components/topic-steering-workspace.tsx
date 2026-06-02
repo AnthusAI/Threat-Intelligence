@@ -7948,7 +7948,7 @@ function InsightsDeskView({
                   >
                     <option value="">All domains ({threads.length})</option>
                     {domainOptions.map((option) => (
-                      <option key={option.key} value={option.key}>{option.label} ({option.count})</option>
+                      <option key={option.key} value={option.key}>{option.key} ({option.count})</option>
                     ))}
                   </select>
                   {nextToken ? (
@@ -9213,7 +9213,7 @@ function NewsroomListDetailShell({
   list: ReactNode;
   onCloseDetail?: () => void;
   selectionScrollKey?: string | null;
-  sectionKey: "assignments" | "concepts" | "messages" | "references" | "topics";
+  sectionKey: "assignments" | "concepts" | "insights" | "messages" | "references" | "topics";
   utilityActions?: NewsroomDetailAction[];
 }) {
   const [detailMode, setDetailMode] = useState<"split" | "full">("split");

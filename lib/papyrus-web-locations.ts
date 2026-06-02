@@ -445,7 +445,6 @@ function objectKindToWebPath(kind: PapyrusObjectKind, objectId: string): string 
   const encoded = encodeURIComponent(decodeURIComponent(objectId));
   if (kind === "reference") return `/newsroom/references/${encoded}`;
   if (kind === "message") return `/newsroom/messages/${encoded}`;
-  if (kind === "insight") return `/newsroom/insights/${encoded}`;
   if (kind === "assignment") return `/newsroom/assignments/${encoded}`;
   if (kind === "category") return `/newsroom/topics?category=${encoded}`;
   if (kind === "semanticNode") return `/newsroom/concepts?node=${encoded}`;
