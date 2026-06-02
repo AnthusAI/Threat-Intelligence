@@ -7,8 +7,8 @@ import * as events from "aws-cdk-lib/aws-events";
 import * as route53 from "aws-cdk-lib/aws-route53";
 import * as ses from "aws-cdk-lib/aws-ses";
 import * as sesActions from "aws-cdk-lib/aws-ses-actions";
-import { PolicyStatement } from "aws-cdk-lib/aws-iam";
-import { CfnFunction, Function as LambdaFunction } from "aws-cdk-lib/aws-lambda";
+import { Effect, PolicyStatement } from "aws-cdk-lib/aws-iam";
+import { CfnEventSourceMapping, CfnFunction, Function as LambdaFunction, FunctionUrlAuthType } from "aws-cdk-lib/aws-lambda";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import { CfnIndex, CfnVectorBucket, CfnVectorBucketPolicy } from "aws-cdk-lib/aws-s3vectors";
 import { dirname, resolve } from "node:path";
@@ -30,7 +30,6 @@ import { sesInboundReceive } from "./functions/ses-inbound-receive/resource";
 import { slackDelivery } from "./functions/slack-delivery/resource";
 import { slackEvents } from "./functions/slack-events/resource";
 import { InboundEmailStack } from "./inbound-email/stack";
-import { SlackAgentStack } from "./slack/stack";
 import { storage } from "./storage/resource";
 
 const knowledgeVectorIndexName = "papyrus-knowledge";
@@ -189,13 +188,49 @@ if (enableConsoleResponder || enableSlackAgent) {
     backend.slackEvents.addEnvironment("PAPYRUS_SLACK_SIGNING_SECRET", secret(slackSigningSecretName));
     backend.slackDelivery.addEnvironment("PAPYRUS_SLACK_BOT_TOKEN", secret(slackBotTokenName));
 
-    const slackStack = new SlackAgentStack(dataStack, "SlackAgent", {
-      slackEventsFunction: slackEventsLambda,
-      slackDeliveryFunction: slackDeliveryLambda,
-      messageTable,
-      messageStreamArn,
+    // Wire Slack on the data stack (not a nested SlackAgent stack) to avoid CloudFormation
+    // circular dependencies between Message and slack-delivery in the data resource group.
+    const slackEventsFunctionUrl = slackEventsLambda.addFunctionUrl({
+      authType: FunctionUrlAuthType.NONE,
     });
-    slackEventsUrl = slackStack.eventsFunctionUrl;
+    slackEventsUrl = slackEventsFunctionUrl.url;
+
+    const slackConsumerStack = backend.createStack("slack-consumer");
+    new CfnEventSourceMapping(slackConsumerStack, "SlackDeliveryMessageStreamMapping", {
+      batchSize: 1,
+      eventSourceArn: messageStreamArn,
+      functionName: slackDeliveryLambda.functionArn,
+      functionResponseTypes: ["ReportBatchItemFailures"],
+      maximumRetryAttempts: 2,
+      startingPosition: "LATEST",
+    });
+
+    slackDeliveryLambda.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: [
+          "dynamodb:DescribeStream",
+          "dynamodb:GetRecords",
+          "dynamodb:GetShardIterator",
+          "dynamodb:ListStreams",
+        ],
+        resources: [messageStreamArn],
+      }),
+    );
+    slackDeliveryLambda.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ["dynamodb:GetItem", "dynamodb:Query", "dynamodb:BatchGetItem"],
+        resources: [messageTable.tableArn, `${messageTable.tableArn}/index/*`],
+      }),
+    );
+    slackDeliveryLambda.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ["appsync:GraphQL"],
+        resources: ["*"],
+      }),
+    );
   }
 }
 
