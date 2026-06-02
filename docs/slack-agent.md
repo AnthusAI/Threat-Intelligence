@@ -29,8 +29,12 @@ sequenceDiagram
 Set sandbox or pipeline env vars:
 
 - `PAPYRUS_ENABLE_SLACK=true`
-- `PAPYRUS_SLACK_SIGNING_SECRET` (Amplify secret)
-- `PAPYRUS_SLACK_BOT_TOKEN` (Amplify secret, `xoxb-…`)
+- `PAPYRUS_SLACK_SIGNING_SECRET` (Amplify secret via `npx ampx secret set`, not `.env` alone)
+- `PAPYRUS_SLACK_BOT_TOKEN` (Amplify secret, `xoxb-…`, same `ampx secret set` flow)
+
+`.env` is for local development only. Deployed Lambdas read secrets from SSM using
+`AMPLIFY_SSM_ENV_CONFIG`; placeholders like `<value will be resolved during runtime>`
+are resolved at cold start.
 - Optional: `PAPYRUS_SLACK_ALLOWED_USER_IDS` (comma-separated Slack user IDs)
 - `PAPYRUS_CONSOLE_RESPONSE_TARGET=cloud` (same as email/console)
 

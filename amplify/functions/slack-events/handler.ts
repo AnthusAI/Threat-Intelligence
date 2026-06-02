@@ -20,13 +20,6 @@ export const handler = async (event: FunctionUrlEvent) => {
   const headers = normalizeHeaders(event.headers ?? {});
   const timestamp = headers["x-slack-request-timestamp"] ?? "";
   const signature = headers["x-slack-signature"] ?? "";
-  const secret = slackSigningSecret();
-  if (!secret) {
-    return jsonResponse(500, { ok: false, error: "PAPYRUS_SLACK_SIGNING_SECRET is not configured." });
-  }
-  if (!verifySlackRequestSignature({ signingSecret: secret, timestamp, rawBody, signature })) {
-    return jsonResponse(401, { ok: false, error: "invalid-slack-signature" });
-  }
 
   let payload: Record<string, unknown>;
   try {
@@ -37,7 +30,36 @@ export const handler = async (event: FunctionUrlEvent) => {
 
   const payloadType = String(payload.type ?? "").trim();
   if (payloadType === "url_verification") {
-    return jsonResponse(200, { challenge: payload.challenge });
+    let secret: string;
+    try {
+      secret = await slackSigningSecret();
+    } catch (error) {
+      return jsonResponse(500, {
+        ok: false,
+        error: error instanceof Error ? error.message : "PAPYRUS_SLACK_SIGNING_SECRET is not configured.",
+      });
+    }
+    if (!verifySlackRequestSignature({ signingSecret: secret, timestamp, rawBody, signature })) {
+      return jsonResponse(401, { ok: false, error: "invalid-slack-signature" });
+    }
+    const challenge = String(payload.challenge ?? "").trim();
+    if (!challenge) {
+      return jsonResponse(400, { ok: false, error: "missing-challenge" });
+    }
+    return jsonResponse(200, { challenge });
+  }
+
+  let secret: string;
+  try {
+    secret = await slackSigningSecret();
+  } catch (error) {
+    return jsonResponse(500, {
+      ok: false,
+      error: error instanceof Error ? error.message : "PAPYRUS_SLACK_SIGNING_SECRET is not configured.",
+    });
+  }
+  if (!verifySlackRequestSignature({ signingSecret: secret, timestamp, rawBody, signature })) {
+    return jsonResponse(401, { ok: false, error: "invalid-slack-signature" });
   }
 
   if (payloadType !== "event_callback") {

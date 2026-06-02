@@ -1,9 +1,10 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { resolveAmplifySecret } from "./amplify-secrets";
 
 const URL_PATTERN = /https?:\/\/\S+/gi;
 
-export function slackSigningSecret(): string {
-  return (process.env.PAPYRUS_SLACK_SIGNING_SECRET ?? process.env.SLACK_SIGNING_SECRET ?? "").trim();
+export async function slackSigningSecret(): Promise<string> {
+  return resolveAmplifySecret("PAPYRUS_SLACK_SIGNING_SECRET");
 }
 
 export function allowedSlackUserIds(): Set<string> {

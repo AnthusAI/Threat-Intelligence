@@ -178,15 +178,32 @@ if (enableConsoleResponder || enableSlackAgent) {
       "PAPYRUS_SLACK_ALLOWED_USER_IDS",
       (process.env.PAPYRUS_SLACK_ALLOWED_USER_IDS ?? "").trim(),
     );
+    if (jwtSsmEnvConfig) {
+      backend.slackEvents.addEnvironment("AMPLIFY_SSM_ENV_CONFIG", jwtSsmEnvConfig);
+      backend.slackDelivery.addEnvironment("AMPLIFY_SSM_ENV_CONFIG", jwtSsmEnvConfig);
+    }
     backend.slackDelivery.addEnvironment("PAPYRUS_GRAPHQL_ENDPOINT", graphqlEndpoint);
     backend.slackDelivery.addEnvironment(
       "PAPYRUS_CONSOLE_RESPONSE_TARGET",
       (process.env.PAPYRUS_CONSOLE_RESPONSE_TARGET ?? "cloud").trim() || "cloud",
     );
-    const slackSigningSecretName = (process.env.PAPYRUS_SLACK_SIGNING_SECRET_NAME ?? "PAPYRUS_SLACK_SIGNING_SECRET").trim();
     const slackBotTokenName = (process.env.PAPYRUS_SLACK_BOT_TOKEN_NAME ?? "PAPYRUS_SLACK_BOT_TOKEN").trim();
-    backend.slackEvents.addEnvironment("PAPYRUS_SLACK_SIGNING_SECRET", secret(slackSigningSecretName));
     backend.slackDelivery.addEnvironment("PAPYRUS_SLACK_BOT_TOKEN", secret(slackBotTokenName));
+
+    const slackSsmPolicy = new PolicyStatement({
+      effect: Effect.ALLOW,
+      actions: ["ssm:GetParameter"],
+      resources: [
+        "arn:aws:ssm:*:*:parameter/amplify/papyrus/*/PAPYRUS_SLACK_SIGNING_SECRET",
+        "arn:aws:ssm:*:*:parameter/amplify/papyrus/*/PAPYRUS_SLACK_BOT_TOKEN",
+        "arn:aws:ssm:*:*:parameter/amplify/papyrus/*/OPENAI_API_KEY",
+        "arn:aws:ssm:*:*:parameter/amplify/shared/papyrus/PAPYRUS_SLACK_SIGNING_SECRET",
+        "arn:aws:ssm:*:*:parameter/amplify/shared/papyrus/PAPYRUS_SLACK_BOT_TOKEN",
+        "arn:aws:ssm:*:*:parameter/amplify/shared/papyrus/OPENAI_API_KEY",
+      ],
+    });
+    slackEventsLambda.addToRolePolicy(slackSsmPolicy);
+    slackDeliveryLambda.addToRolePolicy(slackSsmPolicy);
 
     // Wire Slack on the data stack (not a nested SlackAgent stack) to avoid CloudFormation
     // circular dependencies between Message and slack-delivery in the data resource group.

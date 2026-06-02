@@ -12,18 +12,32 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from papyrus_content.auth_commands import _is_amplify_secret_placeholder, _resolve_amplify_ssm_secret
 from papyrus_newsroom.console_chat_enqueue import enqueue_console_chat_turn
 
 _SLACK_API_BASE = "https://slack.com/api/"
 _URL_PATTERN = re.compile(r"https?://\S+", re.IGNORECASE)
 
 
+def _resolve_secret_env(name: str, *, fallbacks: tuple[str, ...] = ()) -> str:
+    candidates = (name, *fallbacks)
+    for key in candidates:
+        direct = str(os.environ.get(key) or "").strip()
+        if direct and not _is_amplify_secret_placeholder(direct):
+            return direct
+    for key in candidates:
+        resolved = _resolve_amplify_ssm_secret(key)
+        if resolved:
+            return resolved
+    return ""
+
+
 def slack_signing_secret() -> str:
-    return str(os.environ.get("PAPYRUS_SLACK_SIGNING_SECRET") or os.environ.get("SLACK_SIGNING_SECRET") or "").strip()
+    return _resolve_secret_env("PAPYRUS_SLACK_SIGNING_SECRET", fallbacks=("SLACK_SIGNING_SECRET",))
 
 
 def slack_bot_token() -> str:
-    return str(os.environ.get("PAPYRUS_SLACK_BOT_TOKEN") or os.environ.get("SLACK_BOT_TOKEN") or "").strip()
+    return _resolve_secret_env("PAPYRUS_SLACK_BOT_TOKEN", fallbacks=("SLACK_BOT_TOKEN",))
 
 
 def allowed_slack_user_ids() -> set[str]:
