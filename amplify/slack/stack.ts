@@ -1,6 +1,6 @@
 import { NestedStack, type NestedStackProps } from "aws-cdk-lib";
 import { Effect, PolicyStatement } from "aws-cdk-lib/aws-iam";
-import { CfnEventSourceMapping, FunctionUrlAuthType, type IFunction } from "aws-cdk-lib/aws-lambda";
+import { CfnEventSourceMapping, Function as LambdaFunction, FunctionUrlAuthType, type IFunction } from "aws-cdk-lib/aws-lambda";
 import type { ITable } from "aws-cdk-lib/aws-dynamodb";
 import { Construct } from "constructs";
 
@@ -9,7 +9,6 @@ export type SlackAgentStackProps = NestedStackProps & {
   slackDeliveryFunction: IFunction;
   messageTable: ITable;
   messageStreamArn: string;
-  graphqlEndpoint: string;
 };
 
 /** Public Slack Events endpoint and assistant reply delivery on the Message stream. */
@@ -19,9 +18,8 @@ export class SlackAgentStack extends NestedStack {
   constructor(scope: Construct, id: string, props: SlackAgentStackProps) {
     super(scope, id, props);
 
-    props.slackDeliveryFunction.addEnvironment("PAPYRUS_GRAPHQL_ENDPOINT", props.graphqlEndpoint);
-
-    const functionUrl = props.slackEventsFunction.addFunctionUrl({
+    const slackEventsLambda = props.slackEventsFunction as LambdaFunction;
+    const functionUrl = slackEventsLambda.addFunctionUrl({
       authType: FunctionUrlAuthType.NONE,
     });
     this.eventsFunctionUrl = functionUrl.url;

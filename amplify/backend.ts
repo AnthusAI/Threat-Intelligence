@@ -179,6 +179,7 @@ if (enableConsoleResponder || enableSlackAgent) {
       "PAPYRUS_SLACK_ALLOWED_USER_IDS",
       (process.env.PAPYRUS_SLACK_ALLOWED_USER_IDS ?? "").trim(),
     );
+    backend.slackDelivery.addEnvironment("PAPYRUS_GRAPHQL_ENDPOINT", graphqlEndpoint);
     backend.slackDelivery.addEnvironment(
       "PAPYRUS_CONSOLE_RESPONSE_TARGET",
       (process.env.PAPYRUS_CONSOLE_RESPONSE_TARGET ?? "cloud").trim() || "cloud",
@@ -193,7 +194,6 @@ if (enableConsoleResponder || enableSlackAgent) {
       slackDeliveryFunction: slackDeliveryLambda,
       messageTable,
       messageStreamArn,
-      graphqlEndpoint,
     });
     slackEventsUrl = slackStack.eventsFunctionUrl;
   }
