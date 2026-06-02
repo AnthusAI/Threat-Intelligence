@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from typing import Any
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 def _dynamodb_string(value: dict[str, Any] | None) -> str:
@@ -73,8 +77,17 @@ def handler(event: dict[str, Any], _context: Any = None) -> dict[str, Any]:
         sequence = str(record.get("eventID") or message.get("id") or "")
         try:
             outcome = deliver_slack_reply_for_assistant_message(client, assistant_message=message)
+            logger.info(
+                "slack-delivery message=%s outcome=%s",
+                message.get("id"),
+                outcome,
+            )
             results.append({"eventId": sequence, **outcome})
         except Exception as error:  # noqa: BLE001
+            logger.exception(
+                "slack-delivery failed message=%s",
+                message.get("id"),
+            )
             failures.append({"itemIdentifier": sequence, "error": str(error)})
 
     if failures:

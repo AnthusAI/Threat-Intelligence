@@ -288,9 +288,9 @@ def deliver_slack_reply_for_assistant_message(
         content = str(assistant_message.get("summary") or "").strip()
     post_result = post_slack_thread_reply(channel_id=channel_id, thread_ts=thread_ts, text=content)
 
-    from papyrus_content.newsroom_commands import now_iso
+    from datetime import datetime, timezone
 
-    delivered_at = now_iso()
+    delivered_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     assistant_meta["slackDeliveredAt"] = delivered_at
     assistant_meta["slackDeliveryTs"] = post_result.get("ts")
     client.graphql(
