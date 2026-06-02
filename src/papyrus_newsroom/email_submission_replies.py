@@ -44,6 +44,7 @@ class InboundMimeEnvelope:
     references_header: str | None
     message_id: str | None
     attachments: list[InboundMimeAttachment]
+    html_parts: tuple[str, ...] = ()
 
 
 def feedback_rfc_message_id(submission_message_id: str) -> str:
@@ -157,6 +158,7 @@ def parse_inbound_mime_envelope(raw_bytes: bytes) -> InboundMimeEnvelope:
         references_header=str(message.get("References") or "").strip() or None,
         message_id=str(message.get("Message-ID") or "").strip() or None,
         attachments=attachments,
+        html_parts=tuple(html_parts),
     )
 
 
@@ -660,6 +662,16 @@ def process_inbound_email_submission(
     body_for_classification = envelope.body_text if envelope else str(message.get("content") or "")
     attachments_for_classification = envelope.attachments if envelope else []
     citations = metadata.get("directCitations") if isinstance(metadata.get("directCitations"), list) else []
+    if envelope and not citations:
+        from papyrus_newsroom.email_mime_intake import extract_direct_citations_from_intake_text
+
+        citations = extract_direct_citations_from_intake_text(
+            body_text=envelope.body_text,
+            html_parts=list(envelope.html_parts),
+        )
+        if citations:
+            metadata["directCitations"] = citations
+            metadata["directCitationCount"] = len(citations)
     classification = (
         str(metadata.get("intakeClassification") or "").strip()
         or classify_inbound_email_intake(
@@ -694,6 +706,12 @@ def process_inbound_email_submission(
         result = {"mode": "agent_intake", "chat": chat, "citationCount": len(citations)}
         _mark_message_completed(client, message_id=message_id, finished_at=finished_at, result=result)
         release_inbound_mime_after_success(client, message_id=message_id)
+        feedback = _try_send_submission_feedback(
+            client,
+            message_id=message_id,
+            processing_result=result,
+            processing_error=None,
+        )
         client.graphql(
             """
             mutation UpdateEmailIntakeAgentMetadata($input: UpdateMessageInput!) {
@@ -708,6 +726,7 @@ def process_inbound_email_submission(
             "status": "completed",
             "mode": "agent_intake",
             "chat": chat,
+            "feedbackEmail": feedback,
         }
 
     if classification == "attachment_only_reply" and parent_message_id and envelope:

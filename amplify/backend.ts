@@ -240,6 +240,15 @@ const storageStack = Stack.of(storageBucket);
 let storageBackupPlan: backup.BackupPlan | undefined;
 let storageBackupVault: backup.BackupVault | undefined;
 
+const storageBucketCfn = storageBucket.node.defaultChild as s3.CfnBucket | undefined;
+if ((enableStorageBackups || enableInboundEmail) && storageBucketCfn) {
+  // Backups and inbound-email intake both rely on S3 → EventBridge notifications.
+  storageBucketCfn.addPropertyOverride(
+    "NotificationConfiguration.EventBridgeConfiguration.EventBridgeEnabled",
+    true,
+  );
+}
+
 if (enableStorageBackups) {
   const storageBackupsStack = backend.createStack("storage-backups");
   const storageBackupVaultName = sanitizeAwsName(
@@ -248,15 +257,6 @@ if (enableStorageBackups) {
       ? "papyrus-dbsyytcm9drqa-main-media-backup-vault"
       : `papyrus-${sanitizeAwsName(storageBackupsStack.stackName, 32)}-media-vault`),
   );
-
-  const storageBucketCfn = storageBucket.node.defaultChild as s3.CfnBucket | undefined;
-  if (storageBucketCfn) {
-    // S3 PITR in AWS Backup requires S3 event delivery through EventBridge.
-    storageBucketCfn.addPropertyOverride(
-      "NotificationConfiguration.EventBridgeConfiguration.EventBridgeEnabled",
-      true,
-    );
-  }
 
   storageBackupVault = new backup.BackupVault(storageBackupsStack, "PapyrusStorageBackupVault", {
     backupVaultName: storageBackupVaultName,

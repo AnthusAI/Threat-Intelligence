@@ -115,6 +115,11 @@ Rejected intake (unauthorized sender, no citations, research-assignment wording)
 invokes the processor with `sendFeedbackOnly: true` so the submitter still gets
 an explanation without running find/process.
 
+The media bucket must have **S3 EventBridge notifications** enabled so
+`InboundEmailStack` can run the receive Lambda on `inbound-email/` object creates
+(and the 15-minute retry sweep can re-process stuck MIME). CDK enables this when
+`PAPYRUS_ENABLE_INBOUND_EMAIL` or storage backups are on.
+
 **Unregistered senders** (`metadata.authorized = false`,
 `metadata.rejectionKind = unregistered_sender`) receive a dedicated rejection
 receipt explaining that only registered Papyrus users may submit by email, with
@@ -130,7 +135,7 @@ original submission `Message`.
 | Intake shape | Handling |
 |--------------|----------|
 | **Single URL/DOI, minimal prose** | Deterministic pipeline: create / find / process direct citations |
-| **Multiple URLs** (e.g. forwarded newsletter) | **Console agent** — file relevant references, create **insight** Messages where prose discusses a paper (`papyrus.reference.insight_create`), skip footer/nav links |
+| **Multiple URLs** (e.g. forwarded newsletter) | **Console agent** — file relevant references, create **insight** Messages where prose discusses a paper (`papyrus.reference.insight_create`), skip footer/nav links. HTML-only forwards extract links from anchor `href` attributes (visible text after tag-stripping often has no URLs). |
 | **URL + substantial message** | **Console agent** — decide filing vs editorial insight vs question vs command (knowledge search, list references, etc.) |
 | **PDF only** (one attachment, no body URL/DOI) | Deterministic: extract DOI/arXiv from PDF (GROBID header when `BIBLICUS_GROBID_URL` is reachable, else PDF-byte heuristics), attach to existing corpus reference or create from identifier, then find/process |
 | **PDF + URL/DOI or multiple PDFs or PDF + long prose** | **Console agent** |

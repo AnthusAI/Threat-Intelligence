@@ -384,7 +384,7 @@ def register_inbound_email_message(
     normalized_sender = normalize_email_address(sender_email)
     profile_id = lookup_registered_user_profile_id(client, normalized_sender)
     authorized = bool(profile_id)
-    citations = extract_direct_citations(body_text) if authorized else []
+    citations: list[dict[str, str]] = []
     parent_submission_message_id: str | None = None
     intake_classification = "new_submission"
     inbound_attachment_count = 0
@@ -406,6 +406,18 @@ def register_inbound_email_message(
                 in_reply_to=envelope.in_reply_to,
                 references_header=envelope.references_header,
             )
+    if authorized:
+        if envelope and envelope.html_parts:
+            from papyrus_newsroom.email_mime_intake import extract_direct_citations_from_intake_text
+
+            citations = extract_direct_citations_from_intake_text(
+                body_text=envelope.body_text,
+                html_parts=list(envelope.html_parts),
+            )
+        elif envelope:
+            citations = extract_direct_citations(envelope.body_text)
+        else:
+            citations = extract_direct_citations(body_text)
     from papyrus_newsroom.email_submission_replies import classify_inbound_email_intake
 
     intake_classification = classify_inbound_email_intake(

@@ -18,6 +18,7 @@ import {
   resolveParentSubmissionMessageId,
   UNREGISTERED_SENDER_RESPONSE_ERROR,
 } from "../shared/email-submission";
+import { parseInboundMimeForIntake } from "../shared/email-mime-intake";
 import {
   inboundMessageIdFromS3,
   parseMessageMetadata,
@@ -38,6 +39,7 @@ type InboundPayload = {
   recipients: string[];
   subject: string;
   bodyText: string;
+  citations: Array<Record<string, unknown>>;
   s3Bucket: string | null;
   s3Key: string | null;
   sesMessageId: string | null;
@@ -121,7 +123,11 @@ async function processInboundSubmission(inbound: InboundPayload): Promise<Record
   const dataClient = await getLambdaDataClient();
   const profileId = await lookupRegisteredUserProfileId(dataClient, inbound.senderEmail);
   const authorized = Boolean(profileId);
-  const citations = authorized ? extractDirectCitations(inbound.bodyText) : [];
+  const citations = authorized
+    ? (inbound.citations.length > 0
+      ? inbound.citations
+      : extractDirectCitations(inbound.bodyText) as Array<Record<string, unknown>>)
+    : [];
   const intakeClassification = classifyInboundEmailIntake({
     bodyText: inbound.bodyText,
     citations,
@@ -349,6 +355,7 @@ async function resolveFromSesMail(
     recipients,
     subject,
     bodyText: "",
+    citations: [],
     s3Bucket,
     s3Key,
     sesMessageId,
@@ -367,20 +374,21 @@ async function loadInboundFromS3Object(
 ): Promise<InboundPayload> {
   const rawObject = await s3Client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
   const rawBytes = await streamToBuffer(rawObject.Body);
-  const parsed = parseInboundEmailBody(rawBytes);
+  const intake = parseInboundMimeForIntake(rawBytes);
   const threading = parseInboundMimeThreading(rawBytes);
   return enrichInboundPayload({
     senderEmail: extractSenderFromRawMime(rawBytes),
     recipients: extractRecipientsFromRawMime(rawBytes),
-    subject: parsed.subject || "(no subject)",
-    bodyText: parsed.text,
+    subject: intake.subject || "(no subject)",
+    bodyText: intake.bodyText,
+    citations: intake.citations as Array<Record<string, unknown>>,
     s3Bucket: bucket,
     s3Key: key,
     sesMessageId,
     inReplyTo: threading.inReplyTo,
     references: threading.references,
     attachmentCount: countInboundAttachments(rawBytes),
-    userComposedText: extractUserComposedReplyText(parsed.text),
+    userComposedText: extractUserComposedReplyText(intake.bodyText),
     parentSubmissionMessageId: null,
   });
 }

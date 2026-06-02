@@ -399,7 +399,7 @@ export function buildEmailSubmissionMessageInput(input: {
   return record;
 }
 
-function titleFromUrl(url: string): string {
+export function titleFromUrl(url: string): string {
   try {
     const parsed = new URL(url);
     const host = parsed.hostname.replace(/^www\./, "");
@@ -411,6 +411,6 @@ function titleFromUrl(url: string): string {
   }
 }
 
-function directCitationRationale(source: string): string {
+export function directCitationRationale(source: string): string {
   return `Direct citation submitted by email: ${source}. This is explicit source material for reference create/find/process intake, not a research assignment.`;
 }
