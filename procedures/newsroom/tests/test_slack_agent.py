@@ -13,6 +13,12 @@ from papyrus_newsroom import slack_agent
 
 
 class SlackAgentTests(unittest.TestCase):
+    def test_newsroom_package_init_is_lazy(self):
+        import papyrus_newsroom
+
+        self.assertNotIn("main", papyrus_newsroom.__dict__)
+        self.assertNotIn("execute_tactus", papyrus_newsroom.__dict__)
+
     def test_verify_slack_request_signature_accepts_valid_payload(self):
         secret = "test-signing-secret"
         body = b'{"type":"event_callback"}'
