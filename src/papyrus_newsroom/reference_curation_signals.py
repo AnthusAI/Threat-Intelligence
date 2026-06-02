@@ -4895,25 +4895,19 @@ def _title_subtitle_from_local_html(source_text: str) -> dict[str, Any]:
     text = source_text or ""
     if "<html" not in text.lower():
         return {}
-    title = (
-        _html_meta_content_from_text(text, "citation_title")
-        or _html_meta_content_from_text(text, "og:title", property_name=True)
-        or _html_meta_content_from_text(text, "twitter:title")
-        or _clean_html_title(_html_title_from_text(text))
-    )
-    title = _normalize_reference_title_candidate(title)
-    subtitle = ""
-    if not title:
-        return {}
-    return {
-        "title": title,
-        "subtitle": subtitle,
-        "titleMode": "original_source_heading",
-        "subtitleMode": "original_source_heading" if subtitle else "unresolved",
-        "source": "local_html_metadata",
-        "sourceUrls": [],
-        "rationale": "Resolved from local imported HTML metadata.",
-    }
+    from papyrus_content.web_structured_metadata import resolve_web_title_subtitle
+
+    resolved = resolve_web_title_subtitle("", html_content=text)
+    if resolved.get("title"):
+        return {
+            **resolved,
+            "titleMode": "original_source_heading",
+            "subtitleMode": "original_source_heading" if resolved.get("subtitle") else "unresolved",
+            "source": "local_html_metadata",
+            "sourceUrls": [],
+            "rationale": "Resolved from local imported HTML via shared web heuristics.",
+        }
+    return {}
 
 
 def _title_subtitle_from_arxiv(source_uri: str, *, fetcher: Any) -> dict[str, Any]:
@@ -4973,6 +4967,14 @@ def _title_subtitle_from_crossref(source_uri: str, *, fetcher: Any) -> dict[str,
 def _title_subtitle_from_html(source_uri: str, *, fetcher: Any) -> dict[str, Any]:
     if not re.match(r"^https?://", source_uri, flags=re.IGNORECASE):
         return {}
+    from papyrus_content.web_structured_metadata import resolve_web_title_subtitle
+
+    def _fetch(url: str, timeout: int = 20) -> str:
+        return str(fetcher(url, timeout=timeout) or "")
+
+    resolved = resolve_web_title_subtitle(source_uri, fetcher=_fetch)
+    if resolved.get("title"):
+        return resolved
     try:
         body = fetcher(source_uri, timeout=20)
     except Exception:
@@ -4990,7 +4992,7 @@ def _title_subtitle_from_html(source_uri: str, *, fetcher: Any) -> dict[str, Any
         "subtitleMode": "original_web_metadata" if subtitle else "unresolved",
         "source": "html_metadata",
         "sourceUrls": [source_uri],
-        "rationale": "Resolved from HTML title/meta tags.",
+        "rationale": "Resolved from HTML title/meta tags (regex fallback).",
     } if title else {}
 
 
