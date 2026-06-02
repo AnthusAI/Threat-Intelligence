@@ -87,6 +87,70 @@ class SlackAgentTests(unittest.TestCase):
         self.assertEqual(metadata["slackChannelId"], "C123")
         self.assertIn("execute_tactus", message_input["content"])
 
+    def test_stream_delivery_skips_metadata_modify_loop(self):
+        message = {
+            "id": "message-console-assistant-1",
+            "role": "ASSISTANT",
+            "responseStatus": "COMPLETED",
+            "metadata": {"slackDeliveredAt": "2026-06-02T12:00:00Z"},
+        }
+        should_process, reason = slack_agent.should_process_slack_delivery_stream_record(
+            event_name="MODIFY",
+            assistant_message=message,
+            previous_message={
+                "responseStatus": "COMPLETED",
+                "metadata": {},
+            },
+        )
+        self.assertFalse(should_process)
+        self.assertEqual(reason, "already-delivered")
+
+    def test_stream_delivery_skips_completed_metadata_touch(self):
+        should_process, reason = slack_agent.should_process_slack_delivery_stream_record(
+            event_name="MODIFY",
+            assistant_message={
+                "role": "ASSISTANT",
+                "responseStatus": "COMPLETED",
+                "metadata": {},
+            },
+            previous_message={
+                "role": "ASSISTANT",
+                "responseStatus": "COMPLETED",
+                "metadata": {},
+            },
+        )
+        self.assertFalse(should_process)
+        self.assertEqual(reason, "completed-metadata-touch")
+
+    def test_stream_delivery_accepts_completed_insert(self):
+        should_process, reason = slack_agent.should_process_slack_delivery_stream_record(
+            event_name="INSERT",
+            assistant_message={
+                "role": "ASSISTANT",
+                "responseStatus": "COMPLETED",
+                "metadata": {},
+            },
+        )
+        self.assertTrue(should_process)
+        self.assertIsNone(reason)
+
+    def test_stream_delivery_accepts_running_to_completed_modify(self):
+        should_process, reason = slack_agent.should_process_slack_delivery_stream_record(
+            event_name="MODIFY",
+            assistant_message={
+                "role": "ASSISTANT",
+                "responseStatus": "COMPLETED",
+                "metadata": {},
+            },
+            previous_message={
+                "role": "ASSISTANT",
+                "responseStatus": "RUNNING",
+                "metadata": {},
+            },
+        )
+        self.assertTrue(should_process)
+        self.assertIsNone(reason)
+
     def test_deliver_slack_reply_skips_non_slack_thread(self):
         client = mock.Mock()
         client.get_record.return_value = {"metadata": json.dumps({"channel": "email_intake"})}

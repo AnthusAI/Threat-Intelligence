@@ -74,6 +74,9 @@ should call `console_chat_enqueue.enqueue_console_chat_turn` (Python) or
 
 ## Operations
 
+- **Delivery loop guard:** `slack-delivery` ignores DynamoDB `MODIFY` events that only touch
+  metadata on an already-`COMPLETED` assistant turn (for example after `slackDeliveredAt` is
+  written). Without this, marking delivery complete re-triggers the stream and spams Slack.
 - Idempotency: Slack `event_id` maps to deterministic `message-console-slack-*` ids.
 - Authorization: when `PAPYRUS_SLACK_ALLOWED_USER_IDS` is empty, all non-bot users are accepted (dev only).
 - Truncation: outbound Slack text is capped at 12k characters.

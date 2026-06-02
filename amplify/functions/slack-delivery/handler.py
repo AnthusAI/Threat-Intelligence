@@ -46,7 +46,10 @@ def _image_to_message(image: dict[str, Any] | None) -> dict[str, Any] | None:
 
 def handler(event: dict[str, Any], _context: Any = None) -> dict[str, Any]:
     from papyrus_content.graphql_authoring import PapyrusGraphQLAuthoringClient
-    from papyrus_newsroom.slack_agent import deliver_slack_reply_for_assistant_message
+    from papyrus_newsroom.slack_agent import (
+        deliver_slack_reply_for_assistant_message,
+        should_process_slack_delivery_stream_record,
+    )
 
     endpoint = os.environ.get("PAPYRUS_GRAPHQL_ENDPOINT", "").strip()
     client = PapyrusGraphQLAuthoringClient(endpoint=endpoint or None)
@@ -73,6 +76,20 @@ def handler(event: dict[str, Any], _context: Any = None) -> dict[str, Any]:
         if str(message.get("role") or "").upper() != "ASSISTANT":
             continue
         if str(message.get("responseStatus") or "").upper() != "COMPLETED":
+            continue
+        old_image = dynamodb.get("OldImage")
+        previous_message = _image_to_message(old_image) if isinstance(old_image, dict) else None
+        should_process, skip_reason = should_process_slack_delivery_stream_record(
+            event_name=event_name,
+            assistant_message=message,
+            previous_message=previous_message,
+        )
+        if not should_process:
+            logger.info(
+                "slack-delivery skip message=%s reason=%s",
+                message.get("id"),
+                skip_reason,
+            )
             continue
         sequence = str(record.get("eventID") or message.get("id") or "")
         try:

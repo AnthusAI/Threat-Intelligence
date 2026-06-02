@@ -256,6 +256,43 @@ def _parse_metadata(raw: Any) -> dict[str, Any]:
     return {}
 
 
+def should_process_slack_delivery_stream_record(
+    *,
+    event_name: str,
+    assistant_message: dict[str, Any],
+    previous_message: dict[str, Any] | None = None,
+) -> tuple[bool, str | None]:
+    """Return whether a DynamoDB stream record should trigger Slack delivery.
+
+    Delivery marks the assistant Message with slackDeliveredAt, which emits a MODIFY.
+    Ignore metadata-only MODIFY events on already-completed turns to avoid loops.
+    """
+    assistant_meta = _parse_metadata(assistant_message.get("metadata"))
+    if assistant_meta.get("slackDeliveredAt"):
+        return False, "already-delivered"
+
+    event = str(event_name or "").strip().upper()
+    if event == "INSERT":
+        return True, None
+
+    if event != "MODIFY":
+        return False, f"unsupported-event:{event_name or 'missing'}"
+
+    if not previous_message:
+        return True, None
+
+    previous_meta = _parse_metadata(previous_message.get("metadata"))
+    if previous_meta.get("slackDeliveredAt"):
+        return False, "already-delivered-previous-image"
+
+    previous_status = str(previous_message.get("responseStatus") or "").strip().upper()
+    current_status = str(assistant_message.get("responseStatus") or "").strip().upper()
+    if previous_status == "COMPLETED" and current_status == "COMPLETED":
+        return False, "completed-metadata-touch"
+
+    return True, None
+
+
 def deliver_slack_reply_for_assistant_message(
     client: Any,
     *,
