@@ -107,6 +107,8 @@ const inboundDnsRecordName = inboundEmailDomain.endsWith(`.${inboundDnsZoneName}
   ? inboundEmailDomain.slice(0, -(inboundDnsZoneName.length + 1))
   : inboundEmailDomain;
 
+let slackEventsUrl: string | undefined;
+
 if (enableConsoleResponder || enableSlackAgent) {
   const messageTable = backend.data.resources.tables.Message;
   const cfnTables = backend.data.resources.cfnResources.cfnTables;
@@ -193,9 +195,7 @@ if (enableConsoleResponder || enableSlackAgent) {
       messageStreamArn,
       graphqlEndpoint,
     });
-    backend.addOutput({
-      slackEventsUrl: slackStack.eventsFunctionUrl,
-    });
+    slackEventsUrl = slackStack.eventsFunctionUrl;
   }
 }
 
@@ -581,6 +581,11 @@ backend.addOutput({
           backupVaultName: storageBackupVault.backupVaultName,
           protectedBucketArn: storageBucket.bucketArn,
           protectedBucketName: storageBucket.bucketName,
+        }
+      : null,
+    slack: enableSlackAgent && slackEventsUrl
+      ? {
+          eventsUrl: slackEventsUrl,
         }
       : null,
   },

@@ -34,7 +34,7 @@ Set sandbox or pipeline env vars:
 - Optional: `PAPYRUS_SLACK_ALLOWED_USER_IDS` (comma-separated Slack user IDs)
 - `PAPYRUS_CONSOLE_RESPONSE_TARGET=cloud` (same as email/console)
 
-Deploy; `amplify/backend.ts` adds a custom output `slackEventsUrl` (Lambda function URL).
+Deploy; `amplify/backend.ts` adds `custom.slack.eventsUrl` in Amplify outputs (Lambda function URL).
 Point the Slack app **Event Subscriptions** request URL at that URL.
 
 ### Production (`main` branch)
@@ -43,7 +43,7 @@ Point the Slack app **Event Subscriptions** request URL at that URL.
 2. In the Amplify console for the **main** backend, set branch env vars and secrets above.
    Slack Lambdas are created only when `PAPYRUS_ENABLE_SLACK=true`.
 3. After a successful deploy, open **Backend deployments → Outputs** (or `amplify_outputs`)
-   and copy `slackEventsUrl` into the Slack app Event Subscriptions request URL.
+   and copy `custom.slack.eventsUrl` into the Slack app Event Subscriptions request URL.
 4. Reinstall the Slack app to the workspace if you changed bot scopes.
 
 ### Slack app scopes (minimum)
