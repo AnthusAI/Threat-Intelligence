@@ -388,6 +388,8 @@ def create_assignment_insight_records(
             "status": "active",
             "summary": summary[:500] if summary else "Tavily deep research insight",
             "body": body,
+            "threadId": message_id,
+            "sequenceNumber": 1,
             "metadata": {
                 "kind": "research.tavily.insight",
                 "assignmentId": assignment["id"],

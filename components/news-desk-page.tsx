@@ -73,6 +73,7 @@ function parseRouteSelection(tab: NewsDeskTab, selectionPath: string[] | null | 
     if (segments[0] === "forum" && segments[1]) return { forumThread: segments[1] };
     return { message: segments[0] ?? null };
   }
+  if (tab === "insights") return { forumThread: segments[0] ?? null };
   if (tab === "assignments") return { assignment: segments[0] ?? null };
   if (tab === "overview" && segments[0] === "forum" && segments[1]) return { forumThread: segments[1] };
   return {};
@@ -99,6 +100,6 @@ function parseNewsDeskTab(sectionValue: string | string[] | null | undefined, le
     : rawValue === "desks"
       ? "topics"
       : rawValue;
-  if (value === "administration" || value === "topics" || value === "concepts" || value === "references" || value === "messages" || value === "assignments" || value === "search") return value;
+  if (value === "administration" || value === "topics" || value === "concepts" || value === "references" || value === "insights" || value === "messages" || value === "assignments" || value === "search") return value;
   return "overview";
 }

@@ -420,16 +420,21 @@ async function createReferenceInsight(event: Parameters<ReferenceInsightHandler>
   ]).slice(0, 24)}`;
 
   await requireDataResult(
-    client.models.Message.create(buildCanonicalMessageInput({
-      id: messageId,
-      messageKind: "insight",
-      messageDomain: "knowledge",
-      summary,
-      source: "newsroom",
-      authorSub: actorSub,
-      authorLabel: actor,
-      now,
-    })),
+    client.models.Message.create({
+      ...buildCanonicalMessageInput({
+        id: messageId,
+        messageKind: "insight",
+        messageDomain: "knowledge",
+        summary,
+        source: "newsroom",
+        authorSub: actorSub,
+        authorLabel: actor,
+        now,
+      }),
+      threadId: messageId,
+      sequenceNumber: 1,
+      content: body,
+    }),
     "create insight Message",
   );
   await putTextModelPayload(
