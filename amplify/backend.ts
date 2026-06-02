@@ -190,17 +190,17 @@ if (enableConsoleResponder || enableSlackAgent) {
     const slackBotTokenName = (process.env.PAPYRUS_SLACK_BOT_TOKEN_NAME ?? "PAPYRUS_SLACK_BOT_TOKEN").trim();
     backend.slackDelivery.addEnvironment("PAPYRUS_SLACK_BOT_TOKEN", secret(slackBotTokenName));
 
+    const slackStack = Stack.of(slackEventsLambda);
+    const slackSsmResources = amplifyAppId
+      ? [
+          `arn:aws:ssm:${slackStack.region}:${slackStack.account}:parameter/amplify/${amplifyAppId}/*`,
+          `arn:aws:ssm:${slackStack.region}:${slackStack.account}:parameter/amplify/shared/${amplifyAppId}/*`,
+        ]
+      : [`arn:aws:ssm:${slackStack.region}:${slackStack.account}:parameter/amplify/*`];
     const slackSsmPolicy = new PolicyStatement({
       effect: Effect.ALLOW,
-      actions: ["ssm:GetParameter"],
-      resources: [
-        "arn:aws:ssm:*:*:parameter/amplify/papyrus/*/PAPYRUS_SLACK_SIGNING_SECRET",
-        "arn:aws:ssm:*:*:parameter/amplify/papyrus/*/PAPYRUS_SLACK_BOT_TOKEN",
-        "arn:aws:ssm:*:*:parameter/amplify/papyrus/*/OPENAI_API_KEY",
-        "arn:aws:ssm:*:*:parameter/amplify/shared/papyrus/PAPYRUS_SLACK_SIGNING_SECRET",
-        "arn:aws:ssm:*:*:parameter/amplify/shared/papyrus/PAPYRUS_SLACK_BOT_TOKEN",
-        "arn:aws:ssm:*:*:parameter/amplify/shared/papyrus/OPENAI_API_KEY",
-      ],
+      actions: ["ssm:GetParameter", "ssm:GetParameters"],
+      resources: slackSsmResources,
     });
     slackEventsLambda.addToRolePolicy(slackSsmPolicy);
     slackDeliveryLambda.addToRolePolicy(slackSsmPolicy);

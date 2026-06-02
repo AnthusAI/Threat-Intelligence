@@ -66,8 +66,11 @@ def _read_ssm_secret_boto(parameter_name: str) -> str:
     except ModuleNotFoundError as error:
         raise RuntimeError("boto3 is required to read JWT secrets from SSM in Lambda.") from error
     client = boto3.client("ssm")
-    response = client.get_parameter(Name=parameter_name, WithDecryption=True)
-    secret = normalize_string((response.get("Parameter") or {}).get("Value"))
+    # Amplify branch policies often grant ssm:GetParameters (plural) on secret paths;
+    # get_parameter requires ssm:GetParameter (singular) on the same ARNs.
+    response = client.get_parameters(Names=[parameter_name], WithDecryption=True)
+    parameters = response.get("Parameters") or []
+    secret = normalize_string(parameters[0].get("Value") if parameters else None)
     if not secret:
         raise RuntimeError(f"SSM parameter {parameter_name} returned no value.")
     return secret

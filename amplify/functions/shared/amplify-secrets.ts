@@ -1,4 +1,4 @@
-import { GetParameterCommand, SSMClient } from "@aws-sdk/client-ssm";
+import { GetParameterCommand, GetParametersCommand, SSMClient } from "@aws-sdk/client-ssm";
 
 const secretCache = new Map<string, string>();
 let ssmClient: SSMClient | null = null;
@@ -23,11 +23,23 @@ export async function resolveAmplifySecret(name: string): Promise<string> {
   }
 
   ssmClient ??= new SSMClient({});
-  const response = await ssmClient.send(new GetParameterCommand({
-    Name: parameterName,
-    WithDecryption: true,
-  }));
-  const resolved = normalizeOptionalString(response.Parameter?.Value);
+  let resolved: string | null = null;
+  try {
+    const batch = await ssmClient.send(new GetParametersCommand({
+      Names: [parameterName],
+      WithDecryption: true,
+    }));
+    resolved = normalizeOptionalString(batch.Parameters?.[0]?.Value);
+  } catch {
+    // Fall back for sandboxes that only grant ssm:GetParameter on a path.
+  }
+  if (!resolved) {
+    const single = await ssmClient.send(new GetParameterCommand({
+      Name: parameterName,
+      WithDecryption: true,
+    }));
+    resolved = normalizeOptionalString(single.Parameter?.Value);
+  }
   if (!resolved) {
     throw new Error(`SSM parameter ${parameterName} did not return a value for ${name}.`);
   }
